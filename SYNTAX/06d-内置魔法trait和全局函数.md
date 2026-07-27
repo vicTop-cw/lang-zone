@@ -23,6 +23,8 @@
 
 均为二元运算符（`BinaryOp`），self 和 rhs 均消费所有权，Output 来自返回类型。除 `__pow__` 外均映射到 `std::ops`。
 
+> `__rem__` 注意事项：`%` 是 remainder（取余，Rust `Rem` trait），非 Python 的 modulo（取模）。对负数，`-7 % 3` = `-1`（remainder）而非 `2`（modulo）。
+
 ---
 
 ## 二、位运算符

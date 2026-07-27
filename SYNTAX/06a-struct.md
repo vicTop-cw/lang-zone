@@ -61,7 +61,20 @@ struct Data =
 //  value                  // ❌ 编译器报错
 ```
 
-### 2.2 字段类型支持
+### 2.2 `__slots__` 内存布局控制
+
+struct 可使用 `__slots__` 属性控制内存布局，映射为 Rust 的 `#[repr(...)]`：
+
+```lz
+struct MyStruct =
+    __slots__ = "C"           // #[repr(C)] — C 兼容布局
+    x: int
+    y: int
+```
+
+有效值：`"C"` / `"packed"` / `"transparent"` / `"align(N)"`。详见 [06e-模块级魔法属性](06e-模块级魔法属性.md) §六。
+
+### 2.3 字段类型支持
 
 字段类型可以是任意合法类型：基础类型、复合类型、泛型参数、其他 struct、Self 引用等。
 
@@ -75,7 +88,7 @@ struct Example<T> =
     parent: Option<Self>
 ```
 
-### 2.3 字段访问
+### 2.4 字段访问
 
 字段通过 `.` 操作符访问，语法与大多数语言一致：
 
@@ -118,7 +131,16 @@ struct Rectangle =
 |------|------|------|
 | `self` | 不可变引用 `&Self` | 只读访问字段，不可修改 |
 | `self: Self` | 不可变引用（显式） | 与 `self` 等价，显式写出类型 |
-| `mut self` | 可变引用 `&mut Self` | 可修改字段 |
+| `mut self` | 可变引用 `&mut Self` | 可修改字�� |
+
+> **self 语义区分 — 普通方法 vs 魔法方法：**
+>
+> | 上下文 | `self` 默认语义 | 写法 |
+> |--------|:---:|------|
+> | 普通方法 | `&Self`（不可变引用） | `def m(self) = ...` |
+> | 普通方法（可变） | `&mut Self` | `def m(mut self) = ...` |
+> | 魔法方法 | `Self`（消费/owned） | `def __add__(self, other: T) -> T` |
+> | 魔法方法（借用） | `&Self` | `def __str__(ref self) -> str = ...` |
 
 ```lz
 struct Counter =
@@ -316,6 +338,8 @@ struct Point =
 - 返回类型为 `Self`，即当前 struct 类型
 - 语义上承担"创建实例"的全部责任
 - 如果 struct 实现了 `__new__`，则优先使用自定义逻辑（而非编译器默认的关键字构造）
+
+> **`magic __new__` 内联语法糖**：在 struct 体内使用 `magic __new__` 是 `magic __new__: def __new__(...)` 声明的内联语法糖。等价于在 struct 外写独立的 magic 块。详见 [06f-magic用法.md](06f-magic用法.md)。
 
 #### `__init__` — 初始化器
 
