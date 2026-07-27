@@ -44,7 +44,7 @@
 | 魔法方法 | 生成 Trait | Rust Trait | 用途 |
 |----------|-----------|-----------|------|
 | `__neg__` | `Neg` | `std::ops::Neg` | 取负 `-a` |
-| `__not__` | `Not` | `std::ops::Not` | 逻辑非 `not a` |
+| `__not__` | `Not` | `std::ops::Not` | 逻辑非 `not a` / `!a` |
 | `__invert__` | `HasInvert` | `HasInvert`（自定义） | 按位取反 `~a` |
 
 均为一元运算符（`UnaryOp`），self 消费，Output 来自返回类型。不分派。
