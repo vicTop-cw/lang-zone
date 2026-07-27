@@ -1,0 +1,49 @@
+# lz std::process — P1 进程管理
+# 源码级映射：lz 符号 → Rust std::process 路径
+
+[module]
+tier = 1
+rust_prefix = "std::process"
+
+# ── 类型映射 ──
+
+[types]
+Command    = "std::process::Command"
+Child      = "std::process::Child"
+Output     = "std::process::Output"
+ExitStatus = "std::process::ExitStatus"
+Stdio      = "std::process::Stdio"
+ExitStatusError = "std::process::ExitStatusError"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Command 方法
+new         = "new"
+arg         = "arg"
+args        = "args"
+env         = "env"
+envRemove   = "env_remove"
+envClear    = "env_clear"
+currentDir  = "current_dir"
+stdin       = "stdin"
+stdout      = "stdout"
+stderr      = "stderr"
+spawn       = "spawn"
+output      = "output"
+status      = "status"
+killOnDrop  = "kill_on_drop"
+# Child 方法
+kill        = "kill"
+id          = "id"
+wait        = "wait"
+waitWithOutput = "wait_with_output"
+tryWait     = "try_wait"
+# ExitStatus 方法
+success     = "success"
+code        = "code"
+
+# ── 类型别名注入 ──
+
+[aliases]

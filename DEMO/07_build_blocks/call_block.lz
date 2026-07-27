@@ -1,0 +1,9 @@
+// ==== Call Build Block ~: ====
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    xs = add ~:
+        yield (1, 2)
+        yield (3, 4)
+    for result in xs:
+        print(result)

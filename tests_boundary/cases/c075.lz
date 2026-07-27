@@ -1,0 +1,4 @@
+def work() =
+  print(1)
+def main() =
+  spawn work()

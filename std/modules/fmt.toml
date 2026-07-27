@@ -1,0 +1,23 @@
+# lz std::fmt — P0 格式化
+# 源码级映射：lz 符号 → Rust std::fmt 路径
+
+[module]
+tier = 1
+rust_prefix = "std::fmt"
+
+# ── 类型映射 ──
+
+[types]
+Debug      = "std::fmt::Debug"
+Display    = "std::fmt::Display"
+Formatter  = "std::fmt::Formatter"
+Error      = "std::fmt::Error"
+
+# ── 方法别名 ──
+
+[methods]
+format = "format"  # 身份映射（宏）
+
+# ── 类型别名注入 ──
+
+[aliases]

@@ -1,0 +1,8 @@
+// ==== Dict<K,V> ====
+def main() =
+    let d = {"a": 1, "b": 2}
+    d["c"] = 3
+    print(f"a={d["a"]}")
+    print(f"len={d.length()}")
+    for (k, v) in d:
+        print(f"{k}->{v}")

@@ -1,0 +1,4 @@
+def f(owned)-> int =
+  return 1
+def main() =
+  print(1)

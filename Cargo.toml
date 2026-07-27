@@ -1,0 +1,7 @@
+[package]
+name = "lang-zong"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 零外部依赖：TOML 解析使用 src/util/mini_toml.rs 内嵌实现

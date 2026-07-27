@@ -1,0 +1,3 @@
+def main() =
+  struct Foo =
+    x: int

@@ -1,0 +1,67 @@
+# lz 标准库桥接 — 顶层清单
+# 唯一权威：定义 Tier 门控、工具链钉定、模块注册表
+
+[meta]
+description = "lz 标准库桥接层：源码级映射，复用 rustc 实现"
+lz_version = "0.1.0"
+
+[toolchain]
+# Tier-1：stable 工具链（默认）
+tier1_channel = "stable"
+# Tier-2：nightly 工具链（opt-in，钉日期）
+tier2_channel = "nightly-2026-07-01"
+
+# ── 模块注册表 ──
+# 每个 key 对应 std/modules/ 下的同名 .toml
+# tier = 1 表示 Rust std（始终可用），tier = 2 表示 rustc_private（需 --allow-rustc-private）
+
+[modules]
+core = { tier = 1 }
+collections = { tier = 1 }
+io = { tier = 1 }
+fs = { tier = 1 }
+thread = { tier = 1 }
+fmt = { tier = 1 }
+str = { tier = 1 }
+vec = { tier = 1 }
+time = { tier = 1 }
+path = { tier = 1 }
+env = { tier = 1 }
+process = { tier = 1 }
+sync = { tier = 1 }
+iter = { tier = 1 }
+itor = { tier = 1 }
+num = { tier = 1 }
+net = { tier = 1 }
+mem = { tier = 1 }
+cmp = { tier = 1 }
+cell = { tier = 1 }
+rc = { tier = 1 }
+convert = { tier = 1 }
+any = { tier = 1 }
+marker = { tier = 1 }
+hash = { tier = 1 }
+os = { tier = 1 }
+reflect = { tier = 1 }
+
+# ── Tier-2 rustc_private 门控 ──
+# 仅当 --allow-rustc-private 开启且 nightly 版本匹配时激活
+# 详情见 std/rustc_private.toml
+
+[tier2_gate]
+enabled_by_default = false
+cli_flag = "--allow-rustc-private"
+version_check = true  # 编译期校验 nightly 版本与 tier2_channel 一致
+
+# ── 全局类型别名 ──
+# 导入对应模块时自动追加的类型别名（源码注入）
+
+[type_aliases]
+IOError = "std::io::Error"          # 导入 io 时追加：pub type IOError = std::io::Error;
+Never  = "!"                         # map_type 补充：Never → !
+
+# ── 三方 crate 注册表 ──
+# 拿来主义：直接复用 Rust 生态中成熟的三方库
+# lz import crate::module → use crate::module; (编译时自动添加 Cargo 依赖提示)
+
+[crates]

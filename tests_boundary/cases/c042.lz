@@ -1,0 +1,4 @@
+def f(x: List<)-> int =
+  return x
+def main() =
+  print(1)

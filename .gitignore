@@ -1,0 +1,30 @@
+/target
+*.exe
+*.pdb
+
+# generated .rs output from lzc — keep only source in src/
+*.rs
+!src/**/*.rs
+
+# generated output directories
+test-suite/*/_work/
+test-suite/*/__pycache__/
+*.pyc
+
+# build artifacts
+*.o
+*.so
+*.dylib
+
+# workspace-specific
+.workbuddy/
+workbuddy/
+bootstrap/
+
+err.log
+demo_err.log
+demo_rc.log
+rc.log
+.trae/
+_bak/
+_mz/

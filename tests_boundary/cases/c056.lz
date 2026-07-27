@@ -1,0 +1,4 @@
+while true:
+  print(1)
+def main() =
+  print(2)

@@ -1,0 +1,6 @@
+struct P =
+  v: int
+def main() =
+  o: P? = Some(P(v: 7))
+  x = o?.v ?? 0
+  print(x)

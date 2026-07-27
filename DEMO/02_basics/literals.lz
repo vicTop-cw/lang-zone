@@ -1,0 +1,15 @@
+// ==== All Literals ====
+def main() =
+    let i = 42
+    let hex = 0xFF
+    let oct = 0o77
+    let bin = 0b1010
+    let f = 3.14
+    let s = "hello"
+    let fs = f"value: {i}"
+    let b = true
+    let none = None
+    let xs = [1, 2, 3]
+    let t = (1, "a")
+    let d = {"key": 42}
+    print(f"{hex},{oct},{bin},{f},{s},{fs},{b}")

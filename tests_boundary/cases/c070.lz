@@ -1,0 +1,3 @@
+def main() =
+  with open()
+    print(1)

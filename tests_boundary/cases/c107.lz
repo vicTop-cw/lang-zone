@@ -1,0 +1,3 @@
+def main() =
+  s = f"{undefined_var}"
+  print(s)

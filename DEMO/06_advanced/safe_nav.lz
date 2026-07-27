@@ -1,0 +1,11 @@
+// ==== Safe Navigation ====
+struct User =
+    name: str
+    email: Option<str>
+
+def main() =
+    let u = User(name: "Alice", email: None)
+    let name = u.name
+    print(f"name: {name}")
+    let email = u.email ?? "no email"
+    print(f"email: {email}")

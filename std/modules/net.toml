@@ -1,0 +1,72 @@
+# lz std::net — P1 网络类型
+# 源码级映射：lz 符号 → Rust std::net 路径
+
+[module]
+tier = 1
+rust_prefix = "std::net"
+
+# ── 类型映射 ──
+
+[types]
+TcpStream     = "std::net::TcpStream"
+TcpListener   = "std::net::TcpListener"
+UdpSocket     = "std::net::UdpSocket"
+IpAddr        = "std::net::IpAddr"
+Ipv4Addr      = "std::net::Ipv4Addr"
+Ipv6Addr      = "std::net::Ipv6Addr"
+SocketAddr    = "std::net::SocketAddr"
+SocketAddrV4  = "std::net::SocketAddrV4"
+SocketAddrV6  = "std::net::SocketAddrV6"
+Shutdown      = "std::net::Shutdown"
+AddrParseError = "std::net::AddrParseError"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# TcpStream 方法
+connect         = "connect"
+read            = "read"
+write           = "write"
+peek            = "peek"
+flush           = "flush"
+shutdown        = "shutdown"
+setNonblocking  = "set_nonblocking"
+localAddr       = "local_addr"
+peerAddr        = "peer_addr"
+takeError       = "take_error"
+setReadTimeout  = "set_read_timeout"
+setWriteTimeout = "set_write_timeout"
+readTimeout     = "read_timeout"
+writeTimeout    = "write_timeout"
+setNodelay      = "set_nodelay"
+nodelay         = "nodelay"
+setTtl          = "set_ttl"
+ttl             = "ttl"
+# TcpListener 方法
+bind       = "bind"
+accept     = "accept"
+incoming   = "incoming"
+# UdpSocket 方法
+bindUdp    = "bind"
+connectUdp = "connect"
+send       = "send"
+recv       = "recv"
+sendTo     = "send_to"
+recvFrom   = "recv_from"
+# IpAddr 方法
+isIpv4        = "is_ipv4"
+isIpv6        = "is_ipv6"
+isLoopback    = "is_loopback"
+isMulticast   = "is_multicast"
+isUnspecified = "is_unspecified"
+isGlobal      = "is_global"
+isLinkLocal   = "is_link_local"
+# SocketAddr 方法
+port     = "port"
+isIpv4Addr = "is_ipv4"
+isIpv6Addr = "is_ipv6"
+
+# ── 类型别名注入 ──
+
+[aliases]

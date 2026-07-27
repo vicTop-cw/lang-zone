@@ -1,0 +1,7 @@
+// 错误用例 3：变量构建块(=:) 内部不允许使用 yield（yield 仅允许在生成器构建块(*:) 中）
+// 期望：语义错误（Parse error: 变量构建块(=:) 内部不允许使用 yield...）
+
+def main() =
+    x =:
+        yield 1
+    print(x)

@@ -1,0 +1,95 @@
+# lz std::iter — P1 迭代器特征与适配器
+# 源码级映射：lz 符号 → Rust std::iter 路径
+
+[module]
+tier = 1
+rust_prefix = "std::iter"
+
+# ── 类型映射 ──
+
+[types]
+Iterator     = "std::iter::Iterator"
+IntoIterator = "std::iter::IntoIterator"
+DoubleEndedIterator = "std::iter::DoubleEndedIterator"
+ExactSizeIterator   = "std::iter::ExactSizeIterator"
+FusedIterator       = "std::iter::FusedIterator"
+TrustedLen          = "std::iter::TrustedLen"
+# 适配器结构体
+Map         = "std::iter::Map"
+Filter      = "std::iter::Filter"
+FilterMap   = "std::iter::FilterMap"
+Chain       = "std::iter::Chain"
+Zip         = "std::iter::Zip"
+Take        = "std::iter::Take"
+Skip        = "std::iter::Skip"
+Enumerate   = "std::iter::Enumerate"
+Peekable    = "std::iter::Peekable"
+FlatMap     = "std::iter::FlatMap"
+Flatten     = "std::iter::Flatten"
+Fuse        = "std::iter::Fuse"
+Inspect     = "std::iter::Inspect"
+Cloned      = "std::iter::Cloned"
+Copied      = "std::iter::Copied"
+Cycle       = "std::iter::Cycle"
+Rev         = "std::iter::Rev"
+Steps       = "std::iter::Steps"
+StepBy      = "std::iter::StepBy"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Iterator trait 核心方法
+next         = "next"
+sizeHint     = "size_hint"
+count        = "count"
+last         = "last"
+nth          = "nth"
+stepBy       = "step_by"
+# 组合器
+map      = "map"
+filter   = "filter"
+filterMap = "filter_map"
+flatten  = "flatten"
+flatMap   = "flat_map"
+chain    = "chain"
+zip      = "zip"
+take     = "take"
+skip     = "skip"
+enumerate = "enumerate"
+peekable  = "peekable"
+fuse     = "fuse"
+inspect  = "inspect"
+cloned   = "cloned"
+copied   = "copied"
+cycle    = "cycle"
+rev      = "rev"
+# 消费器
+collect  = "collect"
+fold     = "fold"
+reduce   = "reduce"
+for_each = "for_each"
+all      = "all"
+any      = "any"
+find     = "find"
+findMap  = "find_map"
+position = "position"
+rposition = "rposition"
+max      = "max"
+min      = "min"
+maxBy    = "max_by"
+minBy    = "min_by"
+maxByKey = "max_by_key"
+minByKey = "min_by_key"
+sum      = "sum"
+product  = "product"
+partition = "partition"
+unzip    = "unzip"
+# DoubleEndedIterator 方法
+nextBack    = "next_back"
+advanceBackBy = "advance_back_by"
+nthBack     = "nth_back"
+
+# ── 类型别名注入 ──
+
+[aliases]

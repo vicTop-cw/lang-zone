@@ -1,0 +1,6 @@
+struct Foo =
+  x: int
+def main() =
+  f = Foo(x: 1)
+  y = f.nonexistent()
+  print(y)

@@ -1,0 +1,45 @@
+# lz std::hash — P1 哈希特征与构建器
+# 源码级映射：lz 符号 → Rust std::hash 路径
+
+[module]
+tier = 1
+rust_prefix = "std::hash"
+
+# ── 类型映射 ──
+
+[types]
+Hash             = "std::hash::Hash"
+Hasher           = "std::hash::Hasher"
+BuildHasher      = "std::hash::BuildHasher"
+BuildHasherDefault = "std::hash::BuildHasherDefault"
+DefaultHasher    = "std::collections::hash_map::DefaultHasher"
+RandomState      = "std::collections::hash_map::RandomState"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Hash trait 方法
+hash         = "hash"
+hashSlice    = "hash_slice"
+# Hasher trait 方法
+finish       = "finish"
+write        = "write"
+writeU8      = "write_u8"
+writeU16     = "write_u16"
+writeU32     = "write_u32"
+writeU64     = "write_u64"
+writeU128    = "write_u128"
+writeUsize   = "write_usize"
+writeI8      = "write_i8"
+writeI16     = "write_i16"
+writeI32     = "write_i32"
+writeI64     = "write_i64"
+writeI128    = "write_i128"
+writeIsize   = "write_isize"
+# BuildHasher trait 方法
+buildHasher  = "build_hasher"
+
+# ── 类型别名注入 ──
+
+[aliases]

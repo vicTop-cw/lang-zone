@@ -1,0 +1,85 @@
+// Lang-Zong 编译器 — ast/stmt.rs
+// 语句类 AST 节点：Stmt, MatchArm, Pattern
+
+use crate::types::Type;
+use super::expr::{Expr, AssignOp};
+
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Expr(Expr),
+    Let {
+        name: String,
+        mutable: bool,
+        is_ref: bool,
+        ty: Option<Type>,
+        value: Expr,
+    },
+    Const {
+        name: String,
+        ty: Option<Type>,
+        value: Expr,
+    },
+    Return(Option<Expr>),
+    Yield(Option<Expr>),
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
+    For {
+        var: String,
+        iter: Expr,
+        body: Vec<Stmt>,
+    },
+    Loop(Vec<Stmt>),
+    Break(Option<Expr>),
+    Continue,
+    Defer(Vec<Stmt>),
+    Raise(Expr),
+    Guard {
+        cond: Option<Expr>,
+        let_binding: Option<(Pattern, Expr)>,
+        else_body: Vec<Stmt>,
+    },
+    With {
+        expr: Expr,
+        alias: Option<String>,
+        body: Vec<Stmt>,
+    },
+    Assign {
+        target: Expr,
+        op: AssignOp,
+        value: Expr,
+    },
+
+    // ── 测试 ──
+    Test {
+        name: String,
+        body: Vec<Stmt>,
+    },
+    Assert {
+        expr: Expr,
+        expected: Option<Expr>,
+    },
+    Suite {
+        name: String,
+        tests: Vec<Stmt>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    Int(i64),
+    Str(String),
+    Bool(bool),
+    Ident(String),
+    Variant(String, Vec<Pattern>),
+    Tuple(Vec<Pattern>),
+    Wildcard,
+}

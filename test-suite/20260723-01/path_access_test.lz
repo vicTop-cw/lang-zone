@@ -1,0 +1,19 @@
+// E2E test: PathAccess 桥接解析
+// fs::exists("file") → std::path::Path::new("file").exists()
+// io::stdout() → std::io::stdout()
+
+import std::fs
+import std::io
+
+def test_path_exists() -> str =
+    r = fs::exists("test_file.txt")
+    "ok"
+
+def test_io_stdout() -> str =
+    io::stdout()
+    "ok"
+
+def main() =
+    print(test_path_exists())
+    print(test_io_stdout())
+    print("PATHACCESS BRIDGE TEST PASSED")

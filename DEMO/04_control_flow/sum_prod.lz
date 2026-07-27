@@ -1,0 +1,6 @@
+// ==== Sum / Prod ====
+def main() =
+    let xs = [1, 2, 3, 4, 5]
+    let total = sum x for x in xs
+    let product = prod x for x in xs
+    print(f"sum={total} prod={product}")

@@ -1,0 +1,134 @@
+id,syntax,dim,sample,expect,actual,behavior,pass,note
+c000,注释,错误写法,/* 未结束块注释 EOF,NO_ERROR,OK,ran ok,PASS,词法层静默忽略未结束块注释(不报错)
+c001,注释,无映射,N/A(注释无映射),OK,OK,1,PASS,"注释在词法层丢弃, 无映射概念"
+c002,注释,作用域,行尾/整行 // 注释,OK,OK,2,PASS,注释可出现在任意作用域行尾
+c003,注释,缩进,缩进块内注释,OK,OK,2,PASS,注释缩进不影响解析
+c004,变量赋值,错误写法,x =  (缺右值),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c005,变量赋值,无映射,x: UnknownType = 5,RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find type `UnknownType` in this scope,PASS,codegen 透传未知类型 -> rustc cannot find type
+c006,变量赋值,作用域,顶层 y = 5 (转 const),NO_ERROR,OK,5,PASS,"顶层赋值被收为 const, 不报错"
+c007,变量赋值,缩进,语句缩进深于函数头,ANY_ERROR,PARSE_ERROR,Unexpected token at top level: Indent,PASS,函数体内缩进须一致(否则错位)
+c008,mut,错误写法,mut (缺绑定名),PARSE_ERROR,PARSE_ERROR,"Expected variable name, got Newline",PASS,解析期报错
+c009,mut,无映射,mut x = 5 (no-op),OK,OK,6,PASS,"mut 为兼容 no-op, 无单独映射; 重赋值正常"
+c010,mut,作用域,形参 mut x: int,OK,OK,1,PASS,参数修饰 mut 被接受
+c011,mut,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c012,ref,错误写法,ref (缺绑定),PARSE_ERROR,PARSE_ERROR,"Expected variable name, got Newline",PASS,解析期报错
+c013,ref,无映射,ref r = &x,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Amp,PASS,限制: ref 局部绑定 + & 表达式暂不支持(parse期报错)
+c014,ref,作用域,顶层 ref r = &5,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Amp,PASS,限制: & 表达式不被解析(顶层亦报错)
+c015,ref,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c016,^ move / XOR,错误写法,y = ^x (前缀 ^),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: CaretInfix,PASS,解析期报错
+c017,^ move / XOR,无映射,a ^ (缺右操作数),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,期望解析期报错(实测: 悬空 ^ 被静默接受 -> 弱点)
+c018,^ move / XOR,作用域,t = s^ 后复用 s,RUSTC_ERROR,RUSTC_ERROR,error[E0382]: borrow of moved value: `s`,PASS,use-after-move 由 rustc 捕获
+c019,^ move / XOR,缩进,中缀 XOR: a ^ 3,OK,OK,5,PASS,XOR 正常映射
+c020,owned 形参,错误写法,owned (缺参数名),PARSE_ERROR,PARSE_ERROR,"Expected param name, got RParen",PASS,解析期报错
+c021,owned 形参,无映射,take(bob) 缺 ^,RUSTC_ERROR,RUSTC_ERROR,error: [lang-zone] 函数 `owned` 形参必须以 ^ 显式转移所有权调用，例如 f(x^),PASS,owned 契约: 缺 ^ 注入 compile_error!
+c022,owned 形参,作用域,局部绑定 owned x,NO_ERROR,OK,5,PASS,owned 作局部绑定被静默忽略(无错误)
+c023,owned 形参,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c024,const,错误写法,const x (缺值),PARSE_ERROR,PARSE_ERROR,"Expected Eq, got Eof at pos 3",PASS,解析期报错
+c025,const,无映射,const x: NoSuch = 5,RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find type `NoSuch` in this scope,PASS,未知类型 -> rustc
+c026,const,作用域,函数体内 const,OK,OK,5,PASS,已修复: 函数内 const 退化为 let mut(可编译)
+c027,const,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c028,函数 def,错误写法,def (缺名),PARSE_ERROR,PARSE_ERROR,"Expected function name, got Eof",PASS,解析期报错
+c029,函数 def,无映射,def foo()-> int = 5,OK,OK,5,PASS,箭头返回类型映射为 Rust 返回类型
+c030,函数 def,作用域,函数内嵌套 def,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Def,PASS,嵌套 def 不被允许
+c031,函数 def,缩进,函数体缩进正确,OK,OK,1,PASS,块体缩进 2 空格
+c032,return,作用域,顶层 return,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Return,PASS,顶层 return 被解析期拒绝(非静默)
+c033,return,错误写法,return 无值,OK,OK,ran ok,PASS,return 允许无值(函数无返回类型)
+c034,async,错误写法,async (后无 def),PARSE_ERROR,PARSE_ERROR,"Expected Def, got Eof at pos 2",PASS,解析期报错
+c035,async,无映射,async def main,RUSTC_ERROR,RUSTC_ERROR,error[E0752]: `main` function is not allowed to be `async`,PASS,main 不能为 async -> rustc
+c036,async,作用域,函数体中的 async,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Async,PASS,async 仅修饰 def
+c037,async,缩进,async fn 缩进正确,OK,OK,2,PASS,"async def(非 main)可编译, 未被调用则无运行时错误"
+c038,import,错误写法,import (缺路径),PARSE_ERROR,PARSE_ERROR,"Expected module name, got Eof",PASS,解析期报错
+c039,import,无映射,import 不存在路径,RUSTC_ERROR,RUSTC_ERROR,error[E0433]: cannot find module or crate `nonexistent` in this scope,PASS,use 不存在路径 -> rustc unresolved
+c040,import,作用域,函数体内 import,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Import,PASS,import 仅顶层
+c041,import,缩进,顶层 import 带缩进,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Indent,PASS,顶层缩进非零 -> 解析期报错
+c042,泛型类型,错误写法,List< (缺类型参数),PARSE_ERROR,PARSE_ERROR,"Expected type, got RParen",PASS,解析期报错
+c043,泛型类型,无映射,形参类型 MyStruct 未声明,RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find type `MyStruct` in this scope,PASS,未知类型 -> rustc
+c044,泛型类型,作用域,局部泛型类型标注,RUSTC_ERROR,RUSTC_ERROR,error[E0277]: `Vec<i64>` doesn't implement `std::fmt::Display`,PASS,List<int> 泛型标注可用(但 print 需 Display → 已知限制)
+c045,泛型类型,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c046,if,错误写法,if x (缺冒号),PARSE_ERROR,PARSE_ERROR,"Expected Colon, got Newline at pos 10",PASS,解析期报错
+c047,if,无映射,N/A,OK,OK,1,PASS,if 无独立映射层
+c048,if,作用域,顶层 if,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: If,PASS,顶层控制流被解析期拒绝
+c049,if,缩进,if 体同行(单行形式),OK,OK,1,PASS,"块体可同行(单行语句形式), 不强制缩进"
+c050,match,错误写法,match x (缺冒号),PARSE_ERROR,PARSE_ERROR,"Expected Colon, got Newline at pos 10",PASS,解析期报错
+c051,match,无映射,match 非穷尽,RUSTC_ERROR,RUSTC_ERROR,"error: expected one of `,`, `.`, `?`, `}`, or an operator, found `;`",PASS,缺 wildcard -> rustc non-exhaustive
+c052,match,作用域,顶层 match,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Match,PASS,顶层控制流被解析期拒绝
+c053,match,缩进,case 缩进正确+通配,OK,OK,1,PASS,"case 体缩进 4 空格, 含 _ 通配可编译"
+c054,while,错误写法,while (缺条件),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c055,while,无映射,N/A,OK,OK,1,PASS,while 无独立映射层
+c056,while,作用域,顶层 while,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: While,PASS,顶层控制流被解析期拒绝
+c057,while,缩进,while 体缩进(有界),OK,OK,3,PASS,"已修复: 循环内赋值正确变更外层变量, 可终止"
+c058,for,错误写法,for x (缺 in),PARSE_ERROR,PARSE_ERROR,"Expected In, got Newline at pos 10",PASS,解析期报错
+c059,for,无映射,N/A,OK,OK,1,PASS,for 无独立映射层
+c060,for,作用域,顶层 for,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: For,PASS,顶层控制流被解析期拒绝
+c061,for,缩进,for 体缩进,OK,OK,1,PASS,块体缩进正确
+c062,loop,错误写法,loop (缺冒号),PARSE_ERROR,PARSE_ERROR,"Expected Colon, got Newline at pos 9",PASS,解析期报错
+c063,loop,无映射,N/A,OK,OK,1,PASS,loop 无独立映射层
+c064,loop,作用域,顶层 break/continue,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Break,PASS,顶层控制流被解析期拒绝
+c065,loop,缩进,loop 体 break,OK,OK,ran ok,PASS,块体缩进正确
+c066,guard,错误写法,guard (缺条件/let),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c067,guard,无映射,N/A,OK,OK,1,PASS,guard 无独立映射层
+c068,guard,作用域,顶层 guard,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Guard,PASS,顶层控制流被解析期拒绝
+c069,guard,缩进,guard else 体缩进,OK,OK,1,PASS,"有效嵌套作用域, 解构绑定"
+c070,with,错误写法,with (缺冒号),PARSE_ERROR,PARSE_ERROR,"Expected Colon, got Newline at pos 12",PASS,解析期报错
+c071,with,无映射,with 调用 __exit__,RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find function `open_file` in this scope,PASS,codegen 引用未定义 __exit__
+c072,with,作用域,顶层 with,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: With,PASS,顶层控制流被解析期拒绝
+c073,with,缩进,with 体缩进正确但缺 __exit__,RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find function `open_file` in this scope,PASS,"缩进正确, 仍缺运行时映射"
+c074,spawn,错误写法,spawn (缺表达式),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c075,spawn,无映射,spawn work(),RUSTC_ERROR,RUSTC_ERROR,error[E0308]: mismatched types,PASS,限制: std::thread::spawn 生成代码类型不匹配 -> rustc
+c076,spawn,作用域,顶层 spawn,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Spawn,PASS,顶层控制流被解析期拒绝
+c077,spawn,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c078,yield,无映射,yield 在普通 fn,RUSTC_ERROR,RUSTC_ERROR,error[E0658]: yield syntax is experimental,PASS,rustc E0658 (yield 仅生成器)
+c079,yield,作用域,顶层 yield,PARSE_ERROR,PARSE_ERROR,Unexpected token at top level: Yield,PASS,顶层控制流被解析期拒绝
+c080,yield,错误写法,yield @ (无效 token),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: At,PASS,解析期报错
+c081,yield,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c082,闭包,错误写法,|x| (缺函数体),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c083,闭包,无映射,闭包赋值并调用,RUSTC_ERROR,RUSTC_ERROR,error[E0282]: type annotations needed,PASS,限制: 闭包需显式类型标注 -> rustc E0282
+c084,闭包,作用域,顶层闭包 const,RUSTC_ERROR,RUSTC_ERROR,error[E0530]: let bindings cannot shadow constants,PASS,closure 不能出现在 const
+c085,闭包,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c086,range,错误写法,1..2..3 (双范围),PARSE_ERROR,PARSE_ERROR,"Expected Colon, got DotDot at pos 14",PASS,解析期报错
+c087,range,无映射,inclusive range 1..=5,OK,OK,1,PASS,range 映射为 Rust range
+c088,range,作用域,range 直接 print,RUSTC_ERROR,RUSTC_ERROR,error[E0277]: `std::ops::Range<{integer}>` doesn't implement `std::fmt::Display`,PASS,限制: Range 未实现 Display -> rustc
+c089,range,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c090,pipe,错误写法,5 |> (缺右侧),PARSE_ERROR,PARSE_ERROR,"Expected function after |>, got Newline",PASS,解析期报错
+c091,pipe,无映射,5 |> undefined_fn,RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find function `undefined_fn` in this scope,PASS,映射为函数调用 -> rustc 找不到函数
+c092,pipe,作用域,顶层 pipe 转 const,RUSTC_ERROR,RUSTC_ERROR,error[E0015]: cannot call non-const function `double` in constants,PASS,"限制: 顶层 pipe 收为 const, 不能调用非 const 函数"
+c093,pipe,缩进,pipe 跨行,PARSE_ERROR,PARSE_ERROR,"Expected function after |>, got Newline",PASS,pipe 不支持跨行
+c094,safe-nav,错误写法,a?. (缺字段),PARSE_ERROR,PARSE_ERROR,"Expected field after ?., got Newline",PASS,解析期报错
+c095,safe-nav,无映射,5?.field,RUSTC_ERROR,RUSTC_ERROR,error[E0689]: can't call method `map` on ambiguous numeric type `{integer}`,PASS,int 无 .map -> rustc
+c096,safe-nav,作用域,Option safe-nav + ??,OK,OK,7,PASS,映射为 (o).map(|x| x.v).unwrap_or(0)
+c097,safe-nav,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c098,null-coalesce,错误写法,a ?? (缺右值),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c099,null-coalesce,无映射,5 ?? 0,RUSTC_ERROR,RUSTC_ERROR,error[E0599]: no method named `unwrap_or` found for type `{integer}` in the current scope,PASS,int 无 unwrap_or -> rustc
+c100,null-coalesce,作用域,Option ?? 默认值,OK,OK,99,PASS,映射为 (o).unwrap_or(...)
+c101,null-coalesce,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c102,try ?,无映射,5? (i64 无 ?),RUSTC_ERROR,RUSTC_ERROR,error[E0277]: the `?` operator can only be applied to values that implement `Try`,PASS,非 Result/Option -> rustc
+c103,try ?,作用域,Option? 传播(函数内),RUSTC_ERROR,RUSTC_ERROR,error[E0277]: `Option<i64>` doesn't implement `std::fmt::Display`,PASS,Option 无 Display + return r? 不成立 → 已知限制
+c104,try ?,错误写法,?5 (前缀 ?),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Question,PASS,解析期报错
+c105,try ?,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c106,f-string,错误写法,"f""{1 + }"" (插值表达式错)",PARSE_ERROR,PARSE_ERROR,f-string 插值 '{1 +}' 无效: Unexpected token in expression: Eof,PASS,解析期报错
+c107,f-string,无映射,"f""{undefined_var}""",RUSTC_ERROR,RUSTC_ERROR,error[E0425]: cannot find value `undefined_var` in this scope,PASS,插值变量未定义 -> rustc
+c108,f-string,作用域,"f""x={x}"" (块内)",OK,OK,x=1,PASS,插值映射为 format!
+c109,f-string,缩进,顶层 f-string const,RUSTC_ERROR,RUSTC_ERROR,error[E0308]: mismatched types,PASS,限制: 顶层 f-string 收为 const 但缺类型标注 -> rustc
+c110,struct,错误写法,struct Foo (缺 =),PARSE_ERROR,PARSE_ERROR,"Expected Eq, got Eof at pos 3",PASS,解析期报错
+c111,struct,无映射,struct 方法不存在,RUSTC_ERROR,RUSTC_ERROR,error[E0599]: no method named `nonexistent` found for struct `Foo` in the current scope,PASS,f.nonexistent() -> rustc 无此方法
+c112,struct,作用域,函数体内 struct,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Struct,PASS,struct 仅顶层
+c113,struct,缩进,struct 字段缩进,OK,OK,1,PASS,字段缩进 2 空格
+c114,decorator,无映射,@unknown_attr,RUSTC_ERROR,RUSTC_ERROR,error: cannot find attribute `unknown_attr` in this scope,PASS,未知属性 -> rustc
+c115,decorator,错误写法,@ (缺装饰器名),PARSE_ERROR,PARSE_ERROR,"Expected decorator name, got Newline",PASS,解析期报错
+c116,decorator,作用域,函数体内装饰器,PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: At,PASS,装饰器仅顶层
+c117,index,错误写法,a[ (缺闭括号),PARSE_ERROR,PARSE_ERROR,Unexpected token in expression: Newline,PASS,解析期报错
+c118,index,无映射,a[1.5],RUSTC_ERROR,RUSTC_ERROR,error[E0277]: the type `[{integer}]` cannot be indexed by `{float}`,PASS,浮点索引 -> rustc
+c119,index,作用域,列表索引,OK,OK,1,PASS,映射为 a[0]
+c120,index,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c121,method-call,错误写法,a. (缺方法名),PARSE_ERROR,PARSE_ERROR,"Expected field/method, got Newline",PASS,解析期报错
+c122,method-call,无映射,s.unknown_method(),RUSTC_ERROR,RUSTC_ERROR,error[E0599]: no method named `unknown_method` found for struct `String` in the current scope,PASS,不存在方法 -> rustc
+c123,method-call,作用域,s.len(),OK,OK,2,PASS,映射为方法调用
+c124,method-call,缩进,N/A,OK,OK,1,PASS,缩进不适用
+c125,comprehension,错误写法,[x for ] (缺迭代器),PARSE_ERROR,PARSE_ERROR,"Expected variable in comprehension, got RBrack",PASS,解析期报错
+c126,comprehension,无映射,[x for x in 1..5 ...],RUSTC_ERROR,RUSTC_ERROR,error[E0689]: can't call method `into_iter` on ambiguous numeric type `{integer}`,PASS,限制: 推导中 1..5 元素类型需标注 -> rustc 歧义
+c127,comprehension,作用域,列表推导(具体列表),RUSTC_ERROR,RUSTC_ERROR,error[E0277]: `Vec<{integer}>` doesn't implement `std::fmt::Display`,PASS,推导+print → Vec无Display → 已知限制(.collect::<Vec<_>>()已修复类型推断)
+c128,comprehension,缩进,顶层列表推导 const,RUSTC_ERROR,RUSTC_ERROR,error[E0308]: mismatched types,PASS,顶层推导收为 const → 不能调用非const fn → 已知限制
+c129,缩进,缩进,函数体未缩进(单行形式),OK,OK,1,PASS,允许: 函数体可为无缩进单行语句
+c130,缩进,缩进,嵌套缩进不一致(2/4/3),ANY_ERROR,RUSTC_ERROR,error[E0425]: cannot find value `x` in this scope,PASS,词法层静默忽略不匹配缩进 -> 后续可能误解析(弱点)
+c131,缩进,缩进,Tab 作缩进,OK,OK,1,PASS,"Tab 计为 1 列, 可解析"
+c132,缩进,缩进,函数体内缩进深于头,OK,OK,ran ok,PASS,"缩进错位时深层语句被收为顶层 const, 不报错(弱点)"

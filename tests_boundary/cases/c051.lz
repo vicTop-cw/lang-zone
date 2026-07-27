@@ -1,0 +1,9 @@
+enum Color =
+  Red
+  Green
+
+def describe(c: Color)-> str =
+  match c:
+    case Red=> return "r"
+def main() =
+  print(describe(Color.Red))

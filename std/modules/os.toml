@@ -1,0 +1,40 @@
+# lz std::os — P1 操作系统平台原生类型重导出
+# 源码级映射：lz 符号 → Rust std::os 路径
+
+[module]
+tier = 1
+rust_prefix = "std::os"
+
+# ── 类型映射 ──
+
+[types]
+# 原始 FFI 类型 (std::os::raw)
+cChar    = "std::os::raw::c_char"
+cSchar   = "std::os::raw::c_schar"
+cUchar   = "std::os::raw::c_uchar"
+cShort   = "std::os::raw::c_short"
+cUshort  = "std::os::raw::c_ushort"
+cInt     = "std::os::raw::c_int"
+cUint    = "std::os::raw::c_uint"
+cLong    = "std::os::raw::c_long"
+cUlong   = "std::os::raw::c_ulong"
+cLonglong  = "std::os::raw::c_longlong"
+cUlonglong = "std::os::raw::c_ulonglong"
+cFloat   = "std::os::raw::c_float"
+cDouble  = "std::os::raw::c_double"
+# 平台特定路径类型（通过重导出访问）
+OsStr    = "std::ffi::OsStr"
+OsString = "std::ffi::OsString"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# OsStr / OsString 方法
+toOsStr = "as_os_str"
+toStrOs  = "to_str"
+intoStringOs = "into_string"
+
+# ── 类型别名注入 ──
+
+[aliases]

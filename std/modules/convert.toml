@@ -1,0 +1,21 @@
+# lz std::convert — P1 类型转换特征
+# 源码级映射：lz 符号 → Rust std::convert 路径
+
+[module]
+tier = 1
+rust_prefix = "std::convert"
+
+# ── 类型映射 ──
+
+[types]
+From       = "std::convert::From"
+Into       = "std::convert::Into"
+TryFrom    = "std::convert::TryFrom"
+TryInto    = "std::convert::TryInto"
+AsRef      = "std::convert::AsRef"
+AsMut      = "std::convert::AsMut"
+Infallible = "std::convert::Infallible"
+
+# ── 类型别名注入 ──
+
+[aliases]

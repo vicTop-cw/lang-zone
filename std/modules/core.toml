@@ -1,0 +1,26 @@
+# lz std::core — P0 核心类型
+# 源码级映射：lz 符号 → Rust std 路径
+# 注：int/float/bool/str/List/Dict/Option/Result 已在 map_type 内置映射，
+#     此处仅补充 map_type 未覆盖的类型
+# rust_prefix = "std" 是因为 Rust 中不存在 std::core，core 是独立 crate
+# 实际类型通过 rewrite_type 注入（非 import 路径重写）
+
+[module]
+tier = 1
+rust_prefix = "std"
+
+# ── 类型映射 ──
+# 仅列 map_type 未覆盖的
+
+[types]
+Never   = "!"
+
+# ── 自由函数 ──
+
+[functions]
+panic = { rust = "panic!", shim = "fmt" }
+print = { rust = "println!", shim = "auto_fmt" }
+
+# ── 类型别名注入 ──
+
+[aliases]

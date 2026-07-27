@@ -1,0 +1,4 @@
+def main() =
+  o: int? = None
+  x = o ?? 99
+  print(x)

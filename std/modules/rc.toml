@@ -1,0 +1,34 @@
+# lz std::rc — P1 引用计数指针
+# 源码级映射：lz 符号 → Rust std::rc 路径
+
+[module]
+tier = 1
+rust_prefix = "std::rc"
+
+# ── 类型映射 ──
+
+[types]
+Rc    = "std::rc::Rc"
+Weak  = "std::rc::Weak"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Rc 方法
+new          = "new"
+clone        = "clone"
+downgrade    = "downgrade"
+strongCount  = "strong_count"
+weakCount    = "weak_count"
+getMut       = "get_mut"
+makeMut      = "make_mut"
+ptrEq        = "ptr_eq"
+tryUnwrap    = "try_unwrap"
+intoRaw      = "into_raw"
+# Weak 方法
+upgrade      = "upgrade"
+
+# ── 类型别名注入 ──
+
+[aliases]

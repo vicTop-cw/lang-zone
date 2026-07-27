@@ -1,0 +1,4 @@
+match 1:
+  case 1=> print(1)
+def main() =
+  print(2)

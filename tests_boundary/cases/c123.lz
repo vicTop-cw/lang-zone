@@ -1,0 +1,4 @@
+def main() =
+  s = "hi"
+  l = s.len()
+  print(l)

@@ -1,0 +1,4 @@
+def main() =
+  guard let Some(x) = Some(1) else:
+      print("no")
+    print(x)

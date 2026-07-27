@@ -1,0 +1,76 @@
+// Lang-Zong Phase 3 测试 — 控制流 + 模块系统
+// 验证: 管道 |> / 安全导航 ?. / null 合并 ?? / guard let / import / match guard
+
+// 导入模块（生成 use 语句）
+import std::collections::HashMap
+
+// ── 1. 管道 |> 函数线程：a |> f(args) ≡ f(a, args) ──
+def double(x: int)-> int = x * 2
+def add_one(x: int)-> int = x + 1
+def add3(a: int, b: int, c: int)-> int = a + b + c
+
+// ── 2. 安全导航 ?. + null 合并 ?? ──
+struct User =
+    name: str
+    profile: int?
+
+def user_label(u: str?)-> str =
+    u ?? "anonymous"
+
+// ── 3. guard let 模式守卫（Rust let...else）──
+def describe(opt: int?)-> str =
+    guard let Some(v) = opt else: "none"
+    if v > 0: "positive" else: "non-positive"
+
+// ── 4. match + 守卫条件 ──
+def classify(xs: List<int>)-> str =
+    match xs.len():
+        case 0=> "empty"
+        case n if n < 5=> "small"
+        case _=> "large"
+
+// ── 5. 链式安全导航 ──
+def profile_name(u: User?)-> str =
+    u?.name ?? "no-name"
+
+// 程序入口
+def main() =
+    // 管道：单函数链
+    p1 = 5 |> double |> add_one
+    print(f"pipe-chain: {p1}")            // add_one(double(5)) = 11
+
+    // 管道：多参线程（receiver 作首参）
+    p2 = 1 |> add3(2, 3)
+    print(f"pipe-multi: {p2}")            // add3(1, 2, 3) = 6
+
+    // null 合并
+    some_val: int? = Some(42)
+    c1 = some_val ?? 0
+    print(f"coalesce-some: {c1}")         // 42
+    none_val: int? = None
+    c2 = none_val ?? 99
+    print(f"coalesce-none: {c2}")         // 99
+
+    // guard let 解构
+    print(f"guard-let Some(7): {describe(Some(7))}")   // positive
+    print(f"guard-let None: {describe(None)}")          // none
+
+    // match + guard
+    print(f"classify []: {classify([])}")               // empty
+    print(f"classify [1,2]: {classify([1, 2])}")       // small
+    big = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    print(f"classify big: {classify(big)}")            // large
+
+    // 链式安全导航
+    u1: User? = Some(User(name: "Alice", profile: Some(1)))
+    u2: User? = None
+    print(f"profile User?: {profile_name(u1)}")         // Alice
+    print(f"profile None: {profile_name(u2)}")          // no-name
+
+    // 标签（Option<str> 合并）
+    lbl = user_label(Some("admin"))
+    print(f"label: {lbl}")                              // admin
+
+    // import 验证：HashMap 可用且类型推导正确
+    scores: Dict<str, int> = HashMap::new()
+    print(f"import HashMap ok: len={scores.len()}")

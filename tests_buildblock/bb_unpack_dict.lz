@@ -1,0 +1,19 @@
+// 调用构建块(~:) — 字典参数包自动拆包为命名实参（类似 Python **kwargs）
+// 类型擦除为 Dict<str, Any>（实际指针）；编译器不校验 key 与参数名是否匹配（使用者责任）。
+def greet(name: str, age: int)-> str =
+    f"{name} is {age}"
+
+// 函数仅需 name；构建的字典含 name 与 age 两个 key —— 多余 key 由编译器忽略（使用者责任）
+def only_name(name: str)-> str =
+    f"hello {name}"
+
+def main() =
+    // 正常 **kwargs 拆包
+    g = greet ~:
+        return {name: "bob", age: 30}
+    print(f"unpack dict (**kwargs)-> {g}")   // 期望 "bob is 30"
+
+    // 多余 key：函数只取 name，age 被忽略，编译通过、运行正常
+    h = only_name ~:
+        return {name: "alice", age: 99}
+    print(f"extra key tolerated: {h}")      // 期望 "hello alice"

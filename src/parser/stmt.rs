@@ -1,0 +1,592 @@
+// Lang-Zong 编译器 — parser/stmt.rs
+// 语句解析 + 构建块语义验证（作为 Parser 的 trait 扩展）
+
+use crate::lexer::Token;
+use crate::ast::*;
+use super::parser::Parser;
+use super::expr::ParserExprExt;
+
+/// Parser 的语句解析扩展 trait
+pub trait ParserStmtExt {
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, String>;
+    fn parse_stmt(&mut self) -> Result<Stmt, String>;
+    fn parse_binding_stmt(&mut self) -> Result<Stmt, String>;
+    fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String>;
+    fn parse_build_block_body(&mut self) -> Result<Vec<Stmt>, String>;
+    fn validate_build_block(&self, kind: BuildKind, body: &[Stmt]) -> Result<(), String>;
+    fn collect_yields<'a>(&self, stmts: &'a [Stmt], out: &mut Vec<&'a Expr>, has_yield: &mut bool);
+    fn first_yield<'a>(&self, stmts: &'a [Stmt]) -> Option<&'a Stmt>;
+    fn build_block_payload<'a>(&self, body: &'a [Stmt]) -> Option<&'a Expr>;
+    fn is_valid_build_params(&self, e: &Expr) -> bool;
+}
+
+impl ParserStmtExt for Parser {
+    // ─── 语句块 ───
+
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
+        let mut stmts = Vec::new();
+        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            self.skip_newlines();
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+            stmts.push(self.parse_stmt()?);
+        }
+        Ok(stmts)
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, String> {
+        match self.peek() {
+            Token::Let => {
+                // let x = 1  → 不可变绑定
+                // let ref r = x  → 不可变引用
+                self.advance();
+                self.parse_binding_stmt_let()
+            }
+            Token::Mut | Token::Ref | Token::Const | Token::Owned => {
+                self.parse_binding_stmt()
+            }
+            Token::Return => {
+                self.advance();
+                let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                Ok(Stmt::Return(expr))
+            }
+            Token::Yield => {
+                self.advance();
+                let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                Ok(Stmt::Yield(expr))
+            }
+            Token::If => {
+                let expr = self.parse_expr()?;
+                Ok(Stmt::Expr(expr))
+            }
+            Token::Match => {
+                let expr = self.parse_expr()?;
+                Ok(Stmt::Expr(expr))
+            }
+            Token::While => {
+                self.advance();
+                let cond = self.parse_expr()?;
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::While { cond, body })
+            }
+            Token::For => {
+                self.advance();
+                let var = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected variable, got {:?}", t)),
+                };
+                self.expect(Token::In)?;
+                let iter = self.parse_expr()?;
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::For { var, iter, body })
+            }
+            Token::Loop => {
+                self.advance();
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::Loop(body))
+            }
+            Token::Break => {
+                self.advance();
+                let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                Ok(Stmt::Break(expr))
+            }
+            Token::Continue => {
+                self.advance();
+                Ok(Stmt::Continue)
+            }
+            Token::Guard => {
+                self.advance();
+                // 支持两种形式:
+                //   guard cond else: VALUE              (条件守卫)
+                //   guard let PATTERN = EXPR else: VALUE (模式守卫 → Rust let...else)
+                let (cond, let_binding) = if self.check(&Token::Let) {
+                    self.advance();
+                    let pattern = self.parse_pattern()?;
+                    self.expect(Token::Eq)?;
+                    let expr = self.parse_expr()?;
+                    (None, Some((pattern, expr)))
+                } else {
+                    (Some(self.parse_expr()?), None)
+                };
+                self.expect(Token::Else)?;
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                let else_body = if self.check(&Token::Indent) {
+                    self.advance();
+                    let b = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    b
+                } else {
+                    vec![self.parse_stmt()?]
+                };
+                Ok(Stmt::Guard { cond, let_binding, else_body })
+            }
+            Token::Defer => {
+                self.advance();
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                let body = if self.check(&Token::Indent) {
+                    self.advance();
+                    let b = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    b
+                } else {
+                    vec![self.parse_stmt()?]
+                };
+                Ok(Stmt::Defer(body))
+            }
+            Token::Raise => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                Ok(Stmt::Raise(expr))
+            }
+            Token::With => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                let alias = if self.check(&Token::As) {
+                    self.advance();
+                    match self.advance() {
+                        Token::Ident(n) => Some(n),
+                        t => return Err(format!("Expected alias, got {:?}", t)),
+                    }
+                } else {
+                    None
+                };
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::With { expr, alias, body })
+            }
+            Token::Spawn => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                Ok(Stmt::Expr(Expr::Spawn(Box::new(expr))))
+            }
+            Token::Test => {
+                self.advance();
+                let name = self.parse_test_name()?;
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                let body = if self.check(&Token::Indent) {
+                    self.advance();
+                    let b = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    b
+                } else {
+                    vec![self.parse_stmt()?]
+                };
+                Ok(Stmt::Test { name, body })
+            }
+            Token::Assert => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                // assert expr == expected → assert_eq!(expr, expected)
+                if let Expr::Binary { left, op: BinOp::Eq, right } = expr {
+                    Ok(Stmt::Assert { expr: *left, expected: Some(*right) })
+                } else if let Expr::Binary { left, op: BinOp::Ne, right } = expr {
+                    Ok(Stmt::Assert { expr: *left, expected: Some(Expr::Unary { op: UnaryOp::Not, operand: right }) })
+                } else {
+                    Ok(Stmt::Assert { expr, expected: None })
+                }
+            }
+            Token::Suite => {
+                self.advance();
+                let name = self.parse_test_name()?;
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let mut tests = Vec::new();
+                while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                    self.skip_newlines();
+                    if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+                    tests.push(self.parse_stmt()?);
+                }
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::Suite { name, tests })
+            }
+            _ => {
+                // 类型化本地绑定: name: T = value
+                if let Token::Ident(_) = self.peek() {
+                    if self.peek_n(1) == &Token::Colon {
+                        let name = self.advance().to_string();
+                        self.advance(); // 消费 :
+                        let ty = self.parse_type()?;
+                        self.expect(Token::Eq)?;
+                        let value = self.parse_expr()?;
+                        return Ok(Stmt::Let { name, mutable: true, is_ref: false, ty: Some(ty), value });
+                    }
+                }
+                // 尝试解析为表达式语句或赋值
+                let expr = self.parse_expr()?;
+                let lhs_name = match &expr {
+                    Expr::Ident(n) => n.clone(),
+                    _ => "_".to_string(),
+                };
+
+                // 构建块（变量）: <lhs> =: <缩进块>
+                if self.check(&Token::BuildAssign) {
+                    self.advance();
+                    let body = self.parse_build_block_body()?;
+                    self.validate_build_block(BuildKind::Var, &body)?;
+                    return Ok(Stmt::Expr(Expr::BuildBlock {
+                        kind: BuildKind::Var,
+                        lhs: Box::new(expr),
+                        body,
+                    }));
+                }
+
+                // 检查是否是赋值
+                match self.peek() {
+                    Token::Eq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        // 构建块（调用/生成器）: x = <fn> ~: / *: <缩进块>
+                        if self.check(&Token::BuildCall) || self.check(&Token::BuildGen) {
+                            let kind = if self.check(&Token::BuildCall) {
+                                BuildKind::Call
+                            } else {
+                                BuildKind::Gen
+                            };
+                            self.advance();
+                            let body = self.parse_build_block_body()?;
+                            self.validate_build_block(kind, &body)?;
+                            return Ok(Stmt::Let {
+                                name: lhs_name,
+                                mutable: true,
+                                is_ref: false,
+                                ty: None,
+                                value: Expr::BuildBlock {
+                                    kind,
+                                    lhs: Box::new(value),
+                                    body,
+                                },
+                            });
+                        }
+                        // ident = value → Let 绑定（非赋值），默认可变
+                        match expr {
+                            Expr::Ident(name) => {
+                                Ok(Stmt::Let { name, mutable: true, is_ref: false, ty: None, value })
+                            }
+                            _ => Ok(Stmt::Assign { target: expr, op: AssignOp::Eq, value })
+                        }
+                    }
+                    Token::PlusEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::AddEq, value })
+                    }
+                    Token::MinusEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::SubEq, value })
+                    }
+                    Token::StarEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::MulEq, value })
+                    }
+                    Token::SlashEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::DivEq, value })
+                    }
+                    Token::PercentEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::ModEq, value })
+                    }
+                    _ => Ok(Stmt::Expr(expr))
+                }
+            }
+        }
+    }
+
+    fn parse_binding_stmt(&mut self) -> Result<Stmt, String> {
+        // Lang-Zong 默认绑定可变更（copy-by-default 模型）：mut 为 no-op 兼容
+        let mut mutable = true;
+        let mut is_ref = false;
+        let mut is_const = false;
+        let mut is_owned = false;
+
+        loop {
+            match self.peek() {
+                Token::Mut => { self.advance(); mutable = true; }
+                Token::Ref => { self.advance(); is_ref = true; }
+                Token::Const => { self.advance(); is_const = true; }
+                Token::Owned => { self.advance(); is_owned = true; mutable = true; }
+                _ => break,
+            }
+        }
+
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected variable name, got {:?}", t)),
+        };
+
+        let ty = if self.check(&Token::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.expect(Token::Eq)?;
+        let value = self.parse_expr()?;
+
+        if is_const {
+            Ok(Stmt::Const { name, ty, value })
+        } else {
+            Ok(Stmt::Let { name, mutable, is_ref, ty, value })
+        }
+    }
+
+    /// let 前缀的绑定：不可变（let ref = 不可变引用）
+    fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String> {
+        let mut is_ref = false;
+        let mut is_const = false;
+
+        loop {
+            match self.peek() {
+                Token::Mut => { self.advance(); /* let mut 冗余，默认不可变；允许但忽略 */ }
+                Token::Ref => { self.advance(); is_ref = true; }
+                Token::Const => { self.advance(); is_const = true; }
+                Token::Owned => { self.advance(); /* let owned 语义上排斥，忽略 */ }
+                _ => break,
+            }
+        }
+
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected variable name, got {:?}", t)),
+        };
+
+        let ty = if self.check(&Token::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        self.expect(Token::Eq)?;
+        let value = self.parse_expr()?;
+
+        if is_const {
+            Ok(Stmt::Const { name, ty, value })
+        } else {
+            // let 前缀 → 不可变绑定
+            Ok(Stmt::Let { name, mutable: false, is_ref, ty, value })
+        }
+    }
+
+    // ─── 构建块 ───
+
+    /// 解析构建块体：符号后必须换行并缩进，跟一个缩进块
+    fn parse_build_block_body(&mut self) -> Result<Vec<Stmt>, String> {
+        self.skip_newlines();
+        self.expect(Token::Indent)?;
+        let body = self.parse_block()?;
+        self.expect(Token::Dedent)?;
+        Ok(body)
+    }
+
+    /// 语义检查：构建块返回值 / yield 载荷必须是元组、字典、结构体构造或实现 BuildParams trait 的表达式
+    fn validate_build_block(&self, kind: BuildKind, body: &[Stmt]) -> Result<(), String> {
+        match kind {
+            BuildKind::Var => {
+                // 变量构建块：内部可执行任意逻辑；yield 仅允许在生成器构建块中
+                if let Some(bad) = self.first_yield(body) {
+                    return Err(format!(
+                        "变量构建块(=:) 内部不允许使用 yield；yield 仅允许在生成器构建块(*:) 中（位置 {:?}）",
+                        bad
+                    ));
+                }
+                Ok(())
+            }
+            BuildKind::Call => {
+                if let Some(bad) = self.first_yield(body) {
+                    return Err(format!(
+                        "调用构建块(~:) 内部不允许使用 yield；yield 仅允许在生成器构建块(*:) 中（位置 {:?}）",
+                        bad
+                    ));
+                }
+                // 调用构建块必须产生返回值（return EXPR 或尾部表达式），且须满足 BuildParams 约束
+                match self.build_block_payload(body) {
+                    Some(e) if self.is_valid_build_params(e) => Ok(()),
+                    Some(_) => Err(
+                        "调用构建块(~:) 的返回值必须是元组 / 字典 / 结构体构造，或实现 BuildParams trait 的表达式"
+                            .to_string(),
+                    ),
+                    None => Err(
+                        "调用构建块(~:) 必须产生返回值（尾部表达式或 return <params>）"
+                            .to_string(),
+                    ),
+                }
+            }
+            BuildKind::Gen => {
+                // 生成器构建块：每个 yield 载荷须满足 BuildParams 约束
+                let mut yields: Vec<&Expr> = Vec::new();
+                let mut has_yield = false;
+                self.collect_yields(body, &mut yields, &mut has_yield);
+                if !has_yield {
+                    return Err(
+                        "生成器构建块(*:) 必须至少包含一个 yield（用于逐步产出构建参数包）".to_string(),
+                    );
+                }
+                for y in &yields {
+                    if !self.is_valid_build_params(y) {
+                        return Err(
+                            "生成器构建块(*:) 的 yield 必须是元组 / 字典 / 结构体构造，或实现 BuildParams trait 的表达式"
+                                .to_string(),
+                        );
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// 收集所有 yield 载荷表达式（含嵌套控制流与 if/match 表达式分支）。
+    /// `has_yield` 记录是否存在任何 yield（含空参数包的裸 yield）。
+    fn collect_yields<'a>(&self, stmts: &'a [Stmt], out: &mut Vec<&'a Expr>, has_yield: &mut bool) {
+        for s in stmts {
+            match s {
+                Stmt::Yield(Some(e)) => {
+                    out.push(e);
+                    *has_yield = true;
+                }
+                Stmt::Yield(None) => {
+                    // 空参数包（裸 yield），合法产出
+                    *has_yield = true;
+                }
+                Stmt::While { body, .. } => self.collect_yields(body, out, has_yield),
+                Stmt::For { body, .. } => self.collect_yields(body, out, has_yield),
+                Stmt::Loop(body) => self.collect_yields(body, out, has_yield),
+                Stmt::Guard { else_body, .. } => self.collect_yields(else_body, out, has_yield),
+                Stmt::With { body, .. } => self.collect_yields(body, out, has_yield),
+                Stmt::Expr(Expr::If { then_body, elif_clauses, else_body, .. }) => {
+                    self.collect_yields(then_body, out, has_yield);
+                    for (_, b) in elif_clauses {
+                        self.collect_yields(b, out, has_yield);
+                    }
+                    if let Some(b) = else_body {
+                        self.collect_yields(b, out, has_yield);
+                    }
+                }
+                Stmt::Expr(Expr::Match { arms, .. }) => {
+                    for arm in arms {
+                        self.collect_yields(&arm.body, out, has_yield);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// 返回第一个出现的 yield 表达式（用于 Var/Call 块禁止 yield 的检查）
+    fn first_yield<'a>(&self, stmts: &'a [Stmt]) -> Option<&'a Stmt> {
+        for s in stmts {
+            match s {
+                Stmt::Yield(_) => return Some(s),
+                Stmt::While { body, .. } => {
+                    if let Some(f) = self.first_yield(body) {
+                        return Some(f);
+                    }
+                }
+                Stmt::For { body, .. } => {
+                    if let Some(f) = self.first_yield(body) {
+                        return Some(f);
+                    }
+                }
+                Stmt::Loop(body) => {
+                    if let Some(f) = self.first_yield(body) {
+                        return Some(f);
+                    }
+                }
+                Stmt::Guard { else_body, .. } => {
+                    if let Some(f) = self.first_yield(else_body) {
+                        return Some(f);
+                    }
+                }
+                Stmt::With { body, .. } => {
+                    if let Some(f) = self.first_yield(body) {
+                        return Some(f);
+                    }
+                }
+                Stmt::Expr(Expr::If { then_body, elif_clauses, else_body, .. }) => {
+                    if let Some(f) = self.first_yield(then_body) {
+                        return Some(f);
+                    }
+                    for (_, b) in elif_clauses {
+                        if let Some(f) = self.first_yield(b) {
+                            return Some(f);
+                        }
+                    }
+                    if let Some(b) = else_body {
+                        if let Some(f) = self.first_yield(b) {
+                            return Some(f);
+                        }
+                    }
+                }
+                Stmt::Expr(Expr::Match { arms, .. }) => {
+                    for arm in arms {
+                        if let Some(f) = self.first_yield(&arm.body) {
+                            return Some(f);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// 提取构建块的"产出参数"表达式：优先 return EXPR，否则取尾部表达式
+    fn build_block_payload<'a>(&self, body: &'a [Stmt]) -> Option<&'a Expr> {
+        for s in body {
+            if let Stmt::Return(Some(e)) = s {
+                return Some(e);
+            }
+        }
+        if let Some(Stmt::Expr(e)) = body.last() {
+            Some(e)
+        } else {
+            None
+        }
+    }
+
+    /// BuildParams 约束：载荷须为元组 / 字典 / 结构体构造（Call）/ 方法调用 / 标识符 / 显式 move(try)
+    fn is_valid_build_params(&self, e: &Expr) -> bool {
+        match e {
+            Expr::TupleLit(_) | Expr::DictLit(_) => true,
+            Expr::Call { .. } | Expr::MethodCall { .. } | Expr::Ident(_) => true,
+            Expr::KwArg { .. } => true,
+            Expr::Move(inner) | Expr::Try(inner) => self.is_valid_build_params(inner),
+            _ => false,
+        }
+    }
+}

@@ -1,0 +1,3 @@
+def main() =
+  const x = 5
+  print(x)

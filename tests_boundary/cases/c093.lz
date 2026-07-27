@@ -1,0 +1,6 @@
+def main() =
+  y = 5 |>
+    double
+  print(y)
+  def double(x: int)-> int =
+    return x * 2

@@ -1,0 +1,4 @@
+def main() =
+  x = 5
+  ref r = &x
+  print(r)

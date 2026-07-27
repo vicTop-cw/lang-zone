@@ -1,0 +1,14 @@
+// ==== Result<T,E> ====
+def safe_parse(s: str) -> Result<int, str> =
+    guard s.length() > 0
+        else:
+            return Err("empty string")
+    Ok(42)
+
+def main() =
+    match safe_parse("42"):
+        case Ok(v) => print(f"parsed {v}")
+        case Err(e) => print(f"error: {e}")
+    match safe_parse(""):
+        case Ok(v) => print(f"parsed {v}")
+        case Err(e) => print(f"error: {e}")

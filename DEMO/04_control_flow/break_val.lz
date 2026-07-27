@@ -1,0 +1,13 @@
+// ==== Break with Value ====
+def find_first(xs: List<int>, target: int) -> int =
+    result = loop:
+        for x in xs:
+            if x == target:
+                break x
+        break -1
+    result
+
+def main() =
+    let xs = [1, 3, 5, 7, 9]
+    print(f"found={find_first(xs, 5)}")
+    print(f"missing={find_first(xs, 2)}")

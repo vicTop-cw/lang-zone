@@ -1,0 +1,5 @@
+@unknown_attr
+def foo()-> int =
+  return 1
+def main() =
+  print(foo())

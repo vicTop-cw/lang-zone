@@ -1,0 +1,3 @@
+s = f"hi"
+def main() =
+  print(s)

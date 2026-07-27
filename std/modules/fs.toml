@@ -1,0 +1,35 @@
+# lz std::fs — P0 文件系统操作
+# 源码级映射：lz 符号 → Rust std::fs 路径
+
+[module]
+tier = 1
+rust_prefix = "std::fs"
+
+# ── 自由函数 ──
+# lz 函数名 → Rust 路径 + 参数适配
+
+[functions]
+read_to_string   = { rust = "std::fs::read_to_string",   shim = "path_ref" }
+write            = { rust = "std::fs::write",              shim = "path_ref" }
+read             = { rust = "std::fs::read",               shim = "path_ref" }
+copy             = { rust = "std::fs::copy",               shim = "path_ref" }
+remove_file      = { rust = "std::fs::remove_file",       shim = "path_ref" }
+remove_dir       = { rust = "std::fs::remove_dir",        shim = "path_ref" }
+remove_dir_all   = { rust = "std::fs::remove_dir_all",    shim = "path_ref" }
+create_dir       = { rust = "std::fs::create_dir",        shim = "path_ref" }
+create_dir_all   = { rust = "std::fs::create_dir_all",    shim = "path_ref" }
+exists           = { rust = "std::path::Path::new({0}).exists()", shim = "path_ref_expr" }
+rename           = { rust = "std::fs::rename",             shim = "path_ref" }
+
+# ── 类型映射 ──
+
+[types]
+File = "std::fs::File"
+DirEntry = "std::fs::DirEntry"
+Metadata = "std::fs::Metadata"
+Permissions = "std::fs::Permissions"
+
+# ── 类型别名注入 ──
+
+[aliases]
+IOError = "std::io::Error"

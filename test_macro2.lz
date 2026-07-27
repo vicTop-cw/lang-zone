@@ -1,0 +1,10 @@
+// 宏系统 E2E 测试 v2 — 使用宏调用
+// 测试 @name!(...) 展开
+
+macro double(input: Tokens) -> Tokens =
+    input
+
+def main() =
+    @double!(
+        print("Hello from lz macro!")
+    )

@@ -1,0 +1,14 @@
+// E2E test: template function {0} placeholder
+// Tests: exists("file") → std::path::Path::new("file").exists()
+// Note: uses bare function call (module-qualified calls like fs::exists 
+// would need PathAccess → Ident resolution, tracked separately)
+
+import std::fs
+
+def test_exists() -> str =
+    r = exists("some_file.txt")
+    "ok"
+
+def main() =
+    print(test_exists())
+    print("TEMPLATE FN TEST PASSED")

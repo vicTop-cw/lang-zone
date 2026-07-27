@@ -1,0 +1,17 @@
+// ==== Basic Functions ====
+def greet(name: str) -> str =
+    f"Hello, {name}!"
+
+def add(a: int, b: int) -> int =
+    a + b
+
+// no return type = inferred
+def say_hello() =
+    print("hello")
+
+def main() =
+    let msg = greet("World")
+    let sum = add(1, 2)
+    print(msg)
+    print(f"1+2={sum}")
+    say_hello()

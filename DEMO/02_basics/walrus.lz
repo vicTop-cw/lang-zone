@@ -1,0 +1,7 @@
+// ==== Walrus Operator := ====
+def compute() -> int = 42
+
+def main() =
+    // walrus: assign and use in one expression
+    if (y := compute()) > 10:
+        print(f"got {y}")

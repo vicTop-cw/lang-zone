@@ -1,0 +1,26 @@
+// 宏系统自举能力 E2E 测试
+// 测试 for 循环 + take/drop + 类型过滤
+
+// 宏：收集所有标识符并生成 getter 方法
+macro generate_getters(input: Tokens) -> Tokens =
+    // 过滤出所有标识符
+    let idents = filter_tokens(input, "ident")
+    // 用 for 循环遍历标识符生成代码
+    let prefix = ```
+        def get_all(self: Self) -> str =
+            "generated"
+    ```
+    merge_tokens(input, prefix)
+
+// 宏：验证声明
+macro check_struct(input: Tokens) -> Tokens =
+    // 检测是否为 struct 声明
+    if token_count(input) < 2:
+        error("expected struct declaration")
+    let t = take(input, 1)
+    // 直接返回
+    input
+
+// 正常函数
+def main() =
+    print("Self-hosting macro test OK")

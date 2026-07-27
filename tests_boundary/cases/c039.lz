@@ -1,0 +1,3 @@
+import nonexistent::module::Thing
+def main() =
+  print(1)

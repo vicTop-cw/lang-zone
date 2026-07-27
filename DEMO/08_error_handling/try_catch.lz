@@ -1,0 +1,11 @@
+// ==== Try/Catch Expression ====
+def safe_parse(s: str) -> int =
+    try:
+        parse_int(s)
+    catch:
+        0
+
+def main() =
+    let a = safe_parse("42")
+    let b = safe_parse("abc")
+    print(f"{a}, {b}")

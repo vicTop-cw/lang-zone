@@ -1,0 +1,91 @@
+# lz std::sync — P1 同步原语与原子类型
+# 源码级映射：lz 符号 → Rust std::sync 路径
+
+[module]
+tier = 1
+rust_prefix = "std::sync"
+
+# ── 类型映射 ──
+
+[types]
+Mutex            = "std::sync::Mutex"
+MutexGuard       = "std::sync::MutexGuard"
+Arc              = "std::sync::Arc"
+SyncWeak         = "std::sync::Weak"       # 消歧：与 rc::Weak 区分
+RwLock           = "std::sync::RwLock"
+RwLockReadGuard  = "std::sync::RwLockReadGuard"
+RwLockWriteGuard = "std::sync::RwLockWriteGuard"
+Barrier          = "std::sync::Barrier"
+BarrierWaitResult = "std::sync::BarrierWaitResult"
+Condvar          = "std::sync::Condvar"
+Once             = "std::sync::Once"
+OnceLock         = "std::sync::OnceLock"
+# 原子类型
+AtomicBool   = "std::sync::atomic::AtomicBool"
+AtomicI8     = "std::sync::atomic::AtomicI8"
+AtomicI16    = "std::sync::atomic::AtomicI16"
+AtomicI32    = "std::sync::atomic::AtomicI32"
+AtomicI64    = "std::sync::atomic::AtomicI64"
+AtomicU8     = "std::sync::atomic::AtomicU8"
+AtomicU16    = "std::sync::atomic::AtomicU16"
+AtomicU32    = "std::sync::atomic::AtomicU32"
+AtomicU64    = "std::sync::atomic::AtomicU64"
+AtomicUsize  = "std::sync::atomic::AtomicUsize"
+AtomicIsize  = "std::sync::atomic::AtomicIsize"
+AtomicPtr    = "std::sync::atomic::AtomicPtr"
+Ordering     = "std::sync::atomic::Ordering"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Mutex / RwLock 方法
+lock       = "lock"
+tryLock    = "try_lock"
+isPoisoned = "is_poisoned"
+intoInner  = "into_inner"
+getMut     = "get_mut"
+# RwLock 特有
+read       = "read"
+tryRead    = "try_read"
+write      = "write"
+tryWrite   = "try_write"
+# Arc 方法
+cloneArc        = "clone"          # lz Arc.cloneArc() → Rust Arc::clone()
+strongCount     = "strong_count"
+weakCount       = "weak_count"
+downgrade       = "downgrade"
+getMutArc       = "get_mut"
+makeMut         = "make_mut"
+ptrEq           = "ptr_eq"
+# Weak 方法
+upgrade      = "upgrade"
+# Barrier 方法
+wait         = "wait"
+# Condvar 方法
+waitCondvar  = "wait"
+waitTimeout  = "wait_timeout"
+notifyOne    = "notify_one"
+notifyAll    = "notify_all"
+# Once 方法
+callOnce     = "call_once"
+# OnceLock 方法
+getOrInit    = "get_or_init"
+# Atomic 方法
+load         = "load"
+store        = "store"
+swap         = "swap"
+compareAndSwap    = "compare_and_swap"
+compareExchange   = "compare_exchange"
+compareExchangeWeak = "compare_exchange_weak"
+fetchAdd     = "fetch_add"
+fetchSub     = "fetch_sub"
+fetchAnd     = "fetch_and"
+fetchOr      = "fetch_or"
+fetchXor     = "fetch_xor"
+fetchMin     = "fetch_min"
+fetchMax     = "fetch_max"
+
+# ── 类型别名注入 ──
+
+[aliases]

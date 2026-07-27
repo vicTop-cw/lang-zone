@@ -1,0 +1,4 @@
+def main() =
+  s = "hello"
+  t = s^
+  print(s)
