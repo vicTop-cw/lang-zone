@@ -162,7 +162,7 @@
 
 | 魔法方法 | 生成 Trait | Rust Trait | 用途 |
 |----------|-----------|-----------|------|
-| `__bool__` | `HasBool` | `HasBool`（自定义） | 布尔测试 `if obj:` |
+| `__bool__` | `HasBool` | `HasBool`（自定义） | 布尔测试 `if obj:`。判定链：`__bool__` → `__len__` → 默认 true |
 | `__abs__` | `HasAbs` | `HasAbs`（自定义） | 绝对值 `abs(x)` |
 | `__hash__` | `Hash` | `std::hash::Hash` | 哈希值计算（见比较） |
 
