@@ -1,0 +1,22 @@
+// ============================
+// LZ Variables — owned & ^ Ownership
+// ============================
+
+def main() =
+    // --- owned keyword (parameter modifier only) ---
+    def greet(owned name: str) =
+        print(f"Hello, {name}!")
+
+    // --- ^ suffix operator (explicit ownership transfer) ---
+    s: str = "Alice"
+    t = s^                    // ownership transferred to t (s is now moved)
+    // print(s)              // ❌ s has been moved
+
+    // Auto-ownership transfer on function call with owned parameter
+    greet(t)                  // equivalent to greet(t^)
+    // print(t)              // ❌ t has been moved
+
+    // --- owned cannot be used on let bindings ---
+    // let owned x: str = "hi"  // ❌ owned only modifies parameters
+
+    print("ownership demo done")

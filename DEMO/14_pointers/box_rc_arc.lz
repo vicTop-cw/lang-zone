@@ -1,0 +1,89 @@
+// ============================
+// LZ Pointers & References
+// ============================
+
+// --- 1. Box<T> (heap-allocated, unique ownership) ---
+def box_demo() =
+    let x: Box<int> = Box.new(42)
+    let val = x[0]              // dereference → 42
+    // &x is also valid as dereference alias (opposite of C/Rust convention)
+
+    let arr: Box<List<int>> = Box.new([1, 2, 3])
+    let first = arr[0]          // 1
+
+// --- 2. Rc<T> (reference counted, single-threaded) ---
+def rc_demo() =
+    let x: Rc<int> = Rc.new(42)
+    let clone1 = x.clone()
+    let clone2 = x.clone()
+    // all three share the same allocation
+
+// --- 3. Arc<T> (atomic reference counted, multi-threaded) ---
+def arc_demo() =
+    let x: Arc<int> = Arc.new(42)
+    let shared = x.clone()
+    // Arc is Send + Sync, safe to share across threads
+
+// --- 4. Cell<T> & RefCell<T> (interior mutability) ---
+def cell_demo() =
+    let cell: Cell<int> = Cell.new(42)
+    cell.set(100)
+    let val = cell.get()        // 100
+
+    let ref_cell: RefCell<int> = RefCell.new(42)
+    *ref_cell.borrow_mut() = 100
+
+// --- 5. dyn is auto-implied (not a keyword in LZ) ---
+trait Drawable =
+    def draw(self) = ...
+
+// LZ: Box<Drawable>  → Rust: Box<dyn Drawable>
+// LZ: Box<int>       → Rust: Box<i64> (no dyn for concrete types)
+
+// --- 6. ref reference bindings ---
+def ref_demo() =
+    x = 42
+    ref r = x           // mutable reference (default: mutable)
+    r = 100             // modifies x
+
+    let ref s = x       // immutable reference (let makes it immutable)
+    // s = 200          // ❌ compile error
+
+// --- 7. Ownership ^ (suffix operator) ---
+def ownership_demo() =
+    let s = "hello"
+    let t = s^           // ownership transferred from s to t
+    // print(s)         // ❌ s has been moved
+
+// --- 8. Take pointer * (prefix operator) ---
+// *x boxes a value to the heap, returning a pointer
+def take_ptr_demo() =
+    let x = 42
+    let p = *x              // p: Box<int>, x moved to heap
+
+    let s = "hello"
+    let ps = *s             // ps: Box<str>
+
+    // Type annotation can specify pointer type
+    let rc_p: Rc<int> = *x  // explicitly Rc pointer
+    let arc_p: Arc<int> = *x // explicitly Arc pointer
+
+// --- 9. Dereference ptr[k] (preferred) or &ptr (alias) ---
+def deref_demo() =
+    let x = Box.new(42)
+    let val = x[0]          // preferred dereference
+    let alias = &x           // alias (note: opposite of C/Rust's & semantics)
+
+// --- 10. Summary of * vs & convention ---
+// Operation     LZ    C/Rust
+// take pointer  *x    Box::new(x)
+// dereference   p[0]  *p
+// deref alias   &p    *p   (⚠ opposite of C/Rust)
+
+def main() =
+    box_demo()
+    rc_demo()
+    arc_demo()
+    ref_demo()
+    ownership_demo()
+    print("pointer and reference demo done")

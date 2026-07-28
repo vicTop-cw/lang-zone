@@ -1,0 +1,58 @@
+// ============================
+// LZ Control Flow — match / case
+// ============================
+
+def main() =
+    let x = 2
+    let name = "hello"
+
+    // --- 2.1 Colon form (block body) ---
+    let desc = match x:
+        case 0:
+            "zero"
+        case 1:
+            "one"
+        case _:
+            "other"
+
+    // --- 2.2 Fat arrow form (inline) ---
+    let label = match x:
+        case 0 => "none"
+        case 1 => "single"
+        case _ => "plural"
+
+    // --- 2.3 Pattern types ---
+    let val = match name:
+        case "hello":      // string literal
+            "greeting"
+        case "bye":
+            "farewell"
+        case _:             // wildcard
+            "unknown"
+
+    // --- 2.4 Nested patterns ---
+    let result: Result<Option<int>, str> = Ok(Some(42))
+    let msg = match result:
+        case Ok(Some(v)):
+            f"got: {v}"
+        case Ok(None):
+            "empty"
+        case Err(e):
+            f"error: {e}"
+
+    // --- 2.5 Destructure enum variants ---
+    let shape = Shape.Circle(x: 0.0, y: 0.0, radius: 5.0)
+    let area = match shape:
+        Shape.Circle(x: _, y: _, radius: r) =>
+            3.14 * r * r
+        Shape.Rectangle(width: w, height: h) =>
+            w * h
+        Shape.Square(side: s) =>
+            s * s
+
+    print(desc, label, val, msg, area)
+
+enum Shape:
+    Circle(x: f64, y: f64, radius: f64)
+    Rectangle(width: f64, height: f64)
+    Square(side: f64)

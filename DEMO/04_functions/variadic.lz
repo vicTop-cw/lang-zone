@@ -1,0 +1,57 @@
+// ============================
+// LZ Functions — Variadic Parameters
+// ============================
+
+// --- 1. Safe collection: List<T> (no .. needed) ---
+// Compiler auto-collects positional args into List<T>
+def sum_all(values: List<int>) -> int =
+    total = 0
+    for v in values:
+        total += v
+    total
+
+// --- 2. .. separator mode ---
+// Controls position/keyword passing discipline
+// .. before: positional only  |  .. after: keyword only
+
+// Single .. at end: remaining named args → kwargs
+def proc<T>(lst: List<T>, ..) =
+    for x in lst:
+        print(x)
+
+// .. before parameter: keyword-only
+def kw_proc<T>(.., lst: List<T>) =
+    for x in lst:
+        print(x)
+
+// Double .. : args + kwargs activation
+def log_all(.., ..) =
+    for v in args:
+        print(v)
+    for (k, v) in kwargs:
+        print(f"{k}: {v}")
+
+// .. with type annotation
+def typed_log(..: Tuple<str, int>, ..: Dict<str, str | int>) =
+    for v in args:
+        print(v)              // v: str | int
+    for (k, v) in kwargs:
+        print(f"{k}: {v}")    // v: str | int
+
+def main() =
+    // Safe collection calls
+    let r1 = sum_all(1, 2, 3, 4, 5)     // 15 — auto-collected
+    let r2 = sum_all()                     // 0 — empty, values = []
+    let r3 = sum_all([1, 2, 3])            // 6 — explicit List
+    print(r1, r2, r3)
+
+    // .. separator calls
+    proc([1, 2, 3])
+    kw_proc(lst=[1, 2, 3])               // keyword-only
+    // kw_proc([1, 2, 3])               // ❌ error: keyword-only
+
+    // Double .. activates args/kwargs
+    log_all(1, 2, 3, key1="a", key2="b")
+
+    // Type-annotated variadic
+    typed_log("hello", 42, msg="world", code=99)

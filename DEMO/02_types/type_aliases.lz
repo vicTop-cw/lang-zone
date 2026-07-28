@@ -1,0 +1,46 @@
+// ============================
+// LZ Type System — Type Aliases
+// ============================
+
+// --- 5.1 Module-level aliases ---
+type UserId = int
+type NameList = List<str>
+type JsonValue = Dict<str, str>
+
+def get_user(id: UserId) -> str = "user"
+
+// --- 5.2 Local aliases (inside function) ---
+def process() =
+    type Id = int
+    let x: Id = 42
+    x + 1
+
+// --- 5.3 Generic aliases ---
+type Pair<T> = (T, T)
+type StringMap<V> = Dict<str, V>
+
+let p: Pair<int> = (1, 2)
+let m: StringMap<f64> = {"pi": 3.14}
+
+// --- 5.4 Generic alias with where ---
+type MapLike<K, V> = Dict<K, V> where K: Hash + Eq
+type Sortable<T> = List<T> where T: Ord
+
+// --- 5.5 Associated types in trait ---
+trait Container =
+    type Item
+    def get(self, index: int) -> Option<Self.Item> = ...
+
+impl Container for List<T> =
+    type Item = T
+    def get(self, index: int) -> Option<T> =
+        if index < self.length():
+            Some(self[index])
+        else:
+            None
+
+// --- 5.6 Transparent alias (type vs struct) ---
+// type is zero-cost transparent, struct creates new type
+type Email = str          // transparent, just a semantic name
+struct EmailStruct =      // new type with type safety
+    value: str

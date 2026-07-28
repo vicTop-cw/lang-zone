@@ -1,0 +1,78 @@
+// ============================
+// LZ Data Structures — struct
+// ============================
+
+// --- 1. Basic struct ---
+struct Point =
+    x: f64
+    y: f64
+
+// --- Empty struct (zero-sized type) ---
+struct Marker =
+
+// --- 2. Methods ---
+struct Rectangle =
+    width: f64
+    height: f64
+
+    // method: &self (immutable reference)
+    def area(self) -> f64 =
+        self.width * self.height
+
+    // mut self: &mut Self (mutable reference)
+    def scale(mut self, factor: f64) =
+        self.width *= factor
+        self.height *= factor
+
+    // static method (no self)
+    def unit() -> Rectangle =
+        Rectangle(width: 1.0, height: 1.0)
+
+// --- 3. Constructor via keyword arguments ---
+def main() =
+    let p = Point(x: 3.0, y: 4.0)
+    print(p.x, p.y)              // 3.0, 4.0
+
+    let r = Rectangle(width: 10.0, height: 5.0)
+    print(r.area())              // 50.0
+
+    r.scale(2.0)
+    print(r.area())              // 200.0
+
+    let unit = Rectangle.unit()
+    print(unit.area())           // 1.0
+
+    // --- 4. Generic struct ---
+    struct Pair<T, U> =
+        first: T
+        second: U
+
+    let p1 = Pair(first: 1, second: "hello")     // Pair<int, str>
+    let p2 = Pair(first: True, second: 3.14)     // Pair<bool, f64>
+    print(p1.first, p2.second)
+
+    // --- 5. Generic with constraint ---
+    struct OrderedPair<T: Ordered> =
+        left: T
+        right: T
+
+        def larger(self) -> T =
+            if self.left > self.right:
+                self.left
+            else:
+                self.right
+
+    let op = OrderedPair(left: 10, right: 20)
+    print(op.larger())           // 20
+
+    // --- 6. Where clause ---
+    struct CloneablePair<T>
+        where T: Clone =
+        a: T
+        b: T
+
+        def clone_both(self) -> (T, T) =
+            (self.a.clone(), self.b.clone())
+
+    // --- 7. Field access ---
+    print(p.x, p.y, r.width, r.height)

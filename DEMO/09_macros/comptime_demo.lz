@@ -1,0 +1,78 @@
+// ============================
+// LZ Macros & Compile-time
+// ============================
+
+// Note: Macro definitions require #!bin macro at the top of a .macro.lz file
+// This demo shows syntax and concepts; actual macro modules are separate files.
+
+// --- 1. Attribute macro # ---
+// #!export(Rust)               → #[export(Rust)]
+// #!bin macro                  → declare macro module (must be first line)
+// #![derive(Clone)]            → #[derive(Clone)]
+
+// --- 2. @ decorator vs # attribute (equivalent forms) ---
+// @export(Rust)     // decorator form
+// #!export(Rust)    // attribute macro form (equivalent)
+
+// --- 3. Macro call syntax ---
+// macro-defined: @name!
+// template-defined: name!
+// attribute macro: #!name
+
+// --- 4. comptime block ---
+// comptime evaluates code at compile time and inlines the result
+
+// Block form (evaluates to the tail expression)
+let TABLE_SIZE = comptime:
+    let base = 256
+    base * 2          // result: 512, inlined at compile time
+
+// Expression form
+let HASH = comptime sha256("hello")
+let PORT = comptime read_port_from_env()
+
+// --- 5. comptime def (compile-time-only function) ---
+comptime def build_lookup(size: int) -> List<int> =
+    let table = []
+    for i in 0..size:
+        table.push(i * i)
+    table
+
+const LOOKUP_TABLE = build_lookup(256)
+
+// --- 6. comptime variable visibility ---
+// Accessible in comptime:
+const LIMIT = 100
+let arr = [0; comptime LIMIT / 2]     // [0; 50]
+
+// NOT accessible in comptime:
+// def bad(x: int) = comptime: x * 2     // ❌ x is runtime
+
+// --- 7. inspect API (compile-time introspection) ---
+// Only available in comptime context:
+// inspect.module_info()
+// inspect.getmodulename()
+// inspect.isfunction(name)
+// inspect.signature(fn)
+
+comptime:
+    let members = inspect.getmembers()
+    for (kind, name) in members:
+        print(f"  [{kind}] {name}")
+
+// --- 8. Typical use cases ---
+// Compile-time config loading:
+let CONFIG = comptime:
+    let cfg = load_json("app_config.json")
+    cfg["database"]
+
+// Compile-time lookup table:
+const SIN_TABLE = comptime:
+    let table = []
+    for i in 0..360:
+        table.push(sin(to_radians(i)))
+    table
+
+def main() =
+    print(TABLE_SIZE, HASH, PORT)
+    print(LOOKUP_TABLE[10])     // 100

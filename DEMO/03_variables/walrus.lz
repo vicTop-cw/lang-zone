@@ -1,0 +1,34 @@
+// ============================
+// LZ Variables — Walrus Operator :=
+// ============================
+
+def main() =
+    // := assigns a value within an expression and returns it
+    // Right-associative, lowest precedence
+
+    // In if condition
+    if (n := compute()) > 0:
+        print(n)            // n is available here
+        print("positive")
+
+    // In while condition
+    count = 0
+    while (val := count_up()) < 10:
+        print(val)
+
+    // Equivalent without :=:
+    // n = compute()
+    // if n > 0:
+    //     print(n)
+
+    // := is the only way to assign inside an expression
+    // Regular = has lowest precedence and can't be used in expressions
+    // 1 + (x = 2)  // ❌ not allowed, use := instead
+
+    print("done")
+
+def compute() -> int = 42
+
+def count_up() -> int =
+    count += 1
+    count

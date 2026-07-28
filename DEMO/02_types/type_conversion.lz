@@ -1,0 +1,32 @@
+// ============================
+// LZ Type System — Type Conversion `as`
+// ============================
+
+def main() =
+    // --- as operator ---
+    let x: int = 42
+    let y: f64 = x as f64       // int → f64
+    let s: str = x as str       // int → str
+    let i: int = 3.14 as int    // f64 → int (truncates)
+
+    // as maps to __cast__ or __try_cast__ magic methods
+    // x as T  →  x.__cast__() -> T
+    //        or  x.__try_cast__() -> Result<T, E>
+
+    // --- Type inference examples ---
+    let a = 42                  // inferred: int
+    let b = "hello"             // inferred: str
+    let c = [1, 2, 3]           // inferred: List<int>
+    let d = (1, "hi")           // inferred: (int, str)
+    let e = {"key": 42}         // inferred: Dict<str, int>
+    let f = {1, 2, 3}           // inferred: Set<int>
+
+    // --- Function type ---
+    let fn_ptr: fn(int, int) -> int = |a, b| a + b
+
+    // --- Type annotations ---
+    let annotated: List<int> = [1, 2, 3]
+    let named: str = "world"
+    let typed: f64 = 3.14159
+
+    print(y, s, i)

@@ -1,0 +1,46 @@
+// ============================
+// LZ Functions — Generics
+// ============================
+
+// --- 1. Basic generic ---
+def identity<T>(x: T) -> T = x
+def first<T>(a: T, b: T) -> T = a
+
+// --- 2. Generic with trait constraint ---
+def larger<T: Ordered>(a: T, b: T) -> T =
+    if a > b:
+        a
+    else:
+        b
+
+// --- 3. where clause ---
+def clone_all<T>(items: List<T>) -> List<T>
+    where T: Clone =
+    result = []
+    for item in items:
+        result.push(item.clone())
+    result
+
+// --- 4. Generic default parameter type ---
+def make_pair<T = int>(x: T, y: T) -> (T, T) =
+    (x, y)
+
+def main() =
+    // Type inference
+    let a = identity(42)         // int
+    let b = identity("hi")      // str
+
+    // With constraint
+    let m = larger(10, 20)      // int
+    let n = larger(3.14, 2.71)  // f64
+
+    // Default parameter
+    let p1 = make_pair(1, 2)          // T = int (default)
+    let p2 = make_pair("a", "b")      // T = str (inferred)
+
+    // Multi-constraint with +
+    def clone_and_print<T: Clone + Display>(x: T) =
+        let copy = x.clone()
+        print(copy)
+
+    print(a, b, m, n, p1, p2)

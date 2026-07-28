@@ -1,0 +1,28 @@
+// ============================
+// LZ Variables — const Constants
+// ============================
+
+// --- Module-level constants ---
+const MAX_SIZE: int = 1000
+const PI: f64 = 3.14159
+const GREETING: str = "hello"
+const DEBUG_MODE: bool = True
+
+// --- Constants must be compile-time evaluable ---
+// const X: int = rand()      // ❌ runtime expression not allowed
+// const NOW: str = get_time()  // ❌ runtime expression not allowed
+
+// --- Use comptime to wrap runtime evaluation ---
+comptime:
+    const TABLE_SIZE: int = 256
+    // const LEN: int = some_list.len()  // compile-time evaluated
+
+def main() =
+    // Constants are accessible anywhere
+    let area = PI * 10.0 * 10.0
+    let limit = MAX_SIZE
+
+    // Constants cannot be reassigned
+    // MAX_SIZE = 2000  // ❌ compile error
+
+    print(area, limit)

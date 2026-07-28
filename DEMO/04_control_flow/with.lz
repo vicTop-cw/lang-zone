@@ -1,5 +1,0 @@
-// ==== With Context Manager ====
-def main() =
-    with open("test.txt", "w"):
-        write("hello")
-    print("file written")

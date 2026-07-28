@@ -1,0 +1,28 @@
+// ============================
+// LZ Type System — Containers
+// ============================
+
+def main() =
+    // --- List<T> (dynamic array) ---
+    let nums: List<int> = [1, 2, 3]
+    nums.push(4)
+    let first = nums[0]
+    print(nums.length())
+
+    // --- Dict<K, V> (hash map) ---
+    let ages: Dict<str, int> = {"alice": 30, "bob": 25}
+    ages["charlie"] = 35
+    let a = ages["alice"]
+
+    // --- Set<T> (hash set) ---
+    let tags: Set<str> = {"rust", "compiler", "lz"}
+    tags.insert("demo")
+    let has_rust = tags.contains("rust")
+
+    // --- Tuple ---
+    let t: (int, str, bool) = (42, "hi", True)
+    let (x, y, z) = t             // destructure
+    let (a2, _) = t               // ignore some elements
+    let (first2, ..) = t          // rest pattern
+
+    print(nums, ages, tags)

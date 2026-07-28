@@ -1,0 +1,60 @@
+// ============================
+// LZ Data Structures — enum
+// ============================
+
+// --- 1. Basic enum (unit variants) ---
+enum Color:
+    Red
+    Green
+    Blue
+
+// --- 2. Enum with data variants ---
+enum Shape:
+    Circle(x: f64, y: f64, radius: f64)
+    Rectangle(width: f64, height: f64)
+    Square(side: f64)
+
+// --- 3. Generic enum ---
+enum Option<T>:
+    Some(value: T)
+    None
+
+enum Result<T, E>:
+    Ok(value: T)
+    Err(error: E)
+
+// --- 4. Constructing enum values ---
+def main() =
+    let c = Color.Red
+    let s = Shape.Circle(x: 0.0, y: 0.0, radius: 5.0)
+    let opt = Option.Some(42)
+    let res: Result<int, str> = Result.Ok(10)
+
+    // --- 5. Pattern matching on enums ---
+    let desc = match c:
+        Color.Red => "red"
+        Color.Green => "green"
+        Color.Blue => "blue"
+
+    let area = match s:
+        Shape.Circle(x: _, y: _, radius: r) => 3.14 * r * r
+        Shape.Rectangle(width: w, height: h) => w * h
+        Shape.Square(side: s) => s * s
+
+    let msg = match opt:
+        Option.Some(value: v) => f"got {v}"
+        Option.None => "empty"
+
+    let result_msg = match res:
+        Result.Ok(value: v) => f"success: {v}"
+        Result.Err(error: e) => f"error: {e}"
+
+    print(desc, area, msg, result_msg)
+
+    // --- 6. Nested pattern matching ---
+    let nested: Result<Option<int>, str> = Result.Ok(Option.Some(42))
+    let nested_desc = match nested:
+        Result.Ok(value: Option.Some(v)) => f"nested value: {v}"
+        Result.Ok(value: Option.None) => "nested empty"
+        Result.Err(error: e) => f"error: {e}"
+    print(nested_desc)

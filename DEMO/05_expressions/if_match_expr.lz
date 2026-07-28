@@ -1,0 +1,59 @@
+// ============================
+// LZ Expressions — if / match as Expressions
+// ============================
+
+def main() =
+    // --- if expression ---
+    let sign = if n > 0:
+            "positive"
+        elif n < 0:
+            "negative"
+        else:
+            "zero"
+    // All branches must return the same type
+
+    // --- match expression ---
+    let desc = match color:
+        case 0 => "none"
+        case 1 => "one"
+        case _ => "many"
+    // => arrow form supports inline values (no newline needed)
+
+    // match with block bodies (colon form)
+    let detailed = match x:
+        case 0:
+            "zero"
+        case _:
+            "non-zero"
+
+    // --- Safe navigation ?. ---
+    // obj?.field: if obj is not None, access field; otherwise None
+    let val: Option<int> = config?.get("key")
+
+    // --- Null coalescing ?? ---
+    // a ?? b: if a is None, use b; otherwise use a
+    let setting = config?.get("timeout") ?? 30
+
+    // --- Error propagation ? ---
+    def parse(s: str) -> Result<int, str> raises str =
+        let n = parse_int(s)?
+        Ok(n)
+
+    // --- Range expressions ---
+    let half_open = 0..10       // 0 to 9
+    let closed = 0..=9          // 0 to 9
+
+    // --- Ownership move ^ ---
+    y = x^                      // transfer ownership of x to y
+    // print(x)                 // ❌ x has been moved
+
+    // --- f-string (string interpolation) ---
+    let name = "world"
+    let msg = f"Hello, {name}!"
+    let calc = f"2 + 2 = {2 + 2}"
+
+    print(sign, desc, msg, calc)
+
+let n = 5
+let color = 1
+let x = 42

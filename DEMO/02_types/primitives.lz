@@ -1,0 +1,22 @@
+// ============================
+// LZ Type System — Primitives
+// ============================
+
+def main() =
+    // --- 1.1 Scalar types ---
+    let a: int = 42
+    let b: f64 = 3.14
+    let c: str = "hello"
+    let d: bool = True
+
+    // --- 1.2 Unit & Never ---
+    let u: Unit = ()           // Unit type, no value
+
+    // Never type cannot have a value, only used as return type
+    def abort() -> Never =
+        panic("abort")
+
+    // Self type (used in trait/impl context)
+    // see trait_impl.lz for full example
+
+    print(a, b, c, d)

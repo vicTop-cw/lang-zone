@@ -1,0 +1,35 @@
+// ============================
+// LZ Expressions — Comprehensions
+// ============================
+
+def main() =
+    // --- List comprehension ---
+    let squares = [x * x for x in 1..10]
+    // [1, 4, 9, 16, 25, 36, 49, 64, 81]
+
+    // With filter
+    let even_squares = [x * x for x in 1..10 if x % 2 == 0]
+    // [4, 16, 36, 64]
+
+    // Multiple filters
+    let filtered = [x for x in 1..20 if x > 5 if x < 15]
+    // [6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+    // Multiple iterators
+    let pairs = [x + y for x in [1, 2] for y in [10, 20]]
+    // [11, 21, 12, 22]
+
+    // --- Dict comprehension ---
+    let squares_dict = {k: k * k for k in 1..5}
+    // {1: 1, 2: 4, 3: 9, 4: 16}
+
+    // With filter
+    let filtered_dict = {k: v for (k, v) in squares_dict if v > 5}
+    // {3: 9, 4: 16}
+
+    // --- Set comprehension ---
+    let unique_squares = {x * x for x in [1, 2, 2, 3, 3, 3]}
+    // {1, 4, 9}
+
+    // Comprehension variables don't leak to outer scope
+    print(squares, even_squares, pairs)

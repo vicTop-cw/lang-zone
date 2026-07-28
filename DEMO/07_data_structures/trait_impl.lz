@@ -1,0 +1,77 @@
+// ============================
+// LZ Data Structures — trait & impl
+// ============================
+
+// --- 1. Trait definition ---
+trait Drawable =
+    def draw(self) -> ()
+    def bounds(self) -> (f64, f64, f64, f64) = ...
+
+// --- 2. Abstract method (= ...) ---
+trait Greeter =
+    def greet(self) -> str = f"Hello, I am {self.name()}"
+    def name(self) -> str = ...
+
+// --- 3. Default implementation ---
+trait HasArea =
+    def area(self) -> f64 = ...    // abstract, must be implemented
+
+// --- 4. Generic trait ---
+trait Container<T> =
+    def get(self, index: int) -> T = ...
+    def len(self) -> int = ...
+
+// --- 5. Associated types ---
+trait Iterator =
+    type Item
+    def next(self) -> Option<Self.Item> = ...
+
+// --- 6. Impl for a type ---
+struct Circle =
+    x: f64
+    y: f64
+    radius: f64
+
+impl Drawable for Circle =
+    def draw(self) -> () =
+        print(f"Circle at ({self.x}, {self.y})")
+    def bounds(self) -> (f64, f64, f64, f64) =
+        (self.x - self.radius, self.y - self.radius,
+         self.x + self.radius, self.y + self.radius)
+
+impl HasArea for Circle =
+    def area(self) -> f64 = 3.14 * self.radius * self.radius
+
+// --- 7. Inherent impl (no trait) ---
+impl Circle =
+    def new(x: f64, y: f64, radius: f64) -> Circle =
+        Circle(x: x, y: y, radius: radius)
+
+// --- 8. Generic impl ---
+struct Pair<T> =
+    first: T
+    second: T
+
+impl<T: Display> Display for Pair<T> =
+    def fmt(self) -> str =
+        f"({self.first}, {self.second})"
+
+// --- 9. Trait constraints ---
+def larger<T: Ordered>(a: T, b: T) -> T =
+    a if a > b else b
+
+// Multiple constraints with +
+def clone_and_print<T: Clone + Display>(x: T) =
+    let copy = x.clone()
+    print(copy)
+
+// Where clause for complex constraints
+def process<T, U>(a: T, b: U) -> List<T>
+    where T: Clone, U: Into<T> =
+    let result = a.clone()
+    [result, b.into()]
+
+def main() =
+    let c = Circle.new(0.0, 0.0, 5.0)
+    c.draw()
+    print(c.area())

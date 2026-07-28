@@ -1,0 +1,95 @@
+// ============================
+// LZ Error Handling — panic / raise / try / catch
+// ============================
+
+// --- 1. panic (unrecoverable, built-in function) ---
+def abort_if_negative(x: int) -> int =
+    if x < 0:
+        panic("negative value not allowed")
+    x
+
+// --- 2. raise / raises (recoverable exceptions) ---
+def divide(a: int, b: int) -> int raises str =
+    if b == 0:
+        raise "division by zero"
+    a / b
+
+// raises declaration is REQUIRED if function body contains raise
+// def bad() -> int =
+//     raise "oops"        // ❌ compile error: missing raises clause
+
+// --- 3. try / catch / finally ---
+def safe_divide(a: int, b: int) -> int =
+    try:
+        divide(a, b)
+    catch e:               // catch all exceptions
+        -1                 // fallback value
+    finally:
+        print("division attempted")
+
+// --- 4. try/catch as expression ---
+let result = try:
+    divide(10, 2)
+catch e:
+    -1          // value when exception occurs
+// result = 5
+
+// --- 5. Multiple catch branches ---
+try:
+    operation()
+catch ValueError:
+    print("value error")
+catch TypeError:
+    print("type error")
+catch e:              // wildcard catch (must be last)
+    print(f"unknown error: {e}")
+
+// --- 6. try/catch/else ---
+// else executes when try succeeds (no exception)
+try:
+    let data = read_file("input.txt")
+catch IOError:
+    print("file not found")
+else:
+    print(f"read {data.len()} bytes")     // only if try succeeds
+
+// --- 7. finally block (always executes) ---
+try:
+    let file = open("data.txt")
+    process(file)
+catch e:
+    print(f"error: {e}")
+finally:
+    file.close()            // always runs, even on exception
+
+// --- 8. Custom exception types (via enum) ---
+enum AppError:
+    NotFound(str)
+    InvalidInput(str)
+    PermissionDenied(str)
+
+def find_user(id: int) -> str raises AppError =
+    guard id > 0 else:
+        raise AppError.InvalidInput("id must be positive")
+    "user"
+
+// --- 9. ? error propagation operator ---
+// ? unwraps Ok values and propagates Err upward
+def parse_and_process(s: str) -> int raises ParseError =
+    let val = parse_int(s)?
+    val * 2
+
+// ? only works with Result types
+// For custom raises exceptions, use try/catch
+
+def main() =
+    let r1 = safe_divide(10, 2)       // 5
+    let r2 = safe_divide(10, 0)       // -1 (catch returns -1)
+
+    let try_result = try:
+        find_user(1)
+    catch AppError.InvalidInput(msg):
+        print(f"invalid: {msg}")
+        ""
+
+    print(r1, r2, try_result)

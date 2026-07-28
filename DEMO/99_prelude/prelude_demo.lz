@@ -1,0 +1,114 @@
+// ============================
+// LZ Prelude — Built-in Functions & Common APIs
+// ============================
+
+// Prelude symbols are automatically available without import.
+// They correspond to Rust std library items injected at codegen time.
+
+def main() =
+    // --- 2.1 Basic I/O ---
+    print("hello world")           // print to stdout
+    // panic("fatal error")        // abort program (commented to allow demo run)
+
+    // --- 2.6 Common built-in functions ---
+    let xs = [3, 1, 4, 1, 5, 9]
+
+    // len() — container length (calls __len__)
+    let n = len(xs)                // 6
+    print(n)
+
+    // str() — convert to string (calls __str__)
+    let s = str(42)                // "42"
+    print(s)
+
+    // int() — convert to int
+    let i = int("42")              // 42
+    print(i)
+
+    // float() — convert to f64
+    let f = float(3)               // 3.0
+    print(f)
+
+    // bool() — convert to bool (calls __bool__)
+    let b = bool(1)                // True
+    print(b)
+
+    // hash() — compute hash (calls __hash__)
+    let h = hash("hello")
+    print(h)
+
+    // contains() — membership check (calls __contains__)
+    let has = contains([1, 2, 3], 2)    // True
+    print(has)
+
+    // iter() — get iterator (calls __iter__)
+    let it = iter([1, 2, 3])
+
+    // enumerate() — indexed iteration
+    for (idx, val) in enumerate(["a", "b", "c"]):
+        print(f"{idx}: {val}")
+
+    // zip() — parallel iteration
+    for (a, b) in zip([1, 2, 3], ["x", "y", "z"]):
+        print(f"{a}{b}")
+
+    // clone() — clone a value (calls __clone__)
+    let original = [1, 2, 3]
+    let copy = clone(original)
+    print(copy)
+
+    // sort() — sort a list
+    let sorted_xs = sort(xs)           // [1, 1, 3, 4, 5, 9]
+    print(sorted_xs)
+
+    // reverse() — reverse a list
+    let reversed_xs = reverse(xs)      // [9, 5, 1, 4, 1, 3]
+    print(reversed_xs)
+
+    // format() — format string
+    let msg = format("value: {}", 42)
+    print(msg)
+
+    // --- str instance methods ---
+    let hello = "hello world"
+    print(hello.length())              // 11
+    print(hello.starts_with("hello"))  // True
+    print(hello.ends_with("world"))    // True
+    print(hello.contains("lo wo"))     // True
+    let parts = hello.split(" ")
+    print(parts)                       // ["hello", "world"]
+    print("  trim  ".trim())           // "trim"
+    // print("hello".to_upper_case())  // "HELLO"
+    // print("HELLO".to_lower_case())  // "hello"
+
+    // --- List<T> instance methods ---
+    let list = [1, 2, 3]
+    list.append(4)                     // [1, 2, 3, 4]
+    print(list)
+    let last = list.pop()              // 4
+    print(last)
+    print(list.length())               // 3
+    print(list.contains(2))            // True
+    list.sort()                        // in-place sort
+
+    // --- Type system (compiler built-in, not import) ---
+    let int_val: int = 42
+    let f64_val: f64 = 3.14
+    let str_val: str = "hello"
+    let bool_val: bool = True
+    let list_val: List<int> = [1, 2, 3]
+    let dict_val: Dict<str, int> = {"a": 1}
+    let set_val: Set<int> = {1, 2, 3}
+    let opt_val: Option<int> = Some(42)
+    let result_val: Result<int, str> = Ok(1)
+
+    // --- Prelude Trait methods ---
+    // The following traits are auto-imported:
+    // Clone, Debug, Display, Default, Eq, PartialEq, Ord, PartialOrd
+    // Hash, From, Into, TryFrom, TryInto, Copy, Send, Sync
+    // Box, Rc, Arc, Cell, RefCell
+    // Iterator, IntoIterator
+
+    // These are available without any import statements
+
+    print("prelude demonstrated")

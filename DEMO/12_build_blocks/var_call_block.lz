@@ -1,0 +1,89 @@
+// ============================
+// LZ Build Blocks — =: / ~:
+// ============================
+
+def main() =
+    // --- 1. Variable build block =: ---
+    // =: creates a no-argument closure; tail expression is the return value
+
+    // Simple variable build block
+    x =:
+        y = 1
+        y + 2
+    print(x)              // 3
+
+    // Multi-statement build block
+    result =:
+        a = 10
+        b = 20
+        a + b
+    print(result)         // 30
+
+    // Conditional build block
+    grade = "B"
+    score =:
+        if grade == "A":
+            90
+        elif grade == "B":
+            80
+        else:
+            60
+    print(score)          // 80
+
+    // Nested build blocks
+    outer =:
+        inner =:
+            5 * 5
+        inner + 10
+    print(outer)          // 35
+
+    // Loop inside build block
+    total =:
+        sum = 0
+        for i in 1..5:
+            sum = sum + i
+        sum
+    print(total)          // 10
+
+    // --- 2. Call build block ~: ---
+    // ~: creates a closure whose return value is unpacked and passed to the callee
+
+    def add(a: int, b: int) -> int = a + b
+
+    // Tuple unpacking (positional args)
+    r1 = add ~:
+        (10, 20)
+    print(r1)             // 30
+
+    // Dict unpacking (keyword args)
+    def greet(greeting: str, name: str) -> str =
+        greeting + ", " + name + "!"
+
+    r2 = greet ~:
+        {"greeting": "Hello", "name": "LZ"}
+    print(r2)             // Hello, LZ!
+
+    // Computational build block
+    r3 = add ~:
+        a = 100
+        b = 200
+        (a, b)
+    print(r3)             // 300
+
+    // --- 3. return inside build blocks ---
+    // return exits the build block, NOT the outer function
+    def demo() =
+        val =:
+            if True:
+                return 42      // exits the =: block, val = 42
+            99
+        print(val)             // 42
+        print("still here")    // ← outer function continues
+
+    demo()
+
+    // --- Whitespace rules ---
+    // =: and ~: must have whitespace before and after, followed by newline + indent
+    // x =:         ✅ correct
+    //     body
+    // x=:body      ❌ error: missing whitespace and newline

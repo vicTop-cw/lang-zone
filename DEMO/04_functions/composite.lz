@@ -1,0 +1,67 @@
+// ============================
+// LZ Functions — Composite (Nesting, Decorators, Closures)
+// ============================
+
+// --- 1. Function nesting ---
+def outer(x: int) -> int =
+    def inner(y: int) -> int =
+        x + y               // inner captures outer's x
+    inner(x + 1)
+
+// --- 2. Decorators ---
+@export(Rust)
+def exported_add(a: int, b: int) -> int = a + b
+
+@memoize
+def fib(n: int) -> int =
+    if n <= 1:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+@math
+def math_sq(x, y) = x * x + y * y
+
+// Multiple decorators (applied top to bottom)
+@bench
+@log
+def timed_function() =
+    print("running")
+
+// --- 3. Closures ---
+// Pipe closures (single expression)
+let add_one = |x| x + 1
+let add = |x, y| x + y
+let compare = |a, b| a > b
+
+// Closure as parameter
+def apply(f: fn(int) -> int, x: int) -> int =
+    f(x)
+
+// Multi-line closure body
+let compute = |a, b|
+    c = a + b
+    c * c
+
+// --- 4. Built-in decorators ---
+// @export(Rust)    → pub fn in Rust
+// @export(Python)  → PyO3 #[pyfunction]
+// @memoize         → OnceLock<HashMap> cache
+// @math            → Number trait polymorphism
+// @simd            → #[inline(always)] (design stage)
+// @parallel        → rayon candidate (design stage)
+// @tail_call       → TCO guarantee (design stage)
+
+def main() =
+    // Nesting
+    let r = outer(1)            // 3
+    print(r)
+
+    // Decorator
+    let f = fib(10)             // 55
+    print(f)
+
+    // Closures
+    let doubled = apply(|x| x * 2, 5)   // 10
+    let result = compute(3, 4)           // 49
+    print(doubled, result)

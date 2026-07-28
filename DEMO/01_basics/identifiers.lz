@@ -1,0 +1,41 @@
+// ============================
+// LZ Identifiers & Underscore Demo
+// ============================
+
+// --- 4.1 Identifier rules ---
+my_var = 10           // lowercase start → variable
+MyType = 20           // uppercase start → type name
+_private = 30         // underscore start → module-private convention
+x1 = 40               // letter + digit
+café = 50             // Unicode letters supported
+
+// --- 4.2 Magic method names (convention, used in trait/magic blocks) ---
+// def __init__(self) = ...
+// def __add__(self, other) = ...
+
+// --- 4.3 Underscore special uses ---
+def underscore_demo() =
+    let t = (1, 2, 3)
+
+    // match wildcard
+    let desc = match t:
+        case (1, _, _) => "starts with 1"
+        case _ => "other"
+
+    // destructure ignore
+    let (a, _, c) = t
+
+    // discard return value
+    let _ = compute()
+    pass
+
+// function parameter placeholder
+def map_demo() =
+    let result = map([1, 2, 3], _, 0)  // _ → auto-named __1
+    print(result)
+
+// unused parameter
+def handler(_: int) =
+    print("called")       // parameter declared but unused
+
+def compute() -> int = 42

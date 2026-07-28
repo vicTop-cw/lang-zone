@@ -1,0 +1,29 @@
+// ============================
+// LZ Variables — ref References
+// ============================
+
+def main() =
+    // --- ref follows LZ's "default mutable" rule ---
+
+    // ref without let → mutable reference
+    x = 42
+    ref r = x         // r is &mut x (mutable reference)
+    r = 100           // modify x through the reference
+    print(x)          // 100
+
+    // mut ref is the same as ref (mut is no-op)
+    mut ref m = x     // also mutable reference
+
+    // let ref → immutable reference
+    let ref s = x     // s is &x (immutable reference)
+    // s = 200        // ❌ compile error
+
+    // --- Binding ref to literals ---
+    ref lit = 42      // creates temp variable, lit points to it
+    let ref const_ref = 99  // immutable ref to temp
+
+    // Rust mapping:
+    // ref r = x    → let r = &mut x;
+    // let ref r = x → let r = &x;
+
+    print(r, m, s, lit)

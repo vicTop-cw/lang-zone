@@ -1,0 +1,46 @@
+// ============================
+// LZ Type System — Option & Result
+// ============================
+
+def main() =
+    // --- Option<T> ---
+    let x: Option<int> = Some(42)
+    let y: Option<int> = None
+
+    // Pattern matching on Option
+    let desc = match x:
+        case Some(v) => f"value: {v}"
+        case None => "empty"
+
+    // guard let pattern
+    guard let Some(n) = x else:
+        return
+    print(f"unwrapped: {n}")
+
+    // --- Result<T, E> ---
+    def safe_div(a: int, b: int) -> Result<int, str> =
+        if b == 0:
+            Err("division by zero")
+        else:
+            Ok(a / b)
+
+    let r1 = safe_div(10, 2)
+    let r2 = safe_div(10, 0)
+
+    // Pattern matching on Result
+    match r1:
+        case Ok(v):
+            print(f"result: {v}")
+        case Err(e):
+            print(f"error: {e}")
+
+    // Error propagation with ?
+    def parse_int(s: str) -> Result<int, str> raises str =
+        if s.is_digit():
+            Ok(int(s))
+        else:
+            Err("not a number")
+
+    def process(s: str) -> Result<int, str> raises str =
+        let val = parse_int(s)?
+        Ok(val * 2)

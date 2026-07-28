@@ -1,0 +1,46 @@
+// ============================
+// LZ Literals Demo
+// ============================
+
+def main() =
+    // --- Integer literals ---
+    let dec: int = 42
+    let hex: int = 0xFF          // 255
+    let oct: int = 0o77          // 63
+    let bin: int = 0b1010        // 10
+
+    // --- Float literals ---
+    let pi: f64 = 3.14
+    let sci: f64 = 1e10          // 10000000000.0
+
+    // --- String literals ---
+    let s: str = "hello"
+    let fs: str = f"x = {dec}"   // f-string interpolation
+    let raw: str = r"\d+"        // raw string, no escape
+    let multi: str = """line1
+line2"""
+    let fmulti: str = f"""x = {dec}"""
+
+    // --- Boolean & special literals ---
+    let t: bool = True
+    let f: bool = False
+    let n: Option<int> = None
+    let sv: Option<int> = Some(42)
+    let ok: Result<int, str> = Ok(1)
+    let err: Result<int, str> = Err("fail")
+
+    // --- Collection literals ---
+    let xs: List<int> = [1, 2, 3]
+    let tp: (int, str) = (1, "hi")
+    let d: Dict<str, int> = {"a": 1, "b": 2}
+    let st: Set<int> = {1, 2, 3}
+
+    // --- Range literals ---
+    let r1: Range = 0..10        // half-open [0, 10)
+    let r2: Range = 0..=9        // closed [0, 9]
+
+    // --- Unit & Never types ---
+    let u: Unit = ()
+    // Never cannot be instantiated; used as return type
+
+    print(dec, hex, oct, bin, pi, sci)

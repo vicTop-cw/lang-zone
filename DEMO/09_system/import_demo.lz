@@ -1,8 +1,0 @@
-// ==== Import ====
-import std.io
-import std.fs
-from std.collections import HashMap
-
-def main() =
-    let data = fs.read_to_string("input.txt")
-    print(data)

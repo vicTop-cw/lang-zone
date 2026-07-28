@@ -1,0 +1,25 @@
+// ============================
+// LZ Comments Demo
+// ============================
+
+// This is a single-line comment
+// It extends to the end of the line
+
+/*
+   This is a block comment.
+   It can span multiple lines.
+   Block comments can be nested: /* inner */ still works.
+*/
+
+// Comments are ignored by the compiler
+// They are for human readers only
+
+def main() =
+    // Inline comment after code
+    let x = 42  // This explains what x is
+
+    /*
+       Multi-line comment inside a function body
+       Can contain detailed explanations
+    */
+    print("comments demonstrated")

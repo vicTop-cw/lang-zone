@@ -1,0 +1,44 @@
+// ============================
+// LZ Expressions — Pipe |>
+// ============================
+
+def add(a:int, ..:Tuple<int, ..>) -> int =
+    total = a
+    for x in args: // auto generated from args tuple
+        total += x
+    total
+
+
+def main() =
+    // Pipe sends the left operand as the first argument to the right function
+    // Equivalent to: data |> f === f(data)
+
+    // Basic pipe
+    let r1 = 5 |> double        // double(5) = 10
+    print(r1)
+
+    // Chained pipe
+    let r2 = 5 |> double |> add_one  // add_one(double(5)) = 11
+    print(r2)
+
+    // Pipe with collection pipeline
+    let result = [1, 2, 3, 4, 5]
+        |> map(|x| x * 2)           // [2, 4, 6, 8, 10]
+        |> filter(|x| x > 5)         // [6, 8, 10]
+        |> collect()
+    print(result)
+
+    // Pipe with lambda
+    let r3 = 10 |> |x| x * x         // 100
+    print(r3)
+
+    // Pipe with custom function
+    let r4_0 =  add(1, 2, 3)      // 1 + 2 + 3 = 6 ,add is normal func
+    let r4 = 10 |> add(1, 2, 3)      // 10 + 1 + 2 + 3 = 16 ,the pipe need the first arg to be the left operand,any funcion which has least one positional arg can be used with pipe
+    let r5 = 10 |> add // 10
+    let r6 = 10 |> add(1, 2, 3, 4, 5) // 10 + 1 + 2 + 3 + 4 + 5 = 25
+
+    print(r4)
+
+def double(x: int) -> int = x * 2
+def add_one(x: int) -> int = x + 1

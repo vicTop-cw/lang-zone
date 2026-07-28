@@ -259,7 +259,7 @@ struct Pair<T, U> =
 
 ```lz
 let p1 = Pair(first: 1, second: "hello")       // Pair<int, str>
-let p2 = Pair(first: true, second: 3.14)       // Pair<bool, f64>
+let p2 = Pair(first: True, second: 3.14)       // Pair<bool, f64>
 ```
 
 ### 5.3 带泛型参数的方法

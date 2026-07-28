@@ -1,0 +1,116 @@
+// ============================
+// LZ Keywords Demo
+// ============================
+
+// --- 1.1 Declaration keywords ---
+def sample(a: int) -> int = a + 1
+
+struct Point =
+    x: f64
+    y: f64
+
+enum Color:
+    Red
+    Green
+    Blue
+
+trait Drawable =
+    def draw(self) -> () = ...
+    def bounds(self) -> (f64, f64, f64, f64) = ...
+
+impl Drawable for Point =
+    def draw(self) -> () = print("drawing")
+    def bounds(self) -> (f64, f64, f64, f64) = (0.0, 0.0, self.x, self.y)
+
+type UserId = int
+const MAX: int = 1000
+
+// --- 1.2 Control flow keywords ---
+def control_flow_demo(x: int, xs: List<int>) =
+    if x > 0:
+        print("positive")
+    elif x < 0:
+        print("negative")
+    else:
+        print("zero")
+
+    match x:
+        case 0 => "none"
+        case _ => "some"
+
+    for v in xs:
+        print(v)
+
+    i = 0
+    while i < 5:
+        print(i)
+        i += 1
+
+    loop:
+        if i >= 10:
+            break
+        i += 1
+
+    pass  // no-op
+
+    guard x != 0 else:
+        return
+
+    with open("test.txt") as f:
+        print(f)
+
+    defer:
+        print("cleanup")
+
+// --- 1.3 Exception keywords ---
+def exception_demo() raises str =
+    raise "oops"
+
+try:
+    exception_demo()
+catch e:
+    print(e)
+finally:
+    print("done")
+
+// --- 1.4 Async & concurrency ---
+async def fetch() -> str = "data"
+
+def async_demo() =
+    let f = spawn fetch()
+    let r = await f
+    print(r)
+
+// --- 1.5 Generator keywords ---
+def counter(n: int) =
+    for i in 0..n:
+        yield i
+
+// --- 1.6 Module keywords ---
+// import std.io
+// from std.io import print
+// lazy import heavy_module
+
+// --- 1.7 Generics keywords ---
+def identity<T>(x: T) -> T = x
+
+// --- 1.8 Macro & compile-time ---
+// macro id(input: Tokens) -> Tokens = input
+comptime:
+    const TABLE_SIZE: int = 256
+
+// --- 1.9 Testing keywords ---
+// test "demo":
+//     assert 1 + 1 == 2
+//     check 2 + 2 == 4
+
+// --- 1.10 Operator keywords ---
+def logic_demo(a: bool, b: bool) =
+    let r1 = a and b
+    let r2 = a or b
+    let r3 = not a
+    let r4 = a && b
+    let r5 = a || b
+    let r6 = !a
+    let r7 = 42 is int
+    pass

@@ -1,7 +1,0 @@
-// ==== Pipe Operator |> ====
-def double(x: int) -> int = x * 2
-def add_one(x: int) -> int = x + 1
-
-def main() =
-    let result = 5 |> double |> add_one
-    print(result)

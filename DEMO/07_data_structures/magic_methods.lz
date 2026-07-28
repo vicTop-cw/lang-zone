@@ -1,0 +1,104 @@
+// ============================
+// LZ Data Structures — Magic Methods
+// ============================
+
+// Magic methods implement operator overloading via __xxx__ methods.
+// When a struct defines a magic method, the compiler auto-generates
+// the corresponding trait impl and a global function.
+
+// --- Arithmetic operators ---
+struct Vector =
+    x: f64
+    y: f64
+
+    // __add__ → Add trait → a + b
+    def __add__(self, other: Vector) -> Vector =
+        Vector(x: self.x + other.x, y: self.y + other.y)
+
+    // __sub__ → Sub trait → a - b
+    def __sub__(self, other: Vector) -> Vector =
+        Vector(x: self.x - other.x, y: self.y - other.y)
+
+    // __mul__ → Mul trait → a * b (scalar multiplication)
+    def __mul__(self, scalar: f64) -> Vector =
+        Vector(x: self.x * scalar, y: self.y * scalar)
+
+    // __str__ → Display trait → str(x)
+    def __str__(self) -> str =
+        f"Vector({self.x}, {self.y})"
+
+    // __eq__ → PartialEq trait → a == b
+    def __eq__(self, other: Vector) -> bool =
+        self.x == other.x and self.y == other.y
+
+// --- Structural equality via magic ---
+struct Point =
+    x: int
+    y: int
+
+    def __eq__(self, other: Point) -> bool =
+        self.x == other.x and self.y == other.y
+
+    def __hash__(self) -> int =
+        self.x ^ self.y
+
+    def __str__(self) -> str =
+        f"Point({self.x}, {self.y})"
+
+// --- Indexing and iteration ---
+struct MyList<T> =
+    items: List<T>
+
+    def __getitem__(self, index: int) -> T =
+        self.items[index]
+
+    def __setitem__(mut self, index: int, value: T) =
+        self.items[index] = value
+
+    def __len__(self) -> int =
+        self.items.length()
+
+    def __iter__(self) -> MyList<T> =
+        MyList(items: self.items)
+
+// --- Callable objects ---
+struct Multiplier =
+    factor: int
+
+    def __call__(self, x: int) -> int =
+        self.factor * x
+
+// --- Context manager ---
+struct ManagedFile =
+    name: str
+
+    def __enter__(self) -> ManagedFile =
+        print(f"opening {self.name}")
+        self
+
+    def __exit__(mut self) =
+        print(f"closing {self.name}")
+
+def main() =
+    let v1 = Vector(x: 1.0, y: 2.0)
+    let v2 = Vector(x: 3.0, y: 4.0)
+
+    let v3 = v1 + v2           // Vector(4.0, 6.0) via __add__
+    let v4 = v2 - v1           // Vector(2.0, 2.0) via __sub__
+    let v5 = v1 * 5.0          // Vector(5.0, 10.0) via __mul__
+    let eq = v1 == v1          // True via __eq__
+
+    print(str(v3), str(v4), str(v5), eq)
+
+    // Indexing
+    let ml = MyList(items: [10, 20, 30])
+    print(ml[0], ml[1])        // 10, 20 via __getitem__
+    print(ml.len())            // 3 via __len__
+
+    // Callable
+    let doubler = Multiplier(factor: 2)
+    print(doubler(21))         // 42 via __call__
+
+    // Context manager
+    with ManagedFile(name: "test.txt") as f:
+        print(f.name)

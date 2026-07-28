@@ -1,0 +1,54 @@
+// ============================
+// LZ Data Structures — Module-level Magic Attributes
+// ============================
+
+// --- __slots__: struct memory layout control ---
+struct MyStruct =
+    __slots__ = "C"             // #[repr(C)] — C-compatible layout
+    x: int
+    y: int
+
+struct Packed =
+    __slots__ = "packed"        // #[repr(packed)] — packed layout
+    a: u8
+    b: u32
+
+struct Aligned =
+    __slots__ = "align(16)"     // #[repr(align(16))] — 16-byte alignment
+    data: List<f64>
+
+// Valid __slots__ values:
+// "C"           → #[repr(C)]
+// "packed"      → #[repr(packed)]
+// "transparent" → #[repr(transparent)]
+// "align(N)"    → #[repr(align(N))]
+
+// --- Module identity attributes (auto-filled by compiler) ---
+// __name__     — fully qualified module name, e.g. "myapp.utils.math"
+// __file__     — source file absolute path
+// __package__  — package path (parent directory component)
+// __path__     — module file directory
+
+// --- __doc__: module documentation ---
+// Module doc comment (first multi-line or consecutive single-line comments)
+// is automatically collected into __doc__
+
+// --- __all__: export visibility ---
+__all__ = ["add", "multiply"]   // only these are publicly exported
+
+def add(a: int, b: int) -> int = a + b
+def multiply(a: int, b: int) -> int = a * b
+// internal_helper is NOT in __all__, so it's private
+def internal_helper() = 42
+
+// --- __bridge__: FFI bridge configuration ---
+__bridge__ = "Rust"
+__bridge_tier__ = "ffi"
+
+// --- Usage of module attributes in comptime ---
+comptime:
+    const MOD_NAME = __name__       // accessible at compile time
+
+def main() =
+    print(add(1, 2))                // 3
+    print(multiply(3, 4))           // 12

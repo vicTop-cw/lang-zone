@@ -1,0 +1,69 @@
+// ============================
+// LZ Concurrency & Async
+// ============================
+
+// --- 1. async function definition ---
+async def fetch_data(id: int) -> str =
+    f"data_{id}"
+
+// --- 2. await inside async function ---
+async def fetch_all() ->
+    let a = await fetch_data(1)
+    let b = await fetch_data(2)
+    a + " + " + b
+
+// --- 3. spawn (async task, thread-based) ---
+// spawn returns Future<T>
+def run_tasks() =
+    let t1 = spawn fetch_data(10)
+    let t2 = spawn fetch_data(20)
+    let r1 = await t1
+    let r2 = await t2
+    print(r1, r2)
+
+// --- 4. spawn with block syntax ---
+def run_block() =
+    let task = spawn:
+        let data = prepare()
+        fetch_data(data)
+    let result = await task
+
+// --- 5. Multiple concurrent tasks ---
+def run_multi() =
+    let t1 = spawn download("url1")
+    let t2 = spawn download("url2")
+    let results = [await t1, await t2]
+    print(results)
+
+// --- 6. Futures aggregation ---
+// Futures<T1, T2, ...> supports 1~12 type parameters
+// let tasks: Futures<str, str> = (spawn f1(), spawn f2())
+// let results = await tasks     // concurrently await all
+
+// --- 7. go (parallel process, for CPU-intensive tasks) ---
+// go launches an independent process, returns Future<T>
+def heavy_work() =
+    let worker: Future<int> = go compute_intensive(data)
+    let result = await worker
+
+// --- 8. spawn vs go comparison ---
+//         | spawn          | go
+// --------|----------------|------------------
+// Launch  | thread         | process
+// Best for| I/O intensive  | CPU intensive
+// Return  | Future<T>      | Future<T>
+
+// --- 9. Multiple spawns with await ---
+async def main() =
+    let f1 = spawn fetch_data(100)
+    let f2 = spawn fetch_data(200)
+
+    let r1 = await f1
+    let r2 = await f2
+    print(r1, r2)
+
+// await can only be used inside async functions or with spawn
+
+def prepare() -> int = 42
+def download(url: str) -> str = f"downloaded {url}"
+def compute_intensive(data: int) -> int = data * data

@@ -1,0 +1,171 @@
+// ============================
+// LZ Testing Framework (v3.2)
+// ============================
+
+// --- 1. Individual test: static name ---
+test "addition":
+    assert 1 + 1 == 2
+
+test "subtraction":
+    assert 5 - 3 == 2
+
+// --- 2. Individual test: dynamic name ---
+// Test names can be any expression evaluating to str
+
+let base_name = "generated"
+
+test base_name:
+    assert True
+
+for i in 1..3:
+    test f"dynamic_{i}":
+        assert i > 0
+
+// --- 3. Suite: grouping related tests ---
+
+suite MathTests:
+    test "add":
+        assert 1 + 1 == 2
+    test "mul":
+        assert 2 * 3 == 6
+    test "div":
+        assert 10 / 2 == 5
+
+suite StringTests:
+    test "len":
+        assert "abc".len() == 3
+    test "concat":
+        assert "hel" + "lo" == "hello"
+
+// --- 4. Suite with setup / teardown ---
+
+suite DatabaseTests:
+    setup:
+        db = connect(":memory:")
+        db.migrate()
+        prefix = "db"
+
+    teardown:
+        db.close()
+
+    test f"{prefix}_insert":
+        db.insert("users", name="Alice")
+        assert db.count("users") == 1
+
+// --- 5. Suite/Test as first-class data ---
+// The compiler maps suite/test to struct instances:
+
+// struct Suite =
+//     name: str
+//     tests: List<Test>
+//     setup: Option<fn()>
+//     teardown: Option<fn()>
+
+// struct Test =
+//     name: str
+//     body: fn()
+//     suite_name: Option<str>  // None = top-level test
+
+// Built-in trait SuiteOps (auto-implemented):
+// def __add__(self, other: Suite) -> Suite          // union
+// def __getitem__(self, names: List<str>) -> Suite  // filter
+// def __sub__(self, names: List<str>) -> Suite      // exclude
+
+// --- 6. Global functions (auto-generated) ---
+// def all_tests() -> List<Test>
+// def suite_by_name(name: str) -> Suite
+// def test_by_name(name: str) -> Test
+// def new_suite(name: str, tests: List<Test>) -> Suite
+
+// --- 7. Composition: merge suites ---
+
+suite CoreTests:
+    setup:
+        print("core init")
+    test "core_add":
+        assert 5 + 5 == 10
+
+// Combine two suites using + (SuiteOps.__add__)
+suite AllTests =
+    new_suite("all", all_tests()) + CoreTests
+
+// --- 8. Composition: filter & exclude ---
+
+// Filter: only keep matching tests (SuiteOps.__getitem__)
+suite QuickCheck = CoreTests["core_add"]
+
+// Exclude: remove specific tests (SuiteOps.__sub__)
+// suite CI = AllTests - ["slow_network", "bench_io"]
+
+// Chained: merge, filter, then exclude
+// suite DailyRun = (CoreTests + suite_by_name("StringTests")) - ["flaky_test"]
+
+// --- 9. Conditional composition ---
+
+def build_tests(is_ci: bool) -> Suite =
+    base = new_suite("base", all_tests()) + CoreTests
+    if is_ci:
+        base - ["slow_network"]
+    else:
+        base
+
+// --- 10. Traverse test names ---
+
+for t in all_tests():
+    print(f"found test: {t.name}")
+
+// --- 11. assert (hard assertion) ---
+
+test "hard assertion":
+    assert 1 + 1 == 2
+    assert 10 / 2 == 5
+    assert "hello".len() == 5, "string length should be 5"
+
+// --- 12. check (soft assertion) ---
+
+test "soft assertion":
+    check 1 + 1 == 3     // fails but continues
+    check 2 + 2 == 4     // still executes
+    assert 3 + 3 == 6    // final hard assertion
+
+// --- 13. Suite with setup/teardown and checks ---
+
+suite WithSetup:
+    setup:
+        values = [1, 2, 3]
+
+    teardown:
+        print("cleanup done")
+
+    test "sum":
+        total = 0
+        for v in values:
+            total = total + v
+        assert total == 6
+
+    test "count":
+        assert values.length() == 3
+
+// --- 14. Complete composition example ---
+
+suite CompleteDemo:
+    test "addition":
+        assert 1 + 1 == 2
+        assert 2 + 3 == 5
+
+    test "soft assertion demo":
+        check 1 + 1 == 3           // fails but continues
+        check 2 + 2 == 4           // passes
+        assert 3 + 3 == 6          // final assertion
+
+// --- 15. Syntax rules ---
+// - test name: any str expression
+// - suite: top-level only (cannot nest suites)
+// - setup/teardown variables visible to all tests in the suite
+// - assert fails → test stops immediately
+// - check fails → recorded, test continues
+// - Run with: lang-zone test
+// - Run specific suite: lang-zone test --suite CI
+
+def main() =
+    print("running: lang-zone test")

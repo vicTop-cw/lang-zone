@@ -1,0 +1,42 @@
+// ============================
+// LZ Functions — Checker [checker]
+// ============================
+
+// [checker] is a runtime parameter validation mechanism
+// Syntax: def name[checker_name]<generics>(params) -> Ret = body
+
+// --- Define a checker function ---
+// Checker functions accept __Params and return __Params
+def validate_age(ps: __Params) -> __Params =
+    if ps.kwargs.contains("age"):
+        let age = ps.kwargs["age"].downcast.<int>()
+        if age < 0 or age > 150:
+            raise "invalid age"
+    ps
+
+// --- Use checker in a function ---
+def create_user[validate_age](name: str, age: int) -> str =
+    f"{name} is {age} years old"
+
+// --- Call with checker (parameter validation active) ---
+def main() =
+    let r1 = create_user[validate_age]("Alice", 30)   // ✅ passes validation
+    print(r1)
+
+    // let r2 = create_user[validate_age]("Bob", 200)  // ❌ raises "invalid age"
+
+    // --- Call without checker (parameters pass through) ---
+    let r3 = create_user("Charlie", 25)               // ✅ skips validation
+    print(r3)
+
+// --- Checker with generic function ---
+def send[validate]<R>(.., ..) -> R =
+    for v in args:
+        print(v)
+    for (k, v) in kwargs:
+        print(f"{k}: {v}")
+
+// --- Checker position rules ---
+// ✅ [checker] after function name, before <generics>
+// ❌ def bad<T>[check](..) = ...  // checker after generics is error
+// ❌ def bad[](..) = ...           // empty checker is error
