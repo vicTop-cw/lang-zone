@@ -21,12 +21,13 @@ type StringMap<V> = Dict<str, V>
 
 let p: Pair<int> = (1, 2)
 let m: StringMap<f64> = {"pi": 3.14}
+let pair_str: Pair<str> = ("a", "b")
 
-// --- 5.4 Generic alias with where ---
+// --- 5.4 Generic aliases with where constraint ---
 type MapLike<K, V> = Dict<K, V> where K: Hash + Eq
 type Sortable<T> = List<T> where T: Ord
 
-// --- 5.5 Associated types in trait ---
+// --- 5.5 Associated types in trait / impl ---
 trait Container =
     type Item
     def get(self, index: int) -> Option<Self.Item> = ...
@@ -35,12 +36,43 @@ impl Container for List<T> =
     type Item = T
     def get(self, index: int) -> Option<T> =
         if index < self.length():
-            Some(self[index])
+            Option.Some(value: self[index])
         else:
-            None
+            Option.None
 
-// --- 5.6 Transparent alias (type vs struct) ---
-// type is zero-cost transparent, struct creates new type
-type Email = str          // transparent, just a semantic name
-struct EmailStruct =      // new type with type safety
+// --- 5.6 Transparent alias: type vs struct ---
+type Email = str
+
+struct EmailStruct =
     value: str
+
+// --- 5.7 Alias in function signatures ---
+type Point2D = (f64, f64)
+
+def distance(a: Point2D, b: Point2D) -> f64 =
+    let (ax, ay) = a
+    let (bx, by) = b
+    let dx = ax - bx
+    let dy = ay - by
+    (dx * dx + dy * dy).sqrt()
+
+def main() =
+    let u: UserId = 1001
+    let names: NameList = ["alice", "bob"]
+    let data: JsonValue = {"key": "value"}
+
+    print(f"user: {u}")
+    print(f"names: {names}")
+    print(f"data: {data}")
+
+    let user_email: Email = "alice@example.com"
+    let user_email_struct = EmailStruct(value: "bob@example.com")
+
+    print(user_email, user_email_struct)
+
+    let p1: Point2D = (0.0, 0.0)
+    let p2: Point2D = (3.0, 4.0)
+    let dist = distance(p1, p2)
+    print(f"distance: {dist}")
+
+    process()

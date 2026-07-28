@@ -3,30 +3,54 @@
 // ============================
 
 def main() =
-    // --- as operator ---
+    // --- 6.1 `as` conversion operator ---
     let x: int = 42
-    let y: f64 = x as f64       // int → f64
-    let s: str = x as str       // int → str
-    let i: int = 3.14 as int    // f64 → int (truncates)
+    let y: f64 = x as f64
+    let s: str = x as str
+    let i: int = 3.14 as int
+    let b: bool = 1 as bool
 
-    // as maps to __cast__ or __try_cast__ magic methods
-    // x as T  →  x.__cast__() -> T
-    //        or  x.__try_cast__() -> Result<T, E>
+    print(f"int {x} -> f64 {y}")
+    print(f"int {x} -> str {s}")
+    print(f"f64 3.14 -> int {i}")
+    print(f"int 1 -> bool {b}")
 
-    // --- Type inference examples ---
-    let a = 42                  // inferred: int
-    let b = "hello"             // inferred: str
-    let c = [1, 2, 3]           // inferred: List<int>
-    let d = (1, "hi")           // inferred: (int, str)
-    let e = {"key": 42}         // inferred: Dict<str, int>
-    let f = {1, 2, 3}           // inferred: Set<int>
+    // --- 6.2 Type inference examples ---
+    let a = 42
+    let b2 = "hello"
+    let c = [1, 2, 3]
+    let d = (1, "hi")
+    let e = {"key": 42}
+    let f = {1, 2, 3}
+    let g = 3.14
+    let h = True
 
-    // --- Function type ---
-    let fn_ptr: fn(int, int) -> int = |a, b| a + b
+    print(a, b2, c, d, e, f, g, h)
 
-    // --- Type annotations ---
-    let annotated: List<int> = [1, 2, 3]
-    let named: str = "world"
-    let typed: f64 = 3.14159
+    // --- 6.3 Function type ---
+    let add: fn(int, int) -> int = |a, b| a + b
+    let mul: fn(int, int) -> int = |a, b| a * b
+    let greet: fn(str) -> str = |name| f"Hello, {name}"
 
-    print(y, s, i)
+    let sum = add(10, 20)
+    let product = mul(6, 7)
+    let greeting = greet("LZ")
+
+    print(f"add: {sum}, mul: {product}, greet: {greeting}")
+
+    // --- 6.4 Type annotations ---
+    let annotated_list: List<int> = [1, 2, 3]
+    let annotated_str: str = "world"
+    let annotated_f64: f64 = 3.14159
+    let annotated_bool: bool = True
+    let annotated_tuple: (int, str) = (42, "answer")
+
+    print(annotated_list, annotated_str, annotated_f64,
+          annotated_bool, annotated_tuple)
+
+    // --- 6.5 Conversion between compatible numeric types ---
+    let small: int = 10
+    let large: f64 = small as f64
+    let back: int = large as int
+
+    print(f"small={small}, large={large}, back={back}")

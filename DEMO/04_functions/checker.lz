@@ -1,12 +1,10 @@
-// ============================
-// LZ Functions — Checker [checker]
-// ============================
+// ============================================================
+// 04_functions / checker.lz
+// 覆盖: 03c-检查站.md — [checker_name] 语法、__Params、
+//       调用时传入/跳过检查站、普通/可变参数/魔法方法
+// ============================================================
 
-// [checker] is a runtime parameter validation mechanism
-// Syntax: def name[checker_name]<generics>(params) -> Ret = body
-
-// --- Define a checker function ---
-// Checker functions accept __Params and return __Params
+// ── 1. 检查函数（契约: (__Params) -> __Params）──────────
 def validate_age(ps: __Params) -> __Params =
     if ps.kwargs.contains("age"):
         let age = ps.kwargs["age"].downcast.<int>()
@@ -14,29 +12,51 @@ def validate_age(ps: __Params) -> __Params =
             raise "invalid age"
     ps
 
-// --- Use checker in a function ---
-def create_user[validate_age](name: str, age: int) -> str =
-    f"{name} is {age} years old"
+def validate_non_empty(ps: __Params) -> __Params =
+    for arg in ps.args:
+        val = arg.downcast.<str>()
+        if val == "":
+            raise "empty string not allowed"
+    ps
 
-// --- Call with checker (parameter validation active) ---
-def main() =
-    let r1 = create_user[validate_age]("Alice", 30)   // ✅ passes validation
-    print(r1)
+// ── 2. 普通函数 + 检查站 ──────────────────────────────
+def add[validate](a: int, b: int) -> int =
+    a + b
 
-    // let r2 = create_user[validate_age]("Bob", 200)  // ❌ raises "invalid age"
+def greet[check_non_empty](name: str) -> str =
+    f"Hello, {name}"
 
-    // --- Call without checker (parameters pass through) ---
-    let r3 = create_user("Charlie", 25)               // ✅ skips validation
-    print(r3)
-
-// --- Checker with generic function ---
+// ── 3. 可变参数函数 + 检查站 ──────────────────────────
 def send[validate]<R>(.., ..) -> R =
     for v in args:
         print(v)
     for (k, v) in kwargs:
         print(f"{k}: {v}")
 
-// --- Checker position rules ---
-// ✅ [checker] after function name, before <generics>
-// ❌ def bad<T>[check](..) = ...  // checker after generics is error
-// ❌ def bad[](..) = ...           // empty checker is error
+// ── 4. 检查站 + 泛型 ──────────────────────────────────
+def process[validate]<T: Display>(val: T) -> str =
+    f"processed: {val}"
+
+// ── 5. 带默认参数 + 检查站 ────────────────────────────
+def config[validate](host: str = "localhost", port: int = 8080) -> str =
+    f"{host}:{port}"
+
+// ── main 入口 ──────────────────────────────────────────
+def main() =
+    print("=== checker.lz ===")
+    print(add[validate_age](1, 2))            // 3
+    print(greet[validate_non_empty]("LZ"))    // Hello, LZ
+    print(add(10, 20))                        // 30（跳过检查站）
+    print(config())                           // localhost:8080
+    print(config("example.com", 443))         // example.com:443
+    print(process[validate_age]<str>("hello"))
+
+// ── 边界情况（注释说明）────────────────────────────────
+// ❌ 错误：[checker] 在 <T> 之后
+// def bad<T>[check](..) = ...
+// ❌ 错误：检查站名称为空
+// def bad[](..) = ...
+// ✅ 正确位置
+// def good[check]<T>(..) = ...
+// ❌ 错误：自引用检查站
+// def add[add](1, 2)

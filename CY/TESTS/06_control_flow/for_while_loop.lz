@@ -1,0 +1,11 @@
+// 06_control_flow - for/while 循环
+def main() =
+    total = 0
+    for i in 0..5:
+        total += i
+    print(total)
+
+    i = 0
+    while i < 3:
+        print(i)
+        i += 1

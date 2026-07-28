@@ -1,0 +1,10 @@
+// 泛型容器测试
+def sum_list(xs: List<int>) -> int =
+    total = 0
+    for x in xs:
+        total += x
+    total
+
+def main() =
+    let nums: List<int> = [1, 2, 3, 4, 5]
+    print(sum_list(nums))

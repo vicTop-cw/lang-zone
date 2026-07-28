@@ -4,29 +4,35 @@
 
 def main() =
     // --- Default mutable binding ---
-    x = 42            // mutable by default
-    x = 100           // reassignment is legal
-    print(x)          // 100
+    x = 42
+    x = 100
+    print(x)
 
     // With type annotation (still mutable)
     y: int = 10
     y = 20
 
     // mut keyword is no-op (already mutable by default)
-    mut z = 50        // same as: z = 50
+    mut z = 50
     z = 60
 
     // --- let immutable binding ---
-    let a = 42        // immutable
-    // a = 100        // ❌ compile error
-
+    let a = 42
     let name: str = "world"
     let pi: f64 = 3.14159
 
     // --- Destructuring bindings ---
     let (first, second) = (1, 2)
-    let Some(v) = Some(42)     // destructure in let (within match/guard)
+    let (head, ..,) = (1, 2, 3, 4)
 
-    // rest pattern: ignore remaining elements
-    let (head, ..,) = (1, 2, 3, 4)    // head = 1
-    print(x, y, z, a, first, second)
+    // --- Option shorthand int? ---
+    let opt: int? = Some(42)            // int? 等价于 Option<int>
+    match opt:
+        case Some(v) => print("matched:", v)
+        case None => print("none")
+
+    // --- guard let for Option ---
+    guard let Some(w) = opt else:
+        print("no value")
+
+    print(x, y, z, a, first, second, head)

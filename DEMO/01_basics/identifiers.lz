@@ -1,41 +1,69 @@
-// ============================
-// LZ Identifiers & Underscore Demo
-// ============================
+// =============================================================
+// LZ 词法基础 — 标识符与下划线展示 (00-词法基础.md §四)
+// 模块级声明在顶层，下划线用法在 def 中演示。
+// =============================================================
 
-// --- 4.1 Identifier rules ---
-my_var = 10           // lowercase start → variable
-MyType = 20           // uppercase start → type name
-_private = 30         // underscore start → module-private convention
-x1 = 40               // letter + digit
-café = 50             // Unicode letters supported
+// --- 4.1 普通标识符 ---
+let my_var: int = 10
+let x1: int = 20
+type MyType = int
+let instance: MyType = 30
+let _private_val: int = 40
+let z9: int = 50
+let café: str = "nice"
+let 名称: str = "中文名"
 
-// --- 4.2 Magic method names (convention, used in trait/magic blocks) ---
-// def __init__(self) = ...
-// def __add__(self, other) = ...
+def my_function(a: int, b: int) -> int = a + b
 
-// --- 4.3 Underscore special uses ---
+// --- 4.2 魔法方法名 ---
+struct MyStruct =
+    data: int
+
+magic __str__:
+    def __str__(self: MyStruct) -> str = "MyStruct"
+
+magic __add__:
+    def __add__(self: MyStruct, other: MyStruct) -> MyStruct =
+        MyStruct(data: self.data + other.data)
+
+// --- 4.3 下划线 `_` 的语义 ---
 def underscore_demo() =
-    let t = (1, 2, 3)
-
-    // match wildcard
-    let desc = match t:
-        case (1, _, _) => "starts with 1"
+    // (1) match 通配
+    let desc = match 5:
+        case 0 => "zero"
         case _ => "other"
 
-    // destructure ignore
-    let (a, _, c) = t
+    // (2) 解构忽略
+    let (a, _, c) = (1, 2, 3)
 
-    // discard return value
+    // (3) guard let 忽略
+    guard let Some(_) = Some(42) else:
+        print("no value")
+
+    // (4) 丢弃返回值
     let _ = compute()
+
+    // (5) 函数参数占位
+    def accepts(a: int, b: int, c: int) -> int = a + b + c
+
+    // (6) 未用参数
+    def handler(_: int) =
+        print("called")
+
+    handler(100)
     pass
 
-// function parameter placeholder
-def map_demo() =
-    let result = map([1, 2, 3], _, 0)  // _ → auto-named __1
-    print(result)
-
-// unused parameter
-def handler(_: int) =
-    print("called")       // parameter declared but unused
-
 def compute() -> int = 42
+
+def main() =
+    print(my_var, x1, instance)
+    print(café, 名称)
+
+    let s1 = MyStruct(data: 100)
+    let s2 = MyStruct(data: 200)
+    print(s1.__str__())
+    let s3 = s1.__add__(s2)
+    print(s3.__str__())
+
+    underscore_demo()
+    print("identifiers done")

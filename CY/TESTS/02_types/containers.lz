@@ -1,0 +1,6 @@
+// 02_types - 容器
+def main() =
+    let xs: List<int> = [1, 2, 3]
+    let d: Dict<str, int> = {"a": 1}
+    let st: Set<int> = {1, 2, 3}
+    print(xs, d, st)

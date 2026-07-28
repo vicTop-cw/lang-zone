@@ -17,6 +17,9 @@ def main() =
     // print(t)              // ❌ t has been moved
 
     // --- owned cannot be used on let bindings ---
-    // let owned x: str = "hi"  // ❌ owned only modifies parameters
+    // let owned x: str = "hi"   // ❌ owned only modifies parameters
+
+    // --- owned only modifies parameters, not bindings ---
+    // //owned s2: str = "hello"  // ❌ error: owned only modifies parameters
 
     print("ownership demo done")

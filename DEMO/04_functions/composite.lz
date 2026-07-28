@@ -1,17 +1,33 @@
-// ============================
-// LZ Functions — Composite (Nesting, Decorators, Closures)
-// ============================
+// ============================================================
+// 04_functions / composite.lz
+// 覆盖: 03e-复合综合.md — 函数嵌套、装饰器（全部 9 种）、
+//       闭包（单行/多行/作为参数）、错误边界
+// ============================================================
 
-// --- 1. Function nesting ---
+// ── 1. 函数嵌套 ────────────────────────────────────────
 def outer(x: int) -> int =
     def inner(y: int) -> int =
-        x + y               // inner captures outer's x
+        x + y                     // 捕获外层变量
     inner(x + 1)
 
-// --- 2. Decorators ---
+def factorial(n: int) -> int =
+    def go(i: int, acc: int) -> int =
+        if i <= 1:
+            acc
+        else:
+            go(i - 1, acc * i)
+    go(n, 1)
+
+// ── 2. 装饰器（所有 9 种内置装饰器）───────────────────
+
+// 2a. @export — 导出为 Rust / Python
 @export(Rust)
 def exported_add(a: int, b: int) -> int = a + b
 
+@export(Python)
+def py_greet(name: str) -> str = f"Hi from LZ, {name}"
+
+// 2b. @memoize — 自动缓存
 @memoize
 def fib(n: int) -> int =
     if n <= 1:
@@ -19,49 +35,110 @@ def fib(n: int) -> int =
     else:
         fib(n - 1) + fib(n - 2)
 
+// 2c. @math — Number trait 多态
 @math
-def math_sq(x, y) = x * x + y * y
+def magnitude(x, y) = (x * x + y * y).sqrt()
 
-// Multiple decorators (applied top to bottom)
-@bench
-@log
-def timed_function() =
-    print("running")
+// 2d. @simd — SIMD 内联优化（设计阶段）
+@simd
+def vector_add(a: List<f64>, b: List<f64>) -> List<f64> =
+    [a[i] + b[i] for i in 0..a.len()]
 
-// --- 3. Closures ---
-// Pipe closures (single expression)
-let add_one = |x| x + 1
-let add = |x, y| x + y
-let compare = |a, b| a > b
+// 2e. @parallel — 并行执行候选
+@parallel
+def heavy_sum(data: List<int>) -> int =
+    sum x for x in data
 
-// Closure as parameter
-def apply(f: fn(int) -> int, x: int) -> int =
-    f(x)
+// 2f. @tail_call — 尾调用优化保证
+@tail_call
+def fact_tco(n: int, acc: int = 1) -> int =
+    if n <= 1:
+        acc
+    else:
+        fact_tco(n - 1, acc * n)
 
-// Multi-line closure body
+// 2g. @unsafe — strict 模式豁免
+@unsafe
+def raw_ptr_op(ptr: int) -> int =
+    ptr
+
+// 2h. @overload — 多分派（预留）
+@overload(int)
+def process(x: int) -> str = f"int: {x}"
+
+@overload(str)
+def process(x: str) -> str = f"str: {x}"
+
+// 2i. 多装饰器叠加
+@memoize
+@tail_call
+def cached_fact(n: int, acc: int = 1) -> int =
+    if n <= 1:
+        acc
+    else:
+        cached_fact(n - 1, acc * n)
+
+// ── 3. 闭包 ──────────────────────────────────────────
+
+// 3a. 单行闭包赋值
+let double = |x| x * 2
+
+// 3b. 多参数闭包
+let sum = |x, y| x + y
+
+// 3c. 多行闭包体
 let compute = |a, b|
     c = a + b
     c * c
 
-// --- 4. Built-in decorators ---
-// @export(Rust)    → pub fn in Rust
-// @export(Python)  → PyO3 #[pyfunction]
-// @memoize         → OnceLock<HashMap> cache
-// @math            → Number trait polymorphism
-// @simd            → #[inline(always)] (design stage)
-// @parallel        → rayon candidate (design stage)
-// @tail_call       → TCO guarantee (design stage)
+// 3d. 闭包作为参数
+def apply(f: fn(int) -> int, x: int) -> int =
+    f(x)
 
+def apply_two(f: fn(int, int) -> int, a: int, b: int) -> int =
+    f(a, b)
+
+// 3e. 闭包捕获外层变量
+def make_adder(n: int) -> fn(int) -> int =
+    |x| x + n
+
+// ── main 入口 ──────────────────────────────────────────
 def main() =
-    // Nesting
-    let r = outer(1)            // 3
-    print(r)
+    print("=== composite.lz ===")
+    print(outer(1))                  // 3
+    print(factorial(5))              // 120
+    print(exported_add(3, 4))        // 7
+    print(py_greet("World"))         // Hi from LZ, World
+    print(fib(10))                   // 55
+    print(magnitude(3, 4))           // 5.0
+    print(vector_add([1.0, 2.0], [3.0, 4.0]))  // [4.0, 6.0]
+    print(heavy_sum([1, 2, 3, 4, 5]))           // 15
+    print(fact_tco(5))               // 120
+    print(raw_ptr_op(0x1000))        // 4096
+    print(process(42))               // int: 42
+    print(process("hello"))          // str: hello
+    print(cached_fact(6))            // 720
+    print(double(7))                 // 14
+    print(sum(10, 20))               // 30
+    print(compute(3, 4))             // 49
+    print(apply(|x| x + 1, 5))       // 6
+    print(apply_two(|a, b| a * b, 6, 7))  // 42
+    let add5 = make_adder(5)
+    print(add5(10))                  // 15
 
-    // Decorator
-    let f = fib(10)             // 55
-    print(f)
+    def use_type_alias() =
+        type Id = int
+        let x: Id = 42
+        x
+    print(use_type_alias())          // 42
 
-    // Closures
-    let doubled = apply(|x| x * 2, 5)   // 10
-    let result = compute(3, 4)           // 49
-    print(doubled, result)
+// ── 边界情况（注释说明）────────────────────────────────
+// ❌ 错误：@export 缺少参数
+// @export
+// def f() = 42
+// ❌ 错误：闭包捕获运行时变量用于 comptime
+// comptime:
+//     let cap = outer_var
+// ❌ 错误：闭包使用 yield
+// def f() =
+//     let g = || yield 1

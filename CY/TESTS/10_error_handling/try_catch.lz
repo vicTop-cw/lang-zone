@@ -1,0 +1,9 @@
+// try/catch 测试
+def main() =
+    try:
+        print("trying")
+    catch e:
+        print("caught")
+    finally:
+        print("cleanup")
+    print("done")

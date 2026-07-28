@@ -1,22 +1,51 @@
 // ============================
-// LZ Type System — Primitives
+// LZ Type — Primitives
 // ============================
 
+// --- Scalar types ---
 def main() =
-    // --- 1.1 Scalar types ---
     let a: int = 42
     let b: f64 = 3.14
     let c: str = "hello"
     let d: bool = True
 
-    // --- 1.2 Unit & Never ---
-    let u: Unit = ()           // Unit type, no value
+    // --- Unit type ---
+    let u: Unit = ()
 
-    // Never type cannot have a value, only used as return type
-    def abort() -> Never =
-        panic("abort")
+    // --- Never type (diverging) ---
+    def abort(msg: str) -> Never =
+        panic(msg)
 
-    // Self type (used in trait/impl context)
-    // see trait_impl.lz for full example
+    // --- Type annotations ---
+    let annotated: int = 100
+    let named: str = "world"
+
+    // --- Type inference ---
+    let inf_a = 42
+    let inf_b = "hello"
+    let inf_c = [1, 2, 3]
+    let inf_d = (1, "hi")
+    let inf_e = {"key": 42}
+    let inf_f = {1, 2, 3}
+
+    // --- Nil type ---
+    let empty: Nil = []
+
+    // --- Tuple ---
+    let t: (int, str, bool) = (42, "hi", True)
+    let (x, y, z) = t
+    let (first, ..) = t
+
+    // --- Reference ---
+    let val = 42
+    ref r = val
+    let ref s = val
+
+    // --- Function type ---
+    let add: fn(int, int) -> int = |a, b| a + b
+
+    // --- Pointer types ---
+    let boxed: Box<int> = Box.new(99)
+    let bv = boxed[0]
 
     print(a, b, c, d)

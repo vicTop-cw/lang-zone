@@ -1,0 +1,7 @@
+// 05_expressions - 运算符
+def main() =
+    let a: int = 10 + 20
+    let b: int = 10 * 2
+    let c: bool = a > b
+    let d: bool = (a == 30) and (b == 20)
+    print(a, b, c, d)

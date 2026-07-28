@@ -3,26 +3,49 @@
 // ============================
 
 def main() =
-    // --- List<T> (dynamic array) ---
+    // --- 2.1 List<T> (dynamic array) ---
     let nums: List<int> = [1, 2, 3]
     nums.push(4)
+    nums.push(5)
     let first = nums[0]
-    print(nums.length())
+    let len = nums.length()
+    let popped = nums.pop()
 
-    // --- Dict<K, V> (hash map) ---
+    print(f"list: {nums}, first: {first}, len: {len}, popped: {popped}")
+
+    let inferred_nums = [10, 20, 30]
+    let mixed = [1, 2, 3]
+
+    // --- 2.2 Dict<K, V> (hash map) ---
     let ages: Dict<str, int> = {"alice": 30, "bob": 25}
     ages["charlie"] = 35
-    let a = ages["alice"]
+    let alice_age = ages["alice"]
+    print(f"alice is {alice_age}")
 
-    // --- Set<T> (hash set) ---
+    let inferred_ages = {"alice": 30, "bob": 25}
+
+    let scores: Dict<str, f64> = {"math": 95.5, "physics": 88.0}
+    scores["chemistry"] = 91.2
+    let math_score = scores["math"]
+    print(f"math: {math_score}")
+
+    // --- 2.3 Set<T> (hash set) ---
     let tags: Set<str> = {"rust", "compiler", "lz"}
     tags.insert("demo")
     let has_rust = tags.contains("rust")
+    let has_java = tags.contains("java")
+    print(f"has rust: {has_rust}, has java: {has_java}")
 
-    // --- Tuple ---
-    let t: (int, str, bool) = (42, "hi", True)
-    let (x, y, z) = t             // destructure
-    let (a2, _) = t               // ignore some elements
-    let (first2, ..) = t          // rest pattern
+    let inferred_tags = {"a", "b", "c"}
 
-    print(nums, ages, tags)
+    let numbers: Set<int> = {1, 2, 3, 4, 5}
+    numbers.insert(6)
+    let has_three = numbers.contains(3)
+    print(f"set has 3: {has_three}")
+
+    // --- Container type annotations ---
+    let annotated_list: List<f64> = [1.1, 2.2, 3.3]
+    let annotated_dict: Dict<int, str> = {1: "one", 2: "two"}
+    let annotated_set: Set<bool> = {True, False}
+
+    print(annotated_list, annotated_dict, annotated_set)

@@ -1,113 +1,76 @@
 // ============================
-// LZ Operator Precedence & Whitespace Rules
+// LZ Operator Precedence & Whitespace
 // ============================
 
-// Reference: 12-操作符.md §1.18 (Whitespace rules) & §2 (Precedence table)
+// Reference: 12-操作符.md §1.18 (Whitespace) & §2 (Precedence)
 
-// --- Binary operators: MUST have whitespace before and after ---
-// ✅ Correct:
+// --- Whitespace rules ---
+// Binary operators: MUST have whitespace before and after
 let sum = a + b
 let product = x * y
 let compare = n >= 0
 let logical = a and b
-let bitwise = flags & mask
 
-// ❌ Wrong:
-// let sum = a+b        // error: binary operator must have whitespace
-// let eq = a==b        // error: binary operator must have whitespace
-
-// --- Unary operators: MUST be adjacent to operand ---
-// ✅ Correct:
+// Unary operators: MUST be adjacent to operand
 let neg = -x
 let invert = ~a
-let not_val = not x       // 'not' is a keyword, natural whitespace
+let not_val = not x
 
-// ❌ Wrong:
-// let neg = - x         // error: unary operator must be adjacent
-// let invert = ~ a      // error: unary operator must be adjacent
-
-// --- Postfix operators: MUST be adjacent to value ---
-// ✅ Correct:
+// Postfix operators: MUST be adjacent to value
 let propagated = fallible()?
 let safe = obj?.field
 let moved = source^
 
-// ❌ Wrong:
-// let x = val ?         // error: postfix operator must be adjacent
-// let y = obj ?.field   // error
-
-// --- Parentheses: MUST be adjacent to function name ---
-// ✅ Correct:
+// Parentheses: MUST be adjacent to function name
 let r1 = f(x)
 let r2 = xs[i]
 
-// ❌ Wrong:
-// let r = f (x)         // error: parens must be adjacent to function name
-
-// --- Compound assignment: no space inside symbol ---
-// ✅ Correct:
+// Compound assignment: no space inside symbol
 x += 1
 y *= 2
-z <<= 3
 
-// ❌ Wrong:
-// x + = 1              // error: no space inside +=
-// y * = 2              // error
-
-// --- Build blocks: no space inside, whitespace before/after, then newline ---
-// ✅ Correct:
+// Build blocks: =: and ~: must have whitespace before and after + newline
 val =:
     body
 
-// ❌ Wrong:
-// val=:body            // error: must have whitespace and newline
-
-// ========================
-// Operator Precedence (low to high)
-// ========================
-
-// 0:  =       (assignment, right-associative)
-// 1:  |>      (pipe, left-associative)
-// 2:  :=      (walrus, right-associative)
-// 3-4: or/and (logical, short-circuit, left-associative)
-// 5:  not !   (logical not, right-associative)
+// --- Precedence table (0 low → 16 high) ---
+// 0:  =       (assignment, right)
+// 1:  |>      (pipe, left)
+// 2:  :=      (walrus, right)
+// 3:  or ||   (logical or, left)
+// 4:  and &&  (logical and, left)
+// 5:  not !   (logical not, right)
 // 6:  == != < > <= >= is in (comparison)
-// 7:  |       (bitwise or)
-// 8:  ^       (bitwise xor)
-// 9:  &       (bitwise and)
-// 10: << >>   (shift)
-// 11: + -     (additive)
-// 12: * / %   (multiplicative)
-// 13: **      (power, right-associative)
-// 14: +x -x ~x (unary, right-associative)
-// 15: ? ?. ^  (postfix, left-associative)
-// 16: . [] () (member/index/call, left-associative)
+// 7:  |       (bitwise or, left)
+// 8:  ^       (bitwise xor, left)
+// 9:  &       (bitwise and, left)
+// 10: << >>   (shift, left)
+// 11: + -     (additive, left)
+// 12: * / %   (multiplicative, left)
+// 13: **      (power, right)
+// 14: +x -x ~x (unary, right)
+// 15: ? ?. ^  (postfix, left)
+// 16: . [] () (member/index/call, left)
 
-def precedence_demo() =
-    // High precedence evaluated first
-    let r1 = 2 + 3 * 4          // = 14 (not 20), * before + (prec 12 > 11)
-    let r2 = (2 + 3) * 4        // = 20, explicit grouping
+// --- Precedence examples ---
+// High precedence evaluated first
+let r = 2 + 3 * 4          // = 14 (* before +)
+let p = (2 + 3) * 4        // = 20 (explicit grouping)
 
-    // Comparison chaining: a < b < c → a < b and b < c
-    let chain = 1 < 5 < 10      // True
+// Comparison chaining: a < b < c → a < b and b < c
+let chain = 1 < 5 < 10
 
-    // Power is right-associative
-    let pow = 2 ** 3 ** 2       // = 2 ** (3**2) = 2**9 = 512
+// Power is right-associative
+let pow = 2 ** 3 ** 2      // = 2**(3**2) = 512
 
-    // Logical operators (prec 3-4) are lower than comparison (prec 6)
-    let logic_first = x > 0 and x < 10   // (x > 0) and (x < 10)
+// Pipe has very low precedence
+let piped = data |> transform |> process
 
-    // Pipe (prec 1) is very low
-    let piped = data |> transform |> process   // process(transform(data))
+// Assignment is lowest
+x = 1 + 2 * 3              // = 7
 
-    // Assignment (prec 0) is lowest
-    // x = 1 + 2 * 3   // First compute 1 + 2*3 = 7, then assign to x
-
-    print(r1, r2, chain, pow, logic_first)
-
-// Ambiguity: add parentheses for clarity
-let x = 10
-let data = 42
+def main() =
+    print(r, p, chain, pow, piped)
 
 def transform(v: int) -> int = v * 2
 def process(v: int) -> int = v + 1

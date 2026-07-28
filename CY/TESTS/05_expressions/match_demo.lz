@@ -1,0 +1,11 @@
+// match/case 测试
+def describe(n: int) -> str =
+    match n:
+        case 0 => "zero"
+        case 1 => "one"
+        case _ => "other"
+
+def main() =
+    print(describe(0))
+    print(describe(1))
+    print(describe(2))

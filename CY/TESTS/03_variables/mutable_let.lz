@@ -1,0 +1,6 @@
+// 03_variables - let 绑定和可变绑定
+def main() =
+    let x: int = 42
+    y = "hello"
+    y = "world"
+    print(x, y)

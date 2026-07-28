@@ -1,0 +1,65 @@
+// ============================================================
+// with (context manager) / defer (LIFO) / pass (no-op)
+// LZ Spec §9, §10, §11
+// ============================================================
+
+struct MyResource =
+    name: str
+
+    // __enter__ returns self as the managed resource
+    def __enter__(self) -> MyResource =
+        print(f"acquiring {self.name}")
+        self
+
+    // __exit__ matches spec: self (the resource) is the parameter
+    // Requires mut self because codegen maps to &mut self (RefMut)
+    def __exit__(mut self) =
+        print(f"releasing {self.name}")
+
+def main() =
+    // --- 10 with context manager + as binding ---
+    with MyResource(name: "database") as res:
+        print(f"using {res.name}")
+    // automatically calls res.__exit__()
+
+    // --- with without as (no enter/exit) ---
+    with print("standalone with block"):
+        print("inside standalone with")
+
+    // --- 11 defer block form ---
+    defer:
+        print("cleanup step A")
+
+    // --- 11 defer inline form ---
+    defer print("cleanup step C")
+
+    defer:
+        print("cleanup step B")
+
+    // Defer executes in LIFO order when main() ends:
+    //   cleanup step C   (last defer statement, first to execute)
+    //   cleanup step B
+    //   cleanup step A   (first defer statement, last to execute)
+
+    // --- defer for resource cleanup ---
+    def process_file() =
+        let file = "data.txt"
+        defer:
+            print(f"closing {file}")
+        print(f"processing {file}")
+        // file close happens here when function exits
+
+    process_file()
+
+    // --- 9 pass no-op ---
+    if True:
+        pass               // placeholder, does nothing
+    else:
+        print("unreachable")
+
+    // pass in match arm
+    match 42:
+        case 0 => print("zero")
+        case _ => pass     // no-op for default case
+
+    print("with and defer demonstrated")

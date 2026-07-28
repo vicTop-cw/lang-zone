@@ -1,21 +1,27 @@
-// ============================
-// LZ Control Flow — guard / guard let
-// ============================
+// ============================================================
+// guard / guard let — Condition guard & Pattern guard
+// LZ Spec §7
+// ============================================================
 
 def main() =
-    // --- 7.1 guard condition guard ---
-    // guard cond else: handler → when cond is False, execute handler
-    // when cond is True, continue with code after the guard block
+    // --- 7.1 guard condition guard (block form) ---
     def safe_div(a: int, b: int) -> int =
         guard b != 0 else:
             return 0          // fail path: return early
-        // guard b != 0 else 0  // can be written inline and no `return` keyword
         a / b                  // success path: continues here
 
     print(safe_div(10, 2))     // 5
     print(safe_div(10, 0))     // 0
 
-    // guard with truthiness chain (__bool__ → __len__ → default true)
+    // --- guard condition guard (single-line form) ---
+    def safe_div2(a: int, b: int) -> int =
+        guard b != 0 else 0   // single-line: else expr is the guard value
+        a / b
+
+    print(safe_div2(10, 2))    // 5
+    print(safe_div2(10, 0))    // 0
+
+    // --- guard with truthiness chain ---
     def process(val: Option<int>) -> str =
         guard let Some(n) = val else:
             return "empty"
@@ -25,10 +31,8 @@ def main() =
     print(process(None))       // "empty"
 
     // --- 7.2 guard let pattern guard ---
-    // guard let PATTERN = expr else: handler
     // pattern match success → bind variables and continue
     // pattern match failure → execute else handler
-
     let opt_name: Option<str> = Some("Alice")
     guard let Some(name) = opt_name else:
         print("no name")

@@ -1,20 +1,21 @@
 // ============================
 // LZ Data Structures — trait & impl
+// Cover: 06c-trait和impl (all features)
 // ============================
 
-// --- 1. Trait definition ---
+// --- 1. Trait definition with abstract methods (= ...) ---
 trait Drawable =
-    def draw(self) -> ()
+    def draw(self) -> () = ...
     def bounds(self) -> (f64, f64, f64, f64) = ...
 
-// --- 2. Abstract method (= ...) ---
+// --- 2. Default implementation (method with body + abstract) ---
 trait Greeter =
     def greet(self) -> str = f"Hello, I am {self.name()}"
     def name(self) -> str = ...
 
-// --- 3. Default implementation ---
+// --- 3. Pure abstract trait ---
 trait HasArea =
-    def area(self) -> f64 = ...    // abstract, must be implemented
+    def area(self) -> f64 = ...
 
 // --- 4. Generic trait ---
 trait Container<T> =
@@ -24,39 +25,87 @@ trait Container<T> =
 // --- 5. Associated types ---
 trait Iterator =
     type Item
-    def next(self) -> Option<Self.Item> = ...
+    def next(mut self) -> Option<Self.Item> = ...
 
-// --- 6. Impl for a type ---
+// --- 6. Concrete types for impl ---
 struct Circle =
     x: f64
     y: f64
     radius: f64
 
+struct Rectangle =
+    width: f64
+    height: f64
+
+// --- 7. Impl for a type (trait impl) ---
 impl Drawable for Circle =
     def draw(self) -> () =
-        print(f"Circle at ({self.x}, {self.y})")
+        print(f"Circle at ({self.x}, {self.y}) with radius {self.radius}")
+
     def bounds(self) -> (f64, f64, f64, f64) =
         (self.x - self.radius, self.y - self.radius,
          self.x + self.radius, self.y + self.radius)
 
+impl Drawable for Rectangle =
+    def draw(self) -> () =
+        print(f"Rectangle {self.width}x{self.height}")
+
+    def bounds(self) -> (f64, f64, f64, f64) =
+        (0.0, 0.0, self.width, self.height)
+
 impl HasArea for Circle =
     def area(self) -> f64 = 3.14 * self.radius * self.radius
 
-// --- 7. Inherent impl (no trait) ---
+impl HasArea for Rectangle =
+    def area(self) -> f64 = self.width * self.height
+
+// --- 8. Inherent impl (no trait) ---
 impl Circle =
     def new(x: f64, y: f64, radius: f64) -> Circle =
         Circle(x: x, y: y, radius: radius)
 
-// --- 8. Generic impl ---
+impl Rectangle =
+    def new(width: f64, height: f64) -> Rectangle =
+        Rectangle(width: width, height: height)
+
+    def square(side: f64) -> Rectangle =
+        Rectangle(width: side, height: side)
+
+// --- 9. Generic impl with constraints ---
 struct Pair<T> =
     first: T
     second: T
+
+impl<T> Pair<T> =
+    def new(first: T, second: T) -> Pair<T> =
+        Pair(first: first, second: second)
+
+    def swap(mut self) =
+        let tmp = self.first
+        self.first = self.second
+        self.second = tmp
 
 impl<T: Display> Display for Pair<T> =
     def fmt(self) -> str =
         f"({self.first}, {self.second})"
 
-// --- 9. Trait constraints ---
+// --- 10. Impl with associated type ---
+struct MyIterator<T> =
+    items: List<T>
+    index: int
+
+impl<T> Iterator for MyIterator<T> =
+    type Item = T
+
+    def next(mut self) -> Option<T> =
+        if self.index < self.items.length():
+            let val = self.items[self.index]
+            self.index += 1
+            Option.Some(value: val)
+        else:
+            Option.None
+
+// --- 11. Trait constraints on functions ---
 def larger<T: Ordered>(a: T, b: T) -> T =
     a if a > b else b
 
@@ -71,7 +120,31 @@ def process<T, U>(a: T, b: U) -> List<T>
     let result = a.clone()
     [result, b.into()]
 
+// --- 12. Using it all ---
 def main() =
     let c = Circle.new(0.0, 0.0, 5.0)
     c.draw()
     print(c.area())
+
+    let r = Rectangle.new(10.0, 20.0)
+    r.draw()
+    print(r.area())
+
+    let sq = Rectangle.square(7.0)
+    print(sq.area())
+
+    // Generic Pair with Display
+    let p = Pair(first: "hello", second: "world")
+    print(p.fmt())
+
+    // Trait constraints
+    print(larger(10, 20))            // 20
+    clone_and_print("copy me")       // "copy me"
+
+    // Iterator usage
+    let iter = MyIterator(items: [1, 2, 3], index: 0)
+    let first = iter.next()
+    let first_msg = match first:
+        Option.Some(value: v) => f"first: {v}"
+        Option.None => "none"
+    print(first_msg)

@@ -1,5 +1,5 @@
 // ============================
-// LZ Generators — yield / yield from / PartialFunc
+// LZ Generators — yield / yield from / PartialFunc / *:
 // ============================
 
 // --- 1. Basic generator (function containing yield) ---
@@ -9,125 +9,69 @@ def counter(n: int) =
 
 // --- 2. yield forms ---
 def signals() =
-    yield              // bare yield → None
-    yield 1            // yield value
-    yield              // bare yield → None
+    yield
+    yield 1
+    yield
 
-// --- 3. Fibonacci generator ---
-def fib(limit: int) =
-    a = 0
-    b = 1
-    while a < limit:
-        yield a
-        a, b = b, a + b
-
-// --- 4. yield from (delegate to another iterator) ---
+// --- 3. yield from (delegate to another iterator) ---
 def chain(iter1, iter2) =
-    yield from iter1      // yield all values from iter1
-    yield from iter2      // then yield all from iter2
+    yield from iter1
+    yield from iter2
 
-// Equivalent to:
-// def chain(iter1, iter2) =
-//     for x in iter1: yield x
-//     for x in iter2: yield x
-
-// --- 5. yield from ... with PartialFunc ---
-// PartialFunc defines a three-stage pipeline:
-// pre_filter → map → post_filter
-
-// Only map
-let square = PartialFunc(
-    map = |x| x * x
-)
-
-// Only pre_filter
-let positives = PartialFunc(
-    pre_filter = |x| x > 0
-)
-
-// Three-stage pipeline
+// --- 4. yield from with PartialFunc ---
 let transform = PartialFunc(
-    pre_filter = |x| x != 0,         // filter out zeros
-    map = |x| 100 / x,               // reciprocal × 100
-    post_filter = |x| x > 0          // keep only positive
+    pre_filter = |x| x != 0,
+    map = |x| 100 / x,
+    post_filter = |x| x > 0
 )
 
-// yield from with PartialFunc
 def processed(nums) =
-    yield from nums with PartialFunc(
-        pre_filter = |x| x % 2 == 1,   // only odds
-        map = |x| x * x,               // square
-        post_filter = |x| x < 50       // result < 50
-    )
+    yield from nums with transform
 
-// --- 6. Generator build block func *: ---
-// *: wraps multiple invocations of a function into an iterator
-
+// --- 5. Generator build block func *: ---
 def add(a: int, b: int) -> int = a + b
 
 def gen_block_demo() =
-    // Each yield calls add() with the given arguments
     let xs = add *:
-        yield (1, 2)      // → add(1, 2) = 3
-        yield (10, 20)    // → add(10, 20) = 30
-        yield (5, -1)     // → add(5, -1) = 4
+        yield (1, 2)
+        yield (10, 20)
+        yield (5, -1)
 
     for x in xs:
-        print(x)          // 3 30 4
+        print(x)
 
-    // Keyword arguments in *:
-    def greet(title: str, name: str) -> str = f"{title} {name}"
     let ys = greet *:
         yield {"title": "Mr", "name": "Zhang"}
         yield {"title": "Ms", "name": "Li"}
 
     for y in ys:
-        print(y)          // Mr Zhang  Ms Li
+        print(y)
 
-    // yield from in *: block
     let pairs = [(1, 2), (3, 4)]
     let zs = add *:
-        yield from pairs  // → add(1,2), add(3,4)
+        yield from pairs
 
     for z in zs:
-        print(z)          // 3 7
+        print(z)
 
-// --- 7. Lazy evaluation ---
-def lazy_demo() =
-    def greet(name: str) -> str =
-        print(f"called with {name}")
-        f"Hello {name}"
+def greet(title: str, name: str) -> str = f"{title} {name}"
 
-    // Generator build block is lazy: no function calls happen here
-    let xs = greet *:
-        yield ("Alice",)
-        yield ("Bob",)
-
-    // Iteration triggers actual execution
-    for x in xs:         // prints "called with Alice" then "called with Bob"
-        print(x)
-
-// --- 8. return in generators (stops iteration) ---
+// --- 6. return in generators (stops iteration) ---
 def limited(n: int) -> int =
     for i in 0..10:
         if i >= n:
-            return              // stops iteration, like StopIteration
+            return
         yield i
 
-// --- yield must be at function top level, not in closures ---
+// --- 7. yield must be at function top level ---
 // def bad() =
-//     f = |x| yield x    // ❌ error: yield inside closure
-
-// def bad2() =
-//     def inner(): yield 1  // ❌ error: yield inside nested function
+//     f = |x| yield x    // ❌ yield inside closure
 
 def main() =
-    // Use counter generator
     for x in counter(5):
-        print(x)          // 0 1 2 3 4
+        print(x)
 
-    // Use fib generator
-    for x in fib(100):
-        print(x)          // 0 1 1 2 3 5 8 13 21 34 55 89
+    for x in limited(3):
+        print(x)
 
     gen_block_demo()

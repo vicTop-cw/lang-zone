@@ -1,85 +1,126 @@
 // ============================
 // LZ Data Structures — Magic Methods
+// Cover: 06d-06g (all magic method features)
+// CRITICAL: __str__, __eq__, __hash__, __getitem__, __len__ MUST use ref self
 // ============================
 
-// Magic methods implement operator overloading via __xxx__ methods.
-// When a struct defines a magic method, the compiler auto-generates
-// the corresponding trait impl and a global function.
-
-// --- Arithmetic operators ---
+// --- 1. Arithmetic operators (owned self — consuming) ---
 struct Vector =
     x: f64
     y: f64
 
-    // __add__ → Add trait → a + b
+    // __add__ → Add trait → a + b (owned self)
     def __add__(self, other: Vector) -> Vector =
         Vector(x: self.x + other.x, y: self.y + other.y)
 
-    // __sub__ → Sub trait → a - b
+    // __sub__ → Sub trait → a - b (owned self)
     def __sub__(self, other: Vector) -> Vector =
         Vector(x: self.x - other.x, y: self.y - other.y)
 
-    // __mul__ → Mul trait → a * b (scalar multiplication)
+    // __mul__ → Mul trait → a * b (owned self, scalar)
     def __mul__(self, scalar: f64) -> Vector =
         Vector(x: self.x * scalar, y: self.y * scalar)
 
-    // __str__ → Display trait → str(x)
-    def __str__(self) -> str =
+    // __str__ → Display trait → str(x) — MUST use ref self
+    def __str__(ref self) -> str =
         f"Vector({self.x}, {self.y})"
 
-    // __eq__ → PartialEq trait → a == b
-    def __eq__(self, other: Vector) -> bool =
+    // __eq__ → PartialEq trait → a == b — MUST use ref self
+    def __eq__(ref self, other: Vector) -> bool =
         self.x == other.x and self.y == other.y
 
-// --- Structural equality via magic ---
+// --- 2. Full magic set on Point (ref self for borrowing methods) ---
 struct Point =
     x: int
     y: int
 
-    def __eq__(self, other: Point) -> bool =
+    // __eq__ → ref self
+    def __eq__(ref self, other: Point) -> bool =
         self.x == other.x and self.y == other.y
 
-    def __hash__(self) -> int =
+    // __hash__ → ref self
+    def __hash__(ref self) -> int =
         self.x ^ self.y
 
-    def __str__(self) -> str =
+    // __str__ → ref self
+    def __str__(ref self) -> str =
         f"Point({self.x}, {self.y})"
 
-// --- Indexing and iteration ---
+// --- 3. Indexing and iteration (ref self for read, mut self for write) ---
 struct MyList<T> =
     items: List<T>
 
-    def __getitem__(self, index: int) -> T =
+    // __getitem__ → Index trait — MUST use ref self
+    def __getitem__(ref self, index: int) -> T =
         self.items[index]
 
+    // __setitem__ → IndexMut trait — mut self (mutable)
     def __setitem__(mut self, index: int, value: T) =
         self.items[index] = value
 
-    def __len__(self) -> int =
+    // __len__ → HasLen trait — MUST use ref self
+    def __len__(ref self) -> int =
         self.items.length()
 
-    def __iter__(self) -> MyList<T> =
-        MyList(items: self.items)
+    // __iter__ → IntoIterator trait — owned self (consuming)
+    def __iter__(self) -> MyIterator<T> =
+        MyIterator(items: self.items, index: 0)
 
-// --- Callable objects ---
+// Helper iterator struct for __iter__
+struct MyIterator<T> =
+    items: List<T>
+    index: int
+
+    // __next__ → Iterator trait — mut self (mutable borrow)
+    def __next__(mut self) -> Option<T> =
+        if self.index < self.items.length():
+            let val = self.items[self.index]
+            self.index += 1
+            Option.Some(value: val)
+        else:
+            Option.None
+
+// --- 4. Callable objects (owned self) ---
 struct Multiplier =
     factor: int
 
+    // __call__ → Callable trait — owned self
     def __call__(self, x: int) -> int =
         self.factor * x
 
-// --- Context manager ---
+// --- 5. Context manager (enter owned, exit mut) ---
 struct ManagedFile =
     name: str
 
+    // __enter__ → Enter trait — owned self (consuming)
     def __enter__(self) -> ManagedFile =
         print(f"opening {self.name}")
         self
 
+    // __exit__ → Exit trait — mut self (mutable borrow)
     def __exit__(mut self) =
         print(f"closing {self.name}")
 
+// --- 6. __new__ magic (static, no self) ---
+struct Config =
+    host: str
+    port: int
+    debug: bool
+
+    magic __new__(host: str, port: int) -> Self =
+        Self(host: host, port: port, debug: false)
+
+// --- 7. __bool__ magic (ref self) ---
+struct Account =
+    active: bool
+    balance: int
+
+    def __bool__(ref self) -> bool =
+        self.active and self.balance > 0
+
+// --- 8. Using all magic methods ---
 def main() =
+    // Arithmetic
     let v1 = Vector(x: 1.0, y: 2.0)
     let v2 = Vector(x: 3.0, y: 4.0)
 
@@ -90,10 +131,21 @@ def main() =
 
     print(str(v3), str(v4), str(v5), eq)
 
+    // Comparison and hashing
+    let p1 = Point(x: 1, y: 2)
+    let p2 = Point(x: 1, y: 2)
+    let p3 = Point(x: 3, y: 4)
+    print(p1 == p2)            // True via __eq__
+    print(p1 == p3)            // False via __eq__
+    print(str(p1))             // "Point(1, 2)" via __str__
+
     // Indexing
     let ml = MyList(items: [10, 20, 30])
     print(ml[0], ml[1])        // 10, 20 via __getitem__
     print(ml.len())            // 3 via __len__
+
+    ml[1] = 25                 // via __setitem__
+    print(ml[1])               // 25
 
     // Callable
     let doubler = Multiplier(factor: 2)
@@ -102,3 +154,16 @@ def main() =
     // Context manager
     with ManagedFile(name: "test.txt") as f:
         print(f.name)
+
+    // __new__ magic construction
+    let cfg = Config(host: "localhost", port: 8080)
+    print(cfg.host, cfg.port, cfg.debug)
+
+    // __bool__ magic
+    let acc1 = Account(active: true, balance: 100)
+    let acc2 = Account(active: true, balance: 0)
+
+    if acc1:
+        print("acc1 is active")       // printed
+    if not acc2:
+        print("acc2 is inactive")     // printed (balance = 0)

@@ -1,25 +1,44 @@
-// ============================
-// LZ Build Blocks — =: / ~:
-// ============================
+// ============================================================
+// LZ Build Blocks — =: (variable) / ~: (call)
+// Spec: SYNTAX/11-构建块.md
+// Covers: =: variable build block, ~: call build block,
+// return inside build blocks, whitespace rules (=: must be
+// followed by newline+indent).
+// ============================================================
 
-def main() =
-    // --- 1. Variable build block =: ---
-    // =: creates a no-argument closure; tail expression is the return value
+// =============================================================
+// 空白规则
+// =============================================================
+// 构建块操作符 =: 和 ~: 是整体 token（符号间无空格），
+// 操作符前后留白 + 后换行缩进：
+//
+//   x =:          ✅ 操作符前后留白 + 换行缩进
+//       body
+//
+//   x=:body       ❌ 操作符前后必须留白 + 换行缩进
+//   x = : body    ❌ = 和 : 之间不能有空格，=: 是整体
 
-    // Simple variable build block
+// =============================================================
+// 1. 变量构建块 =:
+// =============================================================
+// =: 创建一个无参不安全闭包，块体末尾表达式作为返回值。
+
+def demo_simple() =
+    // 1a. 简单变量构建块
     x =:
         y = 1
         y + 2
     print(x)              // 3
 
-    // Multi-statement build block
+    // 1b. 多语句构建块
     result =:
         a = 10
         b = 20
         a + b
     print(result)         // 30
 
-    // Conditional build block
+def demo_conditional() =
+    // 1c. 条件构建块
     grade = "B"
     score =:
         if grade == "A":
@@ -30,60 +49,176 @@ def main() =
             60
     print(score)          // 80
 
-    // Nested build blocks
+def demo_nested() =
+    // 1d. 嵌套构建块
     outer =:
         inner =:
             5 * 5
         inner + 10
     print(outer)          // 35
 
-    // Loop inside build block
+def demo_loop() =
+    // 1e. 构建块内循环
     total =:
         sum = 0
         for i in 1..5:
             sum = sum + i
         sum
-    print(total)          // 10
+    print(total)          // 10 (1+2+3+4)
 
-    // --- 2. Call build block ~: ---
-    // ~: creates a closure whose return value is unpacked and passed to the callee
+// =============================================================
+// 2. 调用构建块 ~:
+// =============================================================
+// ~: 创建一个带参闭包，块体末尾返回元组或字典，自动拆包
+// 传递给左侧 callee。
 
-    def add(a: int, b: int) -> int = a + b
+def add(a: int, b: int) -> int = a + b
 
-    // Tuple unpacking (positional args)
+def greet(greeting: str, name: str) -> str =
+    greeting + ", " + name + "!"
+
+def volume(width: f64, height: f64, depth: f64) -> f64 =
+    width * height * depth
+
+def demo_call_tuple() =
+    // 2a. 元组拆包：按位置传参
     r1 = add ~:
         (10, 20)
     print(r1)             // 30
 
-    // Dict unpacking (keyword args)
-    def greet(greeting: str, name: str) -> str =
-        greeting + ", " + name + "!"
+    // 2b. 多参数函数
+    r4 = volume ~:
+        (2.0, 3.0, 4.0)
+    print(r4)             // 24.0
 
+def demo_call_dict() =
+    // 2c. 字典拆包：按名称传参
     r2 = greet ~:
-        {"greeting": "Hello", "name": "LZ"}
-    print(r2)             // Hello, LZ!
+        {"greeting": "Hello", "name": "Lang-Zong"}
+    print(r2)             // Hello, Lang-Zong!
 
-    // Computational build block
+def demo_call_computed() =
+    // 2d. 计算型构建块
+    // 块体中可执行任意计算，末尾返回元组拆包给 callee
     r3 = add ~:
         a = 100
         b = 200
         (a, b)
     print(r3)             // 300
 
-    // --- 3. return inside build blocks ---
-    // return exits the build block, NOT the outer function
-    def demo() =
-        val =:
-            if True:
-                return 42      // exits the =: block, val = 42
-            99
-        print(val)             // 42
-        print("still here")    // ← outer function continues
+    r5 = add ~:
+        x = 5
+        y = 7
+        z = x * y
+        (z, 10)
+    print(r5)             // 45 (35+10)
 
-    demo()
+// =============================================================
+// 3. 构建块中的 return
+// =============================================================
+// 所有构建块都支持 return 提前退出。**重要**：构建块内的
+// return 退出的是构建块自身，不是外层函数。
 
-    // --- Whitespace rules ---
-    // =: and ~: must have whitespace before and after, followed by newline + indent
-    // x =:         ✅ correct
-    //     body
-    // x=:body      ❌ error: missing whitespace and newline
+def demo_return_in_block() =
+    // 3a. 变量构建块 =: 中的 return
+    x =:
+        if true:
+            return 42        // 退出 =: 构建块，x = 42
+        99                   // 不会执行
+    print(x)                 // 42
+    print("still here")      // ← 外层函数继续执行
+
+def demo_return_no_value() =
+    // 3b. return 不带值时，构建块返回单元值
+    let skip = true
+    x =:
+        if skip:
+            return           // 退出构建块，x = ()
+        100
+    print(x)                 // ()
+
+def demo_return_in_call_block() =
+    // 3c. 调用构建块 ~: 中的 return
+    let use_default = true
+    r = add ~:
+        if use_default:
+            return (0, 0)    // 退出 ~: 构建块，拆包传给 add(0, 0)
+        a = 42
+        b = 58
+        (a, b)
+    // r == add(0, 0) = 0 当 use_default 为真时
+    print(r)                 // 0
+
+def demo_return_scope() =
+    // 3d. 构建块在函数体内：作用域规则
+    let x = 5
+    if x > 10:
+        print("this won't run")  // ← 退出 outer 函数 (commented)
+
+    val =:
+        if x < 0:
+            return -1        // ← 退出 =: 构建块，不是退出 demo
+        x * 2                // x >= 0 时 val = x * 2
+
+    print(val + 1)           // 11 (5*2+1), 外层函数继续执行
+
+// =============================================================
+// 4. 综合示例
+// =============================================================
+
+def complex_demo() =
+    // 构建块与函数组合
+    def multiply(a: int, b: int, c: int) -> int = a * b * c
+
+    // 变量构建块先计算结果
+    factors =:
+        a = 2
+        b = 3
+        c = 4
+        (a, b, c)
+
+    // 然后通过调用构建块传递
+    result = multiply ~:
+        factors
+
+    print("product: {result}")    // 24
+
+    // 混合使用
+    transformed =:
+        raw = 100
+        processed = raw * 2
+        // return inside block
+        if processed > 150:
+            return processed
+        processed - 50
+    print("transformed: {transformed}")  // 200
+
+// =============================================================
+// 5. 语法边界
+// =============================================================
+// ❌ 冒号后必须换行缩进
+// x =: 42            // 错误：=: 后必须换行缩进
+
+// ❌ 调用构建块末尾必须是元组或字典
+// r = f ~: 42        // 错误：~: 块体末尾必须是元组或字典
+
+// ❌ 操作符前后必须留白
+// x=:                // 错误：= 和 : 之间及前后必须留白
+
+// =============================================================
+// main
+// =============================================================
+def main() =
+    demo_simple()
+    demo_conditional()
+    demo_nested()
+    demo_loop()
+    demo_call_tuple()
+    demo_call_dict()
+    demo_call_computed()
+    demo_return_in_block()
+    demo_return_no_value()
+    demo_return_in_call_block()
+    demo_return_scope()
+    complex_demo()
+    print("=== build blocks demo complete ===")

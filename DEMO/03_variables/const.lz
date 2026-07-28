@@ -9,8 +9,8 @@ const GREETING: str = "hello"
 const DEBUG_MODE: bool = True
 
 // --- Constants must be compile-time evaluable ---
-// const X: int = rand()      // ❌ runtime expression not allowed
-// const NOW: str = get_time()  // ❌ runtime expression not allowed
+// const X: int = rand()          // ❌ runtime expression not allowed
+// const NOW: str = get_time()    // ❌ runtime expression not allowed
 
 // --- Use comptime to wrap runtime evaluation ---
 comptime:
@@ -23,6 +23,6 @@ def main() =
     let limit = MAX_SIZE
 
     // Constants cannot be reassigned
-    // MAX_SIZE = 2000  // ❌ compile error
+    // MAX_SIZE = 2000     // ❌ compile error
 
     print(area, limit)

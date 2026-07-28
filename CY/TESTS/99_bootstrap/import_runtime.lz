@@ -1,0 +1,13 @@
+// 自举测试：import 运行时库
+import lz_std
+
+def main() =
+    let x = lz_std.Some(42)
+    let y = lz_std.None_()
+    let z = lz_std.Ok("hello")
+    let w = lz_std.Box(3.14)
+    print(x)
+    print(y)
+    print(z)
+    print(w)
+    print("Bootstrapping test passed!")

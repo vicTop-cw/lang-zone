@@ -1,0 +1,8 @@
+// type alias + const 测试
+type UserId = int
+
+const MAX: int = 1000
+
+def main() =
+    let id: UserId = 42
+    print(id, MAX)

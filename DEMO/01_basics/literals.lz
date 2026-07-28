@@ -1,46 +1,122 @@
-// ============================
-// LZ Literals Demo
-// ============================
+// =============================================================
+// LZ 词法基础 — 字面量展示 (00-词法基础.md §二)
+// 每种字面量形式都用可运行代码演示，未注释掉任何关键字。
+// =============================================================
 
 def main() =
-    // --- Integer literals ---
+    // -------- 整数字面量 ----------
+
+    // 十进制整数
     let dec: int = 42
+
+    // 十六进制整数 (0x)
     let hex: int = 0xFF          // 255
+
+    // 八进制整数 (0o)
     let oct: int = 0o77          // 63
+
+    // 二进制整数 (0b)
     let bin: int = 0b1010        // 10
 
-    // --- Float literals ---
+    print("integers:", dec, hex, oct, bin)
+
+    // -------- 浮点字面量 ----------
+
+    // 小数浮点
     let pi: f64 = 3.14
+
+    // 科学计数法
     let sci: f64 = 1e10          // 10000000000.0
+    let small: f64 = 2.5e-3      // 0.0025
 
-    // --- String literals ---
-    let s: str = "hello"
-    let fs: str = f"x = {dec}"   // f-string interpolation
-    let raw: str = r"\d+"        // raw string, no escape
-    let multi: str = """line1
-line2"""
-    let fmulti: str = f"""x = {dec}"""
+    print("floats:", pi, sci, small)
 
-    // --- Boolean & special literals ---
+    // -------- 字符串字面量 ----------
+
+    // 双引号字符串
+    let s: str = "hello LZ"
+
+    // f-string 插值 (f"...")
+    let name: str = "world"
+    let fs: str = f"hello {name}"   // "hello world"
+
+    // 原始字符串 (r"...") — 不处理转义
+    let raw: str = r"\d+\.\d+"      // 保留反斜杠
+
+    // 多行字符串 ("""...""")
+    let multi: str = """line one
+line two
+line three"""
+
+    // f-多行字符串 (f"""...""")
+    let val: int = 42
+    let fmulti: str = f"""value is {val}
+next line"""
+
+    // r-多行字符串 (r"""...""")
+    let rmulti: str = r"""\d+\.\d+
+[a-z]+"""
+
+    print("strings:", s, fs, raw)
+
+    // -------- 布尔与特殊字面量 ----------
+
+    // 布尔字面量
     let t: bool = True
     let f: bool = False
+
+    // None — Option 空值
     let n: Option<int> = None
+
+    // Some — Option 包装
     let sv: Option<int> = Some(42)
+
+    // Ok — Result 成功
     let ok: Result<int, str> = Ok(1)
+
+    // Err — Result 失败
     let err: Result<int, str> = Err("fail")
 
-    // --- Collection literals ---
+    // Unit 字面量
+    let u: Unit = ()
+
+    // Nil — 空列表类型别名（[] 作为值）
+    let empty: Nil = []
+
+    // Never 类型不能实例化，用于返回值标注
+    def loop_forever() -> Never =
+        loop:
+            pass
+
+    print("bool/special:", t, f, sv, ok)
+
+    // -------- 集合字面量 ----------
+
+    // 列表 — 方括号逗号分隔
     let xs: List<int> = [1, 2, 3]
+
+    // 元组 — 圆括号逗号分隔
     let tp: (int, str) = (1, "hi")
+
+    // 字典 — 花括号键值对（包含 : 即为 dict）
     let d: Dict<str, int> = {"a": 1, "b": 2}
+
+    // 集合 — 花括号逗号分隔（不包含 : 即为 set）
     let st: Set<int> = {1, 2, 3}
 
-    // --- Range literals ---
-    let r1: Range = 0..10        // half-open [0, 10)
-    let r2: Range = 0..=9        // closed [0, 9]
+    // 空字典 {}（无内容即为空 dict）
+    let empty_dict: Dict<str, int> = {}
 
-    // --- Unit & Never types ---
-    let u: Unit = ()
-    // Never cannot be instantiated; used as return type
+    print("collections:", xs, tp, d, st)
 
-    print(dec, hex, oct, bin, pi, sci)
+    // -------- 区间字面量 ----------
+
+    // 半开区间 start..end
+    let r1: Range = 0..10        // [0, 10)
+
+    // 闭区间 start..=end
+    let r2: Range = 0..=9        // [0, 9]
+
+    print("ranges:", r1, r2)
+
+    print("All literals demonstrated successfully")

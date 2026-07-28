@@ -1,25 +1,42 @@
-// ============================
-// LZ Comments Demo
-// ============================
+// =============================================================
+// LZ 词法基础 — 注释展示 (00-词法基础.md §三)
+// 所有注释写法均用可运行代码演示。
+// =============================================================
 
-// This is a single-line comment
-// It extends to the end of the line
-
-/*
-   This is a block comment.
-   It can span multiple lines.
-   Block comments can be nested: /* inner */ still works.
-*/
-
-// Comments are ignored by the compiler
-// They are for human readers only
+// 这是单行注释：以 // 开头，延伸至行尾
+// 单行注释可以有多行，每行以 // 开头
+// 编译器完全忽略 // 后的内容
 
 def main() =
-    // Inline comment after code
-    let x = 42  // This explains what x is
+    // 代码后的内联注释
+    let x: int = 42  // 这行代码后面也有注释
 
     /*
-       Multi-line comment inside a function body
-       Can contain detailed explanations
+       这是块注释（多行注释）。
+       以 /* 开头，以 */ 结尾。
+       可以跨越多行。
+       块注释内部可以包含单行注释 // 风格的内容。
     */
-    print("comments demonstrated")
+
+    let y: int = 100
+
+    /*
+    块注释也常用于暂时禁用大段代码的说明
+    或提供详细的文档说明。
+    */
+
+    // 块注释可以出现在表达式之间
+    let z: int = x + /* 中间块注释 */ y
+
+    // 注释不影响缩进结构
+    let sum: int = x + y + z
+    // 上面是加法运算
+
+    print("sum:", sum)
+
+    /*
+    最后一个演示：块注释可以包含
+    /* 嵌套块注释的写法可能不被支持，需注意 */
+    大多数编译器不支持嵌套块注释。
+    */
+    print("All comments demonstrated successfully")

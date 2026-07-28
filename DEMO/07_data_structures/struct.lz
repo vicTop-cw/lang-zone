@@ -1,5 +1,6 @@
 // ============================
 // LZ Data Structures — struct
+// Cover: 06a-struct (all features)
 // ============================
 
 // --- 1. Basic struct ---
@@ -10,12 +11,12 @@ struct Point =
 // --- Empty struct (zero-sized type) ---
 struct Marker =
 
-// --- 2. Methods ---
+// --- 2. Methods (self, mut self, static) ---
 struct Rectangle =
     width: f64
     height: f64
 
-    // method: &self (immutable reference)
+    // method: self (&Self — immutable reference)
     def area(self) -> f64 =
         self.width * self.height
 
@@ -76,3 +77,34 @@ def main() =
 
     // --- 7. Field access ---
     print(p.x, p.y, r.width, r.height)
+
+    // --- 8. __new__ and __init__ magic constructors ---
+    struct Config =
+        host: str
+        port: int
+        debug: bool
+
+        magic __new__(host: str, port: int) -> Self =
+            Self(host: host, port: port, debug: false)
+
+        magic __init__(mut self, host: str, port: int) =
+            if self.port <= 0 or self.port > 65535:
+                panic("invalid port")
+
+    let cfg = Config(host: "localhost", port: 8080)
+    print(cfg.host, cfg.port, cfg.debug)
+
+    // --- 9. Nested struct construction ---
+    struct Address =
+        city: str
+        street: str
+
+    struct User =
+        name: str
+        addr: Address
+
+    let u = User(
+        name: "Bob",
+        addr: Address(city: "Beijing", street: "ChangAn Ave")
+    )
+    print(u.name, u.addr.city, u.addr.street)

@@ -1,0 +1,15 @@
+// mut self 测试
+struct Counter =
+    count: int
+
+    def increment(mut self) =
+        self.count += 1
+
+    def value(self) -> int =
+        self.count
+
+def main() =
+    let c = Counter(count: 0)
+    c.increment()
+    c.increment()
+    print(c.value())

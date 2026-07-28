@@ -1,0 +1,15 @@
+// 06_control_flow - break/continue
+def main() =
+    total = 0
+    for i in 0..10:
+        if i == 5:
+            break
+        total += i
+    print(total)
+
+    even_sum = 0
+    for i in 0..10:
+        if i % 2 != 0:
+            continue
+        even_sum += i
+    print(even_sum)

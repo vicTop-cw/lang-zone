@@ -3,36 +3,34 @@
 // ============================
 
 // --- 1. Import a module ---
-// import std.io
-// import std.collections.HashMap
+import std.io
+import std.collections.HashMap
 
 // --- 2. Import with alias ---
-// import std.collections.HashMap as Map
+import std.collections.HashMap as Map
 
 // --- 3. From import (selective) ---
-// from std.io import print, read
-// from std.collections import List, Dict
+from std.io import print, read
+from std.collections import List, Dict
 
 // --- 4. Import all public items ---
-// from std.io import *
+from std.io import *
 
 // --- 5. Relative imports ---
-// from .utils import helper      // sibling module
-// from ..common import config     // parent module
+from .utils import helper
+from ..common import config
 
-// --- 7. Bridge system (Rust interop) ---
-// Import Rust crate:
-// import std.bridge.rust.serde_json
-// CLI compile: lzc file.lz --std-dir std/ --rust-crate serde_json=1.0
+// --- 6. Bridge system (Rust interop) ---
+import std.bridge.rust.serde_json
 
-// --- 8. @export decorator for FFI ---
+// --- 7. @export decorator for FFI ---
 @export(Rust)
 def add(a: int, b: int) -> int = a + b
 
 @export(Python)
 def greet(name: str) -> str = f"Hello, {name}"
 
-// --- 9. Module file structure ---
+// --- 8. Module file structure ---
 // Single file: math.lz → module "math"
 // Directory module:
 //   my_package/
@@ -40,7 +38,7 @@ def greet(name: str) -> str = f"Hello, {name}"
 //       utils.lz        ← sub-module
 //       types.lz        ← sub-module
 
-// --- 10. Bridge configuration (TOML) ---
+// --- 9. Bridge configuration (TOML) ---
 // std/bridge/rust/serde_json.toml:
 //   rust_prefix = "serde_json"
 //   version = "1.0"
@@ -50,14 +48,8 @@ def greet(name: str) -> str = f"Hello, {name}"
 // std.io.print          // module path
 // std.collections.List  // type path
 // Option.Some           // enum variant
-
 // "::" is deprecated and produces a lexical error
 
 def main() =
-    // After importing, use the module path or direct name
-    // std.io.print("hello")
-    // print("hello")     // after from std.io import print
-
-    // Exported functions work both in LZ and via FFI
     let r = add(1, 2)
-    print(r)              // 3
+    print(r)

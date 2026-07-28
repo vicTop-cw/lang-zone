@@ -1,59 +1,114 @@
-// ============================
-// LZ Expressions — if / match as Expressions
-// ============================
+// ================================================================
+// LZ Expressions — if / match as Expressions, safe navigation,
+// null coalescing, error propagation, ownership, ranges, f-strings
+// ================================================================
+
+def describe(x) -> str =
+    if x is int:
+        f"integer: {x}"
+    elif x is str:
+        f"string: {x}"
+    elif x is bool:
+        f"boolean: {x}"
+    else:
+        "unknown type"
+
+def risky_parse(s: str) -> Result<int, str> =
+    try:
+        Ok(int(s))
+    catch e:
+        Err("parse failed")
+
+def process(s: str) -> Result<int, str> =
+    // ---- 13  Error propagation ?  ----
+    let n = risky_parse(s)?
+    Ok(n * 2)
+
 
 def main() =
-    // --- if expression ---
+    // ---- 17  if expression (colon + newline + indent)  ----
+    let n = 5
+
     let sign = if n > 0:
             "positive"
         elif n < 0:
             "negative"
         else:
             "zero"
-    // All branches must return the same type
 
-    // --- match expression ---
-    let desc = match color:
+    let grade = if n >= 90:
+            "A"
+        elif n >= 80:
+            "B"
+        elif n >= 70:
+            "C"
+        else:
+            "F"
+
+    // ---- 18  match expression — arrow form (inline)  ----
+    let color = 1
+
+    let desc_arrow = match color:
         case 0 => "none"
         case 1 => "one"
         case _ => "many"
-    // => arrow form supports inline values (no newline needed)
 
-    // match with block bodies (colon form)
-    let detailed = match x:
+    // ---- 18  match expression — colon form (newline+indent)  ----
+    let detailed = match color:
         case 0:
             "zero"
+        case 1:
+            "one"
         case _:
-            "non-zero"
+            "other"
 
-    // --- Safe navigation ?. ---
-    // obj?.field: if obj is not None, access field; otherwise None
-    let val: Option<int> = config?.get("key")
+    // ---- 11  Safe navigation ?.  ----
+    let safe_val: Option<int> = config?.get("key")
+    let safe_nested: Option<int> = config?.nested?.value
 
-    // --- Null coalescing ?? ---
-    // a ?? b: if a is None, use b; otherwise use a
-    let setting = config?.get("timeout") ?? 30
+    // ---- 12  Null coalescing ??  ----
+    let timeout = config?.get("timeout") ?? 30
+    let fallback = config?.get("missing") ?? "default"
 
-    // --- Error propagation ? ---
-    def parse(s: str) -> Result<int, str> raises str =
-        let n = parse_int(s)?
-        Ok(n)
+    // ---- 13  Error propagation ? (used in process above)  ----
+    let processed = process("42")?     // Ok(84)
+    let fallible = process("abc")?     // Err propagated
 
-    // --- Range expressions ---
+    // ---- 14  Range expressions  ----
     let half_open = 0..10       // 0 to 9
-    let closed = 0..=9          // 0 to 9
+    let closed    = 0..=9        // 0 to 9
+    let inclusive = 1..=5        // 1, 2, 3, 4, 5
 
-    // --- Ownership move ^ ---
-    y = x^                      // transfer ownership of x to y
-    // print(x)                 // ❌ x has been moved
+    // ---- 15  Ownership move ^  ----
+    let src = 42
+    let dst = src^
 
-    // --- f-string (string interpolation) ---
-    let name = "world"
-    let msg = f"Hello, {name}!"
-    let calc = f"2 + 2 = {2 + 2}"
+    // ---- f-strings  ----
+    let name = "LZ"
+    let greeting = f"Hello, {name}!"
+    let computed = f"sign = {sign}, grade = {grade}"
+    let expr_str = f"42 + 58 = {42 + 58}"
 
-    print(sign, desc, msg, calc)
+    // ---- 4.3  is type check in describe  ----
+    let desc_int = describe(42)
+    let desc_str = describe("hello")
+    let desc_bool = describe(True)
 
-let n = 5
-let color = 1
-let x = 42
+    // ----  in  (membership)  ----
+    let found = 3 in [1, 2, 3, 4, 5]
+
+    print(sign, grade)
+    print(desc_arrow)
+    print(detailed)
+    print(safe_val, safe_nested, timeout, fallback)
+    print(processed, fallible)
+    print(half_open, closed, inclusive)
+    print(greeting, computed, expr_str)
+    print(desc_int, desc_str, desc_bool)
+    print(found)
+
+
+// ---- Stub for config safe-navigation example  ----
+def config.get(key: str) -> Option<int> = None
+
+def config.nested.value = None

@@ -1,0 +1,9 @@
+// enum 测试
+enum Color:
+    Red
+    Green
+    Blue
+
+def main() =
+    let c = Color.Red
+    print(c)

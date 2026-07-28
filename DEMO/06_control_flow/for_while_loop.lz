@@ -1,44 +1,62 @@
-// ============================
-// LZ Control Flow — for / while / loop
-// ============================
+// ============================================================
+// for / while / loop — with else clause, declarative sum/prod
+// LZ Spec §3, §4, §5, §13.2, §13.3
+// ============================================================
+
+// --- 4.2 for/else: executes when loop ends normally ---
+def find_in_arr(arr: List<int>, target: int) =
+    for val in arr:
+        if val == target:
+            print(f"found {target}")
+            break
+    else:
+        print(f"{target} not found")
+
+// --- 4.3 while/else: executes when condition becomes false ---
+def countdown(n: int) =
+    while n > 0:
+        print(n)
+        n -= 1
+    else:
+        print("blastoff")
 
 def main() =
-    // --- for loop ---
+    // --- 3 for loop ---
+
+    // --- 3.1 for loop with range ---
     for i in 0..5:
         print(i)          // 0 1 2 3 4
 
+    // --- 3.2 for loop with list ---
     for x in [1, 2, 3]:
         print(x)          // 1 2 3
 
+    // --- 3.3 Dict destructuring ---
     for (k, v) in {"a": 1, "b": 2}:
         print(f"{k}: {v}")
 
-    // --- Declarative for: sum / prod ---
+    // --- 3.4 Declarative for: sum / prod ---
     let total = sum x in 1..5: x * x     // 1 + 4 + 9 + 16 = 30
-    let fact = prod i in 1..5: i          // 1*2*3*4 = 24
+    let fact = prod i in 1..5: i          // 1 * 2 * 3 * 4 = 24
     print(total, fact)
 
-    // --- while loop ---
+    // --- 4.1 while loop ---
     i = 0
     while i < 5:
         print(i)
         i += 1
 
-    // --- while/else ---
-    n = 3
-    while n > 0:
-        print(n)
-        n -= 1
-    else:
-        print("while done")     // executes when condition becomes false
+    // --- for/else demo ---
+    find_in_arr([1, 2, 3, 4, 5], 3)      // "found 3"
+    find_in_arr([1, 2, 3, 4, 5], 99)     // "99 not found"
 
-    // --- loop (infinite, needs break) ---
+    // --- while/else demo ---
+    countdown(3)                          // 3 2 1 blastoff
+
+    // --- 5 loop (infinite, needs break) ---
     count = 0
     loop:
         if count >= 3:
             break
         print(count)
         count += 1
-
-    // loop does NOT support else
-    // loop ... else:  // ❌ not valid

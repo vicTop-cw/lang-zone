@@ -44,6 +44,8 @@
 | `with` | `with f as x: ...` | 拒绝 | — | 语句 |
 | `guard` | `guard cond else expr` | 拒绝* | — | `guard` 整体不可赋值，但内部表达式可求值 |
 | `pass` | `x = pass` | 可选 | — | 求值为 `()` |
+| `comptime` 表达式 | `x = comptime expr` | 可选 | 否 | 编译期求值，值固化到常量 |
+| `comptime:` 块 | `x = comptime: expr` | 可选 | 否 | 编译期执行块，末尾表达式值固化 |
 | `test` / `suite` | — | 拒绝 | — | 声明，不可赋值 |
 | `import` | — | 拒绝 | — | 声明，不可赋值 |
 

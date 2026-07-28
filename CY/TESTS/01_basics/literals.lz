@@ -1,0 +1,8 @@
+// 01_basics - 字面量
+def main() =
+    print(42)
+    print(3.14)
+    print("hello")
+    print(True)
+    print(False)
+    print(None)

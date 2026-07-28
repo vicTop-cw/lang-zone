@@ -1,81 +1,55 @@
 // ============================
-// LZ Macros — macro & template
+// LZ Macros — macro & template (macro module)
 // ============================
 
-// Macro and template definitions require a #!bin macro module.
-// This file shows the syntax in a comment-only form since
-// macro modules must be separate files with #!bin macro as first line.
+// This file is a macro module. #!bin macro must be the first line.
 
-// --- 1. #!bin macro module declaration ---
-// Must be the first line of the .lz file:
-// #!bin macro
+// --- 1. macro definition ---
+macro id(input: Tokens) -> Tokens = input
 
-// --- 2. macro definition ---
-// macro name(param: Tokens) -> Tokens = body
-// macro id(input: Tokens) -> Tokens = input
+macro const_i64(name: Tokens, value: Tokens) -> Tokens =
+    quote("const " + name + ": i64 = " + value + ";")
 
-// --- 3. macro body with quote() ---
-// macro const_i64(name: Tokens, value: Tokens) -> Tokens =
-//     quote("const " + name + ": i64 = " + value + ";")
+// --- 2. Backtick syntax sugar for quote() ---
+macro debug_log(msg: Tokens) -> Tokens =
+    f```
+    if DEBUG:
+        print($(msg))
+    ```
 
-// --- 4. Backtick syntax sugar for quote() ---
-// f``` — interpolation mode: $(expr) is evaluated and substituted
-// r``` — raw mode: all characters preserved literally
-//
-// macro debug_log(msg: Tokens) -> Tokens =
-//     f```
-//     if DEBUG:
-//         print($(msg))
-//     ```
+macro raw_text(input: Tokens) -> Tokens =
+    r```
+    Raw text block — $(x) is not interpolated
+    ```
 
-// --- 5. Macro call syntax ---
-// @name! must be on its own line (cannot be inline in an expression)
+// --- 3. Multi-step macro with built-in functions ---
+macro pub_fns(input: Tokens) -> Tokens =
+    let fns = filter_tokens(input, "FnDef")
+    merge_tokens(quote("// public functions:\n"), fns)
+
+// --- 4. Compile-time validation macro ---
+macro checked_add(a: int, b: int) -> Tokens =
+    guard a + b < 1000 else:
+        error("overflow")
+    quote("let result: i64 = " + a + "+" + b + ";")
+
+// --- 5. template definition ---
+template make!<T>(name: Tokens, fields..: Tokens) -> Tokens =
+    f```
+    struct $(name) =
+        $(fields)
+    ```
+
+template assert_eq!<T>(a: Tokens, b: Tokens) -> Tokens =
+    quote("assert_eq!(" + a + ", " + b + ")")
+
+// --- 6. Macro call examples (in regular code, these would be used as: ---
 // @id!
 // def f() = 42
-
-// --- 6. template definition ---
-// template name!<T>(params) -> Tokens = body
-// template ends with ! suffix, call uses name! (no @ prefix)
 //
-// template make!<T>(name: Tokens, fields..: Tokens) -> Tokens =
-//     f```
-//     struct $(name) =
-//         $(fields)
-//     ```
-
-// --- 7. Template call ---
+// @debug_log!("running...")
+//
 // make!(MyStruct,
 //     x: int
 //     y: int
 // )
-// Expands to:
-// struct MyStruct =
-//     x: int
-//     y: int
-
-// --- 8. Built-in macro functions ---
-// quote(s)          → string to Tokens
-// merge_tokens(a,b) → concatenate tokens
-// token_count(stream) → count tokens
-// filter_tokens(src, kind) → filter by token type
-// error(msg)        → compile-time error
-// assert_eq(a, b)   → compile-time assertion
-
-// --- 9. Attribute macro list ---
-// #!bin macro       → declare macro module
-// #!export(Rust)    → export to Rust cdylib
-// #!export(Python)  → export to PyO3 module
-// #!no_std          → disable standard library
-
-// --- 10. Macro expansion pipeline ---
-// Source → Lexer → MacroExpander → Parser → AST → CodeGen
-//                ↑ (only lexical scan)  ↑ (full syntax analysis)
-
-// --- 11. Macro invocation rules ---
-// @name! must be on its own line
-// template name! can be inline in expressions
-// Backtick blocks only get lexical scanning, not full syntax checking
-
-def main() =
-    print("macro and template syntax demonstrated")
-    // Runtime macro replacement results are baked in at compile time

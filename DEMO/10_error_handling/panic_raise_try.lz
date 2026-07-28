@@ -1,95 +1,242 @@
-// ============================
-// LZ Error Handling — panic / raise / try / catch
-// ============================
+// ============================================================
+// LZ Error Handling — panic / raise / try / catch / finally / ?
+// Spec: SYNTAX/09-错误处理.md
+// Covers: panic (built-in), raise/raises (raise REQUIRES raises
+// declaration), try/catch/finally, try as expression, multiple
+// catch branches, try/catch/else, custom exception enums (enum),
+// ? propagation, error boundary cases.
+// ============================================================
 
-// --- 1. panic (unrecoverable, built-in function) ---
-def abort_if_negative(x: int) -> int =
-    if x < 0:
-        panic("negative value not allowed")
-    x
+// =============================================================
+// 1. panic 中止（内置函数）
+// =============================================================
+// panic is a built-in function that immediately aborts the
+// program and prints a message. It is reserved as a keyword.
 
-// --- 2. raise / raises (recoverable exceptions) ---
-def divide(a: int, b: int) -> int raises str =
+def divide(a: int, b: int) -> int =
     if b == 0:
-        raise "division by zero"
+        panic("division by zero")   // built-in panic, halts
     a / b
 
-// raises declaration is REQUIRED if function body contains raise
+// panic(expr) — expr must be of type str
+
+// =============================================================
+// 2. raise / raises 异常
+// =============================================================
+// raise 抛出异常。如果函数体中有 raise，必须在函数签名中
+// 声明 raises 类型（否则编译错误）。
+
+def checked_divide(a: int, b: int) -> int raises str =
+    if b == 0:
+        raise "division by zero"   // raise with string
+    a / b
+
+// ❌ 编译错误：函数体有 raise 但未声明 raises
 // def bad() -> int =
-//     raise "oops"        // ❌ compile error: missing raises clause
+//     raise "oops"
 
-// --- 3. try / catch / finally ---
-def safe_divide(a: int, b: int) -> int =
-    try:
-        divide(a, b)
-    catch e:               // catch all exceptions
-        -1                 // fallback value
-    finally:
-        print("division attempted")
+// ✅ raises 支持多种异常类型联合
+def process_value(x: int) -> int raises str =
+    if x < 0:
+        raise "negative value"
+    if x > 1000:
+        raise "value too large: {x}"
+    x * 2
 
-// --- 4. try/catch as expression ---
-let result = try:
-    divide(10, 2)
-catch e:
-    -1          // value when exception occurs
-// result = 5
+// =============================================================
+// 3. 异常类型 — 自定义 exception enums
+// =============================================================
+// LZ 通过 enum 定义异常类型。无预设层次结构。
 
-// --- 5. Multiple catch branches ---
-try:
-    operation()
-catch ValueError:
-    print("value error")
-catch TypeError:
-    print("type error")
-catch e:              // wildcard catch (must be last)
-    print(f"unknown error: {e}")
-
-// --- 6. try/catch/else ---
-// else executes when try succeeds (no exception)
-try:
-    let data = read_file("input.txt")
-catch IOError:
-    print("file not found")
-else:
-    print(f"read {data.len()} bytes")     // only if try succeeds
-
-// --- 7. finally block (always executes) ---
-try:
-    let file = open("data.txt")
-    process(file)
-catch e:
-    print(f"error: {e}")
-finally:
-    file.close()            // always runs, even on exception
-
-// --- 8. Custom exception types (via enum) ---
 enum AppError:
     NotFound(str)
     InvalidInput(str)
     PermissionDenied(str)
 
+enum FileError:
+    ReadError(str)
+    WriteError(str)
+    ParseError(int, str)
+
 def find_user(id: int) -> str raises AppError =
     guard id > 0 else:
         raise AppError.InvalidInput("id must be positive")
-    "user"
+    "user_{id}"
 
-// --- 9. ? error propagation operator ---
-// ? unwraps Ok values and propagates Err upward
+def read_config(path: str) -> str raises FileError =
+    if path == "":
+        raise FileError.ReadError("empty path")
+    if path.ends_with(".json") == false:
+        raise FileError.ParseError(1, "expected .json file")
+    "config_data"
+
+// =============================================================
+// 4. try / catch / finally
+// =============================================================
+
+// 4a. Basic try/catch/finally
+def safe_divide(a: int, b: int) -> int =
+    try:
+        checked_divide(a, b)
+    catch e:              // catch all exceptions
+        -1                // fallback value
+    finally:
+        print("division attempted")   // always runs
+
+// 4b. try without catch (just finally — allowed)
+def try_finally_only() =
+    try:
+        print("open resource")
+    finally:
+        print("close resource")
+
+// 4c. catch without pattern (catches everything, no binding)
+def try_catch_no_pattern() =
+    try:
+        checked_divide(10, 0)
+    catch:
+        print("something went wrong (no details)")
+
+// =============================================================
+// 5. try 作为表达式
+// =============================================================
+// try 块的尾表达式作为 Ok 值；catch 分支尾表达式作为 Err 值。
+
+let result_from_try = try:
+    checked_divide(10, 2)
+catch e:
+    -1               // 出错时返回 -1
+// result_from_try = 5
+
+let fallback_result = try:
+    checked_divide(10, 0)
+catch e:
+    -1               // fallback: result = -1
+// fallback_result = -1
+
+// =============================================================
+// 6. 多 catch 分支
+// =============================================================
+
+def multi_catch_demo(val: int) =
+    try:
+        let r = process_value(val)
+        print("result: {r}")
+    catch ValueError:
+        print("value error caught")
+    catch TypeError:
+        print("type error caught")
+    catch e:              // 通配 catch（必须最后）
+        print("unknown error: {e}")
+
+// With custom enum exceptions:
+def handle_user(id: int) =
+    try:
+        let u = find_user(id)
+        print("user: {u}")
+    catch AppError.InvalidInput(msg):
+        print("invalid input: {msg}")
+    catch AppError.NotFound(msg):
+        print("not found: {msg}")
+    catch e:              // wildcard for other AppError variants
+        print("app error: {e}")
+
+// =============================================================
+// 7. try/catch/else
+// =============================================================
+// else 在 try 成功、catch 未触发时执行。
+// else 必须在所有 catch 分支之后、finally 之前。
+
+def try_catch_else_demo() =
+    try:
+        let data = read_config("config.json")
+    catch FileError.ReadError(msg):
+        print("read error: {msg}")
+    catch FileError.ParseError(line, msg):
+        print("parse error at line {line}: {msg}")
+    else:
+        print("config loaded successfully")    // only if try succeeds
+    finally:
+        print("read_config attempted")         // always runs
+
+// =============================================================
+// 8. 错误传播 ? 操作符
+// =============================================================
+// ? 后缀操作符将 Result<T,E> 错误向上传播。
+// 仅对 Result 类型有效。对于自定义 raises 异常，使用 try/catch。
+
 def parse_and_process(s: str) -> int raises ParseError =
     let val = parse_int(s)?
     val * 2
 
-// ? only works with Result types
-// For custom raises exceptions, use try/catch
+// 等价于：
+// def parse_and_process(s: str) -> int raises ParseError =
+//     let val = match parse_int(s):
+//         case Ok(v): v
+//         case Err(e): raise e
+//     val * 2
 
+def read_and_parse(path: str) -> int raises FileError =
+    let content = read_file(path)?
+    let parsed = parse_int(content)?
+    parsed
+
+// =============================================================
+// 9. 错误语法边界
+// =============================================================
+// ❌ raise 未声明 raises
+// def bad() -> int =
+//     raise "oops"             // error: missing raises clause
+
+// ❌ panic 缺少消息
+// panic()                      // error: panic needs argument
+
+// ❌ try 无 catch 或 finally
+// try:
+//     do_something()           // error: try needs catch or finally
+
+// ❌ ? 用于非 Result/Option 类型
+// let x: int = 42
+// let y = x?                   // error: int is not Result
+
+// ❌ catch 分支缺少模式
+// try:
+//     action()
+// catch:                       // error: catch needs pattern
+//     handler()
+
+// ❌ raise 类型与 raises 不匹配
+// def f() -> int raises str =
+//     raise 42                 // error: raises str but raised int
+
+// =============================================================
+// main — run all demos
+// =============================================================
 def main() =
-    let r1 = safe_divide(10, 2)       // 5
-    let r2 = safe_divide(10, 0)       // -1 (catch returns -1)
+    // panic example (commented out to avoid abort)
+    // print(divide(5, 0))     // would panic
 
-    let try_result = try:
-        find_user(1)
-    catch AppError.InvalidInput(msg):
-        print(f"invalid: {msg}")
-        ""
+    // raise / try / catch / finally
+    print(safe_divide(10, 2))     // 5
+    print(safe_divide(10, 0))     // -1
 
-    print(r1, r2, try_result)
+    // try as expression
+    print(result_from_try)        // 5
+    print(fallback_result)        // -1
+
+    // try/catch/else + finally
+    try_catch_else_demo()
+
+    // custom enum exceptions
+    handle_user(1)
+    handle_user(-1)
+
+    // multi catch
+    multi_catch_demo(5)
+    multi_catch_demo(2000)
+
+    // error boundary: try without catch (just finally)
+    try_finally_only()
+
+    // error boundary: catch without pattern
+    try_catch_no_pattern()
