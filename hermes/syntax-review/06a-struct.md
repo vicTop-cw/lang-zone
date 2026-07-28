@@ -131,7 +131,7 @@ struct Rectangle =
 |------|------|------|
 | `self` | 不可变引用 `&Self` | 只读访问字段，不可修改 |
 | `self: Self` | 不可变引用（显式） | 与 `self` 等价，显式写出类型 |
-| `mut self` | 可变引用 `&mut Self` | 可修改字段 |
+| `mut self` | 可变引用 `&mut Self` | 可修改字�� |
 
 > **self 语义区分 — 普通方法 vs 魔法方法：**
 >

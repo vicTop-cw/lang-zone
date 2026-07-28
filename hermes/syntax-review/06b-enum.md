@@ -97,46 +97,9 @@ match shape:
 
 > 详细 match 语法见 **[05-控制流](05-控制流.md)**。
 
-```lz
-// 带位置模式匹配（元组变体，按顺序取字段）
-match c:
-    case Circle(x, y, r) =>
-        print(f"Circle at ({x},{y}) radius {r}")
-    case Rect(x, y, w, h) =>
-        print(f"Rect at ({x},{y}) {w}x{h}")
-```
-
 ---
 
-## 七、枚举方法
-
-enum 可定义方法，语法与 struct 方法完全一致：
-
-```lz
-enum Option<T>:
-    Some(T)
-    None
-
-    def is_some(self) -> bool =
-        match self:
-            case Some(_) => True
-            case None => False
-
-    def unwrap_or(self, default: T) -> T =
-        match self:
-            case Some(v) => v
-            case None => default
-```
-
-enum 方法自动在所有变体上可用。使用 `self` 在方法中匹配当前变体。
-
-> 方法语法详见 **[06a-struct.md §三](06a-struct.md)**。
-
----
-
-## 八、枚举支持 trait
-
-## 九、错误语法边界
+## 七、错误语法边界
 
 ```lz
 // ❌ enum 用 = 而非 :

@@ -172,29 +172,4 @@ magic __map__:      // 至少需要 trait 或 method 之一（虽然有默认值
 
 ---
 
-## 内联 magic（struct 内）
-
-struct 内部可使用 `magic __方法名__` 作为 `magic 块` 的语法糖，无需再声明独立的 `magic` 块：
-
-```lz
-struct Point =
-    x: int
-    y: int
-
-    // 内联 magic __new__ — 自定义构造器
-    magic __new__(x: int, y: int) -> Point =
-        Point(x, y)
-
-    // 内联 magic __init__ — 初始化器
-    magic __init__(self: Point, x: int, y: int) =
-        self.x = x
-        self.y = y
-```
-
-`magic __new__` 覆盖编译器默认构造器。若未实现，编译器自动生成基于字段名的关键字构造 `Point(x: 1, y: 2)`。
-
-> 详见 [06a-struct.md](06a-struct.md) §六 构造器魔法方法。
-
----
-
 *上一章：[06e-模块级魔法属性](06e-模块级魔法属性.md)* · *下一章：[06g-魔法综合](06g-魔法综合.md)*
