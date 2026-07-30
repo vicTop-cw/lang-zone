@@ -1,77 +1,11 @@
 // ============================
-// LZ Generators — yield / yield from / PartialFunc / *:
+// LZ Generators — yield
 // ============================
 
-// --- 1. Basic generator (function containing yield) ---
-def counter(n: int) =
+iterator counter(n: int) -> int =
     for i in 0..n:
         yield i
-
-// --- 2. yield forms ---
-def signals() =
-    yield
-    yield 1
-    yield
-
-// --- 3. yield from (delegate to another iterator) ---
-def chain(iter1, iter2) =
-    yield from iter1
-    yield from iter2
-
-// --- 4. yield from with PartialFunc ---
-let transform = PartialFunc(
-    pre_filter = |x| x != 0,
-    map = |x| 100 / x,
-    post_filter = |x| x > 0
-)
-
-def processed(nums) =
-    yield from nums with transform
-
-// --- 5. Generator build block func *: ---
-def add(a: int, b: int) -> int = a + b
-
-def gen_block_demo() =
-    let xs = add *:
-        yield (1, 2)
-        yield (10, 20)
-        yield (5, -1)
-
-    for x in xs:
-        print(x)
-
-    let ys = greet *:
-        yield {"title": "Mr", "name": "Zhang"}
-        yield {"title": "Ms", "name": "Li"}
-
-    for y in ys:
-        print(y)
-
-    let pairs = [(1, 2), (3, 4)]
-    let zs = add *:
-        yield from pairs
-
-    for z in zs:
-        print(z)
-
-def greet(title: str, name: str) -> str = f"{title} {name}"
-
-// --- 6. return in generators (stops iteration) ---
-def limited(n: int) -> int =
-    for i in 0..10:
-        if i >= n:
-            return
-        yield i
-
-// --- 7. yield must be at function top level ---
-// def bad() =
-//     f = |x| yield x    // ❌ yield inside closure
 
 def main() =
     for x in counter(5):
         print(x)
-
-    for x in limited(3):
-        print(x)
-
-    gen_block_demo()

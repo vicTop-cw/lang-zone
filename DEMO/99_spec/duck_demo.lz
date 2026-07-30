@@ -1,0 +1,238 @@
+// ==============================================================
+// LZ duck 关键字 — 结构性类型约束（鸭子类型）规范 demo
+// 当前状态：99_spec（编译器未实现，被 parse 测试跳过）
+// 对应规范：SYNTAX/01-类型系统.md §九 + 01b-duck关系约束.md
+// ==============================================================
+
+// ==============================================================
+// 第一部分：单类型 duck 约束（§九 基础）
+// ==============================================================
+
+// ------ 1. 基本 duck 定义 ------
+
+duck Quackable =
+    def quack(self) -> ()
+    def walk(self) -> ()
+
+// ------ 2. 带字段约束 ------
+
+duck HasName =
+    .name: str
+    def greet(self) -> str
+
+// ------ 3. 带关联类型 ------
+
+duck Iterable =
+    type Item
+    def __iter__(self) -> Iterator<Self.Item>
+
+// ------ 4. 多个类型满足同一 duck ------
+
+struct Dog =
+    def quack(self) -> () = print("Dog: quack?")
+    def walk(self) -> () = print("Dog: walking")
+
+struct Duck =
+    def quack(self) -> () = print("Duck: quack!")
+    def walk(self) -> () = print("Duck: waddle")
+
+// ------ 5. duck + trait 混合 ------
+
+duck HasArea =
+    def area(self) -> f64
+
+struct Circle =
+    radius: f64
+    def area(self) -> f64 = 3.14159 * self.radius * self.radius
+
+struct Rectangle =
+    width: f64
+    height: f64
+    def area(self) -> f64 = self.width * self.height
+
+def print_area[T: HasArea](shape: T) =      // 检查站 [T: HasArea]
+    print(f"area: {shape.area()}")
+
+// 检查站 [] + 普通泛型 <> 混合
+def mix_checkpoint[T: HasArea]<R>(shape: T, extra: R) =
+    print_area(shape)
+
+// where 子句是另一种等价写法
+def process_where[T](x: T) where T: Quackable =
+    print("about to quack")
+    x.quack()
+
+// ==============================================================
+// 第二部分：多类型关系约束（01b-duck §一~§五）
+// ==============================================================
+
+// ------ 6. 基本关系 duck ------
+
+duck Mapper<T, R> =
+    def T.map(self) -> R
+    def R.unmap(self) -> T
+
+struct Wrapper<T>(value: T)
+    def map(self) -> T = self.value
+
+// Wrapper<T>.map → T 自动满足 Mapper<T=Wrapper<T>, R=T>
+
+// ------ 7. 关联类型关系 ------
+
+duck IterPair<T, I> =
+    type I.Item
+    def T.__iter__(self) -> I
+    def I.__next__(mut self) -> T
+
+// ------ 8. 编解码对 ------
+
+duck Codec<T, Encoded> =
+    def T.encode(self) -> Encoded
+    def Encoded.decode(self) -> T
+
+struct User(id: int, name: str)
+struct Json(str)
+impl User =
+    def encode(self) -> Json = Json(f'{{"id":{self.id},"name":"{self.name}"}}')
+impl Json =
+    def decode(self) -> User = User(1, "parsed")
+
+// ==============================================================
+// 第三部分：编译期静态检查（01b-duck §八）
+// ==============================================================
+
+// ------ 9. 方法名正则模式匹配 /pattern/ ------
+
+duck HasGetters =
+    def /get_\w+/ (ref self) -> str
+    match /get_\w+/ at_least(1)
+
+struct Config =
+    name: str
+    version: int
+    def get_name(ref self) -> str = self.name
+    def get_version(ref self) -> str = self.version.to_string()
+    def get_meta(ref self) -> str = "meta"
+
+// Config 自动满足 HasGetters（3 个 get_ 方法）
+
+// CRUD 服务：匹配 create/read/update/delete 四种操作
+duck CRUDService =
+    def /(create|read|update|delete)_\w+/ (self, ..) -> ()
+    match /(create|read|update|delete)_\w+/ exact(4)
+
+struct UserService =
+    def create_user(self, name: str) = pass
+    def read_user(self, id: int) = pass
+    def update_user(self, id: int, name: str) = pass
+    def delete_user(self, id: int) = pass
+
+// ------ 10. 参数约束 ------
+
+duck StackProcessor =
+    def compute(self, a: StackType, b: StackType) -> StackType
+    def save(self, data: RefType) -> ()
+
+// StackType: int, f64, bool, ()
+// RefType:   List, Dict, Box, Iterator
+
+// 位置参数数量约束
+duck RangeCtor =
+    def build(self, ..) -> T
+    match |args| range(2, 4)                  // 参数数量在 2-4 之间
+
+struct UserData(id: int, name: str, active: bool)
+    // build(1, "a", true)  ✅ 3 个参数在 range(2,4) 内
+
+// ------ 11. 修饰符约束 ------
+
+duck PublicReader =
+    pub .value: int
+    def read(ref self) -> int
+
+struct Counter =
+    pub value: int
+    count: int                                // 私有字段
+    def read(ref self) -> int = self.value    // ✅ &self
+
+// ------ 12. 链式推断 ------
+
+duck ChainedProcess<T, R, S> =
+    def T.get_loader(self) -> R
+    def R.load(self) -> S
+    def S.to_string(ref self) -> str
+
+struct Loader(data: List<int>)
+    def load(self) -> List<int> = self.data
+
+struct Pipeline(data: List<int>)
+    def get_loader(self) -> Loader = Loader(data: self.data)
+
+// 编译期推断链：Pipeline.get_loader → Loader → Loader.load() → List<int>
+// List<int> 有 to_string() 方法？— 如果有，整条链通过
+
+// ------ 13. 需要命名参数 ------
+
+duck Sendable =
+    def send(self, ..) -> ()
+    require(to: str, body: str)
+
+struct Mailer
+    def send(self, to: str, body: str, cc: str = "") -> () = pass
+
+// Mailer.send 有 to:str, body:str → 满足 Sendable ✅
+
+// ==============================================================
+// main — 演示编译期结构匹配
+// ==============================================================
+
+def main() =
+    // -- 1-5: 单类型 duck --
+    make_quack(Dog())                // ✅ Dog 满足 Quackable
+    make_quack(Duck())               // ✅ Duck 满足 Quackable
+    print_area(Circle(radius: 2.0))  // ✅ Circle 有 area()
+    print_area(Rectangle(width: 3.0, height: 4.0))
+
+    // -- 6: 关系 duck --
+    let w = Wrapper(value: 42)
+    let mapped = w.map()             // ✅ Wrapper<int>.map → int
+
+    // -- 8: 编解码 --
+    let u = User(id: 1, name: "alice")
+    let j = u.encode()               // ✅ User.encode → Json
+    let u2 = j.decode()              // ✅ Json.decode → User
+
+    // -- 9: 正则匹配 --
+    let cfg = Config(name: "app", version: 1)
+    print(cfg.get_name())            // ✅ get_name 匹配 /get_\w+/
+    print(cfg.get_version())         // ✅ get_version 匹配
+
+    let svc = UserService()
+    svc.create_user("bob")           // ✅ 匹配 /create_\w+/
+    svc.read_user(1)                 // ✅ 匹配 /read_\w+/
+
+    // -- 10: 参数约束 --
+    // compute(1, 2) → StackType ✅  save([1,2]) → RefType ✅
+
+    // -- 11: 修饰符 --
+    let ct = Counter(value: 10, count: 0)
+    print(ct.read())                 // ✅ Counter.read(&self) → int
+
+    // -- 13: 命名参数 --
+    let mailer = Mailer()
+    mailer.send(to: "a@b.com", body: "hello")  // ✅ 有 to/boddy
+
+    // -- 14: .. 位置通配符 + _ 占位符 --
+    // duck Extensible = id: int, name: str, ..
+    // duck Named = _: Any, name: str
+    // duck Service = init(), _(), process(), _(), destroy()
+
+    // -- 15: 交叉约束 Merge --
+    // duck Merge<A, B, C> where C: A & B
+
+    // -- 16: 签名继承 Extended<T> = T, .., enhanced: bool
+
+    // ❌ 以下编译期报错（注释掉的示例）
+    // make_quack(42)                // ❌ int 没有 quack()
+    // print_area("hi")              // ❌ str 没有 area()
+    // mailer.send(body: "hi")       // ❌ 缺少 require(to: str)

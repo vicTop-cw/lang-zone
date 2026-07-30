@@ -1,82 +1,22 @@
 // =============================================================
 // LZ 词法基础 — 全部关键字展示 (00-词法基础.md §一)
-// 模块级关键字声明在顶层，表达式级关键字在 def main() 内演示。
+// 关键字在 def main() 内演示。iterator 是顶层定义关键字，定义在 main() 外。
 // =============================================================
 
-// --- 1.1 声明关键字（模块级）---
-def sample(a: int) -> int = a + 1
-
-struct Point =
-    x: f64
-    y: f64
-
-enum Color:
-    Red
-    Green
-    Blue
-
-trait Drawable =
-    def draw(self) -> () = ...
-
-impl Drawable for Point =
-    def draw(self) -> () = print("drawing")
-
-type UserId = int
-const MAX_SIZE: int = 1024
-
-magic __str__:
-    def __str__(self: Point) -> str = "Point"
-
-// --- 1.6 模块关键字（模块级）---
-import std.io
-from std.io import print
-import std.collections.HashMap as Map
-
-// --- 1.7 泛型关键字（模块级）---
-def identity<T>(x: T) -> T = x
-
-trait Cloneable =
-    def clone(self) -> Self = ...
-
-// --- 1.8 宏/编译期关键字（模块级）---
-// Macro and template require #!bin macro module; shown in 09_macros/
-comptime:
-    const TABLE_SIZE: int = 256
-
-// --- 1.9 测试关键字（模块级）---
-test "keyword_demo":
-    assert 1 + 1 == 2
-    check 2 + 2 == 4
-
-suite DemoSuite:
-    setup:
-        print("setup")
-    teardown:
-        print("teardown")
-    test "suite_test":
-        assert 1 == 1
+// 生成器关键字 iterator
+iterator counter(n: int) -> int =
+    for i in 0..n:
+        yield i
 
 def main() =
-    // --- 1.1 声明关键字（表达式级）---
-    // mut — 可变修饰（变量绑定中为 no-op）
-    mut x = 42         // 等价于 x = 42
-    x = 100
-
-    // ref — 不可变引用；mut ref = 可变引用
-    let data = 42
-    ref r = data       // 可变引用（默认可变）
-    let ref s = data   // 不可变引用
-
-    // let — 不可变绑定
+    // 声明关键字
+    def add(a: int, b: int) -> int = a + b
     let name: str = "Alice"
+    x = 42
+    x = 100
+    pass
 
-    // owned — 形参修饰
-    def consume(owned res: str) -> str = res
-    let owned_example = consume("test")
-
-    // ... 抽象方法（已在 trait Drawable 中使用 `= ...`）
-
-    // --- 1.2 控制流关键字 ---
+    // 控制流关键字
     if x > 0:
         print("positive")
     elif x < 0:
@@ -90,7 +30,7 @@ def main() =
         case _ => "many"
 
     guard x != 0 else:
-        print("guard triggered")
+        print("guarded")
 
     for v in [1, 2, 3]:
         print(v)
@@ -105,19 +45,12 @@ def main() =
             break
         i += 1
 
-    pass
-
     for v in [1, 2, 3]:
         if v == 2:
             continue
         print(v)
 
-    return
-
-    defer:
-        print("cleanup")
-
-    // --- 1.3 异常关键字 ---
+    // 异常关键字
     def faulty() raises str =
         raise "error"
 
@@ -128,30 +61,22 @@ def main() =
     finally:
         print("done")
 
-    // --- 1.4 异步关键字 ---
+    // 异步关键字
     async def fetch() -> str = "data"
     let f = spawn fetch()
     let r = await f
-    go compute_heavy()                     // 启动并行进程（设计阶段）
 
-    // --- 1.5 生成器 ---
-    def counter(n: int) =
-        for i in 0..n:
-            yield i
-
-    // --- 1.10 运算符关键字 ---
+    // 运算符关键字
     let r1 = True and False
     let r2 = True or False
     let r3 = not True
     let r4 = 42 is int
 
-    // --- 1.11 字面量关键字 ---
+    // 字面量关键字
     let flag: bool = True
     let missing: Option<int> = None
     let present: Option<int> = Some(42)
     let ok: Result<int, str> = Ok(1)
     let err: Result<int, str> = Err("fail")
-    let u: Unit = ()
-    let empty: Nil = []
 
     print("keywords demonstrated")
