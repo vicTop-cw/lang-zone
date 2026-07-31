@@ -1,10 +1,10 @@
 # Lang-Zone 编译器 — 使用指南
 
-LZ 编译器提供两个后端：`lzc`（Rust 原生代码生成）和 `lzcyc`（Cython/Python 代码生成）。
+LZ 编译器提供两个后端：`lang-zone`（Rust 原生代码生成，仓库根目录的默认二进制）和 `lzcyc`（Cython/Python 代码生成，位于 `CY/` 子项目）。
 
 ---
 
-## 一、lzc — LZ → Rust 编译器
+## 一、lang-zone — LZ → Rust 编译器
 
 ### 编译单个文件
 
@@ -52,7 +52,7 @@ cargo run -- hello.lz --ir-codegen
 # 库测试（292 项单元测试）
 cargo test --lib
 
-# 仅 DEMO 编译测试（含 99_spec/ 37 文件，跳过 99_errors/）
+# 仅 DEMO 编译测试（覆盖全部 114 个主 DEMO 文件，含 99_spec/ 37 个；跳过 99_errors/）
 cargo test --test compile_demos
 
 # 仅语法错误拒绝测试（99_errors/ 目录下 15/15 文件全部验证）
@@ -90,9 +90,9 @@ let rust_code = CodeGen::generate(&module, None, false, String::new());
 cd lz-infer
 cargo run --bin lz-infer -- ../hello.lz -o hello.lzi
 
-# 然后 lzc 编译时可加载该签名
+# 然后 lang-zone 编译时可加载该签名（计划中，--lzi 标志尚未实现）
 cd ..
-cargo run -- hello.lz --lzi lz-infer/hello.lzi
+# cargo run -- hello.lz --lzi lz-infer/hello.lzi
 ```
 
 ---
@@ -224,7 +224,7 @@ def main() =
 
 ## 五、lzcyc — LZ → Cython 子编译器
 
-`lzcyc` 是 `lzc` 的子编译器，语法完全兼容 LZ，后端输出 Cython（`.pyx`）→ 编译为 Python C 扩展（`.pyd`）。
+`lzcyc` 是 `lang-zone` 的子编译器，语法完全兼容 LZ，后端输出 Cython（`.pyx`）→ 编译为 Python C 扩展（`.pyd`）。
 
 ### 三个命令
 
@@ -243,7 +243,7 @@ cargo run --bin lzcyc -- run hello.lz
 
 ### 两个后端对比
 
-| 特性 | lzc (Rust) | lzcyc (Cython/Python) |
+| 特性 | lang-zone (Rust) | lzcyc (Cython/Python) |
 |:----|:---------:|:--------------------:|
 | 输出 | `.rs` → 原生二进制 | `.pyx` → `.pyd` |
 | 编译时间 | 快（源到源） | 中等（需 cythonize + C 编译） |
@@ -272,7 +272,7 @@ bash run_check.sh
 cd ..
 cargo test --test compile_demos
 
-# 覆盖范围（45 个主 DEMO + 8 个错误边界）
+# 覆盖范围（114 个主 DEMO + 15 个错误边界）
 # 01_basics/     — 字面量、关键字、注释
 # 02_types/      — Option/Result、类型别名
 # 03_variables/  — let/ref/const/owned
@@ -289,6 +289,6 @@ cargo test --test compile_demos
 # 14_pointers/   — Box/Rc/Arc
 # 15_generators/ — yield/yield from
 # 16_testing/    — test/suite/assert
-# 99_errors/     — 49 个预期失败语法边界
+# 99_errors/     — 15 个预期失败语法边界
 # 99_prelude/    — 内置预导入函数
 ```

@@ -99,7 +99,7 @@ def demo() -> int =
     #[test]
     fn ir_if_else() {
         let source = "
-def check(x: int) -> str =
+def check_val(x: int) -> str =
     if x > 0:
         \"positive\"
     else:
@@ -107,7 +107,7 @@ def check(x: int) -> str =
 ";
         let ir = lz_to_ir(source).expect("should compile");
         let text = format!("{ir}");
-        assert!(text.contains("fn check"));
+        assert!(text.contains("fn check_val"));
     }
 
     #[test]

@@ -306,6 +306,17 @@ impl ParserStmtExt for Parser {
                     Ok(Stmt::Assert { expr, expected: None })
                 }
             }
+            Token::Check => {
+                self.advance();
+                let expr = self.parse_expr()?;
+                let message = if self.check(&Token::Comma) {
+                    self.advance();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                Ok(Stmt::Check { expr, message })
+            }
             Token::Def => {
                 let func = self.parse_function(false)?;
                 Ok(Stmt::FnDef { func })
@@ -367,6 +378,26 @@ impl ParserStmtExt for Parser {
                 Ok(Stmt::Suite { name, setup, teardown, tests })
             }
             _ => {
+                // 局部类型别名: type Name = Type
+                if let Token::Ident(ref name) = self.peek() {
+                    if name == "type" {
+                        self.advance(); // 消费 type
+                        let alias_name = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected type alias name, got {:?}", t)),
+                        };
+                        self.expect(Token::Eq)?;
+                        let alias_ty = self.parse_type()?;
+                        return Ok(Stmt::TypeAlias { name: alias_name, ty: alias_ty });
+                    }
+                }
+                // pass 占位符
+                if let Token::Ident(ref name) = self.peek() {
+                    if name == "pass" {
+                        self.advance();
+                        return Ok(Stmt::Pass);
+                    }
+                }
                 // 类型化本地绑定: name: T = value
                 if let Token::Ident(_) = self.peek() {
                     if self.peek_n(1) == &Token::Colon {

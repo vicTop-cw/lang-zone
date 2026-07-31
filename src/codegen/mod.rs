@@ -44,6 +44,7 @@ pub struct CodeGen {
     pub(super) current_fn_name: RefCell<Option<String>>, // 当前正在生成的函数名（用于嵌套 def）
     pub(super) nested_fns: RefCell<Vec<Function>>,   // 从函数体提升的嵌套函数
     pub(super) top_level_builds: Vec<(String, Vec<Stmt>)>,  // 顶层构建块 (name, body)
+    pub(super) local_type_aliases: RefCell<Vec<(String, String)>>, // 局部type别名 (name, rust_type)
 }
 
 impl CodeGen {
@@ -100,6 +101,7 @@ impl CodeGen {
             current_fn_name: RefCell::new(None),
             nested_fns: RefCell::new(Vec::new()),
             top_level_builds: module.top_level_builds.clone(),
+            local_type_aliases: RefCell::new(Vec::new()),
         };
         // 收集函数/方法参数（名 + Rust 类型），供构建块解包（位置 *args / 命名 **kwargs）使用
         for f in &module.functions {
@@ -206,7 +208,12 @@ impl CodeGen {
             let rust_ty = ta.ty.to_rust_type_string();
             out.push_str(&format!("type {} = {};\n", ta.name, rust_ty));
         }
-        if !module.type_aliases.is_empty() { out.push('\n'); }
+        // 4.6. Local type aliases (hoisted from function bodies)
+        let local_aliases = cg.local_type_aliases.borrow();
+        for (name, rust_ty) in local_aliases.iter() {
+            out.push_str(&format!("type {} = {};\n", name, rust_ty));
+        }
+        if !module.type_aliases.is_empty() || !local_aliases.is_empty() { out.push('\n'); }
 
         // 5. Impls
         for i in &module.impls {

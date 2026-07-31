@@ -520,7 +520,7 @@ impl Parser {
 
         // 参数
         self.expect(Token::LParen)?;
-        let params = self.parse_params()?;
+        let (params, variadic) = self.parse_params()?;
         self.expect(Token::RParen)?;
 
         // 返回类型: 使用 `-> type`（与参数类型注解 `:` 区分）
@@ -594,7 +594,8 @@ impl Parser {
 
         Ok(Function {
             name, generics, params, return_type, raises,
-            where_clause, body, is_async: false, is_abstract, is_iterator: false, decorators: Vec::new(),
+            where_clause, body, is_async: false, is_abstract, is_iterator: false,
+            decorators: Vec::new(), variadic,
         })
     }
 
@@ -660,9 +661,26 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_params(&mut self) -> Result<Vec<Param>, String> {
+    /// 解析函数参数列表，返回 (params, variadic_mode)
+    /// `..` 最多出现 2 次，分隔 仅位置/仅关键字/args+kwargs 参数
+    fn parse_params(&mut self) -> Result<(Vec<Param>, VariadicMode), String> {
         let mut params = Vec::new();
+        let mut dotdot_positions: Vec<usize> = Vec::new();
+
         while !self.check(&Token::RParen) {
+            // 检查 `..` 分隔符
+            if self.check(&Token::DotDot) {
+                if dotdot_positions.len() >= 2 {
+                    return Err("`..` 分隔符最多出现 2 次".to_string());
+                }
+                self.advance(); // 消费 DotDot
+                dotdot_positions.push(params.len());
+
+                // `..` 后可选逗号继续
+                if self.check(&Token::Comma) { self.advance(); }
+                continue;
+            }
+
             // 参数默认不可变；mut 修饰按需添加
             let mut is_mut = false;
             let mut is_owned = false;
@@ -685,7 +703,7 @@ impl Parser {
             };
 
             // 参数可以无类型注解（默认为泛型推断）
-            let ty = if self.check(&Token::Comma) || self.check(&Token::RParen) {
+            let ty = if self.check(&Token::Comma) || self.check(&Token::RParen) || self.check(&Token::DotDot) {
                 if name == "self" { Type::Self_ } else { Type::Any }
             } else {
                 self.expect(Token::Colon)?;
@@ -715,7 +733,18 @@ impl Parser {
             params.push(Param { name, ty, default, is_mut, is_owned, is_ref });
             if self.check(&Token::Comma) { self.advance(); }
         }
-        Ok(params)
+
+        let variadic = match dotdot_positions.len() {
+            0 => VariadicMode::None,
+            1 => VariadicMode::Single { dotdot_at: dotdot_positions[0] },
+            2 => VariadicMode::Double {
+                first_at: dotdot_positions[0],
+                second_at: dotdot_positions[1],
+            },
+            _ => unreachable!(),
+        };
+
+        Ok((params, variadic))
     }
 
     fn parse_where_clause(&mut self) -> Result<Vec<WhereBound>, String> {
@@ -948,18 +977,31 @@ impl Parser {
         self.skip_newlines();
 
         // 单行 struct: struct Box<T> = value: T
+        // 或 struct Point = x: f64, y: f64
         if !self.check(&Token::Indent) {
             let mut fields = Vec::new();
             let methods = Vec::new();
-            // 解析单行字段
+            // 解析单行字段（支持逗号分隔多个字段）
             if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
-                let f_name = match self.advance() {
-                    Token::Ident(n) => n,
-                    _ => return Err("Expected field name".into()),
-                };
-                self.expect(Token::Colon)?;
-                let f_type = self.parse_type()?;
-                fields.push(Field { name: f_name, ty: f_type, default: None });
+                loop {
+                    let f_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("struct 字段需换行缩进书写，或单行用逗号分隔。当前: {:?}", t)),
+                    };
+                    self.expect(Token::Colon)?;
+                    let f_type = self.parse_type()?;
+                    fields.push(Field { name: f_name, ty: f_type, default: None });
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                        // 跳过逗号后的空格/换行（检查是否还有下一个字段）
+                        self.skip_newlines();
+                        if self.check(&Token::Newline) || self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
             }
             return Ok(StructDef { name, generics, fields, methods, magic_methods: Vec::new(), is_enum, decorators: Vec::new(), repr_attr: None });
         }
@@ -1006,13 +1048,13 @@ impl Parser {
                         t => return Err(format!("Expected magic method name, got {:?}", t)),
                     };
                     // 解析参数列表
-                    let params = if self.check(&Token::LParen) {
+                    let (params, variadic) = if self.check(&Token::LParen) {
                         self.advance();
-                        let params = self.parse_params()?;
+                        let result = self.parse_params()?;
                         self.expect(Token::RParen)?;
-                        params
+                        result
                     } else {
-                        Vec::new()
+                        (Vec::new(), VariadicMode::None)
                     };
                     // 解析返回类型
                     let return_type = if self.check(&Token::Arrow) {
@@ -1056,6 +1098,7 @@ impl Parser {
                         is_abstract: false,
                         is_iterator: false,
                         decorators: Vec::new(),
+                        variadic,
                     });
                     self.skip_newlines();
                     continue;

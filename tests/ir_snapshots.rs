@@ -91,14 +91,14 @@ def main() -> () =
 #[test]
 fn ir_if_else() {
     let source = r#"
-def check(x: int) -> str =
+def check_val(x: int) -> str =
     if x > 0:
         "positive"
     else:
         "non-positive"
 "#;
     run_ir_test(source, "if_else", &[
-        "LZIR v1", "fn check",
+        "LZIR v1", "fn check_val",
         "if", "else",
     ]);
 }

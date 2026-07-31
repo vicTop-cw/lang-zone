@@ -337,6 +337,13 @@ pub enum Stmt {
     Block {
         stmts: Vec<Stmt>,
     },
+    /// pass 占位符，无操作
+    Pass,
+    /// 局部类型别名（仅文档/注释，代码生成时提升到模块级）
+    TypeAlias {
+        name: String,
+        ty: IrType,
+    },
 }
 
 /// 代码块

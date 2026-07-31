@@ -20,7 +20,7 @@ pub enum Token {
     Try, Catch, Finally, Raise, Raises,
 
     // ── 测试 ──
-    Test, Assert, Suite, Setup, Teardown,
+    Test, Assert, Suite, Setup, Teardown, Check,
 
     // ── 并发 ──
     Async, Await, Spawn, Go, Select,

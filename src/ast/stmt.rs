@@ -59,7 +59,10 @@ pub enum Stmt {
 
     FnDef { func: Function },
 
-    // ── 测试 ──
+    // ── 占位符 ──
+    Pass,
+
+    // ���─ 测试 ──
     Test {
         name: String,
         body: Vec<Stmt>,
@@ -67,6 +70,10 @@ pub enum Stmt {
     Assert {
         expr: Expr,
         expected: Option<Expr>,
+    },
+    Check {
+        expr: Expr,
+        message: Option<Expr>,
     },
     Suite {
         name: String,
@@ -78,6 +85,12 @@ pub enum Stmt {
     // ── 编译期 ──
     Comptime {
         body: Vec<Stmt>,
+    },
+
+    // ── 局部类型别名 ──
+    TypeAlias {
+        name: String,
+        ty: Type,
     },
 }
 

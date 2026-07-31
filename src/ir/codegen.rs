@@ -512,6 +512,10 @@ impl CodeGen {
             }
             Stmt::Break => self.emit_line("break;"),
             Stmt::Continue => self.emit_line("continue;"),
+            Stmt::Pass => self.emit_line("();  // pass"),
+            Stmt::TypeAlias { name, ty } => {
+                self.emit_line(&format!("// type {} = {};", name, self.rust_type(ty)));
+            }
             Stmt::Raise { value } => {
                 self.emit_line(&format!("panic!(\"{{}}\", {});", self.gen_expr(value)));
             }

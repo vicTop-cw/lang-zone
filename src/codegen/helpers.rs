@@ -92,6 +92,7 @@ pub(super) fn gen_decorator_attr(d: &Decorator) -> String {
         "simd" => return "#[inline(always)]\n".to_string(),
         "parallel" => return "#[cfg(feature = \"rayon\")]\n".to_string(),
         "tail_call" => return "#[inline(never)]\n".to_string(),
+        "memoize" => return String::new(),  // handled in gen_function, not as attr
         _ => {}
     }
     let args: Vec<String> = d.args.iter()

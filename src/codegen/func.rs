@@ -30,8 +30,14 @@ impl CodeGenFuncExt for CodeGen {
         // 设置当前函数名（�� gen_stmt 处理 Stmt::FnDef 时使用）
         self.current_fn_name.replace(Some(f.name.clone()));
 
-        // 装饰器
+        // @export(Rust) -> #[no_mangle] pub fn
+        let has_export = has_decorator(f, "export");
+        let visibility = if has_export { "#[no_mangle]\npub " } else { "" };
+        let has_memoize = has_decorator(f, "memoize");
+
+        // decorators
         for d in &f.decorators {
+            if d.name == "export" { continue; }
             out.push_str(&gen_decorator_attr(d));
         }
 
@@ -123,9 +129,27 @@ impl CodeGenFuncExt for CodeGen {
         };
         let body = body.trim_end();
 
+        // @memoize wrapper: add OnceLock<HashMap<>> cache for single-arg functions
+        let body = if has_memoize && f.params.len() == 1 {
+            let param_name = &f.params[0].name;
+            let param_ty = self.map_type(&f.params[0].ty);
+            let ret_ty = f.return_type.as_ref()
+                .map(|t| self.map_type(t))
+                .unwrap_or_else(|| "()".to_string());
+            let cache_name = format!("__MEMOIZE_{}", f.name.to_uppercase());
+            // Wrap original body in a closure to capture result
+            let inner_body = if body.is_empty() { "()".to_string() } else { format!("(|| {{ {} }})()", body) };
+            format!(
+                "    static {}: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<{}, {}>>> = std::sync::OnceLock::new();\n    let cache = {}.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));\n    {{\n        let lock = cache.lock().unwrap();\n        if let Some(v) = lock.get(&{}) {{ return v.clone(); }}\n    }}\n    let result = {};\n    cache.lock().unwrap().insert({}, result.clone());\n    result",
+                cache_name, param_ty, ret_ty, cache_name, param_name, inner_body, param_name
+            )
+        } else {
+            body.to_string()
+        };
+
         out.push_str(&format!(
-            "{}fn {}{}({}){}{} {{\n{}\n}}\n",
-            async_kw, f.name, generics,
+            "{}{}fn {}{}({}){}{} {{\n{}\n}}\n",
+            async_kw, visibility, f.name, generics,
             params.join(", "), ret, where_str, body
         ));
 

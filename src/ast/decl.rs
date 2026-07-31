@@ -42,6 +42,17 @@ pub struct ConstDef {
     pub mutable: bool,
 }
 
+/// 可变参数模式：记录 `..` 分隔符在参数列表中的位置
+#[derive(Debug, Clone, PartialEq)]
+pub enum VariadicMode {
+    /// 无 `..` 分隔符
+    None,
+    /// 单个 `..`：此前 params[0..pos] 为仅位置，此后 params[pos..] 为仅关键字
+    Single { dotdot_at: usize },
+    /// 两个 `..`：`args` + `kwargs` 模式
+    Double { first_at: usize, second_at: usize },
+}
+
 #[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
@@ -55,6 +66,8 @@ pub struct Function {
     pub is_abstract: bool,
     pub is_iterator: bool,       // iterator 关键字定义的生成器函数
     pub decorators: Vec<Decorator>,
+    /// `..` 可变参数模式
+    pub variadic: VariadicMode,
 }
 
 #[derive(Debug, Clone)]
