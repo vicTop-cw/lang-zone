@@ -195,6 +195,10 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::MethodCall { receiver, method, .. } => {
             // 尝试从 receiver 类型推导方法返回类型
             let recv_ty = infer_expr_type(receiver, ctx);
+            // 常见无返回值方法 → Unit
+            if method == "push" || method == "insert" || method == "remove" || method == "clear" {
+                return IrType::Unit;
+            }
             match &recv_ty {
                 IrType::Named { path, .. } => {
                     // 简单启发式：Option::unwrap → 内部类型
@@ -325,9 +329,15 @@ fn convert_ast_pattern(pat: &AstPattern) -> Option<Pattern> {
             let ir_args: Vec<Pattern> = args.iter()
                 .filter_map(|a| convert_ast_pattern(a))
                 .collect();
+            // 如果 name 包含 '.'（如 "Color.Red"），拆分为 enum_name.variant
+            let (enum_name, variant) = if let Some(dot_pos) = name.rfind('.') {
+                (name[..dot_pos].to_string(), name[dot_pos+1..].to_string())
+            } else {
+                ("Error".into(), name.clone())
+            };
             Some(Pattern::Enum {
-                enum_name: "Error".into(),
-                variant: name.clone(),
+                enum_name,
+                variant,
                 args: ir_args,
             })
         }
@@ -444,8 +454,8 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }
             };
 
-            // elif 链 = 嵌套 if
-            for (elif_cond, elif_body) in elif_clauses.iter() {
+            // elif 链 = 嵌套 if（反向迭代，使第一个 elif 成为最外层 if）
+            for (elif_cond, elif_body) in elif_clauses.iter().rev() {
                 result = ExprKind::IfExpr {
                     cond: Box::new(convert_expr(elif_cond, ctx)),
                     then: Box::new(block_to_expr(elif_body, ctx)),
@@ -507,6 +517,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     name: name.clone(),
                     ty: IrType::Any,
                     is_mut: false,
+                    default: None,
                 }).collect(),
                 body: Box::new(convert_expr(body, ctx)),
             }
@@ -638,7 +649,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 callee: Box::new(Expr::new(ExprKind::Var("comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false }],
+                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None }],
                         body: Box::new(out_expr),
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
@@ -655,7 +666,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 callee: Box::new(Expr::new(ExprKind::Var("dict_comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false }],
+                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None }],
                         body: Box::new(Expr::new(
                             ExprKind::TupleLit(vec![key_expr, val_expr]),
                             IrType::Any, Span::unknown(),
@@ -674,7 +685,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 callee: Box::new(Expr::new(ExprKind::Var("set_comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false }],
+                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None }],
                         body: Box::new(elem_expr),
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
@@ -1175,17 +1186,24 @@ fn convert_block_with_ctx(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
 // ══════════════════════════════════════════════════════════════
 
 fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
-    let params: Vec<Param> = func.params.iter().map(|p| Param {
+    let is_math = func.decorators.iter().any(|d| d.name == "math");
+
+    let params: Vec<Param> = func.params.iter().enumerate().map(|(_i, p)| Param {
         name: p.name.clone(),
-        ty: from_ast_type(&p.ty),
+        ty: if is_math { IrType::Generic("T".into()) } else { from_ast_type(&p.ty) },
         is_mut: p.is_mut,
+        default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
     }).collect();
 
     // 构建函数体上下文
     let mut fn_ctx = TypeCtx::new();
     fn_ctx.pending_items = ctx.pending_items.clone();
     fn_ctx.current_fn_name = Some(func.name.clone());
-    fn_ctx.current_generics = func.generics.clone();
+    fn_ctx.current_generics = if is_math {
+        vec!["T".to_string()]
+    } else {
+        func.generics.clone()
+    };
     // 复制全�� struct 信息
     for sn in &ctx.struct_names { fn_ctx.struct_names.insert(sn.clone()); }
     for (sn, fields) in &ctx.struct_fields {
@@ -1197,8 +1215,14 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     for (name, p) in &ctx.fn_params { fn_ctx.fn_params.insert(name.clone(), p.clone()); }
 
     // 添加参数到作用域
-    for p in &func.params {
-        fn_ctx.add_param(&p.name, from_ast_type(&p.ty));
+    if is_math {
+        for p in &func.params {
+            fn_ctx.add_param(&p.name, IrType::Generic("T".into()));
+        }
+    } else {
+        for p in &func.params {
+            fn_ctx.add_param(&p.name, from_ast_type(&p.ty));
+        }
     }
 
     // 返回类型：优先 AST 注解，否则从函数体最后语句推断
@@ -1213,6 +1237,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
 
     let body = convert_block(&func.body, &fn_ctx);
 
+    let is_math = func.decorators.iter().any(|d| d.name == "math");
     let intrinsics: Vec<Intrinsic> = func.decorators.iter().map(|d| {
         let kind = match d.name.as_str() {
             "memoize" => IntrinsicKind::Memoize,
@@ -1221,6 +1246,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             "overload" => IntrinsicKind::Overload,
             "derive" => IntrinsicKind::Derive,
             "tail_call" => IntrinsicKind::TailCall,
+            "math" => IntrinsicKind::Export(vec!["Math".into()]),
             name if name.starts_with("export") => {
                 // @export(Rust, Python)
                 let targets: Vec<String> = d.args.iter()
@@ -1239,11 +1265,16 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
 
     FnDef {
         name: func.name.clone(),
-        generics: func.generics.iter().map(|g| GenericParam {
-            name: g.clone(),
-            bounds: vec![],
-            default: None,
-        }).collect(),
+        generics: if is_math && func.generics.is_empty() {
+            // @math 自动泛型: 单泛型 T（所有参数统一类型）
+            vec![GenericParam { name: "T".into(), bounds: vec![], default: None }]
+        } else {
+            func.generics.iter().map(|g| GenericParam {
+                name: g.clone(),
+                bounds: vec![],
+                default: None,
+            }).collect()
+        },
         params,
         ret_ty,
         body,
@@ -1264,7 +1295,14 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 name: f.name.clone(),
                 fields: match &f.ty {
                     AstType::Unit | AstType::None_ => vec![],
-                    other => vec![from_ast_type(other)],
+                    AstType::Tuple(elems) => {
+                        // 元组变体: Circle(f64, f64, f64) → 三个无名 Field
+                        elems.iter().map(|t| Field {
+                            name: String::new(),
+                            ty: from_ast_type(t),
+                        }).collect()
+                    }
+                    other => vec![Field { name: String::new(), ty: from_ast_type(other) }],
                 },
             }
         }).collect();

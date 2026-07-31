@@ -22,6 +22,12 @@ pub struct CodeGen {
     is_main: bool,
     declared: std::collections::HashSet<String>,
     emitted_types: std::collections::HashSet<String>,
+    /// enum variant → enum name 映射（用于构造器调用路由）
+    enum_variants: HashMap<String, String>,
+    /// 抑制尾表达式隐式 return（用于 match arm / 块表达式内部）
+    suppress_tail_return: bool,
+    /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
+    fn_param_info: HashMap<String, (usize, usize)>,
     buf: String,
 }
 
@@ -44,6 +50,9 @@ impl CodeGen {
             is_main: false,
             declared: std::collections::HashSet::new(),
             emitted_types: std::collections::HashSet::new(),
+            enum_variants: HashMap::new(),
+            suppress_tail_return: false,
+            fn_param_info: HashMap::new(),
             buf: String::new(),
         }
     }
@@ -54,6 +63,23 @@ impl CodeGen {
     pub fn generate(&mut self, module: &IrModule) -> String {
         self.buf.clear();
         self.indent = 0;
+
+        // 预扫描：收集所有 enum variant → enum name 映射
+        self.enum_variants.clear();
+        self.fn_param_info.clear();
+        for item in &module.items {
+            if let Item::EnumDef(e) = item {
+                for variant in &e.variants {
+                    self.enum_variants.insert(variant.name.clone(), e.name.clone());
+                }
+            }
+            if let Item::FnDef(f) = item {
+                let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
+                if default_count > 0 {
+                    self.fn_param_info.insert(f.name.clone(), (f.params.len(), default_count));
+                }
+            }
+        }
 
         // 标准 prelude
         self.emit_prelude();
@@ -140,7 +166,24 @@ impl CodeGen {
 
     fn gen_item(&mut self, item: &Item) {
         match item {
-            Item::FnDef(f) => self.gen_fn_def(f),
+            Item::FnDef(f) => {
+                // 检测方法定义语法 `fn X.method()` → 生成 impl X { fn method() }
+                if let Some((ty_name, _method_name)) = f.name.split_once('.') {
+                    // 收集所有同类型的方法定义（因 gen_item 逐个调用，此处按需即时生成 impl）
+                    self.emit_line(&format!("impl {} {{", ty_name));
+                    self.indent += 1;
+                    // 临时替换函数名为纯方法名
+                    let mut mf = f.clone();
+                    mf.name = f.name.split('.').last().unwrap_or(&f.name).to_string();
+                    // 方法在 impl 块内不需要 pub
+                    self.gen_fn_def(&mf);
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    self.buf.push('\n');
+                } else {
+                    self.gen_fn_def(f);
+                }
+            }
             Item::StructDef(s) => self.gen_struct_def(s),
             Item::EnumDef(e) => self.gen_enum_def(e),
             Item::TraitDef(t) => self.gen_trait_def(t),
@@ -164,6 +207,7 @@ impl CodeGen {
             .collect();
 
         let has_ducks = !duck_params.is_empty();
+        let is_math = f.intrinsics.iter().any(|intr| matches!(&intr.kind, IntrinsicKind::Export(targets) if targets.iter().any(|t| t == "Math")));
 
         let generics = if has_ducks {
             let base = self.gen_generics(&f.generics);
@@ -172,8 +216,25 @@ impl CodeGen {
             } else {
                 format!("<{}, {}>", base.trim_matches(|c| c == '<' || c == '>'), duck_params.join(", "))
             }
+        } else if is_math && !f.generics.is_empty() {
+            // @math: 泛型名直接用
+            self.gen_generics(&f.generics)
         } else {
             self.gen_generics(&f.generics)
+        };
+
+        // @math where 子句：每个泛型参数都需要算术 trait bounds
+        let math_where = if is_math && !f.generics.is_empty() {
+            let clauses: Vec<String> = f.generics.iter().map(|g| {
+                format!("    {}: std::ops::Add<Output={}> + std::ops::Mul<Output={}> + Copy", g.name, g.name, g.name)
+            }).collect();
+            if clauses.is_empty() {
+                String::new()
+            } else {
+                format!("\nwhere\n{}", clauses.join(",\n"))
+            }
+        } else {
+            String::new()
         };
 
         let params: Vec<String> = f.params.iter().enumerate().map(|(i, p)| {
@@ -181,7 +242,14 @@ impl CodeGen {
                 let idx = duck_indices.iter().position(|&d| d == i).unwrap();
                 format!("{}: {}", p.name, duck_params[idx])
             } else {
-                self.gen_param(p)
+                if p.default.is_some() {
+                    // 默认参数 → Option<T>（函数签名）
+                    format!("{}: Option<{}>", p.name, self.rust_type(&p.ty))
+                } else if p.is_mut {
+                    format!("mut {}: {}", p.name, self.rust_type(&p.ty))
+                } else {
+                    format!("{}: {}", p.name, self.rust_type(&p.ty))
+                }
             }
         }).collect();
         let has_yield = block_has_yield(&f.body);
@@ -206,13 +274,14 @@ impl CodeGen {
         let vis = if is_method { "" } else { "pub " };
 
         let sig = format!(
-            "{}{}fn {}{}({}){}",
+            "{}{}fn {}{}({}){}{}",
             if f.is_test { "#[test]\n" } else { "" },
             vis,
             f.name,
             generics,
             params.join(", "),
             ret,
+            math_where,
         );
 
         self.emit_line(&format!("{} {{", sig));
@@ -221,6 +290,14 @@ impl CodeGen {
         // 生成器：body 包含 Yield → prepend __gen_vec
         if has_yield {
             self.emit_line("let mut __gen_vec = Vec::new();");
+        }
+
+        // 默认参数 unwrap: greet(name: str = "World") → let name = name.unwrap_or_else(|| "World".to_string());
+        for p in &f.params {
+            if let Some(ref default_val) = p.default {
+                let def_s = self.gen_expr(default_val);
+                self.emit_line(&format!("let {} = {}.unwrap_or_else(|| {});", p.name, p.name, def_s));
+            }
         }
 
         // 函数体
@@ -279,7 +356,7 @@ impl CodeGen {
             if variant.fields.is_empty() {
                 self.emit_line(&format!("{},", variant.name));
             } else {
-                let types: Vec<String> = variant.fields.iter().map(|t| self.rust_type(t)).collect();
+                let types: Vec<String> = variant.fields.iter().map(|f| self.rust_type(&f.ty)).collect();
                 self.emit_line(&format!("{}({}),", variant.name, types.join(", ")));
             }
         }
@@ -443,9 +520,12 @@ impl CodeGen {
                 }
             }
             Stmt::ExprStmt { expr } => {
-                if is_last && !self.is_main {
+                if is_last && !self.is_main && !self.suppress_tail_return {
                     // 非 main 函数尾表达式 → return expr;
                     self.emit_line(&format!("return {};", self.gen_expr(expr)));
+                } else if is_last && self.suppress_tail_return {
+                    // match arm / 块表达式尾值 → 裸表达式（无分号，作为块值）
+                    self.emit_line(&format!("{}", self.gen_expr(expr)));
                 } else if is_last {
                     // main 函数尾表达式 → expr;
                     self.emit_line(&format!("{};", self.gen_expr(expr)));
@@ -503,7 +583,11 @@ impl CodeGen {
                     let pat_s = self.gen_pattern(pat);
                     self.emit_line(&format!("{} => {{", pat_s));
                     self.indent += 1;
+                    // Match arm body 不应生成 return（值应流向 match 表达式外层）
+                    let saved = self.suppress_tail_return;
+                    self.suppress_tail_return = true;
                     self.gen_block_inner(body);
+                    self.suppress_tail_return = saved;
                     self.indent -= 1;
                     self.emit_line("}");
                 }
@@ -600,7 +684,40 @@ impl CodeGen {
             }
             ExprKind::Call { callee, args } => {
                 let callee_s = self.gen_expr(callee);
-                let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                let mut args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                
+                // 默认参数：函数有 def_count 个默认参数，调用方少传了 → 补 None
+                if let Some(&(total_params, def_count)) = self.fn_param_info.get(&callee_s) {
+                    let required = total_params - def_count;
+                    if args_s.len() < required {
+                        // 少传了必需参数——这是编译器 bug，插入占位符
+                        while args_s.len() < required {
+                            args_s.push("/* missing arg */".to_string());
+                        }
+                    }
+                    // 补默认参数：将显式传入的后几个参数包裹在 Some() 中
+                    let explicit_default_args = if args_s.len() > required { args_s.len() - required } else { 0 };
+                    for i in required..args_s.len() {
+                        let arg_idx = i - required;
+                        if arg_idx < explicit_default_args {
+                            args_s[i] = format!("Some({})", args_s[i]);
+                        }
+                    }
+                    // 补 None 填充未提供的默认参数
+                    while args_s.len() < total_params {
+                        args_s.push("None".to_string());
+                    }
+                }
+                
+                // 检测 enum variant 构造器调用: Circle(0,0,5) → Shape::Circle(0, 0, 5)
+                if let Some(enum_name) = self.enum_variants.get(&callee_s) {
+                    return if args_s.is_empty() {
+                        format!("{}::{}", enum_name, callee_s)
+                    } else {
+                        format!("{}::{}({})", enum_name, callee_s, args_s.join(", "))
+                    };
+                }
+                
                 if callee_s == "print" {
                     let fmt_placeholders: String = args_s.iter().map(|_| "{:?}").collect::<Vec<_>>().join(" ");
                     let fmt = format!("\"{}\"", fmt_placeholders);
@@ -633,11 +750,13 @@ impl CodeGen {
                 }
 
                 // LZ magic methods → Rust equivalents
+                // plus common method name mappings
                 let rust_method = match method.as_str() {
                     "__str__" => "to_string",
                     "__add__" => "add",
                     "__eq__" => "eq",
                     "__iter__" => "iter",
+                    "length" => "len",    // LZ .length() → Rust .len()
                     _ => method,
                 };
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
@@ -832,7 +951,15 @@ impl CodeGen {
         match pat {
             Pattern::Wildcard => "_".into(),
             Pattern::Ident(name) => name.clone(),
-            Pattern::Lit(lit) => self.gen_lit(lit, &IrType::Any),
+            Pattern::Lit(lit) => {
+                // Pattern literals: no .to_string() wrapper
+                match lit {
+                    LitKind::Int(n) => n.to_string(),
+                    LitKind::Str(s) => format!("\"{}\"", s.escape_default()),
+                    LitKind::Bool(b) => b.to_string(),
+                    _ => self.gen_lit(lit, &IrType::Any),
+                }
+            }
             Pattern::Tuple(elems) => {
                 let elems: Vec<String> = elems.iter().map(|e| self.gen_pattern(e)).collect();
                 format!("({})", elems.join(", "))
@@ -1040,8 +1167,8 @@ mod tests {
             name: "add".into(),
             generics: vec![],
             params: vec![
-                Param { name: "a".into(), ty: IrType::Int, is_mut: false },
-                Param { name: "b".into(), ty: IrType::Int, is_mut: false },
+                Param { name: "a".into(), ty: IrType::Int, is_mut: false, default: None },
+                Param { name: "b".into(), ty: IrType::Int, is_mut: false, default: None },
             ],
             ret_ty: IrType::Int,
             body: Block {

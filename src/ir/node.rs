@@ -157,6 +157,8 @@ pub struct Param {
     pub name: String,
     pub ty: IrType,
     pub is_mut: bool,
+    /// 默认值（可选）
+    pub default: Option<Expr>,
 }
 
 // ── 字段 ──
@@ -172,7 +174,8 @@ pub struct Field {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Variant {
     pub name: String,
-    pub fields: Vec<IrType>,   // 变体携带的数据类型（空 = 无字段变体）
+    /// 变体字段：名称 + 类型（空名称 = 位置/元组字段，非空 = 命名字段）
+    pub fields: Vec<Field>,
 }
 
 // ══════════════════════════════════════════════════════════════
