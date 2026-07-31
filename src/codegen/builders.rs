@@ -4,7 +4,6 @@
 use super::CodeGen;
 use crate::parser::*;
 use std::collections::HashSet;
-use crate::types::Type;
 use super::func::CodeGenFuncExt;
 use super::stmt::CodeGenStmtExt;
 use std::collections::HashMap;

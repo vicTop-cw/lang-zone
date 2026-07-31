@@ -364,6 +364,7 @@ impl Lexer {
             "async" => Token::Async,
             "await" => Token::Await,
             "spawn" => Token::Spawn,
+            "go" => Token::Go,
             "select" => Token::Select,
             "macro" => Token::Macro,
             "comptime" => Token::Comptime,

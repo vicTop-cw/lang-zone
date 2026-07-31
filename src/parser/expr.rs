@@ -889,7 +889,7 @@ impl ParserExprExt for Parser {
 
                 Ok(Expr::TryCatch { body, catches, else_body, finally_body })
             }
-            Token::Spawn => {
+            Token::Spawn | Token::Go => {
                 let expr = self.parse_expr()?;
                 Ok(Expr::Spawn(Box::new(expr)))
             }

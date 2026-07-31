@@ -487,7 +487,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::Walrus { target, value } => {
             // := → 展开为 let + 返回；在表达式层面转为复合
             if let AstExpr::Ident(name) = target.as_ref() {
-                let inner_ctx = ctx.clone();
+                let inner_ctx = ctx;
                 let val = convert_expr(value, &inner_ctx);
                 // inner_ctx.add_var(name, val_ty); // FIXME: scope issue
                 ExprKind::StructCtor {

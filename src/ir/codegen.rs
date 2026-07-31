@@ -200,7 +200,7 @@ impl CodeGen {
         } else {
             String::new()
         };
-        let async_kw = if f.is_async { "async " } else { "" };
+        let _async_kw = if f.is_async { "async " } else { "" };
         let is_method = f.params.first().map_or(false, |p| p.name == "self");
         let vis = if is_method { "" } else { "pub " };
 

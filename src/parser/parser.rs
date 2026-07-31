@@ -950,7 +950,7 @@ impl Parser {
         // 单行 struct: struct Box<T> = value: T
         if !self.check(&Token::Indent) {
             let mut fields = Vec::new();
-            let mut methods = Vec::new();
+            let methods = Vec::new();
             // 解析单行字段
             if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                 let f_name = match self.advance() {

@@ -100,7 +100,7 @@ fn main() {
 
     // 从 Token 流中移除宏定义（展开后不再需要）
     let expander = MacroExpander::new(registry);
-    let mut expand_input: Vec<_> = tokens.iter().enumerate()
+    let expand_input: Vec<_> = tokens.iter().enumerate()
         .filter(|(i, _)| {
             // 过滤掉宏定义占用的 token
             let mut skip = false;

@@ -5,7 +5,6 @@ use super::CodeGen;
 use super::MagicSelfMode;
 use crate::parser::*;
 use std::collections::{HashSet, HashMap};
-use crate::types::Type;
 use crate::magic::*;
 use super::func::CodeGenFuncExt;
 

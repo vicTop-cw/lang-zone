@@ -3,12 +3,11 @@
 
 use super::CodeGen;
 use crate::parser::*;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use crate::types::Type;
 use super::magic::CodeGenMagicExt;
 use super::func::CodeGenFuncExt;
 use super::helpers::{escape_str, out_push_attr, gen_decorator_attr};
-use super::builders::CodeGenBuildersExt;
 use super::expr::CodeGenExprExt;
 use super::stmt::CodeGenStmtExt;
 

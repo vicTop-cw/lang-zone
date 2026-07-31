@@ -3,14 +3,12 @@
 
 use super::CodeGen;
 use crate::parser::*;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use crate::types::Type;
 use super::stmt::CodeGenStmtExt;
-use super::magic::CodeGenMagicExt;
 use super::builders::CodeGenBuildersExt;
 use super::helpers::gen_decorator_attr;
 use super::helpers::{has_decorator, apply_parallel_transforms};
-use super::decl::CodeGenDeclExt;
 use super::expr::CodeGenExprExt;
 
 

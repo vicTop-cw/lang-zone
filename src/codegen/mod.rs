@@ -10,20 +10,14 @@ mod builders;
 mod helpers;
 
 use crate::parser::*;
-use crate::lexer::Lexer;
 use crate::types::Type;
-use crate::magic::{MagicEngine, MagicKind, MagicEntry};
+use crate::magic::MagicEngine;
 use crate::bridge::StdBridge;
 use crate::bridge::core::BridgeRegistry;
 use crate::bridge::source::SourceBridge;
 
-use crate::parser::ParserExprExt;
 use self::decl::CodeGenDeclExt;
 use self::func::CodeGenFuncExt;
-use self::stmt::CodeGenStmtExt;
-use self::expr::CodeGenExprExt;
-use self::magic::CodeGenMagicExt;
-use self::builders::CodeGenBuildersExt;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashSet, HashMap};

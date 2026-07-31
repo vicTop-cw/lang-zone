@@ -140,16 +140,16 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             cg.write(&format!("if {}:", gen_expr(cg, cond))); cg.writeln(""); cg.indent += 1; gen_block(cg, then_branch); cg.indent -= 1;
             if let Some(eb) = else_branch { cg.writeln("else:"); cg.indent += 1; gen_block(cg, eb); cg.indent -= 1; }
         }
-        Stmt::For { var, iter, guard, body } => {
+        Stmt::For { var, iter, guard: _, body } => {
             cg.write(&format!("for {} in {}:", var, gen_expr(cg, iter)));
             cg.writeln(""); cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
         }
-        Stmt::While { cond, guard, body } => {
+        Stmt::While { cond, guard: _, body } => {
             cg.write(&format!("while {}:", gen_expr(cg, cond)));
             cg.writeln(""); cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
         }
         Stmt::Match { scrutinee, arms } => {
-            let s = gen_expr(cg, scrutinee);
+            let _s = gen_expr(cg, scrutinee);
             cg.writeln("# match desugar");
             for (i, (pat, block)) in arms.iter().enumerate() {
                 let cond = if i == 0 { "if" } else { "elif" };
@@ -171,7 +171,7 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
         Stmt::TryCatch { body, catches, else_body, finally_body } => {
             cg.writeln("try:");
             cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
-            for (i, (pat, cb)) in catches.iter().enumerate() {
+            for (i, (_pat, cb)) in catches.iter().enumerate() {
                 if i == 0 { cg.write("except:"); } else { cg.write("except:"); }
                 cg.writeln(""); cg.indent += 1; gen_block(cg, cb); cg.indent -= 1;
             }

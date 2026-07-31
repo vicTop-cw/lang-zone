@@ -5,7 +5,6 @@
 use std::path::PathBuf;
 use std::fs;
 use std::process::Command;
-use std::time::Instant;
 
 /// 递归查找 DEMO 目录下所有主 .lz 文件（排除 99_errors/）
 fn find_demo_files() -> Vec<PathBuf> {
@@ -48,7 +47,7 @@ fn all_demos_compile_successfully() {
     let mut failed = Vec::new();
 
     for file in &files {
-        let source = match fs::read_to_string(file) {
+        let _source = match fs::read_to_string(file) {
             Ok(s) => s,
             Err(e) => {
                 failed.push((file.clone(), format!("读取失败: {}", e)));

@@ -274,7 +274,7 @@ impl ParserStmtExt for Parser {
                 self.expect(Token::Dedent)?;
                 Ok(Stmt::With { expr, alias, body })
             }
-            Token::Spawn => {
+            Token::Spawn | Token::Go => {
                 self.advance();
                 let expr = self.parse_expr()?;
                 Ok(Stmt::Expr(Expr::Spawn(Box::new(expr))))
@@ -380,7 +380,7 @@ impl ParserStmtExt for Parser {
                 }
                 // 尝试解析为表达式语句或赋值
                 let expr = self.parse_expr()?;
-                let lhs_name = match &expr {
+                let _lhs_name = match &expr {
                     Expr::Ident(n) => n.clone(),
                     _ => "_".to_string(),
                 };

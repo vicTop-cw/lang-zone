@@ -20,7 +20,7 @@ pub enum Token {
     Test, Assert, Suite, Setup, Teardown,
 
     // ── 并发 ──
-    Async, Await, Spawn, Select,
+    Async, Await, Spawn, Go, Select,
 
     // ── 迭代 ──
     Yield,
@@ -453,6 +453,7 @@ impl Lexer {
             "async" => Token::Async,
             "await" => Token::Await,
             "spawn" => Token::Spawn,
+            "go" => Token::Go,
             "select" => Token::Select,
             "macro" => Token::Macro,
             "comptime" => Token::Comptime,

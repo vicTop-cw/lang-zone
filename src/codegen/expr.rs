@@ -3,13 +3,11 @@
 
 use super::CodeGen;
 use crate::parser::*;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use super::stmt::CodeGenStmtExt;
-use super::magic::CodeGenMagicExt;
 use super::builders::CodeGenBuildersExt;
 use super::func::CodeGenFuncExt;
 use super::helpers::{escape_str, gen_fstring};
-use super::decl::CodeGenDeclExt;
 
 
 pub trait CodeGenExprExt {
@@ -450,11 +448,11 @@ impl CodeGenExprExt for CodeGen {
                 let out_s = self.gen_expr(output);
                 match cond {
                     Some(c) => format!(
-                        "{}.into_iter().filter(|{}| {}).map(|{}| {}).collect::<Vec<_>>()",
+                        "({}).into_iter().filter(|{}| {}).map(|{}| {}).collect::<Vec<_>>()",
                         iter_s, var, self.gen_expr(c), var, out_s
                     ),
                     None => format!(
-                        "{}.into_iter().map(|{}| {}).collect::<Vec<_>>()",
+                        "({}).into_iter().map(|{}| {}).collect::<Vec<_>>()",
                         iter_s, var, out_s
                     ),
                 }
@@ -466,11 +464,11 @@ impl CodeGenExprExt for CodeGen {
                 let v_s = self.gen_expr(value);
                 match cond {
                     Some(c) => format!(
-                        "{}.into_iter().filter(|{}| {}).map(|{}| ({}, {})).collect::<std::collections::HashMap<_, _>>()",
+                        "({}).into_iter().filter(|{}| {}).map(|{}| ({}, {})).collect::<std::collections::HashMap<_, _>>()",
                         iter_s, var, self.gen_expr(c), var, k_s, v_s
                     ),
                     None => format!(
-                        "{}.into_iter().map(|{}| ({}, {})).collect::<std::collections::HashMap<_, _>>()",
+                        "({}).into_iter().map(|{}| ({}, {})).collect::<std::collections::HashMap<_, _>>()",
                         iter_s, var, k_s, v_s
                     ),
                 }
@@ -481,11 +479,11 @@ impl CodeGenExprExt for CodeGen {
                 let e_s = self.gen_expr(elem);
                 match cond {
                     Some(c) => format!(
-                        "{}.into_iter().filter(|{}| {}).map(|{}| {}).collect::<std::collections::HashSet<_>>()",
+                        "({}).into_iter().filter(|{}| {}).map(|{}| {}).collect::<std::collections::HashSet<_>>()",
                         iter_s, var, self.gen_expr(c), var, e_s
                     ),
                     None => format!(
-                        "{}.into_iter().map(|{}| {}).collect::<std::collections::HashSet<_>>()",
+                        "({}).into_iter().map(|{}| {}).collect::<std::collections::HashSet<_>>()",
                         iter_s, var, e_s
                     ),
                 }

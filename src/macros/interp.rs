@@ -2,7 +2,9 @@
 // 编译期宏解释器：在编译时执行宏体，操作 Tokens 类型
 
 use crate::lexer::Token;
-use crate::macros::group::{Tokens, TokenGroupKind, BacktickPrefix, TokenTree, Delimiter};
+use crate::macros::group::{Tokens, TokenGroupKind, BacktickPrefix, TokenTree};
+#[cfg(test)]
+use crate::macros::group::Delimiter;
 use crate::macros::pattern::{
     TokenPattern, ReplaceRule,
     apply_remove, apply_replace,

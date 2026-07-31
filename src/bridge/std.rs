@@ -165,7 +165,7 @@ impl StdBridge {
     }
 
     // ─── resolve_import ───
-    pub fn resolve_import(&self, lz_path: &[String], items: &[String]) -> ImportResolveResult {
+    pub fn resolve_import(&self, lz_path: &[String], _items: &[String]) -> ImportResolveResult {
         if lz_path.is_empty() {
             return ImportResolveResult {
                 rust_path: String::new(),
@@ -463,7 +463,7 @@ impl StdBridge {
         let doc = parse(&content)
             .map_err(|e| format!("解析 {}: {}", path.display(), e))?;
 
-        let meta = doc.get("meta").ok_or("bridge.toml 缺少 [meta]")?;
+        let _meta = doc.get("meta").ok_or("bridge.toml 缺少 [meta]")?;
         let toolchain = doc.get("toolchain").ok_or("bridge.toml 缺少 [toolchain]")?;
         let modules = doc.get("modules").ok_or("bridge.toml 缺少 [modules]")?;
 

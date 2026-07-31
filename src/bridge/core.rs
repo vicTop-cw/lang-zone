@@ -341,7 +341,7 @@ impl MethodResolveResult {
         MethodResolveResult { rust_method: m, rewritten: false, shim: String::new() }
     }
 
-    pub fn mapped(lz: impl Into<String>, rust: impl Into<String>) -> Self {
+    pub fn mapped(_lz: impl Into<String>, rust: impl Into<String>) -> Self {
         MethodResolveResult { rust_method: rust.into(), rewritten: true, shim: String::new() }
     }
 }
