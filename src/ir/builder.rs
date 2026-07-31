@@ -511,6 +511,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::PathAccess { .. } => IrType::Any,
         AstExpr::SafeNav { .. } => IrType::Any,
         AstExpr::TryCatch { .. } => IrType::Any,
+        AstExpr::Paren(inner) => infer_expr_type(inner, ctx),
     }
 }
 
@@ -609,6 +610,9 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::BoolLit(b) => ExprKind::Lit(LitKind::Bool(*b)),
         AstExpr::NoneLit => ExprKind::Lit(LitKind::None_),
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
+        AstExpr::Paren(inner) => {
+            ExprKind::Paren(Box::new(convert_expr(inner, ctx)))
+        }
 
         AstExpr::Call { func, args } => {
             // 特殊处理 __as__ 运算符：__as__(value, type_name) → Cast
@@ -1050,33 +1054,27 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::TryCatch { body, catches, else_body, finally_body } => {
+            // 构建 Stmt::TryCatch 结构以供 codegen 层正确处理
             let body_block = convert_block(body, ctx);
-            let mut stmts = body_block.stmts;
+            let ir_catches: Vec<(Option<Pattern>, Block)> = catches.iter().map(|c| {
+                let pat = convert_ast_pattern(&c.pattern, ctx);
+                let block = convert_block(&c.body, ctx);
+                (pat, block)
+            }).collect();
+            let ir_else = else_body.as_ref().map(|b| convert_block(b, ctx));
+            let ir_finally = finally_body.as_ref().map(|b| convert_block(b, ctx));
 
-            // else 块：接在 try body 成功路径后面
-            if let Some(ref else_blk) = else_body {
-                let else_block = convert_block(else_blk, ctx);
-                stmts.extend(else_block.stmts);
-            }
-
-            // catch 块：用 If+flag 模拟（TODO: 接入真正的 catch_unwind）
-            if !catches.is_empty() {
-                let catch_block = convert_block(&catches[0].body, ctx);
-                // 注释标记 catch 逻辑（后端可识别为错误处理）
-                stmts.push(Stmt::ExprStmt {
-                    expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
-                });
-                stmts.extend(catch_block.stmts);
-            }
-
-            // finally 块：始终追加
-            if let Some(ref finally_blk) = finally_body {
-                let finally_block = convert_block(finally_blk, ctx);
-                stmts.extend(finally_block.stmts);
-            }
-
+            // 返回一个 TryCatch 包装块（codegen 会生成 catch_unwind 等逻辑）
             ExprKind::BlockExpr {
-                block: Block { stmts, ty: IrType::Any },
+                block: Block {
+                    stmts: vec![Stmt::TryCatch {
+                        body: body_block,
+                        catches: ir_catches,
+                        else_body: ir_else,
+                        finally_body: ir_finally,
+                    }],
+                    ty: IrType::Any,
+                },
             }
         }
     };

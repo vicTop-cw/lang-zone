@@ -30,6 +30,8 @@ pub struct CodeGen {
     suppress_tail_return: bool,
     /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
     fn_param_info: HashMap<String, (usize, usize)>,
+    /// 被修改的模块级 const 名称（需生成 static mut 而非 const）
+    mutated_consts: std::collections::HashSet<String>,
     buf: String,
 }
 
@@ -56,6 +58,7 @@ impl CodeGen {
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
             fn_param_info: HashMap::new(),
+            mutated_consts: std::collections::HashSet::new(),
             buf: String::new(),
         }
     }
@@ -73,6 +76,13 @@ impl CodeGen {
         self.fn_param_info.clear();
         self.emitted_types.clear();
         self.impl_types.clear();
+        self.mutated_consts.clear();
+
+        // 收集所有模块级 const 名称
+        let const_names: std::collections::HashSet<String> = module.items.iter()
+            .filter_map(|item| if let Item::Const(c) = item { Some(c.name.clone()) } else { None })
+            .collect();
+
         for item in &module.items {
             if let Item::EnumDef(e) = item {
                 for variant in &e.variants {
@@ -87,6 +97,10 @@ impl CodeGen {
                 // 方法定义语法 fn Type.method() → Type 是 impl-only 类型名
                 if let Some((ty_name, _)) = f.name.split_once('.') {
                     self.impl_types.insert(ty_name.to_string());
+                }
+                // 扫描函数体中的 const 修改
+                if !const_names.is_empty() {
+                    scan_const_mutations(&f.body, &const_names, &mut self.mutated_consts);
                 }
             }
         }
@@ -120,6 +134,18 @@ impl CodeGen {
         self.buf.push('\n');
     }
 
+    /// 返回最后发射的一行（不含缩进和前导空白）
+    fn last_emitted_line(&self) -> &str {
+        let trimmed = self.buf.trim_end();
+        trimmed.rsplit('\n').next().unwrap_or("").trim_start()
+    }
+
+    /// 在最后发射的一行末尾追加文本
+    fn append_to_last_line(&mut self, s: &str) {
+        let len = self.buf.trim_end().len();
+        self.buf.insert_str(len, s);
+    }
+
     /// 从表达式中收集 walrus 变量名（用于预声明）
     fn collect_walrus_vars(expr: &Expr, vars: &mut Vec<String>) {
         match &expr.kind {
@@ -149,6 +175,9 @@ impl CodeGen {
                 Self::collect_walrus_vars(cond, vars);
                 Self::collect_walrus_vars(then, vars);
                 Self::collect_walrus_vars(els, vars);
+            }
+            ExprKind::Paren(inner) => {
+                Self::collect_walrus_vars(inner, vars);
             }
             _ => {}
         }
@@ -534,6 +563,7 @@ impl CodeGen {
     }
 
     fn gen_const_def(&mut self, c: &ConstDef) {
+        let is_mutated = self.mutated_consts.contains(&c.name);
         // const 不支持 .to_string()，直接用 &str
         let (ty_str, val_str) = match &c.ty {
             IrType::Str => {
@@ -546,7 +576,8 @@ impl CodeGen {
             }
             _ => (self.rust_type(&c.ty), self.gen_expr(&c.value)),
         };
-        self.emit_line(&format!("const {}: {} = {};", c.name, ty_str, val_str));
+        let kw = if is_mutated { "static mut" } else { "const" };
+        self.emit_line(&format!("{} {}: {} = {};", kw, c.name, ty_str, val_str));
     }
 
     fn gen_test_def(&mut self, t: &TestDef) {
@@ -619,7 +650,11 @@ impl CodeGen {
                 //   - 首次出现: "let mut x = val"
                 //   - 已声明过: "x = val"（纯赋值）
                 if *is_mut && self.declared.contains(name) {
-                    self.emit_line(&format!("{} = {};", name, self.gen_expr(value)));
+                    if self.mutated_consts.contains(name) {
+                        self.emit_line(&format!("unsafe {{ {} = {}; }}", name, self.gen_expr(value)));
+                    } else {
+                        self.emit_line(&format!("{} = {};", name, self.gen_expr(value)));
+                    }
                     return;
                 }
                 self.declared.insert(name.clone());
@@ -640,7 +675,14 @@ impl CodeGen {
                 self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, self.gen_expr(value)));
             }
             Stmt::Assign { target, value } => {
-                self.emit_line(&format!("{} = {};", self.gen_expr(target), self.gen_expr(value)));
+                let target_s = self.gen_expr(target);
+                let val_s = self.gen_expr(value);
+                // 模块级可变变量 → 需 unsafe 块
+                if self.mutated_consts.contains(&target_s) {
+                    self.emit_line(&format!("unsafe {{ {} = {}; }}", target_s, val_s));
+                } else {
+                    self.emit_line(&format!("{} = {};", target_s, val_s));
+                }
             }
             Stmt::Return { value } => {
                 if let Some(v) = value {
@@ -775,22 +817,33 @@ impl CodeGen {
                 self.emit_line("// defer");
             }
             Stmt::TryCatch { body, catches, else_body, finally_body } => {
-                // try/catch → Rust 的 match Result / ? 运算符
-                self.emit_line("{");
-                self.indent += 1;
+                // try/catch → Rust closure-based error capture pattern
                 if let Some(fin) = finally_body {
                     self.emit_line("let __finally = || {");
                     self.indent += 1;
+                    let saved = self.suppress_tail_return;
+                    self.suppress_tail_return = true;
                     self.gen_block_inner(fin);
+                    self.suppress_tail_return = saved;
                     self.indent -= 1;
                     self.emit_line("};");
                 }
                 self.emit_line("let __result = (|| {");
                 self.indent += 1;
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
                 self.gen_block_inner(body);
+                // 确保闭包体最后一条语句有分号，让 Ok(()) 成为尾表达式
+                let last_line = self.last_emitted_line();
+                if !last_line.ends_with(';') && !last_line.ends_with('}') && !last_line.is_empty() {
+                    self.append_to_last_line(";");
+                }
                 self.emit_line("Ok(())");
+                self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("})();");
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
                 for (pat, block) in catches {
                     let pat_s = match pat {
                         Some(p) => self.gen_pattern(p),
@@ -809,12 +862,11 @@ impl CodeGen {
                     self.indent -= 1;
                     self.emit_line("}");
                 }
+                self.suppress_tail_return = saved;
                 if finally_body.is_some() {
                     self.emit_line("__finally();");
                 }
                 self.emit_line("__result.ok();");
-                self.indent -= 1;
-                self.emit_line("};");
             }
             Stmt::Block { stmts } => {
                 self.emit_line("{");
@@ -973,7 +1025,7 @@ impl CodeGen {
             }
             ExprKind::MethodCall { receiver, method, args } => {
                 let recv = self.gen_expr(receiver);
-                let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                let mut args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
 
                 // await: x.await() → x.await (Rust postfix keyword)
                 if method == "await" {
@@ -1034,6 +1086,11 @@ impl CodeGen {
                     }
                     _ => method,
                 };
+                // String Pattern trait方法(String参数需&借用)
+                let pattern_methods = ["starts_with", "ends_with", "find", "rfind", "replace", "trim_start_matches", "trim_end_matches"];
+                if pattern_methods.contains(&method.as_str()) && !args_s.is_empty() {
+                    args_s[0] = format!("&{}", args_s[0]);
+                }
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
                 // .len() on collections → cast usize to i64
                 if method == "len" { format!("({} as i64)", call) } else { call }
@@ -1112,6 +1169,12 @@ impl CodeGen {
                     }
                     // List/Set/其他集合: elem in container → container.contains(&elem)
                     return format!("{}.contains(&{})", cont_s, elem_s);
+                }
+                // String + 拼接: 右侧需借用 & 以匹配 Rust Add<&str>
+                if *op == BinOpKind::Add && matches!(&rhs.ty, IrType::Str) {
+                    let lhs_s = self.gen_expr(lhs);
+                    let rhs_s = self.gen_expr(rhs);
+                    return format!("{} + &{}", lhs_s, rhs_s);
                 }
                 let op_s = self.binop_str(op);
                 // 链式比较分解: a < b < c → (a < b) && (b < c)
@@ -1233,6 +1296,9 @@ impl CodeGen {
                 child.fn_param_info = self.fn_param_info.clone();
                 child.gen_block_inner(block);
                 format!("{{\n{}    }}", child.buf)
+            }
+            ExprKind::Paren(inner) => {
+                format!("({})", self.gen_expr(inner))
             }
             ExprKind::TupleLit(elems) => {
                 let elems: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
@@ -1539,6 +1605,68 @@ fn type_refers_to(ty: &IrType, name: &str) -> bool {
             params.iter().any(|p| type_refers_to(p, name)) || type_refers_to(ret, name)
         }
         _ => false,
+    }
+}
+
+/// 扫描块中是否存在对 const 名称的修改
+fn scan_const_mutations(block: &Block, const_names: &std::collections::HashSet<String>, mutated: &mut std::collections::HashSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, is_mut, .. } => {
+                if *is_mut && const_names.contains(name) {
+                    mutated.insert(name.clone());
+                }
+            }
+            Stmt::Assign { target, .. } => {
+                if let ExprKind::Var(v) = &target.kind {
+                    if const_names.contains(v) {
+                        mutated.insert(v.clone());
+                    }
+                }
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                scan_const_mutations(then_branch, const_names, mutated);
+                if let Some(ref e) = else_branch {
+                    scan_const_mutations(e, const_names, mutated);
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } => {
+                scan_const_mutations(body, const_names, mutated);
+            }
+            Stmt::Block { stmts } => {
+                let inner_block = Block { stmts: stmts.clone(), ty: IrType::Unit };
+                scan_const_mutations(&inner_block, const_names, mutated);
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    scan_const_mutations(&arm.body, const_names, mutated);
+                }
+            }
+            Stmt::ExprStmt { expr } => {
+                scan_expr_mutations(expr, const_names, mutated);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 递归扫描表达式中对 const 名称的修改（如 +=, -= 等复合赋值）
+fn scan_expr_mutations(expr: &Expr, const_names: &std::collections::HashSet<String>, mutated: &mut std::collections::HashSet<String>) {
+    match &expr.kind {
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            scan_expr_mutations(lhs, const_names, mutated);
+            scan_expr_mutations(rhs, const_names, mutated);
+        }
+        ExprKind::StructCtor { name, fields } if name == "_Walrus" => {
+            if let Some((_, bind_expr)) = fields.iter().find(|(n, _)| n == "_bind") {
+                if let ExprKind::Var(v) = &bind_expr.kind {
+                    if const_names.contains(v) {
+                        mutated.insert(v.clone());
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
