@@ -36,8 +36,10 @@ pub enum LinkKind {
 #[derive(Debug, Clone)]
 pub struct TypeMarshal {
     /// lz 类型 → C 类型（参数方向）
+    #[allow(dead_code)]
     lz_to_c: HashMap<String, String>,
     /// C 类型 → lz 类型（返回值方向）
+    #[allow(dead_code)]
     c_to_lz: HashMap<String, String>,
 }
 
@@ -72,7 +74,9 @@ impl Default for TypeMarshal {
 #[derive(Debug)]
 pub struct FfiBridge {
     functions: HashMap<String, FfiFunction>,
+    #[allow(dead_code)]
     marshal: TypeMarshal,
+    #[allow(dead_code)]
     manifest_path: String,
 }
 

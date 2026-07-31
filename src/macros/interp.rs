@@ -23,6 +23,7 @@ pub struct MacroInterpreter {
     /// 当前深度（递归保护）
     depth: usize,
     /// 最大递归深度
+    #[allow(dead_code)]
     max_depth: usize,
 }
 

@@ -1,13 +1,14 @@
-// 规范目标特性（当前解析器未实现：while 分支不识别 if 守卫）
-// combo-syntax：while 守卫 + 海象 := + 标量累积
-// 出处：SYNTAX/05-控制流.md §3.4/§3.5 + SYNTAX/12-操作符.md §1.20
+// ✅ combo-syntax：while 守卫 + 海象 := + 标量累积
+// 出处：SYNTAX/05-控制流.md §四（while）+ §3.5（for/while 守卫）
+// 注：while 守卫/海象语义已由编译器支持；next() 每轮无条件推进计数，守卫只过滤偶数
+count = 0
+
 def next() -> int =
     count += 1
     count
 
 def main() =
-    count = 0
-    let total = 0
+    total = 0
     while (n := next()) <= 10 if n % 2 == 0:   // 守卫只让偶数进入体
         total = total + n
     print(total)              // 预期：2+4+6+8+10 = 30

@@ -12,7 +12,7 @@
 | `01_basics/` | [00-词法基础.md](../SYNTAX/00-词法基础.md) | 5 | 关键字、字面量、标识符、注释、字面量扩展 |
 | `02_types/` | [01-类型系统.md](../SYNTAX/01-类型系统.md) | 6 | 基本类型、容器、Option/Result、类型别名、类型转换、别名扩展 |
 | `03_variables/` | [02-变量与绑定.md](../SYNTAX/02-变量与绑定.md) | 7 | 默认可变、let、const、ref、owned/^、walrus、walrus/const 扩展 |
-| `04_functions/` | [03-系列](../SYNTAX/03-函数.md) | 6 | def、泛型、checker、可变参数、复合（装饰器/闭包）、闭包扩展 |
+| `04_functions/` | [03-系列](../SYNTAX/03-函数基础.md) | 6 | def、泛型、checker、可变参数、复合（装饰器/闭包）、闭包扩展 |
 | `05_expressions/` | [04-表达式.md](../SYNTAX/04-表达式.md) | 7 | 运算符、管道、推导式、if/match 表达式、空值合并、推导扩展、三元 |
 | `06_control_flow/` | [05-控制流.md](../SYNTAX/05-控制流.md) | 8 | if/elif/else、match、for/while/loop、break/continue、guard、with/defer、loop 扩展、match 扩展 |
 | `07_data_structures/` | [06a-06g](../SYNTAX/06-数据结构.md) | 7 | struct、enum、trait/impl、魔法方法、模块级魔法属性、struct 扩展、enum 扩展 |
@@ -26,9 +26,9 @@
 | `15_generators/` | [14-生成器.md](../SYNTAX/14-生成器.md) | 2 | yield/yield from、PartialFunc、*:、生成器扩展 |
 | `16_testing/` | [15-测试框架.md](../SYNTAX/15-测试框架.md) | 2 | test/suite/assert/check、一等数据组合、测试扩展 |
 | `99_prelude/` | [99-内置预导入库.md](../SYNTAX/99-内置预导入库.md) | 1 | 内置函数、str/List 方法 |
-| `99_spec/` | [缺失语法特性报告](../SYNTAX/overview/缺失语法特性报告.md) | 16 | 按规范撰写、当前未实现的特性目标案例（见 `99_spec/README.md`） |
+| `99_spec/` | [缺失语法特性报告](../SYNTAX/overview/缺失语法特性报告.md) | 37 | 按规范撰写的特性目标案例，已纳入编译测试（31 主 + 6 combo，详见 `99_spec/README.md`） |
 
-> 注：上表「文件数」为 2026-07-29 刷新。各目录新增的 `*_more.lz` 为已有特性的更多变体与边界覆盖；`99_spec/` 为规范目标案例（被 `tests/compile_demos.rs` 跳过，不要求可解析）。下方「各文件覆盖特性清单」仅列代表性文件，新增 `*_more` 文件未逐一展开。
+> 注：上表「文件数」为 2026-07-31 刷新。
 
 ---
 
@@ -137,7 +137,7 @@
 | 10-并发与异步.md | 3 | 3 ✅ | 0 |
 | **合计** | **49** | **49 ✅** | **0** |
 
-所有错误边界示例已在对应 demo 中以 `// ❌` 注释形式覆盖。
+> 计数刷新于 2026-07-31。所有错误边界示例已在对应 demo 中以 `// ❌` 注释形式覆盖。
 
 ---
 

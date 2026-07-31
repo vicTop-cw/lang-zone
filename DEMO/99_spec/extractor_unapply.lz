@@ -6,6 +6,6 @@ struct Point =
     magic __unapply__(self) -> (int, int) = (self.x, self.y)
 
 def main() =
-    let p = Point(3, 4)
+    let p = Point(x: 3, y: 4)
     match p:
         case Point(px, py) => print(px + py)

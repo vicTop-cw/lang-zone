@@ -67,6 +67,7 @@ pub(super) fn gen_fstring(cg: &CodeGen, s: &str) -> String {
 }
 
 /// 从函数体中提取返回值表达式
+#[allow(dead_code)]
 pub(super) fn extract_return(body: &str) -> Option<String> {
     let trimmed = body.trim();
     if trimmed.starts_with("return ") && trimmed.ends_with(';') {

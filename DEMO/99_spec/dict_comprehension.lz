@@ -1,6 +1,11 @@
 // ✅ 已实现 — 字典推导 {k: v for x in iter}
 // 出处：SYNTAX/04-表达式.md
+struct User =
+    id: int
+    name: str
+
 def main() =
     let squares = {x: x * x for x in 1..10}
+    let users = [User(id: 1, name: "Alice"), User(id: 2, name: "Bob")]
     let by_id = {u.id: u.name for u in users}
     print(squares, by_id)

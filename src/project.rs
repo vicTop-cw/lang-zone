@@ -22,6 +22,7 @@ pub struct CompileUnit {
 
 /// 项目级编译器：递归加载和合并多模块
 pub struct ProjectCompiler {
+    #[allow(dead_code)]
     search_paths: SearchPaths,
     resolver: ImportResolver,
     loaded: HashSet<Vec<String>>,
@@ -206,7 +207,7 @@ impl ProjectCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    
 
     #[test]
     fn test_project_compile_single_file() {

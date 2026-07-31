@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// 导入栈条目：正在解析的模块
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ImportEntry {
     /// 模块路径（如 ["std", "vec"]）
     path: Vec<String>,

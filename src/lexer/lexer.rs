@@ -506,7 +506,10 @@ impl Lexer {
                 // 比较/约束
                 '<' => {
                     self.advance();
-                    if self.peek() == Some('<') {
+                    if self.peek() == Some('|') {
+                        self.advance();
+                        tokens.push(Token::BackPipe);
+                    } else if self.peek() == Some('<') {
                         self.advance();
                         if self.peek() == Some('=') {
                             self.advance();
@@ -730,11 +733,6 @@ impl Lexer {
                     line_start = false;
                 }
                 '?' => { self.advance(); tokens.push(Token::Question); line_start = false; }
-                '<' if self.peek_n(1) == Some('|') => {
-                    self.advance(); self.advance();
-                    tokens.push(Token::BackPipe);
-                    line_start = false;
-                }
                 '_' if self.peek_n(1).map_or(true, |c| !c.is_alphanumeric() && c != '_') => {
                     self.advance();
                     tokens.push(Token::Underscore);

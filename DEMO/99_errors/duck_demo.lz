@@ -1,6 +1,6 @@
 // ==============================================================
 // LZ duck 关键字 — 结构性类型约束（鸭子类型）规范 demo
-// 当前状态：99_spec（编译器未实现，被 parse 测试跳过）
+// 当前状态：99_errors（编译器未实现，被 parse 测试跳过）
 // 对应规范：SYNTAX/01-类型系统.md §九 + 01b-duck关系约束.md
 // ==============================================================
 
@@ -223,7 +223,7 @@ def main() =
     // compute(1, 2) → StackType ✅  save([1,2]) → RefType ✅
 
     // -- 11: 修饰符 --
-    let ct = Counter(value: 10, count: 0)
+    let ct = Counter(value: 10, _count: 0)
     print(ct.read())                 // ✅ Counter.read(&self) → int
 
     // -- 13: 命名参数 --

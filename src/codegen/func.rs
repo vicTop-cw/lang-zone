@@ -19,6 +19,7 @@ pub trait CodeGenFuncExt {
     fn gen_method(&self, f: &Function, indent: usize) -> String;
     fn gen_block_return(&self, stmts: &[Stmt], indent: usize, locals: &mut HashSet<String>) -> String;
     fn gen_param(&self, p: &Param) -> String;
+    #[allow(dead_code)]
     fn gen_stmt_body(&self, stmts: &[Stmt], indent: usize) -> String;
 }
 

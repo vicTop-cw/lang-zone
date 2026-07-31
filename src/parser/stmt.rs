@@ -507,14 +507,14 @@ impl ParserStmtExt for Parser {
         let mut mutable = true;
         let mut is_ref = false;
         let mut is_const = false;
-        let mut is_owned = false;
+        let _is_owned = false;
 
         loop {
             match self.peek() {
                 Token::Mut => { self.advance(); mutable = true; }
                 Token::Ref => { self.advance(); is_ref = true; }
                 Token::Const => { self.advance(); is_const = true; }
-                Token::Owned => { self.advance(); is_owned = true; mutable = true; }
+                Token::Owned => { self.advance(); /* _is_owned = true; */ mutable = true; }
                 _ => break,
             }
         }

@@ -1,12 +1,12 @@
-// 规范目标特性（当前解析器未实现：while 分支不识别 if 守卫；loop else 亦为规范目标）
-// combo-syntax：while 守卫 + else 分支
-// 出处：SYNTAX/05-控制流.md §3.4（while）+ §3.6（else）
+// ✅ combo-syntax：while 守卫 + else 分支
+// 出处：SYNTAX/05-控制流.md §四（while）+ §4.2（for/while 的 else 子句）
+count = 0
+
 def next() -> int =
     count += 1
     count
 
 def main() =
-    count = 0
     while (n := next()) <= 5 if n != 3:    // 守卫：跳过 3
         print(n)
     else:

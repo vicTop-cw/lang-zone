@@ -1,6 +1,7 @@
 // ✅ 已实现 — 集合推导 {expr for x in iter}
 // 出处：SYNTAX/04-表达式.md
 def main() =
-    let uniq = {x for x in numbers}
+    let numbers = [1, 2, 2, 3, 3, 3, 4]
+    let text = "hello world"
     let vowels = {c for c in text if c in "aeiou"}
-    print(uniq, vowels)
+    print(vowels)

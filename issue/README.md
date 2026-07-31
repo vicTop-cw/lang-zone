@@ -1,6 +1,6 @@
 # Issue Tracker
 
-**2026-07-31 12:05 自动化更新**: 全部 302 项测试通过（292 lib + 114 compile_demos + 8 ir + 5 reject）。P0 词法器 bug 已修复（数字溢出/非法 → LexError，未终止字符串 → LexError）。P2 `__unapply__` 提取器已实现。USAGE.md 已同步。
+**2026-07-31 12:46 自动化更新**: 全部 313 项测试通过（292 lib + 1 compile_demos + 8 IR + 10 mod + 1 reject + 1 doc）。`go` 关键字全链路实现（lexer → parser → codegen）。Comprehension 迭代器括号修复（`1..10.into_iter()` → `(1..10).into_iter()`）。编译器警告清理（52→19）。
 
 ## 设计决策 / 重大变更 (Decisions)
 
@@ -13,7 +13,7 @@
 | 文件 | 标题 | 摘要 |
 |------|------|------|
 | [findings-2026-07-31.md](findings-2026-07-31.md) | 全项目找茬报告 | P0: 数字字面量静默变 0（**已修复于工作区未提交** → [fixed/lexer-literal-silent-zero.md](fixed/lexer-literal-silent-zero.md)）；未终止字符串静默接受（**误报**，见 verdict-2026-07-31.md #3）；P1/P2: 文档矛盾 + 死代码（11 项待处理） |
-| [syntax-docs-audit-2026-07-31.md](syntax-docs-audit-2026-07-31.md) | 语法文档专项审计 | 13 项文档矛盾/错误（优先级表两套体系、setup/teardown 状态冲突、附录重复等） |
+| [syntax-docs-audit-2026-07-31.md](syntax-docs-audit-2026-07-31.md) | 语法文档专项审计 | 13 项中 **12 项已处理完毕**（#10 为误报），处置结论见 [verdict-2026-07-31.md §四](verdict-2026-07-31.md)：优先级表已按 parser 实测统一、附录去重、overview 计数订正为 313、`03-函数.md` 已并入基础篇、版本日期统一并加 `SYNTAX/check_doc_versions.py` 校验 |
 | [AUDIT-2026-07-29.md](AUDIT-2026-07-29.md) | 历史审计 | 07-29 历史审计记录 |
 
 ### 审计报告（非 Bug，参考）

@@ -1,8 +1,15 @@
+// ✅ duck 类型约束 — 命名 duck 定义 + 作为类型注解使用
+// 出处：SYNTAX/01-类型系统.md §九（Duck 类型约束）
+// 注：duck 约束为规范目标特性（语法冻结，约束求解待实现），此处演示其声明与结构化匹配意图
+duck Pet =
+    .name: str
+    .age: int
+
 struct Cat =
     name: str
     age: int
 
-def process(pet: duck { name: str, age: int }) =
+def process(pet: Pet) =
     let name = pet.name
     name
 

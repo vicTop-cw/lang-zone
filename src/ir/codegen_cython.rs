@@ -178,7 +178,7 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             if let Some(eb) = else_body { cg.writeln("else:"); cg.indent += 1; gen_block(cg, eb); cg.indent -= 1; }
             if let Some(fb) = finally_body { cg.writeln("finally:"); cg.indent += 1; gen_block(cg, fb); cg.indent -= 1; }
         }
-        Stmt::Block { stmts } => { for s in stmts { gen_stmt(cg, s); } }
+        // Stmt::Block handled above (L138)
         _ => cg.writeln("# <stmt todo>"),
     }
 }

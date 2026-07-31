@@ -410,6 +410,7 @@ fn skip_to(tokens: &[Token], mut i: usize, len: usize, target: &Token, err_msg: 
 }
 
 /// 收集缩进块内的 tokens（从 Indent 到匹配的 Dedent）
+#[allow(dead_code)]
 fn collect_indented_block(tokens: &[Token], start: usize) -> Result<Vec<Token>, String> {
     collect_indented_block_with_end(tokens, start).map(|(tokens, _)| tokens)
 }

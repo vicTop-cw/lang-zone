@@ -29,6 +29,7 @@ pub(super) enum MagicSelfMode { Owned, Ref, RefMut, None }
 pub struct CodeGen {
     pub(super) structs: Vec<(String, Vec<String>)>,
     pub(super) enum_variants: Vec<(String, String)>,
+    #[allow(dead_code)]
     pub(super) fn_owned: HashMap<String, Vec<bool>>,
     pub(super) in_gen: Cell<bool>,
     pub(super) in_build_call: Cell<bool>,

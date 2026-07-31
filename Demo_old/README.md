@@ -12,7 +12,7 @@
 |------|------|:---:|
 | `01_hello_world/` | Hello World | [00-词法基础](../SYNTAX/00-词法基础.md) |
 | `02_basics/` | 变量、字面量、类型、运算符 | [02-变量与绑定](../SYNTAX/02-变量与绑定.md) |
-| `03_functions/` | 函数定义、装饰器、泛型、闭包 | [03-函数](../SYNTAX/03-函数.md) |
+| `03_functions/` | 函数定义、装饰器、泛型、闭包 | [03-函数基础](../SYNTAX/03-函数基础.md) |
 | `04_control_flow/` | 条件、循环、match、guard | [05-控制流](../SYNTAX/05-控制流.md) |
 | `05_data_types/` | struct、enum、List、Dict、Option | [01-类型系统](../SYNTAX/01-类型系统.md) |
 | `06_advanced/` | trait、管道、推导式、安全导航 | [06-数据结构](../SYNTAX/06-数据结构.md) |

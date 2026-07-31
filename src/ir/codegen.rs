@@ -73,6 +73,7 @@ impl CodeGen {
         "    ".repeat(self.indent)
     }
 
+    #[allow(dead_code)]
     fn emit(&mut self, s: &str) {
         self.buf.push_str(s);
     }
@@ -580,6 +581,7 @@ impl CodeGen {
                 self.indent -= 1;
                 self.emit_line("}");
             }
+            #[allow(unreachable_patterns)]
             _ => self.emit_line("// TODO: Stmt variant not yet supported"),
         }
     }

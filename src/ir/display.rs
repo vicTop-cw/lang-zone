@@ -3,7 +3,7 @@
 
 use super::node::*;
 use super::types::IrType;
-use std::fmt::{self, Write};
+use std::fmt::{self};
 
 // ── IrType Display ──
 

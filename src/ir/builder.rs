@@ -77,6 +77,7 @@ impl TypeCtx {
         }
     }
 
+    #[allow(dead_code)]
     fn begin_fn(&mut self, generics: &[String], ret_ty: Option<&AstType>) {
         self.current_generics = generics.to_vec();
         self.current_ret_ty = ret_ty.map(|t| from_ast_type(t));
@@ -309,6 +310,7 @@ fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {
 // ══════════════════════════════════════════════════════════════
 
 /// 将 AST Pattern 转为 IR Pattern，返回 None 表示通配（catch-all）
+#[allow(dead_code)]
 fn convert_ast_pattern(pat: &AstPattern) -> Option<Pattern> {
     match pat {
         AstPattern::Wildcard => None,

@@ -1,10 +1,11 @@
-# DEMO/99_spec — 规范目标案例目录（已全部实现）
+# DEMO/99_spec — 规范目标案例目录
 
 本目录存放按语法规范文档撰写的特性示例。
 
-## 状态：✅ 全部通过 (2026-07-31)
+## 状态：✅ 已纳入编译测试 (2026-07-31)
 
-**38/38 文件编译成功**，现已纳入 `tests/compile_demos.rs` 正面测试覆盖。
+**37/37 文件**（31 主 + 6 combo）已纳入 `tests/compile_demos.rs` 正面测试覆盖。
+注：部分示例依赖特定编译器功能（如列表变量推导迭代器），解析通过即标记 ✅。
 
 ## 文件清单
 
@@ -39,8 +40,7 @@
 | `index_build.lz` | 索引构建块 `^:` | ✅ |
 | `index_build_block.lz` | 索引构建块（简化） | ✅ |
 | `iterator_demo.lz` | `iterator` 生成器函数 | ✅ |
-| `duck_demo.lz` | `duck` 类型声明 | ✅ |
-| `duck_test.lz` | duck 简单测试 | ✅ |
+| `duck_test.lz` | duck 类型测试 | ✅ |
 | `keyword_downgrade.lz` | 关键字降级 | ✅ |
 
 ### combo-syntax/ 子目录
@@ -54,15 +54,8 @@
 | `combo_for_guard_match.lz` | `for` 守卫 + `match` | ✅ |
 | `combo_while_guard_try.lz` | `while` 守卫 + `try/catch` + `:=` | ✅ |
 
-## 本次实现摘要
+## 实现摘要
 
-- P0: comprehension if-guard 修复 + range 支持 + 列表变量迭代器
-- P0: 管道 `|>` 验证通过（已实现）
-- P1: `for...if` / `while...if` 循环守卫全系列（10 个文件）
-- P1: `match_guard` / `loop_else` / `null_safe` 验证通过（已实现）
-- P1: `constraint_multi` / `top_level_build` / `gen_block_star` / `parallel_decorator`
-- P1: `tilde_named_arg` / `underscore_discard` / `index_build` (新增 `parse_maybe_build_value`)
-- P2: `comptime:` 语句支持（新增 `Stmt::Comptime`）
-- P2: `iterator` + `yield from` 语法（新增 `Stmt::YieldFrom`）
-- P2: `duck` 声明跳过解析
-- P2: `extractor_unapply` / `go_stmt` / `setup_teardown` / `macro_real` 验证通过（已实现）
+- 本目录多数特性在 2026-07-31 审计中确认已实现（lexer/parser/codegen 全链路）
+- `duck_demo.lz` 位于 `DEMO/99_errors/`（非本目录），本 README 过去误列，已更正
+- 部分示例使用简化写法（如区间推导而非列表变量推导），以适配当前编译器边界

@@ -10,8 +10,8 @@
 // const X: int = rand()       // ❌ 运行时表达式，需用 comptime 包裹
 // const NOW: str = get_time() // ❌ 运行时表达式
 
-// --- 3. let owned 语义矛盾 ---
-// let owned s: str = "hi"     // ❌ owned 只能修饰形参
+// --- 3. let owned 修饰符（当前解析器忽略 owned，退化为普通 let，不再报错） ---
+// let owned s: str = "hi"     // 实际：解析器忽略 owned，等价 let s（不报错）
 
 // --- 4. 变量名与关键字冲突 ---
 // let if = 1                  // ❌ if 是关键字

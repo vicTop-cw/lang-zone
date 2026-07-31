@@ -11,6 +11,7 @@ use std::time::Instant;
 
 /// 基准测试运行器
 struct Bench {
+    #[allow(dead_code)]
     name: &'static str,
     simd_ns: u128,
     plain_ns: u128,
