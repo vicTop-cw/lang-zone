@@ -1,0 +1,25 @@
+// ============================
+// IR边界测试: 枚举方法调用链
+// ============================
+
+enum MyOption =
+    MySome(value: int)
+    MyNone
+
+impl MyOption =
+    def is_my_some(self) -> bool =
+        match self:
+            MyOption.MySome(value: _) => True
+            MyOption.MyNone => False
+    
+    def unwrap_my(self) -> int =
+        match self:
+            MyOption.MySome(value: v) => v
+            MyOption.MyNone => panic("unwrap on MyNone")
+
+def main() =
+    let x = MyOption.MySome(value: 42)
+    let y = MyOption.MyNone
+    print(x.is_my_some())
+    print(y.is_my_some())
+    print(x.unwrap_my())

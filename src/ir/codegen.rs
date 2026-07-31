@@ -551,7 +551,11 @@ impl CodeGen {
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
                     || matches!(ty, IrType::Generic(_))
-                    || if let IrType::Named { path, args } = ty { path == "Range" || args.is_empty() } else { false };
+                    || if let IrType::Named { path, args } = ty {
+                        // Skip for Range, Nil, and types with unresolved generics
+                        path == "Range" || path == "Nil" || args.is_empty()
+                            || args.iter().any(|a| matches!(a, IrType::Generic(_)))
+                    } else { false };
                 let ty_str = if skip_ty {
                     String::new()
                 } else {
@@ -636,8 +640,11 @@ impl CodeGen {
             Stmt::Match { scrutinee, arms } => {
                 let scrut_s = self.gen_expr(scrutinee);
                 // String 类型模式匹配：match name { "hello" => } 需要 &str
+                // self 引用 → clone 以获取 owned 值用于模式匹配提取
                 let scrut_str = if matches!(&scrutinee.ty, IrType::Str) {
                     format!("{}.as_str()", scrut_s)
+                } else if scrut_s == "self" {
+                    format!("self.clone()")
                 } else {
                     scrut_s
                 };
@@ -1051,19 +1058,20 @@ impl CodeGen {
                 format!("({})", elems.join(", "))
             }
             ExprKind::ListLit(elems) => {
-                // 空列表且在 Nil/Unit 上下文中 → ()
-                // 普通空 List → vec![]
+                // 空列表：Nil/Unit → ()，否则 → vec![]
                 let is_nil = elems.is_empty() && (
                     matches!(expr.ty, IrType::Unit)
-                    || if let IrType::Named { ref path, .. } = expr.ty {
-                        path == "Nil"
-                    } else { false }
+                    || matches!(self.rust_type(&expr.ty).as_str(), "()")
                 );
                 if is_nil {
                     "()".to_string()
                 } else {
                     let elems: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
-                    format!("vec![{}]", elems.join(", "))
+                    if elems.is_empty() {
+                        "vec![]".to_string()
+                    } else {
+                        format!("vec![{}]", elems.join(", "))
+                    }
                 }
             }
             _ => format!("/* TODO: unsupported expr */"),

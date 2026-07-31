@@ -1,0 +1,17 @@
+// ============================
+// IR边界测试: 空集合/空值行为
+// ============================
+
+def empty_list_test() =
+    let a = []
+    let b: List = []
+    print(a, b)
+
+def none_test() =
+    let x = None
+    let y: Option = None
+    print(x, y)
+
+def main() =
+    empty_list_test()
+    none_test()

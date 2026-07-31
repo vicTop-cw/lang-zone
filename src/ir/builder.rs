@@ -272,6 +272,11 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             if matches!(op, BinOp::Is) {
                 return IrType::Bool;
             }
+            // 比较/布尔运算符返回 Bool
+            if matches!(op, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge
+                | BinOp::And | BinOp::Or | BinOp::In) {
+                return IrType::Bool;
+            }
             // 取左侧操作数的类型（简化）
             infer_expr_type(left, ctx)
         }

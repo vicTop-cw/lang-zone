@@ -1,0 +1,25 @@
+// ============================
+// IR边界测试: 深度嵌套match
+// ============================
+
+enum Option2 =
+    Some2(value: int)
+    None2
+
+enum NestedEnum =
+    Inner(value: Option2)
+    Outer(value: Option2)
+
+def match_nested(x: NestedEnum) -> int =
+    match x:
+        NestedEnum.Inner(value: Option2.Some2(value: v)) => v
+        NestedEnum.Inner(value: Option2.None2) => -1
+        NestedEnum.Outer(value: Option2.Some2(value: v)) => v * 10
+        NestedEnum.Outer(value: Option2.None2) => -2
+
+def main() =
+    let a = match_nested(NestedEnum.Inner(value: Option2.Some2(value: 42)))
+    let b = match_nested(NestedEnum.Inner(value: Option2.None2))
+    let c = match_nested(NestedEnum.Outer(value: Option2.Some2(value: 7)))
+    let d = match_nested(NestedEnum.Outer(value: Option2.None2))
+    print(a, b, c, d)
