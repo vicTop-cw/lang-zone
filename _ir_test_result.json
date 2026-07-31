@@ -1,9 +1,9 @@
 {
-  "total": 128,
-  "lz_pass": 128,
+  "total": 129,
+  "lz_pass": 129,
   "lz_fail": 0,
-  "rustc_pass": 44,
-  "rustc_fail": 84,
+  "rustc_pass": 49,
+  "rustc_fail": 80,
   "pass_files": [
     "01_basics\\comments.lz",
     "01_basics\\literals_more.lz",
@@ -11,6 +11,8 @@
     "03_variables\\const_more.lz",
     "03_variables\\mutable_let.lz",
     "03_variables\\ref_binding.lz",
+    "03_variables\\walrus.lz",
+    "03_variables\\walrus_more.lz",
     "04_functions\\basic.lz",
     "04_functions\\composite.lz",
     "05_expressions\\comprehension.lz",
@@ -27,17 +29,19 @@
     "06_control_flow\\match_more.lz",
     "07_data_structures\\enum.lz",
     "07_data_structures\\module_magic.lz",
-    "07_data_structures\\struct.lz",
     "07_data_structures\\trait_impl.lz",
     "09_macros\\comptime_demo.lz",
     "13_operators\\compound_assign_more.lz",
     "14_pointers\\box_rc_arc.lz",
     "15_generators\\generator_more.lz",
     "15_generators\\yield_demo.lz",
+    "99_spec\\combo-syntax\\combo_while_guard_else.lz",
+    "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
     "99_spec\\comprehension_over_list.lz",
     "99_spec\\comptime_template.lz",
     "99_spec\\guard_for_1.lz",
     "99_spec\\guard_for_2.lz",
+    "99_spec\\ir-edge-boundary-values.lz",
     "99_spec\\ir-edge-enum-self-methods.lz",
     "99_spec\\ir-edge-guard-combo.lz",
     "99_spec\\ir-edge-nested-match.lz",
@@ -48,7 +52,8 @@
     "export_demo.lz",
     "memoize_demo.lz",
     "pass_demo.lz",
-    "struct_singleline.lz"
+    "struct_singleline.lz",
+    "variadic_dotdot.lz"
   ],
   "errors": {
     "E0573": [
@@ -60,15 +65,8 @@
       "01_basics\\keywords.lz",
       "01_basics\\keywords.lz",
       "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
       "02_types\\option_result.lz",
       "03_variables\\ownership.lz",
-      "03_variables\\walrus.lz",
-      "03_variables\\walrus.lz",
-      "03_variables\\walrus.lz",
-      "03_variables\\walrus_more.lz",
-      "03_variables\\walrus_more.lz",
-      "03_variables\\walrus_more.lz",
       "04_functions\\checker.lz",
       "04_functions\\checker.lz",
       "04_functions\\closures_more.lz",
@@ -79,9 +77,6 @@
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
       "06_control_flow\\guard.lz",
       "06_control_flow\\guard.lz",
       "06_control_flow\\guard.lz",
@@ -90,8 +85,42 @@
       "06_control_flow\\guard.lz",
       "06_control_flow\\with_defer.lz",
       "06_control_flow\\with_defer.lz",
+      "07_data_structures\\callable_objects.lz",
+      "07_data_structures\\callable_objects.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\struct.lz",
+      "07_data_structures\\struct.lz",
+      "07_data_structures\\struct.lz",
+      "07_data_structures\\struct.lz",
+      "07_data_structures\\struct_more.lz",
+      "07_data_structures\\struct_more.lz",
+      "07_data_structures\\struct_more.lz",
+      "07_data_structures\\struct_more.lz",
+      "07_data_structures\\struct_more.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
@@ -151,25 +180,14 @@
       "99_prelude\\prelude_demo.lz",
       "99_prelude\\prelude_demo.lz",
       "99_prelude\\prelude_demo.lz",
+      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
+      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
       "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
       "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_else.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_else.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_else.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_else.lz",
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
       "99_spec\\duck_test.lz",
       "99_spec\\go_stmt.lz",
       "99_spec\\go_stmt.lz",
@@ -185,24 +203,18 @@
       "99_spec\\while_walrus_guard_1.lz",
       "99_spec\\while_walrus_guard_1.lz",
       "99_spec\\while_walrus_guard_1.lz",
-      "99_spec\\while_walrus_guard_1.lz",
-      "99_spec\\while_walrus_guard_1.lz",
-      "99_spec\\while_walrus_guard_1.lz",
-      "99_spec\\while_walrus_guard_1.lz",
       "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_for_walrus.lz",
       "combo-syntax\\combo_for_walrus.lz",
+      "combo-syntax\\combo_generic_struct_method.lz",
       "combo-syntax\\combo_pipe_partial.lz",
+      "combo-syntax\\combo_struct_method_partial.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "combo-syntax\\combo_while_walrus.lz",
-      "combo-syntax\\combo_while_walrus.lz",
-      "combo-syntax\\combo_while_walrus.lz",
       "combo-syntax\\combo_while_walrus.lz",
       "combo-syntax\\combo_while_walrus.lz",
       "combo-syntax\\combo_while_walrus.lz"
@@ -226,6 +238,8 @@
       "02_types\\containers.lz",
       "02_types\\containers.lz",
       "02_types\\containers.lz",
+      "02_types\\containers.lz",
+      "02_types\\containers.lz",
       "02_types\\type_aliases.lz",
       "02_types\\type_aliases.lz",
       "02_types\\type_aliases_more.lz",
@@ -233,6 +247,8 @@
       "02_types\\type_aliases_more.lz",
       "02_types\\type_conversion.lz",
       "04_functions\\closures_more.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
       "06_control_flow\\with_defer.lz",
@@ -246,8 +262,11 @@
       "07_data_structures\\enum_more.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
@@ -255,11 +274,8 @@
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\try_more.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "99_spec\\codegen_str_int_float.lz",
-      "99_spec\\codegen_str_int_float.lz",
+      "10_error_handling\\try_more.lz",
+      "13_operators\\precedence.lz",
       "99_spec\\codegen_str_int_float.lz",
       "99_spec\\gen_block_star.lz",
       "99_spec\\iterator_demo.lz",
@@ -270,14 +286,15 @@
       "99_spec\\iterator_demo.lz",
       "99_spec\\keyword_downgrade.lz",
       "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
       "combo-syntax\\combo_match_ternary.lz",
       "combo-syntax\\combo_match_ternary.lz",
       "combo-syntax\\combo_match_ternary.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
-      "overload_test.lz",
-      "overload_test.lz",
-      "variadic_dotdot.lz",
-      "variadic_dotdot.lz"
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "overload_test.lz"
     ],
     "E0728": [
       "01_basics\\keywords.lz",
@@ -294,7 +311,6 @@
     "E0282": [
       "01_basics\\literals.lz",
       "02_types\\primitives.lz",
-      "05_expressions\\operators.lz",
       "99_spec\\ir-edge-empty-collections.lz",
       "99_spec\\ir-edge-empty-collections.lz"
     ],
@@ -303,12 +319,6 @@
     ],
     "E0054": [
       "02_types\\type_conversion.lz"
-    ],
-    "E0070": [
-      "03_variables\\walrus.lz",
-      "03_variables\\walrus_more.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_else.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_walrus.lz"
     ],
     "E0608": [
       "04_functions\\checker.lz",
@@ -326,12 +336,8 @@
       "04_functions\\generics.lz",
       "04_functions\\generics.lz",
       "04_functions\\generics.lz",
-      "05_expressions\\operators.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\try_more.lz",
       "99_prelude\\prelude_demo.lz",
       "99_prelude\\prelude_demo.lz",
       "99_spec\\underscore_discard_3.lz",
@@ -364,29 +370,19 @@
     "E0121": [
       "05_expressions\\operators.lz"
     ],
-    "E0689": [
+    "E0433": [
       "05_expressions\\operators.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz"
-    ],
-    "E0277": [
       "05_expressions\\operators.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "99_prelude\\prelude_demo.lz",
-      "99_prelude\\prelude_demo.lz",
-      "99_prelude\\prelude_demo.lz",
-      "99_prelude\\prelude_demo.lz",
-      "99_spec\\index_build.lz",
-      "99_spec\\index_build.lz",
-      "99_spec\\index_build_block.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\keyword_downgrade.lz"
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "08_modules\\import_demo.lz",
+      "08_modules\\import_demo.lz",
+      "08_modules\\import_demo.lz",
+      "08_modules\\import_more.lz",
+      "08_modules\\import_more.lz",
+      "08_modules\\import_more.lz",
+      "combo-syntax\\combo_enum_match_guardlet.lz",
+      "combo-syntax\\combo_enum_match_guardlet.lz"
     ],
     "E0015": [
       "05_expressions\\operators.lz",
@@ -404,17 +400,24 @@
       "99_spec\\underscore_partial_2.lz",
       "combo-syntax\\combo_struct_method_partial.lz"
     ],
+    "E0277": [
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "99_prelude\\prelude_demo.lz",
+      "99_prelude\\prelude_demo.lz",
+      "99_spec\\index_build.lz",
+      "99_spec\\index_build.lz",
+      "99_spec\\index_build_block.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\keyword_downgrade.lz"
+    ],
     "E0063": [
       "07_data_structures\\magic_methods.lz"
     ],
     "E0600": [
       "07_data_structures\\magic_methods.lz"
-    ],
-    "E0507": [
-      "07_data_structures\\magic_methods.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
-      "combo-syntax\\combo_generic_struct_method.lz"
     ],
     "E0596": [
       "07_data_structures\\struct_more.lz"
@@ -431,16 +434,6 @@
       "08_modules\\import_more.lz",
       "08_modules\\import_more.lz"
     ],
-    "E0433": [
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz",
-      "combo-syntax\\combo_enum_match_guardlet.lz",
-      "combo-syntax\\combo_enum_match_guardlet.lz"
-    ],
     "E0601": [
       "09_macros\\macro_demo.lz",
       "16_testing\\test_suite.lz",
@@ -450,19 +443,19 @@
       "99_spec\\literal_i64min.lz",
       "99_spec\\setup_teardown.lz"
     ],
-    "E0572": [
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "99_spec\\top_level_build.lz"
+    "E0507": [
+      "99_spec\\combo-syntax\\combo_for_guard_match.lz",
+      "99_spec\\combo-syntax\\combo_for_guard_struct.lz"
+    ],
+    "E0382": [
+      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
+      "99_spec\\iterator_demo.lz"
     ],
     "E0610": [
       "99_spec\\dict_comprehension.lz",
       "99_spec\\dict_comprehension.lz"
     ],
     "E0069": [
-      "99_spec\\iterator_demo.lz"
-    ],
-    "E0382": [
       "99_spec\\iterator_demo.lz"
     ],
     "E0530": [
@@ -477,6 +470,9 @@
       "99_spec\\tilde_named_arg_1.lz",
       "99_spec\\tilde_named_arg_2.lz",
       "99_spec\\tilde_named_arg_3.lz"
+    ],
+    "E0572": [
+      "99_spec\\top_level_build.lz"
     ],
     "E0428": [
       "overload_test.lz"
@@ -500,11 +496,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `e` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:63:18",
+        "error[E0425]: cannot find type `Future` in this scope",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:75:12",
         "|",
-        "63 | println!(\"{:?}\", e);",
-        "|                  ^",
+        "75 |     let f: Future<i64> = spawn(fetch());",
+        "|            ^^^^^^ not found in this scope",
         "|"
       ]
     },
@@ -527,11 +523,11 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:30:34",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:20:10",
         "|",
-        "30 |     let has_rust = tags.contains(\"rust\".to_string());",
-        "|                         -------- ^^^^^^^^^^^^^^^^^^ expected `&_`, found `String`",
-        "|                         |"
+        "20 |     ages[\"charlie\".to_string()] = 35;",
+        "|          ^^^^^^^^^^^^^^^^^^^^^ expected `&_`, found `String`",
+        "|"
       ]
     },
     {
@@ -611,30 +607,6 @@
       ]
     },
     {
-      "file": "03_variables\\walrus.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `val` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\03_variables\\walrus.rs:24:13",
-        "|",
-        "24 |     while { val = count_up(); val } < 10 {",
-        "|             ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "03_variables\\walrus_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\03_variables\\walrus_more.rs:15:13",
-        "|",
-        "15 |     while { v = tick(); v } < 4 {",
-        "|             ^ not found in this scope"
-      ]
-    },
-    {
       "file": "04_functions\\checker.lz",
       "lz_ok": true,
       "rustc_ok": false,
@@ -689,11 +661,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `config` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\05_expressions\\operators.rs:67:22",
+        "error[E0425]: cannot find value `print` in module `std::io`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\05_expressions\\operators.rs:84:29",
         "|",
-        "67 |     let safe_field = config.get(\"key\".to_string());",
-        "|                      ^^^^^^ not found in this scope"
+        "84 |     let mod_path = std::io::print;",
+        "|                             ^^^^^",
+        "|"
       ]
     },
     {
@@ -725,12 +698,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0618]: expected function, found `Multiplier`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\callable_objects.rs:33:22",
+        "error[E0425]: cannot find value `factor` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\callable_objects.rs:15:22",
         "|",
-        "32 |     let doubler = Multiplier { factor: 2 };",
-        "|         ------- `doubler` has type `Multiplier`",
-        "33 |     println!(\"{:?}\", doubler(21));"
+        "15 |         return self::factor * x;",
+        "|                      ^^^^^^ not found in `self`"
       ]
     },
     {
@@ -751,12 +723,23 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0423]: expected value, found enum `Option`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\magic_methods.rs:90:8",
+        "error[E0425]: cannot find value `x` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\magic_methods.rs:16:34",
         "|",
-        "90 | return Option.Some(val);",
-        "|        ^^^^^^",
-        "|"
+        "16 |         return Vector { x: self::x + other.x, y: self::y + other.y };",
+        "|                                  ^ not found in `self`"
+      ]
+    },
+    {
+      "file": "07_data_structures\\struct.lz",
+      "lz_ok": true,
+      "rustc_ok": false,
+      "rustc_errors": [
+        "error[E0425]: cannot find value `width` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct.rs:21:22",
+        "|",
+        "21 |         return self::width * self::height;",
+        "|                      ^^^^^ not found in `self`"
       ]
     },
     {
@@ -764,12 +747,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0596]: cannot borrow `c` as mutable, as it is not declared as mutable",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct_more.rs:35:9",
+        "error[E0425]: cannot find value `count` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct_more.rs:15:28",
         "|",
-        "35 |     let c = Counter { count: 0 };",
-        "|         ^ not mutable",
-        "36 |     println!(\"{:?}\", c.increment());"
+        "15 |         self.count = self::count + 1;",
+        "|                            ^^^^^ not found in `self`"
       ]
     },
     {
@@ -815,12 +797,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0423]: expected value, found enum `FileError`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\10_error_handling\\panic_raise_try.rs:55:23",
+        "warning: unreachable expression",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\10_error_handling\\panic_raise_try.rs:30:1",
         "|",
-        "55 | return panic!(\"{:?}\", FileError.ReadError(\"empty path\".to_string()));",
-        "|                       ^^^^^^^^^",
-        "|"
+        "30 | return panic!(\"{:?}\", \"division by zero\".to_string());",
+        "| ^^^^^^^----------------------------------------------",
+        "| |      |"
       ]
     },
     {
@@ -828,12 +810,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0423]: expected value, found enum `ParseError`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\10_error_handling\\try_more.rs:16:23",
+        "warning: unreachable expression",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\10_error_handling\\try_more.rs:16:1",
         "|",
-        "16 | return panic!(\"{:?}\", ParseError.BadFormat(\"empty\".to_string()));",
-        "|                       ^^^^^^^^^^",
-        "|"
+        "16 | return panic!(\"{:?}\", ParseError::BadFormat(\"empty\".to_string()));",
+        "| ^^^^^^^----------------------------------------------------------",
+        "| |      |"
       ]
     },
     {
@@ -992,12 +974,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0507]: cannot move out of a shared reference",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.rs:27:40",
+        "error[E0425]: cannot find value `x` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.rs:16:22",
         "|",
-        "27 |     for p in (pts).into_iter().filter(|&p| is_positive(p.x)) {",
-        "|                                        ^-",
-        "|                                         |"
+        "16 |         return self::x + self::y;",
+        "|                      ^ not found in `self`"
       ]
     },
     {
@@ -1006,23 +987,11 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_walrus.rs:15:19",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_walrus.rs:15:20",
         "|",
-        "15 |         let n = { v = i * 2; v };",
-        "|                   ^",
+        "15 |         let n = ({ v = i * 2; v });",
+        "|                    ^",
         "|"
-      ]
-    },
-    {
-      "file": "99_spec\\combo-syntax\\combo_while_guard_else.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `n` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_while_guard_else.rs:15:14",
-        "|",
-        "15 |     while ({ n = next(); n } <= 5) && (n != 3) {",
-        "|              ^ not found in this scope"
       ]
     },
     {
@@ -1036,18 +1005,6 @@
         "15 |     count = count + 1;",
         "|     ^^^^^",
         "|"
-      ]
-    },
-    {
-      "file": "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `n` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_while_guard_walrus.rs:16:14",
-        "|",
-        "16 |     while ({ n = next(); n } <= 10) && (n % 2 == 0) {",
-        "|              ^ not found in this scope"
       ]
     },
     {
@@ -1420,10 +1377,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_for_walrus.rs:11:19",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_for_walrus.rs:11:20",
         "|",
-        "11 |         let n = { v = i * 2; v };",
-        "|                   ^",
+        "11 |         let n = ({ v = i * 2; v });",
+        "|                    ^",
         "|"
       ]
     },
@@ -1432,12 +1389,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0507]: cannot move out of `self.item` which is behind a shared reference",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_generic_struct_method.rs:21:28",
+        "error[E0425]: cannot find value `item` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_generic_struct_method.rs:21:34",
         "|",
-        "21 |         return Maybe::Just(self.item);",
-        "|                            ^^^^^^^^^ move occurs because `self.item` has type `T`, which does not implement the `Copy` trait",
-        "|"
+        "21 |         return Maybe::Just(self::item);",
+        "|                                  ^^^^ not found in `self`"
       ]
     },
     {
@@ -1470,11 +1426,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:15:23",
+        "error[E0425]: cannot find value `value` in module `self`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:16:26",
         "|",
-        "15 |         let inc = add(_, 1);",
-        "|                       ^ `_` not allowed here"
+        "16 |         return inc(self::value);",
+        "|                          ^^^^^ not found in `self`"
       ]
     },
     {
@@ -1482,12 +1438,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error: expected expression, found `>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_ternary_walrus.rs:14:52",
+        "error[E0425]: cannot find value `n` in this scope",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_ternary_walrus.rs:14:22",
         "|",
-        "14 |     let v: bool = if n * 10 { { n = compute(); n } > 5 } else { 0 };",
-        "|                                                    ^ expected expression",
-        "|"
+        "14 |     let v: bool = if n * 10 { ({ n = compute(); n }) > 5 } else { 0 };",
+        "|                      ^ not found in this scope"
       ]
     },
     {
@@ -1495,11 +1450,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `msg` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_try_raise_guard.rs:26:18",
+        "warning: unreachable expression",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_try_raise_guard.rs:17:9",
         "|",
-        "26 | println!(\"{:?}\", msg);",
-        "|                  ^^^ not found in this scope"
+        "17 |         return panic!(\"{:?}\", MathError::DivByZero(\"zero\".to_string()));",
+        "|         ^^^^^^^--------------------------------------------------------",
+        "|         |      |"
       ]
     },
     {
@@ -1526,19 +1482,6 @@
         "9 | pub fn add(a: i64, b: i64) -> i64 {",
         "| --------------------------------- previous definition of the value `add` here",
         "..."
-      ]
-    },
-    {
-      "file": "variadic_dotdot.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\variadic_dotdot.rs:10:23",
-        "|",
-        "10 |     return greeting + \", \".to_string() + name;",
-        "|                       ^^^^^^^^^^^^^^^^ expected `&str`, found `String`",
-        "|"
       ]
     }
   ]

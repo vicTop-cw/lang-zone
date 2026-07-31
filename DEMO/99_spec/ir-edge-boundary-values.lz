@@ -1,0 +1,82 @@
+// Boundary values & edge case tests
+// Test: numeric, string, collection, boolean, control flow boundaries
+
+def numeric_boundary() =
+    let big: int = 9223372036854775807
+    let zero: int = 0
+    let one: int = 1
+    
+    let pi: f64 = 3.141592653589793
+    let zero_f64: f64 = 0.0
+    
+    let pow_zero: int = 2 ** 0
+    let shift_max: int = 1 << 63
+    
+    print(pow_zero, shift_max, big)
+
+def string_boundary() =
+    let empty: str = ""
+    let concat: str = "Hello, " + "World!"
+    let repeated: bool = "a" in "abc"
+    let not_found: bool = "z" in "abc"
+    
+    print(concat, repeated)
+
+def collection_boundary() =
+    let empty_list: List<int> = []
+    let single_list = [42]
+    
+    let in_empty = 1 in empty_list
+    let in_single = 42 in single_list
+    
+    let first = single_list[0]
+    
+    print(first, in_empty, in_single)
+
+def boolean_edge() =
+    let t = True
+    let f = False
+
+    let chain1: bool = 1 < 2 < 3 < 4
+    let not_cmp: bool = not True == False
+    let not_not: bool = not not True
+
+    print(chain1, not_cmp)
+
+def nested_expressions() =
+    let a = 1
+    let b = 2
+    let c = 3
+
+    let deep1: int = ((a + b) * (c - a)) / (b + 1)
+    let deep2: int = a + b + c + a + b + c
+
+    print(deep1, deep2)
+
+def match_edge(x: int) -> int =
+    match x:
+        0 => 0
+        1 => 1
+        _ => x * 2
+
+def control_flow_edge(n: int) -> int =
+    if n <= 0:
+        return 0
+    
+    let result = 0
+    for i in 1..n:
+        if i % 2 == 0:
+            continue
+        result = result + i
+    
+    return result
+
+def main() =
+    numeric_boundary()
+    string_boundary()
+    collection_boundary()
+    boolean_edge()
+    nested_expressions()
+    print(match_edge(5))
+    print(control_flow_edge(10))
+    print("boundary tests done")
