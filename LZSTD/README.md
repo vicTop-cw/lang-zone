@@ -1,4 +1,4 @@
-# LZSTD — Lang-Zong 标准库
+# LZSTD — Lang-Zone 标准库
 
 > LZ **自己**的标准库命名空间。用户无需 `import`，默认已在作用域内（prelude）。
 

@@ -2,7 +2,7 @@
 
 > 规范版本: 3.2 · 基于编译器源码 · 最后校订: 2026-07-31
 
-本文档列举 Lang-Zong 编译器内置的全部魔法方法（`__xxx__`），以及它们自动生成的 trait 与对应的 Rust trait。
+本文档列举 Lang-Zone 编译器内置的全部魔法方法（`__xxx__`），以及它们自动生成的 trait 与对应的 Rust trait。
 
 当 struct 实现了某个魔法方法时，编译器自动为该 struct 生成对应的 trait impl，同时生成一个全局函数供直接调用。
 
@@ -153,6 +153,30 @@ struct Point =
 ```
 
 > 详见 [06a-struct.md](06a-struct.md) §六 构造器魔法方法。
+
+---
+
+## 九点五、提取器模式
+
+| 魔法方法 | 参数 | 返回 | 用途 |
+|----------|------|------|------|
+| `__unapply__` | `self` | `(T1, T2, ...)` | match 模式解构，将 struct 分解为元组用于 `case Point(x, y):` |
+
+```lz
+struct Point =
+    x: int
+    y: int
+    magic __unapply__(self) -> (int, int) = (self.x, self.y)
+
+match p:
+    case Point(px, py) => print(px + py)
+```
+
+- `__unapply__` 使用 `self`（owned），返回元组
+- 返回元组的各元素按位置绑定到 match 模式中的子变量
+- 一个 struct 只能定义一个 `__unapply__`
+
+> 详见 [06a-struct.md](06a-struct.md) 与 [05-控制流.md](05-控制流.md) §六 match 解构。
 
 ---
 

@@ -1,13 +1,7 @@
 // ============================
-// LZ 错误边界合集 — 并发与异步 (10-并发与异步.md)
+// LZ 错误边界 — 并发与异步
 // ============================
-
-// --- 1. await 在非 async 函数中 ---
-// def sync_fn() =
-//     await async_fn()          // ❌ 需用 spawn 启动
-
-// --- 2. spawn 非函数调用 ---
-// spawn 42                     // ❌ spawn 后必须是调用
-
-// --- 3. async 函数作为 spawn 参数 ---
-// spawn async def f(): ...      // ❌ spawn 接受调用而非定义
+def main() =
+    // for 循环缺少 colon
+    for x in 1..10
+        print(x)

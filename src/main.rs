@@ -3,7 +3,7 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use lang_zone::lexer::Lexer;
 use lang_zone::parser::Parser;
 use lang_zone::codegen::CodeGen;
@@ -11,7 +11,24 @@ use lang_zone::macros::expand::{extract_macro_defs, MacroExpander};
 use lang_zone::ir::builder::build_ir;
 use lang_zone::ir::codegen::CodeGen as IrCodeGen;
 use lang_zone::project::ProjectCompiler;
-use lang_zone::cache::{CacheEntry, content_hash};
+use lang_zone::cache::{CacheEntry, content_hash, scan_deps};
+
+/// 将 .lz 扩展名替换为 .rs（只替换最后的扩展名，避免 `a.lz.lz` → `a.rs.rs` 问题）
+fn replace_ext(path: &str, from: &str, to: &str) -> String {
+    let p = Path::new(path);
+    if let Some(stem) = p.file_stem() {
+        let parent = p.parent().unwrap_or(Path::new(""));
+        let new_name = format!("{}{}", stem.to_string_lossy(), to);
+        if parent.as_os_str().is_empty() {
+            new_name
+        } else {
+            format!("{}/{}", parent.display(), new_name)
+        }
+    } else {
+        // fallback: just replace
+        path.replace(from, to)
+    }
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -48,7 +65,7 @@ fn main() {
             });
 
         let rust_code = CodeGen::generate(&merged, std_dir, allow_rustc_private, rustc_version);
-        let out_path = path.replace(".lz", ".rs");
+        let out_path = replace_ext(path, ".lz", ".rs");
         fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
             eprintln!("Error writing {}: {}", out_path, e);
             std::process::exit(1);
@@ -156,7 +173,7 @@ fn main() {
                 // ALSO generate .rs via IR codegen
                 let mut cg = IrCodeGen::new();
                 let rust_code = cg.generate(&ir_module);
-                let out_path = path.replace(".lz", ".rs");
+                let out_path = replace_ext(path, ".lz", ".rs");
                 fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", out_path, e);
                     std::process::exit(1);
@@ -176,7 +193,7 @@ fn main() {
             Ok(ir_module) => {
                 let mut cg = IrCodeGen::new();
                 let rust_code = cg.generate(&ir_module);
-                let out_path = path.replace(".lz", ".rs");
+                let out_path = replace_ext(path, ".lz", ".rs");
                 fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", out_path, e);
                     std::process::exit(1);
@@ -203,17 +220,31 @@ fn main() {
 
     println!("Generated {} -> {}", path, out_path);
 
-    // 编译成功后保存缓存
+    // 编译成功后保存缓存（含源文件哈希 + 依赖信息）
     if use_cache {
         let hash = content_hash(std::path::Path::new(path)).unwrap_or_default();
-        let mut entry = CacheEntry::default();
-        entry.hash = hash;
+        let dep_paths = scan_deps(&module);
+        let deps: Vec<(String, String)> = dep_paths.iter()
+            .filter_map(|d| {
+                let dep_full = std::path::Path::new(path).parent().unwrap_or(Path::new(".")).join(d);
+                content_hash(&dep_full).ok().map(|h| (d.clone(), h))
+            })
+            .collect();
+        let entry = CacheEntry {
+            hash,
+            deps,
+            output: format!("{}.rs", std::path::Path::new(path)
+                .file_stem().unwrap_or_default().to_string_lossy()),
+        };
         let _ = entry.save(&PathBuf::from(".lzcache"), std::path::Path::new(path));
     }
 
     // --test: 编译并运行测试
     if run_tests {
-        let out_name = path.replace(".lz", "");
+        let out_name = replace_ext(path, ".lz", "");
+        #[cfg(target_os = "windows")]
+        let test_bin = format!("{}_test.exe", out_name);
+        #[cfg(not(target_os = "windows"))]
         let test_bin = format!("{}_test", out_name);
         let status = std::process::Command::new("rustc")
             .arg("--test")

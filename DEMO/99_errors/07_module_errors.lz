@@ -1,22 +1,6 @@
 // ============================
-// LZ 错误边界合集 — 模块与导入 (07-模块与导入.md)
+// LZ 错误边界 — 模块与导入
 // ============================
-
-// --- 1. 使用 :: 路径 ---
-// import std::io                  // ❌ 应使用 .
-// Option::Some(42)                // ❌ 应使用 Option.Some(42)
-
-// --- 2. 导入不存在的模块 ---
-// import does.not.exist           // ❌ 编译错误
-
-// --- 3. 循环导入 ---
-// // a.lz: import b
-// // b.lz: import a
-// // ❌ 循环导入
-
-// --- 4. from 导入语法错误 ---
-// from import print               // ❌ 缺少模块路径
-// from std.io import              // ❌ 缺少导入项
-
-// --- 5. 导入别名语法错误 ---
-// import std.io as                // ❌ 缺少别名
+def main() =
+    // import 不能出现在函数体内
+    import foo.bar

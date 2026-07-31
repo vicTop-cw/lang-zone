@@ -118,10 +118,15 @@ pub fn content_hash(path: &Path) -> io::Result<String> {
     Ok(format!("{:016x}", h))
 }
 
-/// 缓存文件名：module.lz → module.lzcache
+/// 缓存文件名，使用相对路径避免同名文件冲突。
+/// 例如 `a/foo.lz` → `a_foo.lzcache`，`b/foo.lz` → `b_foo.lzcache`。
 fn cache_file_path(cache_dir: &Path, source: &Path) -> PathBuf {
-    let stem = source.file_stem().unwrap_or_default().to_string_lossy();
-    cache_dir.join(format!("{}.lzcache", stem))
+    // 规范化为相对路径（去掉可能的前导 ./ 或 \）
+    let normalized = source.to_string_lossy().replace('\\', "/");
+    let normalized = normalized.trim_start_matches("./");
+    // 用下划线替换路径分隔符，生成唯一名
+    let safe_name = normalized.replace('/', "_").replace(".lz", ".lzcache");
+    cache_dir.join(safe_name)
 }
 
 /// 产物文件名：module.lz → module.rs
@@ -137,14 +142,15 @@ pub fn scan_deps(module: &crate::ast::Module) -> Vec<String> {
         .collect()
 }
 
-/// 批量检查并清除无效缓存条目
+/// 清除无效的 .lzcache 缓存条目（仅清理缓存文件，不动 .rs 产物）
 pub fn prune_stale(cache_dir: &Path, known_sources: &[PathBuf]) -> io::Result<usize> {
     let mut removed = 0;
     if cache_dir.exists() {
         for entry in fs::read_dir(cache_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map(|e| e == "lzcache" || e == "rs").unwrap_or(false) {
+            // 只清理 .lzcache 文件，不碰 .rs 编译产物
+            if path.extension().map(|e| e == "lzcache").unwrap_or(false) {
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
                 let source_exists = known_sources.iter().any(|s| {
                     s.file_stem().map(|st| st.to_string_lossy() == stem).unwrap_or(false)

@@ -1,4 +1,4 @@
-# Lang-Zong 编译器 — 测试状态与功能变更报告
+# Lang-Zone 编译器 — 测试状态与功能变更报告
 
 > 生成时间：2026-07-22 19:40（更新于 19:42）
 > 环境：Windows / Rust 1.96.0 / SUT：`target/debug/lang-zone.exe`
@@ -133,7 +133,7 @@ cargo test
 | **新增代码量** | `bridge.rs` ≈ 30KB（850+ 行），`mini_toml.rs` ≈ 17KB（530+ 行） |
 
 **用途说明：**
-将 Lang-Zong 中对 Rust 标准库/外部 crate 的引用，通过 TOML 清单文件**源码级映射**到 Rust 标准路径，实现零开销、零外部依赖的「转译期链接」。
+将 Lang-Zone 中对 Rust 标准库/外部 crate 的引用，通过 TOML 清单文件**源码级映射**到 Rust 标准路径，实现零开销、零外部依赖的「转译期链接」。
 
 **核心能力：**
 1. **Import 解析** (`resolve_import`)：`import { fs }` → `use std::fs`；`from fs import read_to_string` → `use std::fs::read_to_string`
@@ -189,7 +189,7 @@ cargo test
 | **新增代码量** | 未知（跨 3 文件，当日新增） |
 
 **用途说明：**
-为 Lang-Zong 添加运行时错误处理机制，对标 Rust 的 `panic!` 和 `Result` 模式匹配，但以声明式块语法暴露。
+为 Lang-Zone 添加运行时错误处理机制，对标 Rust 的 `panic!` 和 `Result` 模式匹配，但以声明式块语法暴露。
 
 **核心能力：**
 1. **`panic(msg)` 表达式** (`Token::Panic`)：转译为 `panic!("{}", msg)`，支持任意表达式作为消息，含 f-string 插值

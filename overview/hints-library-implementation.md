@@ -4,7 +4,7 @@
 
 ## 1. 目标
 
-按 `overview/type-inference-design-research.md` 的 P0 路线图，为 Lang-Zong 建立**类型自推断基础库** `hints`，
+按 `overview/type-inference-design-research.md` 的 P0 路线图，为 Lang-Zone 建立**类型自推断基础库** `hints`，
 为后续 `auto` / `_` / `infer` 占位符与 HM 式推断提供可复用的底层原语。
 
 设计锚点（来自调研报告）：

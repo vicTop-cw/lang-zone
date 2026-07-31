@@ -111,10 +111,10 @@ struct Point:      // ❌ 文档自己的示例用了冒号
 ```
 SYNTAX/06a-struct.md §七明确 `struct Bad:` 是错误语法（必须 `=`）——规范文档自身的示例违反自身规范。
 
-### 13. SYNTAX 文档内部命名混用（Lang-Zone / Lang-Zong）
+### 13. SYNTAX 文档内部命名混用（Lang-Zone / Lang-Zone）
 
 - `SYNTAX/00-词法基础.md:5` 使用 **Lang-Zone**
-- `SYNTAX/06a-struct.md:3,5` 使用 **Lang-Zong**
+- `SYNTAX/06a-struct.md:3,5` 使用 **Lang-Zone**
 
 同一规范目录内两个名字并存（07-31 全项目找茬已报过全局命名问题，此为 SYNTAX 内部的具体分布证据）。
 

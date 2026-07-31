@@ -20,7 +20,7 @@
 
 ## Resolution
 
-- `std/shims.rs` 占位文件已创建（58B，内容仅注释：`Lang-Zong 标准库桥接 shims — 请勿手动编辑`）。
+- `std/shims.rs` 占位文件已创建（58B，内容仅注释：`Lang-Zone 标准库桥接 shims — 请勿手动编辑`）。
 - `include_str!` 现可解析；`cargo build --lib` 通过（仅 1 条 benign unused import 警告，位于 `src/macros/interp.rs:5`）。
 - 本 issue 仅跟踪"编译断链"；链路恢复即关闭。
 

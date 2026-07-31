@@ -1,43 +1,6 @@
 // ============================
-// LZ 错误边界合集 — 类型系统 (01-类型系统.md)
+// LZ 错误边界 — 类型系统
 // ============================
-
-// --- 1. 循环引用 ---
-// type A = B
-// type B = A                  // ❌ 循环引用
-
-// --- 2. 别名不能带函数体/装饰器/raises ---
-// type Fn = (int) -> str = ...  // ❌ 类型别名不能有函数体
-// @export
-// type T = int                  // ❌ 类型别名不支持装饰器
-// def f() -> int raises str =
-//     type R = int              // ❌ 局部类型别名不能带 raises（此项在规范中标注为错误边界）
-
-// --- 3. 别名出现在 match 分支 ---
-// match x:
-//     case MyAlias => ...       // ❌ 类型别名不是模式
-
-// --- 4. 局部别名作用域 ---
-// def f() =
-//     let x: Id = 1              // ❌ Id 尚未定义，错误
-//     type Id = int
-//     let y: Id = 2              // ✅ Id 已定义
-
-// --- 5. 非法类型名 ---
-// let x: void = ()               // ❌ void 不是类型
-// let s: string = "hi"           // ❌ 应为 str
-// let f: float = 3.14            // ❌ 应为 f64
-// let n: null = None             // ❌ None 不是类型名
-
-// --- 6. struct 字段无注解 ---
-// struct Bad =
-//     x                          // ❌ 字段必须带类型注解
-//     y: int
-
-// --- 7. 类型别名循环引用 ---
-// type A = B
-// type B = A                     // ❌ 循环引用
-
-// --- 8. 类型与值混淆 ---
-// let x: None = ...              // ❌ None 是值不是类型，应为 Option<T>
-// let y: Some = ...              // ❌ Some 是构造器不是类型
+def main() =
+    // 类型解析期错误：type 定义不完整
+    type T =

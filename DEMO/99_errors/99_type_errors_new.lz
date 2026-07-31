@@ -1,58 +1,8 @@
 // ============================
-// LZ 错误边界合集 — 新类型系统错误 (99-类型系统新错误.md)
-// 这些代码应触发类型系统错误。
-// 以注释形式展示，不实际运行。
+// LZ 错误边界 — 类型错误（新版）
 // ============================
-
-// --- 1. generic 函数参数类型不匹配 ---
-// def identity<T>(x: T) -> T =
-//     x
-// def main() =
-//     let result: str = identity(42)   // ❌ i64 不能赋值给 str
-
-// --- 2. trait 方法未实现 ---
-// trait Add =
-//     def add(self, other) -> Self
-// struct Point =
-//     x: i64
-//     y: i64
-// // ❌ Point 未实现 trait Add
-
-// --- 3. impl 目标类型不存在 ---
-// impl String:
-//     def foo() =                    // ❌ String 不是已定义的结构体
-//         42
-
-// --- 4. struct 构造器参数不足 ---
-// struct Person =
-//     name: str
-//     age: i64
-// // let p = Person(name: "Alice")    // ❌ 缺少字段 age
-
-// --- 5. 方法调用 self 类型错误 ---
-// struct Counter =
-//     value: i64
-// // impl Counter:
-// //     def reset(mut self) =
-// //         self.value = 0
-// // let c: i64 = 0
-// // c.reset()                         // ❌ i64 没有方法 reset
-
-// --- 6. Option 解包类型错误 ---
-// let opt: Option<i64> = Some(42)
-// let val: str = opt.unwrap()        // ❌ i64 不能赋值给 str
-
-// --- 7. List 元素类型不一致 ---
-// let xs: List<i64> = [1, "two", 3]  // ❌ "two" 不是 i64
-
-// --- 8. 可变引用类型错误 ---
-// def mutate(r: mut i64) =
-//     r = 0                          // ❌ mut 引用赋值语法错误
-
-// --- 9. comptime 非 const 表达式 ---
-// let x = 42
-// const Y: i64 = x + 1              // ❌ const 必须是编译期常量
-
-// --- 10. raise 声明类型与抛出类型不匹配 ---
-// def f() -> str raises i64 =
-//     raise "oops"                   // ❌ raises i64 但抛出 str
+// elif 子句后没有条件表达式
+def main() =
+    if True:
+        pass
+    elif

@@ -1,4 +1,4 @@
-// 规范目标特性（当前解析器未实现：for 分支不识别 if 守卫）
+// ✅ combo-syntax：for 守卫 + 海象运算符 :=（已纳入 compile_demos 覆盖）
 // combo-syntax：for 守卫 + 海象运算符 :=
 // 出处：SYNTAX/05-控制流.md §3.5 + SYNTAX/12-操作符.md §1.20
 def has(x: int) -> bool = True

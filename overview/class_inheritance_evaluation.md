@@ -1,4 +1,4 @@
-# Lang-Zong 引入 class（单继承）评估
+# Lang-Zone 引入 class（单继承）评估
 
 > 评估日期：2026-07-23 | 评估人：Code Reviewer (火眼眼)
 > 上下文：用户提议"引入 class，代替 ref 关键字，class 支持单继承"

@@ -33,7 +33,7 @@ cargo run -- hello.lz --std-dir ./stdlib
 # 项目模式（递归加载 import 依赖）
 cargo run -- hello.lz --project
 
-# 增量编译缓存（仅对比源文件哈希）
+# 增量编译缓存（对比源文件哈希 + 依赖文件哈希）
 cargo run -- hello.lz --cached
 
 # 允许使用 rustc 私有 API
@@ -52,10 +52,10 @@ cargo run -- hello.lz --ir-codegen
 # 库测试（292 项单元测试）
 cargo test --lib
 
-# 仅 DEMO 编译测试（跳过 99_errors 和 99_spec）
+# 仅 DEMO 编译测试（含 99_spec/ 37 文件，跳过 99_errors/）
 cargo test --test compile_demos
 
-# 仅语法错误拒绝测试（99_errors/ 目录下所有 .lz 文件）
+# 仅语法错误拒绝测试（99_errors/ 目录下 15/15 文件全部验证）
 cargo test --test reject_errors
 
 # IR 快照测试

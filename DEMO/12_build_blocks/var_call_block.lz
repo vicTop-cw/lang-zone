@@ -94,8 +94,8 @@ def demo_call_tuple() =
 def demo_call_dict() =
     // 2c. 字典拆包：按名称传参
     r2 = greet ~:
-        {"greeting": "Hello", "name": "Lang-Zong"}
-    print(r2)             // Hello, Lang-Zong!
+        {"greeting": "Hello", "name": "Lang-Zone"}
+    print(r2)             // Hello, Lang-Zone!
 
 def demo_call_computed() =
     // 2d. 计算型构建块

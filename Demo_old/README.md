@@ -1,8 +1,8 @@
-# Lang-Zong 演示示例 (DEMO)
+# Lang-Zone 演示示例 (DEMO)
 
 > 所有 .lz 文件符合 [SYNTAX/](../SYNTAX/) 权威语法规范 v3.1
 
-本目录包含 Lang-Zong 语言的完整特性演示，按主题组织为独立 `.lz` 文件。
+本目录包含 Lang-Zone 语言的完整特性演示，按主题组织为独立 `.lz` 文件。
 
 ---
 

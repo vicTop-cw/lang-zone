@@ -1,7 +1,7 @@
-# Lang-Zong 权威语法规范 v3.2
+# Lang-Zone 权威语法规范 v3.2
 
 > 规范版本: 3.2 · 基于编译器源码审计 · 最后校订: 2026-07-31
-> 本目录是 Lang-Zong 语言的**唯一权威语法参考**
+> 本目录是 Lang-Zone 语言的**唯一权威语法参考**
 >
 > 各文档头部的 `规范版本` 恒等于本目录整体版本；`最后校订` 为该文件的实际最后修改日期，由
 > `SYNTAX/check_doc_versions.py` 校验，勿手工乱填。
@@ -65,4 +65,4 @@ lzc file.lz --std-dir std/ --check
 
 ---
 
-*Lang-Zong 编译器源码: `src/` · 标准库: `std/`*
+*Lang-Zone 编译器源码: `src/` · 标准库: `std/`*
