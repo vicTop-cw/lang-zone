@@ -7,7 +7,7 @@
 // 3. 类型推导（从标注 + 简单传播 + 字面量推断）
 // 4. 魔法方法归一化（MagicCall / MethodCall）
 
-use crate::ast::{self, Expr as AstExpr, Stmt as AstStmt, Pattern as AstPattern, MatchArm, BinOp, UnaryOp, AssignOp, BuildKind};
+use crate::ast::{self, Expr as AstExpr, Stmt as AstStmt, Pattern as AstPattern, BinOp, UnaryOp, AssignOp, BuildKind};
 use crate::types::Type as AstType;
 
 use super::types::{IrType, from_ast_type};
@@ -265,7 +265,23 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 _ => IrType::Any,
             }
         }
-        AstExpr::NullCoalesce { left, .. } => infer_expr_type(left, ctx),
+        AstExpr::NullCoalesce { left, right } => {
+            let left_ty = infer_expr_type(left, ctx);
+            let right_ty = infer_expr_type(right, ctx);
+            let is_right_option = matches!(&right_ty, IrType::Option(_))
+                || matches!(&right_ty, IrType::Named { path, .. } if path == "Option");
+            if is_right_option {
+                // Option<T> ?? Option<T> → Option<T>
+                left_ty
+            } else {
+                // Option<T> ?? T → T（解包）
+                match &left_ty {
+                    IrType::Option(inner) => *inner.clone(),
+                    IrType::Named { path, args } if path == "Option" && !args.is_empty() => args[0].clone(),
+                    _ => left_ty,
+                }
+            }
+        }
         AstExpr::ListLit(_) => IrType::named("List"),
         AstExpr::DictLit(_) => IrType::named("Dict"),
         AstExpr::SetLit(_) => IrType::named("Set"),
@@ -338,15 +354,27 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
             let ir_args: Vec<Pattern> = args.iter()
                 .filter_map(|a| convert_ast_pattern(a, ctx))
                 .collect();
-            // 如果 name 包含 '.'（如 "Color.Red"），拆分为 enum_name.variant
+            // 区分 struct 解构 vs enum 变体模式
+            if ctx.is_struct(name) {
+                // struct 模式: Point(px, py) → Point { x: px, y: py }
+                let field_names: Vec<String> = ctx.struct_fields.get(name)
+                    .map(|fields| fields.keys().cloned().collect())
+                    .unwrap_or_default();
+                let fields: Vec<(String, Pattern)> = ir_args.into_iter().enumerate()
+                    .map(|(i, pat)| {
+                        let fname = field_names.get(i).cloned().unwrap_or_else(|| format!("field_{}", i));
+                        (fname, pat)
+                    })
+                    .collect();
+                return Some(Pattern::Struct { name: name.clone(), fields });
+            }
+            // enum 变体模式
             let (enum_name, variant) = if let Some(dot_pos) = name.rfind('.') {
                 (name[..dot_pos].to_string(), name[dot_pos+1..].to_string())
             } else {
-                // Look up variant in enum registry
                 let enum_name = ctx.enum_variants.get(name.as_str())
                     .cloned()
                     .unwrap_or_else(|| {
-                        // Fallback heuristics for well-known types
                         match name.as_str() {
                             "Some" | "None" => "Option".into(),
                             "Ok" | "Err" => "Result".into(),
@@ -370,23 +398,7 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
     }
 }
 
-/// 将 match arm body 转换为 ExprKind（用于表达式上下文的 if-else 降级）
-fn arm_body_to_expr(arm: &MatchArm, _scrutinee: &AstExpr, ctx: &TypeCtx) -> ExprKind {
-    let mut block_ctx = TypeCtx::new();
-    block_ctx.current_generics = ctx.current_generics.clone();
-    block_ctx.current_ret_ty = ctx.current_ret_ty.clone();
-    if let AstPattern::Ident(name) = &arm.pattern {
-        let scrut_ty = infer_expr_type(_scrutinee, ctx);
-        block_ctx.add_var(name, scrut_ty);
-    }
-    let stmts: Vec<Stmt> = arm.body.iter()
-        .map(|s| convert_stmt(s, &block_ctx))
-        .collect();
-    let blk_ty = arm.body.last()
-        .map(|s| infer_stmt_type(s, &block_ctx))
-        .unwrap_or(IrType::Unit);
-    ExprKind::BlockExpr { block: Block { stmts, ty: blk_ty } }
-}
+// （arm_body_to_expr 已移除 — Match 表达式现在通过 BlockExpr + Stmt::Match 处理）
 
 // ══════════════════════════════════════════════════════════════
 // 核心转换函数
@@ -444,8 +456,37 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Binary { left, op, right } => {
+            let ir_op = map_binop(op);
+            
+            // 链式比较展开: 1 < x < 10 → (1 < x) && (x < 10)
+            if matches!(ir_op, BinOpKind::Lt | BinOpKind::Gt | BinOpKind::Le | BinOpKind::Ge | BinOpKind::Eq | BinOpKind::Neq) {
+                if let AstExpr::Binary { left: inner_left, op: inner_op, right: inner_right } = left.as_ref() {
+                    let inner_ir_op = map_binop(inner_op);
+                    if matches!(inner_ir_op, BinOpKind::Lt | BinOpKind::Gt | BinOpKind::Le | BinOpKind::Ge | BinOpKind::Eq | BinOpKind::Neq) {
+                        // (a cmp1 b) cmp2 c → (a cmp1 b) && (b cmp2 c)
+                        let a = convert_expr(inner_left, ctx);
+                        let b = convert_expr(inner_right, ctx);
+                        let c = convert_expr(right, ctx);
+                        return Expr::new(
+                            ExprKind::BinOp {
+                                op: BinOpKind::And,
+                                lhs: Box::new(Expr::new(
+                                    ExprKind::BinOp { op: inner_ir_op, lhs: Box::new(a), rhs: Box::new(b.clone()) },
+                                    IrType::Bool, Span::unknown(),
+                                )),
+                                rhs: Box::new(Expr::new(
+                                    ExprKind::BinOp { op: ir_op, lhs: Box::new(b), rhs: Box::new(c) },
+                                    IrType::Bool, Span::unknown(),
+                                )),
+                            },
+                            IrType::Bool, Span::unknown(),
+                        );
+                    }
+                }
+            }
+            
             ExprKind::BinOp {
-                op: map_binop(op),
+                op: ir_op,
                 lhs: Box::new(convert_expr(left, ctx)),
                 rhs: Box::new(convert_expr(right, ctx)),
             }
@@ -486,48 +527,49 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Match { expr, arms } => {
-            // Match 表达式 → 嵌套 if-else 链（使用所有臂）
-            // 从最后一个臂开始（最内层 else），向外包裹
-            if arms.is_empty() {
-                ExprKind::Lit(LitKind::Unit)
-            } else {
-                let mut result = arm_body_to_expr(arms.last().unwrap(), expr, ctx);
-                for arm in arms.iter().rev().skip(1) {
-                    let body_kind = arm_body_to_expr(arm, expr, ctx);
-                    let blk_ty = arm.body.last()
-                        .map(|s| infer_stmt_type(s, ctx))
-                        .unwrap_or(IrType::Unit);
-                    let scrutinee = convert_expr(expr, ctx);
-                    let cond = match &arm.pattern {
-                        AstPattern::Wildcard => Expr::new(ExprKind::Lit(LitKind::Bool(true)), IrType::Bool, Span::unknown()),
-                        AstPattern::Int(n) => Expr::new(
-                            ExprKind::BinOp {
-                                op: BinOpKind::Eq, lhs: Box::new(scrutinee),
-                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::Int(*n)), IrType::Int, Span::unknown())),
-                            }, IrType::Bool, Span::unknown(),
-                        ),
-                        AstPattern::Str(s) => Expr::new(
-                            ExprKind::BinOp {
-                                op: BinOpKind::Eq, lhs: Box::new(scrutinee),
-                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::Str(s.clone())), IrType::Str, Span::unknown())),
-                            }, IrType::Bool, Span::unknown(),
-                        ),
-                        AstPattern::Bool(b) => Expr::new(
-                            ExprKind::BinOp {
-                                op: BinOpKind::Eq, lhs: Box::new(scrutinee),
-                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::Bool(*b)), IrType::Bool, Span::unknown())),
-                            }, IrType::Bool, Span::unknown(),
-                        ),
-                        AstPattern::Ident(_) => Expr::new(ExprKind::Lit(LitKind::Bool(true)), IrType::Bool, Span::unknown()),
-                        _ => Expr::new(ExprKind::Lit(LitKind::Bool(true)), IrType::Bool, Span::unknown()),
-                    };
-                    result = ExprKind::IfExpr {
-                        cond: Box::new(cond),
-                        then: Box::new(Expr::new(body_kind, blk_ty.clone(), Span::unknown())),
-                        els: Box::new(Expr::new(result, blk_ty, Span::unknown())),
-                    };
+            // Match 表达式 → 包装为 BlockExpr 内含 Match 语句
+            // （保留模式匹配和变量绑定，if-else 降级会丢失这些信息）
+            let ir_scrutinee = convert_expr(expr, ctx);
+            let mut arm_ctx = TypeCtx::new();
+            arm_ctx.current_generics = ctx.current_generics.clone();
+            arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+            
+            let ir_arms: Vec<(Pattern, Block)> = arms.iter().map(|arm| {
+                let pat = convert_ast_pattern(&arm.pattern, ctx)
+                    .unwrap_or(Pattern::Wildcard);
+                let mut body_ctx = TypeCtx::new();
+                body_ctx.current_generics = ctx.current_generics.clone();
+                body_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                // 从模式中提取绑定变量名并添加到上下文
+                fn collect_pattern_vars(pat: &AstPattern, vars: &mut Vec<String>) {
+                    match pat {
+                        AstPattern::Ident(name) => vars.push(name.clone()),
+                        AstPattern::Variant(_, args) => {
+                            for a in args { collect_pattern_vars(a, vars); }
+                        }
+                        AstPattern::Tuple(elems) => {
+                            for e in elems { collect_pattern_vars(e, vars); }
+                        }
+                        _ => {}
+                    }
                 }
-                result
+                let mut bound_vars = Vec::new();
+                collect_pattern_vars(&arm.pattern, &mut bound_vars);
+                let scrut_ty = infer_expr_type(expr, ctx);
+                for v in &bound_vars {
+                    body_ctx.add_var(v, scrut_ty.clone());
+                }
+                let body = convert_block_with_ctx(&arm.body, &body_ctx);
+                (pat, body)
+            }).collect();
+            
+            let match_stmt = Stmt::Match { scrutinee: ir_scrutinee, arms: ir_arms };
+            let blk_ty = arms.first()
+                .and_then(|arm| arm.body.last())
+                .map(|s| infer_stmt_type(s, ctx))
+                .unwrap_or(IrType::Unit);
+            ExprKind::BlockExpr {
+                block: Block { stmts: vec![match_stmt], ty: blk_ty },
             }
         }
 
@@ -619,25 +661,13 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::NullCoalesce { left, right } => {
-            // a ?? b → if a != None then a else b
+            // a ?? b → null_coalesce 特殊方法调用（codegen 层按类型展开）
             let l = convert_expr(left, ctx);
-            ExprKind::IfExpr {
-                cond: Box::new(Expr::new(
-                    ExprKind::UnOp {
-                        op: UnOpKind::Not,
-                        operand: Box::new(Expr::new(
-                            ExprKind::BinOp {
-                                op: BinOpKind::Eq,
-                                lhs: Box::new(l.clone()),
-                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
-                            },
-                            IrType::Bool, Span::unknown(),
-                        )),
-                    },
-                    IrType::Bool, Span::unknown(),
-                )),
-                then: Box::new(l),
-                els: Box::new(convert_expr(right, ctx)),
+            let r = convert_expr(right, ctx);
+            ExprKind::MethodCall {
+                receiver: Box::new(l),
+                method: "__null_coalesce".into(),
+                args: vec![r],
             }
         }
 
@@ -1133,7 +1163,33 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
 }
 
 fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
-    let mut ir_stmts: Vec<Stmt> = stmts.iter().map(|s| convert_stmt(s, ctx)).collect();
+    // 创建可变的本地上下文，支持 Let 变量传播
+    let mut block_ctx = TypeCtx::new();
+    block_ctx.current_generics = ctx.current_generics.clone();
+    block_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+    block_ctx.current_fn_name = ctx.current_fn_name.clone();
+    block_ctx.pending_items = ctx.pending_items.clone();
+    for sn in &ctx.struct_names { block_ctx.struct_names.insert(sn.clone()); }
+    for (sn, fields) in &ctx.struct_fields {
+        let mut cloned = HashMap::new();
+        for (fn_, ty) in fields { cloned.insert(fn_.clone(), ty.clone()); }
+        block_ctx.struct_fields.insert(sn.clone(), cloned);
+    }
+    for (vn, vt) in &ctx.vars { block_ctx.vars.insert(vn.clone(), vt.clone()); }
+    for (name, ty) in &ctx.fn_returns { block_ctx.fn_returns.insert(name.clone(), ty.clone()); }
+    for (name, p) in &ctx.fn_params { block_ctx.fn_params.insert(name.clone(), p.clone()); }
+    for (vn, en) in &ctx.enum_variants { block_ctx.enum_variants.insert(vn.clone(), en.clone()); }
+    
+    let mut ir_stmts: Vec<Stmt> = Vec::new();
+    for s in stmts {
+        // 前向传播：Let 语句的变量添加到后续语句的上下文
+        if let AstStmt::Let { name, ty, value, .. } = s {
+            let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
+                .unwrap_or_else(|| infer_expr_type(value, &block_ctx));
+            block_ctx.add_var(name, ir_ty);
+        }
+        ir_stmts.push(convert_stmt(s, &block_ctx));
+    }
     
     // 后处理：递归收集所有被赋值的变量名，标记对应首次 let 为 mut
     fn collect_reassigned(stmts: &[Stmt]) -> std::collections::HashSet<String> {

@@ -149,7 +149,16 @@ impl CodeGen {
                 let mapped = self.type_map.get(path.as_str()).map(|s| s.to_string())
                     .unwrap_or_else(|| path.clone());
                 if args.is_empty() {
-                    mapped
+                    // Vec/HashMap/HashSet 需要默认泛型参数
+                    if path == "List" || path == "Vec" {
+                        format!("{}<_>", mapped)
+                    } else if path == "Dict" || path == "HashMap" {
+                        format!("{}<_, _>", mapped)
+                    } else if path == "Set" || path == "HashSet" {
+                        format!("{}<_>", mapped)
+                    } else {
+                        mapped
+                    }
                 } else {
                     let args: Vec<String> = args.iter().map(|a| self.rust_type(a)).collect();
                     format!("{}<{}>", mapped, args.join(", "))
@@ -369,7 +378,14 @@ impl CodeGen {
             if variant.fields.is_empty() {
                 self.emit_line(&format!("{},", variant.name));
             } else {
-                let types: Vec<String> = variant.fields.iter().map(|f| self.rust_type(&f.ty)).collect();
+                let types: Vec<String> = variant.fields.iter().map(|f| {
+                    let mut rust_ty = self.rust_type(&f.ty);
+                    // 递归枚举字段自动 Box
+                    if type_refers_to(&f.ty, &e.name) {
+                        rust_ty = format!("Box<{}>", rust_ty);
+                    }
+                    rust_ty
+                }).collect();
                 self.emit_line(&format!("{}({}),", variant.name, types.join(", ")));
             }
         }
@@ -567,9 +583,9 @@ impl CodeGen {
             }
             Stmt::For { var, iter, guard, body } => {
                 let iter_s = if let Some(g) = guard {
-                    format!("{}.filter(|&{}| {})", self.gen_expr(iter), var, self.gen_expr(g))
+                    format!("({}).into_iter().filter(|&{}| {})", self.gen_expr(iter), var, self.gen_expr(g))
                 } else {
-                    self.gen_expr(iter)
+                    format!("({}).into_iter()", self.gen_expr(iter))
                 };
                 self.emit_line(&format!("for {} in {} {{", var, iter_s));
                 self.indent += 1;
@@ -590,7 +606,14 @@ impl CodeGen {
                 self.emit_line("}");
             }
             Stmt::Match { scrutinee, arms } => {
-                self.emit_line(&format!("match {} {{", self.gen_expr(scrutinee)));
+                let scrut_s = self.gen_expr(scrutinee);
+                // String 类型模式匹配：match name { "hello" => } 需要 &str
+                let scrut_str = if matches!(&scrutinee.ty, IrType::Str) {
+                    format!("{}.as_str()", scrut_s)
+                } else {
+                    scrut_s
+                };
+                self.emit_line(&format!("match {} {{", scrut_str));
                 self.indent += 1;
                 for (pat, body) in arms {
                     let pat_s = self.gen_pattern(pat);
@@ -730,6 +753,28 @@ impl CodeGen {
                     }
                 }
                 
+                // 推导式展开: comp!(|x| body, iter) → (iter).map(|x| body).collect()
+                if callee_s == "comp!" {
+                    if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
+                        return format!("({}).map({}).collect::<Vec<_>>()", iter, lambda);
+                    }
+                    return format!("vec![]");
+                }
+                // dict_comp!(|x| (k, v), iter) → (iter).map(|x| (k,v)).collect()
+                if callee_s == "dict_comp!" {
+                    if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
+                        return format!("({}).map({}).collect::<HashMap<_,_>>()", iter, lambda);
+                    }
+                    return format!("HashMap::new()");
+                }
+                // set_comp!(|x| elem, iter) → (iter).map(|x| elem).collect()
+                if callee_s == "set_comp!" {
+                    if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
+                        return format!("({}).map({}).collect::<HashSet<_>>()", iter, lambda);
+                    }
+                    return format!("HashSet::new()");
+                }
+
                 // 检测 enum variant 构造器调用: Circle(0,0,5) → Shape::Circle(0, 0, 5)
                 if let Some(enum_name) = self.enum_variants.get(&callee_s) {
                     return if args_s.is_empty() {
@@ -760,6 +805,17 @@ impl CodeGen {
             ExprKind::MethodCall { receiver, method, args } => {
                 let recv = self.gen_expr(receiver);
                 let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+
+                // null coalesce: a ?? b → .or() 或 .unwrap_or()
+                if method == "__null_coalesce" && !args.is_empty() {
+                    let arg_is_option = matches!(&args[0].ty, IrType::Option(_))
+                        || matches!(&args[0].ty, IrType::Named { path, .. } if path == "Option");
+                    return if arg_is_option {
+                        format!("{}.or({})", recv, args_s[0])
+                    } else {
+                        format!("{}.unwrap_or({})", recv, args_s[0])
+                    };
+                }
 
                 // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant{field:val}
                 let is_enum_variant = self.emitted_types.contains(&recv) && is_kwarg_call(args);
@@ -975,7 +1031,25 @@ impl CodeGen {
     fn gen_pattern(&self, pat: &Pattern) -> String {
         match pat {
             Pattern::Wildcard => "_".into(),
-            Pattern::Ident(name) => name.clone(),
+            Pattern::Ident(name) => {
+                // Handle dotted patterns like "Color.Red" → convert to Rust enum pattern "Color::Red"
+                if let Some(dot_pos) = name.rfind('.') {
+                    let type_name = &name[..dot_pos];
+                    let variant = &name[dot_pos+1..];
+                    // Check if the prefix is a known type name
+                    if self.emitted_types.contains(type_name)
+                        || type_name == "Option" || type_name == "Result"
+                        || type_name == "Some" || type_name == "None"
+                        || type_name == "Ok" || type_name == "Err"
+                    {
+                        format!("{}::{}", type_name, variant)
+                    } else {
+                        name.clone()
+                    }
+                } else {
+                    name.clone()
+                }
+            }
             Pattern::Lit(lit) => {
                 // Pattern literals: no .to_string() wrapper
                 match lit {
@@ -1151,6 +1225,24 @@ fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
         }
     }
     cg.gen_expr(arg)
+}
+
+/// 检测 IrType 是否引用了指定的类型名（用于递归枚举检测）
+fn type_refers_to(ty: &IrType, name: &str) -> bool {
+    match ty {
+        IrType::Named { path, args } => {
+            if path == name { return true; }
+            args.iter().any(|a| type_refers_to(a, name))
+        }
+        IrType::Option(inner) | IrType::Result { ok: inner, err: _ } | IrType::Ref(inner) | IrType::MutRef(inner) => {
+            type_refers_to(inner, name)
+        }
+        IrType::Tuple(elems) => elems.iter().any(|e| type_refers_to(e, name)),
+        IrType::Fn { params, ret } => {
+            params.iter().any(|p| type_refers_to(p, name)) || type_refers_to(ret, name)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
