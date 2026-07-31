@@ -64,19 +64,16 @@ impl CodeGen {
         self.buf.clear();
         self.indent = 0;
 
-        // 预扫描：收集所有 enum variant → enum name 映射 + 枚举名加入 emitted_types
+        // 预扫描：收集 enum variant → enum name 映射 + 函数参数信息
+        // 注意：不能插入 emitted_types（会阻断 gen_enum_def / gen_struct_def 的去重逻辑）
         self.enum_variants.clear();
         self.fn_param_info.clear();
         self.emitted_types.clear();
         for item in &module.items {
             if let Item::EnumDef(e) = item {
-                self.emitted_types.insert(e.name.clone());
                 for variant in &e.variants {
                     self.enum_variants.insert(variant.name.clone(), e.name.clone());
                 }
-            }
-            if let Item::StructDef(s) = item {
-                self.emitted_types.insert(s.name.clone());
             }
             if let Item::FnDef(f) = item {
                 let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
@@ -660,6 +657,7 @@ impl CodeGen {
                 }
             }
             Stmt::If { cond, then_branch, else_branch } => {
+                self.emit_walrus_predecls(cond);
                 if let Some(else_blk) = else_branch {
                     self.emit_line(&format!("if {} {{", self.gen_expr(cond)));
                     self.indent += 1;
@@ -679,6 +677,7 @@ impl CodeGen {
                 }
             }
             Stmt::For { var, iter, guard, body } => {
+                self.emit_walrus_predecls(iter);
                 let iter_s = if let Some(g) = guard {
                     format!("({}).into_iter().filter(|&{}| {})", self.gen_expr(iter), var, self.gen_expr(g))
                 } else {
@@ -695,6 +694,7 @@ impl CodeGen {
                 self.emit_line("}");
             }
             Stmt::While { cond, guard, body } => {
+                self.emit_walrus_predecls(cond);
                 let cond_s = if let Some(g) = guard {
                     format!("({}) && ({})", self.gen_expr(cond), self.gen_expr(g))
                 } else {
@@ -1073,6 +1073,11 @@ impl CodeGen {
                 if matches!(op, BinOpKind::Pow) {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
+                    // 整数字面量需要类型后缀，否则 Rust 无法推断 .pow() 的接收者类型
+                    if matches!(&lhs.kind, ExprKind::Lit(LitKind::Int(_))) {
+                        let suffix = "_i64";
+                        return format!("{}{}.pow({})", lhs_s, suffix, rhs_s);
+                    }
                     return format!("{}.pow({})", lhs_s, rhs_s);
                 }
                 // In: 成员测试 → .contains() 方法 (elem in container → container.contains(&elem))
@@ -1081,7 +1086,7 @@ impl CodeGen {
                     let cont_s = self.gen_expr(rhs);
                     // 字符串包含: "llo" in "hello" → "hello".contains("llo")
                     if matches!(&rhs.ty, IrType::Str) {
-                        return format!("{}.contains({})", cont_s, elem_s);
+                        return format!("{}.contains(&{})", cont_s, elem_s);
                     }
                     // Dict/HashMap: key in map → map.contains_key(&key)
                     if matches!(&rhs.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap") {
