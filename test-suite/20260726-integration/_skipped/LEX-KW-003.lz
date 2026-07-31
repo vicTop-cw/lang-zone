@@ -1,5 +1,0 @@
-def f() =
-    try:
-        raise "err"
-    catch e:
-        print(e)

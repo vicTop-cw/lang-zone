@@ -1,4 +1,0 @@
-async def f() =
-    await g()
-    spawn h()
-    yield 1

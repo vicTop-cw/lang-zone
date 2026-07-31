@@ -1,7 +1,0 @@
-struct Node =
-    name: str
-
-def main() =
-    n = Node(name: "hello")
-    print(n.name)
-    print("None")

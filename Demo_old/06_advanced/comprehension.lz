@@ -1,6 +1,0 @@
-// ==== List Comprehension ====
-def main() =
-    let squares = [x * x for x in 0..5]
-    print(squares)
-    let evens = [x for x in 0..10 if x % 2 == 0]
-    print(evens)

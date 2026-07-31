@@ -1,6 +1,0 @@
-def outer() -> int:
-    def inner() -> int = 42
-    inner()
-
-def main() =
-    print(outer())

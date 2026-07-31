@@ -1,2 +1,0 @@
-def f(x) =
-    return x > 0 and x < 10 or not (x is None or x in [1, 2])

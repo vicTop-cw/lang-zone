@@ -1,5 +1,0 @@
-trait Read = def read(self: Self) -> str
-
-trait Write = def write(self: Self, data: str)
-
-trait ReadWrite = Read + Write

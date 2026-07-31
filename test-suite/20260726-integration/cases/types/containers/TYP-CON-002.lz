@@ -1,3 +1,0 @@
-def main() =
-    d = {"a": 1}
-    print(d.len())

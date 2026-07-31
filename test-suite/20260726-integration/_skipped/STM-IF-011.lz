@@ -1,9 +1,0 @@
-def main() =
-    o = Some(42)
-    r = match o:
-        case Some(v) => f"got {v}"
-        case None => "nothing"
-    print(r)
-    print(match None:
-        case Some(v) => f"got {v}"
-        case None => "nothing")

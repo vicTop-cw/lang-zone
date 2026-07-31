@@ -1,0 +1,41 @@
+// ============================
+// LZ 可调用对象 — __call__ 直调测试（2026-07-31）
+// 覆盖：06d-内置魔法trait和全局函数.md §十一 + 12-操作符.md §3.5
+//
+// 测试结论（lzc 实测）：
+//   ✅ LZ 语法层：ins() 直调可解析、可生成 .rs
+//   ⚠️ 生成层：生成的 Rust 中 ins(21) 原样保留为 `doubler(21)`，
+//       rustc 编译报 E0618（expected function, found Multiplier）——
+//       __call__ 尚未接线到 Callable trait（fn call(self, args) -> R），
+//       直调目前**不可用**，等待 codegen 修复。
+// ============================
+
+// --- 1. 单参数 __call__ ---
+struct Multiplier =
+    factor: int
+
+    // __call__ → Callable trait — 单参数
+    def __call__(self, x: int) -> int =
+        self.factor * x
+
+// --- 2. 多参数 __call__ ---
+struct Adder =
+    base: int
+
+    // __call__ — 多参数
+    def __call__(self, a: int, b: int) -> int =
+        self.base + a + b
+
+// --- 3. 使用：直接调用 ins() ---
+def main() =
+    // 单参数直调
+    let doubler = Multiplier(factor: 2)
+    print(doubler(21))         // 期望 42（当前生成 .rs 后 rustc E0618，待修复）
+
+    // 多参数直调
+    let add5 = Adder(base: 5)
+    print(add5(1, 2))          // 期望 8
+
+    // 变量间接调用
+    let f = doubler
+    print(f(10))               // 期望 20

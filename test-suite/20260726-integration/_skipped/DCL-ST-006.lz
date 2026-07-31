@@ -1,4 +1,0 @@
-@derive(Clone)
-struct Point =
-    x: int
-    y: int

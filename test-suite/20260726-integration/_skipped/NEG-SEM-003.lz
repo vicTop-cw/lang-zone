@@ -1,8 +1,0 @@
-trait Val =
-    def val(self: Self) -> str
-
-struct Wrong =
-    x: int
-
-impl Val for Wrong:
-    def val(self: Wrong) -> int = self.x

@@ -1,6 +1,0 @@
-struct Resource =
-    name: str
-
-def main() =
-    with Resource(name: "data"):
-        print("using")

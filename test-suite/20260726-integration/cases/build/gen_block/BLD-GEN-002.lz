@@ -1,3 +1,0 @@
-def gen_all() =
-    *:
-        yield from [1, 2, 3]

@@ -1,9 +1,0 @@
-// ==== F-Strings ====
-def main() =
-    let name = "World"
-    let value = 42
-    print(f"Hello, {name}!")
-    print(f"value = {value}")
-    print(f"expr = {value * 2}")
-    let items = [1, 2, 3]
-    print(f"items = {items}")

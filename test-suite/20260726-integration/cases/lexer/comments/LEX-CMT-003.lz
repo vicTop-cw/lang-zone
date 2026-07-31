@@ -1,2 +1,0 @@
-/* outer /* inner nested */ still outer */
-def f() = 1

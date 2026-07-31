@@ -1,6 +1,0 @@
-def main() =
-    x = 0
-    r = match x:
-        case 0 | 1 => "small"
-        case _ => "other"
-    print(r)

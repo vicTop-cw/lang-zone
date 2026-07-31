@@ -1,4 +1,0 @@
-struct Point =
-    x: int
-
-def f(p: Point) = p.y

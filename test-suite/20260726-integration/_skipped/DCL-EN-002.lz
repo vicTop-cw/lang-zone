@@ -1,9 +1,0 @@
-enum Shape = Circle(f64) | Square(f64)
-
-def area(s: Shape) -> f64 =
-    match s:
-        case Shape.Circle(r) => 3.14 * r * r
-        case Shape.Square(w) => w * w
-
-def main() =
-    print(area(Shape.Circle(1.0)))

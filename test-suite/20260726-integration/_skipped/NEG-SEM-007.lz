@@ -1,4 +1,0 @@
-def f() =
-    owned x = "hello"
-    y = x
-    print(x)

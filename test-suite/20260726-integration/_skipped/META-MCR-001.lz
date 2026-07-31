@@ -1,2 +1,0 @@
-#!bin macro
-template hello!() = f```"hello"```

@@ -1,4 +1,0 @@
-def f(mut x: int) =
-    x = x + 1
-
-def main() = print(0)

@@ -1,6 +1,0 @@
-def main() =
-    x = 5
-    r = if x > 0: "pos" else: "neg"
-    print(r)
-    r = if x < 0: "pos" else: "neg"
-    print(r)

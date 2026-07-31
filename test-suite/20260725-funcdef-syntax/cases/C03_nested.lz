@@ -1,6 +1,0 @@
-// 嵌套函数（nested function）：函数体内定义并调用内部函数
-def outer(x: int) -> int =
-    def inner(y: int) -> int = y * 2
-    inner(x) + 1
-
-def use_nested() -> int = outer(5)

@@ -1,5 +1,5 @@
 // LZ 函数 — 闭包与嵌套函数扩展
-// 覆盖：lambda、高阶函数、返回闭包、嵌套函数
+// 覆盖：lambda、高阶函数、返回闭包、嵌套函数、无参闭包
 
 def apply(f: fn(int) -> int, x: int) -> int = f(x)
 
@@ -26,3 +26,19 @@ def main() =
     // 闭包链式
     let composed = |x| double(triple(x))
     print(composed(2))
+
+    // 无参闭包（中间空格，区别于逻辑或 ||）
+    let noop = | | 42
+    print(noop())
+
+    let say_hi = | | print("hi from closure")
+    say_hi()
+
+    // 无参闭包作为参数
+    let f: fn() -> int = | | 99
+    print(f())
+
+    // 无参闭包 vs 逻辑或（|| 紧贴=逻辑或，| | 空格=闭包）
+    let a = True || False       // 逻辑或
+    let b = | | True            // 无参闭包（空格！）
+    print(a, b())

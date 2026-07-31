@@ -1,6 +1,0 @@
-def make_table() -> List<int> =
-    comptime:
-        mut r = [0; 4]
-        for i in 0..4:
-            r[i] = i * i
-        r

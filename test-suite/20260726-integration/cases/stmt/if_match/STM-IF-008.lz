@@ -1,9 +1,0 @@
-def f(x: int) -> str:
-    match x:
-        case n if n > 0 => "positive"
-        case 0 => "zero"
-        case _ => "negative"
-
-def main() =
-    print(f(5))
-    print(f(0))

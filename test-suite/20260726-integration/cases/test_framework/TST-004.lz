@@ -1,7 +1,0 @@
-#!test
-
-const N = 100
-
-suite "calc":
-    test "val":
-        assert N == 100

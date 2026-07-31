@@ -1,3 +1,0 @@
-def f() =
-    s = "hello"
-    s[0]

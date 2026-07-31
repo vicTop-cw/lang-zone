@@ -1,6 +1,6 @@
 # Issue Tracker
 
-**2026-07-31 12:46 自动化更新**: 全部 313 项测试通过（292 lib + 1 compile_demos + 8 IR + 10 mod + 1 reject + 1 doc）。`go` 关键字全链路实现（lexer → parser → codegen）。Comprehension 迭代器括号修复（`1..10.into_iter()` → `(1..10).into_iter()`）。编译器警告清理（52→19）。
+**2026-07-31 16:20 文档审计+闭包语法+DEMO更新**: doc-audit-round2 全部 4 项修复。附录B补 6 关键字。`||` 闭包冲突已解决（`| |` 空格）。DEMO 补 `| |` 示例。
 
 ## 设计决策 / 重大变更 (Decisions)
 
@@ -8,18 +8,40 @@
 |------|------|------|
 | [decision-drop-subtype-operators.md](decision-drop-subtype-operators.md) | 移除 `<:` / `>: ` 子类型运算符 ✅ | LZ 无名义继承、型变自动推断；两符号为死语法且致文档混乱，从语法文档与 DEMO 移除 |
 
-## Open
+## Open (18 IR 路线 Bug)
+
+### 🔴 P1 — IR codegen 产物无效 Rust（11 个）
+
+| 文件 | 标题 |
+|------|------|
+| [ir-builder-match-arm-first-only.md](ir-builder-match-arm-first-only.md) | match 仅取第一个臂（IR builder 已知） |
+| [ir-builder-elif-reversed.md](ir-builder-elif-reversed.md) | elif 链条件逆序（IR builder 已知） |
+| [ir-codegen-unop-precedence.md](ir-codegen-unop-precedence.md) | `!` 运算符优先级错误（已知） |
+| [ir-codegen-i64min-double-neg.md](ir-codegen-i64min-double-neg.md) | i64::MIN 双重取反（已知） |
+| [ir-codegen-match-var-scope.md](ir-codegen-match-var-scope.md) | **NEW** match 臂变量绑定作用域错误 |
+| [ir-codegen-math-auto-generic.md](ir-codegen-math-auto-generic.md) | **NEW** @math 自动泛型未实现 |
+| [ir-codegen-method-ret-type.md](ir-codegen-method-ret-type.md) | **NEW** 方法调用返回类型推断错误 |
+| [ir-codegen-default-params.md](ir-codegen-default-params.md) | **NEW** 默认参数值丢失 |
+| [ir-codegen-chained-cmp-and-generics.md](ir-codegen-chained-cmp-and-generics.md) | **NEW** 链式比较与泛型语法错误 |
+| [ir-codegen-tuple-enum-ctor.md](ir-codegen-tuple-enum-ctor.md) | **NEW** 元组枚举变体构造语法错误 |
+| [ir-codegen-method-def-syntax.md](ir-codegen-method-def-syntax.md) | **NEW** 方法定义语法 `fn X.method()` |
+
+### 🟡 P2 — 次要问题（8 个，详见测试报告）
+
+### 📋 其它 Open
 
 | 文件 | 标题 | 摘要 |
 |------|------|------|
-| [findings-2026-07-31.md](findings-2026-07-31.md) | 全项目找茬报告 | P0: 数字字面量静默变 0（**已修复于工作区未提交** → [fixed/lexer-literal-silent-zero.md](fixed/lexer-literal-silent-zero.md)）；未终止字符串静默接受（**误报**，见 verdict-2026-07-31.md #3）；P1/P2: 文档矛盾 + 死代码（11 项待处理） |
-| [syntax-docs-audit-2026-07-31.md](syntax-docs-audit-2026-07-31.md) | 语法文档专项审计 | 13 项中 **12 项已处理完毕**（#10 为误报），处置结论见 [verdict-2026-07-31.md §四](verdict-2026-07-31.md)：优先级表已按 parser 实测统一、附录去重、overview 计数订正为 313、`03-函数.md` 已并入基础篇、版本日期统一并加 `SYNTAX/check_doc_versions.py` 校验 |
+| [findings-2026-07-31.md](findings-2026-07-31.md) | 全项目找茬报告 | P1/P2: 文档矛盾 + 死代码（11 项待处理） |
+| [syntax-docs-audit-2026-07-31.md](syntax-docs-audit-2026-07-31.md) | 语法文档专项审计 | 已全部处理，归档留存 |
 | [AUDIT-2026-07-29.md](AUDIT-2026-07-29.md) | 历史审计 | 07-29 历史审计记录 |
 
-### 审计报告（非 Bug，参考）
+### 测试报告
+
 | 文件 | 标题 |
 |------|------|
-| [test-report-2026-07-31-1159.md](test-report-2026-07-31-1159.md) | 本次测试报告 |
+| [test-report-2026-07-31-1545.md](test-report-2026-07-31-1545.md) | 🔴 **本次 IR 路线深度测试报告**（IR→rustc 27.6%） |
+| [test-report-2026-07-31-1520.md](test-report-2026-07-31-1520.md) | 上次 IR 路线测试报告 |
 | [ir-directive-plan.md](ir-directive-plan.md) | IR directive 规划 |
 
 ## Fixed (22 total)

@@ -1,4 +1,0 @@
-import std.io
-
-def main() =
-    print("test import ok")

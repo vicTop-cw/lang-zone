@@ -1,5 +1,0 @@
-#!test
-
-test "basic":
-    assert True
-def main() = pass

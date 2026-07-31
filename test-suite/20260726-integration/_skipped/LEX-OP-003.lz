@@ -1,4 +1,0 @@
-@unsafe
-def f() =
-    x = Some(1)
-    y = x?.val ?? 0

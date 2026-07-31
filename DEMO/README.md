@@ -108,7 +108,7 @@
 
 | 文件 | 行数 | 覆盖特性 |
 |:----|:---:|---------|
-| `struct.lz` | 37 | struct 字段/方法/静态方法、嵌套构造 |
+| `struct.lz` | 37 | struct 字段/方法/静态方法、泛型 Pair<T> |
 | `enum.lz` | 142 | 单元/数据/泛型变体、关键字参数构造、enum 方法、嵌套模式匹配 |
 | `trait_impl.lz` | 18 | trait 抽象/默认方法、泛型 trait、trait impl |
 | `magic_methods.lz` | 169 | `__add__`/`__sub__`/`__mul__`、`__str__`/`__eq__`/`__hash__`/`__getitem__`/`__len__`、`__setitem__`/`__next__`、`__call__`、`__enter__`/`__exit__`、`__new__`、`__bool__` |
@@ -133,9 +133,9 @@
 | `rc_arc_more.lz` | 15 | 指针/引用扩展测试 |
 | `yield_demo.lz` | 11 | yield 基础、yield from |
 | `generator_more.lz` | 24 | 生成器扩展测试 |
-| `test_suite.lz` | 9 | test 基本声明、suite 框架 |
+| `test_suite.lz` | 9 | test 声明、assert 断言 |
 | `test_more.lz` | 20 | 测试框架扩展测试 |
-| `prelude_demo.lz` | 86 | print/panic/len/str/int/float/bool/hash/contains/iter/enumerate/zip/clone/sort/reverse/format、str 方法、List 方法 |
+| `prelude_demo.lz` | 86 | print/len/str/int/float/bool/hash/contains/iter/enumerate/zip/clone/sort/reverse/format、str 方法、List 方法 |
 
 > 注：行数为 `wc -l` 实测值（2026-07-31）。部分文件较早期大幅精简，以当前实测为准。
 

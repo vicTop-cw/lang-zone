@@ -1,9 +1,0 @@
-// ==== Tuple ====
-def main() =
-    let t = (1, "hello", true)
-    let (a, b, c) = t
-    print(f"{a}, {b}, {c}")
-    // nested
-    let p = ((1, 2), "ok")
-    let ((x, y), msg) = p
-    print(f"({x},{y}) {msg}")

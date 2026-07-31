@@ -225,6 +225,7 @@ pub struct EnumDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub variants: Vec<Variant>,
+    pub methods: Vec<FnDef>,
     pub span: Span,
 }
 

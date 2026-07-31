@@ -1,8 +1,0 @@
-def get_value() -> int = 15
-
-def main() =
-    print(1)
-    print(get_value())
-    print(6)
-    print(3)
-    print(1)

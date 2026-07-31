@@ -1,8 +1,0 @@
-// 匿名函数（anonymous function / closure）：|params| body
-def run() -> int =
-    let f = |a, b| a + b
-    f(3, 4)
-
-def run2() -> int =
-    let g = |n| n * n
-    g(5)

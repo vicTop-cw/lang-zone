@@ -953,7 +953,8 @@ impl ParserExprExt for Parser {
                     Vec::new()
                 };
 
-                if !patterns.is_empty() {
+                // 点路径模式（如 Color.Red）即使无括号参数也是变体
+                if !patterns.is_empty() || name.contains('.') {
                     Ok(Pattern::Variant(name, patterns))
                 } else {
                     Ok(Pattern::Ident(name))

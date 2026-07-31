@@ -1,4 +1,0 @@
-#!bin macro
-template make_fn!<T>(name: str, val: T) = f```fn {name}() -> T {{
-    {val}
-}}```

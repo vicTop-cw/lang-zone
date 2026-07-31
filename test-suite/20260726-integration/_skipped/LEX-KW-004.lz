@@ -1,6 +1,0 @@
-#!test
-test "t1":
-    assert True
-suite "s":
-    test "t2":
-        assert 1 == 1

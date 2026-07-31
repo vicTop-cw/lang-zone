@@ -1,5 +1,0 @@
-def main() =
-    p = (1, 2)
-    r = match p:
-        case (a, b) => a + b
-    print(r)

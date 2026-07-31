@@ -1,3 +1,0 @@
-def main() =
-    d: Dict<str, int> = {"a": 1}
-    print(d["a"])

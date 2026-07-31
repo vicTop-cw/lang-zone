@@ -1,8 +1,0 @@
-// ==== Panic ====
-def div(a: int, b: int) -> int =
-    if b == 0:
-        panic("division by zero")
-    a / b
-
-def main() =
-    print(div(10, 2))

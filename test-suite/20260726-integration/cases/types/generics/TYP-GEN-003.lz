@@ -1,1 +1,0 @@
-def dup<T>(x: T) -> (T, T) where T : Clone + Ord = (x.clone(), x.clone())

@@ -1,4 +1,0 @@
-#!bin
-
-def main() =
-    print("hello")

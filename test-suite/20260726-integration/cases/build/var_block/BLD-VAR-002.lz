@@ -1,6 +1,0 @@
-def main() =
-    r =:
-        a = 10
-        b = 20
-        a + b
-    print(r)

@@ -1,3 +1,0 @@
-def main() =
-    inc = |x| x + 1
-    print(inc(5))

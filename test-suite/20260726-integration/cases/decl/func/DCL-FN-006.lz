@@ -1,2 +1,0 @@
-def f(ref x: int):
-    print(x)

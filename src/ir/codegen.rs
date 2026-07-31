@@ -263,9 +263,11 @@ impl CodeGen {
             if duck_indices.contains(&i) {
                 let idx = duck_indices.iter().position(|&d| d == i).unwrap();
                 format!("{}: {}", p.name, duck_params[idx])
+            } else if p.name == "self" {
+                // self 参数 → &self / &mut self（借用而非移动）
+                if p.is_mut { "&mut self" } else { "&self" }.into()
             } else {
                 if p.default.is_some() {
-                    // 默认参数 → Option<T>（函数签名）
                     format!("{}: Option<{}>", p.name, self.rust_type(&p.ty))
                 } else if p.is_mut {
                     format!("mut {}: {}", p.name, self.rust_type(&p.ty))
@@ -354,7 +356,7 @@ impl CodeGen {
         // 方法（impl 块）
         if !s.methods.is_empty() {
             self.buf.push('\n');
-            self.emit_line(&format!("impl{} {} {{", generics, s.name));
+            self.emit_line(&format!("impl{} {}{} {{", generics, s.name, generics));
             self.indent += 1;
             for m in &s.methods {
                 self.gen_fn_def(m);
@@ -391,6 +393,19 @@ impl CodeGen {
         }
         self.indent -= 1;
         self.emit_line("}");
+
+        // 方法（impl 块）
+        if !e.methods.is_empty() {
+            self.buf.push('\n');
+            self.emit_line(&format!("impl{} {}{} {{", generics, e.name, generics));
+            self.indent += 1;
+            for m in &e.methods {
+                self.gen_fn_def(m);
+                self.buf.push('\n');
+            }
+            self.indent -= 1;
+            self.emit_line("}");
+        }
     }
 
     fn gen_trait_def(&mut self, t: &TraitDef) {
@@ -493,7 +508,10 @@ impl CodeGen {
                 (IrType::Self_, false) => "&self".into(),
                 (IrType::MutRef(_), _) => "&mut self".into(),
                 (IrType::Ref(_), _) => "&self".into(),
-                _ => format!("self: {}", self.rust_type(&p.ty)),
+                _ => {
+                    // Fallback: treat any self param as &self (LZ semantics: self is borrowed by default)
+                    if p.is_mut { "&mut self" } else { "&self" }.into()
+                }
             }
         } else {
             // duck 类型参数 — 代码生成层用 `_` 占位，语义校验在编译期完成
@@ -790,7 +808,7 @@ impl CodeGen {
                     format!("println!({}, {})", fmt, args_s.join(", "))
                 } else if callee_s == "set!" {
                     format!("std::collections::HashSet::from([{}])", args_s.join(", "))
-                } else if callee_s == "panic!" {
+                } else if callee_s == "panic!" || callee_s == "panic" {
                     format!("panic!(\"{{:?}}\", {})", args_s.join(", "))
                 } else if callee_s == "Exception" {
                     format!("panic!(\"Exception: {{:?}}\", {})", args_s.join(", "))
@@ -1045,15 +1063,19 @@ impl CodeGen {
         match pat {
             Pattern::Wildcard => "_".into(),
             Pattern::Ident(name) => {
-                // Handle dotted patterns like "Color.Red" → convert to Rust enum pattern "Color::Red"
+                // Handle dotted patterns like "Color.Red" → Rust enum pattern "Color::Red"
                 if let Some(dot_pos) = name.rfind('.') {
                     let type_name = &name[..dot_pos];
                     let variant = &name[dot_pos+1..];
-                    // Check if the prefix is a known type name
+                    // Check multiple sources to determine if this is an enum pattern:
+                    // 1. Known type name in emitted_types
+                    // 2. Standard library types
+                    // 3. The variant name is in the enum_variants map (pre-scanned)
                     if self.emitted_types.contains(type_name)
                         || type_name == "Option" || type_name == "Result"
                         || type_name == "Some" || type_name == "None"
                         || type_name == "Ok" || type_name == "Err"
+                        || self.enum_variants.contains_key(variant)
                     {
                         format!("{}::{}", type_name, variant)
                     } else {

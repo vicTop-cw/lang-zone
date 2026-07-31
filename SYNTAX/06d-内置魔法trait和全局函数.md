@@ -207,6 +207,8 @@ match p:
 - `__getitem__` 使用 `&self` 借用，`__setitem__` 使用 `&mut self` 可变借用
 - `__getitem__`/`__setitem__` 支持按索引类型多分派
 
+> **可调用性规则**：struct 作为构造器始终可调用；struct 实例**仅当定义了 `__call__`** 时才可调用；enum / trait / duck 均不可调用。详见 [99-内置预导入库.md](99-内置预导入库.md) 可调用性规则表。
+
 ---
 
 ## 十二、布尔 / 数学

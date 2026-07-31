@@ -1,5 +1,0 @@
-def square(x: int) -> int =
-    x * x
-
-def main() =
-    print(square(5))

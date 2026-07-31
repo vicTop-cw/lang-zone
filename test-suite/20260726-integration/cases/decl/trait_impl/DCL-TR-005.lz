@@ -1,1 +1,0 @@
-trait Greet = def greet(self: Self) -> str = "Hello"

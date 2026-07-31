@@ -1,6 +1,0 @@
-struct Tag =
-    name: str
-
-def main() =
-    t = Tag(name: "magic")
-    print(t.name)

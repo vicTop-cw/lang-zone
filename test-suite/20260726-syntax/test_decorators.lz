@@ -1,9 +1,0 @@
-@parallel
-def process(data: int) -> int = data * 2
-
-@tail_call
-def g(x: int) -> int = x + 1
-
-def main() =
-    print(process(21))
-    print(g(41))

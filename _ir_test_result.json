@@ -1,0 +1,859 @@
+{
+  "timestamp": "2026-07-31 17:45:01",
+  "total_demos": 123,
+  "lz_pass": 122,
+  "lz_fail": 1,
+  "rustc_pass": 43,
+  "rustc_fail": 79,
+  "pass_rate": 35.2,
+  "lz_fail_list": [
+    [
+      "DEMO\\07_data_structures\\enum_more.lz",
+      ""
+    ]
+  ],
+  "rustc_fail_list": [
+    [
+      "DEMO\\01_basics\\identifiers.lz",
+      "E0573,E0425,E0599,E0308"
+    ],
+    [
+      "DEMO\\01_basics\\keywords.lz",
+      "E0425,E0728,E0308"
+    ],
+    [
+      "DEMO\\02_types\\containers.lz",
+      "E0308"
+    ],
+    [
+      "DEMO\\02_types\\option_result.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\02_types\\primitives.lz",
+      "E0608"
+    ],
+    [
+      "DEMO\\02_types\\type_aliases.lz",
+      "E0308"
+    ],
+    [
+      "DEMO\\02_types\\type_aliases_more.lz",
+      "E0423,E0425,E0308"
+    ],
+    [
+      "DEMO\\02_types\\type_conversion.lz",
+      "E0423,E0425,E0308"
+    ],
+    [
+      "DEMO\\03_variables\\mutable_let.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\03_variables\\ownership.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\03_variables\\walrus.lz",
+      "E0425,E0070"
+    ],
+    [
+      "DEMO\\03_variables\\walrus_more.lz",
+      "E0425,E0070"
+    ],
+    [
+      "DEMO\\04_functions\\checker.lz",
+      "E0425,E0608"
+    ],
+    [
+      "DEMO\\04_functions\\closures_more.lz",
+      "E0373,E0308,E0425"
+    ],
+    [
+      "DEMO\\04_functions\\generics.lz",
+      "E0425,E0423,E0369,E0308,E0599"
+    ],
+    [
+      "DEMO\\04_functions\\variadic.lz",
+      "E0061"
+    ],
+    [
+      "DEMO\\05_expressions\\operators.lz",
+      "E0425,E0423,E0121,E0308,E0277"
+    ],
+    [
+      "DEMO\\06_control_flow\\guard.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\06_control_flow\\with_defer.lz",
+      "E0425,E0308,E0599"
+    ],
+    [
+      "DEMO\\07_data_structures\\callable_objects.lz",
+      "E0618"
+    ],
+    [
+      "DEMO\\07_data_structures\\enum.lz",
+      "E0308,E0382"
+    ],
+    [
+      "DEMO\\07_data_structures\\magic_methods.lz",
+      "E0423,E0425,E0277,E0308,E0369"
+    ],
+    [
+      "DEMO\\07_data_structures\\struct_more.lz",
+      "E0596"
+    ],
+    [
+      "DEMO\\07_data_structures\\trait_impl.lz",
+      "E0185"
+    ],
+    [
+      "DEMO\\08_modules\\import_demo.lz",
+      "E0252,E0432,E0433"
+    ],
+    [
+      "DEMO\\08_modules\\import_more.lz",
+      "E0432,E0433"
+    ],
+    [
+      "DEMO\\09_macros\\macro_demo.lz",
+      "E0601"
+    ],
+    [
+      "DEMO\\10_error_handling\\panic_raise_try.lz",
+      "E0423,E0277,E0308,E0425,E0572"
+    ],
+    [
+      "DEMO\\10_error_handling\\try_more.lz",
+      "E0423,E0369,E0308"
+    ],
+    [
+      "DEMO\\11_concurrency\\async_more.lz",
+      "E0425,E0728"
+    ],
+    [
+      "DEMO\\11_concurrency\\async_spawn.lz",
+      "E0425,E0728"
+    ],
+    [
+      "DEMO\\12_build_blocks\\build_more.lz",
+      "E0425,E0061"
+    ],
+    [
+      "DEMO\\12_build_blocks\\var_call_block.lz",
+      "E0425,E0308,E0061"
+    ],
+    [
+      "DEMO\\13_operators\\precedence.lz",
+      "E0425,E0308"
+    ],
+    [
+      "DEMO\\14_pointers\\box_rc_arc.lz",
+      "E0425,E0433,E0608"
+    ],
+    [
+      "DEMO\\14_pointers\\rc_arc_more.lz",
+      "E0425,E0433,E0608"
+    ],
+    [
+      "DEMO\\16_testing\\test_more.lz",
+      "UNKNOWN"
+    ],
+    [
+      "DEMO\\16_testing\\test_suite.lz",
+      "E0601"
+    ],
+    [
+      "DEMO\\99_prelude\\prelude_demo.lz",
+      "E0425,E0423,E0277,E0308"
+    ],
+    [
+      "DEMO\\99_spec\\closure_fatarrow.lz",
+      "E0601"
+    ],
+    [
+      "DEMO\\99_spec\\codegen_str_int_float.lz",
+      "E0601,E0423,E0308,E0425"
+    ],
+    [
+      "DEMO\\99_spec\\combo-syntax\\combo_for_guard_match.lz",
+      "E0507"
+    ],
+    [
+      "DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.lz",
+      "E0507"
+    ],
+    [
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_else.lz",
+      "E0425,E0070"
+    ],
+    [
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_try.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
+      "E0425,E0070"
+    ],
+    [
+      "DEMO\\99_spec\\constraint_multi.lz",
+      "E0601"
+    ],
+    [
+      "DEMO\\99_spec\\dict_comprehension.lz",
+      "E0610"
+    ],
+    [
+      "DEMO\\99_spec\\duck_test.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\99_spec\\gen_block_star.lz",
+      "E0599,E0308"
+    ],
+    [
+      "DEMO\\99_spec\\go_stmt.lz",
+      "E0425,E0308"
+    ],
+    [
+      "DEMO\\99_spec\\guard_for_3.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\99_spec\\index_build.lz",
+      "E0277"
+    ],
+    [
+      "DEMO\\99_spec\\index_build_block.lz",
+      "E0277"
+    ],
+    [
+      "DEMO\\99_spec\\iterator_demo.lz",
+      "E0425,E0308,E0277,E0069,E0599"
+    ],
+    [
+      "DEMO\\99_spec\\keyword_downgrade.lz",
+      "E0530,E0308,E0277"
+    ],
+    [
+      "DEMO\\99_spec\\literal_i64min.lz",
+      "E0601,E0308"
+    ],
+    [
+      "DEMO\\99_spec\\null_safe.lz",
+      "E0369,E0609"
+    ],
+    [
+      "DEMO\\99_spec\\parallel_decorator.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\99_spec\\pipe_spec.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\99_spec\\set_comprehension.lz",
+      "E0599"
+    ],
+    [
+      "DEMO\\99_spec\\setup_teardown.lz",
+      "E0601"
+    ],
+    [
+      "DEMO\\99_spec\\top_level_build.lz",
+      "E0572"
+    ],
+    [
+      "DEMO\\99_spec\\underscore_discard_3.lz",
+      "E0423"
+    ],
+    [
+      "DEMO\\99_spec\\underscore_partial_1.lz",
+      "E0618"
+    ],
+    [
+      "DEMO\\99_spec\\underscore_partial_2.lz",
+      "E0618"
+    ],
+    [
+      "DEMO\\99_spec\\while_walrus_guard_1.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_async_spawn.lz",
+      "E0425,E0728"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_defer_guard_try.lz",
+      "E0308"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_enum_match_guardlet.lz",
+      "E0433"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_generic_struct_method.lz",
+      "E0507"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_match_ternary.lz",
+      "E0308"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_pipe_partial.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_struct_method_partial.lz",
+      "E0618"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_ternary_walrus.lz",
+      "E0425,E0308"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_try_raise_guard.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\combo-syntax\\combo_while_walrus.lz",
+      "E0425"
+    ],
+    [
+      "DEMO\\overload_test.lz",
+      "E0428,E0308"
+    ],
+    [
+      "DEMO\\variadic_dotdot.lz",
+      "E0308"
+    ]
+  ],
+  "rustc_fail_details": {
+    "DEMO\\01_basics\\identifiers.lz": {
+      "code": "E0573,E0425,E0599,E0308",
+      "details": "error[E0573]: expected type, found constant `MyType`\n  --> identifiers.rs:57:17\n   |\n57 | const instance: MyType = 30;\n   |                 ^^^^^^ not a type\n\nwarning: unreachable statement\n  --> identifiers.rs:30:5\n   |\n28 |         return println!(\"{:?}\", \"no value\".to_string());\n   |         ----"
+    },
+    "DEMO\\01_basics\\keywords.lz": {
+      "code": "E0425,E0728,E0308",
+      "details": "error: incorrect use of `await`\n  --> keywords.rs:66:20\n   |\n66 |     let r = f.await();\n   |                    ^^\n   |\nhelp: `await` is not a method call, remove the parentheses\n   |\n66 -     let r = f.await();\n66 +     let r = f.await;\n   |\n\nerror[E0425]: cannot find value `e` in this scope\n  -->"
+    },
+    "DEMO\\02_types\\containers.lz": {
+      "code": "E0308",
+      "details": "error[E0308]: mismatched types\n  --> containers.rs:18:10\n   |\n18 |     ages[\"charlie\".to_string()] = 35;\n   |          ^^^^^^^^^^^^^^^^^^^^^ expected `&_`, found `String`\n   |\n   = note: expected reference `&_`\n                 found struct `String`\nhelp: try removing the method call\n   |\n18 -     a"
+    },
+    "DEMO\\02_types\\option_result.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find function `safe_div` in this scope\n  --> option_result.rs:23:14\n   |\n23 |     let r1 = safe_div(10, 2);\n   |              ^^^^^^^^ not found in this scope\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+    },
+    "DEMO\\02_types\\primitives.lz": {
+      "code": "E0608",
+      "details": "error[E0608]: cannot index into a value of type `Box<i64>`\n  --> primitives.rs:31:19\n   |\n31 |     let bv = boxed[0];\n   |                   ^^^\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0608`."
+    },
+    "DEMO\\02_types\\type_aliases.lz": {
+      "code": "E0308",
+      "details": "error[E0308]: mismatched types\n  --> type_aliases.rs:12:21\n   |\n12 | const UserId: i64 = ();\n   |               ---   ^^ expected `i64`, found `()`\n   |               |\n   |               expected because of the type of the constant\n\nerror[E0308]: mismatched types\n  --> type_aliases.rs:14:31\n   |\n14"
+    },
+    "DEMO\\02_types\\type_aliases_more.lz": {
+      "code": "E0423,E0425,E0308",
+      "details": "error[E0423]: expected value, found builtin type `f64`\n  --> type_aliases_more.rs:12:28\n   |\n12 |     let f: f64 = __as__(n, f64);\n   |                            ^^^ not a value\n\nerror[E0423]: expected value, found builtin type `i64`\n  --> type_aliases_more.rs:13:31\n   |\n13 |     let back: i64 = __"
+    },
+    "DEMO\\02_types\\type_conversion.lz": {
+      "code": "E0423,E0425,E0308",
+      "details": "error[E0423]: expected value, found builtin type `f64`\n --> type_conversion.rs:9:28\n  |\n9 |     let y: f64 = __as__(x, f64);\n  |                            ^^^ not a value\n\nerror[E0423]: expected value, found struct `String`\n   --> type_conversion.rs:10:31\n    |\n 10 |     let s: String = __as__(x, S"
+    },
+    "DEMO\\03_variables\\mutable_let.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find value `second` in this scope\n  --> mutable_let.rs:32:71\n   |\n32 |     println!(\"{:?} {:?} {:?} {:?} {:?} {:?} {:?}\", x, y, z, a, first, second, head);\n   |                                                                       ^^^^^^ not found in this scope\n\nerror: aborting "
+    },
+    "DEMO\\03_variables\\ownership.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find function `greet` in this scope\n  --> ownership.rs:11:5\n   |\n11 |     greet(t);\n   |     ^^^^^ not found in this scope\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+    },
+    "DEMO\\03_variables\\walrus.lz": {
+      "code": "E0425,E0070",
+      "details": "error[E0425]: cannot find value `n` in this scope\n  --> walrus.rs:18:18\n   |\n18 | println!(\"{:?}\", n);\n   |                  ^\n   |\nhelp: the binding `n` is available in a different scope in the same function\n  --> walrus.rs:17:14\n   |\n17 |     if { let n = compute(); n } > 0 { {\n   |              ^"
+    },
+    "DEMO\\03_variables\\walrus_more.lz": {
+      "code": "E0425,E0070",
+      "details": "error[E0425]: cannot find value `v` in this scope\n  --> walrus_more.rs:14:26\n   |\n14 |         println!(\"{:?}\", v);\n   |                          ^\n   |\nhelp: the binding `v` is available in a different scope in the same function\n  --> walrus_more.rs:13:17\n   |\n13 |     while { let v = tick(); v } <"
+    },
+    "DEMO\\04_functions\\checker.lz": {
+      "code": "E0425,E0608",
+      "details": "error[E0425]: cannot find type `__Params` in this scope\n --> checker.rs:7:27\n  |\n7 | pub fn check_positive(ps: __Params) -> __Params {\n  |                           ^^^^^^^^ not found in this scope\n\nerror[E0425]: cannot find type `__Params` in this scope\n --> checker.rs:7:40\n  |\n7 | pub fn check_pos"
+    },
+    "DEMO\\04_functions\\closures_more.lz": {
+      "code": "E0373,E0308,E0425",
+      "details": "error[E0373]: closure may outlive the current function, but it borrows `n`, which is owned by the current function\n  --> closures_more.rs:12:12\n   |\n12 |     return |x: i64| { x + n };\n   |            ^^^^^^^^       - `n` is borrowed here\n   |            |\n   |            may outlive borrowed value "
+    },
+    "DEMO\\04_functions\\generics.lz": {
+      "code": "E0425,E0423,E0369,E0308,E0599",
+      "details": "error[E0425]: cannot find type `T` in this scope\n  --> generics.rs:46:25\n   |\n46 |     let mut cloned: Vec<T> = clone_all(vec![\"a\".to_string(), \"b\".to_string(), \"c\".to_string()]);\n   |                         ^ not found in this scope\n\nerror[E0425]: cannot find type `T` in this scope\n  --> generics."
+    },
+    "DEMO\\04_functions\\variadic.lz": {
+      "code": "E0061",
+      "details": "error[E0061]: this function takes 1 argument but 5 arguments were supplied\n  --> variadic.rs:16:19\n   |\n16 |     let r1: i64 = sum_all(1, 2, 3, 4, 5);\n   |                   ^^^^^^^    -  -  -  - unexpected argument #5 of type `{integer}`\n   |                              |  |  |\n   |               "
+    },
+    "DEMO\\05_expressions\\operators.lz": {
+      "code": "E0425,E0423,E0121,E0308,E0277",
+      "details": "error[E0425]: cannot find value `int` in this scope\n  --> operators.rs:44:29\n   |\n44 |     let is_int: i64 = 42 == int;\n   |                             ^^^\n   |                             |\n   |                             not found in this scope\n   |                             help: perhaps you "
+    },
+    "DEMO\\06_control_flow\\guard.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find function `safe_div` in this scope\n --> guard.rs:9:22\n  |\n9 |     println!(\"{:?}\", safe_div(10, 2));\n  |                      ^^^^^^^^ not found in this scope\n\nerror[E0425]: cannot find function `safe_div` in this scope\n  --> guard.rs:10:22\n   |\n10 |     println!(\"{:?}\", saf"
+    },
+    "DEMO\\06_control_flow\\with_defer.lz": {
+      "code": "E0425,E0308,E0599",
+      "details": "error[E0425]: cannot find value `res` in this scope\n  --> with_defer.rs:25:73\n   |\n25 |         let _with = __as__(MyResource { name: \"database\".to_string() }, res);\n   |                                                                         ^^^ not found in this scope\n\nerror[E0308]: mismatched typ"
+    },
+    "DEMO\\07_data_structures\\callable_objects.lz": {
+      "code": "E0618",
+      "details": "error[E0618]: expected function, found `Multiplier`\n  --> callable_objects.rs:31:22\n   |\n30 |     let doubler = Multiplier { factor: 2 };\n   |         ------- `doubler` has type `Multiplier`\n31 |     println!(\"{:?}\", doubler(21));\n   |                      ^^^^^^^----\n   |                      |\n   "
+    },
+    "DEMO\\07_data_structures\\enum.lz": {
+      "code": "E0308,E0382",
+      "details": "error[E0308]: mismatched types\n  --> enum.rs:53:17\n   |\n27 | impl<T> Option<T> {\n   |      - expected this type parameter\n...\n50 |     fn unwrap_or(&self, default: T) -> T {\n   |                                        - expected `T` because of return type\n...\n53 |                 v\n   |             "
+    },
+    "DEMO\\07_data_structures\\magic_methods.lz": {
+      "code": "E0423,E0425,E0277,E0308,E0369",
+      "details": "error[E0423]: expected value, found enum `Option`\n  --> magic_methods.rs:88:8\n   |\n88 | return Option.Some(val);\n   |        ^^^^^^\n   |\nhelp: use the path separator to refer to a variant\n   |\n88 - return Option.Some(val);\n88 + return Option::Some(val);\n   |\n\nerror[E0423]: expected value, found enum"
+    },
+    "DEMO\\07_data_structures\\struct_more.lz": {
+      "code": "E0596",
+      "details": "error[E0596]: cannot borrow `c` as mutable, as it is not declared as mutable\n  --> struct_more.rs:33:9\n   |\n33 |     let c = Counter { count: 0 };\n   |         ^ not mutable\n34 |     println!(\"{:?}\", c.increment());\n   |                      - cannot borrow as mutable\n35 |     println!(\"{:?}\", c.inc"
+    },
+    "DEMO\\07_data_structures\\trait_impl.lz": {
+      "code": "E0185",
+      "details": "error: expected one of `!`, `(`, `...`, `..=`, `..`, `::`, `:`, `{`, or `|`, found `)`\n  --> trait_impl.rs:13:17\n   |\n13 |     fn draw(Self) -> ();\n   |                 ^ expected one of 9 possible tokens\n   |\n   = note: anonymous parameters are removed in the 2018 edition (see RFC 1685)\nhelp: expli"
+    },
+    "DEMO\\08_modules\\import_demo.lz": {
+      "code": "E0252,E0432,E0433",
+      "details": "error[E0252]: the name `HashMap` is defined multiple times\n --> import_demo.rs:9:5\n  |\n5 | use std::collections::{HashMap, HashSet};\n  |                        ------- previous import of the type `HashMap` here\n...\n9 | use std::collections::HashMap;\n  |     ^^^^^^^^^^^^^^^^^^^^^^^^^ `HashMap` reimpo"
+    },
+    "DEMO\\08_modules\\import_more.lz": {
+      "code": "E0432,E0433",
+      "details": "error[E0432]: unresolved import `std::math`\n --> import_more.rs:7:5\n  |\n7 | use std::math;\n  |     ^^^^^^^^^ no `math` in the root\n  |\nhelp: a similar name exists in the module\n  |\n7 - use std::math;\n7 + use std::path;\n  |\n\nerror[E0432]: unresolved import `std::math`\n --> import_more.rs:9:5\n  |\n9 | "
+    },
+    "DEMO\\09_macros\\macro_demo.lz": {
+      "code": "E0601",
+      "details": "error[E0601]: `main` function not found in crate `macro_demo`\n --> macro_demo.rs:5:42\n  |\n5 | use std::collections::{HashMap, HashSet};\n  |                                          ^ consider adding a `main` function to `macro_demo.rs`\n\nerror: aborting due to 1 previous error\n\nFor more information a"
+    },
+    "DEMO\\10_error_handling\\panic_raise_try.lz": {
+      "code": "E0423,E0277,E0308,E0425,E0572",
+      "details": "error[E0423]: expected value, found enum `FileError`\n  --> panic_raise_try.rs:53:23\n   |\n53 | return panic!(\"{:?}\", FileError.ReadError(\"empty path\".to_string()));\n   |                       ^^^^^^^^^\n   |\nnote: the enum is defined here\n  --> panic_raise_try.rs:15:1\n   |\n15 | / pub enum FileError {\n"
+    },
+    "DEMO\\10_error_handling\\try_more.lz": {
+      "code": "E0423,E0369,E0308",
+      "details": "error[E0423]: expected value, found enum `ParseError`\n  --> try_more.rs:14:23\n   |\n14 | return panic!(\"{:?}\", ParseError.BadFormat(\"empty\".to_string()));\n   |                       ^^^^^^^^^^\n   |\nnote: the enum is defined here\n  --> try_more.rs:8:1\n   |\n 8 | / pub enum ParseError {\n 9 | |     BadFo"
+    },
+    "DEMO\\11_concurrency\\async_more.lz": {
+      "code": "E0425,E0728",
+      "details": "error: incorrect use of `await`\n  --> async_more.rs:15:24\n   |\n15 |     return vec![a.await(), b.await(), c.await()];\n   |                        ^^\n   |\nhelp: `await` is not a method call, remove the parentheses\n   |\n15 -     return vec![a.await(), b.await(), c.await()];\n15 +     return vec![a.awai"
+    },
+    "DEMO\\11_concurrency\\async_spawn.lz": {
+      "code": "E0425,E0728",
+      "details": "error: incorrect use of `await`\n  --> async_spawn.rs:14:30\n   |\n14 |     let r1: String = f1.await();\n   |                              ^^\n   |\nhelp: `await` is not a method call, remove the parentheses\n   |\n14 -     let r1: String = f1.await();\n14 +     let r1: String = f1.await;\n   |\n\nerror: incor"
+    },
+    "DEMO\\12_build_blocks\\build_more.lz": {
+      "code": "E0425,E0061",
+      "details": "error[E0425]: cannot find value `p` in this scope\n  --> build_more.rs:18:27\n   |\n18 |     println!(\"{:?} {:?}\", p.x, p.y);\n   |                           ^ not found in this scope\n\nerror[E0425]: cannot find value `p` in this scope\n  --> build_more.rs:18:32\n   |\n18 |     println!(\"{:?} {:?}\", p.x, p."
+    },
+    "DEMO\\12_build_blocks\\var_call_block.lz": {
+      "code": "E0425,E0308,E0061",
+      "details": "error[E0425]: cannot find value `x` in this scope\n --> var_call_block.rs:9:22\n  |\n9 |     println!(\"{:?}\", x);\n  |                      ^ not found in this scope\n\nerror[E0425]: cannot find value `result` in this scope\n  --> var_call_block.rs:11:29\n   |\n11 |     return println!(\"{:?}\", result);\n   | "
+    },
+    "DEMO\\13_operators\\precedence.lz": {
+      "code": "E0425,E0308",
+      "details": "error[E0425]: cannot find value `a` in this scope\n --> precedence.rs:8:15\n  |\n8 |     let sum = a + b;\n  |               ^ not found in this scope\n\nerror[E0425]: cannot find value `b` in this scope\n --> precedence.rs:8:19\n  |\n8 |     let sum = a + b;\n  |                   ^ not found in this scope\n\n"
+    },
+    "DEMO\\14_pointers\\box_rc_arc.lz": {
+      "code": "E0425,E0433,E0608",
+      "details": "error[E0425]: cannot find type `Rc` in this scope\n  --> box_rc_arc.rs:11:13\n   |\n11 |     let rc: Rc<i64> = Rc::new(42);\n   |             ^^ not found in this scope\n   |\nhelp: consider importing this struct\n   |\n 5 + use std::rc::Rc;\n   |\n\nerror[E0433]: cannot find type `Rc` in this scope\n  --> box_"
+    },
+    "DEMO\\14_pointers\\rc_arc_more.lz": {
+      "code": "E0425,E0433,E0608",
+      "details": "error[E0425]: cannot find type `Rc` in this scope\n  --> rc_arc_more.rs:11:13\n   |\n11 |     let r1: Rc<i64> = Rc::new(10);\n   |             ^^ not found in this scope\n   |\nhelp: consider importing this struct\n   |\n 5 + use std::rc::Rc;\n   |\n\nerror[E0433]: cannot find type `Rc` in this scope\n  --> rc_"
+    },
+    "DEMO\\16_testing\\test_more.lz": {
+      "code": "UNKNOWN",
+      "details": "error: missing parameters for function definition\n  --> test_more.rs:26:10\n   |\n26 | fn string concat() {\n   |          ^\n   |\nhelp: add a parameter list\n   |\n26 | fn string() concat() {\n   |          ++\n\nerror: expected one of `->`, `<`, `where`, or `{`, found `concat`\n  --> test_more.rs:26:11\n   |"
+    },
+    "DEMO\\16_testing\\test_suite.lz": {
+      "code": "E0601",
+      "details": "error[E0601]: `main` function not found in crate `test_suite`\n  --> test_suite.rs:15:2\n   |\n15 | }\n   |  ^ consider adding a `main` function to `test_suite.rs`\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0601`."
+    },
+    "DEMO\\99_prelude\\prelude_demo.lz": {
+      "code": "E0425,E0423,E0277,E0308",
+      "details": "error[E0425]: cannot find function `hash` in this scope\n  --> prelude_demo.rs:20:13\n   |\n20 |     let h = hash(\"hello\".to_string());\n   |             ^^^^ not found in this scope\n   |\nhelp: consider importing this function\n   |\n 5 + use std::ptr::hash;\n   |\n\nerror[E0425]: cannot find function `zip` "
+    },
+    "DEMO\\99_spec\\closure_fatarrow.lz": {
+      "code": "E0601",
+      "details": "error[E0601]: `main` function not found in crate `closure_fatarrow`\n --> closure_fatarrow.rs:5:42\n  |\n5 | use std::collections::{HashMap, HashSet};\n  |                                          ^ consider adding a `main` function to `closure_fatarrow.rs`\n\nerror: aborting due to 1 previous error\n\nFor "
+    },
+    "DEMO\\99_spec\\codegen_str_int_float.lz": {
+      "code": "E0601,E0423,E0308,E0425",
+      "details": "error[E0601]: `main` function not found in crate `codegen_str_int_float`\n  --> codegen_str_int_float.rs:22:2\n   |\n22 | }\n   |  ^ consider adding a `main` function to `codegen_str_int_float.rs`\n\nerror[E0423]: expected function, found builtin type `str`\n --> codegen_str_int_float.rs:8:43\n  |\n8 |     l"
+    },
+    "DEMO\\99_spec\\combo-syntax\\combo_for_guard_match.lz": {
+      "code": "E0507",
+      "details": "error[E0507]: cannot move out of a shared reference\n  --> combo_for_guard_match.rs:19:43\n   |\n19 |     for it in (items).into_iter().filter(|&it| keep(it)) {\n   |                                           ^--\n   |                                            |\n   |                                     "
+    },
+    "DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.lz": {
+      "code": "E0507",
+      "details": "error[E0507]: cannot move out of a shared reference\n  --> combo_for_guard_struct.rs:25:40\n   |\n25 |     for p in (pts).into_iter().filter(|&p| is_positive(p.x)) {\n   |                                        ^-\n   |                                         |\n   |                                       "
+    },
+    "DEMO\\99_spec\\combo-syntax\\combo_while_guard_else.lz": {
+      "code": "E0425,E0070",
+      "details": "error[E0425]: cannot find value `n` in this scope\n  --> combo_while_guard_else.rs:13:44\n   |\n13 |     while ({ let n = next(); n } <= 5) && (n != 3) {\n   |                                            ^\n   |\nhelp: the binding `n` is available in a different scope in the same function\n  --> combo_while"
+    },
+    "DEMO\\99_spec\\combo-syntax\\combo_while_guard_try.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find value `count` in this scope\n  --> combo_while_guard_try.rs:13:5\n   |\n13 |     count = count + 1;\n   |     ^^^^^\n   |\nhelp: you might have meant to introduce a new binding\n   |\n13 |     let count = count + 1;\n   |     +++\n\nerror[E0425]: cannot find value `count` in this scop"
+    },
+    "DEMO\\99_spec\\combo-syntax\\combo_while_guard_walrus.lz": {
+      "code": "E0425,E0070",
+      "details": "error[E0425]: cannot find value `n` in this scope\n  --> combo_while_guard_walrus.rs:14:45\n   |\n14 |     while ({ let n = next(); n } <= 10) && (n % 2 == 0) {\n   |                                             ^\n   |\nhelp: the binding `n` is available in a different scope in the same function\n  --> com"
+    },
+    "DEMO\\99_spec\\constraint_multi.lz": {
+      "code": "E0601",
+      "details": "error: expected one of `!`, `(`, `...`, `..=`, `..`, `::`, `:`, `{`, or `|`, found `)`\n --> constraint_multi.rs:8:17\n  |\n8 |     fn call(Self) -> i64;\n  |                 ^ expected one of 9 possible tokens\n  |\n  = note: anonymous parameters are removed in the 2018 edition (see RFC 1685)\nhelp: expli"
+    },
+    "DEMO\\99_spec\\dict_comprehension.lz": {
+      "code": "E0610",
+      "details": "error[E0610]: `i64` is a primitive type and therefore doesn't have fields\n  --> dict_comprehension.rs:15:74\n   |\n15 |     let by_id: HashMap<i64, i64> = (users).into_iter().map(|u: i64| { (u.id, u.name) }).collect::<HashMap<_,_>>();\n   |                                                               "
+    },
+    "DEMO\\99_spec\\duck_test.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find type `Pet` in this scope\n  --> duck_test.rs:12:21\n   |\n12 | pub fn process(pet: Pet) -> i64 {\n   |                     ^^^ not found in this scope\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+    },
+    "DEMO\\99_spec\\gen_block_star.lz": {
+      "code": "E0599,E0308",
+      "details": "error[E0599]: `i64` is not an iterator\n  --> gen_block_star.rs:12:19\n   |\n12 |     for p in (xs).into_iter() {\n   |                   ^^^^^^^^^ `i64` is not an iterator\n   |\n   = note: the following trait bounds were not satisfied:\n           `i64: Iterator`\n           which is required by `i64: Int"
+    },
+    "DEMO\\99_spec\\go_stmt.lz": {
+      "code": "E0425,E0308",
+      "details": "error[E0425]: cannot find function `spawn` in this scope\n  --> go_stmt.rs:12:5\n   |\n12 |     spawn(worker(1));\n   |     ^^^^^ not found in this scope\n   |\nhelp: consider importing this function\n   |\n 5 + use std::thread::spawn;\n   |\n\nerror[E0425]: cannot find function `spawn` in this scope\n  --> go_"
+    },
+    "DEMO\\99_spec\\guard_for_3.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find function `queue_size` in this scope\n --> guard_for_3.rs:9:25\n  |\n9 |     while (running) && (queue_size() > 0) {\n  |                         ^^^^^^^^^^ not found in this scope\n\nerror[E0425]: cannot find function `step` in this scope\n  --> guard_for_3.rs:10:9\n   |\n10 |      "
+    },
+    "DEMO\\99_spec\\index_build.lz": {
+      "code": "E0277",
+      "details": "error[E0277]: the type `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`\n --> index_build.rs:9:18\n  |\n9 |     let a = nums[nums];\n  |                  ^^^^ `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`\n  |\n  = help: the trait `SliceIndex<[{integer}]>` is not implemented for `Vec<{integ"
+    },
+    "DEMO\\99_spec\\index_build_block.lz": {
+      "code": "E0277",
+      "details": "error[E0277]: the type `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`\n --> index_build_block.rs:9:18\n  |\n9 |     let val = xs[xs];\n  |                  ^^ `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`\n  |\n  = help: the trait `SliceIndex<[{integer}]>` is not implemented for `Vec<{int"
+    },
+    "DEMO\\99_spec\\iterator_demo.lz": {
+      "code": "E0425,E0308,E0277,E0069,E0599",
+      "details": "error[E0425]: cannot find type `Iter` in this scope\n  --> iterator_demo.rs:43:40\n   |\n43 | pub fn outer<R>(n: i64, val: R) -> Vec<Iter<R>> {\n   |                                        ^^^^ not found in this scope\n   |\nhelp: consider importing one of these structs\n   |\n 5 + use std::collections::bin"
+    },
+    "DEMO\\99_spec\\keyword_downgrade.lz": {
+      "code": "E0530,E0308,E0277",
+      "details": "error[E0530]: let bindings cannot shadow tuple variants\n   --> keyword_downgrade.rs:8:9\n    |\n  8 |     let Ok: i64 = 1;\n    |         ^^ cannot be named the same as a tuple variant\n    |\n   ::: D:\\Migrated\\victo\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\lib/rustlib/src/rust\\library\\std\\src\\p"
+    },
+    "DEMO\\99_spec\\literal_i64min.lz": {
+      "code": "E0601,E0308",
+      "details": "error[E0601]: `main` function not found in crate `literal_i64min`\n  --> literal_i64min.rs:20:2\n   |\n20 | }\n   |  ^ consider adding a `main` function to `literal_i64min.rs`\n\nerror[E0308]: mismatched types\n --> literal_i64min.rs:9:12\n  |\n9 |     return println!(\"{:?}\", a);\n  |            ^^^^^^^^^^^^^"
+    },
+    "DEMO\\99_spec\\null_safe.lz": {
+      "code": "E0369,E0609",
+      "details": "error[E0369]: binary operation `==` cannot be applied to type `Option<User>`\n  --> null_safe.rs:17:24\n   |\n17 |     let name = if if u == None { None } else { u.profile } == None { None } else { if u == None { None } else { u.profile }.name }.u...\n   |                      - ^^ ---- Option<User>\n   "
+    },
+    "DEMO\\99_spec\\parallel_decorator.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find function `sum` in this scope\n --> parallel_decorator.rs:8:12\n  |\n8 |     return sum(batch);\n  |            ^^^ not found in this scope\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0425`."
+    },
+    "DEMO\\99_spec\\pipe_spec.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find function `map` in this scope\n --> pipe_spec.rs:8:28\n  |\n8 |     let r = collect(filter(map(vec![1, 2, 3], |x: i64| { x * 2 }), |x: i64| { x > 2 }));\n  |                            ^^^ not found in this scope\n\nerror[E0425]: cannot find function `filter` in this scope\n --> pi"
+    },
+    "DEMO\\99_spec\\set_comprehension.lz": {
+      "code": "E0599",
+      "details": "error[E0599]: the method `into_iter` exists for struct `String`, but its trait bounds were not satisfied\n   --> set_comprehension.rs:10:39\n    |\n 10 |     let vowels: HashSet<i64> = (text).into_iter().map(|c: i64| { c }).collect::<HashSet<_>>();\n    |                                       ^^^^^^^^^\n"
+    },
+    "DEMO\\99_spec\\setup_teardown.lz": {
+      "code": "E0601",
+      "details": "error[E0601]: `main` function not found in crate `setup_teardown`\n --> setup_teardown.rs:5:42\n  |\n5 | use std::collections::{HashMap, HashSet};\n  |                                          ^ consider adding a `main` function to `setup_teardown.rs`\n\nerror: aborting due to 1 previous error\n\nFor more i"
+    },
+    "DEMO\\99_spec\\top_level_build.lz": {
+      "code": "E0572",
+      "details": "error[E0572]: return statement outside of function body\n  --> top_level_build.rs:14:1\n   |\n14 | return (host, port);\n   | ^^^^^^^^^^^^^^^^^^^\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0572`."
+    },
+    "DEMO\\99_spec\\underscore_discard_3.lz": {
+      "code": "E0423",
+      "details": "error: `mut` must be followed by a named binding\n  --> underscore_discard_3.rs:12:9\n   |\n12 |     let mut _: () = log(\"side effect only\".to_string());\n   |         ^^^^\n   |\n   = note: `mut` may be followed by `variable` and `variable @ pattern`\nhelp: remove the `mut` prefix\n   |\n12 -     let mut _:"
+    },
+    "DEMO\\99_spec\\underscore_partial_1.lz": {
+      "code": "E0618",
+      "details": "error: in expressions, `_` can only be used on the left-hand side of an assignment\n  --> underscore_partial_1.rs:12:26\n   |\n12 |     let add10: i64 = add(_, 10);\n   |                          ^ `_` not allowed here\n\nerror[E0618]: expected function, found `i64`\n  --> underscore_partial_1.rs:13:22\n   "
+    },
+    "DEMO\\99_spec\\underscore_partial_2.lz": {
+      "code": "E0618",
+      "details": "error: in expressions, `_` can only be used on the left-hand side of an assignment\n  --> underscore_partial_2.rs:12:23\n   |\n12 |     let f: i64 = sum3(_, 2, 3, _);\n   |                       ^ `_` not allowed here\n\nerror: in expressions, `_` can only be used on the left-hand side of an assignment\n  "
+    },
+    "DEMO\\99_spec\\while_walrus_guard_1.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find value `count` in this scope\n --> while_walrus_guard_1.rs:8:5\n  |\n8 |     count = count + 1;\n  |     ^^^^^\n  |\nhelp: you might have meant to introduce a new binding\n  |\n8 |     let count = count + 1;\n  |     +++\n\nerror[E0425]: cannot find value `count` in this scope\n --> whi"
+    },
+    "DEMO\\combo-syntax\\combo_async_spawn.lz": {
+      "code": "E0425,E0728",
+      "details": "error: incorrect use of `await`\n  --> combo_async_spawn.rs:14:27\n   |\n14 |     let r1: i64 = f1.await();\n   |                           ^^\n   |\nhelp: `await` is not a method call, remove the parentheses\n   |\n14 -     let r1: i64 = f1.await();\n14 +     let r1: i64 = f1.await;\n   |\n\nerror: incorrect u"
+    },
+    "DEMO\\combo-syntax\\combo_defer_guard_try.lz": {
+      "code": "E0308",
+      "details": "error[E0308]: mismatched types\n  --> combo_defer_guard_try.rs:10:16\n   |\n 7 | pub fn process(x: i64) -> i64 {\n   |                           --- expected `i64` because of return type\n...\n10 |         return ();\n   |                ^^ expected `i64`, found `()`\n\nwarning: unreachable statement\n  --> c"
+    },
+    "DEMO\\combo-syntax\\combo_enum_match_guardlet.lz": {
+      "code": "E0433",
+      "details": "error[E0433]: cannot find type `Error` in this scope\n  --> combo_enum_match_guardlet.rs:24:5\n   |\n24 |     Error::Circle(r) => {\n   |     ^^^^^ use of undeclared type `Error`\n   |\nhelp: consider importing one of these items\n   |\n 5 + use std::error::Error;\n   |\n 5 + use std::fmt::Error;\n   |\n 5 + us"
+    },
+    "DEMO\\combo-syntax\\combo_generic_struct_method.lz": {
+      "code": "E0507",
+      "details": "error[E0507]: cannot move out of `self.item` which is behind a shared reference\n  --> combo_generic_struct_method.rs:19:28\n   |\n19 |         return Maybe::Just(self.item);\n   |                            ^^^^^^^^^ move occurs because `self.item` has type `T`, which does not implement the `Copy` trai"
+    },
+    "DEMO\\combo-syntax\\combo_match_ternary.lz": {
+      "code": "E0308",
+      "details": "error[E0308]: mismatched types\n  --> combo_match_ternary.rs:18:9\n   |\n 8 |     match n {\n   |           - this expression has type `i64`\n...\n18 |         \"big\" => {\n   |         ^^^^^ expected `i64`, found `&str`\n\nerror[E0308]: mismatched types\n  --> combo_match_ternary.rs:16:17\n   |\n16 |           "
+    },
+    "DEMO\\combo-syntax\\combo_pipe_partial.lz": {
+      "code": "E0425",
+      "details": "error: in expressions, `_` can only be used on the left-hand side of an assignment\n  --> combo_pipe_partial.rs:12:24\n   |\n12 |     let inc: i64 = add(_, 1);\n   |                        ^ `_` not allowed here\n\nerror[E0425]: cannot find function `map` in this scope\n  --> combo_pipe_partial.rs:13:18\n  "
+    },
+    "DEMO\\combo-syntax\\combo_struct_method_partial.lz": {
+      "code": "E0618",
+      "details": "error: in expressions, `_` can only be used on the left-hand side of an assignment\n  --> combo_struct_method_partial.rs:13:23\n   |\n13 |         let inc = add(_, 1);\n   |                       ^ `_` not allowed here\n\nerror[E0618]: expected function, found `i64`\n  --> combo_struct_method_partial.rs:14"
+    },
+    "DEMO\\combo-syntax\\combo_ternary_walrus.lz": {
+      "code": "E0425,E0308",
+      "details": "error: expected expression, found `>`\n  --> combo_ternary_walrus.rs:12:55\n   |\n12 |     let v: i64 = if n * 10 { { let n = compute(); n } > 5 } else { 0 };\n   |                                                       ^ expected expression\n   |\nhelp: parentheses are required to parse this as an express"
+    },
+    "DEMO\\combo-syntax\\combo_try_raise_guard.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find value `msg` in this scope\n  --> combo_try_raise_guard.rs:24:18\n   |\n24 | println!(\"{:?}\", msg);\n   |                  ^^^ not found in this scope\n\nwarning: unreachable expression\n  --> combo_try_raise_guard.rs:15:9\n   |\n15 |         return panic!(\"{:?}\", MathError::DivByZer"
+    },
+    "DEMO\\combo-syntax\\combo_while_walrus.lz": {
+      "code": "E0425",
+      "details": "error[E0425]: cannot find value `count` in this scope\n --> combo_while_walrus.rs:8:5\n  |\n8 |     count = count + 1;\n  |     ^^^^^\n  |\nhelp: you might have meant to introduce a new binding\n  |\n8 |     let count = count + 1;\n  |     +++\n\nerror[E0425]: cannot find value `count` in this scope\n --> combo"
+    },
+    "DEMO\\overload_test.lz": {
+      "code": "E0428,E0308",
+      "details": "error[E0428]: the name `add` is defined multiple times\n  --> overload_test.rs:11:1\n   |\n 7 | pub fn add(a: i64, b: i64) -> i64 {\n   | --------------------------------- previous definition of the value `add` here\n...\n11 | pub fn add(a: String, b: String) -> String {\n   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"
+    },
+    "DEMO\\variadic_dotdot.lz": {
+      "code": "E0308",
+      "details": "error[E0308]: mismatched types\n --> variadic_dotdot.rs:8:23\n  |\n8 |     return greeting + \", \".to_string() + name;\n  |                       ^^^^^^^^^^^^^^^^ expected `&str`, found `String`\n  |\nhelp: try removing the method call\n  |\n8 -     return greeting + \", \".to_string() + name;\n8 +     return g"
+    }
+  },
+  "error_groups": {
+    "E0573": [
+      "DEMO\\01_basics\\identifiers.lz"
+    ],
+    "E0425": [
+      "DEMO\\01_basics\\identifiers.lz",
+      "DEMO\\01_basics\\keywords.lz",
+      "DEMO\\02_types\\option_result.lz",
+      "DEMO\\02_types\\type_aliases_more.lz",
+      "DEMO\\02_types\\type_conversion.lz",
+      "DEMO\\03_variables\\mutable_let.lz",
+      "DEMO\\03_variables\\ownership.lz",
+      "DEMO\\03_variables\\walrus.lz",
+      "DEMO\\03_variables\\walrus_more.lz",
+      "DEMO\\04_functions\\checker.lz",
+      "DEMO\\04_functions\\closures_more.lz",
+      "DEMO\\04_functions\\generics.lz",
+      "DEMO\\05_expressions\\operators.lz",
+      "DEMO\\06_control_flow\\guard.lz",
+      "DEMO\\06_control_flow\\with_defer.lz",
+      "DEMO\\07_data_structures\\magic_methods.lz",
+      "DEMO\\10_error_handling\\panic_raise_try.lz",
+      "DEMO\\11_concurrency\\async_more.lz",
+      "DEMO\\11_concurrency\\async_spawn.lz",
+      "DEMO\\12_build_blocks\\build_more.lz",
+      "DEMO\\12_build_blocks\\var_call_block.lz",
+      "DEMO\\13_operators\\precedence.lz",
+      "DEMO\\14_pointers\\box_rc_arc.lz",
+      "DEMO\\14_pointers\\rc_arc_more.lz",
+      "DEMO\\99_prelude\\prelude_demo.lz",
+      "DEMO\\99_spec\\codegen_str_int_float.lz",
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_else.lz",
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_try.lz",
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
+      "DEMO\\99_spec\\duck_test.lz",
+      "DEMO\\99_spec\\go_stmt.lz",
+      "DEMO\\99_spec\\guard_for_3.lz",
+      "DEMO\\99_spec\\iterator_demo.lz",
+      "DEMO\\99_spec\\parallel_decorator.lz",
+      "DEMO\\99_spec\\pipe_spec.lz",
+      "DEMO\\99_spec\\while_walrus_guard_1.lz",
+      "DEMO\\combo-syntax\\combo_async_spawn.lz",
+      "DEMO\\combo-syntax\\combo_pipe_partial.lz",
+      "DEMO\\combo-syntax\\combo_ternary_walrus.lz",
+      "DEMO\\combo-syntax\\combo_try_raise_guard.lz",
+      "DEMO\\combo-syntax\\combo_while_walrus.lz"
+    ],
+    "E0599": [
+      "DEMO\\01_basics\\identifiers.lz",
+      "DEMO\\04_functions\\generics.lz",
+      "DEMO\\06_control_flow\\with_defer.lz",
+      "DEMO\\99_spec\\gen_block_star.lz",
+      "DEMO\\99_spec\\iterator_demo.lz",
+      "DEMO\\99_spec\\set_comprehension.lz"
+    ],
+    "E0308": [
+      "DEMO\\01_basics\\identifiers.lz",
+      "DEMO\\01_basics\\keywords.lz",
+      "DEMO\\02_types\\containers.lz",
+      "DEMO\\02_types\\type_aliases.lz",
+      "DEMO\\02_types\\type_aliases_more.lz",
+      "DEMO\\02_types\\type_conversion.lz",
+      "DEMO\\04_functions\\closures_more.lz",
+      "DEMO\\04_functions\\generics.lz",
+      "DEMO\\05_expressions\\operators.lz",
+      "DEMO\\06_control_flow\\with_defer.lz",
+      "DEMO\\07_data_structures\\enum.lz",
+      "DEMO\\07_data_structures\\magic_methods.lz",
+      "DEMO\\10_error_handling\\panic_raise_try.lz",
+      "DEMO\\10_error_handling\\try_more.lz",
+      "DEMO\\12_build_blocks\\var_call_block.lz",
+      "DEMO\\13_operators\\precedence.lz",
+      "DEMO\\99_prelude\\prelude_demo.lz",
+      "DEMO\\99_spec\\codegen_str_int_float.lz",
+      "DEMO\\99_spec\\gen_block_star.lz",
+      "DEMO\\99_spec\\go_stmt.lz",
+      "DEMO\\99_spec\\iterator_demo.lz",
+      "DEMO\\99_spec\\keyword_downgrade.lz",
+      "DEMO\\99_spec\\literal_i64min.lz",
+      "DEMO\\combo-syntax\\combo_defer_guard_try.lz",
+      "DEMO\\combo-syntax\\combo_match_ternary.lz",
+      "DEMO\\combo-syntax\\combo_ternary_walrus.lz",
+      "DEMO\\overload_test.lz",
+      "DEMO\\variadic_dotdot.lz"
+    ],
+    "E0728": [
+      "DEMO\\01_basics\\keywords.lz",
+      "DEMO\\11_concurrency\\async_more.lz",
+      "DEMO\\11_concurrency\\async_spawn.lz",
+      "DEMO\\combo-syntax\\combo_async_spawn.lz"
+    ],
+    "E0608": [
+      "DEMO\\02_types\\primitives.lz",
+      "DEMO\\04_functions\\checker.lz",
+      "DEMO\\14_pointers\\box_rc_arc.lz",
+      "DEMO\\14_pointers\\rc_arc_more.lz"
+    ],
+    "E0423": [
+      "DEMO\\02_types\\type_aliases_more.lz",
+      "DEMO\\02_types\\type_conversion.lz",
+      "DEMO\\04_functions\\generics.lz",
+      "DEMO\\05_expressions\\operators.lz",
+      "DEMO\\07_data_structures\\magic_methods.lz",
+      "DEMO\\10_error_handling\\panic_raise_try.lz",
+      "DEMO\\10_error_handling\\try_more.lz",
+      "DEMO\\99_prelude\\prelude_demo.lz",
+      "DEMO\\99_spec\\codegen_str_int_float.lz",
+      "DEMO\\99_spec\\underscore_discard_3.lz"
+    ],
+    "E0070": [
+      "DEMO\\03_variables\\walrus.lz",
+      "DEMO\\03_variables\\walrus_more.lz",
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_else.lz",
+      "DEMO\\99_spec\\combo-syntax\\combo_while_guard_walrus.lz"
+    ],
+    "E0373": [
+      "DEMO\\04_functions\\closures_more.lz"
+    ],
+    "E0369": [
+      "DEMO\\04_functions\\generics.lz",
+      "DEMO\\07_data_structures\\magic_methods.lz",
+      "DEMO\\10_error_handling\\try_more.lz",
+      "DEMO\\99_spec\\null_safe.lz"
+    ],
+    "E0061": [
+      "DEMO\\04_functions\\variadic.lz",
+      "DEMO\\12_build_blocks\\build_more.lz",
+      "DEMO\\12_build_blocks\\var_call_block.lz"
+    ],
+    "E0121": [
+      "DEMO\\05_expressions\\operators.lz"
+    ],
+    "E0277": [
+      "DEMO\\05_expressions\\operators.lz",
+      "DEMO\\07_data_structures\\magic_methods.lz",
+      "DEMO\\10_error_handling\\panic_raise_try.lz",
+      "DEMO\\99_prelude\\prelude_demo.lz",
+      "DEMO\\99_spec\\index_build.lz",
+      "DEMO\\99_spec\\index_build_block.lz",
+      "DEMO\\99_spec\\iterator_demo.lz",
+      "DEMO\\99_spec\\keyword_downgrade.lz"
+    ],
+    "E0618": [
+      "DEMO\\07_data_structures\\callable_objects.lz",
+      "DEMO\\99_spec\\underscore_partial_1.lz",
+      "DEMO\\99_spec\\underscore_partial_2.lz",
+      "DEMO\\combo-syntax\\combo_struct_method_partial.lz"
+    ],
+    "E0382": [
+      "DEMO\\07_data_structures\\enum.lz"
+    ],
+    "E0596": [
+      "DEMO\\07_data_structures\\struct_more.lz"
+    ],
+    "E0185": [
+      "DEMO\\07_data_structures\\trait_impl.lz"
+    ],
+    "E0252": [
+      "DEMO\\08_modules\\import_demo.lz"
+    ],
+    "E0432": [
+      "DEMO\\08_modules\\import_demo.lz",
+      "DEMO\\08_modules\\import_more.lz"
+    ],
+    "E0433": [
+      "DEMO\\08_modules\\import_demo.lz",
+      "DEMO\\08_modules\\import_more.lz",
+      "DEMO\\14_pointers\\box_rc_arc.lz",
+      "DEMO\\14_pointers\\rc_arc_more.lz",
+      "DEMO\\combo-syntax\\combo_enum_match_guardlet.lz"
+    ],
+    "E0601": [
+      "DEMO\\09_macros\\macro_demo.lz",
+      "DEMO\\16_testing\\test_suite.lz",
+      "DEMO\\99_spec\\closure_fatarrow.lz",
+      "DEMO\\99_spec\\codegen_str_int_float.lz",
+      "DEMO\\99_spec\\constraint_multi.lz",
+      "DEMO\\99_spec\\literal_i64min.lz",
+      "DEMO\\99_spec\\setup_teardown.lz"
+    ],
+    "E0572": [
+      "DEMO\\10_error_handling\\panic_raise_try.lz",
+      "DEMO\\99_spec\\top_level_build.lz"
+    ],
+    "UNKNOWN": [
+      "DEMO\\16_testing\\test_more.lz"
+    ],
+    "E0507": [
+      "DEMO\\99_spec\\combo-syntax\\combo_for_guard_match.lz",
+      "DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.lz",
+      "DEMO\\combo-syntax\\combo_generic_struct_method.lz"
+    ],
+    "E0610": [
+      "DEMO\\99_spec\\dict_comprehension.lz"
+    ],
+    "E0069": [
+      "DEMO\\99_spec\\iterator_demo.lz"
+    ],
+    "E0530": [
+      "DEMO\\99_spec\\keyword_downgrade.lz"
+    ],
+    "E0609": [
+      "DEMO\\99_spec\\null_safe.lz"
+    ],
+    "E0428": [
+      "DEMO\\overload_test.lz"
+    ]
+  }
+}

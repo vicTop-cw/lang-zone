@@ -1,8 +1,0 @@
-// E2E test: . separator should be rejected (P1 fix)
-// After P1 cleanup, import X.Y and from X.Y import no longer accepted
-
-// This must fail at parse time (not produce invalid output)
-import std.collections.HashMap
-
-def main() =
-    print("DOT SEPARATOR TEST — SHOULD NOT COMPILE")

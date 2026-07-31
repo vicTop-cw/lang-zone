@@ -1,4 +1,0 @@
-@unsafe
-def main() =
-    x = 10
-    ref r = x

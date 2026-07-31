@@ -1,5 +1,0 @@
-async def task() =
-    pass
-
-async def main() =
-    spawn task()

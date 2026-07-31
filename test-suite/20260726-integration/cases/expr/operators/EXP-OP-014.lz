@@ -1,8 +1,0 @@
-def main() =
-    mut x = 7
-    x &= 3
-    x |= 8
-    x ^= 15
-    x <<= 1
-    x >>= 2
-    print(x)

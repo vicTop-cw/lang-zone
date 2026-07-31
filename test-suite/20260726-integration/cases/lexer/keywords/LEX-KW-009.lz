@@ -1,7 +1,0 @@
-def f() =
-    a = True
-    b = False
-    c = None
-    d = Some(1)
-    e = Ok(1)
-    f = Err("e")

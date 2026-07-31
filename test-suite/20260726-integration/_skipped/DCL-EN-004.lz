@@ -1,1 +1,0 @@
-enum Config = File { path: str } | InMemory

@@ -1,8 +1,0 @@
-def get_val(v: int?, default: int) -> int:
-    match v:
-        case Some(n) => n
-        case None => default
-
-def main() =
-    print(get_val(Some(42), 0))
-    print(get_val(None, 0))

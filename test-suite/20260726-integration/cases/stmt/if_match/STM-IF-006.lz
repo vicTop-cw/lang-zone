@@ -1,5 +1,0 @@
-def main() =
-    x = 42
-    r = match x:
-        case n => n + 1
-    print(r)

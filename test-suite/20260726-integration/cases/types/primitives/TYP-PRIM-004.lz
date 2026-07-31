@@ -1,4 +1,0 @@
-def is_pos(x: int) -> bool = x > 0
-
-def main() =
-    print(is_pos(5))

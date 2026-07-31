@@ -1,3 +1,0 @@
-def main() =
-    print(not False)
-    print(not True)

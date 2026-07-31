@@ -1,7 +1,0 @@
-def get_val(o) -> int =
-    guard let Some(v) = o else: 0
-    v
-
-def main() =
-    print(get_val(Some(42)))
-    print(get_val(None))

@@ -1,7 +1,0 @@
-def verify(x: int) -> int =
-    guard x > 0 else:
-        0
-    x * 2
-
-def main() =
-    print(verify(5))

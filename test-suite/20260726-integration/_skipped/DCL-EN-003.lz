@@ -1,1 +1,0 @@
-enum Opt<T> = Some(T) | None

@@ -1,2 +1,0 @@
-@overload(int, int)
-def add_int(a: int, b: int) -> int = a + b

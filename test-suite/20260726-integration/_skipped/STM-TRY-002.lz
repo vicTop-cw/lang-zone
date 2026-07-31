@@ -1,5 +1,0 @@
-def main() =
-    try:
-        raise "oops"
-    catch e:
-        print(e)

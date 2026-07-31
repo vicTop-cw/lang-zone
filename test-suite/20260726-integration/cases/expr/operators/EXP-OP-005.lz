@@ -1,5 +1,0 @@
-def main() =
-    x = 5
-    print(x > 0 and x < 10)
-    print(x > 10 and x < 20)
-    print(x > 0 or x < 0)

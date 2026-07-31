@@ -1,6 +1,0 @@
-@unsafe
-def main() =
-    a: int? = Some(42)
-    b: int? = None
-    print(a ?? 0)
-    print(b ?? 0)

@@ -1,3 +1,0 @@
-def main() =
-    p = r"C:\\path"
-    print(p)

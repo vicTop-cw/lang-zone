@@ -1,8 +1,0 @@
-// ==== Defer ====
-def main() =
-    print("start")
-    defer:
-        print("cleanup 2")
-    defer:
-        print("cleanup 1")
-    print("work")

@@ -179,6 +179,41 @@ fn map_assign_op(op: &AssignOp) -> BinOpKind {
     }
 }
 
+/// 将类型名字符串转换为 IrType（用于 `is` 运算符）  
+fn name_to_ir_type(name: &str) -> IrType {
+    match name {
+        "int" | "i64" => IrType::Int,
+        "str" | "String" => IrType::Str,
+        "f64" | "float" => IrType::F64,
+        "bool" => IrType::Bool,
+        "List" | "Vec" => IrType::Named { path: "List".into(), args: vec![] },
+        "Dict" | "HashMap" => IrType::Named { path: "Dict".into(), args: vec![] },
+        "Set" | "HashSet" => IrType::Named { path: "Set".into(), args: vec![] },
+        _ => IrType::Named { path: name.to_string(), args: vec![] },
+    }
+}
+
+/// 编译期类型兼容检查（用于 `is` 运算符和类型转换）  
+fn ir_types_compatible(a: &IrType, b: &IrType) -> bool {
+    match (a, b) {
+        // Any 与任何类型兼容（None、未知等）
+        (IrType::Any, _) | (_, IrType::Any) => true,
+        // 相同基础类型
+        (IrType::Int, IrType::Int) | (IrType::F64, IrType::F64)
+        | (IrType::Str, IrType::Str) | (IrType::Bool, IrType::Bool)
+        | (IrType::Unit, IrType::Unit) | (IrType::Never, IrType::Never) => true,
+        // Named 类型按名称匹配
+        (IrType::Named { path: a_path, .. }, IrType::Named { path: b_path, .. }) => {
+            a_path == b_path
+        }
+        // Option 解包
+        (IrType::Option(inner), other) | (other, IrType::Option(inner)) => {
+            ir_types_compatible(inner, other)
+        }
+        _ => false,
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // 类型推导：从 AST Expr 推导出 IrType
 // ══════════════════════════════════════════════════════════════
@@ -232,7 +267,11 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
         }
         AstExpr::Index { .. } => IrType::Any,
-        AstExpr::Binary { left, .. } => {
+        AstExpr::Binary { left, op, .. } => {
+            // `is` 运算符始终返回 Bool
+            if matches!(op, BinOp::Is) {
+                return IrType::Bool;
+            }
             // 取左侧操作数的类型（简化）
             infer_expr_type(left, ctx)
         }
@@ -456,6 +495,18 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Binary { left, op, right } => {
+            // 特殊处理 `is` 运算符：编译期类型检查
+            if matches!(op, BinOp::Is) {
+                let left_ty = infer_expr_type(left, ctx);
+                if let AstExpr::Ident(type_name) = right.as_ref() {
+                    let expected = name_to_ir_type(type_name);
+                    let result = ir_types_compatible(&left_ty, &expected);
+                    return Expr::new(ExprKind::Lit(LitKind::Bool(result)), IrType::Bool, Span::unknown());
+                }
+                // RHS is not a simple type name → fallback to false
+                return Expr::new(ExprKind::Lit(LitKind::Bool(false)), IrType::Bool, Span::unknown());
+            }
+
             let ir_op = map_binop(op);
             
             // 链式比较展开: 1 < x < 10 → (1 < x) && (x < 10)
@@ -1383,12 +1434,21 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             }
         }).collect();
 
+        let enum_methods: Vec<FnDef> = s.methods.iter().map(|m| {
+            let mut method_ctx = TypeCtx::new();
+            method_ctx.pending_items = ctx.pending_items.clone();
+            method_ctx.struct_names = ctx.struct_names.clone();
+            method_ctx.struct_fields = ctx.struct_fields.clone();
+            convert_fn_def(m, &method_ctx)
+        }).collect();
+
         Item::EnumDef(EnumDef {
             name: s.name.clone(),
             generics: s.generics.iter().map(|g| GenericParam {
                 name: g.clone(), bounds: vec![], default: None,
             }).collect(),
             variants,
+            methods: enum_methods,
             span: Span::unknown(),
         })
     } else {
@@ -1510,9 +1570,44 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
         }));
     }
 
-    // 5. 转换 structs
+    // 5. 转换 structs（enum 同名方法声明需合并）
+    // 收集所有 enum 的额外方法声明（is_enum=true 且 fields 非空的是主声明，其余是方法声明）
+    let mut enum_extra_methods: HashMap<String, Vec<&ast::StructDef>> = HashMap::new();
+    let mut is_enum_main_decl: HashSet<String> = HashSet::new();
     for s in &ast_module.structs {
-        ir_mod.items.push(convert_struct(s, &ctx));
+        if s.is_enum && !s.fields.is_empty() {
+            is_enum_main_decl.insert(s.name.clone());
+        }
+    }
+    for s in &ast_module.structs {
+        if s.is_enum && s.fields.is_empty() && is_enum_main_decl.contains(&s.name) {
+            // 这是附加方法声明，收集起来
+            enum_extra_methods.entry(s.name.clone()).or_default().push(s);
+        }
+    }
+    // 只转换主声明和方法声明（跳过纯方法声明）
+    for s in &ast_module.structs {
+        if s.is_enum && s.fields.is_empty() && is_enum_main_decl.contains(&s.name) {
+            continue; // 额外方法声明已收集，稍后合并
+        }
+        let mut item = convert_struct(s, &ctx);
+        // 合并额外方法到 EnumDef
+        if s.is_enum {
+            if let Item::EnumDef(ref mut ed) = item {
+                if let Some(extras) = enum_extra_methods.get(&s.name) {
+                    for extra in extras {
+                        for m in &extra.methods {
+                            let mut method_ctx = TypeCtx::new();
+                            method_ctx.pending_items = ctx.pending_items.clone();
+                            method_ctx.struct_names = ctx.struct_names.clone();
+                            method_ctx.struct_fields = ctx.struct_fields.clone();
+                            ed.methods.push(convert_fn_def(m, &method_ctx));
+                        }
+                    }
+                }
+            }
+        }
+        ir_mod.items.push(item);
     }
 
     // 6. 转换 traits

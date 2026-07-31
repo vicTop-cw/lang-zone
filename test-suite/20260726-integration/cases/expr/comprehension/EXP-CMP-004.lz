@@ -1,4 +1,0 @@
-def main() =
-    lens = [s.len() for s in ["a", "bb", "ccc"]]
-    for l in lens:
-        print(l)

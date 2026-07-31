@@ -1,4 +1,0 @@
-def main() =
-    r = prod x in [1, 2, 3, 4]:
-        x
-    print(r)

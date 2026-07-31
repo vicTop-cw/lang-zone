@@ -1,3 +1,0 @@
-import std.vec as V
-
-def f() = V.Vec_new()

@@ -1,6 +1,0 @@
-@unsafe
-async def _fetch() -> str =
-    return "data"
-
-async def _process() =
-    r = await fetch()

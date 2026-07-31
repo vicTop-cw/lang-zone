@@ -1,8 +1,0 @@
-struct Data =
-    a: int
-    b: int
-
-def main() =
-    d = Data(a: 10, b: 20)
-    print(d.a)
-    print(d.b)

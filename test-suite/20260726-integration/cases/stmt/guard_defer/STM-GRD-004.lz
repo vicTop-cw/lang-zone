@@ -1,5 +1,0 @@
-def main() =
-    defer:
-        print("c1")
-        print("c2")
-    print("body")

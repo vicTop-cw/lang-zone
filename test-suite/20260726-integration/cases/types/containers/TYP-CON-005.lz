@@ -1,5 +1,0 @@
-def f() -> (int, int) = (42, 99)
-
-def main() =
-    print(42)
-    print("hello")

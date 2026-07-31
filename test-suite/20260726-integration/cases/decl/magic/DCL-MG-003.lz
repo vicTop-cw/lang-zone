@@ -1,8 +1,0 @@
-struct MyArr =
-    data: List<int>
-
-def main() =
-    arr = MyArr(data: [10, 20, 30])
-    print(arr.data[0])
-    print(arr.data[1])
-    print(arr.data[2])
