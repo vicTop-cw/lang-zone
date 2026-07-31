@@ -826,6 +826,10 @@ impl CodeGen {
                         .collect();
                     return format!("{}::{}({})", recv, method, values.join(", "));
                 }
+                // Enum 类型调用变体（位置参数）: Status.Pending("x") → Status::Pending("x")
+                if self.emitted_types.contains(&recv) {
+                    return format!("{}::{}({})", recv, method, args_s.join(", "));
+                }
 
                 // LZ magic methods → Rust equivalents
                 // plus common method name mappings
