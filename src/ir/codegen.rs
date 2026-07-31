@@ -22,6 +22,8 @@ pub struct CodeGen {
     is_main: bool,
     declared: std::collections::HashSet<String>,
     emitted_types: std::collections::HashSet<String>,
+    /// 仅 impl 块（非 struct/enum）的类型名，用于 FieldAccess 生成 :: 语法
+    impl_types: std::collections::HashSet<String>,
     /// enum variant → enum name 映射（用于构造器调用路由）
     enum_variants: HashMap<String, String>,
     /// 抑制尾表达式隐式 return（用于 match arm / 块表达式内部）
@@ -50,6 +52,7 @@ impl CodeGen {
             is_main: false,
             declared: std::collections::HashSet::new(),
             emitted_types: std::collections::HashSet::new(),
+            impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
             fn_param_info: HashMap::new(),
@@ -64,11 +67,12 @@ impl CodeGen {
         self.buf.clear();
         self.indent = 0;
 
-        // 预扫描：收集 enum variant → enum name 映射 + 函数参数信息
+        // 预扫描：收集 enum variant → enum name 映射 + 函数参数信息 + impl-only 类型名
         // 注意：不能插入 emitted_types（会阻断 gen_enum_def / gen_struct_def 的去重逻辑）
         self.enum_variants.clear();
         self.fn_param_info.clear();
         self.emitted_types.clear();
+        self.impl_types.clear();
         for item in &module.items {
             if let Item::EnumDef(e) = item {
                 for variant in &e.variants {
@@ -79,6 +83,10 @@ impl CodeGen {
                 let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
                 if default_count > 0 {
                     self.fn_param_info.insert(f.name.clone(), (f.params.len(), default_count));
+                }
+                // 方法定义语法 fn Type.method() → Type 是 impl-only 类型名
+                if let Some((ty_name, _)) = f.name.split_once('.') {
+                    self.impl_types.insert(ty_name.to_string());
                 }
             }
         }
@@ -891,7 +899,10 @@ impl CodeGen {
                 // 检测 callee 是否为 FieldAccess 形式 Type.Variant → Type::Variant
                 if let ExprKind::FieldAccess { base, field } = &callee.kind {
                     let base_s = self.gen_expr(base);
-                    let sep = if self.emitted_types.contains(&base_s) { "::" } else { "." };
+                    let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
+                    let is_std_module = known_modules.contains(&base_s.as_str());
+                    let is_var_base = matches!(&base.kind, ExprKind::Var(_));
+                    let sep = if is_var_base && (is_std_module || self.emitted_types.contains(&base_s) || self.impl_types.contains(&base_s)) { "::" } else { "." };
                     if sep == "::" {
                         return format!("{}::{}({})", base_s, field, args_s.join(", "));
                     }
@@ -1029,8 +1040,15 @@ impl CodeGen {
             }
             ExprKind::FieldAccess { base, field } => {
                 // Enum variant: Color.Red → Color::Red
+                // Module path: std.io.print → std::io::print
+                // Impl-only type method: config.get() -> config::get(key)
                 let base_s = self.gen_expr(base);
-                let sep = if self.emitted_types.contains(&base_s) { "::" } else { "." };
+                let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
+                let is_std_module = known_modules.contains(&base_s.as_str());
+                let is_var_base = matches!(&base.kind, ExprKind::Var(_));
+                let root = base_s.split("::").next().unwrap_or("");
+                let is_root_known = known_modules.contains(&root) && root != base_s;
+                let sep = if is_root_known || (is_var_base && (is_std_module || self.emitted_types.contains(&base_s) || self.impl_types.contains(&base_s))) { "::" } else { "." };
                 format!("{}{}{}", base_s, sep, field)
             }
             ExprKind::IndexGet { base, key } => {
