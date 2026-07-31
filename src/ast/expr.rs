@@ -141,6 +141,9 @@ pub enum Expr {
         else_body: Option<Vec<Stmt>>,
         finally_body: Option<Vec<Stmt>>,
     },
+
+    /// 括号分组 (expr) — 保留优先级信息
+    Paren(Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

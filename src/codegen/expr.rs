@@ -602,6 +602,7 @@ impl CodeGenExprExt for CodeGen {
                 let mut locals = HashSet::new();
                 self.gen_build_block(*kind, lhs, body, 0, &mut locals)
             }
+            Expr::Paren(inner) => self.gen_expr(inner),
         }
     }
 

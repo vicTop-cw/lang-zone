@@ -582,7 +582,7 @@ impl ParserExprExt for Parser {
                     Ok(Expr::TupleLit(items))
                 } else {
                     self.expect(Token::RParen)?;
-                    Ok(first) // 括号仅用于分组
+                    Ok(Expr::Paren(Box::new(first))) // 保留括号分组信息
                 }
             }
             Token::LBrack => {

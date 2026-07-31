@@ -156,6 +156,7 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             ExprKind::BlockExpr { block } => write!(f, "block {block}"),
+            ExprKind::Paren(inner) => write!(f, "({inner})"),
             ExprKind::Pipe { receiver, func, args } => {
                 write!(f, "pipe {receiver} |> {func}")?;
                 if !args.is_empty() {

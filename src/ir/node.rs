@@ -499,6 +499,9 @@ pub enum ExprKind {
         func: String,
         args: Vec<Expr>,
     },
+
+    /// 括号分组 (expr) — 保留优先级语义
+    Paren(Box<Expr>),
 }
 
 // ── 辅助类型 ──

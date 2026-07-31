@@ -675,7 +675,7 @@ impl CodeGen {
                 self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, self.gen_expr(value)));
             }
             Stmt::Assign { target, value } => {
-                let target_s = self.gen_expr(target);
+                let target_s = self.gen_target_expr(target);
                 let val_s = self.gen_expr(value);
                 // 模块级可变变量 → 需 unsafe 块
                 if self.mutated_consts.contains(&target_s) {
@@ -885,11 +885,27 @@ impl CodeGen {
 
     // ── Expr 生成 ──
 
+    /// 生成赋值目标表达式（不放 unsafe 包装，用于 Stmt::Assign 等）
+    fn gen_target_expr(&self, expr: &Expr) -> String {
+        match &expr.kind {
+            ExprKind::Var(name) => name.clone(),
+            ExprKind::FieldAccess { base, field } => {
+                format!("{}.{}", self.gen_target_expr(base), field)
+            }
+            ExprKind::IndexGet { base, key } => {
+                format!("{}[{}]", self.gen_target_expr(base), self.gen_expr(key))
+            }
+            _ => self.gen_expr(expr),
+        }
+    }
+
     fn gen_expr(&self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Lit(lit) => self.gen_lit(lit, &expr.ty),
             ExprKind::Var(name) => {
-                if name == "pass" { "()".into() } else { name.clone() }
+                if name == "pass" { "()".into() }
+                else if self.mutated_consts.contains(name) { format!("unsafe {{ {} }}", name) }
+                else { name.clone() }
             }
             ExprKind::Call { callee, args, type_args } => {
                 let callee_s = self.gen_expr(callee);
