@@ -266,7 +266,7 @@ impl CodeGen {
                 let idx = duck_indices.iter().position(|&d| d == i).unwrap();
                 format!("{}: {}", p.name, duck_params[idx])
             } else if p.name == "self" {
-                // self 参数 → &self / &mut self（借用而非移动）
+                // self 参数：借用而非移动（LZ 语义为引用）
                 if p.is_mut { "&mut self" } else { "&self" }.into()
             } else {
                 if p.default.is_some() {
@@ -399,7 +399,21 @@ impl CodeGen {
         // 方法（impl 块）
         if !e.methods.is_empty() {
             self.buf.push('\n');
-            self.emit_line(&format!("impl{} {}{} {{", generics, e.name, generics));
+            // 枚举方法 impl：为泛型参数添加 Clone 约束，以支持 self.clone() 提取内部值
+            let impl_generics = if e.generics.is_empty() {
+                String::new()
+            } else {
+                let params: Vec<String> = e.generics.iter().map(|g| {
+                    if g.bounds.is_empty() {
+                        format!("{}: Clone", g.name)
+                    } else {
+                        let bounds: Vec<String> = g.bounds.iter().map(|b| self.rust_type(b)).collect();
+                        format!("{}: Clone + {}", g.name, bounds.join(" + "))
+                    }
+                }).collect();
+                format!("<{}>", params.join(", "))
+            };
+            self.emit_line(&format!("impl{} {}{} {{", impl_generics, e.name, generics));
             self.indent += 1;
             for m in &e.methods {
                 self.gen_fn_def(m);
@@ -640,11 +654,14 @@ impl CodeGen {
             Stmt::Match { scrutinee, arms } => {
                 let scrut_s = self.gen_expr(scrutinee);
                 // String 类型模式匹配：match name { "hello" => } 需要 &str
-                // self 引用 → clone 以获取 owned 值用于模式匹配提取
+                // self (引用) → clone 以获得 owned 值用于模式匹配提取
+                // 其他变量 → clone 以防止局部移动（如 Result::Err(e) 移动 e）
                 let scrut_str = if matches!(&scrutinee.ty, IrType::Str) {
                     format!("{}.as_str()", scrut_s)
                 } else if scrut_s == "self" {
-                    format!("self.clone()")
+                    "self.clone()".to_string()
+                } else if matches!(&scrutinee.kind, ExprKind::Var(_)) {
+                    format!("{}.clone()", scrut_s)
                 } else {
                     scrut_s
                 };
@@ -1138,10 +1155,6 @@ impl CodeGen {
                 if let Some(dot_pos) = name.rfind('.') {
                     let type_name = &name[..dot_pos];
                     let variant = &name[dot_pos+1..];
-                    // Check multiple sources to determine if this is an enum pattern:
-                    // 1. Known type name in emitted_types
-                    // 2. Standard library types
-                    // 3. The variant name is in the enum_variants map (pre-scanned)
                     if self.emitted_types.contains(type_name)
                         || type_name == "Option" || type_name == "Result"
                         || type_name == "Some" || type_name == "None"
