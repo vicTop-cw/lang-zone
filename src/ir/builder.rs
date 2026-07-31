@@ -7,7 +7,7 @@
 // 3. 类型推导（从标注 + 简单传播 + 字面量推断）
 // 4. 魔法方法归一化（MagicCall / MethodCall）
 
-use crate::ast::{self, Expr as AstExpr, Stmt as AstStmt, Pattern as AstPattern, BinOp, UnaryOp, AssignOp, BuildKind};
+use crate::ast::{self, Expr as AstExpr, Stmt as AstStmt, Pattern as AstPattern, MatchArm, BinOp, UnaryOp, AssignOp, BuildKind};
 use crate::types::Type as AstType;
 
 use super::types::{IrType, from_ast_type};
@@ -340,6 +340,24 @@ fn convert_ast_pattern(pat: &AstPattern) -> Option<Pattern> {
     }
 }
 
+/// 将 match arm body 转换为 ExprKind（用于表达式上下文的 if-else 降级）
+fn arm_body_to_expr(arm: &MatchArm, _scrutinee: &AstExpr, ctx: &TypeCtx) -> ExprKind {
+    let mut block_ctx = TypeCtx::new();
+    block_ctx.current_generics = ctx.current_generics.clone();
+    block_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+    if let AstPattern::Ident(name) = &arm.pattern {
+        let scrut_ty = infer_expr_type(_scrutinee, ctx);
+        block_ctx.add_var(name, scrut_ty);
+    }
+    let stmts: Vec<Stmt> = arm.body.iter()
+        .map(|s| convert_stmt(s, &block_ctx))
+        .collect();
+    let blk_ty = arm.body.last()
+        .map(|s| infer_stmt_type(s, &block_ctx))
+        .unwrap_or(IrType::Unit);
+    ExprKind::BlockExpr { block: Block { stmts, ty: blk_ty } }
+}
+
 // ══════════════════════════════════════════════════════════════
 // 核心转换函数
 // ══════════════════════════════════════════════════════════════
@@ -427,7 +445,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             };
 
             // elif 链 = 嵌套 if
-            for (elif_cond, elif_body) in elif_clauses.iter().rev() {
+            for (elif_cond, elif_body) in elif_clauses.iter() {
                 result = ExprKind::IfExpr {
                     cond: Box::new(convert_expr(elif_cond, ctx)),
                     then: Box::new(block_to_expr(elif_body, ctx)),
@@ -438,27 +456,49 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Match { expr, arms } => {
-            // Match 表达式 → 嵌套 If + BlockExpr（简化）
-            // 实际应该用 match arm，这里暂时降级处理
-            arms.first().map(|arm| {
-                let mut block_ctx = TypeCtx::new();
-                match &arm.pattern {
-                    AstPattern::Ident(name) => {
-                        let scrut_ty = infer_expr_type(expr, ctx);
-                        block_ctx.add_var(name, scrut_ty);
-                    }
-                    _ => {}
+            // Match 表达式 → 嵌套 if-else 链（使用所有臂）
+            // 从最后一个臂开始（最内层 else），向外包裹
+            if arms.is_empty() {
+                ExprKind::Lit(LitKind::Unit)
+            } else {
+                let mut result = arm_body_to_expr(arms.last().unwrap(), expr, ctx);
+                for arm in arms.iter().rev().skip(1) {
+                    let body_kind = arm_body_to_expr(arm, expr, ctx);
+                    let blk_ty = arm.body.last()
+                        .map(|s| infer_stmt_type(s, ctx))
+                        .unwrap_or(IrType::Unit);
+                    let scrutinee = convert_expr(expr, ctx);
+                    let cond = match &arm.pattern {
+                        AstPattern::Wildcard => Expr::new(ExprKind::Lit(LitKind::Bool(true)), IrType::Bool, Span::unknown()),
+                        AstPattern::Int(n) => Expr::new(
+                            ExprKind::BinOp {
+                                op: BinOpKind::Eq, lhs: Box::new(scrutinee),
+                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::Int(*n)), IrType::Int, Span::unknown())),
+                            }, IrType::Bool, Span::unknown(),
+                        ),
+                        AstPattern::Str(s) => Expr::new(
+                            ExprKind::BinOp {
+                                op: BinOpKind::Eq, lhs: Box::new(scrutinee),
+                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::Str(s.clone())), IrType::Str, Span::unknown())),
+                            }, IrType::Bool, Span::unknown(),
+                        ),
+                        AstPattern::Bool(b) => Expr::new(
+                            ExprKind::BinOp {
+                                op: BinOpKind::Eq, lhs: Box::new(scrutinee),
+                                rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::Bool(*b)), IrType::Bool, Span::unknown())),
+                            }, IrType::Bool, Span::unknown(),
+                        ),
+                        AstPattern::Ident(_) => Expr::new(ExprKind::Lit(LitKind::Bool(true)), IrType::Bool, Span::unknown()),
+                        _ => Expr::new(ExprKind::Lit(LitKind::Bool(true)), IrType::Bool, Span::unknown()),
+                    };
+                    result = ExprKind::IfExpr {
+                        cond: Box::new(cond),
+                        then: Box::new(Expr::new(body_kind, blk_ty.clone(), Span::unknown())),
+                        els: Box::new(Expr::new(result, blk_ty, Span::unknown())),
+                    };
                 }
-                let stmts: Vec<Stmt> = arm.body.iter()
-                    .map(|s| convert_stmt(s, &block_ctx))
-                    .collect();
-                let blk_ty = arm.body.last()
-                    .map(|s| infer_stmt_type(s, &block_ctx))
-                    .unwrap_or(IrType::Unit);
-                ExprKind::BlockExpr {
-                    block: Block { stmts, ty: blk_ty },
-                }
-            }).unwrap_or(ExprKind::Lit(LitKind::Unit))
+                result
+            }
         }
 
         AstExpr::Closure { params, body } => {
@@ -777,6 +817,24 @@ fn block_to_expr(stmts: &[AstStmt], ctx: &TypeCtx) -> Expr {
 
 fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
     match ast_stmt {
+        AstStmt::Expr(AstExpr::Match { expr, arms }) => {
+            // match 语句 → 直接用 IR Match 节点（codegen 已有完整支持）
+            let ir_scrutinee = convert_expr(expr, ctx);
+            let ir_arms: Vec<(Pattern, Block)> = arms.iter().map(|arm| {
+                let pat = convert_ast_pattern(&arm.pattern)
+                    .unwrap_or(Pattern::Wildcard);
+                let mut arm_ctx = TypeCtx::new();
+                arm_ctx.current_generics = ctx.current_generics.clone();
+                arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                if let AstPattern::Ident(name) = &arm.pattern {
+                    let scrut_ty = infer_expr_type(expr, ctx);
+                    arm_ctx.add_var(name, scrut_ty);
+                }
+                let body = convert_block_with_ctx(&arm.body, &arm_ctx);
+                (pat, body)
+            }).collect();
+            Stmt::Match { scrutinee: ir_scrutinee, arms: ir_arms }
+        }
         AstStmt::Expr(e) => Stmt::ExprStmt { expr: convert_expr(e, ctx) },
 
         AstStmt::Pass => Stmt::Pass,
@@ -1376,6 +1434,29 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
             name: ta.name.clone(),
             ty: ir_ty,
             value: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
+        }));
+    }
+
+    // 9.6. 转换顶层构建块 x =: body → let x = { ... }
+    // 构建块以 BlockExpr 表示（依次执行语句，最后一个表达式为值）
+    for (name, body) in &ast_module.top_level_builds {
+        let mut block_ctx = TypeCtx::new();
+        block_ctx.current_generics = ctx.current_generics.clone();
+        let stmts: Vec<Stmt> = body.iter()
+            .map(|s| convert_stmt(s, &block_ctx))
+            .collect();
+        let blk_ty = body.last()
+            .map(|s| infer_stmt_type(s, &block_ctx))
+            .unwrap_or(IrType::Unit);
+        let value = Expr::new(
+            ExprKind::BlockExpr { block: Block { stmts, ty: blk_ty.clone() } },
+            blk_ty.clone(),
+            Span::unknown(),
+        );
+        ir_mod.items.push(Item::Const(ConstDef {
+            name: name.clone(),
+            ty: blk_ty,
+            value,
         }));
     }
 

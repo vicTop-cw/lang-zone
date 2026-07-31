@@ -661,8 +661,22 @@ impl CodeGen {
                 format!("{} {} {}", self.gen_expr(lhs), op_s, self.gen_expr(rhs))
             }
             ExprKind::UnOp { op, operand } => {
+                // P1: i64::MIN 特判 — -(-9223372036854775808) → i64::MIN
+                if *op == UnOpKind::Neg {
+                    if let ExprKind::Lit(LitKind::Int(v)) = &operand.kind {
+                        if *v == i64::MIN {
+                            return "i64::MIN".to_string();
+                        }
+                    }
+                }
                 let op_s = self.unop_str(op);
-                format!("{}{}", op_s, self.gen_expr(operand))
+                let inner = self.gen_expr(operand);
+                // P1: ! 运算符高优先级 — 操作数是 BinOp 时需要括号
+                if *op == UnOpKind::Not && matches!(operand.kind, ExprKind::BinOp { .. }) {
+                    format!("{}({})", op_s, inner)
+                } else {
+                    format!("{}{}", op_s, inner)
+                }
             }
             ExprKind::IfExpr { cond, then, els } => {
                 format!(
@@ -725,8 +739,9 @@ impl CodeGen {
                 format!("gen {{ yield {}; }}", self.gen_expr(yield_of))
             }
             ExprKind::MagicCall { kind, args } => {
-                let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
-                format!("__magic_{}({})", format!("{:?}", kind).to_lowercase(), args_s.join(", "))
+                // 魔法方法 → Rust 方法/运算符降级
+                // args[0] 是 receiver，后续是额外参数
+                self.gen_magic_call(kind, args)
             }
             ExprKind::Pipe { receiver, func, args } => {
                 let recv = self.gen_expr(receiver);
@@ -849,6 +864,99 @@ impl Default for CodeGen {
 /// 判断表达式是否为 _KwArg（关键字参数）
 fn is_kwarg_call(args: &[Expr]) -> bool {
     args.iter().any(|a| matches!(&a.kind, ExprKind::StructCtor { name, .. } if name == "_KwArg"))
+}
+
+impl CodeGen {
+    /// 魔法方法 → Rust 降级映射
+    fn gen_magic_call(&self, kind: &MagicKind, args: &[Expr]) -> String {
+        let gen_args = |a: &[Expr]| -> Vec<String> {
+            a.iter().map(|e| self.gen_expr(e)).collect()
+        };
+        let args_s = gen_args(args);
+        match kind {
+            MagicKind::Call => {
+                // __call__ → receiver(args...)
+                if args_s.is_empty() {
+                    "()".into()
+                } else {
+                    format!("{}({})", args_s[0], args_s[1..].join(", "))
+                }
+            }
+            MagicKind::GetItem => {
+                if args_s.len() >= 2 {
+                    format!("{}[{}]", args_s[0], args_s[1])
+                } else {
+                    "()".into()
+                }
+            }
+            MagicKind::SetItem => {
+                if args_s.len() >= 3 {
+                    format!("{}[{}] = {}", args_s[0], args_s[1], args_s[2])
+                } else {
+                    "()".into()
+                }
+            }
+            MagicKind::Iter | MagicKind::IntoIter => {
+                if args_s.is_empty() { "().into_iter()".into() }
+                else { format!("{}.into_iter()", args_s[0]) }
+            }
+            MagicKind::Next => {
+                if args_s.is_empty() { "None".into() }
+                else { format!("{}.next()", args_s[0]) }
+            }
+            MagicKind::Display => {
+                if args_s.is_empty() { "\"\"".into() }
+                else { format!("{}.to_string()", args_s[0]) }
+            }
+            MagicKind::Eq => {
+                if args_s.len() >= 2 { format!("{} == {}", args_s[0], args_s[1]) }
+                else { "true".into() }
+            }
+            MagicKind::Cmp => {
+                if args_s.len() >= 2 { format!("{}.cmp(&{})", args_s[0], args_s[1]) }
+                else { "std::cmp::Ordering::Equal".into() }
+            }
+            MagicKind::Drop => {
+                if args_s.is_empty() { "()".into() }
+                else { format!("drop({})", args_s[0]) }
+            }
+            MagicKind::Add => {
+                if args_s.len() >= 2 { format!("{} + {}", args_s[0], args_s[1]) }
+                else { args_s.first().cloned().unwrap_or_default() }
+            }
+            MagicKind::Sub => {
+                if args_s.len() >= 2 { format!("{} - {}", args_s[0], args_s[1]) }
+                else { format!("-{}", args_s.first().cloned().unwrap_or_default()) }
+            }
+            MagicKind::Mul => {
+                if args_s.len() >= 2 { format!("{} * {}", args_s[0], args_s[1]) }
+                else { args_s.first().cloned().unwrap_or_default() }
+            }
+            MagicKind::Neg => {
+                if args_s.is_empty() { "0".into() }
+                else { format!("-{}", args_s[0]) }
+            }
+            MagicKind::Not_ => {
+                if args_s.is_empty() { "false".into() }
+                else { format!("!{}", args_s[0]) }
+            }
+            MagicKind::Len => {
+                if args_s.is_empty() { "0".into() }
+                else { format!("{}.len()", args_s[0]) }
+            }
+            MagicKind::Rev => {
+                if args_s.is_empty() { "().into_iter().rev()".into() }
+                else { format!("{}.into_iter().rev()", args_s[0]) }
+            }
+            MagicKind::SizeHint => {
+                if args_s.is_empty() { "(0, None)".into() }
+                else { format!("{}.size_hint()", args_s[0]) }
+            }
+            MagicKind::IterStrategy => {
+                args_s.first().cloned().unwrap_or_else(|| "()".into())
+            }
+        }
+    }
 }
 
 /// 检测 Block 中是否包含 yield 语句
