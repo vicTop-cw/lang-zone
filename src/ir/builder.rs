@@ -10,7 +10,7 @@
 use crate::ast::{self, Expr as AstExpr, Stmt as AstStmt, Pattern as AstPattern, BinOp, UnaryOp, AssignOp, BuildKind};
 use crate::types::Type as AstType;
 
-use super::types::{IrType, from_ast_type};
+use super::types::{IrType, from_ast_type, from_ast_type_with_generics};
 use super::node::*;
 use super::IrModule;
 use std::cell::RefCell;
@@ -76,11 +76,15 @@ impl TypeCtx {
 
     fn collect_functions(&mut self, module: &ast::Module) {
         for f in &module.functions {
+            let generics: Vec<String> = f.generics.clone();
             if let Some(ref ret_ty) = f.return_type {
-                self.fn_returns.insert(f.name.clone(), from_ast_type(ret_ty));
+                self.fn_returns.insert(
+                    f.name.clone(),
+                    from_ast_type_with_generics(ret_ty, &generics),
+                );
             }
             let params: Vec<IrType> = f.params.iter()
-                .map(|p| from_ast_type(&p.ty))
+                .map(|p| from_ast_type_with_generics(&p.ty, &generics))
                 .collect();
             self.fn_params.insert(f.name.clone(), params);
         }
@@ -214,6 +218,126 @@ fn ir_types_compatible(a: &IrType, b: &IrType) -> bool {
     }
 }
 
+/// 从实参类型解析泛型函数调用：推断泛型参数的具体类型
+///
+/// 策略：
+/// 1. 收集函数定义中泛型参数名列表（从 param_tys 和 ret_ty 中提取 Generic 变量）
+/// 2. 对每个参数位置，尝试将定义的 param_ty 与实参 arg_ty 匹配
+/// 3. 如果 param_ty 是 Generic("T") 且 arg_ty 是具体类型，则将 T 绑定到 arg_ty
+/// 4. 用绑定结果替换 ret_ty 中的泛型变量
+fn resolve_call_generics(
+    ret_ty: &IrType,
+    _fn_name: &str,
+    param_tys: &[IrType],
+    arg_tys: &[IrType],
+    ctx: &TypeCtx,
+) -> IrType {
+    // 收集所有泛型参数名
+    let mut generic_names = std::collections::HashSet::new();
+    fn collect_generics(ty: &IrType, set: &mut std::collections::HashSet<String>) {
+        match ty {
+            IrType::Generic(name) => { set.insert(name.clone()); }
+            IrType::Named { args, .. } => { for a in args { collect_generics(a, set); } }
+            IrType::Option(inner) => collect_generics(inner, set),
+            IrType::Result { ok, err } => { collect_generics(ok, set); collect_generics(err, set); }
+            IrType::Tuple(elems) => { for e in elems { collect_generics(e, set); } }
+            IrType::Fn { params, ret } => { for p in params { collect_generics(p, set); } collect_generics(ret, set); }
+            IrType::Ref(inner) | IrType::MutRef(inner) => collect_generics(inner, set),
+            IrType::Duck { fields } => { for (_, t) in fields { collect_generics(t, set); } }
+            _ => {}
+        }
+    }
+    for pt in param_tys { collect_generics(pt, &mut generic_names); }
+    collect_generics(ret_ty, &mut generic_names);
+
+    if generic_names.is_empty() {
+        return ret_ty.clone();
+    }
+
+    // 尝试从实参类型推断泛型绑定
+    let mut bindings: std::collections::HashMap<String, IrType> = std::collections::HashMap::new();
+    let n = param_tys.len().min(arg_tys.len());
+    for i in 0..n {
+        infer_generic_binding(&param_tys[i], &arg_tys[i], &mut bindings);
+    }
+
+    // 如果没有任何绑定（例如无参泛型函数），尝试从 ctx 的泛型列表推断
+    if bindings.is_empty() && !ctx.current_generics.is_empty() {
+        // 使用当前位置的泛型参数（当前函数定义的泛型）
+        // 这处理了同一泛型函数内调用自身或其他泛型函数的情况
+        let mut alt_bindings = std::collections::HashMap::new();
+        for g in &ctx.current_generics {
+            if generic_names.contains(g) {
+                alt_bindings.insert(g.clone(), IrType::Generic(g.clone()));
+            }
+        }
+        if !alt_bindings.is_empty() {
+            // 有上层泛型上下文 → 传播泛型变量
+            let generics: Vec<String> = alt_bindings.keys().cloned().collect();
+            let concrete: Vec<IrType> = alt_bindings.values().cloned().collect();
+            return ret_ty.substitute_generics(&generics, &concrete);
+        }
+    }
+
+    if bindings.is_empty() {
+        return ret_ty.clone();
+    }
+
+    let generics: Vec<String> = bindings.keys().cloned().collect();
+    let concrete: Vec<IrType> = bindings.values().cloned().collect();
+    ret_ty.substitute_generics(&generics, &concrete)
+}
+
+/// 尝试从 (param_ty, arg_ty) 对中推断泛型绑定
+fn infer_generic_binding(
+    param_ty: &IrType,
+    arg_ty: &IrType,
+    bindings: &mut std::collections::HashMap<String, IrType>,
+) {
+    match param_ty {
+        IrType::Generic(name) => {
+            // 直接绑定：T = arg_ty
+            // 只有 arg_ty 不是 Any 也不是 Generic 时才绑定
+            if !matches!(arg_ty, IrType::Any | IrType::Generic(_)) {
+                bindings.entry(name.clone()).or_insert_with(|| arg_ty.clone());
+            }
+        }
+        IrType::Named { path: p_path, args: p_args } => {
+            if let IrType::Named { path: a_path, args: a_args } = arg_ty {
+                if p_path == a_path {
+                    for (p, a) in p_args.iter().zip(a_args.iter()) {
+                        infer_generic_binding(p, a, bindings);
+                    }
+                }
+            }
+        }
+        IrType::Option(p_inner) => {
+            if let IrType::Option(a_inner) = arg_ty {
+                infer_generic_binding(p_inner, a_inner, bindings);
+            }
+        }
+        IrType::Result { ok: p_ok, err: p_err } => {
+            if let IrType::Result { ok: a_ok, err: a_err } = arg_ty {
+                infer_generic_binding(p_ok, a_ok, bindings);
+                infer_generic_binding(p_err, a_err, bindings);
+            }
+        }
+        IrType::Tuple(p_elems) => {
+            if let IrType::Tuple(a_elems) = arg_ty {
+                for (p, a) in p_elems.iter().zip(a_elems.iter()) {
+                    infer_generic_binding(p, a, bindings);
+                }
+            }
+        }
+        IrType::Ref(p_inner) => {
+            if let IrType::Ref(a_inner) = arg_ty {
+                infer_generic_binding(p_inner, a_inner, bindings);
+            }
+        }
+        _ => {}
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // 类型推导：从 AST Expr 推导出 IrType
 // ══════════════════════════════════════════════════════════════
@@ -226,8 +350,15 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::BoolLit(_) => IrType::Bool,
         AstExpr::NoneLit => IrType::Any,  // None 类型取决于上下文
         AstExpr::Ident(name) => ctx.lookup_var(name),
-        AstExpr::Call { func, .. } => {
+        AstExpr::Call { func, args } => {
             if let AstExpr::Ident(fname) = func.as_ref() {
+                // __as__ 类型转换：返回目标类型
+                if fname == "__as__" && args.len() == 2 {
+                    if let AstExpr::Ident(type_name) = &args[1] {
+                        return name_to_ir_type(type_name);
+                    }
+                    return IrType::Any;
+                }
                 // print/println/panic 是语言内建，返回 Unit
                 if fname == "print" || fname == "println" || fname == "panic" {
                     return IrType::Unit;
@@ -235,7 +366,21 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 if ctx.is_struct(fname) {
                     return IrType::named(fname);
                 }
-                ctx.lookup_fn_return(fname)
+                let ret_ty = ctx.lookup_fn_return(fname);
+                // 泛型分辨率：如果返回类型包含 Generic，尝试从实参推断
+                if ret_ty.contains_generics() {
+                    if let Some(param_tys) = ctx.fn_params.get(fname) {
+                        let arg_tys: Vec<IrType> = args.iter()
+                            .map(|a| infer_expr_type(a, ctx))
+                            .collect();
+                        // 根据参数类型推断泛型变量
+                        let resolved = resolve_call_generics(
+                            &ret_ty, fname, param_tys, &arg_tys, ctx
+                        );
+                        return resolved;
+                    }
+                }
+                ret_ty
             } else {
                 IrType::Any
             }
@@ -466,6 +611,20 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
 
         AstExpr::Call { func, args } => {
+            // 特殊处理 __as__ 运算符：__as__(value, type_name) → Cast
+            if let AstExpr::Ident(ref fname) = func.as_ref() {
+                if fname == "__as__" && args.len() == 2 {
+                    let value = convert_expr(&args[0], ctx);
+                    if let AstExpr::Ident(ref type_name) = &args[1] {
+                        let target = name_to_ir_type(type_name);
+                        let target_ty = target.clone();
+                    return Expr::new(ExprKind::Cast {
+                            expr: Box::new(value),
+                            target,
+                        }, target_ty, Span::unknown());
+                    }
+                }
+            }
             ExprKind::Call { type_args: vec![],
                 callee: Box::new(convert_expr(func, ctx)),
                 args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
@@ -1325,10 +1484,15 @@ fn convert_block_with_ctx(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
 
 fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let is_math = func.decorators.iter().any(|d| d.name == "math");
+    let generics: Vec<String> = if is_math {
+        vec!["T".to_string()]
+    } else {
+        func.generics.clone()
+    };
 
     let params: Vec<Param> = func.params.iter().enumerate().map(|(_i, p)| Param {
         name: p.name.clone(),
-        ty: if is_math { IrType::Generic("T".into()) } else { from_ast_type(&p.ty) },
+        ty: if is_math { IrType::Generic("T".into()) } else { from_ast_type_with_generics(&p.ty, &generics) },
         is_mut: p.is_mut,
         default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
     }).collect();
@@ -1337,12 +1501,8 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let mut fn_ctx = TypeCtx::new();
     fn_ctx.pending_items = ctx.pending_items.clone();
     fn_ctx.current_fn_name = Some(func.name.clone());
-    fn_ctx.current_generics = if is_math {
-        vec!["T".to_string()]
-    } else {
-        func.generics.clone()
-    };
-    // 复制全�� struct 信息
+    fn_ctx.current_generics = generics.clone();
+    // 复制全局 struct 信息
     for sn in &ctx.struct_names { fn_ctx.struct_names.insert(sn.clone()); }
     for (sn, fields) in &ctx.struct_fields {
         let mut cloned = HashMap::new();
@@ -1359,13 +1519,13 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
     } else {
         for p in &func.params {
-            fn_ctx.add_param(&p.name, from_ast_type(&p.ty));
+            fn_ctx.add_param(&p.name, from_ast_type_with_generics(&p.ty, &generics));
         }
     }
 
     // 返回类型：优先 AST 注解，否则从函数体最后语句推断
     let ret_ty = func.return_type.as_ref()
-        .map(|t| from_ast_type(t))
+        .map(|t| from_ast_type_with_generics(t, &generics))
         .unwrap_or_else(|| {
             func.body.last()
                 .map(|stmt| infer_stmt_type(stmt, &fn_ctx))

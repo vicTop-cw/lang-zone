@@ -64,6 +64,105 @@ impl IrType {
     pub fn is_any(&self) -> bool {
         matches!(self, IrType::Any)
     }
+
+    /// 判断类型中是否包含未解析的泛型变量
+    pub fn contains_generics(&self) -> bool {
+        match self {
+            IrType::Generic(_) => true,
+            IrType::Named { args, .. } => args.iter().any(|a| a.contains_generics()),
+            IrType::Option(inner) => inner.contains_generics(),
+            IrType::Result { ok, err } => ok.contains_generics() || err.contains_generics(),
+            IrType::Tuple(elems) => elems.iter().any(|e| e.contains_generics()),
+            IrType::Fn { params, ret } => params.iter().any(|p| p.contains_generics()) || ret.contains_generics(),
+            IrType::Ref(inner) | IrType::MutRef(inner) => inner.contains_generics(),
+            IrType::Duck { fields } => fields.iter().any(|(_, t)| t.contains_generics()),
+            _ => false,
+        }
+    }
+
+    /// 用具体类型替换泛型变量
+    /// generics: 泛型参数名列表（如 ["T"]）
+    /// concrete: 对应的具体类型（如 [Str]）
+    pub fn substitute_generics(&self, generics: &[String], concrete: &[IrType]) -> IrType {
+        match self {
+            IrType::Generic(name) => {
+                generics.iter()
+                    .position(|g| g == name)
+                    .and_then(|i| concrete.get(i))
+                    .cloned()
+                    .unwrap_or_else(|| self.clone())
+            }
+            IrType::Named { path, args } => {
+                let new_args: Vec<IrType> = args.iter()
+                    .map(|a| a.substitute_generics(generics, concrete))
+                    .collect();
+                IrType::Named { path: path.clone(), args: new_args }
+            }
+            IrType::Option(inner) => {
+                IrType::Option(Box::new(inner.substitute_generics(generics, concrete)))
+            }
+            IrType::Result { ok, err } => IrType::Result {
+                ok: Box::new(ok.substitute_generics(generics, concrete)),
+                err: Box::new(err.substitute_generics(generics, concrete)),
+            },
+            IrType::Tuple(elems) => IrType::Tuple(
+                elems.iter().map(|e| e.substitute_generics(generics, concrete)).collect()
+            ),
+            IrType::Fn { params, ret } => IrType::Fn {
+                params: params.iter().map(|p| p.substitute_generics(generics, concrete)).collect(),
+                ret: Box::new(ret.substitute_generics(generics, concrete)),
+            },
+            IrType::Ref(inner) => IrType::Ref(Box::new(inner.substitute_generics(generics, concrete))),
+            IrType::MutRef(inner) => IrType::MutRef(Box::new(inner.substitute_generics(generics, concrete))),
+            IrType::Duck { fields } => IrType::Duck {
+                fields: fields.iter()
+                    .map(|(n, t)| (n.clone(), t.substitute_generics(generics, concrete)))
+                    .collect(),
+            },
+            other => other.clone(),
+        }
+    }
+}
+
+/// 将 crate::types::Type 映射为 IrType（带泛型参数上下文）
+/// generics: 当前函数定义的泛型参数名列表
+pub fn from_ast_type_with_generics(ast_ty: &crate::types::Type, generics: &[String]) -> IrType {
+    use crate::types::Type as AstType;
+    match ast_ty {
+        AstType::Named(name) => {
+            if generics.contains(name) {
+                IrType::Generic(name.clone())
+            } else {
+                IrType::named(name)
+            }
+        }
+        AstType::Generic { base, args } => {
+            let base_name = match base.as_ref() {
+                AstType::Named(n) => n.clone(),
+                other => format!("{:?}", other),
+            };
+            let ir_args: Vec<IrType> = args.iter()
+                .map(|a| from_ast_type_with_generics(a, generics))
+                .collect();
+            IrType::Named { path: base_name, args: ir_args }
+        }
+        AstType::Option(inner) => IrType::Option(Box::new(from_ast_type_with_generics(inner, generics))),
+        AstType::Result { ok, err } => IrType::Result {
+            ok: Box::new(from_ast_type_with_generics(ok, generics)),
+            err: Box::new(from_ast_type_with_generics(err, generics)),
+        },
+        AstType::Optional(inner) => IrType::Option(Box::new(from_ast_type_with_generics(inner, generics))),
+        AstType::Ref(inner) => IrType::Ref(Box::new(from_ast_type_with_generics(inner, generics))),
+        AstType::MutRef(inner) => IrType::MutRef(Box::new(from_ast_type_with_generics(inner, generics))),
+        AstType::Fn { params, ret } => IrType::Fn {
+            params: params.iter().map(|p| from_ast_type_with_generics(p, generics)).collect(),
+            ret: Box::new(from_ast_type_with_generics(ret, generics)),
+        },
+        AstType::Tuple(elems) => IrType::Tuple(
+            elems.iter().map(|e| from_ast_type_with_generics(e, generics)).collect()
+        ),
+        other => from_ast_type(other),
+    }
 }
 
 /// 将 crate::types::Type 映射为 IrType
@@ -97,7 +196,6 @@ pub fn from_ast_type(ast_ty: &crate::types::Type) -> IrType {
             err: Box::new(from_ast_type(err)),
         },
         AstType::Optional(inner) => {
-            // 语法糖 T? → Option<T>
             IrType::Option(Box::new(from_ast_type(inner)))
         }
         AstType::Ref(inner) => IrType::Ref(Box::new(from_ast_type(inner))),
@@ -109,13 +207,10 @@ pub fn from_ast_type(ast_ty: &crate::types::Type) -> IrType {
         AstType::Tuple(elems) => IrType::Tuple(
             elems.iter().map(|e| from_ast_type(e)).collect()
         ),
-        AstType::Simd { elem, .. } => {
-            // SIMD 简化为 Named（后端按需展开）
-            IrType::Named {
-                path: "Simd".to_string(),
-                args: vec![from_ast_type(elem)],
-            }
-        }
+        AstType::Simd { elem, .. } => IrType::Named {
+            path: "Simd".to_string(),
+            args: vec![from_ast_type(elem)],
+        },
     }
 }
 

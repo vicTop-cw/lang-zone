@@ -1106,9 +1106,9 @@ impl CodeGen {
                 format!("({})", elems.join(", "))
             }
             ExprKind::ListLit(elems) => {
-                // 空列表：Nil/Unit → ()，否则 → vec![]
+                // 空列表：Nil/Unit/Any → ()，否则 → vec![]
                 let is_nil = elems.is_empty() && (
-                    matches!(expr.ty, IrType::Unit)
+                    matches!(expr.ty, IrType::Unit | IrType::Any)
                     || matches!(self.rust_type(&expr.ty).as_str(), "()")
                 );
                 if is_nil {
@@ -1116,7 +1116,7 @@ impl CodeGen {
                 } else {
                     let elems: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
                     if elems.is_empty() {
-                        "vec![]".to_string()
+                        format!("vec![]")
                     } else {
                         format!("vec![{}]", elems.join(", "))
                     }
