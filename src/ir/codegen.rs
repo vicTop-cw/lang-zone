@@ -116,6 +116,8 @@ impl CodeGen {
         self.emit_line("#![allow(dead_code)]");
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
+        self.emit_line("use std::rc::Rc;");
+        self.emit_line("use std::sync::Arc;");
         self.buf.push('\n');
     }
 
@@ -548,6 +550,7 @@ impl CodeGen {
                 let mut_kw = if *is_mut { "mut " } else { "" };
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
+                    || matches!(ty, IrType::Generic(_))
                     || if let IrType::Named { path, args } = ty { path == "Range" || args.is_empty() } else { false };
                 let ty_str = if skip_ty {
                     String::new()
@@ -607,7 +610,11 @@ impl CodeGen {
                 };
                 self.emit_line(&format!("for {} in {} {{", var, iter_s));
                 self.indent += 1;
+                // For loop body should not emit return for tail expressions
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
                 self.gen_block_inner(body);
+                self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("}");
             }
@@ -619,7 +626,10 @@ impl CodeGen {
                 };
                 self.emit_line(&format!("while {} {{", cond_s));
                 self.indent += 1;
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
                 self.gen_block_inner(body);
+                self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("}");
             }
@@ -802,6 +812,32 @@ impl CodeGen {
                     };
                 }
                 
+                // 类型转换: int(x) → x as i64, str(x) → format!("{}", x), f64(x) → x as f64
+                if matches!(callee_s.as_str(), "int" | "str" | "f64" | "float") && !args_s.is_empty() {
+                    return match callee_s.as_str() {
+                        "int" => {
+                            // 检查参数表达式类型来决定转换方式
+                            if args.len() == 1 {
+                                let arg_ty = &args[0].ty;
+                                if matches!(arg_ty, IrType::Str) {
+                                    format!("({}).parse::<i64>().unwrap()", args_s[0])
+                                } else {
+                                    format!("({} as i64)", args_s[0])
+                                }
+                            } else {
+                                format!("({} as i64)", args_s[0])
+                            }
+                        }
+                        "str" => {
+                            format!("format!(\"{{}}\", {})", args_s[0])
+                        }
+                        "f64" | "float" => {
+                            format!("({} as f64)", args_s[0])
+                        }
+                        _ => unreachable!(),
+                    };
+                }
+
                 if callee_s == "print" {
                     let fmt_placeholders: String = args_s.iter().map(|_| "{:?}").collect::<Vec<_>>().join(" ");
                     let fmt = format!("\"{}\"", fmt_placeholders);
@@ -857,6 +893,21 @@ impl CodeGen {
                     "__eq__" => "eq",
                     "__iter__" => "iter",
                     "length" => "len",    // LZ .length() → Rust .len()
+                    "to_upper" => "to_uppercase",
+                    "to_lower" => "to_lowercase",
+                    "push" | "append" => "push",
+                    "insert" => "insert",
+                    "remove" => "remove",
+                    "pop" => "pop",
+                    "sort" => "sort",
+                    "reverse" => "reverse",
+                    "contains" => "contains",
+                    "split" => "split",
+                    "join" => "join",
+                    "replace" => "replace",
+                    "trim" => "trim",
+                    "starts_with" => "starts_with",
+                    "ends_with" => "ends_with",
                     "new" if self.emitted_types.contains(&recv) || recv == "Box" || recv == "Rc" || recv == "Arc" => {
                         // Static method on type → use :: syntax
                         return format!("{}::new({})", recv, args_s.join(", "));
@@ -874,7 +925,18 @@ impl CodeGen {
                 format!("{}{}{}", base_s, sep, field)
             }
             ExprKind::IndexGet { base, key } => {
-                format!("{}[{}]", self.gen_expr(base), self.gen_expr(key))
+                let base_s = self.gen_expr(base);
+                // Box/Rc/Arc dereference: x[0] on Box<i64> → *x
+                if matches!(&base.ty, IrType::Named { path, .. } if path == "Box" || path == "Rc" || path == "Arc") {
+                    let key_s = self.gen_expr(key);
+                    if key_s == "0" {
+                        format!("(*{})", base_s)
+                    } else {
+                        format!("{}[{}]", base_s, key_s)
+                    }
+                } else {
+                    format!("{}[{}]", base_s, self.gen_expr(key))
+                }
             }
             ExprKind::IndexSet { base, key, value } => {
                 format!("{}[{}] = {}", self.gen_expr(base), self.gen_expr(key), self.gen_expr(value))
@@ -990,10 +1052,11 @@ impl CodeGen {
             }
             ExprKind::ListLit(elems) => {
                 // 空列表且在 Nil/Unit 上下文中 → ()
+                // 普通空 List → vec![]
                 let is_nil = elems.is_empty() && (
                     matches!(expr.ty, IrType::Unit)
                     || if let IrType::Named { ref path, .. } = expr.ty {
-                        path == "Nil" || path == "List"
+                        path == "Nil"
                     } else { false }
                 );
                 if is_nil {
