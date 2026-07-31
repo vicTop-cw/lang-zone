@@ -310,7 +310,7 @@ pub enum Stmt {
     },
     Match {
         scrutinee: Expr,
-        arms: Vec<(Pattern, Block)>,
+        arms: Vec<MatchArm>,
     },
     Raise {
         value: Expr,
@@ -521,6 +521,13 @@ pub enum BinOpKind {
     BitAnd, BitOr, Xor, Shl, Shr,
 }
 
+impl BinOpKind {
+    /// 是否为比较运算符（Lt/Gt/Le/Ge/Eq/Neq）
+    pub fn is_comparison(&self) -> bool {
+        matches!(self, BinOpKind::Lt | BinOpKind::Gt | BinOpKind::Le | BinOpKind::Ge | BinOpKind::Eq | BinOpKind::Neq)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnOpKind {
     Neg, Not, Ref, MutRef, Deref,
@@ -545,6 +552,17 @@ pub enum MagicKind {
     IntoIter,        // __into_iter__
     SizeHint,        // __size_hint__
     IterStrategy,    // __iter_strategy__
+}
+
+// ══════════════════════════════════════════════════════════════
+// MatchArm — match 分支节点
+// ══════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub guard: Option<Expr>,
+    pub body: Block,
 }
 
 // ══════════════════════════════════════════════════════════════

@@ -151,12 +151,14 @@ impl CodeGen {
                 let mapped = self.type_map.get(path.as_str()).map(|s| s.to_string())
                     .unwrap_or_else(|| path.clone());
                 if args.is_empty() {
-                    // Vec/HashMap/HashSet 需要默认泛型参数
+                    // 常见容器类型需要默认泛型参数，否则 Rust 无法推断
                     if path == "List" || path == "Vec" {
                         format!("{}<_>", mapped)
                     } else if path == "Dict" || path == "HashMap" {
                         format!("{}<_, _>", mapped)
                     } else if path == "Set" || path == "HashSet" {
+                        format!("{}<_>", mapped)
+                    } else if path == "Option" || path == "Result" || path == "Rc" || path == "Arc" || path == "Box" {
                         format!("{}<_>", mapped)
                     } else {
                         mapped
@@ -667,14 +669,17 @@ impl CodeGen {
                 };
                 self.emit_line(&format!("match {} {{", scrut_str));
                 self.indent += 1;
-                for (pat, body) in arms {
-                    let pat_s = self.gen_pattern(pat);
-                    self.emit_line(&format!("{} => {{", pat_s));
+                for arm in arms {
+                    let pat_s = self.gen_pattern(&arm.pattern);
+                    let guard_s = arm.guard.as_ref()
+                        .map(|g| format!(" if {}", self.gen_expr(g)))
+                        .unwrap_or_default();
+                    self.emit_line(&format!("{} => {{", format!("{}{}", pat_s, guard_s)));
                     self.indent += 1;
                     // Match arm body 不应生成 return（值应流向 match 表达式外层）
                     let saved = self.suppress_tail_return;
                     self.suppress_tail_return = true;
-                    self.gen_block_inner(body);
+                    self.gen_block_inner(&arm.body);
                     self.suppress_tail_return = saved;
                     self.indent -= 1;
                     self.emit_line("}");
@@ -856,7 +861,16 @@ impl CodeGen {
                             format!("format!(\"{{}}\", {})", args_s[0])
                         }
                         "f64" | "float" => {
-                            format!("({} as f64)", args_s[0])
+                            if args.len() == 1 {
+                                let arg_ty = &args[0].ty;
+                                if matches!(arg_ty, IrType::Str) {
+                                    format!("({}).parse::<f64>().unwrap()", args_s[0])
+                                } else {
+                                    format!("({} as f64)", args_s[0])
+                                }
+                            } else {
+                                format!("({} as f64)", args_s[0])
+                            }
                         }
                         _ => unreachable!(),
                     };
@@ -883,6 +897,11 @@ impl CodeGen {
             ExprKind::MethodCall { receiver, method, args } => {
                 let recv = self.gen_expr(receiver);
                 let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+
+                // await: x.await() → x.await (Rust postfix keyword)
+                if method == "await" {
+                    return format!("({}).await", recv);
+                }
 
                 // null coalesce: a ?? b → .or() 或 .unwrap_or()
                 if method == "__null_coalesce" && !args.is_empty() {
@@ -967,6 +986,18 @@ impl CodeGen {
             }
             ExprKind::BinOp { op, lhs, rhs } => {
                 let op_s = self.binop_str(op);
+                // 链式比较分解: a < b < c → (a < b) && (b < c)
+                // 检测：LHS 是比较表达式 且 当前操作符也是比较
+                if op.is_comparison() && matches!(&lhs.kind, ExprKind::BinOp { op: lhs_op, .. } if lhs_op.is_comparison()) {
+                    if let ExprKind::BinOp { op: inner_op, lhs: inner_lhs, rhs: inner_rhs } = &lhs.kind {
+                        let inner_lhs_s = self.gen_expr(inner_lhs);
+                        let inner_rhs_s = self.gen_expr(inner_rhs);
+                        let rhs_s = self.gen_expr(rhs);
+                        return format!("({} {} {}) && ({} {} {})", 
+                            inner_lhs_s, self.binop_str(inner_op), inner_rhs_s,
+                            inner_rhs_s, op_s, rhs_s);
+                    }
+                }
                 format!("{} {} {}", self.gen_expr(lhs), op_s, self.gen_expr(rhs))
             }
             ExprKind::UnOp { op, operand } => {

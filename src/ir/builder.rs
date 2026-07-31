@@ -228,6 +228,10 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::Ident(name) => ctx.lookup_var(name),
         AstExpr::Call { func, .. } => {
             if let AstExpr::Ident(fname) = func.as_ref() {
+                // print/println/panic 是语言内建，返回 Unit
+                if fname == "print" || fname == "println" || fname == "panic" {
+                    return IrType::Unit;
+                }
                 if ctx.is_struct(fname) {
                     return IrType::named(fname);
                 }
@@ -590,9 +594,10 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             arm_ctx.current_generics = ctx.current_generics.clone();
             arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
             
-            let ir_arms: Vec<(Pattern, Block)> = arms.iter().map(|arm| {
+            let ir_arms: Vec<MatchArm> = arms.iter().map(|arm| {
                 let pat = convert_ast_pattern(&arm.pattern, ctx)
                     .unwrap_or(Pattern::Wildcard);
+                let guard = arm.guard.as_ref().map(|g| convert_expr(g, ctx));
                 let mut body_ctx = TypeCtx::new();
                 body_ctx.current_generics = ctx.current_generics.clone();
                 body_ctx.current_ret_ty = ctx.current_ret_ty.clone();
@@ -616,7 +621,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     body_ctx.add_var(v, scrut_ty.clone());
                 }
                 let body = convert_block_with_ctx(&arm.body, &body_ctx);
-                (pat, body)
+                MatchArm { pattern: pat, guard, body }
             }).collect();
             
             let match_stmt = Stmt::Match { scrutinee: ir_scrutinee, arms: ir_arms };
@@ -937,9 +942,10 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         AstStmt::Expr(AstExpr::Match { expr, arms }) => {
             // match 语句 → 直接用 IR Match 节点（codegen 已有完整支持）
             let ir_scrutinee = convert_expr(expr, ctx);
-            let ir_arms: Vec<(Pattern, Block)> = arms.iter().map(|arm| {
+            let ir_arms: Vec<MatchArm> = arms.iter().map(|arm| {
                 let pat = convert_ast_pattern(&arm.pattern, ctx)
                     .unwrap_or(Pattern::Wildcard);
+                let guard = arm.guard.as_ref().map(|g| convert_expr(g, ctx));
                 let mut arm_ctx = TypeCtx::new();
                 arm_ctx.current_generics = ctx.current_generics.clone();
                 arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
@@ -948,7 +954,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     arm_ctx.add_var(name, scrut_ty);
                 }
                 let body = convert_block_with_ctx(&arm.body, &arm_ctx);
-                (pat, body)
+                MatchArm { pattern: pat, guard, body }
             }).collect();
             Stmt::Match { scrutinee: ir_scrutinee, arms: ir_arms }
         }
@@ -1264,7 +1270,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                     set.extend(collect_reassigned(&body.stmts));
                 }
                 Stmt::Match { arms, .. } => {
-                    for (_, body) in arms { set.extend(collect_reassigned(&body.stmts)); }
+                    for arm in arms { set.extend(collect_reassigned(&arm.body.stmts)); }
                 }
                 Stmt::TryCatch { body, catches, else_body, finally_body } => {
                     set.extend(collect_reassigned(&body.stmts));
@@ -1294,7 +1300,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                         mark_mut(&mut body.stmts, reassigned);
                     }
                     Stmt::Match { arms, .. } => {
-                        for (_, body) in arms { mark_mut(&mut body.stmts, reassigned); }
+                        for arm in arms { mark_mut(&mut arm.body.stmts, reassigned); }
                     }
                     _ => {}
                 }

@@ -366,8 +366,9 @@ impl fmt::Display for Stmt {
             }
             Stmt::Match { scrutinee, arms } => {
                 write!(f, "match {scrutinee} {{")?;
-                for (pat, block) in arms {
-                    write!(f, " {pat} => {block}")?;
+                for arm in arms {
+                    let guard_s = arm.guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
+                    write!(f, " {}{} => {}", arm.pattern, guard_s, arm.body)?;
                 }
                 f.write_str(" }")
             }

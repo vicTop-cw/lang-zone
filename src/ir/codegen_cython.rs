@@ -151,10 +151,10 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
         Stmt::Match { scrutinee, arms } => {
             let _s = gen_expr(cg, scrutinee);
             cg.writeln("# match desugar");
-            for (i, (pat, block)) in arms.iter().enumerate() {
+            for (i, arm) in arms.iter().enumerate() {
                 let cond = if i == 0 { "if" } else { "elif" };
-                cg.write(&format!("{} True:  # pat={:?}", cond, pat));
-                cg.writeln(""); cg.indent += 1; gen_block(cg, block); cg.indent -= 1;
+                cg.write(&format!("{} True:  # pat={:?}", cond, arm.pattern));
+                cg.writeln(""); cg.indent += 1; gen_block(cg, &arm.body); cg.indent -= 1;
             }
         }
         Stmt::Raise { value } => cg.writeln(&format!("raise {}", gen_expr(cg, value))),
