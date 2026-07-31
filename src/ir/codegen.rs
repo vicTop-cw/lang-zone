@@ -753,24 +753,24 @@ impl CodeGen {
                     }
                 }
                 
-                // 推导式展开: comp!(|x| body, iter) → (iter).map(|x| body).collect()
+                // 推导式展开: comp!(|x| body, iter) → (iter).into_iter().map(|x| body).collect()
                 if callee_s == "comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
-                        return format!("({}).map({}).collect::<Vec<_>>()", iter, lambda);
+                        return format!("({}).into_iter().map({}).collect::<Vec<_>>()", iter, lambda);
                     }
                     return format!("vec![]");
                 }
-                // dict_comp!(|x| (k, v), iter) → (iter).map(|x| (k,v)).collect()
+                // dict_comp!(|x| (k, v), iter) → (iter).into_iter().map(|x| (k,v)).collect()
                 if callee_s == "dict_comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
-                        return format!("({}).map({}).collect::<HashMap<_,_>>()", iter, lambda);
+                        return format!("({}).into_iter().map({}).collect::<HashMap<_,_>>()", iter, lambda);
                     }
                     return format!("HashMap::new()");
                 }
-                // set_comp!(|x| elem, iter) → (iter).map(|x| elem).collect()
+                // set_comp!(|x| elem, iter) → (iter).into_iter().map(|x| elem).collect()
                 if callee_s == "set_comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
-                        return format!("({}).map({}).collect::<HashSet<_>>()", iter, lambda);
+                        return format!("({}).into_iter().map({}).collect::<HashSet<_>>()", iter, lambda);
                     }
                     return format!("HashSet::new()");
                 }
@@ -817,13 +817,14 @@ impl CodeGen {
                     };
                 }
 
-                // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant{field:val}
+                // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant(val1, val2, ...)
+                // 生成位置参数构造（与 tuple variant 定义一致）
                 let is_enum_variant = self.emitted_types.contains(&recv) && is_kwarg_call(args);
                 if is_enum_variant {
-                    let fields: Vec<String> = args.iter()
-                        .map(|a| gen_kwarg_field(a, self))
+                    let values: Vec<String> = args.iter()
+                        .map(|a| gen_kwarg_value(a, self))
                         .collect();
-                    return format!("{}::{} {{ {} }}", recv, method, fields.join(", "));
+                    return format!("{}::{}({})", recv, method, values.join(", "));
                 }
 
                 // LZ magic methods → Rust equivalents
@@ -898,6 +899,14 @@ impl CodeGen {
                         fields.iter().find(|(n, _)| n == "value")
                             .map(|(_, v)| self.gen_expr(v))
                             .unwrap_or_else(|| "()".into())
+                    }
+                    "_Walrus" => {
+                        // := walrus 运算符: { let x = value; value }
+                        let bind = fields.iter().find(|(n, _)| n == "_bind");
+                        let val = fields.iter().find(|(n, _)| n == "_val");
+                        let bind_s = bind.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
+                        let val_s = val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
+                        format!("{{ let {} = {}; {} }}", bind_s, val_s, bind_s)
                     }
                     "Dict" => "std::collections::HashMap::new()".to_string(),
                     "Range" => {
@@ -1206,6 +1215,18 @@ fn block_has_yield(block: &Block) -> bool {
         }
     }
     false
+}
+
+/// 从 _KwArg 中提取字段值（丢弃字段名，用于位置参数构造）
+fn gen_kwarg_value(arg: &Expr, cg: &CodeGen) -> String {
+    if let ExprKind::StructCtor { name, fields } = &arg.kind {
+        if name == "_KwArg" {
+            return fields.iter().find(|(n, _)| n == "value")
+                .map(|(_, v)| cg.gen_expr(v))
+                .unwrap_or_default();
+        }
+    }
+    cg.gen_expr(arg)
 }
 
 /// 将 _KwArg { name, value } 展开为 "field: value"
