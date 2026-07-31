@@ -1,0 +1,14 @@
+// 测试: i64::MIN 字面量 -9223372036854775808
+// 验证 lexer 允许该特殊值通过，codegen 正确生成 Rust 代码
+
+def test_i64min() =
+    let a = -9223372036854775808
+    print(a)
+
+def test_i64max() =
+    let b = 9223372036854775807
+    print(b)
+
+def test_i64min_plus_one() =
+    let c = -9223372036854775807
+    print(c)

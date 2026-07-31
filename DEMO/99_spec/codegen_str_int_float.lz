@@ -1,0 +1,16 @@
+// 测试: str() int() float() 内置转换函数 codegen
+// 验证生成的 Rust 代码可编译（非 str(42) 无效代码）
+
+def test_str_int() =
+    let s = "num: " + str(42)
+    print(s)
+
+def test_int_float() =
+    let a = int(3.14)
+    let b = float(42)
+    print(a)
+    print(b)
+
+def test_str_concat() =
+    let s = "hello" + " " + "world"
+    print(s)

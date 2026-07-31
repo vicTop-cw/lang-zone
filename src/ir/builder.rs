@@ -295,6 +295,9 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
 fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {
     match stmt {
         AstStmt::Expr(e) => infer_expr_type(e, ctx),
+        AstStmt::Pass => IrType::Unit,
+        AstStmt::TypeAlias { .. } => IrType::Unit,
+        AstStmt::Check { .. } => IrType::Unit,
         AstStmt::Let { ty, .. } => ty.as_ref().map(|t| from_ast_type(t)).unwrap_or(IrType::Any),
         AstStmt::Return(Some(e)) => infer_expr_type(e, ctx),
         AstStmt::Return(None) => IrType::Unit,
@@ -776,6 +779,13 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
     match ast_stmt {
         AstStmt::Expr(e) => Stmt::ExprStmt { expr: convert_expr(e, ctx) },
 
+        AstStmt::Pass => Stmt::Pass,
+
+        AstStmt::TypeAlias { name, ty } => Stmt::TypeAlias {
+            name: name.clone(),
+            ty: from_ast_type(ty),
+        },
+
         AstStmt::Let { name, mutable, ty, value, .. } => {
             let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
@@ -979,6 +989,32 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 },
                 IrType::Unit, Span::unknown(),
             ),
+        },
+
+        AstStmt::Check { expr, message: _ } => {
+            // check → 展开为 if !expr { eprintln!(...) }
+            let cond = Expr::new(
+                ExprKind::UnOp {
+                    op: crate::ir::node::UnOpKind::Not,
+                    operand: Box::new(convert_expr(expr, ctx)),
+                },
+                IrType::Bool, Span::unknown(),
+            );
+            let print_call = Expr::new(
+                ExprKind::Call {
+                    callee: Box::new(Expr::new(ExprKind::Var("eprintln!".into()), IrType::Any, Span::unknown())),
+                    args: vec![Expr::new(
+                        ExprKind::Lit(LitKind::Str("CHECK failed".into())),
+                        IrType::Str, Span::unknown(),
+                    )],
+                },
+                IrType::Unit, Span::unknown(),
+            );
+            Stmt::If {
+                cond,
+                then_branch: Block { stmts: vec![Stmt::ExprStmt { expr: print_call }], ty: IrType::Unit },
+                else_branch: None,
+            }
         },
 
         AstStmt::Suite { name: _, setup, teardown, tests } => {

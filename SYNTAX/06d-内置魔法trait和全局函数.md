@@ -176,7 +176,7 @@ match p:
 - 返回元组的各元素按位置绑定到 match 模式中的子变量
 - 一个 struct 只能定义一个 `__unapply__`
 
-> 详见 [06a-struct.md](06a-struct.md) 与 [05-控制流.md](05-控制流.md) §六 match 解构。
+> 详见 [06a-struct.md](06a-struct.md) 与 [05-控制流.md](05-控制流.md) §二 match / case。
 
 ---
 

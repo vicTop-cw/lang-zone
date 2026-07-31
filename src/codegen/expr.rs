@@ -79,6 +79,11 @@ impl CodeGenExprExt for CodeGen {
                     BinOp::BitXor => "^", BinOp::Shl => "<<", BinOp::Shr => ">>",
                     BinOp::In => "in", BinOp::Is => "is",
                 };
+                // 字符串拼接: "a" + "b" → format!("{}{}", a, b)（Rust 不允许 &str + &str）
+                if *op == BinOp::Add && (is_str_like(left) || is_str_like(right)) {
+                    return format!("format!(\"{{}}{{}}\", {}, {})",
+                        self.gen_expr(left), self.gen_expr(right));
+                }
                 if *op == BinOp::Pow {
                     format!("({} as i64).pow({} as u32)", self.gen_expr(left), self.gen_expr(right))
                 } else if *op == BinOp::In {
@@ -90,7 +95,17 @@ impl CodeGenExprExt for CodeGen {
 
             Expr::Unary { op, operand } => {
                 match op {
-                    UnaryOp::Neg => format!("(-{})", self.gen_expr(operand)),
+                    UnaryOp::Neg => {
+                        // i64::MIN 的绝对值 9223372036854775808 超出 i64 正数范围，
+                        // lexer 将其 wrapping 存储为 i64::MIN。一元负号在此为冗余，
+                        // 直接输出字面量即可。
+                        if let Expr::IntLit(n) = operand.as_ref() {
+                            if *n == i64::MIN {
+                                return format!("{}", n);
+                            }
+                        }
+                        format!("(-{})", self.gen_expr(operand))
+                    }
                     UnaryOp::Not => format!("(!{})", self.gen_expr(operand)),
                     UnaryOp::BitNot => format!("(!{})", self.gen_expr(operand)),
                 }
@@ -123,6 +138,19 @@ impl CodeGenExprExt for CodeGen {
                         }
                     }
                     return format!("println!({})", args_s.join(", "));
+                }
+
+                // str(x) → format!("{}", x)（Rust 中 str 是原始类型，不是转换函数）
+                if func_s == "str" && args.len() == 1 {
+                    return format!("format!(\"{{}}\", {})", args_s[0]);
+                }
+
+                // int(x) → x as i64, float(x) → x as f64（Rust 中没有 int()/float() 函数）
+                if func_s == "int" && args.len() == 1 {
+                    return format!("({} as i64)", args_s[0]);
+                }
+                if func_s == "float" && args.len() == 1 {
+                    return format!("({} as f64)", args_s[0]);
                 }
 
                 // ─── SIMD builtins ───
@@ -611,4 +639,9 @@ impl CodeGenExprExt for CodeGen {
             }
         }
     }
+}
+
+/// 判断表达式是否为字符串类型（用于字符串拼接检测）
+fn is_str_like(expr: &Expr) -> bool {
+    matches!(expr, Expr::StrLit(_) | Expr::FStrLit(_))
 }

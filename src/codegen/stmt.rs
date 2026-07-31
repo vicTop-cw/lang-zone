@@ -25,6 +25,10 @@ impl CodeGenStmtExt for CodeGen {
     fn gen_stmt(&self, stmt: &Stmt, indent: usize, locals: &mut HashSet<String>) -> String {
         let pad = "    ".repeat(indent);
         match stmt {
+            Stmt::Pass => {
+                format!("{}();  // pass\n", pad)
+            }
+
             Stmt::Expr(e) => {
                 match e {
                     // 构建块语句：生成闭包表达式（变量构建块直接绑定到 lhs 变量名）
@@ -251,6 +255,12 @@ impl CodeGenStmtExt for CodeGen {
                     format!("{}assert!({});\n", pad, self.gen_expr(expr))
                 }
             }
+            Stmt::Check { expr, message } => {
+                let msg = message.as_ref()
+                    .map(|m| self.gen_expr(m))
+                    .unwrap_or_else(|| format!("\"check failed: {}\"", self.gen_expr(expr)));
+                format!("{}if !({}) {{ eprintln!(\"CHECK: {{}}\", {}); }}\n", pad, self.gen_expr(expr), msg)
+            }
             Stmt::FnDef { func } => {
                 // 嵌套函数已提升为模块级函数，此处生成 let 绑定指向 mangled 名称
                 let parent = self.current_fn_name.borrow().clone().unwrap_or_default();
@@ -266,6 +276,11 @@ impl CodeGenStmtExt for CodeGen {
                     out.push_str(&self.gen_stmt(stmt, indent, locals));
                 }
                 out
+            }
+
+            Stmt::TypeAlias { name, ty } => {
+                self.local_type_aliases.borrow_mut().push((name.clone(), ty.to_rust_type_string()));
+                String::new()  // hoisted to module level, no inline output
             }
         }
     }

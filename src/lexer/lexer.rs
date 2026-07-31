@@ -107,7 +107,15 @@ impl Lexer {
                     }
                     match i64::from_str_radix(&num[2..].replace('_', ""), 16) {
                         Ok(val) => return Token::IntLit(val),
-                        Err(_) => return Token::LexError(format!("无效的十六进制数字: {}", num)),
+                        Err(_) => {
+                            let hex_str = &num[2..].replace('_', "");
+                            // 区分格式错误 vs 值溢出：用 u64 重试
+                            if u64::from_str_radix(hex_str, 16).is_ok() {
+                                return Token::LexError(format!(
+                                    "十六进制值溢出 i64 范围: {}（最大值: 0x7FFFFFFFFFFFFFFF）", num));
+                            }
+                            return Token::LexError(format!("无效的十六进制数字: {}", num));
+                        }
                     }
                 }
                 Some('o') | Some('O') => {
@@ -121,7 +129,7 @@ impl Lexer {
                     }
                     match i64::from_str_radix(&num[2..].replace('_', ""), 8) {
                         Ok(val) => return Token::IntLit(val),
-                        Err(_) => return Token::LexError(format!("无效的八进制数字: {}", num)),
+                        Err(_) => return Token::LexError(format!("八进制值溢出 i64 范围: {}", num)),
                     }
                 }
                 Some('b') | Some('B') => {
@@ -135,7 +143,7 @@ impl Lexer {
                     }
                     match i64::from_str_radix(&num[2..].replace('_', ""), 2) {
                         Ok(val) => return Token::IntLit(val),
-                        Err(_) => return Token::LexError(format!("无效的二进制数字: {}", num)),
+                        Err(_) => return Token::LexError(format!("二进制值溢出 i64 范围: {}", num)),
                     }
                 }
                 _ => {}
@@ -186,7 +194,15 @@ impl Lexer {
         } else {
             match num.parse::<i64>() {
                 Ok(v) => Token::IntLit(v),
-                Err(_) => Token::LexError(format!("无效的整数（可能溢出）: {}", num)),
+                Err(_) => {
+                    // i64::MIN = -9223372036854775808，其绝对值 9223372036854775808 超出 i64 正数范围
+                    // 允许该特殊值通过并以 wrapping 方式存储，由 parser/codegen 处理一元负号
+                    if num == "9223372036854775808" {
+                        Token::IntLit(i64::MIN)
+                    } else {
+                        Token::LexError(format!("无效的整数（可能溢出）: {}", num))
+                    }
+                }
             }
         }
     }
@@ -372,6 +388,7 @@ impl Lexer {
             "raises" => Token::Raises,
             "test" => Token::Test,
             "assert" => Token::Assert,
+            "check" => Token::Check,
             "suite" => Token::Suite,
             "setup" => Token::Setup,
             "teardown" => Token::Teardown,

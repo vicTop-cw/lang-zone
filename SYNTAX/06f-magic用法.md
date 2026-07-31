@@ -79,7 +79,7 @@ magic 块的命名直接决定了自动生成产物的名称：
 | `"refmut"` | `self: &mut Self` | 可变操作（如迭代器 `next`） |
 | `"none"` | 无 self 参数 | 关联函数（如 `default`、`new`） |
 
-**`dispatch`**：多分派策略，详见 §二。
+**`dispatch`**：多分派策略，详见 §三 配置字段表。
 
 **`ret`**：返回类型模式。
 - `"assoc"`：在 trait 上定义 `type Output` 关联类型
