@@ -643,13 +643,15 @@ impl Lexer {
                 }
                 '~' => {
                     // 后缀命名参数糖: x~ → 仅在紧贴标识符后时产生 Tilde
-                    // 前缀 ~x (位非) 跳过（与旧行为一致）
+                    // 前缀 ~x (位非) → 产生 Token::Exclamation (等价于 !x)
+                    // 先检查前置字符（advance 之前），再 advance
+                    let prev_before_tilde = self.prev_char();
                     self.advance();
-                    let prev = self.prev_char();
-                    if prev.map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')') {
+                    if prev_before_tilde.map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')') {
                         tokens.push(Token::Tilde);
+                    } else {
+                        tokens.push(Token::Exclamation);
                     }
-                    // else: skip bare ~ (bitwise not not implemented yet)
                     line_start = false;
                 }
                 '^' if self.peek_n(1) == Some('=') => {

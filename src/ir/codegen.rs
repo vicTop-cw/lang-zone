@@ -64,14 +64,19 @@ impl CodeGen {
         self.buf.clear();
         self.indent = 0;
 
-        // 预扫描：收集所有 enum variant → enum name 映射
+        // 预扫描：收集所有 enum variant → enum name 映射 + 枚举名加入 emitted_types
         self.enum_variants.clear();
         self.fn_param_info.clear();
+        self.emitted_types.clear();
         for item in &module.items {
             if let Item::EnumDef(e) = item {
+                self.emitted_types.insert(e.name.clone());
                 for variant in &e.variants {
                     self.enum_variants.insert(variant.name.clone(), e.name.clone());
                 }
+            }
+            if let Item::StructDef(s) = item {
+                self.emitted_types.insert(s.name.clone());
             }
             if let Item::FnDef(f) = item {
                 let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
@@ -480,7 +485,14 @@ impl CodeGen {
         self.emit_line(&format!("pub trait {}{}{} {{", t.name, generics, supertraits));
         self.indent += 1;
         for sig in &t.methods {
-            let params: Vec<String> = sig.params.iter().map(|p| self.rust_type(p)).collect();
+            // 如果第一个参数是 Self，转为 &self（trait 方法与 impl 块签名需一致）
+            let params: Vec<String> = sig.params.iter().enumerate().map(|(i, p)| {
+                if i == 0 && matches!(p, IrType::Self_) {
+                    "&self".to_string()
+                } else {
+                    self.rust_type(p)
+                }
+            }).collect();
             let ret = if sig.ret != IrType::Unit {
                 format!(" -> {}", self.rust_type(&sig.ret))
             } else {
@@ -876,6 +888,16 @@ impl CodeGen {
                     return format!("HashSet::new()");
                 }
 
+                // 检测 callee 是否为 FieldAccess 形式 Type.Variant → Type::Variant
+                if let ExprKind::FieldAccess { base, field } = &callee.kind {
+                    let base_s = self.gen_expr(base);
+                    let sep = if self.emitted_types.contains(&base_s) { "::" } else { "." };
+                    if sep == "::" {
+                        return format!("{}::{}({})", base_s, field, args_s.join(", "));
+                    }
+                    // else: normal field access call, fall through
+                }
+                
                 // 检测 enum variant 构造器调用: Circle(0,0,5) → Shape::Circle(0, 0, 5)
                 if let Some(enum_name) = self.enum_variants.get(&callee_s) {
                     return if args_s.is_empty() {
@@ -967,7 +989,7 @@ impl CodeGen {
                         .collect();
                     return format!("{}::{}({})", recv, method, values.join(", "));
                 }
-                // Enum 类型调用变体（位置参数）: Status.Pending("x") → Status::Pending("x")
+                // Enum 类型调用变体: Status.Pending("x") → Status::Pending("x")
                 if self.emitted_types.contains(&recv) {
                     return format!("{}::{}({})", recv, method, args_s.join(", "));
                 }
@@ -1047,6 +1069,27 @@ impl CodeGen {
                 format!("{}[{}] = {}", base_s, key_expr, self.gen_expr(value))
             }
             ExprKind::BinOp { op, lhs, rhs } => {
+                // Pow: ** → .pow() 方法调用 (a ** b → a.pow(b))
+                if matches!(op, BinOpKind::Pow) {
+                    let lhs_s = self.gen_expr(lhs);
+                    let rhs_s = self.gen_expr(rhs);
+                    return format!("{}.pow({})", lhs_s, rhs_s);
+                }
+                // In: 成员测试 → .contains() 方法 (elem in container → container.contains(&elem))
+                if matches!(op, BinOpKind::In) {
+                    let elem_s = self.gen_expr(lhs);
+                    let cont_s = self.gen_expr(rhs);
+                    // 字符串包含: "llo" in "hello" → "hello".contains("llo")
+                    if matches!(&rhs.ty, IrType::Str) {
+                        return format!("{}.contains({})", cont_s, elem_s);
+                    }
+                    // Dict/HashMap: key in map → map.contains_key(&key)
+                    if matches!(&rhs.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap") {
+                        return format!("{}.contains_key(&{})", cont_s, elem_s);
+                    }
+                    // List/Set/其他集合: elem in container → container.contains(&elem)
+                    return format!("{}.contains(&{})", cont_s, elem_s);
+                }
                 let op_s = self.binop_str(op);
                 // 链式比较分解: a < b < c → (a < b) && (b < c)
                 // 检测：LHS 是比较表达式 且 当前操作符也是比较
@@ -1161,6 +1204,10 @@ impl CodeGen {
             }
             ExprKind::BlockExpr { block } => {
                 let mut child = CodeGen::new();
+                // 复制父 CodeGen 的枚举/类型映射到子实例
+                child.emitted_types = self.emitted_types.clone();
+                child.enum_variants = self.enum_variants.clone();
+                child.fn_param_info = self.fn_param_info.clone();
                 child.gen_block_inner(block);
                 format!("{{\n{}    }}", child.buf)
             }
@@ -1213,6 +1260,7 @@ impl CodeGen {
             BinOpKind::Mul => "*",
             BinOpKind::Div => "/",
             BinOpKind::Mod => "%",
+            BinOpKind::Pow => "**",         // 不应直接输出，由 gen_expr 特殊处理
             BinOpKind::Eq => "==",
             BinOpKind::Neq => "!=",
             BinOpKind::Lt => "<",
@@ -1226,6 +1274,7 @@ impl CodeGen {
             BinOpKind::Xor => "^",
             BinOpKind::Shl => "<<",
             BinOpKind::Shr => ">>",
+            BinOpKind::In => "in",          // 不应直接输出，由 gen_expr 特殊处理
         }
     }
 

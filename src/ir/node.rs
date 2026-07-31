@@ -515,10 +515,11 @@ pub enum LitKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOpKind {
-    Add, Sub, Mul, Div, Mod,
+    Add, Sub, Mul, Div, Mod, Pow,
     Eq, Neq, Lt, Gt, Le, Ge,
     And, Or,
     BitAnd, BitOr, Xor, Shl, Shr,
+    In,
 }
 
 impl BinOpKind {

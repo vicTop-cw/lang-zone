@@ -152,9 +152,9 @@ fn map_binop(op: &BinOp) -> BinOpKind {
         BinOp::BitXor => BinOpKind::Xor,
         BinOp::Shl => BinOpKind::Shl,
         BinOp::Shr => BinOpKind::Shr,
-        BinOp::Pow => BinOpKind::Mul,     // Pow 降级为 Mul（后端自行处理）
-        BinOp::In => BinOpKind::Eq,        // In 降级，由后端处理
-        BinOp::Is => BinOpKind::Eq,        // Is 降级
+        BinOp::Pow => BinOpKind::Pow,
+        BinOp::In => BinOpKind::In,
+        BinOp::Is => BinOpKind::Eq,        // Is 降级 (Rust 无 is 运算符)
     }
 }
 
@@ -179,7 +179,7 @@ fn map_assign_op(op: &AssignOp) -> BinOpKind {
         AssignOp::XorEq => BinOpKind::Xor,
         AssignOp::ShlEq => BinOpKind::Shl,
         AssignOp::ShrEq => BinOpKind::Shr,
-        AssignOp::PowEq => BinOpKind::Mul,
+        AssignOp::PowEq => BinOpKind::Pow,
     }
 }
 

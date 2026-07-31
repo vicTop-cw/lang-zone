@@ -215,6 +215,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 BinOpKind::And => "and", BinOpKind::Or => "or",
                 BinOpKind::BitAnd => "&", BinOpKind::BitOr => "|",
                 BinOpKind::Xor => "^", BinOpKind::Shl => "<<", BinOpKind::Shr => ">>",
+                BinOpKind::Pow => "**", BinOpKind::In => "in",
             };
             format!("{} {} {}", gen_expr(cg, lhs), o, gen_expr(cg, rhs))
         }
