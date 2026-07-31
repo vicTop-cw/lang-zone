@@ -590,28 +590,35 @@ impl ParserStmtExt for Parser {
 
         // 支持解构绑定: let (a, b) = expr
         if self.check(&Token::LParen) {
-            // 解析 tuple 解构模式，取第一个名字作为绑定名
+            // 解析 tuple 解构模式，收集所有名字
             self.advance(); // consume (
-            let name = match self.advance() {
-                Token::Ident(n) => n,
-                Token::Underscore => "_".to_string(),
-                t => return Err(format!("Expected variable name in destructuring, got {:?}", t)),
-            };
-            // 跳过剩余解构元素直到 )
-            while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
-                if self.check(&Token::Comma) || self.check(&Token::DotDotDot) || self.check(&Token::DotDot) {
-                    self.advance();
-                } else if matches!(self.peek(), Token::Ident(_) | Token::Underscore) {
-                    self.advance();
-                    if self.check(&Token::Colon) {
-                        self.advance(); // :
-                        self.parse_type()?;
+            let mut names = Vec::new();
+            loop {
+                match self.advance() {
+                    Token::Ident(n) => names.push(n),
+                    Token::Underscore => names.push("_".to_string()),
+                    Token::RParen => break,
+                    Token::Comma | Token::DotDot | Token::DotDotDot => {
+                        // skip separators and rest patterns
+                        if self.check(&Token::RParen) { self.advance(); break; }
+                        continue;
                     }
-                } else {
-                    self.advance();
+                    t => {
+                        // skip type annotations in destructure patterns
+                        if self.check(&Token::Colon) {
+                            self.advance(); // :
+                            self.parse_type()?;
+                            if self.check(&Token::RParen) { self.advance(); break; }
+                            continue;
+                        }
+                        return Err(format!("Expected variable name in destructuring, got {:?}", t));
+                    }
                 }
             }
-            self.expect(Token::RParen)?;
+
+            if names.is_empty() {
+                return Err("Destructuring pattern must contain at least one variable".to_string());
+            }
 
             let ty = if self.check(&Token::Colon) {
                 self.advance();
@@ -623,11 +630,17 @@ impl ParserStmtExt for Parser {
             self.expect(Token::Eq)?;
             let value = self.parse_maybe_build_value()?;
 
-            if is_const {
-                return Ok(Stmt::Const { name, ty, value });
-            } else {
-                return Ok(Stmt::Let { name, mutable: false, is_ref, ty, value });
+            if names.len() == 1 {
+                // Single name destructuring → regular Let
+                let name = names.into_iter().next().unwrap();
+                if is_const {
+                    return Ok(Stmt::Const { name, ty, value });
+                } else {
+                    return Ok(Stmt::Let { name, mutable: false, is_ref, ty, value });
+                }
             }
+
+            return Ok(Stmt::LetTuple { names, ty, value });
         }
 
         let name = match self.advance() {

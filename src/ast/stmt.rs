@@ -92,6 +92,13 @@ pub enum Stmt {
         name: String,
         ty: Type,
     },
+
+    // ── 解构绑定 ──
+    LetTuple {
+        names: Vec<String>,
+        ty: Option<Type>,
+        value: Expr,
+    },
 }
 
 #[derive(Debug, Clone)]
