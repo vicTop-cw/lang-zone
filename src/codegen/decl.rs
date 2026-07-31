@@ -194,8 +194,8 @@ impl CodeGenDeclExt for CodeGen {
             out.push_str(&format!("\nimpl{} std::error::Error for {}{} {{}}\n", gen_params, s.name, type_params));
         }
 
-        // 方法
-        if !s.methods.is_empty() {
+        // 方法（包含 def + magic 定义）
+        if !s.methods.is_empty() || !s.magic_methods.is_empty() {
             let impl_generics = if s.generics.is_empty() {
                 String::new()
             } else {
@@ -211,6 +211,19 @@ impl CodeGenDeclExt for CodeGen {
                     out.push('\n');
                 } else {
                     out.push_str(&self.gen_method(m, 1));
+                    out.push('\n');
+                }
+            }
+            // 生成 magic 方法（__unapply__ 等不需要 trait 映射的魔法方法）
+            for m in &s.magic_methods {
+                if self.magic_engine.resolve(&m.name).is_none() {
+                    // 未注册到 MagicEngine 的 magic 方法 → 作为普通方法生成
+                    out.push_str(&self.gen_method(m, 1));
+                    out.push('\n');
+                } else {
+                    // 已注册的 magic 方法 → 在 gen_magic_impls 中生成 trait impl
+                    let unique = self.magic_unique_name(m, &magic_dupes);
+                    out.push_str(&self.gen_magic_method_body(m, &unique, 1));
                     out.push('\n');
                 }
             }

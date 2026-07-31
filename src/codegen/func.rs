@@ -113,7 +113,7 @@ impl CodeGenFuncExt for CodeGen {
                     name, build_s
                 ));
             }
-            body = format!("{}    // Top-level build blocks\n{}", init_lines, body);
+            body = format!("    // Top-level build blocks\n{}{}", init_lines, body);
         }
         
         // @parallel：替换迭代器为并行版本

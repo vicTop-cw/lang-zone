@@ -1,4 +1,0 @@
-def main() =
-    let numbers = 0..5
-    let squares = [x * x for x in numbers]
-    print(squares)

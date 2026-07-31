@@ -1,3 +1,0 @@
-def main() =
-    let result = [x for x in items.filter(|i| i > 0)]
-    print(result)

@@ -1,12 +1,11 @@
-// 规范目标特性（__unapply__ 提取器仅有 TODO 桩）
-// 出处：SYNTAX/06a-struct.md / SYNTAX/05-控制流.md — 自定义解构
-// 预期语法：
+// ✅ __unapply__ 提取器模式 — 结构体解构 match
+// 出处：SYNTAX/06a-struct.md
 struct Point =
     x: int
     y: int
     magic __unapply__(self) -> (int, int) = (self.x, self.y)
 
 def main() =
-    let p = Point(x: 3, y: 4)
+    let p = Point(3, 4)
     match p:
-        case Point(px, py) => print(px, py)
+        case Point(px, py) => print(px + py)

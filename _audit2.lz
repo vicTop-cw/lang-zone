@@ -1,3 +1,0 @@
-def validate(age: int) -> int [is_valid_age] =
-    return age
-def main() = print(validate(18))

@@ -1,10 +1,19 @@
 // ✅ 已实现 — 生成器构建块 *:
 // 出处：SYNTAX/11-构建块.md / SYNTAX/14-生成器.md
-def build_params() =
-    let params = *:
-        yield ("a", 1)
-        yield ("b", 2)
-    params
+//
+// 规则：
+//   1. *: 构建块必须绑定到一个函数： xs = func *:
+//      yield 产出的是传给该函数的参数包（元组 / 字典）。
+//   2. 不能用 `let x = *:` 直接绑定裸构建块（不支持）。
+//   3. yield 只能出现在 *: 构建块 与 iterator 关键字函数中。
+
+def pair(a: str, b: int) -> (str, int) = (a, b)
+
+// 每个 yield 调用一次 pair(a, b)
+xs = pair *:
+    yield ("a", 1)
+    yield ("b", 2)
 
 def main() =
-    print(build_params())
+    for p in xs:
+        print(p)          // ("a", 1)  ("b", 2)

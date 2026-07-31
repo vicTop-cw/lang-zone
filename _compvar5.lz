@@ -1,3 +1,0 @@
-def main() =
-    let result = [x for x in List.new(1, 2, 3)]
-    print(result)

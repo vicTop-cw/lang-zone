@@ -105,8 +105,10 @@ impl Lexer {
                             self.advance();
                         } else { break; }
                     }
-                    let val = i64::from_str_radix(&num[2..].replace('_', ""), 16).unwrap_or(0);
-                    return Token::IntLit(val);
+                    match i64::from_str_radix(&num[2..].replace('_', ""), 16) {
+                        Ok(val) => return Token::IntLit(val),
+                        Err(_) => return Token::LexError(format!("无效的十六进制数字: {}", num)),
+                    }
                 }
                 Some('o') | Some('O') => {
                     num.push(self.advance().unwrap());
@@ -117,8 +119,10 @@ impl Lexer {
                             self.advance();
                         } else { break; }
                     }
-                    let val = i64::from_str_radix(&num[2..].replace('_', ""), 8).unwrap_or(0);
-                    return Token::IntLit(val);
+                    match i64::from_str_radix(&num[2..].replace('_', ""), 8) {
+                        Ok(val) => return Token::IntLit(val),
+                        Err(_) => return Token::LexError(format!("无效的八进制数字: {}", num)),
+                    }
                 }
                 Some('b') | Some('B') => {
                     num.push(self.advance().unwrap());
@@ -129,8 +133,10 @@ impl Lexer {
                             self.advance();
                         } else { break; }
                     }
-                    let val = i64::from_str_radix(&num[2..].replace('_', ""), 2).unwrap_or(0);
-                    return Token::IntLit(val);
+                    match i64::from_str_radix(&num[2..].replace('_', ""), 2) {
+                        Ok(val) => return Token::IntLit(val),
+                        Err(_) => return Token::LexError(format!("无效的二进制数字: {}", num)),
+                    }
                 }
                 _ => {}
             }
@@ -164,18 +170,35 @@ impl Lexer {
             }
         }
         if is_float {
-            Token::FloatLit(num.parse().unwrap_or(0.0))
+            match num.parse::<f64>() {
+                Ok(v) => Token::FloatLit(v),
+                Err(_) => {
+                    // 检查是否形如 "123e"（指数无尾数）
+                    if num.ends_with('e') || num.ends_with('E')
+                        || num.ends_with("e+") || num.ends_with("E+")
+                        || num.ends_with("e-") || num.ends_with("E-") {
+                        Token::LexError(format!("科学计数法缺少指数: {}", num))
+                    } else {
+                        Token::LexError(format!("无效的浮点数: {}", num))
+                    }
+                }
+            }
         } else {
-            Token::IntLit(num.parse().unwrap_or(0))
+            match num.parse::<i64>() {
+                Ok(v) => Token::IntLit(v),
+                Err(_) => Token::LexError(format!("无效的整数（可能溢出）: {}", num)),
+            }
         }
     }
 
     fn read_string(&mut self) -> Token {
         self.advance(); // skip opening "
         let mut s = String::new();
+        let mut closed = false;
         while let Some(c) = self.peek() {
             if c == '"' {
                 self.advance();
+                closed = true;
                 break;
             } else if c == '\\' {
                 self.advance();
@@ -192,7 +215,11 @@ impl Lexer {
                 s.push(self.advance().unwrap());
             }
         }
-        Token::StrLit(s)
+        if closed {
+            Token::StrLit(s)
+        } else {
+            Token::LexError(format!("未终止的字符串字面量: \"{}\"", s))
+        }
     }
 
     fn read_triple_string(&mut self) -> Token {

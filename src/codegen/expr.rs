@@ -329,17 +329,58 @@ impl CodeGenExprExt for CodeGen {
             }
 
             Expr::Match { expr, arms } => {
+                // __unapply__ 提取器: 检测 struct 解构模式
+                let struct_arms: Vec<Option<(&str, &[Pattern])>> = arms.iter()
+                    .map(|arm| self.is_struct_destructure(&arm.pattern))
+                    .collect();
+                let has_struct_arm = struct_arms.iter().any(|s| s.is_some());
+
+                if has_struct_arm {
+                    // 结构体解构: 绑定 scrutinee 到临时变量，用 if-else 链分发
+                    let scrutinee = self.gen_expr(expr);
+                    let mut out = format!("{{\n    let __match_val = {};\n", scrutinee);
+                    for (i, arm) in arms.iter().enumerate() {
+                        let chain = if i == 0 { "if" } else { " else if" };
+                        let mut l = HashSet::new();
+                        let body = self.gen_block_return(&arm.body, 2, &mut l);
+                        if let Some((_, subs)) = struct_arms[i] {
+                            let sub_pats: Vec<String> = subs.iter().map(|p| self.gen_pattern(p)).collect();
+                            let destructure = format!("let ({}) = __match_val.__unapply__();", sub_pats.join(", "));
+                            let guard_str = arm.guard.as_ref()
+                                .map(|g| format!("\n        if {} {{", self.gen_expr(g)))
+                                .unwrap_or_default();
+                            let guard_close = if arm.guard.is_some() { "\n        }" } else { "" };
+                            out.push_str(&format!(
+                                "    {} true {{\n        {}{}\n        {}{}\n    }}",
+                                chain, destructure, guard_str, body.trim_end(), guard_close
+                            ));
+                        } else {
+                            // 非 struct 臂：wildcard pattern（此处所有臂都到了 if-else 链，因为 Rust 不允许重复 `_`）
+                            let pat = self.gen_pattern(&arm.pattern);
+                            let guard = arm.guard.as_ref()
+                                .map(|g| format!(" if {}", self.gen_expr(g)))
+                                .unwrap_or_default();
+                            // 用 match 分发非 struct 臂
+                            out.push_str(&format!(
+                                "    {} match __match_val {{\n        {}{} => {},\n        _ => unreachable!()\n    }}",
+                                chain, pat, guard, body.trim()
+                            ));
+                        }
+                    }
+                    out.push_str("\n}");
+                    return out;
+                }
+
+                // 标准 match（无 struct 解构）
                 let mut out = format!("match {} {{\n", self.gen_expr(expr));
                 for arm in arms {
                     let pat = self.gen_pattern(&arm.pattern);
                     let guard = arm.guard.as_ref()
                         .map(|g| format!(" if {}", self.gen_expr(g)))
                         .unwrap_or_default();
-                    // 使用 gen_block_return 确保最后一条表达式不加分号
                     let mut l = HashSet::new();
                     let body = self.gen_block_return(&arm.body, 3, &mut l);
                     let body_trimmed = body.trim();
-                    // 单表达式 arm → pat => expr,
                     if !body_trimmed.contains('\n') {
                         out.push_str(&format!("        {}{} => {},\n", pat, guard, body_trimmed));
                     } else {

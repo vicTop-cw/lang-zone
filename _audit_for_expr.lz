@@ -1,4 +1,0 @@
-def sum_all(values: List<int>) -> int =
-    for v in values: total = total + v
-    total
-def main() = print(sum_all(1, 2, 3))

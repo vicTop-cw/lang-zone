@@ -1,4 +1,4 @@
-# Lang-Zong 编译器 — 使用指南
+# Lang-Zone 编译器 — 使用指南
 
 LZ 编译器提供两个后端：`lzc`（Rust 原生代码生成）和 `lzcyc`（Cython/Python 代码生成）。
 
@@ -30,42 +30,44 @@ cargo run -- hello.lz --dump-macros
 # 指定标准库路径
 cargo run -- hello.lz --std-dir ./stdlib
 
-# 增量编译缓存
-cargo run -- hello.lz --cache-dir .lzc-cache
+# 项目模式（递归加载 import 依赖）
+cargo run -- hello.lz --project
 
-# 强制重新编译（跳过缓存）
-cargo run -- hello.lz --force
-
-# 加载外部类型签名（由 lz-infer 生成）
-lz-infer hello.lz -o hello.lzi
-cargo run -- hello.lz --lzi hello.lzi
-
-# 输出为 Rust 库 crate（指定 Rust 版本/依赖）
-cargo run -- hello.lz --rust-crate "serde=1.0"
+# 增量编译缓存（仅对比源文件哈希）
+cargo run -- hello.lz --cached
 
 # 允许使用 rustc 私有 API
 cargo run -- hello.lz --allow-rustc-private
+
+# IR 中间表示输出
+cargo run -- hello.lz --emit=ir
+cargo run -- hello.lz --ir-codegen
 ```
+
+> **计划中（尚未实现）**: `--cache-dir`、`--force`、`--lzi`、`--rust-crate`。当前只支持 `--cached` + 硬编码 `.lzcache` 目录。
 
 ### 运行完整测试
 
 ```bash
-# 全部 436 个测试
-cargo test
+# 库测试（292 项单元测试）
+cargo test --lib
 
-# 仅 DEMO 编译测试（45 个文件）
+# 仅 DEMO 编译测试（跳过 99_errors 和 99_spec）
 cargo test --test compile_demos
 
-# 仅语法错误拒绝测试（8 个错误边界文件）
+# 仅语法错误拒绝测试（99_errors/ 目录下所有 .lz 文件）
 cargo test --test reject_errors
+
+# IR 快照测试
+cargo test --test ir_snapshots
 ```
 
 ### 使用作为库
 
 ```rust
-use lang_zong::lexer::Lexer;
-use lang_zong::parser::Parser;
-use lang_zong::codegen::CodeGen;
+use lang_zone::lexer::Lexer;
+use lang_zone::parser::Parser;
+use lang_zone::codegen::CodeGen;
 
 // 1. 词法分析
 let mut lexer = Lexer::new(source);
@@ -74,9 +76,10 @@ let tokens = lexer.tokenize();
 // 2. 语法分析
 let module = Parser::new(tokens).parse_module()?;
 
-// 3. 代码生成
-let rust_code = CodeGen::generate(&module, "output.rs");
+// 3. 代码生成（需提供 std_dir, allow_rustc_private, rustc_version）
+let rust_code = CodeGen::generate(&module, None, false, String::new());
 ```
+
 
 ---
 

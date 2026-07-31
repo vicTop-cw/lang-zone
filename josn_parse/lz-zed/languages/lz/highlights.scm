@@ -84,6 +84,7 @@
 "struct" @keyword
 "enum" @keyword
 "trait" @keyword
+"duck" @keyword
 "type" @keyword
 "let" @keyword
 "var" @keyword

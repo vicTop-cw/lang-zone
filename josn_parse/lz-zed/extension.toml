@@ -8,4 +8,4 @@ repository = "https://github.com/lang-zone/lz-zed"
 
 [grammars.lz]
 repository = "file:///e:/IDEProjects/AI/lang-zone/josn_parse/lz-zed/tree-sitter-lz"
-rev = "2622594"
+rev = "5f391dce65528f7b910c8f13a4a9bc52588603ef"

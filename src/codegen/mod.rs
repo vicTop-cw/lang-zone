@@ -340,6 +340,23 @@ impl CodeGen {
         }
         ty.to_rust_type_string()
     }
+
+    /// 判断 match 模式是否为 struct 解构（需要 __unapply__ 提取器）
+    /// 返回 Some((struct_name, sub_patterns)) 或 None
+    pub(super) fn is_struct_destructure<'a>(&self, pat: &'a Pattern) -> Option<(&'a str, &'a [Pattern])> {
+        match pat {
+            Pattern::Variant(name, subs) if !subs.is_empty() => {
+                let is_enum_variant = self.enum_variants.iter().any(|(v, _)| v == name);
+                let is_struct = self.structs.iter().any(|(s, _)| s == name);
+                if !is_enum_variant && is_struct {
+                    Some((name.as_str(), subs.as_slice()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 /// 扫描模块：是否使用了构建块 / defer
