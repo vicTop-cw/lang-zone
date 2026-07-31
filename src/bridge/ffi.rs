@@ -305,10 +305,14 @@ impl Bridge for FfiBridge {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_SEQ: AtomicUsize = AtomicUsize::new(0);
 
     fn create_test_manifest() -> String {
+        let id = TEST_SEQ.fetch_add(1, Ordering::SeqCst);
         let dir = std::env::temp_dir();
-        let path = dir.join("test_ffi.toml");
+        let path = dir.join(format!("test_ffi_{}.toml", id));
         let content = r#"
 [functions]
 strlen = { params = "*const i8", return = "usize", library = "c", link = "dylib" }

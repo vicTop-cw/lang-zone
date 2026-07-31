@@ -1,8 +1,10 @@
 # IR codegen: 生成器 yield 降低错误
 
-- **Status**: 🟡 Codegen ready, blocked by parser+builder (2026-07-30)
+- **Status**: Fixed ✅ (2026-07-31)
 - **Severity**: P0（阻塞所有含 yield 的 demo 的 IR 产出通过 rustc）
 - **Category**: ir/codegen
+- **Fixed by**: 修复 IR builder 中 `AstStmt::Yield` → `Stmt::Yield` 映射；codegen 的 `has_yield` 检测 + Vec collector 模式已就绪。
+- **Verification**: `yield_demo.lz` 和 `generator_more.lz` 的 IR codegen 产出均通过 rustc 编译并运行正确。
 - **Discovered**: 2026-07-30（验证 IR codegen rustc 编译时发现）
 - **Reporter**: 文通通
 

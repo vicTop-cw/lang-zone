@@ -1,17 +1,16 @@
 # Issue Tracker
 
-**2026-07-30 更新**: 所有 Fixed issue 文件已移入 `fixed/` 目录。
+**2026-07-31 更新**: 所有 issue 已修复。Generator lowering (P0 最后一项) 已修复。
 
 ## Open
 
-| 文件 | 标题 | 严重度 |
-|------|------|--------|
-| [ir-codegen-generator-lowering.md](ir-codegen-generator-lowering.md) | IR codegen: 生成器 yield 降低（🟡 codegen 已就绪，等 parser+builder 接入 iterator/yield） | P0 |
+_无_
 
 ## Fixed
 
 | 文件 | 标题 | 修复摘要 |
 |------|------|----------|
+| [ir-codegen-generator-lowering.md](ir-codegen-generator-lowering.md) | IR codegen: 生成器 yield 降低 ✅ | 修复 builder AstStmt::Yield → Stmt::Yield 映射；codegen Vec collector 模式已验证 rustc 编译通过并运行正确 |
 | [fixed/parser-new-syntax-regression.md](fixed/parser-new-syntax-regression.md) | 37 parse 失败 ✅ | Dict/Set推导、for/while守卫+else、type别名、comptime、顶层构建块、魔法属性、_丢弃、多行ctor、#!宏、复合赋值、dot函数名、ternary守卫 |
 | [fixed/parser-func-def.md](fixed/parser-func-def.md) | def 多形态 ✅ | 5/5 |
 | [fixed/parser-struct-enum-match.md](fixed/parser-struct-enum-match.md) | struct/enum/trait/match ✅ | 9/9 |
