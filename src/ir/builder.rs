@@ -979,8 +979,28 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             ),
         },
 
-        AstStmt::Suite { name: _, tests } => Stmt::Block {
-            stmts: tests.iter().map(|s| convert_stmt(s, ctx)).collect(),
+        AstStmt::Suite { name: _, setup, teardown, tests } => {
+            // 将 setup 和 teardown 内联到每个 test 中
+            let mut ir_tests = Vec::new();
+            for t in tests {
+                match t {
+                    AstStmt::Test { name, body } => {
+                        let mut combined = Vec::new();
+                        if let Some(ref s) = setup {
+                            combined.extend(s.iter().cloned());
+                        }
+                        combined.extend(body.iter().cloned());
+                        if let Some(ref td) = teardown {
+                            combined.extend(td.iter().cloned());
+                        }
+                        ir_tests.push(AstStmt::Test { name: name.clone(), body: combined });
+                    }
+                    _ => ir_tests.push(t.clone()),
+                }
+            }
+            Stmt::Block {
+                stmts: ir_tests.iter().map(|s| convert_stmt(s, ctx)).collect(),
+            }
         },
     }
 }

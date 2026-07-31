@@ -345,6 +345,8 @@ impl Lexer {
             "test" => Token::Test,
             "assert" => Token::Assert,
             "suite" => Token::Suite,
+            "setup" => Token::Setup,
+            "teardown" => Token::Teardown,
             "and" => Token::And,
             "or" => Token::Or,
             "not" => Token::Not,

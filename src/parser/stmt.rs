@@ -322,14 +322,49 @@ impl ParserStmtExt for Parser {
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 self.expect(Token::Indent)?;
+                let mut setup: Option<Vec<Stmt>> = None;
+                let mut teardown: Option<Vec<Stmt>> = None;
                 let mut tests = Vec::new();
                 while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                     self.skip_newlines();
                     if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
-                    tests.push(self.parse_stmt()?);
+                    // 检查 setup / teardown 关键字
+                    match self.peek() {
+                        Token::Setup => {
+                            self.advance();
+                            self.expect(Token::Colon)?;
+                            self.skip_newlines();
+                            let body = if self.check(&Token::Indent) {
+                                self.advance();
+                                let b = self.parse_block()?;
+                                self.expect(Token::Dedent)?;
+                                b
+                            } else {
+                                vec![self.parse_stmt()?]
+                            };
+                            setup = Some(body);
+                        }
+                        Token::Teardown => {
+                            self.advance();
+                            self.expect(Token::Colon)?;
+                            self.skip_newlines();
+                            let body = if self.check(&Token::Indent) {
+                                self.advance();
+                                let b = self.parse_block()?;
+                                self.expect(Token::Dedent)?;
+                                b
+                            } else {
+                                vec![self.parse_stmt()?]
+                            };
+                            teardown = Some(body);
+                        }
+                        _ => {
+                            tests.push(self.parse_stmt()?);
+                        }
+                    }
                 }
                 self.expect(Token::Dedent)?;
-                Ok(Stmt::Suite { name, tests })
+                Ok(Stmt::Suite { name, setup, teardown, tests })
             }
             _ => {
                 // 类型化本地绑定: name: T = value

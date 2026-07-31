@@ -70,6 +70,8 @@ pub enum Stmt {
     },
     Suite {
         name: String,
+        setup: Option<Vec<Stmt>>,
+        teardown: Option<Vec<Stmt>>,
         tests: Vec<Stmt>,
     },
 

@@ -17,7 +17,7 @@ pub enum Token {
     Try, Catch, Finally, Raise, Raises,
 
     // ── 测试 ──
-    Test, Assert, Suite,
+    Test, Assert, Suite, Setup, Teardown,
 
     // ── 并发 ──
     Async, Await, Spawn, Select,
@@ -462,6 +462,8 @@ impl Lexer {
             "test" => Token::Test,
             "assert" => Token::Assert,
             "suite" => Token::Suite,
+            "setup" => Token::Setup,
+            "teardown" => Token::Teardown,
             "and" => Token::And,
             "or" => Token::Or,
             "not" => Token::Not,

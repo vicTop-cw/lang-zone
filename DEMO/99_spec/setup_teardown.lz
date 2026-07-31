@@ -1,5 +1,10 @@
-// 测试套件生命周期钩子
-suite demo_suite:
+// 测试套件生命周期钩子 setup/teardown
+// 出处：SYNTAX/15-测试框架.md
+suite DatabaseTests:
+    setup:
+        let counter = 0
+    teardown:
+        let dummy = counter
     test "add":
         assert 1 + 1 == 2
     test "mul":

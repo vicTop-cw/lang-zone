@@ -88,8 +88,9 @@ pub(super) fn extract_return(body: &str) -> Option<String> {
 /// 装饰器 → Rust attribute 字符串
 pub(super) fn gen_decorator_attr(d: &Decorator) -> String {
     match d.name.as_str() {
-        "simd" => return "#[inline(always)] // @simd: autovectorize hint\n".to_string(),
-        "parallel" => return "// @parallel: rayon par_iter candidate\n".to_string(),
+        "simd" => return "#[inline(always)]\n".to_string(),
+        "parallel" => return "#[cfg(feature = \"rayon\")]\n".to_string(),
+        "tail_call" => return "#[inline(never)]\n".to_string(),
         _ => {}
     }
     let args: Vec<String> = d.args.iter()
@@ -104,6 +105,23 @@ pub(super) fn gen_decorator_attr(d: &Decorator) -> String {
     } else {
         format!("#[{}({})]\n", d.name, args.join(", "))
     }
+}
+
+/// 检查函数是否有指定装饰器
+pub(super) fn has_decorator(func: &Function, name: &str) -> bool {
+    func.decorators.iter().any(|d| d.name == name)
+}
+
+/// 后处理：为 @parallel 函数体替换迭代器为并行版本
+pub(super) fn apply_parallel_transforms(body: &str) -> String {
+    let mut result = body.to_string();
+    // 替换 .iter() -> .par_iter()
+    result = result.replace(".iter()", ".par_iter()");
+    // 替换 .iter_mut() -> .par_iter_mut()
+    result = result.replace(".iter_mut()", ".par_iter_mut()");
+    // 替换 .into_iter() -> .into_par_iter()
+    result = result.replace(".into_iter()", ".into_par_iter()");
+    result
 }
 
 /// placeholder

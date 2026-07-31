@@ -150,6 +150,7 @@ impl CodeGen {
 
         // ── 按需 prelude：只生成实际用到的运行时类型 ──
         let (has_build, has_defer) = scan_usage(&module);
+        let has_parallel = scan_has_parallel(&module);
         if has_build {
             out.push_str("// ── Lang-Zong 构建块 prelude ──\n");
             out.push_str("pub trait BuildParams { type Args; fn into_args(self) -> Self::Args; }\n");
@@ -168,6 +169,10 @@ impl CodeGen {
         }
         // Pipe trait: 需 Sized 约束
         out.push_str("pub trait Pipe<T> where Self: Sized { fn pipe(self, f: impl FnOnce(Self) -> T) -> T { f(self) } }\n\n");
+        if has_parallel {
+            out.push_str("#[cfg(feature = \"rayon\")]\n");
+            out.push_str("use rayon::prelude::*;\n\n");
+        }
         if has_defer {
             out.push_str("// ── defer guard (LIFO drop-order) ──\n");
             out.push_str("struct DeferGuard<F: FnMut()>(Option<F>);\n");
@@ -439,6 +444,23 @@ fn scan_has_pow(module: &Module) -> bool {
     }
     for f in &module.functions {
         if scan_stmts_pow(&f.body) { return true; }
+    }
+    false
+}
+
+/// 扫描模块是否使用 @parallel 装饰器（需要 rayon prelude）
+fn scan_has_parallel(module: &Module) -> bool {
+    for f in &module.functions {
+        if f.decorators.iter().any(|d| d.name == "parallel") {
+            return true;
+        }
+    }
+    for imp in &module.impls {
+        for m in &imp.methods {
+            if m.decorators.iter().any(|d| d.name == "parallel") {
+                return true;
+            }
+        }
     }
     false
 }

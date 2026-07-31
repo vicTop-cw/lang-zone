@@ -9,6 +9,7 @@ use super::stmt::CodeGenStmtExt;
 use super::magic::CodeGenMagicExt;
 use super::builders::CodeGenBuildersExt;
 use super::helpers::gen_decorator_attr;
+use super::helpers::{has_decorator, apply_parallel_transforms};
 use super::decl::CodeGenDeclExt;
 use super::expr::CodeGenExprExt;
 
@@ -16,9 +17,11 @@ use super::expr::CodeGenExprExt;
 pub trait CodeGenFuncExt {
     fn gen_function(&self, f: &Function) -> String;
     fn gen_test_stmt(&self, stmt: &Stmt, indent: usize) -> String;
+    fn gen_suite_test(&self, stmt: &Stmt, indent: usize, setup: Option<&[Stmt]>, teardown: Option<&[Stmt]>) -> String;
     fn gen_method(&self, f: &Function, indent: usize) -> String;
     fn gen_block_return(&self, stmts: &[Stmt], indent: usize, locals: &mut HashSet<String>) -> String;
     fn gen_param(&self, p: &Param) -> String;
+    fn gen_stmt_body(&self, stmts: &[Stmt], indent: usize) -> String;
 }
 
 impl CodeGenFuncExt for CodeGen {
@@ -98,6 +101,12 @@ impl CodeGenFuncExt for CodeGen {
             }
         }
         
+        // @parallel：替换迭代器为并行版本
+        let body = if has_decorator(f, "parallel") {
+            apply_parallel_transforms(&body)
+        } else {
+            body
+        };
         let body = body.trim_end();
 
         out.push_str(&format!(
@@ -134,18 +143,61 @@ impl CodeGenFuncExt for CodeGen {
                     format!("{}assert!({});\n", pad, self.gen_expr(expr))
                 }
             }
-            Stmt::Suite { name, tests: suite_tests } => {
+            Stmt::Suite { name, setup, teardown, tests: suite_tests } => {
                 let pad = "    ".repeat(indent);
                 let mod_name = name.replace(' ', "_").to_lowercase();
                 let mut out = format!("{}mod {} {{\n{}    use super::*;\n\n", pad, mod_name, pad);
                 for t in suite_tests {
-                    out.push_str(&self.gen_test_stmt(t, indent + 1));
+                    out.push_str(&self.gen_suite_test(t, indent + 1, setup.as_deref(), teardown.as_deref()));
                 }
                 out.push_str(&format!("{}}}\n", pad));
                 out
             }
             _ => String::new(),
         }
+    }
+
+    /// 生成套件内的单个测试（含 setup/teardown 内联）
+    fn gen_suite_test(&self, stmt: &Stmt, indent: usize, setup: Option<&[Stmt]>, teardown: Option<&[Stmt]>) -> String {
+        match stmt {
+            Stmt::Test { name, body } => {
+                let pad = "    ".repeat(indent);
+                let fn_name = name.replace(' ', "_").to_lowercase();
+                let mut out = format!("{}#[test]\n{}fn {}() {{\n", pad, pad, fn_name);
+                let mut locals = HashSet::new();
+                // 内联 setup
+                if let Some(setup_stmts) = setup {
+                    out.push_str(&format!("{}    // === setup ===\n", pad));
+                    for s in setup_stmts {
+                        out.push_str(&self.gen_stmt(s, indent + 1, &mut locals));
+                    }
+                }
+                // 测试体
+                for s in body {
+                    out.push_str(&self.gen_stmt(s, indent + 1, &mut locals));
+                }
+                // 内联 teardown
+                if let Some(teardown_stmts) = teardown {
+                    out.push_str(&format!("{}    // === teardown ===\n", pad));
+                    for s in teardown_stmts {
+                        out.push_str(&self.gen_stmt(s, indent + 1, &mut locals));
+                    }
+                }
+                out.push_str(&format!("{}}}\n", pad));
+                out
+            }
+            _ => self.gen_test_stmt(stmt, indent),
+        }
+    }
+
+    /// 生成语句块（无特殊尾表达式处理，纯语句）
+    fn gen_stmt_body(&self, stmts: &[Stmt], indent: usize) -> String {
+        let mut out = String::new();
+        let mut locals = HashSet::new();
+        for s in stmts {
+            out.push_str(&self.gen_stmt(s, indent, &mut locals));
+        }
+        out
     }
 
     fn gen_method(&self, f: &Function, indent: usize) -> String {

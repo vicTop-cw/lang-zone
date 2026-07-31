@@ -1,6 +1,5 @@
-// 规范目标特性（@parallel 当前仅输出注释，无真实代码生成）
+// @parallel 装饰器 — 已实现（生成 #[cfg(feature="rayon")] + rayon::prelude）
 // 出处：SYNTAX/03-函数.md — 复合综合装饰器
-// 预期语法：
 @parallel
 def process(batch: List<int>) -> int = sum(batch)
 
