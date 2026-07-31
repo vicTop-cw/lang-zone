@@ -1,4 +1,0 @@
-async def foo() =
-  print(1)
-def main() =
-  print(2)

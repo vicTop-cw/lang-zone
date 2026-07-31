@@ -1,0 +1,1 @@
+def f(x) where x <: Clone = x

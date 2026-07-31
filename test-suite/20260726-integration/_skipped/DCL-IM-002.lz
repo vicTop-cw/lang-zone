@@ -1,0 +1,4 @@
+from std.io import print
+
+def main() =
+    print("hello")

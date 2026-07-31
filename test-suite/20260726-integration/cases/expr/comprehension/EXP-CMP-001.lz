@@ -1,0 +1,4 @@
+def main() =
+    nums = [x * 2 for x in 1..5]
+    for n in nums:
+        print(n)

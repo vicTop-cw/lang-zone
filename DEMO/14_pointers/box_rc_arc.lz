@@ -3,55 +3,12 @@
 // ============================
 
 def main() =
-    // --- Box<T> (heap-allocated, unique ownership) ---
     let x: Box<int> = Box.new(42)
     let val = x[0]
-    let alias = &x
+    print(val)
 
-    let arr: Box<List<int>> = Box.new([1, 2, 3])
-    let first = arr[0]
+    let rc: Rc<int> = Rc.new(42)
+    let c = rc.clone()
 
-    // --- Rc<T> (reference counted, single-threaded) ---
-    let rc_x: Rc<int> = Rc.new(42)
-    let rc_clone = rc_x.clone()
-
-    // --- Arc<T> (atomic reference counted, multi-threaded) ---
-    let arc_x: Arc<int> = Arc.new(42)
-    let arc_shared = arc_x.clone()
-
-    // --- Cell<T> & RefCell<T> (interior mutability) ---
-    let cell: Cell<int> = Cell.new(42)
-    cell.set(100)
-    let cell_val = cell.get()
-
-    let ref_cell: RefCell<int> = RefCell.new(42)
-    *ref_cell.borrow_mut() = 100
-
-    // --- dyn is auto-implied (not a keyword in LZ) ---
-    // LZ: Box<Drawable> → Rust: Box<dyn Drawable>
-    // LZ: Box<int> → Rust: Box<i64>
-
-    // --- ref bindings ---
-    x_val = 42
-    ref r = x_val
-    r = 100
-
-    let ref s = x_val
-
-    // --- Ownership ^ ---
-    let moved = "hello"
-    let dest = moved^
-
-    // --- Take pointer * (boxes to heap) ---
-    let val = 42
-    let p = *val
-    let rc_p: Rc<int> = *val
-
-    // --- Dereference ptr[k] ---
-    let bx = Box.new(42)
-    let deref = bx[0]
-
-    print(val, first, cell_val)
-
-trait Drawable =
-    def draw(self) = ...
+    let arc: Arc<int> = Arc.new(7)
+    let s = arc.clone()

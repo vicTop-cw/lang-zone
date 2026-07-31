@@ -1,0 +1,6 @@
+﻿def main() =
+    arr = [1, 2, 3]
+    i = 0
+    print(arr[i])
+    i = 1
+    print(arr[i])

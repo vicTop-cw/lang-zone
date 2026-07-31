@@ -1,0 +1,9 @@
+// 变参函数测试
+def sum_all(..args) -> int =
+    total = 0
+    for x in args:
+        total += x
+    total
+
+def main() =
+    print(sum_all(1, 2, 3, 4, 5))

@@ -374,6 +374,7 @@ impl fmt::Display for Stmt {
             Stmt::Break => f.write_str("break"),
             Stmt::Continue => f.write_str("continue"),
             Stmt::Yield { value } => write!(f, "yield {value}"),
+            Stmt::YieldFrom { iter } => write!(f, "yield from {iter}"),
             Stmt::Defer { body } => write!(f, "defer {body}"),
             Stmt::TryCatch { body, catches, else_body, finally_body } => {
                 write!(f, "try {body}")?;

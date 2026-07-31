@@ -1,0 +1,86 @@
+// Phase 12: 结构体与方法测试
+
+// ── 12.1 基本 struct 定义与字段访问 ──
+struct Point =
+    x: i64
+    y: i64
+
+    def dist_sq(self: Point)-> i64 =
+        self.x * self.x + self.y * self.y
+
+def test_struct_field() =
+    p = Point(3, 4)
+    d = p.dist_sq()
+    print("Distance sq: ")
+    print(d)
+
+// ── 12.2 struct 字段更新 ──
+struct Counter =
+    count: i64
+
+    def inc(self: Counter)-> Counter =
+        Counter(self.count + 1)
+
+def test_struct_update() =
+    c = Counter(0)
+    c = c.inc()
+    c = c.inc()
+    print("Count after 2 inc: ")
+    print(c.count)
+
+// ── 12.3 嵌套 struct ──
+struct Inner =
+    data: i64
+
+struct Outer =
+    inner: Inner
+    label: str
+
+    def get_data(self: Outer)-> i64 =
+        self.inner.data
+
+def test_nested_struct() =
+    o = Outer(Inner(99), "nested")
+    print("Inner data: ")
+    print(o.get_data())
+    print("Label: ")
+    print(o.label)
+
+// ── 12.4 多字段 struct ──
+struct Person =
+    name: str
+    age: i64
+
+    def is_adult(self: Person)-> bool =
+        self.age >= 18
+
+def test_multi_field() =
+    p = Person("Alice", 25)
+    print("Name: ")
+    print(p.name)
+    print("Age: ")
+    print(p.age)
+    print("Adult: ")
+    print(p.is_adult())
+
+// ── 12.5 f64 类型 struct ──
+struct Circle =
+    radius: f64
+
+    def area(self: Circle)-> f64 =
+        3.14159 * self.radius * self.radius
+
+def test_f64_struct() =
+    c = Circle(2.0)
+    print("Area: ")
+    print(c.area())
+
+// ── 入口 ──
+def main() =
+    print("=== Struct Test ===")
+    test_struct_field()
+    test_struct_update()
+    test_nested_struct()
+    test_multi_field()
+    test_f64_struct()
+    print("=== Struct Test Complete ===")

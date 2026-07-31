@@ -48,12 +48,12 @@ def process_value(x: int) -> int raises str =
 // =============================================================
 // LZ 通过 enum 定义异常类型。无预设层次结构。
 
-enum AppError:
+enum AppError =
     NotFound(str)
     InvalidInput(str)
     PermissionDenied(str)
 
-enum FileError:
+enum FileError =
     ReadError(str)
     WriteError(str)
     ParseError(int, str)

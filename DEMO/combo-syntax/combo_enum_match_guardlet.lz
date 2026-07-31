@@ -1,0 +1,19 @@
+// combo-syntax（绿色回归测试）：enum + match + guard let 模式守卫
+enum Shape =
+    Circle(f64)
+    Rect(f64, f64)
+
+// guard let 在 match 之外做模式守卫
+def describe(s: Shape) -> str =
+    guard let Circle(r) = s else:
+        return "not a circle"
+    f"circle r={r}"
+
+def main() =
+    let c = Shape.Circle(2.0)
+    let name = match c:
+        case Circle(r) => f"circle {r}"
+        case Rect(w, h) => f"rect {w}x{h}"
+    print(name)                       // circle 2
+    print(describe(c))                // circle r=2
+    print(describe(Shape.Rect(3.0, 4.0)))   // not a circle

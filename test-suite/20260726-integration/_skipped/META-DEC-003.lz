@@ -1,0 +1,2 @@
+@export(Rust)
+def exported_fn() -> int = 42

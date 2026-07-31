@@ -1,7 +1,7 @@
 # Lang-Zong 编译器 — 测试状态与功能变更报告
 
 > 生成时间：2026-07-22 19:40（更新于 19:42）
-> 环境：Windows / Rust 1.96.0 / SUT：`target/debug/lang-zong.exe`
+> 环境：Windows / Rust 1.96.0 / SUT：`target/debug/lang-zone.exe`
 
 ---
 

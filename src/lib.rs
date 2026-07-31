@@ -5,6 +5,8 @@
 pub mod lexer;
 pub mod config;
 pub mod util;
+pub mod project;
+pub mod cache;
 pub mod simd;
 
 // ── L2 语法与宏层 ──
@@ -16,6 +18,9 @@ pub mod macros;
 pub mod types;
 pub mod magic;
 pub mod bridge;
+
+// ── L3.5 中间表示层 ──
+pub mod ir;
 
 // ── L4 代码生成层 ──
 pub mod codegen;

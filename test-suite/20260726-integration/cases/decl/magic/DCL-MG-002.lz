@@ -1,0 +1,7 @@
+struct Value =
+    n: int
+
+def main() =
+    a = Value(n: 1)
+    b = Value(n: 1)
+    print(a.n == b.n)

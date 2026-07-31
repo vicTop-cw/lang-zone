@@ -1,0 +1,13 @@
+// Bug-14 regression: `if parser.method()` must not report "cannot unify with bool"
+// (isolated from str/String and int/usize noise)
+struct Parser =
+    at_end: bool
+
+    def is_eof(self: Parser)-> bool =
+        self.at_end
+
+def step(p: Parser)-> int =
+    if p.is_eof():
+        1
+    else:
+        0

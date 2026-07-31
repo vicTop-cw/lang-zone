@@ -1,0 +1,4 @@
+def f(ref x: int) =
+    print(x)
+
+def main() = print(0)

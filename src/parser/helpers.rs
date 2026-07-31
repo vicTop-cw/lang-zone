@@ -10,8 +10,7 @@ pub fn is_expr_start(tok: &Token) -> bool {
     matches!(tok,
         Token::IntLit(_) | Token::FloatLit(_) | Token::StrLit(_)
         | Token::FStrLit(_) | Token::RawStrLit(_)
-        | Token::True | Token::False | Token::None_ | Token::Some_
-        | Token::Ok_ | Token::Err_ | Token::Ident(_)
+        | Token::True | Token::False | Token::Ident(_)
         | Token::LParen | Token::LBrack | Token::LBrace
         | Token::Minus | Token::Exclamation | Token::Not
     )

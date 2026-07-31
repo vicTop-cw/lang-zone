@@ -72,7 +72,8 @@ impl MacroInterpreter {
             MacroStmt::If { cond, then_body, else_body } => {
                 let cond_val = self.eval_expr(cond)?;
                 let is_true = !cond_val.is_empty()
-                    && !matches!(cond_val.tokens.first(), Some(Token::False) | Some(Token::None_));
+                    && !matches!(cond_val.tokens.first(), Some(Token::False))
+                    && !matches!(cond_val.tokens.first(), Some(Token::Ident(name)) if name == "None");
                 if is_true {
                     self.execute_stmts(then_body)
                 } else if let Some(else_stmts) = else_body {
@@ -124,7 +125,8 @@ impl MacroInterpreter {
             MacroExpr::IfExpr { cond, then_expr, else_expr } => {
                 let cond_val = self.eval_expr(cond)?;
                 let is_true = !cond_val.is_empty()
-                    && !matches!(cond_val.tokens.first(), Some(Token::False) | Some(Token::None_));
+                    && !matches!(cond_val.tokens.first(), Some(Token::False))
+                    && !matches!(cond_val.tokens.first(), Some(Token::Ident(name)) if name == "None");
                 if is_true {
                     self.eval_expr(then_expr)
                 } else if let Some(else_e) = else_expr {
@@ -275,7 +277,7 @@ impl MacroInterpreter {
                 let k = self.eval_expr(&args[0])?;
                 match self.context.get(&k.to_string()) {
                     Some(v) => Ok(Tokens::new(vec![Token::StrLit(v.clone())])),
-                    None => Ok(Tokens::new(vec![Token::None_])),
+                    None => Ok(Tokens::new(vec![Token::Ident("None".to_string())])),
                 }
             }
             "assert_parent" => {
@@ -514,7 +516,7 @@ fn token_matches_kind(token: &Token, kind: &str) -> bool {
             | Token::If | Token::Elif | Token::Else | Token::Match | Token::Case | Token::Guard
             | Token::For | Token::In | Token::While | Token::Loop | Token::Break | Token::Continue
             | Token::Return | Token::With | Token::Defer | Token::Try | Token::Catch | Token::Finally
-            | Token::Raise | Token::Raises | Token::Panic | Token::Async | Token::Await
+            | Token::Raise | Token::Raises | Token::Async | Token::Await
             | Token::Spawn | Token::Select | Token::Yield | Token::Mut | Token::Ref | Token::Owned
             | Token::Where | Token::Import | Token::From | Token::As | Token::Macro | Token::Comptime
             | Token::Self_ | Token::And | Token::Or | Token::Not | Token::Is

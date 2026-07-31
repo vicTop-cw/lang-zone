@@ -1,0 +1,15 @@
+// combo-syntax（绿色回归测试）：泛型 struct + 方法 + enum 返回值
+enum Maybe<T> =
+    Just(T)
+    Nothing
+
+struct Box<T> =
+    item: T
+
+    def get(self) -> Maybe<T> =
+        Maybe.Just(self.item)
+
+def main() =
+    let b = Box(item: 42)
+    let m = b.get()
+    print(m)

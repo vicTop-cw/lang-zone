@@ -1,0 +1,26 @@
+// ============================
+// LZ 错误边界合集 — 控制流 (05-控制流.md)
+// ============================
+
+// --- 1. while 冒号后不换行 ---
+// while True: print("...")     // ❌ 错误
+
+// --- 2. for 冒号后不换行 ---
+// for x in xs: print(x)        // ❌ 错误
+
+// --- 3. guard let else 不换行 ---
+// guard let Some(v) = opt else: return  // ❌ guard let 不支持单行
+
+// --- 4. match case 缺少模式 ---
+// match x:
+//     case:                     // ❌ 缺少 pattern
+
+// --- 5. break/continue 在循环外 ---
+// break                        // ❌ 不在循环中
+// continue                     // ❌ 不在循环中
+
+// --- 6. return 在等式体中多余 ---
+// def f() = return 42           // ❌ 等式体不需要 return
+
+// --- 7. guard 条件不是 bool 表达式 ---
+// guard x:                      // ❌ guard 条件必须是 bool 表达式

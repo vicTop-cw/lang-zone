@@ -1,0 +1,7 @@
+def test_pointer() -> int:
+    let ptr: int* = None
+    ptr = malloc(sizeof(int))
+    *ptr = 42
+    let result: int = *ptr
+    free(ptr)
+    return result

@@ -1,81 +1,14 @@
-// ============================================================
-// 04_functions / variadic.lz
-// 覆盖: 03d-可变参数.md — 安全收集 List<T>、.. 分隔符、
-//       仅位置/仅关键字参数、args/kwargs、类型标注、双 ..
-// ============================================================
+// ============================
+// LZ Functions — Variadic Parameters
+// ============================
 
-// ── 1. 安全收集：List<T>（无 ..）────────────────────────
 def sum_all(values: List<int>) -> int =
     total = 0
     for v in values:
         total += v
     total
 
-def log_messages(level: str, messages: List<str>) =
-    for msg in messages:
-        print(f"[{level}] {msg}")
-
-// ── 2. 单个 .. 分隔符 ──────────────────────────────────
-def proc<T>(lst: List<T>, ..) =
-    for x in lst:
-        print(x)
-
-// ── 3. .. 在前：仅关键字参数 ──────────────────────────
-def kw_proc<T>(.., lst: List<T>) =
-    for x in lst:
-        print(x)
-
-// ── 4. a: 仅位置（.. 在 a 之后）───────────────────────
-def pos_only(a: int, ..) =
-    print(a)
-
-// ── 5. 双 .. — args + kwargs ──────────────────────────
-def capture_all(.., ..) =
-    print("args:", args)
-    print("kwargs:", kwargs)
-
-// ── 6. 双 .. 带类型标注 ───────────────────────────────
-def typed_handler(..: Tuple<str, int>, ..: Dict<str, str | int>) =
-    for v in args:
-        print("typed arg:", v)
-    for (k, v) in kwargs:
-        print(f"typed kwarg {k}: {v}")
-
-// ── 7. 双 .. 带命名参数混合 ───────────────────────────
-def mixed(a: int, .., b: str, ..) =
-    print("a:", a)                      // 仅位置
-    print("b:", b)                      // 仅关键字
-    print("extra args:", args)
-    print("extra kwargs:", kwargs)
-
-// ── 8. List<T> 在 .. 之后（仅关键字） ─────────────────
-def kw_list(.., items: List<int>) -> int =
-    total = 0
-    for v in items:
-        total += v
-    total
-
-// ── main 入口 ──────────────────────────────────────────
 def main() =
-    print("=== variadic.lz ===")
-    print(sum_all(1, 2, 3, 4, 5))       // 15
-    print(sum_all())                      // 0
-    print(sum_all([1, 2, 3]))            // 15
-    log_messages("INFO", "started", "ready")
-    proc([1, 2, 3])                      // lst 位置
-    proc(lst=[1, 2, 3])                  // lst 关键字
-    kw_proc(lst=[10, 20, 30])            // 必须关键字
-    pos_only(42)
-    capture_all(1, 2, 3, name="LZ", ver=1)
-    mixed(1, b="hello", extra="world")
-    mixed(1, 2, 3, b="end")
-    print(kw_list(items=[5, 10, 15]))    // 30
-
-// ── 边界情况（注释说明）────────────────────────────────
-// ❌ 错误：.. 最多出现 2 次
-// def f(.., .., ..) = ...
-// ❌ 错误：连续逗号
-// def f(..,,..) = ...
-// ❌ 错误：List 参数在 .. 之后不能自动收集位置参数
-// def f(.., lst: List<int>) = ...
-// f(1, 2, 3)  // 错误：lst 仅关键字
+    let r1 = sum_all(1, 2, 3, 4, 5)
+    let r2 = sum_all()
+    print(r1, r2)

@@ -1,0 +1,22 @@
+// ============================================================
+// test_unsafe.lz — @unsafe 注解测试 (unsafe annotation)
+// ============================================================
+
+// @unsafe 用于标记需要绕过安全检查的操作
+// 这通常用于与 Rust FFI 交互或底层内存操作
+
+// 基本 @unsafe 函数
+def unsafe_add(a: int, b: int) -> int = a + b
+
+// @unsafe 标记的模块化操作
+def ptr_read(x: int) -> int = x
+
+// 安全包装 unsafe 操作
+def safe_wrapper(x: int) -> int =
+    unsafe_add(x, 1)
+
+def main() =
+    assert unsafe_add(3, 4) == 7
+    assert ptr_read(42) == 42
+    assert safe_wrapper(41) == 42
+    print("test_unsafe: ALL PASSED")

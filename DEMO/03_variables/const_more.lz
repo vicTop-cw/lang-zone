@@ -1,0 +1,18 @@
+// LZ 变量 — const 常量扩展
+// 覆盖：模块级 const、在表达式中使用 const
+
+const MAX: int = 100
+const GREETING: str = "hello"
+const PI: f64 = 3.14
+
+def main() =
+    print(MAX, GREETING, PI)
+
+    // const 参与表达式计算
+    let scaled = MAX * 2
+    let circ = 2.0 * PI * 10.0
+    print(scaled, circ)
+
+    // const 作为默认值来源
+    let limit = MAX
+    print(limit)

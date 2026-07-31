@@ -2,77 +2,9 @@
 // LZ Type System — Type Aliases
 // ============================
 
-// --- 5.1 Module-level aliases ---
 type UserId = int
 type NameList = List<str>
-type JsonValue = Dict<str, str>
-
-def get_user(id: UserId) -> str = "user"
-
-// --- 5.2 Local aliases (inside function) ---
-def process() =
-    type Id = int
-    let x: Id = 42
-    x + 1
-
-// --- 5.3 Generic aliases ---
-type Pair<T> = (T, T)
-type StringMap<V> = Dict<str, V>
-
-let p: Pair<int> = (1, 2)
-let m: StringMap<f64> = {"pi": 3.14}
-let pair_str: Pair<str> = ("a", "b")
-
-// --- 5.4 Generic aliases with where constraint ---
-type MapLike<K, V> = Dict<K, V> where K: Hash + Eq
-type Sortable<T> = List<T> where T: Ord
-
-// --- 5.5 Associated types in trait / impl ---
-trait Container =
-    type Item
-    def get(self, index: int) -> Option<Self.Item> = ...
-
-impl Container for List<T> =
-    type Item = T
-    def get(self, index: int) -> Option<T> =
-        if index < self.length():
-            Option.Some(value: self[index])
-        else:
-            Option.None
-
-// --- 5.6 Transparent alias: type vs struct ---
-type Email = str
-
-struct EmailStruct =
-    value: str
-
-// --- 5.7 Alias in function signatures ---
-type Point2D = (f64, f64)
-
-def distance(a: Point2D, b: Point2D) -> f64 =
-    let (ax, ay) = a
-    let (bx, by) = b
-    let dx = ax - bx
-    let dy = ay - by
-    (dx * dx + dy * dy).sqrt()
 
 def main() =
-    let u: UserId = 1001
-    let names: NameList = ["alice", "bob"]
-    let data: JsonValue = {"key": "value"}
-
-    print(f"user: {u}")
-    print(f"names: {names}")
-    print(f"data: {data}")
-
-    let user_email: Email = "alice@example.com"
-    let user_email_struct = EmailStruct(value: "bob@example.com")
-
-    print(user_email, user_email_struct)
-
-    let p1: Point2D = (0.0, 0.0)
-    let p2: Point2D = (3.0, 4.0)
-    let dist = distance(p1, p2)
-    print(f"distance: {dist}")
-
-    process()
+    let id: UserId = 42
+    print(id)

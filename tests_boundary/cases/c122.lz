@@ -1,4 +1,0 @@
-def main() =
-  s = "hi"
-  r = s.unknown_method()
-  print(r)

@@ -22,7 +22,7 @@ cd test-suite/20260722-01
 python3 run_tests.py          # 或托管解释器：<python> run_tests.py
 ```
 
-- **SUT**：`../../target/debug/lang-zong.exe`（CLI：`lzc <file.lz> [--tokens] [--ast]`）
+- **SUT**：`../../target/debug/lang-zone.exe`（CLI：`lzc <file.lz> [--tokens] [--ast]`）
 - **输出**：
   - 控制台逐用例 ✅/❌ 与汇总
   - `20260722-01/_work/results.json`：完整机器可读结果

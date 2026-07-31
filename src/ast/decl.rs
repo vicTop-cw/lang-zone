@@ -7,13 +7,22 @@ use super::stmt::Stmt;
 
 #[derive(Debug, Clone)]
 pub struct Module {
+    pub name: Option<String>,         // 模块名（来自 __name__ 或文件路径）
     pub imports: Vec<ImportStmt>,
     pub functions: Vec<Function>,
     pub structs: Vec<StructDef>,
     pub traits: Vec<TraitDef>,
     pub impls: Vec<ImplDef>,
     pub consts: Vec<ConstDef>,
+    pub type_aliases: Vec<TypeAliasDef>,
     pub tests: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeAliasDef {
+    pub name: String,
+    pub generics: Vec<String>,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +52,7 @@ pub struct Function {
     pub body: Vec<Stmt>,
     pub is_async: bool,
     pub is_abstract: bool,
+    pub is_iterator: bool,       // iterator 关键字定义的生成器函数
     pub decorators: Vec<Decorator>,
 }
 
@@ -74,6 +84,7 @@ pub struct StructDef {
     pub generics: Vec<String>,
     pub fields: Vec<Field>,
     pub methods: Vec<Function>,
+    pub magic_methods: Vec<Function>,
     pub is_enum: bool,
     pub decorators: Vec<Decorator>,
     pub repr_attr: Option<String>,

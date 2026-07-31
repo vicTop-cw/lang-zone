@@ -1,0 +1,5 @@
+def triple(n: int) -> int =
+    n * 3
+
+def main() =
+    print(triple(33))

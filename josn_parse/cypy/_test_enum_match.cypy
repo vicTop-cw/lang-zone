@@ -1,0 +1,85 @@
+"""Test enum and match/case features in Cypy."""
+
+enum JsonType:
+    NULL = 0
+    BOOL = 1
+    NUMBER = 2
+    STRING = 3
+    ARRAY = 4
+    OBJECT = 5
+
+
+def describe_json_type(t: JsonType) -> str:
+    """Match on enum variants using guard conditions."""
+    match t:
+        case n if n == JsonType.NULL:
+            return "null value"
+        case n if n == JsonType.BOOL:
+            return "boolean (true/false)"
+        case n if n == JsonType.NUMBER:
+            return "number (integer or float)"
+        case n if n == JsonType.STRING:
+            return "string"
+        case n if n == JsonType.ARRAY:
+            return "array (ordered list)"
+        case n if n == JsonType.OBJECT:
+            return "object (key-value pairs)"
+        case _:
+            return "unknown type"
+
+
+def json_type_name(t: JsonType) -> str:
+    """Use match with guard conditions."""
+    match t:
+        case n if n == JsonType.NULL:
+            return "NULL"
+        case n if n == JsonType.BOOL:
+            return "BOOL"
+        case n if n == JsonType.NUMBER:
+            return "NUMBER"
+        case n if n == JsonType.STRING:
+            return "STRING"
+        case n if n == JsonType.ARRAY:
+            return "ARRAY"
+        case n if n == JsonType.OBJECT:
+            return "OBJECT"
+        case _:
+            return "UNKNOWN"
+
+
+def is_scalar_type(t: JsonType) -> bool:
+    """Use match with guard conditions to check scalar types."""
+    match t:
+        case n if n == JsonType.NULL:
+            return True
+        case n if n == JsonType.BOOL:
+            return True
+        case n if n == JsonType.NUMBER:
+            return True
+        case n if n == JsonType.STRING:
+            return True
+        case _:
+            return False
+
+
+def is_collection_type(t: JsonType) -> bool:
+    """Use match with OR pattern for simple integer matching."""
+    match t:
+        case 4 | 5:
+            return True
+        case _:
+            return False
+
+
+def main() -> int:
+    # Test all enum variants
+    types = [JsonType.NULL, JsonType.BOOL, JsonType.NUMBER, JsonType.STRING, JsonType.ARRAY, JsonType.OBJECT]
+
+    for jt in types:
+        name = json_type_name(jt)
+        desc = describe_json_type(jt)
+        scalar = is_scalar_type(jt)
+        collection = is_collection_type(jt)
+        print(f"{name}: {desc} (scalar={scalar}, collection={collection})")
+
+    return 0

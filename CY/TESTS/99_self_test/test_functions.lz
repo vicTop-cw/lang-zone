@@ -1,0 +1,42 @@
+// LZ 自测 — 变量和绑定
+def double(x: int) -> int = x * 2
+
+def main() =
+    // let 不可变绑定
+    let x: int = 42
+    assert x == 42
+
+    // 默认可变绑定
+    y = 10
+    y += 5
+    assert y == 15
+
+    // 函数调用
+    assert double(5) == 10
+    assert double(0) == 0
+    assert double(-3) == -6
+
+    // 默认参数
+    def greet(name: str = "world") -> str =
+        f"Hello, {name}"
+    assert greet() == "Hello, world"
+    assert greet("LZ") == "Hello, LZ"
+
+    // 块体函数
+    def max(a: int, b: int) -> int =
+        if a > b:
+            a
+        else:
+            b
+    assert max(3, 7) == 7
+    assert max(10, 5) == 10
+
+    // 返回语句
+    def abs(n: int) -> int =
+        if n < 0:
+            return -n
+        n
+    assert abs(5) == 5
+    assert abs(-5) == 5
+
+    print("✅ 所有变量和函数测试通过")

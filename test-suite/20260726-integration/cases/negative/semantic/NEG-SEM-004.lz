@@ -1,0 +1,9 @@
+trait Mutator =
+    def update(self: mut Self)
+
+struct S =
+    v: int
+
+impl Mutator for S:
+    def update(self: S):
+        pass

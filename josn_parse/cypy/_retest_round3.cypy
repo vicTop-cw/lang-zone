@@ -1,0 +1,48 @@
+# ============================================================
+# Bug 复测: Round 3 - 指针、泛型与并发
+# ============================================================
+
+# Bug-R3-1: 指针类型仅允许在构建块内使用
+# def test_pointer() -> int:
+#     let ptr: int* = None  # 如果报错则 Bug-R3-1 仍存在
+#     return 0
+
+# Bug-R3-2: free 未定义为内置函数
+# def test_free() -> int:
+#     free(ptr)  # 如果报错则 Bug-R3-2 仍存在
+#     return 0
+
+# Bug-R3-3: malloc 参数应为 sizeof() 而非数值
+# def test_malloc() -> int:
+#     let ptr: int* = malloc(4)  # 如果报错则 Bug-R3-3 仍存在
+#     return 0
+
+# Bug-R3-4: 指针算术返回类型错误
+# def test_ptr_arith() -> int:
+#     let ptr: int* = malloc(sizeof(int))
+#     let p2: int* = ptr + 1  # 如果报错则 Bug-R3-4 仍存在
+#     return 0
+
+# Bug-R3-5: 泛型类型参数 T 未注册到作用域
+# def identity[T](x: T) -> T:  # 如果报错则 Bug-R3-5 仍存在
+#     return x
+
+# Bug-R3-6: spawn 语句在代码生成阶段丢失
+# def test_spawn() -> int:
+#     spawn print("spawned")  # 如果报错则 Bug-R3-6 仍存在
+#     return 0
+
+# Bug-R3-7: go 语句在代码生成阶段丢失
+# def test_go() -> int:
+#     go print("go_routine")  # 如果报错则 Bug-R3-7 仍存在
+#     return 0
+
+# Bug-R3-8: nogil 块语法不支持
+# def test_nogil() -> int:
+#     nogil:  # 如果报错则 Bug-R3-8 仍存在
+#         let x: int = 1 + 1
+#     return 0
+
+# 正常特性验证
+def test_normal() -> int:
+    return 42

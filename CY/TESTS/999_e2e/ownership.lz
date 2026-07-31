@@ -1,0 +1,5 @@
+// 所有权端到端测试 — ^ move + use-after-move
+def main() =
+    x = 42
+    y = x^
+    print(x)

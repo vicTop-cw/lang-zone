@@ -1,0 +1,10 @@
+﻿struct Parser =
+    input: str
+    pos: int
+
+    def test_len(self: Parser)-> bool =
+        self.pos < self.input.len()
+
+def main() =
+    p = Parser("hello", 0)
+    print(p.test_len())

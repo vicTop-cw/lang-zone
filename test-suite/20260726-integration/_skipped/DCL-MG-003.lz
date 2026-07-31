@@ -1,0 +1,10 @@
+struct MyArr =
+    data: List<int>
+
+magic __getitem__(self: MyArr, idx: int) -> int = self.data[idx]
+
+def main() =
+    arr = MyArr(data: [10, 20, 30])
+    print(arr[0])
+    print(arr[1])
+    print(arr[2])

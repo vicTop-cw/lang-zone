@@ -1,0 +1,14 @@
+def test_0() -> int:
+    guard (((-(1 == 0)))) else:
+        return -1
+    defer:
+        let cleanup: int = 0
+    defer:
+        let cleanup: int = 0
+
+def test_1() -> int:
+    x = False
+    print("a")
+
+def main() -> int:
+    return 0

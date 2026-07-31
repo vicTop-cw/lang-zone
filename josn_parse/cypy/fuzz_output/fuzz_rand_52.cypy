@@ -1,0 +1,25 @@
+def test_0() -> int:
+    if (print(x)):
+        return 1
+    else:
+        return 0
+    let x: float = -3.14
+    return (y)
+    defer:
+        let cleanup: int = 0
+    x = -1
+
+def test_1() -> int:
+    return (-(-(y >= print(42))))
+    let x: int = -1
+
+def test_2() -> int:
+    while result:
+        break
+    if ((-((0)))):
+        return 1
+    else:
+        return 0
+
+def main() -> int:
+    return 0

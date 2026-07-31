@@ -1,0 +1,7 @@
+// Build block tests — ~: call build block
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    r1 = add ~:
+        (10, 20)
+    print(r1)

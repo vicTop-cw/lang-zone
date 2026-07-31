@@ -1,0 +1,5 @@
+def f(x: int = 10) -> int = x * 2
+
+def main() =
+    print(f())
+    print(f(21))

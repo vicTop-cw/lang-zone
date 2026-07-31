@@ -1,0 +1,7 @@
+trait Calc = def compute(self: Self, x: int) -> int
+
+struct Bad =
+    v: int
+
+impl Calc for Bad:
+    def compute(self: Bad, x: str) -> str = x

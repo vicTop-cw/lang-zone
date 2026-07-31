@@ -1,0 +1,10 @@
+def test_0() -> int:
+    defer:
+        let cleanup: int = 0
+    x = print(total)
+    guard print(total) else:
+        return -1
+    let x: double = 0.0
+
+def main() -> int:
+    return 0

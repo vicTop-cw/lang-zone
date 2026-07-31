@@ -1,0 +1,8 @@
+// ==== Ownership ====
+def take(owned data: str) =
+    print(f"took: {data}")
+
+def main() =
+    let s = "hello"
+    let moved = s^
+    take(moved)

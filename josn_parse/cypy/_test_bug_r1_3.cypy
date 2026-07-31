@@ -1,0 +1,9 @@
+class Simple:
+    let value: int = 0
+    
+    def get_value(self) -> int:
+        return self.value
+
+def test_self_param() -> int:
+    s = Simple {value: 42}
+    return s.get_value()

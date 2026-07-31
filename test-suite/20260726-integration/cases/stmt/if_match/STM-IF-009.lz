@@ -1,0 +1,7 @@
+def f(x: int) -> str:
+    match x:
+        case 0..10 => "small"
+        case _ => "large"
+
+def main() =
+    print(f(5))

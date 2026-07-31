@@ -1,0 +1,10 @@
+def f(n: int) -> str:
+    match n:
+        case 0:
+            "zero"
+        case _:
+            "other"
+
+def main() =
+    print(f(0))
+    print(f(5))

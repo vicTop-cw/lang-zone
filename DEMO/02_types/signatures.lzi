@@ -1,0 +1,25 @@
+{
+  "version": "0.1.0",
+  "modules": {
+    "DEMO::02_types::containers": {
+      "functions": {
+        "main": {
+          "params": [],
+          "return": "Unit",
+          "generics": [],
+          "generic_bounds": {},
+          "where_clause": {}
+        }
+      },
+      "structs": {},
+      "consts": {},
+      "type_aliases": {}
+    }
+  },
+  "unresolved": [
+    "DEMO\\02_types\\option_result.lz: parse error: Expected Dedent, got Ident(\"Option\") at pos 70",
+    "DEMO\\02_types\\primitives.lz: parse error: Expected variable name, got LParen",
+    "DEMO\\02_types\\type_aliases.lz: parse error: Expected Dedent, got Type at pos 169",
+    "DEMO\\02_types\\type_conversion.lz: parse error: Expected Eq, got LParen at pos 154"
+  ]
+}

@@ -1,0 +1,17 @@
+def test_0() -> int:
+    while ((((100)) < "") + (print((1)))):
+        break
+    let x: bool = True
+
+def test_1() -> int:
+    match print(print(100)):
+        case 0:
+            return 0
+        case _:
+            return -1
+    let x: double = 0.0
+    while (y < print(((-True)))):
+        break
+
+def main() -> int:
+    return 0

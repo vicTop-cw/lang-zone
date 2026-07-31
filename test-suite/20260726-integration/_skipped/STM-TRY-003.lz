@@ -1,0 +1,8 @@
+def main() =
+    try:
+        print("try")
+        raise "err"
+    catch e:
+        print("catch")
+    finally:
+        print("finally")

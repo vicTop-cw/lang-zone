@@ -1,0 +1,5 @@
+# Test: addr() with Python object should fail
+def main() -> int:
+    s: str = "hello"
+    ptr: str* = addr(s)  # Should fail: cannot take address of Python object
+    return 0

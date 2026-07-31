@@ -1,0 +1,65 @@
+// Test 1: Closure single param
+def test_closure() =
+    double = |x| x * 2
+    print(double(5))
+
+// Test 2: Closure multi param
+def test_closure_multi() =
+    add = |a, b| a + b
+    print(add(3, 4))
+
+// Test 3: Pipe
+def test_pipe() =
+    double = |x| x * 2
+    add_one = |x| x + 1
+    result = 5 |> double |> add_one
+    print(result)
+
+// Test 4: List comprehension
+def test_list_comp() =
+    result = [x * 2 for x in 1..5]
+    print(result)
+
+// Test 5: f-string
+def test_fstring() =
+    name = "World"
+    msg = f"Hello, {name}!"
+    print(msg)
+
+// Test 6: Safe navigation on None
+struct Person =
+    name: str
+
+def test_safe_nav_none() =
+    person = None
+    result = person?.name ?? "default"
+    print(result)
+
+// Test 6b: Safe navigation on Some
+def test_safe_nav_some() =
+    person = Person(name: "Alice")
+    result = person?.name ?? "default"
+    print(result)
+
+// Test 7: Walrus operator
+def test_walrus() =
+    x = 10
+    if (n := x) > 0:
+        print(n)
+
+def main() =
+    print("=== Closure ===")
+    test_closure()
+    test_closure_multi()
+    print("=== Pipe ===")
+    test_pipe()
+    print("=== List Comp ===")
+    test_list_comp()
+    print("=== f-string ===")
+    test_fstring()
+    print("=== Safe Nav None ===")
+    test_safe_nav_none()
+    print("=== Safe Nav Some ===")
+    test_safe_nav_some()
+    print("=== Walrus ===")
+    test_walrus()

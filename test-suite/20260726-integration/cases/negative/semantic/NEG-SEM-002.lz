@@ -1,0 +1,9 @@
+trait Full =
+    def a(self: Self) -> int
+    def b(self: Self) -> int
+
+struct Part =
+    v: int
+
+impl Full for Part:
+    def a(self: Part) -> int = 1

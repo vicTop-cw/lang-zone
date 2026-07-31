@@ -1,0 +1,7 @@
+trait Clone = def clone(self: Self) -> Self
+
+struct Wrapper<T> =
+    val: T
+
+impl<T> Clone for Wrapper<T> where T <: Clone:
+    def clone(self: Wrapper<T>) -> Wrapper<T> = Wrapper(val: self.val.clone())

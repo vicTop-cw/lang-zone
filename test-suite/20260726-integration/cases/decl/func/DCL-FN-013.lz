@@ -1,0 +1,5 @@
+def f() -> int:
+    42
+
+def main() =
+    print(f())

@@ -1,0 +1,13 @@
+// 规范目标特性（安全导航 ?. 链式待验证）
+// 出处：SYNTAX/04-表达式.md — 安全导航
+// 预期语法：
+struct User =
+    profile: Profile
+
+struct Profile =
+    name: str
+
+def main() =
+    let u: Option<User> = Some(User(profile: Profile(name: "x")))
+    let name = u?.profile?.name ?? "anon"
+    print(name)

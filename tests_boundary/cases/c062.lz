@@ -1,3 +1,0 @@
-def main() =
-  loop
-    print(1)

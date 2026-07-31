@@ -1,4 +1,0 @@
-def main() =
-  mut x = 5
-  x = 6
-  print(x)

@@ -1,0 +1,6 @@
+// tuple 解构测试
+def main() =
+    let (a, b) = (1, "hello")
+    assert a == 1
+    assert b == "hello"
+    print("tuple destructuring ok")

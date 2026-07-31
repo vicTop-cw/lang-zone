@@ -1,0 +1,23 @@
+// ==== If / Elif / Else ====
+def grade(score: int) -> str =
+    if score >= 90:
+        "A"
+    elif score >= 80:
+        "B"
+    elif score >= 70:
+        "C"
+    else:
+        "F"
+
+def main() =
+    print(grade(95))
+    print(grade(85))
+    // if as expression
+    let x = 10
+    let sign = if x > 0:
+            "positive"
+        elif x < 0:
+            "negative"
+        else:
+            "zero"
+    print(sign)

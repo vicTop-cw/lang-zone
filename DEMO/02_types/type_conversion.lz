@@ -10,10 +10,16 @@ def main() =
     let i: int = 3.14 as int
     let b: bool = 1 as bool
 
-    print(f"int {x} -> f64 {y}")
-    print(f"int {x} -> str {s}")
-    print(f"f64 3.14 -> int {i}")
-    print(f"int 1 -> bool {b}")
+    print("int x -> f64 y")
+    print(x)
+    print(y)
+    print("int x -> str s")
+    print(x)
+    print(s)
+    print("f64 3.14 -> int i")
+    print(i)
+    print("int 1 -> bool b")
+    print(b)
 
     // --- 6.2 Type inference examples ---
     let a = 42
@@ -25,18 +31,30 @@ def main() =
     let g = 3.14
     let h = True
 
-    print(a, b2, c, d, e, f, g, h)
+    print(a)
+    print(b2)
+    print(c)
+    print(d)
+    print(e)
+    print(f)
+    print(g)
+    print(h)
 
     // --- 6.3 Function type ---
-    let add: fn(int, int) -> int = |a, b| a + b
-    let mul: fn(int, int) -> int = |a, b| a * b
+    let add: fn(int, int) -> int = |x, y| x + y
+    let mul: fn(int, int) -> int = |x, y| x * y
     let greet: fn(str) -> str = |name| f"Hello, {name}"
 
     let sum = add(10, 20)
     let product = mul(6, 7)
     let greeting = greet("LZ")
 
-    print(f"add: {sum}, mul: {product}, greet: {greeting}")
+    print("add:")
+    print(sum)
+    print("mul:")
+    print(product)
+    print("greet:")
+    print(greeting)
 
     // --- 6.4 Type annotations ---
     let annotated_list: List<int> = [1, 2, 3]
@@ -45,12 +63,20 @@ def main() =
     let annotated_bool: bool = True
     let annotated_tuple: (int, str) = (42, "answer")
 
-    print(annotated_list, annotated_str, annotated_f64,
-          annotated_bool, annotated_tuple)
+    print(annotated_list)
+    print(annotated_str)
+    print(annotated_f64)
+    print(annotated_bool)
+    print(annotated_tuple)
 
     // --- 6.5 Conversion between compatible numeric types ---
     let small: int = 10
     let large: f64 = small as f64
     let back: int = large as int
 
-    print(f"small={small}, large={large}, back={back}")
+    print("small")
+    print(small)
+    print("large")
+    print(large)
+    print("back")
+    print(back)

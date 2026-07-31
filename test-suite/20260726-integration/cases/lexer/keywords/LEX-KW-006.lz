@@ -1,0 +1,2 @@
+import std.io
+from std.io import print as p

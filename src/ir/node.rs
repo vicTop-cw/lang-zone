@@ -1,0 +1,556 @@
+// Lang-Zone 编译器 — ir/node.rs
+// LZIR-H 节点定义：Item, Stmt, Expr, Pattern 及辅助类型
+//
+// 形态：强类型树 / ANF 风格。每个 Expr 携带 IrType 与 Span。
+
+use super::types::IrType;
+
+// ── 源码位置 ──
+
+/// 源码区间
+#[derive(Debug, Clone, PartialEq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+    pub col: usize,
+}
+
+impl Span {
+    pub fn new(line: usize, col: usize) -> Self {
+        Span { start: 0, end: 0, line, col }
+    }
+    pub fn unknown() -> Self {
+        Span { start: 0, end: 0, line: 0, col: 0 }
+    }
+}
+
+// ── 泛型参数 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenericParam {
+    pub name: String,
+    pub bounds: Vec<IrType>,
+    pub default: Option<IrType>,
+}
+
+// ── 魔法属性 ──
+
+// ── 模块顶层指令 ──
+
+/// 后端语言
+#[derive(Debug, Clone, PartialEq)]
+pub enum Backend {
+    Rust,
+    Cython,
+    Wasm,
+}
+
+impl Default for Backend {
+    fn default() -> Self { Backend::Rust }
+}
+
+/// 模块类型
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModuleKind {
+    Normal,
+    Macro,
+    Template,
+    Prelude,
+    Test,
+}
+
+impl Default for ModuleKind {
+    fn default() -> Self { ModuleKind::Normal }
+}
+
+/// 顶层编译指令
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModuleDirective {
+    pub backend: Backend,
+    pub kind: ModuleKind,
+    pub bridge: Option<String>,
+    pub bridge_tier: Option<String>,
+    pub name: Option<String>,
+    pub doc: Option<String>,
+    pub public: Vec<String>,
+    pub private: Vec<String>,
+    pub deps: Vec<String>,
+    pub no_std: bool,
+}
+
+impl Default for ModuleDirective {
+    fn default() -> Self {
+        ModuleDirective {
+            backend: Backend::default(),
+            kind: ModuleKind::default(),
+            bridge: None, bridge_tier: None,
+            name: None, doc: None,
+            public: vec![], private: vec![], deps: vec![],
+            no_std: false,
+        }
+    }
+}
+
+/// 旧字段，保留兼容
+#[derive(Debug, Clone, PartialEq)]
+pub struct MagicAttrs {
+    pub name: Option<String>,
+    pub doc: Option<String>,
+    pub all: Option<Vec<String>>,
+    pub bridge: Option<String>,
+    pub bridge_tier: Option<String>,
+}
+
+impl Default for MagicAttrs {
+    fn default() -> Self {
+        MagicAttrs { name: None, doc: None, all: None, bridge: None, bridge_tier: None }
+    }
+}
+
+impl From<&ModuleDirective> for MagicAttrs {
+    fn from(d: &ModuleDirective) -> Self {
+        MagicAttrs {
+            name: d.name.clone(),
+            doc: d.doc.clone(),
+            all: if d.public.is_empty() { None } else { Some(d.public.clone()) },
+            bridge: d.bridge.clone(),
+            bridge_tier: d.bridge_tier.clone(),
+        }
+    }
+}
+
+// ── 内建装饰器 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Intrinsic {
+    pub kind: IntrinsicKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IntrinsicKind {
+    Memoize,
+    Parallel,
+    Curry,
+    Overload,
+    Derive,
+    TailCall,
+    Export(Vec<String>),  // @export(Rust), @export(Python)
+    Init,
+}
+
+// ── 函数签名（用于 Trait 声明） ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnSig {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub params: Vec<IrType>,
+    pub ret: IrType,
+}
+
+// ── 参数 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    pub name: String,
+    pub ty: IrType,
+    pub is_mut: bool,
+}
+
+// ── 字段 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Field {
+    pub name: String,
+    pub ty: IrType,
+}
+
+// ── 枚举变体 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Variant {
+    pub name: String,
+    pub fields: Vec<IrType>,   // 变体携带的数据类型（空 = 无字段变体）
+}
+
+// ══════════════════════════════════════════════════════════════
+// Item — 顶层定义项
+// ══════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Item {
+    FnDef(FnDef),
+    StructDef(StructDef),
+    EnumDef(EnumDef),
+    TraitDef(TraitDef),
+    Impl(ImplDef),
+    Use(UseStmt),
+    Const(ConstDef),
+    Test(TestDef),
+}
+
+/// 函数定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub params: Vec<Param>,
+    pub ret_ty: IrType,
+    pub body: Block,
+    pub intrinsics: Vec<Intrinsic>,
+    pub is_async: bool,
+    pub is_iterator: bool,   // iterator 关键字定义的生成器
+    pub is_test: bool,
+    pub span: Span,
+}
+
+/// 结构体定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub fields: Vec<Field>,
+    pub methods: Vec<FnDef>,
+    pub span: Span,
+}
+
+/// 枚举定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub variants: Vec<Variant>,
+    pub span: Span,
+}
+
+/// Trait 定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    pub supertraits: Vec<IrType>,
+    pub methods: Vec<FnSig>,
+}
+
+/// Impl 定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplDef {
+    pub trait_: Option<IrType>,   // None = inherent impl
+    pub for_type: IrType,
+    pub generics: Vec<GenericParam>,
+    pub methods: Vec<FnDef>,
+}
+
+/// Use 语句（仅记录依赖路径）
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseStmt {
+    pub path: Vec<String>,
+    pub items: Vec<String>,
+    pub is_from: bool,
+}
+
+/// 常量定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConstDef {
+    pub name: String,
+    pub ty: IrType,
+    pub value: Expr,
+}
+
+/// 测试定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestDef {
+    pub name: String,
+    pub body: Block,
+}
+
+// ══════════════════════════════════════════════════════════════
+// Stmt — 语句节点
+// ══════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stmt {
+    Let {
+        name: String,
+        ty: IrType,
+        value: Expr,
+        is_mut: bool,
+    },
+    Assign {
+        target: Expr,    // 可赋值左值（Var / FieldAccess / IndexGet）
+        value: Expr,
+    },
+    Return {
+        value: Option<Expr>,
+    },
+    ExprStmt {
+        expr: Expr,
+    },
+    If {
+        cond: Expr,
+        then_branch: Block,
+        else_branch: Option<Block>,
+    },
+    For {
+        var: String,
+        iter: Expr,
+        guard: Option<Expr>,
+        body: Block,
+    },
+    While {
+        cond: Expr,
+        guard: Option<Expr>,
+        body: Block,
+    },
+    Match {
+        scrutinee: Expr,
+        arms: Vec<(Pattern, Block)>,
+    },
+    Raise {
+        value: Expr,
+    },
+    Assert {
+        cond: Expr,
+        message: Option<Expr>,
+    },
+    Yield {
+        value: Expr,
+    },
+    YieldFrom {
+        iter: Expr,
+    },
+    Break,
+    Continue,
+    Defer {
+        body: Block,
+    },
+    /// try/catch/else/finally 错误捕获
+    TryCatch {
+        body: Block,
+        catches: Vec<(Option<Pattern>, Block)>,
+        else_body: Option<Block>,
+        finally_body: Option<Block>,
+    },
+    /// 裸 Block（含构建块块体）
+    Block {
+        stmts: Vec<Stmt>,
+    },
+}
+
+/// 代码块
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
+    pub ty: IrType,       // 块的结果类型（最后一条语句的表达式类型，或 Unit）
+}
+
+// ══════════════════════════════════════════════════════════════
+// Expr — 表达式节点（强类型，携带 IrType + Span）
+// ══════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub ty: IrType,
+    pub span: Span,
+}
+
+impl Expr {
+    pub fn new(kind: ExprKind, ty: IrType, span: Span) -> Self {
+        Expr { kind, ty, span }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprKind {
+    /// 字面量
+    Lit(LitKind),
+
+    /// 变量引用
+    Var(String),
+
+    /// 普通调用 f(args)
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+
+    /// 方法调用 x.method(args)
+    MethodCall {
+        receiver: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
+
+    /// 字段访问 x.field
+    FieldAccess {
+        base: Box<Expr>,
+        field: String,
+    },
+
+    /// 下标读取 base[key]（来自 ^: 脱糖 / []）
+    IndexGet {
+        base: Box<Expr>,
+        key: Box<Expr>,
+    },
+
+    /// 下标赋值（__setitem__）
+    IndexSet {
+        base: Box<Expr>,
+        key: Box<Expr>,
+        value: Box<Expr>,
+    },
+
+    /// 二元运算
+    BinOp {
+        op: BinOpKind,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
+
+    /// 一元运算
+    UnOp {
+        op: UnOpKind,
+        operand: Box<Expr>,
+    },
+
+    /// 表达式型 if（三元 a if cond else b）
+    IfExpr {
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        els: Box<Expr>,
+    },
+
+    /// 匿名函数 |a, b| a + b
+    Lambda {
+        params: Vec<Param>,
+        body: Box<Expr>,
+    },
+
+    /// 结构体构造 Adder(base: 10)
+    StructCtor {
+        name: String,
+        fields: Vec<(String, Expr)>,
+    },
+
+    /// 枚举构造 Some(x) / Ok(v)
+    EnumCtor {
+        enum_name: String,
+        variant: String,
+        args: Vec<Expr>,
+    },
+
+    /// 生成器 *: yield e 脱糖
+    GenExpr {
+        yield_of: Box<Expr>,
+    },
+
+    /// 类型转换（隐式 .into() / 显式 as）
+    Cast {
+        expr: Box<Expr>,
+        target: IrType,
+    },
+
+    /// 魔法方法调用（__iter__ / __next__ / __str__ / __eq__ 等）
+    MagicCall {
+        kind: MagicKind,
+        args: Vec<Expr>,
+    },
+
+    /// 代码块作为表达式
+    BlockExpr {
+        block: Block,
+    },
+
+    /// 元组字面量
+    TupleLit(Vec<Expr>),
+    Tuple(Vec<Expr>),
+
+    /// List 字面量
+    ListLit(Vec<Expr>),
+
+    /// List 字面量 (cython 别名)
+    List(Vec<Expr>),
+
+    /// Dict 字面量 (cython)
+    Dict(Vec<(Expr, Expr)>),
+
+    /// Range 表达式 (cython)
+    Range { start: Option<Box<Expr>>, end: Box<Expr>, inclusive: bool },
+
+    /// 管道调用 x |> f(args)
+    Pipe {
+        receiver: Box<Expr>,
+        func: String,
+        args: Vec<Expr>,
+    },
+}
+
+// ── 辅助类型 ──
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LitKind {
+    Int(i64),
+    F64(f64),
+    Str(String),
+    Bool(bool),
+    Unit,
+    None_,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinOpKind {
+    Add, Sub, Mul, Div, Mod,
+    Eq, Neq, Lt, Gt, Le, Ge,
+    And, Or,
+    BitAnd, BitOr, Xor, Shl, Shr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnOpKind {
+    Neg, Not, Ref, MutRef, Deref,
+}
+
+/// 魔法方法种类
+#[derive(Debug, Clone, PartialEq)]
+pub enum MagicKind {
+    GetItem,         // __getitem__
+    SetItem,         // __setitem__
+    Call,            // __call__
+    Iter,            // __iter__ (→ into_iter)
+    Next,            // __next__
+    Display,         // __str__
+    Eq,              // __eq__
+    Cmp,             // __cmp__
+    Drop,            // __drop__
+    Rev,             // __rev__
+    Len,             // __len__
+    Add, Sub, Mul,   // 算术魔法
+    Neg, Not_,        // 一元魔法
+    IntoIter,        // __into_iter__
+    SizeHint,        // __size_hint__
+    IterStrategy,    // __iter_strategy__
+}
+
+// ══════════════════════════════════════════════════════════════
+// Pattern — 模式匹配节点
+// ══════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Wildcard,
+    Ident(String),
+    Lit(LitKind),
+    Tuple(Vec<Pattern>),
+    Struct {
+        name: String,
+        fields: Vec<(String, Pattern)>,
+    },
+    Enum {
+        enum_name: String,
+        variant: String,
+        args: Vec<Pattern>,
+    },
+}

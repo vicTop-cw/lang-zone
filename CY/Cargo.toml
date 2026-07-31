@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "LZ → Cython compiler — transpile LZ to .pyx, compile to .pyd"
 
+[workspace]
+
 [dependencies]
 # 零外部依赖：与 LZ 原版编译器一致
+lang-zone = { path = ".." }

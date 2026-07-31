@@ -7,28 +7,28 @@
 // ============================
 
 // --- 1. Basic enum (unit variants) ---
-enum Color:
+enum Color =
     Red
     Green
     Blue
 
 // --- 2. Enum with data variants (keyword-arg style) ---
-enum Shape:
+enum Shape =
     Circle(x: f64, y: f64, radius: f64)
     Rectangle(width: f64, height: f64)
     Square(side: f64)
 
 // --- 3. Generic enum ---
-enum Option<T>:
+enum Option<T> =
     Some(value: T)
     None
 
-enum Result<T, E>:
+enum Result<T, E> =
     Ok(value: T)
     Err(error: E)
 
 // --- 4. Enum methods ---
-enum Option<T>:
+enum Option<T> =
     def is_some(self) -> bool =
         match self:
             Option.Some(value: _) => True
@@ -54,7 +54,7 @@ enum Option<T>:
             Option.Some(value: v) => f(v)
             Option.None => Option.None
 
-enum Result<T, E>:
+enum Result<T, E> =
     def is_ok(self) -> bool =
         match self:
             Result.Ok(value: _) => True

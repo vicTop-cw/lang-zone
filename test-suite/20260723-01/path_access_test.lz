@@ -1,16 +1,16 @@
 // E2E test: PathAccess 桥接解析
-// fs::exists("file") → std::path::Path::new("file").exists()
-// io::stdout() → std::io::stdout()
+// fs.exists("file") → std.path.Path.new("file").exists()
+// io.stdout() → std.io.stdout()
 
-import std::fs
-import std::io
+import std.fs
+import std.io
 
 def test_path_exists() -> str =
-    r = fs::exists("test_file.txt")
+    r = fs.exists("test_file.txt")
     "ok"
 
 def test_io_stdout() -> str =
-    io::stdout()
+    io.stdout()
     "ok"
 
 def main() =

@@ -1,0 +1,13 @@
+// combo-syntax：for 守卫 + struct 构造 + 方法调用
+def is_positive(x: int) -> bool = True
+
+struct Point =
+    x: int
+    y: int
+
+    def total(self) -> int = self.x + self.y
+
+def main() =
+    let pts = [Point(x: 1, y: 2), Point(x: -3, y: 4), Point(x: 5, y: -6)]
+    for p in pts if is_positive(p.x):
+        print(p.total())

@@ -1,3 +1,0 @@
-def main() =
-  y = 5 |> undefined_fn
-  print(y)

@@ -1,0 +1,15 @@
+// 规范目标特性（while/for 的 else 分支待验证）
+// 出处：SYNTAX/05-控制流.md — 循环 else
+// 预期语法：
+def main() =
+    let i = 0
+    while i < 3:
+        i += 1
+    else:
+        print("completed without break")
+
+    let total = 0
+    for k in 1..4:
+        total += k
+    else:
+        print(f"total={total}")

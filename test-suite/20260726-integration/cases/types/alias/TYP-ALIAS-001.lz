@@ -1,0 +1,2 @@
+type ID = int
+def f(x: ID) -> ID = 42

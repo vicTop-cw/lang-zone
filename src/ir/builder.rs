@@ -299,6 +299,7 @@ fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {
         AstStmt::Return(None) => IrType::Unit,
         AstStmt::Yield(Some(e)) => IrType::Named { path: "Itor".into(), args: vec![infer_expr_type(e, ctx)] },
         AstStmt::Yield(None) => IrType::Unit,
+        AstStmt::YieldFrom(e) => IrType::Named { path: "Itor".into(), args: vec![infer_expr_type(e, ctx)] },
         _ => IrType::Unit,
     }
 }
@@ -807,6 +808,10 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             Stmt::Yield { value }
         },
 
+        AstStmt::YieldFrom(e) => {
+            Stmt::YieldFrom { iter: convert_expr(e, ctx) }
+        },
+
         AstStmt::While { cond, guard, body, .. } => Stmt::While {
             cond: convert_expr(cond, ctx),
             guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
@@ -849,6 +854,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
             });
             Stmt::Block { stmts }
+        },
+
+        AstStmt::Comptime { body } => {
+            // comptime: 块 — 内联为普通 Block
+            Stmt::Block { stmts: convert_block(body, ctx).stmts }
         },
 
         AstStmt::Raise(e) => Stmt::ExprStmt {

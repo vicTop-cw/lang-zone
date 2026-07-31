@@ -1,0 +1,3 @@
+trait Iterator =
+    type Item
+    def next(self: Self) -> Item

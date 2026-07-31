@@ -1,0 +1,18 @@
+// ==== Guard & Guard Let ====
+def safe_div(a: int, b: int) -> int =
+    guard b != 0
+        else:
+            return 0
+    a / b
+
+def process(opt: Option<int>) -> int =
+    guard let Some(v) = opt
+        else:
+            return 0
+    v * 2
+
+def main() =
+    print(f"10/2={safe_div(10, 2)}")
+    print(f"10/0={safe_div(10, 0)}")
+    print(f"some={process(Some(5))}")
+    print(f"none={process(None)}")

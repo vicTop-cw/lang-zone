@@ -6,6 +6,7 @@
 pub enum Token {
     // ── 声明关键字 ──
     Def, Struct, Enum, Trait, Impl, Const, Mut, Ref, Owned, Let,
+    Iterator,      // iterator 关键字（生成器函数定义）
 
     // ── 控制流 ──
     If, Elif, Else, Match, Case, Guard,
@@ -13,7 +14,7 @@ pub enum Token {
     Defer,
 
     // ── 异常 ──
-    Try, Catch, Finally, Raise, Raises, Panic,
+    Try, Catch, Finally, Raise, Raises,
 
     // ── 测试 ──
     Test, Assert, Suite,
@@ -28,7 +29,7 @@ pub enum Token {
     Import, From, As,
 
     // ── 类型/泛型 ──
-    Where, Self_,
+    Where, Self_, Duck,
 
     // ── 宏/编译期 ──
     Macro, Comptime,
@@ -37,8 +38,7 @@ pub enum Token {
     And, Or, Not, Is,
 
     // ── 字面量 ──
-    True, False, None_,
-    Some_, Ok_, Err_,
+    True, False,
 
     // ── 字面量值 ──
     IntLit(i64),
@@ -64,6 +64,7 @@ pub enum Token {
 
     // ── 复合赋值 ──
     PlusEq, MinusEq, StarEq, SlashEq, PercentEq, // += -= *= /= %=
+    AndEq, OrEq, XorEq, ShlEq, ShrEq, PowEq,    // &= |= ^= <<= >>= **=
 
     // ── 位运算 ──
     Amp, Pipe_, Caret, Shl, Shr, // & | ^ << >>
@@ -92,10 +93,12 @@ pub enum Token {
     CaretInfix,    // ^ 前置留白：强制中缀 XOR，必须带右操作数（悬空报错）
     Backtick,      // ` 代码字面量（三反引号用于宏 quote 块）
     Dollar,        // $ 宏插值符号
+    Tilde,         // ~ 命名参数糖 f(x~) -> f(x = x)
 
     // ── 构建块专用符号 ──
     LexError(String), // 词法错误（构建块符号留白违规等），由 parse_module 拒绝
     BuildAssign,   // =: 变量构建块
+    BuildIndex,    // ^: 索引构建块
     BuildCall,     // ~: 调用构建块
     BuildGen,      // *: 生成器调用构建块
 
@@ -413,6 +416,7 @@ impl Lexer {
 
         match s.as_str() {
             "def" => Token::Def,
+            "iterator" => Token::Iterator,
             "mut" => Token::Mut,
             "ref" => Token::Ref,
             "const" => Token::Const,
@@ -455,7 +459,6 @@ impl Lexer {
             "comptime" => Token::Comptime,
             "raise" => Token::Raise,
             "raises" => Token::Raises,
-            "panic" => Token::Panic,
             "test" => Token::Test,
             "assert" => Token::Assert,
             "suite" => Token::Suite,
@@ -463,12 +466,9 @@ impl Lexer {
             "or" => Token::Or,
             "not" => Token::Not,
             "is" => Token::Is,
+            "duck" => Token::Duck,
             "True" => Token::True,
             "False" => Token::False,
-            "None" => Token::None_,
-            "Some" => Token::Some_,
-            "Ok" => Token::Ok_,
-            "Err" => Token::Err_,
             _ => Token::Ident(s),
         }
     }
@@ -607,12 +607,17 @@ impl Lexer {
                     if self.peek() == Some(':') {
                         self.advance();
                         tokens.push(Token::LtColon);
+                    } else if self.peek() == Some('<') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::ShlEq);
+                        } else {
+                            tokens.push(Token::Shl);
+                        }
                     } else if self.peek() == Some('=') {
                         self.advance();
                         tokens.push(Token::Le);
-                    } else if self.peek() == Some('<') {
-                        self.advance();
-                        tokens.push(Token::Shl);
                     } else {
                         tokens.push(Token::Lt);
                     }
@@ -620,12 +625,17 @@ impl Lexer {
                 }
                 '>' => {
                     self.advance();
-                    if self.peek() == Some('=') {
+                    if self.peek() == Some('>') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::ShrEq);
+                        } else {
+                            tokens.push(Token::Shr);
+                        }
+                    } else if self.peek() == Some('=') {
                         self.advance();
                         tokens.push(Token::Ge);
-                    } else if self.peek() == Some('>') {
-                        self.advance();
-                        tokens.push(Token::Shr);
                     } else {
                         tokens.push(Token::Gt);
                     }
@@ -663,8 +673,13 @@ impl Lexer {
                 }
                 '-' => { self.advance(); tokens.push(Token::Minus); line_start = false; }
                 '*' if self.peek_n(1) == Some('*') => {
-                    self.advance(); self.advance();
-                    tokens.push(Token::StarStar);
+                    if self.peek_n(2) == Some('=') {
+                        self.advance(); self.advance(); self.advance();
+                        tokens.push(Token::PowEq);
+                    } else {
+                        self.advance(); self.advance();
+                        tokens.push(Token::StarStar);
+                    }
                     line_start = false;
                 }
                 '*' if self.peek_n(1) == Some('=') => {
@@ -707,6 +722,19 @@ impl Lexer {
                     }
                     line_start = false;
                 }
+                '~' => {
+                    self.advance();
+                    let prev = self.prev_char();
+                    if prev.map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')') {
+                        tokens.push(Token::Tilde);
+                    }
+                    line_start = false;
+                }
+                '^' if self.peek_n(1) == Some('=') => {
+                    self.advance(); self.advance();
+                    tokens.push(Token::XorEq);
+                    line_start = false;
+                }
                 '^' => {
                     // 前置留白消歧：`a ^` (带空格) → CaretInfix（强制中缀 XOR，须带右操作数，
                     // 悬空报错）；`a^` (紧贴) → CaretOp（后缀 move / 紧贴 XOR，原位置消歧）。
@@ -722,6 +750,11 @@ impl Lexer {
                     tokens.push(Token::AmpAmp);
                     line_start = false;
                 }
+                '&' if self.peek_n(1) == Some('=') => {
+                    self.advance(); self.advance();
+                    tokens.push(Token::AndEq);
+                    line_start = false;
+                }
                 '&' => { self.advance(); tokens.push(Token::Amp); line_start = false; }
                 '|' if self.peek_n(1) == Some('|') => {
                     self.advance(); self.advance();
@@ -731,6 +764,11 @@ impl Lexer {
                 '|' if self.peek_n(1) == Some('>') => {
                     self.advance(); self.advance();
                     tokens.push(Token::Pipe);
+                    line_start = false;
+                }
+                '|' if self.peek_n(1) == Some('=') => {
+                    self.advance(); self.advance();
+                    tokens.push(Token::OrEq);
                     line_start = false;
                 }
                 '|' => { self.advance(); tokens.push(Token::Pipe_); line_start = false; }
@@ -797,6 +835,21 @@ impl Lexer {
                 '_' if self.peek_n(1).map_or(true, |c| !c.is_alphanumeric() && c != '_') => {
                     self.advance();
                     tokens.push(Token::Underscore);
+                    line_start = false;
+                }
+
+                // #! shebang / # attribute macro
+                // #! 整行 → 跳过（shebang 行），#ident → @ident
+                '#' if self.peek_n(1) == Some('!') => {
+                    // shebang 行：跳过整行
+                    self.advance(); self.advance();
+                    while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+                        self.pos += 1;
+                    }
+                }
+                '#' => {
+                    self.advance();
+                    tokens.push(Token::At);
                     line_start = false;
                 }
 

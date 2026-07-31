@@ -1,4 +1,0 @@
-def main() =
-  x = 1
-  s = f"x={x}"
-  print(s)

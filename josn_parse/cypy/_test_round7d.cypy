@@ -1,0 +1,68 @@
+# ============================================================
+# Round 7d: 深度边界测试 - 括号、类型、枚举
+# ============================================================
+
+# R7-11: 括号表达式作为返回值
+def test_paren_return() -> int:
+    return (1 + 2)
+
+# R7-12: 括号表达式作为条件
+def test_paren_cond() -> int:
+    if (1 == 1):
+        return 1
+    return 0
+
+# R7-13: enum 变体独立引用
+enum Status:
+    Ok
+    Err
+
+# def test_enum_val() -> int:
+#     let s: Status = Status.Ok  # Bug: Status 类型未注册
+#     return 0
+
+# R7-14: 嵌套 enum 定义
+enum Outer:
+    A
+    B
+
+# R7-15: 函数默认参数
+# (Cypy 可能不支持默认参数)
+
+# R7-16: 函数返回类型为 struct
+struct Vec2:
+    x: int = 0
+    y: int = 0
+
+def test_return_vec() -> Vec2:
+    return Vec2{x: 1, y: 2}
+
+# R7-17: 函数参数为 struct 类型
+def test_param_vec(v: Vec2) -> int:
+    return v.x + v.y
+
+# R7-18: struct 嵌套字段
+struct Rect:
+    x: int = 0
+    y: int = 0
+    w: int = 0
+    h: int = 0
+
+# R7-19: 循环内声明变量
+def test_loop_var() -> int:
+    let total: int = 0
+    for i in range(3):
+        let doubled: int = i * 2
+        total = total + doubled
+    return total
+
+# R7-20: 复杂赋值
+def test_compound_assign() -> int:
+    let x: int = 0
+    x = 1
+    x = x + 2
+    x = x * 3
+    return x
+
+def main() -> int:
+    return 0

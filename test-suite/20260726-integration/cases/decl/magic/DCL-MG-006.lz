@@ -1,0 +1,8 @@
+struct Trio =
+    a: int
+    b: int
+    c: int
+
+def main() =
+    t = Trio(a: 1, b: 2, c: 3)
+    print(t.a + t.b + t.c)

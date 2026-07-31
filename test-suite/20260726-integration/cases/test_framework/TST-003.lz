@@ -1,0 +1,7 @@
+#!test
+
+def answer() -> int = 42
+
+test "reference":
+    assert answer() == 42
+    print("ok")

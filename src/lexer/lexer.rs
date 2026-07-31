@@ -299,6 +299,7 @@ impl Lexer {
 
         match s.as_str() {
             "def" => Token::Def,
+            "iterator" => Token::Iterator,
             "mut" => Token::Mut,
             "ref" => Token::Ref,
             "const" => Token::Const,
@@ -341,7 +342,6 @@ impl Lexer {
             "comptime" => Token::Comptime,
             "raise" => Token::Raise,
             "raises" => Token::Raises,
-            "panic" => Token::Panic,
             "test" => Token::Test,
             "assert" => Token::Assert,
             "suite" => Token::Suite,
@@ -349,12 +349,9 @@ impl Lexer {
             "or" => Token::Or,
             "not" => Token::Not,
             "is" => Token::Is,
+            "duck" => Token::Duck,
             "True" => Token::True,
             "False" => Token::False,
-            "None" => Token::None_,
-            "Some" => Token::Some_,
-            "Ok" => Token::Ok_,
-            "Err" => Token::Err_,
             _ => Token::Ident(s),
         }
     }
@@ -482,12 +479,17 @@ impl Lexer {
                     if self.peek() == Some(':') {
                         self.advance();
                         tokens.push(Token::LtColon);
+                    } else if self.peek() == Some('<') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::ShlEq);
+                        } else {
+                            tokens.push(Token::Shl);
+                        }
                     } else if self.peek() == Some('=') {
                         self.advance();
                         tokens.push(Token::Le);
-                    } else if self.peek() == Some('<') {
-                        self.advance();
-                        tokens.push(Token::Shl);
                     } else {
                         tokens.push(Token::Lt);
                     }
@@ -495,12 +497,17 @@ impl Lexer {
                 }
                 '>' => {
                     self.advance();
-                    if self.peek() == Some('=') {
+                    if self.peek() == Some('>') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::ShrEq);
+                        } else {
+                            tokens.push(Token::Shr);
+                        }
+                    } else if self.peek() == Some('=') {
                         self.advance();
                         tokens.push(Token::Ge);
-                    } else if self.peek() == Some('>') {
-                        self.advance();
-                        tokens.push(Token::Shr);
                     } else {
                         tokens.push(Token::Gt);
                     }
@@ -538,8 +545,13 @@ impl Lexer {
                 }
                 '-' => { self.advance(); tokens.push(Token::Minus); line_start = false; }
                 '*' if self.peek_n(1) == Some('*') => {
-                    self.advance(); self.advance();
-                    tokens.push(Token::StarStar);
+                    if self.peek_n(2) == Some('=') {
+                        self.advance(); self.advance(); self.advance();
+                        tokens.push(Token::PowEq);
+                    } else {
+                        self.advance(); self.advance();
+                        tokens.push(Token::StarStar);
+                    }
                     line_start = false;
                 }
                 '*' if self.peek_n(1) == Some('=') => {
@@ -582,12 +594,32 @@ impl Lexer {
                     }
                     line_start = false;
                 }
-                '^' => {
-                    // 前置留白消歧：`a ^` (带空格) → CaretInfix（强制中缀 XOR，须带右操作数，
-                    // 悬空报错）；`a^` (紧贴) → CaretOp（后缀 move / 紧贴 XOR，原位置消歧）。
-                    let spaced = is_build_ws(self.prev_char());
+                '~' => {
+                    // 后缀命名参数糖: x~ → 仅在紧贴标识符后时产生 Tilde
+                    // 前缀 ~x (位非) 跳过（与旧行为一致）
                     self.advance();
-                    tokens.push(if spaced { Token::CaretInfix } else { Token::CaretOp });
+                    let prev = self.prev_char();
+                    if prev.map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')') {
+                        tokens.push(Token::Tilde);
+                    }
+                    // else: skip bare ~ (bitwise not not implemented yet)
+                    line_start = false;
+                }
+                '^' if self.peek_n(1) == Some('=') => {
+                    self.advance(); self.advance();
+                    tokens.push(Token::XorEq);
+                    line_start = false;
+                }
+                '^' => {
+                    // `^:` → BuildIndex（索引构建块）
+                    if self.peek_n(1) == Some(':') {
+                        self.advance(); self.advance();
+                        tokens.push(Token::BuildIndex);
+                    } else {
+                        let spaced = is_build_ws(self.prev_char());
+                        self.advance();
+                        tokens.push(if spaced { Token::CaretInfix } else { Token::CaretOp });
+                    }
                     line_start = false;
                 }
 
@@ -595,6 +627,11 @@ impl Lexer {
                 '&' if self.peek_n(1) == Some('&') => {
                     self.advance(); self.advance();
                     tokens.push(Token::AmpAmp);
+                    line_start = false;
+                }
+                '&' if self.peek_n(1) == Some('=') => {
+                    self.advance(); self.advance();
+                    tokens.push(Token::AndEq);
                     line_start = false;
                 }
                 '&' => { self.advance(); tokens.push(Token::Amp); line_start = false; }
@@ -606,6 +643,11 @@ impl Lexer {
                 '|' if self.peek_n(1) == Some('>') => {
                     self.advance(); self.advance();
                     tokens.push(Token::Pipe);
+                    line_start = false;
+                }
+                '|' if self.peek_n(1) == Some('=') => {
+                    self.advance(); self.advance();
+                    tokens.push(Token::OrEq);
                     line_start = false;
                 }
                 '|' => { self.advance(); tokens.push(Token::Pipe_); line_start = false; }
@@ -669,6 +711,19 @@ impl Lexer {
                 '_' if self.peek_n(1).map_or(true, |c| !c.is_alphanumeric() && c != '_') => {
                     self.advance();
                     tokens.push(Token::Underscore);
+                    line_start = false;
+                }
+
+                // #! shebang / # attribute macro
+                '#' if self.peek_n(1) == Some('!') => {
+                    self.advance(); self.advance();
+                    while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+                        self.pos += 1;
+                    }
+                }
+                '#' => {
+                    self.advance();
+                    tokens.push(Token::At);
                     line_start = false;
                 }
 

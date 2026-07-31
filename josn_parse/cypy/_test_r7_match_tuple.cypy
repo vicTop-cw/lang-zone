@@ -1,0 +1,10 @@
+# Test: match tuple
+def test_match_tuple() -> int:
+    match (1, 2):
+        case (1, 2):
+            return 1
+        case _:
+            return 0
+
+def main() -> int:
+    return 0

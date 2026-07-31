@@ -1,0 +1,11 @@
+// combo-syntax（绿色回归测试）：match + 三元(if)表达式
+def classify(n: int) -> str =
+    match n:
+        case 0 => "empty"
+        case 1 => "single"
+        case _ => n > 10 ? "big" : "small"
+
+def main() =
+    print(classify(0))    // empty
+    print(classify(1))    // single
+    print(classify(20))   // big

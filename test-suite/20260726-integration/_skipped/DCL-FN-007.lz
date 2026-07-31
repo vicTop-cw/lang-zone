@@ -1,0 +1,4 @@
+def consume(owned s: str) =
+    pass
+
+def main() = print(0)

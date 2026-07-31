@@ -1,0 +1,4 @@
+def f() =
+    a = True
+    b = None
+    c = Some(1)

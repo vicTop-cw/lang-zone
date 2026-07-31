@@ -1,5 +1,0 @@
-struct Foo =
-  x: int
-  y: int
-def main() =
-  print(1)

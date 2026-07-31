@@ -1,0 +1,2 @@
+def f() raises str =
+    raise "error"

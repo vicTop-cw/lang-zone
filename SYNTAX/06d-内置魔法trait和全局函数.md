@@ -98,7 +98,7 @@
 
 `__from__`/`__try_from__` 按参数类型多分派；`__into__`/`__cast__`/`__try_cast__`/`__try_into__` 按返回类型多分派。
 
-`__cast__[T](self) -> T` 和 `__try_cast__[T](self) -> Result<T, Error>` 对齐 Mojo 风格的泛型类型转换。
+`__cast__<T>(self) -> T` 和 `__try_cast__<T>(self) -> Result<T, Error>` 对齐 Mojo 风格的泛型类型转换。
 
 ---
 
@@ -219,7 +219,7 @@ struct Point =
 | `__implicit_default__` | `ImplicitDefault` | `ImplicitDefault`（自定义） | 隐式默认值填充 |
 
 - `__implicit_copy__` 使用 `&self` 借用，返回 `Self`，move 后自动植入复用
-- `__implicit_to__[T](self) -> T` 按返回类型多分派
+- `__implicit_to__<T>(self) -> T` 按返回类型多分派
 - `__implicit_default__` 无 self（关联函数）
 
 ---

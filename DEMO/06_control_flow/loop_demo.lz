@@ -1,0 +1,25 @@
+// LZ 控制流 — loop / while / for 扩展
+// 覆盖：loop + break、while、for（else 形式见 99_spec）
+
+def main() =
+    // loop 无限循环配合 break
+    let i = 0
+    loop:
+        i += 1
+        if i >= 3:
+            break
+    print(i)
+
+    // while 累加
+    let s = 0
+    let k = 0
+    while k < 4:
+        s += k
+        k += 1
+    print(s)
+
+    // for 遍历区间
+    let total = 0
+    for n in 1..5:
+        total += n
+    print(total)

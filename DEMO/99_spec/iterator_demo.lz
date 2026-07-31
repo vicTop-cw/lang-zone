@@ -1,0 +1,123 @@
+// ==============================================================
+// LZ iterator 关键字 — 生成器函数规范 demo
+// 当前状态：99_spec（编译器未实现，被 parse 测试跳过）
+// 对应规范：SYNTAX/14-生成器.md §八
+// ==============================================================
+
+// --------------------------------------------------------------
+// 1. 基本 iterator — 无泛型，编译期已知类型
+// --------------------------------------------------------------
+
+iterator count_up(n: int) -> int =
+    for i in 0..n:
+        yield i
+
+// -> int 表示每次 yield int，实际返回 Iter<int>
+
+
+// --------------------------------------------------------------
+// 2. iterator 带泛型
+// --------------------------------------------------------------
+
+iterator repeat<T>(val: T, n: int) -> T =
+    for i in 0..n:
+        yield val
+
+// -> T 表示每次 yield T，实际返回 Iter<T>
+
+
+// --------------------------------------------------------------
+// 3. iterator 带 raise — 中断迭代
+// --------------------------------------------------------------
+
+iterator safe_take<T>(items: List<T>, n: int) -> T raises str =
+    if n < 0:
+        raise "count must be non-negative"
+    for i in 0..n:
+        if i >= items.length():
+            raise "index out of bounds"
+        yield items[i]
+
+
+// --------------------------------------------------------------
+// 4. 嵌套 iterator — 调用另一个 iterator 并 yield
+// --------------------------------------------------------------
+
+iterator inner<R>(x: R) -> R =
+    yield x
+
+iterator outer<R>(n: int, val: R) -> Iter<R> =
+    for i in 0..n:
+        yield inner(val)
+
+// outer 的 -> Iter<R> 表示每次 yield 的值为 Iter<R>。
+// 由于 yield inner(val) 产出 Iter<R>，实际返回 Iter<Iter<R>>。
+// 这就是"嵌套迭代器"——外层 yield 内层 iterator 的调用结果。
+
+
+// --------------------------------------------------------------
+// 5. iterator 体内 return — 等价于 raise，终止并抛出错误
+// --------------------------------------------------------------
+
+iterator take_or_error<T>(items: List<T>, n: int) -> T raises str =
+    if n < 0:
+        return "count must be non-negative"   // 等价于 raise
+    for i in 0..n:
+        if i >= items.length():
+            return "index out of bounds"     // 等价于 raise
+        yield items[i]
+
+// return 不接 expr 等价于 raise（无错误停止）：
+iterator stop_signal(n: int) -> int =
+    if n <= 0:
+        return           // 等价于 raise，空错误
+    for i in 0..n:
+        yield i
+
+
+// --------------------------------------------------------------
+// 6. iterator 体内 guard — 简版 return/raise，守卫中止
+// --------------------------------------------------------------
+
+iterator guarded_take<T>(items: List<T>, n: int) -> T raises str =
+    guard n >= 0 else:
+        return "count must be non-negative"   // guard 体内用 return 终止
+    for i in 0..n:
+        guard i < items.length() else:
+            raise "index out of bounds"       // guard 体内用 raise 终止
+        yield items[i]
+
+
+// --------------------------------------------------------------
+// 7. iterator 中的 yield from 委托
+// --------------------------------------------------------------
+
+iterator chain<R>(a_list: List<R>, b_list: List<R>) -> R =
+    yield from a_list
+    yield from b_list
+
+
+// --------------------------------------------------------------
+// 8. main — 使用 iterator
+// --------------------------------------------------------------
+
+def main() =
+    // 1. count_up
+    for x in count_up(5):
+        print(x)              // 0 1 2 3 4
+
+    // 2. repeat
+    for x in repeat("hi", 3):
+        print(x)              // "hi" "hi" "hi"
+
+    // 3. safe_take
+    for x in safe_take([10, 20, 30], 2):
+        print(x)              // 10 20
+
+    // 4. outer — 嵌套迭代器，产出 Iter<R>
+    for x in outer(3, 42):
+        print(x)              // Iter(42) 三次
+
+    // 5. chain
+    for x in chain(["a", "b"], ["c", "d"]):
+        print(x)              // "a" "b" "c" "d"

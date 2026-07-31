@@ -1,0 +1,61 @@
+// ============================================================
+// std/intrinsics 综合使用示例
+// ============================================================
+
+import std::intrinsics::*
+
+// ── 1. @overload 多分派 ──
+@overload
+def add(x: int, y: int) -> int = x + y
+
+@overload
+def add(x: f64, y: f64) -> f64 = x + y
+
+// ── 2. @memoize 编译期缓存 ──
+@memoize
+def fibonacci(n: int) -> int =
+    if n <= 1:
+        n
+    else:
+        fibonacci(n - 1) + fibonacci(n - 2)
+
+// ── 3. @export 桥接导出 ──
+@export(Rust)
+@export(Python)
+def compute(x: int) -> int = x * x
+
+// ── 4. @parallel 自动并行 ──
+@parallel
+def parallel_map(items: List<int>) -> List<int> =
+    items | map(_.2)
+
+// ── 5. @tail_call 尾递归 ──
+@tail_call
+def factorial(n: int, acc: int = 1) -> int =
+    if n <= 1:
+        acc
+    else:
+        factorial(n - 1, acc * n)
+
+// ── 6. @simd 向量化 ──
+@simd
+def sum(values: List<f64>) -> f64 =
+    let mut total = 0.0
+    for v in values:
+        total += v
+    total
+
+// ── Rust 属性的用法（非 intrinsics 包范畴）──
+// 直接在 def 前用 #[name] 写 Rust 属性：
+#[inline(always)]
+def fast_abs(x: int) -> int =
+    if x < 0: -x else: x
+
+#[must_use]
+def safe_div(a: int, b: int) -> int = a // b
+
+def main() =
+    print(add(1, 2))            // @overload → 3
+    print(add(3.14, 2.71))      // @overload → 5.85
+    print(fibonacci(40))        // @memoize → 102334155
+    print(factorial(10))        // @tail_call → 3628800

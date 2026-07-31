@@ -1,0 +1,25 @@
+// LZSTD — 默认导入预置类型（规范参考）
+// 枚举、所有权原语、核心函数
+// 用户无需 import，编译期自动注入
+
+enum Option =
+    Some
+    None
+
+enum Result =
+    Ok
+    Err
+
+enum Ordering =
+    Less
+    Equal
+    Greater
+
+struct Box =
+    _inner: int
+
+struct Rc =
+    _inner: int
+
+struct Arc =
+    _inner: int

@@ -1,0 +1,11 @@
+id = "lz-lang"
+name = "LZ Language Support"
+version = "0.1.0"
+schema_version = 1
+authors = ["lang-zone"]
+description = "Lang-Zone (LZ) programming language support for Zed"
+repository = "https://github.com/lang-zone/lz-zed"
+
+[grammars.lz]
+repository = "file:///e:/IDEProjects/AI/lang-zone/josn_parse/lz-zed/tree-sitter-lz"
+rev = "2622594"

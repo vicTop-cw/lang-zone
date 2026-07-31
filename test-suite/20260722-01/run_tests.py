@@ -8,7 +8,7 @@ Lang-Zong 编译器测试驱动 (Test Harness)
   - 结果数据 -> ./_work/results.json
   - 详细报告由人工撰写于 ./reports/
 
-SUT: ../../target/debug/lang-zong.exe  (CLI: lzc <file.lz> [--tokens] [--ast])
+SUT: ../../target/debug/lang-zone.exe  (CLI: lzc <file.lz> [--tokens] [--ast])
 
 判定规则
 --------
@@ -25,7 +25,7 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "_work")
-SUT = os.path.join(HERE, "..", "..", "target", "debug", "lang-zong.exe")
+SUT = os.path.join(HERE, "..", "..", "target", "debug", "lang-zone.exe")
 SUT = os.path.abspath(SUT)
 
 LONG_IDENT = "a" * 200
@@ -83,7 +83,7 @@ CATALOG = [
 
     dict(id="F08", title="match 模式 AST", category="functional", priority="P0", mode="ast",
          source='def f(x: int)-> str =\n    match x:\n        case 0: "zero"\n        case _: "other"',
-         present=["Match", "pattern: Int(", "pattern: Ident("],
+         present=["Match", "pattern: Int(", "pattern: Wildcard"],
          absent=[],
          note="match 表达式与整型/通配符模式进入 AST (Debug 表示为 pattern: Int(0) / pattern: Ident(_))。"),
 
@@ -125,9 +125,9 @@ CATALOG = [
 
     dict(id="F15", title="owned 契约(违规未 ^)", category="functional", priority="P1", mode="rust",
          source='struct Person =\n    name: str\ndef consume(owned p: Person)-> str = f"{p.name}"\ndef main() =\n    bob = Person(name: "Bob")\n    consume(bob)',
-         present=["compile_error!"],
+         present=["fn consume(p: Person)", "compile_error!"],
          absent=[],
-         note="未以 ^ 调用 owned 形参时, 应注入编译期错误提示。"),
+         note="已修复: owned 契约强制, 未以 ^ 调用时注入 compile_error!。"),
 
     # ---------------- 边界 (Boundary) ----------------
     dict(id="B01", title="空输入", category="boundary", priority="P1", mode="tokens",
@@ -201,13 +201,13 @@ CATALOG = [
          source="def f() =\n    x =:\n        y = 1\n        y",
          present=["let x = (|| unsafe {", "})();"],
          absent=[],
-         note="=: 转译为无参 unsafe 闭包并立即调用。"),
+         note="=: 转译为无参unsafe闭包并立即调用 (闭包捕获需要 unsafe 特征)。"),
 
     dict(id="G02", title="调用构建块 ~:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x = make ~:\n        (1, 2)",
-         present=["__Pack::Tuple", "unsafe { match __p"],
-         absent=[],
-         note="~: 语法为 `x = callee ~: 块`; 参数包类型擦除为 __Pack::Tuple, 经 unsafe 解包调用。"),
+         present=["__Pack::Tuple", "match __p"],
+         absent=["unsafe { match"],
+         note="~: 语法为 `x = callee ~: 块`; 参数包类型擦除为 __Pack::Tuple, 经 match 解包调用 (新架构已移除 unsafe 前缀)。"),
 
     dict(id="G03", title="生成器构建块 *:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x = make *:\n        yield (1,)\n        yield (2,)",

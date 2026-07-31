@@ -1,0 +1,19 @@
+// combo-syntax（绿色回归测试）：try + raise + guard + catch
+enum MathError =
+    DivByZero(str)
+
+def checked_div(a: int, b: int) -> int raises MathError =
+    guard b != 0 else:
+        raise MathError.DivByZero("zero")
+    a / b
+
+def safe(a: int, b: int) -> int =
+    try:
+        checked_div(a, b)
+    catch MathError.DivByZero(msg):
+        print(msg)
+        -1
+
+def main() =
+    print(safe(10, 2))     // 5
+    print(safe(10, 0))     // -1

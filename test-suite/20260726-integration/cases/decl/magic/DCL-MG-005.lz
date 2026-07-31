@@ -1,0 +1,6 @@
+struct Counter =
+    val: int
+
+def main() =
+    c = Counter(val: 3)
+    print(c.val)

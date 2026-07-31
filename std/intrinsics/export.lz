@@ -1,0 +1,20 @@
+// ============================================================
+// @export — 桥接多后端导出
+//
+// 语法：
+//   @export(Rust)       → 生成 pub fn（默认可见性）
+//   @export(Python)     → 生成 #[pyfunction] + PyO3 绑定
+//   @export(Wasm)       → 生成 #[wasm_bindgen] 绑定
+//   @export(C)          → 生成 extern "C" fn（FFI 入口）
+//   @export(Ffi)        → @export(C) 别名
+//
+// 多后端组合：
+//   @export(Rust)
+//   @export(Python)
+//   @export(Wasm)
+//   def compute(x: int) -> int = ...
+//   → 同时生成 Rust pub fn + PyO3 函数 + Wasm 绑定
+//
+// 注意：@export 由导出系统消费，不直接生成 Rust attribute。
+// 具体桥接逻辑在 bridge/ 目录中各模块实现。
+// ============================================================

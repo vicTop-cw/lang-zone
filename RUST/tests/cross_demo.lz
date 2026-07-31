@@ -1,0 +1,15 @@
+from .utils import helper
+
+struct Point =
+    x: int
+    y: int
+
+enum Color:
+    Red
+    Green
+    Blue
+
+def main() =
+    let n = helper(21) in
+    let msg = "result" in
+    print(msg, n)

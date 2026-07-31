@@ -1,0 +1,19 @@
+// 规范目标特性（当前解析器未实现：while 分支不识别 if 守卫）
+// combo-syntax：while 守卫 + try/catch 错误处理 + 海象 :=
+// 出处：SYNTAX/05-控制流.md §3.5 + try 语法
+enum E =
+    Boom(str)
+
+def step() -> int raises E =
+    count += 1
+    guard count <= 3 else:
+        raise E.Boom("over")
+    count
+
+def main() =
+    count = 0
+    try:
+        while (n := step()) <= 3 if n % 2 == 1:    // 守卫：只取奇数步
+            print(n)
+    catch E.Boom(msg):
+        print(msg)

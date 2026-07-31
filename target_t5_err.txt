@@ -1,0 +1,57 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+warning: unused import: `std::collections::HashMap`
+   --> src\typing\bounds.rs:217:9
+    |
+217 |     use std::collections::HashMap;
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::collections::HashMap`
+  --> src\cache.rs:13:5
+   |
+13 | use std::collections::HashMap;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Decorator`
+ --> src\codegen\variadic.rs:4:28
+  |
+4 | use crate::ast::{Function, Decorator};
+  |                            ^^^^^^^^^
+
+warning: unused variable: `variadic_boxed`
+   --> src\codegen\expr.rs:555:29
+    |
+555 |                         let variadic_boxed: Vec<String> = pos_args.iter()
+    |                             ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_variadic_boxed`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `is_unwrap` is never used
+   --> src\strict.rs:104:4
+    |
+104 | fn is_unwrap(_e: &Expr) -> bool { false }
+    |    ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `name` is never read
+  --> src\simd\bench.rs:14:5
+   |
+13 | struct Bench {
+   |        ----- field in this struct
+14 |     name: &'static str,
+   |     ^^^^
+
+warning: function `ctx` is never used
+   --> src\typing\bounds.rs:219:8
+    |
+219 |     fn ctx() -> InferCtx { InferCtx::new() }
+    |        ^^^
+
+warning: function `variadic_type_str` is never used
+  --> src\codegen\variadic.rs:32:8
+   |
+32 | pub fn variadic_type_str(backend: VariadicBackend) -> &'static str {
+   |        ^^^^^^^^^^^^^^^^^
+

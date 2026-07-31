@@ -1,0 +1,25 @@
+def test_0() -> int:
+    match z:
+        case 0:
+            return 0
+        case _:
+            return -1
+    while ((-((100 / True) - (100)))):
+        break
+    return print(print((-(True >= 0))))
+    guard result else:
+        return -1
+
+def test_1() -> int:
+    guard ((z > result) + (False - result)) else:
+        return -1
+    match print((print(y) <= "")):
+        case 0:
+            return 0
+        case _:
+            return -1
+    defer:
+        let cleanup: int = 0
+
+def main() -> int:
+    return 0

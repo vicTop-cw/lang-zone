@@ -1,0 +1,7 @@
+def safe_div(a: int, b: int) -> int =
+    guard b != 0 else: 0
+    a / b
+
+def main() =
+    print(safe_div(10, 5))
+    print(safe_div(10, 0))

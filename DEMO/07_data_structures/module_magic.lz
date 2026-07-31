@@ -1,120 +1,12 @@
 // ============================
-// LZ Data Structures — Module-level Magic Attributes
-// Cover: 06e-模块级魔法属性 (all features)
+// LZ Data Structures — Module Magic Attributes
 // ============================
 
-// Module documentation comment (auto-collected into __doc__)
-// This module demonstrates all module-level magic attributes
-// including __all__, __slots__, __bridge__, and identity attributes.
-
-// --- __all__: export visibility ---
-// Only 'add', 'multiply', and 'Point' are publicly exported
-__all__ = ["add", "multiply", "Point", "Vector", "ManagedBuffer"]
-
-def add(a: int, b: int) -> int = a + b
-def multiply(a: int, b: int) -> int = a * b
-
-// internal_helper is NOT in __all__, so it's private
-def internal_helper() = 42
-
-// --- __bridge__: FFI bridge configuration ---
-__bridge__ = "Rust"
-__bridge_tier__ = "ffi"
-
-// --- __slots__: struct memory layout control ---
-struct MyStruct =
-    __slots__ = "C"             // #[repr(C)] — C-compatible layout
+struct S =
+    __slots__ = "C"
     x: int
     y: int
 
-struct Packed =
-    __slots__ = "packed"        // #[repr(packed)] — packed layout
-    a: u8
-    b: u32
-
-struct Aligned =
-    __slots__ = "align(16)"     // #[repr(align(16))] — 16-byte alignment
-    data: List<f64>
-
-// --- Struct with __slots__ = "transparent" ---
-struct Wrapper =
-    __slots__ = "transparent"   // #[repr(transparent)] — same layout as single field
-    inner: int
-
-// --- Module identity attributes (auto-filled by compiler) ---
-// __name__     — fully qualified module name, e.g. "DEMO._07_data_structures.module_magic"
-// __file__     — source file absolute path
-// __package__  — package path (parent directory component)
-// __path__     — module file directory
-
-// --- Using module attributes in comptime ---
-comptime:
-    const MOD_NAME = __name__       // accessible at compile time
-    const MOD_FILE = __file__       // source file path at compile time
-
-// --- Public struct exported via __all__ ---
-struct Point =
-    x: int
-    y: int
-
-    def __str__(ref self) -> str =
-        f"Point({self.x}, {self.y})"
-
-struct Vector =
-    x: f64
-    y: f64
-
-    def __add__(self, other: Vector) -> Vector =
-        Vector(x: self.x + other.x, y: self.y + other.y)
-
-    def __str__(ref self) -> str =
-        f"Vector({self.x}, {self.y})"
-
-// --- Public struct with __slots__ and __new__ ---
-struct ManagedBuffer =
-    __slots__ = "C"             // C-compatible layout for FFI
-    data: List<u8>
-    size: int
-
-    magic __new__(size: int) -> Self =
-        Self(data: List<u8>.with_capacity(size), size: size)
-
-    def len(ref self) -> int =
-        self.size
-
-// --- __deps__: module dependency declaration ---
-__deps__ = ["std.math", "std.collections"]
-
-// --- __public__ / __private__: explicit visibility ---
-__public__ = ["Config"]
-__private__ = ["_internal_state"]
-
-struct Config =
-    host: str
-    port: int
-
-struct _internal_state =
-    cache: List<str>
-
-// --- main: demonstrates module magic usage ---
 def main() =
-    print(add(1, 2))                // 3
-    print(multiply(3, 4))           // 12
-
-    // Using exported structs
-    let p = Point(x: 10, y: 20)
-    print(str(p))                   // Point(10, 20)
-
-    let v = Vector(x: 1.5, y: 2.5)
-    print(str(v))                   // Vector(1.5, 2.5)
-
-    // Using structs with __slots__
-    let ms = MyStruct(x: 1, y: 2)
-    print(ms.x, ms.y)
-
-    let buf = ManagedBuffer(size: 256)
-    print(buf.len())                // 256
-
-    // Module identity via comptime constant
-    print(MOD_NAME)
-    print(MOD_FILE)
+    let s = S(x: 10, y: 20)
+    print(s.x)

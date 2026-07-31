@@ -1,0 +1,11 @@
+// 规范目标特性（match 守卫语法待验证）
+// 出处：SYNTAX/05-控制流.md — match 守卫
+// 预期语法：
+def classify(n: int) -> str =
+    match n:
+        case 0 => "zero"
+        case x if x > 0 => "positive"
+        case _ => "negative"
+
+def main() =
+    print(classify(5))

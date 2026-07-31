@@ -1,0 +1,9 @@
+// comptime 编译期常量求值
+// template 需要 #!bin macro 宏模块；此处演示 comptime: 块
+const TABLE_SIZE: int = 256
+
+def main() =
+    comptime:
+        const NAME: str = "test"
+    print(TABLE_SIZE)
+

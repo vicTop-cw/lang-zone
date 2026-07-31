@@ -1,0 +1,13 @@
+// ==== Async / Await / Spawn ====
+async def fetch(id: int) -> str =
+    f"data-{id}"
+
+async def process() =
+    let t1 = spawn fetch(1)
+    let t2 = spawn fetch(2)
+    let r1 = await t1
+    let r2 = await t2
+    print(f"{r1}, {r2}")
+
+def main() =
+    process()

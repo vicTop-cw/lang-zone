@@ -1,0 +1,7 @@
+def test() -> int:
+    while False:
+        let x: int = 0
+    return 0
+
+def main() -> int:
+    return 0

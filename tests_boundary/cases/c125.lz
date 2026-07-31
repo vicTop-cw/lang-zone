@@ -1,3 +1,0 @@
-def main() =
-  lst = [x for ]
-  print(lst)

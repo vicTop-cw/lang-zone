@@ -1,0 +1,9 @@
+// 规范目标特性（当前解析器未实现：for 分支不识别 if 守卫）
+// combo-syntax：for 守卫 + 海象运算符 :=
+// 出处：SYNTAX/05-控制流.md §3.5 + SYNTAX/12-操作符.md §1.20
+def has(x: int) -> bool = True
+
+def main() =
+    for i in [1, 2, 3, 4] if has(i):
+        let n = (v := i * 2)   // 守卫通过后，体内用 := 绑定派生值
+        print(n)               // 预期：2 4 6 8

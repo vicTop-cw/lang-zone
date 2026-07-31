@@ -1,0 +1,7 @@
+def describe(x) -> str =
+    if x is int:
+        "integer"
+    elif x is str:
+        "string"
+    else:
+        "unknown"

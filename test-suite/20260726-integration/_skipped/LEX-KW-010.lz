@@ -1,0 +1,2 @@
+def f() =
+    owned s = "hi"

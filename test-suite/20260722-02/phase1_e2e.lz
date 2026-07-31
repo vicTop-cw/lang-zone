@@ -1,10 +1,10 @@
 // lz std bridge — Phase 1 完整功能验证
 // 覆盖: resolve_call + shims注入 + 方法别名 + IOError去重 + containsKey 别名
 
-import std::collections::HashMap
-import std::io
-import std::fs
-import std::vec
+import std.collections.HashMap
+import std.io
+import std.fs
+import std.vec
 
 // ── 1. IOError 类型别名去重（io + fs 同时导入不重复）──
 def test_io_alias_dedup()-> str =
@@ -27,7 +27,7 @@ def test_vec_is_empty()-> str =
 
 // ── 4. HashMap containsKey 新别名 (→ contains_key) ──
 def test_hashmap_contains_key()-> str =
-    m: Dict<str, int> = HashMap::new()
+    m: Dict<str, int> = HashMap.new()
     m.insert("a".to_string(), 1)
     return "ok"
 

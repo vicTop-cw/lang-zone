@@ -1,0 +1,5 @@
+@export(Rust)
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    print(add(10, 20))

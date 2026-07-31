@@ -108,13 +108,14 @@ impl Rectangle =
 ## 七、泛型 impl
 
 ```lz
-impl<T: Display> Display for Pair<T, T> =
+impl<T> Display for Pair<T, T>
+    where T: Display =
     def fmt(self) -> str =
         f"({self.first}, {self.second})"
 ```
 
 - impl 可以带泛型参数和 trait 约束
-- 语法：`impl<TypeParam: Constraint> TraitName for TypeName =`
+- 语法：`impl<TypeParam> TraitName for TypeName where TypeParam: Constraint =`
 
 ---
 
@@ -132,15 +133,19 @@ struct Box<T> =
 
 ### 8.2 trait 约束
 
+约束不写在尖括号内，统一通过 `where` 子句表达：
+
 ```lz
-def larger<T: Ordered>(a: T, b: T) -> T =
+def larger<T>(a: T, b: T) -> T
+    where T: Ordered =
   a if a > b else b
 ```
 
 ### 8.3 多约束
 
 ```lz
-def clone_and_print<T: Clone + Display>(x: T) =
+def clone_and_print<T>(x: T)
+    where T: Clone + Display =
     let copy = x.clone()
     print(copy)
 ```

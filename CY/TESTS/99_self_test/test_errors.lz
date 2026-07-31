@@ -1,0 +1,16 @@
+// 自测 — 错误处理和 defer
+def main() =
+    // raise / try / catch
+    try:
+        print("trying")
+    catch e:
+        print("error")
+    else:
+        print("success")
+    finally:
+        print("done")
+
+    // panic
+    assert True
+
+    print("✅ 错误处理测试通过")

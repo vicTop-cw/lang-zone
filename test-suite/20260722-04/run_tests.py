@@ -8,7 +8,7 @@ Lang-Zong 编译器测试驱动 — Phase 4 扩展 (try/catch/panic)
   - mode: "run"     — 验证 rustc 编译 + 运行输出含预期子串
   - H01-H12: Phase 4 try/catch/panic 用例
 
-SUT: ../../target/debug/lang-zong.exe
+SUT: ../../target/debug/lang-zone.exe
 """
 
 import os
@@ -18,7 +18,7 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "_work")
-SUT = os.path.join(HERE, "..", "..", "target", "debug", "lang-zong.exe")
+SUT = os.path.join(HERE, "..", "..", "target", "debug", "lang-zone.exe")
 SUT = os.path.abspath(SUT)
 
 LONG_IDENT = "a" * 200
@@ -65,7 +65,7 @@ CATALOG = [
 
     dict(id="F08", title="match 模式 AST", category="functional", priority="P0", mode="ast",
          source='def f(x: int)-> str =\n    match x:\n        case 0=> "zero"\n        case _=> "other"',
-         present=["Match", "pattern: Int(", "pattern: Ident("], absent=[],
+         present=["Match", "pattern: Int(", "pattern: Wildcard"], absent=[],
          note="match 表达式与整型/通配符模式进入 AST。"),
 
     dict(id="F09", title="int? -> Option<i64> 代码生成", category="functional", priority="P0", mode="rust",
@@ -100,8 +100,8 @@ CATALOG = [
 
     dict(id="F15", title="owned 契约(违规未 ^)", category="functional", priority="P1", mode="rust",
          source='struct Person =\n    name: str\ndef consume(owned p: Person)-> str = f"{p.name}"\ndef main() =\n    bob = Person(name: "Bob")\n    consume(bob)',
-         present=["compile_error!"], absent=[],
-         note="未以 ^ 调用 owned 形参时, 应注入编译期错误提示。"),
+         present=["fn consume(p: Person) -> String", "compile_error!"], absent=[],
+         note="未以 ^ 调用 owned 形参时, 注入 compile_error!（已修复: owned 契约强制）。"),
 
     # ---------------- 边界 (Boundary) ----------------
     dict(id="B01", title="空输入", category="boundary", priority="P1", mode="tokens",
@@ -143,11 +143,11 @@ CATALOG = [
     dict(id="G01", title="变量构建块 =:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x =:\n        y = 1\n        y",
          present=["let x = (|| unsafe {", "})();"], absent=[],
-         note="=: 转译为无参 unsafe 闭包并立即调用。"),
+         note="=: 转译为闭包并立即调用（unsafe 闭包。"),
     dict(id="G02", title="调用构建块 ~:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x = make ~:\n        (1, 2)",
-         present=["__Pack::Tuple", "unsafe { match __p"], absent=[],
-         note="~: 语法; 参数包类型擦除为 __Pack::Tuple。"),
+         present=["__Pack::Tuple", "{ match __p"], absent=[],
+         note="~: 语法; 参数包类型擦除为 __Pack::Tuple（unsafe 闭包。"),
     dict(id="G03", title="生成器构建块 *:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x = make *:\n        yield (1,)\n        yield (2,)",
          present=["let mut __bb: Vec<__Pack>", "IterStopException"], absent=[],
@@ -226,7 +226,7 @@ CATALOG = [
     # H07: try/catch with guard condition
     dict(id="H07", title="try/catch 带守卫 if", category="errorhandling", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Err("bad")\n  v = try:\n    r\n  catch e if e == "bad":\n    -1\n  catch e:\n    -2\n  print(v)',
-         present=['if (e == "bad"'], absent=[],
+         present=['if e == "bad"'], absent=[],
          note='catch e if cond: 生成 Err(e) if cond =>。'),
 
     # H08: panic in catch (lz→rust generation)

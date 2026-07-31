@@ -1,0 +1,6 @@
+// 规范目标特性（管道 |>; 解析器 WIP，demo 目前需绕行）
+// 出处：SYNTAX/04-表达式.md — 管道操作符
+// 预期语法：
+def main() =
+    let r = [1, 2, 3] |> map(|x| x * 2) |> filter(|x| x > 2) |> collect()
+    print(r)

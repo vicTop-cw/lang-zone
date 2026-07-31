@@ -13,6 +13,8 @@ pub trait ParserStmtExt {
     fn parse_binding_stmt(&mut self) -> Result<Stmt, String>;
     fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String>;
     fn parse_build_block_body(&mut self) -> Result<Vec<Stmt>, String>;
+    /// 解析可能后跟构建块的值表达式：支持直接构建块（*:/~:/^:）和无值构建块（value *:/~:/^:）
+    fn parse_maybe_build_value(&mut self) -> Result<Expr, String>;
     fn validate_build_block(&self, kind: BuildKind, body: &[Stmt]) -> Result<(), String>;
     fn collect_yields<'a>(&self, stmts: &'a [Stmt], out: &mut Vec<&'a Expr>, has_yield: &mut bool);
     fn first_yield<'a>(&self, stmts: &'a [Stmt]) -> Option<&'a Stmt>;
@@ -55,12 +57,28 @@ impl ParserStmtExt for Parser {
             }
             Token::Yield => {
                 self.advance();
+                // yield from expr
+                if self.check(&Token::From) {
+                    self.advance();
+                    let expr = self.parse_expr()?;
+                    return Ok(Stmt::YieldFrom(expr));
+                }
                 let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                     Some(self.parse_expr()?)
                 } else {
                     None
                 };
                 Ok(Stmt::Yield(expr))
+            }
+            Token::Comptime => {
+                // comptime: <缩进块> — 编译期求值块
+                self.advance();
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::Comptime { body })
             }
             Token::If => {
                 let expr = self.parse_expr()?;
@@ -72,28 +90,88 @@ impl ParserStmtExt for Parser {
             }
             Token::While => {
                 self.advance();
-                let cond = self.parse_expr()?;
+                let cond = self.parse_comprehension_iter()?;  // 不消费 if，避免与 guard 冲突
+                // while cond if guard:
+                let guard = if self.check(&Token::If) {
+                    self.advance();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 self.expect(Token::Indent)?;
                 let body = self.parse_block()?;
                 self.expect(Token::Dedent)?;
-                Ok(Stmt::While { cond, body })
+                // while ... else:
+                let else_body = if self.check(&Token::Else) {
+                    self.advance();
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let eb = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    Some(eb)
+                } else {
+                    None
+                };
+                Ok(Stmt::While { cond, guard, body, else_body })
             }
             Token::For => {
                 self.advance();
-                let var = match self.advance() {
-                    Token::Ident(n) => n,
-                    t => return Err(format!("Expected variable, got {:?}", t)),
+                // 支持解构: for (idx, val) in iter
+                let var = if self.check(&Token::LParen) {
+                    self.advance(); // (
+                    let first = match self.advance() {
+                        Token::Ident(n) => n,
+                        Token::Underscore => "_".to_string(),
+                        t => return Err(format!("Expected variable, got {:?}", t)),
+                    };
+                    // 跳过剩余元素直到 )
+                    while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                        if self.check(&Token::Comma) || self.check(&Token::DotDotDot) || self.check(&Token::DotDot) {
+                            self.advance();
+                        } else if matches!(self.peek(), Token::Ident(_) | Token::Underscore) {
+                            self.advance();
+                        } else {
+                            self.advance();
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    first
+                } else {
+                    match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected variable, got {:?}", t)),
+                    }
                 };
                 self.expect(Token::In)?;
-                let iter = self.parse_expr()?;
+                let iter = self.parse_comprehension_iter()?;
+                // for var in iter if guard:
+                let guard = if self.check(&Token::If) {
+                    self.advance();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 self.expect(Token::Indent)?;
                 let body = self.parse_block()?;
                 self.expect(Token::Dedent)?;
-                Ok(Stmt::For { var, iter, body })
+                // for ... else:
+                let else_body = if self.check(&Token::Else) {
+                    self.advance();
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let eb = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    Some(eb)
+                } else {
+                    None
+                };
+                Ok(Stmt::For { var, iter, guard, body, else_body })
             }
             Token::Loop => {
                 self.advance();
@@ -121,6 +199,7 @@ impl ParserStmtExt for Parser {
                 self.advance();
                 // 支持两种形式:
                 //   guard cond else: VALUE              (条件守卫)
+                //   guard cond else VALUE               (内联守卫，无冒号)
                 //   guard let PATTERN = EXPR else: VALUE (模式守卫 → Rust let...else)
                 let (cond, let_binding) = if self.check(&Token::Let) {
                     self.advance();
@@ -132,31 +211,44 @@ impl ParserStmtExt for Parser {
                     (Some(self.parse_expr()?), None)
                 };
                 self.expect(Token::Else)?;
-                self.expect(Token::Colon)?;
-                self.skip_newlines();
-                let else_body = if self.check(&Token::Indent) {
+                let else_body = if self.check(&Token::Colon) {
                     self.advance();
-                    let b = self.parse_block()?;
-                    self.expect(Token::Dedent)?;
-                    b
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let b = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        b
+                    } else {
+                        vec![self.parse_stmt()?]
+                    }
                 } else {
-                    vec![self.parse_stmt()?]
+                    // 内联形式: guard cond else VALUE
+                    let val = self.parse_expr()?;
+                    vec![Stmt::Expr(val)]
                 };
                 Ok(Stmt::Guard { cond, let_binding, else_body })
             }
             Token::Defer => {
                 self.advance();
-                self.expect(Token::Colon)?;
-                self.skip_newlines();
-                let body = if self.check(&Token::Indent) {
+                // 支持两种形式: defer: block 和 defer expr
+                if self.check(&Token::Colon) {
                     self.advance();
-                    let b = self.parse_block()?;
-                    self.expect(Token::Dedent)?;
-                    b
+                    self.skip_newlines();
+                    let body = if self.check(&Token::Indent) {
+                        self.advance();
+                        let b = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        b
+                    } else {
+                        vec![self.parse_stmt()?]
+                    };
+                    Ok(Stmt::Defer(body))
                 } else {
-                    vec![self.parse_stmt()?]
-                };
-                Ok(Stmt::Defer(body))
+                    // 内联 defer: defer print("cleanup")
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::Defer(vec![Stmt::Expr(expr)]))
+                }
             }
             Token::Raise => {
                 self.advance();
@@ -214,6 +306,16 @@ impl ParserStmtExt for Parser {
                     Ok(Stmt::Assert { expr, expected: None })
                 }
             }
+            Token::Def => {
+                let func = self.parse_function(false)?;
+                Ok(Stmt::FnDef { func })
+            }
+            Token::Async => {
+                self.advance(); // consume async
+                let mut func = self.parse_function(false)?;
+                func.is_async = true;
+                Ok(Stmt::FnDef { func })
+            }
             Token::Suite => {
                 self.advance();
                 let name = self.parse_test_name()?;
@@ -260,33 +362,42 @@ impl ParserStmtExt for Parser {
                     }));
                 }
 
+                // 构建块（索引）: <container> ^: <缩进块>
+                if self.check(&Token::BuildIndex) {
+                    self.advance();
+                    let body = self.parse_build_block_body()?;
+                    self.validate_build_block(BuildKind::Index, &body)?;
+                    return Ok(Stmt::Expr(Expr::BuildBlock {
+                        kind: BuildKind::Index,
+                        lhs: Box::new(expr),
+                        body,
+                    }));
+                }
+
+                // 检查双 token 位运算复合赋值: &=, |=, ^=, <<=, >>=
+                {
+                    let peeked = self.peek();
+                    let peek2 = self.peek_n(1);
+                    let compound = match (peeked, peek2) {
+                        (Token::Amp, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        (Token::Pipe_, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        (Token::CaretOp, Token::Eq) | (Token::CaretInfix, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        (Token::Shl, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        (Token::Shr, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        (Token::StarStar, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        _ => None,
+                    };
+                    if let Some(op) = compound {
+                        let value = self.parse_expr()?;
+                        return Ok(Stmt::Assign { target: expr, op, value });
+                    }
+                }
+
                 // 检查是否是赋值
                 match self.peek() {
                     Token::Eq => {
                         self.advance();
-                        let value = self.parse_expr()?;
-                        // 构建块（调用/生成器）: x = <fn> ~: / *: <缩进块>
-                        if self.check(&Token::BuildCall) || self.check(&Token::BuildGen) {
-                            let kind = if self.check(&Token::BuildCall) {
-                                BuildKind::Call
-                            } else {
-                                BuildKind::Gen
-                            };
-                            self.advance();
-                            let body = self.parse_build_block_body()?;
-                            self.validate_build_block(kind, &body)?;
-                            return Ok(Stmt::Let {
-                                name: lhs_name,
-                                mutable: true,
-                                is_ref: false,
-                                ty: None,
-                                value: Expr::BuildBlock {
-                                    kind,
-                                    lhs: Box::new(value),
-                                    body,
-                                },
-                            });
-                        }
+                        let value = self.parse_maybe_build_value()?;
                         // ident = value → Let 绑定（非赋值），默认可变
                         match expr {
                             Expr::Ident(name) => {
@@ -319,6 +430,36 @@ impl ParserStmtExt for Parser {
                         self.advance();
                         let value = self.parse_expr()?;
                         Ok(Stmt::Assign { target: expr, op: AssignOp::ModEq, value })
+                    }
+                    Token::AndEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::AndEq, value })
+                    }
+                    Token::OrEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::OrEq, value })
+                    }
+                    Token::XorEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::XorEq, value })
+                    }
+                    Token::ShlEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::ShlEq, value })
+                    }
+                    Token::ShrEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::ShrEq, value })
+                    }
+                    Token::PowEq => {
+                        self.advance();
+                        let value = self.parse_expr()?;
+                        Ok(Stmt::Assign { target: expr, op: AssignOp::PowEq, value })
                     }
                     _ => Ok(Stmt::Expr(expr))
                 }
@@ -356,7 +497,8 @@ impl ParserStmtExt for Parser {
         };
 
         self.expect(Token::Eq)?;
-        let value = self.parse_expr()?;
+        // 构建块（直接）: mut name = *: / ~: <缩进块>
+        let value = self.parse_maybe_build_value()?;
 
         if is_const {
             Ok(Stmt::Const { name, ty, value })
@@ -380,6 +522,48 @@ impl ParserStmtExt for Parser {
             }
         }
 
+        // 支持解构绑定: let (a, b) = expr
+        if self.check(&Token::LParen) {
+            // 解析 tuple 解构模式，取第一个名字作为绑定名
+            self.advance(); // consume (
+            let name = match self.advance() {
+                Token::Ident(n) => n,
+                Token::Underscore => "_".to_string(),
+                t => return Err(format!("Expected variable name in destructuring, got {:?}", t)),
+            };
+            // 跳过剩余解构元素直到 )
+            while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                if self.check(&Token::Comma) || self.check(&Token::DotDotDot) || self.check(&Token::DotDot) {
+                    self.advance();
+                } else if matches!(self.peek(), Token::Ident(_) | Token::Underscore) {
+                    self.advance();
+                    if self.check(&Token::Colon) {
+                        self.advance(); // :
+                        self.parse_type()?;
+                    }
+                } else {
+                    self.advance();
+                }
+            }
+            self.expect(Token::RParen)?;
+
+            let ty = if self.check(&Token::Colon) {
+                self.advance();
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            self.expect(Token::Eq)?;
+            let value = self.parse_maybe_build_value()?;
+
+            if is_const {
+                return Ok(Stmt::Const { name, ty, value });
+            } else {
+                return Ok(Stmt::Let { name, mutable: false, is_ref, ty, value });
+            }
+        }
+
         let name = match self.advance() {
             Token::Ident(n) => n,
             t => return Err(format!("Expected variable name, got {:?}", t)),
@@ -393,7 +577,8 @@ impl ParserStmtExt for Parser {
         };
 
         self.expect(Token::Eq)?;
-        let value = self.parse_expr()?;
+        // 构建块（直接）: let name = *: / ~: <缩进块>
+        let value = self.parse_maybe_build_value()?;
 
         if is_const {
             Ok(Stmt::Const { name, ty, value })
@@ -401,6 +586,51 @@ impl ParserStmtExt for Parser {
             // let 前缀 → 不可变绑定
             Ok(Stmt::Let { name, mutable: false, is_ref, ty, value })
         }
+    }
+
+    // ─── 构建块值解析 ───
+
+    /// 解析可能后跟构建块的值表达式
+    fn parse_maybe_build_value(&mut self) -> Result<Expr, String> {
+        // 情况1: 直接构建块（*:/~:/^: body）- 无前置值
+        if self.check(&Token::BuildCall) || self.check(&Token::BuildGen) || self.check(&Token::BuildIndex) {
+            let kind = if self.check(&Token::BuildCall) {
+                BuildKind::Call
+            } else if self.check(&Token::BuildGen) {
+                BuildKind::Gen
+            } else {
+                BuildKind::Index
+            };
+            self.advance();
+            let body = self.parse_build_block_body()?;
+            self.validate_build_block(kind, &body)?;
+            return Ok(Expr::BuildBlock {
+                kind,
+                lhs: Box::new(Expr::TupleLit(Vec::new())),
+                body,
+            });
+        }
+        // 情况2: 普通值，可能是值后跟构建块
+        let value = self.parse_expr()?;
+        if self.check(&Token::BuildCall) || self.check(&Token::BuildGen) || self.check(&Token::BuildIndex) {
+            let kind = if self.check(&Token::BuildCall) {
+                BuildKind::Call
+            } else if self.check(&Token::BuildGen) {
+                BuildKind::Gen
+            } else {
+                BuildKind::Index
+            };
+            self.advance();
+            let body = self.parse_build_block_body()?;
+            self.validate_build_block(kind, &body)?;
+            return Ok(Expr::BuildBlock {
+                kind,
+                lhs: Box::new(value),
+                body,
+            });
+        }
+        // 情况3: 纯值，无构建块
+        Ok(value)
     }
 
     // ─── 构建块 ───
@@ -467,6 +697,7 @@ impl ParserStmtExt for Parser {
                 }
                 Ok(())
             }
+            BuildKind::Index => Ok(()),
         }
     }
 

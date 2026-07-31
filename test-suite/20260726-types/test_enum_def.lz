@@ -1,0 +1,8 @@
+enum Color =
+    Red
+    Green
+    Blue
+
+def main() =
+    c = Color.Red
+    print(c)

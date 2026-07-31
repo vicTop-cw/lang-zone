@@ -1,5 +1,0 @@
-def get()-> int? =
-  r: int? = Some(5)
-  return r
-def main() =
-  print(get())

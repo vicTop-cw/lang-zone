@@ -1,0 +1,7 @@
+def main() =
+    mut i = 0
+    loop:
+        if i >= 3:
+            break
+        print(i)
+        i = i + 1

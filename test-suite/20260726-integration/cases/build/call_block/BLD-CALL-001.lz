@@ -1,0 +1,6 @@
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    r = add ~:
+        (10, 20)
+    print(r)

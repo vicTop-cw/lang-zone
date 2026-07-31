@@ -1,0 +1,3 @@
+@unsafe
+def main() =
+    owned s = "hi"

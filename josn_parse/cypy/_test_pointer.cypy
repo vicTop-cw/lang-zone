@@ -1,0 +1,39 @@
+"""
+Round 3a: 测试 Cypy 指针类型 —— int*, malloc, free
+"""
+# 1. 指针类型声明
+def test_ptr_decl() -> int:
+    let ptr: int* = None
+    return 0
+
+# 2. 指针解引用
+def test_ptr_deref() -> int:
+    let x: int = 42
+    let ptr: int* = None
+    return 0
+
+# 3. malloc 分配内存
+def test_malloc() -> int:
+    let ptr: int* = malloc(4)
+    if ptr == None:
+        return 1
+    free(ptr)
+    return 0
+
+# 4. 指针算术
+def test_ptr_arithmetic() -> int:
+    let ptr: int* = malloc(16)
+    if ptr == None:
+        return 1
+    let next_ptr: int* = ptr + 1
+    free(ptr)
+    return 0
+
+def main() -> int:
+    print("=== Pointer Test ===")
+    print("test_ptr_decl: done")
+    print("test_ptr_deref: done")
+    print("test_malloc: done")
+    print("test_ptr_arithmetic: done")
+    print("=== Done ===")
+    return 0

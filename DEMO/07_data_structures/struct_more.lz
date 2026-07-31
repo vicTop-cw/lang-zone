@@ -1,0 +1,27 @@
+// LZ 数据结构 — struct 方法扩展
+// 覆盖：mut self 方法、多方法、方法调用链
+
+struct Counter =
+    count: int
+
+    def increment(mut self) -> int =
+        self.count += 1
+        self.count
+
+    def decrement(mut self) -> int =
+        self.count -= 1
+        self.count
+
+    def reset(mut self) =
+        self.count = 0
+
+    def snapshot(self) -> int = self.count
+
+def main() =
+    let c = Counter(count: 0)
+    print(c.increment())
+    print(c.increment())
+    print(c.decrement())
+    print(c.snapshot())
+    c.reset()
+    print(c.snapshot())

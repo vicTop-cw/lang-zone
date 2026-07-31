@@ -1,0 +1,10 @@
+struct Trio =
+    a: int
+    b: int
+    c: int
+
+magic __len__(self: Trio) -> int = 3
+
+def main() =
+    t = Trio(a: 1, b: 2, c: 3)
+    print(t.len())

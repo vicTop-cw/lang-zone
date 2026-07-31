@@ -1,0 +1,4 @@
+def gen_all() =
+    yield from [1, 2, 3] with |x| x * 2
+
+def main() = print(0)

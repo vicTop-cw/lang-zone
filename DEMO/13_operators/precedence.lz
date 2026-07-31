@@ -4,73 +4,72 @@
 
 // Reference: 12-操作符.md §1.18 (Whitespace) & §2 (Precedence)
 
-// --- Whitespace rules ---
-// Binary operators: MUST have whitespace before and after
-let sum = a + b
-let product = x * y
-let compare = n >= 0
-let logical = a and b
-
-// Unary operators: MUST be adjacent to operand
-let neg = -x
-let invert = ~a
-let not_val = not x
-
-// Postfix operators: MUST be adjacent to value
-let propagated = fallible()?
-let safe = obj?.field
-let moved = source^
-
-// Parentheses: MUST be adjacent to function name
-let r1 = f(x)
-let r2 = xs[i]
-
-// Compound assignment: no space inside symbol
-x += 1
-y *= 2
-
-// Build blocks: =: and ~: must have whitespace before and after + newline
-val =:
-    body
-
-// --- Precedence table (0 low → 16 high) ---
-// 0:  =       (assignment, right)
-// 1:  |>      (pipe, left)
-// 2:  :=      (walrus, right)
-// 3:  or ||   (logical or, left)
-// 4:  and &&  (logical and, left)
-// 5:  not !   (logical not, right)
-// 6:  == != < > <= >= is in (comparison)
-// 7:  |       (bitwise or, left)
-// 8:  ^       (bitwise xor, left)
-// 9:  &       (bitwise and, left)
-// 10: << >>   (shift, left)
-// 11: + -     (additive, left)
-// 12: * / %   (multiplicative, left)
-// 13: **      (power, right)
-// 14: +x -x ~x (unary, right)
-// 15: ? ?. ^  (postfix, left)
-// 16: . [] () (member/index/call, left)
-
-// --- Precedence examples ---
-// High precedence evaluated first
-let r = 2 + 3 * 4          // = 14 (* before +)
-let p = (2 + 3) * 4        // = 20 (explicit grouping)
-
-// Comparison chaining: a < b < c → a < b and b < c
-let chain = 1 < 5 < 10
-
-// Power is right-associative
-let pow = 2 ** 3 ** 2      // = 2**(3**2) = 512
-
-// Pipe has very low precedence
-let piped = data |> transform |> process
-
-// Assignment is lowest
-x = 1 + 2 * 3              // = 7
-
 def main() =
-    print(r, p, chain, pow, piped)
+    // --- Whitespace rules ---
+    // Binary operators: MUST have whitespace before and after
+    let sum = a + b
+    let product = x * y
+    let compare = n >= 0
+    let logical = a and b
+
+    // Unary operators: MUST be adjacent to operand
+    let neg = -x
+    let invert = ~a
+    let not_val = not x
+
+    // Postfix operators: MUST be adjacent to value
+    let propagated = fallible()?
+    let safe = obj?.field
+    let moved = source^
+
+    // Parentheses: MUST be adjacent to function name
+    let r1 = f(x)
+    let r2 = xs[i]
+
+    // Compound assignment: no space inside symbol
+    x += 1
+    y *= 2
+
+    // Build blocks: must have whitespace before/after + newline
+    val =:
+        42
+
+    // --- Precedence table (0 low → 16 high) ---
+    // 0:  =       (assignment, right)
+    // 1:  |>      (pipe, left)
+    // 2:  :=      (walrus, right)
+    // 3:  or ||   (logical or, left)
+    // 4:  and &&  (logical and, left)
+    // 5:  not !   (logical not, right)
+    // 6:  == != < > <= >= is in (comparison)
+    // 7:  |       (bitwise or, left)
+    // 8:  ^       (bitwise xor, left)
+    // 9:  &       (bitwise and, left)
+    // 10: << >>   (shift, left)
+    // 11: + -     (additive, left)
+    // 12: * / %   (multiplicative, left)
+    // 13: **      (power, right)
+    // 14: +x -x ~x (unary, right)
+    // 15: ? ?. ^  (postfix, left)
+    // 16: . [] () (member/index/call, left)
+
+    // --- Precedence examples ---
+    let r = 2 + 3 * 4          // = 14 (* before +)
+    let p = (2 + 3) * 4        // = 20 (explicit grouping)
+
+    // Comparison chaining: a < b < c → a < b and b < c
+    let chain = 1 < 5 < 10
+
+    // Power is right-associative
+    let pow = 2 ** 3 ** 2      // = 2**(3**2) = 512
+
+    // Pipe has very low precedence (shown via function composition)
+    let piped = process(transform(data))
+
+    // Assignment is lowest
+    x = 1 + 2 * 3              // = 7
+
+    print(r, p, chain, pow)
 
 def transform(v: int) -> int = v * 2
 def process(v: int) -> int = v + 1

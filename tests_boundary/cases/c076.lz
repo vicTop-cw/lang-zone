@@ -1,5 +1,0 @@
-spawn work()
-def work() =
-  print(1)
-def main() =
-  print(2)

@@ -1,0 +1,7 @@
+// 构建块（目前只允许出现在函数体内）
+def main() =
+    config =:
+        host = "localhost"
+        port = 8080
+        (host, port)
+    print(config)

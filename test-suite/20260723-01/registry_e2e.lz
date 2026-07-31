@@ -2,12 +2,12 @@
 // Tests: type alias injection, shim injection, method aliases, 
 // template function mapping — all via BridgeRegistry
 
-import std::collections::HashMap
-import std::io
-import std::fs
+import std.collections.HashMap
+import std.io
+import std.fs
 
 // ── 1. Type alias injection + dedup ──
-// Both io and fs inject IOError = std::io::Error
+// Both io and fs inject IOError = std.io.Error
 // Must not produce duplicate type alias (HashMap dedup)
 
 def test_type_alias() -> str =
@@ -19,7 +19,7 @@ def test_shims() -> str =
 
 // ── 3. HashMap construction
 def test_hashmap() -> str =
-    m: Dict<str, int> = HashMap::new()
+    m: Dict<str, int> = HashMap.new()
     "ok"
 
 // ── 4. Vec method aliases (append→push, length→len)

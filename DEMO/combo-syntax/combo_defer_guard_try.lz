@@ -1,0 +1,13 @@
+// combo-syntax（绿色回归测试）：defer + guard + try
+def process(x: int) -> int =
+    defer print("cleanup")
+    guard x > 0 else:
+        return -1
+    try:
+        x * 2
+    catch e:
+        -2
+
+def main() =
+    print(process(5))     // 10
+    print(process(-1))    // -1

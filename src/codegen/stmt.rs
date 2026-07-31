@@ -108,17 +108,42 @@ impl CodeGenStmtExt for CodeGen {
                     format!("{}yield;\n", pad)
                 }
             }
-
-            Stmt::While { cond, body } => {
-                let body_s = self.gen_block(body, indent + 1, locals);
-                format!("{}while {} {{\n{}{}}}\n", pad, self.gen_expr(cond), body_s, pad)
+            Stmt::YieldFrom(e) => {
+                // yield from expr: 委托生成器迭代
+                if self.in_gen.get() {
+                    let inner = self.gen_expr(e);
+                    format!("{}for __yf_val in {}.into_iter() {{ __bb.push(__yf_val); }}\n", pad, inner)
+                } else {
+                    let inner = self.gen_expr(e);
+                    format!("{}// yield from {}\n", pad, inner)
+                }
             }
 
-            Stmt::For { var, iter, body } => {
+            Stmt::While { cond, guard, body, else_body: _ } => {
+                let body_s = self.gen_block(body, indent + 1, locals);
+                match guard {
+                    Some(g) => {
+                        let pad_inc = "    ".repeat(indent + 1);
+                        let guard_s = self.gen_expr(g);
+                        format!("{}while {} {{\n{}if !({}) {{ break; }}\n{}{}}}\n",
+                            pad, self.gen_expr(cond), pad_inc, guard_s, body_s, pad)
+                    }
+                    None => format!("{}while {} {{\n{}{}}}\n", pad, self.gen_expr(cond), body_s, pad),
+                }
+            }
+
+            Stmt::For { var, iter, guard, body, else_body: _ } => {
                 let iter_s = self.gen_expr(iter);
                 let body_s = self.gen_block(body, indent + 1, locals);
-                // Lang-Zong 绑定默认可变更：循环变量声明为 mut
-                format!("{}for mut {} in {} {{\n{}{}}}\n", pad, var, iter_s, body_s, pad)
+                let var_decl = format!("mut {}", var);
+                let inner = match guard {
+                    Some(g) => {
+                        let pad_inc = "    ".repeat(indent + 1);
+                        format!("{}if !({}) {{ continue; }}\n{}", pad_inc, self.gen_expr(g), body_s)
+                    }
+                    None => body_s,
+                };
+                format!("{}for {} in {} {{\n{}{}}}\n", pad, var_decl, iter_s, inner, pad)
             }
 
             Stmt::Loop(body) => {
@@ -206,6 +231,7 @@ impl CodeGenStmtExt for CodeGen {
                     AssignOp::MulEq => "*=",
                     AssignOp::DivEq => "/=",
                     AssignOp::ModEq => "%=",
+                    _ => "=",
                 };
                 // 普通赋值 = 默认拷贝；复合赋值 (+= 等) 保持 Rust 值语义（移动 RHS）
                 // 构建块 RHS 不再 .clone()
@@ -227,6 +253,22 @@ impl CodeGenStmtExt for CodeGen {
                 } else {
                     format!("{}assert!({});\n", pad, self.gen_expr(expr))
                 }
+            }
+            Stmt::FnDef { func } => {
+                // 嵌套函数已提升为模块级函数，此处生成 let 绑定指向 mangled 名称
+                let parent = self.current_fn_name.borrow().clone().unwrap_or_default();
+                let mangled = format!("{}_{}", parent, func.name);
+                locals.insert(func.name.clone());
+                format!("{}let {} = {};\n", pad, func.name, mangled)
+            }
+            Stmt::Comptime { body } => {
+                // comptime: 块 — 在 Rust 中直接内联
+                let mut out = String::new();
+                out.push_str(&format!("{}// comptime block\n", pad));
+                for stmt in body {
+                    out.push_str(&self.gen_stmt(stmt, indent, locals));
+                }
+                out
             }
         }
     }

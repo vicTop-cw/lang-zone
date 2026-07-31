@@ -1,0 +1,3 @@
+def main() =
+    name = "LZ"
+    print(f"Hello, {name}")

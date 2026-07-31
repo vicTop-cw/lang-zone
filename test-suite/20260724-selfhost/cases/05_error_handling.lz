@@ -1,0 +1,27 @@
+// ============================================================
+// Phase 2: lz 自测试 — 05 错误处理（简化版）
+// ============================================================
+
+def check_nonzero(x: int) -> int =
+  if x == 0:
+    -1
+  else:
+    x
+
+def compare_div(a: int, b: int) -> bool =
+  if b != 0:
+    a / b == (a / b)
+  else:
+    False
+
+suite "guard_tests":
+  test "nonzero_5":
+    assert check_nonzero(5) == 5
+  test "nonzero_0":
+    assert check_nonzero(0) == -1
+
+suite "div_tests":
+  test "div_6_by_2":
+    assert 6 / 2 == 3
+  test "div_rem":
+    assert 7 / 2 == 3

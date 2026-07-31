@@ -1,7 +1,7 @@
 # Lang-Zong 编译器 — 测试报告 (TEST REPORT #002) — Phase 4
 
 > 归档路径：`test-suite/20260722-02/reports/TEST_REPORT_002.md`
-> 生成时间：2026-07-22 ｜ 测试驱动：`test-suite/20260722-02/run_tests.py` ｜ SUT：`target/debug/lang-zong.exe`
+> 生成时间：2026-07-22 ｜ 测试驱动：`test-suite/20260722-02/run_tests.py` ｜ SUT：`target/debug/lang-zone.exe`
 
 ---
 

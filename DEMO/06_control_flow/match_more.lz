@@ -1,0 +1,32 @@
+// LZ 控制流 — match 扩展
+// 覆盖：枚举全模式、嵌套模式、通配（守卫形式见 99_spec）
+
+enum Status =
+    Active
+    Inactive
+    Pending(str)
+
+def describe(s: Status) -> str =
+    match s:
+        case Status.Active => "on"
+        case Status.Inactive => "off"
+        case Status.Pending(msg) => f"waiting: {msg}"
+        case _ => "unknown"
+
+enum Shape =
+    Circle(radius: f64)
+    Rect(width: f64, height: f64)
+
+def area(s: Shape) -> f64 =
+    match s:
+        case Shape.Circle(radius: r) => 3.14 * r * r
+        case Shape.Rect(width: w, height: h) => w * h
+
+def main() =
+    print(describe(Status.Active))
+    print(describe(Status.Pending("soon")))
+
+    let c = Shape.Circle(radius: 2.0)
+    let r = Shape.Rect(width: 3.0, height: 4.0)
+    print(area(c))
+    print(area(r))

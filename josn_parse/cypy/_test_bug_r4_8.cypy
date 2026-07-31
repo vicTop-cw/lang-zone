@@ -1,0 +1,7 @@
+# Bug-R4-8: None 不能赋值给 int 类型
+def test_none_int() -> int:
+    let x: int = None
+    return 0
+
+def main() -> int:
+    return 0

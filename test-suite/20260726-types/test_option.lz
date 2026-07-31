@@ -1,0 +1,3 @@
+def main() =
+    x = Option.Some(42)
+    print(x)

@@ -1,0 +1,24 @@
+def test_0() -> int:
+    if (-(((--1) + (False != 1)))):
+        return 1
+    else:
+        return 0
+    while y:
+        break
+    while 1:
+        break
+    match (-(print(1))):
+        case 0:
+            return 0
+        case _:
+            return -1
+
+def test_1() -> int:
+    x = (-"hello")
+    if "":
+        return 1
+    else:
+        return 0
+
+def main() -> int:
+    return 0

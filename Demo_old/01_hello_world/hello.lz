@@ -1,0 +1,3 @@
+// ==== Hello, World ====
+def main() =
+    print("Hello, Lang-Zone!")

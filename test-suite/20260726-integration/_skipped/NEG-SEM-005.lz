@@ -1,0 +1,13 @@
+trait A =
+    def f(self: Self) -> int
+
+trait B =
+    def f(self: Self) -> int
+
+struct C =
+
+impl A for C:
+    def f(self: C) -> int = 1
+
+impl B for C:
+    def f(self: C) -> int = 2

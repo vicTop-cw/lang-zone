@@ -1,0 +1,1 @@
+{closure@e:\IDEProjects\AI\lang-zone\josn_parse\lz\_tests\_fuzz_recursive.rs:21:23: 21:26}: Callable<_>

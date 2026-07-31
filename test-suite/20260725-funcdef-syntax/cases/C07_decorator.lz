@@ -1,0 +1,7 @@
+// 装饰器（decorator）：@name 不带 !，作用于下一个 def
+@timed
+def calc(x: int) -> int = x * x
+
+@parallel
+@log
+def process(items: List<int>) -> int = items.len()

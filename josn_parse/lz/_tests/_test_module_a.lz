@@ -1,0 +1,25 @@
+// _test_module_a.lz — 被导入的模块
+// 测试模块导出、可见性、类型
+
+// 公开函数
+def add(a: int, b: int) -> int =
+    a + b
+
+def greet(name: str) -> str =
+    "Hello, " + name + "!"
+
+// 私有函数（_ 前缀）
+def _internal() -> str =
+    "secret"
+
+// 泛型函数
+def identity<T>(x: T) -> T =
+    x
+
+// 结构体定义
+struct Point =
+    x: int
+    y: int
+
+def make_point(x: int, y: int) -> Point =
+    Point(x, y)

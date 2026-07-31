@@ -1,0 +1,8 @@
+// ==== Closures ====
+def apply(f: fn(int) -> int, x: int) -> int =
+    f(x)
+
+def main() =
+    let double = |x| x * 2
+    let result = apply(double, 10)
+    print(f"double(10) = {result}")

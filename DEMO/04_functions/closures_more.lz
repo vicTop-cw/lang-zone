@@ -1,0 +1,28 @@
+// LZ 函数 — 闭包与嵌套函数扩展
+// 覆盖：lambda、高阶函数、返回闭包、嵌套函数
+
+def apply(f: fn(int) -> int, x: int) -> int = f(x)
+
+def adder(n: int) -> fn(int) -> int =
+    |x| x + n
+
+def main() =
+    // 匿名函数（lambda）
+    let double = |x| x * 2
+    let triple = |x| x * 3
+    print(double(5), triple(4))
+
+    // 高阶函数：把闭包当参数
+    print(apply(double, 10))
+
+    // 返回闭包（捕获环境）
+    let plus3 = adder(3)
+    print(plus3(7))
+
+    // 嵌套函数
+    def inner(a: int, b: int) -> int = a + b
+    print(inner(2, 3))
+
+    // 闭包链式
+    let composed = |x| double(triple(x))
+    print(composed(2))

@@ -1,0 +1,8 @@
+trait Greet =
+    def greet(self: Self) -> str
+
+struct Person =
+    name: str
+
+impl Greet for Person:
+    def greet(self: Person) -> int = 1

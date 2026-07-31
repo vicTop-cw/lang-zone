@@ -1,0 +1,20 @@
+# lz std::itor — 可控迭代器 (controllable iterator)
+# 对齐 vools.data.itor
+# 源码级映射: lz 符号 → 自定义 Rust impl
+
+[module]
+tier = 1
+rust_prefix = "std::itor"
+version = "1.0.0"
+description = "Thread-safe controllable iterator with pause/resume/restart/jump"
+
+[types]
+Itor      = "std::itor::Itor"
+ItorState = "std::itor::ItorState"
+Node      = "std::itor::Node"
+
+[exports]
+Itor
+ItorState
+Node
+itor

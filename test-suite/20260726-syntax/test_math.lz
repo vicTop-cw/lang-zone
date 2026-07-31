@@ -1,0 +1,9 @@
+@math
+def sq(x, y) = x * x + y * y
+
+@math
+def dist(x, y) = x * x + y * y
+
+def main() =
+    print(sq(3, 4))
+    print(dist(5, 12))

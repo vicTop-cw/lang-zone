@@ -1,4 +1,0 @@
-def main() =
-  @deco
-  def foo()-> int =
-    return 1

@@ -1,0 +1,11 @@
+// 规范目标特性（多 trait 约束解析支持，约束求解不完整）
+// 出处：SYNTAX/01-类型系统.md / SYNTAX/03-函数.md — T: A + B
+// 预期语法：
+trait Callable =
+    def call(self) -> int = ...
+
+trait Printable =
+    def to_str(self) -> str = ...
+
+def combine<T: Callable + Printable>(x: T) -> str =
+    f"{x.call()}:{x.to_str()}"

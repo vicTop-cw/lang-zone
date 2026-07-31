@@ -1,7 +1,7 @@
 # Lang-Zong 编译器 — 测试报告 (TEST REPORT #001)
 
 > 归档路径：`test-suite/20260722-01/reports/TEST_REPORT_001.md`
-> 生成时间：2026-07-22 ｜ 测试驱动：`test-suite/20260722-01/run_tests.py` ｜ SUT：`target/debug/lang-zong.exe`
+> 生成时间：2026-07-22 ｜ 测试驱动：`test-suite/20260722-01/run_tests.py` ｜ SUT：`target/debug/lang-zone.exe`
 > **全部测试产物（输入、生成代码、结果、本报告）均仅位于 `test-suite/` 目录内；未修改或创建项目任何其他文件/目录。**
 
 ---
@@ -9,7 +9,7 @@
 ## 1. 测试范围与目标
 
 ### 1.1 被测对象
-Lang-Zong (`lang-zong`) 是用 Rust 编写的源码到源码编译器，将 `.lz` 翻译为 Rust：
+Lang-Zong (`lang-zone`) 是用 Rust 编写的源码到源码编译器，将 `.lz` 翻译为 Rust：
 `src/token.rs`(词法) → `src/parser.rs`(语法 + 构建块语义校验) → `src/codegen.rs`(代码生成) → `src/main.rs`(CLI)。
 
 ### 1.2 测试目标
@@ -176,7 +176,7 @@ python3 run_tests.py        # 或托管解释器路径
 #   - 本报告：20260722-01/reports/TEST_REPORT_001.md
 ```
 
-**SUT 说明**：本次使用 `../../target/debug/lang-zong.exe`（由 `20260722-01/run_tests.py` 引用，时间戳 2026-07-22 17:20）。为遵守"仅 test-suite/ 内存放测试产物"的约束，未重新编译项目；如需基于最新源码验证，可在项目根执行 `cargo build` 后重跑本套件。
+**SUT 说明**：本次使用 `../../target/debug/lang-zone.exe`（由 `20260722-01/run_tests.py` 引用，时间戳 2026-07-22 17:20）。为遵守"仅 test-suite/ 内存放测试产物"的约束，未重新编译项目；如需基于最新源码验证，可在项目根执行 `cargo build` 后重跑本套件。
 
 ---
 

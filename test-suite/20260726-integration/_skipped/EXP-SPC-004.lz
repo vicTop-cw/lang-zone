@@ -1,0 +1,11 @@
+def get_value() -> int = 15
+
+def main() =
+    result = x := 42
+    print(result)
+    if (y := get_value()) > 10:
+        print(y)
+    a = (b := (c := 1) + 2) + 3
+    print(a)
+    print(b)
+    print(c)

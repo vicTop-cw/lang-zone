@@ -1,0 +1,47 @@
+// LZ 自测 — 控制流
+def main() =
+    // for 循环
+    total = 0
+    for i in 0..5:
+        total += i
+    assert total == 10
+
+    // while 循环
+    i = 0
+    while i < 3:
+        i += 1
+    assert i == 3
+
+    // loop
+    count = 0
+    loop:
+        count += 1
+        if count >= 3:
+            break
+    assert count == 3
+
+    // break/continue
+    even_sum = 0
+    for i in 0..10:
+        if i % 2 != 0:
+            continue
+        if i > 6:
+            break
+        even_sum += i
+    assert even_sum == 2 + 4 + 6
+
+    // 简单的 if 语句
+    let x = 42
+    if x > 0:
+        let pos = True
+    assert pos == True
+
+    // guard
+    def safe_div(a: int, b: int) -> int =
+        guard b != 0 else:
+            return 0
+        a / b
+    assert safe_div(10, 2) == 5
+    assert safe_div(10, 0) == 0
+
+    print("✅ 所有控制流测试通过")

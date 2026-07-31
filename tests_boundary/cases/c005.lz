@@ -1,3 +1,0 @@
-def main() =
-  x: UnknownType = 5
-  print(x)

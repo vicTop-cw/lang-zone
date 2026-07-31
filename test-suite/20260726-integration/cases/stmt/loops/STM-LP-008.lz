@@ -1,0 +1,4 @@
+def main() =
+    r = sum x in [1, 2, 3, 4]:
+        x
+    print(r)

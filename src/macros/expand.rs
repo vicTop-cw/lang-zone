@@ -319,7 +319,10 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
                     i += 1;
                     n.clone()
                 }
-                _ => return Err(format!("expected macro name at token {}", i)),
+                _ => {
+                    // 非宏定义（如 #!bin macro 中的 macro 关键字）→ 跳过继续
+                    continue;
+                }
             };
 
             // 跳过到 (

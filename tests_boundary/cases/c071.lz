@@ -1,3 +1,0 @@
-def main() =
-  with open_file() as f:
-    print(f)

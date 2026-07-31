@@ -1,3 +1,0 @@
-def main() =
-  import std::collections::HashMap
-  print(1)

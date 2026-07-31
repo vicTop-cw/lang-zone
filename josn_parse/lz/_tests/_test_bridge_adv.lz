@@ -1,0 +1,83 @@
+// _test_bridge_adv.lz — 阶段 1: 桥接模块深度测试
+// 测试 Result/Option 自动解包、导入变体、类型映射
+
+// ── 1.1 Result/Option 自动解包 ──
+import std::bridge::rust::std::fs
+import std::bridge::rust::std::io
+
+// 测试 std::fs::read_to_string（返回 Result<String>）
+def test_read_to_string() =
+    content = std::fs::read_to_string("_test_bridge_adv.lz")
+    print("File size: ")
+    print(content.len())
+
+// 测试 std::fs::write（返回 Result<()>）
+def test_write_file() =
+    result = std::fs::write("_test_bridge_output.txt", "hello bridge")
+    print("Write result: ")
+    print(result)
+
+// 测试 std::fs::read_dir（返回 Result<ReadDir>，迭代器类型）
+def test_read_dir() =
+    dir_iter = std::fs::read_dir(".")
+    print("Read dir result: ")
+    print(dir_iter)
+
+// 测试 std::fs::exists（返回 bool）
+def test_exists() =
+    exists = std::fs::exists("_test_bridge_adv.lz")
+    print("File exists: ")
+    print(exists)
+
+// 测试 io::Result 类型
+def test_io_result() =
+    stdin_line = std::io::stdin()
+    print("stdin result: ")
+    print(stdin_line)
+
+// ── 1.2 桥接模块导入变体 ──
+import std::bridge::rust::std::collections::HashMap
+import std::bridge::rust::std::path::PathBuf
+
+// 测试 HashMap 映射
+def test_hashmap() =
+    map = HashMap()
+    print("HashMap created: ")
+    print(map)
+
+// 测试 PathBuf 类型
+def test_pathbuf() =
+    path = PathBuf("test.txt")
+    print("PathBuf created: ")
+    print(path)
+
+// ── 1.3 桥接类型作为函数参数和返回值 ──
+def test_bridge_params(content: str) =
+    print("Content length: ")
+    print(content.len())
+
+def test_bridge_return() -> str =
+    content = std::fs::read_to_string("_test_bridge_adv.lz")
+    "fixed string"
+
+// 测试链式桥接调用
+def test_chained_bridge() =
+    content = std::fs::read_to_string("_test_bridge_adv.lz")
+    print("Step 1: read OK")
+    write_result = std::fs::write("_test_bridge_chain.txt", content)
+    print("Step 2: write OK")
+    write_result
+
+// ── 主入口 ──
+def main() =
+    print("=== Bridge Advanced Test ===")
+    test_read_to_string()
+    test_write_file()
+    test_read_dir()
+    test_exists()
+    test_hashmap()
+    test_pathbuf()
+    test_bridge_params("hello")
+    test_bridge_return()
+    test_chained_bridge()
+    print("=== Bridge Advanced Test Complete ===")

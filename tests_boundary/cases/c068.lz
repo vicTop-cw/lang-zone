@@ -1,4 +1,0 @@
-guard let x = Some(1) else:
-  print("no")
-def main() =
-  print(2)

@@ -9,17 +9,17 @@ rust_prefix = "std::fs"
 # lz 函数名 → Rust 路径 + 参数适配
 
 [functions]
-read_to_string   = { rust = "std::fs::read_to_string",   shim = "path_ref" }
-write            = { rust = "std::fs::write",              shim = "path_ref" }
-read             = { rust = "std::fs::read",               shim = "path_ref" }
-copy             = { rust = "std::fs::copy",               shim = "path_ref" }
-remove_file      = { rust = "std::fs::remove_file",       shim = "path_ref" }
-remove_dir       = { rust = "std::fs::remove_dir",        shim = "path_ref" }
-remove_dir_all   = { rust = "std::fs::remove_dir_all",    shim = "path_ref" }
-create_dir       = { rust = "std::fs::create_dir",        shim = "path_ref" }
-create_dir_all   = { rust = "std::fs::create_dir_all",    shim = "path_ref" }
+read_to_string   = { rust = "std::fs::read_to_string",   shim = "path_ref", result = true }
+write            = { rust = "std::fs::write",              shim = "path_ref", result = true }
+read             = { rust = "std::fs::read",               shim = "path_ref", result = true }
+copy             = { rust = "std::fs::copy",               shim = "path_ref", result = true }
+remove_file      = { rust = "std::fs::remove_file",       shim = "path_ref", result = true }
+remove_dir       = { rust = "std::fs::remove_dir",        shim = "path_ref", result = true }
+remove_dir_all   = { rust = "std::fs::remove_dir_all",    shim = "path_ref", result = true }
+create_dir       = { rust = "std::fs::create_dir",        shim = "path_ref", result = true }
+create_dir_all   = { rust = "std::fs::create_dir_all",    shim = "path_ref", result = true }
 exists           = { rust = "std::path::Path::new({0}).exists()", shim = "path_ref_expr" }
-rename           = { rust = "std::fs::rename",             shim = "path_ref" }
+rename           = { rust = "std::fs::rename",             shim = "path_ref", result = true }
 
 # ── 类型映射 ──
 

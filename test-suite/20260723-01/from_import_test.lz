@@ -1,10 +1,10 @@
-// E2E test: from-import syntax with :: separator
-// Tests: from X::Y import a, b → use X::Y::{a, b};
+// E2E test: from-import syntax with . separator
+// Tests: from X.Y import a, b → use X.Y.{a, b};
 
-from std::collections import HashMap
+from std.collections import HashMap
 
 def test_from_syntax() -> str =
-    m: Dict<str, int> = HashMap::new()
+    m: Dict<str, int> = HashMap.new()
     "ok"
 
 def main() =

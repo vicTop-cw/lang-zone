@@ -1,0 +1,6 @@
+// ==== Variable Build Block =: ====
+def main() =
+    x =:
+        y = 1
+        y + 2
+    print(x)

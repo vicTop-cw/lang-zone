@@ -1,0 +1,31 @@
+// LZ 错误处理 — ? 传播链 + 枚举异常 catch
+// 覆盖：raises 函数用 ? 传播、try/catch 捕获具体变体
+
+enum ParseError =
+    BadFormat(str)
+
+def parse_int(s: str) -> int raises ParseError =
+    if s == "":
+        raise ParseError.BadFormat("empty")
+    42
+
+def pipeline(s: str) -> int raises ParseError =
+    let a = parse_int(s)?
+    let b = parse_int(s)?
+    a + b
+
+def main() =
+    let r = try:
+        pipeline("x")
+    catch ParseError.BadFormat(msg):
+        print(f"parse failed: {msg}")
+        -1
+    print(r)
+
+    // 空字符串触发异常分支
+    let r2 = try:
+        pipeline("")
+    catch ParseError.BadFormat(msg):
+        print(f"parse failed: {msg}")
+        -1
+    print(r2)

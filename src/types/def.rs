@@ -69,6 +69,12 @@ pub enum Type {
 
     // ── Self 占位 ──
     Self_,
+
+    // ── 结构化类型 (duck typing) ──
+    /// `duck { field: Type, ... }` — 结构匹配而非名义匹配
+    Duck {
+        fields: Vec<(String, Type)>,  // 保持声明顺序
+    },
 }
 
 impl Type {
@@ -85,6 +91,11 @@ impl Type {
             Type::Any => "std::any::Any".to_string(),
             Type::Unit => String::new(),
             Type::Self_ => "Self".to_string(),
+            Type::Duck { fields: _ } => {
+                // duck 类型在 Rust 中无直接等价，保留为 trait bound：
+                // 实际 codegen 会用 impl Fn 或 _ 替代
+                "_".to_string()
+            }
 
             Type::Named(name) => name.clone(),
 

@@ -1,0 +1,17 @@
+// ==== Struct ====
+struct Point =
+    x: f64
+    y: f64
+
+    def distance(self) -> f64 =
+        (self.x ** 2 + self.y ** 2) ** 0.5
+
+struct Pair<T, U> =
+    first: T
+    second: U
+
+def main() =
+    let p = Point(x: 3.0, y: 4.0)
+    print(f"distance={p.distance()}")
+    let pair = Pair(first: 1, second: "hello")
+    print(f"pair=({pair.first},{pair.second})")

@@ -1,0 +1,23 @@
+// LZ 类型系统 — 类型别名与转换扩展
+// 覆盖：简单别名、别名组合、as 显式转换
+
+type Meter = f64
+type IdList = List<int>
+type Pair = (f64, f64)
+
+def main() =
+    let dist: Meter = 3.5
+    let ids: IdList = [1, 2, 3]
+    let pt: Pair = (1.0, 2.0)
+
+    // as 显式类型转换
+    let n: int = 42
+    let f: f64 = n as f64
+    let back: int = f as int
+
+    print(dist, ids, pt)
+    print(f, back)
+
+    // 别名参与表达式
+    let total: Meter = dist + 1.0
+    print(total)

@@ -1,0 +1,3 @@
+# Bug-R1-1: class 继承语法
+class Child(Parent):
+    pass

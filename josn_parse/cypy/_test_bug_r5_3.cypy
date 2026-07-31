@@ -1,0 +1,10 @@
+type NestedAlias = list[list[int]]
+
+def test_nested_list() -> list[list[int]]:
+    return [[1, 2], [3, 4]]
+
+def test_deep_list() -> list[list[list[int]]]:
+    return [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+
+def test_alias() -> NestedAlias:
+    return [[1, 2], [3, 4]]

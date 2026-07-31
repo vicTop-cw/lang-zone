@@ -1,0 +1,3 @@
+def main() =
+    x = Some(42)
+    print(x.unwrap())

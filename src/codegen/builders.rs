@@ -78,6 +78,11 @@ impl CodeGenBuildersExt for CodeGen {
                     pad, body_s, pad, pad, pad, unpack, pad
                 )
             }
+            BuildKind::Index => {
+                let lhs_s = self.callee_prefix(lhs);
+                let body_s = self.gen_block(body, indent + 1, locals);
+                format!("{{ {}.__getitem__({}) }}", lhs_s, body_s.trim_end())
+            }
         }
     }
 

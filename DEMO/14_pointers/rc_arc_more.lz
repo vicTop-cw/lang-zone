@@ -1,0 +1,15 @@
+// LZ 指针与引用 — Box / Rc / Arc 扩展
+// 覆盖：构造、clone、索引访问
+
+def main() =
+    let b: Box<int> = Box.new(1)
+    let bv = b[0]
+    print(bv)
+
+    let r1: Rc<int> = Rc.new(10)
+    let r2 = r1.clone()
+    print(r1[0], r2[0])
+
+    let a1: Arc<int> = Arc.new(20)
+    let a2 = a1.clone()
+    print(a1[0], a2[0])

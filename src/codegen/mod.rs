@@ -46,6 +46,8 @@ pub struct CodeGen {
     pub(super) bridge: StdBridge,                    // 底层源码桥接（shims/tier2 内部管理）
     pub(super) registry: BridgeRegistry,             // 统一桥接注册中心（对外路由）
     pub(super) magic_engine: MagicEngine,            // 魔法方法映射引擎
+    pub(super) current_fn_name: RefCell<Option<String>>, // 当前正在生成的函数名（用于嵌套 def）
+    pub(super) nested_fns: RefCell<Vec<Function>>,   // 从函数体提升的嵌套函数
 }
 
 impl CodeGen {
@@ -99,6 +101,8 @@ impl CodeGen {
             bridge,
             registry,
             magic_engine: MagicEngine::new(),
+            current_fn_name: RefCell::new(None),
+            nested_fns: RefCell::new(Vec::new()),
         };
         // 收集函数/方法参数（名 + Rust 类型），供构建块解包（位置 *args / 命名 **kwargs）使用
         for f in &module.functions {
@@ -110,6 +114,16 @@ impl CodeGen {
             }
         }
         let mut out = String::new();
+
+        // ── 预扫描：收集嵌套函数定义，提升为模块级函数 ─��
+        for f in &module.functions {
+            collect_nested_fns(&f.body, &f.name, &cg);
+        }
+        for imp in &module.impls {
+            for m in &imp.methods {
+                collect_nested_fns(&m.body, &m.name, &cg);
+            }
+        }
 
         // 1. Imports → Rust use 语句
         let mut emitted_aliases = HashMap::new();
@@ -185,6 +199,13 @@ impl CodeGen {
             out.push('\n');
         }
 
+        // 4.5. Type aliases
+        for ta in &module.type_aliases {
+            let rust_ty = ta.ty.to_rust_type_string();
+            out.push_str(&format!("type {} = {};\n", ta.name, rust_ty));
+        }
+        if !module.type_aliases.is_empty() { out.push('\n'); }
+
         // 5. Impls
         for i in &module.impls {
             out.push_str(&cg.gen_impl(i));
@@ -195,6 +216,16 @@ impl CodeGen {
         for f in &module.functions {
             out.push_str(&cg.gen_function(f));
             out.push_str("\n\n");
+        }
+
+        // 6b. 嵌套函数提升为模块级函数
+        let nested = cg.nested_fns.borrow();
+        if !nested.is_empty() {
+            out.push_str("// ── 嵌套函数（提升至模块级）──\n");
+            for nf in nested.iter() {
+                out.push_str(&cg.gen_function(nf));
+                out.push_str("\n\n");
+            }
         }
 
         // 7. Tests
@@ -324,6 +355,7 @@ fn scan_usage(module: &Module) -> (bool, bool) {
                 }
                 Stmt::For { body, .. } => scan_stmts(body, has_build, has_defer),
                 Stmt::Guard { else_body, .. } => scan_stmts(else_body, has_build, has_defer),
+                Stmt::FnDef { func } => scan_stmts(&func.body, has_build, has_defer),
                 _ => {}
             }
         }
@@ -397,6 +429,9 @@ fn scan_has_pow(module: &Module) -> bool {
                 Stmt::Expr(e) | Stmt::Let { value: e, .. } | Stmt::Return(Some(e)) | Stmt::Yield(Some(e)) => {
                     if scan_expr_pow(e) { return true; }
                 }
+                Stmt::FnDef { func } => {
+                    if scan_stmts_pow(&func.body) { return true; }
+                }
                 _ => {}
             }
         }
@@ -406,5 +441,50 @@ fn scan_has_pow(module: &Module) -> bool {
         if scan_stmts_pow(&f.body) { return true; }
     }
     false
+}
+
+/// 递归收集函数体中的嵌套 def，提升为模块级函数
+fn collect_nested_fns(stmts: &[Stmt], parent_name: &str, cg: &CodeGen) {
+    use crate::ast::{Stmt, Expr};
+    for s in stmts {
+        match s {
+            Stmt::FnDef { func } => {
+                let mangled_name = format!("{}_{}", parent_name, func.name);
+                let mut cloned = func.clone();
+                cloned.name = mangled_name.clone();
+                // 递归扫描嵌套函数体内部
+                collect_nested_fns(&func.body, &mangled_name, cg);
+                cg.nested_fns.borrow_mut().push(cloned);
+            }
+            Stmt::While { body, .. } | Stmt::Loop(body) | Stmt::With { body, .. }
+            | Stmt::For { body, .. } | Stmt::Defer(body) => {
+                collect_nested_fns(body, parent_name, cg);
+            }
+            Stmt::Guard { else_body, .. } => {
+                collect_nested_fns(else_body, parent_name, cg);
+            }
+            Stmt::Let { value: Expr::BuildBlock { body, .. }, .. } => {
+                collect_nested_fns(body, parent_name, cg);
+            }
+            Stmt::Expr(Expr::BuildBlock { body, .. }) => {
+                collect_nested_fns(body, parent_name, cg);
+            }
+            Stmt::Expr(Expr::If { then_body, elif_clauses, else_body, .. }) => {
+                collect_nested_fns(then_body, parent_name, cg);
+                for (_, b) in elif_clauses {
+                    collect_nested_fns(b, parent_name, cg);
+                }
+                if let Some(b) = else_body {
+                    collect_nested_fns(b, parent_name, cg);
+                }
+            }
+            Stmt::Expr(Expr::Match { arms, .. }) => {
+                for arm in arms {
+                    collect_nested_fns(&arm.body, parent_name, cg);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 

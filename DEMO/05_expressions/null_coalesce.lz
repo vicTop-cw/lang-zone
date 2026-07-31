@@ -1,0 +1,16 @@
+// LZ 表达式 — 空值合并 ??
+// 覆盖：Option 上的 ?? 提供默认值
+
+def main() =
+    let name: Option<str> = Some("Alice")
+    let fallback = name ?? "guest"
+    print(fallback)
+
+    let none_name: Option<str> = None
+    print(none_name ?? "guest")
+
+    // 链式 ??（左结合）
+    let a: Option<int> = None
+    let b: Option<int> = None
+    let c: Option<int> = Some(9)
+    print(a ?? b ?? c ?? 0)

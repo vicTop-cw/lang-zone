@@ -1,0 +1,7 @@
+// combo-syntax（绿色回归测试）：管道 |> + 偏应用 _ + 列表方法
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    let inc = add(_, 1)
+    let result = [1, 2, 3] |> map(inc)
+    print(result)          // [2, 3, 4]

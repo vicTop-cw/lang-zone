@@ -1,0 +1,10 @@
+// combo-syntax（绿色回归测试）：async + spawn + await
+async def fetch(id: int) -> int =
+    id * 2
+
+def main() =
+    let f1 = spawn fetch(10)
+    let f2 = spawn fetch(20)
+    let r1 = await f1
+    let r2 = await f2
+    print(r1, r2)          // 20 40

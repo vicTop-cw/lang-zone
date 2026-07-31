@@ -1,0 +1,11 @@
+// 规范目标特性（生成器构建块 *: 已部分实现，待端到端验证）
+// 出处：SYNTAX/11-构建块.md / SYNTAX/14-生成器.md
+// 预期语法：
+def build_params() =
+    let params = *:
+        yield ("a", 1)
+        yield ("b", 2)
+    params
+
+def main() =
+    print(build_params())

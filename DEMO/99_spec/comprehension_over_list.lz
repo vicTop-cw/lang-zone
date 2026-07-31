@@ -1,0 +1,6 @@
+// comprehension 列表变量迭代器 — 已实现
+// 出处：SYNTAX/04-表达式.md — 推导迭代器支持任意可迭代表达式
+def main() =
+    let nums = [1, 2, 3, 4, 5]
+    let doubled = [x * 2 for x in nums]
+    print(doubled)

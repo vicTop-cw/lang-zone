@@ -1,4 +1,0 @@
-def main() =
-  def inner() =
-      return 1
-    print(inner())

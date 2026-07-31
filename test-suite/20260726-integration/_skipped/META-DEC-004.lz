@@ -1,0 +1,4 @@
+@derive(Clone, Debug)
+struct Point =
+    x: int
+    y: int

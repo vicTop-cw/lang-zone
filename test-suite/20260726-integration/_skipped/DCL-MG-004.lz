@@ -1,0 +1,8 @@
+struct Tag =
+    name: str
+
+magic __str__(self: Tag) -> str = self.name
+
+def main() =
+    t = Tag(name: "magic")
+    print(t.to_string())

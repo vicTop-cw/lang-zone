@@ -1,0 +1,5 @@
+// Rust宏（Rust direct bridge）：import std::bridge::rust::* 直通 Rust 生态
+import std::bridge::rust::std::io
+import std::bridge::rust::serde_json
+
+def main() = print("rust bridge")

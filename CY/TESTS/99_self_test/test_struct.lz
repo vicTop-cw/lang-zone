@@ -1,0 +1,49 @@
+// LZ 自测 — 数据结构
+struct Point =
+    x: f64
+    y: f64
+
+    def area(self) -> f64 =
+        self.x * self.y
+
+enum Color:
+    Red
+    Green
+    Blue
+
+impl Point =
+    def new(x: f64, y: f64) -> Point =
+        Point(x: x, y: y)
+
+def main() =
+    // struct
+    let p = Point(x: 3.0, y: 4.0)
+    assert p.area() == 12.0
+
+    // impl
+    let p2 = Point.new(5.0, 6.0)
+    assert p2.area() == 30.0
+
+    // enum
+    let c = Color.Red
+    assert c._variant == 0
+    let g = Color.Green
+    assert g._variant == 1
+    let b = Color.Blue
+    assert b._variant == 2
+
+    // 列表推导
+    let squares = [x * x for x in 0..5 if x > 0]
+    assert squares == [1, 4, 9, 16]
+
+    // match
+    def describe(n: int) -> str =
+        match n:
+            case 0 => "zero"
+            case 1 => "one"
+            case _ => "other"
+    assert describe(0) == "zero"
+    assert describe(1) == "one"
+    assert describe(5) == "other"
+
+    print("✅ 所有数据结构测试通过")

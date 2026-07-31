@@ -1,0 +1,7 @@
+def test_spawn() -> int:
+    spawn print("spawned")
+    return 0
+
+def test_go() -> int:
+    go print("go routine")
+    return 0

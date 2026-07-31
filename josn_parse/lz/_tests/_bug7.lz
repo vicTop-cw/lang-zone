@@ -1,0 +1,10 @@
+struct Box<T> =
+    value: T
+
+impl Box<T> =
+    def same_as(self: Box<T>, other: T)-> bool =
+        true
+
+def main() =
+    b = Box(42)
+    print(b.same_as(7))

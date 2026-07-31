@@ -1,0 +1,28 @@
+// ============================
+// LZ 错误边界合集 — 错误处理 (09-错误处理.md)
+// ============================
+
+// --- 1. raise 未声明 raises ---
+// def bad() -> int =
+//     raise "oops"             // ❌ 缺少 raises 声明
+
+// --- 2. panic 缺少消息 ---
+// panic()                      // ❌ panic 需要参数
+
+// --- 3. try 无 catch 或 finally ---
+// try:
+//     do_something()           // ❌ try 必须有 catch 或 finally
+
+// --- 4. ? 用于非 Result/Option 类型 ---
+// let x: int = 42
+// let y = x?                   // ❌ int 不是 Result
+
+// --- 5. catch 分支缺少模式 ---
+// try:
+//     action()
+// catch:                       // ❌ catch 需要模式
+//     handler()
+
+// --- 6. raise 类型与 raises 不匹配 ---
+// def f() -> int raises str =
+//     raise 42                 // ❌ raises str 但 raise 了 int

@@ -1,0 +1,19 @@
+# Test: not 关键字和 ! 运算符
+def test_not_keyword() -> bool:
+    return not True
+
+def test_bang_op() -> bool:
+    return !True
+
+def test_not_in_if() -> int:
+    if not True:
+        return 1
+    return 0
+
+def test_bang_in_if() -> int:
+    if !True:
+        return 1
+    return 0
+
+def main() -> int:
+    return 0

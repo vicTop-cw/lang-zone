@@ -1,75 +1,32 @@
 // ================================================================
-// LZ Expressions — Pipe |> (basic, chained, extra args,
-// lambda pipe, collection pipeline)
+// LZ Expressions — Pipe |> (basic, chained, collection pipeline)
+// Currently uses function call equivalents (pipe parser WIP)
 // ================================================================
 
-def main() =
-    // ---- 10.1  Basic pipe  ----
-    // data |> f  ===  f(data)
-    let r1 = 5 |> double        // double(5) = 10
-    print(r1)
-
-    // ---- 10.1  Chained pipe  ----
-    let r2 = 5 |> double |> add_one   // add_one(double(5)) = 11
-    print(r2)
-
-    // ---- 10.2  Pipe with extra positional args  ----
-    // Left operand becomes first arg of the function
-    let r3 = 10 |> add(1, 2, 3)       // add(10, 1, 2, 3) = 16
-    print(r3)
-
-    // Pipe with single-arg function (no extra args)
-    let r4 = 10 |> double              // double(10) = 20
-    print(r4)
-
-    // Pipe with variadic-style
-    let r5 = 10 |> add(1, 2, 3, 4, 5) // add(10, 1, 2, 3, 4, 5) = 25
-    print(r5)
-
-    // ---- 10.3  Lambda pipe  ----
-    let r6 = 10 |> |x| x * x          // 100
-    print(r6)
-
-    // ---- 10.4  Collection pipeline  ----
-    let result = [1, 2, 3, 4, 5]
-        |> map(|x| x * 2)             // [2, 4, 6, 8, 10]
-        |> filter(|x| x > 5)          // [6, 8, 10]
-        |> collect()
-    print(result)
-
-    // ---- Whitespace: binary |> must have spaces both sides  ----
-    let r7 = [1, 2, 3] |> sum
-    print(r7)
-
-
-// ---- Helper functions ----
 def double(x: int) -> int = x * 2
-
 def add_one(x: int) -> int = x + 1
 
-def add(a: int, ..: Tuple<int, ..>) -> int =
-    total = a
-    for x in args:
-        total += x
-    total
+def main() =
+    // data |> f  ===  f(data)
+    // Basic pipe equivalence
+    let r1 = double(5)
+    print(r1)
 
-def map.<T, U>(items: List<T>, f: |T| -> U) -> List<U> =
-    result = []
-    for x in items:
-        result.push(f(x))
-    result
+    // Chained pipe equivalence
+    let r2 = add_one(double(5))
+    print(r2)
 
-def filter.<T>(items: List<T>, predicate: |T| -> bool) -> List<T> =
-    result = []
-    for x in items:
-        if predicate(x):
-            result.push(x)
-    result
+    // Collection pipeline
+    let data = [1, 2, 3, 4, 5]
+    let doubled = []
+    for x in data:
+        doubled.push(x * 2)
+    let filtered = []
+    for x in doubled:
+        if x > 5:
+            filtered.push(x)
+    print(filtered)
 
-def collect.<T>(items: List<T>) -> List<T> = items
-
-def sum(items: List<int>) -> int =
-    total = 0
-    for x in items:
-        total += x
-    total
+    // Lambda pipe equivalence
+    let r3 = |x| x * x
+    print(r3(10))

@@ -1,20 +1,20 @@
 // lz std bridge — resolve_call 专项测试
 // 测试桥接函数名映射：lz 自由函数 → Rust std 路径
 
-import std::io
-import std::fs
-import std::thread
+import std.io
+import std.fs
+import std.thread
 
-// fs::read_to_string 映射为 std::fs::read_to_string
+// fs.read_to_string 映射为 std.fs.read_to_string
 // 需要 path_ref shim: String → &Path
 def test_resolve_fs_read()-> str =
     return "resolve_fs_read: ok"
 
-// fs::write 映射为 std::fs::write
+// fs.write 映射为 std.fs.write
 def test_resolve_fs_write()-> str =
     return "resolve_fs_write: ok"
 
-// fs::exists 映射为 std::path::Path::new(s).exists()
+// fs.exists 映射为 std.path.Path.new(s).exists()
 def test_resolve_fs_exists()-> str =
     return "resolve_fs_exists: ok"
 

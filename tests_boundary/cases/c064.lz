@@ -1,4 +1,0 @@
-break
-continue
-def main() =
-  print(1)

@@ -1,0 +1,7 @@
+// 规范目标特性（当前解析器未实现）
+// 出处：SYNTAX/04-表达式.md — 字典推导
+// 预期语法：
+def main() =
+    let squares = {x: x * x for x in 1..10}
+    let by_id = {u.id: u.name for u in users}
+    print(squares, by_id)

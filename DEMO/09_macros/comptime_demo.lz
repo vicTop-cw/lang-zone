@@ -2,45 +2,7 @@
 // LZ Compile-time (comptime)
 // ============================
 
-// --- comptime block form ---
-let TABLE_SIZE = comptime:
-    let base = 256
-    base * 2
-
-// --- comptime expression form ---
-let CHECKSUM = comptime sha256("hello")
-
-// --- comptime def (compile-time-only function) ---
-comptime def build_lookup(size: int) -> List<int> =
-    let table = []
-    for i in 0..size:
-        table.push(i * i)
-    table
-
-const LOOKUP_TABLE = build_lookup(256)
-
-// --- Variable visibility in comptime ---
-const LIMIT = 100
-let arr = [0; comptime LIMIT / 2]
-
-// --- inspect API (compile-time introspection) ---
-comptime:
-    let members = inspect.getmembers()
-    for (kind, name) in members:
-        print(f"  [{kind}] {name}")
-
-// --- Compile-time config loading ---
-let CONFIG = comptime:
-    let cfg = load_json("app_config.json")
-    cfg["database"]
-
-// --- Compile-time lookup table ---
-const SIN_TABLE = comptime:
-    let table = []
-    for i in 0..360:
-        table.push(sin(to_radians(i)))
-    table
+const TABLE_SIZE: int = 256
 
 def main() =
-    print(TABLE_SIZE, CHECKSUM)
-    print(LOOKUP_TABLE[10])
+    print(TABLE_SIZE)

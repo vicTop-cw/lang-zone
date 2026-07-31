@@ -1,0 +1,11 @@
+enum Color:
+    Red
+    Green
+    Blue
+
+enum Shape:
+    Circle(x: f64, y: f64, radius: f64)
+    Point
+
+def main() =
+    print("ok")

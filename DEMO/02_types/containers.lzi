@@ -1,0 +1,19 @@
+{
+  "version": "0.1.0",
+  "modules": {
+    "DEMO::02_types::containers": {
+      "functions": {
+        "main": {
+          "params": [],
+          "return": "Unit",
+          "generics": [],
+          "generic_bounds": {}
+        }
+      },
+      "structs": {},
+      "consts": {},
+      "type_aliases": {}
+    }
+  },
+  "unresolved": []
+}

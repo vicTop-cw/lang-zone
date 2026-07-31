@@ -1,0 +1,6 @@
+// combo-syntax（绿色回归测试）：三元(if-else)表达式 + 海象运算符 :=
+def compute() -> int = 7
+
+def main() =
+    let v = (n := compute()) > 5 if n * 10 else 0
+    print(v)          // 70

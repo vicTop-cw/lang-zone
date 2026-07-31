@@ -1,19 +1,19 @@
 // lz std bridge integration test
 // Tests: import paths, type alias injection, method aliases, function mappings
 
-import std::collections::HashMap
-import std::io
-import std::fs
+import std.collections.HashMap
+import std.io
+import std.fs
 
 // ── 1. IO type alias deduplication ──
-// Both import std::io and import std::fs inject IOError alias
+// Both import std.io and import std.fs inject IOError alias
 // Must not produce duplicate "pub type IOError = ..."
 def test_io_alias()-> str =
     "ok"
 
 // ── 2. HashMap construction ──
 def test_hashmap()-> str =
-    m: Dict<str, int> = HashMap::new()
+    m: Dict<str, int> = HashMap.new()
     return "ok"
 
 // ── 3. Vec method aliases (append→push, length→len) ──

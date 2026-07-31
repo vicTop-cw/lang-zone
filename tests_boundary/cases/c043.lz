@@ -1,4 +1,0 @@
-def f(x: MyStruct)-> int =
-  return 1
-def main() =
-  print(f(5))

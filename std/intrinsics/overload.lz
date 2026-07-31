@@ -1,0 +1,29 @@
+// ============================================================
+// @overload — 多分派函数定义
+//
+// 语法：
+//   @overload
+//   def func_name(param1: Type1, param2: Type2) -> ReturnType =
+//       body
+//
+// 编译产 Rust：
+//   • 所有 @overload 标记的同名函数被收集为分派组
+//   • 生成 dispatch trait + 每个重载的 impl + 泛型入口函数
+//   • Rust 单态化在编译期选择正确实现，零运行时开销
+//
+// 限制：
+//   • 必须至少有两个 @overload 定义
+//   • 可选一个不加 @overload 的 def 作为 fallback
+//   • 分派基于参数类型（方法名和返回类型不参与）
+//
+// 示例：
+//   @overload
+//   def add(x: int, y: int) -> int = x + y
+//
+//   @overload
+//   def add(x: str, y: str) -> str = x + y
+//
+//   def main() =
+//       print(add(1, 2))         // → 3
+//       print(add("a", "b"))     // → "ab"
+// ============================================================

@@ -1,0 +1,7 @@
+#!bin macro
+// 仓颉宏（Cangjie-style macro）：模块内定义 macro，调用 @name!
+macro id(input: Tokens) -> Tokens =
+    input
+
+def main() =
+    @id!(print("macro ok"))

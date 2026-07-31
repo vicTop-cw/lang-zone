@@ -1,0 +1,5 @@
+async def fetch() -> str =
+    return "data"
+
+async def process() =
+    r = fetch().await

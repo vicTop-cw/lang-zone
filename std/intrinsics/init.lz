@@ -1,0 +1,21 @@
+// ============================================================
+// std/intrinsics — 编译器内置装饰器包
+//
+// 本包定义 lz 编译器识别的核心装饰器集合。
+// 装饰器是编译器内在功能（intrinsics），非运行时库。
+// 使用：import std::intrinsics::*
+//
+// 只包含 Rust 没有的功能：
+//   @overload   — 多分派（Rust 无多分派）
+//   @memoize    — 编译期记忆化缓存（Rust 无内置缓存）
+//   @export     — 桥接多后端导出（lz 架构独特优势）
+//   @parallel   — 自动并行化（Rust 无声明式并行）
+//   @tail_call  — 尾递归编译期验证（Rust 不保证 TCO）
+//   @simd       — 自动向量化提示
+//   @derive     — 可派生 trait 代码生成（级联生成多 trait impl）
+//   @curry      — 函数柯里化（Rust 无内置）
+//   @json       — variadic JSON 后端（.. → Vec<Value>）
+//
+// Rust 已有的（@inline/@deprecated/@must_use/@test/@bench）不重复：
+// 直接用 #[name] Rust 属性宏即可。
+// ============================================================

@@ -419,6 +419,37 @@ impl CodeGenExprExt for CodeGen {
                 }
             }
 
+            Expr::DictComprehension { key, value, var, iter, cond } => {
+                let iter_s = self.gen_expr(iter);
+                let k_s = self.gen_expr(key);
+                let v_s = self.gen_expr(value);
+                match cond {
+                    Some(c) => format!(
+                        "{}.into_iter().filter(|{}| {}).map(|{}| ({}, {})).collect::<std::collections::HashMap<_, _>>()",
+                        iter_s, var, self.gen_expr(c), var, k_s, v_s
+                    ),
+                    None => format!(
+                        "{}.into_iter().map(|{}| ({}, {})).collect::<std::collections::HashMap<_, _>>()",
+                        iter_s, var, k_s, v_s
+                    ),
+                }
+            }
+
+            Expr::SetComprehension { elem, var, iter, cond } => {
+                let iter_s = self.gen_expr(iter);
+                let e_s = self.gen_expr(elem);
+                match cond {
+                    Some(c) => format!(
+                        "{}.into_iter().filter(|{}| {}).map(|{}| {}).collect::<std::collections::HashSet<_>>()",
+                        iter_s, var, self.gen_expr(c), var, e_s
+                    ),
+                    None => format!(
+                        "{}.into_iter().map(|{}| {}).collect::<std::collections::HashSet<_>>()",
+                        iter_s, var, e_s
+                    ),
+                }
+            }
+
             Expr::Assign { target, op, value } => {
                 let op_s = match op {
                     AssignOp::Eq => "=",
@@ -427,6 +458,12 @@ impl CodeGenExprExt for CodeGen {
                     AssignOp::MulEq => "*=",
                     AssignOp::DivEq => "/=",
                     AssignOp::ModEq => "%=",
+                    AssignOp::AndEq => "&=",
+                    AssignOp::OrEq => "|=",
+                    AssignOp::XorEq => "^=",
+                    AssignOp::ShlEq => "<<=",
+                    AssignOp::ShrEq => ">>=",
+                    AssignOp::PowEq => "**=",
                 };
                 format!("({} {} {})", self.gen_expr(target), op_s, self.gen_expr(value))
             }

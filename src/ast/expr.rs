@@ -104,6 +104,19 @@ pub enum Expr {
         iter: Box<Expr>,
         cond: Option<Box<Expr>>,
     },
+    DictComprehension {
+        key: Box<Expr>,
+        value: Box<Expr>,
+        var: String,
+        iter: Box<Expr>,
+        cond: Option<Box<Expr>>,
+    },
+    SetComprehension {
+        elem: Box<Expr>,
+        var: String,
+        iter: Box<Expr>,
+        cond: Option<Box<Expr>>,
+    },
     Assign {
         target: Box<Expr>,
         op: AssignOp,
@@ -135,6 +148,7 @@ pub enum BuildKind {
     Var,
     Call,
     Gen,
+    Index,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,4 +168,5 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AssignOp {
     Eq, AddEq, SubEq, MulEq, DivEq, ModEq,
+    AndEq, OrEq, XorEq, ShlEq, ShrEq, PowEq,
 }

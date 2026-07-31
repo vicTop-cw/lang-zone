@@ -8,12 +8,12 @@
 
 ## 一、基本动机
 
-现有 `duck`（§六）描述的是"单类型满足什么结构"——属性型约束。扩展后的 `duck` 要解决的是"**多类型之间存在怎样的结构关系**"——**关系型约束**。
+现有 `duck`（[01-类型系统.md](01-类型系统.md) §九）描述的是"单类型满足什么结构"——属性型约束。扩展后的 `duck` 要解决的是"**多类型之间存在怎样的结构关系**"——**关系型约束**。
 
 ### 两种约束的对比
 
 ```
-// 属性型（当前 §六）—— "T 是什么"
+// 属性型（见 01-类型系统.md §九）—— "T 是什么"
 duck Quackable =
     def quack(self) -> ()
 
@@ -37,28 +37,31 @@ duck Mapper<T, R> =
 
 ## 二、语法设计
 
-### 2.0 检查站约束语法（Checkpoint）
+### 2.0 泛型与约束语法
 
-`duck` 约束在函数签名中通过 **方括号检查站 `[]`** 声明。这是 LZ 统一的**类型约束语法**：
+`duck` 的泛型参数使用尖括号 `<>` 声明。约束支持两种等价写法（与 Rust 一致）：
 
-| 符号 | 含义 | 示例 |
+| 形式 | 语法 | 说明 |
 |------|------|------|
-| `[]` | **检查站** — 声明有约束的泛型参数 | `[T: Quackable]` |
-| `<>` | **普通泛型** — 声明无约束的泛型参数 | `<T>` |
-| 混合 | `[]` 声明有约束的，`<>` 声明无约束的 | `[T: Iterable]<R>` |
+| 尖括号内联 | `<T: Quackable>` | Rust 风格，推荐；约束直接写在参数声明处 |
+| where 子句 | `where T: Quackable` | 函数 / 类型体之前的等价写法，约束较多时更清晰 |
+
+> **注意**：`[]` 是**运行时检查站**语法，只用于运行期断言，**不用于泛型约束**——泛型约束一律走尖括号或 `where`。
+
+> **注解运算符速记**：约束用 `:`（如 `<T: Clone>` / `where T: Clone`）；类型等同用 `==`（如 `A.id == B.id`）。LZ 是结构类型系统、**无名义继承**，型变（协变/逆变/不变）由编译器按位置**自动推断**（与 Rust 一致），不提供也不需 `<:` / `>: ` 标注。完整对照见 [§3.2 注解运算符](#32-注解运算符--)。
 
 ```lz
-// 只有检查站（所有类型参数都有约束）
-def quack[T: Quackable](x: T) = x.quack()
+// 1. 尖括号内联（推荐，对齐 Rust）—— 约束写在参数处
+def make_quack<T: Quackable>(x: T) = x.quack()
 
-// 只有普通泛型（无约束）
-def identity<T>(x: T) = x
+// 2. where 子句 —— 等价写法
+def make_quack<T>(x: T)
+    where T: Quackable =
+    x.quack()
 
-// 混合：T 有约束，R 无约束
-def process[T: Iterable]<R>(items: T) -> List<R> = ...
+// 混合：T 为带约束泛型，R 为普通泛型
+def mix<T: HasArea, R>(shape: T, extra: R) = ...
 ```
-
-> **设计渊源**：`[]` 检查站最初在 `iterator` 关键字设计中以 `[检查站]` 占位符出现，现通过 `duck` 给出具体语义——方括号内声明类型参数并附加约束。
 
 ### 2.1 多泛型参数 + 类型前缀
 
@@ -70,10 +73,10 @@ duck Mapper<T, R> =
 
 当 `duck` 有**多个泛型参数**时，方法声明前需加上 `TypeName.` 前缀指明**所属类型**。
 
-**规则**：多参数时方法前缀**必须**（歧义消除）；单参数时可省略（退化为 §六 语法）。
+**规则**：多参数时方法前缀**必须**（歧义消除）；单参数时可省略（退化为 [01-类型系统.md](01-类型系统.md) §九 的单参数 duck 语法）。
 
 ```
-duck Q<T> =                        // 单参数：兼容 §六
+duck Q<T> =                        // 单参数：兼容 [01-类型系统.md](01-类型系统.md) §九 语法
     def quack(self) -> ()
 
 duck Q<T, R> =                     // 多参数：必须前缀
@@ -109,7 +112,7 @@ duck DoubleMap<T, R> where T: Iterable, R: Iterable =
     def T.map(self) -> R            // T.map 返回另一个 Iterable
     
 duck CrossCheck<A, B, Eq> where Eq: Equals =
-    Eq.equals(A, B) -> bool         // Eq.compare 可接受 A 和 B
+    def Eq.equals(self, a: A, b: B) -> bool   // Eq 提供 equals(a: A, b: B) -> bool
 ```
 
 ---
@@ -120,7 +123,7 @@ duck CrossCheck<A, B, Eq> where Eq: Equals =
 
 | 运算符 | 含义 | 示例 |
 |--------|------|------|
-| `T.method → R` | T.method 的返回类型为 R | `def T.produce() → R` |
+| `T.method -> R` | T.method 的返回类型为 R | `def T.produce() -> R` |
 | `T.method ↦ R` | T.method 的参数类型为 R（简写 `T.method(R)`） | `def T.consume(R)` |
 | `T.field : R` | T.field 的类型等于 R | `T.name: str` |
 
@@ -134,28 +137,56 @@ def T.produce(self) -> R          // produce 的返回类型 = R
 def T.consume(self, x: R) -> ()   // consume 的参数类型 = R
 ```
 
-### 3.2 类型关系运算符（在 where 子句中）
+### 3.2 注解运算符：` : ` / ` == `（约束 vs 类型等同）
 
-| 运算符 | 含义 | 示例 |
-|--------|------|------|
-| `<:` | 子类型关系（T 是 R 的子类型） | `Sub <: Super` |
-| `:>` | 超类型关系（T 是 R 的超类型） | `Super :> Sub` |
-| `==` | 类型等同 | `A.field == B.field` |
-| `::` | duck 约束满足 | `T :: Iterable` |
+`duck` 与泛型约束里会用到三种"注解"运算符，含义各不相同——**混用是文档里最常见的错误来源**。下面一次说清：
 
-### 3.3 协变/逆变声明
+| 运算符 | 名称 | 含义 | 何时用 | 示例 |
+|--------|------|------|--------|------|
+| `:` | 约束 / bound | **T 满足约束 X**：实现某个 trait，或满足某个 duck 的结构要求 | 给泛型参数加"能力"约束（最常用） | `<T: Clone>`、`where T: Quackable` |
+| `==` | 类型等同 | 两侧类型必须完全相同 | 字段类型必须一致时 | `A.id == B.id` |
+
+> **型变（协变 / 逆变 / 不变）由编译器自动推断，无需标注**
+> LZ 是结构类型系统、**没有名义继承**，因此也没有"子类型运算符"。泛型参数的型变方向由它在签名中的**位置**决定，编译器在类型检查阶段自动算出（与 Rust 一致）：
+> - 只出现在**返回类型**（产出）→ **协变**
+> - 只出现在**参数**（消费）→ **逆变**
+> - 同时出现在输入与输出 → **不变**
+>
+> 因此你**不需要、也不能**写 `<:` / `>: ` 来标注型变——这是有意为之的简化，也消除了此前文档里"`:` / `<:` / `>:` 三者混淆"的问题。
+
+> **关键区别（避免混淆）**
+> - `:` 说的是"**能力**"：T 必须能提供 X 要求的方法/字段。这是 99% 场景该用的。
+> - `==` 说的是"**类型等同**"：两侧类型必须完全一致（见 §2.2 / §2.3 的 `A.id == B.id`、`A.name: B.name`）。
+> - 协变 / 逆变**不靠运算符表达**，而由编译器按位置自动推断（见上方说明框）。
+>
+> 注：`:` 在泛型声明处是约束（`<T: X>`），在 duck 字段行 `A.x: f64` 是字段类型标注——都是"X 具备类型/约束 Y"的同一语义，不会冲突。
+
+### 3.3 协变 / 逆变（编译器自动推断，无需标注）
+
+型变方向由泛型参数出现在**产出**还是**消费**位置决定——但**你不用写任何标注**，编译器在类型检查阶段自动算出（与 Rust 一致）：
 
 ```lz
-duck Covariant<Sub, Super> where Sub <: Super =
-    def Sub.produce(self) -> Super     // Sub 产出 Super（协变：产出方向）
+// 协变：T 只出现在「产出」位置（返回类型）→ 编译器自动判定为协变
+duck Producer<T> =
+    def make(self) -> T
 
-duck Contravariant<Super, Sub> where Sub <: Super =
-    def Super.consume(self, x: Sub)    // Super 消费 Sub（逆变：消费方向）
+// 逆变：T 只出现在「消费」位置（参数）→ 编译器自动判定为逆变
+duck Consumer<T> =
+    def eat(self, x: T) -> ()
 
-duck Invariant<T> =
-    def T.read(self) -> T              // T 既是输入也是输出（不变）
-    def T.write(self, x: T)
+// 不变：T 同时出现在输入与输出位置 → 编译器自动判定为不变
+duck Cell<T> =
+    def get(self) -> T
+    def set(self, x: T) -> ()
 ```
+
+判断口诀：
+
+- **协变**：方法只返回 T（产出）→ 不用写任何东西，编译器自动处理。
+- **逆变**：方法只接收 T（消费）→ 同上，自动处理。
+- **不变**：既接收又返回 T → 自动处理。
+
+> 因为 LZ 是结构类型系统、没有名义继承，所以不存在"子类型运算符"。`Producer` / `Consumer` / `Cell` 只是用来说明**位置决定型变**的三种结构形态；具体类型之间的相容性由 `:` 约束（trait / duck）在实例化点检查。
 
 ---
 
@@ -166,36 +197,39 @@ duck Invariant<T> =
 与 `duck` 的基本检查一致——在**泛型实例化时**（monomorphization）：
 
 ```lz
-def process[T, R: Mapper<T, R>](x: T, y: R) =
+def process<T, R>(x: T, y: R)
+    where Mapper<T, R> =
     let mapped = x.map()              // 检查：T.map → R
     let restored = y.unmap(mapped)    // 检查：R.unmap → T
 ```
 
 ### 4.2 类型投影解析规则
 
-投影 `T.method → R` 的检查：
+投影 `T.method -> R` 的检查：
 
 ```
 1. 在 T 的实际类型中查找 method
 2. 提取 method 的返回类型 actual_return
 3. 检查 actual_return 是否等于（或满足）R
    - 如果 R 是具体类型：actual_return == R
-   - 如果 R 是 duck 约束：actual_return :: R
+   - 如果 R 是 duck 约束：actual_return : R（满足该 duck 约束）
    - 如果 R 是泛型参数：actual_return 的类型与 R 的参数类型一致
 ```
 
-### 4.3 子类型关系检查
+### 4.3 结构相容性检查
 
-`Sub <: Super` 的检查：
+当某类型 `Sub` 被要求满足约束 `Super`（trait / duck）时，编译器在**泛型实例化时**做结构相容性检查：
 
 ```
-1. 在泛型实例化时，检查 Sub 的实际类型是否可以向上转型为 Super
-2. 可转型的定义：
+1. 检查 Sub 的实际类型是否满足 Super 的结构要求（约束 / duck）
+2. 满足的定义：
    - Sub == Super ✅
    - Sub 实现了 Super 的 trait ✅
    - Sub 满足 Super 的所有 duck 约束 ✅
-   - Sub 是 Super 的子 struct 或变体 ✅
+   - Sub 与 Super 结构匹配（无需名义继承）✅
 ```
+
+> LZ 没有名义继承，因此"子类型"在这里就是"结构匹配"——只要 Sub 提供了 Super 要求的方法/字段即视为相容，不需要声明继承关系。
 
 ---
 
@@ -208,18 +242,19 @@ duck Mapper<T, R> =
     def T.map(self) -> R
 
 // 用法：任何有 map() 方法且返回 R 的类型都满足
-def transform[T, R: Mapper<T, R>](items: List<T>) -> List<R> =
+def transform<T, R>(items: List<T>) -> List<R>
+    where Mapper<T, R> =
     let result: List<R> = []
     for x in items:
-        result.push(x.map())
+        result.push(x.map())        // 检查：x.map() → R
     result
 
 struct Wrapper<T> =
     value: T
-    def map(self) -> T = self.value
+    def map(self) -> T = self.value   // Wrapper<T>.map → T
 
 let ws = [Wrapper(value: 10), Wrapper(value: 20)]
-let nums = transform(ws)          // Type inference: T = Wrapper<int>, R = int
+let nums = transform(ws)          // 推断：T = Wrapper<int>, R = int
 ```
 
 ### 5.2 双端迭代器
@@ -239,38 +274,45 @@ duck Validator<T, E> =
     def E.message(self) -> str            // E 必须有 message 方法
 
 // 不相关的类型自动满足
-struct Email(String)
-struct ValidationError(String)
+struct Email =
+    value: str
+struct ValidationError =
+    value: str
 
 impl Email =
     def validate(self) -> Result<Email, ValidationError> =
-        if "@" in self.0:
+        if "@" in self.value:
             Ok(self)
         else:
-            Err(ValidationError("invalid email"))
+            Err(ValidationError(value: "invalid email"))
 
 impl ValidationError =
-    def message(self) -> str = self.0
+    def message(self) -> str = self.value
 
 // 这里 Email 和 ValidationError 自动满足 Validator<T=Email, E=ValidationError>
 // 不需要 impl Validator for ...
 ```
 
-### 5.4 协变容器
+### 5.4 型变容器（型变由编译器自动推断）
+
+容器的型变方向**不靠标注**，而由泛型参数在签名中的位置决定。下面三个 duck 分别展示了协变 / 逆变 / 不变三种结构，编译器在类型检查时自动识别：
 
 ```lz
-duck CovariantBox<In, Out> where In <: Out =
-    def In.get(self) -> Out               // In.get 返回 Out（或其子类型）
+// 协变：In（经 Out 间接）只出现在「产出」位置 → 编译器自动判定协变
+duck CovariantBox<In, Out> =
+    def get(self) -> Out
 
-struct Animal(name: str)
-struct Dog(Animal)                        // Dog 是 Animal 的子类型
+// 逆变：Out 只出现在「消费」位置（参数）→ 编译器自动判定逆变
+duck ContravariantBox<Out, In> =
+    def put(self, x: Out) -> ()
 
-struct Box<T>(value: T)
-    def get(self) -> T = self.value
-
-// Box<Dog> 的 get 返回 Dog，Dog <: Animal
-// 满足 CovariantBox<In=Box<Dog>, Out=Animal>
+// 不变：T 同时出现在输入与输出 → 编译器自动判定不变
+duck Cell<T> =
+    def get(self) -> T
+    def set(self, x: T) -> ()
 ```
+
+> 使用这些 duck 时，具体类型之间的相容性仍由 `:` 约束在实例化点检查（LZ 是结构类型系统，没有名义继承，因此不存在 `Dog <: Animal` 这类子类型声明）。需要"产出 Dog 的盒子可当作产出 Animal 的盒子"时，让 `Animal` 成为 duck / trait，`Dog` 在结构上满足它即可。
 
 ### 5.5 编解码对
 
@@ -280,14 +322,17 @@ duck Codec<T, Encoded> =
     def Encoded.decode(self) -> T
 
 // 示例：Json 编解码
-struct User(id: int, name: str)
-struct Json(str)
+struct User =
+    id: int
+    name: str
+struct Json =
+    value: str
 
 impl User =
-    def encode(self) -> Json = Json(f'{{"id": {self.id}, "name": "{self.name}"}}')
+    def encode(self) -> Json = Json(value: f"id:{self.id},name:{self.name}")
 
 impl Json =
-    def decode(self) -> User = User(1, "parsed")  // 简化
+    def decode(self) -> User = User(id: 1, name: "parsed")  // 简化
 
 // 自动满足 Codec<T=User, Encoded=Json>
 ```
@@ -302,8 +347,8 @@ impl Json =
 │ 作用对象       │ 单个类型           │ 多个类型之间的关系          │
 │ 匹配方式       │ T: Xxx            │ T, R: Xxx<T, R>          │
 │ 跨类型方法     │ ❌ 无法表达        │ ✅ T.f → R 投影           │
-│ 类型间关系     │ ❌ 无法表达        │ ✅ <: / :> / ==          │
-│ 协变/逆变      │ ❌ 不支持          │ ✅ 通过投影推导            │
+│ 类型间关系     │ ❌ 无法表达        │ ✅ == 类型等同 / 结构约束匹配  │
+│ 协变/逆变      │ ❌ 不支持          │ ✅ 编译器按位置自动推断    │
 │ 第三方类型     │ ❌ 需要 impl       │ ✅ 结构匹配自动满足        │
 │ 运行时开销     │ 零（静态分发）      │ 零（编译期展开）           │
 ```
@@ -333,11 +378,14 @@ duck Bad2<T, R> =
 duck Good2<T, R> =
     def T.map(self) -> R          // 仅签名，无实现
 
-// ❌ duck 不能实例化
-let x: Mapper<int, str> = ...    // 错误：duck 不是类型，是约束
+// ❌ duck 不能实例化（不能当构造器使用）
+let x = Mapper<int, str>(...)   // 错误：duck 是约束，不可实例化
+
+// ✅ duck 可用作类型注解（与 trait 相同）
+let x: Mapper<int, str> = ...     // 关系型 duck 主要用作泛型约束；此处仅示意可作类型注解
 
 // ✅ 作为泛型约束
-def f[T, R: Mapper<T, R>](...)   // 正确
+def f<T, R>(...) where Mapper<T, R>   // 正确
 
 // ❌ 类型投影不能指向不存在的成员
 duck Bad3<T, R> =
@@ -368,7 +416,7 @@ duck ExactMatch =
 **约束匹配**：
 
 ```lz
-duck ConstrainedMatch =
+duck ConstrainedMatch<T> =
     def process(self) -> T where T: Display  // 返回类型只要实现了 Display 就 OK
     def handle(self, x: T) -> () where T: Clone  // 参数只要实现了 Clone 就 OK
 ```
@@ -376,7 +424,7 @@ duck ConstrainedMatch =
 **链式推断**：
 
 ```lz
-duck Chained =
+duck Chained<I, R> =
     def get_items(self) -> I                // get_items 返回 I
     def I.process(self) -> R                // I 必须有 process() 返回 R
     def R.to_string(ref self) -> str        // R 必须有 to_string() 返回 str
@@ -398,11 +446,11 @@ duck Chained =
 | `..` | 任意数量（已有） | `def f(self, ..)` |
 
 ```lz
-duck ParamConstrained =
+duck ParamConstrained<T> =
     // 方法必须恰好接受 2 个位置参数
     def set_pair(self, a: int, b: str) -> ()
 
-    // 方法可以接受 1-3 个位置参数
+    // 方法共可接受 1~3 个位置参数（key 必填 1 个；range(0,2) 再允许 0~2 个）
     def configure(self, key: str, range(0, 2)) -> ()
 
     // 方法至少需要 1 个参数
@@ -413,20 +461,24 @@ duck ParamConstrained =
 
 | 约束语法 | 含义 |
 |----------|------|
-| `require(a, b)` | 调用时必须提供命名参数 a, b |
-| `optional(a, b)` | 命名参数 a, b 可选（有默认值） |
+| `require(a, b)` | 目标方法调用时必须提供命名参数 a, b |
+| `optional(a, b)` | 目标方法的命名参数 a, b 可选（有默认值） |
+
+`require` / `optional` 作为 duck 体内的**独立约束行**书写（紧跟在被约束的方法之后）：
 
 ```lz
-duck Buildable =
-    def build(self) -> T require(name: str, version: int)  // 必须有 name 和 version 命名参数
-    def init(self, key: str) -> () optional(timeout: int = 30)  // timeout 可选
+duck Buildable<T> =
+    def build(self) -> T
+    require(name: str, version: int)        // build 必须能接受 name 和 version 命名参数
+    def init(self, key: str) -> ()
+    optional(timeout: int)                  // init 可额外接受可选的 timeout 命名参数
 
-    // 组合：必须有以下命名参数
-    def send(self, ..) -> () require(to: str, body: str)
+duck Sendable =
+    def send(self, ..) -> ()
+    require(to: str, body: str)             // send 必须提供 to 和 body 命名参数
 ```
 
-编译期检查：调用 `build(name="x")` 缺少 `version` 报错。
-调用 `build(name="x", version=1, extra=true)` 编译器必须检查是否存在额外的可选命名参数。
+编译期检查：调用 `build(name="x")` 缺少 `version` 报错；`build(name="x", version=1, extra=true)` 检查 `extra` 是否为已知命名参数（否则报错，除非 duck 显式允许额外参数）。
 
 #### 8.2.3 形参类型约束
 
@@ -434,7 +486,7 @@ duck Buildable =
 
 ```lz
 // 类型分类
-// StackType: int, f64, bool, (), str*, (T), struct(无 self 引用)
+// StackType: int, f64, bool, (), str, (T), struct（无 self 引用字段）
 // RefType:   List<T>, Dict<K,V>, Set<T>, struct(含引用字段), Box<T>, Iterator<T>
 
 duck LowLevel =
@@ -502,7 +554,7 @@ duck RefMethods =
 `duck` 中方法名支持正则表达式，用 `/pattern/flags` 括起：
 
 ```lz
-duck PatternMatched =
+duck PatternMatched<T> =
     // 精确方法名（已有）
     def reset(self) -> ()
 
@@ -539,7 +591,7 @@ duck PatternMatched =
 | `exact(N)` | 恰好 N 个 |
 
 ```lz
-duck HasMultipleGetters =
+duck HasMultipleGetters<T> =
     // 至少有 1 个 get_ 方法
     def /get_\w+/ (ref self) -> T where T: Display
     match /get_\w+/ at_least(1)
@@ -582,7 +634,8 @@ duck CRUDService =
 **错误报告示例**：
 
 ```lz
-def process[T, R: Mapper<T, R>](x: T, y: R) =
+def process<T, R>(x: T, y: R)
+    where Mapper<T, R> =
     let mapped = x.map()              // ✅ T.map() → R
     let back = y.unmap(mapped)        // ❌ R 没有 unmap 方法
 ```
@@ -597,31 +650,30 @@ error[DC001]: duck constraint violation at instantiation point
    │                ^^^^^^^^^^^^^^^
    │
    = duck `Mapper<T, R>` requires `R.unmap(self) -> T`
-   = actual type `String` has no method `unmap`
-   = bound at: demo.lz:5  where T: Mapper<T, R>
+   = actual type `str` has no method `unmap`
+   = bound at: demo.lz:5  where Mapper<T, R>
 ```
 
 ### 8.6 完整示例：TypeScript 级别类型安全的列表转换器
 
 ```lz
-// ── 1. 定义 duck 约束 ──
+// ── 1. 定义关系约束 ──
 
-// 关系约束：IterablePair 描述了 T 与 I 之间的迭代关系
+// 关系约束：IterablePair 描述 T 与 I 之间的迭代关系
 duck IterablePair<T, I> =
     type I.Item                              // I 有关联类型 Item
     def T.__iter__(self) -> I                // T.__iter__ 返回 I
     def I.__next__(mut self) -> T            // I.__next__ 返回 T
-    match /__\w+/ exact(3)                  // 必须恰好有 3 个 dunder 方法
+    match /__\w+/ exact(2)                   // 恰好 2 个 dunder 方法（__iter__ / __next__）
 
-// 转化器约束：T 和 R 之间有 map 关系
-duck Transform<T, R> where T: IterablePair<T, I> =
-    def T.map(self, f: StackType) -> R       // T.map 的参数必须为栈类型
-    require(func: Callable)                  // 必须有关键字参数 func
-    match /map_\w+/ at_least(1)             // 至少有 1 个 map_ 前缀方法
+// 转换器约束：T 与 R 之间有 map 关系（I 为迭代器类型）
+duck Transform<T, R, I> where T: IterablePair<T, I> =
+    def T.map(self, f: fn(I.Item) -> R) -> R   // T.map 接受闭包 fn(I.Item) -> R，返回 R
+    match /map\w*/ at_least(1)                  // 至少有 1 个 map 前缀方法（map 本身也匹配）
 
 // ── 2. 实现类型（不相关 struct，结构匹配自动生效）──
 
-struct MyIter<T>
+struct MyIter<T> =
     items: List<T>
     index: int
     def __next__(mut self) -> T =
@@ -632,7 +684,7 @@ struct MyIter<T>
         else:
             raise StopIteration
 
-struct MyList<T>
+struct MyList<T> =
     items: List<T>
     def __iter__(self) -> MyIter<T> =
         MyIter(items: self.items, index: 0)
@@ -640,11 +692,11 @@ struct MyList<T>
 
 // ── 3. 泛型函数 ──
 
-def transform_list[T, R](items: List<T>) -> List<R>
-    where T: Transform<T, R> =              // 编译期静态检查
+def transform_list[T, R, I](items: List<T>) -> List<R>
+    where Transform<T, R, I> =                 // 编译期静态检查
     let result: List<R> = []
     for item in items:
-        result.push(item.map(func: |x| x as R))
+        result.push(item.map(f: |x| x as R))
     result
 
 // ── 4. 使用（编译期检查所有约束） ──
@@ -652,11 +704,10 @@ def transform_list[T, R](items: List<T>) -> List<R>
 let nums = MyList(items: [1, 2, 3])
 let strs = transform_list(nums)
 // 编译期检查链：
-//   MyList → __iter__() → MyIter → __next__() → T (int)
-//   ✅ 3 dunder methods: __iter__, __next__, __init__
-//   ✅ getters at_least(1)
-//   ✅ map() params StackType
-//   ✅ func 关键字参数存在
+//   MyList → __iter__() → MyIter<T> → __next__() → T (int)
+//   ✅ 2 dunder methods: __iter__, __next__
+//   ✅ map 方法至少 1 个（map 匹配 /map\w*/ at_least(1)）
+//   ✅ map() 接受 fn(I.Item) -> R 形式的闭包
 ```
 
 ---
@@ -687,31 +738,26 @@ let strs = transform_list(nums)
 ```lz
 // ..在尾部：前面字段固定，后面可扩展
 duck Extensible =
-    id: int
-    name: str
+    .id: int
+    .name: str
     ..                              // 允许额外字段
 
 // ..在头部：尾部字段固定，前面字段任意
 duck Appendable =
     ..
-    tail: str
+    .tail: str
 
 // ..在中间：两端固定，中间可变形
 duck Framed =
-    prefix: str
+    .prefix: str
     ..
-    suffix: str
+    .suffix: str
 
 // ..与泛型结合
 duck Container<T> =
-    tag: str
-    payload: T
+    .tag: str
+    .payload: T
     ..
-
-// ..在嵌套签名中
-duck NestedFlex =
-    outer: { x: int, .. }
-    inner: { .., y: int }
 ```
 
 **编译期规则**：
@@ -725,52 +771,52 @@ duck NestedFlex =
 `_` 在 duck 块中表示"该位置有一个字段/方法，但不约束其名称"，用于表达位置敏感的部分约束：
 
 ```lz
-// 第一个字段任意，第二个必须是 name: str
+// 第一个字段任意，第二个必须是 .name: str
 duck Named =
     _: Any
-    name: str
+    .name: str
 
-// 前两个字段任意，第三个必须是 timestamp: int
+// 前两个字段任意，第三个必须是 .timestamp: int
 duck Timestamped =
     _: Any
     _: Any
-    timestamp: int
+    .timestamp: int
 
 // 必须字段穿插在占位之间
 duck Credential =
     _: Any
-    username: str
+    .username: str
     _: Any
-    password: str
+    .password: str
     _: Any
 
-// _ + .. 组合：前两个任意，后面任意扩展，必须有 id: int
+// _ + .. 组合：前两个任意，后面任意扩展，必须有 .id: int
 duck Identifiable =
     _: Any
     _: Any
-    id: int
+    .id: int
     ..
 ```
 
-**方法签名占位**：`_()` 表示"该位置有一个方法，不约束方法名"：
+**方法签名占位**：`_(self)` 表示"该位置有一个方法，不约束方法名"：
 
 ```lz
 duck Stringifiable =
-    _(): Any                       // 第一个方法任意
-    toString(): str                // 第二个必须是 toString
+    def _(self) -> Any                 // 第一个方法任意
+    def toString(self) -> str          // 第二个必须是 toString
 
 duck LayoutAware =
-    _(): Any
-    _(): Any
-    render(): void                 // 第三个必须是 render
-    _(): Any
+    def _(self) -> Any
+    def _(self) -> Any
+    def render(self) -> ()             // 第三个必须是 render
+    def _(self) -> Any
 
 duck Service =
-    init(): void                   // 位置0: 初始化
-    _(): Any                       // 位置1: 任意
-    process(): Result              // 位置2: 核心处理
-    _(): Any                       // 位置3: 任意
-    destroy(): void                // 位置4: 清理
+    def init(self) -> ()               // 位置0: 初始化
+    def _(self) -> Any                 // 位置1: 任意
+    def process(self) -> ()            // 位置2: 核心处理
+    def _(self) -> Any                 // 位置3: 任意
+    def destroy(self) -> ()            // 位置4: 清理
 ```
 
 **编译期规则**：
@@ -778,6 +824,8 @@ duck Service =
 1. `_` 匹配位置对应的字段/方法（按声明顺序匹配）
 2. `_` 不检查名称，只检查类型签名
 3. `_: Any` 匹配任何类型的字段（完全通配）
+
+> 注：`Any` 在此是"任意类型"的位置通配符（仅用于 `_: Any` / `def _(self) -> Any` 这类占位），与 `Box<dyn Any>` 的**运行时类型擦除**无关——duck 的所有检查都是编译期静态完成的。
 4. `_(): RetType` 匹配任何名称、返回 `RetType` 的方法
 5. `_` 不会跳过字段——必须逐个位置计数
 
@@ -788,7 +836,7 @@ duck 可以通过 `T, ..` 语法"继承"另一个类型参数的签名并扩展�
 ```lz
 duck Enhanced<T> =
     T, ..                           // 包含 T 的所有字段/方法
-    enhanced: bool                  // 额外字段
+    .enhanced: bool                 // 额外字段
 
 // 等价于: "T 有的我都有，外加 enhanced: bool"
 ```
@@ -799,30 +847,30 @@ duck Enhanced<T> =
 
 ```lz
 duck Family<Base, T1, T2, T3> =
-    members: (T1, T2, T3)
+    .members: (T1, T2, T3)
     where T1: Base, T2: Base, T3: Base
 
 // 用法：要求 T1/T2/T3 都满足 Base 的 duck 约束
 ```
 
-### 10.5 交叉约束 `A & B`
+### 10.5 交叉约束 `A + B`
 
-duck 约束可以通过 `&` 组合多个约束：
+duck 约束可以通过 `+` 组合多个约束（与 `where T: Clone + Display` 写法一致）：
 
 ```lz
 duck Merge<A, B, C> =
-    left: A
-    right: B
-    merged: C
-    where C: A & B                  // C 必须同时满足 A 和 B 的约束
+    .left: A
+    .right: B
+    .merged: C
+    where C: A + B                  // C 必须同时满足 A 和 B 的约束
 ```
 
 ### 10.6 递归泛型约束
 
 ```lz
 duck Tree<T> =
-    value: T
-    children: List<Tree<T>>         // 递归引用自身
+    .value: T
+    .children: List<Tree<T>>         // 递归引用自身
 ```
 
 ### 10.7 位置参数数量约束 (`..` 在签名中)
@@ -842,24 +890,24 @@ duck Flexible =
 
 ```lz
 duck LifecycleService =
-    init(): void                     // 必须第一个
-    _(): Any                         // 任意
-    start(): Result                  // 必须第三个
+    def init(self) -> ()                 // 必须第一个
+    def _(self) -> Any                   // 任意
+    def start(self) -> bool              // 必须第三个
     ..
-    _(): Any
-    shutdown(): void                 // 必须倒数第二个
-    destroy(): void                  // 必须最后一个
+    def _(self) -> Any
+    def shutdown(self) -> ()             // 必须倒数第二个
+    def destroy(self) -> ()              // 必须最后一个
 ```
 
 编译期检查：
 
 ```lz
-struct MyService
+struct MyService =
     def init(self) = pass
-    def setup(self) = pass           // 匹配 _(): Any
+    def setup(self) = pass           // 匹配 _(self)
     def start(self) -> bool = True
     def log(self) = pass             // 匹配 ..
-    def cleanup(self) = pass         // 匹配 _
+    def cleanup(self) = pass         // 匹配 _(self)
     def shutdown(self) = pass
     def destroy(self) = pass
 

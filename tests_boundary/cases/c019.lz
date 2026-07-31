@@ -1,4 +1,0 @@
-def main() =
-  a = 6
-  b = a ^ 3
-  print(b)

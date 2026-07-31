@@ -1,0 +1,3 @@
+def main() =
+    let result = [x for x in items]
+    print(result)

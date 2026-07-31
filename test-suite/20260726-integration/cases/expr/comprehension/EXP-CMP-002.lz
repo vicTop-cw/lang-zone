@@ -1,0 +1,4 @@
+def main() =
+    evens = [x for x in 1..10 if x % 2 == 0]
+    for e in evens:
+        print(e)

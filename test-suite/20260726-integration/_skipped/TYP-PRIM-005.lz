@@ -1,0 +1,4 @@
+def f_i32(x: i32) -> i32 = x
+def f_u32(x: u32) -> u32 = x
+def f_u64(x: u64) -> u64 = x
+def f_f32(x: f32) -> f32 = x

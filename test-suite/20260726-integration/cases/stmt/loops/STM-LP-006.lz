@@ -1,0 +1,6 @@
+def f() -> int:
+    loop:
+        break 42
+
+def main() =
+    print(f())

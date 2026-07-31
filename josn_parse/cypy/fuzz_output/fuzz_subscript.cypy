@@ -1,0 +1,6 @@
+def test() -> int:
+    let lst: list[int] = [1, 2, 3]
+    return lst[0]
+
+def main() -> int:
+    return 0

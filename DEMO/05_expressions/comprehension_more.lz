@@ -1,0 +1,8 @@
+// LZ 表达式 — 列表推导扩展
+// 覆盖：平方推导、加一推导（推导迭代器当前仅支持区间，见 99_spec）
+
+def main() =
+    let squares = [x * x for x in 1..10]
+    let plusones = [x + 1 for x in 1..5]
+    print(squares)
+    print(plusones)

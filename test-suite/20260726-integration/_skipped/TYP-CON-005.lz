@@ -1,0 +1,6 @@
+def f() -> (int, str) = (42, "hello")
+
+def main() =
+    (a, b) = f()
+    print(a)
+    print(b)

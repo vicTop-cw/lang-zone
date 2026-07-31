@@ -1,0 +1,9 @@
+// 规范目标特性（_ = expr 丢弃语句；与 let _ = expr 等价，语义待明确）
+// 出处：SYNTAX/00-词法基础.md §4.3.2 — 丢弃语句
+// 预期语法：单独以 _ 接收，仅要副作用、丢弃结果
+def log(msg: str) -> () =
+    println(msg)
+
+def main() =
+    _ = log("side effect only")
+    _ = println("done")

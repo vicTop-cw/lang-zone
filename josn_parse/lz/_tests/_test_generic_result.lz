@@ -1,0 +1,60 @@
+// ============================================
+// Test 1: Generic enum Result<T, E>
+// ============================================
+enum Result<T, E> =
+    Ok(T)
+    Err(E)
+
+// ============================================
+// Test 2: Generic struct Box<T>
+// ============================================
+struct Box<T> =
+    value: T
+
+// ============================================
+// Test 3: Generic function with where clause
+// ============================================
+def max<T>(a: T, b: T) -> T where T <: Ord =
+    if a > b:
+        a
+    else:
+        b
+
+// ============================================
+// Test 4: Generic method with function type
+// ============================================
+def map<U>(self: Box<T>, f: (T) -> U) -> Box<U> =
+    Box(f(self.value))
+
+// ============================================
+// Test 5: Function returning Result<T, E>
+// ============================================
+def divide(a: i64, b: i64) -> Result<i64, String> =
+    if b == 0:
+        Err("division by zero")
+    else:
+        Ok(a / b)
+
+// ============================================
+// Test 6: Match on Result
+// ============================================
+def main() =
+    let r1 = divide(10, 2)
+    match r1:
+        case Ok(val):
+            println(val)
+        case Err(msg):
+            println(msg)
+
+    let r2 = divide(10, 0)
+    match r2:
+        case Ok(val):
+            println(val)
+        case Err(msg):
+            println(msg)
+
+    let b = Box(42)
+    println(b.value)
+
+    let m = max(10, 20)
+    println(m)

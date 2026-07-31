@@ -1,0 +1,5 @@
+def id<T>(x: T) -> T = x
+
+def main() =
+    print(id(42))
+    print(id("hello"))

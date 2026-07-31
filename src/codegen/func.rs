@@ -25,6 +25,9 @@ impl CodeGenFuncExt for CodeGen {
     fn gen_function(&self, f: &Function) -> String {
         let mut out = String::new();
 
+        // 设置当前函数名（�� gen_stmt 处理 Stmt::FnDef 时使用）
+        self.current_fn_name.replace(Some(f.name.clone()));
+
         // 装饰器
         for d in &f.decorators {
             out.push_str(&gen_decorator_attr(d));
@@ -102,6 +105,10 @@ impl CodeGenFuncExt for CodeGen {
             async_kw, f.name, generics,
             params.join(", "), ret, where_str, body
         ));
+
+        // 重置当前函数名
+        self.current_fn_name.replace(None);
+
         out
     }
 
@@ -143,6 +150,10 @@ impl CodeGenFuncExt for CodeGen {
 
     fn gen_method(&self, f: &Function, indent: usize) -> String {
         let pad = "    ".repeat(indent);
+
+        // 设置当前函数名
+        self.current_fn_name.replace(Some(f.name.clone()));
+
         let async_kw = if f.is_async { "async " } else { "" };
         let generics = if f.generics.is_empty() {
             String::new()
@@ -178,6 +189,9 @@ impl CodeGenFuncExt for CodeGen {
         self.defer_count.set(0);  // 每方法重置 defer 计数器
         let body = self.gen_block_return(&f.body, indent + 1, &mut locals);
         let body = body.trim_end();
+
+        // 重置当前函数名
+        self.current_fn_name.replace(None);
 
         format!(
             "{}{}fn {}{}({}){}{} {{\n{}\n{}}}\n",

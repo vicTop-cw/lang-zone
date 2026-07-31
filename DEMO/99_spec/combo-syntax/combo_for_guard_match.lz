@@ -1,0 +1,16 @@
+// 规范目标特性（当前解析器未实现：for 分支不识别 if 守卫）
+// combo-syntax：for 守卫 + match 模式匹配
+// 出处：SYNTAX/05-控制流.md §3.5 + match 语法
+enum Kind =
+    A(int)
+    B(str)
+
+def keep(k: Kind) -> bool = True
+
+def main() =
+    let items = [Kind.A(1), Kind.B("x"), Kind.A(2)]
+    for it in items if keep(it):
+        let label = match it:
+            case Kind.A(n) => f"a:{n}"
+            case Kind.B(s) => f"b:{s}"
+        print(label)                 // 预期：a:1 b:x a:2

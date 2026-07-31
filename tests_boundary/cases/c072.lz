@@ -1,4 +1,0 @@
-with open_file() as f:
-  print(f)
-def main() =
-  print(2)

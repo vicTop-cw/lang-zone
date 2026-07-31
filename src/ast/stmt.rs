@@ -3,6 +3,7 @@
 
 use crate::types::Type;
 use super::expr::{Expr, AssignOp};
+use super::decl::Function;
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -21,14 +22,19 @@ pub enum Stmt {
     },
     Return(Option<Expr>),
     Yield(Option<Expr>),
+    YieldFrom(Expr),  // yield from expr — 委托生成器
     While {
         cond: Expr,
+        guard: Option<Expr>,          // while cond if guard:
         body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,  // while ... else:
     },
     For {
         var: String,
         iter: Expr,
+        guard: Option<Expr>,          // for x in iter if guard:
         body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,  // for ... else:
     },
     Loop(Vec<Stmt>),
     Break(Option<Expr>),
@@ -51,6 +57,8 @@ pub enum Stmt {
         value: Expr,
     },
 
+    FnDef { func: Function },
+
     // ── 测试 ──
     Test {
         name: String,
@@ -63,6 +71,11 @@ pub enum Stmt {
     Suite {
         name: String,
         tests: Vec<Stmt>,
+    },
+
+    // ── 编译期 ──
+    Comptime {
+        body: Vec<Stmt>,
     },
 }
 

@@ -1,0 +1,11 @@
+def f() =
+    try:
+        raise "err"
+    catch e:
+        print(e)
+    finally:
+        pass
+def g() raises str:
+    raise "err"
+def h() =
+    panic("crash")

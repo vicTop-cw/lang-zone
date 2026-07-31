@@ -1,0 +1,4 @@
+async def f() =
+    pass
+
+def main() = print(0)

@@ -29,7 +29,7 @@ def main() =
     let inf_f = {1, 2, 3}
 
     // --- Nil type ---
-    let empty: Nil = []
+    let empty = []
 
     // --- Tuple ---
     let t: (int, str, bool) = (42, "hi", True)
@@ -42,10 +42,13 @@ def main() =
     let ref s = val
 
     // --- Function type ---
-    let add: fn(int, int) -> int = |a, b| a + b
+    let add: fn(int, int) -> int = |x, y| x + y
 
     // --- Pointer types ---
     let boxed: Box<int> = Box.new(99)
     let bv = boxed[0]
 
-    print(a, b, c, d)
+    print(a)
+    print(b)
+    print(c)
+    print(d)

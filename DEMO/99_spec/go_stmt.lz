@@ -1,0 +1,8 @@
+// 规范目标特性（go 仅部分接入，运行时映射待验证）
+// 出处：SYNTAX/10-并发与异步.md — go 并发语句
+// 预期语法：
+def worker(n: int) = print(f"working {n}")
+
+def main() =
+    go worker(1)
+    go worker(2)

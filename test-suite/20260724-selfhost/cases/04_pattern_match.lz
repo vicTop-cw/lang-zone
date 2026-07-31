@@ -1,0 +1,42 @@
+// ============================================================
+// Phase 2: lz 自测试 — 04 模式匹配（用 int 返回避免 str 缺口）
+// ============================================================
+
+def match_int(x: int) -> int =
+  match x:
+    case 0: 0
+    case 1: 1
+    case _: 99
+
+def match_tuple(t: (int, int)) -> int =
+  match t:
+    case (0, 0): 0
+    case (x, _): x
+
+def match_nested(v: int) -> int =
+  match v:
+    case 0: 10
+    case 1: 20
+    case _: 30
+
+suite "match_int_tests":
+  test "zero_case":
+    assert match_int(0) == 0
+  test "one_case":
+    assert match_int(1) == 1
+  test "other_case":
+    assert match_int(99) == 99
+
+suite "match_tuple_tests":
+  test "zero_zero":
+    assert match_tuple((0, 0)) == 0
+  test "extract_first":
+    assert match_tuple((5, 10)) == 5
+
+suite "match_nested_tests":
+  test "case_0":
+    assert match_nested(0) == 10
+  test "case_1":
+    assert match_nested(1) == 20
+  test "case_default":
+    assert match_nested(99) == 30

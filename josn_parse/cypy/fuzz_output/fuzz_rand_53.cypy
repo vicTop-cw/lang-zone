@@ -1,0 +1,12 @@
+def test_0() -> int:
+    if 0.0:
+        return 1
+    else:
+        return 0
+    return (-(result <= (-(-42))))
+    return print(((result)))
+    guard (print((print(1))) >= y) else:
+        return -1
+
+def main() -> int:
+    return 0

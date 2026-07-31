@@ -1,0 +1,6 @@
+def consume(owned s: str) =
+    pass
+
+def main() =
+    s = "hello"
+    consume(s^)

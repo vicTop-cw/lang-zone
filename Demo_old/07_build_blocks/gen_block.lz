@@ -1,0 +1,10 @@
+// ==== Generator Build Block *: ====
+def square(x: int) -> int = x * x
+
+def main() =
+    xs = square *:
+        yield (2)
+        yield (3)
+        yield (4)
+    for result in xs:
+        print(result)

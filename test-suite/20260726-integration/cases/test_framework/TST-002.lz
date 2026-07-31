@@ -1,0 +1,5 @@
+#!test
+
+test "neg":
+    assert not False
+    print("ok")

@@ -1,0 +1,7 @@
+def describe(n: int) -> str =
+    match n:
+        case 0 => "zero"
+        case _ => "many"
+
+def main() =
+    print(describe(0))

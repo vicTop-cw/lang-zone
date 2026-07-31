@@ -1,0 +1,8 @@
+struct S =
+    x: int
+impl S =
+    def speak(self: S) = 0
+trait T =
+    def speak(self: Self) = ...
+impl T for S =
+    def speak(self: S) = 1

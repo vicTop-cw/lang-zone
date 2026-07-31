@@ -1,0 +1,21 @@
+"""
+Round 1a: 测试 Cypy class 关键字
+"""
+# 1. 简单 class 定义
+class Simple:
+    x: int
+
+# 2. class 带字段
+class Another:
+    name: str
+
+def main() -> int:
+    print("=== Class Test ===")
+    let s: Simple = Simple {x: 10}
+    print(f"Simple.x = {s.x}")
+
+    let a: Another = Another {name: "hello"}
+    print(f"Another.name = {a.name}")
+
+    print("=== Done ===")
+    return 0

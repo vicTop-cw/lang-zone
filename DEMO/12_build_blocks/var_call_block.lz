@@ -60,10 +60,10 @@ def demo_nested() =
 def demo_loop() =
     // 1e. 构建块内循环
     total =:
-        sum = 0
+        s = 0
         for i in 1..5:
-            sum = sum + i
-        sum
+            s = s + i
+        s
     print(total)          // 10 (1+2+3+4)
 
 // =============================================================

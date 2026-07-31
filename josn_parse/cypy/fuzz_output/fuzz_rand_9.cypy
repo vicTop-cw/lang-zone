@@ -1,0 +1,24 @@
+def test_0() -> int:
+    return print((0.0 + print((-100))))
+    (print((0.0)))
+
+def test_1() -> int:
+    return (-(print(total) >= z))
+    print((((0 <= 100) <= 1.5) == print((False))))
+    while ("hello"):
+        break
+
+def test_2() -> int:
+    defer:
+        let cleanup: int = 0
+    if 1.5:
+        return 1
+    else:
+        return 0
+    for i in range(3):
+        let temp: int = i
+    guard (42 < (-((-True)))) else:
+        return -1
+
+def main() -> int:
+    return 0

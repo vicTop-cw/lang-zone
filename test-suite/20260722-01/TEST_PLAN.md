@@ -1,13 +1,13 @@
 # Lang-Zong 编译器 — 测试计划 (TEST PLAN)
 
 > 本计划与全部测试产物均存放于 `test-suite/` 目录内，不修改或创建该目录以外的任何文件。
-> 系统待测对象 (SUT)：预编译二进制 `target/debug/lang-zong.exe`（CLI：`lzc <file.lz> [--tokens] [--ast]`）。
+> 系统待测对象 (SUT)：预编译二进制 `target/debug/lang-zone.exe`（CLI：`lzc <file.lz> [--tokens] [--ast]`）。
 
 ---
 
 ## 1. 项目与技术栈概览
 
-**Lang-Zong (`lang-zong`)** 是一个用 **Rust** 编写的源码到源码（transpile）编译器：
+**Lang-Zong (`lang-zone`)** 是一个用 **Rust** 编写的源码到源码（transpile）编译器：
 将自研语言 **Lang-Zong (`.lz`)** 源文件翻译为 **Rust 源码**，再交由 `rustc` 编译执行。
 
 编译流水线（位于 `src/`）：
@@ -144,7 +144,7 @@
 
 ## 6. 执行与报告
 
-1. 运行 `python3 run_tests.py`（或托管 Python 解释器），驱动 `target/debug/lang-zong.exe`。
+1. 运行 `python3 run_tests.py`（或托管 Python 解释器），驱动 `target/debug/lang-zone.exe`。
 2. 每次执行后，于 `test-suite/reports/` 生成详细测试报告，包含：
    - 测试范围与目标
    - 测试用例清单及逐条执行结果（通过/失败/崩溃）

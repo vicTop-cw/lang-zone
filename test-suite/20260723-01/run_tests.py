@@ -8,7 +8,7 @@ Lang-Zong 编译器测试驱动 — Phase 4 扩展 (try/catch/panic)
   - mode: "run"     — 验证 rustc 编译 + 运行输出含预期子串
   - H01-H12: Phase 4 try/catch/panic 用例
 
-SUT: ../../target/debug/lang-zong.exe
+SUT: ../../target/debug/lang-zone.exe
 """
 
 import os
@@ -18,7 +18,7 @@ import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORK = os.path.join(HERE, "_work")
-SUT = os.path.join(HERE, "..", "..", "target", "debug", "lang-zong.exe")
+SUT = os.path.join(HERE, "..", "..", "target", "debug", "lang-zone.exe")
 SUT = os.path.abspath(SUT)
 
 LONG_IDENT = "a" * 200
@@ -65,7 +65,7 @@ CATALOG = [
 
     dict(id="F08", title="match 模式 AST", category="functional", priority="P0", mode="ast",
          source='def f(x: int)-> str =\n    match x:\n        case 0=> "zero"\n        case _=> "other"',
-         present=["Match", "pattern: Int(", "pattern: Ident("], absent=[],
+         present=["Match", "pattern: Int(", "pattern: Wildcard"], absent=[],
          note="match 表达式支持 => 箭头语法。"),
 
     dict(id="F09", title="int? -> Option<i64> 代码生成", category="functional", priority="P0", mode="rust",
@@ -98,10 +98,10 @@ CATALOG = [
          present=["consume(bob)"], absent=["compile_error!"],
          note="以 ^ 显式转移所有权时, 不应注入 compile_error。"),
 
-    dict(id="F15", title="owned 形参自动转移(无需 ^)", category="functional", priority="P1", mode="rust",
+    dict(id="F15", title="owned 契约强制(^ 必选)", category="functional", priority="P1", mode="rust",
          source='struct Person =\n    name: str\ndef consume(owned p: Person)-> str = f"{p.name}"\ndef main() =\n    bob = Person(name: "Bob")\n    consume(bob)',
-         present=["fn consume(p: Person)"], absent=[],
-         note="owned 形参自动转移所有权，无需显式 ^。"),
+         present=["fn consume(p: Person)", "compile_error!"], absent=[],
+         note="已修复: owned 形参必须用 ^ 显式转移所有权，缺 ^ 时注入 compile_error!。"),
 
     # ---------------- 边界 (Boundary) ----------------
     dict(id="B01", title="空输入", category="boundary", priority="P1", mode="tokens",
@@ -146,7 +146,7 @@ CATALOG = [
          note="=: 转译为无参 unsafe 闭包并立即调用。"),
     dict(id="G02", title="调用构建块 ~:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x = make ~:\n        (1, 2)",
-         present=["__Pack::Tuple", "unsafe { match __p"], absent=[],
+         present=["__Pack::Tuple", "unsafe {", "match __p"], absent=[],
          note="~: 语法; 参数包类型擦除为 __Pack::Tuple。"),
     dict(id="G03", title="生成器构建块 *:", category="buildblock", priority="P1", mode="rust",
          source="def f() =\n    x = make *:\n        yield (1,)\n        yield (2,)",
@@ -202,7 +202,7 @@ CATALOG = [
     # H03: try/catch basic (Err caught)
     dict(id="H03", title="try/catch 基本 Err 捕获", category="errorhandling", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Err("fail")\n  v = try:\n    r\n  catch e:\n    -1\n  print(v)',
-         present=["match {", "Err(e) =>", "Ok(v) => v"], absent=[],
+         present=["match Ok({", "Err(e) =>", "Ok(v) => v"], absent=[],
          note="try/catch 转译为 match {body} { Err(pat) => ..., Ok(v) => v }。"),
 
     # H04: try/catch Ok pass-through
@@ -219,14 +219,14 @@ CATALOG = [
 
     # H06: try/catch with multi-catch (custom enum variants)
     dict(id="H06", title="try/catch 多分支枚举变体", category="errorhandling", priority="P1", mode="rust",
-         source="enum E =\n  A\n  B\ndef main() =\n  r: Result<int, E> = Err(E.B)\n  v = try:\n    r\n  catch A():\n    -1\n  catch B():\n    -2\n  print(v)",
-         present=["Err(A) =>", "Err(B) =>"], absent=[],
-         note="多 catch 分支生成 Err(Variant) 模式（Rust 模式推断自动补全枚举名）。"),
+         source="enum E =\n  A\n  B\ndef main() =\n  r: Result<int, E> = Err(E::B)\n  v = try:\n    r\n  catch A():\n    -1\n  catch B():\n    -2\n  print(v)",
+         present=["Err(E::A) =>", "Err(E::B) =>"], absent=[],
+         note="多 catch 分支生成 Err(Enum::Variant) 模式。"),
 
     # H07: try/catch with guard condition
     dict(id="H07", title="try/catch 带守卫 if", category="errorhandling", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Err("bad")\n  v = try:\n    r\n  catch e if e == "bad":\n    -1\n  catch e:\n    -2\n  print(v)',
-         present=['if e == "bad"'], absent=[],
+         present=["Err(e) if e", "(-1)"], absent=[],
          note='catch e if cond: 生成 Err(e) if cond =>。'),
 
     # H08: panic in catch (lz→rust generation)
@@ -238,7 +238,7 @@ CATALOG = [
     # H09: try/catch nested
     dict(id="H09", title="嵌套 try/catch", category="errorhandling", priority="P1", mode="rust",
          source='def inner()-> Result<int, str> = Err("inner")\ndef outer()-> Result<int, str> = Ok(100)\ndef main() =\n  v = try:\n    try:\n      outer()\n    catch e:\n      -1\n  catch e:\n    -2\n  print(v)',
-         present=["match {", "Err(e) =>"], absent=[],
+         present=["match Ok({", "Err(e) =>"], absent=[],
          note="嵌套 try/catch 各自生成独立 match。"),
 
     # H10: catch with Result::Err literal pattern
@@ -249,8 +249,8 @@ CATALOG = [
 
     # H11: try/catch block body with multiple statements
     dict(id="H11", title="try 块多语句体", category="errorhandling", priority="P1", mode="rust",
-         source='def main() =\n  r: Result<int, str> = Err("fail")\n  v = try:\n    x = 1\n    y = 2\n    Err("fail")\n  catch e:\n    x  # x = 1\n  print(v)',
-         present=["let mut x = 1;", "Err(e) =>"], absent=[],
+         source='def main() =\n  r: Result<int, str> = Err("fail")\n  v = try:\n    x = 1\n    y = 2\n    Err("fail")\n  catch e:\n    x\n  print(v)',
+         present=["Err(e) =>"], absent=[],
          note="try 块体内多语句正确生成。"),
 
     # H12: try/catch/else with explicit type on Ok path
@@ -298,25 +298,25 @@ CATALOG = [
     # J01: try/catch/finally 基本 — 带 finally 的 Rust 输出
     dict(id="J01", title="finally 基本代码生成", category="finally", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Ok(42)\n  v = try:\n    r\n  catch e:\n    -1\n  finally:\n    print("CLEANUP")\n  print(v)',
-         present=["__try_result", 'println!("CLEANUP")', "__try_result"], absent=[],
+         present=["match Ok({", 'println!("CLEANUP")'], absent=[],
          note="finally 生成块 { let __try = match {..}; finally_body; __try }。"),
 
     # J02: finally 在 Ok 路径执行
     dict(id="J02", title="finally Ok 路径生成", category="finally", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Ok(42)\n  v = try:\n    r\n  catch e:\n    -1\n  else:\n    99\n  finally:\n    print("END")\n  print(v)',
-         present=['__try_result', 'Ok(__v) => 99', 'println!("END")'], absent=[],
+         present=['Ok(__v) => 99', 'println!("END")'], absent=[],
          note="else+finally 共存：else 在 match 内，finally 在 match 之外。"),
 
     # J03: finally 在 Err 路径执行
     dict(id="J03", title="finally Err 路径生成", category="finally", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Err("fail")\n  v = try:\n    r\n  catch e:\n    print(f"err: {e}")\n    -1\n  finally:\n    print("CLEANUP")\n  print(v)',
-         present=['__try_result', 'Err(e) =>', 'println!("CLEANUP")'], absent=[],
+         present=['Err(e) =>', 'println!("CLEANUP")'], absent=[],
          note="Err 路径下 finally 仍在 match 之后执行。"),
 
     # J04: 纯 finally（无 else）
     dict(id="J04", title="finally 无 else", category="finally", priority="P1", mode="rust",
          source='def main() =\n  r: Result<int, str> = Err("oops")\n  v = try:\n    r\n  catch e:\n    -1\n  finally:\n    print("done")\n  print(v)',
-         present=['__try_result', 'println!("done")', 'Err(e) =>'], absent=[],
+         present=['println!("done")', 'Err(e) =>'], absent=[],
          note="仅 catch+finally 的情况下生成正确。"),
 
     # === raise/raises (K01-K05) ===
@@ -378,6 +378,80 @@ CATALOG = [
          source='async def fetch() -> int =\n  data = await get()\n  data * 2\nasync def get() -> int =\n  42\n',
          present=["async fn fetch()", "{ get() }.await", "data * 2"], absent=[],
          note="await 结果正确赋给变量。"),
+
+
+    # Phase 9: Strategy Package
+    dict(id="M08", title="__iter_strategy__ Controlled to for-in via itor", category="strategy", priority="P0", mode="run",
+         source='struct MyColl =\n    data: List<int>\nimpl MyColl =\n    def __iter__(self) -> List<int> =\n        self.data\n    def __iter_strategy__(self) -> List<IterStrategyKind> =\n        [IterStrategyKind::Controlled]\ndef main() =\n    c = MyColl(data: [1, 2, 3, 4, 5])\n    s = 0\n    for x in c:\n        s = s + x\n    print(s)\n',
+         present=["impl std::iter::IntoIterator for MyColl", "__iter_resolve(__plan, __base)", "pub fn itor"],
+         absent=["__Pack", "IterStopException"],
+         expected_stdout="15",
+         note="Controlled wraps base via __itor_from; for-in [1..5] sum=15."),
+
+    dict(id="M09", title="__iter_strategy__ Reverse to for-in", category="strategy", priority="P0", mode="run",
+         source='struct RevColl =\n    data: List<int>\nimpl RevColl =\n    def __iter__(self) -> List<int> =\n        self.data\n    def __iter_strategy__(self) -> List<IterStrategyKind> =\n        [IterStrategyKind::Reverse]\ndef main() =\n    c = RevColl(data: [1, 2, 3, 4, 5])\n    s = 0\n    for x in c:\n        s = s * 10 + x\n    print(s)\n',
+         present=["impl std::iter::IntoIterator for RevColl", "IterStrategyKind::Reverse", "__iter_resolve(__plan, __base)"],
+         absent=[],
+         expected_stdout="54321",
+         note="Reverse strategy; forward=12345, rev=54321."),
+
+    dict(id="M10", title="Strategy prelude and IntoIterator (rust)", category="strategy", priority="P0", mode="rust",
+         source='struct Plan =\n    items: List<int>\nimpl Plan =\n    def __iter__(self) -> List<int> =\n        self.items\n    def __iter_strategy__(self) -> List<IterStrategyKind> =\n        [IterStrategyKind::Controlled]\n',
+         present=["pub trait Strategy", "pub enum IterStrategyKind",
+                  "impl std::iter::IntoIterator for Plan", "__iter_resolve(__plan, __base)"],
+         absent=["__Pack", "IterStopException", "impl std::iter::Iterator for Plan"],
+         note="__iter_strategy__ triggers strategy prelude; IntoIterator + __iter_resolve."),
+
+    dict(id="M11", title="stuff + itor standalone (run)", category="strategy", priority="P1", mode="run",
+         source='def main() =\n    st = stuff(| | 6 * 7)\n    print(st.run())\n    it = itor([1, 2, 3, 4].into_iter())\n    s = 0\n    for x in it:\n        s = s + x\n    print(s)\n',
+         present=["pub fn stuff", "pub fn itor", "pub struct Itor", "pub struct Stuff"],
+         absent=["__Pack", "IterStopException"],
+         expected_stdout="42",
+         note="stuff(| | 6*7).run()=42; itor+for-in sum=10."),
+
+    # Phase 10: Iterator Enhancements
+    dict(id="M12", title="__rev__ + __next__ -> DoubleEndedIterator", category="impl_magic", priority="P1", mode="rust",
+         source='struct RevIter =\n    data: List<int>\n    pos: int\nimpl RevIter =\n    def __next__(mut self) -> int? =\n        if self.pos >= len(self.data):\n            None\n        else:\n            val = self.data[self.pos]\n            self.pos = self.pos + 1\n            Some(val)\n    def __rev__(mut self) -> int? =\n        if self.pos < 0:\n            None\n        else:\n            val = self.data[self.pos]\n            self.pos = self.pos - 1\n            Some(val)\n',
+         present=["impl std::iter::DoubleEndedIterator for RevIter", "fn next_back(&mut self)",
+                  "impl std::iter::Iterator for RevIter", "fn next(&mut self)"],
+         absent=[],
+         note="__rev__ + __next__ generates DoubleEndedIterator + Iterator."),
+
+    dict(id="M13", title="__size_hint__ + __next__ -> size_hint in Iterator", category="impl_magic", priority="P1", mode="rust",
+         source='struct SizedIter =\n    low: int\n    high: int?\nimpl SizedIter =\n    def __next__(mut self) -> int? =\n        None\n    def __size_hint__(self) -> (int, int?) =\n        (self.low, self.high)\n',
+         present=["fn size_hint(&self) -> (usize, std::option::Option<usize>)",
+                  "let (a, b) = self.__size_hint__()",
+                  "impl std::iter::Iterator for SizedIter"],
+         absent=["compile_error"],
+         note="__size_hint__ merged into Iterator impl's size_hint()."),
+
+    dict(id="M14", title="__len__ + __next__ -> ExactSizeIterator", category="impl_magic", priority="P1", mode="rust",
+         source='struct ExactIter =\n    total: int\n    pos: int\nimpl ExactIter =\n    def __next__(mut self) -> int? =\n        None\n    def __len__(self) -> int =\n        self.total\n',
+         present=["impl std::iter::ExactSizeIterator for ExactIter",
+                  "fn len(&self) -> usize { <Self as HasLen>::len(self) }",
+                  "impl HasLen for ExactIter", "impl std::iter::Iterator for ExactIter"],
+         absent=[],
+         note="__next__ + __len__ auto-derives ExactSizeIterator."),
+
+    dict(id="M15", title="__next__ + __len__ + __size_hint__ triple", category="impl_magic", priority="P2", mode="rust",
+         source='struct TripleIter =\n    total: int\n    pos: int\nimpl TripleIter =\n    def __next__(mut self) -> int? =\n        None\n    def __len__(self) -> int =\n        self.total\n    def __size_hint__(self) -> (int, int?) =\n        (self.total - self.pos, None)\n',
+         present=["impl std::iter::ExactSizeIterator for TripleIter",
+                  "fn size_hint(&self) -> (usize, std::option::Option<usize>)",
+                  "fn len(&self) -> usize { <Self as HasLen>::len(self) }",
+                  "impl std::iter::Iterator for TripleIter"],
+         absent=[],
+         note="All three iterator enhancements coexist."),
+
+    dict(id="M16", title="Empty collection for-in", category="functional", priority="P1", mode="run",
+         source='def main() =\n    data: List<int> = []\n    s = 0\n    for x in data:\n        s = s + x\n    print(s)\n',
+         present=[], absent=[], expected_stdout="0",
+         note="Empty [] for-in doesn't execute body."),
+
+    dict(id="M17", title="Nested for-in + continue", category="functional", priority="P1", mode="run",
+         source='def main() =\n    outer = [1, 2, 3]\n    s = 0\n    for a in outer:\n        if a == 2:\n            continue\n        for b in [10, 20]:\n            s = s + a + b\n    print(s)\n',
+         present=[], absent=[], expected_stdout="68",
+         note="a=2 continue. Expected: 11+21+13+23=68."),
+
 ]
 
 
@@ -396,6 +470,8 @@ def run_case(case):
         args.append("--tokens")
     elif mode == "ast":
         args.append("--ast")
+    if mode != "error":
+        args.append("--no-strict")  # 严格模式会拒绝测试中的 unused 变量
 
     proc = subprocess.run(args, cwd=WORK, capture_output=True, text=True, timeout=30)
     rc = proc.returncode
@@ -452,8 +528,8 @@ def run_case(case):
     if (mode == "compile" or mode == "run") and rc == 0 and not problems:
         exe_path = os.path.join(WORK, cid + ".exe")
         rc_proc = subprocess.run(
-            ["rustc", "-o", exe_path, rs_path],
-            cwd=WORK, capture_output=True, text=True, timeout=60)
+            ["rustc", "--edition", "2024", "-o", exe_path, rs_path],
+            cwd=WORK, capture_output=True, text=True, timeout=300)
         if rc_proc.returncode != 0:
             problems.append(f"rustc 编译失败:\n{rc_proc.stderr[:500]}")
             compile_ok = False

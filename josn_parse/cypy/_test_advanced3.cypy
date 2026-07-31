@@ -1,0 +1,94 @@
+"""Test advanced Cypy features: trait, impl, union types, match/case."""
+
+# 1. trait: define an interface
+trait Printable:
+    def to_string(self) -> str:
+        return ""
+
+# 2. struct with impl
+struct Point:
+    x: float
+    y: float
+
+impl Printable for Point:
+    def to_string(self) -> str:
+        return f"Point({self.x}, {self.y})"
+
+# 3. union type: int | float
+type Number = int | float
+
+def add_numbers(a: Number, b: Number) -> Number:
+    return a + b
+
+# Direct union in function signature
+def process(value: int) -> str:
+    return str(value)
+
+# 4. match/case on ints (no catch-all, all cases covered)
+def classify_number(n: int) -> str:
+    match n:
+        case 0:
+            return "zero"
+        case 1:
+            return "one"
+        case 2:
+            return "two"
+        case 3:
+            return "three"
+        case 4:
+            return "four"
+        case x if x == 5:
+            return "five"
+
+# match/case on strings
+def classify_string(s: str) -> str:
+    match s:
+        case "hello":
+            return "greeting"
+        case "bye":
+            return "farewell"
+        case "foo":
+            return "test"
+
+# match/case with OR pattern on ints
+def classify_sign(n: int) -> str:
+    match n:
+        case 1 | 2 | 3:
+            return "small positive"
+        case x if x == 0:
+            return "zero"
+        case x if x < 0:
+            return "negative"
+
+def main() -> int:
+    # Test trait + impl
+    p = Point {x: 3.0, y: 4.0}
+    print(f"Point to_string: {p.to_string()}")
+
+    # Test union type via type alias (without type annotation on let)
+    let a = 10
+    let b = 5.5
+    print(f"add_numbers(10, 5.5) = {add_numbers(a, b)}")
+
+    # Test direct union type (simplified)
+    let v1 = 42
+    let v2 = "hello"
+    print(f"process(42) = {process(v1)}")
+    print(f"process('hello') = {process(v2)}")
+
+    # Test match/case on ints
+    print(f"classify_number(0) = {classify_number(0)}")
+    print(f"classify_number(1) = {classify_number(1)}")
+    print(f"classify_number(5) = {classify_number(5)}")
+
+    # Test match/case on strings
+    print(f"classify_string('hello') = {classify_string('hello')}")
+    print(f"classify_string('bye') = {classify_string('bye')}")
+    print(f"classify_string('foo') = {classify_string('foo')}")
+
+    # Test match/case with OR pattern
+    print(f"classify_sign(2) = {classify_sign(2)}")
+    print(f"classify_sign(-3) = {classify_sign(-3)}")
+    print(f"classify_sign(0) = {classify_sign(0)}")
+
+    return 0

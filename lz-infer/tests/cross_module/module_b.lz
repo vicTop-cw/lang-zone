@@ -1,0 +1,9 @@
+from module_a import PointA
+
+struct PointB {
+    label: str
+    a: PointA
+}
+
+def make_point_b(label: str, a: PointA) -> PointB =
+    PointB { label: label, a: a }

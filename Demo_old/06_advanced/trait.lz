@@ -1,0 +1,24 @@
+// ==== Trait + Impl ====
+trait Drawable =
+    def draw(self) -> str = ...
+
+struct Circle =
+    radius: f64
+
+    def draw(self) -> str =
+        f"Circle(r={self.radius})"
+
+struct Square =
+    side: f64
+
+    def draw(self) -> str =
+        f"Square(s={self.side})"
+
+def render(d: Drawable) =
+    print(d.draw())
+
+def main() =
+    let c = Circle(radius: 5.0)
+    let s = Square(side: 3.0)
+    render(c)
+    render(s)

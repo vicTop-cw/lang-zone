@@ -1,0 +1,3 @@
+def main() =
+    ok: int = 100
+    print(ok)

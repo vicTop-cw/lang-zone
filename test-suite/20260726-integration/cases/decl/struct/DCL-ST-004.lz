@@ -1,0 +1,1 @@
+struct Color = Rgb(int, int, int)

@@ -1,0 +1,2 @@
+def consume(owned s: str):
+    pass

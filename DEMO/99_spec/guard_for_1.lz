@@ -1,0 +1,8 @@
+// 规范目标特性（当前解析器未实现：for 分支不识别 if 守卫）
+// 出处：SYNTAX/05-控制流.md §3.5 — for 守卫
+// 预期语法：
+def has(x: int) -> bool = True
+
+def main() =
+    for i in [1, 2, 3, 4] if has(i):
+        print(i)

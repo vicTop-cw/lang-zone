@@ -1,0 +1,14 @@
+// Build block tests — ~: with [checker]
+def check_positive(ps: __Params) -> __Params =
+    if ps.kwargs.contains("x"):
+        let v = ps.kwargs["x"]
+        if v <= 0:
+            raise "must be positive"
+    ps
+
+def guarded_add[check_positive](a: int, b: int) -> int = a + b
+
+def main() =
+    r1 = guarded_add[check_positive] ~:
+        (1, 2)
+    print(r1)

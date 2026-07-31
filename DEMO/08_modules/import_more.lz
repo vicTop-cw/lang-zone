@@ -1,0 +1,21 @@
+// LZ 模块 — 导入形式扩展
+// 覆盖：import / as / from..import / from..import * / 相对导入 / 桥接
+
+import std.math
+import std.math as m
+from std.math import sqrt, pow
+from std.collections import List, Dict, Set
+from .models import User
+from ..core import engine
+from std.io import *
+import std.bridge.rust.serde_json
+
+@export(Rust)
+def compute(a: int, b: int) -> int = a + b
+
+@export(Python)
+def greet(name: str) -> str = f"Hello, {name}"
+
+def main() =
+    print(compute(2, 3))
+    print(greet("world"))

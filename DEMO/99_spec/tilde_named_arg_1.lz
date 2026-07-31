@@ -1,0 +1,9 @@
+// 规范目标特性（当前解析器未实现：src/parser 无后缀 ~ 处理）
+// 出处：SYNTAX/12-操作符.md §1.19 — ~ 后缀命名参数糖（用户示例）
+// 预期语法：
+def name(a: int, b: int) -> int = a + b
+
+def main() =
+    a = 1
+    b = 2
+    print(name(b, b~))     // 位置 a=2, 命名 b=2 → 结果 4（a=2,b=2）

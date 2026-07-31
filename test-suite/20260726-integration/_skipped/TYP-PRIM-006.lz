@@ -1,0 +1,1 @@
+def ch() -> char = 'a'

@@ -1,26 +1,35 @@
 # Issue Tracker
 
-**2026-07-31 更新**: 所有 issue 已修复。Generator lowering (P0 最后一项) 已修复。
+**2026-07-31 自动化测试更新**: 全量回归测试通过，4 个 IR codegen issue 归档。**0 open issues**。
+
+## 设计决策 / 重大变更 (Decisions)
+
+| 文件 | 标题 | 摘要 |
+|------|------|------|
+| [decision-drop-subtype-operators.md](decision-drop-subtype-operators.md) | 移除 `<:` / `>: ` 子类型运算符 ✅ | LZ 无名义继承、型变自动推断；两符号为死语法且致文档混乱，从语法文档与 DEMO 移除 |
 
 ## Open
 
 _无_
 
-## Fixed
+## Fixed (20 total)
 
 | 文件 | 标题 | 修复摘要 |
 |------|------|----------|
-| [ir-codegen-generator-lowering.md](ir-codegen-generator-lowering.md) | IR codegen: 生成器 yield 降低 ✅ | 修复 builder AstStmt::Yield → Stmt::Yield 映射；codegen Vec collector 模式已验证 rustc 编译通过并运行正确 |
-| [fixed/parser-new-syntax-regression.md](fixed/parser-new-syntax-regression.md) | 37 parse 失败 ✅ | Dict/Set推导、for/while守卫+else、type别名、comptime、顶层构建块、魔法属性、_丢弃、多行ctor、#!宏、复合赋值、dot函数名、ternary守卫 |
+| [fixed/ir-codegen-generator-lowering.md](fixed/ir-codegen-generator-lowering.md) | IR codegen: 生成器 yield 降低 ✅ | builder AstStmt::Yield → Stmt::Yield 映射；Vec collector 模式验证通过 |
+| [fixed/ir-codegen-self-type.md](fixed/ir-codegen-self-type.md) | IR codegen: self 参数类型 ✅ | self/&self/&mut self 正确发射 |
+| [fixed/ir-codegen-kwargs-struct-ctor.md](fixed/ir-codegen-kwargs-struct-ctor.md) | IR codegen: struct 构造器 ✅ | _KwArg → Struct { field: value } 脱糖 |
+| [fixed/ir-codegen-tail-return.md](fixed/ir-codegen-tail-return.md) | IR codegen: 尾表达式隐式返回 ✅ | 函数体尾表达式 → return 语句 |
+| [fixed/ir-builder-gaps.md](fixed/ir-builder-gaps.md) | IR builder 缺口 ✅ | if/else/struct/guard/raise 等，6/6 单测 |
+| [fixed/parser-new-syntax-regression.md](fixed/parser-new-syntax-regression.md) | 37 parse 失败 ✅ | Dict/Set推导、for/while守卫+else、type别名等 |
 | [fixed/parser-func-def.md](fixed/parser-func-def.md) | def 多形态 ✅ | 5/5 |
 | [fixed/parser-struct-enum-match.md](fixed/parser-struct-enum-match.md) | struct/enum/trait/match ✅ | 9/9 |
 | [fixed/parser-import-path.md](fixed/parser-import-path.md) | import 路径 ✅ | 2/2 |
 | [fixed/parser-comptime-const-typealias.md](fixed/parser-comptime-const-typealias.md) | comptime/const/typealias/as ✅ | 4/4 |
-| [fixed/parser-operators-expr.md](fixed/parser-operators-expr.md) | 运算符/复合赋值/构造器 ✅ | 复合赋值补全7种；struct ctor LBrace postfix |
+| [fixed/parser-operators-expr.md](fixed/parser-operators-expr.md) | 运算符/复合赋值/构造器 ✅ | 复合赋值补全7种 |
 | [fixed/parser-control-flow.md](fixed/parser-control-flow.md) | ternary/guard/try-raise ✅ | parse_expr if 误判修复 |
 | [fixed/parser-top-level-decls.md](fixed/parser-top-level-decls.md) | 魔法属性/宏定义 ✅ | #! shebang + magic attr |
 | [fixed/parser-5-residual-failures.md](fixed/parser-5-residual-failures.md) | 5 残余失败 ✅ | 全部修复 |
-| [fixed/ir-builder-gaps.md](fixed/ir-builder-gaps.md) | IR builder 缺口 ✅ | if/else/struct/guard/raise 等全部实现，6/6 单测 |
 | [fixed/frontend-keyword-downgrade.md](fixed/frontend-keyword-downgrade.md) | panic/Some/None/Ok/Err 降级 ✅ | P2 |
 | [fixed/parser-dotdot-in-for.md](fixed/parser-dotdot-in-for.md) | `for i in 0..5:` 区间迭代器 ✅ | — |
 | [fixed/build-block-colon-format.md](fixed/build-block-colon-format.md) | `^:` 构建块冒号格式 ✅ | — |

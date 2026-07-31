@@ -1,0 +1,61 @@
+// ============================================================
+// Phase 2: lz 自测试 — 03 数据类型：struct/tuple/list/bool
+// ============================================================
+
+struct Point =
+  x: int
+  y: int
+
+def origin() -> Point =
+  Point(x: 0, y: 0)
+
+def move_x(p: Point, dx: int) -> int =
+  p.x + dx
+
+def tuple_first(t: (int, int)) -> int =
+  match t:
+    case (x, _): x
+
+def tuple_second(t: (int, int)) -> int =
+  match t:
+    case (_, y): y
+
+def list_head() -> int =
+  lst = [1, 2, 3]
+  lst[0]
+
+def list_sum() -> int =
+  nums = [10, 20, 30]
+  nums[0] + nums[1] + nums[2]
+
+def is_positive_or_even(x: int) -> bool =
+  x > 0 or x % 2 == 0
+
+suite "struct_tests":
+  test "test_origin_x":
+    assert origin().x == 0
+  test "test_move_x":
+    assert move_x(Point(x: 1, y: 2), 5) == 6
+  test "field_access":
+    p = Point(x: 10, y: 20)
+    assert p.y == 20
+
+suite "tuple_tests":
+  test "test_first":
+    assert tuple_first((42, 99)) == 42
+  test "test_second":
+    assert tuple_second((42, 99)) == 99
+
+suite "list_tests":
+  test "test_head":
+    assert list_head() == 1
+  test "test_sum":
+    assert list_sum() == 60
+
+suite "bool_tests":
+  test "or_true":
+    assert is_positive_or_even(5) == True
+  test "or_even":
+    assert is_positive_or_even(-2) == True
+  test "or_false":
+    assert is_positive_or_even(-3) == False

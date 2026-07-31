@@ -1,0 +1,12 @@
+struct Cat =
+    name: str
+    age: int
+
+def process(pet: duck { name: str, age: int }) =
+    let name = pet.name
+    name
+
+def main() =
+    let cat = Cat(name: "Whiskers", age: 3)
+    let result = process(cat)
+    print(result)

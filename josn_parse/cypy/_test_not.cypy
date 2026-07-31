@@ -1,0 +1,6 @@
+# Test: not 运算符在表达式中
+def test_not() -> bool:
+    return not True
+
+def main() -> int:
+    return 0

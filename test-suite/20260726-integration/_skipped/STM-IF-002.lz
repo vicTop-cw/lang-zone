@@ -1,0 +1,21 @@
+def test_pos() =
+    x = 5
+    if x > 0:
+        print("positive")
+    elif x < 0:
+        print("negative")
+    else:
+        print("zero")
+
+def test_neg() =
+    x = -3
+    if x > 0:
+        print("positive")
+    elif x < 0:
+        print("negative")
+    else:
+        print("zero")
+
+def main() =
+    test_pos()
+    test_neg()

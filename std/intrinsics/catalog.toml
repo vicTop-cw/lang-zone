@@ -1,0 +1,4 @@
+[package]
+name = "intrinsics"
+version = "0.1.0"
+desc = "Compiler intrinsic decorators — overload, inline, memoize, export, parallel, tail_call, const_fn"

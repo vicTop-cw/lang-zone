@@ -1,0 +1,6 @@
+def sum_all(values: List<int>) -> int =
+    let total = 0
+    for v in values:
+        total = total + v
+    return total
+def main() = print(sum_all(1, 2, 3))

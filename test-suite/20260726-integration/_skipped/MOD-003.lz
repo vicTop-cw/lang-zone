@@ -1,0 +1,4 @@
+#!test
+
+test "basic":
+    assert True
