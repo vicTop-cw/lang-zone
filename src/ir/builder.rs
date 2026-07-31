@@ -29,6 +29,8 @@ struct TypeCtx {
     struct_names: HashSet<String>,
     /// struct 字段类型：struct_name → field_name → type
     struct_fields: HashMap<String, HashMap<String, IrType>>,
+    /// enum variant → enum name 映射
+    enum_variants: HashMap<String, String>,
     /// 当前函数泛型参数
     current_generics: Vec<String>,
     /// 当前函数返回类型
@@ -47,6 +49,7 @@ impl TypeCtx {
             fn_params: HashMap::new(),
             struct_names: HashSet::new(),
             struct_fields: HashMap::new(),
+            enum_variants: HashMap::new(),
             current_generics: vec![],
             current_ret_ty: None,
             current_fn_name: None,
@@ -56,12 +59,18 @@ impl TypeCtx {
 
     fn collect_structs(&mut self, module: &ast::Module) {
         for s in &module.structs {
-            self.struct_names.insert(s.name.clone());
-            let mut fields = HashMap::new();
-            for f in &s.fields {
-                fields.insert(f.name.clone(), from_ast_type(&f.ty));
+            if s.is_enum {
+                for f in &s.fields {
+                    self.enum_variants.insert(f.name.clone(), s.name.clone());
+                }
+            } else {
+                self.struct_names.insert(s.name.clone());
+                let mut fields = HashMap::new();
+                for f in &s.fields {
+                    fields.insert(f.name.clone(), from_ast_type(&f.ty));
+                }
+                self.struct_fields.insert(s.name.clone(), fields);
             }
-            self.struct_fields.insert(s.name.clone(), fields);
         }
     }
 
@@ -318,7 +327,7 @@ fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {
 
 /// 将 AST Pattern 转为 IR Pattern，返回 None 表示通配（catch-all）
 #[allow(dead_code)]
-fn convert_ast_pattern(pat: &AstPattern) -> Option<Pattern> {
+fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
     match pat {
         AstPattern::Wildcard => None,
         AstPattern::Ident(name) => Some(Pattern::Ident(name.clone())),
@@ -327,13 +336,24 @@ fn convert_ast_pattern(pat: &AstPattern) -> Option<Pattern> {
         AstPattern::Bool(b) => Some(Pattern::Lit(LitKind::Bool(*b))),
         AstPattern::Variant(name, args) => {
             let ir_args: Vec<Pattern> = args.iter()
-                .filter_map(|a| convert_ast_pattern(a))
+                .filter_map(|a| convert_ast_pattern(a, ctx))
                 .collect();
             // 如果 name 包含 '.'（如 "Color.Red"），拆分为 enum_name.variant
             let (enum_name, variant) = if let Some(dot_pos) = name.rfind('.') {
                 (name[..dot_pos].to_string(), name[dot_pos+1..].to_string())
             } else {
-                ("Error".into(), name.clone())
+                // Look up variant in enum registry
+                let enum_name = ctx.enum_variants.get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // Fallback heuristics for well-known types
+                        match name.as_str() {
+                            "Some" | "None" => "Option".into(),
+                            "Ok" | "Err" => "Result".into(),
+                            _ => "Error".into(),
+                        }
+                    });
+                (enum_name, name.clone())
             };
             Some(Pattern::Enum {
                 enum_name,
@@ -343,7 +363,7 @@ fn convert_ast_pattern(pat: &AstPattern) -> Option<Pattern> {
         }
         AstPattern::Tuple(elems) => {
             let ir_elems: Vec<Pattern> = elems.iter()
-                .filter_map(|e| convert_ast_pattern(e))
+                .filter_map(|e| convert_ast_pattern(e, ctx))
                 .collect();
             Some(Pattern::Tuple(ir_elems))
         }
@@ -386,7 +406,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
 
         AstExpr::Call { func, args } => {
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(convert_expr(func, ctx)),
                 args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
             }
@@ -562,7 +582,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // |> → 函数调用（receiver 作为第一个参数）
             let mut all_args = vec![convert_expr(receiver, ctx)];
             all_args.extend(args.iter().map(|a| convert_expr(a, ctx)));
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var(func.clone()), IrType::Any, Span::unknown())),
                 args: all_args,
             }
@@ -631,7 +651,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::SetLit(items) => {
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("set!".into()), IrType::Any, Span::unknown())),
                 args: items.iter().map(|i| convert_expr(i, ctx)).collect(),
             }
@@ -645,7 +665,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // [out for x in iter if cond] → 展开为 for + if 的生成模式
             let iter_expr = convert_expr(iter, ctx);
             let out_expr = convert_expr(output, ctx);
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
@@ -662,7 +682,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let iter_expr = convert_expr(iter, ctx);
             let key_expr = convert_expr(key, ctx);
             let val_expr = convert_expr(value, ctx);
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("dict_comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
@@ -681,7 +701,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // {x for x in iter} → 展开为生成模式
             let iter_expr = convert_expr(iter, ctx);
             let elem_expr = convert_expr(elem, ctx);
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("set_comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
@@ -703,7 +723,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Spawn(inner) => {
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("spawn".into()), IrType::Any, Span::unknown())),
                 args: vec![convert_expr(inner, ctx)],
             }
@@ -714,7 +734,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Panic(inner) => {
-            ExprKind::Call {
+            ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("panic!".into()), IrType::Any, Span::unknown())),
                 args: vec![convert_expr(inner, ctx)],
             }
@@ -744,7 +764,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }
                 BuildKind::Call => {
                     // ~: → Call — body 是块尾元组/字典作为参数
-                    ExprKind::Call {
+                    ExprKind::Call { type_args: vec![],
                         callee: Box::new(convert_expr(lhs, ctx)),
                         args: vec![Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown())],
                     }
@@ -832,7 +852,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             // match 语句 → 直接用 IR Match 节点（codegen 已有完整支持）
             let ir_scrutinee = convert_expr(expr, ctx);
             let ir_arms: Vec<(Pattern, Block)> = arms.iter().map(|arm| {
-                let pat = convert_ast_pattern(&arm.pattern)
+                let pat = convert_ast_pattern(&arm.pattern, ctx)
                     .unwrap_or(Pattern::Wildcard);
                 let mut arm_ctx = TypeCtx::new();
                 arm_ctx.current_generics = ctx.current_generics.clone();
@@ -944,7 +964,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
 
         AstStmt::Raise(e) => Stmt::ExprStmt {
             expr: Expr::new(
-                ExprKind::Call {
+                ExprKind::Call { type_args: vec![],
                     callee: Box::new(Expr::new(ExprKind::Var("panic!".into()), IrType::Any, Span::unknown())),
                     args: vec![convert_expr(e, ctx)],
                 },
@@ -1052,7 +1072,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
 
         AstStmt::Assert { expr, expected: _ } => Stmt::ExprStmt {
             expr: Expr::new(
-                ExprKind::Call {
+                ExprKind::Call { type_args: vec![],
                     callee: Box::new(Expr::new(ExprKind::Var("assert!".into()), IrType::Any, Span::unknown())),
                     args: vec![convert_expr(expr, ctx)],
                 },
@@ -1070,7 +1090,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 IrType::Bool, Span::unknown(),
             );
             let print_call = Expr::new(
-                ExprKind::Call {
+                ExprKind::Call { type_args: vec![],
                     callee: Box::new(Expr::new(ExprKind::Var("eprintln!".into()), IrType::Any, Span::unknown())),
                     args: vec![Expr::new(
                         ExprKind::Lit(LitKind::Str("CHECK failed".into())),

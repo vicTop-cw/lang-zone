@@ -79,7 +79,7 @@ impl fmt::Display for Expr {
         match &self.kind {
             ExprKind::Lit(lit) => write!(f, "{lit}"),
             ExprKind::Var(name) => f.write_str(name),
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args, .. } => {
                 write!(f, "call {callee}")?;
                 if !args.is_empty() {
                     f.write_str("(")?;
@@ -471,7 +471,7 @@ impl fmt::Display for Item {
                         f.write_str("(")?;
                         for (i, t) in v.fields.iter().enumerate() {
                             if i > 0 { f.write_str(", ")?; }
-                            write!(f, "{t}")?;
+                            write!(f, "{}", t.ty)?;
                         }
                         writeln!(f, ")")?;
                     }

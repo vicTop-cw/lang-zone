@@ -193,7 +193,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             LitKind::None_ | LitKind::Unit => "None".to_string(),
         },
         ExprKind::Var(name) => name.clone(),
-        ExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args, .. } => {
             let f = gen_expr(cg, callee);
             let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
             format!("{}({})", f, a.join(", "))

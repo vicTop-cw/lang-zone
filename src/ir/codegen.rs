@@ -121,6 +121,19 @@ impl CodeGen {
 
     // ── 类型映射 ──
 
+    fn rust_type_name(&self, name: &str) -> String {
+        match name {
+            "int" => "i64".into(),
+            "float" | "f64" => "f64".into(),
+            "str" => "String".into(),
+            "bool" => "bool".into(),
+            "List" => "Vec".into(),
+            "Dict" => "HashMap".into(),
+            "Set" => "HashSet".into(),
+            other => other.to_string(),
+        }
+    }
+
     fn rust_type(&self, ty: &IrType) -> String {
         match ty {
             IrType::Int => "i64".into(),
@@ -131,7 +144,7 @@ impl CodeGen {
             IrType::Never => "!".into(),
             IrType::Any => "i64".into(),
             IrType::Self_ => "Self".into(),
-            IrType::Duck { .. } => "_".into(),
+            IrType::Duck { .. } => "()".into(),  // Duck types: cannot determine Rust type, use unit
             IrType::Named { path, args } => {
                 let mapped = self.type_map.get(path.as_str()).map(|s| s.to_string())
                     .unwrap_or_else(|| path.clone());
@@ -682,9 +695,17 @@ impl CodeGen {
             ExprKind::Var(name) => {
                 if name == "pass" { "()".into() } else { name.clone() }
             }
-            ExprKind::Call { callee, args } => {
+            ExprKind::Call { callee, args, type_args } => {
                 let callee_s = self.gen_expr(callee);
                 let mut args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                
+                // 泛型类型参数 → turbofish 语法: foo::<T>(args)
+                let turbofish = if !type_args.is_empty() {
+                    let types: Vec<String> = type_args.iter().map(|t| self.rust_type_name(t)).collect();
+                    format!("::<{}>", types.join(", "))
+                } else {
+                    String::new()
+                };
                 
                 // 默认参数：函数有 def_count 个默认参数，调用方少传了 → 补 None
                 if let Some(&(total_params, def_count)) = self.fn_param_info.get(&callee_s) {
@@ -731,9 +752,9 @@ impl CodeGen {
                 } else if !args.is_empty() && is_kwarg_call(args) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
                     let fields: Vec<String> = args.iter().map(|a| gen_kwarg_field(a, self)).collect();
-                    format!("{} {{ {} }}", callee_s, fields.join(", "))
+                    format!("{}{} {{ {} }}", callee_s, turbofish, fields.join(", "))
                 } else {
-                    format!("{}({})", callee_s, args_s.join(", "))
+                    format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
                 }
             }
             ExprKind::MethodCall { receiver, method, args } => {
@@ -757,6 +778,10 @@ impl CodeGen {
                     "__eq__" => "eq",
                     "__iter__" => "iter",
                     "length" => "len",    // LZ .length() → Rust .len()
+                    "new" if self.emitted_types.contains(&recv) || recv == "Box" || recv == "Rc" || recv == "Arc" => {
+                        // Static method on type → use :: syntax
+                        return format!("{}::new({})", recv, args_s.join(", "));
+                    }
                     _ => method,
                 };
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));

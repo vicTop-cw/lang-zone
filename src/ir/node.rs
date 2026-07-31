@@ -385,6 +385,8 @@ pub enum ExprKind {
     Call {
         callee: Box<Expr>,
         args: Vec<Expr>,
+        /// 泛型类型参数（如 foo<T>(args) 中的 T）
+        type_args: Vec<String>,
     },
 
     /// 方法调用 x.method(args)
