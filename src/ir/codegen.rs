@@ -110,6 +110,49 @@ impl CodeGen {
         self.buf.push('\n');
     }
 
+    /// 从表达式中收集 walrus 变量名（用于预声明）
+    fn collect_walrus_vars(expr: &Expr, vars: &mut Vec<String>) {
+        match &expr.kind {
+            ExprKind::StructCtor { name, fields } if name == "_Walrus" => {
+                if let Some((_, bind_expr)) = fields.iter().find(|(n, _)| n == "_bind") {
+                    if let ExprKind::Var(v) = &bind_expr.kind {
+                        if !vars.contains(v) { vars.push(v.clone()); }
+                    }
+                }
+            }
+            ExprKind::BinOp { lhs, rhs, .. } => {
+                Self::collect_walrus_vars(lhs, vars);
+                Self::collect_walrus_vars(rhs, vars);
+            }
+            ExprKind::UnOp { operand, .. } => {
+                Self::collect_walrus_vars(operand, vars);
+            }
+            ExprKind::Call { callee, args, .. } => {
+                Self::collect_walrus_vars(callee, vars);
+                for a in args { Self::collect_walrus_vars(a, vars); }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                Self::collect_walrus_vars(receiver, vars);
+                for a in args { Self::collect_walrus_vars(a, vars); }
+            }
+            ExprKind::IfExpr { cond, then, els } => {
+                Self::collect_walrus_vars(cond, vars);
+                Self::collect_walrus_vars(then, vars);
+                Self::collect_walrus_vars(els, vars);
+            }
+            _ => {}
+        }
+    }
+
+    /// 为 walrus 变量生成预声明: let mut n: i64;
+    fn emit_walrus_predecls(&mut self, cond: &Expr) {
+        let mut vars = Vec::new();
+        Self::collect_walrus_vars(cond, &mut vars);
+        for v in &vars {
+            self.emit_line(&format!("let mut {}: i64;", v));
+        }
+    }
+
     fn emit_prelude(&mut self) {
         self.emit_line("#![allow(unused_imports)]");
         self.emit_line("#![allow(unused_variables)]");
@@ -590,6 +633,7 @@ impl CodeGen {
                 }
             }
             Stmt::ExprStmt { expr } => {
+                self.emit_walrus_predecls(expr);
                 if is_last && !self.is_main && !self.suppress_tail_return {
                     // 非 main 函数尾表达式 → return expr;
                     self.emit_line(&format!("return {};", self.gen_expr(expr)));
@@ -978,11 +1022,29 @@ impl CodeGen {
                         format!("{}[{}]", base_s, key_s)
                     }
                 } else {
-                    format!("{}[{}]", base_s, self.gen_expr(key))
+                    let key_s = self.gen_expr(key);
+                    // HashMap/Dict 索引需要引用: map[&key] 而非 map[key]
+                    let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                    let is_str_key = matches!(&key.ty, IrType::Str);
+                    let key_expr = if is_dict && is_str_key {
+                        format!("&{}", key_s)
+                    } else {
+                        key_s
+                    };
+                    format!("{}[{}]", base_s, key_expr)
                 }
             }
             ExprKind::IndexSet { base, key, value } => {
-                format!("{}[{}] = {}", self.gen_expr(base), self.gen_expr(key), self.gen_expr(value))
+                let base_s = self.gen_expr(base);
+                let key_s = self.gen_expr(key);
+                let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                let is_str_key = matches!(&key.ty, IrType::Str);
+                let key_expr = if is_dict && is_str_key {
+                    format!("&{}", key_s)
+                } else {
+                    key_s
+                };
+                format!("{}[{}] = {}", base_s, key_expr, self.gen_expr(value))
             }
             ExprKind::BinOp { op, lhs, rhs } => {
                 let op_s = self.binop_str(op);
@@ -1040,12 +1102,13 @@ impl CodeGen {
                             .unwrap_or_else(|| "()".into())
                     }
                     "_Walrus" => {
-                        // := walrus 运算符: { let x = value; value }
+                        // := walrus 运算符：变量已在 emit_walrus_predecls 中预声明
+                        // 这里做赋值（非 let 绑定）并返回变量值
                         let bind = fields.iter().find(|(n, _)| n == "_bind");
                         let val = fields.iter().find(|(n, _)| n == "_val");
                         let bind_s = bind.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
                         let val_s = val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
-                        format!("{{ let {} = {}; {} }}", bind_s, val_s, bind_s)
+                        format!("{{ {} = {}; {} }}", bind_s, val_s, bind_s)
                     }
                     "Dict" => "std::collections::HashMap::new()".to_string(),
                     "Range" => {

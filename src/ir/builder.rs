@@ -852,22 +852,34 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
 
         AstExpr::SafeNav { receiver, field } => {
             // x?.field → if x == None then None else x.field
+            // 但如果 receiver 是类型名（非变量），直接字段访问，跳过 null check
             let recv = convert_expr(receiver, ctx);
-            ExprKind::IfExpr {
-                cond: Box::new(Expr::new(
-                    ExprKind::BinOp {
-                        op: BinOpKind::Eq,
-                        lhs: Box::new(recv.clone()),
-                        rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
-                    },
-                    IrType::Bool,
-                    Span::unknown(),
-                )),
-                then: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
-                els: Box::new(Expr::new(
-                    ExprKind::FieldAccess { base: Box::new(recv), field: field.clone() },
-                    IrType::Any, Span::unknown(),
-                )),
+            
+            // 检查 receiver 是否是已知类型名（非变量引用）→ 跳过 null check
+            let is_type_name = match receiver.as_ref() {
+                AstExpr::Ident(name) => !ctx.vars.contains_key(name.as_str()),
+                _ => false,
+            };
+            
+            if is_type_name {
+                ExprKind::FieldAccess { base: Box::new(recv), field: field.clone() }
+            } else {
+                ExprKind::IfExpr {
+                    cond: Box::new(Expr::new(
+                        ExprKind::BinOp {
+                            op: BinOpKind::Eq,
+                            lhs: Box::new(recv.clone()),
+                            rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
+                        },
+                        IrType::Bool,
+                        Span::unknown(),
+                    )),
+                    then: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
+                    els: Box::new(Expr::new(
+                        ExprKind::FieldAccess { base: Box::new(recv), field: field.clone() },
+                        IrType::Any, Span::unknown(),
+                    )),
+                }
             }
         }
 
@@ -1082,7 +1094,7 @@ fn block_to_expr(stmts: &[AstStmt], ctx: &TypeCtx) -> Expr {
             return convert_expr(e, ctx);
         }
     }
-    let ir_stmts: Vec<Stmt> = stmts.iter().map(|s| convert_stmt(s, ctx)).collect();
+    let ir_stmts: Vec<Stmt> = convert_stmts(stmts, ctx);
     let blk_ty = stmts.last()
         .map(|s| infer_stmt_type(s, ctx))
         .unwrap_or(IrType::Unit);
@@ -1095,6 +1107,48 @@ fn block_to_expr(stmts: &[AstStmt], ctx: &TypeCtx) -> Expr {
 // ══════════════════════════════════════════════════════════════
 // Stmt 转换
 // ══════════════════════════════════════════════════════════════
+
+/// 将 AST Stmt 列表转换为 IR Stmt 列表，展开 LetTuple
+fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
+    let mut result = Vec::new();
+    for s in ast_stmts {
+        if let AstStmt::LetTuple { names, ty, value } = s {
+            let ir_value = convert_expr(value, ctx);
+            let val_ty = ir_value.ty.clone();
+            let tmp_name = format!("__destruct_{}", names.join("_"));
+            result.push(Stmt::Let {
+                name: tmp_name.clone(),
+                ty: val_ty.clone(),
+                value: ir_value,
+                is_mut: false,
+            });
+            for (i, name) in names.iter().enumerate() {
+                if name == "_" { continue; }
+                let field_expr = Expr::new(
+                    ExprKind::FieldAccess {
+                        base: Box::new(Expr::new(
+                            ExprKind::Var(tmp_name.clone()),
+                            val_ty.clone(),
+                            Span::unknown(),
+                        )),
+                        field: format!("{}", i),
+                    },
+                    IrType::Any,
+                    Span::unknown(),
+                );
+                result.push(Stmt::Let {
+                    name: name.clone(),
+                    ty: ty.as_ref().map(|t| from_ast_type(t)).unwrap_or(IrType::Any),
+                    value: field_expr,
+                    is_mut: false,
+                });
+            }
+        } else {
+            result.push(convert_stmt(s, ctx));
+        }
+    }
+    result
+}
 
 fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
     match ast_stmt {
@@ -1357,6 +1411,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }
         },
 
+        AstStmt::LetTuple { .. } => {
+            // LetTuple 在 convert_stmts 中展开，不应到达此处
+            Stmt::Pass
+        }
+
         AstStmt::Suite { name: _, setup, teardown, tests } => {
             // 将 setup 和 teardown 内联到每个 test 中
             let mut ir_tests = Vec::new();
@@ -1377,7 +1436,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 }
             }
             Stmt::Block {
-                stmts: ir_tests.iter().map(|s| convert_stmt(s, ctx)).collect(),
+                stmts: convert_stmts(&ir_tests, ctx),
             }
         },
     }
@@ -1409,7 +1468,15 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                 .unwrap_or_else(|| infer_expr_type(value, &block_ctx));
             block_ctx.add_var(name, ir_ty);
         }
-        ir_stmts.push(convert_stmt(s, &block_ctx));
+        if let AstStmt::LetTuple { names, ty, .. } = s {
+            let ir_ty = ty.as_ref().map(|t| from_ast_type(t)).unwrap_or(IrType::Any);
+            for name in names {
+                if name != "_" {
+                    block_ctx.add_var(name, ir_ty.clone());
+                }
+            }
+        }
+        ir_stmts.extend(convert_stmts(std::slice::from_ref(s), &block_ctx));
     }
     
     // 后处理：递归收集所有被赋值的变量名，标记对应首次 let 为 mut

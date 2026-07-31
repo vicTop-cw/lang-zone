@@ -282,6 +282,19 @@ impl CodeGenStmtExt for CodeGen {
                 self.local_type_aliases.borrow_mut().push((name.clone(), ty.to_rust_type_string()));
                 String::new()  // hoisted to module level, no inline output
             }
+
+            Stmt::LetTuple { names, ty: _, value } => {
+                // 解构绑定 → 临时变量 + 逐个字段提取
+                let val_s = self.gen_expr(value);
+                let tmp_name = format!("__lz_t{}", names.join("_"));
+                let mut out = format!("{}let {} = {};\n", pad, tmp_name, val_s);
+                for (i, name) in names.iter().enumerate() {
+                    if *name != "_" {
+                        out.push_str(&format!("{}let {} = {}.{};\n", pad, name, tmp_name, i));
+                    }
+                }
+                out
+            }
         }
     }
 
