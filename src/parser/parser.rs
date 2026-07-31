@@ -78,6 +78,7 @@ impl Parser {
         let mut consts = Vec::new();
         let mut type_aliases = Vec::new();
         let mut tests = Vec::new();
+        let mut top_level_builds = Vec::new();
         let mut module_name = None;
 
         // 词法错误（构建块符号留白违规等）在解析阶段拒绝
@@ -334,6 +335,14 @@ impl Parser {
                                     }
                                     // 复合赋值在顶层忽略（应放在函数中）
                                 }
+                                Stmt::Expr(Expr::BuildBlock { kind: _, lhs, body }) => {
+                                    // 顶层构建块：Var 类型的 =: 构建块，保存用于 codegen
+                                    let name = match &*lhs {
+                                        Expr::Ident(n) => n.clone(),
+                                        _ => format!("__build_{}", top_level_builds.len()),
+                                    };
+                                    top_level_builds.push((name, body));
+                                }
                                 _ => {}
                             }
                         }
@@ -345,7 +354,7 @@ impl Parser {
             self.skip_newlines();
         }
 
-        Ok(Module { name: module_name, imports, functions, structs, traits, impls, consts, type_aliases, tests })
+        Ok(Module { name: module_name, imports, functions, structs, traits, impls, consts, type_aliases, tests, top_level_builds })
     }
 
     fn parse_decorator(&mut self) -> Result<Decorator, String> {
@@ -717,12 +726,7 @@ impl Parser {
                 Token::Ident(n) => n,
                 t => return Err(format!("Expected type param in where, got {:?}", t)),
             };
-            // 支持 <: 或 : 作为约束分隔符
-            if self.check(&Token::LtColon) {
-                self.advance();
-            } else {
-                self.expect(Token::Colon)?;
-            }
+            self.expect(Token::Colon)?;
 
             let mut trait_bounds = Vec::new();
             loop {

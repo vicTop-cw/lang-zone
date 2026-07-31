@@ -153,12 +153,12 @@ struct UserData =
 // ------ 11. 修饰符约束 ------
 
 duck PublicReader =
-    pub .value: int
+    .value: int
     def read(ref self) -> int
 
 struct Counter =
-    pub value: int
-    count: int                                // 私有字段
+    .value: int
+    ._count: int                             // 私有字段（._ 前缀）
     def read(ref self) -> int = self.value    // ✅ &self
 
 // ------ 12. 链式推断 ------

@@ -16,7 +16,7 @@ magic 块有两种等价书写形式：方法定义式（推荐）和声明式�
 // 完整语法（方法定义式）
 magic map<T, R> =
     def __map__(self, f: fn(T) -> R) -> Iterable<R>
-        where Self <: Iterable<T>
+        where Self : Iterable<T>
         = ...                              // 抽象，struct 必须提供实现
 ```
 
@@ -98,7 +98,7 @@ magic 块的命名直接决定了自动生成产物的名称：
 ```lz
 magic map<T, R> =
     def __map__(self, f: fn(T) -> R) -> Iterable<R>
-        where Self <: Iterable<T>
+        where Self : Iterable<T>
         = ...
 ```
 
@@ -142,7 +142,7 @@ def main() =
 // ✓ 正确：方法定义式
 magic map<T, R> =
     def __map__(self, f: fn(T) -> R) -> Iterable<R>
-        where Self <: Iterable<T>
+        where Self : Iterable<T>
         = ...
 
 // ✓ 正确：声明式配置
@@ -168,7 +168,7 @@ magic __map__:      // 至少需要 trait 或 method 之一（虽然有默认值
 1. 魔法方法名必须以 `__` 开头和结尾
 2. magic 块名 = 全局函数名，需与方法语义一致
 3. 声明式和方法定义式不可混用在同一个 magic 块内
-4. `where Self <: Trait` 约束可写于方法签名之后（多约束可逐行列出）
+4. `where Self : Trait` 约束可写于方法签名之后（多约束可逐行列出）
 
 ---
 

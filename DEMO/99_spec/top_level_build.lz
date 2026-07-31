@@ -1,7 +1,9 @@
-// 构建块（目前只允许出现在函数体内）
+// ✅ 已实现 — 顶层构建块 =:
+// 出处：SYNTAX/11-构建块.md
+config =:
+    host = "localhost"
+    port = 8080
+    (host, port)
+
 def main() =
-    config =:
-        host = "localhost"
-        port = 8080
-        (host, port)
     print(config)

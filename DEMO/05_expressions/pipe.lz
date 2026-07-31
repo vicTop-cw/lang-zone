@@ -1,6 +1,5 @@
 // ================================================================
-// LZ Expressions — Pipe |> (basic, chained, collection pipeline)
-// Currently uses function call equivalents (pipe parser WIP)
+// LZ Expressions — Pipe |>
 // ================================================================
 
 def double(x: int) -> int = x * 2
@@ -8,24 +7,12 @@ def add_one(x: int) -> int = x + 1
 
 def main() =
     // data |> f  ===  f(data)
-    // Basic pipe equivalence
-    let r1 = double(5)
+    let r1 = 5 |> double
     print(r1)
 
-    // Chained pipe equivalence
-    let r2 = add_one(double(5))
+    // Chain: data |> f |> g  ===  g(f(data))
+    let r2 = 5 |> double |> add_one
     print(r2)
-
-    // Collection pipeline
-    let data = [1, 2, 3, 4, 5]
-    let doubled = []
-    for x in data:
-        doubled.push(x * 2)
-    let filtered = []
-    for x in doubled:
-        if x > 5:
-            filtered.push(x)
-    print(filtered)
 
     // Lambda pipe equivalence
     let r3 = |x| x * x

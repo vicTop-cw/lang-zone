@@ -177,6 +177,7 @@ impl ProjectCompiler {
             consts: vec![],
             type_aliases: vec![],
             tests: vec![],
+            top_level_builds: vec![],
         };
 
         for unit in &self.units {

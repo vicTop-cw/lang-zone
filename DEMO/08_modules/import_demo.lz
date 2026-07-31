@@ -13,7 +13,7 @@ import std.collections.HashMap as Map
 from std.io import print, read
 from std.collections import List, Dict
 
-// --- 4. Import all public items ---
+// --- 4. Import all exported items (via __public__ / __all__) ---
 from std.io import *
 
 // --- 5. Relative imports ---

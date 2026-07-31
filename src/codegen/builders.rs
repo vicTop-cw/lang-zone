@@ -58,8 +58,10 @@ impl CodeGenBuildersExt for CodeGen {
             }
             BuildKind::Gen => {
                 // 生成器构建块(*:)：进入 in_gen 上下文，yield 逐步产出类型擦除的参数包(__Pack) 推入 __bb；
-                // 闭包正常结束以 IterStopException 收尾（停止信号）。结果惰性迭代器，对每个参数包调用 callee。
+                // 闭包正常结束以 IterStopException 收尾（停止信号）。
+                // 若无 callee（独立 *:），返回原始 __Pack 迭代器；否则对每包调用 callee 解包。
                 let callee = self.callee_name(lhs);
+                let has_callee = !callee.is_empty();
                 let entries = self.callee_entries(&callee);
                 let params: Vec<String> = entries.iter().map(|(n, _)| n.clone()).collect();
                 let types: Vec<String> = entries.iter().map(|(_, t)| t.clone()).collect();
@@ -71,11 +73,16 @@ impl CodeGenBuildersExt for CodeGen {
                 self.in_gen.set(prev);
                 self.pack_types.replace(saved_types);
                 self.pack_names.replace(saved_names);
-                let lhs_s = self.callee_prefix(lhs);
-                let unpack = self.gen_unpack_call("__p", &lhs_s, &params);
+                let tail = if has_callee {
+                    let lhs_s = self.callee_prefix(lhs);
+                    let unpack = self.gen_unpack_call("__p", &lhs_s, &params);
+                    format!(".map(move |__p| {{ {} }})", unpack)
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{{ let mut __bb: Vec<__Pack> = Vec::new();\n{}    (|| unsafe {{\n{}\n{}        IterStopException\n{}    }})();\n{}    __bb.into_iter().map(move |__p| {{ {} }})\n{}    }}",
-                    pad, body_s, pad, pad, pad, unpack, pad
+                    "{{ let mut __bb: Vec<__Pack> = Vec::new();\n{}    (|| unsafe {{\n{}\n{}        IterStopException\n{}    }})();\n{}    __bb.into_iter(){}\n{}    }}",
+                    pad, body_s, pad, pad, pad, tail, pad
                 )
             }
             BuildKind::Index => {

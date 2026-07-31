@@ -48,6 +48,7 @@ pub struct CodeGen {
     pub(super) magic_engine: MagicEngine,            // 魔法方法映射引擎
     pub(super) current_fn_name: RefCell<Option<String>>, // 当前正在生成的函数名（用于嵌套 def）
     pub(super) nested_fns: RefCell<Vec<Function>>,   // 从函数体提升的嵌套函数
+    pub(super) top_level_builds: Vec<(String, Vec<Stmt>)>,  // 顶层构建块 (name, body)
 }
 
 impl CodeGen {
@@ -103,6 +104,7 @@ impl CodeGen {
             magic_engine: MagicEngine::new(),
             current_fn_name: RefCell::new(None),
             nested_fns: RefCell::new(Vec::new()),
+            top_level_builds: module.top_level_builds.clone(),
         };
         // 收集函数/方法参数（名 + Rust 类型），供构建块解包（位置 *args / 命名 **kwargs）使用
         for f in &module.functions {

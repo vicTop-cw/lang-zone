@@ -101,6 +101,21 @@ impl CodeGenFuncExt for CodeGen {
             }
         }
         
+        // 顶层构建块：在 main() 函数开头注入初始化代码
+        if f.name == "main" && !self.top_level_builds.is_empty() {
+            let mut init_lines = String::new();
+            for (name, build_body) in &self.top_level_builds {
+                let mut build_locals = HashSet::new();
+                let build_s = self.gen_block_return(build_body, 2, &mut build_locals);
+                let build_s = build_s.trim_end();
+                init_lines.push_str(&format!(
+                    "    let {} = (|| unsafe {{\n{}\n    }})();\n",
+                    name, build_s
+                ));
+            }
+            body = format!("{}    // Top-level build blocks\n{}", init_lines, body);
+        }
+        
         // @parallel：替换迭代器为并行版本
         let body = if has_decorator(f, "parallel") {
             apply_parallel_transforms(&body)

@@ -1,4 +1,4 @@
 macro m() = 1
 template t!() = 1
 comptime x = 1
-def f(x) where x <: Clone = x
+def f(x) where x : Clone = x

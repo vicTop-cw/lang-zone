@@ -509,18 +509,20 @@ duck LowLevel =
 
 #### 8.3.1 字段可见性约束
 
+LZ 字段可见性由字段名前缀表达：`.name` 即公开字段，`._name` 即私有字段。duck 约束中**不再使用 `pub` 关键字**——`.field` 本身就表示要求目标类型存在该公开字段。
+
 ```lz
 duck PublicFields =
-    pub .name: str                 // 要求 name 字段为公开（pub）
-    pub .version: int
+    .name: str                    // .name 即公开字段，要求目标有公开 name
+    .version: int
 
 duck InternalState =
-    .counter: int                  // 不指定 pub → 只要存在即可（不限制可见性）
+    .counter: int                 // 只要存在该字段即可
 ```
 
 编译期规则：
-- `pub .x: T`：要求类型必须有 `pub x: T`（Rust 侧对应 `pub x: T`）
-- `.x: T`：只要类型有 `x: T` 字段（不限可见性）
+- `.x: T`：要求目标类型有**公开**字段 `x: T`（`.x` 即公开）
+- `._x: T`：要求目标类型有**私有**字段 `_x: T`（`._x` 即私有）
 
 #### 8.3.2 方法 self 修饰符匹配
 
@@ -542,7 +544,8 @@ duck RefMethods =
 
 | 修饰符 | duck 中声明 | 编译期校验规则 |
 |--------|------------|--------------|
-| `pub` | `pub .field: T` | 目标字段必须 `pub`，否则报错 |
+| `.`（公开） | `.field: T` | 目标必须有公开字段 `field`，否则报错 |
+| `._`（私有） | `._field: T` | 目标必须有私有字段 `_field`，否则报错 |
 | `ref` | `def foo(ref self)` | 目标方法 self 必须为 `&self` |
 | `mut` | `def foo(mut self)` | 目标方法 self 必须为 `&mut self` |
 | `owned` | `def foo(owned self)` | 目标方法 self 必须为 `self`（move） |
@@ -610,7 +613,7 @@ duck CRUDService =
 阶段 1：定义期（Parse duck 块时）
 ├── 解析方法签名（精确/约束/正则）
 ├── 解析参数约束（位置数/命名/类型类别）
-├── 解析修饰符规则（pub/ref/mut/comptime）
+├── 解析字段可见性（`.` 公开 / `._` 私有）与修饰符（ref/mut/comptime）
 ├── 构建约束表（ConstraintTable）
 └── 注意：此时不报错，duck 块不绑定任何具体类型
 
@@ -620,7 +623,7 @@ duck CRUDService =
 │   ├── 精确匹配 → 方法名 + 签名精确相等
 │   ├── 约束匹配 → 方法名 + 返回类型满足约束
 │   ├── 正则匹配 → 方法名正则 + 参数签名 + 数量约束
-│   └── 修饰符匹配 → pub/ref/mut/comptime 校验
+│   └── 修饰符匹配 → 字段可见性（`.`/`._`）与 ref/mut/comptime 校验
 ├── 链式推断 → 跨方法类型跟踪
 ├── 收集所有错误（非短路，全部上报）
 └── 全部通过 → monomorphization 生成代码
@@ -721,7 +724,7 @@ let strs = transform_list(nums)
 | `DC003` | 命名参数缺失 | `require(name, version)` 中某个参数未提供 |
 | `DC004` | 类型类别不匹配 | `StackType` 参数传入了 `RefType` 类型 |
 | `DC005` | self 修饰符不匹配 | `ref self` 要求 `&self` 但实际为 `self` |
-| `DC006` | 字段可见性不匹配 | `pub .name` 但实际字段不是 pub |
+| `DC006` | 字段可见性不匹配 | 约束要求 `.name`（公开）但目标字段不可见（私有或不存在） |
 | `DC007` | 正则模式不匹配 | 所有方法名都不匹配 `/pattern/` |
 | `DC008` | 数量约束违反 | `at_least(N)`/`exact(N)` 不满足 |
 | `DC009` | 关联类型缺失 | `type Item` 但实际类型没有 |

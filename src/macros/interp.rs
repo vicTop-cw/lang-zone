@@ -524,7 +524,7 @@ fn token_matches_kind(token: &Token, kind: &str) -> bool {
         "operator" => matches!(token,
             Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::Percent
             | Token::StarStar | Token::Eq | Token::EqEq | Token::NotEq | Token::Lt | Token::Gt
-            | Token::Le | Token::Ge | Token::LtColon | Token::PlusEq | Token::MinusEq
+            | Token::Le | Token::Ge | Token::PlusEq | Token::MinusEq
             | Token::StarEq | Token::SlashEq | Token::PercentEq | Token::Amp | Token::Pipe_
             | Token::Caret | Token::CaretOp | Token::CaretInfix | Token::Shl | Token::Shr
             | Token::AmpAmp | Token::PipePipe | Token::Arrow | Token::FatArrow

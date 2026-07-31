@@ -16,6 +16,7 @@ pub struct Module {
     pub consts: Vec<ConstDef>,
     pub type_aliases: Vec<TypeAliasDef>,
     pub tests: Vec<Stmt>,
+    pub top_level_builds: Vec<(String, Vec<Stmt>)>,  // 顶层构建块 (name, body)
 }
 
 #[derive(Debug, Clone)]

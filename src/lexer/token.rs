@@ -57,7 +57,6 @@ pub enum Token {
     EqEq,          // ==
     NotEq,         // !=
     Lt, Gt, Le, Ge,
-    LtColon,       // <: 约束符号
 
     // ── 算术 ──
     Plus, Minus, Star, Slash, Percent, StarStar, // + - * / % **
@@ -606,10 +605,7 @@ impl Lexer {
                 // 比较/约束
                 '<' => {
                     self.advance();
-                    if self.peek() == Some(':') {
-                        self.advance();
-                        tokens.push(Token::LtColon);
-                    } else if self.peek() == Some('<') {
+                    if self.peek() == Some('<') {
                         self.advance();
                         if self.peek() == Some('=') {
                             self.advance();

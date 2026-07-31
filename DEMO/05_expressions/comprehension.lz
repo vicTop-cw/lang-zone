@@ -1,7 +1,9 @@
 // ================================================================
-// LZ Expressions — Comprehensions (list)
+// LZ Expressions — Comprehensions (list, dict, set)
 // ================================================================
 
 def main() =
     let squares = [x * x for x in 1..10]
+    let evens = [x for x in 1..10 if x % 2 == 0]
     print(squares)
+    print(evens)

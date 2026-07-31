@@ -1,6 +1,6 @@
 # Issue Tracker
 
-**2026-07-31 自动化测试更新**: 全量回归测试通过，4 个 IR codegen issue 归档。**0 open issues**。
+**2026-07-31 11:12 自动化更新**: 全部 415 项测试通过（292 lib + 114 compile_demos + 8 ir + 1 reject）。**0 open issues**。P0/P1 缺失特性已完成。P3 LtColon 死代码已清理。
 
 ## 设计决策 / 重大变更 (Decisions)
 
@@ -10,9 +10,9 @@
 
 ## Open
 
-_无_
+_（无）_
 
-## Fixed (20 total)
+## Fixed (21 total)
 
 | 文件 | 标题 | 修复摘要 |
 |------|------|----------|
@@ -22,6 +22,7 @@ _无_
 | [fixed/ir-codegen-tail-return.md](fixed/ir-codegen-tail-return.md) | IR codegen: 尾表达式隐式返回 ✅ | 函数体尾表达式 → return 语句 |
 | [fixed/ir-builder-gaps.md](fixed/ir-builder-gaps.md) | IR builder 缺口 ✅ | if/else/struct/guard/raise 等，6/6 单测 |
 | [fixed/parser-new-syntax-regression.md](fixed/parser-new-syntax-regression.md) | 37 parse 失败 ✅ | Dict/Set推导、for/while守卫+else、type别名等 |
+| [cleanup-ltcolon-deadcode.md](cleanup-ltcolon-deadcode.md) | 清理 LtColon 死代码 ✅ | token.rs/lexer.rs/parser.rs/interp.rs/constraint.rs 共 5 处删除 |
 | [fixed/parser-func-def.md](fixed/parser-func-def.md) | def 多形态 ✅ | 5/5 |
 | [fixed/parser-struct-enum-match.md](fixed/parser-struct-enum-match.md) | struct/enum/trait/match ✅ | 9/9 |
 | [fixed/parser-import-path.md](fixed/parser-import-path.md) | import 路径 ✅ | 2/2 |

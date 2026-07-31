@@ -14,7 +14,7 @@ struct Box<T> =
 // ============================================
 // Test 3: Generic function with where clause
 // ============================================
-def max<T>(a: T, b: T) -> T where T <: Ord =
+def max<T>(a: T, b: T) -> T where T : Ord =
     if a > b:
         a
     else:

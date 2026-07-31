@@ -28,7 +28,8 @@
 - `SYNTAX/01b-duck关系约束.md`：§2.0 速记、§3.2 运算符表与关键区别说明、§3.3 协变/逆变声明、§4.3 子类型关系检查→结构相容性检查、§5.4 协变/逆变容器、§6 对比表——全面移除 `<:` / `>:` 并改为「自动推断」叙述。
 - `DEMO/99_spec/subtype_bounds.lz`：**删除**（整文件即围绕 `<:` / `>: `，已无意义）。
 - `DEMO/99_spec/duck_demo.lz`：确认无 `<:` / `>:`（仅 `01b` 文档含此符号），无需改动。
-- `SYNTAX/01-类型系统.md` 等其余文档：经核查未使用 `<:` / `>: `，无需改动。
+- `SYNTAX/03c-检查站.md`、`06f-magic用法.md`、`06g-魔法综合.md`：原多处使用 `where Self <: X` / `where T <: X`（魔法 Self 约束语法），按决策统一改为 `where Self: X` / `where T: X`（与 `:` 约束一致）。
+- `SYNTAX/01-类型系统.md` 等其余文档：经核查未使用 `<:` / `>: `（仅 `01b` 含「不使用 `<:` / `>: `」的元说明），无需改动。
 
 ## 保留
 
@@ -37,11 +38,11 @@
 
 ## 工程侧后续（非文档侧，交工程实现）
 
-- `src/lexer/token.rs` 的 `LtColon` token，及 `lexer.rs` / `parser.rs:697` / `macros/interp.rs` 中对它的处理，已成为**死代码**，可在后续清理（不紧急）。
+- `src/lexer/token.rs` 的 `LtColon` token（枚举 L60）及其 `<` 词法分支（L609）、`src/lexer/lexer.rs` 的 `<` 词法分支（L481）、`src/parser/parser.rs` 的 `parse_where_clause`（L721）、`src/macros/interp.rs` 的 operator 匹配臂（L527）——这 5 处已成为**死代码**，清理清单见 [`cleanup-ltcolon-deadcode.md`](cleanup-ltcolon-deadcode.md)（Open / P3）。
 - `src/hints/constraint.rs` 注释「子类型约束（Subtype）留待 P1」：**取消**该 P1 计划（符号已移除，无需实现）。
 - 若未来需要「有界泛型」或「显式型变覆盖」，再重新设计符号；当前保持设计开放但不发符号。
 
 ## 验证
 
 - `cargo test --test compile_demos` 仍 1 passed（99_spec 被跳过，绿 demo 套件未受影响）。
-- `01b` 全文 grep 确认：除「我们不使用 `<:` / `>: `」的元说明外，无任何作为运算符的 `<:` / `>: ` 残留。
+- 全文 grep 确认：`01b` / `03c` / `06f` / `06g` 中除「不使用 `<:` / `>: `」的元说明外，无任何作为运算符的 `<:` / `>: ` 残留（`03c`/`06f`/`06g` 原魔法 Self 约束 `where Self <: X` 已统一改为 `where Self: X`）。
