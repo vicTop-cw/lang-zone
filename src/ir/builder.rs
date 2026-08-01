@@ -804,6 +804,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     ty: IrType::Any,
                     is_mut: false,
                     default: None,
+                    variadic: false,
                 }).collect(),
                 body: Box::new(convert_expr(body, ctx)),
             }
@@ -935,7 +936,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 callee: Box::new(Expr::new(ExprKind::Var("comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None }],
+                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
                         body: Box::new(out_expr),
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
@@ -952,7 +953,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 callee: Box::new(Expr::new(ExprKind::Var("dict_comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None }],
+                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
                         body: Box::new(Expr::new(
                             ExprKind::TupleLit(vec![key_expr, val_expr]),
                             IrType::Any, Span::unknown(),
@@ -971,7 +972,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 callee: Box::new(Expr::new(ExprKind::Var("set_comp!".into()), IrType::Any, Span::unknown())),
                 args: vec![
                     Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None }],
+                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
                         body: Box::new(elem_expr),
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
@@ -1550,11 +1551,20 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         func.generics.clone()
     };
 
-    let params: Vec<Param> = func.params.iter().enumerate().map(|(_i, p)| Param {
-        name: p.name.clone(),
-        ty: if is_math { IrType::Generic("T".into()) } else { from_ast_type_with_generics(&p.ty, &generics) },
-        is_mut: p.is_mut,
-        default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
+    let params: Vec<Param> = func.params.iter().enumerate().map(|(_i, p)| {
+        // 检测 variadic: ast::Function.variadic 表示参数收集模式
+        let is_variadic = match &func.variadic {
+            ast::VariadicMode::Single { dotdot_at } => _i >= *dotdot_at,
+            ast::VariadicMode::Double { first_at, .. } => _i >= *first_at,
+            _ => false,
+        };
+        Param {
+            name: p.name.clone(),
+            ty: if is_math { IrType::Generic("T".into()) } else { from_ast_type_with_generics(&p.ty, &generics) },
+            is_mut: p.is_mut,
+            default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
+            variadic: is_variadic,
+        }
     }).collect();
 
     // 构建函数体上下文

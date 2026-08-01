@@ -34,6 +34,8 @@ pub struct CodeGen {
     mutated_consts: std::collections::HashSet<String>,
     /// enum variant → field types 映射: (enum_name, variant_name) → Vec<IrType>
     enum_variant_fields: HashMap<(String, String), Vec<IrType>>,
+    /// 函数名 → variadic 参数起始索引（该索引及之后的参数收集为 &[T]）
+    fn_variadic: HashMap<String, usize>,
     buf: String,
 }
 
@@ -62,6 +64,7 @@ impl CodeGen {
             fn_param_info: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
             enum_variant_fields: HashMap::new(),
+            fn_variadic: HashMap::new(),
             buf: String::new(),
         }
     }
@@ -105,6 +108,10 @@ impl CodeGen {
                 let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
                 if default_count > 0 {
                     self.fn_param_info.insert(f.name.clone(), (f.params.len(), default_count));
+                }
+                // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
+                if let Some((idx, _)) = f.params.iter().enumerate().find(|(_, p)| p.variadic) {
+                    self.fn_variadic.insert(f.name.clone(), idx);
                 }
                 // 方法定义语法 fn Type.method() → Type 是 impl-only 类型名
                 if let Some((ty_name, _)) = f.name.split_once('.') {
@@ -365,12 +372,17 @@ impl CodeGen {
                 // self 参数：借用而非移动（LZ 语义为引用）
                 if p.is_mut { "&mut self" } else { "&self" }.into()
             } else {
-                if p.default.is_some() {
-                    format!("{}: Option<{}>", p.name, self.rust_type(&p.ty))
-                } else if p.is_mut {
-                    format!("mut {}: {}", p.name, self.rust_type(&p.ty))
+                let ty_str = if p.variadic {
+                    format!("&[{}]", self.rust_type(&p.ty))
+                } else if p.default.is_some() {
+                    format!("Option<{}>", self.rust_type(&p.ty))
                 } else {
-                    format!("{}: {}", p.name, self.rust_type(&p.ty))
+                    self.rust_type(&p.ty).to_string()
+                };
+                if p.is_mut {
+                    format!("mut {}: {}", p.name, ty_str)
+                } else {
+                    format!("{}: {}", p.name, ty_str)
                 }
             }
         }).collect();
@@ -1110,6 +1122,21 @@ impl CodeGen {
                     // Function call with named args: func(a, b~) → func(a, b)
                     let flat_args: Vec<String> = args.iter().map(|a| gen_kwarg_value(a, self)).collect();
                     format!("{}{}({})", callee_s, turbofish, flat_args.join(", "))
+                } else if let Some(&variadic_idx) = self.fn_variadic.get(&callee_s) {
+                    // Variadic 函数调用: 将 variadic_idx 及之后的实参打包为 &[...]
+                    let normal_args = &args_s[..variadic_idx.min(args_s.len())];
+                    let variadic_args = if args_s.len() > variadic_idx {
+                        args_s[variadic_idx..].join(", ")
+                    } else {
+                        String::new()
+                    };
+                    let mut all_args: Vec<String> = normal_args.to_vec();
+                    if args_s.len() >= variadic_idx {
+                        all_args.push(format!("&[{}]", variadic_args));
+                    } else {
+                        all_args.push("&[]".to_string());
+                    }
+                    format!("{}{}({})", callee_s, turbofish, all_args.join(", "))
                 } else {
                     format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
                 }
@@ -1403,6 +1430,20 @@ impl CodeGen {
                 }
             }
             ExprKind::Cast { expr, target } => {
+                // Special cases: as bool → != 0, as str → format/to_string
+                if *target == IrType::Bool {
+                    return format!("({} != 0)", self.gen_expr(expr));
+                }
+                if *target == IrType::Str {
+                    return format!("format!(\"{{}}\", {})", self.gen_expr(expr));
+                }
+                // int → f64: implicit widening
+                // Non-primitive casts: as String → .to_string()
+                if let IrType::Named { path, .. } = target {
+                    if path == "String" {
+                        return format!("({}).to_string()", self.gen_expr(expr));
+                    }
+                }
                 format!("{} as {}", self.gen_expr(expr), self.rust_type(target))
             }
             ExprKind::GenExpr { yield_of } => {
@@ -1886,8 +1927,8 @@ mod tests {
             name: "add".into(),
             generics: vec![],
             params: vec![
-                Param { name: "a".into(), ty: IrType::Int, is_mut: false, default: None },
-                Param { name: "b".into(), ty: IrType::Int, is_mut: false, default: None },
+                Param { name: "a".into(), ty: IrType::Int, is_mut: false, default: None, variadic: false },
+                Param { name: "b".into(), ty: IrType::Int, is_mut: false, default: None, variadic: false },
             ],
             ret_ty: IrType::Int,
             body: Block {

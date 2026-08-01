@@ -2,8 +2,8 @@
   "total": 129,
   "lz_pass": 129,
   "lz_fail": 0,
-  "rustc_pass": 58,
-  "rustc_fail": 71,
+  "rustc_pass": 57,
+  "rustc_fail": 72,
   "pass_files": [
     "01_basics\\comments.lz",
     "01_basics\\literals_more.lz",
@@ -61,8 +61,7 @@
     "export_demo.lz",
     "memoize_demo.lz",
     "pass_demo.lz",
-    "struct_singleline.lz",
-    "variadic_dotdot.lz"
+    "struct_singleline.lz"
   ],
   "errors": {
     "E0573": [
@@ -133,7 +132,8 @@
       "combo-syntax\\combo_ternary_walrus.lz",
       "combo-syntax\\combo_try_raise_guard.lz",
       "combo-syntax\\combo_try_raise_guard.lz",
-      "overload_test.lz"
+      "overload_test.lz",
+      "variadic_dotdot.lz"
     ],
     "E0425": [
       "01_basics\\keywords.lz",
@@ -252,12 +252,6 @@
       "02_types\\primitives.lz",
       "99_spec\\ir-edge-empty-collections.lz",
       "99_spec\\ir-edge-empty-collections.lz"
-    ],
-    "E0605": [
-      "02_types\\type_conversion.lz"
-    ],
-    "E0054": [
-      "02_types\\type_conversion.lz"
     ],
     "E0608": [
       "04_functions\\checker.lz",
@@ -509,12 +503,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:43:39",
+        "warning: unnecessary parentheses around assigned value",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:14:19",
         "|",
-        "43 |     let greet: fn(String) -> String = |name: i64| { \"Hello, {name}\".to_string() };",
-        "|                --------------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected fn pointer, found closure",
-        "|                |"
+        "14 |     let b: bool = (1 != 0);",
+        "|                   ^      ^",
+        "|"
       ]
     },
     {
@@ -1311,6 +1305,19 @@
         "9 | pub fn add(a: i64, b: i64) -> i64 {",
         "| --------------------------------- previous definition of the value `add` here",
         "..."
+      ]
+    },
+    {
+      "file": "variadic_dotdot.lz",
+      "lz_ok": true,
+      "rustc_ok": false,
+      "rustc_errors": [
+        "error[E0308]: mismatched types",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\variadic_dotdot.rs:10:43",
+        "|",
+        "10 |     return greeting + &\", \".to_string() + &name;",
+        "|                                           ^^^^^ expected `&str`, found `&&[String]`",
+        "|"
       ]
     }
   ]

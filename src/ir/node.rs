@@ -159,6 +159,8 @@ pub struct Param {
     pub is_mut: bool,
     /// 默认值（可选）
     pub default: Option<Expr>,
+    /// 是否为 variadic 参数（..name: T → 在调用处收集剩余实参为切片）
+    pub variadic: bool,
 }
 
 // ── 字段 ──
