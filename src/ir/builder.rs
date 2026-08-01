@@ -2067,6 +2067,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         fn_ctx.struct_methods.insert(sn.clone(), ms.clone());
     }
     for (cn, ct) in &ctx.top_level_consts { fn_ctx.top_level_consts.insert(cn.clone(), ct.clone()); }
+    for (vn, en) in &ctx.enum_variants { fn_ctx.enum_variants.insert(vn.clone(), en.clone()); }
     for (name, ty) in &ctx.fn_returns { fn_ctx.fn_returns.insert(name.clone(), ty.clone()); }
     for (name, p) in &ctx.fn_params { fn_ctx.fn_params.insert(name.clone(), p.clone()); }
 
