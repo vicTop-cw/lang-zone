@@ -36,6 +36,8 @@ pub struct CodeGen {
     enum_variant_fields: HashMap<(String, String), Vec<IrType>>,
     /// 函数名 → variadic 参数起始索引（该索引及之后的参数收集为 &[T]）
     fn_variadic: HashMap<String, usize>,
+    /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
+    fn_param_types: HashMap<String, Vec<IrType>>,
     buf: String,
 }
 
@@ -65,6 +67,7 @@ impl CodeGen {
             mutated_consts: std::collections::HashSet::new(),
             enum_variant_fields: HashMap::new(),
             fn_variadic: HashMap::new(),
+            fn_param_types: HashMap::new(),
             buf: String::new(),
         }
     }
@@ -109,6 +112,8 @@ impl CodeGen {
                 if default_count > 0 {
                     self.fn_param_info.insert(f.name.clone(), (f.params.len(), default_count));
                 }
+                // 收集所有参数类型（用于隐式 variadic 检测）
+                self.fn_param_types.insert(f.name.clone(), f.params.iter().map(|p| p.ty.clone()).collect());
                 // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
                 if let Some((idx, _)) = f.params.iter().enumerate().find(|(_, p)| p.variadic) {
                     self.fn_variadic.insert(f.name.clone(), idx);
@@ -268,6 +273,11 @@ impl CodeGen {
             "Set" => "HashSet".into(),
             other => other.to_string(),
         }
+    }
+
+    fn is_collection_type(&self, ty: &IrType) -> bool {
+        matches!(ty, IrType::Named { path, .. }
+            if ["Vec","List","HashMap","HashSet","Dict","Set"].contains(&path.as_str()))
     }
 
     fn rust_type(&self, ty: &IrType) -> String {
@@ -1115,6 +1125,7 @@ impl CodeGen {
                         let iter_method = if let Some(iter_expr) = args.get(1) {
                             if matches!(&iter_expr.ty, IrType::Str) { ".chars()" } else { ".into_iter()" }
                         } else { ".into_iter()" };
+                        let lambda = strip_lambda_type(lambda);
                         return format!("({}){}.map({}).collect::<HashMap<_,_>>()", iter, iter_method, lambda);
                     }
                     return format!("HashMap::new()");
@@ -1125,6 +1136,7 @@ impl CodeGen {
                         let iter_method = if let Some(iter_expr) = args.get(1) {
                             if matches!(&iter_expr.ty, IrType::Str) { ".chars()" } else { ".into_iter()" }
                         } else { ".into_iter()" };
+                        let lambda = strip_lambda_type(lambda);
                         return format!("({}){}.map({}).collect::<HashSet<_>>()", iter, iter_method, lambda);
                     }
                     return format!("HashSet::new()");
@@ -1274,6 +1286,20 @@ impl CodeGen {
                         all_args.push("&[]".to_string());
                     }
                     format!("{}{}({})", callee_s, turbofish, all_args.join(", "))
+                } else if let Some(ptypes) = self.fn_param_types.get(&callee_s) {
+                    // 隐式 variadic: 单集合参数 + 实参数量不匹配 → auto-pack
+                    if ptypes.len() == 1 && args_s.len() != 1
+                        && self.is_collection_type(&ptypes[0])
+                    {
+                        let packed = if args_s.is_empty() {
+                            "vec![]".to_string()
+                        } else {
+                            format!("vec![{}]", args_s.join(", "))
+                        };
+                        format!("{}{}({})", callee_s, turbofish, packed)
+                    } else {
+                        format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
+                    }
                 } else {
                     format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
                 }
@@ -1499,10 +1525,9 @@ impl CodeGen {
                 )
             }
             ExprKind::Lambda { params, body } => {
-                let params: Vec<String> = params.iter().map(|p| {
-                    if p.ty == IrType::Any { format!("{}", p.name) }
-                    else { self.gen_param(p) }
-                }).collect();
+                let params: Vec<String> = params.iter().map(|p| self.gen_param(p)).collect();
+                // Use move for all closures - LZ doesn't have Rust borrow semantics
+                // Comprehension closures will get their :i64 stripped in the comprehension handler
                 format!("move |{}| {{ {} }}", params.join(", "), self.gen_expr(body))
             }
             ExprKind::StructCtor { name, fields } => {
@@ -1950,6 +1975,27 @@ fn gen_kwarg_value(arg: &Expr, cg: &CodeGen) -> String {
         }
     }
     cg.gen_expr(arg)
+}
+
+/// Strip `: Type` annotations from closure params (for comprehension closures)
+/// "move |x: i64| { ... }" → "move |x| { ... }"
+fn strip_lambda_type(lambda: &str) -> String {
+    // Find `|param: Type|` and replace with `|param|`
+    let mut result = lambda.to_string();
+    // Pattern: `|IDENT: TYPE|` (before `{`)
+    if let Some(pipe_idx) = result.find('|') {
+        let after_pipe = &result[pipe_idx + 1..];
+        if let Some(colon_idx) = after_pipe.find(':') {
+            if let Some(next_pipe) = after_pipe[colon_idx..].find('|') {
+                let type_end = colon_idx + next_pipe;
+                let param_name = after_pipe[..colon_idx].trim();
+                let before = &result[..pipe_idx + 1];
+                let after = &result[pipe_idx + 1 + type_end..];
+                result = format!("{}{}{}", before, param_name, after);
+            }
+        }
+    }
+    result
 }
 
 /// 将 _KwArg { name, value } 展开为 "field: value"
