@@ -2,8 +2,8 @@
   "total": 129,
   "lz_pass": 129,
   "lz_fail": 0,
-  "rustc_pass": 49,
-  "rustc_fail": 80,
+  "rustc_pass": 54,
+  "rustc_fail": 75,
   "pass_files": [
     "01_basics\\comments.lz",
     "01_basics\\literals_more.lz",
@@ -28,7 +28,9 @@
     "06_control_flow\\match.lz",
     "06_control_flow\\match_more.lz",
     "07_data_structures\\enum.lz",
+    "07_data_structures\\enum_more.lz",
     "07_data_structures\\module_magic.lz",
+    "07_data_structures\\struct.lz",
     "07_data_structures\\trait_impl.lz",
     "09_macros\\comptime_demo.lz",
     "13_operators\\compound_assign_more.lz",
@@ -49,6 +51,9 @@
     "99_spec\\loop_else.lz",
     "99_spec\\macro_real.lz",
     "99_spec\\match_guard.lz",
+    "99_spec\\tilde_named_arg_1.lz",
+    "99_spec\\tilde_named_arg_2.lz",
+    "99_spec\\tilde_named_arg_3.lz",
     "export_demo.lz",
     "memoize_demo.lz",
     "pass_demo.lz",
@@ -85,42 +90,8 @@
       "06_control_flow\\guard.lz",
       "06_control_flow\\with_defer.lz",
       "06_control_flow\\with_defer.lz",
-      "07_data_structures\\callable_objects.lz",
-      "07_data_structures\\callable_objects.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\struct.lz",
-      "07_data_structures\\struct.lz",
-      "07_data_structures\\struct.lz",
-      "07_data_structures\\struct.lz",
-      "07_data_structures\\struct_more.lz",
-      "07_data_structures\\struct_more.lz",
-      "07_data_structures\\struct_more.lz",
-      "07_data_structures\\struct_more.lz",
-      "07_data_structures\\struct_more.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
@@ -180,8 +151,6 @@
       "99_prelude\\prelude_demo.lz",
       "99_prelude\\prelude_demo.lz",
       "99_prelude\\prelude_demo.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
       "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
       "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
@@ -209,9 +178,7 @@
       "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_for_walrus.lz",
       "combo-syntax\\combo_for_walrus.lz",
-      "combo-syntax\\combo_generic_struct_method.lz",
       "combo-syntax\\combo_pipe_partial.lz",
-      "combo-syntax\\combo_struct_method_partial.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
@@ -235,11 +202,6 @@
       "01_basics\\keywords.lz",
       "01_basics\\keywords.lz",
       "01_basics\\keywords.lz",
-      "02_types\\containers.lz",
-      "02_types\\containers.lz",
-      "02_types\\containers.lz",
-      "02_types\\containers.lz",
-      "02_types\\containers.lz",
       "02_types\\type_aliases.lz",
       "02_types\\type_aliases.lz",
       "02_types\\type_aliases_more.lz",
@@ -252,14 +214,8 @@
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
       "06_control_flow\\with_defer.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
-      "07_data_structures\\enum_more.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
       "10_error_handling\\panic_raise_try.lz",
@@ -310,6 +266,7 @@
     ],
     "E0282": [
       "01_basics\\literals.lz",
+      "02_types\\containers.lz",
       "02_types\\primitives.lz",
       "99_spec\\ir-edge-empty-collections.lz",
       "99_spec\\ir-edge-empty-collections.lz"
@@ -336,6 +293,7 @@
       "04_functions\\generics.lz",
       "04_functions\\generics.lz",
       "04_functions\\generics.lz",
+      "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
       "99_prelude\\prelude_demo.lz",
@@ -403,6 +361,8 @@
     "E0277": [
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
       "99_prelude\\prelude_demo.lz",
       "99_prelude\\prelude_demo.lz",
       "99_spec\\index_build.lz",
@@ -445,7 +405,8 @@
     ],
     "E0507": [
       "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_struct.lz"
+      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
+      "combo-syntax\\combo_generic_struct_method.lz"
     ],
     "E0382": [
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
@@ -465,11 +426,6 @@
     "E0609": [
       "99_spec\\null_safe.lz",
       "99_spec\\null_safe.lz"
-    ],
-    "E0574": [
-      "99_spec\\tilde_named_arg_1.lz",
-      "99_spec\\tilde_named_arg_2.lz",
-      "99_spec\\tilde_named_arg_3.lz"
     ],
     "E0572": [
       "99_spec\\top_level_build.lz"
@@ -512,8 +468,8 @@
         "error[E0282]: type annotations needed for `Vec<_>`",
         "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\literals.rs:37:9",
         "|",
-        "37 |     let empty = vec![];",
-        "|         ^^^^^   ------ type must be known at this point",
+        "37 |     let empty = Vec::new();",
+        "|         ^^^^^   ---------- type must be known at this point",
         "|"
       ]
     },
@@ -522,11 +478,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:20:10",
+        "error[E0282]: type annotations needed for `HashMap<_, _>`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:23:9",
         "|",
-        "20 |     ages[\"charlie\".to_string()] = 35;",
-        "|          ^^^^^^^^^^^^^^^^^^^^^ expected `&_`, found `String`",
+        "23 |     let inferred_ages = std::collections::HashMap::<_, _>::new();",
+        "|         ^^^^^^^^^^^^^   ---------------------------------------- type must be known at this point",
         "|"
       ]
     },
@@ -698,24 +654,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `factor` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\callable_objects.rs:15:22",
+        "error[E0618]: expected function, found `Multiplier`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\callable_objects.rs:33:22",
         "|",
-        "15 |         return self::factor * x;",
-        "|                      ^^^^^^ not found in `self`"
-      ]
-    },
-    {
-      "file": "07_data_structures\\enum_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\enum_more.rs:22:18",
-        "|",
-        "22 |             eval(a) + eval(b)",
-        "|             ---- ^ expected `Expr`, found `Box<Expr>`",
-        "|             |"
+        "32 |     let doubler = Multiplier { factor: 2 };",
+        "|         ------- `doubler` has type `Multiplier`",
+        "33 |     println!(\"{:?}\", doubler(21));"
       ]
     },
     {
@@ -723,23 +667,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `x` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\magic_methods.rs:16:34",
+        "error[E0423]: expected value, found enum `Option`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\magic_methods.rs:90:8",
         "|",
-        "16 |         return Vector { x: self::x + other.x, y: self::y + other.y };",
-        "|                                  ^ not found in `self`"
-      ]
-    },
-    {
-      "file": "07_data_structures\\struct.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `width` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct.rs:21:22",
-        "|",
-        "21 |         return self::width * self::height;",
-        "|                      ^^^^^ not found in `self`"
+        "90 | return Option.Some(val);",
+        "|        ^^^^^^",
+        "|"
       ]
     },
     {
@@ -747,11 +680,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `count` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct_more.rs:15:28",
+        "error[E0596]: cannot borrow `c` as mutable, as it is not declared as mutable",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct_more.rs:35:9",
         "|",
-        "15 |         self.count = self::count + 1;",
-        "|                            ^^^^^ not found in `self`"
+        "35 |     let c = Counter { count: 0 };",
+        "|         ^ not mutable",
+        "36 |     println!(\"{:?}\", c.increment());"
       ]
     },
     {
@@ -974,11 +908,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `x` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.rs:16:22",
+        "error[E0507]: cannot move out of a shared reference",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.rs:27:40",
         "|",
-        "16 |         return self::x + self::y;",
-        "|                      ^ not found in `self`"
+        "27 |     for p in (pts).into_iter().filter(|&p| is_positive(p.x)) {",
+        "|                                        ^-",
+        "|                                         |"
       ]
     },
     {
@@ -1128,9 +1063,9 @@
         "error[E0282]: type annotations needed for `Vec<_>`",
         "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\ir-edge-empty-collections.rs:10:9",
         "|",
-        "10 |     let a = vec![];",
-        "|         ^",
-        "11 |     let b = vec![];"
+        "10 |     let a = Vec::new();",
+        "|         ^   ---------- type must be known at this point",
+        "|"
       ]
     },
     {
@@ -1231,43 +1166,6 @@
         "|",
         "7 | use std::sync::Arc;",
         "|                    ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\setup_teardown.rs`"
-      ]
-    },
-    {
-      "file": "99_spec\\tilde_named_arg_1.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0574]: expected struct, variant or union type, found function `name`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\tilde_named_arg_1.rs:16:22",
-        "|",
-        "16 |     println!(\"{:?}\", name { b, b: b });",
-        "|                      ^^^^ not a struct, variant or union type"
-      ]
-    },
-    {
-      "file": "99_spec\\tilde_named_arg_2.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0574]: expected struct, variant or union type, found function `name`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\tilde_named_arg_2.rs:16:22",
-        "|",
-        "16 |     println!(\"{:?}\", name { b: b, a: a });",
-        "|                      ^^^^ not a struct, variant or union type"
-      ]
-    },
-    {
-      "file": "99_spec\\tilde_named_arg_3.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error: expected identifier, found `1`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\tilde_named_arg_3.rs:15:29",
-        "|",
-        "15 |     println!(\"{:?}\", name { 1, b: b });",
-        "|                      ----   ^ expected identifier",
-        "|                      |"
       ]
     },
     {
@@ -1389,11 +1287,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `item` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_generic_struct_method.rs:21:34",
+        "error[E0507]: cannot move out of `self.item` which is behind a shared reference",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_generic_struct_method.rs:21:28",
         "|",
-        "21 |         return Maybe::Just(self::item);",
-        "|                                  ^^^^ not found in `self`"
+        "21 |         return Maybe::Just(self.item);",
+        "|                            ^^^^^^^^^ move occurs because `self.item` has type `T`, which does not implement the `Copy` trait",
+        "|"
       ]
     },
     {
@@ -1426,11 +1325,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find value `value` in module `self`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:16:26",
+        "error: in expressions, `_` can only be used on the left-hand side of an assignment",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:15:23",
         "|",
-        "16 |         return inc(self::value);",
-        "|                          ^^^^^ not found in `self`"
+        "15 |         let inc = add(_, 1);",
+        "|                       ^ `_` not allowed here"
       ]
     },
     {

@@ -794,6 +794,11 @@ impl CodeGen {
                         .unwrap_or_default();
                     self.emit_line(&format!("{} => {{", format!("{}{}", pat_s, guard_s)));
                     self.indent += 1;
+                    // 为递归枚举 Box 字段自动插入 let binding = *binding; 解引用
+                    let box_bindings = self.collect_box_pattern_bindings(&arm.pattern);
+                    for b in &box_bindings {
+                        self.emit_line(&format!("let {} = *{};", b, b));
+                    }
                     // Match arm body 不应生成 return（值应流向 match 表达式外层）
                     let saved = self.suppress_tail_return;
                     self.suppress_tail_return = true;
@@ -987,11 +992,11 @@ impl CodeGen {
                     let is_var_base = matches!(&base.kind, ExprKind::Var(_));
                     let sep = if is_var_base && (is_std_module || self.emitted_types.contains(&base_s) || self.impl_types.contains(&base_s)) { "::" } else { "." };
                     if sep == "::" {
-                        // 检查变体字段类型，为 Box 字段自动包裹 Box::new()
+                        // 检查变体字段类型，为递归字段自动包裹 Box::new()
                         let field_types = self.enum_variant_fields.get(&(base_s.clone(), field.clone()));
                         let wrapped_args: Vec<String> = args_s.iter().enumerate().map(|(i, a)| {
                             let needs_box = field_types.as_ref().map_or(false, |types| {
-                                types.get(i).map_or(false, |ty| is_box_type(ty))
+                                types.get(i).map_or(false, |ty| type_refers_to(ty, &base_s))
                             });
                             if needs_box { format!("Box::new({})", a) } else { a.clone() }
                         }).collect();
@@ -1089,16 +1094,13 @@ impl CodeGen {
                 // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant(val1, val2, ...)
                 // 生成位置参数构造（与 tuple variant 定义一致）
                 let is_enum_variant = self.emitted_types.contains(&recv) && is_kwarg_call(args);
-                eprintln!("DEBUG: is_enum_variant={} recv={} method={} emitted_contains={}",
-                    is_enum_variant, recv, method, self.emitted_types.contains(&recv));
                 if is_enum_variant {
                     let field_types = self.enum_variant_fields.get(&(recv.clone(), method.clone()));
-                    eprintln!("DEBUG: field_types for ({}, {}) = {:?}", recv, method, field_types);
                     let values: Vec<String> = args.iter().enumerate()
                         .map(|(i, a)| {
                             let val = gen_kwarg_value(a, self);
                             let needs_box = field_types.as_ref().map_or(false, |types| {
-                                types.get(i).map_or(false, |ty| is_box_type(ty))
+                                types.get(i).map_or(false, |ty| type_refers_to(ty, &recv))
                             });
                             if needs_box { format!("Box::new({})", val) } else { val }
                         })
@@ -1107,14 +1109,11 @@ impl CodeGen {
                 }
                 // Enum 类型调用变体: Status.Pending("x") → Status::Pending("x")
                 if self.emitted_types.contains(&recv) {
-                    eprintln!("DEBUG: non-kwarg enum ctor recv={} method={} field_types_at_this_point={:?}",
-                        recv, method, 
-                        self.enum_variant_fields.keys().filter(|(e,_)| e==&recv).collect::<Vec<_>>());
                     let field_types = self.enum_variant_fields.get(&(recv.clone(), method.clone()));
                     let wrapped_args: Vec<String> = args_s.iter().enumerate()
                         .map(|(i, a)| {
                             let needs_box = field_types.as_ref().map_or(false, |types| {
-                                types.get(i).map_or(false, |ty| is_box_type(ty))
+                                types.get(i).map_or(false, |ty| type_refers_to(ty, &recv))
                             });
                             if needs_box { format!("Box::new({})", a) } else { a.clone() }
                         })
@@ -1334,13 +1333,13 @@ impl CodeGen {
                 }
             }
             ExprKind::EnumCtor { enum_name, variant, args } => {
-                // 查找该变体的字段类型，为 Box 字段自动包裹 Box::new()
+                // 查找该变体的字段类型，为递归字段自动包裹 Box::new()
                 let field_types = self.enum_variant_fields.get(&(enum_name.clone(), variant.clone()));
                 let args_s: Vec<String> = args.iter().enumerate().map(|(i, a)| {
                     let expr_s = self.gen_expr(a);
                     // 检查该位置是否需要 Box::new() 包装
                     let needs_box = field_types.map_or(false, |types| {
-                        types.get(i).map_or(false, |ty| is_box_type(ty))
+                        types.get(i).map_or(false, |ty| type_refers_to(ty, enum_name))
                     });
                     if needs_box {
                         format!("Box::new({})", expr_s)
@@ -1514,24 +1513,49 @@ impl CodeGen {
                 format!("{} {{ {} }}", name, fields.join(", "))
             }
             Pattern::Enum { enum_name, variant, args } => {
-                // 查找该变体的字段类型，为 Box 字段添加 `box` 模式前缀
-                let field_types = self.enum_variant_fields.get(&(enum_name.clone(), variant.clone()));
+                // 递归字段在模式中不添加 box 关键字（box_patterns 尚未稳定）
+                // 由 gen_stmt(Match) 在臂体开头自动插入 let var = *var; 解引用
                 if args.is_empty() {
                     format!("{}::{}", enum_name, variant)
                 } else {
-                    let args: Vec<String> = args.iter().enumerate().map(|(i, a)| {
-                        let needs_box = field_types.map_or(false, |types| {
-                            types.get(i).map_or(false, |ty| is_box_type(ty))
-                        });
-                        if needs_box {
-                            format!("box {}", self.gen_pattern(a))
-                        } else {
-                            self.gen_pattern(a)
-                        }
-                    }).collect();
+                    let args: Vec<String> = args.iter().map(|a| self.gen_pattern(a)).collect();
                     format!("{}::{}({})", enum_name, variant, args.join(", "))
                 }
             }
+        }
+    }
+
+    /// 收集 Enum 模式中需要 Box 解引用的绑定名（用于插入 let name = *name;）
+    fn collect_box_pattern_bindings(&self, pat: &Pattern) -> Vec<String> {
+        let mut bindings = Vec::new();
+        if let Pattern::Enum { enum_name, variant, args } = pat {
+            if let Some(field_types) = self.enum_variant_fields.get(&(enum_name.clone(), variant.clone())) {
+                for (i, arg_pat) in args.iter().enumerate() {
+                    if field_types.get(i).map_or(false, |ty| type_refers_to(ty, enum_name)) {
+                        Self::collect_pattern_idents(arg_pat, &mut bindings);
+                    }
+                }
+            }
+        }
+        bindings
+    }
+
+    /// 递归收集 Pattern 中的所有标识符名
+    fn collect_pattern_idents(pat: &Pattern, out: &mut Vec<String>) {
+        match pat {
+            Pattern::Ident(name) => {
+                if name != "_" { out.push(name.clone()); }
+            }
+            Pattern::Tuple(elems) => {
+                for e in elems { Self::collect_pattern_idents(e, out); }
+            }
+            Pattern::Struct { fields, .. } => {
+                for (_, p) in fields { Self::collect_pattern_idents(p, out); }
+            }
+            Pattern::Enum { args, .. } => {
+                for a in args { Self::collect_pattern_idents(a, out); }
+            }
+            _ => {}
         }
     }
 }
@@ -1692,11 +1716,6 @@ fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
         }
     }
     cg.gen_expr(arg)
-}
-
-/// 检查类型是否为 Box&lt;T&gt;
-fn is_box_type(ty: &IrType) -> bool {
-    matches!(ty, IrType::Named { path, .. } if path == "Box")
 }
 
 /// 检测 IrType 是否引用了指定的类型名（用于递归枚举检测）

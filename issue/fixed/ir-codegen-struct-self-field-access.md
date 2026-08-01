@@ -1,6 +1,6 @@
 # ir-codegen-struct-self-field-access
 
-> 状态: Open | 严重等级: P1 | 发现日期: 2026-07-31 | 分类: IR Codegen
+> 状态: Fixed | 严重等级: P1 | 发现日期: 2026-07-31 | 修复日期: 2026-08-01 | 修复提交: 4aa367e | 分类: IR Codegen
 
 ## Bug 标题
 struct impl 方法内字段访问生成 `self::field` 而非 `self.field`

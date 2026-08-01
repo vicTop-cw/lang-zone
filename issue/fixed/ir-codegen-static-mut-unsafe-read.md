@@ -1,6 +1,6 @@
 # ir-codegen-static-mut-unsafe-read
 
-> 状态: Open | 严重等级: P2 | 发现日期: 2026-07-31 | 分类: IR Codegen
+> 状态: Fixed | 严重等级: P2 | 发现日期: 2026-07-31 | 修复日期: 2026-08-01 | 修复提交: 350e54d | 分类: IR Codegen
 
 ## Bug 标题
 walrus 算子生成的 `static mut` 读取未包裹在 `unsafe` 块中
