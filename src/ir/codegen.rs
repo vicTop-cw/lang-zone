@@ -32,6 +32,8 @@ pub struct CodeGen {
     fn_param_info: HashMap<String, (usize, usize)>,
     /// 被修改的模块级 const 名称（需生成 static mut 而非 const）
     mutated_consts: std::collections::HashSet<String>,
+    /// enum variant → field types 映射: (enum_name, variant_name) → Vec<IrType>
+    enum_variant_fields: HashMap<(String, String), Vec<IrType>>,
     buf: String,
 }
 
@@ -59,6 +61,7 @@ impl CodeGen {
             suppress_tail_return: false,
             fn_param_info: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
+            enum_variant_fields: HashMap::new(),
             buf: String::new(),
         }
     }
@@ -77,6 +80,7 @@ impl CodeGen {
         self.emitted_types.clear();
         self.impl_types.clear();
         self.mutated_consts.clear();
+        self.enum_variant_fields.clear();
 
         // 收集所有模块级 const 名称
         let const_names: std::collections::HashSet<String> = module.items.iter()
@@ -87,6 +91,14 @@ impl CodeGen {
             if let Item::EnumDef(e) = item {
                 for variant in &e.variants {
                     self.enum_variants.insert(variant.name.clone(), e.name.clone());
+                    // 收集变体字段类型（用于构造时 Box::new() 包装判断）
+                    let field_types: Vec<IrType> = variant.fields.iter()
+                        .map(|f| f.ty.clone())
+                        .collect();
+                    self.enum_variant_fields.insert(
+                        (e.name.clone(), variant.name.clone()),
+                        field_types,
+                    );
                 }
             }
             if let Item::FnDef(f) = item {
@@ -893,7 +905,10 @@ impl CodeGen {
                 format!("{}.{}", self.gen_target_expr(base), field)
             }
             ExprKind::IndexGet { base, key } => {
-                format!("{}[{}]", self.gen_target_expr(base), self.gen_expr(key))
+                let key_s = self.gen_expr(key);
+                let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                let key_expr = if is_dict { format!("&{}", key_s) } else { key_s };
+                format!("{}[{}]", self.gen_target_expr(base), key_expr)
             }
             _ => self.gen_expr(expr),
         }
@@ -972,7 +987,15 @@ impl CodeGen {
                     let is_var_base = matches!(&base.kind, ExprKind::Var(_));
                     let sep = if is_var_base && (is_std_module || self.emitted_types.contains(&base_s) || self.impl_types.contains(&base_s)) { "::" } else { "." };
                     if sep == "::" {
-                        return format!("{}::{}({})", base_s, field, args_s.join(", "));
+                        // 检查变体字段类型，为 Box 字段自动包裹 Box::new()
+                        let field_types = self.enum_variant_fields.get(&(base_s.clone(), field.clone()));
+                        let wrapped_args: Vec<String> = args_s.iter().enumerate().map(|(i, a)| {
+                            let needs_box = field_types.as_ref().map_or(false, |types| {
+                                types.get(i).map_or(false, |ty| is_box_type(ty))
+                            });
+                            if needs_box { format!("Box::new({})", a) } else { a.clone() }
+                        }).collect();
+                        return format!("{}::{}({})", base_s, field, wrapped_args.join(", "));
                     }
                     // else: normal field access call, fall through
                 }
@@ -1031,10 +1054,14 @@ impl CodeGen {
                     format!("panic!(\"{{:?}}\", {})", args_s.join(", "))
                 } else if callee_s == "Exception" {
                     format!("panic!(\"Exception: {{:?}}\", {})", args_s.join(", "))
-                } else if !args.is_empty() && is_kwarg_call(args) {
+                } else if !args.is_empty() && is_kwarg_call(args) && self.emitted_types.contains(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
                     let fields: Vec<String> = args.iter().map(|a| gen_kwarg_field(a, self)).collect();
                     format!("{}{} {{ {} }}", callee_s, turbofish, fields.join(", "))
+                } else if !args.is_empty() && is_kwarg_call(args) {
+                    // Function call with named args: func(a, b~) → func(a, b)
+                    let flat_args: Vec<String> = args.iter().map(|a| gen_kwarg_value(a, self)).collect();
+                    format!("{}{}({})", callee_s, turbofish, flat_args.join(", "))
                 } else {
                     format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
                 }
@@ -1062,15 +1089,37 @@ impl CodeGen {
                 // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant(val1, val2, ...)
                 // 生成位置参数构造（与 tuple variant 定义一致）
                 let is_enum_variant = self.emitted_types.contains(&recv) && is_kwarg_call(args);
+                eprintln!("DEBUG: is_enum_variant={} recv={} method={} emitted_contains={}",
+                    is_enum_variant, recv, method, self.emitted_types.contains(&recv));
                 if is_enum_variant {
-                    let values: Vec<String> = args.iter()
-                        .map(|a| gen_kwarg_value(a, self))
+                    let field_types = self.enum_variant_fields.get(&(recv.clone(), method.clone()));
+                    eprintln!("DEBUG: field_types for ({}, {}) = {:?}", recv, method, field_types);
+                    let values: Vec<String> = args.iter().enumerate()
+                        .map(|(i, a)| {
+                            let val = gen_kwarg_value(a, self);
+                            let needs_box = field_types.as_ref().map_or(false, |types| {
+                                types.get(i).map_or(false, |ty| is_box_type(ty))
+                            });
+                            if needs_box { format!("Box::new({})", val) } else { val }
+                        })
                         .collect();
                     return format!("{}::{}({})", recv, method, values.join(", "));
                 }
                 // Enum 类型调用变体: Status.Pending("x") → Status::Pending("x")
                 if self.emitted_types.contains(&recv) {
-                    return format!("{}::{}({})", recv, method, args_s.join(", "));
+                    eprintln!("DEBUG: non-kwarg enum ctor recv={} method={} field_types_at_this_point={:?}",
+                        recv, method, 
+                        self.enum_variant_fields.keys().filter(|(e,_)| e==&recv).collect::<Vec<_>>());
+                    let field_types = self.enum_variant_fields.get(&(recv.clone(), method.clone()));
+                    let wrapped_args: Vec<String> = args_s.iter().enumerate()
+                        .map(|(i, a)| {
+                            let needs_box = field_types.as_ref().map_or(false, |types| {
+                                types.get(i).map_or(false, |ty| is_box_type(ty))
+                            });
+                            if needs_box { format!("Box::new({})", a) } else { a.clone() }
+                        })
+                        .collect();
+                    return format!("{}::{}({})", recv, method, wrapped_args.join(", "));
                 }
 
                 // LZ magic methods → Rust equivalents
@@ -1102,8 +1151,8 @@ impl CodeGen {
                     }
                     _ => method,
                 };
-                // String Pattern trait方法(String参数需&借用)
-                let pattern_methods = ["starts_with", "ends_with", "find", "rfind", "replace", "trim_start_matches", "trim_end_matches"];
+                // String Pattern trait方法 + 集合contains等需要引用的方法
+                let pattern_methods = ["starts_with", "ends_with", "find", "rfind", "replace", "trim_start_matches", "trim_end_matches", "contains"];
                 if pattern_methods.contains(&method.as_str()) && !args_s.is_empty() {
                     args_s[0] = format!("&{}", args_s[0]);
                 }
@@ -1116,6 +1165,11 @@ impl CodeGen {
                 // Module path: std.io.print → std::io::print
                 // Impl-only type method: config.get() -> config::get(key)
                 let base_s = self.gen_expr(base);
+                // self 在 impl 方法中始终是 receiver，用 `.` 访问字段
+                // （生成的代码无嵌套模块，无需 self:: 模块路径前缀）
+                if base_s == "self" {
+                    return format!("{}.{}", base_s, field);
+                }
                 let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
                 let is_std_module = known_modules.contains(&base_s.as_str());
                 let is_var_base = matches!(&base.kind, ExprKind::Var(_));
@@ -1137,9 +1191,9 @@ impl CodeGen {
                 } else {
                     let key_s = self.gen_expr(key);
                     // HashMap/Dict 索引需要引用: map[&key] 而非 map[key]
+                    // Rust HashMap::index 签名: fn index(&self, key: &Q) -> &V —— 始终需要引用
                     let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
-                    let is_str_key = matches!(&key.ty, IrType::Str);
-                    let key_expr = if is_dict && is_str_key {
+                    let key_expr = if is_dict {
                         format!("&{}", key_s)
                     } else {
                         key_s
@@ -1151,8 +1205,7 @@ impl CodeGen {
                 let base_s = self.gen_expr(base);
                 let key_s = self.gen_expr(key);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
-                let is_str_key = matches!(&key.ty, IrType::Str);
-                let key_expr = if is_dict && is_str_key {
+                let key_expr = if is_dict {
                     format!("&{}", key_s)
                 } else {
                     key_s
@@ -1255,7 +1308,7 @@ impl CodeGen {
                         let val_s = val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
                         format!("{{ {} = {}; {} }}", bind_s, val_s, bind_s)
                     }
-                    "Dict" => "std::collections::HashMap::new()".to_string(),
+                    "Dict" => "std::collections::HashMap::<_, _>::new()".to_string(),
                     "Range" => {
                         let start = fields.iter().find(|(n, _)| n == "start");
                         let end = fields.iter().find(|(n, _)| n == "end");
@@ -1281,7 +1334,20 @@ impl CodeGen {
                 }
             }
             ExprKind::EnumCtor { enum_name, variant, args } => {
-                let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                // 查找该变体的字段类型，为 Box 字段自动包裹 Box::new()
+                let field_types = self.enum_variant_fields.get(&(enum_name.clone(), variant.clone()));
+                let args_s: Vec<String> = args.iter().enumerate().map(|(i, a)| {
+                    let expr_s = self.gen_expr(a);
+                    // 检查该位置是否需要 Box::new() 包装
+                    let needs_box = field_types.map_or(false, |types| {
+                        types.get(i).map_or(false, |ty| is_box_type(ty))
+                    });
+                    if needs_box {
+                        format!("Box::new({})", expr_s)
+                    } else {
+                        expr_s
+                    }
+                }).collect();
                 if args_s.is_empty() {
                     format!("{}::{}", enum_name, variant)
                 } else {
@@ -1321,7 +1387,7 @@ impl CodeGen {
                 format!("({})", elems.join(", "))
             }
             ExprKind::ListLit(elems) => {
-                // 空列表：Nil/Unit/Any → ()，否则 → vec![]
+                // 空列表：Nil/Unit/Any → ()，否则 → Vec::new() 或 vec![...]
                 let is_nil = elems.is_empty() && (
                     matches!(expr.ty, IrType::Unit | IrType::Any)
                     || matches!(self.rust_type(&expr.ty).as_str(), "()")
@@ -1329,11 +1395,22 @@ impl CodeGen {
                 if is_nil {
                     "()".to_string()
                 } else {
-                    let elems: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
-                    if elems.is_empty() {
-                        format!("vec![]")
+                    let elems_s: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
+                    if elems_s.is_empty() {
+                        // 空列表：尝试从类型获取元素类型用于 Vec 标注
+                        if let IrType::Named { path, args } = &expr.ty {
+                            if (path == "List" || path == "Vec") && !args.is_empty() {
+                                format!("Vec::<{}>::new()", self.rust_type(&args[0]))
+                            } else if path == "List" || path == "Vec" {
+                                "Vec::new()".to_string()
+                            } else {
+                                "vec![]".to_string()
+                            }
+                        } else {
+                            "vec![]".to_string()
+                        }
                     } else {
-                        format!("vec![{}]", elems.join(", "))
+                        format!("vec![{}]", elems_s.join(", "))
                     }
                 }
             }
@@ -1437,10 +1514,21 @@ impl CodeGen {
                 format!("{} {{ {} }}", name, fields.join(", "))
             }
             Pattern::Enum { enum_name, variant, args } => {
+                // 查找该变体的字段类型，为 Box 字段添加 `box` 模式前缀
+                let field_types = self.enum_variant_fields.get(&(enum_name.clone(), variant.clone()));
                 if args.is_empty() {
                     format!("{}::{}", enum_name, variant)
                 } else {
-                    let args: Vec<String> = args.iter().map(|a| self.gen_pattern(a)).collect();
+                    let args: Vec<String> = args.iter().enumerate().map(|(i, a)| {
+                        let needs_box = field_types.map_or(false, |types| {
+                            types.get(i).map_or(false, |ty| is_box_type(ty))
+                        });
+                        if needs_box {
+                            format!("box {}", self.gen_pattern(a))
+                        } else {
+                            self.gen_pattern(a)
+                        }
+                    }).collect();
                     format!("{}::{}({})", enum_name, variant, args.join(", "))
                 }
             }
@@ -1604,6 +1692,11 @@ fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
         }
     }
     cg.gen_expr(arg)
+}
+
+/// 检查类型是否为 Box&lt;T&gt;
+fn is_box_type(ty: &IrType) -> bool {
+    matches!(ty, IrType::Named { path, .. } if path == "Box")
 }
 
 /// 检测 IrType 是否引用了指定的类型名（用于递归枚举检测）
