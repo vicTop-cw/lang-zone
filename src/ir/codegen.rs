@@ -1059,6 +1059,49 @@ impl CodeGen {
                     format!("panic!(\"{{:?}}\", {})", args_s.join(", "))
                 } else if callee_s == "Exception" {
                     format!("panic!(\"Exception: {{:?}}\", {})", args_s.join(", "))
+                // --- Prelude free function → method/expression mappings ---
+                } else if callee_s == "len" && args_s.len() == 1 {
+                    format!("({}.len() as i64)", args_s[0])
+                } else if callee_s == "contains" && args_s.len() == 2 {
+                    format!("({}).contains(&{})", args_s[0], args_s[1])
+                } else if callee_s == "iter" && args_s.len() == 1 {
+                    format!("({}).iter()", args_s[0])
+                } else if callee_s == "enumerate" && args_s.len() == 1 {
+                    format!("({}).iter().enumerate()", args_s[0])
+                } else if callee_s == "zip" && args_s.len() == 2 {
+                    format!("({}).into_iter().zip({}.into_iter())", args_s[0], args_s[1])
+                } else if callee_s == "clone" && args_s.len() == 1 {
+                    format!("({}).clone()", args_s[0])
+                } else if callee_s == "sort" && args_s.len() == 1 {
+                    format!("{{ let mut _tmp = {0}.clone(); _tmp.sort(); _tmp }}", args_s[0])
+                } else if callee_s == "reverse" && args_s.len() == 1 {
+                    format!("{{ let mut _tmp = {0}.clone(); _tmp.reverse(); _tmp }}", args_s[0])
+                } else if callee_s == "format" {
+                    // format("fmt", args...) → format!("fmt", args...)
+                    // 第一个参数若是字面量 → 直接取字符串值；否则使用生成的表达式
+                    let fmt_str = if args.len() >= 1 {
+                        if let ExprKind::Lit(LitKind::Str(s)) = &args[0].kind {
+                            format!("\"{}\"", s)
+                        } else {
+                            args_s[0].clone()
+                        }
+                    } else {
+                        "\"\"".to_string()
+                    };
+                    let rest = if args_s.len() > 1 { format!(", {}", args_s[1..].join(", ")) } else { String::new() };
+                    format!("format!({}{})", fmt_str, rest)
+                } else if callee_s == "hash" && args_s.len() == 1 {
+                    format!("{{ let mut _hasher = std::collections::hash_map::DefaultHasher::new(); std::hash::Hash::hash(&{}, &mut _hasher); std::hash::Hasher::finish(&_hasher) as i64 }}", args_s[0])
+                } else if callee_s == "bool" && args_s.len() == 1 {
+                    format!("({} != 0)", args_s[0])
+                } else if callee_s == "range" && args_s.len() >= 1 {
+                    // range(start, end) or range(end) → start..end or 0..end
+                    if args_s.len() == 1 {
+                        format!("0..{}", args_s[0])
+                    } else {
+                        format!("{}..{}", args_s[0], args_s[1])
+                    }
+                // --- End prelude mappings ---
                 } else if !args.is_empty() && is_kwarg_call(args) && self.emitted_types.contains(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
                     let fields: Vec<String> = args.iter().map(|a| gen_kwarg_field(a, self)).collect();
@@ -1151,9 +1194,15 @@ impl CodeGen {
                     _ => method,
                 };
                 // String Pattern trait方法 + 集合contains等需要引用的方法
-                let pattern_methods = ["starts_with", "ends_with", "find", "rfind", "replace", "trim_start_matches", "trim_end_matches", "contains"];
+                // String Pattern trait方法 + 集合contains等需要引用的方法
+                let pattern_methods = ["starts_with", "ends_with", "find", "rfind", "replace", "trim_start_matches", "trim_end_matches", "contains", "split", "rsplit", "splitn", "rsplitn"];
                 if pattern_methods.contains(&method.as_str()) && !args_s.is_empty() {
-                    args_s[0] = format!("&{}", args_s[0]);
+                    // 若第一个参数是字符串字面量，直接使用 &str 避免临时 String 生命周期问题
+                    if let ExprKind::Lit(LitKind::Str(s)) = &args[0].kind {
+                        args_s[0] = format!("\"{}\"", s);
+                    } else {
+                        args_s[0] = format!("&{}", args_s[0]);
+                    }
                 }
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
                 // .len() on collections → cast usize to i64

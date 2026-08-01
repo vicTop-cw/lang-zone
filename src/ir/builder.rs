@@ -1352,13 +1352,8 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         }
 
         AstStmt::FnDef { func } => {
-            // 嵌套函数提升为模块级 Item::FnDef，名称为 {父函数}_{子函数}
-            let parent_name = ctx.current_fn_name.clone().unwrap_or_default();
-            let nested_name = if parent_name.is_empty() {
-                func.name.clone()
-            } else {
-                format!("{}_{}", parent_name, func.name)
-            };
+            // 嵌套函数提升为模块级 Item::FnDef
+            let nested_name = func.name.clone();
             let mut nested_def = convert_fn_def(func, ctx);
             nested_def.name = nested_name;
             ctx.pending_items.borrow_mut().push(Item::FnDef(nested_def));
@@ -1920,6 +1915,8 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     }
 
     // 11. 将提升出的嵌套函数等 pending items 追加到模块
+    // 先 drop ctx 确保 Rc 引用计数归 1，否则 try_unwrap 静默失败
+    drop(ctx);
     if let Ok(items) = Rc::try_unwrap(pending_items) {
         ir_mod.items.extend(items.into_inner());
     }

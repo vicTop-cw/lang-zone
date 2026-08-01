@@ -75,7 +75,7 @@ def main() =
     print("  trim  ".trim())
 
     // --- List<T> instance methods ---
-    let list = [1, 2, 3]
+    list = [1, 2, 3]
     list.append(4)
     print(list)
     let last = list.pop()
