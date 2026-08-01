@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Batch test all DEMO/*.lz files via IR codegen path."""
-import subprocess, sys, os
+import subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent

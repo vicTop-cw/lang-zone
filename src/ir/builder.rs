@@ -742,6 +742,47 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Call { func, args, type_args } => {
+            // 部分应用检测：如果 args 中包含 _ 占位符，展开为 Lambda
+            // add(_, 1) → |x| add(x, 1)
+            let has_wildcard = args.iter().any(|a| matches!(a, AstExpr::Ident(s) if s == "_"));
+            if has_wildcard {
+                let mut param_idx = 0u32;
+                let mut lambda_params: Vec<Param> = Vec::new();
+                let mut filled_args: Vec<Expr> = Vec::new();
+                for a in args.iter() {
+                    if matches!(a, AstExpr::Ident(s) if s == "_") {
+                        let param_name = format!("__p{}", param_idx);
+                        param_idx += 1;
+                        lambda_params.push(Param {
+                            name: param_name.clone(),
+                            ty: IrType::Any,
+                            default: None,
+                            variadic: false,
+                            is_mut: false,
+                        });
+                        filled_args.push(Expr::new(
+                            ExprKind::Var(param_name),
+                            IrType::Any, Span::unknown(),
+                        ));
+                    } else {
+                        filled_args.push(convert_expr(a, ctx));
+                    }
+                }
+                let callee = convert_expr(func, ctx);
+                let call = Expr::new(ExprKind::Call {
+                    type_args: vec![],
+                    callee: Box::new(callee),
+                    args: filled_args,
+                }, IrType::Any, Span::unknown());
+                return Expr::new(ExprKind::Lambda {
+                    params: lambda_params,
+                    body: Box::new(call),
+                    is_move: true,
+                }, IrType::Fn {
+                    params: vec![IrType::Any; param_idx as usize],
+                    ret: Box::new(IrType::Any),
+                }, Span::unknown());
+            }
             // 特殊处理 __as__ 运算符：__as__(value, type_name) → Cast
             if let AstExpr::Ident(ref fname) = func.as_ref() {
                 if fname == "__as__" && args.len() == 2 {
@@ -1589,6 +1630,12 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
             let mut ir_value = convert_expr(value, ctx);
+            // 当 value 是 Lambda（部分应用展开等），使用 Lambda 的类型而非 infer 的类型
+            let ir_ty = if let IrType::Fn { .. } = &ir_value.ty {
+                ir_value.ty.clone()
+            } else {
+                ir_ty
+            };
             // 当 Let 类型注解为 fn(..) -> .. 且 value 是 Lambda 时，
             // 将 fn 的参数类型传播到 Lambda 参数中
             if let IrType::Fn { params: fn_params, .. } = &ir_ty {
@@ -1612,6 +1659,12 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
             let mut ir_value = convert_expr(value, ctx);
+            // 当 value 是 Lambda 时，使用 Lambda 的类型
+            let ir_ty = if let IrType::Fn { .. } = &ir_value.ty {
+                ir_value.ty.clone()
+            } else {
+                ir_ty
+            };
             // 同上：传播 fn 参数类型到 Lambda
             if let IrType::Fn { params: fn_params, .. } = &ir_ty {
                 if let ExprKind::Lambda { params: lambda_params, .. } = &mut ir_value.kind {
