@@ -38,6 +38,10 @@ pub struct CodeGen {
     fn_variadic: HashMap<String, usize>,
     /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
     fn_param_types: HashMap<String, Vec<IrType>>,
+    /// 模块级 const/static 名称（用于参数重命名避免 E0530 冲突）
+    top_level_static_names: std::collections::HashSet<String>,
+    /// 当前函数的参数重命名映射（原名 → 新名），用于 E0530 冲突解决
+    param_renames: HashMap<String, String>,
     buf: String,
 }
 
@@ -68,6 +72,8 @@ impl CodeGen {
             enum_variant_fields: HashMap::new(),
             fn_variadic: HashMap::new(),
             fn_param_types: HashMap::new(),
+            top_level_static_names: std::collections::HashSet::new(),
+            param_renames: HashMap::new(),
             buf: String::new(),
         }
     }
@@ -92,6 +98,19 @@ impl CodeGen {
         let const_names: std::collections::HashSet<String> = module.items.iter()
             .filter_map(|item| if let Item::Const(c) = item { Some(c.name.clone()) } else { None })
             .collect();
+        
+        // 收集所有模块级顶层名称（const + 函数名）以避免 E0530 参数冲突
+        self.top_level_static_names.clear();
+        for item in &module.items {
+            match item {
+                Item::Const(c) => { self.top_level_static_names.insert(c.name.clone()); }
+                Item::FnDef(f) => { self.top_level_static_names.insert(f.name.clone()); }
+                Item::StructDef(s) => { self.top_level_static_names.insert(s.name.clone()); }
+                Item::EnumDef(e) => { self.top_level_static_names.insert(e.name.clone()); }
+                Item::TraitDef(t) => { self.top_level_static_names.insert(t.name.clone()); }
+                _ => {}
+            }
+        }
 
         for item in &module.items {
             if let Item::EnumDef(e) = item {
@@ -126,6 +145,8 @@ impl CodeGen {
                 if !const_names.is_empty() {
                     scan_const_mutations(&f.body, &const_names, &mut self.mutated_consts);
                 }
+                // 检测函数参数名与模块级 static 的冲突（E0530）
+                // 冲突解决在 gen_fn_def 中通过 param_renames 处理
             }
         }
 
@@ -280,6 +301,13 @@ impl CodeGen {
             if ["Vec","List","HashMap","HashSet","Dict","Set"].contains(&path.as_str()))
     }
 
+    /// 检查名称是否为已知的类型名（内置枚举 + 用户定义的 enum/impl 类型）
+    fn is_known_type_or_enum(&self, name: &str) -> bool {
+        self.emitted_types.contains(name)
+        || self.impl_types.contains(name)
+        || matches!(name, "Option" | "Result" | "Some" | "None" | "Ok" | "Err")
+    }
+
     fn rust_type(&self, ty: &IrType) -> String {
         match ty {
             IrType::Int => "i64".into(),
@@ -374,6 +402,13 @@ impl CodeGen {
 
     fn gen_fn_def(&mut self, f: &FnDef) {
         self.declared.clear();
+        // 检测参数名与模块级名称冲突 → 重命名参数（E0530）
+        self.param_renames.clear();
+        for p in &f.params {
+            if p.name != "self" && self.top_level_static_names.contains(&p.name) {
+                self.param_renames.insert(p.name.clone(), format!("{}_", p.name));
+            }
+        }
         // 检测 duck 参数 → 自动注入泛型类型
         let duck_params: Vec<String> = f.params.iter().enumerate()
             .filter(|(_, p)| matches!(&p.ty, IrType::Duck { .. }))
@@ -416,9 +451,10 @@ impl CodeGen {
         };
 
         let params: Vec<String> = f.params.iter().enumerate().map(|(i, p)| {
+            let pname = self.param_renames.get(&p.name).cloned().unwrap_or_else(|| p.name.clone());
             if duck_indices.contains(&i) {
                 let idx = duck_indices.iter().position(|&d| d == i).unwrap();
-                format!("{}: {}", p.name, duck_params[idx])
+                format!("{}: {}", pname, duck_params[idx])
             } else if p.name == "self" {
                 // self 参数：借用而非移动（LZ 语义为引用）
                 if p.is_mut { "&mut self" } else { "&self" }.into()
@@ -431,9 +467,9 @@ impl CodeGen {
                     self.rust_type(&p.ty).to_string()
                 };
                 if p.is_mut {
-                    format!("mut {}: {}", p.name, ty_str)
+                    format!("mut {}: {}", pname, ty_str)
                 } else {
-                    format!("{}: {}", p.name, ty_str)
+                    format!("{}: {}", pname, ty_str)
                 }
             }
         }).collect();
@@ -481,8 +517,9 @@ impl CodeGen {
         // 默认参数 unwrap: greet(name: str = "World") → let name = name.unwrap_or_else(|| "World".to_string());
         for p in &f.params {
             if let Some(ref default_val) = p.default {
+                let pname = self.param_renames.get(&p.name).cloned().unwrap_or_else(|| p.name.clone());
                 let def_s = self.gen_expr(default_val);
-                self.emit_line(&format!("let {} = {}.unwrap_or_else(|| {});", p.name, p.name, def_s));
+                self.emit_line(&format!("let {} = {}.unwrap_or_else(|| {});", p.name, pname, def_s));
             }
         }
 
@@ -802,14 +839,17 @@ impl CodeGen {
                             || args.iter().any(|a| matches!(a, IrType::Generic(_)))
                     } else { false };
                 // 空容器需要类型提示 Vec<_> / HashMap<_, _>（Nil 类型除外）
+                // Dir/Set 空容器：即使 skip_ty 为 true，也强制输出类型标注（Rust 无法推断 K, V）
                 let is_empty_container = match &value.kind {
                     ExprKind::ListLit(elems) => elems.is_empty() && !matches!(ty, IrType::Named { path, .. } if path == "Nil"),
                     ExprKind::StructCtor { name: n, fields } => n == "Dict" && fields.is_empty(),
                     _ => false,
                 };
+                // 空 Dict/Set 强制输出类型标注
+                let force_ty = is_empty_container && matches!(ty, IrType::Named { path, .. } if path == "Dict" || path == "Set");
                 let ty_str = if is_empty_container {
                     // 优先使用声明的类型；若无则使用占位符
-                    if !skip_ty {
+                    if !skip_ty || force_ty {
                         format!(": {}", self.rust_type(ty))
                     } else if let ExprKind::StructCtor { name: n, .. } = &value.kind {
                         if n == "Dict" { ": std::collections::HashMap<_, _>".to_string() }
@@ -1011,11 +1051,47 @@ impl CodeGen {
                     self.emit_line("Ok(val) => val,");
                     self.emit_line("Err(_panic) => {");
                     self.indent += 1;
-                    // Catch handlers: allow return statements
+                    // Catch handlers: suppress tail return — values flow through match expr
+                    // (explicit return statements still work via Stmt::Return handler)
                     let _saved = self.suppress_tail_return;
-                    self.suppress_tail_return = false;
-                    for (_pat, block) in catches {
-                        self.gen_block_inner(block);
+                    self.suppress_tail_return = true;
+                    if catches.len() > 1 {
+                        // Multi-catch: emit only the last catch arm (catch-all).
+                        // catch_unwind can't do type-specific downcasting at codegen level.
+                        // Specific-type catches are emitted as comments for documentation.
+                        for (i, (pat, block)) in catches.iter().enumerate() {
+                            if i < catches.len() - 1 {
+                                // Specific-type catch → comment only
+                                let pat_str = match pat {
+                                    Some(Pattern::Ident(name)) => name.clone(),
+                                    Some(pat) => format!("{:?}", pat),
+                                    None => "(catch-all)".into(),
+                                };
+                                self.emit_line(&format!("// catch {}: (specific-type catch not supported with catch_unwind)", pat_str));
+                            } else {
+                                // Last arm is the catch-all
+                                if let Some(Pattern::Ident(var_name)) = pat {
+                                    self.emit_line(&format!(
+                                        "let {} = format!(\"{{:?}}\", _panic);",
+                                        var_name
+                                    ));
+                                    self.declared.insert(var_name.clone());
+                                }
+                                self.gen_block_inner(block);
+                            }
+                        }
+                    } else {
+                        for (pat, block) in catches {
+                            // Bind catch variable from panic info if pattern is a named ident
+                            if let Some(Pattern::Ident(var_name)) = pat {
+                                self.emit_line(&format!(
+                                    "let {} = format!(\"{{:?}}\", _panic);",
+                                    var_name
+                                ));
+                                self.declared.insert(var_name.clone());
+                            }
+                            self.gen_block_inner(block);
+                        }
                     }
                     self.suppress_tail_return = _saved;
                     self.indent -= 1;
@@ -1027,7 +1103,7 @@ impl CodeGen {
                         self.emit_line("{");
                         self.indent += 1;
                         let _saved = self.suppress_tail_return;
-                        self.suppress_tail_return = false;
+                        self.suppress_tail_return = true;
                         self.gen_block_inner(els);
                         self.suppress_tail_return = _saved;
                         self.indent -= 1;
@@ -1097,6 +1173,7 @@ impl CodeGen {
             ExprKind::Var(name) => {
                 if name == "pass" { "()".into() }
                 else if self.mutated_consts.contains(name) { format!("unsafe {{ {} }}", name) }
+                else if let Some(renamed) = self.param_renames.get(name) { renamed.clone() }
                 else { name.clone() }
             }
             ExprKind::Call { callee, args, type_args } => {
@@ -1170,7 +1247,8 @@ impl CodeGen {
                     let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
                     let is_std_module = known_modules.contains(&base_s.as_str());
                     let is_var_base = matches!(&base.kind, ExprKind::Var(_));
-                    let sep = if is_var_base && (is_std_module || self.emitted_types.contains(&base_s) || self.impl_types.contains(&base_s)) { "::" } else { "." };
+                    let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
+                    let sep = if is_var_base && (is_std_module || is_known_type) { "::" } else { "." };
                     if sep == "::" {
                         // 检查变体字段类型，为递归字段自动包裹 Box::new()
                         let field_types = self.enum_variant_fields.get(&(base_s.clone(), field.clone()));
@@ -1354,7 +1432,7 @@ impl CodeGen {
 
                 // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant(val1, val2, ...)
                 // 生成位置参数构造（与 tuple variant 定义一致）
-                let is_enum_variant = self.emitted_types.contains(&recv) && is_kwarg_call(args);
+                let is_enum_variant = (self.emitted_types.contains(&recv) || matches!(recv.as_str(), "Option" | "Result")) && is_kwarg_call(args);
                 if is_enum_variant {
                     let field_types = self.enum_variant_fields.get(&(recv.clone(), method.clone()));
                     let values: Vec<String> = args.iter().enumerate()
@@ -1369,7 +1447,8 @@ impl CodeGen {
                     return format!("{}::{}({})", recv, method, values.join(", "));
                 }
                 // Enum 类型调用变体: Status.Pending("x") → Status::Pending("x")
-                if self.emitted_types.contains(&recv) {
+                // Also: Option.Some(42) → Option::Some(42)
+                if self.emitted_types.contains(&recv) || matches!(recv.as_str(), "Option" | "Result") {
                     let field_types = self.enum_variant_fields.get(&(recv.clone(), method.clone()));
                     let wrapped_args: Vec<String> = args_s.iter().enumerate()
                         .map(|(i, a)| {
@@ -1437,11 +1516,11 @@ impl CodeGen {
                     return format!("{}.{}", base_s, field);
                 }
                 let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
-                let is_std_module = known_modules.contains(&base_s.as_str());
                 let is_var_base = matches!(&base.kind, ExprKind::Var(_));
                 let root = base_s.split("::").next().unwrap_or("");
                 let is_root_known = known_modules.contains(&root) && root != base_s;
-                let sep = if is_root_known || (is_var_base && (is_std_module || self.emitted_types.contains(&base_s) || self.impl_types.contains(&base_s))) { "::" } else { "." };
+                let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
+                let sep = if is_root_known || is_known_type { "::" } else { "." };
                 format!("{}{}{}", base_s, sep, field)
             }
             ExprKind::IndexGet { base, key } => {
