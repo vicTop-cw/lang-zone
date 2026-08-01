@@ -567,7 +567,24 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 _ => IrType::Any,
             }
         }
-        AstExpr::BuildBlock { lhs, .. } => infer_expr_type(lhs, ctx),
+        AstExpr::BuildBlock { kind, lhs, body } => {
+            // =: / ~: / *: 构建块返回 lhs 类型（或块类型）
+            // ^: 索引构建块返回 lhs 的元素类型（如 Vec<T> → T）
+            let lhs_ty = infer_expr_type(lhs, ctx);
+            match kind {
+                BuildKind::Index => {
+                    match &lhs_ty {
+                        IrType::Named { args, .. } if !args.is_empty() => args[0].clone(),
+                        _ => lhs_ty,
+                    }
+                }
+                BuildKind::Call => {
+                    // ~: 构建块的返回类型是 body 块的结果类型（调用返回）
+                    body.last().map(|s| infer_stmt_type(s, ctx)).unwrap_or(IrType::Unit)
+                }
+                _ => lhs_ty,
+            }
+        }
         AstExpr::KwArg { .. } => IrType::Any,
         AstExpr::PathAccess { .. } => IrType::Any,
         AstExpr::SafeNav { .. } => IrType::Any,
@@ -1096,58 +1113,83 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             ExprKind::TupleLit(elems.iter().map(|e| convert_expr(e, ctx)).collect())
         }
 
-        AstExpr::ListComprehension { output, var, iter, cond: _ } => {
-            // [out for x in iter if cond] → 展开为 for + if 的生成模式
+        AstExpr::ListComprehension { output, var, iter, cond } => {
+            // [out for x in iter if cond] → 展开为生成模式
             let iter_expr = convert_expr(iter, ctx);
             let out_expr = convert_expr(output, ctx);
+            let mut args = vec![
+                Expr::new(ExprKind::Lambda {
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    body: Box::new(out_expr),
+                    is_move: true,
+                }, IrType::Any, Span::unknown()),
+                iter_expr,
+            ];
+            // 过滤条件 cond 作为第三个参数传入 (可选)
+            if let Some(c) = cond {
+                args.push(Expr::new(ExprKind::Lambda {
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    body: Box::new(convert_expr(c, ctx)),
+                    is_move: true,
+                }, IrType::Any, Span::unknown()));
+            }
             ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("comp!".into()), IrType::Any, Span::unknown())),
-                args: vec![
-                    Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
-                        body: Box::new(out_expr),
-                        is_move: true,
-                    }, IrType::Any, Span::unknown()),
-                    iter_expr,
-                ],
+                args,
             }
         }
 
-        AstExpr::DictComprehension { key, value, var, iter, cond: _ } => {
+        AstExpr::DictComprehension { key, value, var, iter, cond } => {
             // {k: v for x in iter} → 展开为生成模式
             let iter_expr = convert_expr(iter, ctx);
             let key_expr = convert_expr(key, ctx);
             let val_expr = convert_expr(value, ctx);
+            let mut args = vec![
+                Expr::new(ExprKind::Lambda {
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    body: Box::new(Expr::new(
+                        ExprKind::TupleLit(vec![key_expr, val_expr]),
+                        IrType::Any, Span::unknown(),
+                    )),
+                    is_move: true,
+                }, IrType::Any, Span::unknown()),
+                iter_expr,
+            ];
+            if let Some(c) = cond {
+                args.push(Expr::new(ExprKind::Lambda {
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    body: Box::new(convert_expr(c, ctx)),
+                    is_move: true,
+                }, IrType::Any, Span::unknown()));
+            }
             ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("dict_comp!".into()), IrType::Any, Span::unknown())),
-                args: vec![
-                    Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
-                        body: Box::new(Expr::new(
-                            ExprKind::TupleLit(vec![key_expr, val_expr]),
-                            IrType::Any, Span::unknown(),
-                        )),
-                        is_move: true,
-                    }, IrType::Any, Span::unknown()),
-                    iter_expr,
-                ],
+                args,
             }
         }
 
-        AstExpr::SetComprehension { elem, var, iter, cond: _ } => {
+        AstExpr::SetComprehension { elem, var, iter, cond } => {
             // {x for x in iter} → 展开为生成模式
             let iter_expr = convert_expr(iter, ctx);
             let elem_expr = convert_expr(elem, ctx);
+            let mut args = vec![
+                Expr::new(ExprKind::Lambda {
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    body: Box::new(elem_expr),
+                    is_move: true,
+                }, IrType::Any, Span::unknown()),
+                iter_expr,
+            ];
+            if let Some(c) = cond {
+                args.push(Expr::new(ExprKind::Lambda {
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    body: Box::new(convert_expr(c, ctx)),
+                    is_move: true,
+                }, IrType::Any, Span::unknown()));
+            }
             ExprKind::Call { type_args: vec![],
                 callee: Box::new(Expr::new(ExprKind::Var("set_comp!".into()), IrType::Any, Span::unknown())),
-                args: vec![
-                    Expr::new(ExprKind::Lambda {
-                        params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
-                        body: Box::new(elem_expr),
-                        is_move: true,
-                    }, IrType::Any, Span::unknown()),
-                    iter_expr,
-                ],
+                args,
             }
         }
 
@@ -1271,10 +1313,19 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     ExprKind::BlockExpr { block: body_block }
                 }
                 BuildKind::Index => {
-                    // ^: → IndexGet（保持原有逻辑）
+                    // ^: → IndexGet。key = body 块中的最后一个表达式值。
+                    // 语法：container ^: <key>（冒号后换行缩进，块体为单值 key）
+                    let key_expr = body.last().and_then(|s| match s {
+                        AstStmt::Expr(e) => Some(convert_expr(e, ctx)),
+                        _ => None,
+                    }).unwrap_or_else(|| {
+                        // 回退：若无单个尾部表达式，用整个块（BlockExpr）
+                        let blk = convert_block_with_ctx(body, ctx);
+                        Expr::new(ExprKind::BlockExpr { block: blk }, IrType::Any, Span::unknown())
+                    });
                     ExprKind::IndexGet {
                         base: Box::new(convert_expr(lhs, ctx)),
-                        key: Box::new(convert_expr(lhs, ctx)),
+                        key: Box::new(key_expr),
                     }
                 }
             }

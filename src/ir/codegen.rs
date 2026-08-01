@@ -1291,6 +1291,21 @@ impl CodeGen {
 
     // ── Expr 生成 ──
 
+    /// 生成索引 key：Rust 的 Vec/切片/字符串索引需要 usize，
+    /// 而 LZ 的 int 是 i64，因此对整数索引自动转换为 usize。
+    /// 对 HashMap/Dict 保持引用语义（contains_key/get 需要 &K）。
+    fn gen_index_key(&self, key: &Expr, base: &Expr) -> String {
+        let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+        // 对整数 key（i64）转换为 usize，除非目标是 dict（其 key 不是数值索引）
+        if !is_dict && matches!(&key.ty, IrType::Int) {
+            let key_s = self.gen_expr(key);
+            // 避免对已是 usize 的表达式重复转换；若 key 是纯字面量整数，直接转换
+            format!("({} as usize)", key_s)
+        } else {
+            self.gen_expr(key)
+        }
+    }
+
     /// 生成赋值目标表达式（不放 unsafe 包装，用于 Stmt::Assign 等）
     fn gen_target_expr(&self, expr: &Expr) -> String {
         match &expr.kind {
@@ -1299,7 +1314,7 @@ impl CodeGen {
                 format!("{}.{}", self.gen_target_expr(base), field)
             }
             ExprKind::IndexGet { base, key } => {
-                let key_s = self.gen_expr(key);
+                let key_s = self.gen_index_key(key, base);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
                 let key_expr = if is_dict { format!("&{}", key_s) } else { key_s };
                 format!("{}[{}]", self.gen_target_expr(base), key_expr)
@@ -1400,31 +1415,45 @@ impl CodeGen {
                     }
                 }
                 
-                // 推导式展开: comp!(|x| body, iter) → (iter).into_iter().map(|x| body).collect()
+                // 推导式展开: comp!(|x| body, iter[, cond]) → (iter).into_iter().filter(|x| cond).map(|x| body).collect()
                 if callee_s == "comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
+                        let lambda = strip_lambda_type(lambda);
+                        // 第三个参数存在 → 过滤条件（filter 闭包接收 &Item，用 & 解引用参数）
+                        if let Some(cond) = args_s.get(2) {
+                            let cond = strip_lambda_type_with_ref(cond);
+                            return format!("({}).into_iter().filter({}).map({}).collect::<Vec<_>>()", iter, cond, lambda);
+                        }
                         return format!("({}).into_iter().map({}).collect::<Vec<_>>()", iter, lambda);
                     }
                     return format!("vec![]");
                 }
-                // dict_comp!(|x| (k, v), iter) → (iter).into_iter().map(|x| (k,v)).collect()
+                // dict_comp!(|x| (k, v), iter[, cond]) → (iter).into_iter().filter(|&x| cond).map(|x| (k,v)).collect()
                 if callee_s == "dict_comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
                         let iter_method = if let Some(iter_expr) = args.get(1) {
                             if matches!(&iter_expr.ty, IrType::Str) { ".chars()" } else { ".into_iter()" }
                         } else { ".into_iter()" };
                         let lambda = strip_lambda_type(lambda);
+                        if let Some(cond) = args_s.get(2) {
+                            let cond = strip_lambda_type_with_ref(cond);
+                            return format!("({}){}.filter({}).map({}).collect::<HashMap<_,_>>()", iter, iter_method, cond, lambda);
+                        }
                         return format!("({}){}.map({}).collect::<HashMap<_,_>>()", iter, iter_method, lambda);
                     }
                     return format!("HashMap::new()");
                 }
-                // set_comp!(|x| elem, iter) → (iter).into_iter().map(|x| elem).collect()
+                // set_comp!(|x| elem, iter[, cond]) → (iter).into_iter().filter(|&x| cond).map(|x| elem).collect()
                 if callee_s == "set_comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
                         let iter_method = if let Some(iter_expr) = args.get(1) {
                             if matches!(&iter_expr.ty, IrType::Str) { ".chars()" } else { ".into_iter()" }
                         } else { ".into_iter()" };
                         let lambda = strip_lambda_type(lambda);
+                        if let Some(cond) = args_s.get(2) {
+                            let cond = strip_lambda_type_with_ref(cond);
+                            return format!("({}){}.filter({}).map({}).collect::<HashSet<_>>()", iter, iter_method, cond, lambda);
+                        }
                         return format!("({}){}.map({}).collect::<HashSet<_>>()", iter, iter_method, lambda);
                     }
                     return format!("HashSet::new()");
@@ -1782,7 +1811,7 @@ impl CodeGen {
                         format!("{}[{}]", base_s, key_s)
                     }
                 } else {
-                    let key_s = self.gen_expr(key);
+                    let key_s = self.gen_index_key(key, base);
                     // HashMap/Dict 索引: map["key"] → map.get(&"key").cloned() 
                     // Rust HashMap 不实现 Index trait
                     let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
@@ -1797,7 +1826,7 @@ impl CodeGen {
             }
             ExprKind::IndexSet { base, key, value } => {
                 let base_s = self.gen_expr(base);
-                let key_s = self.gen_expr(key);
+                let key_s = self.gen_index_key(key, base);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
                 if is_dict {
                     // HashMap 不支持 IndexMut，使用 .insert() 代替
@@ -1823,8 +1852,15 @@ impl CodeGen {
                     let elem_s = self.gen_expr(lhs);
                     let cont_s = self.gen_expr(rhs);
                     // 字符串包含: "llo" in "hello" → "hello".contains("llo")
+                    // 用不带 & 的 contains：对 char / &str / String 都有效（均实现 Pattern）
                     if matches!(&rhs.ty, IrType::Str) {
-                        return format!("{}.contains(&{})", cont_s, elem_s);
+                        // 若 elem 是 filter 闭包参数（&char 引用），需解引用为 char
+                        let elem_arg = if elem_s.starts_with('&') {
+                            format!("*({})", elem_s)
+                        } else {
+                            elem_s.clone()
+                        };
+                        return format!("{}.contains({})", cont_s, elem_arg);
                     }
                     // Dict/HashMap: key in map → map.contains_key(&key)
                     if matches!(&rhs.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap") {
