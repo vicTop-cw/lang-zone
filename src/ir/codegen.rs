@@ -922,7 +922,10 @@ impl CodeGen {
             matches!(&c.ty,
                 IrType::Named { path, .. }
                 if ["Vec","List","HashMap","HashSet","Dict","Set"].contains(&path.as_str())
-            ) || val_str.contains("catch_unwind") || val_str.contains("LazyLock")
+            ) || matches!(&c.ty, IrType::Tuple(_))
+                || val_str.contains("catch_unwind")
+                || val_str.contains("LazyLock")
+                || val_str.contains(".to_string()")
         );
         if needs_lazy {
             let lazy_ty = self.rust_type(&c.ty);
@@ -1617,7 +1620,15 @@ impl CodeGen {
                 if callee_s == "print" {
                     let fmt_placeholders: String = args_s.iter().map(|_| "{:?}").collect::<Vec<_>>().join(" ");
                     let fmt = format!("\"{}\"", fmt_placeholders);
-                    format!("println!({}, {})", fmt, args_s.join(", "))
+                    // 顶层静态（LazyLock<..>）需解引用才能打印值：print(config) → print(*config)
+                    let print_args: Vec<String> = args.iter().zip(args_s.iter()).map(|(a, s)| {
+                        if let ExprKind::Var(name) = &a.kind {
+                            if self.top_level_static_names.contains(name) {
+                                format!("(*{})", s)
+                            } else { s.clone() }
+                        } else { s.clone() }
+                    }).collect();
+                    format!("println!({}, {})", fmt, print_args.join(", "))
                 } else if callee_s == "set!" {
                     format!("std::collections::HashSet::from([{}])", args_s.join(", "))
                 } else if callee_s == "panic!" || callee_s == "panic" {

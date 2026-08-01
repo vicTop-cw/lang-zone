@@ -2454,6 +2454,7 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     for c in &ast_module.consts {
         let ty = c.ty.as_ref().map(|t| from_ast_type(t))
             .unwrap_or_else(|| infer_expr_type(&c.value, &ctx));
+        eprintln!("DEBUG const {} ty={:?}", c.name, ty);
         ctx.top_level_consts.insert(c.name.clone(), ty);
     }
 
@@ -2560,6 +2561,25 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     for (name, body) in &ast_module.top_level_builds {
         let mut block_ctx = TypeCtx::new();
         block_ctx.current_generics = ctx.current_generics.clone();
+        // 预扫描：收集构建块内局部变量类型（x = value 赋值），供元组/表达式推断
+        for s in body {
+            eprintln!("DEBUG buildbody stmt = {:?}", s);
+            match s {
+                AstStmt::Expr(e) => {
+                    if let AstExpr::Assign { target, value, .. } = e {
+                        if let AstExpr::Ident(vname) = target.as_ref() {
+                            block_ctx.add_var(vname, infer_expr_type(value, &block_ctx));
+                        }
+                    }
+                }
+                AstStmt::Let { name, ty, value, .. } => {
+                    let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
+                        .unwrap_or_else(|| infer_expr_type(value, &block_ctx));
+                    block_ctx.add_var(name, ir_ty);
+                }
+                _ => {}
+            }
+        }
         let stmts: Vec<Stmt> = body.iter()
             .map(|s| convert_stmt(s, &block_ctx))
             .collect();
