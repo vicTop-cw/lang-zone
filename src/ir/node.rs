@@ -522,6 +522,8 @@ pub enum LitKind {
     Int(i64),
     F64(f64),
     Str(String),
+    /// f-string 字面量（保留原始内容，含 {expr} 插值标记）
+    FStr(String),
     Bool(bool),
     Unit,
     None_,

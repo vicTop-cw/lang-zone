@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// 类型推导上下文
+#[derive(Clone)]
 struct TypeCtx {
     /// 变量名 → 类型
     vars: HashMap<String, IrType>,
@@ -733,7 +734,8 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::IntLit(n) => ExprKind::Lit(LitKind::Int(*n)),
         AstExpr::FloatLit(n) => ExprKind::Lit(LitKind::F64(*n)),
         AstExpr::StrLit(s) => ExprKind::Lit(LitKind::Str(s.clone())),
-        AstExpr::FStrLit(s) | AstExpr::RawStrLit(s) => ExprKind::Lit(LitKind::Str(s.clone())),
+        AstExpr::FStrLit(s) => ExprKind::Lit(LitKind::FStr(s.clone())),
+        AstExpr::RawStrLit(s) => ExprKind::Lit(LitKind::Str(s.clone())),
         AstExpr::BoolLit(b) => ExprKind::Lit(LitKind::Bool(*b)),
         AstExpr::NoneLit => ExprKind::Lit(LitKind::None_),
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
@@ -1950,6 +1952,40 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             for name in names {
                 if name != "_" {
                     block_ctx.add_var(name, ir_ty.clone());
+                }
+            }
+        }
+        // guard let <Variant>(...) = expr else: ... → match value { Variant(r) => { 剩余语句 }, _ => { else_body } }
+        if let AstStmt::Guard { let_binding, else_body, .. } = s {
+            if let Some((pat, value)) = let_binding {
+                if let AstPattern::Variant(_, args) = pat {
+                    let val = convert_expr(value, &block_ctx);
+                    // 剩余语句作为匹配分支的 body（guard 之后代码仅在匹配时执行）
+                    let rest: Vec<AstStmt> = stmts.iter().skip_while(|x| !std::ptr::eq(*x, s)).skip(1).cloned().collect();
+                    // 匹配分支上下文：绑定模式变量（类型 Any 占位，body 转换时按需解析）
+                    let mut then_ctx = block_ctx.clone();
+                    fn collect_pat_vars(pat: &AstPattern, ctx: &mut TypeCtx) {
+                        match pat {
+                            AstPattern::Ident(name) => { ctx.add_var(name, IrType::Any); }
+                            AstPattern::Variant(_, as_) => { for a in as_ { collect_pat_vars(a, ctx); } }
+                            _ => {}
+                        }
+                    }
+                    collect_pat_vars(&AstPattern::Variant(String::new(), args.clone()), &mut then_ctx);
+                    let then_block = convert_block(&rest, &then_ctx);
+                    let else_block = convert_block(else_body, &block_ctx);
+                    // 构建 match 结构：Variant(...) 分支 + 默认分支
+                    let ir_pat = convert_ast_pattern(pat, &block_ctx)
+                        .unwrap_or(Pattern::Wildcard);
+                    let match_stmt = Stmt::Match {
+                        scrutinee: val,
+                        arms: vec![
+                            MatchArm { pattern: ir_pat, guard: None, body: then_block },
+                            MatchArm { pattern: Pattern::Wildcard, guard: None, body: else_block },
+                        ],
+                    };
+                    ir_stmts.push(match_stmt);
+                    break;
                 }
             }
         }

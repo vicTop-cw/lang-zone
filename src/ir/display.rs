@@ -198,6 +198,7 @@ impl fmt::Display for LitKind {
             LitKind::Int(n) => write!(f, "{n}_i64"),
             LitKind::F64(n) => write!(f, "{n}_f64"),
             LitKind::Str(s) => write!(f, "\"{s}\""),
+            LitKind::FStr(s) => write!(f, "f\"{s}\""),
             LitKind::Bool(b) => write!(f, "{b}"),
             LitKind::Unit => f.write_str("()"),
             LitKind::None_ => f.write_str("None"),

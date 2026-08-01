@@ -191,6 +191,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             LitKind::Int(n) => n.to_string(),
             LitKind::F64(f) => f.to_string(),
             LitKind::Str(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+            LitKind::FStr(s) => format!("f\"{}\"", s.replace('"', "\\\"")),
             LitKind::Bool(b) => if *b { "True".to_string() } else { "False".to_string() },
             LitKind::None_ | LitKind::Unit => "None".to_string(),
         },

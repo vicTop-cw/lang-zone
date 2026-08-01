@@ -2217,6 +2217,69 @@ impl CodeGen {
         }
     }
 
+    /// 生成 f-string: 提取 {expr} 插值，转成 format!("literal", expr, ...)
+    /// {{ / }} 转义为字面量大括号；单个 {expr} 为插值占位符
+    fn gen_fstring(&self, s: &str) -> String {
+        let mut format_str = String::new();
+        let mut args: Vec<String> = Vec::new();
+        let mut arg_idx = 0usize;
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => {
+                    if chars.peek() == Some(&'{') {
+                        // {{ → 显示字面 {（format! 中需要 {{）
+                        chars.next();
+                        format_str.push_str("{{");
+                    } else {
+                        // 提取插值表达式 {expr}
+                        let mut expr = String::new();
+                        let mut depth = 0usize;
+                        while let Some(&ec) = chars.peek() {
+                            match ec {
+                                '}' if depth == 0 => { chars.next(); break; }
+                                '{' => { depth += 1; expr.push(ec); chars.next(); }
+                                '}' => { depth -= 1; expr.push(ec); chars.next(); }
+                                _ => { expr.push(ec); chars.next(); }
+                            }
+                        }
+                        // 用唯一标记占位，最后替换为 {} 占位符
+                        format_str.push_str(&format!("__LZ_FMT_{}__", arg_idx));
+                        arg_idx += 1;
+                        args.push(self.gen_expr_str(&expr));
+                    }
+                }
+                '}' => {
+                    if chars.peek() == Some(&'}') {
+                        chars.next();
+                        format_str.push_str("}}");
+                    } else {
+                        format_str.push('}');
+                    }
+                }
+                _ => format_str.push(c),
+            }
+        }
+        // 先转义文本中的 { / }，再恢复插值占位符为 {}，避免占位符被误转义
+        let escaped = escape_format_braces(&format_str);
+        let mut fmt_quoted = escaped;
+        for i in 0..arg_idx {
+            fmt_quoted = fmt_quoted.replace(&format!("__LZ_FMT_{}__", i), "{}");
+        }
+        let fmt_quoted = fmt_quoted.replace('"', "\\\"");
+        if args.is_empty() {
+            format!("format!(\"{}\")", fmt_quoted)
+        } else {
+            format!("format!(\"{}\", {})", fmt_quoted, args.join(", "))
+        }
+    }
+
+    /// 将 IR 表达式字符串化（用于 f-string 插值）。简单提取：若为 Var/字段则直接用名字
+    fn gen_expr_str(&self, expr: &str) -> String {
+        expr.trim().to_string()
+    }
+
+
     fn gen_lit(&self, lit: &LitKind, _ty: &IrType) -> String {
         match lit {
             LitKind::Int(n) => n.to_string(),
@@ -2228,6 +2291,7 @@ impl CodeGen {
                 let escaped = s.escape_default().to_string();
                 format!("\"{}\".to_string()", escaped)
             }
+            LitKind::FStr(s) => self.gen_fstring(s),
             LitKind::Bool(b) => b.to_string(),
             LitKind::Unit => "()".to_string(),
             LitKind::None_ => "None".to_string(),
@@ -2500,6 +2564,36 @@ fn gen_kwarg_value(arg: &Expr, cg: &CodeGen) -> String {
         }
     }
     cg.gen_expr(arg)
+}
+
+/// 转义 format! 字符串中的独立 { / }（避免被误判为占位符）
+/// 已转义的 {{ 或 }} 保持不变
+fn escape_format_braces(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '{' => {
+                if chars.peek() == Some(&'{') {
+                    // 已是 {{，保留（显示字面 {）
+                    chars.next();
+                    out.push_str("{{");
+                } else {
+                    out.push_str("{{");
+                }
+            }
+            '}' => {
+                if chars.peek() == Some(&'}') {
+                    chars.next();
+                    out.push_str("}}");
+                } else {
+                    out.push_str("}}");
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Strip `: Type` annotations from closure params (for comprehension closures)
