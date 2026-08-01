@@ -1560,11 +1560,8 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         AstStmt::Continue => Stmt::Continue,
 
         AstStmt::Defer(body) => {
-            // defer → 展开为 Block（在 block end 处追加 cleanup）
-            let mut stmts = convert_block(body, ctx).stmts;
-            stmts.push(Stmt::ExprStmt {
-                expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
-            });
+            // defer → 展开为 Block（不追加 return，让后续代码继续执行）
+            let stmts = convert_block(body, ctx).stmts;
             Stmt::Block { stmts }
         },
 
