@@ -1381,6 +1381,37 @@ impl CodeGen {
                     } else {
                         format!("{}..{}", args_s[0], args_s[1])
                     }
+                // ── Iterator/collection free-function → method mappings ──
+                // Pipe inserts receiver as first arg: [1,2,3] |> f(args) → f([1,2,3], args)
+                // Strip type annotations from closure args for Rust iterator adapters
+                } else if callee_s == "sum" && args_s.len() == 1 {
+                    // sum(collection) → collection.iter().sum()
+                    format!("({}).iter().sum()", args_s[0])
+                } else if callee_s == "map" && args_s.len() == 2 {
+                    // map(collection, fn) → collection.into_iter().map(fn)
+                    let lambda = strip_lambda_type(&args_s[1]);
+                    format!("({}).into_iter().map({})", args_s[0], lambda)
+                } else if callee_s == "filter" && args_s.len() == 2 {
+                    // filter(iterator, fn) → iterator.filter(fn)
+                    // filter takes &Item, so add & before closure params
+                    let lambda = strip_lambda_type_with_ref(&args_s[1]);
+                    format!("({}).filter({})", args_s[0], lambda)
+                } else if callee_s == "collect" && args_s.len() == 1 {
+                    format!("({}).collect::<Vec<_>>()", args_s[0])
+                } else if callee_s == "max" && args_s.len() == 1 {
+                    format!("(*(&{}).iter().max().unwrap())", args_s[0])
+                } else if callee_s == "min" && args_s.len() == 1 {
+                    format!("(*(&{}).iter().min().unwrap())", args_s[0])
+                } else if callee_s == "any" && args_s.len() == 2 {
+                    let lambda = strip_lambda_type(&args_s[1]);
+                    format!("({}).iter().any({})", args_s[0], lambda)
+                } else if callee_s == "all" && args_s.len() == 2 {
+                    let lambda = strip_lambda_type(&args_s[1]);
+                    format!("({}).iter().all({})", args_s[0], lambda)
+                } else if callee_s == "sorted" && args_s.len() == 1 {
+                    format!("{{ let mut _tmp = {0}.clone(); _tmp.sort(); _tmp }}", args_s[0])
+                } else if callee_s == "reversed" && args_s.len() == 1 {
+                    format!("{{ let mut _tmp = {0}.clone(); _tmp.reverse(); _tmp }}", args_s[0])
                 // --- End prelude mappings ---
                 } else if !args.is_empty() && is_kwarg_call(args) && self.emitted_types.contains(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
@@ -2129,6 +2160,33 @@ fn strip_lambda_type(lambda: &str) -> String {
         }
     }
     result
+}
+
+/// Strip type annotations AND add `&` before each param for filter-style closures
+/// "move |x: i64| { ... }" → "move |&x| { ... }"
+/// "move |x| { ... }" → "move |&x| { ... }"
+fn strip_lambda_type_with_ref(lambda: &str) -> String {
+    let no_types = strip_lambda_type(lambda);
+    // Now add `&` before each parameter name
+    // Format: "move |x, y| { ... }" or "|x| { ... }"
+    if let Some(pipe_open) = no_types.find('|') {
+        if let Some(pipe_close) = no_types[pipe_open + 1..].find('|') {
+            let params_part = &no_types[pipe_open + 1..pipe_open + 1 + pipe_close];
+            let ref_params: String = params_part
+                .split(',')
+                .map(|p| {
+                    let trimmed = p.trim();
+                    if trimmed.is_empty() { String::new() }
+                    else { format!("&{}", trimmed) }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let before = &no_types[..pipe_open + 1];
+            let after = &no_types[pipe_open + 1 + pipe_close..];
+            return format!("{}{}{}", before, ref_params, after);
+        }
+    }
+    no_types
 }
 
 /// 将 _KwArg { name, value } 展开为 "field: value"
