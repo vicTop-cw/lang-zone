@@ -675,7 +675,22 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     }
                 }
             }
-            let ir_type_args: Vec<String> = type_args.iter().map(|t| {
+            // 处理 func[type_arg](args) → 泛型调用: func::<type_arg>(args)
+            let actual_func: &AstExpr;
+            let extra_type_args: Vec<String>;
+            if let AstExpr::Index { receiver, index } = func.as_ref() {
+                if let AstExpr::Ident(ref type_name) = index.as_ref() {
+                    actual_func = receiver;
+                    extra_type_args = vec![type_name.clone()];
+                } else {
+                    actual_func = func;
+                    extra_type_args = vec![];
+                }
+            } else {
+                actual_func = func;
+                extra_type_args = vec![];
+            }
+            let mut ir_type_args: Vec<String> = type_args.iter().map(|t| {
                 match t.as_str() {
                     "int" => "i64".to_string(),
                     "str" => "String".to_string(),
@@ -684,8 +699,9 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     other => other.to_string(),
                 }
             }).collect();
+            ir_type_args.extend(extra_type_args);
             ExprKind::Call { type_args: ir_type_args,
-                callee: Box::new(convert_expr(func, ctx)),
+                callee: Box::new(convert_expr(actual_func, ctx)),
                 args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
             }
         }
@@ -957,7 +973,11 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             
             // 检查 receiver 是否是已知类型名（非变量引用）→ 跳过 null check
             let is_type_name = match receiver.as_ref() {
-                AstExpr::Ident(name) => !ctx.vars.contains_key(name.as_str()),
+                AstExpr::Ident(name) => {
+                    !ctx.vars.contains_key(name.as_str())
+                    && (ctx.struct_names.contains(name.as_str())
+                        || ctx.enum_variants.values().any(|en| en == name.as_str()))
+                }
                 _ => false,
             };
             

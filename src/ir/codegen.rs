@@ -271,14 +271,26 @@ impl CodeGen {
     }
 
     fn emit_prelude(&mut self) {
+        // Rust 2021 edition support (async/await, etc.)
         self.emit_line("#![allow(unused_imports)]");
         self.emit_line("#![allow(unused_variables)]");
         self.emit_line("#![allow(dead_code)]");
+        self.emit_line("#![allow(non_snake_case)]");
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
         self.emit_line("use std::rc::Rc;");
         self.emit_line("use std::sync::Arc;");
         self.buf.push('\n');
+
+        // ── Lang-Zone 运行时桥接 shims ──
+        // 仅注入 __Params 类型定义
+        self.buf.push_str("// ── 运行时桥接 shims ──\n");
+        self.buf.push_str("use std::any::Any;\n");
+        self.buf.push_str("#[derive(Debug)]\n");
+        self.buf.push_str("pub struct __Params {\n");
+        self.buf.push_str("    pub args: Vec<Box<dyn Any>>,\n");
+        self.buf.push_str("    pub kwargs: HashMap<String, Box<dyn Any>>,\n");
+        self.buf.push_str("}\n\n");
     }
 
     // ── 类型映射 ──
@@ -544,6 +556,7 @@ impl CodeGen {
         self.emitted_types.insert(s.name.clone());
 
         let generics = self.gen_generics(&s.generics);
+        self.emit_line("#[derive(Debug, Clone)]");
         self.emit_line(&format!("pub struct {}{} {{", s.name, generics));
         self.indent += 1;
         for field in &s.fields {
@@ -1321,7 +1334,13 @@ impl CodeGen {
                 } else if callee_s == "len" && args_s.len() == 1 {
                     format!("({}.len() as i64)", args_s[0])
                 } else if callee_s == "contains" && args_s.len() == 2 {
-                    format!("({}).contains(&{})", args_s[0], args_s[1])
+                    // HashMap/Dict → contains_key; String/Vec → contains
+                    let is_dict = matches!(&args[0].ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                    if is_dict {
+                        format!("({}).contains_key(&{})", args_s[0], args_s[1])
+                    } else {
+                        format!("({}).contains(&{})", args_s[0], args_s[1])
+                    }
                 } else if callee_s == "iter" && args_s.len() == 1 {
                     format!("({}).iter()", args_s[0])
                 } else if callee_s == "enumerate" && args_s.len() == 1 {
@@ -1477,7 +1496,13 @@ impl CodeGen {
                     "pop" => "pop",
                     "sort" => "sort",
                     "reverse" => "reverse",
-                    "contains" => "contains",
+                    "contains" => {
+                        // HashMap/Dict → contains_key; String/Vec → contains
+                        let is_dict = matches!(&receiver.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                        // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
+                        let is_kwargs = matches!(&receiver.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
+                        if is_dict || is_kwargs { "contains_key" } else { "contains" }
+                    }
                     "split" => "split",
                     "join" => "join",
                     "replace" => "replace",
@@ -1535,15 +1560,16 @@ impl CodeGen {
                     }
                 } else {
                     let key_s = self.gen_expr(key);
-                    // HashMap/Dict 索引需要引用: map[&key] 而非 map[key]
-                    // Rust HashMap::index 签名: fn index(&self, key: &Q) -> &V —— 始终需要引用
+                    // HashMap/Dict 索引: map["key"] → map.get(&"key").cloned() 
+                    // Rust HashMap 不实现 Index trait
                     let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
-                    let key_expr = if is_dict {
-                        format!("&{}", key_s)
+                    // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
+                    let is_kwargs = matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
+                    if is_dict || is_kwargs {
+                        format!("({}).get(&{}).cloned().unwrap()", base_s, key_s)
                     } else {
-                        key_s
-                    };
-                    format!("{}[{}]", base_s, key_expr)
+                        format!("{}[{}]", base_s, key_s)
+                    }
                 }
             }
             ExprKind::IndexSet { base, key, value } => {

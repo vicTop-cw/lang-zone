@@ -6,6 +6,11 @@ import subprocess, os, sys, glob, json, re, shutil, tempfile
 from pathlib import Path
 from datetime import datetime
 
+# Fix Unicode output on Windows
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 ROOT = Path(r"E:\IDEProjects\AI\lang-zone")
 BIN = ROOT / "target" / "debug" / "lang-zone.exe"
 DEMO_DIR = ROOT / "DEMO"
