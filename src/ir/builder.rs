@@ -1361,10 +1361,22 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         AstStmt::Let { name, mutable, ty, value, .. } => {
             let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
+            let mut ir_value = convert_expr(value, ctx);
+            // 当 Let 类型注解为 fn(..) -> .. 且 value 是 Lambda 时，
+            // 将 fn 的参数类型传播到 Lambda 参数中
+            if let IrType::Fn { params: fn_params, .. } = &ir_ty {
+                if let ExprKind::Lambda { params: lambda_params, .. } = &mut ir_value.kind {
+                    if lambda_params.len() == fn_params.len() {
+                        for (lp, fp) in lambda_params.iter_mut().zip(fn_params.iter()) {
+                            lp.ty = fp.clone();
+                        }
+                    }
+                }
+            }
             Stmt::Let {
                 name: name.clone(),
                 ty: ir_ty,
-                value: convert_expr(value, ctx),
+                value: ir_value,
                 is_mut: *mutable,
             }
         }
@@ -1372,10 +1384,21 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         AstStmt::Const { name, ty, value } => {
             let ir_ty = ty.as_ref().map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
+            let mut ir_value = convert_expr(value, ctx);
+            // 同上：传播 fn 参数类型到 Lambda
+            if let IrType::Fn { params: fn_params, .. } = &ir_ty {
+                if let ExprKind::Lambda { params: lambda_params, .. } = &mut ir_value.kind {
+                    if lambda_params.len() == fn_params.len() {
+                        for (lp, fp) in lambda_params.iter_mut().zip(fn_params.iter()) {
+                            lp.ty = fp.clone();
+                        }
+                    }
+                }
+            }
             Stmt::Let {
                 name: name.clone(),
                 ty: ir_ty,
-                value: convert_expr(value, ctx),
+                value: ir_value,
                 is_mut: false,
             }
         }

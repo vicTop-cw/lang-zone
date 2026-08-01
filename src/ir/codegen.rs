@@ -709,24 +709,79 @@ impl CodeGen {
             (".", "self"), ("..", "super"),
         ].iter().cloned().collect();
         
+        // LZ 内建函数/类型：由 codegen 直接生成，不需要 Rust use 语句
+        let builtin_items: std::collections::HashSet<&str> = [
+            "print", "read", "len", "panic", "type", "range",
+            "spawn", "await", "yield", "comptime",
+        ].iter().cloned().collect();
+        
+        // 已知的 LZ 模块路径 → Rust 模块路径映射
+        // 空字符串 = 无 Rust 对应模块，跳过 use 语句生成
+        let known_module_paths: std::collections::HashSet<&str> = [
+            "std::io",           // → std::io
+            "std::collections",  // → std::collections
+            "std::sync",         // → std::sync
+            "std::rc",           // → std::rc
+            "std::time",         // → std::time
+            "std::thread",       // → std::thread
+            "std::net",          // → std::net
+            "std::fs",           // → std::fs
+            "std::env",          // → std::env
+            "std::process",      // → std::process
+            "std::path",         // → std::path
+            "std::hash",         // → std::hash
+            "std::iter",         // std::iter (稳定)
+            "std::mem",          // std::mem (稳定)
+            "std::fmt",          // std::fmt (稳定)
+            "std::cmp",          // std::cmp (稳定)
+            "std::str",          // std::str (稳定)
+            "std::marker",       // std::marker (稳定)
+            "std::any",          // std::any (稳定)
+            "std::convert",      // std::convert (稳定)
+            "std::cell",         // std::cell (稳定)
+            "std::os",           // std::os (稳定)
+        ].iter().cloned().collect();
+        
         // prelude 已导入的项（不需要重复导入）
         let prelude_items: std::collections::HashSet<&str> = [
-            "HashMap", "HashSet", "Rc", "Arc",
+            "HashMap", "HashSet", "Rc", "Arc", "Vec",
         ].iter().cloned().collect();
         
         let path: Vec<String> = u.path.iter().map(|seg| {
             lz_to_rust.get(seg.as_str()).map(|s| s.to_string()).unwrap_or_else(|| seg.clone())
         }).collect();
         let path_str = path.join("::");
+        
+        // 相对导入（self::、super::）无法在生成的文件中解析，跳过
+        if path_str.starts_with("self::") || path_str.starts_with("super::") {
+            return;
+        }
+        
+        // 非相对路径：检查是否为已知模块或已知模块的子路径
+        let is_known = known_module_paths.contains(path_str.as_str());
+        let parent_path = path_str.rsplitn(2, "::").nth(1).unwrap_or("");
+        let parent_is_known = known_module_paths.contains(parent_path);
+        let is_std_root = path_str == "std";
+        if !is_known && !parent_is_known && !is_std_root {
+            // 未知模块路径，跳过（如 std::math, std::bridge.rust.serde_json）
+            return;
+        }
+        
         if u.is_from {
             if u.items.is_empty() {
+                if !known_module_paths.contains(path_str.as_str()) && path_str != "std" {
+                    return;
+                }
                 self.emit_line(&format!("use {};", path_str));
             } else if u.items.len() == 1 && u.items[0] == "*" {
-                // * 通配符 → use path::*;（不是 use path::{*}）
+                if !known_module_paths.contains(path_str.as_str()) {
+                    return;
+                }
                 self.emit_line(&format!("use {}::*;", path_str));
             } else {
-                // 过滤掉已在 prelude 中导入的项（先映射 LZ→Rust 再过滤）
+                // 过滤掉内建函数和已在 prelude 中的项
                 let items: Vec<String> = u.items.iter()
+                    .filter(|item| !builtin_items.contains(item.as_str()))
                     .map(|item| {
                         lz_to_rust.get(item.as_str()).map(|s| s.to_string()).unwrap_or_else(|| item.clone())
                     })
@@ -738,6 +793,11 @@ impl CodeGen {
                 self.emit_line(&format!("use {}::{{{}}};", path_str, items.join(", ")));
             }
         } else {
+            // import std.io → use std::io;
+            // import std.math → 跳过（无 Rust 对应模块）
+            if !known_module_paths.contains(path_str.as_str()) && path_str != "std" {
+                return;
+            }
             self.emit_line(&format!("use {};", path_str));
         }
     }
