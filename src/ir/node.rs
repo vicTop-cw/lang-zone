@@ -450,6 +450,7 @@ pub enum ExprKind {
     Lambda {
         params: Vec<Param>,
         body: Box<Expr>,
+        is_move: bool,
     },
 
     /// 结构体构造 Adder(base: 10)

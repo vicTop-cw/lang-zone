@@ -2,6 +2,7 @@
 // 表达式解析（优先级递降）+ Pattern 解析（作为 Parser 的 trait 扩展）
 
 use crate::lexer::Token;
+use crate::types::Type;
 use crate::ast::*;
 use super::parser::Parser;
 use super::helpers::validate_fstring;
@@ -431,6 +432,78 @@ impl ParserExprExt for Parser {
                     } else {
                         expr = Expr::PathAccess { receiver: Box::new(expr), segment: seg };
                     }
+                }
+                Token::Lt => {
+                    // 泛型调用: func<Type>(args)
+                    // 仅在当前表达式是 Ident（函数名）且后面跟着 > 和 ( 时处理
+                    if !matches!(&expr, Expr::Ident(_)) {
+                        break;
+                    }
+                    // peek ahead: 检查是否是泛型调用模式
+                    // 模式: Ident < Type (,...)? > (
+                    let mut is_generic_call = false;
+                    let mut idx = 1usize;
+                    loop {
+                        match self.peek_n(idx) {
+                            Token::Gt | Token::Shr => {
+                                // 检查 > 后面是否是 (
+                                let after_gt = if matches!(self.peek_n(idx), Token::Shr) { idx + 1 } else { idx + 1 };
+                                if matches!(self.peek_n(after_gt), Token::LParen) {
+                                    is_generic_call = true;
+                                }
+                                break;
+                            }
+                            Token::Comma => { idx += 1; }
+                            Token::Ident(_) | Token::IntLit(_) | Token::StrLit(_) | Token::True | Token::False => { idx += 1; }
+                            Token::LBrack => {
+                                // 跳过 [Type] 如 List[int]
+                                idx += 1;
+                                let mut depth = 1;
+                                while depth > 0 {
+                                    match self.peek_n(idx) {
+                                        Token::RBrack => { depth -= 1; idx += 1; }
+                                        Token::Eof => break,
+                                        _ => { idx += 1; }
+                                    }
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+                    if !is_generic_call {
+                        break;
+                    }
+                    // 确认是泛型调用，现在解析类型参数
+                    let _ = self.advance(); // 消费 <
+                    let mut type_args: Vec<Type> = Vec::new();
+                    loop {
+                        match self.peek() {
+                            Token::Gt | Token::Shr | Token::Eof => break,
+                            _ => {}
+                        }
+                        type_args.push(self.parse_type()?);
+                        if self.check(&Token::Comma) {
+                            let _ = self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    // 处理 >> 作为两个 > 的情况
+                    if self.check(&Token::Shr) {
+                        let _ = self.advance(); // 消费 >>（作为单个 >）
+                    } else {
+                        let _ = self.expect(Token::Gt)?;
+                    }
+                    // 解析参数
+                    let _ = self.expect(Token::LParen)?;
+                    let mut args = Vec::new();
+                    while !self.check(&Token::RParen) {
+                        args.push(self.parse_expr()?);
+                        if self.check(&Token::Comma) { let _ = self.advance(); }
+                    }
+                    let _ = self.expect(Token::RParen)?;
+                    let type_arg_names: Vec<String> = type_args.iter().map(|t| t.to_string()).collect();
+                    expr = Expr::Call { type_args: type_arg_names, func: Box::new(expr), args };
                 }
                 Token::LParen => {
                     self.advance();

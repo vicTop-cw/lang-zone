@@ -109,7 +109,7 @@ impl fmt::Display for Expr {
             ExprKind::BinOp { op, lhs, rhs } => write!(f, "binop {lhs} {op} {rhs}"),
             ExprKind::UnOp { op, operand } => write!(f, "unop {op} {operand}"),
             ExprKind::IfExpr { cond, then, els } => write!(f, "if {cond} then {then} else {els}"),
-            ExprKind::Lambda { params, body } => {
+            ExprKind::Lambda { params, body, .. } => {
                 f.write_str("|")?;
                 for (i, p) in params.iter().enumerate() {
                     if i > 0 { f.write_str(", ")?; }

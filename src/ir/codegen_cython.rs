@@ -236,7 +236,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
             format!("{}.{}({})", enum_name, variant, a.join(", "))
         }
-        ExprKind::Lambda { params, body } => {
+        ExprKind::Lambda { params, body, .. } => {
             let p: Vec<String> = params.iter().map(|p| p.name.clone() + ": object").collect();
             let b = gen_expr(cg, body);
             format!("lambda {}: {}", p.join(", "), b)
