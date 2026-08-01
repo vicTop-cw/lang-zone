@@ -432,7 +432,12 @@ impl Parser {
         let mut path = Vec::new();
         // 支持相对导入: from .utils, from ..common
         while self.check(&Token::Dot) || self.check(&Token::DotDot) {
-            path.push(self.advance().to_string());
+            let seg = match self.advance() {
+                Token::Dot => "self".to_string(),
+                Token::DotDot => "super".to_string(),
+                t => t.to_string(),
+            };
+            path.push(seg);
         }
         loop {
             match self.peek() {

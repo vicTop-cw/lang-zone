@@ -621,14 +621,20 @@ impl CodeGen {
 
     fn gen_use_stmt(&mut self, u: &UseStmt) {
         // 映射 LZ 类型名 → Rust 类型名（仅在 import 路径中使用）
+        // 以及相对路径前缀映射：. → self, .. → super
         let lz_to_rust: HashMap<&str, &str> = [
             ("List", "Vec"), ("Dict", "HashMap"), ("Set", "HashSet"),
             ("String", "String"), ("Nil", "()"), ("int", "i64"),
             ("str", "String"), ("f64", "f64"), ("bool", "bool"),
+            (".", "self"), ("..", "super"),
+        ].iter().cloned().collect();
+        
+        // prelude 已导入的项（不需要重复导入）
+        let prelude_items: std::collections::HashSet<&str> = [
+            "HashMap", "HashSet", "Rc", "Arc",
         ].iter().cloned().collect();
         
         let path: Vec<String> = u.path.iter().map(|seg| {
-            // 包名保留原样，类型名映射
             lz_to_rust.get(seg.as_str()).map(|s| s.to_string()).unwrap_or_else(|| seg.clone())
         }).collect();
         let path_str = path.join("::");
@@ -639,9 +645,16 @@ impl CodeGen {
                 // * 通配符 → use path::*;（不是 use path::{*}）
                 self.emit_line(&format!("use {}::*;", path_str));
             } else {
-                let items: Vec<String> = u.items.iter().map(|item| {
-                    lz_to_rust.get(item.as_str()).map(|s| s.to_string()).unwrap_or_else(|| item.clone())
-                }).collect();
+                // 过滤掉已在 prelude 中导入的项（先映射 LZ→Rust 再过滤）
+                let items: Vec<String> = u.items.iter()
+                    .map(|item| {
+                        lz_to_rust.get(item.as_str()).map(|s| s.to_string()).unwrap_or_else(|| item.clone())
+                    })
+                    .filter(|rust_item| !prelude_items.contains(rust_item.as_str()))
+                    .collect();
+                if items.is_empty() {
+                    return;
+                }
                 self.emit_line(&format!("use {}::{{{}}};", path_str, items.join(", ")));
             }
         } else {
@@ -755,9 +768,10 @@ impl CodeGen {
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
                     || matches!(ty, IrType::Generic(_))
+                    || matches!(ty, IrType::Fn { .. })
                     || if let IrType::Named { path, args } = ty {
-                        // Skip for Range, Nil, and types with unresolved generics
-                        path == "Range" || path == "Nil" || args.is_empty()
+                        path == "Range" || path == "Nil" || path == "Dict" || path == "Set"
+                            || args.is_empty()
                             || args.iter().any(|a| matches!(a, IrType::Generic(_)))
                     } else { false };
                 // 空容器需要类型提示 Vec<_> / HashMap<_, _>（Nil 类型除外）
@@ -1098,14 +1112,20 @@ impl CodeGen {
                 // dict_comp!(|x| (k, v), iter) → (iter).into_iter().map(|x| (k,v)).collect()
                 if callee_s == "dict_comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
-                        return format!("({}).into_iter().map({}).collect::<HashMap<_,_>>()", iter, lambda);
+                        let iter_method = if let Some(iter_expr) = args.get(1) {
+                            if matches!(&iter_expr.ty, IrType::Str) { ".chars()" } else { ".into_iter()" }
+                        } else { ".into_iter()" };
+                        return format!("({}){}.map({}).collect::<HashMap<_,_>>()", iter, iter_method, lambda);
                     }
                     return format!("HashMap::new()");
                 }
                 // set_comp!(|x| elem, iter) → (iter).into_iter().map(|x| elem).collect()
                 if callee_s == "set_comp!" {
                     if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
-                        return format!("({}).into_iter().map({}).collect::<HashSet<_>>()", iter, lambda);
+                        let iter_method = if let Some(iter_expr) = args.get(1) {
+                            if matches!(&iter_expr.ty, IrType::Str) { ".chars()" } else { ".into_iter()" }
+                        } else { ".into_iter()" };
+                        return format!("({}){}.map({}).collect::<HashSet<_>>()", iter, iter_method, lambda);
                     }
                     return format!("HashSet::new()");
                 }
@@ -1479,8 +1499,11 @@ impl CodeGen {
                 )
             }
             ExprKind::Lambda { params, body } => {
-                let params: Vec<String> = params.iter().map(|p| self.gen_param(p)).collect();
-                format!("|{}| {{ {} }}", params.join(", "), self.gen_expr(body))
+                let params: Vec<String> = params.iter().map(|p| {
+                    if p.ty == IrType::Any { format!("{}", p.name) }
+                    else { self.gen_param(p) }
+                }).collect();
+                format!("move |{}| {{ {} }}", params.join(", "), self.gen_expr(body))
             }
             ExprKind::StructCtor { name, fields } => {
                 // Special handling for built-in types

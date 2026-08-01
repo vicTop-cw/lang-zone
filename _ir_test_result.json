@@ -2,8 +2,8 @@
   "total": 129,
   "lz_pass": 129,
   "lz_fail": 0,
-  "rustc_pass": 67,
-  "rustc_fail": 62,
+  "rustc_pass": 70,
+  "rustc_fail": 59,
   "pass_files": [
     "01_basics\\comments.lz",
     "01_basics\\literals_more.lz",
@@ -11,6 +11,7 @@
     "02_types\\option_result.lz",
     "02_types\\type_aliases.lz",
     "02_types\\type_aliases_more.lz",
+    "02_types\\type_conversion.lz",
     "03_variables\\const.lz",
     "03_variables\\const_more.lz",
     "03_variables\\mutable_let.lz",
@@ -53,6 +54,7 @@
     "99_spec\\comprehension_over_list.lz",
     "99_spec\\comptime_template.lz",
     "99_spec\\constraint_multi.lz",
+    "99_spec\\go_stmt.lz",
     "99_spec\\guard_for_1.lz",
     "99_spec\\guard_for_2.lz",
     "99_spec\\ir-edge-boundary-values.lz",
@@ -64,6 +66,7 @@
     "99_spec\\loop_else.lz",
     "99_spec\\macro_real.lz",
     "99_spec\\match_guard.lz",
+    "99_spec\\set_comprehension.lz",
     "99_spec\\setup_teardown.lz",
     "99_spec\\tilde_named_arg_1.lz",
     "99_spec\\tilde_named_arg_2.lz",
@@ -81,12 +84,92 @@
       "07_data_structures\\magic_methods.lz",
       "99_spec\\extractor_unapply.lz",
       "99_spec\\gen_block_star.lz",
+      "99_spec\\iterator_demo.lz"
+    ],
+    "E0728": [
+      "01_basics\\keywords.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_spawn.lz",
+      "11_concurrency\\async_spawn.lz",
+      "combo-syntax\\combo_async_spawn.lz",
+      "combo-syntax\\combo_async_spawn.lz"
+    ],
+    "E0308": [
+      "01_basics\\keywords.lz",
+      "01_basics\\keywords.lz",
+      "01_basics\\keywords.lz",
+      "01_basics\\keywords.lz",
+      "04_functions\\closures_more.lz",
+      "04_functions\\generics.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "06_control_flow\\with_defer.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\try_more.lz",
+      "10_error_handling\\try_more.lz",
+      "10_error_handling\\try_more.lz",
+      "10_error_handling\\try_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_spawn.lz",
+      "11_concurrency\\async_spawn.lz",
+      "13_operators\\precedence.lz",
+      "99_spec\\codegen_str_int_float.lz",
+      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
+      "99_spec\\dict_comprehension.lz",
+      "99_spec\\gen_block_star.lz",
       "99_spec\\iterator_demo.lz",
-      "99_spec\\set_comprehension.lz"
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "combo-syntax\\combo_async_spawn.lz",
+      "combo-syntax\\combo_async_spawn.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_match_ternary.lz",
+      "combo-syntax\\combo_match_ternary.lz",
+      "combo-syntax\\combo_match_ternary.lz",
+      "combo-syntax\\combo_ternary_walrus.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "overload_test.lz",
+      "variadic_dotdot.lz"
+    ],
+    "E0282": [
+      "01_basics\\literals.lz",
+      "02_types\\primitives.lz",
+      "99_spec\\ir-edge-empty-collections.lz",
+      "99_spec\\ir-edge-empty-collections.lz"
     ],
     "E0425": [
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
       "04_functions\\checker.lz",
       "04_functions\\checker.lz",
       "04_functions\\generics.lz",
@@ -100,20 +183,6 @@
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_spawn.lz",
-      "11_concurrency\\async_spawn.lz",
-      "11_concurrency\\async_spawn.lz",
-      "11_concurrency\\async_spawn.lz",
       "12_build_blocks\\build_more.lz",
       "12_build_blocks\\build_more.lz",
       "12_build_blocks\\var_call_block.lz",
@@ -153,8 +222,6 @@
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
       "99_spec\\combo-syntax\\combo_while_guard_try.lz",
       "99_spec\\duck_test.lz",
-      "99_spec\\go_stmt.lz",
-      "99_spec\\go_stmt.lz",
       "99_spec\\guard_for_3.lz",
       "99_spec\\guard_for_3.lz",
       "99_spec\\iterator_demo.lz",
@@ -167,10 +234,6 @@
       "99_spec\\while_walrus_guard_1.lz",
       "99_spec\\while_walrus_guard_1.lz",
       "99_spec\\while_walrus_guard_1.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_for_walrus.lz",
       "combo-syntax\\combo_for_walrus.lz",
       "combo-syntax\\combo_pipe_partial.lz",
@@ -181,79 +244,6 @@
       "combo-syntax\\combo_while_walrus.lz",
       "combo-syntax\\combo_while_walrus.lz"
     ],
-    "E0728": [
-      "01_basics\\keywords.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_spawn.lz",
-      "11_concurrency\\async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz"
-    ],
-    "E0308": [
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "02_types\\type_conversion.lz",
-      "04_functions\\closures_more.lz",
-      "04_functions\\generics.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "06_control_flow\\with_defer.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\try_more.lz",
-      "10_error_handling\\try_more.lz",
-      "10_error_handling\\try_more.lz",
-      "10_error_handling\\try_more.lz",
-      "13_operators\\precedence.lz",
-      "99_spec\\codegen_str_int_float.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\gen_block_star.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_ternary_walrus.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "overload_test.lz",
-      "variadic_dotdot.lz"
-    ],
-    "E0282": [
-      "01_basics\\literals.lz",
-      "02_types\\primitives.lz",
-      "99_spec\\ir-edge-empty-collections.lz",
-      "99_spec\\ir-edge-empty-collections.lz"
-    ],
     "E0608": [
       "04_functions\\checker.lz",
       "07_data_structures\\magic_methods.lz",
@@ -262,9 +252,6 @@
       "07_data_structures\\magic_methods.lz",
       "14_pointers\\rc_arc_more.lz",
       "14_pointers\\rc_arc_more.lz"
-    ],
-    "E0373": [
-      "04_functions\\closures_more.lz"
     ],
     "E0423": [
       "04_functions\\generics.lz",
@@ -309,8 +296,6 @@
       "05_expressions\\operators.lz",
       "08_modules\\import_demo.lz",
       "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_more.lz",
       "08_modules\\import_more.lz",
       "08_modules\\import_more.lz",
       "combo-syntax\\combo_enum_match_guardlet.lz",
@@ -337,6 +322,9 @@
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
+      "11_concurrency\\async_more.lz",
       "99_spec\\index_build.lz",
       "99_spec\\index_build.lz",
       "99_spec\\index_build_block.lz",
@@ -350,14 +338,11 @@
     "E0600": [
       "07_data_structures\\magic_methods.lz"
     ],
-    "E0252": [
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz"
-    ],
     "E0432": [
       "08_modules\\import_demo.lz",
       "08_modules\\import_demo.lz",
+      "08_modules\\import_demo.lz",
+      "08_modules\\import_more.lz",
       "08_modules\\import_more.lz",
       "08_modules\\import_more.lz",
       "08_modules\\import_more.lz"
@@ -366,10 +351,6 @@
       "99_spec\\combo-syntax\\combo_for_guard_match.lz",
       "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
       "combo-syntax\\combo_generic_struct_method.lz"
-    ],
-    "E0610": [
-      "99_spec\\dict_comprehension.lz",
-      "99_spec\\dict_comprehension.lz"
     ],
     "E0069": [
       "99_spec\\iterator_demo.lz"
@@ -412,11 +393,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:78:16",
+        "warning: unnecessary parentheses around assigned value",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:78:22",
         "|",
-        "78 |     let mut f: Future<i64> = spawn(fetch());",
-        "|                ^^^^^^ not found in this scope",
+        "78 |     let mut f: i64 = (fetch());",
+        "|                      ^       ^",
         "|"
       ]
     },
@@ -447,19 +428,6 @@
       ]
     },
     {
-      "file": "02_types\\type_conversion.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:43:43",
-        "|",
-        "43 |     let mut greet: fn(String) -> String = |name: i64| { \"Hello, {name}\".to_string() };",
-        "|                    --------------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected fn pointer, found closure",
-        "|                    |"
-      ]
-    },
-    {
       "file": "04_functions\\checker.lz",
       "lz_ok": true,
       "rustc_ok": false,
@@ -476,12 +444,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0373]: closure may outlive the current function, but it borrows `n`, which is owned by the current function",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\closures_more.rs:14:12",
+        "error[E0308]: mismatched types",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\closures_more.rs:22:37",
         "|",
-        "14 |     return |x: i64| { x + n };",
-        "|            ^^^^^^^^       - `n` is borrowed here",
-        "|            |"
+        "13 | pub fn adder(n: i64) -> impl Fn(i64) -> i64 {",
+        "|                         ------------------- the found opaque type",
+        "..."
       ]
     },
     {
@@ -492,7 +460,7 @@
         "error[E0425]: cannot find value `int` in this scope",
         "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\generics.rs:56:37",
         "|",
-        "56 |     println!(\"{:?} {:?}\", convert < int, str > (10, |n: i64| { \"num: {n}\".to_string() }));",
+        "56 |     println!(\"{:?} {:?}\", convert < int, str > (10, move |n| { \"num: {n}\".to_string() }));",
         "|                                     ^^^",
         "|                                     |"
       ]
@@ -566,12 +534,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0252]: the name `HashMap` is defined multiple times",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_demo.rs:13:29",
+        "error[E0432]: unresolved imports `std::io::print`, `std::io::read`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_demo.rs:11:15",
         "|",
-        "5 | use std::collections::{HashMap, HashSet};",
-        "|                        ------- previous import of the type `HashMap` here",
-        "..."
+        "11 | use std::io::{print, read};",
+        "|               ^^^^^  ^^^^ no `read` in `io`",
+        "|               |"
       ]
     },
     {
@@ -579,12 +547,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0252]: the name `HashMap` is defined multiple times",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_more.rs:13:29",
+        "error[E0432]: unresolved import `std::math`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_more.rs:9:5",
         "|",
-        "5 | use std::collections::{HashMap, HashSet};",
-        "|                        ------- previous import of the type `HashMap` here",
-        "..."
+        "9 | use std::math;",
+        "|     ^^^^^^^^^ no `math` in the root",
+        "|"
       ]
     },
     {
@@ -618,11 +586,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_more.rs:14:16",
+        "warning: unnecessary parentheses around assigned value",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_more.rs:14:25",
         "|",
-        "14 |     let mut a: Future<String> = spawn(fetch(1));",
-        "|                ^^^^^^ not found in this scope",
+        "14 |     let mut a: String = (fetch(1));",
+        "|                         ^        ^",
         "|"
       ]
     },
@@ -631,11 +599,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_spawn.rs:14:17",
+        "warning: unnecessary parentheses around assigned value",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_spawn.rs:14:26",
         "|",
-        "14 |     let mut f1: Future<String> = spawn(fetch_data(10));",
-        "|                 ^^^^^^ not found in this scope",
+        "14 |     let mut f1: String = (fetch_data(10));",
+        "|                          ^              ^",
         "|"
       ]
     },
@@ -771,11 +739,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0610]: `i64` is a primitive type and therefore doesn't have fields",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\dict_comprehension.rs:17:78",
+        "error[E0308]: mismatched types",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\dict_comprehension.rs:17:40",
         "|",
-        "17 |     let mut by_id: HashMap<i64, i64> = (users).into_iter().map(|u: i64| { (u.id, u.name) }).collect::<HashMap<_,_>>();",
-        "|                                                                              ^^"
+        "17 |     let mut by_id: HashMap<i64, i64> = (users).into_iter().map(move |u| { (u.id, u.name) }).collect::<HashMap<_,_>>();",
+        "|                    -----------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `HashMap<i64, i64>`, found `HashMap<i64, String>`",
+        "|                    |"
       ]
     },
     {
@@ -813,19 +782,6 @@
         "|",
         "14 |     for p in (xs).into_iter() {",
         "|                   ^^^^^^^^^ `i64` is not an iterator",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\go_stmt.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find function `spawn` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\go_stmt.rs:14:5",
-        "|",
-        "14 |     spawn(worker(1));",
-        "|     ^^^^^ not found in this scope",
         "|"
       ]
     },
@@ -938,21 +894,8 @@
         "error[E0425]: cannot find function `map` in this scope",
         "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\pipe_spec.rs:10:32",
         "|",
-        "10 |     let mut r = collect(filter(map(vec![1, 2, 3], |x: i64| { x * 2 }), |x: i64| { x > 2 }));",
+        "10 |     let mut r = collect(filter(map(vec![1, 2, 3], move |x| { x * 2 }), move |x| { x > 2 }));",
         "|                                ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "99_spec\\set_comprehension.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0599]: the method `into_iter` exists for struct `String`, but its trait bounds were not satisfied",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\set_comprehension.rs:12:43",
-        "|",
-        "12 |     let mut vowels: HashSet<i64> = (text).into_iter().map(|c: i64| { c }).collect::<HashSet<_>>();",
-        "|                                           ^^^^^^^^^",
-        "|"
       ]
     },
     {
@@ -1022,11 +965,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_async_spawn.rs:14:17",
+        "warning: unnecessary parentheses around assigned value",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_async_spawn.rs:14:23",
         "|",
-        "14 |     let mut f1: Future<i64> = spawn(fetch(10));",
-        "|                 ^^^^^^ not found in this scope",
+        "14 |     let mut f1: i64 = (fetch(10));",
+        "|                       ^         ^",
         "|"
       ]
     },
