@@ -257,7 +257,9 @@ impl ParserStmtExt for Parser {
             }
             Token::With => {
                 self.advance();
-                let expr = self.parse_expr()?;
+                // 使用 parse_pipe() 而非 parse_expr()，避免 'as' 被当作类型转换运算符吞掉
+                // with expr as alias: — 'as' 在此上下文是别名绑定，不是类型转换
+                let expr = self.parse_pipe()?;
                 let alias = if self.check(&Token::As) {
                     self.advance();
                     match self.advance() {

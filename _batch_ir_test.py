@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Batch test all DEMO/*.lz files via IR codegen path."""
-import subprocess, sys, os, shutil
+import subprocess, sys, os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 LZ_EXE = ROOT / "target" / "debug" / "lang-zone.exe"
-if not LZ_EXE.exists():
-    print("ERROR: lang-zone.exe not found. Run: cargo build")
-    sys.exit(1)
+assert LZ_EXE.exists(), "lang-zone.exe not found. Run: cargo build"
 
 lz_files = sorted(f for f in ROOT.glob("DEMO/**/*.lz")
     if "spec" not in str(f).lower() and "error" not in str(f).lower())
@@ -53,12 +51,9 @@ print(f"  PASS:       {len(results['PASS'])}")
 print(f"  IR_FAIL:    {len(results['IR_FAIL'])}")
 print(f"  RUSTC_FAIL: {len(results['RUSTC_FAIL'])}")
 
-for label, items in [("RUSTC_FAIL", results["RUSTC_FAIL"]), ("IR_FAIL", results["IR_FAIL"])]:
+for label, items in [("RUSTC_FAIL", results["RUSTC_FAIL"])]:
     print(f"\n--- {label} ({len(items)}) ---")
     for n, e in items: print(f"  {n}\n    {e}")
-
-print(f"\n--- PASS ({len(results['PASS'])}) ---")
-for n in results["PASS"]: print(f"  {n}")
 
 print(f"\n--- ERROR BREAKDOWN ---")
 for code, count in sorted(error_categories.items(), key=lambda x: -x[1]):
