@@ -1186,30 +1186,77 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             }
         }
 
-        AstExpr::BuildBlock { kind, lhs, body: _ } => {
-            // 构建块脱糖 — 这是核心
+        AstExpr::BuildBlock { kind, lhs, body } => {
+            // 构建块脱糖：将 body 转换为 BlockExpr，然后包装为闭包立即调用
+            // 参考 AST codegen 的 gen_build_block 实现
             match kind {
                 BuildKind::Var => {
-                    // =: → 转为 Let 语句（在下层处理，这里给占位）
-                    ExprKind::Lit(LitKind::Unit)
+                    // =: → { let __tmp = (|| { body; __result })(); __tmp }
+                    // body 中的变量声明在此作用域中，闭包立即执行
+                    let body_block = convert_block_with_ctx(body, ctx);
+                    // 用 BlockExpr 包装 body（作为 Lambda 立即调用）
+                    let body_expr = Expr::new(
+                        ExprKind::BlockExpr { block: body_block },
+                        IrType::Any,
+                        Span::unknown(),
+                    );
+                    ExprKind::Call {
+                        type_args: vec![],
+                        callee: Box::new(Expr::new(
+                            ExprKind::Lambda {
+                                params: vec![],
+                                body: Box::new(body_expr),
+                                is_move: false,
+                            },
+                            IrType::Any,
+                            Span::unknown(),
+                        )),
+                        args: vec![],
+                    }
+                }
+                BuildKind::Call => {
+                    // ~: → callee(__p) 其中 __p = (|| { body })()
+                    // body 的返回值作为单个参数传给 callee
+                    let body_block = convert_block_with_ctx(body, ctx);
+                    let body_expr = Expr::new(
+                        ExprKind::BlockExpr { block: body_block },
+                        IrType::Any,
+                        Span::unknown(),
+                    );
+                    let packed = Expr::new(
+                        ExprKind::Call {
+                            type_args: vec![],
+                            callee: Box::new(Expr::new(
+                                ExprKind::Lambda {
+                                    params: vec![],
+                                    body: Box::new(body_expr),
+                                    is_move: false,
+                                },
+                                IrType::Any,
+                                Span::unknown(),
+                            )),
+                            args: vec![],
+                        },
+                        IrType::Any,
+                        Span::unknown(),
+                    );
+                    ExprKind::Call {
+                        type_args: vec![],
+                        callee: Box::new(convert_expr(lhs, ctx)),
+                        args: vec![packed],
+                    }
+                }
+                BuildKind::Gen => {
+                    // *: → 生成器表达式，将 body 转换为迭代器
+                    let body_block = convert_block_with_ctx(body, ctx);
+                    ExprKind::BlockExpr { block: body_block }
                 }
                 BuildKind::Index => {
-                    // ^: → IndexGet
+                    // ^: → IndexGet（保持原有逻辑）
                     ExprKind::IndexGet {
                         base: Box::new(convert_expr(lhs, ctx)),
                         key: Box::new(convert_expr(lhs, ctx)),
                     }
-                }
-                BuildKind::Call => {
-                    // ~: → Call — body 是块尾元组/字典作为参数
-                    ExprKind::Call { type_args: vec![],
-                        callee: Box::new(convert_expr(lhs, ctx)),
-                        args: vec![Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown())],
-                    }
-                }
-                BuildKind::Gen => {
-                    // *: → Vec::new() 占位
-                    ExprKind::ListLit(vec![])
                 }
             }
         }
@@ -1349,7 +1396,46 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }).collect();
             Stmt::Match { scrutinee: ir_scrutinee, arms: ir_arms }
         }
-        AstStmt::Expr(e) => Stmt::ExprStmt { expr: convert_expr(e, ctx) },
+        AstStmt::Expr(e) => {
+            // 构建块（=:/~:）在表达式位置出现时，需要特殊处理
+            // =: 构建块作为表达式语句：生成立即调用闭包作为表达式
+            if let AstExpr::BuildBlock { kind: BuildKind::Var, lhs, body } = e {
+                let lhs_name = match &**lhs {
+                    AstExpr::Ident(name) => name.clone(),
+                    _ => return Stmt::Pass,
+                };
+                let body_block = convert_block_with_ctx(body, ctx);
+                let body_expr = Expr::new(
+                    ExprKind::BlockExpr { block: body_block },
+                    IrType::Any,
+                    Span::unknown(),
+                );
+                let init_expr = Expr::new(
+                    ExprKind::Call {
+                        type_args: vec![],
+                        callee: Box::new(Expr::new(
+                            ExprKind::Lambda {
+                                params: vec![],
+                                body: Box::new(body_expr),
+                                is_move: false,
+                            },
+                            IrType::Any,
+                            Span::unknown(),
+                        )),
+                        args: vec![],
+                    },
+                    IrType::Any,
+                    Span::unknown(),
+                );
+                return Stmt::Let {
+                    name: lhs_name,
+                    ty: IrType::Any,
+                    value: init_expr,
+                    is_mut: false,
+                };
+            }
+            Stmt::ExprStmt { expr: convert_expr(e, ctx) }
+        }
 
         AstStmt::Pass => Stmt::Pass,
 

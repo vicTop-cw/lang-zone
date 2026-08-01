@@ -272,6 +272,7 @@ impl fmt::Display for MagicKind {
             MagicKind::IntoIter => f.write_str("__into_iter__"),
             MagicKind::SizeHint => f.write_str("__size_hint__"),
             MagicKind::IterStrategy => f.write_str("__iter_strategy__"),
+            MagicKind::UnpackBuildCall => f.write_str("unpack_build_call"),
         }
     }
 }

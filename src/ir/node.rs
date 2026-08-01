@@ -567,6 +567,7 @@ pub enum MagicKind {
     IntoIter,        // __into_iter__
     SizeHint,        // __size_hint__
     IterStrategy,    // __iter_strategy__
+    UnpackBuildCall, // ~: 构建块参数解包
 }
 
 // ══════════════════════════════════════════════════════════════

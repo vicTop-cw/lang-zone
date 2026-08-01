@@ -1284,6 +1284,8 @@ impl CodeGen {
                 let callee_s = self.gen_expr(callee);
                 let mut args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
                 
+
+                
                 // 泛型类型参数 → turbofish 语法: foo::<T>(args)
                 let turbofish = if !type_args.is_empty() {
                     let types: Vec<String> = type_args.iter().map(|t| self.rust_type_name(t)).collect();
@@ -1790,8 +1792,20 @@ impl CodeGen {
             ExprKind::Lambda { params, body, .. } => {
                 let params: Vec<String> = params.iter().map(|p| self.gen_param(p)).collect();
                 // Use move for all closures - LZ doesn't have Rust borrow semantics
-                // Comprehension closures will get their :i64 stripped in the comprehension handler
-                format!("move |{}| {{ {} }}", params.join(", "), self.gen_expr(body))
+                // 当 body 是 BlockExpr 时，抑制 return 关键字让尾表达式正常工作
+                if let ExprKind::BlockExpr { block } = &body.kind {
+                    let mut child = CodeGen::new();
+                    child.emitted_types = self.emitted_types.clone();
+                    child.enum_variants = self.enum_variants.clone();
+                    child.fn_param_info = self.fn_param_info.clone();
+                    child.current_variadic_params = self.current_variadic_params.clone();
+                    // Lambda 体内不生成 return，让尾表达式成为闭包返回值
+                    child.suppress_tail_return = true;
+                    child.gen_block_inner(block);
+                    format!("move |{}| {{\n{}        }}", params.join(", "), child.buf.trim())
+                } else {
+                    format!("move |{}| {{ {} }}", params.join(", "), self.gen_expr(body))
+                }
             }
             ExprKind::StructCtor { name, fields } => {
                 // Special handling for built-in types
@@ -1895,8 +1909,12 @@ impl CodeGen {
                 format!("gen {{ yield {}; }}", self.gen_expr(yield_of))
             }
             ExprKind::MagicCall { kind, args } => {
+                // 特殊 magic: UnpackBuildCall → ~: 构建块元组解包
+                if *kind == MagicKind::UnpackBuildCall && !args.is_empty() {
+                    let packed = self.gen_expr(&args[0]);
+                    return format!("__UNPACK_TUPLE__({})", packed);
+                }
                 // 魔法方法 → Rust 方法/运算符降级
-                // args[0] 是 receiver，后续是额外参数
                 self.gen_magic_call(kind, args)
             }
             ExprKind::Pipe { receiver, func, args } => {
@@ -2205,6 +2223,9 @@ impl CodeGen {
                 else { format!("{}.size_hint()", args_s[0]) }
             }
             MagicKind::IterStrategy => {
+                args_s.first().cloned().unwrap_or_else(|| "()".into())
+            }
+            MagicKind::UnpackBuildCall => {
                 args_s.first().cloned().unwrap_or_else(|| "()".into())
             }
         }
