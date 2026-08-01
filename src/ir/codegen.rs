@@ -687,7 +687,24 @@ impl CodeGen {
             _ => (self.rust_type(&c.ty), self.gen_expr(&c.value)),
         };
         let kw = if is_mutated { "static mut" } else { "const" };
-        self.emit_line(&format!("{} {}: {} = {};", kw, c.name, ty_str, val_str));
+        // 需要使用 lhs!() 惰性初始化的情况：
+        // 1. 集合类型（Vec, HashMap, HashSet）— 不能 const 初始化（需要 .to_string() 等）
+        // 2. 包含 catch_unwind 等非 const 调用的值
+        let needs_lazy = !is_mutated && (
+            matches!(&c.ty,
+                IrType::Named { path, .. }
+                if ["Vec","List","HashMap","HashSet","Dict","Set"].contains(&path.as_str())
+            ) || val_str.contains("catch_unwind") || val_str.contains("LazyLock")
+        );
+        if needs_lazy {
+            let lazy_ty = self.rust_type(&c.ty);
+            self.emit_line(&format!(
+                "static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});",
+                c.name, lazy_ty, val_str
+            ));
+        } else {
+            self.emit_line(&format!("{} {}: {} = {};", kw, c.name, ty_str, val_str));
+        }
     }
 
     fn gen_type_alias_def(&mut self, ta: &TypeAliasDef) {
@@ -972,68 +989,73 @@ impl CodeGen {
                 self.emit_line("// defer");
             }
             Stmt::TryCatch { body, catches, else_body, finally_body } => {
-                // try/catch → Rust closure-based error capture pattern
-                if let Some(fin) = finally_body {
-                    self.emit_line("let __finally = || {");
-                    self.indent += 1;
-                    let saved = self.suppress_tail_return;
-                    self.suppress_tail_return = true;
-                    self.gen_block_inner(fin);
-                    self.suppress_tail_return = saved;
-                    self.indent -= 1;
-                    self.emit_line("};");
-                }
-                self.emit_line("let __result: Result<(), String> = (|| {");
+                // try/catch → std::panic::catch_unwind pattern
+                let has_catch = !catches.is_empty();
+                let has_else = else_body.is_some();
+                let has_finally = finally_body.is_some();
+                
+                // ── catch_unwind wrapping ──
+                // suppress_tail_return = true: closure body's last expr is the return value (no explicit return)
+                self.emit_line("let __panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {");
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
                 self.gen_block_inner(body);
-                let last_line = self.last_emitted_line();
-                if !last_line.ends_with(';') && !last_line.ends_with('}') && !last_line.is_empty() {
-                    self.append_to_last_line(";");
-                }
-                self.emit_line("Ok(())");
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
-                self.emit_line("})();");
+                self.emit_line("}));");
                 
-                // 使用 match 引用避免多次消费 __result
-                let saved = self.suppress_tail_return;
-                self.suppress_tail_return = true;
-                if !catches.is_empty() || else_body.is_some() {
-                    self.emit_line("match &__result {");
+                if has_catch || has_else {
+                    self.emit_line("let __try_val = match __panic_result {");
                     self.indent += 1;
-                    for (pat, block) in catches {
-                        let pat_s = match pat {
-                            Some(p) => self.gen_pattern(p),
-                            None => "_".into(),
-                        };
-                        self.emit_line(&format!("Err({}) => {{", pat_s));
-                        self.indent += 1;
+                    self.emit_line("Ok(val) => val,");
+                    self.emit_line("Err(_panic) => {");
+                    self.indent += 1;
+                    // Catch handlers: allow return statements
+                    let _saved = self.suppress_tail_return;
+                    self.suppress_tail_return = false;
+                    for (_pat, block) in catches {
                         self.gen_block_inner(block);
-                        self.indent -= 1;
-                        self.emit_line("}");
                     }
-                    if let Some(els) = else_body {
-                        self.emit_line("Ok(_) => {");
-                        self.indent += 1;
-                        self.gen_block_inner(els);
-                        self.indent -= 1;
-                        self.emit_line("}");
-                    }
-                    // 未匹配的错误或无 else 时什么都不做
-                    if else_body.is_none() && !catches.is_empty() {
-                        self.emit_line("_ => {}");
-                    }
+                    self.suppress_tail_return = _saved;
                     self.indent -= 1;
                     self.emit_line("}");
+                    self.indent -= 1;
+                    self.emit_line("};");
+                    // else_body runs after successful try
+                    if let Some(els) = else_body {
+                        self.emit_line("{");
+                        self.indent += 1;
+                        let _saved = self.suppress_tail_return;
+                        self.suppress_tail_return = false;
+                        self.gen_block_inner(els);
+                        self.suppress_tail_return = _saved;
+                        self.indent -= 1;
+                        self.emit_line("}");
+                    }
+                } else {
+                    // No catch/else: unwrap the result (re-panics on error)
+                    self.emit_line("let __try_val = __panic_result.unwrap();");
                 }
-                self.suppress_tail_return = saved;
-                if finally_body.is_some() {
-                    self.emit_line("__finally();");
+                
+                // ── finally cleanup + return value ──
+                if has_finally {
+                    // Save value, run cleanup statements, then return value
+                    self.emit_line("let __final_val = __try_val;");
+                    // Emit all finally statements with semicolons (suppress tail = true → bare expr, then append ;)
+                    let _saved = self.suppress_tail_return;
+                    self.suppress_tail_return = true;
+                    self.gen_block_inner(finally_body.as_ref().unwrap());
+                    self.suppress_tail_return = _saved;
+                    // Fix: ensure last finally statement ends with ; before __final_val
+                    if !self.last_emitted_line().ends_with(';') && !self.last_emitted_line().ends_with('}') 
+                        && !self.last_emitted_line().is_empty() {
+                        self.append_to_last_line(";");
+                    }
+                    self.emit_line("__final_val");
+                } else {
+                    self.emit_line("__try_val");
                 }
-                // 丢弃 __result（try-catch 作为语句，不返回值）
-                self.emit_line("let _ = __result;");
             }
             Stmt::Block { stmts } => {
                 self.emit_line("{");
@@ -1322,6 +1344,12 @@ impl CodeGen {
                     } else {
                         format!("{}.unwrap_or({})", recv, args_s[0])
                     };
+                }
+
+                // try_into (the ? operator): convert to Result::unwrap() for now
+                // In the future, this should emit ? operator when in a Result-returning context
+                if method == "try_into" {
+                    return format!("{}.unwrap()", recv);
                 }
 
                 // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant(val1, val2, ...)

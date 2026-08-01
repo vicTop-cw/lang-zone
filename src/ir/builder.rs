@@ -503,9 +503,27 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 }
             }
         }
-        AstExpr::ListLit(_) => IrType::named("List"),
-        AstExpr::DictLit(_) => IrType::named("Dict"),
-        AstExpr::SetLit(_) => IrType::named("Set"),
+        AstExpr::ListLit(items) => {
+            let elem_ty = items.first()
+                .map(|i| infer_expr_type(i, ctx))
+                .unwrap_or(IrType::Any);
+            IrType::Named { path: "List".into(), args: vec![elem_ty] }
+        }
+        AstExpr::DictLit(entries) => {
+            let key_ty = entries.first()
+                .and_then(|(k, _)| Some(infer_expr_type(k, ctx)))
+                .unwrap_or(IrType::Any);
+            let val_ty = entries.first()
+                .and_then(|(_, v)| Some(infer_expr_type(v, ctx)))
+                .unwrap_or(IrType::Any);
+            IrType::Named { path: "Dict".into(), args: vec![key_ty, val_ty] }
+        }
+        AstExpr::SetLit(items) => {
+            let elem_ty = items.first()
+                .map(|i| infer_expr_type(i, ctx))
+                .unwrap_or(IrType::Any);
+            IrType::Named { path: "Set".into(), args: vec![elem_ty] }
+        }
         AstExpr::TupleLit(elems) => {
             IrType::Tuple(elems.iter().map(|e| infer_expr_type(e, ctx)).collect())
         }
@@ -966,11 +984,22 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Try(inner) => {
-            // try expr → MethodCall (类似 ?操作符)
-            ExprKind::MethodCall {
-                receiver: Box::new(convert_expr(inner, ctx)),
-                method: "try_into".into(),
-                args: vec![],
+            // try expr (? 操作符): 对 Result/Option 类型做错误传播，否则透传
+            let inner_ty = infer_expr_type(inner, ctx);
+            let result_like = matches!(&inner_ty,
+                IrType::Result { .. } | IrType::Option(_)
+            ) || matches!(&inner_ty,
+                IrType::Named { path, .. } if path == "Result" || path == "Option"
+            );
+            if result_like {
+                ExprKind::MethodCall {
+                    receiver: Box::new(convert_expr(inner, ctx)),
+                    method: "try_into".into(),
+                    args: vec![],
+                }
+            } else {
+                // Non-Result type: just pass through (raises-type propagation)
+                convert_expr(inner, ctx).kind
             }
         }
 
