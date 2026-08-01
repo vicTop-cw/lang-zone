@@ -217,10 +217,17 @@
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
       "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\try_more.lz",
+      "10_error_handling\\try_more.lz",
       "10_error_handling\\try_more.lz",
       "10_error_handling\\try_more.lz",
       "13_operators\\precedence.lz",
       "99_spec\\codegen_str_int_float.lz",
+      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
       "99_spec\\gen_block_star.lz",
       "99_spec\\iterator_demo.lz",
       "99_spec\\iterator_demo.lz",
@@ -235,6 +242,7 @@
       "combo-syntax\\combo_match_ternary.lz",
       "combo-syntax\\combo_match_ternary.lz",
       "combo-syntax\\combo_ternary_walrus.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
       "combo-syntax\\combo_try_raise_guard.lz",
       "combo-syntax\\combo_try_raise_guard.lz",
       "overload_test.lz",
@@ -359,15 +367,14 @@
       "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
       "combo-syntax\\combo_generic_struct_method.lz"
     ],
-    "E0382": [
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\iterator_demo.lz"
-    ],
     "E0610": [
       "99_spec\\dict_comprehension.lz",
       "99_spec\\dict_comprehension.lz"
     ],
     "E0069": [
+      "99_spec\\iterator_demo.lz"
+    ],
+    "E0382": [
       "99_spec\\iterator_demo.lz"
     ],
     "E0530": [
@@ -406,9 +413,9 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:75:16",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:78:16",
         "|",
-        "75 |     let mut f: Future<i64> = spawn(fetch());",
+        "78 |     let mut f: Future<i64> = spawn(fetch());",
         "|                ^^^^^^ not found in this scope",
         "|"
       ]

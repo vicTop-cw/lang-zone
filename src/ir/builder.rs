@@ -218,6 +218,34 @@ fn ir_types_compatible(a: &IrType, b: &IrType) -> bool {
     }
 }
 
+/// 从 AST 表达式提取类型名称列表（支持单类型和多类型参数）
+/// - Ident("int") → Some(vec!["int"])
+/// - TupleLit([Ident("int"), Ident("str")]) → Some(vec!["int", "str"])
+/// - 其他 → None
+fn extract_type_names(expr: &AstExpr) -> Option<Vec<String>> {
+    match expr {
+        AstExpr::Ident(name) => Some(vec![name.clone()]),
+        AstExpr::TupleLit(elems) => {
+            let names: Option<Vec<String>> = elems.iter()
+                .map(|e| if let AstExpr::Ident(n) = e { Some(n.clone()) } else { None })
+                .collect();
+            names
+        }
+        _ => None,
+    }
+}
+
+/// 将 LZ 类型名映射为 Rust 类型名（用于泛型类型参数）
+fn map_type_args(names: &[String]) -> Vec<String> {
+    names.iter().map(|t| match t.as_str() {
+        "int" => "i64".to_string(),
+        "str" => "String".to_string(),
+        "f64" | "float" => "f64".to_string(),
+        "bool" => "bool".to_string(),
+        other => other.to_string(),
+    }).collect()
+}
+
 /// 从实参类型解析泛型函数调用：推断泛型参数的具体类型
 ///
 /// 策略：
@@ -691,12 +719,26 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let ir_op = map_binop(op);
             
             // 泛型调用检测: ident < Type > (args) — 不是比较，而是泛型实例化
+            // 支持单类型参数 ident < T > 和多类型参数 ident < T, U >
             if matches!(ir_op, BinOpKind::Gt) {
-                if let AstExpr::Binary { left: inner_left, op: BinOp::Lt, right: _inner_right } = left.as_ref() {
-                    if let AstExpr::Ident(_fname) = inner_left.as_ref() {
-                        if let AstExpr::Ident(tname) = _inner_right.as_ref() {
-                            // 收集类型参数和调用实参
-                            let type_names = vec![tname.clone()];
+                if let AstExpr::Binary { left: inner_left, op: BinOp::Lt, right: inner_right } = left.as_ref() {
+                    if let AstExpr::Ident(fname) = inner_left.as_ref() {
+                        if let Some(type_names) = extract_type_names(inner_right) {
+                            if let AstExpr::Call { func: call_func, args: call_args, .. } = right.as_ref() {
+                                if let AstExpr::Ident(call_fname) = call_func.as_ref() {
+                                    if call_fname == fname {
+                                        // 这是泛型调用: f < T, U > (args)
+                                        let ir_callee = convert_expr(inner_left, ctx);
+                                        let ir_args: Vec<Expr> = call_args.iter().map(|a| convert_expr(a, ctx)).collect();
+                                        let ir_type_args = map_type_args(&type_names);
+                                        return Expr::new(
+                                            ExprKind::Call { callee: Box::new(ir_callee), args: ir_args, type_args: ir_type_args },
+                                            IrType::Any, Span::unknown(),
+                                        );
+                                    }
+                                }
+                            }
+                            // 泛型调用不带括号参数: f < T > — 收集实参
                             let call_args;
                             if let AstExpr::TupleLit(elems) = right.as_ref() {
                                 call_args = elems.clone();
@@ -705,47 +747,12 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             }
                             let ir_callee = convert_expr(inner_left, ctx);
                             let ir_args: Vec<Expr> = call_args.iter().map(|a| convert_expr(a, ctx)).collect();
-                            let ir_type_args: Vec<String> = type_names.iter().map(|t| match t.as_str() {
-                                "int" => "i64".to_string(),
-                                "str" => "String".to_string(),
-                                "f64" | "float" => "f64".to_string(),
-                                "bool" => "bool".to_string(),
-                                other => other.to_string(),
-                            }).collect();
-                            let ret_ty = ctx.lookup_fn_return(&_fname);
+                            let ir_type_args = map_type_args(&type_names);
+                            let ret_ty = ctx.lookup_fn_return(&fname);
                             return Expr::new(
                                 ExprKind::Call { callee: Box::new(ir_callee), args: ir_args, type_args: ir_type_args },
                                 ret_ty, Span::unknown(),
                             );
-                        }
-                    }
-                }
-            }
-            if matches!(ir_op, BinOpKind::Gt) {
-                if let AstExpr::Binary { left: inner_left, op: BinOp::Lt, right: inner_right } = left.as_ref() {
-                    if let AstExpr::Ident(fname) = inner_left.as_ref() {
-                        if let AstExpr::Ident(_tname) = inner_right.as_ref() {
-                            if let AstExpr::Call { func, args: call_args, .. } = right.as_ref() {
-                                if let AstExpr::Ident(call_fname) = func.as_ref() {
-                                    if call_fname == fname {
-                                        // 这是泛型调用: f < T > (args)
-                                        let ir_callee = convert_expr(inner_left, ctx);
-                                        let ir_args: Vec<Expr> = call_args.iter().map(|a| convert_expr(a, ctx)).collect();
-                                        let ir_type_name = _tname.clone();
-                                        let ir_type_args = vec![match ir_type_name.as_str() {
-                                            "int" => "i64".to_string(),
-                                            "str" => "String".to_string(),
-                                            "f64" | "float" => "f64".to_string(),
-                                            "bool" => "bool".to_string(),
-                                            other => other.to_string(),
-                                        }];
-                                        return Expr::new(
-                                            ExprKind::Call { callee: Box::new(ir_callee), args: ir_args, type_args: ir_type_args },
-                                            IrType::Any, Span::unknown(),
-                                        );
-                                    }
-                                }
-                            }
                         }
                     }
                 }

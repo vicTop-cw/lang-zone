@@ -282,6 +282,13 @@ impl CodeGen {
             IrType::Self_ => "Self".into(),
             IrType::Duck { .. } => "()".into(),  // Duck types: cannot determine Rust type, use unit
             IrType::Named { path, args } => {
+                // Future<T> → T（暂时同步化：spawn 返回的值类型就是内部类型）
+                if path == "Future" {
+                    if let Some(inner) = args.first() {
+                        return self.rust_type(inner);
+                    }
+                    return "()".into();
+                }
                 let mapped = self.type_map.get(path.as_str()).map(|s| s.to_string())
                     .unwrap_or_else(|| path.clone());
                 if args.is_empty() {
@@ -952,12 +959,11 @@ impl CodeGen {
                     self.indent -= 1;
                     self.emit_line("};");
                 }
-                self.emit_line("let __result = (|| {");
+                self.emit_line("let __result: Result<(), String> = (|| {");
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
                 self.gen_block_inner(body);
-                // 确保闭包体最后一条语句有分号，让 Ok(()) 成为尾表达式
                 let last_line = self.last_emitted_line();
                 if !last_line.ends_with(';') && !last_line.ends_with('}') && !last_line.is_empty() {
                     self.append_to_last_line(";");
@@ -966,23 +972,35 @@ impl CodeGen {
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("})();");
+                
+                // 使用 match 引用避免多次消费 __result
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
-                for (pat, block) in catches {
-                    let pat_s = match pat {
-                        Some(p) => self.gen_pattern(p),
-                        None => "_".into(),
-                    };
-                    self.emit_line(&format!("if let Err({}) = __result {{", pat_s));
+                if !catches.is_empty() || else_body.is_some() {
+                    self.emit_line("match &__result {");
                     self.indent += 1;
-                    self.gen_block_inner(block);
-                    self.indent -= 1;
-                    self.emit_line("}");
-                }
-                if let Some(els) = else_body {
-                    self.emit_line("if __result.is_ok() {");
-                    self.indent += 1;
-                    self.gen_block_inner(els);
+                    for (pat, block) in catches {
+                        let pat_s = match pat {
+                            Some(p) => self.gen_pattern(p),
+                            None => "_".into(),
+                        };
+                        self.emit_line(&format!("Err({}) => {{", pat_s));
+                        self.indent += 1;
+                        self.gen_block_inner(block);
+                        self.indent -= 1;
+                        self.emit_line("}");
+                    }
+                    if let Some(els) = else_body {
+                        self.emit_line("Ok(_) => {");
+                        self.indent += 1;
+                        self.gen_block_inner(els);
+                        self.indent -= 1;
+                        self.emit_line("}");
+                    }
+                    // 未匹配的错误或无 else 时什么都不做
+                    if else_body.is_none() && !catches.is_empty() {
+                        self.emit_line("_ => {}");
+                    }
                     self.indent -= 1;
                     self.emit_line("}");
                 }
@@ -990,7 +1008,8 @@ impl CodeGen {
                 if finally_body.is_some() {
                     self.emit_line("__finally();");
                 }
-                self.emit_line("__result.ok();");
+                // 丢弃 __result（try-catch 作为语句，不返回值）
+                self.emit_line("let _ = __result;");
             }
             Stmt::Block { stmts } => {
                 self.emit_line("{");
@@ -1179,6 +1198,9 @@ impl CodeGen {
                     format!("({}).into_iter().zip({}.into_iter())", args_s[0], args_s[1])
                 } else if callee_s == "clone" && args_s.len() == 1 {
                     format!("({}).clone()", args_s[0])
+                } else if callee_s == "spawn" && args_s.len() >= 1 {
+                    // spawn(expr) → 同步评估（async 运行时待后续实现）
+                    format!("({})", args_s.join(", "))
                 } else if callee_s == "sort" && args_s.len() == 1 {
                     format!("{{ let mut _tmp = {0}.clone(); _tmp.sort(); _tmp }}", args_s[0])
                 } else if callee_s == "reverse" && args_s.len() == 1 {
