@@ -1070,8 +1070,20 @@ impl CodeGen {
             }
             Stmt::For { var, iter, guard, body } => {
                 self.emit_walrus_predecls(iter);
+                // 顶层静态集合（LazyLock<Vec<..>>）不能用 into_iter()（共享引用不可 move），
+                // 改用 .iter().cloned()（LZ 元素均 Clone）
+                let use_lazy_iter = if let ExprKind::Var(name) = &iter.kind {
+                    self.is_collection_type(&iter.ty) && (self.top_level_static_names.contains(name))
+                } else { false };
                 let iter_s = if let Some(g) = guard {
-                    format!("({}).into_iter().filter(|&{}| {})", self.gen_expr(iter), var, self.gen_expr(g))
+                    let base = if use_lazy_iter {
+                        format!("({}).iter().cloned()", self.gen_expr(iter))
+                    } else {
+                        format!("({}).into_iter()", self.gen_expr(iter))
+                    };
+                    format!("{}.filter(|&{}| {})", base, var, self.gen_expr(g))
+                } else if use_lazy_iter {
+                    format!("({}).iter().cloned()", self.gen_expr(iter))
                 } else {
                     format!("({}).into_iter()", self.gen_expr(iter))
                 };
@@ -2066,7 +2078,17 @@ impl CodeGen {
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
                 child.fn_param_info = self.fn_param_info.clone();
+                // 生成器构建块（含 yield）：预声明 __gen_vec 并返回
+                let is_gen = block_has_yield(block);
+                if is_gen {
+                    child.emit_line("let mut __gen_vec = Vec::new();");
+                }
                 child.gen_block_inner(block);
+                if is_gen {
+                    // 块尾返回 __gen_vec
+                    let trimmed = child.buf.trim_end();
+                    return format!("{{\n{}\n    __gen_vec\n    }}", trimmed);
+                }
                 format!("{{\n{}    }}", child.buf)
             }
             ExprKind::Paren(inner) => {

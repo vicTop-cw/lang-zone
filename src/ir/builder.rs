@@ -31,6 +31,8 @@ struct TypeCtx {
     struct_fields: HashMap<String, HashMap<String, IrType>>,
     /// struct 方法名集合：struct_name → 方法名集合（含魔术方法）
     struct_methods: HashMap<String, HashSet<String>>,
+    /// 顶层 const/static 类型：name → type
+    top_level_consts: HashMap<String, IrType>,
     /// enum variant → enum name 映射
     enum_variants: HashMap<String, String>,
     /// 当前函数泛型参数
@@ -52,6 +54,7 @@ impl TypeCtx {
             struct_names: HashSet::new(),
             struct_fields: HashMap::new(),
             struct_methods: HashMap::new(),
+            top_level_consts: HashMap::new(),
             enum_variants: HashMap::new(),
             current_generics: vec![],
             current_ret_ty: None,
@@ -121,6 +124,7 @@ impl TypeCtx {
             .or_else(|| self.current_generics.iter()
                 .find(|g| g.as_str() == name)
                 .map(|g| IrType::Generic(g.clone())))
+            .or_else(|| self.top_level_consts.get(name).cloned())
             .unwrap_or(IrType::Any)
     }
 
@@ -616,6 +620,16 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 BuildKind::Call => {
                     // ~: 构建块的返回类型是 body 块的结果类型（调用返回）
                     body.last().map(|s| infer_stmt_type(s, ctx)).unwrap_or(IrType::Unit)
+                }
+                BuildKind::Gen => {
+                    // *: 生成器构建块 → List<yield 类型>
+                    // 从 body 中第一个 yield 语句推导元素类型
+                    let elem_ty = body.iter().find_map(|s| {
+                        if let AstStmt::Yield(Some(e)) = s {
+                            Some(infer_expr_type(e, ctx))
+                        } else { None }
+                    }).unwrap_or(IrType::Any);
+                    IrType::Named { path: "List".into(), args: vec![elem_ty] }
                 }
                 _ => lhs_ty,
             }
@@ -1509,6 +1523,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 for (vn, en) in &ctx.enum_variants {
                     arm_ctx.enum_variants.insert(vn.clone(), en.clone());
                 }
+                for (cn, ct) in &ctx.top_level_consts { arm_ctx.top_level_consts.insert(cn.clone(), ct.clone()); }
                 // 也复制 struct 信息用于模式匹配
                 for sn in &ctx.struct_names {
                     arm_ctx.struct_names.insert(sn.clone());
@@ -1867,6 +1882,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     for (name, ty) in &ctx.fn_returns { block_ctx.fn_returns.insert(name.clone(), ty.clone()); }
     for (name, p) in &ctx.fn_params { block_ctx.fn_params.insert(name.clone(), p.clone()); }
     for (vn, en) in &ctx.enum_variants { block_ctx.enum_variants.insert(vn.clone(), en.clone()); }
+    for (cn, ct) in &ctx.top_level_consts { block_ctx.top_level_consts.insert(cn.clone(), ct.clone()); }
     
     let mut ir_stmts: Vec<Stmt> = Vec::new();
     for s in stmts {
@@ -1997,6 +2013,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     for (sn, ms) in &ctx.struct_methods {
         fn_ctx.struct_methods.insert(sn.clone(), ms.clone());
     }
+    for (cn, ct) in &ctx.top_level_consts { fn_ctx.top_level_consts.insert(cn.clone(), ct.clone()); }
     for (name, ty) in &ctx.fn_returns { fn_ctx.fn_returns.insert(name.clone(), ty.clone()); }
     for (name, p) in &ctx.fn_params { fn_ctx.fn_params.insert(name.clone(), p.clone()); }
 
@@ -2300,6 +2317,7 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
         for (sn, ms) in &ctx.struct_methods {
             impl_ctx.struct_methods.insert(sn.clone(), ms.clone());
         }
+        for (cn, ct) in &ctx.top_level_consts { impl_ctx.top_level_consts.insert(cn.clone(), ct.clone()); }
         for (name, ty) in &ctx.fn_returns { impl_ctx.fn_returns.insert(name.clone(), ty.clone()); }
         impl_ctx.current_generics = imp.generics.clone();
         convert_fn_def(m, &impl_ctx)
@@ -2342,6 +2360,12 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     // 1. 收集类型信息
     ctx.collect_structs(ast_module);
     ctx.collect_functions(ast_module);
+    // 预收集顶层 const 类型（供函数体内引用查询，如生成器集合迭代）
+    for c in &ast_module.consts {
+        let ty = c.ty.as_ref().map(|t| from_ast_type(t))
+            .unwrap_or_else(|| infer_expr_type(&c.value, &ctx));
+        ctx.top_level_consts.insert(c.name.clone(), ty);
+    }
 
     // 2. 构建 IR 模块
     let name = ast_module.name.clone().unwrap_or_else(|| "main".to_string());
@@ -2423,6 +2447,8 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     for c in &ast_module.consts {
         let ty = c.ty.as_ref().map(|t| from_ast_type(t))
             .unwrap_or_else(|| infer_expr_type(&c.value, &ctx));
+        // 记录顶层 const 类型，供函数内 lookup_var 查询（如生成器集合迭代）
+        ctx.top_level_consts.insert(c.name.clone(), ty.clone());
         ir_mod.items.push(Item::Const(ConstDef {
             name: c.name.clone(),
             ty,
