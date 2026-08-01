@@ -990,6 +990,8 @@ impl CodeGen {
                 } else {
                     format!(": {}", self.rust_type(ty))
                 };
+                // walrus 变量预声明（let 绑定中的 := 需要先声明变量再赋值）
+                self.emit_walrus_predecls(value);
                 self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, 
                     if is_empty_container {
                         match ty {
