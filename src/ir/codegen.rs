@@ -283,10 +283,12 @@ impl CodeGen {
 
     fn emit_prelude(&mut self) {
         // Rust 2021 edition support (async/await, etc.)
-        self.emit_line("#![allow(unused_imports)]");
-        self.emit_line("#![allow(unused_variables)]");
-        self.emit_line("#![allow(dead_code)]");
-        self.emit_line("#![allow(non_snake_case)]");
+        // 使用 outer attributes (#[..]) 而非 inner attributes (#![..])
+        // 因为 type alias 可能已在 prelude 之前输出，inner attributes 不允许出现在 item 之后
+        self.emit_line("#[allow(unused_imports)]");
+        self.emit_line("#[allow(unused_variables)]");
+        self.emit_line("#[allow(dead_code)]");
+        self.emit_line("#[allow(non_snake_case)]");
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
         self.emit_line("use std::rc::Rc;");
