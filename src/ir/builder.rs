@@ -912,9 +912,14 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             ExprKind::ListLit(items.iter().map(|i| convert_expr(i, ctx)).collect())
         }
 
-        AstExpr::DictLit(_entries) => {
-            // Dict → StructCtor 或保留为 Dict
-            ExprKind::StructCtor { name: "Dict".into(), fields: vec![] }
+        AstExpr::DictLit(entries) => {
+            // Dict → StructCtor，将条目存储为 (k, v) 对
+            let mut fields = Vec::new();
+            for (i, (k, v)) in entries.iter().enumerate() {
+                fields.push((format!("_k{}", i), convert_expr(k, ctx)));
+                fields.push((format!("_v{}", i), convert_expr(v, ctx)));
+            }
+            ExprKind::StructCtor { name: "Dict".into(), fields }
         }
 
         AstExpr::SetLit(items) => {

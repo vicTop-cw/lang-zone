@@ -682,7 +682,12 @@ impl CodeGen {
                     return;
                 }
                 self.declared.insert(name.clone());
-                let mut_kw = if *is_mut { "mut " } else { "" };
+                // LZ 容器类型（List/Dict/Set）始终生成 mut，因方法可修改容器内容
+                let is_container = matches!(&value.kind, ExprKind::ListLit(..))
+                    || matches!(&value.kind, ExprKind::StructCtor { name: n, .. } if n == "Dict")
+                    || matches!(ty, IrType::Named { path, .. } if path == "List" || path == "Dict" || path == "Set" || path == "Vec" || path == "HashMap" || path == "HashSet");
+                let needs_mut = *is_mut || is_container;
+                let mut_kw = if needs_mut { "mut " } else { "" };
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
                     || matches!(ty, IrType::Generic(_))
@@ -691,7 +696,21 @@ impl CodeGen {
                         path == "Range" || path == "Nil" || args.is_empty()
                             || args.iter().any(|a| matches!(a, IrType::Generic(_)))
                     } else { false };
-                let ty_str = if skip_ty {
+                // 空容器需要类型提示 Vec<_> / HashMap<_, _>（Nil 类型除外）
+                let is_empty_container = match &value.kind {
+                    ExprKind::ListLit(elems) => elems.is_empty() && !matches!(ty, IrType::Named { path, .. } if path == "Nil"),
+                    ExprKind::StructCtor { name: n, fields } => n == "Dict" && fields.is_empty(),
+                    _ => false,
+                };
+                let ty_str = if is_empty_container {
+                    // 优先使用声明的类型；若无则使用占位符
+                    if !skip_ty {
+                        format!(": {}", self.rust_type(ty))
+                    } else if let ExprKind::StructCtor { name: n, .. } = &value.kind {
+                        if n == "Dict" { ": std::collections::HashMap<_, _>".to_string() }
+                        else { String::new() }
+                    } else { ": Vec<_>".to_string() }
+                } else if skip_ty {
                     String::new()
                 } else {
                     format!(": {}", self.rust_type(ty))
@@ -1280,12 +1299,12 @@ impl CodeGen {
                 let base_s = self.gen_expr(base);
                 let key_s = self.gen_expr(key);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
-                let key_expr = if is_dict {
-                    format!("&{}", key_s)
+                if is_dict {
+                    // HashMap 不支持 IndexMut，使用 .insert() 代替
+                    format!("{}.insert(&{}, {})", base_s, key_s, self.gen_expr(value))
                 } else {
-                    key_s
-                };
-                format!("{}[{}] = {}", base_s, key_expr, self.gen_expr(value))
+                    format!("{}[{}] = {}", base_s, key_s, self.gen_expr(value))
+                }
             }
             ExprKind::BinOp { op, lhs, rhs } => {
                 // Pow: ** → .pow() 方法调用 (a ** b → a.pow(b))
@@ -1383,7 +1402,24 @@ impl CodeGen {
                         let val_s = val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
                         format!("{{ {} = {}; {} }}", bind_s, val_s, bind_s)
                     }
-                    "Dict" => "std::collections::HashMap::<_, _>::new()".to_string(),
+                    "Dict" => {
+                        if fields.is_empty() {
+                            "std::collections::HashMap::new()".to_string()
+                        } else {
+                            // 带条目的 Dict: HashMap::from([(k, v), ...])
+                            let mut pairs = Vec::new();
+                            let mut i = 0;
+                            while i < fields.len() {
+                                let key = fields.iter().find(|(n, _)| n == &format!("_k{}", i));
+                                let val = fields.iter().find(|(n, _)| n == &format!("_v{}", i));
+                                if let (Some((_, k)), Some((_, v))) = (key, val) {
+                                    pairs.push(format!("({}, {})", self.gen_expr(k), self.gen_expr(v)));
+                                }
+                                i += 1;
+                            }
+                            format!("std::collections::HashMap::from([{}])", pairs.join(", "))
+                        }
+                    }
                     "Range" => {
                         let start = fields.iter().find(|(n, _)| n == "start");
                         let end = fields.iter().find(|(n, _)| n == "end");
@@ -1491,7 +1527,7 @@ impl CodeGen {
                             if (path == "List" || path == "Vec") && !args.is_empty() {
                                 format!("Vec::<{}>::new()", self.rust_type(&args[0]))
                             } else if path == "List" || path == "Vec" {
-                                "Vec::new()".to_string()
+                                "vec![]".to_string()
                             } else {
                                 "vec![]".to_string()
                             }

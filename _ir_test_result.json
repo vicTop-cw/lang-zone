@@ -248,10 +248,13 @@
     ],
     "E0282": [
       "01_basics\\literals.lz",
-      "02_types\\containers.lz",
       "02_types\\primitives.lz",
       "99_spec\\ir-edge-empty-collections.lz",
       "99_spec\\ir-edge-empty-collections.lz"
+    ],
+    "E0594": [
+      "02_types\\containers.lz",
+      "02_types\\containers.lz"
     ],
     "E0608": [
       "04_functions\\checker.lz",
@@ -451,12 +454,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0282]: type annotations needed for `HashMap<_, _>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:23:9",
+        "warning: variable does not need to be mutable",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:17:9",
         "|",
-        "23 |     let inferred_ages = std::collections::HashMap::<_, _>::new();",
-        "|         ^^^^^^^^^^^^^   ---------------------------------------- type must be known at this point",
-        "|"
+        "17 |     let mut inferred_nums = vec![10, 20, 30];",
+        "|         ----^^^^^^^^^^^^^",
+        "|         |"
       ]
     },
     {
@@ -884,10 +887,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0610]: `i64` is a primitive type and therefore doesn't have fields",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\dict_comprehension.rs:17:74",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\dict_comprehension.rs:17:78",
         "|",
-        "17 |     let by_id: HashMap<i64, i64> = (users).into_iter().map(|u: i64| { (u.id, u.name) }).collect::<HashMap<_,_>>();",
-        "|                                                                          ^^"
+        "17 |     let mut by_id: HashMap<i64, i64> = (users).into_iter().map(|u: i64| { (u.id, u.name) }).collect::<HashMap<_,_>>();",
+        "|                                                                              ^^"
       ]
     },
     {
@@ -959,10 +962,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0277]: the type `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\index_build.rs:11:18",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\index_build.rs:11:22",
         "|",
-        "11 |     let a = nums[nums];",
-        "|                  ^^^^ `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`",
+        "11 |     let mut a = nums[nums];",
+        "|                      ^^^^ `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`",
         "|"
       ]
     },
@@ -972,10 +975,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0277]: the type `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\index_build_block.rs:11:18",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\index_build_block.rs:11:22",
         "|",
-        "11 |     let val = xs[xs];",
-        "|                  ^^ `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`",
+        "11 |     let mut val = xs[xs];",
+        "|                      ^^ `Vec<{integer}>` cannot be indexed by `Vec<{integer}>`",
         "|"
       ]
     },
@@ -984,12 +987,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0282]: type annotations needed for `Vec<_>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\ir-edge-empty-collections.rs:10:9",
+        "error[E0282]: type annotations needed",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\ir-edge-empty-collections.rs:10:16",
         "|",
-        "10 |     let a = Vec::new();",
-        "|         ^   ---------- type must be known at this point",
-        "|"
+        "10 |     let mut a: Vec<_> = vec![];",
+        "|                ^^^^^^ cannot infer type"
       ]
     },
     {
@@ -1073,10 +1075,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0599]: the method `into_iter` exists for struct `String`, but its trait bounds were not satisfied",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\set_comprehension.rs:12:39",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\set_comprehension.rs:12:43",
         "|",
-        "12 |     let vowels: HashSet<i64> = (text).into_iter().map(|c: i64| { c }).collect::<HashSet<_>>();",
-        "|                                       ^^^^^^^^^",
+        "12 |     let mut vowels: HashSet<i64> = (text).into_iter().map(|c: i64| { c }).collect::<HashSet<_>>();",
+        "|                                           ^^^^^^^^^",
         "|"
       ]
     },
