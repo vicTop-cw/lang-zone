@@ -690,6 +690,67 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
 
             let ir_op = map_binop(op);
             
+            // 泛型调用检测: ident < Type > (args) — 不是比较，而是泛型实例化
+            if matches!(ir_op, BinOpKind::Gt) {
+                if let AstExpr::Binary { left: inner_left, op: BinOp::Lt, right: _inner_right } = left.as_ref() {
+                    if let AstExpr::Ident(_fname) = inner_left.as_ref() {
+                        if let AstExpr::Ident(tname) = _inner_right.as_ref() {
+                            // 收集类型参数和调用实参
+                            let type_names = vec![tname.clone()];
+                            let call_args;
+                            if let AstExpr::TupleLit(elems) = right.as_ref() {
+                                call_args = elems.clone();
+                            } else {
+                                call_args = vec![right.as_ref().clone()];
+                            }
+                            let ir_callee = convert_expr(inner_left, ctx);
+                            let ir_args: Vec<Expr> = call_args.iter().map(|a| convert_expr(a, ctx)).collect();
+                            let ir_type_args: Vec<String> = type_names.iter().map(|t| match t.as_str() {
+                                "int" => "i64".to_string(),
+                                "str" => "String".to_string(),
+                                "f64" | "float" => "f64".to_string(),
+                                "bool" => "bool".to_string(),
+                                other => other.to_string(),
+                            }).collect();
+                            let ret_ty = ctx.lookup_fn_return(&_fname);
+                            return Expr::new(
+                                ExprKind::Call { callee: Box::new(ir_callee), args: ir_args, type_args: ir_type_args },
+                                ret_ty, Span::unknown(),
+                            );
+                        }
+                    }
+                }
+            }
+            if matches!(ir_op, BinOpKind::Gt) {
+                if let AstExpr::Binary { left: inner_left, op: BinOp::Lt, right: inner_right } = left.as_ref() {
+                    if let AstExpr::Ident(fname) = inner_left.as_ref() {
+                        if let AstExpr::Ident(_tname) = inner_right.as_ref() {
+                            if let AstExpr::Call { func, args: call_args, .. } = right.as_ref() {
+                                if let AstExpr::Ident(call_fname) = func.as_ref() {
+                                    if call_fname == fname {
+                                        // 这是泛型调用: f < T > (args)
+                                        let ir_callee = convert_expr(inner_left, ctx);
+                                        let ir_args: Vec<Expr> = call_args.iter().map(|a| convert_expr(a, ctx)).collect();
+                                        let ir_type_name = _tname.clone();
+                                        let ir_type_args = vec![match ir_type_name.as_str() {
+                                            "int" => "i64".to_string(),
+                                            "str" => "String".to_string(),
+                                            "f64" | "float" => "f64".to_string(),
+                                            "bool" => "bool".to_string(),
+                                            other => other.to_string(),
+                                        }];
+                                        return Expr::new(
+                                            ExprKind::Call { callee: Box::new(ir_callee), args: ir_args, type_args: ir_type_args },
+                                            IrType::Any, Span::unknown(),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
             // 链式比较展开: 1 < x < 10 → (1 < x) && (x < 10)
             if matches!(ir_op, BinOpKind::Lt | BinOpKind::Gt | BinOpKind::Le | BinOpKind::Ge | BinOpKind::Eq | BinOpKind::Neq) {
                 if let AstExpr::Binary { left: inner_left, op: inner_op, right: inner_right } = left.as_ref() {
