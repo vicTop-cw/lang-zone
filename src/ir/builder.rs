@@ -1968,10 +1968,126 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         ret_ty,
         body,
         intrinsics,
-        is_async: func.is_async,
+        // 自动检测：如果函数体包含 await/spawn 且未显式标记 async，自动标记
+        is_async: func.is_async || ast_body_has_async(&func.body),
         is_iterator: func.is_iterator,
         is_test: false,
         span: Span::unknown(),
+    }
+}
+
+/// 检测 AST 函数体（Vec<Stmt>）是否包含 async 相关表达式（await/spawn）
+fn ast_body_has_async(stmts: &[ast::Stmt]) -> bool {
+    stmts.iter().any(|stmt| ast_stmt_has_async(stmt))
+}
+
+fn ast_stmt_has_async(stmt: &ast::Stmt) -> bool {
+    match stmt {
+        ast::Stmt::Expr(e) | ast::Stmt::Return(Some(e)) | ast::Stmt::Yield(Some(e)) => {
+            ast_expr_has_async(e)
+        }
+        ast::Stmt::Let { value, .. } | ast::Stmt::Const { value, .. } => {
+            ast_expr_has_async(value)
+        }
+        ast::Stmt::While { cond, body, guard, .. } => {
+            ast_expr_has_async(cond)
+                || guard.as_ref().map_or(false, |e| ast_expr_has_async(e))
+                || ast_body_has_async(body)
+        }
+        ast::Stmt::For { iter, body, guard, .. } => {
+            ast_expr_has_async(iter)
+                || guard.as_ref().map_or(false, |e| ast_expr_has_async(e))
+                || ast_body_has_async(body)
+        }
+        ast::Stmt::Loop(body) | ast::Stmt::Defer(body) => ast_body_has_async(body),
+        ast::Stmt::Assign { target, value, .. } => {
+            ast_expr_has_async(target) || ast_expr_has_async(value)
+        }
+        ast::Stmt::With { expr, body, .. } => {
+            ast_expr_has_async(expr) || ast_body_has_async(body)
+        }
+        ast::Stmt::Break(Some(e)) | ast::Stmt::Raise(e) | ast::Stmt::YieldFrom(e) => {
+            ast_expr_has_async(e)
+        }
+        ast::Stmt::FnDef { func } => ast_body_has_async(&func.body),
+        _ => false,
+    }
+}
+
+fn ast_expr_has_async(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::Await(_) | ast::Expr::Spawn(_) => true,
+        ast::Expr::Call { func, args, .. } => {
+            ast_expr_has_async(func) || args.iter().any(ast_expr_has_async)
+        }
+        ast::Expr::MethodCall { receiver, args, .. } => {
+            ast_expr_has_async(receiver) || args.iter().any(ast_expr_has_async)
+        }
+        ast::Expr::Binary { left, right, .. } => {
+            ast_expr_has_async(left) || ast_expr_has_async(right)
+        }
+        ast::Expr::Unary { operand, .. } => ast_expr_has_async(operand),
+        ast::Expr::If { cond, then_body, elif_clauses, else_body } => {
+            ast_expr_has_async(cond)
+                || ast_body_has_async(then_body)
+                || elif_clauses.iter().any(|(c, b)| ast_expr_has_async(c) || ast_body_has_async(b))
+                || else_body.as_ref().map_or(false, |b| ast_body_has_async(b))
+        }
+        ast::Expr::Match { expr, arms } => {
+            ast_expr_has_async(expr)
+                || arms.iter().any(|a| a.guard.as_ref().map_or(false, |g| ast_expr_has_async(g))
+                    || ast_body_has_async(&a.body))
+        }
+        ast::Expr::Closure { body, .. } => ast_expr_has_async(body),
+        ast::Expr::Pipe { receiver, args, .. } => {
+            ast_expr_has_async(receiver) || args.iter().any(ast_expr_has_async)
+        }
+        ast::Expr::ListLit(es) | ast::Expr::TupleLit(es) | ast::Expr::SetLit(es) => {
+            es.iter().any(ast_expr_has_async)
+        }
+        ast::Expr::DictLit(kvs) => {
+            kvs.iter().any(|(k, v)| ast_expr_has_async(k) || ast_expr_has_async(v))
+        }
+        ast::Expr::SafeNav { receiver, .. } | ast::Expr::Try(receiver) => ast_expr_has_async(receiver),
+        ast::Expr::NullCoalesce { left, right } => {
+            ast_expr_has_async(left) || ast_expr_has_async(right)
+        }
+        ast::Expr::Walrus { target, value } => {
+            ast_expr_has_async(target) || ast_expr_has_async(value)
+        }
+        ast::Expr::Paren(e) | ast::Expr::Panic(e) | ast::Expr::Move(e) => ast_expr_has_async(e),
+        ast::Expr::Range { start, end, .. } => {
+            start.as_ref().map_or(false, |e| ast_expr_has_async(e))
+                || end.as_ref().map_or(false, |e| ast_expr_has_async(e))
+        }
+        ast::Expr::Assign { target, value, .. } => {
+            ast_expr_has_async(target) || ast_expr_has_async(value)
+        }
+        ast::Expr::ListComprehension { output, iter, cond, .. } => {
+            ast_expr_has_async(output) || ast_expr_has_async(iter)
+                || cond.as_ref().map_or(false, |e| ast_expr_has_async(e))
+        }
+        ast::Expr::DictComprehension { key, value, iter, cond, .. } => {
+            ast_expr_has_async(key) || ast_expr_has_async(value)
+                || ast_expr_has_async(iter)
+                || cond.as_ref().map_or(false, |e| ast_expr_has_async(e))
+        }
+        ast::Expr::SetComprehension { elem, iter, cond, .. } => {
+            ast_expr_has_async(elem) || ast_expr_has_async(iter)
+                || cond.as_ref().map_or(false, |e| ast_expr_has_async(e))
+        }
+        ast::Expr::BuildBlock { lhs, body, .. } => {
+            ast_expr_has_async(lhs) || ast_body_has_async(body)
+        }
+        ast::Expr::TryCatch { body, .. } => ast_body_has_async(body),
+        ast::Expr::FieldAccess { receiver, .. } | ast::Expr::PathAccess { receiver, .. } => {
+            ast_expr_has_async(receiver)
+        }
+        ast::Expr::Index { receiver, index } => {
+            ast_expr_has_async(receiver) || ast_expr_has_async(index)
+        }
+        ast::Expr::KwArg { value, .. } => ast_expr_has_async(value),
+        _ => false,
     }
 }
 

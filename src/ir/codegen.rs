@@ -296,13 +296,33 @@ impl CodeGen {
         self.buf.push('\n');
 
         // ── Lang-Zone 运行时桥接 shims ──
-        // 仅注入 __Params 类型定义
         self.buf.push_str("// ── 运行时桥接 shims ──\n");
         self.buf.push_str("use std::any::Any;\n");
         self.buf.push_str("#[derive(Debug)]\n");
         self.buf.push_str("pub struct __Params {\n");
         self.buf.push_str("    pub args: Vec<Box<dyn Any>>,\n");
         self.buf.push_str("    pub kwargs: HashMap<String, Box<dyn Any>>,\n");
+        self.buf.push_str("}\n\n");
+        // spawn_task: 异步任务包装器（保持 Future 语义，允许 .await）
+        self.buf.push_str("async fn __spawn_task<T>(f: impl std::future::Future<Output = T>) -> T {\n");
+        self.buf.push_str("    f.await\n");
+        self.buf.push_str("}\n\n");
+        // block_on: 同步阻塞执行 async 代码（用于 async main，无外部依赖）
+        self.buf.push_str("fn __block_on<F: std::future::Future>(mut f: F) -> F::Output {\n");
+        self.buf.push_str("    use std::task::{{Context, Poll, RawWaker, RawWakerVTable, Waker}};\n");
+        self.buf.push_str("    use std::pin::Pin;\n");
+        self.buf.push_str("    unsafe fn clone_raw(_: *const ()) -> RawWaker { RawWaker::new(std::ptr::null(), &VTABLE) }\n");
+        self.buf.push_str("    unsafe fn noop(_: *const ()) {{}}\n");
+        self.buf.push_str("    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_raw, noop, noop, noop);\n");
+        self.buf.push_str("    let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };\n");
+        self.buf.push_str("    let mut cx = Context::from_waker(&waker);\n");
+        self.buf.push_str("    let mut f = unsafe { Pin::new_unchecked(&mut f) };\n");
+        self.buf.push_str("    loop {\n");
+        self.buf.push_str("        match f.as_mut().poll(&mut cx) {\n");
+        self.buf.push_str("            Poll::Ready(val) => return val,\n");
+        self.buf.push_str("            Poll::Pending => std::thread::yield_now(),\n");
+        self.buf.push_str("        }\n");
+        self.buf.push_str("    }\n");
         self.buf.push_str("}\n\n");
     }
 
@@ -345,12 +365,14 @@ impl CodeGen {
             IrType::Self_ => "Self".into(),
             IrType::Duck { .. } => "()".into(),  // Duck types: cannot determine Rust type, use unit
             IrType::Named { path, args } => {
-                // Future<T> → T（暂时同步化：spawn 返回的值类型就是内部类型）
+                // Future<T> → 保持 Future 类型用于函数签名
+                // 对于变量声明，由 gen_let 等处理方决定是否省略类型标注
                 if path == "Future" {
                     if let Some(inner) = args.first() {
-                        return self.rust_type(inner);
+                        let inner_ty = self.rust_type(inner);
+                        return format!("std::future::Future<Output = {}>", inner_ty);
                     }
-                    return "()".into();
+                    return "std::future::Future<Output = ()>".into();
                 }
                 let mapped = self.type_map.get(path.as_str()).map(|s| s.to_string())
                     .unwrap_or_else(|| path.clone());
@@ -506,8 +528,12 @@ impl CodeGen {
             }
         }).collect();
         let has_yield = block_has_yield(&f.body);
-        let ret = if f.name == "main" {
+        // Rust 不允许 async main，对于 async main 使用 block_on 包装
+        let is_async_main = f.is_async && f.name == "main";
+        let ret = if f.name == "main" && !is_async_main {
             String::new()  // Rust main always returns ()
+        } else if is_async_main {
+            String::new()  // async main 也返回 ()（block_on 内部处理）
         } else if has_yield {
             format!(" -> Vec<{}>", self.rust_type(&f.ret_ty))
         } else if f.ret_ty != IrType::Unit {
@@ -522,7 +548,7 @@ impl CodeGen {
         } else {
             String::new()
         };
-        let async_kw = if f.is_async { "async " } else { "" };
+        let async_kw = if f.is_async && !is_async_main { "async " } else { "" };
         let is_method = f.params.first().map_or(false, |p| p.name == "self");
         let vis = if is_method { "" } else { "pub " };
 
@@ -558,7 +584,17 @@ impl CodeGen {
         // 函数体
         self.current_ret_ty = Some(f.ret_ty.clone());
         self.is_main = f.name == "main";
-        self.gen_block_inner(&f.body);
+        if is_async_main {
+            // async main → 使用 block_on 包装：fn main() { __block_on(async { body }) }
+            self.emit_line("let __async_main = async {");
+            self.indent += 1;
+            self.gen_block_inner(&f.body);
+            self.indent -= 1;
+            self.emit_line("};");
+            self.emit_line("__block_on(__async_main);");
+        } else {
+            self.gen_block_inner(&f.body);
+        }
         self.current_ret_ty = None;
         self.is_main = false;
 
@@ -928,6 +964,7 @@ impl CodeGen {
                     || matches!(ty, IrType::Fn { .. })
                     || if let IrType::Named { path, args } = ty {
                         path == "Range" || path == "Nil" || path == "Dict" || path == "Set"
+                            || path == "Future"  // Future<T> 是 trait 不是具体类型，无法用于变量标注
                             || args.is_empty()
                             || args.iter().any(|a| matches!(a, IrType::Generic(_)))
                     } else { false };
@@ -1491,8 +1528,10 @@ impl CodeGen {
                 } else if callee_s == "clone" && args_s.len() == 1 {
                     format!("({}).clone()", args_s[0])
                 } else if callee_s == "spawn" && args_s.len() >= 1 {
-                    // spawn(expr) → 同步评估（async 运行时待后续实现）
-                    format!("({})", args_s.join(", "))
+                    // spawn(expr) → 保持异步 Future 语义
+                    // 在 async 上下文中：spawn fetch(1) 生成 __spawn_task(fetch(1))
+                    // 注意：fetch 是 async fn，直接调用返回 Future
+                    format!("__spawn_task({})", args_s.join(", "))
                 } else if callee_s == "sort" && args_s.len() == 1 {
                     format!("{{ let mut _tmp = {0}.clone(); _tmp.sort(); _tmp }}", args_s[0])
                 } else if callee_s == "reverse" && args_s.len() == 1 {
