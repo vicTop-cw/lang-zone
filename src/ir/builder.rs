@@ -619,8 +619,12 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     }
                 }
                 BuildKind::Call => {
-                    // ~: 构建块的返回类型是 body 块的结果类型（调用返回）
-                    body.last().map(|s| infer_stmt_type(s, ctx)).unwrap_or(IrType::Unit)
+                    // ~: 构建块的实际返回类型是 callee 的返回值类型
+                    // body 的类型是元组（被解包为 callee 的参数），不是调用结果
+                    match &lhs_ty {
+                        IrType::Fn { ret, .. } => *ret.clone(),
+                        _ => IrType::Any,  // callee 类型未知，用 Any 避免错误类型标注
+                    }
                 }
                 BuildKind::Gen => {
                     // *: 生成器构建块 → List<yield 类型>
@@ -1633,10 +1637,10 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
             let mut ir_value = convert_expr(value, ctx);
             // 当 value 是 Lambda（部分应用展开等），使用 Lambda 的类型而非 infer 的类型
-            let ir_ty = if let IrType::Fn { .. } = &ir_value.ty {
-                ir_value.ty.clone()
-            } else {
-                ir_ty
+            // 当 value 的 IR 类型为 Any（~: 构建块等），也使用 IR 类型避免错误标注
+            let ir_ty = match &ir_value.ty {
+                IrType::Fn { .. } | IrType::Any => ir_value.ty.clone(),
+                _ => ir_ty,
             };
             // 当 Let 类型注解为 fn(..) -> .. 且 value 是 Lambda 时，
             // 将 fn 的参数类型传播到 Lambda 参数中
@@ -1662,10 +1666,10 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
             let mut ir_value = convert_expr(value, ctx);
             // 当 value 是 Lambda 时，使用 Lambda 的类型
-            let ir_ty = if let IrType::Fn { .. } = &ir_value.ty {
-                ir_value.ty.clone()
-            } else {
-                ir_ty
+            // 当 value 的 IR 类型为 Any（~: 构建块等），也使用 IR 类型避免错误标注
+            let ir_ty = match &ir_value.ty {
+                IrType::Fn { .. } | IrType::Any => ir_value.ty.clone(),
+                _ => ir_ty,
             };
             // 同上：传播 fn 参数类型到 Lambda
             if let IrType::Fn { params: fn_params, .. } = &ir_ty {
