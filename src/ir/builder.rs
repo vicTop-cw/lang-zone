@@ -29,6 +29,8 @@ struct TypeCtx {
     struct_names: HashSet<String>,
     /// struct 字段类型：struct_name → field_name → type
     struct_fields: HashMap<String, HashMap<String, IrType>>,
+    /// struct 方法名集合：struct_name → 方法名集合（含魔术方法）
+    struct_methods: HashMap<String, HashSet<String>>,
     /// enum variant → enum name 映射
     enum_variants: HashMap<String, String>,
     /// 当前函数泛型参数
@@ -49,6 +51,7 @@ impl TypeCtx {
             fn_params: HashMap::new(),
             struct_names: HashSet::new(),
             struct_fields: HashMap::new(),
+            struct_methods: HashMap::new(),
             enum_variants: HashMap::new(),
             current_generics: vec![],
             current_ret_ty: None,
@@ -70,6 +73,15 @@ impl TypeCtx {
                     fields.insert(f.name.clone(), from_ast_type(&f.ty));
                 }
                 self.struct_fields.insert(s.name.clone(), fields);
+                // 收集 struct 方法名（含魔术方法）
+                let mut mset: HashSet<String> = HashSet::new();
+                for m in s.methods.iter() {
+                    mset.insert(m.name.clone());
+                }
+                for m in s.magic_methods.iter() {
+                    mset.insert(m.name.clone());
+                }
+                self.struct_methods.insert(s.name.clone(), mset);
             }
         }
     }
@@ -170,6 +182,29 @@ fn map_binop(op: &BinOp) -> BinOpKind {
         BinOp::Pow => BinOpKind::Pow,
         BinOp::In => BinOpKind::In,
         BinOp::Is => BinOpKind::Eq,        // Is 降级 (Rust 无 is 运算符)
+    }
+}
+
+/// 运算符 → 魔术方法名 映射（用于用户自定义类型重载）
+fn magic_method_for_binop(op: &BinOp) -> Option<&'static str> {
+    match op {
+        BinOp::Add => Some("__add__"),
+        BinOp::Sub => Some("__sub__"),
+        BinOp::Mul => Some("__mul__"),
+        BinOp::Div => Some("__truediv__"),
+        BinOp::Mod => Some("__mod__"),
+        BinOp::Eq => Some("__eq__"),
+        BinOp::Ne => Some("__ne__"),
+        BinOp::Lt => Some("__lt__"),
+        BinOp::Gt => Some("__gt__"),
+        BinOp::Le => Some("__le__"),
+        BinOp::Ge => Some("__ge__"),
+        BinOp::BitAnd => Some("__and__"),
+        BinOp::BitOr => Some("__or__"),
+        BinOp::BitXor => Some("__xor__"),
+        BinOp::Pow => Some("__pow__"),
+        BinOp::In => Some("__contains__"),
+        _ => None,
     }
 }
 
@@ -801,6 +836,27 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }
                 // RHS is not a simple type name → fallback to false
                 return Expr::new(ExprKind::Lit(LitKind::Bool(false)), IrType::Bool, Span::unknown());
+            }
+
+            // 用户自定义类型的运算符 → 魔术方法调用（如 Vector + Vector → Vector.__add__）
+            let left_ty_bin = infer_expr_type(left, ctx);
+            if let Some(magic) = magic_method_for_binop(op) {
+                let is_user_struct = match &left_ty_bin {
+                    IrType::Named { path, .. } => ctx.struct_methods.get(path)
+                        .map(|ms| ms.contains(magic))
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                if is_user_struct {
+                    let recv = convert_expr(left, ctx);
+                    let ret_ty = infer_expr_type(left, ctx);
+                    let expr = Expr::new(ExprKind::MethodCall {
+                        receiver: Box::new(recv),
+                        method: magic.to_string(),
+                        args: vec![convert_expr(right, ctx)],
+                    }, ret_ty, Span::unknown());
+                    return expr;
+                }
             }
 
             let ir_op = map_binop(op);
@@ -1804,6 +1860,9 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
         for (fn_, ty) in fields { cloned.insert(fn_.clone(), ty.clone()); }
         block_ctx.struct_fields.insert(sn.clone(), cloned);
     }
+    for (sn, ms) in &ctx.struct_methods {
+        block_ctx.struct_methods.insert(sn.clone(), ms.clone());
+    }
     for (vn, vt) in &ctx.vars { block_ctx.vars.insert(vn.clone(), vt.clone()); }
     for (name, ty) in &ctx.fn_returns { block_ctx.fn_returns.insert(name.clone(), ty.clone()); }
     for (name, p) in &ctx.fn_params { block_ctx.fn_params.insert(name.clone(), p.clone()); }
@@ -1934,6 +1993,9 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         let mut cloned = HashMap::new();
         for (fn_, ty) in fields { cloned.insert(fn_.clone(), ty.clone()); }
         fn_ctx.struct_fields.insert(sn.clone(), cloned);
+    }
+    for (sn, ms) in &ctx.struct_methods {
+        fn_ctx.struct_methods.insert(sn.clone(), ms.clone());
     }
     for (name, ty) in &ctx.fn_returns { fn_ctx.fn_returns.insert(name.clone(), ty.clone()); }
     for (name, p) in &ctx.fn_params { fn_ctx.fn_params.insert(name.clone(), p.clone()); }
@@ -2165,6 +2227,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             method_ctx.pending_items = ctx.pending_items.clone();
             method_ctx.struct_names = ctx.struct_names.clone();
             method_ctx.struct_fields = ctx.struct_fields.clone();
+            method_ctx.struct_methods = ctx.struct_methods.clone();
             convert_fn_def(m, &method_ctx)
         }).collect();
 
@@ -2188,6 +2251,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             method_ctx.pending_items = ctx.pending_items.clone();
             method_ctx.struct_names = ctx.struct_names.clone();
             method_ctx.struct_fields = ctx.struct_fields.clone();
+            method_ctx.struct_methods = ctx.struct_methods.clone();
             convert_fn_def(m, &method_ctx)
         }).collect();
 
@@ -2232,6 +2296,9 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
             let mut cloned = HashMap::new();
             for (fn_, ty) in fields { cloned.insert(fn_.clone(), ty.clone()); }
             impl_ctx.struct_fields.insert(sn.clone(), cloned);
+        }
+        for (sn, ms) in &ctx.struct_methods {
+            impl_ctx.struct_methods.insert(sn.clone(), ms.clone());
         }
         for (name, ty) in &ctx.fn_returns { impl_ctx.fn_returns.insert(name.clone(), ty.clone()); }
         impl_ctx.current_generics = imp.generics.clone();
@@ -2327,6 +2394,7 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
                             method_ctx.pending_items = ctx.pending_items.clone();
                             method_ctx.struct_names = ctx.struct_names.clone();
                             method_ctx.struct_fields = ctx.struct_fields.clone();
+            method_ctx.struct_methods = ctx.struct_methods.clone();
                             ed.methods.push(convert_fn_def(m, &method_ctx));
                         }
                     }

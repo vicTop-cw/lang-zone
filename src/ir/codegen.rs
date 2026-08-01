@@ -1733,10 +1733,11 @@ impl CodeGen {
 
                 // LZ magic methods → Rust equivalents
                 // plus common method name mappings
+                // 注意：算术/比较魔术方法（__add__/__eq__ 等）保留原名，
+                // 因为用户 struct 的 impl 方法就叫 __add__；__str__/__iter__ 用于
+                // str() 转换和迭代的容器场景，继续映射
                 let rust_method = match method.as_str() {
                     "__str__" => "to_string",
-                    "__add__" => "add",
-                    "__eq__" => "eq",
                     "__iter__" => "iter",
                     "length" => "len",    // LZ .length() → Rust .len()
                     "to_upper" => "to_uppercase",
