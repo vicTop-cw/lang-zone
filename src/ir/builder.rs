@@ -350,7 +350,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::BoolLit(_) => IrType::Bool,
         AstExpr::NoneLit => IrType::Any,  // None 类型取决于上下文
         AstExpr::Ident(name) => ctx.lookup_var(name),
-        AstExpr::Call { func, args } => {
+        AstExpr::Call { func, args, .. } => {
             if let AstExpr::Ident(fname) = func.as_ref() {
                 // __as__ 类型转换：返回目标类型
                 if fname == "__as__" && args.len() == 2 {
@@ -614,7 +614,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             ExprKind::Paren(Box::new(convert_expr(inner, ctx)))
         }
 
-        AstExpr::Call { func, args } => {
+        AstExpr::Call { func, args, type_args } => {
             // 特殊处理 __as__ 运算符：__as__(value, type_name) → Cast
             if let AstExpr::Ident(ref fname) = func.as_ref() {
                 if fname == "__as__" && args.len() == 2 {
@@ -629,7 +629,16 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     }
                 }
             }
-            ExprKind::Call { type_args: vec![],
+            let ir_type_args: Vec<String> = type_args.iter().map(|t| {
+                match t.as_str() {
+                    "int" => "i64".to_string(),
+                    "str" => "String".to_string(),
+                    "f64" | "float" => "f64".to_string(),
+                    "bool" => "bool".to_string(),
+                    other => other.to_string(),
+                }
+            }).collect();
+            ExprKind::Call { type_args: ir_type_args,
                 callee: Box::new(convert_expr(func, ctx)),
                 args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
             }
@@ -1642,10 +1651,23 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             // @math 自动泛型: 单泛型 T（所有参数统一类型）
             vec![GenericParam { name: "T".into(), bounds: vec![], default: None }]
         } else {
-            func.generics.iter().map(|g| GenericParam {
-                name: g.clone(),
-                bounds: vec![],
-                default: None,
+            // 从 where_clause 收集每个泛型参数的 bounds
+            let mut bounds_map: HashMap<String, Vec<IrType>> = HashMap::new();
+            for wb in &func.where_clause {
+                let ir_bounds: Vec<IrType> = wb.bounds.iter()
+                    .map(|b| from_ast_type(b))
+                    .collect();
+                bounds_map.entry(wb.type_param.clone())
+                    .or_default()
+                    .extend(ir_bounds);
+            }
+            func.generics.iter().map(|g| {
+                let bounds = bounds_map.remove(g).unwrap_or_default();
+                GenericParam {
+                    name: g.clone(),
+                    bounds,
+                    default: None,
+                }
             }).collect()
         },
         params,

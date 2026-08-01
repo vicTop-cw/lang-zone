@@ -682,12 +682,8 @@ impl CodeGen {
                     return;
                 }
                 self.declared.insert(name.clone());
-                // LZ 容器类型（List/Dict/Set）始终生成 mut，因方法可修改容器内容
-                let is_container = matches!(&value.kind, ExprKind::ListLit(..))
-                    || matches!(&value.kind, ExprKind::StructCtor { name: n, .. } if n == "Dict")
-                    || matches!(ty, IrType::Named { path, .. } if path == "List" || path == "Dict" || path == "Set" || path == "Vec" || path == "HashMap" || path == "HashSet");
-                let needs_mut = *is_mut || is_container;
-                let mut_kw = if needs_mut { "mut " } else { "" };
+                // LZ 语义：所有 let 绑定生成 mut（LZ 中容器/结构体方法可修改内容）
+                let mut_kw = "mut ";
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
                     || matches!(ty, IrType::Generic(_))
@@ -718,6 +714,17 @@ impl CodeGen {
                 self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, self.gen_expr(value)));
             }
             Stmt::Assign { target, value } => {
+                // Dict/HashMap 索引赋值 → .insert() 替代（HashMap 不实现 IndexMut）
+                if let ExprKind::IndexGet { base, key } = &target.kind {
+                    let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                    if is_dict {
+                        let base_s = self.gen_expr(base);
+                        let key_s = self.gen_expr(key);
+                        let val_s = self.gen_expr(value);
+                        self.emit_line(&format!("{}.insert({}, {});", base_s, key_s, val_s));
+                        return;
+                    }
+                }
                 let target_s = self.gen_target_expr(target);
                 let val_s = self.gen_expr(value);
                 // 模块级可变变量 → 需 unsafe 块

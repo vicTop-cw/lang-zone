@@ -174,7 +174,7 @@ impl ParserExprExt for Parser {
                     // 解析 as 右侧的类型
                     let ty = self.parse_type()?;
                     let ty_name = ty.to_string();
-                    left = Expr::Call {
+                    left = Expr::Call { type_args: vec![],
                         func: Box::new(Expr::Ident("__as__".to_string())),
                         args: vec![left, Expr::Ident(ty_name)],
                     };
@@ -366,7 +366,7 @@ impl ParserExprExt for Parser {
                                 if self.check(&Token::Comma) { self.advance(); }
                             }
                             self.expect(Token::RParen)?;
-                            expr = Expr::Call { func: Box::new(expr), args };
+                            expr = Expr::Call { type_args: vec![], func: Box::new(expr), args };
                         }
                         continue;
                     }
@@ -421,7 +421,7 @@ impl ParserExprExt for Parser {
                             if self.check(&Token::Comma) { self.advance(); }
                         }
                         self.expect(Token::RParen)?;
-                        expr = Expr::Call {
+                        expr = Expr::Call { type_args: vec![],
                             func: Box::new(Expr::PathAccess {
                                 receiver: Box::new(expr),
                                 segment: seg,
@@ -489,7 +489,7 @@ impl ParserExprExt for Parser {
                         self.expect(Token::RParen)?;
                         args
                     };
-                    expr = Expr::Call { func: Box::new(expr), args };
+                    expr = Expr::Call { type_args: vec![], func: Box::new(expr), args };
                 }
                 Token::LBrace => {
                     // Struct ctor: Point{x: 10, y: 20} 或 Point{x~, y~}
@@ -511,7 +511,7 @@ impl ParserExprExt for Parser {
                         if self.check(&Token::Comma) { self.advance(); }
                     }
                     self.expect(Token::RBrace)?;
-                    expr = Expr::Call { func: Box::new(expr), args };
+                    expr = Expr::Call { type_args: vec![], func: Box::new(expr), args };
                 }
                 Token::LBrack => {
                     self.advance();

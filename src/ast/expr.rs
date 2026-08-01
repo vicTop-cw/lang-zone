@@ -35,6 +35,7 @@ pub enum Expr {
     Call {
         func: Box<Expr>,
         args: Vec<Expr>,
+        type_args: Vec<String>,
     },
     KwArg {
         name: String,

@@ -111,7 +111,7 @@ impl CodeGenExprExt for CodeGen {
                 }
             }
 
-            Expr::Call { func, args } => {
+            Expr::Call { func, args, .. } => {
                 // 实参：Rust 默认语义 — Copy自动复制，!Copy move
                 let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let func_s = self.gen_expr(func);
