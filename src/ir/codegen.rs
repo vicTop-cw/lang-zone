@@ -38,6 +38,8 @@ pub struct CodeGen {
     fn_variadic: HashMap<String, usize>,
     /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
     fn_param_types: HashMap<String, Vec<IrType>>,
+    /// 重载函数签名集合：函数名 → 多个参数类型签名（同名函数 >1 个时启用 mangling）
+    overload_sigs: HashMap<String, Vec<Vec<IrType>>>,
     /// 当前正在生成的函数的 variadic 参数名集合
     current_variadic_params: std::collections::HashSet<String>,
     /// 模块级 const/static 名称（用于参数重命名避免 E0530 冲突）
@@ -75,6 +77,7 @@ impl CodeGen {
             current_variadic_params: std::collections::HashSet::new(),
             fn_variadic: HashMap::new(),
             fn_param_types: HashMap::new(),
+            overload_sigs: HashMap::new(),
             top_level_static_names: std::collections::HashSet::new(),
             param_renames: HashMap::new(),
             buf: String::new(),
@@ -96,6 +99,7 @@ impl CodeGen {
         self.impl_types.clear();
         self.mutated_consts.clear();
         self.enum_variant_fields.clear();
+        self.overload_sigs.clear();
 
         // 收集所有模块级 const 名称
         let const_names: std::collections::HashSet<String> = module.items.iter()
@@ -144,6 +148,13 @@ impl CodeGen {
                 }
                 // 收集所有参数类型（用于隐式 variadic 检测）
                 self.fn_param_types.insert(f.name.clone(), f.params.iter().map(|p| p.ty.clone()).collect());
+                // 收集重载签名：同名非方法函数出现多次 → 记录各签名（用于函数重载 mangling）
+                if !f.params.iter().any(|p| p.name == "self") {
+                    let sig: Vec<IrType> = f.params.iter().map(|p| p.ty.clone()).collect();
+                    self.overload_sigs.entry(f.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(sig);
+                }
                 // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
                 if let Some((idx, _)) = f.params.iter().enumerate().find(|(_, p)| p.variadic) {
                     self.fn_variadic.insert(f.name.clone(), idx);
@@ -447,6 +458,56 @@ impl CodeGen {
         }
     }
 
+    /// 计算重载函数的 mangled 名称。仅当函数名有多个重载签名时返回 mangled 名，
+    /// 否则返回原名。用于函数定义处。
+    fn mangled_fn_name(&self, name: String, sig: &[IrType]) -> String {
+        if let Some(sigs) = self.overload_sigs.get(&name) {
+            if sigs.len() > 1 {
+                let suffix: Vec<String> = sig.iter().map(|t| self.type_mangle_suffix(t)).collect();
+                return format!("{}__{}", name, suffix.join("_"));
+            }
+        }
+        name
+    }
+
+    /// 根据实参 IR 类型匹配重载签名，返回选择的 mangled 函数名。
+    /// 找不到匹配时返回 None（调用方保留原名）。
+    fn match_overload(&self, name: &str, sigs: &[Vec<IrType>], args: &[Expr]) -> Option<String> {
+        // 参数类型兼容：实参类型与签名参数类型匹配（含 Any 通配）
+        let compatible = |arg_ty: &IrType, param_ty: &IrType| -> bool {
+            if matches!(param_ty, IrType::Any) { return true; }
+            if matches!(arg_ty, IrType::Any) { return true; }
+            arg_ty == param_ty
+        };
+        // 优先找精确参数数量匹配且类型全兼容的签名
+        for sig in sigs.iter().filter(|s| s.len() == args.len()) {
+            if args.iter().zip(sig.iter()).all(|(a, p)| compatible(&a.ty, p)) {
+                let suffix: Vec<String> = sig.iter().map(|t| self.type_mangle_suffix(t)).collect();
+                return Some(format!("{}__{}", name, suffix.join("_")));
+            }
+        }
+        None
+    }
+
+    /// 将 IrType 编码为 mangled 后缀（简短稳定编码）
+    fn type_mangle_suffix(&self, ty: &IrType) -> String {
+        match ty {
+            IrType::Int => "i64".to_string(),
+            IrType::F64 => "f64".to_string(),
+            IrType::Bool => "bool".to_string(),
+            IrType::Str => "String".to_string(),
+            IrType::Named { path, args } => {
+                if args.is_empty() {
+                    path.replace("::", "_")
+                } else {
+                    let inner: Vec<String> = args.iter().map(|a| self.type_mangle_suffix(a)).collect();
+                    format!("{}_{}", path.replace("::", "_"), inner.join("_"))
+                }
+            }
+            other => format!("{:?}", other).replace(['<', '>', ' ', '(', ')', ',', '{', '}'], "_"),
+        }
+    }
+
     fn gen_fn_def(&mut self, f: &FnDef) {
         self.declared.clear();
         // 收集当前函数的 variadic 参数名
@@ -552,12 +613,13 @@ impl CodeGen {
         let is_method = f.params.first().map_or(false, |p| p.name == "self");
         let vis = if is_method { "" } else { "pub " };
 
+        let fn_name = self.mangled_fn_name(f.name.clone(), &f.params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>());
         let sig = format!(
             "{}{}{}fn {}{}({}){}{}",
             if f.is_test { "#[test]\n" } else { "" },
             vis,
             async_kw,
-            f.name,
+            fn_name,
             generics,
             params.join(", "),
             ret,
@@ -1355,6 +1417,17 @@ impl CodeGen {
                 } else {
                     callee_s
                 };
+                // 函数重载分派：根据实参类型选择对应的 mangled 版本
+                let callee_s = if let ExprKind::Var(name) = &callee.kind {
+                    if let Some(sigs) = self.overload_sigs.get(name) {
+                        if sigs.len() > 1 {
+                            // 从实参 IR 类型匹配签名
+                            if let Some(sel) = self.match_overload(name, sigs, args) {
+                                sel
+                            } else { callee_s }
+                        } else { callee_s }
+                    } else { callee_s }
+                } else { callee_s };
                 
                 // 检测 ~: 元组解包模式：连续的 UnpackBuildCall 参数
                 let has_unpack = args.iter().any(|a| matches!(&a.kind, ExprKind::MagicCall { kind: MagicKind::UnpackBuildCall, .. }));
@@ -2078,6 +2151,8 @@ impl CodeGen {
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
                 child.fn_param_info = self.fn_param_info.clone();
+                // 块表达式尾值应为块尾表达式（非 return）
+                child.suppress_tail_return = true;
                 // 生成器构建块（含 yield）：预声明 __gen_vec 并返回
                 let is_gen = block_has_yield(block);
                 if is_gen {
