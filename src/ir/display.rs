@@ -525,6 +525,7 @@ impl fmt::Display for Item {
                 }
             }
             Item::Const(c) => write!(f, "const {}: {} = {}", c.name, c.ty, c.value),
+            Item::TypeAlias(ta) => write!(f, "type {} = {}", ta.name, ta.ty),
             Item::Test(t) => write!(f, "test {} {:#?}", t.name, t.body),
         }
     }

@@ -39,6 +39,7 @@ impl CythonCodeGen {
             Item::StructDef(s) => Some(s.name.clone()),
             Item::EnumDef(e) => Some(e.name.clone()),
             Item::Const(c) => Some(c.name.clone()),
+            Item::TypeAlias(ta) => Some(ta.name.clone()),
             _ => None,
         }).collect();
         self.writeln(&format!("__all__ = [{}]", all_items.iter().map(|n| format!("\"{}\"", n)).collect::<Vec<_>>().join(", ")));
@@ -62,6 +63,7 @@ impl CythonCodeGen {
             Item::StructDef(s) => self.gen_struct(s),
             Item::EnumDef(e) => self.gen_enum(e),
             Item::Const(c) => self.gen_const(c),
+            Item::TypeAlias(_) => {}  // Cython uses ctypedef
             Item::Use(u) => self.gen_import(u),
             Item::TraitDef(t) => self.gen_trait(t),
             Item::Impl(i) => self.gen_impl(i),

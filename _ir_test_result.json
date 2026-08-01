@@ -2,13 +2,15 @@
   "total": 129,
   "lz_pass": 129,
   "lz_fail": 0,
-  "rustc_pass": 59,
-  "rustc_fail": 70,
+  "rustc_pass": 67,
+  "rustc_fail": 62,
   "pass_files": [
     "01_basics\\comments.lz",
     "01_basics\\literals_more.lz",
     "02_types\\containers.lz",
     "02_types\\option_result.lz",
+    "02_types\\type_aliases.lz",
+    "02_types\\type_aliases_more.lz",
     "03_variables\\const.lz",
     "03_variables\\const_more.lz",
     "03_variables\\mutable_let.lz",
@@ -38,15 +40,19 @@
     "07_data_structures\\struct_more.lz",
     "07_data_structures\\trait_impl.lz",
     "09_macros\\comptime_demo.lz",
+    "09_macros\\macro_demo.lz",
     "13_operators\\compound_assign_more.lz",
     "14_pointers\\box_rc_arc.lz",
     "15_generators\\generator_more.lz",
     "15_generators\\yield_demo.lz",
+    "16_testing\\test_suite.lz",
     "99_prelude\\prelude_demo.lz",
+    "99_spec\\closure_fatarrow.lz",
     "99_spec\\combo-syntax\\combo_while_guard_else.lz",
     "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
     "99_spec\\comprehension_over_list.lz",
     "99_spec\\comptime_template.lz",
+    "99_spec\\constraint_multi.lz",
     "99_spec\\guard_for_1.lz",
     "99_spec\\guard_for_2.lz",
     "99_spec\\ir-edge-boundary-values.lz",
@@ -54,9 +60,11 @@
     "99_spec\\ir-edge-guard-combo.lz",
     "99_spec\\ir-edge-nested-match.lz",
     "99_spec\\ir-edge-type-boundary.lz",
+    "99_spec\\literal_i64min.lz",
     "99_spec\\loop_else.lz",
     "99_spec\\macro_real.lz",
     "99_spec\\match_guard.lz",
+    "99_spec\\setup_teardown.lz",
     "99_spec\\tilde_named_arg_1.lz",
     "99_spec\\tilde_named_arg_2.lz",
     "99_spec\\tilde_named_arg_3.lz",
@@ -66,9 +74,6 @@
     "struct_singleline.lz"
   ],
   "errors": {
-    "E0573": [
-      "01_basics\\identifiers.lz"
-    ],
     "E0599": [
       "01_basics\\identifiers.lz",
       "01_basics\\identifiers.lz",
@@ -78,63 +83,6 @@
       "99_spec\\gen_block_star.lz",
       "99_spec\\iterator_demo.lz",
       "99_spec\\set_comprehension.lz"
-    ],
-    "E0308": [
-      "01_basics\\identifiers.lz",
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "01_basics\\literals.lz",
-      "02_types\\type_aliases.lz",
-      "02_types\\type_aliases.lz",
-      "02_types\\type_aliases_more.lz",
-      "02_types\\type_aliases_more.lz",
-      "02_types\\type_aliases_more.lz",
-      "02_types\\type_conversion.lz",
-      "04_functions\\closures_more.lz",
-      "04_functions\\generics.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "06_control_flow\\with_defer.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\try_more.lz",
-      "10_error_handling\\try_more.lz",
-      "13_operators\\precedence.lz",
-      "99_spec\\codegen_str_int_float.lz",
-      "99_spec\\gen_block_star.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_ternary_walrus.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "overload_test.lz",
-      "variadic_dotdot.lz"
     ],
     "E0425": [
       "01_basics\\keywords.lz",
@@ -237,13 +185,60 @@
       "01_basics\\keywords.lz",
       "11_concurrency\\async_more.lz",
       "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
       "11_concurrency\\async_spawn.lz",
       "11_concurrency\\async_spawn.lz",
       "combo-syntax\\combo_async_spawn.lz",
       "combo-syntax\\combo_async_spawn.lz"
+    ],
+    "E0308": [
+      "01_basics\\keywords.lz",
+      "01_basics\\keywords.lz",
+      "01_basics\\keywords.lz",
+      "02_types\\type_conversion.lz",
+      "04_functions\\closures_more.lz",
+      "04_functions\\generics.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "05_expressions\\operators.lz",
+      "06_control_flow\\with_defer.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "07_data_structures\\magic_methods.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "10_error_handling\\try_more.lz",
+      "10_error_handling\\try_more.lz",
+      "13_operators\\precedence.lz",
+      "99_spec\\codegen_str_int_float.lz",
+      "99_spec\\gen_block_star.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "99_spec\\iterator_demo.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_defer_guard_try.lz",
+      "combo-syntax\\combo_match_ternary.lz",
+      "combo-syntax\\combo_match_ternary.lz",
+      "combo-syntax\\combo_match_ternary.lz",
+      "combo-syntax\\combo_ternary_walrus.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "combo-syntax\\combo_try_raise_guard.lz",
+      "overload_test.lz",
+      "variadic_dotdot.lz"
     ],
     "E0282": [
       "01_basics\\literals.lz",
@@ -349,24 +344,15 @@
     ],
     "E0252": [
       "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz"
+      "08_modules\\import_more.lz",
+      "08_modules\\import_more.lz"
     ],
     "E0432": [
       "08_modules\\import_demo.lz",
       "08_modules\\import_demo.lz",
       "08_modules\\import_more.lz",
       "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz",
       "08_modules\\import_more.lz"
-    ],
-    "E0601": [
-      "09_macros\\macro_demo.lz",
-      "16_testing\\test_suite.lz",
-      "99_spec\\closure_fatarrow.lz",
-      "99_spec\\codegen_str_int_float.lz",
-      "99_spec\\constraint_multi.lz",
-      "99_spec\\literal_i64min.lz",
-      "99_spec\\setup_teardown.lz"
     ],
     "E0507": [
       "99_spec\\combo-syntax\\combo_for_guard_match.lz",
@@ -406,12 +392,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error: `mut` must be followed by a named binding",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\identifiers.rs:34:9",
+        "warning: unreachable statement",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\identifiers.rs:34:5",
         "|",
-        "34 |     let mut _: i64 = compute();",
-        "|         ^^^^",
-        "|"
+        "32 |         return println!(\"{:?}\", \"no value\".to_string());",
+        "|         ----------------------------------------------- any code following this expression is unreachable",
+        "33 |     }"
       ]
     },
     {
@@ -432,11 +418,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "warning: denote infinite loops with `loop { ... }`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\literals.rs:53:5",
+        "error[E0282]: type annotations needed for `Vec<_>`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\literals.rs:37:9",
         "|",
-        "53 |     while true {",
-        "|     ^^^^^^^^^^ help: use `loop`",
+        "37 |     let mut empty = vec![];",
+        "|         ^^^^^^^^^   ------ type must be known at this point",
         "|"
       ]
     },
@@ -454,42 +440,16 @@
       ]
     },
     {
-      "file": "02_types\\type_aliases.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_aliases.rs:14:21",
-        "|",
-        "14 | const UserId: i64 = ();",
-        "|               ---   ^^ expected `i64`, found `()`",
-        "|               |"
-      ]
-    },
-    {
-      "file": "02_types\\type_aliases_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_aliases_more.rs:22:20",
-        "|",
-        "22 | const Meter: f64 = ();",
-        "|              ---   ^^ expected `f64`, found `()`",
-        "|              |"
-      ]
-    },
-    {
       "file": "02_types\\type_conversion.lz",
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:14:23",
+        "error[E0308]: mismatched types",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:43:43",
         "|",
-        "14 |     let mut b: bool = (1 != 0);",
-        "|                       ^      ^",
-        "|"
+        "43 |     let mut greet: fn(String) -> String = |name: i64| { \"Hello, {name}\".to_string() };",
+        "|                    --------------------   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected fn pointer, found closure",
+        "|                    |"
       ]
     },
     {
@@ -600,7 +560,7 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0252]: the name `HashMap` is defined multiple times",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_demo.rs:11:5",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_demo.rs:13:29",
         "|",
         "5 | use std::collections::{HashMap, HashSet};",
         "|                        ------- previous import of the type `HashMap` here",
@@ -612,24 +572,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0432]: unresolved import `std::math`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_more.rs:9:5",
+        "error[E0252]: the name `HashMap` is defined multiple times",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_more.rs:13:29",
         "|",
-        "9 | use std::math;",
-        "|     ^^^^^^^^^ no `math` in the root",
-        "|"
-      ]
-    },
-    {
-      "file": "09_macros\\macro_demo.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0601]: `main` function not found in crate `macro_demo`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\09_macros\\macro_demo.rs:7:20",
-        "|",
-        "7 | use std::sync::Arc;",
-        "|                    ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\09_macros\\macro_demo.rs`"
+        "5 | use std::collections::{HashMap, HashSet};",
+        "|                        ------- previous import of the type `HashMap` here",
+        "..."
       ]
     },
     {
@@ -747,30 +695,6 @@
       ]
     },
     {
-      "file": "16_testing\\test_suite.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0601]: `main` function not found in crate `test_suite`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\16_testing\\test_suite.rs:17:2",
-        "|",
-        "17 | }",
-        "|  ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\16_testing\\test_suite.rs`"
-      ]
-    },
-    {
-      "file": "99_spec\\closure_fatarrow.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0601]: `main` function not found in crate `closure_fatarrow`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\closure_fatarrow.rs:7:20",
-        "|",
-        "7 | use std::sync::Arc;",
-        "|                    ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\closure_fatarrow.rs`"
-      ]
-    },
-    {
       "file": "99_spec\\codegen_str_int_float.lz",
       "lz_ok": true,
       "rustc_ok": false,
@@ -833,18 +757,6 @@
         "15 |     count = count + 1;",
         "|     ^^^^^",
         "|"
-      ]
-    },
-    {
-      "file": "99_spec\\constraint_multi.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0601]: `main` function not found in crate `constraint_multi`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\constraint_multi.rs:19:2",
-        "|",
-        "19 | }",
-        "|  ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\constraint_multi.rs`"
       ]
     },
     {
@@ -987,18 +899,6 @@
       ]
     },
     {
-      "file": "99_spec\\literal_i64min.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0601]: `main` function not found in crate `literal_i64min`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\literal_i64min.rs:22:2",
-        "|",
-        "22 | }",
-        "|  ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\literal_i64min.rs`"
-      ]
-    },
-    {
       "file": "99_spec\\null_safe.lz",
       "lz_ok": true,
       "rustc_ok": false,
@@ -1049,18 +949,6 @@
       ]
     },
     {
-      "file": "99_spec\\setup_teardown.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0601]: `main` function not found in crate `setup_teardown`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\setup_teardown.rs:7:20",
-        "|",
-        "7 | use std::sync::Arc;",
-        "|                    ^ consider adding a `main` function to `E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\setup_teardown.rs`"
-      ]
-    },
-    {
       "file": "99_spec\\top_level_build.lz",
       "lz_ok": true,
       "rustc_ok": false,
@@ -1077,11 +965,11 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error: `mut` must be followed by a named binding",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_discard_3.rs:14:9",
+        "error[E0423]: expected function, found macro `println`",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_discard_3.rs:10:12",
         "|",
-        "14 |     let mut _: () = log(\"side effect only\".to_string());",
-        "|         ^^^^",
+        "10 |     return println(msg);",
+        "|            ^^^^^^^ not a function",
         "|"
       ]
     },

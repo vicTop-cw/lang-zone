@@ -128,9 +128,42 @@ impl CodeGen {
         self.emit_prelude();
 
         // 每个顶层 item
+        let mut has_main = false;
+        // 追踪已生成的 use 语句（去重 prelude imports）
+        let mut emitted_uses: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // prelude 已自动导入的模块/类型
+        let prelude_imports: std::collections::HashSet<&str> = [
+            "std::collections::HashMap", "std::collections::HashSet"
+        ].iter().cloned().collect();
+        
         for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if f.name == "main" { has_main = true; }
+            }
+            // 跳过已在 prelude 中导入的重复 use 语句
+            if let Item::Use(u) = item {
+                let key = u.path.join("::");
+                if prelude_imports.contains(key.as_str()) {
+                    continue;
+                }
+                if u.is_from && u.items.len() == 1 {
+                    let full = format!("{}::{}", key, u.items[0]);
+                    if prelude_imports.contains(full.as_str()) {
+                        continue;
+                    }
+                }
+                if emitted_uses.contains(&key) && u.items.is_empty() {
+                    continue;  // 完全重复的 use path;
+                }
+                emitted_uses.insert(key);
+            }
             self.gen_item(item);
             self.buf.push('\n');
+        }
+
+        // 如果没有 main 函数，自动生成空 main（避免 E0601）
+        if !has_main {
+            self.buf.push_str("pub fn main() {\n    // auto-generated: LZ module has no main entry point\n}\n");
         }
 
         std::mem::take(&mut self.buf)
@@ -317,6 +350,7 @@ impl CodeGen {
             Item::Impl(i) => self.gen_impl_def(i),
             Item::Use(u) => self.gen_use_stmt(u),
             Item::Const(c) => self.gen_const_def(c),
+            Item::TypeAlias(ta) => self.gen_type_alias_def(ta),
             Item::Test(t) => self.gen_test_def(t),
         }
     }
@@ -403,14 +437,15 @@ impl CodeGen {
         } else {
             String::new()
         };
-        let _async_kw = if f.is_async { "async " } else { "" };
+        let async_kw = if f.is_async { "async " } else { "" };
         let is_method = f.params.first().map_or(false, |p| p.name == "self");
         let vis = if is_method { "" } else { "pub " };
 
         let sig = format!(
-            "{}{}fn {}{}({}){}{}",
+            "{}{}{}fn {}{}({}){}{}",
             if f.is_test { "#[test]\n" } else { "" },
             vis,
+            async_kw,
             f.name,
             generics,
             params.join(", "),
@@ -578,11 +613,32 @@ impl CodeGen {
     }
 
     fn gen_use_stmt(&mut self, u: &UseStmt) {
-        let path = u.path.join("::");
+        // 映射 LZ 类型名 → Rust 类型名（仅在 import 路径中使用）
+        let lz_to_rust: HashMap<&str, &str> = [
+            ("List", "Vec"), ("Dict", "HashMap"), ("Set", "HashSet"),
+            ("String", "String"), ("Nil", "()"), ("int", "i64"),
+            ("str", "String"), ("f64", "f64"), ("bool", "bool"),
+        ].iter().cloned().collect();
+        
+        let path: Vec<String> = u.path.iter().map(|seg| {
+            // 包名保留原样，类型名映射
+            lz_to_rust.get(seg.as_str()).map(|s| s.to_string()).unwrap_or_else(|| seg.clone())
+        }).collect();
+        let path_str = path.join("::");
         if u.is_from {
-            self.emit_line(&format!("use {}::{{{}}};", path, u.items.join(", ")));
+            if u.items.is_empty() {
+                self.emit_line(&format!("use {};", path_str));
+            } else if u.items.len() == 1 && u.items[0] == "*" {
+                // * 通配符 → use path::*;（不是 use path::{*}）
+                self.emit_line(&format!("use {}::*;", path_str));
+            } else {
+                let items: Vec<String> = u.items.iter().map(|item| {
+                    lz_to_rust.get(item.as_str()).map(|s| s.to_string()).unwrap_or_else(|| item.clone())
+                }).collect();
+                self.emit_line(&format!("use {}::{{{}}};", path_str, items.join(", ")));
+            }
         } else {
-            self.emit_line(&format!("use {};", path));
+            self.emit_line(&format!("use {};", path_str));
         }
     }
 
@@ -602,6 +658,10 @@ impl CodeGen {
         };
         let kw = if is_mutated { "static mut" } else { "const" };
         self.emit_line(&format!("{} {}: {} = {};", kw, c.name, ty_str, val_str));
+    }
+
+    fn gen_type_alias_def(&mut self, ta: &TypeAliasDef) {
+        self.emit_line(&format!("pub type {} = {};", ta.name, self.rust_type(&ta.ty)));
     }
 
     fn gen_test_def(&mut self, t: &TestDef) {
@@ -683,7 +743,8 @@ impl CodeGen {
                 }
                 self.declared.insert(name.clone());
                 // LZ 语义：所有 let 绑定生成 mut（LZ 中容器/结构体方法可修改内容）
-                let mut_kw = "mut ";
+                // 例外：`_` 通配符不能有 mut（Rust E0573）
+                let mut_kw = if name == "_" { "" } else { "mut " };
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
                     || matches!(ty, IrType::Generic(_))
@@ -795,12 +856,20 @@ impl CodeGen {
             }
             Stmt::While { cond, guard, body } => {
                 self.emit_walrus_predecls(cond);
+                // while true → loop (Rust warns about while true)
+                let is_infinite = guard.is_none() && matches!(&cond.kind, ExprKind::Lit(LitKind::Bool(true)));
                 let cond_s = if let Some(g) = guard {
                     format!("({}) && ({})", self.gen_expr(cond), self.gen_expr(g))
+                } else if is_infinite {
+                    String::new()
                 } else {
                     self.gen_expr(cond)
                 };
-                self.emit_line(&format!("while {} {{", cond_s));
+                if is_infinite {
+                    self.emit_line("loop {");
+                } else {
+                    self.emit_line(&format!("while {} {{", cond_s));
+                }
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
@@ -1475,7 +1544,7 @@ impl CodeGen {
             ExprKind::Cast { expr, target } => {
                 // Special cases: as bool → != 0, as str → format/to_string
                 if *target == IrType::Bool {
-                    return format!("({} != 0)", self.gen_expr(expr));
+                    return format!("{} != 0", self.gen_expr(expr));
                 }
                 if *target == IrType::Str {
                     return format!("format!(\"{{}}\", {})", self.gen_expr(expr));
@@ -1512,7 +1581,13 @@ impl CodeGen {
                 format!("{{\n{}    }}", child.buf)
             }
             ExprKind::Paren(inner) => {
-                format!("({})", self.gen_expr(inner))
+                // 剥离不必要括号: (*expr) → *expr, (x != 0) → x != 0
+                match &inner.kind {
+                    ExprKind::UnOp { .. } | ExprKind::BinOp { .. } => {
+                        self.gen_expr(inner)  // 这些运算符自身已有足够优先级
+                    }
+                    _ => format!("({})", self.gen_expr(inner))
+                }
             }
             ExprKind::TupleLit(elems) => {
                 let elems: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();

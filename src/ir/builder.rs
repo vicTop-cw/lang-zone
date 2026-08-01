@@ -1965,13 +1965,12 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
         }));
     }
 
-    // 9.5. 转换 type aliases → Const 项（type UserId = int）
+    // 9.5. 转换 type aliases
     for ta in &ast_module.type_aliases {
         let ir_ty = from_ast_type(&ta.ty);
-        ir_mod.items.push(Item::Const(ConstDef {
+        ir_mod.items.push(Item::TypeAlias(TypeAliasDef {
             name: ta.name.clone(),
             ty: ir_ty,
-            value: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
         }));
     }
 

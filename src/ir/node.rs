@@ -193,6 +193,7 @@ pub enum Item {
     Impl(ImplDef),
     Use(UseStmt),
     Const(ConstDef),
+    TypeAlias(TypeAliasDef),
     Test(TestDef),
 }
 
@@ -263,6 +264,13 @@ pub struct ConstDef {
     pub name: String,
     pub ty: IrType,
     pub value: Expr,
+}
+
+/// 类型别名定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeAliasDef {
+    pub name: String,
+    pub ty: IrType,
 }
 
 /// 测试定义
