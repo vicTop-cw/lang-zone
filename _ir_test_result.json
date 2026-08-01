@@ -2,11 +2,12 @@
   "total": 129,
   "lz_pass": 129,
   "lz_fail": 0,
-  "rustc_pass": 57,
-  "rustc_fail": 72,
+  "rustc_pass": 59,
+  "rustc_fail": 70,
   "pass_files": [
     "01_basics\\comments.lz",
     "01_basics\\literals_more.lz",
+    "02_types\\containers.lz",
     "02_types\\option_result.lz",
     "03_variables\\const.lz",
     "03_variables\\const_more.lz",
@@ -34,6 +35,7 @@
     "07_data_structures\\enum_more.lz",
     "07_data_structures\\module_magic.lz",
     "07_data_structures\\struct.lz",
+    "07_data_structures\\struct_more.lz",
     "07_data_structures\\trait_impl.lz",
     "09_macros\\comptime_demo.lz",
     "13_operators\\compound_assign_more.lz",
@@ -70,7 +72,6 @@
     "E0599": [
       "01_basics\\identifiers.lz",
       "01_basics\\identifiers.lz",
-      "04_functions\\generics.lz",
       "06_control_flow\\with_defer.lz",
       "07_data_structures\\magic_methods.lz",
       "99_spec\\extractor_unapply.lz",
@@ -91,6 +92,7 @@
       "02_types\\type_aliases_more.lz",
       "02_types\\type_conversion.lz",
       "04_functions\\closures_more.lz",
+      "04_functions\\generics.lz",
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
@@ -122,7 +124,6 @@
       "99_spec\\iterator_demo.lz",
       "99_spec\\iterator_demo.lz",
       "99_spec\\iterator_demo.lz",
-      "99_spec\\keyword_downgrade.lz",
       "combo-syntax\\combo_defer_guard_try.lz",
       "combo-syntax\\combo_defer_guard_try.lz",
       "combo-syntax\\combo_defer_guard_try.lz",
@@ -140,8 +141,6 @@
       "01_basics\\keywords.lz",
       "04_functions\\checker.lz",
       "04_functions\\checker.lz",
-      "04_functions\\generics.lz",
-      "04_functions\\generics.lz",
       "04_functions\\generics.lz",
       "05_expressions\\operators.lz",
       "05_expressions\\operators.lz",
@@ -252,10 +251,6 @@
       "99_spec\\ir-edge-empty-collections.lz",
       "99_spec\\ir-edge-empty-collections.lz"
     ],
-    "E0594": [
-      "02_types\\containers.lz",
-      "02_types\\containers.lz"
-    ],
     "E0608": [
       "04_functions\\checker.lz",
       "07_data_structures\\magic_methods.lz",
@@ -269,8 +264,6 @@
       "04_functions\\closures_more.lz"
     ],
     "E0423": [
-      "04_functions\\generics.lz",
-      "04_functions\\generics.lz",
       "04_functions\\generics.lz",
       "07_data_structures\\magic_methods.lz",
       "07_data_structures\\magic_methods.lz",
@@ -346,17 +339,13 @@
       "99_spec\\index_build_block.lz",
       "99_spec\\iterator_demo.lz",
       "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\keyword_downgrade.lz"
+      "99_spec\\iterator_demo.lz"
     ],
     "E0063": [
       "07_data_structures\\magic_methods.lz"
     ],
     "E0600": [
       "07_data_structures\\magic_methods.lz"
-    ],
-    "E0596": [
-      "07_data_structures\\struct_more.lz"
     ],
     "E0252": [
       "08_modules\\import_demo.lz",
@@ -397,6 +386,7 @@
     ],
     "E0530": [
       "99_spec\\keyword_downgrade.lz",
+      "99_spec\\keyword_downgrade.lz",
       "99_spec\\keyword_downgrade.lz"
     ],
     "E0609": [
@@ -416,11 +406,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0573]: expected type, found constant `MyType`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\identifiers.rs:61:17",
+        "error: `mut` must be followed by a named binding",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\identifiers.rs:34:9",
         "|",
-        "61 | const instance: MyType = 30;",
-        "|                 ^^^^^^ not a type"
+        "34 |     let mut _: i64 = compute();",
+        "|         ^^^^",
+        "|"
       ]
     },
     {
@@ -429,10 +420,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:75:12",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:75:16",
         "|",
-        "75 |     let f: Future<i64> = spawn(fetch());",
-        "|            ^^^^^^ not found in this scope",
+        "75 |     let mut f: Future<i64> = spawn(fetch());",
+        "|                ^^^^^^ not found in this scope",
         "|"
       ]
     },
@@ -450,28 +441,15 @@
       ]
     },
     {
-      "file": "02_types\\containers.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: variable does not need to be mutable",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\containers.rs:17:9",
-        "|",
-        "17 |     let mut inferred_nums = vec![10, 20, 30];",
-        "|         ----^^^^^^^^^^^^^",
-        "|         |"
-      ]
-    },
-    {
       "file": "02_types\\primitives.lz",
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
         "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\primitives.rs:36:14",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\primitives.rs:36:18",
         "|",
-        "36 |     let bv = (*boxed);",
-        "|              ^      ^",
+        "36 |     let mut bv = (*boxed);",
+        "|                  ^      ^",
         "|"
       ]
     },
@@ -507,10 +485,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:14:19",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:14:23",
         "|",
-        "14 |     let b: bool = (1 != 0);",
-        "|                   ^      ^",
+        "14 |     let mut b: bool = (1 != 0);",
+        "|                       ^      ^",
         "|"
       ]
     },
@@ -544,11 +522,12 @@
       "lz_ok": true,
       "rustc_ok": false,
       "rustc_errors": [
-        "error[E0423]: expected value, found builtin type `str`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\generics.rs:51:36",
+        "error[E0425]: cannot find value `int` in this scope",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\generics.rs:56:37",
         "|",
-        "51 |     let mut p2: bool = make_pair < str && str > (\"x\".to_string(), \"y\".to_string());",
-        "|                                    ^^^ not a value"
+        "56 |     println!(\"{:?} {:?}\", convert < int, str > (10, |n: i64| { \"num: {n}\".to_string() }));",
+        "|                                     ^^^",
+        "|                                     |"
       ]
     },
     {
@@ -557,11 +536,11 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0061]: this function takes 1 argument but 5 arguments were supplied",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\variadic.rs:18:19",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\variadic.rs:18:23",
         "|",
-        "18 |     let r1: i64 = sum_all(1, 2, 3, 4, 5);",
-        "|                   ^^^^^^^    -  -  -  - unexpected argument #5 of type `{integer}`",
-        "|                              |  |  |"
+        "18 |     let mut r1: i64 = sum_all(1, 2, 3, 4, 5);",
+        "|                       ^^^^^^^    -  -  -  - unexpected argument #5 of type `{integer}`",
+        "|                                  |  |  |"
       ]
     },
     {
@@ -570,10 +549,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `print` in module `std::io`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\05_expressions\\operators.rs:84:29",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\05_expressions\\operators.rs:84:33",
         "|",
-        "84 |     let mod_path = std::io::print;",
-        "|                             ^^^^^",
+        "84 |     let mut mod_path = std::io::print;",
+        "|                                 ^^^^^",
         "|"
       ]
     },
@@ -583,10 +562,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find type `res` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\06_control_flow\\with_defer.rs:27:68",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\06_control_flow\\with_defer.rs:27:72",
         "|",
-        "27 |         let _with = MyResource { name: \"database\".to_string() } as res;",
-        "|                                                                    ^^^ not found in this scope"
+        "27 |         let mut _with = MyResource { name: \"database\".to_string() } as res;",
+        "|                                                                        ^^^ not found in this scope"
       ]
     },
     {
@@ -597,8 +576,8 @@
         "error[E0618]: expected function, found `Multiplier`",
         "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\callable_objects.rs:33:22",
         "|",
-        "32 |     let doubler = Multiplier { factor: 2 };",
-        "|         ------- `doubler` has type `Multiplier`",
+        "32 |     let mut doubler = Multiplier { factor: 2 };",
+        "|         ----------- `doubler` has type `Multiplier`",
         "33 |     println!(\"{:?}\", doubler(21));"
       ]
     },
@@ -613,19 +592,6 @@
         "90 | return Option.Some(val);",
         "|        ^^^^^^",
         "|"
-      ]
-    },
-    {
-      "file": "07_data_structures\\struct_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0596]: cannot borrow `c` as mutable, as it is not declared as mutable",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\struct_more.rs:35:9",
-        "|",
-        "35 |     let c = Counter { count: 0 };",
-        "|         ^ not mutable",
-        "36 |     println!(\"{:?}\", c.increment());"
       ]
     },
     {
@@ -698,10 +664,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_more.rs:14:12",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_more.rs:14:16",
         "|",
-        "14 |     let a: Future<String> = spawn(fetch(1));",
-        "|            ^^^^^^ not found in this scope",
+        "14 |     let mut a: Future<String> = spawn(fetch(1));",
+        "|                ^^^^^^ not found in this scope",
         "|"
       ]
     },
@@ -711,10 +677,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_spawn.rs:14:13",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_spawn.rs:14:17",
         "|",
-        "14 |     let f1: Future<String> = spawn(fetch_data(10));",
-        "|             ^^^^^^ not found in this scope",
+        "14 |     let mut f1: Future<String> = spawn(fetch_data(10));",
+        "|                 ^^^^^^ not found in this scope",
         "|"
       ]
     },
@@ -748,10 +714,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `a` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\13_operators\\precedence.rs:10:15",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\13_operators\\precedence.rs:10:19",
         "|",
-        "10 |     let sum = a + b;",
-        "|               ^ not found in this scope"
+        "10 |     let mut sum = a + b;",
+        "|                   ^ not found in this scope"
       ]
     },
     {
@@ -760,10 +726,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\14_pointers\\rc_arc_more.rs:11:14",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\14_pointers\\rc_arc_more.rs:11:18",
         "|",
-        "11 |     let bv = (*b);",
-        "|              ^  ^",
+        "11 |     let mut bv = (*b);",
+        "|                  ^  ^",
         "|"
       ]
     },
@@ -810,10 +776,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\codegen_str_int_float.rs:15:13",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\codegen_str_int_float.rs:15:17",
         "|",
-        "15 |     let a = (3.14 as i64);",
-        "|             ^           ^",
+        "15 |     let mut a = (3.14 as i64);",
+        "|                 ^           ^",
         "|"
       ]
     },
@@ -849,10 +815,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_walrus.rs:15:20",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_walrus.rs:15:24",
         "|",
-        "15 |         let n = ({ v = i * 2; v });",
-        "|                    ^",
+        "15 |         let mut n = ({ v = i * 2; v });",
+        "|                        ^",
         "|"
       ]
     },
@@ -1013,10 +979,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0530]: let bindings cannot shadow tuple variants",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\keyword_downgrade.rs:10:9",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\keyword_downgrade.rs:10:13",
         "|",
-        "10 |     let Ok: i64 = 1;",
-        "|         ^^ cannot be named the same as a tuple variant",
+        "10 |     let mut Ok: i64 = 1;",
+        "|             ^^ cannot be named the same as a tuple variant",
         "|"
       ]
     },
@@ -1038,11 +1004,11 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0369]: binary operation `==` cannot be applied to type `Option<User>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\null_safe.rs:19:24",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\null_safe.rs:19:28",
         "|",
-        "19 |     let name = if if u == None { None } else { u.profile } == None { None } else { if u == None { None } else { u.profile }.name }.u...",
-        "|                      - ^^ ---- Option<User>",
-        "|                      |"
+        "19 |     let mut name = if if u == None { None } else { u.profile } == None { None } else { if u == None { None } else { u.profile }.name...",
+        "|                          - ^^ ---- Option<User>",
+        "|                          |"
       ]
     },
     {
@@ -1063,10 +1029,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find function `map` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\pipe_spec.rs:10:28",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\pipe_spec.rs:10:32",
         "|",
-        "10 |     let r = collect(filter(map(vec![1, 2, 3], |x: i64| { x * 2 }), |x: i64| { x > 2 }));",
-        "|                            ^^^ not found in this scope"
+        "10 |     let mut r = collect(filter(map(vec![1, 2, 3], |x: i64| { x * 2 }), |x: i64| { x > 2 }));",
+        "|                                ^^^ not found in this scope"
       ]
     },
     {
@@ -1125,10 +1091,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_partial_1.rs:14:26",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_partial_1.rs:14:30",
         "|",
-        "14 |     let add10: i64 = add(_, 10);",
-        "|                          ^ `_` not allowed here"
+        "14 |     let mut add10: i64 = add(_, 10);",
+        "|                              ^ `_` not allowed here"
       ]
     },
     {
@@ -1137,10 +1103,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_partial_2.rs:14:23",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_partial_2.rs:14:27",
         "|",
-        "14 |     let f: i64 = sum3(_, 2, 3, _);",
-        "|                       ^ `_` not allowed here"
+        "14 |     let mut f: i64 = sum3(_, 2, 3, _);",
+        "|                           ^ `_` not allowed here"
       ]
     },
     {
@@ -1162,10 +1128,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find type `Future` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_async_spawn.rs:14:13",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_async_spawn.rs:14:17",
         "|",
-        "14 |     let f1: Future<i64> = spawn(fetch(10));",
-        "|             ^^^^^^ not found in this scope",
+        "14 |     let mut f1: Future<i64> = spawn(fetch(10));",
+        "|                 ^^^^^^ not found in this scope",
         "|"
       ]
     },
@@ -1201,10 +1167,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_for_walrus.rs:11:20",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_for_walrus.rs:11:24",
         "|",
-        "11 |         let n = ({ v = i * 2; v });",
-        "|                    ^",
+        "11 |         let mut n = ({ v = i * 2; v });",
+        "|                        ^",
         "|"
       ]
     },
@@ -1240,10 +1206,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_pipe_partial.rs:14:24",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_pipe_partial.rs:14:28",
         "|",
-        "14 |     let inc: i64 = add(_, 1);",
-        "|                        ^ `_` not allowed here"
+        "14 |     let mut inc: i64 = add(_, 1);",
+        "|                            ^ `_` not allowed here"
       ]
     },
     {
@@ -1252,10 +1218,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:15:23",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:15:27",
         "|",
-        "15 |         let inc = add(_, 1);",
-        "|                       ^ `_` not allowed here"
+        "15 |         let mut inc = add(_, 1);",
+        "|                           ^ `_` not allowed here"
       ]
     },
     {
@@ -1264,10 +1230,10 @@
       "rustc_ok": false,
       "rustc_errors": [
         "error[E0425]: cannot find value `n` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_ternary_walrus.rs:14:22",
+        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_ternary_walrus.rs:14:26",
         "|",
-        "14 |     let v: bool = if n * 10 { ({ n = compute(); n }) > 5 } else { 0 };",
-        "|                      ^ not found in this scope"
+        "14 |     let mut v: bool = if n * 10 { ({ n = compute(); n }) > 5 } else { 0 };",
+        "|                          ^ not found in this scope"
       ]
     },
     {
