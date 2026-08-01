@@ -126,6 +126,21 @@ impl TypeCtx {
             .cloned()
             .unwrap_or(IrType::Any)
     }
+
+    fn is_builtin_function(&self, name: &str) -> bool {
+        matches!(name, "print" | "println" | "panic" | "len" | "contains"
+            | "iter" | "enumerate" | "zip" | "sum" | "map" | "filter" | "collect"
+            | "max" | "min" | "any" | "all" | "sorted" | "reversed" | "set!"
+            | "format" | "hash" | "bool" | "range" | "clone" | "sort" | "reverse"
+            | "spawn" | "Exception" | "panic!")
+    }
+
+    fn is_struct_type(&self, ty: &IrType) -> bool {
+        match ty {
+            IrType::Named { path, .. } => self.struct_names.contains(path),
+            _ => false,
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -700,6 +715,27 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }
             }).collect();
             ir_type_args.extend(extra_type_args);
+
+            // __call__ 检测：如果是 struct 实例变量调用，转换为 MethodCall
+            if let AstExpr::Ident(ref fname) = actual_func {
+                if !ctx.fn_returns.contains_key(fname)
+                    && !ctx.is_builtin_function(fname)
+                    && !ctx.is_struct(fname)
+                {
+                    // 变量可能是一个 struct 实例 → 使用 __call__
+                    let var_ty = ctx.lookup_var(fname);
+                    if ctx.is_struct_type(&var_ty) {
+                        let recv = convert_expr(actual_func, ctx);
+                        let ret_ty = recv.ty.clone();
+                        return Expr::new(ExprKind::MethodCall {
+                            receiver: Box::new(recv),
+                            method: "__call__".to_string(),
+                            args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
+                        }, ret_ty, Span::unknown());
+                    }
+                }
+            }
+
             ExprKind::Call { type_args: ir_type_args,
                 callee: Box::new(convert_expr(actual_func, ctx)),
                 args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
@@ -918,6 +954,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     variadic: false,
                 }).collect(),
                 body: Box::new(convert_expr(body, ctx)),
+                is_move: true,
             }
         }
 
@@ -1069,6 +1106,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     Expr::new(ExprKind::Lambda {
                         params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
                         body: Box::new(out_expr),
+                        is_move: true,
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
                 ],
@@ -1089,6 +1127,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             ExprKind::TupleLit(vec![key_expr, val_expr]),
                             IrType::Any, Span::unknown(),
                         )),
+                        is_move: true,
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
                 ],
@@ -1105,6 +1144,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     Expr::new(ExprKind::Lambda {
                         params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
                         body: Box::new(elem_expr),
+                        is_move: true,
                     }, IrType::Any, Span::unknown()),
                     iter_expr,
                 ],
@@ -1292,6 +1332,14 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 let mut arm_ctx = TypeCtx::new();
                 arm_ctx.current_generics = ctx.current_generics.clone();
                 arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                // 复制 enum_variants 以便模式匹配能正确解析枚举类型
+                for (vn, en) in &ctx.enum_variants {
+                    arm_ctx.enum_variants.insert(vn.clone(), en.clone());
+                }
+                // 也复制 struct 信息用于模式匹配
+                for sn in &ctx.struct_names {
+                    arm_ctx.struct_names.insert(sn.clone());
+                }
                 if let AstPattern::Ident(name) = &arm.pattern {
                     let scrut_ty = infer_expr_type(expr, ctx);
                     arm_ctx.add_var(name, scrut_ty);
@@ -1683,10 +1731,11 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     };
 
     let params: Vec<Param> = func.params.iter().enumerate().map(|(_i, p)| {
-        // 检测 variadic: ast::Function.variadic 表示参数收集模式
+        // 检测 variadic:
+        // - VariadicMode::Single { dotdot_at }: .. 分隔仅位置/仅关键字参数，不改变参数类型
+        // - VariadicMode::Double { first_at, second_at }: second_at 之后的参数是真正的 variadic 收集
         let is_variadic = match &func.variadic {
-            ast::VariadicMode::Single { dotdot_at } => _i >= *dotdot_at,
-            ast::VariadicMode::Double { first_at, .. } => _i >= *first_at,
+            ast::VariadicMode::Double { second_at, .. } => _i >= *second_at,
             _ => false,
         };
         Param {

@@ -38,6 +38,8 @@ pub struct CodeGen {
     fn_variadic: HashMap<String, usize>,
     /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
     fn_param_types: HashMap<String, Vec<IrType>>,
+    /// 当前正在生成的函数的 variadic 参数名集合
+    current_variadic_params: std::collections::HashSet<String>,
     /// 模块级 const/static 名称（用于参数重命名避免 E0530 冲突）
     top_level_static_names: std::collections::HashSet<String>,
     /// 当前函数的参数重命名映射（原名 → 新名），用于 E0530 冲突解决
@@ -70,6 +72,7 @@ impl CodeGen {
             fn_param_info: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
             enum_variant_fields: HashMap::new(),
+            current_variadic_params: std::collections::HashSet::new(),
             fn_variadic: HashMap::new(),
             fn_param_types: HashMap::new(),
             top_level_static_names: std::collections::HashSet::new(),
@@ -111,6 +114,14 @@ impl CodeGen {
                 _ => {}
             }
         }
+
+        // 提前生成所有类型别名（必须在使用前声明）
+        for item in &module.items {
+            if let Item::TypeAlias(ta) = item {
+                self.gen_type_alias_def(ta);
+            }
+        }
+        self.buf.push('\n');
 
         for item in &module.items {
             if let Item::EnumDef(e) = item {
@@ -407,13 +418,20 @@ impl CodeGen {
             Item::Impl(i) => self.gen_impl_def(i),
             Item::Use(u) => self.gen_use_stmt(u),
             Item::Const(c) => self.gen_const_def(c),
-            Item::TypeAlias(ta) => self.gen_type_alias_def(ta),
+            Item::TypeAlias(_) => { /* 已提前生成，跳过 */ }
             Item::Test(t) => self.gen_test_def(t),
         }
     }
 
     fn gen_fn_def(&mut self, f: &FnDef) {
         self.declared.clear();
+        // 收集当前函数的 variadic 参数名
+        self.current_variadic_params.clear();
+        for p in &f.params {
+            if p.variadic {
+                self.current_variadic_params.insert(p.name.clone());
+            }
+        }
         // 检测参数名与模块级名称冲突 → 重命名参数（E0530）
         self.param_renames.clear();
         for p in &f.params {
@@ -873,7 +891,18 @@ impl CodeGen {
                 } else {
                     format!(": {}", self.rust_type(ty))
                 };
-                self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, self.gen_expr(value)));
+                self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, 
+                    if is_empty_container {
+                        match ty {
+                            IrType::Named { path, .. } if path == "Dict" || path == "Set" || path == "HashMap" || path == "HashSet" => {
+                                "std::collections::HashMap::new()".to_string()
+                            }
+                            _ => "Vec::new()".to_string()
+                        }
+                    } else {
+                        self.gen_expr(value)
+                    }
+                ));
             }
             Stmt::Assign { target, value } => {
                 // Dict/HashMap 索引赋值 → .insert() 替代（HashMap 不实现 IndexMut）
@@ -1255,13 +1284,15 @@ impl CodeGen {
                 }
 
                 // 检测 callee 是否为 FieldAccess 形式 Type.Variant → Type::Variant
+                // 仅当 field 是大写开头（枚举变体）时才用 ::；小写开头为方法调用，用 .
                 if let ExprKind::FieldAccess { base, field } = &callee.kind {
                     let base_s = self.gen_expr(base);
                     let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
                     let is_std_module = known_modules.contains(&base_s.as_str());
                     let is_var_base = matches!(&base.kind, ExprKind::Var(_));
                     let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
-                    let sep = if is_var_base && (is_std_module || is_known_type) { "::" } else { "." };
+                    let field_is_uppercase = field.chars().next().map_or(false, |c| c.is_uppercase());
+                    let sep = if is_var_base && (is_std_module || is_known_type) && field_is_uppercase { "::" } else { "." };
                     if sep == "::" {
                         // 检查变体字段类型，为递归字段自动包裹 Box::new()
                         let field_types = self.enum_variant_fields.get(&(base_s.clone(), field.clone()));
@@ -1562,12 +1593,11 @@ impl CodeGen {
                 if method == "len" { format!("({} as i64)", call) } else { call }
             }
             ExprKind::FieldAccess { base, field } => {
-                // Enum variant: Color.Red → Color::Red
+                // Enum variant: Color.Red → Color::Red (field 大写开头)
                 // Module path: std.io.print → std::io::print
-                // Impl-only type method: config.get() -> config::get(key)
+                // Method/field access: config.get() -> config.get (field 小写开头)
                 let base_s = self.gen_expr(base);
                 // self 在 impl 方法中始终是 receiver，用 `.` 访问字段
-                // （生成的代码无嵌套模块，无需 self:: 模块路径前缀）
                 if base_s == "self" {
                     return format!("{}.{}", base_s, field);
                 }
@@ -1576,7 +1606,9 @@ impl CodeGen {
                 let root = base_s.split("::").next().unwrap_or("");
                 let is_root_known = known_modules.contains(&root) && root != base_s;
                 let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
-                let sep = if is_root_known || is_known_type { "::" } else { "." };
+                // 仅当 field 是大写开头（枚举变体/模块）时才用 ::；小写开头为方法/字段，用 .
+                let field_is_uppercase = field.chars().next().map_or(false, |c| c.is_uppercase());
+                let sep = if (is_root_known || is_known_type) && field_is_uppercase { "::" } else { "." };
                 format!("{}{}{}", base_s, sep, field)
             }
             ExprKind::IndexGet { base, key } => {
@@ -1642,9 +1674,14 @@ impl CodeGen {
                     return format!("{}.contains(&{})", cont_s, elem_s);
                 }
                 // String + 拼接: 右侧需借用 & 以匹配 Rust Add<&str>
+                // 但如果 rhs 是 variadic 参数（类型已是 &[T]），不应再加 &
                 if *op == BinOpKind::Add && matches!(&rhs.ty, IrType::Str) {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
+                    let rhs_is_variadic = matches!(&rhs.kind, ExprKind::Var(name) if self.current_variadic_params.contains(name));
+                    if rhs_is_variadic {
+                        return format!("{} + {}", lhs_s, rhs_s);
+                    }
                     return format!("{} + &{}", lhs_s, rhs_s);
                 }
                 let op_s = self.binop_str(op);
@@ -1688,7 +1725,7 @@ impl CodeGen {
                     self.gen_expr(els)
                 )
             }
-            ExprKind::Lambda { params, body } => {
+            ExprKind::Lambda { params, body, .. } => {
                 let params: Vec<String> = params.iter().map(|p| self.gen_param(p)).collect();
                 // Use move for all closures - LZ doesn't have Rust borrow semantics
                 // Comprehension closures will get their :i64 stripped in the comprehension handler
@@ -1841,7 +1878,13 @@ impl CodeGen {
                         // 空列表：尝试从类型获取元素类型用于 Vec 标注
                         if let IrType::Named { path, args } = &expr.ty {
                             if (path == "List" || path == "Vec") && !args.is_empty() {
-                                format!("Vec::<{}>::new()", self.rust_type(&args[0]))
+                                // 如果元素类型是泛型参数，使用 Vec::new() 让 Rust 推断
+                                let elem_is_generic = matches!(&args[0], IrType::Generic(_));
+                                if elem_is_generic {
+                                    "Vec::new()".to_string()
+                                } else {
+                                    format!("Vec::<{}>::new()", self.rust_type(&args[0]))
+                                }
                             } else if path == "List" || path == "Vec" {
                                 "vec![]".to_string()
                             } else {
