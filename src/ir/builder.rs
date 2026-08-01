@@ -1215,9 +1215,10 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     }
                 }
                 BuildKind::Call => {
-                    // ~: → callee(__p) 其中 __p = (|| { body })()
-                    // body 的返回值作为单个参数传给 callee
+                    // ~: → callee(args...) 其中 args = body 返回元组的元素
+                    // 如果 body 最后返回的是元组，解包为独立参数
                     let body_block = convert_block_with_ctx(body, ctx);
+                    let block_ty = body_block.ty.clone(); // 在 move 之前提取类型
                     let body_expr = Expr::new(
                         ExprKind::BlockExpr { block: body_block },
                         IrType::Any,
@@ -1240,10 +1241,28 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         IrType::Any,
                         Span::unknown(),
                     );
+                    // 如果 body 返回元组，解包为独立参数
+                    let args: Vec<Expr> = if let IrType::Tuple(elements) = block_ty {
+                        // 元组解包：为每个元素生成一个 packed 字段访问
+                        elements.iter().enumerate().map(|(i, _elem)| {
+                            Expr::new(
+                                ExprKind::MagicCall {
+                                    kind: MagicKind::UnpackBuildCall,
+                                    args: vec![packed.clone(), Expr::new(
+                                        ExprKind::Lit(LitKind::Int(i as i64)),
+                                        IrType::Int, Span::unknown(),
+                                    )],
+                                },
+                                IrType::Any, Span::unknown(),
+                            )
+                        }).collect()
+                    } else {
+                        vec![packed]
+                    };
                     ExprKind::Call {
                         type_args: vec![],
                         callee: Box::new(convert_expr(lhs, ctx)),
-                        args: vec![packed],
+                        args,
                     }
                 }
                 BuildKind::Gen => {

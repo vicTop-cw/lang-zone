@@ -1282,9 +1282,55 @@ impl CodeGen {
             }
             ExprKind::Call { callee, args, type_args } => {
                 let callee_s = self.gen_expr(callee);
-                let mut args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                // 如果 callee 是 Lambda（立即调用闭包），需要用括号包裹
+                // move || { body }() → (move || { body })()
+                let callee_s = if matches!(&callee.kind, ExprKind::Lambda { .. }) {
+                    format!("({})", callee_s)
+                } else {
+                    callee_s
+                };
                 
-
+                // 检测 ~: 元组解包模式：连续的 UnpackBuildCall 参数
+                let has_unpack = args.iter().any(|a| matches!(&a.kind, ExprKind::MagicCall { kind: MagicKind::UnpackBuildCall, .. }));
+                
+                // 收集 unpack 的 packed 表达式和索引
+                let (unpack_packed, unpack_indices): (Option<String>, Vec<String>) = if has_unpack {
+                    let mut packed_s = String::new();
+                    let mut idx_list = Vec::new();
+                    for a in args.iter() {
+                        if let ExprKind::MagicCall { kind: MagicKind::UnpackBuildCall, args: ua } = &a.kind {
+                            if ua.len() >= 2 {
+                                if packed_s.is_empty() {
+                                    packed_s = self.gen_expr(&ua[0]);
+                                }
+                                idx_list.push(self.gen_expr(&ua[1]));
+                            }
+                        }
+                    }
+                    (Some(packed_s), idx_list)
+                } else {
+                    (None, Vec::new())
+                };
+                
+                let mut args_s: Vec<String> = if has_unpack {
+                    // 为所有 unpack 参数生成 __t.0, __t.1 等引用
+                    let mut result_args: Vec<String> = Vec::new();
+                    let mut idx_iter = unpack_indices.iter();
+                    for a in args.iter() {
+                        if matches!(&a.kind, ExprKind::MagicCall { kind: MagicKind::UnpackBuildCall, .. }) {
+                            if let Some(idx) = idx_iter.next() {
+                                result_args.push(format!("__t.{}", idx));
+                            } else {
+                                result_args.push(self.gen_expr(a));
+                            }
+                        } else {
+                            result_args.push(self.gen_expr(a));
+                        }
+                    }
+                    result_args
+                } else {
+                    args.iter().map(|a| self.gen_expr(a)).collect()
+                };
                 
                 // 泛型类型参数 → turbofish 语法: foo::<T>(args)
                 let turbofish = if !type_args.is_empty() {
@@ -1543,10 +1589,21 @@ impl CodeGen {
                         };
                         format!("{}{}({})", callee_s, turbofish, packed)
                     } else {
-                        format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
+                        let call_str = format!("{}{}({})", callee_s, turbofish, args_s.join(", "));
+                        // ~: 元组解包：将调用包装在 { let __t = <packed>; callee(__t.0, __t.1) } 中
+                        if let Some(ref packed) = unpack_packed {
+                            format!("{{ let __t = {}; {} }}", packed, call_str)
+                        } else {
+                            call_str
+                        }
                     }
                 } else {
-                    format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
+                    let call_str = format!("{}{}({})", callee_s, turbofish, args_s.join(", "));
+                    if let Some(ref packed) = unpack_packed {
+                        format!("{{ let __t = {}; {} }}", packed, call_str)
+                    } else {
+                        call_str
+                    }
                 }
             }
             ExprKind::MethodCall { receiver, method, args } => {
@@ -1910,9 +1967,12 @@ impl CodeGen {
             }
             ExprKind::MagicCall { kind, args } => {
                 // 特殊 magic: UnpackBuildCall → ~: 构建块元组解包
-                if *kind == MagicKind::UnpackBuildCall && !args.is_empty() {
+                // args[0] = 闭包立即调用表达式, args[1] = 元素索引
+                if *kind == MagicKind::UnpackBuildCall && args.len() >= 2 {
                     let packed = self.gen_expr(&args[0]);
-                    return format!("__UNPACK_TUPLE__({})", packed);
+                    let idx = self.gen_expr(&args[1]);
+                    // 使用临时变量访问元组字段: { let __t = packed; __t.<idx> }
+                    return format!("{{ let __t = {}; __t.{} }}", packed, idx);
                 }
                 // 魔法方法 → Rust 方法/运算符降级
                 self.gen_magic_call(kind, args)
