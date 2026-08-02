@@ -1154,18 +1154,21 @@ impl CodeGen {
                 };
                 // walrus 变量预声明（let 绑定中的 := 需要先声明变量再赋值）
                 self.emit_walrus_predecls(value);
-                self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, 
-                    if is_empty_container {
-                        match ty {
-                            IrType::Named { path, .. } if path == "Dict" || path == "Set" || path == "HashMap" || path == "HashSet" => {
-                                "std::collections::HashMap::new()".to_string()
-                            }
-                            _ => "Vec::new()".to_string()
+                // 元组解构（let (a,b,c) = tuple 或 __destruct_ 临时）→ 对源元组 clone 避免 move（LZ 元组可重复解构）
+                let is_tuple_destr = (name.starts_with('(') && name.contains(',')) || name.starts_with("__destruct_");
+                let value_s = if is_tuple_destr && matches!(ty, IrType::Tuple(_)) {
+                    format!("({}).clone()", self.gen_expr(value))
+                } else if is_empty_container {
+                    match ty {
+                        IrType::Named { path, .. } if path == "Dict" || path == "Set" || path == "HashMap" || path == "HashSet" => {
+                            "std::collections::HashMap::new()".to_string()
                         }
-                    } else {
-                        self.gen_expr(value)
+                        _ => "Vec::new()".to_string()
                     }
-                ));
+                } else {
+                    self.gen_expr(value)
+                };
+                self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, value_s));
             }
             Stmt::Assign { target, value } => {
                 // Dict/HashMap 索引赋值 → .insert() 替代（HashMap 不实现 IndexMut）
