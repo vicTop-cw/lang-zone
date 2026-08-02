@@ -1378,10 +1378,14 @@ impl CodeGen {
             Stmt::Block { stmts } => {
                 self.emit_line("{");
                 self.indent += 1;
+                // Block 中的 tail stmt 不应用 return 包裹（defer 等场景）
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
                 let n = stmts.len();
                 for (i, s) in stmts.iter().enumerate() {
                     self.gen_stmt(s, i == n - 1);
                 }
+                self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("}");
             }
