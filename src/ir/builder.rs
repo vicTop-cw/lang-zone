@@ -1643,9 +1643,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 .unwrap_or_else(|| infer_expr_type(value, ctx));
             let mut ir_value = convert_expr(value, ctx);
             // 当 value 是 Lambda（部分应用展开等），使用 Lambda 的类型而非 infer 的类型
-            // 当 value 的 IR 类型为 Any（~: 构建块等），也使用 IR 类型避免错误标注
+            // 当 value 的 IR 类型为 Any 且无显式类型注解时，也使用 IR 类型避免错误标注
+            // 注意：若存在显式类型注解（如 let n: Option<int> = None），必须保留注解类型
             let ir_ty = match &ir_value.ty {
-                IrType::Fn { .. } | IrType::Any => ir_value.ty.clone(),
+                IrType::Fn { .. } => ir_value.ty.clone(),
+                IrType::Any if ir_ty == IrType::Any => ir_value.ty.clone(),
                 _ => ir_ty,
             };
             // 当 Let 类型注解为 fn(..) -> .. 且 value 是 Lambda 时，
