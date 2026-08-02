@@ -1752,6 +1752,9 @@ impl CodeGen {
                     format!("({}).into_iter().zip({}.into_iter())", args_s[0], args_s[1])
                 } else if callee_s == "clone" && args_s.len() == 1 {
                     format!("({}).clone()", args_s[0])
+                } else if callee_s == "__go" && args_s.len() >= 1 {
+                    // go expr → std::thread::spawn(move || { expr }) 并行线程
+                    format!("std::thread::spawn(move || {{ {} }})", args_s.join(", "))
                 } else if callee_s == "spawn" && args_s.len() >= 1 {
                     // spawn(expr) → 保持异步 Future 语义
                     // 在 async 上下文中：spawn fetch(1) 生成 __spawn_task(fetch(1))

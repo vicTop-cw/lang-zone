@@ -149,7 +149,7 @@ impl TypeCtx {
             | "iter" | "enumerate" | "zip" | "sum" | "map" | "filter" | "collect"
             | "max" | "min" | "any" | "all" | "sorted" | "reversed" | "set!"
             | "format" | "hash" | "bool" | "range" | "clone" | "sort" | "reverse"
-            | "spawn" | "Exception" | "panic!")
+            | "spawn" | "go" | "__go" | "Exception" | "panic!")
     }
 
     fn is_struct_type(&self, ty: &IrType) -> bool {
@@ -1324,8 +1324,10 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Spawn(inner) => {
+            // go expr → 并行线程：thread::spawn(move || { expr })
+            // 与显式 spawn(expr)（异步任务）区分，使用内部标记 __go
             ExprKind::Call { type_args: vec![],
-                callee: Box::new(Expr::new(ExprKind::Var("spawn".into()), IrType::Any, Span::unknown())),
+                callee: Box::new(Expr::new(ExprKind::Var("__go".into()), IrType::Any, Span::unknown())),
                 args: vec![convert_expr(inner, ctx)],
             }
         }
@@ -2243,7 +2245,8 @@ fn ast_stmt_has_async(stmt: &ast::Stmt) -> bool {
 
 fn ast_expr_has_async(expr: &ast::Expr) -> bool {
     match expr {
-        ast::Expr::Await(_) | ast::Expr::Spawn(_) => true,
+        // Spawn(go) → thread::spawn 同步启动，不触发 async；Await 触发 async
+        ast::Expr::Await(_) => true,
         ast::Expr::Call { func, args, .. } => {
             ast_expr_has_async(func) || args.iter().any(ast_expr_has_async)
         }
