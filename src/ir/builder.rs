@@ -486,6 +486,10 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     if method == "len" {
                         return IrType::Int;
                     }
+                    // clone() 返回接收者类型（Rc/Arc/Box 等）
+                    if method == "clone" && (path == "Rc" || path == "Arc" || path == "Box") {
+                        return recv_ty.clone();
+                    }
                 }
                 _ => {}
             }
