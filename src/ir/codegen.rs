@@ -1081,6 +1081,15 @@ impl CodeGen {
                         self.emit_line(&format!("{}.insert({}, {});", base_s, key_s, val_s));
                         return;
                     }
+                    // 用户 struct 索引赋值 → .__setitem__(key, value)
+                    let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                    if is_struct {
+                        let base_s = self.gen_expr(base);
+                        let key_s = self.gen_index_key(key, base);
+                        let val_s = self.gen_expr(value);
+                        self.emit_line(&format!("({}).__setitem__({}, {});", base_s, key_s, val_s));
+                        return;
+                    }
                 }
                 let target_s = self.gen_target_expr(target);
                 let val_s = self.gen_expr(value);
@@ -2047,7 +2056,7 @@ impl CodeGen {
             ExprKind::IfExpr { cond, then, els } => {
                 format!(
                     "if {} {{ {} }} else {{ {} }}",
-                    self.gen_expr(cond),
+                    self.gen_bool_cond(cond),
                     self.gen_expr(then),
                     self.gen_expr(els)
                 )
