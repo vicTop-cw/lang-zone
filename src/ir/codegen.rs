@@ -54,6 +54,8 @@ pub struct CodeGen {
     struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
     /// struct 是否定义了 __new__：struct_name → 是否
     struct_has_new: std::collections::HashSet<String>,
+    /// 使用 LazyLock 的顶层静态集合名（需解引用访问）
+    lazy_static_names: std::collections::HashSet<String>,
     buf: String,
 }
 
@@ -92,6 +94,7 @@ impl CodeGen {
             borrow_self: false,
             struct_fields_info: std::collections::HashMap::new(),
             struct_has_new: std::collections::HashSet::new(),
+            lazy_static_names: std::collections::HashSet::new(),
             buf: String::new(),
         }
     }
@@ -985,6 +988,7 @@ impl CodeGen {
                 || val_str.contains(".to_string()")
         );
         if needs_lazy {
+            self.lazy_static_names.insert(c.name.clone());
             let lazy_ty = self.rust_type(&c.ty);
             self.emit_line(&format!(
                 "static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});",
@@ -1759,7 +1763,8 @@ impl CodeGen {
                     // 顶层静态（LazyLock<..>）需解引用才能打印值：print(config) → print(*config)
                     let print_args: Vec<String> = args.iter().zip(args_s.iter()).map(|(a, s)| {
                         if let ExprKind::Var(name) = &a.kind {
-                            if self.top_level_static_names.contains(name) {
+                            // 仅 LazyLock 静态集合需解引用访问；标量 const 不需
+                            if self.lazy_static_names.contains(name) {
                                 format!("(*{})", s)
                             } else { s.clone() }
                         } else { s.clone() }
