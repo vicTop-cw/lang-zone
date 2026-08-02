@@ -28,8 +28,6 @@ pub struct CodeGen {
     enum_variants: HashMap<String, String>,
     /// 抑制尾表达式隐式 return（用于 match arm / 块表达式内部）
     suppress_tail_return: bool,
-    /// 丢弃尾表达式值（语句上下文 match arm，值应为 ()）
-    discard_tail_value: bool,
     /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
     fn_param_info: HashMap<String, (usize, usize)>,
     /// 被修改的模块级 const 名称（需生成 static mut 而非 const）
@@ -85,7 +83,6 @@ impl CodeGen {
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
-            discard_tail_value: false,
             fn_param_info: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
             enum_variant_fields: HashMap::new(),
@@ -1217,13 +1214,8 @@ impl CodeGen {
                     // 非 main 函数尾表达式 → return expr;
                     self.emit_line(&format!("return {};", self.gen_expr(expr)));
                 } else if is_last && self.suppress_tail_return {
-                    if self.discard_tail_value {
-                        // 语句上下文（match arm 作为语句）→ 尾值丢弃为 ()
-                        self.emit_line(&format!("{};", self.gen_expr(expr)));
-                    } else {
-                        // match arm / 块表达式尾值 → 裸表达式（无分号，作为块值）
-                        self.emit_line(&format!("{}", self.gen_expr(expr)));
-                    }
+                    // match arm / 块表达式尾值 → 裸表达式（无分号，作为块值）
+                    self.emit_line(&format!("{}", self.gen_expr(expr)));
                 } else if is_last {
                     // main 函数尾表达式 → expr;
                     self.emit_line(&format!("{};", self.gen_expr(expr)));
@@ -1338,14 +1330,10 @@ impl CodeGen {
                         self.emit_line(&format!("let {} = *{};", b, b));
                     }
                     // Match arm body 不应生成 return（值应流向 match 表达式外层）
-                    // 语句级 match（Stmt::Match）的 arm 尾值应丢弃为 ()，否则值与上下文类型不匹配
-                    let saved_suppress = self.suppress_tail_return;
-                    let saved_discard = self.discard_tail_value;
+                    let saved = self.suppress_tail_return;
                     self.suppress_tail_return = true;
-                    self.discard_tail_value = true;
                     self.gen_block_inner(&arm.body);
-                    self.suppress_tail_return = saved_suppress;
-                    self.discard_tail_value = saved_discard;
+                    self.suppress_tail_return = saved;
                     self.indent -= 1;
                     self.emit_line("}");
                 }
