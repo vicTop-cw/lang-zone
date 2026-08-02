@@ -1828,10 +1828,13 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             with_ctx.current_generics = ctx.current_generics.clone();
             let name = alias.clone().unwrap_or_else(|| "_with".into());
             with_ctx.add_var(&name, val_ty.clone());
-            Stmt::Block {
-                stmts: vec![
-                    Stmt::Let { name: name.clone(), ty: val_ty.clone(), value: val, is_mut: false },
-                    // with → __exit__ 清理（若有）；否则 drop()
+            // 仅当 with 有 as 绑定（上下文管理器）时才生成 __exit__ 清理；
+            // with <普通表达式>: 无 enter/exit 语义，直接执行块
+            let mut stmts = vec![
+                Stmt::Let { name: name.clone(), ty: val_ty.clone(), value: val, is_mut: false },
+            ];
+            if alias.is_some() {
+                stmts.push(
                     Stmt::ExprStmt {
                         expr: Expr::new(
                             ExprKind::MethodCall {
@@ -1841,11 +1844,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                             },
                             IrType::Unit, Span::unknown(),
                         )
-                    },
-                ].into_iter()
-                    .chain(body.iter().map(|s| convert_stmt(s, &with_ctx)))
-                    .collect(),
+                    }
+                );
             }
+            stmts.extend(body.iter().map(|s| convert_stmt(s, &with_ctx)));
+            Stmt::Block { stmts }
         }
 
         AstStmt::Assign { target, op, value } => {
