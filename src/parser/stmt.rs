@@ -119,26 +119,20 @@ impl ParserStmtExt for Parser {
             }
             Token::For => {
                 self.advance();
-                // 支持解构: for (idx, val) in iter
+                // 支持解构: for (idx, val) in iter → var = "(idx, val)"
                 let var = if self.check(&Token::LParen) {
                     self.advance(); // (
-                    let first = match self.advance() {
-                        Token::Ident(n) => n,
-                        Token::Underscore => "_".to_string(),
-                        t => return Err(format!("Expected variable, got {:?}", t)),
-                    };
-                    // 跳过剩余元素直到 )
+                    let mut elems: Vec<String> = Vec::new();
                     while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
-                        if self.check(&Token::Comma) || self.check(&Token::DotDotDot) || self.check(&Token::DotDot) {
-                            self.advance();
-                        } else if matches!(self.peek(), Token::Ident(_) | Token::Underscore) {
-                            self.advance();
-                        } else {
-                            self.advance();
+                        match self.advance() {
+                            Token::Ident(n) => elems.push(n),
+                            Token::Underscore => elems.push("_".to_string()),
+                            Token::Comma | Token::DotDotDot | Token::DotDot => {}
+                            t => return Err(format!("Expected variable, got {:?}", t)),
                         }
                     }
                     self.expect(Token::RParen)?;
-                    first
+                    format!("({})", elems.join(", "))
                 } else {
                     match self.advance() {
                         Token::Ident(n) => n,
