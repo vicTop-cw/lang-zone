@@ -56,6 +56,8 @@ pub struct CodeGen {
     struct_has_new: std::collections::HashSet<String>,
     /// 使用 LazyLock 的顶层静态集合名（需解引用访问）
     lazy_static_names: std::collections::HashSet<String>,
+    /// 当前正在生成的函数是否为 async（用于 __go 的异步/同步分派）
+    current_fn_is_async: bool,
     buf: String,
 }
 
@@ -95,6 +97,7 @@ impl CodeGen {
             struct_fields_info: std::collections::HashMap::new(),
             struct_has_new: std::collections::HashSet::new(),
             lazy_static_names: std::collections::HashSet::new(),
+            current_fn_is_async: false,
             buf: String::new(),
         }
     }
@@ -536,6 +539,8 @@ impl CodeGen {
 
     fn gen_fn_def(&mut self, f: &FnDef) {
         self.declared.clear();
+        // 记录当前函数是否为 async（用于 __go 的异步/同步分派）
+        self.current_fn_is_async = f.is_async || (f.name == "main" && block_has_await(&f.body));
         // 记录 self 是否以共享引用接收（&self），用于对 self.字段 值表达式自动 .clone()
         self.borrow_self = f.params.iter().find(|p| p.name == "self")
             .map_or(false, |p| !p.is_mut && !p.is_owned && !is_consuming_self(f));
@@ -1796,8 +1801,14 @@ impl CodeGen {
                 } else if callee_s == "clone" && args_s.len() == 1 {
                     format!("({}).clone()", args_s[0])
                 } else if callee_s == "__go" && args_s.len() >= 1 {
-                    // go expr → std::thread::spawn(move || { expr }) 并行线程
-                    format!("std::thread::spawn(move || {{ {} }})", args_s.join(", "))
+                    // go/spawn expr → 根据函数上下文分派：
+                    //   async 函数中 → __spawn_task(expr) 异步 Future
+                    //   普通函数中 → std::thread::spawn(move || { expr }) 并行线程
+                    if self.current_fn_is_async {
+                        format!("__spawn_task({})", args_s.join(", "))
+                    } else {
+                        format!("std::thread::spawn(move || {{ {} }})", args_s.join(", "))
+                    }
                 } else if callee_s == "spawn" && args_s.len() >= 1 {
                     // spawn(expr) → 保持异步 Future 语义
                     // 在 async 上下文中：spawn fetch(1) 生成 __spawn_task(fetch(1))
@@ -2829,6 +2840,43 @@ fn block_has_yield(block: &Block) -> bool {
         }
     }
     false
+}
+
+/// 检测 Block 中是否包含 await 表达式
+fn block_has_await(block: &Block) -> bool {
+    for stmt in &block.stmts {
+        if stmt_has_await(stmt) { return true; }
+    }
+    false
+}
+
+fn stmt_has_await(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::ExprStmt { expr } => expr_has_await(expr),
+        Stmt::Return { value: Some(expr) } => expr_has_await(expr),
+        Stmt::Yield { value } => expr_has_await(value),
+        Stmt::Let { value, .. } => expr_has_await(value),
+        Stmt::If { cond, then_branch, else_branch, .. } => {
+            expr_has_await(cond) || block_has_await(then_branch)
+                || else_branch.as_ref().map_or(false, block_has_await)
+        }
+        Stmt::For { body, .. } | Stmt::While { body, .. } => block_has_await(body),
+        Stmt::Block { stmts } => block_has_await(&Block { stmts: stmts.clone(), ty: IrType::Unit }),
+        _ => false,
+    }
+}
+
+fn expr_has_await(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::MethodCall { method, .. } if method == "await" => true,
+        ExprKind::Call { callee, args, .. } => {
+            expr_has_await(callee) || args.iter().any(expr_has_await)
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => expr_has_await(lhs) || expr_has_await(rhs),
+        ExprKind::BlockExpr { block } => block_has_await(block),
+        ExprKind::Lambda { body, .. } => expr_has_await(body),
+        _ => false,
+    }
 }
 
 /// 从 _KwArg 中提取字段值（丢弃字段名，用于位置参数构造）
