@@ -1403,7 +1403,13 @@ impl CodeGen {
             // 避免对已是 usize 的表达式重复转换；若 key 是纯字面量整数，直接转换
             format!("({} as usize)", key_s)
         } else {
-            self.gen_expr(key)
+            let key_s = self.gen_expr(key);
+            // 在容器索引（Vec/List）场景下，若 key 是 self 的 int 字段（impl 内），也转 usize
+            if !is_dict && matches!(&key.kind, ExprKind::FieldAccess { .. }) && matches!(&base.ty, IrType::Named { path, .. } if path == "Vec" || path == "List" || path == "Array") {
+                format!("({} as usize)", key_s)
+            } else {
+                key_s
+            }
         }
     }
 
