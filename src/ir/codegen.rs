@@ -333,6 +333,7 @@ impl CodeGen {
         self.emit_line("use std::rc::Rc;");
         self.emit_line("use std::sync::Arc;");
         self.emit_line("use std::fmt::Display;");
+        self.emit_line("use std::fmt::Debug;");
         self.buf.push('\n');
 
         // ── Lang-Zone 运行时桥接 shims ──
@@ -1055,9 +1056,17 @@ impl CodeGen {
         }
         let params: Vec<String> = g.iter().map(|p| {
             let mut s = p.name.clone();
-            if !p.bounds.is_empty() {
-                let bounds: Vec<String> = p.bounds.iter().map(|b| self.gen_trait_bound(b)).collect();
-                s.push_str(&format!(": {}", bounds.join(" + ")));
+            let mut all_bounds: Vec<String> = Vec::new();
+            for b in &p.bounds {
+                let tb = self.gen_trait_bound(b);
+                if !all_bounds.contains(&tb) { all_bounds.push(tb); }
+            }
+            // LZ 类型均可 Debug（print/println 使用 {:?}），未约束的泛型参数自动加 Debug
+            if !all_bounds.iter().any(|b| b == "Debug") {
+                all_bounds.push("Debug".to_string());
+            }
+            if !all_bounds.is_empty() {
+                s.push_str(&format!(": {}", all_bounds.join(" + ")));
             }
             if let Some(ref def) = p.default {
                 s.push_str(&format!(" = {}", self.rust_type(def)));
