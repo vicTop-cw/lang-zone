@@ -326,6 +326,7 @@ impl CodeGen {
         self.emit_line("use std::collections::{HashMap, HashSet};");
         self.emit_line("use std::rc::Rc;");
         self.emit_line("use std::sync::Arc;");
+        self.emit_line("use std::fmt::Display;");
         self.buf.push('\n');
 
         // ── Lang-Zone 运行时桥接 shims ──
@@ -1009,6 +1010,36 @@ impl CodeGen {
 
     // ── 泛型 ──
 
+    /// 将 LZ trait 约束名映射为 Rust trait 名
+    /// Ordered → PartialOrd, Display → Display, Clone → Clone 等
+    fn gen_trait_bound(&self, b: &IrType) -> String {
+        if let IrType::Named { path, args } = b {
+            let mapped = match path.as_str() {
+                "Ordered" => "PartialOrd",
+                "PartialOrder" => "PartialOrd",
+                "Equatable" => "PartialEq",
+                "Comparable" => "PartialOrd",
+                "Iterable" => "IntoIterator",
+                "Hashable" => "Hash",
+                other => other,
+            };
+            if args.is_empty() {
+                mapped.to_string()
+            } else {
+                format!("{}{}", mapped, self.gen_type_args(args))
+            }
+        } else {
+            self.rust_type(b)
+        }
+    }
+
+    /// 生成泛型实参 <A, B> 部分（已带 < >）
+    fn gen_type_args(&self, args: &[IrType]) -> String {
+        if args.is_empty() { return String::new(); }
+        let inner: Vec<String> = args.iter().map(|a| self.rust_type(a)).collect();
+        format!("<{}>", inner.join(", "))
+    }
+
     fn gen_generics(&self, g: &[GenericParam]) -> String {
         if g.is_empty() {
             return String::new();
@@ -1016,7 +1047,7 @@ impl CodeGen {
         let params: Vec<String> = g.iter().map(|p| {
             let mut s = p.name.clone();
             if !p.bounds.is_empty() {
-                let bounds: Vec<String> = p.bounds.iter().map(|b| self.rust_type(b)).collect();
+                let bounds: Vec<String> = p.bounds.iter().map(|b| self.gen_trait_bound(b)).collect();
                 s.push_str(&format!(": {}", bounds.join(" + ")));
             }
             if let Some(ref def) = p.default {

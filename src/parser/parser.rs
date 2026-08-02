@@ -13,11 +13,13 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     pub(super) pending_gt: usize, // 处理嵌套泛型 >> 分裂为两个 >
+    /// 最近一次 parse_generic_params 解析到的内联约束 (type_param → bounds)
+    pending_inline_bounds: Vec<(String, Vec<Type>)>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0, pending_gt: 0 }
+        Self { tokens, pos: 0, pending_gt: 0, pending_inline_bounds: Vec::new() }
     }
 
     pub(super) fn peek(&self) -> &Token {
@@ -555,11 +557,15 @@ impl Parser {
         };
 
         // where 子句（允许换行）
-        let where_clause = if self.check(&Token::Where) {
+        let mut where_clause = if self.check(&Token::Where) {
             self.parse_where_clause()?
         } else {
             Vec::new()
         };
+        // 合并内联约束 (T: Ordered → where_clause)
+        for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
+            where_clause.push(WhereBound { type_param: tp, bounds: bds });
+        }
 
         // 函数体
         let (body, is_abstract) = if no_body {
@@ -607,11 +613,32 @@ impl Parser {
     fn parse_generic_params(&mut self) -> Result<Vec<String>, String> {
         self.expect(Token::Lt)?;
         let mut params = Vec::new();
+        // 内联约束: T: Ordered → 合并进 where_clause
+        let mut inline_bounds: Vec<(String, Vec<Type>)> = Vec::new();
+        self.pending_inline_bounds.clear();
         loop {
-            match self.advance() {
-                Token::Ident(n) => params.push(n),
+            let name = match self.advance() {
+                Token::Ident(n) => n,
                 t => return Err(format!("Expected generic param, got {:?}", t)),
+            };
+            // 内联 trait 约束: T: Ordered + Clone
+            let mut bounds: Vec<Type> = Vec::new();
+            if self.check(&Token::Colon) {
+                self.advance();
+                loop {
+                    let b = self.parse_type()?;
+                    bounds.push(b);
+                    if self.check(&Token::Plus) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
             }
+            if !bounds.is_empty() {
+                inline_bounds.push((name.clone(), bounds));
+            }
+            params.push(name);
             // 默认类型: T = int
             if self.check(&Token::Eq) {
                 self.advance(); // =
@@ -629,27 +656,6 @@ impl Parser {
                     self.advance();
                 }
             }
-            // 约束: T: Clone or T: Clone + Display
-            if self.check(&Token::Colon) {
-                self.advance(); // :
-                let mut depth = 0;
-                loop {
-                    if self.check(&Token::Comma) || self.check(&Token::Gt) || self.check(&Token::Shr) {
-                        if self.check(&Token::Gt) || self.check(&Token::Shr) {
-                            if depth == 0 { break; }
-                        }
-                        if self.check(&Token::Comma) {
-                            break;
-                        }
-                    }
-                    if self.check(&Token::Lt) { depth += 1; }
-                    if self.check(&Token::Gt) || self.check(&Token::Shr) {
-                        if depth == 0 { break; }
-                        depth -= 1;
-                    }
-                    self.advance();
-                }
-            }
             if self.check(&Token::Comma) { self.advance(); continue; }
             // 闭合 >：Gt 或 Shr（嵌套泛型 >>）
             if self.check(&Token::Gt) {
@@ -662,6 +668,9 @@ impl Parser {
                 break;
             }
             break;
+        }
+        if !inline_bounds.is_empty() {
+            self.pending_inline_bounds = inline_bounds;
         }
         Ok(params)
     }
@@ -1272,11 +1281,15 @@ impl Parser {
         }
         self.expect(Token::Dedent)?;
 
-        let where_clause = if self.check(&Token::Where) {
+        let mut where_clause = if self.check(&Token::Where) {
             self.parse_where_clause()?
         } else {
             Vec::new()
         };
+        // 合并内联约束
+        for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
+            where_clause.push(WhereBound { type_param: tp, bounds: bds });
+        }
 
         Ok(ImplDef { trait_name, type_name, generics, where_clause, methods })
     }
