@@ -2119,9 +2119,18 @@ impl CodeGen {
                     // 字符串包含: "llo" in "hello" → "hello".contains("llo")
                     // 用不带 & 的 contains：对 char / &str / String 都有效（均实现 Pattern）
                     if matches!(&rhs.ty, IrType::Str) {
-                        // 若 elem 是 filter 闭包参数（&char 引用），需解引用为 char
-                        let elem_arg = if elem_s.starts_with('&') {
-                            format!("*({})", elem_s)
+                        // String::contains 的 Pattern 参数需为 &str：
+                        //  - 字符串字面量 "a" 直接使用（已是 &str）
+                        //  - String 值（"a".to_string()）用 &* 解引用为 &str
+                        //  - char / 其他则原样
+                        let elem_arg = if let ExprKind::Lit(LitKind::Str(s)) = &lhs.kind {
+                            format!("\"{}\"", s)
+                        } else if elem_s.ends_with(".to_string()") || elem_s.starts_with('&') {
+                            if elem_s.starts_with('&') {
+                                format!("*({})", elem_s)
+                            } else {
+                                format!("&*({})", elem_s)
+                            }
                         } else {
                             elem_s.clone()
                         };
