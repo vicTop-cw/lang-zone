@@ -179,6 +179,7 @@ impl ProjectCompiler {
             type_aliases: vec![],
             tests: vec![],
             top_level_builds: vec![],
+            magic_blocks: vec![],
         };
 
         for unit in &self.units {
@@ -190,6 +191,7 @@ impl ProjectCompiler {
             merged.consts.extend(m.consts.clone());
             merged.type_aliases.extend(m.type_aliases.clone());
             merged.tests.extend(m.tests.clone());
+            merged.magic_blocks.extend(m.magic_blocks.clone());
             // imports 去重
             for imp in &m.imports {
                 if !merged.imports.iter().any(|existing| {

@@ -17,6 +17,15 @@ pub struct Module {
     pub type_aliases: Vec<TypeAliasDef>,
     pub tests: Vec<Stmt>,
     pub top_level_builds: Vec<(String, Vec<Stmt>)>,  // 顶层构建块 (name, body)
+    /// 独立 magic 块: magic __str__: def __str__(self: MyStruct) -> str = ...
+    pub magic_blocks: Vec<MagicDef>,
+}
+
+/// 独立 magic 方法块定义
+#[derive(Debug, Clone)]
+pub struct MagicDef {
+    pub method_name: String,     // __str__
+    pub function: Function,      // def __str__(self: MyStruct) -> str
 }
 
 #[derive(Debug, Clone)]

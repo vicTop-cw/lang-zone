@@ -490,6 +490,11 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     if method == "clone" && (path == "Rc" || path == "Arc" || path == "Box") {
                         return recv_ty.clone();
                     }
+                    // 用户 struct 的算术/构造魔术方法返回接收者类型
+                    if ctx.struct_methods.get(path).map(|ms| ms.contains(method)).unwrap_or(false)
+                        && matches!(method.as_str(), "__add__" | "__sub__" | "__mul__" | "__div__" | "__new__" | "__call__" | "__getitem__" | "__iter__" | "__setitem__") {
+                        return recv_ty.clone();
+                    }
                 }
                 _ => {}
             }
@@ -2547,6 +2552,28 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     // 7. 转换 impls
     for imp in &ast_module.impls {
         ir_mod.items.push(convert_impl(imp, &ctx));
+    }
+
+    // 7.5 独立 magic 块: magic __str__: def __str__(self: MyStruct) → impl MyStruct
+    for mb in &ast_module.magic_blocks {
+        // 从 self 参数类型确定目标类型
+        let target = mb.function.params.iter()
+            .find(|p| p.name == "self" || p.name == "self_")
+            .map(|p| from_ast_type(&p.ty))
+            .and_then(|ty| if let IrType::Named { path, .. } = ty { Some(path) } else { None })
+            .unwrap_or_default();
+        if target.is_empty() { continue; }
+        // 注册魔术方法名到 struct_methods，供运算符/调用分发
+        ctx.struct_methods.entry(target.clone()).or_default().insert(mb.method_name.clone());
+        let mut impl_ctx = ctx.clone();
+        impl_ctx.current_generics = mb.function.generics.clone();
+        let method = convert_fn_def(&mb.function, &impl_ctx);
+        ir_mod.items.push(Item::Impl(ImplDef {
+            trait_: None,
+            for_type: IrType::named(&target),
+            generics: vec![],
+            methods: vec![method],
+        }));
     }
 
     // 8. 转换 functions

@@ -82,6 +82,7 @@ impl Parser {
         let mut tests = Vec::new();
         let mut top_level_builds = Vec::new();
         let mut module_name = None;
+        let mut magic_blocks: Vec<MagicDef> = Vec::new();
 
         // 词法错误（构建块符号留白违规等）在解析阶段拒绝
         for t in &self.tokens {
@@ -265,24 +266,26 @@ impl Parser {
                 _ => {
                     // 尝试解析为顶层赋值（全局变量）
                     if let Token::Ident(_) = self.peek() {
-                        // magic __xxx__ 块: 跳过
+                        // magic __xxx__ 块: magic __str__: def __str__(self: T) -> ...
                         if self.peek().to_string() == "magic" && matches!(self.peek_n(1), Token::MagicMethod(_)) {
                             self.advance(); // magic
-                            self.advance(); // MagicMethod
-                            if self.check(&Token::Colon) {
+                            let magic_name = match self.advance() {
+                                Token::MagicMethod(n) => n,
+                                t => return Err(format!("Expected magic method name, got {:?}", t)),
+                            };
+                            self.expect(Token::Colon)?;
+                            self.skip_newlines();
+                            if self.check(&Token::Indent) {
                                 self.advance();
-                                self.skip_newlines();
-                                if self.check(&Token::Indent) {
-                                    self.advance();
-                                    let mut depth = 1;
-                                    while depth > 0 && !self.check(&Token::Eof) {
-                                        match self.advance() {
-                                            Token::Indent => depth += 1,
-                                            Token::Dedent => depth -= 1,
-                                            _ => {}
-                                        }
+                                while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                                    if self.check(&Token::Def) {
+                                        let f = self.parse_function(false)?;
+                                        magic_blocks.push(MagicDef { method_name: magic_name.clone(), function: f });
+                                    } else {
+                                        self.advance();
                                     }
                                 }
+                                if self.check(&Token::Dedent) { self.advance(); }
                             }
                         } else if self.peek().to_string() == "type" {
                             // type alias: type UserId = int
@@ -356,7 +359,7 @@ impl Parser {
             self.skip_newlines();
         }
 
-        Ok(Module { name: module_name, imports, functions, structs, traits, impls, consts, type_aliases, tests, top_level_builds })
+        Ok(Module { name: module_name, imports, functions, structs, traits, impls, consts, type_aliases, tests, top_level_builds, magic_blocks })
     }
 
     fn parse_decorator(&mut self) -> Result<Decorator, String> {
