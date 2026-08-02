@@ -46,6 +46,8 @@ pub struct CodeGen {
     top_level_static_names: std::collections::HashSet<String>,
     /// 当前函数的参数重命名映射（原名 → 新名），用于 E0530 冲突解决
     param_renames: HashMap<String, String>,
+    /// 所有用户自定义类型名（struct/enum），预收集用于判断表达式是否为自定义类型
+    known_types: std::collections::HashSet<String>,
     buf: String,
 }
 
@@ -68,6 +70,7 @@ impl CodeGen {
             is_main: false,
             declared: std::collections::HashSet::new(),
             emitted_types: std::collections::HashSet::new(),
+            known_types: std::collections::HashSet::new(),
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
@@ -100,6 +103,16 @@ impl CodeGen {
         self.mutated_consts.clear();
         self.enum_variant_fields.clear();
         self.overload_sigs.clear();
+
+        // 预收集所有用户自定义类型名（struct/enum），供函数体/表达式中判断
+        self.known_types.clear();
+        for item in &module.items {
+            match item {
+                Item::StructDef(s) => { self.known_types.insert(s.name.clone()); }
+                Item::EnumDef(e) => { self.known_types.insert(e.name.clone()); }
+                _ => {}
+            }
+        }
 
         // 收集所有模块级 const 名称
         let const_names: std::collections::HashSet<String> = module.items.iter()
@@ -1082,7 +1095,7 @@ impl CodeGen {
                         return;
                     }
                     // 用户 struct 索引赋值 → .__setitem__(key, value)
-                    let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                    let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                     if is_struct {
                         let base_s = self.gen_expr(base);
                         let key_s = self.gen_index_key(key, base);
@@ -1611,7 +1624,7 @@ impl CodeGen {
                             // 用户 struct 且有 __str__ → 调用 __str__()；否则用 Display
                             if args.len() == 1 {
                                 if let IrType::Named { path, .. } = &args[0].ty {
-                                    if self.emitted_types.contains(path) {
+                                    if self.is_known_type(path) {
                                         format!("({}).__str__()", args_s[0])
                                     } else {
                                         format!("format!(\"{{}}\", {})", args_s[0])
@@ -1742,10 +1755,11 @@ impl CodeGen {
                 } else if callee_s == "reversed" && args_s.len() == 1 {
                     format!("{{ let mut _tmp = {0}.clone(); _tmp.reverse(); _tmp }}", args_s[0])
                 // --- End prelude mappings ---
-                } else if !args.is_empty() && is_kwarg_call(args) && self.emitted_types.contains(&callee_s) {
+                } else if !args.is_empty() && is_kwarg_call(args) && self.is_known_type(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
                     let fields: Vec<String> = args.iter().map(|a| gen_kwarg_field(a, self)).collect();
                     format!("{}{} {{ {} }}", callee_s, turbofish, fields.join(", "))
+
                 } else if !args.is_empty() && is_kwarg_call(args) {
                     // Function call with named args: func(a, b~) → func(a, b)
                     let flat_args: Vec<String> = args.iter().map(|a| gen_kwarg_value(a, self)).collect();
@@ -1852,7 +1866,7 @@ impl CodeGen {
                 }
 
                 // 判断 receiver 是否为用户自定义 struct（有对应魔术方法时用魔术方法名）
-                let recv_is_struct = matches!(&receiver.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                let recv_is_struct = matches!(&receiver.ty, IrType::Named { path, .. } if self.is_known_type(path));
 
                 // LZ magic methods → Rust equivalents
                 // plus common method name mappings
@@ -1950,7 +1964,7 @@ impl CodeGen {
                     // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
                     let is_kwargs = matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
                     // 用户 struct：ml[0] → ml.__getitem__(0)
-                    let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                    let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                     if is_struct {
                         format!("({}).__getitem__({})", base_s, key_s)
                     } else if is_dict || is_kwargs {
@@ -1965,7 +1979,7 @@ impl CodeGen {
                 let key_s = self.gen_index_key(key, base);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
                 // 用户 struct：ml[1] = v → ml.__setitem__(1, v)
-                let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                 if is_struct {
                     format!("({}).__setitem__({}, {})", base_s, key_s, self.gen_expr(value))
                 } else if is_dict {
@@ -2271,6 +2285,13 @@ impl CodeGen {
 
     /// 生成布尔条件：用户 struct 类型用 __bool__() 方法
     /// if acc → if acc.__bool__()；if not acc → if !(acc.__bool__())
+    /// 判断某类型名是否为用户自定义类型（struct/enum），支持泛型名剥离
+    fn is_known_type(&self, name: &str) -> bool {
+        // 剥离泛型参数：MyList<i64> → MyList
+        let base = name.split('<').next().unwrap_or(name);
+        self.known_types.contains(base) || self.emitted_types.contains(base)
+    }
+
     fn gen_bool_cond(&self, cond: &Expr) -> String {
         // 处理 Not 包裹：not expr → !(expr 转 bool)
         if let ExprKind::UnOp { op: UnOpKind::Not, operand } = &cond.kind {
@@ -2279,7 +2300,7 @@ impl CodeGen {
         }
         // 用户 struct 类型 → 调用 __bool__()
         if let IrType::Named { path, .. } = &cond.ty {
-            if self.emitted_types.contains(path) {
+            if self.is_known_type(path) {
                 let s = self.gen_expr(cond);
                 // 若表达式是赋值等复合，直接调用
                 return format!("({}).__bool__()", s);
