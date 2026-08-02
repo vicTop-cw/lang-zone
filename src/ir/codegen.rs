@@ -573,17 +573,14 @@ impl CodeGen {
         let is_math = f.intrinsics.iter().any(|intr| matches!(&intr.kind, IntrinsicKind::Export(targets) if targets.iter().any(|t| t == "Math")));
 
         let generics = if has_ducks {
-            let base = self.gen_generics(&f.generics);
+            let base = self.gen_fn_generics(&f.generics);
             if base.is_empty() {
                 format!("<{}>", duck_params.join(", "))
             } else {
                 format!("<{}, {}>", base.trim_matches(|c| c == '<' || c == '>'), duck_params.join(", "))
             }
-        } else if is_math && !f.generics.is_empty() {
-            // @math: 泛型名直接用
-            self.gen_generics(&f.generics)
         } else {
-            self.gen_generics(&f.generics)
+            self.gen_fn_generics(&f.generics)
         };
 
         // @math where 子句：每个泛型参数都需要算术 trait bounds
@@ -1059,6 +1056,34 @@ impl CodeGen {
             if !p.bounds.is_empty() {
                 let bounds: Vec<String> = p.bounds.iter().map(|b| self.gen_trait_bound(b)).collect();
                 s.push_str(&format!(": {}", bounds.join(" + ")));
+            }
+            if let Some(ref def) = p.default {
+                s.push_str(&format!(" = {}", self.rust_type(def)));
+            }
+            s
+        }).collect();
+        format!("<{}>", params.join(", "))
+    }
+
+    /// 函数泛型参数：为未约束的泛型参数追加 Debug 约束
+    /// （print/println 使用 {:?}，需保证泛型 T 可 Debug）
+    fn gen_fn_generics(&self, g: &[GenericParam]) -> String {
+        if g.is_empty() {
+            return String::new();
+        }
+        let params: Vec<String> = g.iter().map(|p| {
+            let mut s = p.name.clone();
+            let mut all_bounds: Vec<String> = Vec::new();
+            for b in &p.bounds {
+                let tb = self.gen_trait_bound(b);
+                if !all_bounds.contains(&tb) { all_bounds.push(tb); }
+            }
+            // 未显式约束的泛型参数追加 Debug（LZ 类型均可 Debug）
+            if !all_bounds.iter().any(|b| b == "Debug") {
+                all_bounds.push("Debug".to_string());
+            }
+            if !all_bounds.is_empty() {
+                s.push_str(&format!(": {}", all_bounds.join(" + ")));
             }
             if let Some(ref def) = p.default {
                 s.push_str(&format!(" = {}", self.rust_type(def)));
