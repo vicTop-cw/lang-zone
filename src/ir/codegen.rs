@@ -1145,6 +1145,11 @@ impl CodeGen {
                         return;
                     }
                 }
+                // _ = expr → 丢弃语句，生成 let _ = expr（仅取副作用）
+                if matches!(&target.kind, ExprKind::Var(n) if n == "_") {
+                    self.emit_line(&format!("let _ = {};", self.gen_expr(value)));
+                    return;
+                }
                 let target_s = self.gen_target_expr(target);
                 let val_s = self.gen_expr(value);
                 // 模块级可变变量 → 需 unsafe 块
@@ -1715,7 +1720,7 @@ impl CodeGen {
                     };
                 }
 
-                if callee_s == "print" {
+                if callee_s == "print" || callee_s == "println" {
                     let fmt_placeholders: String = args_s.iter().map(|_| "{:?}").collect::<Vec<_>>().join(" ");
                     let fmt = format!("\"{}\"", fmt_placeholders);
                     // 顶层静态（LazyLock<..>）需解引用才能打印值：print(config) → print(*config)
