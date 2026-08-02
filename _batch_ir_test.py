@@ -1,73 +1,45 @@
-import subprocess, os, json
-from datetime import datetime, timezone
-
-DEMO_ROOT = "DEMO"
-EXCLUDE = {"99_errors", "99_spec"}
-
-def find_lz(root):
-    files = []
-    for dp, dn, fn in os.walk(root):
-        dn[:] = [d for d in dn if d not in EXCLUDE]
-        for f in fn:
-            if f.endswith('.lz'):
-                files.append(os.path.relpath(os.path.join(dp, f), root))
-    return sorted(files)
-
-def run_lz(fp):
-    r = subprocess.run(['cargo', 'run', '--', fp, '--ir-codegen'],
-        capture_output=True, timeout=120, encoding='utf-8', errors='replace')
-    return 'Generated' in (r.stdout + r.stderr), r.stdout + r.stderr
-
-def run_rustc(rs):
-    r = subprocess.run(['rustc', '--edition', '2021', '--emit=metadata', rs],
-        capture_output=True, timeout=30, encoding='utf-8', errors='replace')
-    return r.returncode == 0, (r.stderr or "")
-
-def main():
-    lz_files = find_lz(DEMO_ROOT)
-    res = {"total": len(lz_files), "lz_pass": 0, "lz_fail": 0,
-           "rustc_pass": 0, "rustc_fail": 0, "pass_files": [],
-           "errors": {}, "details": [],
-           "timestamp": datetime.now(timezone.utc).isoformat()}
-
-    for i, f in enumerate(lz_files):
-        full = os.path.join(DEMO_ROOT, f)
-        rs = full.replace('.lz', '.rs')
-        print(f"[{i+1}/{len(lz_files)}] {f} ... ", end='', flush=True)
-        lz_ok, _ = run_lz(full)
-        if not lz_ok:
-            res["lz_fail"] += 1; print("LZ FAIL")
-            res["details"].append({"file": f, "lz_ok": False, "rustc_ok": False, "rustc_errors": ["LZ FAIL"]})
-            continue
-        res["lz_pass"] += 1
-        ok, stderr = run_rustc(rs)
-        if ok:
-            res["rustc_pass"] += 1; res["pass_files"].append(f); print("OK")
-        else:
-            res["rustc_fail"] += 1
-            errs = []
-            for line in stderr.split('\n'):
-                if 'error[' in line:
-                    code = line.split('error[')[1].split(']')[0]
-                    errs.append(code)
-                    res["errors"].setdefault(code, [])
-                    if f not in res["errors"][code]:
-                        res["errors"][code].append(f)
-            res["details"].append({"file": f, "lz_ok": True, "rustc_ok": False, "rustc_errors": stderr.strip().split('\n')[:8]})
-            print(f"FAIL ({', '.join(set(errs))})")
-        if os.path.exists(rs): os.remove(rs)
-
-    print(f"\n{'='*60}")
-    print(f"IR Codegen Batch Results")
-    print(f"{'='*60}")
-    print(f"Total: {res['total']}")
-    print(f"LZ->IR: {res['lz_pass']}/{res['total']} ({res['lz_pass']*100//res['total']}%)")
-    print(f"IR->rustc: {res['rustc_pass']}/{res['total']} ({res['rustc_pass']*100//res['total']}%)")
-    print(f"\nErrors:")
-    for code in sorted(res["errors"].keys()):
-        print(f"  {code}: {len(res['errors'][code])} files")
-    with open('_ir_test_result.json', 'w', encoding='utf-8') as f:
-        json.dump(res, f, indent=2, ensure_ascii=False)
-
-if __name__ == '__main__':
-    main()
+#!/usr/bin/env python3
+import subprocess, sys
+from pathlib import Path
+ROOT = Path(__file__).resolve().parent
+LZ_EXE = ROOT / "target" / "debug" / "lang-zone.exe"
+assert LZ_EXE.exists(), "lang-zone.exe not found"
+lz_files = sorted(f for f in ROOT.glob("DEMO/**/*.lz") if "spec" not in str(f).lower() and "error" not in str(f).lower())
+print(f"Found {len(lz_files)} .lz files\n" + "=" * 70)
+results = {"PASS": [], "IR_FAIL": [], "RUSTC_FAIL": []}
+error_categories = {}
+for lz_file in lz_files:
+    name = str(lz_file.relative_to(ROOT))
+    rs_file = lz_file.with_suffix(".rs")
+    p = subprocess.run([str(LZ_EXE), str(lz_file), "--ir-codegen"], capture_output=True, text=True, cwd=str(ROOT), timeout=30)
+    if p.returncode != 0 or not rs_file.exists():
+        err = (p.stderr or p.stdout or "(no output)").strip()
+        results["IR_FAIL"].append((name, err[:200]))
+        continue
+    p2 = subprocess.run(["rustc", "--edition", "2021", str(rs_file)], capture_output=True, text=True, cwd=str(ROOT), timeout=30)
+    if p2.returncode == 0:
+        results["PASS"].append(name)
+        exe = rs_file.with_suffix(".exe")
+        if exe.exists(): exe.unlink()
+    else:
+        first_err = "(no error line)"
+        err_code = ""
+        for line in p2.stderr.splitlines():
+            if line.startswith("error[") and "]" in line:
+                first_err = line.strip()
+                code_start = line.find("[") + 1
+                code_end = line.find("]")
+                err_code = line[code_start:code_end]
+                break
+        results["RUSTC_FAIL"].append((name, first_err[:200]))
+        if err_code: error_categories[err_code] = error_categories.get(err_code, 0) + 1
+print(f"\nSUMMARY: {len(lz_files)} files")
+print(f"  PASS:       {len(results['PASS'])}")
+print(f"  IR_FAIL:    {len(results['IR_FAIL'])}")
+print(f"  RUSTC_FAIL: {len(results['RUSTC_FAIL'])}")
+for label, items in [("RUSTC_FAIL", results["RUSTC_FAIL"])]:
+    print(f"\n--- {label} ({len(items)}) ---")
+    for n, e in items: print(f"  {n}\n    {e}")
+print(f"\n--- ERROR BREAKDOWN ---")
+for code, count in sorted(error_categories.items(), key=lambda x: -x[1]):
+    print(f"  {code}: {count}")

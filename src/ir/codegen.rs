@@ -726,16 +726,17 @@ impl CodeGen {
         // 方法（impl 块）
         if !s.methods.is_empty() {
             self.buf.push('\n');
-            // 为泛型参数添加 Clone 约束，以支持 __getitem__/__iter__ 等从共享引用提取值
+            // 为泛型参数添加 Clone + Debug 约束
+            // Clone 支持 self.clone() 提取值，Debug 支持 f-string {:?} 插值
             let impl_generics = if s.generics.is_empty() {
                 String::new()
             } else {
                 let params: Vec<String> = s.generics.iter().map(|g| {
                     if g.bounds.is_empty() {
-                        format!("{}: Clone", g.name)
+                        format!("{}: Clone + std::fmt::Debug", g.name)
                     } else {
                         let bounds: Vec<String> = g.bounds.iter().map(|b| self.rust_type(b)).collect();
-                        format!("{}: Clone + {}", g.name, bounds.join(" + "))
+                        format!("{}: Clone + std::fmt::Debug + {}", g.name, bounds.join(" + "))
                     }
                 }).collect();
                 format!("<{}>", params.join(", "))
@@ -781,16 +782,17 @@ impl CodeGen {
         // 方法（impl 块）
         if !e.methods.is_empty() {
             self.buf.push('\n');
-            // 枚举方法 impl：为泛型参数添加 Clone 约束，以支持 self.clone() 提取内部值
+            // 枚举方法 impl：为泛型参数添加 Clone + Debug 约束
+            // Clone 支持 self.clone() 提取值，Debug 支持 f-string {:?} 插值
             let impl_generics = if e.generics.is_empty() {
                 String::new()
             } else {
                 let params: Vec<String> = e.generics.iter().map(|g| {
                     if g.bounds.is_empty() {
-                        format!("{}: Clone", g.name)
+                        format!("{}: Clone + std::fmt::Debug", g.name)
                     } else {
                         let bounds: Vec<String> = g.bounds.iter().map(|b| self.rust_type(b)).collect();
-                        format!("{}: Clone + {}", g.name, bounds.join(" + "))
+                        format!("{}: Clone + std::fmt::Debug + {}", g.name, bounds.join(" + "))
                     }
                 }).collect();
                 format!("<{}>", params.join(", "))
@@ -2496,7 +2498,9 @@ impl CodeGen {
         let escaped = escape_format_braces(&format_str);
         let mut fmt_quoted = escaped;
         for i in 0..arg_idx {
-            fmt_quoted = fmt_quoted.replace(&format!("__LZ_FMT_{}__", i), "{}");
+            // 使用 {:?} (Debug) 而非 {} (Display)，因为 Vec/Option/HashMap 等
+            // 容器类型和自定义类型只有 Debug trait，没有 Display trait
+            fmt_quoted = fmt_quoted.replace(&format!("__LZ_FMT_{}__", i), "{:?}");
         }
         let fmt_quoted = fmt_quoted.replace('"', "\\\"");
         if args.is_empty() {
