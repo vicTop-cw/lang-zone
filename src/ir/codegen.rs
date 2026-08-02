@@ -1116,7 +1116,7 @@ impl CodeGen {
             Stmt::If { cond, then_branch, else_branch } => {
                 self.emit_walrus_predecls(cond);
                 if let Some(else_blk) = else_branch {
-                    self.emit_line(&format!("if {} {{", self.gen_expr(cond)));
+                    self.emit_line(&format!("if {} {{", self.gen_bool_cond(cond)));
                     self.indent += 1;
                     self.gen_block_inner(then_branch);
                     self.indent -= 1;
@@ -1126,7 +1126,7 @@ impl CodeGen {
                     self.indent -= 1;
                     self.emit_line("}");
                 } else {
-                    self.emit_line(&format!("if {} {{", self.gen_expr(cond)));
+                    self.emit_line(&format!("if {} {{", self.gen_bool_cond(cond)));
                     self.indent += 1;
                     self.gen_block_inner(then_branch);
                     self.indent -= 1;
@@ -1599,7 +1599,20 @@ impl CodeGen {
                             }
                         }
                         "str" => {
-                            format!("format!(\"{{}}\", {})", args_s[0])
+                            // 用户 struct 且有 __str__ → 调用 __str__()；否则用 Display
+                            if args.len() == 1 {
+                                if let IrType::Named { path, .. } = &args[0].ty {
+                                    if self.emitted_types.contains(path) {
+                                        format!("({}).__str__()", args_s[0])
+                                    } else {
+                                        format!("format!(\"{{}}\", {})", args_s[0])
+                                    }
+                                } else {
+                                    format!("format!(\"{{}}\", {})", args_s[0])
+                                }
+                            } else {
+                                format!("format!(\"{{}}\", {})", args_s[0])
+                            }
                         }
                         "f64" | "float" => {
                             if args.len() == 1 {
@@ -1829,14 +1842,25 @@ impl CodeGen {
                     return format!("{}::{}({})", recv, method, wrapped_args.join(", "));
                 }
 
+                // 判断 receiver 是否为用户自定义 struct（有对应魔术方法时用魔术方法名）
+                let recv_is_struct = matches!(&receiver.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+
                 // LZ magic methods → Rust equivalents
                 // plus common method name mappings
                 // 注意：算术/比较魔术方法（__add__/__eq__ 等）保留原名，
                 // 因为用户 struct 的 impl 方法就叫 __add__；__str__/__iter__ 用于
                 // str() 转换和迭代的容器场景，继续映射
                 let rust_method = match method.as_str() {
-                    "__str__" => "to_string",
-                    "__iter__" => "iter",
+                    // 用户 struct：len/iter/next/contains 等映射到魔术方法
+                    "len" if recv_is_struct => "__len__",
+                    "iter" if recv_is_struct => "__iter__",
+                    "next" if recv_is_struct => "__next__",
+                    "getitem" if recv_is_struct => "__getitem__",
+                    "setitem" if recv_is_struct => "__setitem__",
+                    "contains" if recv_is_struct => "__contains__",
+                    // 非用户 struct 的 __str__/__iter__ 用于内置容器/字符串场景
+                    "__str__" if !recv_is_struct => "to_string",
+                    "__iter__" if !recv_is_struct => "iter",
                     "length" => "len",    // LZ .length() → Rust .len()
                     "to_upper" => "to_uppercase",
                     "to_lower" => "to_lowercase",
@@ -1877,8 +1901,8 @@ impl CodeGen {
                     }
                 }
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
-                // .len() on collections → cast usize to i64
-                if method == "len" { format!("({} as i64)", call) } else { call }
+                // .len()/.length() on collections → cast usize to i64
+                if method == "len" || method == "length" { format!("({} as i64)", call) } else { call }
             }
             ExprKind::FieldAccess { base, field } => {
                 // Enum variant: Color.Red → Color::Red (field 大写开头)
@@ -1916,7 +1940,11 @@ impl CodeGen {
                     let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
                     // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
                     let is_kwargs = matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
-                    if is_dict || is_kwargs {
+                    // 用户 struct：ml[0] → ml.__getitem__(0)
+                    let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                    if is_struct {
+                        format!("({}).__getitem__({})", base_s, key_s)
+                    } else if is_dict || is_kwargs {
                         format!("({}).get(&{}).cloned().unwrap()", base_s, key_s)
                     } else {
                         format!("{}[{}]", base_s, key_s)
@@ -1927,7 +1955,11 @@ impl CodeGen {
                 let base_s = self.gen_expr(base);
                 let key_s = self.gen_index_key(key, base);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
-                if is_dict {
+                // 用户 struct：ml[1] = v → ml.__setitem__(1, v)
+                let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.emitted_types.contains(path));
+                if is_struct {
+                    format!("({}).__setitem__({}, {})", base_s, key_s, self.gen_expr(value))
+                } else if is_dict {
                     // HashMap 不支持 IndexMut，使用 .insert() 代替
                     format!("{}.insert(&{}, {})", base_s, key_s, self.gen_expr(value))
                 } else {
@@ -2226,6 +2258,25 @@ impl CodeGen {
             }
             _ => format!("/* TODO: unsupported expr */"),
         }
+    }
+
+    /// 生成布尔条件：用户 struct 类型用 __bool__() 方法
+    /// if acc → if acc.__bool__()；if not acc → if !(acc.__bool__())
+    fn gen_bool_cond(&self, cond: &Expr) -> String {
+        // 处理 Not 包裹：not expr → !(expr 转 bool)
+        if let ExprKind::UnOp { op: UnOpKind::Not, operand } = &cond.kind {
+            let inner = self.gen_bool_cond(operand);
+            return format!("!({})", inner);
+        }
+        // 用户 struct 类型 → 调用 __bool__()
+        if let IrType::Named { path, .. } = &cond.ty {
+            if self.emitted_types.contains(path) {
+                let s = self.gen_expr(cond);
+                // 若表达式是赋值等复合，直接调用
+                return format!("({}).__bool__()", s);
+            }
+        }
+        self.gen_expr(cond)
     }
 
     /// 生成 f-string: 提取 {expr} 插值，转成 format!("literal", expr, ...)

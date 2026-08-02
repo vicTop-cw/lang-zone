@@ -1805,12 +1805,12 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             Stmt::Block {
                 stmts: vec![
                     Stmt::Let { name: name.clone(), ty: val_ty.clone(), value: val, is_mut: false },
-                    // defer → cleanup at block end
+                    // with → __exit__ 清理（若有）；否则 drop()
                     Stmt::ExprStmt {
                         expr: Expr::new(
                             ExprKind::MethodCall {
                                 receiver: Box::new(Expr::new(ExprKind::Var(name), val_ty.clone(), Span::unknown())),
-                                method: "drop".into(),
+                                method: "__exit__".into(),
                                 args: vec![],
                             },
                             IrType::Unit, Span::unknown(),
