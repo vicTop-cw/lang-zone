@@ -765,6 +765,8 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             default: None,
                             variadic: false,
                             is_mut: false,
+                            is_ref: false,
+                            is_owned: false,
                         });
                         filled_args.push(Expr::new(
                             ExprKind::Var(param_name),
@@ -1084,6 +1086,8 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     name: name.clone(),
                     ty: IrType::Any,
                     is_mut: false,
+                    is_ref: false,
+                    is_owned: false,
                     default: None,
                     variadic: false,
                 }).collect(),
@@ -1236,7 +1240,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let out_expr = convert_expr(output, ctx);
             let mut args = vec![
                 Expr::new(ExprKind::Lambda {
-                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
                     body: Box::new(out_expr),
                     is_move: true,
                 }, IrType::Any, Span::unknown()),
@@ -1245,7 +1249,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // 过滤条件 cond 作为第三个参数传入 (可选)
             if let Some(c) = cond {
                 args.push(Expr::new(ExprKind::Lambda {
-                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
                     body: Box::new(convert_expr(c, ctx)),
                     is_move: true,
                 }, IrType::Any, Span::unknown()));
@@ -1263,7 +1267,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let val_expr = convert_expr(value, ctx);
             let mut args = vec![
                 Expr::new(ExprKind::Lambda {
-                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
                     body: Box::new(Expr::new(
                         ExprKind::TupleLit(vec![key_expr, val_expr]),
                         IrType::Any, Span::unknown(),
@@ -1274,7 +1278,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             ];
             if let Some(c) = cond {
                 args.push(Expr::new(ExprKind::Lambda {
-                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
                     body: Box::new(convert_expr(c, ctx)),
                     is_move: true,
                 }, IrType::Any, Span::unknown()));
@@ -1291,7 +1295,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let elem_expr = convert_expr(elem, ctx);
             let mut args = vec![
                 Expr::new(ExprKind::Lambda {
-                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
                     body: Box::new(elem_expr),
                     is_move: true,
                 }, IrType::Any, Span::unknown()),
@@ -1299,7 +1303,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             ];
             if let Some(c) = cond {
                 args.push(Expr::new(ExprKind::Lambda {
-                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, default: None, variadic: false }],
+                    params: vec![Param { name: var.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
                     body: Box::new(convert_expr(c, ctx)),
                     is_move: true,
                 }, IrType::Any, Span::unknown()));
@@ -2086,6 +2090,8 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             name: p.name.clone(),
             ty: if is_math { IrType::Generic("T".into()) } else { from_ast_type_with_generics(&p.ty, &generics) },
             is_mut: p.is_mut,
+            is_ref: p.is_ref,
+            is_owned: p.is_owned,
             default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
             variadic: is_variadic,
         }
@@ -2373,6 +2379,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             }).collect(),
             fields,
             methods,
+            has_new: s.magic_methods.iter().any(|m| m.name == "__new__"),
             span: Span::unknown(),
         })
     }

@@ -48,6 +48,12 @@ pub struct CodeGen {
     param_renames: HashMap<String, String>,
     /// 所有用户自定义类型名（struct/enum），预收集用于判断表达式是否为自定义类型
     known_types: std::collections::HashSet<String>,
+    /// 当前方法是否以共享引用（&self）接收，用于对 self.字段 值表达式自动 .clone()
+    borrow_self: bool,
+    /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
+    struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// struct 是否定义了 __new__：struct_name → 是否
+    struct_has_new: std::collections::HashSet<String>,
     buf: String,
 }
 
@@ -70,7 +76,6 @@ impl CodeGen {
             is_main: false,
             declared: std::collections::HashSet::new(),
             emitted_types: std::collections::HashSet::new(),
-            known_types: std::collections::HashSet::new(),
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
@@ -83,6 +88,10 @@ impl CodeGen {
             overload_sigs: HashMap::new(),
             top_level_static_names: std::collections::HashSet::new(),
             param_renames: HashMap::new(),
+            known_types: std::collections::HashSet::new(),
+            borrow_self: false,
+            struct_fields_info: std::collections::HashMap::new(),
+            struct_has_new: std::collections::HashSet::new(),
             buf: String::new(),
         }
     }
@@ -523,6 +532,9 @@ impl CodeGen {
 
     fn gen_fn_def(&mut self, f: &FnDef) {
         self.declared.clear();
+        // 记录 self 是否以共享引用接收（&self），用于对 self.字段 值表达式自动 .clone()
+        self.borrow_self = f.params.iter().find(|p| p.name == "self")
+            .map_or(false, |p| !p.is_mut && !p.is_owned && !is_consuming_self(f));
         // 收集当前函数的 variadic 参数名
         self.current_variadic_params.clear();
         for p in &f.params {
@@ -584,8 +596,17 @@ impl CodeGen {
                 let idx = duck_indices.iter().position(|&d| d == i).unwrap();
                 format!("{}: {}", pname, duck_params[idx])
             } else if p.name == "self" {
-                // self 参数：借用而非移动（LZ 语义为引用）
-                if p.is_mut { "&mut self" } else { "&self" }.into()
+                // self 参数修饰：ref self → &self；mut self → &mut self；owned self → self
+                // 消耗型魔术方法（__enter__/__iter__）以 owned self 接收以便 move 字段
+                // 算术运算符保留 &self 以避免调用方多次复用实例时发生 move
+                let consumes_self = f.name == "__enter__" || f.name == "__iter__";
+                if p.is_mut {
+                    "&mut self".into()
+                } else if p.is_owned || (p.is_ref == false && consumes_self && !is_math) {
+                    "self".into()
+                } else {
+                    "&self".into()
+                }
             } else {
                 let ty_str = if p.variadic {
                     format!("&[{}]", self.rust_type(&p.ty))
@@ -685,6 +706,12 @@ impl CodeGen {
     fn gen_struct_def(&mut self, s: &StructDef) {
         if self.emitted_types.contains(&s.name) { return; }
         self.emitted_types.insert(s.name.clone());
+        // 记录字段信息，供 __new__ 补齐默认字段
+        self.struct_fields_info.insert(s.name.clone(),
+            s.fields.iter().map(|f| (f.name.clone(), f.ty.clone())).collect());
+        if s.has_new {
+            self.struct_has_new.insert(s.name.clone());
+        }
 
         let generics = self.gen_generics(&s.generics);
         self.emit_line("#[derive(Debug, Clone)]");
@@ -699,7 +726,21 @@ impl CodeGen {
         // 方法（impl 块）
         if !s.methods.is_empty() {
             self.buf.push('\n');
-            self.emit_line(&format!("impl{} {}{} {{", generics, s.name, generics));
+            // 为泛型参数添加 Clone 约束，以支持 __getitem__/__iter__ 等从共享引用提取值
+            let impl_generics = if s.generics.is_empty() {
+                String::new()
+            } else {
+                let params: Vec<String> = s.generics.iter().map(|g| {
+                    if g.bounds.is_empty() {
+                        format!("{}: Clone", g.name)
+                    } else {
+                        let bounds: Vec<String> = g.bounds.iter().map(|b| self.rust_type(b)).collect();
+                        format!("{}: Clone + {}", g.name, bounds.join(" + "))
+                    }
+                }).collect();
+                format!("<{}>", params.join(", "))
+            };
+            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
             self.indent += 1;
             for m in &s.methods {
                 self.gen_fn_def(m);
@@ -1094,11 +1135,11 @@ impl CodeGen {
                         self.emit_line(&format!("{}.insert({}, {});", base_s, key_s, val_s));
                         return;
                     }
-                    // 用户 struct 索引赋值 → .__setitem__(key, value)
+                    // 用户 struct 索引赋值 → .__setitem__(key, value)（key 保持 i64，内部 self.items[i] 再转 usize）
                     let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                     if is_struct {
                         let base_s = self.gen_expr(base);
-                        let key_s = self.gen_index_key(key, base);
+                        let key_s = self.gen_expr(key);
                         let val_s = self.gen_expr(value);
                         self.emit_line(&format!("({}).__setitem__({}, {});", base_s, key_s, val_s));
                         return;
@@ -1409,7 +1450,14 @@ impl CodeGen {
         } else {
             let key_s = self.gen_expr(key);
             // 在容器索引（Vec/List）场景下，若 key 是 self 的 int 字段（impl 内），也转 usize
-            if !is_dict && matches!(&key.kind, ExprKind::FieldAccess { .. }) && matches!(&base.ty, IrType::Named { path, .. } if path == "Vec" || path == "List" || path == "Array") {
+            // 结构模式：self.container[self.index] → base 与 key 均为 self.字段
+            let is_self_field_key = matches!(&key.kind,
+                ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
+            let is_self_field_base = matches!(&base.kind,
+                ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
+            let is_container_base = matches!(&base.ty, IrType::Named { path, .. }
+                if path == "Vec" || path == "List" || path == "Array" || path == "HashMap" || path == "Dict" || path == "Set");
+            if !is_dict && is_self_field_key && (is_self_field_base || is_container_base) {
                 format!("({} as usize)", key_s)
             } else {
                 key_s
@@ -1767,8 +1815,33 @@ impl CodeGen {
                 // --- End prelude mappings ---
                 } else if !args.is_empty() && is_kwarg_call(args) && self.is_known_type(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
-                    let fields: Vec<String> = args.iter().map(|a| gen_kwarg_field(a, self)).collect();
-                    format!("{}{} {{ {} }}", callee_s, turbofish, fields.join(", "))
+                    let base_name = callee_s.split('<').next().unwrap_or(&callee_s).to_string();
+                    let provided: Vec<String> = args.iter().map(|a| gen_kwarg_field(a, self)).collect();
+                    // 已提供的字段名集合
+                    let provided_names: std::collections::HashSet<String> = args.iter().filter_map(|a| {
+                        if let ExprKind::StructCtor { name, fields } = &a.kind {
+                            if name == "_KwArg" {
+                                return fields.iter().find(|(n, _)| n == "name")
+                                    .and_then(|(_, v)| match &v.kind {
+                                        ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
+                                        _ => None,
+                                    });
+                            }
+                        }
+                        None
+                    }).collect();
+                    // __new__ 魔术构造：补齐未提供的字段为类型默认值（如 Config(host,port) → debug:false）
+                    let mut all_fields = provided;
+                    if self.struct_has_new.contains(&base_name) {
+                        if let Some(info) = self.struct_fields_info.get(&base_name) {
+                            for (fname, fty) in info {
+                                if !provided_names.contains(fname) {
+                                    all_fields.push(format!("{}: {}", fname, self.default_value_for(&fty)));
+                                }
+                            }
+                        }
+                    }
+                    format!("{}{} {{ {} }}", callee_s, turbofish, all_fields.join(", "))
 
                 } else if !args.is_empty() && is_kwarg_call(args) {
                     // Function call with named args: func(a, b~) → func(a, b)
@@ -1933,6 +2006,19 @@ impl CodeGen {
                         args_s[0] = format!("&{}", args_s[0]);
                     }
                 }
+                // 算术/比较魔术方法（__add__/__eq__ 等）取 &self + owned 参数，
+                // 调用方需 clone 以避免 move 复用的变量
+                let non_consuming_magic = ["__add__", "__sub__", "__mul__", "__div__", "__eq__", "__lt__", "__gt__", "__le__", "__ge__", "__ne__"];
+                if non_consuming_magic.contains(&method.as_str()) && recv_is_struct {
+                    let recv_c = format!("({}).clone()", recv);
+                    let args_c: Vec<String> = args_s.iter().zip(args.iter()).map(|(s, a)| {
+                        // 数值标量（如 5.0）无需 clone
+                        let is_scalar = matches!(&a.ty, IrType::Int | IrType::F64 | IrType::Bool);
+                        if is_scalar { s.clone() } else { format!("({}).clone()", s) }
+                    }).collect();
+                    let call = format!("{}.{}({})", recv_c, rust_method, args_c.join(", "));
+                    return call;
+                }
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
                 // .len()/.length() on collections → cast usize to i64
                 if method == "len" || method == "length" { format!("({} as i64)", call) } else { call }
@@ -1973,14 +2059,21 @@ impl CodeGen {
                     let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
                     // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
                     let is_kwargs = matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
-                    // 用户 struct：ml[0] → ml.__getitem__(0)
+                    // 用户 struct：ml[0] → ml.__getitem__(0)（key 保持 i64，内部 self.items[i] 再转 usize）
                     let is_struct = matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                     if is_struct {
-                        format!("({}).__getitem__({})", base_s, key_s)
+                        format!("({}).__getitem__({})", base_s, self.gen_expr(key))
                     } else if is_dict || is_kwargs {
                         format!("({}).get(&{}).cloned().unwrap()", base_s, key_s)
                     } else {
-                        format!("{}[{}]", base_s, key_s)
+                        // 值上下文取 self.字段[...]：需 .clone() 避免从容器 move（self.items[idx] 返回 T）
+                        // 赋值目标走 gen_target_expr，不会进入此分支
+                        let is_self_field = matches!(&base.kind, ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
+                        if is_self_field {
+                            format!("{}[{}].clone()", base_s, key_s)
+                        } else {
+                            format!("{}[{}]", base_s, key_s)
+                        }
                     }
                 }
             }
@@ -2302,6 +2395,21 @@ impl CodeGen {
         self.known_types.contains(base) || self.emitted_types.contains(base)
     }
 
+    /// 生成字段类型的默认值（用于 __new__ 补齐）
+    fn default_value_for(&self, ty: &IrType) -> String {
+        match ty {
+            IrType::Int => "0".into(),
+            IrType::F64 => "0.0".into(),
+            IrType::Bool => "false".into(),
+            IrType::Str => "\"\".to_string()".into(),
+            IrType::Named { path, .. } => match path.as_str() {
+                "String" => "\"\".to_string()".into(),
+                _ => format!("{}.new()", self.rust_type(ty)),
+            },
+            _ => "Default::default()".into(),
+        }
+    }
+
     fn gen_bool_cond(&self, cond: &Expr) -> String {
         // 处理 Not 包裹：not expr → !(expr 转 bool)
         if let ExprKind::UnOp { op: UnOpKind::Not, operand } = &cond.kind {
@@ -2537,6 +2645,11 @@ fn is_kwarg_call(args: &[Expr]) -> bool {
     args.iter().any(|a| matches!(&a.kind, ExprKind::StructCtor { name, .. } if name == "_KwArg"))
 }
 
+/// 是否为消耗型（owned self）魔术方法
+fn is_consuming_self(f: &FnDef) -> bool {
+    matches!(f.name.as_str(), "__enter__" | "__iter__")
+}
+
 impl CodeGen {
     /// 魔法方法 → Rust 降级映射
     fn gen_magic_call(&self, kind: &MagicKind, args: &[Expr]) -> String {
@@ -2757,7 +2870,16 @@ fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
                 })
                 .unwrap_or_default();
             let value = fields.iter().find(|(n, _)| n == "value")
-                .map(|(_, v)| cg.gen_expr(v))
+                .map(|(_, v)| {
+                    let s = cg.gen_expr(v);
+                    // &self 方法内构造时 move self.字段 → 需 .clone()
+                    if cg.borrow_self
+                        && matches!(&v.kind, ExprKind::FieldAccess { base, .. } if matches!(&base.kind, ExprKind::Var(n) if n == "self")) {
+                        format!("{}.clone()", s)
+                    } else {
+                        s
+                    }
+                })
                 .unwrap_or_default();
             return format!("{}: {}", name_raw, value);
         }
@@ -2884,8 +3006,8 @@ mod tests {
             name: "add".into(),
             generics: vec![],
             params: vec![
-                Param { name: "a".into(), ty: IrType::Int, is_mut: false, default: None, variadic: false },
-                Param { name: "b".into(), ty: IrType::Int, is_mut: false, default: None, variadic: false },
+                Param { name: "a".into(), ty: IrType::Int, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false },
+                Param { name: "b".into(), ty: IrType::Int, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false },
             ],
             ret_ty: IrType::Int,
             body: Block {

@@ -157,6 +157,10 @@ pub struct Param {
     pub name: String,
     pub ty: IrType,
     pub is_mut: bool,
+    /// 是否为引用参数（ref self / ref x）
+    pub is_ref: bool,
+    /// 是否为 owned 参数（owned self）
+    pub is_owned: bool,
     /// 默认值（可选）
     pub default: Option<Expr>,
     /// 是否为 variadic 参数（..name: T → 在调用处收集剩余实参为切片）
@@ -219,6 +223,8 @@ pub struct StructDef {
     pub generics: Vec<GenericParam>,
     pub fields: Vec<Field>,
     pub methods: Vec<FnDef>,
+    /// 是否定义了 __new__ 魔术构造（用于构造时补齐默认字段）
+    pub has_new: bool,
     pub span: Span,
 }
 
