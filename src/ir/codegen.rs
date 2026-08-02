@@ -1153,7 +1153,8 @@ impl CodeGen {
                 };
                 // walrus 变量预声明（let 绑定中的 := 需要先声明变量再赋值）
                 self.emit_walrus_predecls(value);
-                self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, 
+                let renamed = self.rename_reserved_var(name);
+                self.emit_line(&format!("let {}{}{} = {};", mut_kw, renamed, ty_str, 
                     if is_empty_container {
                         match ty {
                             IrType::Named { path, .. } if path == "Dict" || path == "Set" || path == "HashMap" || path == "HashSet" => {
@@ -1541,7 +1542,7 @@ impl CodeGen {
                 if name == "pass" { "()".into() }
                 else if self.mutated_consts.contains(name) { format!("unsafe {{ {} }}", name) }
                 else if let Some(renamed) = self.param_renames.get(name) { renamed.clone() }
-                else { name.clone() }
+                else { self.rename_reserved_var(name) }
             }
             ExprKind::Call { callee, args, type_args } => {
                 let callee_s = self.gen_expr(callee);
@@ -2471,6 +2472,15 @@ impl CodeGen {
         // 剥离泛型参数：MyList<i64> → MyList
         let base = name.split('<').next().unwrap_or(name);
         self.known_types.contains(base) || self.emitted_types.contains(base)
+    }
+
+    /// Rust prelude 中的枚举变体名，作为变量名时需重命名以避免 E0530
+    /// （LZ 允许 Ok/Some/None/Err 等关键字降级为标识符）
+    fn rename_reserved_var(&self, name: &str) -> String {
+        match name {
+            "Ok" | "Some" | "None" | "Err" => format!("{}_", name),
+            _ => name.to_string(),
+        }
     }
 
     /// 生成字段类型的默认值（用于 __new__ 补齐）
