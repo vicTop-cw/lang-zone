@@ -2199,12 +2199,19 @@ impl CodeGen {
                 }
                 // String + 拼接: 右侧需借用 & 以匹配 Rust Add<&str>
                 // 但如果 rhs 是 variadic 参数（类型已是 &[T]），不应再加 &
-                if *op == BinOpKind::Add && matches!(&rhs.ty, IrType::Str) {
+                let str_concat = matches!(&rhs.ty, IrType::Str) || matches!(&lhs.ty, IrType::Str);
+                if *op == BinOpKind::Add && str_concat {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
                     let rhs_is_variadic = matches!(&rhs.kind, ExprKind::Var(name) if self.current_variadic_params.contains(name));
                     if rhs_is_variadic {
                         return format!("{} + {}", lhs_s, rhs_s);
+                    }
+                    // String + String → String + &str（Rust Add<&str>）
+                    // 对临时 String（format! 等）用 &{}[..] 切为 &str
+                    if matches!(&rhs.kind, ExprKind::Call { .. }) || rhs_s.ends_with(".to_string()")
+                        || matches!(&rhs.kind, ExprKind::Var(_)) {
+                        return format!("{} + &{}[..]", lhs_s, rhs_s);
                     }
                     return format!("{} + &{}", lhs_s, rhs_s);
                 }

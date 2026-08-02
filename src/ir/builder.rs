@@ -446,6 +446,15 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 if fname == "print" || fname == "println" || fname == "panic" {
                     return IrType::Unit;
                 }
+                // str/int/float/bool 类型转换内建：返回对应类型
+                match fname.as_str() {
+                    "str" => return IrType::Str,
+                    "int" => return IrType::Int,
+                    "float" => return IrType::F64,
+                    "bool" => return IrType::Bool,
+                    "len" => return IrType::Int,
+                    _ => {}
+                }
                 if ctx.is_struct(fname) {
                     return IrType::named(fname);
                 }
