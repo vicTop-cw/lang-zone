@@ -1209,7 +1209,12 @@ impl CodeGen {
                     } else {
                         format!("({}).into_iter()", self.gen_expr(iter))
                     };
-                    format!("{}.filter(|&{}| {})", base, var, self.gen_expr(g))
+                    // guard 中若使用 var.field（struct 字段），闭包参数用引用 |p| 以自动解引用；
+                    // 否则（原始类型比较）用 |&x| 按值解构（Copy）
+                    let guard_s = self.gen_expr(g);
+                    let uses_field = guard_s.contains(&format!("{}.", var));
+                    let pat = if uses_field { format!("|{}|", var) } else { format!("|&{}|", var) };
+                    format!("{}.filter({} {})", base, pat, guard_s)
                 } else if use_lazy_iter {
                     format!("({}).iter().cloned()", self.gen_expr(iter))
                 } else {
