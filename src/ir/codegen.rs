@@ -437,8 +437,8 @@ impl CodeGen {
         self.buf.push_str("use std::any::Any;\n");
         self.buf.push_str("#[derive(Debug)]\n");
         self.buf.push_str("pub struct __Params {\n");
-        self.buf.push_str("    pub args: Vec<Rc<dyn Any>>,\n");
-        self.buf.push_str("    pub kwargs: HashMap<String, Rc<dyn Any>>,\n");
+        self.buf.push_str("    pub args: Vec<Box<dyn Any>>,\n");
+        self.buf.push_str("    pub kwargs: HashMap<String, Box<dyn Any>>,\n");
         self.buf.push_str("}\n\n");
         // spawn_task: 异步任务包装器（保持 Future 语义，允许 .await）
         self.buf.push_str("async fn __spawn_task<T>(f: impl std::future::Future<Output = T>) -> T {\n");
@@ -3376,91 +3376,108 @@ fn collect_pattern_bindings(pattern: &Pattern, locals: &mut std::collections::Ha
 }
 
 /// 递归收集块中引用的自由变量名（shadow 为遮蔽名集合：闭包参数）
+/// 递归收集自由变量引用。in_closure=true 表示当前处于闭包作用域，
+/// 此时裸赋值 `x = v` 视为局部声明（加入遮蔽集），而不是外部变量引用。
+/// 用于构建块（=: → 闭包）内的赋值，避免被误提升为全局变量。
 fn collect_var_refs(block: &Block, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>) {
+    collect_var_refs_inner(block, shadow, refs, false);
+}
+
+fn collect_var_refs_inner(block: &Block, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>, in_closure: bool) {
     for stmt in &block.stmts {
-        collect_stmt_var_refs(stmt, shadow, refs);
+        collect_stmt_var_refs(stmt, shadow, refs, in_closure);
     }
 }
 
-fn collect_stmt_var_refs(stmt: &Stmt, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>) {
+fn collect_stmt_var_refs(stmt: &Stmt, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>, in_closure: bool) {
     match stmt {
-        Stmt::Let { value, .. } => collect_expr_var_refs(value, shadow, refs),
-        Stmt::Assign { target, value } => {
-            collect_expr_var_refs(target, shadow, refs);
-            collect_expr_var_refs(value, shadow, refs);
+        Stmt::Let { name, value, .. } => {
+            // let 声明引入新局部变量，遮蔽同名外部引用
+            shadow.insert(name.clone());
+            collect_expr_var_refs(value, shadow, refs, in_closure);
         }
-        Stmt::ExprStmt { expr } => collect_expr_var_refs(expr, shadow, refs),
-        Stmt::Return { value } => { if let Some(v) = value { collect_expr_var_refs(v, shadow, refs); } }
+        Stmt::Assign { target, value } => {
+            // 闭包作用域内：裸赋值视为局部声明（如构建块内 a = 10）
+            if in_closure {
+                if let ExprKind::Var(n) = &target.kind {
+                    shadow.insert(n.clone());
+                }
+            }
+            collect_expr_var_refs(target, shadow, refs, in_closure);
+            collect_expr_var_refs(value, shadow, refs, in_closure);
+        }
+        Stmt::ExprStmt { expr } => collect_expr_var_refs(expr, shadow, refs, in_closure),
+        Stmt::Return { value } => { if let Some(v) = value { collect_expr_var_refs(v, shadow, refs, in_closure); } }
         Stmt::If { cond, then_branch, else_branch, .. } => {
-            collect_expr_var_refs(cond, shadow, refs);
-            collect_var_refs(then_branch, shadow, refs);
-            if let Some(e) = else_branch { collect_var_refs(e, shadow, refs); }
+            collect_expr_var_refs(cond, shadow, refs, in_closure);
+            collect_var_refs_inner(then_branch, shadow, refs, in_closure);
+            if let Some(e) = else_branch { collect_var_refs_inner(e, shadow, refs, in_closure); }
         }
         Stmt::For { iter, guard, body, .. } => {
-            collect_expr_var_refs(iter, shadow, refs);
-            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs); }
-            collect_var_refs(body, shadow, refs);
+            collect_expr_var_refs(iter, shadow, refs, in_closure);
+            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs, in_closure); }
+            collect_var_refs_inner(body, shadow, refs, in_closure);
         }
         Stmt::While { cond, guard, body } => {
-            collect_expr_var_refs(cond, shadow, refs);
-            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs); }
-            collect_var_refs(body, shadow, refs);
+            collect_expr_var_refs(cond, shadow, refs, in_closure);
+            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs, in_closure); }
+            collect_var_refs_inner(body, shadow, refs, in_closure);
         }
         Stmt::Block { stmts } => {
             let inner = Block { stmts: stmts.clone(), ty: IrType::Unit };
-            collect_var_refs(&inner, shadow, refs);
+            collect_var_refs_inner(&inner, shadow, refs, in_closure);
         }
         Stmt::Match { scrutinee, arms, .. } => {
-            collect_expr_var_refs(scrutinee, shadow, refs);
-            for arm in arms { collect_var_refs(&arm.body, shadow, refs); }
+            collect_expr_var_refs(scrutinee, shadow, refs, in_closure);
+            for arm in arms { collect_var_refs_inner(&arm.body, shadow, refs, in_closure); }
         }
-        Stmt::Raise { value } => collect_expr_var_refs(value, shadow, refs),
-        Stmt::Assert { cond, .. } => collect_expr_var_refs(cond, shadow, refs),
+        Stmt::Raise { value } => collect_expr_var_refs(value, shadow, refs, in_closure),
+        Stmt::Assert { cond, .. } => collect_expr_var_refs(cond, shadow, refs, in_closure),
         _ => {}
     }
 }
 
-fn collect_expr_var_refs(expr: &Expr, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>) {
+fn collect_expr_var_refs(expr: &Expr, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>, in_closure: bool) {
     match &expr.kind {
         ExprKind::Var(name) => {
             // 被闭包参数/局部变量遮蔽的跳过
             if !shadow.contains(name.as_str()) { refs.push(name.clone()); }
         }
         ExprKind::BinOp { lhs, rhs, .. } => {
-            collect_expr_var_refs(lhs, shadow, refs);
-            collect_expr_var_refs(rhs, shadow, refs);
+            collect_expr_var_refs(lhs, shadow, refs, in_closure);
+            collect_expr_var_refs(rhs, shadow, refs, in_closure);
         }
-        ExprKind::UnOp { operand, .. } => collect_expr_var_refs(operand, shadow, refs),
+        ExprKind::UnOp { operand, .. } => collect_expr_var_refs(operand, shadow, refs, in_closure),
         ExprKind::Call { callee, args, .. } => {
-            collect_expr_var_refs(callee, shadow, refs);
-            for a in args { collect_expr_var_refs(a, shadow, refs); }
+            collect_expr_var_refs(callee, shadow, refs, in_closure);
+            for a in args { collect_expr_var_refs(a, shadow, refs, in_closure); }
         }
         ExprKind::MethodCall { receiver, args, .. } => {
-            collect_expr_var_refs(receiver, shadow, refs);
-            for a in args { collect_expr_var_refs(a, shadow, refs); }
+            collect_expr_var_refs(receiver, shadow, refs, in_closure);
+            for a in args { collect_expr_var_refs(a, shadow, refs, in_closure); }
         }
-        ExprKind::FieldAccess { base, .. } => collect_expr_var_refs(base, shadow, refs),
+        ExprKind::FieldAccess { base, .. } => collect_expr_var_refs(base, shadow, refs, in_closure),
         ExprKind::IndexGet { base, key } => {
-            collect_expr_var_refs(base, shadow, refs);
-            collect_expr_var_refs(key, shadow, refs);
+            collect_expr_var_refs(base, shadow, refs, in_closure);
+            collect_expr_var_refs(key, shadow, refs, in_closure);
         }
         ExprKind::IfExpr { cond, then, els } => {
-            collect_expr_var_refs(cond, shadow, refs);
-            collect_expr_var_refs(then, shadow, refs);
-            collect_expr_var_refs(els, shadow, refs);
+            collect_expr_var_refs(cond, shadow, refs, in_closure);
+            collect_expr_var_refs(then, shadow, refs, in_closure);
+            collect_expr_var_refs(els, shadow, refs, in_closure);
         }
-        ExprKind::BlockExpr { block } => collect_var_refs(block, shadow, refs),
+        ExprKind::BlockExpr { block } => collect_var_refs_inner(block, shadow, refs, in_closure),
         ExprKind::Lambda { params, body, .. } => {
-            // 闭包参数遮蔽：进入闭包体时加入遮蔽集
+            // 闭包参数遮蔽：进入闭包体时加入遮蔽集；闭包内裸赋值视为局部声明
             let mut inner_shadow = shadow.clone();
             for p in params { inner_shadow.insert(p.name.clone()); }
-            collect_expr_var_refs(body, &mut inner_shadow, refs);
+            collect_expr_var_refs(body, &mut inner_shadow, refs, true);
         }
-        ExprKind::ListLit(elems) => for e in elems { collect_expr_var_refs(e, shadow, refs); },
-        ExprKind::TupleLit(elems) => for e in elems { collect_expr_var_refs(e, shadow, refs); },
-        ExprKind::StructCtor { fields, .. } => for (_, v) in fields { collect_expr_var_refs(v, shadow, refs); },
-        ExprKind::Cast { expr, .. } => collect_expr_var_refs(expr, shadow, refs),
-        ExprKind::MagicCall { args, .. } => for a in args { collect_expr_var_refs(a, shadow, refs); },
+        ExprKind::ListLit(elems) => for e in elems { collect_expr_var_refs(e, shadow, refs, in_closure); },
+        ExprKind::TupleLit(elems) => for e in elems { collect_expr_var_refs(e, shadow, refs, in_closure); },
+        ExprKind::StructCtor { fields, .. } => for (_, v) in fields { collect_expr_var_refs(v, shadow, refs, in_closure); },
+        ExprKind::Cast { expr, .. } => collect_expr_var_refs(expr, shadow, refs, in_closure),
+        ExprKind::MagicCall { args, .. } => for a in args { collect_expr_var_refs(a, shadow, refs, in_closure); },
         _ => {}
     }
 }
