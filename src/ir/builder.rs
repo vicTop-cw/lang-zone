@@ -478,6 +478,14 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
         }
         AstExpr::MethodCall { receiver, method, .. } => {
+            // 枚举变体构造: Kind.A(1) → Kind 类型
+            // receiver 是枚举/结构类型名时，方法名是变体
+            if let AstExpr::Ident(recv_name) = receiver.as_ref() {
+                let base = recv_name.split('<').next().unwrap_or(recv_name);
+                if ctx.is_struct(base) || ctx.enum_variants.values().any(|e| e == base) {
+                    return IrType::named(base);
+                }
+            }
             // 尝试从 receiver 类型推导方法返回类型
             let recv_ty = infer_expr_type(receiver, ctx);
             // 常见无返回值方法 → Unit

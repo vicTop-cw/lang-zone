@@ -1289,8 +1289,20 @@ impl CodeGen {
                     // 否则（原始类型比较）用 |&x| 按值解构（Copy）
                     let guard_s = self.gen_expr(g);
                     let uses_field = guard_s.contains(&format!("{}.", var));
-                    let pat = if uses_field { format!("|{}|", var) } else { format!("|&{}|", var) };
-                    format!("{}.filter({} {})", base, pat, guard_s)
+                    // guard 将 var 作为值传递（如 keep(it)）→ 若非 Copy 元素需闭包内 clone
+                    let elem_is_primitive = matches!(iter.ty, IrType::Int | IrType::F64 | IrType::Bool | IrType::Str)
+                        || matches!(&iter.ty, IrType::Named { path, args } if path == "List" && args.first().map_or(false,
+                            |a| matches!(a, IrType::Int | IrType::F64 | IrType::Bool | IrType::Str)));
+                    let passes_by_value = !uses_field && !elem_is_primitive && guard_s.contains(var);
+                    if passes_by_value {
+                        // 元素为非 Copy 的 struct/enum：|it| 引用参数 + 闭包内 (*it).clone() 供 guard 按值使用
+                        format!("{}.filter(|{}| {{ let {}_owned = (*{}).clone(); {} }})",
+                            base, var, var, var,
+                            guard_s.replace(var, &format!("{}_owned", var)))
+                    } else {
+                        let pat = if uses_field { format!("|{}|", var) } else { format!("|&{}|", var) };
+                        format!("{}.filter({} {})", base, pat, guard_s)
+                    }
                 } else if use_lazy_iter {
                     format!("({}).iter().cloned()", self.gen_expr(iter))
                 } else {
