@@ -2444,6 +2444,11 @@ impl CodeGen {
                     child.enum_variants = self.enum_variants.clone();
                     child.fn_param_info = self.fn_param_info.clone();
                     child.current_variadic_params = self.current_variadic_params.clone();
+                    // 传递 static/global 变量名集合（用于 E0530 冲突检测）
+                    child.global_vars = self.global_vars.clone();
+                    child.top_level_static_names = self.top_level_static_names.clone();
+                    child.downgraded_vars = self.downgraded_vars.clone();
+                    child.mutated_consts = self.mutated_consts.clone();
                     // Lambda 体内不生成 return，让尾表达式成为闭包返回值
                     child.suppress_tail_return = true;
                     child.gen_block_inner(block);
@@ -2821,10 +2826,24 @@ impl CodeGen {
                     {
                         format!("{}::{}", type_name, variant)
                     } else {
-                        name.clone()
+                        // 检测 pattern 绑定名与模块级 static/global 冲突（E0530）
+                        if self.global_vars.contains_key(name.as_str())
+                            || self.top_level_static_names.contains(name.as_str())
+                        {
+                            format!("{}_", name)
+                        } else {
+                            name.clone()
+                        }
                     }
                 } else {
-                    name.clone()
+                    // 检测 pattern 绑定名与模块级 static/global 冲突（E0530）
+                    if self.global_vars.contains_key(name.as_str())
+                        || self.top_level_static_names.contains(name.as_str())
+                    {
+                        format!("{}_", name)
+                    } else {
+                        name.clone()
+                    }
                 }
             }
             Pattern::Lit(lit) => {
