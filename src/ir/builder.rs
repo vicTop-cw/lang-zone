@@ -2164,24 +2164,15 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     }
 
     // 返回类型：优先 AST 注解，否则从函数体最后语句推断
-    let mut ret_ty = func.return_type.as_ref()
+    let ret_ty = func.return_type.as_ref()
         .map(|t| from_ast_type_with_generics(t, &generics))
         .unwrap_or_else(|| {
             func.body.last()
                 .map(|stmt| infer_stmt_type(stmt, &fn_ctx))
                 .unwrap_or(IrType::Unit)
         });
-    // Iterator/generator 函数的返回类型是 Vec<element_type>
-    // 但如果 ret_ty 已经是 Vec<T> 或 List<T>（如 `-> List<int>` 类型注解），不再双重包装
-    if func.is_iterator {
-        let is_already_vec = matches!(&ret_ty, IrType::Named { path, .. } if path == "Vec" || path == "List");
-        if !is_already_vec {
-            ret_ty = IrType::Named {
-                path: "Vec".to_string(),
-                args: vec![ret_ty],
-            };
-        }
-    }
+    // 注意：Iterator 函数的 Vec<T> 包装由 codegen 负责（基于 has_yield 检测），
+    // 此处不包装，避免 Vec<Vec<T>> 双重包装。
     fn_ctx.current_ret_ty = Some(ret_ty.clone());
 
     let body = convert_block(&func.body, &fn_ctx);
