@@ -990,7 +990,13 @@ impl Parser {
             Vec::new()
         };
 
-        self.expect(Token::Eq)?;
+        // 支持 = 和 : 两种分隔符
+        // enum Color: Red, Green, Blue  或  enum Color = Red, Green, Blue
+        if !self.check(&Token::Eq) && !self.check(&Token::Colon) {
+            let t = self.advance();
+            return Err(format!("Expected Eq or Colon, got {:?} at pos {}", t, self.pos));
+        }
+        self.advance(); // consume = or :
         self.skip_newlines();
 
         // 单行 struct: struct Box<T> = value: T
