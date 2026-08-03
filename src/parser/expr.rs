@@ -1031,6 +1031,13 @@ impl ParserExprExt for Parser {
     fn parse_pattern(&mut self) -> Result<Pattern, String> {
         let first = self.advance();
         match first {
+            // 负数模式: case -999 =>
+            Token::Minus => {
+                match self.advance() {
+                    Token::IntLit(n) => Ok(Pattern::Int(-n)),
+                    t => Err(format!("Expected integer after minus in pattern, got {:?}", t)),
+                }
+            }
             Token::IntLit(n) => {
                 Ok(Pattern::Int(n))
             }

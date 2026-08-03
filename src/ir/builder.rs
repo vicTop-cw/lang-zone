@@ -1797,7 +1797,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             ),
         },
 
-        AstStmt::Guard { cond, let_binding, else_body } => {
+        AstStmt::Guard { cond, let_binding, else_body, .. } => {
             // guard → if let ... else
             if let Some((pattern, value)) = let_binding {
                 let val = convert_expr(value, ctx);

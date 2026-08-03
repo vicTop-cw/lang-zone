@@ -44,6 +44,7 @@ pub enum Stmt {
     Guard {
         cond: Option<Expr>,
         let_binding: Option<(Pattern, Expr)>,
+        success_expr: Option<Expr>,   // guard cond success_expr else fail_body
         else_body: Vec<Stmt>,
     },
     With {

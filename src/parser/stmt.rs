@@ -191,10 +191,11 @@ impl ParserStmtExt for Parser {
             }
             Token::Guard => {
                 self.advance();
-                // 支持两种形式:
-                //   guard cond else: VALUE              (条件守卫)
-                //   guard cond else VALUE               (内联守卫，无冒号)
-                //   guard let PATTERN = EXPR else: VALUE (模式守卫 → Rust let...else)
+                // 支持三种形式:
+                //   guard cond else: block                (条件守卫，块形式)
+                //   guard cond else expr                  (内联守卫)
+                //   guard cond success_expr else fail_expr (带成功值的守卫)
+                //   guard let PATTERN = EXPR else: VALUE  (模式守卫 → Rust let...else)
                 let (cond, let_binding) = if self.check(&Token::Let) {
                     self.advance();
                     let pattern = self.parse_pattern()?;
@@ -203,6 +204,12 @@ impl ParserStmtExt for Parser {
                     (None, Some((pattern, expr)))
                 } else {
                     (Some(self.parse_expr()?), None)
+                };
+                // guard cond success_expr else fail_expr: cond 后非 Else 即 success 值
+                let success_expr = if !self.check(&Token::Else) {
+                    Some(self.parse_expr()?)
+                } else {
+                    None
                 };
                 self.expect(Token::Else)?;
                 let else_body = if self.check(&Token::Colon) {
@@ -221,7 +228,7 @@ impl ParserStmtExt for Parser {
                     let val = self.parse_expr()?;
                     vec![Stmt::Expr(val)]
                 };
-                Ok(Stmt::Guard { cond, let_binding, else_body })
+                Ok(Stmt::Guard { cond, let_binding, success_expr, else_body })
             }
             Token::Defer => {
                 self.advance();

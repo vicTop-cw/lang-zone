@@ -169,7 +169,7 @@ impl CodeGenStmtExt for CodeGen {
                 format!("{}return Err({});\n", pad, self.gen_expr(expr))
             }
 
-            Stmt::Guard { cond, let_binding, else_body } => {
+            Stmt::Guard { cond, let_binding, else_body, .. } => {
                 // else 分支：单表达式自动包 return；多语句/块直接展开
                 let else_s = if else_body.len() == 1 {
                     match &else_body[0] {
