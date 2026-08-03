@@ -2484,12 +2484,53 @@ impl CodeGen {
                 }
             }
             ExprKind::IfExpr { cond, then, els } => {
-                format!(
-                    "if {} {{ {} }} else {{ {} }}",
-                    self.gen_bool_cond(cond),
-                    self.gen_expr(then),
-                    self.gen_expr(els)
-                )
+                let then_s = self.gen_expr(then);
+                let els_s = self.gen_expr(els);
+                // 如果 then 或 els 包含多行 BlockExpr，使用多行格式确保缩进正确
+                if then_s.contains('\n') || els_s.contains('\n') {
+                    // emit_line 会在字符串前添加 self.indent 级别的缩进，
+                    // 所以这里的内容缩进只需 self.indent + 1（相对于 if 行再缩进一层）
+                    let close_indent = "    ".repeat(self.indent);
+                    let inner_indent = "    ".repeat(self.indent + 1);
+                    let then_body = if then_s.starts_with("{\n") {
+                        // BlockExpr: 重新格式化内容，使用正确的缩进级别
+                        let inner = &then_s[2..then_s.len()-1]; // 去掉 { 和 }
+                        let inner = inner.trim();
+                        let lines: Vec<&str> = inner.lines().collect();
+                        if lines.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n{}{}\n{}", inner_indent, lines.join(&format!("\n{}", inner_indent)), close_indent)
+                        }
+                    } else {
+                        format!(" {}", then_s)
+                    };
+                    let else_body = if els_s.starts_with("{\n") {
+                        let inner = &els_s[2..els_s.len()-1];
+                        let inner = inner.trim();
+                        let lines: Vec<&str> = inner.lines().collect();
+                        if lines.is_empty() {
+                            String::new()
+                        } else {
+                            format!("\n{}{}\n{}", inner_indent, lines.join(&format!("\n{}", inner_indent)), close_indent)
+                        }
+                    } else {
+                        format!(" {}", els_s)
+                    };
+                    format!(
+                        "if {} {{{}}} else {{{}}}",
+                        self.gen_bool_cond(cond),
+                        then_body,
+                        else_body
+                    )
+                } else {
+                    format!(
+                        "if {} {{ {} }} else {{ {} }}",
+                        self.gen_bool_cond(cond),
+                        then_s,
+                        els_s
+                    )
+                }
             }
             ExprKind::Lambda { params, body, .. } => {
                 let params: Vec<String> = params.iter().map(|p| self.gen_param(p)).collect();
