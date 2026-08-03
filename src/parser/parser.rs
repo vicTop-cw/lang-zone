@@ -590,6 +590,7 @@ impl Parser {
         let (body, is_abstract) = if no_body {
             (Vec::new(), false)
         } else {
+            self.skip_newlines(); // 允许 = 在下一行
             self.expect(Token::Eq)?;
             self.skip_newlines();
             if self.check(&Token::DotDot) || self.check(&Token::DotDotDot) {
@@ -1014,6 +1015,7 @@ impl Parser {
         // 支持 = : =: 三种分隔符
         // enum Color: Red, Green, Blue  或  enum Color = Red, Green, Blue
         // struct Box =: body ...  (构建块)
+        self.skip_newlines(); // 允许分隔符前换行（如文档注释后的空行）
         if !self.check(&Token::Eq) && !self.check(&Token::Colon) && !self.check(&Token::BuildAssign) {
             let t = self.advance();
             return Err(format!("Expected Eq, Colon or BuildAssign, got {:?} at pos {}", t, self.pos));
@@ -1306,6 +1308,7 @@ impl Parser {
         }
 
         // 支持 = 和 : 两种分隔符
+        self.skip_newlines(); // 允许分隔符前换行
         if !self.check(&Token::Eq) && !self.check(&Token::Colon) {
             let t = self.advance();
             return Err(format!("Expected Eq or Colon, got {:?} at pos {}", t, self.pos));
