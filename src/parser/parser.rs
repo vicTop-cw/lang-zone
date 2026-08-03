@@ -509,6 +509,10 @@ impl Parser {
         let mut name = match self.advance() {
             Token::Ident(n) => n,
             Token::MagicMethod(n) => n,
+            Token::And => "and".to_string(),
+            Token::Or => "or".to_string(),
+            Token::Not => "not".to_string(),
+            Token::In => "in".to_string(),
             t => return Err(format!("Expected function name, got {:?}", t)),
         };
         // 点号分隔函数名: def config.get(...)
@@ -951,6 +955,10 @@ impl Parser {
             Token::Ref => {
                 let inner = self.parse_type()?;
                 Type::Ref(Box::new(inner))
+            }
+            Token::Mut => {
+                let inner = self.parse_type()?;
+                Type::MutRef(Box::new(inner))
             }
             Token::Self_ => Type::Self_,
             Token::LParen => {

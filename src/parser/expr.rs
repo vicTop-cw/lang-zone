@@ -1059,6 +1059,10 @@ impl ParserExprExt for Parser {
 
     /// 解析 pattern（match arm / guard let 等）
     fn parse_pattern(&mut self) -> Result<Pattern, String> {
+        // 跳过 ref/mut 模式修饰符（语义上忽略，仅语法兼容）
+        while self.check(&Token::Ref) || self.check(&Token::Mut) {
+            self.advance();
+        }
         let first = self.advance();
         match first {
             // 负数模式: case -999 =>
