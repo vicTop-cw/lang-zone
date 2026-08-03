@@ -2172,9 +2172,9 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 .unwrap_or(IrType::Unit)
         });
     // Iterator/generator 函数的返回类型是 Vec<element_type>
-    // 但如果 ret_ty 已经是 Vec<T>（如 `for i in start..end: yield i`），不再双重包装
+    // 但如果 ret_ty 已经是 Vec<T> 或 List<T>（如 `-> List<int>` 类型注解），不再双重包装
     if func.is_iterator {
-        let is_already_vec = matches!(&ret_ty, IrType::Named { path, .. } if path == "Vec");
+        let is_already_vec = matches!(&ret_ty, IrType::Named { path, .. } if path == "Vec" || path == "List");
         if !is_already_vec {
             ret_ty = IrType::Named {
                 path: "Vec".to_string(),
