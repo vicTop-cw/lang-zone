@@ -1809,6 +1809,25 @@ impl CodeGen {
                 } else {
                     args.iter().map(|a| self.gen_expr(a)).collect()
                 };
+                // LZ 字符串为不可变值类型：若将 String 类型变量按值传给参数类型为
+                // String 的用户函数（会移动），且该变量被复用，则需 .clone()。
+                // 避免 E0382 use of moved value（如 parse_int(s)? 两次）。
+                if let Some(callee_name) = match &callee.kind {
+                    ExprKind::Var(n) => Some(n.clone()),
+                    _ => None,
+                } {
+                    if let Some(callee_ptypes) = self.fn_param_types.get(&callee_name).cloned() {
+                        for (i, a) in args.iter().enumerate() {
+                            if i >= callee_ptypes.len() { break; }
+                            let is_str_param = matches!(&callee_ptypes[i], IrType::Str);
+                            let is_str_var = matches!(&a.ty, IrType::Str)
+                                && matches!(&a.kind, ExprKind::Var(_));
+                            if is_str_param && is_str_var && i < args_s.len() {
+                                args_s[i] = format!("{}.clone()", args_s[i]);
+                            }
+                        }
+                    }
+                }
                 
                 // 泛型类型参数 → turbofish 语法: foo::<T>(args)
                 let turbofish = if !type_args.is_empty() {
