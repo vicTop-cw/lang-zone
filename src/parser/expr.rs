@@ -221,7 +221,26 @@ impl ParserExprExt for Parser {
         let mut left = self.parse_null_coalesce()?;
         while self.check(&Token::Pipe) {
             self.advance();
-            // 右侧是函数调用
+            // 右侧是函数调用: x |> f(args) 或 x |> (|y| expr)
+            if self.check(&Token::LParen) {
+                // 括号包裹的表达式: x |> (|y| expr)
+                self.advance(); // consume (
+                let expr = self.parse_expr()?;
+                // 跳过可能的外层 Dedent（Lambda body 中的 match 块消费了 case Dedent）
+                self.skip_newlines();
+                while self.check(&Token::Dedent) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+                self.expect(Token::RParen)?;
+                // 将 receiver 作为参数调用括号内的函数
+                left = Expr::Call {
+                    type_args: vec![],
+                    func: Box::new(expr),
+                    args: vec![left],
+                };
+                continue;
+            }
             let func_name = match self.advance() {
                 Token::Ident(n) => n,
                 t => return Err(format!("Expected function after |>, got {:?}", t)),
@@ -236,7 +255,7 @@ impl ParserExprExt for Parser {
                 self.expect(Token::RParen)?;
                 args
             } else {
-                Vec::new()
+                vec![left.clone()]  // 无括号时，将 receiver 作为参数传入
             };
             left = Expr::Pipe { receiver: Box::new(left), func: func_name, args };
         }
@@ -660,6 +679,8 @@ impl ParserExprExt for Parser {
     fn parse_primary(&mut self) -> Result<Expr, String> {
         let tok = self.advance();
         match tok {
+            // 跳过缩进 token（用于 Lambda body 跨行时外层的缩进）
+            Token::Indent => self.parse_primary(),
             Token::IntLit(n) => Ok(Expr::IntLit(n)),
             Token::FloatLit(f) => Ok(Expr::FloatLit(f)),
             Token::StrLit(s) => Ok(Expr::StrLit(s)),
@@ -942,6 +963,14 @@ impl ParserExprExt for Parser {
                 // 支持可选的 = 分隔符: |x| -> int = body
                 if self.check(&Token::Eq) {
                     self.advance(); // consume =
+                }
+                // Lambda body: 跳过换行，支持跨行表达式
+                // |x| x + 1  或  |x| match x: case ...
+                self.skip_newlines();
+                // 如果 body 在缩进块内（如 let 语句中），跳过外层的 Indent
+                // match/if/for 等有自己的 Indent 处理
+                if self.check(&Token::Indent) {
+                    self.advance(); // skip Indent
                 }
                 let body = self.parse_expr()?;
                 Ok(Expr::Closure { params, body: Box::new(body) })
