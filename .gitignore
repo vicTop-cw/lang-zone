@@ -28,3 +28,17 @@ rc.log
 .trae/
 _bak/
 _mz/
+
+# build artifacts / compile cache (previously committed by mistake)
+*.rmeta
+*.rlib
+_ir_out/
+
+# temp test & analysis scripts/logs
+_*.py
+_*.txt
+temp_test_*.lz
+.test_meta/
+
+# generated test reports
+issue/test-report-*.md
