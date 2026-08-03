@@ -2645,17 +2645,8 @@ impl CodeGen {
                 child.fn_param_info = self.fn_param_info.clone();
                 // 块表达式尾值应为块尾表达式（非 return）
                 child.suppress_tail_return = true;
-                // 生成器构建块（含 yield）：预声明 __gen_vec 并返回
-                let is_gen = block_has_yield(block);
-                if is_gen {
-                    child.emit_line("let mut __gen_vec = Vec::new();");
-                }
+                // __gen_vec 已在函数级别声明，BlockExpr 中只需 push 不需要重新声明
                 child.gen_block_inner(block);
-                if is_gen {
-                    // 块尾返回 __gen_vec
-                    let trimmed = child.buf.trim_end();
-                    return format!("{{\n{}\n    __gen_vec\n    }}", trimmed);
-                }
                 format!("{{\n{}    }}", child.buf)
             }
             ExprKind::Paren(inner) => {
@@ -3106,6 +3097,12 @@ fn block_has_yield(block: &Block) -> bool {
             return true;
         }
         match stmt {
+            Stmt::ExprStmt { expr } => {
+                if expr_has_yield(expr) { return true; }
+            }
+            Stmt::Let { value, .. } => {
+                if expr_has_yield(value) { return true; }
+            }
             Stmt::If { then_branch, else_branch, .. } => {
                 if block_has_yield(then_branch) { return true; }
                 if let Some(ref e) = else_branch { if block_has_yield(e) { return true; } }
@@ -3120,6 +3117,20 @@ fn block_has_yield(block: &Block) -> bool {
         }
     }
     false
+}
+
+fn expr_has_yield(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::BlockExpr { block } => block_has_yield(block),
+        ExprKind::IfExpr { then, els, .. } => {
+            expr_has_yield(then) || expr_has_yield(els)
+        }
+        ExprKind::Call { callee, args, .. } => {
+            expr_has_yield(callee) || args.iter().any(expr_has_yield)
+        }
+        ExprKind::Lambda { body, .. } => expr_has_yield(body),
+        _ => false,
+    }
 }
 
 /// 检测 Block 中是否包含 await 表达式
