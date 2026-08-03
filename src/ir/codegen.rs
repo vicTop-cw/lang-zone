@@ -437,8 +437,8 @@ impl CodeGen {
         self.buf.push_str("use std::any::Any;\n");
         self.buf.push_str("#[derive(Debug)]\n");
         self.buf.push_str("pub struct __Params {\n");
-        self.buf.push_str("    pub args: Vec<Box<dyn Any>>,\n");
-        self.buf.push_str("    pub kwargs: HashMap<String, Box<dyn Any>>,\n");
+        self.buf.push_str("    pub args: Vec<std::boxed::Box<dyn Any>>,\n");
+        self.buf.push_str("    pub kwargs: HashMap<String, std::boxed::Box<dyn Any>>,\n");
         self.buf.push_str("}\n\n");
         // spawn_task: 异步任务包装器（保持 Future 语义，允许 .await）
         self.buf.push_str("async fn __spawn_task<T>(f: impl std::future::Future<Output = T>) -> T {\n");
