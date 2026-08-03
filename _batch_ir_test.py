@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 LZ_EXE = ROOT / "target" / "debug" / "lang-zone.exe"
 assert LZ_EXE.exists(), "lang-zone.exe not found"
-lz_files = sorted(f for f in ROOT.glob("DEMO/**/*.lz") if "spec" not in str(f).lower() and "error" not in str(f).lower())
+lz_files = sorted(f for f in ROOT.glob("DEMO/**/*.lz") if "spec" not in str(f).lower() and "error" not in str(f).lower() and "99_spec" not in str(f))
 print(f"Found {len(lz_files)} .lz files\n" + "=" * 70)
 results = {"PASS": [], "IR_FAIL": [], "RUSTC_FAIL": []}
 error_categories = {}

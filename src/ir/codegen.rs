@@ -513,14 +513,15 @@ impl CodeGen {
                     .unwrap_or_else(|| path.clone());
                 if args.is_empty() {
                     // 常见容器类型需要默认泛型参数，否则 Rust 无法推断
+                    // 使用 i64（LZ 默认数值类型）作为默认元素类型，避免 Vec::new() 无法推断
                     if path == "List" || path == "Vec" {
-                        format!("{}<_>", mapped)
+                        format!("{}<i64>", mapped)
                     } else if path == "Dict" || path == "HashMap" {
-                        format!("{}<_, _>", mapped)
+                        format!("{}<i64, i64>", mapped)
                     } else if path == "Set" || path == "HashSet" {
-                        format!("{}<_>", mapped)
+                        format!("{}<i64>", mapped)
                     } else if path == "Option" || path == "Result" || path == "Rc" || path == "Arc" || path == "Box" {
-                        format!("{}<_>", mapped)
+                        format!("{}<i64>", mapped)
                     } else {
                         mapped
                     }
@@ -1239,21 +1240,28 @@ impl CodeGen {
                 // LZ: Let{is_mut:true} = 无 let 关键字的赋值
                 //   - 首次出现: "let mut x = val"
                 //   - 已声明过: "x = val"（纯赋值）
-                let gen_name = if self.downgraded_vars.contains(name.as_str()) {
+                // 生成安全的变量名：处理关键字降级 + 模块级 static 冲突（E0530）
+                let safe_name = if self.downgraded_vars.contains(name.as_str())
+                    || self.global_vars.contains_key(name.as_str())
+                    || self.top_level_static_names.contains(name.as_str())
+                {
                     format!("{}_", name)
-                } else { name.clone() };
+                } else {
+                    name.clone()
+                };
                 if *is_mut && self.declared.contains(name) {
                     if self.mutated_consts.contains(name) {
-                        self.emit_line(&format!("unsafe {{ {} = {}; }}", gen_name, self.gen_expr(value)));
+                        self.emit_line(&format!("unsafe {{ {} = {}; }}", safe_name, self.gen_expr(value)));
                     } else {
-                        self.emit_line(&format!("{} = {};", gen_name, self.gen_expr(value)));
+                        self.emit_line(&format!("{} = {};", safe_name, self.gen_expr(value)));
                     }
                     return;
                 }
-                self.declared.insert(name.clone());
+                // 如果发生了重命名，用新名称注册 declared
+                self.declared.insert(safe_name.clone());
                 // LZ 语义：所有 let 绑定生成 mut（LZ 中容器/结构体方法可修改内容）
                 // 例外：`_` 通配符不能有 mut（Rust E0573）
-                let mut_kw = if name == "_" { "" } else { "mut " };
+                let mut_kw = if safe_name == "_" { "" } else { "mut " };
                 let skip_ty = *ty == IrType::Any || *ty == IrType::Unit
                     || matches!(ty, IrType::Duck { .. })
                     || matches!(ty, IrType::Generic(_))
@@ -1289,7 +1297,7 @@ impl CodeGen {
                 // walrus 变量预声明（let 绑定中的 := 需要先声明变量再赋值）
                 self.emit_walrus_predecls(value);
                 // 元组解构（let (a,b,c) = tuple 或 __destruct_ 临时）→ 对源元组 clone 避免 move（LZ 元组可重复解构）
-                let is_tuple_destr = (name.starts_with('(') && name.contains(',')) || name.starts_with("__destruct_");
+                let is_tuple_destr = (safe_name.starts_with('(') && safe_name.contains(',')) || safe_name.starts_with("__destruct_");
                 let value_s = if is_tuple_destr && matches!(ty, IrType::Tuple(_)) {
                     format!("({}).clone()", self.gen_expr(value))
                 } else if is_empty_container {
@@ -1302,7 +1310,7 @@ impl CodeGen {
                 } else {
                     self.gen_expr(value)
                 };
-                self.emit_line(&format!("let {}{}{} = {};", mut_kw, gen_name, ty_str, value_s));
+                self.emit_line(&format!("let {}{}{} = {};", mut_kw, safe_name, ty_str, value_s));
             }
             Stmt::Assign { target, value } => {
                 // Dict/HashMap 索引赋值 → .insert() 替代（HashMap 不实现 IndexMut）
