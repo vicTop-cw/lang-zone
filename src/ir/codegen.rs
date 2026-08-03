@@ -2287,7 +2287,10 @@ impl CodeGen {
                 // Box/Rc/Arc dereference: x[0] on Box<i64> → *x
                 if matches!(&base.ty, IrType::Named { path, .. } if path == "Box" || path == "Rc" || path == "Arc") {
                     let key_s = self.gen_expr(key);
-                    if key_s == "0" {
+                    // x[0]（下标 0）→ 解引用 (*x)；其他下标按索引处理
+                    let is_zero = matches!(&key.kind, ExprKind::Lit(LitKind::Int(0)))
+                        || key_s.trim_end_matches("i64") == "0";
+                    if is_zero {
                         format!("(*{})", base_s)
                     } else {
                         format!("{}[{}]", base_s, key_s)
