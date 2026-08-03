@@ -1107,7 +1107,9 @@ impl CodeGen {
 
     fn gen_test_def(&mut self, t: &TestDef) {
         self.emit_line("#[test]");
-        self.emit_line(&format!("fn {}() {{", t.name));
+        // 测试名可能含空格（如 "string concat"），需转换为合法 Rust 标识符
+        let safe_name = sanitize_ident(&t.name);
+        self.emit_line(&format!("fn {}() {{", safe_name));
         self.indent += 1;
         self.gen_block_inner(&t.body);
         self.indent -= 1;
@@ -1765,7 +1767,11 @@ impl CodeGen {
                                 if packed_s.is_empty() {
                                     packed_s = self.gen_expr(&ua[0]);
                                 }
-                                idx_list.push(self.gen_expr(&ua[1]));
+                                // 元组索引必须是裸整数（无类型后缀）
+                                match &ua[1].kind {
+                                    ExprKind::Lit(LitKind::Int(n)) => idx_list.push(n.to_string()),
+                                    _ => idx_list.push(self.gen_expr(&ua[1])),
+                                }
                             }
                         }
                     }
@@ -2425,7 +2431,9 @@ impl CodeGen {
                             inner_rhs_s, op_s, rhs_s);
                     }
                 }
-                format!("{} {} {}", self.gen_expr(lhs), op_s, self.gen_expr(rhs))
+                // 二元操作的操作数若为 unsafe 块（全局变量访问），需加括号：
+                // unsafe { a } + unsafe { b } → (unsafe { a }) + (unsafe { b })
+                format!("{} {} {}", self.wrap_bin_operand(self.gen_expr(lhs)), op_s, self.wrap_bin_operand(self.gen_expr(rhs)))
             }
             ExprKind::UnOp { op, operand } => {
                 // P1: i64::MIN 特判 — -(-9223372036854775808) → i64::MIN
@@ -2582,7 +2590,12 @@ impl CodeGen {
                 // args[0] = 闭包立即调用表达式, args[1] = 元素索引
                 if *kind == MagicKind::UnpackBuildCall && args.len() >= 2 {
                     let packed = self.gen_expr(&args[0]);
-                    let idx = self.gen_expr(&args[1]);
+                    // 元组字段索引必须是裸整数（无类型后缀），否则 __t.0i64 非法。
+                    // args[1] 是索引字面量，直接从 IR 提取，避免 gen_expr 附加的 i64 后缀。
+                    let idx = match &args[1].kind {
+                        ExprKind::Lit(LitKind::Int(n)) => n.to_string(),
+                        _ => self.gen_expr(&args[1]),
+                    };
                     // 使用临时变量访问元组字段: { let __t = packed; __t.<idx> }
                     return format!("{{ let __t = {}; __t.{} }}", packed, idx);
                 }
@@ -2789,6 +2802,17 @@ impl CodeGen {
             LitKind::Bool(b) => b.to_string(),
             LitKind::Unit => "()".to_string(),
             LitKind::None_ => "None".to_string(),
+        }
+    }
+
+    /// 二元操作的操作数包装：若生成的表达式是 unsafe 块（全局变量访问），
+    /// 需加括号，否则 `unsafe { a } + unsafe { b }` 无法解析。
+    fn wrap_bin_operand(&self, s: String) -> String {
+        let trimmed = s.trim_start();
+        if trimmed.starts_with("unsafe {") || trimmed.starts_with("unsafe{") {
+            format!("({})", s)
+        } else {
+            s
         }
     }
 
@@ -3448,6 +3472,27 @@ fn infer_global_type(block: &Block, name: &str, params: &[Param]) -> IrType {
         }
     }
     IrType::Int
+}
+
+/// 将可能包含空格/特殊字符的名称转换为合法 Rust 标识符。
+/// 用于测试函数名等场景（如 "string concat" → "string_concat"）。
+fn sanitize_ident(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    // Rust 标识符不能以数字开头
+    if out.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    out
 }
 
 #[cfg(test)]
