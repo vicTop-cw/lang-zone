@@ -52,6 +52,8 @@ pub struct CodeGen {
     borrow_self: bool,
     /// 模块级全局可变变量：name → type（跨函数共享，生成 static mut + unsafe 访问）
     global_vars: std::collections::HashMap<String, IrType>,
+    /// 关键字降级变量（Ok/Some/None/Err 用作变量名时重命名为 name_ 避免 E0530）
+    downgraded_vars: std::collections::HashSet<String>,
     /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
     struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
     /// struct 是否定义了 __new__：struct_name → 是否
@@ -101,6 +103,7 @@ impl CodeGen {
             lazy_static_names: std::collections::HashSet::new(),
             current_fn_is_async: false,
             global_vars: std::collections::HashMap::new(),
+            downgraded_vars: std::collections::HashSet::new(),
             buf: String::new(),
         }
     }
@@ -1224,6 +1227,10 @@ impl CodeGen {
     fn gen_stmt(&mut self, stmt: &Stmt, is_last: bool) {
         match stmt {
             Stmt::Let { name, ty, value, is_mut } => {
+                // 关键字降级变量（Ok/Some/None/Err 用作变量名）：注册并重命名为 name_
+                if matches!(name.as_str(), "Ok" | "Some" | "None" | "Err") {
+                    self.downgraded_vars.insert(name.clone());
+                }
                 // 模块级全局变量：不生成局部 let，改为 unsafe 赋值（全局已 static mut 声明）
                 if self.global_vars.contains_key(name.as_str()) {
                     self.emit_line(&format!("unsafe {{ {} = {}; }}", name, self.gen_expr(value)));
@@ -1232,11 +1239,14 @@ impl CodeGen {
                 // LZ: Let{is_mut:true} = 无 let 关键字的赋值
                 //   - 首次出现: "let mut x = val"
                 //   - 已声明过: "x = val"（纯赋值）
+                let gen_name = if self.downgraded_vars.contains(name.as_str()) {
+                    format!("{}_", name)
+                } else { name.clone() };
                 if *is_mut && self.declared.contains(name) {
                     if self.mutated_consts.contains(name) {
-                        self.emit_line(&format!("unsafe {{ {} = {}; }}", name, self.gen_expr(value)));
+                        self.emit_line(&format!("unsafe {{ {} = {}; }}", gen_name, self.gen_expr(value)));
                     } else {
-                        self.emit_line(&format!("{} = {};", name, self.gen_expr(value)));
+                        self.emit_line(&format!("{} = {};", gen_name, self.gen_expr(value)));
                     }
                     return;
                 }
@@ -1292,7 +1302,7 @@ impl CodeGen {
                 } else {
                     self.gen_expr(value)
                 };
-                self.emit_line(&format!("let {}{}{} = {};", mut_kw, name, ty_str, value_s));
+                self.emit_line(&format!("let {}{}{} = {};", mut_kw, gen_name, ty_str, value_s));
             }
             Stmt::Assign { target, value } => {
                 // Dict/HashMap 索引赋值 → .insert() 替代（HashMap 不实现 IndexMut）
@@ -1687,6 +1697,7 @@ impl CodeGen {
             ExprKind::Lit(lit) => self.gen_lit(lit, &expr.ty),
             ExprKind::Var(name) => {
                 if name == "pass" { "()".into() }
+                else if self.downgraded_vars.contains(name.as_str()) { format!("{}_", name) }
                 else if self.global_vars.contains_key(name.as_str()) { format!("unsafe {{ {} }}", name) }
                 else if self.mutated_consts.contains(name) { format!("unsafe {{ {} }}", name) }
                 else if let Some(renamed) = self.param_renames.get(name) { renamed.clone() }
