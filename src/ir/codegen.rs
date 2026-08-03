@@ -2370,13 +2370,14 @@ impl CodeGen {
             ExprKind::BinOp { op, lhs, rhs } => {
                 // Pow: ** → .pow() 方法调用 (a ** b → a.pow(b))
                 if matches!(op, BinOpKind::Pow) {
+                    // a ** b → a.pow(b)。gen_lit 已为整数字面量附加 i64 后缀
+                    //（如 2i64），直接使用 lhs_s，避免重复追加产生 2i64_i64。
+                    // Rust 的 .pow() 指数参数为 u32：整数字面量用 {n}u32，否则 as u32。
                     let lhs_s = self.gen_expr(lhs);
-                    let rhs_s = self.gen_expr(rhs);
-                    // 整数字面量需要类型后缀，否则 Rust 无法推断 .pow() 的接收者类型
-                    if matches!(&lhs.kind, ExprKind::Lit(LitKind::Int(_))) {
-                        let suffix = "_i64";
-                        return format!("{}{}.pow({})", lhs_s, suffix, rhs_s);
-                    }
+                    let rhs_s = match &rhs.kind {
+                        ExprKind::Lit(LitKind::Int(n)) => format!("{}u32", n),
+                        _ => format!("{} as u32", self.gen_expr(rhs)),
+                    };
                     return format!("{}.pow({})", lhs_s, rhs_s);
                 }
                 // In: 成员测试 → .contains() 方法 (elem in container → container.contains(&elem))
