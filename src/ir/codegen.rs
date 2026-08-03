@@ -1111,6 +1111,9 @@ impl CodeGen {
             // 实际 Rust 输出不包含 duck 字段约束
             if matches!(&p.ty, IrType::Duck { .. }) {
                 format!("{}: T_DUCK_{}", p.name, p.name.to_uppercase())
+            } else if matches!(&p.ty, IrType::Any) {
+                // Any 类型参数省略类型注解，让 Rust 从上下文推断（用于 map/filter 闭包）
+                p.name.clone()
             } else {
                 format!("{}: {}", p.name, self.rust_type(&p.ty))
             }

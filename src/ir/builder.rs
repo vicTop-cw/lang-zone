@@ -1185,21 +1185,23 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             if is_type_name {
                 ExprKind::FieldAccess { base: Box::new(recv), field: field.clone() }
             } else {
-                ExprKind::IfExpr {
-                    cond: Box::new(Expr::new(
-                        ExprKind::BinOp {
-                            op: BinOpKind::Eq,
-                            lhs: Box::new(recv.clone()),
-                            rhs: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
+                // x?.field → x.map(|__sn| __sn.field)（Option.map；x 为 None 时得 None）
+                // 避免 == None 比较（需 PartialEq）和直接 .field（Option 无该字段）
+                let param = "__sn".to_string();
+                ExprKind::MethodCall {
+                    receiver: Box::new(recv),
+                    method: "map".into(),
+                    args: vec![Expr::new(
+                        ExprKind::Lambda {
+                            params: vec![Param { name: param.clone(), ty: IrType::Any, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
+                            body: Box::new(Expr::new(
+                                ExprKind::FieldAccess { base: Box::new(Expr::new(ExprKind::Var(param.clone()), IrType::Any, Span::unknown())), field: field.clone() },
+                                IrType::Any, Span::unknown(),
+                            )),
+                            is_move: true,
                         },
-                        IrType::Bool,
-                        Span::unknown(),
-                    )),
-                    then: Box::new(Expr::new(ExprKind::Lit(LitKind::None_), IrType::Any, Span::unknown())),
-                    els: Box::new(Expr::new(
-                        ExprKind::FieldAccess { base: Box::new(recv), field: field.clone() },
                         IrType::Any, Span::unknown(),
-                    )),
+                    )],
                 }
             }
         }
