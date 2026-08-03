@@ -3102,7 +3102,7 @@ impl CodeGen {
 /// 检测 Block 中是否包含 yield 语句
 fn block_has_yield(block: &Block) -> bool {
     for stmt in &block.stmts {
-        if matches!(stmt, Stmt::Yield { .. }) {
+        if matches!(stmt, Stmt::Yield { .. } | Stmt::YieldFrom { .. }) {
             return true;
         }
         match stmt {
