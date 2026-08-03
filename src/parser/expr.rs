@@ -32,6 +32,9 @@ pub trait ParserExprExt {
     /// 解析 comprehension 的 iter 表达式：支持 range(..) 和 walrus(:=)，
     /// 但不消费 if（避免与 comprehension guard 冲突）
     fn parse_comprehension_iter(&mut self) -> Result<Expr, String>;
+    /// 判断 `?` 后是否紧跟三元 true 分支（表达式开始）—— 用于区分
+    /// 三元 `cond ? a : b` 与错误传播后缀 `expr?`
+    fn is_ternary_after(&self) -> bool;
 }
 
 impl ParserExprExt for Parser {
@@ -48,6 +51,20 @@ impl ParserExprExt for Parser {
             return Ok(Expr::If {
                 cond: Box::new(cond),
                 then_body: vec![Stmt::Expr(left)],
+                elif_clauses: Vec::new(),
+                else_body: Some(vec![Stmt::Expr(else_val)]),
+            });
+        }
+        // Ternary (C 风格): cond ? a : b
+        // `?` 作为三元中缀（其后跟表达式再跟 :）；若为行尾 Try 已由 postfix 消费
+        if self.check(&Token::Question) {
+            self.advance();
+            let then_val = self.parse_expr()?;
+            self.expect(Token::Colon)?;
+            let else_val = self.parse_expr()?;
+            return Ok(Expr::If {
+                cond: Box::new(left),
+                then_body: vec![Stmt::Expr(then_val)],
                 elif_clauses: Vec::new(),
                 else_body: Some(vec![Stmt::Expr(else_val)]),
             });
@@ -106,6 +123,20 @@ impl ParserExprExt for Parser {
             });
         }
         Ok(left)
+    }
+
+    fn is_ternary_after(&self) -> bool {
+        // `?` 后紧跟一个表达式开始（三元 true 分支）→ 是三元中缀
+        // 注意：当前位置是 `?`，需检查其后的 token
+        match self.peek_n(1) {
+            Token::IntLit(_) | Token::FloatLit(_) | Token::StrLit(_) | Token::FStrLit(_)
+            | Token::RawStrLit(_) | Token::TripleStrLit(_) | Token::True | Token::False
+            | Token::Ident(_) | Token::MagicMethod(_) | Token::Underscore | Token::Self_
+            | Token::LParen | Token::LBrack | Token::LBrace | Token::If
+            | Token::Not | Token::Minus | Token::Plus | Token::Pipe | Token::BackPipe
+            | Token::Try | Token::Async => true,
+            _ => false,
+        }
     }
 
     fn parse_or(&mut self) -> Result<Expr, String> {
@@ -593,6 +624,12 @@ impl ParserExprExt for Parser {
                     expr = Expr::Index { receiver: Box::new(expr), index: Box::new(index) };
                 }
                 Token::Question => {
+                    // 区分三元 `cond ? a : b` 与错误传播 `expr?`：
+                    // 若 `?` 后紧跟一个表达式开始（三元 true 分支），则交由
+                    // parse_expr 处理三元；否则为 Try 错误传播后缀。
+                    if self.is_ternary_after() {
+                        break;
+                    }
                     self.advance();
                     expr = Expr::Try(Box::new(expr));
                 }

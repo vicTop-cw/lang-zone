@@ -427,7 +427,9 @@ impl CodeGen {
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
         self.emit_line("use std::rc::Rc;");
+        self.emit_line("use std::sync::Arc;");
         self.emit_line("use std::fmt::Debug;");
+        self.emit_line("use std::fmt::Display;");
         self.buf.push('\n');
 
         // ── Lang-Zone 运行时桥接 shims ──
