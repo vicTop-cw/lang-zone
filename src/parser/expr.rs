@@ -917,16 +917,32 @@ impl ParserExprExt for Parser {
                 Ok(Expr::Match { expr: Box::new(expr), arms })
             }
             Token::Pipe_ => {
-                // 闭包: |x, y| x + y
+                // 闭包: |x, y| x + y  或  |x: int, y: int| -> int = x + y
                 let mut params = Vec::new();
                 while !self.check(&Token::Pipe_) {
                     match self.advance() {
-                        Token::Ident(n) => params.push(n),
+                        Token::Ident(n) => {
+                            params.push(n);
+                            // 支持可选的类型注解: |x: int|
+                            if self.check(&Token::Colon) {
+                                self.advance(); // consume :
+                                self.parse_type()?; // skip type annotation
+                            }
+                        }
                         t => return Err(format!("Expected param, got {:?}", t)),
                     }
                     if self.check(&Token::Comma) { self.advance(); }
                 }
                 self.advance(); // consume |
+                // 支持可选的返回类型注解: |x| -> int = ...
+                if self.check(&Token::Arrow) {
+                    self.advance(); // consume ->
+                    self.parse_type()?; // skip return type annotation
+                }
+                // 支持可选的 = 分隔符: |x| -> int = body
+                if self.check(&Token::Eq) {
+                    self.advance(); // consume =
+                }
                 let body = self.parse_expr()?;
                 Ok(Expr::Closure { params, body: Box::new(body) })
             }
