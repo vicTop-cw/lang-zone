@@ -1595,8 +1595,16 @@ impl CodeGen {
                         }
                     } else {
                         for (pat, block) in catches {
-                            // Bind catch variable from panic info if pattern is a named ident
-                            if let Some(Pattern::Ident(var_name)) = pat {
+                            // Bind catch variable from panic info
+                            // Pattern can be simple Ident or Enum variant with args (e.g. MathError.DivByZero(msg))
+                            let var_names: Vec<String> = match pat {
+                                Some(Pattern::Ident(name)) => vec![name.clone()],
+                                Some(Pattern::Enum { args, .. }) => args.iter()
+                                    .filter_map(|a| if let Pattern::Ident(n) = a { Some(n.clone()) } else { None })
+                                    .collect(),
+                                _ => Vec::new(),
+                            };
+                            for var_name in &var_names {
                                 self.emit_line(&format!(
                                     "let {} = format!(\"{{:?}}\", _panic);",
                                     var_name
@@ -2883,6 +2891,25 @@ impl CodeGen {
         }
     }
 
+    /// 收集模式中的所有 Ident 绑定名（用于 catch 模式参数提取等场景）
+    fn collect_pattern_idents(&self, pat: &Pattern) -> Vec<String> {
+        let mut out = Vec::new();
+        match pat {
+            Pattern::Ident(name) => out.push(name.clone()),
+            Pattern::Tuple(elems) => {
+                for e in elems { out.extend(self.collect_pattern_idents(e)); }
+            }
+            Pattern::Struct { fields, .. } => {
+                for (_, p) in fields { out.extend(self.collect_pattern_idents(p)); }
+            }
+            Pattern::Enum { args, .. } => {
+                for a in args { out.extend(self.collect_pattern_idents(a)); }
+            }
+            _ => {}
+        }
+        out
+    }
+
     /// 收集 Enum 模式中需要 Box 解引用的绑定名（用于插入 let name = *name;）
     fn collect_box_pattern_bindings(&self, pat: &Pattern) -> Vec<String> {
         let mut bindings = Vec::new();
@@ -2890,7 +2917,7 @@ impl CodeGen {
             if let Some(field_types) = self.enum_variant_fields.get(&(enum_name.clone(), variant.clone())) {
                 for (i, arg_pat) in args.iter().enumerate() {
                     if field_types.get(i).map_or(false, |ty| type_refers_to(ty, enum_name)) {
-                        Self::collect_pattern_idents(arg_pat, &mut bindings);
+                        bindings.extend(self.collect_pattern_idents(arg_pat));
                     }
                 }
             }
@@ -2898,24 +2925,6 @@ impl CodeGen {
         bindings
     }
 
-    /// 递归收集 Pattern 中的所有标识符名
-    fn collect_pattern_idents(pat: &Pattern, out: &mut Vec<String>) {
-        match pat {
-            Pattern::Ident(name) => {
-                if name != "_" { out.push(name.clone()); }
-            }
-            Pattern::Tuple(elems) => {
-                for e in elems { Self::collect_pattern_idents(e, out); }
-            }
-            Pattern::Struct { fields, .. } => {
-                for (_, p) in fields { Self::collect_pattern_idents(p, out); }
-            }
-            Pattern::Enum { args, .. } => {
-                for a in args { Self::collect_pattern_idents(a, out); }
-            }
-            _ => {}
-        }
-    }
 }
 
 impl Default for CodeGen {
