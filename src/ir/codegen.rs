@@ -427,8 +427,6 @@ impl CodeGen {
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
         self.emit_line("use std::rc::Rc;");
-        self.emit_line("use std::sync::Arc;");
-        self.emit_line("use std::fmt::Display;");
         self.emit_line("use std::fmt::Debug;");
         self.buf.push('\n');
 
