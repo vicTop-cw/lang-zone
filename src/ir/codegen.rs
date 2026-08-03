@@ -1288,9 +1288,17 @@ impl CodeGen {
                     } else if let ExprKind::StructCtor { name: n, .. } = &value.kind {
                         if n == "Dict" { ": std::collections::HashMap<_, _>".to_string() }
                         else { String::new() }
-                    } else { ": Vec<_>".to_string() }
+                    } else { format!(": {}", self.rust_type(ty)) }
                 } else if skip_ty {
-                    String::new()
+                    // None 字面量/构造/变量：类型未知时用 Option<i64> 默认，避免 Rust 无法推断
+                    let is_none = matches!(&value.kind, ExprKind::Lit(LitKind::None_))
+                        || matches!(&value.kind, ExprKind::StructCtor { name: n, .. } if n == "None")
+                        || matches!(&value.kind, ExprKind::Var(n) if n == "None");
+                    if is_none {
+                        ": Option<i64>".to_string()
+                    } else {
+                        String::new()
+                    }
                 } else {
                     format!(": {}", self.rust_type(ty))
                 };
