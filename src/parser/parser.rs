@@ -488,12 +488,24 @@ impl Parser {
     // ─── 函数 ───
 
     pub(super) fn parse_function(&mut self, no_body: bool) -> Result<Function, String> {
-        // 接受 def 或 iterator 关键字
-        match self.advance() {
-            Token::Def => {}
-            Token::Iterator => {}
-            t => return Err(format!("Expected def or iterator, got {:?}", t)),
+        // 跳过装饰器 (@unsafe 等)
+        let mut decorators = Vec::new();
+        while self.check(&Token::At) {
+            self.advance(); // consume @
+            let name = match self.advance() {
+                Token::Ident(n) => n,
+                t => return Err(format!("Expected decorator name after @, got {:?}", t)),
+            };
+            decorators.push(Decorator { name, args: Vec::new() });
+            self.skip_newlines();
         }
+        // 接受 def / iterator / magic 关键字
+        let is_magic = match self.advance() {
+            Token::Def => false,
+            Token::Iterator => false,
+            Token::Ident(ref s) if s == "magic" => true,
+            t => return Err(format!("Expected def, iterator or magic, got {:?}", t)),
+        };
         let mut name = match self.advance() {
             Token::Ident(n) => n,
             Token::MagicMethod(n) => n,
@@ -609,6 +621,7 @@ impl Parser {
         Ok(Function {
             name, generics, params, return_type, raises,
             where_clause, body, is_async: false, is_abstract, is_iterator: false,
+            is_magic,
             decorators: Vec::new(), variadic,
         })
     }
@@ -1121,6 +1134,7 @@ impl Parser {
                         is_async: false,
                         is_abstract: false,
                         is_iterator: false,
+                        is_magic: false,
                         decorators: Vec::new(),
                         variadic,
                     });
@@ -1278,7 +1292,17 @@ impl Parser {
             (None, first_name)
         };
 
-        self.expect(Token::Eq)?;
+        // 支持 impl 类型上的泛型参数: impl<T> Box<T> =
+        if self.check(&Token::Lt) {
+            self.parse_generic_params()?; // consume and skip type generics
+        }
+
+        // 支持 = 和 : 两种分隔符
+        if !self.check(&Token::Eq) && !self.check(&Token::Colon) {
+            let t = self.advance();
+            return Err(format!("Expected Eq or Colon, got {:?} at pos {}", t, self.pos));
+        }
+        self.advance(); // consume = or :
         self.skip_newlines();
         self.expect(Token::Indent)?;
 

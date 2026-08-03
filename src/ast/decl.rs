@@ -74,6 +74,7 @@ pub struct Function {
     pub is_async: bool,
     pub is_abstract: bool,
     pub is_iterator: bool,       // iterator 关键字定义的生成器函数
+    pub is_magic: bool,          // magic 关键字标记的内建方法
     pub decorators: Vec<Decorator>,
     /// `..` 可变参数模式
     pub variadic: VariadicMode,
