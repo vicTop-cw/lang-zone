@@ -1495,7 +1495,16 @@ impl CodeGen {
                 } else {
                     scrut_s
                 };
-                self.emit_line(&format!("match {} {{", scrut_str));
+                // 若 match 是尾语句（其值流向外层块），保持裸 match 表达式；
+                // 若为非尾语句（值被丢弃），arm 产出非 () 值时直接 `match { };`
+                // 会报 E0308（expected (), found T），需用 let _ = 丢弃值。
+                let discard = !is_last;
+                let open = if discard {
+                    format!("let _ = match {} {{", scrut_str)
+                } else {
+                    format!("match {} {{", scrut_str)
+                };
+                self.emit_line(&open);
                 self.indent += 1;
                 for arm in arms {
                     let pat_s = self.gen_pattern(&arm.pattern);
@@ -1518,7 +1527,8 @@ impl CodeGen {
                     self.emit_line("}");
                 }
                 self.indent -= 1;
-                self.emit_line("}");
+                // discard=true 时需以 `};` 关闭（let _ = match {...};），否则仅 `}`
+                self.emit_line(if discard { "};" } else { "}" });
             }
             Stmt::Break => self.emit_line("break;"),
             Stmt::Continue => self.emit_line("continue;"),
