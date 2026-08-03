@@ -50,6 +50,8 @@ pub struct CodeGen {
     known_types: std::collections::HashSet<String>,
     /// 当前方法是否以共享引用（&self）接收，用于对 self.字段 值表达式自动 .clone()
     borrow_self: bool,
+    /// 模块级全局可变变量：name → type（跨函数共享，生成 static mut + unsafe 访问）
+    global_vars: std::collections::HashMap<String, IrType>,
     /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
     struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
     /// struct 是否定义了 __new__：struct_name → 是否
@@ -98,6 +100,7 @@ impl CodeGen {
             struct_has_new: std::collections::HashSet::new(),
             lazy_static_names: std::collections::HashSet::new(),
             current_fn_is_async: false,
+            global_vars: std::collections::HashMap::new(),
             buf: String::new(),
         }
     }
@@ -145,6 +148,19 @@ impl CodeGen {
                 Item::TraitDef(t) => { self.top_level_static_names.insert(t.name.clone()); }
                 _ => {}
             }
+        }
+
+        // 分析跨函数全局可变变量（如 count，在 next() 中使用但 main() 中声明）
+        self.analyze_global_vars(module, &const_names);
+        // 生成 static mut 全局变量声明
+        if !self.global_vars.is_empty() {
+            let gv: Vec<(String, String, String)> = self.global_vars.iter()
+                .map(|(n, t)| (n.clone(), self.rust_type(t), self.const_default_value(t)))
+                .collect();
+            for (name, rust_ty, init) in &gv {
+                self.emit_line(&format!("static mut {}: {} = {};", name, rust_ty, init));
+            }
+            self.buf.push('\n');
         }
 
         // 提前生成所有类型别名（必须在使用前声明）
@@ -243,6 +259,81 @@ impl CodeGen {
         }
 
         std::mem::take(&mut self.buf)
+    }
+
+    /// 分析跨函数全局可变变量：在函数 A 中引用但未在 A 声明的变量，
+    /// 若在另一个函数中作为局部变量声明，则视为模块级全局变量
+    fn analyze_global_vars(&mut self, module: &IrModule, const_names: &std::collections::HashSet<String>) {
+        // 收集每个函数声明的局部变量名（参数 + 局部 let + 闭包参数）
+        let mut fn_locals: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+        let mut fn_refs: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                let mut locals: std::collections::HashSet<String> = std::collections::HashSet::new();
+                for p in &f.params { locals.insert(p.name.clone()); }
+                // 递归收集局部 let 绑定名（含闭包参数遮蔽）
+                collect_local_lets(&f.body, &mut locals);
+                fn_locals.insert(f.name.clone(), locals);
+
+                let mut refs: Vec<String> = Vec::new();
+                // 收集引用的自由变量（排除闭包参数遮蔽）
+                collect_var_refs(&f.body, &mut std::collections::HashSet::new(), &mut refs);
+                fn_refs.insert(f.name.clone(), refs);
+            }
+        }
+
+        let known: std::collections::HashSet<String> = self.top_level_static_names.clone();
+        let mut candidates: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (fname, refs) in &fn_refs {
+            let locals = fn_locals.get(fname).cloned().unwrap_or_default();
+            for rname in refs {
+                if locals.contains(rname.as_str()) { continue; }
+                if const_names.contains(rname.as_str()) { continue; }
+                if known.contains(rname.as_str()) { continue; }
+                if rname == "self" || rname == "self_" || rname == "pass" || rname == "_" { continue; }
+                if rname.starts_with('_') && rname != "_" { continue; }
+                candidates.insert(rname.clone());
+            }
+        }
+
+        // 仅当变量在另一个函数中作为局部变量声明时，才视为全局
+        for c in candidates {
+            let declared_elsewhere = fn_locals.values().any(|l| l.contains(c.as_str()));
+            if declared_elsewhere {
+                let ty = self.infer_global_type(module, &c);
+                self.global_vars.insert(c, ty);
+            }
+        }
+    }
+
+    /// 生成全局变量的 const 兼容默认值（不能调用 Default::default，非 const-stable）
+    fn const_default_value(&self, ty: &IrType) -> String {
+        match ty {
+            IrType::Int => "0".into(),
+            IrType::F64 => "0.0".into(),
+            IrType::Bool => "false".into(),
+            IrType::Str => "String::new()".into(),
+            IrType::Named { path, .. } => match path.as_str() {
+                "String" => "String::new()".into(),
+                "Vec" | "List" => "Vec::new()".into(),
+                "HashMap" | "Dict" => "std::collections::HashMap::new()".into(),
+                "HashSet" | "Set" => "std::collections::HashSet::new()".into(),
+                _ => "0".into(),
+            },
+            _ => "0".into(),
+        }
+    }
+
+    /// 从模块中推断全局变量类型
+    fn infer_global_type(&self, module: &IrModule, name: &str) -> IrType {
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                let t = infer_global_type(&f.body, name, &f.params);
+                if t != IrType::Any { return t; }
+            }
+        }
+        IrType::Int
     }
 
     // ── 辅助方法 ──
@@ -1133,6 +1224,11 @@ impl CodeGen {
     fn gen_stmt(&mut self, stmt: &Stmt, is_last: bool) {
         match stmt {
             Stmt::Let { name, ty, value, is_mut } => {
+                // 模块级全局变量：不生成局部 let，改为 unsafe 赋值（全局已 static mut 声明）
+                if self.global_vars.contains_key(name.as_str()) {
+                    self.emit_line(&format!("unsafe {{ {} = {}; }}", name, self.gen_expr(value)));
+                    return;
+                }
                 // LZ: Let{is_mut:true} = 无 let 关键字的赋值
                 //   - 首次出现: "let mut x = val"
                 //   - 已声明过: "x = val"（纯赋值）
@@ -1223,6 +1319,14 @@ impl CodeGen {
                 if matches!(&target.kind, ExprKind::Var(n) if n == "_") {
                     self.emit_line(&format!("let _ = {};", self.gen_expr(value)));
                     return;
+                }
+                // 全局可变变量赋值 → unsafe { count = value; }
+                if let ExprKind::Var(gname) = &target.kind {
+                    if self.global_vars.contains_key(gname.as_str()) {
+                        let val_s = self.gen_expr(value);
+                        self.emit_line(&format!("unsafe {{ {} = {}; }}", gname, val_s));
+                        return;
+                    }
                 }
                 let target_s = self.gen_target_expr(target);
                 let val_s = self.gen_expr(value);
@@ -1583,6 +1687,7 @@ impl CodeGen {
             ExprKind::Lit(lit) => self.gen_lit(lit, &expr.ty),
             ExprKind::Var(name) => {
                 if name == "pass" { "()".into() }
+                else if self.global_vars.contains_key(name.as_str()) { format!("unsafe {{ {} }}", name) }
                 else if self.mutated_consts.contains(name) { format!("unsafe {{ {} }}", name) }
                 else if let Some(renamed) = self.param_renames.get(name) { renamed.clone() }
                 else { name.clone() }
@@ -3128,6 +3233,136 @@ fn scan_expr_mutations(expr: &Expr, const_names: &std::collections::HashSet<Stri
         }
         _ => {}
     }
+}
+
+/// 收集块中的局部 let 绑定名 + 闭包参数（遮蔽名）
+fn collect_local_lets(block: &Block, locals: &mut std::collections::HashSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, .. } => { locals.insert(name.clone()); }
+            Stmt::If { then_branch, else_branch, .. } => {
+                collect_local_lets(then_branch, locals);
+                if let Some(e) = else_branch { collect_local_lets(e, locals); }
+            }
+            Stmt::For { var, body, .. } => { locals.insert(var.clone()); collect_local_lets(body, locals); }
+            Stmt::While { body, .. } => collect_local_lets(body, locals),
+            Stmt::Block { stmts } => {
+                let inner = Block { stmts: stmts.clone(), ty: IrType::Unit };
+                collect_local_lets(&inner, locals);
+            }
+            Stmt::Match { arms, .. } => { for a in arms { collect_local_lets(&a.body, locals); } }
+            _ => {}
+        }
+    }
+}
+
+/// 递归收集块中引用的自由变量名（shadow 为遮蔽名集合：闭包参数）
+fn collect_var_refs(block: &Block, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>) {
+    for stmt in &block.stmts {
+        collect_stmt_var_refs(stmt, shadow, refs);
+    }
+}
+
+fn collect_stmt_var_refs(stmt: &Stmt, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>) {
+    match stmt {
+        Stmt::Let { value, .. } => collect_expr_var_refs(value, shadow, refs),
+        Stmt::Assign { target, value } => {
+            collect_expr_var_refs(target, shadow, refs);
+            collect_expr_var_refs(value, shadow, refs);
+        }
+        Stmt::ExprStmt { expr } => collect_expr_var_refs(expr, shadow, refs),
+        Stmt::Return { value } => { if let Some(v) = value { collect_expr_var_refs(v, shadow, refs); } }
+        Stmt::If { cond, then_branch, else_branch, .. } => {
+            collect_expr_var_refs(cond, shadow, refs);
+            collect_var_refs(then_branch, shadow, refs);
+            if let Some(e) = else_branch { collect_var_refs(e, shadow, refs); }
+        }
+        Stmt::For { iter, guard, body, .. } => {
+            collect_expr_var_refs(iter, shadow, refs);
+            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs); }
+            collect_var_refs(body, shadow, refs);
+        }
+        Stmt::While { cond, guard, body } => {
+            collect_expr_var_refs(cond, shadow, refs);
+            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs); }
+            collect_var_refs(body, shadow, refs);
+        }
+        Stmt::Block { stmts } => {
+            let inner = Block { stmts: stmts.clone(), ty: IrType::Unit };
+            collect_var_refs(&inner, shadow, refs);
+        }
+        Stmt::Match { scrutinee, arms, .. } => {
+            collect_expr_var_refs(scrutinee, shadow, refs);
+            for arm in arms { collect_var_refs(&arm.body, shadow, refs); }
+        }
+        Stmt::Raise { value } => collect_expr_var_refs(value, shadow, refs),
+        Stmt::Assert { cond, .. } => collect_expr_var_refs(cond, shadow, refs),
+        _ => {}
+    }
+}
+
+fn collect_expr_var_refs(expr: &Expr, shadow: &mut std::collections::HashSet<String>, refs: &mut Vec<String>) {
+    match &expr.kind {
+        ExprKind::Var(name) => {
+            // 被闭包参数/局部变量遮蔽的跳过
+            if !shadow.contains(name.as_str()) { refs.push(name.clone()); }
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            collect_expr_var_refs(lhs, shadow, refs);
+            collect_expr_var_refs(rhs, shadow, refs);
+        }
+        ExprKind::UnOp { operand, .. } => collect_expr_var_refs(operand, shadow, refs),
+        ExprKind::Call { callee, args, .. } => {
+            collect_expr_var_refs(callee, shadow, refs);
+            for a in args { collect_expr_var_refs(a, shadow, refs); }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            collect_expr_var_refs(receiver, shadow, refs);
+            for a in args { collect_expr_var_refs(a, shadow, refs); }
+        }
+        ExprKind::FieldAccess { base, .. } => collect_expr_var_refs(base, shadow, refs),
+        ExprKind::IndexGet { base, key } => {
+            collect_expr_var_refs(base, shadow, refs);
+            collect_expr_var_refs(key, shadow, refs);
+        }
+        ExprKind::IfExpr { cond, then, els } => {
+            collect_expr_var_refs(cond, shadow, refs);
+            collect_expr_var_refs(then, shadow, refs);
+            collect_expr_var_refs(els, shadow, refs);
+        }
+        ExprKind::BlockExpr { block } => collect_var_refs(block, shadow, refs),
+        ExprKind::Lambda { params, body, .. } => {
+            // 闭包参数遮蔽：进入闭包体时加入遮蔽集
+            let mut inner_shadow = shadow.clone();
+            for p in params { inner_shadow.insert(p.name.clone()); }
+            collect_expr_var_refs(body, &mut inner_shadow, refs);
+        }
+        ExprKind::ListLit(elems) => for e in elems { collect_expr_var_refs(e, shadow, refs); },
+        ExprKind::TupleLit(elems) => for e in elems { collect_expr_var_refs(e, shadow, refs); },
+        ExprKind::StructCtor { fields, .. } => for (_, v) in fields { collect_expr_var_refs(v, shadow, refs); },
+        ExprKind::Cast { expr, .. } => collect_expr_var_refs(expr, shadow, refs),
+        ExprKind::MagicCall { args, .. } => for a in args { collect_expr_var_refs(a, shadow, refs); },
+        _ => {}
+    }
+}
+
+/// 从函数体推断全局变量的类型（查找 name = value 赋值，从 value 推断）
+fn infer_global_type(block: &Block, name: &str, params: &[Param]) -> IrType {
+    for p in params {
+        if p.name == name { return p.ty.clone(); }
+    }
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name: n, value, .. } if n == name => return value.ty.clone(),
+            Stmt::Assign { target, value } => {
+                if let ExprKind::Var(v) = &target.kind {
+                    if v == name { return value.ty.clone(); }
+                }
+            }
+            _ => {}
+        }
+    }
+    IrType::Int
 }
 
 #[cfg(test)]
