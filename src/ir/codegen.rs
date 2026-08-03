@@ -2280,7 +2280,13 @@ impl CodeGen {
                 let base_s = self.gen_expr(base);
                 // self 在 impl 方法中始终是 receiver，用 `.` 访问字段
                 if base_s == "self" {
-                    return format!("{}.{}", base_s, field);
+                    // self.field 从 &self 共享引用中需要 .clone() 来获取所有权
+                    // 除非字段类型是 Copy 标量（Int/F64/Bool）
+                    let is_scalar = matches!(&base.ty, IrType::Int | IrType::F64 | IrType::Bool);
+                    if is_scalar {
+                        return format!("{}.{}", base_s, field);
+                    }
+                    return format!("{}.{}.clone()", base_s, field);
                 }
                 let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
                 let is_var_base = matches!(&base.kind, ExprKind::Var(_));
