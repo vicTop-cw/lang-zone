@@ -3250,9 +3250,26 @@ fn collect_local_lets(block: &Block, locals: &mut std::collections::HashSet<Stri
                 let inner = Block { stmts: stmts.clone(), ty: IrType::Unit };
                 collect_local_lets(&inner, locals);
             }
-            Stmt::Match { arms, .. } => { for a in arms { collect_local_lets(&a.body, locals); } }
+            Stmt::Match { arms, .. } => {
+                for a in arms {
+                    // 收集 match 模式绑定名（遮蔽外部变量）
+                    collect_pattern_bindings(&a.pattern, locals);
+                    collect_local_lets(&a.body, locals);
+                }
+            }
             _ => {}
         }
+    }
+}
+
+/// 收集模式中的绑定名（match 臂的 Ident/Tuple/Struct/Enum 绑定）
+fn collect_pattern_bindings(pattern: &Pattern, locals: &mut std::collections::HashSet<String>) {
+    match pattern {
+        Pattern::Ident(name) => { locals.insert(name.clone()); }
+        Pattern::Tuple(ps) => { for p in ps { collect_pattern_bindings(p, locals); } }
+        Pattern::Struct { fields, .. } => { for (_, p) in fields { collect_pattern_bindings(p, locals); } }
+        Pattern::Enum { args, .. } => { for p in args { collect_pattern_bindings(p, locals); } }
+        _ => {}
     }
 }
 
