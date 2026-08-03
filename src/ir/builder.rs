@@ -2164,13 +2164,20 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     }
 
     // 返回类型：优先 AST 注解，否则从函数体最后语句推断
-    let ret_ty = func.return_type.as_ref()
+    let mut ret_ty = func.return_type.as_ref()
         .map(|t| from_ast_type_with_generics(t, &generics))
         .unwrap_or_else(|| {
             func.body.last()
                 .map(|stmt| infer_stmt_type(stmt, &fn_ctx))
                 .unwrap_or(IrType::Unit)
         });
+    // Iterator/generator 函数的返回类型是 Vec<element_type>
+    if func.is_iterator {
+        ret_ty = IrType::Named {
+            path: "Vec".to_string(),
+            args: vec![ret_ty],
+        };
+    }
     fn_ctx.current_ret_ty = Some(ret_ty.clone());
 
     let body = convert_block(&func.body, &fn_ctx);
