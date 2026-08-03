@@ -1321,6 +1321,18 @@ impl Parser {
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
             if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+            // 跳过 impl 块中的 type 别名: type Item = int
+            if let Token::Ident(ref s) = self.peek() {
+                if s == "type" {
+                    self.advance(); // consume 'type'
+                    // 消费 'type Name = Type' 直到行末或 Dedent
+                    while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                        let t = self.advance();
+                        if matches!(t, Token::Newline) { break; }
+                    }
+                    continue;
+                }
+            }
             methods.push(self.parse_function(false)?);
             self.skip_newlines();
         }
