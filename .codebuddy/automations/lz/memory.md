@@ -1,34 +1,28 @@
 # LZ 开发自动化记忆
 
-## 最近运行: 2026-08-03 (Round 14)
+## 最近运行: 2026-08-03 (Round 15)
 
 ### 状态
 - 所有测试通过: 292 单元测试 + 1 编译测试(129 demo) + 8 IR 快照 = 301 ✅
-- rustc 实际编译通过率: 108/129 (稳定)
+- rustc 实际编译通过率: 108/129 (稳定, 无回归)
 
-### 本轮尝试 (模块级全局变量 - 已完全回滚)
+### 本轮完成 (Round 15)
 
-**实现**: 检测跨函数引用的变量(count), 生成 static mut + unsafe 访问
-- combo_while_walrus.lz 验证通过 (输出 1 2 3 4 5)
-- 但导致 7 个 demo 回归 (closures_more/composite/pipe/match_more/var_call_block/iterator_demo/keyword_downgrade)
-- E0530 从 1→7, E0614 新增 3
+1. **模块级全局变量 (跨函数共享)** (ir/codegen.rs)
+   - 检测在函数 A 引用但未在 A 声明、在另一函数声明的变量(count)
+   - 生成 static mut + unsafe 访问
+   - 关键: 精确作用域分析 - 闭包参数遮蔽 (Lambda 参数加入 shadow 集)
+   - 解决上一轮回归: composite/pipe/match_more 不再被误判
+   - 验证: combo_while_walrus.lz (1 2 3 4 5), while_walrus_guard_1.lz 编译通过
 
-**回滚原因**: 跨函数全局检测过于激进
-- collect_var_refs 收集了函数名/闭包捕获/装饰器参数等被误判为全局的变量
-- 如 composite.rs 的 @math sq(x,y) 中 x 被误提升为 static mut
-- 需要精确的作用域分析才能区分真全局 vs 参数/捕获/装饰器产物
-
-**决定**: 完全回滚, 恢复 108 基线, 无净变更
-- 教训: 跨函数全局检测需配合精确作用域分析(区分参数/闭包捕获/装饰器),
-  不能简单用"函数内未声明"启发式
-
-### 保留成果 (上一轮 Round 13, 已推送)
-- 安全导航 ?. 实现 (null_safe.lz 输出 "x")
-- Any 闭包参数省略类型注解
+### 关键改进 (vs 上一轮失败尝试)
+- 上一轮 naive 检测导致 7 个 demo 回归 (闭包参数被误判为全局)
+- 本轮加入 shadow 集: 遍历 Lambda 时, 闭包参数加入遮蔽集, 不作为全局候选
+- collect_var_refs 接受 shadow 参数, 精确区分闭包参数 vs 真自由变量
 
 ### 待处理 (均为需实现的特性)
-- E0425 (9): 模块级全局变量(需精确作用域分析) / duck typing / 高级运算符
-- E0308 (10): 类型不匹配
-- E0530 (1): 关键字降级
-- 主要剩余: 全局变量(高影响但需精确分析), duck typing, catch 枚举载荷,
-  iterator 关键字, __Params checker, 非标准 ?: 三元
+- E0425 (11): duck typing / 高级运算符 / catch 枚举载荷(msg)
+- E0308 (8): 类型不匹配
+- E0277 (3): __Params Box<dyn Any>
+- 主要剩余: duck typing, catch 枚举载荷提取, iterator 关键字,
+  __Params checker, 非标准 ?: 三元, 空集合默认类型
