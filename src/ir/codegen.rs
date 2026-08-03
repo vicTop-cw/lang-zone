@@ -296,6 +296,8 @@ impl CodeGen {
                 if known.contains(rname.as_str()) { continue; }
                 if rname == "self" || rname == "self_" || rname == "pass" || rname == "_" { continue; }
                 if rname.starts_with('_') && rname != "_" { continue; }
+                // 排除枚举变体/字面量名（None/Some/Ok/Err/true/false）—— 非变量
+                if matches!(rname.as_str(), "None" | "Some" | "Ok" | "Err" | "true" | "false" | "pass") { continue; }
                 candidates.insert(rname.clone());
             }
         }
