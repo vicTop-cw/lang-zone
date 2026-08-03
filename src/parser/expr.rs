@@ -46,6 +46,7 @@ impl ParserExprExt for Parser {
         if !matches!(&left, Expr::If { .. } | Expr::Match { .. }) && self.check(&Token::If) {
             self.advance();
             let cond = self.parse_expr()?;
+            self.skip_newlines();
             self.expect(Token::Else)?;
             let else_val = self.parse_expr()?;
             return Ok(Expr::If {

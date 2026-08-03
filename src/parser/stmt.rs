@@ -13,6 +13,8 @@ pub trait ParserStmtExt {
     fn parse_binding_stmt(&mut self) -> Result<Stmt, String>;
     fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String>;
     fn parse_build_block_body(&mut self) -> Result<Vec<Stmt>, String>;
+    /// 解析 =: 构建块值（let result =: <缩进块>）
+    fn parse_build_block_value(&mut self) -> Result<Expr, String>;
     /// 解析可能后跟构建块的值表达式：支持直接构建块（*:/~:/^:）和无值构建块（value *:/~:/^:）
     fn parse_maybe_build_value(&mut self) -> Result<Expr, String>;
     fn validate_build_block(&self, kind: BuildKind, body: &[Stmt]) -> Result<(), String>;
@@ -658,9 +660,20 @@ impl ParserStmtExt for Parser {
             None
         };
 
-        self.expect(Token::Eq)?;
+        // 支持 = 和 =: (构建块)
+        // let name = expr  或  let name =: <缩进块>
+        if !self.check(&Token::Eq) && !self.check(&Token::BuildAssign) {
+            let t = self.advance();
+            return Err(format!("Expected Eq or BuildAssign, got {:?}", t));
+        }
+        let is_build_assign = matches!(self.advance(), Token::BuildAssign);
         // 构建块（直接）: let name = *: / ~: <缩进块>
-        let value = self.parse_maybe_build_value()?;
+        let value = if is_build_assign {
+            // =: 后跟缩进块
+            self.parse_build_block_value()?
+        } else {
+            self.parse_maybe_build_value()?
+        };
 
         if is_const {
             Ok(Stmt::Const { name, ty, value })
@@ -671,6 +684,17 @@ impl ParserStmtExt for Parser {
     }
 
     // ─── 构建块值解析 ───
+
+    /// 解析 =: 构建块值（let result =: <缩进块>）
+    fn parse_build_block_value(&mut self) -> Result<Expr, String> {
+        let body = self.parse_build_block_body()?;
+        self.validate_build_block(BuildKind::Var, &body)?;
+        Ok(Expr::BuildBlock {
+            kind: BuildKind::Var,
+            lhs: Box::new(Expr::TupleLit(Vec::new())),
+            body,
+        })
+    }
 
     /// 解析可能后跟构建块的值表达式
     fn parse_maybe_build_value(&mut self) -> Result<Expr, String> {
