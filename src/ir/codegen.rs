@@ -586,6 +586,8 @@ impl CodeGen {
     /// 计算重载函数的 mangled 名称。仅当函数名有多个重载签名时返回 mangled 名，
     /// 否则返回原名。用于函数定义处。
     fn mangled_fn_name(&self, name: String, sig: &[IrType]) -> String {
+        // 清理测试名：空格 → 下划线，确保生成合法的 Rust 标识符
+        let name = name.replace(' ', "_");
         if let Some(sigs) = self.overload_sigs.get(&name) {
             if sigs.len() > 1 {
                 let suffix: Vec<String> = sig.iter().map(|t| self.type_mangle_suffix(t)).collect();
@@ -2750,7 +2752,7 @@ impl CodeGen {
 
     fn gen_lit(&self, lit: &LitKind, _ty: &IrType) -> String {
         match lit {
-            LitKind::Int(n) => n.to_string(),
+            LitKind::Int(n) => format!("{}i64", n),
             LitKind::F64(f) => {
                 let s = f.to_string();
                 if s.contains('.') || s.contains('e') { s } else { format!("{}.0", s) }
@@ -2828,7 +2830,7 @@ impl CodeGen {
             Pattern::Lit(lit) => {
                 // Pattern literals: no .to_string() wrapper
                 match lit {
-                    LitKind::Int(n) => n.to_string(),
+                    LitKind::Int(n) => format!("{}i64", n),
                     LitKind::Str(s) => format!("\"{}\"", s.escape_default()),
                     LitKind::Bool(b) => b.to_string(),
                     _ => self.gen_lit(lit, &IrType::Any),
