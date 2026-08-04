@@ -1,0 +1,85 @@
+// ============================================================
+// boundary-coverage: Trait + Impl + 泛型 + 约束组合测试
+// 覆盖: trait 默认方法、泛型 trait、多约束、
+//      trait 组合、impl 多方法、where 子句
+// ============================================================
+
+// --- 1. 泛型 trait + 默认方法 ---
+trait Measurable =
+    def measure(self) -> int
+    def describe(self) -> str =
+        f"size:{self.measure()}"
+
+// --- 2. impl 多个 trait ---
+struct DataBlock =
+    size: int
+    label: str
+
+impl Measurable for DataBlock =
+    def measure(self) -> int =
+        self.size
+
+// --- 3. trait 约束 + 泛型函数 ---
+def sum_measures<T: Measurable>(items: List<T>) -> int =
+    let mut total = 0
+    for item in items:
+        total += item.measure()
+    total
+
+// --- 4. 多约束 where 子句 ---
+def process_dual<A, B>(a: A, b: B) -> int
+    where A: Measurable
+    where B: Measurable =
+    a.measure() + b.measure()
+
+// --- 5. trait + enum 组合 ---
+trait ValueHolder =
+    def get_value(self) -> int
+
+enum Expr:
+    Literal(int)
+    Add(Expr, Expr)
+
+impl ValueHolder for Expr =
+    def get_value(self) -> int =
+        match self:
+            Expr.Literal(v) => v
+            Expr.Add(l, r) => l.get_value() + r.get_value()
+
+// --- 6. trait 继承（stacked constraints）---
+trait Resettable =
+    def reset(mut self)
+
+trait Configurable: Resettable =
+    def configure(self, params: Dict<str, str>)
+
+// --- 7. impl 闭包作为方法实现 ---
+struct Adder =
+    delta: int
+
+impl Measurable for Adder =
+    def measure(self) -> int =
+        let f = |x: int| -> int = x + self.delta
+        f(0)
+
+// --- main ---
+def main() =
+    print("=== combo-trait-impl ===")
+    let block = DataBlock(size: 100, label: "test")
+    print(block.measure())
+    print(block.describe())
+
+    let items = [DataBlock(size: 10, label: "a"), DataBlock(size: 20, label: "b")]
+    print(sum_measures(items))
+
+    let a = DataBlock(size: 30, label: "x")
+    let b = DataBlock(size: 40, label: "y")
+    print(process_dual(a, b))
+
+    let expr = Expr.Add(Expr.Literal(5), Expr.Literal(10))
+    print(expr.get_value())
+
+    let adder = Adder(delta: 100)
+    print(adder.measure())
+
+    print("combo-trait-impl done")

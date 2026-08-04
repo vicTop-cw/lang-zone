@@ -1,7 +1,7 @@
 // ✅ combo-syntax：while 守卫 + try/catch 错误处理 + 海象 :=（已纳入 compile_demos 覆盖）
 // combo-syntax：while 守卫 + try/catch 错误处理 + 海象 :=
 // 出处：SYNTAX/05-控制流.md §3.5 + try 语法
-enum E =
+enum E:
     Boom(str)
 
 def step() -> int raises E =

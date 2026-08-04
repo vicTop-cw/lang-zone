@@ -1,7 +1,7 @@
 // LZ 控制流 — match 扩展
 // 覆盖：枚举全模式、嵌套模式、通配（守卫形式见 99_spec）
 
-enum Status =
+enum Status:
     Active
     Inactive
     Pending(str)
@@ -13,7 +13,7 @@ def describe(s: Status) -> str =
         case Status.Pending(msg) => f"waiting: {msg}"
         case _ => "unknown"
 
-enum Shape =
+enum Shape:
     Circle(radius: f64)
     Rect(width: f64, height: f64)
 

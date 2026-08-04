@@ -1,0 +1,274 @@
+#!bin lz
+// ============================================================
+// lz_std/error.lz — 异常层级体系
+// 覆盖: SYNTAX/09-错误处理.md
+// 定义 LZ 标准异常层级和 Error trait
+// ============================================================
+
+// ============================================================
+// Error Trait (已在 traits.lz 中声明, 此处扩展)
+// ============================================================
+
+trait Error: Display + Debug =
+    /// 返回错误来源链中的上一个错误
+    def source(ref self) -> Option<ref Error> = None
+
+    /// 错误描述
+    def description(ref self) -> str = self.__str__()
+
+    /// 错误链字符串 (递归打印)
+    def chain_str(ref self) -> str =
+        let mut result = self.__str__()
+        match self.source():
+            case Some(ref src):
+                result = result + "\nCaused by: " + src.chain_str()
+            case None:
+                pass
+        return result
+
+
+// ============================================================
+// 标准异常 Enum
+// ============================================================
+
+/// LzError — 所有 LZ 异常的基类型
+enum LzError:
+    /// 值错误 (参数类型正确但值不合法)
+    ValueError(str)
+    /// 类型错误
+    TypeError(str)
+    /// 索引越界
+    IndexError(str)
+    /// 键不存在
+    KeyError(str)
+    /// 运行时错误
+    RuntimeError(str)
+    /// 未实现
+    NotImplementedError(str)
+    /// 断言失败
+    AssertionError(str)
+    /// 算术溢出
+    OverflowError(str)
+    /// 除零错误
+    ZeroDivisionError(str)
+    /// 类型转换失败 (as 强转失败时抛出)
+    CastError(str)
+    /// IO 错误
+    IoError(str)
+    /// 文件未找到
+    FileNotFoundError(str)
+    /// 权限错误
+    PermissionError(str)
+    /// 解析错误
+    ParseError(str)
+    /// 编码/解码错误
+    CodecError(str)
+
+// ============================================================
+// LzError 实现
+// ============================================================
+
+impl LzError =
+
+    /// 获取错误消息
+    def message(ref self) -> str =
+        match self:
+            case ValueError(msg):
+                return msg
+            case TypeError(msg):
+                return msg
+            case IndexError(msg):
+                return msg
+            case KeyError(msg):
+                return msg
+            case RuntimeError(msg):
+                return msg
+            case NotImplementedError(msg):
+                return msg
+            case AssertionError(msg):
+                return msg
+            case OverflowError(msg):
+                return msg
+            case ZeroDivisionError(msg):
+                return msg
+            case CastError(msg):
+                return msg
+            case IoError(msg):
+                return msg
+            case FileNotFoundError(msg):
+                return msg
+            case PermissionError(msg):
+                return msg
+            case ParseError(msg):
+                return msg
+            case CodecError(msg):
+                return msg
+
+    /// 错误类型名
+    def kind(ref self) -> str =
+        match self:
+            case ValueError(_):
+                return "ValueError"
+            case TypeError(_):
+                return "TypeError"
+            case IndexError(_):
+                return "IndexError"
+            case KeyError(_):
+                return "KeyError"
+            case RuntimeError(_):
+                return "RuntimeError"
+            case NotImplementedError(_):
+                return "NotImplementedError"
+            case AssertionError(_):
+                return "AssertionError"
+            case OverflowError(_):
+                return "OverflowError"
+            case ZeroDivisionError(_):
+                return "ZeroDivisionError"
+            case CastError(_):
+                return "CastError"
+            case IoError(_):
+                return "IoError"
+            case FileNotFoundError(_):
+                return "FileNotFoundError"
+            case PermissionError(_):
+                return "PermissionError"
+            case ParseError(_):
+                return "ParseError"
+            case CodecError(_):
+                return "CodecError"
+
+    // --- 便捷构造器 ---
+
+    def value_error(msg: str) -> LzError =
+        ValueError(msg)
+
+    def type_error(msg: str) -> LzError =
+        TypeError(msg)
+
+    def index_error(msg: str) -> LzError =
+        IndexError(msg)
+
+    def key_error(msg: str) -> LzError =
+        KeyError(msg)
+
+    def runtime_error(msg: str) -> LzError =
+        RuntimeError(msg)
+
+    def not_implemented(msg: str) -> LzError =
+        NotImplementedError(msg)
+
+    def assertion_error(msg: str) -> LzError =
+        AssertionError(msg)
+
+    def overflow_error(msg: str) -> LzError =
+        OverflowError(msg)
+
+    def zero_division(msg: str) -> LzError =
+        ZeroDivisionError(msg)
+
+    def cast_error(msg: str) -> LzError =
+        CastError(msg)
+
+    def io_error(msg: str) -> LzError =
+        IoError(msg)
+
+    def file_not_found(msg: str) -> LzError =
+        FileNotFoundError(msg)
+
+    def permission_error(msg: str) -> LzError =
+        PermissionError(msg)
+
+    def parse_error(msg: str) -> LzError =
+        ParseError(msg)
+
+    def codec_error(msg: str) -> LzError =
+        CodecError(msg)
+
+    // --- 魔法方法 ---
+
+    def __str__(ref self) -> str =
+        self.kind() + ": " + self.message()
+
+    def __eq__(ref self, ref other: LzError) -> bool =
+        self.kind() == other.kind() and self.message() == other.message()
+
+
+// ============================================================
+// 便捷异常抛出函数
+// ============================================================
+
+/// 抛出除零错误
+def zero_division(msg: str) -> Never =
+    raise LzError.ZeroDivisionError(msg)
+
+/// 抛出类型转换错误 (as 强转失败)
+def cast_error(msg: str) -> Never =
+    raise LzError.CastError(msg)
+
+/// 抛出值错误
+def value_error(msg: str) -> Never =
+    raise LzError.ValueError(msg)
+
+/// 抛出类型错误
+def type_error(msg: str) -> Never =
+    raise LzError.TypeError(msg)
+
+/// 抛出索引错误
+def index_error(msg: str) -> Never =
+    raise LzError.IndexError(msg)
+
+/// 抛出键错误
+def key_error(msg: str) -> Never =
+    raise LzError.KeyError(msg)
+
+/// 抛出运行时错误
+def runtime_error(msg: str) -> Never =
+    raise LzError.RuntimeError(msg)
+
+/// 抛出未实现错误
+def not_implemented(msg: str) -> Never =
+    raise LzError.NotImplementedError(msg)
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "error kinds":
+        let err = LzError.value_error("invalid value")
+        assert err.kind() == "ValueError"
+        assert err.message() == "invalid value"
+
+    test "error display":
+        let err = LzError.type_error("expected int")
+        let s = err.__str__()
+        assert s.contains("TypeError")
+        assert s.contains("expected int")
+
+    test "error equality":
+        let a = LzError.index_error("out of bounds")
+        let b = LzError.index_error("out of bounds")
+        let c = LzError.index_error("other")
+        assert a == b
+        assert a != c
+
+    test "try-catch pattern":
+        def safe_divide(a: int, b: int) -> Result<int, LzError]:
+            if b == 0:
+                return Err(LzError.zero_division("division by zero"))
+            return Ok(a / b)
+
+        let result = safe_divide(10, 0)
+        assert result.is_err()
+
+        let result2 = safe_divide(10, 2)
+        assert result2 == Ok(5)
+
+    test "error chain":
+        let err = LzError.runtime_error("outer error")
+        let desc = err.description()
+        assert desc.contains("outer error")
+
+    print("error.lz — all tests passed!")

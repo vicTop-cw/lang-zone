@@ -1,0 +1,416 @@
+#!bin lz
+// ============================================================
+// lz_std/list.lz — List<T> 方法与工具
+// 覆盖: SYNTAX/01-类型系统.md, SYNTAX/06e-trait定义.md
+// 扩展 List 类型的完整操作集合
+// ============================================================
+
+impl<T> List<T> =
+
+    // --- 查询 ---
+
+    /// 元素个数
+    def len(ref self) -> int =
+        len(self)
+
+    /// 是否为空
+    def is_empty(ref self) -> bool =
+        self.len() == 0
+
+    /// 获取第一个元素
+    def first(ref self) -> Option<ref T> =
+        if self.is_empty():
+            return None
+        return Some(self[0])
+
+    /// 获取最后一个元素
+    def last(ref self) -> Option<ref T> =
+        if self.is_empty():
+            return None
+        return Some(self[self.len() - 1])
+
+    /// 按索引获取 (安全)
+    def get(ref self, index: int) -> Option<ref T> =
+        if index < 0 or index >= self.len():
+            return None
+        return Some(self[index])
+
+    /// 是否包含元素
+    def contains(ref self, value: ref T) -> bool
+        where T: Eq
+        =
+        for item in self:
+            if item == value:
+                return True
+        return False
+
+    /// 查找元素位置
+    def index_of(ref self, value: ref T) -> Option<int>
+        where T: Eq
+        =
+        let mut i = 0
+        for item in self:
+            if item == value:
+                return Some(i)
+            i = i + 1
+        return None
+
+    /// 统计元素出现次数
+    def count_of(ref self, value: ref T) -> int
+        where T: Eq
+        =
+        let mut count = 0
+        for item in self:
+            if item == value:
+                count = count + 1
+        return count
+
+    // --- 修改 ---
+
+    /// 追加元素
+    def push(mut self, value: T) =
+        // 内建: 编译器映射
+        self.append(value)
+
+    /// 弹出最后一个元素
+    def pop(mut self) -> Option<T> =
+        if self.is_empty():
+            return None
+        let last = self[self.len() - 1]
+        self.remove_at(self.len() - 1)
+        return Some(last)
+
+    /// 在指定位置插入
+    def insert(mut self, index: int, value: T) =
+        // 内建: 编译器映射
+        self.insert_at(index, value)
+
+    /// 移除指定位置的元素
+    def remove_at(mut self, index: int) -> Option<T> =
+        if index < 0 or index >= self.len():
+            return None
+        let removed = self[index]
+        self.remove(index)
+        return Some(removed)
+
+    /// 移除第一个匹配的元素
+    def remove(mut self, value: ref T) -> bool
+        where T: Eq
+        =
+        match self.index_of(value):
+            case Some(idx):
+                _ = self.remove_at(idx)
+                return True
+            case None:
+                return False
+
+    /// 清空所有元素
+    def clear(mut self) =
+        // 内建: 编译器映射
+        self.clear()
+
+    /// 扩展: 追加另一个列表的所有元素
+    def extend(mut self, other: List<T>) =
+        for item in other:
+            self.push(item)
+
+    /// 保留满足条件的元素
+    def retain(mut self, predicate: fn(ref T) -> bool) =
+        let mut i = 0
+        while i < self.len():
+            if not predicate(self[i]):
+                _ = self.remove_at(i)
+            else:
+                i = i + 1
+
+    // --- 转换 ---
+
+    /// 映射每个元素
+    def map<U>(ref self, f: fn(ref T) -> U) -> List<U> =
+        let mut result = List()
+        for item in self:
+            result.push(f(item))
+        return result
+
+    /// 过滤元素
+    def filter(ref self, predicate: fn(ref T) -> bool) -> List<T> =
+        let mut result = List()
+        for item in self:
+            if predicate(item):
+                result.push(item)
+        return result
+
+    /// 折叠归约
+    def fold<U>(ref self, init: U, f: fn(U, ref T) -> U) -> U =
+        let mut acc = init
+        for item in self:
+            acc = f(acc, item)
+        return acc
+
+    /// 归约 (无初始值)
+    def reduce(ref self, f: fn(T, T) -> T) -> Option<T> =
+        if self.is_empty():
+            return None
+        let mut acc = self[0]
+        let mut i = 1
+        while i < self.len():
+            acc = f(acc, self[i])
+            i = i + 1
+        return Some(acc)
+
+    /// 反转列表
+    def reverse(mut self) =
+        let mut left = 0
+        let mut right = self.len() - 1
+        while left < right:
+            let temp = self[left]
+            self[left] = self[right]
+            self[right] = temp
+            left = left + 1
+            right = right - 1
+
+    /// 返回反转后的新列表
+    def reversed(ref self) -> List<T> =
+        let mut result = List()
+        let mut i = self.len() - 1
+        while i >= 0:
+            result.push(self[i])
+            i = i - 1
+        return result
+
+    /// 切片 [start, end)
+    def slice(ref self, start: int, end: int) -> List<T> =
+        let mut result = List()
+        let mut i = start
+        while i < end and i < self.len():
+            result.push(self[i])
+            i = i + 1
+        return result
+
+    /// 排序 (升序)
+    def sort(mut self)
+        where T: Ord
+        =
+        // 冒泡排序 (实际应由编译器优化)
+        let n = self.len()
+        let mut i = 0
+        while i < n:
+            let mut j = 0
+            while j < n - i - 1:
+                if self[j] > self[j + 1]:
+                    let temp = self[j]
+                    self[j] = self[j + 1]
+                    self[j + 1] = temp
+                j = j + 1
+            i = i + 1
+
+    /// 排序 (按比较器)
+    def sort_by(mut self, compare: fn(ref T, ref T) -> Ordering) =
+        let n = self.len()
+        let mut i = 0
+        while i < n:
+            let mut j = 0
+            while j < n - i - 1:
+                if compare(self[j], self[j + 1]) == Ordering.Greater:
+                    let temp = self[j]
+                    self[j] = self[j + 1]
+                    self[j + 1] = temp
+                j = j + 1
+            i = i + 1
+
+    // --- 集合操作 ---
+
+    /// 去重 (保持顺序, 保留首次出现)
+    def unique(ref self) -> List<T>
+        where T: Eq + Hash
+        =
+        let mut seen = Dict()
+        let mut result = List()
+        for item in self:
+            if not seen.contains_key(item):
+                seen.insert(item, True)
+                result.push(item)
+        return result
+
+    /// 连接两个列表
+    def concat(ref self, other: List<T>) -> List<T> =
+        let mut result = List()
+        for item in self:
+            result.push(item)
+        for item in other:
+            result.push(item)
+        return result
+
+    // --- 迭代 ---
+
+    /// 返回迭代器
+    def iter(ref self) -> ListIter<ref T> =
+        ListIter(list: self, index: 0)
+
+    /// 返回可变迭代器
+    def iter_mut(mut self) -> ListIter<mut T> =
+        ListIter(list: self, index: 0)
+
+    /// 返回所有权迭代器
+    def into_iter(self) -> ListIntoIter<T> =
+        ListIntoIter(list: self, index: 0)
+
+    // --- 魔法方法 ---
+
+    def __len__(ref self) -> int =
+        self.len()
+
+    def __getitem__(ref self, index: int) -> ref T =
+        // 内建: 编译器映射
+        self[index]
+
+    def __setitem__(mut self, index: int, value: T) =
+        // 内建: 编译器映射
+        self[index] = value
+
+    def __iter__(ref self) -> ListIter<ref T> =
+        self.iter()
+
+    def __add__(self, other: List<T>) -> List<T> =
+        self.concat(other)
+
+    def __eq__(ref self, ref other: List<T>) -> bool
+        where T: Eq
+        =
+        if self.len() != other.len():
+            return False
+        let mut i = 0
+        while i < self.len():
+            if self[i] != other[i]:
+                return False
+            i = i + 1
+        return True
+
+    def __str__(ref self) -> str
+        where T: Display
+        =
+        if self.is_empty():
+            return "[]"
+        let mut result = "["
+        let mut i = 0
+        while i < self.len():
+            if i > 0:
+                result = result + ", "
+            result = result + self[i].__str__()
+            i = i + 1
+        return result + "]"
+
+
+// ============================================================
+// List 迭代器
+// ============================================================
+
+struct ListIter<T> =
+    list: List<T>
+    index: int
+
+impl<T> Iterator for ListIter<T> =
+    type Item = T
+
+    def __next__(mut self) -> Option<T> =
+        if self.index >= self.list.len():
+            return None
+        let item = self.list[self.index]
+        self.index = self.index + 1
+        return Some(item)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.list.len() - self.index
+        return (remaining, Some(remaining))
+
+
+struct ListIntoIter<T> =
+    list: List<T>
+    index: int
+
+impl<T> Iterator for ListIntoIter<T> =
+    type Item = T
+
+    def __next__(mut self) -> Option<T> =
+        if self.index >= self.list.len():
+            return None
+        let item = self.list[self.index]
+        self.index = self.index + 1
+        return Some(item)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.list.len() - self.index
+        return (remaining, Some(remaining))
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "first and last":
+        let lst = [1, 2, 3, 4, 5]
+        assert lst.first() == Some(1)
+        assert lst.last() == Some(5)
+        assert ([] as List<int>).first() == None
+
+    test "get and contains":
+        let lst = [10, 20, 30]
+        assert lst.get(1) == Some(20)
+        assert lst.get(5) == None
+        assert lst.contains(20)
+        assert not lst.contains(99)
+
+    test "index_of":
+        let lst = ["a", "b", "c", "b"]
+        assert lst.index_of("b") == Some(1)
+        assert lst.index_of("z") == None
+
+    test "push and pop":
+        let mut lst = [1, 2]
+        lst.push(3)
+        assert lst == [1, 2, 3]
+        assert lst.pop() == Some(3)
+        assert lst == [1, 2]
+
+    test "map and filter":
+        let lst = [1, 2, 3, 4, 5]
+        let doubled = lst.map(|x: ref int| -> int = x * 2)
+        assert doubled == [2, 4, 6, 8, 10]
+        let evens = lst.filter(|x: ref int| -> bool = x % 2 == 0)
+        assert evens == [2, 4]
+
+    test "fold and reduce":
+        let lst = [1, 2, 3, 4, 5]
+        assert lst.fold(0, |acc: int, x: ref int| -> int = acc + x) == 15
+        assert lst.reduce(|a: int, b: int| -> int = a + b) == Some(15)
+
+    test "sort":
+        let mut lst = [3, 1, 4, 1, 5, 9, 2, 6]
+        lst.sort()
+        assert lst == [1, 1, 2, 3, 4, 5, 6, 9]
+
+    test "reverse and reversed":
+        let mut lst = [1, 2, 3]
+        lst.reverse()
+        assert lst == [3, 2, 1]
+        assert [1, 2, 3].reversed() == [3, 2, 1]
+
+    test "unique":
+        let lst = [1, 2, 2, 3, 3, 3, 4]
+        assert lst.unique() == [1, 2, 3, 4]
+
+    test "concat":
+        assert [1, 2].concat([3, 4]) == [1, 2, 3, 4]
+        assert [1, 2] + [3, 4] == [1, 2, 3, 4]
+
+    test "iter":
+        let mut sum = 0
+        for x in [1, 2, 3].iter():
+            sum = sum + x
+        assert sum == 6
+
+    test "slice":
+        assert [1, 2, 3, 4, 5].slice(1, 4) == [2, 3, 4]
+
+    print("list.lz — all tests passed!")

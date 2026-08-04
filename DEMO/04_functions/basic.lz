@@ -8,7 +8,7 @@
 // ── 1.1 等式体（单行）───────────────────────────────────
 def add(a: int, b: int) -> int = a + b
 
-def double(x) = x * 2              // 无注解，推断 int
+def double(x: int) -> int = x * 2
 
 def greet(name: str) -> str = f"Hello, {name}"
 
@@ -42,7 +42,7 @@ def greet_default(name: str = "world") -> str =
 def is_positive(x: int) -> bool = x > 0
 
 // ── 3.2 无注解返回类型（默认推断） ─────────────────────
-def inferred_double(x) = x * 2       // -> int
+def inferred_double(x: int) -> int = x * 2
 
 // ── 3.3 main 函数（默认 ()） ──────────────────────────
 def main() =

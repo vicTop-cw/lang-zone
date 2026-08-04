@@ -1,5 +1,5 @@
 // combo-syntax（绿色回归测试）：enum + match + guard let 模式守卫
-enum Shape =
+enum Shape:
     Circle(f64)
     Rect(f64, f64)
 

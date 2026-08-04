@@ -1,7 +1,7 @@
 // LZ 错误处理 — ? 传播链 + 枚举异常 catch
 // 覆盖：raises 函数用 ? 传播、try/catch 捕获具体变体
 
-enum ParseError =
+enum ParseError:
     BadFormat(str)
 
 def parse_int(s: str) -> int raises ParseError =

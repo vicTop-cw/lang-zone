@@ -1,0 +1,60 @@
+// ============================================================================
+// 规范符合性 / 验收用例 —— 暂不可运行（PENDING COMPILER SUPPORT）
+// ----------------------------------------------------------------------------
+// 当前编译器（Rust 后端 lzrsc / Cython 后端 lzcyc）尚未实现 `..` 可变参数注入
+// 与泛型变长类型包（type-pack）。本文件对应 SYNTAX/03d-可变参数.md §2.8，
+// 是「如何在内部免类型转换拿到明确类型」的验收示例。
+//
+// 待编译器落地以下能力后即可直接 `lzrsc this_file.lz` 运行：
+//   1. 参数列表中的 `..` 触发 args / kwargs 注入；
+//   2. `..: Tuple<T>` / `..: Dict<K,V>` 注入具体类型容器；
+//   3. 泛型变长 `def f<Ts...>(..: Tuple<Ts...>)` 推导异质元组类型。
+// 在特性实现前请勿用编译器编译本文件（会解析失败）。
+// ============================================================================
+
+// ── 方案 A：同质注解（编译期已知，零转换）──────────────────────────────────
+// 期望：args 注入为 List<int>，内部按 int 直接用，无 as、无 raises。
+
+def sum_all(..: Tuple<int>) =
+    total = 0
+    for v in args:
+        total += v          // v: int，编译期已知
+    total
+
+def cfg(..: Dict<str, int>) =
+    for (k, v) in kwargs:
+        print(k, v)         // v: int
+
+// sum_all(1, 2, 3, 4)   // 期望 → 10
+// cfg(timeout=30, retry=3)  // 期望 → timeout 30 / retry 3
+
+// ── 方案 B：异构泛型变长捕获（type-pack，零开销、免 as）────────────────────
+// 期望：Ts... 由调用点推断，args 为异质元组，每槽位类型明确。
+
+def show<Ts...>(..: Tuple<Ts...>) =
+    print(args.0, args.1, args.2)   // args.0: Ts0, args.1: Ts1, args.2: Ts2
+
+def first<Ts...>(..: Tuple<Ts...>) =
+    match args:
+        case (a,)    => a            // a: Ts0
+        case (a, ..) => a            // a: Ts0
+
+// show(1, "a", True)    // 期望推断 Ts... = <int, str, bool>，打印 1 a True
+// first(10, 20, 30)     // 期望 → 10
+
+// ── 方案 C：动态反射（保留 dyn Any，但免手写 as）──────────────────────────
+// 期望：match 按类型分支，编译器在分支内自动 downcast，无需手写 as。
+
+def describe(..) =
+    for v in args:                   // v: dyn Any
+        match v:
+            case int  => print(f"int {v}")     // v 自动 downcast 为 int
+            case str  => print(f"str {v}")     // v 自动 downcast 为 str
+            case bool => print(f"bool {v}")    // v 自动 downcast 为 bool
+            else      => panic("未知类型")
+
+def log_types(..) =
+    for v in args:
+        print(v.type_name(), v)      // 运行时明确类型名，如 "int" "str"
+
+// describe(1, "x", True) // 期望 → int 1 / str x / bool True

@@ -1,0 +1,197 @@
+#!bin lz
+// ============================================================
+// lz_std/prelude.lz — Prelude 汇总模块
+// 自举时可通过 from lz_std.prelude import * 导入所有核心符号
+// 注意: 每个 .lz 文件独立编译, 此处仅列出所有公共 API 的声明
+// ============================================================
+
+// ============================================================
+// 核心枚举 — 从各模块重新导出
+// ============================================================
+
+// --- Option<T> (来自 option.lz) ---
+// enum Option<T>:
+//     Some(T)
+//     None
+
+// --- Result<T, E> (来自 result.lz) ---
+// enum Result<T, E>:
+//     Ok(T)
+//     Err(E)
+
+// --- Ordering (来自 ordering.lz) ---
+// enum Ordering:
+//     Less
+//     Equal
+//     Greater
+
+// --- LzError (来自 error.lz) ---
+// enum LzError:
+//     ValueError(str)
+//     TypeError(str)
+//     IndexError(str)
+//     KeyError(str)
+//     RuntimeError(str)
+//     NotImplementedError(str)
+//     AssertionError(str)
+//     OverflowError(str)
+//     ZeroDivisionError(str)
+//     IoError(str)
+//     FileNotFoundError(str)
+//     PermissionError(str)
+//     ParseError(str)
+//     CodecError(str)
+
+
+// ============================================================
+// 核心 Trait (来自 traits.lz)
+// ============================================================
+
+// trait Eq: PartialEq
+// trait PartialEq
+// trait Ord: Eq + PartialOrd
+// trait PartialOrd: PartialEq
+// trait Hash
+// trait Clone
+// trait DeepClone
+// trait Default
+// trait Display
+// trait Debug
+// trait From<T>
+// trait Into<T>
+// trait TryFrom<T>
+// trait TryInto<T>
+// trait Add<Rhs = Self>
+// trait Sub<Rhs = Self>
+// trait Mul<Rhs = Self>
+// trait Div<Rhs = Self>
+// trait Rem<Rhs = Self>
+// trait Neg
+// trait Not
+// trait AddAssign<Rhs = Self>
+// trait SubAssign<Rhs = Self>
+// trait MulAssign<Rhs = Self>
+// trait DivAssign<Rhs = Self>
+// trait RemAssign<Rhs = Self>
+// trait BitAnd<Rhs = Self>
+// trait BitOr<Rhs = Self>
+// trait BitXor<Rhs = Self>
+// trait Shl<Rhs = Self>
+// trait Shr<Rhs = Self>
+// trait Index<Idx>
+// trait IndexMut<Idx>
+// trait Iterator
+// trait DoubleEndedIterator
+// trait Iterable
+// trait IntoIterator
+// trait FromIterator<T>
+// trait Drop
+// trait Sized
+// trait Callable<Args, Ret>
+// trait Str
+// trait Len
+// trait Bool
+// trait Error: Display + Debug
+
+
+// ============================================================
+// 智能指针 (来自 box.lz)
+// ============================================================
+
+// struct Box<T>
+// struct Rc<T>
+// struct Arc<T>
+// struct Weak<T>
+
+
+// ============================================================
+// 迭代器构造器 (来自 iter.lz)
+// ============================================================
+
+// struct Range
+// struct RangeInclusive
+// struct Once<T>
+// struct Repeat<T>
+// struct RepeatN<T>
+// struct Empty<T>
+// struct Zip<A, B>
+// struct StepRange
+
+// def range(start: int, end: int) -> Range
+// def range_to(end: int) -> Range
+// def range_inclusive(start: int, end: int) -> RangeInclusive
+// def once<T>(value: T) -> Once<T>
+// def repeat<T>(value: T) -> Repeat<T>
+// def repeat_n<T>(value: T, n: int) -> RepeatN<T>
+// def empty<T>() -> Empty<T>
+// def zip<A: Iterator, B: Iterator>(a: A, b: B) -> Zip<A, B>
+// def step_range(start: int, end: int, step: int) -> StepRange
+
+
+// ============================================================
+// 全局工具函数 (来自 iter.lz + ordering.lz + math.lz + string.lz)
+// ============================================================
+
+// --- 比较 ---
+// def min<T: Ord>(a: T, b: T) -> T
+// def max<T: Ord>(a: T, b: T) -> T
+// def clamp<T: Ord>(value: T, lo: T, hi: T) -> T
+// def compare<T: Ord>(ref a: T, ref b: T) -> Ordering
+
+// --- 迭代器工具 ---
+// def for_each<I: Iterable>(iterable: ref I, f: fn(I.Item) -> ())
+// def map<I: Iterable, U>(iterable: ref I, f: fn(I.Item) -> U) -> List<U>
+// def filter<I: Iterable>(iterable: ref I, predicate: fn(ref I.Item) -> bool) -> List<I.Item>
+// def fold<I: Iterable, U>(iterable: ref I, init: U, f: fn(U, I.Item) -> U) -> U
+// def collect_list<I: Iterable>(iterable: ref I) -> List<I.Item>
+// def all<I: Iterable>(iterable: ref I, predicate: fn(I.Item) -> bool) -> bool
+// def any<I: Iterable>(iterable: ref I, predicate: fn(I.Item) -> bool) -> bool
+// def find<I: Iterable>(iterable: ref I, predicate: fn(ref I.Item) -> bool) -> Option<I.Item>
+// def count_if<I: Iterable>(iterable: ref I, predicate: fn(I.Item) -> bool) -> int
+// def sum<I: Iterable>(iterable: ref I) -> I.Item
+// def product<I: Iterable>(iterable: ref I) -> I.Item
+
+// --- 字符串 ---
+// def join(parts: List<str>, separator: str) -> str
+// def format(template: str, args: List<str>) -> str
+
+
+// ============================================================
+// 自测试 — 演示 prelude 的使用
+// ============================================================
+
+def main():
+    test "prelude — Option usage":
+        let val = Some(42)
+        assert val.is_some()
+        assert val.unwrap() == 42
+
+    test "prelude — Result usage":
+        let ok_val: Result<int, str> = Ok(100)
+        assert ok_val.is_ok()
+        assert ok_val.unwrap() == 100
+
+    test "prelude — Ordering usage":
+        assert Ordering.Less.is_lt()
+        assert Ordering.Equal.is_eq()
+
+    test "prelude — range and collect":
+        let items = collect_list(range(1, 4))
+        assert items == [1, 2, 3]
+
+    test "prelude — min max":
+        assert min(3, 7) == 3
+        assert max(3, 7) == 7
+
+    test "prelude — map filter":
+        let result = map([1, 2, 3], |x: int| -> int = x * 10)
+        assert result == [10, 20, 30]
+
+    test "prelude — join":
+        assert join(["a", "b", "c"], ",") == "a,b,c"
+
+    test "prelude — error":
+        let err = LzError.value_error("bad")
+        assert err.kind() == "ValueError"
+
+    print("prelude.lz — all tests passed!")

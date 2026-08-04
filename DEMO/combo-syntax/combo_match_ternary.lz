@@ -3,7 +3,7 @@ def classify(n: int) -> str =
     match n:
         case 0 => "empty"
         case 1 => "single"
-        case _ => n > 10 ? "big" : "small"
+        case _ => "big" if n > 10 else "small"
 
 def main() =
     print(classify(0))    // empty

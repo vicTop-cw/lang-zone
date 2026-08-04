@@ -1,0 +1,67 @@
+// ============================================================
+// boundary-coverage: 迭代器 + 生成器组合测试
+// 覆盖: iterator + yield、yield from、生成器 + for、
+//      iterator + try/catch、yield + 闭包
+// ============================================================
+
+// --- 1. iterator + yield + for 遍历 ---
+iterator countdown(n: int) -> int =
+    let mut i = n
+    while i > 0:
+        yield i
+        i -= 1
+
+// --- 2. iterator + if 条件 yield ---
+iterator filter_even(items: List<int>) -> int =
+    for item in items:
+        if item % 2 == 0:
+            yield item
+
+// --- 3. iterator + try/catch ---
+iterator safe_range(start: int, end: int) -> int raises str =
+    guard start <= end else:
+        raise "start must be <= end"
+    for i in start..end:
+        yield i
+
+// --- 4. yield from 委托 ---
+iterator flatten(lists: List<List<int>>) -> int =
+    for inner in lists:
+        yield from inner
+
+// --- 5. 生成器构建块 + for 消费 ---
+def gen_pair(a: str, b: int) -> (str, int) =
+    (a, b)
+
+entries = gen_pair *:
+    yield ("one", 1)
+    yield ("two", 2)
+    yield ("three", 3)
+
+// --- 6. iterator 嵌套闭包（iter 中 yield）---
+iterator filter_by_threshold(items: List<int>, threshold: int) -> int =
+    let checker = |x: int| -> bool = x > threshold
+    for item in items:
+        if checker(item):
+            yield item
+
+// --- 7. iterator 结合 map 使用 ---
+def use_iterator_map(data: List<int>) =
+    for x in filter_even(data):
+        print(x * 2)
+
+// --- main ---
+def main() =
+    print("=== combo-iterator-generator ===")
+    for x in countdown(5):
+        print(x)
+    for x in filter_even([1, 2, 3, 4, 5, 6]):
+        print(x)
+    for x in safe_range(1, 4):
+        print(x)
+    for x in flatten([[1, 2], [3, 4], [5]]):
+        print(x)
+    for p in entries:
+        print(p)
+    use_iterator_map([1, 2, 3, 4, 5, 6])
+    print("combo-iterator-generator done")

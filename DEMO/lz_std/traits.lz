@@ -1,0 +1,640 @@
+#!bin lz
+// ============================================================
+// lz_std/traits.lz — 核心 Trait 体系
+// 覆盖: SYNTAX/06e-trait定义.md, SYNTAX/06f-impl实现.md
+// 每个 trait 定义类型间可组合的行为契约
+// ============================================================
+
+// --- 相等与比较 ---
+
+trait PartialEq =
+    /// 部分相等比较 (可能不满足自反性, 如 f64 的 NaN)
+    def __eq__(ref self, ref other: Self) -> bool = ...
+
+    /// 不等比较 (默认实现: not __eq__)
+    def __ne__(ref self, ref other: Self) -> bool =
+        not self.__eq__(other)
+
+
+trait Eq: PartialEq =
+    /// 全等比较 (满足自反性、对称性、传递性)
+    /// 继承 PartialEq, 无额外方法, 作为标记 trait
+    pass
+
+
+trait PartialOrd: PartialEq =
+    /// 部分比较 (可能不可比)
+    def __lt__(ref self, ref other: Self) -> bool = ...
+    def __le__(ref self, ref other: Self) -> bool =
+        self.__lt__(other) or self.__eq__(other)
+    def __gt__(ref self, ref other: Self) -> bool =
+        not self.__le__(other)
+    def __ge__(ref self, ref other: Self) -> bool =
+        not self.__lt__(other)
+
+    /// 部分比较 (返回 Option<Ordering>)
+    def partial_cmp(ref self, ref other: Self) -> Ordering? = ...
+
+
+trait Ord: Eq + PartialOrd =
+    /// 全序比较 (任意两个值可比)
+    def cmp(ref self, ref other: Self) -> Ordering = ...
+
+
+// --- 哈希 ---
+
+trait Hash =
+    /// 计算哈希值, 用于 Dict/Set 键
+    def __hash__(ref self) -> int = ...
+
+
+// --- 克隆 ---
+
+trait Clone =
+    /// 浅克隆 (复制引用或基本值)
+    def clone(ref self) -> Self = ...
+
+
+trait DeepClone =
+    /// 深克隆 (递归复制所有嵌套数据)
+    def deep_clone(ref self) -> Self = ...
+
+
+// --- 默认值 ---
+
+trait Default =
+    /// 返回类型的默认值
+    def default() -> Self = ...
+
+
+// --- 显示与调试 ---
+
+trait Display =
+    /// 用户友好的字符串表示
+    def __str__(ref self) -> str = ...
+
+
+trait Debug =
+    /// 调试用的详细字符串表示
+    def __repr__(ref self) -> str = ...
+
+
+// --- 类型转换 ---
+
+trait From<T> =
+    /// 从 T 构造 Self
+    def __from__(value: T) -> Self = ...
+
+
+trait Into<T> =
+    /// 将 Self 转换为 T
+    def into(self) -> T = ...
+
+
+// 反向实现: impl From<A> for B 则自动获得 Into<B> for A
+// 编译器自动生成, 此处仅声明 trait
+
+
+trait TryFrom<T> =
+    /// 尝试从 T 构造 Self (可能失败)
+    type Error
+    def try_from(value: T) -> Result<Self, Self.Error> = ...
+
+
+trait TryInto<T> =
+    /// 尝试将 Self 转换为 T (可能失败)
+    type Error
+    def try_into(self) -> Result<T, Self.Error> = ...
+
+
+// --- 算术运算 ---
+
+trait Add<Rhs = Self> =
+    type Output
+    def __add__(self, rhs: Rhs) -> Self.Output = ...
+
+
+trait Sub<Rhs = Self> =
+    type Output
+    def __sub__(self, rhs: Rhs) -> Self.Output = ...
+
+
+trait Mul<Rhs = Self> =
+    type Output
+    def __mul__(self, rhs: Rhs) -> Self.Output = ...
+
+
+trait Div<Rhs = Self> =
+    type Output
+    def __div__(self, rhs: Rhs) -> Self.Output = ...
+
+
+trait Rem<Rhs = Self> =
+    type Output
+    def __rem__(self, rhs: Rhs) -> Self.Output = ...
+
+
+trait Neg =
+    type Output
+    def __neg__(self) -> Self.Output = ...
+
+
+trait Not =
+    type Output
+    def __not__(ref self) -> Self.Output = ...
+
+
+// 复合赋值 (默认由对应二元运算实现)
+trait AddAssign<Rhs = Self> =
+    def __iadd__(mut self, rhs: Rhs) = ...
+
+trait SubAssign<Rhs = Self> =
+    def __isub__(mut self, rhs: Rhs) = ...
+
+trait MulAssign<Rhs = Self> =
+    def __imul__(mut self, rhs: Rhs) = ...
+
+trait DivAssign<Rhs = Self> =
+    def __idiv__(mut self, rhs: Rhs) = ...
+
+trait RemAssign<Rhs = Self> =
+    def __irem__(mut self, rhs: Rhs) = ...
+
+
+// --- 位运算 ---
+
+trait BitAnd<Rhs = Self> =
+    type Output
+    def __and__(self, rhs: Rhs) -> Self.Output = ...
+
+trait BitOr<Rhs = Self> =
+    type Output
+    def __or__(self, rhs: Rhs) -> Self.Output = ...
+
+trait BitXor<Rhs = Self> =
+    type Output
+    def __xor__(self, rhs: Rhs) -> Self.Output = ...
+
+trait Shl<Rhs = Self> =
+    type Output
+    def __shl__(self, rhs: Rhs) -> Self.Output = ...
+
+trait Shr<Rhs = Self> =
+    type Output
+    def __shr__(self, rhs: Rhs) -> Self.Output = ...
+
+
+// --- 索引 ---
+
+trait Index<Idx> =
+    type Output
+    def __getitem__(ref self, index: Idx) -> ref Self.Output = ...
+
+
+trait IndexMut<Idx> =
+    type Output
+    def __setitem__(mut self, index: Idx, value: Self.Output) = ...
+
+
+// --- 迭代器体系 ---
+
+trait Iterator =
+    type Item
+
+    /// 获取下一个元素
+    def __next__(mut self) -> Option<Self.Item> = ...
+
+    /// 返回元素数量提示 (可选)
+    def size_hint(ref self) -> (int, Option<int>) =
+        (0, None)
+
+    // --- 消费器 (Consumer) ---
+
+    /// 对每个元素执行操作
+    def for_each(mut self, f: fn(Self.Item) -> ()) =
+        while let Some(item) = self.__next__():
+            f(item)
+
+    /// 收集为集合
+    def collect<C: FromIterator<Self.Item>>(mut self) -> C =
+        C.from_iter(self)
+
+    /// 折叠
+    def fold<B>(mut self, init: B, f: fn(B, Self.Item) -> B) -> B =
+        let mut acc = init
+        while let Some(item) = self.__next__():
+            acc = f(acc, item)
+        return acc
+
+    /// 归约 (无初始值的 fold)
+    def reduce(mut self, f: fn(Self.Item, Self.Item) -> Self.Item) -> Option<Self.Item> =
+        match self.__next__():
+            case Some(first):
+                let mut acc = first
+                while let Some(item) = self.__next__():
+                    acc = f(acc, item)
+                return Some(acc)
+            case None:
+                return None
+
+    /// 计数
+    def count(mut self) -> int =
+        let mut n = 0
+        while let Some(_) = self.__next__():
+            n = n + 1
+        return n
+
+    /// 求和 (需要 Item: Add)
+    def sum(mut self) -> Self.Item
+        where Self.Item: Add<Output = Self.Item> + Default
+        =
+        let mut total = Self.Item.default()
+        while let Some(item) = self.__next__():
+            total = total + item
+        return total
+
+    /// 求积
+    def product(mut self) -> Self.Item
+        where Self.Item: Mul<Output = Self.Item>
+        =
+        match self.__next__():
+            case Some(first):
+                let mut result = first
+                while let Some(item) = self.__next__():
+                    result = result * item
+                return result
+            case None:
+                return Self.Item.default()
+
+    /// 全部满足
+    def all(mut self, predicate: fn(Self.Item) -> bool) -> bool =
+        while let Some(item) = self.__next__():
+            if not predicate(item):
+                return False
+        return True
+
+    /// 任一满足
+    def any(mut self, predicate: fn(Self.Item) -> bool) -> bool =
+        while let Some(item) = self.__next__():
+            if predicate(item):
+                return True
+        return False
+
+    /// 查找第一个满足条件的元素
+    def find(mut self, predicate: fn(ref Self.Item) -> bool) -> Option<Self.Item> =
+        while let Some(item) = self.__next__():
+            if predicate(item):
+                return Some(item)
+        return None
+
+    /// 获取第 n 个元素
+    def nth(mut self, n: int) -> Option<Self.Item> =
+        let mut i = 0
+        while let Some(item) = self.__next__():
+            if i == n:
+                return Some(item)
+            i = i + 1
+        return None
+
+    /// 获取最后一个元素
+    def last(mut self) -> Option<Self.Item> =
+        let mut result = None
+        while let Some(item) = self.__next__():
+            result = Some(item)
+        return result
+
+    // --- 适配器 (Adapter) ---
+
+    /// 映射
+    def map<B>(self, f: fn(Self.Item) -> B) -> Map<Self, B> =
+        Map(iter: self, func: f)
+
+    /// 过滤
+    def filter(self, predicate: fn(ref Self.Item) -> bool) -> Filter<Self> =
+        Filter(iter: self, pred: predicate)
+
+    /// 取前 n 个
+    def take(self, n: int) -> Take<Self> =
+        Take(iter: self, remaining: n)
+
+    /// 跳过前 n 个
+    def skip(self, n: int) -> Skip<Self> =
+        Skip(iter: self, to_skip: n)
+
+    /// 链式连接
+    def chain<Other: Iterator<Item = Self.Item>>(self, other: Other) -> Chain<Self, Other> =
+        Chain(first: self, second: other, first_done: False)
+
+    /// 枚举
+    def enumerate(self) -> Enumerate<Self> =
+        Enumerate(iter: self, index: 0)
+
+    /// 展开映射
+    def flat_map<B, I: Iterator<Item = B>>(self, f: fn(Self.Item) -> I) -> FlatMap<Self, I, B> =
+        FlatMap(outer: self, func: f, inner: None)
+
+    /// 反转 (需要 DoubleEndedIterator)
+    def rev(self) -> Rev<Self>
+        where Self: DoubleEndedIterator
+        =
+        Rev(iter: self)
+
+    /// 窥视
+    def peekable(self) -> Peekable<Self> =
+        Peekable(iter: self, peeked: None)
+
+
+trait DoubleEndedIterator: Iterator =
+    /// 从尾部获取下一个元素
+    def next_back(mut self) -> Option<Self.Item> = ...
+
+
+trait Iterable =
+    type Item
+    type Iter: Iterator<Item = Self.Item>
+
+    /// 返回迭代器
+    def __iter__(self) -> Self.Iter = ...
+
+
+trait IntoIterator =
+    type Item
+    type IntoIter: Iterator<Item = Self.Item>
+
+    /// 转换为迭代器 (消费 self)
+    def into_iter(self) -> Self.IntoIter = ...
+
+
+trait FromIterator<T> =
+    /// 从迭代器构造集合
+    def from_iter<I: Iterator<Item = T>>(iter: I) -> Self = ...
+
+
+// --- 其他核心 trait ---
+
+trait Drop =
+    /// 析构时调用
+    def __drop__(mut self) = ...
+
+
+trait Sized =
+    /// 编译期已知大小的类型 (标记 trait)
+    pass
+
+
+trait Callable<Args, Ret> =
+    /// 可调用对象
+    def __call__(self, args: Args) -> Ret = ...
+
+
+trait Str =
+    /// 转换为字符串表示
+    def to_str(ref self) -> str = ...
+
+
+trait Len =
+    /// 返回元素数量
+    def __len__(ref self) -> int = ...
+
+
+trait Bool =
+    /// 布尔值判定 (用于 if/while/guard 条件)
+    def __bool__(ref self) -> bool = ...
+
+
+trait Error: Display + Debug =
+    /// 错误 trait, 继承 Display 和 Debug
+    /// 可选: 提供错误来源链
+    def source(ref self) -> Option<ref Error> = None
+
+    /// 错误描述
+    def description(ref self) -> str = self.__str__()
+
+
+// ============================================================
+// 迭代器适配器 struct 定义
+// ============================================================
+
+struct Map<I, B> =
+    iter: I
+    func: fn(I.Item) -> B
+
+impl<I: Iterator, B> Iterator for Map<I, B> =
+    type Item = B
+
+    def __next__(mut self) -> Option<B> =
+        match self.iter.__next__():
+            case Some(item):
+                return Some((self.func)(item))
+            case None:
+                return None
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        self.iter.size_hint()
+
+
+struct Filter<I: Iterator> =
+    iter: I
+    pred: fn(ref I.Item) -> bool
+
+impl<I: Iterator> Iterator for Filter<I> =
+    type Item = I.Item
+
+    def __next__(mut self) -> Option<I.Item> =
+        while let Some(item) = self.iter.__next__():
+            if (self.pred)(item):
+                return Some(item)
+        return None
+
+
+struct Take<I: Iterator> =
+    iter: I
+    remaining: int
+
+impl<I: Iterator> Iterator for Take<I> =
+    type Item = I.Item
+
+    def __next__(mut self) -> Option<I.Item> =
+        if self.remaining > 0:
+            self.remaining = self.remaining - 1
+            return self.iter.__next__()
+        return None
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let (lower, upper) = self.iter.size_hint()
+        let new_lower = min(lower, self.remaining)
+        let new_upper = match upper:
+            case Some(x):
+                return Some(min(x, self.remaining))
+            case None:
+                return Some(self.remaining)
+        return (new_lower, new_upper)
+
+
+struct Skip<I: Iterator> =
+    iter: I
+    to_skip: int
+
+impl<I: Iterator> Iterator for Skip<I> =
+    type Item = I.Item
+
+    def __next__(mut self) -> Option<I.Item> =
+        while self.to_skip > 0:
+            _ = self.iter.__next__()
+            self.to_skip = self.to_skip - 1
+        return self.iter.__next__()
+
+
+struct Chain<A: Iterator, B: Iterator<Item = A.Item>> =
+    first: A
+    second: B
+    first_done: bool
+
+impl<A: Iterator, B: Iterator<Item = A.Item>> Iterator for Chain<A, B> =
+    type Item = A.Item
+
+    def __next__(mut self) -> Option<A.Item> =
+        if not self.first_done:
+            match self.first.__next__():
+                case Some(item):
+                    return Some(item)
+                case None:
+                    self.first_done = True
+        return self.second.__next__()
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let (lo1, hi1) = self.first.size_hint()
+        let (lo2, hi2) = self.second.size_hint()
+        let lo = lo1 + lo2
+        let hi = match (hi1, hi2):
+            case (Some(x), Some(y)):
+                return Some(x + y)
+            case _:
+                return None
+        return (lo, hi)
+
+
+struct Enumerate<I: Iterator> =
+    iter: I
+    index: int
+
+impl<I: Iterator> Iterator for Enumerate<I> =
+    type Item = (int, I.Item)
+
+    def __next__(mut self) -> Option<(int, I.Item)> =
+        match self.iter.__next__():
+            case Some(item):
+                let idx = self.index
+                self.index = self.index + 1
+                return Some((idx, item))
+            case None:
+                return None
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        self.iter.size_hint()
+
+
+struct FlatMap<I: Iterator, J: Iterator, B> =
+    outer: I
+    func: fn(I.Item) -> J
+    inner: Option<J>
+
+impl<I: Iterator, J: Iterator, B> Iterator for FlatMap<I, J, B>
+    where J: Iterator<Item = B>
+    =
+    type Item = B
+
+    def __next__(mut self) -> Option<B> =
+        loop:
+            match self.inner:
+                case Some(ref mut inner_iter):
+                    match inner_iter.__next__():
+                        case Some(item):
+                            return Some(item)
+                        case None:
+                            self.inner = None
+                case None:
+                    match self.outer.__next__():
+                        case Some(outer_item):
+                            self.inner = Some((self.func)(outer_item))
+                        case None:
+                            return None
+
+
+struct Rev<I: DoubleEndedIterator> =
+    iter: I
+
+impl<I: DoubleEndedIterator> Iterator for Rev<I> =
+    type Item = I.Item
+
+    def __next__(mut self) -> Option<I.Item> =
+        self.iter.next_back()
+
+
+struct Peekable<I: Iterator> =
+    iter: I
+    peeked: Option<I.Item>
+
+impl<I: Iterator> Iterator for Peekable<I> =
+    type Item = I.Item
+
+    def __next__(mut self) -> Option<I.Item> =
+        match self.peeked:
+            case Some(item):
+                self.peeked = None
+                return Some(item)
+            case None:
+                return self.iter.__next__()
+
+    def peek(mut self) -> Option<ref I.Item> =
+        match self.peeked:
+            case Some(ref item):
+                return Some(item)
+            case None:
+                self.peeked = self.iter.__next__()
+                match self.peeked:
+                    case Some(ref item):
+                        return Some(item)
+                    case None:
+                        return None
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    // 验证 Map 适配器
+    test "map doubles values":
+        let values = [1, 2, 3, 4, 5]
+        let doubled = values.iter().map(|x: int| -> int = x * 2).collect()
+        assert doubled == [2, 4, 6, 8, 10]
+
+    // 验证 Filter 适配器
+    test "filter evens":
+        let values = [1, 2, 3, 4, 5, 6]
+        let evens = values.iter().filter(|x: ref int| -> bool = x % 2 == 0).collect()
+        assert evens == [2, 4, 6]
+
+    // 验证 Take + Skip
+    test "take and skip":
+        let values = [1, 2, 3, 4, 5]
+        let result = values.iter().skip(2).take(2).collect()
+        assert result == [3, 4]
+
+    // 验证 Enumerate
+    test "enumerate":
+        let result = ["a", "b", "c"].iter().enumerate().collect()
+        assert result == [(0, "a"), (1, "b"), (2, "c")]
+
+    // 验证 fold / reduce
+    test "fold sum":
+        let sum = [1, 2, 3, 4, 5].iter().fold(0, |acc: int, x: int| -> int = acc + x)
+        assert sum == 15
+
+    // 验证 any / all
+    test "any and all":
+        assert [1, 2, 3].iter().any(|x: int| -> bool = x > 2)
+        assert [1, 2, 3].iter().all(|x: int| -> bool = x > 0)
+
+    print("traits.lz — all tests passed!")

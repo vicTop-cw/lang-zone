@@ -1,0 +1,177 @@
+// ============================================================
+// boundary-coverage: 数据类型深度嵌套测试
+// 覆盖: 嵌套 struct、嵌套 enum、泛型嵌套、
+//      深度模式匹配、嵌套类型别名
+// ============================================================
+
+// --- 1. 三层嵌套 struct ---
+struct InnerData =
+    value: int
+    label: str
+
+struct MiddleData =
+    inner: InnerData
+    index: int
+
+struct OuterData =
+    middle: MiddleData
+    name: str
+    active: bool
+
+// --- 2. 嵌套泛型 struct ---
+struct Node<T> =
+    value: T
+    left: Option<Node<T>>
+    right: Option<Node<T>>
+
+// --- 3. 三层嵌套 enum ---
+enum Level3:
+    Leaf3(value: int)
+    Empty3
+
+enum Level2:
+    Node2(child: Level3)
+    Pass2
+
+enum Level1:
+    Node1(child: Level2)
+    Root1(value: int)
+
+// --- 4. 泛型嵌套 enum ---
+enum Tree<T>:
+    Branch(value: T, left: Tree<T>, right: Tree<T>)
+    Tip(value: T)
+
+// --- 5. 深度模式匹配（四层嵌套解构）---
+def deep_match_levels(l1: Level1) -> str =
+    match l1:
+        Level1.Node1(child: Level2.Node2(child: Level3.Leaf3(value: v))) =>
+            f"deep_leaf:{v}"
+        Level1.Node1(child: Level2.Node2(child: Level3.Empty3)) =>
+            "deep_empty"
+        Level1.Node1(child: Level2.Pass2) =>
+            "pass"
+        Level1.Root1(value: v) =>
+            f"root:{v}"
+
+// --- 6. 嵌套集合类型 ---
+def nested_collections() =
+    let matrix: List<List<int>> = [[1, 2], [3, 4], [5, 6]]
+    let nested_dict: Dict<str, List<int>> = {"evens": [2, 4, 6], "odds": [1, 3, 5]}
+    let tuple_of_lists: (List<int>, List<str>) = ([1, 2, 3], ["a", "b"])
+    print(matrix[1][0])
+    print(nested_dict["evens"][2])
+    print(tuple_of_lists)
+
+// --- 7. 嵌套 Option/Result 类型 ---
+def deep_option_result(x: int) -> Result<Option<int>, str> =
+    if x < 0:
+        Result.Err(error: "negative")
+    elif x == 0:
+        Result.Ok(value: Option.None)
+    else:
+        Result.Ok(value: Option.Some(value: x))
+
+// --- 8. struct 内嵌 impl + 魔法方法 ---
+struct Counter =
+    count: int
+
+    def inc(mut self) -> int =
+        self.count += 1
+        self.count
+
+    def dec(mut self) -> int =
+        self.count -= 1
+        self.count
+
+    def __add__(self, other: Counter) -> Counter =
+        Counter(count: self.count + other.count)
+
+    def __str__(ref self) -> str =
+        f"Counter({self.count})"
+
+// --- 9. enum 嵌套 struct 作为变体数据 ---
+enum Shape3D:
+    Sphere(radius: f64)
+    Box3D(width: f64, height: f64, depth: f64)
+    Cylinder(radius: f64, height: f64)
+
+impl Shape3D =
+    def volume(self) -> f64 =
+        match self:
+            Shape3D.Sphere(radius: r) =>
+                4.0 / 3.0 * 3.14159 * r * r * r
+            Shape3D.Box3D(width: w, height: h, depth: d) =>
+                w * h * d
+            Shape3D.Cylinder(radius: r, height: h) =>
+                3.14159 * r * r * h
+
+// --- 10. 嵌套类型别名（泛型组合）---
+type Matrix = List<List<int>>
+type ResultDict = Dict<str, Result<int, str>>
+type MaybeNode<T> = Option<Node<T>>
+
+// --- 11. struct 方法内嵌套闭包和 match ---
+struct Processor =
+    factor: int
+
+    def transform(self, items: List<int>) -> List<int> =
+        let mapper = |x: int| -> int = x * self.factor
+        [mapper(item) for item in items if item > 0]
+
+    def classify(self, value: int) -> str =
+        match value:
+            case v if v < 0 => "negative"
+            case 0 => "zero"
+            case v if v < self.factor => "small"
+            case _ => "large"
+
+// --- main ---
+def main() =
+    print("=== nesting-data-types ===")
+
+    let outer = OuterData(
+        middle: MiddleData(
+            inner: InnerData(value: 42, label: "test"),
+            index: 1
+        ),
+        name: "root",
+        active: True
+    )
+    print(outer.middle.inner.value)
+    print(outer.middle.inner.label)
+
+    let l1a = Level1.Node1(child: Level2.Node2(child: Level3.Leaf3(value: 99)))
+    let l1b = Level1.Node1(child: Level2.Node2(child: Level3.Empty3))
+    let l1c = Level1.Node1(child: Level2.Pass2)
+    let l1d = Level1.Root1(value: 7)
+    print(deep_match_levels(l1a))
+    print(deep_match_levels(l1b))
+    print(deep_match_levels(l1c))
+    print(deep_match_levels(l1d))
+
+    nested_collections()
+
+    print(deep_option_result(-5))
+    print(deep_option_result(0))
+    print(deep_option_result(10))
+
+    let c1 = Counter(count: 10)
+    let c2 = Counter(count: 5)
+    let c3 = c1 + c2
+    print(c3)
+
+    let sphere = Shape3D.Sphere(radius: 2.0)
+    let box3d = Shape3D.Box3D(width: 2.0, height: 3.0, depth: 4.0)
+    let cyl = Shape3D.Cylinder(radius: 1.0, height: 5.0)
+    print(sphere.volume())
+    print(box3d.volume())
+    print(cyl.volume())
+
+    let proc = Processor(factor: 10)
+    print(proc.transform([1, -2, 3, 0, 5]))
+    print(proc.classify(-5))
+    print(proc.classify(5))
+    print(proc.classify(50))
+
+    print("nesting-data-types done")

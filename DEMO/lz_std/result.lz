@@ -1,0 +1,332 @@
+#!bin lz
+// ============================================================
+// lz_std/result.lz — Result<T, E> 枚举
+// 覆盖: SYNTAX/06b-enum定义.md, SYNTAX/09-错误处理.md
+// Result 表示操作可能成功 (Ok) 或失败 (Err)
+// ============================================================
+
+enum Result<T, E>:
+    /// 成功, 包含返回值
+    Ok(T)
+    /// 失败, 包含错误
+    Err(E)
+
+// ============================================================
+// Result 方法实现
+// ============================================================
+
+impl<T, E> Result<T, E> =
+
+    // --- 查询 ---
+
+    /// 是否为 Ok
+    def is_ok(ref self) -> bool =
+        match self:
+            case Ok(_):
+                return True
+            case Err(_):
+                return False
+
+    /// 是否为 Err
+    def is_err(ref self) -> bool =
+        match self:
+            case Ok(_):
+                return False
+            case Err(_):
+                return True
+
+    /// 是否为 Ok 且满足条件
+    def is_ok_and(ref self, predicate: fn(ref T) -> bool) -> bool =
+        match self:
+            case Ok(ref value):
+                return predicate(value)
+            case Err(_):
+                return False
+
+    /// 是否为 Err 且满足条件
+    def is_err_and(ref self, predicate: fn(ref E) -> bool) -> bool =
+        match self:
+            case Ok(_):
+                return False
+            case Err(ref error):
+                return predicate(error)
+            case _:
+                return False
+
+    // --- 提取 ---
+
+    /// 提取 Ok 值或 panic
+    def unwrap(self) -> T =
+        match self:
+            case Ok(value):
+                return value
+            case Err(_):
+                panic("called `Result.unwrap()` on an `Err` value")
+
+    /// 提取 Ok 值或返回默认值
+    def unwrap_or(self, default: T) -> T =
+        match self:
+            case Ok(value):
+                return value
+            case Err(_):
+                return default
+
+    /// 提取 Ok 值或用闭包计算默认值
+    def unwrap_or_else(self, f: fn(E) -> T) -> T =
+        match self:
+            case Ok(value):
+                return value
+            case Err(error):
+                return f(error)
+
+    /// 提取 Err 值或 panic
+    def unwrap_err(self) -> E =
+        match self:
+            case Ok(_):
+                panic("called `Result.unwrap_err()` on an `Ok` value")
+            case Err(error):
+                return error
+
+    /// 提取 Ok 值或用自定义消息 panic
+    def expect(self, msg: str) -> T =
+        match self:
+            case Ok(value):
+                return value
+            case Err(_):
+                panic(msg)
+
+    /// 提取 Err 值或用自定义消息 panic
+    def expect_err(self, msg: str) -> E =
+        match self:
+            case Ok(_):
+                panic(msg)
+            case Err(error):
+                return error
+
+    // --- 转换 ---
+
+    /// 映射 Ok 中的值
+    def map<U>(self, f: fn(T) -> U) -> Result<U, E> =
+        match self:
+            case Ok(value):
+                return Ok(f(value))
+            case Err(error):
+                return Err(error)
+
+    /// 映射或返回默认值
+    def map_or<U>(self, default: U, f: fn(T) -> U) -> U =
+        match self:
+            case Ok(value):
+                return f(value)
+            case Err(_):
+                return default
+
+    /// 映射或用闭包计算默认值
+    def map_or_else<U>(self, default_fn: fn(E) -> U, f: fn(T) -> U) -> U =
+        match self:
+            case Ok(value):
+                return f(value)
+            case Err(error):
+                return default_fn(error)
+
+    /// 映射 Err 中的错误
+    def map_err<F>(self, f: fn(E) -> F) -> Result<T, F> =
+        match self:
+            case Ok(value):
+                return Ok(value)
+            case Err(error):
+                return Err(f(error))
+
+    /// 返回此 Result 或另一个 Result
+    def and<U>(self, other: Result<U, E>) -> Result<U, E> =
+        match self:
+            case Ok(_):
+                return other
+            case Err(error):
+                return Err(error)
+
+    /// 链式调用: 如果是 Ok, 用闭包生成下一个 Result
+    def and_then<U>(self, f: fn(T) -> Result<U, E>) -> Result<U, E> =
+        match self:
+            case Ok(value):
+                return f(value)
+            case Err(error):
+                return Err(error)
+
+    /// 返回此 Result 或另一个 Result
+    def or<F>(self, other: Result<T, F>) -> Result<T, F> =
+        match self:
+            case Ok(value):
+                return Ok(value)
+            case Err(_):
+                return other
+
+    /// 返回此 Result 或用闭包生成另一个
+    def or_else<F>(self, f: fn(E) -> Result<T, F>) -> Result<T, F> =
+        match self:
+            case Ok(value):
+                return Ok(value)
+            case Err(error):
+                return f(error)
+
+    // --- 转换到 Option ---
+
+    /// 转换为 Option: Ok → Some, Err → None
+    def ok(self) -> Option<T> =
+        match self:
+            case Ok(value):
+                return Some(value)
+            case Err(_):
+                return None
+
+    /// 转换为 Option: Ok → None, Err → Some
+    def err(self) -> Option<E> =
+        match self:
+            case Ok(_):
+                return None
+            case Err(error):
+                return Some(error)
+
+    // --- 副作用 ---
+
+    /// 如果是 Ok, 执行副作用操作
+    def inspect(ref self, f: fn(ref T) -> ()) -> ref Self =
+        match self:
+            case Ok(ref value):
+                f(value)
+            case Err(_):
+                pass
+        return self
+
+    /// 如果是 Err, 执行副作用操作
+    def inspect_err(ref self, f: fn(ref E) -> ()) -> ref Self =
+        match self:
+            case Ok(_):
+                pass
+            case Err(ref error):
+                f(error)
+        return self
+
+    // --- 迭代 ---
+
+    /// 返回 0 或 1 个元素的迭代器 (仅 Ok 值)
+    def iter(ref self) -> ResultIter<ref T> =
+        ResultIter(inner: self.ok())
+
+    // --- 魔法方法 ---
+
+    /// 布尔判定: Ok = True, Err = False
+    def __bool__(ref self) -> bool =
+        self.is_ok()
+
+    /// 相等比较
+    def __eq__(ref self, ref other: Result<T, E>) -> bool
+        where T: Eq, E: Eq
+        =
+        match (self, other):
+            case (Ok(ref a), Ok(ref b)):
+                return a.__eq__(b)
+            case (Err(ref a), Err(ref b)):
+                return a.__eq__(b)
+            case _:
+                return False
+
+    /// 字符串表示
+    def __str__(ref self) -> str
+        where T: Display, E: Display
+        =
+        match self:
+            case Ok(ref value):
+                return "Ok(" + value.__str__() + ")"
+            case Err(ref error):
+                return "Err(" + error.__str__() + ")"
+
+
+// ============================================================
+// Result 迭代器
+// ============================================================
+
+struct ResultIter<T> =
+    inner: Option<T>
+
+impl<T> Iterator for ResultIter<T> =
+    type Item = T
+
+    def __next__(mut self) -> Option<T> =
+        let taken = self.inner
+        self.inner = None
+        return taken
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "is_ok and is_err":
+        let ok_val: Result<int, str> = Ok(42)
+        let err_val: Result<int, str> = Err("fail")
+        assert ok_val.is_ok()
+        assert not ok_val.is_err()
+        assert err_val.is_err()
+        assert not err_val.is_ok()
+
+    test "is_ok_and":
+        let val: Result<int, str> = Ok(10)
+        assert val.is_ok_and(|x: ref int| -> bool = x > 5)
+
+    test "unwrap":
+        let val: Result<int, str> = Ok(42)
+        assert val.unwrap() == 42
+
+    test "unwrap_or":
+        let val: Result<int, str> = Err("oops")
+        assert val.unwrap_or(0) == 0
+
+    test "unwrap_or_else":
+        let val: Result<int, str> = Err("bad")
+        let result = val.unwrap_or_else(|e: str| -> int = len(e))
+        assert result == 3
+
+    test "map":
+        let val: Result<int, str> = Ok(5)
+        let result = val.map(|x: int| -> int = x * 2)
+        assert result == Ok(10)
+
+    test "map_err":
+        let val: Result<int, str> = Err("oops")
+        let result = val.map_err(|e: str| -> str = "Error: " + e)
+        assert result == Err("Error: oops")
+
+    test "and_then":
+        def safe_div(a: int, b: int) -> Result<int, str>:
+            if b == 0:
+                return Err("division by zero")
+            return Ok(a / b)
+        let result = safe_div(10, 2)
+        let chained = result.and_then(|x: int| -> Result<int, str> = safe_div(x, 5))
+        assert chained == Ok(1)
+        let fail = result.and_then(|x: int| -> Result<int, str> = safe_div(x, 0))
+        assert fail == Err("division by zero")
+
+    test "or_else":
+        let a: Result<int, str> = Err("first")
+        let b: Result<int, str> = Err("second")
+        let c = a.or_else(|e: str| -> Result<int, str> = Ok(len(e)))
+        assert c == Ok(5)
+
+    test "ok and err":
+        let val: Result<int, str> = Ok(42)
+        assert val.ok() == Some(42)
+        assert val.err() == None
+        let err_val: Result<int, str> = Err("fail")
+        assert err_val.ok() == None
+        assert err_val.err() == Some("fail")
+
+    test "bool conversion":
+        let ok_val: Result<int, str> = Ok(1)
+        let err_val: Result<int, str> = Err("x")
+        assert ok_val.__bool__()
+        assert not err_val.__bool__()
+
+    print("result.lz — all tests passed!")

@@ -1,0 +1,318 @@
+#!bin lz
+// ============================================================
+// lz_std/string.lz — String 方法与工具函数
+// 覆盖: SYNTAX/01-类型系统.md, SYNTAX/06e-trait定义.md
+// 扩展 str 类型的常用操作
+// ============================================================
+
+// ============================================================
+// Str trait 的 str 类型实现 (impl 内建类型)
+// ============================================================
+
+impl str =
+
+    // --- 查询 ---
+
+    /// 字符串长度 (字符数)
+    def len(ref self) -> int =
+        // 内建: 由编译器映射到 len() 内建函数
+        len(self)
+
+    /// 是否为空字符串
+    def is_empty(ref self) -> bool =
+        self.len() == 0
+
+    /// 是否包含子串
+    def contains(ref self, substr: str) -> bool =
+        self.find(substr).is_some()
+
+    /// 是否以 prefix 开头
+    def starts_with(ref self, prefix: str) -> bool =
+        if prefix.len() > self.len():
+            return False
+        return self.slice(0, prefix.len()) == prefix
+
+    /// 是否以 suffix 结尾
+    def ends_with(ref self, suffix: str) -> bool =
+        if suffix.len() > self.len():
+            return False
+        let start = self.len() - suffix.len()
+        return self.slice(start, self.len()) == suffix
+
+    /// 查找子串位置 (返回起始索引, 未找到返回 None)
+    def find(ref self, substr: str) -> Option<int> =
+        if substr.is_empty():
+            return Some(0)
+        if substr.len() > self.len():
+            return None
+        let max_start = self.len() - substr.len()
+        let mut i = 0
+        while i <= max_start:
+            if self.slice(i, i + substr.len()) == substr:
+                return Some(i)
+            i = i + 1
+        return None
+
+    /// 从右侧查找子串位置
+    def rfind(ref self, substr: str) -> Option<int> =
+        if substr.is_empty():
+            return Some(self.len())
+        if substr.len() > self.len():
+            return None
+        let max_start = self.len() - substr.len()
+        let mut i = max_start
+        while i >= 0:
+            if self.slice(i, i + substr.len()) == substr:
+                return Some(i)
+            i = i - 1
+        return None
+
+    /// 获取指定位置的字符
+    def char_at(ref self, index: int) -> Option<str> =
+        if index < 0 or index >= self.len():
+            return None
+        return Some(self.slice(index, index + 1))
+
+    // --- 切片 ---
+
+    /// 切片 [start, end)
+    def slice(ref self, start: int, end: int) -> str =
+        // 内建: 编译器映射
+        self[start..end]
+
+    /// 从 start 到结尾的切片
+    def slice_from(ref self, start: int) -> str =
+        self.slice(start, self.len())
+
+    /// 从开头到 end 的切片
+    def slice_to(ref self, end: int) -> str =
+        self.slice(0, end)
+
+    // --- 修改 (返回新字符串) ---
+
+    /// 替换所有匹配的子串
+    def replace(ref self, from: str, to: str) -> str =
+        if from.is_empty():
+            return self
+        let mut result = ""
+        let mut pos = 0
+        while pos < self.len():
+            match self.slice_from(pos).find(from):
+                case Some(idx):
+                    let abs_idx = pos + idx
+                    result = result + self.slice(pos, abs_idx) + to
+                    pos = abs_idx + from.len()
+                case None:
+                    result = result + self.slice_from(pos)
+                    break
+        return result
+
+    /// 去除首尾空白字符
+    def trim(ref self) -> str =
+        self.trim_start().trim_end()
+
+    /// 去除开头空白字符
+    def trim_start(ref self) -> str =
+        let mut start = 0
+        while start < self.len() and self.char_at(start).unwrap_or(" ").is_whitespace():
+            start = start + 1
+        return self.slice_from(start)
+
+    /// 去除结尾空白字符
+    def trim_end(ref self) -> str =
+        let mut end = self.len()
+        while end > 0 and self.char_at(end - 1).unwrap_or(" ").is_whitespace():
+            end = end - 1
+        return self.slice_to(end)
+
+    /// 是否空白字符
+    def is_whitespace(ref self) -> bool =
+        self == " " or self == "\t" or self == "\n" or self == "\r"
+
+    /// 转为小写
+    def to_lower(ref self) -> str =
+        // 内建: 编译器映射
+        self.lower()
+
+    /// 转为大写
+    def to_upper(ref self) -> str =
+        // 内建: 编译器映射
+        self.upper()
+
+    /// 重复 n 次
+    def repeat(ref self, n: int) -> str =
+        let mut result = ""
+        let mut i = 0
+        while i < n:
+            result = result + self
+            i = i + 1
+        return result
+
+    // --- 分割与连接 ---
+
+    /// 按分隔符分割为 List<str>
+    def split(ref self, delimiter: str) -> List<str> =
+        let mut result = List()
+        if delimiter.is_empty():
+            // 按字符分割
+            let mut i = 0
+            while i < self.len():
+                result.push(self.slice(i, i + 1))
+                i = i + 1
+            return result
+        let mut pos = 0
+        while pos <= self.len():
+            match self.slice_from(pos).find(delimiter):
+                case Some(idx):
+                    result.push(self.slice(pos, pos + idx))
+                    pos = pos + idx + delimiter.len()
+                case None:
+                    result.push(self.slice_from(pos))
+                    break
+        return result
+
+    /// 按换行符分割为多行
+    def lines(ref self) -> List<str> =
+        self.split("\n")
+
+    // --- 字符迭代 ---
+
+    /// 返回字符迭代器
+    def chars(ref self) -> CharIter =
+        CharIter(s: self, pos: 0)
+
+    // --- 魔法方法 ---
+
+    def __len__(ref self) -> int =
+        self.len()
+
+    def __add__(self, other: str) -> str =
+        // 内建: 编译器映射为字符串连接
+        self + other
+
+    def __eq__(ref self, ref other: str) -> bool =
+        self.len() == other.len() and self.starts_with(other)
+
+    def __str__(ref self) -> str =
+        self
+
+
+// ============================================================
+// 字符迭代器
+// ============================================================
+
+struct CharIter =
+    s: str
+    pos: int
+
+impl Iterator for CharIter =
+    type Item = str
+
+    def __next__(mut self) -> Option<str> =
+        if self.pos >= self.s.len():
+            return None
+        let ch = self.s.slice(self.pos, self.pos + 1)
+        self.pos = self.pos + 1
+        return Some(ch)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.s.len() - self.pos
+        return (remaining, Some(remaining))
+
+
+// ============================================================
+// 全局字符串工具函数
+// ============================================================
+
+/// 连接字符串列表
+def join(parts: List<str>, separator: str) -> str =
+    if parts.is_empty():
+        return ""
+    let mut result = parts.first().unwrap_or("")
+    let mut i = 1
+    while i < parts.len():
+        result = result + separator + parts.get(i).unwrap_or("")
+        i = i + 1
+    return result
+
+/// 格式化 (简单版本, 替换 {})
+def format(template: str, args: List<str>) -> str =
+    let mut result = ""
+    let mut pos = 0
+    let mut arg_idx = 0
+    while pos < template.len():
+        match template.slice_from(pos).find("{}"):
+            case Some(idx):
+                result = result + template.slice(pos, pos + idx)
+                if arg_idx < args.len():
+                    result = result + args.get(arg_idx).unwrap_or("")
+                    arg_idx = arg_idx + 1
+                pos = pos + idx + 2
+            case None:
+                result = result + template.slice_from(pos)
+                break
+    return result
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "len and is_empty":
+        assert "hello".len() == 5
+        assert "".is_empty()
+        assert not "x".is_empty()
+
+    test "contains":
+        assert "hello world".contains("world")
+        assert not "hello".contains("xyz")
+
+    test "starts_with and ends_with":
+        assert "hello.txt".starts_with("hello")
+        assert "hello.txt".ends_with(".txt")
+        assert not "hello.txt".ends_with(".md")
+
+    test "find and rfind":
+        assert "hello hello".find("hello") == Some(0)
+        assert "hello hello".rfind("hello") == Some(6)
+        assert "abc".find("xyz") == None
+
+    test "slice":
+        assert "hello".slice(1, 4) == "ell"
+        assert "hello".slice_from(2) == "llo"
+        assert "hello".slice_to(3) == "hel"
+
+    test "replace":
+        assert "hello world".replace("world", "lz") == "hello lz"
+        assert "aaa".replace("a", "b") == "bbb"
+
+    test "trim":
+        assert "  hello  ".trim() == "hello"
+        assert "  hello".trim_start() == "hello"
+        assert "hello  ".trim_end() == "hello"
+
+    test "to_upper and to_lower":
+        assert "Hello".to_upper() == "HELLO"
+        assert "Hello".to_lower() == "hello"
+
+    test "repeat":
+        assert "ab".repeat(3) == "ababab"
+
+    test "split":
+        let parts = "a,b,c".split(",")
+        assert parts == ["a", "b", "c"]
+
+    test "chars iteration":
+        let mut result = ""
+        for ch in "abc".chars():
+            result = result + ch
+        assert result == "abc"
+
+    test "join":
+        assert join(["a", "b", "c"], "-") == "a-b-c"
+
+    test "format":
+        assert format("Hello, {}!", ["World"]) == "Hello, World!"
+
+    print("string.lz — all tests passed!")

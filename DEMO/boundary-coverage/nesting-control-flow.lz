@@ -1,0 +1,175 @@
+// ============================================================
+// boundary-coverage: 控制流深度嵌套测试
+// 覆盖: if/elif/else、for、while、loop、match、break/continue
+// 的深层嵌套组合（3-4 层嵌套）
+// ============================================================
+
+// --- 1. 四层嵌套 if/elif/else ---
+def deep_if(a: int, b: int, c: int, d: int) -> str =
+    if a > 0:
+        if b > 0:
+            if c > 0:
+                if d > 0:
+                    "all_positive"
+                else:
+                    "abc_pos_d_nonpos"
+            else:
+                if d > 0:
+                    "ab_pos_c_nonpos_d_pos"
+                else:
+                    "ab_pos_cd_nonpos"
+        else:
+            if c > 0:
+                if d > 0:
+                    "a_pos_b_nonpos_cd_pos"
+                else:
+                    "a_pos_b_nonpos_c_pos_d_nonpos"
+            else:
+                "a_pos_bc_nonpos"
+    else:
+        if b > 0:
+            if c > 0:
+                if d > 0:
+                    "a_nonpos_bcd_pos"
+                else:
+                    "a_nonpos_bc_pos_d_nonpos"
+            else:
+                "a_nonpos_b_pos_c_nonpos"
+        else:
+            "a_nonpos_b_nonpos"
+
+// --- 2. 三层嵌套 for + if 守卫 ---
+def nested_for_if(limit: int) -> int =
+    let mut total = 0
+    for i in 0..limit:
+        for j in 0..limit:
+            for k in 0..limit:
+                if i + j + k < limit:
+                    total += 1
+    total
+
+// --- 3. for 嵌套 while 嵌套 if ---
+def for_while_if(data: List<int>) -> int =
+    let mut sum = 0
+    for item in data:
+        let mut counter = item
+        while counter > 0:
+            if counter % 2 == 0:
+                sum += counter
+            counter -= 1
+    sum
+
+// --- 4. while 内嵌 for 内嵌 match ---
+def while_for_match(n: int) -> int =
+    let mut result = 0
+    let mut i = 0
+    while i < n:
+        for j in 0..n:
+            let add = match j % 3:
+                case 0:
+                    j
+                case 1:
+                    j * 2
+                case _:
+                    1
+            result += add
+        i += 1
+    result
+
+// --- 5. match 内嵌 if/elif/else ---
+def match_with_if(x: int, y: int) -> str =
+    match x:
+        case 0 =>
+            if y > 0:
+                "zero_pos"
+            elif y < 0:
+                "zero_neg"
+            else:
+                "zero_zero"
+        case 1 =>
+            if y > 0:
+                "one_pos"
+            else:
+                "one_nonpos"
+        case _ =>
+            if y == 0:
+                "other_zero"
+            elif y > 100:
+                "other_large"
+            else:
+                "other"
+
+// --- 6. 嵌套循环 + break（带值）+ continue ---
+def nested_break_continue(target: int) -> int =
+    let mut found = -1
+    for i in 0..10:
+        for j in 0..10:
+            if i * 10 + j == target:
+                found = i * 100 + j
+                break
+        if found != -1:
+            break
+    found
+
+// --- 7. 循环 + else 分支（for/else, while/else）---
+def loop_with_else(limit: int) -> str =
+    let mut i = 0
+    while i < limit:
+        if i == 5:
+            return "broke_at_5"
+        i += 1
+    else:
+        return "completed"
+
+def for_with_else(items: List<int>) -> str =
+    for item in items:
+        if item == 0:
+            return "found_zero"
+    else:
+        return "no_zero"
+
+// --- 8. match 块体嵌套 match 表达式 ---
+def nested_match_expr(x: int, y: int) -> int =
+    match x:
+        case 0:
+            match y:
+                case 0:
+                    0
+                case _:
+                    -1
+        case 1:
+            match y:
+                case 0:
+                    -1
+                case _:
+                    1
+        case _:
+            x + y
+
+// --- 9. main ---
+def main() =
+    print("=== nesting-control-flow ===")
+
+    print(deep_if(1, 2, 3, 4))
+    print(deep_if(1, 2, -1, 4))
+    print(deep_if(-1, 2, 3, 4))
+    print(deep_if(-1, -1, -1, -1))
+
+    print(nested_for_if(3))
+    print(for_while_if([2, 3]))
+    print(while_for_match(3))
+    print(match_with_if(0, 5))
+    print(match_with_if(1, -1))
+    print(match_with_if(99, 200))
+    print(nested_break_continue(25))
+    print(nested_break_continue(999))
+    print(loop_with_else(3))
+    print(loop_with_else(10))
+    print(for_with_else([1, 2, 3]))
+    print(for_with_else([1, 0, 3]))
+    print(nested_match_expr(0, 0))
+    print(nested_match_expr(0, 1))
+    print(nested_match_expr(1, 0))
+    print(nested_match_expr(1, 1))
+    print(nested_match_expr(5, 3))
+    print("nesting-control-flow done")

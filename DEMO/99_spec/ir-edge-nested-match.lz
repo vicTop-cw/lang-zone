@@ -2,11 +2,11 @@
 // IR边界测试: 深度嵌套match
 // ============================
 
-enum Option2 =
+enum Option2:
     Some2(value: int)
     None2
 
-enum NestedEnum =
+enum NestedEnum:
     Inner(value: Option2)
     Outer(value: Option2)
 

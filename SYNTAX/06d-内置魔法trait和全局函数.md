@@ -1,6 +1,6 @@
 # LZ 魔法方法 — 内置魔法 Trait 和全局函数
 
-> 规范版本: 3.2 · 基于编译器源码 · 最后校订: 2026-07-31
+> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-04
 
 本文档列举 Lang-Zone 编译器内置的全部魔法方法（`__xxx__`），以及它们自动生成的 trait 与对应的 Rust trait。
 
@@ -341,8 +341,8 @@ struct MyFile =
     path: str
     def __enter__(self) -> File =
         open(self.path)                     // self 被消费, 返回 File guard
-    def __exit__(mut self, guard: File) =
-        guard.close()                       // 在 guard 上清理
+    def __exit__(mut self, _guard: File) =
+        _guard.close()                       // 在 guard 上清理
 ```
 
 > 与 Python 协议的关键区别: `__exit__` 接收 guard 值而非 `self`（因为 `__enter__` 已将 `self` 消费），且不接收异常三元组（LZ 用 `try/catch` 替代 `with` 内的异常处理）。

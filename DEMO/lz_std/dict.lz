@@ -1,0 +1,377 @@
+#!bin lz
+// ============================================================
+// lz_std/dict.lz — Dict<K, V> 方法与工具
+// 覆盖: SYNTAX/01-类型系统.md
+// 扩展 Dict 类型的完整操作集合
+// ============================================================
+
+impl<K, V> Dict<K, V> =
+
+    // --- 查询 ---
+
+    /// 键值对数量
+    def len(ref self) -> int =
+        len(self)
+
+    /// 是否为空
+    def is_empty(ref self) -> bool =
+        self.len() == 0
+
+    /// 获取键对应的值 (安全)
+    def get(ref self, key: ref K) -> Option<ref V>
+        where K: Eq + Hash
+        =
+        if self.contains_key(key):
+            return Some(self[key])
+        return None
+
+    /// 是否包含指定键
+    def contains_key(ref self, key: ref K) -> bool
+        where K: Eq + Hash
+        =
+        // 内建: 编译器映射
+        key in self
+
+    /// 获取所有键
+    def keys(ref self) -> List<K> =
+        let mut result = List()
+        for (k, _) in self:
+            result.push(k)
+        return result
+
+    /// 获取所有值
+    def values(ref self) -> List<V> =
+        let mut result = List()
+        for (_, v) in self:
+            result.push(v)
+        return result
+
+    /// 获取所有键值对
+    def items(ref self) -> List<(K, V)> =
+        let mut result = List()
+        for (k, v) in self:
+            result.push((k, v))
+        return result
+
+    // --- 修改 ---
+
+    /// 插入键值对 (如果键已存在则更新)
+    def insert(mut self, key: K, value: V) =
+        // 内建: 编译器映射
+        self[key] = value
+
+    /// 移除键 (返回被移除的值)
+    def remove(mut self, key: ref K) -> Option<V>
+        where K: Eq + Hash
+        =
+        match self.get(key):
+            case Some(value):
+                let removed = value
+                // 内建: 编译器从 self 中移除 key 并返回值
+                return Some(removed)
+            case None:
+                return None
+
+    /// 清空所有键值对
+    def clear(mut self) =
+        // 内建: 编译器映射
+        self.clear()
+
+    /// 仅当键不存在时插入
+    def set_default(mut self, key: K, default: V) -> ref V
+        where K: Eq + Hash
+        =
+        if not self.contains_key(key):
+            self.insert(key, default)
+        return self[key]
+
+    /// 从另一个 Dict 更新键值对
+    def update(mut self, other: Dict<K, V>)
+        where K: Eq + Hash
+        =
+        for (k, v) in other:
+            self.insert(k, v)
+
+    // --- 转换 ---
+
+    /// 映射值 (保留键)
+    def map_values<U>(ref self, f: fn(ref V) -> U) -> Dict<K, U>
+        where K: Eq + Hash
+        =
+        let mut result = Dict()
+        for (k, v) in self:
+            result.insert(k, f(v))
+        return result
+
+    /// 映射键值对
+    def map<K2, V2>(ref self, f: fn(ref K, ref V) -> (K2, V2)) -> Dict<K2, V2>
+        where K2: Eq + Hash
+        =
+        let mut result = Dict()
+        for (k, v) in self:
+            let (new_k, new_v) = f(k, v)
+            result.insert(new_k, new_v)
+        return result
+
+    /// 过滤键值对
+    def filter(ref self, predicate: fn(ref K, ref V) -> bool) -> Dict<K, V>
+        where K: Eq + Hash
+        =
+        let mut result = Dict()
+        for (k, v) in self:
+            if predicate(k, v):
+                result.insert(k, v)
+        return result
+
+    /// 保留满足条件的键值对
+    def retain(mut self, predicate: fn(ref K, ref V) -> bool)
+        where K: Eq + Hash
+        =
+        let mut keys_to_remove = List()
+        for (k, v) in self:
+            if not predicate(k, v):
+                keys_to_remove.push(k)
+        for k in keys_to_remove:
+            _ = self.remove(k)
+
+    // --- 聚合 ---
+
+    /// 折叠归约
+    def fold<U>(ref self, init: U, f: fn(U, ref K, ref V) -> U) -> U =
+        let mut acc = init
+        for (k, v) in self:
+            acc = f(acc, k, v)
+        return acc
+
+    // --- 迭代 ---
+
+    /// 返回键值对迭代器
+    def iter(ref self) -> DictIter<ref K, ref V> =
+        DictIter(dict: self, keys: self.keys(), index: 0)
+
+    /// 返回键迭代器
+    def iter_keys(ref self) -> DictKeyIter<ref K, ref V> =
+        DictKeyIter(dict: self, keys: self.keys(), index: 0)
+
+    /// 返回值迭代器
+    def iter_values(ref self) -> DictValueIter<ref K, ref V> =
+        DictValueIter(dict: self, keys: self.keys(), index: 0)
+
+    // --- 魔法方法 ---
+
+    def __len__(ref self) -> int =
+        self.len()
+
+    def __getitem__(ref self, key: K) -> ref V
+        where K: Eq + Hash
+        =
+        // 内建: 编译器映射
+        self[key]
+
+    def __setitem__(mut self, key: K, value: V)
+        where K: Eq + Hash
+        =
+        // 内建: 编译器映射
+        self[key] = value
+
+    def __iter__(ref self) -> DictIter<ref K, ref V> =
+        self.iter()
+
+    def __contains__(ref self, key: ref K) -> bool
+        where K: Eq + Hash
+        =
+        self.contains_key(key)
+
+    def __eq__(ref self, ref other: Dict<K, V>) -> bool
+        where K: Eq + Hash, V: Eq
+        =
+        if self.len() != other.len():
+            return False
+        for (k, v) in self:
+            match other.get(k):
+                case Some(ref other_v):
+                    if v != other_v:
+                        return False
+                case None:
+                    return False
+        return True
+
+    def __str__(ref self) -> str
+        where K: Display, V: Display
+        =
+        if self.is_empty():
+            return "{}"
+        let mut result = "{"
+        let mut first = True
+        for (k, v) in self:
+            if not first:
+                result = result + ", "
+            result = result + k.__str__() + ": " + v.__str__()
+            first = False
+        return result + "}"
+
+
+// ============================================================
+// Dict 迭代器
+// ============================================================
+
+struct DictIter<K, V> =
+    dict: Dict<K, V>
+    keys: List<K>
+    index: int
+
+impl<K, V> Iterator for DictIter<K, V> =
+    type Item = (K, V)
+
+    def __next__(mut self) -> Option<(K, V)> =
+        if self.index >= self.keys.len():
+            return None
+        let key = self.keys[self.index]
+        let value = self.dict[key]
+        self.index = self.index + 1
+        return Some((key, value))
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.keys.len() - self.index
+        return (remaining, Some(remaining))
+
+
+struct DictKeyIter<K, V> =
+    dict: Dict<K, V>
+    keys: List<K>
+    index: int
+
+impl<K, V> Iterator for DictKeyIter<K, V> =
+    type Item = K
+
+    def __next__(mut self) -> Option<K> =
+        if self.index >= self.keys.len():
+            return None
+        let key = self.keys[self.index]
+        self.index = self.index + 1
+        return Some(key)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.keys.len() - self.index
+        return (remaining, Some(remaining))
+
+
+struct DictValueIter<K, V> =
+    dict: Dict<K, V>
+    keys: List<K>
+    index: int
+
+impl<K, V> Iterator for DictValueIter<K, V> =
+    type Item = V
+
+    def __next__(mut self) -> Option<V> =
+        if self.index >= self.keys.len():
+            return None
+        let key = self.keys[self.index]
+        let value = self.dict[key]
+        self.index = self.index + 1
+        return Some(value)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.keys.len() - self.index
+        return (remaining, Some(remaining))
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "insert and get":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("a", 1)
+        d.insert("b", 2)
+        assert d.get("a") == Some(1)
+        assert d.get("c") == None
+
+    test "contains_key":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("x", 10)
+        assert d.contains_key("x")
+        assert not d.contains_key("y")
+
+    test "len and is_empty":
+        let mut d: Dict<str, int> = Dict()
+        assert d.is_empty()
+        d.insert("k", 1)
+        assert d.len() == 1
+        assert not d.is_empty()
+
+    test "keys values items":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("a", 1)
+        d.insert("b", 2)
+        let ks = d.keys()
+        ks.sort()
+        assert ks == ["a", "b"]
+        let vs = d.values()
+        vs.sort()
+        assert vs == [1, 2]
+
+    test "remove":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("a", 1)
+        d.insert("b", 2)
+        assert d.remove("a") == Some(1)
+        assert d.get("a") == None
+        assert d.remove("z") == None
+
+    test "set_default":
+        let mut d: Dict<str, int> = Dict()
+        let v1 = d.set_default("a", 10)
+        assert v1 == 10
+        let v2 = d.set_default("a", 20)
+        assert v2 == 10
+
+    test "update":
+        let mut d1: Dict<str, int> = Dict()
+        d1.insert("a", 1)
+        let mut d2: Dict<str, int> = Dict()
+        d2.insert("b", 2)
+        d2.insert("c", 3)
+        d1.update(d2)
+        assert d1.len() == 3
+        assert d1.get("b") == Some(2)
+
+    test "map_values":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("a", 1)
+        d.insert("b", 2)
+        let doubled = d.map_values(|v: ref int| -> int = v * 2)
+        assert doubled.get("a") == Some(2)
+        assert doubled.get("b") == Some(4)
+
+    test "filter":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("a", 1)
+        d.insert("b", 2)
+        d.insert("c", 3)
+        let filtered = d.filter(|k: ref str, v: ref int| -> bool = v > 1)
+        assert filtered.len() == 2
+        assert not filtered.contains_key("a")
+
+    test "fold":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("a", 1)
+        d.insert("b", 2)
+        let sum = d.fold(0, |acc: int, k: ref str, v: ref int| -> int = acc + v)
+        assert sum == 3
+
+    test "iteration":
+        let mut d: Dict<str, int> = Dict()
+        d.insert("x", 10)
+        d.insert("y", 20)
+        let mut count = 0
+        let mut total = 0
+        for (k, v) in d:
+            count = count + 1
+            total = total + v
+        assert count == 2
+        assert total == 30
+
+    print("dict.lz — all tests passed!")

@@ -1,0 +1,433 @@
+#!bin lz
+// ============================================================
+// lz_std/math.lz — 数学模块
+// 覆盖: SYNTAX/04-表达式.md
+// 提供数学常量、基本函数、三角函数、取整、数论等
+// ============================================================
+
+// ============================================================
+// 数学常量
+// ============================================================
+
+const PI: f64 = 3.141592653589793
+const E: f64 = 2.718281828459045
+const TAU: f64 = 6.283185307179586
+const PHI: f64 = 1.618033988749895  // 黄金比例
+const SQRT2: f64 = 1.4142135623730951
+const INFINITY: f64 = 1.0 / 0.0
+const NAN: f64 = 0.0 / 0.0
+
+// ============================================================
+// 基本函数
+// ============================================================
+
+/// 绝对值
+def abs(x: int) -> int =
+    if x < 0:
+        return -x
+    return x
+
+def abs_f64(x: f64) -> f64 =
+    if x < 0.0:
+        return -x
+    return x
+
+/// 最小值 (可变参数版本通过重载)
+def min_i32(a: int, b: int) -> int =
+    if a < b:
+        return a
+    return b
+
+/// 最大值
+def max_i32(a: int, b: int) -> int =
+    if a > b:
+        return a
+    return b
+
+def max_f64(a: f64, b: f64) -> f64 =
+    if a > b:
+        return a
+    return b
+
+def min_f64(a: f64, b: f64) -> f64 =
+    if a < b:
+        return a
+    return b
+
+/// 限制值在范围内
+def clamp_i32(value: int, lo: int, hi: int) -> int =
+    if value < lo:
+        return lo
+    elif value > hi:
+        return hi
+    return value
+
+def clamp_f64(value: f64, lo: f64, hi: f64) -> f64 =
+    if value < lo:
+        return lo
+    elif value > hi:
+        return hi
+    return value
+
+/// 符号函数
+def sign(x: int) -> int =
+    if x > 0:
+        return 1
+    elif x < 0:
+        return -1
+    return 0
+
+def sign_f64(x: f64) -> f64 =
+    if x > 0.0:
+        return 1.0
+    elif x < 0.0:
+        return -1.0
+    return 0.0
+
+// ============================================================
+// 幂与对数
+// ============================================================
+
+/// 整数幂
+def pow_int(base: int, exp: int) -> int =
+    if exp < 0:
+        return 0
+    let mut result = 1
+    let mut e = exp
+    let mut b = base
+    while e > 0:
+        if e % 2 == 1:
+            result = result * b
+        b = b * b
+        e = e / 2
+    return result
+
+/// 平方根 (牛顿迭代法)
+def sqrt(x: f64) -> f64 =
+    if x < 0.0:
+        return NAN
+    if x == 0.0:
+        return 0.0
+    let mut guess = x
+    let mut i = 0
+    while i < 100:
+        let next_guess = (guess + x / guess) / 2.0
+        if abs_f64(next_guess - guess) < 0.0000000001:
+            return next_guess
+        guess = next_guess
+        i = i + 1
+    return guess
+
+/// 立方根
+def cbrt(x: f64) -> f64 =
+    if x == 0.0:
+        return 0.0
+    let sign = if x < 0.0: -1.0 else 1.0
+    let abs_x = abs_f64(x)
+    let mut guess = abs_x
+    let mut i = 0
+    while i < 100:
+        let next_guess = (2.0 * guess + abs_x / (guess * guess)) / 3.0
+        if abs_f64(next_guess - guess) < 0.0000000001:
+            return sign * next_guess
+        guess = next_guess
+        i = i + 1
+    return sign * guess
+
+/// e 的 x 次方 (泰勒级数)
+def exp(x: f64) -> f64 =
+    let mut result = 1.0
+    let mut term = 1.0
+    let mut n = 1
+    while n < 50:
+        term = term * x / (n as f64)
+        result = result + term
+        if abs_f64(term) < 0.000000000000001:
+            break
+        n = n + 1
+    return result
+
+/// 自然对数 (ln)
+def ln(x: f64) -> f64 =
+    if x <= 0.0:
+        return NAN
+    if x == 1.0:
+        return 0.0
+    // 使用级数展开: ln(x) = 2 * sum(((x-1)/(x+1))^(2n+1) / (2n+1))
+    let y = (x - 1.0) / (x + 1.0)
+    let y2 = y * y
+    let mut result = 0.0
+    let mut term = y
+    let mut n = 0
+    while n < 100:
+        result = result + term / (2.0 * (n as f64) + 1.0)
+        term = term * y2
+        if abs_f64(term) < 0.000000000000001:
+            break
+        n = n + 1
+    return 2.0 * result
+
+/// 以 2 为底的对数
+def log2(x: f64) -> f64 =
+    ln(x) / ln(2.0)
+
+/// 以 10 为底的对数
+def log10(x: f64) -> f64 =
+    ln(x) / ln(10.0)
+
+/// 任意底数的对数
+def log(base: f64, x: f64) -> f64 =
+    ln(x) / ln(base)
+
+/// x 的 y 次方
+def pow_f64(x: f64, y: f64) -> f64 =
+    exp(y * ln(x))
+
+// ============================================================
+// 三角函数
+// ============================================================
+
+/// 正弦 (泰勒级数)
+def sin(x: f64) -> f64 =
+    // 将 x 归一化到 [-PI, PI]
+    let x_norm = x - (x / TAU).floor() * TAU
+    let mut result = x_norm
+    let mut term = x_norm
+    let mut n = 1
+    while n < 20:
+        term = -term * x_norm * x_norm / ((2.0 * (n as f64)) * (2.0 * (n as f64) + 1.0))
+        result = result + term
+        if abs_f64(term) < 0.000000000000001:
+            break
+        n = n + 1
+    return result
+
+/// 余弦
+def cos(x: f64) -> f64 =
+    sin(PI / 2.0 - x)
+
+/// 正切
+def tan(x: f64) -> f64 =
+    sin(x) / cos(x)
+
+/// 反正弦
+def asin(x: f64) -> f64 =
+    if x < -1.0 or x > 1.0:
+        return NAN
+    // 牛顿法求解 sin(y) - x = 0
+    let mut y = x
+    let mut i = 0
+    while i < 50:
+        let next = y - (sin(y) - x) / cos(y)
+        if abs_f64(next - y) < 0.000000000001:
+            return next
+        y = next
+        i = i + 1
+    return y
+
+/// 反余弦
+def acos(x: f64) -> f64 =
+    PI / 2.0 - asin(x)
+
+/// 反正切
+def atan(x: f64) -> f64 =
+    // 使用级数: atan(x) = x - x^3/3 + x^5/5 - ...
+    if abs_f64(x) > 1.0:
+        let sign_x = if x > 0.0: 1.0 else -1.0
+        return sign_x * PI / 2.0 - atan(1.0 / x)
+    let x2 = x * x
+    let mut result = x
+    let mut term = x
+    let mut n = 1
+    while n < 100:
+        term = -term * x2
+        result = result + term / (2.0 * (n as f64) + 1.0)
+        if abs_f64(term) < 0.000000000000001:
+            break
+        n = n + 1
+    return result
+
+/// 四象限反正切
+def atan2(y: f64, x: f64) -> f64 =
+    if x > 0.0:
+        return atan(y / x)
+    elif x < 0.0:
+        if y >= 0.0:
+            return atan(y / x) + PI
+        return atan(y / x) - PI
+    else:
+        if y > 0.0:
+            return PI / 2.0
+        elif y < 0.0:
+            return -PI / 2.0
+        return 0.0
+
+// ============================================================
+// 取整
+// ============================================================
+
+/// 向下取整
+def floor(x: f64) -> int =
+    let i = x as int
+    if x >= 0.0 or x == (i as f64):
+        return i
+    return i - 1
+
+/// 向上取整
+def ceil(x: f64) -> int =
+    let i = x as int
+    if x <= 0.0 or x == (i as f64):
+        return i
+    return i + 1
+
+/// 四舍五入
+def round(x: f64) -> int =
+    floor(x + 0.5)
+
+/// 截断 (向零取整)
+def trunc(x: f64) -> int =
+    x as int
+
+/// 小数部分
+def fract(x: f64) -> f64 =
+    x - (x as int) as f64
+
+// ============================================================
+// 数论
+// ============================================================
+
+/// 最大公约数 (欧几里得算法)
+def gcd(a: int, b: int) -> int =
+    let mut x = abs(a)
+    let mut y = abs(b)
+    while y != 0:
+        let temp = y
+        y = x % y
+        x = temp
+    return x
+
+/// 最小公倍数
+def lcm(a: int, b: int) -> int =
+    if a == 0 or b == 0:
+        return 0
+    abs(a * b) / gcd(a, b)
+
+/// 是否为质数
+def is_prime(n: int) -> bool =
+    if n < 2:
+        return False
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+    let limit = sqrt(n as f64) as int + 1
+    let mut i = 3
+    while i <= limit:
+        if n % i == 0:
+            return False
+        i = i + 2
+    return True
+
+/// 阶乘
+def factorial(n: int) -> int =
+    if n < 0:
+        return 0
+    let mut result = 1
+    let mut i = 2
+    while i <= n:
+        result = result * i
+        i = i + 1
+    return result
+
+/// 斐波那契数
+def fibonacci(n: int) -> int =
+    if n < 0:
+        return 0
+    if n <= 1:
+        return n
+    let mut a = 0
+    let mut b = 1
+    let mut i = 2
+    while i <= n:
+        let c = a + b
+        a = b
+        b = c
+        i = i + 1
+    return b
+
+// ============================================================
+// 弧度与角度转换
+// ============================================================
+
+/// 角度转弧度
+def radians(degrees: f64) -> f64 =
+    degrees * PI / 180.0
+
+/// 弧度转角度
+def degrees(radians: f64) -> f64 =
+    radians * 180.0 / PI
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "abs and sign":
+        assert abs(-5) == 5
+        assert abs(3) == 3
+        assert sign(-10) == -1
+        assert sign(0) == 0
+        assert sign(7) == 1
+
+    test "min max clamp":
+        assert min_i32(3, 7) == 3
+        assert max_i32(3, 7) == 7
+        assert clamp_i32(5, 0, 10) == 5
+        assert clamp_i32(-1, 0, 10) == 0
+        assert clamp_i32(15, 0, 10) == 10
+
+    test "pow_int":
+        assert pow_int(2, 3) == 8
+        assert pow_int(5, 0) == 1
+        assert pow_int(3, 4) == 81
+
+    test "sqrt":
+        assert abs_f64(sqrt(4.0) - 2.0) < 0.0001
+        assert abs_f64(sqrt(2.0) - 1.41421356237) < 0.0001
+        assert sqrt(0.0) == 0.0
+
+    test "gcd and lcm":
+        assert gcd(12, 8) == 4
+        assert gcd(7, 13) == 1
+        assert lcm(4, 6) == 12
+
+    test "is_prime":
+        assert is_prime(2)
+        assert is_prime(3)
+        assert is_prime(17)
+        assert not is_prime(1)
+        assert not is_prime(4)
+        assert not is_prime(100)
+
+    test "factorial":
+        assert factorial(0) == 1
+        assert factorial(1) == 1
+        assert factorial(5) == 120
+
+    test "fibonacci":
+        assert fibonacci(0) == 0
+        assert fibonacci(1) == 1
+        assert fibonacci(10) == 55
+
+    test "floor ceil round":
+        assert floor(3.7) == 3
+        assert ceil(3.2) == 4
+        assert round(3.4) == 3
+        assert round(3.6) == 4
+        assert trunc(-3.7) == -3
+
+    test "radians degrees":
+        assert abs_f64(degrees(PI) - 180.0) < 0.0001
+        assert abs_f64(radians(180.0) - PI) < 0.0001
+
+    print("math.lz — all tests passed!")

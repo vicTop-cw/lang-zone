@@ -1,0 +1,153 @@
+// ============================================================
+// boundary-coverage: struct + 方法 + match + guard + try 组合
+// 覆盖: struct 方法链 + match、struct + guard let、
+//      struct + try、泛型 struct + 闭包方法、impl 组合
+// ============================================================
+
+// --- 1. struct + guard let + try ---
+struct User =
+    id: int
+    name: str
+
+    def validate(self) -> bool =
+        self.id > 0 and self.name != ""
+
+def process_user(u: User) -> str =
+    guard u.validate() else:
+        return "invalid_user"
+    try:
+        f"user_{u.id}:{u.name}"
+    catch e:
+        "error"
+
+// --- 2. 泛型 struct + 方法 + match ---
+struct Container<T> =
+    data: Option<T>
+
+    def is_present(self) -> bool =
+        match self.data:
+            Option.Some(value: _) => True
+            Option.None => False
+
+    def get_or(self, default: T) -> T =
+        match self.data:
+            Option.Some(value: v) => v
+            Option.None => default
+
+    def map<R>(self, f: fn(T) -> R) -> Container<R> =
+        Container(data: match self.data:
+            Option.Some(value: v) => Option.Some(value: f(v))
+            Option.None => Option.None
+        )
+
+// --- 3. struct + defer + 方法 ---
+struct Resource =
+    id: int
+
+    def __enter__(self) -> Resource =
+        print(f"enter:{self.id}")
+        self
+
+    def __exit__(mut self) =
+        print(f"exit:{self.id}")
+
+    def work(self) -> int =
+        self.id * 10
+
+// --- 4. struct + match 守卫组合 ---
+struct Score =
+    math: int
+    english: int
+
+impl Score =
+    def grade(self) -> str =
+        let avg = (self.math + self.english) / 2
+        match avg:
+            case v if v >= 90 => "A"
+            case v if v >= 80 => "B"
+            case v if v >= 70 => "C"
+            case v if v >= 60 => "D"
+            case _ => "F"
+
+    def is_pass(self) -> bool =
+        self.math >= 60 and self.english >= 60
+
+// --- 5. struct + trait + impl 组合 ---
+trait Printable =
+    def format(self) -> str
+
+struct Book =
+    title: str
+    pages: int
+
+impl Printable for Book =
+    def format(self) -> str =
+        f"Book({self.title}, {self.pages}p)"
+
+// --- 6. enum + impl + 闭包 ---
+enum Calculator:
+    Add(int, int)
+    Mul(int, int)
+    Div(int, int)
+
+impl Calculator =
+    def compute(self) -> Result<int, str> =
+        match self:
+            Calculator.Add(a, b) =>
+                Result.Ok(value: a + b)
+            Calculator.Mul(a, b) =>
+                Result.Ok(value: a * b)
+            Calculator.Div(a, b) =>
+                if b == 0:
+                    Result.Err(error: "div_by_zero")
+                else:
+                    Result.Ok(value: a / b)
+
+    def apply(self, f: fn(int) -> int) -> Calculator =
+        match self:
+            Calculator.Add(a, b) =>
+                Calculator.Add(f(a), f(b))
+            Calculator.Mul(a, b) =>
+                Calculator.Mul(f(a), f(b))
+            Calculator.Div(a, b) =>
+                Calculator.Div(f(a), f(b))
+
+// --- main ---
+def main() =
+    print("=== combo-struct-method ===")
+    print(process_user(User(id: 1, name: "Alice")))
+    print(process_user(User(id: -1, name: "")))
+    print(process_user(User(id: 2, name: "")))
+
+    let c1 = Container(data: Option.Some(value: 42))
+    let c2: Container<int> = Container(data: Option.None)
+    print(c1.is_present())
+    print(c2.is_present())
+    print(c1.get_or(0))
+    print(c2.get_or(0))
+    let c3 = c1.map(|x| x * 2)
+    print(c3.get_or(0))
+
+    with Resource(id: 1) as res:
+        print(res.work())
+
+    let s1 = Score(math: 85, english: 92)
+    let s2 = Score(math: 55, english: 65)
+    print(s1.grade())
+    print(s2.grade())
+    print(s1.is_pass())
+    print(s2.is_pass())
+
+    let book = Book(title: "LZ Guide", pages: 200)
+    print(book.format())
+
+    let calc1 = Calculator.Add(10, 20)
+    let calc2 = Calculator.Div(100, 0)
+    let calc3 = Calculator.Mul(5, 6)
+    print(calc1.compute())
+    print(calc2.compute())
+    print(calc3.compute())
+    let calc4 = calc1.apply(|x| x + 1)
+    print(calc4.compute())
+
+    print("combo-struct-method done")

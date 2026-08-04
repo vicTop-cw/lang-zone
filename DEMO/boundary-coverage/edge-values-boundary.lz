@@ -1,0 +1,139 @@
+// ============================================================
+// boundary-coverage: 数值与边界值测试
+// 覆盖: int/f64 极值、零值、空集合、字面量边界、
+//      浮点特殊值、字符串边界、运算符边界
+// ============================================================
+
+// --- 1. int 边界值 ---
+def int_boundaries() =
+    let max_i64: int = 9223372036854775807
+    let min_i64: int = -9223372036854775808
+    let zero: int = 0
+    let one: int = 1
+    let neg_one: int = -1
+
+    let max_plus_one: int = max_i64 + 1    // wraps?
+    let min_minus_one: int = min_i64 - 1   // wraps?
+
+    print(zero, one, neg_one)
+    print(max_i64, min_i64)
+
+// --- 2. f64 边界值 ---
+def f64_boundaries() =
+    let zero_f: f64 = 0.0
+    let neg_zero: f64 = -0.0
+    let one_f: f64 = 1.0
+    let very_small: f64 = 0.0000000001
+    let very_large: f64 = 1.0e308
+
+    let inf_positive: f64 = 1.0 / 0.0
+    let nan: f64 = 0.0 / 0.0
+
+    print(zero_f, one_f, very_small)
+
+// --- 3. 空集合边界 ---
+def empty_collections() =
+    let empty_list: List<int> = []
+    let empty_dict: Dict<str, int> = {}
+    // Set 必须至少有一个元素来区分 {} dict
+    let single_set: Set<int> = {1}
+    let empty_str: str = ""
+
+    print(empty_list, empty_dict, single_set)
+    print(empty_str, empty_str.len())
+
+// --- 4. None/Option 边界 ---
+def none_boundaries() =
+    let none_val = None
+    let some_zero = Option.Some(value: 0)
+    let some_none: Option<Option<int>> = Option.Some(value: Option.None)
+
+    print(none_val, some_zero, some_none)
+
+// --- 5. 字面量边界（各种进制）---
+def literal_boundaries() =
+    let hex_max: int = 0xFFFFFFFFFFFFFFFF
+    let oct_min: int = 0o0
+    let bin_max: int = 0b11111111
+
+    let sci_large: f64 = 1.0e-308
+    let sci_small: f64 = 9.9e307
+
+    print(hex_max, oct_min, bin_max)
+    print(sci_large, sci_small)
+
+// --- 6. 字符串边界 ---
+def string_boundaries() =
+    let empty: str = ""
+    let single: str = "x"
+    let unicode: str = "你好世界"
+    let escaped: str = "tab:\there"
+    let raw: str = r"\n\t\0"
+    let multi: str = """line1
+    line2
+    line3"""
+    let f_empty: str = f""
+    let f_nested: str = f"x={1 + 2}"
+
+    print(empty, single, unicode)
+    print(escaped, raw)
+    print(multi, f_empty, f_nested)
+
+// --- 7. bool 边界 ---
+def bool_boundaries() =
+    let t = True
+    let f = False
+
+    let and_tt = True and True
+    let and_tf = True and False
+    let and_ff = False and False
+    let or_tt = True or True
+    let or_tf = True or False
+    let not_t = not True
+    let not_f = not False
+    let triple_not = not not not True
+
+    print(and_tt, and_tf, and_ff)
+    print(or_tt, or_tf)
+    print(not_t, not_f, triple_not)
+
+// --- 8. 运算符边界 ---
+def operator_boundaries() =
+    let shift_max: int = 1 << 62
+    let shift_zero: int = 1 >> 1
+    let pow_zero: int = 0 ** 0
+    let pow_one: int = 999 ** 0
+    let neg_max: int = -9223372036854775807
+    let mod_by_one: int = 100 % 1
+    let div_neg: int = -10 / 3
+
+    print(shift_max, shift_zero)
+    print(pow_zero, pow_one)
+    print(neg_max, mod_by_one, div_neg)
+
+// --- 9. 集合操作边界 ---
+def collection_boundaries() =
+    let single: List<int> = [42]
+    let access_first: int = single[0]
+    let out_of_range: int = single.len()
+
+    let empty_check = 1 in []
+    let single_check = 42 in single
+    let not_in_check = 99 not in single
+
+    print(access_first, out_of_range)
+    print(empty_check, single_check, not_in_check)
+
+// --- main ---
+def main() =
+    print("=== edge-values-boundary ===")
+    int_boundaries()
+    f64_boundaries()
+    empty_collections()
+    none_boundaries()
+    literal_boundaries()
+    string_boundaries()
+    bool_boundaries()
+    operator_boundaries()
+    collection_boundaries()
+    print("edge-values-boundary done")

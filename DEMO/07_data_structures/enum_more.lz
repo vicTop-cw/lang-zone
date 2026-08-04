@@ -2,7 +2,7 @@
 // 覆盖：enum 变体引用自身类型、嵌套构造（单行调用）、递归 match
 // 注意：构造调用需单行书写（多行缩进参数当前不被解析）
 
-enum Expr =
+enum Expr:
     Num(value: f64)
     Add(left: Expr, right: Expr)
     Mul(left: Expr, right: Expr)

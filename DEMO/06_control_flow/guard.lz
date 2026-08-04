@@ -3,7 +3,7 @@
 // LZ Spec §7
 // ============================================================
 
-def main() =
+def main() -> int =
     // --- 7.1 guard condition guard (block form) ---
     def safe_div(a: int, b: int) -> int =
         guard b != 0 else:
@@ -13,6 +13,11 @@ def main() =
     print(safe_div(10, 2))     // 5
     print(safe_div(10, 0))     // 0
 
+    def safe_div0(a: int, b: int) -> int =
+        guard b != 0 else:
+            0          // fail path: return early and `return` can be omitted
+        a / b
+    print(safe_div0(10, 0))     // 0
     // --- guard condition guard (single-line form) ---
     def safe_div2(a: int, b: int) -> int =
         guard b != 0 else 0   // single-line: else expr is the guard value
@@ -23,8 +28,10 @@ def main() =
 
     // --- guard with truthiness chain ---
     def process(val: Option<int>) -> str =
-        guard let Some(n) = val else:
-            return "empty"
+        guard let Some(n) = val else: // can create a closure to
+            def inner() -> str =
+                guard n % 2 == 0 "even" else "odd"
+            inner()
         f"value: {n}"
 
     print(process(Some(42)))   // "value: 42"
@@ -33,9 +40,19 @@ def main() =
     // --- 7.2 guard let pattern guard ---
     // pattern match success → bind variables and continue
     // pattern match failure → execute else handler
-    let opt_name: Option<str> = Some("Alice")
+    let opt_name: Option<str> = Some("Bob")
+    guard_name : str?
     guard let Some(name) = opt_name else:
         print("no name")
-        return
+        guard_name = Some("guard_name")
+        guard let Some(g_name) = guard_name else:
+            return -1
+        guard g_name == "guard_name" else -2
+        2
+
 
     print(f"hello {name}")     // "hello Alice"
+
+    guard name == "Alice" else 1
+
+    0

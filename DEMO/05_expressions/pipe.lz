@@ -15,5 +15,5 @@ def main() =
     print(r2)
 
     // Lambda pipe equivalence
-    let r3 = |x| x * x
+    let r3 = |x: int| -> int = x * x
     print(r3(10))

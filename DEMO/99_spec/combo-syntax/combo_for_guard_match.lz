@@ -1,7 +1,7 @@
 // ✅ combo-syntax：for 守卫 + match 模式匹配（已纳入 compile_demos 覆盖）
 // combo-syntax：for 守卫 + match 模式匹配
 // 出处：SYNTAX/05-控制流.md §3.5 + match 语法
-enum Kind =
+enum Kind:
     A(int)
     B(str)
 

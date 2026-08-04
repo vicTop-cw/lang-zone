@@ -1,0 +1,108 @@
+// ============================================================
+// boundary-coverage: 关键字/字面量/标识符边界测试
+// 覆盖: 关键字降级、下划线多语义、魔法方法名、
+//      特殊字面量、标识符边界
+// ============================================================
+
+// --- 1. 关键字降级（用作标识符）---
+def keyword_downgrade() =
+    let Ok = 100
+    let Some = 200
+    let None = 300
+    let Err = 400
+    let True = 500
+    let False = 600
+    print(Ok + Some + None + Err + True + False)
+
+// --- 2. 下划线多种语义 ---
+def add(a: int, b: int) -> int = a + b
+
+def underscore_semantics() =
+    // 通配/丢弃
+    _ = print("side_effect")
+
+    // 偏应用（单洞）
+    let add5 = add(_, 5)
+    print(add5(10))
+
+    // 偏应用（多洞）
+    let sum3 = add(_, _)
+    print(sum3(1, 2))
+
+    // match 通配符
+    let v = match 42:
+        case 0 => "zero"
+        case _ => "not_zero"
+    print(v)
+
+// --- 3. 魔法方法名 ---
+struct MagicBox =
+    value: int
+
+    magic __init__(self, value: int) -> MagicBox =
+        MagicBox(value: value)
+
+    magic __str__(ref self) -> str =
+        f"MagicBox({self.value})"
+
+    magic __add__(self, other: MagicBox) -> MagicBox =
+        MagicBox(value: self.value + other.value)
+
+    magic __eq__(ref self, other: MagicBox) -> bool =
+        self.value == other.value
+
+    magic __getitem__(ref self, index: int) -> int =
+        if index == 0:
+            self.value
+        else:
+            panic("bad_index")
+
+    magic __len__(ref self) -> int = 1
+
+// --- 4. 特殊字面量组合 ---
+def special_literals() =
+    let unit_val: Unit = ()
+    let option_none: Option<int> = None
+    let option_some = Option.Some(value: 42)
+    let result_ok: Result<int, str> = Result.Ok(value: 10)
+    let result_err: Result<int, str> = Result.Err(error: "failed")
+
+    print(unit_val, option_none, option_some)
+    print(result_ok, result_err)
+
+// --- 5. 标识符包含数字/下划线 ---
+def identifiers_with_special_chars() =
+    let my_var_123 = 42
+    let _hidden = "secret"
+    let camelCase = 10
+    let snake_case = 20
+    print(my_var_123, _hidden, camelCase, snake_case)
+
+// --- 6. 注释边界 ---
+def comment_boundaries() =
+    let x = 1    // 行末注释
+    let /* 块注释在行中 */ y = 2
+    /* 跨行
+       块注释 */ let z = 3
+    let w = 4    /* 末尾块注释 */
+    print(x, y, z, w)
+
+// --- main ---
+def main() =
+    print("=== edge-keyword-identifier ===")
+    keyword_downgrade()
+    underscore_semantics()
+
+    let box1 = MagicBox(value: 10)
+    let box2 = MagicBox(value: 20)
+    let box3 = box1 + box2
+    print(box3)
+    print(box1 == box2)
+    print(box1 == MagicBox(value: 10))
+    print(box1[0])
+    print(box1.__len__())
+
+    special_literals()
+    identifiers_with_special_chars()
+    comment_boundaries()
+    print("edge-keyword-identifier done")

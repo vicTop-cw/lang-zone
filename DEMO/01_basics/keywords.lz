@@ -70,7 +70,8 @@ def main() =
     let r1 = True and False
     let r2 = True or False
     let r3 = not True
-    let r4 = 42 is int
+    // `is` 是编译期关键字, 用于 duck 约束中做单例同一性判断 (如 `is None`)
+    // 运行时不可用, 参见 SYNTAX/01b-duck关系约束.md
 
     // 字面量关键字
     let flag: bool = True

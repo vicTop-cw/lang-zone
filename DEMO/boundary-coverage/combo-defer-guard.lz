@@ -1,0 +1,116 @@
+// ============================================================
+// boundary-coverage: defer + guard + with + try 组合测试
+// 覆盖: defer + guard 组合、with + defer 组合、
+//      guard + try + else、多层 defer LIFO
+// ============================================================
+
+// --- 1. defer 多层嵌套（LIFO 顺序验证）---
+def defer_lifo_order() =
+    defer print("defer_1")
+    defer print("defer_2")
+    defer print("defer_3")
+    // 执行顺序: defer_3, defer_2, defer_1
+    print("body")
+
+// --- 2. defer + guard 组合 ---
+def defer_guard_combo(x: int) -> str =
+    defer print(f"finally:{x}")
+    guard x > 0 else:
+        return "negative"
+    guard x != 5 else:
+        return "is_five"
+    f"positive:{x}"
+
+// --- 3. guard + try + catch 组合 ---
+def guard_try_catch(value: int) -> int =
+    guard value != 0 else:
+        return 0
+    try:
+        100 / value
+    catch e:
+        -1
+
+// --- 4. defer + try + finally + guard ---
+def all_combined(data: int) -> int =
+    defer print("cleanup_step")
+    guard data >= 0 else:
+        return -100
+    try:
+        let result = 1000 / (data + 1)
+        result
+    catch e:
+        -200
+    finally:
+        print("attempted")
+
+// --- 5. with + defer + try 组合 ---
+struct FileHandle =
+    path: str
+
+    def __enter__(self) -> FileHandle =
+        print(f"open:{self.path}")
+        self
+
+    def __exit__(mut self) =
+        print(f"close:{self.path}")
+
+def with_defer_try(path: str) -> int =
+    defer print("defer_cleanup")
+    with FileHandle(path: path) as f:
+        try:
+            if path == "":
+                raise "empty_path"
+            path.len()
+        catch e:
+            0
+
+// --- 6. guard let + try 组合 ---
+enum Wrap:
+    Data(value: int)
+    Empty
+
+def guard_let_try(w: Wrap) -> int =
+    guard let Wrap.Data(value: v) = w else:
+        return -1
+    try:
+        v * 10
+    catch e:
+        -2
+
+// --- 7. 嵌套 with 多层 ---
+def nested_with() =
+    with FileHandle(path: "a.txt") as f1:
+        with FileHandle(path: "b.txt") as f2:
+            with FileHandle(path: "c.txt") as f3:
+                print("nested_work")
+
+// --- 8. try + else + guard 组合 ---
+def try_else_guard(x: int) -> str =
+    try:
+        guard x != 0 else:
+            raise "zero"
+        100 / x
+    catch e:
+        "caught"
+    else:
+        "success"
+
+// --- main ---
+def main() =
+    print("=== combo-defer-guard ===")
+    defer_lifo_order()
+    print(defer_guard_combo(10))
+    print(defer_guard_combo(-1))
+    print(defer_guard_combo(5))
+    print(guard_try_catch(10))
+    print(guard_try_catch(0))
+    print(all_combined(9))
+    print(all_combined(-1))
+    print(with_defer_try("hello"))
+    print(with_defer_try(""))
+    print(guard_let_try(Wrap.Data(value: 5)))
+    print(guard_let_try(Wrap.Empty))
+    nested_with()
+    print(try_else_guard(2))
+    print(try_else_guard(0))
+    print("combo-defer-guard done")

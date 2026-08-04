@@ -3,12 +3,12 @@
 // LZ Spec §2
 // ============================================================
 
-enum Color =
+enum Color:
     Red
     Green
     Blue
 
-enum Shape =
+enum Shape:
     Circle(x: f64, y: f64, radius: f64)
     Rectangle(width: f64, height: f64)
     Square(side: f64)

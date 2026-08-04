@@ -2,7 +2,7 @@
 // IR边界测试: 枚举方法调用链
 // ============================
 
-enum MyOption =
+enum MyOption:
     MySome(value: int)
     MyNone
 

@@ -1,0 +1,375 @@
+#!bin lz
+// ============================================================
+// lz_std/set.lz — Set<T> 方法与工具
+// 覆盖: SYNTAX/01-类型系统.md
+// 扩展 Set 类型的完整操作集合
+// ============================================================
+
+impl<T> Set<T> =
+
+    // --- 查询 ---
+
+    /// 元素个数
+    def len(ref self) -> int =
+        len(self)
+
+    /// 是否为空
+    def is_empty(ref self) -> bool =
+        self.len() == 0
+
+    /// 是否包含元素
+    def contains(ref self, value: ref T) -> bool
+        where T: Eq + Hash
+        =
+        value in self
+
+    /// 是否为子集
+    def is_subset(ref self, other: ref Set<T>) -> bool
+        where T: Eq + Hash
+        =
+        for item in self:
+            if not other.contains(item):
+                return False
+        return True
+
+    /// 是否为超集
+    def is_superset(ref self, other: ref Set<T>) -> bool
+        where T: Eq + Hash
+        =
+        other.is_subset(self)
+
+    /// 是否不相交
+    def is_disjoint(ref self, other: ref Set<T>) -> bool
+        where T: Eq + Hash
+        =
+        for item in self:
+            if other.contains(item):
+                return False
+        return True
+
+    // --- 修改 ---
+
+    /// 添加元素
+    def add(mut self, value: T)
+        where T: Eq + Hash
+        =
+        // 内建: 编译器映射
+        self.insert(value)
+
+    /// 移除元素
+    def remove(mut self, value: ref T) -> bool
+        where T: Eq + Hash
+        =
+        if self.contains(value):
+            // 内建: 编译器映射
+            self.discard(value)
+            return True
+        return False
+
+    /// 清空
+    def clear(mut self) =
+        // 内建: 编译器映射
+        self.clear()
+
+    // --- 集合运算 ---
+
+    /// 并集
+    def union(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        let mut result = Set()
+        for item in self:
+            result.add(item)
+        for item in other:
+            result.add(item)
+        return result
+
+    /// 交集
+    def intersection(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        let mut result = Set()
+        for item in self:
+            if other.contains(item):
+                result.add(item)
+        return result
+
+    /// 差集 (在 self 中但不在 other 中)
+    def difference(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        let mut result = Set()
+        for item in self:
+            if not other.contains(item):
+                result.add(item)
+        return result
+
+    /// 对称差集 (在 self 或 other 中, 但不同时在两者中)
+    def symmetric_difference(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        self.union(other).difference(self.intersection(other))
+
+    // --- 转换 ---
+
+    /// 转为 List
+    def to_list(ref self) -> List<T> =
+        let mut result = List()
+        for item in self:
+            result.push(item)
+        return result
+
+    /// 映射元素为新集合
+    def map<U>(ref self, f: fn(ref T) -> U) -> Set<U>
+        where U: Eq + Hash
+        =
+        let mut result = Set()
+        for item in self:
+            result.add(f(item))
+        return result
+
+    /// 过滤元素
+    def filter(ref self, predicate: fn(ref T) -> bool) -> Set<T>
+        where T: Eq + Hash
+        =
+        let mut result = Set()
+        for item in self:
+            if predicate(item):
+                result.add(item)
+        return result
+
+    /// 折叠归约
+    def fold<U>(ref self, init: U, f: fn(U, ref T) -> U) -> U =
+        let mut acc = init
+        for item in self:
+            acc = f(acc, item)
+        return acc
+
+    // --- 迭代 ---
+
+    /// 返回迭代器
+    def iter(ref self) -> SetIter<ref T> =
+        SetIter(items: self.to_list(), index: 0)
+
+    /// 返回所有权迭代器
+    def into_iter(self) -> SetIntoIter<T> =
+        SetIntoIter(items: self.to_list(), index: 0)
+
+    // --- 魔法方法 ---
+
+    def __len__(ref self) -> int =
+        self.len()
+
+    def __contains__(ref self, value: ref T) -> bool
+        where T: Eq + Hash
+        =
+        self.contains(value)
+
+    def __iter__(ref self) -> SetIter<ref T> =
+        self.iter()
+
+    def __and__(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        self.intersection(other)
+
+    def __or__(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        self.union(other)
+
+    def __sub__(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        self.difference(other)
+
+    def __xor__(ref self, other: ref Set<T>) -> Set<T>
+        where T: Eq + Hash
+        =
+        self.symmetric_difference(other)
+
+    def __eq__(ref self, ref other: Set<T>) -> bool
+        where T: Eq + Hash
+        =
+        self.len() == other.len() and self.is_subset(other)
+
+    def __str__(ref self) -> str
+        where T: Display
+        =
+        if self.is_empty():
+            return "{}"
+        let mut result = "{"
+        let mut first = True
+        for item in self:
+            if not first:
+                result = result + ", "
+            result = result + item.__str__()
+            first = False
+        return result + "}"
+
+
+// ============================================================
+// Set 迭代器
+// ============================================================
+
+struct SetIter<T> =
+    items: List<T>
+    index: int
+
+impl<T> Iterator for SetIter<T> =
+    type Item = T
+
+    def __next__(mut self) -> Option<T> =
+        if self.index >= self.items.len():
+            return None
+        let item = self.items[self.index]
+        self.index = self.index + 1
+        return Some(item)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.items.len() - self.index
+        return (remaining, Some(remaining))
+
+
+struct SetIntoIter<T> =
+    items: List<T>
+    index: int
+
+impl<T> Iterator for SetIntoIter<T> =
+    type Item = T
+
+    def __next__(mut self) -> Option<T> =
+        if self.index >= self.items.len():
+            return None
+        let item = self.items[self.index]
+        self.index = self.index + 1
+        return Some(item)
+
+    def size_hint(ref self) -> (int, Option<int>) =
+        let remaining = self.items.len() - self.index
+        return (remaining, Some(remaining))
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "add and contains":
+        let mut s: Set<int> = Set()
+        s.add(1)
+        s.add(2)
+        s.add(3)
+        assert s.contains(1)
+        assert s.contains(2)
+        assert not s.contains(99)
+
+    test "len and is_empty":
+        let mut s: Set<int> = Set()
+        assert s.is_empty()
+        s.add(1)
+        assert s.len() == 1
+
+    test "remove":
+        let mut s: Set<int> = Set()
+        s.add(1)
+        s.add(2)
+        assert s.remove(1)
+        assert not s.contains(1)
+        assert not s.remove(99)
+
+    test "union":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        let mut b: Set<int> = Set()
+        b.add(2)
+        b.add(3)
+        let u = a.union(b)
+        assert u.contains(1)
+        assert u.contains(2)
+        assert u.contains(3)
+        assert u.len() == 3
+
+    test "intersection":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        a.add(3)
+        let mut b: Set<int> = Set()
+        b.add(2)
+        b.add(3)
+        b.add(4)
+        let i = a.intersection(b)
+        assert i.len() == 2
+        assert i.contains(2)
+        assert i.contains(3)
+
+    test "difference":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        a.add(3)
+        let mut b: Set<int> = Set()
+        b.add(2)
+        let d = a.difference(b)
+        assert d.len() == 2
+        assert d.contains(1)
+        assert d.contains(3)
+
+    test "symmetric_difference":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        let mut b: Set<int> = Set()
+        b.add(2)
+        b.add(3)
+        let sd = a.symmetric_difference(b)
+        assert sd.len() == 2
+        assert sd.contains(1)
+        assert sd.contains(3)
+
+    test "is_subset and is_superset":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        let mut b: Set<int> = Set()
+        b.add(1)
+        b.add(2)
+        b.add(3)
+        assert a.is_subset(b)
+        assert b.is_superset(a)
+        assert not b.is_subset(a)
+
+    test "is_disjoint":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        let mut b: Set<int> = Set()
+        b.add(3)
+        b.add(4)
+        assert a.is_disjoint(b)
+
+    test "operators":
+        let mut a: Set<int> = Set()
+        a.add(1)
+        a.add(2)
+        let mut b: Set<int> = Set()
+        b.add(2)
+        b.add(3)
+        assert (a & b).len() == 1
+        assert (a | b).len() == 3
+        assert (a - b).len() == 1
+
+    test "filter and map":
+        let mut s: Set<int> = Set()
+        s.add(1)
+        s.add(2)
+        s.add(3)
+        s.add(4)
+        let evens = s.filter(|x: ref int| -> bool = x % 2 == 0)
+        assert evens.len() == 2
+        assert evens.contains(2)
+        assert evens.contains(4)
+
+    print("set.lz — all tests passed!")

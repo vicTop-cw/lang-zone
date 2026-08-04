@@ -1,0 +1,76 @@
+// ============================================================
+// boundary-coverage: 异步/并发组合测试
+// 覆盖: async + await + spawn + try 组合、
+//      async + 闭包、go + try、async + match
+// ============================================================
+
+// --- 1. async 函数 + try/catch ---
+async def fetch_safe(id: int) -> Result<int, str> =
+    try:
+        if id < 0:
+            raise "invalid_id"
+        Result.Ok(value: id * 10)
+    catch e:
+        Result.Err(error: e)
+
+// --- 2. spawn + try + catch 组合 ---
+def spawn_with_error_handling() =
+    let future = spawn fetch_safe(5)
+    let result = await future
+    match result:
+        Result.Ok(value: v) =>
+            print(f"ok:{v}")
+        Result.Err(error: e) =>
+            print(f"err:{e}")
+
+// --- 3. 多个 spawn 并发 ---
+async def slow_double(x: int) -> int = x * 2
+
+def multiple_spawn() =
+    let f1 = spawn slow_double(10)
+    let f2 = spawn slow_double(20)
+    let f3 = spawn slow_double(30)
+    let r1 = await f1
+    let r2 = await f2
+    let r3 = await f3
+    print(r1, r2, r3)
+
+// --- 4. go + defer 组合 ---
+def go_with_defer() =
+    defer print("main_cleanup")
+    go print("concurrent_task")
+    print("main_task")
+
+// --- 5. go + for 循环组合 ---
+def go_in_loop(n: int) =
+    for i in 0..n:
+        go print(f"worker_{i}")
+
+// --- 6. async + match 组合 ---
+async def classify_async(x: int) -> str =
+    match x:
+        case v if v < 0 => "negative"
+        case 0 => "zero"
+        case _ => "positive"
+
+def async_with_match() =
+    let f = spawn classify_async(42)
+    let result = await f
+    print(result)
+
+// --- main ---
+def main() =
+    print("=== combo-async-await ===")
+    spawn_with_error_handling()
+    let bad = spawn fetch_safe(-1)
+    let bad_result = await bad
+    match bad_result:
+        Result.Ok(value: v) =>
+            print(f"unexpected:{v}")
+        Result.Err(error: e) =>
+            print(f"expected_err:{e}")
+    multiple_spawn()
+    go_with_defer()
+    go_in_loop(3)
+    async_with_match()
+    print("combo-async-await done")

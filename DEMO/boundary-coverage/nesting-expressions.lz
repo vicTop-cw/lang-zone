@@ -1,0 +1,90 @@
+// ============================================================
+// boundary-coverage: 表达式深度嵌套测试
+// 覆盖: 运算符嵌套、函数调用嵌套、方法链、
+//      三元表达式嵌套、管道嵌套、推导式嵌套
+// ============================================================
+
+// --- 1. 五层嵌套算术表达式 ---
+def deep_arithmetic(a: int, b: int, c: int, d: int, e: int) -> int =
+    ((a + b) * (c - d)) / ((e + a) % (b + 1)) + ((a ** 2) - (b ** 2))
+
+// --- 2. 六层嵌套逻辑表达式 ---
+def deep_logical(a: int, b: int, c: int, d: int) -> bool =
+    (a > 0 and b > 0) or (c < 0 and d < 0) and not (a == b) or (c != d)
+
+// --- 3. 混合运算符深层嵌套 ---
+def deep_mixed(a: int, b: int, c: int) -> int =
+    ((a & b) | (c << 2)) ^ ((a >> 1) & (b | c)) + (a * b - c)
+
+// --- 4. 嵌套函数调用（调用链）---
+def add_one(x: int) -> int = x + 1
+def mul_two(x: int) -> int = x * 2
+def sub_three(x: int) -> int = x - 3
+
+def deep_call_chain(x: int) -> int =
+    add_one(mul_two(sub_three(add_one(mul_two(x)))))
+
+// --- 5. 嵌套三元表达式 ---
+def deep_ternary(a: int, b: int, c: int, d: int) -> str =
+    "abcd_pos" if a > 0 and b > 0 and c > 0 and d > 0
+    else "abc_pos" if a > 0 and b > 0 and c > 0
+    else "ab_pos" if a > 0 and b > 0
+    else "a_pos" if a > 0
+    else "all_nonpos"
+
+// --- 6. 方法链深层调用 ---
+def deep_method_chain(xs: List<int>) -> int =
+    xs.iter().filter(|x| x > 0).map(|x| x * 2).take(3).sum()
+
+// --- 7. 管道多级嵌套 ---
+def deep_pipe(x: int) -> int =
+    x |> add_one |> mul_two |> sub_three |> add_one |> mul_two
+
+// --- 8. 推导式嵌套（List comprehension with condition）---
+def deep_comprehension(limit: int) -> List<int> =
+    [x * y for x in 0..limit for y in 0..limit if x + y < limit]
+
+// --- 9. 表达式型 match 嵌套 ---
+def deep_match_expr(a: int, b: int) -> int =
+    match a:
+        case 0 => match b:
+            case 0 => 0
+            case _ => 1
+        case _ => match b:
+            case 0 => 2
+            case _ => a + b
+
+// --- 10. 嵌套 if 表达式（表达式型）---
+def deep_if_expr(a: int, b: int, c: int) -> int =
+    a + (1 if a > 0 else 0) + (10 if b > 0 else 0) + (100 if c > 0 else 0)
+
+// --- 11. 混合：算术+逻辑+比较链 ---
+def deep_mixed_compare(x: int, y: int, z: int) -> bool =
+    0 < x and x < y and y < z and z < 1000 and x + y + z > 0
+
+// --- 12. f-string 深度嵌套插值 ---
+def deep_fstring(name: str, age: int, city: str) -> str =
+    f"user: {name}, age: {age}, city: {city}, sum: {age + 10}, check: {age > 18}"
+
+// --- main ---
+def main() =
+    print("=== nesting-expressions ===")
+    print(deep_arithmetic(5, 3, 10, 2, 1))
+    print(deep_logical(1, 2, -3, -4))
+    print(deep_mixed(7, 3, 5))
+    print(deep_call_chain(5))
+    print(deep_ternary(1, 1, 1, 1))
+    print(deep_ternary(1, 1, 0, 0))
+    print(deep_ternary(0, 0, 0, 0))
+    print(deep_method_chain([1, -2, 3, -4, 5, 6]))
+    print(deep_pipe(3))
+    print(deep_comprehension(3))
+    print(deep_match_expr(0, 0))
+    print(deep_match_expr(0, 5))
+    print(deep_match_expr(3, 7))
+    print(deep_if_expr(1, 2, 3))
+    print(deep_if_expr(-1, 0, -1))
+    print(deep_mixed_compare(1, 50, 999))
+    print(deep_mixed_compare(10, 5, 20))
+    print(deep_fstring("Alice", 25, "NYC"))
+    print("nesting-expressions done")

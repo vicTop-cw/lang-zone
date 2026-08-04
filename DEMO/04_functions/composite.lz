@@ -22,5 +22,5 @@ def main() =
     let r = sq(3.0, 4.0)
     print(r)
 
-    let double = |x| x * 2
+    let double = |x: int| -> int = x * 2
     print(double(5))

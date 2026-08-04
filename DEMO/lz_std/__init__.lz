@@ -1,0 +1,51 @@
+#!bin lz
+// ============================================================
+// lz_std/__init__.lz — 模块入口
+// 使 DEMO/lz_std/ 作为目录模块可被 import
+// 注意: 由于 DEMO 测试逐文件编译, 此处仅作为自举参考
+// ============================================================
+
+// 模块文档:
+// lz_std 是 LZ 语言的标准库, 在自举后将成为 lz::builtins
+// 当前版本仅提供完整的 API 定义, 具体实现依赖编译器后端
+
+// 子模块:
+//   traits.lz     — 核心 Trait 体系 (Eq/Ord/Hash/Clone/Iterator...)
+//   option.lz     — Option<T> 枚举
+//   result.lz     — Result<T, E> 枚举
+//   ordering.lz   — Ordering 枚举
+//   string.lz     — String 方法扩展
+//   list.lz       — List<T> 方法扩展
+//   dict.lz       — Dict<K, V> 方法扩展
+//   set.lz        — Set<T> 方法扩展
+//   iter.lz       — 迭代器构造器与工具
+//   math.lz       — 数学模块
+//   error.lz      — 异常层级体系
+//   box.lz        — Box/Rc/Arc 智能指针
+//   prelude.lz    — Prelude 汇总
+
+// ============================================================
+// 重新导出核心符号 (自举后使用 from lz_std import * 时)
+// ============================================================
+
+// 版本信息
+const VERSION: str = "0.1.0"
+const STDLIB_NAME: str = "lz_std"
+
+def version() -> str =
+    STDLIB_NAME + " v" + VERSION
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "module version":
+        assert version() == "lz_std v0.1.0"
+
+    test "module constants":
+        assert STDLIB_NAME == "lz_std"
+        assert VERSION == "0.1.0"
+
+    print("lz_std/__init__.lz — module initialized!")

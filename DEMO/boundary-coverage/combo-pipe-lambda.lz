@@ -1,0 +1,63 @@
+// ============================================================
+// boundary-coverage: 管道 + Lambda 深度组合测试
+// 覆盖: 多级管道链、管道 + 闭包、管道 + match 表达式、
+//      管道 + ? 传播、管道 + 偏应用
+// ============================================================
+
+// --- 1. 七级管道链 ---
+def deep_pipe_chain(x: int) -> int =
+    x |> inc |> inc |> inc |> double |> double |> dec |> inc
+
+def inc(x: int) -> int = x + 1
+def double(x: int) -> int = x * 2
+def dec(x: int) -> int = x - 1
+
+// --- 2. 管道 + 闭包 + 集合操作 ---
+def pipe_with_lambda(data: List<int>) -> int =
+    data |> filter(|x| x > 0) |> map(|x| x * 3) |> fold(0, |acc, x| acc + x)
+
+// --- 3. 管道 + match 表达式 ---
+def pipe_match(val: int) -> str =
+    val |> double |> (|x|
+        match x:
+            case v if v < 10 => "small"
+            case v if v < 100 => "medium"
+            case _ => "large"
+    )
+
+// --- 4. 管道 + 偏应用 ---
+def add3(a: int, b: int, c: int) -> int = a + b + c
+
+def pipe_partial(data: List<int>) -> List<int> =
+    data |> map(add3(_, 10, 20))
+
+// --- 5. 管道 + 条件函数选择 ---
+def if_func(flag: bool) -> fn(int) -> int =
+    double if flag else inc
+
+def pipe_conditional(x: int, flag: bool) -> int =
+    x |> if_func(flag)
+
+// --- 6. 管道 + 异步 ---
+async def async_double(x: int) -> int = x * 2
+async def async_add(x: int, y: int) -> int = x + y
+
+def pipe_async(x: int) =
+    let r = spawn async_double(x)
+    let v = await r
+    let result = v |> async_add(_, 5)
+    await result
+
+// --- main ---
+def main() =
+    print("=== combo-pipe-lambda ===")
+    print(deep_pipe_chain(1))
+    print(pipe_with_lambda([1, -2, 3, 0, 5]))
+    print(pipe_match(3))
+    print(pipe_match(25))
+    print(pipe_match(200))
+    print(pipe_partial([1, 2, 3]))
+    print(pipe_conditional(5, True))
+    print(pipe_conditional(5, False))
+    print(pipe_async(3))
+    print("combo-pipe-lambda done")

@@ -41,7 +41,7 @@ def underscore_demo() =
         print("no value")
 
     // (4) 丢弃返回值
-    let _ = compute()
+    _ = compute()
 
     // (5) 函数参数占位
     def accepts(a: int, b: int, c: int) -> int = a + b + c

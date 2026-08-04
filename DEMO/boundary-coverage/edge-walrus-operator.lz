@@ -1,0 +1,73 @@
+// ============================================================
+// boundary-coverage: 海象操作符 + 控制流边界测试
+// 覆盖: := 在 if/while/for 中、:= + 嵌套控制流、
+//      := + 闭包、:= + match
+// ============================================================
+
+// --- 1. := 在 if 条件中 ---
+def walrus_if(values: List<int>) -> int =
+    let mut result = 0
+    if (first := values.first()) != None:
+        result = first
+    result
+
+// --- 2. := 在 while 条件中 ---
+def walrus_while() =
+    let mut counter = 5
+    while (n := counter) > 0:
+        print(n)
+        counter -= 1
+
+// --- 3. := 在嵌套条件中 ---
+def walrus_nested(data: Option<int>) -> str =
+    if (v := data?) != 0:
+        if (doubled := v * 2) > 100:
+            f"large:{doubled}"
+        else:
+            f"small:{doubled}"
+    else:
+        "zero"
+
+// --- 4. := + match 组合 ---
+def walrus_match() =
+    let val = Option.Some(value: 42)
+    match val:
+        Option.Some(value: v):
+            if (result := v * 3) > 100:
+                print(f"big:{result}")
+            else:
+                print(f"small:{result}")
+        Option.None:
+            print("none")
+
+// --- 5. := 模块级海象 ---
+let mut counter: int = 0
+
+def increment_counter() -> int =
+    counter += 1
+    counter
+
+def walrus_module() =
+    if (c := increment_counter()) > 0:
+        print(c)
+
+// --- 6. := + for + if 守卫组合 ---
+def walrus_for_guard(items: List<int>) =
+    for item in items:
+        if (squared := item * item) > 50:
+            print(f"big_sq:{squared}")
+
+// --- main ---
+def main() =
+    print("=== edge-walrus-operator ===")
+    print(walrus_if([10, 20, 30]))
+    print(walrus_if([]))
+    walrus_while()
+    print(walrus_nested(Option.Some(value: 60)))
+    print(walrus_nested(Option.Some(value: 5)))
+    print(walrus_nested(Option.Some(value: 0)))
+    print(walrus_nested(Option.None))
+    walrus_match()
+    walrus_module()
+    walrus_for_guard([5, 7, 10, 12])
+    print("edge-walrus-operator done")

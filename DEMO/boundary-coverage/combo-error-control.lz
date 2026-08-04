@@ -1,0 +1,165 @@
+// ============================================================
+// boundary-coverage: 错误处理 + 控制流组合测试
+// 覆盖: try 内嵌 for/while/match、catch 内嵌控制流、
+//      guard + try 组合、defer + try 组合、? + 条件组合
+// ============================================================
+
+// --- 1. try 内嵌 for 循环 ---
+def try_inside_for(values: List<int>) -> int =
+    let mut total = 0
+    for val in values:
+        try:
+            if val == 0:
+                raise "zero_value"
+            total += val
+        catch e:
+            total += -1
+    total
+
+// --- 2. for 内嵌 try 内嵌 match ---
+def for_try_match(items: List<int>) -> str =
+    for item in items:
+        try:
+            let result = match item:
+                case v if v > 100 => raise "too_large"
+                case v if v < 0 => raise "negative"
+                case _ => item * 2
+            print(f"ok:{result}")
+        catch e:
+            print(f"err:{e}")
+    "done"
+
+// --- 3. try 作为表达式 + match ---
+def try_expr_match(a: int, b: int) -> int =
+    let result = try:
+        if b == 0:
+            raise "div_by_zero"
+        a / b
+    catch e:
+        -999
+    match result:
+        case -999 => 0
+        case _ => result
+
+// --- 4. catch 内嵌套 if/match ---
+def catch_with_control(code: int) -> str =
+    try:
+        if code < 0:
+            raise "negative_code"
+        elif code == 0:
+            raise "zero_code"
+        "ok"
+    catch e:
+        if code == -1:
+            "special_neg"
+        elif code == 0:
+            "special_zero"
+        else:
+            "generic_error"
+
+// --- 5. guard + try + finally 组合 ---
+def guard_try_finally(x: int) -> int =
+    guard x >= 0 else:
+        return -1
+    try:
+        let result = 100 / x
+        result
+    catch e:
+        -2
+    finally:
+        print(f"processed {x}")
+
+// --- 6. defer + try 组合 ---
+def defer_try_combo(path: str) -> int =
+    defer print(f"cleanup: {path}")
+    try:
+        if path == "":
+            raise "empty_path"
+        path.len()
+    catch e:
+        -1
+
+// --- 7. 多层 try 嵌套 ---
+def nested_try(ops: List<int>) -> int =
+    try:
+        try:
+            if ops.len() == 0:
+                raise "no_ops"
+            ops[0]
+        catch e:
+            0
+    catch e:
+        -1
+
+// --- 8. try + else + for 组合 ---
+def try_else_for(data: List<int>) -> int =
+    let mut total = 0
+    try:
+        for val in data:
+            total += val
+    catch e:
+        total = -1
+    else:
+        total *= 2
+    total
+
+// --- 9. ? 传播 + if 条件组合 ---
+def unwrap_add(a: Option<int>, b: Option<int>) -> Option<int> =
+    let va = a?
+    let vb = b?
+    Option.Some(value: va + vb)
+
+// --- 10. 异常 enum + catch 多分支 + 控制流 ---
+enum MyError:
+    BadInput(str)
+    Timeout(int)
+    NotFound(str)
+
+def risky_op(x: int) -> int raises MyError =
+    if x < 0:
+        raise MyError.BadInput("negative")
+    elif x == 0:
+        raise MyError.NotFound("missing")
+    elif x > 1000:
+        raise MyError.Timeout(x)
+    x * 2
+
+def multi_catch_control(val: int) -> str =
+    try:
+        let r = risky_op(val)
+        f"success:{r}"
+    catch MyError.BadInput(msg):
+        f"bad:{msg}"
+    catch MyError.NotFound(msg):
+        f"not_found:{msg}"
+    catch MyError.Timeout(ms):
+        f"timeout:{ms}"
+    catch e:
+        f"unknown:{e}"
+
+// --- main ---
+def main() =
+    print("=== combo-error-control ===")
+    print(try_inside_for([1, 0, 3, 0, 5]))
+    print(for_try_match([10, 50, 200, -1, 25]))
+    print(try_expr_match(10, 2))
+    print(try_expr_match(10, 0))
+    print(catch_with_control(-1))
+    print(catch_with_control(0))
+    print(catch_with_control(5))
+    print(guard_try_finally(5))
+    print(guard_try_finally(0))
+    print(guard_try_finally(-3))
+    print(defer_try_combo("test.txt"))
+    print(defer_try_combo(""))
+    print(nested_try([1, 2, 3]))
+    print(nested_try([]))
+    print(try_else_for([1, 2, 3]))
+    print(try_else_for([]))
+    print(unwrap_add(Option.Some(value: 10), Option.Some(value: 20)))
+    print(unwrap_add(Option.None, Option.Some(value: 20)))
+    print(multi_catch_control(5))
+    print(multi_catch_control(-1))
+    print(multi_catch_control(0))
+    print(multi_catch_control(2000))
+    print("combo-error-control done")

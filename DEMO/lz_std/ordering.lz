@@ -1,0 +1,190 @@
+#!bin lz
+// ============================================================
+// lz_std/ordering.lz — Ordering 枚举
+// 覆盖: SYNTAX/06b-enum定义.md
+// Ordering 表示两个值比较的结果
+// ============================================================
+
+enum Ordering:
+    /// 小于
+    Less
+    /// 等于
+    Equal
+    /// 大于
+    Greater
+
+impl Ordering =
+
+    /// 反转比较结果
+    def reverse(self) -> Ordering =
+        match self:
+            case Less:
+                return Greater
+            case Equal:
+                return Equal
+            case Greater:
+                return Less
+
+    /// 链式比较: 如果 self 是 Equal, 则使用 other 的结果
+    def then(self, other: Ordering) -> Ordering =
+        match self:
+            case Equal:
+                return other
+            case _:
+                return self
+
+    /// 链式比较: 如果 self 是 Equal, 则调用闭包获取结果
+    def then_with(self, f: fn() -> Ordering) -> Ordering =
+        match self:
+            case Equal:
+                return f()
+            case _:
+                return self
+
+    /// 是否为 Less
+    def is_lt(ref self) -> bool =
+        match self:
+            case Less:
+                return True
+            case _:
+                return False
+
+    /// 是否为 Equal
+    def is_eq(ref self) -> bool =
+        match self:
+            case Equal:
+                return True
+            case _:
+                return False
+
+    /// 是否为 Greater
+    def is_gt(ref self) -> bool =
+        match self:
+            case Greater:
+                return True
+            case _:
+                return False
+
+    /// 是否为 Less 或 Equal
+    def is_le(ref self) -> bool =
+        not self.is_gt()
+
+    /// 是否为 Greater 或 Equal
+    def is_ge(ref self) -> bool =
+        not self.is_lt()
+
+    // --- 魔法方法 ---
+
+    def __str__(ref self) -> str =
+        match self:
+            case Less:
+                return "Less"
+            case Equal:
+                return "Equal"
+            case Greater:
+                return "Greater"
+
+    def __eq__(ref self, ref other: Ordering) -> bool =
+        match (self, other):
+            case (Less, Less):
+                return True
+            case (Equal, Equal):
+                return True
+            case (Greater, Greater):
+                return True
+            case _:
+                return False
+
+    /// 从 int 构造: 负数 → Less, 0 → Equal, 正数 → Greater
+    def from_int(n: int) -> Ordering =
+        if n < 0:
+            return Less
+        elif n > 0:
+            return Greater
+        return Equal
+
+    /// 转为 int: Less → -1, Equal → 0, Greater → 1
+    def to_int(ref self) -> int =
+        match self:
+            case Less:
+                return -1
+            case Equal:
+                return 0
+            case Greater:
+                return 1
+
+
+// ============================================================
+// 全局比较辅助函数
+// ============================================================
+
+/// 比较两个可排序值
+def compare<T: Ord>(ref a: T, ref b: T) -> Ordering =
+    a.cmp(b)
+
+/// 返回两个值中较小的
+def min<T: Ord>(a: T, b: T) -> T =
+    match a.cmp(b):
+        case Less | Equal:
+            return a
+        case Greater:
+            return b
+
+/// 返回两个值中较大的
+def max<T: Ord>(a: T, b: T) -> T =
+    match a.cmp(b):
+        case Less:
+            return b
+        case Greater | Equal:
+            return a
+
+/// 将值限制在 [lo, hi] 范围内
+def clamp<T: Ord>(value: T, lo: T, hi: T) -> T =
+    if value.cmp(lo) == Less:
+        return lo
+    elif value.cmp(hi) == Greater:
+        return hi
+    return value
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "reverse":
+        assert Ordering.Less.reverse() == Ordering.Greater
+        assert Ordering.Greater.reverse() == Ordering.Less
+        assert Ordering.Equal.reverse() == Ordering.Equal
+
+    test "then":
+        assert Ordering.Less.then(Ordering.Greater) == Ordering.Less
+        assert Ordering.Equal.then(Ordering.Greater) == Ordering.Greater
+        assert Ordering.Equal.then(Ordering.Less) == Ordering.Less
+
+    test "then_with":
+        let result = Ordering.Equal.then_with(|| -> Ordering = Ordering.Greater)
+        assert result == Ordering.Greater
+
+    test "from_int and to_int":
+        assert Ordering.from_int(-5) == Ordering.Less
+        assert Ordering.from_int(0) == Ordering.Equal
+        assert Ordering.from_int(10) == Ordering.Greater
+        assert Ordering.Less.to_int() == -1
+        assert Ordering.Equal.to_int() == 0
+        assert Ordering.Greater.to_int() == 1
+
+    test "min max clamp":
+        assert min(3, 7) == 3
+        assert max(3, 7) == 7
+        assert clamp(5, 0, 10) == 5
+        assert clamp(-1, 0, 10) == 0
+        assert clamp(15, 0, 10) == 10
+
+    test "is_lt is_eq is_gt":
+        assert Ordering.Less.is_lt()
+        assert not Ordering.Less.is_eq()
+        assert Ordering.Equal.is_eq()
+        assert Ordering.Greater.is_gt()
+
+    print("ordering.lz — all tests passed!")

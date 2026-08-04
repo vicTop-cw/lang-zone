@@ -1,0 +1,315 @@
+#!bin lz
+// ============================================================
+// lz_std/option.lz — Option<T> 枚举
+// 覆盖: SYNTAX/06b-enum定义.md, SYNTAX/01-类型系统.md
+// Option 表示一个可能存在也可能不存在的值
+// ============================================================
+
+enum Option<T>:
+    /// 存在值
+    Some(T)
+    /// 不存在值
+    None
+
+// ============================================================
+// Option 方法实现
+// ============================================================
+
+impl<T> Option<T> =
+
+    // --- 查询 ---
+
+    /// 是否为 Some
+    def is_some(ref self) -> bool =
+        match self:
+            case Some(_):
+                return True
+            case None:
+                return False
+
+    /// 是否为 None
+    def is_none(ref self) -> bool =
+        match self:
+            case Some(_):
+                return False
+            case None:
+                return True
+
+    /// 是否为 Some 且满足条件
+    def is_some_and(ref self, predicate: fn(ref T) -> bool) -> bool =
+        match self:
+            case Some(ref value):
+                return predicate(value)
+            case None:
+                return False
+
+    // --- 提取 ---
+
+    /// 提取值或 panic
+    def unwrap(self) -> T =
+        match self:
+            case Some(value):
+                return value
+            case None:
+                panic("called `Option.unwrap()` on a `None` value")
+
+    /// 提取值或返回默认值
+    def unwrap_or(self, default: T) -> T =
+        match self:
+            case Some(value):
+                return value
+            case None:
+                return default
+
+    /// 提取值或用闭包计算默认值
+    def unwrap_or_else(self, f: fn() -> T) -> T =
+        match self:
+            case Some(value):
+                return value
+            case None:
+                return f()
+
+    /// 提取值或用自定义消息 panic
+    def expect(self, msg: str) -> T =
+        match self:
+            case Some(value):
+                return value
+            case None:
+                panic(msg)
+
+    // --- 转换 ---
+
+    /// 映射 Some 中的值
+    def map<U>(self, f: fn(T) -> U) -> Option<U> =
+        match self:
+            case Some(value):
+                return Some(f(value))
+            case None:
+                return None
+
+    /// 映射或返回默认值
+    def map_or<U>(self, default: U, f: fn(T) -> U) -> U =
+        match self:
+            case Some(value):
+                return f(value)
+            case None:
+                return default
+
+    /// 映射或用闭包计算默认值
+    def map_or_else<U>(self, default_fn: fn() -> U, f: fn(T) -> U) -> U =
+        match self:
+            case Some(value):
+                return f(value)
+            case None:
+                return default_fn()
+
+    /// 返回 Option<Option<T>>, 然后 and_then 展平
+    def and<U>(self, other: Option<U>) -> Option<U> =
+        match self:
+            case Some(_):
+                return other
+            case None:
+                return None
+
+    /// 链式调用: 如果是 Some, 用闭包生成下一个 Option
+    def and_then<U>(self, f: fn(T) -> Option<U>) -> Option<U> =
+        match self:
+            case Some(value):
+                return f(value)
+            case None:
+                return None
+
+    /// 返回此 Option 或另一个 Option
+    def or(self, other: Option<T>) -> Option<T> =
+        match self:
+            case Some(_):
+                return self
+            case None:
+                return other
+
+    /// 返回此 Option 或用闭包生成另一个
+    def or_else(self, f: fn() -> Option<T>) -> Option<T> =
+        match self:
+            case Some(_):
+                return self
+            case None:
+                return f()
+
+    /// 过滤: 如果值满足条件则保留, 否则返回 None
+    def filter(self, predicate: fn(ref T) -> bool) -> Option<T> =
+        match self:
+            case Some(ref value):
+                if predicate(value):
+                    return self
+                return None
+            case None:
+                return None
+
+    // --- 转换到 Result ---
+
+    /// 将 Option 转为 Result: Some → Ok, None → Err(err)
+    def ok_or<E>(self, err: E) -> Result<T, E> =
+        match self:
+            case Some(value):
+                return Ok(value)
+            case None:
+                return Err(err)
+
+    /// 将 Option 转为 Result: Some → Ok, None → Err(f())
+    def ok_or_else<E>(self, err_fn: fn() -> E) -> Result<T, E> =
+        match self:
+            case Some(value):
+                return Ok(value)
+            case None:
+                return Err(err_fn())
+
+    // --- 拉平 ---
+
+    /// 展平 Option<Option<T>> → Option<T>
+    def flatten(self) -> Option<T>
+        where T: Option<_>
+        =
+        match self:
+            case Some(inner):
+                return inner
+            case None:
+                return None
+
+    // --- 副作用 ---
+
+    /// 如果是 Some, 执行副作用操作
+    def inspect(ref self, f: fn(ref T) -> ()) -> ref Self =
+        match self:
+            case Some(ref value):
+                f(value)
+            case None:
+                pass
+        return self
+
+    // --- 迭代 ---
+
+    /// 返回 0 或 1 个元素的迭代器
+    def iter(ref self) -> OptionIter<ref T> =
+        OptionIter(inner: self)
+
+    def iter_mut(mut self) -> OptionIter<mut T> =
+        OptionIter(inner: self)
+
+    // --- 魔法方法 ---
+
+    /// 布尔判定: Some = True, None = False
+    def __bool__(ref self) -> bool =
+        self.is_some()
+
+    /// 相等比较
+    def __eq__(ref self, ref other: Option<T>) -> bool
+        where T: Eq
+        =
+        match (self, other):
+            case (Some(ref a), Some(ref b)):
+                return a.__eq__(b)
+            case (None, None):
+                return True
+            case _:
+                return False
+
+    /// 字符串表示
+    def __str__(ref self) -> str
+        where T: Display
+        =
+        match self:
+            case Some(ref value):
+                return "Some(" + value.__str__() + ")"
+            case None:
+                return "None"
+
+
+// ============================================================
+// Option 迭代器
+// ============================================================
+
+struct OptionIter<T> =
+    inner: Option<T>
+
+impl<T> Iterator for OptionIter<T> =
+    type Item = T
+
+    def __next__(mut self) -> Option<T> =
+        // 取出内部值并返回, 然后返回 None
+        // 注意: 这里需要所有权移动
+        let taken = self.inner
+        self.inner = None
+        return taken
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "is_some and is_none":
+        let some_val = Some(42)
+        let none_val: Option<int> = None
+        assert some_val.is_some()
+        assert not some_val.is_none()
+        assert none_val.is_none()
+        assert not none_val.is_some()
+
+    test "is_some_and":
+        let val = Some(10)
+        assert val.is_some_and(|x: ref int| -> bool = x > 5)
+        assert not val.is_some_and(|x: ref int| -> bool = x > 20)
+
+    test "unwrap":
+        assert Some(42).unwrap() == 42
+
+    test "unwrap_or":
+        assert Some(42).unwrap_or(0) == 42
+        assert (None as Option<int>).unwrap_or(0) == 0
+
+    test "unwrap_or_else":
+        let result = (None as Option<int>).unwrap_or_else(|| -> int = 99)
+        assert result == 99
+
+    test "map":
+        let result = Some(3).map(|x: int| -> int = x * x)
+        assert result == Some(9)
+        assert (None as Option<int>).map(|x: int| -> int = x * x) == None
+
+    test "and_then":
+        def safe_div(a: int, b: int) -> Option<int>:
+            if b == 0:
+                return None
+            return Some(a / b)
+        let result = Some(10).and_then(|x: int| -> Option<int> = safe_div(x, 2))
+        assert result == Some(5)
+        let result2 = Some(10).and_then(|x: int| -> Option<int> = safe_div(x, 0))
+        assert result2 == None
+
+    test "or_else":
+        let a: Option<int> = None
+        let b = a.or_else(|| -> Option<int> = Some(100))
+        assert b == Some(100)
+
+    test "filter":
+        let val = Some(5)
+        assert val.filter(|x: ref int| -> bool = x > 0) == Some(5)
+        assert val.filter(|x: ref int| -> bool = x > 10) == None
+
+    test "ok_or":
+        let result = Some(42).ok_or("error")
+        assert result == Ok(42)
+
+    test "flatten":
+        let nested: Option<Option<int>> = Some(Some(5))
+        assert nested.flatten() == Some(5)
+
+    test "iter":
+        let mut count = 0
+        let val = Some(42)
+        for item in val.iter():
+            count = count + 1
+            assert item == 42
+        assert count == 1
+
+    print("option.lz — all tests passed!")

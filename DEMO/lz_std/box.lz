@@ -1,0 +1,267 @@
+#!bin lz
+// ============================================================
+// lz_std/box.lz — 智能指针 Box/Rc/Arc
+// 覆盖: SYNTAX/13-指针与引用.md, SYNTAX/01-类型系统.md
+// 指针类型仅能在 @unsafe 作用域中声明和操作
+// ============================================================
+
+// ============================================================
+// Box<T> — 堆分配唯一所有权指针
+// ============================================================
+
+struct Box<T> =
+    /// 内部堆指针 (由编译器管理)
+    _ptr: int  // 实际为 *T, 此处用 int 占位
+
+impl<T> Box<T> =
+
+    // struct 默认 callable: Box(value) 直接构造
+    // 自定义构造使用 magic __new__, 与 Python __new__/__init__ 一致
+
+    magic __new__(value: T) -> Box<T> =
+        // 内建: 编译器在堆上分配并构造
+        Box(_ptr: 0)
+
+    /// 获取不可变引用 (指针解引用, 仅 @unsafe 中可用)
+    @unsafe
+    def get(ref self) -> ref T =
+        // 内建: 编译器映射为指针解引用
+        // 生成代码: &*self._ptr
+        pass
+
+    /// 获取可变引用 (指针解引用, 仅 @unsafe 中可用)
+    @unsafe
+    def get_mut(mut self) -> mut T =
+        // 内建: 编译器映射为指针解引用
+        pass
+
+    /// 解引用获取值 (消费 Box)
+    @unsafe
+    def unwrap(self) -> T =
+        // 内建: 编译器移动堆上值并释放 Box
+        pass
+
+    /// 替换内部值 (返回旧值)
+    @unsafe
+    def replace(mut self, value: T) -> T =
+        // 内建: 编译器交换堆上值
+        pass
+
+    // --- 魔法方法 ---
+
+    /// 自动解引用
+    def __deref__(ref self) -> ref T =
+        self.get()
+
+    /// 析构 (自动释放堆内存)
+    @unsafe
+    def __drop__(mut self) =
+        // 内建: 编译器自动插入 drop
+        pass
+
+    def __eq__(ref self, ref other: Box<T>) -> bool
+        where T: Eq
+        =
+        self.get().__eq__(other.get())
+
+    def __str__(ref self) -> str
+        where T: Display
+        =
+        "Box(" + self.get().__str__() + ")"
+
+
+// ============================================================
+// Rc<T> — 引用计数共享指针 (非线程安全)
+// ============================================================
+
+struct Rc<T> =
+    /// 内部指针和引用计数 (由编译器管理)
+    _inner: int  // 实际为 (T, usize)*, 此处用 int 占位
+
+impl<T> Rc<T> =
+
+    magic __new__(value: T) -> Rc<T> =
+        // 内建: 编译器分配堆内存, 初始引用计数 = 1
+        Rc(_inner: 0)
+
+    /// 获取不可变引用
+    @unsafe
+    def get(ref self) -> ref T =
+        // 内建: 编译器映射为指针解引用
+        pass
+
+    /// 克隆 (增加引用计数)
+    def clone(ref self) -> Rc<T> =
+        // 内建: 编译器映射为 Rc::clone(self)
+        Rc(_inner: self._inner)
+
+    /// 获取引用计数
+    def strong_count(ref self) -> int =
+        // 内建: 编译器映射
+        1
+
+    /// 获取弱引用计数
+    def weak_count(ref self) -> int =
+        // 内建: 编译器映射
+        0
+
+    /// 尝试获取唯一所有权 (引用计数为 1 时成功)
+    def try_unwrap(self) -> Result<T, Rc<T>> =
+        if self.strong_count() == 1:
+            return Ok(self.get())
+        return Err(self)
+
+    /// 创建弱引用
+    def downgrade(ref self) -> Weak<T> =
+        Weak(_rc: self._inner, _strong_count: self.strong_count())
+
+    // --- 魔法方法 ---
+
+    def __deref__(ref self) -> ref T =
+        self.get()
+
+    @unsafe
+    def __drop__(mut self) =
+        // 内建: 编译器自动管理引用计数 (减 1, 为 0 时释放)
+        pass
+
+    def __eq__(ref self, ref other: Rc<T>) -> bool
+        where T: Eq
+        =
+        self.get().__eq__(other.get())
+
+    def __str__(ref self) -> str
+        where T: Display
+        =
+        "Rc(" + self.get().__str__() + ")"
+
+
+// ============================================================
+// Arc<T> — 原子引用计数共享指针 (线程安全)
+// ============================================================
+
+struct Arc<T> =
+    /// 内部指针和原子引用计数 (由编译器管理)
+    _inner: int  // 实际为 (T, AtomicUsize)*
+
+impl<T> Arc<T> =
+
+    magic __new__(value: T) -> Arc<T> =
+        // 内建: 编译器分配堆内存, 初始引用计数 = 1 (原子)
+        Arc(_inner: 0)
+
+    /// 获取不可变引用
+    @unsafe
+    def get(ref self) -> ref T =
+        // 内建: 编译器映射为指针解引用
+        pass
+
+    /// 克隆 (原子增加引用计数)
+    def clone(ref self) -> Arc<T> =
+        Arc(_inner: self._inner)
+
+    /// 获取引用计数
+    def strong_count(ref self) -> int =
+        1
+
+    /// 获取弱引用计数
+    def weak_count(ref self) -> int =
+        0
+
+    /// 尝试获取唯一所有权
+    def try_unwrap(self) -> Result<T, Arc<T>> =
+        if self.strong_count() == 1:
+            return Ok(self.get())
+        return Err(self)
+
+    /// 创建弱引用
+    def downgrade(ref self) -> Weak<T> =
+        Weak(_rc: self._inner, _strong_count: self.strong_count())
+
+    // --- 魔法方法 ---
+
+    def __deref__(ref self) -> ref T =
+        self.get()
+
+    @unsafe
+    def __drop__(mut self) =
+        // 内建: 编译器自动管理原子引用计数
+        pass
+
+    def __eq__(ref self, ref other: Arc<T>) -> bool
+        where T: Eq
+        =
+        self.get().__eq__(other.get())
+
+    def __str__(ref self) -> str
+        where T: Display
+        =
+        "Arc(" + self.get().__str__() + ")"
+
+
+// ============================================================
+// Weak<T> — 弱引用 (不增加引用计数)
+// ============================================================
+
+struct Weak<T> =
+    _rc: int             // 指向 Rc/Arc 内部控制块
+    _strong_count: int   // 用于判断原值是否还存活
+
+impl<T> Weak<T> =
+
+    /// 尝试升级为强引用 (如果原值还存在)
+    def upgrade(ref self) -> Option<Rc<T>> =
+        // 内建: 编译器检查引用计数 > 0
+        if self._strong_count > 0:
+            return Some(Rc(_inner: self._rc))
+        return None
+
+    /// 升级为 Arc 强引用
+    def upgrade_arc(ref self) -> Option<Arc<T>> =
+        if self._strong_count > 0:
+            return Some(Arc(_inner: self._rc))
+        return None
+
+    // --- 魔法方法 ---
+
+    def __drop__(mut self) =
+        // 内建: 编译器减少弱引用计数
+        pass
+
+
+// ============================================================
+// 自测试
+// ============================================================
+
+def main():
+    test "Box construct and get":
+        let b = Box(42)
+        assert b.get() == 42
+
+    test "Box display":
+        let b = Box(42)
+        let s = b.__str__()
+        assert s.contains("Box")
+
+    test "Rc construct and clone":
+        let rc1 = Rc([1, 2, 3])
+        let rc2 = rc1.clone()
+        assert rc1.get() == rc2.get()
+
+    test "Arc construct and get":
+        let arc = Arc("shared")
+        assert arc.get() == "shared"
+
+    test "Box equality":
+        let a = Box(10)
+        let b = Box(10)
+        let c = Box(20)
+        assert a == b
+        assert a != c
+
+    test "Rc try_unwrap":
+        let rc = Rc(100)
+        let result = rc.try_unwrap()
+        assert result == Ok(100)
+
+    print("box.lz — all tests passed!")

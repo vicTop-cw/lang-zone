@@ -8,8 +8,8 @@ def adder(n: int) -> fn(int) -> int =
 
 def main() =
     // 匿名函数（lambda）
-    let double = |x| x * 2
-    let triple = |x| x * 3
+    let double = |x: int| -> int = x * 2
+    let triple = |x: int| -> int = x * 3
     print(double(5), triple(4))
 
     // 高阶函数：把闭包当参数
@@ -24,14 +24,14 @@ def main() =
     print(inner(2, 3))
 
     // 闭包链式
-    let composed = |x| double(triple(x))
+    let composed = |x: int| -> int = double(triple(x))
     print(composed(2))
 
     // 无参闭包（中间空格，区别于逻辑或 ||）
-    let noop = | | 42
+    let noop = | | -> int = 42
     print(noop())
 
-    let say_hi = | | print("hi from closure")
+    let say_hi = | | -> () = print("hi from closure")
     say_hi()
 
     // 无参闭包作为参数
@@ -40,5 +40,5 @@ def main() =
 
     // 无参闭包 vs 逻辑或（|| 紧贴=逻辑或，| | 空格=闭包）
     let a = True || False       // 逻辑或
-    let b = | | True            // 无参闭包（空格！）
+    let b = | | -> bool = True            // 无参闭包（空格！）
     print(a, b())

@@ -1,0 +1,140 @@
+// ============================================================
+// boundary-coverage: 作用域嵌套与变量遮蔽测试
+// 覆盖: 多层变量遮蔽、let 作用域隔离、
+//      const 跨层可见、闭包捕获遮蔽变量、
+//      for 循环变量作用域、match 分支作用域
+// ============================================================
+
+// --- 1. 三层变量遮蔽（let）---
+def scope_shadow_basic() -> int =
+    let x = 1
+    let x = x + 10           // x = 11 (re-bind)
+    print(x)
+    let result =:
+        let x = 100           // shadow outer x
+        print(x)              // 100
+        x + 1
+    print(x)                  // 11 (outer x unchanged)
+    result
+
+// --- 2. 模块级 + 函数级 + 块级遮蔽 ---
+let global_val: int = 1000
+
+def scope_module_function() =
+    let global_val = 100      // shadow module-level
+    print(global_val)         // 100
+    let inner =:
+        let global_val = 10   // deeper shadow
+        print(global_val)     // 10
+    print(global_val)         // 100
+
+// --- 3. const 不可遮蔽特性 ---
+const MAGIC: int = 42
+
+def scope_const() -> int =
+    let local = MAGIC + 1
+    print(local)              // 43
+    local
+
+// --- 4. for 循环变量作用域 ---
+def scope_for_loop() =
+    let mut sum = 0
+    for i in 0..5:
+        let doubled = i * 2
+        sum += doubled
+        print(i, doubled)
+    // i 和 doubled 在此不可见
+    print(sum)
+
+// --- 5. match 分支作用域 ---
+def scope_match_branch(x: int) -> int =
+    let base = 10
+    match x:
+        case 0:
+            let local = 100
+            base + local
+        case 1:
+            let local = 200
+            base + local
+        case _:
+            let local = x * 10
+            base + local
+
+// --- 6. 闭包捕获 + 遮蔽 ---
+def scope_closure_capture() -> int =
+    let x = 5
+    let f = |y: int| -> int =
+        let x = 50            // shadow captured x
+        x + y + 1
+    let result = f(10)        // 50 + 10 + 1 = 61
+    print(x)                  // 5 (unchanged)
+    result
+
+// --- 7. try/catch/finally 作用域 ---
+def scope_try_catch() =
+    let outer = 100
+    try:
+        let inner = 200
+        print(outer, inner)
+    catch e:
+        let err_val = -1
+        print(err_val)
+    finally:
+        let final_val = 999
+        print(final_val)
+    // inner, err_val, final_val 在此不可见
+
+// --- 8. defer 作用域 ---
+def scope_defer() =
+    let main_val = 10
+    defer:
+        let cleanup_val = 20
+        print(main_val, cleanup_val)
+    let main_val = 30
+    // defer 捕获的是当前值
+
+// --- 9. 多层嵌套块作用域 ---
+def scope_nested_blocks() -> int =
+    let a = 1
+    let b =:
+        let a = 10
+        let c =:
+            let a = 100
+            let d =:
+                let a = 1000
+                a
+            a + d
+        a + c
+    a + b
+
+// --- 10. if/elif/else 分支作用域 ---
+def scope_if_branches(flag: int) -> int =
+    let shared = 100
+    if flag > 0:
+        let branch_val = 10
+        shared + branch_val
+    elif flag < 0:
+        let branch_val = -10
+        shared + branch_val
+    else:
+        let branch_val = 0
+        shared + branch_val
+
+// --- main ---
+def main() =
+    print("=== edge-scope-shadow ===")
+    print(scope_shadow_basic())
+    scope_module_function()
+    print(scope_const())
+    scope_for_loop()
+    print(scope_match_branch(0))
+    print(scope_match_branch(1))
+    print(scope_match_branch(5))
+    print(scope_closure_capture())
+    scope_try_catch()
+    scope_defer()
+    print(scope_nested_blocks())
+    print(scope_if_branches(1))
+    print(scope_if_branches(-1))
+    print(scope_if_branches(0))
+    print("edge-scope-shadow done")

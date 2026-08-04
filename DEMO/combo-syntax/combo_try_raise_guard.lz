@@ -1,5 +1,5 @@
 // combo-syntax（绿色回归测试）：try + raise + guard + catch
-enum MathError =
+enum MathError:
     DivByZero(str)
 
 def checked_div(a: int, b: int) -> int raises MathError =

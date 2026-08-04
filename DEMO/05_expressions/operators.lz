@@ -46,10 +46,9 @@ line2"""
     let ge  = 2 >= 1           // True
     let chain = 1 < 5 < 10    // chained comparison
 
-    // ---- 4.3  is (type check & identity)  ----
-    let is_int   = 42 is int
-    let is_str   = "hi" is str
-    let is_same  = None is None
+    // `is` — 编译期关键字, 仅用于 duck 约束
+    //   duck 内: `x is None` (单例同一性, 编译期判定)
+    //   运行时不可用, 参见 SYNTAX/01b-duck关系约束.md
 
     // ---- 5  Logical — keyword form  ----
     let land = True and False   // short-circuit

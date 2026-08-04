@@ -1,9 +1,8 @@
 # Duck 关系约束——多类型间结构化关系
 
-> 规范版本: 3.2 · 基于编译器源码 · 最后校订: 2026-07-31
+> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-04
 
-> **参考**: Nim `concept` · Rust `trait` bounds · Go interface 结构匹配  
-> **状态**: 🟡 规范设计（语法冻结，待实现）
+> **参考**: Nim `concept` · Rust `trait` bounds · Go interface 结构匹配
 
 ---
 
@@ -510,7 +509,7 @@ duck LowLevel =
 
 #### 8.3.1 字段可见性约束
 
-LZ 字段可见性由字段名前缀表达：`.name` 即公开字段，`._name` 即私有字段。duck 约束中**不再使用 `pub` 关键字**——`.field` 本身就表示要求目标类型存在该公开字段。
+LZ 字段可见性由字段名前缀表达：`.name` 即公开字段，`._name` 即私有字段。duck 约束中要求目标类型存在公开字段，直接写 `.field` 即可（无 `pub` 关键字）。
 
 ```lz
 duck PublicFields =
@@ -918,3 +917,89 @@ struct MyService =
 // ✅ MyService 满足 LifecycleService
 // ❌ 缺少 shutdown() 或顺序不对 → 编译期报错
 ```
+
+---
+
+## 十一、duck 专用软关键字（soft keywords）
+
+### 11.1 机制：什么是「软关键字」
+
+**duck 专用软关键字（soft keyword）** 是一类在 `duck` 块内按上下文识别为专用 token、在 `duck` 块外恢复为普通标识符的词（与 Rust 的 `union`、Swift 的 `some` 同机制）。它们**不是全局保留字**——不占用标识符命名空间，可用作变量名/字段名/方法名；仅在 `duck` 体内特定语法位置具有专用含义。
+
+### 11.2 软关键字分类表
+
+| 软关键字 | 类别 | duck 体内含义 | 语法位置 |
+|----------|------|---------------|----------|
+| `require(a, b)` | 约束行 | 目标方法调用时必须提供命名参数 `a, b` | 方法签名后独立行（§8.2.2） |
+| `optional(a, b)` | 约束行 | 目标方法的命名参数 `a, b` 可选（有默认值） | 方法签名后独立行（§8.2.2） |
+| `exact(N)` | 签名内嵌 | 位置参数恰好 N 个 / 正则匹配恰好 N 个 | 参数位 / `match` 行（§8.2.1/8.4） |
+| `min(N)` | 签名内嵌 | 位置参数至少 N 个 | 参数位（§8.2.1） |
+| `max(N)` | 签名内嵌 | 位置参数不超过 N 个 | 参数位（§8.2.1） |
+| `range(L, R)` | 签名内嵌 | 位置参数在 L~R 个 | 参数位（§8.2.1） |
+| `at_least(N)` | match 行 | 至少有 N 个方法匹配正则模式 | `match` 行（§8.4） |
+| `at_most(N)` | match 行 | 最多 N 个方法匹配正则模式 | `match` 行（§8.4） |
+| `match` | 约束行 | 引入正则模式匹配约束 | duck 体内独立行（§8.4） |
+| `StackType` | 伪类型 | 参数必须为栈类型（Copy 语义，零堆分配） | 参数类型位（§8.2.3） |
+| `RefType` | 伪类型 | 参数必须为引用类型（Move 语义，含堆分配） | 参数类型位（§8.2.3） |
+| `Any` | 伪类型 | 位置通配（`_: Any` / `def _(self) -> Any`） | 字段/方法占位（§10.2） |
+| `satisfies` | 约束行 | 要求目标类型同时满足另一 duck（`satisfies Base`） | duck 体内独立行 |
+| `sealed` | 约束行 | 闭合约束：目标类型不得有额外成员（与 `..` 相反） | duck 体内独立行 |
+| `default` | 签名修饰 | 该成员可选：目标类型可不实现（缺省跳过） | 方法签名行 |
+
+### 11.3 约束行 / 签名内嵌 / 伪类型（第 1~12 行）
+
+前 12 个软关键字在 `duck` 体内按其语法位置识别（§11.5 解析规则），duck 体外恢复为普通标识符：
+
+```lz
+duck Buildable<T> =
+    def build(self) -> T
+    require(name: str, version: int)     // 软关键字：require 行
+    def init(self, key: str, range(0, 2)) -> ()   // range 内嵌
+    optional(timeout: int)               // 软关键字：optional 行
+
+// 离开 duck 体后恢复普通标识符：
+let require = 1                          // ✅ 合法：require 是普通变量名
+```
+
+> **解析规则**：这些词在 `duck` 体内被词法器按上下文稳定识别；在 duck 体外（普通代码）它们是普通标识符，可用作变量名等，不因保留字占用而报错。
+
+### 11.4 组合约束 / 闭合 / 可选成员（第 13~15 行）
+
+```lz
+// ① satisfies —— 显式「本 duck 要求目标类型还满足另一个 duck」，
+//    与 where T: Base 等价，但可写在 duck 体内作约束行（更内聚）
+duck Resource<T> where T: Iterable =
+    satisfies Iterable                 // 等价 where T: Iterable（二选一即可）
+    def fetch(self) -> T
+
+// ② sealed —— 闭合约束：目标类型不得有额外成员。
+//    与 `..`（开放，允许额外成员）相反，默认 duck 是开放的
+duck ExactShape =
+    sealed                             // 目标类型只能有 .w / .h，多一个字段即报错
+    .w: int
+    .h: int
+
+// ③ default —— 该成员可选：目标类型可不实现，编译器缺省跳过。
+//    与 `optional`（命名参数可选）互补：default 是整个成员可选
+duck Renderable =
+    def render(self) -> ()
+    default def fallback(self) -> ()   // 目标类型可不实现 fallback
+```
+
+### 11.5 解析规则与语法边界
+
+1. **上下文识别**：软关键字仅在 `duck` 块体内被识别；识别依据是所在行/参数位的语法结构（约束行引导词、`match` 行、参数位 `exact/min/max/range`、类型位 `StackType/RefType/Any`）。
+2. **duck 体外完全普通**：`let require = 1`、`struct X = x: StackType`、`def optional() = ...` 均合法——这些词不是全局保留字。
+3. **不嵌套识别**：`duck` 体内的 `def`/`struct` 等普通语法里不识别软关键字（嵌套的 duck 块除外）。
+4. **冲突处理**：若目标类型真的定义了名为 `require` 的字段/方法，duck 体内用 `def require(self)` 正常声明；软关键字 `require(...)` 只出现在「无 `def` 前缀的独立调用行」，两者由行首 token 区分，无歧义。
+5. **错误提示**：软关键字用错位置（如 duck 体外写 `require(a)`）→ 按普通函数调用解析（若 `require` 未定义则报「未定义函数」），不产生「保留字」错误。
+
+### 11.6 与「保留字」的边界
+
+| 类别 | 示例 | 是否占用标识符 |
+|------|------|:--------------:|
+| 硬关键字（全局保留） | `def` / `if` / `for` / `duck` | ✅ 占用，不可作标识符 |
+| 软关键字（duck 体内专用） | `require` / `optional` / `exact` / `satisfies` / `sealed` / `default` | ❌ 不占用，duck 体外可用 |
+| 内建/伪类型（prelude） | `StackType` / `RefType` / `Any` | ❌ 不占用（库内容） |
+
+> 详见 [附录B-关键字保留字符号语法边界.md](附录B-关键字保留字符号语法边界.md) §1.13 的 duck 软关键字总表。
