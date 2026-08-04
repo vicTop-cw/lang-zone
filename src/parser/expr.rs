@@ -897,6 +897,9 @@ impl ParserExprExt for Parser {
             }
             Token::Match => {
                 let expr = self.parse_expr()?;
+                if !self.check(&Token::Colon) {
+                    eprintln!("[DEBUG Match FAIL] after expr, next={:?}", self.peek());
+                }
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 self.expect(Token::Indent)?;
@@ -916,7 +919,7 @@ impl ParserExprExt for Parser {
                             Ok(p) => patterns.push(p),
                             Err(e) => return Err(format!("{} (in match arm pattern)", e)),
                         }
-                        if self.check(&Token::Pipe_) {
+                        if self.check(&Token::Pipe_) || self.check(&Token::PipePipe) {
                             self.advance();
                         } else {
                             break;
@@ -928,24 +931,24 @@ impl ParserExprExt for Parser {
                     } else {
                         None
                     };
+                    // 接受 : 或 => 作为 arm 分隔符（所有模式共享同一个 body）
+                    if self.check(&Token::FatArrow) {
+                        self.advance();
+                    } else {
+                        self.expect(Token::Colon)?;
+                    }
+                    self.skip_newlines();
+                    let body = if self.check(&Token::Indent) {
+                        self.advance();
+                        let b = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        b
+                    } else {
+                        vec![self.parse_stmt()?]
+                    };
                     // 对于多模式，每个模式复制一份 arm（简化处理）
-                    for pat in patterns {
-                        // 接受 : 或 => 作为 arm 分隔符
-                        if self.check(&Token::FatArrow) {
-                            self.advance();
-                        } else {
-                            self.expect(Token::Colon)?;
-                        }
-                        self.skip_newlines();
-                        let body = if self.check(&Token::Indent) {
-                            self.advance();
-                            let b = self.parse_block()?;
-                            self.expect(Token::Dedent)?;
-                            b
-                        } else {
-                            vec![self.parse_stmt()?]
-                        };
-                        arms.push(MatchArm { pattern: pat, guard: guard.clone(), body });
+                    for pat in &patterns {
+                        arms.push(MatchArm { pattern: pat.clone(), guard: guard.clone(), body: body.clone() });
                     }
                     self.skip_newlines();
                 }
