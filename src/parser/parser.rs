@@ -595,8 +595,21 @@ impl Parser {
             let has_colon_body = self.check(&Token::Colon);
             if has_colon_body {
                 self.advance(); // consume :
-            } else {
+            } else if !self.check(&Token::Eq) && !self.check(&Token::Dedent) {
+                // 没有 = body → 抽象方法声明（仅签名）
+                // 但如果下一个是 Dedent 或 Struct 等顶层 token，也视为无 body
+                if matches!(self.peek(), Token::Dedent | Token::Struct | Token::Enum | Token::Trait | Token::Impl | Token::Def | Token::Iterator) {
+                    return Ok(Function {
+                        name, generics, params, return_type, raises,
+                        where_clause, body: Vec::new(), is_async: false,
+                        is_abstract: true, is_iterator: false,
+                        is_magic,
+                        decorators: Vec::new(), variadic,
+                    });
+                }
                 self.expect(Token::Eq)?;
+            } else {
+                self.advance(); // consume =
             }
             self.skip_newlines();
             if self.check(&Token::DotDot) || self.check(&Token::DotDotDot) {
