@@ -38,6 +38,10 @@ impl ParserStmtExt for Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
+        // 跳过意外的 Indent（嵌套块的额外缩进）
+        if self.check(&Token::Indent) {
+            self.advance();
+        }
         match self.peek() {
             Token::Let => {
                 // let x = 1  → 不可变绑定
