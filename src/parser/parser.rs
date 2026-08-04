@@ -581,7 +581,13 @@ impl Parser {
             None
         };
 
-        // where 子句（允许换行）
+        // where 子句（允许换行和缩进）
+        // def name<T>() -> R where T: Bound
+        //     where T: Bound2 =
+        self.skip_newlines();
+        if self.check(&Token::Indent) {
+            self.advance(); // skip Indent before where
+        }
         let mut where_clause = if self.check(&Token::Where) {
             self.parse_where_clause()?
         } else {
