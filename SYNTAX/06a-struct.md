@@ -52,8 +52,9 @@ struct Bad =
 
 ```lz
 // 函数参数：类型注解可选
-def foo(x) = x + 1           // ✅ 可行（推断为 int）
-def bar(x: int) = x + 1      // ✅ 显式注解
+//def foo(x) = x + 1           // x 完全没有注解
+//def bar(x: int) = x + 1      // X 返回值没有注解
+def bar(x: int) -> int = x + 1      // ✅ 合法
 
 // struct 字段：类型注解强制
 struct Data =
@@ -434,7 +435,42 @@ let db = Database.new("postgres://localhost/test")
 | **分离关注** | `__new__` 负责分配策略，`__init__` 负责字段级初始化 |
 | **与 trait 兼容** | `__new__` 可作为 `Constructible` trait 的一部分 |
 
-### 6.4 注意
+### 6.4 `__implicit_from__` — 隐式构造
+
+当 struct 实现了 `__implicit_from__`，编译器可在类型不匹配时自动插入转换：
+
+```lz
+struct Port =
+    value: int
+
+    // 从 str 隐式构造
+    magic __implicit_from__(s: str) -> Self =
+        Self(value: s.parse().unwrap_or(8080))
+
+    // 从 int 隐式构造
+    magic __implicit_from__(n: int) -> Self =
+        Self(value: n)
+```
+
+触发场景：
+
+```lz
+s = "3000"
+let p: Port = s           // str → Port，自动转换
+
+let n = 8080
+let p2: Port = n          // int → Port，自动转换
+
+def serve(port: Port) ->
+    print(port.value)
+serve("9090")             // 参数传递，自动转换
+```
+
+**与 `__new__` 的区别**：
+- `__new__` → 覆盖默认构造器，`Port(n: 8080)` 调用时触发
+- `__implicit_from__` → 编译器自动插入，`let p: Port = 8080` 时触发
+
+### 6.5 注意
 
 - `__new__` 和 `__init__` 的签名由用户自定义，不强制匹配字段列表
 - 实现了 `__new__` 后，编译器默认的关键字构造是否仍可用有待确定

@@ -13,7 +13,7 @@
 
 ### 两种约束的对比
 
-```
+```lz
 // 属性型（见 01-类型系统.md §九）—— "T 是什么"
 duck Quackable =
     def quack(self) -> ()

@@ -152,6 +152,21 @@ def clone_and_print<T>(x: T)
 
 - 使用 `+` 连接多个 trait 约束
 
+### 8.4 impl 内建类型
+
+允许对内置类型（`List<T>`、`Dict<K,V>`、`Set<T>`、`str`、`int`、`f64`、`bool`）编写 `impl` 块以扩展方法：
+
+```lz
+impl List<int> =
+    def sum(ref self) -> int =
+        let mut s = 0
+        for x in self:
+            s += x
+        s
+```
+
+> 内置类型的 `impl` 不能覆盖编译器已生成的魔法方法（如 `__eq__`、`__str__` 等），但可以添加新的普通方法。`impl` 内的 `self` 自动推导为该内置类型。
+
 ### 8.4 where 子句
 
 ```lz

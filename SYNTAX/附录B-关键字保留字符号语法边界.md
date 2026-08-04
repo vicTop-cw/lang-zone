@@ -48,9 +48,10 @@
 | `for` | 迭代循环 | 函数/块内 |
 | `while` | 条件循环 | 函数/块内 |
 | `loop` | 无限循环 | 函数/块内 |
+| `block` | 命名作用域/标签跳出 | 函数/块内 |
 | `pass` | 占位符 | 任何块内 |
-| `break` | 退出循环(单层) | 仅 `for`/`while`/`loop` 内 |
-| `continue` | 下一轮迭代(单层) | 仅 `for`/`while`/`loop` 内 |
+| `break` | 退出循环/命名块（支持 `break NAME` 跨层） | `for`/`while`/`loop`/`block` 内 |
+| `continue` | 续跑循环下一轮（支持 `continue NAME`） | 仅 `for`/`while`/`loop` 内 |
 | `return` | 函数返回 | 仅函数/构建块内 |
 | `with` | 上下文管理器 | 函数/块内 |
 | `defer` | 延迟执行(LIFO) | 函数/块内 |
@@ -130,7 +131,7 @@
 
 | 关键字 | 用途 |
 |--------|------|
-| `is` | 引用同一性（`a is b`）；类型判断（`x is int`） |
+| `is` | 编译期同一性（仅 duck 约束内, 判定 `is None`/`is Unit`/`is Nil` 等单例） |
 | `in` | 成员判断（`a in b` → `b.__contains__(&a)`） |
 
 ### 1.12 内建值/类型/构造器（**非关键字**）
@@ -176,7 +177,7 @@
 | 范围 | `..` `..=` | 表达式级运算符，优先级仅高于赋值 `=`、海象 `:=`、三元（见 12-操作符.md §二 1 级区） |
 | 三元 | `if`/`else` | 仅作 `a if c else b` 三元表达式；与 `if` 语句不共享优先级 |
 | 复合赋值 | `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=` | 与 `=` 同级（最低），语句级 |
-| 构建块 | `=:` `~:` `*:` | 非表达式运算符，不进入优先级体系 |
+| 构建块 | `=:` `^:` `~:` `*:` | 非表达式运算符，不进入优先级体系 |
 | 所有权移动 | `^`（后缀） | 后缀操作符，不进入中缀优先级体系 |
 
 ## 四、语法边界 — 嵌套限制
@@ -197,7 +198,7 @@
 | `type` | 顶层, 函数内, trait 内 | — |
 | `comptime` | 函数/块内, 顶层 | — |
 | `const` | 顶层, comptime 块内 | 函数体内(直接写 `const` 报错) |
-| `break` | `for`/`while`/`loop` 内 | 循环外 |
+| `break` | `for`/`while`/`loop`/`block` 内 | 循环/块外 |
 | `continue` | `for`/`while`/`loop` 内 | 循环外 |
 | `return` | 函数/构建块内 | 顶层 |
 | `yield` | 生成器函数内/生成器构建块内 | 普通函数内 |
@@ -217,8 +218,7 @@
 | 单行 if | `if cond: expr` 仅支持三元 `a if cond else b`。`if cond: stmt` 块体必须换行缩进 |
 | 单行 guard | `guard cond else expr` 支持；`guard let Pattern = expr else:` 块体必须换行缩进 |
 | 单行 for/while | 不支持，冒号后必须换行缩进 |
-| `for`/`while` 不可赋值 | `let x = for ...` 编译错误 |
-| `loop` 可赋值 | `let x = loop: ... break value` |
+| `for`/`while`/`loop` 可赋值 | 均为表达式，值由 `break [NAME] [v]` 决定；正常完成 → `()`（`let r = for i in xs: if c: break i`） |
 | 所有权 `^` | 后缀操作符，仅用于变量/字段移动 |
 | `mut` 在变量中 | no-op，默认已可变；`mut self` 在方法中表示 `&mut Self` |
 | struct 字段 | 必须带类型注解 |

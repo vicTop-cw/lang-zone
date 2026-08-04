@@ -189,9 +189,14 @@ struct Point =
     magic __init__(self: Point, x: int, y: int) =
         self.x = x
         self.y = y
+
+    // 内联 magic __implicit_from__ — 隐式从 tuple 构造
+    magic __implicit_from__(t: (int, int)) -> Self =
+        Point(x: t.0, y: t.1)
 ```
 
 `magic __new__` 覆盖编译器默认构造器。若未实现，编译器自动生成基于字段名的关键字构造 `Point(x: 1, y: 2)`。
+`magic __implicit_from__` 使编译器在类型不匹配时自动插入转换（如 `let p: Point = (1, 2)`）。
 
 > 详见 [06a-struct.md](06a-struct.md) §六 构造器魔法方法。
 

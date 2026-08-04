@@ -22,9 +22,8 @@
 | 二元表达式 | `x = a + b` | 可选 | 否 | |
 | 函数调用 | `x = fn(a)` | 可选 | 否 | 返回 `()` 时绑定为 `Unit` |
 | 三元条件 | `x = a if cond else b` | 可选 | 否 | 两分支类型必须一致 |
-| `loop` | `x = loop: ... break v` | 可选 | 否 | 仅 `loop` 可带值 |
-| `for` | `x = for _ in xs: ...` | 拒绝 | — | `for` 返回 `()` |
-| `while` | `x = while cond: ...` | 拒绝 | — | `while` 返回 `()` |
+| `loop` / `for` / `while` | `x = for i in xs: if c: break i` | 可选 | 否 | 均为表达式，值由 `break [NAME] [v]` 决定；正常完成 → `()` |
+| `block` | `x = block NAME: ...` | 拒绝 | — | 命名作用域，**无返回值**；`break NAME` value-less |
 | `if/elif/else` 块 | `x = if cond: ... else: ...` | 可选 | 否 | 作为表达式时须有 `else` |
 | `match` 块 | `x = match v: case p => e` | 可选 | 否 | 全部分支类型一致 |
 | 闭包 | `f = \|x\| x + 1` | 可选 | 是 | 参数/返回类型需注解 |
@@ -38,8 +37,8 @@
 | `ref` 引用 | `ref r = x` | 可选 | 否 | |
 | `return` | `return expr` | 拒绝 | — | 语句，不可赋值 |
 | `yield` | `yield expr` | 拒绝 | — | 语句，不可赋值 |
-| `break` | `break value` | 拒绝* | — | 仅 `loop` 接收，不可直接 `let x = break v` |
-| `continue` | `continue` | 拒绝 | — | 语句 |
+| `break` | `break [NAME] [value]` | 拒绝* | — | 跨层由 `block` 标签提供；`break NAME v` 仅循环合法，block 不能带值 |
+| `continue` | `continue [NAME]` | 拒绝 | — | 语句；`continue NAME` 续跑标签所指循环 |
 | `defer` | `defer: cleanup()` | 拒绝 | — | 语句 |
 | `with` | `with f as x: ...` | 拒绝 | — | 语句 |
 | `guard` | `guard cond else expr` | 拒绝* | — | `guard` 整体不可赋值，但内部表达式可求值 |
@@ -49,7 +48,7 @@
 | `test` / `suite` | — | 拒绝 | — | 声明，不可赋值 |
 | `import` | — | 拒绝 | — | 声明，不可赋值 |
 
-> * `break value` 的值由 `loop` 表达式接收（`let x = loop: ... break v`），不可单独赋值 `let x = break v`。  
+> * `break [NAME] [value]` 的值由**循环表达式**接收（`let x = loop: ... break v` / `let r = for i in xs: if c: break i`），不可单独赋值 `let x = break v`；`break NAME v` 仅在 `NAME` 为循环时合法，block 的 `break NAME` 不带值（见 05b-block命名块.md §4.3）。  
 > * `guard cond else expr` 中 `else` 后的表达式值即 guard 整体的值，可用于表达式上下文（如 `let x = guard b != 0 else 0` 中的 `0`），但 `guard ... else:` 块形式不可赋值。
 
 ---

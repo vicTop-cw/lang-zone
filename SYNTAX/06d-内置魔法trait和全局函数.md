@@ -48,6 +48,7 @@
 | `__neg__` | `Neg` | `std::ops::Neg` | 取负 `-a` |
 | `__not__` | `Not` | `std::ops::Not` | 逻辑非 `not a` / `!a` |
 | `__invert__` | `HasInvert` | `HasInvert`（自定义） | 按位取反 `~a` |
+| `__deref__` | `Deref` | `std::ops::Deref` | 解引用 `*a` |
 
 均为一元运算符（`UnaryOp`），self 消费，Output 来自返回类型。不分派。
 
@@ -99,6 +100,12 @@
 `__from__`/`__try_from__` 按参数类型多分派；`__into__`/`__cast__`/`__try_cast__`/`__try_into__` 按返回类型多分派。
 
 `__cast__<T>(self) -> T` 和 `__try_cast__<T>(self) -> Result<T, Error>` 对齐 Mojo 风格的泛型类型转换。
+
+**`as` 操作符分发规则**：
+1. 优先调用 `__cast__`（强转）
+2. 若类型未实现 `__cast__` 但实现了 `__try_cast__`，则调用 `__try_cast__`，失败时抛出 `CastError`
+3. 两者均未实现 → 编译期错误
+4. 数值基本类型互转由编译器内置实现，不依赖 `__cast__`/`__try_cast__`
 
 ---
 
@@ -240,12 +247,57 @@ match p:
 
 | 魔法方法 | 生成 Trait | Rust Trait | 用途 |
 |----------|-----------|-----------|------|
+| `__implicit_from__` | `ImplicitFrom` | `ImplicitFrom`（自定义） | 隐式从源类型构造：`T` 可从 `S` 自动构造 |
+| `__implicit_to__` | `ImplicitInto` | `ImplicitInto`（自定义） | 隐式转换为目标类型：`S` 可自动转为 `T`（由 `__implicit_from__` blanket impl 派生） |
 | `__implicit_copy__` | `ImplicitCopy` | `ImplicitCopy`（自定义） | Mojo 风格隐式复制（move 后复用） |
-| `__implicit_to__` | `ImplicitInto` | `ImplicitInto`（自定义） | Scala 风格隐式转换（类型不匹配时自动搜索） |
 | `__implicit_default__` | `ImplicitDefault` | `ImplicitDefault`（自定义） | 隐式默认值填充 |
 
+**`__implicit_from__` 与 `__implicit_to__` 的配对关系**：
+
+```
+实现 __implicit_from__  → blanket impl 自动提供 __implicit_to__
+（类似 Rust From<T> → Into<U> 的自动推导）
+```
+
+**规则**：
+1. 只需实现 `__implicit_from__`，对应的 `__implicit_to__` 自动获得
+2. `__implicit_from__` 和 `__implicit_to__` 不可同时手动实现（避免歧义）
+3. 每次隐式转换最多执行一步（禁止链式 A→B→C 自动转换）
+4. 隐式转换与显式 `as` / `.into()` 互不干扰
+
+```lz
+// 示例：让 int 可以从 str 隐式构造
+struct Int =
+    value: i64
+    magic __implicit_from__(s: str) -> Self =
+        Self(value: s.parse().unwrap_or(0))
+
+s = "1"
+x: int = s   // str → int，编译器自动插入 __implicit_from__
+```
+
+**初始化优先级链**（类型不匹配时的尝试顺序）：
+
+```
+S → T (隐式)
+  1. T::__implicit_from__(v)     // 优先：隐式 From
+  2. v.__implicit_to__::<T>()    // 次之：隐式 Into（由步骤 1 的 blanket impl 派生）
+  3. T::__from__(v)              // 回退：显式 From
+  4. v.__into__::<T>()           // 回退：显式 Into
+  5. T::__default__()            // 兜底：默认值（仅当 v 是 default 关键字时）
+```
+
+**返回值隐式转换**：
+
+```lz
+def calculate() -> int =
+    let result: str = "42"
+    return result  // str → int，编译器自动插入 __implicit_from__<int>(result)
+```
+
+- `__implicit_from__` 按源类型多分派，签名 `__implicit_from__(source: S) -> Self`
+- `__implicit_to__<T>` 按返回类型多分派，签名 `__implicit_to__(self) -> T`
 - `__implicit_copy__` 使用 `&self` 借用，返回 `Self`，move 后自动植入复用
-- `__implicit_to__<T>(self) -> T` 按返回类型多分派
 - `__implicit_default__` 无 self（关联函数）
 
 ---
@@ -282,7 +334,18 @@ match p:
 | `__enter__` | `Enter` | `Enter`（自定义） | 进入 `with` 块（上下文管理器入口） |
 | `__exit__` | `Exit` | `Exit`（自定义） | 退出 `with` 块（上下文管理器出口） |
 
-`__enter__` 消费 self，返回 `Guard` 类型；`__exit__` 使用 `&mut self` 可变借用，与 `__enter__` 配对实现 RAII 风格的资源管理。
+`__enter__` 消费 self，返回一个 guard 对象（由 `with ... as x` 中的 `x` 绑定）；`__exit__` 接收该 guard 对象作为参数（**不是** `&mut self`），在其上执行清理逻辑。
+
+```lz
+struct MyFile =
+    path: str
+    def __enter__(self) -> File =
+        open(self.path)                     // self 被消费, 返回 File guard
+    def __exit__(mut self, guard: File) =
+        guard.close()                       // 在 guard 上清理
+```
+
+> 与 Python 协议的关键区别: `__exit__` 接收 guard 值而非 `self`（因为 `__enter__` 已将 `self` 消费），且不接收异常三元组（LZ 用 `try/catch` 替代 `with` 内的异常处理）。
 
 ---
 
@@ -353,12 +416,14 @@ match p:
 | `__buildparams__` | `BuildParams` | 构建块 |
 | `__implicit_copy__` | `ImplicitCopy` | 隐式策略 |
 | `__implicit_to__` | `ImplicitInto` | 隐式策略 |
+| `__implicit_from__` | `ImplicitFrom` | 隐式策略 |
 | `__implicit_default__` | `ImplicitDefault` | 隐式策略 |
 | `__guarded_pred__` | `GuardedStrategy` | 守卫策略 |
 | `__guarded_action__` | `GuardedStrategy` | 守卫策略 |
 | `__int__` | `std::convert::From` | 类型缺口 |
 | `__float__` | `std::convert::From` | 类型缺口 |
 | `__pos__` | `Pos` | 类型缺口 |
+| `__deref__` | `std::ops::Deref` | 运算符 |
 | `__enter__` | `Enter` | 上下文 |
 | `__exit__` | `Exit` | 上下文 |
 | `__iter_strategy__` | `std::iter::IntoIterator` | 迭代策略 |
