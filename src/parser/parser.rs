@@ -94,6 +94,12 @@ impl Parser {
         self.skip_newlines();
 
         while self.peek() != &Token::Eof {
+            // 跳过意外的 Dedent（嵌套块结束标记）
+            if self.check(&Token::Dedent) {
+                self.advance();
+                self.skip_newlines();
+                continue;
+            }
             let mut decorators = Vec::new();
             // 解析装饰器
             while self.check(&Token::At) {
