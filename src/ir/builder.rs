@@ -1262,7 +1262,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             ExprKind::TupleLit(elems.iter().map(|e| convert_expr(e, ctx)).collect())
         }
 
-        AstExpr::ListComprehension { output, var, iter, cond } => {
+        AstExpr::ListComprehension { output, var, iter, cond, .. } => {
             // [out for x in iter if cond] → 展开为生成模式
             let iter_expr = convert_expr(iter, ctx);
             let out_expr = convert_expr(output, ctx);

@@ -471,7 +471,7 @@ impl CodeGenExprExt for CodeGen {
                 format!("({}).unwrap_or({})", self.gen_expr(left), self.gen_expr(right))
             }
 
-            Expr::ListComprehension { output, var, iter, cond } => {
+            Expr::ListComprehension { output, var, iter, cond, .. } => {
                 let iter_s = self.gen_expr(iter);
                 let out_s = self.gen_expr(output);
                 match cond {

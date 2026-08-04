@@ -104,6 +104,7 @@ pub enum Expr {
         var: String,
         iter: Box<Expr>,
         cond: Option<Box<Expr>>,
+        extra_clauses: Vec<(String, Box<Expr>, Option<Box<Expr>>)>,
     },
     DictComprehension {
         key: Box<Expr>,

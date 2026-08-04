@@ -725,28 +725,34 @@ impl ParserExprExt for Parser {
                     return Ok(Expr::ListLit(Vec::new()));
                 }
                 let first = self.parse_expr()?;
-                // 推导式: [x for x in iter]
-                if let Token::For = self.peek() {
-                    // 简单推导式: [output for var in iter]
-                    self.advance(); // for
-                    let var = match self.advance() {
-                        Token::Ident(n) => n,
-                        t => return Err(format!("Expected var, got {:?}", t)),
-                    };
-                    self.expect(Token::In)?;
-                let iter = self.parse_comprehension_iter()?;
-                let cond = if self.check(&Token::If) {
-                    self.advance();
-                    Some(Box::new(self.parse_expr()?))
-                } else {
-                    None
-                };
-                self.expect(Token::RBrack)?;
-                return Ok(Expr::ListComprehension {
+                // 推导式: [output for var in iter if cond]
+                // 支持多个 for 子句: [x * y for x in 0..N for y in 0..N if cond]
+                if self.check(&Token::For) {
+                    let mut clauses = Vec::new();
+                    loop {
+                        self.advance(); // for
+                        let var = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected var, got {:?}", t)),
+                        };
+                        self.expect(Token::In)?;
+                        let iter = self.parse_comprehension_iter()?;
+                        let cond = if self.check(&Token::If) {
+                            self.advance();
+                            Some(Box::new(self.parse_expr()?))
+                        } else {
+                            None
+                        };
+                        clauses.push((var, Box::new(iter), cond));
+                        if !self.check(&Token::For) { break; }
+                    }
+                    self.expect(Token::RBrack)?;
+                    return Ok(Expr::ListComprehension {
                         output: Box::new(first),
-                        var,
-                        iter: Box::new(iter),
-                        cond,
+                        var: clauses[0].0.clone(),
+                        iter: clauses[0].1.clone(),
+                        cond: clauses[0].2.clone(),
+                        extra_clauses: clauses[1..].to_vec(),
                     });
                 }
                 // 列表字面量
