@@ -197,6 +197,13 @@ impl ParserExprExt for Parser {
                     let right = self.parse_pipe()?;
                     left = Expr::Binary { left: Box::new(left), op: BinOp::In, right: Box::new(right) };
                 }
+                Token::Not => {
+                    self.advance();
+                    // not in 运算符
+                    self.expect(Token::In)?;
+                    let right = self.parse_pipe()?;
+                    left = Expr::Binary { left: Box::new(left), op: BinOp::NotIn, right: Box::new(right) };
+                }
                 Token::Is => {
                     self.advance();
                     let right = self.parse_pipe()?;
@@ -976,7 +983,6 @@ impl ParserExprExt for Parser {
                 // |x| x + 1  或  |x| match x: case ...
                 self.skip_newlines();
                 // 如果 body 在缩进块内（如 let 语句中），跳过外层的 Indent
-                // match/if/for 等有自己的 Indent 处理
                 if self.check(&Token::Indent) {
                     self.advance(); // skip Indent
                 }

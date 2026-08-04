@@ -2399,8 +2399,9 @@ impl CodeGen {
                     };
                     return format!("{}.pow({})", lhs_s, rhs_s);
                 }
-                // In: 成员测试 → .contains() 方法 (elem in container → container.contains(&elem))
-                if matches!(op, BinOpKind::In) {
+                // In / NotIn: 成员测试 → .contains() 方法 (elem in container → container.contains(&elem))
+                if matches!(op, BinOpKind::In | BinOpKind::NotIn) {
+                    let not_prefix = if matches!(op, BinOpKind::NotIn) { "!" } else { "" };
                     let elem_s = self.gen_expr(lhs);
                     let cont_s = self.gen_expr(rhs);
                     // 字符串包含: "llo" in "hello" → "hello".contains("llo")
@@ -2421,14 +2422,14 @@ impl CodeGen {
                         } else {
                             elem_s.clone()
                         };
-                        return format!("{}.contains({})", cont_s, elem_arg);
+                        return format!("{}{}.contains({})", not_prefix, cont_s, elem_arg);
                     }
                     // Dict/HashMap: key in map → map.contains_key(&key)
                     if matches!(&rhs.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap") {
-                        return format!("{}.contains_key(&{})", cont_s, elem_s);
+                        return format!("{}{}.contains_key(&{})", not_prefix, cont_s, elem_s);
                     }
                     // List/Set/其他集合: elem in container → container.contains(&elem)
-                    return format!("{}.contains(&{})", cont_s, elem_s);
+                    return format!("{}{}.contains(&{})", not_prefix, cont_s, elem_s);
                 }
                 // String + 拼接: 右侧需借用 & 以匹配 Rust Add<&str>
                 // 但如果 rhs 是 variadic 参数（类型已是 &[T]），不应再加 &
@@ -2899,7 +2900,8 @@ impl CodeGen {
             BinOpKind::Xor => "^",
             BinOpKind::Shl => "<<",
             BinOpKind::Shr => ">>",
-            BinOpKind::In => "in",          // 不应直接输出，由 gen_expr 特殊处理
+            BinOpKind::In => "in",
+            BinOpKind::NotIn => "not_in",  // 不应直接输出，由 gen_expr 特殊处理
         }
     }
 

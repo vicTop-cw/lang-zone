@@ -77,7 +77,7 @@ impl CodeGenExprExt for CodeGen {
                     BinOp::And => "&&", BinOp::Or => "||",
                     BinOp::BitAnd => "&", BinOp::BitOr => "|",
                     BinOp::BitXor => "^", BinOp::Shl => "<<", BinOp::Shr => ">>",
-                    BinOp::In => "in", BinOp::Is => "is",
+                    BinOp::In => "in", BinOp::NotIn => "not_in", BinOp::Is => "is",
                 };
                 // 字符串拼接: "a" + "b" → format!("{}{}", a, b)（Rust 不允许 &str + &str）
                 if *op == BinOp::Add && (is_str_like(left) || is_str_like(right)) {

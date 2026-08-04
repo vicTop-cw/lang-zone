@@ -231,6 +231,7 @@ impl fmt::Display for BinOpKind {
             BinOpKind::Shr => f.write_str(">>"),
             BinOpKind::Pow => f.write_str("**"),
             BinOpKind::In => f.write_str("in"),
+            BinOpKind::NotIn => f.write_str("not in"),
         }
     }
 }

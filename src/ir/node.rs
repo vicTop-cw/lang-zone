@@ -541,7 +541,7 @@ pub enum BinOpKind {
     Eq, Neq, Lt, Gt, Le, Ge,
     And, Or,
     BitAnd, BitOr, Xor, Shl, Shr,
-    In,
+    In, NotIn,
 }
 
 impl BinOpKind {

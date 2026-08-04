@@ -186,6 +186,7 @@ fn map_binop(op: &BinOp) -> BinOpKind {
         BinOp::Shr => BinOpKind::Shr,
         BinOp::Pow => BinOpKind::Pow,
         BinOp::In => BinOpKind::In,
+        BinOp::NotIn => BinOpKind::NotIn,
         BinOp::Is => BinOpKind::Eq,        // Is 降级 (Rust 无 is 运算符)
     }
 }
