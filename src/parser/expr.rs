@@ -952,6 +952,26 @@ impl ParserExprExt for Parser {
                 self.expect(Token::Dedent)?;
                 Ok(Expr::Match { expr: Box::new(expr), arms })
             }
+            Token::PipePipe => {
+                // 空参数闭包: || expr
+                // 跳过换行，支持跨行表达式
+                self.skip_newlines();
+                // 支持可选的返回类型注解: || -> int = body
+                if self.check(&Token::Arrow) {
+                    self.advance(); // consume ->
+                    self.parse_type()?; // skip return type annotation
+                }
+                // 支持可选的 = 分隔符: || -> int = body
+                if self.check(&Token::Eq) {
+                    self.advance(); // consume =
+                }
+                self.skip_newlines();
+                if self.check(&Token::Indent) {
+                    self.advance(); // skip Indent
+                }
+                let body = self.parse_expr()?;
+                Ok(Expr::Closure { params: Vec::new(), body: Box::new(body) })
+            }
             Token::Pipe_ => {
                 // 闭包: |x, y| x + y  或  |x: int, y: int| -> int = x + y
                 let mut params = Vec::new();
