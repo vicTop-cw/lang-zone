@@ -109,10 +109,9 @@ impl Lexer {
                         Ok(val) => return Token::IntLit(val),
                         Err(_) => {
                             let hex_str = &num[2..].replace('_', "");
-                            // 区分格式错误 vs 值溢出：用 u64 重试
-                            if u64::from_str_radix(hex_str, 16).is_ok() {
-                                return Token::LexError(format!(
-                                    "十六进制值溢出 i64 范围: {}（最大值: 0x7FFFFFFFFFFFFFFF）", num));
+                            // 如果值在 u64 范围内，作为 i64 返回（允许负数表示）
+                            if let Ok(val) = u64::from_str_radix(hex_str, 16) {
+                                return Token::IntLit(val as i64);
                             }
                             return Token::LexError(format!("无效的十六进制数字: {}", num));
                         }
