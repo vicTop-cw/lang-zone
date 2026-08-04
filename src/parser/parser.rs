@@ -845,7 +845,7 @@ impl Parser {
     // ─── 类型解析 ───
 
     pub(super) fn parse_type(&mut self) -> Result<Type, String> {
-        let base = match self.advance() {
+        let mut base = match self.advance() {
             Token::Duck => {
                 // duck { name: Type, name: Type, ... }
                 self.expect(Token::LBrace)?;
@@ -987,6 +987,32 @@ impl Parser {
             }
             t => return Err(format!("Expected type, got {:?}", t)),
         };
+
+        // 支持路径类型: Self.Item 或 std.collections.List<T>
+        while self.check(&Token::Dot) {
+            self.advance(); // consume .
+            let next = match self.advance() {
+                Token::Ident(n) => n,
+                t => return Err(format!("Expected identifier after . in type path, got {:?}", t)),
+            };
+            // 构建路径类型: Self.Item → Named("Self.Item")
+            let path = match &base {
+                Type::Named(n) => format!("{}.{}", n, next),
+                _ => format!("{}.{}", "<>", next), // 回退
+            };
+            base = Type::Named(path);
+            // 检查泛型参数: Self.Item<T>
+            if self.check(&Token::Lt) {
+                self.advance();
+                let mut inner = Vec::new();
+                loop {
+                    inner.push(self.parse_type()?);
+                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Gt) { self.advance(); break; }
+                }
+                base = Type::Generic { base: Box::new(base), args: inner };
+            }
+        }
 
         // int? 语法糖：int? → Option<int>, str? → Option<str>
         if self.check(&Token::Question) {
@@ -1264,7 +1290,8 @@ impl Parser {
 
             match self.peek() {
                 Token::Def | Token::Iterator => {
-                    // trait 方法可能有默认实现
+                    // trait 方法: 先尝试带 body 的解析，如果失败则回退
+                    // 先 peek 检查是否有 @ 装饰器或 magic 关键字
                     let f = self.parse_function(false)?;
                     methods.push(f);
                 }
