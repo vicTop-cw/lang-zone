@@ -734,6 +734,7 @@ impl Parser {
             let name = match self.advance() {
                 Token::Ident(n) => n,
                 Token::Self_ => "self".to_string(),
+                Token::From => "from".to_string(),
                 t => return Err(format!("Expected param name, got {:?}", t)),
             };
 

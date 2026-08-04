@@ -692,6 +692,7 @@ impl ParserExprExt for Parser {
             Token::RawStrLit(s) => Ok(Expr::RawStrLit(s)),
             Token::True => Ok(Expr::BoolLit(true)),
             Token::False => Ok(Expr::BoolLit(false)),
+            Token::From => Ok(Expr::Ident("from".to_string())),
             Token::Ident(name) => Ok(Expr::Ident(name)),
             Token::Underscore => Ok(Expr::Ident("_".to_string())),
             Token::Self_ => Ok(Expr::Ident("self".to_string())),
