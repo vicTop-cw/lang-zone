@@ -591,7 +591,13 @@ impl Parser {
             (Vec::new(), false)
         } else {
             self.skip_newlines(); // 允许 = 在下一行
-            self.expect(Token::Eq)?;
+            // 支持 `:` 作为 block body 分隔符（def main(): <Indent>）
+            let has_colon_body = self.check(&Token::Colon);
+            if has_colon_body {
+                self.advance(); // consume :
+            } else {
+                self.expect(Token::Eq)?;
+            }
             self.skip_newlines();
             if self.check(&Token::DotDot) || self.check(&Token::DotDotDot) {
                 if self.check(&Token::DotDotDot) {
