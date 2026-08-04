@@ -650,6 +650,8 @@ impl ParserStmtExt for Parser {
 
         let name = match self.advance() {
             Token::Ident(n) => n,
+            Token::True => "True".to_string(),
+            Token::False => "False".to_string(),
             t => return Err(format!("Expected variable name, got {:?}", t)),
         };
 
