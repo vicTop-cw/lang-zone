@@ -1242,6 +1242,15 @@ impl Parser {
         } else {
             Vec::new()
         };
+        // 支持 trait Name: Bound1 + Bound2 =  (trait bounds)
+        // 或 trait Name =  (无 bounds)
+        if self.check(&Token::Colon) {
+            self.advance(); // consume :
+            // 跳过 trait bounds 直到 =
+            while !self.check(&Token::Eq) && !self.check(&Token::Eof) && !self.check(&Token::Newline) && !self.check(&Token::Indent) {
+                self.advance(); // skip bound tokens (Display + Debug, etc.)
+            }
+        }
         self.expect(Token::Eq)?;
         self.skip_newlines();
         self.expect(Token::Indent)?;
