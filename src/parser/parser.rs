@@ -1277,7 +1277,11 @@ impl Parser {
             self.skip_newlines();
         }
 
-        self.expect(Token::Dedent)?;
+        // 消费所有嵌套块的 Dedent（struct/impl/trait 嵌套时可能有多层）
+        while self.check(&Token::Dedent) {
+            self.advance();
+            self.skip_newlines();
+        }
         Ok(StructDef { name, generics, fields, methods, magic_methods, is_enum, decorators: Vec::new(), repr_attr })
     }
 
@@ -1333,7 +1337,10 @@ impl Parser {
             }
             self.skip_newlines();
         }
-        self.expect(Token::Dedent)?;
+        while self.check(&Token::Dedent) {
+            self.advance();
+            self.skip_newlines();
+        }
         Ok(TraitDef { name, generics, methods, fields })
     }
 
@@ -1398,7 +1405,10 @@ impl Parser {
             methods.push(self.parse_function(false)?);
             self.skip_newlines();
         }
-        self.expect(Token::Dedent)?;
+        while self.check(&Token::Dedent) {
+            self.advance();
+            self.skip_newlines();
+        }
 
         let mut where_clause = if self.check(&Token::Where) {
             self.parse_where_clause()?
