@@ -38,7 +38,10 @@ fn find_demo_files() -> Vec<PathBuf> {
     files
 }
 
+// TECH_DEBT: 该测试依赖 AST→RUST 代码生成路径（无 --emit=ir），违反 IR-only 技术路线约束。
+// 已移至 tests/deprecated/ 并标记 ignore。见 issues/2026-08-05-tech-debt-compile-demos-ast-rust.md。
 #[test]
+#[ignore = "TECH_DEBT: AST→RUST 路径，违反 IR-only 约束；改用 tests/ir_snapshots.rs"]
 fn all_demos_compile_successfully() {
     let files = find_demo_files();
     assert!(!files.is_empty(), "至少应找到 1 个 demo 文件");
