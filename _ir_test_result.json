@@ -1,17 +1,21 @@
 {
-  "total": 129,
-  "lz_pass": 129,
-  "lz_fail": 0,
-  "rustc_pass": 73,
-  "rustc_fail": 56,
+  "total": 114,
+  "lz_pass": 100,
+  "lz_fail": 14,
+  "rustc_pass": 75,
+  "rustc_fail": 25,
   "pass_files": [
     "01_basics\\comments.lz",
+    "01_basics\\identifiers.lz",
+    "01_basics\\keywords.lz",
     "01_basics\\literals.lz",
     "01_basics\\literals_more.lz",
     "02_types\\containers.lz",
     "02_types\\option_result.lz",
+    "02_types\\primitives.lz",
     "02_types\\type_aliases.lz",
     "02_types\\type_aliases_more.lz",
+    "02_types\\type_conversion.lz",
     "03_variables\\const.lz",
     "03_variables\\const_more.lz",
     "03_variables\\mutable_let.lz",
@@ -22,1040 +26,207 @@
     "04_functions\\basic.lz",
     "04_functions\\closures_more.lz",
     "04_functions\\composite.lz",
+    "04_functions\\generics.lz",
     "04_functions\\variadic.lz",
     "05_expressions\\comprehension.lz",
     "05_expressions\\comprehension_more.lz",
     "05_expressions\\if_match_expr.lz",
     "05_expressions\\null_coalesce.lz",
-    "05_expressions\\pipe.lz",
     "05_expressions\\ternary.lz",
     "06_control_flow\\break_continue.lz",
     "06_control_flow\\for_while_loop.lz",
-    "06_control_flow\\guard.lz",
     "06_control_flow\\if_elif_else.lz",
     "06_control_flow\\loop_demo.lz",
     "06_control_flow\\match.lz",
     "06_control_flow\\match_more.lz",
+    "06_control_flow\\with_defer.lz",
+    "07_data_structures\\callable_objects.lz",
     "07_data_structures\\enum.lz",
     "07_data_structures\\enum_more.lz",
+    "07_data_structures\\magic_methods.lz",
     "07_data_structures\\module_magic.lz",
     "07_data_structures\\struct.lz",
     "07_data_structures\\struct_more.lz",
     "07_data_structures\\trait_impl.lz",
+    "08_modules\\import_demo.lz",
+    "08_modules\\import_more.lz",
     "09_macros\\comptime_demo.lz",
     "09_macros\\macro_demo.lz",
+    "10_error_handling\\try_more.lz",
+    "11_concurrency\\async_more.lz",
+    "11_concurrency\\async_spawn.lz",
+    "12_build_blocks\\build_more.lz",
     "13_operators\\compound_assign_more.lz",
     "14_pointers\\box_rc_arc.lz",
+    "14_pointers\\rc_arc_more.lz",
     "15_generators\\generator_more.lz",
     "15_generators\\yield_demo.lz",
+    "16_testing\\test_more.lz",
     "16_testing\\test_suite.lz",
     "99_prelude\\prelude_demo.lz",
-    "99_spec\\closure_fatarrow.lz",
-    "99_spec\\combo-syntax\\combo_while_guard_else.lz",
-    "99_spec\\combo-syntax\\combo_while_guard_walrus.lz",
-    "99_spec\\comprehension_over_list.lz",
-    "99_spec\\comptime_template.lz",
-    "99_spec\\constraint_multi.lz",
-    "99_spec\\dict_comprehension.lz",
-    "99_spec\\go_stmt.lz",
-    "99_spec\\guard_for_1.lz",
-    "99_spec\\guard_for_2.lz",
-    "99_spec\\ir-edge-boundary-values.lz",
-    "99_spec\\ir-edge-enum-self-methods.lz",
-    "99_spec\\ir-edge-guard-combo.lz",
-    "99_spec\\ir-edge-nested-match.lz",
-    "99_spec\\ir-edge-type-boundary.lz",
-    "99_spec\\literal_i64min.lz",
-    "99_spec\\loop_else.lz",
-    "99_spec\\macro_real.lz",
-    "99_spec\\match_guard.lz",
-    "99_spec\\set_comprehension.lz",
-    "99_spec\\setup_teardown.lz",
-    "99_spec\\tilde_named_arg_1.lz",
-    "99_spec\\tilde_named_arg_2.lz",
-    "99_spec\\tilde_named_arg_3.lz",
+    "boundary-coverage\\combo-error-control.lz",
+    "combo-syntax\\combo_async_spawn.lz",
+    "combo-syntax\\combo_defer_guard_try.lz",
+    "combo-syntax\\combo_enum_match_guardlet.lz",
+    "combo-syntax\\combo_for_walrus.lz",
+    "combo-syntax\\combo_generic_struct_method.lz",
+    "combo-syntax\\combo_match_ternary.lz",
+    "combo-syntax\\combo_pipe_partial.lz",
+    "combo-syntax\\combo_struct_method_partial.lz",
+    "combo-syntax\\combo_try_raise_guard.lz",
+    "combo-syntax\\combo_while_walrus.lz",
     "export_demo.lz",
     "memoize_demo.lz",
+    "overload_test.lz",
     "pass_demo.lz",
     "struct_singleline.lz"
   ],
   "errors": {
-    "E0599": [
-      "01_basics\\identifiers.lz",
-      "01_basics\\identifiers.lz",
-      "06_control_flow\\with_defer.lz",
-      "07_data_structures\\magic_methods.lz",
-      "99_spec\\extractor_unapply.lz",
-      "99_spec\\gen_block_star.lz",
-      "99_spec\\iterator_demo.lz"
-    ],
-    "E0728": [
-      "01_basics\\keywords.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_spawn.lz",
-      "11_concurrency\\async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz"
-    ],
-    "E0308": [
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "01_basics\\keywords.lz",
-      "02_types\\type_conversion.lz",
-      "04_functions\\generics.lz",
-      "04_functions\\generics.lz",
-      "05_expressions\\operators.lz",
-      "06_control_flow\\with_defer.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_spawn.lz",
-      "11_concurrency\\async_spawn.lz",
-      "13_operators\\precedence.lz",
-      "99_spec\\codegen_str_int_float.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "99_spec\\gen_block_star.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_async_spawn.lz",
-      "combo-syntax\\combo_defer_guard_try.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_match_ternary.lz",
-      "combo-syntax\\combo_ternary_walrus.lz",
-      "overload_test.lz",
-      "variadic_dotdot.lz"
-    ],
-    "E0382": [
-      "02_types\\primitives.lz",
-      "10_error_handling\\try_more.lz",
-      "99_spec\\iterator_demo.lz"
-    ],
-    "E0425": [
+    "E0277": [
       "04_functions\\checker.lz",
-      "04_functions\\checker.lz",
-      "04_functions\\generics.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "05_expressions\\operators.lz",
-      "06_control_flow\\with_defer.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "10_error_handling\\panic_raise_try.lz",
-      "12_build_blocks\\build_more.lz",
-      "12_build_blocks\\build_more.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "13_operators\\precedence.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
-      "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "99_spec\\duck_test.lz",
-      "99_spec\\guard_for_3.lz",
-      "99_spec\\guard_for_3.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\parallel_decorator.lz",
-      "99_spec\\pipe_spec.lz",
-      "99_spec\\pipe_spec.lz",
-      "99_spec\\pipe_spec.lz",
-      "99_spec\\while_walrus_guard_1.lz",
-      "99_spec\\while_walrus_guard_1.lz",
-      "99_spec\\while_walrus_guard_1.lz",
-      "combo-syntax\\combo_for_walrus.lz",
-      "combo-syntax\\combo_for_walrus.lz",
-      "combo-syntax\\combo_pipe_partial.lz",
-      "combo-syntax\\combo_ternary_walrus.lz",
-      "combo-syntax\\combo_ternary_walrus.lz",
-      "combo-syntax\\combo_ternary_walrus.lz",
-      "combo-syntax\\combo_try_raise_guard.lz",
-      "combo-syntax\\combo_while_walrus.lz",
-      "combo-syntax\\combo_while_walrus.lz",
-      "combo-syntax\\combo_while_walrus.lz"
-    ],
-    "E0608": [
-      "04_functions\\checker.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "14_pointers\\rc_arc_more.lz",
-      "14_pointers\\rc_arc_more.lz"
-    ],
-    "E0423": [
-      "04_functions\\generics.lz",
-      "05_expressions\\operators.lz",
-      "07_data_structures\\magic_methods.lz",
-      "99_spec\\underscore_discard_3.lz",
-      "99_spec\\underscore_discard_3.lz"
+      "boundary-coverage\\combo-pipe-lambda.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\result.lz",
+      "lz_std\\string.lz"
     ],
     "E0369": [
-      "04_functions\\generics.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "99_spec\\null_safe.lz",
-      "99_spec\\null_safe.lz"
+      "04_functions\\checker.lz",
+      "boundary-coverage\\combo-build-block.lz",
+      "lz_std\\__init__.lz",
+      "lz_std\\list.lz",
+      "lz_std\\string.lz"
     ],
-    "E0433": [
+    "E0107": [
+      "04_functions\\checker.lz",
+      "lz_std\\box.lz",
+      "lz_std\\dict.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\result.lz",
+      "lz_std\\set.lz"
+    ],
+    "E0425": [
       "05_expressions\\operators.lz",
+      "10_error_handling\\panic_raise_try.lz",
+      "13_operators\\precedence.lz",
+      "boundary-coverage\\combo-build-block.lz",
+      "boundary-coverage\\combo-iterator-generator.lz",
+      "boundary-coverage\\combo-pipe-lambda.lz",
+      "lz_std\\dict.lz",
+      "lz_std\\list.lz",
+      "lz_std\\prelude.lz",
+      "lz_std\\set.lz",
+      "lz_std\\string.lz"
+    ],
+    "E0423": [
       "05_expressions\\operators.lz",
+      "lz_std\\box.lz"
+    ],
+    "E0599": [
       "05_expressions\\operators.lz",
+      "boundary-coverage\\combo-pipe-lambda.lz",
+      "lz_std\\box.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\result.lz",
+      "lz_std\\string.lz"
+    ],
+    "E0308": [
       "05_expressions\\operators.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz",
-      "combo-syntax\\combo_enum_match_guardlet.lz",
-      "combo-syntax\\combo_enum_match_guardlet.lz"
-    ],
-    "E0618": [
-      "07_data_structures\\callable_objects.lz",
-      "07_data_structures\\callable_objects.lz",
-      "07_data_structures\\callable_objects.lz",
-      "07_data_structures\\magic_methods.lz",
-      "99_spec\\underscore_partial_1.lz",
-      "99_spec\\underscore_partial_2.lz",
-      "combo-syntax\\combo_struct_method_partial.lz"
-    ],
-    "E0277": [
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "07_data_structures\\magic_methods.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "11_concurrency\\async_more.lz",
-      "99_spec\\index_build.lz",
-      "99_spec\\index_build.lz",
-      "99_spec\\index_build_block.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz",
-      "99_spec\\iterator_demo.lz"
-    ],
-    "E0063": [
-      "07_data_structures\\magic_methods.lz"
-    ],
-    "E0600": [
-      "07_data_structures\\magic_methods.lz"
-    ],
-    "E0432": [
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_demo.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz",
-      "08_modules\\import_more.lz"
+      "10_error_handling\\panic_raise_try.lz",
+      "12_build_blocks\\var_call_block.lz",
+      "boundary-coverage\\combo-async-await.lz",
+      "boundary-coverage\\combo-build-block.lz",
+      "boundary-coverage\\combo-defer-guard.lz",
+      "boundary-coverage\\combo-iterator-generator.lz",
+      "boundary-coverage\\combo-pipe-lambda.lz",
+      "boundary-coverage\\edge-values-boundary.lz",
+      "boundary-coverage\\edge-walrus-operator.lz",
+      "boundary-coverage\\nesting-control-flow.lz",
+      "boundary-coverage\\nesting-expressions.lz",
+      "combo-syntax\\combo_ternary_walrus.lz",
+      "lz_std\\box.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\prelude.lz",
+      "lz_std\\result.lz",
+      "lz_std\\string.lz"
     ],
     "E0061": [
-      "12_build_blocks\\build_more.lz",
-      "12_build_blocks\\build_more.lz",
+      "05_expressions\\pipe.lz",
       "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz",
-      "12_build_blocks\\var_call_block.lz"
+      "boundary-coverage\\combo-pipe-lambda.lz",
+      "boundary-coverage\\nesting-expressions.lz"
     ],
-    "E0507": [
-      "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
-      "combo-syntax\\combo_generic_struct_method.lz"
+    "E0382": [
+      "boundary-coverage\\combo-defer-guard.lz",
+      "lz_std\\list.lz"
     ],
     "E0282": [
-      "99_spec\\ir-edge-empty-collections.lz"
-    ],
-    "E0069": [
-      "99_spec\\iterator_demo.lz"
+      "boundary-coverage\\combo-pipe-lambda.lz",
+      "lz_std\\box.lz",
+      "lz_std\\option.lz"
     ],
     "E0530": [
-      "99_spec\\keyword_downgrade.lz",
-      "99_spec\\keyword_downgrade.lz",
-      "99_spec\\keyword_downgrade.lz"
+      "boundary-coverage\\nesting-expressions.lz"
+    ],
+    "E0600": [
+      "lz_std\\__init__.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\prelude.lz",
+      "lz_std\\result.lz",
+      "lz_std\\string.lz"
+    ],
+    "E0255": [
+      "lz_std\\box.lz"
+    ],
+    "E0117": [
+      "lz_std\\box.lz"
+    ],
+    "E0392": [
+      "lz_std\\box.lz"
+    ],
+    "E0207": [
+      "lz_std\\box.lz",
+      "lz_std\\dict.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\set.lz"
+    ],
+    "E0116": [
+      "lz_std\\box.lz",
+      "lz_std\\list.lz"
     ],
     "E0609": [
-      "99_spec\\null_safe.lz",
-      "99_spec\\null_safe.lz"
+      "lz_std\\box.lz"
     ],
-    "E0572": [
-      "99_spec\\top_level_build.lz"
+    "E0560": [
+      "lz_std\\box.lz"
     ],
-    "E0428": [
-      "overload_test.lz"
+    "E0407": [
+      "lz_std\\dict.lz",
+      "lz_std\\list.lz",
+      "lz_std\\option.lz",
+      "lz_std\\result.lz",
+      "lz_std\\set.lz",
+      "lz_std\\string.lz"
+    ],
+    "E0404": [
+      "lz_std\\dict.lz",
+      "lz_std\\set.lz"
+    ],
+    "E0053": [
+      "lz_std\\string.lz"
+    ],
+    "E0046": [
+      "lz_std\\string.lz"
+    ],
+    "E0390": [
+      "lz_std\\string.lz"
     ]
   },
-  "details": [
-    {
-      "file": "01_basics\\identifiers.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unreachable statement",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\identifiers.rs:34:5",
-        "|",
-        "32 |         return println!(\"{:?}\", \"no value\".to_string());",
-        "|         ----------------------------------------------- any code following this expression is unreachable",
-        "33 |     }"
-      ]
-    },
-    {
-      "file": "01_basics\\keywords.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\01_basics\\keywords.rs:76:22",
-        "|",
-        "76 |     let mut f: i64 = (fetch());",
-        "|                      ^       ^",
-        "|"
-      ]
-    },
-    {
-      "file": "02_types\\primitives.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\primitives.rs:36:18",
-        "|",
-        "36 |     let mut bv = (*boxed);",
-        "|                  ^      ^",
-        "|"
-      ]
-    },
-    {
-      "file": "02_types\\type_conversion.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\02_types\\type_conversion.rs:46:30",
-        "|",
-        "46 |     let mut greeting = greet(\"LZ\".to_string());",
-        "|                        ----- ^^^^^^^^^^^^^^^^ expected `i64`, found `String`",
-        "|                        |"
-      ]
-    },
-    {
-      "file": "04_functions\\checker.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find type `__Params` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\checker.rs:9:27",
-        "|",
-        "9 | pub fn check_positive(ps: __Params) -> __Params {",
-        "|                           ^^^^^^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "04_functions\\generics.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `int` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\04_functions\\generics.rs:56:37",
-        "|",
-        "56 |     println!(\"{:?} {:?}\", convert < int, str > (10, move |n: i64| { \"num: {n}\".to_string() }));",
-        "|                                     ^^^",
-        "|                                     |"
-      ]
-    },
-    {
-      "file": "05_expressions\\operators.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `config` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\05_expressions\\operators.rs:67:29",
-        "|",
-        "67 |     let mut safe_field = if config == None { None } else { config::get }(\"key\".to_string());",
-        "|                             ^^^^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "06_control_flow\\with_defer.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find type `res` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\06_control_flow\\with_defer.rs:27:72",
-        "|",
-        "27 |         let mut _with = MyResource { name: \"database\".to_string() } as res;",
-        "|                                                                        ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "07_data_structures\\callable_objects.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0618]: expected function, found `Multiplier`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\callable_objects.rs:33:22",
-        "|",
-        "32 |     let mut doubler = Multiplier { factor: 2 };",
-        "|         ----------- `doubler` has type `Multiplier`",
-        "33 |     println!(\"{:?}\", doubler(21));"
-      ]
-    },
-    {
-      "file": "07_data_structures\\magic_methods.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find type `f` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\07_data_structures\\magic_methods.rs:163:73",
-        "|",
-        "163 |         let mut _with = ManagedFile { name: \"test.txt\".to_string() } as f;",
-        "|                                                                         ^ not found in this scope"
-      ]
-    },
-    {
-      "file": "08_modules\\import_demo.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0432]: unresolved imports `std::io::print`, `std::io::read`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_demo.rs:11:15",
-        "|",
-        "11 | use std::io::{print, read};",
-        "|               ^^^^^  ^^^^ no `read` in `io`",
-        "|               |"
-      ]
-    },
-    {
-      "file": "08_modules\\import_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0432]: unresolved import `std::math`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\08_modules\\import_more.rs:9:5",
-        "|",
-        "9 | use std::math;",
-        "|     ^^^^^^^^^ no `math` in the root",
-        "|"
-      ]
-    },
-    {
-      "file": "10_error_handling\\panic_raise_try.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unreachable expression",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\10_error_handling\\panic_raise_try.rs:30:1",
-        "|",
-        "30 | return panic!(\"{:?}\", \"division by zero\".to_string());",
-        "| ^^^^^^^----------------------------------------------",
-        "| |      |"
-      ]
-    },
-    {
-      "file": "10_error_handling\\try_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unreachable expression",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\10_error_handling\\try_more.rs:16:1",
-        "|",
-        "16 | return panic!(\"{:?}\", ParseError::BadFormat(\"empty\".to_string()));",
-        "| ^^^^^^^----------------------------------------------------------",
-        "| |      |"
-      ]
-    },
-    {
-      "file": "11_concurrency\\async_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_more.rs:14:25",
-        "|",
-        "14 |     let mut a: String = (fetch(1));",
-        "|                         ^        ^",
-        "|"
-      ]
-    },
-    {
-      "file": "11_concurrency\\async_spawn.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\11_concurrency\\async_spawn.rs:14:26",
-        "|",
-        "14 |     let mut f1: String = (fetch_data(10));",
-        "|                          ^              ^",
-        "|"
-      ]
-    },
-    {
-      "file": "12_build_blocks\\build_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `p` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\12_build_blocks\\build_more.rs:20:27",
-        "|",
-        "20 |     println!(\"{:?} {:?}\", p.x, p.y);",
-        "|                           ^ not found in this scope"
-      ]
-    },
-    {
-      "file": "12_build_blocks\\var_call_block.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `x` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\12_build_blocks\\var_call_block.rs:11:22",
-        "|",
-        "11 |     println!(\"{:?}\", x);",
-        "|                      ^ not found in this scope"
-      ]
-    },
-    {
-      "file": "13_operators\\precedence.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `a` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\13_operators\\precedence.rs:10:19",
-        "|",
-        "10 |     let mut sum = a + b;",
-        "|                   ^ not found in this scope"
-      ]
-    },
-    {
-      "file": "14_pointers\\rc_arc_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\14_pointers\\rc_arc_more.rs:11:18",
-        "|",
-        "11 |     let mut bv = (*b);",
-        "|                  ^  ^",
-        "|"
-      ]
-    },
-    {
-      "file": "16_testing\\test_more.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error: missing parameters for function definition",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\16_testing\\test_more.rs:28:10",
-        "|",
-        "28 | fn string concat() {",
-        "|          ^",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\codegen_str_int_float.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\codegen_str_int_float.rs:15:17",
-        "|",
-        "15 |     let mut a = (3.14 as i64);",
-        "|                 ^           ^",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\combo-syntax\\combo_for_guard_match.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_match.rs:20:36",
-        "|",
-        "20 |     let mut items: Vec<i64> = vec![Kind::A(1), Kind::B(\"x\".to_string()), Kind::A(2)];",
-        "|                                    ^^^^^^^^^^ expected `i64`, found `Kind`"
-      ]
-    },
-    {
-      "file": "99_spec\\combo-syntax\\combo_for_guard_struct.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0507]: cannot move out of a shared reference",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_struct.rs:27:40",
-        "|",
-        "27 |     for p in (pts).into_iter().filter(|&p| is_positive(p.x)) {",
-        "|                                        ^-",
-        "|                                         |"
-      ]
-    },
-    {
-      "file": "99_spec\\combo-syntax\\combo_for_guard_walrus.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_for_guard_walrus.rs:15:29",
-        "|",
-        "15 |         let mut n: i64 = ({ v = i * 2; v });",
-        "|                             ^",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\combo-syntax\\combo_while_guard_try.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `count` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\combo-syntax\\combo_while_guard_try.rs:15:5",
-        "|",
-        "15 |     count = count + 1;",
-        "|     ^^^^^",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\duck_test.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find type `Pet` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\duck_test.rs:14:21",
-        "|",
-        "14 | pub fn process(pet: Pet) -> i64 {",
-        "|                     ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "99_spec\\extractor_unapply.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0599]: no method named `clone` found for struct `Point` in the current scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\extractor_unapply.rs:16:13",
-        "|",
-        "9 | pub struct Point {",
-        "| ---------------- method `clone` not found for this struct",
-        "..."
-      ]
-    },
-    {
-      "file": "99_spec\\gen_block_star.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0599]: `i64` is not an iterator",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\gen_block_star.rs:14:19",
-        "|",
-        "14 |     for p in (xs).into_iter() {",
-        "|                   ^^^^^^^^^ `i64` is not an iterator",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\guard_for_3.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find function `queue_size` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\guard_for_3.rs:11:25",
-        "|",
-        "11 |     while (running) && (queue_size() > 0) {",
-        "|                         ^^^^^^^^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "99_spec\\index_build.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0277]: the type `Vec<i64>` cannot be indexed by `Vec<i64>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\index_build.rs:11:32",
-        "|",
-        "11 |     let mut a: Vec<i64> = nums[nums];",
-        "|                                ^^^^ `Vec<i64>` cannot be indexed by `Vec<i64>`",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\index_build_block.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0277]: the type `Vec<i64>` cannot be indexed by `Vec<i64>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\index_build_block.rs:11:32",
-        "|",
-        "11 |     let mut val: Vec<i64> = xs[xs];",
-        "|                                ^^ `Vec<i64>` cannot be indexed by `Vec<i64>`",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\ir-edge-empty-collections.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0282]: type annotations needed for `Option<_>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\ir-edge-empty-collections.rs:16:9",
-        "|",
-        "16 |     let mut x = None;",
-        "|         ^^^^^   ---- type must be known at this point",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\iterator_demo.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find type `Iter` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\iterator_demo.rs:45:40",
-        "|",
-        "45 | pub fn outer<R>(n: i64, val: R) -> Vec<Iter<R>> {",
-        "|                                        ^^^^ not found in this scope",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\keyword_downgrade.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0530]: let bindings cannot shadow tuple variants",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\keyword_downgrade.rs:10:13",
-        "|",
-        "10 |     let mut Ok: i64 = 1;",
-        "|             ^^ cannot be named the same as a tuple variant",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\null_safe.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0369]: binary operation `==` cannot be applied to type `Option<User>`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\null_safe.rs:19:28",
-        "|",
-        "19 |     let mut name = if if u == None { None } else { u.profile } == None { None } else { if u == None { None } else { u.profile }.name...",
-        "|                          - ^^ ---- Option<User>",
-        "|                          |"
-      ]
-    },
-    {
-      "file": "99_spec\\parallel_decorator.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find function `sum` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\parallel_decorator.rs:10:12",
-        "|",
-        "10 |     return sum(batch);",
-        "|            ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "99_spec\\pipe_spec.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find function `map` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\pipe_spec.rs:10:32",
-        "|",
-        "10 |     let mut r = collect(filter(map(vec![1, 2, 3], move |x: i64| { x * 2 }), move |x: i64| { x > 2 }));",
-        "|                                ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "99_spec\\top_level_build.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0572]: return statement outside of function body",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\top_level_build.rs:16:1",
-        "|",
-        "16 | return (host, port);",
-        "| ^^^^^^^^^^^^^^^^^^^"
-      ]
-    },
-    {
-      "file": "99_spec\\underscore_discard_3.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0423]: expected function, found macro `println`",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_discard_3.rs:10:12",
-        "|",
-        "10 |     return println(msg);",
-        "|            ^^^^^^^ not a function",
-        "|"
-      ]
-    },
-    {
-      "file": "99_spec\\underscore_partial_1.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_partial_1.rs:14:30",
-        "|",
-        "14 |     let mut add10: i64 = add(_, 10);",
-        "|                              ^ `_` not allowed here"
-      ]
-    },
-    {
-      "file": "99_spec\\underscore_partial_2.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\underscore_partial_2.rs:14:27",
-        "|",
-        "14 |     let mut f: i64 = sum3(_, 2, 3, _);",
-        "|                           ^ `_` not allowed here"
-      ]
-    },
-    {
-      "file": "99_spec\\while_walrus_guard_1.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `count` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\99_spec\\while_walrus_guard_1.rs:10:5",
-        "|",
-        "10 |     count = count + 1;",
-        "|     ^^^^^",
-        "|"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_async_spawn.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "warning: unnecessary parentheses around assigned value",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_async_spawn.rs:14:23",
-        "|",
-        "14 |     let mut f1: i64 = (fetch(10));",
-        "|                       ^         ^",
-        "|"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_defer_guard_try.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_defer_guard_try.rs:12:16",
-        "|",
-        "9 | pub fn process(x: i64) -> i64 {",
-        "|                           --- expected `i64` because of return type",
-        "..."
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_enum_match_guardlet.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0433]: cannot find type `Error` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_enum_match_guardlet.rs:26:5",
-        "|",
-        "26 |     Error::Circle(r) => {",
-        "|     ^^^^^ use of undeclared type `Error`",
-        "|"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_for_walrus.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `v` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_for_walrus.rs:11:29",
-        "|",
-        "11 |         let mut n: i64 = ({ v = i * 2; v });",
-        "|                             ^",
-        "|"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_generic_struct_method.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0507]: cannot move out of `self.item` which is behind a shared reference",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_generic_struct_method.rs:21:28",
-        "|",
-        "21 |         return Maybe::Just(self.item);",
-        "|                            ^^^^^^^^^ move occurs because `self.item` has type `T`, which does not implement the `Copy` trait",
-        "|"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_match_ternary.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_match_ternary.rs:20:9",
-        "|",
-        "10 |     match n.clone() {",
-        "|           --------- this expression has type `i64`",
-        "..."
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_pipe_partial.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_pipe_partial.rs:14:28",
-        "|",
-        "14 |     let mut inc: i64 = add(_, 1);",
-        "|                            ^ `_` not allowed here"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_struct_method_partial.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error: in expressions, `_` can only be used on the left-hand side of an assignment",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_struct_method_partial.rs:15:27",
-        "|",
-        "15 |         let mut inc = add(_, 1);",
-        "|                           ^ `_` not allowed here"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_ternary_walrus.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `n` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_ternary_walrus.rs:14:26",
-        "|",
-        "14 |     let mut v: bool = if n * 10 { ({ n = compute(); n }) > 5 } else { 0 };",
-        "|                          ^ not found in this scope"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_try_raise_guard.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `msg` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_try_raise_guard.rs:30:26",
-        "|",
-        "30 |         println!(\"{:?}\", msg);",
-        "|                          ^^^ not found in this scope"
-      ]
-    },
-    {
-      "file": "combo-syntax\\combo_while_walrus.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0425]: cannot find value `count` in this scope",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\combo-syntax\\combo_while_walrus.rs:10:5",
-        "|",
-        "10 |     count = count + 1;",
-        "|     ^^^^^",
-        "|"
-      ]
-    },
-    {
-      "file": "overload_test.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0428]: the name `add` is defined multiple times",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\overload_test.rs:13:1",
-        "|",
-        "9 | pub fn add(a: i64, b: i64) -> i64 {",
-        "| --------------------------------- previous definition of the value `add` here",
-        "..."
-      ]
-    },
-    {
-      "file": "variadic_dotdot.lz",
-      "lz_ok": true,
-      "rustc_ok": false,
-      "rustc_errors": [
-        "error[E0308]: mismatched types",
-        "--> E:\\IDEProjects\\AI\\lang-zone\\DEMO\\variadic_dotdot.rs:10:43",
-        "|",
-        "10 |     return greeting + &\", \".to_string() + &name;",
-        "|                                           ^^^^^ expected `&str`, found `&&[String]`",
-        "|"
-      ]
-    }
-  ]
+  "details": [],
+  "timestamp": "2026-08-04T11:13:39.962463+00:00"
 }

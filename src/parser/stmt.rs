@@ -231,8 +231,30 @@ impl ParserStmtExt for Parser {
                     }
                 } else {
                     // 内联形式: guard cond else VALUE
-                    let val = self.parse_expr()?;
-                    vec![Stmt::Expr(val)]
+                    // VALUE 可以是普通表达式，也可以是 break / continue / return 等控制流关键字
+                    let val = if self.check(&Token::Break) {
+                        self.advance();
+                        let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) {
+                            Some(self.parse_expr()?)
+                        } else {
+                            None
+                        };
+                        Stmt::Break(expr)
+                    } else if self.check(&Token::Continue) {
+                        self.advance();
+                        Stmt::Continue
+                    } else if self.check(&Token::Return) {
+                        self.advance();
+                        let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) {
+                            Some(self.parse_expr()?)
+                        } else {
+                            None
+                        };
+                        Stmt::Return(expr)
+                    } else {
+                        Stmt::Expr(self.parse_expr()?)
+                    };
+                    vec![val]
                 };
                 Ok(Stmt::Guard { cond, let_binding, success_expr, else_body })
             }
