@@ -588,11 +588,18 @@ impl Parser {
         if self.check(&Token::Indent) {
             self.advance(); // skip Indent before where
         }
-        let mut where_clause = if self.check(&Token::Where) {
-            self.parse_where_clause()?
-        } else {
-            Vec::new()
-        };
+        let mut where_clause = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&Token::Indent) {
+                self.advance(); // skip Indent before where
+            }
+            if self.check(&Token::Where) {
+                where_clause.extend(self.parse_where_clause()?);
+            } else {
+                break;
+            }
+        }
         // 合并内联约束 (T: Ordered → where_clause)
         for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
             where_clause.push(WhereBound { type_param: tp, bounds: bds });
