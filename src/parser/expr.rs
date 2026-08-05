@@ -998,9 +998,9 @@ impl ParserExprExt for Parser {
                     self.advance(); // consume ->
                     self.parse_type()?; // skip return type annotation
                 }
-                // 支持可选的 = 分隔符: |x| -> int = body
-                if self.check(&Token::Eq) {
-                    self.advance(); // consume =
+                // 支持可选的 = 或 => 分隔符: |x| = body  或  |x| => body
+                if self.check(&Token::Eq) || self.check(&Token::FatArrow) {
+                    self.advance(); // consume = or =>
                 }
                 // Lambda body: 跳过换行，支持跨行表达式
                 // |x| x + 1  或  |x| match x: case ...
