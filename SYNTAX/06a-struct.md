@@ -1,6 +1,6 @@
 # LZ struct（结构体）
 
-> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-04
+> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-05
 
 本文档详细定义 Lang-Zone 的 struct（结构体）语法：基本定义、字段注解、方法、构造实例、泛型结构体、`__new__`/`__init__` 魔法方法，以及错误语法边界。enum、trait、impl 等类型见 **[06-数据结构](06-数据结构.md)**。
 
@@ -86,8 +86,10 @@ struct Example<T> =
     flag: bool
     data: T
     children: List<Option<T>>
-    parent: Option<Self>
+    parent: Option<Self>    // 自引用：自动 Box → Option<Box<Self>>（见 06h §二）
 ```
+
+**自引用字段**（`Self` / 类型全名直接引用自身）由编译器**自动插入独占间接层 `Box`**：`parent: Option<Self>` ≡ `Option<Box<Self>>`，构造自动 `Box::new`、访问透明。共享所有权须显式写 `Rc<Self>`/`Arc<Self>`。完整规则见 **[06h-自引用与Self关键字.md](06h-自引用与Self关键字.md)**。
 
 ### 2.4 字段访问
 
