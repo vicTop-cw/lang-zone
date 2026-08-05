@@ -568,6 +568,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 .unwrap_or(IrType::Unit)
         }
         AstExpr::Closure { .. } => IrType::Any,
+        AstExpr::BlockExpr(_) => IrType::Any,
         AstExpr::Range { .. } => IrType::named("Range"),
         AstExpr::Walrus { value, .. } => infer_expr_type(value, ctx),
         AstExpr::Pipe { func, .. } => ctx.lookup_fn_return(func),
@@ -758,6 +759,15 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
                 .filter_map(|e| convert_ast_pattern(e, ctx))
                 .collect();
             Some(Pattern::Tuple(ir_elems))
+        }
+        AstPattern::List(elems) => {
+            let ir_elems: Vec<Pattern> = elems.iter()
+                .filter_map(|e| convert_ast_pattern(e, ctx))
+                .collect();
+            Some(Pattern::List(ir_elems))
+        }
+        AstPattern::Range { start, end, inclusive } => {
+            Some(Pattern::Range { start: *start, end: *end, inclusive: *inclusive })
         }
     }
 }
@@ -1131,6 +1141,13 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }).collect(),
                 body: Box::new(convert_expr(body, ctx)),
                 is_move: true,
+            }
+        }
+
+        AstExpr::BlockExpr(stmts) => {
+            let ir_stmts: Vec<Stmt> = stmts.iter().map(|s| convert_stmt(s, ctx)).collect();
+            ExprKind::BlockExpr {
+                block: Block { stmts: ir_stmts, ty: IrType::Any },
             }
         }
 
@@ -1773,6 +1790,13 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             body: convert_block(body, ctx),
         },
 
+        AstStmt::WhileLet { pattern, expr, guard, body, .. } => Stmt::WhileLet {
+            pattern: convert_ast_pattern(pattern, ctx).unwrap_or(Pattern::Wildcard),
+            expr: convert_expr(expr, ctx),
+            guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
+            body: convert_block(body, ctx),
+        },
+
         AstStmt::For { var, iter, guard, body, .. } => {
             let mut loop_ctx = TypeCtx::new();
             // 从 ctx 复制函数泛型上下文
@@ -1910,6 +1934,17 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             ctx.pending_items.borrow_mut().push(Item::FnDef(nested_def));
 
             // 占位语句（嵌套函数不作为语句，已在模块级注册）
+            Stmt::ExprStmt {
+                expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
+            }
+        }
+
+        AstStmt::EnumDef(struct_def) => {
+            // 函数体内的 enum 定义提升为模块级 Item
+            let item = convert_struct(&struct_def, ctx);
+            ctx.pending_items.borrow_mut().push(item);
+
+            // 占位语句
             Stmt::ExprStmt {
                 expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
             }

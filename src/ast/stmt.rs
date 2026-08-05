@@ -3,6 +3,7 @@
 
 use crate::types::Type;
 use super::expr::{Expr, AssignOp};
+use super::decl::StructDef;
 use super::decl::Function;
 
 #[derive(Debug, Clone)]
@@ -29,6 +30,13 @@ pub enum Stmt {
         body: Vec<Stmt>,
         else_body: Option<Vec<Stmt>>,  // while ... else:
     },
+    WhileLet {
+        pattern: Pattern,
+        expr: Expr,
+        guard: Option<Expr>,
+        body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+    },
     For {
         var: String,
         iter: Expr,
@@ -52,6 +60,8 @@ pub enum Stmt {
         alias: Option<String>,
         body: Vec<Stmt>,
     },
+    /// 函数体内的 enum 定义
+    EnumDef(StructDef),
     Assign {
         target: Expr,
         op: AssignOp,
@@ -117,5 +127,7 @@ pub enum Pattern {
     Ident(String),
     Variant(String, Vec<Pattern>),
     Tuple(Vec<Pattern>),
+    List(Vec<Pattern>),
+    Range { start: i64, end: i64, inclusive: bool },
     Wildcard,
 }

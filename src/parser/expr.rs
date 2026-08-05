@@ -27,6 +27,8 @@ pub trait ParserExprExt {
     fn parse_power(&mut self) -> Result<Expr, String>;
     fn parse_unary(&mut self) -> Result<Expr, String>;
     fn parse_postfix(&mut self) -> Result<Expr, String>;
+    /// 从已有表达式继续解析 postfix（跨行方法链用）
+    fn parse_postfix_chain(&mut self, expr: Expr) -> Result<Expr, String>;
     fn parse_primary(&mut self) -> Result<Expr, String>;
     fn parse_pattern(&mut self) -> Result<Pattern, String>;
     /// 解析 comprehension 的 iter 表达式：支持 range(..) 和 walrus(:=)，
@@ -395,8 +397,12 @@ impl ParserExprExt for Parser {
     }
 
     fn parse_postfix(&mut self) -> Result<Expr, String> {
-        let mut expr = self.parse_primary()?;
+        let expr = self.parse_primary()?;
+        self.parse_postfix_chain(expr)
+    }
 
+    /// 从已有表达式继续解析 postfix（跨行方法链用）
+    fn parse_postfix_chain(&mut self, mut expr: Expr) -> Result<Expr, String> {
         loop {
             match self.peek() {
                 Token::Dot => {
@@ -440,6 +446,10 @@ impl ParserExprExt for Parser {
                         self.advance();
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
+                        // 跳过参数间的换行和缩进
+                        self.skip_newlines();
+                        if self.check(&Token::Indent) { self.advance(); }
+                        if self.check(&Token::Dedent) { break; }
                         // 关键字参数: name: value 或 name~ 语法糖
                         let arg = if let Token::Ident(_) = self.peek() {
                             if self.peek_n(1) == &Token::Tilde {
@@ -460,6 +470,8 @@ impl ParserExprExt for Parser {
                             args.push(arg);
                             if self.check(&Token::Comma) { self.advance(); }
                         }
+                        // Dedent 表示参数列表的缩进块结束，跳过它
+                        if self.check(&Token::Dedent) { self.advance(); }
                         self.expect(Token::RParen)?;
                         expr = Expr::MethodCall { receiver: Box::new(expr), method: name, args };
                     } else {
@@ -476,9 +488,13 @@ impl ParserExprExt for Parser {
                         self.advance();
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
+                            self.skip_newlines();
+                            if self.check(&Token::Indent) { self.advance(); }
+                            if self.check(&Token::Dedent) { break; }
                             args.push(self.parse_expr()?);
                             if self.check(&Token::Comma) { self.advance(); }
                         }
+                        if self.check(&Token::Dedent) { self.advance(); }
                         self.expect(Token::RParen)?;
                         expr = Expr::Call { type_args: vec![],
                             func: Box::new(Expr::PathAccess {
@@ -593,10 +609,15 @@ impl ParserExprExt for Parser {
                             self.skip_newlines();
                         }
                         self.expect(Token::Dedent)?;
+                        // 消费闭合的 RParen（Dedent 后紧跟 )）
+                        if self.check(&Token::RParen) { self.advance(); }
                         args
                     } else {
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
+                            self.skip_newlines();
+                            if self.check(&Token::Indent) { self.advance(); }
+                            if self.check(&Token::Dedent) { break; }
                             // 关键字参数: name: value 或 name~ 语法糖
                             let arg = if let Token::Ident(_) = self.peek() {
                                 if self.peek_n(1) == &Token::Tilde {
@@ -617,6 +638,7 @@ impl ParserExprExt for Parser {
                             args.push(arg);
                             if self.check(&Token::Comma) { self.advance(); }
                         }
+                        if self.check(&Token::Dedent) { self.advance(); }
                         self.expect(Token::RParen)?;
                         args
                     };
@@ -998,19 +1020,31 @@ impl ParserExprExt for Parser {
                     self.advance(); // consume ->
                     self.parse_type()?; // skip return type annotation
                 }
-                // 支持可选的 = 或 => 分隔符: |x| = body  或  |x| => body
-                if self.check(&Token::Eq) || self.check(&Token::FatArrow) {
+                // 支持可选的 = 或 => 分隔符: |x| = body  或  |x| => block
+                let has_fat_arrow = self.check(&Token::FatArrow);
+                if self.check(&Token::Eq) || has_fat_arrow {
                     self.advance(); // consume = or =>
                 }
-                // Lambda body: 跳过换行，支持跨行表达式
-                // |x| x + 1  或  |x| match x: case ...
                 self.skip_newlines();
-                // 如果 body 在缩进块内（如 let 语句中），跳过外层的 Indent
-                if self.check(&Token::Indent) {
-                    self.advance(); // skip Indent
+                if has_fat_arrow {
+                    // => 后是块体（支持多语句缩进块）
+                    if self.check(&Token::Indent) {
+                        self.advance(); // skip Indent
+                        let stmts = self.parse_block()?;
+                        Ok(Expr::Closure { params, body: Box::new(Expr::BlockExpr(stmts)) })
+                    } else {
+                        let body = self.parse_expr()?;
+                        Ok(Expr::Closure { params, body: Box::new(body) })
+                    }
+                } else {
+                    // = 后是表达式体
+                    // 如果 body 在缩进块内（如 let 语句中），跳过外层的 Indent
+                    if self.check(&Token::Indent) {
+                        self.advance(); // skip Indent
+                    }
+                    let body = self.parse_expr()?;
+                    Ok(Expr::Closure { params, body: Box::new(body) })
                 }
-                let body = self.parse_expr()?;
-                Ok(Expr::Closure { params, body: Box::new(body) })
             }
             Token::Try => {
                 self.expect(Token::Colon)?;
@@ -1089,6 +1123,11 @@ impl ParserExprExt for Parser {
                 let inner = self.parse_expr()?;
                 Ok(Expr::Await(Box::new(inner)))
             }
+            Token::MagicMethod(name) => {
+                // __name__, __doc__, __is_macro__ 等魔法标识符
+                // 作为普通标识符表达式使用
+                Ok(Expr::Ident(name))
+            }
             _ => Err(format!("Unexpected token in expression: {:?}", tok)),
         }
     }
@@ -1109,7 +1148,22 @@ impl ParserExprExt for Parser {
                 }
             }
             Token::IntLit(n) => {
-                Ok(Pattern::Int(n))
+                // 范围模式: n..m 或 n..=m
+                if self.check(&Token::DotDot) {
+                    self.advance(); // ..
+                    match self.advance() {
+                        Token::IntLit(end) => Ok(Pattern::Range { start: n, end, inclusive: false }),
+                        t => Err(format!("Expected end of range pattern, got {:?}", t)),
+                    }
+                } else if self.check(&Token::DotDotEq) {
+                    self.advance(); // ..=
+                    match self.advance() {
+                        Token::IntLit(end) => Ok(Pattern::Range { start: n, end, inclusive: true }),
+                        t => Err(format!("Expected end of range pattern, got {:?}", t)),
+                    }
+                } else {
+                    Ok(Pattern::Int(n))
+                }
             }
             Token::FloatLit(f) => {
                 Ok(Pattern::Str(f.to_string()))
@@ -1175,6 +1229,41 @@ impl ParserExprExt for Parser {
                 } else {
                     Ok(Pattern::Tuple(patterns))
                 }
+            }
+            Token::LBrack => {
+                // 列表模式: [a, b, c] 或 [first, ..rest]
+                let mut patterns = Vec::new();
+                while !self.check(&Token::RBrack) {
+                    if self.check(&Token::DotDot) {
+                        self.advance(); // ..
+                        // .. 后面可能有 rest 绑定名: ..rest
+                        let rest_pat = if let Token::Ident(_) = self.peek() {
+                            let name = self.advance().to_string();
+                            Pattern::Ident(name)
+                        } else {
+                            Pattern::Wildcard
+                        };
+                        patterns.push(rest_pat);
+                    } else {
+                        patterns.push(self.parse_pattern()?);
+                    }
+                    if self.check(&Token::Comma) { self.advance(); }
+                }
+                self.expect(Token::RBrack)?;
+                Ok(Pattern::List(patterns))
+            }
+            Token::LBrace => {
+                // 字典模式: {"port": p} — 键值对匹配
+                let mut patterns = Vec::new();
+                while !self.check(&Token::RBrace) {
+                    // 跳过键（字符串字面量）
+                    self.advance(); // key string
+                    self.expect(Token::Colon)?; // :
+                    patterns.push(self.parse_pattern()?);
+                    if self.check(&Token::Comma) { self.advance(); }
+                }
+                self.expect(Token::RBrace)?;
+                Ok(Pattern::List(patterns))
             }
             _ => Err(format!("Unexpected token in pattern: {:?}", first)),
         }

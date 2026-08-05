@@ -17,6 +17,8 @@ pub trait ParserStmtExt {
     fn parse_build_block_value(&mut self) -> Result<Expr, String>;
     /// 解析可能后跟构建块的值表达式：支持直接构建块（*:/~:/^:）和无值构建块（value *:/~:/^:）
     fn parse_maybe_build_value(&mut self) -> Result<Expr, String>;
+    /// 跨行方法链：检查 Newline (+ Indent) 后是否有 postfix token，有则继续解析
+    fn consume_crossline_postfix(&mut self, expr: Expr) -> Result<Expr, String>;
     fn validate_build_block(&self, kind: BuildKind, body: &[Stmt]) -> Result<(), String>;
     fn collect_yields<'a>(&self, stmts: &'a [Stmt], out: &mut Vec<&'a Expr>, has_yield: &mut bool);
     fn first_yield<'a>(&self, stmts: &'a [Stmt]) -> Option<&'a Stmt>;
@@ -26,6 +28,40 @@ pub trait ParserStmtExt {
 
 impl ParserStmtExt for Parser {
     // ─── 语句块 ───
+
+    /// 跨行方法链：在 let 绑定上下文中，检查 Newline (+ Indent) 后是否有 postfix token
+    fn consume_crossline_postfix(&mut self, mut expr: Expr) -> Result<Expr, String> {
+        loop {
+            // 检查 Newline 后是否有 postfix token
+            let is_postfix = if self.check(&Token::Newline) {
+                let after_nl = self.peek_n(1);
+                matches!(after_nl,
+                    Token::Dot | Token::LParen | Token::LBrack
+                    | Token::Question | Token::SafeNav | Token::CaretOp
+                ) || (matches!(after_nl, Token::Indent)
+                    && matches!(self.peek_n(2),
+                        Token::Dot | Token::LParen | Token::LBrack
+                        | Token::Question | Token::SafeNav | Token::CaretOp
+                    ))
+            } else {
+                false
+            };
+
+            if !is_postfix {
+                break;
+            }
+
+            // 跳过 Newline 和可选的 Indent
+            self.advance(); // skip Newline
+            if self.check(&Token::Indent) {
+                self.advance(); // skip Indent
+            }
+
+            // 使用 ParserExprExt 的 parse_postfix_chain 继续解析
+            expr = ParserExprExt::parse_postfix_chain(self, expr)?;
+        }
+        Ok(expr)
+    }
 
     fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
         let mut stmts = Vec::new();
@@ -96,6 +132,37 @@ impl ParserStmtExt for Parser {
             }
             Token::While => {
                 self.advance();
+                // while let pat = expr:  (while-let 模式)
+                if self.check(&Token::Let) {
+                    self.advance(); // let
+                    let pattern = self.parse_pattern()?;
+                    self.expect(Token::Eq)?;
+                    let expr = self.parse_expr()?;
+                    let guard = if self.check(&Token::If) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let body = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    let else_body = if self.check(&Token::Else) {
+                        self.advance();
+                        self.expect(Token::Colon)?;
+                        self.skip_newlines();
+                        self.expect(Token::Indent)?;
+                        let eb = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        Some(eb)
+                    } else {
+                        None
+                    };
+                    return Ok(Stmt::WhileLet { pattern, expr, guard, body, else_body });
+                }
+                // while cond:
                 let cond = self.parse_comprehension_iter()?;  // 不消费 if，避免与 guard 冲突
                 // while cond if guard:
                 let guard = if self.check(&Token::If) {
@@ -351,6 +418,10 @@ impl ParserStmtExt for Parser {
             Token::Def => {
                 let func = self.parse_function(false)?;
                 Ok(Stmt::FnDef { func })
+            }
+            Token::Enum => {
+                let enum_def = self.parse_struct_like(true)?;
+                Ok(Stmt::EnumDef(enum_def))
             }
             Token::Async => {
                 self.advance(); // consume async
@@ -696,12 +767,16 @@ impl ParserStmtExt for Parser {
         }
         let is_build_assign = matches!(self.advance(), Token::BuildAssign);
         // 构建块（直接）: let name = *: / ~: <缩进块>
-        let value = if is_build_assign {
+        let mut value = if is_build_assign {
             // =: 后跟缩进块
             self.parse_build_block_value()?
         } else {
             self.parse_maybe_build_value()?
         };
+
+        // 跨行方法链：let chain = opt\n    .map(...)\n    .unwrap_or(0)
+        // 在 let 绑定上下文中，检查后续是否有跨行 postfix
+        value = self.consume_crossline_postfix(value)?;
 
         if is_const {
             Ok(Stmt::Const { name, ty, value })

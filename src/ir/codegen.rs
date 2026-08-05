@@ -1562,6 +1562,23 @@ impl CodeGen {
                 self.indent -= 1;
                 self.emit_line("}");
             }
+            Stmt::WhileLet { pattern, expr, guard, body } => {
+                let expr_s = self.gen_expr(expr);
+                let pat_s = self.gen_pattern(pattern);
+                let cond_s = if let Some(g) = guard {
+                    format!("let {} = {} && {}", pat_s, expr_s, self.gen_expr(g))
+                } else {
+                    format!("let {} = {}", pat_s, expr_s)
+                };
+                self.emit_line(&format!("while {} {{", cond_s));
+                self.indent += 1;
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
+                self.gen_block_inner(body);
+                self.suppress_tail_return = saved;
+                self.indent -= 1;
+                self.emit_line("}");
+            }
             Stmt::Match { scrutinee, arms } => {
                 let scrut_s = self.gen_expr(scrutinee);
                 // String 类型模式匹配：match name { "hello" => } 需要 &str
@@ -3070,6 +3087,17 @@ impl CodeGen {
                     format!("{}::{}({})", enum_name, variant, args.join(", "))
                 }
             }
+            Pattern::List(elems) => {
+                let elems: Vec<String> = elems.iter().map(|e| self.gen_pattern(e)).collect();
+                format!("[{}]", elems.join(", "))
+            }
+            Pattern::Range { start, end, inclusive } => {
+                if *inclusive {
+                    format!("{}i64..={}i64", start, end)
+                } else {
+                    format!("{}i64..{}i64", start, end)
+                }
+            }
         }
     }
 
@@ -3238,7 +3266,7 @@ fn block_has_yield(block: &Block) -> bool {
                 if block_has_yield(then_branch) { return true; }
                 if let Some(ref e) = else_branch { if block_has_yield(e) { return true; } }
             }
-            Stmt::For { body, .. } | Stmt::While { body, .. } => {
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
                 if block_has_yield(body) { return true; }
             }
             Stmt::Block { stmts } => {
@@ -3282,7 +3310,7 @@ fn stmt_has_await(stmt: &Stmt) -> bool {
             expr_has_await(cond) || block_has_await(then_branch)
                 || else_branch.as_ref().map_or(false, block_has_await)
         }
-        Stmt::For { body, .. } | Stmt::While { body, .. } => block_has_await(body),
+        Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => block_has_await(body),
         Stmt::Block { stmts } => block_has_await(&Block { stmts: stmts.clone(), ty: IrType::Unit }),
         _ => false,
     }
@@ -3459,7 +3487,7 @@ fn scan_const_mutations(block: &Block, const_names: &std::collections::HashSet<S
                     scan_const_mutations(e, const_names, mutated);
                 }
             }
-            Stmt::For { body, .. } | Stmt::While { body, .. } => {
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
                 scan_const_mutations(body, const_names, mutated);
             }
             Stmt::Block { stmts } => {
@@ -3509,7 +3537,7 @@ fn collect_local_lets(block: &Block, locals: &mut std::collections::HashSet<Stri
                 if let Some(e) = else_branch { collect_local_lets(e, locals); }
             }
             Stmt::For { var, body, .. } => { locals.insert(var.clone()); collect_local_lets(body, locals); }
-            Stmt::While { body, .. } => collect_local_lets(body, locals),
+            Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => collect_local_lets(body, locals),
             Stmt::Block { stmts } => {
                 let inner = Block { stmts: stmts.clone(), ty: IrType::Unit };
                 collect_local_lets(&inner, locals);
@@ -3582,6 +3610,11 @@ fn collect_stmt_var_refs(stmt: &Stmt, shadow: &mut std::collections::HashSet<Str
         }
         Stmt::While { cond, guard, body } => {
             collect_expr_var_refs(cond, shadow, refs, in_closure);
+            if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs, in_closure); }
+            collect_var_refs_inner(body, shadow, refs, in_closure);
+        }
+        Stmt::WhileLet { expr, guard, body, .. } => {
+            collect_expr_var_refs(expr, shadow, refs, in_closure);
             if let Some(g) = guard { collect_expr_var_refs(g, shadow, refs, in_closure); }
             collect_var_refs_inner(body, shadow, refs, in_closure);
         }

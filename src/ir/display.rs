@@ -319,6 +319,21 @@ impl fmt::Display for Pattern {
                 }
                 Ok(())
             }
+            Pattern::List(elems) => {
+                f.write_str("[")?;
+                for (i, e) in elems.iter().enumerate() {
+                    if i > 0 { f.write_str(", ")?; }
+                    write!(f, "{e}")?;
+                }
+                f.write_str("]")
+            }
+            Pattern::Range { start, end, inclusive } => {
+                if *inclusive {
+                    write!(f, "{start}..={end}")
+                } else {
+                    write!(f, "{start}..{end}")
+                }
+            }
         }
     }
 }
@@ -369,6 +384,10 @@ impl fmt::Display for Stmt {
             Stmt::While { cond, guard, body } => {
                 let guard_s = guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
                 write!(f, "while {cond}{guard_s} {body}")
+            }
+            Stmt::WhileLet { pattern, expr, guard, body } => {
+                let guard_s = guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
+                write!(f, "while let {pattern} = {expr}{guard_s} {body}")
             }
             Stmt::Match { scrutinee, arms } => {
                 write!(f, "match {scrutinee} {{")?;

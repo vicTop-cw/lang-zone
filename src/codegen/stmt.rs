@@ -268,6 +268,10 @@ impl CodeGenStmtExt for CodeGen {
                 locals.insert(func.name.clone());
                 format!("{}let {} = {};\n", pad, func.name, mangled)
             }
+            Stmt::EnumDef(_) => {
+                // enum 定义已提升为模块级，此处为占位
+                String::new()
+            }
             Stmt::Comptime { body } => {
                 // comptime: 块 — 在 Rust 中直接内联
                 let mut out = String::new();
@@ -294,6 +298,19 @@ impl CodeGenStmtExt for CodeGen {
                     }
                 }
                 out
+            }
+            Stmt::WhileLet { pattern: _, expr, guard, body, else_body: _ } => {
+                let body_s = self.gen_block(body, indent + 1, locals);
+                let expr_s = self.gen_expr(expr);
+                match guard {
+                    Some(g) => {
+                        let pad_inc = "    ".repeat(indent + 1);
+                        let guard_s = self.gen_expr(g);
+                        format!("{}while let _ = {} {{\n{}if !({}) {{ break; }}\n{}{}}}\n",
+                            pad, expr_s, pad_inc, guard_s, body_s, pad)
+                    }
+                    None => format!("{}while let _ = {} {{\n{}{}}}\n", pad, expr_s, body_s, pad),
+                }
             }
         }
     }

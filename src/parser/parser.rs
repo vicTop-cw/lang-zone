@@ -973,22 +973,28 @@ impl Parser {
                         }
                     }
                     // 识别特殊容器类型
-                    return match &base_ty {
+                    let generic_ty = match &base_ty {
                         Type::Named(name) if name == "Option" && inner.len() == 1 => {
-                            Ok(Type::Option(Box::new(inner.into_iter().next().unwrap())))
+                            Type::Option(Box::new(inner.into_iter().next().unwrap()))
                         }
                         Type::Named(name) if name == "Result" && inner.len() == 2 => {
                             let mut iter = inner.into_iter();
-                            Ok(Type::Result {
+                            Type::Result {
                                 ok: Box::new(iter.next().unwrap()),
                                 err: Box::new(iter.next().unwrap()),
-                            })
+                            }
                         }
-                        _ => Ok(Type::Generic {
+                        _ => Type::Generic {
                             base: Box::new(base_ty),
                             args: inner,
-                        }),
+                        },
                     };
+                    // 泛型类型后也支持 ? 后缀: List<T>? → Optional<List<T>>
+                    if self.check(&Token::Question) {
+                        self.advance();
+                        return Ok(Type::Optional(Box::new(generic_ty)));
+                    }
+                    return Ok(generic_ty);
                 }
                 base_ty
             }
@@ -1064,7 +1070,7 @@ impl Parser {
 
     // ─── struct / enum ───
 
-    fn parse_struct_like(&mut self, is_enum: bool) -> Result<StructDef, String> {
+    pub fn parse_struct_like(&mut self, is_enum: bool) -> Result<StructDef, String> {
         self.advance(); // skip struct/enum
         let name = match self.advance() {
             Token::Ident(n) => n,

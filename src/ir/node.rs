@@ -332,6 +332,12 @@ pub enum Stmt {
         guard: Option<Expr>,
         body: Block,
     },
+    WhileLet {
+        pattern: Pattern,
+        expr: Expr,
+        guard: Option<Expr>,
+        body: Block,
+    },
     Match {
         scrutinee: Expr,
         arms: Vec<MatchArm>,
@@ -614,6 +620,8 @@ pub enum Pattern {
     Ident(String),
     Lit(LitKind),
     Tuple(Vec<Pattern>),
+    List(Vec<Pattern>),
+    Range { start: i64, end: i64, inclusive: bool },
     Struct {
         name: String,
         fields: Vec<(String, Pattern)>,

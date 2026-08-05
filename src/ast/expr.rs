@@ -76,6 +76,8 @@ pub enum Expr {
         params: Vec<String>,
         body: Box<Expr>,
     },
+    // 块表达式（|x| => block body）
+    BlockExpr(Vec<Stmt>),
     Range {
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,

@@ -603,6 +603,12 @@ impl CodeGenExprExt for CodeGen {
                 self.gen_build_block(*kind, lhs, body, 0, &mut locals)
             }
             Expr::Paren(inner) => self.gen_expr(inner),
+            Expr::BlockExpr(stmts) => {
+                let body_s: String = stmts.iter()
+                    .map(|s| self.gen_stmt(s, 1, &mut HashSet::new()))
+                    .collect();
+                format!("{{\n{}}}", body_s)
+            }
         }
     }
 
@@ -637,6 +643,17 @@ impl CodeGenExprExt for CodeGen {
             Pattern::Tuple(elems) => {
                 let subs: Vec<String> = elems.iter().map(|p| self.gen_pattern(p)).collect();
                 format!("({})", subs.join(", "))
+            }
+            Pattern::List(elems) => {
+                let subs: Vec<String> = elems.iter().map(|p| self.gen_pattern(p)).collect();
+                format!("[{}]", subs.join(", "))
+            }
+            Pattern::Range { start, end, inclusive } => {
+                if *inclusive {
+                    format!("{}..={}", start, end)
+                } else {
+                    format!("{}..{}", start, end)
+                }
             }
         }
     }
