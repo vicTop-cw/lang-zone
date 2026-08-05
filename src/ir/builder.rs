@@ -2488,6 +2488,14 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             convert_fn_def(m, &method_ctx)
         }).collect();
 
+        // 提取 __new__ 的签名信息
+        let new_method = s.magic_methods.iter().find(|m| m.name == "__new__");
+        let has_new = new_method.is_some();
+        let new_params: Vec<(String, IrType)> = new_method.iter().flat_map(|m| {
+            m.params.iter().map(|p| (p.name.clone(), from_ast_type(&p.ty)))
+        }).collect();
+        let new_ret_ty = new_method.and_then(|m| m.return_type.as_ref().map(|t| from_ast_type(t)));
+
         Item::StructDef(StructDef {
             name: s.name.clone(),
             generics: s.generics.iter().map(|g| GenericParam {
@@ -2495,7 +2503,9 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             }).collect(),
             fields,
             methods,
-            has_new: s.magic_methods.iter().any(|m| m.name == "__new__"),
+            has_new,
+            new_params,
+            new_ret_ty,
             span: Span::unknown(),
         })
     }

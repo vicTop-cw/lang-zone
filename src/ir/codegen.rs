@@ -829,6 +829,43 @@ impl CodeGen {
         self.indent -= 1;
         self.emit_line("}");
 
+        // 如果 struct 有 __new__，生成 __lz_new 构造器函数
+        if s.has_new {
+            self.buf.push('\n');
+            let impl_generics = if s.generics.is_empty() {
+                String::new()
+            } else {
+                let params: Vec<String> = s.generics.iter().map(|g| {
+                    format!("{}: Clone + std::fmt::Debug", g.name)
+                }).collect();
+                format!("<{}>", params.join(", "))
+            };
+            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
+            self.indent += 1;
+            // 生成 __lz_new 函数签名
+            let params: Vec<String> = s.new_params.iter()
+                .map(|(n, t)| format!("{}: {}", n, self.rust_type(t)))
+                .collect();
+            let ret_ty = s.new_ret_ty.as_ref()
+                .map(|t| self.rust_type(t))
+                .unwrap_or_else(|| format!("{}{}", s.name, generics));
+            self.emit_line(&format!("pub fn __lz_new({}) -> {} {{", params.join(", "), ret_ty));
+            // body: 通过关键字构造
+            self.indent += 1;
+            self.emit_line(&format!("{}{} {{ {} }}",
+                s.name, generics,
+                s.fields.iter()
+                    .map(|f| format!("{}: {}", f.name, 
+                        if s.new_params.iter().any(|(n, _)| n == &f.name) { f.name.clone() }
+                        else { self.default_value_for(&f.ty) }))
+                    .collect::<Vec<_>>().join(", ")
+            ));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
         // 方法（impl 块）
         if !s.methods.is_empty() {
             self.buf.push('\n');

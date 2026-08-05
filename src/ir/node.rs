@@ -225,6 +225,9 @@ pub struct StructDef {
     pub methods: Vec<FnDef>,
     /// 是否定义了 __new__ 魔术构造（用于构造时补齐默认字段）
     pub has_new: bool,
+    /// __new__ 的参数列表（用于 codegen 生成 __lz_new 函数签名）
+    pub new_params: Vec<(String, IrType)>,
+    pub new_ret_ty: Option<IrType>,
     pub span: Span,
 }
 
