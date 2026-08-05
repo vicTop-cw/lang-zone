@@ -228,6 +228,9 @@ pub struct StructDef {
     /// __new__ 的参数列表（用于 codegen 生成 __lz_new 函数签名）
     pub new_params: Vec<(String, IrType)>,
     pub new_ret_ty: Option<IrType>,
+    /// 是否定义了 __init__ 后初始化方法
+    pub has_init: bool,
+    pub init_params: Vec<(String, IrType)>,
     pub span: Span,
 }
 

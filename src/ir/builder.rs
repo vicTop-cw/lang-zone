@@ -2496,6 +2496,13 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
         }).collect();
         let new_ret_ty = new_method.and_then(|m| m.return_type.as_ref().map(|t| from_ast_type(t)));
 
+        // 提取 __init__ 的签名信息
+        let init_method = s.magic_methods.iter().find(|m| m.name == "__init__");
+        let has_init = init_method.is_some();
+        let init_params: Vec<(String, IrType)> = init_method.iter().flat_map(|m| {
+            m.params.iter().map(|p| (p.name.clone(), from_ast_type(&p.ty)))
+        }).collect();
+
         Item::StructDef(StructDef {
             name: s.name.clone(),
             generics: s.generics.iter().map(|g| GenericParam {
@@ -2506,6 +2513,8 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             has_new,
             new_params,
             new_ret_ty,
+            has_init,
+            init_params,
             span: Span::unknown(),
         })
     }

@@ -862,6 +862,18 @@ impl CodeGen {
             ));
             self.indent -= 1;
             self.emit_line("}");
+            // 如果 struct 有 __init__，在同一个 impl 块中生成 __lz_init 方法
+            if s.has_init {
+                let init_params: Vec<String> = s.init_params.iter()
+                    .map(|(n, t)| format!("{}: {}", n, self.rust_type(t)))
+                    .collect();
+                self.emit_line(&format!("pub fn __lz_init(&mut self, {}) {{", init_params.join(", ")));
+                self.indent += 1;
+                // body: 初始化字段赋值（简单实现：无操作占位）
+                self.emit_line("// __init__ body (user-defined initialization)");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
             self.indent -= 1;
             self.emit_line("}");
         }
