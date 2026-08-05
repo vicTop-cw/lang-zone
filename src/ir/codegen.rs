@@ -400,7 +400,7 @@ impl CodeGen {
                 Self::collect_walrus_vars(then, vars);
                 Self::collect_walrus_vars(els, vars);
             }
-            ExprKind::Paren(inner) => {
+            ExprKind::Paren(inner) | ExprKind::ImplicitConvert { source: inner, .. } => {
                 Self::collect_walrus_vars(inner, vars);
             }
             _ => {}
@@ -2771,6 +2771,13 @@ impl CodeGen {
                 // __gen_vec 已在函数级别声明，BlockExpr 中只需 push 不需要重新声明
                 child.gen_block_inner(block);
                 format!("{{\n{}    }}", child.buf)
+            }
+            ExprKind::ImplicitConvert { source, target_ty } => {
+                let src = self.gen_expr(source);
+                let tgt = self.rust_type(target_ty);
+                let src_ty = self.rust_type(&source.ty);
+                format!("<{} as ImplicitFrom<{}>>::__implicit_from__({})",
+                    tgt, src_ty, src)
             }
             ExprKind::Paren(inner) => {
                 // 剥离不必要括号: (*expr) → *expr, (x != 0) → x != 0

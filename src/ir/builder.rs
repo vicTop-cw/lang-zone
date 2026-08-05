@@ -1737,8 +1737,22 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }
         }
 
-        AstStmt::Return(val) => Stmt::Return {
-            value: val.as_ref().map(|v| convert_expr(v, ctx)),
+        AstStmt::Return(val) => {
+            let value = val.as_ref().map(|v| {
+                let expr = convert_expr(v, ctx);
+                // 返回值隐式转换: return S 但声明返回 T → 插入 ImplicitConvert
+                if let Some(ref ret_ty) = ctx.current_ret_ty {
+                    if expr.ty != *ret_ty && !matches!(ret_ty, IrType::Unit) {
+                        return Expr::new(
+                            ExprKind::ImplicitConvert { source: Box::new(expr.clone()), target_ty: ret_ty.clone() },
+                            ret_ty.clone(),
+                            Span::unknown()
+                        );
+                    }
+                }
+                expr
+            });
+            Stmt::Return { value }
         },
 
         AstStmt::Yield(val) => {

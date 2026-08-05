@@ -527,6 +527,13 @@ pub enum ExprKind {
 
     /// 括号分组 (expr) — 保留优先级语义
     Paren(Box<Expr>),
+
+    /// 隐式类型转换: source: S → target_ty: T
+    /// 优先级: __implicit_from__ → __implicit_to__ → __default__
+    ImplicitConvert {
+        source: Box<Expr>,
+        target_ty: IrType,
+    },
 }
 
 // ── 辅助类型 ──
