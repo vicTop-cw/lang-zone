@@ -2,7 +2,7 @@
 // LZ Functions — Checker [checker]
 // ============================
 
-def check_positive(ps: __Params) -> __Params =
+def check_positive(ps: __Params) -> __Params raises str =
     if ps.kwargs.contains("x"):
         let val = ps.kwargs["x"]
         if val <= 0:

@@ -41,7 +41,7 @@ def underscore_semantics() =
 struct MagicBox =
     value: int
 
-    magic __init__(self, value: int) -> MagicBox =
+    magic __init__(mut self, value: int) =
         MagicBox(value: value)
 
     magic __str__(ref self) -> str =

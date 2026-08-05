@@ -11,7 +11,7 @@ def main() =
     else:
         print("C")
 
-    let grade = ""
+    mut grade = ""
     if score >= 90:
         grade = "A"
     elif score >= 80:

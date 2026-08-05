@@ -18,7 +18,7 @@ trait Error: Display + Debug =
 
     /// 错误链字符串 (递归打印)
     def chain_str(ref self) -> str =
-        let mut result = self.__str__()
+        mut result = self.__str__()
         match self.source():
             case Some(ref src):
                 result = result + "\nCaused by: " + src.chain_str()
@@ -260,7 +260,7 @@ def main() =
                 return Err(LzError.zero_division("division by zero"))
             return Ok(a / b)
 
-        let result = safe_divide(10, 0)
+        mut result = safe_divide(10, 0)
         assert result.is_err()
 
         let result2 = safe_divide(10, 2)

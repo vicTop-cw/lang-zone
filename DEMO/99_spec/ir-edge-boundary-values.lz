@@ -63,7 +63,7 @@ def control_flow_edge(n: int) -> int =
     if n <= 0:
         return 0
     
-    let result = 0
+    mut result = 0
     for i in 1..n:
         if i % 2 == 0:
             continue

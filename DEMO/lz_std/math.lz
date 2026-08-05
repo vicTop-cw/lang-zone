@@ -92,9 +92,9 @@ def sign_f64(x: f64) -> f64 =
 def pow_int(base: int, exp: int) -> int =
     if exp < 0:
         return 0
-    let mut result = 1
-    let mut e = exp
-    let mut b = base
+    mut result = 1
+    mut e = exp
+    mut b = base
     while e > 0:
         if e % 2 == 1:
             result = result * b
@@ -108,8 +108,8 @@ def sqrt(x: f64) -> f64 =
         return NAN
     if x == 0.0:
         return 0.0
-    let mut guess = x
-    let mut i = 0
+    mut guess = x
+    mut i = 0
     while i < 100:
         let next_guess = (guess + x / guess) / 2.0
         if abs_f64(next_guess - guess) < 0.0000000001:
@@ -124,8 +124,8 @@ def cbrt(x: f64) -> f64 =
         return 0.0
     let sign = if x < 0.0: -1.0 else 1.0
     let abs_x = abs_f64(x)
-    let mut guess = abs_x
-    let mut i = 0
+    mut guess = abs_x
+    mut i = 0
     while i < 100:
         let next_guess = (2.0 * guess + abs_x / (guess * guess)) / 3.0
         if abs_f64(next_guess - guess) < 0.0000000001:
@@ -136,9 +136,9 @@ def cbrt(x: f64) -> f64 =
 
 /// e 的 x 次方 (泰勒级数)
 def exp(x: f64) -> f64 =
-    let mut result = 1.0
-    let mut term = 1.0
-    let mut n = 1
+    mut result = 1.0
+    mut term = 1.0
+    mut n = 1
     while n < 50:
         term = term * x / (n as f64)
         result = result + term
@@ -154,11 +154,11 @@ def ln(x: f64) -> f64 =
     if x == 1.0:
         return 0.0
     // 使用级数展开: ln(x) = 2 * sum(((x-1)/(x+1))^(2n+1) / (2n+1))
-    let y = (x - 1.0) / (x + 1.0)
+    mut y = (x - 1.0) / (x + 1.0)
     let y2 = y * y
-    let mut result = 0.0
-    let mut term = y
-    let mut n = 0
+    mut result = 0.0
+    mut term = y
+    mut n = 0
     while n < 100:
         result = result + term / (2.0 * (n as f64) + 1.0)
         term = term * y2
@@ -191,9 +191,9 @@ def pow_f64(x: f64, y: f64) -> f64 =
 def sin(x: f64) -> f64 =
     // 将 x 归一化到 [-PI, PI]
     let x_norm = x - (x / TAU).floor() * TAU
-    let mut result = x_norm
-    let mut term = x_norm
-    let mut n = 1
+    mut result = x_norm
+    mut term = x_norm
+    mut n = 1
     while n < 20:
         term = -term * x_norm * x_norm / ((2.0 * (n as f64)) * (2.0 * (n as f64) + 1.0))
         result = result + term
@@ -215,8 +215,8 @@ def asin(x: f64) -> f64 =
     if x < -1.0 or x > 1.0:
         return NAN
     // 牛顿法求解 sin(y) - x = 0
-    let mut y = x
-    let mut i = 0
+    mut y = x
+    mut i = 0
     while i < 50:
         let next = y - (sin(y) - x) / cos(y)
         if abs_f64(next - y) < 0.000000000001:
@@ -236,9 +236,9 @@ def atan(x: f64) -> f64 =
         let sign_x = if x > 0.0: 1.0 else -1.0
         return sign_x * PI / 2.0 - atan(1.0 / x)
     let x2 = x * x
-    let mut result = x
-    let mut term = x
-    let mut n = 1
+    mut result = x
+    mut term = x
+    mut n = 1
     while n < 100:
         term = -term * x2
         result = result + term / (2.0 * (n as f64) + 1.0)
@@ -268,14 +268,14 @@ def atan2(y: f64, x: f64) -> f64 =
 
 /// 向下取整
 def floor(x: f64) -> int =
-    let i = x as int
+    mut i = x as int
     if x >= 0.0 or x == (i as f64):
         return i
     return i - 1
 
 /// 向上取整
 def ceil(x: f64) -> int =
-    let i = x as int
+    mut i = x as int
     if x <= 0.0 or x == (i as f64):
         return i
     return i + 1
@@ -298,8 +298,8 @@ def fract(x: f64) -> f64 =
 
 /// 最大公约数 (欧几里得算法)
 def gcd(a: int, b: int) -> int =
-    let mut x = abs(a)
-    let mut y = abs(b)
+    mut x = abs(a)
+    mut y = abs(b)
     while y != 0:
         let temp = y
         y = x % y
@@ -321,7 +321,7 @@ def is_prime(n: int) -> bool =
     if n % 2 == 0:
         return False
     let limit = sqrt(n as f64) as int + 1
-    let mut i = 3
+    mut i = 3
     while i <= limit:
         if n % i == 0:
             return False
@@ -332,8 +332,8 @@ def is_prime(n: int) -> bool =
 def factorial(n: int) -> int =
     if n < 0:
         return 0
-    let mut result = 1
-    let mut i = 2
+    mut result = 1
+    mut i = 2
     while i <= n:
         result = result * i
         i = i + 1
@@ -345,9 +345,9 @@ def fibonacci(n: int) -> int =
         return 0
     if n <= 1:
         return n
-    let mut a = 0
-    let mut b = 1
-    let mut i = 2
+    mut a = 0
+    mut b = 1
+    mut i = 2
     while i <= n:
         let c = a + b
         a = b

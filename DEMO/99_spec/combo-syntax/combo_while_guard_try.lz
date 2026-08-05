@@ -4,6 +4,8 @@
 enum E:
     Boom(str)
 
+count = 0
+
 def step() -> int raises E =
     count += 1
     guard count <= 3 else:
@@ -11,7 +13,6 @@ def step() -> int raises E =
     count
 
 def main() =
-    count = 0
     try:
         while (n := step()) <= 3 if n % 2 == 1:    // 守卫：只取奇数步
             print(n)

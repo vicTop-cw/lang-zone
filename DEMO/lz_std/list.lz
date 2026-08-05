@@ -48,7 +48,7 @@ impl<T> List<T> =
     def index_of(ref self, value: ref T) -> Option<int>
         where T: Eq
         =
-        let mut i = 0
+        mut i = 0
         for item in self:
             if item == value:
                 return Some(i)
@@ -59,7 +59,7 @@ impl<T> List<T> =
     def count_of(ref self, value: ref T) -> int
         where T: Eq
         =
-        let mut count = 0
+        mut count = 0
         for item in self:
             if item == value:
                 count = count + 1
@@ -116,7 +116,7 @@ impl<T> List<T> =
 
     /// 保留满足条件的元素
     def retain(mut self, predicate: fn(ref T) -> bool) =
-        let mut i = 0
+        mut i = 0
         while i < self.len():
             if not predicate(self[i]):
                 _ = self.remove_at(i)
@@ -127,14 +127,14 @@ impl<T> List<T> =
 
     /// 映射每个元素
     def map<U>(ref self, f: fn(ref T) -> U) -> List<U> =
-        let mut result = List()
+        mut result = List()
         for item in self:
             result.push(f(item))
         return result
 
     /// 过滤元素
     def filter(ref self, predicate: fn(ref T) -> bool) -> List<T> =
-        let mut result = List()
+        mut result = List()
         for item in self:
             if predicate(item):
                 result.push(item)
@@ -142,7 +142,7 @@ impl<T> List<T> =
 
     /// 折叠归约
     def fold<U>(ref self, init: U, f: fn(U, ref T) -> U) -> U =
-        let mut acc = init
+        mut acc = init
         for item in self:
             acc = f(acc, item)
         return acc
@@ -151,8 +151,8 @@ impl<T> List<T> =
     def reduce(ref self, f: fn(T, T) -> T) -> Option<T> =
         if self.is_empty():
             return None
-        let mut acc = self[0]
-        let mut i = 1
+        mut acc = self[0]
+        mut i = 1
         while i < self.len():
             acc = f(acc, self[i])
             i = i + 1
@@ -160,8 +160,8 @@ impl<T> List<T> =
 
     /// 反转列表
     def reverse(mut self) =
-        let mut left = 0
-        let mut right = self.len() - 1
+        mut left = 0
+        mut right = self.len() - 1
         while left < right:
             let temp = self[left]
             self[left] = self[right]
@@ -171,8 +171,8 @@ impl<T> List<T> =
 
     /// 返回反转后的新列表
     def reversed(ref self) -> List<T> =
-        let mut result = List()
-        let mut i = self.len() - 1
+        mut result = List()
+        mut i = self.len() - 1
         while i >= 0:
             result.push(self[i])
             i = i - 1
@@ -180,8 +180,8 @@ impl<T> List<T> =
 
     /// 切片 [start, end)
     def slice(ref self, start: int, end: int) -> List<T> =
-        let mut result = List()
-        let mut i = start
+        mut result = List()
+        mut i = start
         while i < end and i < self.len():
             result.push(self[i])
             i = i + 1
@@ -193,9 +193,9 @@ impl<T> List<T> =
         =
         // 冒泡排序 (实际应由编译器优化)
         let n = self.len()
-        let mut i = 0
+        mut i = 0
         while i < n:
-            let mut j = 0
+            mut j = 0
             while j < n - i - 1:
                 if self[j] > self[j + 1]:
                     let temp = self[j]
@@ -207,9 +207,9 @@ impl<T> List<T> =
     /// 排序 (按比较器)
     def sort_by(mut self, compare: fn(ref T, ref T) -> Ordering) =
         let n = self.len()
-        let mut i = 0
+        mut i = 0
         while i < n:
-            let mut j = 0
+            mut j = 0
             while j < n - i - 1:
                 if compare(self[j], self[j + 1]) == Ordering.Greater:
                     let temp = self[j]
@@ -225,7 +225,7 @@ impl<T> List<T> =
         where T: Eq + Hash
         =
         let mut seen = Dict()
-        let mut result = List()
+        mut result = List()
         for item in self:
             if not seen.contains_key(item):
                 seen.insert(item, True)
@@ -234,7 +234,7 @@ impl<T> List<T> =
 
     /// 连接两个列表
     def concat(ref self, other: List<T>) -> List<T> =
-        let mut result = List()
+        mut result = List()
         for item in self:
             result.push(item)
         for item in other:
@@ -279,7 +279,7 @@ impl<T> List<T> =
         =
         if self.len() != other.len():
             return False
-        let mut i = 0
+        mut i = 0
         while i < self.len():
             if self[i] != other[i]:
                 return False
@@ -291,8 +291,8 @@ impl<T> List<T> =
         =
         if self.is_empty():
             return "[]"
-        let mut result = "["
-        let mut i = 0
+        mut result = "["
+        mut i = 0
         while i < self.len():
             if i > 0:
                 result = result + ", "
@@ -405,7 +405,7 @@ def main() =
         assert [1, 2] + [3, 4] == [1, 2, 3, 4]
 
     test "iter":
-        let mut sum = 0
+        mut sum = 0
         for x in [1, 2, 3].iter():
             sum = sum + x
         assert sum == 6

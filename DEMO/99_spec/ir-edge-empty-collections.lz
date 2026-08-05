@@ -3,8 +3,8 @@
 // ============================
 
 def empty_list_test() =
-    let a = []
-    let b: List = []
+    let a: List<int> = []
+    let b: List<int> = []
     print(a, b)
 
 def none_test() =

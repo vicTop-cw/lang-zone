@@ -38,7 +38,7 @@ def scope_const() -> int =
 
 // --- 4. for 循环变量作用域 ---
 def scope_for_loop() =
-    let mut sum = 0
+    mut sum = 0
     for i in 0..5:
         let doubled = i * 2
         sum += doubled

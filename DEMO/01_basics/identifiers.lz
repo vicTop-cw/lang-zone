@@ -19,8 +19,7 @@ def my_function(a: int, b: int) -> int = a + b
 struct MyStruct =
     data: int
 
-magic __str__:
-    def __str__(self: MyStruct) -> str = "MyStruct"
+magic __str__(self: MyStruct) -> str = "MyStruct"
 
 magic __add__:
     def __add__(self: MyStruct, other: MyStruct) -> MyStruct =
@@ -61,8 +60,8 @@ def main() =
 
     let s1 = MyStruct(data: 100)
     let s2 = MyStruct(data: 200)
-    print(s1.__str__())
-    let s3 = s1.__add__(s2)
+    print(str(s1))
+    let s3 = s1 + s2
     print(s3.__str__())
 
     underscore_demo()

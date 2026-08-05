@@ -97,8 +97,8 @@ struct ManagedFile =
         print(f"opening {self.name}")
         self
 
-    // __exit__ → Exit trait — mut self (mutable borrow)
-    def __exit__(mut self) =
+    // __exit__ → Exit trait — mut self (mutable borrow) + guard
+    def __exit__(mut self, _guard: ManagedFile) =
         print(f"closing {self.name}")
 
 // --- 6. __new__ magic (static, no self) ---

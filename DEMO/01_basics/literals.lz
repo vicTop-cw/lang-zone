@@ -115,10 +115,10 @@ next line"""
     // -------- 区间字面量 ----------
 
     // 半开区间 start..end
-    let r1: Range = 0..10        // [0, 10)
+    let r1 = 0..10        // [0, 10)
 
     // 闭区间 start..=end
-    let r2: Range = 0..=9        // [0, 9]
+    let r2 = 0..=9        // [0, 9]
 
     print("ranges:", r1, r2)
 

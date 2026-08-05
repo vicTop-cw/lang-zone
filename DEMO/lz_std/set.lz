@@ -77,7 +77,7 @@ impl<T> Set<T> =
     def union(ref self, other: ref Set<T>) -> Set<T>
         where T: Eq + Hash
         =
-        let mut result = Set()
+        mut result = Set()
         for item in self:
             result.add(item)
         for item in other:
@@ -88,7 +88,7 @@ impl<T> Set<T> =
     def intersection(ref self, other: ref Set<T>) -> Set<T>
         where T: Eq + Hash
         =
-        let mut result = Set()
+        mut result = Set()
         for item in self:
             if other.contains(item):
                 result.add(item)
@@ -98,7 +98,7 @@ impl<T> Set<T> =
     def difference(ref self, other: ref Set<T>) -> Set<T>
         where T: Eq + Hash
         =
-        let mut result = Set()
+        mut result = Set()
         for item in self:
             if not other.contains(item):
                 result.add(item)
@@ -114,7 +114,7 @@ impl<T> Set<T> =
 
     /// 转为 List
     def to_list(ref self) -> List<T> =
-        let mut result = List()
+        mut result = List()
         for item in self:
             result.push(item)
         return result
@@ -123,7 +123,7 @@ impl<T> Set<T> =
     def map<U>(ref self, f: fn(ref T) -> U) -> Set<U>
         where U: Eq + Hash
         =
-        let mut result = Set()
+        mut result = Set()
         for item in self:
             result.add(f(item))
         return result
@@ -132,7 +132,7 @@ impl<T> Set<T> =
     def filter(ref self, predicate: fn(ref T) -> bool) -> Set<T>
         where T: Eq + Hash
         =
-        let mut result = Set()
+        mut result = Set()
         for item in self:
             if predicate(item):
                 result.add(item)
@@ -140,7 +140,7 @@ impl<T> Set<T> =
 
     /// 折叠归约
     def fold<U>(ref self, init: U, f: fn(U, ref T) -> U) -> U =
-        let mut acc = init
+        mut acc = init
         for item in self:
             acc = f(acc, item)
         return acc
@@ -198,8 +198,8 @@ impl<T> Set<T> =
         =
         if self.is_empty():
             return "{}"
-        let mut result = "{"
-        let mut first = True
+        mut result = "{"
+        mut first = True
         for item in self:
             if not first:
                 result = result + ", "

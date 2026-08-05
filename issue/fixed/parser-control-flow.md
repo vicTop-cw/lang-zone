@@ -1,10 +1,16 @@
 # parser 控制流新形态失败（ternary / guard / try-raise）
 
-- **Status**: Open
+- **Status**: Partially Fixed（guard 内联 `else break/continue/return` 已修复；三元/try-raise 仍待处理）
 - **Severity**: P1
 - **Category**: parser（控制流）
 - **Parent**: [parser-new-syntax-regression.md](parser-new-syntax-regression.md)
 - **Owner**: engineering
+
+## Fix History
+- **2026-08-05T00:00:00Z**: 修复 guard 内联 `else break/continue/return`（`Unexpected token in expression: Break`）。
+  - Fix commit: `45ee99c058a9041cffc5150eb57fc209f08438cd`
+  - 验证: `cargo test --lib` 292 通过；`cargo test --test ir_snapshots` 8/8；guard.lz LZ→IR 转绿。
+  - 验证人: auto-sdet
 
 ## Summary
 

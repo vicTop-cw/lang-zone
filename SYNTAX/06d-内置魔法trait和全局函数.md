@@ -337,7 +337,7 @@ def calculate() -> int =
 | `__enter__` | `Enter` | `Enter`（自定义） | 进入 `with` 块（上下文管理器入口） |
 | `__exit__` | `Exit` | `Exit`（自定义） | 退出 `with` 块（上下文管理器出口） |
 
-`__enter__` 消费 self，返回一个 guard 对象（由 `with ... as x` 中的 `x` 绑定）；`__exit__` 接收该 guard 对象作为参数（**不是** `&mut self`），在其上执行清理逻辑。
+`__enter__` 消费 self，返回一个 guard 对象（由 `with ... as x` 中的 `x` 绑定）；`__exit__` 接收 `mut self` 与该 guard 对象为参数（`def __exit__(mut self, _guard: File)`），在其上执行清理逻辑。
 
 ```lz
 struct MyFile =

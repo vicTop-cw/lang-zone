@@ -5,6 +5,18 @@
 // calls, method access, turbofish, indexing, whitespace rules)
 // ================================================================
 
+struct Point =
+    x: int
+    y: int
+
+let point = Point(x: 10, y: 20)
+
+// config?.get() — config 为 Option 容器，?. 安全导航后调用 get
+let config: Option<Dict<str, int>> = Some({"timeout": 30})
+// safe_field 等用到 config 的语句依赖上面的类型标注
+
+let items = ["a", "b", "c"]
+
 def main() =
     // ---- 2.1 / 2.2 / 2.3  Literals ----
     let int_lit   = 42
@@ -115,8 +127,8 @@ line2"""
     let mod_path = std.io.print
 
     // ---- 8.5  Turbofish .<T>  ----
-    let parsed = parse.<int>("42")
-    let collected = collect.<str>(items)
+    let parsed = parse_num.<int>("42")
+    let collected = collect_items.<str>(items)
 
     // ---- 9  Indexing  ----
     let idx0 = xs[0]         // 3
@@ -163,15 +175,3 @@ def parse_int(s: str) -> Result<int, str> =
 def parse_num<T>(s: str) -> Result<T, str> = parse_int(s)
 
 def collect_items<T>(items: List<T>) -> List<T> = items
-
-struct Point =
-    x: int
-    y: int
-
-let point = Point(x: 10, y: 20)
-
-// config?.get() — config 为 Option 容器，?. 安全导航后调用 get
-let config: Option<Dict<str, int>> = Some({"timeout": 30})
-// safe_field 等用到 config 的语句依赖上面的类型标注
-
-let items = ["a", "b", "c"]

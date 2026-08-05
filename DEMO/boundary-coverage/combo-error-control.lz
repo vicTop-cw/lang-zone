@@ -6,7 +6,7 @@
 
 // --- 1. try 内嵌 for 循环 ---
 def try_inside_for(values: List<int>) -> int =
-    let mut total = 0
+    mut total = 0
     for val in values:
         try:
             if val == 0:
@@ -93,7 +93,7 @@ def nested_try(ops: List<int>) -> int =
 
 // --- 8. try + else + for 组合 ---
 def try_else_for(data: List<int>) -> int =
-    let mut total = 0
+    mut total = 0
     try:
         for val in data:
             total += val

@@ -1,10 +1,11 @@
 // combo-syntax（绿色回归测试）：while 循环 + 海象运算符 :=
 // 两个已实现特性叠加：在 while 条件内用 := 绑定每次取到的值
+count = 0
+
 def next() -> int =
     count += 1
     count
 
 def main() =
-    count = 0
     while (n := next()) <= 5:
         print(n)          // 预期输出：1 2 3 4 5

@@ -305,7 +305,7 @@ def main() =
         assert nested.flatten() == Some(5)
 
     test "iter":
-        let mut count = 0
+        mut count = 0
         let val = Some(42)
         for item in val.iter():
             count = count + 1

@@ -13,7 +13,7 @@ struct MyResource =
 
     // __exit__ matches spec: self (the resource) is the parameter
     // Requires mut self because codegen maps to &mut self (RefMut)
-    def __exit__(mut self) =
+    def __exit__(mut self, _guard: MyResource) =
         print(f"releasing {self.name}")
 
 def main() =

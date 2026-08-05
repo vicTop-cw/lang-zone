@@ -14,7 +14,7 @@ async def fetch_safe(id: int) -> Result<int, str> =
         Result.Err(error: e)
 
 // --- 2. spawn + try + catch 组合 ---
-def spawn_with_error_handling() =
+async def spawn_with_error_handling() =
     let future = spawn fetch_safe(5)
     let result = await future
     match result:
@@ -26,7 +26,7 @@ def spawn_with_error_handling() =
 // --- 3. 多个 spawn 并发 ---
 async def slow_double(x: int) -> int = x * 2
 
-def multiple_spawn() =
+async def multiple_spawn() =
     let f1 = spawn slow_double(10)
     let f2 = spawn slow_double(20)
     let f3 = spawn slow_double(30)
@@ -53,7 +53,7 @@ async def classify_async(x: int) -> str =
         case 0 => "zero"
         case _ => "positive"
 
-def async_with_match() =
+async def async_with_match() =
     let f = spawn classify_async(42)
     let result = await f
     print(result)
@@ -61,7 +61,7 @@ def async_with_match() =
 // --- main ---
 def main() =
     print("=== combo-async-await ===")
-    spawn_with_error_handling()
+    await spawn spawn_with_error_handling()
     let bad = spawn fetch_safe(-1)
     let bad_result = await bad
     match bad_result:
@@ -69,8 +69,8 @@ def main() =
             print(f"unexpected:{v}")
         case Result.Err(error: e) =>
             print(f"expected_err:{e}")
-    multiple_spawn()
+    await spawn multiple_spawn()
     go_with_defer()
     go_in_loop(3)
-    async_with_match()
+    await spawn async_with_match()
     print("combo-async-await done")

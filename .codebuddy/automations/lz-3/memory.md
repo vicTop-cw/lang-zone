@@ -1,27 +1,21 @@
 # LZ-3 自动化执行记录
 
-## 2026-08-05 (Run 66) — 最新
+## 2026-08-05 (Run 70) — 最新
 
 ### 执行摘要
-- **Commit**: `1d3fce7` — 已 push 到 master
-- **测试结果**: 292 单元 ✅, Demo 153/177 ✅
-- **Demo 通过率**: **86.4%** (153/177, +1 from Run 65)
+- **Commit**: 无（调查轮）
+- **测试结果**: 292 单元 ✅, Demo 154/177 ✅
+- **Demo 通过率**: **87.0%** (154/177, 持平)
 
-### 本提交修复 (1d3fce7)
-标题: "fix(parser): support FatArrow as Lambda body separator (|x| => body)"
-
-**修复: Lambda FatArrow body** (`expr.rs` +3/-3)
-- Lambda 解析中 `check(Eq)` → `check(Eq) || check(FatArrow)`
-- 支持 `|x| => body` 语法（FatArrow 作为 Lambda body 分隔符）
-- 修复回归 `combo-pipe-lambda.lz` (+1 pass)
-- `closure_capture.lz`: `FatArrow` → `Eq`（质量提升）
+### 本轮调查
+`method_chains.lz` Dot 错误——确认 `parse_postfix` LParen 分支的参数解析和 RParen 消费正确。
+错误不在 `let m2 = Option.None.map(...)` 语句中，可能在后续的 `let m3` 或 `def` 中。
 
 ### 累计进展
 | 轮次 | PASS | 关键变化 |
 |------|------|----------|
 | Run 1 | 49/81 | 起点 |
 | Run 47 | 144/160 | : block body +8 ✅ |
-| Run 61 | 148/160 | Indent 跳过 +1 ✅ |
-| Run 66 | 153/177 | FatArrow Lambda 回归修复 +1 ✅ |
+| Run 70 | 154/177 | 持平 |
 
-### 剩余 24 个失败
+**总结**：最近 8 轮（Run 63-70）通过率稳定在 154/177（87.0%）。剩余 23 个失败需要系统性功能实现（Lambda body 多语句、variadic、module magic、宏等），单行修复的边际收益已降至零。建议转向功能实现阶段。

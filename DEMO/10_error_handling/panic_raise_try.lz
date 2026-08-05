@@ -102,13 +102,13 @@ def try_catch_no_pattern() =
 // =============================================================
 // try 块的尾表达式作为 Ok 值；catch 分支尾表达式作为 Err 值。
 
-let result_from_try = try:
+mut result_from_try = try:
     checked_divide(10, 2)
 catch e:
     -1               // 出错时返回 -1
 // result_from_try = 5
 
-let fallback_result = try:
+mut fallback_result = try:
     checked_divide(10, 0)
 catch e:
     -1               // fallback: result = -1
@@ -165,8 +165,16 @@ def try_catch_else_demo() =
 // ? 后缀操作符将 Result<T,E> 错误向上传播。
 // 仅对 Result 类型有效。对于自定义 raises 异常，使用 try/catch。
 
-def parse_and_process(s: str) -> int raises ParseError =
-    let val = parse_int(s)?
+def parse_int(s: str) -> int raises FileError =
+    match s:
+        case "42" => 42
+        case _ => raise FileError.ParseError(0, f"cannot parse: {s}")
+
+def read_file(path: str) -> str raises FileError =
+    raise FileError.ReadError(f"cannot read: {path}")
+
+def parse_and_process(s: str) -> int raises FileError =
+    mut val = parse_int(s)?
     val * 2
 
 // 等价于：

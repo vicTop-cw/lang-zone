@@ -34,24 +34,25 @@ def main() =
     val =:
         42
 
-    // --- Precedence table (0 low → 16 high) ---
-    // 0:  =       (assignment, right)
-    // 1:  |>      (pipe, left)
-    // 2:  :=      (walrus, right)
-    // 3:  or ||   (logical or, left)
-    // 4:  and &&  (logical and, left)
-    // 5:  not !   (logical not, right)
-    // 6:  == != < > <= >= is in (comparison)
-    // 7:  |       (bitwise or, left)
-    // 8:  ^       (bitwise xor, left)
-    // 9:  &       (bitwise and, left)
-    // 10: << >>   (shift, left)
-    // 11: + -     (additive, left)
-    // 12: * / %   (multiplicative, left)
-    // 13: **      (power, right)
-    // 14: +x -x ~x (unary, right)
-    // 15: ? ?. ^  (postfix, left)
-    // 16: . [] () (member/index/call, left)
+    // --- Precedence table (0 low → 17 high, 权威源：12-操作符.md §二) ---
+    // 0:  = += -= *= /= %= **= &= |= ^= <<= >>=  (assignment, right)
+    // 1:  :=  (walrus, right)；同级：三元 a if c else b、范围 .. ..=
+    // 2:  or ||   (logical or, left)
+    // 3:  and &&  (logical and, left)
+    // 4:  not !   (logical not, right)
+    // 5:  == != < > <= >=  (comparison)
+    // 6:  is in as  (identity / membership / cast)
+    // 7:  |>      (pipe, left)
+    // 8:  ??      (null-coalesce, left)
+    // 9:  |       (bitwise or, left)
+    // 10: ^       (bitwise xor, left)
+    // 11: &       (bitwise and, left)
+    // 12: << >>   (shift, left)
+    // 13: + -     (additive, left)
+    // 14: * / %   (multiplicative, left)
+    // 15: **      (power, right)
+    // 16: + - ~ * & (unary)  (unary, right)
+    // 17: ? ?. ^(postfix) [] () .  (member/index/call, left)
 
     // --- Precedence examples ---
     let r = 2 + 3 * 4          // = 14 (* before +)

@@ -34,21 +34,21 @@ impl<K, V> Dict<K, V> =
 
     /// 获取所有键
     def keys(ref self) -> List<K> =
-        let mut result = List()
+        mut result = List()
         for (k, _) in self:
             result.push(k)
         return result
 
     /// 获取所有值
     def values(ref self) -> List<V> =
-        let mut result = List()
+        mut result = List()
         for (_, v) in self:
             result.push(v)
         return result
 
     /// 获取所有键值对
     def items(ref self) -> List<(K, V)> =
-        let mut result = List()
+        mut result = List()
         for (k, v) in self:
             result.push((k, v))
         return result
@@ -98,7 +98,7 @@ impl<K, V> Dict<K, V> =
     def map_values<U>(ref self, f: fn(ref V) -> U) -> Dict<K, U>
         where K: Eq + Hash
         =
-        let mut result = Dict()
+        mut result = Dict()
         for (k, v) in self:
             result.insert(k, f(v))
         return result
@@ -107,7 +107,7 @@ impl<K, V> Dict<K, V> =
     def map<K2, V2>(ref self, f: fn(ref K, ref V) -> (K2, V2)) -> Dict<K2, V2>
         where K2: Eq + Hash
         =
-        let mut result = Dict()
+        mut result = Dict()
         for (k, v) in self:
             let (new_k, new_v) = f(k, v)
             result.insert(new_k, new_v)
@@ -117,7 +117,7 @@ impl<K, V> Dict<K, V> =
     def filter(ref self, predicate: fn(ref K, ref V) -> bool) -> Dict<K, V>
         where K: Eq + Hash
         =
-        let mut result = Dict()
+        mut result = Dict()
         for (k, v) in self:
             if predicate(k, v):
                 result.insert(k, v)
@@ -138,7 +138,7 @@ impl<K, V> Dict<K, V> =
 
     /// 折叠归约
     def fold<U>(ref self, init: U, f: fn(U, ref K, ref V) -> U) -> U =
-        let mut acc = init
+        mut acc = init
         for (k, v) in self:
             acc = f(acc, k, v)
         return acc
@@ -201,8 +201,8 @@ impl<K, V> Dict<K, V> =
         =
         if self.is_empty():
             return "{}"
-        let mut result = "{"
-        let mut first = True
+        mut result = "{"
+        mut first = True
         for (k, v) in self:
             if not first:
                 result = result + ", "
@@ -366,8 +366,8 @@ def main() =
         let mut d: Dict<str, int> = Dict()
         d.insert("x", 10)
         d.insert("y", 20)
-        let mut count = 0
-        let mut total = 0
+        mut count = 0
+        mut total = 0
         for (k, v) in d:
             count = count + 1
             total = total + v

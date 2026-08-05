@@ -9,7 +9,7 @@
 // --- 1. 数值转换 infallible：不需要 raises ---
 def to_float(x: int) -> f64 = x as f64            // 永不失败
 def to_int(x: f64) -> int = x as int              // 永不失败（截断）
-def to_i32(x: int) -> i32 = x as i32              // 永不失败
+def to_i32(x: int) -> int = x as int              // 永不失败
 
 // --- 2. 字符串解析 fallible：需声明 raises ---
 def parse_int(s: str) -> int raises CastError =

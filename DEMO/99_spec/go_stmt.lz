@@ -1,5 +1,5 @@
 // ✅ 已实现 — go 关键字词法化 + 解析 + codegen（2026-07-31）
-// 出处：SYNTAX/10-并发与异步.md — go 并行进程
+// 出处：SYNTAX/10-并发与异步.md — go 新线程（std::thread::spawn）
 // go expr → std::thread::spawn(move || { expr })
 def worker(n: int) = print(f"working {n}")
 

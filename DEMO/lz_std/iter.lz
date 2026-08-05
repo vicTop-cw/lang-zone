@@ -20,12 +20,12 @@ impl Iterator for Range =
     def __next__(mut self) -> Option<int> =
         if self.current >= self.end:
             return None
-        let value = self.current
+        mut value = self.current
         self.current = self.current + 1
         return Some(value)
 
     def size_hint(ref self) -> (int, Option<int>) =
-        let remaining = self.end - self.current
+        mut remaining = self.end - self.current
         if remaining < 0:
             return (0, Some(0))
         return (remaining, Some(remaining))
@@ -52,7 +52,7 @@ impl Iterator for RangeInclusive =
             return None
         if self.current > self.end:
             return None
-        let value = self.current
+        mut value = self.current
         if self.current == self.end:
             self.done = True
         else:
@@ -195,7 +195,7 @@ impl Iterator for StepRange =
             return None
         if self.step < 0 and self.current <= self.end:
             return None
-        let value = self.current
+        mut value = self.current
         self.current = self.current + self.step
         return Some(value)
 
@@ -230,7 +230,7 @@ def filter<I: Iterable>(iterable: ref I, predicate: fn(ref I.Item) -> bool) -> L
 
 /// 折叠可迭代对象
 def fold<I: Iterable, U>(iterable: ref I, init: U, f: fn(U, I.Item) -> U) -> U =
-    let mut acc = init
+    mut acc = init
     for item in iterable:
         acc = f(acc, item)
     return acc
@@ -265,7 +265,7 @@ def find<I: Iterable>(iterable: ref I, predicate: fn(ref I.Item) -> bool) -> Opt
 
 /// 计数满足条件的元素
 def count_if<I: Iterable>(iterable: ref I, predicate: fn(I.Item) -> bool) -> int =
-    let mut n = 0
+    mut n = 0
     for item in iterable:
         if predicate(item):
             n = n + 1
@@ -275,7 +275,7 @@ def count_if<I: Iterable>(iterable: ref I, predicate: fn(I.Item) -> bool) -> int
 def sum<I: Iterable>(iterable: ref I) -> I.Item
     where I.Item: Add<Output = I.Item> + Default
     =
-    let mut total = I.Item.default()
+    mut total = I.Item.default()
     for item in iterable:
         total = total + item
     return total
@@ -284,8 +284,8 @@ def sum<I: Iterable>(iterable: ref I) -> I.Item
 def product<I: Iterable>(iterable: ref I) -> I.Item
     where I.Item: Mul<Output = I.Item> + Default
     =
-    let mut total = I.Item.default()
-    let mut first = True
+    mut total = I.Item.default()
+    mut first = True
     for item in iterable:
         if first:
             total = item
@@ -341,7 +341,7 @@ def main() =
         assert result == [0, 3, 6, 9]
 
     test "for_each":
-        let mut total = 0
+        mut total = 0
         for_each([1, 2, 3], |x: int| = total = total + x)
         assert total == 6
 

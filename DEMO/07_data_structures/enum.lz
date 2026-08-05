@@ -20,13 +20,6 @@ enum Shape:
 enum Option<T>:
     Some(value: T)
     None
-
-enum Result<T, E>:
-    Ok(value: T)
-    Err(error: E)
-
-// --- 4. Enum methods ---
-enum Option<T>:
     def is_some(self) -> bool =
         match self:
             case Option.Some(value: _) => True
@@ -53,6 +46,8 @@ enum Option<T>:
             case Option.None => Option.None
 
 enum Result<T, E>:
+    Ok(value: T)
+    Err(error: E)
     def is_ok(self) -> bool =
         match self:
             case Result.Ok(value: _) => True

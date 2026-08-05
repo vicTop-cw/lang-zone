@@ -40,7 +40,7 @@ def deep_if(a: int, b: int, c: int, d: int) -> str =
 
 // --- 2. 三层嵌套 for + if 守卫 ---
 def nested_for_if(limit: int) -> int =
-    let mut total = 0
+    mut total = 0
     for i in 0..limit:
         for j in 0..limit:
             for k in 0..limit:
@@ -50,9 +50,9 @@ def nested_for_if(limit: int) -> int =
 
 // --- 3. for 嵌套 while 嵌套 if ---
 def for_while_if(data: List<int>) -> int =
-    let mut sum = 0
+    mut sum = 0
     for item in data:
-        let mut counter = item
+        mut counter = item
         while counter > 0:
             if counter % 2 == 0:
                 sum += counter
@@ -61,8 +61,8 @@ def for_while_if(data: List<int>) -> int =
 
 // --- 4. while 内嵌 for 内嵌 match ---
 def while_for_match(n: int) -> int =
-    let mut result = 0
-    let mut i = 0
+    mut result = 0
+    mut i = 0
     while i < n:
         for j in 0..n:
             let add = match j % 3:
@@ -101,7 +101,7 @@ def match_with_if(x: int, y: int) -> str =
 
 // --- 6. 嵌套循环 + break（带值）+ continue ---
 def nested_break_continue(target: int) -> int =
-    let mut found = -1
+    mut found = -1
     for i in 0..10:
         for j in 0..10:
             if i * 10 + j == target:
@@ -113,7 +113,7 @@ def nested_break_continue(target: int) -> int =
 
 // --- 7. 循环 + else 分支（for/else, while/else）---
 def loop_with_else(limit: int) -> str =
-    let mut i = 0
+    mut i = 0
     while i < limit:
         if i == 5:
             return "broke_at_5"

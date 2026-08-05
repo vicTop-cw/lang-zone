@@ -44,6 +44,8 @@ struct TypeCtx {
     current_fn_name: Option<String>,
     /// 提升出的待处理顶级 Items（嵌套函数等）
     pending_items: Rc<RefCell<Vec<Item>>>,
+    /// 语义错误收集（不可变重赋值 E0384 / 空列表类型不可推断 E0282）
+    errors: Rc<RefCell<Vec<String>>>,
 }
 
 impl TypeCtx {
@@ -61,6 +63,15 @@ impl TypeCtx {
             current_ret_ty: None,
             current_fn_name: None,
             pending_items: Rc::new(RefCell::new(Vec::new())),
+            errors: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
+    /// 记录一条语义错误（自动去重），供 build_ir 在末尾统一报错
+    fn report_error(&self, msg: String) {
+        let mut errors = self.errors.borrow_mut();
+        if !errors.contains(&msg) {
+            errors.push(msg);
         }
     }
 
@@ -2067,29 +2078,94 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
         set
     }
 
+    // 空列表字面量元素类型推断（支持 append/push 上下文推断，贴近 Rust）
+    let empty_elems = resolve_empty_list_elems(&ir_stmts);
+
+    // 不可变 `let` 重赋值 → E0384 错误（移除原本自动提升为 mut 的行为，贴近 Rust 语义）
     let reassigned = collect_reassigned(&ir_stmts);
-    if !reassigned.is_empty() {
-        fn mark_mut(stmts: &mut [Stmt], reassigned: &std::collections::HashSet<String>) {
-            for s in stmts {
-                if let Stmt::Let { name, is_mut, .. } = s {
-                    if reassigned.contains(name.as_str()) { *is_mut = true; }
+    for s in &ir_stmts {
+        if let Stmt::Let { name, is_mut, .. } = s {
+            if reassigned.contains(name.as_str()) && !*is_mut {
+                ctx.report_error(format!(
+                    "error[E0384]: cannot assign twice to immutable variable `{}`\n  = help: change `let {}` to `let mut {}` if you intend to reassign it",
+                    name, name, name
+                ));
+            }
+        }
+    }
+
+    // 将推断出的空列表元素类型应用到对应 let；无法推断则报 E0282 错误
+    for s in &mut ir_stmts {
+        if let Stmt::Let { name, ty, value, .. } = s {
+            if let Some(elem) = empty_elems.get(name.as_str()) {
+                *ty = IrType::Named { path: "List".to_string(), args: vec![elem.clone()] };
+            } else if let IrType::Named { path, args } = ty {
+                if path == "List" && args.len() == 1 && matches!(args[0], IrType::Any) {
+                    if let ExprKind::ListLit(items) = &value.kind {
+                        if items.is_empty() {
+                            ctx.report_error(format!(
+                                "error[E0282]: type annotations needed\n  = cannot infer element type for empty list bound to `{}`\n  = help: give it an explicit type, e.g. `let {}: List<T> = []`",
+                                name, name
+                            ));
+                        }
+                    }
                 }
+            }
+        }
+    }
+
+    // 递归收集空列表字面量，并通过 append/push 调用推断其元素类型（贴近 Rust 的上下文推断）
+    fn resolve_empty_list_elems(stmts: &[Stmt]) -> std::collections::HashMap<String, IrType> {
+        let mut empty_lets: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for s in stmts {
+            if let Stmt::Let { name, ty, value, .. } = s {
+                if let IrType::Named { path, args } = ty {
+                    if path == "List" && args.len() == 1 && matches!(args[0], IrType::Any) {
+                        if let ExprKind::ListLit(items) = &value.kind {
+                            if items.is_empty() { empty_lets.insert(name.clone()); }
+                        }
+                    }
+                }
+            }
+        }
+        let mut resolved: std::collections::HashMap<String, IrType> = std::collections::HashMap::new();
+        fn scan(stmts: &[Stmt], empty_lets: &std::collections::HashSet<String>, resolved: &mut std::collections::HashMap<String, IrType>) {
+            for s in stmts {
                 match s {
+                    Stmt::ExprStmt { expr: e } => {
+                        if let ExprKind::MethodCall { receiver, method, args } = &e.kind {
+                            if method == "append" || method == "push" {
+                                if let ExprKind::Var(name) = &receiver.kind {
+                                    if empty_lets.contains(name) && !resolved.contains_key(name) {
+                                        if let Some(first) = args.first() {
+                                            if first.ty != IrType::Any {
+                                                resolved.insert(name.clone(), first.ty.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Stmt::If { then_branch, else_branch, .. } => {
-                        mark_mut(&mut then_branch.stmts, reassigned);
-                        if let Some(eb) = else_branch { mark_mut(&mut eb.stmts, reassigned); }
+                        scan(&then_branch.stmts, empty_lets, resolved);
+                        if let Some(eb) = else_branch { scan(&eb.stmts, empty_lets, resolved); }
                     }
-                    Stmt::While { body, .. } | Stmt::For { body, .. } => {
-                        mark_mut(&mut body.stmts, reassigned);
+                    Stmt::While { body, .. } | Stmt::For { body, .. } => scan(&body.stmts, empty_lets, resolved),
+                    Stmt::Match { arms, .. } => for a in arms { scan(&a.body.stmts, empty_lets, resolved); },
+                    Stmt::TryCatch { body, catches, else_body, finally_body } => {
+                        scan(&body.stmts, empty_lets, resolved);
+                        for (_, cb) in catches { scan(&cb.stmts, empty_lets, resolved); }
+                        if let Some(eb) = else_body { scan(&eb.stmts, empty_lets, resolved); }
+                        if let Some(fb) = finally_body { scan(&fb.stmts, empty_lets, resolved); }
                     }
-                    Stmt::Match { arms, .. } => {
-                        for arm in arms { mark_mut(&mut arm.body.stmts, reassigned); }
-                    }
+                    Stmt::Block { stmts: b } => scan(&b, empty_lets, resolved),
                     _ => {}
                 }
             }
         }
-        mark_mut(&mut ir_stmts, &reassigned);
+        scan(stmts, &empty_lets, &mut resolved);
+        resolved
     }
 
     let ty = stmts.last()
@@ -2136,6 +2212,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // 构建函数体上下文
     let mut fn_ctx = TypeCtx::new();
     fn_ctx.pending_items = ctx.pending_items.clone();
+    fn_ctx.errors = ctx.errors.clone();
     fn_ctx.current_fn_name = Some(func.name.clone());
     fn_ctx.current_generics = generics.clone();
     // 复制全局 struct 信息
@@ -2633,6 +2710,7 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     for (name, body) in &ast_module.top_level_builds {
         let mut block_ctx = TypeCtx::new();
         block_ctx.current_generics = ctx.current_generics.clone();
+        block_ctx.errors = ctx.errors.clone();
         // 预扫描：收集构建块内局部变量类型（x = value 赋值），供元组/表达式推断
         for s in body {
             eprintln!("DEBUG buildbody stmt = {:?}", s);
@@ -2685,6 +2763,13 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     }
 
     // 11. 将提升出的嵌套函数等 pending items 追加到模块
+    // 语义错误统一上报（不可变重赋值 E0384 / 空列表类型推断 E0282）
+    {
+        let errors = ctx.errors.borrow();
+        if !errors.is_empty() {
+            return Err(IrBuildError::Generic(errors.join("\n")));
+        }
+    }
     // 先 drop ctx 确保 Rc 引用计数归 1，否则 try_unwrap 静默失败
     drop(ctx);
     if let Ok(items) = Rc::try_unwrap(pending_items) {

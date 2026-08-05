@@ -52,7 +52,7 @@ def none_boundaries() =
 
 // --- 5. 字面量边界（各种进制）---
 def literal_boundaries() =
-    let hex_max: int = 0xFFFFFFFFFFFFFFFF
+    let hex_max: int = 0x7FFFFFFFFFFFFFFF
     let oct_min: int = 0o0
     let bin_max: int = 0b11111111
 

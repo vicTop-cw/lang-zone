@@ -151,7 +151,7 @@ def demo_return_in_call_block() =
 
 def demo_return_scope() =
     // 3d. 构建块在函数体内：作用域规则
-    let x = 5
+    mut x = 5
     if x > 10:
         print("this won't run")  // ← 退出 outer 函数 (commented)
 

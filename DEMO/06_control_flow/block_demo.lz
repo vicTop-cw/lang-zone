@@ -14,7 +14,7 @@
 
 def main() =
     // ========== 定义 1：plain 块（定义即执行 + 标签跳出）==========
-    let total = 0
+    mut total = 0
     block scan:                    // plain 块：定义时立即执行体
         for x in 1..10:
             if x > 5:
@@ -58,7 +58,7 @@ def main() =
     block normalize[ps: __Params]:
         ps.args[0] = (ps.args[0] as int).abs()
 
-    def divide[n](a: int, b: int) -> int = a / b   // normalize 作 [chk]
+    def divide[normalize](a: int, b: int) -> int = a / b   // normalize 作 [chk]
     print(divide(-10, 2))          // 触发 normalize → ps.args[0] 已 abs → 10/2=5
 
     block work[normalize]:         // 也可挂到另一个 block
@@ -99,7 +99,7 @@ def main() =
     block apply_f[(3,)]            // double_ps 先跑 → 6
 
     // ========== 自递归（压栈递归）==========
-    let out = []
+    let mut out = []
     block count_down[ps: __Params]:
         let n = ps.args[0] as int
         if n <= 0:

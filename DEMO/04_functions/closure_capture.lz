@@ -20,7 +20,7 @@ def fn_capture() =
 // --- 2. 可写捕获（FnMut）---
 // 闭包修改外部 mut 变量 → 映射 FnMut
 def fnmut_capture() =
-    let mut total = 0                    // 外部可变变量
+    mut total = 0                    // 外部可变变量
     let add_to_total = |x: int| =>
         total = total + x            // 写捕获 → FnMut
     add_to_total(5)
@@ -40,7 +40,7 @@ def fnonce_capture() =
 // 同一闭包同时只读 + 可写：编译器自动映射 FnMut（最高捕获等级）
 def mixed_capture() =
     let base = 100                   // 只读捕获
-    let mut offset = 1                   // 可变捕获
+    mut offset = 1                   // 可变捕获
     let adjust = |x: int| =>
         let v = base + x             // 读 base（Fn 级别）
         offset = offset + v          // 写 offset（FnMut 级别）

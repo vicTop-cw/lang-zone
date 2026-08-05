@@ -6,7 +6,7 @@
 
 // --- 1. iterator + yield + for 遍历 ---
 iterator countdown(n: int) -> int =
-    let mut i = n
+    mut i = n
     while i > 0:
         yield i
         i -= 1

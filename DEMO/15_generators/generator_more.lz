@@ -18,7 +18,7 @@ def main() =
     for v in fib(7):
         print(v)
 
-    let mut acc = 0
+    mut acc = 0
     for s in squares(5):
         acc += s
     print(acc)

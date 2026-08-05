@@ -6,14 +6,14 @@
 
 // --- 1. := 在 if 条件中 ---
 def walrus_if(values: List<int>) -> int =
-    let mut result = 0
+    mut result = 0
     if (first := values.first()) != None:
         result = first
     result
 
 // --- 2. := 在 while 条件中 ---
 def walrus_while() =
-    let mut counter = 5
+    mut counter = 5
     while (n := counter) > 0:
         print(n)
         counter -= 1

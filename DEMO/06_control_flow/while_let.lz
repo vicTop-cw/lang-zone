@@ -40,12 +40,11 @@ def process_until_fail(it: Iterator<int>) -> int =
     processed
 
 // --- 5. 无限源循环：自定义迭代器 ---
-def count_from(start: int) -> Iterator<int> =
-    iterator:
-        i = start
-        loop:
-            yield i
-            i = i + 1
+iterator count_from(start: int) -> Iterator<int> =
+    i = start
+    loop:
+        yield i
+        i = i + 1
 
 def main() =
     // 1. 求和 1..5

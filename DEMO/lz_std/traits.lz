@@ -221,7 +221,7 @@ trait Iterator =
 
     /// 折叠
     def fold<B>(mut self, init: B, f: fn(B, Self.Item) -> B) -> B =
-        let mut acc = init
+        mut acc = init
         while let Some(item) = self.__next__():
             acc = f(acc, item)
         return acc
@@ -230,7 +230,7 @@ trait Iterator =
     def reduce(mut self, f: fn(Self.Item, Self.Item) -> Self.Item) -> Option<Self.Item> =
         match self.__next__():
             case Some(first):
-                let mut acc = first
+                mut acc = first
                 while let Some(item) = self.__next__():
                     acc = f(acc, item)
                 return Some(acc)
@@ -239,7 +239,7 @@ trait Iterator =
 
     /// 计数
     def count(mut self) -> int =
-        let mut n = 0
+        mut n = 0
         while let Some(_) = self.__next__():
             n = n + 1
         return n
@@ -248,7 +248,7 @@ trait Iterator =
     def sum(mut self) -> Self.Item
         where Self.Item: Add<Output = Self.Item> + Default
         =
-        let mut total = Self.Item.default()
+        mut total = Self.Item.default()
         while let Some(item) = self.__next__():
             total = total + item
         return total
@@ -259,7 +259,7 @@ trait Iterator =
         =
         match self.__next__():
             case Some(first):
-                let mut result = first
+                mut result = first
                 while let Some(item) = self.__next__():
                     result = result * item
                 return result
@@ -289,7 +289,7 @@ trait Iterator =
 
     /// 获取第 n 个元素
     def nth(mut self, n: int) -> Option<Self.Item> =
-        let mut i = 0
+        mut i = 0
         while let Some(item) = self.__next__():
             if i == n:
                 return Some(item)
@@ -298,7 +298,7 @@ trait Iterator =
 
     /// 获取最后一个元素
     def last(mut self) -> Option<Self.Item> =
-        let mut result = None
+        mut result = None
         while let Some(item) = self.__next__():
             result = Some(item)
         return result
@@ -619,12 +619,12 @@ def main() =
     // 验证 Take + Skip
     test "take and skip":
         let values = [1, 2, 3, 4, 5]
-        let result = values.iter().skip(2).take(2).collect()
+        mut result = values.iter().skip(2).take(2).collect()
         assert result == [3, 4]
 
     // 验证 Enumerate
     test "enumerate":
-        let result = ["a", "b", "c"].iter().enumerate().collect()
+        mut result = ["a", "b", "c"].iter().enumerate().collect()
         assert result == [(0, "a"), (1, "b"), (2, "c")]
 
     // 验证 fold / reduce
