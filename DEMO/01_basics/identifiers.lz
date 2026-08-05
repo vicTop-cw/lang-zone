@@ -19,10 +19,9 @@ def my_function(a: int, b: int) -> int = a + b
 struct MyStruct =
     data: int
 
-magic __str__(self: MyStruct) -> str = "MyStruct"
+    magic __str__(self: MyStruct) -> str = "MyStruct"
 
-magic __add__:
-    def __add__(self: MyStruct, other: MyStruct) -> MyStruct =
+    magic __add__(self: MyStruct, other: MyStruct) -> MyStruct =
         MyStruct(data: self.data + other.data)
 
 // --- 4.3 下划线 `_` 的语义 ---
@@ -62,7 +61,7 @@ def main() =
     let s2 = MyStruct(data: 200)
     print(str(s1))
     let s3 = s1 + s2
-    print(s3.__str__())
+    print(str(s3))
 
     underscore_demo()
     print("identifiers done")
