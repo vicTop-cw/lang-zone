@@ -878,6 +878,38 @@ impl CodeGen {
             self.emit_line("}");
         }
 
+        // 如果 struct 有 __implicit_from__，生成 ImplicitFrom trait impl
+        if !s.implicit_froms.is_empty() {
+            self.buf.push('\n');
+            // 生成 ImplicitFrom trait 定义（首次使用时）
+            self.emit_line("// trait ImplicitFrom<T> { fn implicit_from(value: T) -> Self; }");
+            for src_ty in &s.implicit_froms {
+                let src_rust = self.rust_type(src_ty);
+                let impl_generics = if s.generics.is_empty() {
+                    String::new()
+                } else {
+                    let params: Vec<String> = s.generics.iter().map(|g| {
+                        format!("{}: Clone + std::fmt::Debug", g.name)
+                    }).collect();
+                    format!("<{}>", params.join(", "))
+                };
+                self.emit_line(&format!("impl{} ImplicitFrom<{}> for {}{} {{", impl_generics, src_rust, s.name, generics));
+                self.indent += 1;
+                let ret_ty = format!("{}{}", s.name, generics);
+                self.emit_line(&format!("fn __implicit_from__(value: {}) -> {} {{", src_rust, ret_ty));
+                self.indent += 1;
+                // 构造调用：使用关键字构造，value 映射到第一个字段
+                self.emit_line(&format!("{} {{ {}: value, ..{}::default() }}",
+                    ret_ty,
+                    s.fields.first().map(|f| f.name.as_str()).unwrap_or("_"),
+                    ret_ty));
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
         // 方法（impl 块）
         if !s.methods.is_empty() {
             self.buf.push('\n');

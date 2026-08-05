@@ -2503,6 +2503,12 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             m.params.iter().map(|p| (p.name.clone(), from_ast_type(&p.ty)))
         }).collect();
 
+        // 提取 __implicit_from__ 的源类型列表
+        let implicit_froms: Vec<IrType> = s.magic_methods.iter()
+            .filter(|m| m.name == "__implicit_from__")
+            .flat_map(|m| m.params.first().map(|p| from_ast_type(&p.ty)))
+            .collect();
+
         Item::StructDef(StructDef {
             name: s.name.clone(),
             generics: s.generics.iter().map(|g| GenericParam {
@@ -2515,6 +2521,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             new_ret_ty,
             has_init,
             init_params,
+            implicit_froms,
             span: Span::unknown(),
         })
     }

@@ -231,6 +231,8 @@ pub struct StructDef {
     /// 是否定义了 __init__ 后初始化方法
     pub has_init: bool,
     pub init_params: Vec<(String, IrType)>,
+    /// __implicit_from__ 隐式转换（源类型列表）
+    pub implicit_froms: Vec<IrType>,
     pub span: Span,
 }
 
