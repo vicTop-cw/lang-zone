@@ -1,13 +1,7 @@
 // ============================
-// LZ 可调用对象 — __call__ 直调测试（2026-07-31）
+// LZ 可调用对象 — __call__ 直调
 // 覆盖：06d-内置魔法trait和全局函数.md §十一 + 12-操作符.md §3.5
-//
-// 测试结论（lzc 实测）：
-//   ✅ LZ 语法层：ins() 直调可解析、可生成 .rs
-//   ⚠️ 生成层：生成的 Rust 中 ins(21) 原样保留为 `doubler(21)`，
-//       rustc 编译报 E0618（expected function, found Multiplier）——
-//       __call__ 尚未接线到 Callable trait（fn call(self, args) -> R），
-//       直调目前**不可用**，等待 codegen 修复。
+// __call__ → Callable trait：obj(args) 脱糖为 call(self, args)，入参打包为元组
 // ============================
 
 // --- 1. 单参数 __call__ ---

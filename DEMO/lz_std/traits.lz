@@ -603,7 +603,7 @@ impl<I: Iterator> Iterator for Peekable<I> =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     // 验证 Map 适配器
     test "map doubles values":
         let values = [1, 2, 3, 4, 5]

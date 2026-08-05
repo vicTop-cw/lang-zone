@@ -160,7 +160,7 @@
 // 自测试 — 演示 prelude 的使用
 // ============================================================
 
-def main():
+def main() =
     test "prelude — Option usage":
         let val = Some(42)
         assert val.is_some()

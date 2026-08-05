@@ -1,142 +1,141 @@
-// ============================
-// LZ Data Structures — enum
-// Cover: 06b-enum (all features)
-// CRITICAL: enum data variants MUST use keyword-arg construction
-//           (Option.Some(value: 42) NOT Option.Some(42))
-//           Add enum methods
-// ============================
+// ============================================================
+// LZ 枚举 — enum 定义、模式匹配、泛型枚举、方法
+// LZ Spec 06b-enum.md + 05-控制流.md §2 (match/case)
+// ============================================================
 
-// --- 1. Basic enum (unit variants) ---
+// --- 1. 基础 enum（冒号定义）---
 enum Color:
     Red
     Green
     Blue
 
-// --- 2. Enum with data variants (keyword-arg style) ---
+// --- 2. 带字段 enum（路径+关键字参数构造）---
 enum Shape:
-    Circle(x: f64, y: f64, radius: f64)
-    Rectangle(width: f64, height: f64)
-    Square(side: f64)
+    Circle(x: int, y: int, radius: int)
+    Rectangle(width: int, height: int)
+    Square(side: int)
 
-// --- 3. Generic enum ---
-enum Option<T> =
+// enum 数据变体：路径+关键字参数构造（Option.Some(value: 42)）；
+// 预导入变体 Some/None/Ok/Err 也支持直接构造简写（Some(42) ≡ Option.Some(42)）
+enum Option<T>:
     Some(value: T)
     None
 
-enum Result<T, E> =
+enum Result<T, E>:
     Ok(value: T)
     Err(error: E)
 
 // --- 4. Enum methods ---
-enum Option<T> =
+enum Option<T>:
     def is_some(self) -> bool =
         match self:
-            Option.Some(value: _) => True
-            Option.None => False
+            case Option.Some(value: _) => True
+            case Option.None => False
 
     def is_none(self) -> bool =
         match self:
-            Option.Some(value: _) => False
-            Option.None => True
+            case Option.Some(value: _) => False
+            case Option.None => True
 
     def unwrap_or(self, default: T) -> T =
         match self:
-            Option.Some(value: v) => v
-            Option.None => default
+            case Option.Some(value: v) => v
+            case Option.None => default
 
     def map<R>(self, f: fn(T) -> R) -> Option<R> =
         match self:
-            Option.Some(value: v) => Option.Some(value: f(v))
-            Option.None => Option.None
+            case Option.Some(value: v) => Option.Some(value: f(v))
+            case Option.None => Option.None
 
     def and_then<R>(self, f: fn(T) -> Option<R>) -> Option<R> =
         match self:
-            Option.Some(value: v) => f(v)
-            Option.None => Option.None
+            case Option.Some(value: v) => f(v)
+            case Option.None => Option.None
 
-enum Result<T, E> =
+enum Result<T, E>:
     def is_ok(self) -> bool =
         match self:
-            Result.Ok(value: _) => True
-            Result.Err(error: _) => False
+            case Result.Ok(value: _) => True
+            case Result.Err(error: _) => False
 
     def is_err(self) -> bool =
         match self:
-            Result.Ok(value: _) => False
-            Result.Err(error: _) => True
+            case Result.Ok(value: _) => False
+            case Result.Err(error: _) => True
 
     def unwrap(self) -> T =
         match self:
-            Result.Ok(value: v) => v
-            Result.Err(error: e) => panic(f"called unwrap on Err: {e}")
+            case Result.Ok(value: v) => v
+            case Result.Err(error: e) => panic(f"called unwrap on Err: {e}")
 
     def unwrap_or(self, default: T) -> T =
         match self:
-            Result.Ok(value: v) => v
-            Result.Err(error: _) => default
+            case Result.Ok(value: v) => v
+            case Result.Err(error: _) => default
 
-// --- 5. Constructing enum values (keyword-arg construction) ---
+// --- 5. 使用示例 ---
 def main() =
-    // Unit variant: no keyword args needed
+    // 变体构造
     let c = Color.Red
-
-    // Data variant: keyword-arg construction
-    let s = Shape.Circle(x: 0.0, y: 0.0, radius: 5.0)
-
-    // Generic enum with keyword-arg construction
+    let s = Shape.Circle(x: 0, y: 0, radius: 10)
     let opt = Option.Some(value: 42)
-    let empty: Option<int> = Option.None
+    let res = Result.Ok(value: 10)
 
-    let res: Result<int, str> = Result.Ok(value: 10)
-    let err: Result<int, str> = Result.Err(error: "failed")
-
-    // --- 6. Pattern matching on enums ---
+    // match 模式匹配
     let desc = match c:
-        Color.Red => "red"
-        Color.Green => "green"
-        Color.Blue => "blue"
+        case Color.Red => "red"
+        case Color.Green => "green"
+        case Color.Blue => "blue"
 
     let area = match s:
-        Shape.Circle(x: _, y: _, radius: r) => 3.14 * r * r
-        Shape.Rectangle(width: w, height: h) => w * h
-        Shape.Square(side: s) => s * s
+        case Shape.Circle(x: _, y: _, radius: r) => 3.14 * r * r
+        case Shape.Rectangle(width: w, height: h) => w * h
+        case Shape.Square(side: s) => s * s
 
     let msg = match opt:
-        Option.Some(value: v) => f"got {v}"
-        Option.None => "empty"
+        case Option.Some(value: v) => f"got {v}"
+        case Option.None => "empty"
 
     let result_msg = match res:
-        Result.Ok(value: v) => f"success: {v}"
-        Result.Err(error: e) => f"error: {e}"
+        case Result.Ok(value: v) => f"success: {v}"
+        case Result.Err(error: e) => f"error: {e}"
 
-    print(desc, area, msg, result_msg)
+    print(desc)
+    print(area)
+    print(msg)
+    print(result_msg)
 
-    // --- 7. Using enum methods ---
-    print(opt.is_some())        // True
-    print(empty.is_none())      // True
-    print(opt.unwrap_or(0))     // 42
-    print(empty.unwrap_or(0))   // 0
+    // 方法调用（枚举方法）
+    let opt2 = Some(42)
+    let opt3 = Option.None
+    print(opt2.is_some())          // True
+    print(opt3.is_none())          // True
+    print(opt2.unwrap_or(0))       // 42
+    print(opt3.unwrap_or(0))       // 0
 
-    let mapped = opt.map(|x| x * 2)
+    let mapped = opt2.map(|x| x * 2)
     let mapped_msg = match mapped:
-        Option.Some(value: v) => f"mapped: {v}"
-        Option.None => "empty"
+        case Option.Some(value: v) => f"mapped: {v}"
+        case Option.None => "empty"
     print(mapped_msg)           // "mapped: 84"
 
-    let chained = opt.and_then(|x| Option.Some(value: x + 1))
+    let chained = opt2.and_then(|x| Some(x + 1))
     let chained_msg = match chained:
-        Option.Some(value: v) => f"chained: {v}"
-        Option.None => "empty"
+        case Option.Some(value: v) => f"chained: {v}"
+        case Option.None => "empty"
     print(chained_msg)          // "chained: 43"
 
-    print(res.is_ok())          // True
-    print(err.is_err())         // True
-    print(res.unwrap())         // 10
+    // Result 方法
+    let ok_val: Result<int, str> = Ok(5)
+    let err_val: Result<int, str> = Err("bad")
+    print(ok_val.is_ok())        // True
+    print(err_val.is_err())      // True
+    print(ok_val.unwrap())       // 5
 
-    // --- 8. Nested pattern matching ---
-    let nested: Result<Option<int>, str> = Result.Ok(value: Option.Some(value: 42))
+    // 嵌套模式
+    let nested: Result<Option<int>, str> = Ok(Some(7))
     let nested_desc = match nested:
-        Result.Ok(value: Option.Some(value: v)) => f"nested value: {v}"
-        Result.Ok(value: Option.None) => "nested empty"
-        Result.Err(error: e) => f"error: {e}"
+        case Result.Ok(value: Option.Some(value: v)) => f"nested value: {v}"
+        case Result.Ok(value: Option.None) => "nested empty"
+        case Result.Err(error: e) => f"error: {e}"
     print(nested_desc)

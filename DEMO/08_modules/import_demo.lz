@@ -44,11 +44,11 @@ def greet(name: str) -> str = f"Hello, {name}"
 //   version = "1.0"
 
 // --- Path syntax ---
-// LZ uses "." as path separator (not "::")
+// LZ 路径分隔符为 "."（非 "::"）
 // std.io.print          // module path
 // std.collections.List  // type path
 // Option.Some           // enum variant
-// "::" is deprecated and produces a lexical error
+// "::" 不是路径分隔符，无其他运算符用法，产生词法错误（见 00-词法基础 §五）
 
 def main() =
     let r = add(1, 2)

@@ -18,7 +18,7 @@ def pipe_with_lambda(data: List<int>) -> int =
 
 // --- 3. 管道 + match 表达式 ---
 def pipe_match(val: int) -> str =
-    val |> double |> (|x|
+    val |> double |> (|x| =>
         match x:
             case v if v < 10 => "small"
             case v if v < 100 => "medium"

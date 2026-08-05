@@ -53,11 +53,11 @@ def process_result(result: Result<Option<int>, str>) -> str =
 // --- 2.5 Enum variant destructuring ---
 def area(shape: Shape) -> f64 =
     match shape:
-        Shape.Circle(x: _, y: _, radius: r) =>
+        case Shape.Circle(x: _, y: _, radius: r) =>
             3.14 * r * r
-        Shape.Rectangle(width: w, height: h) =>
+        case Shape.Rectangle(width: w, height: h) =>
             w * h
-        Shape.Square(side: s) =>
+        case Shape.Square(side: s) =>
             s * s
 
 def main() =

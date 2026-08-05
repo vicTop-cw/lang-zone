@@ -199,35 +199,35 @@ impl LzError =
 // ============================================================
 
 /// 抛出除零错误
-def zero_division(msg: str) -> Never =
+def zero_division(msg: str) -> Never raises LzError =
     raise LzError.ZeroDivisionError(msg)
 
 /// 抛出类型转换错误 (as 强转失败)
-def cast_error(msg: str) -> Never =
+def cast_error(msg: str) -> Never raises LzError =
     raise LzError.CastError(msg)
 
 /// 抛出值错误
-def value_error(msg: str) -> Never =
+def value_error(msg: str) -> Never raises LzError =
     raise LzError.ValueError(msg)
 
 /// 抛出类型错误
-def type_error(msg: str) -> Never =
+def type_error(msg: str) -> Never raises LzError =
     raise LzError.TypeError(msg)
 
 /// 抛出索引错误
-def index_error(msg: str) -> Never =
+def index_error(msg: str) -> Never raises LzError =
     raise LzError.IndexError(msg)
 
 /// 抛出键错误
-def key_error(msg: str) -> Never =
+def key_error(msg: str) -> Never raises LzError =
     raise LzError.KeyError(msg)
 
 /// 抛出运行时错误
-def runtime_error(msg: str) -> Never =
+def runtime_error(msg: str) -> Never raises LzError =
     raise LzError.RuntimeError(msg)
 
 /// 抛出未实现错误
-def not_implemented(msg: str) -> Never =
+def not_implemented(msg: str) -> Never raises LzError =
     raise LzError.NotImplementedError(msg)
 
 
@@ -235,7 +235,7 @@ def not_implemented(msg: str) -> Never =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "error kinds":
         let err = LzError.value_error("invalid value")
         assert err.kind() == "ValueError"

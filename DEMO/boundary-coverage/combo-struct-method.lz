@@ -26,18 +26,18 @@ struct Container<T> =
 
     def is_present(self) -> bool =
         match self.data:
-            Option.Some(value: _) => True
-            Option.None => False
+            case Option.Some(value: _) => True
+            case Option.None => False
 
     def get_or(self, default: T) -> T =
         match self.data:
-            Option.Some(value: v) => v
-            Option.None => default
+            case Option.Some(value: v) => v
+            case Option.None => default
 
     def map<R>(self, f: fn(T) -> R) -> Container<R> =
         Container(data: match self.data:
-            Option.Some(value: v) => Option.Some(value: f(v))
-            Option.None => Option.None
+            case Option.Some(value: v) => Option.Some(value: f(v))
+            case Option.None => Option.None
         )
 
 // --- 3. struct + defer + 方法 ---
@@ -93,11 +93,11 @@ enum Calculator:
 impl Calculator =
     def compute(self) -> Result<int, str> =
         match self:
-            Calculator.Add(a, b) =>
+            case Calculator.Add(a, b) =>
                 Result.Ok(value: a + b)
-            Calculator.Mul(a, b) =>
+            case Calculator.Mul(a, b) =>
                 Result.Ok(value: a * b)
-            Calculator.Div(a, b) =>
+            case Calculator.Div(a, b) =>
                 if b == 0:
                     Result.Err(error: "div_by_zero")
                 else:
@@ -105,11 +105,11 @@ impl Calculator =
 
     def apply(self, f: fn(int) -> int) -> Calculator =
         match self:
-            Calculator.Add(a, b) =>
+            case Calculator.Add(a, b) =>
                 Calculator.Add(f(a), f(b))
-            Calculator.Mul(a, b) =>
+            case Calculator.Mul(a, b) =>
                 Calculator.Mul(f(a), f(b))
-            Calculator.Div(a, b) =>
+            case Calculator.Div(a, b) =>
                 Calculator.Div(f(a), f(b))
 
 // --- main ---

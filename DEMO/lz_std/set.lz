@@ -254,7 +254,7 @@ impl<T> Iterator for SetIntoIter<T> =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "add and contains":
         let mut s: Set<int> = Set()
         s.add(1)

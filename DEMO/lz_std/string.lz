@@ -258,7 +258,7 @@ def format(template: str, args: List<str>) -> str =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "len and is_empty":
         assert "hello".len() == 5
         assert "".is_empty()

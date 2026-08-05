@@ -3,7 +3,7 @@
 
 def main() =
     // loop 无限循环配合 break
-    let i = 0
+    i = 0              // 默认可变绑定（let 不可变，不能 +=）
     loop:
         i += 1
         if i >= 3:
@@ -11,15 +11,15 @@ def main() =
     print(i)
 
     // while 累加
-    let s = 0
-    let k = 0
+    s = 0              // 默认可变绑定
+    k = 0
     while k < 4:
         s += k
         k += 1
     print(s)
 
     // for 遍历区间
-    let total = 0
+    total = 0          // 默认可变绑定
     for n in 1..5:
         total += n
     print(total)

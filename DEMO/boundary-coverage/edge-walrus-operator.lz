@@ -32,12 +32,12 @@ def walrus_nested(data: Option<int>) -> str =
 def walrus_match() =
     let val = Option.Some(value: 42)
     match val:
-        Option.Some(value: v):
+        case Option.Some(value: v):
             if (result := v * 3) > 100:
                 print(f"big:{result}")
             else:
                 print(f"small:{result}")
-        Option.None:
+        case Option.None:
             print("none")
 
 // --- 5. := 模块级海象 ---

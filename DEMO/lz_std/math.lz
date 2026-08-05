@@ -371,7 +371,7 @@ def degrees(radians: f64) -> f64 =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "abs and sign":
         assert abs(-5) == 5
         assert abs(3) == 3

@@ -4,15 +4,17 @@
 //      特殊字面量、标识符边界
 // ============================================================
 
-// --- 1. 关键字降级（用作标识符）---
+// --- 1. 内建构造器名作标识符（非关键字，可作变量名）---
+// 注：Ok/Some/None/Err 是 prelude 内建构造器，不是关键字（附录B §3.6）；
+// True/False 是布尔字面量关键字，不可作标识符。
 def keyword_downgrade() =
     let Ok = 100
     let Some = 200
     let None = 300
     let Err = 400
-    let True = 500
-    let False = 600
-    print(Ok + Some + None + Err + True + False)
+    // let True = 500    // ❌ True 是布尔字面量关键字，不可作标识符
+    // let False = 600   // ❌ 同上
+    print(Ok + Some + None + Err)
 
 // --- 2. 下划线多种语义 ---
 def add(a: int, b: int) -> int = a + b

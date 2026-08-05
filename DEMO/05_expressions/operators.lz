@@ -168,8 +168,10 @@ struct Point =
     x: int
     y: int
 
-let point = Point{x: 10, y: 20}
+let point = Point(x: 10, y: 20)
 
-def config.get(key: str) -> Option<int> = None
+// config?.get() — config 为 Option 容器，?. 安全导航后调用 get
+let config: Option<Dict<str, int>> = Some({"timeout": 30})
+// safe_field 等用到 config 的语句依赖上面的类型标注
 
 let items = ["a", "b", "c"]

@@ -47,12 +47,12 @@ def main() =
     cloned = clone_all(["a", "b", "c"])
     print(cloned)                          // ["a", "b", "c"]
     p1 = make_pair(1, 2)                  // (1, 2)  T = int
-    p2 = make_pair<str>("x", "y")         // (x, y)  T = str
+    p2 = make_pair.<str>("x", "y")        // (x, y)  T = str
     print(p1)
     print(p2)
     print(wrap_or_default("LZ", "name"))
-    print(wrap_or_default<int>(42, "val"))
-    print(convert<int, str>(10, |n| f"num: {n}")) // num: 10
+    print(wrap_or_default.<int>(42, "val"))
+    print(convert.<int, str>(10, |n| f"num: {n}")) // num: 10
 
 // ── 边界情况（注释说明）────────────────────────────────
 // ❌ 错误：泛型尖括号后有空格

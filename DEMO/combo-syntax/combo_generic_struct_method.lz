@@ -1,5 +1,5 @@
 // combo-syntax（绿色回归测试）：泛型 struct + 方法 + enum 返回值
-enum Maybe<T> =
+enum Maybe<T>:
     Just(T)
     Nothing
 

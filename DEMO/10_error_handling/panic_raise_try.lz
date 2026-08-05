@@ -40,7 +40,7 @@ def process_value(x: int) -> int raises str =
     if x < 0:
         raise "negative value"
     if x > 1000:
-        raise "value too large: {x}"
+        raise f"value too large: {x}"
     x * 2
 
 // =============================================================
@@ -61,7 +61,7 @@ enum FileError:
 def find_user(id: int) -> str raises AppError =
     guard id > 0 else:
         raise AppError.InvalidInput("id must be positive")
-    "user_{id}"
+    f"user_{id}"
 
 def read_config(path: str) -> str raises FileError =
     if path == "":
@@ -90,12 +90,12 @@ def try_finally_only() =
     finally:
         print("close resource")
 
-// 4c. catch without pattern (catches everything, no binding)
+// 4c. catch with wildcard binding (catches everything)
 def try_catch_no_pattern() =
     try:
         checked_divide(10, 0)
-    catch:
-        print("something went wrong (no details)")
+    catch e:
+        print(f"something went wrong (no details): {e}")
 
 // =============================================================
 // 5. try 作为表达式
@@ -121,25 +121,25 @@ catch e:
 def multi_catch_demo(val: int) =
     try:
         let r = process_value(val)
-        print("result: {r}")
+        print(f"result: {r}")
     catch ValueError:
         print("value error caught")
     catch TypeError:
         print("type error caught")
     catch e:              // 通配 catch（必须最后）
-        print("unknown error: {e}")
+        print(f"unknown error: {e}")
 
 // With custom enum exceptions:
 def handle_user(id: int) =
     try:
         let u = find_user(id)
-        print("user: {u}")
+        print(f"user: {u}")
     catch AppError.InvalidInput(msg):
-        print("invalid input: {msg}")
+        print(f"invalid input: {msg}")
     catch AppError.NotFound(msg):
-        print("not found: {msg}")
+        print(f"not found: {msg}")
     catch e:              // wildcard for other AppError variants
-        print("app error: {e}")
+        print(f"app error: {e}")
 
 // =============================================================
 // 7. try/catch/else
@@ -151,9 +151,9 @@ def try_catch_else_demo() =
     try:
         let data = read_config("config.json")
     catch FileError.ReadError(msg):
-        print("read error: {msg}")
+        print(f"read error: {msg}")
     catch FileError.ParseError(line, msg):
-        print("parse error at line {line}: {msg}")
+        print(f"parse error at line {line}: {msg}")
     else:
         print("config loaded successfully")    // only if try succeeds
     finally:

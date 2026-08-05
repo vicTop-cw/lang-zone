@@ -45,13 +45,13 @@ enum Tree<T>:
 // --- 5. 深度模式匹配（四层嵌套解构）---
 def deep_match_levels(l1: Level1) -> str =
     match l1:
-        Level1.Node1(child: Level2.Node2(child: Level3.Leaf3(value: v))) =>
+        case Level1.Node1(child: Level2.Node2(child: Level3.Leaf3(value: v))) =>
             f"deep_leaf:{v}"
-        Level1.Node1(child: Level2.Node2(child: Level3.Empty3)) =>
+        case Level1.Node1(child: Level2.Node2(child: Level3.Empty3)) =>
             "deep_empty"
-        Level1.Node1(child: Level2.Pass2) =>
+        case Level1.Node1(child: Level2.Pass2) =>
             "pass"
-        Level1.Root1(value: v) =>
+        case Level1.Root1(value: v) =>
             f"root:{v}"
 
 // --- 6. 嵌套集合类型 ---
@@ -99,11 +99,11 @@ enum Shape3D:
 impl Shape3D =
     def volume(self) -> f64 =
         match self:
-            Shape3D.Sphere(radius: r) =>
+            case Shape3D.Sphere(radius: r) =>
                 4.0 / 3.0 * 3.14159 * r * r * r
-            Shape3D.Box3D(width: w, height: h, depth: d) =>
+            case Shape3D.Box3D(width: w, height: h, depth: d) =>
                 w * h * d
-            Shape3D.Cylinder(radius: r, height: h) =>
+            case Shape3D.Cylinder(radius: r, height: h) =>
                 3.14159 * r * r * h
 
 // --- 10. 嵌套类型别名（泛型组合）---

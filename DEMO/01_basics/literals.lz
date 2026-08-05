@@ -80,8 +80,11 @@ next line"""
     // Unit 字面量
     let u: Unit = ()
 
-    // Nil — 空列表类型别名（[] 作为值）
-    let empty: Nil = []
+    // Nil — 单元类型 () 的别名（无返回值标注；与空列表无关）
+    let u2: Nil = ()
+
+    // 空列表字面量 — 类型由上下文推断为 List<T>
+    let empty: List<int> = []
 
     // Never 类型不能实例化，用于返回值标注
     def loop_forever() -> Never =

@@ -1,58 +1,45 @@
 // ============================================================
 // guard / guard let — Condition guard & Pattern guard
-// LZ Spec §7
+// LZ Spec §7 (05-控制流.md §7.1 / §7.2)
 // ============================================================
 
 def main() -> int =
-    // --- 7.1 guard condition guard (block form) ---
+    // --- 7.1 guard 条件守卫（块形式）---
     def safe_div(a: int, b: int) -> int =
         guard b != 0 else:
-            return 0          // fail path: return early
-        a / b                  // success path: continues here
+            return 0          // 失败路径：显式 return
+        a / b                  // 成功路径：条件放行后继续
 
     print(safe_div(10, 2))     // 5
     print(safe_div(10, 0))     // 0
 
+    // 失败路径可用尾表达式（省略 return，块末尾隐式 return）
     def safe_div0(a: int, b: int) -> int =
         guard b != 0 else:
-            0          // fail path: return early and `return` can be omitted
+            0          // 失败路径：块尾表达式 0，隐式 return 0
         a / b
     print(safe_div0(10, 0))     // 0
-    // --- guard condition guard (single-line form) ---
+
+    // --- 7.1 guard 条件守卫（单行形式）---
     def safe_div2(a: int, b: int) -> int =
-        guard b != 0 else 0   // single-line: else expr is the guard value
+        guard b != 0 else 0   // 单行：else 后纯表达式 → 等价 if b == 0: return 0
         a / b
 
     print(safe_div2(10, 2))    // 5
     print(safe_div2(10, 0))    // 0
 
-    // --- guard with truthiness chain ---
-    def process(val: Option<int>) -> str =
-        guard let Some(n) = val else: // can create a closure to
-            def inner() -> str =
-                guard n % 2 == 0 "even" else "odd"
-            inner()
-        f"value: {n}"
-
-    print(process(Some(42)))   // "value: 42"
-    print(process(None))       // "empty"
-
-    // --- 7.2 guard let pattern guard ---
-    // pattern match success → bind variables and continue
-    // pattern match failure → execute else handler
+    // --- guard let 模式守卫：成功绑定并继续，失败走 else ---
     let opt_name: Option<str> = Some("Bob")
-    guard_name : str?
     guard let Some(name) = opt_name else:
         print("no name")
-        guard_name = Some("guard_name")
-        guard let Some(g_name) = guard_name else:
-            return -1
-        guard g_name == "guard_name" else -2
-        2
+        return -1
+    print(f"hello {name}")     // "hello Bob"
 
-
-    print(f"hello {name}")     // "hello Alice"
-
-    guard name == "Alice" else 1
+    // 嵌套 guard let：第二次绑定失败时提前返回
+    let opt_age: Option<int> = Some(30)
+    guard let Some(age) = opt_age else:
+        return -2
+    guard age > 0 else -3      // 单行条件守卫（失败 → return -3）
+    print(f"age: {age}")       // "age: 30"
 
     0

@@ -181,7 +181,7 @@ def complex_demo() =
     result = multiply ~:
         factors
 
-    print("product: {result}")    // 24
+    print(f"product: {result}")    // 24
 
     // 混合使用
     transformed =:
@@ -191,7 +191,7 @@ def complex_demo() =
         if processed > 150:
             return processed
         processed - 50
-    print("transformed: {transformed}")  // 200
+    print(f"transformed: {transformed}")  // 200
 
 // =============================================================
 // 5. 语法边界

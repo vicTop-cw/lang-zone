@@ -43,8 +43,8 @@ enum Expr:
 impl ValueHolder for Expr =
     def get_value(self) -> int =
         match self:
-            Expr.Literal(v) => v
-            Expr.Add(l, r) => l.get_value() + r.get_value()
+            case Expr.Literal(v) => v
+            case Expr.Add(l, r) => l.get_value() + r.get_value()
 
 // --- 6. trait 继承（stacked constraints）---
 trait Resettable =

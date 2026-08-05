@@ -12,10 +12,10 @@ enum NestedEnum:
 
 def match_nested(x: NestedEnum) -> int =
     match x:
-        NestedEnum.Inner(value: Option2.Some2(value: v)) => v
-        NestedEnum.Inner(value: Option2.None2) => -1
-        NestedEnum.Outer(value: Option2.Some2(value: v)) => v * 10
-        NestedEnum.Outer(value: Option2.None2) => -2
+        case NestedEnum.Inner(value: Option2.Some2(value: v)) => v
+        case NestedEnum.Inner(value: Option2.None2) => -1
+        case NestedEnum.Outer(value: Option2.Some2(value: v)) => v * 10
+        case NestedEnum.Outer(value: Option2.None2) => -2
 
 def main() =
     let a = match_nested(NestedEnum.Inner(value: Option2.Some2(value: 42)))

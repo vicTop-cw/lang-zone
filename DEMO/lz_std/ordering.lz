@@ -151,7 +151,7 @@ def clamp<T: Ord>(value: T, lo: T, hi: T) -> T =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "reverse":
         assert Ordering.Less.reverse() == Ordering.Greater
         assert Ordering.Greater.reverse() == Ordering.Less

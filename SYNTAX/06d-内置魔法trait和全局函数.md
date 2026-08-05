@@ -1,6 +1,6 @@
 # LZ 魔法方法 — 内置魔法 Trait 和全局函数
 
-> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-04
+> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-05
 
 本文档列举 Lang-Zone 编译器内置的全部魔法方法（`__xxx__`），以及它们自动生成的 trait 与对应的 Rust trait。
 
@@ -209,6 +209,9 @@ match p:
 | `__getitem__` | `Index` | `std::ops::Index` | 索引读取 `obj[key]` |
 | `__setitem__` | `IndexMut` | `std::ops::IndexMut` | 索引写入 `obj[key] = val` |
 | `__pipe__` | `Pipe` | `Pipe`（自定义） | 管道操作 `a \|> b` |
+| `__is_ok__` | `SpreadOk` | `SpreadOk`（自定义） | 可传播判定 `obj?`：`True`=成功值（见 09 §4.3） |
+| `__unwrap__` | `SpreadOk` | `SpreadOk`（自定义） | 可传播成功值解包：`obj?` 成功分支的结果 |
+| `__err__` | `SpreadErr` | `SpreadErr`（自定义） | 可传播错误值提取：`obj?` 错误分支向上传播的内容 |
 
 - `__call__` 使用 `Custom(MagicDesc)` 通用分支生成，trait 方法签名为 `fn call(self, args: (A, B)) -> R`，入参打包为元组，返回类型为关联类型 `Output`
 - `__getitem__` 使用 `&self` 借用，`__setitem__` 使用 `&mut self` 可变借用
@@ -411,6 +414,8 @@ struct MyFile =
 | `__getitem__` | `std::ops::Index` | 调用/索引 |
 | `__setitem__` | `std::ops::IndexMut` | 调用/索引 |
 | `__pipe__` | `Pipe` | 调用/索引 |
+| `__is_ok__`/`__unwrap__` | `SpreadOk` | 错误传播 `?` |
+| `__err__` | `SpreadErr` | 错误传播 `?` |
 | `__bool__` | `HasBool` | 布尔/数学 |
 | `__abs__` | `HasAbs` | 布尔/数学 |
 | `__buildparams__` | `BuildParams` | 构建块 |

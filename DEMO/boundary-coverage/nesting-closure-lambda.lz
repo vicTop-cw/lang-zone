@@ -6,8 +6,8 @@
 
 // --- 1. 三层嵌套闭包 ---
 def triple_nested_closure() =
-    let outer = |a: int|
-        let middle = |b: int|
+    let outer = |a: int| =>
+        let middle = |b: int| =>
             let inner = |c: int| -> int = a + b + c
             inner
         middle
@@ -70,8 +70,8 @@ def closure_with_ifexpr() =
 
 // --- 9. 返回闭包的函数嵌套 ---
 def factory_chain(x: int) -> fn(int) -> fn(int) -> int =
-    |a|
-        |b|
+    |a| =>
+        |b| =>
             x + a + b
 
 // --- 10. 复杂闭包组合：管道 + 闭包 + 偏应用 ---

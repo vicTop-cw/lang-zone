@@ -18,9 +18,9 @@ def spawn_with_error_handling() =
     let future = spawn fetch_safe(5)
     let result = await future
     match result:
-        Result.Ok(value: v) =>
+        case Result.Ok(value: v) =>
             print(f"ok:{v}")
-        Result.Err(error: e) =>
+        case Result.Err(error: e) =>
             print(f"err:{e}")
 
 // --- 3. 多个 spawn 并发 ---
@@ -65,9 +65,9 @@ def main() =
     let bad = spawn fetch_safe(-1)
     let bad_result = await bad
     match bad_result:
-        Result.Ok(value: v) =>
+        case Result.Ok(value: v) =>
             print(f"unexpected:{v}")
-        Result.Err(error: e) =>
+        case Result.Err(error: e) =>
             print(f"expected_err:{e}")
     multiple_spawn()
     go_with_defer()

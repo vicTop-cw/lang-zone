@@ -309,7 +309,7 @@ def min(a: int, b: int) -> int =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "range":
         let result = collect_list(range(0, 5))
         assert result == [0, 1, 2, 3, 4]

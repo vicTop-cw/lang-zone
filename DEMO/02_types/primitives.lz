@@ -28,8 +28,9 @@ def main() =
     let inf_e = {"key": 42}
     let inf_f = {1, 2, 3}
 
-    // --- Nil type ---
-    let empty = []
+    // --- Nil（单元类型别名）与空列表 ---
+    let n: Nil = ()           // 单元类型：无值占位
+    let empty = []            // 空列表：类型由上下文推断为 List<T>
 
     // --- Tuple ---
     let t: (int, str, bool) = (42, "hi", True)

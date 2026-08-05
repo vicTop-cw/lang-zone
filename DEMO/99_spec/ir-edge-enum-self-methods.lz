@@ -9,13 +9,13 @@ enum MyOption:
 impl MyOption =
     def is_my_some(self) -> bool =
         match self:
-            MyOption.MySome(value: _) => True
-            MyOption.MyNone => False
+            case MyOption.MySome(value: _) => True
+            case MyOption.MyNone => False
     
     def unwrap_my(self) -> int =
         match self:
-            MyOption.MySome(value: v) => v
-            MyOption.MyNone => panic("unwrap on MyNone")
+            case MyOption.MySome(value: v) => v
+            case MyOption.MyNone => panic("unwrap on MyNone")
 
 def main() =
     let x = MyOption.MySome(value: 42)

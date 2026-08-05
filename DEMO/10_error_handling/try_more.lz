@@ -1,5 +1,8 @@
 // LZ 错误处理 — ? 传播链 + 枚举异常 catch
-// 覆盖：raises 函数用 ? 传播、try/catch 捕获具体变体
+// 覆盖：可传播协议（09 §4.3）——raises 函数用 ? 传播异常、
+//       try/catch 捕获具体变体
+// 原理：parse_int(s)? 的错误值（ParseError.BadFormat）与 pipeline 的
+//       raises ParseError 声明兼容 → 自动 raise 向上传播（非 try/catch）
 
 enum ParseError:
     BadFormat(str)

@@ -262,7 +262,7 @@ impl<T> Iterator for ResultIter<T> =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "is_ok and is_err":
         let ok_val: Result<int, str> = Ok(42)
         let err_val: Result<int, str> = Err("fail")

@@ -281,7 +281,7 @@ impl<K, V> Iterator for DictValueIter<K, V> =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "insert and get":
         let mut d: Dict<str, int> = Dict()
         d.insert("a", 1)

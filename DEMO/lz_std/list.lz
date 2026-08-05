@@ -347,7 +347,7 @@ impl<T> Iterator for ListIntoIter<T> =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "first and last":
         let lst = [1, 2, 3, 4, 5]
         assert lst.first() == Some(1)

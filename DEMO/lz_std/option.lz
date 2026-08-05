@@ -246,7 +246,7 @@ impl<T> Iterator for OptionIter<T> =
 // 自测试
 // ============================================================
 
-def main():
+def main() =
     test "is_some and is_none":
         let some_val = Some(42)
         let none_val: Option<int> = None
