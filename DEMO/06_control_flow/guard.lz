@@ -42,4 +42,21 @@ def main() -> int =
     guard age > 0 else -3      // 单行条件守卫（失败 → return -3）
     print(f"age: {age}")       // "age: 30"
 
+    // --- 7.2 guard let 单行失败表达式 ---
+    // guard let 失败路径可用单行表达式（隐式 return 该值）
+    def guard_let_single(o: Option<int>) -> int =
+        guard let Some(v) = o else -1    // 失败 → return -1
+        v * 2
+    print(guard_let_single(Some(21)))    // 42
+    print(guard_let_single(None))        // -1
+
+    // 单行 guard let 在循环内：失败 → break（覆盖默认 return）
+    def guard_let_in_loop(o: Option<int>) -> int =
+        result = 0
+        for i in 1..3:
+            guard let Some(v) = o else break   // 失败 → break 循环
+            result = result + v * i
+        result
+    print(guard_let_in_loop(Some(10)))   // 10*1 + 10*2 = 30
+
     0

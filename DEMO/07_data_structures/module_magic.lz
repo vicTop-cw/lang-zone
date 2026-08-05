@@ -1,6 +1,10 @@
 // ============================
 // LZ Data Structures — Module Magic Attributes
+// LZ Spec 06e-模块级魔法属性.md
 // ============================
+
+// 模块文档注释（自动收集到 __doc__）
+// 这是 module_magic 模块的说明
 
 struct S =
     __slots__ = "C"
@@ -10,3 +14,10 @@ struct S =
 def main() =
     let s = S(x: 10, y: 20)
     print(s.x)
+
+    // --- 模块级魔法属性（编译期可用）---
+    print(__name__)          // 模块全限定名（自动填充）
+    print(__doc__)           // 模块文档注释（自动收集）
+    print(__version__)       // 编译器版本号
+    print(__backend__)       // 编译后端（"rustc"）
+    print(__is_macro__)      // 是否宏模块 → False

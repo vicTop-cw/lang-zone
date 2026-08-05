@@ -1,0 +1,53 @@
+// ============================================================
+// as 强转 — infallible 数值转换 vs fallible 解析转换
+// LZ Spec 09-错误处理.md §2.4
+//
+// 数值类型间转换（int↔f64↔i32）是 infallible：永不失败，免 raises
+// 解析式转换（str→int 等）是 fallible：可能抛 CastError，需 raises 或 try/catch
+// ============================================================
+
+// --- 1. 数值转换 infallible：不需要 raises ---
+def to_float(x: int) -> f64 = x as f64            // 永不失败
+def to_int(x: f64) -> int = x as int              // 永不失败（截断）
+def to_i32(x: int) -> i32 = x as i32              // 永不失败
+
+// --- 2. 字符串解析 fallible：需声明 raises ---
+def parse_int(s: str) -> int raises CastError =
+    s as int                    // "42" → 42；"abc" → CastError
+
+def parse_f64(s: str) -> f64 raises CastError =
+    s as f64
+
+// --- 3. fallible as 被 try/catch 处理：不需 raises ---
+def safe_parse(s: str) -> int =
+    try:
+        s as int
+    catch CastError:
+        0
+
+// --- 4. 使用链：数值转换在数学函数中安全 ---
+def half_float(n: int) -> f64 =
+    (n as f64) / 2.0            // infallible，数学函数无需 raises
+
+def main() =
+    // infallible 数值转换
+    print(to_float(7))          // 7.0
+    print(to_int(3.9))          // 3（截断）
+    print(to_i32(300))          // 300
+
+    // fallible 解析：正常
+    print(parse_int("42"))      // 42
+    print(parse_f64("3.14"))    // 3.14
+
+    // fallible 解析：失败被 catch
+    print(safe_parse("not a number"))  // 0
+
+    // 数学函数
+    print(half_float(10))       // 5.0
+
+    // fallible 失败经 try/catch 展示
+    try:
+        let bad = parse_int("abc")
+        print(bad)
+    catch CastError:
+        print("cast error caught")     // cast error caught

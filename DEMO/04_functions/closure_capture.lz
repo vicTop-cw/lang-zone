@@ -1,0 +1,74 @@
+// ============================================================
+// 闭包捕获模式 — Fn / FnMut / FnOnce 映射
+// LZ Spec 03e-closure闭包.md §五
+//
+// 捕获模式（编译器按捕获变量使用自动选择，无需用户标注）：
+//   只读捕获 → Fn        （多次调用，不可修改捕获变量）
+//   可写捕获 → FnMut     （可修改捕获变量，不转移所有权）
+//   ^ 显式移动 → FnOnce  （所有权移入闭包，原变量失效）
+// ============================================================
+
+// --- 1. 只读捕获（Fn）---
+// closure 只读 count，多次调用互不干扰
+def fn_capture() =
+    let count = 10
+    let get_count = | | -> int = count      // 只读捕获
+    print(get_count())     // 10
+    print(get_count())     // 10（再次调用，count 不变）
+    print(count)           // 10（原变量仍可用）
+
+// --- 2. 可写捕获（FnMut）---
+// 闭包修改外部 mut 变量 → 映射 FnMut
+def fnmut_capture() =
+    let mut total = 0                    // 外部可变变量
+    let add_to_total = |x: int| =>
+        total = total + x            // 写捕获 → FnMut
+    add_to_total(5)
+    add_to_total(7)
+    print(total)                     // 12（闭包内修改已生效）
+
+// --- 3. 所有权转移捕获（FnOnce / move）---
+// 显式 ^ 将值移入闭包 → 原变量失效（FnOnce 语义）
+def fnonce_capture() =
+    let data = [1, 2, 3]
+    let consume = | | =>             // 捕获 data 所有权
+        print(f"consuming {len(data)} items")
+    consume()
+    // print(data)                   // ❌ data 已移入闭包，不可用
+
+// --- 4. 三种捕获混合使用 ---
+// 同一闭包同时只读 + 可写：编译器自动映射 FnMut（最高捕获等级）
+def mixed_capture() =
+    let base = 100                   // 只读捕获
+    let mut offset = 1                   // 可变捕获
+    let adjust = |x: int| =>
+        let v = base + x             // 读 base（Fn 级别）
+        offset = offset + v          // 写 offset（FnMut 级别）
+        v
+    print(adjust(1))                 // 101
+    print(offset)                    // 102（offset 被闭包修改）
+
+// --- 5. 闭包作 fn 参数：trait bound 自动匹配 ---
+// 只读闭包可传入多次调用场景；修改型闭包映射 FnMut
+def apply_twice(f: fn(int) -> int, x: int) -> int =
+    f(f(x))
+
+def closure_as_param() =
+    let factor = 3
+    let triple = |n: int| -> int = n * factor   // 只读捕获 → Fn
+    print(apply_twice(triple, 2))   // triple(triple(2)) = 18
+
+// --- 6. 闭包存入容器（dyn 环境 → move）---
+def closure_in_box() =
+    let msg = "hello"
+    let f = | | -> str = msg        // 存 dyn 时按 move 捕获
+    let boxed: Box<fn() -> str> = Box.new(f)
+    print(boxed[0])                 // 解引用调用：Box 解引用 → fn → 调用
+
+def main() =
+    fn_capture()
+    fnmut_capture()
+    fnonce_capture()
+    mixed_capture()
+    closure_as_param()
+    closure_in_box()

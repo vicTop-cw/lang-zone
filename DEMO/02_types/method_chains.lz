@@ -1,0 +1,71 @@
+// ============================================================
+// Option/Result 组合方法链 — map / and_then / unwrap_or / flat_map
+// LZ Spec 01-类型系统.md §2.2 + lz_std/option.lz result.lz
+// ============================================================
+
+def main() =
+    // --- Option 方法链 ---
+    let opt = Some(5)
+
+    // map：Some(v) → Some(f(v))；None → None
+    let m1 = opt.map(|x| x * 2)               // Some(10)
+    let m2 = Option.None.map(|x: int| x * 2)  // None
+
+    // and_then：Some(v) → f(v)（f 返回 Option）；None → None
+    let a1 = opt.and_then(|x| Some(x + 1))    // Some(6)
+    let a2 = opt.and_then(|x| Option.None)    // None
+
+    // unwrap_or：Some(v) → v；None → default
+    let u1 = opt.unwrap_or(0)                 // 5
+    let u2 = Option.None.unwrap_or(0)         // 0
+
+    // flat_map（同 and_then 语义，方法链场景）
+    let f1 = opt.map(|x| x * 10).and_then(|x| Some(x + 1))  // Some(51)
+
+    // 链式组合
+    let chain = opt
+        .map(|x| x * 2)          // Some(10)
+        .and_then(|x| Some(x - 1) if x > 5 else None)  // Some(9)
+        .unwrap_or(0)            // 9
+
+    print(m1)
+    print(m2)
+    print(a1)
+    print(a2)
+    print(u1)
+    print(u2)
+    print(f1)
+    print(chain)
+
+    // --- Result 方法链 ---
+    let ok = Ok(10)
+    let err: Result<int, str> = Err("boom")
+
+    // map / map_err
+    let r1 = ok.map(|x| x * 3)                // Ok(30)
+    let r2 = err.map(|x: int| x * 3)          // Err("boom")
+
+    // and_then
+    let r3 = ok.and_then(|x| Ok(x / 2) if x > 5 else Err("small"))  // Ok(5)
+    let r4 = err.and_then(|x: int| Ok(x + 1))  // Err("boom")
+
+    // unwrap_or / unwrap_or_else
+    let r5 = ok.unwrap_or(0)                  // 10
+    let r6 = err.unwrap_or(-1)                // -1
+
+    // ? 传播（可传播协议）
+    def double_ok(r: Result<int, str>) -> int raises str =
+        let v = r?              // Ok → v；Err → raise（与 raises str 兼容）
+        v * 2
+
+    let d1 = try:
+        double_ok(Ok(21))
+    catch e:
+        0
+    print(r1)
+    print(r2)
+    print(r3)
+    print(r4)
+    print(r5)
+    print(r6)
+    print(d1)

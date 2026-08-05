@@ -1,0 +1,32 @@
+#!bin macro
+// ============================================================
+// 宏模块 — 供其他模块 import macro 导入
+// LZ Spec 08-宏与编译期.md §二 (宏模块) + 07-模块与导入.md §2.6
+//
+// 签名规则：
+//   macro    签名固定 Tokens -> Tokens（纯 Token 级转换）
+//   template 参数自由（可含 str/int），但返回必须 Tokens
+// ============================================================
+
+// --- 1. template：编译期字符串模板（自由参数，返回 Tokens）---
+// name 是编译期 str 值，直接拼接生成 Tokens
+template greet(name: str) -> Tokens =
+    quote("print(\"Hello, " + name + "!\");")
+
+// --- 2. macro：包装成断言（固定 Tokens -> Tokens）---
+// actual/expected 是 Tokens 参数，经 quote 拼接
+macro check_eq(actual: Tokens, expected: Tokens) -> Tokens =
+    quote("guard (" + actual + ") == (" + expected + ") else:\n    panic(\"assert failed\");")
+
+// --- 3. 卫生性示例宏：宏内绑定局部变量，不污染调用方 ---
+// 展开后生成的局部变量带唯一后缀，与调用方同名变量隔离
+macro local_sum(iterable: Tokens) -> Tokens =
+    quote(
+        "let acc = 0\n"
+        + "for item in (" + iterable + "):\n"
+        + "    acc = acc + item\n"
+        + "acc"
+    )
+
+// --- 4. 普通定义（宏模块中也可定义，供调用方经普通 import 使用）---
+def square(x: int) -> int = x * x

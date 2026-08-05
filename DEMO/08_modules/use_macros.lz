@@ -1,0 +1,35 @@
+// ============================================================
+// 使用宏模块 — import macro 跨模块导入 + 宏卫生性
+// LZ Spec 07-模块与导入.md §2.6 + 08-宏与编译期.md §3.4/§3.7
+// ============================================================
+
+// --- 导入宏模块（宏命名空间与普通项分离）---
+import macro string_macros                 // 导入整个宏模块
+from macro string_macros import check_eq    // 导入特定宏
+import macro string_macros as sm            // 导入并别名
+
+// 普通项（def/struct）用普通 import 导入（import macro 只导宏）
+import string_macros
+
+def main() =
+    // --- 1. template 调用（name! 语法，可内联表达式）---
+    let msg = greet!("World")       // template 用 name!（无 @）
+    print(msg)                      // "Hello, World!"
+
+    // --- 2. macro 调用（@name! 语法，必须独占一行）---
+    let x = 5
+    @check_eq!(x, 5)                // 独占一行：展开为 guard x == 5 else panic(...)
+    @check_eq!(x * 2, 10)
+
+    // 通过别名导入的宏同样可用
+    @sm.check_eq!(x + 1, 6)
+
+    // --- 3. 宏卫生性：宏内局部变量与调用方隔离 ---
+    // @local_sum! 展开后产生独立局部块（宏内 acc 带唯一后缀），
+    // 与调用方 acc 互不干扰。调用方 acc=100 保持原值。
+    let acc = 100                    // 调用方 acc
+    @local_sum!([1, 2, 3])           // 展开：宏内 let acc 独立（卫生）
+    print(f"acc: {acc}")             // 100（宏内绑定未泄漏到调用方）
+
+    // --- 4. 宏模块中的普通定义（用普通 import 引入）---
+    print(square(4))                 // 16

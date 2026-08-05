@@ -1,0 +1,90 @@
+// ============================================================
+// 自引用与 Self — 递归类型自动独占间接
+// LZ Spec 06h-自引用与Self关键字.md
+//
+// 核心：递归字段直接写 Self / 类型全名，编译器自动 Box
+//   next: Self?  ≡  Box<Self>?    （独占所有权自动间接）
+//   Rc/Arc 共享必须显式写
+// ============================================================
+
+// --- 1. 递归链表：Self 字段自动 Box ---
+struct ListNode<T> =
+    value: T
+    next: Self?            // 自动 Box<Self>?（免写 Box<）
+
+def list_len<T>(mut node: ListNode<T>?) -> int =
+    count = 0
+    while let Some(n) = node:
+        count = count + 1
+        node = n.next      // 访问自动 Box 字段（透明）
+    count
+
+def list_push<T>(mut head: ListNode<T>?, value: T) -> ListNode<T> =
+    ListNode(value: value, next: head)   // 构造自动 Box::new(head)
+
+// --- 2. 递归表达式树：enum 变体自动 Box ---
+enum Expr:
+    Num(value: f64)
+    Add(left: Expr, right: Expr)     // 自动 Box<Expr>
+    Mul(left: Expr, right: Expr)     // 自动 Box<Expr>
+
+def eval_expr(e: Expr) -> f64 =
+    match e:
+        case Expr.Num(value: v) => v
+        case Expr.Add(left: l, right: r) => eval_expr(l) + eval_expr(r)
+        case Expr.Mul(left: l, right: r) => eval_expr(l) * eval_expr(r)
+
+// --- 3. 显式共享所有权（Rc/Arc 不自动，必须显式写）---
+struct SharedNode =
+    value: int
+    neighbors: List<Rc<Self>>     // 显式 Rc：共享子节点
+
+// --- 4. 递归二叉树：两个 Self 字段 ---
+struct TreeNode<T> =
+    value: T
+    left: Self?                   // 自动 Box<Self>?
+    right: Self?                  // 自动 Box<Self>?
+
+def tree_depth<T>(mut root: TreeNode<T>?) -> int =
+    match root:
+        case None => 0
+        case Some(node):
+            let l = tree_depth(node.left)
+            let r = tree_depth(node.right)
+            if l > r:
+                l + 1
+            else:
+                r + 1
+
+def main() =
+    // 链表构建：从尾部到头部 push
+    mut list: ListNode<int>? = None
+    list = list_push(list, 3)
+    list = list_push(list, 2)
+    list = list_push(list, 1)
+    print(list_len(list))         // 3（1 -> 2 -> 3）
+
+    // 遍历访问
+    let all_values = match list:
+        case None => "empty"
+        case Some(n) => f"head: {n.value}"
+    print(all_values)             // "head: 1"
+
+    // 表达式树：(1 + 2) * 3
+    let expr = Expr.Mul(
+        left: Expr.Add(left: Expr.Num(value: 1.0), right: Expr.Num(value: 2.0)),
+        right: Expr.Num(value: 3.0),
+    )
+    print(eval_expr(expr))        // 9.0
+
+    // 二叉树：depth of [1 [2 [4 5]] [3]]
+    let tree = TreeNode(
+        value: 1,
+        left: TreeNode(value: 2, left: TreeNode(value: 4, left: None, right: None), right: TreeNode(value: 5, left: None, right: None)),
+        right: TreeNode(value: 3, left: None, right: None),
+    )
+    print(tree_depth(tree))       // 3
+
+    // 共享节点：Rc 显式
+    let shared = SharedNode(value: 1, neighbors: [])
+    print(shared.value)           // 1

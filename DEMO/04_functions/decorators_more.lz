@@ -1,0 +1,66 @@
+// ============================================================
+// 装饰器补充 — @math / @unsafe / @tail_call / @overload / @memoize
+// LZ Spec 03e-复合综合.md §四 (装饰器)
+// ============================================================
+
+// --- @tail_call：尾调用优化保证 ---
+@tail_call
+def factorial(n: int, acc: int = 1) -> int =
+    if n <= 1:
+        acc
+    else:
+        factorial(n - 1, acc * n)     // 尾调用 → 优化为循环
+
+@tail_call
+def sum_to(n: int, acc: int = 0) -> int =
+    if n == 0:
+        acc
+    else:
+        sum_to(n - 1, acc + n)
+
+// --- @unsafe：strict 模式豁免（原生指针操作）---
+@unsafe
+def raw_pointer_op(ptr: int) -> int =
+    // 绕过 borrow checker 的原生指针操作
+    ptr
+
+// --- @math：Number trait 多态（无注解参数自动泛型化）---
+@math
+def double(x) = x * 2          // @math：x 自动泛型化为数字类型
+
+@math
+def add(a, b) = a + b
+
+// --- @overload：多分派（同函数名多签名）---
+@overload
+def describe(x: int) -> str = f"int: {x}"
+
+@overload
+def describe(x: str) -> str = f"str: {x}"
+
+// --- @memoize：缓存（composite.lz 已有，此处补充组合）---
+@memoize
+def fib(n: int) -> int =
+    if n <= 1:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+def main() =
+    // @tail_call 深度递归（不会栈溢出）
+    print(factorial(10))       // 3628800
+    print(sum_to(100))         // 5050
+
+    // @unsafe
+    print(raw_pointer_op(1234))  // 1234
+
+    // @math 泛型化
+    print(double(21))          // 42（int）
+    print(add(1.5, 2.5))       // 4.0（f64）
+
+    // @overload 多分派
+    print(describe(42))        // "int: 42"
+    print(describe("hi"))      // "str: hi"
+
+    // @memoize
+    print(fib(20))             // 6765

@@ -1,0 +1,41 @@
+// ============================================================
+// 使用模块 — 跨模块可见性 + 初始化顺序
+// LZ Spec 07-模块与导入.md §2.5.1 / §2.5.2
+// ============================================================
+
+// 导入 services 模块：其顶层语句在此处执行一次（打印 "services.lz initializing"）
+import services
+
+// 选择性导入具体项（默认全部公开）
+from services import create_client, Config, Status
+
+def main() =
+    // --- 1. 可见性：默认全部公开，均可引入 ---
+    // 模块级 let / const
+    print(services.service_name)         // "demo-service"
+    print(services.MAX_RETRY)            // 3
+
+    // def / struct / enum 均可跨模块使用
+    let c = create_client("localhost")
+    print(c)                             // "client://localhost"
+
+    let cfg = Config(host: "localhost", port: 8080)
+    print(cfg.host)                      // "localhost"
+
+    let st = Status.Ready
+    print(st)                            // Status.Ready
+
+    // checker 块跨模块调用（顶层定义，惰性；触发时运行）
+    def mk_port(p: int) -> int =
+        // 用 services 的 validate_port 归一化端口
+        let r = p
+        services.validate_port[(r,)]
+        r
+    print(mk_port(80))                   // 80
+    print(mk_port(-1))                   // 0（validate_port 归一化）
+
+    // --- 2. 初始化顺序 ---
+    // import services 已先执行其顶层（打印 "services.lz initializing"），
+    // 之后才执行本模块 main —— 依赖顺序由 import 位置保证。
+    // 若 a↔b 互相 import 顶层循环 → 编译错误（无法确定初始化顺序）。
+    print("use_services.main running")

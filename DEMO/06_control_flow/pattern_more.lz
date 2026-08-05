@@ -1,0 +1,112 @@
+// ============================================================
+// match 结构化模式 — 列表/字典/范围/或模式/引用绑定
+// LZ Spec 05-控制流.md §2.3 模式表
+// ============================================================
+
+def main() =
+    // --- 1. 列表模式：定长解构 + ..rest ---
+    let lst = [1, 2, 3]
+    match lst:
+        case [a, b, c]:
+            print(f"triple: {a},{b},{c}")       // 1,2,3
+        case _:
+            print("not triple")
+
+    let long = [10, 20, 30, 40]
+    match long:
+        case [first, ..rest]:
+            print(f"first: {first}")            // 10
+            print(f"rest: {rest}")              // [20, 30, 40]
+        case _:
+            print("empty")
+
+    // .. 只匹配剩余（不绑定）
+    let any_len = [1, 2]
+    match any_len:
+        case [_, ..]:
+            print("has at least 1 element")
+        case []:
+            print("empty")
+
+    // --- 2. 字典模式：键匹配 + 值绑定 ---
+    let cfg = {"host": "localhost", "port": 8080}
+    match cfg:
+        case {"port": p}:
+            print(f"port: {p}")                 // 8080（未列出的键忽略）
+        case _:
+            print("no port")
+
+    // --- 3. 范围模式：闭区间 / 半开区间 ---
+    let score = 75
+    match score:
+        case 0..=59:
+            print("fail")
+        case 60..=79:
+            print("pass")                       // pass
+        case 80..=100:
+            print("excellent")
+        case _:
+            print("invalid")
+
+    let n = 5
+    match n:
+        case 1..5:       // 半开区间 [1,5)
+            print("one to four")
+        case 5..=10:     // 闭区间 [5,10]
+            print("five to ten")                // five to ten
+        case _:
+            print("other")
+
+    // --- 4. 或模式：多模式合并 ---
+    let v = 2
+    match v:
+        case 0 | 1:
+            print("binary low")
+        case 2 | 3:
+            print("small even-ish")             // small even-ish
+        case _:
+            print("other")
+
+    // 或模式 + 变体：多分支合并
+    enum Command:
+        Move(x: int, y: int)
+        Jump(x: int, y: int)
+        Stop
+
+    let cmd = Command.Move(x: 1, y: 2)
+    match cmd:
+        case Command.Move(x: _, y: _) | Command.Jump(x: _, y: _):
+            print("movement command")
+        case Command.Stop:
+            print("stop")
+
+    // --- 5. 类型守卫：case pattern if cond ---
+    let val: Option<int> = Some(42)
+    match val:
+        case Some(v) if v > 100:
+            print("big")
+        case Some(v) if v > 10:
+            print(f"medium: {v}")               // medium: 42
+        case Some(v):
+            print(f"small: {v}")
+        case None:
+            print("none")
+
+    // --- 6. 引用绑定模式：case ref x / case ref mut x ---
+    // ref 绑定不转移所有权（&T）
+    let data = Some([1, 2, 3])
+    match data:
+        case Some(ref items):
+            print(f"len via ref: {len(items)}") // 3（items 是 &List<int>）
+        case None:
+            print("none")
+    print(data)             // data 仍可用（未被 move）
+
+    // ref mut 绑定：原地修改（&mut T）
+    let counter = Some(5)
+    match counter:
+        case Some(ref mut c):
+            c = c + 1       // 修改引用指向的值
+        case None:
+            print("none")
+    print(counter)          // Some(6)

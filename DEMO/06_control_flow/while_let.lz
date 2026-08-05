@@ -1,0 +1,75 @@
+// ============================================================
+// while let 模式循环
+// LZ Spec 05-控制流.md §7.3
+//
+// 反复求值 expr 并尝试模式匹配：成功绑定执行体，失败结束循环
+// ============================================================
+
+// --- 1. 迭代器消费：每次 next() 产出 Option，成功则继续 ---
+def sum_all(it: Iterator<int>) -> int =
+    total = 0
+    while let Some(item) = it.next():
+        total = total + item
+    total
+
+// --- 2. 手写迭代：需要中途 break 的场景 ---
+def take_until_zero(it: Iterator<int>) -> List<int> =
+    let result = []
+    while let Some(item) = it.next():
+        if item == 0:
+            break
+        result.append(item)
+    result
+
+// --- 3. Result 迭代：遇到 Err 结束 ---
+def first_error(it: Iterator<Result<int, str>>) -> Option<str> =
+    while let Ok(v) = it.next():
+        if v > 100:
+            break
+    // 循环结束后检查是否遇到 Err
+    match it.next():
+        case Err(e) => Some(e)
+        case _ => None
+
+// --- 4. 与 guard let 分工：while let 静默结束，guard let 走 else ---
+def process_until_fail(it: Iterator<int>) -> int =
+    processed = 0
+    while let Some(item) = it.next():
+        guard item > 0 else break        // 失败走 else（guard let 语义）
+        processed = processed + item
+    processed
+
+// --- 5. 无限源循环：自定义迭代器 ---
+def count_from(start: int) -> Iterator<int> =
+    iterator:
+        i = start
+        loop:
+            yield i
+            i = i + 1
+
+def main() =
+    // 1. 求和 1..5
+    let r = 1..5
+    print(sum_all(r))          // 10
+
+    // 2. 取到 0 前
+    let nums = [1, 2, 0, 3, 4]
+    print(take_until_zero(nums))   // [1, 2]
+
+    // 3. 模式绑定 + break
+    let seq = [5, 10, 15, 20]
+    first = 0
+    while let Some(item) = seq.into_iter().next():
+        if item == 15:
+            break
+        first = item
+    print(first)               // 10
+
+    // 5. 无限生成器取前 3
+    let gen = count_from(0)
+    taken = 0
+    while let Some(v) = gen.next():
+        print(v)               // 0, 1, 2
+        taken = taken + 1
+        if taken >= 3:
+            break

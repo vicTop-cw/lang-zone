@@ -1,0 +1,74 @@
+// ============================================================
+// 词法边界 — 字符串转义 + 数值字面量规则
+// LZ Spec 00-词法基础.md §2.1 (转义) + §2.2 (数值边界)
+// ============================================================
+
+def main() =
+    // ========== 1. 字符串转义序列 ==========
+
+    // 基础转义
+    let nl = "line1\nline2"          // \n 换行
+    let tab = "col1\tcol2"           // \t 制表符
+    let bs = "back\\slash"           // \\ 反斜杠
+    let quote = "say \"hi\""         // \" 双引号
+    let cr = "a\rb"                  // \r 回车
+    let nul = "x\0y"                 // \0 空字符
+
+    // Unicode 码点
+    let emoji = "\u{1F600}"          // 😀
+    let cjk = "\u{4E2D}\u{6587}"     // 中文
+    let ascii = "\u{41}"             // A
+
+    // 原始字符串：不处理转义
+    let raw = r"a\nb\tc"             // 字面 a\nb\tc（\n 原样）
+
+    // f-string 花括号转义：字面 {} 用 \{ \}
+    let brace = f"literal \{curly\} braces"   // literal {curly} braces
+    let interp = f"value is {42}"             // 插值 value is 42
+
+    print(nl)
+    print(tab)
+    print(bs)
+    print(quote)
+    print(emoji)                     // 😀
+    print(cjk)                       // 中文
+    print(ascii)                     // A
+    print(raw)                       // a\nb\tc
+    print(brace)
+    print(interp)
+
+    // ========== 2. 数值字面量边界 ==========
+
+    // 下划线分隔（可读性）
+    let million = 1_000_000          // 1000000
+    let big = 9_223_372_036_854_775_807   // i64 最大值
+    let hex_sep = 0xFF_FF            // 十六进制下划线
+
+    // 进制字面量
+    let hex = 0xFF                   // 255
+    let oct = 0o17                   // 15
+    let bin = 0b1010                 // 10
+
+    // 浮点形式（统一 f64）
+    let f1 = 3.14
+    let f2 = 1e10                    // 1e10
+    let f3 = 1.5e-3                  // 0.0015
+    // let bad1 = 1.                  // ❌ 省略小数部分非法，须 1.0
+    // let bad2 = .5                  // ❌ 省略整数部分非法，须 0.5
+
+    print(million)                   // 1000000
+    print(big)
+    print(hex_sep)                   // 65535
+    print(hex)                       // 255
+    print(oct)                       // 15
+    print(bin)                       // 10
+    print(f1)
+    print(f2)
+    print(f3)
+
+    // 溢出 → 编译错误（i64 范围外）
+    // let overflow = 9223372036854775808   // ❌ 超出 i64 最大值
+
+    // f32 需要显式 as
+    let f32_val = 1.5 as f32         // 无 f32 后缀字面量
+    print(f32_val)

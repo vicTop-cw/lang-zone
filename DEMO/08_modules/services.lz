@@ -1,0 +1,37 @@
+// ============================================================
+// 被导入模块 — 可见性 + 初始化顺序演示
+// LZ Spec 07-模块与导入.md §2.5.1 (可见性) + §2.5.2 (初始化顺序)
+//
+// 模块没有私有关键字：所有顶层项默认全部公开，可被 import 引入。
+// 下划线 _ 前缀是「模块内部约定」（编译器不报错，外部不应引用）。
+// 顶层语句在首次 import 时按书写顺序执行一次。
+// ============================================================
+
+// --- 顶层语句：首次 import 时执行一次 ---
+print("services.lz initializing")        // import services 时打印一次
+
+let service_name = "demo-service"        // 顶层 let：可被导入方引用
+const MAX_RETRY = 3                      // 顶层 const
+
+// --- 默认公开的项（均可被 import）---
+def create_client(host: str) -> str =
+    f"client://{host}"
+
+struct Config =
+    host: str
+    port: int
+
+enum Status:
+    Ready
+    Busy
+
+// --- _ 前缀：模块内部约定（外部不应引用，但编译器不报错）---
+let _internal_cache = {}
+
+// --- checker 块：顶层定义，跨模块可复用（惰性）---
+block validate_port[ps: __Params]:
+    let p = ps.args[0] as int
+    guard p > 0 else:
+        ps.args[0] = 0
+        return
+    ps.args[0] = p
