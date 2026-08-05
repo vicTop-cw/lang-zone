@@ -1,0 +1,143 @@
+// ============================================================
+// Duck 关系约束 — 多类型结构化关系
+// LZ Spec 01b-duck关系约束.md
+//
+// 软关键字（仅 duck 体内生效）：require / optional / exact / min / max /
+// range / at_least / at_most / match / satisfies / sealed / default /
+// StackType / RefType / Any
+// ============================================================
+
+// --- 1. 属性型 duck（单类型约束）---
+duck Quackable =
+    def quack(self) -> ()
+
+// 结构匹配：MyDuck 有 quack 方法，自动满足 Quackable
+struct MyDuck:
+    def quack(self) -> () =
+        print("quack quack")
+
+def make_quack<T: Quackable>(x: T) =
+    x.quack()
+
+// --- 2. 关系型 duck（多类型约束）---
+duck Mapper<T, R> =
+    def T.map(self) -> R
+    def R.unmap(self) -> T
+
+struct A:
+    value: int
+struct B:
+    value: int
+
+// A 有 map -> B，B 有 unmap -> A，满足 Mapper<A, B>
+struct AImpl:
+    def map(self) -> B =
+        B(value: self.value * 2)
+struct BImpl:
+    def unmap(self) -> A =
+        A(value: self.value / 2)
+
+// --- 3. 参数数量约束：exact / min / max / range ---
+duck SizedProcessor =
+    def process(self, a: int, b: int) -> ()    // 恰好 2 参数
+    def configure(self, key: str, range(0, 2)) -> ()  // 1~3 参数
+    def handle(self, min(1)) -> ()             // 至少 1 参数
+    def dump(self, max(3)) -> ()               // 不超过 3 参数
+
+// --- 4. 命名参数约束：require / optional ---
+duck Buildable<T> =
+    def build(self) -> T
+    require(name: str, version: int)           // build 必须接受 name/version
+    def init(self, key: str) -> ()
+    optional(timeout: int)                     // init 可接受可选 timeout
+
+// --- 5. 方法名正则：match / at_least / at_most / exact ---
+duck HasMultipleGetters<T> =
+    def /get_\w+/ (ref self) -> T where T: Display
+    match /get_\w+/ at_least(1)
+
+duck CRUDService =
+    def /(create|read|update|delete)_\w+/ (self, ..) -> ()
+    match /(create|read|update|delete)_\w+/ exact(4)
+
+// --- 6. satisfies / sealed / default ---
+duck Resource<T> where T: Iterable =
+    satisfies Iterable
+    def fetch(self) -> T
+
+duck ExactShape =
+    sealed
+    .w: int
+    .h: int
+
+duck Renderable =
+    def render(self) -> ()
+    default def fallback(self) -> ()           // 可选成员
+
+// --- 7. 伪类型约束：StackType / RefType / Any ---
+duck MemoryAware =
+    def stack_op(self, x: StackType) -> ()    // 参数必须栈类型（Copy）
+    def heap_op(self, x: RefType) -> ()       // 参数必须引用类型（Move）
+    def generic(self, x: Any) -> ()           // 任意类型
+
+// --- 8. 实现类型（结构匹配自动生效，无需 impl）---
+struct DuckA:
+    def quack(self) -> () =
+        print("A quacks")
+
+struct DuckB:
+    def quack(self) -> () =
+        print("B quacks")
+
+struct Person:
+    name: str
+    age: int
+    def get_name(self) -> str = self.name
+    def get_age(self) -> int = self.age
+
+struct Point2D:
+    w: int
+    h: int
+
+struct Canvas:
+    def render(self) -> () =
+        print("rendering canvas")
+    // 无 fallback：Renderable 的 default 成员可缺省
+
+// --- 9. 泛型函数约束使用 ---
+def shout<T: Quackable>(x: T) =
+    x.quack()
+
+def get_first_getter<T: HasMultipleGetters<str>>(x: T) -> str =
+    x.get_name()
+
+def main() =
+    // 属性型：结构匹配
+    let da = DuckA()
+    let db = DuckB()
+    make_quack(da)              // "A quacks"
+    make_quack(db)              // "B quacks"
+    shout(da)                   // "A quacks"
+
+    // 关系型：A→B 映射链
+    let a = AImpl()
+    let b = a.map()
+    let back = b.unmap()
+    print(back.value)
+
+    // 正则方法匹配：Person 有 get_name / get_age → 满足 HasMultipleGetters
+    let p = Person(name: "Alice", age: 30)
+    print(get_first_getter(p))  // "Alice"
+
+    // sealed：Point2D 恰好 w/h
+    let pt = Point2D(w: 10, h: 20)
+    print(f"{pt.w}x{pt.h}")
+
+    // default：Canvas 无 fallback 也满足 Renderable
+    let c = Canvas()
+    c.render()
+
+    // 软关键字体外是普通标识符
+    let require = 1             // ✅ require 是普通变量名
+    let optional = 2            // ✅ optional 是普通变量名
+    print(require + optional)   // 3

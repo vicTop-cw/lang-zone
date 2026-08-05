@@ -1,0 +1,110 @@
+// ============================================================
+// block 命名块 — 定义 2 种 + 触发 4 种
+// LZ Spec 05b-block命名块.md v1.4
+//
+// 定义（2 种）：
+//   block NAME:             plain 块：定义即执行，可 break NAME 跳出
+//   block NAME[ps]:         checker 块：惰性登记，触发才执行
+// 触发（4 种，等价调用已定义单元）：
+//   block NAME ^: (实参)     标准调用
+//   block NAME[(实参)]       单行调用
+//   break NAME with (实参)   循环体内调用（不跳出）
+//   挂 [chk]                 宿主调用时自动执行
+// ============================================================
+
+def main() =
+    // ========== 定义 1：plain 块（定义即执行 + 标签跳出）==========
+    let total = 0
+    block scan:                    // plain 块：定义时立即执行体
+        for x in 1..10:
+            if x > 5:
+                break scan         // 跨层跳出 block
+            total += x
+    print(total)                   // 15（1+2+3+4+5）
+
+    // 多层嵌套跳出
+    block outer:
+        block inner:
+            for i in 0..10:
+                if i == 3:
+                    break outer    // 跳出 outer（含 inner 与 for）
+        print("inner done")        // 不执行
+    print("after outer")
+
+    // ========== 定义 2：checker 块（惰性登记 + 触发）==========
+    block count_up[ps: __Params]:  // 定义：惰性登记，不执行
+        let n = ps.args[0] as int
+        print(f"count_up got: {n}")
+
+    // 触发 1：标准调用 ^:
+    block count_up ^:              // 触发：^: 换行缩进写实参
+        (10,)
+    // 触发 2：单行调用 [(...)]
+    block count_up[(20,)]
+
+    // ========== 触发 3：break NAME with（循环体内调用）==========
+    block validate[ps: __Params]:  // checker 块：校验逻辑
+        let v = ps.args[0] as int
+        guard v >= 0 else:
+            ps.args[0] = 0
+            return
+        ps.args[0] = v
+
+    for n in -2..2:
+        break validate with (n,)   // 循环体内触发：n 注入 ps，不跳出循环
+        print(f"validated: {n}")
+
+    // ========== 触发 4：挂 [chk]（宿主调用自动执行）==========
+    block normalize[ps: __Params]:
+        ps.args[0] = (ps.args[0] as int).abs()
+
+    def divide[n](a: int, b: int) -> int = a / b   // normalize 作 [chk]
+    print(divide(-10, 2))          // 触发 normalize → ps.args[0] 已 abs → 10/2=5
+
+    block work[normalize]:         // 也可挂到另一个 block
+        print(f"work ps: {ps.args[0]}")
+    block work ^:
+        (-7,)
+
+    // ========== checker 块 return 边界 ==========
+    block early_exit[ps: __Params]:
+        if (ps.args[0] as int) == 0:
+            return                 // 终止本次运行
+        print(f"processed: {ps.args[0]}")
+
+    block early_exit ^:
+        (0,)
+    block early_exit ^:
+        (5,)
+
+    // ========== 检查站实参三种形态 ==========
+    // 形态 1：__Params 值
+    block norm[ps: __Params]:
+        print(f"norm: {ps.args[0]}")
+    block norm[(1,)]               // 直接 __Params
+
+    // 形态 2：带检查站的 block
+    block pre[ps: __Params]:
+        ps.args[0] = (ps.args[0] as int) * 2
+    block run[pre]:
+        print(f"run: {ps.args[0]}")
+    block run[(5,)]                // pre 先跑（×2）→ 10
+
+    // 形态 3：__Params -> __Params 函数
+    def double_ps(ps: __Params) -> __Params =
+        ps.args[0] = (ps.args[0] as int) * 2
+        ps
+    block apply_f[double_ps]:
+        print(f"apply_f: {ps.args[0]}")
+    block apply_f[(3,)]            // double_ps 先跑 → 6
+
+    // ========== 自递归（压栈递归）==========
+    let out = []
+    block count_down[ps: __Params]:
+        let n = ps.args[0] as int
+        if n <= 0:
+            return                 // 终止：整条栈逐层返回
+        out.append(n)
+        break count_down with (n - 1,)   // 重入自己（压栈）
+    block count_down[(3,)]
+    print(out)                     // [3, 2, 1]

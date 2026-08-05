@@ -1,0 +1,99 @@
+// ============================================================
+// 高阶函数 — 函数作参数 / 方法作实参 / 返回函数
+// LZ Spec 03e-closure闭包.md + 03-函数基础.md
+//
+// 方法作实参：LZ 通过闭包包装（|x| obj.method(x)）传递实例方法，
+// 与 Rust |x| obj.method(x) 一致（无独立方法引用语法）。
+// ============================================================
+
+// ========== 1. 顶层函数作参数 ==========
+def apply_twice(f: fn(int) -> int, x: int) -> int =
+    f(f(x))
+
+def inc(x: int) -> int = x + 1
+def double(x: int) -> int = x * 2
+
+// ========== 2. 函数作返回值 ==========
+def make_adder(n: int) -> fn(int) -> int =
+    |x| -> int = x + n        // 捕获 n 返回闭包
+
+// ========== 3. struct 方法作实参（闭包包装）===========
+struct Calculator:
+    base: int
+    def add(self, x: int) -> int = self.base + x
+    def mul(self, x: int) -> int = self.base * x
+
+def apply_func(f: fn(int) -> int, x: int) -> int = f(x)
+
+// ========== 4. enum 方法作实参 ==========
+enum MathOp:
+    Add
+    Mul
+    def eval(self, a: int, b: int) -> int =
+        match self:
+            case MathOp.Add => a + b
+            case MathOp.Mul => a * b
+
+def run_op(op: fn(int, int) -> int, a: int, b: int) -> int =
+    op(a, b)
+
+// ========== 5. trait 方法作实参（通过 impl 后的闭包）==========
+trait Describable =
+    def describe(self) -> str
+
+struct Car:
+    model: str
+
+impl Describable for Car =
+    def describe(self) -> str = f"Car: {self.model}"
+
+// 接收 fn 的高阶函数
+def print_desc(f: fn() -> str) =
+    print(f())
+
+// ========== 6. 函数数组 / 函数列表 ==========
+def apply_all(fns: List<fn(int) -> int>, x: int) -> List<int> =
+    let results = []
+    for f in fns:
+        results.append(f(x))
+    results
+
+def main() =
+    // 1. 顶层函数作参数
+    print(apply_twice(inc, 5))      // inc(inc(5)) = 7
+    print(apply_twice(double, 3))   // double(double(3)) = 12
+
+    // 2. 函数作返回值
+    let add5 = make_adder(5)
+    let add10 = make_adder(10)
+    print(add5(3))                  // 8
+    print(add10(3))                 // 13
+
+    // 3. struct 方法作实参（闭包包装）
+    let calc = Calculator(base: 100)
+    print(apply_func(|x| calc.add(x), 5))    // 105
+    print(apply_func(|x| calc.mul(x), 3))    // 300
+
+    // 4. enum 方法作实参
+    let op = MathOp.Mul
+    print(run_op(|a, b| op.eval(a, b), 6, 7))  // 42
+
+    // 5. trait 方法作实参（闭包包装）
+    let car = Car(model: "Tesla")
+    print_desc(| | -> str = car.describe())   // "Car: Tesla"
+
+    // 6. 函数列表统一应用
+    let fns = [inc, double, |x| -> int = x * 3]
+    let out = apply_all(fns, 5)
+    print(out)                      // [6, 10, 15]
+
+    // 7. 组合：返回闭包 + 闭包参数
+    let adder = make_adder(100)
+    let composed = apply_twice(adder, 1)     // (1+100)+100 = 201
+    print(composed)                 // 201
+
+    // 8. 闭包作为数据：映射后排序
+    def sort_squares(xs: List<int>) -> List<int> =
+        let squared = xs.map(|x| -> int = x * x)   // 闭包作映射函数
+        squared.sort()                              // List 方法
+    print(sort_squares([3, 1, 2]))  // [1, 4, 9]
