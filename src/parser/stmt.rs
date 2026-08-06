@@ -113,16 +113,34 @@ impl ParserStmtExt for Parser {
                 Ok(Stmt::Yield(expr))
             }
             Token::Block => {
-                // block label: <缩进块> — 命名块
+                // block label: <缩进块> — 命名块（plain 或 checker）
                 self.advance();
                 // 标签名可以是任意标识符或关键字
                 let label = self.advance().to_string();
+                // 检测 checker 子句：[ps] / [ps: __Params] / [chk_name]
+                let is_checker = self.check(&Token::LBrack);
+                let ps_name = if is_checker {
+                    self.advance(); // [
+                    let ps = self.advance().to_string(); // ps / chk_name
+                    if self.check(&Token::Colon) {
+                        self.advance(); // :
+                        self.advance().to_string(); // __Params（跳过）
+                    }
+                    self.expect(Token::RBrack)?;
+                    ps
+                } else {
+                    String::new()
+                };
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 self.expect(Token::Indent)?;
                 let body = self.parse_block()?;
                 self.expect(Token::Dedent)?;
-                Ok(Stmt::Block { label, body })
+                if is_checker {
+                    Ok(Stmt::CheckerBlock { label, ps_name, body })
+                } else {
+                    Ok(Stmt::Block { label, body })
+                }
             }
             Token::Comptime => {
                 // comptime: <缩进块> — 编译期求值块

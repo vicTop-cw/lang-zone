@@ -582,6 +582,14 @@ impl CodeGen {
             Item::Const(c) => self.gen_const_def(c),
             Item::TypeAlias(_) => { /* 已提前生成，跳过 */ }
             Item::Test(t) => self.gen_test_def(t),
+            Item::CheckerBlock { name, ps_name: _, body } => {
+                // checker 块 → fn NAME(ps: &mut __Params)
+                self.emit_line(&format!("fn {name}(ps: &mut __Params) {{"));
+                self.indent += 1;
+                self.gen_block_inner(body);
+                self.indent -= 1;
+                self.emit_line("}");
+            }
         }
     }
 
@@ -1629,7 +1637,7 @@ impl CodeGen {
                 self.emit_line(if discard { "};" } else { "}" });
             }
             Stmt::Break => self.emit_line("break;"),
-            Stmt::BreakLabel { label: _, value } => {
+            Stmt::BreakLabel { label: _, value: _ } => {
                 // block 内 break label → 无值 return（退出闭包）
                 // block 无返回值，value 仅用于 break NAME with v（触发 checker 块，待实现）
                 self.emit_line("return; // break block");
@@ -1646,6 +1654,11 @@ impl CodeGen {
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("})();");
+            }
+            Stmt::CheckerBlock { .. } => {
+                // checker 块已提升为模块级 Item::CheckerBlock（惰性登记）
+                // 此处为占位语句，不生成内联代码
+                self.emit_line("();  // checker block (defined at module level)");
             }
             Stmt::Pass => self.emit_line("();  // pass"),
             Stmt::TypeAlias { name, ty } => {

@@ -405,6 +405,7 @@ impl fmt::Display for Stmt {
             }
             Stmt::Continue => f.write_str("continue"),
             Stmt::BlockLabel { label, body } => write!(f, "block '{label} {body}"),
+            Stmt::CheckerBlock { label, ps_name, body: _ } => write!(f, "block '{label}[ps:{ps_name}] ..."),
             Stmt::Yield { value } => write!(f, "yield {value}"),
             Stmt::YieldFrom { iter } => write!(f, "yield from {iter}"),
             Stmt::Defer { body } => write!(f, "defer {body}"),
@@ -555,6 +556,7 @@ impl fmt::Display for Item {
             Item::Const(c) => write!(f, "const {}: {} = {}", c.name, c.ty, c.value),
             Item::TypeAlias(ta) => write!(f, "type {} = {}", ta.name, ta.ty),
             Item::Test(t) => write!(f, "test {} {:#?}", t.name, t.body),
+            Item::CheckerBlock { name, ps_name, .. } => write!(f, "checker block '{name}[ps:{ps_name}]"),
         }
     }
 }

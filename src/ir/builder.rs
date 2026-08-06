@@ -1960,6 +1960,18 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             body: convert_block(body, ctx),
         },
 
+        AstStmt::CheckerBlock { label, ps_name, body } => {
+            // checker 块 → IR 压缩为模块级 fn NAME(ps: &mut __Params)
+            // 惰性登记：定义时不执行，仅注册为 Item::CheckerBlock
+            ctx.pending_items.borrow_mut().push(Item::CheckerBlock {
+                name: label.clone(),
+                ps_name: ps_name.clone(),
+                body: convert_block(body, ctx),
+            });
+            // 占位语句（checker 块不内联执行）
+            Stmt::Pass
+        },
+
         AstStmt::Defer(body) => {
             // defer → 展开为 Block（不追加 return，让后续代码继续执行）
             let stmts = convert_block(body, ctx).stmts;

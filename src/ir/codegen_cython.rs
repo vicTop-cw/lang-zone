@@ -68,6 +68,7 @@ impl CythonCodeGen {
             Item::TraitDef(t) => self.gen_trait(t),
             Item::Impl(i) => self.gen_impl(i),
             Item::Test(t) => self.gen_test(t),
+            Item::CheckerBlock { .. } => {} // checker 块不生成 Cython 代码
         }
     }
 

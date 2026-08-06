@@ -161,6 +161,9 @@ impl CodeGenStmtExt for CodeGen {
                 let body_s = self.gen_block(body, indent + 1, locals);
                 format!("{}(|| {{ // block '{} \n{}{}}})();\n", pad, label, body_s, pad)
             }
+            Stmt::CheckerBlock { label: _, ps_name: _, body: _ } => {
+                String::new() // checker 块不内联（已提升为模块级函数）
+            }
             Stmt::Continue => format!("{}continue;\n", pad),
 
             Stmt::Defer(body) => {

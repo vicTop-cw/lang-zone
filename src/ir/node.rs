@@ -199,6 +199,8 @@ pub enum Item {
     Const(ConstDef),
     TypeAlias(TypeAliasDef),
     Test(TestDef),
+    /// checker 块 → 编译为 fn NAME(ps: &mut __Params)
+    CheckerBlock { name: String, ps_name: String, body: Block },
 }
 
 /// 函数定义
@@ -359,6 +361,8 @@ pub enum Stmt {
     BreakLabel { label: String, value: Option<Expr> },
     Continue,
     BlockLabel { label: String, body: Block },
+    /// checker 块 → IR 压缩为 fn NAME(ps: &mut __Params)
+    CheckerBlock { label: String, ps_name: String, body: Block },
     Defer {
         body: Block,
     },

@@ -51,6 +51,8 @@ pub enum Stmt {
     Continue,
     /// block label: body  — 命名块，break label 可跨层跳出
     Block { label: String, body: Vec<Stmt> },
+    /// block NAME[ps: __Params]: body  — checker 块（惰性登记，不执行）
+    CheckerBlock { label: String, ps_name: String, body: Vec<Stmt> },
     Defer(Vec<Stmt>),
     Raise(Expr),
     Guard {
