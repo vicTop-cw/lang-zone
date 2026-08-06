@@ -321,6 +321,16 @@ impl ParserStmtExt for Parser {
                         };
                         return Ok(Stmt::BreakLabel { label, value });
                     }
+                    // break NAME with expr → 循环体内触发 checker 块
+                    if self.peek_n(1) == &Token::With {
+                        let label = match self.advance() {
+                            Token::Ident(n) => n,
+                            _ => unreachable!(),
+                        };
+                        self.advance(); // consume with
+                        let args = self.parse_expr()?;
+                        return Ok(Stmt::BlockCall { label, args });
+                    }
                 }
                 let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) {
                     Some(self.parse_expr()?)
