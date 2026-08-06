@@ -99,7 +99,7 @@ def main() =
     block apply_f[(3,)]            // double_ps 先跑 → 6
 
     // ========== 自递归（压栈递归）==========
-    let mut out = []
+    let mut out: List<int> = []
     block count_down[ps: __Params]:
         let n = ps.args[0] as int
         if n <= 0:
