@@ -1972,6 +1972,25 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             Stmt::Pass
         },
 
+        AstStmt::BlockCall { label, args } => {
+            // 触发调用 → 转换为 fn_call(label)(args)
+            Stmt::ExprStmt {
+                expr: Expr::new(
+                    ExprKind::Call {
+                        callee: Box::new(Expr::new(
+                            ExprKind::Var(label.clone()),
+                            IrType::Any,
+                            Span::unknown(),
+                        )),
+                        type_args: vec![],
+                        args: vec![convert_expr(args, ctx)],
+                    },
+                    IrType::Unit,
+                    Span::unknown(),
+                ),
+            }
+        },
+
         AstStmt::Defer(body) => {
             // defer → 展开为 Block（不追加 return，让后续代码继续执行）
             let stmts = convert_block(body, ctx).stmts;

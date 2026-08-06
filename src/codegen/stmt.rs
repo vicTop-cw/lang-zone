@@ -166,6 +166,10 @@ impl CodeGenStmtExt for CodeGen {
             }
             Stmt::Continue => format!("{}continue;\n", pad),
 
+            Stmt::BlockCall { label, args } => {
+                format!("{}{}(&mut __Params::new({}));\n", pad, label, self.gen_expr(args))
+            }
+
             Stmt::Defer(body) => {
                 let n = self.defer_count.get();
                 self.defer_count.set(n + 1);

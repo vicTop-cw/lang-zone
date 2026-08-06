@@ -81,6 +81,7 @@ impl Parser {
         let mut type_aliases = Vec::new();
         let mut tests = Vec::new();
         let mut top_level_builds = Vec::new();
+        let mut top_stmts: Vec<Stmt> = Vec::new();
         let mut module_name = None;
         let mut magic_blocks: Vec<MagicDef> = Vec::new();
 
@@ -174,6 +175,12 @@ impl Parser {
                     }
                 }
                 Token::Newline => { self.advance(); }
+                Token::Block => {
+                    // 模块级 block 定义 / 触发调用
+                    // 作为顶层构建块语句处理
+                    let stmt = self.parse_stmt()?;
+                    top_stmts.push(stmt);
+                }
                 Token::MagicMethod(ref magic_name) => {
                     // 模块级魔法属性: __name__ = "value", __all__ = [...]
                     let name = magic_name.clone();

@@ -66,6 +66,8 @@ pub enum Stmt {
         alias: Option<String>,
         body: Vec<Stmt>,
     },
+    /// checker 块触发调用（block NAME ^: / block NAME[(expr)]）
+    BlockCall { label: String, args: Expr },
     /// 函数体内的 enum 定义
     EnumDef(StructDef),
     Assign {

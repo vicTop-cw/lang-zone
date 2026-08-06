@@ -113,10 +113,35 @@ impl ParserStmtExt for Parser {
                 Ok(Stmt::Yield(expr))
             }
             Token::Block => {
-                // block label: <缩进块> — 命名块（plain 或 checker）
+                // block label: <缩进块> — 命名块（plain 或 checker）定义
+                // block NAME ^: / block NAME[(expr)] — 触发调用
                 self.advance();
                 // 标签名可以是任意标识符或关键字
                 let label = self.advance().to_string();
+
+                // ── 触发语法 ──
+                // block NAME ^: expr → 标准触发调用
+                if self.check(&Token::CaretOp) {
+                    self.advance(); // ^
+                    self.expect(Token::Colon)?; // :
+                    self.skip_newlines();
+                    let args = self.parse_expr()?;
+                    return Ok(Stmt::BlockCall { label, args });
+                }
+                // block NAME[(expr)] → 单行触发调用
+                // 区分 checker 子句 [ps: __Params]：后者括号内是标识符
+                if self.check(&Token::LBrack) {
+                    let after_brack = self.peek_n(1);
+                    let is_trigger = !matches!(after_brack, Token::Ident(_) | Token::Mut);
+                    if is_trigger {
+                        self.advance(); // [
+                        let args = self.parse_expr()?;
+                        self.expect(Token::RBrack)?; // ]
+                        return Ok(Stmt::BlockCall { label, args });
+                    }
+                }
+
+                // ── 定义语法 ──
                 // 检测 checker 子句：[ps] / [ps: __Params] / [chk_name]
                 let is_checker = self.check(&Token::LBrack);
                 let ps_name = if is_checker {
