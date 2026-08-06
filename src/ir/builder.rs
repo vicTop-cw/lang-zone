@@ -2200,7 +2200,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                         scan(&then_branch.stmts, empty_lets, resolved);
                         if let Some(eb) = else_branch { scan(&eb.stmts, empty_lets, resolved); }
                     }
-                    Stmt::While { body, .. } | Stmt::For { body, .. } => scan(&body.stmts, empty_lets, resolved),
+                    Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::WhileLet { body, .. } => scan(&body.stmts, empty_lets, resolved),
                     Stmt::Match { arms, .. } => for a in arms { scan(&a.body.stmts, empty_lets, resolved); },
                     Stmt::TryCatch { body, catches, else_body, finally_body } => {
                         scan(&body.stmts, empty_lets, resolved);
