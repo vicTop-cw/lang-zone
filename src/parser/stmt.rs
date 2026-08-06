@@ -679,10 +679,11 @@ impl ParserStmtExt for Parser {
     fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String> {
         let mut is_ref = false;
         let mut is_const = false;
+        let mut mutable = false;
 
         loop {
             match self.peek() {
-                Token::Mut => { self.advance(); /* let mut 冗余，默认不可变；允许但忽略 */ }
+                Token::Mut => { self.advance(); mutable = true; }
                 Token::Ref => { self.advance(); is_ref = true; }
                 Token::Const => { self.advance(); is_const = true; }
                 Token::Owned => { self.advance(); /* let owned 语义上排斥，忽略 */ }
@@ -738,7 +739,7 @@ impl ParserStmtExt for Parser {
                 if is_const {
                     return Ok(Stmt::Const { name, ty, value });
                 } else {
-                    return Ok(Stmt::Let { name, mutable: false, is_ref, ty, value });
+                    return Ok(Stmt::Let { name, mutable, is_ref, ty, value });
                 }
             }
 
@@ -781,8 +782,8 @@ impl ParserStmtExt for Parser {
         if is_const {
             Ok(Stmt::Const { name, ty, value })
         } else {
-            // let 前缀 → 不可变绑定
-            Ok(Stmt::Let { name, mutable: false, is_ref, ty, value })
+            // let 前缀 → 默认可变（let mut 显式声明）
+            Ok(Stmt::Let { name, mutable, is_ref, ty, value })
         }
     }
 
