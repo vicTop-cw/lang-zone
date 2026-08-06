@@ -772,6 +772,39 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
     }
 }
 
+/// 收集 AST Pattern 中绑定的所有变量名
+fn collect_ast_pattern_vars(pat: &AstPattern, out: &mut Vec<String>) {
+    match pat {
+        AstPattern::Wildcard => {}
+        AstPattern::Ident(name) => { out.push(name.clone()); }
+        AstPattern::Int(_) | AstPattern::Str(_) | AstPattern::Bool(_) => {}
+        AstPattern::Variant(_, args) | AstPattern::Tuple(args) | AstPattern::List(args) => {
+            for a in args { collect_ast_pattern_vars(a, out); }
+        }
+        AstPattern::Range { .. } => {}
+    }
+}
+
+/// 收集 IR Pattern 中绑定的所有变量名
+#[allow(dead_code)]
+fn collect_pattern_vars(pat: &Pattern, out: &mut Vec<String>) {
+    match pat {
+        Pattern::Wildcard => {}
+        Pattern::Ident(name) => { out.push(name.clone()); }
+        Pattern::Lit(_) => {}
+        Pattern::Tuple(elems) | Pattern::List(elems) => {
+            for e in elems { collect_pattern_vars(e, out); }
+        }
+        Pattern::Struct { fields, .. } => {
+            for (_, p) in fields { collect_pattern_vars(p, out); }
+        }
+        Pattern::Enum { args, .. } => {
+            for a in args { collect_pattern_vars(a, out); }
+        }
+        Pattern::Range { .. } => {}
+    }
+}
+
 // （arm_body_to_expr 已移除 — Match 表达式现在通过 BlockExpr + Stmt::Match 处理）
 
 // ══════════════════════════════════════════════════════════════
@@ -1790,11 +1823,38 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             body: convert_block(body, ctx),
         },
 
-        AstStmt::WhileLet { pattern, expr, guard, body, .. } => Stmt::WhileLet {
-            pattern: convert_ast_pattern(pattern, ctx).unwrap_or(Pattern::Wildcard),
-            expr: convert_expr(expr, ctx),
-            guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
-            body: convert_block(body, ctx),
+        AstStmt::WhileLet { pattern, expr, guard, body, .. } => {
+            let ir_expr = convert_expr(expr, ctx);
+
+            // 从 expr 类型推断模式绑定变量的类型
+            // e.g. while let Some(item) = opt (Option<int>) → item: int
+            // 注意：方法调用返回类型推断不完整（it.next() → Any），
+            // 仅对直接 Option<T> 类型变量生效
+            let inner_ty = match &ir_expr.ty {
+                IrType::Option(inner) => Some((**inner).clone()),
+                IrType::Named { path, args } if path == "Option" && args.len() == 1 => Some(args[0].clone()),
+                _ => None,
+            };
+
+            // 构建增强的 ctx（包含模式绑定变量类型）
+            let mut body_ctx = ctx.clone();
+            if let Some(ref ty) = inner_ty {
+                let mut pattern_vars: Vec<String> = Vec::new();
+                collect_ast_pattern_vars(pattern, &mut pattern_vars);
+                for var in &pattern_vars {
+                    body_ctx.vars.insert(var.clone(), ty.clone());
+                }
+            }
+
+            let ir_pattern = convert_ast_pattern(pattern, ctx).unwrap_or(Pattern::Wildcard);
+            let ir_body = convert_block(body, &body_ctx);
+
+            Stmt::WhileLet {
+                pattern: ir_pattern,
+                expr: ir_expr,
+                guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
+                body: ir_body,
+            }
         },
 
         AstStmt::For { var, iter, guard, body, .. } => {
@@ -2024,6 +2084,8 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
 fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     // 创建可变的本地上下文，支持 Let 变量传播
     let mut block_ctx = TypeCtx::new();
+    // 继承父级上下文中的变量类型（支持 WhileLet 等模式绑定类型传递）
+    block_ctx.vars = ctx.vars.clone();
     block_ctx.current_generics = ctx.current_generics.clone();
     block_ctx.current_ret_ty = ctx.current_ret_ty.clone();
     block_ctx.current_fn_name = ctx.current_fn_name.clone();
