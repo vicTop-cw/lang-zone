@@ -121,11 +121,19 @@ impl ParserStmtExt for Parser {
 
                 // ── 触发语法 ──
                 // block NAME ^: expr → 标准触发调用
-                if self.check(&Token::CaretOp) {
-                    self.advance(); // ^
-                    self.expect(Token::Colon)?; // :
+                // 注意：^: 在词法分析器中被识别为 Token::BuildIndex
+                if self.check(&Token::CaretOp) || self.check(&Token::BuildIndex) {
+                    if self.check(&Token::BuildIndex) {
+                        self.advance(); // consume BuildIndex (^:)
+                    } else {
+                        self.advance(); // ^
+                        self.expect(Token::Colon)?; // :
+                    }
                     self.skip_newlines();
+                    if self.check(&Token::Indent) { self.advance(); } // ^: 后可能换行缩进
                     let args = self.parse_expr()?;
+                    self.skip_newlines();
+                    if self.check(&Token::Dedent) { self.advance(); } // 退出 ^: 缩进
                     return Ok(Stmt::BlockCall { label, args });
                 }
                 // block NAME[(expr)] → 单行触发调用
