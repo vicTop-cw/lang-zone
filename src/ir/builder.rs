@@ -2200,30 +2200,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                         scan(&then_branch.stmts, empty_lets, resolved);
                         if let Some(eb) = else_branch { scan(&eb.stmts, empty_lets, resolved); }
                     }
-                    Stmt::While { body, .. } | Stmt::For { body, .. } => scan(&body.stmts, empty_lets, resolved),
-                    Stmt::WhileLet { expr, body, .. } => {
-                        scan(&body.stmts, empty_lets, resolved);
-                        // 如果 body 中的 append 调用参数类型为 Any，
-                        // 尝试从 WhileLet 的 expr 类型推导
-                        // e.g. while let Some(item) = opt (Option<int>):
-                        //      result.append(item) → item 类型 = int
-                        let inner_ty = match &expr.ty {
-                            IrType::Option(inner) => Some((**inner).clone()),
-                            IrType::Named { path, args } if path == "Option" && args.len() == 1 => Some(args[0].clone()),
-                            _ => None,
-                        };
-                        if let Some(ty) = inner_ty {
-                            // 对仍未 resolved 的空列表变量，尝试用推断的类型
-                            let mut second_pass = std::collections::HashMap::new();
-                            for name in empty_lets {
-                                if !resolved.contains_key(name) {
-                                    second_pass.insert(name.clone(), ty.clone());
-                                }
-                            }
-                            // 只对在 body 中有 append 调用的变量进行推断
-                            resolved.extend(second_pass);
-                        }
-                    },
+                    Stmt::While { body, .. } | Stmt::For { body, .. } | Stmt::WhileLet { body, .. } => scan(&body.stmts, empty_lets, resolved),
                     Stmt::Match { arms, .. } => for a in arms { scan(&a.body.stmts, empty_lets, resolved); },
                     Stmt::TryCatch { body, catches, else_body, finally_body } => {
                         scan(&body.stmts, empty_lets, resolved);
