@@ -501,8 +501,12 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             // 尝试从 receiver 类型推导方法返回类型
             let recv_ty = infer_expr_type(receiver, ctx);
             // 常见无返回值方法 → Unit
-            if method == "push" || method == "insert" || method == "remove" || method == "clear" {
+            if method == "push" || method == "insert" || method == "remove" || method == "clear" || method == "append" {
                 return IrType::Unit;
+            }
+            // 内置方法返回类型推断表
+            if let Some(ret) = lookup_builtin_method_ret(&recv_ty, method, ctx) {
+                return ret;
             }
             match &recv_ty {
                 IrType::Named { path, .. } => {
@@ -769,6 +773,54 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
         AstPattern::Range { start, end, inclusive } => {
             Some(Pattern::Range { start: *start, end: *end, inclusive: *inclusive })
         }
+    }
+}
+
+/// 内置方法返回类型推断表
+/// 为常用内置类型提供方法返回类型推断
+fn lookup_builtin_method_ret(recv_ty: &IrType, method: &str, _ctx: &TypeCtx) -> Option<IrType> {
+    match recv_ty {
+        // Iterator<T>.next() → Option<T>
+        IrType::Named { path, args } if path == "Iterator" && args.len() == 1 => {
+            match method {
+                "next" => Some(IrType::Option(Box::new(args[0].clone()))),
+                "len" => Some(IrType::Int),
+                _ => None,
+            }
+        }
+        // List<T> 方法
+        IrType::Named { path, args } if path == "List" && args.len() == 1 => {
+            match method {
+                "len" => Some(IrType::Int),
+                "clone" => Some(recv_ty.clone()),
+                "iter" => Some(IrType::Named { path: "Iterator".into(), args: args.clone() }),
+                _ => None,
+            }
+        }
+        // Option<T>.unwrap() / expect() → T
+        IrType::Option(inner) => {
+            match method {
+                "unwrap" | "expect" => Some((**inner).clone()),
+                "map" | "and_then" => Some(recv_ty.clone()), // 保守：返回同类型
+                _ => None,
+            }
+        }
+        IrType::Named { path, args } if path == "Option" && args.len() == 1 => {
+            match method {
+                "unwrap" | "expect" => Some(args[0].clone()),
+                "map" | "and_then" => Some(recv_ty.clone()),
+                _ => None,
+            }
+        }
+        // String 方法
+        IrType::Named { path, .. } if path == "str" || path == "String" => {
+            match method {
+                "len" => Some(IrType::Int),
+                "clone" => Some(recv_ty.clone()),
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }
 
