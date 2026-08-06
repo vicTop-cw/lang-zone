@@ -356,7 +356,9 @@ pub enum Stmt {
         iter: Expr,
     },
     Break,
+    BreakLabel { label: String, value: Option<Expr> },
     Continue,
+    BlockLabel { label: String, body: Block },
     Defer {
         body: Block,
     },

@@ -46,7 +46,11 @@ pub enum Stmt {
     },
     Loop(Vec<Stmt>),
     Break(Option<Expr>),
+    /// break label: value  — 命名块跳出（可选带值）
+    BreakLabel { label: String, value: Option<Expr> },
     Continue,
+    /// block label: body  — 命名块，break label 可跨层跳出
+    Block { label: String, body: Vec<Stmt> },
     Defer(Vec<Stmt>),
     Raise(Expr),
     Guard {

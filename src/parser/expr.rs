@@ -917,6 +917,18 @@ impl ParserExprExt for Parser {
                 }
                 Ok(Expr::If { cond: Box::new(cond), then_body, elif_clauses, else_body })
             }
+            Token::Block => {
+                // block label: body — 命名块表达式
+                self.advance();
+                // 标签名可以是任意标识符或关键字（如 test, match 等）
+                let label = self.advance().to_string();
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Expr::BlockExpr(body))
+            }
             Token::Match => {
                 let expr = self.parse_expr()?;
                 if !self.check(&Token::Colon) {

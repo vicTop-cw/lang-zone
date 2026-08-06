@@ -396,6 +396,7 @@ impl Lexer {
             "not" => Token::Not,
             "is" => Token::Is,
             "duck" => Token::Duck,
+            "block" => Token::Block,
             "True" => Token::True,
             "False" => Token::False,
             _ => Token::Ident(s),

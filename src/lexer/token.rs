@@ -14,7 +14,7 @@ pub enum Token {
     // ── 控制流 ──
     If, Elif, Else, Match, Case, Guard,
     For, In, While, Loop, Break, Continue, Return, With,
-    Defer,
+    Defer, Block,
 
     // ── 异常 ──
     Try, Catch, Finally, Raise, Raises,

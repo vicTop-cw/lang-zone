@@ -112,6 +112,18 @@ impl ParserStmtExt for Parser {
                 };
                 Ok(Stmt::Yield(expr))
             }
+            Token::Block => {
+                // block label: <缩进块> — 命名块
+                self.advance();
+                // 标签名可以是任意标识符或关键字
+                let label = self.advance().to_string();
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                Ok(Stmt::Block { label, body })
+            }
             Token::Comptime => {
                 // comptime: <缩进块> — 编译期求值块
                 self.advance();
@@ -251,6 +263,22 @@ impl ParserStmtExt for Parser {
             }
             Token::Break => {
                 self.advance();
+                // break label: value  — 命名块跳出
+                if let Token::Ident(_) = self.peek() {
+                    if self.peek_n(1) == &Token::Colon {
+                        let label = match self.advance() {
+                            Token::Ident(n) => n,
+                            _ => unreachable!(),
+                        };
+                        self.advance(); // consume :
+                        let value = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) {
+                            Some(self.parse_expr()?)
+                        } else {
+                            None
+                        };
+                        return Ok(Stmt::BreakLabel { label, value });
+                    }
+                }
                 let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) {
                     Some(self.parse_expr()?)
                 } else {

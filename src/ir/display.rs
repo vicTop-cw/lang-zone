@@ -398,7 +398,13 @@ impl fmt::Display for Stmt {
                 f.write_str(" }")
             }
             Stmt::Break => f.write_str("break"),
+            Stmt::BreakLabel { label, value } => {
+                write!(f, "break '{label}")?;
+                if let Some(v) = value { write!(f, " {v}")?; }
+                Ok(())
+            }
             Stmt::Continue => f.write_str("continue"),
+            Stmt::BlockLabel { label, body } => write!(f, "block '{label} {body}"),
             Stmt::Yield { value } => write!(f, "yield {value}"),
             Stmt::YieldFrom { iter } => write!(f, "yield from {iter}"),
             Stmt::Defer { body } => write!(f, "defer {body}"),

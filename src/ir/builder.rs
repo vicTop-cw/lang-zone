@@ -1949,7 +1949,16 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         },
 
         AstStmt::Break(_) => Stmt::Break,
+        AstStmt::BreakLabel { label, value } => Stmt::BreakLabel {
+            label: label.clone(),
+            value: value.as_ref().map(|v| convert_expr(v, ctx)),
+        },
         AstStmt::Continue => Stmt::Continue,
+
+        AstStmt::Block { label, body } => Stmt::BlockLabel {
+            label: label.clone(),
+            body: convert_block(body, ctx),
+        },
 
         AstStmt::Defer(body) => {
             // defer → 展开为 Block（不追加 return，让后续代码继续执行）

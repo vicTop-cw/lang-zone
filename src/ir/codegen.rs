@@ -1629,7 +1629,25 @@ impl CodeGen {
                 self.emit_line(if discard { "};" } else { "}" });
             }
             Stmt::Break => self.emit_line("break;"),
+            Stmt::BreakLabel { label, value } => {
+                if let Some(v) = value {
+                    let vs = self.gen_expr(v);
+                    self.emit_line(&format!("break '{} {};", label, vs));
+                } else {
+                    self.emit_line(&format!("break '{};", label));
+                }
+            }
             Stmt::Continue => self.emit_line("continue;"),
+            Stmt::BlockLabel { label, body } => {
+                self.emit_line(&format!("'{}: {{", label));
+                self.indent += 1;
+                let saved = self.suppress_tail_return;
+                self.suppress_tail_return = true;
+                self.gen_block_inner(body);
+                self.suppress_tail_return = saved;
+                self.indent -= 1;
+                self.emit_line("}");
+            }
             Stmt::Pass => self.emit_line("();  // pass"),
             Stmt::TypeAlias { name, ty } => {
                 self.emit_line(&format!("// type {} = {};", name, self.rust_type(ty)));
