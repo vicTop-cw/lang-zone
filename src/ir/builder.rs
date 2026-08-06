@@ -780,32 +780,45 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
 /// 为常用内置类型提供方法返回类型推断
 fn lookup_builtin_method_ret(recv_ty: &IrType, method: &str, _ctx: &TypeCtx) -> Option<IrType> {
     match recv_ty {
-        // Iterator<T>.next() → Option<T>
+        // Iterator<T> 方法
         IrType::Named { path, args } if path == "Iterator" && args.len() == 1 => {
             match method {
                 "next" => Some(IrType::Option(Box::new(args[0].clone()))),
-                "len" => Some(IrType::Int),
+                "len" | "count" => Some(IrType::Int),
+                "collect" => Some(IrType::Named { path: "List".into(), args: args.clone() }),
                 _ => None,
             }
         }
         // List<T> 方法
         IrType::Named { path, args } if path == "List" && args.len() == 1 => {
             match method {
-                "len" => Some(IrType::Int),
+                "len" | "size" => Some(IrType::Int),
                 "clone" => Some(recv_ty.clone()),
                 "iter" => Some(IrType::Named { path: "Iterator".into(), args: args.clone() }),
+                "get" | "pop" => Some(IrType::Option(Box::new(args[0].clone()))),
+                "first" | "last" => Some(IrType::Option(Box::new(args[0].clone()))),
                 _ => None,
             }
         }
-        // Option<T>.unwrap() / expect() → T
+        // Option<T> 方法
         IrType::Option(inner) => {
             match method {
                 "unwrap" | "expect" => Some((**inner).clone()),
-                "map" | "and_then" => Some(recv_ty.clone()), // 保守：返回同类型
+                "map" | "and_then" => Some(recv_ty.clone()),
+                "is_some" | "is_none" => Some(IrType::Bool),
                 _ => None,
             }
         }
         IrType::Named { path, args } if path == "Option" && args.len() == 1 => {
+            match method {
+                "unwrap" | "expect" => Some(args[0].clone()),
+                "map" | "and_then" => Some(recv_ty.clone()),
+                "is_some" | "is_none" => Some(IrType::Bool),
+                _ => None,
+            }
+        }
+        // Result<T,E>.unwrap() / expect() → T
+        IrType::Named { path, args } if path == "Result" && args.len() >= 1 => {
             match method {
                 "unwrap" | "expect" => Some(args[0].clone()),
                 "map" | "and_then" => Some(recv_ty.clone()),
