@@ -154,16 +154,12 @@ impl CodeGenStmtExt for CodeGen {
 
             Stmt::Break(None) => format!("{}break;\n", pad),
             Stmt::Break(Some(e)) => format!("{}break {};\n", pad, self.gen_expr(e)),
-            Stmt::BreakLabel { label, value } => {
-                if let Some(v) = value {
-                    format!("{}break '{} {};\n", pad, label, self.gen_expr(v))
-                } else {
-                    format!("{}break '{};\n", pad, label)
-                }
+            Stmt::BreakLabel { label: _, value: _ } => {
+                format!("{}return; // break block\n", pad)
             }
-            Stmt::Block { label: _, body } => {
+            Stmt::Block { label, body } => {
                 let body_s = self.gen_block(body, indent + 1, locals);
-                format!("{}'lz_block: {{\n{}{}}}\n", pad, body_s, pad)
+                format!("{}(|| {{ // block '{} \n{}{}}})();\n", pad, label, body_s, pad)
             }
             Stmt::Continue => format!("{}continue;\n", pad),
 

@@ -1629,24 +1629,23 @@ impl CodeGen {
                 self.emit_line(if discard { "};" } else { "}" });
             }
             Stmt::Break => self.emit_line("break;"),
-            Stmt::BreakLabel { label, value } => {
-                if let Some(v) = value {
-                    let vs = self.gen_expr(v);
-                    self.emit_line(&format!("break '{} {};", label, vs));
-                } else {
-                    self.emit_line(&format!("break '{};", label));
-                }
+            Stmt::BreakLabel { label: _, value } => {
+                // block 内 break label → 无值 return（退出闭包）
+                // block 无返回值，value 仅用于 break NAME with v（触发 checker 块，待实现）
+                self.emit_line("return; // break block");
             }
             Stmt::Continue => self.emit_line("continue;"),
             Stmt::BlockLabel { label, body } => {
-                self.emit_line(&format!("'{}: {{", label));
+                // plain 块：压缩为无参闭包（定义即执行，闭包语义）
+                // block scan: ... break scan → (|| { ... return; })()
+                self.emit_line(&format!("(|| {{ // block '{}", label));
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
                 self.gen_block_inner(body);
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
-                self.emit_line("}");
+                self.emit_line("})();");
             }
             Stmt::Pass => self.emit_line("();  // pass"),
             Stmt::TypeAlias { name, ty } => {
