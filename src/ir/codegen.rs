@@ -42,6 +42,10 @@ pub struct CodeGen {
     fn_param_types: HashMap<String, Vec<IrType>>,
     /// 重载函数签名集合：函数名 → 多个参数类型签名（同名函数 >1 个时启用 mangling）
     overload_sigs: HashMap<String, Vec<Vec<IrType>>>,
+    /// 重载签名是否带 `..` 变参：函数名 → 每个签名是否 variadic（03d §2.7 兜底）
+    overload_variadic: HashMap<String, Vec<bool>>,
+    /// 重载签名的显式参数类型（排除注入的 args/kwargs）：函数名 → 每签名显式参数
+    overload_explicit: HashMap<String, Vec<Vec<IrType>>>,
     /// 当前正在生成的函数的 variadic 参数名集合
     current_variadic_params: std::collections::HashSet<String>,
     /// 模块级 const/static 名称（用于参数重命名避免 E0530 冲突）
@@ -64,6 +68,11 @@ pub struct CodeGen {
     lazy_static_names: std::collections::HashSet<String>,
     /// 当前正在生成的函数是否为 async（用于 __go 的异步/同步分派）
     current_fn_is_async: bool,
+    /// duck 约束字段成员：泛型参数名 → 该泛型 duck 约束声明的字段名集合
+    /// （用于泛型函数体内 `a.field` → trait accessor `a.__field_field()`）
+    duck_field_members: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// duck 定义索引（name → DuckDef），供 gen_fn_def 填充 duck_field_members 使用
+    duck_defs: std::collections::HashMap<String, DuckDef>,
     buf: String,
 }
 
@@ -97,6 +106,8 @@ impl CodeGen {
             fn_kwargs: HashMap::new(),
             fn_param_types: HashMap::new(),
             overload_sigs: HashMap::new(),
+            overload_variadic: HashMap::new(),
+            overload_explicit: HashMap::new(),
             top_level_static_names: std::collections::HashSet::new(),
             param_renames: HashMap::new(),
             known_types: std::collections::HashSet::new(),
@@ -105,6 +116,8 @@ impl CodeGen {
             struct_has_new: std::collections::HashSet::new(),
             lazy_static_names: std::collections::HashSet::new(),
             current_fn_is_async: false,
+            duck_field_members: std::collections::HashMap::new(),
+            duck_defs: std::collections::HashMap::new(),
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
             buf: String::new(),
@@ -180,6 +193,15 @@ impl CodeGen {
 
         // 分析跨函数全局可变变量（如 count，在 next() 中使用但 main() 中声明）
         self.analyze_global_vars(module, &const_names);
+        // 索引 duck 定义（用于泛型函数体内 duck 字段访问 → trait accessor 转换）
+        self.duck_defs.clear();
+        let mut duck_defs_idx: HashMap<&str, &DuckDef> = HashMap::new();
+        for item in &module.items {
+            if let Item::DuckDef(d) = item {
+                duck_defs_idx.insert(d.name.as_str(), d);
+                self.duck_defs.insert(d.name.clone(), d.clone());
+            }
+        }
         // 生成 static mut 全局变量声明
         if !self.global_vars.is_empty() {
             let gv: Vec<(String, String, String)> = self
@@ -231,6 +253,22 @@ impl CodeGen {
                         .entry(f.name.clone())
                         .or_insert_with(Vec::new)
                         .push(sig);
+                    // 03d §2.7：`..` 变长签名作为兜底候选，记录 variadic 标记与显式参数
+                    let is_var = f.params.iter().any(|p| p.variadic);
+                    self.overload_variadic
+                        .entry(f.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(is_var);
+                    let explicit: Vec<IrType> = f
+                        .params
+                        .iter()
+                        .filter(|p| !p.variadic)
+                        .map(|p| p.ty.clone())
+                        .collect();
+                    self.overload_explicit
+                        .entry(f.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(explicit);
                 }
                 // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
                 // 注意：kwargs 注入参数单独记录在 fn_kwargs，不参与位置变参打包
@@ -270,6 +308,47 @@ impl CodeGen {
                         args: vec![],
                     }],
                 );
+            }
+        }
+
+        // 补登记：为 mangled 重载名登记 variadic/kwargs/param_types，
+        // 使调用点按 mangled 名（如 show__Any）能查到打包信息（03d §2.7）
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if f.params.iter().any(|p| p.name == "self") {
+                    continue;
+                }
+                let sig: Vec<IrType> = f.params.iter().map(|p| p.ty.clone()).collect();
+                let mangled = self.mangled_fn_name(f.name.clone(), &sig);
+                if mangled == f.name {
+                    continue;
+                }
+                // variadic args 起始索引（排除 kwargs）
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name != "kwargs")
+                {
+                    self.fn_variadic.insert(mangled.clone(), idx);
+                }
+                // kwargs 起始索引
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name == "kwargs")
+                {
+                    self.fn_kwargs.insert(mangled.clone(), idx);
+                }
+                // 参数类型（含注入参数，供隐式 variadic 检测）
+                self.fn_param_types.insert(mangled.clone(), sig);
+                // 默认参数信息
+                let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
+                if default_count > 0 {
+                    self.fn_param_info
+                        .insert(mangled, (f.params.len(), default_count));
+                }
             }
         }
 
@@ -607,6 +686,47 @@ impl CodeGen {
             || matches!(name, "Option" | "Result" | "Some" | "None" | "Ok" | "Err")
     }
 
+    /// 生成 duck 方法签名中的类型：关联类型引用（I.Item，§2.3）→ `Self::Item`，
+    /// 其余类型走 rust_type。仅用于 duck trait / impl 方法签名。
+    fn duck_sig_type(&self, ty: &IrType, duck: &DuckDef) -> String {
+        match ty {
+            IrType::Named { path, args } => {
+                // `I.Item`：path 含点号且前缀是 duck 泛型参数
+                if let Some((owner, member)) = path.split_once('.') {
+                    if duck.generics.iter().any(|g| g.name == owner) {
+                        if args.is_empty() {
+                            return format!("Self::{}", member);
+                        }
+                        let inner: Vec<String> =
+                            args.iter().map(|a| self.duck_sig_type(a, duck)).collect();
+                        return format!("Self::{}<{}>", member, inner.join(", "));
+                    }
+                }
+                if args.is_empty() {
+                    self.rust_type(ty)
+                } else {
+                    let inner: Vec<String> =
+                        args.iter().map(|a| self.duck_sig_type(a, duck)).collect();
+                    format!("{}<{}>", path, inner.join(", "))
+                }
+            }
+            IrType::Option(inner) => format!("Option<{}>", self.duck_sig_type(inner, duck)),
+            IrType::Tuple(items) => {
+                let inner: Vec<String> =
+                    items.iter().map(|i| self.duck_sig_type(i, duck)).collect();
+                format!("({})", inner.join(", "))
+            }
+            IrType::Ref(inner) => format!("&{}", self.duck_sig_type(inner, duck)),
+            IrType::MutRef(inner) => format!("&mut {}", self.duck_sig_type(inner, duck)),
+            IrType::Result { ok, err } => format!(
+                "Result<{}, {}>",
+                self.duck_sig_type(ok, duck),
+                self.duck_sig_type(err, duck)
+            ),
+            other => self.rust_type(other),
+        }
+    }
+
     fn rust_type(&self, ty: &IrType) -> String {
         match ty {
             IrType::Int => "i64".into(),
@@ -743,6 +863,8 @@ impl CodeGen {
 
     /// 根据实参 IR 类型匹配重载签名，返回选择的 mangled 函数名。
     /// 找不到匹配时返回 None（调用方保留原名）。
+    /// 分派原则（03d §2.7）：先用不带 `..` 的固定签名匹配；无命中时
+    /// 再按声明顺序对带 `..` 的变长签名做兜底匹配（只看显式参数）。
     fn match_overload(&self, name: &str, sigs: &[Vec<IrType>], args: &[Expr]) -> Option<String> {
         // 参数类型兼容：实参类型与签名参数类型匹配（含 Any 通配）
         let compatible = |arg_ty: &IrType, param_ty: &IrType| -> bool {
@@ -754,12 +876,41 @@ impl CodeGen {
             }
             arg_ty == param_ty
         };
-        // 优先找精确参数数量匹配且类型全兼容的签名
-        for sig in sigs.iter().filter(|s| s.len() == args.len()) {
-            if args
+        let variadic_flags = self.overload_variadic.get(name);
+        let explicit_sigs = self.overload_explicit.get(name);
+        // 阶段 1：固定签名（无 `..`）精确匹配
+        for (i, sig) in sigs.iter().enumerate() {
+            let is_var = variadic_flags.map_or(false, |v| v.get(i).copied().unwrap_or(false));
+            if is_var {
+                continue;
+            }
+            if sig.len() == args.len()
+                && args
+                    .iter()
+                    .zip(sig.iter())
+                    .all(|(a, p)| compatible(&a.ty, p))
+            {
+                let suffix: Vec<String> = sig.iter().map(|t| self.type_mangle_suffix(t)).collect();
+                return Some(format!("{}__{}", name, suffix.join("_")));
+            }
+        }
+        // 阶段 2：变长签名（带 `..`）兜底：显式参数全部兼容且数量不超出即可
+        for (i, sig) in sigs.iter().enumerate() {
+            let is_var = variadic_flags.map_or(false, |v| v.get(i).copied().unwrap_or(false));
+            if !is_var {
+                continue;
+            }
+            let explicit = explicit_sigs
+                .and_then(|e| e.get(i))
+                .cloned()
+                .unwrap_or_default();
+            if args.len() < explicit.len() {
+                continue;
+            }
+            if explicit
                 .iter()
-                .zip(sig.iter())
-                .all(|(a, p)| compatible(&a.ty, p))
+                .zip(args.iter())
+                .all(|(p, a)| compatible(&a.ty, p))
             {
                 let suffix: Vec<String> = sig.iter().map(|t| self.type_mangle_suffix(t)).collect();
                 return Some(format!("{}__{}", name, suffix.join("_")));
@@ -811,6 +962,51 @@ impl CodeGen {
             if p.name != "self" && self.top_level_static_names.contains(&p.name) {
                 self.param_renames
                     .insert(p.name.clone(), format!("{}_", p.name));
+            }
+        }
+        // 收集泛型参数上的 duck 字段约束（a.field → a.__field_field() trait accessor）
+        // 注意：duck_field_members 的 key 用「实际参数名」（如 a），
+        // 因为函数体内字段访问的 base 是参数名，不是泛型参数名（A）
+        // 字段归属：duck 字段约束 owner 前缀（如 A）对应「该 duck 泛型参数在 bound
+        // 实参中的位置」；若本参数对应的函数泛型出现在该位置，则字段属于本参数。
+        self.duck_field_members.clear();
+        for p in &f.params {
+            let IrType::Generic(gname) = &p.ty else { continue };
+            let mut field_names: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            // 找到该泛型参数对应的 duck 约束
+            if let Some(g) = f.generics.iter().find(|g| &g.name == gname) {
+                for b in &g.bounds {
+                    if let IrType::Named { path, args } = b {
+                        if let Some(d) = self.duck_defs.get(path) {
+                            // 本函数泛型 gname 在 bound 实参中的位置 → duck 泛型参数名
+                            let duck_owner_for_self: Option<String> = args
+                                .iter()
+                                .position(|ba| {
+                                    matches!(ba, IrType::Generic(n) if n == gname)
+                                        || matches!(ba, IrType::Named { path, .. } if path == gname)
+                                })
+                                .and_then(|i| d.generics.get(i))
+                                .map(|dg| dg.name.clone());
+                            for df in &d.fields {
+                                // 字段属于本泛型：无 owner 前缀，或
+                                // owner == 本泛型在该 bound 中对应的 duck 泛型参数
+                                let belongs = match &df.owner {
+                                    None => true,
+                                    Some(o) => {
+                                        duck_owner_for_self.as_ref().map_or(false, |d| d == o)
+                                    }
+                                };
+                                if belongs {
+                                    field_names.insert(df.name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !field_names.is_empty() {
+                self.duck_field_members.insert(p.name.clone(), field_names);
             }
         }
         // 检测 duck 参数 → 自动注入泛型类型
@@ -866,6 +1062,107 @@ impl CodeGen {
             }
         } else {
             String::new()
+        };
+
+        // 字段关系 duck 的 where 投影约束（§2.2 `A.id == B.id`）：
+        // 关系字段在 trait 中用关联类型 __Field_x 表达，泛型函数体内比较两侧字段时，
+        // 需要 `<A as Duck<...>>::__Field_x: PartialEq<<B as Duck<...>>::__Field_x>` 约束
+        let mut rel_clauses: Vec<String> = Vec::new();
+        for g in &f.generics {
+            for b in &g.bounds {
+                let IrType::Named { path, args } = b else { continue };
+                let Some(d) = self.duck_defs.get(path) else { continue };
+                for df in &d.fields {
+                    let Some((rel_owner, rel_name)) = &df.rel else { continue };
+                    let owner_matches = match &df.owner {
+                        None => true,
+                        Some(o) => o == &g.name,
+                    };
+                    if !owner_matches {
+                        continue;
+                    }
+                    let args_str = args
+                        .iter()
+                        .map(|a| self.rust_type(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let left = format!(
+                        "<{} as {}<{}>>::__Field_{}",
+                        g.name, path, args_str, df.name
+                    );
+                    // 右侧：找函数泛型 rel_owner 的同名 duck bound（如 B: LinkedFields<B, A>）
+                    let right = f
+                        .generics
+                        .iter()
+                        .find(|g2| &g2.name == rel_owner)
+                        .and_then(|g2| {
+                            g2.bounds.iter().find_map(|b2| {
+                                if let IrType::Named {
+                                    path: p2,
+                                    args: args2,
+                                } = b2
+                                {
+                                    if p2 == path {
+                                        let s2 = args2
+                                            .iter()
+                                            .map(|a| self.rust_type(a))
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+                                        return Some(format!(
+                                            "<{} as {}<{}>>::__Field_{}",
+                                            rel_owner, path, s2, rel_name
+                                        ));
+                                    }
+                                }
+                                None
+                            })
+                        })
+                        .unwrap_or_else(|| {
+                            format!(
+                                "<{} as {}<{}>>::__Field_{}",
+                                rel_owner, path, args_str, rel_name
+                            )
+                        });
+                    rel_clauses.push(format!("    {}: PartialEq<{}>", left, right));
+                }
+                // 关联类型 Debug 约束（§2.3）：泛型函数体内 print/format 关联类型值
+                // 需要 `<T as HasItem<T>>::Item: std::fmt::Debug`
+                for a in &d.assoc_types {
+                    let belongs = match &a.owner {
+                        None => true,
+                        Some(o) => {
+                            let oi = d.generics.iter().position(|g2| &g2.name == o);
+                            match oi {
+                                Some(i) => args.get(i).map_or(false, |ba| {
+                                    matches!(ba, IrType::Generic(n) if n == &g.name)
+                                        || matches!(ba, IrType::Named { path, .. } if path == &g.name)
+                                }),
+                                None => false,
+                            }
+                        }
+                    };
+                    if !belongs {
+                        continue;
+                    }
+                    let args_str = args
+                        .iter()
+                        .map(|a| self.rust_type(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    rel_clauses.push(format!(
+                        "    <{} as {}<{}>>::{}: std::fmt::Debug",
+                        g.name, path, args_str, a.name
+                    ));
+                }
+            }
+        }
+        let rel_where = if rel_clauses.is_empty() {
+            String::new()
+        } else if math_where.is_empty() {
+            format!("\nwhere\n{}", rel_clauses.join(",\n"))
+        } else {
+            // math_where 已是 \nwhere\nclauses 形式，关系约束追加为额外子句
+            format!("{},\n{}", math_where.trim_end(), rel_clauses.join(",\n"))
         };
 
         let params: Vec<String> = f
@@ -948,7 +1245,7 @@ impl CodeGen {
             &f.params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
         );
         let sig = format!(
-            "{}{}{}fn {}{}({}){}{}",
+            "{}{}{}fn {}{}({}){}{}{}",
             if f.is_test { "#[test]\n" } else { "" },
             vis,
             async_kw,
@@ -957,6 +1254,7 @@ impl CodeGen {
             params.join(", "),
             ret,
             math_where,
+            rel_where,
         );
 
         self.emit_line(&format!("{} {{", sig));
@@ -1549,12 +1847,36 @@ impl CodeGen {
             let gs: Vec<String> = d.generics.iter().map(|g| g.name.clone()).collect();
             format!("<{}>", gs.join(", "))
         };
+        // 多泛型关系 duck（有 owner 前缀方法）：方法给默认实现，
+        // 由自动生成的 impl 按 owner 选择性覆写（编译期结构检查保证正确性）
+        let has_owners = d.methods.iter().any(|m| m.owner.is_some());
         self.emit_line(&format!("pub trait {}{} {{", d.name, generics));
         self.indent += 1;
+        // 关联类型约束（§2.3 `type I.Item`）→ Rust trait 关联类型声明
+        for a in &d.assoc_types {
+            self.emit_line(&format!("type {};", a.name));
+        }
         // 字段约束 → 生成 accessor 方法
         for f in &d.fields {
+            // 关系字段（A.id == B.id / A.name: B.name）：无显式类型，
+            // 用关联类型表达「两侧类型相等」（§2.2），impl 时由具体类型指定
+            if f.rel.is_some() {
+                self.emit_line(&format!("type __Field_{};", f.name));
+                self.emit_line(&format!(
+                    "fn __field_{}(&self) -> &Self::__Field_{} {{ unimplemented!() }}",
+                    f.name, f.name
+                ));
+                continue;
+            }
             let rt = self.rust_type(&f.ty);
-            self.emit_line(&format!("fn __field_{}(&self) -> &{};", f.name, rt));
+            if has_owners || f.owner.is_some() {
+                self.emit_line(&format!(
+                    "fn __field_{}(&self) -> &{} {{ unimplemented!() }}",
+                    f.name, rt
+                ));
+            } else {
+                self.emit_line(&format!("fn __field_{}(&self) -> &{};", f.name, rt));
+            }
         }
         // 方法签名
         for m in &d.methods {
@@ -1569,20 +1891,39 @@ impl CodeGen {
                             "&self".to_string()
                         } // LZ 默认即引用
                     } else {
-                        format!("{}: {}", p.name, self.rust_type(&p.ty))
+                        format!("{}: {}", p.name, self.duck_sig_type(&p.ty, d))
                     }
                 })
                 .collect();
-            let ret = self.rust_type(&m.ret_ty);
-            self.emit_line(&format!("fn {}({}) -> {};", m.name, params.join(", "), ret));
+            let ret = self.duck_sig_type(&m.ret_ty, d);
+            if has_owners {
+                self.emit_line(&format!(
+                    "fn {}({}) -> {} {{ unimplemented!() }}",
+                    m.name,
+                    params.join(", "),
+                    ret
+                ));
+            } else {
+                self.emit_line(&format!("fn {}({}) -> {};", m.name, params.join(", "), ret));
+            }
+        }
+        // PhantomData 占位方法：确保所有 duck 泛型参数被 trait 使用（避免 E0392）
+        if !d.generics.is_empty() {
+            let gs: Vec<String> = d.generics.iter().map(|g| g.name.clone()).collect();
+            self.emit_line(&format!(
+                "fn _lz_duck_phantom(&self) -> std::marker::PhantomData<({})> {{ std::marker::PhantomData }}",
+                gs.join(", ")
+            ));
         }
         self.indent -= 1;
         self.emit_line("}");
     }
 
     /// 自动生成 duck 结构匹配的 Rust impl：
-    /// 对每个在调用点被用作 duck 约束实参的具体类型，生成 `impl Duck for Type { ... }`，
+    /// 对每个在调用点被用作 duck 约束实参的具体类型，生成 `impl Duck<...> for Type<...> { ... }`，
     /// 方法体委托到该类型自己的同名方法（结构匹配 → 运行时零开销）。
+    /// 支持多泛型关系 duck（Mapper<T,R>）与泛型具体类型（Wrapper<T>）：
+    /// 通过 duck 方法签名与具体类型方法签名的 unify，反推 duck 泛型参数 → 具体类型的绑定。
     fn gen_duck_auto_impls(&mut self, module: &IrModule) {
         let pairs = crate::ir::duck_check::collect_duck_impls(module);
         if pairs.is_empty() {
@@ -1602,26 +1943,147 @@ impl CodeGen {
                 _ => {}
             }
         }
-        for (type_name, duck_name) in &pairs {
+        let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (type_name, duck_name, initial_bindings) in &pairs {
             let Some(duck) = duck_defs.get(duck_name.as_str()) else { continue };
             let Some(sdef) = struct_defs.get(type_name.as_str()) else { continue };
-            // 泛型 duck（如 Mapper<T,R>）或泛型具体类型：需要类型参数映射，暂不自动 impl
-            if !duck.generics.is_empty() || !sdef.generics.is_empty() {
+            // 同一 (类型, duck) 只生成一份泛型 impl（不同调用点泛型实参由 Rust 推断）
+            let dedup = format!("{}::{}", type_name, duck_name);
+            if !emitted.insert(dedup) {
                 continue;
             }
-            self.emit_line(&format!("impl {} for {} {{", duck.name, sdef.name));
+            // 反推 duck 泛型参数 → 具体类型表达式（调用点绑定 + 方法签名 unify 补全）
+            let Some(subst) = crate::ir::duck_check::infer_duck_bindings(
+                duck,
+                sdef,
+                initial_bindings,
+            ) else {
+                continue;
+            };
+            // 具体类型自身的泛型参数名（如 Wrapper 的 T）
+            let concrete_generics: Vec<String> =
+                sdef.generics.iter().map(|g| g.name.clone()).collect();
+            // impl 目标类型表达式：TypeName<T1, T2>
+            let self_ir = if concrete_generics.is_empty() {
+                IrType::named(type_name)
+            } else {
+                IrType::named_with(
+                    type_name,
+                    concrete_generics
+                        .iter()
+                        .map(|n| IrType::Generic(n.clone()))
+                        .collect(),
+                )
+            };
+            let self_str = self.rust_type(&self_ir);
+            // duck 泛型参数名（供 trait 泛型实参顺序）
+            let duck_names: Vec<String> = duck.generics.iter().map(|g| g.name.clone()).collect();
+            // trait 泛型实参（按 duck 泛型参数顺序）
+            let trait_args: Vec<String> =
+                duck_names.iter().map(|n| self.rust_type(&subst[n])).collect();
+            // impl 泛型参数：与具体类型定义一致（Clone + Debug bound）
+            let impl_generics = if concrete_generics.is_empty() {
+                String::new()
+            } else {
+                let params: Vec<String> = sdef
+                    .generics
+                    .iter()
+                    .map(|g| {
+                        if g.bounds.is_empty() {
+                            format!("{}: Clone + std::fmt::Debug", g.name)
+                        } else {
+                            let bounds: Vec<String> =
+                                g.bounds.iter().map(|b| self.rust_type(b)).collect();
+                            format!(
+                                "{}: Clone + std::fmt::Debug + {}",
+                                g.name,
+                                bounds.join(" + ")
+                            )
+                        }
+                    })
+                    .collect();
+                format!("<{}>", params.join(", "))
+            };
+            self.emit_line(&format!(
+                "impl{} {}{} for {} {{",
+                impl_generics,
+                duck.name,
+                if trait_args.is_empty() {
+                    String::new()
+                } else {
+                    format!("<{}>", trait_args.join(", "))
+                },
+                self_str
+            ));
             self.indent += 1;
-            // 字段约束 → 直接访问字段
+            // 关联类型绑定（§2.3 `type I.Item`）：trait 声明了关联类型，
+            // impl 必须提供具体值。推断：具体类型第一个泛型参数，否则 Any→i64。
+            for a in &duck.assoc_types {
+                let belongs = match &a.owner {
+                    None => true,
+                    Some(g) => {
+                        matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name)
+                    }
+                };
+                if !belongs {
+                    continue;
+                }
+                // 具体类型第一个泛型参数（如 MyIter<T> 的 T）作为关联类型值
+                let assoc_ty = concrete_generics
+                    .first()
+                    .map(|n| IrType::Generic(n.clone()))
+                    .unwrap_or_else(|| IrType::Any);
+                let rt = self.rust_type(&assoc_ty);
+                self.emit_line(&format!("type {} = {};", a.name, rt));
+            }
+            // 字段约束 → 直接访问字段（只生成属于本类型的字段约束）
             for f in &duck.fields {
-                let rt = self.rust_type(&f.ty);
+                let belongs = match &f.owner {
+                    None => true,
+                    Some(g) => matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name),
+                };
+                if !belongs {
+                    continue;
+                }
+                // 关系字段（A.id == B.id）：trait 用关联类型 __Field_x，
+                // impl 需绑定关联类型 = 具体类型该字段的实际类型，并覆写 accessor
+                if f.rel.is_some() {
+                    // 找到具体类型中同名字段的类型
+                    let field_ty = sdef
+                        .fields
+                        .iter()
+                        .find(|sf| sf.name == f.name)
+                        .map(|sf| sf.ty.clone())
+                        .unwrap_or_else(|| IrType::Any);
+                    let rt = self.rust_type(&field_ty);
+                    self.emit_line(&format!("type __Field_{} = {};", f.name, rt));
+                    self.emit_line(&format!(
+                        "fn __field_{}(&self) -> &Self::__Field_{} {{",
+                        f.name, f.name
+                    ));
+                    self.indent += 1;
+                    self.emit_line(&format!("&self.{}", f.name));
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    continue;
+                }
+                let fty = crate::ir::duck_check::substitute(&f.ty, &subst);
+                let rt = self.rust_type(&fty);
                 self.emit_line(&format!("fn __field_{}(&self) -> &{} {{", f.name, rt));
                 self.indent += 1;
                 self.emit_line(&format!("&self.{}", f.name));
                 self.indent -= 1;
                 self.emit_line("}");
             }
-            // 方法约束 → 委托到具体类型的同名方法
+            // 方法约束 → 委托到具体类型的同名方法（只生成属于本类型的约束）
             for m in &duck.methods {
+                let belongs = match &m.owner {
+                    None => true,
+                    Some(g) => matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name),
+                };
+                if !belongs {
+                    continue;
+                }
                 let params: Vec<String> = m
                     .params
                     .iter()
@@ -1633,7 +2095,10 @@ impl CodeGen {
                                 "&self".to_string()
                             }
                         } else {
-                            format!("{}: {}", p.name, self.rust_type(&p.ty))
+                            // 先替换 duck 泛型引用（R→Fahrenheit），再处理关联类型引用
+                            // （I.Item → Self::Item），保证 impl 签名类型均有定义
+                            let ty = crate::ir::duck_check::substitute(&p.ty, &subst);
+                            format!("{}: {}", p.name, self.duck_sig_type(&ty, duck))
                         }
                     })
                     .collect();
@@ -1648,8 +2113,13 @@ impl CodeGen {
                         }
                     })
                     .collect();
-                let ret = self.rust_type(&m.ret_ty);
-                self.emit_line(&format!("fn {}({}) -> {} {{", m.name, params.join(", "), ret));
+                let ret = if m.ret_ty == IrType::Unit {
+                    String::new()
+                } else {
+                    let ty = crate::ir::duck_check::substitute(&m.ret_ty, &subst);
+                    format!(" -> {}", self.duck_sig_type(&ty, duck))
+                };
+                self.emit_line(&format!("fn {}({}){} {{", m.name, params.join(", "), ret));
                 self.indent += 1;
                 self.emit_line(&format!("{}::{}({})", sdef.name, m.name, args.join(", ")));
                 self.indent -= 1;
@@ -3032,6 +3502,15 @@ impl CodeGen {
                             call_str
                         }
                     }
+                } else if args_s.is_empty()
+                    && self.is_known_type(&callee_s)
+                    && !matches!(
+                        callee_s.as_str(),
+                        "Option" | "Result" | "Some" | "None" | "Ok" | "Err"
+                    )
+                {
+                    // 空字段 struct 构造：Text() → Text {}
+                    format!("{} {{}}", callee_s)
                 } else {
                     let call_str = format!("{}{}({})", callee_s, turbofish, args_s.join(", "));
                     if let Some(ref packed) = unpack_packed {
@@ -3240,6 +3719,15 @@ impl CodeGen {
                 // Enum variant: Color.Red → Color::Red (field 大写开头)
                 // Module path: std.io.print → std::io::print
                 // Method/field access: config.get() -> config.get (field 小写开头)
+                // duck 约束泛型参数的字段访问：a.field → a.__field_field()（trait accessor）
+                if let ExprKind::Var(name) = &base.kind {
+                    if let Some(fields) = self.duck_field_members.get(name) {
+                        if fields.contains(field) {
+                            let base_s = self.gen_expr(base);
+                            return format!("{}.__field_{}()", base_s, field);
+                        }
+                    }
+                }
                 let base_s = self.gen_expr(base);
                 // self 在 impl 方法中始终是 receiver，用 `.` 访问字段
                 if base_s == "self" {

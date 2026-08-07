@@ -3179,12 +3179,22 @@ fn convert_block_with_ctx(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
 
 /// 转换 duck 类型约束 → IR DuckDef
 fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
+    // 嵌套约束 where T: X → 存到对应泛型参数的 bounds（§2.4）
+    let mut where_bounds: HashMap<String, Vec<IrType>> = HashMap::new();
+    for wb in &d.where_clause {
+        let ir_bounds: Vec<IrType> = wb.bounds.iter().map(|b| from_ast_type(b)).collect();
+        where_bounds
+            .entry(wb.type_param.clone())
+            .or_default()
+            .extend(ir_bounds);
+    }
     let methods: Vec<DuckMethod> = d
         .methods
         .iter()
         .map(|m| DuckMethod {
             owner: m.owner.clone(),
             name: m.name.clone(),
+            name_pattern: m.name_pattern.clone(),
             params: m
                 .params
                 .iter()
@@ -3204,6 +3214,7 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
                 .map(|t| from_ast_type(t))
                 .unwrap_or(IrType::Unit),
             param_range: m.param_range,
+            is_default: m.is_default,
         })
         .collect();
     let fields: Vec<DuckField> = d
@@ -3213,6 +3224,7 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
             owner: f.owner.clone(),
             name: f.name.clone(),
             ty: from_ast_type(&f.ty),
+            rel: f.rel.clone(),
         })
         .collect();
     DuckDef {
@@ -3222,8 +3234,34 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
             .iter()
             .map(|g| GenericParam {
                 name: g.clone(),
-                bounds: vec![],
+                bounds: where_bounds.remove(g).unwrap_or_default(),
                 default: None,
+            })
+            .collect(),
+        assoc_types: d
+            .assoc_types
+            .iter()
+            .map(|a| DuckAssocType {
+                owner: a.owner.clone(),
+                name: a.name.clone(),
+            })
+            .collect(),
+        satisfies: d.satisfies.clone(),
+        sealed: d.sealed,
+        match_rules: d
+            .match_rules
+            .iter()
+            .map(|r| DuckMatchRule {
+                pattern: r.pattern.clone(),
+                range: r.range,
+            })
+            .collect(),
+        param_reqs: d
+            .param_reqs
+            .iter()
+            .map(|r| DuckParamReq {
+                is_required: r.is_required,
+                names: r.names.clone(),
             })
             .collect(),
         methods,

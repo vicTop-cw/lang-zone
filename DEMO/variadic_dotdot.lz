@@ -7,26 +7,35 @@
 
 // === 安全收集：无 ..，类型安全 ===
 def sum_all(values: List<int>) -> int =
-    total = 0
+    s = 0
     for v in values:
-        total += v
-    total
+        s += v
+    s
 
 sum_all(1, 2, 3, 4)        // 10 — 自动收集为 List<int>
+
+def main() =
+    sum_all(1, 2, 3, 4)
+    catch_all(1, 2, 3)
+    kw_only(timeout: 30, retry: 3)
+    let t = total(1, 2, 3)
+    print(f"total={t}")
+    both(1, 2, name: 9)
+    print("variadic demo done")
 
 // === 单 .. 无注解 → 仅注入 args（元素 Any，等价 Tuple<Any,..>） ===
 def catch_all(..) =
     print(f"args={args}")      // args: List<Any>
 
 catch_all(1, 2, 3)            // args=[1,2,3]
-// catch_all(1, name="x")     // ❌ 单 .. 无注解不收集 kwargs
+// catch_all(1, name: "x")    // ❌ 单 .. 无注解不收集 kwargs
 
 // 想要 kwargs：用 ..: Dict 或第二个 ..
 def kw_only(..: Dict<str, int>) =
     for (k, v) in kwargs:
         print(f"{k}={v}")
 
-kw_only(timeout=30, retry=3)   // timeout=30, retry=3
+kw_only(timeout: 30, retry: 3)   // timeout=30, retry=3
 
 // === ..: Tuple → 仅 args（带类型约束） ===
 def total(..: Tuple<int>) -> int =
@@ -42,4 +51,4 @@ def both(.., ..) =
     print(f"args={args}")
     print(f"kwargs={kwargs}")
 
-both(1, 2, name="x")      // args=[1,2], kwargs={name:"x"}
+both(1, 2, name: "x")      // args=[1,2], kwargs={name:"x"}

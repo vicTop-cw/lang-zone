@@ -1,0 +1,42 @@
+// ============================================================
+// 测试: duck 多泛型关系 — Mapper<T, R> 自动 impl 生成 + 泛型类型映射
+// ============================================================
+
+// ── 多泛型关系 duck：T 有 map 返回 R，R 有 unmap 返回 T ──
+duck Mapper<T, R> =
+    def T.map(self) -> R
+    def R.unmap(self) -> T
+
+// ── 满足 duck 的普通类型 ──
+struct Celsius =
+    value: f64
+    def map(self) -> Fahrenheit = Fahrenheit(value: self.value * 9.0 / 5.0 + 32.0)
+
+struct Fahrenheit =
+    value: f64
+    def unmap(self) -> Celsius = Celsius(value: (self.value - 32.0) * 5.0 / 9.0)
+
+// ── 泛型具体类型：Wrapper<T> 自身有 map 返回 T ──
+duck Identity<T> =
+    def get(self) -> T
+
+struct Box2<T> =
+    value: T
+    def get(self) -> T = self.value
+
+// ── 使用 duck 约束的泛型函数 ──
+def convert<T, R>(c: T) -> R where T: Mapper<T, R> =
+    c.map()
+
+def unwrap<T, R>(b: T) -> R where T: Identity<R> =
+    b.get()
+
+def main() =
+    let c = Celsius(value: 0.0)
+    let f: Fahrenheit = convert(c)
+    print(f"0C = {f.value}F")
+
+    let b = Box2(value: 42)
+    let v = unwrap(b)
+    print(f"boxed = {v}")
+    print("multi-generic duck demo done")

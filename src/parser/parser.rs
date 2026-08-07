@@ -1338,10 +1338,24 @@ impl Parser {
                     _ => Type::Named(n),
                 };
                 // 泛型参数 List<int>, Dict<K,V>, Option<T>, Result<T,E>
+                // 也支持 Tuple<T1, T2, ..> 中的 `..` 通配（03d §2.3：约束位置参数各自类型）
                 if self.check(&Token::Lt) {
                     self.advance(); // consume <
                     let mut inner = Vec::new();
                     loop {
+                        if self.check(&Token::DotDot) {
+                            // `..` 通配：位置参数数量不限，push 占位 Any 后继续
+                            self.advance();
+                            inner.push(Type::Any);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Gt) {
+                                self.advance();
+                                break;
+                            }
+                            continue;
+                        }
                         inner.push(self.parse_type()?);
                         if self.check(&Token::Comma) {
                             self.advance();
@@ -1952,14 +1966,143 @@ impl Parser {
         } else {
             Vec::new()
         };
+        // 可选的嵌套约束: duck D<T> where T: Iterable = ...（§2.4）
+        let where_clause = if self.check(&Token::Where) {
+            self.parse_where_clause()?
+        } else {
+            Vec::new()
+        };
         self.expect(Token::Eq)?;
         self.skip_newlines();
         self.expect(Token::Indent)?;
 
         let mut methods = Vec::new();
         let mut fields = Vec::new();
+        let mut assoc_types = Vec::new();
+        let mut satisfies = Vec::new();
+        let mut sealed = false;
+        let mut match_rules = Vec::new();
+        let mut param_reqs = Vec::new();
 
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            // default 修饰（§11.4③）：`default def fallback(self) -> ()`
+            // 必须在软关键字行判断之前消费，否则 default 会走普通标识符分支
+            let mut is_default = false;
+            if let Token::Ident(kw) = self.peek() {
+                if kw == "default" && self.peek_n(1) == &Token::Def {
+                    self.advance();
+                    is_default = true;
+                }
+            }
+            // ── 软关键字行（§11）：satisfies / sealed / match / require / optional ──
+            if let Token::Ident(kw) = self.peek() {
+                match kw.as_str() {
+                    "satisfies" => {
+                        self.advance();
+                        match self.advance() {
+                            Token::Ident(n) => satisfies.push(n),
+                            t => {
+                                return Err(format!(
+                                    "Expected duck name after satisfies, got {:?}",
+                                    t
+                                ))
+                            }
+                        }
+                        self.skip_newlines();
+                        continue;
+                    }
+                    "sealed" => {
+                        self.advance();
+                        sealed = true;
+                        self.skip_newlines();
+                        continue;
+                    }
+                    "match" => {
+                        self.advance();
+                        // match /pattern/ at_least(N) / at_most(N) / exact(N)
+                        //（模式用字符串字面量承载，如 match "get_\w+" at_least(1)）
+                        let pattern = match self.advance() {
+                            Token::StrLit(s) => s,
+                            Token::RawStrLit(s) => s,
+                            t => {
+                                return Err(format!(
+                                    "Expected regex pattern in duck match, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        let count_kw = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected count constraint in duck match, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.expect(Token::LParen)?;
+                        let n = match self.advance() {
+                            Token::IntLit(n) => n as usize,
+                            t => {
+                                return Err(format!(
+                                    "Expected int in match constraint, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.expect(Token::RParen)?;
+                        let range = match count_kw.as_str() {
+                            "at_least" => (n, usize::MAX),
+                            "at_most" => (0, n),
+                            "exact" => (n, n),
+                            other => {
+                                return Err(format!(
+                                    "Expected at_least/at_most/exact, got {}",
+                                    other
+                                ))
+                            }
+                        };
+                        match_rules.push(DuckMatchRule { pattern, range });
+                        self.skip_newlines();
+                        continue;
+                    }
+                    "require" | "optional" => {
+                        let is_required = kw == "require";
+                        self.advance();
+                        self.expect(Token::LParen)?;
+                        let mut names = Vec::new();
+                        while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                            self.skip_newlines();
+                            match self.advance() {
+                                Token::Ident(n) => names.push(n),
+                                Token::Self_ => names.push("self".to_string()),
+                                t => {
+                                    return Err(format!(
+                                        "Expected param name in duck require/optional, got {:?}",
+                                        t
+                                    ))
+                                }
+                            }
+                            // 可选类型标注 name: type
+                            if self.check(&Token::Colon) {
+                                self.advance();
+                                self.parse_type()?;
+                            }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                        param_reqs.push(DuckParamReq {
+                            is_required,
+                            names,
+                        });
+                        self.skip_newlines();
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
             if self.check(&Token::Def) {
                 self.advance(); // def
                 // 多泛型关系 duck 的类型前缀: def T.map(self) -> R
@@ -1971,9 +2114,15 @@ impl Parser {
                         self.advance(); // .
                     }
                 }
+                // 方法名：普通标识符 或 正则模式 "get_\w+"（§8.4）
+                let mut name_pattern = None;
                 let method_name = match self.advance() {
                     Token::Ident(n) => n,
                     Token::MagicMethod(n) => n,
+                    Token::StrLit(p) => {
+                        name_pattern = Some(p);
+                        "__regex__".to_string()
+                    }
                     t => return Err(format!("Expected method name in duck, got {:?}", t)),
                 };
                 // 解析参数（可含参数数量约束: exact(N)/min(N)/max(N)/range(L,R)）
@@ -2044,9 +2193,11 @@ impl Parser {
                 methods.push(DuckMethod {
                     owner,
                     name: method_name,
+                    name_pattern,
                     params,
                     return_type: ret,
                     param_range,
+                    is_default,
                 });
             } else if self.check(&Token::Dot) {
                 // .field_name: Type（无前缀）
@@ -2061,16 +2212,43 @@ impl Parser {
                     owner: None,
                     name: field_name,
                     ty: field_ty,
+                    rel: None,
                 });
             } else if let Token::Ident(ref kw) = self.peek() {
                 if kw == "type" {
-                    // type AssociatedType — skip for now (关联类型后续实现)
+                    // 关联类型约束: `type I.Item`（§2.3）或 `type Item`（当前类型）
                     self.advance(); // type
-                    while !self.check(&Token::Newline) && !self.check(&Token::Eof) {
-                        self.advance();
+                    let owner = if self.peek_n(1) == &Token::Dot {
+                        match self.advance() {
+                            Token::Ident(n) => Some(n),
+                            t => {
+                                return Err(format!(
+                                    "Expected type prefix in duck assoc type, got {:?}",
+                                    t
+                                ))
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    if owner.is_some() {
+                        self.advance(); // .
                     }
+                    let assoc_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "Expected assoc type name in duck, got {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    assoc_types.push(DuckAssocType {
+                        owner,
+                        name: assoc_name,
+                    });
                 } else if self.peek_n(1) == &Token::Dot {
-                    // 多泛型关系 duck 的字段前缀: A.x: f64
+                    // 多泛型关系 duck 的字段前缀: A.x: f64 / A.x == B.y / A.x: B.y（§2.2）
                     let owner = match self.advance() {
                         Token::Ident(n) => n,
                         t => return Err(format!("Expected type prefix in duck, got {:?}", t)),
@@ -2080,12 +2258,69 @@ impl Parser {
                         Token::Ident(n) => n,
                         t => return Err(format!("Expected field name in duck, got {:?}", t)),
                     };
+                    // A.x == B.y：类型等同关系
+                    if self.check(&Token::EqEq) {
+                        self.advance();
+                        let rel_owner = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected type prefix after == in duck field, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.advance(); // .
+                        let rel_name = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected field name after == in duck field, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        fields.push(DuckField {
+                            owner: Some(owner),
+                            name: field_name,
+                            ty: Type::Any,
+                            rel: Some((rel_owner, rel_name)),
+                        });
+                        continue;
+                    }
                     self.expect(Token::Colon)?;
+                    // A.x: B.y：简写形式（类型等同），区别于 A.x: f64（显式类型）
+                    if let Token::Ident(_rel_owner) = self.peek() {
+                        if self.peek_n(1) == &Token::Dot {
+                            let rel_owner = match self.advance() {
+                                Token::Ident(n) => n,
+                                _ => unreachable!(),
+                            };
+                            self.advance(); // .
+                            let rel_name = match self.advance() {
+                                Token::Ident(n) => n,
+                                t => {
+                                    return Err(format!(
+                                        "Expected field name after : in duck field, got {:?}",
+                                        t
+                                    ))
+                                }
+                            };
+                            fields.push(DuckField {
+                                owner: Some(owner),
+                                name: field_name,
+                                ty: Type::Any,
+                                rel: Some((rel_owner, rel_name)),
+                            });
+                            continue;
+                        }
+                    }
                     let field_ty = self.parse_type()?;
                     fields.push(DuckField {
                         owner: Some(owner),
                         name: field_name,
                         ty: field_ty,
+                        rel: None,
                     });
                 } else {
                     self.advance(); // skip unexpected
@@ -2101,6 +2336,12 @@ impl Parser {
         Ok(DuckDef {
             name,
             generics,
+            where_clause,
+            assoc_types,
+            satisfies,
+            sealed,
+            match_rules,
+            param_reqs,
             methods,
             fields,
         })

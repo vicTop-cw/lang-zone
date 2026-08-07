@@ -340,10 +340,46 @@ pub struct TestDef {
 pub struct DuckDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
+    /// 关联类型约束: `type I.Item`（§2.3）
+    pub assoc_types: Vec<DuckAssocType>,
+    /// satisfies 约束行（§11.4①）：要求目标类型同时满足另一 duck
+    pub satisfies: Vec<String>,
+    /// sealed 闭合约束（§11.4②）：目标类型不得有额外成员
+    pub sealed: bool,
+    /// 正则方法匹配约束（§8.4）：`match /pattern/ at_least(N)`
+    pub match_rules: Vec<DuckMatchRule>,
+    /// 命名参数约束（§8.2.2）：`require(...)` / `optional(...)` 独立行
+    pub param_reqs: Vec<DuckParamReq>,
     /// 方法签名列表
     pub methods: Vec<DuckMethod>,
     /// 字段约束: field_name → type（多泛型 duck 可带类型前缀）
     pub fields: Vec<DuckField>,
+}
+
+/// Duck 正则匹配约束行（§8.4）：`match /pattern/ at_least(N)`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckMatchRule {
+    pub pattern: String,
+    /// (lo, hi) 数量约束：at_least→(N, MAX)、at_most→(0, N)、exact→(N, N)
+    pub range: (usize, usize),
+}
+
+/// Duck 命名参数约束行（§8.2.2）：`require(name: str, version: int)` /
+/// `optional(timeout: int)`
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckParamReq {
+    /// true = require（必需命名参数）；false = optional（可选命名参数）
+    pub is_required: bool,
+    /// 参数名列表
+    pub names: Vec<String>,
+}
+
+/// Duck 关联类型约束 — `type I.Item`（§2.3）
+/// owner 为所属类型前缀（如 I），None 表示当前类型自身
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckAssocType {
+    pub owner: Option<String>,
+    pub name: String,
 }
 
 /// Duck 字段约束 — 结构匹配的最小单元之一
@@ -353,6 +389,9 @@ pub struct DuckField {
     pub owner: Option<String>,
     pub name: String,
     pub ty: IrType,
+    /// 字段关系约束（§2.2）：`A.id == B.id` / `A.name: B.name`，
+    /// 要求本字段类型等于 (rel_owner, rel_name) 字段的类型。None = 无关系。
+    pub rel: Option<(String, String)>,
 }
 
 /// Duck 方法签名
@@ -361,10 +400,14 @@ pub struct DuckMethod {
     /// 所属类型前缀（多泛型关系 duck，如 `def T.map`），None 表示无前缀
     pub owner: Option<String>,
     pub name: String,
+    /// 正则模式方法名（§8.4）：`def /get_\w+/ (ref self) -> int`
+    pub name_pattern: Option<String>,
     pub params: Vec<Param>,
     pub ret_ty: IrType,
     /// 参数数量约束: range(min, max)
     pub param_range: Option<(usize, usize)>,
+    /// default 修饰（§11.4③）：该成员可选，目标类型可不实现
+    pub is_default: bool,
 }
 
 // ══════════════════════════════════════════════════════════════
