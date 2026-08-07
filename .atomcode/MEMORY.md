@@ -1,0 +1,115 @@
+# ΣLang (lang-zone) 项目记忆 — AtomCode 启动即读
+
+> 用途：下次启动自动读取，据此行动。更新于 2026-08-07。
+
+---
+
+## 一、项目身份
+
+- **项目**：ΣLang / LZ（lang-zone）—— `.lz` → Rust 的源码到源码编译器。
+- **定位**：LZ 是面向系统编程的静态类型语言：默认可变绑定、结构类型（duck typing）、魔法方法驱动运算符重载、构建块语法、编译期宏与 comptime。
+- **核心路线（用户拍板）**：**全力走 IR 中间表示**——AST → LZIR → Rust。**只关注 IR→Rust 这条线，Cython 后端（`lzcyc`、`src/ir/codegen_cython.rs`、`src/codegen/`、CY/ 目录）不管、不碰、不为其写代码**。
+- **与 sigma-lang 无关**，基于 IR 生成 Rust 代码。
+
+## 二、构建与验证命令（每次改动后必跑）
+
+```bash
+cargo check --quiet          # 快速编译检查
+cargo build --quiet          # 构建二进制 target/debug/lang-zone.exe
+target/debug/lang-zone.exe DEMO/02_types/duck_demo.lz   # 编译 .lz → 生成同名 .rs
+cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 Rust 可编译可运行
+```
+
+- `lang-zone.exe <file.lz>` 默认走 IR codegen，输出 `file.rs`。
+- **验证铁律**：生成的 `.rs` 必须能过 `rustc` 编译且运行正确，才算完成。
+
+## 三、架构与关键模块
+
+```
+.lz → Lexer(src/lexer) → Parser(src/parser) → AST(src/ast) → IR builder(src/ir/builder.rs) → IR codegen(src/ir/codegen.rs) → .rs
+```
+
+- `src/ir/mod.rs`：IrModule 定义、模块入口。
+- `src/ir/node.rs`：IR 节点（FnDef/StructDef/DuckDef/Stmt/Expr 等）。
+- `src/ir/types.rs`：IrType（Named/Option/Result/Duck/Generic…，无 List/Dict 变体，用 Named 表达）。
+- `src/ir/builder.rs`：`build_ir(ast_module) -> Result<IrModule>`，AST→IR；**末尾接入 duck 结构匹配检查**。
+- `src/ir/codegen.rs`：IR→Rust 字符串，`CodeGen::generate`。
+- `src/ir/duck_check.rs`：duck 结构匹配编译期检查器（`check_duck_satisfaction` / `collect_duck_impls`）。
+- `src/parser/parser.rs`：AST 解析，含 `parse_duck_def`、`parse_params`、`parse_single_param`。
+- `src/ast/decl.rs`：AST 声明节点（DuckDef/DuckField/DuckMethod/Function/VariadicMode…）。
+- 规范文档：`SYNTAX/*.md`（36 份），**写语法功能前先读对应文档**，例如：
+  - `01b-duck关系约束.md`（duck 完整规范，含关系约束、参数约束、软关键字）
+  - `03d-可变参数.md`（`..` 变参注入 + `/` `*` 分隔符规范）
+  - `06a-struct.md` / `06b-enum.md` / `06c-trait和impl.md` / `05b-block命名块.md` 等。
+- DEMO：`DEMO/01_basics/…DEMO/16_testing/`，`DEMO/02_types/duck_demo.lz`、`duck_relation.lz` 是 duck 覆盖样例。
+
+## 四、已实现功能状态（截至 2026-08-07）
+
+### duck 关键字（已完成一轮）
+- parse + IR + Rust trait codegen（`pub trait HasArea { fn area(&self) -> f64; }`）。
+- **多泛型关系语法**：`duck Mapper<T, R> = def T.map(self) -> R` 类型前缀、`A.x: f64` 字段前缀（AST/IR 用 `owner: Option<String>`）。
+- **参数约束族**：`exact(N)` / `min(N)` / `max(N)` / `range(L,R)` → 统一 `(min,max)` 存 `param_range`。
+- **结构匹配编译期检查**：`src/ir/duck_check.rs` 报 `error[E0600]`（缺方法/字段、参数数量、返回类型）。
+- **自动 impl 生成**：结构满足 duck 的类型自动生成 `impl HasArea for Circle { fn area(&self) -> f64 { Circle::area(self) } }` 委托，使生成 Rust 可编译运行（关键突破）。
+- where 约束 + 尖括号内联约束 `<T: HasArea>` 均可用。
+
+### duck 后续功能全部补齐（2026-08-07 完成，已验证 rustc 编译运行）
+- **多泛型关系自动 impl**：`collect_duck_impls` 返回 `(type_name, duck_name, HashMap<duck泛型, IrType>)` 调用点绑定；`infer_duck_bindings` 用方法签名 unify 反推 duck 泛型 → 具体类型映射（含泛型类型 `Box2<T>`）；trait 方法带 owner 时给默认实现 + `_lz_duck_phantom` 防 E0392；impl 泛型带 `Clone + std::fmt::Debug` bound。
+- **嵌套约束**：`duck D<T> where T: Iterable` → 检查器递归验证（`depth < 8` 防环），duck 的 where_clause 存到泛型参数 bounds。
+- **字段关系**：`A.id == B.id` / `A.name: B.name` → AST/IR `DuckField.rel: Option<(owner,name)>`；trait 用关联类型 `type __Field_x;` + accessor `fn __field_x(&self) -> &Self::__Field_x`；检查器比较两侧字段类型相等；泛型函数体内生成 where 投影约束 `<A as Duck<...>>::__Field_x: PartialEq<<B as Duck<...>>::__Field_x>`。
+- **关联类型**：`type I.Item` → AST/IR `assoc_types`；trait 生成 `type Item;`，impl 绑定 `type Item = <具体类型>`；方法签名渲染用 `duck_sig_type`（`I.Item` → `Self::Item`，先 substitute duck 泛型再渲染）；泛型函数体内生成 `<T as Duck<...>>::Item: std::fmt::Debug` 约束。
+- **软关键字族**：`satisfies`（递归验证）/ `sealed`（成员数闭合检查）/ `default def`（可选成员，缺失不报错）/ `match "pattern" at_least(N)`（正则数量，`regex_like_match` 自实现子集：`\w`/`\d`/`(a|b)`/`+`/`*`/`?`/`.`）/ `require`/`optional`（命名参数行）；正则方法名 `def "get_\w+"(self)`。
+- duck 检查器 subst 从 bound args 构建（`where T: Mapper<T,R>` 的 T/R 位置 → 实参类型），`ty_fully_bound` 判断 duck 泛型是否全绑定，未绑定保守跳过避免误报。
+
+### 可变参数 / 参数分割（2026-08-07 完成，按 03d 文档）
+- `..` 是**变参注入标记**（最多 2 次），任何 `..` 出现即注入：单 `..` 无注解 → 注入 `args`（元素 Any）；`..: Tuple<T>` → args-only；`..: Dict<K,V>` → kwargs-only；双 `..` → args + kwargs。
+- `/` `*` 是 Python 式安全分隔符（纯分割、不注入、类型安全），与 `..` **互斥**（混用报 Parse error）。
+- AST `VariadicMode`：`ArgsOnly { dotdot_at, elem_ty }` / `KwargsOnly { dotdot_at, value_ty }` / `Both { … }`。
+- IR：注入隐式参数 `args`（`&[T]` 切片收集）、`kwargs`（`&HashMap<String, V>`），调用点自动打包。
+- **`..: Tuple<T1,T2,..>` 通配**：parse_type 泛型参数内支持 `..` 占位（push Any）。
+- **@overload 变长分派**：`overload_variadic`/`overload_explicit` 记录每签名是否变长 + 显式参数；`match_overload` 阶段1 固定签名精确匹配 → 阶段2 变长签名兜底（显式参数兼容即可）；收集后补登记 mangled 名的 variadic/kwargs/param_types 供调用点打包。
+
+### 其他已有能力（勿重复造）
+- block/checker 语法（`block NAME ^:` 等）、while_let、闭包、构建块、@overload 重载、泛型 where 约束、enum/struct/impl、comptime、宏、检查站 `[ps]/[chk]`。
+
+### 其他基础设施
+- 空字段 struct 构造 `Text()` → `Text {}`（Call fallback 分支修复）。
+- 版本推进：`src/util/version.rs` VERSION_PATCH = 141（v0.133 起 + 8 小阶段）。
+
+## 五、项目规则（用户全局偏好，必须遵守）
+
+1. **输出选项/选择前，先给明确建议（带理由），再列选项**。
+2. **ΣLang 长期自主运行规则**：每个小阶段 = 一次版本推进（v0.133 起）；每 10 个小阶段同步一次仓库（git 提交 + push）；每 100 个小阶段发布一次 PyPI（100 小阶段 = 0.0.1，当前 0.7.1 已发布，下次 0.7.2 需 100 小阶段）；总目标 496 个小阶段；**完全自主自由发挥演化，不弹任何询问**。
+3. 提交信息：English 正文 + Conventional Commits + 末尾 `Co-Authored-By: AtomCode (deepseek-v4-flash) <noreply@atomgit.com>`；**只在用户要求时提交**（自主运行规则下按第 2 条节奏提交）。
+4. 用户说"先易后难"→ 排任务按难度递增。
+5. 修改代码前先读文件（read_file），用 edit_file / write_file 改文件，禁止 sed/重定向改源码。
+
+## 六、下一步方向（按难度，供后续自主选择）
+
+> 2026-08-07 全量语法核查后，未完善清单已写入 AtomGit issue #1
+> （https://atomgit.com/VictorTop/lang-zone/issues/1），按修复优先级排序：
+
+1. **高**：管道 `|>` 实参重复 bug（`5 |> double` 生成 `double(5,5)`，现有 DEMO/05_expressions/pipe.lz 也编译失败 E0061）。
+2. **高**：字典推导多 for（`{k: v for k in 1..2 for v in 10..11}` 报 `Expected RBrace, got For`；列表推导多 for 正常）。
+3. **中**：trait 体内关联类型 `type Item` + `Self.Item` 引用（06c §五，parser 未实现；可复用 duck 关联类型 codegen 路径）。
+4. **中**：泛型默认参数 `T = int`（03b §四，parser 跳过默认表达式，GenericParam.default 恒 None，需 AST/IR/codegen 贯通）。
+5. **中**：生成器无返回类型标注时 yield 类型推断（`iterator counter(n: int) = …yield i` 生成 `Vec<()>` E0308）。
+6. **难**：多类型变参位置约束 `..: Tuple<T1,T2,..>`（03d §2.3，元素类型只取 first，依赖 type-pack，成本最高，可与 P2-6 合并规划）。
+7. **长期**：跨模块类型推断（P2-3，lz-infer 未接入）、模块级魔法属性 `__doc__`/`__all__`（P2-5）、`__Params.args` 异构元组化（P2-6）。
+
+## 七、已知坑（避免踩）
+
+- `IrType` 没有 `List`/`Dict`/`Set` 变体——用 `Named { path: "List", args }` 表达；写 IrType 匹配时别引用不存在的变体。
+- `IrType::Any` 在 rust_type 映射为 `"i64"`（fallback）。
+- duck 检查器在 `build_ir` 末尾运行，报错会阻止 codegen。
+- 关键字实参语法是 `name: value`（`:`）或 `name~` 糖，**不是** `=`。
+- 双 `..` 调用点打包：`fn_variadic` 只记位置变参（排除 kwargs），kwargs 走 `fn_kwargs`。
+- 函数内局部变量勿与模块级函数/类型同名（避免 E0530/解析歧义，已有 param_renames 机制处理参数，但函数体局部变量仍可能撞名）。
+- duck 方法签名里的 duck 泛型引用是 `Named(path)` 而非 `Generic`——替换要用 `duck_check::substitute`（Named path 匹配 subst），`IrType::substitute_generics` 只替换 Generic 会漏。
+- 自动 impl 方法签名：先 `substitute` 替换 duck 泛型（R→Fahrenheit）再 `duck_sig_type` 处理关联类型（I.Item→Self::Item），否则 impl 里出现未定义类型 R。
+- 多泛型 duck（有 owner 前缀方法）的 trait 方法必须给默认实现 `{ unimplemented!() }`，否则 impl 只覆写本类型方法会编译失败；加 `_lz_duck_phantom` 防 E0392（未使用泛型参数）。
+- 字段关系 duck（`A.id == B.id`）在泛型函数体内比较两侧字段时，必须生成 where 投影约束 `<A as Duck<..>>::__Field_x: PartialEq<...>`，否则 E0369。
+- 关联类型在泛型函数体内 `print` 需 where 约束 `<T as Duck<..>>::Item: std::fmt::Debug`，否则 E0277。
+- 泛型函数体内访问 duck 约束泛型参数的字段（`a.field`）→ 自动转 `a.__field_field()` trait accessor（`duck_field_members` 按参数名收集，key 是参数名不是泛型名）。
+- 空字段 struct 构造 `Text()` 走 Call fallback 需生成 `Text {}`（`args_s.is_empty() && is_known_type` 分支）。
+- **已知缺陷（未修复）**：管道 `|>` 实参重复、字典推导多 for 报错、trait 内关联类型不支持、泛型默认参数值丢弃、生成器无返回类型 yield 推断缺失——详见 issue #1。
