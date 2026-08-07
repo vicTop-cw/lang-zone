@@ -563,6 +563,12 @@ impl fmt::Display for Item {
                     if p.is_mut {
                         f.write_str("mut ")?;
                     }
+                    if p.is_owned {
+                        f.write_str("owned ")?;
+                    }
+                    if p.is_ref {
+                        f.write_str("ref ")?;
+                    }
                     write!(f, "{}: {}", p.name, p.ty)?;
                 }
                 writeln!(f, ") -> {}:", fn_def.ret_ty)?;

@@ -13,6 +13,8 @@ pub enum Stmt {
         name: String,
         mutable: bool,
         is_ref: bool,
+        /// owned 绑定：强制显式消费（x^ / return / 传 owned 形参），消费后毒化
+        is_owned: bool,
         ty: Option<Type>,
         value: Expr,
     },

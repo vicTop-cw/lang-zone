@@ -1,0 +1,67 @@
+// ============================================================
+// 测试: 形参修饰符 — 无/ref/mut ref/mut/owned/mut owned
+// 对应 SYNTAX/03-函数基础.md §2.3
+// ============================================================
+
+// ── 无修饰：默认按值（仿射） ──
+def by_value(x: int) -> int =
+    x * 2
+
+// ── ref：不可变引用 ──
+def read_ref(ref data: List<int>) -> int =
+    data.len()
+
+// ── mut ref：可变引用 ──
+def modify_ref(mut ref data: List<int>) =
+    data.push(42)
+
+// ── mut：可变按值，函数内可修改 ──
+def double_in_place(mut x: int) -> int =
+    x *= 2
+    x
+
+// ── owned：强制所有权，内部 return 消费 ──
+def consume_str(owned s: str) -> str =
+    return s                    // return 交出所有权 ✅
+
+// ── owned 内部消费：传给另一个 owned 形参 ──
+def pass_through(owned s: str) -> str =
+    consume_str(s^)             // 显式转移给下一个 owned 形参 ✅
+
+// ── mut owned：可修改 + return 消费 ──
+def modify_and_consume(mut owned s: str) -> str =
+    s += "!"                    // 可变：可修改内容
+    return s                    // return 消费 ✅
+
+def main() =
+    // 无修饰（仿射，可多次使用）
+    print(by_value(21))         // 42
+
+    // ref / mut ref（借用，不转移）
+    xs = [1, 2, 3]
+    print(read_ref(xs))         // 3
+    modify_ref(xs)              // xs 变为 [1,2,3,42]
+    print(xs.len())             // 4
+
+    // mut 可变按值
+    print(double_in_place(21))  // 42
+
+    // owned 形参：调用后原变量毒化
+    msg = "hi"
+    let back1 = consume_str(msg)   // msg 被消费 → 毒化
+    print(back1)                   // hi
+    // print(msg)                  // ❌ msg 已毒化
+
+    // owned 传链消费
+    s2 = "chain"
+    let back2 = pass_through(s2)   // s2 → pass_through → consume_str
+    print(back2)                   // chain
+    // print(s2)                   // ❌ 已毒化
+
+    // mut owned：修改后消费
+    s3 = "lz"
+    let back3 = modify_and_consume(s3)  // s3 被消费
+    print(back3)                       // lz!
+    // print(s3)                       // ❌ 已毒化
+
+    print("param modifiers tests done")

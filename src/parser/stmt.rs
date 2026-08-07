@@ -697,6 +697,7 @@ impl ParserStmtExt for Parser {
                             name,
                             mutable: true,
                             is_ref: false,
+                            is_owned: false,
                             ty: Some(ty),
                             value,
                         });
@@ -791,6 +792,7 @@ impl ParserStmtExt for Parser {
                                 name,
                                 mutable: true,
                                 is_ref: false,
+                                is_owned: false,
                                 ty: None,
                                 value,
                             }),
@@ -907,11 +909,10 @@ impl ParserStmtExt for Parser {
     }
 
     fn parse_binding_stmt(&mut self) -> Result<Stmt, String> {
-        // Lang-Zong 默认绑定可变更（copy-by-default 模型）：mut 为 no-op 兼容
-        let mut mutable = true;
         let mut is_ref = false;
         let mut is_const = false;
-        let _is_owned = false;
+        let mut mutable = false;
+        let mut is_owned = false;
 
         loop {
             match self.peek() {
@@ -928,8 +929,8 @@ impl ParserStmtExt for Parser {
                     is_const = true;
                 }
                 Token::Owned => {
-                    self.advance(); /* _is_owned = true; */
-                    mutable = true;
+                    self.advance();
+                    is_owned = true;
                 }
                 _ => break,
             }
@@ -958,17 +959,19 @@ impl ParserStmtExt for Parser {
                 name,
                 mutable,
                 is_ref,
+                is_owned,
                 ty,
                 value,
             })
         }
     }
 
-    /// let 前缀的绑定：不可变（let ref = 不可变引用）
+    /// let 前缀的绑定：不可变（let ref = 不可变引用；let owned = 不可变+强制消费）
     fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String> {
         let mut is_ref = false;
         let mut is_const = false;
         let mut mutable = false;
+        let mut is_owned = false;
 
         loop {
             match self.peek() {
@@ -985,7 +988,8 @@ impl ParserStmtExt for Parser {
                     is_const = true;
                 }
                 Token::Owned => {
-                    self.advance(); /* let owned 语义上排斥，忽略 */
+                    self.advance();
+                    is_owned = true;
                 }
                 _ => break,
             }
@@ -1052,6 +1056,7 @@ impl ParserStmtExt for Parser {
                         name,
                         mutable,
                         is_ref,
+                        is_owned,
                         ty,
                         value,
                     });
@@ -1102,6 +1107,7 @@ impl ParserStmtExt for Parser {
                 name,
                 mutable,
                 is_ref,
+                is_owned,
                 ty,
                 value,
             })

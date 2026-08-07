@@ -43,6 +43,7 @@ impl CodeGenStmtExt for CodeGen {
                 name,
                 mutable,
                 is_ref,
+                is_owned: _,
                 ty,
                 value,
             } => {
