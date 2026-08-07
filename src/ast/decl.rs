@@ -154,14 +154,28 @@ pub struct DuckDef {
     pub generics: Vec<String>,
     /// 方法签名列表
     pub methods: Vec<DuckMethod>,
-    /// 字段约束: .field_name: Type
-    pub fields: Vec<(String, Type)>,
+    /// 字段约束: .field_name: Type（多泛型 duck 可带类型前缀 A.x: Type）
+    pub fields: Vec<DuckField>,
+}
+
+/// Duck 字段约束 — 结构匹配的最小单元之一
+/// `.name: str`（无前缀）或 `A.x: f64`（多泛型关系 duck 的类型前缀）
+#[derive(Debug, Clone)]
+pub struct DuckField {
+    /// 所属类型前缀（多泛型关系 duck），None 表示无前缀（单类型 duck）
+    pub owner: Option<String>,
+    pub name: String,
+    pub ty: Type,
 }
 
 /// Duck 方法签名 — 结构匹配的最小单元
 #[derive(Debug, Clone)]
 pub struct DuckMethod {
+    /// 所属类型前缀（多泛型关系 duck，如 `def T.map`），None 表示无前缀
+    pub owner: Option<String>,
     pub name: String,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
+    /// 参数数量约束: range(min, max)，编译期检查
+    pub param_range: Option<(usize, usize)>,
 }

@@ -342,16 +342,29 @@ pub struct DuckDef {
     pub generics: Vec<GenericParam>,
     /// 方法签名列表
     pub methods: Vec<DuckMethod>,
-    /// 字段约束: field_name → type
-    pub fields: Vec<(String, IrType)>,
+    /// 字段约束: field_name → type（多泛型 duck 可带类型前缀）
+    pub fields: Vec<DuckField>,
+}
+
+/// Duck 字段约束 — 结构匹配的最小单元之一
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckField {
+    /// 所属类型前缀（多泛型关系 duck），None 表示无前缀
+    pub owner: Option<String>,
+    pub name: String,
+    pub ty: IrType,
 }
 
 /// Duck 方法签名
 #[derive(Debug, Clone, PartialEq)]
 pub struct DuckMethod {
+    /// 所属类型前缀（多泛型关系 duck，如 `def T.map`），None 表示无前缀
+    pub owner: Option<String>,
     pub name: String,
     pub params: Vec<Param>,
     pub ret_ty: IrType,
+    /// 参数数量约束: range(min, max)
+    pub param_range: Option<(usize, usize)>,
 }
 
 // ══════════════════════════════════════════════════════════════

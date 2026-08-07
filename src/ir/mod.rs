@@ -12,8 +12,10 @@ pub mod display;
 pub mod builder;
 pub mod codegen;
 pub mod codegen_cython;
+pub mod duck_check;
 
 pub use builder::build_ir;
+pub use duck_check::check_duck_satisfaction;
 
 /// LZIR-H 版本号（节点兼容性标识）
 pub const IR_VERSION: u32 = 1;

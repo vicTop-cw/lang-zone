@@ -1040,6 +1040,85 @@ impl Parser {
         Ok((params, variadic))
     }
 
+    /// 解析单个函数参数（名称、类型注解、默认值、修饰符），
+    /// 供 duck 方法签名等需要独立解析单个参数的场景复用。
+    fn parse_single_param(&mut self, allow_default: bool) -> Result<Param, String> {
+        // 参数默认不可变；mut 修饰按需添加
+        let mut is_mut = false;
+        let mut is_owned = false;
+        let mut is_ref = false;
+
+        // 参数修饰符（名前修饰：mut / ref / owned / owend）
+        loop {
+            match self.peek() {
+                Token::Mut => {
+                    self.advance();
+                    is_mut = true;
+                }
+                Token::Ref => {
+                    self.advance();
+                    is_ref = true;
+                }
+                Token::Owned => {
+                    self.advance();
+                    is_owned = true;
+                }
+                _ => break,
+            }
+        }
+
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            Token::Self_ => "self".to_string(),
+            Token::From => "from".to_string(),
+            t => return Err(format!("Expected param name, got {:?}", t)),
+        };
+
+        // 参数可以无类型注解（默认为泛型推断）
+        let ty = if self.check(&Token::Comma)
+            || self.check(&Token::RParen)
+            || self.check(&Token::DotDot)
+        {
+            if name == "self" {
+                Type::Self_
+            } else {
+                Type::Any
+            }
+        } else {
+            self.expect(Token::Colon)?;
+
+            // 类型前缀修饰符（名后修饰：name: owed str）
+            if self.check(&Token::Owned) {
+                self.advance();
+                is_owned = true;
+            }
+            // ref 在类型前缀位置 → 同样支持
+            if self.check(&Token::Ref) {
+                self.advance();
+                is_ref = true;
+            }
+
+            self.parse_type()?
+        };
+
+        // 默认值
+        let default = if allow_default && self.check(&Token::Eq) {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(Param {
+            name,
+            ty,
+            default,
+            is_mut,
+            is_owned,
+            is_ref,
+        })
+    }
+
     fn parse_where_clause(&mut self) -> Result<Vec<WhereBound>, String> {
         self.expect(Token::Where)?;
         let mut bounds = Vec::new();
@@ -1810,14 +1889,77 @@ impl Parser {
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             if self.check(&Token::Def) {
                 self.advance(); // def
+                // 多泛型关系 duck 的类型前缀: def T.map(self) -> R
+                let mut owner = None;
+                if let Token::Ident(n) = self.peek() {
+                    if self.peek_n(1) == &Token::Dot {
+                        owner = Some(n.clone());
+                        self.advance(); // 前缀类型名
+                        self.advance(); // .
+                    }
+                }
                 let method_name = match self.advance() {
                     Token::Ident(n) => n,
                     Token::MagicMethod(n) => n,
                     t => return Err(format!("Expected method name in duck, got {:?}", t)),
                 };
-                // 解析参数
+                // 解析参数（可含参数数量约束: exact(N)/min(N)/max(N)/range(L,R)）
                 self.expect(Token::LParen)?;
-                let (params, _variadic) = self.parse_params()?;
+                let mut param_range = None;
+                let mut params = Vec::new();
+                while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                    self.skip_newlines();
+                    // 检测参数数量约束关键字: exact / min / max / range
+                    if let Token::Ident(ref kw) = self.peek() {
+                        if matches!(kw.as_str(), "exact" | "min" | "max" | "range")
+                            && self.peek_n(1) == &Token::LParen
+                        {
+                            let kw = kw.clone();
+                            self.advance(); // 关键字
+                            self.advance(); // (
+                            let first = match self.advance() {
+                                Token::IntLit(n) => n as usize,
+                                t => {
+                                    return Err(format!(
+                                        "Expected int in {} constraint, got {:?}",
+                                        kw, t
+                                    ))
+                                }
+                            };
+                            let (lo, hi) = match kw.as_str() {
+                                "exact" => (first, first),
+                                "min" => (first, usize::MAX),
+                                "max" => (0, first),
+                                "range" => {
+                                    self.expect(Token::Comma)?;
+                                    let hi = match self.advance() {
+                                        Token::IntLit(n) => n as usize,
+                                        t => {
+                                            return Err(format!(
+                                                "Expected int for range max, got {:?}",
+                                                t
+                                            ))
+                                        }
+                                    };
+                                    (first, hi)
+                                }
+                                _ => unreachable!(),
+                            };
+                            self.expect(Token::RParen)?;
+                            param_range = Some((lo, hi));
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                            continue;
+                        }
+                    }
+                    // 解析普通参数
+                    let p = self.parse_single_param(false)?;
+                    params.push(p);
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                }
                 self.expect(Token::RParen)?;
                 // 返回类型
                 let ret = if self.check(&Token::Arrow) {
@@ -1827,12 +1969,14 @@ impl Parser {
                     None
                 };
                 methods.push(DuckMethod {
+                    owner,
                     name: method_name,
                     params,
                     return_type: ret,
+                    param_range,
                 });
             } else if self.check(&Token::Dot) {
-                // .field_name: Type
+                // .field_name: Type（无前缀）
                 self.advance(); // .
                 let field_name = match self.advance() {
                     Token::Ident(n) => n,
@@ -1840,7 +1984,11 @@ impl Parser {
                 };
                 self.expect(Token::Colon)?;
                 let field_ty = self.parse_type()?;
-                fields.push((field_name, field_ty));
+                fields.push(DuckField {
+                    owner: None,
+                    name: field_name,
+                    ty: field_ty,
+                });
             } else if let Token::Ident(ref kw) = self.peek() {
                 if kw == "type" {
                     // type AssociatedType — skip for now (关联类型后续实现)
@@ -1848,6 +1996,24 @@ impl Parser {
                     while !self.check(&Token::Newline) && !self.check(&Token::Eof) {
                         self.advance();
                     }
+                } else if self.peek_n(1) == &Token::Dot {
+                    // 多泛型关系 duck 的字段前缀: A.x: f64
+                    let owner = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected type prefix in duck, got {:?}", t)),
+                    };
+                    self.advance(); // .
+                    let field_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected field name in duck, got {:?}", t)),
+                    };
+                    self.expect(Token::Colon)?;
+                    let field_ty = self.parse_type()?;
+                    fields.push(DuckField {
+                        owner: Some(owner),
+                        name: field_name,
+                        ty: field_ty,
+                    });
                 } else {
                     self.advance(); // skip unexpected
                 }

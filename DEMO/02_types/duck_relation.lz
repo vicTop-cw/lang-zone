@@ -1,0 +1,24 @@
+// ============================================================
+// 测试: duck 多类型关系约束 + range 参数数量约束
+// ============================================================
+
+// ── 基本关系 duck ──
+duck Mapper<T, R> =
+    def map(self) -> R
+
+// ── 参数数量约束 ──
+duck RangeCtor<T> =
+    def build(self) -> T
+    def configure(self, range(2, 4)) -> ()
+
+// ── 满足 duck 的类型 ──
+struct Wrapper<T> =
+    value: T
+    def map(self) -> T = self.value
+
+struct Builder =
+    def configure(self, a: int, b: int, c: int = 0) -> () = pass
+
+def main() =
+    let w = Wrapper(value: 42)
+    print("multi-type duck demo done")

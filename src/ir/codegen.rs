@@ -315,6 +315,9 @@ impl CodeGen {
             );
         }
 
+        // duck 结构匹配自动 impl：结构满足 duck 的具体类型 → impl Duck for Type
+        self.gen_duck_auto_impls(module);
+
         std::mem::take(&mut self.buf)
     }
 
@@ -1526,9 +1529,9 @@ impl CodeGen {
         self.emit_line(&format!("pub trait {}{} {{", d.name, generics));
         self.indent += 1;
         // 字段约束 → 生成 accessor 方法
-        for (field_name, field_ty) in &d.fields {
-            let rt = self.rust_type(field_ty);
-            self.emit_line(&format!("fn __field_{}(&self) -> &{};", field_name, rt));
+        for f in &d.fields {
+            let rt = self.rust_type(&f.ty);
+            self.emit_line(&format!("fn __field_{}(&self) -> &{};", f.name, rt));
         }
         // 方法签名
         for m in &d.methods {
@@ -1554,7 +1557,86 @@ impl CodeGen {
         self.emit_line("}");
     }
 
-    // ── 泛型 ──
+    /// 自动生成 duck 结构匹配的 Rust impl：
+    /// 对每个在调用点被用作 duck 约束实参的具体类型，生成 `impl Duck for Type { ... }`，
+    /// 方法体委托到该类型自己的同名方法（结构匹配 → 运行时零开销）。
+    fn gen_duck_auto_impls(&mut self, module: &IrModule) {
+        let pairs = crate::ir::duck_check::collect_duck_impls(module);
+        if pairs.is_empty() {
+            return;
+        }
+        // 索引 duck 定义与具体类型定义
+        let mut duck_defs: HashMap<&str, &DuckDef> = HashMap::new();
+        let mut struct_defs: HashMap<&str, &StructDef> = HashMap::new();
+        for item in &module.items {
+            match item {
+                Item::DuckDef(d) => {
+                    duck_defs.insert(d.name.as_str(), d);
+                }
+                Item::StructDef(s) => {
+                    struct_defs.insert(s.name.as_str(), s);
+                }
+                _ => {}
+            }
+        }
+        for (type_name, duck_name) in &pairs {
+            let Some(duck) = duck_defs.get(duck_name.as_str()) else { continue };
+            let Some(sdef) = struct_defs.get(type_name.as_str()) else { continue };
+            // 泛型 duck（如 Mapper<T,R>）或泛型具体类型：需要类型参数映射，暂不自动 impl
+            if !duck.generics.is_empty() || !sdef.generics.is_empty() {
+                continue;
+            }
+            self.emit_line(&format!("impl {} for {} {{", duck.name, sdef.name));
+            self.indent += 1;
+            // 字段约束 → 直接访问字段
+            for f in &duck.fields {
+                let rt = self.rust_type(&f.ty);
+                self.emit_line(&format!("fn __field_{}(&self) -> &{} {{", f.name, rt));
+                self.indent += 1;
+                self.emit_line(&format!("&self.{}", f.name));
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+            // 方法约束 → 委托到具体类型的同名方法
+            for m in &duck.methods {
+                let params: Vec<String> = m
+                    .params
+                    .iter()
+                    .map(|p| {
+                        if p.name == "self" {
+                            if p.is_mut {
+                                "&mut self".to_string()
+                            } else {
+                                "&self".to_string()
+                            }
+                        } else {
+                            format!("{}: {}", p.name, self.rust_type(&p.ty))
+                        }
+                    })
+                    .collect();
+                let args: Vec<String> = m
+                    .params
+                    .iter()
+                    .map(|p| {
+                        if p.name == "self" {
+                            "self".to_string()
+                        } else {
+                            p.name.clone()
+                        }
+                    })
+                    .collect();
+                let ret = self.rust_type(&m.ret_ty);
+                self.emit_line(&format!("fn {}({}) -> {} {{", m.name, params.join(", "), ret));
+                self.indent += 1;
+                self.emit_line(&format!("{}::{}({})", sdef.name, m.name, args.join(", ")));
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+            self.indent -= 1;
+            self.emit_line("}");
+            self.buf.push('\n');
+        }
+    }
 
     /// 将 LZ trait 约束名映射为 Rust trait 名
     /// Ordered → PartialOrd, Display → Display, Clone → Clone 等

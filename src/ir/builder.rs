@@ -3183,6 +3183,7 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
         .methods
         .iter()
         .map(|m| DuckMethod {
+            owner: m.owner.clone(),
             name: m.name.clone(),
             params: m
                 .params
@@ -3202,12 +3203,17 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
                 .as_ref()
                 .map(|t| from_ast_type(t))
                 .unwrap_or(IrType::Unit),
+            param_range: m.param_range,
         })
         .collect();
-    let fields: Vec<(String, IrType)> = d
+    let fields: Vec<DuckField> = d
         .fields
         .iter()
-        .map(|(n, t)| (n.clone(), from_ast_type(t)))
+        .map(|f| DuckField {
+            owner: f.owner.clone(),
+            name: f.name.clone(),
+            ty: from_ast_type(&f.ty),
+        })
         .collect();
     DuckDef {
         name: d.name.clone(),
@@ -4046,6 +4052,12 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     drop(ctx);
     if let Ok(items) = Rc::try_unwrap(pending_items) {
         ir_mod.items.extend(items.into_inner());
+    }
+
+    // 12. duck 结构匹配编译期检查（具体类型 vs duck 约束）
+    let duck_errors = crate::ir::duck_check::check_duck_satisfaction(&ir_mod);
+    if !duck_errors.is_empty() {
+        return Err(IrBuildError::Generic(duck_errors.join("\n")));
     }
 
     Ok(ir_mod)
