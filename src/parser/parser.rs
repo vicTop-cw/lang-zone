@@ -925,21 +925,41 @@ impl Parser {
     }
 
     /// 解析函数参数列表，返回 (params, variadic_mode)
-    /// `..` 最多出现 2 次，分隔 仅位置/仅关键字/args+kwargs 参数
+    /// `..` 是变参注入标记（最多 2 次）：单 `..` 无注解 → 注入 args（元素 Any）；
+    /// `..: Tuple<T>` → args-only；`..: Dict<K,V>` → kwargs-only；双 `..` → args + kwargs。
+    /// `/` `*` 是安全分隔符（仅分割、不注入），与 `..` 互斥（见 03d-可变参数.md §三）。
     fn parse_params(&mut self) -> Result<(Vec<Param>, VariadicMode), String> {
         let mut params = Vec::new();
         let mut dotdot_positions: Vec<usize> = Vec::new();
+        let mut dotdot_annots: Vec<Option<Type>> = Vec::new();
+        let mut has_slash_star = false;
 
         while !self.check(&Token::RParen) {
-            // 检查 `..` 分隔符
+            // 检查 `..` 变参注入标记
             if self.check(&Token::DotDot) {
                 if dotdot_positions.len() >= 2 {
-                    return Err("`..` 分隔符最多出现 2 次".to_string());
+                    return Err("`..` 最多出现 2 次".to_string());
                 }
-                self.advance(); // 消费 DotDot
+                self.advance(); // 消费 ..
                 dotdot_positions.push(params.len());
-
+                // 可选类型注解: ..: Tuple<T> / ..: Dict<K,V>
+                let annot = if self.check(&Token::Colon) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                dotdot_annots.push(annot);
                 // `..` 后可选逗号继续
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+                continue;
+            }
+            // `/` `*` 安全分隔符（仅分割，不注入）
+            if self.check(&Token::Slash) || self.check(&Token::Star) {
+                self.advance();
+                has_slash_star = true;
                 if self.check(&Token::Comma) {
                     self.advance();
                 }
@@ -981,6 +1001,8 @@ impl Parser {
             let ty = if self.check(&Token::Comma)
                 || self.check(&Token::RParen)
                 || self.check(&Token::DotDot)
+                || self.check(&Token::Slash)
+                || self.check(&Token::Star)
             {
                 if name == "self" {
                     Type::Self_
@@ -1025,14 +1047,65 @@ impl Parser {
             }
         }
 
+        // `/` `*` 与 `..` 互斥：同一签名不允许混用（文档 §3.3）
+        if has_slash_star && !dotdot_positions.is_empty() {
+            return Err("`/` `*` 与 `..` 不能混用在同一签名".to_string());
+        }
+
         let variadic = match dotdot_positions.len() {
             0 => VariadicMode::None,
-            1 => VariadicMode::Single {
-                dotdot_at: dotdot_positions[0],
-            },
-            2 => VariadicMode::Double {
+            1 => {
+                let at = dotdot_positions[0];
+                let annot = dotdot_annots[0].clone();
+                match annot {
+                    // ..: Dict<K,V> → kwargs-only（值类型 V）
+                    Some(Type::Generic { base, args })
+                        if matches!(*base, Type::Named(ref b) if b == "Dict") =>
+                    {
+                        let value_ty = args.last().cloned();
+                        VariadicMode::KwargsOnly { dotdot_at: at, value_ty }
+                    }
+                    // ..: Tuple<T> → args-only（元素类型 T）
+                    Some(Type::Tuple(ts)) => VariadicMode::ArgsOnly {
+                        dotdot_at: at,
+                        elem_ty: ts.first().cloned(),
+                    },
+                    Some(Type::Generic { base, args })
+                        if matches!(*base, Type::Named(ref b) if b == "Tuple") =>
+                    {
+                        VariadicMode::ArgsOnly {
+                            dotdot_at: at,
+                            elem_ty: args.first().cloned(),
+                        }
+                    }
+                    // .. 无注解 → args-only（元素 Any）
+                    _ => VariadicMode::ArgsOnly { dotdot_at: at, elem_ty: None },
+                }
+            }
+            2 => VariadicMode::Both {
                 first_at: dotdot_positions[0],
+                args_elem_ty: dotdot_annots[0]
+                    .clone()
+                    .and_then(|t| match t {
+                        Type::Tuple(ts) => ts.first().cloned(),
+                        Type::Generic { base, args }
+                            if matches!(*base, Type::Named(ref b) if b == "Tuple") =>
+                        {
+                            args.first().cloned()
+                        }
+                        _ => None,
+                    }),
                 second_at: dotdot_positions[1],
+                kwargs_value_ty: dotdot_annots[1]
+                    .clone()
+                    .and_then(|t| match t {
+                        Type::Generic { base, args }
+                            if matches!(*base, Type::Named(ref b) if b == "Dict") =>
+                        {
+                            args.last().cloned()
+                        }
+                        _ => None,
+                    }),
             },
             _ => unreachable!(),
         };

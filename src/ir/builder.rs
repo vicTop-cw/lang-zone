@@ -3244,13 +3244,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         .iter()
         .enumerate()
         .map(|(_i, p)| {
-            // 检测 variadic:
-            // - VariadicMode::Single { dotdot_at }: .. 分隔仅位置/仅关键字参数，不改变参数类型
-            // - VariadicMode::Double { first_at, second_at }: second_at 之后的参数是真正的 variadic 收集
-            let is_variadic = match &func.variadic {
-                ast::VariadicMode::Double { second_at, .. } => _i >= *second_at,
-                _ => false,
-            };
+            // `..` 注入的 args/kwargs 在下方单独追加；此处只转换具名参数
             Param {
                 name: p.name.clone(),
                 ty: if is_math {
@@ -3262,11 +3256,80 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 is_ref: p.is_ref,
                 is_owned: p.is_owned,
                 default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
-                variadic: is_variadic,
+                variadic: false,
             }
         })
         .collect();
-
+    // `..` 变参注入：追加 args/kwargs 隐式参数（variadic 收集）
+    // 文档 03d-可变参数.md §2：任何 `..` 出现即触发注入；
+    // 单 `..` 无注解 → 注入 args（元素 Any）；`..: Tuple<T>` → args-only；
+    // `..: Dict<K,V>` → kwargs-only；双 `..` → args + kwargs
+    let mut variadic_params: Vec<Param> = Vec::new();
+    match &func.variadic {
+        ast::VariadicMode::ArgsOnly { elem_ty, .. } => {
+            let elem = elem_ty
+                .as_ref()
+                .map(|t| from_ast_type_with_generics(t, &generics))
+                .unwrap_or(IrType::Any);
+            variadic_params.push(Param {
+                name: "args".into(),
+                ty: elem,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: true,
+            });
+        }
+        ast::VariadicMode::KwargsOnly { value_ty, .. } => {
+            let v = value_ty
+                .as_ref()
+                .map(|t| from_ast_type_with_generics(t, &generics))
+                .unwrap_or(IrType::Any);
+            variadic_params.push(Param {
+                name: "kwargs".into(),
+                ty: v,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: true,
+            });
+        }
+        ast::VariadicMode::Both {
+            args_elem_ty,
+            kwargs_value_ty,
+            ..
+        } => {
+            let elem = args_elem_ty
+                .as_ref()
+                .map(|t| from_ast_type_with_generics(t, &generics))
+                .unwrap_or(IrType::Any);
+            variadic_params.push(Param {
+                name: "args".into(),
+                ty: elem,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: true,
+            });
+            let v = kwargs_value_ty
+                .as_ref()
+                .map(|t| from_ast_type_with_generics(t, &generics))
+                .unwrap_or(IrType::Any);
+            variadic_params.push(Param {
+                name: "kwargs".into(),
+                ty: v,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: true,
+            });
+        }
+        ast::VariadicMode::None => {}
+    }
     // 构建函数体上下文
     let mut fn_ctx = TypeCtx::new();
     fn_ctx.pending_items = ctx.pending_items.clone();
@@ -3308,6 +3371,30 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     } else {
         for p in &func.params {
             fn_ctx.add_param(&p.name, from_ast_type_with_generics(&p.ty, &generics));
+        }
+    }
+    // 注入 args/kwargs 内置变量到函数作用域（函数体内可直接引用 args / kwargs）
+    for vp in &variadic_params {
+        if vp.name == "args" {
+            // args: List<elem>（元素类型注解或无注解 → Any）
+            let elem = vp.ty.clone();
+            fn_ctx.add_param(
+                "args",
+                IrType::Named {
+                    path: "List".into(),
+                    args: vec![elem],
+                },
+            );
+        } else if vp.name == "kwargs" {
+            // kwargs: Dict<str, V>
+            let v = vp.ty.clone();
+            fn_ctx.add_param(
+                "kwargs",
+                IrType::Named {
+                    path: "Dict".into(),
+                    args: vec![IrType::Str, v],
+                },
+            );
         }
     }
 
@@ -3406,7 +3493,12 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 })
                 .collect()
         },
-        params,
+        params: {
+            // 合并注入的 args/kwargs 变参（variadic 收集）
+            let mut all = params;
+            all.extend(variadic_params);
+            all
+        },
         ret_ty,
         body,
         intrinsics,

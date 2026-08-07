@@ -36,6 +36,8 @@ pub struct CodeGen {
     enum_variant_fields: HashMap<(String, String), Vec<IrType>>,
     /// 函数名 → variadic 参数起始索引（该索引及之后的参数收集为 &[T]）
     fn_variadic: HashMap<String, usize>,
+    /// 函数名 → kwargs 注入参数起始索引（kwargs 收集为 &HashMap<String, V>）
+    fn_kwargs: HashMap<String, usize>,
     /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
     fn_param_types: HashMap<String, Vec<IrType>>,
     /// 重载函数签名集合：函数名 → 多个参数类型签名（同名函数 >1 个时启用 mangling）
@@ -92,6 +94,7 @@ impl CodeGen {
             enum_variant_fields: HashMap::new(),
             current_variadic_params: std::collections::HashSet::new(),
             fn_variadic: HashMap::new(),
+            fn_kwargs: HashMap::new(),
             fn_param_types: HashMap::new(),
             overload_sigs: HashMap::new(),
             top_level_static_names: std::collections::HashSet::new(),
@@ -230,8 +233,23 @@ impl CodeGen {
                         .push(sig);
                 }
                 // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
-                if let Some((idx, _)) = f.params.iter().enumerate().find(|(_, p)| p.variadic) {
+                // 注意：kwargs 注入参数单独记录在 fn_kwargs，不参与位置变参打包
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name != "kwargs")
+                {
                     self.fn_variadic.insert(f.name.clone(), idx);
+                }
+                // 收集 kwargs 注入参数（函数名 → kwargs 参数起始索引）
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name == "kwargs")
+                {
+                    self.fn_kwargs.insert(f.name.clone(), idx);
                 }
                 // 方法定义语法 fn Type.method() → Type 是 impl-only 类型名
                 if let Some((ty_name, _)) = f.name.split_once('.') {
@@ -877,7 +895,12 @@ impl CodeGen {
                     }
                 } else {
                     let ty_str = if p.variadic {
-                        format!("&[{}]", self.rust_type(&p.ty))
+                        if p.name == "kwargs" {
+                            // kwargs 注入: &HashMap<String, V>（值类型 = p.ty）
+                            format!("&HashMap<String, {}>", self.rust_type(&p.ty))
+                        } else {
+                            format!("&[{}]", self.rust_type(&p.ty))
+                        }
                     } else if p.default.is_some() {
                         format!("Option<{}>", self.rust_type(&p.ty))
                     } else {
@@ -2912,6 +2935,64 @@ impl CodeGen {
                         }
                     }
                     format!("{}{} {{ {} }}", callee_s, turbofish, all_fields.join(", "))
+                } else if let Some(&_kwidx) = self.fn_kwargs.get(&callee_s) {
+                    // kwargs 注入函数调用: 普通位置实参在前，命名实参打包为 &HashMap<String, V>
+                    // （若同时有 args 注入，位置实参按 variadic 起始索引打包为 &[...]）
+                    let mut normal: Vec<String> = Vec::new();
+                    let mut pairs: Vec<String> = Vec::new();
+                    for a in args {
+                        if let ExprKind::StructCtor { name, fields } = &a.kind {
+                            if name == "_KwArg" {
+                                let k = fields
+                                    .iter()
+                                    .find(|(n, _)| n == "name")
+                                    .and_then(|(_, v)| match &v.kind {
+                                        ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
+                                        _ => None,
+                                    })
+                                    .unwrap_or_default();
+                                let v = fields
+                                    .iter()
+                                    .find(|(n, _)| n == "value")
+                                    .map(|(_, e)| self.gen_expr(e))
+                                    .unwrap_or_default();
+                                // 键转义为 Rust 字符串字面量: "timeout".to_string()
+                                pairs.push(format!(
+                                    "(\"{}\".to_string(), {})",
+                                    k.replace('\\', "\\\\").replace('"', "\\\""),
+                                    v
+                                ));
+                                continue;
+                            }
+                        }
+                        normal.push(self.gen_expr(a));
+                    }
+                    // args 变参打包（Both 模式: args + kwargs 双收集）
+                    if let Some(&v_idx) = self.fn_variadic.get(&callee_s) {
+                        let head = normal[..v_idx.min(normal.len())].to_vec();
+                        let tail = if normal.len() > v_idx {
+                            normal[v_idx..].join(", ")
+                        } else {
+                            String::new()
+                        };
+                        let mut all = head;
+                        if normal.len() >= v_idx {
+                            all.push(format!("&[{}]", tail));
+                        } else {
+                            all.push("&[]".to_string());
+                        }
+                        normal = all;
+                    }
+                    let map = if pairs.is_empty() {
+                        "std::collections::HashMap::new()".to_string()
+                    } else {
+                        format!(
+                            "std::collections::HashMap::from([{}])",
+                            pairs.join(", ")
+                        )
+                    };
+                    normal.push(format!("&{}", map));
+                    format!("{}{}({})", callee_s, turbofish, normal.join(", "))
                 } else if !args.is_empty() && is_kwarg_call(args) {
                     // Function call with named args: func(a, b~) → func(a, b)
                     let flat_args: Vec<String> =

@@ -55,15 +55,33 @@ pub struct ConstDef {
     pub mutable: bool,
 }
 
-/// 可变参数模式：记录 `..` 分隔符在参数列表中的位置
+/// 可变参数模式：`..` 是变参注入标记（非边界分隔符），最多出现 2 次。
+/// 任何 `..` 出现即触发注入：单 `..` 无注解 → 只注入 args（元素 Any）；
+/// `..: Tuple<T>` → args-only；`..: Dict<K,V>` → kwargs-only；双 `..` → args + kwargs。
+/// （位置/关键字边界由 `/` `*` 安全分隔符负责，与 `..` 互斥，见 03d-可变参数.md §三）
 #[derive(Debug, Clone, PartialEq)]
 pub enum VariadicMode {
-    /// 无 `..` 分隔符
+    /// 无 `..` 注入
     None,
-    /// 单个 `..`：此前 params[0..pos] 为仅位置，此后 params[pos..] 为仅关键字
-    Single { dotdot_at: usize },
-    /// 两个 `..`：`args` + `kwargs` 模式
-    Double { first_at: usize, second_at: usize },
+    /// 单 `..`（无注解或 `..: Tuple<T>`）：注入 args（位置变长参数）
+    ArgsOnly {
+        dotdot_at: usize,
+        /// `..: Tuple<T>` 的元素类型；None = Any 擦除
+        elem_ty: Option<Type>,
+    },
+    /// 单 `..: Dict<K,V>`：注入 kwargs（关键字变长参数）
+    KwargsOnly {
+        dotdot_at: usize,
+        /// `..: Dict<K,V>` 的值类型；None = Any 擦除
+        value_ty: Option<Type>,
+    },
+    /// 双 `..`：args + kwargs 双收集
+    Both {
+        first_at: usize,
+        args_elem_ty: Option<Type>,
+        second_at: usize,
+        kwargs_value_ty: Option<Type>,
+    },
 }
 
 #[derive(Debug, Clone)]
