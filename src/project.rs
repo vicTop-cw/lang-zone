@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ast;
 use crate::config::paths::SearchPaths;
-use crate::ir::{IrModule, builder::build_ir};
+use crate::ir::{builder::build_ir, IrModule};
 use crate::lexer::Lexer;
 use crate::macros::expand::{extract_macro_defs, MacroExpander};
 use crate::parser::Parser;
@@ -53,7 +53,8 @@ impl ProjectCompiler {
         } else {
             self.base_dir.join(entry_file)
         };
-        let entry_abs = entry_abs.canonicalize()
+        let entry_abs = entry_abs
+            .canonicalize()
             .map_err(|e| format!("Cannot find entry file {:?}: {}", entry_file, e))?;
 
         self.load_module(&entry_abs, &vec!["main".into()])?;
@@ -68,18 +69,15 @@ impl ProjectCompiler {
     }
 
     /// 递归加载一个 .lz 模块
-    fn load_module(
-        &mut self,
-        file_path: &Path,
-        logical_path: &[String],
-    ) -> Result<(), String> {
+    fn load_module(&mut self, file_path: &Path, logical_path: &[String]) -> Result<(), String> {
         // 循环依赖检测
         let path_vec = logical_path.to_vec();
         if self.loaded.contains(&path_vec) {
             return Ok(());
         }
 
-        self.resolver.push(path_vec.clone(), file_path.to_path_buf())
+        self.resolver
+            .push(path_vec.clone(), file_path.to_path_buf())
             .map_err(|e| format!("Import error in {}: {}", file_path.display(), e))?;
 
         // 读取和编译
@@ -92,11 +90,13 @@ impl ProjectCompiler {
         let (registry, _ranges) = extract_macro_defs(&tokens)
             .map_err(|e| format!("Macro error in {}: {}", file_path.display(), e))?;
         let expander = MacroExpander::new(registry);
-        let expanded = expander.expand(&tokens)
+        let expanded = expander
+            .expand(&tokens)
             .map_err(|e| format!("Expand error in {}: {}", file_path.display(), e))?;
 
         let mut parser = Parser::new(expanded);
-        let module = parser.parse_module()
+        let module = parser
+            .parse_module()
             .map_err(|e| format!("Parse error in {}: {}", file_path.display(), e))?;
 
         self.loaded.insert(path_vec.clone());
@@ -116,19 +116,24 @@ impl ProjectCompiler {
     }
 
     /// 加载 import 语句指向的模块
-    fn load_import(
-        &mut self,
-        imp: &ast::ImportStmt,
-        from_file: &Path,
-    ) -> Result<(), String> {
+    fn load_import(&mut self, imp: &ast::ImportStmt, from_file: &Path) -> Result<(), String> {
         // 跳过 std/系统 import（由 StdBridge 处理）
         if imp.path.first().map_or(false, |p| p == "std") {
             return Ok(());
         }
         // 跳过非 .lz 的 crate import
         if imp.path.first().map_or(false, |p| {
-            ["serde", "tokio", "regex", "chrono", "rand", "itertools",
-             "serde_json", "once_cell"].contains(&p.as_str())
+            [
+                "serde",
+                "tokio",
+                "regex",
+                "chrono",
+                "rand",
+                "itertools",
+                "serde_json",
+                "once_cell",
+            ]
+            .contains(&p.as_str())
         }) {
             return Ok(());
         }
@@ -141,7 +146,8 @@ impl ProjectCompiler {
         let mut found = false;
         for candidate in &candidates {
             if candidate.exists() {
-                let abs = candidate.canonicalize()
+                let abs = candidate
+                    .canonicalize()
                     .map_err(|e| format!("Canonicalize error: {}", e))?;
                 self.load_module(&abs, import_path)?;
                 found = true;
@@ -179,6 +185,8 @@ impl ProjectCompiler {
             type_aliases: vec![],
             tests: vec![],
             top_level_builds: vec![],
+            top_stmts: vec![],
+            duck_defs: vec![],
             magic_blocks: vec![],
         };
 
@@ -191,12 +199,16 @@ impl ProjectCompiler {
             merged.consts.extend(m.consts.clone());
             merged.type_aliases.extend(m.type_aliases.clone());
             merged.tests.extend(m.tests.clone());
+            merged.top_stmts.extend(m.top_stmts.clone());
+            merged.duck_defs.extend(m.duck_defs.clone());
             merged.magic_blocks.extend(m.magic_blocks.clone());
             // imports 去重
             for imp in &m.imports {
-                if !merged.imports.iter().any(|existing| {
-                    existing.path == imp.path && existing.items == imp.items
-                }) {
+                if !merged
+                    .imports
+                    .iter()
+                    .any(|existing| existing.path == imp.path && existing.items == imp.items)
+                {
                     merged.imports.push(imp.clone());
                 }
             }
@@ -209,7 +221,6 @@ impl ProjectCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[test]
     fn test_project_compile_single_file() {
@@ -231,8 +242,16 @@ mod tests {
         let dir = std::env::temp_dir().join("lz_test_cross");
         let _ = fs::create_dir_all(&dir);
 
-        fs::write(&dir.join("utils.lz"), "def add(a: int, b: int) -> int =\n    a + b\n").unwrap();
-        fs::write(&dir.join("main.lz"), "import utils\n\ndef main() =\n    let x = 1\n    x\n").unwrap();
+        fs::write(
+            &dir.join("utils.lz"),
+            "def add(a: int, b: int) -> int =\n    a + b\n",
+        )
+        .unwrap();
+        fs::write(
+            &dir.join("main.lz"),
+            "import utils\n\ndef main() =\n    let x = 1\n    x\n",
+        )
+        .unwrap();
 
         let mut pc = ProjectCompiler::new(dir.clone(), None);
         let module = pc.compile(&dir.join("main.lz")).expect("should compile");

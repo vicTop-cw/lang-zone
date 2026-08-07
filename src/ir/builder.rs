@@ -3177,6 +3177,54 @@ fn convert_block_with_ctx(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
 // 顶层 Item 转换
 // ══════════════════════════════════════════════════════════════
 
+/// 转换 duck 类型约束 → IR DuckDef
+fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
+    let methods: Vec<DuckMethod> = d
+        .methods
+        .iter()
+        .map(|m| DuckMethod {
+            name: m.name.clone(),
+            params: m
+                .params
+                .iter()
+                .map(|p| Param {
+                    name: p.name.clone(),
+                    ty: from_ast_type(&p.ty),
+                    is_mut: p.is_mut,
+                    is_ref: p.is_ref,
+                    is_owned: p.is_owned,
+                    default: None,
+                    variadic: false,
+                })
+                .collect(),
+            ret_ty: m
+                .return_type
+                .as_ref()
+                .map(|t| from_ast_type(t))
+                .unwrap_or(IrType::Unit),
+        })
+        .collect();
+    let fields: Vec<(String, IrType)> = d
+        .fields
+        .iter()
+        .map(|(n, t)| (n.clone(), from_ast_type(t)))
+        .collect();
+    DuckDef {
+        name: d.name.clone(),
+        generics: d
+            .generics
+            .iter()
+            .map(|g| GenericParam {
+                name: g.clone(),
+                bounds: vec![],
+                default: None,
+            })
+            .collect(),
+        methods,
+        fields,
+    }
+}
+
 fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let is_math = func.decorators.iter().any(|d| d.name == "math");
     let generics: Vec<String> = if is_math {
@@ -3907,7 +3955,12 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
         }));
     }
 
-    // 9.5. 转换 type aliases
+    // 9.5. 转换 duck 类型约束 → Item::DuckDef
+    for d in &ast_module.duck_defs {
+        ir_mod.items.push(Item::DuckDef(convert_duck_def(d)));
+    }
+
+    // 9.6. 转换 type aliases
     for ta in &ast_module.type_aliases {
         let ir_ty = from_ast_type(&ta.ty);
         ir_mod.items.push(Item::TypeAlias(TypeAliasDef {

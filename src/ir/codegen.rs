@@ -702,6 +702,7 @@ impl CodeGen {
                 self.indent -= 1;
                 self.emit_line("}");
             }
+            Item::DuckDef(d) => self.gen_duck_def(d),
         }
     }
 
@@ -1510,6 +1511,45 @@ impl CodeGen {
         self.emit_line(&format!("fn {}() {{", safe_name));
         self.indent += 1;
         self.gen_block_inner(&t.body);
+        self.indent -= 1;
+        self.emit_line("}");
+    }
+
+    /// duck 类型约束 → Rust trait
+    fn gen_duck_def(&mut self, d: &DuckDef) {
+        let generics = if d.generics.is_empty() {
+            String::new()
+        } else {
+            let gs: Vec<String> = d.generics.iter().map(|g| g.name.clone()).collect();
+            format!("<{}>", gs.join(", "))
+        };
+        self.emit_line(&format!("pub trait {}{} {{", d.name, generics));
+        self.indent += 1;
+        // 字段约束 → 生成 accessor 方法
+        for (field_name, field_ty) in &d.fields {
+            let rt = self.rust_type(field_ty);
+            self.emit_line(&format!("fn __field_{}(&self) -> &{};", field_name, rt));
+        }
+        // 方法签名
+        for m in &d.methods {
+            let params: Vec<String> = m
+                .params
+                .iter()
+                .map(|p| {
+                    if p.name == "self" {
+                        if p.is_mut {
+                            "&mut self".to_string()
+                        } else {
+                            "&self".to_string()
+                        } // LZ 默认即引用
+                    } else {
+                        format!("{}: {}", p.name, self.rust_type(&p.ty))
+                    }
+                })
+                .collect();
+            let ret = self.rust_type(&m.ret_ty);
+            self.emit_line(&format!("fn {}({}) -> {};", m.name, params.join(", "), ret));
+        }
         self.indent -= 1;
         self.emit_line("}");
     }

@@ -673,6 +673,9 @@ impl fmt::Display for Item {
             Item::CheckerBlock { name, ps_name, .. } => {
                 write!(f, "checker block '{name}[ps:{ps_name:?}]")
             }
+            Item::DuckDef(d) => {
+                write!(f, "duck {} {{ {} methods }}", d.name, d.methods.len())
+            }
         }
     }
 }

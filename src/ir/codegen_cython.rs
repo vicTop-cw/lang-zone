@@ -12,7 +12,12 @@ pub struct CythonCodeGen {
 }
 
 impl CythonCodeGen {
-    pub fn new() -> Self { CythonCodeGen { indent: 0, buf: String::new() } }
+    pub fn new() -> Self {
+        CythonCodeGen {
+            indent: 0,
+            buf: String::new(),
+        }
+    }
 
     pub fn generate(&mut self, module: &IrModule) -> &str {
         self.buf.clear();
@@ -24,7 +29,9 @@ impl CythonCodeGen {
         self.writeln("");
         // 运行时哨兵
         self.writeln("class _Moved:");
-        self.writeln("    def __getattr__(self, name): raise RuntimeError('access to moved value')");
+        self.writeln(
+            "    def __getattr__(self, name): raise RuntimeError('access to moved value')",
+        );
         self.writeln("    def __bool__(self): raise RuntimeError('use of moved value')");
         self.writeln("    def __repr__(self): return '<_Moved>'");
         self.writeln("_MOVED = _Moved()");
@@ -34,20 +41,35 @@ impl CythonCodeGen {
         let fname = module.name.replace("::", "/");
         self.writeln(&format!("__name__ = \"{}\"", fname));
         self.writeln(&format!("__file__ = \"{}.lz\"", fname));
-        let all_items: Vec<String> = module.items.iter().filter_map(|i| match i {
-            Item::FnDef(f) => Some(f.name.clone()),
-            Item::StructDef(s) => Some(s.name.clone()),
-            Item::EnumDef(e) => Some(e.name.clone()),
-            Item::Const(c) => Some(c.name.clone()),
-            Item::TypeAlias(ta) => Some(ta.name.clone()),
-            _ => None,
-        }).collect();
-        self.writeln(&format!("__all__ = [{}]", all_items.iter().map(|n| format!("\"{}\"", n)).collect::<Vec<_>>().join(", ")));
+        let all_items: Vec<String> = module
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::FnDef(f) => Some(f.name.clone()),
+                Item::StructDef(s) => Some(s.name.clone()),
+                Item::EnumDef(e) => Some(e.name.clone()),
+                Item::Const(c) => Some(c.name.clone()),
+                Item::TypeAlias(ta) => Some(ta.name.clone()),
+                _ => None,
+            })
+            .collect();
+        self.writeln(&format!(
+            "__all__ = [{}]",
+            all_items
+                .iter()
+                .map(|n| format!("\"{}\"", n))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
         self.writeln("");
 
         let mut has_main = false;
         for item in &module.items {
-            if let Item::FnDef(f) = item { if f.name == "main" { has_main = true; } }
+            if let Item::FnDef(f) = item {
+                if f.name == "main" {
+                    has_main = true;
+                }
+            }
             self.gen_item(item);
         }
         // 如果没有 main 函数，添加默认空 main
@@ -63,93 +85,203 @@ impl CythonCodeGen {
             Item::StructDef(s) => self.gen_struct(s),
             Item::EnumDef(e) => self.gen_enum(e),
             Item::Const(c) => self.gen_const(c),
-            Item::TypeAlias(_) => {}  // Cython uses ctypedef
+            Item::TypeAlias(_) => {} // Cython uses ctypedef
             Item::Use(u) => self.gen_import(u),
             Item::TraitDef(t) => self.gen_trait(t),
             Item::Impl(i) => self.gen_impl(i),
             Item::Test(t) => self.gen_test(t),
             Item::CheckerBlock { .. } => {} // checker 块不生成 Cython 代码
+            Item::DuckDef(_) => {}          // duck 约束不生成运行时代码
         }
     }
 
     fn gen_function(&mut self, f: &FnDef) {
-        let p: Vec<String> = f.params.iter().map(|p| format!("{} {}", self.map_type(&p.ty), p.name)).collect();
-        let ret = if f.ret_ty != IrType::Unit { self.map_type(&f.ret_ty).to_string() } else { "void".to_string() };
-        let decl = if !f.body.stmts.is_empty() { "cdef" } else { "cpdef" };
+        let p: Vec<String> = f
+            .params
+            .iter()
+            .map(|p| format!("{} {}", self.map_type(&p.ty), p.name))
+            .collect();
+        let ret = if f.ret_ty != IrType::Unit {
+            self.map_type(&f.ret_ty).to_string()
+        } else {
+            "void".to_string()
+        };
+        let decl = if !f.body.stmts.is_empty() {
+            "cdef"
+        } else {
+            "cpdef"
+        };
         self.write(&format!("{} {} {}({}):", decl, ret, f.name, p.join(", ")));
-        self.writeln(""); self.indent += 1;
-        gen_block(self, &f.body); self.indent -= 1; self.writeln("");
+        self.writeln("");
+        self.indent += 1;
+        gen_block(self, &f.body);
+        self.indent -= 1;
+        self.writeln("");
     }
 
     fn gen_struct(&mut self, s: &StructDef) {
-        self.writeln(&format!("cdef class {}:", s.name)); self.indent += 1;
-        for f in &s.fields { self.writeln(&format!("cdef public {} {}", self.map_type(&f.ty), f.name)); }
+        self.writeln(&format!("cdef class {}:", s.name));
+        self.indent += 1;
+        for f in &s.fields {
+            self.writeln(&format!("cdef public {} {}", self.map_type(&f.ty), f.name));
+        }
         if !s.fields.is_empty() {
-            let p: Vec<String> = s.fields.iter().map(|f| format!("{} {}", self.map_type(&f.ty), f.name)).collect();
+            let p: Vec<String> = s
+                .fields
+                .iter()
+                .map(|f| format!("{} {}", self.map_type(&f.ty), f.name))
+                .collect();
             self.write(&format!("def __init__(self, {}):", p.join(", ")));
-            for f in &s.fields { self.writeln(&format!("    self.{} = {}", f.name, f.name)); }
-        } else { self.writeln("pass"); }
-        for m in &s.methods { self.gen_method(m); }
-        self.indent -= 1; self.writeln("");
+            for f in &s.fields {
+                self.writeln(&format!("    self.{} = {}", f.name, f.name));
+            }
+        } else {
+            self.writeln("pass");
+        }
+        for m in &s.methods {
+            self.gen_method(m);
+        }
+        self.indent -= 1;
+        self.writeln("");
     }
 
     fn gen_method(&mut self, f: &FnDef) {
-        let p: Vec<String> = f.params.iter().map(|p| format!("{} {}", self.map_type(&p.ty), p.name)).collect();
-        let ret = if f.ret_ty != IrType::Unit { format!(" -> {}", self.map_type(&f.ret_ty)) } else { String::new() };
+        let p: Vec<String> = f
+            .params
+            .iter()
+            .map(|p| format!("{} {}", self.map_type(&p.ty), p.name))
+            .collect();
+        let ret = if f.ret_ty != IrType::Unit {
+            format!(" -> {}", self.map_type(&f.ret_ty))
+        } else {
+            String::new()
+        };
         self.write(&format!("def {}({}){}:", f.name, p.join(", "), ret));
-        self.writeln(""); self.indent += 1; gen_block(self, &f.body); self.indent -= 1;
+        self.writeln("");
+        self.indent += 1;
+        gen_block(self, &f.body);
+        self.indent -= 1;
     }
 
-    fn gen_enum(&mut self, _e: &EnumDef) { self.writeln("# enum (WIP)"); }
-    fn gen_const(&mut self, _c: &ConstDef) { self.writeln("# const (WIP)"); }
-    fn gen_import(&mut self, _u: &UseStmt) { self.writeln("# import (WIP)"); }
-    fn gen_trait(&mut self, _t: &TraitDef) { self.writeln("# trait (WIP)"); }
-    fn gen_impl(&mut self, _i: &ImplDef) { self.writeln("# impl (WIP)"); }
-    fn gen_test(&mut self, _t: &TestDef) { self.writeln("# test (WIP)"); }
+    fn gen_enum(&mut self, _e: &EnumDef) {
+        self.writeln("# enum (WIP)");
+    }
+    fn gen_const(&mut self, _c: &ConstDef) {
+        self.writeln("# const (WIP)");
+    }
+    fn gen_import(&mut self, _u: &UseStmt) {
+        self.writeln("# import (WIP)");
+    }
+    fn gen_trait(&mut self, _t: &TraitDef) {
+        self.writeln("# trait (WIP)");
+    }
+    fn gen_impl(&mut self, _i: &ImplDef) {
+        self.writeln("# impl (WIP)");
+    }
+    fn gen_test(&mut self, _t: &TestDef) {
+        self.writeln("# test (WIP)");
+    }
 
     fn map_type(&self, ty: &IrType) -> &str {
         match ty {
-            IrType::Int => "int", IrType::F64 => "double", IrType::Str => "str",
-            IrType::Bool => "bint", IrType::Unit | IrType::Never => "void",
+            IrType::Int => "int",
+            IrType::F64 => "double",
+            IrType::Str => "str",
+            IrType::Bool => "bint",
+            IrType::Unit | IrType::Never => "void",
             IrType::Any => "object",
             IrType::Named { path, .. } => match path.as_str() {
-                "List" | "list" => "list", "Dict" | "dict" => "dict",
-                "Set" | "set" => "set", "Option" | "Result" => "object",
+                "List" | "list" => "list",
+                "Dict" | "dict" => "dict",
+                "Set" | "set" => "set",
+                "Option" | "Result" => "object",
                 _ => "object",
             },
             _ => "object",
         }
     }
 
-    fn writeln(&mut self, s: &str) { let p = "    ".repeat(self.indent); self.buf.push_str(&p); self.buf.push_str(s); self.buf.push('\n'); }
-    fn write(&mut self, s: &str) { let p = "    ".repeat(self.indent); self.buf.push_str(&p); self.buf.push_str(s); }
+    fn writeln(&mut self, s: &str) {
+        let p = "    ".repeat(self.indent);
+        self.buf.push_str(&p);
+        self.buf.push_str(s);
+        self.buf.push('\n');
+    }
+    fn write(&mut self, s: &str) {
+        let p = "    ".repeat(self.indent);
+        self.buf.push_str(&p);
+        self.buf.push_str(s);
+    }
 }
 
 fn gen_block(cg: &mut CythonCodeGen, block: &Block) {
-    for stmt in &block.stmts { gen_stmt(cg, stmt); }
+    for stmt in &block.stmts {
+        gen_stmt(cg, stmt);
+    }
 }
 
 fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
     match stmt {
         Stmt::Let { name, value, .. } => cg.writeln(&format!("{} = {}", name, gen_expr(cg, value))),
-        Stmt::Assign { target, value } => cg.writeln(&format!("{} = {}", gen_expr(cg, target), gen_expr(cg, value))),
+        Stmt::Assign { target, value } => cg.writeln(&format!(
+            "{} = {}",
+            gen_expr(cg, target),
+            gen_expr(cg, value)
+        )),
         Stmt::Return { value: Some(v) } => cg.writeln(&format!("return {}", gen_expr(cg, v))),
         Stmt::Return { value: None } => cg.writeln("return"),
-        Stmt::ExprStmt { expr } => { let s = gen_expr(cg, expr); if !s.is_empty() { cg.writeln(&s); } }
+        Stmt::ExprStmt { expr } => {
+            let s = gen_expr(cg, expr);
+            if !s.is_empty() {
+                cg.writeln(&s);
+            }
+        }
         Stmt::Break => cg.writeln("break"),
         Stmt::Continue => cg.writeln("continue"),
-        Stmt::Block { stmts } => { for s in stmts { gen_stmt(cg, s); } }
-        Stmt::If { cond, then_branch, else_branch } => {
-            cg.write(&format!("if {}:", gen_expr(cg, cond))); cg.writeln(""); cg.indent += 1; gen_block(cg, then_branch); cg.indent -= 1;
-            if let Some(eb) = else_branch { cg.writeln("else:"); cg.indent += 1; gen_block(cg, eb); cg.indent -= 1; }
+        Stmt::Block { stmts } => {
+            for s in stmts {
+                gen_stmt(cg, s);
+            }
         }
-        Stmt::For { var, iter, guard: _, body } => {
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            cg.write(&format!("if {}:", gen_expr(cg, cond)));
+            cg.writeln("");
+            cg.indent += 1;
+            gen_block(cg, then_branch);
+            cg.indent -= 1;
+            if let Some(eb) = else_branch {
+                cg.writeln("else:");
+                cg.indent += 1;
+                gen_block(cg, eb);
+                cg.indent -= 1;
+            }
+        }
+        Stmt::For {
+            var,
+            iter,
+            guard: _,
+            body,
+        } => {
             cg.write(&format!("for {} in {}:", var, gen_expr(cg, iter)));
-            cg.writeln(""); cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
+            cg.writeln("");
+            cg.indent += 1;
+            gen_block(cg, body);
+            cg.indent -= 1;
         }
-        Stmt::While { cond, guard: _, body } => {
+        Stmt::While {
+            cond,
+            guard: _,
+            body,
+        } => {
             cg.write(&format!("while {}:", gen_expr(cg, cond)));
-            cg.writeln(""); cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
+            cg.writeln("");
+            cg.indent += 1;
+            gen_block(cg, body);
+            cg.indent -= 1;
         }
         Stmt::Match { scrutinee, arms } => {
             let _s = gen_expr(cg, scrutinee);
@@ -157,29 +289,64 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             for (i, arm) in arms.iter().enumerate() {
                 let cond = if i == 0 { "if" } else { "elif" };
                 cg.write(&format!("{} True:  # pat={:?}", cond, arm.pattern));
-                cg.writeln(""); cg.indent += 1; gen_block(cg, &arm.body); cg.indent -= 1;
+                cg.writeln("");
+                cg.indent += 1;
+                gen_block(cg, &arm.body);
+                cg.indent -= 1;
             }
         }
         Stmt::Raise { value } => cg.writeln(&format!("raise {}", gen_expr(cg, value))),
         Stmt::Assert { cond, message } => {
             if let Some(msg) = message {
-                cg.writeln(&format!("assert {}, {}", gen_expr(cg, cond), gen_expr(cg, msg)));
-            } else { cg.writeln(&format!("assert {}", gen_expr(cg, cond))); }
+                cg.writeln(&format!(
+                    "assert {}, {}",
+                    gen_expr(cg, cond),
+                    gen_expr(cg, msg)
+                ));
+            } else {
+                cg.writeln(&format!("assert {}", gen_expr(cg, cond)));
+            }
         }
         Stmt::Yield { value } => cg.writeln(&format!("yield {}", gen_expr(cg, value))),
         Stmt::Defer { body } => {
             cg.writeln("try:");
-            cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
+            cg.indent += 1;
+            gen_block(cg, body);
+            cg.indent -= 1;
         }
-        Stmt::TryCatch { body, catches, else_body, finally_body } => {
+        Stmt::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
             cg.writeln("try:");
-            cg.indent += 1; gen_block(cg, body); cg.indent -= 1;
+            cg.indent += 1;
+            gen_block(cg, body);
+            cg.indent -= 1;
             for (i, (_pat, cb)) in catches.iter().enumerate() {
-                if i == 0 { cg.write("except:"); } else { cg.write("except:"); }
-                cg.writeln(""); cg.indent += 1; gen_block(cg, cb); cg.indent -= 1;
+                if i == 0 {
+                    cg.write("except:");
+                } else {
+                    cg.write("except:");
+                }
+                cg.writeln("");
+                cg.indent += 1;
+                gen_block(cg, cb);
+                cg.indent -= 1;
             }
-            if let Some(eb) = else_body { cg.writeln("else:"); cg.indent += 1; gen_block(cg, eb); cg.indent -= 1; }
-            if let Some(fb) = finally_body { cg.writeln("finally:"); cg.indent += 1; gen_block(cg, fb); cg.indent -= 1; }
+            if let Some(eb) = else_body {
+                cg.writeln("else:");
+                cg.indent += 1;
+                gen_block(cg, eb);
+                cg.indent -= 1;
+            }
+            if let Some(fb) = finally_body {
+                cg.writeln("finally:");
+                cg.indent += 1;
+                gen_block(cg, fb);
+                cg.indent -= 1;
+            }
         }
         // Stmt::Block handled above (L138)
         _ => cg.writeln("# <stmt todo>"),
@@ -193,7 +360,13 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             LitKind::F64(f) => f.to_string(),
             LitKind::Str(s) => format!("\"{}\"", s.replace('"', "\\\"")),
             LitKind::FStr(s) => format!("f\"{}\"", s.replace('"', "\\\"")),
-            LitKind::Bool(b) => if *b { "True".to_string() } else { "False".to_string() },
+            LitKind::Bool(b) => {
+                if *b {
+                    "True".to_string()
+                } else {
+                    "False".to_string()
+                }
+            }
             LitKind::None_ | LitKind::Unit => "None".to_string(),
         },
         ExprKind::Var(name) => name.clone(),
@@ -202,39 +375,73 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
             format!("{}({})", f, a.join(", "))
         }
-        ExprKind::MethodCall { receiver, method, args } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             let r = gen_expr(cg, receiver);
             let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
             format!("{}.{}({})", r, method, a.join(", "))
         }
         ExprKind::FieldAccess { base, field } => format!("{}.{}", gen_expr(cg, base), field),
-        ExprKind::IndexGet { base, key } => format!("{}[{}]", gen_expr(cg, base), gen_expr(cg, key)),
+        ExprKind::IndexGet { base, key } => {
+            format!("{}[{}]", gen_expr(cg, base), gen_expr(cg, key))
+        }
         ExprKind::BinOp { op, lhs, rhs } => {
             let o = match op {
-                BinOpKind::Add => "+", BinOpKind::Sub => "-",
-                BinOpKind::Mul => "*", BinOpKind::Div => "/", BinOpKind::Mod => "%",
-                BinOpKind::Eq => "==", BinOpKind::Neq => "!=",
-                BinOpKind::Lt => "<", BinOpKind::Gt => ">",
-                BinOpKind::Le => "<=", BinOpKind::Ge => ">=",
-                BinOpKind::And => "and", BinOpKind::Or => "or",
-                BinOpKind::BitAnd => "&", BinOpKind::BitOr => "|",
-                BinOpKind::Xor => "^", BinOpKind::Shl => "<<", BinOpKind::Shr => ">>",
-                BinOpKind::Pow => "**", BinOpKind::In => "in", BinOpKind::NotIn => "not in",
+                BinOpKind::Add => "+",
+                BinOpKind::Sub => "-",
+                BinOpKind::Mul => "*",
+                BinOpKind::Div => "/",
+                BinOpKind::Mod => "%",
+                BinOpKind::Eq => "==",
+                BinOpKind::Neq => "!=",
+                BinOpKind::Lt => "<",
+                BinOpKind::Gt => ">",
+                BinOpKind::Le => "<=",
+                BinOpKind::Ge => ">=",
+                BinOpKind::And => "and",
+                BinOpKind::Or => "or",
+                BinOpKind::BitAnd => "&",
+                BinOpKind::BitOr => "|",
+                BinOpKind::Xor => "^",
+                BinOpKind::Shl => "<<",
+                BinOpKind::Shr => ">>",
+                BinOpKind::Pow => "**",
+                BinOpKind::In => "in",
+                BinOpKind::NotIn => "not in",
             };
             format!("{} {} {}", gen_expr(cg, lhs), o, gen_expr(cg, rhs))
         }
         ExprKind::UnOp { op, operand } => {
-            let o = match op { UnOpKind::Neg => "-", UnOpKind::Not => "not ", _ => "~" };
+            let o = match op {
+                UnOpKind::Neg => "-",
+                UnOpKind::Not => "not ",
+                _ => "~",
+            };
             format!("{}{}", o, gen_expr(cg, operand))
         }
         ExprKind::IfExpr { cond, then, els } => {
-            format!("({} if {} else {})", gen_expr(cg, then), gen_expr(cg, cond), gen_expr(cg, els))
+            format!(
+                "({} if {} else {})",
+                gen_expr(cg, then),
+                gen_expr(cg, cond),
+                gen_expr(cg, els)
+            )
         }
         ExprKind::StructCtor { name, fields } => {
-            let f: Vec<String> = fields.iter().map(|(n,e)| format!("{} = {}", n, gen_expr(cg, e))).collect();
+            let f: Vec<String> = fields
+                .iter()
+                .map(|(n, e)| format!("{} = {}", n, gen_expr(cg, e)))
+                .collect();
             format!("{}({})", name, f.join(", "))
         }
-        ExprKind::EnumCtor { enum_name, variant, args } => {
+        ExprKind::EnumCtor {
+            enum_name,
+            variant,
+            args,
+        } => {
             let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
             format!("{}.{}({})", enum_name, variant, a.join(", "))
         }
@@ -244,7 +451,12 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             format!("lambda {}: {}", p.join(", "), b)
         }
         ExprKind::IndexSet { base, key, value } => {
-            format!("{}[{}] = {}", gen_expr(cg, base), gen_expr(cg, key), gen_expr(cg, value))
+            format!(
+                "{}[{}] = {}",
+                gen_expr(cg, base),
+                gen_expr(cg, key),
+                gen_expr(cg, value)
+            )
         }
         ExprKind::GenExpr { yield_of } => {
             format!("({})", gen_expr(cg, yield_of))

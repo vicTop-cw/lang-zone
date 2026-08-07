@@ -234,6 +234,8 @@ pub enum Item {
         default_checker: Option<String>,
         body: Block,
     },
+    /// duck 类型约束 → 编译为 Rust trait
+    DuckDef(DuckDef),
 }
 
 /// 函数定义
@@ -331,6 +333,25 @@ pub struct TypeAliasDef {
 pub struct TestDef {
     pub name: String,
     pub body: Block,
+}
+
+/// Duck 类型约束定义 — 编译期结构匹配，零开销
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckDef {
+    pub name: String,
+    pub generics: Vec<GenericParam>,
+    /// 方法签名列表
+    pub methods: Vec<DuckMethod>,
+    /// 字段约束: field_name → type
+    pub fields: Vec<(String, IrType)>,
+}
+
+/// Duck 方法签名
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuckMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret_ty: IrType,
 }
 
 // ══════════════════════════════════════════════════════════════

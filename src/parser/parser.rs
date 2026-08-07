@@ -90,6 +90,7 @@ impl Parser {
         let mut tests = Vec::new();
         let mut top_level_builds = Vec::new();
         let mut top_stmts: Vec<Stmt> = Vec::new();
+        let mut duck_defs = Vec::new();
         let mut module_name = None;
         let mut magic_blocks: Vec<MagicDef> = Vec::new();
 
@@ -304,38 +305,9 @@ impl Parser {
                     }
                 }
                 Token::Duck => {
-                    // duck 声明 — 跳过解析直到遇到下一个顶层声明或 EOF
-                    self.advance(); // duck keyword
-                                    // 跳过名称行
-                    while !self.check(&Token::Newline) && !self.check(&Token::Eof) {
-                        self.advance();
-                    }
-                    // 跳过 Body 缩进块（跟踪 indent/dedent 深度）
-                    let mut depth = 0;
-                    loop {
-                        if self.check(&Token::Eof) {
-                            break;
-                        }
-                        if self.check(&Token::Indent) {
-                            depth += 1;
-                            self.advance();
-                            continue;
-                        }
-                        if self.check(&Token::Dedent) {
-                            depth -= 1;
-                            self.advance();
-                            if depth <= 0 {
-                                break;
-                            }
-                            continue;
-                        }
-                        if self.check(&Token::Newline) && depth == 0 {
-                            // 空行在顶层，继续跳过
-                            self.advance();
-                            continue;
-                        }
-                        self.advance();
-                    }
+                    // 解析 duck 声明: duck Name = def method(...) -> Ret ...
+                    let d = self.parse_duck_def()?;
+                    duck_defs.push(d);
                 }
                 _ => {
                     // 尝试解析为顶层赋值（全局变量）
@@ -476,6 +448,8 @@ impl Parser {
             type_aliases,
             tests,
             top_level_builds,
+            top_stmts,
+            duck_defs,
             magic_blocks,
         })
     }
@@ -1810,6 +1784,86 @@ impl Parser {
             generics,
             where_clause,
             methods,
+        })
+    }
+
+    /// 解析 duck 声明: duck Name<T> = def method(self) -> Ret .field: Type ...
+    fn parse_duck_def(&mut self) -> Result<DuckDef, String> {
+        self.advance(); // duck keyword
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected duck name, got {:?}", t)),
+        };
+        // 可选的泛型参数: duck Mapper<T, R> = ...
+        let generics = if self.check(&Token::Lt) {
+            self.parse_generic_params()?
+        } else {
+            Vec::new()
+        };
+        self.expect(Token::Eq)?;
+        self.skip_newlines();
+        self.expect(Token::Indent)?;
+
+        let mut methods = Vec::new();
+        let mut fields = Vec::new();
+
+        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            if self.check(&Token::Def) {
+                self.advance(); // def
+                let method_name = match self.advance() {
+                    Token::Ident(n) => n,
+                    Token::MagicMethod(n) => n,
+                    t => return Err(format!("Expected method name in duck, got {:?}", t)),
+                };
+                // 解析参数
+                self.expect(Token::LParen)?;
+                let (params, _variadic) = self.parse_params()?;
+                self.expect(Token::RParen)?;
+                // 返回类型
+                let ret = if self.check(&Token::Arrow) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                methods.push(DuckMethod {
+                    name: method_name,
+                    params,
+                    return_type: ret,
+                });
+            } else if self.check(&Token::Dot) {
+                // .field_name: Type
+                self.advance(); // .
+                let field_name = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected field name after . in duck, got {:?}", t)),
+                };
+                self.expect(Token::Colon)?;
+                let field_ty = self.parse_type()?;
+                fields.push((field_name, field_ty));
+            } else if let Token::Ident(ref kw) = self.peek() {
+                if kw == "type" {
+                    // type AssociatedType — skip for now (关联类型后续实现)
+                    self.advance(); // type
+                    while !self.check(&Token::Newline) && !self.check(&Token::Eof) {
+                        self.advance();
+                    }
+                } else {
+                    self.advance(); // skip unexpected
+                }
+            } else {
+                // skip unexpected tokens
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(Token::Dedent)?;
+
+        Ok(DuckDef {
+            name,
+            generics,
+            methods,
+            fields,
         })
     }
 }

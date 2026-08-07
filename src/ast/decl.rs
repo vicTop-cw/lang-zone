@@ -17,6 +17,10 @@ pub struct Module {
     pub type_aliases: Vec<TypeAliasDef>,
     pub tests: Vec<Stmt>,
     pub top_level_builds: Vec<(String, Vec<Stmt>)>, // 顶层构建块 (name, body)
+    /// 顶层 block / checker 块语句
+    pub top_stmts: Vec<Stmt>,
+    /// duck 类型约束定义
+    pub duck_defs: Vec<DuckDef>,
     /// 独立 magic 块: magic __str__: def __str__(self: MyStruct) -> str = ...
     pub magic_blocks: Vec<MagicDef>,
 }
@@ -140,4 +144,24 @@ pub struct ImplDef {
     pub generics: Vec<String>,
     pub where_clause: Vec<WhereBound>,
     pub methods: Vec<Function>,
+}
+
+/// Duck 类型约束定义 — 编译期结构匹配，零运行时开销
+/// `duck Name = def method(self) -> Ret ...`
+#[derive(Debug, Clone)]
+pub struct DuckDef {
+    pub name: String,
+    pub generics: Vec<String>,
+    /// 方法签名列表
+    pub methods: Vec<DuckMethod>,
+    /// 字段约束: .field_name: Type
+    pub fields: Vec<(String, Type)>,
+}
+
+/// Duck 方法签名 — 结构匹配的最小单元
+#[derive(Debug, Clone)]
+pub struct DuckMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_type: Option<Type>,
 }
