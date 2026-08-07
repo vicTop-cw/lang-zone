@@ -1,0 +1,28 @@
+// ============================================================
+// 测试: def NAME[checker_block] — 函数挂载检查站
+// ============================================================
+
+// ── checker 块: 记录调用次数 ──
+block counter[ps: __Params]:
+    // checker 收到打包的参数，可检查/修改/记录
+    let n = ps.args[0] as int
+
+// ── 尾递归斐波那契 + checker ──
+def fib[counter](n: int, a: int, b: int) -> int =
+    a if n == 1 else fib(n - 1, b, a + b)
+
+// ── 尾递归阶乘 + checker ──
+def fact[counter](n: int, acc: int) -> int =
+    acc if n <= 1 else fact(n - 1, acc * n)
+
+def main() =
+    test "fib with checker":
+        let r = fib(10, 0, 1)
+        // fib(10) = 55
+        assert r == 55
+
+    test "fact with checker":
+        let r2 = fact(5, 1)
+        assert r2 == 120
+
+    print("def[checker] tests done")

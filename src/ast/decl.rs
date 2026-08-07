@@ -1,13 +1,13 @@
 // Lang-Zong 编译器 — ast/decl.rs
 // 声明类 AST 节点：Module, Function, StructDef, TraitDef, ImplDef 等
 
-use crate::types::Type;
 use super::expr::Expr;
 use super::stmt::Stmt;
+use crate::types::Type;
 
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub name: Option<String>,         // 模块名（来自 __name__ 或文件路径）
+    pub name: Option<String>, // 模块名（来自 __name__ 或文件路径）
     pub imports: Vec<ImportStmt>,
     pub functions: Vec<Function>,
     pub structs: Vec<StructDef>,
@@ -16,7 +16,7 @@ pub struct Module {
     pub consts: Vec<ConstDef>,
     pub type_aliases: Vec<TypeAliasDef>,
     pub tests: Vec<Stmt>,
-    pub top_level_builds: Vec<(String, Vec<Stmt>)>,  // 顶层构建块 (name, body)
+    pub top_level_builds: Vec<(String, Vec<Stmt>)>, // 顶层构建块 (name, body)
     /// 独立 magic 块: magic __str__: def __str__(self: MyStruct) -> str = ...
     pub magic_blocks: Vec<MagicDef>,
 }
@@ -24,8 +24,8 @@ pub struct Module {
 /// 独立 magic 方法块定义
 #[derive(Debug, Clone)]
 pub struct MagicDef {
-    pub method_name: String,     // __str__
-    pub function: Function,      // def __str__(self: MyStruct) -> str
+    pub method_name: String, // __str__
+    pub function: Function,  // def __str__(self: MyStruct) -> str
 }
 
 #[derive(Debug, Clone)]
@@ -73,11 +73,15 @@ pub struct Function {
     pub body: Vec<Stmt>,
     pub is_async: bool,
     pub is_abstract: bool,
-    pub is_iterator: bool,       // iterator 关键字定义的生成器函数
-    pub is_magic: bool,          // magic 关键字标记的内建方法
+    pub is_iterator: bool, // iterator 关键字定义的生成器函数
+    pub is_magic: bool,    // magic 关键字标记的内建方法
     pub decorators: Vec<Decorator>,
     /// `..` 可变参数模式
     pub variadic: VariadicMode,
+    /// checker 参数名（def f[ps: __Params](...) — ps 接收 &mut __Params）
+    pub checker_param: Option<String>,
+    /// 引用的默认检查站名（def f[cache](...) 或 def f[cache][ps: __Params](...)）
+    pub default_checker: Option<String>,
 }
 
 #[derive(Debug, Clone)]

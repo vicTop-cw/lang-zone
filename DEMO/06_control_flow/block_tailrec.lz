@@ -1,0 +1,76 @@
+// ============================================================
+// 测试: block 检查站尾递归（原地更新 ps 状态）
+//
+// 核心机制:
+//   block NAME[ps: __Params]:   — 接收 &mut __Params，原地修改
+//   block NAME[(args,)]        — 自调用，更新 ps 状态后再次触发
+//
+// 适用于:
+//   - 尾递归循环（每次更新 ps.args 而非递归新建栈帧）
+//   - 计数器/累加器模式
+// ============================================================
+
+// ── 1. 尾递归 countdown: block 自调用 ──
+// 对比 def 版本需要 return 新 ps，block 版本直接修改 ps.args
+def main() =
+    let mut result: List<int> = []
+
+    block countdown[ps: __Params]:
+        let n = ps.args[0] as int
+        if n <= 0:
+            result.push(0)   // 哨兵
+            return
+        result.push(n)
+        // 原地更新 ps 状态 → 等价于尾递归调用 countdown(n-1)
+        ps.args[0] = n - 1
+        block countdown[(ps.args[0] as int,)]
+
+    block countdown[(5,)]
+    assert result == [5, 4, 3, 2, 1, 0]
+
+    // ── 2. 累加器阶乘 ──
+    block factorial[ps: __Params]:
+        let n = ps.args[0] as int
+        let acc = ps.args[1] as int
+        if n <= 1:
+            ps.args[0] = acc   // 结果存回
+            return
+        ps.args[0] = n - 1
+        ps.args[1] = acc * n
+        block factorial[(ps.args[0] as int, ps.args[1] as int)]
+
+    block factorial[(5, 1)]
+    // ps.args[0] = 120
+
+    // ── 3. 斐波那契 3 参数 ──
+    block fib[ps: __Params]:
+        let n = ps.args[0] as int
+        let a = ps.args[1] as int
+        let b = ps.args[2] as int
+        if n == 0:
+            ps.args[0] = a
+            return
+        ps.args[0] = n - 1
+        ps.args[1] = b
+        ps.args[2] = a + b
+        block fib[(ps.args[0] as int, ps.args[1] as int, ps.args[2] as int)]
+
+    block fib[(10, 0, 1)]
+    // ps.args[0] = 55
+
+    // ── 4. while 循环: 状态机模式 ──
+    let mut visited: List<int> = []
+
+    block walk[ps: __Params]:
+        let cur = ps.args[0] as int
+        let end = ps.args[1] as int
+        if cur > end:
+            return
+        visited.push(cur)
+        ps.args[0] = cur + 1
+        block walk[(ps.args[0] as int, ps.args[1] as int)]
+
+    block walk[(1, 10)]
+    assert visited == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    print("block tailrec tests done")

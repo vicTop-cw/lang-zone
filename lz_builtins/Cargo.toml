@@ -1,0 +1,8 @@
+[package]
+name = "lz_builtins"
+version = "0.1.0"
+edition = "2021"
+description = "Lang-Zone runtime builtins — shared by all generated Rust output"
+
+[dependencies]
+# 零外部依赖，纯 std

@@ -1,12 +1,11 @@
 // Lang-Zong 编译器 — codegen/stmt.rs
 // CodeGenStmtExt trait 扩展
 
+use super::builders::CodeGenBuildersExt;
+use super::expr::CodeGenExprExt;
 use super::CodeGen;
 use crate::parser::*;
 use std::collections::HashSet;
-use super::expr::CodeGenExprExt;
-use super::builders::CodeGenBuildersExt;
-
 
 pub trait CodeGenStmtExt {
     fn gen_block(&self, stmts: &[Stmt], indent: usize, locals: &mut HashSet<String>) -> String;
@@ -40,7 +39,13 @@ impl CodeGenStmtExt for CodeGen {
                 }
             }
 
-            Stmt::Let { name, mutable, is_ref, ty, value } => {
+            Stmt::Let {
+                name,
+                mutable,
+                is_ref,
+                ty,
+                value,
+            } => {
                 // mutable=false → `let x = ...`；mutable=true → `let mut x = ...`
                 // 作用域感知：若同名变量已在当前作用域声明过，则作为赋值（=）而非重新 let，
                 // 避免循环/闭包体内变量被反复遮蔽、外层变量永不更新（无限循环 bug）。
@@ -53,7 +58,8 @@ impl CodeGenStmtExt for CodeGen {
                 } else {
                     let m = if *mutable { "mut " } else { "" };
                     let r = if *is_ref { "&" } else { "" };
-                    let t = ty.as_ref()
+                    let t = ty
+                        .as_ref()
                         .map(|t| format!(": {}", self.map_type(t)))
                         .unwrap_or_default();
                     locals.insert(name.clone());
@@ -63,7 +69,8 @@ impl CodeGenStmtExt for CodeGen {
 
             Stmt::Const { name, ty, value } => {
                 // 函数体内 const 退化为 let mut（const item 在函数内需要显式类型，且生命周期受限）
-                let t = ty.as_ref()
+                let t = ty
+                    .as_ref()
                     .map(|t| format!(": {}", self.map_type(t)))
                     .unwrap_or_default();
                 locals.insert(name.clone());
@@ -73,10 +80,18 @@ impl CodeGenStmtExt for CodeGen {
             Stmt::Return(Some(e)) => {
                 if self.in_gen.get() {
                     // 生成器构建块内：return（带值）先求值，再发出 IterStopException 停止信号
-                    format!("{}let _ = {}; return IterStopException;\n", pad, self.gen_expr(e))
+                    format!(
+                        "{}let _ = {}; return IterStopException;\n",
+                        pad,
+                        self.gen_expr(e)
+                    )
                 } else if self.in_build_call.get() {
                     // 调用构建块内：return 的值即参数包，类型擦除为 __Pack
-                    format!("{}return {};\n", pad, self.gen_pack_value(e, indent, locals))
+                    format!(
+                        "{}return {};\n",
+                        pad,
+                        self.gen_pack_value(e, indent, locals)
+                    )
                 } else {
                     format!("{}return {};\n", pad, self.gen_expr(e))
                 }
@@ -96,7 +111,11 @@ impl CodeGenStmtExt for CodeGen {
             Stmt::Yield(Some(e)) => {
                 if self.in_gen.get() {
                     // 生成器构建块内：yield 逐步产出参数包 → 类型擦除后推入收集器
-                    format!("{}__bb.push({});\n", pad, self.gen_pack_value(e, indent, locals))
+                    format!(
+                        "{}__bb.push({});\n",
+                        pad,
+                        self.gen_pack_value(e, indent, locals)
+                    )
                 } else {
                     format!("{}yield {};\n", pad, self.gen_expr(e))
                 }
@@ -113,38 +132,73 @@ impl CodeGenStmtExt for CodeGen {
                 // yield from expr: 委托生成器迭代
                 if self.in_gen.get() {
                     let inner = self.gen_expr(e);
-                    format!("{}for __yf_val in {}.into_iter() {{ __bb.push(__yf_val); }}\n", pad, inner)
+                    format!(
+                        "{}for __yf_val in {}.into_iter() {{ __bb.push(__yf_val); }}\n",
+                        pad, inner
+                    )
                 } else {
                     let inner = self.gen_expr(e);
                     format!("{}// yield from {}\n", pad, inner)
                 }
             }
 
-            Stmt::While { cond, guard, body, else_body: _ } => {
+            Stmt::While {
+                cond,
+                guard,
+                body,
+                else_body: _,
+            } => {
                 let body_s = self.gen_block(body, indent + 1, locals);
                 match guard {
                     Some(g) => {
                         let pad_inc = "    ".repeat(indent + 1);
                         let guard_s = self.gen_expr(g);
-                        format!("{}while {} {{\n{}if !({}) {{ break; }}\n{}{}}}\n",
-                            pad, self.gen_expr(cond), pad_inc, guard_s, body_s, pad)
+                        format!(
+                            "{}while {} {{\n{}if !({}) {{ break; }}\n{}{}}}\n",
+                            pad,
+                            self.gen_expr(cond),
+                            pad_inc,
+                            guard_s,
+                            body_s,
+                            pad
+                        )
                     }
-                    None => format!("{}while {} {{\n{}{}}}\n", pad, self.gen_expr(cond), body_s, pad),
+                    None => format!(
+                        "{}while {} {{\n{}{}}}\n",
+                        pad,
+                        self.gen_expr(cond),
+                        body_s,
+                        pad
+                    ),
                 }
             }
 
-            Stmt::For { var, iter, guard, body, else_body: _ } => {
+            Stmt::For {
+                var,
+                iter,
+                guard,
+                body,
+                else_body: _,
+            } => {
                 let iter_s = self.gen_expr(iter);
                 let body_s = self.gen_block(body, indent + 1, locals);
                 let var_decl = format!("mut {}", var);
                 let inner = match guard {
                     Some(g) => {
                         let pad_inc = "    ".repeat(indent + 1);
-                        format!("{}if !({}) {{ continue; }}\n{}", pad_inc, self.gen_expr(g), body_s)
+                        format!(
+                            "{}if !({}) {{ continue; }}\n{}",
+                            pad_inc,
+                            self.gen_expr(g),
+                            body_s
+                        )
                     }
                     None => body_s,
                 };
-                format!("{}for {} in {} {{\n{}{}}}\n", pad, var_decl, iter_s, inner, pad)
+                format!(
+                    "{}for {} in {} {{\n{}{}}}\n",
+                    pad, var_decl, iter_s, inner, pad
+                )
             }
 
             Stmt::Loop(body) => {
@@ -159,15 +213,28 @@ impl CodeGenStmtExt for CodeGen {
             }
             Stmt::Block { label, body } => {
                 let body_s = self.gen_block(body, indent + 1, locals);
-                format!("{}(|| {{ // block '{} \n{}{}}})();\n", pad, label, body_s, pad)
+                format!(
+                    "{}(|| {{ // block '{} \n{}{}}})();\n",
+                    pad, label, body_s, pad
+                )
             }
-            Stmt::CheckerBlock { label: _, ps_name: _, body: _ } => {
+            Stmt::CheckerBlock {
+                label: _,
+                ps_name: _,
+                default_checker: _,
+                body: _,
+            } => {
                 String::new() // checker 块不内联（已提升为模块级函数）
             }
             Stmt::Continue => format!("{}continue;\n", pad),
 
             Stmt::BlockCall { label, args } => {
-                format!("{}{}(&mut __Params::new({}));\n", pad, label, self.gen_expr(args))
+                format!(
+                    "{}{}(&mut __Params::new({}));\n",
+                    pad,
+                    label,
+                    self.gen_expr(args)
+                )
             }
 
             Stmt::Defer(body) => {
@@ -176,14 +243,22 @@ impl CodeGenStmtExt for CodeGen {
                 let body_s = self.gen_block(body, indent + 1, locals);
                 // 生成 __defer_N 守卫变量，Drop 时执行 defer 体
                 // 使用 move 闭包 + FnOnce 确保捕获环境（包括可变引用）
-                format!("{}let __defer_{} = DeferGuard(Some(|| {{\n{}{}}}));\n", pad, n, body_s, pad)
+                format!(
+                    "{}let __defer_{} = DeferGuard(Some(|| {{\n{}{}}}));\n",
+                    pad, n, body_s, pad
+                )
             }
 
             Stmt::Raise(expr) => {
                 format!("{}return Err({});\n", pad, self.gen_expr(expr))
             }
 
-            Stmt::Guard { cond, let_binding, else_body, .. } => {
+            Stmt::Guard {
+                cond,
+                let_binding,
+                else_body,
+                ..
+            } => {
                 // else 分支：单表达式自动包 return；多语句/块直接展开
                 let else_s = if else_body.len() == 1 {
                     match &else_body[0] {
@@ -203,7 +278,13 @@ impl CodeGenStmtExt for CodeGen {
                 match (cond, let_binding) {
                     (Some(c), None) => {
                         // guard cond else: VALUE  →  if !(cond) { return VALUE; }
-                        format!("{}if !({}) {{\n{}{}}}\n", pad, self.gen_expr(c), else_s, pad)
+                        format!(
+                            "{}if !({}) {{\n{}{}}}\n",
+                            pad,
+                            self.gen_expr(c),
+                            else_s,
+                            pad
+                        )
                     }
                     (None, Some((pat, expr))) => {
                         // guard let PATTERN = EXPR else: VALUE  →  let PATTERN = EXPR else { return VALUE; };
@@ -226,10 +307,10 @@ impl CodeGenStmtExt for CodeGen {
                 match alias {
                     Some(name) => {
                         let body_s = self.gen_block(body, indent + 1, locals);
-                        format!("{}let mut {} = {};\n{}{}__exit__(&mut {});\n",
-                            pad, name, expr_s,
-                            body_s,
-                            pad, name)
+                        format!(
+                            "{}let mut {} = {};\n{}{}__exit__(&mut {});\n",
+                            pad, name, expr_s, body_s, pad, name
+                        )
                     }
                     None => {
                         let body_s = self.gen_block(body, indent + 1, locals);
@@ -259,21 +340,30 @@ impl CodeGenStmtExt for CodeGen {
             }
 
             // 测试语句不应出现在普通函数体中，作为兜底生成空字符串
-            Stmt::Test { .. } | Stmt::Suite { .. } => {
-                String::new()
-            }
+            Stmt::Test { .. } | Stmt::Suite { .. } => String::new(),
             Stmt::Assert { expr, expected } => {
                 if let Some(exp) = expected {
-                    format!("{}assert_eq!({}, {});\n", pad, self.gen_expr(expr), self.gen_expr(exp))
+                    format!(
+                        "{}assert_eq!({}, {});\n",
+                        pad,
+                        self.gen_expr(expr),
+                        self.gen_expr(exp)
+                    )
                 } else {
                     format!("{}assert!({});\n", pad, self.gen_expr(expr))
                 }
             }
             Stmt::Check { expr, message } => {
-                let msg = message.as_ref()
+                let msg = message
+                    .as_ref()
                     .map(|m| self.gen_expr(m))
                     .unwrap_or_else(|| format!("\"check failed: {}\"", self.gen_expr(expr)));
-                format!("{}if !({}) {{ eprintln!(\"CHECK: {{}}\", {}); }}\n", pad, self.gen_expr(expr), msg)
+                format!(
+                    "{}if !({}) {{ eprintln!(\"CHECK: {{}}\", {}); }}\n",
+                    pad,
+                    self.gen_expr(expr),
+                    msg
+                )
             }
             Stmt::FnDef { func } => {
                 // 嵌套函数已提升为模块级函数，此处生成 let 绑定指向 mangled 名称
@@ -297,11 +387,17 @@ impl CodeGenStmtExt for CodeGen {
             }
 
             Stmt::TypeAlias { name, ty } => {
-                self.local_type_aliases.borrow_mut().push((name.clone(), ty.to_rust_type_string()));
-                String::new()  // hoisted to module level, no inline output
+                self.local_type_aliases
+                    .borrow_mut()
+                    .push((name.clone(), ty.to_rust_type_string()));
+                String::new() // hoisted to module level, no inline output
             }
 
-            Stmt::LetTuple { names, ty: _, value } => {
+            Stmt::LetTuple {
+                names,
+                ty: _,
+                value,
+            } => {
                 // 解构绑定 → 临时变量 + 逐个字段提取
                 let val_s = self.gen_expr(value);
                 let tmp_name = format!("__lz_t{}", names.join("_"));
@@ -313,21 +409,27 @@ impl CodeGenStmtExt for CodeGen {
                 }
                 out
             }
-            Stmt::WhileLet { pattern: _, expr, guard, body, else_body: _ } => {
+            Stmt::WhileLet {
+                pattern: _,
+                expr,
+                guard,
+                body,
+                else_body: _,
+            } => {
                 let body_s = self.gen_block(body, indent + 1, locals);
                 let expr_s = self.gen_expr(expr);
                 match guard {
                     Some(g) => {
                         let pad_inc = "    ".repeat(indent + 1);
                         let guard_s = self.gen_expr(g);
-                        format!("{}while let _ = {} {{\n{}if !({}) {{ break; }}\n{}{}}}\n",
-                            pad, expr_s, pad_inc, guard_s, body_s, pad)
+                        format!(
+                            "{}while let _ = {} {{\n{}if !({}) {{ break; }}\n{}{}}}\n",
+                            pad, expr_s, pad_inc, guard_s, body_s, pad
+                        )
                     }
                     None => format!("{}while let _ = {} {{\n{}{}}}\n", pad, expr_s, body_s, pad),
                 }
             }
         }
     }
-
-
 }

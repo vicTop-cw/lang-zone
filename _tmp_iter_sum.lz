@@ -1,0 +1,15 @@
+trait Add<Rhs = Self> =
+    type Output
+
+trait Default =
+    def default() -> Self = ...
+
+trait Iterable =
+    type Item
+
+
+def sum<I: Iterable>(iterable: ref I) -> I.Item
+    where I.Item: Add<Output = I.Item> + Default
+    =
+    mut total = I.Item.default()
+    total

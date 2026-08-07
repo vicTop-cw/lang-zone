@@ -1,10 +1,10 @@
 // Lang-Zong 编译器 — parser/stmt.rs
 // 语句解析 + 构建块语义验证（作为 Parser 的 trait 扩展）
 
-use crate::lexer::Token;
-use crate::ast::*;
-use super::parser::Parser;
 use super::expr::ParserExprExt;
+use super::parser::Parser;
+use crate::ast::*;
+use crate::lexer::Token;
 
 /// Parser 的语句解析扩展 trait
 pub trait ParserStmtExt {
@@ -35,13 +35,23 @@ impl ParserStmtExt for Parser {
             // 检查 Newline 后是否有 postfix token
             let is_postfix = if self.check(&Token::Newline) {
                 let after_nl = self.peek_n(1);
-                matches!(after_nl,
-                    Token::Dot | Token::LParen | Token::LBrack
-                    | Token::Question | Token::SafeNav | Token::CaretOp
+                matches!(
+                    after_nl,
+                    Token::Dot
+                        | Token::LParen
+                        | Token::LBrack
+                        | Token::Question
+                        | Token::SafeNav
+                        | Token::CaretOp
                 ) || (matches!(after_nl, Token::Indent)
-                    && matches!(self.peek_n(2),
-                        Token::Dot | Token::LParen | Token::LBrack
-                        | Token::Question | Token::SafeNav | Token::CaretOp
+                    && matches!(
+                        self.peek_n(2),
+                        Token::Dot
+                            | Token::LParen
+                            | Token::LBrack
+                            | Token::Question
+                            | Token::SafeNav
+                            | Token::CaretOp
                     ))
             } else {
                 false
@@ -67,7 +77,9 @@ impl ParserStmtExt for Parser {
         let mut stmts = Vec::new();
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
-            if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
             stmts.push(self.parse_stmt()?);
         }
         Ok(stmts)
@@ -85,12 +97,13 @@ impl ParserStmtExt for Parser {
                 self.advance();
                 self.parse_binding_stmt_let()
             }
-            Token::Mut | Token::Ref | Token::Const | Token::Owned => {
-                self.parse_binding_stmt()
-            }
+            Token::Mut | Token::Ref | Token::Const | Token::Owned => self.parse_binding_stmt(),
             Token::Return => {
                 self.advance();
-                let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                let expr = if !self.check(&Token::Newline)
+                    && !self.check(&Token::Dedent)
+                    && !self.check(&Token::Eof)
+                {
                     Some(self.parse_expr()?)
                 } else {
                     None
@@ -105,7 +118,10 @@ impl ParserStmtExt for Parser {
                     let expr = self.parse_expr()?;
                     return Ok(Stmt::YieldFrom(expr));
                 }
-                let expr = if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                let expr = if !self.check(&Token::Newline)
+                    && !self.check(&Token::Dedent)
+                    && !self.check(&Token::Eof)
+                {
                     Some(self.parse_expr()?)
                 } else {
                     None
@@ -130,10 +146,14 @@ impl ParserStmtExt for Parser {
                         self.expect(Token::Colon)?; // :
                     }
                     self.skip_newlines();
-                    if self.check(&Token::Indent) { self.advance(); } // ^: 后可能换行缩进
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                    } // ^: 后可能换行缩进
                     let args = self.parse_expr()?;
                     self.skip_newlines();
-                    if self.check(&Token::Dedent) { self.advance(); } // 退出 ^: 缩进
+                    if self.check(&Token::Dedent) {
+                        self.advance();
+                    } // 退出 ^: 缩进
                     return Ok(Stmt::BlockCall { label, args });
                 }
                 // block NAME[(expr)] → 单行触发调用
@@ -150,19 +170,36 @@ impl ParserStmtExt for Parser {
                 }
 
                 // ── 定义语法 ──
-                // 检测 checker 子句：[ps] / [ps: __Params] / [chk_name]
-                let is_checker = self.check(&Token::LBrack);
-                let ps_name = if is_checker {
+                // [ps: __Params]  → 定义 ps（ps_name = Some, default_checker = None）
+                // [checker_name]  → 引用已有检查站（ps_name = None, default_checker = Some）
+                // [None]          → 显式无检查站（均为 None）
+                let (is_checker, ps_name, default_checker) = if self.check(&Token::LBrack) {
                     self.advance(); // [
-                    let ps = self.advance().to_string(); // ps / chk_name
-                    if self.check(&Token::Colon) {
+                    let first = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "Expected checker name or ps:Type after [, got {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    if first == "None" {
+                        self.expect(Token::RBrack)?;
+                        (true, None, None)
+                    } else if self.check(&Token::Colon) {
+                        // [ps: __Params] → 定义检查站参数
                         self.advance(); // :
-                        self.advance().to_string(); // __Params（跳过）
+                        self.parse_type()?; // skip __Params type
+                        self.expect(Token::RBrack)?;
+                        (true, Some(first), None)
+                    } else {
+                        // [checker_name] → 引用已有检查站
+                        self.expect(Token::RBrack)?;
+                        (true, None, Some(first))
                     }
-                    self.expect(Token::RBrack)?;
-                    ps
                 } else {
-                    String::new()
+                    (false, None, None)
                 };
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
@@ -170,7 +207,12 @@ impl ParserStmtExt for Parser {
                 let body = self.parse_block()?;
                 self.expect(Token::Dedent)?;
                 if is_checker {
-                    Ok(Stmt::CheckerBlock { label, ps_name, body })
+                    Ok(Stmt::CheckerBlock {
+                        label,
+                        ps_name,
+                        default_checker,
+                        body,
+                    })
                 } else {
                     Ok(Stmt::Block { label, body })
                 }
@@ -223,11 +265,17 @@ impl ParserStmtExt for Parser {
                     } else {
                         None
                     };
-                    return Ok(Stmt::WhileLet { pattern, expr, guard, body, else_body });
+                    return Ok(Stmt::WhileLet {
+                        pattern,
+                        expr,
+                        guard,
+                        body,
+                        else_body,
+                    });
                 }
                 // while cond:
-                let cond = self.parse_comprehension_iter()?;  // 不消费 if，避免与 guard 冲突
-                // while cond if guard:
+                let cond = self.parse_comprehension_iter()?; // 不消费 if，避免与 guard 冲突
+                                                             // while cond if guard:
                 let guard = if self.check(&Token::If) {
                     self.advance();
                     Some(self.parse_expr()?)
@@ -251,7 +299,12 @@ impl ParserStmtExt for Parser {
                 } else {
                     None
                 };
-                Ok(Stmt::While { cond, guard, body, else_body })
+                Ok(Stmt::While {
+                    cond,
+                    guard,
+                    body,
+                    else_body,
+                })
             }
             Token::For => {
                 self.advance();
@@ -301,7 +354,13 @@ impl ParserStmtExt for Parser {
                 } else {
                     None
                 };
-                Ok(Stmt::For { var, iter, guard, body, else_body })
+                Ok(Stmt::For {
+                    var,
+                    iter,
+                    guard,
+                    body,
+                    else_body,
+                })
             }
             Token::Loop => {
                 self.advance();
@@ -412,7 +471,12 @@ impl ParserStmtExt for Parser {
                     };
                     vec![val]
                 };
-                Ok(Stmt::Guard { cond, let_binding, success_expr, else_body })
+                Ok(Stmt::Guard {
+                    cond,
+                    let_binding,
+                    success_expr,
+                    else_body,
+                })
             }
             Token::Defer => {
                 self.advance();
@@ -485,12 +549,34 @@ impl ParserStmtExt for Parser {
                 self.advance();
                 let expr = self.parse_expr()?;
                 // assert expr == expected → assert_eq!(expr, expected)
-                if let Expr::Binary { left, op: BinOp::Eq, right } = expr {
-                    Ok(Stmt::Assert { expr: *left, expected: Some(*right) })
-                } else if let Expr::Binary { left, op: BinOp::Ne, right } = expr {
-                    Ok(Stmt::Assert { expr: *left, expected: Some(Expr::Unary { op: UnaryOp::Not, operand: right }) })
+                if let Expr::Binary {
+                    left,
+                    op: BinOp::Eq,
+                    right,
+                } = expr
+                {
+                    Ok(Stmt::Assert {
+                        expr: *left,
+                        expected: Some(*right),
+                    })
+                } else if let Expr::Binary {
+                    left,
+                    op: BinOp::Ne,
+                    right,
+                } = expr
+                {
+                    Ok(Stmt::Assert {
+                        expr: *left,
+                        expected: Some(Expr::Unary {
+                            op: UnaryOp::Not,
+                            operand: right,
+                        }),
+                    })
                 } else {
-                    Ok(Stmt::Assert { expr, expected: None })
+                    Ok(Stmt::Assert {
+                        expr,
+                        expected: None,
+                    })
                 }
             }
             Token::Check => {
@@ -529,7 +615,9 @@ impl ParserStmtExt for Parser {
                 let mut tests = Vec::new();
                 while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                     self.skip_newlines();
-                    if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+                    if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        break;
+                    }
                     // 检查 setup / teardown 关键字
                     match self.peek() {
                         Token::Setup => {
@@ -566,7 +654,12 @@ impl ParserStmtExt for Parser {
                     }
                 }
                 self.expect(Token::Dedent)?;
-                Ok(Stmt::Suite { name, setup, teardown, tests })
+                Ok(Stmt::Suite {
+                    name,
+                    setup,
+                    teardown,
+                    tests,
+                })
             }
             _ => {
                 // 局部类型别名: type Name = Type
@@ -579,7 +672,10 @@ impl ParserStmtExt for Parser {
                         };
                         self.expect(Token::Eq)?;
                         let alias_ty = self.parse_type()?;
-                        return Ok(Stmt::TypeAlias { name: alias_name, ty: alias_ty });
+                        return Ok(Stmt::TypeAlias {
+                            name: alias_name,
+                            ty: alias_ty,
+                        });
                     }
                 }
                 // pass 占位符
@@ -597,7 +693,13 @@ impl ParserStmtExt for Parser {
                         let ty = self.parse_type()?;
                         self.expect(Token::Eq)?;
                         let value = self.parse_expr()?;
-                        return Ok(Stmt::Let { name, mutable: true, is_ref: false, ty: Some(ty), value });
+                        return Ok(Stmt::Let {
+                            name,
+                            mutable: true,
+                            is_ref: false,
+                            ty: Some(ty),
+                            value,
+                        });
                     }
                 }
                 // 尝试解析为表达式语句或赋值
@@ -636,17 +738,45 @@ impl ParserStmtExt for Parser {
                     let peeked = self.peek();
                     let peek2 = self.peek_n(1);
                     let compound = match (peeked, peek2) {
-                        (Token::Amp, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
-                        (Token::Pipe_, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
-                        (Token::CaretOp, Token::Eq) | (Token::CaretInfix, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
-                        (Token::Shl, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
-                        (Token::Shr, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
-                        (Token::StarStar, Token::Eq) => { self.advance(); self.advance(); Some(AssignOp::Eq) }
+                        (Token::Amp, Token::Eq) => {
+                            self.advance();
+                            self.advance();
+                            Some(AssignOp::Eq)
+                        }
+                        (Token::Pipe_, Token::Eq) => {
+                            self.advance();
+                            self.advance();
+                            Some(AssignOp::Eq)
+                        }
+                        (Token::CaretOp, Token::Eq) | (Token::CaretInfix, Token::Eq) => {
+                            self.advance();
+                            self.advance();
+                            Some(AssignOp::Eq)
+                        }
+                        (Token::Shl, Token::Eq) => {
+                            self.advance();
+                            self.advance();
+                            Some(AssignOp::Eq)
+                        }
+                        (Token::Shr, Token::Eq) => {
+                            self.advance();
+                            self.advance();
+                            Some(AssignOp::Eq)
+                        }
+                        (Token::StarStar, Token::Eq) => {
+                            self.advance();
+                            self.advance();
+                            Some(AssignOp::Eq)
+                        }
                         _ => None,
                     };
                     if let Some(op) = compound {
                         let value = self.parse_expr()?;
-                        return Ok(Stmt::Assign { target: expr, op, value });
+                        return Ok(Stmt::Assign {
+                            target: expr,
+                            op,
+                            value,
+                        });
                     }
                 }
 
@@ -657,68 +787,120 @@ impl ParserStmtExt for Parser {
                         let value = self.parse_maybe_build_value()?;
                         // ident = value → Let 绑定（非赋值），默认可变
                         match expr {
-                            Expr::Ident(name) => {
-                                Ok(Stmt::Let { name, mutable: true, is_ref: false, ty: None, value })
-                            }
-                            _ => Ok(Stmt::Assign { target: expr, op: AssignOp::Eq, value })
+                            Expr::Ident(name) => Ok(Stmt::Let {
+                                name,
+                                mutable: true,
+                                is_ref: false,
+                                ty: None,
+                                value,
+                            }),
+                            _ => Ok(Stmt::Assign {
+                                target: expr,
+                                op: AssignOp::Eq,
+                                value,
+                            }),
                         }
                     }
                     Token::PlusEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::AddEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::AddEq,
+                            value,
+                        })
                     }
                     Token::MinusEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::SubEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::SubEq,
+                            value,
+                        })
                     }
                     Token::StarEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::MulEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::MulEq,
+                            value,
+                        })
                     }
                     Token::SlashEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::DivEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::DivEq,
+                            value,
+                        })
                     }
                     Token::PercentEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::ModEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::ModEq,
+                            value,
+                        })
                     }
                     Token::AndEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::AndEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::AndEq,
+                            value,
+                        })
                     }
                     Token::OrEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::OrEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::OrEq,
+                            value,
+                        })
                     }
                     Token::XorEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::XorEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::XorEq,
+                            value,
+                        })
                     }
                     Token::ShlEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::ShlEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::ShlEq,
+                            value,
+                        })
                     }
                     Token::ShrEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::ShrEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::ShrEq,
+                            value,
+                        })
                     }
                     Token::PowEq => {
                         self.advance();
                         let value = self.parse_expr()?;
-                        Ok(Stmt::Assign { target: expr, op: AssignOp::PowEq, value })
+                        Ok(Stmt::Assign {
+                            target: expr,
+                            op: AssignOp::PowEq,
+                            value,
+                        })
                     }
-                    _ => Ok(Stmt::Expr(expr))
+                    _ => Ok(Stmt::Expr(expr)),
                 }
             }
         }
@@ -733,10 +915,22 @@ impl ParserStmtExt for Parser {
 
         loop {
             match self.peek() {
-                Token::Mut => { self.advance(); mutable = true; }
-                Token::Ref => { self.advance(); is_ref = true; }
-                Token::Const => { self.advance(); is_const = true; }
-                Token::Owned => { self.advance(); /* _is_owned = true; */ mutable = true; }
+                Token::Mut => {
+                    self.advance();
+                    mutable = true;
+                }
+                Token::Ref => {
+                    self.advance();
+                    is_ref = true;
+                }
+                Token::Const => {
+                    self.advance();
+                    is_const = true;
+                }
+                Token::Owned => {
+                    self.advance(); /* _is_owned = true; */
+                    mutable = true;
+                }
                 _ => break,
             }
         }
@@ -760,7 +954,13 @@ impl ParserStmtExt for Parser {
         if is_const {
             Ok(Stmt::Const { name, ty, value })
         } else {
-            Ok(Stmt::Let { name, mutable, is_ref, ty, value })
+            Ok(Stmt::Let {
+                name,
+                mutable,
+                is_ref,
+                ty,
+                value,
+            })
         }
     }
 
@@ -772,10 +972,21 @@ impl ParserStmtExt for Parser {
 
         loop {
             match self.peek() {
-                Token::Mut => { self.advance(); mutable = true; }
-                Token::Ref => { self.advance(); is_ref = true; }
-                Token::Const => { self.advance(); is_const = true; }
-                Token::Owned => { self.advance(); /* let owned 语义上排斥，忽略 */ }
+                Token::Mut => {
+                    self.advance();
+                    mutable = true;
+                }
+                Token::Ref => {
+                    self.advance();
+                    is_ref = true;
+                }
+                Token::Const => {
+                    self.advance();
+                    is_const = true;
+                }
+                Token::Owned => {
+                    self.advance(); /* let owned 语义上排斥，忽略 */
+                }
                 _ => break,
             }
         }
@@ -792,7 +1003,10 @@ impl ParserStmtExt for Parser {
                     Token::RParen => break,
                     Token::Comma | Token::DotDot | Token::DotDotDot => {
                         // skip separators and rest patterns
-                        if self.check(&Token::RParen) { self.advance(); break; }
+                        if self.check(&Token::RParen) {
+                            self.advance();
+                            break;
+                        }
                         continue;
                     }
                     t => {
@@ -800,10 +1014,16 @@ impl ParserStmtExt for Parser {
                         if self.check(&Token::Colon) {
                             self.advance(); // :
                             self.parse_type()?;
-                            if self.check(&Token::RParen) { self.advance(); break; }
+                            if self.check(&Token::RParen) {
+                                self.advance();
+                                break;
+                            }
                             continue;
                         }
-                        return Err(format!("Expected variable name in destructuring, got {:?}", t));
+                        return Err(format!(
+                            "Expected variable name in destructuring, got {:?}",
+                            t
+                        ));
                     }
                 }
             }
@@ -828,7 +1048,13 @@ impl ParserStmtExt for Parser {
                 if is_const {
                     return Ok(Stmt::Const { name, ty, value });
                 } else {
-                    return Ok(Stmt::Let { name, mutable, is_ref, ty, value });
+                    return Ok(Stmt::Let {
+                        name,
+                        mutable,
+                        is_ref,
+                        ty,
+                        value,
+                    });
                 }
             }
 
@@ -872,7 +1098,13 @@ impl ParserStmtExt for Parser {
             Ok(Stmt::Const { name, ty, value })
         } else {
             // let 前缀 → 默认可变（let mut 显式声明）
-            Ok(Stmt::Let { name, mutable, is_ref, ty, value })
+            Ok(Stmt::Let {
+                name,
+                mutable,
+                is_ref,
+                ty,
+                value,
+            })
         }
     }
 
@@ -892,7 +1124,10 @@ impl ParserStmtExt for Parser {
     /// 解析可能后跟构建块的值表达式
     fn parse_maybe_build_value(&mut self) -> Result<Expr, String> {
         // 情况1: 直接构建块（*:/~:/^: body）- 无前置值
-        if self.check(&Token::BuildCall) || self.check(&Token::BuildGen) || self.check(&Token::BuildIndex) {
+        if self.check(&Token::BuildCall)
+            || self.check(&Token::BuildGen)
+            || self.check(&Token::BuildIndex)
+        {
             let kind = if self.check(&Token::BuildCall) {
                 BuildKind::Call
             } else if self.check(&Token::BuildGen) {
@@ -911,7 +1146,10 @@ impl ParserStmtExt for Parser {
         }
         // 情况2: 普通值，可能是值后跟构建块
         let value = self.parse_expr()?;
-        if self.check(&Token::BuildCall) || self.check(&Token::BuildGen) || self.check(&Token::BuildIndex) {
+        if self.check(&Token::BuildCall)
+            || self.check(&Token::BuildGen)
+            || self.check(&Token::BuildIndex)
+        {
             let kind = if self.check(&Token::BuildCall) {
                 BuildKind::Call
             } else if self.check(&Token::BuildGen) {
@@ -983,7 +1221,8 @@ impl ParserStmtExt for Parser {
                 self.collect_yields(body, &mut yields, &mut has_yield);
                 if !has_yield {
                     return Err(
-                        "生成器构建块(*:) 必须至少包含一个 yield（用于逐步产出构建参数包）".to_string(),
+                        "生成器构建块(*:) 必须至少包含一个 yield（用于逐步产出构建参数包）"
+                            .to_string(),
                     );
                 }
                 for y in &yields {
@@ -1018,7 +1257,12 @@ impl ParserStmtExt for Parser {
                 Stmt::Loop(body) => self.collect_yields(body, out, has_yield),
                 Stmt::Guard { else_body, .. } => self.collect_yields(else_body, out, has_yield),
                 Stmt::With { body, .. } => self.collect_yields(body, out, has_yield),
-                Stmt::Expr(Expr::If { then_body, elif_clauses, else_body, .. }) => {
+                Stmt::Expr(Expr::If {
+                    then_body,
+                    elif_clauses,
+                    else_body,
+                    ..
+                }) => {
                     self.collect_yields(then_body, out, has_yield);
                     for (_, b) in elif_clauses {
                         self.collect_yields(b, out, has_yield);
@@ -1067,7 +1311,12 @@ impl ParserStmtExt for Parser {
                         return Some(f);
                     }
                 }
-                Stmt::Expr(Expr::If { then_body, elif_clauses, else_body, .. }) => {
+                Stmt::Expr(Expr::If {
+                    then_body,
+                    elif_clauses,
+                    else_body,
+                    ..
+                }) => {
                     if let Some(f) = self.first_yield(then_body) {
                         return Some(f);
                     }

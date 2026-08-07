@@ -21,7 +21,9 @@ impl fmt::Display for IrType {
             IrType::Duck { fields } => {
                 f.write_str("duck {")?;
                 for (i, (n, t)) in fields.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{n}: {t}")?;
                 }
                 f.write_str("}")
@@ -31,7 +33,9 @@ impl fmt::Display for IrType {
                 if !args.is_empty() {
                     f.write_str("<")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(">")?;
@@ -43,7 +47,9 @@ impl fmt::Display for IrType {
             IrType::Tuple(elems) => {
                 f.write_str("(")?;
                 for (i, e) in elems.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{e}")?;
                 }
                 f.write_str(")")
@@ -51,7 +57,9 @@ impl fmt::Display for IrType {
             IrType::Fn { params, ret } => {
                 f.write_str("fn(")?;
                 for (i, p) in params.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{p}")?;
                 }
                 write!(f, ") -> {ret}")
@@ -84,19 +92,27 @@ impl fmt::Display for Expr {
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(")")?;
                 }
                 Ok(())
             }
-            ExprKind::MethodCall { receiver, method, args } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
                 write!(f, "method {receiver}.{method}")?;
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(")")?;
@@ -105,14 +121,18 @@ impl fmt::Display for Expr {
             }
             ExprKind::FieldAccess { base, field } => write!(f, "field {base}.{field}"),
             ExprKind::IndexGet { base, key } => write!(f, "index {base}[{key}]"),
-            ExprKind::IndexSet { base, key, value } => write!(f, "index_set {base}[{key}] = {value}"),
+            ExprKind::IndexSet { base, key, value } => {
+                write!(f, "index_set {base}[{key}] = {value}")
+            }
             ExprKind::BinOp { op, lhs, rhs } => write!(f, "binop {lhs} {op} {rhs}"),
             ExprKind::UnOp { op, operand } => write!(f, "unop {op} {operand}"),
             ExprKind::IfExpr { cond, then, els } => write!(f, "if {cond} then {then} else {els}"),
             ExprKind::Lambda { params, body, .. } => {
                 f.write_str("|")?;
                 for (i, p) in params.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     f.write_str(&p.name)?;
                 }
                 write!(f, "| {body}")
@@ -122,19 +142,27 @@ impl fmt::Display for Expr {
                 if !fields.is_empty() {
                     f.write_str("{ ")?;
                     for (i, (k, v)) in fields.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{k}: {v}")?;
                     }
                     f.write_str(" }")?;
                 }
                 Ok(())
             }
-            ExprKind::EnumCtor { enum_name, variant, args } => {
+            ExprKind::EnumCtor {
+                enum_name,
+                variant,
+                args,
+            } => {
                 write!(f, "{enum_name}::{variant}")?;
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(")")?;
@@ -148,7 +176,9 @@ impl fmt::Display for Expr {
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(")")?;
@@ -157,12 +187,18 @@ impl fmt::Display for Expr {
             }
             ExprKind::BlockExpr { block } => write!(f, "block {block}"),
             ExprKind::Paren(inner) => write!(f, "({inner})"),
-            ExprKind::Pipe { receiver, func, args } => {
+            ExprKind::Pipe {
+                receiver,
+                func,
+                args,
+            } => {
                 write!(f, "pipe {receiver} |> {func}")?;
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(")")?;
@@ -172,7 +208,9 @@ impl fmt::Display for Expr {
             ExprKind::TupleLit(elems) => {
                 f.write_str("(")?;
                 for (i, e) in elems.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{e}")?;
                 }
                 f.write_str(")")
@@ -180,7 +218,9 @@ impl fmt::Display for Expr {
             ExprKind::ListLit(items) => {
                 f.write_str("[")?;
                 for (i, item) in items.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{item}")?;
                 }
                 f.write_str("]")
@@ -290,7 +330,9 @@ impl fmt::Display for Pattern {
             Pattern::Tuple(elems) => {
                 f.write_str("(")?;
                 for (i, e) in elems.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{e}")?;
                 }
                 f.write_str(")")
@@ -300,19 +342,27 @@ impl fmt::Display for Pattern {
                 if !fields.is_empty() {
                     f.write_str("{ ")?;
                     for (i, (k, v)) in fields.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{k}: {v}")?;
                     }
                     f.write_str(" }")?;
                 }
                 Ok(())
             }
-            Pattern::Enum { enum_name, variant, args } => {
+            Pattern::Enum {
+                enum_name,
+                variant,
+                args,
+            } => {
                 write!(f, "{enum_name}::{variant}")?;
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{a}")?;
                     }
                     f.write_str(")")?;
@@ -322,12 +372,18 @@ impl fmt::Display for Pattern {
             Pattern::List(elems) => {
                 f.write_str("[")?;
                 for (i, e) in elems.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
                     write!(f, "{e}")?;
                 }
                 f.write_str("]")
             }
-            Pattern::Range { start, end, inclusive } => {
+            Pattern::Range {
+                start,
+                end,
+                inclusive,
+            } => {
                 if *inclusive {
                     write!(f, "{start}..={end}")
                 } else {
@@ -358,41 +414,71 @@ impl fmt::Display for Block {
 impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Stmt::Let { name, ty, value, is_mut } => {
+            Stmt::Let {
+                name,
+                ty,
+                value,
+                is_mut,
+            } => {
                 let kw = if *is_mut { "let mut" } else { "let" };
                 write!(f, "{kw} {name}: {ty} = {value}")
             }
             Stmt::Assign { target, value } => write!(f, "{target} = {value}"),
-            Stmt::Return { value } => {
-                match value {
-                    Some(v) => write!(f, "return {v}"),
-                    None => f.write_str("return"),
-                }
-            }
+            Stmt::Return { value } => match value {
+                Some(v) => write!(f, "return {v}"),
+                None => f.write_str("return"),
+            },
             Stmt::ExprStmt { expr } => write!(f, "{expr}"),
-            Stmt::If { cond, then_branch, else_branch } => {
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 write!(f, "if {cond} {then_branch}")?;
                 if let Some(els) = else_branch {
                     write!(f, " else {els}")?;
                 }
                 Ok(())
             }
-            Stmt::For { var, iter, guard, body } => {
-                let guard_s = guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
+            Stmt::For {
+                var,
+                iter,
+                guard,
+                body,
+            } => {
+                let guard_s = guard
+                    .as_ref()
+                    .map(|g| format!(" if {g}"))
+                    .unwrap_or_default();
                 write!(f, "for {var} in {iter}{guard_s} {body}")
             }
             Stmt::While { cond, guard, body } => {
-                let guard_s = guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
+                let guard_s = guard
+                    .as_ref()
+                    .map(|g| format!(" if {g}"))
+                    .unwrap_or_default();
                 write!(f, "while {cond}{guard_s} {body}")
             }
-            Stmt::WhileLet { pattern, expr, guard, body } => {
-                let guard_s = guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
+            Stmt::WhileLet {
+                pattern,
+                expr,
+                guard,
+                body,
+            } => {
+                let guard_s = guard
+                    .as_ref()
+                    .map(|g| format!(" if {g}"))
+                    .unwrap_or_default();
                 write!(f, "while let {pattern} = {expr}{guard_s} {body}")
             }
             Stmt::Match { scrutinee, arms } => {
                 write!(f, "match {scrutinee} {{")?;
                 for arm in arms {
-                    let guard_s = arm.guard.as_ref().map(|g| format!(" if {g}")).unwrap_or_default();
+                    let guard_s = arm
+                        .guard
+                        .as_ref()
+                        .map(|g| format!(" if {g}"))
+                        .unwrap_or_default();
                     write!(f, " {}{} => {}", arm.pattern, guard_s, arm.body)?;
                 }
                 f.write_str(" }")
@@ -400,16 +486,28 @@ impl fmt::Display for Stmt {
             Stmt::Break => f.write_str("break"),
             Stmt::BreakLabel { label, value } => {
                 write!(f, "break '{label}")?;
-                if let Some(v) = value { write!(f, " {v}")?; }
+                if let Some(v) = value {
+                    write!(f, " {v}")?;
+                }
                 Ok(())
             }
             Stmt::Continue => f.write_str("continue"),
             Stmt::BlockLabel { label, body } => write!(f, "block '{label} {body}"),
-            Stmt::CheckerBlock { label, ps_name, body: _ } => write!(f, "block '{label}[ps:{ps_name}] ..."),
+            Stmt::CheckerBlock {
+                label,
+                ps_name,
+                default_checker: _,
+                body: _,
+            } => write!(f, "block '{label}[ps:{ps_name:?}]"),
             Stmt::Yield { value } => write!(f, "yield {value}"),
             Stmt::YieldFrom { iter } => write!(f, "yield from {iter}"),
             Stmt::Defer { body } => write!(f, "defer {body}"),
-            Stmt::TryCatch { body, catches, else_body, finally_body } => {
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
                 write!(f, "try {body}")?;
                 for (pat, block) in catches {
                     match pat {
@@ -450,15 +548,21 @@ impl fmt::Display for Item {
                 if !fn_def.generics.is_empty() {
                     f.write_str("<")?;
                     for (i, g) in fn_def.generics.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         f.write_str(&g.name)?;
                     }
                     f.write_str(">")?;
                 }
                 f.write_str("(")?;
                 for (i, p) in fn_def.params.iter().enumerate() {
-                    if i > 0 { f.write_str(", ")?; }
-                    if p.is_mut { f.write_str("mut ")?; }
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    if p.is_mut {
+                        f.write_str("mut ")?;
+                    }
                     write!(f, "{}: {}", p.name, p.ty)?;
                 }
                 writeln!(f, ") -> {}:", fn_def.ret_ty)?;
@@ -473,7 +577,9 @@ impl fmt::Display for Item {
                 if !s.generics.is_empty() {
                     f.write_str("<")?;
                     for (i, g) in s.generics.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         f.write_str(&g.name)?;
                     }
                     f.write_str(">")?;
@@ -489,7 +595,9 @@ impl fmt::Display for Item {
                 if !e.generics.is_empty() {
                     f.write_str("<")?;
                     for (i, g) in e.generics.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         f.write_str(&g.name)?;
                     }
                     f.write_str(">")?;
@@ -503,7 +611,9 @@ impl fmt::Display for Item {
                         f.write_str(&v.name)?;
                         f.write_str("(")?;
                         for (i, t) in v.fields.iter().enumerate() {
-                            if i > 0 { f.write_str(", ")?; }
+                            if i > 0 {
+                                f.write_str(", ")?;
+                            }
                             write!(f, "{}", t.ty)?;
                         }
                         writeln!(f, ")")?;
@@ -516,7 +626,9 @@ impl fmt::Display for Item {
                 if !t.supertraits.is_empty() {
                     f.write_str(" : ")?;
                     for (i, st) in t.supertraits.iter().enumerate() {
-                        if i > 0 { f.write_str(" + ")?; }
+                        if i > 0 {
+                            f.write_str(" + ")?;
+                        }
                         write!(f, "{st}")?;
                     }
                 }
@@ -526,7 +638,9 @@ impl fmt::Display for Item {
                     f.write_str(&m.name)?;
                     f.write_str("(")?;
                     for (i, p) in m.params.iter().enumerate() {
-                        if i > 0 { f.write_str(", ")?; }
+                        if i > 0 {
+                            f.write_str(", ")?;
+                        }
                         write!(f, "{p}")?;
                     }
                     writeln!(f, ") -> {}", m.ret)?;
@@ -556,7 +670,9 @@ impl fmt::Display for Item {
             Item::Const(c) => write!(f, "const {}: {} = {}", c.name, c.ty, c.value),
             Item::TypeAlias(ta) => write!(f, "type {} = {}", ta.name, ta.ty),
             Item::Test(t) => write!(f, "test {} {:#?}", t.name, t.body),
-            Item::CheckerBlock { name, ps_name, .. } => write!(f, "checker block '{name}[ps:{ps_name}]"),
+            Item::CheckerBlock { name, ps_name, .. } => {
+                write!(f, "checker block '{name}[ps:{ps_name:?}]")
+            }
         }
     }
 }

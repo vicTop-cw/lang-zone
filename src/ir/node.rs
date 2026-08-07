@@ -18,10 +18,20 @@ pub struct Span {
 
 impl Span {
     pub fn new(line: usize, col: usize) -> Self {
-        Span { start: 0, end: 0, line, col }
+        Span {
+            start: 0,
+            end: 0,
+            line,
+            col,
+        }
     }
     pub fn unknown() -> Self {
-        Span { start: 0, end: 0, line: 0, col: 0 }
+        Span {
+            start: 0,
+            end: 0,
+            line: 0,
+            col: 0,
+        }
     }
 }
 
@@ -47,7 +57,9 @@ pub enum Backend {
 }
 
 impl Default for Backend {
-    fn default() -> Self { Backend::Rust }
+    fn default() -> Self {
+        Backend::Rust
+    }
 }
 
 /// 模块类型
@@ -61,7 +73,9 @@ pub enum ModuleKind {
 }
 
 impl Default for ModuleKind {
-    fn default() -> Self { ModuleKind::Normal }
+    fn default() -> Self {
+        ModuleKind::Normal
+    }
 }
 
 /// 顶层编译指令
@@ -84,9 +98,13 @@ impl Default for ModuleDirective {
         ModuleDirective {
             backend: Backend::default(),
             kind: ModuleKind::default(),
-            bridge: None, bridge_tier: None,
-            name: None, doc: None,
-            public: vec![], private: vec![], deps: vec![],
+            bridge: None,
+            bridge_tier: None,
+            name: None,
+            doc: None,
+            public: vec![],
+            private: vec![],
+            deps: vec![],
             no_std: false,
         }
     }
@@ -104,7 +122,13 @@ pub struct MagicAttrs {
 
 impl Default for MagicAttrs {
     fn default() -> Self {
-        MagicAttrs { name: None, doc: None, all: None, bridge: None, bridge_tier: None }
+        MagicAttrs {
+            name: None,
+            doc: None,
+            all: None,
+            bridge: None,
+            bridge_tier: None,
+        }
     }
 }
 
@@ -113,7 +137,11 @@ impl From<&ModuleDirective> for MagicAttrs {
         MagicAttrs {
             name: d.name.clone(),
             doc: d.doc.clone(),
-            all: if d.public.is_empty() { None } else { Some(d.public.clone()) },
+            all: if d.public.is_empty() {
+                None
+            } else {
+                Some(d.public.clone())
+            },
             bridge: d.bridge.clone(),
             bridge_tier: d.bridge_tier.clone(),
         }
@@ -136,7 +164,7 @@ pub enum IntrinsicKind {
     Overload,
     Derive,
     TailCall,
-    Export(Vec<String>),  // @export(Rust), @export(Python)
+    Export(Vec<String>), // @export(Rust), @export(Python)
     Init,
 }
 
@@ -200,7 +228,12 @@ pub enum Item {
     TypeAlias(TypeAliasDef),
     Test(TestDef),
     /// checker 块 → 编译为 fn NAME(ps: &mut __Params)
-    CheckerBlock { name: String, ps_name: String, body: Block },
+    CheckerBlock {
+        name: String,
+        ps_name: Option<String>,
+        default_checker: Option<String>,
+        body: Block,
+    },
 }
 
 /// 函数定义
@@ -213,8 +246,12 @@ pub struct FnDef {
     pub body: Block,
     pub intrinsics: Vec<Intrinsic>,
     pub is_async: bool,
-    pub is_iterator: bool,   // iterator 关键字定义的生成器
+    pub is_iterator: bool, // iterator 关键字定义的生成器
     pub is_test: bool,
+    /// checker 参数名（def f[ps: __Params]）
+    pub checker_param: Option<String>,
+    /// 引用的默认检查站名（def f[cache]）
+    pub default_checker: Option<String>,
     pub span: Span,
 }
 
@@ -260,7 +297,7 @@ pub struct TraitDef {
 /// Impl 定义
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplDef {
-    pub trait_: Option<IrType>,   // None = inherent impl
+    pub trait_: Option<IrType>, // None = inherent impl
     pub for_type: IrType,
     pub generics: Vec<GenericParam>,
     pub methods: Vec<FnDef>,
@@ -309,7 +346,7 @@ pub enum Stmt {
         is_mut: bool,
     },
     Assign {
-        target: Expr,    // 可赋值左值（Var / FieldAccess / IndexGet）
+        target: Expr, // 可赋值左值（Var / FieldAccess / IndexGet）
         value: Expr,
     },
     Return {
@@ -358,11 +395,22 @@ pub enum Stmt {
         iter: Expr,
     },
     Break,
-    BreakLabel { label: String, value: Option<Expr> },
+    BreakLabel {
+        label: String,
+        value: Option<Expr>,
+    },
     Continue,
-    BlockLabel { label: String, body: Block },
+    BlockLabel {
+        label: String,
+        body: Block,
+    },
     /// checker 块 → IR 压缩为 fn NAME(ps: &mut __Params)
-    CheckerBlock { label: String, ps_name: String, body: Block },
+    CheckerBlock {
+        label: String,
+        ps_name: Option<String>,
+        default_checker: Option<String>,
+        body: Block,
+    },
     Defer {
         body: Block,
     },
@@ -390,7 +438,7 @@ pub enum Stmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
-    pub ty: IrType,       // 块的结果类型（最后一条语句的表达式类型，或 Unit）
+    pub ty: IrType, // 块的结果类型（最后一条语句的表达式类型，或 Unit）
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -528,7 +576,11 @@ pub enum ExprKind {
     Dict(Vec<(Expr, Expr)>),
 
     /// Range 表达式 (cython)
-    Range { start: Option<Box<Expr>>, end: Box<Expr>, inclusive: bool },
+    Range {
+        start: Option<Box<Expr>>,
+        end: Box<Expr>,
+        inclusive: bool,
+    },
 
     /// 管道调用 x |> f(args)
     Pipe {
@@ -564,41 +616,72 @@ pub enum LitKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BinOpKind {
-    Add, Sub, Mul, Div, Mod, Pow,
-    Eq, Neq, Lt, Gt, Le, Ge,
-    And, Or,
-    BitAnd, BitOr, Xor, Shl, Shr,
-    In, NotIn,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    Xor,
+    Shl,
+    Shr,
+    In,
+    NotIn,
 }
 
 impl BinOpKind {
     /// 是否为比较运算符（Lt/Gt/Le/Ge/Eq/Neq）
     pub fn is_comparison(&self) -> bool {
-        matches!(self, BinOpKind::Lt | BinOpKind::Gt | BinOpKind::Le | BinOpKind::Ge | BinOpKind::Eq | BinOpKind::Neq)
+        matches!(
+            self,
+            BinOpKind::Lt
+                | BinOpKind::Gt
+                | BinOpKind::Le
+                | BinOpKind::Ge
+                | BinOpKind::Eq
+                | BinOpKind::Neq
+        )
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnOpKind {
-    Neg, Not, Ref, MutRef, Deref,
+    Neg,
+    Not,
+    Ref,
+    MutRef,
+    Deref,
 }
 
 /// 魔法方法种类
 #[derive(Debug, Clone, PartialEq)]
 pub enum MagicKind {
-    GetItem,         // __getitem__
-    SetItem,         // __setitem__
-    Call,            // __call__
-    Iter,            // __iter__ (→ into_iter)
-    Next,            // __next__
-    Display,         // __str__
-    Eq,              // __eq__
-    Cmp,             // __cmp__
-    Drop,            // __drop__
-    Rev,             // __rev__
-    Len,             // __len__
-    Add, Sub, Mul,   // 算术魔法
-    Neg, Not_,        // 一元魔法
+    GetItem, // __getitem__
+    SetItem, // __setitem__
+    Call,    // __call__
+    Iter,    // __iter__ (→ into_iter)
+    Next,    // __next__
+    Display, // __str__
+    Eq,      // __eq__
+    Cmp,     // __cmp__
+    Drop,    // __drop__
+    Rev,     // __rev__
+    Len,     // __len__
+    Add,
+    Sub,
+    Mul, // 算术魔法
+    Neg,
+    Not_,            // 一元魔法
     IntoIter,        // __into_iter__
     SizeHint,        // __size_hint__
     IterStrategy,    // __iter_strategy__
@@ -627,7 +710,11 @@ pub enum Pattern {
     Lit(LitKind),
     Tuple(Vec<Pattern>),
     List(Vec<Pattern>),
-    Range { start: i64, end: i64, inclusive: bool },
+    Range {
+        start: i64,
+        end: i64,
+        inclusive: bool,
+    },
     Struct {
         name: String,
         fields: Vec<(String, Pattern)>,

@@ -1,0 +1,21 @@
+// ============================================================
+// 验证: block 自递归是压栈，不是尾递归优化
+// 设置 Rust 栈限制 20 层，应触发 stack overflow
+// ============================================================
+// 编译: rustc --edition 2021 -C stack-protector=strong
+// 运行: 预期栈溢出，证明是函数调用而非循环
+
+def main() =
+    let mut depth: int = 0
+
+    block deep[ps: __Params]:
+        let n = ps.args[0] as int
+        if n <= 0:
+            return
+        depth = depth + 1
+        ps.args[0] = n - 1
+        // 这是函数调用，不是 goto！每层压栈
+        block deep[(ps.args[0] as int,)]
+
+    block deep[(1000,)]   // 期望: 栈溢出
+    print(f"depth={depth}")  // never reached if stack overflow

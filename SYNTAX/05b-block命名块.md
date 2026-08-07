@@ -78,9 +78,9 @@ block_def    := "block" [NAME] [checker_clause] [raises_clause] ":"
 block_call   := "block" NAME "^:" expr           // 标准调用：注入 __Params（^: 单值块体）
              |  "block" NAME "[" expr "]"        // 单行调用：等价 ^: 的紧凑写法
 raises_clause := "raises" error_type             // 仅 checker 块可声明（plain 块不可 raises）
-checker_clause := "[" NAME ":" "__Params" "]"    // 消费 ps（省略注解写为 [ps]）
-                | "[" NAME "]"                   // 带检查站 NAME（函数或 checker 块）
-                | checker_clause checker_clause  // 可叠加，如 [ps: __Params][my_chk]
+checker_clause := "[" NAME ":" "__Params" "]"    // 消费 ps（定义检查站参数）
+                | "[" NAME "]"                   // 带检查站 NAME（引用已有检查站）
+                | "[" "None" "]"                  // 显式无检查站
 break_stmt   := "break" [NAME] [expr]            // 循环带值：break | break NAME | break [NAME] v（v=循环表达式值）
                | "break" [NAME] "with" expr      // with 值：无 NAME→循环体返回值；有 NAME→复用命名块，expr 为 __Params（不跳出循环）
 continue_stmt := "continue" [NAME]
@@ -358,6 +358,17 @@ block validate[ps: __Params]:
 - **定义即惰性**：`block NAME[ps]:` 只登记、不执行；触发一律走 §2.4 四途径，**不存在「定义并启动」合并形态**（`block NAME[ps] ^:` 非法，见 §2.1）。
 - 因 block 无返回值，**用「原地修改 ps」代替函数的 `return __Params`**（见 §5.6）。
 
+**方括号 `[ ]` 三种形态判定（与函数 `def` 一致，见 [03c-检查站.md](03c-检查站.md) §一）：**
+
+| 写法 | 语义 | `ps_name` | `default_checker` |
+|------|------|-----------|-------------------|
+| `block NAME[ps: __Params]:` | 定义检查站参数，惰性登记 | `Some("ps")` | `None` |
+| `block NAME[cache]:` | 引用已有检查站 `cache`，触发时先跑 `cache` 再进体 | `None` | `Some("cache")` |
+| `block NAME[None]:` | 显式无检查站 | `None` | `None` |
+| `block NAME:`（无 `[ ]`） | plain 块（非 checker），立即执行 | — | — |
+
+> `block NAME[ps]:`（省略类型注解）等价于 `block NAME[ps: __Params]:`，编译器推断 `ps` 类型。
+
 ### 5.2 block 带检查站：`block NAME[chk]:`（精确写法）
 
 与函数 `[chk]` 对称：块「带」一个检查站（函数或 checker 块），触发块时先跑它改写 `__Params`，再跑体。
@@ -374,11 +385,16 @@ block A ^:                    // 触发（标准调用）：先跑 my_check，�
     (10, 20)
 block A ^:                    // 再触发：喂新参数
     (30, 40)
+
+// [None] 显式无检查站
+block Fast[None]:              // 显式声明不使用检查站
+    print(ps.args[0])
 ```
 
 **要点**：
 
 - `block A[my_check]:`（带 `:` 与体）是**定义（延迟）**——定义时**不执行体**、也无参数入口（`ps` 不存在）。触发（`^:` / `[(expr)]` / `break with` / 挂 `[chk]`）时才注入 `ps` 并运行。
+- `[None]` 用于显式禁用检查站——当模块存在默认检查站，某个特定块需要绕过时使用。
 - `block A[my_check] ^: (10, 20):`（在同一行用 `^:` 接参数并带 `:` 体）**非法**——`^:` 冒号后必须换行缩进，且「定义与触发不得合并」（§2.1/§2.4）。**正确写法**：`block A[my_check]:` 定义 + `block A ^:` 触发，两行。
 - 叠加消费与带站：`block A[ps: __Params][my_check]:` + `block A ^:\n    (10, 20)` —— 先 `my_check` 处理，再进 A 体（A 体还能继续改 ps；`^:` 首行缩进的是入口实参，其后块体属已定义的 A）。
 
@@ -489,7 +505,10 @@ block Outer:                       // 父块，普通标签作用域，只跑一
 
 | 检查项 | 行为 |
 |--------|------|
+| `block NAME[ps: T]` 且 `T != __Params` | 编译错误（检查站参数类型必须为 `__Params`） |
 | `block NAME[ps]` 但体未使用 `ps` | 警告（未使用的检查站通道） |
+| `block NAME[chk]` 的 `chk` 签名非 `(__Params) -> __Params` 或不是 checker 块 | 编译错误 |
+| `block NAME[None] ^:` 触发 | 合法：显式跳过检查站 |
 | `block NAME[ps] ^:`（定义与触发合并一行） | 编译错误（定义与触发分离，见 §2.1/§2.4） |
 | `block NAME ^:` / `block NAME[(expr)]` 但 `NAME` 未定义 / 非 checker 块 | 编译错误（无法调用不存在的块） |
 | `block NAME[chk]` 的 `chk` 签名非 `(__Params) -> __Params` 或不是 checker 块 | 编译错误 |

@@ -1,10 +1,10 @@
 // Lang-Zong 编译器 — ast/stmt.rs
 // 语句类 AST 节点：Stmt, MatchArm, Pattern
 
-use crate::types::Type;
-use super::expr::{Expr, AssignOp};
-use super::decl::StructDef;
 use super::decl::Function;
+use super::decl::StructDef;
+use super::expr::{AssignOp, Expr};
+use crate::types::Type;
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
@@ -23,12 +23,12 @@ pub enum Stmt {
     },
     Return(Option<Expr>),
     Yield(Option<Expr>),
-    YieldFrom(Expr),  // yield from expr — 委托生成器
+    YieldFrom(Expr), // yield from expr — 委托生成器
     While {
         cond: Expr,
-        guard: Option<Expr>,          // while cond if guard:
+        guard: Option<Expr>, // while cond if guard:
         body: Vec<Stmt>,
-        else_body: Option<Vec<Stmt>>,  // while ... else:
+        else_body: Option<Vec<Stmt>>, // while ... else:
     },
     WhileLet {
         pattern: Pattern,
@@ -40,25 +40,38 @@ pub enum Stmt {
     For {
         var: String,
         iter: Expr,
-        guard: Option<Expr>,          // for x in iter if guard:
+        guard: Option<Expr>, // for x in iter if guard:
         body: Vec<Stmt>,
-        else_body: Option<Vec<Stmt>>,  // for ... else:
+        else_body: Option<Vec<Stmt>>, // for ... else:
     },
     Loop(Vec<Stmt>),
     Break(Option<Expr>),
     /// break label: value  — 命名块跳出（可选带值）
-    BreakLabel { label: String, value: Option<Expr> },
+    BreakLabel {
+        label: String,
+        value: Option<Expr>,
+    },
     Continue,
     /// block label: body  — 命名块，break label 可跨层跳出
-    Block { label: String, body: Vec<Stmt> },
-    /// block NAME[ps: __Params]: body  — checker 块（惰性登记，不执行）
-    CheckerBlock { label: String, ps_name: String, body: Vec<Stmt> },
+    Block {
+        label: String,
+        body: Vec<Stmt>,
+    },
+    /// block NAME[ps: __Params]: body  — checker 块（惰性，定义 ps）
+    /// block NAME[chk]: body           — checker 块（惰性，引用已有检查站）
+    /// block NAME[None]: body          — checker 块（显式无检查站）
+    CheckerBlock {
+        label: String,
+        ps_name: Option<String>,
+        default_checker: Option<String>,
+        body: Vec<Stmt>,
+    },
     Defer(Vec<Stmt>),
     Raise(Expr),
     Guard {
         cond: Option<Expr>,
         let_binding: Option<(Pattern, Expr)>,
-        success_expr: Option<Expr>,   // guard cond success_expr else fail_body
+        success_expr: Option<Expr>, // guard cond success_expr else fail_body
         else_body: Vec<Stmt>,
     },
     With {
@@ -67,7 +80,10 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     /// checker 块触发调用（block NAME ^: / block NAME[(expr)]）
-    BlockCall { label: String, args: Expr },
+    BlockCall {
+        label: String,
+        args: Expr,
+    },
     /// 函数体内的 enum 定义
     EnumDef(StructDef),
     Assign {
@@ -76,7 +92,9 @@ pub enum Stmt {
         value: Expr,
     },
 
-    FnDef { func: Function },
+    FnDef {
+        func: Function,
+    },
 
     // ── 占位符 ──
     Pass,
@@ -136,6 +154,10 @@ pub enum Pattern {
     Variant(String, Vec<Pattern>),
     Tuple(Vec<Pattern>),
     List(Vec<Pattern>),
-    Range { start: i64, end: i64, inclusive: bool },
+    Range {
+        start: i64,
+        end: i64,
+        inclusive: bool,
+    },
     Wildcard,
 }

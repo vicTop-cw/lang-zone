@@ -1,11 +1,11 @@
 // Lang-Zong 编译器 — parser/parser.rs
 // Parser 核心 + 顶层解析方法
 
+use super::expr::ParserExprExt;
+use super::stmt::ParserStmtExt;
+use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
-use crate::ast::*;
-use super::stmt::ParserStmtExt;
-use super::expr::ParserExprExt;
 
 // ──────────────── Parser ────────────────
 
@@ -19,7 +19,12 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, pos: 0, pending_gt: 0, pending_inline_bounds: Vec::new() }
+        Self {
+            tokens,
+            pos: 0,
+            pending_gt: 0,
+            pending_inline_bounds: Vec::new(),
+        }
     }
 
     pub(super) fn peek(&self) -> &Token {
@@ -65,7 +70,10 @@ impl Parser {
         if std::mem::discriminant(&t) == std::mem::discriminant(&expected) {
             Ok(t)
         } else {
-            Err(format!("Expected {:?}, got {:?} at pos {}", expected, t, self.pos))
+            Err(format!(
+                "Expected {:?}, got {:?} at pos {}",
+                expected, t, self.pos
+            ))
         }
     }
 
@@ -163,18 +171,44 @@ impl Parser {
                     // 顶层 let x = 1 → 不可变全局常量
                     self.advance();
                     let stmt = self.parse_binding_stmt_let()?;
-                    if let Stmt::Let { name, ty, value, mutable, .. } = stmt {
-                        consts.push(ConstDef { name, ty, value, mutable });
+                    if let Stmt::Let {
+                        name,
+                        ty,
+                        value,
+                        mutable,
+                        ..
+                    } = stmt
+                    {
+                        consts.push(ConstDef {
+                            name,
+                            ty,
+                            value,
+                            mutable,
+                        });
                     }
                 }
                 Token::Mut | Token::Ref | Token::Owned => {
                     // 顶层变量绑定: mut y: int = 0, ref r = &x
                     let stmt = self.parse_binding_stmt()?;
-                    if let Stmt::Let { name, ty, value, mutable, .. } = stmt {
-                        consts.push(ConstDef { name, ty, value, mutable });
+                    if let Stmt::Let {
+                        name,
+                        ty,
+                        value,
+                        mutable,
+                        ..
+                    } = stmt
+                    {
+                        consts.push(ConstDef {
+                            name,
+                            ty,
+                            value,
+                            mutable,
+                        });
                     }
                 }
-                Token::Newline => { self.advance(); }
+                Token::Newline => {
+                    self.advance();
+                }
                 Token::Block => {
                     // 模块级 block 定义 / 触发调用
                     // 作为顶层构建块语句处理
@@ -198,7 +232,10 @@ impl Parser {
                             _ => {} // __all__, __bridge__ 等暂存 consts
                         }
                         consts.push(ConstDef {
-                            name, ty: None, value, mutable: false,
+                            name,
+                            ty: None,
+                            value,
+                            mutable: false,
                         });
                     } else if self.check(&Token::Colon) {
                         // magic __str__: 块 — 跳过整个块
@@ -229,7 +266,14 @@ impl Parser {
                             self.expect(Token::Dedent)?;
                             // 将 comptime 块体内容存入 consts（标记 comptime 语义）
                             for stmt in &block {
-                                if let Stmt::Let { name, ty, value, mutable, .. } = stmt {
+                                if let Stmt::Let {
+                                    name,
+                                    ty,
+                                    value,
+                                    mutable,
+                                    ..
+                                } = stmt
+                                {
                                     consts.push(ConstDef {
                                         name: name.clone(),
                                         ty: ty.clone(),
@@ -241,7 +285,14 @@ impl Parser {
                         } else if !self.check(&Token::Newline) && !self.check(&Token::Eof) {
                             // 单行: comptime x = expr
                             let stmt = self.parse_stmt()?;
-                            if let Stmt::Let { name, ty, value, mutable, .. } = &stmt {
+                            if let Stmt::Let {
+                                name,
+                                ty,
+                                value,
+                                mutable,
+                                ..
+                            } = &stmt
+                            {
                                 consts.push(ConstDef {
                                     name: name.clone(),
                                     ty: ty.clone(),
@@ -255,17 +306,27 @@ impl Parser {
                 Token::Duck => {
                     // duck 声明 — 跳过解析直到遇到下一个顶层声明或 EOF
                     self.advance(); // duck keyword
-                    // 跳过名称行
-                    while !self.check(&Token::Newline) && !self.check(&Token::Eof) { self.advance(); }
+                                    // 跳过名称行
+                    while !self.check(&Token::Newline) && !self.check(&Token::Eof) {
+                        self.advance();
+                    }
                     // 跳过 Body 缩进块（跟踪 indent/dedent 深度）
                     let mut depth = 0;
                     loop {
-                        if self.check(&Token::Eof) { break; }
-                        if self.check(&Token::Indent) { depth += 1; self.advance(); continue; }
+                        if self.check(&Token::Eof) {
+                            break;
+                        }
+                        if self.check(&Token::Indent) {
+                            depth += 1;
+                            self.advance();
+                            continue;
+                        }
                         if self.check(&Token::Dedent) {
                             depth -= 1;
                             self.advance();
-                            if depth <= 0 { break; }
+                            if depth <= 0 {
+                                break;
+                            }
                             continue;
                         }
                         if self.check(&Token::Newline) && depth == 0 {
@@ -280,11 +341,15 @@ impl Parser {
                     // 尝试解析为顶层赋值（全局变量）
                     if let Token::Ident(_) = self.peek() {
                         // magic __xxx__ 块: magic __str__: def __str__(self: T) -> ...
-                        if self.peek().to_string() == "magic" && matches!(self.peek_n(1), Token::MagicMethod(_)) {
+                        if self.peek().to_string() == "magic"
+                            && matches!(self.peek_n(1), Token::MagicMethod(_))
+                        {
                             self.advance(); // magic
                             let magic_name = match self.advance() {
                                 Token::MagicMethod(n) => n,
-                                t => return Err(format!("Expected magic method name, got {:?}", t)),
+                                t => {
+                                    return Err(format!("Expected magic method name, got {:?}", t))
+                                }
                             };
                             self.expect(Token::Colon)?;
                             self.skip_newlines();
@@ -293,12 +358,17 @@ impl Parser {
                                 while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                                     if self.check(&Token::Def) {
                                         let f = self.parse_function(false)?;
-                                        magic_blocks.push(MagicDef { method_name: magic_name.clone(), function: f });
+                                        magic_blocks.push(MagicDef {
+                                            method_name: magic_name.clone(),
+                                            function: f,
+                                        });
                                     } else {
                                         self.advance();
                                     }
                                 }
-                                if self.check(&Token::Dedent) { self.advance(); }
+                                if self.check(&Token::Dedent) {
+                                    self.advance();
+                                }
                             }
                         } else if self.peek().to_string() == "type" {
                             // type alias: type UserId = int
@@ -316,7 +386,9 @@ impl Parser {
                                         Token::Ident(g) => gens.push(g),
                                         Token::Gt | Token::Shr => break,
                                         Token::Comma => {}
-                                        Token::Eof => return Err("Unterminated generic params".into()),
+                                        Token::Eof => {
+                                            return Err("Unterminated generic params".into())
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -333,13 +405,29 @@ impl Parser {
                             let ty = self.parse_type()?;
                             self.expect(Token::Eq)?;
                             let value = self.parse_expr()?;
-                            consts.push(ConstDef { name, ty: Some(ty), value, mutable: false });
+                            consts.push(ConstDef {
+                                name,
+                                ty: Some(ty),
+                                value,
+                                mutable: false,
+                            });
                         } else {
                             let stmt = self.parse_stmt()?;
                             // 将 Let / Assign 转为 const（简化处理）
                             match stmt {
-                                Stmt::Let { name, ty, value, mutable, .. } => {
-                                    consts.push(ConstDef { name, ty, value, mutable });
+                                Stmt::Let {
+                                    name,
+                                    ty,
+                                    value,
+                                    mutable,
+                                    ..
+                                } => {
+                                    consts.push(ConstDef {
+                                        name,
+                                        ty,
+                                        value,
+                                        mutable,
+                                    });
                                 }
                                 Stmt::Assign { target, op, value } => {
                                     // 赋值语句如 y += 10 在顶层暂时跳过
@@ -349,7 +437,12 @@ impl Parser {
                                         _ => "_".to_string(),
                                     };
                                     if op == AssignOp::Eq {
-                                        consts.push(ConstDef { name, ty: None, value, mutable: false });
+                                        consts.push(ConstDef {
+                                            name,
+                                            ty: None,
+                                            value,
+                                            mutable: false,
+                                        });
                                     }
                                     // 复合赋值在顶层忽略（应放在函数中）
                                 }
@@ -372,7 +465,19 @@ impl Parser {
             self.skip_newlines();
         }
 
-        Ok(Module { name: module_name, imports, functions, structs, traits, impls, consts, type_aliases, tests, top_level_builds, magic_blocks })
+        Ok(Module {
+            name: module_name,
+            imports,
+            functions,
+            structs,
+            traits,
+            impls,
+            consts,
+            type_aliases,
+            tests,
+            top_level_builds,
+            magic_blocks,
+        })
     }
 
     fn parse_decorator(&mut self) -> Result<Decorator, String> {
@@ -386,7 +491,9 @@ impl Parser {
             let mut args = Vec::new();
             while !self.check(&Token::RParen) {
                 args.push(self.parse_expr()?);
-                if self.check(&Token::Comma) { self.advance(); }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
             }
             self.expect(Token::RParen)?;
             args
@@ -417,7 +524,9 @@ impl Parser {
             }
         }
         // 花括号形式: import X::{a, b} 或 import X.{a, b}
-        let items = if (self.check(&Token::PathSep) || self.check(&Token::Dot)) && self.peek_n(1) == &Token::LBrace {
+        let items = if (self.check(&Token::PathSep) || self.check(&Token::Dot))
+            && self.peek_n(1) == &Token::LBrace
+        {
             self.advance(); // :: 或 .
             self.advance(); // {
             let mut items = Vec::new();
@@ -426,7 +535,11 @@ impl Parser {
                     Token::Ident(n) => items.push(n),
                     t => return Err(format!("Expected import item, got {:?}", t)),
                 }
-                if self.check(&Token::Comma) { self.advance(); } else { break; }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
             }
             self.expect(Token::RBrace)?;
             items
@@ -442,7 +555,12 @@ impl Parser {
         } else {
             None
         };
-        Ok(ImportStmt { path, alias, items, is_from: false })
+        Ok(ImportStmt {
+            path,
+            alias,
+            items,
+            is_from: false,
+        })
     }
 
     fn parse_from_import(&mut self) -> Result<ImportStmt, String> {
@@ -460,11 +578,16 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::Ident(_) => path.push(self.advance().to_string()),
-                Token::PathSep | Token::Dot => { self.advance(); }
+                Token::PathSep | Token::Dot => {
+                    self.advance();
+                }
                 _ => break,
             }
             // 在 ident 之后检查是否是 :: 或 .（统一为路径分隔符）
-            if !self.check(&Token::PathSep) && !self.check(&Token::Dot) && !matches!(self.peek(), Token::Ident(_)) {
+            if !self.check(&Token::PathSep)
+                && !self.check(&Token::Dot)
+                && !matches!(self.peek(), Token::Ident(_))
+            {
                 break;
             }
         }
@@ -476,9 +599,18 @@ impl Parser {
                 Token::Star => items.push("*".to_string()),
                 t => return Err(format!("Expected import item, got {:?}", t)),
             }
-            if self.check(&Token::Comma) { self.advance(); } else { break; }
+            if self.check(&Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
         }
-        Ok(ImportStmt { path, alias: None, items, is_from: true })
+        Ok(ImportStmt {
+            path,
+            alias: None,
+            items,
+            is_from: true,
+        })
     }
 
     fn parse_const(&mut self) -> Result<ConstDef, String> {
@@ -495,7 +627,12 @@ impl Parser {
         };
         self.expect(Token::Eq)?;
         let value = self.parse_expr()?;
-        Ok(ConstDef { name, ty, value, mutable: false })
+        Ok(ConstDef {
+            name,
+            ty,
+            value,
+            mutable: false,
+        })
     }
 
     // ─── 函数 ───
@@ -509,7 +646,10 @@ impl Parser {
                 Token::Ident(n) => n,
                 t => return Err(format!("Expected decorator name after @, got {:?}", t)),
             };
-            decorators.push(Decorator { name, args: Vec::new() });
+            decorators.push(Decorator {
+                name,
+                args: Vec::new(),
+            });
             self.skip_newlines();
         }
         // 接受 def / iterator / magic 关键字
@@ -534,21 +674,47 @@ impl Parser {
             name.push('.');
             match self.advance() {
                 Token::Ident(seg) => name.push_str(&seg),
-                t => return Err(format!("Expected identifier after . in function name, got {:?}", t)),
+                t => {
+                    return Err(format!(
+                        "Expected identifier after . in function name, got {:?}",
+                        t
+                    ))
+                }
             }
         }
 
-        // checker 注解: def test_val[check_positive](x: int) -> int = x
-        if self.check(&Token::LBrack) {
+        // checker 注解:
+        //   [ps: __Params]  → 定义检查站参数（新的 def/block 自带 ps 参数）
+        //   [checker_name]  → 引用已有检查站（无类型注解）
+        //   [None]          → 显式无检查站
+        let (checker_param, default_checker) = if self.check(&Token::LBrack) {
             self.advance(); // [
-            // 跳过 checker 内容
-            let mut depth = 1;
-            while depth > 0 && !self.check(&Token::Eof) {
-                if self.check(&Token::LBrack) { depth += 1; }
-                if self.check(&Token::RBrack) { depth -= 1; }
-                self.advance();
+            let first = match self.advance() {
+                Token::Ident(n) => n,
+                t => {
+                    return Err(format!(
+                        "Expected checker name or ps:Type after [, got {:?}",
+                        t
+                    ))
+                }
+            };
+            if first == "None" {
+                self.expect(Token::RBrack)?;
+                (None, None)
+            } else if self.check(&Token::Colon) {
+                // [ps: __Params] → 定义检查站参数
+                self.advance(); // :
+                self.parse_type()?; // skip __Params type
+                self.expect(Token::RBrack)?;
+                (Some(first), None)
+            } else {
+                // [checker_name] → 引用已有检查站
+                self.expect(Token::RBrack)?;
+                (None, Some(first))
             }
-        }
+        } else {
+            (None, None)
+        };
 
         // 泛型参数
         let generics = if self.check(&Token::Lt) {
@@ -609,7 +775,10 @@ impl Parser {
         }
         // 合并内联约束 (T: Ordered → where_clause)
         for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
-            where_clause.push(WhereBound { type_param: tp, bounds: bds });
+            where_clause.push(WhereBound {
+                type_param: tp,
+                bounds: bds,
+            });
         }
 
         // 函数体
@@ -617,20 +786,39 @@ impl Parser {
             (Vec::new(), false)
         } else {
             self.skip_newlines(); // 允许 = 在下一行
-            // 支持 `:` 作为 block body 分隔符（def main(): <Indent>）
+                                  // 支持 `:` 作为 block body 分隔符（def main(): <Indent>）
             let has_colon_body = self.check(&Token::Colon);
             if has_colon_body {
                 self.advance(); // consume :
             } else if !self.check(&Token::Eq) && !self.check(&Token::Dedent) {
                 // 没有 = body → 抽象方法声明（仅签名）
                 // 但如果下一个是 Dedent 或 Struct 等顶层 token，也视为无 body
-                if matches!(self.peek(), Token::Dedent | Token::Struct | Token::Enum | Token::Trait | Token::Impl | Token::Def | Token::Iterator) {
+                if matches!(
+                    self.peek(),
+                    Token::Dedent
+                        | Token::Struct
+                        | Token::Enum
+                        | Token::Trait
+                        | Token::Impl
+                        | Token::Def
+                        | Token::Iterator
+                ) {
                     return Ok(Function {
-                        name, generics, params, return_type, raises,
-                        where_clause, body: Vec::new(), is_async: false,
-                        is_abstract: true, is_iterator: false,
+                        name,
+                        generics,
+                        params,
+                        return_type,
+                        raises,
+                        where_clause,
+                        body: Vec::new(),
+                        is_async: false,
+                        is_abstract: true,
+                        is_iterator: false,
                         is_magic,
-                        decorators: Vec::new(), variadic,
+                        decorators: Vec::new(),
+                        variadic,
+                        checker_param: None,
+                        default_checker: None,
                     });
                 }
                 self.expect(Token::Eq)?;
@@ -669,10 +857,21 @@ impl Parser {
         }
 
         Ok(Function {
-            name, generics, params, return_type, raises,
-            where_clause, body, is_async: false, is_abstract, is_iterator: false,
+            name,
+            generics,
+            params,
+            return_type,
+            raises,
+            where_clause,
+            body,
+            is_async: false,
+            is_abstract,
+            is_iterator: false,
             is_magic,
-            decorators: Vec::new(), variadic,
+            decorators: Vec::new(),
+            variadic,
+            checker_param,
+            default_checker,
         })
     }
 
@@ -708,21 +907,31 @@ impl Parser {
             // 默认类型: T = int
             if self.check(&Token::Eq) {
                 self.advance(); // =
-                // 跳过默认类型表达式，直到 , 或 >
+                                // 跳过默认类型表达式，直到 , 或 >
                 let mut depth = 0;
                 loop {
-                    if self.check(&Token::Comma) || self.check(&Token::Gt) || self.check(&Token::Shr) {
+                    if self.check(&Token::Comma)
+                        || self.check(&Token::Gt)
+                        || self.check(&Token::Shr)
+                    {
                         break;
                     }
-                    if self.check(&Token::Lt) { depth += 1; }
+                    if self.check(&Token::Lt) {
+                        depth += 1;
+                    }
                     if self.check(&Token::Gt) || self.check(&Token::Shr) {
-                        if depth == 0 { break; }
-                        depth -=1;
+                        if depth == 0 {
+                            break;
+                        }
+                        depth -= 1;
                     }
                     self.advance();
                 }
             }
-            if self.check(&Token::Comma) { self.advance(); continue; }
+            if self.check(&Token::Comma) {
+                self.advance();
+                continue;
+            }
             // 闭合 >：Gt 或 Shr（嵌套泛型 >>）
             if self.check(&Token::Gt) {
                 self.advance();
@@ -757,7 +966,9 @@ impl Parser {
                 dotdot_positions.push(params.len());
 
                 // `..` 后可选逗号继续
-                if self.check(&Token::Comma) { self.advance(); }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
                 continue;
             }
 
@@ -769,9 +980,18 @@ impl Parser {
             // 参数修饰符（名前修饰：mut / ref / owned / owend）
             loop {
                 match self.peek() {
-                    Token::Mut => { self.advance(); is_mut = true; }
-                    Token::Ref => { self.advance(); is_ref = true; }
-                    Token::Owned => { self.advance(); is_owned = true; }
+                    Token::Mut => {
+                        self.advance();
+                        is_mut = true;
+                    }
+                    Token::Ref => {
+                        self.advance();
+                        is_ref = true;
+                    }
+                    Token::Owned => {
+                        self.advance();
+                        is_owned = true;
+                    }
                     _ => break,
                 }
             }
@@ -784,8 +1004,15 @@ impl Parser {
             };
 
             // 参数可以无类型注解（默认为泛型推断）
-            let ty = if self.check(&Token::Comma) || self.check(&Token::RParen) || self.check(&Token::DotDot) {
-                if name == "self" { Type::Self_ } else { Type::Any }
+            let ty = if self.check(&Token::Comma)
+                || self.check(&Token::RParen)
+                || self.check(&Token::DotDot)
+            {
+                if name == "self" {
+                    Type::Self_
+                } else {
+                    Type::Any
+                }
             } else {
                 self.expect(Token::Colon)?;
 
@@ -811,13 +1038,24 @@ impl Parser {
                 None
             };
 
-            params.push(Param { name, ty, default, is_mut, is_owned, is_ref });
-            if self.check(&Token::Comma) { self.advance(); }
+            params.push(Param {
+                name,
+                ty,
+                default,
+                is_mut,
+                is_owned,
+                is_ref,
+            });
+            if self.check(&Token::Comma) {
+                self.advance();
+            }
         }
 
         let variadic = match dotdot_positions.len() {
             0 => VariadicMode::None,
-            1 => VariadicMode::Single { dotdot_at: dotdot_positions[0] },
+            1 => VariadicMode::Single {
+                dotdot_at: dotdot_positions[0],
+            },
             2 => VariadicMode::Double {
                 first_at: dotdot_positions[0],
                 second_at: dotdot_positions[1],
@@ -848,7 +1086,10 @@ impl Parser {
                     break;
                 }
             }
-            bounds.push(WhereBound { type_param, bounds: trait_bounds });
+            bounds.push(WhereBound {
+                type_param,
+                bounds: trait_bounds,
+            });
 
             // 多个约束用逗号分隔（或换行后继续）
             if self.check(&Token::Comma) {
@@ -904,7 +1145,9 @@ impl Parser {
                     self.expect(Token::Colon)?;
                     let field_ty = self.parse_type()?;
                     fields.push((name, field_ty));
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
                 }
                 self.expect(Token::RBrace)?;
                 return Ok(Type::Duck { fields });
@@ -925,7 +1168,9 @@ impl Parser {
                         let mut params = Vec::new();
                         while !self.check(&Token::RParen) {
                             params.push(self.parse_type()?);
-                            if self.check(&Token::Comma) { self.advance(); }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
                         }
                         self.expect(Token::RParen)?;
                         let ret = if self.check(&Token::Arrow) {
@@ -934,7 +1179,10 @@ impl Parser {
                         } else {
                             Type::Unit
                         };
-                        return Ok(Type::Fn { params, ret: Box::new(ret) });
+                        return Ok(Type::Fn {
+                            params,
+                            ret: Box::new(ret),
+                        });
                     }
                     "Simd" => {
                         // Simd[T, N] — SIMD 向量类型
@@ -944,14 +1192,22 @@ impl Parser {
                         let width = match self.advance() {
                             Token::IntLit(n) => {
                                 if n < 1 || n > 64 {
-                                    return Err(format!("Simd width must be between 1 and 64, got {}", n));
+                                    return Err(format!(
+                                        "Simd width must be between 1 and 64, got {}",
+                                        n
+                                    ));
                                 }
                                 n as usize
                             }
-                            t => return Err(format!("Expected integer width for Simd, got {:?}", t)),
+                            t => {
+                                return Err(format!("Expected integer width for Simd, got {:?}", t))
+                            }
                         };
                         self.expect(Token::Gt)?;
-                        return Ok(Type::Simd { elem: Box::new(elem), width });
+                        return Ok(Type::Simd {
+                            elem: Box::new(elem),
+                            width,
+                        });
                     }
                     _ => Type::Named(n),
                 };
@@ -961,7 +1217,9 @@ impl Parser {
                     let mut inner = Vec::new();
                     loop {
                         inner.push(self.parse_type()?);
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                         // 闭合 >：可能是 Gt 或 Shr（嵌套泛型 >>）
                         if self.check(&Token::Gt) {
                             self.advance();
@@ -1019,7 +1277,9 @@ impl Parser {
                 let mut inner = Vec::new();
                 while !self.check(&Token::RParen) {
                     inner.push(self.parse_type()?);
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
                 }
                 self.expect(Token::RParen)?;
                 if self.check(&Token::Arrow) {
@@ -1045,7 +1305,12 @@ impl Parser {
             self.advance(); // consume .
             let next = match self.advance() {
                 Token::Ident(n) => n,
-                t => return Err(format!("Expected identifier after . in type path, got {:?}", t)),
+                t => {
+                    return Err(format!(
+                        "Expected identifier after . in type path, got {:?}",
+                        t
+                    ))
+                }
             };
             // 构建路径类型: Self.Item → Named("Self.Item")
             let path = match &base {
@@ -1059,10 +1324,18 @@ impl Parser {
                 let mut inner = Vec::new();
                 loop {
                     inner.push(self.parse_type()?);
-                    if self.check(&Token::Comma) { self.advance(); }
-                    if self.check(&Token::Gt) { self.advance(); break; }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                    if self.check(&Token::Gt) {
+                        self.advance();
+                        break;
+                    }
                 }
-                base = Type::Generic { base: Box::new(base), args: inner };
+                base = Type::Generic {
+                    base: Box::new(base),
+                    args: inner,
+                };
             }
         }
 
@@ -1094,9 +1367,13 @@ impl Parser {
         // enum Color: Red, Green, Blue  或  enum Color = Red, Green, Blue
         // struct Box =: body ...  (构建块)
         self.skip_newlines(); // 允许分隔符前换行（如文档注释后的空行）
-        if !self.check(&Token::Eq) && !self.check(&Token::Colon) && !self.check(&Token::BuildAssign) {
+        if !self.check(&Token::Eq) && !self.check(&Token::Colon) && !self.check(&Token::BuildAssign)
+        {
             let t = self.advance();
-            return Err(format!("Expected Eq, Colon or BuildAssign, got {:?} at pos {}", t, self.pos));
+            return Err(format!(
+                "Expected Eq, Colon or BuildAssign, got {:?} at pos {}",
+                t, self.pos
+            ));
         }
         self.advance(); // consume = : or =:
         self.skip_newlines();
@@ -1107,20 +1384,35 @@ impl Parser {
             let mut fields = Vec::new();
             let methods = Vec::new();
             // 解析单行字段（支持逗号分隔多个字段）
-            if !self.check(&Token::Newline) && !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            if !self.check(&Token::Newline)
+                && !self.check(&Token::Dedent)
+                && !self.check(&Token::Eof)
+            {
                 loop {
                     let f_name = match self.advance() {
                         Token::Ident(n) => n,
-                        t => return Err(format!("struct 字段需换行缩进书写，或单行用逗号分隔。当前: {:?}", t)),
+                        t => {
+                            return Err(format!(
+                                "struct 字段需换行缩进书写，或单行用逗号分隔。当前: {:?}",
+                                t
+                            ))
+                        }
                     };
                     self.expect(Token::Colon)?;
                     let f_type = self.parse_type()?;
-                    fields.push(Field { name: f_name, ty: f_type, default: None });
+                    fields.push(Field {
+                        name: f_name,
+                        ty: f_type,
+                        default: None,
+                    });
                     if self.check(&Token::Comma) {
                         self.advance();
                         // 跳过逗号后的空格/换行（检查是否还有下一个字段）
                         self.skip_newlines();
-                        if self.check(&Token::Newline) || self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        if self.check(&Token::Newline)
+                            || self.check(&Token::Dedent)
+                            || self.check(&Token::Eof)
+                        {
                             break;
                         }
                     } else {
@@ -1128,7 +1420,16 @@ impl Parser {
                     }
                 }
             }
-            return Ok(StructDef { name, generics, fields, methods, magic_methods: Vec::new(), is_enum, decorators: Vec::new(), repr_attr: None });
+            return Ok(StructDef {
+                name,
+                generics,
+                fields,
+                methods,
+                magic_methods: Vec::new(),
+                is_enum,
+                decorators: Vec::new(),
+                repr_attr: None,
+            });
         }
 
         self.expect(Token::Indent)?;
@@ -1139,7 +1440,9 @@ impl Parser {
 
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
-            if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
 
             // __slots__ = "C" | "packed" | "align(N)" | "transparent"  → #[repr(...)]
             if matches!(self.peek(), Token::MagicMethod(_)) {
@@ -1150,10 +1453,17 @@ impl Parser {
                     let val = match self.advance() {
                         Token::StrLit(s) => s,
                         Token::Ident(s) => s, // 允许未加引号: __slots__ = C
-                        t => return Err(format!("Expected string literal for __slots__, got {:?}", t)),
+                        t => {
+                            return Err(format!(
+                                "Expected string literal for __slots__, got {:?}",
+                                t
+                            ))
+                        }
                     };
                     // 验证 repr 值
-                    let valid = val == "C" || val == "packed" || val == "transparent"
+                    let valid = val == "C"
+                        || val == "packed"
+                        || val == "transparent"
                         || val.starts_with("align(");
                     if !valid {
                         return Err(format!("Invalid __slots__ value '{}': expected 'C', 'packed', 'align(N)', or 'transparent'", val));
@@ -1225,6 +1535,8 @@ impl Parser {
                         is_magic: false,
                         decorators: Vec::new(),
                         variadic,
+                        checker_param: None,
+                        default_checker: None,
                     });
                     self.skip_newlines();
                     continue;
@@ -1263,7 +1575,9 @@ impl Parser {
                                 }
                                 self.expect(Token::Colon)?;
                                 field_types.push(self.parse_type()?);
-                                if self.check(&Token::Comma) { self.advance(); }
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                }
                             }
                             self.expect(Token::RParen)?;
                             if field_types.len() == 1 {
@@ -1275,20 +1589,22 @@ impl Parser {
                             let mut types = Vec::new();
                             while !self.check(&Token::RParen) {
                                 types.push(self.parse_type()?);
-                                if self.check(&Token::Comma) { self.advance(); }
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                }
                             }
                             self.expect(Token::RParen)?;
                             if types.len() == 1 {
                                 types.into_iter().next().unwrap()
                             } else {
-                                Type::Tuple(types)  // 多字段变体: Color(f64, f64, f64)
+                                Type::Tuple(types) // 多字段变体: Color(f64, f64, f64)
                             }
                         }
                     } else if self.check(&Token::Colon) {
                         self.advance();
                         self.parse_type()?
                     } else {
-                        Type::Unit  // unit variant, no type
+                        Type::Unit // unit variant, no type
                     };
                     let default = if self.check(&Token::Eq) {
                         self.advance();
@@ -1296,9 +1612,15 @@ impl Parser {
                     } else {
                         None
                     };
-                    fields.push(Field { name: f_name, ty: f_type, default });
+                    fields.push(Field {
+                        name: f_name,
+                        ty: f_type,
+                        default,
+                    });
                 }
-                _ => { break; }
+                _ => {
+                    break;
+                }
             }
             self.skip_newlines();
         }
@@ -1308,7 +1630,16 @@ impl Parser {
             self.advance();
             self.skip_newlines();
         }
-        Ok(StructDef { name, generics, fields, methods, magic_methods, is_enum, decorators: Vec::new(), repr_attr })
+        Ok(StructDef {
+            name,
+            generics,
+            fields,
+            methods,
+            magic_methods,
+            is_enum,
+            decorators: Vec::new(),
+            repr_attr,
+        })
     }
 
     // ─── trait ───
@@ -1328,8 +1659,12 @@ impl Parser {
         // 或 trait Name =  (无 bounds)
         if self.check(&Token::Colon) {
             self.advance(); // consume :
-            // 跳过 trait bounds 直到 =
-            while !self.check(&Token::Eq) && !self.check(&Token::Eof) && !self.check(&Token::Newline) && !self.check(&Token::Indent) {
+                            // 跳过 trait bounds 直到 =
+            while !self.check(&Token::Eq)
+                && !self.check(&Token::Eof)
+                && !self.check(&Token::Newline)
+                && !self.check(&Token::Indent)
+            {
                 self.advance(); // skip bound tokens (Display + Debug, etc.)
             }
         }
@@ -1342,7 +1677,9 @@ impl Parser {
 
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
-            if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
 
             match self.peek() {
                 Token::Def | Token::Iterator => {
@@ -1356,10 +1693,16 @@ impl Parser {
                     if self.check(&Token::Colon) {
                         self.advance();
                         let f_type = self.parse_type()?;
-                        fields.push(Field { name: f_name, ty: f_type, default: None });
+                        fields.push(Field {
+                            name: f_name,
+                            ty: f_type,
+                            default: None,
+                        });
                     }
                 }
-                _ => { break; }
+                _ => {
+                    break;
+                }
             }
             self.skip_newlines();
         }
@@ -1367,7 +1710,12 @@ impl Parser {
             self.advance();
             self.skip_newlines();
         }
-        Ok(TraitDef { name, generics, methods, fields })
+        Ok(TraitDef {
+            name,
+            generics,
+            methods,
+            fields,
+        })
     }
 
     // ─── impl ───
@@ -1406,7 +1754,10 @@ impl Parser {
         self.skip_newlines(); // 允许分隔符前换行
         if !self.check(&Token::Eq) && !self.check(&Token::Colon) {
             let t = self.advance();
-            return Err(format!("Expected Eq or Colon, got {:?} at pos {}", t, self.pos));
+            return Err(format!(
+                "Expected Eq or Colon, got {:?} at pos {}",
+                t, self.pos
+            ));
         }
         self.advance(); // consume = or :
         self.skip_newlines();
@@ -1415,15 +1766,19 @@ impl Parser {
         let mut methods = Vec::new();
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
-            if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
             // 跳过 impl 块中的 type 别名: type Item = int
             if let Token::Ident(ref s) = self.peek() {
                 if s == "type" {
                     self.advance(); // consume 'type'
-                    // 消费 'type Name = Type' 直到行末或 Dedent
+                                    // 消费 'type Name = Type' 直到行末或 Dedent
                     while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                         let t = self.advance();
-                        if matches!(t, Token::Newline) { break; }
+                        if matches!(t, Token::Newline) {
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -1443,9 +1798,18 @@ impl Parser {
         };
         // 合并内联约束
         for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
-            where_clause.push(WhereBound { type_param: tp, bounds: bds });
+            where_clause.push(WhereBound {
+                type_param: tp,
+                bounds: bds,
+            });
         }
 
-        Ok(ImplDef { trait_name, type_name, generics, where_clause, methods })
+        Ok(ImplDef {
+            trait_name,
+            type_name,
+            generics,
+            where_clause,
+            methods,
+        })
     }
 }

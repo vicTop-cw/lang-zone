@@ -1,0 +1,33 @@
+// ============================================================
+// 测试: checker 拦截 + 修改参数
+//
+// def fib[gate](n, a, b) — gate 可修改 n/a/b 后再执行 fib
+// ============================================================
+
+// ── checker: 确保参数合法 ──
+block validate[ps: __Params]:
+    let n = ps.args[0] as int
+    let a = ps.args[1] as int
+    let b = ps.args[2] as int
+    // 负数修正
+    if n < 0:
+        ps.args[0] = 0
+    if a < 0:
+        ps.args[1] = 0
+    if b < 0:
+        ps.args[2] = 0
+
+// ── 尾递归 fib + 参数校验 ──
+def fib[validate](n: int, a: int, b: int) -> int =
+    a if n <= 1 else fib(n - 1, b, a + b)
+
+def main() =
+    // 正常调用
+    let r1 = fib(10, 0, 1)
+    // r1 = 55
+
+    // 非法参数被 checker 修正
+    let r2 = fib(-5, -10, -20)
+    // checker 修正: n→0, a→0, b→0 → fib(0, 0, 0) = 0
+
+    print("checker validate OK")
