@@ -208,7 +208,8 @@ match p:
 | `__call__` | `Callable` | `Callable`（自定义） | 可调用对象 `obj(args)` |
 | `__getitem__` | `Index` | `std::ops::Index` | 索引读取 `obj[key]` |
 | `__setitem__` | `IndexMut` | `std::ops::IndexMut` | 索引写入 `obj[key] = val` |
-| `__pipe__` | `Pipe` | `Pipe`（自定义） | 管道操作 `a \|> b` |
+| `__lpipe__` | — | — | 管道左侧数据变换 `a \|> b`：先调 `a.__lpipe__()` 产出数据（默认返回自身） |
+| `__rpipe__` | — | — | 管道右侧处理工厂 `a \|> b`：`b.__rpipe__(a)` 返回单参函数处理数据（优先于 `__call__`） |
 | `__is_ok__` | `SpreadOk` | `SpreadOk`（自定义） | 可传播判定 `obj?`：`True`=成功值（见 09 §4.3） |
 | `__unwrap__` | `SpreadOk` | `SpreadOk`（自定义） | 可传播成功值解包：`obj?` 成功分支的结果 |
 | `__err__` | `SpreadErr` | `SpreadErr`（自定义） | 可传播错误值提取：`obj?` 错误分支向上传播的内容 |
@@ -413,7 +414,7 @@ struct MyFile =
 | `__call__` | `Callable` | 调用/索引 |
 | `__getitem__` | `std::ops::Index` | 调用/索引 |
 | `__setitem__` | `std::ops::IndexMut` | 调用/索引 |
-| `__pipe__` | `Pipe` | 调用/索引 |
+| `__lpipe__`/`__rpipe__` | — | 管道（见 04-表达式.md §十） |
 | `__is_ok__`/`__unwrap__` | `SpreadOk` | 错误传播 `?` |
 | `__err__` | `SpreadErr` | 错误传播 `?` |
 | `__bool__` | `HasBool` | 布尔/数学 |
