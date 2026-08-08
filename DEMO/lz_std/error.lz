@@ -43,7 +43,7 @@ enum LzError:
     KeyError(str)
     /// 运行时错误
     RuntimeError(str)
-    /// 未实现
+    /// 功能未实现错误（按 Python 惯例保留名称）
     NotImplementedError(str)
     /// 断言失败
     AssertionError(str)
@@ -226,7 +226,7 @@ def key_error(msg: str) -> Never raises LzError =
 def runtime_error(msg: str) -> Never raises LzError =
     raise LzError.RuntimeError(msg)
 
-/// 抛出未实现错误
+/// 抛出功能未实现错误
 def not_implemented(msg: str) -> Never raises LzError =
     raise LzError.NotImplementedError(msg)
 

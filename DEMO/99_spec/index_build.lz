@@ -1,5 +1,4 @@
-// 规范目标特性（当前解析器未实现：索引构建块 ^:）
-// 索引构建块：container ^: <key> 脱糖为 container.__getitem__(key)，冒号后换行缩进、块体为单值 key
+// 索引构建块：`container ^: <key>` 脱糖为 container.__getitem__(key)，冒号后换行缩进、块体为单值 key
 // 右操作数为单个表达式（单值），直接作为 key；与 ~:（需元组/字典块尾）不同
 def main() =
     let nums = [10, 20, 30]

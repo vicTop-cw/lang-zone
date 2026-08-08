@@ -1,4 +1,4 @@
-// 规范目标特性（当前解析器未实现）
+// for 守卫 + else：`for x in xs if cond: ... else:`
 // 出处：SYNTAX/05-控制流.md §3.5 — for 守卫 + else
 // 预期语法：
 def main() =

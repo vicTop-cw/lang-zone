@@ -35,6 +35,20 @@ impl ParserStmtExt for Parser {
             // 检查 Newline 后是否有 postfix token
             let is_postfix = if self.check(&Token::Newline) {
                 let after_nl = self.peek_n(1);
+                // `[` 后若是表达式开始关键字（await/spawn/if 等），
+                // 说明是列表字面量（[await a, await b]）而非上一行的索引 postfix
+                let is_list_lit = matches!(after_nl, Token::LBrack)
+                    && matches!(
+                        self.peek_n(2),
+                        Token::Await
+                            | Token::Spawn
+                            | Token::Go
+                            | Token::If
+                            | Token::Try
+                            | Token::Not
+                            | Token::Minus
+                            | Token::Plus
+                    );
                 matches!(
                     after_nl,
                     Token::Dot
@@ -43,16 +57,17 @@ impl ParserStmtExt for Parser {
                         | Token::Question
                         | Token::SafeNav
                         | Token::CaretOp
-                ) || (matches!(after_nl, Token::Indent)
-                    && matches!(
-                        self.peek_n(2),
-                        Token::Dot
-                            | Token::LParen
-                            | Token::LBrack
-                            | Token::Question
-                            | Token::SafeNav
-                            | Token::CaretOp
-                    ))
+                ) && !is_list_lit
+                    || (matches!(after_nl, Token::Indent)
+                        && matches!(
+                            self.peek_n(2),
+                            Token::Dot
+                                | Token::LParen
+                                | Token::LBrack
+                                | Token::Question
+                                | Token::SafeNav
+                                | Token::CaretOp
+                        ))
             } else {
                 false
             };

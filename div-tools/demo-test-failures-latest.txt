@@ -1,0 +1,58 @@
+RUSTC|02_types/duck_relation.lz|error: linking with `link.exe` failed: exit code: 1104
+RUSTC|02_types/method_chains.lz|error[E0282]: type annotations needed
+RUSTC|02_types/type_conversion.lz|error[E0277]: cannot add `i64` to `f64`
+RUSTC|04_functions/checker.lz|error[E0277]: the trait bound `Box<dyn Any>: Clone` is not satisfied
+RUSTC|04_functions/closure_capture.lz|error[E0308]: mismatched types
+RUSTC|04_functions/decorators_more.lz|error[E0308]: mismatched types
+RUSTC|04_functions/spread_protocol.lz|error[E0369]: cannot multiply `HttpResult<i64>` by `i64`
+RUSTC|05_expressions/operators.lz|error[E0425]: cannot find type `T` in this scope
+RUSTC|06_control_flow/block_demo.lz|error[E0425]: cannot find value `out` in this scope
+RUSTC|06_control_flow/block_stack_test.lz|error[E0425]: cannot find value `depth` in this scope
+RUSTC|06_control_flow/block_tailrec.lz|error[E0425]: cannot find value `result` in this scope
+RUSTC|06_control_flow/def_checker_param.lz|error[E0308]: mismatched types
+RUSTC|06_control_flow/for_while_loop.lz|error: linking with `link.exe` failed: exit code: 1104
+RUSTC|06_control_flow/guard.lz|error[E0308]: mismatched types
+RUSTC|06_control_flow/pattern_more.lz|error[E0423]: expected value, found enum `Command`
+RUSTC|06_control_flow/while_let.lz|error[E0782]: expected a type, found a trait
+RUSTC|08_modules/use_macros.lz|error[E0425]: cannot find value `greet` in this scope
+RUSTC|08_modules/use_services.lz|error[E0425]: cannot find value `service_name` in this scope
+RUSTC|12_build_blocks/var_call_block.lz|error[E0308]: mismatched types
+RUSTC|15_generators/yield_infer.lz|error[E0425]: cannot find value `i` in this scope
+RUSTC|99_spec/combo-syntax/combo_while_guard_try.lz|error: linking with `link.exe` failed: exit code: 1104
+RUN|99_spec/guard_for_3.lz|
+PARSE|99_spec/macro_real.lz|Parse error: Unexpected token at top level: Backtick
+RUSTC|99_spec/top_level_build.lz|error[E0425]: cannot find value `host` in this scope
+PARSE|Problems/_probe2.lz|Parse error: Expected Eq, got Newline at pos 11
+RUSTC|Problems/_probe_block.lz|error[E0267]: `break` inside of a closure
+RUSTC|boundary-coverage/combo-async-await.lz|error[E0308]: mismatched types
+RUSTC|boundary-coverage/combo-build-block.lz|error[E0308]: mismatched types
+RUSTC|boundary-coverage/combo-defer-guard.lz|error[E0061]: this method takes 0 arguments but 1 argument was supplied
+RUN|boundary-coverage/combo-error-control.lz|
+RUSTC|boundary-coverage/combo-pipe-lambda.lz|error: in expressions, `_` can only be used on the left-hand side of an assignment
+PARSE|boundary-coverage/combo-struct-method.lz|Parse error: Unexpected token in expression: Struct
+PARSE|boundary-coverage/combo-trait-impl.lz|Parse error: Unexpected token in expression: Trait
+RUSTC|boundary-coverage/edge-keyword-identifier.lz|error[E0425]: cannot find value `None_` in this scope
+PARSE|boundary-coverage/edge-scope-shadow.lz|Parse error: Unexpected token in expression: Let
+RUSTC|boundary-coverage/edge-values-boundary.lz|error[E0308]: mismatched types
+RUSTC|boundary-coverage/edge-walrus-operator.lz|error[E0308]: mismatched types
+PARSE|boundary-coverage/nesting-closure-lambda.lz|Parse error: Unexpected token in expression: Newline
+RUSTC|boundary-coverage/nesting-control-flow.lz|error[E0308]: mismatched types
+PARSE|boundary-coverage/nesting-data-types.lz|Parse error: Expected RBrack, got For at pos 809
+RUSTC|boundary-coverage/nesting-expressions.lz|error[E0308]: mismatched types
+PARSE|boundary-coverage/prefix-suffix-stacking.lz|Parse error: Unexpected token in expression: Star
+RUSTC|combo-syntax/combo_ternary_walrus.lz|error[E0308]: mismatched types
+RUSTC|lz_std/__init__.lz|error[E0369]: cannot add `&str` to `&str`
+RUSTC|lz_std/box.lz|error[E0255]: the name `Rc` is defined multiple times
+RUSTC|lz_std/dict.lz|error: unexpected end of macro invocation
+PARSE|lz_std/error.lz|Parse error: Expected type, got RBrack
+PARSE|lz_std/iter.lz|Parse error: Expected Colon, got Dot at pos 1849
+RUSTC|lz_std/list.lz|error: unexpected end of macro invocation
+PARSE|lz_std/math.lz|Parse error: Expected Indent, got Minus at pos 619
+RUSTC|lz_std/option.lz|error: unexpected end of macro invocation
+RUSTC|lz_std/ordering.lz|error: unexpected end of macro invocation
+RUSTC|lz_std/prelude.lz|error: unexpected end of macro invocation
+RUSTC|lz_std/result.lz|error: unexpected end of macro invocation
+RUSTC|lz_std/set.lz|error: unexpected end of macro invocation
+PARSE|lz_std/string.lz|Parse error: Expected param name, got Template
+PARSE|lz_std/traits.lz|Parse error: Expected type param in where, got Self_
+PARSE|variadic_type_fidelity.lz|Parse error: Expected LParen, got DotDot at pos 73

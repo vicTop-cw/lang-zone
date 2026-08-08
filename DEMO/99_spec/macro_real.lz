@@ -1,5 +1,5 @@
 #!bin macro
-// 规范目标特性（macro 仅在 #!bin macro 模块可用）
+// macro 定义：仅在 #!bin macro 模块中可用
 // 出处：SYNTAX/08-宏与编译期.md — macro 定义
 // 预期语法：
 macro json(field: Tokens, val: Tokens) -> Tokens =

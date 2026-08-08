@@ -187,3 +187,17 @@
 - **PASS 140 → 144**，FAIL 60
 - 本轮确认通过的新修复：def_checker、magic_methods、module_magic、self_recursive、string_macros、panic_raise_try、var_call_block（dict→kwargs 拆包）
 - 失败分布：15 PARSE / 44 RUSTC / 1 RUN
+
+### 2026-08-08 第十八轮：closure_capture 修复（v152 后，未提交部分 14）
+- **已修复**：闭包 `|x| =>` 块体内 `total = total + x`（无 let 前缀可变绑定）写外部变量 → 转 Stmt::Assign 而非新 let 绑定
+  - TypeCtx 加 block_declared（本块首次声明集合）；convert_block 预扫描登记；无 let 前缀且外部已有且本块未声明 → Assign
+  - Closure 分支创建独立 closure_ctx（继承 vars、重置 block_declared）
+  - gen_fstring 插值 `{len(data)}` 映射为 `(data.len() as i64)`（内建调用）
+- 剩余（类型推断边缘，待修）：
+  - `fnonce_capture() -> i64`：无返回注解 + 末尾 `consume()`（Unit）被推断为 i64（闭包调用 lookup_fn_return 失败回退 Any→i64）
+  - `apply_twice(triple, 2)`：`fn(int) -> int` 参数传闭包 → 生成 `fn(i64) -> i64` 但实参是 move 闭包（E0308，需 fn 参数泛型化 F: Fn(i64)->i64）
+
+### 2026-08-08 第十九轮：全量回归结果（v152 后，未提交部分 15）
+- **PASS 144 → 146**，FAIL 58
+- 本轮确认通过的新修复（9 个）：guard_for_3、duck_test、iterator_demo、string_macros、panic_raise_try、var_call_block、use_services、async_more、closure_capture
+- 失败分布：15 PARSE / 42 RUSTC / 1 RUN

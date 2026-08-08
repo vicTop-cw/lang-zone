@@ -1,6 +1,14 @@
-// 规范目标特性（当前解析器未实现）
+// while 守卫：`while cond if guard:`
 // 出处：SYNTAX/05-控制流.md §3.5 — while 守卫
-// 预期语法：
+size = 3
+
+def queue_size() -> int =
+    size
+
+def step() =
+    size = size - 1
+    print("step")
+
 def main() =
     running = True
     while running if queue_size() > 0:

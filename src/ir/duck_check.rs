@@ -176,6 +176,25 @@ pub fn collect_duck_impls(ir: &IrModule) -> Vec<(String, String, HashMap<String,
             if let ExprKind::Call { callee, args, .. } = &expr.kind {
                 if let ExprKind::Var(fname) = &callee.kind {
                     if let Some(fdef) = fn_defs.get(fname.as_str()) {
+                        // 参数类型直接是 duck 名（pet: Pet）：生成 impl Duck for 具体类型
+                        for (pi, param) in fdef.params.iter().enumerate() {
+                            let IrType::Named { path: dname, .. } = &param.ty else {
+                                continue;
+                            };
+                            if !ducks.contains_key(dname.as_str()) {
+                                continue;
+                            }
+                            let Some(arg) = args.get(pi) else { continue };
+                            let IrType::Named { path: type_name, .. } = &arg.ty else {
+                                continue;
+                            };
+                            let type_name = type_name.clone();
+                            let key = (type_name.clone(), dname.clone(), format!("{:?}", arg.ty));
+                            if !seen.insert(key) {
+                                continue;
+                            }
+                            result.push((type_name, dname.clone(), HashMap::new()));
+                        }
                         for g in &fdef.generics {
                             let duck_bounds: Vec<(&str, &[IrType])> = g
                                 .bounds
@@ -340,6 +359,41 @@ fn check_call_site(
                 }
             }
         }
+    }
+    // 参数类型直接是 duck 名（pet: Pet）的调用点：验证实参满足 duck
+    // （与泛型 bound 形式不同，此处 duck 名直接出现在参数类型注解中）
+    for (pi, param) in fdef.params.iter().enumerate() {
+        let IrType::Named { path: dname, .. } = &param.ty else {
+            continue;
+        };
+        if !ducks.contains_key(dname.as_str()) {
+            continue;
+        }
+        let Some(arg) = args.get(pi) else { continue };
+        let IrType::Named { path, args: type_args } = &arg.ty else {
+            continue;
+        };
+        let Some(type_info) = types.get(path.as_str()) else { continue };
+        if !checked.insert((path.clone(), dname.clone())) {
+            continue;
+        }
+        let duck = ducks[dname.as_str()];
+        let bound = param.ty.clone();
+        verify_type_satisfies_duck(
+            path,
+            type_args,
+            type_info,
+            duck,
+            &bound,
+            &fdef.generics,
+            &fdef.params,
+            &arg_tys,
+            dname,
+            ducks,
+            types,
+            0,
+            errors,
+        );
     }
 }
 

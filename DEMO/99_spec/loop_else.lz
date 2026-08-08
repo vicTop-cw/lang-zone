@@ -1,4 +1,4 @@
-// 规范目标特性（while/for 的 else 分支待验证）
+// 循环 else：`while cond: ... else:` / `for x in xs: ... else:`（循环正常结束执行 else）
 // 出处：SYNTAX/05-控制流.md — 循环 else
 // 预期语法：
 def main() =

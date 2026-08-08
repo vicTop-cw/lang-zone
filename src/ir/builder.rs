@@ -46,10 +46,15 @@ struct TypeCtx {
     enum_variants: HashMap<String, String>,
     /// enum 变体字段类型：variant → [类型]（有序，match 臂绑定用）
     enum_variant_field_types: HashMap<String, Vec<IrType>>,
+    /// 本块（convert_block 循环）内首次声明的变量：区分「首次绑定」与「重新赋值」
+    /// （闭包体内 `total = total + x` 写外部变量 → 应转 Assign，而非新 let 绑定）
+    block_declared: std::collections::HashSet<String>,
     /// 当前函数泛型参数
     current_generics: Vec<String>,
     /// 当前函数返回类型
     current_ret_ty: Option<IrType>,
+    /// 当前是否在 iterator（生成器）函数内：return 等价 raise，不做隐式类型转换
+    current_is_iterator: bool,
     /// 当前函数名（用于嵌套函数命名）
     current_fn_name: Option<String>,
     /// 提升出的待处理顶级 Items（嵌套函数等）
@@ -72,8 +77,10 @@ impl TypeCtx {
             top_level_consts: HashMap::new(),
             enum_variants: HashMap::new(),
             enum_variant_field_types: HashMap::new(),
+            block_declared: std::collections::HashSet::new(),
             current_generics: vec![],
             current_ret_ty: None,
+            current_is_iterator: false,
             current_fn_name: None,
             pending_items: Rc::new(RefCell::new(Vec::new())),
             errors: Rc::new(RefCell::new(Vec::new())),
@@ -1517,6 +1524,25 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         },
 
         AstExpr::Index { receiver, index } => {
+            // `services.validate_port[(r,)]`：模块命名空间 + 元组实参 → checker 块调用
+            // （services.X 在 codegen 层降级为 X，此处转为函数调用而非索引）
+            if let AstExpr::FieldAccess { receiver: _, field } = receiver.as_ref() {
+                if let AstExpr::TupleLit(_) = index.as_ref() {
+                    return Expr::new(
+                        ExprKind::Call {
+                            type_args: vec![],
+                            callee: Box::new(Expr::new(
+                                ExprKind::Var(field.clone()),
+                                IrType::Any,
+                                Span::unknown(),
+                            )),
+                            args: vec![convert_expr(index, ctx)],
+                        },
+                        IrType::Any,
+                        Span::unknown(),
+                    );
+                }
+            }
             // [] 下标访问 → IndexGet
             ExprKind::IndexGet {
                 base: Box::new(convert_expr(receiver, ctx)),
@@ -1834,22 +1860,64 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             }
         }
 
-        AstExpr::Closure { params, body } => ExprKind::Lambda {
-            params: params
-                .iter()
-                .map(|name| Param {
-                    name: name.clone(),
-                    ty: IrType::Any,
-                    is_mut: false,
-                    is_ref: false,
-                    is_owned: false,
-                    default: None,
-                    variadic: false,
-                })
-                .collect(),
-            body: Box::new(convert_expr(body, ctx)),
-            is_move: true,
-        },
+        AstExpr::Closure { params, body } => {
+            // 闭包体是独立的词法块：创建新 ctx（继承 vars 但重置 block_declared），
+            // 使闭包内 `total = total + x` 能识别为写外部变量（Assign）而非新绑定
+            let mut closure_ctx = TypeCtx::new();
+            closure_ctx.vars = ctx.vars.clone();
+            closure_ctx.current_generics = ctx.current_generics.clone();
+            closure_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+            closure_ctx.current_is_iterator = ctx.current_is_iterator;
+            closure_ctx.current_fn_name = ctx.current_fn_name.clone();
+            closure_ctx.pending_items = ctx.pending_items.clone();
+            closure_ctx.errors = ctx.errors.clone();
+            for sn in &ctx.struct_names {
+                closure_ctx.struct_names.insert(sn.clone());
+            }
+            for (sn, fields) in &ctx.struct_fields {
+                closure_ctx.struct_fields.insert(sn.clone(), fields.clone());
+            }
+            for (sn, order) in &ctx.struct_field_order {
+                closure_ctx.struct_field_order.insert(sn.clone(), order.clone());
+            }
+            for (sn, ms) in &ctx.struct_methods {
+                closure_ctx.struct_methods.insert(sn.clone(), ms.clone());
+            }
+            for (sn, arity) in &ctx.struct_method_arity {
+                closure_ctx.struct_method_arity.insert(sn.clone(), arity.clone());
+            }
+            for (vn, en) in &ctx.enum_variants {
+                closure_ctx.enum_variants.insert(vn.clone(), en.clone());
+            }
+            for (vn, ft) in &ctx.enum_variant_field_types {
+                closure_ctx.enum_variant_field_types.insert(vn.clone(), ft.clone());
+            }
+            for (cn, ct) in &ctx.top_level_consts {
+                closure_ctx.top_level_consts.insert(cn.clone(), ct.clone());
+            }
+            for (name, ty) in &ctx.fn_returns {
+                closure_ctx.fn_returns.insert(name.clone(), ty.clone());
+            }
+            for (name, p) in &ctx.fn_params {
+                closure_ctx.fn_params.insert(name.clone(), p.clone());
+            }
+            ExprKind::Lambda {
+                params: params
+                    .iter()
+                    .map(|name| Param {
+                        name: name.clone(),
+                        ty: IrType::Any,
+                        is_mut: false,
+                        is_ref: false,
+                        is_owned: false,
+                        default: None,
+                        variadic: false,
+                    })
+                    .collect(),
+                body: Box::new(convert_expr(body, &closure_ctx)),
+                is_move: true,
+            }
+        }
 
         AstExpr::BlockExpr(stmts) => {
             let ir_stmts: Vec<Stmt> = stmts.iter().map(|s| convert_stmt(s, ctx)).collect();
@@ -2885,11 +2953,25 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     }
                 }
             }
-            Stmt::Let {
-                name: name.clone(),
-                ty: ir_ty,
-                value: ir_value,
-                is_mut: *mutable,
+            // 无 let 前缀的默认可变绑定（x = v）且变量在**本块之外**已存在 → 重新赋值
+            // （闭包内写外部变量：total = total + x → total = total + x 而非新绑定）
+            // 本块首次声明（block_declared 含 name）保持 Let；外部已有但本块未声明 → Assign
+            if *mutable && ty.is_none() && ctx.vars.contains_key(name.as_str()) && !ctx.block_declared.contains(name.as_str()) {
+                Stmt::Assign {
+                    target: Expr::new(
+                        ExprKind::Var(name.clone()),
+                        ir_ty.clone(),
+                        Span::unknown(),
+                    ),
+                    value: ir_value,
+                }
+            } else {
+                Stmt::Let {
+                    name: name.clone(),
+                    ty: ir_ty,
+                    value: ir_value,
+                    is_mut: *mutable,
+                }
             }
         }
 
@@ -2934,16 +3016,19 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             let value = val.as_ref().map(|v| {
                 let expr = convert_expr(v, ctx);
                 // 返回值隐式转换: return S 但声明返回 T → 插入 ImplicitConvert
-                if let Some(ref ret_ty) = ctx.current_ret_ty {
-                    if expr.ty != *ret_ty && !matches!(ret_ty, IrType::Unit) {
-                        return Expr::new(
-                            ExprKind::ImplicitConvert {
-                                source: Box::new(expr.clone()),
-                                target_ty: ret_ty.clone(),
-                            },
-                            ret_ty.clone(),
-                            Span::unknown(),
-                        );
+                // （iterator 函数内 return 等价 raise，不做隐式转换，避免 String→T 残留）
+                if !ctx.current_is_iterator {
+                    if let Some(ref ret_ty) = ctx.current_ret_ty {
+                        if expr.ty != *ret_ty && !matches!(ret_ty, IrType::Unit) {
+                            return Expr::new(
+                                ExprKind::ImplicitConvert {
+                                    source: Box::new(expr.clone()),
+                                    target_ty: ret_ty.clone(),
+                                },
+                                ret_ty.clone(),
+                                Span::unknown(),
+                            );
+                        }
                     }
                 }
                 expr
@@ -3024,6 +3109,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             // 从 ctx 复制函数泛型上下文
             loop_ctx.current_generics = ctx.current_generics.clone();
             loop_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+            loop_ctx.current_is_iterator = ctx.current_is_iterator;
             // 推导迭代变量的类型
             let iter_ty = infer_expr_type(iter, ctx);
             let elem_ty = match &iter_ty {
@@ -3392,6 +3478,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     block_ctx.vars = ctx.vars.clone();
     block_ctx.current_generics = ctx.current_generics.clone();
     block_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+    block_ctx.current_is_iterator = ctx.current_is_iterator;
     block_ctx.current_fn_name = ctx.current_fn_name.clone();
     block_ctx.pending_items = ctx.pending_items.clone();
     for sn in &ctx.struct_names {
@@ -3439,6 +3526,10 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             name, ty, value, ..
         } = s
         {
+            // 本块首次声明的变量：登记到 block_declared（区分首次绑定与重新赋值）
+            if !block_ctx.vars.contains_key(name.as_str()) {
+                block_ctx.block_declared.insert(name.clone());
+            }
             let ir_ty = ty
                 .as_ref()
                 .map(|t| from_ast_type(t))
@@ -3814,6 +3905,145 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
     }
 }
 
+/// 检测 IR Block 是否包含 yield 语句（递归嵌套块）
+fn ir_block_has_yield(block: &Block) -> bool {
+    for stmt in &block.stmts {
+        if matches!(stmt, Stmt::Yield { .. } | Stmt::YieldFrom { .. }) {
+            return true;
+        }
+        match stmt {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if ir_block_has_yield(then_branch) {
+                    return true;
+                }
+                if let Some(eb) = else_branch {
+                    if ir_block_has_yield(eb) {
+                        return true;
+                    }
+                }
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } => {
+                if ir_block_has_yield(body) {
+                    return true;
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    if ir_block_has_yield(&arm.body) {
+                        return true;
+                    }
+                }
+            }
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
+                if ir_block_has_yield(body) {
+                    return true;
+                }
+                for (_, cb) in catches {
+                    if ir_block_has_yield(cb) {
+                        return true;
+                    }
+                }
+                if let Some(eb) = else_body {
+                    if ir_block_has_yield(eb) {
+                        return true;
+                    }
+                }
+                if let Some(fb) = finally_body {
+                    if ir_block_has_yield(fb) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// 将 iterator（生成器）函数体内的带值 return 重写为 raise（等价终止并抛出）。
+/// 递归遍历嵌套块（if/for/while/match/try 等），codegen 会把 Stmt::Raise 生成 panic!。
+fn rewrite_iterator_returns(block: &mut Block) {
+    for stmt in &mut block.stmts {
+        match stmt {
+            Stmt::Return { value: Some(v) } => {
+                // 带值 return → raise（生成器内 return expr 等价于 raise）
+                let v = std::mem::replace(
+                    v,
+                    Expr::new(
+                        ExprKind::Lit(LitKind::Unit),
+                        IrType::Unit,
+                        Span::unknown(),
+                    ),
+                );
+                *stmt = Stmt::Raise { value: v };
+            }
+            Stmt::Return { value: None } => {
+                // 无值 return → raise 空
+                *stmt = Stmt::Raise {
+                    value: Expr::new(
+                        ExprKind::Lit(LitKind::Unit),
+                        IrType::Unit,
+                        Span::unknown(),
+                    ),
+                };
+            }
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                rewrite_iterator_returns(then_branch);
+                if let Some(eb) = else_branch {
+                    rewrite_iterator_returns(eb);
+                }
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } => {
+                rewrite_iterator_returns(body);
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    rewrite_iterator_returns(&mut arm.body);
+                }
+            }
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
+                rewrite_iterator_returns(body);
+                for (_, cb) in catches {
+                    rewrite_iterator_returns(cb);
+                }
+                if let Some(eb) = else_body {
+                    rewrite_iterator_returns(eb);
+                }
+                if let Some(fb) = finally_body {
+                    rewrite_iterator_returns(fb);
+                }
+            }
+            Stmt::Block { stmts } => {
+                let mut inner = Block {
+                    stmts: std::mem::take(stmts),
+                    ty: IrType::Unit,
+                };
+                rewrite_iterator_returns(&mut inner);
+                *stmts = inner.stmts;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// 递归扫描生成器函数体，返回第一个 `yield expr` 中 expr 的推断类型。
 /// 同时预登记函数体（含嵌套块）内的 let 绑定，使 `yield i` 能推断出 i 的类型。
 fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Option<IrType> {
@@ -4091,8 +4321,19 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // 注意：Iterator 函数的 Vec<T> 包装由 codegen 负责（基于 has_yield 检测），
     // 此处不包装，避免 Vec<Vec<T>> 双重包装。
     fn_ctx.current_ret_ty = Some(ret_ty.clone());
+    fn_ctx.current_is_iterator = func.is_iterator;
 
     let body = convert_block(&func.body, &fn_ctx);
+    // iterator 体内 return 等价 raise（08-生成器.md：终止迭代并抛出）
+    // codegen 将 Stmt::Raise 生成 panic!，因此把带值 return 转成 raise
+    // 判断条件：is_iterator 标志 或 body 实际含 yield（更可靠，覆盖标志缺失）
+    let body = if func.is_iterator || ir_block_has_yield(&body) {
+        let mut b = body;
+        rewrite_iterator_returns(&mut b);
+        b
+    } else {
+        body
+    };
 
     let is_math = func.decorators.iter().any(|d| d.name == "math");
     let intrinsics: Vec<Intrinsic> = func

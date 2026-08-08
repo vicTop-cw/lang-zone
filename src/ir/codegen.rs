@@ -28,6 +28,8 @@ pub struct CodeGen {
     enum_variants: HashMap<String, String>,
     /// 抑制尾表达式隐式 return（用于 match arm / 块表达式内部）
     suppress_tail_return: bool,
+    /// 当前是否在生成器（iterator/yield）函数内：体内 return 等价 raise（panic）
+    in_generator: bool,
     /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
     fn_param_info: HashMap<String, (usize, usize)>,
     /// 函数 ref/mut ref 参数标记：函数名 → 每参数 (is_ref, is_mut)（调用点自动传引用）
@@ -68,6 +70,9 @@ pub struct CodeGen {
     struct_has_new: std::collections::HashSet<String>,
     /// 使用 LazyLock 的顶层静态集合名（需解引用访问）
     lazy_static_names: std::collections::HashSet<String>,
+    /// 已导入的用户模块名（import services → "services"）：模块命名空间访问
+    /// （services.service_name）降级为直接引用（模块项已平铺生成到同一 Rust 文件）
+    imported_modules: std::collections::HashSet<String>,
     /// 当前正在生成的函数是否为 async（用于 __go 的异步/同步分派）
     current_fn_is_async: bool,
     /// duck 约束字段成员：泛型参数名 → 该泛型 duck 约束声明的字段名集合
@@ -100,6 +105,7 @@ impl CodeGen {
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
+            in_generator: false,
             fn_param_info: HashMap::new(),
             fn_ref_params: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
@@ -118,6 +124,7 @@ impl CodeGen {
             struct_fields_info: std::collections::HashMap::new(),
             struct_has_new: std::collections::HashSet::new(),
             lazy_static_names: std::collections::HashSet::new(),
+            imported_modules: std::collections::HashSet::new(),
             current_fn_is_async: false,
             duck_field_members: std::collections::HashMap::new(),
             duck_defs: std::collections::HashMap::new(),
@@ -381,6 +388,12 @@ impl CodeGen {
             if matches!(item, Item::CheckerBlock { .. }) {
                 self.gen_item(item);
                 self.buf.push('\n');
+            }
+            // 收集用户导入模块名（import services → "services"）供命名空间降级
+            if let Item::Use(u) = item {
+                if let Some(first) = u.path.first() {
+                    self.imported_modules.insert(first.clone());
+                }
             }
         }
 
@@ -733,6 +746,9 @@ impl CodeGen {
                         // 降级为 String（宏体 quote 拼接生成 Rust 字符串）
                         if path == "Tokens" {
                             "String".to_string()
+                        } else if path == "Iter" {
+                            // 生成器（iterator）返回类型：Iter<T> → Vec<T>
+                            "Vec".to_string()
                         } else {
                             path.clone()
                         }
@@ -955,6 +971,23 @@ impl CodeGen {
         // 实参中的位置」；若本参数对应的函数泛型出现在该位置，则字段属于本参数。
         self.duck_field_members.clear();
         for p in &f.params {
+            // 两种情况：
+            // 1. 参数类型是泛型参数（T）且其 bound 是 duck → 收集该 duck 字段
+            // 2. 参数类型直接是 duck 名（pet: Pet）→ 收集 duck 定义的全部字段
+            if let IrType::Named { path, .. } = &p.ty {
+                if let Some(d) = self.duck_defs.get(path) {
+                    let field_names: std::collections::HashSet<String> = d
+                        .fields
+                        .iter()
+                        .filter(|df| df.owner.is_none())
+                        .map(|df| df.name.clone())
+                        .collect();
+                    if !field_names.is_empty() {
+                        self.duck_field_members.insert(p.name.clone(), field_names);
+                    }
+                    continue;
+                }
+            }
             let IrType::Generic(gname) = &p.ty else {
                 continue;
             };
@@ -996,19 +1029,41 @@ impl CodeGen {
             }
         }
         // 检测 duck 参数 → 自动注入泛型类型
+        // duck 类型在 IR 中为 Named(path)，需同时匹配 duck_defs 登记的名字
+        let is_duck_ty = |ty: &IrType| -> bool {
+            match ty {
+                IrType::Duck { .. } => true,
+                IrType::Named { path, .. } => self.duck_defs.contains_key(path.as_str()),
+                _ => false,
+            }
+        };
         let duck_params: Vec<String> = f
             .params
             .iter()
             .enumerate()
-            .filter(|(_, p)| matches!(&p.ty, IrType::Duck { .. }))
+            .filter(|(_, p)| is_duck_ty(&p.ty))
             .map(|(i, _)| format!("DuckParam{}", i))
             .collect();
         let duck_indices: Vec<usize> = f
             .params
             .iter()
             .enumerate()
-            .filter(|(_, p)| matches!(&p.ty, IrType::Duck { .. }))
+            .filter(|(_, p)| is_duck_ty(&p.ty))
             .map(|(i, _)| i)
+            .collect();
+        // duck 参数 → 泛型参数名 + trait bound（DuckParam0: Pet）
+        let duck_bounds: Vec<String> = f
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| is_duck_ty(&p.ty))
+            .filter_map(|(i, p)| {
+                if let IrType::Named { path, .. } = &p.ty {
+                    Some(format!("DuckParam{}: {}", i, path))
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let has_ducks = !duck_params.is_empty();
@@ -1048,6 +1103,14 @@ impl CodeGen {
             }
         } else {
             String::new()
+        };
+        // duck 参数 trait bound（DuckParam0: Pet）并入 where 子句
+        let duck_where = if duck_bounds.is_empty() {
+            String::new()
+        } else if math_where.is_empty() {
+            format!("\nwhere\n{}", duck_bounds.join(",\n"))
+        } else {
+            format!(",\n{}", duck_bounds.join(",\n"))
         };
 
         // 字段关系 duck 的 where 投影约束（§2.2 `A.id == B.id`）：
@@ -1211,6 +1274,9 @@ impl CodeGen {
             })
             .collect();
         let has_yield = block_has_yield(&f.body);
+        // 生成器函数内 return 等价 raise（iterator 体内 return 终止并抛出）
+        let saved_generator = self.in_generator;
+        self.in_generator = has_yield;
         // Rust 不允许 async main，对于 async main 使用 block_on 包装
         let is_async_main = f.is_async && f.name == "main";
         let ret = if f.name == "main" && !is_async_main {
@@ -1244,7 +1310,7 @@ impl CodeGen {
             &f.params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
         );
         let sig = format!(
-            "{}{}{}fn {}{}({}){}{}{}",
+            "{}{}{}fn {}{}({}){}{}{}{}",
             if f.is_test { "#[test]\n" } else { "" },
             vis,
             async_kw,
@@ -1253,6 +1319,7 @@ impl CodeGen {
             params.join(", "),
             ret,
             math_where,
+            duck_where,
             rel_where,
         );
 
@@ -2533,6 +2600,16 @@ impl CodeGen {
                         self.emit_line(&format!("({}).__setitem__({}, {});", base_s, key_s, val_s));
                         return;
                     }
+                    // checker 块 ps.args[k] = v：元素为 Box<dyn Any>，需 Box::new 包装
+                    let is_params_args = matches!(&base.kind,
+                        ExprKind::FieldAccess { field, .. } if field == "args");
+                    if is_params_args {
+                        let base_s = self.gen_expr(base);
+                        let key_s = self.gen_index_key(key, base);
+                        let val_s = self.gen_expr(value);
+                        self.emit_line(&format!("{}[{}] = Box::new({});", base_s, key_s, val_s));
+                        return;
+                    }
                 }
                 // _ = expr → 丢弃语句，生成 let _ = expr（仅取副作用）
                 if matches!(&target.kind, ExprKind::Var(n) if n == "_") {
@@ -2557,7 +2634,15 @@ impl CodeGen {
                 }
             }
             Stmt::Return { value } => {
-                if let Some(v) = value {
+                if self.in_generator {
+                    // iterator 体内 return 等价 raise：终止迭代并抛出
+                    // （return expr 为错误信息；return 无值 → 空 panic）
+                    if let Some(v) = value {
+                        self.emit_line(&format!("panic!(\"{{:?}}\", {});", self.gen_expr(v)));
+                    } else {
+                        self.emit_line("panic!(\"generator return\");");
+                    }
+                } else if let Some(v) = value {
                     self.emit_line(&format!("return {};", self.gen_expr(v)));
                 } else {
                     self.emit_line("return;");
@@ -2807,7 +2892,17 @@ impl CodeGen {
                 self.emit_line(&format!("assert!({});", self.gen_expr(cond)));
             }
             Stmt::Yield { value } => {
-                self.emit_line(&format!("__gen_vec.push({});", self.gen_expr(value)));
+                // 非 Copy 泛型值（T）push 需 clone，避免 move（E0382/E0507）
+                let val_s = self.gen_expr(value);
+                let is_copy = matches!(&value.ty, IrType::Int | IrType::F64 | IrType::Bool)
+                    || matches!(&value.ty, IrType::Named { path, .. }
+                        if path == "String" && val_s.contains(".clone()"));
+                let val_s = if is_copy {
+                    val_s
+                } else {
+                    format!("{}.clone()", val_s)
+                };
+                self.emit_line(&format!("__gen_vec.push({});", val_s));
             }
             Stmt::YieldFrom { iter } => {
                 self.emit_line(&format!("// yield from {}", self.gen_expr(iter)));
@@ -3007,8 +3102,20 @@ impl CodeGen {
     fn gen_index_key(&self, key: &Expr, base: &Expr) -> String {
         let is_dict =
             matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+        // 容器（Vec/List）索引的 key 需为 usize：
+        // - 整数 key（i64）直接转换
+        // - 类型未知（Any）的变量 key（如 for 循环变量 items[i]）也转换，
+        //   避免 Rust 切片索引需要 usize（E0277）
+        let is_container = matches!(&base.ty, IrType::Named { path, .. }
+            if path == "Vec" || path == "List" || path == "Array" || path == "Set" || path == "HashSet");
+        let key_is_numeric = matches!(&key.ty, IrType::Int)
+            || (is_container
+                && matches!(&key.ty, IrType::Any)
+                && !matches!(&key.kind, ExprKind::Var(n) if n == "pass"))
+            || (matches!(&key.ty, IrType::Any)
+                && matches!(&key.kind, ExprKind::Var(_)));
         // 对整数 key（i64）转换为 usize，除非目标是 dict（其 key 不是数值索引）
-        if !is_dict && matches!(&key.ty, IrType::Int) {
+        if !is_dict && key_is_numeric {
             let key_s = self.gen_expr(key);
             // 避免对已是 usize 的表达式重复转换；若 key 是纯字面量整数，直接转换
             format!("({} as usize)", key_s)
@@ -3172,6 +3279,23 @@ impl CodeGen {
                     ExprKind::Var(n) => Some(n.clone()),
                     _ => None,
                 } {
+                    // checker 块调用：callee 参数类型为 __Params（validate_port((r))）→
+                    // 打包实参为 __Params 并传 &mut __ps
+                    if let Some(callee_ptypes) = self.fn_param_types.get(&callee_name).cloned() {
+                        if callee_ptypes.len() == 1
+                            && matches!(&callee_ptypes[0], IrType::Named { path, .. } if path == "__Params")
+                        {
+                            let packed_args: Vec<String> = args_s
+                                .iter()
+                                .map(|a| format!("Box::new({})", a))
+                                .collect();
+                            return format!(
+                                "{{ let mut __ps = __Params {{ args: vec![{}], kwargs: std::collections::HashMap::new() }}; {}(&mut __ps); }}",
+                                packed_args.join(", "),
+                                callee_name
+                            );
+                        }
+                    }
                     if let Some(callee_ptypes) = self.fn_param_types.get(&callee_name).cloned() {
                         let ref_flags = self
                             .fn_ref_params
@@ -4073,11 +4197,19 @@ impl CodeGen {
                     if let Some(fields) = self.duck_field_members.get(name) {
                         if fields.contains(field) {
                             let base_s = self.gen_expr(base);
-                            return format!("{}.__field_{}()", base_s, field);
+                            // trait accessor 返回 &String / &i64：clone 为 owned 值
+                            return format!("{}.__field_{}().clone()", base_s, field);
                         }
                     }
                 }
                 let base_s = self.gen_expr(base);
+                // 用户导入模块的命名空间访问（services.service_name）：
+                // 模块项已平铺生成到同一 Rust 文件，直接引用 field 即可
+                if matches!(&base.kind, ExprKind::Var(base_name)
+                    if self.imported_modules.contains(base_name.as_str()))
+                {
+                    return field.clone();
+                }
                 // self 在 impl 方法中始终是 receiver，用 `.` 访问字段
                 if base_s == "self" {
                     // self.field 从 &self 共享引用中需要 .clone() 来获取所有权
@@ -4177,7 +4309,11 @@ impl CodeGen {
             ExprKind::IndexSet { base, key, value } => {
                 let base_s = self.gen_expr(base);
                 let key_s = self.gen_index_key(key, base);
+                eprintln!("DBG IndexSet base_kind={:?} base_ty={:?}", base.kind, base.ty);
                 let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+                // checker 块的 __Params.args[k] = v：元素为 Box<dyn Any>，需 Box::new 包装
+                let is_params_args = matches!(&base.kind,
+                    ExprKind::FieldAccess { field, .. } if field == "args");
                 // 用户 struct：ml[1] = v → ml.__setitem__(1, v)
                 let is_struct =
                     matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
@@ -4191,8 +4327,9 @@ impl CodeGen {
                 } else if is_dict {
                     // HashMap 不支持 IndexMut，使用 .insert() 代替
                     format!("{}.insert(&{}, {})", base_s, key_s, self.gen_expr(value))
-                } else {
-                    format!("{}[{}] = {}", base_s, key_s, self.gen_expr(value))
+                } else if is_params_args {
+                    format!("{}[{}] = Box::new({})", base_s, key_s, self.gen_expr(value))
+                } else {                    format!("{}[{}] = {}", base_s, key_s, self.gen_expr(value))
                 }
             }
             ExprKind::BinOp { op, lhs, rhs } => {
@@ -4404,6 +4541,7 @@ impl CodeGen {
                     child.top_level_static_names = self.top_level_static_names.clone();
                     child.downgraded_vars = self.downgraded_vars.clone();
                     child.mutated_consts = self.mutated_consts.clone();
+                    child.in_generator = self.in_generator;
                     // Lambda 体内不生成 return，让尾表达式成为闭包返回值
                     child.suppress_tail_return = true;
                     child.gen_block_inner(block);
@@ -4603,6 +4741,7 @@ impl CodeGen {
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
                 child.fn_param_info = self.fn_param_info.clone();
+                child.in_generator = self.in_generator;
                 // 块表达式尾值应为块尾表达式（非 return）
                 child.suppress_tail_return = true;
                 // __gen_vec 已在函数级别声明，BlockExpr 中只需 push 不需要重新声明
@@ -4760,6 +4899,9 @@ impl CodeGen {
                         let expr_trim = expr.trim();
                         if self.downgraded_vars.contains(expr_trim) {
                             args.push(format!("{}_", expr_trim));
+                        } else if let Some(inner) = expr_trim.strip_prefix("len(").and_then(|s| s.strip_suffix(')')) {
+                            // f-string 插值中的 len(x) → (x.len() as i64)
+                            args.push(format!("({}.len() as i64)", inner));
                         } else {
                             args.push(self.gen_expr_str(&expr));
                         }
