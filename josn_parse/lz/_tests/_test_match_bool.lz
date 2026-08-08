@@ -1,7 +1,0 @@
-def main() =
-    x = True
-    match x:
-        case True:
-            print("true")
-        case False:
-            print("false")

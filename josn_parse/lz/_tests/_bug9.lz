@@ -1,6 +1,0 @@
-trait Greet =
-    def say_hello(self: Self) = ...
-struct Foo =
-    x: int
-impl Greet for Foo =
-    def say_goodbye(self: Foo) = 0

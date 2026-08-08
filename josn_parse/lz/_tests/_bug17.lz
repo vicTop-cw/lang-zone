@@ -1,6 +1,0 @@
-def risky()-> str =
-    try:
-        err = "boom"
-        panic(err)
-    catch e: str:
-        "caught: " + e

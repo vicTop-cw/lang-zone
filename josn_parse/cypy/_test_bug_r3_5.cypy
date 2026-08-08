@@ -1,6 +1,0 @@
-# Bug-R3-5: 泛型类型参数 T 未注册到作用域
-def identity[T](x: T) -> T:
-    return x
-
-def main() -> int:
-    return 0

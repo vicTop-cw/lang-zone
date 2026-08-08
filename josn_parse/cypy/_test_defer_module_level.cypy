@@ -1,6 +1,0 @@
-# Test: defer at module level should fail
-defer:
-    print("cleanup")
-
-def main() -> int:
-    return 0

@@ -1,5 +1,0 @@
-def divide(a: int, b: int)-> int =
-    a / b
-
-def add(a: int, b: int)-> int =
-    a + b

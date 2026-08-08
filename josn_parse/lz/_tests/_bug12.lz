@@ -1,6 +1,0 @@
-trait Inc =
-    def inc(self: Self) = ...
-struct C =
-    x: int
-impl Inc for C =
-    def inc(mut self: C) = 0

@@ -1,5 +1,0 @@
-# Bug-R1-4: val 关键字不能作为变量名
-let val: str = "init"
-
-def main() -> int:
-    return 0

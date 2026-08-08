@@ -1,5 +1,0 @@
-# Bug-R5-10: 模块级 let 声明生成 cdef int 而非 Python 全局变量
-let GLOBAL_VAL: int = 100
-
-def main() -> int:
-    return 0

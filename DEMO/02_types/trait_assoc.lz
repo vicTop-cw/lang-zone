@@ -1,0 +1,27 @@
+// trait 关联类型测试（06c §五）
+trait Iterator =
+    type Item
+    def get(mut self) -> Option<Self.Item> = None
+    def peek(self) -> Option<Self.Item> = None
+
+impl Iterator for Counter =
+    type Item = int
+    def get(mut self) -> Option<int> =
+        if self.n < self.limit:
+            self.n = self.n + 1
+            Some(self.n)
+        else:
+            None
+    def peek(self) -> Option<int> =
+        Some(self.n)
+
+struct Counter =
+    n: int
+    limit: int
+
+def main() =
+    let c = Counter(n: 0, limit: 3)
+    let v = c.get()
+    print(v)
+    let p = c.peek()
+    print(p)

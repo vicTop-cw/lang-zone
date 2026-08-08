@@ -1,7 +1,0 @@
-# Test: addr() valid usage
-def main() -> int:
-    x: int = 1
-    ptr: int* = addr(x)
-    y: float = 1.5
-    ptr2: float* = addr(y)
-    return 0

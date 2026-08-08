@@ -1,0 +1,74 @@
+PASS=131 FAIL=73
+RUSTC|01_basics/identifiers.lz|error[E0599]: no method named `__str__` found for struct `MyStruct` in the current scope
+RUSTC|01_basics/lexical_boundaries.lz|error[E0425]: cannot find value `curly` in this scope
+RUSTC|02_types/fallible_as.lz|error[E0605]: non-primitive cast: `String` as `i64`
+RUSTC|02_types/method_chains.lz|error[E0282]: type annotations needed
+PARSE|03_variables/ref_binding.lz|IR build error: IR build error: error[E0384]: cannot assign twice to immutable variable `r`
+RUSTC|04_functions/checker.lz|error[E0277]: the trait bound `Box<dyn Any>: Clone` is not satisfied
+RUSTC|04_functions/closure_capture.lz|error[E0308]: mismatched types
+RUSTC|04_functions/decorators_more.lz|error[E0308]: mismatched types
+RUSTC|04_functions/param_modifiers.lz|error[E0382]: use of moved value: `xs`
+RUSTC|04_functions/spread_protocol.lz|error[E0425]: cannot find type `T` in this scope
+PARSE|05_expressions/comprehension_dict_multi.lz|Parse error: Unexpected token at top level: LBrace
+RUSTC|05_expressions/operators.lz|error[E0423]: expected value, found crate `std`
+RUSTC|06_control_flow/block_checker_ref.lz|error[E0605]: non-primitive cast: `Box<(dyn Any + 'static)>` as `i64`
+RUSTC|06_control_flow/block_demo.lz|error[E0425]: cannot find value `out` in this scope
+RUSTC|06_control_flow/block_stack_test.lz|error[E0425]: cannot find value `depth` in this scope
+RUSTC|06_control_flow/block_tailrec.lz|error[E0425]: cannot find value `result` in this scope
+RUSTC|06_control_flow/def_checker.lz|error[E0425]: cannot find function `counter` in this scope
+RUSTC|06_control_flow/def_checker2.lz|error[E0425]: cannot find function `validate` in this scope
+RUSTC|06_control_flow/def_checker_param.lz|error[E0308]: mismatched types
+RUSTC|06_control_flow/guard.lz|error[E0308]: mismatched types
+RUSTC|06_control_flow/pattern_more.lz|error[E0423]: expected value, found enum `Command`
+RUSTC|06_control_flow/while_let.lz|error[E0782]: expected a type, found a trait
+RUSTC|06_control_flow/with_defer.lz|error[E0061]: this method takes 1 argument but 0 arguments were supplied
+RUSTC|07_data_structures/enum.lz|error[E0277]: cannot multiply `{float}` by `i64`
+RUSTC|07_data_structures/magic_methods.lz|error[E0061]: this method takes 1 argument but 0 arguments were supplied
+RUSTC|07_data_structures/module_magic.lz|error[E0425]: cannot find value `__name__` in this scope
+RUSTC|07_data_structures/self_recursive.lz|error[E0411]: cannot find type `Self` in this scope
+PARSE|08_modules/string_macros.lz|Parse error: Unexpected token at top level: Arrow
+PARSE|08_modules/use_macros.lz|Macro definition error: expected '(' after macro name 'string_macros'
+RUSTC|08_modules/use_services.lz|error[E0425]: cannot find value `services` in this scope
+RUSTC|10_error_handling/panic_raise_try.lz|error[E0423]: expected value, found macro `line`
+PARSE|11_concurrency/async_more.lz|Parse error: Expected RBrack, got Comma at pos 60
+RUSTC|12_build_blocks/var_call_block.lz|error[E0061]: this function takes 2 arguments but 1 argument was supplied
+RUSTC|13_operators/precedence.lz|error[E0425]: cannot find value `a` in this scope
+RUSTC|99_spec/duck_test.lz|error[E0782]: expected a type, found a trait
+RUSTC|99_spec/gen_block_star.lz|error[E0425]: cannot find value `__gen_vec` in this scope
+RUSTC|99_spec/guard_for_3.lz|error[E0425]: cannot find function `queue_size` in this scope
+RUSTC|99_spec/iterator_demo.lz|error[E0425]: cannot find type `Iter` in this scope
+PARSE|Problems/_probe2.lz|Parse error: Expected Eq, got Newline at pos 11
+RUSTC|Problems/_probe_block.lz|error[E0267]: `break` inside of a closure
+RUSTC|boundary-coverage/combo-async-await.lz|error[E0308]: mismatched types
+RUSTC|boundary-coverage/combo-build-block.lz|error[E0425]: cannot find value `__gen_vec` in this scope
+RUSTC|boundary-coverage/combo-defer-guard.lz|error[E0308]: `match` arms have incompatible types
+RUN|boundary-coverage/combo-error-control.lz|
+RUSTC|boundary-coverage/combo-iterator-generator.lz|error[E0425]: cannot find value `__gen_vec` in this scope
+RUSTC|boundary-coverage/combo-pipe-lambda.lz|error: in expressions, `_` can only be used on the left-hand side of an assignment
+PARSE|boundary-coverage/combo-struct-method.lz|Parse error: Unexpected token in expression: Struct
+PARSE|boundary-coverage/combo-trait-impl.lz|Parse error: Unexpected token in expression: Trait
+RUSTC|boundary-coverage/edge-keyword-identifier.lz|error[E0425]: cannot find value `None_` in this scope
+PARSE|boundary-coverage/edge-scope-shadow.lz|Parse error: Unexpected token in expression: Let
+RUSTC|boundary-coverage/edge-values-boundary.lz|error[E0308]: mismatched types
+RUSTC|boundary-coverage/edge-walrus-operator.lz|error[E0308]: mismatched types
+PARSE|boundary-coverage/nesting-closure-lambda.lz|Parse error: Unexpected token in expression: Newline
+RUSTC|boundary-coverage/nesting-control-flow.lz|error[E0308]: mismatched types
+PARSE|boundary-coverage/nesting-data-types.lz|Parse error: Expected RBrack, got For at pos 809
+RUSTC|boundary-coverage/nesting-expressions.lz|error[E0308]: mismatched types
+PARSE|boundary-coverage/prefix-suffix-stacking.lz|Parse error: Unexpected token in expression: Star
+RUSTC|combo-syntax/combo_ternary_walrus.lz|error[E0308]: mismatched types
+RUSTC|lz_std/__init__.lz|error[E0369]: cannot add `&str` to `&str`
+RUSTC|lz_std/box.lz|error[E0255]: the name `Rc` is defined multiple times
+RUSTC|lz_std/dict.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
+PARSE|lz_std/error.lz|Parse error: Expected type, got RBrack
+PARSE|lz_std/iter.lz|Parse error: Expected Colon, got Dot at pos 1849
+RUSTC|lz_std/list.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
+PARSE|lz_std/math.lz|Parse error: Expected Indent, got Minus at pos 619
+RUSTC|lz_std/option.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
+RUSTC|lz_std/ordering.lz|error[E0416]: identifier `Less_` is bound more than once in the same pattern
+RUSTC|lz_std/prelude.lz|error[E0425]: cannot find value `Ordering` in this scope
+RUSTC|lz_std/result.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
+RUSTC|lz_std/set.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
+RUSTC|lz_std/string.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
+PARSE|lz_std/traits.lz|Parse error: Expected type param in where, got Self_
+PARSE|variadic_type_fidelity.lz|Parse error: Expected LParen, got DotDot at pos 73

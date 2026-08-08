@@ -1,7 +1,0 @@
-﻿def main() =
-    arr = [1, 2, 3]
-    i = 0
-    n = arr.len()
-    while i < n:
-        print(arr[i])
-        i += 1

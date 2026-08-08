@@ -1,5 +1,0 @@
-# Test: val variable immutability
-def main() -> int:
-    val x: int = 1
-    x = 2  # Should fail: val cannot be reassigned
-    return x

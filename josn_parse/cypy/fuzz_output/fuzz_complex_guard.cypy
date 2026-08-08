@@ -1,7 +1,0 @@
-def test(x: int) -> int:
-    guard x >= 0 else:
-        return -1
-    return x
-
-def main() -> int:
-    return 0

@@ -1,8 +1,0 @@
-# Test: and 运算符在 if 条件中
-def test_and() -> int:
-    if True and False:
-        return 1
-    return 0
-
-def main() -> int:
-    return 0

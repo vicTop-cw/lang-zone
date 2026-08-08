@@ -1,9 +1,0 @@
-// Test D: 字符串转义
-def test_string_special() =
-    a = "hello\nworld"
-    b = "tab\there"
-    print(a)
-    print(b)
-
-def main() =
-    test_string_special()

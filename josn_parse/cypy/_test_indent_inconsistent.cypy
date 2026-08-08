@@ -1,9 +1,0 @@
-# Test: inconsistent indentation should fail
-def test_indent() -> int:
-    x: int = 1
-      y: int = 2
-    z: int = 3
-    return x + y + z
-
-def main() -> int:
-    return 0

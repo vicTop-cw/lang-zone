@@ -1,6 +1,0 @@
-# Bug-R2-2: yield from 语法不支持
-def sub_gen() -> int:
-    return 0
-def delegating_gen() -> int:
-    yield from sub_gen()
-    return 0

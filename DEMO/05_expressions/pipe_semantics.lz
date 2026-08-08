@@ -1,0 +1,46 @@
+// 管道新语义测试（用户 2026-08-08 设计）
+// - |> 左侧任意值 T，右侧接收 T 的单参 callable，默认首参预填充
+// - 构造调用：1.0 |> Point(2.0) → Point(1.0, 2.0)
+// - __call__ 实例：p |> p1 → p1.__call__(p)
+// - __lpipe__：左侧数据变换（默认返回自身）
+// - __rpipe__：右侧处理函数生成（优先于 __call__）
+
+struct Point =
+    x: f64
+    y: f64
+
+    def __call__(mut self, other: Point) -> Point =
+        // 组合两点的坐标（演示 __call__ 首参预填充）
+        Point(self.x + other.x, self.y + other.y)
+
+    def __lpipe__(self) -> Point =
+        // 左侧数据变换：放大 x
+        Point(self.x * 10.0, self.y)
+
+    def __rpipe__(self, other: Point) -> fn(Point) -> Point =
+        // 右侧处理：other 是左侧数据，返回单参函数处理（忽略传入数据，用 other 构造）
+        |_x: Point| Point(other.x + 1.0, other.y + 1.0)
+
+def double(x: int) -> int = x * 2
+
+def main() =
+    // 1. 构造调用预填充：Point(1.0, 2.0)
+    let p = 1.0 |> Point(2.0)
+    print(p.x)
+    print(p.y)
+
+    // 2. __rpipe__ 优先（Point 实现了 __rpipe__）：p |> p → p.__rpipe__(p.__lpipe__())(p.__lpipe__())
+    let p1 = p |> p
+    print(p1.x)
+
+    // 3. __call__ 实例调用：定义无 __rpipe__ 的类型验证 __call__ 路径
+    let p2 = p |> p1
+    print(p2.x)
+
+    // 4. 单参函数
+    let r = 5 |> double
+    print(r)
+
+    // 5. 闭包
+    let r2 = 10 |> |x: int| x * x
+    print(r2)

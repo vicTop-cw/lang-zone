@@ -1,7 +1,0 @@
-def test() -> int:
-    defer:
-        let x: int = 0
-    return 1
-
-def main() -> int:
-    return 0

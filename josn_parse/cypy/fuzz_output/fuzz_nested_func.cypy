@@ -1,7 +1,0 @@
-def outer() -> int:
-    def inner() -> int:
-        return 42
-    return inner()
-
-def main() -> int:
-    return 0

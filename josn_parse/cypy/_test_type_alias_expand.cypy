@@ -1,8 +1,0 @@
-# Test: type alias expansion
-type IntList = list[int]
-type StringMap = dict[str, int]
-
-def main() -> int:
-    items: IntList = [1, 2, 3]
-    counts: StringMap = {"a": 1, "b": 2}
-    return len(items)

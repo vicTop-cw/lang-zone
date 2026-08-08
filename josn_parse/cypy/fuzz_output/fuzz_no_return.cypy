@@ -1,5 +1,0 @@
-def test() -> int:
-    let x: int = 1
-
-def main() -> int:
-    return 0

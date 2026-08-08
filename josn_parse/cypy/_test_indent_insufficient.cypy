@@ -1,7 +1,0 @@
-# Test: insufficient indentation should fail
-def test_indent() -> int:
- x: int = 1
-    return x
-
-def main() -> int:
-    return 0

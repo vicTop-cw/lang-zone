@@ -1,7 +1,0 @@
-def test() -> int:
-    let f: float = 3.14
-    let x: int = int(f)
-    return x
-
-def main() -> int:
-    return 0

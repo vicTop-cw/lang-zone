@@ -1,4 +1,0 @@
-﻿def main() =
-    s = "hello"
-    if s != "world":
-        print("not equal")

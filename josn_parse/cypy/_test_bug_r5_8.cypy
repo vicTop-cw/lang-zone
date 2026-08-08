@@ -1,6 +1,0 @@
-# Bug-R5-8: 十六进制/八进制/二进制字面量不支持
-def test_hex() -> int:
-    return 0xFF
-
-def main() -> int:
-    return 0

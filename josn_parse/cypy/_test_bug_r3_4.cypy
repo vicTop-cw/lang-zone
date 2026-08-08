@@ -1,8 +1,0 @@
-# Bug-R3-4: 指针算术返回类型错误
-def test_ptr_arith() -> int:
-    let p: int* = malloc(sizeof(int))
-    let q: int* = p + 1
-    return 0
-
-def main() -> int:
-    return 0

@@ -1,4 +1,0 @@
-# Bug-R3-7: go 语句在代码生成阶段丢失
-def test_go() -> int:
-    go print("go_routine")
-    return 0

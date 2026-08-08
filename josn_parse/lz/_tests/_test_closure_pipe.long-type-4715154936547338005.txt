@@ -1,1 +1,0 @@
-{closure@e:\IDEProjects\AI\lang-zone\josn_parse\lz\_tests\_test_closure_pipe.rs:25:22: 25:25}: Callable<_>

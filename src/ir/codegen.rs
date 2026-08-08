@@ -971,7 +971,9 @@ impl CodeGen {
         // 实参中的位置」；若本参数对应的函数泛型出现在该位置，则字段属于本参数。
         self.duck_field_members.clear();
         for p in &f.params {
-            let IrType::Generic(gname) = &p.ty else { continue };
+            let IrType::Generic(gname) = &p.ty else {
+                continue;
+            };
             let mut field_names: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
             // 找到该泛型参数对应的 duck 约束
@@ -1070,10 +1072,16 @@ impl CodeGen {
         let mut rel_clauses: Vec<String> = Vec::new();
         for g in &f.generics {
             for b in &g.bounds {
-                let IrType::Named { path, args } = b else { continue };
-                let Some(d) = self.duck_defs.get(path) else { continue };
+                let IrType::Named { path, args } = b else {
+                    continue;
+                };
+                let Some(d) = self.duck_defs.get(path) else {
+                    continue;
+                };
                 for df in &d.fields {
-                    let Some((rel_owner, rel_name)) = &df.rel else { continue };
+                    let Some((rel_owner, rel_name)) = &df.rel else {
+                        continue;
+                    };
                     let owner_matches = match &df.owner {
                         None => true,
                         Some(o) => o == &g.name,
@@ -1655,15 +1663,13 @@ impl CodeGen {
                 if args.is_empty() {
                     self.rust_type(ty)
                 } else {
-                    let inner: Vec<String> =
-                        args.iter().map(|a| self.trait_sig_type(a)).collect();
+                    let inner: Vec<String> = args.iter().map(|a| self.trait_sig_type(a)).collect();
                     format!("{}<{}>", path, inner.join(", "))
                 }
             }
             IrType::Option(inner) => format!("Option<{}>", self.trait_sig_type(inner)),
             IrType::Tuple(items) => {
-                let inner: Vec<String> =
-                    items.iter().map(|i| self.trait_sig_type(i)).collect();
+                let inner: Vec<String> = items.iter().map(|i| self.trait_sig_type(i)).collect();
                 format!("({})", inner.join(", "))
             }
             IrType::Ref(inner) => format!("&{}", self.trait_sig_type(inner)),
@@ -2008,19 +2014,21 @@ impl CodeGen {
         }
         let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (type_name, duck_name, initial_bindings) in &pairs {
-            let Some(duck) = duck_defs.get(duck_name.as_str()) else { continue };
-            let Some(sdef) = struct_defs.get(type_name.as_str()) else { continue };
+            let Some(duck) = duck_defs.get(duck_name.as_str()) else {
+                continue;
+            };
+            let Some(sdef) = struct_defs.get(type_name.as_str()) else {
+                continue;
+            };
             // 同一 (类型, duck) 只生成一份泛型 impl（不同调用点泛型实参由 Rust 推断）
             let dedup = format!("{}::{}", type_name, duck_name);
             if !emitted.insert(dedup) {
                 continue;
             }
             // 反推 duck 泛型参数 → 具体类型表达式（调用点绑定 + 方法签名 unify 补全）
-            let Some(subst) = crate::ir::duck_check::infer_duck_bindings(
-                duck,
-                sdef,
-                initial_bindings,
-            ) else {
+            let Some(subst) =
+                crate::ir::duck_check::infer_duck_bindings(duck, sdef, initial_bindings)
+            else {
                 continue;
             };
             // 具体类型自身的泛型参数名（如 Wrapper 的 T）
@@ -2042,8 +2050,10 @@ impl CodeGen {
             // duck 泛型参数名（供 trait 泛型实参顺序）
             let duck_names: Vec<String> = duck.generics.iter().map(|g| g.name.clone()).collect();
             // trait 泛型实参（按 duck 泛型参数顺序）
-            let trait_args: Vec<String> =
-                duck_names.iter().map(|n| self.rust_type(&subst[n])).collect();
+            let trait_args: Vec<String> = duck_names
+                .iter()
+                .map(|n| self.rust_type(&subst[n]))
+                .collect();
             // impl 泛型参数：与具体类型定义一致（Clone + Debug bound）
             let impl_generics = if concrete_generics.is_empty() {
                 String::new()
@@ -2103,7 +2113,9 @@ impl CodeGen {
             for f in &duck.fields {
                 let belongs = match &f.owner {
                     None => true,
-                    Some(g) => matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name),
+                    Some(g) => {
+                        matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name)
+                    }
                 };
                 if !belongs {
                     continue;
@@ -2142,7 +2154,9 @@ impl CodeGen {
             for m in &duck.methods {
                 let belongs = match &m.owner {
                     None => true,
-                    Some(g) => matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name),
+                    Some(g) => {
+                        matches!(subst.get(g), Some(IrType::Named { path, .. }) if path == type_name)
+                    }
                 };
                 if !belongs {
                     continue;
@@ -3563,10 +3577,7 @@ impl CodeGen {
                     let map = if pairs.is_empty() {
                         "std::collections::HashMap::new()".to_string()
                     } else {
-                        format!(
-                            "std::collections::HashMap::from([{}])",
-                            pairs.join(", ")
-                        )
+                        format!("std::collections::HashMap::from([{}])", pairs.join(", "))
                     };
                     normal.push(format!("&{}", map));
                     format!("{}{}({})", callee_s, turbofish, normal.join(", "))

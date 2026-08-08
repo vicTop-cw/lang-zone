@@ -1,8 +1,0 @@
-def test() -> int:
-    for i in range(10):
-        if i == 5:
-            break
-    return 0
-
-def main() -> int:
-    return 0

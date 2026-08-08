@@ -1,8 +1,0 @@
-# Bug-R6-20: 缺少 DeferStmt 类型检查 + 代码生成
-def test_defer_type() -> int:
-    defer:
-        let cleanup: int = 1
-    return 0
-
-def main() -> int:
-    return 0

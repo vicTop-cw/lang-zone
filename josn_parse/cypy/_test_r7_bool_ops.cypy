@@ -1,4 +1,0 @@
-def test() -> bool:
-    return True == True
-def main() -> int:
-    return 0

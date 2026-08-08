@@ -1,8 +1,0 @@
-# Bug-R6-19: 缺少 GuardStmt 类型检查 (guard condition)
-def test_guard_type(x: int) -> int:
-    guard x >= 0 else:
-        return -1
-    return x
-
-def main() -> int:
-    return 0

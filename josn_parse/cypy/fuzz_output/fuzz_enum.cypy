@@ -1,7 +1,0 @@
-enum Color:
-    Red
-    Green
-    Blue
-
-def main() -> int:
-    return 0

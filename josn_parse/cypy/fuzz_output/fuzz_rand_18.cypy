@@ -1,6 +1,0 @@
-def test_0() -> int:
-    return ((-100) == print((-(100 / True))))
-    x = print((result))
-
-def main() -> int:
-    return 0

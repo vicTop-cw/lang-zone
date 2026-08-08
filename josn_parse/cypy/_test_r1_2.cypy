@@ -1,3 +1,0 @@
-# Bug-R1-2: cdef class 不支持
-cdef class CdefClass:
-    pass

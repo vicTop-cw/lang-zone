@@ -1,6 +1,0 @@
-# Bug-R5-2: tuple 返回类型被误判为 list
-def test_empty_tuple() -> tuple:
-    return ()
-
-def main() -> int:
-    return 0

@@ -1,9 +1,0 @@
-# Bug-R1-1: class 继承语法
-class Parent:
-    x: int = 0
-
-class Child(Parent):
-    pass
-
-def main() -> int:
-    return 0

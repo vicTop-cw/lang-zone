@@ -1,7 +1,0 @@
-def test() -> int:
-    for i in range(3):
-        let x: int = 0
-    return 0
-
-def main() -> int:
-    return 0

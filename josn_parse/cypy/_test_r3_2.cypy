@@ -1,4 +1,0 @@
-# Bug-R3-2: free 未定义为内置函数
-def test_free() -> int:
-    free(ptr)
-    return 0

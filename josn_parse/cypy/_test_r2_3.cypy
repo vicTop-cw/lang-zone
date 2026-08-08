@@ -1,3 +1,0 @@
-# Bug-R2-3: f-string 在代码生成中丢失引号类型
-def test_fstring() -> str:
-    return f"Simple.x = {42}"

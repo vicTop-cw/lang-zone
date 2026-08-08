@@ -1,5 +1,0 @@
-﻿def main() =
-    s = "hello"
-    i = 0
-    if i < s.len():
-        print("ok")

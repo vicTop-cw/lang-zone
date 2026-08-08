@@ -1,6 +1,0 @@
-# Bug-R5-9: 浮点数精度截断
-def test_float_precision() -> float:
-    return 3.14159265358979323846
-
-def main() -> int:
-    return 0

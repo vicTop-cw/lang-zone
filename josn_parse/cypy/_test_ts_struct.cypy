@@ -1,9 +1,0 @@
-struct Point:
-    x: int = 0
-
-def test_struct_field_type() -> int:
-    let p: Point = Point{x: "wrong"}
-    return p.x
-
-def main() -> int:
-    return 0

@@ -1,9 +1,0 @@
-# Bug-R5-5: for i in range(n) 循环变量类型为 object
-def test_for_range() -> int:
-    let total: int = 0
-    for i in range(3):
-        total = total + i
-    return total
-
-def main() -> int:
-    return 0

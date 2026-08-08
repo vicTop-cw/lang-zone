@@ -1,6 +1,0 @@
-trait Drawable =
-    def draw(self: Self) = ...
-struct Circle =
-    r: f64
-impl Drawable for Circle =
-    def draw(self: Circle) = 0

@@ -1,5 +1,0 @@
-# Bug-R6-12: _parse_typed_var 不区分 let/val (val 可变性)
-val CONST_VAL: int = 42
-
-def main() -> int:
-    return 0

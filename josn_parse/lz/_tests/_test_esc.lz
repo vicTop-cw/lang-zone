@@ -1,3 +1,0 @@
-﻿def main() =
-    s = "\n"
-    print("newline")

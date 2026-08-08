@@ -1,5 +1,0 @@
-﻿def main() =
-    s = "hello"
-    ch = s[0]
-    if ch >= "a" and ch <= "z":
-        print("letter")

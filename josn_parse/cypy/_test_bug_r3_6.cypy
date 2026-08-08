@@ -1,7 +1,0 @@
-# Bug-R3-6: spawn 语句在代码生成阶段丢失
-def test_spawn() -> int:
-    spawn print("spawned")
-    return 0
-
-def main() -> int:
-    return 0

@@ -1,7 +1,0 @@
-def test_0() -> int:
-    for i in range(1):
-        let temp: int = i
-    let x: bool = False
-
-def main() -> int:
-    return 0

@@ -1,6 +1,0 @@
-trait V =
-    def get_val(self: Self)-> str = ...
-struct T =
-    x: int
-impl V for T =
-    def get_val(self: T)-> int = 0

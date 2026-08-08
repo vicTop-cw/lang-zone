@@ -1,6 +1,0 @@
-﻿def main() =
-    ch = "x"
-    if ch == "\"":
-        print("is quote")
-    else:
-        print("not quote")

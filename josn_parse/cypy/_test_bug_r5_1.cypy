@@ -1,5 +1,0 @@
-type MyList = list[int]
-
-def test_type_alias() -> MyList:
-    let arr: MyList = [1, 2, 3]
-    return arr

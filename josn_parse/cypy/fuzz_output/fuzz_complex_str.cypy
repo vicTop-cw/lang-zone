@@ -1,3 +1,0 @@
-def main() -> int:
-    let s: str = "hello world"
-    return 0

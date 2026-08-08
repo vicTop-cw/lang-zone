@@ -1,7 +1,0 @@
-trait Dual =
-    def first(self: Self) = ...
-    def second(self: Self) = ...
-struct Bar =
-    x: int
-impl Dual for Bar =
-    def first(self: Bar) = 0
