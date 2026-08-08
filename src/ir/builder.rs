@@ -33,8 +33,13 @@ struct TypeCtx {
     struct_names: HashSet<String>,
     /// struct 字段类型：struct_name → field_name → type
     struct_fields: HashMap<String, HashMap<String, IrType>>,
+    /// struct 字段声明顺序：struct_name → [field_name, ...]（位置参数构造用）
+    struct_field_order: HashMap<String, Vec<String>>,
     /// struct 方法名集合：struct_name → 方法名集合（含魔术方法）
     struct_methods: HashMap<String, HashSet<String>>,
+    /// struct 方法非 self 参数个数：struct_name → (method_name → 参数个数)
+    /// 用于 __call__ 单参校验与 __rpipe__/__lpipe__ 分派
+    struct_method_arity: HashMap<String, HashMap<String, usize>>,
     /// 顶层 const/static 类型：name → type
     top_level_consts: HashMap<String, IrType>,
     /// enum variant → enum name 映射
@@ -59,7 +64,9 @@ impl TypeCtx {
             fn_params: HashMap::new(),
             struct_names: HashSet::new(),
             struct_fields: HashMap::new(),
+            struct_field_order: HashMap::new(),
             struct_methods: HashMap::new(),
+            struct_method_arity: HashMap::new(),
             top_level_consts: HashMap::new(),
             enum_variants: HashMap::new(),
             current_generics: vec![],
@@ -87,19 +94,26 @@ impl TypeCtx {
             } else {
                 self.struct_names.insert(s.name.clone());
                 let mut fields = HashMap::new();
+                let mut field_order: Vec<String> = Vec::new();
                 for f in &s.fields {
                     fields.insert(f.name.clone(), from_ast_type(&f.ty));
+                    field_order.push(f.name.clone());
                 }
                 self.struct_fields.insert(s.name.clone(), fields);
+                self.struct_field_order.insert(s.name.clone(), field_order);
                 // 收集 struct 方法名（含魔术方法）
                 let mut mset: HashSet<String> = HashSet::new();
+                let mut arity_map: HashMap<String, usize> = HashMap::new();
                 for m in s.methods.iter() {
                     mset.insert(m.name.clone());
+                    arity_map.insert(m.name.clone(), m.params.iter().filter(|p| p.name != "self").count());
                 }
                 for m in s.magic_methods.iter() {
                     mset.insert(m.name.clone());
+                    arity_map.insert(m.name.clone(), m.params.iter().filter(|p| p.name != "self").count());
                 }
                 self.struct_methods.insert(s.name.clone(), mset);
+                self.struct_method_arity.insert(s.name.clone(), arity_map);
             }
         }
     }
@@ -709,7 +723,42 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::BlockExpr(_) => IrType::Any,
         AstExpr::Range { .. } => IrType::named("Range"),
         AstExpr::Walrus { value, .. } => infer_expr_type(value, ctx),
-        AstExpr::Pipe { func, .. } => ctx.lookup_fn_return(func),
+        AstExpr::Pipe { callee, .. } => {
+            // 管道结果类型 = 右侧 callable 的返回类型：
+            // - Ident 是已知 struct（构造调用）→ struct 类型本身
+            // - Ident 是变量（__call__ 实例）→ 变量类型（__call__ 通常返回同类型）
+            // - Ident 是函数 → 函数返回类型；闭包 → Any
+            match callee.as_ref() {
+                AstExpr::Ident(name) => {
+                    if ctx.is_struct(name) {
+                        // 构造调用 Point(2.0) → Point 类型（首参预填充 receiver）
+                        IrType::Named {
+                            path: name.clone(),
+                            args: vec![],
+                        }
+                    } else if let IrType::Named { path, .. } = ctx.lookup_var(name) {
+                        // 变量实例：若类型实现了 __call__，管道结果为 __call__ 返回类型
+                        // （推断期近似为实例类型本身，Point.__call__ 返回 Point）
+                        if ctx
+                            .struct_methods
+                            .get(&path)
+                            .map_or(false, |m| m.contains("__call__") || m.contains("__rpipe__"))
+                        {
+                            IrType::Named {
+                                path: path.clone(),
+                                args: vec![],
+                            }
+                        } else {
+                            ctx.lookup_fn_return(name)
+                        }
+                    } else {
+                        ctx.lookup_fn_return(name)
+                    }
+                }
+                AstExpr::Closure { .. } => IrType::Any,
+                _ => IrType::Any,
+            }
+        }
         AstExpr::Try(inner) => {
             // try 表达式：Result → Ok 类型
             let inner_ty = infer_expr_type(inner, ctx);
@@ -1290,6 +1339,38 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }
             }
 
+            // struct 位置参数构造：Point(1.0, 2.0) → StructCtor { name: "Point", fields: [(x,..),(y,..)] }
+            // （管道 `1.0 |> Point(2.0)` 预填充后即此形式；关键字构造在 codegen 端已有处理）
+            if let AstExpr::Ident(ref fname) = actual_func {
+                if ctx.is_struct(fname) && !args.is_empty() {
+                    let is_all_positional = args
+                        .iter()
+                        .all(|a| !matches!(a, AstExpr::KwArg { .. }));
+                    if is_all_positional {
+                        let order = ctx.struct_field_order.get(fname).cloned().unwrap_or_default();
+                        let fields: Vec<(String, Expr)> = args
+                            .iter()
+                            .enumerate()
+                            .map(|(i, a)| {
+                                let fname_i = order
+                                    .get(i)
+                                    .cloned()
+                                    .unwrap_or_else(|| format!("_f{}", i));
+                                (fname_i, convert_expr(a, ctx))
+                            })
+                            .collect();
+                        return Expr::new(
+                            ExprKind::StructCtor {
+                                name: fname.clone(),
+                                fields,
+                            },
+                            IrType::named(fname),
+                            Span::unknown(),
+                        );
+                    }
+                }
+            }
+
             ExprKind::Call {
                 type_args: ir_type_args,
                 callee: Box::new(convert_expr(actual_func, ctx)),
@@ -1693,20 +1774,158 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
 
         AstExpr::Pipe {
             receiver,
-            func,
+            callee,
             args,
         } => {
-            // |> → 函数调用（receiver 作为第一个参数）
-            let mut all_args = vec![convert_expr(receiver, ctx)];
-            all_args.extend(args.iter().map(|a| convert_expr(a, ctx)));
-            ExprKind::Call {
-                type_args: vec![],
-                callee: Box::new(Expr::new(
-                    ExprKind::Var(func.clone()),
-                    IrType::Any,
-                    Span::unknown(),
-                )),
-                args: all_args,
+            // |> 管道：
+            // - 左侧 receiver 作为数据；若其类型实现了 __lpipe__，先调用 recv.__lpipe__() 产出数据
+            // - 右侧 callee 分类：
+            //     * 变量（实例，类型实现 __rpipe__）→ (right.__rpipe__(recv))(recv)
+            //     * 变量（实例，类型实现 __call__）→ right.__call__(recv, ...args)（首参预填充）
+            //     * 函数/构造/闭包/其他 → 首参预填充调用 callee(recv, ...args)
+            let recv_ir = convert_expr(receiver, ctx);
+            let args_ir: Vec<Expr> = args.iter().map(|a| convert_expr(a, ctx)).collect();
+            // 左侧 __lpipe__：类型实现 __lpipe__ 时，数据 = recv.__lpipe__()（默认实现返回自身）
+            let data_ir = {
+                let recv_ty = infer_expr_type(receiver, ctx);
+                if let IrType::Named { path, .. } = &recv_ty {
+                    let has_lpipe = ctx
+                        .struct_methods
+                        .get(path)
+                        .map_or(false, |m| m.contains("__lpipe__"));
+                    if has_lpipe {
+                        Expr::new(
+                            ExprKind::MethodCall {
+                                receiver: Box::new(recv_ir),
+                                method: "__lpipe__".into(),
+                                args: vec![],
+                            },
+                            recv_ty.clone(),
+                            Span::unknown(),
+                        )
+                    } else {
+                        recv_ir
+                    }
+                } else {
+                    recv_ir
+                }
+            };
+            // 右侧分类
+            match callee.as_ref() {
+                AstExpr::Ident(name) => {
+                    // 变量（实例）→ __rpipe__ 优先，其次 __call__（须单参函数，否则报错）
+                    let var_ty = ctx.lookup_var(name);
+                    if let IrType::Named { path, .. } = &var_ty {
+                        if let Some(methods) = ctx.struct_methods.get(path) {
+                            if methods.contains("__rpipe__") {
+                                // (right.__rpipe__(recv))(recv)
+                                return Expr::new(
+                                    ExprKind::Call {
+                                        type_args: vec![],
+                                        callee: Box::new(Expr::new(
+                                            ExprKind::MethodCall {
+                                                receiver: Box::new(Expr::new(
+                                                    ExprKind::Var(name.clone()),
+                                                    var_ty.clone(),
+                                                    Span::unknown(),
+                                                )),
+                                                method: "__rpipe__".into(),
+                                                args: vec![data_ir.clone()],
+                                            },
+                                            IrType::Any,
+                                            Span::unknown(),
+                                        )),
+                                        args: vec![data_ir],
+                                    },
+                                    ty,
+                                    span,
+                                );
+                            }
+                            if methods.contains("__call__") {
+                                // __call__ 必须是单参函数（非 self 参数 = 1）
+                                let arity = ctx
+                                    .struct_method_arity
+                                    .get(path)
+                                    .and_then(|m| m.get("__call__"))
+                                    .copied()
+                                    .unwrap_or(0);
+                                if arity != 1 {
+                                    ctx.report_error(format!(
+                                        "管道右值 `{}` 的 __call__ 不是单参函数（参数数 {}，期望 1）；\
+                                         实现 __rpipe__ 或改为单参 __call__",
+                                        name, arity
+                                    ));
+                                }
+                                // right.__call__(recv, ...args)（首参预填充）
+                                let mut call_args = vec![data_ir];
+                                call_args.extend(args_ir);
+                                return Expr::new(
+                                    ExprKind::MethodCall {
+                                        receiver: Box::new(Expr::new(
+                                            ExprKind::Var(name.clone()),
+                                            var_ty.clone(),
+                                            Span::unknown(),
+                                        )),
+                                        method: "__call__".into(),
+                                        args: call_args,
+                                    },
+                                    ty,
+                                    span,
+                                );
+                            }
+                            // 已知 struct 实例但既无 __rpipe__ 也无 __call__ → 非 callable
+                            ctx.report_error(format!(
+                                "管道右值 `{}`（类型 {}）不可调用：未实现 __rpipe__ 或 __call__",
+                                name, path
+                            ));
+                            return Expr::new(ExprKind::Lit(LitKind::Unit), ty, span);
+                        }
+                    }
+                    // 函数/构造/未知 → 首参预填充调用；
+                    // 已知 struct（构造调用）→ StructCtor 按字段顺序映射
+                    if ctx.is_struct(name) {
+                        let order = ctx.struct_field_order.get(name).cloned().unwrap_or_default();
+                        let mut fields: Vec<(String, Expr)> = Vec::new();
+                        fields.push(("".into(), data_ir));
+                        fields.extend(args_ir.into_iter().map(|a| ("".into(), a)));
+                        let mapped: Vec<(String, Expr)> = fields
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, (_, e))| {
+                                let fname_i = order
+                                    .get(i)
+                                    .cloned()
+                                    .unwrap_or_else(|| format!("_f{}", i));
+                                (fname_i, e)
+                            })
+                            .collect();
+                        return Expr::new(
+                            ExprKind::StructCtor {
+                                name: name.clone(),
+                                fields: mapped,
+                            },
+                            IrType::named(name),
+                            Span::unknown(),
+                        );
+                    }
+                    let mut all_args = vec![data_ir];
+                    all_args.extend(args_ir);
+                    ExprKind::Call {
+                        type_args: vec![],
+                        callee: Box::new(Expr::new(
+                            ExprKind::Var(name.clone()),
+                            IrType::Any,
+                            Span::unknown(),
+                        )),
+                        args: all_args,
+                    }
+                }
+                // 闭包/方法/复杂表达式 → 保留 Pipe 节点，codegen 兜底展开
+                _ => ExprKind::Pipe {
+                    receiver: Box::new(data_ir),
+                    callee: Box::new(convert_expr(callee, ctx)),
+                    args: args_ir,
+                },
             }
         }
 
@@ -2961,8 +3180,14 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
         }
         block_ctx.struct_fields.insert(sn.clone(), cloned);
     }
+    for (sn, order) in &ctx.struct_field_order {
+        block_ctx.struct_field_order.insert(sn.clone(), order.clone());
+    }
     for (sn, ms) in &ctx.struct_methods {
         block_ctx.struct_methods.insert(sn.clone(), ms.clone());
+    }
+    for (sn, arity) in &ctx.struct_method_arity {
+        block_ctx.struct_method_arity.insert(sn.clone(), arity.clone());
     }
     for (vn, vt) in &ctx.vars {
         block_ctx.vars.insert(vn.clone(), vt.clone());
@@ -3559,8 +3784,14 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
         fn_ctx.struct_fields.insert(sn.clone(), cloned);
     }
+    for (sn, order) in &ctx.struct_field_order {
+        fn_ctx.struct_field_order.insert(sn.clone(), order.clone());
+    }
     for (sn, ms) in &ctx.struct_methods {
         fn_ctx.struct_methods.insert(sn.clone(), ms.clone());
+    }
+    for (sn, arity) in &ctx.struct_method_arity {
+        fn_ctx.struct_method_arity.insert(sn.clone(), arity.clone());
     }
     for (cn, ct) in &ctx.top_level_consts {
         fn_ctx.top_level_consts.insert(cn.clone(), ct.clone());
@@ -3915,7 +4146,9 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 method_ctx.pending_items = ctx.pending_items.clone();
                 method_ctx.struct_names = ctx.struct_names.clone();
                 method_ctx.struct_fields = ctx.struct_fields.clone();
+                method_ctx.struct_field_order = ctx.struct_field_order.clone();
                 method_ctx.struct_methods = ctx.struct_methods.clone();
+                method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
                 convert_fn_def(m, &method_ctx)
             })
             .collect();
@@ -3957,7 +4190,9 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 method_ctx.pending_items = ctx.pending_items.clone();
                 method_ctx.struct_names = ctx.struct_names.clone();
                 method_ctx.struct_fields = ctx.struct_fields.clone();
+                method_ctx.struct_field_order = ctx.struct_field_order.clone();
                 method_ctx.struct_methods = ctx.struct_methods.clone();
+                method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
                 convert_fn_def(m, &method_ctx)
             })
             .collect();
@@ -4096,8 +4331,14 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
                 }
                 impl_ctx.struct_fields.insert(sn.clone(), cloned);
             }
+            for (sn, order) in &ctx.struct_field_order {
+                impl_ctx.struct_field_order.insert(sn.clone(), order.clone());
+            }
             for (sn, ms) in &ctx.struct_methods {
                 impl_ctx.struct_methods.insert(sn.clone(), ms.clone());
+            }
+            for (sn, arity) in &ctx.struct_method_arity {
+                impl_ctx.struct_method_arity.insert(sn.clone(), arity.clone());
             }
             for (cn, ct) in &ctx.top_level_consts {
                 impl_ctx.top_level_consts.insert(cn.clone(), ct.clone());

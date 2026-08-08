@@ -231,7 +231,8 @@ impl ParserExprExt for Parser {
         let mut left = self.parse_null_coalesce()?;
         while self.check(&Token::Pipe) {
             self.advance();
-            // 右侧是函数调用: x |> f(args) 或 x |> (|y| expr)
+            // 右侧 callable 表达式：函数名 / 调用 f(args) / 构造 Point(2.0) /
+            // 方法 obj.method / 闭包 |x| expr / 括号包裹表达式 (expr) / 变量（__call__ 实例）
             if self.check(&Token::LParen) {
                 // 括号包裹的表达式: x |> (|y| expr)
                 self.advance(); // consume (
@@ -243,33 +244,26 @@ impl ParserExprExt for Parser {
                     self.skip_newlines();
                 }
                 self.expect(Token::RParen)?;
-                // 将 receiver 作为参数调用括号内的函数
-                left = Expr::Call {
-                    type_args: vec![],
-                    func: Box::new(expr),
-                    args: vec![left],
+                left = Expr::Pipe {
+                    receiver: Box::new(left),
+                    callee: Box::new(expr),
+                    args: Vec::new(),
                 };
                 continue;
             }
-            let func_name = match self.advance() {
-                Token::Ident(n) => n,
-                t => return Err(format!("Expected function after |>, got {:?}", t)),
+            // 其余情况：解析 postfix 表达式（覆盖 Ident / f(args) / obj.method / 闭包 / 变量）
+            let rhs = self.parse_postfix()?;
+            // 拆分 Call → (callee, args)：`f(1,2)` → callee=f, args=[1,2]，
+            // 由 IR 端把 receiver 预填充为首参（f(recv, 1, 2)）
+            let (callee, args) = match rhs {
+                Expr::Call { type_args: _, func, args } => (*func, args),
+                other => (other, Vec::new()),
             };
-            let args = if self.check(&Token::LParen) {
-                self.advance();
-                let mut args = Vec::new();
-                while !self.check(&Token::RParen) {
-                    args.push(self.parse_expr()?);
-                    if self.check(&Token::Comma) { self.advance(); }
-                }
-                self.expect(Token::RParen)?;
-                args
-            } else {
-                // 无括号时不留占位参数：IR builder 会把 receiver 作为首参注入，
-                // 若在此也放 receiver 会导致实参重复（如 5 |> double → double(5,5)）
-                Vec::new()
+            left = Expr::Pipe {
+                receiver: Box::new(left),
+                callee: Box::new(callee),
+                args,
             };
-            left = Expr::Pipe { receiver: Box::new(left), func: func_name, args };
         }
         Ok(left)
     }

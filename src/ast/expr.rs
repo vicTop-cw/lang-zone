@@ -89,7 +89,10 @@ pub enum Expr {
     },
     Pipe {
         receiver: Box<Expr>,
-        func: String,
+        /// 右侧 callable 完整表达式：函数名 Ident / 闭包 Closure / 方法 PathAccess /
+        /// 构造调用 Call / 变量 Ident（实现 __call__ 的实例）
+        callee: Box<Expr>,
+        /// 显式实参（首参预填充 receiver 后追加）
         args: Vec<Expr>,
     },
     SafeNav {

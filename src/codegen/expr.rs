@@ -431,14 +431,19 @@ impl CodeGenExprExt for CodeGen {
                 }
             }
 
-            Expr::Pipe { receiver, func, args } => {
+            Expr::Pipe { receiver, callee, args } => {
                 // 函数线程管道：a |> f(args) ≡ f(a, args)
+                // callee 是完整表达式（函数名/闭包/方法/构造调用），receiver 预填充为首参
                 let recv_s = self.gen_expr(receiver);
                 let mut all_args = vec![recv_s];
                 for a in args {
                     all_args.push(self.gen_expr(a));
                 }
-                format!("{}({})", func, all_args.join(", "))
+                let callee_s = match callee.as_ref() {
+                    Expr::Ident(name) => name.clone(),
+                    other => self.gen_expr(other),
+                };
+                format!("{}({})", callee_s, all_args.join(", "))
             }
 
             Expr::Walrus { target, value } => {

@@ -56,7 +56,6 @@ impl CodeGenMagicExt for CodeGen {
     fn magic_needs_owned_self(&self, magic_name: &str) -> MagicSelfMode {
         match magic_name {
             "__add__" | "__sub__" | "__mul__" | "__div__" | "__rem__" | "__pow__"
-            | "__pipe__"
             | "__neg__" | "__not__"
             | "__bitand__" | "__bitor__" | "__bitxor__" | "__shl__" | "__shr__"
             | "__into__" | "__try_into__" => MagicSelfMode::Owned,

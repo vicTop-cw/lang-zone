@@ -189,10 +189,10 @@ impl fmt::Display for Expr {
             ExprKind::Paren(inner) => write!(f, "({inner})"),
             ExprKind::Pipe {
                 receiver,
-                func,
+                callee,
                 args,
             } => {
-                write!(f, "pipe {receiver} |> {func}")?;
+                write!(f, "pipe {receiver} |> {callee}")?;
                 if !args.is_empty() {
                     f.write_str("(")?;
                     for (i, a) in args.iter().enumerate() {

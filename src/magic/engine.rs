@@ -118,12 +118,9 @@ impl MagicEngine {
             kind: MagicKind::BinaryOp,
             multi_dispatch: true,
         });
-        // __pipe__ → 自定义 Pipe trait
-        self.register("__pipe__", MagicEntry {
-            trait_path: "Pipe", trait_method: "pipe",
-            kind: MagicKind::BinaryOp,
-            multi_dispatch: true,
-        });
+        // __pipe__ 已废弃（用户 2026-08-08 决策）：管道由通用 callable 语义驱动，
+        // 左侧 __lpipe__（数据变换，默认返回自身）与右侧 __rpipe__（处理函数生成，优先于 __call__）
+        // 由 ir::builder 管道展开直接调用，无需 MagicEngine trait impl 注册。
 
         // 一元运算符
         for (magic, trait_path, method) in &[

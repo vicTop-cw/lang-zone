@@ -663,10 +663,11 @@ pub enum ExprKind {
         inclusive: bool,
     },
 
-    /// 管道调用 x |> f(args)
+    /// 管道调用 x |> f(args) — callee 为右侧完整表达式（函数 Var / 闭包 Lambda /
+    /// 方法 MethodCall / 构造 Var / __call__ 实例 Var），args 为显式实参
     Pipe {
         receiver: Box<Expr>,
-        func: String,
+        callee: Box<Expr>,
         args: Vec<Expr>,
     },
 

@@ -4272,12 +4272,22 @@ impl CodeGen {
             }
             ExprKind::Pipe {
                 receiver,
-                func,
+                callee,
                 args,
             } => {
+                // 管道兜底展开：receiver 预填充为首参调用 callee
+                // （函数/构造/闭包等通用路径；__call__ 实例与 __rpipe__ 由 builder 决策）
                 let recv = self.gen_expr(receiver);
                 let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
-                format!("{}({}, {})", func, recv, args_s.join(", "))
+                let mut all = vec![recv];
+                all.extend(args_s);
+                let callee_s = self.gen_expr(callee);
+                // 闭包作为 callee 需括号包裹：(|x| ...)(recv)
+                if matches!(&callee.kind, ExprKind::Lambda { .. }) {
+                    format!("({})({})", callee_s, all.join(", "))
+                } else {
+                    format!("{}({})", callee_s, all.join(", "))
+                }
             }
             ExprKind::BlockExpr { block } => {
                 let mut child = CodeGen::new();

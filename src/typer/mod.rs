@@ -1325,15 +1325,15 @@ impl Typer {
                 unify(&mut sess.ctx, &t, &v)?;
                 Ok(v)
             }
-            Expr::Pipe { receiver, func, args } => {
+            Expr::Pipe { receiver, callee, args } => {
                 // a |> f(args) ≡ f(a, args...) 在类型层面
                 let _recv_t = Self::infer_expr(sess, receiver)?;
-                // 用 Expr::Call(func(a, args...)) 推断返回类型
+                // 用 Expr::Call(callee(a, args...)) 推断返回类型
                 let mut pipe_args = vec![receiver.as_ref().clone()];
                 for a in args.iter() {
                     pipe_args.push(a.clone());
                 }
-                let pipe_func = Expr::Ident(func.clone());
+                let pipe_func = callee.as_ref().clone();
                 let mut pipe_expr = Expr::Call {
                     func: Box::new(pipe_func),
                     args: pipe_args,
