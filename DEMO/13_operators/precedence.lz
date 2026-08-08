@@ -7,10 +7,15 @@
 def main() =
     // --- Whitespace rules ---
     // Binary operators: MUST have whitespace before and after
+    let a = 3
+    let b = 4
+    mut x = 5
+    mut y = 2
+    let n = 7
     let sum = a + b
     let product = x * y
     let compare = n >= 0
-    let logical = a and b
+    let logical = True and False
 
     // Unary operators: MUST be adjacent to operand
     let neg = -x
@@ -18,13 +23,18 @@ def main() =
     let not_val = not x
 
     // Postfix operators: MUST be adjacent to value
+    def fallible() -> Option<int> = Some(n)
     let propagated = fallible()?
-    let safe = obj?.field
+    def obj() -> Option<int> = Some(n)
+    let safe = obj()?
+    let source = 42
     let moved = source^
 
     // Parentheses: MUST be adjacent to function name
+    def f(v: int) -> int = v * 2
+    let xs = [1, 2, 3]
     let r1 = f(x)
-    let r2 = xs[i]
+    let r2 = xs[1]
 
     // Compound assignment: no space inside symbol
     x += 1
@@ -65,6 +75,7 @@ def main() =
     let pow = 2 ** 3 ** 2      // = 2**(3**2) = 512
 
     // Pipe has very low precedence (shown via function composition)
+    let data = 4
     let piped = process(transform(data))
 
     // Assignment is lowest

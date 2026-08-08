@@ -125,3 +125,20 @@
   - magic_methods：`with` 块 `__exit__()` 调用缺参数（E0061，需传入资源参数）
   - module_magic：模块级 `__name__` 魔法属性未生成（E0425）
   - self_recursive：`Self` 在函数/递归类型中未解析（E0411/E0072，需 Self 类型替换与递归 Box 化）
+
+### 2026-08-08 第十轮进展（v152 后，未提交部分 6）
+- `13_operators/precedence.lz` 已通过（修正测试文件：补未定义变量、`and` 用 bool 操作数、`+=` 需 mut 绑定）
+- 剩余缺陷（待修）：
+  - 08_modules/string_macros、use_macros：宏定义/导入解析失败（parser 宏语法缺口）
+  - 08_modules/use_services：`services` 未找到（模块级作用域解析）
+  - 10_error_handling/panic_raise_try：`line` 与 Rust 内置宏名冲突（E0423）
+  - 11_concurrency/async_more：泛型参数解析失败（Expected RBrack）
+  - 12_build_blocks/var_call_block：`~:` 调用构建块时字典未按名拆包（E0061，需 codegen 支持 dict→kwargs）
+
+### 2026-08-08 第十一轮进展（v152 后，未提交部分 7）
+- 99_spec/boundary-coverage 可行项已随 #6 修复（gen_block_star、combo-iterator-generator 通过）
+- 剩余深层缺陷（非可行项，需类型系统支持）：
+  - 99_spec/duck_test：`pub fn process(pet: Pet)` — duck 类型被当值类型生成（E0782，需 duck 形参降级）
+  - 99_spec/iterator_demo：`Iter<R>` 泛型类型未解析（E0425）+ `[T]` 不能按 i64 索引
+  - 99_spec/guard_for_3：`queue_size` 函数未找到
+  - boundary-coverage：15 个组合语法/类型缺陷（async-await、defer-guard、walrus、嵌套表达式等）
