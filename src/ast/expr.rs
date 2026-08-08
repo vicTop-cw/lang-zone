@@ -114,12 +114,14 @@ pub enum Expr {
         var: String,
         iter: Box<Expr>,
         cond: Option<Box<Expr>>,
+        extra_clauses: Vec<(String, Box<Expr>, Option<Box<Expr>>)>,
     },
     SetComprehension {
         elem: Box<Expr>,
         var: String,
         iter: Box<Expr>,
         cond: Option<Box<Expr>>,
+        extra_clauses: Vec<(String, Box<Expr>, Option<Box<Expr>>)>,
     },
     Assign {
         target: Box<Expr>,

@@ -1603,6 +1603,10 @@ impl CodeGen {
             t.name, generics, supertraits
         ));
         self.indent += 1;
+        // 关联类型声明（§五 `type Item`）→ Rust trait 关联类型
+        for a in &t.assoc_types {
+            self.emit_line(&format!("type {};", a));
+        }
         for sig in &t.methods {
             // 如果第一个参数是 Self，转为 &self（trait 方法与 impl 块签名需一致）
             let params: Vec<String> = sig
@@ -1612,13 +1616,17 @@ impl CodeGen {
                 .map(|(i, p)| {
                     if i == 0 && matches!(p, IrType::Self_) {
                         "&self".to_string()
+                    } else if i == 0
+                        && matches!(p, IrType::MutRef(inner) if matches!(&**inner, IrType::Self_))
+                    {
+                        "&mut self".to_string()
                     } else {
-                        self.rust_type(p)
+                        self.trait_sig_type(p)
                     }
                 })
                 .collect();
             let ret = if sig.ret != IrType::Unit {
-                format!(" -> {}", self.rust_type(&sig.ret))
+                format!(" -> {}", self.trait_sig_type(&sig.ret))
             } else {
                 String::new()
             };
@@ -1628,8 +1636,59 @@ impl CodeGen {
         self.emit_line("}");
     }
 
+    /// 生成 trait 方法签名中的类型：`Self.Item`（§五 关联类型引用）→ `Self::Item`，
+    /// 其余类型走 rust_type。仅用于 trait 方法签名。
+    fn trait_sig_type(&self, ty: &IrType) -> String {
+        match ty {
+            IrType::Named { path, args } => {
+                // `Self.Item`：path 含点号且前缀是 Self
+                if let Some((owner, member)) = path.split_once('.') {
+                    if owner == "Self" {
+                        if args.is_empty() {
+                            return format!("Self::{}", member);
+                        }
+                        let inner: Vec<String> =
+                            args.iter().map(|a| self.trait_sig_type(a)).collect();
+                        return format!("Self::{}<{}>", member, inner.join(", "));
+                    }
+                }
+                if args.is_empty() {
+                    self.rust_type(ty)
+                } else {
+                    let inner: Vec<String> =
+                        args.iter().map(|a| self.trait_sig_type(a)).collect();
+                    format!("{}<{}>", path, inner.join(", "))
+                }
+            }
+            IrType::Option(inner) => format!("Option<{}>", self.trait_sig_type(inner)),
+            IrType::Tuple(items) => {
+                let inner: Vec<String> =
+                    items.iter().map(|i| self.trait_sig_type(i)).collect();
+                format!("({})", inner.join(", "))
+            }
+            IrType::Ref(inner) => format!("&{}", self.trait_sig_type(inner)),
+            IrType::MutRef(inner) => format!("&mut {}", self.trait_sig_type(inner)),
+            IrType::Result { ok, err } => format!(
+                "Result<{}, {}>",
+                self.trait_sig_type(ok),
+                self.trait_sig_type(err)
+            ),
+            other => self.rust_type(other),
+        }
+    }
+
     fn gen_impl_def(&mut self, i: &ImplDef) {
-        let generics = self.gen_generics(&i.generics);
+        // Rust impl 泛型不允许默认类型参数（E0741），剥离默认值仅保留 bounds
+        let stripped: Vec<GenericParam> = i
+            .generics
+            .iter()
+            .map(|g| GenericParam {
+                name: g.name.clone(),
+                bounds: g.bounds.clone(),
+                default: None,
+            })
+            .collect();
+        let generics = self.gen_generics(&stripped);
         let trait_part = i
             .trait_
             .as_ref()
@@ -1642,6 +1701,10 @@ impl CodeGen {
             self.rust_type(&i.for_type)
         ));
         self.indent += 1;
+        // 关联类型绑定（§五 `type Item = T`）→ Rust 关联类型实现
+        for (name, ty) in &i.assoc_type_bindings {
+            self.emit_line(&format!("type {} = {};", name, self.rust_type(ty)));
+        }
         for m in &i.methods {
             self.gen_fn_def(m);
             self.buf.push('\n');
@@ -2209,9 +2272,8 @@ impl CodeGen {
                 if !all_bounds.is_empty() {
                     s.push_str(&format!(": {}", all_bounds.join(" + ")));
                 }
-                if let Some(ref def) = p.default {
-                    s.push_str(&format!(" = {}", self.rust_type(def)));
-                }
+                // 函数泛型默认参数（`T = int`，03b §四）不渲染：Rust 函数泛型
+                // 不允许默认类型参数（E0741），由调用点类型推断 / LZ 类型检查使用
                 s
             })
             .collect();
@@ -3128,6 +3190,51 @@ impl CodeGen {
                         );
                     }
                     return format!("HashSet::new()");
+                }
+
+                // 多 for 推导链: comp_outer!(|x| ..., iter, cond) → flat_map + collect
+                // comp_mid!(|x| ..., iter, cond) → flat_map（不 collect）
+                // comp_leaf!(|x| body, iter, cond) → map（不 collect）
+                // dict_comp_* / set_comp_* 同理（collect HashMap/HashSet）
+                for (prefix, collect_ty) in [
+                    ("comp_", "Vec<_>"),
+                    ("dict_comp_", "HashMap<_,_>"),
+                    ("set_comp_", "HashSet<_>"),
+                ] {
+                    if let Some(suffix) = callee_s.strip_prefix(prefix) {
+                        if suffix == "outer!" || suffix == "mid!" || suffix == "leaf!" {
+                            if let (Some(lambda), Some(iter)) = (args_s.first(), args_s.get(1)) {
+                                let iter_method = if let Some(iter_expr) = args.get(1) {
+                                    if matches!(&iter_expr.ty, IrType::Str) {
+                                        ".chars()"
+                                    } else {
+                                        ".into_iter()"
+                                    }
+                                } else {
+                                    ".into_iter()"
+                                };
+                                let lambda = strip_lambda_type(lambda);
+                                let op = if suffix == "leaf!" { "map" } else { "flat_map" };
+                                let chain = match args_s.get(2) {
+                                    Some(cond) => {
+                                        let cond = strip_lambda_type_with_ref(cond);
+                                        format!(
+                                            "({}){}.filter({}).{}({})",
+                                            iter, iter_method, cond, op, lambda
+                                        )
+                                    }
+                                    None => {
+                                        format!("({}){}.{}({})", iter, iter_method, op, lambda)
+                                    }
+                                };
+                                if suffix == "outer!" {
+                                    return format!("{}.collect::<{}>()", chain, collect_ty);
+                                }
+                                return chain;
+                            }
+                            return format!("{}::new()", collect_ty);
+                        }
+                    }
                 }
 
                 // 检测 callee 是否为 FieldAccess 形式 Type.Variant → Type::Variant

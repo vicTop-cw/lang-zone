@@ -294,6 +294,8 @@ pub struct TraitDef {
     pub generics: Vec<GenericParam>,
     pub supertraits: Vec<IrType>,
     pub methods: Vec<FnSig>,
+    /// 关联类型声明（§五 `type Item`）→ Rust trait 关联类型
+    pub assoc_types: Vec<String>,
 }
 
 /// Impl 定义
@@ -303,6 +305,8 @@ pub struct ImplDef {
     pub for_type: IrType,
     pub generics: Vec<GenericParam>,
     pub methods: Vec<FnDef>,
+    /// 关联类型绑定（§五 `type Item = T`）→ `type Item = ...;`
+    pub assoc_type_bindings: Vec<(String, IrType)>,
 }
 
 /// Use 语句（仅记录依赖路径）

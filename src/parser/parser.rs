@@ -15,6 +15,8 @@ pub struct Parser {
     pub(super) pending_gt: usize, // 处理嵌套泛型 >> 分裂为两个 >
     /// 最近一次 parse_generic_params 解析到的内联约束 (type_param → bounds)
     pending_inline_bounds: Vec<(String, Vec<Type>)>,
+    /// 最近一次 parse_generic_params 解析到的默认类型 (type_param → default type)
+    pending_generic_defaults: Vec<(String, Type)>,
 }
 
 impl Parser {
@@ -24,6 +26,7 @@ impl Parser {
             pos: 0,
             pending_gt: 0,
             pending_inline_bounds: Vec::new(),
+            pending_generic_defaults: Vec::new(),
         }
     }
 
@@ -780,6 +783,7 @@ impl Parser {
                     return Ok(Function {
                         name,
                         generics,
+                        generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
                         params,
                         return_type,
                         raises,
@@ -833,6 +837,7 @@ impl Parser {
         Ok(Function {
             name,
             generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
             params,
             return_type,
             raises,
@@ -877,31 +882,14 @@ impl Parser {
             if !bounds.is_empty() {
                 inline_bounds.push((name.clone(), bounds));
             }
-            params.push(name);
-            // 默认类型: T = int
+            // 默认类型: T = int（§四）→ 解析并存入 pending_generic_defaults
+            // 注意：需在 push(name) 之前 clone，避免 name 被移动后借用
             if self.check(&Token::Eq) {
                 self.advance(); // =
-                                // 跳过默认类型表达式，直到 , 或 >
-                let mut depth = 0;
-                loop {
-                    if self.check(&Token::Comma)
-                        || self.check(&Token::Gt)
-                        || self.check(&Token::Shr)
-                    {
-                        break;
-                    }
-                    if self.check(&Token::Lt) {
-                        depth += 1;
-                    }
-                    if self.check(&Token::Gt) || self.check(&Token::Shr) {
-                        if depth == 0 {
-                            break;
-                        }
-                        depth -= 1;
-                    }
-                    self.advance();
-                }
+                let default_ty = self.parse_type()?;
+                self.pending_generic_defaults.push((name.clone(), default_ty));
             }
+            params.push(name);
             if self.check(&Token::Comma) {
                 self.advance();
                 continue;
@@ -1455,6 +1443,7 @@ impl Parser {
             // 构建路径类型: Self.Item → Named("Self.Item")
             let path = match &base {
                 Type::Named(n) => format!("{}.{}", n, next),
+                Type::Self_ => format!("Self.{}", next),
                 _ => format!("{}.{}", "<>", next), // 回退
             };
             base = Type::Named(path);
@@ -1563,6 +1552,7 @@ impl Parser {
             return Ok(StructDef {
                 name,
                 generics,
+                generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
                 fields,
                 methods,
                 magic_methods: Vec::new(),
@@ -1664,6 +1654,7 @@ impl Parser {
                     magic_methods.push(Function {
                         name: magic_name.clone(),
                         generics: Vec::new(),
+                        generic_defaults: Vec::new(),
                         params,
                         return_type,
                         raises: None,
@@ -1773,6 +1764,7 @@ impl Parser {
         Ok(StructDef {
             name,
             generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
             fields,
             methods,
             magic_methods,
@@ -1814,6 +1806,7 @@ impl Parser {
 
         let mut methods = Vec::new();
         let mut fields = Vec::new();
+        let mut assoc_types = Vec::new();
 
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
@@ -1827,6 +1820,20 @@ impl Parser {
                     // 先 peek 检查是否有 @ 装饰器或 magic 关键字
                     let f = self.parse_function(false)?;
                     methods.push(f);
+                }
+                Token::Ident(ref kw) if kw == "type" => {
+                    // trait 关联类型声明（§五）: `type Item`
+                    self.advance(); // type
+                    let assoc_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "Expected assoc type name in trait, got {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    assoc_types.push(assoc_name);
                 }
                 Token::Ident(_) => {
                     let f_name = self.advance().to_string();
@@ -1853,8 +1860,10 @@ impl Parser {
         Ok(TraitDef {
             name,
             generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
             methods,
             fields,
+            assoc_types,
         })
     }
 
@@ -1904,22 +1913,28 @@ impl Parser {
         self.expect(Token::Indent)?;
 
         let mut methods = Vec::new();
+        let mut assoc_type_bindings = Vec::new();
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
             self.skip_newlines();
             if self.check(&Token::Dedent) || self.check(&Token::Eof) {
                 break;
             }
-            // 跳过 impl 块中的 type 别名: type Item = int
+            // impl 块中的关联类型绑定: type Item = int（§五）
             if let Token::Ident(ref s) = self.peek() {
                 if s == "type" {
                     self.advance(); // consume 'type'
-                                    // 消费 'type Name = Type' 直到行末或 Dedent
-                    while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
-                        let t = self.advance();
-                        if matches!(t, Token::Newline) {
-                            break;
+                    let bind_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "Expected assoc type name in impl, got {:?}",
+                                t
+                            ))
                         }
-                    }
+                    };
+                    self.expect(Token::Eq)?;
+                    let bind_ty = self.parse_type()?;
+                    assoc_type_bindings.push((bind_name, bind_ty));
                     continue;
                 }
             }
@@ -1948,8 +1963,10 @@ impl Parser {
             trait_name,
             type_name,
             generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
             where_clause,
             methods,
+            assoc_type_bindings,
         })
     }
 

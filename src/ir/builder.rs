@@ -1076,6 +1076,77 @@ fn collect_pattern_vars(pat: &Pattern, out: &mut Vec<String>) {
 // 核心转换函数
 // ══════════════════════════════════════════════════════════════
 
+/// 构建多 for 推导链（2+ 子句）：
+/// `[out for x in a for y in b]` → `comp_outer!(|x| comp_leaf!(|y| out, b), a)`
+/// codegen 端展开为 `(a).into_iter().flat_map(|x| (b).into_iter().map(|y| out)).collect()`。
+/// `kind` 为 `comp` / `dict_comp` / `set_comp`，决定最外层 callee 前缀。
+fn build_multi_comp(
+    ctx: &TypeCtx,
+    clauses: &[(String, Box<AstExpr>, Option<Box<AstExpr>>)],
+    body: Expr,
+    kind: &str,
+) -> ExprKind {
+    let n = clauses.len();
+    debug_assert!(n >= 2, "multi-comp needs >= 2 clauses");
+    let mut inner = body.kind;
+    // 从最内层子句开始向外包裹：最内层用 leaf（map），中间层用 mid（flat_map），最外层用 outer（flat_map + collect）
+    for i in (0..n).rev() {
+        let (var, iter, cond) = &clauses[i];
+        let iter_expr = convert_expr(iter, ctx);
+        let level = if i == 0 { "outer" } else if i == n - 1 { "leaf" } else { "mid" };
+        let callee = format!("{}_{}!", kind, level);
+        let mut args = vec![
+            Expr::new(
+                ExprKind::Lambda {
+                    params: vec![Param {
+                        name: var.clone(),
+                        ty: IrType::Any,
+                        is_mut: false,
+                        is_ref: false,
+                        is_owned: false,
+                        default: None,
+                        variadic: false,
+                    }],
+                    body: Box::new(Expr::new(inner, IrType::Any, Span::unknown())),
+                    is_move: true,
+                },
+                IrType::Any,
+                Span::unknown(),
+            ),
+            iter_expr,
+        ];
+        if let Some(c) = cond {
+            args.push(Expr::new(
+                ExprKind::Lambda {
+                    params: vec![Param {
+                        name: var.clone(),
+                        ty: IrType::Any,
+                        is_mut: false,
+                        is_ref: false,
+                        is_owned: false,
+                        default: None,
+                        variadic: false,
+                    }],
+                    body: Box::new(convert_expr(c, ctx)),
+                    is_move: true,
+                },
+                IrType::Any,
+                Span::unknown(),
+            ));
+        }
+        inner = ExprKind::Call {
+            type_args: vec![],
+            callee: Box::new(Expr::new(
+                ExprKind::Var(callee),
+                IrType::Any,
+                Span::unknown(),
+            )),
+            args,
+        };
+    }
+    inner
+}
+
 fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
     let ty = infer_expr_type(ast_expr, ctx);
     let span = Span::unknown();
@@ -1764,9 +1835,16 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             var,
             iter,
             cond,
-            ..
+            extra_clauses,
         } => {
             // [out for x in iter if cond] → 展开为生成模式
+            if !extra_clauses.is_empty() {
+                // 多 for：构建嵌套 flat_map 链
+                let mut clauses = vec![(var.clone(), iter.clone(), cond.clone())];
+                clauses.extend(extra_clauses.iter().map(|(v, i, c)| (v.clone(), i.clone(), c.clone())));
+                let out_expr = convert_expr(output, ctx);
+                return Expr::new(build_multi_comp(ctx, &clauses, out_expr, "comp"), ty, span);
+            }
             let iter_expr = convert_expr(iter, ctx);
             let out_expr = convert_expr(output, ctx);
             let mut args = vec![
@@ -1826,11 +1904,23 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             var,
             iter,
             cond,
+            extra_clauses,
         } => {
             // {k: v for x in iter} → 展开为生成模式
-            let iter_expr = convert_expr(iter, ctx);
             let key_expr = convert_expr(key, ctx);
             let val_expr = convert_expr(value, ctx);
+            let body = Expr::new(
+                ExprKind::TupleLit(vec![key_expr, val_expr]),
+                IrType::Any,
+                Span::unknown(),
+            );
+            if !extra_clauses.is_empty() {
+                // 多 for：构建嵌套 flat_map 链
+                let mut clauses = vec![(var.clone(), iter.clone(), cond.clone())];
+                clauses.extend(extra_clauses.iter().map(|(v, i, c)| (v.clone(), i.clone(), c.clone())));
+                return Expr::new(build_multi_comp(ctx, &clauses, body, "dict_comp"), ty, span);
+            }
+            let iter_expr = convert_expr(iter, ctx);
             let mut args = vec![
                 Expr::new(
                     ExprKind::Lambda {
@@ -1843,11 +1933,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             default: None,
                             variadic: false,
                         }],
-                        body: Box::new(Expr::new(
-                            ExprKind::TupleLit(vec![key_expr, val_expr]),
-                            IrType::Any,
-                            Span::unknown(),
-                        )),
+                        body: Box::new(body),
                         is_move: true,
                     },
                     IrType::Any,
@@ -1890,10 +1976,17 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             var,
             iter,
             cond,
+            extra_clauses,
         } => {
             // {x for x in iter} → 展开为生成模式
-            let iter_expr = convert_expr(iter, ctx);
             let elem_expr = convert_expr(elem, ctx);
+            if !extra_clauses.is_empty() {
+                // 多 for：构建嵌套 flat_map 链
+                let mut clauses = vec![(var.clone(), iter.clone(), cond.clone())];
+                clauses.extend(extra_clauses.iter().map(|(v, i, c)| (v.clone(), i.clone(), c.clone())));
+                return Expr::new(build_multi_comp(ctx, &clauses, elem_expr, "set_comp"), ty, span);
+            }
+            let iter_expr = convert_expr(iter, ctx);
             let mut args = vec![
                 Expr::new(
                     ExprKind::Lambda {
@@ -3269,6 +3362,87 @@ fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
     }
 }
 
+/// 递归扫描生成器函数体，返回第一个 `yield expr` 中 expr 的推断类型。
+/// 同时预登记函数体（含嵌套块）内的 let 绑定，使 `yield i` 能推断出 i 的类型。
+fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Option<IrType> {
+    for stmt in stmts {
+        match stmt {
+            AstStmt::Let { name, ty, value, .. } => {
+                // 预登记 let 绑定：优先类型注解，否则从初始值推断
+                let bind_ty = ty
+                    .as_ref()
+                    .map(|t| from_ast_type_with_generics(t, &ctx.current_generics))
+                    .unwrap_or_else(|| infer_expr_type(value, ctx));
+                ctx.add_var(name, bind_ty);
+            }
+            AstStmt::Yield(Some(e)) => {
+                return Some(infer_expr_type(e, ctx));
+            }
+            AstStmt::While {
+                body, else_body, ..
+            } => {
+                if let Some(t) = scan_iterator_yield_ty(body, ctx) {
+                    return Some(t);
+                }
+                if let Some(eb) = else_body {
+                    if let Some(t) = scan_iterator_yield_ty(eb, ctx) {
+                        return Some(t);
+                    }
+                }
+            }
+            AstStmt::Loop(body)
+            | AstStmt::Block { body, .. }
+            | AstStmt::CheckerBlock { body, .. }
+            | AstStmt::Defer(body)
+            | AstStmt::Test { body, .. }
+            | AstStmt::Comptime { body } => {
+                if let Some(t) = scan_iterator_yield_ty(body, ctx) {
+                    return Some(t);
+                }
+            }
+            AstStmt::WhileLet {
+                body, else_body, ..
+            }
+            | AstStmt::For {
+                body, else_body, ..
+            } => {
+                if let Some(t) = scan_iterator_yield_ty(body, ctx) {
+                    return Some(t);
+                }
+                if let Some(eb) = else_body {
+                    if let Some(t) = scan_iterator_yield_ty(eb, ctx) {
+                        return Some(t);
+                    }
+                }
+            }
+            AstStmt::With { body, .. } => {
+                if let Some(t) = scan_iterator_yield_ty(body, ctx) {
+                    return Some(t);
+                }
+            }
+            AstStmt::Suite {
+                setup,
+                teardown,
+                tests,
+                ..
+            } => {
+                for sub in setup
+                    .iter()
+                    .flatten()
+                    .chain(teardown.iter().flatten())
+                    .chain(tests.iter())
+                {
+                    if let Some(t) = scan_iterator_yield_ty(std::slice::from_ref(sub), ctx) {
+                        return Some(t);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let is_math = func.decorators.iter().any(|d| d.name == "math");
     let generics: Vec<String> = if is_math {
@@ -3436,16 +3610,22 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
     }
 
-    // 返回类型：优先 AST 注解，否则从函数体最后语句推断
+    // 返回类型：优先 AST 注解，否则从函数体最后语句推断；
+    // iterator 无标注时从第一个 yield 表达式推断元素类型（codegen 会包装 Vec<T>）
     let ret_ty = func
         .return_type
         .as_ref()
         .map(|t| from_ast_type_with_generics(t, &generics))
         .unwrap_or_else(|| {
-            func.body
-                .last()
-                .map(|stmt| infer_stmt_type(stmt, &fn_ctx))
-                .unwrap_or(IrType::Unit)
+            if func.is_iterator {
+                // 递归扫描（yield 可嵌套在 while/for/if 块内），并预登记 let 绑定类型
+                scan_iterator_yield_ty(&func.body, &mut fn_ctx).unwrap_or(IrType::Unit)
+            } else {
+                func.body
+                    .last()
+                    .map(|stmt| infer_stmt_type(stmt, &fn_ctx))
+                    .unwrap_or(IrType::Unit)
+            }
         });
     // 注意：Iterator 函数的 Vec<T> 包装由 codegen 负责（基于 has_yield 检测），
     // 此处不包装，避免 Vec<Vec<T>> 双重包装。
@@ -3519,6 +3699,12 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                     .or_default()
                     .extend(ir_bounds);
             }
+            // 泛型默认类型（§四 `T = int`）
+            let defaults_map: HashMap<String, IrType> = func
+                .generic_defaults
+                .iter()
+                .map(|(n, t)| (n.clone(), from_ast_type(t)))
+                .collect();
             func.generics
                 .iter()
                 .map(|g| {
@@ -3526,7 +3712,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                     GenericParam {
                         name: g.clone(),
                         bounds,
-                        default: None,
+                        default: defaults_map.get(g).cloned(),
                     }
                 })
                 .collect()
@@ -3742,7 +3928,11 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 .map(|g| GenericParam {
                     name: g.clone(),
                     bounds: vec![],
-                    default: None,
+                    default: s
+                        .generic_defaults
+                        .iter()
+                        .find(|(n, _)| n == g)
+                        .map(|(_, t)| from_ast_type(t)),
                 })
                 .collect(),
             variants,
@@ -3813,7 +4003,11 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 .map(|g| GenericParam {
                     name: g.clone(),
                     bounds: vec![],
-                    default: None,
+                    default: s
+                        .generic_defaults
+                        .iter()
+                        .find(|(n, _)| n == g)
+                        .map(|(_, t)| from_ast_type(t)),
                 })
                 .collect(),
             fields,
@@ -3844,7 +4038,18 @@ fn convert_trait(t: &ast::TraitDef) -> Item {
                     default: None,
                 })
                 .collect(),
-            params: m.params.iter().map(|p| from_ast_type(&p.ty)).collect(),
+            params: m
+                .params
+                .iter()
+                .map(|p| {
+                    // 保留 self 可变性：mut self → MutRef(Self_)，使 trait 声明与 impl 签名一致
+                    if p.name == "self" && p.is_mut {
+                        IrType::MutRef(Box::new(IrType::Self_))
+                    } else {
+                        from_ast_type(&p.ty)
+                    }
+                })
+                .collect(),
             ret: m
                 .return_type
                 .as_ref()
@@ -3861,11 +4066,16 @@ fn convert_trait(t: &ast::TraitDef) -> Item {
             .map(|g| GenericParam {
                 name: g.clone(),
                 bounds: vec![],
-                default: None,
+                default: t
+                    .generic_defaults
+                    .iter()
+                    .find(|(n, _)| n == g)
+                    .map(|(_, ty)| from_ast_type(ty)),
             })
             .collect(),
         supertraits: vec![],
         methods,
+        assoc_types: t.assoc_types.clone(),
     })
 }
 
@@ -3909,10 +4119,19 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
             .map(|g| GenericParam {
                 name: g.clone(),
                 bounds: vec![],
-                default: None,
+                default: imp
+                    .generic_defaults
+                    .iter()
+                    .find(|(n, _)| n == g)
+                    .map(|(_, ty)| from_ast_type(ty)),
             })
             .collect(),
         methods,
+        assoc_type_bindings: imp
+            .assoc_type_bindings
+            .iter()
+            .map(|(n, t)| (n.clone(), from_ast_type(t)))
+            .collect(),
     })
 }
 
@@ -4068,6 +4287,7 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
             for_type: IrType::named(&target),
             generics: vec![],
             methods: vec![method],
+            assoc_type_bindings: vec![],
         }));
     }
 

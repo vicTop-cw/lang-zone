@@ -265,7 +265,9 @@ impl ParserExprExt for Parser {
                 self.expect(Token::RParen)?;
                 args
             } else {
-                vec![left.clone()]  // 无括号时，将 receiver 作为参数传入
+                // 无括号时不留占位参数：IR builder 会把 receiver 作为首参注入，
+                // 若在此也放 receiver 会导致实参重复（如 5 |> double → double(5,5)）
+                Vec::new()
             };
             left = Expr::Pipe { receiver: Box::new(left), func: func_name, args };
         }
@@ -568,13 +570,33 @@ impl ParserExprExt for Parser {
                     } else {
                         let _ = self.expect(Token::Gt)?;
                     }
-                    // 解析参数
+                    // 解析参数（含关键字实参 name: value / name~，与普通调用一致）
                     let _ = self.expect(Token::LParen)?;
                     let mut args = Vec::new();
                     while !self.check(&Token::RParen) {
-                        args.push(self.parse_expr()?);
-                        if self.check(&Token::Comma) { let _ = self.advance(); }
+                        self.skip_newlines();
+                        if self.check(&Token::Indent) { self.advance(); }
+                        if self.check(&Token::Dedent) { break; }
+                        let arg = if let Token::Ident(_) = self.peek() {
+                            if self.peek_n(1) == &Token::Tilde {
+                                let name = self.advance().to_string();
+                                self.advance(); // ~
+                                Expr::KwArg { name: name.clone(), value: Box::new(Expr::Ident(name)) }
+                            } else if self.peek_n(1) == &Token::Colon {
+                                let name = self.advance().to_string();
+                                self.advance(); // :
+                                let v = self.parse_expr()?;
+                                Expr::KwArg { name, value: Box::new(v) }
+                            } else {
+                                self.parse_expr()?
+                            }
+                        } else {
+                            self.parse_expr()?
+                        };
+                        args.push(arg);
+                        if self.check(&Token::Comma) { self.advance(); }
                     }
+                    if self.check(&Token::Dedent) { self.advance(); }
                     let _ = self.expect(Token::RParen)?;
                     let type_arg_names: Vec<String> = type_args.iter().map(|t| t.to_string()).collect();
                     expr = Expr::Call { type_args: type_arg_names, func: Box::new(expr), args };
@@ -807,27 +829,34 @@ impl ParserExprExt for Parser {
                     let val = self.parse_expr()?;
                     if self.check(&Token::For) {
                         // Dict comprehension: {k: v for var in iter if cond}
-                        self.advance(); // for
-                        let var = match self.advance() {
-                            Token::Ident(n) => n,
-                            t => return Err(format!("Expected var in dict comprehension, got {:?}", t)),
-                        };
-                        self.expect(Token::In)?;
-                    let iter = self.parse_comprehension_iter()?;
-                    let cond = if self.check(&Token::If) {
-                        self.advance();
-                        Some(Box::new(self.parse_expr()?))
-                    } else {
-                        None
-                    };
-                    self.expect(Token::RBrace)?;
-                    return Ok(Expr::DictComprehension {
-                            key: Box::new(first),
-                            value: Box::new(val),
-                            var,
-                            iter: Box::new(iter),
-                            cond,
-                        });
+                        // 支持多个 for 子句: {k: v for x in a for y in b if cond}
+                        let mut clauses = Vec::new();
+                        loop {
+                            self.advance(); // for
+                            let var = match self.advance() {
+                                Token::Ident(n) => n,
+                                t => return Err(format!("Expected var in dict comprehension, got {:?}", t)),
+                            };
+                            self.expect(Token::In)?;
+                            let iter = self.parse_comprehension_iter()?;
+                            let cond = if self.check(&Token::If) {
+                                self.advance();
+                                Some(Box::new(self.parse_expr()?))
+                            } else {
+                                None
+                            };
+                            clauses.push((var, Box::new(iter), cond));
+                            if !self.check(&Token::For) { break; }
+                        }
+                        self.expect(Token::RBrace)?;
+                        return Ok(Expr::DictComprehension {
+                                key: Box::new(first),
+                                value: Box::new(val),
+                                var: clauses[0].0.clone(),
+                                iter: clauses[0].1.clone(),
+                                cond: clauses[0].2.clone(),
+                                extra_clauses: clauses[1..].to_vec(),
+                            });
                     }
                     // 常规字典字面量 {k: v, k2: v2}
                     let mut entries = vec![(first, val)];
@@ -843,26 +872,33 @@ impl ParserExprExt for Parser {
                     Ok(Expr::DictLit(entries))
                 } else if self.check(&Token::For) {
                     // Set comprehension: {x for var in iter if cond}
-                    self.advance(); // for
-                    let var = match self.advance() {
-                        Token::Ident(n) => n,
-                        t => return Err(format!("Expected var in set comprehension, got {:?}", t)),
-                    };
-                    self.expect(Token::In)?;
-                let iter = self.parse_comprehension_iter()?;
-                let cond = if self.check(&Token::If) {
-                    self.advance();
-                    Some(Box::new(self.parse_expr()?))
-                } else {
-                    None
-                };
-                self.expect(Token::RBrace)?;
-                Ok(Expr::SetComprehension {
-                        elem: Box::new(first),
-                        var,
-                        iter: Box::new(iter),
-                        cond,
-                    })
+                    // 支持多个 for 子句: {x for a in xs for b in ys if cond}
+                    let mut clauses = Vec::new();
+                    loop {
+                        self.advance(); // for
+                        let var = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected var in set comprehension, got {:?}", t)),
+                        };
+                        self.expect(Token::In)?;
+                        let iter = self.parse_comprehension_iter()?;
+                        let cond = if self.check(&Token::If) {
+                            self.advance();
+                            Some(Box::new(self.parse_expr()?))
+                        } else {
+                            None
+                        };
+                        clauses.push((var, Box::new(iter), cond));
+                        if !self.check(&Token::For) { break; }
+                    }
+                    self.expect(Token::RBrace)?;
+                    Ok(Expr::SetComprehension {
+                            elem: Box::new(first),
+                            var: clauses[0].0.clone(),
+                            iter: clauses[0].1.clone(),
+                            cond: clauses[0].2.clone(),
+                            extra_clauses: clauses[1..].to_vec(),
+                        })
                 } else {
                     // 集合字面量 {a, b, c}
                     let mut items = vec![first];

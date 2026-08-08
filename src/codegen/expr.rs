@@ -486,7 +486,7 @@ impl CodeGenExprExt for CodeGen {
                 }
             }
 
-            Expr::DictComprehension { key, value, var, iter, cond } => {
+            Expr::DictComprehension { key, value, var, iter, cond, .. } => {
                 let iter_s = self.gen_expr(iter);
                 let k_s = self.gen_expr(key);
                 let v_s = self.gen_expr(value);
@@ -502,7 +502,7 @@ impl CodeGenExprExt for CodeGen {
                 }
             }
 
-            Expr::SetComprehension { elem, var, iter, cond } => {
+            Expr::SetComprehension { elem, var, iter, cond, .. } => {
                 let iter_s = self.gen_expr(iter);
                 let e_s = self.gen_expr(elem);
                 match cond {

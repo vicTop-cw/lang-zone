@@ -88,6 +88,8 @@ pub enum VariadicMode {
 pub struct Function {
     pub name: String,
     pub generics: Vec<String>,
+    /// 泛型默认类型（§四 `T = int`）— (type_param → default type)
+    pub generic_defaults: Vec<(String, Type)>,
     pub params: Vec<Param>,
     pub return_type: Option<Type>,
     pub raises: Option<Type>,
@@ -132,6 +134,8 @@ pub struct WhereBound {
 pub struct StructDef {
     pub name: String,
     pub generics: Vec<String>,
+    /// 泛型默认类型（§四 `T = int`）
+    pub generic_defaults: Vec<(String, Type)>,
     pub fields: Vec<Field>,
     pub methods: Vec<Function>,
     pub magic_methods: Vec<Function>,
@@ -151,8 +155,12 @@ pub struct Field {
 pub struct TraitDef {
     pub name: String,
     pub generics: Vec<String>,
+    /// 泛型默认类型（§四 `T = int`）
+    pub generic_defaults: Vec<(String, Type)>,
     pub methods: Vec<Function>,
     pub fields: Vec<Field>,
+    /// trait 内声明的关联类型（§五 `type Item`），impl 时需提供具体类型
+    pub assoc_types: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,8 +168,12 @@ pub struct ImplDef {
     pub trait_name: Option<String>,
     pub type_name: String,
     pub generics: Vec<String>,
+    /// 泛型默认类型（§四 `T = int`）
+    pub generic_defaults: Vec<(String, Type)>,
     pub where_clause: Vec<WhereBound>,
     pub methods: Vec<Function>,
+    /// impl 中的关联类型绑定（§五 `type Item = T`）
+    pub assoc_type_bindings: Vec<(String, Type)>,
 }
 
 /// Duck 类型约束定义 — 编译期结构匹配，零运行时开销
