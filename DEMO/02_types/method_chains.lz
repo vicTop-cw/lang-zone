@@ -22,11 +22,8 @@ def main() =
     // flat_map（同 and_then 语义，方法链场景）
     let f1 = opt.map(|x| x * 10).and_then(|x| Some(x + 1))  // Some(51)
 
-    // 链式组合
-    let chain = opt
-        .map(|x| x * 2)          // Some(10)
-        .and_then(|x| Some(x - 1) if x > 5 else None)  // Some(9)
-        .unwrap_or(0)            // 9
+    // 链式组合（跨行链式暂由单行表达，避免缩进解析边界问题）
+    let chain = opt.map(|x| x * 2).and_then(|x| Some(x - 1) if x > 5 else None).unwrap_or(0)  // 9
 
     print(m1)
     print(m2)

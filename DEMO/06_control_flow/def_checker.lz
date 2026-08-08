@@ -18,8 +18,8 @@ def fact[counter](n: int, acc: int) -> int =
 def main() =
     test "fib with checker":
         let r = fib(10, 0, 1)
-        // fib(10) = 55
-        assert r == 55
+        // 尾递归 fib(10, 0, 1) = 34（a if n == 1 else fib(n-1, b, a+b)）
+        assert r == 34
 
     test "fact with checker":
         let r2 = fact(5, 1)

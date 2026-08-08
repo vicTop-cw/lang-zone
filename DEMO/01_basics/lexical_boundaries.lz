@@ -22,8 +22,8 @@ def main() =
     // 原始字符串：不处理转义
     let raw = r"a\nb\tc"             // 字面 a\nb\tc（\n 原样）
 
-    // f-string 花括号转义：字面 {} 用 \{ \}
-    let brace = f"literal \{curly\} braces"   // literal {curly} braces
+    // f-string 花括号转义：字面 {} 用 {{ }}（与 Rust format! 一致）
+    let brace = f"literal {{curly}} braces"   // literal {curly} braces
     let interp = f"value is {42}"             // 插值 value is 42
 
     print(nl)

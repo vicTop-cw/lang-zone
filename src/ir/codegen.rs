@@ -1261,7 +1261,7 @@ impl CodeGen {
             self.emit_line(&format!("let mut __ps = __Params {{ args: vec![{}], kwargs: std::collections::HashMap::new() }};", boxed.join(", ")));
             self.emit_line(&format!("{}(&mut __ps);", checker_name));
             for (i, (pname, pty)) in user_params.iter().enumerate() {
-                let line = format!("let {0}: {1} = (*{{ let __a: &dyn std::any::Any = &__ps.args[{2}usize]; __a.downcast_ref::<{1}>().expect(\"checker arg cast failed\") }});", pname, pty, i);
+                let line = format!("let {0}: {1} = (*__ps.args[{2}usize].downcast_ref::<{1}>().expect(\"checker arg cast failed\"));", pname, pty, i);
                 self.emit_line(&line);
             }
         }
@@ -4217,6 +4217,28 @@ impl CodeGen {
                 }
                 if *target == IrType::Str {
                     return format!("format!(\"{{}}\", {})", self.gen_expr(expr));
+                }
+                // String/str → 数值：fallible 解析（str→int 按 09-错误处理.md §2.4）
+                // Rust 的 `as` 不允许 String→数值，必须用 .parse()
+                let src_is_string = matches!(expr.ty, IrType::Str)
+                    || matches!(&expr.ty, IrType::Named { path, .. } if path == "String");
+                let tgt_is_numeric = matches!(target, IrType::Int | IrType::F64);
+                if src_is_string && tgt_is_numeric {
+                    let tgt = self.rust_type(target);
+                    return format!("({}).parse::<{}>().unwrap()", self.gen_expr(expr), tgt);
+                }
+                // __Params.args[i]（Box<dyn Any>）→ 数值：downcast 而非 `as` 强转
+                // checker 块体内 `ps.args[i] as int` 的取值路径
+                if tgt_is_numeric
+                    && matches!(&expr.kind, ExprKind::IndexGet { base, .. }
+                        if matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "args"))
+                {
+                    let tgt = self.rust_type(target);
+                    let idx_s = self.gen_expr(expr);
+                    return format!(
+                        "(*{}.downcast_ref::<{}>().expect(\"checker arg cast failed\"))",
+                        idx_s, tgt
+                    );
                 }
                 // int → f64: implicit widening
                 // Non-primitive casts: as String → .to_string()

@@ -3069,20 +3069,27 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             stmts: body.iter().map(|s| convert_stmt(s, ctx)).collect(),
         },
 
-        AstStmt::Assert { expr, expected: _ } => Stmt::ExprStmt {
-            expr: Expr::new(
-                ExprKind::Call {
-                    type_args: vec![],
-                    callee: Box::new(Expr::new(
-                        ExprKind::Var("assert!".into()),
-                        IrType::Any,
-                        Span::unknown(),
-                    )),
-                    args: vec![convert_expr(expr, ctx)],
-                },
-                IrType::Unit,
-                Span::unknown(),
-            ),
+        AstStmt::Assert { expr, expected } => {
+            // assert expr == expected → assert!(expr == expected)
+            let mut args = vec![convert_expr(expr, ctx)];
+            if let Some(exp) = expected {
+                args.push(convert_expr(exp, ctx));
+            }
+            Stmt::ExprStmt {
+                expr: Expr::new(
+                    ExprKind::Call {
+                        type_args: vec![],
+                        callee: Box::new(Expr::new(
+                            ExprKind::Var("assert_eq!".into()),
+                            IrType::Any,
+                            Span::unknown(),
+                        )),
+                        args,
+                    },
+                    IrType::Unit,
+                    Span::unknown(),
+                ),
+            }
         },
 
         AstStmt::Check { expr, message: _ } => {
@@ -4197,6 +4204,27 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             })
             .collect();
 
+        // 普通 magic 方法体（__str__/__add__ 等，除 __new__/__init__/__implicit_from__ 特殊处理外）
+        // 也转成 FnDef 并入 methods，否则 `magic __str__` 等方法体在 IR 中丢失
+        let special_magic = ["__new__", "__init__", "__implicit_from__"];
+        let magic_methods: Vec<FnDef> = s
+            .magic_methods
+            .iter()
+            .filter(|m| !special_magic.contains(&m.name.as_str()))
+            .map(|m| {
+                let mut method_ctx = TypeCtx::new();
+                method_ctx.pending_items = ctx.pending_items.clone();
+                method_ctx.struct_names = ctx.struct_names.clone();
+                method_ctx.struct_fields = ctx.struct_fields.clone();
+                method_ctx.struct_field_order = ctx.struct_field_order.clone();
+                method_ctx.struct_methods = ctx.struct_methods.clone();
+                method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+                convert_fn_def(m, &method_ctx)
+            })
+            .collect();
+        let mut methods = methods;
+        methods.extend(magic_methods);
+
         // 提取 __new__ 的签名信息
         let new_method = s.magic_methods.iter().find(|m| m.name == "__new__");
         let has_new = new_method.is_some();
@@ -4615,6 +4643,37 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
             ty: blk_ty,
             value,
         }));
+    }
+
+    // 9.7. 转换顶层 block / checker 块语句（top_stmts）
+    // checker 块（block NAME[ps: __Params]）→ Item::CheckerBlock（惰性登记，由 codegen 发射 fn NAME）
+    // 其他顶层语句（如顶层赋值）→ 转为 Const/表达式，保证不丢失
+    for s in &ast_module.top_stmts {
+        match s {
+            AstStmt::CheckerBlock {
+                label,
+                ps_name,
+                default_checker,
+                body,
+            } => {
+                ctx.pending_items.borrow_mut().push(Item::CheckerBlock {
+                    name: label.clone(),
+                    ps_name: ps_name.clone(),
+                    default_checker: default_checker.clone(),
+                    body: convert_block(body, &ctx),
+                });
+            }
+            AstStmt::Expr(AstExpr::Assign { target, value, .. }) => {
+                if let AstExpr::Ident(name) = target.as_ref() {
+                    ir_mod.items.push(Item::Const(ConstDef {
+                        name: name.clone(),
+                        ty: infer_expr_type(value, &ctx),
+                        value: convert_expr(value, &ctx),
+                    }));
+                }
+            }
+            _ => {}
+        }
     }
 
     // 10. 转换 tests

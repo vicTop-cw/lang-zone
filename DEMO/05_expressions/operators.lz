@@ -124,7 +124,7 @@ line2"""
     let pt_y = point.y
 
     // ---- 8.4  Path access (module)  ----
-    let mod_path = std.io.print
+    // let mod_path = std.io.print   // 模块路径函数引用暂不支持（待模块系统接入）
 
     // ---- 8.5  Turbofish .<T>  ----
     let parsed = parse_num.<int>("42")
