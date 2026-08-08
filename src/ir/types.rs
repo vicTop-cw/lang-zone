@@ -181,7 +181,15 @@ pub fn from_ast_type(ast_ty: &crate::types::Type) -> IrType {
         AstType::Duck { fields } => IrType::Duck {
             fields: fields.iter().map(|(n, t)| (n.clone(), from_ast_type(t))).collect(),
         },
-        AstType::Named(name) => IrType::named(name),
+        AstType::Named(name) => {
+            // 宏系统（08-宏与编译期.md）的 Tokens 类型：IR 后端不展开宏，
+            // 统一映射为 Str（宏体 quote 拼接生成 Rust 字符串）
+            if name == "Tokens" {
+                IrType::Str
+            } else {
+                IrType::named(name)
+            }
+        }
         AstType::Generic { base, args } => {
             let base_name = match base.as_ref() {
                 AstType::Named(n) => n.clone(),

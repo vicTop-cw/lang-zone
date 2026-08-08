@@ -35,7 +35,7 @@ pub enum Token {
     Where, Self_, Duck,
 
     // ── 宏/编译期 ──
-    Macro, Comptime,
+    Macro, Template, Comptime,
 
     // ── 逻辑关键字 ──
     And, Or, Not, Is,

@@ -728,7 +728,15 @@ impl CodeGen {
                     .type_map
                     .get(path.as_str())
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| path.clone());
+                    .unwrap_or_else(|| {
+                        // 宏系统（08-宏与编译期.md）的 Tokens 类型：IR 后端不展开宏，
+                        // 降级为 String（宏体 quote 拼接生成 Rust 字符串）
+                        if path == "Tokens" {
+                            "String".to_string()
+                        } else {
+                            path.clone()
+                        }
+                    });
                 if args.is_empty() {
                     // 常见容器类型需要默认泛型参数，否则 Rust 无法推断
                     // 使用 i64（LZ 默认数值类型）作为默认元素类型，避免 Vec::new() 无法推断
@@ -1347,11 +1355,38 @@ impl CodeGen {
         self.emit_line(&format!("pub struct {}{} {{", s.name, generics));
         self.indent += 1;
         for field in &s.fields {
-            self.emit_line(&format!(
-                "pub {}: {},",
-                field.name,
-                self.rust_type(&field.ty)
-            ));
+            // 递归字段自动 Box：字段类型直接/间接引用 struct 自身时（如 next: Self?），
+            // 生成 Box<...> 避免 Rust 无限大小类型错误（E0072）。
+            // Self 字段在 struct 定义内解析为自身类型名（递归替换包裹类型）。
+            let self_ty = IrType::Named {
+                path: s.name.clone(),
+                args: s
+                    .generics
+                    .iter()
+                    .map(|g| IrType::Generic(g.name.clone()))
+                    .collect(),
+            };
+            let field_ty = replace_self(&field.ty, &self_ty);
+            let needs_box = field_needs_box(&field_ty, &s.name);
+            let ty_str = if needs_box {
+                // Option<Self> → Option<Box<Self>>；裸 Self → Box<Self>；Vec<Self> → Vec<Box<Self>>
+                if let IrType::Option(inner) = &field_ty {
+                    format!("Option<Box<{}>>", self.rust_type(inner))
+                } else if let IrType::Named { path, args } = &field_ty {
+                    if path == "Option" {
+                        format!("Option<Box<{}>>", self.rust_type(&field_ty))
+                    } else if path == "Vec" || path == "List" {
+                        format!("Vec<Box<{}>>", self.rust_type(&args[0]))
+                    } else {
+                        format!("Box<{}>", self.rust_type(&field_ty))
+                    }
+                } else {
+                    format!("Box<{}>", self.rust_type(&field_ty))
+                }
+            } else {
+                self.rust_type(&field_ty)
+            };
+            self.emit_line(&format!("pub {}: {},", field.name, ty_str));
         }
         self.indent -= 1;
         self.emit_line("}");
@@ -2281,9 +2316,13 @@ impl CodeGen {
                         all_bounds.push(tb);
                     }
                 }
-                // 未显式约束的泛型参数追加 Debug（LZ 类型均可 Debug）
+                // 未显式约束的泛型参数追加 Debug + Clone（LZ 值语义默认 clone，
+                // 递归类型遍历（root.clone() 等）需要 T: Clone）
                 if !all_bounds.iter().any(|b| b == "Debug") {
                     all_bounds.push("Debug".to_string());
+                }
+                if !all_bounds.iter().any(|b| b == "Clone") {
+                    all_bounds.push("Clone".to_string());
                 }
                 if !all_bounds.is_empty() {
                     s.push_str(&format!(": {}", all_bounds.join(" + ")));
@@ -2349,7 +2388,11 @@ impl CodeGen {
                 is_mut,
             } => {
                 // 关键字降级变量（Ok/Some/None/Err 用作变量名）：注册并重命名为 name_
-                if matches!(name.as_str(), "Ok" | "Some" | "None" | "Err") {
+                // line/column/file 与 Rust 内置宏（line!/column!/file!）冲突，同样降级
+                if matches!(
+                    name.as_str(),
+                    "Ok" | "Some" | "None" | "Err" | "line" | "column" | "file"
+                ) {
                     self.downgraded_vars.insert(name.clone());
                 }
                 // 模块级全局变量：不生成局部 let，改为 unsafe 赋值（全局已 static mut 声明）
@@ -2658,6 +2701,12 @@ impl CodeGen {
             } => {
                 let expr_s = self.gen_expr(expr);
                 let pat_s = self.gen_pattern(pattern);
+                // 模式提取会移动 expr 的值：Var 表达式 clone 一次避免循环内移动
+                let expr_s = if matches!(&expr.kind, ExprKind::Var(_)) {
+                    format!("{}.clone()", expr_s)
+                } else {
+                    expr_s
+                };
                 let cond_s = if let Some(g) = guard {
                     format!("let {} = {} && {}", pat_s, expr_s, self.gen_expr(g))
                 } else {
@@ -2817,11 +2866,35 @@ impl CodeGen {
                                 };
                                 self.emit_line(&format!("// catch {}: (specific-type catch not supported with catch_unwind)", pat_str));
                             } else {
-                                // Last arm is the catch-all
-                                if let Some(Pattern::Ident(var_name)) = pat {
+                                // Last arm is the catch-all（也支持 Enum 模式绑定：ParseError(line, msg)）
+                                let var_names: Vec<String> = match pat {
+                                    Some(Pattern::Ident(name)) => vec![name.clone()],
+                                    Some(Pattern::Enum { args, .. }) => args
+                                        .iter()
+                                        .filter_map(|a| {
+                                            if let Pattern::Ident(n) = a {
+                                                Some(n.clone())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect(),
+                                    _ => Vec::new(),
+                                };
+                                for var_name in &var_names {
+                                    // line/column/file 与 Rust 内置宏冲突 → 降级重命名
+                                    if matches!(var_name.as_str(), "line" | "column" | "file") {
+                                        self.downgraded_vars.insert(var_name.clone());
+                                    }
+                                    let safe =
+                                        if self.downgraded_vars.contains(var_name.as_str()) {
+                                            format!("{}_", var_name)
+                                        } else {
+                                            var_name.clone()
+                                        };
                                     self.emit_line(&format!(
                                         "let {} = format!(\"{{:?}}\", _panic);",
-                                        var_name
+                                        safe
                                     ));
                                     self.declared.insert(var_name.clone());
                                 }
@@ -2847,9 +2920,18 @@ impl CodeGen {
                                 _ => Vec::new(),
                             };
                             for var_name in &var_names {
+                                // line/column/file 与 Rust 内置宏冲突 → 降级重命名
+                                if matches!(var_name.as_str(), "line" | "column" | "file") {
+                                    self.downgraded_vars.insert(var_name.clone());
+                                }
+                                let safe = if self.downgraded_vars.contains(var_name.as_str()) {
+                                    format!("{}_", var_name)
+                                } else {
+                                    var_name.clone()
+                                };
                                 self.emit_line(&format!(
                                     "let {} = format!(\"{{:?}}\", _panic);",
-                                    var_name
+                                    safe
                                 ));
                                 self.declared.insert(var_name.clone());
                             }
@@ -3083,23 +3165,48 @@ impl CodeGen {
                 } else {
                     args.iter().map(|a| self.gen_expr(a)).collect()
                 };
-                // LZ 字符串为不可变值类型：若将 String 类型变量按值传给参数类型为
-                // String 的用户函数（会移动），且该变量被复用，则需 .clone()。
-                // 避免 E0382 use of moved value（如 parse_int(s)? 两次）。
+                // LZ 值语义：非 Copy 类型的变量按值传给用户函数会移动（E0382）；
+                // 若实参是变量且参数类型非 Copy（Str/Option/Named 等），自动 .clone()。
+                // 排除 ref/mut ref 参数（下面单独处理 &x / &mut x）。
                 if let Some(callee_name) = match &callee.kind {
                     ExprKind::Var(n) => Some(n.clone()),
                     _ => None,
                 } {
                     if let Some(callee_ptypes) = self.fn_param_types.get(&callee_name).cloned() {
+                        let ref_flags = self
+                            .fn_ref_params
+                            .get(&callee_name)
+                            .cloned()
+                            .unwrap_or_default();
                         for (i, a) in args.iter().enumerate() {
                             if i >= callee_ptypes.len() {
                                 break;
                             }
-                            let is_str_param = matches!(&callee_ptypes[i], IrType::Str);
-                            let is_str_var =
-                                matches!(&a.ty, IrType::Str) && matches!(&a.kind, ExprKind::Var(_));
-                            if is_str_param && is_str_var && i < args_s.len() {
-                                args_s[i] = format!("{}.clone()", args_s[i]);
+                            let is_ref_param = ref_flags
+                                .get(i)
+                                .map_or(false, |(r, _)| *r);
+                            if is_ref_param {
+                                continue;
+                            }
+                            let param_is_copy = matches!(
+                                &callee_ptypes[i],
+                                IrType::Int | IrType::F64 | IrType::Bool
+                            );
+                            let arg_is_var = matches!(&a.kind, ExprKind::Var(_));
+                            let arg_is_copy = matches!(
+                                &a.ty,
+                                IrType::Int | IrType::F64 | IrType::Bool
+                            );
+                            if !param_is_copy && arg_is_var && !arg_is_copy && i < args_s.len() {
+                                let s = &args_s[i];
+                                let is_none_lit = s.trim_end() == "None";
+                                if !s.starts_with('&')
+                                    && !s.ends_with(".clone()")
+                                    && !s.contains("::")
+                                    && !is_none_lit
+                                {
+                                    args_s[i] = format!("{}.clone()", s);
+                                }
                             }
                         }
                     }
@@ -3516,12 +3623,107 @@ impl CodeGen {
                         "{{ let mut _tmp = {0}.clone(); _tmp.reverse(); _tmp }}",
                         args_s[0]
                     )
+                // 宏系统（08-宏与编译期.md）：quote(...) 是宏体 Token 包装，
+                // IR 后端不展开宏，降级为参数拼接（单参直接返回，多参用 + 连接，
+                // 后续参数以 &... 借用匹配 Rust String + &str）
+                } else if callee_s == "quote" && !args_s.is_empty() {
+                    if args_s.len() == 1 {
+                        args_s[0].clone()
+                    } else {
+                        let mut parts = Vec::new();
+                        for (idx, a) in args_s.iter().enumerate() {
+                            if idx == 0 {
+                                parts.push(a.clone());
+                            } else {
+                                parts.push(format!("&{}[..]", a));
+                            }
+                        }
+                        parts.join(" + ")
+                    }
                 // --- End prelude mappings ---
                 } else if !args.is_empty() && is_kwarg_call(args) && self.is_known_type(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
                     let base_name = callee_s.split('<').next().unwrap_or(&callee_s).to_string();
-                    let provided: Vec<String> =
-                        args.iter().map(|a| gen_kwarg_field(a, self)).collect();
+                    // 递归字段集合：字段类型直接引用 struct 自身（如 next: Self?）→ 构造时自动 Box
+                    // （Vec<Rc<Self>> 等已间接，不 Box）
+                    let recursive_fields: std::collections::HashSet<String> = self
+                        .struct_fields_info
+                        .get(&base_name)
+                        .map(|info| {
+                            info.iter()
+                                .filter(|(_, fty)| field_needs_box(fty, &base_name))
+                                .map(|(fn_, _)| fn_.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let provided: Vec<String> = args
+                        .iter()
+                        .map(|a| {
+                            let s = gen_kwarg_field(a, self);
+                            // 空列表字段（neighbors: []）：按字段类型生成 Vec::<T>::new()，
+                            // 避免推断为 Vec<i64> 与字段类型（如 Vec<Rc<SharedNode>>）不匹配
+                            if let Some(fname) = kwarg_field_name(a) {
+                                if let Some(info) = self.struct_fields_info.get(&base_name) {
+                                    if let Some((_, fty)) =
+                                        info.iter().find(|(n, _)| n == &fname)
+                                    {
+                                        if let IrType::Named { path, args } = fty {
+                                            if (path == "Vec" || path == "List")
+                                                && !args.is_empty()
+                                                && s.split_once(':')
+                                                    .map(|(_, v)| v.trim())
+                                                    .map_or(false, |v| {
+                                                        v == "Vec::<i64>::new()"
+                                                            || v == "Vec::new()"
+                                                            || v == "vec![]"
+                                                    })
+                                            {
+                                                let elem = self.rust_type(&args[0]);
+                                                return format!(
+                                                    "{}: Vec::<{}>::new()",
+                                                    fname, elem
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // 递归字段值自动 Box：根据**值表达式类型**决定包装方式：
+                            // - 值本身是 Option（head 变量 / None 字面量）→ .map(Box::new)（None 直接 None）
+                            // - 值不是 Option（裸 TreeNode{...} 构造）→ Some(Box::new(...))
+                            let fname = kwarg_field_name(a);
+                            if let Some(fname) = fname {
+                                if recursive_fields.contains(&fname) {
+                                    // 取值表达式及其 IR 类型
+                                    let val_expr = match &a.kind {
+                                        ExprKind::StructCtor { fields, .. } => fields
+                                            .iter()
+                                            .find(|(n, _)| n == "value")
+                                            .map(|(_, v)| v),
+                                        _ => None,
+                                    };
+                                    let val_is_option = val_expr.map_or(false, |v| {
+                                        matches!(&v.ty, IrType::Option(_))
+                                            || matches!(&v.kind, ExprKind::Var(n)
+                                                if n == "None" || n == "Some")
+                                    });
+                                    let val_s = s
+                                        .split_once(':')
+                                        .map(|(_, v)| v.trim().to_string())
+                                        .unwrap_or(s);
+                                    return if val_s == "None" {
+                                        // None 字面量：类型由字段上下文推断，直接保留
+                                        format!("{}: None", fname)
+                                    } else if val_is_option {
+                                        format!("{}: {}.map(Box::new)", fname, val_s)
+                                    } else {
+                                        format!("{}: Some(Box::new({}))", fname, val_s)
+                                    };
+                                }
+                            }
+                            s
+                        })
+                        .collect();
                     // 已提供的字段名集合
                     let provided_names: std::collections::HashSet<String> = args
                         .iter()
@@ -3898,7 +4100,39 @@ impl CodeGen {
                 } else {
                     "."
                 };
-                format!("{}{}{}", base_s, sep, field)
+                let access_s = format!("{}{}{}", base_s, sep, field);
+                // 递归字段透明解 Box：字段类型是 struct 自身的 Option<Box<Self>>，
+                // 读取时映射为 Option<Self>（n.next → n.next.map(|__b| *__b)）。
+                // 按 base 的静态类型名（而非变量名）查字段信息。
+                let base_type_name = match &base.ty {
+                    IrType::Named { path, .. } => Some(path.clone()),
+                    IrType::Option(inner) => match inner.as_ref() {
+                        IrType::Named { path, .. } => Some(path.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if let Some(bt_name) = base_type_name {
+                    if let Some(info) = self.struct_fields_info.get(&bt_name) {
+                        let is_recursive = info
+                            .iter()
+                            .find(|(n, _)| n == field)
+                            .map_or(false, |(_, fty)| type_refers_to(fty, &bt_name));
+                        if is_recursive {
+                            let field_ty = info
+                                .iter()
+                                .find(|(n, _)| n == field)
+                                .map(|(_, t)| t.clone());
+                            let is_option = matches!(&field_ty, Some(IrType::Option(_)));
+                            return if is_option {
+                                format!("{}.map(|__b| *__b)", access_s)
+                            } else {
+                                format!("(*{})", access_s)
+                            };
+                        }
+                    }
+                }
+                access_s
             }
             ExprKind::IndexGet { base, key } => {
                 let base_s = self.gen_expr(base);
@@ -4522,7 +4756,13 @@ impl CodeGen {
                         // 用唯一标记占位，最后替换为 {} 占位符
                         format_str.push_str(&format!("__LZ_FMT_{}__", arg_idx));
                         arg_idx += 1;
-                        args.push(self.gen_expr_str(&expr));
+                        // 插值若是单个变量名且为降级变量（line 等宏名冲突）→ 用重命名后的名字
+                        let expr_trim = expr.trim();
+                        if self.downgraded_vars.contains(expr_trim) {
+                            args.push(format!("{}_", expr_trim));
+                        } else {
+                            args.push(self.gen_expr_str(&expr));
+                        }
                     }
                 }
                 '}' => {
@@ -5157,6 +5397,21 @@ fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
     cg.gen_expr(arg)
 }
 
+/// 提取 _KwArg 的字段名（用于递归字段构造 Box 判断）
+fn kwarg_field_name(arg: &Expr) -> Option<String> {
+    if let ExprKind::StructCtor { name, fields } = &arg.kind {
+        if name == "_KwArg" {
+            return fields.iter().find(|(n, _)| n == "name").and_then(
+                |(_, v)| match &v.kind {
+                    ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
+                    _ => None,
+                },
+            );
+        }
+    }
+    None
+}
+
 /// 检测 IrType 是否引用了指定的类型名（用于递归枚举检测）
 fn type_refers_to(ty: &IrType, name: &str) -> bool {
     match ty {
@@ -5175,6 +5430,46 @@ fn type_refers_to(ty: &IrType, name: &str) -> bool {
             params.iter().any(|p| type_refers_to(p, name)) || type_refers_to(ret, name)
         }
         _ => false,
+    }
+}
+
+/// 字段是否需要自动 Box：仅当字段类型**直接**是自身（`Self` / `Self?` / `Option<Self>`），
+/// 才需要 Box 打破无限大小。`Vec<Self>`、`Rc<Self>`、`Box<Self>` 等已间接，无需 Box。
+fn field_needs_box(ty: &IrType, name: &str) -> bool {
+    match ty {
+        IrType::Self_ => true,
+        IrType::Named { path, .. } => path == name,
+        IrType::Option(inner) => match inner.as_ref() {
+            IrType::Self_ => true,
+            IrType::Named { path, .. } => path == name,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// 递归替换类型中的 `Self` 引用为具体类型（struct 定义内 Self → 自身类型名）。
+fn replace_self(ty: &IrType, self_ty: &IrType) -> IrType {
+    match ty {
+        IrType::Self_ => self_ty.clone(),
+        IrType::Named { path, args } => {
+            let new_args: Vec<IrType> = args.iter().map(|a| replace_self(a, self_ty)).collect();
+            IrType::Named {
+                path: path.clone(),
+                args: new_args,
+            }
+        }
+        IrType::Option(inner) => IrType::Option(Box::new(replace_self(inner, self_ty))),
+        IrType::Result { ok, err } => IrType::Result {
+            ok: Box::new(replace_self(ok, self_ty)),
+            err: Box::new(replace_self(err, self_ty)),
+        },
+        IrType::Tuple(elems) => {
+            IrType::Tuple(elems.iter().map(|e| replace_self(e, self_ty)).collect())
+        }
+        IrType::Ref(inner) => IrType::Ref(Box::new(replace_self(inner, self_ty))),
+        IrType::MutRef(inner) => IrType::MutRef(Box::new(replace_self(inner, self_ty))),
+        _ => ty.clone(),
     }
 }
 

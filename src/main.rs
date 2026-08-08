@@ -107,13 +107,72 @@ fn main() {
 
     // ── 宏展开（Phase 2: Lexer 之后、Parser 之前） ──
     // 第一遍：提取宏定义并构建注册中心
-    let (registry, macro_ranges) = match extract_macro_defs(&tokens) {
-        Ok((r, ranges)) => (r, ranges),
+    let mut registry = match extract_macro_defs(&tokens) {
+        Ok((r, _ranges)) => r,
         Err(e) => {
             eprintln!("Macro definition error: {}", e);
             std::process::exit(1);
         }
     };
+
+    // 跨模块宏导入：`import macro X` / `from macro X import Y` → 读取 X.lz 并合并其宏定义
+    let dir = std::path::Path::new(path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut i = 0usize;
+    while i < tokens.len() {
+        let is_import = tokens[i] == lang_zone::lexer::Token::Import
+            || tokens[i] == lang_zone::lexer::Token::From;
+        if is_import {
+            // import macro X / from macro X import Y
+            let mut j = i + 1;
+            let mut is_macro_import = false;
+            let mut mod_name: Option<String> = None;
+            while j < tokens.len() {
+                match &tokens[j] {
+                    lang_zone::lexer::Token::Macro => {
+                        is_macro_import = true;
+                        j += 1;
+                    }
+                    lang_zone::lexer::Token::Ident(n) if mod_name.is_none() => {
+                        mod_name = Some(n.clone());
+                        j += 1;
+                    }
+                    lang_zone::lexer::Token::Newline | lang_zone::lexer::Token::Dedent => break,
+                    _ => {
+                        if tokens[j] == lang_zone::lexer::Token::Import {
+                            j += 1;
+                        } else if tokens[j] == lang_zone::lexer::Token::As {
+                            j += 2;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if tokens[j] == lang_zone::lexer::Token::Newline {
+                    break;
+                }
+            }
+            if is_macro_import {
+                if let Some(mname) = mod_name {
+                    let macro_path = dir.join(format!("{}.lz", mname));
+                    if let Ok(src) = std::fs::read_to_string(&macro_path) {
+                        let mut mlexer = lang_zone::lexer::Lexer::new(&src);
+                        let mtokens = mlexer.tokenize();
+                        if let Ok((mreg, _mranges)) = extract_macro_defs(&mtokens) {
+                            registry.merge(mreg);
+                        }
+                    }
+                }
+            }
+            // 跳到本行末尾
+            while i < tokens.len() && tokens[i] != lang_zone::lexer::Token::Newline {
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    let macro_ranges = Vec::<usize>::new();
 
     // 从 Token 流中移除宏定义（展开后不再需要）
     let expander = MacroExpander::new(registry);

@@ -312,6 +312,55 @@ impl Parser {
                     let d = self.parse_duck_def()?;
                     duck_defs.push(d);
                 }
+                Token::Macro | Token::Template => {
+                    // 宏定义: macro name(params) -> Tokens = body / template name(...) -> Tokens = body
+                    // 宏是编译期 Token 转换，IR 后端暂不展开；解析为普通函数定义
+                    // （参数/返回按 Tokens 类型保存，body 为 quote(...) 表达式）
+                    self.advance(); // consume macro/template
+                    let name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected macro name, got {:?}", t)),
+                    };
+                    // 参数
+                    self.expect(Token::LParen)?;
+                    let (params, variadic) = self.parse_params()?;
+                    self.expect(Token::RParen)?;
+                    // 可选返回类型: -> Tokens
+                    let return_type = if self.check(&Token::Arrow) {
+                        self.advance();
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    self.expect(Token::Eq)?;
+                    self.skip_newlines();
+                    // 跳过可能的外层 Indent（缩进块体）
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                    }
+                    let body = self.parse_expr()?;
+                    if self.check(&Token::Dedent) {
+                        self.advance();
+                    }
+                    functions.push(Function {
+                        name,
+                        generics: vec![],
+                        generic_defaults: vec![],
+                        params,
+                        return_type,
+                        raises: None,
+                        where_clause: vec![],
+                        body: vec![Stmt::Return(Some(body))],
+                        is_async: false,
+                        is_abstract: false,
+                        is_iterator: false,
+                        is_magic: false,
+                        decorators: vec![],
+                        variadic: crate::ast::VariadicMode::None,
+                        checker_param: None,
+                        default_checker: None,
+                    });
+                }
                 _ => {
                     // 尝试解析为顶层赋值（全局变量）
                     if let Token::Ident(_) = self.peek() {
@@ -482,6 +531,10 @@ impl Parser {
 
     fn parse_import(&mut self) -> Result<ImportStmt, String> {
         self.expect(Token::Import)?;
+        // import macro X（宏命名空间导入，IR 后端同普通 import 处理）
+        if self.check(&Token::Macro) {
+            self.advance();
+        }
         let mut path = Vec::new();
         loop {
             match self.advance() {
@@ -542,6 +595,10 @@ impl Parser {
 
     fn parse_from_import(&mut self) -> Result<ImportStmt, String> {
         self.expect(Token::From)?;
+        // from macro X import Y（宏命名空间导入，IR 后端同普通 import 处理）
+        if self.check(&Token::Macro) {
+            self.advance();
+        }
         let mut path = Vec::new();
         // 支持相对导入: from .utils, from ..common
         while self.check(&Token::Dot) || self.check(&Token::DotDot) {

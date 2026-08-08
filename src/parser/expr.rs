@@ -1061,6 +1061,11 @@ impl ParserExprExt for Parser {
                     if self.check(&Token::Indent) {
                         self.advance(); // skip Indent
                         let stmts = self.parse_block()?;
+                        // 消费块体结束的 Dedent（回到闭包外层缩进），
+                        // 否则外层 block 会误判提前结束（后续语句丢失）
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
                         Ok(Expr::Closure { params, body: Box::new(Expr::BlockExpr(stmts)) })
                     } else {
                         let body = self.parse_expr()?;

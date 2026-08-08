@@ -42,6 +42,13 @@ impl MacroRegistry {
     pub fn contains(&self, name: &str) -> bool {
         self.macros.contains_key(name)
     }
+
+    /// 合并另一个注册中心的全部宏定义（跨模块宏导入用）
+    pub fn merge(&mut self, other: MacroRegistry) {
+        for (n, def) in other.macros {
+            self.macros.insert(n, def);
+        }
+    }
 }
 
 // ──────────────── 宏展开器 ────────────────
@@ -98,9 +105,25 @@ impl MacroExpander {
                     Token::Ident(n) => n.clone(),
                     _ => unreachable!(),
                 };
+                // 别名宏调用 @alias.name!：At Ident Dot Ident Exclamation → 用 . 后宏名展开
+                // （import macro X as sm → @sm.check_eq! 等价 @check_eq!）
+                let mut name = name;
+                let mut name_end = name_idx + 1;
+                while name_end < len && matches!(&tokens[name_end], Token::Newline | Token::Indent) {
+                    name_end += 1;
+                }
+                if name_end + 1 < len
+                    && tokens[name_end] == Token::Dot
+                    && matches!(&tokens[name_end + 1], Token::Ident(n2) if n2 == "check_eq" || true)
+                {
+                    if let Token::Ident(n2) = &tokens[name_end + 1] {
+                        name = n2.clone();
+                        name_end += 2;
+                    }
+                }
 
-                // 检查 name 后面是否有 !（跳过空白）
-                let mut excl_idx = name_idx + 1;
+                // 检查 name 后面是否有 !（跳过空白；别名解析后从 name_end 开始）
+                let mut excl_idx = name_end;
                 while excl_idx < len && matches!(&tokens[excl_idx], Token::Newline | Token::Indent) {
                     excl_idx += 1;
                 }
@@ -326,6 +349,12 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
             };
 
             // 跳过到 (
+            // 宏名后必须紧跟 (（宏定义签名）；否则是 import macro X / from macro X import Y
+            // 等导入语法，跳过继续（不算宏定义）
+            let after_name = skip_blanks(tokens, i, len);
+            if tokens.get(after_name) != Some(&Token::LParen) {
+                continue;
+            }
             i = skip_to(tokens, i, len, &Token::LParen, &format!("expected '(' after macro name '{}'", name))?;
             i += 1; // 跳过 (
 

@@ -19,8 +19,8 @@ def list_len<T>(mut node: ListNode<T>?) -> int =
         node = n.next      // 访问自动 Box 字段（透明）
     count
 
-def list_push<T>(mut head: ListNode<T>?, value: T) -> ListNode<T> =
-    ListNode(value: value, next: head)   // 构造自动 Box::new(head)
+def list_push<T>(mut head: ListNode<T>?, value: T) -> ListNode<T>? =
+    Some(ListNode(value: value, next: head))   // 构造自动 Box::new(head)；返回 Option 保持链表头可空
 
 // --- 2. 递归表达式树：enum 变体自动 Box ---
 enum Expr:
@@ -83,7 +83,7 @@ def main() =
         left: TreeNode(value: 2, left: TreeNode(value: 4, left: None, right: None), right: TreeNode(value: 5, left: None, right: None)),
         right: TreeNode(value: 3, left: None, right: None),
     )
-    print(tree_depth(tree))       // 3
+    print(tree_depth(Some(tree)))   // 3（tree_depth 参数为 Option<TreeNode<T>>）
 
     // 共享节点：Rc 显式
     let shared = SharedNode(value: 1, neighbors: [])

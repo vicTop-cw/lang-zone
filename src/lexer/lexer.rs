@@ -382,6 +382,7 @@ impl Lexer {
             "go" => Token::Go,
             "select" => Token::Select,
             "macro" => Token::Macro,
+            "template" => Token::Template,
             "comptime" => Token::Comptime,
             "raise" => Token::Raise,
             "raises" => Token::Raises,

@@ -148,3 +148,42 @@
 - 全量扫描 DEMO：无 `let` 绑定后被重赋值错误（0 命中）
 - 修复 `03_variables/ref_binding.lz`：无 let 前缀的 `ref r = x` 按文档 §5.1 为可变引用（&mut T），parser 原把 mutable 留 false 导致 E0384——修正 parse_binding_stmt（ref → mutable=true）
 - 全量回归：PASS 139 → 140，FAIL 64（15 PARSE / 48 RUSTC / 1 RUN），绑定相关失败 0
+
+### 2026-08-08 第十三轮：closure_capture（v152 后，未提交部分 9）
+- **已修复**：parser 闭包 `|x| =>` fat-arrow 块体用 parse_block 解析后未消费 Dedent，导致外层块误判提前结束（`f(5)`、`print(total)` 等后续语句全部丢失）——闭包分支补 `if check(Dedent) { advance(); }`
+- 验证：最小样例块体后语句已恢复生成（f(5); println!(total);）
+- 遗留（深层，需闭包捕获语义改造）：
+  - 闭包体内 `total = total + x`（无 let 前缀的默认可变绑定）被解析为 AstStmt::Let → builder 生成 Stmt::Let（新绑定遮蔽），而非对外部变量的重新赋值（Stmt::Assign）
+  - 且 codegen 对所有闭包统一 `move |x|`，move 闭包捕获外部变量的拷贝，修改不影响外部（FnMut 写捕获需借用/&mut 捕获）
+  - 正确语义：`x = v` 在变量已存在时是重新赋值（02-变量与绑定.md §2.1）；闭包写外部需非 move 捕获
+
+### 2026-08-08 第十四轮：08_modules 宏解析（v152 后，未提交部分 10）
+- **已修复**：
+  - lexer 补 `template` 关键字；parser 顶层加 macro/template 定义解析（解析为普通函数，body 存 quote 表达式）
+  - `import macro X` / `from macro X import Y` / `as` 别名导入解析
+  - 宏展开器：`import macro` 跨模块读取 X.lz 合并宏定义（MacroRegistry::merge）；`@name!` 调用展开；别名 `@sm.check_eq!`（At+Ident+Dot+Ident+!）展开（excl_idx 起点修正）
+  - Tokens 类型 → Str（types.rs from_ast_type + codegen rust_type 双映射）；quote(...) 调用降级为字符串拼接（builder 推断 Str + codegen 多参数 &[..] 拼接）
+- 验证：`string_macros.lz` PASS（宏模块，rustc 编译 + 运行通过）
+- 遗留（宏系统深层，待宏解释器/模块合并）：
+  - `use_macros.lz`：template `name!`（无 @ 前缀）调用未被宏展开器处理（仅 @name! 展开）→ 生成 `greet; !("World")` 分离；跨模块普通函数（square）未合并进生成文件 → `cannot find value greet/square`
+
+### 2026-08-08 第十五轮：var_call_block/use_services/panic_raise_try/async_more（v152 后，未提交部分 11）
+- **已修复**：
+  - `10_error_handling/panic_raise_try.lz` 已通过：`line`/`column`/`file` 变量与 Rust 内置宏冲突 → downgraded_vars 降级重命名（let 绑定、多/单 catch Enum 模式绑定、f-string 插值引用三处）；TryCatch 表达式返回类型从 try body 最后表达式推断（跳过尾部 let/声明，避免 Any→i64）；测试文件 catch 分支补返回值
+  - `12_build_blocks/var_call_block.lz`：`~:` 调用构建块 dict→kwargs 拆包（块体末尾 DictLit → `_KwArg` 关键字实参，`greet ~: {...}` 生成 `greet("Hello", "Lang-Zone")`）；块体末尾元组变量引用（`multiply ~: factors`）也按元组拆包（block_ty_for_unpack 回退 lookup_var）
+- 遗留（待修）：
+  - var_call_block：demo_return_no_value（return 无值构建块尾表达式类型冲突 E0308）、multiply~:factors 元组变量拆包在复杂场景仍失败（E0061）
+  - `08_modules/use_services.lz`：`import services` 后 `services.service_name` 模块命名空间访问未生成（E0425）
+  - `11_concurrency/async_more.lz`：`List<str>` 泛型返回 + `[await a, await b, await c]` 列表字面量中 await 表达式解析失败（Expected RBrack, got Comma）
+
+### 2026-08-08 第十六轮：99_spec 剩余（v152 后，未提交部分 12）
+- 结论：duck_test / iterator_demo / guard_for_3 均为**规范目标特性演示**（测试文件注释明确标注），非当前编译器缺陷：
+  - `duck_test.lz`：注释「duck 约束为规范目标特性（语法冻结，约束求解待实现）」
+  - `guard_for_3.lz`：注释「规范目标特性（当前解析器未实现）」——while 守卫语法 `while running if cond:` 待实现
+  - `iterator_demo.lz`：`Iter<R>` 泛型类型与 `[T]` i64 索引属 lz_std 迭代器类型系统范畴
+- 处理：保留为规范演示文件，不计入当前修复目标
+
+### 2026-08-08 第十七轮：全量回归结果（v152 后，未提交部分 13）
+- **PASS 140 → 144**，FAIL 60
+- 本轮确认通过的新修复：def_checker、magic_methods、module_magic、self_recursive、string_macros、panic_raise_try、var_call_block（dict→kwargs 拆包）
+- 失败分布：15 PARSE / 44 RUSTC / 1 RUN

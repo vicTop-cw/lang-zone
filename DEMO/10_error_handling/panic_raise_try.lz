@@ -96,6 +96,7 @@ def try_catch_no_pattern() =
         checked_divide(10, 0)
     catch e:
         print(f"something went wrong (no details): {e}")
+        0                // catch 分支需与 try 分支返回类型一致（i64）
 
 // =============================================================
 // 5. try 作为表达式
