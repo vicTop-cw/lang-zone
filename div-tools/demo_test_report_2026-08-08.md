@@ -1,35 +1,37 @@
-# DEMO 全面测试统计报告（2026-08-08）
+# DEMO 全面测试统计报告（2026-08-08 v150 更新）
 
-> 生成方式：`lang-zone.exe <file.lz>` → IR codegen → `rustc --edition 2021` 编译 → 运行验证
-> 排除项：`DEMO/99_errors/`（故意错误语法演示文件，预期报错，不计入失败）
+> 生成方式：`lang-zone.exe <file.lz>` → IR codegen（唯一路径）→ `rustc --edition 2021 --extern lz_builtins` 编译 → 运行验证
+> 本次变更：builtins 内嵌为内部子库（`use lz_builtins::*;`），生成代码不再内联 ~40 行 shims；移除 `--ast-codegen` 老路子
+> 排除项：`DEMO/99_errors/`（故意错误语法演示文件，预期报错）
 
 ## 一、总体结果
 
 | 指标 | 数量 |
 |------|------|
 | DEMO 测试文件总数（排除 99_errors） | 204 |
-| 通过（编译 + 运行成功） | 131 |
-| 失败 | 73 |
-| 通过率 | 64.2% |
+| 通过（编译 + 运行成功） | 132 |
+| 失败 | 72 |
+| 通过率 | 64.7% |
 
 ## 二、失败分类
 
 | 类别 | 数量 | 含义 |
 |------|------|------|
-| PARSE / IR build error | 17 | 无法生成 IR（语法错误或 IR 构建错误） |
+| PARSE / IR build error | 14 | 无法生成 IR（语法错误或 IR 构建错误） |
 | RUSTC（生成 rs 编译失败） | 55 | IR 生成成功但 Rust 编译错误 |
 | RUN（运行失败） | 1 | 编译通过但运行崩溃 |
+| NO_RS（未生成输出） | 2 | 极少数生成文件缺失（待核） |
 
 ## 三、失败分布（按目录）
 
 | 目录 | 失败数 | 主要错误 |
 |------|--------|----------|
-| boundary-coverage | 17 | 组合语法覆盖：PARSE 报错（struct/trait 表达式、闭包嵌套）、RUSTC（`__gen_vec` 未定义、类型不匹配、`_` 用法） |
-| lz_std | 14 | 标准库自测：`__next__` 不属于 trait Iterator（E0407）、`Less_` 重复绑定、Parse 错误 |
-| 06_control_flow | 11 | checker 块：`cannot find value`（counter/validate/depth/out 未找到）、`break` 在闭包内 |
-| 04_functions | 5 | 闭包捕获、装饰器、spread 协议（T 未定义）、checker |
+| boundary-coverage | 17 | 组合语法覆盖：PARSE 报错、`__gen_vec` 未定义、类型不匹配 |
+| lz_std | 13 | 标准库自测：`__next__` 不属于 trait Iterator、Parse 错误（**本轮不处理**） |
+| 06_control_flow | 11 | checker 块：`cannot find value`、`break` 在闭包内 |
+| 04_functions | 5 | 闭包捕获、装饰器、spread 协议 |
 | 99_spec | 4 | `__gen_vec` 未定义、duck trait、guard_for |
-| 07_data_structures | 4 | enum 算术、magic_methods 参数、模块魔法属性 |
+| 07_data_structures | 4 | enum 算术、魔法方法参数、模块魔法属性 |
 | 08_modules | 3 | 宏定义解析、services 未找到 |
 | 02_types | 2 | String→i64 cast、类型注解缺失 |
 | 01_basics | 2 | `__str__` 未生成、`curly` 未定义 |
@@ -50,7 +52,7 @@
 - **部分 boundary-coverage PARSE 错误**：组合语法超出现有 parser 支持
 
 ### 4.3 需要人工确认
-- **lz_std 大量失败**：标准库 .lz 文件本身是否能独立编译（可能依赖 prelude 合并），需确认测试方式
+- **lz_std 大量失败**：标准库 .lz 文件本身是否能独立编译（可能依赖 prelude 合并），本轮明确不处理
 - **99_spec**：专项规格测试，多为功能缺陷
 
 ## 五、建议下一步（按优先级）

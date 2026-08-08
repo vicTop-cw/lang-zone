@@ -6,7 +6,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use lang_zone::lexer::Lexer;
 use lang_zone::parser::Parser;
-use lang_zone::codegen::CodeGen;
 use lang_zone::macros::expand::{extract_macro_defs, MacroExpander};
 use lang_zone::ir::builder::build_ir;
 use lang_zone::ir::codegen::CodeGen as IrCodeGen;
@@ -33,7 +32,7 @@ fn replace_ext(path: &str, from: &str, to: &str) -> String {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--ast-codegen] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
+        eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
         std::process::exit(1);
     }
 
@@ -41,16 +40,8 @@ fn main() {
 
     // CLI 标志解析（提前，供 project 和单文件两种模式共用）
     let std_dir = extract_flag_value(&args, "--std-dir").map(PathBuf::from);
-    let allow_rustc_private = args.iter().any(|a| a == "--allow-rustc-private");
     let run_tests = args.iter().any(|a| a == "--test");
     let use_cache = args.iter().any(|a| a == "--cached");
-
-    // 获取 rustc 版本
-    let rustc_version = std::process::Command::new("rustc")
-        .arg("--version")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
 
     let path = &args[1];
 
@@ -64,18 +55,14 @@ fn main() {
                 std::process::exit(1);
             });
 
-        let (rust_code, label) = if args.iter().any(|a| a == "--ast-codegen") {
-            (CodeGen::generate(&merged, std_dir, allow_rustc_private, rustc_version), "AST codegen")
-        } else {
-            match build_ir(&merged) {
-                Ok(ir_module) => {
-                    let mut cg = IrCodeGen::new();
-                    (cg.generate(&ir_module), "IR codegen")
-                }
-                Err(e) => {
-                    eprintln!("IR build error (project mode): {}", e);
-                    std::process::exit(1);
-                }
+        let (rust_code, label) = match build_ir(&merged) {
+            Ok(ir_module) => {
+                let mut cg = IrCodeGen::new();
+                (cg.generate(&ir_module), "IR codegen")
+            }
+            Err(e) => {
+                eprintln!("IR build error (project mode): {}", e);
+                std::process::exit(1);
             }
         };
         let out_path = replace_ext(path, ".lz", ".rs");
@@ -191,48 +178,27 @@ fn main() {
         }
     }
 
-    // --ast-codegen: 使用旧的 AST→Rust 直接 codegen（回退路径）
-    let use_ast_codegen = args.iter().any(|a| a == "--ast-codegen");
-    let use_ir_codegen = args.iter().any(|a| a == "--ir-codegen") || !use_ast_codegen;
-
-    // 默认路径: IR → CodeGen (Rust)
-    if use_ir_codegen {
-        match build_ir(&module) {
-            Ok(ir_module) => {
-                let mut cg = IrCodeGen::new();
-                let rust_code = cg.generate(&ir_module);
-                let out_path = replace_ext(path, ".lz", ".rs");
-                fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
-                    eprintln!("Error writing {}: {}", out_path, e);
-                    std::process::exit(1);
-                });
-                println!("Generated {} -> {} (IR codegen)", path, out_path);
-
-                // --test: 编译并运行测试（IR 路径）
-                if run_tests {
-                    run_test_mode(path, &out_path);
-                }
-                return;
-            }
-            Err(e) => {
-                eprintln!("IR build error: {e}");
+    // 唯一 codegen 路径: AST → LZIR → Rust（无老路子选项）
+    match build_ir(&module) {
+        Ok(ir_module) => {
+            let mut cg = IrCodeGen::new();
+            let rust_code = cg.generate(&ir_module);
+            let out_path = replace_ext(path, ".lz", ".rs");
+            fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
+                eprintln!("Error writing {}: {}", out_path, e);
                 std::process::exit(1);
+            });
+            println!("Generated {} -> {} (IR codegen)", path, out_path);
+
+            // --test: 编译并运行测试（IR 路径）
+            if run_tests {
+                run_test_mode(path, &out_path);
             }
         }
-    }
-
-    // 旧 AST 路径 (--ast-codegen)
-    let rust_code = CodeGen::generate(&module, std_dir, allow_rustc_private, rustc_version);
-    let out_path = replace_ext(path, ".lz", ".rs");
-    fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
-        eprintln!("Error writing {}: {}", out_path, e);
-        std::process::exit(1);
-    });
-    println!("Generated {} -> {} (AST codegen)", path, out_path);
-
-    // --test: 编译并运行测试（AST 路径）
-    if run_tests {
-        run_test_mode(path, &out_path);
+        Err(e) => {
+            eprintln!("IR build error: {e}");
+            std::process::exit(1);
+        }
     }
 }
 

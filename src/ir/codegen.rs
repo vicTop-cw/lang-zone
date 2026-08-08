@@ -618,45 +618,11 @@ impl CodeGen {
         self.emit_line("use std::fmt::Display;");
         self.buf.push('\n');
 
-        // ── Lang-Zone 运行时桥接 shims ──
-        self.buf.push_str("// ── 运行时桥接 shims ──\n");
-        self.buf.push_str("use std::any::Any;\n");
-        self.buf.push_str("#[derive(Debug)]\n");
-        self.buf.push_str("pub struct __Params {\n");
-        self.buf
-            .push_str("    pub args: Vec<std::boxed::Box<dyn Any>>,\n");
-        self.buf
-            .push_str("    pub kwargs: HashMap<String, std::boxed::Box<dyn Any>>,\n");
-        self.buf.push_str("}\n\n");
-        // spawn_task: 异步任务包装器（保持 Future 语义，允许 .await）
-        self.buf
-            .push_str("async fn __spawn_task<T>(f: impl std::future::Future<Output = T>) -> T {\n");
-        self.buf.push_str("    f.await\n");
-        self.buf.push_str("}\n\n");
-        // block_on: 同步阻塞执行 async 代码（用于 async main，无外部依赖）
-        self.buf
-            .push_str("fn __block_on<F: std::future::Future>(mut f: F) -> F::Output {\n");
-        self.buf
-            .push_str("    use std::task::{{Context, Poll, RawWaker, RawWakerVTable, Waker}};\n");
-        self.buf.push_str("    use std::pin::Pin;\n");
-        self.buf.push_str("    unsafe fn clone_raw(_: *const ()) -> RawWaker { RawWaker::new(std::ptr::null(), &VTABLE) }\n");
-        self.buf.push_str("    unsafe fn noop(_: *const ()) {{}}\n");
-        self.buf.push_str("    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone_raw, noop, noop, noop);\n");
-        self.buf.push_str("    let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };\n");
-        self.buf
-            .push_str("    let mut cx = Context::from_waker(&waker);\n");
-        self.buf
-            .push_str("    let mut f = unsafe { Pin::new_unchecked(&mut f) };\n");
-        self.buf.push_str("    loop {\n");
-        self.buf
-            .push_str("        match f.as_mut().poll(&mut cx) {\n");
-        self.buf
-            .push_str("            Poll::Ready(val) => return val,\n");
-        self.buf
-            .push_str("            Poll::Pending => std::thread::yield_now(),\n");
-        self.buf.push_str("        }\n");
-        self.buf.push_str("    }\n");
-        self.buf.push_str("}\n\n");
+        // ── Lang-Zone 运行时 builtins（内部子库导入，避免重复内联）──
+        // __Params / __spawn_task / __block_on 及 print/len/range 等全部
+        // 由 lz_builtins crate 提供；生成代码仅导入 API。
+        self.emit_line("use lz_builtins::*;");
+        self.buf.push('\n');
     }
 
     // ── 类型映射 ──

@@ -1,4 +1,4 @@
-PASS=131 FAIL=73
+PASS=132 FAIL=72
 RUSTC|01_basics/identifiers.lz|error[E0599]: no method named `__str__` found for struct `MyStruct` in the current scope
 RUSTC|01_basics/lexical_boundaries.lz|error[E0425]: cannot find value `curly` in this scope
 RUSTC|02_types/fallible_as.lz|error[E0605]: non-primitive cast: `String` as `i64`
@@ -9,7 +9,6 @@ RUSTC|04_functions/closure_capture.lz|error[E0308]: mismatched types
 RUSTC|04_functions/decorators_more.lz|error[E0308]: mismatched types
 RUSTC|04_functions/param_modifiers.lz|error[E0382]: use of moved value: `xs`
 RUSTC|04_functions/spread_protocol.lz|error[E0425]: cannot find type `T` in this scope
-PARSE|05_expressions/comprehension_dict_multi.lz|Parse error: Unexpected token at top level: LBrace
 RUSTC|05_expressions/operators.lz|error[E0423]: expected value, found crate `std`
 RUSTC|06_control_flow/block_checker_ref.lz|error[E0605]: non-primitive cast: `Box<(dyn Any + 'static)>` as `i64`
 RUSTC|06_control_flow/block_demo.lz|error[E0425]: cannot find value `out` in this scope
@@ -66,9 +65,7 @@ RUSTC|lz_std/list.lz|error[E0407]: method `__next__` is not a member of trait `I
 PARSE|lz_std/math.lz|Parse error: Expected Indent, got Minus at pos 619
 RUSTC|lz_std/option.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
 RUSTC|lz_std/ordering.lz|error[E0416]: identifier `Less_` is bound more than once in the same pattern
-RUSTC|lz_std/prelude.lz|error[E0425]: cannot find value `Ordering` in this scope
+RUSTC|lz_std/prelude.lz|error[E0423]: expected value, found enum `Ordering`
 RUSTC|lz_std/result.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
 RUSTC|lz_std/set.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
 RUSTC|lz_std/string.lz|error[E0407]: method `__next__` is not a member of trait `Iterator`
-PARSE|lz_std/traits.lz|Parse error: Expected type param in where, got Self_
-PARSE|variadic_type_fidelity.lz|Parse error: Expected LParen, got DotDot at pos 73

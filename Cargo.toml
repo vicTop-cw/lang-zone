@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "lz-infer"]
+members = [".", "lz-infer", "lz_builtins"]
 resolver = "2"
 
 [package]
