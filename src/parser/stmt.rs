@@ -923,6 +923,8 @@ impl ParserStmtExt for Parser {
                 Token::Ref => {
                     self.advance();
                     is_ref = true;
+                    // 无 let 前缀的 ref 绑定默认可变引用（&mut T，mut 为 no-op）
+                    mutable = true;
                 }
                 Token::Const => {
                     self.advance();

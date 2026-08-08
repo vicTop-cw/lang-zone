@@ -142,3 +142,9 @@
   - 99_spec/iterator_demo：`Iter<R>` 泛型类型未解析（E0425）+ `[T]` 不能按 i64 索引
   - 99_spec/guard_for_3：`queue_size` 函数未找到
   - boundary-coverage：15 个组合语法/类型缺陷（async-await、defer-guard、walrus、嵌套表达式等）
+
+### 2026-08-08 第十二轮：绑定语法核查（v152 后，未提交部分 8）
+- 按 02-变量与绑定.md 核查：`let x = v` 不可变、`x = v` 默认可变、`mut x = v`/`let mut x = v` 为显式可变糖
+- 全量扫描 DEMO：无 `let` 绑定后被重赋值错误（0 命中）
+- 修复 `03_variables/ref_binding.lz`：无 let 前缀的 `ref r = x` 按文档 §5.1 为可变引用（&mut T），parser 原把 mutable 留 false 导致 E0384——修正 parse_binding_stmt（ref → mutable=true）
+- 全量回归：PASS 139 → 140，FAIL 64（15 PARSE / 48 RUSTC / 1 RUN），绑定相关失败 0
