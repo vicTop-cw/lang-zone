@@ -1872,7 +1872,7 @@ impl Parser {
     fn parse_impl(&mut self) -> Result<ImplDef, String> {
         self.advance(); // skip impl
 
-        let generics = if self.check(&Token::Lt) {
+        let mut generics = if self.check(&Token::Lt) {
             self.parse_generic_params()?
         } else {
             Vec::new()
@@ -1895,8 +1895,10 @@ impl Parser {
         };
 
         // 支持 impl 类型上的泛型参数: impl<T> Box<T> =
+        // 也支持 `impl Box<T>` 形式（类型名后的泛型参数一并归入 generics）
         if self.check(&Token::Lt) {
-            self.parse_generic_params()?; // consume and skip type generics
+            let mut impl_gen = self.parse_generic_params()?;
+            generics.append(&mut impl_gen);
         }
 
         // 支持 = 和 : 两种分隔符

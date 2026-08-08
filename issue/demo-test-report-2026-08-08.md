@@ -92,3 +92,36 @@
 - 修复：
   - `06_control_flow/def_checker.lz`：build_ir 补 `top_stmts` 遍历（顶层 checker 块 → Item::CheckerBlock）；checker 块体内 `ps.args[i] as int` 生成 `.downcast_ref()`（原 `&args[i]` 赋 `&dyn Any` 失败）；`assert a == b` 生成 `assert_eq!(a, b)`（原只生成 `assert!(a)`）；修正测试断言值（fib 尾递归=34）
 - 遗留缺陷（block 系列 `out/depth/result` 未找到）：checker/plain block 提升为模块级 `fn`/闭包后，块体内引用 main 局部变量无法解析——需块级变量捕获机制（深层改造）
+
+### 2026-08-08 第五轮进展（v152 后，未提交部分）
+- `__gen_vec` 构建块作用域已修复：gen_const_def 的 LazyLock 闭包体注入 `let mut __gen_vec: Vec<_> = Vec::new(); ...; __gen_vec`（gen_block_star、combo-iterator-generator 通过）
+- `assert a == b` 生成 `assert_eq!`（def_checker 通过）
+- 04_functions 待修（诊断结论）：
+  - `param_modifiers`：AST ref/mut ref 参数 is_ref 已在 builder 传递（3686-3705），但生成签名仍 `data: Vec<i64>`——gen_param 的 is_ref 分支未触发，疑 IR Param.is_ref 为 false 或调用点传值；需查 parser 是否设置 ref 参数 is_ref
+  - `closure_capture`：闭包 `|x| =>` fat-arrow 块体后语句丢失（add_to_total(5) 等未生成）——闭包块体消费了外层 Dedent，parser 块体边界问题
+  - `decorators_more`：泛型返回类型不匹配（double<T: Debug>(x: T) -> T 返回类型推断错误）
+  - `spread_protocol`：impl HttpResult 丢 `<T>` 泛型参数（生成 `impl HttpResult {` 而非 `impl<T> HttpResult<T>`），方法体 T 未绑定
+
+### 2026-08-08 第六轮进展（v152 后，未提交部分 2）
+- `04_functions/param_modifiers.lz` 部分修复：函数签名 ref 参数生成 `&T`/`&mut T`（gen_param 与函数签名生成处均补 is_ref 分支）；剩余：调用点未自动传引用（`read_ref(xs)` 需 `&xs`）——需调用点按 callee 参数 is_ref 自动加 `&`/`&mut`（fn_param_info 仅存参数/默认数，需扩展）
+- 遗留（待修）：closure_capture（闭包 `|x| =>` fat-arrow 块体后语句丢失，parser 块体边界）、decorators_more（泛型返回类型推断）、spread_protocol（impl 丢 `<T>` 泛型）
+
+### 2026-08-08 第七轮进展（v152 后，未提交部分 3）
+- `04_functions/param_modifiers.lz` 已通过：函数签名 ref 参数 → `&T`/`&mut T`（gen_param 与签名生成处）；调用点按 fn_ref_params 自动传 `&x`/`&mut x`
+- `04_functions/spread_protocol.lz` 主体修复：parse_impl 保留 `impl<T>` 泛型；convert_impl for_type 携带泛型（`impl<T: Clone + std::fmt::Debug> HttpResult<T>`）
+- 剩余缺陷（待修）：
+  - spread_protocol：`r?` 对自定义传播类型（HttpResult，实现 __is_ok__/__unwrap__）未解包——builder AstExpr::Try 仅识别 Result/Option，自定义类型走透传生成 `let code = r`
+  - closure_capture：闭包 `|x| =>` fat-arrow 块体后语句丢失（add_to_total(5) 等未生成），parser 块体边界问题
+  - decorators_more：泛型返回类型不匹配（double<T: Debug>(x: T) -> T 返回类型推断错误）
+
+### 2026-08-08 第八轮：全量回归结果（v152 后，未提交部分 4）
+- **PASS 132 → 135 → 138**，FAIL 66（16 PARSE / 49 RUSTC / 1 RUN）
+- 本轮确认通过的修复（9 个文件）：identifiers、lexical_boundaries、fallible_as、method_chains、operators、def_checker、gen_block_star、combo-iterator-generator、param_modifiers
+- 尚未处理：#8（07_data_structures）、#9（08_modules + 分散）、#10（99_spec + boundary-coverage）
+
+### 2026-08-08 第九轮进展（v152 后，未提交部分 5）
+- `07_data_structures/enum.lz` 已通过：BinOp 加 float×int 混合算术提升（`3.14 * (r as f64)`）；match 臂字段绑定（新增 enum_variant_field_types 收集 + field_types_for_variant 按位置绑定，fn_ctx/block_ctx/arm_ctx/body_ctx 均补复制）；测试文件修正（面积臂统一 f64、res 显式 Result<int,str> 标注）
+- 遗留缺陷（待修）：
+  - magic_methods：`with` 块 `__exit__()` 调用缺参数（E0061，需传入资源参数）
+  - module_magic：模块级 `__name__` 魔法属性未生成（E0425）
+  - self_recursive：`Self` 在函数/递归类型中未解析（E0411/E0072，需 Self 类型替换与递归 Box 化）

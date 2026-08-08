@@ -74,7 +74,7 @@ def main() =
     let c = Color.Red
     let s = Shape.Circle(x: 0, y: 0, radius: 10)
     let opt = Option.Some(value: 42)
-    let res = Result.Ok(value: 10)
+    let res: Result<int, str> = Result.Ok(value: 10)
 
     // match 模式匹配
     let desc = match c:
@@ -84,8 +84,8 @@ def main() =
 
     let area = match s:
         case Shape.Circle(x: _, y: _, radius: r) => 3.14 * r * r
-        case Shape.Rectangle(width: w, height: h) => w * h
-        case Shape.Square(side: s) => s * s
+        case Shape.Rectangle(width: w, height: h) => (w as f64) * (h as f64)
+        case Shape.Square(side: s) => (s as f64) * (s as f64)
 
     let msg = match opt:
         case Option.Some(value: v) => f"got {v}"

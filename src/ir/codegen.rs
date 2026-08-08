@@ -30,6 +30,8 @@ pub struct CodeGen {
     suppress_tail_return: bool,
     /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
     fn_param_info: HashMap<String, (usize, usize)>,
+    /// 函数 ref/mut ref 参数标记：函数名 → 每参数 (is_ref, is_mut)（调用点自动传引用）
+    fn_ref_params: HashMap<String, Vec<(bool, bool)>>,
     /// 被修改的模块级 const 名称（需生成 static mut 而非 const）
     mutated_consts: std::collections::HashSet<String>,
     /// enum variant → field types 映射: (enum_name, variant_name) → Vec<IrType>
@@ -99,6 +101,7 @@ impl CodeGen {
             enum_variants: HashMap::new(),
             suppress_tail_return: false,
             fn_param_info: HashMap::new(),
+            fn_ref_params: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
             enum_variant_fields: HashMap::new(),
             current_variadic_params: std::collections::HashSet::new(),
@@ -240,6 +243,13 @@ impl CodeGen {
                 if default_count > 0 {
                     self.fn_param_info
                         .insert(f.name.clone(), (f.params.len(), default_count));
+                }
+                // 收集 ref/mut ref 参数标记（函数名 → 每参数 (is_ref, is_mut)）
+                if f.params.iter().any(|p| p.is_ref) {
+                    self.fn_ref_params.insert(
+                        f.name.clone(),
+                        f.params.iter().map(|p| (p.is_ref, p.is_mut)).collect(),
+                    );
                 }
                 // 收集所有参数类型（用于隐式 variadic 检测）
                 self.fn_param_types.insert(
@@ -1174,6 +1184,13 @@ impl CodeGen {
                         }
                     } else if p.default.is_some() {
                         format!("Option<{}>", self.rust_type(&p.ty))
+                    } else if p.is_ref {
+                        // ref x: T → &T；mut ref x: T → &mut T
+                        if p.is_mut {
+                            format!("&mut {}", self.rust_type(&p.ty))
+                        } else {
+                            format!("&{}", self.rust_type(&p.ty))
+                        }
                     } else {
                         self.rust_type(&p.ty).to_string()
                     };
@@ -1650,14 +1667,24 @@ impl CodeGen {
     }
 
     fn gen_impl_def(&mut self, i: &ImplDef) {
-        // Rust impl 泛型不允许默认类型参数（E0741），剥离默认值仅保留 bounds
+        // Rust impl 泛型不允许默认类型参数（E0741），剥离默认值仅保留 bounds；
+        // 追加 Clone + Debug bound（LZ 值语义自动 .clone()，泛型需可 Clone）
         let stripped: Vec<GenericParam> = i
             .generics
             .iter()
-            .map(|g| GenericParam {
-                name: g.name.clone(),
-                bounds: g.bounds.clone(),
-                default: None,
+            .map(|g| {
+                let mut bounds = g.bounds.clone();
+                for b in ["Clone", "std::fmt::Debug"] {
+                    let tb = self.gen_trait_bound(&IrType::named(b));
+                    if !bounds.iter().any(|x| self.gen_trait_bound(x) == tb) {
+                        bounds.push(IrType::named(b));
+                    }
+                }
+                GenericParam {
+                    name: g.name.clone(),
+                    bounds,
+                    default: None,
+                }
             })
             .collect();
         let generics = self.gen_generics(&stripped);
@@ -1846,9 +1873,18 @@ impl CodeGen {
         if needs_lazy {
             self.lazy_static_names.insert(c.name.clone());
             let lazy_ty = self.rust_type(&c.ty);
+            // 生成器构建块（*:）会在闭包体内 push __gen_vec，需先声明并在末尾返回
+            let lazy_val = if val_str.contains("__gen_vec") {
+                format!(
+                    "{{ let mut __gen_vec: Vec<_> = Vec::new(); {}; __gen_vec }}",
+                    val_str
+                )
+            } else {
+                val_str.clone()
+            };
             self.emit_line(&format!(
                 "static {}: std::sync::LazyLock<{}> = std::sync::LazyLock::new(|| {});",
-                c.name, lazy_ty, val_str
+                c.name, lazy_ty, lazy_val
             ));
         } else {
             self.emit_line(&format!("{} {}: {} = {};", kw, c.name, ty_str, val_str));
@@ -2281,6 +2317,13 @@ impl CodeGen {
             } else if matches!(&p.ty, IrType::Any) {
                 // Any 类型参数省略类型注解，让 Rust 从上下文推断（用于 map/filter 闭包）
                 p.name.clone()
+            } else if p.is_ref {
+                // ref x: T → &T（不可变引用）；mut ref x: T → &mut T（可变引用）
+                if p.is_mut {
+                    format!("{}: &mut {}", p.name, self.rust_type(&p.ty))
+                } else {
+                    format!("{}: &{}", p.name, self.rust_type(&p.ty))
+                }
             } else {
                 format!("{}: {}", p.name, self.rust_type(&p.ty))
             }
@@ -3057,6 +3100,26 @@ impl CodeGen {
                                 matches!(&a.ty, IrType::Str) && matches!(&a.kind, ExprKind::Var(_));
                             if is_str_param && is_str_var && i < args_s.len() {
                                 args_s[i] = format!("{}.clone()", args_s[i]);
+                            }
+                        }
+                    }
+                    // ref/mut ref 参数：调用点自动传 &x / &mut x
+                    if let Some(ref_flags) = self.fn_ref_params.get(&callee_name).cloned() {
+                        for (i, a) in args.iter().enumerate() {
+                            if i >= ref_flags.len() {
+                                break;
+                            }
+                            let (is_ref, is_mut) = ref_flags[i];
+                            if is_ref && i < args_s.len() {
+                                let s = &args_s[i];
+                                // 避免重复引用（已是 &x 或 &mut x 时跳过）
+                                if !s.starts_with('&') {
+                                    args_s[i] = if is_mut {
+                                        format!("&mut {}", s)
+                                    } else {
+                                        format!("&{}", s)
+                                    };
+                                }
                             }
                         }
                     }
@@ -3996,12 +4059,24 @@ impl CodeGen {
                 }
                 // 二元操作的操作数若为 unsafe 块（全局变量访问），需加括号：
                 // unsafe { a } + unsafe { b } → (unsafe { a }) + (unsafe { b })
-                format!(
-                    "{} {} {}",
-                    self.wrap_bin_operand(self.gen_expr(lhs)),
-                    op_s,
-                    self.wrap_bin_operand(self.gen_expr(rhs))
-                )
+                // float×int 混合算术：int 侧自动提升为 f64（如 3.14 * r）
+                let arith = matches!(op, BinOpKind::Add | BinOpKind::Sub | BinOpKind::Mul | BinOpKind::Div | BinOpKind::Mod);
+                let lhs_ty = &lhs.ty;
+                let rhs_ty = &rhs.ty;
+                let lhs_is_f64 = matches!(lhs_ty, IrType::F64);
+                let rhs_is_f64 = matches!(rhs_ty, IrType::F64);
+                // rhs 是数值或未知（Any fallback 为 i64）时，f64 侧混合算术需提升
+                let rhs_is_numeric = matches!(rhs_ty, IrType::Int | IrType::F64 | IrType::Any);
+                let lhs_is_numeric = matches!(lhs_ty, IrType::Int | IrType::F64 | IrType::Any);
+                let lhs_s = self.wrap_bin_operand(self.gen_expr(lhs));
+                let rhs_s = self.wrap_bin_operand(self.gen_expr(rhs));
+                if arith && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
+                    format!("{} {} ({} as f64)", lhs_s, op_s, rhs_s)
+                } else if arith && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
+                    format!("({} as f64) {} {}", lhs_s, op_s, rhs_s)
+                } else {
+                    format!("{} {} {}", lhs_s, op_s, rhs_s)
+                }
             }
             ExprKind::UnOp { op, operand } => {
                 // P1: i64::MIN 特判 — -(-9223372036854775808) → i64::MIN

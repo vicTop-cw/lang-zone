@@ -44,6 +44,8 @@ struct TypeCtx {
     top_level_consts: HashMap<String, IrType>,
     /// enum variant → enum name 映射
     enum_variants: HashMap<String, String>,
+    /// enum 变体字段类型：variant → [类型]（有序，match 臂绑定用）
+    enum_variant_field_types: HashMap<String, Vec<IrType>>,
     /// 当前函数泛型参数
     current_generics: Vec<String>,
     /// 当前函数返回类型
@@ -69,6 +71,7 @@ impl TypeCtx {
             struct_method_arity: HashMap::new(),
             top_level_consts: HashMap::new(),
             enum_variants: HashMap::new(),
+            enum_variant_field_types: HashMap::new(),
             current_generics: vec![],
             current_ret_ty: None,
             current_fn_name: None,
@@ -90,6 +93,16 @@ impl TypeCtx {
             if s.is_enum {
                 for f in &s.fields {
                     self.enum_variants.insert(f.name.clone(), s.name.clone());
+                }
+                // 收集变体字段类型：variant → [类型]（有序，match 臂绑定用）
+                // 变体字段合并存于 Field.ty：单字段 → AstType::Int；多字段 → AstType::Tuple([..])
+                for v in &s.fields {
+                    let types: Vec<IrType> = match &v.ty {
+                        AstType::Tuple(items) => items.iter().map(from_ast_type).collect(),
+                        AstType::Unit => vec![],
+                        other => vec![from_ast_type(other)],
+                    };
+                    self.enum_variant_field_types.insert(v.name.clone(), types);
                 }
             } else {
                 self.struct_names.insert(s.name.clone());
@@ -1091,6 +1104,27 @@ fn collect_ast_pattern_vars(pat: &AstPattern, out: &mut Vec<String>) {
     }
 }
 
+/// 变体模式字段绑定：`Shape::Circle(x: _, y: _, radius: r)` → r 绑定为
+/// radius 字段类型（int）而非整个 scrutinee 类型。按字段位置匹配。
+fn field_types_for_variant(pat: &AstPattern, ctx: &TypeCtx) -> Option<Vec<(String, IrType)>> {
+    let (vname, field_pats) = match pat {
+        AstPattern::Variant(name, args) => (name, args),
+        _ => return None,
+    };
+    // 变体名可能是 "Shape.Circle" 或 "Circle"
+    let vbase = vname.rsplit('.').next().unwrap_or(vname);
+    let ftypes = ctx.enum_variant_field_types.get(vbase)?;
+    let mut out = Vec::new();
+    for (i, fp) in field_pats.iter().enumerate() {
+        if let AstPattern::Ident(bind) = fp {
+            if let Some(fty) = ftypes.get(i) {
+                out.push((bind.clone(), fty.clone()));
+            }
+        }
+    }
+    Some(out)
+}
+
 /// 收集 IR Pattern 中绑定的所有变量名
 #[allow(dead_code)]
 fn collect_pattern_vars(pat: &Pattern, out: &mut Vec<String>) {
@@ -1646,6 +1680,8 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     let mut body_ctx = TypeCtx::new();
                     body_ctx.current_generics = ctx.current_generics.clone();
                     body_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                    body_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                    body_ctx.enum_variants = ctx.enum_variants.clone();
                     // 从模式中提取绑定变量名并添加到上下文
                     fn collect_pattern_vars(pat: &AstPattern, vars: &mut Vec<String>) {
                         match pat {
@@ -1668,6 +1704,12 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     let scrut_ty = infer_expr_type(expr, ctx);
                     for v in &bound_vars {
                         body_ctx.add_var(v, scrut_ty.clone());
+                    }
+                    // 变体模式字段绑定：Shape::Circle(_, _, r) → r 绑定为字段类型（int）
+                    if let Some(ftypes) = field_types_for_variant(&arm.pattern, &body_ctx) {
+                        for (fname, fty) in ftypes {
+                            body_ctx.add_var(&fname, fty);
+                        }
                     }
                     let body = convert_block_with_ctx(&arm.body, &body_ctx);
                     MatchArm {
@@ -2561,6 +2603,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     let mut arm_ctx = TypeCtx::new();
                     arm_ctx.current_generics = ctx.current_generics.clone();
                     arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                    arm_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
                     // 复制 enum_variants 以便模式匹配能正确解析枚举类型
                     for (vn, en) in &ctx.enum_variants {
                         arm_ctx.enum_variants.insert(vn.clone(), en.clone());
@@ -2575,6 +2618,15 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     if let AstPattern::Ident(name) = &arm.pattern {
                         let scrut_ty = infer_expr_type(expr, ctx);
                         arm_ctx.add_var(name, scrut_ty);
+                    }
+                    // 变体模式字段绑定：Shape::Circle(x: _, y: _, radius: r) →
+                    // r 绑定为 radius 字段类型（int），而非整个 scrutinee 类型
+                    if let AstPattern::Variant(_, field_pats) = &arm.pattern {
+                        if let Some(ftypes) = field_types_for_variant(&arm.pattern, &arm_ctx) {
+                            for (fname, ty) in ftypes {
+                                arm_ctx.add_var(&fname, ty);
+                            }
+                        }
                     }
                     let body = convert_block_with_ctx(&arm.body, &arm_ctx);
                     MatchArm {
@@ -3208,6 +3260,9 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     for (vn, en) in &ctx.enum_variants {
         block_ctx.enum_variants.insert(vn.clone(), en.clone());
     }
+    for (vn, ft) in &ctx.enum_variant_field_types {
+        block_ctx.enum_variant_field_types.insert(vn.clone(), ft.clone());
+    }
     for (cn, ct) in &ctx.top_level_consts {
         block_ctx.top_level_consts.insert(cn.clone(), ct.clone());
     }
@@ -3806,6 +3861,9 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     for (vn, en) in &ctx.enum_variants {
         fn_ctx.enum_variants.insert(vn.clone(), en.clone());
     }
+    for (vn, ft) in &ctx.enum_variant_field_types {
+        fn_ctx.enum_variant_field_types.insert(vn.clone(), ft.clone());
+    }
     for (name, ty) in &ctx.fn_returns {
         fn_ctx.fn_returns.insert(name.clone(), ty.clone());
     }
@@ -4381,7 +4439,19 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
 
     Item::Impl(ImplDef {
         trait_: imp.trait_name.as_ref().map(|n| IrType::named(n)),
-        for_type: IrType::named(&imp.type_name),
+        // for_type 需携带 impl 泛型参数：impl Box<T> → Box<T>
+        for_type: if imp.generics.is_empty() {
+            IrType::named(&imp.type_name)
+        } else {
+            IrType::Named {
+                path: imp.type_name.clone(),
+                args: imp
+                    .generics
+                    .iter()
+                    .map(|g| IrType::Generic(g.clone()))
+                    .collect(),
+            }
+        },
         generics: imp
             .generics
             .iter()
