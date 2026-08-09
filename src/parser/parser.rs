@@ -944,6 +944,14 @@ impl Parser {
                 Token::Ident(n) => n,
                 t => return Err(format!("Expected generic param, got {:?}", t)),
             };
+            // type-pack 变长泛型参数（03d-可变参数.md §2.8 方案 B）：`Ts...`
+            // 解析为普通泛型参数 Ts（变长展开能力待 codegen 实现，先保证解析通过）
+            if self.check(&Token::DotDotDot) {
+                self.advance(); // consume ...
+            } else if self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot {
+                self.advance(); // consume ..
+                self.advance(); // consume .
+            }
             // 内联 trait 约束: T: Ordered + Clone
             let mut bounds: Vec<Type> = Vec::new();
             if self.check(&Token::Colon) {
@@ -1263,10 +1271,22 @@ impl Parser {
         self.expect(Token::Where)?;
         let mut bounds = Vec::new();
         loop {
-            let type_param = match self.advance() {
+            // where 子句约束参数支持关联类型路径：`I.Item: Add<...>`（06c-trait定义.md §五）
+            // 或 trait 内 `Self.Item: ...`（Self 是 Token::Self_ 特殊 token）。
+            // 读类型参数后若跟 `.` + Ident（关联类型），拼接为 "I.Item" / "Self.Item" 形式
+            let mut type_param = match self.advance() {
                 Token::Ident(n) => n,
+                Token::Self_ => "Self".to_string(),
                 t => return Err(format!("Expected type param in where, got {:?}", t)),
             };
+            while self.check(&Token::Dot) {
+                self.advance(); // .
+                let seg = match self.advance() {
+                    Token::Ident(s) => s,
+                    t => return Err(format!("Expected assoc type in where, got {:?}", t)),
+                };
+                type_param = format!("{}.{}", type_param, seg);
+            }
             self.expect(Token::Colon)?;
 
             let mut trait_bounds = Vec::new();
@@ -1424,6 +1444,21 @@ impl Parser {
                             continue;
                         }
                         inner.push(self.parse_type()?);
+                        // 命名泛型参数（关联类型绑定）：`Add<Output = I.Item>`
+                        // （06c-trait定义.md §五：trait 泛型用关联类型绑定）——
+                        // `Output = Type` 形式跳过 Output，仅记录类型参数
+                        if self.check(&Token::Eq) {
+                            self.advance(); // consume =
+                            let _ = self.parse_type()?; // 关联类型值
+                        }
+                        // type-pack 元素 `Ts...`（03d §2.8 方案 B）：消费尾部 `...`
+                        // （parse_type 解析 Ident(Ts) 后残留 DotDotDot）
+                        if self.check(&Token::DotDotDot) {
+                            self.advance(); // consume ...
+                        } else if self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot {
+                            self.advance(); // consume ..
+                            self.advance(); // consume .
+                        }
                         if self.check(&Token::Comma) {
                             self.advance();
                         }
@@ -1903,7 +1938,8 @@ impl Parser {
                     methods.push(f);
                 }
                 Token::Ident(ref kw) if kw == "type" => {
-                    // trait 关联类型声明（§五）: `type Item`
+                    // trait 关联类型声明（§五）: `type Item` 或带 bound 的
+                    // `type Iter: Iterator<Item = Self.Item>`
                     self.advance(); // type
                     let assoc_name = match self.advance() {
                         Token::Ident(n) => n,
@@ -1915,6 +1951,12 @@ impl Parser {
                         }
                     };
                     assoc_types.push(assoc_name);
+                    // 可选 bound：`type Iter: Iterator<...>` — 消费 bound 类型
+                    // （bound 的完整 Rust 输出暂由关联类型使用处承担）
+                    if self.check(&Token::Colon) {
+                        self.advance(); // :
+                        let _ = self.parse_type()?;
+                    }
                 }
                 Token::Ident(_) => {
                     let f_name = self.advance().to_string();
@@ -1976,10 +2018,17 @@ impl Parser {
         };
 
         // 支持 impl 类型上的泛型参数: impl<T> Box<T> =
-        // 也支持 `impl Box<T>` 形式（类型名后的泛型参数一并归入 generics）
+        // 也支持 `impl Box<T>` 形式（类型名后的泛型参数一并归入 generics）。
+        // 注意：`impl<T> Iterator for Once<T>` 中 Once<T> 的 T 是 impl 泛型 T 的
+        // 使用，不能重复收集（否则生成 impl<T, T> for Once<T, T>，E0403/E0107）；
+        // 仅当类型参数名不在已有 generics 中时才收集（如 `impl Box<T>` 无 impl 泛型）
         if self.check(&Token::Lt) {
             let mut impl_gen = self.parse_generic_params()?;
-            generics.append(&mut impl_gen);
+            for g in impl_gen.drain(..) {
+                if !generics.iter().any(|x| x == &g) {
+                    generics.push(g);
+                }
+            }
         }
 
         // 支持 = 和 : 两种分隔符

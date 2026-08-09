@@ -726,8 +726,32 @@ impl ParserStmtExt for Parser {
                         });
                     }
                 }
+                // 无 let 前缀的默认可变绑定: name = value
+                // （语句级先于 parse_expr 识别；否则 parse_expr 的赋值表达式分支会把
+                // `x = 42` 解析为 Expr::Assign，builder 又转成比较 → 变量未声明 E0425）
+                if let Token::Ident(_) = self.peek() {
+                    if self.peek_n(1) == &Token::Eq {
+                        let name = self.advance().to_string();
+                        self.advance(); // 消费 =
+                        let value = self.parse_maybe_build_value()?;
+                        return Ok(Stmt::Let {
+                            name,
+                            mutable: true,
+                            is_ref: false,
+                            is_owned: false,
+                            ty: None,
+                            value,
+                        });
+                    }
+                }
                 // 尝试解析为表达式语句或赋值
                 let expr = self.parse_expr()?;
+                // parse_expr 的赋值表达式分支（为闭包体 `|x| = total = total + x` 支持）
+                // 可能已抢先消费 `=`：语句级 `a[i] = v` / `obj.f = v` 需转回 Stmt::Assign，
+                // 否则 builder 把 Assign 转 BinOp == → 生成比较而非赋值（E0369 Box<dyn Any>）
+                if let Expr::Assign { target, op, value } = expr {
+                    return Ok(Stmt::Assign { target: *target, op, value: *value });
+                }
                 let _lhs_name = match &expr {
                     Expr::Ident(n) => n.clone(),
                     _ => "_".to_string(),

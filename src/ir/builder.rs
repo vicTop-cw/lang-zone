@@ -930,11 +930,32 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 .map(|s| infer_stmt_type(s, ctx))
                 .unwrap_or(IrType::Unit)
         }
-        AstExpr::Match { arms, .. } => arms
-            .first()
-            .and_then(|arm| arm.body.last())
-            .map(|s| infer_stmt_type(s, ctx))
-            .unwrap_or(IrType::Unit),
+        AstExpr::Match { expr, arms } => {
+            // type-pack 异质元组（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的 args
+            // 编译为 List<Ts> 切片，`case (a,)` / `case (a, ..)` 臂体返回 a（元素 &Ts）。
+            // 从 scrutinee 元素类型 + 模式绑定变量推断臂体返回类型（否则 Any→i64 误判）
+            let scrut_ty = infer_expr_type(expr, ctx);
+            let elem_ty = match &scrut_ty {
+                IrType::Named { args, .. } if !args.is_empty() => Some(args[0].clone()),
+                _ => None,
+            };
+            if let (Some(arm), Some(elem)) = (arms.first(), elem_ty) {
+                let mut binds = Vec::new();
+                collect_ast_pattern_vars(&arm.pattern, &mut binds);
+                // 臂体返回绑定变量（如 `case (a,) => a`）→ 返回元素类型
+                if let Some(last) = arm.body.last() {
+                    if let AstStmt::Expr(AstExpr::Ident(n)) = last {
+                        if binds.iter().any(|b| b == n) {
+                            return elem;
+                        }
+                    }
+                }
+            }
+            arms.first()
+                .and_then(|arm| arm.body.last())
+                .map(|s| infer_stmt_type(s, ctx))
+                .unwrap_or(IrType::Unit)
+        }
         AstExpr::Closure { .. } => IrType::Any,
         AstExpr::BlockExpr(_) => IrType::Any,
         AstExpr::Range { .. } => IrType::named("Range"),
@@ -2198,8 +2219,19 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     let mut bound_vars = Vec::new();
                     collect_pattern_vars(&arm.pattern, &mut bound_vars);
                     let scrut_ty = infer_expr_type(expr, ctx);
+                    // 元组模式绑定（type-pack 异质元组 03d §2.8 方案 B）：
+                    // `case (a,)` / `case (a, ..)` 中 a 绑定切片元素（&Ts），
+                    // 类型应为集合元素类型而非整个集合（否则返回类型推断错）
+                    let bind_ty = if matches!(&arm.pattern, AstPattern::Tuple(_)) {
+                        match &scrut_ty {
+                            IrType::Named { args, .. } if !args.is_empty() => args[0].clone(),
+                            _ => scrut_ty.clone(),
+                        }
+                    } else {
+                        scrut_ty.clone()
+                    };
                     for v in &bound_vars {
-                        body_ctx.add_var(v, scrut_ty.clone());
+                        body_ctx.add_var(v, bind_ty.clone());
                     }
                     // 变体模式字段绑定：Shape::Circle(_, _, r) → r 绑定为字段类型（int）
                     if let Some(ftypes) = field_types_for_variant(&arm.pattern, &body_ctx) {
@@ -4054,17 +4086,22 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         },
 
         AstStmt::Assert { expr, expected } => {
-            // assert expr == expected → assert!(expr == expected)
+            // assert expr == expected → assert_eq!(expr, expected)
+            // assert expr（单表达式布尔断言）→ assert!(expr)
+            // （否则 assert_eq! 只有单参数 → Rust 宏 "unexpected end of macro invocation"）
             let mut args = vec![convert_expr(expr, ctx)];
-            if let Some(exp) = expected {
+            let callee_name = if let Some(exp) = expected {
                 args.push(convert_expr(exp, ctx));
-            }
+                "assert_eq!"
+            } else {
+                "assert!"
+            };
             Stmt::ExprStmt {
                 expr: Expr::new(
                     ExprKind::Call {
                         type_args: vec![],
                         callee: Box::new(Expr::new(
-                            ExprKind::Var("assert_eq!".into()),
+                            ExprKind::Var(callee_name.into()),
                             IrType::Any,
                             Span::unknown(),
                         )),

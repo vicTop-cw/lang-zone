@@ -78,6 +78,21 @@ impl ParserExprExt for Parser {
             let value = self.parse_expr()?;
             return Ok(Expr::Walrus { target: Box::new(left), value: Box::new(value) });
         }
+        // 赋值表达式: x = expr（闭包体 `|x: int| = total = total + x`、复合赋值 += 等）。
+        // 注意 `==` 是比较（EqEq），此处是单 `=` 赋值
+        if matches!(
+            &left,
+            Expr::Ident(_) | Expr::FieldAccess { .. } | Expr::Index { .. }
+        ) && self.check(&Token::Eq)
+        {
+            self.advance();
+            let value = self.parse_expr()?;
+            return Ok(Expr::Assign {
+                target: Box::new(left),
+                op: AssignOp::Eq,
+                value: Box::new(value),
+            });
+        }
         // Range: a..b or a..=b
         if self.check(&Token::DotDot) || self.check(&Token::DotDotEq) {
             let inclusive = self.check(&Token::DotDotEq);
@@ -487,6 +502,8 @@ impl ParserExprExt for Parser {
                         Token::MagicMethod(n) => n,
                         Token::True => "True".to_string(),
                         Token::False => "False".to_string(),
+                        // 元组索引访问 args.0 / args.1（type-pack 异质元组，03d §2.8 方案 B）
+                        Token::IntLit(n) => n.to_string(),
                         t => return Err(format!("Expected field/method, got {:?}", t)),
                     };
                     if self.check(&Token::LParen) {
@@ -996,6 +1013,34 @@ impl ParserExprExt for Parser {
                 let cond = self.parse_expr()?;
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
+                // 内联 if 表达式（`let x = if cond: then else`，math.lz 行 125）：
+                // 冒号后直接跟表达式而非缩进块 → then_body 为单个表达式语句
+                if !self.check(&Token::Indent) {
+                    let then_expr = self.parse_expr()?;
+                    let mut elif_clauses = Vec::new();
+                    let mut else_body = None;
+                    // else if 链：`if a: x else if b: y else z`
+                    if self.check(&Token::Else) {
+                        self.advance();
+                        if self.check(&Token::If) {
+                            self.advance();
+                            let eif_cond = self.parse_expr()?;
+                            self.expect(Token::Colon)?;
+                            self.skip_newlines();
+                            let eif_then = self.parse_expr()?;
+                            elif_clauses.push((eif_cond, vec![Stmt::Expr(eif_then)]));
+                        } else {
+                            let else_expr = self.parse_expr()?;
+                            else_body = Some(vec![Stmt::Expr(else_expr)]);
+                        }
+                    }
+                    return Ok(Expr::If {
+                        cond: Box::new(cond),
+                        then_body: vec![Stmt::Expr(then_expr)],
+                        elif_clauses,
+                        else_body,
+                    });
+                }
                 self.expect(Token::Indent)?;
                 let then_body = self.parse_block()?;
                 self.expect(Token::Dedent)?;
@@ -1313,6 +1358,18 @@ impl ParserExprExt for Parser {
             Token::True => Ok(Pattern::Bool(true)),
             Token::False => Ok(Pattern::Bool(false)),
             Token::Underscore => Ok(Pattern::Wildcard),
+            // match 兜底分支：`else => ...` 等价 `_ => ...`（通配）
+            Token::Else => Ok(Pattern::Wildcard),
+            // `..` / `..rest` 剩余绑定（元组模式 (a, ..) / 列表模式 [a, ..rest]，03d §2.8 方案 B）
+            Token::DotDot | Token::DotDotDot => {
+                // first 已由顶层 advance() 消费（first == DotDot），此处仅检查 rest 绑定名
+                let rest_name = if matches!(self.peek(), Token::Ident(_)) {
+                    Some(self.advance().to_string())
+                } else {
+                    None
+                };
+                Ok(Pattern::Rest(rest_name))
+            }
             Token::Ident(n) => {
                 let mut name = n;
                 // 处理点路径模式: Shape.Circle(x: _, y: _, radius: r)
@@ -1360,12 +1417,19 @@ impl ParserExprExt for Parser {
             }
             Token::LParen => {
                 let mut patterns = Vec::new();
+                // 跟踪是否出现逗号：`(a)` 是分组（解包为单模式），`(a,)` 是单元素
+                // 元组模式（保留 Tuple），`(a, b)` 是多元素元组（03d §2.8 方案 B：
+                // `case (a,) => a` / `case (a, ..) => a` 匹配 type-pack 异质元组）
+                let mut has_comma = false;
                 while !self.check(&Token::RParen) {
                     patterns.push(self.parse_pattern()?);
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                        has_comma = true;
+                    }
                 }
                 self.expect(Token::RParen)?;
-                if patterns.len() == 1 {
+                if patterns.len() == 1 && !has_comma {
                     Ok(patterns.into_iter().next().unwrap())
                 } else {
                     Ok(Pattern::Tuple(patterns))

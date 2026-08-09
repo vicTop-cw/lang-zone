@@ -236,20 +236,22 @@ def join(parts: List<str>, separator: str) -> str =
     return result
 
 /// 格式化 (简单版本, 替换 {})
-def format(template: str, args: List<str>) -> str =
+// `template` 是规范 00-词法基础.md §1.8 的宏模板定义硬关键字，不可作标识符
+// （用户指令：macro/template/comptime 特性不修）；修正测试文件参数名为 `tpl`
+def format(tpl: str, args: List<str>) -> str =
     mut result = ""
     mut pos = 0
     mut arg_idx = 0
-    while pos < template.len():
-        match template.slice_from(pos).find("{}"):
+    while pos < tpl.len():
+        match tpl.slice_from(pos).find("{}"):
             case Some(idx):
-                result = result + template.slice(pos, pos + idx)
+                result = result + tpl.slice(pos, pos + idx)
                 if arg_idx < args.len():
                     result = result + args.get(arg_idx).unwrap_or("")
                     arg_idx = arg_idx + 1
                 pos = pos + idx + 2
             case None:
-                result = result + template.slice_from(pos)
+                result = result + tpl.slice_from(pos)
                 break
     return result
 

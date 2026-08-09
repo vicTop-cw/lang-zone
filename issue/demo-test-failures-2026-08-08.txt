@@ -1,18 +1,16 @@
-PASS=187 FAIL=17
+PASS=189 FAIL=15
 PARSE|99_spec/macro_real.lz|error: Unexpected token at top level: Backtick
-PARSE|variadic_type_fidelity.lz|error: Expected LParen, got DotDot at pos 73
-PARSE|lz_std/iter.lz|error: Expected Colon, got Dot at pos 1849
-PARSE|lz_std/math.lz|error: Expected Indent, got Minus at pos 619
-PARSE|lz_std/string.lz|error: Expected param name, got Template
-PARSE|lz_std/traits.lz|error: Expected type param in where, got Self_
+PARSE|lz_std/traits.lz|error: Expected Eq or Colon, got Indent at pos 3324
 RUSTC|08_modules/use_macros.lz|error[E0600]: cannot apply unary operator `!` to type `String`
-RUSTC|lz_std/__init__.lz|error[E0369]: cannot add `&str` to `&str`
-RUSTC|lz_std/box.lz|error[E0255]: the name `Rc` is defined multiple times
-RUSTC|lz_std/dict.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/error.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/list.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/option.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/ordering.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/prelude.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/result.lz|error: unexpected end of macro invocation
-RUSTC|lz_std/set.lz|error: unexpected end of macro invocation
+RUSTC|lz_std/box.lz|error[E0392]: type parameter `T` is never used
+RUSTC|lz_std/dict.lz|error[E0404]: expected trait, found derive macro `Hash`
+RUSTC|lz_std/error.lz|error[E0782]: expected a type, found a trait
+RUSTC|lz_std/iter.lz|error[E0423]: expected value, found type parameter `I`
+RUSTC|lz_std/list.lz|error[E0423]: expected value, found enum `Ordering`
+RUSTC|lz_std/math.lz|error[E0369]: cannot multiply `fn(i64) -> i64 {sign}` by `f64`
+RUSTC|lz_std/option.lz|error[E0053]: method `next` has an incompatible type for trait
+RUSTC|lz_std/ordering.lz|error[E0416]: identifier `Less_` is bound more than once in the same pattern
+RUSTC|lz_std/prelude.lz|error[E0423]: expected value, found enum `Ordering`
+RUSTC|lz_std/result.lz|error[E0277]: the trait bound `bool: lz_builtins::ImplicitFrom<i64>` is not satisfied
+RUSTC|lz_std/set.lz|error[E0404]: expected trait, found derive macro `Hash`
+RUSTC|lz_std/string.lz|error[E0390]: cannot define inherent `impl` for primitive types

@@ -1,7 +1,7 @@
-# DEMO 全面测试统计报告（2026-08-09 v156 更新）
+# DEMO 全面测试统计报告（2026-08-09 v157 更新）
 
 > 生成方式：`lang-zone.exe <file.lz>` → IR codegen（唯一路径）→ `rustc --edition 2021 --extern lz_builtins` 编译 → 运行验证
-> 本次变更：v156 修复 14 项（iterator_demo 嵌套迭代器 Iter<Iter<T>>、enum/magic_methods 自定义 Option 遮蔽 std、go_stmt 尾语句 Future 推断、nesting 系列 while/for-else labeled block + 迭代器链、block 系列 checker 块闭包捕获 &mut 参数、use_services --project 跨模块合并路径、edge-values-boundary 溢出用例修正、edge-walrus-operator walrus 赋值 + unwrap_or、Problems 探针 break 闭包/裸声明修正）
+> 本次变更：v157 修复 9 类（variadic_type_fidelity type-pack 全链、iter/math/string/traits 解析、__init__ &str+&str、box Rc/Arc 去冲突、lz_std 宏调用系列清零、parse_expr 闭包赋值/内联 if/元组模式等）（iterator_demo 嵌套迭代器 Iter<Iter<T>>、enum/magic_methods 自定义 Option 遮蔽 std、go_stmt 尾语句 Future 推断、nesting 系列 while/for-else labeled block + 迭代器链、block 系列 checker 块闭包捕获 &mut 参数、use_services --project 跨模块合并路径、edge-values-boundary 溢出用例修正、edge-walrus-operator walrus 赋值 + unwrap_or、Problems 探针 break 闭包/裸声明修正）
 > 排除项：`DEMO/99_errors/`（故意错误语法演示文件，预期报错）
 
 ## 一、总体结果
@@ -9,9 +9,9 @@
 | 指标 | 数量 |
 |------|------|
 | DEMO 测试文件总数（排除 99_errors） | 204 |
-| 通过（编译 + 运行成功） | 187 |
-| 失败 | 17 |
-| 通过率 | 91.7% |
+| 通过（编译 + 运行成功） | 189 |
+| 失败 | 15 |
+| 通过率 | 92.6% |
 
 ## 二、失败分类
 

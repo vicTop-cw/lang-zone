@@ -62,6 +62,14 @@ pub struct CodeGen {
     /// 当前循环嵌套深度（for/while/while let/loop）：
     /// plain block 内循环中的 break 仍跳出循环，块顶层的 break 退出闭包
     loop_depth: usize,
+    /// type-pack 切片模式绑定变量名集合（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的
+    /// args 编译为 &[Ts]，`[a]` / `[a, ..]` 模式中 a 绑定 &Ts（引用），臂体内
+    /// 引用 a 需生成 a.clone()（否则 E0308 expected Ts, found &Ts）
+    slice_clone_bindings: std::collections::HashSet<String>,
+    /// 当前是否在 `impl Iterator for X` 内（LZ 迭代协议，规范 06d-内置魔法trait和
+    /// 全局函数.md §五）：LZ 用 `__next__`/`__size_hint__` 魔术方法实现迭代协议，
+    /// 生成 std::iter::Iterator impl 时需映射为 `next`/`size_hint`（否则 E0407）
+    in_iterator_impl: bool,
     /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
     fn_param_info: HashMap<String, (usize, usize)>,
     /// 函数 ref/mut ref 参数标记：函数名 → 每参数 (is_ref, is_mut)（调用点自动传引用）
@@ -164,6 +172,8 @@ impl CodeGen {
             loop_else_counter: 0,
             plain_block_depth: 0,
             loop_depth: 0,
+            slice_clone_bindings: std::collections::HashSet::new(),
+            in_iterator_impl: false,
             fn_param_info: HashMap::new(),
             fn_ref_params: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
@@ -797,8 +807,14 @@ impl CodeGen {
         self.emit_line("#[allow(non_snake_case)]");
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
-        self.emit_line("use std::rc::Rc;");
-        self.emit_line("use std::sync::Arc;");
+        // 若模块自定义了 Rc/Arc 类型（如 lz_std/box.lz 的 `struct Rc<T>`/`struct Arc<T>`，
+        // LZ 自举标准库自行实现智能指针），跳过 std 同名导入，否则 E0255 重复定义
+        if !self.known_types.contains("Rc") {
+            self.emit_line("use std::rc::Rc;");
+        }
+        if !self.known_types.contains("Arc") {
+            self.emit_line("use std::sync::Arc;");
+        }
         self.emit_line("use std::fmt::Debug;");
         self.emit_line("use std::fmt::Display;");
         self.buf.push('\n');
@@ -921,9 +937,21 @@ impl CodeGen {
                             // 生成器（iterator）返回类型：Iter<T> → Vec<T>
                             "Vec".to_string()
                         } else {
-                            path.clone()
+                            // 关联类型路径（06c-trait定义.md §五）：`I.Item` 在 Rust 中
+                            // 需写为 `I::Item`（泛型参数上的关联类型用 `::` 而非 `.`）
+                            path.replace('.', "::")
                         }
                     });
+                // 用户自定义类型（struct/enum/impl-only）优先于内置 type_map 映射：
+                // lz_std/iter.lz 自定义 `struct Range`，type_map 却映射到 std::ops::Range，
+                // 导致 `impl Iterator for std::ops::Range<i64>` 与字段访问冲突（E0609）
+                let mapped = if self.emitted_types.contains(path.as_str())
+                    || self.impl_types.contains(path.as_str())
+                {
+                    path.clone()
+                } else {
+                    mapped
+                };
                 if args.is_empty() {
                     // 常见容器类型需要默认泛型参数，否则 Rust 无法推断
                     // 使用 i64（LZ 默认数值类型）作为默认元素类型，避免 Vec::new() 无法推断
@@ -1581,31 +1609,40 @@ impl CodeGen {
             };
             format!(" -> Vec<{}>", self.rust_type(&elem))
         } else if f.ret_ty != IrType::Unit {
-            let ret_ty_str = match &f.ret_ty {
-                IrType::Fn { params, ret } => {
-                    // 递归生成嵌套 Fn 返回类型：
-                    // fn(int) -> fn(int) -> int → impl Fn(i64) -> Box<dyn Fn(i64) -> i64>
-                    // （Rust 不允许 impl Fn -> impl Fn 嵌套，E0562；内层用 Box<dyn Fn>）
-                    fn rust_fn_ret(ty: &IrType, cg: &CodeGen) -> String {
-                        match ty {
-                            IrType::Fn { params, ret } => {
-                                let p: Vec<String> =
-                                    params.iter().map(|p| cg.rust_type(p)).collect();
-                                format!(
-                                    "Box<dyn Fn({}) -> {}>",
-                                    p.join(", "),
-                                    rust_fn_ret(ret, cg)
-                                )
+            // `impl Iterator` 内 `size_hint` 的返回类型：std Iterator 要求
+            // `(usize, Option<usize>)`，而 LZ 写 `(int, Option<int>)`（i64）——
+            // 生成时转为 `(usize, Option<usize>)`（否则 E0053 类型不兼容）
+            if self.in_iterator_impl
+                && (f.name == "size_hint" || f.name == "__size_hint__")
+            {
+                format!(" -> (usize, Option<usize>)")
+            } else {
+                let ret_ty_str = match &f.ret_ty {
+                    IrType::Fn { params, ret } => {
+                        // 递归生成嵌套 Fn 返回类型：
+                        // fn(int) -> fn(int) -> int → impl Fn(i64) -> Box<dyn Fn(i64) -> i64>
+                        // （Rust 不允许 impl Fn -> impl Fn 嵌套，E0562；内层用 Box<dyn Fn>）
+                        fn rust_fn_ret(ty: &IrType, cg: &CodeGen) -> String {
+                            match ty {
+                                IrType::Fn { params, ret } => {
+                                    let p: Vec<String> =
+                                        params.iter().map(|p| cg.rust_type(p)).collect();
+                                    format!(
+                                        "Box<dyn Fn({}) -> {}>",
+                                        p.join(", "),
+                                        rust_fn_ret(ret, cg)
+                                    )
+                                }
+                                other => cg.rust_type(other),
                             }
-                            other => cg.rust_type(other),
                         }
+                        let p: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();
+                        format!("impl Fn({}) -> {}", p.join(", "), rust_fn_ret(ret, self))
                     }
-                    let p: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();
-                    format!("impl Fn({}) -> {}", p.join(", "), rust_fn_ret(ret, self))
-                }
-                _ => self.rust_type(&f.ret_ty),
-            };
-            format!(" -> {}", ret_ty_str)
+                    _ => self.rust_type(&f.ret_ty),
+                };
+                format!(" -> {}", ret_ty_str)
+            }
         } else {
             String::new()
         };
@@ -1620,8 +1657,20 @@ impl CodeGen {
         let fn_name = if is_typed_main {
             "__lz_main".to_string()
         } else {
+            let raw = f.name.clone();
+            // LZ 迭代协议（规范 06d §五）：`impl Iterator for X` 中 `__next__` 魔术
+            // 方法映射为 std::iter::Iterator 的 `next`、`__size_hint__` → `size_hint`
+            let mapped = if self.in_iterator_impl {
+                match raw.as_str() {
+                    "__next__" => "next".to_string(),
+                    "__size_hint__" => "size_hint".to_string(),
+                    _ => raw.clone(),
+                }
+            } else {
+                raw.clone()
+            };
             self.mangled_fn_name(
-                f.name.clone(),
+                mapped,
                 &f.params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
             )
         };
@@ -2163,6 +2212,14 @@ impl CodeGen {
             .as_ref()
             .map(|t| format!("{} for ", self.rust_type(t)))
             .unwrap_or_default();
+        // LZ 迭代协议（规范 06d-内置魔法trait和全局函数.md §五）：
+        // `impl Iterator for X` 用 `__next__`/`__size_hint__` 魔术方法实现，
+        // 生成 std::iter::Iterator impl 时方法名需映射为 `next`/`size_hint`（E0407）
+        let saved_iterator_impl = self.in_iterator_impl;
+        self.in_iterator_impl = matches!(
+            &i.trait_,
+            Some(IrType::Named { path, .. }) if path == "Iterator"
+        );
         self.emit_line(&format!(
             "impl{} {}{} {{",
             generics,
@@ -2183,6 +2240,7 @@ impl CodeGen {
             self.buf.push('\n');
         }
         self.in_impl_generic = saved_impl_generic;
+        self.in_iterator_impl = saved_iterator_impl;
         self.indent -= 1;
         self.emit_line("}");
     }
@@ -2885,6 +2943,13 @@ impl CodeGen {
                 }
                 // 如果发生了重命名，用新名称注册 declared
                 self.declared.insert(safe_name.clone());
+                // 模块级函数/常量名冲突时（E0530，如 math.lz 的 `let sign` 遮蔽
+                // 模块级 `fn sign`）声明被重命名为 sign_，引用处 Var 也需同步解析：
+                // 登记到 param_renames（与参数重命名同一机制），否则 `sign * x`
+                // 会解析到模块级 fn sign（E0369 cannot multiply fn by f64）
+                if safe_name != name.as_str() {
+                    self.param_renames.insert(name.clone(), safe_name.clone());
+                }
                 // LZ 语义：所有 let 绑定生成 mut（LZ 中容器/结构体方法可修改内容）
                 // 例外：`_` 通配符不能有 mut（Rust E0573）
                 let mut_kw = if safe_name == "_" { "" } else { "mut " };
@@ -3331,6 +3396,13 @@ impl CodeGen {
                 // 若为非尾语句（值被丢弃），arm 产出非 () 值时直接 `match { };`
                 // 会报 E0308（expected (), found T），需用 let _ = 丢弃值。
                 let discard = !is_last;
+                // type-pack 异质元组（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的 args
+                // 编译为切片 &[Ts]，元组模式 `(a,)` / `(a, ..)` 需转为切片模式
+                // `[a]` / `[a, ..]`（Rust 切片模式），臂体 a 绑定 &Ts
+                let is_slice_scrutinee = matches!(
+                    &scrutinee.ty,
+                    IrType::Named { path, .. } if path == "List" || path == "Vec" || path == "Tuple"
+                );
                 let open = if discard {
                     format!("let _ = match {} {{", scrut_str)
                 } else {
@@ -3347,6 +3419,9 @@ impl CodeGen {
                     };
                     let pat_s = if dict_entries.is_some() {
                         "_".to_string()
+                    } else if is_slice_scrutinee {
+                        // 切片上下文：元组模式 (a,) / (a, ..) → 切片模式 [a] / [a, ..]
+                        self.gen_slice_pattern(&arm.pattern)
                     } else {
                         self.gen_pattern(&arm.pattern)
                     };
@@ -3387,12 +3462,34 @@ impl CodeGen {
                     // （E0384：ref mut c 绑定为 &mut，直接赋值给不可变引用报错）
                     let saved_ref_mut = self.ref_mut_bindings.clone();
                     self.ref_mut_bindings = self.collect_ref_mut_bindings(&arm.pattern);
+                    // type-pack 切片模式绑定（03d §2.8 方案 B）：`[a]` / `[a, ..]` 中
+                    // a 绑定 &Ts（引用），臂体内引用 a 需生成 a.clone()（E0308 修复）
+                    let saved_slice_clone = self.slice_clone_bindings.clone();
+                    if is_slice_scrutinee {
+                        let mut bindings = Vec::new();
+                        self.collect_slice_bindings(&arm.pattern, &mut bindings);
+                        for b in bindings {
+                            self.slice_clone_bindings.insert(b);
+                        }
+                    }
                     // Match arm body 不应生成 return（值应流向 match 表达式外层）
                     let saved = self.suppress_tail_return;
                     self.suppress_tail_return = true;
                     self.gen_block_inner(&arm.body);
                     self.suppress_tail_return = saved;
                     self.ref_mut_bindings = saved_ref_mut;
+                    self.slice_clone_bindings = saved_slice_clone;
+                    self.indent -= 1;
+                    self.emit_line("}");
+                }
+                // type-pack 切片模式（03d §2.8 方案 B）：args 是 &[Ts]，若用户臂未
+                // 覆盖空切片 `&[]`，自动追加通配兜底臂（否则 E0004 non-exhaustive）
+                if is_slice_scrutinee
+                    && !arms.iter().any(|a| matches!(a.pattern, Pattern::Wildcard))
+                {
+                    self.emit_line("_ => {");
+                    self.indent += 1;
+                    self.emit_line("panic!(\"unexpected empty args\");");
                     self.indent -= 1;
                     self.emit_line("}");
                 }
@@ -3707,7 +3804,20 @@ impl CodeGen {
         match &expr.kind {
             ExprKind::Var(name) => name.clone(),
             ExprKind::FieldAccess { base, field } => {
-                format!("{}.{}", self.gen_target_expr(base), field)
+                // type-pack 异质元组索引（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的 args
+                // 编译为切片 &[Ts]，`args.0` 映射为 `args[0]`（Rust 切片索引）；
+                // 数字字段名仅在 base 是集合/切片类型时按索引处理
+                let is_numeric_field = !field.is_empty() && field.chars().all(|c| c.is_ascii_digit());
+                if is_numeric_field
+                    && matches!(
+                        &base.ty,
+                        IrType::Named { path, .. } if path == "List" || path == "Vec" || path == "Tuple"
+                    )
+                {
+                    format!("{}[{}]", self.gen_target_expr(base), field)
+                } else {
+                    format!("{}.{}", self.gen_target_expr(base), field)
+                }
             }
             ExprKind::IndexGet { base, key } => {
                 let key_s = self.gen_index_key(key, base);
@@ -3741,6 +3851,10 @@ impl CodeGen {
                     // 模块级 LazyLock 静态集合：表达式访问需解引用 + clone，
                     // 否则 `config.and_then(...)` 报 E0507（cannot move out of dereference）
                     format!("(*{}).clone()", name)
+                } else if self.slice_clone_bindings.contains(name.as_str()) {
+                    // type-pack 切片模式绑定（03d §2.8 方案 B）：臂体内引用 a
+                    // 需 a.clone()（a 绑定 &Ts，返回/使用需 owned Ts，E0308 修复）
+                    format!("{}.clone()", name)
                 } else {
                     name.clone()
                 }
@@ -4914,6 +5028,12 @@ impl CodeGen {
                 } else if method == "first" {
                     // .first() 返回 Option<&T>，需 .copied() 转 Option<T>（E0308 修复）
                     format!("({}).copied()", call)
+                } else if method == "type_name" && args_s.is_empty() {
+                    // 运行时类型自省（03d §2.8 方案 C）：v.type_name() →
+                    // std::any::type_name::<T>()（T 为 receiver 静态类型，去掉引用层级）
+                    let t = self.rust_type(&receiver.ty);
+                    let t = t.trim_start_matches('&').trim().to_string();
+                    format!("std::any::type_name::<{}>()", t)
                 } else {
                     call
                 }
@@ -4923,6 +5043,17 @@ impl CodeGen {
                 // Module path: std.io.print → std::io::print
                 // Method/field access: config.get() -> config.get (field 小写开头)
                 // duck 约束泛型参数的字段访问：a.field → a.__field_field()（trait accessor）
+                // type-pack 异质元组索引（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的 args
+                // 编译为切片 &[Ts]，`args.0` 映射为 `args[0]`（Rust 切片索引）
+                let is_numeric_field = !field.is_empty() && field.chars().all(|c| c.is_ascii_digit());
+                if is_numeric_field
+                    && matches!(
+                        &base.ty,
+                        IrType::Named { path, .. } if path == "List" || path == "Vec" || path == "Tuple"
+                    )
+                {
+                    return format!("{}[{}]", self.gen_expr(base), field);
+                }
                 if let ExprKind::Var(name) = &base.kind {
                     if let Some(fields) = self.duck_field_members.get(name) {
                         if fields.contains(field) {
@@ -5155,9 +5286,23 @@ impl CodeGen {
                 if *op == BinOpKind::Add && str_concat {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
+                    // const str（&str 静态引用，如 __init__.lz 的 `STDLIB_NAME + " v"`）
+                    // 或字符串字面量作 lhs 时 `&str + &str` 非法（E0369）：
+                    // 需先 `.to_string()` 变为 String 再拼 &str
+                    let lhs_is_ref_str = matches!(&lhs.kind, ExprKind::Lit(LitKind::Str(_)))
+                        || matches!(
+                            &lhs.kind,
+                            ExprKind::Var(name)
+                                if self.top_level_static_names.contains(name.as_str())
+                        );
+                    let lhs_base = if lhs_is_ref_str {
+                        format!("{}.to_string()", lhs_s)
+                    } else {
+                        lhs_s
+                    };
                     let rhs_is_variadic = matches!(&rhs.kind, ExprKind::Var(name) if self.current_variadic_params.contains(name));
                     if rhs_is_variadic {
-                        return format!("{} + {}", lhs_s, rhs_s);
+                        return format!("{} + {}", lhs_base, rhs_s);
                     }
                     // String + String → String + &str（Rust Add<&str>）
                     // 对临时 String（format! 等）用 &{}[..] 切为 &str
@@ -5165,9 +5310,9 @@ impl CodeGen {
                         || rhs_s.ends_with(".to_string()")
                         || matches!(&rhs.kind, ExprKind::Var(_))
                     {
-                        return format!("{} + &{}[..]", lhs_s, rhs_s);
+                        return format!("{} + &{}[..]", lhs_base, rhs_s);
                     }
-                    return format!("{} + &{}", lhs_s, rhs_s);
+                    return format!("{} + &{}", lhs_base, rhs_s);
                 }
                 let op_s = self.binop_str(op);
                 // 链式比较分解: a < b < c → (a < b) && (b < c)
@@ -5844,6 +5989,45 @@ impl CodeGen {
     }
 
     // ── Pattern 生成 ──
+
+    /// 切片上下文模式生成（type-pack 异质元组 03d §2.8 方案 B）：
+    /// `..: Tuple<Ts...>` 的 args 编译为切片 &[Ts]，元组模式 `(a,)` / `(a, ..)`
+    /// 需转为 Rust 切片模式 `[a]` / `[a, ..]`（否则 E0308 expected slice, found tuple）。
+    /// 臂体绑定 a 为 &Ts（切片元素引用），臂体内自动 .clone() 取值。
+    fn gen_slice_pattern(&self, pat: &Pattern) -> String {
+        match pat {
+            Pattern::Tuple(elems) => {
+                let elems: Vec<String> = elems.iter().map(|e| self.gen_slice_pattern(e)).collect();
+                format!("[{}]", elems.join(", "))
+            }
+            Pattern::Rest(name) => match name {
+                Some(n) => format!("{} @ ..", n),
+                None => "..".into(),
+            },
+            Pattern::Ident(name) => name.clone(),
+            Pattern::Wildcard => "_".into(),
+            other => self.gen_pattern(other),
+        }
+    }
+
+    /// 收集切片模式绑定名（type-pack 异质元组 03d §2.8 方案 B）：
+    /// `[a]` / `[a, ..]` 模式中 a 绑定 &Ts（切片元素引用）
+    fn collect_slice_bindings(&self, pat: &Pattern, out: &mut Vec<String>) {
+        match pat {
+            Pattern::Ident(name) => out.push(name.clone()),
+            Pattern::Tuple(elems) | Pattern::List(elems) => {
+                for e in elems {
+                    self.collect_slice_bindings(e, out);
+                }
+            }
+            Pattern::Rest(name) => {
+                if let Some(n) = name {
+                    out.push(n.clone());
+                }
+            }
+            _ => {}
+        }
+    }
 
     fn gen_pattern(&self, pat: &Pattern) -> String {
         match pat {
@@ -6684,7 +6868,10 @@ fn collect_local_lets(block: &Block, locals: &mut std::collections::HashSet<Stri
                 }
             }
             Stmt::For { var, body, .. } => {
-                locals.insert(var.clone());
+                // 元组解构循环变量 `for (k, v) in ...`：var 形如 "(k, v)"，
+                // 需把 k、v 分别收集为局部变量，否则 analyze_global_vars 把
+                // 未收集的名字误判为跨函数全局变量（E0530 static mut 冲突）
+                collect_for_var_bindings(var, locals);
                 collect_local_lets(body, locals);
             }
             Stmt::While { body, .. } => {
@@ -6740,6 +6927,25 @@ fn collect_pattern_bindings(pattern: &Pattern, locals: &mut std::collections::Ha
             }
         }
         _ => {}
+    }
+}
+
+/// 收集 for 循环变量的绑定名：`for x in ...` → x；
+/// 元组解构 `for (k, v) in ...` → k、v 分别收集（否则 analyze_global_vars
+/// 把未收集的名字误判为跨函数全局变量，生成 static mut 与 for 绑定冲突 E0530）
+fn collect_for_var_bindings(var: &str, locals: &mut std::collections::HashSet<String>) {
+    let trimmed = var.trim();
+    if trimmed.starts_with('(') && trimmed.ends_with(')') {
+        // 元组解构：(k, v) → 分别收集
+        let inner = &trimmed[1..trimmed.len() - 1];
+        for part in inner.split(',') {
+            let name = part.trim();
+            if !name.is_empty() && name != "_" {
+                locals.insert(name.to_string());
+            }
+        }
+    } else if !trimmed.is_empty() && trimmed != "_" {
+        locals.insert(trimmed.to_string());
     }
 }
 
