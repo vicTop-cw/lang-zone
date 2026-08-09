@@ -1,6 +1,6 @@
 # ΣLang (lang-zone) 项目记忆 — AtomCode 启动即读
 
-> 用途：下次启动自动读取，据此行动。更新于 2026-08-07。
+> 用途：下次启动自动读取，据此行动。更新于 2026-08-09。
 
 ---
 
@@ -119,3 +119,24 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - 闭包写外部变量已支持：无 let 前缀可变绑定（x = v）在变量已存在时转 Stmt::Assign（TypeCtx.block_declared 记录本块首次声明，Closure 分支创建独立 closure_ctx 重置 block_declared）
 - duck 类型作为参数注解（pet: Pet）→ 泛型参数 + trait bound（DuckParam0: Pet）；字段访问走 __field_X().clone()（duck_field_members 覆盖 Named duck 参数）；collect_duck_impls 在调用点为具体类型生成 impl Pet for Cat
 - 宏系统已支持：lexer template 关键字、macro/template 顶层定义、import macro/from macro/as 别名、跨模块 MacroRegistry::merge、@alias.name! 展开、Tokens 类型→Str（from_ast_type + rust_type 双映射）、quote(...) 降级为字符串拼接（codegen 多参 &[..]）
+
+## 八、v157 本轮进展（2026-08-09，commit c7528de 已 push）
+
+- **全量回归基线**：PASS 189 / FAIL 15（92.6%），优于 v156 的 187/17；报告 `issue/demo-test-report-2026-08-08.md` 与失败清单已更新至 v157。
+- **剩余 15 项失败分类**：macro 系 2 项（macro_real Backtick、use_macros，用户明确排除）＋ lz_std 标准库深层 13 项（traits.lz 剩余 PARSE + 12 个 RUSTC：E0423 枚举变体路径 `Ordering.Less`、E0404 Hash derive、E0782 trait 类型、E0053 `next` 类型、E0392 未用泛型、E0416 模式重绑定 `Less_`、E0277 ImplicitFrom 边界、E0390 primitive impl、E0369 `sign` 遮蔽残留、E0053 等——均为编译器特性级改造，非本轮范围）。
+- **本轮修复内容（9 类）**：
+  1. variadic_type_fidelity.lz type-pack 全链：`Ts...` 泛型/类型参数解析、`args.N` 元组索引（FieldAccess 数字字段→切片索引）、切片模式 `[a, ..]`、`(a,)` 单元素元组模式（has_comma 区分）、else 兜底臂、空切片自动兜底臂、slice 绑定臂体内自动 `.clone()`；**0 error 运行正常**。
+  2. iter.lz 解析修复：where 关联类型 `I.Item: Add<Output = I.Item>`、`Output = I.Item` 命名泛型参数、闭包体赋值表达式（parse_expr `x = expr`→Expr::Assign）、assert! 单表达式（无 expected 时不再生成 assert_eq! 单参）、impl 泛型去重（`impl<T> Iterator for Once<T>` 不再重复 T）、`__next__`/`__size_hint__` 在 `impl Iterator` 中映射为 `next`/`size_hint`（新字段 `in_iterator_impl`）、`I.Item` 关联类型路径 `I::Item`（rust_type 中 `.`→`::`）。
+  3. math.lz：内联 if 表达式（`let sign = if x < 0.0: -1.0 else 1.0`，Token::If 分支支持冒号后直接表达式）、let 变量遮蔽模块级函数（E0530 重命名后登记 param_renames 使引用同步）。
+  4. string.lz：`template` 是硬关键字不可作参数名（00-词法基础 §1.8），修正测试文件参数名 template→tpl。
+  5. traits.lz：where 子句 `Self.Item`（Token::Self_ 支持）、trait 关联类型带 bound（`type Iter: Iterator<Item = Self.Item>` 消费 bound）。
+  6. __init__.lz：const `&str` 作 lhs 的字符串拼接（`STDLIB_NAME + " v"`）→ 生成 `.to_string() + &...`（str_concat 分支 `lhs_is_ref_str`）；**0 error 运行正常**。
+  7. box.lz：模块自定义 `struct Rc<T>`/`Arc<T>` 时跳过 `use std::rc::Rc`/`Arc` 导入（E0255 修复）。
+  8. lz_std 宏调用错误系列（dict/list/option/ordering/prelude/result/set/error）："unexpected end of macro invocation" 全部清零。
+  9. 全量回归从 130/74 恢复到 189/15：修复 parse_expr 赋值分支引入的语句级回归（`x = 42` 默认可变绑定被解析成 `x == 42` 比较 → parse_stmt 中 Ident 后跟 Eq 时先识别为 Stmt::Let；`a[i] = v` 索引赋值 Expr::Assign 转回 Stmt::Assign）。
+- **新增已知坑**：
+  - `parse_expr` 的赋值表达式分支（为闭包体 `|x| = total = total + x` 支持）会抢先消费 `=`，**语句级** `x = 42`（默认可变绑定）必须在 parse_stmt 中先于 parse_expr 识别为 Stmt::Let，`a[i] = v`/`obj.f = v` 的 Expr::Assign 需转回 Stmt::Assign——否则 builder 把 Assign 转 BinOp `==` 生成比较（E0425/E0369 回归）。
+  - `parse_generic_params` 中 `impl<T> ... for Once<T>` 的 `Once<T>` 类型参数若与已有泛型同名会重复收集 → 生成 `impl<T,T>`；解析时对已存在名字去重。
+  - `for (k, v) in ...` 元组解构循环变量需分别收集为局部变量（`collect_for_var_bindings`），否则 analyze_global_vars 把未收集名字误判为跨函数全局变量（E0530 static mut 冲突）。
+  - lz_std 是标准库自测（#!bin lz），多数文件 rustc 仍有深层错误（E0423/E0277/E0404 等），非解析层可修，需编译器特性级改造。
+- v157（2026-08-09）全量回归 PASS 189/FAIL 15（92.6%），commit c7528de 已 push；剩余失败：macro 2（排除）+ lz_std 深层 13（traits.lz 剩余 PARSE + 12 RUSTC：E0423/E0404/E0782/E0053/E0392/E0416/E0277/E0390/E0369，需编译器特性级改造）；本轮新增坑：parse_expr 赋值分支抢先消费 `=`，语句级 `x = 42` 须在 parse_stmt 先识别为 Stmt::Let、`a[i]=v` 的 Expr::Assign 转回 Stmt::Assign（否则生成 == 比较回归）；for (k,v) 解构变量须分别收集（collect_for_var_bindings 防 E0530）；impl<T> for Once<T> 泛型去重。
