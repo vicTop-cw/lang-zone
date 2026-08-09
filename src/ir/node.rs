@@ -235,6 +235,10 @@ pub enum Item {
         ps_name: Option<String>,
         default_checker: Option<String>,
         body: Block,
+        /// 捕获的外层函数局部变量（block 闭包语义，规范 05b-block命名块.md §三）：
+        /// checker 块体引用的 main 局部变量（out/depth/result 等）需作为
+        /// fn 的 &mut 参数传入，否则提升为模块级 fn 后 E0425（block_demo 等）
+        captured: Vec<(String, IrType)>,
     },
     /// duck 类型约束 → 编译为 Rust trait
     DuckDef(DuckDef),
@@ -449,11 +453,13 @@ pub enum Stmt {
         iter: Expr,
         guard: Option<Expr>,
         body: Block,
+        else_body: Option<Block>,
     },
     While {
         cond: Expr,
         guard: Option<Expr>,
         body: Block,
+        else_body: Option<Block>,
     },
     WhileLet {
         pattern: Pattern,

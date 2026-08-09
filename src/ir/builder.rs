@@ -13,6 +13,7 @@ use crate::ast::{
 };
 use crate::types::Type as AstType;
 
+use super::codegen::collect_var_refs;
 use super::node::*;
 use super::types::{from_ast_type, from_ast_type_with_generics, IrType};
 use super::IrModule;
@@ -1197,7 +1198,17 @@ fn ast_stmt_has_bare_return(stmt: &AstStmt) -> bool {
 
 fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {
     match stmt {
-        AstStmt::Expr(e) => infer_expr_type(e, ctx),
+        AstStmt::Expr(e) => {
+            // go expr 作为语句使用时值被丢弃，不污染函数返回类型
+            // （规范 10-并发与异步.md：`let x: Future<int> = go f()` 绑定上下文
+            // 才返回 Future<T>；尾语句 `go f()` 应视为 Unit，避免无返回注解
+            // 的 def main() 被推断为 Future<()> 触发 typed main 分支 E0782）
+            if matches!(e, AstExpr::Spawn(_)) {
+                IrType::Unit
+            } else {
+                infer_expr_type(e, ctx)
+            }
+        }
         AstStmt::Pass => IrType::Unit,
         AstStmt::TypeAlias { .. } => IrType::Unit,
         AstStmt::Check { .. } => IrType::Unit,
@@ -3666,11 +3677,15 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         },
 
         AstStmt::While {
-            cond, guard, body, ..
+            cond,
+            guard,
+            body,
+            else_body,
         } => Stmt::While {
             cond: convert_expr(cond, ctx),
             guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
             body: convert_block(body, ctx),
+            else_body: else_body.as_ref().map(|b| convert_block(b, ctx)),
         },
 
         AstStmt::WhileLet {
@@ -3720,7 +3735,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             iter,
             guard,
             body,
-            ..
+            else_body,
         } => {
             let mut loop_ctx = TypeCtx::new();
             // 从 ctx 复制函数泛型上下文
@@ -3739,6 +3754,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 iter: convert_expr(iter, ctx),
                 guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
                 body: convert_block_with_ctx(body, &loop_ctx),
+                else_body: else_body.as_ref().map(|b| convert_block(b, ctx)),
             }
         }
 
@@ -3750,6 +3766,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             ),
             guard: None,
             body: convert_block(body, ctx),
+            else_body: None,
         },
 
         AstStmt::Break(_) => Stmt::Break,
@@ -3772,11 +3789,21 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         } => {
             // checker 块 → IR 压缩为模块级 fn NAME(ps: &mut __Params)
             // 惰性登记：定义时不执行，仅注册为 Item::CheckerBlock
+            // checker 块体是独立词法块（闭包语义）：块内裸赋值 `depth = depth + 1`
+            // 引用外部捕获变量，不应继承外层 block_declared 误转 let 绑定（E0425）
+            let mut chk_ctx = ctx.clone();
+            chk_ctx.block_declared.clear();
+            let ir_body = convert_block(body, &chk_ctx);
+            // 捕获的外层函数局部变量（block 闭包语义，规范 05b-block命名块.md §三）：
+            // body 引用的、在函数作用域（ctx.vars）内声明的变量（out/depth/result 等），
+            // 需作为 fn 的 &mut 参数传入，否则提升为模块级 fn 后 E0425（block_demo 等）
+            let captured = collect_checker_captured(&ir_body, ctx, ps_name.as_deref());
             ctx.pending_items.borrow_mut().push(Item::CheckerBlock {
                 name: label.clone(),
                 ps_name: ps_name.clone(),
                 default_checker: default_checker.clone(),
-                body: convert_block(body, ctx),
+                body: ir_body,
+                captured,
             });
             // 占位语句（checker 块不内联执行）
             Stmt::Pass
@@ -3784,6 +3811,12 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
 
         AstStmt::BlockCall { label, args } => {
             // 触发调用 → 转换为 fn_call(label)(args)
+            // 元组实参 (a, b, c) → 展开为多个独立参数（checker 块 ps.args[i] 逐位解包，
+            // block_tailrec.lz factorial[(5, 1)]；单元素 (10,) 也经 TupleLit 展开）
+            let call_args: Vec<Expr> = match args {
+                AstExpr::TupleLit(elems) => elems.iter().map(|e| convert_expr(e, ctx)).collect(),
+                other => vec![convert_expr(other, ctx)],
+            };
             Stmt::ExprStmt {
                 expr: Expr::new(
                     ExprKind::Call {
@@ -3793,7 +3826,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                             Span::unknown(),
                         )),
                         type_args: vec![],
-                        args: vec![convert_expr(args, ctx)],
+                        args: call_args,
                     },
                     IrType::Unit,
                     Span::unknown(),
@@ -5944,11 +5977,14 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
                 default_checker,
                 body,
             } => {
+                let ir_body = convert_block(body, &ctx);
+                let captured = collect_checker_captured(&ir_body, &ctx, ps_name.as_deref());
                 ctx.pending_items.borrow_mut().push(Item::CheckerBlock {
                     name: label.clone(),
                     ps_name: ps_name.clone(),
                     default_checker: default_checker.clone(),
-                    body: convert_block(body, &ctx),
+                    body: ir_body,
+                    captured,
                 });
             }
             AstStmt::Expr(AstExpr::Assign { target, value, .. }) => {
@@ -6003,4 +6039,38 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     }
 
     Ok(ir_mod)
+}
+
+/// 收集 checker 块体引用的外层函数局部变量（block 闭包语义，规范 05b-block命名块.md §三）。
+/// checker 块被提升为模块级 fn NAME(ps: &mut __Params)，body 中引用的 main 局部变量
+/// （out/depth/result 等）需作为 &mut 参数传入，否则 E0425
+/// （block_demo/block_stack_test/block_tailrec）。
+/// 排除：ps 参数名、模块级常量（top_level_consts 已生成全局、无需捕获）、
+/// 非变量引用（函数名/内置名不在 ctx.vars 中，自动排除）。
+fn collect_checker_captured(
+    body: &Block,
+    ctx: &TypeCtx,
+    ps_name: Option<&str>,
+) -> Vec<(String, IrType)> {
+    let mut refs = Vec::new();
+    let mut shadow = std::collections::HashSet::new();
+    collect_var_refs(body, &mut shadow, &mut refs);
+    let mut captured: Vec<(String, IrType)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for name in refs {
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.insert(name.clone());
+        if ps_name == Some(name.as_str()) {
+            continue; // ps 参数自身
+        }
+        if ctx.top_level_consts.contains_key(&name) {
+            continue; // 模块级 const：全局生成，无需捕获
+        }
+        if let Some(ty) = ctx.vars.get(&name) {
+            captured.push((name, ty.clone()));
+        }
+    }
+    captured
 }

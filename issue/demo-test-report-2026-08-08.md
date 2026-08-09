@@ -1,7 +1,7 @@
-# DEMO 全面测试统计报告（2026-08-09 v155 更新）
+# DEMO 全面测试统计报告（2026-08-09 v156 更新）
 
 > 生成方式：`lang-zone.exe <file.lz>` → IR codegen（唯一路径）→ `rustc --edition 2021 --extern lz_builtins` 编译 → 运行验证
-> 本次变更：批量修复组合语法/类型系统缺陷（pattern_more 列表/字典/..rest 模式、method_chains 泛型 None 注入、spread_protocol r? 自定义传播、var_call_block 构建块、combo-pipe-lambda 管道洞/偏应用/高阶函数、combo-defer-guard try/else 语义、nesting-closure-lambda 嵌套 Fn Box、combo-struct-method/combo-trait-impl trait 抽象方法/默认方法、while_let 模式绑定、edge-* 边界覆盖、top_level_build 顶层构建块、guard_for_3 全局变量赋值 等 41 项）
+> 本次变更：v156 修复 14 项（iterator_demo 嵌套迭代器 Iter<Iter<T>>、enum/magic_methods 自定义 Option 遮蔽 std、go_stmt 尾语句 Future 推断、nesting 系列 while/for-else labeled block + 迭代器链、block 系列 checker 块闭包捕获 &mut 参数、use_services --project 跨模块合并路径、edge-values-boundary 溢出用例修正、edge-walrus-operator walrus 赋值 + unwrap_or、Problems 探针 break 闭包/裸声明修正）
 > 排除项：`DEMO/99_errors/`（故意错误语法演示文件，预期报错）
 
 ## 一、总体结果
@@ -9,25 +9,25 @@
 | 指标 | 数量 |
 |------|------|
 | DEMO 测试文件总数（排除 99_errors） | 204 |
-| 通过（编译 + 运行成功） | 173 |
-| 失败 | 31 |
-| 通过率 | 84.8% |
+| 通过（编译 + 运行成功） | 187 |
+| 失败 | 17 |
+| 通过率 | 91.7% |
 
 ## 二、失败分类
 
 | 类别 | 数量 | 含义 |
 |------|------|------|
-| PARSE / IR build error | 8 | 无法生成 IR（语法错误或 IR 构建错误） |
-| RUSTC（生成 rs 编译失败） | 21 | IR 生成成功但 Rust 编译错误 |
-| RUN（运行失败） | 2 | 编译通过但运行崩溃 |
+| PARSE / IR build error | 6 | 无法生成 IR（语法错误或 IR 构建错误） |
+| RUSTC（生成 rs 编译失败） | 11 | IR 生成成功但 Rust 编译错误 |
+| RUN（运行失败） | 0 | 编译通过但运行崩溃 |
 
 ## 三、失败分布（按目录）
 
 | 目录 | 失败数 | 主要错误 |
 |------|--------|----------|
-| boundary-coverage | 17 | 组合语法覆盖：PARSE 报错、`__gen_vec` 未定义、类型不匹配 |
-| lz_std | 13 | 标准库自测：`__next__` 不属于 trait Iterator、Parse 错误（**本轮不处理**） |
-| 06_control_flow | 11 | checker 块：`cannot find value`、`break` 在闭包内 |
+| boundary-coverage | 0 | 全部通过 |
+| lz_std | 14 | 标准库自测（**本轮不处理**） |
+| 06_control_flow | 0 | 全部通过 |
 | 04_functions | 5 | 闭包捕获、装饰器、spread 协议 |
 | 99_spec | 4 | `__gen_vec` 未定义、duck trait、guard_for |
 | 07_data_structures | 4 | enum 算术、魔法方法参数、模块魔法属性 |

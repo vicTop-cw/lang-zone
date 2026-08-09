@@ -265,6 +265,7 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             iter,
             guard: _,
             body,
+            else_body: _,
         } => {
             cg.write(&format!("for {} in {}:", var, gen_expr(cg, iter)));
             cg.writeln("");
@@ -276,6 +277,7 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             cond,
             guard: _,
             body,
+            else_body: _,
         } => {
             cg.write(&format!("while {}:", gen_expr(cg, cond)));
             cg.writeln("");

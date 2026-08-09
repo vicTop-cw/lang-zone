@@ -48,6 +48,20 @@ pub struct CodeGen {
     /// 当前是否在泛型函数内（@math 等）：整数字面量不附加 i64 后缀，
     /// 否则 `x * 2i64`（T 泛型）报 E0308（expected T, found i64）
     in_generic_fn: bool,
+    /// 当前是否在泛型 impl 块内：impl<T> 的方法自身无 generics 字段，
+    /// 但体内 Option.None 等需按泛型上下文处理（magic_methods.lz __next__ E0308）
+    in_impl_generic: bool,
+    /// 循环 else 标志栈：Some(flag) = 当前循环带 else 子句（while/else, for/else，
+    /// 规范 05-控制流.md §13.2/13.3），break 时置 false 跳过 else 体
+    loop_else_stack: Vec<Option<String>>,
+    /// 循环 else 标志唯一命名计数器
+    loop_else_counter: usize,
+    /// plain block（block NAME: → (|| { ... })() 闭包）嵌套深度：
+    /// 闭包内顶层（非循环内）break 应生成 return 退出闭包而非裸 break（E0267）
+    plain_block_depth: usize,
+    /// 当前循环嵌套深度（for/while/while let/loop）：
+    /// plain block 内循环中的 break 仍跳出循环，块顶层的 break 退出闭包
+    loop_depth: usize,
     /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
     fn_param_info: HashMap<String, (usize, usize)>,
     /// 函数 ref/mut ref 参数标记：函数名 → 每参数 (is_ref, is_mut)（调用点自动传引用）
@@ -65,6 +79,13 @@ pub struct CodeGen {
     /// checker 块名称集合（fn NAME(ps: &mut __Params)），用于 default_checker 链
     /// 调用时区分 checker 块与普通值函数（fn NAME(ps: __Params) -> __Params）
     checker_blocks: std::collections::HashSet<String>,
+    /// checker 块捕获的外层局部变量：checker 名 → [(变量名, 类型)]
+    /// （block 闭包语义，规范 05b-block命名块.md §三）：生成
+    /// fn NAME(ps: &mut __Params, out: &mut Vec<i64>, ...)，调用点传 &mut out
+    checker_captures: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// 当前正在生成的 checker fn 捕获参数名集合（递归调用时捕获变量已是
+    /// fn 参数 &mut 引用，直接传名而非 &mut 名）
+    current_checker_captures: std::collections::HashSet<String>,
     /// match 臂 `ref mut` 模式绑定名集合（case Some(ref mut c)：臂体内
     /// c = c + 1 需生成 *c = *c + 1 解引用赋值，E0384 修复）
     ref_mut_bindings: std::collections::HashSet<String>,
@@ -138,6 +159,11 @@ impl CodeGen {
             in_math_fn: false,
             in_generator: false,
             in_generic_fn: false,
+            in_impl_generic: false,
+            loop_else_stack: Vec::new(),
+            loop_else_counter: 0,
+            plain_block_depth: 0,
+            loop_depth: 0,
             fn_param_info: HashMap::new(),
             fn_ref_params: HashMap::new(),
             mutated_consts: std::collections::HashSet::new(),
@@ -147,6 +173,8 @@ impl CodeGen {
             fn_kwargs: HashMap::new(),
             fn_param_types: HashMap::new(),
             checker_blocks: std::collections::HashSet::new(),
+            checker_captures: std::collections::HashMap::new(),
+            current_checker_captures: std::collections::HashSet::new(),
             ref_mut_bindings: std::collections::HashSet::new(),
             overload_sigs: HashMap::new(),
             overload_variadic: HashMap::new(),
@@ -406,6 +434,15 @@ impl CodeGen {
                 // checker 块（fn NAME(ps: &mut __Params) → NAME(ps);）
                 // 与普通值函数（fn NAME(ps: __Params) -> __Params → *ps = NAME(ps.clone());）
                 self.checker_blocks.insert(name.clone());
+            }
+            if let Item::CheckerBlock {
+                name, captured, ..
+            } = item
+            {
+                // 登记 checker 块捕获的外层局部变量（block 闭包语义，规范 05b-block命名块.md §三）
+                if !captured.is_empty() {
+                    self.checker_captures.insert(name.clone(), captured.clone());
+                }
             }
         }
 
@@ -989,10 +1026,32 @@ impl CodeGen {
                 ps_name: _,
                 default_checker,
                 body,
+                captured,
             } => {
                 // checker 块 → fn NAME(ps: &mut __Params)
-                self.emit_line(&format!("fn {name}(ps: &mut __Params) {{"));
+                // 捕获的外层局部变量（block 闭包语义，规范 05b-block命名块.md §三）：
+                // 追加 &mut 参数（out: &mut Vec<i64> 等），调用点传 &mut out
+                let captured_params: Vec<String> = captured
+                    .iter()
+                    .map(|(n, t)| format!("{}: &mut {}", n, self.rust_type(t)))
+                    .collect();
+                let sig = if captured_params.is_empty() {
+                    format!("fn {name}(ps: &mut __Params) {{")
+                } else {
+                    format!("fn {name}(ps: &mut __Params, {}) {{", captured_params.join(", "))
+                };
+                self.emit_line(&sig);
                 self.indent += 1;
+                // 登记当前 checker fn 的捕获参数名：递归调用（break NAME with /
+                // block NAME[(...)]）时捕获变量已是 &mut 参数，直接传名而非 &mut 名；
+                // 同时加入 ref_mut_bindings：捕获变量是 &mut 引用，`depth = depth + 1`
+                // 需生成 `*depth = *depth + 1`（E0369 修复）
+                let saved_checker_captures = self.current_checker_captures.clone();
+                let saved_ref_mut = self.ref_mut_bindings.clone();
+                for (n, _) in captured {
+                    self.current_checker_captures.insert(n.clone());
+                    self.ref_mut_bindings.insert(n.clone());
+                }
                 if let Some(ref chk_name) = default_checker {
                     // 区分两类 default_checker：
                     //  - checker 块（fn NAME(ps: &mut __Params)）→ NAME(ps);
@@ -1006,15 +1065,43 @@ impl CodeGen {
                             "*ps = {chk_name}(std::mem::replace(ps, __Params::new()));"
                         ));
                     } else {
-                        self.emit_line(&format!("{chk_name}(ps);"));
+                        // default_checker 若也有捕获，同参数传递
+                        let extra = self.checker_extra_args(chk_name);
+                        if extra.is_empty() {
+                            self.emit_line(&format!("{chk_name}(ps);"));
+                        } else {
+                            self.emit_line(&format!("{chk_name}(ps, {});", extra.join(", ")));
+                        }
                     }
                 }
                 self.gen_block_inner(body);
+                self.current_checker_captures = saved_checker_captures;
+                self.ref_mut_bindings = saved_ref_mut;
                 self.indent -= 1;
                 self.emit_line("}");
             }
             Item::DuckDef(d) => self.gen_duck_def(d),
         }
+    }
+
+    /// 查询 checker 块捕获变量在调用点的实参列表（block 闭包语义，规范 05b-block命名块.md §三）。
+    /// - 模块级/函数级调用：捕获变量是局部变量 → 传 `&mut out`
+    /// - checker fn 体内递归调用：捕获变量已是 fn 的 &mut 参数 → 直接传 `out`
+    fn checker_extra_args(&self, name: &str) -> Vec<String> {
+        self.checker_captures
+            .get(name)
+            .map(|caps| {
+                caps.iter()
+                    .map(|(n, _)| {
+                        if self.current_checker_captures.contains(n) {
+                            n.clone()
+                        } else {
+                            format!("&mut {}", n)
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// 计算重载函数的 mangled 名称。仅当函数名有多个重载签名时返回 mangled 名，
@@ -1463,9 +1550,10 @@ impl CodeGen {
         // 生成器函数内 return 等价 raise（iterator 体内 return 终止并抛出）
         let saved_generator = self.in_generator;
         self.in_generator = has_yield;
-        // 泛型函数（@math 等）体内整数字面量不附加 i64 后缀（E0308 修复）
+        // 泛型函数（@math 等）体内整数字面量不附加 i64 后缀（E0308 修复）；
+        // impl<T> 泛型块方法自身无 generics，也按泛型上下文处理（in_impl_generic）
         let saved_generic_fn = self.in_generic_fn;
-        self.in_generic_fn = !f.generics.is_empty();
+        self.in_generic_fn = !f.generics.is_empty() || self.in_impl_generic;
         let saved_math_fn = self.in_math_fn;
         self.in_math_fn = is_math;
         // Rust 不允许 async main，对于 async main 使用 block_on 包装
@@ -1480,9 +1568,13 @@ impl CodeGen {
         } else if is_async_main {
             String::new() // async main 也返回 ()（block_on 内部处理）
         } else if has_yield {
-            // 生成器返回 Iter<T> / Iterator<T> → Vec<T>（解包内部类型，避免 Vec<impl Iterator<..>>）
+            // 生成器返回类型：-> Y 表示每次 yield 的值为 Y（规范 14-生成器 §五/§八）。
+            // - `-> int`          → Vec<i64>
+            // - `-> Iter<R>`      → Vec<Iter<R>>（嵌套迭代器，Iter 映射为 Vec）
+            // - `-> Iterator<T>`  → Vec<T>（trait 无法装 Vec，解包内部类型）
             let elem = match &f.ret_ty {
-                IrType::Named { path, args } if path == "Iter" || path == "Iterator" => {
+                IrType::Named { path, .. } if path == "Iter" => f.ret_ty.clone(),
+                IrType::Named { path, args } if path == "Iterator" => {
                     args.first().cloned().unwrap_or(IrType::Int)
                 }
                 other => other.clone(),
@@ -1850,10 +1942,15 @@ impl CodeGen {
             };
             self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
             self.indent += 1;
+            // 泛型 struct（struct MyIterator<T>）内联方法按泛型上下文处理：
+            // Option.None 生成 Option::None 由返回类型推断（magic_methods.lz __next__ E0308）
+            let saved_impl_generic = self.in_impl_generic;
+            self.in_impl_generic = !s.generics.is_empty();
             for m in &s.methods {
                 self.gen_fn_def(m);
                 self.buf.push('\n');
             }
+            self.in_impl_generic = saved_impl_generic;
             self.indent -= 1;
             self.emit_line("}");
         }
@@ -2077,10 +2174,15 @@ impl CodeGen {
         for (name, ty) in &i.assoc_type_bindings {
             self.emit_line(&format!("type {} = {};", name, self.rust_type(ty)));
         }
+        // 泛型 impl 块（impl<T> ...）内方法按泛型上下文处理：
+        // Option.None 生成 Option::None 由返回类型推断（magic_methods.lz __next__ E0308）
+        let saved_impl_generic = self.in_impl_generic;
+        self.in_impl_generic = !i.generics.is_empty();
         for m in &i.methods {
             self.gen_fn_def(m);
             self.buf.push('\n');
         }
+        self.in_impl_generic = saved_impl_generic;
         self.indent -= 1;
         self.emit_line("}");
     }
@@ -3025,8 +3127,21 @@ impl CodeGen {
                 iter,
                 guard,
                 body,
+                else_body,
             } => {
                 self.emit_walrus_predecls(iter);
+                // for/else：循环正常结束（非 break）执行 else 体（规范 05-控制流.md §13.2）。
+                // Rust 无 for/else 语法，用 labeled block：break 'label 跳出整个块跳过 else
+                let else_label = else_body.as_ref().map(|_| {
+                    self.loop_else_counter += 1;
+                    let label = format!("__lz_loop_else_{}", self.loop_else_counter);
+                    self.emit_line(&format!("'{}: {{", label));
+                    label
+                });
+                if else_label.is_some() {
+                    self.indent += 1;
+                }
+                self.loop_else_stack.push(else_label.clone());
                 // 顶层静态集合（LazyLock<Vec<..>>）不能用 into_iter()（共享引用不可 move），
                 // 改用 .iter().cloned()（LZ 元素均 Clone）
                 let use_lazy_iter = if let ExprKind::Var(name) = &iter.kind {
@@ -3084,14 +3199,43 @@ impl CodeGen {
                 // 循环体不是值上下文：尾表达式需加分号（否则 std::thread::spawn(...) 裸生成 E0308）
                 let saved_semi = self.force_stmt_semicolon;
                 self.force_stmt_semicolon = true;
+                self.loop_depth += 1;
                 self.gen_block_inner(body);
+                self.loop_depth -= 1;
                 self.force_stmt_semicolon = saved_semi;
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("}");
+                self.loop_else_stack.pop();
+                if let (Some(label), Some(eb)) = (else_label, else_body) {
+                    // else 体尾表达式即块值（return/发散语句时块类型为 !，可强转函数返回类型）；
+                    // 不追加 break 'label（会让块尾变为 () 与返回类型冲突 E0308）
+                    self.gen_block_inner(&eb);
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    let _ = label;
+                }
             }
-            Stmt::While { cond, guard, body } => {
+            Stmt::While {
+                cond,
+                guard,
+                body,
+                else_body,
+            } => {
                 self.emit_walrus_predecls(cond);
+                // while/else：循环正常结束（非 break）执行 else 体（规范 05-控制流.md §13.3）。
+                // Rust 无 while/else 语法，用 labeled block：break 'label 跳出整个块跳过 else；
+                // else 体以 return/尾表达式结束，块类型由尾语句决定（已验证 rustc 接受）
+                let else_label = else_body.as_ref().map(|_| {
+                    self.loop_else_counter += 1;
+                    let label = format!("__lz_loop_else_{}", self.loop_else_counter);
+                    self.emit_line(&format!("'{}: {{", label));
+                    label
+                });
+                if else_label.is_some() {
+                    self.indent += 1;
+                }
+                self.loop_else_stack.push(else_label.clone());
                 // while true → loop (Rust warns about while true)
                 let is_infinite =
                     guard.is_none() && matches!(&cond.kind, ExprKind::Lit(LitKind::Bool(true)));
@@ -3110,10 +3254,21 @@ impl CodeGen {
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
+                self.loop_depth += 1;
                 self.gen_block_inner(body);
+                self.loop_depth -= 1;
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("}");
+                self.loop_else_stack.pop();
+                if let (Some(label), Some(eb)) = (else_label, else_body) {
+                    // else 体尾表达式即块值（return/发散语句时块类型为 !，可强转函数返回类型）；
+                    // 不追加 break 'label（会让块尾变为 () 与返回类型冲突 E0308）
+                    self.gen_block_inner(&eb);
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    let _ = label;
+                }
             }
             Stmt::WhileLet {
                 pattern,
@@ -3138,7 +3293,9 @@ impl CodeGen {
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
+                self.loop_depth += 1;
                 self.gen_block_inner(body);
+                self.loop_depth -= 1;
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
                 self.emit_line("}");
@@ -3243,7 +3400,21 @@ impl CodeGen {
                 // discard=true 时需以 `};` 关闭（let _ = match {...};），否则仅 `}`
                 self.emit_line(if discard { "};" } else { "}" });
             }
-            Stmt::Break => self.emit_line("break;"),
+            Stmt::Break => {
+                // plain block（block NAME: → (|| { ... })() 闭包）内顶层 break：
+                // 闭包内裸 break 非法（E0267），应生成 return 退出闭包（跳出 block）。
+                // 循环内的 break 仍跳出循环（loop_depth > 0）。
+                if self.plain_block_depth > 0 && self.loop_depth == 0 {
+                    self.emit_line("return; // break block");
+                    return;
+                }
+                // 循环带 else 子句时：break 需跳出 labeled block 跳过 else 体
+                if let Some(Some(label)) = self.loop_else_stack.last() {
+                    self.emit_line(&format!("break '{};", label));
+                } else {
+                    self.emit_line("break;");
+                }
+            }
             Stmt::BreakLabel { label: _, value: _ } => {
                 // block 内 break label → 无值 return（退出闭包）
                 // block 无返回值，value 仅用于 break NAME with v（触发 checker 块，待实现）
@@ -3255,10 +3426,12 @@ impl CodeGen {
                 // block scan: ... break scan → (|| { ... return; })()
                 self.emit_line(&format!("(|| {{ // block '{}", label));
                 self.indent += 1;
+                self.plain_block_depth += 1;
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
                 self.gen_block_inner(body);
                 self.suppress_tail_return = saved;
+                self.plain_block_depth -= 1;
                 self.indent -= 1;
                 self.emit_line("})();");
             }
@@ -3676,7 +3849,7 @@ impl CodeGen {
                     _ => None,
                 } {
                     // checker 块调用：callee 参数类型为 __Params（validate_port((r))）→
-                    // 打包实参为 __Params 并传 &mut __ps
+                    // 打包实参为 __Params 并传 &mut __ps；捕获变量追加 &mut 实参
                     if let Some(callee_ptypes) = self.fn_param_types.get(&callee_name).cloned() {
                         if callee_ptypes.len() == 1
                             && matches!(&callee_ptypes[0], IrType::Named { path, .. } if path == "__Params")
@@ -3685,10 +3858,16 @@ impl CodeGen {
                                 .iter()
                                 .map(|a| format!("Box::new({})", a))
                                 .collect();
+                            let extra = self.checker_extra_args(&callee_name);
+                            let call = if extra.is_empty() {
+                                format!("{}(&mut __ps)", callee_name)
+                            } else {
+                                format!("{}(&mut __ps, {})", callee_name, extra.join(", "))
+                            };
                             return format!(
-                                "{{ let mut __ps = __Params {{ args: vec![{}], kwargs: std::collections::HashMap::new() }}; {}(&mut __ps); }}",
+                                "{{ let mut __ps = __Params {{ args: vec![{}], kwargs: std::collections::HashMap::new() }}; {}; }}",
                                 packed_args.join(", "),
-                                callee_name
+                                call
                             );
                         }
                     }
@@ -3965,9 +4144,11 @@ impl CodeGen {
                         // 无法推断 T（E0282，如 opt.and_then(|x| Option.None)）
                         if field == "None" && wrapped_args.is_empty() && base_s == "Option" {
                             // 泛型函数（如 map<R> 内 `case Option.None => Option.None`）中
-                            // 硬编码 i64 错误：裸 None 让 Rust 从 match 臂配对推断（combo-struct-method.lz）
+                            // 硬编码 i64 错误：Option::None 让 Rust 从 match 臂配对推断（combo-struct-method.lz）；
+                            // 且用户自定义 `enum Option<T>` 会遮蔽 std Option（enum.lz），
+                            // 裸 None 是 std 变体类型不匹配（E0308），必须带 Option:: 前缀
                             if self.in_generic_fn {
-                                return "None".to_string();
+                                return "Option::None".to_string();
                             }
                             let elem = match &expr.ty {
                                 IrType::Named { path, args }
@@ -4546,9 +4727,10 @@ impl CodeGen {
                         // 泛型函数（如 `def map<R>(...) = Container(data: match self.data:
                         //   case Option.Some(value: v) => Option.Some(value: f(v))
                         //   case Option.None => Option.None)`）中硬编码 i64 错误：
-                        // 裸 None 让 Rust 从 match 臂配对推断（combo-struct-method.lz E0308）
+                        // Option::None 让 Rust 从 match 臂配对推断（combo-struct-method.lz E0308）；
+                        // 且用户自定义 `enum Option<T>` 遮蔽 std Option 时裸 None 类型不匹配（enum.lz）
                         if self.in_generic_fn {
-                            return "None".to_string();
+                            return "Option::None".to_string();
                         }
                         return format!("Option::<{}>::None", elem);
                     }
@@ -4663,6 +4845,36 @@ impl CodeGen {
                     return call;
                 }
                 let call = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
+                // ── 迭代器适配器链特殊处理 ──
+                // LZ 值语义：.iter() 产出 owned 元素（.iter().cloned()），供 filter/map 闭包
+                // 直接按值使用（E0308：xs.iter().filter(|x| x > 0) 闭包参数是 &&i64）；
+                // filter 闭包接收 &Item → |&x| 模式（strip_lambda_type_with_ref）；
+                // take/skip 参数需 usize（LZ int 是 i64）
+                let recv_is_option = matches!(
+                    &receiver.ty,
+                    IrType::Named { path, .. } if path == "Option" || path == "Result"
+                ) || matches!(&receiver.ty, IrType::Option(_) | IrType::Result { .. });
+                if !recv_is_option {
+                    if method == "iter" && self.is_collection_type(&receiver.ty) {
+                        return format!("({}).iter().cloned()", recv);
+                    }
+                    if method == "filter" && args_s.len() == 1 {
+                        return format!(
+                            "({}).filter({})",
+                            recv,
+                            strip_lambda_type_with_ref(&args_s[0])
+                        );
+                    }
+                    if method == "take" && args_s.len() == 1 {
+                        return format!("({}).take({} as usize)", recv, args_s[0]);
+                    }
+                    if method == "skip" && args_s.len() == 1 {
+                        return format!("({}).skip({} as usize)", recv, args_s[0]);
+                    }
+                    if method == "sum" && args_s.is_empty() {
+                        return format!("({}).sum()", recv);
+                    }
+                }
                 // Option/Result 消费型方法（map/and_then/unwrap_or 等）：receiver 按值
                 // 消费，非 Copy 类型（内部含 String 等）的变量需 clone 才能复用（E0382 修复，
                 // 如 ok.map(...) 后再用 ok）。借用型方法（as_ref/len 等）不受影响。
@@ -4755,9 +4967,10 @@ impl CodeGen {
                 // 无法推断 T（E0282，如 opt.and_then(|x| Option.None)）
                 let access_s = if sep == "::" && field == "None" && base_s == "Option" {
                     // 泛型函数（如 map<R> 内 `case Option.None => Option.None`）中
-                    // 硬编码 i64 错误：裸 None 让 Rust 从 match 臂配对推断（combo-struct-method.lz）
+                    // 硬编码 i64 错误：Option::None 让 Rust 从 match 臂配对推断（combo-struct-method.lz）；
+                    // 用户自定义 `enum Option<T>` 遮蔽 std Option 时裸 None 类型不匹配（enum.lz）
                     if self.in_generic_fn {
-                        "None".to_string()
+                        "Option::None".to_string()
                     } else {
                         let elem = match &expr.ty {
                             IrType::Named { path, args } if path == "Option" && args.len() == 1 => {
@@ -5341,6 +5554,10 @@ impl CodeGen {
                 // 泛型函数标志需传递给 child（match 表达式内 Option.None 的裸 None
                 // 推断，combo-struct-method.lz map<R> 泛型方法）
                 child.in_generic_fn = self.in_generic_fn;
+                // 继承父级已声明变量集合：块内 `x = v`（is_mut let）对外层变量的
+                // 赋值应生成 `x = ...` 而非 `let mut x = ...` 遮蔽（edge-walrus-operator
+                // walrus_if 的 result = first；t_seq 同块顺序赋值正常因 declared 共享）
+                child.declared = self.declared.clone();
                 // 块表达式尾值应为块尾表达式（非 return）
                 child.suppress_tail_return = true;
                 // __gen_vec 已在函数级别声明，BlockExpr 中只需 push 不需要重新声明
@@ -6530,7 +6747,7 @@ fn collect_pattern_bindings(pattern: &Pattern, locals: &mut std::collections::Ha
 /// 递归收集自由变量引用。in_closure=true 表示当前处于闭包作用域，
 /// 此时裸赋值 `x = v` 视为局部声明（加入遮蔽集），而不是外部变量引用。
 /// 用于构建块（=: → 闭包）内的赋值，避免被误提升为全局变量。
-fn collect_var_refs(
+pub(crate) fn collect_var_refs(
     block: &Block,
     shadow: &mut std::collections::HashSet<String>,
     refs: &mut Vec<String>,
@@ -6598,12 +6815,20 @@ fn collect_stmt_var_refs(
             }
             collect_var_refs_inner(body, shadow, refs, in_closure);
         }
-        Stmt::While { cond, guard, body } => {
+        Stmt::While {
+            cond,
+            guard,
+            body,
+            else_body,
+        } => {
             collect_expr_var_refs(cond, shadow, refs, in_closure);
             if let Some(g) = guard {
                 collect_expr_var_refs(g, shadow, refs, in_closure);
             }
             collect_var_refs_inner(body, shadow, refs, in_closure);
+            if let Some(eb) = else_body {
+                collect_var_refs_inner(eb, shadow, refs, in_closure);
+            }
         }
         Stmt::WhileLet {
             expr, guard, body, ..

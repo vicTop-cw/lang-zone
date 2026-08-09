@@ -1218,7 +1218,12 @@ fn walk_stmt(stmt: &Stmt, f: &mut dyn FnMut(&Expr)) {
             }
             walk_block(body, f);
         }
-        Stmt::While { cond, guard, body } => {
+        Stmt::While {
+            cond,
+            guard,
+            body,
+            else_body: _,
+        } => {
             walk_expr(cond, f);
             if let Some(g) = guard {
                 walk_expr(g, f);

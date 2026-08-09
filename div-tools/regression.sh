@@ -24,7 +24,16 @@ run_one() {
     local out err rc
 
     # Step 1: lz -> rs
-    err=$("$EXE" "$lz" 2>&1)
+    # 含 import/from 的跨模块 demo 需 --project 模式合并依赖（use_services/use_macros）
+    local needs_project=false
+    if grep -qE "^\s*(import|from)\s+" "$lz" 2>/dev/null; then
+        needs_project=true
+    fi
+    if $needs_project; then
+        err=$("$EXE" "$lz" --project 2>&1)
+    else
+        err=$("$EXE" "$lz" 2>&1)
+    fi
     rc=$?
     if [[ $rc -ne 0 ]]; then
         PARSE_FAIL=$((PARSE_FAIL+1)); FAIL=$((FAIL+1))

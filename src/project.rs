@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use crate::ast;
 use crate::config::paths::SearchPaths;
 use crate::ir::{builder::build_ir, IrModule};
-use crate::lexer::Lexer;
+use crate::lexer::{Lexer, Token};
 use crate::macros::expand::{extract_macro_defs, MacroExpander};
 use crate::parser::Parser;
 use crate::util::import::ImportResolver;
@@ -48,7 +48,12 @@ impl ProjectCompiler {
 
     /// 编译项目入口文件
     pub fn compile(&mut self, entry_file: &Path) -> Result<ast::Module, String> {
+        // 相对入口文件：base_dir 已是其父目录，直接拼接会双倍路径
+        // （base_dir.join(entry_file) → DEMO/08_modules/DEMO/08_modules/x.lz）。
+        // 若 entry_file 是相对路径且其父目录恰为 base_dir，直接用原路径。
         let entry_abs = if entry_file.is_absolute() {
+            entry_file.to_path_buf()
+        } else if entry_file.parent().map_or(false, |p| p == self.base_dir) {
             entry_file.to_path_buf()
         } else {
             self.base_dir.join(entry_file)
@@ -89,6 +94,61 @@ impl ProjectCompiler {
 
         let (registry, _ranges) = extract_macro_defs(&tokens)
             .map_err(|e| format!("Macro error in {}: {}", file_path.display(), e))?;
+        // 跨模块宏导入：`import macro X` / `from macro X import Y` → 在展开前
+        // 先读取 X.lz 并合并其宏定义（否则 `@check_eq!` 展开时 undefined macro）
+        let mut registry = registry;
+        let dir = file_path.parent().unwrap_or(&self.base_dir);
+        let mut i = 0usize;
+        while i < tokens.len() {
+            let is_import = tokens[i] == Token::Import || tokens[i] == Token::From;
+            if is_import {
+                let mut j = i + 1;
+                let mut is_macro_import = false;
+                let mut mod_name: Option<String> = None;
+                while j < tokens.len() {
+                    match &tokens[j] {
+                        Token::Macro => {
+                            is_macro_import = true;
+                            j += 1;
+                        }
+                        Token::Ident(n) if mod_name.is_none() => {
+                            mod_name = Some(n.clone());
+                            j += 1;
+                        }
+                        Token::Newline | Token::Dedent => break,
+                        _ => {
+                            if tokens[j] == Token::Import {
+                                j += 1;
+                            } else if tokens[j] == Token::As {
+                                j += 2;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if tokens[j] == Token::Newline {
+                        break;
+                    }
+                }
+                if is_macro_import {
+                    if let Some(mname) = mod_name {
+                        let macro_path = dir.join(format!("{}.lz", mname));
+                        if let Ok(src) = std::fs::read_to_string(&macro_path) {
+                            let mut mlexer = Lexer::new(&src);
+                            let mtokens = mlexer.tokenize();
+                            if let Ok((mreg, _mranges)) = extract_macro_defs(&mtokens) {
+                                registry.merge(mreg);
+                            }
+                        }
+                    }
+                }
+                // 跳到本行末尾
+                while i < tokens.len() && tokens[i] != Token::Newline {
+                    i += 1;
+                }
+            }
+            i += 1;
+        }
         let expander = MacroExpander::new(registry);
         let expanded = expander
             .expand(&tokens)

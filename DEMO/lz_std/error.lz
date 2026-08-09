@@ -255,7 +255,7 @@ def main() =
         assert a != c
 
     test "try-catch pattern":
-        def safe_divide(a: int, b: int) -> Result<int, LzError]:
+        def safe_divide(a: int, b: int) -> Result<int, LzError>:
             if b == 0:
                 return Err(LzError.zero_division("division by zero"))
             return Ok(a / b)

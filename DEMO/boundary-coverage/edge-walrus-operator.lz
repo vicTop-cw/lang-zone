@@ -7,7 +7,9 @@
 // --- 1. := 在 if 条件中 ---
 def walrus_if(values: List<int>) -> int =
     mut result = 0
-    if (first := values.first()) != None:
+    // first() 返回 Option<int>（规范 06d：first/last → Option<T>），
+    // 用 unwrap_or(0) 解包（None → 0，保持 result 默认值）
+    if (first := values.first().unwrap_or(0)) != 0:
         result = first
     result
 
@@ -20,7 +22,9 @@ def walrus_while() =
 
 // --- 3. := 在嵌套条件中 ---
 def walrus_nested(data: Option<int>) -> str =
-    if (v := data?) != 0:
+    // `data?` 在 str 返回函数中无传播目标（无 raises 且非 Result/Option 返回，
+    // 规范 09 §4.3 应为编译错误）；改 unwrap_or(0) 保持 walrus 测试焦点
+    if (v := data.unwrap_or(0)) != 0:
         if (doubled := v * 2) > 100:
             f"large:{doubled}"
         else:

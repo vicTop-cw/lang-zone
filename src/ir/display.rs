@@ -460,19 +460,33 @@ impl fmt::Display for Stmt {
                 iter,
                 guard,
                 body,
+                else_body,
             } => {
                 let guard_s = guard
                     .as_ref()
                     .map(|g| format!(" if {g}"))
                     .unwrap_or_default();
-                write!(f, "for {var} in {iter}{guard_s} {body}")
+                let else_s = else_body
+                    .as_ref()
+                    .map(|b| format!(" else {b}"))
+                    .unwrap_or_default();
+                write!(f, "for {var} in {iter}{guard_s} {body}{else_s}")
             }
-            Stmt::While { cond, guard, body } => {
+            Stmt::While {
+                cond,
+                guard,
+                body,
+                else_body,
+            } => {
                 let guard_s = guard
                     .as_ref()
                     .map(|g| format!(" if {g}"))
                     .unwrap_or_default();
-                write!(f, "while {cond}{guard_s} {body}")
+                let else_s = else_body
+                    .as_ref()
+                    .map(|b| format!(" else {b}"))
+                    .unwrap_or_default();
+                write!(f, "while {cond}{guard_s} {body}{else_s}")
             }
             Stmt::WhileLet {
                 pattern,

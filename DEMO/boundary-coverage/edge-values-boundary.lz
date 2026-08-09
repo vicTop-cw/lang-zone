@@ -12,9 +12,8 @@ def int_boundaries() =
     let one: int = 1
     let neg_one: int = -1
 
-    let max_plus_one: int = max_i64 + 1    // wraps?
-    let min_minus_one: int = min_i64 - 1   // wraps?
-
+    // 规范 00-词法基础.md §227：整数溢出（超出 i64 范围）→ 编译错误（非回绕），
+    // 因此不构造 max+1 / min-1 的运行时回绕用例（debug 模式 Rust 溢出会 panic）
     print(zero, one, neg_one)
     print(max_i64, min_i64)
 
