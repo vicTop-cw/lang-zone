@@ -65,9 +65,9 @@ impl Measurable for Adder =
 // --- main ---
 def main() =
     print("=== combo-trait-impl ===")
-    let block = DataBlock(size: 100, label: "test")
-    print(block.measure())
-    print(block.describe())
+    let data = DataBlock(size: 100, label: "test")
+    print(data.measure())
+    print(data.describe())
 
     let items = [DataBlock(size: 10, label: "a"), DataBlock(size: 20, label: "b")]
     print(sum_measures(items))

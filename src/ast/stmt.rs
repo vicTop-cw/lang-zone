@@ -153,9 +153,15 @@ pub enum Pattern {
     Str(String),
     Bool(bool),
     Ident(String),
+    /// `ref mut name` 模式绑定：c 绑定为 &mut 引用（case Some(ref mut c)）
+    RefMutIdent(String),
     Variant(String, Vec<Pattern>),
     Tuple(Vec<Pattern>),
     List(Vec<Pattern>),
+    /// `{"k": p, ...}` 字典模式：键匹配 + 值绑定（未列出的键忽略）
+    Dict(Vec<(String, Pattern)>),
+    /// `..` / `..rest` 剩余绑定（仅出现在 List 模式内）
+    Rest(Option<String>),
     Range {
         start: i64,
         end: i64,

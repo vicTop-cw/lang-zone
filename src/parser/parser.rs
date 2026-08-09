@@ -10,8 +10,8 @@ use crate::types::Type;
 // ──────────────── Parser ────────────────
 
 pub struct Parser {
-    tokens: Vec<Token>,
-    pos: usize,
+    pub(super) tokens: Vec<Token>,
+    pub(super) pos: usize,
     pub(super) pending_gt: usize, // 处理嵌套泛型 >> 分裂为两个 >
     /// 最近一次 parse_generic_params 解析到的内联约束 (type_param → bounds)
     pending_inline_bounds: Vec<(String, Vec<Type>)>,
@@ -824,6 +824,28 @@ impl Parser {
             let has_colon_body = self.check(&Token::Colon);
             if has_colon_body {
                 self.advance(); // consume :
+            } else if self.check(&Token::Dedent) {
+                // 直接遇到 Dedent（trait 抽象方法 `def reset(mut self)` 后无 body）：
+                // 返回抽象方法且不消费 Dedent（否则 trait 块结束符丢失，
+                // 后续 trait/struct 被误当表达式，E0554）
+                return Ok(Function {
+                    name,
+                    generics,
+                    generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                    params,
+                    return_type,
+                    raises,
+                    where_clause,
+                    body: Vec::new(),
+                    is_async: false,
+                    is_abstract: true,
+                    is_iterator: false,
+                    is_magic,
+                    decorators: Vec::new(),
+                    variadic,
+                    checker_param: None,
+                    default_checker: None,
+                });
             } else if !self.check(&Token::Eq) && !self.check(&Token::Dedent) {
                 // 没有 = body → 抽象方法声明（仅签名）
                 // 但如果下一个是 Dedent 或 Struct 等顶层 token，也视为无 body
@@ -1873,8 +1895,10 @@ impl Parser {
 
             match self.peek() {
                 Token::Def | Token::Iterator => {
-                    // trait 方法: 先尝试带 body 的解析，如果失败则回退
-                    // 先 peek 检查是否有 @ 装饰器或 magic 关键字
+                    // trait 方法：既可能是抽象声明（`def measure(self) -> int` 无 body，
+                    // parse_function 内部检测 Dedent 等返回 is_abstract），也可能是
+                    // 默认实现（`def describe(self) -> str = f"..."` 带 body）。
+                    // 用 no_body=false 让两种形态都正确解析。
                     let f = self.parse_function(false)?;
                     methods.push(f);
                 }

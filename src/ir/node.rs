@@ -176,6 +176,8 @@ pub struct FnSig {
     pub generics: Vec<GenericParam>,
     pub params: Vec<IrType>,
     pub ret: IrType,
+    /// trait 默认方法体（Some = 带默认实现，None = 抽象声明）
+    pub body: Option<Block>,
 }
 
 // ── 参数 ──
@@ -329,6 +331,7 @@ pub struct ConstDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAliasDef {
     pub name: String,
+    pub generics: Vec<String>,
     pub ty: IrType,
 }
 
@@ -789,9 +792,15 @@ pub struct MatchArm {
 pub enum Pattern {
     Wildcard,
     Ident(String),
+    /// `ref mut name` 模式绑定：c 绑定为 &mut 引用（case Some(ref mut c)）
+    RefMutIdent(String),
     Lit(LitKind),
     Tuple(Vec<Pattern>),
     List(Vec<Pattern>),
+    /// `{"k": p, ...}` 字典模式：键匹配 + 值绑定（未列出的键忽略）
+    Dict(Vec<(String, Pattern)>),
+    /// `..` / `..rest` 剩余绑定（仅出现在 List 模式内）
+    Rest(Option<String>),
     Range {
         start: i64,
         end: i64,

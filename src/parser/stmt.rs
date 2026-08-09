@@ -35,8 +35,9 @@ impl ParserStmtExt for Parser {
             // 检查 Newline 后是否有 postfix token
             let is_postfix = if self.check(&Token::Newline) {
                 let after_nl = self.peek_n(1);
-                // `[` 后若是表达式开始关键字（await/spawn/if 等），
-                // 说明是列表字面量（[await a, await b]）而非上一行的索引 postfix
+                // `[` 后若是表达式开始关键字/字面量（await/spawn/if/数字/字符串等），
+                // 说明是列表字面量（[await a, await b] / [1, 2, 3] / ["a", "b"]）
+                // 而非上一行的索引 postfix（如 let a = 5 后跟新语句 [1, 2, 3]）
                 let is_list_lit = matches!(after_nl, Token::LBrack)
                     && matches!(
                         self.peek_n(2),
@@ -48,6 +49,13 @@ impl ParserStmtExt for Parser {
                             | Token::Not
                             | Token::Minus
                             | Token::Plus
+                            | Token::IntLit(_)
+                            | Token::FloatLit(_)
+                            | Token::StrLit(_)
+                            | Token::True
+                            | Token::False
+                            | Token::Underscore
+                            | Token::Ident(_)
                     );
                 matches!(
                     after_nl,
@@ -1107,7 +1115,18 @@ impl ParserStmtExt for Parser {
         // 构建块（直接）: let name = *: / ~: <缩进块>
         let mut value = if is_build_assign {
             // =: 后跟缩进块
-            self.parse_build_block_value()?
+            let mut bv = self.parse_build_block_value()?;
+            // `let x =: <块>`：构建块 lhs 应为绑定名 x（而非空元组 TupleLit([])），
+            // 否则构建块类型推断回退空元组 → ()（combo-build-block.lz E0308）
+            if let Expr::BuildBlock {
+                kind: BuildKind::Var,
+                lhs,
+                ..
+            } = &mut bv
+            {
+                *lhs = Box::new(Expr::Ident(name.clone()));
+            }
+            bv
         } else {
             self.parse_maybe_build_value()?
         };

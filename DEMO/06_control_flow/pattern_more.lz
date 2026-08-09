@@ -29,7 +29,7 @@ def main() =
             print("empty")
 
     // --- 2. 字典模式：键匹配 + 值绑定 ---
-    let cfg = {"host": "localhost", "port": 8080}
+    let cfg = {"host": 0, "port": 8080}
     match cfg:
         case {"port": p}:
             print(f"port: {p}")                 // 8080（未列出的键忽略）

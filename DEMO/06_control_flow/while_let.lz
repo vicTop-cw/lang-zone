@@ -23,12 +23,12 @@ def take_until_zero(it: Iterator<int>) -> List<int> =
 
 // --- 3. Result 迭代：遇到 Err 结束 ---
 def first_error(it: Iterator<Result<int, str>>) -> Option<str> =
-    while let Ok(v) = it.next():
+    while let Some(Ok(v)) = it.next():
         if v > 100:
             break
     // 循环结束后检查是否遇到 Err
     match it.next():
-        case Err(e) => Some(e)
+        case Some(Err(e)) => Some(e)
         case _ => None
 
 // --- 4. 与 guard let 分工：while let 静默结束，guard let 走 else ---
@@ -39,10 +39,10 @@ def process_until_fail(it: Iterator<int>) -> int =
         processed = processed + item
     processed
 
-// --- 5. 无限源循环：自定义迭代器 ---
-iterator count_from(start: int) -> Iterator<int> =
+// --- 5. 生成器遍历（eager Vec + for break）---
+iterator count_from(start: int, limit: int) -> Iterator<int> =
     i = start
-    loop:
+    while i < start + limit:
         yield i
         i = i + 1
 
@@ -58,17 +58,17 @@ def main() =
     // 3. 模式绑定 + break
     let seq = [5, 10, 15, 20]
     first = 0
-    while let Some(item) = seq.into_iter().next():
+    for item in seq:
         if item == 15:
             break
         first = item
     print(first)               // 10
 
-    // 5. 无限生成器取前 3
-    let gen = count_from(0)
+    // 5. 生成器取前 3
+    let gen = count_from(0, 5)
     taken = 0
-    while let Some(v) = gen.next():
-        print(v)               // 0, 1, 2
+    for item in gen:
+        print(item)            // 0, 1, 2
         taken = taken + 1
         if taken >= 3:
             break

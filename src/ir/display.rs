@@ -326,6 +326,7 @@ impl fmt::Display for Pattern {
         match self {
             Pattern::Wildcard => f.write_str("_"),
             Pattern::Ident(name) => f.write_str(name),
+            Pattern::RefMutIdent(name) => write!(f, "ref mut {name}"),
             Pattern::Lit(lit) => write!(f, "{lit}"),
             Pattern::Tuple(elems) => {
                 f.write_str("(")?;
@@ -379,6 +380,20 @@ impl fmt::Display for Pattern {
                 }
                 f.write_str("]")
             }
+            Pattern::Dict(entries) => {
+                f.write_str("{")?;
+                for (i, (k, p)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "\"{k}\": {p}")?;
+                }
+                f.write_str("}")
+            }
+            Pattern::Rest(name) => match name {
+                Some(n) => write!(f, "..{n}"),
+                None => f.write_str(".."),
+            },
             Pattern::Range {
                 start,
                 end,

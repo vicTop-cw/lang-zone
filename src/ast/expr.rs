@@ -2,6 +2,7 @@
 // 表达式类 AST 节点：Expr, BuildKind, BinOp, UnaryOp, AssignOp
 
 use super::stmt::{Stmt, MatchArm};
+use crate::types::Type;
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -74,6 +75,10 @@ pub enum Expr {
     // 特殊
     Closure {
         params: Vec<String>,
+        /// 参数类型注解（与 params 一一对应；无注解为 None）。
+        /// 修复 E0282：`|x: int|` 的类型原被 parse_type() 丢弃，导致
+        /// Option.None.map(|x: int| ...) 生成无类型闭包无法推断
+        param_tys: Vec<Option<Type>>,
         body: Box<Expr>,
     },
     // 块表达式（|x| => block body）
@@ -175,6 +180,10 @@ pub enum BinOp {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
     Neg, Not, BitNot,
+    /// 一元 `*` 解引用（`*(&(*boxed))` 前缀叠写，12-操作符.md §1.18）
+    Deref,
+    /// 一元 `&` 取引用（`*(&(*boxed))` 前缀叠写）
+    Ref,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -108,6 +108,8 @@ impl CodeGenExprExt for CodeGen {
                     }
                     UnaryOp::Not => format!("(!{})", self.gen_expr(operand)),
                     UnaryOp::BitNot => format!("(!{})", self.gen_expr(operand)),
+                    UnaryOp::Deref => format!("(*{})", self.gen_expr(operand)),
+                    UnaryOp::Ref => format!("(&{})", self.gen_expr(operand)),
                 }
             }
 
@@ -417,7 +419,7 @@ impl CodeGenExprExt for CodeGen {
                 out
             }
 
-            Expr::Closure { params, body } => {
+            Expr::Closure { params, body, .. } => {
                 format!("|{}| {}", params.join(", "), self.gen_expr(body))
             }
 
@@ -630,6 +632,7 @@ impl CodeGenExprExt for CodeGen {
             Pattern::Str(s) => format!("\"{}\"", escape_str(s)),
             Pattern::Bool(b) => b.to_string(),
             Pattern::Ident(s) => s.clone(),
+            Pattern::RefMutIdent(s) => s.clone(),
             Pattern::Wildcard => "_".to_string(),
             Pattern::Variant(name, sub) => {
                 // 限定枚举变体名: Disk → Shape::Disk
@@ -653,6 +656,17 @@ impl CodeGenExprExt for CodeGen {
                 let subs: Vec<String> = elems.iter().map(|p| self.gen_pattern(p)).collect();
                 format!("[{}]", subs.join(", "))
             }
+            Pattern::Dict(entries) => {
+                let subs: Vec<String> = entries
+                    .iter()
+                    .map(|(k, p)| format!("\"{}\": {}", k, self.gen_pattern(p)))
+                    .collect();
+                format!("{{ {} }}", subs.join(", "))
+            }
+            Pattern::Rest(name) => match name {
+                Some(n) => format!("{} @ ..", n),
+                None => "..".into(),
+            },
             Pattern::Range { start, end, inclusive } => {
                 if *inclusive {
                     format!("{}..={}", start, end)

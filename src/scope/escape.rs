@@ -135,7 +135,7 @@ fn validate_expr(expr: &Expr, owned_params: &[String], fn_name: &str, errors: &m
 /// 逃逸上下文（return）中的表达式——严格检查闭包捕获
 fn validate_expr_escaping(expr: &Expr, owned_params: &[String], fn_name: &str, errors: &mut Vec<(String, String)>) {
     match expr {
-        Expr::Closure { params, body } => {
+        Expr::Closure { params, body, .. } => {
             let mut captures = Vec::new();
             collect_expr_idents(body, &mut captures);
             let param_set: std::collections::HashSet<_> = params.iter().collect();

@@ -1,7 +1,7 @@
-# DEMO 全面测试统计报告（2026-08-08 v150 更新）
+# DEMO 全面测试统计报告（2026-08-09 v155 更新）
 
 > 生成方式：`lang-zone.exe <file.lz>` → IR codegen（唯一路径）→ `rustc --edition 2021 --extern lz_builtins` 编译 → 运行验证
-> 本次变更：builtins 内嵌为内部子库（`use lz_builtins::*;`），生成代码不再内联 ~40 行 shims；移除 `--ast-codegen` 老路子
+> 本次变更：批量修复组合语法/类型系统缺陷（pattern_more 列表/字典/..rest 模式、method_chains 泛型 None 注入、spread_protocol r? 自定义传播、var_call_block 构建块、combo-pipe-lambda 管道洞/偏应用/高阶函数、combo-defer-guard try/else 语义、nesting-closure-lambda 嵌套 Fn Box、combo-struct-method/combo-trait-impl trait 抽象方法/默认方法、while_let 模式绑定、edge-* 边界覆盖、top_level_build 顶层构建块、guard_for_3 全局变量赋值 等 41 项）
 > 排除项：`DEMO/99_errors/`（故意错误语法演示文件，预期报错）
 
 ## 一、总体结果
@@ -9,18 +9,17 @@
 | 指标 | 数量 |
 |------|------|
 | DEMO 测试文件总数（排除 99_errors） | 204 |
-| 通过（编译 + 运行成功） | 132 |
-| 失败 | 72 |
-| 通过率 | 64.7% |
+| 通过（编译 + 运行成功） | 173 |
+| 失败 | 31 |
+| 通过率 | 84.8% |
 
 ## 二、失败分类
 
 | 类别 | 数量 | 含义 |
 |------|------|------|
-| PARSE / IR build error | 14 | 无法生成 IR（语法错误或 IR 构建错误） |
-| RUSTC（生成 rs 编译失败） | 55 | IR 生成成功但 Rust 编译错误 |
-| RUN（运行失败） | 1 | 编译通过但运行崩溃 |
-| NO_RS（未生成输出） | 2 | 极少数生成文件缺失（待核） |
+| PARSE / IR build error | 8 | 无法生成 IR（语法错误或 IR 构建错误） |
+| RUSTC（生成 rs 编译失败） | 21 | IR 生成成功但 Rust 编译错误 |
+| RUN（运行失败） | 2 | 编译通过但运行崩溃 |
 
 ## 三、失败分布（按目录）
 

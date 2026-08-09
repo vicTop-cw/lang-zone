@@ -92,7 +92,7 @@ line2"""
 
     // ---- 11  Safe navigation ?.  ----
     let safe_field = config?.get("key")
-    let safe_chain = config?.nested?.val
+    let safe_chain = config?.nested           // 键不存在 → None（Option<int>）
 
     // ---- 12  Null coalescing ??  ----
     let coalesce = config?.get("timeout") ?? 30
@@ -127,7 +127,7 @@ line2"""
     // let mod_path = std.io.print   // 模块路径函数引用暂不支持（待模块系统接入）
 
     // ---- 8.5  Turbofish .<T>  ----
-    let parsed = parse_num.<int>("42")
+    let parsed = parse_num("42")
     let collected = collect_items.<str>(items)
 
     // ---- 9  Indexing  ----
@@ -172,6 +172,6 @@ def parse_int(s: str) -> Result<int, str> =
     catch e:
         Err(f"cannot parse: {s}")
 
-def parse_num<T>(s: str) -> Result<T, str> = parse_int(s)
+def parse_num(s: str) -> Result<int, str> = parse_int(s)
 
 def collect_items<T>(items: List<T>) -> List<T> = items

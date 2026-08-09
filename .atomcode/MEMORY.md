@@ -113,3 +113,9 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - 泛型函数体内访问 duck 约束泛型参数的字段（`a.field`）→ 自动转 `a.__field_field()` trait accessor（`duck_field_members` 按参数名收集，key 是参数名不是泛型名）。
 - 空字段 struct 构造 `Text()` 走 Call fallback 需生成 `Text {}`（`args_s.is_empty() && is_known_type` 分支）。
 - **已知缺陷（未修复）**：管道 `|>` 实参重复、字典推导多 for 报错、trait 内关联类型不支持、泛型默认参数值丢弃、生成器无返回类型 yield 推断缺失——详见 issue #1。
+- ΣLang 版本推进至 v154（2026-08-08），全量回归基线 PASS 146 / FAIL 58（15 PARSE / 42 RUSTC / 1 RUN），commit 52fc0d1 已 push github+gitcode
+- 2026-08-08 目录规整完成：issues/ 并入 issue/（README 补说明）；demo 测试报告移入 issue/；div-tools/ 收纳 9 个辅助脚本（含 check_doc_versions.py、fix_*.ps1）；新增 README-FOR-AI.md（AI 接手规范：唯一 IR 路线、开发期禁止缓存/增量编译、必须全量回归）与 history-work/（工作记录）
+- 已清除 DEMO 与 SYNTAX 中「规范目标特性/未实现/语法冻结/待实现」字眼（用户 2026-08-08 决策：无规范目标特性，所有 DEMO 除 99_errors 都需测试修复）；99_spec 下 guard_for_3/duck_test/iterator_demo 等已实际修复通过
+- 闭包写外部变量已支持：无 let 前缀可变绑定（x = v）在变量已存在时转 Stmt::Assign（TypeCtx.block_declared 记录本块首次声明，Closure 分支创建独立 closure_ctx 重置 block_declared）
+- duck 类型作为参数注解（pet: Pet）→ 泛型参数 + trait bound（DuckParam0: Pet）；字段访问走 __field_X().clone()（duck_field_members 覆盖 Named duck 参数）；collect_duck_impls 在调用点为具体类型生成 impl Pet for Cat
+- 宏系统已支持：lexer template 关键字、macro/template 顶层定义、import macro/from macro/as 别名、跨模块 MacroRegistry::merge、@alias.name! 展开、Tokens 类型→Str（from_ast_type + rust_type 双映射）、quote(...) 降级为字符串拼接（codegen 多参 &[..]）
