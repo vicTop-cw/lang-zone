@@ -1,0 +1,32 @@
+// ============================================================
+// 轮20: 测试框架 — test/suite/setup/teardown（语法为冒号块）
+// 通过 lang-zone <file> --test 编译运行
+// ============================================================
+
+test "basic assert":
+    assert 1 + 1 == 2
+    assert 2 * 3 == 6
+
+test "string ops":
+    assert "abc" + "def" == "abcdef"
+    assert len("hello") == 5
+
+test "list ops":
+    let xs = [1, 2, 3]
+    assert len(xs) == 3
+    assert xs[0] == 1
+
+suite MathSuite:
+    setup:
+        pass
+    teardown:
+        pass
+
+    test "addition":
+        assert 1 + 1 == 2
+
+    test "multiplication":
+        assert 2 * 3 == 6
+
+def main() =
+    print("P20 testing OK")

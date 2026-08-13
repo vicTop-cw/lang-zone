@@ -54,6 +54,10 @@ struct TypeCtx {
     current_generics: Vec<String>,
     /// 当前函数返回类型
     current_ret_ty: Option<IrType>,
+    /// impl 方法中 self 的具体类型（如 Dict<K,V> / HashMap<K,V>）：
+    /// 未设置时 self 推断为 Self_，导致 `self[key]`/`key in self` 无法解析
+    /// 容器方法（codegen 需 Named Dict/HashMap 分支判断）
+    self_ty: Option<IrType>,
     /// 当前是否在 iterator（生成器）函数内：return 等价 raise，不做隐式类型转换
     current_is_iterator: bool,
     /// 当前函数名（用于嵌套函数命名）
@@ -62,6 +66,12 @@ struct TypeCtx {
     pending_items: Rc<RefCell<Vec<Item>>>,
     /// 语义错误收集（不可变重赋值 E0384 / 空列表类型不可推断 E0282）
     errors: Rc<RefCell<Vec<String>>>,
+    /// 顶层 const 的编译期求值结果（name → ComptimeValue）：comptime 块/表达式
+    /// 内解析 const 引用（`comptime LIMIT / 2`），否则 Ident 查不到报未定义
+    comptime_consts: std::collections::HashMap<String, crate::comptime::ComptimeValue>,
+    /// 当前模块 AST（Rc 共享）：comptime 求值需访问模块函数定义
+    /// （`comptime gen_primes(8)` 查 module.functions 编译期执行）
+    comptime_module: Option<std::rc::Rc<ast::Module>>,
 }
 
 impl TypeCtx {
@@ -81,10 +91,13 @@ impl TypeCtx {
             block_declared: std::collections::HashSet::new(),
             current_generics: vec![],
             current_ret_ty: None,
+            self_ty: None,
             current_is_iterator: false,
             current_fn_name: None,
             pending_items: Rc::new(RefCell::new(Vec::new())),
             errors: Rc::new(RefCell::new(Vec::new())),
+            comptime_consts: std::collections::HashMap::new(),
+            comptime_module: None,
         }
     }
 
@@ -164,6 +177,27 @@ impl TypeCtx {
                         IrType::Named {
                             path: "Future".into(),
                             args: vec![ret],
+                        },
+                    );
+                } else if f.is_iterator {
+                    // iterator 生成器函数（iterator repeat<T>(val, n) -> T / 
+                    // count_from(...) -> Iterator<int>）：调用返回**迭代器集合**
+                    // Vec<元素类型>（生成代码 `-> Vec<Y>`，急切收集）。登记为
+                    // Vec<元素>——若声明返回 Iterator<int> 则取元素 int 登记
+                    // Vec<int>，否则 Vec<ret>（iterator_demo `for x in
+                    // repeat("hi", 3)` 中 T=String 误当字符串迭代生成 .chars()，
+                    // E0599；while_let `Vec<impl Iterator>` 非法 E0562）
+                    let elem = match &ret {
+                        IrType::Named { path, args } if path == "Iterator" && args.len() == 1 => {
+                            args[0].clone()
+                        }
+                        _ => ret.clone(),
+                    };
+                    self.fn_returns.insert(
+                        f.name.clone(),
+                        IrType::Named {
+                            path: "Vec".into(),
+                            args: vec![elem],
                         },
                     );
                 } else {
@@ -315,17 +349,17 @@ fn magic_method_for_binop(op: &BinOp) -> Option<&'static str> {
         BinOp::Add => Some("__add__"),
         BinOp::Sub => Some("__sub__"),
         BinOp::Mul => Some("__mul__"),
-        BinOp::Div => Some("__truediv__"),
-        BinOp::Mod => Some("__mod__"),
+        BinOp::Div => Some("__div__"),
+        BinOp::Mod => Some("__rem__"),
         BinOp::Eq => Some("__eq__"),
         BinOp::Ne => Some("__ne__"),
         BinOp::Lt => Some("__lt__"),
         BinOp::Gt => Some("__gt__"),
         BinOp::Le => Some("__le__"),
         BinOp::Ge => Some("__ge__"),
-        BinOp::BitAnd => Some("__and__"),
-        BinOp::BitOr => Some("__or__"),
-        BinOp::BitXor => Some("__xor__"),
+        BinOp::BitAnd => Some("__bitand__"),
+        BinOp::BitOr => Some("__bitor__"),
+        BinOp::BitXor => Some("__bitxor__"),
         BinOp::Pow => Some("__pow__"),
         BinOp::In => Some("__contains__"),
         _ => None,
@@ -356,6 +390,30 @@ fn map_assign_op(op: &AssignOp) -> BinOpKind {
         AssignOp::ShlEq => BinOpKind::Shl,
         AssignOp::ShrEq => BinOpKind::Shr,
         AssignOp::PowEq => BinOpKind::Pow,
+    }
+}
+
+/// 泛型参数规范化：`Named("T", [])`（from_ast_type 表示）→ `Generic("T")`
+/// （infer 表示），递归处理嵌套（`Named("Rc", [Named("T")])` → `Named("Rc", [Generic("T")])`）。
+/// 用于 return 隐式转换判断中两侧容器元素类型比较（box.lz `Err(self.clone())`）。
+fn normalize_gen(ty: &IrType, generics: &[String]) -> IrType {
+    match ty {
+        IrType::Named { path, args } => {
+            if args.is_empty() {
+                if generics.iter().any(|g| g == path) {
+                    IrType::Generic(path.clone())
+                } else {
+                    ty.clone()
+                }
+            } else {
+                let new_args: Vec<IrType> = args.iter().map(|a| normalize_gen(a, generics)).collect();
+                IrType::Named {
+                    path: path.clone(),
+                    args: new_args,
+                }
+            }
+        }
+        _ => ty.clone(),
     }
 }
 
@@ -713,12 +771,29 @@ fn infer_generic_binding(
 
 fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
     match ast_expr {
+        // comptime 表达式：类型与内部表达式一致（B3 求值内联）
+        AstExpr::Comptime(inner) => infer_expr_type(inner, ctx),
         AstExpr::IntLit(_) => IrType::Int,
         AstExpr::FloatLit(_) => IrType::F64,
         AstExpr::StrLit(_) | AstExpr::FStrLit(_) | AstExpr::RawStrLit(_) => IrType::Str,
         AstExpr::BoolLit(_) => IrType::Bool,
         AstExpr::NoneLit => IrType::Any, // None 类型取决于上下文
-        AstExpr::Ident(name) => ctx.lookup_var(name),
+        AstExpr::Ident(name) => {
+            // 裸枚举变体名（Less/Equal/Greater）：类型应为枚举类型而非 Any→i64 fallback，
+            // 否则 `return Less` 会插入 <Ordering as ImplicitFrom<i64>> 错误转换（E0277）
+            if let Some(enum_name) = ctx.enum_variants.get(name.as_str()) {
+                if !ctx.vars.contains_key(name.as_str()) {
+                    IrType::Named {
+                        path: enum_name.clone(),
+                        args: vec![],
+                    }
+                } else {
+                    ctx.lookup_var(name)
+                }
+            } else {
+                ctx.lookup_var(name)
+            }
+        }
         AstExpr::Call {
             func,
             args,
@@ -787,6 +862,32 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 if ctx.is_struct(fname) {
                     return IrType::named(fname);
                 }
+                // 容器空构造：`List()` / `Set()` / `Dict()` 返回对应容器类型，
+                // 否则推断为 Any→i64（`let mut result = List()` 后 `return result`
+                // 生成 <Vec<U> as ImplicitFrom<i64>> 错误转换，E0277）
+                if args.is_empty() {
+                    match fname.as_str() {
+                        "List" | "Vec" => {
+                            return IrType::Named {
+                                path: "List".into(),
+                                args: vec![IrType::Any],
+                            }
+                        }
+                        "Set" | "HashSet" => {
+                            return IrType::Named {
+                                path: "Set".into(),
+                                args: vec![IrType::Any],
+                            }
+                        }
+                        "Dict" | "HashMap" => {
+                            return IrType::Named {
+                                path: "Dict".into(),
+                                args: vec![IrType::Any, IrType::Any],
+                            }
+                        }
+                        _ => {}
+                    }
+                }
                 // 闭包变量调用：consume() 中 consume 是局部 Fn 变量 →
                 // 返回闭包体 ret 类型（否则 lookup_fn_return 回退 Any→i64，E0308）
                 if let IrType::Fn { ret, .. } = ctx.lookup_var(fname) {
@@ -827,6 +928,15 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
             // 尝试从 receiver 类型推导方法返回类型
             let recv_ty = infer_expr_type(receiver, ctx);
+            // size_hint() 返回 (int, Option<int>)（LZ 视角 int；codegen 在
+            // impl Iterator 中映射为 usize）。iter.lz Zip::size_hint 中
+            // `self.a.size_hint()` 若不推断，min(lo_a, lo_b) 报 E0308
+            if method == "size_hint" || method == "__size_hint__" {
+                return IrType::Tuple(vec![
+                    IrType::Int,
+                    IrType::Option(Box::new(IrType::Int)),
+                ]);
+            }
             // 常见无返回值方法 → Unit
             if method == "push"
                 || method == "insert"
@@ -835,6 +945,18 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 || method == "append"
             {
                 return IrType::Unit;
+            }
+            // 比较魔术方法（__eq__/__ne__/__lt__/__gt__/__le__/__ge__）→ Bool：
+            // option.lz `a.__eq__(b)` 推断为 Bool，否则回退 i64 导致
+            // `<bool as ImplicitFrom<i64>>::__implicit_from__(a == b)`（E0277）
+            if method == "__eq__"
+                || method == "__ne__"
+                || method == "__lt__"
+                || method == "__gt__"
+                || method == "__le__"
+                || method == "__ge__"
+            {
+                return IrType::Bool;
             }
             // 内置方法返回类型推断表
             if let Some(ret) = lookup_builtin_method_ret(&recv_ty, method, ctx) {
@@ -854,6 +976,20 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     // clone() 返回接收者类型（Rc/Arc/Box 等）
                     if method == "clone" && (path == "Rc" || path == "Arc" || path == "Box") {
                         return recv_ty.clone();
+                    }
+                    // 用户 struct 方法：从登记的方法返回类型查询（box.lz `get` 返回
+                    // `ref T`，否则 `b.get()` 推断为 Any，`assert b.get() == 42`
+                    // 无法解引用，E0277 can't compare &i64 with i64）
+                    if ctx
+                        .struct_methods
+                        .get(path)
+                        .map(|ms| ms.contains(method))
+                        .unwrap_or(false)
+                    {
+                        let mret = ctx.lookup_fn_return(&format!("{}.{}", path, method));
+                        if !matches!(mret, IrType::Any) {
+                            return mret;
+                        }
                     }
                     // 用户 struct 的算术/构造魔术方法返回接收者类型
                     if ctx
@@ -888,7 +1024,20 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 _ => IrType::Any,
             }
         }
-        AstExpr::Index { .. } => IrType::Any,
+        AstExpr::Index { receiver, .. } => {
+            // `self[key]` 索引类型：从容器类型推断元素类型，而不是恒为 Any→i64。
+            // Dict<K,V> → V；List<T>/Vec<T> → T；否则 Any
+            let recv_ty = infer_expr_type(receiver, ctx);
+            match &recv_ty {
+                IrType::Named { path, args } if path == "Dict" || path == "HashMap" => {
+                    args.get(1).cloned().unwrap_or(IrType::Any)
+                }
+                IrType::Named { path, args } if path == "List" || path == "Vec" => {
+                    args.first().cloned().unwrap_or(IrType::Any)
+                }
+                _ => IrType::Any,
+            }
+        }
         AstExpr::Binary { left, op, right } => {
             // `is` 运算符始终返回 Bool
             if matches!(op, BinOp::Is) {
@@ -1656,6 +1805,41 @@ fn build_multi_comp(
     inner
 }
 
+/// 将编译期求值结果转为 IR 表达式（Int/Float/Bool/Str/None → 字面量；
+/// List/Tuple → vec![...]/元组递归内联，供查找表「焊死」；
+/// Map/Type/Inspect 不支持内联，返回 None）
+fn comptime_value_to_lit(v: &crate::comptime::ComptimeValue) -> Option<ExprKind> {
+    use crate::comptime::ComptimeValue;
+    match v {
+        ComptimeValue::Int(i) => Some(ExprKind::Lit(LitKind::Int(*i))),
+        ComptimeValue::Float(f) => Some(ExprKind::Lit(LitKind::F64(*f))),
+        ComptimeValue::Bool(b) => Some(ExprKind::Lit(LitKind::Bool(*b))),
+        ComptimeValue::Str(s) => Some(ExprKind::Lit(LitKind::Str(s.clone()))),
+        ComptimeValue::None => Some(ExprKind::Lit(LitKind::None_)),
+        ComptimeValue::List(xs) => {
+            let elems: Vec<Expr> = xs.iter().map(|x| {
+                Expr::new(
+                    comptime_value_to_lit(x).unwrap_or(ExprKind::Lit(LitKind::None_)),
+                    IrType::Any,
+                    Span::unknown(),
+                )
+            }).collect();
+            Some(ExprKind::ListLit(elems))
+        }
+        ComptimeValue::Tuple(xs) => {
+            let elems: Vec<Expr> = xs.iter().map(|x| {
+                Expr::new(
+                    comptime_value_to_lit(x).unwrap_or(ExprKind::Lit(LitKind::None_)),
+                    IrType::Any,
+                    Span::unknown(),
+                )
+            }).collect();
+            Some(ExprKind::TupleLit(elems))
+        }
+        _ => None,
+    }
+}
+
 fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
     let ty = infer_expr_type(ast_expr, ctx);
     let span = Span::unknown();
@@ -1670,6 +1854,27 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::NoneLit => ExprKind::Lit(LitKind::None_),
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
         AstExpr::Paren(inner) => ExprKind::Paren(Box::new(convert_expr(inner, ctx))),
+        // comptime 表达式：编译期求值，结果内联为字面量（B3）
+        AstExpr::Comptime(inner) => {
+            // 使用真实模块（comptime 可调用模块内函数/引用 const）
+            let empty_module = ast::Module::default();
+            let module_ref = ctx.comptime_module.as_ref().map(|m| m.as_ref()).unwrap_or(&empty_module);
+            let mut cctx = crate::comptime::ComptimeContext::new(module_ref);
+            // 注入顶层 const 求值结果（`comptime LIMIT / 2` 解析 const 引用）
+            for (n, v) in &ctx.comptime_consts {
+                cctx.symtab.insert(n.clone(), v.clone());
+            }
+            match crate::comptime::ComptimeEvaluator::eval_expr(inner, &mut cctx) {
+                Ok(v) => match comptime_value_to_lit(&v) {
+                    Some(kind) => kind,
+                    None => ExprKind::Paren(Box::new(convert_expr(inner, ctx))),
+                },
+                Err(e) => {
+                    ctx.errors.borrow_mut().push(format!("comptime 求值失败: {}", e));
+                    ExprKind::Paren(Box::new(convert_expr(inner, ctx)))
+                }
+            }
+        }
 
         AstExpr::Call {
             func,
@@ -1903,10 +2108,42 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 }
             }
 
+            // 函数参数调用（iter.lz filter/find `predicate(item)`，predicate:
+            // fn(ref I.Item) -> bool）：callee 是 Fn 类型变量且参数为 ref 时，
+            // 实参自动取引用（&item），否则 E0308 expected &I::Item found owned
+            let fn_arg_refs: Vec<bool> = if let AstExpr::Ident(fname) = func.as_ref() {
+                match ctx.lookup_var(fname) {
+                    IrType::Fn { params, .. } => params
+                        .iter()
+                        .map(|p| matches!(p, IrType::Ref(_) | IrType::MutRef(_)))
+                        .collect(),
+                    _ => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            };
+            let args: Vec<Expr> = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    if i < fn_arg_refs.len() && fn_arg_refs[i] {
+                        Expr::new(
+                            ExprKind::UnOp {
+                                op: UnOpKind::Ref,
+                                operand: Box::new(convert_expr(a, ctx)),
+                            },
+                            IrType::Any,
+                            Span::unknown(),
+                        )
+                    } else {
+                        convert_expr(a, ctx)
+                    }
+                })
+                .collect();
             ExprKind::Call {
                 type_args: ir_type_args,
                 callee: Box::new(convert_expr(actual_func, ctx)),
-                args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
+                args,
             }
         }
 
@@ -2151,34 +2388,35 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             elif_clauses,
             else_body,
         } => {
-            // 多分支 if → 嵌套 IfExpr
-            let mut result = if let Some(els) = else_body {
-                ExprKind::IfExpr {
-                    cond: Box::new(convert_expr(cond, ctx)),
-                    then: Box::new(block_to_expr(then_body, ctx)),
-                    els: Box::new(block_to_expr(els, ctx)),
-                }
+            // 多分支 if → 嵌套 IfExpr。elif 链必须嵌套在**原始 if 的 else 分支内**：
+            // `if cond { then } else { if elif1 { b1 } else { if elif2 { b2 } else { else_body } } }`
+            // 旧实现把 elif 反向包在原始 if **外层**（`if elif { b } else { if cond ... }`），
+            // 导致分支顺序颠倒（age_group: age<20 的 elif 反而先判断）。
+            // else 分支保留原始 block_to_expr 节点（含自身 Unit 类型）——用
+            // Expr::new(els, ty) 以 if 整体类型标注 else 会导致 set.lz 等
+            // 语句级 if 的 else () 类型错乱（E0308 if/else incompatible）
+            let mut els_expr = if let Some(els) = else_body {
+                block_to_expr(els, ctx)
             } else {
-                ExprKind::IfExpr {
-                    cond: Box::new(convert_expr(cond, ctx)),
-                    then: Box::new(block_to_expr(then_body, ctx)),
-                    els: Box::new(Expr::new(
-                        ExprKind::Lit(LitKind::Unit),
-                        IrType::Unit,
-                        Span::unknown(),
-                    )),
-                }
+                Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown())
             };
-
-            // elif 链 = 嵌套 if（反向迭代，使第一个 elif 成为最外层 if）
+            // 反向迭代 elif，使第一个 elif 成为最内层 else（紧贴 else_body）
             for (elif_cond, elif_body) in elif_clauses.iter().rev() {
-                result = ExprKind::IfExpr {
-                    cond: Box::new(convert_expr(elif_cond, ctx)),
-                    then: Box::new(block_to_expr(elif_body, ctx)),
-                    els: Box::new(Expr::new(result, ty.clone(), Span::unknown())),
-                };
+                els_expr = Expr::new(
+                    ExprKind::IfExpr {
+                        cond: Box::new(convert_expr(elif_cond, ctx)),
+                        then: Box::new(block_to_expr(elif_body, ctx)),
+                        els: Box::new(els_expr),
+                    },
+                    ty.clone(),
+                    Span::unknown(),
+                );
             }
-            result
+            ExprKind::IfExpr {
+                cond: Box::new(convert_expr(cond, ctx)),
+                then: Box::new(block_to_expr(then_body, ctx)),
+                els: Box::new(els_expr),
+            }
         }
 
         AstExpr::Match { expr, arms } => {
@@ -2316,9 +2554,13 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             }
             // 闭包参数登记到 closure_ctx.vars（遮蔽外部同名变量）：
             // 否则体内 `x + y` 中 y 会错误回退到外部 f64 变量，触发混合提升
-            // （E0282 参数类型注解丢失的过渡方案：参数以 Any 登记，Any→i64 fallback）
-            for name in params {
-                closure_ctx.vars.insert(name.clone(), IrType::Any);
+            // （E0282 参数类型注解丢失的过渡方案：参数以 Any 登记，Any→i64 fallback）。
+            // 带类型注解的 ref 参数（`|x: ref int|`）按 Ref 登记，使体内 `x > 2`
+            // 能识别 x 是引用（codegen 解引用，iter.lz find 闭包 E0308）
+            for (i, name) in params.iter().enumerate() {
+                let param_ty = param_tys.get(i).and_then(|t| t.as_ref());
+                let declared_ty = param_ty.map(|t| from_ast_type(t)).unwrap_or(IrType::Any);
+                closure_ctx.vars.insert(name.clone(), declared_ty);
             }
             ExprKind::Lambda {
                 params: params
@@ -3076,11 +3318,19 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         }
 
         AstExpr::Assign { target, op, value } => {
-            // 复合赋值 → 仍在 Expr 层表达（Assign 语义，由后端处理）
-            ExprKind::BinOp {
-                op: map_assign_op(op),
-                lhs: Box::new(convert_expr(target, ctx)),
-                rhs: Box::new(convert_expr(value, ctx)),
+            // 纯赋值（`total = total + x`，闭包体/表达式上下文）→ AssignExpr，
+            // codegen 渲染 `target = value`；复合赋值（+= 等）→ BinOp
+            if *op == AssignOp::Eq {
+                ExprKind::AssignExpr {
+                    target: Box::new(convert_expr(target, ctx)),
+                    value: Box::new(convert_expr(value, ctx)),
+                }
+            } else {
+                ExprKind::BinOp {
+                    op: map_assign_op(op),
+                    lhs: Box::new(convert_expr(target, ctx)),
+                    rhs: Box::new(convert_expr(value, ctx)),
+                }
             }
         }
 
@@ -3398,9 +3648,21 @@ fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
                     IrType::Any,
                     Span::unknown(),
                 );
+                // 解构字段类型：从元组类型提取元素（`let (lower, upper) = size_hint()`
+                // 的 (int, Option<int>) → lower: int, upper: Option<int>），否则 Any
+                // 导致 `return (lower, upper)` 推断错误（E0277 ImplicitFrom）
+                let field_ty = match &val_ty {
+                    IrType::Tuple(items) => {
+                        items.get(i).cloned().unwrap_or(IrType::Any)
+                    }
+                    _ => ty
+                        .as_ref()
+                        .map(|t| from_ast_type(t))
+                        .unwrap_or(IrType::Any),
+                };
                 result.push(Stmt::Let {
                     name: name.clone(),
-                    ty: ty.as_ref().map(|t| from_ast_type(t)).unwrap_or(IrType::Any),
+                    ty: field_ty,
                     value: field_expr,
                     is_mut: false,
                 });
@@ -3423,6 +3685,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     let pat = convert_ast_pattern(&arm.pattern, ctx).unwrap_or(Pattern::Wildcard);
                     let guard = arm.guard.as_ref().map(|g| convert_expr(g, ctx));
                     let mut arm_ctx = TypeCtx::new();
+                    arm_ctx.vars = ctx.vars.clone();
                     arm_ctx.current_generics = ctx.current_generics.clone();
                     arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
                     arm_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
@@ -3438,8 +3701,16 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                         arm_ctx.struct_names.insert(sn.clone());
                     }
                     if let AstPattern::Ident(name) = &arm.pattern {
-                        let scrut_ty = infer_expr_type(expr, ctx);
-                        arm_ctx.add_var(name, scrut_ty);
+                        // 裸枚举变体名模式（`case Equal:`）是变体匹配而非变量绑定：
+                        // 登记为绑定变量会把臂体内 `return Equal` 解析成类型为 Self 的
+                        // 变量引用（E0277 ImplicitFrom<Self>）。仅当名字不是枚举变体
+                        // 时才 add_var（如 `case x:` 绑定整个 scrutinee）
+                        let is_enum_variant =
+                            ctx.enum_variants.contains_key(name.as_str());
+                        if !is_enum_variant {
+                            let scrut_ty = infer_expr_type(expr, ctx);
+                            arm_ctx.add_var(name, scrut_ty);
+                        }
                     }
                     // ref mut 绑定（case Some(ref mut c)）：c 登记为 MutRef 内层类型，
                     // 臂体内 c = c + 1 需生成 *c = *c + 1（解引用赋值）
@@ -3678,16 +3949,251 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 // 返回值隐式转换: return S 但声明返回 T → 插入 ImplicitConvert
                 // （iterator 函数内 return 等价 raise，不做隐式转换，避免 String→T 残留）
                 if !ctx.current_is_iterator {
-                    if let Some(ref ret_ty) = ctx.current_ret_ty {
-                        if expr.ty != *ret_ty && !matches!(ret_ty, IrType::Unit) {
-                            return Expr::new(
-                                ExprKind::ImplicitConvert {
-                                    source: Box::new(expr.clone()),
-                                    target_ty: ret_ty.clone(),
-                                },
-                                ret_ty.clone(),
-                                Span::unknown(),
-                            );
+                    // `return None`（目标 Option<T>）：None 字面量直接返回即可，
+                    // 无需 ImplicitConvert——否则生成 <Option<i64> as ImplicitFrom<i64>>
+                    // 错误包装（E0277，iter.lz `__next__` 的 None 分支）
+                    let ret_is_option = ctx
+                        .current_ret_ty
+                        .as_ref()
+                        .map(|rt| {
+                            matches!(rt, IrType::Option(_))
+                                || matches!(rt, IrType::Named { path, .. }
+                                    if path == "Option" || path == "Result")
+                        })
+                        .unwrap_or(false);
+                    let expr_is_none = matches!(expr.kind, ExprKind::Lit(LitKind::None_))
+                        || matches!(&expr.kind, ExprKind::Var(n) if n == "None" || n == "None_");
+                    // 泛型参数规范化：`Named("T", [])`（from_ast_type 表示）→ `Generic("T")`
+                    // （infer 表示），使两侧容器元素类型可比较（box.lz `Err(self.clone())`：
+                    // ret_ty err 侧是 Named("Rc", [Named("T")])，expr.ty err 侧是
+                    // Named("Rc", [Generic("T")])，不规范化则 re != ee → 误插 ImplicitConvert）
+                    let normalize_generic = |ty: &IrType| -> IrType { normalize_gen(ty, &ctx.current_generics) };
+                    // 同容器名、仅元素类型差异（List<Any> vs List<U>）：跳过转换，
+                    // 让 Rust 从返回类型推断（`return result` 中 result 是 List() 空构造，
+                    // 元素类型 Any→i64 与返回 List<I::Item> 不匹配，E0277）。
+                    // 递归比较 Named 参数：`Option<Rc<T>>` vs `Option<Rc<i64>>`
+                    // （box.lz Weak::upgrade `Some(Rc(_inner: self._rc))`，_inner:int
+                    // 占位导致 Rc 推断为 Rc<i64>，E0277 ImplicitFrom）
+                    let same_named_rec = |a: &IrType, b: &IrType| -> bool {
+                        // 任何一侧为 Any/Generic 即兼容（collect_list 的 result 是
+                        // List() 空构造 → List<Any>，返回类型 List<I::Item>；当前只有
+                        // 双方 Named 才检查，Any 会落到 _ => a==b 返回 false，E0277）
+                        if matches!(a, IrType::Generic(_) | IrType::Any)
+                            || matches!(b, IrType::Generic(_) | IrType::Any)
+                            || a == b
+                        {
+                            return true;
+                        }
+                        match (a, b) {
+                            (IrType::Named { path: p1, args: r1 }, IrType::Named { path: p2, args: r2 })
+                                if p1 == p2 && r1.len() == r2.len() && !r1.is_empty() =>
+                            {
+                                r1.iter().zip(r2.iter()).all(|(x, y)| {
+                                    if x == y {
+                                        true
+                                    } else if matches!(x, IrType::Generic(_) | IrType::Any)
+                                        || matches!(y, IrType::Generic(_) | IrType::Any)
+                                    {
+                                        true
+                                    } else if let (IrType::Named { path: q1, .. }, IrType::Named { path: q2, .. }) =
+                                        (x, y)
+                                    {
+                                        // 关联类型路径（I::Item / I.Item）与具体类型兼容：
+                                        // collect_list 的 `return result` 中 result 推断为
+                                        // Vec<i64>，返回类型 Vec<I::Item>（E0277 ImplicitFrom）
+                                        q1 == q2
+                                            || q1.contains("::")
+                                            || q1.contains('.')
+                                            || q2.contains("::")
+                                            || q2.contains('.')
+                                    } else {
+                                        false
+                                    }
+                                })
+                            }
+                            // Option(Int) vs Option(Any)——内部 Any 兼容（size_hint 的
+                            // return (new_lower, new_upper) 中 new_upper 是 Option<Any>，
+                            // 否则 ImplicitFrom 插入 E0308/E0277）
+                            (IrType::Option(i1), IrType::Option(i2)) => {
+                                if i1 == i2 {
+                                    true
+                                } else if matches!(i1.as_ref(), IrType::Generic(_) | IrType::Any)
+                                    || matches!(i2.as_ref(), IrType::Generic(_) | IrType::Any)
+                                {
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            // 一方空 args（类型未推断，如 `Rc` vs `Rc<T>`）：视为兼容，
+                            // 让 Rust 从返回类型推断（box.lz `Some(Rc(_inner: self._rc))`
+                            // 的 Rc 推断为 Named{args:[]}，E0277 ImplicitFrom）
+                            (
+                                IrType::Named { path: p1, args },
+                                IrType::Named { path: p2, args: args2 },
+                            ) if p1 == p2
+                                && (args.is_empty() || args2.is_empty())
+                                && args.len() != args2.len() =>
+                            {
+                                true
+                            }
+                            _ => a == b,
+                        }
+                    };
+                    let same_container_any = match (ctx.current_ret_ty.as_ref(), &expr.ty) {
+                        // 元组返回（size_hint 的 `return (lower, upper)`）：元素递归
+                        // 比较（Any 元素兼容），否则 (i64, Any) vs (i64, Option<i64>)
+                        // 插入错误 ImplicitFrom（E0277）
+                        (
+                            Some(IrType::Tuple(ra)),
+                            IrType::Tuple(ea),
+                        ) if ra.len() == ea.len() => {
+                            let ok = ra.iter().zip(ea.iter()).all(|(r, e)| same_named_rec(r, e));
+                            if !ok && ra.len() == 2 {
+                                eprintln!(
+                                    "DBG tuple_same: ra={:?} ea={:?} ok={}",
+                                    ra, ea, ok
+                                );
+                            }
+                            ok
+                        }
+                        (
+                            Some(IrType::Named { path: rp, args: ra }),
+                            IrType::Named { path: ep, args: ea },
+                        ) if rp == ep && !ra.is_empty() && !ea.is_empty() => {
+                            ra.iter().zip(ea.iter()).all(|(r, e)| same_named_rec(r, e))
+                        }
+                        // Result<T, Any> vs Result<T, Rc<T>>：err/ok 侧 Any 时跳过转换
+                        // （box.lz `Ok(self.get())`，get 返回 &T，Ok 推断 Result<T, Any>）
+                        (
+                            Some(IrType::Result { ok: ro, err: re }),
+                            IrType::Result { ok: eo, err: ee },
+                        ) => {
+                            let ro = normalize_generic(ro);
+                            let re = normalize_generic(re);
+                            let eo = normalize_generic(eo);
+                            let ee = normalize_generic(ee);
+                            (matches!(ro, IrType::Generic(_) | IrType::Any)
+                                || matches!(eo, IrType::Generic(_) | IrType::Any)
+                                || ro == eo)
+                                && (matches!(re, IrType::Generic(_) | IrType::Any)
+                                    || matches!(ee, IrType::Generic(_) | IrType::Any)
+                                    || re == ee)
+                        }
+                        // Result<T, E> 在 AST 中可能解析为 Named("Result", [ok, err])，
+                        // 而 Err(...) 构造推断为 IrType::Result 变体（box.lz try_unwrap
+                        // `return Err(self)`）——跨表示形式比较，跳过等价的 ImplicitConvert
+                        (
+                            Some(IrType::Named { path: rp, args: ra }),
+                            IrType::Result { ok: eo, err: ee },
+                        ) if rp == "Result" && ra.len() == 2 => {
+                            let ro = normalize_generic(&ra[0]);
+                            let re = normalize_generic(&ra[1]);
+                            let eo = normalize_generic(eo);
+                            let ee = normalize_generic(ee);
+                            (matches!(ro, IrType::Generic(_) | IrType::Any)
+                                || matches!(eo, IrType::Generic(_) | IrType::Any)
+                                || ro == eo)
+                                && (matches!(re, IrType::Generic(_) | IrType::Any)
+                                    || matches!(ee, IrType::Generic(_) | IrType::Any)
+                                    || re == ee)
+                        }
+                        (
+                            Some(IrType::Result { ok: ro, err: re }),
+                            IrType::Named { path: ep, args: ea },
+                        ) if ep == "Result" && ea.len() == 2 => {
+                            let ro = normalize_generic(ro);
+                            let re = normalize_generic(re);
+                            let eo = normalize_generic(&ea[0]);
+                            let ee = normalize_generic(&ea[1]);
+                            (matches!(ro, IrType::Generic(_) | IrType::Any)
+                                || matches!(eo, IrType::Generic(_) | IrType::Any)
+                                || ro == eo)
+                                && (matches!(re, IrType::Generic(_) | IrType::Any)
+                                    || matches!(ee, IrType::Generic(_) | IrType::Any)
+                                    || re == ee)
+                        }
+                        // Option 同理：Named("Option", [T]) vs IrType::Option(T)
+                        (
+                            Some(IrType::Named { path: rp, args: ra }),
+                            IrType::Option(eo),
+                        ) if rp == "Option" && ra.len() == 1 => {
+                            let ro = normalize_generic(&ra[0]);
+                            let eo = normalize_generic(eo);
+                            matches!(ro, IrType::Generic(_) | IrType::Any)
+                                || matches!(eo, IrType::Generic(_) | IrType::Any)
+                                || same_named_rec(&ro, &eo)
+                        }
+                        (
+                            Some(IrType::Option(ro)),
+                            IrType::Named { path: ep, args: ea },
+                        ) if ep == "Option" && ea.len() == 1 => {
+                            let ro = normalize_generic(ro);
+                            let eo = normalize_generic(&ea[0]);
+                            matches!(ro, IrType::Generic(_) | IrType::Any)
+                                || matches!(eo, IrType::Generic(_) | IrType::Any)
+                                || same_named_rec(&ro, &eo)
+                        }
+                        // Option/Option：`Some(Rc(_inner: self._rc))` 的 ret/expr 都是
+                        // IrType::Option 变体（box.lz Weak::upgrade，Rc 推断为空 args），
+                        // 递归比较内部元素（E0277 ImplicitFrom）
+                        (
+                            Some(IrType::Option(ro)),
+                            IrType::Option(eo),
+                        ) => {
+                            let ro = normalize_generic(ro);
+                            let eo = normalize_generic(eo);
+                            matches!(ro, IrType::Generic(_) | IrType::Any)
+                                || matches!(eo, IrType::Generic(_) | IrType::Any)
+                                || same_named_rec(&ro, &eo)
+                        }
+                        _ => false,
+                    };
+                    if !(expr_is_none && ret_is_option) && !same_container_any {
+                        if let Some(ref ret_ty) = ctx.current_ret_ty {
+                            // ref 返回（`return self[key]`，&V）且表达式是值（V）：
+                            // 跳过 ImplicitConvert（E0277 &V: ImplicitFrom<V>），
+                            // codegen 对 HashMap 索引生成 .get(&key).unwrap()（&V）
+                            let ref_ret_ok =
+                                matches!(ret_ty, IrType::Ref(inner) if expr.ty == (**inner).clone())
+                                    || matches!(ret_ty, IrType::MutRef(inner)
+                                        if expr.ty == (**inner).clone());
+                            if !ref_ret_ok
+                                && expr.ty != *ret_ty
+                                && !matches!(ret_ty, IrType::Unit)
+                            {
+                                // 返回类型含关联类型路径（`I::Item` / `Option<(A::Item, B::Item)>`，
+                                // iter.lz sum/product/Zip::next）：跳过 ImplicitConvert，
+                                // 让 Rust 从函数签名推断（E0277 ImplicitFrom）
+                                fn contains_assoc_path(ty: &IrType) -> bool {
+                                    match ty {
+                                        IrType::Named { path, args } => {
+                                            path.contains("::")
+                                                || path.contains('.')
+                                                || args.iter().any(contains_assoc_path)
+                                        }
+                                        IrType::Option(inner) => contains_assoc_path(inner),
+                                        IrType::Result { ok, err } => {
+                                            contains_assoc_path(ok) || contains_assoc_path(err)
+                                        }
+                                        IrType::Tuple(items) => {
+                                            items.iter().any(contains_assoc_path)
+                                        }
+                                        _ => false,
+                                    }
+                                }
+                                let ret_is_assoc_path = contains_assoc_path(ret_ty);
+                                if !ret_is_assoc_path {
+                                    return Expr::new(
+                                        ExprKind::ImplicitConvert {
+                                            source: Box::new(expr.clone()),
+                                            target_ty: ret_ty.clone(),
+                                        },
+                                        ret_ty.clone(),
+                                        Span::unknown(),
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -3774,6 +4280,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             loop_ctx.current_generics = ctx.current_generics.clone();
             loop_ctx.current_ret_ty = ctx.current_ret_ty.clone();
             loop_ctx.current_is_iterator = ctx.current_is_iterator;
+            // 复制变量类型（predicate: fn(ref I.Item) 等函数参数）：
+            // 否则 for 循环体内 `predicate(item)` 中 predicate 类型丢失→Any，
+            // 无法识别 ref 参数自动取引用（iter.lz filter/find，E0308）
+            loop_ctx.vars = ctx.vars.clone();
+            loop_ctx.current_fn_name = ctx.current_fn_name.clone();
             // 推导迭代变量的类型
             let iter_ty = infer_expr_type(iter, ctx);
             let elem_ty = match &iter_ty {
@@ -3873,9 +4384,33 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         }
 
         AstStmt::Comptime { body } => {
-            // comptime: 块 — 内联为普通 Block
-            Stmt::Block {
-                stmts: convert_block(body, ctx).stmts,
+            // comptime: 块 — 编译期求值，结果内联（B3）。
+            // 求值成功且有值 → 内联为字面量表达式；无值（块内仅 let/const）→ Pass；
+            // 求值失败 → 收集错误并降级为普通 Block（保留原编译行为）。
+            // 使用真实模块（comptime 块内可调用模块内函数/引用 const）
+            let empty_module = ast::Module::default();
+            let module_ref = ctx.comptime_module.as_ref().map(|m| m.as_ref()).unwrap_or(&empty_module);
+            let mut cctx = crate::comptime::ComptimeContext::new(module_ref);
+            // 注入顶层 const 求值结果（comptime 块内解析 const 引用）
+            for (n, v) in &ctx.comptime_consts {
+                cctx.symtab.insert(n.clone(), v.clone());
+            }
+            match crate::comptime::ComptimeEvaluator::eval_block(body, &mut cctx) {
+                Ok(Some(v)) => match comptime_value_to_lit(&v) {
+                    Some(kind) => Stmt::ExprStmt {
+                        expr: Expr::new(kind, IrType::Any, Span::unknown()),
+                    },
+                    None => Stmt::Block {
+                        stmts: convert_block(body, ctx).stmts,
+                    },
+                },
+                Ok(None) => Stmt::Pass,
+                Err(e) => {
+                    ctx.errors.borrow_mut().push(format!("comptime 块求值失败: {}", e));
+                    Stmt::Block {
+                        stmts: convert_block(body, ctx).stmts,
+                    }
+                }
             }
         }
 
@@ -3982,7 +4517,9 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 name: name.clone(),
                 ty: val_ty.clone(),
                 value: val,
-                is_mut: false,
+                // with 资源绑定须可变：块内可被 __exit__/__enter__ 等可变借用
+                // （生成 `let mut res`，否则 E0596 cannot borrow as mutable）
+                is_mut: true,
             }];
             if alias.is_some() {
                 // __exit__ 调用参数数 = 方法实际非 self 参数数。
@@ -4081,9 +4618,13 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }
         }
 
-        AstStmt::Test { name: _, body } => Stmt::Block {
-            stmts: body.iter().map(|s| convert_stmt(s, ctx)).collect(),
-        },
+        AstStmt::Test { name: _, body } => {
+            // test 块体用 convert_block（可变 block_ctx 前向传播 let 变量类型）：
+            // convert_stmt 的 ctx 不可变，let 变量不登记，后续 `assert a == b` 中
+            // a 推断为 Any（box.lz E0369 assert_eq 需 PartialEq）
+            let blk = convert_block(body, ctx);
+            Stmt::Block { stmts: blk.stmts }
+        }
 
         AstStmt::Assert { expr, expected } => {
             // assert expr == expected → assert_eq!(expr, expected)
@@ -4091,8 +4632,116 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             // （否则 assert_eq! 只有单参数 → Rust 宏 "unexpected end of macro invocation"）
             let mut args = vec![convert_expr(expr, ctx)];
             let callee_name = if let Some(exp) = expected {
-                args.push(convert_expr(exp, ctx));
-                "assert_eq!"
+                // 用户自定义 struct 比较：assert_eq! 要求 PartialEq（box.lz 的
+                // Box/Rc/Arc 只定义 __eq__ 魔术方法 → E0369），改用
+                // assert!(lhs.__eq__(rhs)) 调用自定义魔术方法
+                let ir_expr = args[0].clone();
+                // `assert b.get() == 42`：b.get() 返回 `ref T`（&T），与 owned 值
+                // 比较需解引用（&i64 == i64 无实现，E0277 can't compare）
+                let lhs_is_ref = matches!(ir_expr.ty, IrType::Ref(_) | IrType::MutRef(_));
+                let is_user_struct = matches!(&ir_expr.ty, IrType::Named { path, .. }
+                    if (ctx.struct_names.contains(path.as_str())
+                        || ctx.enum_variants.values().any(|e| e == path.as_str()))
+                        && !["List", "Dict", "Set", "Option", "Result", "String"]
+                            .contains(&path.as_str()));
+                if is_user_struct {
+                    // parser 把 `assert a != c` 拆成 expected=Not(c)：
+                    // 若 struct 未定义 __ne__（box.lz 只有 __eq__），生成 !a.__eq__(&c)
+                    let is_ne = matches!(exp, AstExpr::Unary { op: UnaryOp::Not, .. });
+                    let ne_operand = if let AstExpr::Unary { operand, .. } = exp {
+                        (**operand).clone()
+                    } else {
+                        exp.clone()
+                    };
+                    let has_ne = ctx
+                        .struct_methods
+                        .get(
+                            &match &ir_expr.ty {
+                                IrType::Named { path, .. } => path.clone(),
+                                _ => String::new(),
+                            },
+                        )
+                        .map(|ms| ms.contains("__ne__"))
+                        .unwrap_or(false);
+                    if is_ne && !has_ne {
+                        // !a.__eq__(&c)：调用 __eq__ 后取反
+                        args = vec![Expr::new(
+                            ExprKind::UnOp {
+                                op: UnOpKind::Not,
+                                operand: Box::new(Expr::new(
+                                    ExprKind::MethodCall {
+                                        receiver: Box::new(ir_expr),
+                                        method: "__eq__".into(),
+                                        args: vec![Expr::new(
+                                            ExprKind::UnOp {
+                                                op: UnOpKind::Ref,
+                                                operand: Box::new(convert_expr(&ne_operand, ctx)),
+                                            },
+                                            IrType::Any,
+                                            Span::unknown(),
+                                        )],
+                                    },
+                                    IrType::Bool,
+                                    Span::unknown(),
+                                )),
+                            },
+                            IrType::Bool,
+                            Span::unknown(),
+                        )];
+                    } else {
+                        let magic = if is_ne { "__ne__" } else { "__eq__" };
+                        args = vec![Expr::new(
+                            ExprKind::MethodCall {
+                                receiver: Box::new(ir_expr),
+                                method: magic.into(),
+                                // __eq__/__ne__ 签名是 `fn __eq__(&self, other: &Self)`：
+                                // 参数应为引用 `&rhs`（box.lz assert a == b → a.__eq__(&b)，
+                                // 传 owned 值会 E0308 expected &Box, found Box）
+                                args: vec![Expr::new(
+                                    ExprKind::UnOp {
+                                        op: UnOpKind::Ref,
+                                        operand: Box::new(convert_expr(&ne_operand, ctx)),
+                                    },
+                                    IrType::Any,
+                                    Span::unknown(),
+                                )],
+                            },
+                            IrType::Bool,
+                            Span::unknown(),
+                        )];
+                    }
+                    "assert!"
+                } else if lhs_is_ref {
+                    // lhs 是引用（&T）：与 owned 值比较需解引用（*b.get() == 42），
+                    // 但 rhs 也是引用时（rc1.get() == rc2.get()）保持引用比较
+                    // （&Vec<i64> == &Vec<i64> 合法；*lhs vs &rhs 反而 E0277）
+                    let rhs_is_ref = match exp {
+                        AstExpr::MethodCall { .. } | AstExpr::Ident(_) => {
+                            let rhs_ty = infer_expr_type(exp, ctx);
+                            matches!(rhs_ty, IrType::Ref(_) | IrType::MutRef(_))
+                        }
+                        _ => false,
+                    };
+                    if rhs_is_ref {
+                        args.push(convert_expr(exp, ctx));
+                    } else {
+                        args = vec![
+                            Expr::new(
+                                ExprKind::UnOp {
+                                    op: UnOpKind::Deref,
+                                    operand: Box::new(ir_expr),
+                                },
+                                IrType::Any,
+                                Span::unknown(),
+                            ),
+                            convert_expr(exp, ctx),
+                        ];
+                    }
+                    "assert_eq!"
+                } else {
+                    args.push(convert_expr(exp, ctx));
+                    "assert_eq!"
+                }
             } else {
                 "assert!"
             };
@@ -4202,6 +4851,9 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     block_ctx.current_is_iterator = ctx.current_is_iterator;
     block_ctx.current_fn_name = ctx.current_fn_name.clone();
     block_ctx.pending_items = ctx.pending_items.clone();
+    block_ctx.errors = ctx.errors.clone();
+    block_ctx.comptime_consts = ctx.comptime_consts.clone();
+    block_ctx.comptime_module = ctx.comptime_module.clone();
     for sn in &ctx.struct_names {
         block_ctx.struct_names.insert(sn.clone());
     }
@@ -4247,7 +4899,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             name, ty, value, ..
         } = s
         {
-            // 本块首次声明的变量：登记到 block_declared（区分首次绑定与重新赋值）
+            // 本块首次声明的变量：登记到 block_declared（区分首次绑定与重新赋值）。
             // 顶层变量（size = 3 等顶层 Assign 转 Const）不属于本块首次声明：
             // 否则 `size = size - 1`（无 let 前缀可变绑定）被误判为本块绑定走
             // Let 分支，生成局部新绑定而非修改全局（guard_for_3.lz while 死循环）
@@ -4815,6 +5467,11 @@ fn prescan_closure_bindings(stmts: &[AstStmt], ctx: &mut TypeCtx) {
                     ret: Box::new(ret),
                 };
                 ctx.add_var(name, fty);
+                // 预登记的闭包绑定是本函数体**声明**（`mut f = 闭包` 的 f）：
+                // 标记 block_declared，否则 convert_block 预扫描（`!vars.contains`）
+                // 把预注册的 f 误当外部变量跳过 block_declared 注册，后续
+                // 3888 行误转 Assign（生成裸赋值 `f = move |...|` 缺 let，E0425）
+                ctx.block_declared.insert(name.clone());
             }
         }
     }
@@ -4906,10 +5563,19 @@ fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Option<IrType
 
 fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let is_math = func.decorators.iter().any(|d| d.name == "math");
+    // 方法泛型 + impl 级泛型合并（`impl<T> Box<T>` 的方法 try_unwrap 中
+    // `Result<T, Rc<T>>` 的 T 是 impl 泛型；只含 func.generics 则 T 被解析为
+    // Named("T") 而非 Generic("T")，导致 return 隐式转换误判（E0277））
     let generics: Vec<String> = if is_math {
         vec!["T".to_string()]
     } else {
-        func.generics.clone()
+        let mut g = func.generics.clone();
+        for gg in &ctx.current_generics {
+            if !g.contains(gg) {
+                g.push(gg.clone());
+            }
+        }
+        g
     };
 
     let params: Vec<Param> = func
@@ -5007,7 +5673,13 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let mut fn_ctx = TypeCtx::new();
     fn_ctx.pending_items = ctx.pending_items.clone();
     fn_ctx.errors = ctx.errors.clone();
+    fn_ctx.comptime_consts = ctx.comptime_consts.clone();
+    fn_ctx.comptime_module = ctx.comptime_module.clone();
     fn_ctx.current_fn_name = Some(func.name.clone());
+    // 继承顶层函数返回类型表：嵌套函数内调用其他函数（`return classify(0)`）需
+    // 查 lookup_fn_return——否则 fn_returns 为空 → Any→i64 fallback，
+    // return 误插 <String as ImplicitFrom<i64>> 转换（E0277，match_patterns.lz）
+    fn_ctx.fn_returns = ctx.fn_returns.clone();
     // 继承顶层变量（size = 3 等顶层 Assign 转 Const）：函数内 `x = v` 需识别为
     // 修改全局（guard_for_3.lz size = size - 1），否则生成局部新绑定 E0425
     fn_ctx.top_level_consts = ctx.top_level_consts.clone();
@@ -5055,7 +5727,23 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
     } else {
         for p in &func.params {
-            fn_ctx.add_param(&p.name, from_ast_type_with_generics(&p.ty, &generics));
+            // impl 方法中 self 参数绑定为 impl 目标类型（self_ty，如 Dict<K,V>），
+            // 使 self[key]、key in self、self.field 等按具体类型解析（E0277/E0599）
+            if p.name == "self" || p.name == "self_" {
+                if let Some(st) = &ctx.self_ty {
+                    fn_ctx.add_param(&p.name, st.clone());
+                    continue;
+                }
+            }
+            // ref 参数（iterable: ref I）登记为 Ref(inner)：for 循环等按引用处理，
+            // 否则 iterable 推断为 Generic("I")，`for item in iterable` 生成
+            // (iterable).into_iter() 会 move 出 &I（E0507 cannot move out of *iterable）
+            let base_ty = from_ast_type_with_generics(&p.ty, &generics);
+            if p.is_ref && !p.is_mut {
+                fn_ctx.add_param(&p.name, IrType::Ref(Box::new(base_ty)));
+            } else {
+                fn_ctx.add_param(&p.name, base_ty);
+            }
         }
     }
     // 注入 args/kwargs 内置变量到函数作用域（函数体内可直接引用 args / kwargs）
@@ -5208,6 +5896,21 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         })
         .collect();
 
+    // 引用 impl 级泛型的 where 约束（如 `impl<K,V> Dict<K,V>` 方法
+    // `where K: Eq + Hash`，K 不在方法泛型中）无法合并到方法泛型，
+    // 保留到 FnDef.where_clause，由 codegen 输出到方法签名（E0277 修复）
+    let extra_where: Vec<(String, Vec<IrType>)> = func
+        .where_clause
+        .iter()
+        .filter(|wb| !func.generics.contains(&wb.type_param))
+        .map(|wb| {
+            (
+                wb.type_param.clone(),
+                wb.bounds.iter().map(|b| from_ast_type(b)).collect(),
+            )
+        })
+        .collect();
+
     FnDef {
         name: func.name.clone(),
         generics: if is_math && func.generics.is_empty() {
@@ -5233,7 +5936,8 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 .iter()
                 .map(|(n, t)| (n.clone(), from_ast_type(t)))
                 .collect();
-            func.generics
+            let generics: Vec<GenericParam> = func
+                .generics
                 .iter()
                 .map(|g| {
                     let bounds = bounds_map.remove(g).unwrap_or_default();
@@ -5243,7 +5947,8 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                         default: defaults_map.get(g).cloned(),
                     }
                 })
-                .collect()
+                .collect();
+            generics
         },
         params: {
             // 合并注入的 args/kwargs 变参（variadic 收集）
@@ -5260,6 +5965,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         is_test: false,
         checker_param: func.checker_param.clone(),
         default_checker: func.default_checker.clone(),
+        where_clause: extra_where,
         span: Span::unknown(),
     }
 }
@@ -5567,7 +6273,14 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 .iter()
                 .map(|g| GenericParam {
                     name: g.clone(),
-                    bounds: vec![],
+                    // struct 泛型内联约束（`struct Map<I: Iterator, B>` 的 I: Iterator）：
+                    // 生成 `I: std::iter::Iterator`（E0220 associated type Item not found）
+                    bounds: s
+                        .generic_bounds
+                        .iter()
+                        .find(|(n, _)| n == g)
+                        .map(|(_, bds)| bds.iter().map(|b| from_ast_type(b)).collect())
+                        .unwrap_or_default(),
                     default: s
                         .generic_defaults
                         .iter()
@@ -5599,7 +6312,15 @@ fn convert_trait(t: &ast::TraitDef, ctx: &TypeCtx) -> Item {
                 .iter()
                 .map(|g| GenericParam {
                     name: g.clone(),
-                    bounds: vec![],
+                    // trait 方法泛型约束（collect<C: FromIterator<Self.Item>>）：
+                    // 从方法 where_clause 提取（E0423 expected value, found type
+                    // parameter C——C: FromIterator 约束丢失）
+                    bounds: m
+                        .where_clause
+                        .iter()
+                        .find(|wb| wb.type_param == *g)
+                        .map(|wb| wb.bounds.iter().map(|b| from_ast_type(b)).collect())
+                        .unwrap_or_default(),
                     default: None,
                 })
                 .collect(),
@@ -5611,8 +6332,26 @@ fn convert_trait(t: &ast::TraitDef, ctx: &TypeCtx) -> Item {
                     if p.name == "self" && p.is_mut {
                         IrType::MutRef(Box::new(IrType::Self_))
                     } else {
-                        from_ast_type(&p.ty)
+                        let t = from_ast_type(&p.ty);
+                        // ref 参数（`ref other: Self`）→ Ref(Self_)，生成 &Self 参数
+                        // （否则 other: Self 报 E0277 size for Self cannot be known）
+                        if p.is_ref {
+                            IrType::Ref(Box::new(t))
+                        } else {
+                            t
+                        }
                     }
+                })
+                .collect(),
+            params_names: m.params.iter().map(|p| p.name.clone()).collect(),
+            // trait 方法 where 约束（try_from ... where Self: Sized）：生成到方法签名
+            where_clause: m
+                .where_clause
+                .iter()
+                .map(|wb| {
+                    let bounds: Vec<IrType> =
+                        wb.bounds.iter().map(|b| from_ast_type(b)).collect();
+                    (wb.type_param.clone(), bounds)
                 })
                 .collect(),
             ret: m
@@ -5625,7 +6364,17 @@ fn convert_trait(t: &ast::TraitDef, ctx: &TypeCtx) -> Item {
             body: if m.body.is_empty() {
                 None
             } else {
-                Some(convert_block_with_ctx(&m.body, ctx))
+                // 注册方法参数变量到 ctx（predicate 等 fn 参数的类型），否则
+                // 调用点 callee.ty 是 Any，callee_fn_refs 不生效（E0308
+                // expected &Item, found Item——find/Filter 的 predicate(item)）
+                let mut body_ctx = ctx.clone();
+                for p in &m.params {
+                    if p.name != "self" {
+                        let t = from_ast_type(&p.ty);
+                        body_ctx.add_var(&p.name, t);
+                    }
+                }
+                Some(convert_block_with_ctx(&m.body, &body_ctx))
             },
         })
         .collect();
@@ -5645,7 +6394,7 @@ fn convert_trait(t: &ast::TraitDef, ctx: &TypeCtx) -> Item {
                     .map(|(_, ty)| from_ast_type(ty)),
             })
             .collect(),
-        supertraits: vec![],
+        supertraits: t.supertraits.iter().map(|st| from_ast_type(st)).collect(),
         methods,
         assoc_types: t.assoc_types.clone(),
     })
@@ -5680,10 +6429,32 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
             for (cn, ct) in &ctx.top_level_consts {
                 impl_ctx.top_level_consts.insert(cn.clone(), ct.clone());
             }
+            // impl 方法体内裸枚举变体名（`return Less`）需枚举映射做类型推断，
+            // 否则回退 Any→i64 生成 <Ordering as ImplicitFrom<i64>> 错误转换（E0277）
+            for (vn, en) in &ctx.enum_variants {
+                impl_ctx.enum_variants.insert(vn.clone(), en.clone());
+            }
+            for (vn, ft) in &ctx.enum_variant_field_types {
+                impl_ctx.enum_variant_field_types.insert(vn.clone(), ft.clone());
+            }
             for (name, ty) in &ctx.fn_returns {
                 impl_ctx.fn_returns.insert(name.clone(), ty.clone());
             }
             impl_ctx.current_generics = imp.generics.clone();
+            // self 参数绑定为 impl 目标类型（如 Dict<K,V>→HashMap<K,V>）：
+            // 否则 self[key] 推断为 i64、key in self 无法走 contains_key 分支（E0277/E0599）
+            impl_ctx.self_ty = Some(if imp.generics.is_empty() {
+                IrType::named(&imp.type_name)
+            } else {
+                IrType::Named {
+                    path: imp.type_name.clone(),
+                    args: imp
+                        .generics
+                        .iter()
+                        .map(|g| IrType::Generic(g.clone()))
+                        .collect(),
+                }
+            });
             convert_fn_def(m, &impl_ctx)
         })
         .collect();
@@ -5703,24 +6474,47 @@ fn convert_impl(imp: &ast::ImplDef, ctx: &TypeCtx) -> Item {
                     .collect(),
             }
         },
-        generics: imp
-            .generics
-            .iter()
-            .map(|g| GenericParam {
-                name: g.clone(),
-                bounds: vec![],
-                default: imp
-                    .generic_defaults
-                    .iter()
-                    .find(|(n, _)| n == g)
-                    .map(|(_, ty)| from_ast_type(ty)),
-            })
-            .collect(),
+        generics: {
+            // 合并 where_clause / 内联约束（`impl<A: Iterator> ...` 的 A: Iterator）
+            // 到泛型参数 bounds：否则生成 `impl<A: Clone + Debug>` 丢失 A: Iterator，
+            // 后续 `A::Item` 关联类型无法解析（E0220 associated type not found）
+            let mut bounds_map: HashMap<String, Vec<IrType>> = HashMap::new();
+            for wb in &imp.where_clause {
+                let ir_bounds: Vec<IrType> = wb.bounds.iter().map(|b| from_ast_type(b)).collect();
+                bounds_map
+                    .entry(wb.type_param.clone())
+                    .or_default()
+                    .extend(ir_bounds);
+            }
+            imp.generics
+                .iter()
+                .map(|g| GenericParam {
+                    name: g.clone(),
+                    bounds: bounds_map.remove(g).unwrap_or_default(),
+                    default: imp
+                        .generic_defaults
+                        .iter()
+                        .find(|(n, _)| n == g)
+                        .map(|(_, ty)| from_ast_type(ty)),
+                })
+                .collect()
+        },
         methods,
         assoc_type_bindings: imp
             .assoc_type_bindings
             .iter()
             .map(|(n, t)| (n.clone(), from_ast_type(t)))
+            .collect(),
+        // impl 级 where 约束（`where I::Item: Clone` 的关联类型约束，type_param
+        // 含点号）：不能合并到泛型参数 bounds（I.Item 不是 I），需生成 impl where
+        where_clause: imp
+            .where_clause
+            .iter()
+            .filter(|wb| wb.type_param.contains('.'))
+            .map(|wb| {
+                let bounds: Vec<IrType> = wb.bounds.iter().map(|b| from_ast_type(b)).collect();
+                (wb.type_param.clone(), bounds)
+            })
             .collect(),
     })
 }
@@ -5748,6 +6542,8 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     let mut ctx = TypeCtx::new();
     let pending_items = Rc::new(RefCell::new(Vec::new()));
     ctx.pending_items = pending_items.clone();
+    // comptime 求值需要访问模块函数定义（`comptime gen_primes(8)` 编译期执行）
+    ctx.comptime_module = Some(Rc::new(ast_module.clone()));
 
     // 1. 收集类型信息
     ctx.collect_structs(ast_module);
@@ -5760,6 +6556,12 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
                 .unwrap_or_else(|| infer_expr_type(&c.value, &ctx));
         eprintln!("DEBUG const {} ty={:?}", c.name, ty);
         ctx.top_level_consts.insert(c.name.clone(), ty);
+        // 顶层 const 编译期求值（comptime 块/表达式内解析 const 引用）
+        let empty_module = ast::Module::default();
+        let mut cctx = crate::comptime::ComptimeContext::new(&empty_module);
+        if let Ok(v) = crate::comptime::ComptimeEvaluator::eval_expr(&c.value, &mut cctx) {
+            ctx.comptime_consts.insert(c.name.clone(), v);
+        }
     }
 
     // 2. 构建 IR 模块
@@ -5847,6 +6649,18 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
             .entry(imp.type_name.clone())
             .or_default()
             .extend(imp.methods.iter().map(|m| m.name.clone()));
+        // 登记 impl 方法返回类型（如 box.lz `def get(ref self) -> ref T` 返回 &T）：
+        // 否则 `b.get()` 方法调用推断为 Any，`assert b.get() == 42` 无法解引用（E0277）。
+        // 用 `类型名.方法名` 作 key：Rc/Arc 都有 try_unwrap，裸方法名会互相覆盖
+        // （`rc.try_unwrap()` 误推断为 Arc 的签名 → E0425 cannot find type `T`）
+        for m in &imp.methods {
+            if let Some(ref ret) = m.return_type {
+                ctx.fn_returns.insert(
+                    format!("{}.{}", imp.type_name, m.name),
+                    from_ast_type_with_generics(ret, &imp.generics),
+                );
+            }
+        }
         ir_mod.items.push(convert_impl(imp, &ctx));
     }
 
@@ -5884,11 +6698,16 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
             generics: vec![],
             methods: vec![method],
             assoc_type_bindings: vec![],
+            where_clause: vec![],
         }));
     }
 
     // 8. 转换 functions
     for f in &ast_module.functions {
+        // comptime def：仅编译期存在（供 comptime 求值器调用），不生成运行时代码
+        if f.is_comptime {
+            continue;
+        }
         ir_mod.items.push(Item::FnDef(convert_fn_def(f, &ctx)));
     }
 
@@ -5908,7 +6727,8 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
         (
             "__is_macro__".to_string(),
             IrType::Bool,
-            ExprKind::Lit(LitKind::Bool(false)),
+            // 宏模块（首行 #!bin macro）为 true，普通模块为 false（06e 规范）
+            ExprKind::Lit(LitKind::Bool(ast_module.is_macro)),
         ),
     ];
     for (mc_name, mc_ty, mc_kind) in magic_consts {
@@ -5955,6 +6775,8 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
         let mut block_ctx = TypeCtx::new();
         block_ctx.current_generics = ctx.current_generics.clone();
         block_ctx.errors = ctx.errors.clone();
+        block_ctx.comptime_consts = ctx.comptime_consts.clone();
+        block_ctx.comptime_module = ctx.comptime_module.clone();
         // 预扫描：收集构建块内局部变量类型（x = value 赋值），供元组/表达式推断
         for s in body {
             match s {

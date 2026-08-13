@@ -1,0 +1,4 @@
+name = "Cypy"
+grammar = "cypy"
+path_suffixes = ["cypy"]
+line_comments = ["# "]

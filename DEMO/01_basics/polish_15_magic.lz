@@ -1,0 +1,66 @@
+// ============================================================
+// 轮15: 魔法方法 — __str__/__getitem__/__len__ 自定义类型
+// 每项用 assert 确保正确
+// ============================================================
+
+struct Counter =
+    count: int
+
+impl Counter =
+    def __add__(self, other: Counter) -> Counter =
+        Counter(count: self.count + other.count)
+    def __eq__(self, other: Counter) -> bool =
+        self.count == other.count
+
+struct Range2 =
+    start: int
+    end: int
+    items: List<int>
+
+impl Range2 =
+    def __getitem__(self, idx: int) -> int =
+        self.items[idx]
+    def __len__(self) -> int =
+        len(self.items)
+
+struct Name =
+    first: str
+    last: str
+
+impl Name =
+    def __str__(self) -> str =
+        self.first + " " + self.last
+
+def main() =
+    // ── __add__/__eq__ 魔法（操作符驱动） ──
+    let c1 = Counter(count: 3)
+    let c2 = Counter(count: 4)
+    assert (c1 + c2).count == 7
+    assert c1 == Counter(count: 3)
+    assert c1 != c2
+
+    // ── __getitem__ 索引访问（自定义类型） ──
+    let r = Range2(start: 0, end: 5, items: [10, 20, 30])
+    assert r[0] == 10
+    assert r[1] == 20
+    assert r[2] == 30
+
+    // ── __len__ 长度（len() 内建调用自定义 __len__） ──
+    assert len(r) == 3
+
+    // ── __str__ 字符串化 ──
+    let n = Name(first: "LZ", last: "Lang")
+    assert str(n) == "LZ Lang"
+
+    // ── 魔法方法组合 ──
+    let total = (c1 + c2) + Counter(count: 1)
+    assert total.count == 8
+    assert total == Counter(count: 8)
+
+    // ── __getitem__ + 循环组合 ──
+    mut sum_items = 0
+    for i in 0..3:
+        sum_items = sum_items + r[i]
+    assert sum_items == 60
+
+    print("P15 magic OK")

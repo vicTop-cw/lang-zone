@@ -10,8 +10,8 @@
 // ============================================================
 
 struct Box<T> =
-    /// 内部堆指针 (由编译器管理)
-    _ptr: int  // 实际为 *T, 此处用 int 占位
+    /// 内部值 (编译器管理)
+    value: T
 
 impl<T> Box<T> =
 
@@ -19,33 +19,29 @@ impl<T> Box<T> =
     // 自定义构造使用 magic __new__, 与 Python __new__/__init__ 一致
 
     magic __new__(value: T) -> Box<T> =
-        // 内建: 编译器在堆上分配并构造
-        Box(_ptr: 0)
+        Box(value: value)
 
-    /// 获取不可变引用 (指针解引用, 仅 @unsafe 中可用)
+    /// 获取不可变引用
     @unsafe
     def get(ref self) -> ref T =
-        // 内建: 编译器映射为指针解引用
-        // 生成代码: &*self._ptr
-        pass
+        self.value
 
-    /// 获取可变引用 (指针解引用, 仅 @unsafe 中可用)
+    /// 获取可变引用
     @unsafe
     def get_mut(mut self) -> mut T =
-        // 内建: 编译器映射为指针解引用
-        pass
+        self.value
 
     /// 解引用获取值 (消费 Box)
     @unsafe
     def unwrap(self) -> T =
-        // 内建: 编译器移动堆上值并释放 Box
-        pass
+        self.value
 
     /// 替换内部值 (返回旧值)
     @unsafe
     def replace(mut self, value: T) -> T =
-        // 内建: 编译器交换堆上值
-        pass
+        let old = self.value
+        self.value = value
+        return old
 
     // --- 魔法方法 ---
 
@@ -75,25 +71,22 @@ impl<T> Box<T> =
 // ============================================================
 
 struct Rc<T> =
-    /// 内部指针和引用计数 (由编译器管理)
-    _inner: int  // 实际为 (T, usize)*, 此处用 int 占位
+    /// 内部值 (编译器管理)
+    value: T
 
 impl<T> Rc<T> =
 
     magic __new__(value: T) -> Rc<T> =
-        // 内建: 编译器分配堆内存, 初始引用计数 = 1
-        Rc(_inner: 0)
+        Rc(value: value)
 
     /// 获取不可变引用
     @unsafe
     def get(ref self) -> ref T =
-        // 内建: 编译器映射为指针解引用
-        pass
+        self.value
 
-    /// 克隆 (增加引用计数)
+    /// 克隆 (共享值)
     def clone(ref self) -> Rc<T> =
-        // 内建: 编译器映射为 Rc::clone(self)
-        Rc(_inner: self._inner)
+        Rc(value: self.value.clone())
 
     /// 获取引用计数
     def strong_count(ref self) -> int =
@@ -108,12 +101,12 @@ impl<T> Rc<T> =
     /// 尝试获取唯一所有权 (引用计数为 1 时成功)
     def try_unwrap(self) -> Result<T, Rc<T>> =
         if self.strong_count() == 1:
-            return Ok(self.get())
+            return Ok(self.value.clone())
         return Err(self)
 
     /// 创建弱引用
     def downgrade(ref self) -> Weak<T> =
-        Weak(_rc: self._inner, _strong_count: self.strong_count())
+        Weak(value: self.value.clone(), _strong_count: self.strong_count())
 
     // --- 魔法方法 ---
 
@@ -141,24 +134,23 @@ impl<T> Rc<T> =
 // ============================================================
 
 struct Arc<T> =
-    /// 内部指针和原子引用计数 (由编译器管理)
-    _inner: int  // 实际为 (T, AtomicUsize)*
+    /// 内部值 (编译器管理)
+    value: T
 
 impl<T> Arc<T> =
 
     magic __new__(value: T) -> Arc<T> =
         // 内建: 编译器分配堆内存, 初始引用计数 = 1 (原子)
-        Arc(_inner: 0)
+        Arc(value: value)
 
     /// 获取不可变引用
     @unsafe
     def get(ref self) -> ref T =
-        // 内建: 编译器映射为指针解引用
-        pass
+        self.value
 
     /// 克隆 (原子增加引用计数)
     def clone(ref self) -> Arc<T> =
-        Arc(_inner: self._inner)
+        Arc(value: self.value.clone())
 
     /// 获取引用计数
     def strong_count(ref self) -> int =
@@ -171,12 +163,12 @@ impl<T> Arc<T> =
     /// 尝试获取唯一所有权
     def try_unwrap(self) -> Result<T, Arc<T>> =
         if self.strong_count() == 1:
-            return Ok(self.get())
+            return Ok(self.value.clone())
         return Err(self)
 
     /// 创建弱引用
     def downgrade(ref self) -> Weak<T> =
-        Weak(_rc: self._inner, _strong_count: self.strong_count())
+        Weak(value: self.value.clone(), _strong_count: self.strong_count())
 
     // --- 魔法方法 ---
 
@@ -204,7 +196,7 @@ impl<T> Arc<T> =
 // ============================================================
 
 struct Weak<T> =
-    _rc: int             // 指向 Rc/Arc 内部控制块
+    value: T             // 共享值 (编译器管理)
     _strong_count: int   // 用于判断原值是否还存活
 
 impl<T> Weak<T> =
@@ -213,13 +205,13 @@ impl<T> Weak<T> =
     def upgrade(ref self) -> Option<Rc<T>> =
         // 内建: 编译器检查引用计数 > 0
         if self._strong_count > 0:
-            return Some(Rc(_inner: self._rc))
+            return Some(Rc(value: self.value.clone()))
         return None
 
     /// 升级为 Arc 强引用
     def upgrade_arc(ref self) -> Option<Arc<T>> =
         if self._strong_count > 0:
-            return Some(Arc(_inner: self._rc))
+            return Some(Arc(value: self.value.clone()))
         return None
 
     // --- 魔法方法 ---

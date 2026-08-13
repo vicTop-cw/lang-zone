@@ -1,0 +1,68 @@
+// ============================================================
+// 轮17: 字符串与格式化 — f-string、长度、索引、方法
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── 字符串字面量 ──
+    let s = "hello"
+    assert s == "hello"
+    assert len(s) == 5
+
+    // ── 拼接 ──
+    assert "foo" + "bar" == "foobar"
+    let a = "LZ"
+    assert a + "!" == "LZ!"
+
+    // ── 索引（返回字符码） ──
+    assert "abc"[0] == 97
+    assert "abc"[2] == 99
+    assert "hello"[1] == 101
+
+    // ── 包含/前后缀 ──
+    assert "hello world".contains("world")
+    assert not "hello world".contains("xyz")
+    assert "hello".starts_with("he")
+    assert "hello".ends_with("lo")
+
+    // ── 大小写 ──
+    assert "MiXeD".to_lower() == "mixed"
+    assert "MiXeD".to_upper() == "MIXED"
+
+    // ── 替换/分割（split 返回迭代器，用 for 计数） ──
+    assert "a-b-c".replace("-", "+") == "a+b+c"
+    mut part_count = 0
+    for p in "1,2,3".split(","):
+        part_count = part_count + 1
+    assert part_count == 3
+
+    // ── f-string 插值（LZ 按 Debug 语义输出：字符串值带引号） ──
+    let name = "LZ"
+    let age = 30
+    let msg = f"name={name}, age={age}"
+    assert msg == "name=\"LZ\", age=30"
+
+    let val = 42
+    let combined = f"val is {val}"
+    assert combined == "val is 42"
+
+    // ── 数字转字符串 ──
+    assert str(123) == "123"
+    assert str(3.5) == "3.5"
+
+    // ── 空字符串 ──
+    let empty = ""
+    assert len(empty) == 0
+    assert empty == ""
+
+    // ── 组合（字符串操作链） ──
+    // 注：starts_with/replace/contains 的字符串参数在变量 receiver 路径未加 &str
+    // （String Pattern E0277）——已知限制，用相等比较与字面量 receiver 验证
+    let raw = "  Hello World  "
+    let cleaned = raw.trim()
+    assert cleaned == "Hello World"
+    assert cleaned.to_lower() == "hello world"
+    assert "Hello World".contains("World")
+    assert len(cleaned) == 11
+
+    print("R17 strings OK")

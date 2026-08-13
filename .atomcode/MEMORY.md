@@ -140,3 +140,9 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
   - `for (k, v) in ...` 元组解构循环变量需分别收集为局部变量（`collect_for_var_bindings`），否则 analyze_global_vars 把未收集名字误判为跨函数全局变量（E0530 static mut 冲突）。
   - lz_std 是标准库自测（#!bin lz），多数文件 rustc 仍有深层错误（E0423/E0277/E0404 等），非解析层可修，需编译器特性级改造。
 - v157（2026-08-09）全量回归 PASS 189/FAIL 15（92.6%），commit c7528de 已 push；剩余失败：macro 2（排除）+ lz_std 深层 13（traits.lz 剩余 PARSE + 12 RUSTC：E0423/E0404/E0782/E0053/E0392/E0416/E0277/E0390/E0369，需编译器特性级改造）；本轮新增坑：parse_expr 赋值分支抢先消费 `=`，语句级 `x = 42` 须在 parse_stmt 先识别为 Stmt::Let、`a[i]=v` 的 Expr::Assign 转回 Stmt::Assign（否则生成 == 比较回归）；for (k,v) 解构变量须分别收集（collect_for_var_bindings 防 E0530）；impl<T> for Once<T> 泛型去重。
+- codegen Paren(BinOp) 不再剥离括号（(a+b)/c 剥离会改变优先级，math.lz sqrt 断言失败）；仅 UnOp 剥离。
+- comptime 已实现：Expr::Comptime/Stmt::Comptime 在 ir/builder.rs 中调 ComptimeEvaluator 求值内联；TypeCtx.comptime_consts 存顶层 const 求值结果（comptime 内可引用 const），需在 convert_block/convert_fn_def 等子 ctx 继承。
+- template 机制：TemplateRegistry+extract_template_defs+TemplateExpander（name! 调用，main.rs/project.rs 在 MacroExpander 后接入）；quote 内建重新 lex StrLit 时需 trim_start（前导空格产生 Indent 报错）并过滤 Eof/Semicolon；Binary Plus 后 merge_str_lits 合并相邻 StrLit。
+- #!bin macro：lexer 识别整行产生单个 Token::Macro，extract_macro_defs 在 macro 后跟 Newline/Eof 时消费该 token（否则残留到 Parser 报 Expected macro name）；多参数非属性宏（check_eq 两参）由 expand_macro 用 split_top_level_args 按顶层逗号拆分绑定。
+- comptime 编译期函数调用：ComptimeEvaluator Call 分支查 module.functions 求值纯函数（参数位置绑定、继承 symtab）；内建 len()/push/索引支持；comptime_value_to_lit 返回 ExprKind 支持 List/Tuple 内联 vec![...]（查找表焊死）。TypeCtx.comptime_module 需在子 ctx 继承。
+- 宏展开要点：expand_macro 按调用形式分派（attr 有值→属性宏；多参数→split_top_level_args 拆分绑定），不依赖 is_attr（参数个数≥2 误判 bug）；宏体必须单行表达式（parse_macro_body 不处理跨行 + 链）；quote 重新 lex 的字符串片段与参数 token 不合并成单一标识符（`"get_" + name` 生成两个 Ident）——模板生成完整函数名参数。

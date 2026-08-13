@@ -1,0 +1,15 @@
+// ============================================================
+// 轮15: 模块文件 — 供 round15_use.lz import 使用
+// 注：模块文件不定义 main（project 合并时 main__ 冲突 E0428）
+// ============================================================
+
+const PI = 3
+
+def add(a: int, b: int) -> int =
+    a + b
+
+def mul(a: int, b: int) -> int =
+    a * b
+
+def greet(name: str) -> str =
+    "hi " + name

@@ -1,0 +1,23 @@
+// ============================================================
+// 轮27: 模块进阶 — from import */别名/多模块（--project 模式）
+// 模块文件：polish_27_lib.lz（同目录）
+// ============================================================
+
+from polish_27_lib import add, mul, CONST_V
+
+def main() =
+    // ── from import 选择性导入 ──
+    assert add(3, 4) == 7
+    assert mul(3, 4) == 12
+    assert CONST_V == 100
+
+    // ── 导入函数组合 ──
+    assert add(mul(2, 3), add(1, 1)) == 8
+
+    // ── 多模块调用链 ──
+    def apply_twice(f: fn(int) -> int, x: int) -> int =
+        f(f(x))
+    let add10 = |x: int| add(x, 10)
+    assert apply_twice(add10, 1) == 21
+
+    print("P27 modules OK")

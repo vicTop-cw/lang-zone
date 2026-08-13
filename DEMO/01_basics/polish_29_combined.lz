@@ -1,0 +1,106 @@
+// ============================================================
+// 轮29: 综合组合 — 多特性深度嵌套（函数+struct+list+match+闭包+dict）
+// 只使用前 28 轮已验证的特性组合，确保正确
+// ============================================================
+
+struct Student =
+    name: str
+    scores: List<int>
+
+def average(s: Student) -> int =
+    let count = len(s.scores)    // 先取长度（for 遍历会 move scores）
+    mut total = 0
+    for v in s.scores:
+        total = total + v
+    return total / count
+
+def grade(s: Student) -> str =
+    let avg = average(s)
+    if avg >= 90:
+        "A"
+    elif avg >= 75:
+        "B"
+    elif avg >= 60:
+        "C"
+    else:
+        "F"
+
+def main() =
+    // ── 组合1: struct 数组 + 方法 + 条件 + 收集 ──
+    let students = [
+        Student(name: "Alice", scores: [95, 90, 88]),   // 平均 91 → A
+        Student(name: "Bob", scores: [80, 75, 70]),     // 平均 75 → B
+        Student(name: "Carol", scores: [50, 55, 45]),   // 平均 50 → F
+    ]
+    mut honors: List<str> = []
+    for s in students:
+        let g = grade(s)
+        if g == "A" or g == "B":
+            honors.push(s.name)
+    assert honors == ["Alice", "Bob"]
+
+    // ── 组合2: 闭包 + list + 函数组合 ──
+    let double = |x: int| x * 2
+    let inc = |x: int| x + 1
+    def compose(f: fn(int) -> int, g: fn(int) -> int) -> fn(int) -> int =
+        |x: int| f(g(x))
+    mut dbl_inc = compose(double, inc)
+    mut inc_dbl = compose(inc, double)
+    assert dbl_inc(3) == 8      // (3+1)*2
+    assert inc_dbl(3) == 7      // 3*2+1
+
+    // ── 组合3: dict + struct + 循环 ──
+    let gradebook = {"Alice": [95, 90], "Bob": [70, 65]}
+    mut best = ""
+    mut best_avg = 0
+    for name in ["Alice", "Bob"]:
+        mut total = 0
+        for sc in gradebook[name]:
+            total = total + sc
+        let avg = total / 2
+        if avg > best_avg:
+            best_avg = avg
+            best = name
+    assert best == "Alice"
+    assert best_avg == 92
+
+    // ── 组合4: 枚举 + match + 列表收集 ──
+    enum Status =
+        Pass
+        Fail
+    def check_status(score: int) -> Status =
+        if score >= 60:
+            Status.Pass
+        else:
+            Status.Fail
+    mut pass_count = 0
+    for sc in [95, 50, 70, 40]:
+        if check_status(sc) == Status.Pass:
+            pass_count = pass_count + 1
+    assert pass_count == 2
+
+    // ── 组合5: 字符串 + 循环 + 条件 + 函数 ──
+    def shout_word(w: str) -> str =
+        w.to_upper() + "!"
+    mut message = ""
+    for w in ["hi", "lz"]:
+        message = message + shout_word(w) + " "
+    assert message == "HI! LZ! "
+
+    // ── 组合6: 嵌套循环 + 矩阵 + 累加 ──
+    let grid = [[1, 2], [3, 4], [5, 6]]
+    mut sum_all = 0
+    for row in grid:
+        for cell in row:
+            sum_all = sum_all + cell
+    assert sum_all == 21
+
+    // ── 组合7: 函数工厂 + 结构体 + 闭包链 ──
+    def make_scaler(k: int) -> fn(int) -> int =
+        |x: int| x * k
+    let triple = make_scaler(3)
+    let fivex = make_scaler(5)
+    assert triple(fivex(2)) == 30
+    assert fivex(triple(2)) == 30
+
+    print("P29 combined OK")

@@ -1,0 +1,6 @@
+# Bug-R5-11: 转义序列 \t, \n 在代码生成中丢失
+def test_escape() -> str:
+    return "tab:\t newline:\n"
+
+def main() -> int:
+    return 0

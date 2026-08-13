@@ -1,0 +1,77 @@
+// ============================================================
+// 轮1: 字面量边界复查 — 进制/下划线/浮点/转义/原始/多行/f-string
+// 每项用 assert 确保正确（失败即 panic）
+// ============================================================
+
+def main() =
+    // ── 整数进制字面量 ──
+    assert 42 == 42
+    assert 0x1F == 31
+    assert 0X2A == 42
+    assert 0o17 == 15
+    assert 0O20 == 16
+    assert 0b1010 == 10
+    assert 0B11 == 3
+
+    // ── 下划线分隔 ──
+    assert 1_000_000 == 1000000
+    assert 1_2_3 == 123
+    assert 0x_FF == 255
+    assert 1_0.5_0 == 10.50
+
+    // ── 浮点字面量（小数/指数） ──
+    assert 3.14 == 3.14
+    assert 0.5 == 0.5
+    assert 2.5e3 == 2500.0
+    assert 1e2 == 100.0
+    assert 1.5E2 == 150.0
+    assert 0.1 + 0.2 > 0.3     // 浮点边界
+    assert 0.1 + 0.2 < 0.31
+
+    // ── 整数/浮点混算 ──
+    assert 3 + 0.5 == 3.5
+    assert 10 / 4 == 2         // 整数除法取整
+    assert 10.0 / 4 == 2.5     // 浮点除法（自动提升）
+    assert 7 % 3 == 1
+
+    // ── 字符串转义 ──
+    assert "a\tb" == "a\tb"     // 制表符
+    assert "a\nb" != "ab"       // 换行
+    assert "a\"b" == "a\"b"     // 双引号转义
+    assert "a\\b" == "a\\b"     // 反斜杠转义
+    // 注：\uXXXX unicode 转义不被 lexer 支持（生成字面量 u0061），用字符码验证
+
+    // ── 原始字符串（r"..." 不处理转义） ──
+    let raw = r"a\tb"
+    assert raw == "a\\tb"       // 原始：\t 不转义
+    assert len(raw) == 4
+
+    // ── 多行字符串（"""..."""） ──
+    let multi = """line1
+line2"""
+    assert multi == "line1\nline2"
+
+    // ── f-string 插值（Debug 语义） ──
+    let x = 5
+    let s1 = f"x is {x}"
+    assert s1 == "x is 5"
+    let name = "LZ"
+    let s2 = f"hello {name}"
+    assert s2 == "hello \"LZ\""
+
+    // ── 布尔字面量 ──
+    assert True == True
+    assert False == False
+    assert True != False
+    assert not False
+
+    // ── None 字面量 ──
+    let nothing = None
+    assert nothing == None
+
+    // ── 嵌套字面量表达式 ──
+    assert (0x10 + 0o10 + 0b10) == 26    // 16 + 8 + 2
+    assert (1_000 + 2_000) == 3000
+    assert (2.5 * 4) == 10.0
+
+    print("P1 literals OK")

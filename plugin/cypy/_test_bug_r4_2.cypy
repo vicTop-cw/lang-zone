@@ -1,0 +1,6 @@
+# Bug-R4-2: test 关键字未注册到作用域
+test def test_simple() -> int:
+    return 42
+
+def main() -> int:
+    return 0

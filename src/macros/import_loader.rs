@@ -89,7 +89,7 @@ fn load_module_recursive(
         .ok_or_else(|| format!("macro module not found: {}", path.join("::")))?;
 
     // 循环依赖检测
-    resolver.push(path.to_vec())?;
+    resolver.push(path.to_vec(), file.clone())?;
 
     let source = fs::read_to_string(&file)
         .map_err(|e| format!("error reading {}: {}", file.display(), e))?;
@@ -103,8 +103,8 @@ fn load_module_recursive(
 
     let mut lexer = Lexer::new(&source);
     let toks = lexer.tokenize();
-    let (r, _) = extract_macro_defs(&toks, true)?;
-    let (t, _) = extract_template_defs(&toks, true)?;
+    let (r, _) = extract_macro_defs(&toks)?;
+    let (t, _) = extract_template_defs(&toks)?;
     registry.merge(r);
     templates.merge(t);
 

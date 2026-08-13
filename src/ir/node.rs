@@ -175,6 +175,10 @@ pub struct FnSig {
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub params: Vec<IrType>,
+    /// trait 方法参数名（默认方法体用真实参数名，抽象声明用 _pN）
+    pub params_names: Vec<String>,
+    /// trait 方法 where 约束（`try_from ... where Self: Sized` 的 Self: Sized）
+    pub where_clause: Vec<(String, Vec<IrType>)>,
     pub ret: IrType,
     /// trait 默认方法体（Some = 带默认实现，None = 抽象声明）
     pub body: Option<Block>,
@@ -260,6 +264,10 @@ pub struct FnDef {
     pub checker_param: Option<String>,
     /// 引用的默认检查站名（def f[cache]）
     pub default_checker: Option<String>,
+    /// 额外 where 约束（type_param → bounds）：引用 impl 级泛型的 where 子句
+    /// （如 `impl<K,V> Dict<K,V>` 方法 `where K: Eq + Hash`，K 不在方法泛型中），
+    /// builder 合并不到方法泛型上，需原样输出到方法签名（codegen 用）
+    pub where_clause: Vec<(String, Vec<IrType>)>,
     pub span: Span,
 }
 
@@ -313,6 +321,9 @@ pub struct ImplDef {
     pub methods: Vec<FnDef>,
     /// 关联类型绑定（§五 `type Item = T`）→ `type Item = ...;`
     pub assoc_type_bindings: Vec<(String, IrType)>,
+    /// impl 级 where 约束（`impl<I: Iterator> Iterator for Peekable<I> where
+    /// I::Item: Clone` 的关联类型约束，type_param 含点号）
+    pub where_clause: Vec<(String, Vec<IrType>)>,
 }
 
 /// Use 语句（仅记录依赖路径）
@@ -595,6 +606,14 @@ pub enum ExprKind {
         op: BinOpKind,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+    },
+
+    /// 赋值表达式（`total = total + x`，闭包体/表达式上下文中的纯赋值 `=`）：
+    /// Rust 渲染为 `target = value`（赋值表达式返回 ()）。
+    /// 注意：不能用 BinOp(Eq) 表达——codegen 会把 Eq 渲染为 `==` 比较（E0308）
+    AssignExpr {
+        target: Box<Expr>,
+        value: Box<Expr>,
     },
 
     /// 一元运算

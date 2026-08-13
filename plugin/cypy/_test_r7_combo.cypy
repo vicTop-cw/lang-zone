@@ -1,0 +1,52 @@
+# Test: 特性组合 - enum + match + struct
+enum Status:
+    Ok
+    Err
+
+struct Result:
+    status: int = 0
+    value: int = 0
+
+def test_enum_match() -> int:
+    let s: int = 0
+    match s:
+        case 0:
+            return 1
+        case 1:
+            return 0
+        case _:
+            return -1
+
+def test_struct_with_enum() -> int:
+    let r: Result = Result{status: 0, value: 42}
+    return r.value
+
+def test_nested_match() -> int:
+    match 1:
+        case 1:
+            match 2:
+                case 2:
+                    return 42
+                case _:
+                    return 0
+        case _:
+            return 0
+
+def test_match_guard() -> int:
+    match 1:
+        case 1:
+            return 1
+        case _:
+            return 0
+
+def test_match_multi_pattern() -> int:
+    match 1:
+        case 1:
+            return 1
+        case 2:
+            return 2
+        case _:
+            return 0
+
+def main() -> int:
+    return 0

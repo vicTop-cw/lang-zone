@@ -9,7 +9,10 @@ use crate::ast;
 use crate::config::paths::SearchPaths;
 use crate::ir::{builder::build_ir, IrModule};
 use crate::lexer::{Lexer, Token};
-use crate::macros::expand::{extract_macro_defs, MacroExpander};
+use crate::macros::expand::{
+    contains_pending_call, extract_macro_defs, extract_template_defs, MacroExpander,
+    TemplateExpander,
+};
 use crate::parser::Parser;
 use crate::util::import::ImportResolver;
 
@@ -92,8 +95,14 @@ impl ProjectCompiler {
         let mut lexer = Lexer::new(&source);
         let tokens = lexer.tokenize();
 
-        let (registry, _ranges) = extract_macro_defs(&tokens)
+        let (registry, macro_ranges) = extract_macro_defs(&tokens)
             .map_err(|e| format!("Macro error in {}: {}", file_path.display(), e))?;
+        // 提取 template 定义（name! 调用展开；返回 Tokens 的编译期函数）
+        let (template_registry, template_ranges) = extract_template_defs(&tokens)
+            .map_err(|e| format!("Template error in {}: {}", file_path.display(), e))?;
+        let mut template_registry = template_registry;
+        let mut macro_ranges = macro_ranges;
+        macro_ranges.extend(template_ranges);
         // 跨模块宏导入：`import macro X` / `from macro X import Y` → 在展开前
         // 先读取 X.lz 并合并其宏定义（否则 `@check_eq!` 展开时 undefined macro）
         let mut registry = registry;
@@ -139,6 +148,9 @@ impl ProjectCompiler {
                             if let Ok((mreg, _mranges)) = extract_macro_defs(&mtokens) {
                                 registry.merge(mreg);
                             }
+                            if let Ok((treg, _tranges)) = extract_template_defs(&mtokens) {
+                                template_registry.merge(treg);
+                            }
                         }
                     }
                 }
@@ -149,10 +161,56 @@ impl ProjectCompiler {
             }
             i += 1;
         }
+        // 从 token 流移除宏/模板定义占用 token（#!bin macro 声明、macro/template 定义）
+        let filtered: Vec<Token> = tokens
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| {
+                let mut skip = false;
+                for chunk in macro_ranges.chunks(2) {
+                    if chunk.len() == 2 && *idx >= chunk[0] && *idx < chunk[1] {
+                        skip = true;
+                        break;
+                    }
+                }
+                !skip
+            })
+            .map(|(_, t)| t.clone())
+            .collect();
         let expander = MacroExpander::new(registry);
-        let expanded = expander
-            .expand(&tokens)
+        let template_expander = TemplateExpander::new(template_registry);
+
+        // 混合嵌套交替展开循环（与单文件模式一致，08 §3.6）：
+        // 宏→模板→宏→…直到稳定。宏产物可含 name!、模板产物可含 @name!，
+        // 单次宏展开 + 单次模板展开无法覆盖双向混合嵌套
+        let mut expanded = expander
+            .expand(&filtered)
             .map_err(|e| format!("Expand error in {}: {}", file_path.display(), e))?;
+        let max_passes = 16;
+        let mut stable = false;
+        for _pass in 0..max_passes {
+            let before = expanded.clone();
+            let after_tpl = template_expander
+                .expand(&expanded)
+                .map_err(|e| format!("Template error in {}: {}", file_path.display(), e))?;
+            let after_mac = expander
+                .expand(&after_tpl)
+                .map_err(|e| format!("Expand error in {}: {}", file_path.display(), e))?;
+            expanded = after_mac;
+            // 稳定条件：无新展开 **且无未展开嵌套调用残留**（宏↔模板无限
+            // 交替时 token 流往返可能相同，仅比较相等会误判稳定并残留调用）
+            if expanded == before && !contains_pending_call(&expanded) {
+                stable = true;
+                break;
+            }
+        }
+        if !stable {
+            return Err(format!(
+                "Macro/template 交替展开未稳定 in {}（可能循环嵌套，超过 {} 轮）",
+                file_path.display(),
+                max_passes
+            ));
+        }
 
         let mut parser = Parser::new(expanded);
         let module = parser
@@ -248,6 +306,8 @@ impl ProjectCompiler {
             top_stmts: vec![],
             duck_defs: vec![],
             magic_blocks: vec![],
+            // 合并模块中任一为宏模块（#!bin macro）则整体视为宏模块
+            is_macro: false,
         };
 
         for unit in &self.units {

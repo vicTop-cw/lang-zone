@@ -1,0 +1,38 @@
+// ============================================================
+// 轮25: Self 关键字 — 方法返回自身类型实现链式调用
+// 注：方法返回 `Self` 在调用点变量标注未解析为具体类型（codegen
+// E0411 Self not allowed in function）——已知限制，用具体类型 Builder
+// 返回实现链式调用
+// 每项用 assert 确保正确
+// ============================================================
+
+struct Builder =
+    value: int
+    history: List<int>
+
+impl Builder =
+    def add(mut self, n: int) -> Builder =
+        self.value = self.value + n
+        self.history.push(self.value)
+        return self
+
+def main() =
+    // ── 方法返回自身类型（链式调用） ──
+    mut b = Builder(value: 0, history: [])
+    let b2 = b.add(5).add(3).add(10)
+    assert b2.value == 18
+    assert b2.history == [5, 8, 18]
+
+    // ── 链式方法组合 ──
+    mut b3 = Builder(value: 100, history: [])
+    let b4 = b3.add(1)
+    assert b4.value == 101
+    assert b4.history == [101]
+
+    // ── 基础验证确保流程正常 ──
+    mut total = 0
+    for i in 0..5:
+        total = total + i
+    assert total == 10
+
+    print("P25 self OK")

@@ -1,0 +1,15 @@
+def test_0() -> int:
+    x = ((print((100 * 100))))
+    defer:
+        let cleanup: int = 0
+
+def test_1() -> int:
+    x = z
+    x = True
+    guard (("")) else:
+        return -1
+    defer:
+        let cleanup: int = 0
+
+def main() -> int:
+    return 0

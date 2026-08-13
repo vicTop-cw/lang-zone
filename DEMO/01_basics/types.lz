@@ -1,0 +1,53 @@
+// ============================================================
+// 轮14: 类型系统 — Option/Result、as 转换、类型别名
+// 每项用 assert 确保正确
+// ============================================================
+
+type IntList = List<int>   // 类型别名语法为 `type X = ...`（01-类型系统.md §4）
+
+def main() =
+    // ── Option 构造与解构 ──
+    let some_v = Some(42)
+    let none_v = None
+    assert some_v != none_v
+
+    // ── Option unwrap / is_some / is_none ──
+    assert some_v.is_some()
+    assert none_v.is_none()
+    assert some_v.unwrap() == 42
+
+    // ── Result 构造（err 侧需类型注解，Ok/Err 推断 err 为 Any→E0282） ──
+    let ok_v: Result<int, str> = Ok(100)
+    let err_v: Result<int, str> = Err("boom")
+    assert ok_v.is_ok()
+    assert err_v.is_err()
+
+    // ── as 类型转换 ──
+    let i = 42
+    let f = i as float
+    assert f == 42.0
+    let back = f as int
+    assert back == 42
+    let s = i as str
+    assert s == "42"
+
+    // ── 类型别名 ──
+    let nums: IntList = [1, 2, 3]
+    assert nums == [1, 2, 3]
+    assert len(nums) == 3
+
+    // ── Option 与 match ──
+    def maybe_double(x: Option<int>) -> int =
+        match x:
+            case Some(v): return v * 2
+            case None: return 0
+    assert maybe_double(Some(5)) == 10
+    assert maybe_double(None) == 0
+
+    // ── 类型注解与推导 ──
+    let annotated_list: List<int> = [1, 2]
+    let inferred_list = [3, 4]
+    assert annotated_list == [1, 2]
+    assert inferred_list == [3, 4]
+
+    print("R14 types OK")

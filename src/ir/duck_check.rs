@@ -1315,6 +1315,10 @@ fn walk_expr(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
             walk_expr(lhs, f);
             walk_expr(rhs, f);
         }
+        ExprKind::AssignExpr { target, value } => {
+            walk_expr(target, f);
+            walk_expr(value, f);
+        }
         ExprKind::UnOp { operand, .. } => walk_expr(operand, f),
         ExprKind::IfExpr { cond, then, els } => {
             walk_expr(cond, f);

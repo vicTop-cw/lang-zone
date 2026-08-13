@@ -1,0 +1,92 @@
+// ============================================================
+// 轮5: match 进阶 — 嵌套模式/列表 rest/or 模式/守卫组合
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── or 模式（| 组合多个字面量） ──
+    def vowel(ch: str) -> bool =
+        match ch:
+            case "a" | "e" | "i" | "o" | "u": return True
+            case _: return False
+    assert vowel("a")
+    assert vowel("e")
+    assert vowel("z") == False
+
+    // ── 守卫（guard）组合 ──
+    def fizzbuzz(n: int) -> str =
+        match n:
+            case x if x % 15 == 0: return "FizzBuzz"
+            case x if x % 3 == 0: return "Fizz"
+            case x if x % 5 == 0: return "Buzz"
+            case _: return str(n)
+    assert fizzbuzz(15) == "FizzBuzz"
+    assert fizzbuzz(9) == "Fizz"
+    assert fizzbuzz(10) == "Buzz"
+    assert fizzbuzz(7) == "7"
+
+    // ── 嵌套模式（元组内元组） ──
+    def classify_point(pt: (int, int)) -> str =
+        match pt:
+            case (0, 0): return "origin"
+            case (x, 0): return "on-x"
+            case (0, y): return "on-y"
+            case (x, y): return "quadrant"
+    assert classify_point((0, 0)) == "origin"
+    assert classify_point((5, 0)) == "on-x"
+    assert classify_point((0, 5)) == "on-y"
+    assert classify_point((1, 2)) == "quadrant"
+
+    // ── 列表 rest 模式（.. 捕获剩余） ──
+    def head_tail(items: List<int>) -> str =
+        match items:
+            case []: return "empty"
+            case [x]: return "single"
+            case [x, ..]: return "has-many"
+    assert head_tail([]) == "empty"
+    assert head_tail([1]) == "single"
+    assert head_tail([1, 2, 3]) == "has-many"
+
+    // ── 变量绑定 + 守卫 ──
+    def abs_val(n: int) -> int =
+        match n:
+            case x if x >= 0: return x
+            case x: return -x
+    assert abs_val(5) == 5
+    assert abs_val(-5) == 5
+
+    // ── match 表达式作为值（尾表达式） ──
+    def day_type(day: str) -> str =
+        match day:
+            case "sat" | "sun": "weekend"
+            case _: "weekday"
+    assert day_type("sat") == "weekend"
+    assert day_type("mon") == "weekday"
+
+    // ── 嵌套 match（match 分支内再 match） ──
+    def combo(a: int, b: int) -> str =
+        match a:
+            case 0: return "zero-a"
+            case _:
+                match b:
+                    case 0: return "zero-b"
+                    case _: return "both-nonzero"
+    assert combo(0, 5) == "zero-a"
+    assert combo(5, 0) == "zero-b"
+    assert combo(5, 5) == "both-nonzero"
+
+    // ── 数字区间守卫（多条件组合） ──
+    def age_group(age: int) -> str =
+        match age:
+            case x if x < 0: return "invalid"
+            case x if x < 13: return "child"
+            case x if x < 20: return "teen"
+            case x if x < 65: return "adult"
+            case _: return "senior"
+    assert age_group(-1) == "invalid"
+    assert age_group(12) == "child"
+    assert age_group(19) == "teen"
+    assert age_group(64) == "adult"
+    assert age_group(65) == "senior"
+
+    print("P5 match OK")

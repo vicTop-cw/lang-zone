@@ -1,0 +1,46 @@
+// lz-zed test fixture: 03-strings — 字符串字面量与转义
+// Authority: SYNTAX/00-词法基础.md §2.1
+
+# 普通双引号字符串
+let s1 = "hello"
+let s2 = "with \"quote\" inside"
+
+# 转义序列
+let esc = "\n\t\\\"\'"
+let uni = "\u{1F600}"
+let nul = "\0"
+let cr = "\r"
+
+# f-string（含插值）
+let name = "world"
+let msg = f"hello {name}"
+let expr = f"sum = {1 + 2}"
+
+# f-string 转义花括号
+let brace = f"literal \{x\}"
+
+# 原始字符串（不处理转义）
+let re = r"\d+"
+let raw2 = r"a\nb"
+
+# 多行字符串
+let ml = """line1
+line2"""
+
+# f-多行
+let fml = f"""x={x}"""
+
+# r-多行
+let rml = r"""\d+"""
+
+# 反引号 quote 块（宏语法糖，08-宏与编译期.md §3.2）
+macro debug_log(msg: Tokens) -> Tokens =
+    f```
+    if DEBUG:
+        print($(msg))
+    ```
+
+macro raw_block(input: Tokens) -> Tokens =
+    r```
+    $(x) 原样保留
+    ```

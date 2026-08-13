@@ -1,0 +1,30 @@
+def test_0() -> int:
+    (-print(print((-42))))
+    while x:
+        break
+    x = ((((0))))
+    if (1 <= -3.14):
+        return 1
+    else:
+        return 0
+    defer:
+        let cleanup: int = 0
+
+def test_1() -> int:
+    if (print((-(1)))):
+        return 1
+    else:
+        return 0
+    (-print(print(result)))
+    match print((-((-100)))):
+        case 0:
+            return 0
+        case _:
+            return -1
+    if (((-(False)) == ((42))) * ((print(100) > print(1)))):
+        return 1
+    else:
+        return 0
+
+def main() -> int:
+    return 0

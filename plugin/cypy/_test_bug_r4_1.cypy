@@ -1,0 +1,7 @@
+# Bug-R4-1: @decorator 装饰器语法不支持
+@decorator
+def decorated() -> int:
+    return 42
+
+def main() -> int:
+    return 0

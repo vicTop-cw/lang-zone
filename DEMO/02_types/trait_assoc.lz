@@ -20,7 +20,7 @@ struct Counter =
     limit: int
 
 def main() =
-    let c = Counter(n: 0, limit: 3)
+    mut c = Counter(n: 0, limit: 3)
     let v = c.get()
     print(v)
     let p = c.peek()

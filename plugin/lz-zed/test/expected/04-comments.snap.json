@@ -1,0 +1,726 @@
+{
+  "file": "04-comments.lz",
+  "tokens": 141,
+  "scopes": {
+    "comment.line.double-slash.lz": 6,
+    "text": 33,
+    "keyword.lz": 5,
+    "variable.lz": 4,
+    "keyword.operator.lz": 4,
+    "constant.numeric.integer.lz": 4,
+    "comment.block.lz": 82,
+    "meta.preprocessor.attribute.lz": 3
+  },
+  "lines": [
+    [
+      {
+        "t": "// lz-zed test fixture: 04-comments — 注释",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// Authority: SYNTAX/00-词法基础.md §三",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// 单行注释",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "42",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// 正确的单行注释",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "y",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "// 行尾注释",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "/*",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "多",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "行",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "注",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "释",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "可",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "以",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "跨",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "行",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "内",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "含",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "关",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "键",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "字",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "d",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "e",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "f",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "i",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "f",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "也",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "不",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "应",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "被",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "高",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "亮",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "为",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "关",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "键",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "字",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "内",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "含",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "字",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "符",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "串",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "\"",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "h",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "e",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "l",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "l",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "o",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "\"",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "与",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "数",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "字",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "4",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "2",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "也",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "不",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "应",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "被",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "高",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "亮",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "*/",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "z",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "20",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "/*",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "单",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "行",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "块",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "注",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "释",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": " ",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "*/",
+        "s": "comment.block.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "w",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "30",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// # 是属性宏标记而不是注释（00 §1.13），注释内出现的 # 属于注释文本",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#!bin",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "macro",
+        "s": "keyword.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#!export(Rust)",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#![derive(Clone)]",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      }
+    ]
+  ]
+}

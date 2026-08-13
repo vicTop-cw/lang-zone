@@ -1,0 +1,84 @@
+// Fuzz 5: 模式匹配边界测试
+
+// ── 5.1 match i64 值匹配 ──
+def test_match_int() =
+    x = 2
+    match x:
+        case 1:
+            print("one")
+        case 2:
+            print("two")
+        case _:
+            print("other")
+
+// ── 5.2 match 返回值 ──
+def test_match_return() =
+    x = 3
+    result = match x:
+        case 1:
+            "one"
+        case 2:
+            "two"
+        case _:
+            "other"
+
+    print("match return: ")
+    print(result)
+
+// ── 5.3 match bool ──
+def test_match_bool() =
+    x = true
+    match x:
+        case true:
+            print("yes")
+        case false:
+            print("no")
+
+// ── 5.4 match 嵌套 Option ──
+def test_match_option_nest() =
+    a = Some(Some(42))
+    match a:
+        case Some(inner):
+            match inner:
+                case Some(v):
+                    print("nested option: ")
+                    print(v)
+                case _:
+                    print("inner none")
+        case _:
+            print("outer none")
+
+// ── 5.5 match 多重模式 ──
+def test_match_multi() =
+    x = 1
+    match x:
+        case 1:
+            print("case 1")
+        case 2:
+            print("case 2")
+        case 3:
+            print("case 3")
+        case _:
+            print("default")
+
+// ── 5.6 match 在 if 内 ──
+def test_match_in_if() =
+    x = Some(5)
+    if true:
+        match x:
+            case Some(v):
+                print("match in if: ")
+                print(v)
+            case _:
+                print("none")
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Match ===")
+    test_match_int()
+    test_match_return()
+    test_match_bool()
+    test_match_option_nest()
+    test_match_multi()
+    test_match_in_if()
+    print("=== Fuzz Match Complete ===")

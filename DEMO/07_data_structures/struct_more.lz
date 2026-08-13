@@ -18,7 +18,7 @@ struct Counter =
     def snapshot(self) -> int = self.count
 
 def main() =
-    let c = Counter(count: 0)
+    mut c = Counter(count: 0)
     print(c.increment())
     print(c.increment())
     print(c.decrement())

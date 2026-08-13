@@ -1,0 +1,68 @@
+# Test Cypy advanced features: guard, defer, let, val, guard let, owend
+
+# 1. guard: early return / boundary check
+def test_guard(x: int) -> int:
+    guard x != 0 else 0
+    return 100 // x
+
+# 2. defer: cleanup
+def test_defer() -> int:
+    print("start")
+    defer print("cleanup")
+    print("middle")
+    return 42
+
+# 3. let: block-level binding
+def test_let() -> int:
+    let a: int = 10
+    let b: int = 20
+    let result: int = a + b
+    print(f"let result: {result}")
+    return result
+
+# 4. val: immutable constants
+val PI: float = 3.14159
+val MAX_SIZE: int = 100
+val GREETING: str = "Hello from val"
+
+def test_val() -> str:
+    print(f"PI={PI}, MAX_SIZE={MAX_SIZE}, GREETING={GREETING}")
+    return GREETING
+
+# 5. guard let: conditional binding
+def get_optional_value() -> int:
+    return 42
+
+def test_guard_let() -> int:
+    guard let v = get_optional_value() else 0
+    print(f"guard let v={v}")
+    return v
+
+# 6. owend: ownership declaration
+owend msg: str = "owned test"
+
+def test_owend() -> str:
+    return msg
+
+# main function
+def main() -> int:
+    print("=== test_guard ===")
+    print(f"test_guard(10) = {test_guard(10)}")
+    print(f"test_guard(0) = {test_guard(0)}")
+
+    print("=== test_defer ===")
+    print(f"test_defer() = {test_defer()}")
+
+    print("=== test_let ===")
+    test_let()
+
+    print("=== test_val ===")
+    test_val()
+
+    print("=== test_guard_let ===")
+    print(f"test_guard_let() = {test_guard_let()}")
+
+    print("=== test_owend ===")
+    print(f"test_owend() = {test_owend()}")
+
+    return 0

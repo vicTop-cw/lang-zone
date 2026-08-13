@@ -1,0 +1,24 @@
+# Zed extension manifest for the Lang-Zone (lz) language
+# Syntax authority: E:\IDEProjects\AI\lang-zone\SYNTAX (spec v3.3)
+
+id = "lz"
+name = "lz"
+version = "0.1.0"
+schema_version = 1
+authors = ["Lang-Zone"]
+description = "Lang-Zone (lz) language support: syntax highlighting"
+repository = ""
+
+# ---------------------------------------------------------------------------
+# Tree-sitter grammar declaration.
+#
+# `repository` + `rev` are used by Zed to fetch and compile the grammar.
+# Local-dev extensions point at a local git repo via a `file://` URL
+# (per https://zed.dev/docs/extensions/languages), so no remote is needed.
+# Build the grammar with build.ps1 (Windows) or build.sh (macOS/Linux):
+#   tree-sitter generate   -> grammar/src/parser.c
+#   tree-sitter build --wasm (or `tree-sitter build-wasm`) -> grammars/lz.wasm
+# ---------------------------------------------------------------------------
+[grammars.lz]
+repository = "file:///E:/IDEProjects/AI/lang-zone/plugin/lz-zed/tree-sitter-lz"
+rev = "d051526f39eb5c02764797cb9880175c27da7d0d"

@@ -1,0 +1,77 @@
+// ============================================================
+// 轮6: 函数定义 — 参数/返回/默认参数/递归/嵌套函数
+// 每项用 assert 确保正确
+// ============================================================
+
+def add(a: int, b: int) -> int =
+    return a + b
+
+def sub(a: int, b: int) -> int =
+    a - b          // 尾表达式即返回值
+
+def greet(name: str) -> str =
+    "Hello, " + name
+
+def no_ret(x: int) =
+    x * 2          // 无返回注解：结果被丢弃
+
+def default_params(a: int, b: int = 10) -> int =
+    a + b
+
+def multi_ret(x: int) -> (int, int) =
+    (x * 2, x * 3)
+
+def fib(n: int) -> int =
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+def main() =
+    // ── 基本调用与返回值 ──
+    assert add(3, 4) == 7
+    assert sub(10, 4) == 6
+    assert greet("LZ") == "Hello, LZ"
+
+    // ── 尾表达式返回 ──
+    assert sub(20, 5) == 15
+
+    // ── 默认参数 ──
+    assert default_params(1, 2) == 3
+    assert default_params(1) == 11
+
+    // ── 多返回值（元组解构） ──
+    let (d, t) = multi_ret(5)
+    assert d == 10
+    assert t == 15
+
+    // ── 递归（斐波那契） ──
+    assert fib(0) == 0
+    assert fib(1) == 1
+    assert fib(5) == 5
+    assert fib(10) == 55
+
+    // ── 无返回类型注解的函数 ──
+    no_ret(7)      // 应正常执行不崩溃
+
+    // ── 嵌套函数（函数内定义函数） ──
+    def inner(x: int) -> int =
+        x * 100
+    assert inner(3) == 300
+
+    // ── 函数作为值传递（赋给变量后调用） ──
+    let fn_ref = add
+    assert fn_ref(10, 20) == 30
+
+    // ── 函数组合（一个函数的输出作另一函数输入） ──
+    assert add(fib(5), sub(20, 5)) == 20
+    assert greet(str(sub(5, 0))) == "Hello, 5"   // sub→5, str→"5"
+
+    // ── 参数求值顺序与嵌套调用 ──
+    assert add(add(1, 2), add(3, 4)) == 10
+
+    // ── 返回类型推导（无显式注解，从尾表达式推断） ──
+    def square(n: int) =
+        n * n
+    assert square(6) == 36
+
+    print("R6 functions OK")

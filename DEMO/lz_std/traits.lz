@@ -98,7 +98,7 @@ trait Into<T> =
 trait TryFrom<T> =
     /// 尝试从 T 构造 Self (可能失败)
     type Error
-    def try_from(value: T) -> Result<Self, Self.Error> = ...
+    def try_from(value: T) -> Result<Self, Self.Error> where Self: Sized = ...
 
 
 trait TryInto<T> =
@@ -165,15 +165,15 @@ trait RemAssign<Rhs = Self> =
 
 trait BitAnd<Rhs = Self> =
     type Output
-    def __and__(self, rhs: Rhs) -> Self.Output = ...
+    def __bitand__(self, rhs: Rhs) -> Self.Output = ...
 
 trait BitOr<Rhs = Self> =
     type Output
-    def __or__(self, rhs: Rhs) -> Self.Output = ...
+    def __bitor__(self, rhs: Rhs) -> Self.Output = ...
 
 trait BitXor<Rhs = Self> =
     type Output
-    def __xor__(self, rhs: Rhs) -> Self.Output = ...
+    def __bitxor__(self, rhs: Rhs) -> Self.Output = ...
 
 trait Shl<Rhs = Self> =
     type Output
@@ -255,7 +255,7 @@ trait Iterator =
 
     /// 求积
     def product(mut self) -> Self.Item
-        where Self.Item: Mul<Output = Self.Item>
+        where Self.Item: Mul<Output = Self.Item> + Default
         =
         match self.__next__():
             case Some(first):
@@ -298,49 +298,53 @@ trait Iterator =
 
     /// 获取最后一个元素
     def last(mut self) -> Option<Self.Item> =
-        mut result = None
-        while let Some(item) = self.__next__():
-            result = Some(item)
-        return result
+        match self.__next__():
+            case Some(first):
+                mut result = first
+                while let Some(item) = self.__next__():
+                    result = item
+                return Some(result)
+            case None:
+                return None
 
     // --- 适配器 (Adapter) ---
 
     /// 映射
-    def map<B>(self, f: fn(Self.Item) -> B) -> Map<Self, B> =
+    def map<B>(self, f: fn(Self.Item) -> B) -> Map<Self, B> where Self: Iterator + Sized + Clone =
         Map(iter: self, func: f)
 
     /// 过滤
-    def filter(self, predicate: fn(ref Self.Item) -> bool) -> Filter<Self> =
+    def filter(self, predicate: fn(ref Self.Item) -> bool) -> Filter<Self> where Self: Iterator + Sized + Clone =
         Filter(iter: self, pred: predicate)
 
     /// 取前 n 个
-    def take(self, n: int) -> Take<Self> =
+    def take(self, n: int) -> Take<Self> where Self: Iterator + Sized + Clone =
         Take(iter: self, remaining: n)
 
     /// 跳过前 n 个
-    def skip(self, n: int) -> Skip<Self> =
+    def skip(self, n: int) -> Skip<Self> where Self: Iterator + Sized + Clone =
         Skip(iter: self, to_skip: n)
 
     /// 链式连接
-    def chain<Other: Iterator<Item = Self.Item>>(self, other: Other) -> Chain<Self, Other> =
+    def chain<Other: Iterator<Item = Self.Item>>(self, other: Other) -> Chain<Self, Other> where Self: Iterator + Sized + Clone =
         Chain(first: self, second: other, first_done: False)
 
     /// 枚举
-    def enumerate(self) -> Enumerate<Self> =
+    def enumerate(self) -> Enumerate<Self> where Self: Iterator + Sized + Clone =
         Enumerate(iter: self, index: 0)
 
     /// 展开映射
-    def flat_map<B, I: Iterator<Item = B>>(self, f: fn(Self.Item) -> I) -> FlatMap<Self, I, B> =
+    def flat_map<B, I: Iterator<Item = B>>(self, f: fn(Self.Item) -> I) -> FlatMap<Self, I, B> where Self: Iterator + Sized + Clone =
         FlatMap(outer: self, func: f, inner: None)
 
     /// 反转 (需要 DoubleEndedIterator)
     def rev(self) -> Rev<Self>
-        where Self: DoubleEndedIterator
+        where Self: DoubleEndedIterator + Sized + Clone
         =
         Rev(iter: self)
 
     /// 窥视
-    def peekable(self) -> Peekable<Self> =
+    def peekable(self) -> Peekable<Self> where Self: Iterator + Sized + Clone =
         Peekable(iter: self, peeked: None)
 
 
@@ -415,7 +419,7 @@ trait Error: Display + Debug =
 // 迭代器适配器 struct 定义
 // ============================================================
 
-struct Map<I, B> =
+struct Map<I: Iterator, B> =
     iter: I
     func: fn(I.Item) -> B
 
@@ -430,7 +434,8 @@ impl<I: Iterator, B> Iterator for Map<I, B> =
                 return None
 
     def size_hint(ref self) -> (int, Option<int>) =
-        self.iter.size_hint()
+        let (lower, upper) = self.iter.size_hint()
+        return (lower, upper)
 
 
 struct Filter<I: Iterator> =
@@ -465,9 +470,9 @@ impl<I: Iterator> Iterator for Take<I> =
         let new_lower = min(lower, self.remaining)
         let new_upper = match upper:
             case Some(x):
-                return Some(min(x, self.remaining))
+                Some(min(x, self.remaining))
             case None:
-                return Some(self.remaining)
+                Some(self.remaining)
         return (new_lower, new_upper)
 
 
@@ -506,11 +511,15 @@ impl<A: Iterator, B: Iterator<Item = A.Item>> Iterator for Chain<A, B> =
         let (lo1, hi1) = self.first.size_hint()
         let (lo2, hi2) = self.second.size_hint()
         let lo = lo1 + lo2
-        let hi = match (hi1, hi2):
-            case (Some(x), Some(y)):
-                return Some(x + y)
+        let hi = match hi1:
+            case Some(x):
+                match hi2:
+                    case Some(y):
+                        Some(x + y)
+                    case _:
+                        None
             case _:
-                return None
+                None
         return (lo, hi)
 
 
@@ -531,7 +540,8 @@ impl<I: Iterator> Iterator for Enumerate<I> =
                 return None
 
     def size_hint(ref self) -> (int, Option<int>) =
-        self.iter.size_hint()
+        let (lower, upper) = self.iter.size_hint()
+        return (lower, upper)
 
 
 struct FlatMap<I: Iterator, J: Iterator, B> =
@@ -540,7 +550,7 @@ struct FlatMap<I: Iterator, J: Iterator, B> =
     inner: Option<J>
 
 impl<I: Iterator, J: Iterator, B> Iterator for FlatMap<I, J, B>
-    where J: Iterator<Item = B>
+    where J: Iterator<Item = B> + Clone
     =
     type Item = B
 
@@ -575,7 +585,9 @@ struct Peekable<I: Iterator> =
     iter: I
     peeked: Option<I.Item>
 
-impl<I: Iterator> Iterator for Peekable<I> =
+impl<I: Iterator> Iterator for Peekable<I>
+    where I.Item: Clone
+    =
     type Item = I.Item
 
     def __next__(mut self) -> Option<I.Item> =
@@ -586,17 +598,17 @@ impl<I: Iterator> Iterator for Peekable<I> =
             case None:
                 return self.iter.__next__()
 
+impl<I: Iterator> Peekable<I>
+    where I.Item: Clone
+    =
     def peek(mut self) -> Option<ref I.Item> =
+        if self.peeked.is_none():
+            self.peeked = self.iter.__next__()
         match self.peeked:
             case Some(ref item):
                 return Some(item)
             case None:
-                self.peeked = self.iter.__next__()
-                match self.peeked:
-                    case Some(ref item):
-                        return Some(item)
-                    case None:
-                        return None
+                return None
 
 
 // ============================================================
@@ -607,25 +619,26 @@ def main() =
     // 验证 Map 适配器
     test "map doubles values":
         let values = [1, 2, 3, 4, 5]
-        let doubled = values.iter().map(|x: int| -> int = x * 2).collect()
+        let doubled: List<int> = values.iter().map(|x: int| -> int = x * 2).collect()
         assert doubled == [2, 4, 6, 8, 10]
 
     // 验证 Filter 适配器
     test "filter evens":
         let values = [1, 2, 3, 4, 5, 6]
-        let evens = values.iter().filter(|x: ref int| -> bool = x % 2 == 0).collect()
+        let evens: List<int> = values.iter().filter(|x: ref int| -> bool = x % 2 == 0).collect()
         assert evens == [2, 4, 6]
 
     // 验证 Take + Skip
     test "take and skip":
         let values = [1, 2, 3, 4, 5]
-        mut result = values.iter().skip(2).take(2).collect()
+        mut result: List<int> = values.iter().skip(2).take(2).collect()
         assert result == [3, 4]
 
     // 验证 Enumerate
     test "enumerate":
-        mut result = ["a", "b", "c"].iter().enumerate().collect()
-        assert result == [(0, "a"), (1, "b"), (2, "c")]
+        let values = [10, 20, 30]
+        mut result: List<(int, int)> = Enumerate(iter: values.iter(), index: 0).collect()
+        assert result == [(0, 10), (1, 20), (2, 30)]
 
     // 验证 fold / reduce
     test "fold sum":

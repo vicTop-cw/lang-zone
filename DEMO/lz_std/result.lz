@@ -210,7 +210,7 @@ impl<T, E> Result<T, E> =
     // --- 迭代 ---
 
     /// 返回 0 或 1 个元素的迭代器 (仅 Ok 值)
-    def iter(ref self) -> ResultIter<ref T> =
+    def iter(self) -> ResultIter<T> =
         ResultIter(inner: self.ok())
 
     // --- 魔法方法 ---
@@ -225,9 +225,9 @@ impl<T, E> Result<T, E> =
         =
         match (self, other):
             case (Ok(ref a), Ok(ref b)):
-                return a.__eq__(b)
+                return a.clone() == b.clone()
             case (Err(ref a), Err(ref b)):
-                return a.__eq__(b)
+                return a.clone() == b.clone()
             case _:
                 return False
 
@@ -312,7 +312,7 @@ def main() =
     test "or_else":
         let a: Result<int, str> = Err("first")
         let b: Result<int, str> = Err("second")
-        let c = a.or_else(|e: str| -> Result<int, str> = Ok(len(e)))
+        let c: Result<int, str> = a.or_else(|e: str| -> Result<int, str> = Ok(len(e)))
         assert c == Ok(5)
 
     test "ok and err":

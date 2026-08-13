@@ -1,0 +1,95 @@
+// ============================================================
+// 轮5: match 模式匹配 — 字面量/变量/通配/守卫/元组/列表
+// 每项用 assert 确保正确
+// ============================================================
+
+def classify(n: int) -> str =
+    match n:
+        case 0: return "zero"
+        case 1: return "one"
+        case 2 | 3: return "two_or_three"
+        case x if x < 0: return "negative"
+        case _: return "other"
+
+def main() =
+    // ── match 基本（整数字面量分支） ──
+    assert classify(0) == "zero"
+    assert classify(1) == "one"
+    assert classify(2) == "two_or_three"
+    assert classify(3) == "two_or_three"
+
+    // ── 守卫（guard）分支 ──
+    assert classify(-5) == "negative"
+
+    // ── 通配（_）分支 ──
+    assert classify(42) == "other"
+    assert classify(999) == "other"
+
+    // ── match 字符串字面量 ──
+    mut fruit = ""
+    let name = "apple"
+    match name:
+        case "apple": fruit = "red"
+        case "banana": fruit = "yellow"
+        case _: fruit = "unknown"
+    assert fruit == "red"
+
+    // ── match 布尔 ──
+    mut verdict = ""
+    let flag = True
+    match flag:
+        case True: verdict = "yes"
+        case False: verdict = "no"
+    assert verdict == "yes"
+
+    // ── match 变量绑定（case x: 绑定值） ──
+    mut doubled = 0
+    let v = 7
+    match v:
+        case x: doubled = x * 2
+    assert doubled == 14
+
+    // ── match 返回表达式（match 作为函数返回值） ──
+    def level(score: int) -> str =
+        match score:
+            case s if s >= 90: return "A"
+            case s if s >= 75: return "B"
+            case _: return "C"
+    assert level(95) == "A"
+    assert level(80) == "B"
+    assert level(60) == "C"
+
+    // ── match 元组模式 ──
+    def sign_pair(a: int, b: int) -> str =
+        match (a, b):
+            case (0, 0): return "origin"
+            case (x, 0): return "on_x"
+            case (0, y): return "on_y"
+            case _: return "other"
+    assert sign_pair(0, 0) == "origin"
+    assert sign_pair(5, 0) == "on_x"
+    assert sign_pair(0, 5) == "on_y"
+    assert sign_pair(1, 2) == "other"
+
+    // ── match 列表模式（含 .. 剩余） ──
+    def first_elem(items: List<int>) -> str =
+        match items:
+            case []: return "empty"
+            case [x, ..]: return "has_first"
+    assert first_elem([]) == "empty"
+    assert first_elem([1, 2, 3]) == "has_first"
+
+    // ── 嵌套 match（match 内直接返回字面量） ──
+    def describe(n: int) -> str =
+        match n:
+            case 0: return "zero"
+            case 1: return "one"
+            case _: return "big"
+    // 注：match 分支内 `return classify(0)`（调用其他函数）为已知边界缺陷——
+    // 嵌套函数 fn_ctx 的 fn_returns 继承不完整导致 classify 返回类型误判为
+    // i64，误插 <String as ImplicitFrom<i64>>（E0277，遗留 bug 见回归记录）
+    assert describe(0) == "zero"
+    assert describe(1) == "one"
+    assert describe(5) == "big"
+
+    print("R5 match OK")

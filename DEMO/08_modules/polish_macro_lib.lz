@@ -1,0 +1,22 @@
+#!bin macro
+// ============================================================
+// polish_macro_lib — 宏模块：纯宏/template API 库（不实现 main）
+// 常用模式：宏模块只定义宏 API，供非宏模块 import macro 导入使用
+// 规范: SYNTAX/08-宏与编译期.md §4.3（跨模块使用宏）
+// ============================================================
+
+// ── 宏 1：断言包装（guard/else 展开，固定 Tokens -> Tokens） ──
+macro check_eq(actual: Tokens, expected: Tokens) -> Tokens =
+    quote("guard (" + actual + ") == (" + expected + ") else:\n    panic(\"assert failed\")")
+
+// ── 宏 2：包装缩进块（朋友函数场景） ──
+macro note_block(body: Tokens) -> Tokens =
+    quote("// noted block:\n" + body + "\n")
+
+// ── 宏 3：生成顶层常量（纯 Token 转换，顶层调用） ──
+macro make_const(name: Tokens, value: Tokens) -> Tokens =
+    quote("const " + name + " = " + value)
+
+// ── template：自由参数（str），返回 Tokens，可内联 ──
+template say_hi(name: str) -> Tokens =
+    quote("print(\"hi " + name + "\")")

@@ -158,6 +158,9 @@ pub enum Expr {
 
     /// 括号分组 (expr) — 保留优先级信息
     Paren(Box<Expr>),
+
+    /// comptime 表达式：`comptime <expr>` — 编译期求值后内联结果
+    Comptime(Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

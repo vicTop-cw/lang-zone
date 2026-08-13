@@ -1,0 +1,25 @@
+def test_0() -> int:
+    return (print(-1) == 1.5)
+    defer:
+        let cleanup: int = 0
+
+def test_1() -> int:
+    ((print(0.0) - print((42 < True))))
+    return print((0.0))
+    defer:
+        let cleanup: int = 0
+    defer:
+        let cleanup: int = 0
+    while result:
+        break
+
+def test_2() -> int:
+    for i in range(2):
+        let temp: int = i
+    x = (-1)
+    for i in range(3):
+        let temp: int = i
+    return True
+
+def main() -> int:
+    return 0

@@ -1,0 +1,9 @@
+# Test: generic type alias expansion
+type Pair[T, U] = tuple[T, U]
+
+def make_pair[T, U](a: T, b: U) -> Pair[T, U]:
+    return (a, b)
+
+def main() -> int:
+    p = make_pair(1, "hello")
+    return len(p)

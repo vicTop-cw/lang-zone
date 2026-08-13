@@ -817,6 +817,27 @@ impl ParserExprExt for Parser {
             Token::Ident(name) => Ok(Expr::Ident(name)),
             Token::Underscore => Ok(Expr::Ident("_".to_string())),
             Token::Self_ => Ok(Expr::Ident("self".to_string())),
+            Token::Comptime => {
+                // comptime <expr> — 编译期表达式（求值后内联结果）
+                // comptime: 块 — 编译期块（规范 08b §2.1），块尾表达式值为结果
+                if self.check(&Token::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let block = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        Ok(Expr::Comptime(Box::new(Expr::BlockExpr(block))))
+                    } else {
+                        // 单行块：comptime: expr
+                        let inner = self.parse_expr()?;
+                        Ok(Expr::Comptime(Box::new(inner)))
+                    }
+                } else {
+                    let inner = self.parse_expr()?;
+                    Ok(Expr::Comptime(Box::new(inner)))
+                }
+            }
             Token::LParen => {
                 // 空括号 () → 单元
                 if self.check(&Token::RParen) {

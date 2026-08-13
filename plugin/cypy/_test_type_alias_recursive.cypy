@@ -1,0 +1,13 @@
+# Test: recursive type alias expansion
+type Number = int
+type PositiveNumber = Number
+type IntPair = Pair[PositiveNumber]
+
+struct Pair[T]:
+    first: T
+    second: T
+
+def main() -> int:
+    x: PositiveNumber = 1
+    p: IntPair = Pair {first: 2, second: 3}
+    return x + p.first

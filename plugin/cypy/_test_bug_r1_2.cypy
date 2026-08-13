@@ -1,0 +1,9 @@
+cdef class CdefClass:
+    let value: int = 0
+    
+    def get_value(self) -> int:
+        return self.value
+
+def test_cdef_class() -> int:
+    c = CdefClass {value: 42}
+    return c.get_value()

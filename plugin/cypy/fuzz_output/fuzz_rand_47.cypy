@@ -1,0 +1,16 @@
+def test_0() -> int:
+    match total:
+        case 0:
+            return 0
+        case _:
+            return -1
+    defer:
+        let cleanup: int = 0
+
+def test_1() -> int:
+    defer:
+        let cleanup: int = 0
+    True
+
+def main() -> int:
+    return 0

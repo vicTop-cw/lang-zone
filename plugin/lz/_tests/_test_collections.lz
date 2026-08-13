@@ -1,0 +1,62 @@
+// _test_collections.lz — 阶段 7: List/集合操作与迭代器
+
+// ── 7.1 List 字面量与构造 ──
+
+def test_list_literal() =
+    arr = [1, 2, 3, 4, 5]
+    print("List length: ")
+    print(arr.len())
+    print("First element: ")
+    print(arr[0])
+    print("Last element: ")
+    print(arr[arr.len() - 1])
+
+// ── 7.2 List 突变操作 ──
+
+def test_list_push() =
+    arr = [1, 2]
+    arr.push(3)
+    print("After push: ")
+    print(arr.len())
+
+def test_list_pop() =
+    arr = [1, 2, 3]
+    val = arr.pop()
+    print("Popped: ")
+    print(val)
+    print("Remaining: ")
+    print(arr.len())
+
+// ── 7.3 List 迭代 ──
+
+def test_list_for_each() =
+    arr = [10, 20, 30]
+    for item in arr:
+        print("Item: ")
+        print(item)
+
+// ── 7.4 嵌套 List ──
+
+def test_nested_list() =
+    outer = [[1, 2], [3, 4]]
+    inner = outer[0]
+    print("Nested element: ")
+    print(inner[0])
+
+// ── 7.5 空 List ──
+
+def test_empty_list_ops() =
+    arr = []
+    print("Empty length: ")
+    print(arr.len())
+
+// ── 主入口 ──
+def main() =
+    print("=== Collections Test ===")
+    test_list_literal()
+    test_list_push()
+    test_list_pop()
+    test_list_for_each()
+    test_nested_list()
+    test_empty_list_ops()
+    print("=== Collections Test Complete ===")

@@ -14,7 +14,7 @@ def sum_all(it: Iterator<int>) -> int =
 
 // --- 2. 手写迭代：需要中途 break 的场景 ---
 def take_until_zero(it: Iterator<int>) -> List<int> =
-    let result = []
+    mut result = []
     while let Some(item) = it.next():
         if item == 0:
             break

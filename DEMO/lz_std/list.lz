@@ -36,7 +36,7 @@ impl<T> List<T> =
         return Some(self[index])
 
     /// 是否包含元素
-    def contains(ref self, value: ref T) -> bool
+    def contains(ref self, value: T) -> bool
         where T: Eq
         =
         for item in self:
@@ -45,7 +45,7 @@ impl<T> List<T> =
         return False
 
     /// 查找元素位置
-    def index_of(ref self, value: ref T) -> Option<int>
+    def index_of(ref self, value: T) -> Option<int>
         where T: Eq
         =
         mut i = 0
@@ -56,7 +56,7 @@ impl<T> List<T> =
         return None
 
     /// 统计元素出现次数
-    def count_of(ref self, value: ref T) -> int
+    def count_of(ref self, value: T) -> int
         where T: Eq
         =
         mut count = 0
@@ -81,7 +81,7 @@ impl<T> List<T> =
         return Some(last)
 
     /// 在指定位置插入
-    def insert(mut self, index: int, value: T) =
+    def insert(mut self, index: int, value: T) -> () =
         // 内建: 编译器映射
         self.insert_at(index, value)
 
@@ -94,7 +94,7 @@ impl<T> List<T> =
         return Some(removed)
 
     /// 移除第一个匹配的元素
-    def remove(mut self, value: ref T) -> bool
+    def remove(mut self, value: T) -> bool
         where T: Eq
         =
         match self.index_of(value):
@@ -112,7 +112,7 @@ impl<T> List<T> =
     /// 扩展: 追加另一个列表的所有元素
     def extend(mut self, other: List<T>) =
         for item in other:
-            self.push(item)
+            self.push(item.clone())
 
     /// 保留满足条件的元素
     def retain(mut self, predicate: fn(ref T) -> bool) =
@@ -137,7 +137,7 @@ impl<T> List<T> =
         mut result = List()
         for item in self:
             if predicate(item):
-                result.push(item)
+                result.push(item.clone())
         return result
 
     /// 折叠归约
@@ -228,28 +228,28 @@ impl<T> List<T> =
         mut result = List()
         for item in self:
             if not seen.contains_key(item):
-                seen.insert(item, True)
-                result.push(item)
+                seen.insert(item.clone(), True)
+                result.push(item.clone())
         return result
 
     /// 连接两个列表
     def concat(ref self, other: List<T>) -> List<T> =
         mut result = List()
         for item in self:
-            result.push(item)
+            result.push(item.clone())
         for item in other:
-            result.push(item)
+            result.push(item.clone())
         return result
 
     // --- 迭代 ---
 
     /// 返回迭代器
-    def iter(ref self) -> ListIter<ref T> =
-        ListIter(list: self, index: 0)
+    def iter(ref self) -> ListIter<T> =
+        ListIter(list: self.clone(), index: 0)
 
     /// 返回可变迭代器
-    def iter_mut(mut self) -> ListIter<mut T> =
-        ListIter(list: self, index: 0)
+    def iter_mut(mut self) -> ListIter<T> =
+        ListIter(list: self.clone(), index: 0)
 
     /// 返回所有权迭代器
     def into_iter(self) -> ListIntoIter<T> =
@@ -268,8 +268,8 @@ impl<T> List<T> =
         // 内建: 编译器映射
         self[index] = value
 
-    def __iter__(ref self) -> ListIter<ref T> =
-        self.iter()
+    def __iter__(ref self) -> ListIter<T> =
+        ListIter(list: self.clone(), index: 0)
 
     def __add__(self, other: List<T>) -> List<T> =
         self.concat(other)

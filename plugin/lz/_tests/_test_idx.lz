@@ -1,0 +1,10 @@
+﻿struct Parser =
+    input: str
+    pos: int
+
+    def try_at(self: Parser)-> str =
+        self.input[self.pos + 1]
+
+def main() =
+    p = Parser("hello", 0)
+    print(p.try_at())

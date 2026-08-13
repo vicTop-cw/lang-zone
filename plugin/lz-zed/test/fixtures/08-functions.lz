@@ -1,0 +1,76 @@
+// lz-zed test fixture: 08-functions — 函数、闭包、泛型、可变参数
+// Authority: SYNTAX/03 系列 + 12-操作符.md §1.15/1.18 + 03d-可变参数.md
+
+# 等式体（单行）
+def double(x: int) -> int = x * 2
+
+# 块体（缩进）
+def abs2(x: int) -> int =
+    x if x >= 0 else -x
+
+# 无返回类型注解
+def greet(name: str) = f"hi {name}"
+
+# async 函数
+async def fetch_data(url: str) -> str =
+    let body = await http.get(url)
+    body
+
+# 泛型函数 + where 约束
+def first[T](xs: List[T]) -> T where T: Clone =
+    xs[0]
+
+# 泛型数值约束（Number 为内建数值 trait）
+def normalize[T: Number](x: T) -> T = x
+
+# 泛型默认值
+def make[T: Default]() -> T = T.default()
+
+# 闭包：单行 / 无参 / 胖箭头多行 / 带注解
+let inc = |x| x + 1
+let answer = | | 42
+let add = |x, y| x + y
+let block_closure = |x, y| =>
+    let s = x + y
+    s * 2
+let annotated = |x: int, y: int| x - y
+
+# 占位偏应用（洞）
+let add10 = add(_, 10)
+let g = list.map(_ * 2)
+
+# 可变参数：.. 注入
+def log_all(..args) -> () = pass
+def log_kv(prefix: str, .., ..: Dict) -> () = pass
+def pick(..: Tuple<Any, Any>) -> () = pass
+
+# 安全分隔符 / 与 *
+def boundary(a: int, /, b: int, *, c: int) -> int = a + b + c
+
+# 安全收集 List<T>
+def sum_all(values: List<int>) -> int =
+    total = 0
+    for v in values:
+        total += v
+    total
+
+# 命名参数与命名参数糖
+def named(a: int, b: int) -> int = a + b
+name(b~, a~)
+name(b=1, a=2)
+
+# 函数嵌套与装饰器
+@export(Rust)
+def outer(x: int) -> int =
+    def inner(y: int) -> int = y * 2
+    inner(x)
+
+# 返回类型：元组 / Option / 单元
+def divmod2(a: int, b: int) -> (int, int) = (a / b, a % b)
+def find(xs: List<int>, v: int) -> Option<int> = None
+def noop() -> () = pass
+
+# 尾表达式自动返回
+def implicit(x: int) -> int =
+    let y = x + 1
+    y

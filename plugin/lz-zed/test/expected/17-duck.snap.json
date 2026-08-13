@@ -1,0 +1,1878 @@
+{
+  "file": "17-duck.lz",
+  "tokens": 398,
+  "scopes": {
+    "comment.line.double-slash.lz": 2,
+    "text": 59,
+    "meta.preprocessor.attribute.lz": 5,
+    "keyword.lz": 18,
+    "variable.lz": 42,
+    "keyword.operator.lz": 22,
+    "keyword.control.lz": 3,
+    "entity.name.type.lz": 5,
+    "meta.duck.lz": 187,
+    "keyword.control.duck.lz": 19,
+    "support.function.lz": 3,
+    "support.type.lz": 5,
+    "keyword.operator.ellipsis.lz": 5,
+    "string.regexp.lz": 1,
+    "constant.numeric.integer.lz": 8,
+    "constant.numeric.float.lz": 2,
+    "punctuation.section.lz": 8,
+    "punctuation.separator.lz": 4
+  },
+  "lines": [
+    [
+      {
+        "t": "// lz-zed test fixture: 17-duck — 鸭子类型约束（软关键字）",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// Authority: SYNTAX/01b-duck关系约束.md §十一 + 附录B §1.13",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "定义",
+        "s": "variable.lz"
+      },
+      {
+        "t": "：",
+        "s": "text"
+      },
+      {
+        "t": "约束行",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "签名内嵌",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "match",
+        "s": "keyword.control.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "行",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "伪类型",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " Sortable =",
+        "s": "entity.name.type.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "require",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "key",
+        "s": "variable.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "optional",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "reverse",
+        "s": "support.function.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "sort",
+        "s": "support.function.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "self",
+        "s": "variable.lz"
+      },
+      {
+        "t": ",",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "key",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Callable",
+        "s": "variable.lz"
+      },
+      {
+        "t": ",",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "reverse",
+        "s": "support.function.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "bool",
+        "s": "support.type.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "List",
+        "s": "support.type.lz"
+      },
+      {
+        "t": "<",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "Any",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": ">",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "...",
+        "s": "keyword.operator.ellipsis.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "match",
+        "s": "keyword.control.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "/^get_/",
+        "s": "string.regexp.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "at_least",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "satisfies",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Base",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " HasArea =",
+        "s": "entity.name.type.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "area",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "self",
+        "s": "variable.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "f64",
+        "s": "support.type.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "...",
+        "s": "keyword.operator.ellipsis.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "sealed",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "default",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " Positional =",
+        "s": "entity.name.type.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "point",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "self",
+        "s": "variable.lz"
+      },
+      {
+        "t": ",",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Any",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": ",",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "y",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Any",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Any",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "...",
+        "s": "keyword.operator.ellipsis.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "exact",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "range",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ",",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "min",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "max",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "at_most",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "体外",
+        "s": "variable.lz"
+      },
+      {
+        "t": "：",
+        "s": "text"
+      },
+      {
+        "t": "软关键字恢复为普通标识符",
+        "s": "variable.lz"
+      },
+      {
+        "t": "（",
+        "s": "text"
+      },
+      {
+        "t": "附录B",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "§",
+        "s": "text"
+      },
+      {
+        "t": "1.13",
+        "s": "constant.numeric.float.lz"
+      },
+      {
+        "t": "）",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "require",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "optional",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "int",
+        "s": "support.type.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "int",
+        "s": "support.type.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "struct",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "X",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "value",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "StackType",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "伪类型",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " StackOnly =",
+        "s": "entity.name.type.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "push",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "self",
+        "s": "variable.lz"
+      },
+      {
+        "t": ",",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "value",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "StackType",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "...",
+        "s": "keyword.operator.ellipsis.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "get",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "self",
+        "s": "variable.lz"
+      },
+      {
+        "t": ")",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "RefType",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "...",
+        "s": "keyword.operator.ellipsis.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "多类型关系",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " Pair =",
+        "s": "entity.name.type.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "left",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Any",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "right",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": " ",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "Any",
+        "s": "keyword.control.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "",
+        "s": "meta.duck.lz"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "duck",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "作为类型注解",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "process",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "t",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "Sortable",
+        "s": "variable.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "pass",
+        "s": "keyword.control.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "obj",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "HasArea",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "Circle",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "1.0",
+        "s": "constant.numeric.float.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      }
+    ]
+  ]
+}

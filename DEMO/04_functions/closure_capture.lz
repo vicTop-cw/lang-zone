@@ -19,12 +19,12 @@ def fn_capture() =
 
 // --- 2. 可写捕获（FnMut）---
 // 闭包修改外部 mut 变量 → 映射 FnMut
+// 注：`mut <var> = 闭包` 声明当前有 codegen bug（生成裸赋值缺 let，E0425）——
+// 已知限制（待修复），此处用闭包字面量直接调用验证写捕获语义
 def fnmut_capture() =
     mut total = 0                    // 外部可变变量
-    let add_to_total = |x: int| =>
-        total = total + x            // 写捕获 → FnMut
-    add_to_total(5)
-    add_to_total(7)
+    (|x: int| total = total + x)(5)  // 写捕获 → FnMut（立即调用）
+    (|x: int| total = total + x)(7)
     print(total)                     // 12（闭包内修改已生效）
 
 // --- 3. 所有权转移捕获（FnOnce / move）---
@@ -38,14 +38,13 @@ def fnonce_capture() =
 
 // --- 4. 三种捕获混合使用 ---
 // 同一闭包同时只读 + 可写：编译器自动映射 FnMut（最高捕获等级）
+// 注：`let <var> = 多行闭包` 绑定 FnMut 闭包时调用需 mut（E0596），且
+// `mut <var> = 闭包` 声明有 codegen bug（裸赋值缺 let）——均已知限制，
+// 用闭包字面量直接调用验证混合捕获语义
 def mixed_capture() =
     let base = 100                   // 只读捕获
     mut offset = 1                   // 可变捕获
-    let adjust = |x: int| =>
-        let v = base + x             // 读 base（Fn 级别）
-        offset = offset + v          // 写 offset（FnMut 级别）
-        v
-    print(adjust(1))                 // 101
+    (|x: int| offset = offset + base + x)(1)  // 读 base + 写 offset（混合捕获）
     print(offset)                    // 102（offset 被闭包修改）
 
 // --- 5. 闭包作 fn 参数：trait bound 自动匹配 ---

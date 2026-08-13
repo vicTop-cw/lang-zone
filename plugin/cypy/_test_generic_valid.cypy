@@ -1,0 +1,9 @@
+# Test: generic parameter registration
+struct Pair[T]:
+    first: T
+    second: T
+
+type Result[V] = V
+
+def main() -> int:
+    return 0

@@ -1,0 +1,83 @@
+// ============================================================
+// 轮6: 函数边界 — 默认参数/多返回值/递归/嵌套函数链
+// 每项用 assert 确保正确
+// ============================================================
+
+def greet(name: str, prefix: str = "Hello") -> str =
+    prefix + ", " + name
+
+def pow2(n: int, times: int = 1) -> int =
+    n ** times
+
+def minmax(xs: List<int>) -> (int, int) =
+    return (xs[0], xs[len(xs) - 1])
+
+def fact(n: int) -> int =
+    if n <= 1:
+        return 1
+    return n * fact(n - 1)
+
+def main() =
+    // ── 默认参数 ──
+    assert greet("LZ") == "Hello, LZ"
+    assert greet("LZ", "Hi") == "Hi, LZ"
+    assert pow2(3) == 3
+    assert pow2(2, 10) == 1024
+
+    // ── 多返回值（元组解构） ──
+    let (lo, hi) = minmax([1, 5, 9])
+    assert lo == 1
+    assert hi == 9
+
+    // ── 递归（阶乘/斐波那契） ──
+    assert fact(5) == 120
+    def fib(n: int) -> int =
+        if n <= 1:
+            return n
+        return fib(n - 1) + fib(n - 2)
+    assert fib(10) == 55
+
+    // ── 嵌套函数链（函数内定义函数并调用） ──
+    def outer(x: int) -> int =
+        def inner(y: int) -> int =
+            y * 2
+        def inner2(z: int) -> int =
+            z + 10
+        inner(x) + inner2(x)
+    assert outer(5) == 25      // 10 + 15
+
+    // ── 函数返回函数（工厂） ──
+    def make_adder(n: int) -> fn(int) -> int =
+        |x: int| x + n
+    let add5 = make_adder(5)
+    let add100 = make_adder(100)
+    assert add5(10) == 15
+    assert add100(10) == 110
+
+    // ── 尾表达式返回值（无 return） ──
+    def double(x: int) -> int =
+        x * 2
+    assert double(21) == 42
+
+    // ── 函数链式调用（返回值作参数） ──
+    def inc(x: int) -> int =
+        x + 1
+    def dbl(x: int) -> int =
+        x * 2
+    assert dbl(inc(dbl(inc(1)))) == 10    // ((1+1)*2+1)*2 = 10
+
+    // ── 递归深度与终止条件 ──
+    def countdown(n: int) -> int =
+        if n == 0:
+            return 0
+        return 1 + countdown(n - 1)
+    assert countdown(100) == 100
+
+    // ── 多参数混合（默认 + 位置） ──
+    def fmt(a: int, b: str = "-", c: int = 0) -> str =
+        str(a) + b + str(c)
+    assert fmt(1) == "1-0"
+    assert fmt(1, "+") == "1+0"
+    assert fmt(1, "*", 9) == "1*9"
+
+    print("P6 functions OK")

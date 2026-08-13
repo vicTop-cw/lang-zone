@@ -1,0 +1,21 @@
+def test_0() -> int:
+    if (((0.0))):
+        return 1
+    else:
+        return 0
+    while total:
+        break
+
+def test_1() -> int:
+    let x: bool = True
+    return total
+    if (0 / (print((True)) / ((True <= -1) >= 0))):
+        return 1
+    else:
+        return 0
+    defer:
+        let cleanup: int = 0
+    x = print(((y > print(-1))))
+
+def main() -> int:
+    return 0

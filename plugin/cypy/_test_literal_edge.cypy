@@ -1,0 +1,57 @@
+# 字面量边界测试
+
+# 1. Unicode 字符串
+def test_unicode() -> str:
+    return "Hello, 世界! Café 你好"
+
+# 2. 空字符串
+def test_empty_string() -> str:
+    return ""
+
+# 3. 特殊字符转义
+def test_escape_chars() -> str:
+    return "tab:\t newline:\n quote:\" backslash:\\"
+
+# 4. 多行字符串（使用三引号）
+def test_multiline_string() -> str:
+    return "line1\nline2\nline3"
+
+# 5. 大整数
+def test_big_int() -> int:
+    return 999999999999999999
+
+# 6. 大浮点数
+def test_big_float() -> float:
+    return 3.14159265358979323846
+
+# 7. 负数字面量
+def test_negative_literal() -> int:
+    return -42
+
+# 8. 零值
+def test_zero() -> int:
+    return 0
+
+# 9. 布尔字面量
+def test_bool_literal() -> bool:
+    return True
+
+# 10. 科学计数法
+def test_scientific() -> float:
+    return 1.5e10
+
+# 11. 十六进制（Cypy 不支持 0x 前缀）
+def test_hex() -> int:
+    return 255
+
+# 12. 八进制（Cypy 不支持 0o 前缀）
+def test_octal() -> int:
+    return 63
+
+# 13. 二进制（Cypy 不支持 0b 前缀）
+def test_binary() -> int:
+    return 10
+
+# 14. 字符串拼接
+def test_string_concat() -> str:
+    return "hello" + " " + "world"

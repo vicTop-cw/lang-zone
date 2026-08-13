@@ -1,0 +1,19 @@
+# Lang-Zone (lz) language configuration — directory-extension loader format.
+# Per Zed docs (zed.dev/docs/extensions/languages), language metadata lives in
+# languages/<name>/config.toml; extension.toml only registers [grammars.*].
+# Syntax authority: ../SYNTAX (spec v3.3)
+
+name = "lz"
+grammar = "lz"
+path_suffixes = ["lz"]
+line_comments = ["//"]
+block_comment = ["/*", "*/"]
+brackets = [
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "[", end = "]", close = true, newline = false },
+  { start = "{", end = "}", close = true, newline = false },
+  { start = "|", end = "|", close = true, newline = false },
+]
+autoclose_before = ")]}:,;"
+word_characters = ["_"]
+foldable = true

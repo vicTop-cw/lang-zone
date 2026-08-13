@@ -1,2 +1,53 @@
 #!bin macro
-// Macro module declaration
+// ============================================================
+// macro_demo — 宏的正确用法
+// 规范: SYNTAX/08-宏与编译期.md
+//
+// 关键点：
+// 1. 宏签名固定 Tokens -> Tokens（纯 Token 级转换，无副作用）
+// 2. 宏仅能定义在宏模块（#!bin macro 首行）
+// 3. 使用宏时（调用点）@name! 必须独占一行（§3.5 规则 1）
+// 4. 宏定义/宏 body 不受独占一行限制
+// 5. template（name!）可内联在表达式中（§3.5 末尾）
+// ============================================================
+
+// --- 宏定义（签名固定 Tokens -> Tokens，纯 Token 转换） ---
+
+// 恒等宏：输入 token 流原样返回
+macro id(input: Tokens) -> Tokens = input
+
+// 拼接宏：生成 const 定义（纯 Token 转换）
+macro make_const(name: Tokens, value: Tokens) -> Tokens =
+    quote("const " + name + " = " + value)
+
+// 作用于缩进块：包装块为带注释输出（朋友函数场景演示）
+macro note_block(body: Tokens) -> Tokens =
+    quote("// friend block:\n" + body + "\n")
+
+// --- template 定义（签名自由，返回必须 Tokens，可内联调用） ---
+template greet(name: str) -> Tokens =
+    quote("print(\"Hello, " + name + "!\")")
+
+// --- 使用宏（顶层独占一行调用）：展开 const 定义 ---
+@make_const!(LIMIT, 100)
+@make_const!(BASE, 7)
+
+def main() =
+    // 宏展开的常量直接可用
+    print(LIMIT + BASE)          // 107
+
+    // 恒等宏：@id! 独占一行，作用于后续缩进块（展开为原样）
+    @id!
+    let x = 21
+
+    // 宏作用于缩进块（§3.5 规则 5）：note_block 包装 def 块
+    @note_block!
+    def helper(v: int) -> int =
+        v * 2
+
+    print(helper(x))             // 42
+
+    // template 调用：name! 可内联（§4.2）
+    greet!("LZ")
+
+    print("macro demo done")

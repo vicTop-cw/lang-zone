@@ -1,0 +1,6 @@
+# Bug-R2-1: yield 语句在代码生成阶段全部丢失
+def simple_gen() -> int:
+    yield 1
+    yield 2
+    yield 3
+    return 0

@@ -1,0 +1,84 @@
+#!bin lz
+// ============================================================
+// comptime 焊死外部库结果 — 编译期调用"大型外部库"API 拿结果内联
+// 覆盖: SYNTAX/08b-comptime编译期.md §7 典型场景
+//
+// 场景：生产中某些能力依赖大型第三方库（密码学/数值计算/机器学习等），
+// 若运行时依赖，分发产物需携带大库。用 comptime 在编译期调用库的
+// 纯函数（模拟），把计算结果「焊死」为常量/查找表内联进生成代码——
+// 运行时零外部依赖，产物可直接分发。
+// ============================================================
+
+// ────────────────────────────────────────────────
+// 模拟外部大型库（真实场景：openssl / numpy / 密码学套件等）
+// 以下纯函数代表库的 API——它们可在编译期被 comptime 解释执行
+// ────────────────────────────────────────────────
+
+/// 生成前 n 个质数（模拟库的 primality 模块）
+def gen_primes(count: int) -> List<int> =
+    mut primes: List<int> = []
+    mut n = 2
+    mut found = 0
+    while found < count:
+        mut is_prime = True
+        mut d = 2
+        while d * d <= n:
+            if n % d == 0:
+                is_prime = False
+                break
+            d = d + 1
+        if is_prime:
+            primes.push(n)
+            found = found + 1
+        n = n + 1
+    return primes
+
+/// 生成前 n 个斐波那契数（模拟库的 fib 模块）
+def fib_table(n: int) -> List<int> =
+    mut table: List<int> = []
+    mut a = 0
+    mut b = 1
+    mut i = 0
+    while i < n:
+        table.push(a)
+        let tmp = a + b
+        a = b
+        b = tmp
+        i = i + 1
+    return table
+
+/// 简化字符串哈希（模拟库的 hash 模块；真实场景可为 SHA-256 等）
+def simple_hash(s: str) -> int =
+    mut h = 0
+    mut i = 0
+    while i < len(s):
+        let c = s[i]
+        h = h * 31 + c
+        i = i + 1
+    return h
+
+// ────────────────────────────────────────────────
+// 使用方：编译期调用库 API，结果焊死
+// ────────────────────────────────────────────────
+
+def main() =
+    // 编译期算好质数表并内联（运行时不再需要库的 primality 模块）
+    let primes = comptime gen_primes(8)
+    print(primes)
+    // 期望: [2, 3, 5, 7, 11, 13, 17, 19]
+
+    // 编译期算好斐波那契表并内联
+    let fibs = comptime fib_table(10)
+    print(fibs)
+    // 期望: [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+
+    // 编译期算好哈希值（运行时不再需要库的 hash 模块）
+    let h1 = comptime simple_hash("lang-zone")
+    let h2 = comptime simple_hash("lang-zone")   // 同输入同输出，可作编译期校验
+    print(h1)
+    print(h1 == h2)
+
+    // 组合：编译期推导 + 运行时使用
+    let half_of_fibs = comptime fib_table(10)[4]
+    print(half_of_fibs)
+    // 期望: 3

@@ -5,7 +5,7 @@ use super::expr::Expr;
 use super::stmt::Stmt;
 use crate::types::Type;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Module {
     pub name: Option<String>, // 模块名（来自 __name__ 或文件路径）
     pub imports: Vec<ImportStmt>,
@@ -23,6 +23,9 @@ pub struct Module {
     pub duck_defs: Vec<DuckDef>,
     /// 独立 magic 块: magic __str__: def __str__(self: MyStruct) -> str = ...
     pub magic_blocks: Vec<MagicDef>,
+    /// 是否为宏模块（首行 `#!bin macro` 声明）：宏/template 仅能定义在宏模块，
+    /// 模块级魔法属性 __is_macro__ 据此填充（06e-模块级魔法属性.md）
+    pub is_macro: bool,
 }
 
 /// 独立 magic 方法块定义
@@ -99,6 +102,8 @@ pub struct Function {
     pub is_abstract: bool,
     pub is_iterator: bool, // iterator 关键字定义的生成器函数
     pub is_magic: bool,    // magic 关键字标记的内建方法
+    /// comptime def 编译期函数：仅在编译期存在，不生成运行时代码
+    pub is_comptime: bool,
     pub decorators: Vec<Decorator>,
     /// `..` 可变参数模式
     pub variadic: VariadicMode,
@@ -134,6 +139,8 @@ pub struct WhereBound {
 pub struct StructDef {
     pub name: String,
     pub generics: Vec<String>,
+    /// 泛型内联约束（`struct Map<I: Iterator, B>` 的 I: Iterator）
+    pub generic_bounds: Vec<(String, Vec<Type>)>,
     /// 泛型默认类型（§四 `T = int`）
     pub generic_defaults: Vec<(String, Type)>,
     pub fields: Vec<Field>,
@@ -157,6 +164,8 @@ pub struct TraitDef {
     pub generics: Vec<String>,
     /// 泛型默认类型（§四 `T = int`）
     pub generic_defaults: Vec<(String, Type)>,
+    /// 父 trait（`trait DoubleEndedIterator: Iterator` 的 : Iterator）
+    pub supertraits: Vec<Type>,
     pub methods: Vec<Function>,
     pub fields: Vec<Field>,
     /// trait 内声明的关联类型（§五 `type Item`），impl 时需提供具体类型

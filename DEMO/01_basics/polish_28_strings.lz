@@ -1,0 +1,52 @@
+// ============================================================
+// 轮28: 字符串进阶 — 原始/多行/格式化/方法链
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── 原始字符串（r"..." 不处理转义） ──
+    let raw = r"a\tb\nc"
+    assert raw == "a\\tb\\nc"
+    assert len(raw) == 7
+
+    // ── 多行字符串（"""..."""） ──
+    let multi = """line1
+line2
+line3"""
+    assert multi == "line1\nline2\nline3"
+
+    // ── 字符串方法链 ──
+    let s = "  Hello World  "
+    assert s.trim() == "Hello World"
+    assert s.trim().to_lower() == "hello world"
+    assert s.trim().to_upper() == "HELLO WORLD"
+
+    // ── 格式化（f-string Debug 语义） ──
+    let name = "LZ"
+    let ver = 2
+    let msg = f"lang-zone v{ver} by {name}"
+    assert msg == "lang-zone v2 by \"LZ\""
+
+    // ── 字符串拼接组合 ──
+    let parts: List<str> = ["a", "b", "c"]
+    mut joined = ""
+    for p in parts:
+        joined = joined + p
+    assert joined == "abc"
+
+    // ── 字符串长度与索引 ──
+    assert len("hello") == 5
+    assert "hello"[0] == 104
+    assert "hello"[4] == 111
+
+    // ── 字符串比较 ──
+    assert "abc" == "abc"
+    assert "abc" < "abd"
+    assert "abc" != "ABC"
+
+    // ── 嵌套字符串操作 ──
+    let greeting = "Hello, " + name + "!"
+    assert greeting == "Hello, LZ!"
+    assert greeting.len() == 10       // "Hello, "(7) + "LZ"(2) + "!"(1)
+
+    print("P28 strings OK")

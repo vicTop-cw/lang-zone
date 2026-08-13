@@ -1,0 +1,36 @@
+// lz-zed test fixture: 02-literals — 数字与布尔字面量
+// Authority: SYNTAX/00-词法基础.md §2 + §2.2
+
+# 十进制整数
+let a = 42
+let b = 0
+let c = 1_000_000
+
+# 十六进制 / 八进制 / 二进制
+let h = 0xFF
+let o = 0o77
+let bin = 0b1010
+
+# 浮点：小数与科学计数（1. 与 .5 非法，不出现）
+let pi = 3.14
+let e = 1e10
+let neg = 1.5e-3
+let big = 2.5E+6
+
+# 整数边界
+let neg_int = -9223372036854775808
+let max_int = 9223372036854775807
+
+# 区间字面量（含数值）
+let r1 = 0..10
+let r2 = 0..=9
+
+# 布尔
+let yes = True
+let no = False
+
+# 数值参与表达式
+let sum = 1 + 2 * 3
+let frac = 10 / 4
+let mod = 10 % 3
+let pow = 2 ** 10

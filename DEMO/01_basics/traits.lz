@@ -1,0 +1,57 @@
+// ============================================================
+// 轮13: trait/impl — 定义/实现/默认方法/泛型 impl
+// 每项用 assert 确保正确
+// ============================================================
+
+trait Describable =
+    def describe(self) -> str
+
+struct Dog =
+    name: str
+    age: int
+
+impl Describable for Dog =
+    def describe(self) -> str =
+        "Dog(" + self.name + ")"
+
+struct Cat =
+    name: str
+
+impl Describable for Cat =
+    def describe(self) -> str =
+        "Cat(" + self.name + ")"
+
+// 默认方法 trait：实现方只提供 area，perimeter 用默认实现
+trait ShapeOps =
+    def area(self) -> int
+    def perimeter(self) -> int =
+        self.area() * 2
+
+struct Square =
+    side: int
+
+impl ShapeOps for Square =
+    def area(self) -> int =
+        self.side * self.side
+
+// 注：泛型 trait（trait Pair<T> + impl Pair<int> for T）定义在 parser 有
+// Parse error（Expected Eq or Colon, got For）——已知限制（03b 泛型未全接线），
+// 本轮仅覆盖基础 trait/impl 与默认方法
+
+def main() =
+    // ── trait 方法分发（不同实现） ──
+    let d = Dog(name: "Rex", age: 3)
+    let c = Cat(name: "Tom")
+    assert d.describe() == "Dog(Rex)"
+    assert c.describe() == "Cat(Tom)"
+
+    // ── trait 默认方法 ──
+    let sq = Square(side: 4)
+    assert sq.area() == 16
+    assert sq.perimeter() == 32
+
+    // ── 组合：trait 方法链 ──
+    let sq2 = Square(side: 3)
+    assert sq2.area() + sq2.perimeter() == 9 + 18
+
+    print("R13 traits OK")

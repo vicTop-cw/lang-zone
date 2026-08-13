@@ -1,0 +1,45 @@
+// ============================================================
+// 轮16: 错误处理基础 — guard/assert/check/raise 语法
+// 注：try/catch 依赖 std::panic::catch_unwind，本工具链 panic 策略为
+// abort（纯 Rust catch_unwind 也失效）——环境限制，此处仅验证语法层
+// ============================================================
+
+def safe_div(a: int, b: int) -> int =
+    guard b != 0 else:
+        raise "division by zero"
+    a / b
+
+def main() =
+    // ── guard 条件守卫（满足继续，不满足走 else 分支） ──
+    assert safe_div(10, 2) == 5
+    assert safe_div(9, 3) == 3
+
+    // ── assert 断言（真通过） ──
+    assert 1 == 1
+    assert 2 > 1
+    assert True
+
+    // ── check 检查（同 assert 语义） ──
+    check 3 == 3
+    check "abc" != "xyz"
+
+    // ── guard 失败走 else（此处 raise 会 panic 退出——仅验证语法可编译） ──
+    // let x = safe_div(1, 0)   // 会触发 raise panic，注释掉
+    // ── try/catch（环境 catch_unwind 不可用，见文件头注） ──
+
+    // ── guard 组合条件 ──
+    def clamp(v: int, lo: int, hi: int) -> int =
+        guard v >= lo else:
+            return lo
+        guard v <= hi else:
+            return hi
+        v
+    assert clamp(5, 0, 10) == 5
+    assert clamp(-3, 0, 10) == 0
+    assert clamp(99, 0, 10) == 10
+
+    // ── 断言路径（通过路径） ──
+    assert 10 > 5
+    assert len("abc") == 3
+
+    print("R16 errors OK")

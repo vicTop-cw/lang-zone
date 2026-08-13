@@ -36,21 +36,21 @@ impl<K, V> Dict<K, V> =
     def keys(ref self) -> List<K> =
         mut result = List()
         for (k, _) in self:
-            result.push(k)
+            result.push(k.clone())
         return result
 
     /// 获取所有值
     def values(ref self) -> List<V> =
         mut result = List()
         for (_, v) in self:
-            result.push(v)
+            result.push(v.clone())
         return result
 
     /// 获取所有键值对
     def items(ref self) -> List<(K, V)> =
         mut result = List()
         for (k, v) in self:
-            result.push((k, v))
+            result.push((k.clone(), v.clone()))
         return result
 
     // --- 修改 ---
@@ -66,7 +66,7 @@ impl<K, V> Dict<K, V> =
         =
         match self.get(key):
             case Some(value):
-                let removed = value
+                let removed = value.clone()
                 // 内建: 编译器从 self 中移除 key 并返回值
                 return Some(removed)
             case None:
@@ -82,7 +82,7 @@ impl<K, V> Dict<K, V> =
         where K: Eq + Hash
         =
         if not self.contains_key(key):
-            self.insert(key, default)
+            _ = self.insert(key.clone(), default)
         return self[key]
 
     /// 从另一个 Dict 更新键值对
@@ -90,7 +90,7 @@ impl<K, V> Dict<K, V> =
         where K: Eq + Hash
         =
         for (k, v) in other:
-            self.insert(k, v)
+            self.insert(k.clone(), v.clone())
 
     // --- 转换 ---
 
@@ -100,7 +100,7 @@ impl<K, V> Dict<K, V> =
         =
         mut result = Dict()
         for (k, v) in self:
-            result.insert(k, f(v))
+            result.insert(k.clone(), f(v))
         return result
 
     /// 映射键值对
@@ -120,7 +120,7 @@ impl<K, V> Dict<K, V> =
         mut result = Dict()
         for (k, v) in self:
             if predicate(k, v):
-                result.insert(k, v)
+                _ = result.insert(k.clone(), v.clone())
         return result
 
     /// 保留满足条件的键值对
@@ -130,7 +130,7 @@ impl<K, V> Dict<K, V> =
         let mut keys_to_remove = List()
         for (k, v) in self:
             if not predicate(k, v):
-                keys_to_remove.push(k)
+                keys_to_remove.push(k.clone())
         for k in keys_to_remove:
             _ = self.remove(k)
 
@@ -146,16 +146,16 @@ impl<K, V> Dict<K, V> =
     // --- 迭代 ---
 
     /// 返回键值对迭代器
-    def iter(ref self) -> DictIter<ref K, ref V> =
-        DictIter(dict: self, keys: self.keys(), index: 0)
+    def iter(ref self) -> DictIter<K, V> =
+        DictIter(dict: self.clone(), keys: self.keys(), index: 0)
 
     /// 返回键迭代器
-    def iter_keys(ref self) -> DictKeyIter<ref K, ref V> =
-        DictKeyIter(dict: self, keys: self.keys(), index: 0)
+    def iter_keys(ref self) -> DictKeyIter<K, V> =
+        DictKeyIter(dict: self.clone(), keys: self.keys(), index: 0)
 
     /// 返回值迭代器
-    def iter_values(ref self) -> DictValueIter<ref K, ref V> =
-        DictValueIter(dict: self, keys: self.keys(), index: 0)
+    def iter_values(ref self) -> DictValueIter<K, V> =
+        DictValueIter(dict: self.clone(), keys: self.keys(), index: 0)
 
     // --- 魔法方法 ---
 
@@ -174,8 +174,8 @@ impl<K, V> Dict<K, V> =
         // 内建: 编译器映射
         self[key] = value
 
-    def __iter__(ref self) -> DictIter<ref K, ref V> =
-        self.iter()
+    def __iter__(ref self) -> DictIter<K, V> =
+        DictIter(dict: self.clone(), keys: self.keys(), index: 0)
 
     def __contains__(ref self, key: ref K) -> bool
         where K: Eq + Hash
@@ -190,7 +190,7 @@ impl<K, V> Dict<K, V> =
         for (k, v) in self:
             match other.get(k):
                 case Some(ref other_v):
-                    if v != other_v:
+                    if v.clone() != other_v.clone():
                         return False
                 case None:
                     return False
@@ -220,7 +220,7 @@ struct DictIter<K, V> =
     keys: List<K>
     index: int
 
-impl<K, V> Iterator for DictIter<K, V> =
+impl<K: Eq + Hash, V> Iterator for DictIter<K, V> =
     type Item = (K, V)
 
     def __next__(mut self) -> Option<(K, V)> =
@@ -241,7 +241,7 @@ struct DictKeyIter<K, V> =
     keys: List<K>
     index: int
 
-impl<K, V> Iterator for DictKeyIter<K, V> =
+impl<K: Eq + Hash, V> Iterator for DictKeyIter<K, V> =
     type Item = K
 
     def __next__(mut self) -> Option<K> =
@@ -261,7 +261,7 @@ struct DictValueIter<K, V> =
     keys: List<K>
     index: int
 
-impl<K, V> Iterator for DictValueIter<K, V> =
+impl<K: Eq + Hash, V> Iterator for DictValueIter<K, V> =
     type Item = V
 
     def __next__(mut self) -> Option<V> =
@@ -306,10 +306,10 @@ def main() =
         let mut d: Dict<str, int> = Dict()
         d.insert("a", 1)
         d.insert("b", 2)
-        let ks = d.keys()
+        mut ks = d.keys()
         ks.sort()
         assert ks == ["a", "b"]
-        let vs = d.values()
+        mut vs = d.values()
         vs.sort()
         assert vs == [1, 2]
 

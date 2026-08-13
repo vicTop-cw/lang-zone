@@ -1,0 +1,55 @@
+// ============================================================
+// 轮16: duck 类型 — duck 定义/约束（方法须定义在 struct 内部，
+// 否则 duck_check 找不到结构方法，E0600）
+// 每项用 assert 确保正确
+// ============================================================
+
+duck HasName =
+    def name(self) -> str
+
+duck HasArea =
+    def area(self) -> int
+
+struct Dog =
+    n: str
+    def name(self) -> str =
+        self.n
+
+struct Circle3 =
+    radius: int
+    def area(self) -> int =
+        3 * self.radius * self.radius
+
+struct Square3 =
+    side: int
+    def area(self) -> int =
+        self.side * self.side
+
+def main() =
+    // ── duck 结构匹配（结构满足 duck） ──
+    let dog = Dog(n: "Rex")
+    let c = Circle3(radius: 3)
+    let sq = Square3(side: 4)
+
+    // ── 泛型函数用 duck 约束（内联 <T: HasName>） ──
+    def show_name<T: HasName>(x: T) -> str =
+        x.name()
+    assert show_name(dog) == "Rex"
+
+    def total_area<T: HasArea>(x: T) -> int =
+        x.area()
+    assert total_area(c) == 27
+    assert total_area(sq) == 16
+
+    // ── where 子句 duck 约束 ──
+    def area_plus<T>(x: T) -> int where T: HasArea =
+        x.area() + 1
+    assert area_plus(c) == 28
+    assert area_plus(sq) == 17
+
+    // ── 直接方法调用（不依赖 duck 约束） ──
+    assert dog.name() == "Rex"
+    assert c.area() == 27
+    assert sq.area() == 16
+
+    print("P16 duck OK")

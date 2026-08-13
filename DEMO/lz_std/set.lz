@@ -54,15 +54,15 @@ impl<T> Set<T> =
         where T: Eq + Hash
         =
         // 内建: 编译器映射
-        self.insert(value)
+        _ = self.insert(value)
 
     /// 移除元素
     def remove(mut self, value: ref T) -> bool
         where T: Eq + Hash
         =
         if self.contains(value):
-            // 内建: 编译器映射
-            self.discard(value)
+            // 内建: 编译器映射（std HashSet 无 discard，用 remove 删除）
+            _ = self.remove(value)
             return True
         return False
 
@@ -79,9 +79,9 @@ impl<T> Set<T> =
         =
         mut result = Set()
         for item in self:
-            result.add(item)
+            result.add(item.clone())
         for item in other:
-            result.add(item)
+            result.add(item.clone())
         return result
 
     /// 交集
@@ -91,7 +91,7 @@ impl<T> Set<T> =
         mut result = Set()
         for item in self:
             if other.contains(item):
-                result.add(item)
+                result.add(item.clone())
         return result
 
     /// 差集 (在 self 中但不在 other 中)
@@ -101,7 +101,7 @@ impl<T> Set<T> =
         mut result = Set()
         for item in self:
             if not other.contains(item):
-                result.add(item)
+                result.add(item.clone())
         return result
 
     /// 对称差集 (在 self 或 other 中, 但不同时在两者中)
@@ -116,7 +116,7 @@ impl<T> Set<T> =
     def to_list(ref self) -> List<T> =
         mut result = List()
         for item in self:
-            result.push(item)
+            result.push(item.clone())
         return result
 
     /// 映射元素为新集合
@@ -135,7 +135,7 @@ impl<T> Set<T> =
         mut result = Set()
         for item in self:
             if predicate(item):
-                result.add(item)
+                result.add(item.clone())
         return result
 
     /// 折叠归约
@@ -148,7 +148,7 @@ impl<T> Set<T> =
     // --- 迭代 ---
 
     /// 返回迭代器
-    def iter(ref self) -> SetIter<ref T> =
+    def iter(ref self) -> SetIter<T> =
         SetIter(items: self.to_list(), index: 0)
 
     /// 返回所有权迭代器
@@ -165,15 +165,15 @@ impl<T> Set<T> =
         =
         self.contains(value)
 
-    def __iter__(ref self) -> SetIter<ref T> =
-        self.iter()
+    def __iter__(ref self) -> SetIter<T> =
+        SetIter(items: self.to_list(), index: 0)
 
-    def __and__(ref self, other: ref Set<T>) -> Set<T>
+    def __bitand__(ref self, other: ref Set<T>) -> Set<T>
         where T: Eq + Hash
         =
         self.intersection(other)
 
-    def __or__(ref self, other: ref Set<T>) -> Set<T>
+    def __bitor__(ref self, other: ref Set<T>) -> Set<T>
         where T: Eq + Hash
         =
         self.union(other)
@@ -183,7 +183,7 @@ impl<T> Set<T> =
         =
         self.difference(other)
 
-    def __xor__(ref self, other: ref Set<T>) -> Set<T>
+    def __bitxor__(ref self, other: ref Set<T>) -> Set<T>
         where T: Eq + Hash
         =
         self.symmetric_difference(other)

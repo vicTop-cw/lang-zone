@@ -1,0 +1,87 @@
+// ============================================================
+// 轮8: list 进阶 — 嵌套列表/二维/组合操作
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── 二维列表（矩阵） ──
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+    assert matrix[0][0] == 1
+    assert matrix[2][2] == 9
+    assert matrix[1][1] == 5
+    assert len(matrix) == 3
+    assert len(matrix[0]) == 3
+
+    // ── 矩阵转置（嵌套循环） ──
+    mut transposed: List<List<int>> = []
+    for j in 0..3:
+        mut row: List<int> = []
+        for i in 0..3:
+            row.push(matrix[i][j])
+        transposed.push(row)
+    assert transposed[0] == [1, 4, 7]
+    assert transposed[1] == [2, 5, 8]
+    assert transposed[2] == [3, 6, 9]
+
+    // ── 列表切片组合 ──
+    let nums = [0, 1, 2, 3, 4, 5]
+    assert nums[1..4] == [1, 2, 3]
+    assert nums[0..6] == [0, 1, 2, 3, 4, 5]
+
+    // ── 列表方法链（push + sort + reverse） ──
+    mut chain: List<int> = [3, 1]
+    chain.push(2)
+    chain.sort()
+    assert chain == [1, 2, 3]
+    chain.reverse()
+    assert chain == [3, 2, 1]
+
+    // ── 列表统计（求和/计数/查找；for 遍历为值语义会 move 列表，先取长度） ──
+    let data = [4, 2, 7, 1, 9]
+    let data_len = len(data)
+    mut total = 0
+    for v in data:
+        total = total + v
+    assert total == 23
+    assert data_len == 5
+
+    // ── 嵌套列表遍历（递归式收集） ──
+    mut flat: List<int> = []
+    for row in matrix:
+        for cell in row:
+            if cell % 2 == 0:
+                flat.push(cell)
+    assert flat == [2, 4, 6, 8]
+
+    // ── 列表作为函数参数与返回 ──
+    def append_all(xs: List<int>, ys: List<int>) -> List<int> =
+        mut out: List<int> = xs
+        for y in ys:
+            out.push(y)
+        return out
+    let combined = append_all([1, 2], [3, 4])
+    assert combined == [1, 2, 3, 4]
+
+    // ── 列表元素修改（索引赋值） ──
+    mut editable = [1, 2, 3]
+    editable[0] = 100
+    editable[2] = 300
+    assert editable == [100, 2, 300]
+
+    // ── 列表与字符串互转 ──
+    let words = ["a", "b", "c"]
+    assert len(words) == 3
+    assert words[0] == "a"
+
+    // ── 空列表边界 ──
+    let empty: List<int> = []
+    assert len(empty) == 0
+    let empty2: List<List<int>> = []
+    assert len(empty2) == 0
+
+    // ── 深层嵌套（3 层列表） ──
+    let cube = [[[1], [2]], [[3], [4]]]
+    assert cube[0][0][0] == 1
+    assert cube[1][1][0] == 4
+
+    print("P8 lists OK")

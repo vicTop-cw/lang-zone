@@ -121,7 +121,14 @@ impl MacroInterpreter {
                 let r = self.eval_expr(right)?;
                 #[allow(unreachable_patterns)]
                 match op {
-                    BinaryOp::Plus => Ok(l.concat(r)),
+                    BinaryOp::Plus => {
+                        // 合并相邻 StrLit：quote("a" + name + "b") 产生
+                        // [StrLit("a"), StrLit("World"), StrLit("b")] → 单个 StrLit，
+                        // 否则 parser 把它们解析为分散语句而非字符串拼接
+                        let mut merged = l.concat(r);
+                        merged.tokens = merge_str_lits(merged.tokens);
+                        Ok(merged)
+                    }
                     _ => Err(format!("unsupported binary op {:?} in macro", op)),
                 }
             }
@@ -221,9 +228,10 @@ impl MacroInterpreter {
             // 字面量
             return Ok(Tokens::new(tokens.to_vec()));
         }
-        // 复杂场景：表达式（如 x + 1），这里做简化处理
-        // 递归解析为 MacroExpr 再求值会更完整，但先做简单版本
-        Err(format!("complex interpolation not yet supported: {:?}", tokens))
+        // 复杂表达式（如 `$(x + 1)` / `$(len(items))`）：用宏表达式解析器
+        // 解析为 MacroExpr 再求值，返回其结果 Tokens（08 §3.2 f``` 插值）
+        let (expr, _end) = crate::macros::expand::parse_macro_expr(tokens, 0)?;
+        self.eval_expr(&expr)
     }
 
     // ──────────────── 内置函数求值 ────────────────
@@ -301,11 +309,30 @@ impl MacroInterpreter {
 
             // ── 宏 API 工具集 ──
 
-            // quote(tokens) → 原样返回
+            // quote(tokens) → 原样返回；但其中的 StrLit 内容需重新词法分析为
+            // 代码 token（模板/macro 产物是 LZ 代码，字符串字面量只是源码文本载体）
             "quote" => {
                 if args.len() != 1 { return Err("quote requires 1 arg".to_string()); }
                 let val = self.eval_expr(&args[0])?;
-                Ok(val)  // 标识：直接返回
+                let mut out: Vec<Token> = Vec::new();
+                for t in val.tokens {
+                    if let Token::StrLit(s) = &t {
+                        // 字符串内容 → 重新 lex 为代码 token（guard/print 等语句）。
+                        // LZ 语句用换行分隔，分号是 Rust 风格残留，过滤掉（否则
+                        // parser 报 Unexpected token: Semicolon）。
+                        // 前导空白需 trim：lexer 把行首空格当缩进（Indent token），
+                        // `" * 2)"` 会混入 Indent 导致 Expected RParen, got Indent
+                        let mut lexer = crate::lexer::Lexer::new(s.trim_start());
+                        out.extend(
+                            lexer.tokenize().into_iter().filter(|t| {
+                                !matches!(t, Token::Eof | Token::Semicolon)
+                            }),
+                        );
+                    } else {
+                        out.push(t);
+                    }
+                }
+                Ok(Tokens::new(out))
             }
 
             // merge_tokens(a, b, ...) → 拼接多个 Tokens
@@ -958,4 +985,24 @@ mod tests {
             panic!("expected Group");
         }
     }
+}
+
+/// 合并相邻的 StrLit token：`quote("a" + name + "b")` 参数插值产生
+/// [StrLit("a"), StrLit("World"), StrLit("b")]，需合并为单个 StrLit
+/// （否则 parser 解析为分散表达式语句而非字符串拼接）
+fn merge_str_lits(tokens: Vec<Token>) -> Vec<Token> {
+    let mut out: Vec<Token> = Vec::new();
+    for t in tokens {
+        match t {
+            Token::StrLit(s) => {
+                if let Some(Token::StrLit(last)) = out.last_mut() {
+                    last.push_str(&s);
+                } else {
+                    out.push(Token::StrLit(s));
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }

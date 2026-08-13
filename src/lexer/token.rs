@@ -107,6 +107,10 @@ pub enum Token {
     // ── 缩进虚拟 Token ──
     Indent, Dedent, Newline,
 
+    /// 未知 token：lexer 无法识别的内容（携带原始文本）。
+    /// 供宏/模板展开器与前端检查层识别未知输入，而非静默跳过
+    Unknown(String),
+
     Eof,
 }
 

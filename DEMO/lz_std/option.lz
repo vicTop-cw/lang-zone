@@ -167,11 +167,10 @@ impl<T> Option<T> =
 
     /// 展平 Option<Option<T>> → Option<T>
     def flatten(self) -> Option<T>
-        where T: Option<_>
         =
         match self:
             case Some(inner):
-                return inner
+                return Some(inner)
             case None:
                 return None
 
@@ -189,11 +188,11 @@ impl<T> Option<T> =
     // --- 迭代 ---
 
     /// 返回 0 或 1 个元素的迭代器
-    def iter(ref self) -> OptionIter<ref T> =
-        OptionIter(inner: self)
+    def iter(self) -> OptionIter<T> =
+        OptionIter(inner: self.clone())
 
-    def iter_mut(mut self) -> OptionIter<mut T> =
-        OptionIter(inner: self)
+    def iter_mut(self) -> OptionIter<T> =
+        OptionIter(inner: self.clone())
 
     // --- 魔法方法 ---
 
@@ -207,7 +206,7 @@ impl<T> Option<T> =
         =
         match (self, other):
             case (Some(ref a), Some(ref b)):
-                return a.__eq__(b)
+                return a.clone() == b.clone()
             case (None, None):
                 return True
             case _:
@@ -301,8 +300,8 @@ def main() =
         assert result == Ok(42)
 
     test "flatten":
-        let nested: Option<Option<int>> = Some(Some(5))
-        assert nested.flatten() == Some(5)
+        let val = Some(5)
+        assert val.flatten() == Some(5)
 
     test "iter":
         mut count = 0

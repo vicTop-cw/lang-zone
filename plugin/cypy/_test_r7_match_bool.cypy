@@ -1,0 +1,10 @@
+# Test: match bool
+def test_match_bool() -> int:
+    match True:
+        case True:
+            return 1
+        case _:
+            return 0
+
+def main() -> int:
+    return 0

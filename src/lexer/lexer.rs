@@ -759,12 +759,41 @@ impl Lexer {
                     line_start = false;
                 }
 
-                // #! shebang / # attribute macro
+                // #! shebang / #!bin macro 宏模块声明
                 '#' if self.peek_n(1) == Some('!') => {
                     self.advance(); self.advance();
+                    // 收集 #! 后到行尾的内容
+                    let start = self.pos;
                     while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
                         self.pos += 1;
                     }
+                    let rest: String = self.chars[start..self.pos].iter().collect();
+                    let trimmed = rest.trim();
+                    // #!bin macro → 宏模块声明（规范 08 §二）
+                    if trimmed.starts_with("bin macro") {
+                        tokens.push(Token::Macro);
+                    } else if trimmed.starts_with("export") {
+                        // #!export(Rust) → @export(Rust)（属性宏，复用 @export 装饰器路径）
+                        // lexer 把 #!export(X) 转成 @export(X) 的 token 序列，
+                        // parser 的 parse_decorator 与 builder 的 Export 内建处理
+                        tokens.push(Token::At);
+                        let sub_src = format!("export{}", &trimmed[6..]);
+                        let mut sub = crate::lexer::Lexer::new(&sub_src);
+                        tokens.extend(
+                            sub.tokenize().into_iter().filter(|t| {
+                                !matches!(
+                                    t,
+                                    Token::Eof | Token::Newline | Token::Indent | Token::Dedent
+                                )
+                            }),
+                        );
+                    } else if trimmed == "no_std" {
+                        // #!no_std → @no_std 属性宏（IR 层 ModuleDirective.no_std 处理）
+                        tokens.push(Token::At);
+                        tokens.push(Token::Ident("no_std".to_string()));
+                    }
+                    // 其他 #! 视为 shebang 跳过
+                    line_start = false;
                 }
                 '#' => {
                     self.advance();
@@ -772,7 +801,13 @@ impl Lexer {
                     line_start = false;
                 }
 
-                _ => { self.advance(); } // skip unknown
+                _ => {
+                    // 未知字符：产生 Token::Unknown（携带原始字符），
+                    // 供宏/模板展开器与前端检查层识别未知输入（而非静默跳过）
+                    let ch = self.chars[self.pos].to_string();
+                    self.advance();
+                    tokens.push(Token::Unknown(ch));
+                }
             }
         }
 

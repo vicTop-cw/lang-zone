@@ -1,0 +1,9 @@
+# Bug-R4-4: is 运算符在 if 条件中不支持
+def test_is() -> int:
+    let x: int = 1
+    if x is 1:
+        return 1
+    return 0
+
+def main() -> int:
+    return 0

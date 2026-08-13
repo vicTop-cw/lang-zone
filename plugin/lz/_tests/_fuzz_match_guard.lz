@@ -1,0 +1,97 @@
+// Fuzz 6: match guard 与复杂模式匹配
+
+// ── 6.1 match with guard (if 条件) ──
+def test_guard_simple() =
+    x = 5
+    match x:
+        case n if n > 0:
+            print("positive")
+        case n if n < 0:
+            print("negative")
+        case _:
+            print("zero")
+
+// ── 6.2 match guard 复合条件 ──
+def test_guard_compound() =
+    x = 10
+    match x:
+        case n if n > 0 and n < 5:
+            print("small")
+        case n if n >= 5 and n < 15:
+            print("medium")
+        case _:
+            print("large")
+
+// ── 6.3 match enum with guard ──
+enum Color =
+    Red_
+    Green_
+    Blue_
+    RGB(i64, i64, i64)
+
+def test_guard_enum() =
+    c = RGB(255, 0, 0)
+    match c:
+        case RGB(r, g, b) if r > 200:
+            print("bright red")
+        case RGB(r, g, b) if g > 200:
+            print("bright green")
+        case RGB(r, g, b) if b > 200:
+            print("bright blue")
+        case _:
+            print("other color")
+
+// ── 6.4 match Option with guard ──
+def test_guard_option() =
+    opt = Some(42)
+    match opt:
+        case Some(v) if v > 10:
+            print("large value: ")
+            print(v)
+        case Some(v):
+            print("small value: ")
+            print(v)
+        case _:
+            print("none")
+
+// ── 6.5 多分支 match 返回值 ──
+def test_match_multi_return() =
+    x = 2
+    result = match x:
+        case 1:
+            10
+        case 2:
+            20
+        case 3:
+            30
+        case _:
+            0
+    print("multi return: ")
+    print(result)
+
+// ── 6.6 match 嵌套在表达式内 ──
+def test_match_in_expr() =
+    x = 1
+    y = 2
+    z = match x:
+        case 1:
+            match y:
+                case 2:
+                    100
+                case _:
+                    0
+        case _:
+            0
+    print("nested match expr: ")
+    print(z)
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Match Guard ===")
+    test_guard_simple()
+    test_guard_compound()
+    test_guard_enum()
+    test_guard_option()
+    test_match_multi_return()
+    test_match_in_expr()
+    print("=== Fuzz Match Guard Complete ===")

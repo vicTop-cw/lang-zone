@@ -1,0 +1,12 @@
+enum Color:
+    Red
+    Green
+    Blue
+def test() -> int:
+    match Color.Red:
+        case Color.Red:
+            return 1
+        case _:
+            return 0
+def main() -> int:
+    return 0

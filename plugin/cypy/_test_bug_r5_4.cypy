@@ -1,0 +1,6 @@
+# Bug-R5-4: 函数类型注解 (int) -> int 语法不支持
+def test_func_type(f: (int) -> int) -> int:
+    return f(1)
+
+def main() -> int:
+    return 0

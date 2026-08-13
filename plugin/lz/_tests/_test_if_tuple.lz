@@ -1,0 +1,23 @@
+// Test: if/else with tuple return types (no struct mutation)
+def test_if_tuple1(x: int)-> (int, int) =
+    if x > 0:
+        (x, 1)
+    else:
+        (x, 0)
+
+// Test: if/else with tuple return types + struct
+struct Parser =
+    input: str
+    pos: int
+
+    def new(input: str)-> Parser =
+        Parser(input, 0)
+
+def test_if_tuple2(mut parser: Parser)-> (Parser, int) =
+    if parser.pos > 0:
+        (parser, 1)
+    else:
+        (parser, 0)
+
+def main() =
+    print("ok")

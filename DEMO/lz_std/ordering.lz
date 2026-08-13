@@ -120,31 +120,35 @@ impl Ordering =
 
 /// 比较两个可排序值
 def compare<T: Ord>(ref a: T, ref b: T) -> Ordering =
-    a.cmp(b)
+    if a < b:
+        return Less
+    elif a > b:
+        return Greater
+    else:
+        return Equal
 
 /// 返回两个值中较小的
 def min<T: Ord>(a: T, b: T) -> T =
-    match a.cmp(b):
-        case Less | Equal:
-            return a
-        case Greater:
-            return b
+    if a < b:
+        return a
+    else:
+        return b
 
 /// 返回两个值中较大的
 def max<T: Ord>(a: T, b: T) -> T =
-    match a.cmp(b):
-        case Less:
-            return b
-        case Greater | Equal:
-            return a
+    if a > b:
+        return a
+    else:
+        return b
 
 /// 将值限制在 [lo, hi] 范围内
 def clamp<T: Ord>(value: T, lo: T, hi: T) -> T =
-    if value.cmp(lo) == Less:
+    if value < lo:
         return lo
-    elif value.cmp(hi) == Greater:
+    elif value > hi:
         return hi
-    return value
+    else:
+        return value
 
 
 // ============================================================

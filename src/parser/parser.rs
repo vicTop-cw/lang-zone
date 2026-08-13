@@ -17,6 +17,9 @@ pub struct Parser {
     pending_inline_bounds: Vec<(String, Vec<Type>)>,
     /// 最近一次 parse_generic_params 解析到的默认类型 (type_param → default type)
     pending_generic_defaults: Vec<(String, Type)>,
+    /// 是否为宏模块（首行 `#!bin macro`）——由调用方在宏展开前用原始
+    /// token 流检测并设置（展开会消费 #!bin macro 声明，Parser 自身无法检测）
+    pub is_macro: bool,
 }
 
 impl Parser {
@@ -27,6 +30,7 @@ impl Parser {
             pending_gt: 0,
             pending_inline_bounds: Vec::new(),
             pending_generic_defaults: Vec::new(),
+            is_macro: false,
         }
     }
 
@@ -83,6 +87,20 @@ impl Parser {
     // ─── 顶层 ───
 
     pub fn parse_module(&mut self) -> Result<Module, String> {
+        // 宏模块检测：首行 `#!bin macro` 声明（lexer 对整行产生单个 Token::Macro，
+        // 后跟 Newline/Eof）。宏/template 仅能定义在宏模块，__is_macro__ 据此填充
+        let mut is_macro_module = false;
+        let mut ti = 0;
+        while ti < self.tokens.len() && matches!(&self.tokens[ti], Token::Newline | Token::Indent) {
+            ti += 1;
+        }
+        if ti < self.tokens.len() && self.tokens[ti] == Token::Macro {
+            let next = self.tokens.get(ti + 1);
+            if next.map_or(true, |t| matches!(t, Token::Newline | Token::Eof)) {
+                is_macro_module = true;
+            }
+        }
+
         let mut imports = Vec::new();
         let mut functions = Vec::new();
         let mut structs = Vec::new();
@@ -259,8 +277,16 @@ impl Parser {
                     }
                 }
                 Token::Comptime => {
-                    // comptime: 编译期块 — 解析内容
+                    // 顶层循环用 match peek() 未消费 token：先 advance 消费 comptime
                     self.advance();
+                    // comptime def f(...) — 编译期函数（仅编译期存在，不生成运行时代码）
+                    if self.check(&Token::Def) {
+                        let mut f = self.parse_function(false)?;
+                        f.is_comptime = true;
+                        f.decorators = decorators;
+                        functions.push(f);
+                        continue; // 继续处理后续 top-level 语句（不能 break 跳出顶层循环）
+                    }
                     if self.check(&Token::Colon) {
                         self.advance();
                         self.skip_newlines();
@@ -355,6 +381,7 @@ impl Parser {
                         is_abstract: false,
                         is_iterator: false,
                         is_magic: false,
+                        is_comptime: false,
                         decorators: vec![],
                         variadic: crate::ast::VariadicMode::None,
                         checker_param: None,
@@ -503,6 +530,8 @@ impl Parser {
             top_stmts,
             duck_defs,
             magic_blocks,
+            // main.rs 用原始 token 流（展开前）检测设置；自检作兜底
+            is_macro: self.is_macro || is_macro_module,
         })
     }
 
@@ -841,6 +870,7 @@ impl Parser {
                     is_abstract: true,
                     is_iterator: false,
                     is_magic,
+                    is_comptime: false,
                     decorators: Vec::new(),
                     variadic,
                     checker_param: None,
@@ -872,6 +902,7 @@ impl Parser {
                         is_abstract: true,
                         is_iterator: false,
                         is_magic,
+                        is_comptime: false,
                         decorators: Vec::new(),
                         variadic,
                         checker_param: None,
@@ -926,6 +957,7 @@ impl Parser {
             is_abstract,
             is_iterator: false,
             is_magic,
+            is_comptime: false,
             decorators: Vec::new(),
             variadic,
             checker_param,
@@ -937,8 +969,10 @@ impl Parser {
         self.expect(Token::Lt)?;
         let mut params = Vec::new();
         // 内联约束: T: Ordered → 合并进 where_clause
+        // 注意：不能 clear pending_inline_bounds——parse_impl 会调用本函数两次
+        // （impl<A: Iterator> 声明泛型 + Zip<A,B> 类型实参），第二次调用若 clear
+        // 会丢掉第一次收集的 `A: Iterator` 约束（E0220 associated type not found）
         let mut inline_bounds: Vec<(String, Vec<Type>)> = Vec::new();
-        self.pending_inline_bounds.clear();
         loop {
             let name = match self.advance() {
                 Token::Ident(n) => n,
@@ -994,7 +1028,10 @@ impl Parser {
             break;
         }
         if !inline_bounds.is_empty() {
-            self.pending_inline_bounds = inline_bounds;
+            // 用 extend 而非赋值：parse_impl 会调用本函数两次（impl<A: Iterator>
+            // 声明泛型 + Zip<A,B> 类型实参），第二次 inline_bounds 为空时
+            // 不能覆盖第一次收集的 `A: Iterator` 约束（E0220）
+            self.pending_inline_bounds.extend(inline_bounds);
         }
         Ok(params)
     }
@@ -1446,10 +1483,18 @@ impl Parser {
                         inner.push(self.parse_type()?);
                         // 命名泛型参数（关联类型绑定）：`Add<Output = I.Item>`
                         // （06c-trait定义.md §五：trait 泛型用关联类型绑定）——
-                        // `Output = Type` 形式跳过 Output，仅记录类型参数
+                        // `Output = Type` 形式：把整个绑定作为 Named("Output = I.Item")
+                        // 保留（codegen 渲染为 `Add<Output = I::Item>`），
+                        // 而不是仅记录 Output 导致 E0425 cannot find type `Output`
                         if self.check(&Token::Eq) {
+                            let name = inner.pop().unwrap_or(Type::Any);
                             self.advance(); // consume =
-                            let _ = self.parse_type()?; // 关联类型值
+                            let value = self.parse_type()?; // 关联类型值
+                            inner.push(Type::Named(format!(
+                                "{} = {}",
+                                name.to_string(),
+                                value.to_string()
+                            )));
                         }
                         // type-pack 元素 `Ts...`（03d §2.8 方案 B）：消费尾部 `...`
                         // （parse_type 解析 Ident(Ts) 后残留 DotDotDot）
@@ -1666,6 +1711,7 @@ impl Parser {
             return Ok(StructDef {
                 name,
                 generics,
+                generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
                 generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
                 fields,
                 methods,
@@ -1778,6 +1824,7 @@ impl Parser {
                         is_abstract: false,
                         is_iterator: false,
                         is_magic: false,
+                        is_comptime: false,
                         decorators: Vec::new(),
                         variadic,
                         checker_param: None,
@@ -1878,6 +1925,7 @@ impl Parser {
         Ok(StructDef {
             name,
             generics,
+            generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
             generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
             fields,
             methods,
@@ -1901,17 +1949,27 @@ impl Parser {
         } else {
             Vec::new()
         };
-        // 支持 trait Name: Bound1 + Bound2 =  (trait bounds)
+        // 支持 trait Name: Bound1 + Bound2 =  (trait bounds/supertraits)
         // 或 trait Name =  (无 bounds)
+        let mut supertraits = Vec::new();
         if self.check(&Token::Colon) {
             self.advance(); // consume :
-                            // 跳过 trait bounds 直到 =
-            while !self.check(&Token::Eq)
-                && !self.check(&Token::Eof)
-                && !self.check(&Token::Newline)
-                && !self.check(&Token::Indent)
-            {
-                self.advance(); // skip bound tokens (Display + Debug, etc.)
+                            // 解析 supertrait 类型直到 =（trait DoubleEndedIterator: Iterator）
+            loop {
+                if self.check(&Token::Eq)
+                    || self.check(&Token::Eof)
+                    || self.check(&Token::Newline)
+                    || self.check(&Token::Indent)
+                {
+                    break;
+                }
+                let st = self.parse_type()?;
+                supertraits.push(st);
+                if self.check(&Token::Plus) {
+                    self.advance();
+                } else {
+                    break;
+                }
             }
         }
         self.expect(Token::Eq)?;
@@ -1920,6 +1978,7 @@ impl Parser {
 
         let mut methods = Vec::new();
         let mut fields = Vec::new();
+        // trait 内声明的关联类型（§五 `type Item`）收集
         let mut assoc_types = Vec::new();
 
         while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
@@ -1984,6 +2043,7 @@ impl Parser {
             name,
             generics,
             generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+            supertraits,
             methods,
             fields,
             assoc_types,
@@ -2000,6 +2060,10 @@ impl Parser {
         } else {
             Vec::new()
         };
+        // 立即转存头部内联约束（`impl<A: Iterator> ...`）：后续解析 impl 方法体
+        // 时 parse_function 会 take 清空 pending_inline_bounds，导致 `A: Iterator`
+        // 约束丢失（E0220 associated type not found）
+        let head_inline_bounds = std::mem::take(&mut self.pending_inline_bounds);
 
         let first_name = match self.advance() {
             Token::Ident(n) => n,
@@ -2031,8 +2095,25 @@ impl Parser {
             }
         }
 
-        // 支持 = 和 : 两种分隔符
-        self.skip_newlines(); // 允许分隔符前换行
+        // 支持 = 和 : 两种分隔符；也支持 where 子句位于分隔符之前
+        // （换行/缩进形式，与 parse_function 一致）：
+        //   impl<I: Iterator, J: Iterator, B> Iterator for FlatMap<I, J, B>
+        //       where J: Iterator<Item = B>
+        //       =
+        let mut pre_where = Vec::new();
+        let mut consumed_indent_for_where = false;
+        loop {
+            self.skip_newlines();
+            if self.check(&Token::Indent) {
+                self.advance(); // skip Indent before where
+                consumed_indent_for_where = true;
+            }
+            if self.check(&Token::Where) {
+                pre_where.extend(self.parse_where_clause()?);
+            } else {
+                break;
+            }
+        }
         if !self.check(&Token::Eq) && !self.check(&Token::Colon) {
             let t = self.advance();
             return Err(format!(
@@ -2042,7 +2123,9 @@ impl Parser {
         }
         self.advance(); // consume = or :
         self.skip_newlines();
-        self.expect(Token::Indent)?;
+        if !consumed_indent_for_where {
+            self.expect(Token::Indent)?;
+        }
 
         let mut methods = Vec::new();
         let mut assoc_type_bindings = Vec::new();
@@ -2083,7 +2166,16 @@ impl Parser {
         } else {
             Vec::new()
         };
-        // 合并内联约束
+        // 合并分隔符之前的 where 子句（impl ... where ... = 换行形式）
+        where_clause.splice(0..0, pre_where);
+        // 合并 impl 头部内联约束（`impl<A: Iterator>` 的 A: Iterator，已提前转存
+        // 避免被 parse_function 清空）与后续内联约束
+        for (tp, bds) in head_inline_bounds {
+            where_clause.push(WhereBound {
+                type_param: tp,
+                bounds: bds,
+            });
+        }
         for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
             where_clause.push(WhereBound {
                 type_param: tp,

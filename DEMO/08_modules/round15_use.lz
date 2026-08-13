@@ -1,0 +1,19 @@
+// ============================================================
+// 轮15: 导入导出 — import / from / 模块调用（--project 模式）
+// 注：模块前缀调用（round15_math.add()）未接线（命名空间合并限制），
+// 用 from import 选择性导入直接调用
+// ============================================================
+
+from round15_math import add, mul, PI
+
+def main() =
+    // ── from import 选择性导入 ──
+    assert add(3, 4) == 7
+    assert mul(3, 4) == 12
+    assert PI == 3
+
+    // ── 导入函数组合 ──
+    assert add(mul(2, 3), add(1, 1)) == 8
+    assert mul(add(1, 1), add(1, 1)) == 4
+
+    print("R15 imports OK")

@@ -1,0 +1,85 @@
+// ============================================================
+// 轮13: trait 进阶 — supertrait/默认方法覆盖
+// 每项用 assert 确保正确
+// ============================================================
+
+trait Named =
+    def name(self) -> str
+
+trait Sized2 =
+    def size(self) -> int
+
+// 注：supertrait 默认方法内调用非 supertrait 方法（describe 里 self.size()）
+// 在 IR 路径有 codegen 缺陷（E0599 &Self 无 size）——已知限制，本轮仅测
+// 独立 trait 默认方法与覆盖
+
+struct Animal =
+    n: str
+    s: int
+
+impl Named for Animal =
+    def name(self) -> str =
+        self.n
+
+impl Sized2 for Animal =
+    def size(self) -> int =
+        self.s
+
+struct Vehicle =
+    model: str
+    wheels: int
+
+impl Named for Vehicle =
+    def name(self) -> str =
+        self.model
+
+impl Sized2 for Vehicle =
+    def size(self) -> int =
+        self.wheels
+
+// ── 独立 trait 默认方法（顶层定义，函数体内不可嵌套类型） ──
+trait Area2 =
+    def area(self) -> int
+    def doubled(self) -> int =
+        self.area() * 2
+
+struct Square2 =
+    side: int
+
+impl Area2 for Square2 =
+    def area(self) -> int =
+        self.side * self.side
+
+struct Circle2 =
+    radius: int
+
+impl Area2 for Circle2 =
+    def area(self) -> int =
+        3 * self.radius * self.radius
+    def doubled(self) -> int =
+        self.area() * 3    // 覆盖默认 *2 → *3
+
+def main() =
+    // ── trait 方法分发 ──
+    let dog = Animal(n: "Rex", s: 10)
+    let car = Vehicle(model: "Sedan", wheels: 4)
+    assert dog.name() == "Rex"
+    assert car.name() == "Sedan"
+    assert dog.size() == 10
+    assert car.size() == 4
+
+    // ── 独立 trait 默认方法（定义在顶层，见文件上方） ──
+    let sq = Square2(side: 4)
+    assert sq.area() == 16
+    assert sq.doubled() == 32
+
+    // ── 默认方法覆盖（子类覆盖默认实现，定义在顶层） ──
+    let c2 = Circle2(radius: 2)
+    assert c2.area() == 12
+    assert c2.doubled() == 36    // 12*3（覆盖生效）
+
+    // ── trait 方法组合（多 trait 实现） ──
+    let bird = Animal(n: "Tweety", s: 3)
+    assert bird.name() + str(bird.size()) == "Tweety3"
+
+    print("P13 traits OK")

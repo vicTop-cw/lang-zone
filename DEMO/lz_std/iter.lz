@@ -128,7 +128,9 @@ def repeat_n<T>(value: T, n: int) -> RepeatN<T> =
 
 /// 空迭代器
 struct Empty<T> =
-    _phantom: T
+    // 空 struct：codegen 自动补 PhantomData<T>（_phantom: T 无法初始化，
+    // 原 `Empty(_phantom: None as T)` 生成 `None as T` 非法，E0605）
+    _lz_marker: ()
 
 impl<T> Iterator for Empty<T> =
     type Item = T
@@ -141,7 +143,7 @@ impl<T> Iterator for Empty<T> =
 
 /// 创建空迭代器
 def empty<T>() -> Empty<T> =
-    Empty(_phantom: None as T)
+    Empty(_lz_marker: ())
 
 
 // ============================================================
@@ -168,9 +170,9 @@ impl<A: Iterator, B: Iterator> Iterator for Zip<A, B> =
         let lo = min(lo_a, lo_b)
         let hi = match (hi_a, hi_b):
             case (Some(x), Some(y)):
-                return Some(min(x, y))
+                Some(min(x, y))
             case _:
-                return None
+                None
         return (lo, hi)
 
 /// 同时迭代两个迭代器
@@ -327,8 +329,9 @@ def main() =
         assert result == ["x", "x", "x"]
 
     test "empty":
-        // 泛型由上下文推断
-        assert collect_list(empty()) == []
+        // 显式泛型参数：empty() 的 T 无法从 == [] 上下文推断（Rust E0283），
+        // 用 LZ turbofish 语法 `empty.<int>()` 指定
+        assert collect_list(empty.<int>()) == []
 
     test "zip":
         let a = range(0, 3)
@@ -358,7 +361,7 @@ def main() =
     test "all any":
         assert all([2, 4, 6], |x: int| -> bool = x % 2 == 0)
         assert not all([2, 3, 6], |x: int| -> bool = x % 2 == 0)
-        assert any([1, 3, 5], |x: int| -> bool = x % 2 == 0)
+        assert any([1, 3, 5, 6], |x: int| -> bool = x % 2 == 0)
         assert not any([1, 3, 5], |x: int| -> bool = x % 2 == 0)
 
     test "find":

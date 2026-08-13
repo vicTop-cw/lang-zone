@@ -1,0 +1,14 @@
+def test_0() -> int:
+    match (("hello") + (-(z))):
+        case 0:
+            return 0
+        case _:
+            return -1
+    for i in range(4):
+        let temp: int = i
+    while result:
+        break
+    return ((100))
+
+def main() -> int:
+    return 0

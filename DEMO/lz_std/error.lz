@@ -9,16 +9,16 @@
 // Error Trait (已在 traits.lz 中声明, 此处扩展)
 // ============================================================
 
-trait Error: Display + Debug =
+trait Error =
     /// 返回错误来源链中的上一个错误
     def source(ref self) -> Option<ref Error> = None
 
-    /// 错误描述
-    def description(ref self) -> str = self.__str__()
+    /// 错误描述 (由具体类型实现)
+    def description(ref self) -> str
 
     /// 错误链字符串 (递归打印)
     def chain_str(ref self) -> str =
-        mut result = self.__str__()
+        mut result = self.description()
         match self.source():
             case Some(ref src):
                 result = result + "\nCaused by: " + src.chain_str()
@@ -189,6 +189,10 @@ impl LzError =
 
     def __str__(ref self) -> str =
         self.kind() + ": " + self.message()
+
+    /// 错误描述（Error trait 抽象方法的实现）
+    def description(ref self) -> str =
+        self.__str__()
 
     def __eq__(ref self, ref other: LzError) -> bool =
         self.kind() == other.kind() and self.message() == other.message()

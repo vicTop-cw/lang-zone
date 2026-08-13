@@ -90,7 +90,7 @@ def main() =
     print(add5(10))
     print(mul3(10))
 
-    let composed = compose(add5, mul3)
+    mut composed = compose(add5, mul3)
     print(composed(4))    // add5(mul3(4)) = 12 + 5 = 17
 
     let f = capture_multilevel(10)

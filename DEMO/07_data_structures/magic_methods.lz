@@ -140,7 +140,7 @@ def main() =
     print(str(p1))             // "Point(1, 2)" via __str__
 
     // Indexing
-    let ml = MyList(items: [10, 20, 30])
+    mut ml = MyList(items: [10, 20, 30])
     print(ml[0], ml[1])        // 10, 20 via __getitem__
     print(ml.len())            // 3 via __len__
 

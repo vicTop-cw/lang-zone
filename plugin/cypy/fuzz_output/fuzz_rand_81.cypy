@@ -1,0 +1,8 @@
+def test_0() -> int:
+    1
+    defer:
+        let cleanup: int = 0
+    return (-total)
+
+def main() -> int:
+    return 0

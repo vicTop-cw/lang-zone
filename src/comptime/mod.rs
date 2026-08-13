@@ -354,9 +354,41 @@ impl ComptimeEvaluator {
                 if func_name.starts_with("inspect::") {
                     let inspect_fn = func_name.trim_start_matches("inspect::");
                     Self::eval_inspect_call(inspect_fn, &args, ctx)
+                } else if func_name == "len" && args.len() == 1 {
+                    // 内建 len()：列表/元组/字符串长度（simple_hash `len(s)`）
+                    match &args[0] {
+                        ComptimeValue::List(xs) => Ok(ComptimeValue::Int(xs.len() as i64)),
+                        ComptimeValue::Tuple(xs) => Ok(ComptimeValue::Int(xs.len() as i64)),
+                        ComptimeValue::Str(s) => Ok(ComptimeValue::Int(s.len() as i64)),
+                        other => Err(format!("编译期 len 不支持 {:?}", other)),
+                    }
+                } else if func_name == "print" {
+                    // 编译期 print：调试输出（08b §4.1），不产生运行时代码
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|a| a.to_rust_literal().unwrap_or_else(|_| format!("{:?}", a)))
+                        .collect();
+                    eprintln!("[comptime] {}", parts.join(" "));
+                    Ok(ComptimeValue::None)
                 } else {
-                    // 编译期函数调用（comptime def 注册的）
-                    Err(format!("编译期函数 `{}` 尚未实现（待 comptime def 注册）", func_name))
+                    // 编译期函数调用：查模块内同名函数，绑定参数后求值函数体
+                    // （comptime def / 纯函数编译期执行，如生成查找表、计算哈希）
+                    let f = ctx.module.functions.iter().find(|f| f.name == func_name)
+                        .ok_or_else(|| format!("编译期函数 `{}` 未找到", func_name))?;
+                    let mut fctx = ComptimeContext::new(ctx.module);
+                    // 继承外层 depth：递归函数调用时深度限制生效（否则无限递归栈溢出）
+                    fctx.depth = ctx.depth;
+                    // 继承外层编译期符号（顶层 const 等）
+                    fctx.symtab = ctx.symtab.clone();
+                    // 位置绑定参数（self 不参与；默认参数缺省时跳过）
+                    for (p, v) in f.params.iter().zip(args.iter()) {
+                        fctx.symtab.insert(p.name.clone(), v.clone());
+                    }
+                    // 求值函数体：return 值或块尾表达式值即结果
+                    match Self::eval_block(&f.body, &mut fctx)? {
+                        Some(v) => Ok(v),
+                        None => Err(format!("编译期函数 `{}` 无返回值", func_name)),
+                    }
                 }
             }
 
@@ -366,9 +398,73 @@ impl ComptimeEvaluator {
                 Self::get_field(&rcv, field)
             }
 
-            // 不支持在编译期求值的表达式
-            Expr::MethodCall { .. } => Err("编译期不支持方法调用".into()),
-            Expr::Index { .. } => Err("编译期不支持索引操作".into()),
+            // comptime: 块 — 块尾表达式值为结果（规范 08b §2.1）
+            Expr::BlockExpr(stmts) => {
+                Ok(Self::eval_block(stmts, ctx)?.unwrap_or(ComptimeValue::None))
+            }
+
+            // 列表方法调用：push（编译期构建查找表 `primes.push(n)`）
+            Expr::MethodCall { receiver, method, args } => {
+                let recv = Self::eval_expr(receiver, ctx)?;
+                match (method.as_str(), recv) {
+                    ("push", ComptimeValue::List(mut xs)) => {
+                        if args.len() != 1 {
+                            return Err("push 需 1 个参数".into());
+                        }
+                        let v = Self::eval_expr(&args[0], ctx)?;
+                        xs.push(v);
+                        Ok(ComptimeValue::List(xs))
+                    }
+                    ("len", ComptimeValue::List(xs)) => Ok(ComptimeValue::Int(xs.len() as i64)),
+                    ("len", ComptimeValue::Str(s)) => Ok(ComptimeValue::Int(s.len() as i64)),
+                    (m, other) => Err(format!("编译期不支持对 {:?} 调用方法 `{}`", other, m)),
+                }
+            }
+            // 索引：列表 `xs[i]` / 字符串 `s[i]` / 字典 `d["key"]`
+            Expr::Index { receiver, index } => {
+                let recv = Self::eval_expr(receiver, ctx)?;
+                match recv {
+                    ComptimeValue::List(xs) => {
+                        let idx = match Self::eval_expr(index, ctx)? {
+                            ComptimeValue::Int(i) => i,
+                            other => return Err(format!("编译期索引需整数，got {:?}", other)),
+                        };
+                        xs.get(idx as usize)
+                            .cloned()
+                            .ok_or_else(|| format!("编译期索引越界: {} >= {}", idx, xs.len()))
+                    }
+                    ComptimeValue::Tuple(xs) => {
+                        let idx = match Self::eval_expr(index, ctx)? {
+                            ComptimeValue::Int(i) => i,
+                            other => return Err(format!("编译期索引需整数，got {:?}", other)),
+                        };
+                        xs.get(idx as usize)
+                            .cloned()
+                            .ok_or_else(|| format!("编译期索引越界: {} >= {}", idx, xs.len()))
+                    }
+                    ComptimeValue::Str(s) => {
+                        let idx = match Self::eval_expr(index, ctx)? {
+                            ComptimeValue::Int(i) => i,
+                            other => return Err(format!("编译期索引需整数，got {:?}", other)),
+                        };
+                        s.chars()
+                            .nth(idx as usize)
+                            .map(|c| ComptimeValue::Int(c as i64))
+                            .ok_or_else(|| format!("编译期索引越界: {} >= {}", idx, s.len()))
+                    }
+                    ComptimeValue::Map(m) => {
+                        // 字典索引 d["key"]（08b §7：dict 索引可用）
+                        let key = match Self::eval_expr(index, ctx)? {
+                            ComptimeValue::Str(k) => k,
+                            other => return Err(format!("编译期 dict 索引需字符串键，got {:?}", other)),
+                        };
+                        m.get(&key)
+                            .cloned()
+                            .ok_or_else(|| format!("编译期 dict 无键 `{}`", key))
+                    }
+                    other => Err(format!("编译期不支持对 {:?} 索引", other)),
+                }
+            }
             Expr::Match { .. } => Err("编译期不支持 match 表达式".into()),
             Expr::BuildBlock { .. } => Err("编译期不支持构建块".into()),
             Expr::PathAccess { .. } => Err("编译期不支持路径访问".into()),
@@ -384,35 +480,56 @@ impl ComptimeEvaluator {
     fn eval_stmt(s: &Stmt, ctx: &mut ComptimeContext) -> Result<Option<ComptimeValue>, String> {
         match s {
             Stmt::Pass => Ok(None),
-            Stmt::FnDef(_) => {
+            Stmt::FnDef { .. } => {
                 // 内嵌函数暂不支持编译期求值
                 Ok(None)
             }
-            Stmt::TypeAlias(_) => {
+            Stmt::TypeAlias { .. } => {
                 // 类型别名是类型层声明，编译期求值无需处理（值为 Unit）
                 Ok(None)
             }
             Stmt::Expr(e) => {
+                // `if cond: return x` 语句：if 分支体内的 return 是函数返回值信号，
+                // 不能走 eval_expr（其 If 分支把 return 值当表达式值丢弃），
+                // 需按语句级处理并传播 return（否则递归函数 factorial 无法终止，
+                // 无限递归栈溢出）
+                if let Expr::If { cond, then_body, elif_clauses, else_body } = e {
+                    if Self::eval_expr(cond, ctx)?.truthy() {
+                        return Self::eval_block(then_body, ctx);
+                    }
+                    for (c, b) in elif_clauses {
+                        if Self::eval_expr(c, ctx)?.truthy() {
+                            return Self::eval_block(b, ctx);
+                        }
+                    }
+                    if let Some(b) = else_body {
+                        return Self::eval_block(b, ctx);
+                    }
+                    return Ok(None);
+                }
+                // `primes.push(n)` 表达式语句：求值后写回 receiver 变量（副作用），
+                // 否则 push 结果被丢弃，查找表构建失败（fib_table 空列表）
+                if let Expr::MethodCall { receiver, method, args } = e {
+                    if method == "push" {
+                        if let Expr::Ident(name) = receiver.as_ref() {
+                            let v = Self::eval_expr(e, ctx)?;
+                            ctx.symtab.insert(name.clone(), v);
+                            return Ok(None);
+                        }
+                    }
+                }
                 Self::eval_expr(e, ctx)?;
                 Ok(None)
             }
-            Stmt::Let { name, value, comptime, .. } => {
-                if *comptime {
-                    let v = Self::eval_expr(value, ctx)?;
-                    ctx.symtab.insert(name.clone(), v);
-                    Ok(None)
-                } else {
-                    Err(format!("comptime 块内不能定义运行时变量 `{}`", name))
-                }
+            Stmt::Let { name, value, .. } => {
+                let v = Self::eval_expr(value, ctx)?;
+                ctx.symtab.insert(name.clone(), v);
+                Ok(None)
             }
-            Stmt::Const { name, value, comptime, .. } => {
-                if *comptime {
-                    let v = Self::eval_expr(value, ctx)?;
-                    ctx.symtab.insert(name.clone(), v);
-                    Ok(None)
-                } else {
-                    Err(format!("comptime 块内不能定义运行时 const `{}`", name))
-                }
+            Stmt::Const { name, value, .. } => {
+                let v = Self::eval_expr(value, ctx)?;
+                ctx.symtab.insert(name.clone(), v);
+                Ok(None)
             }
             Stmt::Assign { target, value, .. } => {
                 let name = match target {
@@ -425,8 +542,8 @@ impl ComptimeEvaluator {
             }
             Stmt::Return(Some(e)) => Ok(Some(Self::eval_expr(e, ctx)?)),
             Stmt::Return(None) => Ok(Some(ComptimeValue::None)),
-            Stmt::Comptime(body) => Self::eval_block(body, ctx),
-            Stmt::Assert { expr, expected, message: _ } => {
+            Stmt::Comptime { body } => Self::eval_block(body, ctx),
+            Stmt::Assert { expr, expected } => {
                 let ok = Self::eval_expr(expr, ctx)?.truthy();
                 if !ok {
                     let msg = match expected {
@@ -438,7 +555,7 @@ impl ComptimeEvaluator {
                 }
                 Ok(None)
             }
-            Stmt::Check { expr, expected: _, message: _ } => {
+            Stmt::Check { expr, message: _ } => {
                 // check 在 comptime 中等同于 assert（静默失败在运行时才有意义）
                 let ok = Self::eval_expr(expr, ctx)?.truthy();
                 if !ok {
@@ -453,7 +570,11 @@ impl ComptimeEvaluator {
                     if guard > 1_000_000 {
                         return Err("comptime while 步数超限（疑似死循环）".into());
                     }
-                    if let Some(v) = Self::eval_block(body, ctx)? {
+                    if let Some(v) = Self::eval_block_loop(body, ctx)? {
+                        // break（无值 → None 信号）→ 跳出循环继续；否则是 return 值
+                        if matches!(v, ComptimeValue::None) {
+                            break;
+                        }
                         return Ok(Some(v));
                     }
                 }
@@ -466,9 +587,41 @@ impl ComptimeEvaluator {
                     ComptimeValue::Tuple(xs) => xs,
                     _ => return Err("comptime for 仅支持遍历 list/tuple".into()),
                 };
-                for it in items {
-                    ctx.symtab.insert(var.clone(), it);
-                    if let Some(v) = Self::eval_block(body, ctx)? {
+                eprintln!("DBG comptime for: var={} items={}", var, items.len());
+                for (it_idx, it) in items.iter().enumerate() {
+                    eprintln!("DBG comptime for iter {}: {:?}", it_idx, it);
+                    // 元组解构 `for (kind, name) in members:`：parser 把 var 存为
+                    // "(kind, name)" 字符串（08b §7.3 示例），解析名字后逐一绑定
+                    let trimmed = var.trim();
+                    if trimmed.starts_with('(') && trimmed.ends_with(')') {
+                        let inner = &trimmed[1..trimmed.len() - 1];
+                        let names: Vec<String> = inner
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        match &it {
+                            ComptimeValue::Tuple(vs) if vs.len() == names.len() => {
+                                for (n, v) in names.iter().zip(vs.iter()) {
+                                    ctx.symtab.insert(n.clone(), v.clone());
+                                }
+                            }
+                            other => {
+                                return Err(format!(
+                                    "comptime for 解构: 期望 {}-元组，got {:?}",
+                                    names.len(),
+                                    other
+                                ))
+                            }
+                        }
+                    } else {
+                        ctx.symtab.insert(var.clone(), it.clone());
+                    }
+                    if let Some(v) = Self::eval_block_loop(body, ctx)? {
+                        // break（无值 → None 信号）→ 跳出循环继续；否则是 return 值
+                        if matches!(v, ComptimeValue::None) {
+                            break;
+                        }
                         return Ok(Some(v));
                     }
                 }
@@ -518,34 +671,24 @@ impl ComptimeEvaluator {
                     None => return Ok(Some(ComptimeValue::None)),
                 }
             }
-            Stmt::Continue(_) => Ok(None),
+            Stmt::Continue => Ok(None),
             Stmt::Yield(v) => {
                 match v {
                     Some(e) => return Ok(Some(Self::eval_expr(e, ctx)?)),
                     None => return Ok(Some(ComptimeValue::None)),
                 }
             }
-            Stmt::Test { .. } | Stmt::Suite { .. } | Stmt::YieldFrom { .. } | Stmt::Destructure { .. } => Ok(None),
-            Stmt::If { cond, body, elifs, else_body } => {
-                if Self::eval_expr(cond, ctx)?.truthy() {
-                    Self::eval_block(body, ctx)
-                } else {
-                    for (elif_cond, elif_body) in elifs {
-                        if Self::eval_expr(elif_cond, ctx)?.truthy() {
-                            return Self::eval_block(elif_body, ctx);
-                        }
-                    }
-                    if let Some(eb) = else_body {
-                        Self::eval_block(eb, ctx)
-                    } else {
-                        Ok(None)
-                    }
-                }
-            }
-            Stmt::Match { .. } => {
-                // comptime match 暂不支持求值
-                Ok(None)
-            }
+            // 不支持编译期求值的语句：直接跳过（值为 Unit）
+            Stmt::Test { .. }
+            | Stmt::Suite { .. }
+            | Stmt::YieldFrom(_)
+            | Stmt::LetTuple { .. }
+            | Stmt::WhileLet { .. }
+            | Stmt::BreakLabel { .. }
+            | Stmt::Block { .. }
+            | Stmt::CheckerBlock { .. }
+            | Stmt::BlockCall { .. }
+            | Stmt::EnumDef(_) => Ok(None),
         }
     }
 
@@ -553,6 +696,28 @@ impl ComptimeEvaluator {
 
     /// 求值语句块。Some(v) 表示 return v；None 正常结束。
     pub fn eval_block(stmts: &[Stmt], ctx: &mut ComptimeContext) -> Result<Option<ComptimeValue>, String> {
+        let n = stmts.len();
+        // 块尾表达式（Stmt::Expr）的值作为块结果（规范 08b §2.1「块尾表达式的值
+        // 即为 comptime 结果」）。逐语句求值，遇到 return 提前返回。
+        for (i, s) in stmts.iter().enumerate() {
+            let is_last = i + 1 == n;
+            if is_last {
+                if let Stmt::Expr(e) = s {
+                    let v = Self::eval_expr(e, ctx)?;
+                    return Ok(Some(v));
+                }
+            }
+            if let Some(v) = Self::eval_stmt(s, ctx)? {
+                return Ok(Some(v));
+            }
+        }
+        Ok(None)
+    }
+
+    /// 循环体求值：逐语句执行，仅传播显式 return（不把块尾表达式值当返回值）。
+    /// 与 eval_block 的区别：`for x in [1,2,3]: out.push(x)` 中 push 是表达式语句，
+    /// 若按块尾值处理会提前 return 导致只迭代一次。
+    fn eval_block_loop(stmts: &[Stmt], ctx: &mut ComptimeContext) -> Result<Option<ComptimeValue>, String> {
         for s in stmts {
             if let Some(v) = Self::eval_stmt(s, ctx)? {
                 return Ok(Some(v));
@@ -788,7 +953,7 @@ impl ComptimeEvaluator {
                 let params: Vec<Parameter> = f.params.iter().map(|p| Parameter {
                     name: p.name.clone(),
                     kind: ParameterKind::PositionalOrKeyword,
-                    annotation: p.ty.clone(),
+                    annotation: Some(p.ty.clone()),
                     default: None,
                 }).collect();
                 Ok(ComptimeValue::Inspect(InspectObject::Signature(Signature {
@@ -816,14 +981,14 @@ impl ComptimeEvaluator {
                 let params: Vec<Parameter> = f.params.iter().map(|p| Parameter {
                     name: p.name.clone(),
                     kind: ParameterKind::PositionalOrKeyword,
-                    annotation: p.ty.clone(),
+                    annotation: Some(p.ty.clone()),
                     default: None,
                 }).collect();
                 Ok(ComptimeValue::Inspect(InspectObject::Function(FunctionInfo {
                     name: f.name.clone(),
                     parameters: params,
                     return_annotation: f.return_type.clone(),
-                    is_comptime: f.comptime,
+                    is_comptime: false,
                 })))
             }
 
@@ -880,7 +1045,7 @@ impl ComptimeEvaluator {
     fn module_info(m: &Module) -> ModuleInfo {
         ModuleInfo {
             name: m.name.clone().unwrap_or_default(),
-            doc: m.doc.clone(),
+            doc: Some(String::new()),
             functions: m.functions.iter().map(|f| f.name.clone()).collect(),
             structs: m.structs.iter().map(|s| s.name.clone()).collect(),
             traits: m.traits.iter().map(|t| t.name.clone()).collect(),

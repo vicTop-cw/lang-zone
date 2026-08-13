@@ -1,0 +1,73 @@
+import std::time
+
+def fib(n: i64) =
+    if n <= 1:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+def fib_iter(n: i64) =
+    a: i64 = 0
+    b: i64 = 1
+    i: i64 = 0
+    while i < n:
+        t = a + b
+        a = b
+        b = t
+        i = i + 1
+    a
+
+def string_processing() =
+    s: str = ""
+    i: i64 = 0
+    while i < 10000:
+        s = s + "num=" + i.to_string() + " "
+        i = i + 1
+    s.len()
+
+def main() =
+    print("=== LZ Benchmarks ===")
+    print("")
+
+    print("--- CPU ---")
+    start1 = time.now()
+    r1: i64 = 0
+    i1: i64 = 0
+    while i1 < 10:
+        r1 = fib(30)
+        i1 = i1 + 1
+    e1 = start1.elapsed()
+    print("fib(30) x10: ")
+    print(e1.as_millis())
+    print("ms  result=")
+    print(r1)
+    print("")
+
+    start2 = time.now()
+    r2: i64 = 0
+    i2: i64 = 0
+    while i2 < 100:
+        r2 = fib_iter(100000)
+        i2 = i2 + 1
+    e2 = start2.elapsed()
+    print("fib_iter(100000) x100: ")
+    print(e2.as_millis())
+    print("ms  result=")
+    print(r2)
+    print("")
+
+    print("--- String ---")
+    start3 = time.now()
+    r3: i64 = 0
+    i3: i64 = 0
+    while i3 < 10:
+        r3 = string_processing()
+        i3 = i3 + 1
+    e3 = start3.elapsed()
+    print("string_processing x10: ")
+    print(e3.as_millis())
+    print("ms  result_len=")
+    print(r3)
+    print("")
+
+    print("Done.")

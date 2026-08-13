@@ -19,6 +19,9 @@ pub mod types;
 pub mod magic;
 pub mod bridge;
 
+// ── L3.5 编译期求值层 ──
+pub mod comptime;
+
 // ── L3.5 中间表示层 ──
 pub mod ir;
 

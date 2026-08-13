@@ -1,0 +1,6 @@
+# Test: simple generic function
+def identity[T](x: T) -> T:
+    return x
+
+def main() -> int:
+    return identity(42)

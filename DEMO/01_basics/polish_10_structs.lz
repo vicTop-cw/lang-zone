@@ -1,0 +1,87 @@
+// ============================================================
+// 轮10: struct 进阶 — 嵌套 struct/方法链/self 返回
+// 每项用 assert 确保正确
+// ============================================================
+
+struct Point =
+    x: int
+    y: int
+
+struct Circle =
+    center: Point
+    radius: int
+
+struct Rect =
+    top_left: Point
+    w: int
+    h: int
+
+def main() =
+    // ── 嵌套 struct 构造与访问 ──
+    let c = Circle(center: Point(x: 1, y: 2), radius: 5)
+    assert c.center.x == 1
+    assert c.center.y == 2
+    assert c.radius == 5
+
+    let r = Rect(top_left: Point(x: 0, y: 0), w: 10, h: 4)
+    assert r.top_left.x == 0
+    assert r.w == 10
+    assert r.h == 4
+
+    // ── 嵌套 struct 修改 ──
+    mut c2 = Circle(center: Point(x: 0, y: 0), radius: 1)
+    c2.center.x = 7
+    c2.radius = 9
+    assert c2.center.x == 7
+    assert c2.center.y == 0
+    assert c2.radius == 9
+
+    // ── 方法链（方法返回 struct，继续调方法） ──
+    def Point.scaled(self, k: int) -> Point =
+        Point(x: self.x * k, y: self.y * k)
+    def Point.shifted(self, dx: int, dy: int) -> Point =
+        Point(x: self.x + dx, y: self.y + dy)
+    let p = Point(x: 2, y: 3)
+    let p2 = p.scaled(10).shifted(1, 1)
+    assert p2.x == 21
+    assert p2.y == 31
+
+    // ── self 返回（builder 风格） ──
+    def Point.with_x(mut self, new_x: int) -> Point =
+        self.x = new_x
+        return self
+    let p3 = Point(x: 0, y: 0).with_x(42)
+    assert p3.x == 42
+    assert p3.y == 0
+
+    // ── 方法组合（方法内调方法） ──
+    def Circle.area(self) -> int =
+        3 * self.radius * self.radius
+    def Circle.describe(self) -> str =
+        "circle@" + str(self.center.x) + "," + str(self.center.y)
+    assert c.area() == 75
+    assert c.describe() == "circle@1,2"
+
+    // ── struct 数组与方法遍历 ──
+    let shapes = [
+        Circle(center: Point(x: 0, y: 0), radius: 2),
+        Circle(center: Point(x: 1, y: 1), radius: 3),
+    ]
+    mut total_area = 0
+    for s in shapes:
+        total_area = total_area + s.area()
+    assert total_area == 39        // 12 + 27
+
+    // ── struct 作为函数参数与返回 ──
+    def translate(pp: Point, dx: int, dy: int) -> Point =
+        Point(x: pp.x + dx, y: pp.y + dy)
+    let moved = translate(Point(x: 5, y: 5), 10, -2)
+    assert moved.x == 15
+    assert moved.y == 3
+
+    // ── 嵌套 struct 方法（内层方法通过外层调用） ──
+    def Rect.area(self) -> int =
+        self.w * self.h
+    assert r.area() == 40
+
+    print("P10 structs OK")

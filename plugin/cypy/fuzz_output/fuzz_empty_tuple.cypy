@@ -1,0 +1,5 @@
+def test() -> tuple:
+    return ()
+
+def main() -> int:
+    return 0

@@ -1,0 +1,30 @@
+def test_0() -> int:
+    match ((-print(x)) + x):
+        case 0:
+            return 0
+        case _:
+            return -1
+    match x:
+        case 0:
+            return 0
+        case _:
+            return -1
+    x = (z)
+    return ("hello")
+
+def test_1() -> int:
+    let x: float = -3.14
+    defer:
+        let cleanup: int = 0
+
+def test_2() -> int:
+    guard 1.5 else:
+        return -1
+    while (y):
+        break
+    return ((-(z >= 1.5)))
+    guard (-(print(z) >= print((-0)))) else:
+        return -1
+
+def main() -> int:
+    return 0

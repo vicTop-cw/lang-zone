@@ -1,0 +1,23 @@
+def test_0() -> int:
+    return print((-(y)))
+    guard print(print((print(0) * -3.14))) else:
+        return -1
+    (print((-(-1))))
+
+def test_1() -> int:
+    guard x else:
+        return -1
+    defer:
+        let cleanup: int = 0
+    while True:
+        break
+    match True:
+        case 0:
+            return 0
+        case _:
+            return -1
+    for i in range(3):
+        let temp: int = i
+
+def main() -> int:
+    return 0

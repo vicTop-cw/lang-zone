@@ -97,7 +97,7 @@ impl str =
         mut result = ""
         mut pos = 0
         while pos < self.len():
-            match self.slice_from(pos).find(from):
+            match self.slice_from(pos).find(from.clone()):
                 case Some(idx):
                     let abs_idx = pos + idx
                     result = result + self.slice(pos, abs_idx) + to
@@ -162,7 +162,7 @@ impl str =
             return result
         mut pos = 0
         while pos <= self.len():
-            match self.slice_from(pos).find(delimiter):
+            match self.slice_from(pos).find(delimiter.clone()):
                 case Some(idx):
                     result.push(self.slice(pos, pos + idx))
                     pos = pos + idx + delimiter.len()
@@ -179,7 +179,7 @@ impl str =
 
     /// 返回字符迭代器
     def chars(ref self) -> CharIter =
-        CharIter(s: self, pos: 0)
+        CharIter(s: "" + self, pos: 0)
 
     // --- 魔法方法 ---
 
@@ -194,7 +194,7 @@ impl str =
         self.len() == other.len() and self.starts_with(other)
 
     def __str__(ref self) -> str =
-        self
+        "" + self
 
 
 // ============================================================
@@ -228,7 +228,7 @@ impl Iterator for CharIter =
 def join(parts: List<str>, separator: str) -> str =
     if parts.is_empty():
         return ""
-    mut result = parts.first().unwrap_or("")
+    mut result: str = parts.first().unwrap_or("")
     mut i = 1
     while i < parts.len():
         result = result + separator + parts.get(i).unwrap_or("")

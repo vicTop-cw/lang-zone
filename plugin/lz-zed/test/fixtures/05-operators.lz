@@ -1,0 +1,73 @@
+// lz-zed test fixture: 05-operators — 运算符全集
+// Authority: SYNTAX/12-操作符.md §一（完整列表）+ 00-词法基础.md §5.1
+
+# 算术
+let a = 1 + 2
+let b = 5 - 3
+let c = 4 * 2
+let d = 9 / 3
+let e = 10 % 3
+let f = 2 ** 8
+
+# 一元
+let g = -x
+let h = +x
+let i = ~bits
+let j = *ptr
+let k = &val
+let l = !flag
+
+# 比较
+let m1 = a == b
+let m2 = a != b
+let m3 = a < b
+let m4 = a > b
+let m5 = a <= b
+let m6 = a >= b
+
+# 逻辑（符号形式）
+let n1 = a && b
+let n2 = a || b
+
+# 位运算
+let o1 = a & b
+let o2 = a | b
+let o3 = a ^ b
+let o4 = a << 2
+let o5 = a >> 2
+
+# 复合赋值
+x += 1
+x -= 1
+x *= 2
+x /= 2
+x %= 2
+x **= 2
+x &= 1
+x |= 1
+x ^= 1
+x <<= 1
+x >>= 1
+
+# 赋值 / 海象 / 区间 / 管道
+x = 42
+let w1 = (n := len(xs))
+let r1 = 0..10
+let r2 = 0..=10
+let p1 = data |> process
+
+# 空安全
+let q1 = fallible()?
+let q2 = obj?.field
+let q3 = config.get("k") ?? "default"
+
+# 所有权 / 命名参数糖 / 后缀
+let moved = x^
+name(b~, a~)
+
+# 标点
+let t1: int = 5
+let t2 = (1, "hi")
+let t3 = f(1, 2)
+let t5 = |x| x + 1
+# -> 仅用于返回类型标注（见 08-functions）

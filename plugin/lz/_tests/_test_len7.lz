@@ -1,0 +1,10 @@
+﻿struct Parser =
+    input: str
+    pos: int
+
+    def has_next(self: Parser, offset: int)-> bool =
+        self.input.len() > self.pos + offset
+
+def main() =
+    p = Parser("hello", 0)
+    print(p.has_next(1))

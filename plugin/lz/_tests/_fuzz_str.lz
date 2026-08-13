@@ -1,0 +1,60 @@
+// Fuzz 8: 字符串与集合高级操作
+
+// ── 8.1 字符串长度 ──
+def test_str_len() =
+    s = "hello world"
+    print("len: ")
+    print(s.len())
+
+// ── 8.2 空字符串 ──
+def test_str_empty() =
+    s = ""
+    print("empty len: ")
+    print(s.len())
+
+// ── 8.4 List 长度 ──
+def test_list_len() =
+    arr = [1, 2, 3, 4, 5]
+    print("list len: ")
+    print(arr.len())
+
+// ── 8.5 List push ──
+def test_list_push() =
+    arr = [1, 2]
+    arr.push(3)
+    print("after push: ")
+    print(arr.len())
+
+// ── 8.6 List pop ──
+def test_list_pop() =
+    arr = [1, 2, 3]
+    val = arr.pop()
+    print("popped: ")
+    print(val)
+
+// ── 8.7 字符串比较 ──
+def test_str_cmp() =
+    a = "abc"
+    b = "abc"
+    if a == b:
+        print("equal")
+    else:
+        print("not equal")
+
+// ── 8.8 字符串与数字混合 ──
+def test_str_with_num() =
+    x = 42
+    print("number: ")
+    print(x)
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz String ===")
+    test_str_len()
+    test_str_empty()
+    test_list_len()
+    test_list_push()
+    test_list_pop()
+    test_str_cmp()
+    test_str_with_num()
+    print("=== Fuzz String Complete ===")

@@ -1,0 +1,86 @@
+// ============================================================
+// 轮11: enum 进阶 — 带字段变体组合/嵌套枚举 match
+// 每项用 assert 确保正确
+// ============================================================
+
+enum Shape =
+    Point
+    Circle(radius: int)
+    Rect(w: int, h: int)
+    Triangle(base: int, height: int)
+
+enum Result2 =
+    Success(value: int)
+    Failure(msg: str)
+
+def main() =
+    // ── 带字段变体构造与字段访问 ──
+    let s1 = Shape.Point
+    let s2 = Shape.Circle(radius: 5)
+    let s3 = Shape.Rect(w: 3, h: 4)
+    let s4 = Shape.Triangle(base: 6, height: 2)
+
+    // ── 变体 match（字段提取计算） ──
+    def area(s: Shape) -> int =
+        match s:
+            case Shape.Point: return 0
+            case Shape.Circle(radius): return 3 * radius * radius
+            case Shape.Rect(w, h): return w * h
+            case Shape.Triangle(base, height): return base * height / 2
+    assert area(s1) == 0
+    assert area(s2) == 75
+    assert area(s3) == 12
+    assert area(s4) == 6
+
+    // ── 嵌套枚举（enum 变体含 enum 变体字段） ──
+    enum Wrapper =
+        ShapeWrap(s: Shape)
+        NumWrap(n: int)
+    let w1 = Wrapper.ShapeWrap(Shape.Circle(radius: 2))
+    let w2 = Wrapper.NumWrap(100)
+
+    def unwrap_area(w: Wrapper) -> int =
+        match w:
+            case Wrapper.ShapeWrap(s): return area(s)
+            case Wrapper.NumWrap(n): return n
+    assert unwrap_area(w1) == 12
+    assert unwrap_area(w2) == 100
+
+    // ── enum 数组与遍历 ──
+    let shapes = [Shape.Circle(radius: 1), Shape.Rect(w: 2, h: 3)]
+    mut total = 0
+    for sh in shapes:
+        total = total + area(sh)
+    assert total == 9        // 3 + 6
+
+    // ── enum 相等比较与 match 守卫 ──
+    def describe(r: Result2) -> str =
+        match r:
+            case Result2.Success(value) if value > 100: return "big-success"
+            case Result2.Success(value): return "success-" + str(value)
+            case Result2.Failure(msg): return "fail-" + msg
+    assert describe(Result2.Success(50)) == "success-50"
+    assert describe(Result2.Success(200)) == "big-success"
+    assert describe(Result2.Failure("err")) == "fail-err"
+
+    // ── 嵌套 match（enum match 分支内再 match） ──
+    def classify(s: Shape) -> str =
+        match s:
+            case Shape.Circle(radius):
+                match radius:
+                    case r if r > 3: return "big-circle"
+                    case _: return "small-circle"
+            case _: return "other"
+    assert classify(Shape.Circle(radius: 5)) == "big-circle"
+    assert classify(Shape.Circle(radius: 2)) == "small-circle"
+    assert classify(Shape.Rect(w: 1, h: 1)) == "other"
+
+    // ── enum 作为函数参数传递 ──
+    def is_circle(s: Shape) -> bool =
+        match s:
+            case Shape.Circle(radius): return True
+            case _: return False
+    assert is_circle(Shape.Circle(radius: 1)) == True
+    assert is_circle(Shape.Point) == False
+
+    print("P11 enums OK")

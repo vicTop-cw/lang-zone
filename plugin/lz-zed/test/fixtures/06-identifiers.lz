@@ -1,0 +1,30 @@
+// lz-zed test fixture: 06-identifiers — 标识符与魔法方法
+// Authority: SYNTAX/00-词法基础.md §四
+
+# 普通标识符
+my_var = 1
+MyType = 2
+_private = 3
+x1 = 4
+café = 5
+camelCase = 6
+snake_case_name = 7
+
+# 魔法方法（双下划线开头与结尾）
+def __init__(self) = pass
+def __add__(self, other) = pass
+def __implicit_from__(self) = pass
+def __eq__(self, other) -> bool = True
+
+# 下划线特殊语义
+match value:
+    case 0 => "zero"
+    case _ => "other"
+
+let (a, _) = (1, 2)
+_ = heavy_side_effect()
+def handler(_: int) = pass
+
+# 标识符与关键字边界（关键字不可作标识符，以下不出现）
+# 正确示例：保留词之外的命名
+let class_name = "x"  # class 不是关键字；class_name 是普通标识符

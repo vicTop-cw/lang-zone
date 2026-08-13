@@ -1,0 +1,8 @@
+def test_param_type(a: int) -> int:
+    return a
+
+def test_call_wrong_type() -> int:
+    return test_param_type("wrong")
+
+def main() -> int:
+    return 0

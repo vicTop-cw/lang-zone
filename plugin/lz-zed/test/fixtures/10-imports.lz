@@ -1,0 +1,31 @@
+// lz-zed test fixture: 10-imports — 模块与导入
+// Authority: SYNTAX/07-模块与导入.md
+
+# 导入模块
+import std.io
+import std.collections.HashMap
+
+# 导入别名
+import std.collections.HashMap as Map
+
+# from 选择性导入
+from std.io import print, read
+from std.collections import List, Dict
+
+# 导入所有公开项
+from std.io import *
+
+# 宏导入
+import macro my_macros
+
+# 相对导入
+import .sibling
+import ..parent.mod
+
+# 路径语法：. 为路径分隔符（:: 非法）
+std.io.print("hello")
+let m: Map<str, int> = Map.new()
+
+# 顶层 let 与表达式（首次 import 时执行）
+let initialized = compute()
+print("module loaded")

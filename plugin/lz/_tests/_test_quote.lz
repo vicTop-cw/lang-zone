@@ -1,0 +1,6 @@
+﻿def main() =
+    s = "hello"
+    if s == "\"""":
+        print("match")
+    else:
+        print("no match")

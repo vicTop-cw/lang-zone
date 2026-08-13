@@ -1,0 +1,82 @@
+// ============================================================
+// 轮9: dict 进阶 — 嵌套 dict/混合遍历/组合
+// 注：LZ dict 字面量要求值类型同构（异构需显式注解），测试用同构值
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── 嵌套 dict（外层值全为 dict，内层值全为 str） ──
+    let config = {"db": {"host": "localhost", "port": "5432"}, "app": {"mode": "debug"}}
+    assert config["db"]["host"] == "localhost"
+    assert config["db"]["port"] == "5432"
+    assert config["app"]["mode"] == "debug"
+
+    // ── 修改嵌套 dict 值（同构 str） ──
+    mut settings = {"theme": {"color": "dark", "size": "14"}}
+    settings["theme"]["color"] = "light"
+    assert settings["theme"]["color"] == "light"
+    settings["theme"]["size"] = "16"
+    assert settings["theme"]["size"] == "16"
+
+    // ── 新增嵌套键 ──
+    settings["extra"] = {"lang": "LZ"}
+    assert settings["extra"]["lang"] == "LZ"
+
+    // ── dict 值与 list 组合（值全为 List<int>，同构） ──
+    let inventory = {"ids": [1, 2, 3], "codes": [4, 5]}
+    assert inventory["ids"][1] == 2
+    assert inventory["codes"][0] == 4
+    assert len(inventory["ids"]) == 3
+
+    // ── 遍历 dict 键集合（keys 收集到 list） ──
+    let person = {"name": "LZ", "age": "30", "city": "BJ"}
+    let keys: List<str> = ["name", "age", "city"]
+    mut found_all = True
+    for k in keys:
+        if k not in person:
+            found_all = False
+    assert found_all == True
+
+    // ── dict 长度与包含 ──
+    assert len(person) == 3
+    assert "name" in person
+    assert "xyz" not in person
+
+    // ── dict 函数参数与返回（显式类型注解 Dict<str, int>） ──
+    def merge(d1: Dict<str, int>, d2: Dict<str, int>) -> Dict<str, int> =
+        mut out = d1
+        for k in ["x", "y"]:
+            if k in d2:
+                let val = d2[k]        // 先取值（借用 k）
+                out[k] = val           // 再赋值（最后使用 k）
+        return out
+    let m: Dict<str, int> = merge({"a": 1, "x": 2}, {"x": 10, "y": 20})
+    assert m["a"] == 1
+    assert m["x"] == 10
+    assert m["y"] == 20
+
+    // ── dict 遍历求和（值累加，int 同构） ──
+    let scores = {"a": 10, "b": 20, "c": 30}
+    mut score_total = 0
+    for k in ["a", "b", "c"]:
+        score_total = score_total + scores[k]
+    assert score_total == 60
+
+    // ── 空 dict 边界 ──
+    let empty: Dict<str, int> = {}
+    assert len(empty) == 0
+    assert "k" not in empty
+
+    // ── dict 值类型一致（int 值） ──
+    let nums = {"one": 1, "two": 2, "three": 3}
+    assert nums["one"] + nums["two"] + nums["three"] == 6
+
+    // ── 组合：嵌套 int dict + 循环 + 条件 ──
+    let db_config = {"prod": {"port": 80}, "dev": {"port": 8080}}
+    mut prod_port = 0
+    if "prod" in db_config:
+        prod_port = db_config["prod"]["port"]
+    assert prod_port == 80
+    assert db_config["dev"]["port"] == 8080
+
+    print("P9 dicts OK")

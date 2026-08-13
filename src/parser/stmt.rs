@@ -243,12 +243,20 @@ impl ParserStmtExt for Parser {
             Token::Comptime => {
                 // comptime: <缩进块> — 编译期求值块
                 self.advance();
-                self.expect(Token::Colon)?;
-                self.skip_newlines();
-                self.expect(Token::Indent)?;
-                let body = self.parse_block()?;
-                self.expect(Token::Dedent)?;
-                Ok(Stmt::Comptime { body })
+                if self.check(&Token::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let body = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    Ok(Stmt::Comptime { body })
+                } else {
+                    // comptime <expr> — 编译期表达式语句（print 调试输出等）
+                    let expr = self.parse_expr()?;
+                    Ok(Stmt::Comptime {
+                        body: vec![Stmt::Expr(expr)],
+                    })
+                }
             }
             Token::If => {
                 let expr = self.parse_expr()?;
@@ -588,12 +596,16 @@ impl ParserStmtExt for Parser {
                     right,
                 } = expr
                 {
+                    // assert a != b → assert!(a != b)（整个 Ne 表达式作为断言；
+                    // 旧实现把 expected 改成 Unary(Not, b) 会生成 assert_eq!(a, !b)，
+                    // 对 int 是位反、对 str 是非法一元 ! —— E0600/E0308）
                     Ok(Stmt::Assert {
-                        expr: *left,
-                        expected: Some(Expr::Unary {
-                            op: UnaryOp::Not,
-                            operand: right,
-                        }),
+                        expr: Expr::Binary {
+                            left,
+                            op: BinOp::Ne,
+                            right,
+                        },
+                        expected: None,
                     })
                 } else {
                     Ok(Stmt::Assert {

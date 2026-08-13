@@ -1,0 +1,43 @@
+// ============================================================
+// 轮18: 生成器 — iterator/yield 基础
+// 每项用 assert 确保正确
+// ============================================================
+
+// iterator 生成器：yield 产生元素，调用返回集合（Vec）
+iterator count_up(n: int) -> int =
+    mut i = 0
+    while i < n:
+        yield i
+        i = i + 1
+
+iterator double_seq(xs: List<int>) -> int =
+    for x in xs:
+        yield x * 2
+
+def main() =
+    // ── iterator 生成器调用（返回 Vec，可 for 遍历） ──
+    mut sum = 0
+    for v in count_up(5):
+        sum = sum + v
+    assert sum == 10        // 0+1+2+3+4
+
+    // ── 生成器输出收集到列表 ──
+    mut collected: List<int> = []
+    for v in count_up(4):
+        collected.push(v)
+    assert collected == [0, 1, 2, 3]
+
+    // ── 生成器带参数与转换 ──
+    mut doubled: List<int> = []
+    for v in double_seq([1, 2, 3]):
+        doubled.push(v)
+    assert doubled == [2, 4, 6]
+
+    // ── 生成器与条件组合 ──
+    mut evens: List<int> = []
+    for v in count_up(6):
+        if v % 2 == 0:
+            evens.push(v)
+    assert evens == [0, 2, 4]
+
+    print("P18 iterator OK")

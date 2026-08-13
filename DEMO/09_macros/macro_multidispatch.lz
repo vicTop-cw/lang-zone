@@ -1,0 +1,40 @@
+#!bin macro
+// ============================================================
+// macro_multidispatch — 宏（纯 Token 转换）与 template（自由参数）正确用法
+// 规范: SYNTAX/08-宏与编译期.md
+//
+// 要点：
+// - macro 签名固定 Tokens -> Tokens（纯 Token 转换），@name! 独占一行使用
+// - template 参数自由（int/str/Tokens），返回必须 Tokens，name! 可内联
+// - 宏定义/宏 body 不受独占一行限制
+// ============================================================
+
+// --- 宏：单 Tokens 参数，纯 Token 转换（把代码块包装为注释 + 原样） ---
+macro note(body: Tokens) -> Tokens =
+    quote("// noted:\n" + body + "\n")
+
+// --- 宏：变参收集（items..: Tokens），自包含输出（打印数组）---
+// 注：宏内 let 绑定会被卫生性重命名（§3.7 宏内绑定隔离），调用方不可
+// 引用——宏输出应自包含（print/return），不依赖调用方引用宏内变量
+macro emit_array(items..: Tokens) -> Tokens =
+    quote("print([" + items + "])")
+
+// --- template：自由参数（int），返回 Tokens，可内联 ---
+// 注：quote 字符串内转义双引号（\"）会导致宏体解析"未终止的字符串
+// 字面量"——避免转义；宏解释器 if 条件校验暂不可靠，编译期校验待完善
+template checked(x: int, bound: int) -> Tokens =
+    quote("print(x is " + x + ")")
+
+def main() =
+    // 宏调用独占一行 + 缩进块输入（宏作用于缩进块）
+    @note!
+    def friend_fn(a: int, b: int) -> int =
+        a + b
+
+    // 宏调用独占一行 + 括号参数（§3.4 允许 @name!(args)）
+    @emit_array!(1, 2, 3)              // → print([1, 2, 3])
+
+    // template 调用：name! 后缀（§4.2），可内联
+    checked!(5, 10)                    // → print(x is 5)
+
+    print("macro multidispatch OK")

@@ -1,0 +1,8 @@
+# Bug-R6-8: 复合赋值不支持 Subscript 目标
+def test_subscript_assign() -> int:
+    let lst: list[int] = [1, 2, 3]
+    lst[0] += 1
+    return 0
+
+def main() -> int:
+    return 0

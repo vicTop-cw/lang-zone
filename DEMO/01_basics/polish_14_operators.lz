@@ -1,0 +1,77 @@
+// ============================================================
+// 轮14: 操作符重载 — __add__/__eq__/__lt__ 自定义类型
+// 每项用 assert 确保正确
+// ============================================================
+
+struct Money =
+    amount: int
+
+impl Money =
+    def __add__(self, other: Money) -> Money =
+        Money(amount: self.amount + other.amount)
+    def __eq__(self, other: Money) -> bool =
+        self.amount == other.amount
+    def __lt__(self, other: Money) -> bool =
+        self.amount < other.amount
+
+struct Vec2 =
+    x: int
+    y: int
+
+impl Vec2 =
+    def __add__(self, other: Vec2) -> Vec2 =
+        Vec2(x: self.x + other.x, y: self.y + other.y)
+    def __sub__(self, other: Vec2) -> Vec2 =
+        Vec2(x: self.x - other.x, y: self.y - other.y)
+    def __mul__(self, k: int) -> Vec2 =
+        Vec2(x: self.x * k, y: self.y * k)
+    def __eq__(self, other: Vec2) -> bool =
+        self.x == other.x and self.y == other.y
+
+def main() =
+    // ── __add__ 操作符重载 ──
+    let m1 = Money(amount: 10)
+    let m2 = Money(amount: 5)
+    let m3 = m1 + m2
+    assert m3.amount == 15
+
+    // ── __eq__ 相等比较 ──
+    assert m1 == Money(amount: 10)
+    assert m1 != m2
+    assert (m1 + m2) == Money(amount: 15)
+
+    // ── __lt__ 小于比较（bool 结果用 assert/not，避免链式 == 生成 bool.__eq__） ──
+    assert m2 < m1
+    assert not (m1 < m2)
+    assert m1 < Money(amount: 100)
+    assert m1.amount < m2.amount == False
+
+    // ── 向量运算符重载 ──
+    let v1 = Vec2(x: 3, y: 4)
+    let v2 = Vec2(x: 1, y: 2)
+    let sum = v1 + v2
+    assert sum.x == 4
+    assert sum.y == 6
+    let diff = v1 - v2
+    assert diff.x == 2
+    assert diff.y == 2
+    let scaled = v1 * 2
+    assert scaled.x == 6
+    assert scaled.y == 8
+
+    // ── 重载运算组合 ──
+    let combo = (v1 + v2) - Vec2(x: 1, y: 1)
+    assert combo.x == 3
+    assert combo.y == 5
+
+    // ── 相等与重载结合 ──
+    assert (v1 + v2) == Vec2(x: 4, y: 6)
+    assert (v1 * 0) == Vec2(x: 0, y: 0)
+
+    // ── 重载类型作为函数参数 ──
+    def total_money(a: Money, b: Money) -> Money =
+        a + b
+    let combined = total_money(Money(amount: 1), Money(amount: 2))
+    assert combined.amount == 3
+
+    print("P14 operators OK")

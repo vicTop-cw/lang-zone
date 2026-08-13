@@ -1,0 +1,33 @@
+def test_0() -> int:
+    if total:
+        return 1
+    else:
+        return 0
+    let x: float = -3.14
+    guard ((((-1))) == ("hello" > print(""))) else:
+        return -1
+    let x: str = "hello"
+    while (-False):
+        break
+
+def test_1() -> int:
+    defer:
+        let cleanup: int = 0
+    if -3.14:
+        return 1
+    else:
+        return 0
+    for i in range(3):
+        let temp: int = i
+    while ((True) == total):
+        break
+    defer:
+        let cleanup: int = 0
+
+def test_2() -> int:
+    defer:
+        let cleanup: int = 0
+    let x: double = 0.0
+
+def main() -> int:
+    return 0

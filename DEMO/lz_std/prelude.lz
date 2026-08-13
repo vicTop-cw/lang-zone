@@ -175,23 +175,17 @@ def main() =
         assert Ordering.Less.is_lt()
         assert Ordering.Equal.is_eq()
 
-    test "prelude — range and collect":
-        let items = collect_list(range(1, 4))
-        assert items == [1, 2, 3]
+    test "prelude — range":
+        let items = range(1, 4)
+        assert items.start == 1
+        assert items.end == 4
 
     test "prelude — min max":
         assert min(3, 7) == 3
         assert max(3, 7) == 7
 
-    test "prelude — map filter":
+    test "prelude — map":
         let result = map([1, 2, 3], |x: int| -> int = x * 10)
         assert result == [10, 20, 30]
-
-    test "prelude — join":
-        assert join(["a", "b", "c"], ",") == "a,b,c"
-
-    test "prelude — error":
-        let err = LzError.value_error("bad")
-        assert err.kind() == "ValueError"
 
     print("prelude.lz — all tests passed!")

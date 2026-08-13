@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lz · 语法高亮预览</title>
+<style>
+  :root {
+    --fg: #383a42; --muted: #a0a1a7; --line: #e5e5e6; --bg: #ffffff;
+    --kw: #a626a4; --str: #50a14f; --num: #986801; --com: #a0a1a7;
+    --type: #e45649; --fn: #4078f2; --const: #0184bc; --attr: #c18401;
+    --punct: #383a42;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 48px 24px 72px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.65;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  header { margin-bottom: 32px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; letter-spacing: .02em; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta code { background: #f4f4f5; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar label { font-size: 13px; color: var(--muted); }
+  .toolbar input[type=file], .toolbar select {
+    font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--fg);
+  }
+  .toolbar button {
+    font: inherit; font-size: 13px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; color: var(--fg);
+  }
+  .toolbar button:hover { border-color: #c8c8ca; }
+  pre {
+    margin: 0 0 16px; padding: 20px 24px; border: 1px solid var(--line); border-radius: 6px;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+    font-size: 13.5px; line-height: 1.7; overflow-x: auto; tab-size: 4;
+  }
+  .ln { display: inline-block; width: 2.6em; margin-right: 1.4em; text-align: right; color: var(--muted); user-select: none; }
+  .tok-kw { color: var(--kw); }
+  .tok-str { color: var(--str); }
+  .tok-num { color: var(--num); }
+  .tok-com { color: var(--com); font-style: italic; }
+  .tok-type { color: var(--type); }
+  .tok-fn { color: var(--fn); }
+  .tok-const { color: var(--const); }
+  .tok-attr { color: var(--attr); }
+  .tok-punct { color: var(--punct); }
+  .tok-esc { color: var(--attr); }
+  .tok-regex { color: var(--str); font-style: italic; }
+  .tok-interp { background: #f4f4f5; border-radius: 3px; }
+  .stats { color: var(--muted); font-size: 12.5px; margin-bottom: 28px; }
+  legend { margin-top: 36px; border-top: 1px solid var(--line); padding-top: 20px; }
+  legend h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+  .legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 24px; font-size: 13px; }
+  .legend div { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 34px; height: 14px; border-radius: 3px; flex: none; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 12px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>lz · Lang-Zone 语法高亮预览</h1>
+    <div class="meta">基于 <code>syntaxes/lz.tmLanguage.json</code>（SYNTAX 规范 v3.3）· 本地浏览器渲染，无需 Zed · 系统字体极简版</div>
+  </header>
+
+  <div class="toolbar">
+    <button id="btn-sample">显示内置示例 showcase.lz</button>
+    <label>打开 .lz 文件 <input type="file" id="file" accept=".lz"></label>
+    <span class="meta" id="filename"></span>
+  </div>
+
+  <pre id="out"></pre>
+  <div class="stats" id="stats"></div>
+
+  <legend>
+    <h2>词法元素 → 颜色对照（与 docs/LEXICAL-MATRIX.md 对应）</h2>
+    <div class="legend" id="legend"></div>
+  </legend>
+
+  <footer>lz-zed · 高亮规则源文件：<a href="syntaxes/lz.tmLanguage.json">lz.tmLanguage.json</a> · 完整校验：<code>node test/run-tests.js</code></footer>
+</div>
+
+<script type="application/json" id="lz-grammar">
+{"$schema":"https://json.schemastore.org/tmLanguage.json","name":"lz","scopeName":"source.lz","fileTypes":["lz"],"patterns":[{"include":"#comments"},{"include":"#strings"},{"include":"#numbers"},{"include":"#duck"},{"include":"#keywords"},{"include":"#builtins"},{"include":"#magic"},{"include":"#attributes"},{"include":"#decorators"},{"include":"#operators"},{"include":"#punctuation"},{"include":"#identifiers"}],"repository":{"comments":{"patterns":[{"name":"comment.line.double-slash.lz","match":"//.*$"},{"name":"comment.block.lz","begin":"/\\*","end":"\\*/","patterns":[]}]},"strings":{"patterns":[{"name":"string.quoted.double.f.lz","begin":"f\"\"\"","end":"\"\"\"","patterns":[{"include":"#escape"},{"include":"#interpolation"}]},{"name":"string.quoted.double.f.lz","begin":"f\"","end":"\"","patterns":[{"include":"#escape"},{"include":"#interpolation"}]},{"name":"string.quoted.double.raw.lz","begin":"r\"\"\"","end":"\"\"\"","patterns":[]},{"name":"string.quoted.double.raw.lz","begin":"r\"","end":"\"","patterns":[]},{"name":"string.quoted.double.lz","begin":"\"\"\"","end":"\"\"\"","patterns":[{"include":"#escape"}]},{"name":"string.quoted.double.lz","begin":"\"","end":"\"","patterns":[{"include":"#escape"}]},{"name":"string.quoted.triple.backtick.lz","begin":"f```","end":"```","patterns":[{"include":"#interpolation"}]},{"name":"string.quoted.triple.backtick.lz","begin":"r```","end":"```","patterns":[]},{"name":"string.quoted.triple.backtick.lz","begin":"```","end":"```","patterns":[]}]},"escape":{"patterns":[{"name":"constant.character.escape.lz","match":"\\\\u\\{[0-9a-fA-F]{1,6}\\}|\\\\[nrt\\\\\"'0{}]|\\\\."}]},"interpolation":{"patterns":[{"name":"meta.interpolation.lz","begin":"\\{","end":"\\}","patterns":[{"include":"#keywords"},{"include":"#numbers"},{"include":"#builtins"},{"include":"#operators"},{"include":"#identifiers"}]}]},"numbers":{"patterns":[{"name":"constant.numeric.float.lz","match":"\\b[0-9][0-9_]*\\.[0-9]+([eE][+-]?[0-9]+)?\\b|\\b[0-9][0-9_]*[eE][+-]?[0-9]+\\b"},{"name":"constant.numeric.integer.lz","match":"\\b0[xX][0-9a-fA-F_]+\\b|\\b0[oO][0-7_]+\\b|\\b0[bB][01_]+\\b|\\b[0-9][0-9_]*\\b"}]},"duck":{"patterns":[{"name":"meta.duck.lz","begin":"(?m)(^\\s*)(duck)(\\s+[A-Za-z_][A-Za-z0-9_]*\\s*(?:=|:))","beginCaptures":{"2":{"name":"keyword.lz"},"3":{"name":"entity.name.type.lz"}},"end":"(?=^\\S)","patterns":[{"name":"keyword.control.duck.lz","match":"\\b(require|optional|exact|min|max|range|at_least|at_most|satisfies|sealed|default|StackType|RefType|Any)\\b"},{"name":"string.regexp.lz","match":"/[^/\\s]+/"},{"include":"#keywords"},{"include":"#builtins"},{"include":"#strings"},{"include":"#numbers"},{"include":"#operators"},{"include":"#identifiers"}]}]},"keywords":{"patterns":[{"name":"keyword.control.lz","match":"\\b(if|elif|else|match|case|guard|for|while|loop|block|pass|break|continue|return|with|defer|async|await|spawn|go|yield)\\b"},{"name":"keyword.exception.lz","match":"\\b(raise|raises|try|catch|finally)\\b"},{"name":"keyword.import.lz","match":"\\b(import|from|as)\\b"},{"name":"keyword.operator.lz","match":"\\b(and|or|not|is|in)\\b"},{"name":"keyword.lz","match":"\\b(def|struct|enum|trait|impl|type|const|mut|ref|let|owned|magic|duck|iterator|where|Self|macro|comptime|template|test|suite|setup|teardown|assert|check)\\b"},{"name":"constant.language.boolean.lz","match":"\\b(True|False)\\b"},{"name":"keyword.operator.ellipsis.lz","match":"\\.\\.\\."}]},"builtins":{"patterns":[{"name":"support.type.lz","match":"\\b(int|f64|bool|str|List|Dict|Set|Option|Result|Tuple|Box|Rc|Arc|Cell|RefCell|IOError|Tokens|Never|Unit|Nil|Number)\\b"},{"name":"constant.language.lz","match":"\\b(None|Some|Ok|Err)\\b"},{"name":"support.function.lz","match":"\\b(print|panic|len|contains|iter|enumerate|zip|map|filter|collect|sort|reverse|clone|drop|format|hash|callable|quote|merge_tokens|sum|prod)\\b"}]},"magic":{"patterns":[{"name":"entity.name.function.magic.lz","match":"__[_\\p{L}\\p{N}]+__"}]},"attributes":{"patterns":[{"name":"meta.preprocessor.attribute.lz","match":"#!\\[[^\\]]*\\]|#!\\S+|#\\[[^\\]]*\\]|#"}]},"decorators":{"patterns":[{"name":"meta.annotation.lz","match":"@[_\\p{L}][_\\p{L}\\p{N}]*"}]},"operators":{"patterns":[{"name":"keyword.operator.lz","match":"\\*\\*=|<<=|>>=|\\.\\.=|\\.\\.\\.|->|=>|\\|>|:=|=:|\\^:|~:|\\*:|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|\\*\\*|==|!=|<=|>=|&&|\\|\\||<<|>>|\\.\\.|\\+|-|\\*|/|%|&|\\||\\^|~|!|<|>|=|\\?\\?|\\?\\.|\\?|@"}]},"punctuation":{"patterns":[{"name":"punctuation.separator.lz","match":"[:,]"},{"name":"punctuation.accessor.lz","match":"\\."},{"name":"punctuation.section.lz","match":"[(){}\\[\\]]"}]},"identifiers":{"patterns":[{"name":"variable.lz","match":"[_\\p{L}][_\\p{L}\\p{N}]*"}]}}}
+</script>
+
+<script type="text/plain" id="lz-sample">// lz-zed showcase — Lang-Zone (lz) 语法高亮综合示例
+// 语法基准: SYNTAX 规范 v3.3
+
+#!bin macro
+#![derive(Clone)]
+
+import std.io
+from std.collections import List, Dict
+import std.collections.HashMap as Map
+
+const MAX_RETRIES: int = 3
+type UserId = int
+
+# --- struct 与魔法方法 ------------------------------------------------------
+
+struct User =
+    id: UserId
+    name: str
+    scores: List<int>
+    def __init__(self, id: UserId, name: str) =
+        self.id = id
+        self.name = name
+        self.scores = []
+    def __str__(self) -> str =
+        f"User({self.id}, {self.name})"
+    def best(self) -> Option<int> =
+        if len(self.scores) == 0:
+            None
+        else:
+            Some(max(self.scores))
+
+# --- enum / trait / impl ----------------------------------------------------
+
+enum Status =
+    Active
+    Suspended
+
+trait Reportable =
+    def report(self) -> str = ...
+    def label(self) -> str = "item"
+
+impl Reportable for User =
+    def report(self) -> str =
+        f"{self.name}: {self.best() ?? -1}"
+
+# --- 函数与闭包 -------------------------------------------------------------
+
+def rank(u: User) -> int =
+    let best = u.best() ?? 0
+    best
+
+async def fetch_scores(u: User) -> List<int> =
+    let raw = await api.scores(u.id)?
+    raw |> map(|x| x * 2) |> collect()
+
+def summarize(users: List<User>) -> Dict<str, int> =
+    out = {}
+    for u in users if u.best() != None:
+        out[u.name] = u.best()^
+    out
+
+# --- 控制流 -----------------------------------------------------------------
+
+def describe(status: Status) -> str =
+    match status:
+        case Active => "on"
+        case Suspended => "off"
+        case _ => "unknown"
+
+def safe_best(u: User) -> int =
+    guard let Some(v) = u.best() else:
+        return 0
+    v
+
+# --- 测试 -------------------------------------------------------------------
+
+suite UserTests:
+    setup:
+        alice = User(id: 1, name: "Alice")
+    teardown:
+        cleanup()
+    test "best score":
+        alice.scores.append(95)
+        assert alice.best() == Some(95)
+    test "empty best":
+        check alice.best() == None
+
+# --- 宏 / 构建块 / 鸭子类型 --------------------------------------------------
+
+macro double_expr(e: Tokens) -> Tokens =
+    quote("(" + e + " + " + e + ")")
+
+duck Named =
+    require(name)
+    def label(self) -> str = ...
+
+greeting =:
+    let n = "world"
+    f"hello {n}"
+
+first = xs ^:
+    0
+
+# --- 数字 / 字符串 / 注释 ----------------------------------------------------
+
+let hex_val = 0xDEAD_BEEF
+let oct_val = 0o755
+let bin_val = 0b1101
+let big = 1_000_000_000
+let ratio = 3.14159
+let sci = 6.02e23
+let raw_re = r"^\d+$"
+let multi = """multi
+line"""
+let msg = f"user={u.name} score={rank(u)}"
+
+# 注释与运算符
+total = (a + b) * c / d % e ** f
+flag = not ready or (enabled and !blocked)
+moved = data^
+named_call(limit~, offset~)
+</script>
+
+<script>
+'use strict';
+/* ---- mini TextMate tokenizer (port of test/run-tests.js) ---- */
+const grammar = JSON.parse(document.getElementById('lz-grammar').textContent);
+
+function compilePatterns(patterns, grammar, seen) {
+  const flags = 'myu';
+  const strip = (re) => re.replace(/^\(\?m\)/, '');
+  const out = [];
+  for (const p of patterns) {
+    if (p.include !== undefined) {
+      const key = p.include.replace(/^#/, '');
+      const entry = grammar.repository && grammar.repository[key];
+      if (!entry || !entry.patterns) throw new Error('missing repository entry: ' + key);
+      if (seen.has(key)) continue;
+      out.push(...compilePatterns(entry.patterns, grammar, new Set(seen).add(key)));
+      continue;
+    }
+    if (p.match !== undefined) {
+      out.push({ kind: 'match', re: new RegExp(strip(p.match), flags), name: p.name || null });
+    } else if (p.begin !== undefined && p.end !== undefined) {
+      out.push({
+        kind: 'region', beginRe: new RegExp(strip(p.begin), flags), endRe: new RegExp(strip(p.end), flags),
+        name: p.name || null, patterns: compilePatterns(p.patterns || [], grammar, seen), beginCaptures: p.beginCaptures || {}
+      });
+    } else {
+      throw new Error('bad pattern');
+    }
+  }
+  return out;
+}
+const compiled = { root: compilePatterns(grammar.patterns, grammar, new Set()) };
+
+function emitBegin(text, m, p, out) {
+  const caps = p.beginCaptures;
+  const keys = Object.keys(caps);
+  if (keys.length === 0) { out.push({ t: text, s: p.name || '' }); return; }
+  const absS = m.index, absE = m.index + m[0].length;
+  const ranges = [];
+  for (const g of keys) {
+    const gi = Number(g), v = m[gi];
+    if (v !== undefined && v !== '') {
+      const off = m[0].indexOf(v);
+      ranges.push({ start: absS + off, end: absS + off + v.length, name: caps[g].name || p.name || '' });
+    }
+  }
+  ranges.sort((a, b) => a.start - b.start);
+  let cur = absS;
+  for (const r of ranges) {
+    if (r.start > cur) out.push({ t: text.slice(cur - absS, r.start - absS), s: p.name || '' });
+    out.push({ t: text.slice(r.start - absS, r.end - absS), s: r.name });
+    cur = r.end;
+  }
+  if (cur < absE) out.push({ t: text.slice(cur - absS), s: p.name || '' });
+}
+
+function tokenize(source) {
+  const out = [], stack = [];
+  let pos = 0;
+  while (pos < source.length) {
+    if (stack.length) {
+      const top = stack[stack.length - 1];
+      top.endRe.lastIndex = pos;
+      const em = top.endRe.exec(source);
+      if (em) { out.push({ t: em[0], s: top.name || '' }); pos = em.index + em[0].length; stack.pop(); continue; }
+    }
+    const pats = stack.length ? stack[stack.length - 1].patterns : compiled.root;
+    let hit = false;
+    for (const p of pats) {
+      if (p.kind === 'match') {
+        p.re.lastIndex = pos;
+        const m = p.re.exec(source);
+        if (m) { out.push({ t: m[0], s: p.name || '' }); pos = m.index + m[0].length; hit = true; break; }
+      } else {
+        p.beginRe.lastIndex = pos;
+        const m = p.beginRe.exec(source);
+        if (m) {
+          emitBegin(source.slice(m.index, m.index + m[0].length), m, p, out);
+          pos = m.index + m[0].length;
+          stack.push({ patterns: p.patterns, name: p.name, endRe: p.endRe });
+          hit = true; break;
+        }
+      }
+    }
+    if (hit) continue;
+    out.push({ t: source[pos], s: stack.length ? stack[stack.length - 1].name : 'text' });
+    pos += 1;
+  }
+  return out;
+}
+
+/* ---- scope -> css class ---- */
+function cls(scope) {
+  if (!scope || scope === 'text') return '';
+  if (scope.startsWith('comment')) return 'tok-com';
+  if (scope.startsWith('string.quoted')) return 'tok-str';
+  if (scope.startsWith('constant.numeric')) return 'tok-num';
+  if (scope.startsWith('constant.character.escape')) return 'tok-esc';
+  if (scope.startsWith('constant')) return 'tok-const';
+  if (scope.startsWith('keyword') || scope.startsWith('meta.annotation') || scope.startsWith('meta.preprocessor')) return 'tok-kw';
+  if (scope.startsWith('support.type') || scope.startsWith('entity.name.type')) return 'tok-type';
+  if (scope.startsWith('support.function') || scope.startsWith('entity.name.function')) return 'tok-fn';
+  if (scope.startsWith('string.regexp')) return 'tok-regex';
+  if (scope.startsWith('meta.interpolation')) return 'tok-interp';
+  if (scope.startsWith('punctuation')) return 'tok-punct';
+  return '';
+}
+
+/* ---- render ---- */
+const out = document.getElementById('out');
+const stats = document.getElementById('stats');
+const fileInput = document.getElementById('file');
+const fileName = document.getElementById('filename');
+
+function render(source, name) {
+  const tokens = tokenize(source);
+  const lines = [];
+  let cur = [];
+  for (const tok of tokens) {
+    const parts = tok.t.split('\n');
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) { lines.push(cur); cur = []; }
+      cur.push({ t: parts[i], s: tok.s });
+    }
+  }
+  lines.push(cur);
+  let html = '';
+  lines.forEach((line, i) => {
+    html += '<span class="ln">' + (i + 1) + '</span>';
+    for (const tok of line) {
+      const c = cls(tok.s);
+      html += c ? '<span class="' + c + '">' + esc(tok.t) + '</span>' : esc(tok.t);
+    }
+    html += '\n';
+  });
+  out.innerHTML = html;
+  const scopeCount = {};
+  let total = 0;
+  for (const tok of tokens) { if (tok.s) scopeCount[tok.s] = (scopeCount[tok.s] || 0) + 1; total += 1; }
+  const top = Object.entries(scopeCount).sort((a, b) => b[1] - a[1]).slice(0, 8)
+    .map(([k, v]) => k.replace('.lz', '') + '×' + v).join(' · ');
+  stats.textContent = name + ' · ' + tokens.length + ' tokens · ' + Object.keys(scopeCount).length + ' scopes' + (top ? '  —  ' + top : '');
+  fileName.textContent = name;
+}
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+document.getElementById('btn-sample').addEventListener('click', () => {
+  render(document.getElementById('lz-sample').textContent.trimStart(), 'demo/showcase.lz（内置）');
+});
+fileInput.addEventListener('change', () => {
+  const f = fileInput.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => render(String(r.result), f.name);
+  r.readAsText(f);
+});
+render(document.getElementById('lz-sample').textContent.trimStart(), 'demo/showcase.lz（内置）');
+
+/* ---- legend ---- */
+const legendItems = [
+  ['关键字 keyword.*', 'var(--kw)'], ['字符串 string.*', 'var(--str)'], ['数字 constant.numeric', 'var(--num)'],
+  ['注释 comment.*', 'var(--com)'], ['内建类型 support.type', 'var(--type)'], ['内建函数 support.function', 'var(--fn)'],
+  ['构造器/常量 constant.language', 'var(--const)'], ['属性宏/装饰器 meta.*', 'var(--attr)'], ['标点 punctuation.*', 'var(--punct)'],
+];
+document.getElementById('legend').innerHTML = legendItems.map(([label, color]) =>
+  '<div><span class="swatch" style="background:' + color + '"></span>' + label + '</div>').join('');
+</script>
+</body>
+</html>
