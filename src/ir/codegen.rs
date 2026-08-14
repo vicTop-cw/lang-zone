@@ -9399,6 +9399,9 @@ mod tests {
             is_async: false,
             is_iterator: false,
             is_test: false,
+            checker_param: None,
+            default_checker: None,
+            where_clause: vec![],
             span: Span::unknown(),
         }));
         let mut cg = CodeGen::new();
@@ -9459,6 +9462,9 @@ mod tests {
             is_async: false,
             is_iterator: false,
             is_test: false,
+            checker_param: None,
+            default_checker: None,
+            where_clause: vec![],
             span: Span::unknown(),
         }));
         let mut cg = CodeGen::new();

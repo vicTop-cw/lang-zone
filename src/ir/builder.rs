@@ -7235,12 +7235,39 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     }
 
     // 9. 转换 consts
-    // 9.0. 模块级魔法属性（06e-模块级魔法属性.md）：__name__/__doc__/__is_macro__ 等自动填充
+    // 9.0. 模块级魔法属性（06e-模块级魔法属性.md）：__name__/__file__/__package__/
+    // __path__/__doc__/__is_macro__ 等自动填充
+    // __file__/__package__/__path__ 从源文件路径派生（main.rs 注入 Module.file_path）
+    let src_path = ast_module.file_path.clone().unwrap_or_default();
+    let src_parent = std::path::Path::new(&src_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let package_name = std::path::Path::new(&src_path)
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
     let magic_consts: Vec<(String, IrType, ExprKind)> = vec![
         (
             "__name__".to_string(),
             IrType::Str,
             ExprKind::Lit(LitKind::Str(ir_mod.name.clone())),
+        ),
+        (
+            "__file__".to_string(),
+            IrType::Str,
+            ExprKind::Lit(LitKind::Str(src_path.clone())),
+        ),
+        (
+            "__package__".to_string(),
+            IrType::Str,
+            ExprKind::Lit(LitKind::Str(package_name)),
+        ),
+        (
+            "__path__".to_string(),
+            IrType::Str,
+            ExprKind::Lit(LitKind::Str(src_parent)),
         ),
         (
             "__doc__".to_string(),

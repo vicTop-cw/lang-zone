@@ -283,13 +283,16 @@ fn main() {
     // 宏模块检测：展开已消费 #!bin macro 声明，用原始 token 流（展开前）检测
     // （lexer 对 `#!bin macro` 整行产生单个 Token::Macro + Newline）
     parser.is_macro = has_bin_macro_declaration(&tokens);
-    let module = match parser.parse_module() {
+    let mut module = match parser.parse_module() {
         Ok(m) => m,
         Err(e) => {
             eprintln!("Parse error: {}", e);
             std::process::exit(1);
         }
     };
+    // 模块级魔法属性 __file__/__package__/__path__ 的数据源（06e §一）：
+    // parser 不感知文件路径，编译入口（main.rs）在此注入 .lz 源文件路径
+    module.file_path = Some(path.to_string());
 
     if args.iter().any(|a| a == "--ast") {
         println!("{:#?}", module);

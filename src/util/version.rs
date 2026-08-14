@@ -8,7 +8,7 @@ pub const VERSION_MAJOR: u32 = 0;
 /// 编译器次版本号
 pub const VERSION_MINOR: u32 = 1;
 /// 编译器修订版本号（每小阶段推进一次，v0.133 起 + 19 小阶段 = 152）
-pub const VERSION_PATCH: u32 = 156;
+pub const VERSION_PATCH: u32 = 157;
 /// 预发布标签（空 = 正式版）
 pub const VERSION_PRE: &str = "alpha";
 

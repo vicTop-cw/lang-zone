@@ -1677,6 +1677,9 @@ mod tests {
     #[test]
     fn test_extract_macro_defs_basic() {
         let tokens = vec![
+            // `#!bin macro` 宏模块声明行（08 §2.1）：Token::Macro 独立成行
+            Token::Macro,
+            Token::Newline,
             Token::Macro,
             Token::Ident("hello".into()),
             Token::LParen,

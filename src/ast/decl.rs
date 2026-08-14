@@ -8,6 +8,8 @@ use crate::types::Type;
 #[derive(Debug, Clone, Default)]
 pub struct Module {
     pub name: Option<String>, // 模块名（来自 __name__ 或文件路径）
+    /// .lz 源文件路径（06e 模块级魔法属性 __file__/__package__/__path__ 的数据源）
+    pub file_path: Option<String>,
     pub imports: Vec<ImportStmt>,
     pub functions: Vec<Function>,
     pub structs: Vec<StructDef>,

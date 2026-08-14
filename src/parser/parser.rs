@@ -518,6 +518,8 @@ impl Parser {
 
         Ok(Module {
             name: module_name,
+            // 源文件路径由 main.rs 在解析后注入（parser 不感知文件路径）
+            file_path: None,
             imports,
             functions,
             structs,
