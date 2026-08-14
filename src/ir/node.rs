@@ -330,6 +330,7 @@ pub struct ImplDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UseStmt {
     pub path: Vec<String>,
+    pub alias: Option<String>,
     pub items: Vec<String>,
     pub is_from: bool,
 }
@@ -443,6 +444,8 @@ pub enum Stmt {
         ty: IrType,
         value: Expr,
         is_mut: bool,
+        /// 引用绑定（ref r = x / let ref r = x）：codegen 生成 `let r = &mut x;` / `&x`
+        is_ref: bool,
     },
     Assign {
         target: Expr, // 可赋值左值（Var / FieldAccess / IndexGet）

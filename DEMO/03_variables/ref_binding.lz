@@ -1,6 +1,8 @@
 // ============================
 // LZ Variables — ref References
 // ============================
+// 注意：真实 Rust 引用（NLL）下，可变引用的借用延伸到其最后一次使用，
+// 因此每次通过引用读取（print(r)）须先于对源变量的直接读取（print(x)）。
 
 def main() =
     // --- ref follows LZ's "default mutable" rule ---
@@ -8,23 +10,31 @@ def main() =
     // ref without let → mutable reference (&mut T)
     x = 42
     ref r = x         // r is &mut x (mutable reference)
-    r = 100           // modify x through the reference
+    r = 100           // *r = 100 → x 变为 100
+    print(r)          // 100（r 最后一次使用，借用结束）
     print(x)          // 100
 
     // mut ref is the same as ref (mut is no-op)
-    mut ref m = x     // also mutable reference
+    y = 7
+    mut ref m = y     // also mutable reference (&mut y)
+    m = 8             // *m = 8 → y 变为 8
+    print(m)          // 8（m 最后一次使用，借用结束）
+    print(y)          // 8
 
     // let ref → immutable reference (&T)
-    let ref s = x     // s is &x (immutable reference)
-    // s = 200        // ❌ compile error
+    z = 5
+    let ref s = z     // s is &z (immutable reference)
+    print(s)          // 5（s 最后一次使用，借用结束）
+    print(z)          // 5
+    // s = 200        // ❌ compile error（不可变引用不可赋值）
 
     // --- Binding ref to literals ---
     ref lit = 42      // creates temp variable, lit points to it (mutable ref)
     let ref const_ref = 99  // immutable ref to temp
+    print(lit)        // 42
+    print(const_ref)  // 99
 
     // Rust mapping:
     // ref r = x       → let r = &mut x;
     // let ref r = x   → let r = &x;
     // ref r = 42      → let mut tmp = 42; let r = &mut tmp;
-
-    print(r, m, s, lit)

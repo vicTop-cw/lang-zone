@@ -1181,6 +1181,7 @@ impl Parser {
                     Some(Type::Tuple(ts)) => VariadicMode::ArgsOnly {
                         dotdot_at: at,
                         elem_ty: ts.first().cloned(),
+                        elem_tys: ts.clone(),
                     },
                     Some(Type::Generic { base, args })
                         if matches!(*base, Type::Named(ref b) if b == "Tuple") =>
@@ -1188,10 +1189,11 @@ impl Parser {
                         VariadicMode::ArgsOnly {
                             dotdot_at: at,
                             elem_ty: args.first().cloned(),
+                            elem_tys: args.clone(),
                         }
                     }
                     // .. 无注解 → args-only（元素 Any）
-                    _ => VariadicMode::ArgsOnly { dotdot_at: at, elem_ty: None },
+                    _ => VariadicMode::ArgsOnly { dotdot_at: at, elem_ty: None, elem_tys: vec![] },
                 }
             }
             2 => VariadicMode::Both {

@@ -322,14 +322,58 @@ impl MacroInterpreter {
                         // parser 报 Unexpected token: Semicolon）。
                         // 前导空白需 trim：lexer 把行首空格当缩进（Indent token），
                         // `" * 2)"` 会混入 Indent 导致 Expected RParen, got Indent
-                        let mut lexer = crate::lexer::Lexer::new(s.trim_start());
-                        out.extend(
-                            lexer.tokenize().into_iter().filter(|t| {
-                                !matches!(t, Token::Eof | Token::Semicolon)
-                            }),
-                        );
+                        let trimmed = s.trim_start();
+                        // 缩进重平衡（08 §3.6）：字符串以换行 + 行首缩进空白结尾
+                        // （如 `"for i in 0..2:\n    "` 拼接 body）时，lexer 在
+                        // 行首空白 + EOF 处 break，不产生 Indent token——拼接的
+                        // body 丢失缩进 → "Expected Indent, got Let"。检测到该
+                        // 形态时在 lex 结果末尾补一个 Indent，使 body 进入块内。
+                        let needs_indent = match trimmed.rsplit_once('\n') {
+                            Some((_, tail)) => {
+                                !tail.is_empty()
+                                    && tail.chars().all(|c| c == ' ' || c == '\t')
+                            }
+                            None => false,
+                        };
+                        let mut lexer = crate::lexer::Lexer::new(trimmed);
+                        let mut toks: Vec<Token> = lexer
+                            .tokenize()
+                            .into_iter()
+                            .filter(|t| !matches!(t, Token::Eof | Token::Semicolon))
+                            .collect();
+                        if needs_indent {
+                            // lexer 的 EOF 清理会删除字符串末尾 `\n` 产生的 Newline
+                            // （tokenize 尾部 `while last==Newline pop`），此处补回
+                            // Newline + Indent，使拼接的 body 进入块内：
+                            // `"for i in 0..2:\n    " + body` →
+                            //   for i in 0..2: <Newline> <Indent> <body>
+                            if toks.last() != Some(&Token::Newline) {
+                                toks.push(Token::Newline);
+                            }
+                            toks.push(Token::Indent);
+                        }
+                        out.extend(toks);
                     } else {
                         out.push(t);
+                    }
+                }
+                // 缩进自平衡（08 §3.6）：quote 产物（含拼接的参数 body）中
+                // 未闭合的 Indent 在末尾补匹配 Dedent，使产物独立合法、插入
+                // 任意缩进上下文不残留未闭合缩进（light_check 缩进配对）。
+                // 同时过滤参数 body 带入的 Eof/Semicolon（collect_decl_tokens
+                // 可能收集到文件末尾的 Eof，混入产物会提前终止 parser 解析）。
+                out.retain(|t| !matches!(t, Token::Eof | Token::Semicolon));
+                let net_indent = out
+                    .iter()
+                    .map(|t| match t {
+                        Token::Indent => 1i32,
+                        Token::Dedent => -1i32,
+                        _ => 0,
+                    })
+                    .sum::<i32>();
+                if net_indent > 0 {
+                    for _ in 0..net_indent {
+                        out.push(Token::Dedent);
                     }
                 }
                 Ok(Tokens::new(out))

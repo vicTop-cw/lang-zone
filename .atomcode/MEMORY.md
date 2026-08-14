@@ -146,3 +146,14 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - #!bin macro：lexer 识别整行产生单个 Token::Macro，extract_macro_defs 在 macro 后跟 Newline/Eof 时消费该 token（否则残留到 Parser 报 Expected macro name）；多参数非属性宏（check_eq 两参）由 expand_macro 用 split_top_level_args 按顶层逗号拆分绑定。
 - comptime 编译期函数调用：ComptimeEvaluator Call 分支查 module.functions 求值纯函数（参数位置绑定、继承 symtab）；内建 len()/push/索引支持；comptime_value_to_lit 返回 ExprKind 支持 List/Tuple 内联 vec![...]（查找表焊死）。TypeCtx.comptime_module 需在子 ctx 继承。
 - 宏展开要点：expand_macro 按调用形式分派（attr 有值→属性宏；多参数→split_top_level_args 拆分绑定），不依赖 is_attr（参数个数≥2 误判 bug）；宏体必须单行表达式（parse_macro_body 不处理跨行 + 链）；quote 重新 lex 的字符串片段与参数 token 不合并成单一标识符（`"get_" + name` 生成两个 Ident）——模板生成完整函数名参数。
+- 待办：ref 绑定修复（IR Stmt::Let 需加 is_ref 字段 + builder 传 + codegen 生成 &mut/& + Assign 解引用 *r=v + 源变量可变性传播）；修复尝试曾引发 primitives/dict/ref_binding 回归已撤回
+- 待办：import 模块别名未实现——`import moda as m` 的 UseStmt 无 alias 字段（builder 丢弃别名 → m 未生成 E0425 + m.add 误映射 m.insert）；修复需 UseStmt 加 alias + builder 传 + codegen m.func 模块路径解析
+- 待办：lexer 未知转义 `\q` 静默吞反斜杠（"a\qb"→"aqb" 生成，esc 默认 _=>esc）；应报错或保留反斜杠；未闭合字符串/无效十六进制已正确报错
+- 待办：嵌套函数写外层局部变量生成无效 Rust——嵌套函数（def add 在 main 内）提升为顶层 fn，`total = total + x` 生成 `let mut total = total + x`（E0425）；需嵌套函数→闭包捕获转换或编译期报错
+- 待办：宏产物含缩进块插入缩进上下文时缩进未闭合——quote 产物 `guard...else:\n    panic(...)` 展开到函数体报 "Expected Dedent, got Eof"（产物 Indent/Dedent 与插入位置层级合并问题，需缩进重平衡）；无参数宏吞后续已修（不收集后续声明）
+- let 语义：`let` = 不可变绑定（生成 Rust `let`）、`mut x` = 可变（生成 `let mut`）——codegen 按 AST is_mut 生成（00-词法基础.md:35）；with 资源绑定 as res 生成 `let mut res`（__exit__ 需可变）
+- 宏机制（08 规范）：@name! 使用须独占一行（非宏模块中，§3.5 规则 1）；展开为宏→模板→宏交替循环直到稳定（16 轮上限，含 contains_pending_call 防残留）；--macro-check=loose|light|strict 逐层检查（light 默认：括号/缩进/else-elif/guard 配对）；透传宏/模板（body=单参数引用）跳过卫生性；无参数宏不收集后续声明；__is_macro__ 宏模块 true（main.rs 用原始 token 流 has_bin_macro_declaration 检测）；Token 新增 Unknown(String)
+- 魔法方法命名已与文档对齐（12-操作符.md）：/ → __div__、% → __rem__、& → __bitand__、| → __bitor__、^ → __bitxor__（旧 __truediv__/__mod__/__and__/__or__/__xor__ 已废弃，set.lz/traits.lz 已同步）；闭包写外部变量用 block_has_external_assign 检测（含 Stmt::Assign 分支）决定非 move 借用捕获
+- 工具：div-tools/semantic_check.py 语义契约检查（C1-C9：绑定可变性/ref-mut 参数/with 资源/方法 self/闭包绑定，当前 0 违规，可集成回归）；回归基线 261 PASS / 0 FAIL（div-tools/regression.sh）；lz_std 魔法方法须用文档命名
+- **v155（2026-08-14，全量回归 261/0 PASS）**：实现 issue #1 全部待办——pipe/字典推导多 for 已由后续提交修复（探针验证）；lexer 未知转义报错 + `\u{XXXX}` 解码 + `r"""` 三引号 raw string 支持（read_raw_string）；import 别名 `as m`（UseStmt.alias 字段 + imported_modules 登记 + Call/MethodCall 前缀剥离）；trait/duck 关联类型、泛型默认参数 `T = int`（Box2<T = i64>）、yield 推断均已在 HEAD 实现（探针验证）；ref 绑定真引用（is_ref 贯通 + `*r=v` 解引用 + 字面量临时变量 + 源变量须可变——primitives.lz 改 `val = 42`）；嵌套函数写外层局部变量编译期报错（仅拦截写，读会被 analyze_global_vars 提升为全局合法）；quote 缩进重平衡（needs_indent 补 Newline+Indent + net_indent 自平衡 Dedent + 过滤 Eof）；多类型变参位置约束 `..: Tuple<T1,T2,..>` → 固定前缀异构元组 `(T1, T2, Vec<Box<dyn Any>>)`（AST elem_tys 字段 + codegen 签名/调用点/索引访问，`use std::any::Any` prelude）
+- v155 版本推进：src/util/version.rs VERSION_PATCH 154→155

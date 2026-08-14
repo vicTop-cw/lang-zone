@@ -27,6 +27,8 @@ pub struct CodeGen {
     current_fn_ret_is_ref: bool,
     is_main: bool,
     declared: std::collections::HashSet<String>,
+    /// ref 绑定变量名集合（ref r = x / let ref r = x）：后续赋值 r = v 需生成 `*r = v`
+    ref_bindings: std::collections::HashSet<String>,
     emitted_types: std::collections::HashSet<String>,
     /// 仅 impl 块（非 struct/enum）的类型名，用于 FieldAccess 生成 :: 语法
     impl_types: std::collections::HashSet<String>,
@@ -179,6 +181,7 @@ impl CodeGen {
             current_fn_ret_ty: None,
             is_main: false,
             declared: std::collections::HashSet::new(),
+            ref_bindings: std::collections::HashSet::new(),
             emitted_types: std::collections::HashSet::new(),
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
@@ -581,6 +584,10 @@ impl CodeGen {
                 if let Some(first) = u.path.first() {
                     self.imported_modules.insert(first.clone());
                 }
+                // import moda as m → 别名 m 同样登记为模块命名空间前缀
+                if let Some(alias) = &u.alias {
+                    self.imported_modules.insert(alias.clone());
+                }
             }
         }
 
@@ -881,6 +888,9 @@ impl CodeGen {
         self.emit_line("#[allow(non_snake_case)]");
         self.buf.push('\n');
         self.emit_line("use std::collections::{HashMap, HashSet};");
+        // 多类型变参位置约束（03d §2.3 `..: Tuple<T1,T2,..>`）的尾部收集
+        // args: (T1, T2, Vec<Box<dyn Any>>) 需要 std::any::Any
+        self.emit_line("use std::any::Any;");
         // 若模块自定义了 Rc/Arc 类型（如 lz_std/box.lz 的 `struct Rc<T>`/`struct Arc<T>`，
         // LZ 自举标准库自行实现智能指针），跳过 std 同名导入，否则 E0255 重复定义
         if !self.known_types.contains("Rc") {
@@ -1656,6 +1666,13 @@ impl CodeGen {
                         if p.name == "kwargs" {
                             // kwargs 注入: &HashMap<String, V>（值类型 = p.ty）
                             format!("&HashMap<String, {}>", self.rust_type(&p.ty))
+                        } else if let IrType::Tuple(items) = &p.ty {
+                            // 03d §2.3 多类型位置约束：`..: Tuple<T1, T2, ..>` →
+                            // args: (T1, T2, Vec<Box<dyn Any>>)（前 N 位置精确类型，
+                            // 尾部 `..` 通配收集为 Box<dyn Any>）
+                            let prefix: Vec<String> =
+                                items.iter().map(|t| self.rust_type(t)).collect();
+                            format!("({}, Vec<Box<dyn Any>>)", prefix.join(", "))
                         } else {
                             format!("&[{}]", self.rust_type(&p.ty))
                         }
@@ -3548,6 +3565,7 @@ impl CodeGen {
                 ty,
                 value,
                 is_mut,
+                is_ref,
             } => {
                 // 关键字降级变量（Ok/Some/None/Err 用作变量名）：注册并重命名为 name_
                 // line/column/file 与 Rust 内置宏（line!/column!/file!）冲突，同样降级
@@ -3579,6 +3597,11 @@ impl CodeGen {
                     name.clone()
                 };
                 if *is_mut && self.declared.contains(name) {
+                    // ref 绑定变量（ref r = x）：r = v → *r = v（解引用赋值修改原值）
+                    if self.ref_bindings.contains(name.as_str()) {
+                        self.emit_line(&format!("*{} = {};", safe_name, self.gen_expr(value)));
+                        return;
+                    }
                     if self.mutated_consts.contains(name) {
                         self.emit_line(&format!(
                             "unsafe {{ {} = {}; }}",
@@ -3592,6 +3615,28 @@ impl CodeGen {
                 }
                 // 如果发生了重命名，用新名称注册 declared
                 self.declared.insert(safe_name.clone());
+                // ref 绑定（ref r = x / let ref r = x，02-变量与绑定 §5、13-指针与引用 §2.1）：
+                //   ref r = x     → let r = &mut x;（无 let 前缀，默认可变引用）
+                //   let ref r = x → let r = &x;（let 强制不可变引用）
+                //   ref r = 42    → let mut __lz_ref_r = 42; let r = &mut __lz_ref_r;
+                //   let ref r = 42 → let __lz_ref_r = 42; let r = &__lz_ref_r;
+                if *is_ref {
+                    let val_s = self.gen_expr(value);
+                    let ref_kw = if *is_mut { "&mut " } else { "&" };
+                    let is_literal = matches!(&value.kind, ExprKind::Lit(_))
+                        || matches!(&value.kind, ExprKind::StructCtor { .. });
+                    if is_literal {
+                        // 字面量/构造取引用：先建临时变量，再引用它
+                        let tmp = format!("__lz_ref_{}", safe_name);
+                        let tmp_mut = if *is_mut { "mut " } else { "" };
+                        self.emit_line(&format!("let {}{} = {};", tmp_mut, tmp, val_s));
+                        self.emit_line(&format!("let {} = {}{};", safe_name, ref_kw, tmp));
+                    } else {
+                        self.emit_line(&format!("let {} = {}{};", safe_name, ref_kw, val_s));
+                    }
+                    self.ref_bindings.insert(safe_name.clone());
+                    return;
+                }
                 // 模块级函数/常量名冲突时（E0530，如 math.lz 的 `let sign` 遮蔽
                 // 模块级 `fn sign`）声明被重命名为 sign_，引用处 Var 也需同步解析：
                 // 登记到 param_renames（与参数重命名同一机制），否则 `sign * x`
@@ -3775,6 +3820,13 @@ impl CodeGen {
                 }
                 let target_s = self.gen_target_expr(target);
                 let val_s = self.gen_expr(value);
+                // ref 绑定变量（ref r = x）：r = v → *r = v（跨块赋值，同块走 Let 分支）
+                if let ExprKind::Var(name) = &target.kind {
+                    if self.ref_bindings.contains(name.as_str()) {
+                        self.emit_line(&format!("*{} = {};", target_s, val_s));
+                        return;
+                    }
+                }
                 // ref mut 模式绑定（case Some(ref mut c)）：c 是 &mut 引用，
                 // c = c + 1 需生成 *c = *c + 1（解引用赋值，E0384 修复）
                 if let ExprKind::Var(name) = &target.kind {
@@ -5192,6 +5244,14 @@ impl CodeGen {
                 // 检测 callee 是否为 FieldAccess 形式 Type.Variant → Type::Variant
                 // 仅当 field 是大写开头（枚举变体）时才用 ::；小写开头为方法调用，用 .
                 if let ExprKind::FieldAccess { base, field } = &callee.kind {
+                    // 用户导入模块（含别名）的函数调用 m.add(...) → add(...)：
+                    // 模块项已平铺生成到同一 Rust 文件，直接调用 field 即可
+                    // （避免走方法调用路径把 add 误映射成 insert）
+                    if matches!(&base.kind, ExprKind::Var(base_name)
+                        if self.imported_modules.contains(base_name.as_str()))
+                    {
+                        return format!("{}({})", field, args_s.join(", "));
+                    }
                     let base_s = self.gen_expr(base);
                     let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
                     let is_std_module = known_modules.contains(&base_s.as_str());
@@ -5717,8 +5777,39 @@ impl CodeGen {
                     } else {
                         String::new()
                     };
+                    // 03d §2.3 多类型位置约束：`..: Tuple<T1, T2, ..>` 的 args 参数
+                    // 类型是 IrType::Tuple(prefix) → 打包为 (T1, T2, Vec<Box<dyn Any>>)
+                    // 前 N 个实参直接进元组字段，尾部 `..` 实参 Box::new 收集
+                    let is_tuple_variadic = self
+                        .fn_param_types
+                        .get(&callee_s)
+                        .and_then(|pts| pts.get(variadic_idx))
+                        .map_or(false, |t| matches!(t, IrType::Tuple(_)));
                     let mut all_args: Vec<String> = normal_args.to_vec();
-                    if args_s.len() >= variadic_idx {
+                    if is_tuple_variadic {
+                        let prefix_n = args_s
+                            .len()
+                            .saturating_sub(variadic_idx)
+                            .min(
+                                match &self.fn_param_types.get(&callee_s).and_then(|pts| pts.get(variadic_idx)) {
+                                    Some(IrType::Tuple(items)) => items.len(),
+                                    _ => 0,
+                                },
+                            );
+                        let tuple_fields: Vec<String> =
+                            args_s[variadic_idx..variadic_idx + prefix_n].to_vec();
+                        let tail: Vec<String> = if args_s.len() > variadic_idx + prefix_n {
+                            args_s[variadic_idx + prefix_n..]
+                                .iter()
+                                .map(|a| format!("Box::new({})", a))
+                                .collect()
+                        } else {
+                            vec![]
+                        };
+                        let mut tuple_parts: Vec<String> = tuple_fields;
+                        tuple_parts.push(format!("vec![{}]", tail.join(", ")));
+                        all_args.push(format!("({})", tuple_parts.join(", ")));
+                    } else if args_s.len() >= variadic_idx {
                         all_args.push(format!("&[{}]", variadic_args));
                     } else {
                         all_args.push("&[]".to_string());
@@ -5834,6 +5925,18 @@ impl CodeGen {
                     recv
                 };
                 let mut args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                // 用户导入模块（含别名）的方法调用 m.add(...) → add(...)：
+                // 模块项已平铺生成到同一 Rust 文件，直接调用 method 即可
+                // （避免走方法调用路径把 add 误映射成 insert）
+                if matches!(&receiver.kind, ExprKind::Var(base_name)
+                    if self.imported_modules.contains(base_name.as_str()))
+                {
+                    return if args_s.is_empty() {
+                        format!("{}()", method)
+                    } else {
+                        format!("{}({})", method, args_s.join(", "))
+                    };
+                }
                 // ref 参数：调用点自动 &x（DictExt::get 的 key: ref K → d.get(&key)，
                 // 否则 expected &_, found String E0308）
                 if let Some(ref_flags) = self.fn_ref_params.get(method.as_str()).cloned() {

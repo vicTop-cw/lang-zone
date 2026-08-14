@@ -71,6 +71,9 @@ pub enum VariadicMode {
         dotdot_at: usize,
         /// `..: Tuple<T>` 的元素类型；None = Any 擦除
         elem_ty: Option<Type>,
+        /// 03d §2.3 多类型位置约束：`..: Tuple<T1, T2, ..>` 的完整类型列表
+        /// （尾部 `..` 通配解析为 Type::Any 作为哨兵；非多类型时为 []）
+        elem_tys: Vec<Type>,
     },
     /// 单 `..: Dict<K,V>`：注入 kwargs（关键字变长参数）
     KwargsOnly {

@@ -434,8 +434,15 @@ impl fmt::Display for Stmt {
                 ty,
                 value,
                 is_mut,
+                is_ref,
             } => {
-                let kw = if *is_mut { "let mut" } else { "let" };
+                let kw = if *is_ref {
+                    if *is_mut { "let mut ref" } else { "let ref" }
+                } else if *is_mut {
+                    "let mut"
+                } else {
+                    "let"
+                };
                 write!(f, "{kw} {name}: {ty} = {value}")
             }
             Stmt::Assign { target, value } => write!(f, "{target} = {value}"),

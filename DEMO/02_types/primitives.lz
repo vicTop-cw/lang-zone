@@ -38,7 +38,9 @@ def main() =
     let (first, ..) = t
 
     // --- Reference ---
-    let val = 42
+    // ref 绑定需要源变量可变（规范 02 §5.1：默认可变绑定），let 不可变绑定
+    // 取 &mut 会 E0596
+    val = 42
     ref r = val
     let ref s = val
 

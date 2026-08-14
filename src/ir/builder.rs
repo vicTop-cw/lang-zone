@@ -1366,6 +1366,411 @@ fn ast_stmt_has_bare_return(stmt: &AstStmt) -> bool {
     }
 }
 
+/// 检测嵌套函数体是否引用了外层函数局部变量（E0425 修复）。
+/// 嵌套函数被提升为模块级 fn 后，无法访问定义它的外层函数的局部变量；
+/// 返回第一个被引用的外层局部变量名（None = 无捕获）。
+/// declared：嵌套函数自身参数 + 体内已声明的局部变量（按语句顺序累计遮蔽）。
+fn check_expr_capture(
+    e: &AstExpr,
+    outer: &HashMap<String, IrType>,
+    declared: &mut HashSet<String>,
+) -> Option<String> {
+    match e {
+        AstExpr::Ident(n) => {
+            // 读取外层变量**不报错**：会被 analyze_global_vars 提升为模块级
+            // 全局（static mut + unsafe 访问），跨函数可见合法（polish_02 的
+            // read_shared 读取 shared、precedence 的 fallible 读取 n 均为此模式）。
+            // 只有**写**（Assign 目标 / 无 let 前缀的默认可变绑定）才在
+            // check_stmt_capture 的 Assign/Let 分支拦截。
+            let _ = (n, outer, declared);
+            None
+        }
+        AstExpr::ListLit(items) | AstExpr::SetLit(items) | AstExpr::TupleLit(items) => {
+            items.iter().find_map(|i| check_expr_capture(i, outer, declared))
+        }
+        AstExpr::DictLit(items) => items.iter().find_map(|(k, v)| {
+            check_expr_capture(k, outer, declared)
+                .or_else(|| check_expr_capture(v, outer, declared))
+        }),
+        AstExpr::Binary { left, right, .. } => {
+            check_expr_capture(left, outer, declared)
+                .or_else(|| check_expr_capture(right, outer, declared))
+        }
+        AstExpr::Unary { operand, .. } => check_expr_capture(operand, outer, declared),
+        AstExpr::Call { func, args, .. } => {
+            check_expr_capture(func, outer, declared).or_else(|| {
+                args.iter()
+                    .find_map(|a| check_expr_capture(a, outer, declared))
+            })
+        }
+        AstExpr::KwArg { value, .. } => check_expr_capture(value, outer, declared),
+        AstExpr::MethodCall { receiver, args, .. } => {
+            check_expr_capture(receiver, outer, declared).or_else(|| {
+                args.iter()
+                    .find_map(|a| check_expr_capture(a, outer, declared))
+            })
+        }
+        AstExpr::FieldAccess { receiver, .. }
+        | AstExpr::PathAccess { receiver, .. }
+        | AstExpr::SafeNav { receiver, .. } => check_expr_capture(receiver, outer, declared),
+        AstExpr::Index { receiver, index } => {
+            check_expr_capture(receiver, outer, declared)
+                .or_else(|| check_expr_capture(index, outer, declared))
+        }
+        AstExpr::If {
+            cond,
+            then_body,
+            elif_clauses,
+            else_body,
+        } => check_expr_capture(cond, outer, declared)
+            .or_else(|| check_stmts_capture(then_body, outer, declared))
+            .or_else(|| {
+                elif_clauses.iter().find_map(|(c, b)| {
+                    check_expr_capture(c, outer, declared)
+                        .or_else(|| check_stmts_capture(b, outer, declared))
+                })
+            })
+            .or_else(|| {
+                else_body
+                    .as_ref()
+                    .and_then(|b| check_stmts_capture(b, outer, declared))
+            }),
+        AstExpr::Match { expr, arms } => {
+            check_expr_capture(expr, outer, declared).or_else(|| {
+                arms.iter().find_map(|arm| {
+                    let mut sub = declared.clone();
+                    let mut pv = vec![];
+                    collect_ast_pattern_vars(&arm.pattern, &mut pv);
+                    for n in pv {
+                        sub.insert(n);
+                    }
+                    if let Some(g) = &arm.guard {
+                        if let Some(hit) = check_expr_capture(g, outer, &mut sub) {
+                            return Some(hit);
+                        }
+                    }
+                    check_stmts_capture(&arm.body, outer, &mut sub)
+                })
+            })
+        }
+        AstExpr::Closure { params, body, .. } => {
+            let mut sub = declared.clone();
+            for p in params {
+                sub.insert(p.clone());
+            }
+            check_expr_capture(body, outer, &mut sub)
+        }
+        AstExpr::BlockExpr(body) => check_stmts_capture(body, outer, declared),
+        AstExpr::Range { start, end, .. } => start
+            .as_ref()
+            .and_then(|s| check_expr_capture(s, outer, declared))
+            .or_else(|| end.as_ref().and_then(|e| check_expr_capture(e, outer, declared))),
+        AstExpr::Walrus { target, value } => {
+            check_expr_capture(target, outer, declared)
+                .or_else(|| check_expr_capture(value, outer, declared))
+        }
+        AstExpr::Pipe {
+            receiver,
+            callee,
+            args,
+        } => check_expr_capture(receiver, outer, declared)
+            .or_else(|| check_expr_capture(callee, outer, declared))
+            .or_else(|| {
+                args.iter()
+                    .find_map(|a| check_expr_capture(a, outer, declared))
+            }),
+        AstExpr::NullCoalesce { left, right } => {
+            check_expr_capture(left, outer, declared)
+                .or_else(|| check_expr_capture(right, outer, declared))
+        }
+        AstExpr::ListComprehension {
+            output,
+            var,
+            iter,
+            cond,
+            extra_clauses,
+        }
+        | AstExpr::SetComprehension {
+            elem: output,
+            var,
+            iter,
+            cond,
+            extra_clauses,
+        } => {
+            let mut sub = declared.clone();
+            sub.insert(var.clone());
+            for (v, i, c) in extra_clauses {
+                sub.insert(v.clone());
+                if let Some(hit) = check_expr_capture(i, outer, &mut sub) {
+                    return Some(hit);
+                }
+                if let Some(hit) = c.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)) {
+                    return Some(hit);
+                }
+            }
+            check_expr_capture(iter, outer, &mut sub)
+                .or_else(|| cond.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)))
+                .or_else(|| check_expr_capture(output, outer, &mut sub))
+        }
+        AstExpr::DictComprehension {
+            key,
+            value,
+            var,
+            iter,
+            cond,
+            extra_clauses,
+        } => {
+            let mut sub = declared.clone();
+            sub.insert(var.clone());
+            for (v, i, c) in extra_clauses {
+                sub.insert(v.clone());
+                if let Some(hit) = check_expr_capture(i, outer, &mut sub) {
+                    return Some(hit);
+                }
+                if let Some(hit) = c.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)) {
+                    return Some(hit);
+                }
+            }
+            check_expr_capture(iter, outer, &mut sub)
+                .or_else(|| cond.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)))
+                .or_else(|| check_expr_capture(key, outer, &mut sub))
+                .or_else(|| check_expr_capture(value, outer, &mut sub))
+        }
+        AstExpr::Assign { target, value, .. } => {
+            check_expr_capture(target, outer, declared)
+                .or_else(|| check_expr_capture(value, outer, declared))
+        }
+        AstExpr::Spawn(inner)
+        | AstExpr::Move(inner)
+        | AstExpr::Panic(inner)
+        | AstExpr::Await(inner)
+        | AstExpr::Try(inner)
+        | AstExpr::Paren(inner)
+        | AstExpr::Comptime(inner) => check_expr_capture(inner, outer, declared),
+        AstExpr::BuildBlock { lhs, body, .. } => {
+            check_expr_capture(lhs, outer, declared)
+                .or_else(|| check_stmts_capture(body, outer, declared))
+        }
+        AstExpr::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => check_stmts_capture(body, outer, declared)
+            .or_else(|| {
+                catches.iter().find_map(|arm| {
+                    let mut sub = declared.clone();
+                    let mut pv = vec![];
+                    collect_ast_pattern_vars(&arm.pattern, &mut pv);
+                    for n in pv {
+                        sub.insert(n);
+                    }
+                    if let Some(g) = &arm.guard {
+                        if let Some(hit) = check_expr_capture(g, outer, &mut sub) {
+                            return Some(hit);
+                        }
+                    }
+                    check_stmts_capture(&arm.body, outer, &mut sub)
+                })
+            })
+            .or_else(|| {
+                else_body
+                    .as_ref()
+                    .and_then(|b| check_stmts_capture(b, outer, declared))
+            })
+            .or_else(|| {
+                finally_body
+                    .as_ref()
+                    .and_then(|b| check_stmts_capture(b, outer, declared))
+            }),
+        _ => None,
+    }
+}
+
+fn check_stmts_capture(
+    stmts: &[AstStmt],
+    outer: &HashMap<String, IrType>,
+    declared: &mut HashSet<String>,
+) -> Option<String> {
+    for s in stmts {
+        if let Some(hit) = check_stmt_capture(s, outer, declared) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn check_stmt_capture(
+    s: &AstStmt,
+    outer: &HashMap<String, IrType>,
+    declared: &mut HashSet<String>,
+) -> Option<String> {
+    match s {
+        AstStmt::Let { name, mutable, value, .. } => {
+            // 只对**写外层局部变量**报错（无 let 前缀的默认可变绑定 `total = ...`
+            // 且 total 在外层作用域存在）：builder 在嵌套函数体内会生成
+            // `let mut total = total + x`（新绑定自引用）→ E0425。
+            // 有 let 前缀的声明（let x = v）是本函数新绑定，不报。
+            // 纯读取（value 中引用外层变量）不报——会被 analyze_global_vars
+            // 提升为模块级全局（static mut + unsafe 访问），跨函数可见合法。
+            let hit = if *mutable && outer.contains_key(name.as_str()) && !declared.contains(name.as_str()) {
+                Some(name.clone())
+            } else {
+                None
+            };
+            declared.insert(name.clone());
+            hit.or_else(|| check_expr_capture(value, outer, declared))
+        }
+        AstStmt::Const { name, value, .. } => {
+            let hit = check_expr_capture(value, outer, declared);
+            declared.insert(name.clone());
+            hit
+        }
+        AstStmt::LetTuple { names, value, .. } => {
+            let hit = check_expr_capture(value, outer, declared);
+            for n in names {
+                declared.insert(n.clone());
+            }
+            hit
+        }
+        AstStmt::Expr(e) => check_expr_capture(e, outer, declared),
+        AstStmt::Return(Some(e)) | AstStmt::Yield(Some(e)) => check_expr_capture(e, outer, declared),
+        AstStmt::YieldFrom(e) | AstStmt::Raise(e) => check_expr_capture(e, outer, declared),
+        AstStmt::While {
+            cond,
+            guard,
+            body,
+            else_body,
+        } => check_expr_capture(cond, outer, declared)
+            .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared)))
+            .or_else(|| check_stmts_capture(body, outer, declared))
+            .or_else(|| {
+                else_body
+                    .as_ref()
+                    .and_then(|b| check_stmts_capture(b, outer, declared))
+            }),
+        AstStmt::WhileLet {
+            pattern,
+            expr,
+            guard,
+            body,
+            else_body,
+        } => {
+            let hit = check_expr_capture(expr, outer, declared)
+                .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared)));
+            let mut pv = vec![];
+            collect_ast_pattern_vars(pattern, &mut pv);
+            for n in pv {
+                declared.insert(n);
+            }
+            hit.or_else(|| check_stmts_capture(body, outer, declared)).or_else(|| {
+                else_body
+                    .as_ref()
+                    .and_then(|b| check_stmts_capture(b, outer, declared))
+            })
+        }
+        AstStmt::For {
+            var,
+            iter,
+            guard,
+            body,
+            else_body,
+        } => {
+            let hit = check_expr_capture(iter, outer, declared)
+                .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared)));
+            declared.insert(var.clone());
+            hit.or_else(|| check_stmts_capture(body, outer, declared)).or_else(|| {
+                else_body
+                    .as_ref()
+                    .and_then(|b| check_stmts_capture(b, outer, declared))
+            })
+        }
+        AstStmt::Loop(body) => check_stmts_capture(body, outer, declared),
+        AstStmt::Break(Some(e)) => check_expr_capture(e, outer, declared),
+        AstStmt::BreakLabel { value, .. } => {
+            value.as_ref().and_then(|v| check_expr_capture(v, outer, declared))
+        }
+        AstStmt::Block { body, .. }
+        | AstStmt::CheckerBlock { body, .. }
+        | AstStmt::Defer(body)
+        | AstStmt::Comptime { body } => check_stmts_capture(body, outer, declared),
+        AstStmt::Guard {
+            cond,
+            let_binding,
+            success_expr,
+            else_body,
+        } => {
+            let mut hit = cond
+                .as_ref()
+                .and_then(|c| check_expr_capture(c, outer, declared));
+            if let Some((pat, e)) = let_binding {
+                if hit.is_none() {
+                    hit = check_expr_capture(e, outer, declared);
+                }
+                let mut pv = vec![];
+                collect_ast_pattern_vars(pat, &mut pv);
+                for n in pv {
+                    declared.insert(n);
+                }
+            }
+            if hit.is_none() {
+                hit = success_expr
+                    .as_ref()
+                    .and_then(|s| check_expr_capture(s, outer, declared));
+            }
+            hit.or_else(|| check_stmts_capture(else_body, outer, declared))
+        }
+        AstStmt::With { expr, alias, body } => {
+            let hit = check_expr_capture(expr, outer, declared);
+            if let Some(a) = alias {
+                declared.insert(a.clone());
+            }
+            hit.or_else(|| check_stmts_capture(body, outer, declared))
+        }
+        AstStmt::BlockCall { args, .. } => check_expr_capture(args, outer, declared),
+        AstStmt::Assign { target, value, .. } => {
+            // 写外层局部变量（total = ... / total += ...）→ 生成新绑定自引用 E0425
+            if let AstExpr::Ident(n) = target {
+                if !declared.contains(n.as_str()) && outer.contains_key(n.as_str()) {
+                    return Some(n.clone());
+                }
+            }
+            check_expr_capture(target, outer, declared)
+                .or_else(|| check_expr_capture(value, outer, declared))
+        }
+        AstStmt::Test { body, .. } => check_stmts_capture(body, outer, declared),
+        AstStmt::Assert { expr, expected } => {
+            check_expr_capture(expr, outer, declared)
+                .or_else(|| expected.as_ref().and_then(|e| check_expr_capture(e, outer, declared)))
+        }
+        AstStmt::Check { expr, message } => {
+            check_expr_capture(expr, outer, declared)
+                .or_else(|| message.as_ref().and_then(|m| check_expr_capture(m, outer, declared)))
+        }
+        AstStmt::Suite {
+            setup,
+            teardown,
+            tests,
+            ..
+        } => {
+            let mut hit = setup
+                .as_ref()
+                .and_then(|s| check_stmts_capture(s, outer, declared));
+            if hit.is_none() {
+                hit = teardown
+                    .as_ref()
+                    .and_then(|s| check_stmts_capture(s, outer, declared));
+            }
+            if hit.is_none() {
+                hit = check_stmts_capture(tests, outer, declared);
+            }
+            hit
+        }
+        // 嵌套函数体内的嵌套函数：由该函数自身转换时独立检查（递归）
+        _ => None,
+    }
+}
+
 fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {
     match stmt {
         AstStmt::Expr(e) => {
@@ -3631,6 +4036,7 @@ fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
                 ty: val_ty.clone(),
                 value: ir_value,
                 is_mut: false,
+                is_ref: false,
             });
             for (i, name) in names.iter().enumerate() {
                 if name == "_" {
@@ -3665,6 +4071,7 @@ fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
                     ty: field_ty,
                     value: field_expr,
                     is_mut: false,
+                    is_ref: false,
                 });
             }
         } else {
@@ -3811,6 +4218,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     ty: build_ty,
                     value: init_expr,
                     is_mut: false,
+                    is_ref: false,
                 };
             }
             Stmt::ExprStmt {
@@ -3828,6 +4236,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         AstStmt::Let {
             name,
             mutable,
+            is_ref,
             ty,
             value,
             ..
@@ -3902,6 +4311,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     ty: ir_ty,
                     value: ir_value,
                     is_mut: *mutable,
+                    is_ref: *is_ref,
                 }
             }
         }
@@ -3940,6 +4350,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 ty: ir_ty,
                 value: ir_value,
                 is_mut: false,
+                is_ref: false,
             }
         }
 
@@ -4520,6 +4931,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 // with 资源绑定须可变：块内可被 __exit__/__enter__ 等可变借用
                 // （生成 `let mut res`，否则 E0596 cannot borrow as mutable）
                 is_mut: true,
+                is_ref: false,
             }];
             if alias.is_some() {
                 // __exit__ 调用参数数 = 方法实际非 self 参数数。
@@ -4595,6 +5007,19 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         }
 
         AstStmt::FnDef { func } => {
+            // 嵌套函数提升为模块级 Item::FnDef。但嵌套函数体若引用外层函数
+            // 的局部变量（total = total + x 中 total 是外层局部），提升后
+            // 无法访问（生成 let mut total = total + x → E0425）。编译期报错，
+            // 提示改用闭包捕获（闭包支持写外部变量）。
+            let mut declared: HashSet<String> =
+                func.params.iter().map(|p| p.name.clone()).collect();
+            if let Some(captured) = check_stmts_capture(&func.body, &ctx.vars, &mut declared) {
+                ctx.report_error(format!(
+                    "嵌套函数 `{}` 引用了外层局部变量 `{}`：嵌套函数提升为模块级后无法访问外层局部变量（E0425），请改用闭包捕获（如 `let {} = |...| ...`）",
+                    func.name, captured, func.name
+                ));
+            }
+
             // 嵌套函数提升为模块级 Item::FnDef
             let nested_name = func.name.clone();
             let mut nested_def = convert_fn_def(func, ctx);
@@ -5605,20 +6030,41 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // `..: Dict<K,V>` → kwargs-only；双 `..` → args + kwargs
     let mut variadic_params: Vec<Param> = Vec::new();
     match &func.variadic {
-        ast::VariadicMode::ArgsOnly { elem_ty, .. } => {
-            let elem = elem_ty
-                .as_ref()
-                .map(|t| from_ast_type_with_generics(t, &generics))
-                .unwrap_or(IrType::Any);
-            variadic_params.push(Param {
-                name: "args".into(),
-                ty: elem,
-                is_mut: false,
-                is_ref: false,
-                is_owned: false,
-                default: None,
-                variadic: true,
-            });
+        ast::VariadicMode::ArgsOnly { elem_ty, elem_tys, .. } => {
+            // 03d §2.3 多类型位置约束：`..: Tuple<T1, T2, ..>` 约束位置参数各自类型。
+            // 生成固定前缀异构元组 args: (T1, T2, Vec<Box<dyn Any>>)——
+            // 前 N 个位置有精确类型，尾部 `..` 通配（哨兵 Type::Any）收集为 Box<dyn Any> 切片。
+            let is_multi = elem_tys.len() >= 2 && elem_tys.last() == Some(&AstType::Any);
+            if is_multi {
+                let prefix_tys: Vec<AstType> = elem_tys[..elem_tys.len() - 1].to_vec();
+                let prefix_irs: Vec<IrType> = prefix_tys
+                    .iter()
+                    .map(|t| from_ast_type_with_generics(t, &generics))
+                    .collect();
+                variadic_params.push(Param {
+                    name: "args".into(),
+                    ty: IrType::Tuple(prefix_irs),
+                    is_mut: false,
+                    is_ref: false,
+                    is_owned: false,
+                    default: None,
+                    variadic: true,
+                });
+            } else {
+                let elem = elem_ty
+                    .as_ref()
+                    .map(|t| from_ast_type_with_generics(t, &generics))
+                    .unwrap_or(IrType::Any);
+                variadic_params.push(Param {
+                    name: "args".into(),
+                    ty: elem,
+                    is_mut: false,
+                    is_ref: false,
+                    is_owned: false,
+                    default: None,
+                    variadic: true,
+                });
+            }
         }
         ast::VariadicMode::KwargsOnly { value_ty, .. } => {
             let v = value_ty
@@ -5751,13 +6197,20 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         if vp.name == "args" {
             // args: List<elem>（元素类型注解或无注解 → Any）
             let elem = vp.ty.clone();
-            fn_ctx.add_param(
-                "args",
-                IrType::Named {
-                    path: "List".into(),
-                    args: vec![elem],
-                },
-            );
+            // 03d §2.3 多类型位置约束：`..: Tuple<T1, T2, ..>` 的 args 是固定前缀
+            // 异构元组 (T1, T2, Vec<Box<dyn Any>>)——注册为 Tuple 类型，使函数体内
+            // args[0] / args.N 走元组字段访问（codegen IndexGet 的 Tuple 分支 → .0/.1）
+            if matches!(&elem, IrType::Tuple(_)) {
+                fn_ctx.add_param("args", elem);
+            } else {
+                fn_ctx.add_param(
+                    "args",
+                    IrType::Named {
+                        path: "List".into(),
+                        args: vec![elem],
+                    },
+                );
+            }
         } else if vp.name == "kwargs" {
             // kwargs: Dict<str, V>
             let v = vp.ty.clone();
@@ -6587,6 +7040,7 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
     for imp in &ast_module.imports {
         ir_mod.items.push(Item::Use(UseStmt {
             path: imp.path.clone(),
+            alias: imp.alias.clone(),
             items: imp.items.clone(),
             is_from: imp.is_from,
         }));
