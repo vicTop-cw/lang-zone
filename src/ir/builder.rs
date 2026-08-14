@@ -443,6 +443,46 @@ fn name_to_ir_type(name: &str) -> IrType {
     }
 }
 
+/// 判断 `x as T` 是否为编译器内置转换（无需 `__cast__`/`__try_cast__`）：
+/// 基本数值类型（int/f64/bool/str）之间的转换由编译器内置实现
+/// （01-类型系统.md §6：数值基本类型间 `as` 不依赖魔法方法）；
+/// 内置容器类型（List/Dict/Set/Option/Result/Box/Tuple 等）的字面量
+/// 类型标注（`[] as List<int>`、`None as Option<int>`）同样是内置标注，
+/// 不需要 `__cast__`/`__try_cast__`。
+/// 非内置转换（用户自定义 struct/enum/duck 参与）必须由源类型实现
+/// `__cast__<T>()` 或 `__try_cast__<T>() -> Result<T, E>`。
+fn is_builtin_cast(src: &IrType, target: &IrType) -> bool {
+    let src_builtin = matches!(
+        src,
+        IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Never
+    );
+    let tgt_builtin = matches!(
+        target,
+        IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Never
+    );
+    if src_builtin && tgt_builtin {
+        return true;
+    }
+    // 内置容器类型名（字面量标注放行）
+    // 注意：AST 中 `List<int>` 的 type_name 被解析成整串 "Vec<i64>"，
+    // name_to_ir_type 走 `_ =>` 分支存为 Named { path: "Vec<i64>" }，
+    // 因此需按 `<` 前的基名匹配（"Vec"）而非全名。
+    let builtin_container = |t: &IrType| -> bool {
+        match t {
+            IrType::Named { path, .. } => {
+                let base = path.split('<').next().unwrap_or(path.as_str());
+                matches!(
+                    base,
+                    "List" | "Vec" | "Dict" | "HashMap" | "Set" | "HashSet" | "Option" | "Result"
+                        | "Box" | "Tuple" | "String" | "Any"
+                )
+            }
+            _ => false,
+        }
+    };
+    builtin_container(src) && builtin_container(target)
+}
+
 /// 编译期类型兼容检查（用于 `is` 运算符和类型转换）
 fn ir_types_compatible(a: &IrType, b: &IrType) -> bool {
     match (a, b) {
@@ -2412,6 +2452,35 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     if let AstExpr::Ident(ref type_name) = &args[1] {
                         let target = name_to_ir_type(type_name);
                         let target_ty = target.clone();
+                        // __cast__/__try_cast__ 双缺检查（01-类型系统.md §6）：
+                        // 自定义类型（struct/enum/duck）执行 `x as T` 必须实现
+                        // `__cast__<T>()` 或 `__try_cast__<T>() -> Result<T, E>`，
+                        // 两者均未实现 → LZ 编译期报错（而非生成非法 Rust `as` 被
+                        // rustc E0605 兜底）。基本数值类型间转换由编译器内置放行；
+                        // 内置容器类型（List/Dict/Option/Result 等，不在
+                        // struct_methods 中）的 as 是字面量类型标注，同样放行。
+                        let needs_magic = !is_builtin_cast(&value.ty, &target);
+                        if needs_magic {
+                            if let IrType::Named { path, .. } = &value.ty {
+                                // 仅用户自定义类型（有方法集合可查）要求魔法方法；
+                                // 内置类型/未登记类型保守放行，避免误伤
+                                // `[] as List<int>` / `None as Option<int>` 标注
+                                if ctx.struct_methods.contains_key(path.as_str()) {
+                                    let has_magic = ctx
+                                        .struct_methods
+                                        .get(path)
+                                        .map_or(false, |ms| {
+                                            ms.contains("__cast__") || ms.contains("__try_cast__")
+                                        });
+                                    if !has_magic {
+                                        ctx.report_error(format!(
+                                            "类型 `{}` 未实现 `__cast__` 或 `__try_cast__`，无法执行 `as {}` 转换（01-类型系统.md §6）",
+                                            path, type_name
+                                        ));
+                                    }
+                                }
+                            }
+                        }
                         return Expr::new(
                             ExprKind::Cast {
                                 expr: Box::new(value),
