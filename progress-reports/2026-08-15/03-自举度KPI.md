@@ -55,3 +55,26 @@
   - 深层 elif/`||` 链（>10 层）触发 lang-zone 编译栈溢出（编译器递归限制）。
 - **LZ 占比不变**（词法试点在 bootstrap 未入库；lexer.lz 约 190 行待入库提升占比）。
 
+## 六、KPI 推进记录（v170，追加）
+
+- **2026-08-15 v170 修复**（自举前端试点暴露的 2 个真实缺陷）：
+  - **元组字段实参未 clone（E0382）**：实参 clone 注入条件 `Var | IndexGet` 扩展
+    `FieldAccess`（元组字段 `r.0` 在 IR 中是 FieldAccess）——p28 probe 验证
+    （`is_keyword(r.0)` 后再用 `r.0`，rustc 0 错误）。
+  - **字符串切片 cast 走 as i64（E0605）**：Cast 分支 `src_is_string` 只查
+    `expr.ty`，字符串切片/索引（`s[a..b] as int`）ty 常推断为 Any → 误走
+    `as i64` 强转；修复：切片/索引形态（base 为 Str）同样走 `.parse::<i64>()`
+    ——parser_e probe 验证（`"42"[0..2] as int` → 42）。
+- **Parser 前端 LZ 化试点跑通**（bootstrap/work/lz_parser/parser.lz）：
+  递归下降表达式解析器（tokenize → parse_expr/parse_term/parse_atom，覆盖
+  `+ - * /` 优先级与括号）端到端输出正确（`1 + 2 * 3 + (4 - 1)` = 10、
+  `2 * 3 - 4 / 2` = 4）。
+- **v170 新暴露/确认缺陷**（登记，待修复）：
+  - `let num: str = r.0` 变量 cast 仍走 as i64（builder let 类型标注未传播
+    到变量 ty）——规避：切片表达式内联 cast（`src[a..b] as int`）；
+  - 「let 语句后跟元组字面量」被 codegen 拼成调用（E0618，p29 复现）——
+    规避：元组先绑定中间变量再返回；
+  - 深层 elif 链（>10 层）触发 lang-zone 编译栈溢出（p27 同类）——
+    规避：查表法（List 数据驱动）。
+- **自举前端里程碑**：词法 ✅ → 递归下降表达式解析 ✅ → 语句/完整 Parser 下一阶段。
+

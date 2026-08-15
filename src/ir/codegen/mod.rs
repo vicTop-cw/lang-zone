@@ -5046,7 +5046,9 @@ impl CodeGen {
                             }
                             let arg_is_var = matches!(
                                 &a.kind,
-                                ExprKind::Var(_) | ExprKind::IndexGet { .. }
+                                ExprKind::Var(_)
+                                    | ExprKind::IndexGet { .. }
+                                    | ExprKind::FieldAccess { .. }
                             );
                             let arg_is_copy = matches!(
                                 &a.ty,
@@ -7593,7 +7595,17 @@ impl CodeGen {
                 let src_is_string = matches!(expr.ty, IrType::Str)
                     || matches!(&expr.ty, IrType::Named { path, .. } if path == "String");
                 let tgt_is_numeric = matches!(target, IrType::Int | IrType::F64);
-                if src_is_string && tgt_is_numeric {
+                // 字符串切片/索引（s[a..b] / s[i]）→ 数值：base 是 String 但
+                // 切片表达式 ty 常推断为 Any（自举试点 parser.lz 复现 E0605
+                // `s[0..2] as i64` 非原生 cast），需同样走 .parse()
+                let expr_is_str_index = matches!(
+                    &expr.kind,
+                    ExprKind::IndexGet { base, .. }
+                        if matches!(&base.ty, IrType::Str)
+                            || matches!(&base.ty, IrType::Named { path, .. }
+                                if path == "String" || path == "str")
+                );
+                if (src_is_string || expr_is_str_index) && tgt_is_numeric {
                     let tgt = self.rust_type(target);
                     return format!("({}).parse::<{}>().unwrap()", self.gen_expr(expr), tgt);
                 }
