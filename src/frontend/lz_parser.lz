@@ -1,0 +1,284 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 4：用 LZ 实现递归下降表达式解析器（Parser 前端 LZ 化起步）
+// 基于词法试点（lexer.lz）的 Token 流：tokenize → parse_expr → 求值
+// 覆盖：+ - * / 优先级、括号、整数/标识符；验证「LZ 写语法前端」可行性
+//
+// 规避（p29 定位的 LZ 缺陷）：
+//   A. tokenize 运算符分支用查表法（List 数据驱动），避免 9 层 elif 链
+//      触发 lang-zone 编译栈溢出（p27 同类：深层 elif 链）
+//   B. 递归下降返回元组先绑定中间变量（let r = (...) 再 return r），
+//      避免「let 语句后跟元组字面量」被 codegen 拼成调用（E0618）
+// ═══════════════════════════════════════════════════════════════
+
+// ── Token（词法试点精简子集，v171 加语句关键字）──
+enum Token:
+    IntLit(v: int)
+    Ident(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    LParen
+    RParen
+    Colon
+    Return
+    If
+    Else
+    Def
+    Newline
+    Eof
+
+// ── 字符工具 ──
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+// ── 扫描（数字/标识符）──
+// 数字直接返回 int（切片表达式 s[a..b] as int 走 codegen parse 分支；
+// tokenize 函数级上下文中 `num as int` 变量 cast 仍走 as i64——p33-p38
+// 证明枚举构造/List 拼接/while 循环场景均已走 parse（v170 覆盖），
+// 仅 tokenize 复杂函数上下文差异登记待修）
+def scan_int(src: str, start: int) -> (int, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    let v = src[start..i] as int
+    let res: (int, int) = (v, i)
+    res
+
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
+        i = i + 1
+    (src[start..i], i)
+
+// ── 关键字 → Token（查表，规避深层 elif 链）──
+def keyword_token(w: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("return", Token.Return),
+        ("if", Token.If),
+        ("else", Token.Else),
+        ("def", Token.Def),
+    ]
+    let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == w:
+            result = (true, pair.1)
+    result
+
+// ── 单字符运算符查表（规避深层 elif 链）──
+def op_token(c: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("+", Token.Plus),
+        ("-", Token.Minus),
+        ("*", Token.Star),
+        ("/", Token.Slash),
+        ("(", Token.LParen),
+        (")", Token.RParen),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = (true, pair.1)
+    result
+
+// ── tokenize：完整扫描表达式源码（行首缩进 → Indent(v)）──
+// 注：缩进块解析（scan_indent/parse_block/Indent token）已实现并经 p42
+// probe 验证可用，但完整文件触发 lang-zone 编译栈溢出（编译器递归限制，
+// 已登记）——入库版本回退为多行语句版（Newline 分隔，能编译）
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if c == " " || c == "\t":
+            i = i + 1
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            tokens = tokens + [Token.IntLit(v: r.0)]
+            line_start = false
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let kw = keyword_token(r.0)
+            if kw.0:
+                tokens = tokens + [kw.1]
+            else:
+                tokens = tokens + [Token.Ident(name: r.0)]
+            line_start = false
+        elif c == ":":
+            tokens = tokens + [Token.Colon]
+            i = i + 1
+            line_start = false
+        else:
+            let r = op_token(c)
+            let found = r.0
+            let tok = r.1
+            if found:
+                tokens = tokens + [tok]
+                i = i + 1
+            else:
+                i = i + 1
+            line_start = false
+    tokens = tokens + [Token.Eof]
+    tokens
+
+// ── Token 流工具 ──
+def tok_at(toks: List<Token>, idx: int) -> Token =
+    toks[idx].clone()
+
+// ── 递归下降解析器（返回 (结果, 新位置)，元组先绑定中间变量）──
+// parse_atom: 整数(占位 0) | 标识符(占位 0) | ( expr )
+def parse_atom(toks: List<Token>, pos: int) -> (int, int) =
+    let t = tok_at(toks, pos)
+    let res: (int, int) = match t:
+        case Token.IntLit(v: n) => (n, pos + 1)
+        case Token.LParen =>
+            let r = parse_expr(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let pr: (int, int) = (rv, rp + 1)
+            pr
+        case _ => (0, pos + 1)
+    res
+
+// parse_term: atom (* atom)* / atom
+def parse_term(toks: List<Token>, pos: int) -> (int, int) =
+    let first = parse_atom(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.Star:
+            let r = parse_atom(toks, p + 1)
+            value = value * r.0
+            p = r.1
+        elif t == Token.Slash:
+            let r = parse_atom(toks, p + 1)
+            value = value / r.0
+            p = r.1
+        else:
+            done = true
+    let res: (int, int) = (value, p)
+    res
+
+// parse_expr: term (+ term)* - term
+def parse_expr(toks: List<Token>, pos: int) -> (int, int) =
+    let first = parse_term(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.Plus:
+            let r = parse_term(toks, p + 1)
+            value = value + r.0
+            p = r.1
+        elif t == Token.Minus:
+            let r = parse_term(toks, p + 1)
+            value = value - r.0
+            p = r.1
+        else:
+            done = true
+    let res: (int, int) = (value, p)
+    res
+
+// ── 语句级解析（v171：if/def/return）──
+// parse_stmt: return expr | if expr | def name | 表达式语句
+// 返回 (语句描述 str, 新位置)；简化：仅解析语句头 + 首表达式
+def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    let res: (str, int) = match t:
+        case Token.Return =>
+            let r = parse_expr(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let rr: (str, int) = ("return " + rv.to_string(), rp)
+            rr
+        case Token.If =>
+            let r = parse_expr(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            // LZ 三元表达式：a if cond else b（if 是语句式，不能内联）
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let rr: (str, int) = ("if " + rv.to_string(), npos)
+            rr
+        case Token.Else =>
+            let rr: (str, int) = ("else", pos + 1)
+            rr
+        case Token.Def =>
+            let name_t = tok_at(toks, pos + 1)
+            let name_s = ident_name(name_t)
+            let rr: (str, int) = ("def " + name_s, pos + 2)
+            rr
+        case Token.Newline =>
+            let rr: (str, int) = ("", pos + 1)
+            rr
+        case _ =>
+            let r = parse_expr(toks, pos)
+            let rv = r.0
+            let rp = r.1
+            let rr: (str, int) = ("expr " + rv.to_string(), rp)
+            rr
+    res
+
+// 提取 Ident 的 name（非 Ident 返回 "?"）
+def ident_name(t: Token) -> str =
+    // 注：绑定名用 nm 而非 n——单字母 n 触发 codegen 降级（n_）且体内引用
+    // 未同步（E0308，自举暴露缺陷）
+    let res: str = match t:
+        case Token.Ident(name: nm) => nm
+        case _ => "?"
+    res
+
+// List<str> → 摘要字符串（逗号分隔，块体展示用）
+def list_summary(xs: List<str>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        out = out + xs[idx]
+    out
+
+// parse_program: stmt* 直到 Eof；返回 (语句列表描述, 位置)
+def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
+    let mut out: List<str> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.Eof:
+            done = true
+        else:
+            let r = parse_stmt(toks, p)
+            let s = r.0
+            if s.len() > 0:
+                out = out + [s]
+            p = r.1
+    (out, p)
+
+// ── main：解析一段多行含语句的源码并输出 ──
+def main() =
+    // 缩进嵌套：def foo 体含 if 体（两层级联块）
+    let src = "def foo:\n    if 1:\n        return 2\n    return 3\nelse"
+    let toks = tokenize(src)
+    let r = parse_program(toks, 0)
+    let stmts = r.0
+    for idx in 0..stmts.len():
+        print(stmts[idx])

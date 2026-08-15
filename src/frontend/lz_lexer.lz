@@ -1,0 +1,259 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 3：用 LZ 实现 LZ 词法分析核心（对齐 src/lexer/token.rs）
+// 覆盖：Token 枚举（带值变体）+ tokenize 简化版（标识符/整数/字符串/
+//       运算符/标点）——验证「LZ 写编译器前端」可行性，暴露 codegen 缺陷
+// ═══════════════════════════════════════════════════════════════
+
+// ── Token（对齐 token.rs 核心子集，v168 扩展）──
+enum Token:
+    Def
+    Struct
+    If
+    Else
+    Return
+    IntLit(v: int)
+    StrLit(s: str)
+    Ident(name: str)
+    MagicMethod(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    Percent
+    StarStar
+    Eq
+    EqEq
+    NotEq
+    Lt
+    Gt
+    Le
+    Ge
+    AmpAmp
+    PipePipe
+    Colon
+    ColonColon
+    Comma
+    Dot
+    Arrow
+    FatArrow
+    LParen
+    RParen
+    LBrace
+    RBrace
+    Newline
+    Eof
+
+// ── 关键字表（简化）──
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "struct" || s == "if" || s == "else" || s == "return"
+
+// ── 关键字 → Token ──
+def keyword_token(s: str) -> Token =
+    if s == "def":
+        Token.Def
+    elif s == "struct":
+        Token.Struct
+    elif s == "if":
+        Token.If
+    elif s == "else":
+        Token.Else
+    else:
+        Token.Return
+
+// ── 单字符运算符/标点 → (bool, Token)（found, token）——不用 Option<Token>：
+//    LZ 对 `None` 赋值硬编码 i64（Option<Token> 场景 E0308，自举 v168 缺陷）；
+//    查表法（数据驱动）：p27 复现「11 层 elif 链 + Option<Token>」触发
+//    lang-zone 编译栈溢出（v167 缺陷 3），List 查表规避深层嵌套──
+def punct_token(c: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("+", Token.Plus),
+        ("-", Token.Minus),
+        ("*", Token.Star),
+        ("/", Token.Slash),
+        ("%", Token.Percent),
+        (":", Token.Colon),
+        (",", Token.Comma),
+        (".", Token.Dot),
+        ("(", Token.LParen),
+        (")", Token.RParen),
+        ("{", Token.LBrace),
+        ("}", Token.RBrace),
+        ("<", Token.Lt),
+        (">", Token.Gt),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = (true, pair.1)
+    result
+
+// 双字符运算符 → Token（查表；未命中返回 false）
+def two_char_token(c1: str, c2: str) -> (bool, Token) =
+    let key: str = c1 + c2
+    let table: List<(str, Token)> = [
+        ("==", Token.EqEq),
+        ("!=", Token.NotEq),
+        ("<=", Token.Le),
+        (">=", Token.Ge),
+        ("&&", Token.AmpAmp),
+        ("||", Token.PipePipe),
+        ("::", Token.ColonColon),
+        ("->", Token.Arrow),
+        ("=>", Token.FatArrow),
+        ("**", Token.StarStar),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == key:
+            result = (true, pair.1)
+    result
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def is_ident_char(c: str) -> bool =
+    is_alpha(c) || is_digit(c)
+
+// ── 字符工具：字符串单字符索引 s[i] 返回字节码 i64（有意设计，见
+//    polish_28_strings 断言），取字符需用切片 s[idx..idx+1] ──
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+// ── 扫描函数（拆分 tokenize：单函数嵌套过深触发 lang-zone 编译栈溢出，
+//    自举试点 v167 缺陷 3；每个扫描函数只处理一类 token）──
+
+// 扫描标识符/关键字：返回 (word, 结束位置)
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_ident_char(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+// 扫描整数：返回 (数字字符串, 结束位置)
+def scan_int(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+// 扫描运算符/标点：返回 ((bool, Token), 结束位置)；双字符优先
+def scan_punct(src: str, i: int) -> ((bool, Token), int) =
+    let c = char_at(src, i)
+    let r = punct_token(c)
+    if r.0:
+        (r, i + 1)
+    elif i + 1 < str_len(src):
+        let two = two_char_token(c, char_at(src, i + 1))
+        if two.0:
+            ((true, two.1), i + 2)
+        else:
+            (r, i + 1)
+    else:
+        (r, i + 1)
+
+// 扫描字符串字面量：返回 (内容, 结束位置)；"..." 到匹配引号
+def scan_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 1
+    while i < str_len(src) && char_at(src, i) != "\"":
+        i = i + 1
+    (src[(start + 1)..i], i + 1)
+
+// ── tokenize：简化词法分析（对齐 lexer.rs 核心逻辑）──
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    while i < str_len(src):
+        let c = char_at(src, i)
+        // 空白跳过
+        if c == " " || c == "\t":
+            i = i + 1
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+        // 字符串字面量 "..." → StrLit
+        elif c == "\"":
+            let r = scan_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.StrLit(s: r.0)]
+        // 标识符/关键字/magic method（__xxx__）
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let word: str = r.0
+            if word.len() > 4 && word[0..2] == "__" && word[(word.len() - 2)..word.len()] == "__":
+                tokens = tokens + [Token.MagicMethod(name: word)]
+            elif is_keyword(word):
+                tokens = tokens + [keyword_token(word)]
+            else:
+                tokens = tokens + [Token.Ident(name: word)]
+        // 整数（`num as int` 暂因 LZ cast 缺陷走 as i64 强转 E0605——元组字段
+        // 类型未推断为 Str；先以 Ident 占位，登记 v170 遗留缺陷待修）
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            let num: str = r.0
+            tokens = tokens + [Token.Ident(name: num)]
+        // 运算符/标点（双字符优先，含 == != <= >= && || :: -> => **）
+        else:
+            let r = scan_punct(src, i)
+            i = r.1
+            let pr = r.0
+            if pr.0:
+                tokens = tokens + [pr.1]
+    tokens = tokens + [Token.Eof]
+    tokens
+
+// ── display_token：Token → str（对齐 Rust 调试输出简化）──
+def display_token(t: Token) -> str =
+    match t:
+        case Token.Def => "Def"
+        case Token.Struct => "Struct"
+        case Token.If => "If"
+        case Token.Else => "Else"
+        case Token.Return => "Return"
+        case Token.IntLit(v: n) => "IntLit(" + n.to_string() + ")"
+        case Token.StrLit(s: s) => "StrLit(" + s + ")"
+        case Token.Ident(name: n) => "Ident(" + n + ")"
+        case Token.MagicMethod(name: n) => "MagicMethod(" + n + ")"
+        case Token.Plus => "Plus"
+        case Token.Minus => "Minus"
+        case Token.Star => "Star"
+        case Token.Slash => "Slash"
+        case Token.Percent => "Percent"
+        case Token.StarStar => "StarStar"
+        case Token.Eq => "Eq"
+        case Token.EqEq => "EqEq"
+        case Token.NotEq => "NotEq"
+        case Token.Lt => "Lt"
+        case Token.Gt => "Gt"
+        case Token.Le => "Le"
+        case Token.Ge => "Ge"
+        case Token.AmpAmp => "AmpAmp"
+        case Token.PipePipe => "PipePipe"
+        case Token.Colon => "Colon"
+        case Token.ColonColon => "ColonColon"
+        case Token.Comma => "Comma"
+        case Token.Dot => "Dot"
+        case Token.Arrow => "Arrow"
+        case Token.FatArrow => "FatArrow"
+        case Token.LParen => "LParen"
+        case Token.RParen => "RParen"
+        case Token.LBrace => "LBrace"
+        case Token.RBrace => "RBrace"
+        case Token.Newline => "Newline"
+        case Token.Eof => "Eof"
+
+// ── main：tokenize 一段示例源码并输出（覆盖字符串/运算符/magic method）──
+def main() =
+    let src = "def greet(name):\n    return \"hello \" + name\nif a >= 2 && b <= 3:\n    x.__len__()"
+    let toks = tokenize(src)
+    for idx in 0..toks.len():
+        print(display_token(toks[idx]))
