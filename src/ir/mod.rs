@@ -13,6 +13,7 @@ pub mod builder;
 pub mod codegen;
 pub mod codegen_cython;
 pub mod duck_check;
+pub mod lz_codegen;
 
 pub use builder::build_ir;
 pub use duck_check::check_duck_satisfaction;
