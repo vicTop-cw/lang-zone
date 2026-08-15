@@ -9236,8 +9236,17 @@ fn collect_stmt_var_refs(
             }
         }
         Stmt::For {
-            iter, guard, body, ..
+            var,
+            iter,
+            guard,
+            body,
+            ..
         } => {
+            // for 循环变量是局部绑定：遮蔽体内引用（`ts[idx]` 的 idx），
+            // 否则 idx 被当作自由引用 → analyze_global_vars 误判为跨函数
+            // 全局变量，生成 `static mut idx` 与 for 绑定冲突（E0530，
+            // 自举试点 bootstrap/work/lz_ir 暴露：多函数 for idx 触发）
+            shadow.insert(var.clone());
             collect_expr_var_refs(iter, shadow, refs, in_closure);
             if let Some(g) = guard {
                 collect_expr_var_refs(g, shadow, refs, in_closure);
