@@ -5,6 +5,7 @@
 # generated .rs output from lzc — keep only source in src/
 *.rs
 !src/**/*.rs
+!tests/**/*.rs
 
 # generated output directories
 test-suite/*/_work/

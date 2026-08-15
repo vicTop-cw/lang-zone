@@ -9289,6 +9289,12 @@ fn collect_stmt_var_refs(
         } => {
             collect_expr_var_refs(scrutinee, shadow, refs, in_closure);
             for arm in arms {
+                // match 臂模式绑定是局部变量（`case X(path: p)` 的 p）：遮蔽
+                // 臂体内引用，否则被 collect_var_refs 误收为自由引用 →
+                // analyze_global_vars 误判为跨函数全局变量，生成 static mut
+                // 与 let/参数绑定冲突（E0530，自举试点 bootstrap/work/lz_ir
+                // 暴露：多函数同名模式绑定 a/o/es/r 触发）
+                collect_pattern_bindings(&arm.pattern, shadow);
                 collect_var_refs_inner(&arm.body, shadow, refs, in_closure);
             }
         }
