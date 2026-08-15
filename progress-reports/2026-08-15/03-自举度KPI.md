@@ -78,3 +78,24 @@
     规避：查表法（List 数据驱动）。
 - **自举前端里程碑**：词法 ✅ → 递归下降表达式解析 ✅ → 语句/完整 Parser 下一阶段。
 
+## 七、KPI 推进记录（v171，追加）
+
+- **2026-08-15 v171 验证结论**：
+  - **let 显式类型标注传播已可用**：p30/p31/p32 三 probe 实证
+    `let num: str = r.0` + `num as int` 正确走 `.parse::<i64>()` 分支
+    （rustc 0 错误）——builder 的 `add_var` 本就用显式标注注册变量类型，
+    v170 的 Cast 分支修复已覆盖，builder 无需额外修改；
+  - **枚举构造实参中变量 cast 仍有差异**：`Token.IntLit(v: num as int)`
+    场景仍走 as i64（builder 实参处理差异）——parser.lz 以切片内联 cast
+    （`src[a..b] as int`）规避，登记待修。
+- **Parser 语句级扩展跑通**（bootstrap/work/lz_parser/parser.lz）：
+  - Token 枚举加 `Colon/Return/If/Else/Def` 语句关键字；
+  - `keyword_token` 查表（return/if/else/def）、tokenize 支持关键字与冒号；
+  - `parse_stmt`（return expr | if expr | def name | 表达式语句）+
+    `parse_program`（stmt* 直到 Eof）；
+  - 端到端输出正确：`return 1+2 → return 3`、`if 3 → if 3`、`def foo`、
+    `expr 4`（rustc 0 错误）；
+  - 记录 LZ 语法边界：if 是语句式（不能内联），三元用 `a if cond else b`；
+    enum 构造实参 move 需显式 `.clone()`（`Token.Ident(name: w.clone())`）。
+- **自举前端里程碑**：词法 ✅ → 表达式解析 ✅ → 语句级解析 ✅ → 完整 Parser 下一阶段。
+
