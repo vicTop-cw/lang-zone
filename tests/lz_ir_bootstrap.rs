@@ -118,3 +118,56 @@ fn lz_written_ir_display_compiles_and_runs() {
     // 清理
     let _ = fs::remove_dir_all(&work);
 }
+
+/// 自举回归门禁（增强）：lzc --emit=ir-lz 端到端。
+/// 验证链：.lz → lzc 生成 .lzlz（LZ IR 库 + main 构造）→ lang-zone 编译 →
+/// rustc → 运行 → 输出 IR 文本（自举路线 B 主管线落地，tnr 建议 ①）。
+/// 输出为 LZ print 的 Debug 字符串（带引号与 \n 转义），断言关键子串即可。
+#[test]
+fn lz_emit_ir_lz_roundtrip() {
+    let work = std::env::temp_dir().join("lz_ir_lz_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    // 复制一个基础 DEMO 到临时目录（避免 --emit=ir-lz 在 DEMO 目录落盘）
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("DEMO/04_functions/basic.lz");
+    let lz_path = work.join("basic.lz");
+    fs::copy(&src, &lz_path).expect("copy demo");
+    let out_path = work.join("basic.lzlz");
+    let rs_path = work.join("basic.rs");
+    let exe_path = work.join("basic.exe");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=ir-lz")
+        .output()
+        .expect("run lang-zone --emit=ir-lz");
+    assert!(
+        out.status.success(),
+        "--emit=ir-lz 失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out_path.exists(), "生成 .lzlz 缺失");
+    assert!(rs_path.exists(), "中间 .rs 缺失");
+    assert!(exe_path.exists(), "最终 exe 缺失");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // IR 文本输出（Debug 字符串：带引号与 \n 转义；断言关键子串）
+    assert!(
+        stdout.contains("LZIR v1"),
+        "输出应含 LZIR v1 头，got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("fn add") && stdout.contains("binop"),
+        "输出应含 fn add / binop，got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("items"),
+        "输出应含 items 计数，got: {}",
+        stdout
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}

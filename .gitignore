@@ -7,6 +7,9 @@
 !src/**/*.rs
 !tests/**/*.rs
 
+# generated LZ IR codegen intermediate (.lzlz → .rs → .exe) from --emit=ir-lz
+*.lzlz
+
 # generated output directories
 test-suite/*/_work/
 test-suite/*/__pycache__/
