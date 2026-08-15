@@ -117,7 +117,6 @@ def tokenize(src: str) -> List<Token> =
             let r = scan_int(src, i)
             i = r.1
             tokens = tokens + [Token.IntLit(v: r.0)]
-            line_start = false
         elif is_alpha(c):
             let r = scan_ident(src, i)
             i = r.1
@@ -126,11 +125,9 @@ def tokenize(src: str) -> List<Token> =
                 tokens = tokens + [kw.1]
             else:
                 tokens = tokens + [Token.Ident(name: r.0)]
-            line_start = false
         elif c == ":":
             tokens = tokens + [Token.Colon]
             i = i + 1
-            line_start = false
         else:
             let r = op_token(c)
             let found = r.0
@@ -140,7 +137,6 @@ def tokenize(src: str) -> List<Token> =
                 i = i + 1
             else:
                 i = i + 1
-            line_start = false
     tokens = tokens + [Token.Eof]
     tokens
 
