@@ -99,3 +99,21 @@
     enum 构造实参 move 需显式 `.clone()`（`Token.Ident(name: w.clone())`）。
 - **自举前端里程碑**：词法 ✅ → 表达式解析 ✅ → 语句级解析 ✅ → 完整 Parser 下一阶段。
 
+## 八、KPI 推进记录（v172，追加）
+
+- **2026-08-15 v172 验证结论**：
+  - **枚举构造实参 cast 已修复**：p33/p34/p35 三 probe 实证
+    `Token.IntLit(v: num as int)` 正确走 `.parse::<i64>()` 分支（rustc 0
+    错误，val=42）——v170 Cast 修复已覆盖 let 绑定 / List 字面量 / 枚举
+    构造实参场景；v171 时失败为测试构建时序问题。
+  - **登记差异**：List 拼接累积场景（`tokens + [Token.IntLit(v: num as int)]`）
+    cast 仍走 as i64——parser.lz 以切片内联 cast（`src[a..b] as int`）规避，
+    待修（builder 实参处理差异）。
+- **Parser 多行语句解析跑通**（bootstrap/work/lz_parser/parser.lz）：
+  - Token 枚举加 `Newline`，tokenize 支持换行 → Newline；
+  - parse_stmt 加 Newline 分支（跳过空行）、parse_program 跳过空语句；
+  - 多行源码解析端到端输出正确：`def foo` / `return 3` / `if 3` / `else` /
+    `expr 4`（rustc 0 错误）。
+- **自举前端里程碑**：词法 ✅ → 表达式解析 ✅ → 语句级解析 ✅ → 多行语句 ✅
+  → 完整 Parser（缩进块嵌套）下一阶段。
+
