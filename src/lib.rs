@@ -22,7 +22,9 @@ pub mod bridge;
 // ── L3.5 编译期求值层 ──
 pub mod comptime;
 
-// ── L3.5 跨模块类型签名层（lz-infer 生成的 .lzi 文件加载与查询） ──
+// ── L3.5 跨模块类型签名层（lz-infer 生成的 .lzi 文件加载与查询；可选增强，
+// 由 infer 特性门控，非主编译管线依赖） ──
+#[cfg(feature = "infer")]
 pub mod infer;
 
 // ── L3.5 中间表示层 ──

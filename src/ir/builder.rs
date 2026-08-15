@@ -71,6 +71,7 @@ struct TypeCtx {
     comptime_consts: std::collections::HashMap<String, crate::comptime::ComptimeValue>,
     /// 跨模块类型签名（lz-infer 生成的 .lzi）：函数返回类型回退查询源
     /// （本地函数查不到时，从 .lzi 模块签名补全，接通跨模块推断管线）
+    #[cfg(feature = "infer")]
     lzi_signatures: Option<std::rc::Rc<crate::infer::LziRegistry>>,
     /// 当前模块 AST（Rc 共享）：comptime 求值需访问模块函数定义
     /// （`comptime gen_primes(8)` 查 module.functions 编译期执行）
@@ -101,6 +102,7 @@ impl TypeCtx {
             errors: Rc::new(RefCell::new(Vec::new())),
             comptime_consts: std::collections::HashMap::new(),
             comptime_module: None,
+            #[cfg(feature = "infer")]
             lzi_signatures: None,
         }
     }
@@ -261,6 +263,7 @@ impl TypeCtx {
         }
         // 跨模块回退：本地函数查不到时，从 .lzi 签名补全（lz-infer 生成的
         // 跨模块类型签名，main.rs --lzi 加载后经 build_ir_with_lzi 注入）
+        #[cfg(feature = "infer")]
         if let Some(reg) = &self.lzi_signatures {
             for file in &reg.files {
                 for m in file.modules.values() {
@@ -7305,6 +7308,7 @@ impl std::fmt::Display for IrBuildError {
 /// 主入口：AST Module → IrModule
 /// 将 .lzi 签名中的 LZ 类型字符串转换为 IrType（跨模块推断回退用）。
 /// 支持基本类型与常见泛型容器；未知类型降级为 Named（与 from_ast_type 语义一致）。
+#[cfg(feature = "infer")]
 fn lzi_type_to_ir(s: &str) -> IrType {
     match s.trim() {
         "int" | "i64" => IrType::Int,
@@ -7354,27 +7358,29 @@ fn lzi_type_to_ir(s: &str) -> IrType {
 
 /// 默认入口：不带跨模块签名（等价 build_ir_with_lzi(_, None)）
 pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
-    build_ir_inner(ast_module, None)
+    build_ir_inner(ast_module, |_ctx| {})
 }
 
 /// 带 .lzi 跨模块类型签名的入口：main.rs `--lzi <file>` 加载后传入，
 /// 供 IR builder 在本地函数查不到时回退查询外部模块函数返回类型。
+#[cfg(feature = "infer")]
 pub fn build_ir_with_lzi(
     ast_module: &ast::Module,
     lzi: std::rc::Rc<crate::infer::LziRegistry>,
 ) -> Result<IrModule, IrBuildError> {
-    build_ir_inner(ast_module, Some(lzi))
+    build_ir_inner(ast_module, |ctx| ctx.lzi_signatures = Some(lzi))
 }
 
 fn build_ir_inner(
     ast_module: &ast::Module,
-    lzi: Option<std::rc::Rc<crate::infer::LziRegistry>>,
+    init_ctx: impl FnOnce(&mut TypeCtx),
 ) -> Result<IrModule, IrBuildError> {
     let mut ctx = TypeCtx::new();
     let pending_items = Rc::new(RefCell::new(Vec::new()));
     ctx.pending_items = pending_items.clone();
-    // 跨模块签名注入（.lzi）：lookup_fn_return 回退查询源
-    ctx.lzi_signatures = lzi;
+    // 跨模块签名注入（.lzi）：lookup_fn_return 回退查询源；
+    // 闭包在 build_ir 传空（无 infer 时等价）、build_ir_with_lzi 注入 registry
+    init_ctx(&mut ctx);
     // comptime 求值需要访问模块函数定义（`comptime gen_primes(8)` 编译期执行）
     ctx.comptime_module = Some(Rc::new(ast_module.clone()));
 

@@ -9,12 +9,13 @@ edition = "2021"
 
 [dependencies]
 # 零外部依赖：TOML 解析使用 src/util/mini_toml.rs 内嵌实现
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
 rayon = { version = "1.10", optional = true }
 
 [features]
-# infer 特性已并入默认编译（.lzi 跨模块类型签名为主编译管线组成部分）；
-# 保留空特性别名兼容 `--features infer` 用法
-infer = []
+# infer：外部 lz-infer / .lzi 跨模块类型签名（可选增强，非主编译管线依赖；
+# 同项目跨模块类型走 --project 源码合并路径）
+default = ["infer"]
+infer = ["serde", "serde_json"]
 parallel = ["rayon"]

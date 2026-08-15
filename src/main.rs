@@ -53,7 +53,8 @@ fn main() {
     let use_cache = args.iter().any(|a| a == "--cached");
 
     // --lzi <file>：加载 lz-infer 生成的跨模块类型签名（.lzi），注入 IR builder，
-    // 本地函数查不到返回类型时回退查询外部模块签名（跨模块推断管线接通）
+    // 本地函数查不到返回类型时回退查询外部模块签名（可选增强，infer 特性门控）
+    #[cfg(feature = "infer")]
     let lzi_registry = extract_flag_value(&args, "--lzi").map(|p| {
         let reg = lang_zone::infer::LziRegistry::load_single(Path::new(&p))
             .unwrap_or_else(|e| {
@@ -62,6 +63,9 @@ fn main() {
             });
         std::rc::Rc::new(reg)
     });
+    // 非 infer 构建：无 .lzi 支持，占位（build_ir_opt 非 infer 版本忽略该参数）
+    #[cfg(not(feature = "infer"))]
+    let lzi_registry: Option<()> = None;
 
     let path = &args[1];
 
@@ -353,6 +357,7 @@ fn main() {
 
 /// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，
 /// 否则默认入口（本地函数查不到返回类型时回退查询外部模块签名）
+#[cfg(feature = "infer")]
 fn build_ir_opt(
     module: &lang_zone::ast::Module,
     lzi: Option<&std::rc::Rc<lang_zone::infer::LziRegistry>>,
@@ -361,6 +366,15 @@ fn build_ir_opt(
         Some(reg) => lang_zone::ir::builder::build_ir_with_lzi(module, reg.clone()),
         None => build_ir(module),
     }
+}
+
+/// 非 infer 构建：无 .lzi 支持，直接走默认 build_ir（忽略 lzi 占位参数）
+#[cfg(not(feature = "infer"))]
+fn build_ir_opt(
+    module: &lang_zone::ast::Module,
+    _lzi: Option<&()>,
+) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
+    build_ir(module)
 }
 
 /// 从 CLI 参数中提取标志值（如 --std-dir <path>）
