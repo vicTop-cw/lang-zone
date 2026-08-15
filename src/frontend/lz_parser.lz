@@ -25,6 +25,7 @@ enum Token:
     If
     Else
     Def
+    Indent(v: int)
     Newline
     Eof
 
@@ -53,6 +54,12 @@ def scan_int(src: str, start: int) -> (int, int) =
     let v = src[start..i] as int
     let res: (int, int) = (v, i)
     res
+
+def scan_indent(src: str, start: int) -> (int, int) =
+    let mut j = start
+    while j < str_len(src) && (char_at(src, j) == " " or char_at(src, j) == "	"):
+        j = j + 1
+    (j - start, j)
 
 def scan_ident(src: str, start: int) -> (str, int) =
     let mut i = start
@@ -217,7 +224,11 @@ def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
             let after = tok_at(toks, rp)
             // LZ 三元表达式：a if cond else b（if 是语句式，不能内联）
             let npos = (rp + 1) if after == Token.Colon else rp
-            let rr: (str, int) = ("if " + rv.to_string(), npos)
+            let blk = parse_block(toks, npos, 0)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("if " + rv.to_string() + " {" + body_s + "}", blk_end)
             rr
         case Token.Else =>
             let rr: (str, int) = ("else", pos + 1)
@@ -225,7 +236,13 @@ def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
         case Token.Def =>
             let name_t = tok_at(toks, pos + 1)
             let name_s = ident_name(name_t)
-            let rr: (str, int) = ("def " + name_s, pos + 2)
+            let colon_t = tok_at(toks, pos + 2)
+            let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
+            let blk = parse_block(toks, npos, 0)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("def " + name_s + " {" + body_s + "}", blk_end)
             rr
         case Token.Newline =>
             let rr: (str, int) = ("", pos + 1)
@@ -257,6 +274,45 @@ def list_summary(xs: List<str>) -> str =
     out
 
 // parse_program: stmt* 直到 Eof；返回 (语句列表描述, 位置)
+def parse_block(toks: List<Token>, pos: int, indent: int) -> (List<str>, int) =
+    let mut out: List<str> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        let tag = block_tag(t)
+        if tag == 0:
+            done = true
+        elif tag == 1:
+            p = p + 1
+        elif tag == 2:
+            let n = block_indent(t)
+            if n > indent:
+                let r = parse_stmt(toks, p + 1)
+                let s = r.0
+                if s.len() > 0:
+                    out = out + [s]
+                p = r.1
+            else:
+                done = true
+        else:
+            done = true
+    (out, p)
+
+def block_tag(t: Token) -> int =
+    let res: int = match t:
+        case Token.Eof => 0
+        case Token.Newline => 1
+        case Token.Indent(v: n) => 2
+        case _ => 0
+    res
+
+def block_indent(t: Token) -> int =
+    let res: int = match t:
+        case Token.Indent(v: n) => n
+        case _ => -1
+    res
+
 def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     let mut out: List<str> = []
     let mut p = pos
