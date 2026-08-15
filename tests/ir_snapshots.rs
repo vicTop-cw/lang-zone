@@ -68,7 +68,15 @@ def greet(name: str) -> str =
 
 #[test]
 fn ir_empty_module() {
-    run_ir_test("", "empty", &["LZIR v1", ";; 0 items"]);
+    // v157 起空模块也生成模块级魔法属性 items（__name__/__file__/__package__/
+    // __path__/__doc__/__is_macro__），共 6 个
+    run_ir_test("", "empty", &[
+        "LZIR v1",
+        ";; 6 items",
+        "const __name__: str",
+        "const __doc__: str",
+        "const __is_macro__: bool",
+    ]);
 }
 
 #[test]

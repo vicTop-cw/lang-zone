@@ -1948,6 +1948,7 @@ impl CodeGen {
         self.is_main = false;
         self.in_generator = saved_generator;
         self.in_generic_fn = saved_generic_fn;
+        self.in_math_fn = saved_math_fn;
 
         // 生成器：追加 return __gen_vec
         if has_yield {
@@ -4409,7 +4410,9 @@ impl CodeGen {
             }
             Stmt::BreakLabel { label: _, value: _ } => {
                 // block 内 break label → 无值 return（退出闭包）
-                // block 无返回值，value 仅用于 break NAME with v（触发 checker 块，待实现）
+                // 注意：`break NAME with v`（触发 checker 块）不走本分支——parser 将其
+                // 解析为 BlockCall，builder 转为 Call，checker 打包调用已实现（见
+                // ExprKind::Call 的 __Params 打包分支）；本分支仅覆盖纯标签跳出
                 self.emit_line("return; // break block");
             }
             Stmt::Continue => self.emit_line("continue;"),
@@ -5059,7 +5062,7 @@ impl CodeGen {
                     }
                     // ref/mut ref 参数：调用点自动传 &x / &mut x
                     if let Some(ref_flags) = self.fn_ref_params.get(&callee_name).cloned() {
-                        for (i, a) in args.iter().enumerate() {
+                        for (i, _a) in args.iter().enumerate() {
                             if i >= ref_flags.len() {
                                 break;
                             }
@@ -5940,7 +5943,7 @@ impl CodeGen {
                 // ref 参数：调用点自动 &x（DictExt::get 的 key: ref K → d.get(&key)，
                 // 否则 expected &_, found String E0308）
                 if let Some(ref_flags) = self.fn_ref_params.get(method.as_str()).cloned() {
-                    for (i, a) in args.iter().enumerate() {
+                    for (i, _a) in args.iter().enumerate() {
                         // 跳过 self 参数：fn_ref_params[0] 是 self 标记，方法调用
                         // args 不含 self（Dict::remove 的 key: ref K → d.remove(&key)）
                         let fi = i + 1;
@@ -6427,7 +6430,7 @@ impl CodeGen {
                     let args_owned: Vec<String> = args_s
                         .iter()
                         .enumerate()
-                        .map(|(i, s)| {
+                        .map(|(_, s)| {
                             let s = if method == "find" && s.starts_with('&') && !s.starts_with("&&") {
                                 s[1..].to_string()
                             } else {

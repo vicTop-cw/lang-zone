@@ -405,6 +405,18 @@ impl ComptimeEvaluator {
 
             // 列表方法调用：push（编译期构建查找表 `primes.push(n)`）
             Expr::MethodCall { receiver, method, args } => {
+                // inspect 命名空间：`inspect.getabstracts("Shape")` 在 parser 中
+                // 解析为 MethodCall（而非 Call{FieldAccess}），此处识别 receiver
+                // 为 `inspect` 的调用并转发到 eval_inspect_call（与 Call 分支的
+                // inspect:: 前缀等价，否则报「未定义的编译期变量 inspect」）
+                if let Expr::Ident(n) = receiver.as_ref() {
+                    if n == "inspect" {
+                        let iargs: Vec<ComptimeValue> = args.iter()
+                            .map(|a| Self::eval_expr(a, ctx))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        return Self::eval_inspect_call(method, &iargs, ctx);
+                    }
+                }
                 let recv = Self::eval_expr(receiver, ctx)?;
                 match (method.as_str(), recv) {
                     ("push", ComptimeValue::List(mut xs)) => {
@@ -509,7 +521,7 @@ impl ComptimeEvaluator {
                 }
                 // `primes.push(n)` 表达式语句：求值后写回 receiver 变量（副作用），
                 // 否则 push 结果被丢弃，查找表构建失败（fib_table 空列表）
-                if let Expr::MethodCall { receiver, method, args } = e {
+                if let Expr::MethodCall { receiver, method, args: _ } = e {
                     if method == "push" {
                         if let Expr::Ident(name) = receiver.as_ref() {
                             let v = Self::eval_expr(e, ctx)?;
@@ -867,6 +879,9 @@ impl ComptimeEvaluator {
             (InspectObject::Mro(m), "name") => Ok(ComptimeValue::Str(m.name.clone())),
             (InspectObject::Mro(m), "mro") => Ok(ComptimeValue::List(
                 m.mro.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+            (InspectObject::Abstracts(a), "name") => Ok(ComptimeValue::Str(a.name.clone())),
+            (InspectObject::Abstracts(a), "abstract_methods") => Ok(ComptimeValue::List(
+                a.abstract_methods.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
             (InspectObject::Frame(f), "function") => match &f.function {
                 Some(n) => Ok(ComptimeValue::Str(n.clone())),
                 None => Ok(ComptimeValue::None),
@@ -1004,9 +1019,27 @@ impl ComptimeEvaluator {
             "getabstracts" => {
                 let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
                     .ok_or("getabstracts 需字符串参数（类名）")?;
+                // 检测 struct/trait 中声明为 abstract 的方法（is_abstract，无方法体）
+                let mut abstract_methods: Vec<String> = Vec::new();
+                if let Some(s) = ctx.module.structs.iter().find(|s| s.name == name) {
+                    for m in &s.methods {
+                        if m.is_abstract {
+                            abstract_methods.push(m.name.clone());
+                        }
+                    }
+                }
+                if let Some(t) = ctx.module.traits.iter().find(|t| t.name == name) {
+                    for m in &t.methods {
+                        if m.is_abstract {
+                            abstract_methods.push(m.name.clone());
+                        }
+                    }
+                }
+                abstract_methods.sort();
+                abstract_methods.dedup();
                 Ok(ComptimeValue::Inspect(InspectObject::Abstracts(Abstracts {
                     name: name.clone(),
-                    abstract_methods: Vec::new(), // 待实现具体抽象方法检测
+                    abstract_methods,
                 })))
             }
 

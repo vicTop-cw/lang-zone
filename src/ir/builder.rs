@@ -1335,7 +1335,6 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                         .unwrap_or(lhs_ty);
                     last_ty
                 }
-                _ => lhs_ty,
             }
         }
         AstExpr::KwArg { .. } => IrType::Any,
@@ -3105,7 +3104,9 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             if let AstExpr::Ident(name) = target.as_ref() {
                 let inner_ctx = ctx;
                 let val = convert_expr(value, &inner_ctx);
-                // inner_ctx.add_var(name, val_ty); // FIXME: scope issue
+                // walrus 变量登记不在表达式层做（convert_expr 是 &TypeCtx 不可变
+                // 借用，无法 add_var）；由 convert_block 的前向传播统一登记
+                // （collect_stmt_walrus），使后续语句 lookup_var(name) 拿到真实类型
                 ExprKind::StructCtor {
                     name: "_Walrus".into(),
                     fields: vec![
@@ -3263,7 +3264,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     // → 语义是先调用 if_func(flag) 得到函数，再把 x 作为其参数：
                     //   if_func(flag)(x)，而非 if_func(x, flag)（E0061）
                     let callee_ret_is_fn = matches!(ctx.lookup_fn_return(name), IrType::Fn { .. });
-                    let mut all_args = if has_hole {
+                    let all_args = if has_hole {
                         let mut filled: Vec<Expr> = Vec::new();
                         let mut data_used = false;
                         for a in args.iter() {
@@ -4201,7 +4202,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     }
                     // 变体模式字段绑定：Shape::Circle(x: _, y: _, radius: r) →
                     // r 绑定为 radius 字段类型（int），而非整个 scrutinee 类型
-                    if let AstPattern::Variant(_, field_pats) = &arm.pattern {
+                    if let AstPattern::Variant(..) = &arm.pattern {
                         if let Some(ftypes) = field_types_for_variant(&arm.pattern, &arm_ctx) {
                             for (fname, ty) in ftypes {
                                 arm_ctx.add_var(&fname, ty);
@@ -5332,6 +5333,205 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
     }
 }
 
+/// 递归收集语句内所有 walrus `x := expr` 绑定（name → 推断类型）。
+/// convert_expr 是 &TypeCtx 不可变借用，无法在 walrus 转换处 add_var
+/// （builder.rs:3108 FIXME 的 scope issue）；改为在 convert_block 的
+/// 前向传播中统一登记，语义与 Let/BuildBlock Var 前向传播一致。
+fn collect_stmt_walrus(stmt: &AstStmt, ctx: &TypeCtx, out: &mut Vec<(String, IrType)>) {
+    match stmt {
+        AstStmt::Expr(e) => collect_expr_walrus(e, ctx, out),
+        AstStmt::Let { value, .. } | AstStmt::Const { value, .. } => {
+            collect_expr_walrus(value, ctx, out)
+        }
+        AstStmt::LetTuple { value, .. } => collect_expr_walrus(value, ctx, out),
+        AstStmt::Return(Some(e)) | AstStmt::Yield(Some(e)) | AstStmt::Raise(e) => {
+            collect_expr_walrus(e, ctx, out)
+        }
+        AstStmt::YieldFrom(e) | AstStmt::BlockCall { args: e, .. } => {
+            collect_expr_walrus(e, ctx, out)
+        }
+        AstStmt::Break(Some(e)) | AstStmt::BreakLabel { value: Some(e), .. } => {
+            collect_expr_walrus(e, ctx, out)
+        }
+        AstStmt::While { cond, guard, .. }
+        | AstStmt::WhileLet { expr: cond, guard, .. } => {
+            collect_expr_walrus(cond, ctx, out);
+            if let Some(g) = guard {
+                collect_expr_walrus(g, ctx, out);
+            }
+        }
+        AstStmt::For { iter, guard, .. } => {
+            collect_expr_walrus(iter, ctx, out);
+            if let Some(g) = guard {
+                collect_expr_walrus(g, ctx, out);
+            }
+        }
+        AstStmt::Assign { target, value, .. } => {
+            collect_expr_walrus(target, ctx, out);
+            collect_expr_walrus(value, ctx, out);
+        }
+        AstStmt::Guard {
+            cond,
+            success_expr,
+            let_binding,
+            ..
+        } => {
+            if let Some(c) = cond {
+                collect_expr_walrus(c, ctx, out);
+            }
+            if let Some(s) = success_expr {
+                collect_expr_walrus(s, ctx, out);
+            }
+            if let Some((_, e)) = let_binding {
+                collect_expr_walrus(e, ctx, out);
+            }
+        }
+        AstStmt::With { expr, .. } => collect_expr_walrus(expr, ctx, out),
+        AstStmt::Assert { expr, expected } => {
+            collect_expr_walrus(expr, ctx, out);
+            if let Some(e) = expected {
+                collect_expr_walrus(e, ctx, out);
+            }
+        }
+        AstStmt::Check { expr, message } => {
+            collect_expr_walrus(expr, ctx, out);
+            if let Some(m) = message {
+                collect_expr_walrus(m, ctx, out);
+            }
+        }
+        // 嵌套语句体（Loop/Block/CheckerBlock/Defer/Test/Suite/Comptime/FnDef）：
+        // 各自经独立的 convert_block 转换并自行登记，此处不递归避免作用域泄漏。
+        _ => {}
+    }
+}
+
+/// 递归扫描表达式树中的 walrus 绑定（跳过闭包体/块表达式/推导式作用域内绑定，
+/// 那些属于独立词法块；推导式的 iter/output 表达式仍扫描，其中 walrus 作用于外层）。
+fn collect_expr_walrus(e: &AstExpr, ctx: &TypeCtx, out: &mut Vec<(String, IrType)>) {
+    match e {
+        AstExpr::Walrus { target, value } => {
+            if let AstExpr::Ident(name) = target.as_ref() {
+                if !out.iter().any(|(n, _)| n == name) {
+                    out.push((name.clone(), infer_expr_type(value, ctx)));
+                }
+            }
+            collect_expr_walrus(target, ctx, out);
+            collect_expr_walrus(value, ctx, out);
+        }
+        AstExpr::ListLit(elems) | AstExpr::SetLit(elems) | AstExpr::TupleLit(elems) => {
+            for x in elems {
+                collect_expr_walrus(x, ctx, out);
+            }
+        }
+        AstExpr::DictLit(entries) => {
+            for (k, v) in entries {
+                collect_expr_walrus(k, ctx, out);
+                collect_expr_walrus(v, ctx, out);
+            }
+        }
+        AstExpr::Binary { left, right, .. } => {
+            collect_expr_walrus(left, ctx, out);
+            collect_expr_walrus(right, ctx, out);
+        }
+        AstExpr::Unary { operand, .. } => collect_expr_walrus(operand, ctx, out),
+        AstExpr::Call { func, args, .. } => {
+            collect_expr_walrus(func, ctx, out);
+            for a in args {
+                collect_expr_walrus(a, ctx, out);
+            }
+        }
+        AstExpr::KwArg { value, .. } => collect_expr_walrus(value, ctx, out),
+        AstExpr::MethodCall { receiver, args, .. } => {
+            collect_expr_walrus(receiver, ctx, out);
+            for a in args {
+                collect_expr_walrus(a, ctx, out);
+            }
+        }
+        AstExpr::FieldAccess { receiver, .. } | AstExpr::PathAccess { receiver, .. } => {
+            collect_expr_walrus(receiver, ctx, out)
+        }
+        AstExpr::Index { receiver, index } => {
+            collect_expr_walrus(receiver, ctx, out);
+            collect_expr_walrus(index, ctx, out);
+        }
+        AstExpr::If { cond, elif_clauses, .. } => {
+            collect_expr_walrus(cond, ctx, out);
+            for (c, _) in elif_clauses {
+                collect_expr_walrus(c, ctx, out);
+            }
+        }
+        AstExpr::Match { expr, arms } => {
+            collect_expr_walrus(expr, ctx, out);
+            for arm in arms {
+                if let Some(g) = &arm.guard {
+                    collect_expr_walrus(g, ctx, out);
+                }
+            }
+        }
+        AstExpr::Range { start, end, .. } => {
+            if let Some(s) = start {
+                collect_expr_walrus(s, ctx, out);
+            }
+            if let Some(e2) = end {
+                collect_expr_walrus(e2, ctx, out);
+            }
+        }
+        AstExpr::Pipe { receiver, callee, args } => {
+            collect_expr_walrus(receiver, ctx, out);
+            collect_expr_walrus(callee, ctx, out);
+            for a in args {
+                collect_expr_walrus(a, ctx, out);
+            }
+        }
+        AstExpr::SafeNav { receiver, .. } => collect_expr_walrus(receiver, ctx, out),
+        AstExpr::Try(inner)
+        | AstExpr::Spawn(inner)
+        | AstExpr::Move(inner)
+        | AstExpr::Panic(inner)
+        | AstExpr::Await(inner)
+        | AstExpr::Paren(inner)
+        | AstExpr::Comptime(inner) => collect_expr_walrus(inner, ctx, out),
+        AstExpr::NullCoalesce { left, right } => {
+            collect_expr_walrus(left, ctx, out);
+            collect_expr_walrus(right, ctx, out);
+        }
+        AstExpr::ListComprehension { output, iter, cond, extra_clauses, .. }
+        | AstExpr::SetComprehension { elem: output, iter, cond, extra_clauses, .. } => {
+            collect_expr_walrus(output, ctx, out);
+            collect_expr_walrus(iter, ctx, out);
+            if let Some(c) = cond {
+                collect_expr_walrus(c, ctx, out);
+            }
+            for (_, i, c) in extra_clauses {
+                collect_expr_walrus(i, ctx, out);
+                if let Some(c) = c {
+                    collect_expr_walrus(c, ctx, out);
+                }
+            }
+        }
+        AstExpr::DictComprehension { key, value, iter, cond, extra_clauses, .. } => {
+            collect_expr_walrus(key, ctx, out);
+            collect_expr_walrus(value, ctx, out);
+            collect_expr_walrus(iter, ctx, out);
+            if let Some(c) = cond {
+                collect_expr_walrus(c, ctx, out);
+            }
+            for (_, i, c) in extra_clauses {
+                collect_expr_walrus(i, ctx, out);
+                if let Some(c) = c {
+                    collect_expr_walrus(c, ctx, out);
+                }
+            }
+        }
+        AstExpr::Assign { target, value, .. } => {
+            collect_expr_walrus(target, ctx, out);
+            collect_expr_walrus(value, ctx, out);
+        }
+        // Closure/BlockExpr/BuildBlock/TryCatch：独立词法块，绑定不泄漏到外层
+        _ => {}
+    }
+}
+
 fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     // 创建可变的本地上下文，支持 Let 变量传播
     let mut block_ctx = TypeCtx::new();
@@ -5439,6 +5639,21 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                     block_ctx.add_var(name, ir_ty.clone());
                 }
             }
+        }
+        // 前向传播：`x := expr`（walrus）在表达式内绑定变量，登记类型供
+        // 后续语句引用（builder.rs:3108 FIXME：convert_expr 是 &TypeCtx
+        // 不可变借用，无法在 walrus 转换处 add_var；此处仿照 Let 前向传播
+        // 统一登记，使 `if (n := f()) > 0:` 的 then 分支 / 后续语句
+        // 能 lookup_var(n) 拿到真实类型而非 Any）
+        let mut walrus_binds = Vec::new();
+        collect_stmt_walrus(s, &block_ctx, &mut walrus_binds);
+        for (wname, wty) in walrus_binds {
+            if !block_ctx.vars.contains_key(&wname)
+                && !block_ctx.top_level_consts.contains_key(&wname)
+            {
+                block_ctx.block_declared.insert(wname.clone());
+            }
+            block_ctx.add_var(&wname, wty);
         }
         // guard let <Variant>(...) = expr else: ... → match value { Variant(r) => { 剩余语句 }, _ => { else_body } }
         if let AstStmt::Guard {

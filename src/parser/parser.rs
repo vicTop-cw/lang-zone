@@ -339,8 +339,10 @@ impl Parser {
                     duck_defs.push(d);
                 }
                 Token::Macro | Token::Template => {
-                    // 宏定义: macro name(params) -> Tokens = body / template name(...) -> Tokens = body
-                    // 宏是编译期 Token 转换，IR 后端暂不展开；解析为普通函数定义
+                    // 宏定义兜底解析：正常流程下宏/template 定义已由 main.rs 的
+                    // token 层展开管线（MacroExpander/TemplateExpander 交替展开，
+                    // 08 §3.6）在解析前移除并展开，IR 后端直接消费展开后的 token
+                    // 流；此处仅作兜底（宏定义未被前置过滤时），解析为普通函数定义
                     // （参数/返回按 Tokens 类型保存，body 为 quote(...) 表达式）
                     self.advance(); // consume macro/template
                     let name = match self.advance() {
@@ -349,7 +351,7 @@ impl Parser {
                     };
                     // 参数
                     self.expect(Token::LParen)?;
-                    let (params, variadic) = self.parse_params()?;
+                    let (params, _variadic) = self.parse_params()?;
                     self.expect(Token::RParen)?;
                     // 可选返回类型: -> Tokens
                     let return_type = if self.check(&Token::Arrow) {

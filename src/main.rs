@@ -116,8 +116,8 @@ fn main() {
 
     // ── 宏展开（Phase 2: Lexer 之后、Parser 之前） ──
     // 第一遍：提取宏定义并构建注册中心（ranges 记录宏定义占用 token，用于从流中移除）
-    let mut macro_ranges_from_extract: Vec<usize> = Vec::new();
-    let mut template_ranges_from_extract: Vec<usize> = Vec::new();
+    let mut macro_ranges_from_extract: Vec<usize>;
+    let template_ranges_from_extract: Vec<usize>;
     let mut registry = match extract_macro_defs(&tokens) {
         Ok((r, ranges)) => {
             macro_ranges_from_extract = ranges;
