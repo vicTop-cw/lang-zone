@@ -5039,7 +5039,10 @@ impl CodeGen {
                                     args_s[i] = format!("{}.into_iter()", s);
                                 }
                             }
-                            let arg_is_var = matches!(&a.kind, ExprKind::Var(_));
+                            let arg_is_var = matches!(
+                                &a.kind,
+                                ExprKind::Var(_) | ExprKind::IndexGet { .. }
+                            );
                             let arg_is_copy = matches!(
                                 &a.ty,
                                 IrType::Int | IrType::F64 | IrType::Bool
@@ -5047,6 +5050,9 @@ impl CodeGen {
                             // Fn 类型参数（impl Fn(...) opaque）不可 clone（E0599）：
                             // 实参是闭包变量时直接传引用即可，不自动 .clone()
                             let param_is_fn = matches!(&callee_ptypes[i], IrType::Fn { .. });
+                            // 缺陷 B 修复：实参为 IndexGet（`f(ts[0])`）且元素类型
+                            // 非 Copy 时，从 Vec 索引取出即 move（E0507），需自动
+                            // .clone()——与变量实参的 E0382 处理对齐
                             if !param_is_copy && arg_is_var && !arg_is_copy && !param_is_fn && i < args_s.len() {
                                 let s = &args_s[i];
                                 let is_none_lit = s.trim_end() == "None";
@@ -7093,6 +7099,28 @@ impl CodeGen {
                     }
                     return format!("{} + &{}", lhs_base, rhs_s);
                 }
+                // List/Vec + List/Vec 拼接：Rust Vec 未实现 Add（E0369，
+                // `out + [x]` 会生成 `out + vec![...]` 编译失败）。生成
+                // extend 语义：`a + b` → `{ let mut v = a; v.extend(b); v }`
+                // （b 为 Vec<T>，实现 IntoIterator；拼接返回新 Vec，语义一致）
+                let lhs_is_list = matches!(&lhs.ty, IrType::Named { path, .. }
+                    if path == "List" || path == "Vec");
+                let rhs_is_list = matches!(&rhs.ty, IrType::Named { path, .. }
+                    if path == "List" || path == "Vec");
+                if *op == BinOpKind::Add && (lhs_is_list || rhs_is_list) {
+                    let lhs_s = self.gen_expr(lhs);
+                    let rhs_s = self.gen_expr(rhs);
+                    // lhs 是引用（self.字段 等）时先克隆再 extend，否则 move 借用值（E0507）
+                    let lhs_base = if lhs_s.trim_start().starts_with('&') {
+                        format!("(*{}).clone()", lhs_s)
+                    } else {
+                        lhs_s
+                    };
+                    return format!(
+                        "{{ let mut __lz_cat = {}; __lz_cat.extend({}); __lz_cat }}",
+                        lhs_base, rhs_s
+                    );
+                }
                 let op_s = self.binop_str(op);
                 // 用户 struct 比较运算符 → 自定义魔术方法（box.lz `a == b` 调用
                 // `impl Box<T> { def __eq__ }`，否则 Box 无 PartialEq 报 E0369）：
@@ -7656,6 +7684,15 @@ impl CodeGen {
                 child.current_fn_ret_is_ref = self.current_fn_ret_is_ref;
                 // 函数级返回类型：BlockExpr（if 块）内 dict 索引 ref 判断需继承
                 child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
+                // 函数参数类型表需继承：块内 Call 的实参 clone 注入（非 Copy 变量/
+                // 索引元素自动 .clone()，E0382/E0507）依赖 fn_param_types 查询，
+                // 否则 if 分支块内的 `f(list[i])` 不 clone（bootstrap/lz_ir 试点暴露）
+                child.fn_param_types = self.fn_param_types.clone();
+                child.fn_ref_params = self.fn_ref_params.clone();
+                child.overload_sigs = self.overload_sigs.clone();
+                child.fn_variadic = self.fn_variadic.clone();
+                child.fn_kwargs = self.fn_kwargs.clone();
+                child.current_variadic_params = self.current_variadic_params.clone();
                 // __gen_vec 已在函数级别声明，BlockExpr 中只需 push 不需要重新声明
                 child.gen_block_inner(block);
                 format!("{{\n{}    }}", child.buf)
@@ -7778,7 +7815,33 @@ impl CodeGen {
                 if is_nil {
                     "()".to_string()
                 } else {
-                    let elems_s: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
+                    let elems_s: Vec<String> = elems
+                        .iter()
+                        .map(|e| {
+                            let s = self.gen_expr(e);
+                            // 列表字面量元素：IndexGet/Var 且元素类型非 Copy 时
+                            // 自动 .clone()（E0507 cannot move out of index /
+                            // E0382 moved value，如 `out + [ts[i]]` 的 vec![ts[i]]）
+                            let is_copy = matches!(
+                                &e.ty,
+                                IrType::Int | IrType::F64 | IrType::Bool
+                            );
+                            let is_moveable = matches!(
+                                &e.kind,
+                                ExprKind::Var(_) | ExprKind::IndexGet { .. }
+                            );
+                            if !is_copy
+                                && is_moveable
+                                && !s.starts_with('&')
+                                && !s.ends_with(".clone()")
+                                && !s.contains("::")
+                            {
+                                format!("{}.clone()", s)
+                            } else {
+                                s
+                            }
+                        })
+                        .collect();
                     if elems_s.is_empty() {
                         // 空列表：尝试从类型获取元素类型用于 Vec 标注
                         if let IrType::Named { path, args } = &expr.ty {
