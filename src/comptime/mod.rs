@@ -980,7 +980,33 @@ impl ComptimeEvaluator {
 
             // ── 源码 ──
             "getsource" | "getsourcefile" | "getsourcelines" | "getdoc" | "getcomments" => {
-                Err(format!("inspect::{} 需要注入源码文本（ComptimeContext::with_source）", name))
+                // 源码文本由编译入口（main.rs）注入 Module.source_text →
+                // builder 的 ComptimeContext::with_source；未注入时报错提示
+                let src = ctx
+                    .source
+                    .clone()
+                    .ok_or_else(|| format!("inspect::{} 需要注入源码文本（ComptimeContext::with_source）", name))?;
+                let filename = ctx.module.file_path.clone().unwrap_or_else(|| "<unknown>".into());
+                let lines: Vec<String> = src.lines().map(|l| l.to_string()).collect();
+                match name {
+                    "getsourcefile" => {
+                        Ok(ComptimeValue::Str(filename))
+                    }
+                    "getsource" | "getsourcelines" => {
+                        Ok(ComptimeValue::Inspect(InspectObject::Source(SourceInfo {
+                            filename,
+                            source: src,
+                            first_lineno: 1,
+                            lines,
+                        })))
+                    }
+                    // getdoc / getcomments：源码级文档/注释提取依赖 AST 节点注解，
+                    // 暂以空字符串/空列表占位（结构可用，内容留待文档管线完善）
+                    "getdoc" => Ok(ComptimeValue::Str(String::new())),
+                    _ => Ok(ComptimeValue::List(
+                        lines.into_iter().map(ComptimeValue::Str).collect(),
+                    )),
+                }
             }
 
             // ── 当前模块信息 ──

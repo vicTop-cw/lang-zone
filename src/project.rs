@@ -295,6 +295,7 @@ impl ProjectCompiler {
         let mut merged = ast::Module {
             name: None,
             file_path: None,
+            source_text: None,
             imports: vec![],
             functions: vec![],
             structs: vec![],

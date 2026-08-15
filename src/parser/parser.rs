@@ -522,6 +522,8 @@ impl Parser {
             name: module_name,
             // 源文件路径由 main.rs 在解析后注入（parser 不感知文件路径）
             file_path: None,
+            // 源文件文本同样由 main.rs 在解析后注入（comptime getsource 数据源）
+            source_text: None,
             imports,
             functions,
             structs,

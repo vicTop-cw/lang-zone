@@ -24,6 +24,33 @@
 
 ---
 
+## 状态总览（2026-08-15 更新）
+
+> 本计划所列各项的当前实现状态（v157/v158 复核，均为可验证结论）：
+
+| 项 | 特性 | 状态 |
+|:--:|:-----|:----:|
+| P0-1 | Dict/Set 推导式 | ✅ 已实现（与列表推导共用框架，多 for 子句 + guard 可用） |
+| P0-2 | for/while 守卫 + else | ✅ 已实现（AST/IR 均有 guard + else_body 字段） |
+| P0-3 | type 别名解析 | ✅ 已实现（`TypeAliasDef` + IR `Item::TypeAlias`） |
+| P1-1 | comptime 块内容解析 | ✅ 已实现（`AstStmt::Comptime` → 求值内联/降级） |
+| P1-2 | 顶层构建块 | ✅ 已实现（`top_level_builds` → BlockExpr） |
+| P1-3 | 模块级魔法属性 | ✅ 已实现（v157：`__name__`/`__file__`/`__package__`/`__path__`/`__doc__`/`__is_macro__`） |
+| P1-4 | `_ = expr` 丢弃 | ✅ 已实现 |
+| P1-5 | 多行 struct 构造调用 | ✅ 已实现（parser/expr.rs:669-672 处理 LParen 后 Indent） |
+| P1-6 | `#!` shebang 属性宏 | ✅ 已实现（`#!bin macro` 宏模块声明，lexer 整行 Token::Macro） |
+| P1-7 | 泛型约束 → WhereBound | ✅ 已实现（where 子句 + 尖括号内联约束均可用） |
+| P2-1 | 关键字降级 | ✅ 已实现（panic/Some/None/Ok/Err → prelude 解析） |
+| P2-2 | `~` 后缀命名参数糖 | ✅ 已实现 |
+| P2-3 | magic 声明块 | ✅ 已实现（魔法属性 + 独立 magic 块） |
+| P2-4 | `__unapply__` 提取器 | ✅ 已实现（match 解构） |
+| P2-5 | 顶层 macro 定义 | ✅ 已实现（main.rs token 层 MacroExpander/TemplateExpander 展开） |
+| P2-6 | 非 Range 迭代器列表推导 | ✅ 已修复（`[x*x for x in xs]` 生成 flat_map/filter/map，probe p13 实证） |
+
+**结论：原计划 16 项全部落地**，本文件保留为历史计划存档（原正文记录当时的缺失状态与实现步骤）。
+
+---
+
 ## 真正缺失的前端特性（按优先级排序）
 
 ### P0 — 阻塞性（3 项）

@@ -10,6 +10,9 @@ pub struct Module {
     pub name: Option<String>, // 模块名（来自 __name__ 或文件路径）
     /// .lz 源文件路径（06e 模块级魔法属性 __file__/__package__/__path__ 的数据源）
     pub file_path: Option<String>,
+    /// .lz 源文件文本（comptime `inspect.getsource`/`getsourcelines` 等的数据源，
+    /// 由编译入口 main.rs 注入；默认 None = 未注入，getsource 报错提示）
+    pub source_text: Option<String>,
     pub imports: Vec<ImportStmt>,
     pub functions: Vec<Function>,
     pub structs: Vec<StructDef>,

@@ -69,6 +69,9 @@ struct TypeCtx {
     /// 顶层 const 的编译期求值结果（name → ComptimeValue）：comptime 块/表达式
     /// 内解析 const 引用（`comptime LIMIT / 2`），否则 Ident 查不到报未定义
     comptime_consts: std::collections::HashMap<String, crate::comptime::ComptimeValue>,
+    /// 跨模块类型签名（lz-infer 生成的 .lzi）：函数返回类型回退查询源
+    /// （本地函数查不到时，从 .lzi 模块签名补全，接通跨模块推断管线）
+    lzi_signatures: Option<std::rc::Rc<crate::infer::LziRegistry>>,
     /// 当前模块 AST（Rc 共享）：comptime 求值需访问模块函数定义
     /// （`comptime gen_primes(8)` 查 module.functions 编译期执行）
     comptime_module: Option<std::rc::Rc<ast::Module>>,
@@ -98,6 +101,7 @@ impl TypeCtx {
             errors: Rc::new(RefCell::new(Vec::new())),
             comptime_consts: std::collections::HashMap::new(),
             comptime_module: None,
+            lzi_signatures: None,
         }
     }
 
@@ -252,7 +256,23 @@ impl TypeCtx {
     }
 
     fn lookup_fn_return(&self, name: &str) -> IrType {
-        self.fn_returns.get(name).cloned().unwrap_or(IrType::Any)
+        if let Some(t) = self.fn_returns.get(name) {
+            return t.clone();
+        }
+        // 跨模块回退：本地函数查不到时，从 .lzi 签名补全（lz-infer 生成的
+        // 跨模块类型签名，main.rs --lzi 加载后经 build_ir_with_lzi 注入）
+        if let Some(reg) = &self.lzi_signatures {
+            for file in &reg.files {
+                for m in file.modules.values() {
+                    if let Some(f) = m.functions.get(name) {
+                        if let Some(rt) = &f.return_type {
+                            return lzi_type_to_ir(rt);
+                        }
+                    }
+                }
+            }
+        }
+        IrType::Any
     }
 
     fn is_struct(&self, name: &str) -> bool {
@@ -2304,6 +2324,10 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let empty_module = ast::Module::default();
             let module_ref = ctx.comptime_module.as_ref().map(|m| m.as_ref()).unwrap_or(&empty_module);
             let mut cctx = crate::comptime::ComptimeContext::new(module_ref);
+            // 注入源码文本（inspect.getsource/getsourcelines 数据源，main.rs 已填）
+            if let Some(src) = &module_ref.source_text {
+                cctx = cctx.with_source(src.clone());
+            }
             // 注入顶层 const 求值结果（`comptime LIMIT / 2` 解析 const 引用）
             for (n, v) in &ctx.comptime_consts {
                 cctx.symtab.insert(n.clone(), v.clone());
@@ -4872,6 +4896,10 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             let empty_module = ast::Module::default();
             let module_ref = ctx.comptime_module.as_ref().map(|m| m.as_ref()).unwrap_or(&empty_module);
             let mut cctx = crate::comptime::ComptimeContext::new(module_ref);
+            // 注入源码文本（inspect.getsource/getsourcelines 数据源，main.rs 已填）
+            if let Some(src) = &module_ref.source_text {
+                cctx = cctx.with_source(src.clone());
+            }
             // 注入顶层 const 求值结果（comptime 块内解析 const 引用）
             for (n, v) in &ctx.comptime_consts {
                 cctx.symtab.insert(n.clone(), v.clone());
@@ -7275,10 +7303,78 @@ impl std::fmt::Display for IrBuildError {
 }
 
 /// 主入口：AST Module → IrModule
+/// 将 .lzi 签名中的 LZ 类型字符串转换为 IrType（跨模块推断回退用）。
+/// 支持基本类型与常见泛型容器；未知类型降级为 Named（与 from_ast_type 语义一致）。
+fn lzi_type_to_ir(s: &str) -> IrType {
+    match s.trim() {
+        "int" | "i64" => IrType::Int,
+        "f64" => IrType::F64,
+        "str" | "String" => IrType::Str,
+        "bool" => IrType::Bool,
+        "()" | "Unit" => IrType::Unit,
+        other => {
+            // Option<T> / List<T> / Vec<T> / Dict<K,V> 等泛型容器
+            if let Some(inner) = other
+                .strip_prefix("Option<")
+                .and_then(|t| t.strip_suffix('>'))
+            {
+                IrType::Option(Box::new(lzi_type_to_ir(inner)))
+            } else if let Some(inner) = other
+                .strip_prefix("List<")
+                .or_else(|| other.strip_prefix("Vec<"))
+                .and_then(|t| t.strip_suffix('>'))
+            {
+                IrType::Named {
+                    path: "Vec".into(),
+                    args: vec![lzi_type_to_ir(inner)],
+                }
+            } else if let Some(inner) = other
+                .strip_prefix("Dict<")
+                .or_else(|| other.strip_prefix("HashMap<"))
+                .and_then(|t| t.strip_suffix('>'))
+            {
+                // Dict<K,V> → HashMap<K,V>（IR Named 表达）
+                let parts: Vec<&str> = inner.splitn(2, ',').map(|t| t.trim()).collect();
+                IrType::Named {
+                    path: "HashMap".into(),
+                    args: vec![
+                        lzi_type_to_ir(parts.first().copied().unwrap_or("Any")),
+                        lzi_type_to_ir(parts.get(1).copied().unwrap_or("Any")),
+                    ],
+                }
+            } else {
+                IrType::Named {
+                    path: other.to_string(),
+                    args: vec![],
+                }
+            }
+        }
+    }
+}
+
+/// 默认入口：不带跨模块签名（等价 build_ir_with_lzi(_, None)）
 pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
+    build_ir_inner(ast_module, None)
+}
+
+/// 带 .lzi 跨模块类型签名的入口：main.rs `--lzi <file>` 加载后传入，
+/// 供 IR builder 在本地函数查不到时回退查询外部模块函数返回类型。
+pub fn build_ir_with_lzi(
+    ast_module: &ast::Module,
+    lzi: std::rc::Rc<crate::infer::LziRegistry>,
+) -> Result<IrModule, IrBuildError> {
+    build_ir_inner(ast_module, Some(lzi))
+}
+
+fn build_ir_inner(
+    ast_module: &ast::Module,
+    lzi: Option<std::rc::Rc<crate::infer::LziRegistry>>,
+) -> Result<IrModule, IrBuildError> {
     let mut ctx = TypeCtx::new();
     let pending_items = Rc::new(RefCell::new(Vec::new()));
     ctx.pending_items = pending_items.clone();
+    // 跨模块签名注入（.lzi）：lookup_fn_return 回退查询源
+    ctx.lzi_signatures = lzi;
     // comptime 求值需要访问模块函数定义（`comptime gen_primes(8)` 编译期执行）
     ctx.comptime_module = Some(Rc::new(ast_module.clone()));
 
@@ -7295,7 +7391,12 @@ pub fn build_ir(ast_module: &ast::Module) -> Result<IrModule, IrBuildError> {
         ctx.top_level_consts.insert(c.name.clone(), ty);
         // 顶层 const 编译期求值（comptime 块/表达式内解析 const 引用）
         let empty_module = ast::Module::default();
-        let mut cctx = crate::comptime::ComptimeContext::new(&empty_module);
+        let module_ref = ctx.comptime_module.as_ref().map(|m| m.as_ref()).unwrap_or(&empty_module);
+        let mut cctx = crate::comptime::ComptimeContext::new(module_ref);
+        // 注入源码文本（inspect.getsource/getsourcelines 数据源，main.rs 已填）
+        if let Some(src) = &module_ref.source_text {
+            cctx = cctx.with_source(src.clone());
+        }
         if let Ok(v) = crate::comptime::ComptimeEvaluator::eval_expr(&c.value, &mut cctx) {
             ctx.comptime_consts.insert(c.name.clone(), v);
         }

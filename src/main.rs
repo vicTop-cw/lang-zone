@@ -52,6 +52,17 @@ fn main() {
     let run_tests = args.iter().any(|a| a == "--test");
     let use_cache = args.iter().any(|a| a == "--cached");
 
+    // --lzi <file>：加载 lz-infer 生成的跨模块类型签名（.lzi），注入 IR builder，
+    // 本地函数查不到返回类型时回退查询外部模块签名（跨模块推断管线接通）
+    let lzi_registry = extract_flag_value(&args, "--lzi").map(|p| {
+        let reg = lang_zone::infer::LziRegistry::load_single(Path::new(&p))
+            .unwrap_or_else(|e| {
+                eprintln!("lzi load error ({}): {}", p, e);
+                std::process::exit(1);
+            });
+        std::rc::Rc::new(reg)
+    });
+
     let path = &args[1];
 
     // --project: 递归加载 import 的所有 .lz 依赖，合并编译
@@ -64,7 +75,7 @@ fn main() {
                 std::process::exit(1);
             });
 
-        let (rust_code, label) = match build_ir(&merged) {
+        let (rust_code, label) = match build_ir_opt(&merged, lzi_registry.as_ref()) {
             Ok(ir_module) => {
                 let mut cg = IrCodeGen::new();
                 (cg.generate(&ir_module), "IR codegen")
@@ -293,6 +304,9 @@ fn main() {
     // 模块级魔法属性 __file__/__package__/__path__ 的数据源（06e §一）：
     // parser 不感知文件路径，编译入口（main.rs）在此注入 .lz 源文件路径
     module.file_path = Some(path.to_string());
+    // comptime inspect.getsource/getsourcelines 的源码数据源（08b §6）：
+    // 注入源文件文本，供 ComptimeContext.with_source 使用
+    module.source_text = Some(source.clone());
 
     if args.iter().any(|a| a == "--ast") {
         println!("{:#?}", module);
@@ -301,7 +315,7 @@ fn main() {
 
     // --emit=ir: 输出 LZIR 中间表示文本（不生成 .rs）
     if args.iter().any(|a| a == "--emit=ir") {
-        match build_ir(&module) {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
             Ok(ir_module) => {
                 println!("{ir_module}");
                 return;
@@ -314,7 +328,7 @@ fn main() {
     }
 
     // 唯一 codegen 路径: AST → LZIR → Rust（无老路子选项）
-    match build_ir(&module) {
+    match build_ir_opt(&module, lzi_registry.as_ref()) {
         Ok(ir_module) => {
             let mut cg = IrCodeGen::new();
             let rust_code = cg.generate(&ir_module);
@@ -334,6 +348,18 @@ fn main() {
             eprintln!("IR build error: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，
+/// 否则默认入口（本地函数查不到返回类型时回退查询外部模块签名）
+fn build_ir_opt(
+    module: &lang_zone::ast::Module,
+    lzi: Option<&std::rc::Rc<lang_zone::infer::LziRegistry>>,
+) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
+    match lzi {
+        Some(reg) => lang_zone::ir::builder::build_ir_with_lzi(module, reg.clone()),
+        None => build_ir(module),
     }
 }
 
