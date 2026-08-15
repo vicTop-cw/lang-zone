@@ -7087,6 +7087,12 @@ impl CodeGen {
                         );
                     let lhs_base = if lhs_is_ref_str {
                         format!("{}.to_string()", lhs_s)
+                    } else if matches!(&lhs.kind, ExprKind::IndexGet { .. }) {
+                        // lhs 从容器取元素（`chars[0] + "x"`，自举试点 p23 复现）：
+                        // IndexGet 生成 `chars[0]`（move 出 String，E0507），
+                        // str 拼接要求 lhs 为 String 值——需 .clone()（与 v162
+                        // 实参 clone 条件 Var|IndexGet 同族）
+                        format!("{}.clone()", lhs_s)
                     } else {
                         lhs_s
                     };

@@ -37,3 +37,21 @@
 
 > 缺陷 2 为真实 codegen 缺陷（值语义），待排期修复；缺陷 1 为设计行为需文档化；
 > 缺陷 3 为编译器递归限制，词法试点需拆分函数规避。
+
+## 五、KPI 推进记录（v168，追加）
+
+- **2026-08-15 v168 更新**：binop 索引 clone 缺陷已修复（str 拼接 lhs IndexGet 注入
+  `.clone()`，p23 复现 → rustc 0 错误，6 DEMO 回归通过）。
+- **词法试点跑通**（bootstrap/work/lz_lexer/lexer.lz）：Token 枚举 + tokenize 简化版
+  （标识符/关键字/整数/运算符/标点）端到端输出正确（rustc 0 错误）。拆函数规避
+  栈溢出：scan_ident/scan_int/scan_punct 拆分 + punct_token 查表法（List 数据驱动）
+  + is_digit/is_alpha 范围比较短链——规避「11 层 elif 链 + Option<Token>」编译栈溢出
+  （p27 复现根因：深层 elif/`||` 链被解析为深嵌套 BinOp）。
+- **v168 新暴露缺陷**（登记，待修复）：
+  - 元组字段 `r.0` 作为实参被消费后再用 → E0382（LZ 未对元组字段实参注入 clone）；
+  - 元组字段类型未推断为 Str → `num as int` 走 `as i64` 强转 E0605（cast 路径需
+    依据字段类型而非表达式形态）；
+  - `Option<Token>` 类型下 `None` 硬编码 i64（Option<Token> 场景 E0308）；
+  - 深层 elif/`||` 链（>10 层）触发 lang-zone 编译栈溢出（编译器递归限制）。
+- **LZ 占比不变**（词法试点在 bootstrap 未入库；lexer.lz 约 190 行待入库提升占比）。
+
