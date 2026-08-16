@@ -401,3 +401,25 @@
     while 循环 ✅ → for 循环 ✅ → **match 表达式（case => 值）** ✅ →
     下一阶段（类与实例 / 字符串方法 / 模块与导入 / 下标访问）。
 
+## 二十三、KPI 推进记录（v187，追加）
+
+- **2026-08-16 v187 下标访问表达式（Index 节点 + 后缀下标层）**：
+  - **Token 扩展**：枚举加 `LBracket`/`RBracket`；op_token 表加 `[`/`]`；
+  - **Expr 节点扩展**：`Index(recv: Expr, idx: Expr)` 递归变体
+    （recv/idx 均含 Expr → Box 判定与定义/构造两侧一致）；
+  - **后缀下标层**：parse_postfix 扩展——LParen → Call、Dot → Get
+    之外新增 `LBracket → Index`（parse_logic 解析下标表达式，
+    跳过 RBracket）；`xs[i + 1]` 下标内表达式正常解析；
+  - **display_expr 扩展**：Index 渲染 `recv[idx]`（recv/idx 递归渲染）；
+  - **端到端验证**：`def pick(xs: int) -> int {let first : int = xs[0],
+    let second : int = xs[i + 1], return first + second}` + `else`，
+    rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → 取字段 ✅ → match 语句 ✅ →
+    while 循环 ✅ → for 循环 ✅ → match 表达式 ✅ → **下标访问
+    （Index + 后缀层）** ✅ → 下一阶段（类与实例 / 字符串方法 /
+    模块与导入）。
+
