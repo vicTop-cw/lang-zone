@@ -464,3 +464,29 @@
     字符串字面量 ✅ → **列表字面量（ListLit）** ✅ → 下一阶段（类与实例 /
     模块与导入 / 元组与字典字面量）。
 
+## 二十六、KPI 推进记录（v190，追加）
+
+- **2026-08-16 v190 元组字面量（TupleLit 节点 + 逗号探测）**：
+  - **Expr 节点扩展**：`TupleLit(elems: List<Expr>)` 递归变体
+    （`List<Expr>` 字段 Box 判定与定义/构造两侧一致）；
+  - **parse_atom LParen 分支升级**：逗号探测区分两种形态——
+    `(expr)` 括号表达式（无逗号，返回内层表达式）vs `(a, b, c)`
+    元组字面量（首元素 + 逗号分隔剩余元素直到 RParen）；
+  - **新暴露边界**：`.0`/`.1` 元组字段访问——Get 后缀层原本只用
+    ident_name（Ident 字段名），`pair.0` 渲染成 `pair.?`；新增
+    `field_desc`（IntLit → 数字、Ident → 名）修复；
+  - **display_expr 扩展**：TupleLit 渲染 `(1, p)`（expr_list_summary
+    逗号连接元素，递归渲染）；
+  - **端到端验证**：`def swap_pair(p: int) -> int {let pair : int =
+    (1, p), let single : int = p, return pair.0}` + `else`，rustc 0
+    错误，运行输出正确（元组/括号/元组字段三形态正确区分）；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → 取字段 ✅ → match 语句 ✅ →
+    while 循环 ✅ → for 循环 ✅ → match 表达式 ✅ → 下标访问 ✅ →
+    字符串字面量 ✅ → 列表字面量 ✅ → **元组字面量（TupleLit + 逗号
+    探测 + 数字字段）** ✅ → 下一阶段（类与实例 / 模块与导入 /
+    字典字面量）。
+
