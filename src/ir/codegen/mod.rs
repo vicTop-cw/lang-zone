@@ -2411,6 +2411,7 @@ impl CodeGen {
                 let mut child = CodeGen::new();
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
+                child.enum_variant_fields = self.enum_variant_fields.clone();
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = self.in_generator;
                 child.suppress_tail_return = true;
@@ -7362,6 +7363,7 @@ impl CodeGen {
                     let mut child = CodeGen::new();
                     child.emitted_types = self.emitted_types.clone();
                     child.enum_variants = self.enum_variants.clone();
+                    child.enum_variant_fields = self.enum_variant_fields.clone();
                     child.fn_param_info = self.fn_param_info.clone();
                     child.current_variadic_params = self.current_variadic_params.clone();
                     // 传递 static/global 变量名集合（用于 E0530 冲突检测）
@@ -7675,6 +7677,7 @@ impl CodeGen {
                 // 复制父 CodeGen 的枚举/类型映射到子实例
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
+                child.enum_variant_fields = self.enum_variant_fields.clone();
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = self.in_generator;
                 // 泛型函数标志需传递给 child（match 表达式内 Option.None 的裸 None

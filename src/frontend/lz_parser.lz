@@ -162,23 +162,32 @@ def tokenize(src: str) -> List<Token> =
 def tok_at(toks: List<Token>, idx: int) -> Token =
     toks[idx].clone()
 
-// ── 递归下降解析器（返回 (结果, 新位置)，元组先绑定中间变量）──
-// parse_atom: 整数(占位 0) | 标识符(占位 0) | ( expr )
-def parse_atom(toks: List<Token>, pos: int) -> (int, int) =
+// ── 表达式 AST（v178：求值 → 建树，自举 Parser 核心数据结构）──
+// 递归枚举（Bin 含 Expr）——p0_recursive_enum 已验证 codegen 可行；
+// 字段名用 v:nm/op 长名，规避单字母 codegen 降级（E0308）
+enum Expr:
+    IntLit(v: int)
+    Ident(name: str)
+    Bin(op: str, l: Expr, r: Expr)
+
+// ── 递归下降解析器（返回 (Expr, 新位置)，元组先绑定中间变量）──
+// parse_atom: 整数 | 标识符 | ( expr )
+def parse_atom(toks: List<Token>, pos: int) -> (Expr, int) =
     let t = tok_at(toks, pos)
-    let res: (int, int) = match t:
-        case Token.IntLit(v: n) => (n, pos + 1)
+    let res: (Expr, int) = match t:
+        case Token.IntLit(v: n) => (Expr.IntLit(v: n), pos + 1)
+        case Token.Ident(name: nm) => (Expr.Ident(name: nm), pos + 1)
         case Token.LParen =>
             let r = parse_expr(toks, pos + 1)
             let rv = r.0
             let rp = r.1
-            let pr: (int, int) = (rv, rp + 1)
+            let pr: (Expr, int) = (rv, rp + 1)
             pr
-        case _ => (0, pos + 1)
+        case _ => (Expr.Ident(name: "?"), pos + 1)
     res
 
 // parse_term: atom (* atom)* / atom
-def parse_term(toks: List<Token>, pos: int) -> (int, int) =
+def parse_term(toks: List<Token>, pos: int) -> (Expr, int) =
     let first = parse_atom(toks, pos)
     let mut value = first.0
     let mut p = first.1
@@ -187,19 +196,25 @@ def parse_term(toks: List<Token>, pos: int) -> (int, int) =
         let t = tok_at(toks, p)
         if t == Token.Star:
             let r = parse_atom(toks, p + 1)
-            value = value * r.0
-            p = r.1
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "*", l: value.clone(), r: rv)
+            value = ne
+            p = rp
         elif t == Token.Slash:
             let r = parse_atom(toks, p + 1)
-            value = value / r.0
-            p = r.1
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "/", l: value.clone(), r: rv)
+            value = ne
+            p = rp
         else:
             done = true
-    let res: (int, int) = (value, p)
+    let res: (Expr, int) = (value, p)
     res
 
 // parse_expr: term (+ term)* - term
-def parse_expr(toks: List<Token>, pos: int) -> (int, int) =
+def parse_expr(toks: List<Token>, pos: int) -> (Expr, int) =
     let first = parse_term(toks, pos)
     let mut value = first.0
     let mut p = first.1
@@ -208,15 +223,31 @@ def parse_expr(toks: List<Token>, pos: int) -> (int, int) =
         let t = tok_at(toks, p)
         if t == Token.Plus:
             let r = parse_term(toks, p + 1)
-            value = value + r.0
-            p = r.1
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "+", l: value.clone(), r: rv)
+            value = ne
+            p = rp
         elif t == Token.Minus:
             let r = parse_term(toks, p + 1)
-            value = value - r.0
-            p = r.1
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "-", l: value.clone(), r: rv)
+            value = ne
+            p = rp
         else:
             done = true
-    let res: (int, int) = (value, p)
+    let res: (Expr, int) = (value, p)
+    res
+
+// Expr → 中缀串（v178）：IntLit(3) → "3"；Bin("+",a,b) → "a + b"；
+// 递归渲染（Bin 的 l/r 也是 Expr）
+def display_expr(e: Expr) -> str =
+    let res: str = match e:
+        case Expr.IntLit(v: n) => n.to_string()
+        case Expr.Ident(name: nm) => nm
+        case Expr.Bin(op: op, l: lv, r: rv) =>
+            display_expr(lv) + " " + op + " " + display_expr(rv)
     res
 
 // ── 语句级解析（v171：if/def/return；v176：缩进值传递）──
@@ -230,7 +261,7 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let r = parse_expr(toks, pos + 1)
             let rv = r.0
             let rp = r.1
-            let rr: (str, int) = ("return " + rv.to_string(), rp)
+            let rr: (str, int) = ("return " + display_expr(rv), rp)
             rr
         case Token.If =>
             let r = parse_expr(toks, pos + 1)
@@ -243,7 +274,7 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let body = blk.0
             let blk_end = blk.1
             let body_s = list_summary(body)
-            let rr: (str, int) = ("if " + rv.to_string() + " {" + body_s + "}", blk_end)
+            let rr: (str, int) = ("if " + display_expr(rv) + " {" + body_s + "}", blk_end)
             rr
         case Token.Else =>
             let rr: (str, int) = ("else", pos + 1)
@@ -280,7 +311,7 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let r = parse_expr(toks, pos)
             let rv = r.0
             let rp = r.1
-            let rr: (str, int) = ("expr " + rv.to_string(), rp)
+            let rr: (str, int) = ("expr " + display_expr(rv), rp)
             rr
     res
 
@@ -386,10 +417,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含函数签名+嵌套块的多行源码并输出 ──
+// ── main：解析一段含表达式 AST 的多行源码并输出 ──
 def main() =
-    // 签名 + 缩进嵌套：def add(a: int, b: int) -> int 体含 if 体（两级）
-    let src = "def add(a: int, b: int) -> int:\n    if 1:\n        return 2\n    return 3\nelse"
+    // 签名 + 嵌套块 + 二元表达式：return a + b * 2（AST 渲染保优先级）
+    let src = "def add(a: int, b: int) -> int:\n    if a + b:\n        return a + b * 2\n    return 3\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0

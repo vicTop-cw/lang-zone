@@ -213,3 +213,27 @@
     缩进块 ✅ → 嵌套块递归 ✅ → **函数签名/参数/类型标注（完整 Parser
     起步）** ✅ → 下一阶段（表达式内部 AST 化 / 类型标注传递）。
 
+## 十四、KPI 推进记录（v178，追加）
+
+- **2026-08-16 v178 表达式 AST 化（递归 Expr 枚举）+ codegen 子实例缺陷修复**：
+  - **递归 Expr 枚举**：`enum Expr: IntLit(v: int) / Ident(name: str) /
+    Bin(op: str, l: Expr, r: Expr)`（p0_recursive_enum 已验证 codegen 可行）；
+  - **解析器改建树**：parse_atom/parse_term/parse_expr 从「求值 int」改为
+    「返回 Expr AST」（Bin 组装用 `value.clone()` 防移动），display_expr
+    递归渲染中缀串（`a + b * 2` 保优先级）；
+  - **新暴露编译器缺陷（关键）**：`Expr.Bin(...)` 递归字段构造缺
+    `Box::new()` 包装（E0308）——根因：codegen 三处**子 CodeGen 实例**
+    （trait 默认方法体 / Lambda 块体 / BlockExpr 块体）克隆了
+    `emitted_types`/`enum_variants` 等映射但**漏克隆 `enum_variant_fields`**，
+    子实例枚举字段表为空 → `type_refers_to` 递归字段判定失效；
+  - **修复**：三处子 CodeGen 统一补 `child.enum_variant_fields =
+    self.enum_variant_fields.clone()`（与 enum_variants 同步克隆）；
+  - **端到端验证**：`def add(a: int, b: int) -> int {if a + b {return a + b * 2},
+    return 3}` + `else`，rustc 0 错误，运行输出正确（AST 渲染保优先级）；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → **表达式 AST 化（递归枚举
+    + 子实例缺陷修复）** ✅ → 下一阶段（完整表达式（比较/逻辑/调用）/
+    match 模式）。
+
