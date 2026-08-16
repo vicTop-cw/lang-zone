@@ -443,3 +443,24 @@
     **字符串字面量（StrLit）** ✅ → 下一阶段（列表字面量 / 类与实例 /
     模块与导入）。
 
+## 二十五、KPI 推进记录（v189，追加）
+
+- **2026-08-16 v189 列表字面量（ListLit 节点 + LBracket 分支）**：
+  - **Expr 节点扩展**：`ListLit(elems: List<Expr>)` 递归变体
+    （`List<Expr>` 字段 Box 判定与定义/构造两侧一致）；
+  - **parse_atom LBracket 分支**：`[a, b, c]` 列表字面量——parse_list_elems
+    解析逗号分隔的 logic 表达式直到 RBracket；空列表/多元素均可；
+  - **display_expr 扩展**：ListLit 渲染 `[1, 2, 3]`（expr_list_summary
+    逗号连接元素，递归渲染）；
+  - **端到端验证**：`def first_of(xs: int) -> int {let ys : int =
+    [1, 2, 3], return ys[0]}` + `else`，rustc 0 错误，运行输出正确
+    （列表字面量 + 下标链式组合）；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → 取字段 ✅ → match 语句 ✅ →
+    while 循环 ✅ → for 循环 ✅ → match 表达式 ✅ → 下标访问 ✅ →
+    字符串字面量 ✅ → **列表字面量（ListLit）** ✅ → 下一阶段（类与实例 /
+    模块与导入 / 元组与字典字面量）。
+
