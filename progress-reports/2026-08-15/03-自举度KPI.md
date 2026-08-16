@@ -303,3 +303,24 @@
     比较/逻辑 ✅ → let 绑定 ✅ → **调用表达式（Call + 后缀层）** ✅ →
     下一阶段（取字段/下标/方法调用 / match 模式 / 类与实例）。
 
+## 十八、KPI 推进记录（v182，追加）
+
+- **2026-08-16 v182 取字段表达式（Get 节点 + 后缀字段层）**：
+  - **Token 扩展**：枚举加 `Dot`；op_token 表加 `.`；
+  - **Expr 节点扩展**：`Get(recv: Expr, name: str)` 递归变体
+    （recv 含 Expr → Box 判定与定义/构造两侧一致）；
+  - **后缀字段层**：parse_postfix 扩展——LParen → Call 之外新增
+    `Dot + Ident → Get`（`recv.name`），链式后缀
+    （`r.width * r.height` 中 Get 作为 Bin 操作数、`r.valid` 作为
+    Cmp/Logic 操作数均正确）；
+  - **display_expr 扩展**：Get 渲染 `recv.name`（recv 递归渲染）；
+  - **端到端验证**：`def area(r: int) -> int {let d : int = r.width *
+    r.height, if d >= 2 && r.valid {return clamp(d, 1, 9)}, return 3}`
+    + `else`，rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → **取字段（Get + 后缀层）** ✅ →
+    下一阶段（下标/方法调用 / match 模式 / 类与实例 / 字符串方法）。
+
