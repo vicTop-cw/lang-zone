@@ -11,9 +11,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── Token（词法试点精简子集，v171 加语句关键字，v177 加逗号/箭头，
-//     v179 加比较/逻辑运算符）──
+//     v179 加比较/逻辑运算符，v188 加字符串字面量）──
 enum Token:
     IntLit(v: int)
+    StrLit(s: str)
     Ident(name: str)
     Plus
     Minus
@@ -88,6 +89,14 @@ def scan_ident(src: str, start: int) -> (str, int) =
     while i < str_len(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
         i = i + 1
     (src[start..i], i)
+
+// 扫描字符串字面量（v188）："..." 到匹配引号；返回 (内容, 结束位置)
+def scan_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 1
+    while i < str_len(src) && char_at(src, i) != "\"":
+        i = i + 1
+    let res: (str, int) = (src[(start + 1)..i], i + 1)
+    res
 
 // ── 关键字 → Token（查表，规避深层 elif 链）──
 def keyword_token(w: str) -> (bool, Token) =
@@ -176,6 +185,10 @@ def tokenize(src: str) -> List<Token> =
             line_start = false
         elif c == " ":
             i = i + 1
+        elif c == "\"":
+            let r = scan_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.StrLit(s: r.0)]
         elif is_digit(c):
             let r = scan_int(src, i)
             i = r.1
@@ -231,6 +244,7 @@ def tok_at(toks: List<Token>, idx: int) -> Token =
 // 字段名用 v:nm/op 长名，规避单字母 codegen 降级（E0308）
 enum Expr:
     IntLit(v: int)
+    StrLit(v: str)
     Ident(name: str)
     Bin(op: str, l: Expr, r: Expr)
     Cmp(op: str, l: Expr, r: Expr)
@@ -245,6 +259,7 @@ def parse_atom(toks: List<Token>, pos: int) -> (Expr, int) =
     let t = tok_at(toks, pos)
     let res: (Expr, int) = match t:
         case Token.IntLit(v: n) => (Expr.IntLit(v: n), pos + 1)
+        case Token.StrLit(s: sv) => (Expr.StrLit(v: sv), pos + 1)
         case Token.Ident(name: nm) => (Expr.Ident(name: nm), pos + 1)
         case Token.LParen =>
             let r = parse_logic(toks, pos + 1)
@@ -444,6 +459,7 @@ def expr_list_summary(xs: List<Expr>) -> str =
 def display_expr(e: Expr) -> str =
     let res: str = match e:
         case Expr.IntLit(v: n) => n.to_string()
+        case Expr.StrLit(v: sv) => "\"" + sv + "\""
         case Expr.Ident(name: nm) => nm
         case Expr.Bin(op: op, l: lv, r: rv) =>
             display_expr(lv) + " " + op + " " + display_expr(rv)
@@ -723,10 +739,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含下标访问表达式 AST 的多行源码并输出 ──
+// ── main：解析一段含字符串字面量 AST 的多行源码并输出 ──
 def main() =
-    // 下标访问（Index 后缀层）+ let 绑定 + 赋值语句 + 嵌套块
-    let src = "def pick(xs: int) -> int:\n    let first: int = xs[0]\n    let second: int = xs[i + 1]\n    return first + second\nelse"
+    // 字符串字面量（StrLit）+ let 绑定 + 调用 + 嵌套块
+    let src = "def greet(name: str) -> str:\n    let msg: str = \"hello \" + name\n    return msg\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0
