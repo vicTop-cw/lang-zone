@@ -1,5 +1,5 @@
 // Lang-Zong 编译器 — CLI 入口
-// 用法: lzc hello.lz [--tokens] [--ast] [--std-dir <path>] [--allow-rustc-private]  → hello.rs
+// 用法: lzc hello.lz [--tokens] [--ast] [--emit=ir] [--emit=lex-lz] [--emit=parse-lz] [--std-dir <path>] [--allow-rustc-private]  → hello.rs
 
 use std::env;
 use std::fs;
@@ -30,6 +30,103 @@ fn replace_ext(path: &str, from: &str, to: &str) -> String {
     }
 }
 
+// ── 自举路线 B：LZ 写的前端（src/frontend/*.lz）接入主流程 ──
+// --emit=lex-lz / --emit=parse-lz：用 LZ 实现的词法/语法前端处理输入文件，
+// 走与 --emit=ir-lz 相同的 lzc→rustc→run 递归管线，输出可与 Rust 版基线 diff。
+const LZ_LEXER_LIB: &str = include_str!("frontend/lz_lexer.lz");
+const LZ_PARSER_LIB: &str = include_str!("frontend/lz_parser.lz");
+
+/// 剥离 .lz 前端源里自带的 main（保留库代码），由 wrapper main 接管输入
+fn lz_frontend_lib_only(lib: &str) -> &str {
+    match lib.rfind("\ndef main() =") {
+        Some(idx) => &lib[..idx],
+        None => {
+            eprintln!("LZ frontend source missing `def main() =` marker");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 转义待注入的 .lz 源码（保持单行字符串字面量，避免破坏缩进结构）
+fn escape_lz_wrapper(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+/// 组装 wrapper LZ 源码并递归编译运行（lexer 输出 token 流；parser 输出语句描述）
+fn run_lz_frontend(path: &str, source: &str, mode: &str) {
+    let (lib_only, body) = match mode {
+        "lex" => (
+            lz_frontend_lib_only(LZ_LEXER_LIB),
+            "    let toks = tokenize(src)\n    for idx in 0..toks.len():\n        print(display_token(toks[idx]))\n",
+        ),
+        "parse" => (
+            lz_frontend_lib_only(LZ_PARSER_LIB),
+            "    let toks = tokenize(src)\n    let r = parse_program(toks, 0)\n    let stmts = r.0\n    for idx in 0..stmts.len():\n        print(stmts[idx])\n",
+        ),
+        _ => unreachable!(),
+    };
+    let wrapper = format!(
+        "// 由 lzc --emit={}-lz 生成（自举路线 B：LZ 写的前端处理输入文件）\n{}\n\ndef main() =\n    let src = \"{}\"\n{}\n",
+        mode, lib_only, escape_lz_wrapper(source), body
+    );
+    let lz_path = replace_ext(path, ".lz", ".lzfront");
+    fs::write(&lz_path, &wrapper).unwrap_or_else(|e| {
+        eprintln!("Error writing {}: {}", lz_path, e);
+        std::process::exit(1);
+    });
+    eprintln!("Generated {} -> {} (LZ {} frontend)", path, lz_path, mode);
+
+    // 与 --emit=ir-lz 相同的递归管线：lang-zone → .rs → rustc → exe → stdout
+    let self_exe = std::env::current_exe().unwrap_or_default();
+    let build = Command::new(&self_exe)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone on generated LZ frontend");
+    if !build.status.success() {
+        eprintln!(
+            "LZ {} frontend 编译失败: {}",
+            mode,
+            String::from_utf8_lossy(&build.stderr)
+        );
+        std::process::exit(1);
+    }
+    let rs_path = replace_ext(&lz_path, ".lzfront", ".rs");
+    let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = replace_ext(&lz_path, ".lzfront", ".exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs_path)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on generated .rs");
+    if !rc.status.success() {
+        eprintln!(
+            "LZ {} frontend rustc 失败: {}",
+            mode,
+            String::from_utf8_lossy(&rc.stderr)
+        );
+        std::process::exit(1);
+    }
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    if !run.status.success() {
+        eprintln!(
+            "LZ {} frontend 运行失败: {}",
+            mode,
+            String::from_utf8_lossy(&run.stderr)
+        );
+        std::process::exit(1);
+    }
+    print!("{}", String::from_utf8_lossy(&run.stdout));
+}
+
 // Windows 主线程栈默认仅 1MB（链接器默认），深层递归下降（宏展开、嵌套缩进块
 // 解析、深层嵌套表达式 codegen）会栈溢出（p43 复现：thread 'main' has
 // overflowed its stack）。将整个编译流水线移入 512MB 大栈线程，解除该限制。
@@ -48,7 +145,7 @@ fn main() {
 /// 实际编译流水线（在 main 的大栈线程中执行）；返回进程退出码
 fn compile_main(args: Vec<String>) -> i32 {
     if args.len() < 2 {
-        eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
+        eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--emit=lex-lz] [--emit=parse-lz] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
         std::process::exit(1);
     }
 
@@ -410,6 +507,18 @@ fn compile_main(args: Vec<String>) -> i32 {
                 std::process::exit(1);
             }
         }
+    }
+
+    // --emit=lex-lz / --emit=parse-lz: 自举路线 B —— 用 LZ 写的前端处理输入文件
+    //（src/frontend/lz_lexer.lz / lz_parser.lz），走与 ir-lz 相同的递归管线，
+    // 输出与 Rust 版基线（--tokens / --ast）可 diff。
+    if args.iter().any(|a| a == "--emit=lex-lz") {
+        run_lz_frontend(path, &source, "lex");
+        return 0;
+    }
+    if args.iter().any(|a| a == "--emit=parse-lz") {
+        run_lz_frontend(path, &source, "parse");
+        return 0;
     }
 
     // 唯一 codegen 路径: AST → LZIR → Rust（无老路子选项）

@@ -24,6 +24,8 @@ enum Token:
     RParen
     LBracket
     RBracket
+    LBrace
+    RBrace
     Colon
     Comma
     Arrow
@@ -130,6 +132,8 @@ def op_token(c: str) -> (bool, Token) =
         (")", Token.RParen),
         ("[", Token.LBracket),
         ("]", Token.RBracket),
+        ("{", Token.LBrace),
+        ("}", Token.RBrace),
         ("<", Token.Lt),
         (">", Token.Gt),
         ("=", Token.Eq),
@@ -232,16 +236,21 @@ def tokenize(src: str) -> List<Token> =
 
 // ── Token 流工具 ──
 def tok_at(toks: List<Token>, idx: int) -> Token =
-    toks[idx].clone()
+    // 越界保护：索引超出 token 流末尾时返回 Eof，避免裸索引 panic
+    if idx >= toks.len():
+        Token.Eof
+    else:
+        toks[idx].clone()
 
 // ── 表达式 AST（v178：求值 → 建树，自举 Parser 核心数据结构；
 //     v179：加 Cmp/Logic 节点；v181：加 Call 节点；v182：加 Get 节点；
 //     v187：加 Index 节点）──
 // 递归枚举（Bin/Cmp/Logic/Call/Get/Index 含 Expr；v189 加 ListLit；
-// v190 加 TupleLit）——p0_recursive_enum 已验证 codegen 可行（v178 修复
-// 子 CodeGen 漏克隆 enum_variant_fields 后 Box 包装正常；v181 确认 enum
-// 定义/构造两侧均用 type_refers_to 深查——`List<Expr>` 字段两侧一致生成
-// Box<Vec<Expr>>）；
+// v190 加 TupleLit；v191 加 DictLit）——p0_recursive_enum 已验证 codegen
+// 可行（v178 修复子 CodeGen 漏克隆 enum_variant_fields 后 Box 包装正常；
+// v181 确认 enum 定义/构造两侧均用 type_refers_to 深查——`List<Expr>`
+// 字段两侧一致生成 Box<Vec<Expr>>；`List<(Expr, Expr)>` 经 Tuple 深查
+// 两侧一致）；
 // 字段名用 v:nm/op 长名，规避单字母 codegen 降级（E0308）
 enum Expr:
     IntLit(v: int)
@@ -255,6 +264,7 @@ enum Expr:
     Index(recv: Expr, idx: Expr)
     ListLit(elems: List<Expr>)
     TupleLit(elems: List<Expr>)
+    DictLit(pairs: List<(Expr, Expr)>)
 
 // ── 递归下降解析器（返回 (Expr, 新位置)，元组先绑定中间变量）──
 // parse_atom: 整数 | 字符串 | 标识符 | ( expr )/(a, b, c) | [elem, ...]
@@ -302,7 +312,45 @@ def parse_atom(toks: List<Token>, pos: int) -> (Expr, int) =
             let rp = r.1
             let pr: (Expr, int) = (Expr.ListLit(elems: elems), rp + 1)
             pr
+        case Token.LBrace =>
+            // 字典字面量 {"k": v, ...}（v191）
+            let r = parse_dict_pairs(toks, pos + 1)
+            let pairs = r.0
+            let rp = r.1
+            let pr: (Expr, int) = (Expr.DictLit(pairs: pairs), rp + 1)
+            pr
         case _ => (Expr.Ident(name: "?"), pos + 1)
+    res
+
+// 字典键值对解析（v191）：`"k": v, "k2": v2` → List<(Expr, Expr)> +
+// RBrace 后位置
+def parse_dict_pairs(toks: List<Token>, pos: int) -> (List<(Expr, Expr)>, int) =
+    let mut out: List<(Expr, Expr)> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RBrace:
+            done = true
+            p = p + 1
+        elif t == Token.Eof:
+            // 输入截断护栏
+            done = true
+        else:
+            let rk = parse_logic(toks, p)
+            let k = rk.0
+            let after_key = rk.1
+            let rv = parse_logic(toks, after_key + 1)
+            let v = rv.0
+            let after_val = rv.1
+            let pair: (Expr, Expr) = (k, v)
+            out = out + [pair]
+            let sep = tok_at(toks, after_val)
+            if sep == Token.Comma:
+                p = after_val + 1
+            else:
+                p = after_val
+    let res: (List<(Expr, Expr)>, int) = (out, p)
     res
 
 // 列表元素解析（v189）：`a, b, c` → List<Expr> + RBracket 后位置
@@ -511,10 +559,21 @@ def expr_list_summary(xs: List<Expr>) -> str =
         out = out + display_expr(xs[idx])
     out
 
+// List<(Expr, Expr)> → 摘要字符串（"k": v, "k2": v2，DictLit 展示用，v191）
+def expr_pair_summary(xs: List<(Expr, Expr)>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        let pair = xs[idx].clone()
+        out = out + display_expr(pair.0) + ": " + display_expr(pair.1)
+    out
+
 // Expr → 中缀串（v178：IntLit(3) → "3"；Bin("+",a,b) → "a + b"；
 // v179：Cmp/Logic 同款递归渲染；v181：Call 渲染 f(a, b)；
 // v182：Get 渲染 recv.name；v187：Index 渲染 recv[idx]；
-// v189：ListLit 渲染 [a, b, c]；v190：TupleLit 渲染 (a, b, c)）
+// v189：ListLit 渲染 [a, b, c]；v190：TupleLit 渲染 (a, b, c)；
+// v191：DictLit 渲染 {"k": v, ...}）
 def display_expr(e: Expr) -> str =
     let res: str = match e:
         case Expr.IntLit(v: n) => n.to_string()
@@ -536,6 +595,8 @@ def display_expr(e: Expr) -> str =
             "[" + expr_list_summary(ev) + "]"
         case Expr.TupleLit(elems: ev) =>
             "(" + expr_list_summary(ev) + ")"
+        case Expr.DictLit(pairs: pv) =>
+            "{" + expr_pair_summary(pv) + "}"
     res
 
 // ── 语句级解析（v171：if/def/return；v176：缩进值传递）──
@@ -738,19 +799,30 @@ def parse_params(toks: List<Token>, pos: int) -> (str, int) =
         if t == Token.RParen:
             done = true
             p = p + 1
+        elif t == Token.Eof:
+            // 输入截断护栏：避免在 Eof 上无限循环
+            done = true
         else:
-            let name_t = tok_at(toks, p)
-            let nm = ident_name(name_t)
+            let nm = ident_name(t)
             let colon_t = tok_at(toks, p + 1)
-            let ty_t = tok_at(toks, p + 2)
-            let ty = ident_name(ty_t)
-            let item: str = nm + ": " + ty
-            out = out + [item]
-            let sep = tok_at(toks, p + 3)
-            if sep == Token.Comma:
-                p = p + 4
+            if colon_t == Token.Colon:
+                let ty_t = tok_at(toks, p + 2)
+                let ty = ident_name(ty_t)
+                let item: str = nm + ": " + ty
+                out = out + [item]
+                let sep = tok_at(toks, p + 3)
+                if sep == Token.Comma:
+                    p = p + 4
+                else:
+                    p = p + 3
             else:
-                p = p + 3
+                // 无类型标注参数：def f(x)
+                out = out + [nm]
+                let sep = tok_at(toks, p + 1)
+                if sep == Token.Comma:
+                    p = p + 2
+                else:
+                    p = p + 1
     let params_s = "(" + list_summary(out) + ")"
     let res: (str, int) = (params_s, p)
     res
@@ -811,10 +883,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含元组字面量 AST 的多行源码并输出 ──
+// ── main：解析一段含字典字面量 AST 的多行源码并输出 ──
 def main() =
-    // 元组字面量（TupleLit）+ 括号表达式区分 + let 绑定 + 嵌套块
-    let src = "def swap_pair(p: int) -> int:\n    let pair: int = (1, p)\n    let single: int = (p)\n    return pair.0\nelse"
+    // 字典字面量（DictLit）+ let 绑定 + 下标 + 嵌套块
+    let src = "def lookup(key: str) -> int:\n    let m: str = {\"a\": 1, \"b\": 2}\n    return m[\"a\"]\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0

@@ -166,6 +166,26 @@ def scan_string(src: str, start: int) -> (str, int) =
         i = i + 1
     (src[(start + 1)..i], i + 1)
 
+// 数字字符查表转值（避免 str→int 直 cast 的 E0605）
+def digit_val(c: str) -> int =
+    let table: List<(str, int)> = [
+        ("0", 0), ("1", 1), ("2", 2), ("3", 3), ("4", 4),
+        ("5", 5), ("6", 6), ("7", 7), ("8", 8), ("9", 9)
+    ]
+    let mut result = 0
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = pair.1
+    result
+
+// 数字串折叠为 int（无内建 str→int 时的手工实现）
+def str_to_int(s: str) -> int =
+    let mut v = 0
+    for idx in 0..s.len():
+        v = v * 10 + digit_val(char_at(s, idx))
+    v
+
 // ── tokenize：简化词法分析（对齐 lexer.rs 核心逻辑）──
 def tokenize(src: str) -> List<Token> =
     let mut tokens: List<Token> = []
@@ -194,13 +214,12 @@ def tokenize(src: str) -> List<Token> =
                 tokens = tokens + [keyword_token(word)]
             else:
                 tokens = tokens + [Token.Ident(name: word)]
-        // 整数（`num as int` 暂因 LZ cast 缺陷走 as i64 强转 E0605——元组字段
-        // 类型未推断为 Str；先以 Ident 占位，登记 v170 遗留缺陷待修）
+        // 整数：scan_int 返回数字串，查表折叠为 int 生成 IntLit（v170 遗留缺陷已修）
         elif is_digit(c):
             let r = scan_int(src, i)
             i = r.1
             let num: str = r.0
-            tokens = tokens + [Token.Ident(name: num)]
+            tokens = tokens + [Token.IntLit(v: str_to_int(num))]
         // 运算符/标点（双字符优先，含 == != <= >= && || :: -> => **）
         else:
             let r = scan_punct(src, i)
