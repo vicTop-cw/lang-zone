@@ -30,8 +30,23 @@ fn replace_ext(path: &str, from: &str, to: &str) -> String {
     }
 }
 
+// Windows 主线程栈默认仅 1MB（链接器默认），深层递归下降（宏展开、嵌套缩进块
+// 解析、深层嵌套表达式 codegen）会栈溢出（p43 复现：thread 'main' has
+// overflowed its stack）。将整个编译流水线移入 512MB 大栈线程，解除该限制。
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let code = std::thread::Builder::new()
+        .name("lang-zone-compile".to_string())
+        .stack_size(512 * 1024 * 1024)
+        .spawn(move || compile_main(args))
+        .expect("failed to spawn compile thread")
+        .join()
+        .unwrap_or(1);
+    std::process::exit(code);
+}
+
+/// 实际编译流水线（在 main 的大栈线程中执行）；返回进程退出码
+fn compile_main(args: Vec<String>) -> i32 {
     if args.len() < 2 {
         eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
         std::process::exit(1);
@@ -96,7 +111,7 @@ fn main() {
             std::process::exit(1);
         });
         println!("Generated {} -> {} (project mode, {}, {} modules)", path, out_path, label, pc.unit_count());
-        return;
+        return 0;
     }
 
     // --cached: 跳过未修改文件
@@ -106,7 +121,7 @@ fn main() {
         if let Ok(Some(entry)) = CacheEntry::load(&cache_dir, src_path) {
             if entry.is_fresh(src_path, &cache_dir) {
                 println!("Cached (unchanged): {}", path);
-                return;
+                return 0;
             }
         }
         // 不新鲜则继续编译；编译成功后在末尾保存缓存
@@ -127,7 +142,7 @@ fn main() {
         for (i, t) in tokens.iter().enumerate() {
             println!("{:4} {:?}", i, t);
         }
-        return;
+        return 0;
     }
 
     // ── 宏展开（Phase 2: Lexer 之后、Parser 之前） ──
@@ -291,7 +306,7 @@ fn main() {
         for (i, t) in expanded_tokens.iter().enumerate() {
             println!("{:4} {:?}", i, t);
         }
-        return;
+        return 0;
     }
 
     // Parse（使用展开后的 Token 流）
@@ -315,7 +330,7 @@ fn main() {
 
     if args.iter().any(|a| a == "--ast") {
         println!("{:#?}", module);
-        return;
+        return 0;
     }
 
     // --emit=ir: 输出 LZIR 中间表示文本（不生成 .rs）
@@ -323,7 +338,7 @@ fn main() {
         match build_ir_opt(&module, lzi_registry.as_ref()) {
             Ok(ir_module) => {
                 println!("{ir_module}");
-                return;
+                return 0;
             }
             Err(e) => {
                 eprintln!("IR emission error: {e}");
@@ -388,7 +403,7 @@ fn main() {
                     std::process::exit(1);
                 }
                 print!("{}", String::from_utf8_lossy(&run.stdout));
-                return;
+                return 0;
             }
             Err(e) => {
                 eprintln!("IR emission error (ir-lz): {e}");
@@ -419,6 +434,7 @@ fn main() {
             std::process::exit(1);
         }
     }
+    0
 }
 
 /// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，

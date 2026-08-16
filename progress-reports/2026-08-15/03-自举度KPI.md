@@ -171,3 +171,23 @@
   缩进块 ✅ → 嵌套块递归（p44 验证，完整集成受编译器限制）→ 完整 Parser
   下一阶段。
 
+## 十二、KPI 推进记录（v176，追加）
+
+- **2026-08-16 v176 编译器栈溢出解除（大栈线程）+ 嵌套块递归完整入库**：
+  - **根因确认**：p43/p44 系列定位的「缩进 tokenize + parse_block↔parse_stmt
+    互相递归」编译栈溢出，根因是 **Windows 主线程栈默认仅 1MB**（链接器
+    默认），深层递归下降直接爆栈——是编译器运行环境限制，非 LZ 语法问题；
+  - **修复**：main.rs 编译流水线移入 **512MB 大栈线程**
+    （`thread::Builder::stack_size(512MB)`，main 变薄壳 + `compile_main(args)`），
+    p43 全组合（缩进 tokenize + 互相递归）debug 二进制编译通过（原爆栈）；
+  - **嵌套块递归完整入库**：src/frontend/lz_parser.lz 恢复缩进块版——
+    tokenize 生成 `Indent(v)`（line_start 行首扫描）、parse_stmt 携带
+    indent 参数（If/Def 体递归 parse_block 传缩进值）、parse_program 委托
+    parse_block(indent=-1) 兼容行首 Indent(0)；端到端输出
+    `def foo {if 1 {return 2}, return 3}` + `else`，rustc 0 错误；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → **嵌套块递归（完整集成，编译器限制解除）** ✅ → 完整 Parser
+    下一阶段（函数签名/参数/类型标注）。
+

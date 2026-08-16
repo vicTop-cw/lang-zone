@@ -99,19 +99,29 @@ def op_token(c: str) -> (bool, Token) =
             result = (true, pair.1)
     result
 
-// ── tokenize：完整扫描表达式源码（行首缩进 → Indent(v)）──
-// 注：缩进块解析（scan_indent/parse_block/Indent token）已实现并经 p42
-// probe 验证可用，但完整文件触发 lang-zone 编译栈溢出（编译器递归限制，
-// 已登记）——入库版本回退为多行语句版（Newline 分隔，能编译）
+// ── tokenize：完整扫描源码（行首缩进 → Indent(v)，嵌套块解析）──
+// v176：编译器栈溢出解除（main.rs 大栈线程 512MB）后，缩进块版恢复入库——
+// 行首空格数生成 Indent(v)；parse_block↔parse_stmt 互相递归解析嵌套块。
+// 限制：空行/纯缩进行不生成 Indent（块内空行会终止块），见 p43 同款设计
 def tokenize(src: str) -> List<Token> =
     let mut tokens: List<Token> = []
     let mut i = 0
+    let mut line_start = true
     while i < str_len(src):
         let c = char_at(src, i)
-        if c == " " || c == "\t":
-            i = i + 1
-        elif c == "\n":
+        if c == "\n":
             tokens = tokens + [Token.Newline]
+            i = i + 1
+            line_start = true
+        elif line_start && c == " ":
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        elif line_start:
+            tokens = tokens + [Token.Indent(v: 0)]
+            line_start = false
+        elif c == " ":
             i = i + 1
         elif is_digit(c):
             let r = scan_int(src, i)
@@ -201,10 +211,11 @@ def parse_expr(toks: List<Token>, pos: int) -> (int, int) =
     let res: (int, int) = (value, p)
     res
 
-// ── 语句级解析（v171：if/def/return）──
-// parse_stmt: return expr | if expr | def name | 表达式语句
-// 返回 (语句描述 str, 新位置)；简化：仅解析语句头 + 首表达式
-def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
+// ── 语句级解析（v171：if/def/return；v176：缩进值传递）──
+// parse_stmt: return expr | if expr: 块 | def name: 块 | 表达式语句
+// 返回 (语句描述 str, 新位置)；indent = 本语句所在行的缩进值，
+// 嵌套块（if/def 体）须 > indent 才会被收集
+def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
     let t = tok_at(toks, pos)
     let res: (str, int) = match t:
         case Token.Return =>
@@ -220,7 +231,7 @@ def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
             let after = tok_at(toks, rp)
             // LZ 三元表达式：a if cond else b（if 是语句式，不能内联）
             let npos = (rp + 1) if after == Token.Colon else rp
-            let blk = parse_block(toks, npos, 0)
+            let blk = parse_block(toks, npos, indent)
             let body = blk.0
             let blk_end = blk.1
             let body_s = list_summary(body)
@@ -234,7 +245,7 @@ def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
             let name_s = ident_name(name_t)
             let colon_t = tok_at(toks, pos + 2)
             let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
-            let blk = parse_block(toks, npos, 0)
+            let blk = parse_block(toks, npos, indent)
             let body = blk.0
             let blk_end = blk.1
             let body_s = list_summary(body)
@@ -284,7 +295,7 @@ def parse_block(toks: List<Token>, pos: int, indent: int) -> (List<str>, int) =
         elif tag == 2:
             let n = block_indent(t)
             if n > indent:
-                let r = parse_stmt(toks, p + 1)
+                let r = parse_stmt(toks, p + 1, n)
                 let s = r.0
                 if s.len() > 0:
                     out = out + [s]
@@ -310,20 +321,8 @@ def block_indent(t: Token) -> int =
     res
 
 def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
-    let mut out: List<str> = []
-    let mut p = pos
-    let mut done = false
-    while not done:
-        let t = tok_at(toks, p)
-        if t == Token.Eof:
-            done = true
-        else:
-            let r = parse_stmt(toks, p)
-            let s = r.0
-            if s.len() > 0:
-                out = out + [s]
-            p = r.1
-    (out, p)
+    // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
+    parse_block(toks, pos, -1)
 
 // ── main：解析一段多行含语句的源码并输出 ──
 def main() =
