@@ -258,3 +258,27 @@
     **比较/逻辑表达式（Cmp/Logic + 优先级层）** ✅ → 下一阶段（完整表达式
     （调用/取字段）/ match 模式 / let 绑定）。
 
+## 十六、KPI 推进记录（v180，追加）
+
+- **2026-08-16 v180 let 绑定语句 + codegen match 臂作用域缺陷修复**：
+  - **Token 扩展**：枚举加 `Let`/`Eq`；keyword_token 加 `"let"`；
+    op_token 表加 `=`；
+  - **parse_stmt Let 分支**：`let x = expr` / `let x: ty = expr`（可选
+    类型标注）→ `let total : int = a + b`；类型标注用 `ident_name`
+    提取，` = ` 号后走 parse_logic 解析表达式；
+  - **新暴露编译器缺陷（关键）**：match 各臂共享 `self.declared`
+    集合——Def 臂声明 `ap` 后，Let 臂同名 `let mut ap` 被当成已声明
+    变量生成纯赋值 `ap = ...`（无 `let mut`），rustc E0425 cannot
+    find value；
+  - **修复**：match 臂体生成处加快照/恢复（`let saved_declared =
+    self.declared.clone()`，臂体生成后还原），各臂作用域独立；
+  - **端到端验证**：`def add(a: int, b: int) -> int {let total : int =
+    a + b, if total >= 2 && a < 10 {return total}, return 3}` +
+    `else`，rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → **let 绑定（含类型标注，match 臂作用域修复）** ✅ →
+    下一阶段（完整表达式（调用/取字段）/ match 模式）。
+

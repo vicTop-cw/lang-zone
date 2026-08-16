@@ -4377,7 +4377,12 @@ impl CodeGen {
                     // Match arm body 不应生成 return（值应流向 match 表达式外层）
                     let saved = self.suppress_tail_return;
                     self.suppress_tail_return = true;
+                    // 各 match 臂作用域独立：臂内 `let mut x` 不应影响其他臂的
+                    // declared 判定（否则前一臂声明的同名变量使后一臂 `let mut x`
+                    // 被当成赋值 `x = ...` 生成，E0425 cannot find value，v180 缺陷）
+                    let saved_declared = self.declared.clone();
                     self.gen_block_inner(&arm.body);
+                    self.declared = saved_declared;
                     self.suppress_tail_return = saved;
                     self.ref_mut_bindings = saved_ref_mut;
                     self.slice_clone_bindings = saved_slice_clone;

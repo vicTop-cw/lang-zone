@@ -32,6 +32,8 @@ enum Token:
     Ge
     AmpAmp
     PipePipe
+    Eq
+    Let
     Return
     If
     Else
@@ -85,6 +87,7 @@ def keyword_token(w: str) -> (bool, Token) =
         ("if", Token.If),
         ("else", Token.Else),
         ("def", Token.Def),
+        ("let", Token.Let),
     ]
     let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
     for idx in 0..table.len():
@@ -104,6 +107,7 @@ def op_token(c: str) -> (bool, Token) =
         (")", Token.RParen),
         ("<", Token.Lt),
         (">", Token.Gt),
+        ("=", Token.Eq),
     ]
     let mut result: (bool, Token) = (false, Token.Plus)
     for idx in 0..table.len():
@@ -411,6 +415,25 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let body_s = list_summary(body)
             let rr: (str, int) = ("def " + sig + " {" + body_s + "}", blk_end)
             rr
+        case Token.Let =>
+            // let x = expr | let x: ty = expr（v180）
+            let name_t = tok_at(toks, pos + 1)
+            let name_s = ident_name(name_t)
+            let mut ap = pos + 2
+            let mut ty_s = ""
+            let colon_t = tok_at(toks, ap)
+            if colon_t == Token.Colon:
+                let ty_t = tok_at(toks, ap + 1)
+                ty_s = ident_name(ty_t)
+                ap = ap + 2
+            let eq_t = tok_at(toks, ap)
+            let rp = (ap + 1) if eq_t == Token.Eq else ap
+            let r = parse_logic(toks, rp)
+            let rv = r.0
+            let rend = r.1
+            let full = name_s + (" : " + ty_s if ty_s.len() > 0 else "") + " = " + display_expr(rv)
+            let rr: (str, int) = ("let " + full, rend)
+            rr
         case Token.Newline =>
             let rr: (str, int) = ("", pos + 1)
             rr
@@ -524,10 +547,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含比较/逻辑表达式 AST 的多行源码并输出 ──
+// ── main：解析一段含 let 绑定 + 比较/逻辑表达式 AST 的多行源码并输出 ──
 def main() =
-    // 签名 + 嵌套块 + 比较/逻辑表达式（&& || 优先级最低，Cmp 次之）
-    let src = "def add(a: int, b: int) -> int:\n    if a + b >= 2 && a < 10:\n        return a + b * 2\n    return 3\nelse"
+    // let 绑定（含类型标注）+ 嵌套块 + 比较/逻辑表达式
+    let src = "def add(a: int, b: int) -> int:\n    let total: int = a + b\n    if total >= 2 && a < 10:\n        return total\n    return 3\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0
