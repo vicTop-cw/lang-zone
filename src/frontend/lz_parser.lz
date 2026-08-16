@@ -38,6 +38,8 @@ enum Token:
     Match
     Case
     While
+    For
+    In
     Return
     If
     Else
@@ -95,6 +97,8 @@ def keyword_token(w: str) -> (bool, Token) =
         ("match", Token.Match),
         ("case", Token.Case),
         ("while", Token.While),
+        ("for", Token.For),
+        ("in", Token.In),
     ]
     let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
     for idx in 0..table.len():
@@ -504,6 +508,21 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let body_s = list_summary(body)
             let rr: (str, int) = ("while " + display_expr(rv) + " {" + body_s + "}", blk_end)
             rr
+        case Token.For =>
+            // for x in iter: 块（v185）
+            let name_t = tok_at(toks, pos + 1)
+            let name_s = ident_name(name_t)
+            let r = parse_logic(toks, pos + 3)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("for " + name_s + " in " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
         case Token.Def =>
             let name_t = tok_at(toks, pos + 1)
             let name_s = ident_name(name_t)
@@ -678,10 +697,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含 while 循环语句 AST 的多行源码并输出 ──
+// ── main：解析一段含 for 循环语句 AST 的多行源码并输出 ──
 def main() =
-    // while 循环 + let 绑定 + 赋值语句 + 比较/逻辑 + 嵌套块
-    let src = "def sum_to(n: int) -> int:\n    let total: int = 0\n    while total < n:\n        total = total + 1\n    return total\nelse"
+    // for 循环 + let 绑定 + 赋值语句 + 嵌套块
+    let src = "def total_of(xs: int) -> int:\n    let total: int = 0\n    for x in xs:\n        total = total + x\n    return total\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0
