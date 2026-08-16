@@ -324,3 +324,24 @@
     比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → **取字段（Get + 后缀层）** ✅ →
     下一阶段（下标/方法调用 / match 模式 / 类与实例 / 字符串方法）。
 
+## 十九、KPI 推进记录（v183，追加）
+
+- **2026-08-16 v183 match 语句（Match/Case 分支 + 模式描述）**：
+  - **Token 扩展**：枚举加 `Match`/`Case`；keyword_token 加
+    `"match"`/`"case"`；
+  - **parse_stmt Match 分支**：`match expr: 块`——parse_logic 解析
+    scrutinee、跳过冒号、parse_block 收集 case 行（缩进嵌套）；
+  - **parse_stmt Case 分支**：`case 模式: 块`——pattern_desc 渲染
+    模式（IntLit → 数字、Ident/通配 → 名），体走 parse_block 递归；
+  - **pattern_desc**：模式 → 描述串辅助函数；
+  - **端到端验证**：`def classify(x: int) -> int {match x {case 1
+    {return 10}, case _ {return 20}}}` + `else`，rustc 0 错误，运行
+    输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → 取字段 ✅ → **match 语句
+    （Match/Case + 模式）** ✅ → 下一阶段（match 表达式/模式绑定 /
+    while/for 循环 / 类与实例）。
+

@@ -35,6 +35,8 @@ enum Token:
     Eq
     Let
     Dot
+    Match
+    Case
     Return
     If
     Else
@@ -89,6 +91,8 @@ def keyword_token(w: str) -> (bool, Token) =
         ("else", Token.Else),
         ("def", Token.Def),
         ("let", Token.Let),
+        ("match", Token.Match),
+        ("case", Token.Case),
     ]
     let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
     for idx in 0..table.len():
@@ -460,6 +464,31 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
         case Token.Else =>
             let rr: (str, int) = ("else", pos + 1)
             rr
+        case Token.Match =>
+            // match expr: 块（v183：case 行由 Case 分支处理）
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("match " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
+        case Token.Case =>
+            // case 模式: 块（v183：模式为 IntLit/Ident/通配描述）
+            let pat_t = tok_at(toks, pos + 1)
+            let pat_s = pattern_desc(pat_t)
+            let colon_t = tok_at(toks, pos + 2)
+            let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("case " + pat_s + " {" + body_s + "}", blk_end)
+            rr
         case Token.Def =>
             let name_t = tok_at(toks, pos + 1)
             let name_s = ident_name(name_t)
@@ -520,6 +549,14 @@ def ident_name(t: Token) -> str =
     // 注：绑定名用 nm 而非 n——单字母 n 触发 codegen 降级（n_）且体内引用
     // 未同步（E0308，自举暴露缺陷）
     let res: str = match t:
+        case Token.Ident(name: nm) => nm
+        case _ => "?"
+    res
+
+// 模式描述（v183）：case 模式 → 字符串（IntLit → 数字、Ident/通配 → 名）
+def pattern_desc(t: Token) -> str =
+    let res: str = match t:
+        case Token.IntLit(v: n) => n.to_string()
         case Token.Ident(name: nm) => nm
         case _ => "?"
     res
@@ -617,10 +654,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含取字段表达式 AST 的多行源码并输出 ──
+// ── main：解析一段含 match 语句 AST 的多行源码并输出 ──
 def main() =
-    // 取字段（Get 后缀层）+ 调用 + let 绑定 + 比较/逻辑 + 嵌套块
-    let src = "def area(r: int) -> int:\n    let d: int = r.width * r.height\n    if d >= 2 && r.valid:\n        return clamp(d, 1, 9)\n    return 3\nelse"
+    // match 语句（Match/Case 分支）+ let 绑定 + 嵌套块
+    let src = "def classify(x: int) -> int:\n    match x:\n        case 1:\n            return 10\n        case _:\n            return 20\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0
