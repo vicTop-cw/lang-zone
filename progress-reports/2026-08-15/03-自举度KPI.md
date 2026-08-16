@@ -237,3 +237,24 @@
     + 子实例缺陷修复）** ✅ → 下一阶段（完整表达式（比较/逻辑/调用）/
     match 模式）。
 
+## 十五、KPI 推进记录（v179，追加）
+
+- **2026-08-16 v179 比较/逻辑表达式（Cmp/Logic 节点 + 优先级层）**：
+  - **Token 扩展**：枚举加 `EqEq/Ne/Lt/Gt/Le/Ge/AmpAmp/PipePipe`；
+    op_token 表加 `<`/`>`；新增 `two_char_op` 双字符查表
+    （`== != <= >= && ||`），tokenize else 分支先试双字符再回落单字符；
+  - **Expr 节点扩展**：`Cmp(op, l, r)` / `Logic(op, l, r)` 递归变体；
+  - **优先级层**：`parse_logic`（`&&`/`||`，最低）→ `parse_cmp`
+    （`== != < <= > >=`）→ `parse_expr`（`+ -`）→ `parse_term`
+    （`* /`）→ `parse_atom`；括号 `( expr )` 改走 parse_logic；
+  - **parse_stmt 升级**：Return/If/表达式语句三处 `parse_expr` 改
+    `parse_logic`（if 条件支持比较/逻辑）；
+  - **端到端验证**：`def add(a: int, b: int) -> int {if a + b >= 2 && a < 10
+    {return a + b * 2}, return 3}` + `else`，rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    **比较/逻辑表达式（Cmp/Logic + 优先级层）** ✅ → 下一阶段（完整表达式
+    （调用/取字段）/ match 模式 / let 绑定）。
+
