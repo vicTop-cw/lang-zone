@@ -382,3 +382,22 @@
     while 循环 ✅ → **for 循环** ✅ → 下一阶段（match 表达式 /
     类与实例 / 字符串方法 / 模块与导入）。
 
+## 二十二、KPI 推进记录（v186，追加）
+
+- **2026-08-16 v186 match 表达式（FatArrow `=>` 值形式）**：
+  - **Token 扩展**：枚举加 `FatArrow`；two_char_op 双字符表加 `=>`
+    （`case 1 => 10` 命中）；
+  - **parse_stmt Case 分支扩展**：`case 模式 => 值`（parse_logic 解析
+    值表达式，渲染 `case 1 => 10`）；保留 v183 的 `case 模式: 块`
+    形式（冒号块分支不变）；
+  - **端到端验证**：`def classify(x: int) -> int {let res : int = 0,
+    match x {case 1 => 10, case _ => 20}, return res}` + `else`，
+    rustc 0 错误，运行输出正确（match 语句级 + case 值形式）；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → 取字段 ✅ → match 语句 ✅ →
+    while 循环 ✅ → for 循环 ✅ → **match 表达式（case => 值）** ✅ →
+    下一阶段（类与实例 / 字符串方法 / 模块与导入 / 下标访问）。
+

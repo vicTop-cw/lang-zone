@@ -24,6 +24,7 @@ enum Token:
     Colon
     Comma
     Arrow
+    FatArrow
     EqEq
     Ne
     Lt
@@ -138,6 +139,7 @@ def two_char_op(c1: str, c2: str) -> (bool, Token) =
         (">=", Token.Ge),
         ("&&", Token.AmpAmp),
         ("||", Token.PipePipe),
+        ("=>", Token.FatArrow),
     ]
     let mut result: (bool, Token) = (false, Token.Plus)
     for idx in 0..table.len():
@@ -484,17 +486,25 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let rr: (str, int) = ("match " + display_expr(rv) + " {" + body_s + "}", blk_end)
             rr
         case Token.Case =>
-            // case 模式: 块（v183：模式为 IntLit/Ident/通配描述）
+            // case 模式: 块（v183）| case 模式 => 值（v186 match 表达式）
             let pat_t = tok_at(toks, pos + 1)
             let pat_s = pattern_desc(pat_t)
-            let colon_t = tok_at(toks, pos + 2)
-            let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
-            let blk = parse_block(toks, npos, indent)
-            let body = blk.0
-            let blk_end = blk.1
-            let body_s = list_summary(body)
-            let rr: (str, int) = ("case " + pat_s + " {" + body_s + "}", blk_end)
-            rr
+            let arrow_t = tok_at(toks, pos + 2)
+            if arrow_t == Token.FatArrow:
+                let r = parse_logic(toks, pos + 3)
+                let rv = r.0
+                let rp = r.1
+                let rr: (str, int) = ("case " + pat_s + " => " + display_expr(rv), rp)
+                rr
+            else:
+                let colon_t = tok_at(toks, pos + 2)
+                let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
+                let blk = parse_block(toks, npos, indent)
+                let body = blk.0
+                let blk_end = blk.1
+                let body_s = list_summary(body)
+                let rr: (str, int) = ("case " + pat_s + " {" + body_s + "}", blk_end)
+                rr
         case Token.While =>
             // while cond: 块（v184）
             let r = parse_logic(toks, pos + 1)
@@ -697,10 +707,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含 for 循环语句 AST 的多行源码并输出 ──
+// ── main：解析一段含 match 表达式 AST 的多行源码并输出 ──
 def main() =
-    // for 循环 + let 绑定 + 赋值语句 + 嵌套块
-    let src = "def total_of(xs: int) -> int:\n    let total: int = 0\n    for x in xs:\n        total = total + x\n    return total\nelse"
+    // match 语句 + case => 值形式（v186）+ let 绑定 + 嵌套块
+    let src = "def classify(x: int) -> int:\n    let res: int = 0\n    match x:\n        case 1 => 10\n        case _ => 20\n    return res\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0
