@@ -23,7 +23,33 @@ test-suite/*/__pycache__/
 # workspace-specific
 .workbuddy/
 workbuddy/
-bootstrap/
+# 自举目录：只入库规范文档、脚本与 .lz 试点源（构建产物 .rs/.exe/log/backup 不入库）
+bootstrap/*
+!bootstrap/01-自举总纲.md
+!bootstrap/02-自举前置条件清单.md
+!bootstrap/03-自举执行计划.md
+!bootstrap/04-当前项目自举具体方案.md
+!bootstrap/05-自举里程碑台账.md
+!bootstrap/06-自举交接续推文档.md
+!bootstrap/README.md
+!bootstrap/build.sh
+!bootstrap/build.ps1
+!bootstrap/rollback.sh
+!bootstrap/rollback.ps1
+!bootstrap/work/
+bootstrap/work/*
+!bootstrap/work/fail_drill.sh
+!bootstrap/work/*.lz
+!bootstrap/work/lz_ir/
+bootstrap/work/lz_ir/*
+!bootstrap/work/lz_ir/*.lz
+!bootstrap/work/lz_ir/README.md
+!bootstrap/work/lz_lexer/
+bootstrap/work/lz_lexer/*
+!bootstrap/work/lz_lexer/*.lz
+!bootstrap/work/lz_parser/
+bootstrap/work/lz_parser/*
+!bootstrap/work/lz_parser/*.lz
 
 err.log
 demo_err.log

@@ -1,0 +1,7 @@
+// bootstrap test5: list 列表
+def list_sum() -> int =
+  nums = [10, 20, 30]
+  nums[0] + nums[1] + nums[2]
+
+def main() =
+  print(list_sum())

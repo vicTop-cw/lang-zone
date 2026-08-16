@@ -1,0 +1,8 @@
+// 自举试点输入源：极小 .lz，其 IR 输出作为 LZ 后端的输入样本
+def main() =
+    let a: int = 40
+    let b: int = 2
+    let msg: str = "sum:"
+    print(msg, a, b)
+    let ok: bool = true
+    print(ok)
