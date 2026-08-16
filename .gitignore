@@ -6,6 +6,9 @@
 *.rs
 !src/**/*.rs
 !tests/**/*.rs
+# workspace 成员的 Rust 源码必须入库（否则干净检出无法构建）
+!lz_builtins/**/*.rs
+!lz-infer/**/*.rs
 
 # generated LZ IR codegen intermediate (.lzlz → .rs → .exe) from --emit=ir-lz
 *.lzlz
