@@ -9,6 +9,8 @@
 # workspace 成员的 Rust 源码必须入库（否则干净检出无法构建）
 !lz_builtins/**/*.rs
 !lz-infer/**/*.rs
+# std 目录的 Rust 桥接源（shims.rs，被 src/codegen 引用）同样必须入库
+!std/**/*.rs
 
 # generated LZ IR codegen intermediate (.lzlz → .rs → .exe) from --emit=ir-lz
 *.lzlz
