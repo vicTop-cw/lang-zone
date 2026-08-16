@@ -37,6 +37,7 @@ enum Token:
     Dot
     Match
     Case
+    While
     Return
     If
     Else
@@ -93,6 +94,7 @@ def keyword_token(w: str) -> (bool, Token) =
         ("let", Token.Let),
         ("match", Token.Match),
         ("case", Token.Case),
+        ("while", Token.While),
     ]
     let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
     for idx in 0..table.len():
@@ -489,6 +491,19 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let body_s = list_summary(body)
             let rr: (str, int) = ("case " + pat_s + " {" + body_s + "}", blk_end)
             rr
+        case Token.While =>
+            // while cond: 块（v184）
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("while " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
         case Token.Def =>
             let name_t = tok_at(toks, pos + 1)
             let name_s = ident_name(name_t)
@@ -537,11 +552,20 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             let rr: (str, int) = ("", pos + 1)
             rr
         case _ =>
+            // 表达式语句或赋值：lhs = rhs（v184，while 体需要）
             let r = parse_logic(toks, pos)
             let rv = r.0
             let rp = r.1
-            let rr: (str, int) = ("expr " + display_expr(rv), rp)
-            rr
+            let eq_t = tok_at(toks, rp)
+            if eq_t == Token.Eq:
+                let r2 = parse_logic(toks, rp + 1)
+                let rv2 = r2.0
+                let rend = r2.1
+                let rr: (str, int) = (display_expr(rv) + " = " + display_expr(rv2), rend)
+                rr
+            else:
+                let rr: (str, int) = ("expr " + display_expr(rv), rp)
+                rr
     res
 
 // 提取 Ident 的 name（非 Ident 返回 "?"）
@@ -654,10 +678,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含 match 语句 AST 的多行源码并输出 ──
+// ── main：解析一段含 while 循环语句 AST 的多行源码并输出 ──
 def main() =
-    // match 语句（Match/Case 分支）+ let 绑定 + 嵌套块
-    let src = "def classify(x: int) -> int:\n    match x:\n        case 1:\n            return 10\n        case _:\n            return 20\nelse"
+    // while 循环 + let 绑定 + 赋值语句 + 比较/逻辑 + 嵌套块
+    let src = "def sum_to(n: int) -> int:\n    let total: int = 0\n    while total < n:\n        total = total + 1\n    return total\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0

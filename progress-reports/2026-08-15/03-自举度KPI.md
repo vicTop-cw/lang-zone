@@ -345,3 +345,22 @@
     （Match/Case + 模式）** ✅ → 下一阶段（match 表达式/模式绑定 /
     while/for 循环 / 类与实例）。
 
+## 二十、KPI 推进记录（v184，追加）
+
+- **2026-08-16 v184 while 循环语句 + 赋值语句**：
+  - **Token 扩展**：枚举加 `While`；keyword_token 加 `"while"`；
+  - **parse_stmt While 分支**：`while cond: 块`——parse_logic 解析
+    条件、跳过冒号、parse_block 收集循环体（缩进嵌套）；
+  - **parse_stmt 赋值语句**：表达式语句分支检测 `=`——`lhs = rhs`
+    （parse_logic 解析两侧，渲染 `total = total + 1`，while 体需要）；
+  - **端到端验证**：`def sum_to(n: int) -> int {let total : int = 0,
+    while total < n {total = total + 1}, return total}` + `else`，
+    rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → 调用 ✅ → 取字段 ✅ → match 语句 ✅ →
+    **while 循环 + 赋值语句** ✅ → 下一阶段（for 循环 / match 表达式 /
+    类与实例 / 字符串方法）。
+
