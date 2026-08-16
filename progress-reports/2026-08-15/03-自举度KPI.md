@@ -191,3 +191,25 @@
     缩进块 ✅ → **嵌套块递归（完整集成，编译器限制解除）** ✅ → 完整 Parser
     下一阶段（函数签名/参数/类型标注）。
 
+## 十三、KPI 推进记录（v177，追加）
+
+- **2026-08-16 v177 函数签名/参数/类型标注解析（完整 Parser 起步）**：
+  - **Token 扩展**：枚举加 `Comma`/`Arrow`，tokenize 支持 `,` 与 `->`
+    双字符（先判 `-`+`>`，再回落单字符表）；
+  - **parse_params**：`(a: int, b: str)` 参数列表 → 描述串
+    `(a: int, b: str)` + RParen 后位置；参数名/类型均走 ident_name；
+  - **ret_suffix**：`-> int` 返回类型后缀 → `(" -> int", 新位置)`；
+  - **Def 分支签名解析**：parse_stmt Def 分支读 LParen→parse_params、
+    Arrow→ret_suffix、再 Colon→块，签名串拼接为完整
+    `def add(a: int, b: int) -> int {...}`；
+  - **新暴露缺陷登记**：`let mut sig = name_s` 时 name_s 来自 ident_name
+    （&str 切片），`sig + pr.0` 生成 `&str + String` 拼接（E0308）——
+    规避：`name_s + ""` 强制 sig 为 String 起点；
+  - **端到端验证**：`def add(a: int, b: int) -> int {if 1 {return 2}, return 3}`
+    + `else`，rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → **函数签名/参数/类型标注（完整 Parser
+    起步）** ✅ → 下一阶段（表达式内部 AST 化 / 类型标注传递）。
+

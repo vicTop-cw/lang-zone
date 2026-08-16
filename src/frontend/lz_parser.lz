@@ -10,7 +10,7 @@
 //      避免「let 语句后跟元组字面量」被 codegen 拼成调用（E0618）
 // ═══════════════════════════════════════════════════════════════
 
-// ── Token（词法试点精简子集，v171 加语句关键字）──
+// ── Token（词法试点精简子集，v171 加语句关键字，v177 加逗号/箭头）──
 enum Token:
     IntLit(v: int)
     Ident(name: str)
@@ -21,6 +21,8 @@ enum Token:
     LParen
     RParen
     Colon
+    Comma
+    Arrow
     Return
     If
     Else
@@ -138,6 +140,12 @@ def tokenize(src: str) -> List<Token> =
         elif c == ":":
             tokens = tokens + [Token.Colon]
             i = i + 1
+        elif c == ",":
+            tokens = tokens + [Token.Comma]
+            i = i + 1
+        elif c == "-" && i + 1 < str_len(src) && char_at(src, i + 1) == ">":
+            tokens = tokens + [Token.Arrow]
+            i = i + 2
         else:
             let r = op_token(c)
             let found = r.0
@@ -243,13 +251,27 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
         case Token.Def =>
             let name_t = tok_at(toks, pos + 1)
             let name_s = ident_name(name_t)
-            let colon_t = tok_at(toks, pos + 2)
-            let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
+            // 注：name_s 来自 ident_name（&str 切片），`+ ""` 强制 sig 为 String
+            // 起点，否则 `sig + pr.0` 生成 &str + String 拼接（E0308，v177 缺陷）
+            let mut sig = name_s + ""
+            let mut ap = pos + 2
+            // 参数列表：(a: int, b: str)
+            let lp_t = tok_at(toks, ap)
+            if lp_t == Token.LParen:
+                let pr = parse_params(toks, ap)
+                sig = sig + pr.0
+                ap = pr.1
+            // 返回类型：-> int
+            let rf = ret_suffix(toks, ap)
+            sig = sig + rf.0
+            ap = rf.1
+            let colon_t = tok_at(toks, ap)
+            let npos = (ap + 1) if colon_t == Token.Colon else ap
             let blk = parse_block(toks, npos, indent)
             let body = blk.0
             let blk_end = blk.1
             let body_s = list_summary(body)
-            let rr: (str, int) = ("def " + name_s + " {" + body_s + "}", blk_end)
+            let rr: (str, int) = ("def " + sig + " {" + body_s + "}", blk_end)
             rr
         case Token.Newline =>
             let rr: (str, int) = ("", pos + 1)
@@ -279,6 +301,46 @@ def list_summary(xs: List<str>) -> str =
             out = out + ", "
         out = out + xs[idx]
     out
+
+// ── 参数列表解析（v177）：(a: int, b: str) → 参数描述串 + 新位置 ──
+// pos 指向 LParen；返回 (描述串 "(a: int, b: str)", RParen 后位置)
+def parse_params(toks: List<Token>, pos: int) -> (str, int) =
+    let mut out: List<str> = []
+    let mut p = pos + 1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RParen:
+            done = true
+            p = p + 1
+        else:
+            let name_t = tok_at(toks, p)
+            let nm = ident_name(name_t)
+            let colon_t = tok_at(toks, p + 1)
+            let ty_t = tok_at(toks, p + 2)
+            let ty = ident_name(ty_t)
+            let item: str = nm + ": " + ty
+            out = out + [item]
+            let sep = tok_at(toks, p + 3)
+            if sep == Token.Comma:
+                p = p + 4
+            else:
+                p = p + 3
+    let params_s = "(" + list_summary(out) + ")"
+    let res: (str, int) = (params_s, p)
+    res
+
+// 返回类型后缀：`-> int` → (" -> int", 新位置)；无则 ("", 原位置)
+def ret_suffix(toks: List<Token>, pos: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    if t == Token.Arrow:
+        let ty_t = tok_at(toks, pos + 1)
+        let ty = ident_name(ty_t)
+        let res: (str, int) = (" -> " + ty, pos + 2)
+        res
+    else:
+        let res: (str, int) = ("", pos)
+        res
 
 // parse_program: stmt* 直到 Eof；返回 (语句列表描述, 位置)
 def parse_block(toks: List<Token>, pos: int, indent: int) -> (List<str>, int) =
@@ -324,10 +386,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段多行含语句的源码并输出 ──
+// ── main：解析一段含函数签名+嵌套块的多行源码并输出 ──
 def main() =
-    // 缩进嵌套：def foo 体含 if 体（两层级联块）
-    let src = "def foo:\n    if 1:\n        return 2\n    return 3\nelse"
+    // 签名 + 缩进嵌套：def add(a: int, b: int) -> int 体含 if 体（两级）
+    let src = "def add(a: int, b: int) -> int:\n    if 1:\n        return 2\n    return 3\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0
