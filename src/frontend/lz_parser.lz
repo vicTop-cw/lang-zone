@@ -204,9 +204,11 @@ def tok_at(toks: List<Token>, idx: int) -> Token =
     toks[idx].clone()
 
 // ── 表达式 AST（v178：求值 → 建树，自举 Parser 核心数据结构；
-//     v179：加 Cmp/Logic 节点支撑比较/逻辑表达式）──
-// 递归枚举（Bin/Cmp/Logic 含 Expr）——p0_recursive_enum 已验证 codegen
-// 可行（v178 修复子 CodeGen 漏克隆 enum_variant_fields 后 Box 包装正常）；
+//     v179：加 Cmp/Logic 节点；v181：加 Call 节点（后缀调用））──
+// 递归枚举（Bin/Cmp/Logic/Call 含 Expr）——p0_recursive_enum 已验证
+// codegen 可行（v178 修复子 CodeGen 漏克隆 enum_variant_fields 后 Box
+// 包装正常；v181 确认 enum 定义/构造两侧均用 type_refers_to 深查——
+// `List<Expr>` 字段两侧一致生成 Box<Vec<Expr>>）；
 // 字段名用 v:nm/op 长名，规避单字母 codegen 降级（E0308）
 enum Expr:
     IntLit(v: int)
@@ -214,6 +216,7 @@ enum Expr:
     Bin(op: str, l: Expr, r: Expr)
     Cmp(op: str, l: Expr, r: Expr)
     Logic(op: str, l: Expr, r: Expr)
+    Call(callee: Expr, args: List<Expr>)
 
 // ── 递归下降解析器（返回 (Expr, 新位置)，元组先绑定中间变量）──
 // parse_atom: 整数 | 标识符 | ( logic )
@@ -231,23 +234,67 @@ def parse_atom(toks: List<Token>, pos: int) -> (Expr, int) =
         case _ => (Expr.Ident(name: "?"), pos + 1)
     res
 
-// parse_term: atom (* atom)* / atom
-def parse_term(toks: List<Token>, pos: int) -> (Expr, int) =
+// ── 调用实参解析（v181）：`(a, b)` → List<Expr> + RParen 后位置 ──
+def parse_args(toks: List<Token>, pos: int) -> (List<Expr>, int) =
+    let mut out: List<Expr> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RParen:
+            done = true
+            p = p + 1
+        else:
+            let r = parse_logic(toks, p)
+            let rv = r.0
+            let rp = r.1
+            out = out + [rv]
+            let sep = tok_at(toks, rp)
+            if sep == Token.Comma:
+                p = rp + 1
+            else:
+                p = rp
+    let res: (List<Expr>, int) = (out, p)
+    res
+
+// ── 后缀调用层（v181）：atom (args)* ——优先级最高，绑定最紧──
+// parse_atom 之后循环探测 LParen：命中则解析实参并组装 Call 节点
+def parse_postfix(toks: List<Token>, pos: int) -> (Expr, int) =
     let first = parse_atom(toks, pos)
     let mut value = first.0
     let mut p = first.1
     let mut done = false
     while not done:
         let t = tok_at(toks, p)
+        if t == Token.LParen:
+            let r = parse_args(toks, p + 1)
+            let args_list = r.0
+            let rp = r.1
+            let ne = Expr.Call(callee: value.clone(), args: args_list)
+            value = ne
+            p = rp
+        else:
+            done = true
+    let res: (Expr, int) = (value, p)
+    res
+
+// parse_term: postfix (* postfix)* / postfix
+def parse_term(toks: List<Token>, pos: int) -> (Expr, int) =
+    let first = parse_postfix(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
         if t == Token.Star:
-            let r = parse_atom(toks, p + 1)
+            let r = parse_postfix(toks, p + 1)
             let rv = r.0
             let rp = r.1
             let ne = Expr.Bin(op: "*", l: value.clone(), r: rv)
             value = ne
             p = rp
         elif t == Token.Slash:
-            let r = parse_atom(toks, p + 1)
+            let r = parse_postfix(toks, p + 1)
             let rv = r.0
             let rp = r.1
             let ne = Expr.Bin(op: "/", l: value.clone(), r: rv)
@@ -347,8 +394,17 @@ def parse_logic(toks: List<Token>, pos: int) -> (Expr, int) =
     let res: (Expr, int) = (value, p)
     res
 
+// List<Expr> → 摘要字符串（逗号分隔，Call 实参展示用，v181）
+def expr_list_summary(xs: List<Expr>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        out = out + display_expr(xs[idx])
+    out
+
 // Expr → 中缀串（v178：IntLit(3) → "3"；Bin("+",a,b) → "a + b"；
-// v179：Cmp/Logic 同款递归渲染）
+// v179：Cmp/Logic 同款递归渲染；v181：Call 渲染 f(a, b)）
 def display_expr(e: Expr) -> str =
     let res: str = match e:
         case Expr.IntLit(v: n) => n.to_string()
@@ -359,6 +415,8 @@ def display_expr(e: Expr) -> str =
             display_expr(lv) + " " + op + " " + display_expr(rv)
         case Expr.Logic(op: op, l: lv, r: rv) =>
             display_expr(lv) + " " + op + " " + display_expr(rv)
+        case Expr.Call(callee: cv, args: av) =>
+            display_expr(cv) + "(" + expr_list_summary(av) + ")"
     res
 
 // ── 语句级解析（v171：if/def/return；v176：缩进值传递）──
@@ -547,10 +605,10 @@ def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
     // 顶层即缩进 -1 的块：行首 Indent(0) 视为顶层语句（v176 缩进块版）
     parse_block(toks, pos, -1)
 
-// ── main：解析一段含 let 绑定 + 比较/逻辑表达式 AST 的多行源码并输出 ──
+// ── main：解析一段含调用表达式 AST 的多行源码并输出 ──
 def main() =
-    // let 绑定（含类型标注）+ 嵌套块 + 比较/逻辑表达式
-    let src = "def add(a: int, b: int) -> int:\n    let total: int = a + b\n    if total >= 2 && a < 10:\n        return total\n    return 3\nelse"
+    // 调用表达式（后缀层）+ let 绑定 + 比较/逻辑 + 嵌套块
+    let src = "def add(a: int, b: int) -> int:\n    let total: int = double(a + b)\n    if total >= 2 && a < 10:\n        return clamp(total, 1, 9)\n    return 3\nelse"
     let toks = tokenize(src)
     let r = parse_program(toks, 0)
     let stmts = r.0

@@ -282,3 +282,24 @@
     比较/逻辑 ✅ → **let 绑定（含类型标注，match 臂作用域修复）** ✅ →
     下一阶段（完整表达式（调用/取字段）/ match 模式）。
 
+## 十七、KPI 推进记录（v181，追加）
+
+- **2026-08-16 v181 调用表达式（Call 节点 + 后缀解析层）**：
+  - **Expr 节点扩展**：`Call(callee: Expr, args: List<Expr>)` 递归变体
+    ——`List<Expr>` 字段的 Box 判定与枚举定义/构造两侧一致
+    （type_refers_to 深查 → `Box<Vec<Expr>>`，已核对 gen_enum_def）；
+  - **后缀调用层**：parse_postfix（优先级最高）——parse_atom 之后循环
+    探测 LParen，命中则 parse_args 解析实参列表（逗号分隔的 logic
+    表达式）并组装 Call 节点；parse_term 的原子/操作数改走 parse_postfix；
+  - **display_expr 扩展**：Call 渲染 `f(a, b)`（expr_list_summary 逗号
+    连接实参），callee/实参递归渲染；
+  - **端到端验证**：`def add(a: int, b: int) -> int {let total : int =
+    double(a + b), if total >= 2 && a < 10 {return clamp(total, 1, 9)},
+    return 3}` + `else`，rustc 0 错误，运行输出正确；
+  - **验证**：cargo test 314 全绿（292 lib + 8 ir_snapshots + 9 mod +
+    3 lz_ir_bootstrap + 1 reject_errors + 1 doc-test）；
+  - **自举前端里程碑**：词法 ✅ → 表达式 ✅ → 语句级 ✅ → 多行语句 ✅ →
+    缩进块 ✅ → 嵌套块递归 ✅ → 函数签名 ✅ → 表达式 AST 化 ✅ →
+    比较/逻辑 ✅ → let 绑定 ✅ → **调用表达式（Call + 后缀层）** ✅ →
+    下一阶段（取字段/下标/方法调用 / match 模式 / 类与实例）。
+
