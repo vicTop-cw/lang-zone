@@ -2,11 +2,13 @@
 pub mod builtins;
 pub mod collections;
 pub mod iter;
+pub mod lz_bootstrap_builtins;
 pub mod ops;
 pub mod types;
 
 pub use builtins::*;
 pub use collections::*;
 pub use iter::*;
+pub use lz_bootstrap_builtins::*;
 pub use ops::*;
 pub use types::*;

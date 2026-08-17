@@ -18,6 +18,40 @@ use super::types::IrType;
 /// 内嵌的 LZ IR 库（类型定义 + display 函数）
 pub const LZ_IR_LIB: &str = include_str!("lz_ir_lib.lz");
 
+/// 内嵌的 LZ Rust codegen 库（类型定义 + codegen 函数）
+pub const LZ_CODEGEN_LIB: &str = include_str!("lz_codegen_lib.lz");
+
+/// 将 IrModule 序列化为完整 LZ 源码（库 + main 构造 + codegen_module 调用）
+/// 自举路线 B：D1 环节 —— LZ 实现 Rust 代码生成
+pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
+    let mut g = LzGen::new();
+    let mut out = String::new();
+    out.push_str("// 由 lzc --emit=rs-lz 生成（自举路线 B：LZ 实现 Rust codegen）\n");
+    out.push_str(LZ_CODEGEN_LIB);
+    out.push_str("\n\n// ── main：构造当前模块的 IR 并输出 Rust 代码 ──\n");
+    out.push_str("def main() =\n");
+
+    let mut item_names: Vec<String> = Vec::new();
+    for item in &module.items {
+        let name = g.fresh();
+        let item_src = g.item(item);
+        g.lets.push(format!("    let {} = {}", name, item_src));
+        item_names.push(name);
+    }
+
+    out.push_str(&g.lets.join("\n"));
+    out.push('\n');
+    out.push_str(&format!(
+        "    let m = IrModule(name: \"{}\", items: [{}], prelude: [{}], version: {})\n",
+        module.name,
+        item_names.join(", "),
+        gen_str_list(&module.prelude),
+        module.version
+    ));
+    out.push_str("    print_str(codegen_module(m))\n    return 0\n");
+    out
+}
+
 /// 将 IrModule 序列化为完整 LZ 源码（库 + main 构造 + display_module 调用）
 pub fn ir_module_to_lz_source(module: &IrModule) -> String {
     let mut g = LzGen::new();

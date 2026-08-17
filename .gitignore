@@ -50,6 +50,9 @@ bootstrap/work/lz_ir/*
 !bootstrap/work/lz_ir/*.lz
 !bootstrap/work/lz_ir/*.ps1
 !bootstrap/work/lz_ir/README.md
+!bootstrap/work/lz_codegen/
+bootstrap/work/lz_codegen/*
+!bootstrap/work/lz_codegen/*.ps1
 !bootstrap/work/lz_lexer/
 bootstrap/work/lz_lexer/*
 !bootstrap/work/lz_lexer/*.lz

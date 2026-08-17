@@ -509,6 +509,72 @@ fn compile_main(args: Vec<String>) -> i32 {
         }
     }
 
+    // --emit=rs-lz: 自举路线 B（D1）—— 生成 LZ codegen 构造代码
+    // （lz_codegen_lib.lz 库 + main 构造），经 lang-zone → rustc → 运行
+    // 输出 Rust 源码（与常规 IR codegen 路径生成的 .rs 逐字符一致）。
+    // 即「用 LZ 实现 Rust codegen」：Rust 编译器只序列化 IR 数据为 LZ 调用，
+    // codegen 逻辑完全由 LZ 侧承担（bootstrap/work/lz_codegen 试点落地）。
+    if args.iter().any(|a| a == "--emit=rs-lz") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                let lz_source =
+                    lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source(&ir_module);
+                let lz_path = replace_ext(path, ".lz", ".lzrs");
+                fs::write(&lz_path, &lz_source).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", lz_path, e);
+                    std::process::exit(1);
+                });
+                eprintln!("Generated {} -> {} (LZ Rust codegen)", path, lz_path);
+                // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
+                let self_exe = std::env::current_exe().unwrap_or_default();
+                let build = Command::new(&self_exe)
+                    .arg(&lz_path)
+                    .output()
+                    .expect("run lang-zone on generated LZ");
+                if !build.status.success() {
+                    eprintln!(
+                        "LZ Rust codegen 编译失败: {}",
+                        String::from_utf8_lossy(&build.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                let rs_path = replace_ext(&lz_path, ".lzrs", ".rs");
+                let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("target/debug/liblz_builtins.rlib");
+                let exe_path = replace_ext(&lz_path, ".lzrs", ".exe");
+                let rc = Command::new("rustc")
+                    .args(["--edition", "2021"])
+                    .arg(&rs_path)
+                    .arg("--extern")
+                    .arg(format!("lz_builtins={}", builtins.display()))
+                    .arg("-o")
+                    .arg(&exe_path)
+                    .output()
+                    .expect("run rustc on generated .rs");
+                if !rc.status.success() {
+                    eprintln!(
+                        "LZ Rust codegen rustc 失败: {}",
+                        String::from_utf8_lossy(&rc.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                let run = Command::new(&exe_path)
+                    .output()
+                    .expect("run generated exe");
+                if !run.status.success() {
+                    eprintln!("LZ Rust codegen 运行失败: {}", String::from_utf8_lossy(&run.stderr));
+                    std::process::exit(1);
+                }
+                print!("{}", String::from_utf8_lossy(&run.stdout));
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("IR emission error (rs-lz): {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // --emit=lex-lz / --emit=parse-lz: 自举路线 B —— 用 LZ 写的前端处理输入文件
     //（src/frontend/lz_lexer.lz / lz_parser.lz），走与 ir-lz 相同的递归管线，
     // 输出与 Rust 版基线（--tokens / --ast）可 diff。

@@ -34,6 +34,33 @@
 
 ---
 
+## 2026-08-17 · AutoClaw（自举 100% 里程碑，v160）
+
+### 一、D1：codegen 关键路径 .lz 化（15%）
+- **内容**：新建 `src/ir/lz_codegen_lib.lz`（LZ 版 codegen：rust_type 映射/表达式/语句/Item/模块组装/f-string 模板解析/Range/Dict/Set/HashMap 索引 get/insert 形态/contains 参数剥离/while-true→loop/字符串转义/魔法常量 &str 渲染/f64 字面量 .0 后缀/force_ty 空容器强制标注）；`src/ir/lz_codegen.rs` 新增 `ir_module_to_rs_lz_source`；`src/main.rs` 新增 `--emit=rs-lz` 递归管线
+- **验证**：d1_probe 双路 .rs 逐字符一致；`tests/lz_ir_bootstrap.rs::lz_emit_rs_lz_matches_native_codegen` 逐字节断言
+- **产物**：src/ir/lz_codegen_lib.lz、src/ir/lz_codegen.rs、src/main.rs、tests/lz_ir_bootstrap.rs
+
+### 二、D2：DEMO 子集全量行为一致（10%）
+- **内容**：`bootstrap/work/lz_codegen/diff_rs.ps1`（默认 8 DEMO 输入集）；实测 8 个 DEMO + 1 探针双路 .rs 逐字符一致且编译运行通过
+- **缺口清单**：impl 块生成（struct/trait_impl）、列表推导（comprehension）、生成器/闭包/ref 绑定（keywords/primitives）、match 模式、__lz_main 重命名（guard）——不伪装覆盖
+- **产物**：bootstrap/work/lz_codegen/diff_rs.ps1、.gitignore 例外
+
+### 三、E1/E2：builtins 核心子集 .lz 化并并入 crate（10%）
+- **内容**：`bootstrap/work/lz_builtins/core_subset.lz` 8 个纯函数（lz_all/any/count_if/sum_ints/join_words/ends_with/abs/clamp）；生成 .rs 提取为 `lz_builtins/src/runtime/lz_bootstrap_builtins.rs` + runtime/mod.rs 导出
+- **验证**：cargo test -p lz_builtins 8/8；端到端 .lz 程序调用输出正确
+- **缺陷记录**：3 个 LZ 编译器缺陷以规避写法绕过（str 切片 codegen、bool 提前返回、内联标注），见台账 05 §7 v4
+
+### 四、G2：覆盖映射表（4%）
+- **内容**：06 §6 覆盖映射表扩展至 15/15，命中率 100%
+- **验证**：cargo test 全量 320/0；DEMO 全量 261/261；bootstrap closed 闭环 13/13 RC=0
+
+### 五、口径
+- 61% + D1 15% + D2 10% + E1 6% + E2 4% + G2 4% = **100%**；版本 v159→160
+- 异常记录：closed 闭环首跑受 E1 探针残留 .lz/.exe 污染（14/17、runout 残留），清理探针文件后 RC=0——探针属一次性探测文件，按清洁规范删除
+
+---
+
 ## 2026-08-17 · AutoClaw（自举 50% 里程碑，v159）
 
 ### 一、C2：IR 构建 .lz 化（对齐 `--emit=ir` 与 `--emit=ir-lz` 双路输出）

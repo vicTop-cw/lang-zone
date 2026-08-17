@@ -467,3 +467,99 @@ def main() =
 
     let _ = fs::remove_dir_all(&work);
 }
+
+/// 自举 D1 门禁（100% 里程碑）：--emit=rs-lz 双路 .rs 产物逐字符一致。
+///
+/// Rust 版 codegen（常规路径生成 .rs）与 LZ 版 codegen（--emit=rs-lz，经递归
+/// 管线 lzc→rustc→run 输出 Rust 源码）对同一输入产出完全相同的 .rs。若
+/// lz_codegen_lib.lz 或 lz_codegen.rs 的 rs-lz 生成回归，本测试失败。
+#[test]
+fn lz_emit_rs_lz_matches_native_codegen() {
+    let source = r#"
+def add(x: int, y: int) -> int =
+    x + y
+
+const LIMIT: int = 100
+
+struct Point =
+    x: f64
+    y: f64
+
+enum Color:
+    Red
+    Blue
+
+def main() =
+    let a = 1 + 2
+    let b = 3.5 * 2.0
+    let s = "hi"
+    let neg = -a
+    let c = add(a, 4)
+    print(c)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_diff_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("d1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+    let rs_path = work.join("d1_input.rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 路 1：常规路径生成 .rs（Rust 版 codegen）
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "常规 codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = fs::read(&rs_path).expect("read native .rs");
+
+    // 路 2：--emit=rs-lz（LZ 版 codegen，递归管线）
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    // 逐字符一致断言（D1 判据）
+    assert_eq!(
+        native_rs, out_lz.stdout,
+        "常规 codegen 与 --emit=rs-lz 产物不一致（LZ 版 codegen 回归？）\nnative: {}\nlz: {}",
+        String::from_utf8_lossy(&native_rs),
+        String::from_utf8_lossy(&out_lz.stdout)
+    );
+    assert!(!out_lz.stdout.is_empty(), ".rs 输出不应为空");
+
+    // 生成的 Rust 必须能过 rustc（运行行为一致由 D2 全量比对覆盖）
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = work.join("d1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs_path)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on generated .rs");
+    assert!(
+        rc.status.success(),
+        "LZ 版 codegen 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "生成产物运行失败");
+
+    let _ = fs::remove_dir_all(&work);
+}
