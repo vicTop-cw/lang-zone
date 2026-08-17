@@ -1,0 +1,3 @@
+@!def unclosed macro
+def main() =
+    print(1)

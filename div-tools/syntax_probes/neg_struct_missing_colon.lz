@@ -1,0 +1,4 @@
+struct P =
+    x int
+def main() =
+    print(1)

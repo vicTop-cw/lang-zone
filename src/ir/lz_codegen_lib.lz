@@ -1,7 +1,9 @@
 // ═══════════════════════════════════════════════════════════════
-// LZ IR 库（lzc --emit=ir-lz 后端内嵌）：用 LZ 实现的 LZIR display
-// 对齐 src/ir/display.rs；由 src/ir/lz_codegen.rs include_str! 嵌入，
-// 生成的 .lz = 本库 + main 构造（bootstrap/work/lz_ir/ir_module.lz 为其开发镜像）
+// LZ IR + Rust codegen 库（lzc --emit=rs-lz 后端内嵌）
+// 前半部分：IR 类型 + display（与 lz_ir_lib.lz 一致，自举路线 B）
+// 后半部分：codegen_* —— 用 LZ 实现的 IrModule → Rust 源码（D1 环节）
+// 由 src/ir/lz_codegen.rs include_str! 嵌入，
+// 生成的 .lzrs = 本库 + main 构造（bootstrap/work/lz_codegen 为其开发镜像）
 // ═══════════════════════════════════════════════════════════════
 
 // ── IrType（17 变体，含 Duck）──

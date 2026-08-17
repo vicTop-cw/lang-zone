@@ -1,5 +1,8 @@
 // Lang-Zong 编译器 — CLI 入口
 // 用法: lzc hello.lz [--tokens] [--ast] [--emit=ir] [--emit=lex-lz] [--emit=parse-lz] [--std-dir <path>] [--allow-rustc-private]  → hello.rs
+// 子命令: lang-zone create|build|check|peek|push → src/cli.rs
+
+mod cli;
 
 use std::env;
 use std::fs;
@@ -144,6 +147,27 @@ fn main() {
 
 /// 实际编译流水线（在 main 的大栈线程中执行）；返回进程退出码
 fn compile_main(args: Vec<String>) -> i32 {
+    // ── 子命令分派：args[1] 是 create/build/check/peek/push 或
+    // -h/--help/--version 时走子命令路径；否则保持原单文件编译路径不变 ──
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "-h" | "--help" => {
+                cli::print_help();
+                return 0;
+            }
+            "--version" => {
+                println!("Lang-Zone compiler (lz) {}", lang_zone::util::version::version());
+                return 0;
+            }
+            "create" => return cli::cmd_create(&args),
+            "build" => return cli::cmd_build(&args),
+            "check" => return cli::cmd_check(&args),
+            "peek" => return cli::cmd_peek(&args),
+            "push" => return cli::cmd_push(&args),
+            _ => { /* 单文件编译路径（行为保持原样） */ }
+        }
+    }
+
     if args.len() < 2 {
         eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--emit=lex-lz] [--emit=parse-lz] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
         std::process::exit(1);

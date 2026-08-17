@@ -1,0 +1,4 @@
+trait T =
+    def go(self) -> int
+def main() =
+    print(1)

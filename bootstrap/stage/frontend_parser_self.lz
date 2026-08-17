@@ -1,0 +1,798 @@
+
+enum Token:
+    IntLit(v: int)
+    StrLit(s: str)
+    Ident(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    LParen
+    RParen
+    LBracket
+    RBracket
+    LBrace
+    RBrace
+    Colon
+    Comma
+    Arrow
+    FatArrow
+    EqEq
+    Ne
+    Lt
+    Gt
+    Le
+    Ge
+    AmpAmp
+    PipePipe
+    Eq
+    Let
+    Dot
+    Match
+    Case
+    While
+    For
+    In
+    Return
+    If
+    Else
+    Def
+    Indent(v: int)
+    Newline
+    Eof
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def scan_int(src: str, start: int) -> (int, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    let v = src[start..i] as int
+    let res: (int, int) = (v, i)
+    res
+
+def scan_indent(src: str, start: int) -> (int, int) =
+    let mut j = start
+    while j < str_len(src) && (char_at(src, j) == " " or char_at(src, j) == "	"):
+        j = j + 1
+    (j - start, j)
+
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
+        i = i + 1
+    (src[start..i], i)
+
+def scan_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 1
+    while i < str_len(src) && char_at(src, i) != "\"":
+        i = i + 1
+    let res: (str, int) = (src[(start + 1)..i], i + 1)
+    res
+
+def keyword_token(w: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("return", Token.Return),
+        ("if", Token.If),
+        ("else", Token.Else),
+        ("def", Token.Def),
+        ("let", Token.Let),
+        ("match", Token.Match),
+        ("case", Token.Case),
+        ("while", Token.While),
+        ("for", Token.For),
+        ("in", Token.In),
+    ]
+    let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == w:
+            result = (true, pair.1)
+    result
+
+def op_token(c: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("+", Token.Plus),
+        ("-", Token.Minus),
+        ("*", Token.Star),
+        ("/", Token.Slash),
+        ("(", Token.LParen),
+        (")", Token.RParen),
+        ("[", Token.LBracket),
+        ("]", Token.RBracket),
+        ("{", Token.LBrace),
+        ("}", Token.RBrace),
+        ("<", Token.Lt),
+        (">", Token.Gt),
+        ("=", Token.Eq),
+        (".", Token.Dot),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = (true, pair.1)
+    result
+
+def two_char_op(c1: str, c2: str) -> (bool, Token) =
+    let key: str = c1 + c2
+    let table: List<(str, Token)> = [
+        ("==", Token.EqEq),
+        ("!=", Token.Ne),
+        ("<=", Token.Le),
+        (">=", Token.Ge),
+        ("&&", Token.AmpAmp),
+        ("||", Token.PipePipe),
+        ("=>", Token.FatArrow),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == key:
+            result = (true, pair.1)
+    result
+
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    let mut line_start = true
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+            line_start = true
+        elif line_start && c == " ":
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        elif line_start:
+            tokens = tokens + [Token.Indent(v: 0)]
+            line_start = false
+        elif c == " ":
+            i = i + 1
+        elif c == "\"":
+            let r = scan_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.StrLit(s: r.0)]
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            tokens = tokens + [Token.IntLit(v: r.0)]
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let kw = keyword_token(r.0)
+            if kw.0:
+                tokens = tokens + [kw.1]
+            else:
+                tokens = tokens + [Token.Ident(name: r.0)]
+        elif c == ":":
+            tokens = tokens + [Token.Colon]
+            i = i + 1
+        elif c == ",":
+            tokens = tokens + [Token.Comma]
+            i = i + 1
+        elif c == "-" && i + 1 < str_len(src) && char_at(src, i + 1) == ">":
+            tokens = tokens + [Token.Arrow]
+            i = i + 2
+        else:
+            let mut handled = false
+            if i + 1 < str_len(src):
+                let r2 = two_char_op(c, char_at(src, i + 1))
+                if r2.0:
+                    tokens = tokens + [r2.1]
+                    i = i + 2
+                    handled = true
+            if not handled:
+                let r = op_token(c)
+                let found = r.0
+                let tok = r.1
+                if found:
+                    tokens = tokens + [tok]
+                    i = i + 1
+                else:
+                    i = i + 1
+    tokens = tokens + [Token.Eof]
+    tokens
+
+def tok_at(toks: List<Token>, idx: int) -> Token =
+    if idx >= toks.len():
+        Token.Eof
+    else:
+        toks[idx].clone()
+
+enum Expr:
+    IntLit(v: int)
+    StrLit(v: str)
+    Ident(name: str)
+    Bin(op: str, l: Expr, r: Expr)
+    Cmp(op: str, l: Expr, r: Expr)
+    Logic(op: str, l: Expr, r: Expr)
+    Call(callee: Expr, args: List<Expr>)
+    Get(recv: Expr, name: str)
+    Index(recv: Expr, idx: Expr)
+    ListLit(elems: List<Expr>)
+    TupleLit(elems: List<Expr>)
+    DictLit(pairs: List<(Expr, Expr)>)
+
+def parse_atom(toks: List<Token>, pos: int) -> (Expr, int) =
+    let t = tok_at(toks, pos)
+    let res: (Expr, int) = match t:
+        case Token.IntLit(v: n) => (Expr.IntLit(v: n), pos + 1)
+        case Token.StrLit(s: sv) => (Expr.StrLit(v: sv), pos + 1)
+        case Token.Ident(name: nm) => (Expr.Ident(name: nm), pos + 1)
+        case Token.LParen =>
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let sep = tok_at(toks, rp)
+            if sep == Token.Comma:
+                let mut elems: List<Expr> = [rv]
+                let mut p = rp + 1
+                let mut done = false
+                while not done:
+                    let t2 = tok_at(toks, p)
+                    if t2 == Token.RParen:
+                        done = true
+                        p = p + 1
+                    else:
+                        let r2 = parse_logic(toks, p)
+                        let rv2 = r2.0
+                        let rp2 = r2.1
+                        elems = elems + [rv2]
+                        let sep2 = tok_at(toks, rp2)
+                        if sep2 == Token.Comma:
+                            p = rp2 + 1
+                        else:
+                            p = rp2
+                let pr: (Expr, int) = (Expr.TupleLit(elems: elems), p)
+                pr
+            else:
+                let pr: (Expr, int) = (rv, rp + 1)
+                pr
+        case Token.LBracket =>
+            let r = parse_list_elems(toks, pos + 1)
+            let elems = r.0
+            let rp = r.1
+            let pr: (Expr, int) = (Expr.ListLit(elems: elems), rp + 1)
+            pr
+        case Token.LBrace =>
+            let r = parse_dict_pairs(toks, pos + 1)
+            let pairs = r.0
+            let rp = r.1
+            let pr: (Expr, int) = (Expr.DictLit(pairs: pairs), rp + 1)
+            pr
+        case _ => (Expr.Ident(name: "?"), pos + 1)
+    res
+
+def parse_dict_pairs(toks: List<Token>, pos: int) -> (List<(Expr, Expr)>, int) =
+    let mut out: List<(Expr, Expr)> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RBrace:
+            done = true
+            p = p + 1
+        elif t == Token.Eof:
+            done = true
+        else:
+            let rk = parse_logic(toks, p)
+            let k = rk.0
+            let after_key = rk.1
+            let rv = parse_logic(toks, after_key + 1)
+            let v = rv.0
+            let after_val = rv.1
+            let pair: (Expr, Expr) = (k, v)
+            out = out + [pair]
+            let sep = tok_at(toks, after_val)
+            if sep == Token.Comma:
+                p = after_val + 1
+            else:
+                p = after_val
+    let res: (List<(Expr, Expr)>, int) = (out, p)
+    res
+
+def parse_list_elems(toks: List<Token>, pos: int) -> (List<Expr>, int) =
+    let mut out: List<Expr> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RBracket:
+            done = true
+            p = p + 1
+        else:
+            let r = parse_logic(toks, p)
+            let rv = r.0
+            let rp = r.1
+            out = out + [rv]
+            let sep = tok_at(toks, rp)
+            if sep == Token.Comma:
+                p = rp + 1
+            else:
+                p = rp
+    let res: (List<Expr>, int) = (out, p)
+    res
+
+def parse_args(toks: List<Token>, pos: int) -> (List<Expr>, int) =
+    let mut out: List<Expr> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RParen:
+            done = true
+            p = p + 1
+        else:
+            let r = parse_logic(toks, p)
+            let rv = r.0
+            let rp = r.1
+            out = out + [rv]
+            let sep = tok_at(toks, rp)
+            if sep == Token.Comma:
+                p = rp + 1
+            else:
+                p = rp
+    let res: (List<Expr>, int) = (out, p)
+    res
+
+def parse_postfix(toks: List<Token>, pos: int) -> (Expr, int) =
+    let first = parse_atom(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.LParen:
+            let r = parse_args(toks, p + 1)
+            let args_list = r.0
+            let rp = r.1
+            let ne = Expr.Call(callee: value.clone(), args: args_list)
+            value = ne
+            p = rp
+        elif t == Token.Dot:
+            let name_t = tok_at(toks, p + 1)
+            let nm = field_desc(name_t)
+            let ne = Expr.Get(recv: value.clone(), name: nm)
+            value = ne
+            p = p + 2
+        elif t == Token.LBracket:
+            let r = parse_logic(toks, p + 1)
+            let idx_expr = r.0
+            let rp = r.1
+            let ne = Expr.Index(recv: value.clone(), idx: idx_expr)
+            value = ne
+            p = (rp + 1)  //  RBracket
+        else:
+            done = true
+    let res: (Expr, int) = (value, p)
+    res
+
+def parse_term(toks: List<Token>, pos: int) -> (Expr, int) =
+    let first = parse_postfix(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.Star:
+            let r = parse_postfix(toks, p + 1)
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "*", l: value.clone(), r: rv)
+            value = ne
+            p = rp
+        elif t == Token.Slash:
+            let r = parse_postfix(toks, p + 1)
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "/", l: value.clone(), r: rv)
+            value = ne
+            p = rp
+        else:
+            done = true
+    let res: (Expr, int) = (value, p)
+    res
+
+def parse_expr(toks: List<Token>, pos: int) -> (Expr, int) =
+    let first = parse_term(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.Plus:
+            let r = parse_term(toks, p + 1)
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "+", l: value.clone(), r: rv)
+            value = ne
+            p = rp
+        elif t == Token.Minus:
+            let r = parse_term(toks, p + 1)
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Bin(op: "-", l: value.clone(), r: rv)
+            value = ne
+            p = rp
+        else:
+            done = true
+    let res: (Expr, int) = (value, p)
+    res
+
+def cmp_op(t: Token) -> (bool, str) =
+    let res: (bool, str) = match t:
+        case Token.EqEq => (true, "==")
+        case Token.Ne => (true, "!=")
+        case Token.Lt => (true, "<")
+        case Token.Le => (true, "<=")
+        case Token.Gt => (true, ">")
+        case Token.Ge => (true, ">=")
+        case _ => (false, "?")
+    res
+
+def logic_op(t: Token) -> (bool, str) =
+    let res: (bool, str) = match t:
+        case Token.AmpAmp => (true, "&&")
+        case Token.PipePipe => (true, "||")
+        case _ => (false, "?")
+    res
+
+def parse_cmp(toks: List<Token>, pos: int) -> (Expr, int) =
+    let first = parse_expr(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        let co = cmp_op(t)
+        if co.0:
+            let r = parse_expr(toks, p + 1)
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Cmp(op: co.1, l: value.clone(), r: rv)
+            value = ne
+            p = rp
+        else:
+            done = true
+    let res: (Expr, int) = (value, p)
+    res
+
+def parse_logic(toks: List<Token>, pos: int) -> (Expr, int) =
+    let first = parse_cmp(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        let lo = logic_op(t)
+        if lo.0:
+            let r = parse_cmp(toks, p + 1)
+            let rv = r.0
+            let rp = r.1
+            let ne = Expr.Logic(op: lo.1, l: value.clone(), r: rv)
+            value = ne
+            p = rp
+        else:
+            done = true
+    let res: (Expr, int) = (value, p)
+    res
+
+def expr_list_summary(xs: List<Expr>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        out = out + display_expr(xs[idx])
+    out
+
+def expr_pair_summary(xs: List<(Expr, Expr)>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        let pair = xs[idx].clone()
+        out = out + display_expr(pair.0) + ": " + display_expr(pair.1)
+    out
+
+def display_expr(e: Expr) -> str =
+    let res: str = match e:
+        case Expr.IntLit(v: n) => n.to_string()
+        case Expr.StrLit(v: sv) => "\"" + sv + "\""
+        case Expr.Ident(name: nm) => nm
+        case Expr.Bin(op: op, l: lv, r: rv) =>
+            display_expr(lv) + " " + op + " " + display_expr(rv)
+        case Expr.Cmp(op: op, l: lv, r: rv) =>
+            display_expr(lv) + " " + op + " " + display_expr(rv)
+        case Expr.Logic(op: op, l: lv, r: rv) =>
+            display_expr(lv) + " " + op + " " + display_expr(rv)
+        case Expr.Call(callee: cv, args: av) =>
+            display_expr(cv) + "(" + expr_list_summary(av) + ")"
+        case Expr.Get(recv: rv, name: nm) =>
+            display_expr(rv) + "." + nm
+        case Expr.Index(recv: rv, idx: iv) =>
+            display_expr(rv) + "[" + display_expr(iv) + "]"
+        case Expr.ListLit(elems: ev) =>
+            "[" + expr_list_summary(ev) + "]"
+        case Expr.TupleLit(elems: ev) =>
+            "(" + expr_list_summary(ev) + ")"
+        case Expr.DictLit(pairs: pv) =>
+            "{" + expr_pair_summary(pv) + "}"
+    res
+
+def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    let res: (str, int) = match t:
+        case Token.Return =>
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let rr: (str, int) = ("return " + display_expr(rv), rp)
+            rr
+        case Token.If =>
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("if " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
+        case Token.Else =>
+            let rr: (str, int) = ("else", pos + 1)
+            rr
+        case Token.Match =>
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("match " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
+        case Token.Case =>
+            let pat_t = tok_at(toks, pos + 1)
+            let pat_s = pattern_desc(pat_t)
+            let arrow_t = tok_at(toks, pos + 2)
+            if arrow_t == Token.FatArrow:
+                let r = parse_logic(toks, pos + 3)
+                let rv = r.0
+                let rp = r.1
+                let rr: (str, int) = ("case " + pat_s + " => " + display_expr(rv), rp)
+                rr
+            else:
+                let colon_t = tok_at(toks, pos + 2)
+                let npos = (pos + 3) if colon_t == Token.Colon else pos + 2
+                let blk = parse_block(toks, npos, indent)
+                let body = blk.0
+                let blk_end = blk.1
+                let body_s = list_summary(body)
+                let rr: (str, int) = ("case " + pat_s + " {" + body_s + "}", blk_end)
+                rr
+        case Token.While =>
+            let r = parse_logic(toks, pos + 1)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("while " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
+        case Token.For =>
+            let name_t = tok_at(toks, pos + 1)
+            let name_s = ident_name(name_t)
+            let r = parse_logic(toks, pos + 3)
+            let rv = r.0
+            let rp = r.1
+            let after = tok_at(toks, rp)
+            let npos = (rp + 1) if after == Token.Colon else rp
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("for " + name_s + " in " + display_expr(rv) + " {" + body_s + "}", blk_end)
+            rr
+        case Token.Def =>
+            let name_t = tok_at(toks, pos + 1)
+            let name_s = ident_name(name_t)
+            let mut sig = name_s + ""
+            let mut ap = pos + 2
+            let lp_t = tok_at(toks, ap)
+            if lp_t == Token.LParen:
+                let pr = parse_params(toks, ap)
+                sig = sig + pr.0
+                ap = pr.1
+            let rf = ret_suffix(toks, ap)
+            sig = sig + rf.0
+            ap = rf.1
+            let colon_t = tok_at(toks, ap)
+            let npos = (ap + 1) if colon_t == Token.Colon else ap
+            let blk = parse_block(toks, npos, indent)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("def " + sig + " {" + body_s + "}", blk_end)
+            rr
+        case Token.Let =>
+            let name_t = tok_at(toks, pos + 1)
+            let name_s = ident_name(name_t)
+            let mut ap = pos + 2
+            let mut ty_s = ""
+            let colon_t = tok_at(toks, ap)
+            if colon_t == Token.Colon:
+                let ty_t = tok_at(toks, ap + 1)
+                ty_s = ident_name(ty_t)
+                ap = ap + 2
+            let eq_t = tok_at(toks, ap)
+            let rp = (ap + 1) if eq_t == Token.Eq else ap
+            let r = parse_logic(toks, rp)
+            let rv = r.0
+            let rend = r.1
+            let full = name_s + (" : " + ty_s if ty_s.len() > 0 else "") + " = " + display_expr(rv)
+            let rr: (str, int) = ("let " + full, rend)
+            rr
+        case Token.Newline =>
+            let rr: (str, int) = ("", pos + 1)
+            rr
+        case _ =>
+            let r = parse_logic(toks, pos)
+            let rv = r.0
+            let rp = r.1
+            let eq_t = tok_at(toks, rp)
+            if eq_t == Token.Eq:
+                let r2 = parse_logic(toks, rp + 1)
+                let rv2 = r2.0
+                let rend = r2.1
+                let rr: (str, int) = (display_expr(rv) + " = " + display_expr(rv2), rend)
+                rr
+            else:
+                let rr: (str, int) = ("expr " + display_expr(rv), rp)
+                rr
+    res
+
+def ident_name(t: Token) -> str =
+    let res: str = match t:
+        case Token.Ident(name: nm) => nm
+        case _ => "?"
+    res
+
+def pattern_desc(t: Token) -> str =
+    let res: str = match t:
+        case Token.IntLit(v: n) => n.to_string()
+        case Token.Ident(name: nm) => nm
+        case _ => "?"
+    res
+
+def field_desc(t: Token) -> str =
+    let res: str = match t:
+        case Token.IntLit(v: n) => n.to_string()
+        case Token.Ident(name: nm) => nm
+        case _ => "?"
+    res
+
+def list_summary(xs: List<str>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        out = out + xs[idx]
+    out
+
+def parse_params(toks: List<Token>, pos: int) -> (str, int) =
+    let mut out: List<str> = []
+    let mut p = pos + 1
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        if t == Token.RParen:
+            done = true
+            p = p + 1
+        elif t == Token.Eof:
+            done = true
+        else:
+            let nm = ident_name(t)
+            let colon_t = tok_at(toks, p + 1)
+            if colon_t == Token.Colon:
+                let ty_t = tok_at(toks, p + 2)
+                let ty = ident_name(ty_t)
+                let item: str = nm + ": " + ty
+                out = out + [item]
+                let sep = tok_at(toks, p + 3)
+                if sep == Token.Comma:
+                    p = p + 4
+                else:
+                    p = p + 3
+            else:
+                out = out + [nm]
+                let sep = tok_at(toks, p + 1)
+                if sep == Token.Comma:
+                    p = p + 2
+                else:
+                    p = p + 1
+    let params_s = "(" + list_summary(out) + ")"
+    let res: (str, int) = (params_s, p)
+    res
+
+def ret_suffix(toks: List<Token>, pos: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    if t == Token.Arrow:
+        let ty_t = tok_at(toks, pos + 1)
+        let ty = ident_name(ty_t)
+        let res: (str, int) = (" -> " + ty, pos + 2)
+        res
+    else:
+        let res: (str, int) = ("", pos)
+        res
+
+def parse_block(toks: List<Token>, pos: int, indent: int) -> (List<str>, int) =
+    let mut out: List<str> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        let tag = block_tag(t)
+        if tag == 0:
+            done = true
+        elif tag == 1:
+            p = p + 1
+        elif tag == 2:
+            let n = block_indent(t)
+            if n > indent:
+                let r = parse_stmt(toks, p + 1, n)
+                let s = r.0
+                if s.len() > 0:
+                    out = out + [s]
+                p = r.1
+            else:
+                done = true
+        else:
+            done = true
+    (out, p)
+
+def block_tag(t: Token) -> int =
+    let res: int = match t:
+        case Token.Eof => 0
+        case Token.Newline => 1
+        case Token.Indent(v: n) => 2
+        case _ => 0
+    res
+
+def block_indent(t: Token) -> int =
+    let res: int = match t:
+        case Token.Indent(v: n) => n
+        case _ => -1
+    res
+
+def parse_program(toks: List<Token>, pos: int) -> (List<str>, int) =
+    parse_block(toks, pos, -1)
+
+
+def main() =
+    let src = read_file(__file__).unwrap()
+    let toks = tokenize(src)
+    let r = parse_program(toks, 0)
+    let stmts = r.0
+    for idx in 0..stmts.len():
+        print(stmts[idx])

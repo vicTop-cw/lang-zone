@@ -1,0 +1,14 @@
+struct Point =
+    x: f64
+    y: f64
+
+enum Color:
+    Red
+    Blue
+
+def dist(p: Point) -> f64 =
+    p.x + p.y
+
+def main() =
+    let p = Point(x: 1.5, y: 2.5)
+    print(dist(p))

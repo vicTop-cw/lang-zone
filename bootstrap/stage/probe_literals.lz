@@ -1,0 +1,10 @@
+def add(x: int, y: int) -> int =
+    x + y
+
+const LIMIT: int = 100
+
+def main() =
+    let a = 1 + 2
+    let b = 3.5 * 2.0
+    let s = "hi"
+    print(add(a, LIMIT))
