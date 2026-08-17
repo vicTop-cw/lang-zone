@@ -372,3 +372,98 @@ fn lz_emit_ir_lz_roundtrip() {
 
     let _ = fs::remove_dir_all(&work);
 }
+
+/// 自举 C3 门禁（50% 里程碑）：--emit=ir vs --emit=ir-lz 双路输出逐字符一致。
+///
+/// Rust 版 display.rs（--emit=ir）与 LZ 版 lz_ir_lib.lz（--emit=ir-lz，经
+/// 递归管线 lzc→rustc→run）对同一输入产出完全相同 IR 文本。若 lz_ir_lib.lz
+/// 或 lz_codegen.rs 回归（ty 前缀 / 缩进式 body / 泛型签名等丢失），本测试失败。
+#[test]
+fn lz_emit_ir_lz_matches_ir_byte_exact() {
+    // 覆盖：函数定义（含泛型）、const、let/赋值、binop/unop、call/index/field、
+    // if/else、for/while、match、return、struct 定义、enum 定义、列表/字典字面量
+    let source = r#"
+def add(x: int, y: int) -> int =
+    x + y
+
+const LIMIT: int = 100
+
+struct Pair<T> =
+    first: T
+    second: T
+
+enum Shape:
+    Circle(r: f64)
+    Rect(w: f64, h: f64)
+
+def classify(x: int) -> str =
+    match x:
+        case 0 => "zero"
+        case _ => "many"
+
+def sum_to(n: int) -> int =
+    let mut total = 0
+    for i in 0..n:
+        total = total + i
+    while total > 100:
+        total = total - 1
+    total
+
+def area(s: Shape) -> f64 =
+    match s:
+        case Shape.Circle(r: r) => 3.14 * r * r
+        case Shape.Rect(w: w, h: h) => w * h
+
+def main() =
+    let xs: List<int> = [1, 2]
+    let d = {"a": 1}
+    print(xs[0])
+    print(add(LIMIT, 1))
+    print(classify(0))
+    print(sum_to(5))
+    let c = Shape.Circle(r: 3.0)
+    print(area(c))
+"#;
+
+    let work = std::env::temp_dir().join("lz_ir_diff_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("diff_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 路 1：Rust 版 display（--emit=ir）
+    let out_ir = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=ir")
+        .output()
+        .expect("run lang-zone --emit=ir");
+    assert!(
+        out_ir.status.success(),
+        "--emit=ir 失败: {}",
+        String::from_utf8_lossy(&out_ir.stderr)
+    );
+
+    // 路 2：LZ 版 display（--emit=ir-lz，递归管线）
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=ir-lz")
+        .output()
+        .expect("run lang-zone --emit=ir-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=ir-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    // 逐字符一致断言（C3 判据）
+    assert_eq!(
+        out_ir.stdout, out_lz.stdout,
+        "--emit=ir 与 --emit=ir-lz 输出不一致（LZ 版 display 回归？）\nir: {}\nlz: {}",
+        String::from_utf8_lossy(&out_ir.stdout),
+        String::from_utf8_lossy(&out_lz.stdout)
+    );
+    assert!(!out_ir.stdout.is_empty(), "IR 输出不应为空");
+
+    let _ = fs::remove_dir_all(&work);
+}

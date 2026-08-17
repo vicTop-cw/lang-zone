@@ -4,7 +4,7 @@
 // 生成的 .lz = 本库 + main 构造（bootstrap/work/lz_ir/ir_module.lz 为其开发镜像）
 // ═══════════════════════════════════════════════════════════════
 
-// ── IrType（16 变体）──
+// ── IrType（17 变体，含 Duck）──
 enum IrType:
     Int
     F64
@@ -22,6 +22,7 @@ enum IrType:
     Ref(inner: IrType)
     MutRef(inner: IrType)
     Generic(name: str)
+    Duck(fields: List<(str, IrType)>)
 
 // ── Expr（单 enum 带 ty 字段）──
 enum Expr:
@@ -50,38 +51,99 @@ enum Expr:
     TupleLit(elems: List<Expr>, ty: IrType)
     ListLit(items: List<Expr>, ty: IrType)
     BlockExpr(stmts: List<Stmt>, ty: IrType)
+    GenExpr(yield_of: Expr, ty: IrType)
+    // Rust display.rs 落进 `_ => "<expr>"` 的节点：显示 `<expr>` 逐字符对齐
+    Paren(inner: Expr, ty: IrType)
+    Range(end: Expr, inclusive: bool, ty: IrType)
+    Dict(pairs: List<(Expr, Expr)>, ty: IrType)
+    AssignExpr(target: Expr, value: Expr, ty: IrType)
+    ImplicitConvert(source: Expr, target_ty: IrType, ty: IrType)
+
+// ── BlockIR：带类型标注的块（Rust Block Display = `{ [ty]\n ... }`）──
+// 单变体 enum（而非 struct）：codegen 对 enum 自动 derive PartialEq，
+// struct 只 derive Debug/Clone —— Stmt 枚举含 BlockIR 字段，缺 PartialEq 会 E0369
+enum BlockIR:
+    Block(stmts: List<Stmt>, ty: IrType)
+
+// ── Maybe*：替代 Option<X> 的构造枚举 ──
+// 裸 Option.None 的 expr.ty 被 LZ codegen 硬编码为 i64（Option::<i64>::None，
+// 即使在具名返回类型函数内也如此），无法构造 Option<Expr> 等；
+// 改用自有单位变体枚举（MaybeExpr.NoExpr 等），避免元素类型推断。
+enum MaybeExpr:
+    NoExpr
+    YesExpr(value: Expr)
+
+enum MaybeBlock:
+    NoBlock
+    YesBlock(value: BlockIR)
+
+enum MaybeStr:
+    NoStr
+    YesStr(value: str)
+
+enum MaybeIrType:
+    NoTy
+    YesTy(value: IrType)
+
+enum MaybePattern:
+    NoPat
+    YesPat(value: Pattern)
 
 // ── Stmt ──
 enum Stmt:
-    Let(name: str, ty: IrType, value: Expr, is_mut: bool)
+    Let(name: str, ty: IrType, value: Expr, is_mut: bool, is_ref: bool)
     Assign(target: Expr, value: Expr)
-    Return(value: Option<Expr>)
+    Return(value: MaybeExpr)
     ExprStmt(expr: Expr)
-    If(cond: Expr, then: List<Stmt>, els: Option<List<Stmt>>)
-    For(var: str, iter: Expr, body: List<Stmt>)
-    While(cond: Expr, body: List<Stmt>)
+    If(cond: Expr, then: BlockIR, els: MaybeBlock)
+    For(var: str, iter: Expr, guard_e: MaybeExpr, body: BlockIR, else_body: MaybeBlock)
+    While(cond: Expr, guard_e: MaybeExpr, body: BlockIR, else_body: MaybeBlock)
     Block(stmts: List<Stmt>)
-    Match(scrutinee: Expr, arms: List<(Pattern, List<Stmt>)>)
+    Match(scrutinee: Expr, arms: List<(Pattern, MaybeExpr, BlockIR)>)
     Yield(value: Expr)
+    YieldFrom(iter: Expr)
+    Break
+    BreakLabel(label: str, value: MaybeExpr)
+    Continue
+    BlockLabel(label: str, body: BlockIR)
+    Defer(body: BlockIR)
+    TryCatch(body: BlockIR, catches: List<(MaybePattern, BlockIR)>, else_body: MaybeBlock, finally_body: MaybeBlock)
+    WhileLet(pattern: Pattern, expr: Expr, guard_e: MaybeExpr, body: BlockIR)
+    Raise(value: Expr)
+    Assert(cond: Expr)
+    TypeAlias(name: str, ty: IrType)
+    CheckerBlock(label: str, ps_name: MaybeStr)
     Pass
 
 // ── Pattern ──
 enum Pattern:
     Wildcard
     Ident(name: str)
+    RefMutIdent(name: str)
     LitInt(v: int)
+    LitStr(s: str)
+    LitBool(b: bool)
+    LitF64(v: f64)
     Tuple(elems: List<Pattern>)
+    List(elems: List<Pattern>)
+    Struct(name: str, fields: List<(str, Pattern)>)
     Enum(enum_name: str, variant: str, args: List<Pattern>)
+    Rest(name: MaybeStr)
     Range(start: int, end: int, inclusive: bool)
 
 // ── Item ──
 enum Item:
     FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
-    StructDef(name: str, fields: List<(str, IrType)>)
-    EnumDef(name: str, variants: List<(str, List<IrType>)>)
+    StructDef(name: str, generics: List<str>, fields: List<(str, IrType)>)
+    EnumDef(name: str, generics: List<str>, variants: List<(str, List<IrType>)>)
     TraitDef(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>)
     DuckDef(name: str, method_count: int)
+    UseStmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool)
+    TypeAlias(name: str, ty: IrType)
+    Impl(trait_: MaybeIrType, for_type: IrType, method_names: List<str>)
+    CheckerBlock(name: str, ps_name: MaybeStr)
+    Test(name: str, body: List<Stmt>)
 
 // ── IrModule 顶层 ──
 struct IrModule =
@@ -112,12 +174,14 @@ def display_type(t: IrType) -> str =
             "fn(" + type_list(ps) + ") -> " + display_type(r)
         case IrType.Ref(inner: x) => "&" + display_type(x)
         case IrType.MutRef(inner: x) => "&mut " + display_type(x)
+        case IrType.Duck(fields: fs) =>
+            "duck {" + duck_fields(fs) + "}"
 
 def type_list(ts: List<IrType>) -> str =
     if ts.len() == 0:
         ""
     else:
-        let head = display_type(ts[0])
+        let head = display_type(ts[0].clone())
         if ts.len() > 1:
             head + ", " + type_list(tail_t(ts))
         else:
@@ -126,7 +190,14 @@ def type_list(ts: List<IrType>) -> str =
 def tail_t(ts: List<IrType>) -> List<IrType> =
     let mut out: List<IrType> = []
     for idx in 1..ts.len():
-        out = out + [ts[idx]]
+        out.push(ts[idx].clone())
+    out
+
+def duck_fields(fs: List<(str, IrType)>) -> str =
+    let mut out = ""
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        out = out + (", " if idx > 0 else "") + f.0 + ": " + display_type(f.1)
     out
 
 // ── display_expr：Expr → str（带 [ty] 前缀）──
@@ -173,7 +244,19 @@ def display_expr(e: Expr) -> str =
         case Expr.ListLit(items: xs, ty: t) =>
             "[" + display_type(t) + "] [" + expr_list(xs) + "]"
         case Expr.BlockExpr(stmts: ss, ty: t) =>
-            "[" + display_type(t) + "] block " + stmt_block(ss)
+            "[" + display_type(t) + "] block " + block_with_ty(ss, t)
+        case Expr.GenExpr(yield_of: y, ty: t) =>
+            "[" + display_type(t) + "] gen " + display_expr(y)
+        case Expr.Paren(inner: i, ty: t) =>
+            "[" + display_type(t) + "] (" + display_expr(i) + ")"
+        case Expr.Range(end: en, inclusive: inc, ty: t) =>
+            "[" + display_type(t) + "] <expr>"
+        case Expr.Dict(pairs: ps, ty: t) =>
+            "[" + display_type(t) + "] <expr>"
+        case Expr.AssignExpr(target: tg, value: v, ty: t) =>
+            "[" + display_type(t) + "] <expr>"
+        case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) =>
+            "[" + display_type(t) + "] <expr>"
 
 def arg_list(as_: List<Expr>) -> str =
     if as_.len() == 0:
@@ -185,7 +268,7 @@ def expr_list(es: List<Expr>) -> str =
     if es.len() == 0:
         ""
     else:
-        let head = display_expr(es[0])
+        let head = display_expr(es[0].clone())
         if es.len() > 1:
             head + ", " + expr_list(tail_e(es))
         else:
@@ -194,15 +277,17 @@ def expr_list(es: List<Expr>) -> str =
 def tail_e(es: List<Expr>) -> List<Expr> =
     let mut out: List<Expr> = []
     for idx in 1..es.len():
-        out = out + [es[idx]]
+        out.push(es[idx].clone())
     out
 
 def field_pairs(fs: List<(str, Expr)>) -> str =
     if fs.len() == 0:
         ""
     else:
-        let f0 = fs[0].clone()
-        "{" + pair_str(f0) + "}"
+        let mut out = "{ "
+        for idx in 0..fs.len():
+            out = out + (", " if idx > 0 else "") + pair_str(fs[idx].clone())
+        out + " }"
 
 def pair_str(p: (str, Expr)) -> str =
     p.0 + ": " + display_expr(p.1)
@@ -210,43 +295,110 @@ def pair_str(p: (str, Expr)) -> str =
 // ── display_stmt：Stmt → str ──
 def display_stmt(s: Stmt) -> str =
     match s:
-        case Stmt.Let(name: n, ty: t, value: v, is_mut: m) =>
-            ("let mut " if m else "let ") + n + ": " + display_type(t) + " = " + display_expr(v)
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+            let_kw(m, r) + n + ": " + display_type(t) + " = " + display_expr(v)
         case Stmt.Assign(target: t, value: v) =>
             display_expr(t) + " = " + display_expr(v)
         case Stmt.Return(value: v) =>
             match v:
-                case Option.Some(value: inner) => "return " + display_expr(inner)
-                case Option.None => "return"
+                case MaybeExpr.YesExpr(value: inner) => "return " + display_expr(inner)
+                case MaybeExpr.NoExpr => "return"
         case Stmt.ExprStmt(expr: e) => display_expr(e)
         case Stmt.If(cond: c, then: t, els: e) =>
-            let base = "if " + display_expr(c) + " " + stmt_block(t)
+            let base = "if " + display_expr(c) + " " + block_disp(t)
             match e:
-                case Option.Some(value: es) => base + ": " + stmt_block(es)
-                case Option.None => base
-        case Stmt.For(var: v, iter: it, body: b) =>
-            "for " + v + " in " + display_expr(it) + " " + stmt_block(b)
-        case Stmt.While(cond: c, body: b) =>
-            "while " + display_expr(c) + " " + stmt_block(b)
+                case MaybeBlock.YesBlock(value: es) => base + " else " + block_disp(es)
+                case MaybeBlock.NoBlock => base
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) =>
+            "for " + v + " in " + display_expr(it) + guard_s(g) + " " + block_disp(b) + else_s(eb)
+        case Stmt.While(cond: c, guard_e: g, body: b, else_body: eb) =>
+            "while " + display_expr(c) + guard_s(g) + " " + block_disp(b) + else_s(eb)
         case Stmt.Block(stmts: b) =>
             stmt_block(b)
         case Stmt.Match(scrutinee: s, arms: as_) =>
             match_block(s, as_)
         case Stmt.Yield(value: v) =>
             "yield " + display_expr(v)
-        case Stmt.Pass =>
-            "pass"
+        case Stmt.YieldFrom(iter: it) =>
+            "yield from " + display_expr(it)
+        case Stmt.Break => "break"
+        case Stmt.BreakLabel(label: l, value: v) =>
+            let base = "break '" + l
+            match v:
+                case MaybeExpr.YesExpr(value: inner) => base + " " + display_expr(inner)
+                case MaybeExpr.NoExpr => base
+        case Stmt.Continue => "continue"
+        case Stmt.BlockLabel(label: l, body: b) =>
+            "block '" + l + " " + block_disp(b)
+        case Stmt.Defer(body: b) =>
+            "defer " + block_disp(b)
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let mut out = "try " + block_disp(b)
+            out = out + try_catches_str(cs)
+            out = out + else_s(eb)
+            out = out + finally_s(fb)
+            out
+        case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) =>
+            "while let " + display_pattern(p) + " = " + display_expr(e) + guard_s(g) + " " + block_disp(b)
+        case Stmt.CheckerBlock(label: l, ps_name: p) =>
+            "block '" + l + "[ps:" + opt_debug(p) + "]"
+        case Stmt.Raise(value: v) => "<stmt>"
+        case Stmt.Assert(cond: c) => "<stmt>"
+        case Stmt.TypeAlias(name: n, ty: t) => "<stmt>"
+        case Stmt.Pass => "<stmt>"
+
+def let_kw(m: bool, r: bool) -> str =
+    ("let mut ref " if (m && r) else ("let ref " if r else ("let mut " if m else "let ")))
+
+def guard_s(g: MaybeExpr) -> str =
+    match g:
+        case MaybeExpr.YesExpr(value: e) => " if " + display_expr(e)
+        case MaybeExpr.NoExpr => ""
+
+def else_s(eb: MaybeBlock) -> str =
+    match eb:
+        case MaybeBlock.YesBlock(value: b) => " else " + block_disp(b)
+        case MaybeBlock.NoBlock => ""
+
+def finally_s(fb: MaybeBlock) -> str =
+    match fb:
+        case MaybeBlock.YesBlock(value: b) => " finally " + block_disp(b)
+        case MaybeBlock.NoBlock => ""
+
+def try_catches_str(cs: List<(MaybePattern, BlockIR)>) -> str =
+    let mut out = ""
+    for idx in 0..cs.len():
+        let c = cs[idx].clone()
+        out = out + catch_str(c)
+    out
+
+def catch_str(c: (MaybePattern, BlockIR)) -> str =
+    match c.0:
+        case MaybePattern.YesPat(value: p) => " catch(" + display_pattern(p) + ") " + block_disp(c.1)
+        case MaybePattern.NoPat => " catch " + block_disp(c.1)
 
 // ── display_pattern：Pattern → str ──
 def display_pattern(p: Pattern) -> str =
     match p:
         case Pattern.Wildcard => "_"
         case Pattern.Ident(name: n) => n
+        case Pattern.RefMutIdent(name: n) => "ref mut " + n
         case Pattern.LitInt(v: n) => n.to_string() + "_i64"
+        case Pattern.LitStr(s: s) => "\"" + s + "\""
+        case Pattern.LitBool(b: b) => b.to_string()
+        case Pattern.LitF64(v: n) => n.to_string() + "_f64"
         case Pattern.Tuple(elems: es) =>
             "(" + pat_list(es) + ")"
+        case Pattern.List(elems: es) =>
+            "[" + pat_list(es) + "]"
+        case Pattern.Struct(name: n, fields: fs) =>
+            n + pat_struct_fields(fs)
         case Pattern.Enum(enum_name: en, variant: v, args: a) =>
             en + "::" + v + arg_pat_list(a)
+        case Pattern.Rest(name: rn) =>
+            match rn:
+                case MaybeStr.YesStr(value: n2) => ".." + n2
+                case MaybeStr.NoStr => ".."
         case Pattern.Range(start: st, end: en, inclusive: inc) =>
             st.to_string() + ("..=" if inc else "..") + en.to_string()
 
@@ -254,7 +406,7 @@ def pat_list(ps: List<Pattern>) -> str =
     if ps.len() == 0:
         ""
     else:
-        let head = display_pattern(ps[0])
+        let head = display_pattern(ps[0].clone())
         if ps.len() > 1:
             head + ", " + pat_list(tail_pat(ps))
         else:
@@ -263,7 +415,7 @@ def pat_list(ps: List<Pattern>) -> str =
 def tail_pat(ps: List<Pattern>) -> List<Pattern> =
     let mut out: List<Pattern> = []
     for idx in 1..ps.len():
-        out = out + [ps[idx]]
+        out.push(ps[idx].clone())
     out
 
 def arg_pat_list(ps: List<Pattern>) -> str =
@@ -272,12 +424,22 @@ def arg_pat_list(ps: List<Pattern>) -> str =
     else:
         "(" + pat_list(ps) + ")"
 
+def pat_struct_fields(fs: List<(str, Pattern)>) -> str =
+    if fs.len() == 0:
+        ""
+    else:
+        let mut out = "{ "
+        for idx in 0..fs.len():
+            let f = fs[idx].clone()
+            out = out + (", " if idx > 0 else "") + f.0 + ": " + display_pattern(f.1)
+        out + " }"
+
 // ── match_block：Stmt::Match → str ──
-def match_block(s: Expr, as_: List<(Pattern, List<Stmt>)>) -> str =
+def match_block(s: Expr, as_: List<(Pattern, MaybeExpr, BlockIR)>) -> str =
     let mut out = "match " + display_expr(s) + " {"
     for idx in 0..as_.len():
         let arm = as_[idx].clone()
-        out = out + " " + display_pattern(arm.0) + " => " + stmt_block(arm.1)
+        out = out + " " + display_pattern(arm.0) + guard_s(arm.1) + " => " + block_disp(arm.2)
     out + " }"
 
 def stmt_block(ss: List<Stmt>) -> str =
@@ -286,14 +448,42 @@ def stmt_block(ss: List<Stmt>) -> str =
     else:
         let mut out = "{\n"
         for idx in 0..ss.len():
-            out = out + "  " + display_stmt(ss[idx]) + "\n"
+            out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
         out + "}"
+
+// Block Display（Rust 版带 [ty]）：{ [ty]\n  stmt\n} / { } [ty]
+// BlockIR 为单变体 enum，字段访问走 match 解构（LZ 不支持 enum 变体直接 .field）
+def block_disp(b: BlockIR) -> str =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            if ss.len() == 0:
+                "{ } [" + display_type(t) + "]"
+            else:
+                let mut out = "{ [" + display_type(t) + "]\n"
+                for idx in 0..ss.len():
+                    out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
+                out + "}"
+
+// Expr::BlockExpr 的块显示（ty 用表达式自身类型）
+def block_with_ty(ss: List<Stmt>, t: IrType) -> str =
+    if ss.len() == 0:
+        "{ } [" + display_type(t) + "]"
+    else:
+        let mut out = "{ [" + display_type(t) + "]\n"
+        for idx in 0..ss.len():
+            out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
+        out + "}"
+
+def opt_debug(o: MaybeStr) -> str =
+    match o:
+        case MaybeStr.YesStr(value: s) => "Some(\"" + s + "\")"
+        case MaybeStr.NoStr => "None"
 
 // FnDef body：每行 2 空格缩进（对齐 display.rs Item::FnDef）
 def stmt_lines(ss: List<Stmt>) -> str =
     let mut out = ""
     for idx in 0..ss.len():
-        out = out + "  " + display_stmt(ss[idx]) + "\n"
+        out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
     out
 
 // ── display_item：Item → str ──
@@ -303,14 +493,27 @@ def display_item(it: Item) -> str =
             "fn " + n + generic_sig(gs) + param_sig(ps) + " -> " + display_type(r) + ":\n" + stmt_lines(b)
         case Item.Const(name: n, ty: t, value: v) =>
             "const " + n + ": " + display_type(t) + " = " + display_expr(v)
-        case Item.StructDef(name: n, fields: fs) =>
-            "struct " + n + " {\n" + field_lines(fs) + "}"
-        case Item.EnumDef(name: n, variants: vs) =>
-            "enum " + n + " {\n" + variant_lines(vs) + "}"
+        case Item.StructDef(name: n, generics: gs, fields: fs) =>
+            "struct " + n + generic_sig(gs) + " {\n" + field_lines(fs) + "}"
+        case Item.EnumDef(name: n, generics: gs, variants: vs) =>
+            "enum " + n + generic_sig(gs) + " {\n" + variant_lines(vs) + "}"
         case Item.TraitDef(name: n, supertraits: ss, methods: ms) =>
             "trait " + n + super_join(ss) + " {\n" + method_lines(ms) + "}"
         case Item.DuckDef(name: n, method_count: c) =>
             "duck " + n + " { " + c.to_string() + " methods }"
+        case Item.UseStmt(path: p, alias: a, items: xs, is_from: f) =>
+            (("from " + dot_join(p) + " import " + str_join(xs)) if f else ("import " + dot_join(p)))
+        case Item.TypeAlias(name: n, ty: t) =>
+            "type " + n + " = " + display_type(t)
+        case Item.Impl(trait_: tr, for_type: fty, method_names: ms) =>
+            let mut out = "impl " + impl_head(tr) + display_type(fty) + " {\n"
+            for idx in 0..ms.len():
+                out = out + "  fn " + ms[idx].clone() + " ...\n"
+            out + "}"
+        case Item.CheckerBlock(name: n, ps_name: p) =>
+            "checker block '" + n + "[ps:" + opt_debug(p) + "]"
+        case Item.Test(name: n, body: b) =>
+            "test " + n + " " + stmt_block(b)
 
 def generic_sig(gs: List<str>) -> str =
     if gs.len() == 0:
@@ -342,9 +545,9 @@ def super_join(ss: List<IrType>) -> str =
     if ss.len() == 0:
         ""
     else:
-        let mut out = " : " + display_type(ss[0])
+        let mut out = " : " + display_type(ss[0].clone())
         for idx in 1..ss.len():
-            out = out + " + " + display_type(ss[idx])
+            out = out + " + " + display_type(ss[idx].clone())
         out
 
 def method_lines(ms: List<(str, List<IrType>, IrType)>) -> str =
@@ -374,8 +577,22 @@ def param_str(p: (str, IrType, bool, bool, bool)) -> str =
 def tail_p(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool, bool, bool)> =
     let mut out: List<(str, IrType, bool, bool, bool)> = []
     for idx in 1..ps.len():
-        out = out + [ps[idx]]
+        out.push(ps[idx].clone())
     out
+
+def impl_head(tr: MaybeIrType) -> str =
+    match tr:
+        case MaybeIrType.YesTy(value: t) => display_type(t) + " for "
+        case MaybeIrType.NoTy => ""
+
+def dot_join(xs: List<str>) -> str =
+    if xs.len() == 0:
+        ""
+    else:
+        let mut out = xs[0].clone()
+        for idx in 1..xs.len():
+            out = out + "." + xs[idx].clone()
+        out
 
 // ── display_module：IrModule → str ──
 def display_module(m: IrModule) -> str =
@@ -385,7 +602,7 @@ def display_module(m: IrModule) -> str =
         out = out + ";; prelude: " + str_join(m.prelude) + "\n"
     out = out + "\n"
     for idx in 0..m.items.len():
-        out = out + display_item(m.items[idx]) + "\n\n"
+        out = out + display_item(m.items[idx].clone()) + "\n\n"
     out
 
 def str_join(xs: List<str>) -> str =
@@ -394,5 +611,5 @@ def str_join(xs: List<str>) -> str =
     else:
         let mut out = xs[0].clone()
         for idx in 1..xs.len():
-            out = out + ", " + xs[idx]
+            out = out + ", " + xs[idx].clone()
         out

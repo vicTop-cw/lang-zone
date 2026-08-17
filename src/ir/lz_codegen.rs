@@ -46,7 +46,10 @@ pub fn ir_module_to_lz_source(module: &IrModule) -> String {
         gen_str_list(&module.prelude),
         module.version
     ));
-    out.push_str("    print(display_module(m))\n");
+    // print_str（Display 输出，println!("{}")）与 --emit=ir 的 println!("{ir_module}") 一致；
+    // print 会被 codegen 特判为 Debug 格式（println!("{:?}")），str 加引号转义 → 不可用
+    // 尾部加 return 0：print_str 返回 ()，而 LZ main 尾表达式会被当作返回值（i64）→ E0308
+    out.push_str("    print_str(display_module(m))\n    return 0\n");
     out
 }
 
@@ -98,6 +101,38 @@ impl LzGen {
         format!("[{}]", names.join(", "))
     }
 
+    /// 生成 BlockIR 构造：块语句列表 + 块类型（对齐 Rust Block Display 的 [ty] 标注）
+    fn block_ref(&mut self, b: &Block) -> String {
+        let ss = self.stmts_ref(&b.stmts);
+        let ty = self.irtype(&b.ty);
+        format!("BlockIR.Block(stmts: {}, ty: {})", ss, ty)
+    }
+
+    /// 裸 Option.None 无法推断元素类型（LZ 硬编码 Option::<i64>::None）；
+    /// 改用 lz_ir_lib.lz 的自有 Maybe* 单位变体枚举构造。
+    fn opt_none(&mut self, inner_ty: &str) -> String {
+        match inner_ty {
+            "Expr" => "MaybeExpr.NoExpr".to_string(),
+            "BlockIR" => "MaybeBlock.NoBlock".to_string(),
+            "str" => "MaybeStr.NoStr".to_string(),
+            "IrType" => "MaybeIrType.NoTy".to_string(),
+            "Pattern" => "MaybePattern.NoPat".to_string(),
+            other => {
+                let name = self.fresh();
+                self.lets.push(format!("    let {}: Option<{}> = Option.None", name, other));
+                name
+            }
+        }
+    }
+
+    /// MaybeStr 构造（str 需转义）
+    fn opt_str(&mut self, s: &Option<String>) -> String {
+        match s {
+            Some(v) => format!("MaybeStr.YesStr(value: \"{}\")", escape_lz(v)),
+            None => self.opt_none("str"),
+        }
+    }
+
     /// 收集并生成表达式列表引用
     fn exprs_ref(&mut self, exprs: &[Expr]) -> String {
         let items: Vec<String> = exprs.iter().map(|e| self.expr(e)).collect();
@@ -146,7 +181,12 @@ impl LzGen {
                     .map(|fl| format!("(\"{}\", {})", fl.name, self.irtype(&fl.ty)))
                     .collect();
                 let fields = self.list_ref("(str, IrType)", items);
-                format!("Item.StructDef(name: \"{}\", fields: {})", s.name, fields)
+                let generics: Vec<String> = s.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
+                let generics_s = self.list_ref("str", generics);
+                format!(
+                    "Item.StructDef(name: \"{}\", generics: {}, fields: {})",
+                    s.name, generics_s, fields
+                )
             }
             Item::EnumDef(e) => {
                 let variants: Vec<String> = e
@@ -159,7 +199,9 @@ impl LzGen {
                     })
                     .collect();
                 let variants = self.list_ref("(str, List<IrType>)", variants);
-                format!("Item.EnumDef(name: \"{}\", variants: {})", e.name, variants)
+                let generics: Vec<String> = e.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
+                let generics_s = self.list_ref("str", generics);
+                format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
             }
             Item::TraitDef(t) => {
                 let supers_items: Vec<String> = t.supertraits.iter().map(|st| self.irtype(st)).collect();
@@ -188,30 +230,40 @@ impl LzGen {
                 let path = u.path.join(".");
                 let items = u.items.join(", ");
                 if u.is_from {
-                    format!("Item.UseStmt(path: [\"{}\"], alias: None, items: [\"{}\"], is_from: true)", path, items)
+                    format!("Item.UseStmt(path: [\"{}\"], alias: {}, items: [\"{}\"], is_from: true)", path, self.opt_none("str"), items)
                 } else {
-                    format!("Item.UseStmt(path: [\"{}\"], alias: None, items: [], is_from: false)", path)
+                    format!("Item.UseStmt(path: [\"{}\"], alias: {}, items: [], is_from: false)", path, self.opt_none("str"))
                 }
             }
             Item::Test(t) => {
                 let body = self.stmts_ref(&t.body.stmts);
                 format!("Item.Test(name: \"{}\", body: {})", t.name, body)
             }
-            Item::CheckerBlock { name, body, .. } => {
-                let stmts = self.stmts_ref(&body.stmts);
-                format!("Item.CheckerBlock(name: \"{}\", body: {})", name, stmts)
-            }
+            Item::CheckerBlock { name, ps_name, .. } => format!(
+                "Item.CheckerBlock(name: \"{}\", ps_name: {})",
+                name,
+                self.opt_str(ps_name)
+            ),
             Item::TypeAlias(ta) => {
                 format!("Item.TypeAlias(name: \"{}\", ty: {})", ta.name, self.irtype(&ta.ty))
             }
             Item::Impl(imp) => {
-                let methods_items: Vec<String> = imp
+                let trait_s = match &imp.trait_ {
+                    Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
+                    None => self.opt_none("IrType"),
+                };
+                let names_items: Vec<String> = imp
                     .methods
                     .iter()
-                    .map(|m| self.item(&Item::FnDef(m.clone())))
+                    .map(|m| format!("\"{}\"", escape_lz(&m.name)))
                     .collect();
-                let methods = self.list_ref("Item", methods_items);
-                format!("Item.Impl(methods: {})", methods)
+                let names_s = self.list_ref("str", names_items);
+                format!(
+                    "Item.Impl(trait_: {}, for_type: {}, method_names: {})",
+                    trait_s,
+                    self.irtype(&imp.for_type),
+                    names_s
+                )
             }
         }
     }
@@ -220,12 +272,13 @@ impl LzGen {
 
     fn stmt(&mut self, s: &Stmt) -> String {
         match s {
-            Stmt::Let { name, ty, value, is_mut, .. } => format!(
-                "Stmt.Let(name: \"{}\", ty: {}, value: {}, is_mut: {})",
+            Stmt::Let { name, ty, value, is_mut, is_ref, .. } => format!(
+                "Stmt.Let(name: \"{}\", ty: {}, value: {}, is_mut: {}, is_ref: {})",
                 name,
                 self.irtype(ty),
                 self.expr(value),
-                if *is_mut { "true" } else { "false" }
+                if *is_mut { "true" } else { "false" },
+                if *is_ref { "true" } else { "false" }
             ),
             Stmt::Assign { target, value } => format!(
                 "Stmt.Assign(target: {}, value: {})",
@@ -233,18 +286,18 @@ impl LzGen {
                 self.expr(value)
             ),
             Stmt::Return { value } => match value {
-                Some(v) => format!("Stmt.Return(value: Option.Some(value: {}))", self.expr(v)),
-                None => "Stmt.Return(value: Option.None)".to_string(),
+                Some(v) => format!("Stmt.Return(value: MaybeExpr.YesExpr(value: {}))", self.expr(v)),
+                None => format!("Stmt.Return(value: {})", self.opt_none("Expr")),
             },
             Stmt::ExprStmt { expr } => format!("Stmt.ExprStmt(expr: {})", self.expr(expr)),
             Stmt::If { cond, then_branch, else_branch } => {
-                let then_s = self.stmts_ref(&then_branch.stmts);
+                let then_s = self.block_ref(then_branch);
                 let els_s = match else_branch {
                     Some(b) => {
-                        let es = self.stmts_ref(&b.stmts);
-                        format!("Option.Some(value: {})", es)
+                        let es = self.block_ref(b);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
                     }
-                    None => "Option.None".to_string(),
+                    None => self.opt_none("BlockIR"),
                 };
                 format!(
                     "Stmt.If(cond: {}, then: {}, els: {})",
@@ -253,23 +306,47 @@ impl LzGen {
                     els_s
                 )
             }
-            Stmt::For { var, iter, guard, body, .. } => {
-                let body_s = self.stmts_ref(&body.stmts);
-                let _ = guard;
+            Stmt::For { var, iter, guard, body, else_body, .. } => {
+                let body_s = self.block_ref(body);
+                let guard_s = match guard {
+                    Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                    None => self.opt_none("Expr"),
+                };
+                let else_s = match else_body {
+                    Some(eb) => {
+                        let es = self.block_ref(eb);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
                 format!(
-                    "Stmt.For(var: \"{}\", iter: {}, body: {})",
+                    "Stmt.For(var: \"{}\", iter: {}, guard_e: {}, body: {}, else_body: {})",
                     var,
                     self.expr(iter),
-                    body_s
+                    guard_s,
+                    body_s,
+                    else_s
                 )
             }
-            Stmt::While { cond, guard, body, .. } => {
-                let body_s = self.stmts_ref(&body.stmts);
-                let _ = guard;
+            Stmt::While { cond, guard, body, else_body, .. } => {
+                let body_s = self.block_ref(body);
+                let guard_s = match guard {
+                    Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                    None => self.opt_none("Expr"),
+                };
+                let else_s = match else_body {
+                    Some(eb) => {
+                        let es = self.block_ref(eb);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
                 format!(
-                    "Stmt.While(cond: {}, body: {})",
+                    "Stmt.While(cond: {}, guard_e: {}, body: {}, else_body: {})",
                     self.expr(cond),
-                    body_s
+                    guard_s,
+                    body_s,
+                    else_s
                 )
             }
             Stmt::Block { stmts } => {
@@ -280,11 +357,15 @@ impl LzGen {
                 let arms_items: Vec<String> = arms
                     .iter()
                     .map(|a| {
-                        let body = self.stmts_ref(&a.body.stmts);
-                        format!("({}, {})", gen_pattern(&a.pattern), body)
+                        let body = self.block_ref(&a.body);
+                        let guard = match &a.guard {
+                            Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                            None => self.opt_none("Expr"),
+                        };
+                        format!("({}, {}, {})", self.pattern(&a.pattern), guard, body)
                     })
                     .collect();
-                let arms_s = self.list_ref("(Pattern, List<Stmt>)", arms_items);
+                let arms_s = self.list_ref("(Pattern, MaybeExpr, BlockIR)", arms_items);
                 format!(
                     "Stmt.Match(scrutinee: {}, arms: {})",
                     self.expr(scrutinee),
@@ -296,19 +377,23 @@ impl LzGen {
             Stmt::Break => "Stmt.Break".to_string(),
             Stmt::BreakLabel { label, value } => {
                 let v = match value {
-                    Some(v) => format!("Option.Some(value: {})", self.expr(v)),
-                    None => "Option.None".to_string(),
+                    Some(v) => format!("MaybeExpr.YesExpr(value: {})", self.expr(v)),
+                    None => self.opt_none("Expr"),
                 };
                 format!("Stmt.BreakLabel(label: \"{}\", value: {})", label, v)
             }
             Stmt::Continue => "Stmt.Continue".to_string(),
             Stmt::BlockLabel { label, body } => {
-                let ss = self.stmts_ref(&body.stmts);
+                let ss = self.block_ref(body);
                 format!("Stmt.BlockLabel(label: \"{}\", body: {})", label, ss)
             }
-            Stmt::CheckerBlock { .. } => "Stmt.Pass".to_string(),
+            Stmt::CheckerBlock { label, ps_name, .. } => format!(
+                "Stmt.CheckerBlock(label: \"{}\", ps_name: {})",
+                label,
+                self.opt_str(ps_name)
+            ),
             Stmt::Defer { body } => {
-                let ss = self.stmts_ref(&body.stmts);
+                let ss = self.block_ref(body);
                 format!("Stmt.Defer(body: {})", ss)
             }
             Stmt::Raise { value } => format!("Stmt.Raise(value: {})", self.expr(value)),
@@ -317,11 +402,55 @@ impl LzGen {
             Stmt::TypeAlias { name, ty } => {
                 format!("Stmt.TypeAlias(name: \"{}\", ty: {})", name, self.irtype(ty))
             }
-            Stmt::TryCatch { body, .. } => {
-                let ss = self.stmts_ref(&body.stmts);
-                format!("Stmt.Block(stmts: {})", ss)
+            Stmt::TryCatch { body, catches, else_body, finally_body } => {
+                let ss = self.block_ref(body);
+                let catches_items: Vec<String> = catches
+                    .iter()
+                    .map(|(pat, block)| {
+                        let b = self.block_ref(block);
+                        let p = match pat {
+                            Some(p) => format!("MaybePattern.YesPat(value: {})", self.pattern(p)),
+                            None => self.opt_none("Pattern"),
+                        };
+                        format!("({}, {})", p, b)
+                    })
+                    .collect();
+                let catches_s = self.list_ref("(MaybePattern, BlockIR)", catches_items);
+                let else_s = match else_body {
+                    Some(eb) => {
+                        let es = self.block_ref(eb);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                let finally_s = match finally_body {
+                    Some(fb) => {
+                        let fs = self.block_ref(fb);
+                        format!("MaybeBlock.YesBlock(value: {})", fs)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                format!(
+                    "Stmt.TryCatch(body: {}, catches: {}, else_body: {}, finally_body: {})",
+                    ss,
+                    catches_s,
+                    else_s,
+                    finally_s
+                )
             }
-            Stmt::WhileLet { .. } => "Stmt.Pass".to_string(),
+            Stmt::WhileLet { pattern, expr, guard, body, .. } => {
+                let guard_s = match guard {
+                    Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                    None => self.opt_none("Expr"),
+                };
+                format!(
+                    "Stmt.WhileLet(pattern: {}, expr: {}, guard_e: {}, body: {})",
+                    self.pattern(pattern),
+                    self.expr(expr),
+                    guard_s,
+                    self.block_ref(body)
+                )
+            }
         }
     }
 
@@ -445,50 +574,43 @@ impl LzGen {
                 let elems_items: Vec<String> = pairs
                     .iter()
                     .map(|(k, v)| {
-                        format!(
-                            "Expr.TupleLit(elems: [{}, {}], ty: {})",
-                            self.expr(k),
-                            self.expr(v),
-                            ty
-                        )
+                        format!("({}, {})", self.expr(k), self.expr(v))
                     })
                     .collect();
-                let elems_s = self.list_ref("Expr", elems_items);
-                format!("Expr.ListLit(items: {}, ty: {})", elems_s, ty)
+                let elems_s = self.list_ref("(Expr, Expr)", elems_items);
+                format!("Expr.Dict(pairs: {}, ty: {})", elems_s, ty)
             }
             ExprKind::Range { start, end, inclusive } => {
-                let start_s = match start {
-                    Some(s) => self.expr(s),
-                    None => "Expr.LitUnit(ty: IrType.Unit)".to_string(),
-                };
+                // 注意：LZ 版 Range 不携带 start（display.rs 对 Range 落 `_ => "<expr>"`，
+                // start 不参与显示；同时避免 Expr ↔ MaybeExpr 直接互递归 E0072）
+                let _ = start;
                 format!(
-                    "Expr.BinOp(op: \"{}\", lhs: {}, rhs: {}, ty: {})",
-                    if *inclusive { "..=" } else { ".." },
-                    start_s,
+                    "Expr.Range(end: {}, inclusive: {}, ty: {})",
                     self.expr(end),
+                    inclusive,
                     ty
                 )
             }
-            ExprKind::Paren(inner) => self.expr(inner),
+            ExprKind::Paren(inner) => format!("Expr.Paren(inner: {}, ty: {})", self.expr(inner), ty),
             ExprKind::BlockExpr { block } => {
                 let stmts = self.stmts_ref(&block.stmts);
                 format!("Expr.BlockExpr(stmts: {}, ty: {})", stmts, ty)
             }
             ExprKind::GenExpr { yield_of } => {
                 format!(
-                    "Expr.BlockExpr(stmts: [Stmt.Yield(value: {})], ty: {})",
+                    "Expr.GenExpr(yield_of: {}, ty: {})",
                     self.expr(yield_of),
                     ty
                 )
             }
             ExprKind::AssignExpr { target, value } => format!(
-                "Expr.BinOp(op: \"=\", lhs: {}, rhs: {}, ty: {})",
+                "Expr.AssignExpr(target: {}, value: {}, ty: {})",
                 self.expr(target),
                 self.expr(value),
                 ty
             ),
             ExprKind::ImplicitConvert { source, target_ty } => format!(
-                "Expr.Cast(inner: {}, target: {}, ty: {})",
+                "Expr.ImplicitConvert(source: {}, target_ty: {}, ty: {})",
                 self.expr(source),
                 self.irtype(target_ty),
                 ty
@@ -554,7 +676,7 @@ impl LzGen {
                     .map(|(n, ty)| format!("(\"{}\", {})", escape_lz(n), self.irtype(ty)))
                     .collect();
                 let fields_s = self.list_ref("(str, IrType)", fields_items);
-                format!("IrType.Named(path: \"Duck\", args: [{}])", fields_s)
+                format!("IrType.Duck(fields: {})", fields_s)
             }
             IrType::Generic(name) => format!("IrType.Generic(name: \"{}\")", escape_lz(name)),
         }
@@ -575,6 +697,56 @@ impl LzGen {
             })
             .collect();
         self.list_ref("(str, IrType, bool, bool, bool)", items)
+    }
+
+    /// Pattern → 构造表达式（列表走 self.list_ref，空列表类型标注避免 Vec<i64> 推断）
+    fn pattern(&mut self, p: &Pattern) -> String {
+        match p {
+            Pattern::Wildcard => "Pattern.Wildcard".to_string(),
+            Pattern::Ident(name) => format!("Pattern.Ident(name: \"{}\")", name),
+            Pattern::RefMutIdent(name) => format!("Pattern.RefMutIdent(name: \"{}\")", name),
+            Pattern::Lit(LitKind::Int(n)) => format!("Pattern.LitInt(v: {})", n),
+            Pattern::Lit(LitKind::Str(s)) => format!("Pattern.LitStr(s: \"{}\")", escape_lz(s)),
+            Pattern::Lit(LitKind::Bool(b)) => format!("Pattern.LitBool(b: {})", b),
+            Pattern::Lit(LitKind::F64(n)) => format!("Pattern.LitF64(v: {})", n),
+            Pattern::Lit(_) => "Pattern.Wildcard".to_string(),
+            Pattern::Tuple(elems) => {
+                let elems_items: Vec<String> = elems.iter().map(|e| self.pattern(e)).collect();
+                let elems_s = self.list_ref("Pattern", elems_items);
+                format!("Pattern.Tuple(elems: {})", elems_s)
+            }
+            Pattern::List(elems) => {
+                let elems_items: Vec<String> = elems.iter().map(|e| self.pattern(e)).collect();
+                let elems_s = self.list_ref("Pattern", elems_items);
+                format!("Pattern.List(elems: {})", elems_s)
+            }
+            Pattern::Dict(_) => "Pattern.Wildcard".to_string(),
+            Pattern::Rest(name) => match name {
+                Some(n) => format!("Pattern.Rest(name: MaybeStr.YesStr(value: \"{}\"))", escape_lz(n)),
+                None => format!("Pattern.Rest(name: {})", self.opt_none("str")),
+            },
+            Pattern::Range { start, end, inclusive } => {
+                format!("Pattern.Range(start: {}, end: {}, inclusive: {})", start, end, inclusive)
+            }
+            Pattern::Struct { name, fields } => {
+                let fields_items: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("(\"{}\", {})", k, self.pattern(v)))
+                    .collect();
+                let fields_s = self.list_ref("(str, Pattern)", fields_items);
+                format!("Pattern.Struct(name: \"{}\", fields: {})", name, fields_s)
+            }
+            Pattern::Enum { enum_name, variant, args } => {
+                let args_items: Vec<String> = args.iter().map(|a| self.pattern(a)).collect();
+                let args_s = self.list_ref("Pattern", args_items);
+                format!(
+                    "Pattern.Enum(enum_name: \"{}\", variant: \"{}\", args: {})",
+                    enum_name,
+                    variant,
+                    args_s
+                )
+            }
+        }
     }
 }
 
@@ -601,49 +773,6 @@ fn gen_lit(lit: &LitKind, ty: &str) -> String {
         LitKind::Bool(b) => format!("Expr.LitBool(b: {}, ty: {})", b, ty),
         LitKind::Unit => format!("Expr.LitUnit(ty: {})", ty),
         LitKind::None_ => format!("Expr.LitNone(ty: {})", ty),
-    }
-}
-
-fn gen_pattern(p: &Pattern) -> String {
-    match p {
-        Pattern::Wildcard => "Pattern.Wildcard".to_string(),
-        Pattern::Ident(name) => format!("Pattern.Ident(name: \"{}\")", name),
-        Pattern::RefMutIdent(name) => format!("Pattern.Ident(name: \"{}\")", name),
-        Pattern::Lit(LitKind::Int(n)) => format!("Pattern.LitInt(v: {})", n),
-        Pattern::Lit(LitKind::Str(s)) => format!("Pattern.Ident(name: \"{}\")", escape_lz(s)),
-        Pattern::Lit(_) => "Pattern.Wildcard".to_string(),
-        Pattern::Tuple(elems) => {
-            let elems_s: Vec<String> = elems.iter().map(gen_pattern).collect();
-            format!("Pattern.Tuple(elems: [{}])", elems_s.join(", "))
-        }
-        Pattern::List(elems) => {
-            let elems_s: Vec<String> = elems.iter().map(gen_pattern).collect();
-            format!("Pattern.Tuple(elems: [{}])", elems_s.join(", "))
-        }
-        Pattern::Dict(_) => "Pattern.Wildcard".to_string(),
-        Pattern::Rest(name) => match name {
-            Some(n) => format!("Pattern.Ident(name: \"{}\")", n),
-            None => "Pattern.Wildcard".to_string(),
-        },
-        Pattern::Range { start, end, inclusive } => {
-            format!("Pattern.Range(start: {}, end: {}, inclusive: {})", start, end, inclusive)
-        }
-        Pattern::Struct { name, fields } => {
-            let fields_s: Vec<String> = fields
-                .iter()
-                .map(|(k, v)| format!("(\"{}\", {})", k, gen_pattern(v)))
-                .collect();
-            format!("Pattern.Enum(enum_name: \"{}\", variant: \"{}\", args: [{}])", name, name, fields_s.join(", "))
-        }
-        Pattern::Enum { enum_name, variant, args } => {
-            let args_s: Vec<String> = args.iter().map(gen_pattern).collect();
-            format!(
-                "Pattern.Enum(enum_name: \"{}\", variant: \"{}\", args: [{}])",
-                enum_name,
-                variant,
-                args_s.join(", ")
-            )
-        }
     }
 }
 

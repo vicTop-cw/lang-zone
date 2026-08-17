@@ -31,3 +31,20 @@
 
 - 更早的 issue 记录（2026-07-29 ~ 2026-08-06）：见 `issue/`（AUDIT、decision-*、test-report、周期状态等）
 - 设计决策汇总：`issue/README.md`
+
+---
+
+## 2026-08-17 · AutoClaw（自举 50% 里程碑，v159）
+
+### 一、C2：IR 构建 .lz 化（对齐 `--emit=ir` 与 `--emit=ir-lz` 双路输出）
+- **内容**：`src/ir/lz_ir_lib.lz` 与 `src/ir/display.rs` 逐字符对齐——Expr `[ty]` 前缀、FnDef body 缩进式（弃 `{ }` 包裹）、Block `{ [ty] }` 展示、StructDef/EnumDef 泛型签名；`src/ir/lz_codegen.rs` 构造代码同步（`BlockIR.Block`、`Option.Some`、`print_str` 切换、`StructDef` generics 字段）
+- **修复阻断缺陷**：struct 缺 PartialEq derive 致 enum derive 展开失败（E0369，`BlockIR` 改单变体 enum）；`print_str` 尾表达式与 `__lz_main -> i64` 类型不匹配（E0308，main 尾部补 `return 0`）；`lz_ir_lib.lz` UTF-8 BOM 致解析失败（去 BOM）
+- **验证**：8 个关键 DEMO（literals/containers/const/ternary/comprehension/guard/struct/trait_impl）双路 diff 逐字符一致
+- **产物**：src/ir/lz_ir_lib.lz、src/ir/lz_codegen.rs、bootstrap/work/lz_ir/README.md
+
+### 二、C3：双路 diff 对照自动化
+- **内容**：`bootstrap/work/lz_ir/diff_ir.ps1`（默认 8 输入集，Start-Process 纯净捕获 stdout，退出码 0/1/2/3）；`tests/lz_ir_bootstrap.rs` 新增 `lz_emit_ir_lz_matches_ir_byte_exact`（逐字节断言，覆盖泛型函数/struct/enum/match/循环/字典）
+- **验证**：脚本 8/8 一致退出码 0；cargo test 全量 319/0（40% 基线 314 +5）；DEMO 全量 261/261（1 例 link.exe 1104 瞬时文件锁，单独重跑通过）；bootstrap closed 闭环退出码 0（两轮 manifest 一致 + PROMOTE）
+- **产物**：bootstrap/work/lz_ir/diff_ir.ps1、tests/lz_ir_bootstrap.rs、bootstrap/05-自举里程碑台账.md（§2.1 50% 章节/§3/§4/§7）、bootstrap/06-自举交接续推文档.md（水位与路线图）、src/util/version.rs（v158→159）
+- **口径**：40% 已计 49%（含 G1 缓冲）+ C2 6% + C3 6% = 61% ≥ 50%
+- **异常记录**：本机 WSL bash 损坏（无法访问 localhost），`div-tools/regression.sh` 只扫到 2 个文件——改用 PowerShell 等价脚本完成 DEMO 全量回归，结论一致；未修改回归脚本本身

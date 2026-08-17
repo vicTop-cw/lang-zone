@@ -66,6 +66,7 @@ compile_and_run() {
     local exe_file="$dir/$base.exe"
     local win_lz="$(to_win_path "$lz_file")"
     local win_std="$(to_win_path "$STD_DIR")"
+    local win_rlib="$(to_win_path "$BUILTINS_RLIB")"
 
     log_step "编译: $base"
 
@@ -80,7 +81,7 @@ compile_and_run() {
     # Step 2: Rust → Binary（链接 lz_builtins，codegen 恒生成 use lz_builtins::*）
     log_info "  [RUSTC] Rust → Binary..."
     local rustc_output
-    rustc_output=$(rustc --edition 2021 "$rs_file" --extern "lz_builtins=$BUILTINS_RLIB" -o "$exe_file" 2>&1) || {
+    rustc_output=$(rustc --edition 2021 "$rs_file" --extern "lz_builtins=$win_rlib" -o "$exe_file" 2>&1) || {
         log_fail "  [RUSTC] rustc 编译失败: $lz_file"
         echo "$rustc_output" | grep -E "error\[" | head -5
         return 2

@@ -103,6 +103,7 @@ enum IrType:
 | `ir_types.lz` / `ir_types.rs` | LZ 版 IrType 定义 + display（当前成果） |
 | `ir_module.lz` / `ir_module.rs` | LZ 版 IrModule/Item/Stmt/Expr 核心子集 + display（试点 2） |
 | `ir_compare.lz` | 对照输入（与 ir_module.lz main 构造的 IR 等价） |
+| `diff_ir.ps1` | C3 双路 diff 自动化（默认 8 个关键 DEMO 输入集，退出码 0=全部一致；产物落 `diffwork/`） |
 | `README.md` | 本试点记录 |
 
 ---
@@ -125,17 +126,42 @@ Rust 版 `lang-zone.exe --emit=ir` vs LZ 版 `ir_module_lz.exe`。
 | BinOp | `binop [int] x + [int] y` | `binop x + y` | 🟡 见下 |
 | Call/Index | `call print(index xs[0_i64])` | 同格式（无 ty 前缀） | 🟡 见下 |
 
-**已知差异（设计取舍，非缺陷）**：
-1. **Expr 省略 `[ty]` 前缀**：Rust display.rs 每个 Expr 带 `[ty] ` 前缀（`[int] binop ...`），
-   LZ 版核心子集省略（ty 由调用方管理）——若需逐字符对齐，可在 LZ 版为
-   Expr 增加 ty 字段后补前缀。
-2. **FnDef body 用块包裹**：Rust 版 body 每行 `  stmt` 缩进（无外层 `{ }`），
-   LZ 版 `stmt_block` 用 `{ ... }` 包裹——对齐 Rust 需改 display_item 的 body 渲染。
+**已知差异（2026-08-17 C2 已全部对齐，diff 为空）**：
+
+> **C2 修复记录（2026-08-17）**：以下两处差异已在 `src/ir/lz_ir_lib.lz` + `src/ir/lz_codegen.rs` 中消除，
+> 同一输入下 `--emit=ir` 与 `--emit=ir-lz` 输出**逐字符一致（fc /b 无差异）**：
+>
+> 1. **Expr `[ty]` 前缀**：LZ 版 display_expr 每个变体补 `[display_type(ty)] ` 前缀，与 display.rs `write!(f, "[{}] ", self.ty)` 对齐。
+> 2. **FnDef body 缩进式**：LZ 版 display_item 改用 `stmt_lines`（每行 2 空格，无外层 `{ }`），对齐 display.rs Item::FnDef 的 `writeln!(f, "  {stmt}")`。
+> 3. **print → print_str**：生成代码尾部 `print(display_module(m))` 改为 `print_str(display_module(m))`——
+>    LZ codegen 对 `print` 特判生成 `println!("{:?}")`（str 被 Debug 加引号转义），`print_str`（lz_builtins Display 版）
+>    与 `--emit=ir` 的 `println!("{ir_module}")` 输出一致。
+>
+> 附带的其它对齐：块体渲染带 `[ty]` 标注（BlockIR，含 if/for/while/match 臂/BlockExpr）；
+> If 的 else 分隔符 `": "` → `" else "`；StructCtor 字段列表 `{ a: 1, b: 2 }` 多字段拼接；
+> Rust `_ => "<expr>"` 的 Expr（Range/Dict/AssignExpr/ImplicitConvert）与 `_ => "<stmt>"` 的 Stmt（Raise/Assert/TypeAlias/Pass）
+> 在 LZ 侧显式渲染同名占位；Option 字段改用自有 Maybe* 单位变体枚举（裸 `Option.None` 被 LZ codegen 硬编码
+> `Option::<i64>::None`，且 Expr↔MaybeExpr 直接互递归会 E0072，故 Range 不携带 start——display 本就不用它）；
+> struct/enum 定义补 generics 显示（`generic_sig`）。
+
+1. ~~Expr 省略 `[ty]` 前缀~~（已对齐）
+2. ~~FnDef body 用块包裹~~（已对齐）
 
 **结论**：LZ 已能序列化 IR 模块的核心结构（头/函数/常量/语句/表达式），
-格式与 Rust 版整体对齐；上述两处差异为实现取舍，后续可逐字符对齐。
+格式与 Rust 版**逐字符一致**（c2_probe.lz 与 c2_probe2.lz 两套探针 fc /b 无差异）。
 
 **附带收获**：试点暴露并修复了 1 个 codegen 真实缺陷——
 `collect_stmt_var_refs` 的 `Stmt::For` 分支未把 for 变量加入 shadow，
 多函数同名 for 变量（`for idx`）被 analyze_global_vars 误判为跨函数全局
 （生成 `static mut idx`，E0530）——已在 codegen 修复（v163 随附）。
+
+---
+
+## 七、C3 diff 对照自动化（2026-08-17，v159）
+
+**目标**：把「双路输出逐字符一致」从一次性验证变成可重复执行的常态化护栏。
+
+- 脚本：`bootstrap/work/lz_ir/diff_ir.ps1`——对每个输入跑 `--emit=ir` 与 `--emit=ir-lz`，用 `git diff --no-index` 比对两路输出；默认输入集为 8 个关键 DEMO（literals/containers/const/ternary/comprehension/guard/struct/trait_impl，覆盖字面量/容器/泛型 struct/enum/推导式/guard/trait impl）。
+- 用法：`powershell -File bootstrap\work\lz_ir\diff_ir.ps1`（退出码 0=全部一致 / 1=不一致 / 2=环境缺失 / 3=ir-lz 失败）。
+- 固化：`tests/lz_ir_bootstrap.rs::lz_emit_ir_lz_matches_ir_byte_exact` 在 `cargo test` 中逐字节断言两路输出相等（覆盖泛型函数/struct/enum/match/循环/字典）。
+- 实测：2026-08-17 脚本 8/8 一致退出码 0；cargo test 全量 319/0；DEMO 全量 261/261。
