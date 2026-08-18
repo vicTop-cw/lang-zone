@@ -2,18 +2,27 @@
 // LZIR-H 节点定义：Item, Stmt, Expr, Pattern 及辅助类型
 //
 // 形态：强类型树 / ANF 风格。每个 Expr 携带 IrType 与 Span。
+//
+// 序列化：所有节点在 `infer` feature 下派生 serde Serialize/Deserialize，
+// 支持 JSON / bincode 两种缓存格式（见 ir/mod.rs 的 to_json / to_bincode）。
 
 use super::types::IrType;
 
 // ── 源码位置 ──
 
 /// 源码区间
-#[derive(Debug, Clone, PartialEq)]
+///
+/// 携带文件路径（`file`）与行列（`line`/`col`），支持从 IR 节点回溯源码。
+/// `file == None` 表示位置未知（宏展开/合成节点），`line == 0` 表示 unknown。
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Span {
     pub start: usize,
     pub end: usize,
     pub line: usize,
     pub col: usize,
+    /// 源文件路径（None = 未知/合成节点）
+    pub file: Option<String>,
 }
 
 impl Span {
@@ -23,6 +32,17 @@ impl Span {
             end: 0,
             line,
             col,
+            file: None,
+        }
+    }
+    /// 带文件路径的 span（行/列未知时传 0）
+    pub fn with_file(file: impl Into<String>, line: usize, col: usize) -> Self {
+        Span {
+            start: 0,
+            end: 0,
+            line,
+            col,
+            file: Some(file.into()),
         }
     }
     pub fn unknown() -> Self {
@@ -31,6 +51,31 @@ impl Span {
             end: 0,
             line: 0,
             col: 0,
+            file: None,
+        }
+    }
+    /// 带文件路径的 unknown span（宏展开/合成节点，但已知来源文件）
+    pub fn unknown_with_file(file: impl Into<String>) -> Self {
+        Span {
+            start: 0,
+            end: 0,
+            line: 0,
+            col: 0,
+            file: Some(file.into()),
+        }
+    }
+    /// 是否为 unknown（无行列信息）
+    pub fn is_unknown(&self) -> bool {
+        self.line == 0 && self.col == 0
+    }
+    /// 是否携带文件路径
+    pub fn has_file(&self) -> bool {
+        self.file.is_some()
+    }
+    /// 将文件路径注入本 span（若尚未设置）
+    pub fn with_file_if_missing(&mut self, file: &str) {
+        if self.file.is_none() {
+            self.file = Some(file.to_string());
         }
     }
 }
@@ -38,6 +83,7 @@ impl Span {
 // ── 泛型参数 ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct GenericParam {
     pub name: String,
     pub bounds: Vec<IrType>,
@@ -50,6 +96,7 @@ pub struct GenericParam {
 
 /// 后端语言
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum Backend {
     Rust,
     Cython,
@@ -64,6 +111,7 @@ impl Default for Backend {
 
 /// 模块类型
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum ModuleKind {
     Normal,
     Macro,
@@ -80,6 +128,7 @@ impl Default for ModuleKind {
 
 /// 顶层编译指令
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct ModuleDirective {
     pub backend: Backend,
     pub kind: ModuleKind,
@@ -112,6 +161,7 @@ impl Default for ModuleDirective {
 
 /// 旧字段，保留兼容
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct MagicAttrs {
     pub name: Option<String>,
     pub doc: Option<String>,
@@ -151,12 +201,14 @@ impl From<&ModuleDirective> for MagicAttrs {
 // ── 内建装饰器 ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Intrinsic {
     pub kind: IntrinsicKind,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum IntrinsicKind {
     Memoize,
     Parallel,
@@ -165,12 +217,14 @@ pub enum IntrinsicKind {
     Derive,
     TailCall,
     Export(Vec<String>), // @export(Rust), @export(Python)
+    Extern(Vec<String>), // @extern(Rust), @extern(Python) 外部声明（L1 机制）
     Init,
 }
 
 // ── 函数签名（用于 Trait 声明） ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnSig {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -187,6 +241,7 @@ pub struct FnSig {
 // ── 参数 ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Param {
     pub name: String,
     pub ty: IrType,
@@ -204,6 +259,7 @@ pub struct Param {
 // ── 字段 ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Field {
     pub name: String,
     pub ty: IrType,
@@ -212,6 +268,7 @@ pub struct Field {
 // ── 枚举变体 ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Variant {
     pub name: String,
     /// 变体字段：名称 + 类型（空名称 = 位置/元组字段，非空 = 命名字段）
@@ -223,6 +280,7 @@ pub struct Variant {
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum Item {
     FnDef(FnDef),
     StructDef(StructDef),
@@ -250,6 +308,7 @@ pub enum Item {
 
 /// 函数定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -273,6 +332,7 @@ pub struct FnDef {
 
 /// 结构体定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct StructDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -293,6 +353,7 @@ pub struct StructDef {
 
 /// 枚举定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct EnumDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -303,6 +364,7 @@ pub struct EnumDef {
 
 /// Trait 定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct TraitDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -314,6 +376,7 @@ pub struct TraitDef {
 
 /// Impl 定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct ImplDef {
     pub trait_: Option<IrType>, // None = inherent impl
     pub for_type: IrType,
@@ -328,6 +391,7 @@ pub struct ImplDef {
 
 /// Use 语句（仅记录依赖路径）
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct UseStmt {
     pub path: Vec<String>,
     pub alias: Option<String>,
@@ -337,6 +401,7 @@ pub struct UseStmt {
 
 /// 常量定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConstDef {
     pub name: String,
     pub ty: IrType,
@@ -345,6 +410,7 @@ pub struct ConstDef {
 
 /// 类型别名定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct TypeAliasDef {
     pub name: String,
     pub generics: Vec<String>,
@@ -353,6 +419,7 @@ pub struct TypeAliasDef {
 
 /// 测试定义
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct TestDef {
     pub name: String,
     pub body: Block,
@@ -360,6 +427,7 @@ pub struct TestDef {
 
 /// Duck 类型约束定义 — 编译期结构匹配，零开销
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct DuckDef {
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -381,6 +449,7 @@ pub struct DuckDef {
 
 /// Duck 正则匹配约束行（§8.4）：`match /pattern/ at_least(N)`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct DuckMatchRule {
     pub pattern: String,
     /// (lo, hi) 数量约束：at_least→(N, MAX)、at_most→(0, N)、exact→(N, N)
@@ -390,6 +459,7 @@ pub struct DuckMatchRule {
 /// Duck 命名参数约束行（§8.2.2）：`require(name: str, version: int)` /
 /// `optional(timeout: int)`
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct DuckParamReq {
     /// true = require（必需命名参数）；false = optional（可选命名参数）
     pub is_required: bool,
@@ -400,6 +470,7 @@ pub struct DuckParamReq {
 /// Duck 关联类型约束 — `type I.Item`（§2.3）
 /// owner 为所属类型前缀（如 I），None 表示当前类型自身
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct DuckAssocType {
     pub owner: Option<String>,
     pub name: String,
@@ -407,6 +478,7 @@ pub struct DuckAssocType {
 
 /// Duck 字段约束 — 结构匹配的最小单元之一
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct DuckField {
     /// 所属类型前缀（多泛型关系 duck），None 表示无前缀
     pub owner: Option<String>,
@@ -419,6 +491,7 @@ pub struct DuckField {
 
 /// Duck 方法签名
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct DuckMethod {
     /// 所属类型前缀（多泛型关系 duck，如 `def T.map`），None 表示无前缀
     pub owner: Option<String>,
@@ -438,6 +511,7 @@ pub struct DuckMethod {
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum Stmt {
     Let {
         name: String,
@@ -540,9 +614,22 @@ pub enum Stmt {
 
 /// 代码块
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub ty: IrType, // 块的结果类型（最后一条语句的表达式类型，或 Unit）
+    /// 块级源码位置（含文件路径）
+    pub span: Span,
+}
+
+impl Default for Block {
+    fn default() -> Self {
+        Block {
+            stmts: vec![],
+            ty: IrType::Unit,
+            span: Span::unknown(),
+        }
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -550,6 +637,7 @@ pub struct Block {
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct Expr {
     pub kind: ExprKind,
     pub ty: IrType,
@@ -563,6 +651,7 @@ impl Expr {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExprKind {
     /// 字面量
     Lit(LitKind),
@@ -657,6 +746,12 @@ pub enum ExprKind {
         yield_of: Box<Expr>,
     },
 
+    /// 生成器构建块 func *: { yield ... } — 收集 yield 参数包，逐包调用 callee（无 callee 时返回参数包迭代器）
+    GenBuild {
+        callee: Option<Box<Expr>>,
+        block: Block,
+    },
+
     /// 类型转换（隐式 .into() / 显式 as）
     Cast {
         expr: Box<Expr>,
@@ -716,6 +811,7 @@ pub enum ExprKind {
 // ── 辅助类型 ──
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum LitKind {
     Int(i64),
     F64(f64),
@@ -728,6 +824,7 @@ pub enum LitKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum BinOpKind {
     Add,
     Sub,
@@ -768,6 +865,7 @@ impl BinOpKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum UnOpKind {
     Neg,
     Not,
@@ -778,6 +876,7 @@ pub enum UnOpKind {
 
 /// 魔法方法种类
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum MagicKind {
     GetItem, // __getitem__
     SetItem, // __setitem__
@@ -806,6 +905,7 @@ pub enum MagicKind {
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
@@ -817,6 +917,7 @@ pub struct MatchArm {
 // ══════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum Pattern {
     Wildcard,
     Ident(String),

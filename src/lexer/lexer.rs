@@ -850,6 +850,10 @@ impl Lexer {
                 }
                 '#' => {
                     self.advance();
+                    // #[attr] 属性宏写法：'#' 后跟 '[' 时跳过 '['，等价于 @attr
+                    if self.chars.get(self.pos) == Some(&'[') {
+                        self.advance();
+                    }
                     tokens.push(Token::At);
                     line_start = false;
                 }

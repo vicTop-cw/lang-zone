@@ -58,6 +58,8 @@ pub struct CodeGen {
     in_lambda_block: bool,
     /// 当前是否在生成器（iterator/yield）函数内：体内 return 等价 raise（panic）
     in_generator: bool,
+    /// 当前是否在生成器构建块（func *:）闭包内：yield → push 到闭包收集器 __bb
+    in_gen_build: bool,
     /// 当前是否在泛型函数内（@math 等）：整数字面量不附加 i64 后缀，
     /// 否则 `x * 2i64`（T 泛型）报 E0308（expected T, found i64）
     in_generic_fn: bool,
@@ -164,6 +166,8 @@ pub struct CodeGen {
     duck_field_members: std::collections::HashMap<String, std::collections::HashSet<String>>,
     /// duck 定义索引（name → DuckDef），供 gen_fn_def 填充 duck_field_members 使用
     duck_defs: std::collections::HashMap<String, DuckDef>,
+    /// 本模块是否使用 Ext 类型或 #[extern] 装饰器（仅此时生成 ExtHandle）
+    module_uses_ext: bool,
     buf: String,
 }
 
@@ -197,6 +201,7 @@ impl CodeGen {
             in_lambda_block: false,
             in_math_fn: false,
             in_generator: false,
+            in_gen_build: false,
             in_generic_fn: false,
             in_impl_generic: false,
             loop_else_stack: Vec::new(),
@@ -237,6 +242,7 @@ impl CodeGen {
             current_fn_ret_is_ref: false,
             duck_field_members: std::collections::HashMap::new(),
             duck_defs: std::collections::HashMap::new(),
+            module_uses_ext: false,
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
             buf: String::new(),
@@ -287,9 +293,12 @@ impl CodeGen {
             })
             .collect();
 
-        // 预登记 LazyLock 静态集合名（集合/Option<集合>/Tuple 类型 const）。
+        // 预登记 LazyLock 静态集合名（集合/Option<集合>/Tuple/Str 非字面量 const）。
         // 必须在函数体生成前登记：否则 main 内 config.and_then(...) 时
         // lazy_static_names 尚无 config → 生成 config 而非 (*config).clone()（E0507）
+        // 与 gen_const_def 的 needs_lazy 条件对齐：Str 非纯字面量值生成
+        // .to_string() → LazyLock<String>，引用处同样需 (*name).clone() 解引用
+        // （顶层构建块 x =: 返回 String 的场景，E0369）
         self.lazy_static_names.clear();
         for item in &module.items {
             if let Item::Const(c) = item {
@@ -303,6 +312,7 @@ impl CodeGen {
                                 .contains(&path.as_str())
                     ),
                     IrType::Tuple(_) => true,
+                    IrType::Str => !matches!(&c.value.kind, ExprKind::Lit(LitKind::Str(_))),
                     _ => false,
                 };
                 if ty_is_collection {
@@ -565,6 +575,15 @@ impl CodeGen {
         }
 
         // 标准 prelude
+        self.module_uses_ext = module.items.iter().any(|item| match item {
+            Item::FnDef(f) => {
+                matches!(f.ret_ty, IrType::Ext)
+                    || f.intrinsics
+                        .iter()
+                        .any(|i| matches!(i.kind, IntrinsicKind::Extern(_)))
+            }
+            _ => false,
+        });
         self.emit_prelude();
 
         // 每个顶层 item — 先发射 checker 块供后续函数引用
@@ -884,6 +903,37 @@ impl CodeGen {
     }
 
     fn emit_prelude(&mut self) {
+        let uses_ext = self.module_uses_ext;
+        self.emit_prelude_base();
+        if uses_ext {
+            self.emit_ext_preamble();
+        }
+    }
+
+    fn emit_ext_preamble(&mut self) {
+        // 外部专用句柄 ExtHandle（#[extern(lang)] 返回类型，无 extern 关键字）
+        self.emit_line("/// 外部专用句柄：#[extern(lang)] 标记入口的统一返回值。");
+        self.emit_line("#[derive(Debug, Clone)]");
+        self.emit_line("pub struct ExtHandle {");
+        self.emit_line("    pub lang: String,       // 目标语言标记（Rust / Python / C）");
+        self.emit_line("    pub ptr: usize,         // 外部对象不透明句柄（0 = 错误）");
+        self.emit_line("    pub err: Option<String>, // 错误约定：非 None 即为错误");
+        self.emit_line("}");
+        self.emit_line("impl ExtHandle {");
+        self.emit_line("    pub fn ok(lang: &str, ptr: usize) -> Self { Self { lang: lang.to_string(), ptr, err: None } }");
+        self.emit_line("    pub fn fail(lang: &str, msg: &str) -> Self { Self { lang: lang.to_string(), ptr: 0, err: Some(msg.to_string()) } }");
+        self.emit_line("    pub fn is_err(&self) -> bool { self.err.is_some() || self.ptr == 0 }");
+        self.emit_line("    pub fn err_msg(&self) -> Option<&str> { self.err.as_deref() }");
+        self.emit_line("}");
+        // 分发器：extern 入口经此调用（缺失实现 → 可定位诊断，不静默）
+        self.emit_line("fn __lz_ext_call(lang: &str, name: &str, args: Vec<String>) -> ExtHandle {");
+        self.emit_line("    let _ = (lang, name, args);");
+        self.emit_line("    ExtHandle::fail(lang, &format!(\"no external implementation for '{}' (lang {})\", name, lang))");
+        self.emit_line("}");
+        self.buf.push('\n');
+    }
+
+    fn emit_prelude_base(&mut self) {
         // Rust 2021 edition support (async/await, etc.)
         // 使用 outer attributes (#[..]) 而非 inner attributes (#![..])
         // 因为 type alias 可能已在 prelude 之前输出，inner attributes 不允许出现在 item 之后
@@ -1007,6 +1057,7 @@ impl CodeGen {
             IrType::Unit => "()".into(),
             IrType::Never => "!".into(),
             IrType::Any => "i64".into(),
+            IrType::Ext => "ExtHandle".into(),
             IrType::Self_ => "Self".into(),
             IrType::Duck { .. } => "()".into(), // Duck types: cannot determine Rust type, use unit
             IrType::Named { path, args } => {
@@ -1937,7 +1988,38 @@ impl CodeGen {
             if matches!(ret.as_ref(), IrType::Fn { .. }));
         // typed main（def main() -> int）走 __lz_main 内部函数，尾表达式需 return
         self.is_main = f.name == "main" && !is_typed_main;
-        if is_async_main {
+        // #[extern(lang)]：函数体由外部实现提供 → 分发调用（无 extern 关键字）
+        let extern_targets: Option<Vec<String>> = f.intrinsics.iter().find_map(|i| {
+            if let IntrinsicKind::Extern(targets) = &i.kind {
+                Some(targets.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(ext) = extern_targets {
+            let lang = ext.first().cloned().unwrap_or_else(|| "Rust".into());
+            let arg_list: Vec<String> = f
+                .params
+                .iter()
+                .map(|p| {
+                    let pn = self
+                        .param_renames
+                        .get(&p.name)
+                        .cloned()
+                        .unwrap_or_else(|| p.name.clone());
+                    format!("{}.to_string()", pn)
+                })
+                .collect();
+            self.emit_line(&format!(
+                "let __lz_ext_args: Vec<String> = vec![{}];",
+                arg_list.join(", ")
+            ));
+            self.emit_line(&format!(
+                "let __lz_ext_ret = __lz_ext_call(\"{}\", \"{}\", __lz_ext_args);",
+                lang, f.name
+            ));
+            self.emit_line("return __lz_ext_ret;");
+        } else if is_async_main {
             // async main → 使用 block_on 包装：fn main() { __block_on(async { body }) }
             self.emit_line("let __async_main = async {");
             self.indent += 1;
@@ -2959,7 +3041,6 @@ impl CodeGen {
         if needs_lazy {
             self.lazy_static_names.insert(c.name.clone());
             let lazy_ty = self.rust_type(&c.ty);
-            // 生成器构建块（*:）会在闭包体内 push __gen_vec，需先声明并在末尾返回
             let lazy_val = if val_str.contains("__gen_vec") {
                 format!(
                     "{{ let mut __gen_vec: Vec<_> = Vec::new(); {}; __gen_vec }}",
@@ -3866,7 +3947,10 @@ impl CodeGen {
                 }
             }
             Stmt::Return { value } => {
-                if self.in_generator {
+                if self.in_gen_build {
+                    // 生成器构建块闭包内 return 等价提前退出收集（闭包返回 ()）
+                    self.emit_line("return;");
+                } else if self.in_generator {
                     // iterator 体内 return 等价 raise：终止迭代并抛出
                     // （return expr 为错误信息；return 无值 → 空 panic）
                     if let Some(v) = value {
@@ -4469,6 +4553,20 @@ impl CodeGen {
                 self.emit_line(&format!("assert!({});", self.gen_expr(cond)));
             }
             Stmt::Yield { value } => {
+                // 生成器构建块（func *:）闭包内：yield 参数包 → push 到闭包收集器 __bb
+                if self.in_gen_build {
+                    let val_s = self.gen_expr(value);
+                    let is_copy = matches!(&value.ty, IrType::Int | IrType::F64 | IrType::Bool)
+                        || matches!(&value.ty, IrType::Named { path, .. }
+                            if path == "String" && val_s.contains(".clone()"));
+                    let val_s = if is_copy {
+                        val_s
+                    } else {
+                        format!("{}.clone()", val_s)
+                    };
+                    self.emit_line(&format!("__bb.push({});", val_s));
+                    return;
+                }
                 // 非 Copy 泛型值（T）push 需 clone，避免 move（E0382/E0507）
                 let val_s = self.gen_expr(value);
                 let is_copy = matches!(&value.ty, IrType::Int | IrType::F64 | IrType::Bool)
@@ -4482,6 +4580,13 @@ impl CodeGen {
                 self.emit_line(&format!("__gen_vec.push({});", val_s));
             }
             Stmt::YieldFrom { iter } => {
+                if self.in_gen_build {
+                    self.emit_line(&format!(
+                        "__bb.extend({}.into_iter());",
+                        self.gen_expr(iter)
+                    ));
+                    return;
+                }
                 self.emit_line(&format!("// yield from {}", self.gen_expr(iter)));
                 self.emit_line(&format!(
                     "__gen_vec.extend({}.into_iter());",
@@ -6962,7 +7067,7 @@ impl CodeGen {
                             return format!("{}[{}].to_string()", base_s, key_s);
                         }
                         if base_is_str_any {
-                            return format!("(({}).as_bytes()[{}] as i64)", base_s, key_s);
+                            return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
                         }
                         let is_self_field = matches!(&base.kind, ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
                         let is_self_base = matches!(&base.kind, ExprKind::Var(n) if n == "self");
@@ -6989,10 +7094,8 @@ impl CodeGen {
                             if base_is_str && is_range_key {
                                 format!("{}[{}].to_string()", base_s, key_s)
                             } else if base_is_str {
-                                // 字符串单字符索引 s[i]：Rust 不支持 str 按 usize
-                                // 索引（E0277 SliceIndex），映射为字节索引取字符码
-                                // （simple_hash `let c = s[i]`，comptime 焊死场景）
-                                format!("(({}).as_bytes()[{}] as i64)", base_s, key_s)
+                                // 字符串单字符索引：char 安全
+                                format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
                             } else {
                                 format!("{}[{}].clone()", base_s, key_s)
                             }
@@ -7685,6 +7788,9 @@ impl CodeGen {
                 child.enum_variant_fields = self.enum_variant_fields.clone();
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = self.in_generator;
+                // 生成器构建块闭包内（func *:）嵌套块表达式（if 分支等）需继承
+                // in_gen_build，否则块内 yield 会误走 __gen_vec 函数级路径（E0425）
+                child.in_gen_build = self.in_gen_build;
                 // 泛型函数标志需传递给 child（match 表达式内 Option.None 的裸 None
                 // 推断，combo-struct-method.lz map<R> 泛型方法）
                 child.in_generic_fn = self.in_generic_fn;
@@ -7727,6 +7833,79 @@ impl CodeGen {
                 // __gen_vec 已在函数级别声明，BlockExpr 中只需 push 不需要重新声明
                 child.gen_block_inner(block);
                 format!("{{\n{}    }}", child.buf)
+            }
+            ExprKind::GenBuild { callee, block } => {
+                // 生成器构建块 func *: { yield ... }
+                // 有 callee：收集 yield 参数包（闭包收集器 __bb），逐包调用 callee → collect Vec
+                // 无 callee：仅收集参数包返回 Vec（迭代器）；yield 类型即收集器元素类型
+                let elem_ty = first_yield_type(block).unwrap_or(IrType::Unit);
+                let elem_rust = self.rust_type(&elem_ty);
+                let mut child = CodeGen::new();
+                child.emitted_types = self.emitted_types.clone();
+                child.enum_variants = self.enum_variants.clone();
+                child.enum_variant_fields = self.enum_variant_fields.clone();
+                child.fn_param_info = self.fn_param_info.clone();
+                child.in_generator = false;
+                child.in_gen_build = true;
+                child.in_generic_fn = self.in_generic_fn;
+                child.declared = self.declared.clone();
+                child.suppress_tail_return = true;
+                child.param_renames = self.param_renames.clone();
+                child.downgraded_vars = self.downgraded_vars.clone();
+                child.global_vars = self.global_vars.clone();
+                child.mutated_consts = self.mutated_consts.clone();
+                child.slice_clone_bindings = self.slice_clone_bindings.clone();
+                child.lazy_static_names = self.lazy_static_names.clone();
+                child.top_level_static_names = self.top_level_static_names.clone();
+                child.struct_phantom_generics = self.struct_phantom_generics.clone();
+                child.current_fn_is_size_hint = self.current_fn_is_size_hint;
+                child.in_iterator_impl = self.in_iterator_impl;
+                child.current_fn_ret_is_ref = self.current_fn_ret_is_ref;
+                child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
+                child.fn_param_types = self.fn_param_types.clone();
+                child.fn_ref_params = self.fn_ref_params.clone();
+                child.overload_sigs = self.overload_sigs.clone();
+                child.fn_variadic = self.fn_variadic.clone();
+                child.fn_kwargs = self.fn_kwargs.clone();
+                child.current_variadic_params = self.current_variadic_params.clone();
+                child.gen_block_inner(block);
+                let body_s = child.buf;
+                let tail = match callee {
+                    Some(callee_expr) => {
+                        let callee_s = self.gen_expr(callee_expr);
+                        match &elem_ty {
+                            IrType::Tuple(elems) => {
+                                let binds: Vec<String> = (0..elems.len())
+                                    .map(|i| format!("__a{}", i))
+                                    .collect();
+                                let pat = if binds.len() == 1 {
+                                    format!("({},)", binds.join(", "))
+                                } else {
+                                    format!("({})", binds.join(", "))
+                                };
+                                format!(
+                                    "__bb.into_iter().map(move |__p| {{ let {} = __p; {}({}) }}).collect::<Vec<_>>()",
+                                    pat,
+                                    callee_s,
+                                    binds.join(", ")
+                                )
+                            }
+                            IrType::Unit => format!(
+                                "__bb.into_iter().map(move |_| {}()).collect::<Vec<_>>()",
+                                callee_s
+                            ),
+                            _ => format!(
+                                "__bb.into_iter().map(move |__p| {}(__p)).collect::<Vec<_>>()",
+                                callee_s
+                            ),
+                        }
+                    }
+                    None => "__bb".to_string(),
+                };
+                format!(
+                    "{{\n    let mut __bb: Vec<{}> = Vec::new();\n    (|| unsafe {{\n{}    }})();\n    {}\n}}",
+                    elem_rust, body_s, tail
+                )
             }
             ExprKind::ImplicitConvert { source, target_ty } => {
                 // `return self`（self 是 &Self 引用）→ 直接 self.clone()：
@@ -8556,6 +8735,7 @@ mod tests {
             body: Block {
                 stmts: vec![],
                 ty: IrType::Unit,
+                span: Span::unknown(),
             },
             intrinsics: vec![],
             is_async: false,
@@ -8619,6 +8799,7 @@ mod tests {
                     ),
                 }],
                 ty: IrType::Int,
+                span: Span::unknown(),
             },
             intrinsics: vec![],
             is_async: false,

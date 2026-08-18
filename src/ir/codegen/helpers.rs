@@ -64,6 +64,7 @@ pub(crate) fn block_has_yield(block: &Block) -> bool {
             }
             Stmt::Block { stmts } => {
                 if block_has_yield(&Block {
+                    span: Span::unknown(),
                     stmts: stmts.clone(),
                     ty: IrType::Unit,
                 }) {
@@ -104,6 +105,7 @@ pub(crate) fn block_has_bare_return(block: &Block) -> bool {
             }
             Stmt::Block { stmts } => {
                 if block_has_bare_return(&Block {
+                    span: Span::unknown(),
                     stmts: stmts.clone(),
                     ty: IrType::Unit,
                 }) {
@@ -159,6 +161,7 @@ pub(crate) fn block_has_external_assign(block: &Block, params: &[String]) -> boo
             Stmt::Block { stmts } => {
                 if block_has_external_assign(
                     &Block {
+                        span: Span::unknown(),
                         stmts: stmts.clone(),
                         ty: IrType::Unit,
                     },
@@ -219,12 +222,72 @@ pub(crate) fn expr_has_external_assign(expr: &Expr, params: &[String]) -> bool {
 pub(crate) fn expr_has_yield(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::BlockExpr { block } => block_has_yield(block),
+        ExprKind::GenBuild { block, .. } => {
+            // 生成器构建块内的 yield 由构建块自身收集，不污染外层函数
+            let _ = block;
+            false
+        }
         ExprKind::IfExpr { then, els, .. } => expr_has_yield(then) || expr_has_yield(els),
         ExprKind::Call { callee, args, .. } => {
             expr_has_yield(callee) || args.iter().any(expr_has_yield)
         }
         ExprKind::Lambda { body, .. } => expr_has_yield(body),
         _ => false,
+    }
+}
+
+/// 查找 Block 中第一个 yield 表达式的 IR 类型（生成器构建块 func *: 收集器类型用）
+pub(crate) fn first_yield_type(block: &Block) -> Option<IrType> {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Yield { value } => return Some(value.ty.clone()),
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if let Some(t) = first_yield_type(then_branch) {
+                    return Some(t);
+                }
+                if let Some(e) = else_branch {
+                    if let Some(t) = first_yield_type(e) {
+                        return Some(t);
+                    }
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
+                if let Some(t) = first_yield_type(body) {
+                    return Some(t);
+                }
+            }
+            Stmt::ExprStmt { expr } => {
+                if let Some(t) = expr_first_yield_type(expr) {
+                    return Some(t);
+                }
+            }
+            Stmt::Let { value, .. } => {
+                if let Some(t) = expr_first_yield_type(value) {
+                    return Some(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 查找 Expr 中第一个 yield 表达式的 IR 类型
+pub(crate) fn expr_first_yield_type(expr: &Expr) -> Option<IrType> {
+    match &expr.kind {
+        ExprKind::BlockExpr { block } => first_yield_type(block),
+        ExprKind::GenBuild { block, .. } => first_yield_type(block),
+        ExprKind::IfExpr { then, els, .. } => {
+            expr_first_yield_type(then).or_else(|| expr_first_yield_type(els))
+        }
+        ExprKind::Call { callee, args, .. } => expr_first_yield_type(callee)
+            .or_else(|| args.iter().find_map(expr_first_yield_type)),
+        ExprKind::Lambda { body, .. } => expr_first_yield_type(body),
+        _ => None,
     }
 }
 
@@ -258,6 +321,7 @@ pub(crate) fn stmt_has_await(stmt: &Stmt) -> bool {
             block_has_await(body)
         }
         Stmt::Block { stmts } => block_has_await(&Block {
+            span: Span::unknown(),
             stmts: stmts.clone(),
             ty: IrType::Unit,
         }),
@@ -534,6 +598,7 @@ pub(crate) fn scan_const_mutations(
             }
             Stmt::Block { stmts } => {
                 let inner_block = Block {
+                    span: Span::unknown(),
                     stmts: stmts.clone(),
                     ty: IrType::Unit,
                 };
@@ -614,6 +679,7 @@ pub(crate) fn collect_local_lets(block: &Block, locals: &mut std::collections::H
             }
             Stmt::Block { stmts } => {
                 let inner = Block {
+                    span: Span::unknown(),
                     stmts: stmts.clone(),
                     ty: IrType::Unit,
                 };
@@ -782,6 +848,7 @@ pub(crate) fn collect_stmt_var_refs(
         }
         Stmt::Block { stmts } => {
             let inner = Block {
+                span: Span::unknown(),
                 stmts: stmts.clone(),
                 ty: IrType::Unit,
             };

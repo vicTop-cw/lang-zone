@@ -447,6 +447,7 @@ fn name_to_ir_type(name: &str) -> IrType {
         "str" | "String" => IrType::Str,
         "f64" | "float" => IrType::F64,
         "bool" => IrType::Bool,
+        "Ext" => IrType::Ext,
         "List" | "Vec" => IrType::Named {
             path: "List".into(),
             args: vec![],
@@ -668,6 +669,7 @@ fn from_ast_type_name(name: &str) -> IrType {
         "str" | "String" => IrType::Str,
         "f64" | "float" => IrType::F64,
         "bool" => IrType::Bool,
+        "Ext" => IrType::Ext,
         other => IrType::Named {
             path: other.to_string(),
             args: vec![],
@@ -1329,18 +1331,29 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     }
                 }
                 BuildKind::Gen => {
-                    // *: 生成器构建块 → List<yield 类型>
-                    // 从 body 中第一个 yield 语句推导元素类型
-                    let elem_ty = body
-                        .iter()
-                        .find_map(|s| {
-                            if let AstStmt::Yield(Some(e)) = s {
-                                Some(infer_expr_type(e, ctx))
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(IrType::Any);
+                    // *: 生成器构建块 → List<元素类型>
+                    // 有 callee（函数/方法引用）时元素类型 = callee 返回类型；
+                    // 否则从 body 中第一个 yield 表达式推导
+                    let has_callee = matches!(
+                        &**lhs,
+                        AstExpr::Ident(_) | AstExpr::MethodCall { .. } | AstExpr::FieldAccess { .. }
+                    );
+                    // 优先从函数符号表取返回类型（Ident 直接引用函数时 lookup_var 回退 Any，
+                    // 会导致 *: 构建块元素类型错误地取 yield 包类型）
+                    let elem_ty = if let AstExpr::Ident(fname) = &**lhs {
+                        if let Some(ret) = ctx.fn_returns.get(fname) {
+                            ret.clone()
+                        } else {
+                            infer_yield_elem_ty(body, lhs_ty, ctx)
+                        }
+                    } else if has_callee {
+                        match &lhs_ty {
+                            IrType::Fn { ret, .. } => *ret.clone(),
+                            _ => infer_yield_elem_ty(body, lhs_ty, ctx),
+                        }
+                    } else {
+                        infer_yield_elem_ty(body, lhs_ty, ctx)
+                    };
                     IrType::Named {
                         path: "List".into(),
                         args: vec![elem_ty],
@@ -2307,6 +2320,19 @@ fn comptime_value_to_lit(v: &crate::comptime::ComptimeValue) -> Option<ExprKind>
     }
 }
 
+/// 从 *: 构建块 body 中第一个 yield 表达式推断元素类型（无 callee 或 callee 类型不可知时）
+fn infer_yield_elem_ty(body: &[AstStmt], _lhs_ty: IrType, ctx: &TypeCtx) -> IrType {
+    body.iter()
+        .find_map(|s| {
+            if let AstStmt::Yield(Some(e)) = s {
+                Some(infer_expr_type(e, ctx))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(IrType::Any)
+}
+
 fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
     let ty = infer_expr_type(ast_expr, ctx);
     let span = Span::unknown();
@@ -3005,6 +3031,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 .unwrap_or(IrType::Unit);
             ExprKind::BlockExpr {
                 block: Block {
+                    span: Span::unknown(),
                     stmts: vec![match_stmt],
                     ty: blk_ty,
                 },
@@ -3091,6 +3118,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             let ir_stmts: Vec<Stmt> = stmts.iter().map(|s| convert_stmt(s, ctx)).collect();
             ExprKind::BlockExpr {
                 block: Block {
+                    span: Span::unknown(),
                     stmts: ir_stmts,
                     ty: IrType::Any,
                 },
@@ -4004,9 +4032,19 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     }
                 }
                 BuildKind::Gen => {
-                    // *: → 生成器表达式，将 body 转换为迭代器
+                    // *: → 生成器构建块：callee 为左侧函数/方法引用（有 callee 时逐包调用，
+                    // 无 callee 时仅收集参数包返回迭代器）。body 中的 yield 由 codegen 收集。
                     let body_block = convert_block_with_ctx(body, ctx);
-                    ExprKind::BlockExpr { block: body_block }
+                    let callee = match &**lhs {
+                        AstExpr::Ident(_) | AstExpr::MethodCall { .. } | AstExpr::FieldAccess { .. } => {
+                            Some(Box::new(convert_expr(lhs, ctx)))
+                        }
+                        _ => None,
+                    };
+                    ExprKind::GenBuild {
+                        callee,
+                        block: body_block,
+                    }
                 }
                 BuildKind::Index => {
                     // ^: → IndexGet。key = body 块中的最后一个表达式值。
@@ -4074,6 +4112,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // 返回一个 TryCatch 包装块（codegen 会生成 catch_unwind 等逻辑）
             ExprKind::BlockExpr {
                 block: Block {
+                    span: Span::unknown(),
                     stmts: vec![Stmt::TryCatch {
                         body: body_block,
                         catches: ir_catches,
@@ -4107,6 +4146,7 @@ fn block_to_expr(stmts: &[AstStmt], ctx: &TypeCtx) -> Expr {
     Expr::new(
         ExprKind::BlockExpr {
             block: Block {
+                span: Span::unknown(),
                 stmts: ir_stmts,
                 ty: blk_ty.clone(),
             },
@@ -4970,6 +5010,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                             Span::unknown(),
                         ),
                         then_branch: Block {
+                            span: Span::unknown(),
                             stmts: vec![],
                             ty: IrType::Unit,
                         },
@@ -5007,6 +5048,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                             Span::unknown(),
                         )),
                     then_branch: Block {
+                        span: Span::unknown(),
                         stmts: vec![],
                         ty: IrType::Unit,
                     },
@@ -5318,6 +5360,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             Stmt::If {
                 cond,
                 then_branch: Block {
+                    span: Span::unknown(),
                     stmts: vec![Stmt::ExprStmt { expr: print_call }],
                     ty: IrType::Unit,
                 },
@@ -5942,6 +5985,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
         .map(|s| infer_stmt_type(s, ctx))
         .unwrap_or(IrType::Unit);
     Block {
+        span: Span::unknown(),
         stmts: ir_stmts,
         ty,
     }
@@ -6175,6 +6219,7 @@ fn rewrite_iterator_returns(block: &mut Block) {
             }
             Stmt::Block { stmts } => {
                 let mut inner = Block {
+                    span: Span::unknown(),
                     stmts: std::mem::take(stmts),
                     ty: IrType::Unit,
                 };
@@ -6564,11 +6609,16 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     fn_ctx.current_ret_ty = Some(ret_ty.clone());
     fn_ctx.current_is_iterator = func.is_iterator;
 
-    let body = convert_block(&func.body, &fn_ctx);
-    // 函数尾 `let x =: <构建块>`（BuildBlock Var）：构建块值赋给 x 后应作为
-    // 函数返回值（如 combo-build-block.lz 的 build_if_else/build_match/build_try）。
-    // 否则生成 `let x = (move || {...})();` 后无 return，E0308 类型不匹配。
-    let body = if !matches!(ret_ty, IrType::Unit) && !func.is_iterator {
+    // #[extern(lang)]：外部声明无 lz 函数体，codegen 生成分发调用
+    let has_extern = func.decorators.iter().any(|d| d.name == "extern");
+    let body = if has_extern {
+        Block::default()
+    } else {
+        let body = convert_block(&func.body, &fn_ctx);
+        // 函数尾 `let x =: <构建块>`（BuildBlock Var）：构建块值赋给 x 后应作为
+        // 函数返回值（如 combo-build-block.lz 的 build_if_else/build_match/build_try）。
+        // 否则生成 `let x = (move || {...})();` 后无 return，E0308 类型不匹配。
+        if !matches!(ret_ty, IrType::Unit) && !func.is_iterator {
         // 匹配两种形式：
         //   - `result =: ...`（AstStmt::Expr 包裹 BuildBlock）
         //   - `let result =: ...`（AstStmt::Let 的 value 是 BuildBlock）
@@ -6605,6 +6655,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
     } else {
         body
+    }
     };
     // iterator 体内 return 等价 raise（08-生成器.md：终止迭代并抛出）
     // codegen 将 Stmt::Raise 生成 panic!，因此把带值 return 转成 raise
@@ -6630,6 +6681,35 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 "derive" => IntrinsicKind::Derive,
                 "tail_call" => IntrinsicKind::TailCall,
                 "math" => IntrinsicKind::Export(vec!["Math".into()]),
+                "extern" => {
+                    // #[extern(Rust, Python)] 外部声明（L1 机制）
+                    let targets: Vec<String> = d
+                        .args
+                        .iter()
+                        .filter_map(|a| {
+                            if let AstExpr::Ident(n) = a {
+                                Some(n.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    IntrinsicKind::Extern(if targets.is_empty() {
+                        vec![]
+                    } else {
+                        // 归一化语言标记（大小写不敏感：rust → Rust）
+                        targets
+                            .iter()
+                            .map(|t| {
+                                let mut c = t.chars();
+                                match c.next() {
+                                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                                    None => String::new(),
+                                }
+                            })
+                            .collect()
+                    })
+                }
                 name if name.starts_with("export") => {
                     // @export(Rust, Python)
                     let targets: Vec<String> = d
@@ -6663,6 +6743,43 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             }
         })
         .collect();
+
+    // #[extern(lang)] 诊断：语言参数缺失 / 重复标记 / 返回类型必须为 Ext
+    {
+        let extern_count = func.decorators.iter().filter(|d| d.name == "extern").count();
+        if extern_count > 1 {
+            ctx.report_error(format!(
+                "#[extern] 重复标记：函数 '{}' 有 {} 个 extern 装饰器",
+                func.name, extern_count
+            ));
+        }
+        if let Some(ei) = intrinsics.iter().find(|i| matches!(i.kind, IntrinsicKind::Extern(_))) {
+            if let IntrinsicKind::Extern(targets) = &ei.kind {
+                if targets.is_empty() {
+                    ctx.report_error(format!(
+                        "#[extern] 缺少语言参数：函数 '{}' 需要 #[extern(Rust)] / #[extern(Python)]",
+                        func.name
+                    ));
+                }
+                for t in targets {
+                    let known = matches!(t.as_str(), "Rust" | "Python" | "C");
+                    if !known {
+                        ctx.report_error(format!(
+                            "#[extern] 未知语言 '{}'：函数 '{}' 支持 Rust / Python / C",
+                            t, func.name
+                        ));
+                    }
+                }
+            }
+            if !matches!(ret_ty, IrType::Ext) {
+                ctx.report_error(format!(
+                    "#[extern] 返回类型错误：函数 '{}' 必须返回 Ext（外部专用句柄），实际返回 {}",
+                    func.name,
+                    ret_ty
+                ));
+            }
+        }
+    }
 
     // 引用 impl 级泛型的 where 约束（如 `impl<K,V> Dict<K,V>` 方法
     // `where K: Eq + Hash`，K 不在方法泛型中）无法合并到方法泛型，
@@ -7683,6 +7800,7 @@ fn build_ir_inner(
         let value = Expr::new(
             ExprKind::BlockExpr {
                 block: Block {
+                    span: Span::unknown(),
                     stmts,
                     ty: blk_ty.clone(),
                 },

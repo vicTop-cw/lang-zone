@@ -630,6 +630,17 @@ impl LzGen {
                 let stmts = self.stmts_ref(&block.stmts);
                 format!("Expr.BlockExpr(stmts: {}, ty: {})", stmts, ty)
             }
+            ExprKind::GenBuild { callee, block } => {
+                let callee_s = match callee {
+                    Some(c) => format!("Some({})", self.expr(c)),
+                    None => "None".to_string(),
+                };
+                let stmts = self.stmts_ref(&block.stmts);
+                format!(
+                    "Expr.GenBuild(callee: {}, stmts: {}, ty: {})",
+                    callee_s, stmts, ty
+                )
+            }
             ExprKind::GenExpr { yield_of } => {
                 format!(
                     "Expr.GenExpr(yield_of: {}, ty: {})",
@@ -681,6 +692,7 @@ impl LzGen {
             IrType::Never => "IrType.Never".to_string(),
             IrType::Any => "IrType.Any".to_string(),
             IrType::Self_ => "IrType.Self_".to_string(),
+            IrType::Ext => "IrType.Ext".to_string(),
             IrType::Named { path, args } => {
                 let args_items: Vec<String> = args.iter().map(|a| self.irtype(a)).collect();
                 let args_s = self.list_ref("IrType", args_items);

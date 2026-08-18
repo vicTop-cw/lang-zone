@@ -1,4 +1,4 @@
-// Lang-Zong 编译器 — util/version.rs
+﻿// Lang-Zong 编译器 — util/version.rs
 // 编译器版本信息：版本号、最低 Rust 版本要求、版本字符串
 //
 // 对标 Rust `version!()` 宏 + `rustc --version` 输出格式
@@ -8,7 +8,7 @@ pub const VERSION_MAJOR: u32 = 0;
 /// 编译器次版本号
 pub const VERSION_MINOR: u32 = 1;
 /// 编译器修订版本号（每小阶段推进一次，v0.133 起 + 19 小阶段 = 152）
-pub const VERSION_PATCH: u32 = 161;
+pub const VERSION_PATCH: u32 = 162;
 /// 预发布标签（空 = 正式版）
 pub const VERSION_PRE: &str = "alpha";
 

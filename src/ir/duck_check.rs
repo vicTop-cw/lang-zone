@@ -1289,6 +1289,14 @@ fn walk_stmt(stmt: &Stmt, f: &mut dyn FnMut(&Expr)) {
 fn walk_expr(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
     f(expr);
     match &expr.kind {
+        ExprKind::GenBuild { callee, block } => {
+            if let Some(c) = callee {
+                walk_expr(c, f);
+            }
+            for stmt in &block.stmts {
+                walk_stmt(stmt, f);
+            }
+        }
         ExprKind::Call { callee, args, .. } => {
             walk_expr(callee, f);
             for a in args {

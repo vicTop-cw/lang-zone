@@ -135,6 +135,10 @@ impl Parser {
             // 解析装饰器
             while self.check(&Token::At) {
                 decorators.push(self.parse_decorator()?);
+                // #[attr] 写法：属性头后的 ] 可省略（#[extern(rust)] → @extern(rust)]）
+                if self.check(&Token::RBrack) {
+                    self.advance();
+                }
                 self.skip_newlines();
             }
 

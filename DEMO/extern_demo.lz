@@ -1,0 +1,18 @@
+// extern_demo.lz — #[extern(lang)] 外部声明示例
+// 三机制之 L1：外部声明（返回外部专用句柄 Ext）
+// 注：extern 函数的 lz 体为占位（codegen 生成分发调用，忽略占位体）
+
+#[extern(rust)]
+def open_device(path: str) -> Ext = 0
+
+#[extern(python)]
+def load_numpy() -> Ext = 0
+
+def main():
+    // 无外部实现时：Ext 句柄携带可定位诊断，不静默失败
+    let h = open_device("/dev/null")
+    let p = load_numpy()
+    print("open_device is_err: ")
+    print(h.is_err())
+    print("load_numpy err: ")
+    print(p.err_msg())

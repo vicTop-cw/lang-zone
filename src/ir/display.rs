@@ -17,6 +17,7 @@ impl fmt::Display for IrType {
             IrType::Unit => f.write_str("()"),
             IrType::Never => f.write_str("!"),
             IrType::Any => f.write_str("?"),
+            IrType::Ext => f.write_str("Ext"),
             IrType::Self_ => f.write_str("Self"),
             IrType::Duck { fields } => {
                 f.write_str("duck {")?;

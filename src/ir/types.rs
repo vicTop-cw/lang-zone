@@ -8,6 +8,7 @@
 
 /// LZIR 类型表示 — 与任何后端无关
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum IrType {
     // ── 内建原语 ──
     Int,
@@ -18,6 +19,9 @@ pub enum IrType {
     Never,      // !
     Any,        // 未确定类型（fallback）
     Self_,      // self 参数类型
+
+    // ── 特殊类型 ──
+    Ext,          // 外部专用句柄（#[extern(lang)] 返回值）
 
     // ── 命名类型（含泛型参数） ──
     // 例：Named("Option", [Int])、Named("Vec", [Str])、Named("MyStruct", [])
@@ -132,6 +136,8 @@ pub fn from_ast_type_with_generics(ast_ty: &crate::types::Type, generics: &[Stri
         AstType::Named(name) => {
             if generics.contains(name) {
                 IrType::Generic(name.clone())
+            } else if name == "Ext" {
+                IrType::Ext
             } else {
                 IrType::named(name)
             }
@@ -186,6 +192,8 @@ pub fn from_ast_type(ast_ty: &crate::types::Type) -> IrType {
             // 统一映射为 Str（宏体 quote 拼接生成 Rust 字符串）
             if name == "Tokens" {
                 IrType::Str
+            } else if name == "Ext" {
+                IrType::Ext
             } else {
                 IrType::named(name)
             }
