@@ -15,6 +15,7 @@ use lang_zone::ir::builder::build_ir;
 use lang_zone::ir::codegen::CodeGen as IrCodeGen;
 use lang_zone::project::ProjectCompiler;
 use lang_zone::cache::CacheEntry;
+use lang_zone::incr::IncrCompiler;
 
 /// 将 .lz 扩展名替换为 .rs（只替换最后的扩展名，避免 `a.lz.lz` → `a.rs.rs` 问题）
 fn replace_ext(path: &str, from: &str, to: &str) -> String {
@@ -164,6 +165,9 @@ fn compile_main(args: Vec<String>) -> i32 {
             "check" => return cli::cmd_check(&args),
             "peek" => return cli::cmd_peek(&args),
             "push" => return cli::cmd_push(&args),
+            // FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D）
+            "watch" => return lang_zone::hotreload::cmd_watch(&args),
+            "lsp" => return lang_zone::lsp::run_lsp(),
             _ => { /* 单文件编译路径（行为保持原样） */ }
         }
     }
@@ -188,6 +192,9 @@ fn compile_main(args: Vec<String>) -> i32 {
     let std_dir = extract_flag_value(&args, "--std-dir").map(PathBuf::from);
     let run_tests = args.iter().any(|a| a == "--test");
     let use_cache = args.iter().any(|a| a == "--cached");
+    // 旧 AST 直接 codegen 回退开关（仅用于双路线 golden 对照；默认 IR 路线）
+    let use_ast_codegen = args.iter().any(|a| a == "--ast-codegen");
+    let allow_rustc_private = args.iter().any(|a| a == "--allow-rustc-private");
 
     // --lzi <file>：加载 lz-infer 生成的跨模块类型签名（.lzi），注入 IR builder，
     // 本地函数查不到返回类型时回退查询外部模块签名（可选增强，infer 特性门控）
@@ -204,7 +211,48 @@ fn compile_main(args: Vec<String>) -> i32 {
     #[cfg(not(feature = "infer"))]
     let lzi_registry: Option<()> = None;
 
-    let path = &args[1];
+    // entry 路径取第一个非 `-` 开头的参数（兼容 `--incr <file>` 与 `<file> --incr` 两种顺序）
+    let path = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or(&args[1]);
+
+    // --incr：增量编译（FIST T4.3 / 升级计划方向B）
+    // 模块级缓存 + 依赖图 + 传播失效；未变更模块直接复用缓存产物。
+    if args.iter().any(|a| a == "--incr") {
+        let base_dir = std::path::Path::new(path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
+        let cache_dir = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--incr-cache="))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(IncrCompiler::default_cache_dir()));
+        let mut ic = IncrCompiler::new(base_dir, cache_dir);
+        let outcome = ic
+            .compile(std::path::Path::new(path))
+            .unwrap_or_else(|e| {
+                eprintln!("Incremental compile error: {}", e);
+                std::process::exit(1);
+            });
+        let out_path = replace_ext(path, ".lz", ".rs");
+        fs::write(&out_path, &outcome.code).unwrap_or_else(|e| {
+            eprintln!("Error writing {}: {}", out_path, e);
+            std::process::exit(1);
+        });
+        println!(
+            "Incremental: {} -> {} ({} modules: {} cached, {} rebuilt, {} ms)",
+            path,
+            out_path,
+            outcome.stats.total,
+            outcome.stats.hits,
+            outcome.stats.misses,
+            outcome.stats.elapsed_ms
+        );
+        return 0;
+    }
 
     // --project: 递归加载 import 的所有 .lz 依赖，合并编译
     if should_use_project {
@@ -216,14 +264,28 @@ fn compile_main(args: Vec<String>) -> i32 {
                 std::process::exit(1);
             });
 
-        let (rust_code, label) = match build_ir_opt(&merged, lzi_registry.as_ref()) {
-            Ok(ir_module) => {
-                let mut cg = IrCodeGen::new();
-                (cg.generate(&ir_module), "IR codegen")
-            }
-            Err(e) => {
-                eprintln!("IR build error (project mode): {}", e);
-                std::process::exit(1);
+        let (rust_code, label) = if use_ast_codegen {
+            // 旧 AST 直接 codegen（仅双路线 golden 对照用；默认已退役）
+            let rustc_version = lang_zone::util::version::version();
+            (
+                lang_zone::codegen::CodeGen::generate(
+                    &merged,
+                    std_dir.clone(),
+                    allow_rustc_private,
+                    rustc_version,
+                ),
+                "AST codegen (legacy)",
+            )
+        } else {
+            match build_ir_opt(&merged, lzi_registry.as_ref()) {
+                Ok(ir_module) => {
+                    let mut cg = IrCodeGen::new();
+                    (cg.generate(&ir_module), "IR codegen")
+                }
+                Err(e) => {
+                    eprintln!("IR build error (project mode): {}", e);
+                    std::process::exit(1);
+                }
             }
         };
         let out_path = replace_ext(path, ".lz", ".rs");
@@ -611,7 +673,24 @@ fn compile_main(args: Vec<String>) -> i32 {
         return 0;
     }
 
-    // 唯一 codegen 路径: AST → LZIR → Rust（无老路子选项）
+    // 默认 codegen 路径: AST → LZIR → Rust（IR 路线；AST 直接 codegen 已退役，
+    // 仅 --ast-codegen 回退开关保留用于双路线 golden 对照）
+    if use_ast_codegen {
+        let rustc_version = lang_zone::util::version::version();
+        let rust_code = lang_zone::codegen::CodeGen::generate(
+            &module,
+            std_dir.clone(),
+            allow_rustc_private,
+            rustc_version,
+        );
+        let out_path = replace_ext(path, ".lz", ".rs");
+        fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
+            eprintln!("Error writing {}: {}", out_path, e);
+            std::process::exit(1);
+        });
+        println!("Generated {} -> {} (AST codegen, legacy)", path, out_path);
+        return 0;
+    }
     match build_ir_opt(&module, lzi_registry.as_ref()) {
         Ok(ir_module) => {
             let mut cg = IrCodeGen::new();

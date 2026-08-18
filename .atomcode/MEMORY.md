@@ -112,7 +112,6 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - 关联类型在泛型函数体内 `print` 需 where 约束 `<T as Duck<..>>::Item: std::fmt::Debug`，否则 E0277。
 - 泛型函数体内访问 duck 约束泛型参数的字段（`a.field`）→ 自动转 `a.__field_field()` trait accessor（`duck_field_members` 按参数名收集，key 是参数名不是泛型名）。
 - 空字段 struct 构造 `Text()` 走 Call fallback 需生成 `Text {}`（`args_s.is_empty() && is_known_type` 分支）。
-- **已知缺陷（未修复）**：管道 `|>` 实参重复、字典推导多 for 报错、trait 内关联类型不支持、泛型默认参数值丢弃、生成器无返回类型 yield 推断缺失——详见 issue #1。
 - ΣLang 版本推进至 v154（2026-08-08），全量回归基线 PASS 146 / FAIL 58（15 PARSE / 42 RUSTC / 1 RUN），commit 52fc0d1 已 push github+gitcode
 - 2026-08-08 目录规整完成：issues/ 并入 issue/（README 补说明）；demo 测试报告移入 issue/；div-tools/ 收纳 9 个辅助脚本（含 check_doc_versions.py、fix_*.ps1）；新增 README-FOR-AI.md（AI 接手规范：唯一 IR 路线、开发期禁止缓存/增量编译、必须全量回归）与 history-work/（工作记录）
 - 已清除 DEMO 与 SYNTAX 中「规范目标特性/未实现/语法冻结/待实现」字眼（用户 2026-08-08 决策：无规范目标特性，所有 DEMO 除 99_errors 都需测试修复）；99_spec 下 guard_for_3/duck_test/iterator_demo 等已实际修复通过
@@ -146,11 +145,6 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - #!bin macro：lexer 识别整行产生单个 Token::Macro，extract_macro_defs 在 macro 后跟 Newline/Eof 时消费该 token（否则残留到 Parser 报 Expected macro name）；多参数非属性宏（check_eq 两参）由 expand_macro 用 split_top_level_args 按顶层逗号拆分绑定。
 - comptime 编译期函数调用：ComptimeEvaluator Call 分支查 module.functions 求值纯函数（参数位置绑定、继承 symtab）；内建 len()/push/索引支持；comptime_value_to_lit 返回 ExprKind 支持 List/Tuple 内联 vec![...]（查找表焊死）。TypeCtx.comptime_module 需在子 ctx 继承。
 - 宏展开要点：expand_macro 按调用形式分派（attr 有值→属性宏；多参数→split_top_level_args 拆分绑定），不依赖 is_attr（参数个数≥2 误判 bug）；宏体必须单行表达式（parse_macro_body 不处理跨行 + 链）；quote 重新 lex 的字符串片段与参数 token 不合并成单一标识符（`"get_" + name` 生成两个 Ident）——模板生成完整函数名参数。
-- 待办：ref 绑定修复（IR Stmt::Let 需加 is_ref 字段 + builder 传 + codegen 生成 &mut/& + Assign 解引用 *r=v + 源变量可变性传播）；修复尝试曾引发 primitives/dict/ref_binding 回归已撤回
-- 待办：import 模块别名未实现——`import moda as m` 的 UseStmt 无 alias 字段（builder 丢弃别名 → m 未生成 E0425 + m.add 误映射 m.insert）；修复需 UseStmt 加 alias + builder 传 + codegen m.func 模块路径解析
-- 待办：lexer 未知转义 `\q` 静默吞反斜杠（"a\qb"→"aqb" 生成，esc 默认 _=>esc）；应报错或保留反斜杠；未闭合字符串/无效十六进制已正确报错
-- 待办：嵌套函数写外层局部变量生成无效 Rust——嵌套函数（def add 在 main 内）提升为顶层 fn，`total = total + x` 生成 `let mut total = total + x`（E0425）；需嵌套函数→闭包捕获转换或编译期报错
-- 待办：宏产物含缩进块插入缩进上下文时缩进未闭合——quote 产物 `guard...else:\n    panic(...)` 展开到函数体报 "Expected Dedent, got Eof"（产物 Indent/Dedent 与插入位置层级合并问题，需缩进重平衡）；无参数宏吞后续已修（不收集后续声明）
 - let 语义：`let` = 不可变绑定（生成 Rust `let`）、`mut x` = 可变（生成 `let mut`）——codegen 按 AST is_mut 生成（00-词法基础.md:35）；with 资源绑定 as res 生成 `let mut res`（__exit__ 需可变）
 - 宏机制（08 规范）：@name! 使用须独占一行（非宏模块中，§3.5 规则 1）；展开为宏→模板→宏交替循环直到稳定（16 轮上限，含 contains_pending_call 防残留）；--macro-check=loose|light|strict 逐层检查（light 默认：括号/缩进/else-elif/guard 配对）；透传宏/模板（body=单参数引用）跳过卫生性；无参数宏不收集后续声明；__is_macro__ 宏模块 true（main.rs 用原始 token 流 has_bin_macro_declaration 检测）；Token 新增 Unknown(String)
 - 魔法方法命名已与文档对齐（12-操作符.md）：/ → __div__、% → __rem__、& → __bitand__、| → __bitor__、^ → __bitxor__（旧 __truediv__/__mod__/__and__/__or__/__xor__ 已废弃，set.lz/traits.lz 已同步）；闭包写外部变量用 block_has_external_assign 检测（含 Stmt::Assign 分支）决定非 move 借用捕获
@@ -161,3 +155,7 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - v156 版本推进：src/util/version.rs VERSION_PATCH 155→156
 - **v157（2026-08-14，全量回归 261/0 PASS，cargo test 292/0）**：全量待办闭环核查——issue #1 七项全部闭环（pipe/字典推导多 for/trait 关联类型/泛型默认参数 T=int/yield 推断/type-pack 位置约束 均探针或 DEMO 验证通过）；记忆五项待办（ref 绑定/import 别名/lexer 转义/嵌套函数写外层/宏缩进）已验证闭环；新增修复：① `__file__`/`__package__`/`__path__` 模块级魔法属性落地（ast::Module 加 file_path 字段 + main.rs 解析后注入 + builder magic_consts 派生填充，06e §一 ✅ 全部实现，此前生成 E0425 未定义变量）；② cargo test 编译修复（codegen.rs 两处测试 FnDef 补 checker_param/default_checker/where_clause 字段；宏测试 tokens 补 `#!bin macro` 声明行适配宏模块检测）；③ strict.rs/typer 为未接入模块树（lib.rs 无 mod strict/typer），其中 file_path 字段引用是死代码残留
 - v157 版本推进：src/util/version.rs VERSION_PATCH 156→157
+- v157（2026-08-14）：issue #1 全部待办闭环（pipe/字典推导多 for/trait 关联类型/泛型默认参数/yield 推断/type-pack），记忆五项待办（ref 绑定/import 别名/lexer 转义/嵌套函数/宏缩进）闭环；__file__/__package__/__path__ 魔法属性落地（ast::Module 加 file_path 字段 + main.rs 注入 + builder magic_consts 派生）；cargo test 292/0、全量回归 261/0；strict.rs/typer 未接入模块树（lib.rs 无 mod）
+- 自举路线 B 前端已入库 src/frontend/（lz_lexer.lz ~259 行 + lz_parser.lz ~284 行，v173），自举度 LZ 占比 1.7%（997/57597 行，v174）
+- LZ 编译器递归限制（v174/v175 定位）：「缩进 tokenize（行首 Indent 生成）+ parse_block↔parse_stmt 互相递归」完整组合触发 lang-zone 编译栈溢出；规避：line_start 仅行首缩进分支处理（无条件 `if line_start:` 或分散 line_start 赋值都会溢出），用「空格 && line_start」+「line_start」两个简单分支
+- 自举 Parser 嵌套块递归：p44 实证 parse_stmt If 分支递归调 parse_block 逻辑可用（固定 token 列表 → `if 1 {return 2}`，rustc 0 错误）；v174 入库版 tokenize 实际不生成 Indent（残留 line_start=false 无声明）是 `def foo {}` 空体根因；提交链 v174 4ef57fb / v175 5ff637a

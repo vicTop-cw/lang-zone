@@ -7,7 +7,12 @@ pub mod config;
 pub mod util;
 pub mod project;
 pub mod cache;
+pub mod incr;
 pub mod simd;
+
+// ─── FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D） ───
+pub mod hotreload;
+pub mod lsp;
 
 // ── L2 语法与宏层 ──
 pub mod ast;

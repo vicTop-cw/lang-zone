@@ -6,9 +6,11 @@
 //! .lzcache 格式:
 //! ```text
 //! hash=1a2b3c4d
-//! deps=dep_a.lz:hash1,dep_b.lz:hash2
+//! deps=dep_a.lz|hash1,dep_b.lz|hash2
 //! output=module.rs
 //! ```
+//! deps 条目用 `|` 分隔路径与哈希（路径可能含盘符冒号 `C:` / verbatim 前缀 `\\?\`），
+//! 解析时兼容旧格式 `:` 分隔（无盘符的相对路径）。
 
 use std::fs;
 use std::io;
@@ -26,10 +28,15 @@ impl CacheEntry {
     /// 从缓存目录加载某 .lz 文件的 .lzcache
     pub fn load(cache_dir: &Path, source: &Path) -> io::Result<Option<Self>> {
         let cache_file = cache_file_path(cache_dir, source);
+        Self::load_from(&cache_file)
+    }
+
+    /// 从任意缓存文件路径加载（增量编译管线用：文件名由调用方基于相对路径生成）
+    pub fn load_from(cache_file: &Path) -> io::Result<Option<Self>> {
         if !cache_file.exists() {
             return Ok(None);
         }
-        let data = fs::read_to_string(&cache_file)?;
+        let data = fs::read_to_string(cache_file)?;
         Ok(Some(Self::parse(&data)))
     }
 
@@ -46,7 +53,9 @@ impl CacheEntry {
                         entry.deps = value.split(',')
                             .filter(|s| !s.is_empty())
                             .filter_map(|s| {
-                                let (dep_path, dep_hash) = s.split_once(':')?;
+                                // 新格式 `path|hash`；兼容旧格式 `path:hash`
+                                let sep = if s.contains('|') { '|' } else { ':' };
+                                let (dep_path, dep_hash) = s.split_once(sep)?;
                                 Some((dep_path.to_string(), dep_hash.to_string()))
                             })
                             .collect();
@@ -64,7 +73,7 @@ impl CacheEntry {
         out.push_str(&format!("hash={}\n", self.hash));
         if !self.deps.is_empty() {
             let deps_str: Vec<String> = self.deps.iter()
-                .map(|(p, h)| format!("{}:{}", p, h))
+                .map(|(p, h)| format!("{}|{}", p, h))
                 .collect();
             out.push_str(&format!("deps={}\n", deps_str.join(",")));
         }
@@ -76,7 +85,15 @@ impl CacheEntry {
     pub fn save(&self, cache_dir: &Path, source: &Path) -> io::Result<()> {
         fs::create_dir_all(cache_dir)?;
         let cache_file = cache_file_path(cache_dir, source);
-        fs::write(&cache_file, self.serialize())
+        self.save_to(&cache_file)
+    }
+
+    /// 写入任意缓存文件路径（增量编译管线用）
+    pub fn save_to(&self, cache_file: &Path) -> io::Result<()> {
+        if let Some(parent) = cache_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(cache_file, self.serialize())
     }
 
     /// 检查缓存是否有效（源哈希匹配 + 所有依赖哈希匹配）
