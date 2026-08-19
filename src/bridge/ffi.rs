@@ -280,6 +280,7 @@ impl Bridge for FfiBridge {
                 module_name: "ffi".into(),
                 is_macro: false,
                 is_template: false,
+                    ret_result: false,
             }
         })
     }

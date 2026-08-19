@@ -1907,6 +1907,10 @@ impl Parser {
                     } else if self.check(&Token::Colon) {
                         self.advance();
                         self.parse_type()?
+                    } else if matches!(self.peek(), Token::Ident(_)) {
+                        // G2: 字段/变体缺冒号（`struct P { x int }`）→ 报错而非容错
+                        let t = self.peek().clone();
+                        return Err(format!("字段/变体 `{:?}` 缺少冒号 `:`（期望形如 `{:?}: Type`）", t, t));
                     } else {
                         Type::Unit // unit variant, no type
                     };

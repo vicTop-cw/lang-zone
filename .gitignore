@@ -86,3 +86,14 @@ temp_test_*.lz
 
 # generated test reports
 issue/test-report-*.md
+
+# local test/log artifacts (2026-08-19)
+*.log
+test_out*.txt
+test_list.txt
+build_pid.txt
+cargo_ir_out.txt
+temp/
+reports/
+omega/
+

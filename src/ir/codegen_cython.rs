@@ -1,14 +1,48 @@
 // LZIR → Cython 代码生成器（子编译器）
 // 任务：将 IrModule 转换为合法的 Cython (.pyx) 源代码
 // 覆盖全部 Stmt / ExprKind 变体
+//
+// 设计原则：
+// 1. 对象一律 PyObject：容器/泛型位置用 object；函数签名位置优先 C 类型（性能）
+// 2. 对齐 PyO3 结构：#[pyclass]→cdef class, #[pymethods]→类内方法, #[pyfunction]→cpdef/cdef
+// 3. Ω-spec 先行：corpus/*.json 定义验证基准，实现必须过 Ω-gate
 
 use super::node::*;
 use super::types::IrType;
 use super::IrModule;
+use std::collections::HashSet;
+
+/// 类型映射上下文（决定同一 IrType 在不同位置映射为何种 Cython 类型）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TypeCtx {
+    /// 函数签名位置（参数/返回值）—— 优先 C 类型以获得性能
+    Signature,
+    /// 容器/泛型位置（List<T>, Dict<K,V> 的 T/K/V）—— 一律 object（PyObject）
+    Container,
+    /// 泛型参数位置 —— 运行时擦除为 object
+    Generic,
+    /// 结构体字段位置 —— 可用 C 类型（cdef public）
+    Field,
+    /// 局部变量位置 —— 推断可用 C 类型
+    Local,
+}
 
 pub struct CythonCodeGen {
     indent: usize,
     buf: String,
+    // ── 上下文状态 ──
+    /// 所有用户自定义类型名（struct/enum/impl）
+    known_types: HashSet<String>,
+    /// cdef class 名集合（用于判断类型名是否需要 cdef class 引用）
+    cdef_classes: HashSet<String>,
+    /// 当前所在的 cdef class 名（用于 Self_ 解析）
+    current_class_name: Option<String>,
+    /// 当前函数返回类型（用于尾表达式判断）
+    current_fn_ret_ty: Option<IrType>,
+    /// 当前是否在 cdef class 体内（方法生成 vs 自由函数）
+    in_cdef_class: bool,
+    /// 函数名 → 重载签名列表（参数类型向量）
+    overload_sigs: std::collections::HashMap<String, Vec<Vec<IrType>>>,
 }
 
 impl CythonCodeGen {
@@ -16,6 +50,12 @@ impl CythonCodeGen {
         CythonCodeGen {
             indent: 0,
             buf: String::new(),
+            known_types: HashSet::new(),
+            cdef_classes: HashSet::new(),
+            current_class_name: None,
+            current_fn_ret_ty: None,
+            in_cdef_class: false,
+            overload_sigs: std::collections::HashMap::new(),
         }
     }
 
@@ -25,6 +65,8 @@ impl CythonCodeGen {
         self.writeln("# cython: language_level=3");
         self.writeln("# cython: boundscheck=False");
         self.writeln("");
+        // ── 预扫描：收集所有自定义类型名 ──
+        self.prescan_module(module);
         self.writeln("import cython");
         self.writeln("");
         // 运行时哨兵
@@ -72,6 +114,8 @@ impl CythonCodeGen {
             }
             self.gen_item(item);
         }
+        // 生成函数重载分发器
+        self.gen_overload_dispatchers();
         // 如果没有 main 函数，添加默认空 main
         if !has_main {
             self.writeln("def main(): pass");
@@ -85,33 +129,81 @@ impl CythonCodeGen {
             Item::StructDef(s) => self.gen_struct(s),
             Item::EnumDef(e) => self.gen_enum(e),
             Item::Const(c) => self.gen_const(c),
-            Item::TypeAlias(_) => {} // Cython uses ctypedef
+            Item::TypeAlias(ta) => self.gen_type_alias(ta),
             Item::Use(u) => self.gen_import(u),
             Item::TraitDef(t) => self.gen_trait(t),
             Item::Impl(i) => self.gen_impl(i),
             Item::Test(t) => self.gen_test(t),
-            Item::CheckerBlock { .. } => {} // checker 块不生成 Cython 代码
-            Item::DuckDef(_) => {}          // duck 约束不生成运行时代码
+            Item::CheckerBlock { name, ps_name, default_checker, body, captured } => {
+                self.gen_checker_block(name, ps_name.as_deref(), default_checker.as_deref(), body, captured);
+            }
+            Item::DuckDef(d) => self.gen_duck_def(d),
         }
     }
 
     fn gen_function(&mut self, f: &FnDef) {
-        let p: Vec<String> = f
-            .params
-            .iter()
-            .map(|p| format!("{} {}", self.map_type(&p.ty), p.name))
-            .collect();
+        // ── 泛型擦除：Cython 无泛型运行时，泛型参数退化为 object ──
+        // where 约束生成注释（编译期检查在 duck_check 完成）
+        let generics_comment = if !f.generics.is_empty() {
+            let names: Vec<String> = f.generics.iter().map(|g| g.name.clone()).collect();
+            format!("  # generic<{}>", names.join(", "))
+        } else {
+            String::new()
+        };
+
+        // ── 参数映射：变参参数特殊处理 ──
+        let mut p: Vec<String> = vec![];
+        for param in &f.params {
+            if param.variadic {
+                // ..name: Tuple<T> → *args; ..name: Dict<K,V> → **kwargs
+                // 单 .. 无注解 → *args（元素 Any）
+                let elem_hint = match &param.ty {
+                    IrType::Named { path, .. } if path == "Dict" || path == "dict" => {
+                        format!("**{}", param.name)
+                    }
+                    _ => format!("*{}", param.name),
+                };
+                p.push(elem_hint);
+            } else {
+                p.push(format!(
+                    "{} {}",
+                    self.map_type(&param.ty, TypeCtx::Signature),
+                    param.name
+                ));
+            }
+        }
+
         let ret = if f.ret_ty != IrType::Unit {
-            self.map_type(&f.ret_ty).to_string()
+            self.map_type(&f.ret_ty, TypeCtx::Signature).to_string()
         } else {
             "void".to_string()
         };
-        let decl = if !f.body.stmts.is_empty() {
-            "cdef"
-        } else {
-            "cpdef"
+        let decl = if !f.body.stmts.is_empty() { "cdef" } else { "cpdef" };
+
+        // ── 函数重载：同名函数 >1 个时启用 mangling ──
+        // 先取出重载信息（避免后续可变借用冲突）
+        let overload_info: Option<(String, usize)> = self.overload_sigs.get(&f.name).and_then(|sigs| {
+            if sigs.len() > 1 {
+                let sig: Vec<IrType> = f.params.iter().map(|p| p.ty.clone()).collect();
+                let idx = sigs.iter().position(|s| s == &sig).unwrap_or(0);
+                Some((f.name.clone(), idx))
+            } else {
+                None
+            }
+        });
+        let fn_name = match overload_info {
+            Some((name, idx)) => format!("{}__{}", name, idx),
+            None => f.name.clone(),
         };
-        self.write(&format!("{} {} {}({}):", decl, ret, f.name, p.join(", ")));
+
+        self.write(&format!(
+            "{} {} {}({}):{}",
+            decl,
+            ret,
+            fn_name,
+            p.join(", "),
+            generics_comment
+        ));
         self.writeln("");
         self.indent += 1;
         gen_block(self, &f.body);
@@ -119,17 +211,47 @@ impl CythonCodeGen {
         self.writeln("");
     }
 
+    /// 生成函数重载分发器（在模块末尾调用一次）
+    fn gen_overload_dispatchers(&mut self) {
+        // 先收集重载信息（避免可变/不可变借用冲突）
+        let overloads: Vec<(String, Vec<Vec<IrType>>)> = self.overload_sigs
+            .iter()
+            .filter(|(_, sigs)| sigs.len() > 1)
+            .map(|(name, sigs)| (name.clone(), sigs.clone()))
+            .collect();
+        for (name, sigs) in &overloads {
+            // def name(*args):
+            //     if len(args) == N0: return name__0(*args)
+            //     if len(args) == N1: return name__1(*args)
+            self.writeln(&format!("def {}(*args):", name));
+            self.indent += 1;
+            for (idx, sig) in sigs.iter().enumerate() {
+                let cond = if idx == 0 { "if" } else { "elif" };
+                self.writeln(&format!(
+                    "{} len(args) == {}: return {}__{}(*args)",
+                    cond, sig.len(), name, idx
+                ));
+            }
+            self.writeln(&format!(
+                "else: raise TypeError(f\"{}: no matching overload for {{len(args)}} args\")",
+                name
+            ));
+            self.indent -= 1;
+            self.writeln("");
+        }
+    }
+
     fn gen_struct(&mut self, s: &StructDef) {
         self.writeln(&format!("cdef class {}:", s.name));
         self.indent += 1;
         for f in &s.fields {
-            self.writeln(&format!("cdef public {} {}", self.map_type(&f.ty), f.name));
+            self.writeln(&format!("cdef public {} {}", self.map_type(&f.ty, TypeCtx::Field), f.name));
         }
         if !s.fields.is_empty() {
             let p: Vec<String> = s
                 .fields
                 .iter()
-                .map(|f| format!("{} {}", self.map_type(&f.ty), f.name))
+                .map(|f| format!("{} {}", self.map_type(&f.ty, TypeCtx::Signature), f.name))
                 .collect();
             self.write(&format!("def __init__(self, {}):", p.join(", ")));
             for f in &s.fields {
@@ -138,67 +260,406 @@ impl CythonCodeGen {
         } else {
             self.writeln("pass");
         }
+        // 设置当前类名上下文，使方法内 Self_ 解析为当前类
+        let prev_class = self.current_class_name.clone();
+        self.current_class_name = Some(s.name.clone());
         for m in &s.methods {
             self.gen_method(m);
         }
+        self.current_class_name = prev_class;
         self.indent -= 1;
         self.writeln("");
     }
 
     fn gen_method(&mut self, f: &FnDef) {
-        let p: Vec<String> = f
-            .params
-            .iter()
-            .map(|p| format!("{} {}", self.map_type(&p.ty), p.name))
-            .collect();
+        // Cython 方法需要显式 self；self 无类型标注，其余参数正常映射
+        let mut parts = vec![];
+        for p in &f.params {
+            if p.name == "self" || p.ty == IrType::Self_ {
+                parts.push("self".into());
+            } else {
+                parts.push(format!("{} {}", self.map_type(&p.ty, TypeCtx::Signature), p.name));
+            }
+        }
         let ret = if f.ret_ty != IrType::Unit {
-            format!(" -> {}", self.map_type(&f.ret_ty))
+            self.map_type(&f.ret_ty, TypeCtx::Signature)
         } else {
-            String::new()
+            "void".into()
         };
-        self.write(&format!("def {}({}){}:", f.name, p.join(", "), ret));
+        let decl = if !f.body.stmts.is_empty() { "cdef" } else { "cpdef" };
+        self.write(&format!("{} {} {}({}):", decl, ret, f.name, parts.join(", ")));
         self.writeln("");
         self.indent += 1;
         gen_block(self, &f.body);
         self.indent -= 1;
     }
 
-    fn gen_enum(&mut self, _e: &EnumDef) {
-        self.writeln("# enum (WIP)");
+    fn gen_enum(&mut self, e: &EnumDef) {
+        // ── 类层次方案（对齐 PyO3 enum / IntEnum）──
+        // enum Shape { Circle(r), Rect(w, h) } →
+        //   class Shape: pass
+        //   class Circle(Shape): cdef public double r; def __init__(self, double r): ...
+        //   class Rect(Shape): ...
+        self.writeln(&format!("class {}:", e.name));
+        self.indent += 1;
+        self.writeln("pass");
+        self.indent -= 1;
+        self.writeln("");
+
+        // 每个变体生成一个子类
+        for v in &e.variants {
+            self.writeln(&format!("class {}({}):", v.name, e.name));
+            self.indent += 1;
+            if v.fields.is_empty() {
+                self.writeln("pass");
+            } else {
+                // cdef public 字段
+                for f in &v.fields {
+                    self.writeln(&format!(
+                        "cdef public {} {}",
+                        self.map_type(&f.ty, TypeCtx::Field),
+                        f.name
+                    ));
+                }
+                // __init__
+                let p: Vec<String> = v
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "{} {}",
+                            self.map_type(&f.ty, TypeCtx::Signature),
+                            f.name
+                        )
+                    })
+                    .collect();
+                self.writeln(&format!("def __init__(self, {}):", p.join(", ")));
+                self.indent += 1;
+                for f in &v.fields {
+                    self.writeln(&format!("self.{} = {}", f.name, f.name));
+                }
+                self.indent -= 1;
+            }
+            self.indent -= 1;
+            self.writeln("");
+        }
+
+        // enum 方法注入到基类（用 @staticmethod 或模块级函数模拟）
+        // TODO: 后续可注入到基类；当前保持为注释占位
+        if !e.methods.is_empty() {
+            self.writeln(&format!("# enum {} methods: {} 个（注入到基类）", e.name, e.methods.len()));
+        }
     }
-    fn gen_const(&mut self, _c: &ConstDef) {
-        self.writeln("# const (WIP)");
-    }
-    fn gen_import(&mut self, _u: &UseStmt) {
-        self.writeln("# import (WIP)");
-    }
-    fn gen_trait(&mut self, _t: &TraitDef) {
-        self.writeln("# trait (WIP)");
-    }
-    fn gen_impl(&mut self, _i: &ImplDef) {
-        self.writeln("# impl (WIP)");
-    }
-    fn gen_test(&mut self, _t: &TestDef) {
-        self.writeln("# test (WIP)");
+    fn gen_const(&mut self, c: &ConstDef) {
+        let val = gen_expr(self, &c.value);
+        let ty = self.map_type(&c.ty, TypeCtx::Signature);
+        if c.ty == IrType::Unit || matches!(c.ty, IrType::Str) || matches!(c.ty, IrType::Int) || matches!(c.ty, IrType::F64) || matches!(c.ty, IrType::Bool) {
+            self.writeln(&format!("{} {} = {}", ty, c.name, val));
+        } else {
+            self.writeln(&format!("cdef object {} = {}", c.name, val));
+        }
     }
 
-    fn map_type(&self, ty: &IrType) -> &str {
-        match ty {
-            IrType::Int => "int",
-            IrType::F64 => "double",
-            IrType::Str => "str",
-            IrType::Bool => "bint",
-            IrType::Unit | IrType::Never => "void",
-            IrType::Any => "object",
-            IrType::Named { path, .. } => match path.as_str() {
-                "List" | "list" => "list",
-                "Dict" | "dict" => "dict",
-                "Set" | "set" => "set",
-                "Option" | "Result" => "object",
-                _ => "object",
-            },
-            _ => "object",
+    fn gen_type_alias(&mut self, ta: &TypeAliasDef) {
+        let target = self.map_type(&ta.ty, TypeCtx::Signature);
+        self.writeln(&format!("# type {} = {}", ta.name, target));
+        // Cython 用 ctypedef 表达类型别名（仅对 C 类型有效，Python 类型用注释）
+        if target != "object" && !target.contains('<') && !self.is_python_container(&target) {
+            self.writeln(&format!("ctypedef {} {}", target, ta.name));
         }
+    }
+
+    /// 判断是否为 Python 容器类型（不能用 ctypedef）
+    fn is_python_container(&self, ty: &str) -> bool {
+        matches!(ty, "list" | "dict" | "set" | "tuple" | "str")
+    }
+    fn gen_import(&mut self, u: &UseStmt) {
+        let path = u.path.join(".");
+        if u.is_from {
+            // from path import item1, item2
+            if u.items.is_empty() {
+                self.writeln(&format!("from {} import *", path));
+            } else {
+                let items: Vec<String> = u.items.iter().map(|i| {
+                    if let Some(alias) = &u.alias {
+                        if i == u.items.last().unwrap() {
+                            format!("{} as {}", i, alias)
+                        } else { i.clone() }
+                    } else { i.clone() }
+                }).collect();
+                self.writeln(&format!("from {} import {}", path, items.join(", ")));
+            }
+        } else {
+            // import path [as alias]
+            if let Some(alias) = &u.alias {
+                self.writeln(&format!("import {} as {}", path, alias));
+            } else {
+                self.writeln(&format!("import {}", path));
+            }
+        }
+    }
+    fn gen_trait(&mut self, t: &TraitDef) {
+        // ── Trait → 抽象基类（运行时标记；编译期 duck 检查已在 duck_check 完成）──
+        // trait HasArea { def area(self) -> f64 } →
+        //   class HasArea:
+        //       """Trait: HasArea"""
+        //       def area(self) -> double: ...
+        self.writeln(&format!("class {}:", t.name));
+        self.indent += 1;
+        self.writeln(&format!("\"\"\"Trait: {}\"\"\"", t.name));
+        for m in &t.methods {
+            let p: Vec<String> = m.params_names.iter().zip(m.params.iter()).map(|(name, ty)| {
+                if name == "self" || *ty == IrType::Self_ { "self".into() }
+                else { format!("{} {}", self.map_type(ty, TypeCtx::Signature), name) }
+            }).collect();
+            let ret = self.map_type(&m.ret, TypeCtx::Signature);
+            self.writeln(&format!(
+                "def {}({}) -> {}: ...",
+                m.name, p.join(", "), ret
+            ));
+        }
+        self.indent -= 1;
+        self.writeln("");
+    }
+
+    fn gen_impl(&mut self, i: &ImplDef) {
+        // ── Impl → 方法注入到目标类型（inherent impl / trait impl）──
+        let target_name = match &i.for_type {
+            IrType::Named { path, .. } => path.clone(),
+            _ => return,
+        };
+
+        // trait 名（如果有）
+        let trait_name = match &i.trait_ {
+            Some(IrType::Named { path, .. }) => path.clone(),
+            _ => String::new(),
+        };
+
+        if !trait_name.is_empty() {
+            self.writeln(&format!(
+                "# impl {} for {}",
+                trait_name, target_name
+            ));
+        } else {
+            self.writeln(&format!("# impl {}", target_name));
+        }
+
+        // 关联类型绑定
+        for (name, ty) in &i.assoc_type_bindings {
+            self.writeln(&format!(
+                "# type {} = {}",
+                name,
+                self.map_type(ty, TypeCtx::Signature)
+            ));
+        }
+
+        // 方法注入到目标类型（cdef class 无法动态扩展 → 改为模块级函数或注释）
+        // TODO: 需要预扫描时将 impl 方法合并到目标 cdef class 的方法列表
+        for m in &i.methods {
+            self.writeln(&format!(
+                "# {}.{} → 注入到 {}",
+                if trait_name.is_empty() { &target_name } else { &trait_name },
+                m.name,
+                target_name
+            ));
+        }
+        self.writeln("");
+    }
+
+    fn gen_test(&mut self, t: &TestDef) {
+        // ── Test → pytest 风格函数 ──
+        let safe_name: String = t.name.chars().map(|c| match c {
+            ' ' => '_',
+            '-' => '_',
+            c => c,
+        }).collect();
+        self.writeln(&format!("def test_{}():", safe_name));
+        self.indent += 1;
+        gen_block(self, &t.body);
+        self.indent -= 1;
+        self.writeln("");
+    }
+
+    fn gen_checker_block(
+        &mut self,
+        name: &str,
+        ps_name: Option<&str>,
+        default_checker: Option<&str>,
+        body: &Block,
+        captured: &[(String, IrType)],
+    ) {
+        // ── Checker 块 → 模块级函数（对齐 Rust 端 __Params）──
+        // def NAME(ps, cap1, cap2, ...):
+        let ps_param = ps_name.unwrap_or("ps");
+        let mut params = vec![ps_param.to_string()];
+        for (cap_name, cap_ty) in captured {
+            params.push(format!("{}: {}", cap_name, self.map_type(cap_ty, TypeCtx::Signature)));
+        }
+        self.writeln(&format!("def {}({}):", name, params.join(", ")));
+        self.indent += 1;
+        if let Some(dc) = default_checker {
+            self.writeln(&format!("\"\"\"default_checker: {dc}\"\"\""));
+        }
+        gen_block(self, body);
+        self.indent -= 1;
+        self.writeln("");
+    }
+
+    fn gen_duck_def(&mut self, d: &DuckDef) {
+        // ── Duck 约束 → 运行时类型标记（编译期检查已在 duck_check 完成）──
+        // duck HasArea { def area(self) -> f64 } →
+        //   class HasArea: """Duck type constraint"""
+        self.writeln(&format!("class {}:", d.name));
+        self.indent += 1;
+        self.writeln(&format!("\"\"\"Duck type constraint: {}\"\"\"", d.name));
+        // 方法签名存根
+        for m in &d.methods {
+            let ret = self.map_type(&m.ret_ty, TypeCtx::Signature);
+            self.writeln(&format!("# def {}(...) -> {}", m.name, ret));
+        }
+        // 字段约束
+        for f in &d.fields {
+            let ty = self.map_type(&f.ty, TypeCtx::Signature);
+            self.writeln(&format!("# field {}: {}", f.name, ty));
+        }
+        self.indent -= 1;
+        self.writeln("");
+    }
+
+    /// 预扫描模块：收集所有自定义类型名（struct/enum/impl）和 cdef class 集合
+    /// 必须在 generate 主循环前调用一次
+    fn prescan_module(&mut self, module: &IrModule) {
+        use std::collections::hash_map::Entry;
+        for item in &module.items {
+            match item {
+                Item::StructDef(s) => {
+                    self.known_types.insert(s.name.clone());
+                    self.cdef_classes.insert(s.name.clone());
+                }
+                Item::EnumDef(e) => {
+                    self.known_types.insert(e.name.clone());
+                    // enum 的每个变体也是类型名
+                    for v in &e.variants {
+                        self.known_types.insert(format!("{}.{}", e.name, v.name));
+                    }
+                }
+                Item::Impl(i) => {
+                    if let IrType::Named { path, .. } = &i.for_type {
+                        self.known_types.insert(path.clone());
+                    }
+                }
+                Item::TypeAlias(ta) => {
+                    self.known_types.insert(ta.name.clone());
+                }
+                Item::FnDef(f) => {
+                    // 收集函数重载签名
+                    let sig: Vec<IrType> = f.params.iter().map(|p| p.ty.clone()).collect();
+                    match self.overload_sigs.entry(f.name.clone()) {
+                        Entry::Occupied(mut e) => { e.get_mut().push(sig); }
+                        Entry::Vacant(e) => { e.insert(vec![sig]); }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// 上下文感知类型映射（核心）
+    /// 函数签名位置优先 C 类型（性能），容器/泛型位置一律 object（PyObject）
+    pub fn map_type(&self, ty: &IrType, ctx: TypeCtx) -> String {
+        match ty {
+            // ── 内建原语 ──
+            IrType::Int => match ctx {
+                TypeCtx::Signature | TypeCtx::Field | TypeCtx::Local => "Py_ssize_t".into(),
+                TypeCtx::Container | TypeCtx::Generic => "object".into(),
+            },
+            IrType::F64 => match ctx {
+                TypeCtx::Signature | TypeCtx::Field | TypeCtx::Local => "double".into(),
+                TypeCtx::Container | TypeCtx::Generic => "object".into(),
+            },
+            IrType::Str => "str".into(),  // Python str 本身就是 PyObject
+            IrType::Bool => "bint".into(),  // Cython bool 也是 PyObject
+            IrType::Unit | IrType::Never => "void".into(),
+            IrType::Any => "object".into(),
+            IrType::Self_ => {
+                // 在 cdef class 内解析为当前类名，否则退化为 object
+                self.current_class_name.clone().unwrap_or_else(|| "object".into())
+            }
+            IrType::Ext => "object".into(),  // 外部不透明句柄 → PyObject
+
+            // ── 命名类型 ──
+            IrType::Named { path, args } => self.map_named_type(path, args, ctx),
+
+            // ── 容器类型 ──
+            IrType::Option(inner) => match ctx {
+                TypeCtx::Signature | TypeCtx::Field | TypeCtx::Local => "object".into(),  // None = 无值
+                TypeCtx::Container | TypeCtx::Generic => "object".into(),
+            },
+            IrType::Result { .. } => "object".into(),  // 用异常传播表错
+
+            IrType::Tuple(elems) => match ctx {
+                TypeCtx::Container | TypeCtx::Generic => "object".into(),
+                _ => {
+                    if elems.is_empty() {
+                        "tuple".into()
+                    } else {
+                        // 元组 → tuple（元素类型运行时擦除）
+                        "tuple".into()
+                    }
+                }
+            },
+
+            // ── 函数类型 ──
+            IrType::Fn { .. } => "object".into(),  // 闭包/Python callable
+
+            // ── 引用类型（Cython 无原生引用 → PyObject）──
+            IrType::Ref(_) | IrType::MutRef(_) => "object".into(),
+
+            // ── Duck 类型（编译期检查，运行时为 PyObject）──
+            IrType::Duck { .. } => "object".into(),
+
+            // ── 泛型变量（运行时擦除）──
+            IrType::Generic(_) => "object".into(),
+        }
+    }
+
+    /// 映射 Named 类型（含用户自定义类型判断）
+    fn map_named_type(&self, path: &str, _args: &[IrType], _ctx: TypeCtx) -> String {
+        match path {
+            // ── 标准库容器（映射到 Python 原生容器）──
+            "List" | "list" => "list".into(),
+            "Dict" | "dict" => "dict".into(),
+            "Set" | "set" => "set".into(),
+
+            // ── 智能指针 → 退化为 object ──
+            "Box" | "Rc" | "Arc" => "object".into(),
+
+            // ── 异步句柄 ──
+            "Future" => "object".into(),
+
+            // ── 用户自定义类型 ──
+            other => {
+                if self.known_types.contains(other) || self.cdef_classes.contains(other) {
+                    // 用户自定义 struct/enum → 直接用类型名（cdef class 或 class 已定义）
+                    other.to_string()
+                } else {
+                    // 未知类型 → object（PyObject 兜底，一律 PyObject 原则）
+                    "object".into()
+                }
+            }
+        }
+    }
+
+    /// 便捷函数：函数签名位置映射（默认用 Signature 上下文）
+    #[allow(dead_code)]
+    fn map_type_sig(&self, ty: &IrType) -> String {
+        self.map_type(ty, TypeCtx::Signature)
+    }
+
+    /// 便捷函数：容器元素位置映射
+    #[allow(dead_code)]
+    fn map_type_container(&self, ty: &IrType) -> String {
+        self.map_type(ty, TypeCtx::Container)
     }
 
     fn writeln(&mut self, s: &str) {
@@ -286,11 +747,16 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             cg.indent -= 1;
         }
         Stmt::Match { scrutinee, arms } => {
-            let _s = gen_expr(cg, scrutinee);
-            cg.writeln("# match desugar");
+            let s = gen_expr(cg, scrutinee);
+            cg.writeln(&format!("# match {}", s));
             for (i, arm) in arms.iter().enumerate() {
                 let cond = if i == 0 { "if" } else { "elif" };
-                cg.write(&format!("{} True:  # pat={:?}", cond, arm.pattern));
+                let (pat_cond, bindings) = gen_pattern(cg, &arm.pattern, "__scrutinee__");
+                // 生成绑定赋值
+                for (bname, bval) in &bindings {
+                    cg.writeln(&format!("{} = {}", bname, bval));
+                }
+                cg.write(&format!("{} {}:", cond, pat_cond));
                 cg.writeln("");
                 cg.indent += 1;
                 gen_block(cg, &arm.body);
@@ -326,13 +792,8 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             cg.indent += 1;
             gen_block(cg, body);
             cg.indent -= 1;
-            for (i, (_pat, cb)) in catches.iter().enumerate() {
-                if i == 0 {
-                    cg.write("except:");
-                } else {
-                    cg.write("except:");
-                }
-                cg.writeln("");
+            for (_pat, cb) in catches.iter() {
+                cg.writeln("except:");
                 cg.indent += 1;
                 gen_block(cg, cb);
                 cg.indent -= 1;
@@ -350,7 +811,63 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
                 cg.indent -= 1;
             }
         }
-        // Stmt::Block handled above (L138)
+        Stmt::WhileLet { pattern, expr, guard, body } => {
+            cg.writeln(&format!("# while let {:?}", pattern));
+            cg.write(&format!("for {} in {}:", "__while_let__", gen_expr(cg, expr)));
+            cg.writeln("");
+            cg.indent += 1;
+            if let Some(g) = guard {
+                cg.writeln(&format!("if {}:", gen_expr(cg, g)));
+                cg.indent += 1;
+                gen_block(cg, body);
+                cg.indent -= 1;
+            } else {
+                gen_block(cg, body);
+            }
+            cg.indent -= 1;
+        }
+        Stmt::Match { scrutinee, arms } => {
+            let s = gen_expr(cg, scrutinee);
+            cg.writeln(&format!("# match {}", s));
+            for (i, arm) in arms.iter().enumerate() {
+                let cond = if i == 0 { "if" } else { "elif" };
+                cg.write(&format!("{} True:  # pat={:?}", cond, arm.pattern));
+                cg.writeln("");
+                cg.indent += 1;
+                gen_block(cg, &arm.body);
+                cg.indent -= 1;
+            }
+        }
+        Stmt::YieldFrom { iter } => {
+            cg.writeln(&format!("yield from {}", gen_expr(cg, iter)));
+        }
+        Stmt::BreakLabel { label, value } => {
+            if let Some(v) = value {
+                cg.writeln(&format!("# break {} with {}", label, gen_expr(cg, v)));
+            } else {
+                cg.writeln(&format!("# break {}", label));
+            }
+            cg.writeln("break");
+        }
+        Stmt::Continue => cg.writeln("continue"),
+        Stmt::BlockLabel { label, body } => {
+            cg.writeln(&format!("# block {}:", label));
+            gen_block(cg, body);
+        }
+        Stmt::CheckerBlock { label, ps_name, default_checker, body } => {
+            let ps_param = ps_name.as_deref().unwrap_or("ps");
+            cg.writeln(&format!("def {}({}):", label, ps_param));
+            cg.indent += 1;
+            if let Some(dc) = default_checker {
+                cg.writeln(&format!("\"\"\"default_checker: {dc}\"\"\""));
+            }
+            gen_block(cg, body);
+            cg.indent -= 1;
+        }
+        Stmt::Pass => cg.writeln("pass"),
+        Stmt::TypeAlias { name, ty } => {
+            cg.writeln(&format!("# type {} = {:?}", name, ty));
+        }
         _ => cg.writeln("# <stmt todo>"),
     }
 }
@@ -374,7 +891,42 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
         ExprKind::Var(name) => name.clone(),
         ExprKind::Call { callee, args, .. } => {
             let f = gen_expr(cg, callee);
-            let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
+            // ── 内建断言降级：assert_eq!(a, b) → assert a == b；assert!(e) → assert e ──
+            if f == "assert_eq!" {
+                if args.len() >= 2 {
+                    return format!(
+                        "assert {} == {}",
+                        gen_expr(cg, &args[0]),
+                        gen_expr(cg, &args[1])
+                    );
+                }
+                if args.len() == 1 {
+                    return format!("assert {}", gen_expr(cg, &args[0]));
+                }
+            }
+            if f == "assert!" {
+                if let Some(a) = args.first() {
+                    return format!("assert {}", gen_expr(cg, a));
+                }
+            }
+            // ── 关键字参数 _KwArg 内联：f(_KwArg(name="x", value=3)) → f(x = 3) ──
+            let a: Vec<String> = args.iter().map(|arg| {
+                if let ExprKind::StructCtor { name, fields } = &arg.kind {
+                    if name == "_KwArg" {
+                        let k = fields.iter().find(|(n, _)| n == "name")
+                            .and_then(|(_, v)| match &v.kind {
+                                ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
+                                _ => None,
+                            });
+                        let v = fields.iter().find(|(n, _)| n == "value")
+                            .map(|(_, e)| gen_expr(cg, e));
+                        if let (Some(k), Some(v)) = (k, v) {
+                            return format!("{} = {}", k, v);
+                        }
+                    }
+                }
+                gen_expr(cg, arg)
+            }).collect();
             format!("{}({})", f, a.join(", "))
         }
         ExprKind::MethodCall {
@@ -463,6 +1015,179 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
         ExprKind::GenExpr { yield_of } => {
             format!("({})", gen_expr(cg, yield_of))
         }
+        ExprKind::AssignExpr { target, value } => {
+            format!("{} = {}", gen_expr(cg, target), gen_expr(cg, value))
+        }
+        ExprKind::GenBuild { callee, block } => {
+            let callee_str = match callee {
+                Some(c) => gen_expr(cg, c),
+                None => "None".into(),
+            };
+            format!("# gen_build {} ({} stmts)", callee_str, block.stmts.len())
+        }
+        ExprKind::Cast { expr, target } => {
+            format!("{}({})", cg.map_type(target, TypeCtx::Signature), gen_expr(cg, expr))
+        }
+        ExprKind::MagicCall { kind, args } => {
+            let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
+            match kind {
+                MagicKind::GetItem => format!("{}[{}]", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into())),
+                MagicKind::SetItem => format!("{}[{}] = {}", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into()), a.get(2).unwrap_or(&"".into())),
+                MagicKind::Display => format!("str({})", a.first().unwrap_or(&"".into())),
+                MagicKind::Len => format!("len({})", a.first().unwrap_or(&"".into())),
+                MagicKind::Eq => format!("{} == {}", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into())),
+                MagicKind::Cmp => format!("{} < {}", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into())),
+                MagicKind::Iter => format!("iter({})", a.first().unwrap_or(&"".into())),
+                MagicKind::Next => format!("next({})", a.first().unwrap_or(&"".into())),
+                MagicKind::Call => format!("{}({})", a.first().unwrap_or(&"".into()), a.iter().skip(1).cloned().collect::<Vec<_>>().join(", ")),
+                MagicKind::Add => format!("{} + {}", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into())),
+                MagicKind::Sub => format!("{} - {}", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into())),
+                MagicKind::Mul => format!("{} * {}", a.first().unwrap_or(&"".into()), a.get(1).unwrap_or(&"".into())),
+                MagicKind::Neg => format!("-{}", a.first().unwrap_or(&"".into())),
+                MagicKind::Not_ => format!("not {}", a.first().unwrap_or(&"".into())),
+                MagicKind::Drop => format!("# __drop__({})", a.first().unwrap_or(&"".into())),
+                MagicKind::Rev => format!("reversed({})", a.first().unwrap_or(&"".into())),
+                _ => format!("{}({})", format!("{:?}", kind).to_lowercase(), a.join(", ")),
+            }
+        }
+        ExprKind::BlockExpr { block } => {
+            let mut inner = String::new();
+            for stmt in &block.stmts {
+                inner.push_str(&format!("    # {:?}\n", stmt));
+            }
+            format!("(begin\n{}\n)", inner)
+        }
+        ExprKind::TupleLit(exprs) | ExprKind::Tuple(exprs) => {
+            let e: Vec<String> = exprs.iter().map(|e| gen_expr(cg, e)).collect();
+            format!("({})", e.join(", "))
+        }
+        ExprKind::ListLit(exprs) | ExprKind::List(exprs) => {
+            let e: Vec<String> = exprs.iter().map(|e| gen_expr(cg, e)).collect();
+            format!("[{}]", e.join(", "))
+        }
+        ExprKind::Dict(entries) => {
+            let e: Vec<String> = entries.iter().map(|(k, v)| {
+                format!("{}: {}", gen_expr(cg, k), gen_expr(cg, v))
+            }).collect();
+            format!("{{{}}}", e.join(", "))
+        }
+        ExprKind::Range { start, end, inclusive } => {
+            let s = match start {
+                Some(s) => gen_expr(cg, s),
+                None => "0".into(),
+            };
+            let e = gen_expr(cg, end);
+            if *inclusive {
+                format!("range({}, {} + 1)", s, e)
+            } else {
+                format!("range({}, {})", s, e)
+            }
+        }
+        ExprKind::Pipe { receiver, callee, args } => {
+            let r = gen_expr(cg, receiver);
+            let c = gen_expr(cg, callee);
+            let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
+            format!("{}({}, {})", c, a.join(", "), r)
+        }
+        ExprKind::Paren(expr) => {
+            format!("({})", gen_expr(cg, expr))
+        }
+        ExprKind::ImplicitConvert { source, target_ty } => {
+            format!("{}({})", cg.map_type(target_ty, TypeCtx::Signature), gen_expr(cg, source))
+        }
         _ => String::new(),
+    }
+}
+
+/// 生成模式匹配条件 + 绑定变量列表
+/// 返回 (条件表达式, [(绑定名, 值表达式)])
+fn gen_pattern(cg: &CythonCodeGen, pat: &Pattern, scrutinee: &str) -> (String, Vec<(String, String)>) {
+    match pat {
+        Pattern::Wildcard => ("True".into(), vec![]),
+        Pattern::Ident(name) => {
+            (format!("True  # bind {}", name), vec![(name.clone(), scrutinee.to_string())])
+        }
+        Pattern::RefMutIdent(name) => {
+            (format!("True  # ref mut bind {}", name), vec![(name.clone(), scrutinee.to_string())])
+        }
+        Pattern::Lit(lit) => {
+            let lit_str = match lit {
+                LitKind::Int(n) => n.to_string(),
+                LitKind::F64(f) => f.to_string(),
+                LitKind::Str(s) => format!("\"{}\"", s),
+                LitKind::Bool(b) => if *b { "True" } else { "False" }.into(),
+                _ => "None".into(),
+            };
+            (format!("{} == {}", scrutinee, lit_str), vec![])
+        }
+        Pattern::Tuple(elems) => {
+            let mut conds = vec![format!("isinstance({}, tuple) && len({}) == {}", scrutinee, scrutinee, elems.len())];
+            let mut bindings = vec![];
+            for (i, elem) in elems.iter().enumerate() {
+                let sub_scrut = format!("{}[{}]", scrutinee, i);
+                let (c, b) = gen_pattern(cg, elem, &sub_scrut);
+                conds.push(c);
+                bindings.extend(b);
+            }
+            (conds.join(" && "), bindings)
+        }
+        Pattern::List(elems) => {
+            let mut conds = vec![format!("isinstance({}, list) && len({}) == {}", scrutinee, scrutinee, elems.len())];
+            let mut bindings = vec![];
+            for (i, elem) in elems.iter().enumerate() {
+                let sub_scrut = format!("{}[{}]", scrutinee, i);
+                let (c, b) = gen_pattern(cg, elem, &sub_scrut);
+                conds.push(c);
+                bindings.extend(b);
+            }
+            (conds.join(" && "), bindings)
+        }
+        Pattern::Dict(entries) => {
+            let mut conds = vec![format!("isinstance({}, dict)", scrutinee)];
+            let mut bindings = vec![];
+            for (key, val) in entries {
+                let sub_scrut = format!("{}[\"{}\"]", scrutinee, key);
+                let (c, b) = gen_pattern(cg, val, &sub_scrut);
+                conds.push(c);
+                bindings.extend(b);
+            }
+            (conds.join(" && "), bindings)
+        }
+        Pattern::Rest(name) => {
+            match name {
+                Some(n) => (format!("True  # rest bind {}", n), vec![(n.clone(), scrutinee.to_string())]),
+                None => ("True".into(), vec![]),
+            }
+        }
+        Pattern::Range { start, end, inclusive } => {
+            let end_cond = if *inclusive {
+                format!("{} <= {} <= {}", start, scrutinee, end)
+            } else {
+                format!("{} <= {} < {}", start, scrutinee, end)
+            };
+            (end_cond, vec![])
+        }
+        Pattern::Struct { name, fields } => {
+            let mut conds = vec![format!("hasattr({}, '{}')", scrutinee, name)];
+            let mut bindings = vec![];
+            for (fname, fpat) in fields {
+                let sub_scrut = format!("{}.{}", scrutinee, fname);
+                let (c, b) = gen_pattern(cg, fpat, &sub_scrut);
+                conds.push(c);
+                bindings.extend(b);
+            }
+            (conds.join(" && "), bindings)
+        }
+        Pattern::Enum { enum_name, variant, args } => {
+            let mut conds = vec![format!("isinstance({}, {})", scrutinee, enum_name)];
+            let mut bindings = vec![];
+            for (i, arg) in args.iter().enumerate() {
+                let sub_scrut = format!("{}[{}]", scrutinee, i);
+                let (c, b) = gen_pattern(cg, arg, &sub_scrut);
+                conds.push(c);
+                bindings.extend(b);
+            }
+            (conds.join(" && "), bindings)
+        }
     }
 }

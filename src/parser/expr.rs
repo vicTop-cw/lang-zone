@@ -1021,10 +1021,18 @@ impl ParserExprExt for Parser {
                 } else {
                     // 集合字面量 {a, b, c}
                     let mut items = vec![first];
-                    if self.check(&Token::Comma) { self.advance(); }
                     while !self.check(&Token::RBrace) {
+                        // G2: 元素间必须用逗号分隔（如 `{"a" 1}` 本意字典缺冒号）→ 报错而非吞为集合
+                        if !self.check(&Token::Comma) && !self.check(&Token::Newline) {
+                            let t = self.peek().clone();
+                            return Err(format!(
+                                "字典/集合字面量元素之间缺少逗号（{t:?}）；字典请使用 `key: value` 形式"
+                            ));
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                         items.push(self.parse_expr()?);
-                        if self.check(&Token::Comma) { self.advance(); }
                     }
                     self.expect(Token::RBrace)?;
                     Ok(Expr::SetLit(items))

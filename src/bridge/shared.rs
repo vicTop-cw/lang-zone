@@ -323,7 +323,7 @@ impl Bridge for ZincBridge {
             module_name: "zinc".into(),
             is_macro: false,
             is_template: false,
-            ret_result: false,
+                    ret_result: false,
         })
     }
 

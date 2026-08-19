@@ -168,6 +168,10 @@ pub struct CodeGen {
     duck_defs: std::collections::HashMap<String, DuckDef>,
     /// 本模块是否使用 Ext 类型或 #[extern] 装饰器（仅此时生成 ExtHandle）
     module_uses_ext: bool,
+    /// I3：L2 中继——extern 自动登记目标 registry。注入后 codegen 处理
+    /// #[extern(lang)] 函数时自动 register_symbol 并联动台账（REGISTER）。
+    /// None = 不登记（默认，保持既有生成行为不变）。
+    pub bridge_registry: Option<crate::bridge::core::BridgeRegistry>,
     buf: String,
 }
 
@@ -245,11 +249,17 @@ impl CodeGen {
             module_uses_ext: false,
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
+            bridge_registry: None,
             buf: String::new(),
         }
     }
 
     // ── 入口 ──
+
+    /// 注入 BridgeRegistry：使 #[extern(lang)] 在 codegen 时自动登记（I3）
+    pub fn set_bridge_registry(&mut self, registry: crate::bridge::core::BridgeRegistry) {
+        self.bridge_registry = Some(registry);
+    }
 
     /// 将整个 IrModule 生成为 Rust 源代码
     pub fn generate(&mut self, module: &IrModule) -> String {
@@ -1998,6 +2008,23 @@ impl CodeGen {
         });
         if let Some(ext) = extern_targets {
             let lang = ext.first().cloned().unwrap_or_else(|| "Rust".into());
+            // I3：extern 自动登记（L2 中继打通）——注入 registry 时，
+            // #[extern(lang)] 声明自动 register_symbol + 台账 REGISTER。
+            // 签名形如 "fn(a: int, b: int) -> Ext"，供 E_TYPE 参数个数校验。
+            // 先计算签名（借用 self），再可变借用 registry，避免 E0502。
+            let extern_sig = if self.bridge_registry.is_some() {
+                let sig_params: Vec<String> = f
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, self.rust_type(&p.ty)))
+                    .collect();
+                Some(format!("fn({}) -> Ext", sig_params.join(", ")))
+            } else {
+                None
+            };
+            if let (Some(reg), Some(sig)) = (&mut self.bridge_registry, extern_sig.as_deref()) {
+                let _ = reg.register_symbol(&f.name, &lang, sig);
+            }
             let arg_list: Vec<String> = f
                 .params
                 .iter()
@@ -8715,6 +8742,53 @@ impl CodeGen {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extern_auto_registers_to_bridge_registry() {
+        // I3：注入 registry 时，#[extern(lang)] 函数在 codegen 中自动
+        // register_symbol + 台账 REGISTER（不改变生成产物本身）。
+        let mut module = IrModule::new("test".into());
+        module.items.push(Item::FnDef(FnDef {
+            name: "open_device".into(),
+            generics: vec![],
+            params: vec![Param {
+                name: "dev".into(),
+                ty: IrType::Int,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: false,
+            }],
+            ret_ty: IrType::Unit,
+            body: Block { stmts: vec![], ty: IrType::Unit, span: Span::unknown() },
+            intrinsics: vec![Intrinsic {
+                kind: IntrinsicKind::Extern(vec!["Rust".into()]),
+                span: Span::unknown(),
+            }],
+            is_async: false,
+            is_iterator: false,
+            is_test: false,
+            checker_param: None,
+            default_checker: None,
+            where_clause: vec![],
+            span: Span::unknown(),
+        }));
+        let reg = crate::bridge::core::BridgeRegistry::new();
+        let mut cg = CodeGen::new();
+        cg.set_bridge_registry(reg);
+        let _rust = cg.generate(&module);
+        let reg = cg.bridge_registry.unwrap();
+        assert_eq!(reg.symbol_count(), 1, "extern 符号应自动登记");
+        let sym = reg.lookup_symbol("open_device").expect("符号应可查询");
+        assert_eq!(sym.lang, "Rust");
+        assert!(sym.signature.contains("dev: i64"), "签名应含参数类型: {}", sym.signature);
+        let recs = reg.ledger().records();
+        assert!(
+            recs.iter().any(|r| r.event == "REGISTER" && r.detail.contains("open_device")),
+            "台账应含 REGISTER 记录"
+        );
+    }
 
     #[test]
     fn test_empty_module() {

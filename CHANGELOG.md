@@ -13,6 +13,26 @@ AIGC:
 
 本文件记录 LZ 编译器（`lzc` / `lzcyc`）的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v0.1.163] - 2026-08-19
+
+### 桥接缺口补全 + G2 语义检测 + Cy 后端
+- G4 bridge 接线：python.rs 正向桥接（Mojo 式 from python import shim + resolve/gen + 单测）
+- G5 调用台账：ledger.rs 追加式 TSV + `lzc emit-bridge-report` CLI 审计
+- G8 PyO3 依赖注入：pyo3 0.22.6 + py-bridge feature 隔离 + docs/py-bridge-struct.md（Cy 对齐基准）
+- G7 embed 属性宏解析（parser/expr/stmt）
+- G2 错误检测推进：semantic_check.rs 修复 is_bound 漏判内置类型名、builtin_type_names 扩充、FnSig param_count_min（默认参数）、泛型/arity 放宽、Never 返回类型豁免 raise 声明、BuildBlock 标识符先绑定；ir_snapshots 43/43 全绿；反例 raise_without_raises 迁移 REJECT_CASES
+- Cy 后端完成：src/ir/codegen_cython.rs + CY/ 规范 + tests/cython_backend.rs + DEMO/*.pyx 生成物
+- 全量回归 486 tests passed / 0 failed
+- docs/补缺计划-2026-08-19.md（单一事实源主计划）；过时文档归档 docs/obsolete/
+
+## [v0.1.162] - 2026-08-18
+
+### Ext 类型 + extern L1 + G3 字符串切片 + FIST T4
+- `#[extern(lang)]` 外部声明（L1）：lexer/parser 通用装饰器、Ext 类型、`__lz_ext_call` 分发器、ExtHandle
+- G3 字符串切片 char 安全（chars().collect()），非 ASCII 不 panic
+- FIST T4：incr.rs 模块级缓存+依赖图+级联失效+rayon、hotreload.rs watch、lsp.rs；IR 序列化 IR_MAGIC+IR_VERSION+ModuleDep
+- 提交 a4a6a25 / ec37e78；全量回归 392 tests
+
 ## [v0.1.161] - 2026-08-17
 
 ### 稳定自举 + CLI 子命令集成

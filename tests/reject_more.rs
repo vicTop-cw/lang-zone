@@ -79,6 +79,11 @@ const REJECT_CASES: &[RejectCase] = &[
         source: "def main() =\n    let xs = [[[[1, 2]]\n    print(xs)\n",
         phase: "parser",
     },
+    RejectCase {
+        name: "raise_without_raises",
+        source: "def f(x: int) -> int =\n    if x < 0:\n        raise \"neg\"\n    x\n",
+        phase: "semantic（G2：raise 未声明 raises 须拒绝）",
+    },
 ];
 
 /// 已知宽松语义（当前编译器接受，非拒绝）：
@@ -103,11 +108,6 @@ const ACCEPTED_CASES: &[RejectCase] = &[
         name: "struct_no_fields",
         source: "struct Empty =\n",
         phase: "parser（宽松：空 struct 被接受）",
-    },
-    RejectCase {
-        name: "raise_without_raises",
-        source: "def f(x: int) -> int =\n    if x < 0:\n        raise \"neg\"\n    x\n",
-        phase: "ir（宽松：raise 未强制 requires raises 声明）",
     },
     RejectCase {
         name: "yield_outside_iterator",

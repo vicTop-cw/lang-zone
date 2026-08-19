@@ -23,6 +23,7 @@ pub mod macros;
 pub mod types;
 pub mod magic;
 pub mod bridge;
+pub mod semantic_check;
 
 // ── L3.5 编译期求值层 ──
 pub mod comptime;

@@ -972,24 +972,38 @@ impl ParserStmtExt for Parser {
         let mut is_const = false;
         let mut mutable = false;
         let mut is_owned = false;
+        let mut seen: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
 
         loop {
             match self.peek() {
                 Token::Mut => {
+                    // G2: 双重 mut（`let mut mut x`）→ 报错
+                    if !seen.insert("mut") {
+                        return Err("重复修饰符 `mut`（`let mut mut x` 非法）".to_string());
+                    }
                     self.advance();
                     mutable = true;
                 }
                 Token::Ref => {
+                    if !seen.insert("ref") {
+                        return Err("重复修饰符 `ref`".to_string());
+                    }
                     self.advance();
                     is_ref = true;
                     // 无 let 前缀的 ref 绑定默认可变引用（&mut T，mut 为 no-op）
                     mutable = true;
                 }
                 Token::Const => {
+                    if !seen.insert("const") {
+                        return Err("重复修饰符 `const`".to_string());
+                    }
                     self.advance();
                     is_const = true;
                 }
                 Token::Owned => {
+                    if !seen.insert("owned") {
+                        return Err("重复修饰符 `owned`".to_string());
+                    }
                     self.advance();
                     is_owned = true;
                 }
@@ -1033,22 +1047,36 @@ impl ParserStmtExt for Parser {
         let mut is_const = false;
         let mut mutable = false;
         let mut is_owned = false;
+        let mut seen: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
 
         loop {
             match self.peek() {
                 Token::Mut => {
+                    // G2: 双重 mut（`let mut mut x`）→ 报错
+                    if !seen.insert("mut") {
+                        return Err("重复修饰符 `mut`（`let mut mut x` 非法）".to_string());
+                    }
                     self.advance();
                     mutable = true;
                 }
                 Token::Ref => {
+                    if !seen.insert("ref") {
+                        return Err("重复修饰符 `ref`".to_string());
+                    }
                     self.advance();
                     is_ref = true;
                 }
                 Token::Const => {
+                    if !seen.insert("const") {
+                        return Err("重复修饰符 `const`".to_string());
+                    }
                     self.advance();
                     is_const = true;
                 }
                 Token::Owned => {
+                    if !seen.insert("owned") {
+                        return Err("重复修饰符 `owned`".to_string());
+                    }
                     self.advance();
                     is_owned = true;
                 }

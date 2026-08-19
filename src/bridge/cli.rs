@@ -210,6 +210,7 @@ impl Bridge for CliBridge {
                 module_name: "cli".into(),
                 is_macro: false,
                 is_template: false,
+                    ret_result: false,
             }
         })
     }

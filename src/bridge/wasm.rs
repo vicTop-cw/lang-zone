@@ -355,7 +355,7 @@ impl Bridge for WasmBridge {
                 module_name: "wasm".into(),
                 is_macro: false,
                 is_template: false,
-                ret_result: false,
+                    ret_result: false,
             })
         } else {
             None

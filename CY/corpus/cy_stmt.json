@@ -1,0 +1,23 @@
+{
+  "op": "cy_stmt",
+  "version": "1.0",
+  "definition": {
+    "signature": "gen_stmt(stmt: Stmt) -> String",
+    "note": "全部 Stmt 变体 → Cython 语句：Let/Assign/Return/ExprStmt/If/For/While/Match/Raise/Assert/Yield/Break/Continue/TryCatch/Defer/Pass 等。"
+  },
+  "preconditions": ["stmt 必须是合法 Stmt 变体"],
+  "laws": ["L1", "L4"],
+  "tests": [
+    {"input": {"stmt": {"Let": {"name":"a","ty":"Int","value":"42","is_mut":false,"is_ref":false}}}, "expected": "a = 42"},
+    {"input": {"stmt": {"Assign": {"target":"a","value":"10"}}}, "expected": "a = 10"},
+    {"input": {"stmt": {"Return": {"value":"x"}}}, "expected": "return x"},
+    {"input": {"stmt": {"Return": {"value":null}}}, "expected": "return"},
+    {"input": {"stmt": {"Break":{}}}, "expected": "break"},
+    {"input": {"stmt": {"Continue":{}}}, "expected": "continue"},
+    {"input": {"stmt": {"Raise":{"value":"RuntimeError('boom')"}}}, "expected": "raise RuntimeError('boom')"},
+    {"input": {"stmt": {"Assert":{"cond":"x > 0"}}}, "expected": "assert x > 0"},
+    {"input": {"stmt": {"Yield":{"value":"x"}}}, "expected": "yield x"},
+    {"input": {"stmt": {"Pass":{}}}, "expected": "pass"}
+  ],
+  "fingerprint": "fnv1a64:cy_stmt_v1"
+}

@@ -176,6 +176,12 @@ impl Lexer {
                 break;
             }
         }
+        // G2: 数字后紧跟字母/下划线（如 `12abc`）→ 非法数字字面量
+        if let Some(c) = self.peek() {
+            if c.is_alphabetic() || c == '_' {
+                return Token::LexError(format!("非法数字字面量: {}（后跟 `{}`）", num, c));
+            }
+        }
         if is_float {
             match num.parse::<f64>() {
                 Ok(v) => Token::FloatLit(v),

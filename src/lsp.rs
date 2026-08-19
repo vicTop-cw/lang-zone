@@ -15,7 +15,6 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
-use std::path::{Path, PathBuf};
 
 use crate::ir::builder::build_ir;
 use crate::lexer::{Lexer, Token};

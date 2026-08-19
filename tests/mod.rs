@@ -13,3 +13,4 @@ mod ir_snapshots;
 mod lz_semantic_cases;
 mod reject_more;
 mod fuzz_smoke;
+mod cython_backend;

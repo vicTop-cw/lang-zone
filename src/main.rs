@@ -165,6 +165,8 @@ fn compile_main(args: Vec<String>) -> i32 {
             "check" => return cli::cmd_check(&args),
             "peek" => return cli::cmd_peek(&args),
             "push" => return cli::cmd_push(&args),
+            // 方案.md G5：调用台账审计入口（只读，不依赖编译）
+            "emit-bridge-report" => return cli::cmd_emit_bridge_report(&args),
             // FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D）
             "watch" => return lang_zone::hotreload::cmd_watch(&args),
             "lsp" => return lang_zone::lsp::run_lsp(),
@@ -195,6 +197,8 @@ fn compile_main(args: Vec<String>) -> i32 {
     // 旧 AST 直接 codegen 回退开关（仅用于双路线 golden 对照；默认 IR 路线）
     let use_ast_codegen = args.iter().any(|a| a == "--ast-codegen");
     let allow_rustc_private = args.iter().any(|a| a == "--allow-rustc-private");
+    // --backend=cython：选择 Cython 后端（默认 Rust）
+    let backend_cython = args.iter().any(|a| a == "--backend=cython");
 
     // --lzi <file>：加载 lz-infer 生成的跨模块类型签名（.lzi），注入 IR builder，
     // 本地函数查不到返回类型时回退查询外部模块签名（可选增强，infer 特性门控）
@@ -258,11 +262,15 @@ fn compile_main(args: Vec<String>) -> i32 {
     if should_use_project {
         let base_dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("."));
         let mut pc = ProjectCompiler::new(base_dir.to_path_buf(), std_dir.clone());
-        let merged = pc.compile(std::path::Path::new(path))
+        let mut merged = pc.compile(std::path::Path::new(path))
             .unwrap_or_else(|e| {
                 eprintln!("Project compile error: {}", e);
                 std::process::exit(1);
             });
+        // 项目模式合并模块也需带 file_path：语义检查 import 同目录解析依赖它
+        if merged.file_path.is_none() {
+            merged.file_path = Some(path.to_string());
+        }
 
         let (rust_code, label) = if use_ast_codegen {
             // 旧 AST 直接 codegen（仅双路线 golden 对照用；默认已退役）
@@ -693,18 +701,31 @@ fn compile_main(args: Vec<String>) -> i32 {
     }
     match build_ir_opt(&module, lzi_registry.as_ref()) {
         Ok(ir_module) => {
-            let mut cg = IrCodeGen::new();
-            let rust_code = cg.generate(&ir_module);
-            let out_path = replace_ext(path, ".lz", ".rs");
-            fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
-                eprintln!("Error writing {}: {}", out_path, e);
-                std::process::exit(1);
-            });
-            println!("Generated {} -> {} (IR codegen)", path, out_path);
+            if backend_cython {
+                // ── Cython 后端：IR → .pyx ──
+                let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
+                let pyx_code = cg.generate(&ir_module);
+                let out_path = replace_ext(path, ".lz", ".pyx");
+                fs::write(&out_path, pyx_code).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", out_path, e);
+                    std::process::exit(1);
+                });
+                println!("Generated {} -> {} (Cython backend)", path, out_path);
+            } else {
+                // ── Rust 后端（默认）──
+                let mut cg = IrCodeGen::new();
+                let rust_code = cg.generate(&ir_module);
+                let out_path = replace_ext(path, ".lz", ".rs");
+                fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", out_path, e);
+                    std::process::exit(1);
+                });
+                println!("Generated {} -> {} (IR codegen)", path, out_path);
 
-            // --test: 编译并运行测试（IR 路径）
-            if run_tests {
-                run_test_mode(path, &out_path);
+                // --test: 编译并运行测试（IR 路径）
+                if run_tests {
+                    run_test_mode(path, &out_path);
+                }
             }
         }
         Err(e) => {
@@ -717,11 +738,16 @@ fn compile_main(args: Vec<String>) -> i32 {
 
 /// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，
 /// 否则默认入口（本地函数查不到返回类型时回退查询外部模块签名）
+/// 统一入口：先做 G2 语义检查（semantic_check），再进入 IR 构建。
 #[cfg(feature = "infer")]
 fn build_ir_opt(
     module: &lang_zone::ast::Module,
     lzi: Option<&std::rc::Rc<lang_zone::infer::LziRegistry>>,
 ) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
+    let errs = lang_zone::semantic_check::check_module(module);
+    if !errs.is_empty() {
+        return Err(lang_zone::ir::builder::IrBuildError::Generic(errs.join("\n")));
+    }
     match lzi {
         Some(reg) => lang_zone::ir::builder::build_ir_with_lzi(module, reg.clone()),
         None => build_ir(module),
@@ -729,11 +755,16 @@ fn build_ir_opt(
 }
 
 /// 非 infer 构建：无 .lzi 支持，直接走默认 build_ir（忽略 lzi 占位参数）
+/// 统一入口：先做 G2 语义检查（semantic_check），再进入 IR 构建。
 #[cfg(not(feature = "infer"))]
 fn build_ir_opt(
     module: &lang_zone::ast::Module,
     _lzi: Option<&()>,
 ) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
+    let errs = lang_zone::semantic_check::check_module(module);
+    if !errs.is_empty() {
+        return Err(lang_zone::ir::builder::IrBuildError::Generic(errs.join("\n")));
+    }
     build_ir(module)
 }
 

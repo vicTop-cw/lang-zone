@@ -53,6 +53,16 @@ pub enum ErrorCode {
     VersionMismatch = 60,
     IncompatibleABI = 61,
     DeprecatedAPI = 62,
+
+    // 符号层 (70-79) — E_SYM / E_TYPE / E_DUP / E_LANG
+    /// E_SYM: 符号未找到
+    SymbolNotFound = 70,
+    /// E_TYPE: 类型/参数不匹配
+    SymbolTypeError = 71,
+    /// E_DUP: 符号重复注册
+    DuplicateSymbol = 72,
+    /// E_LANG: 语言/桥接不支持
+    LanguageError = 73,
 }
 
 impl ErrorCode {
@@ -71,6 +81,7 @@ impl ErrorCode {
             ErrorCode::PermissionDenied | ErrorCode::SandboxViolation | ErrorCode::CapabilityMissing => "security",
             ErrorCode::OutOfMemory | ErrorCode::QuotaExceeded | ErrorCode::FileDescriptorLimit => "resource",
             ErrorCode::VersionMismatch | ErrorCode::IncompatibleABI | ErrorCode::DeprecatedAPI => "version",
+            ErrorCode::SymbolNotFound | ErrorCode::SymbolTypeError | ErrorCode::DuplicateSymbol | ErrorCode::LanguageError => "symbol",
         }
     }
 }
@@ -313,6 +324,21 @@ pub struct CallResolveResult {
     pub module_name: String,
     pub is_macro: bool,
     pub is_template: bool,  // rust_path 含 {0}/{1} 等占位符
+    pub ret_result: bool,   // 返回值是否需要 Result 包装
+}
+
+/// 路由模式（用于 import/call 路由）
+#[derive(Debug, Clone)]
+pub struct RoutePattern {
+    pub prefix: String,
+    pub capability: BridgeCapability,
+    pub priority: usize,
+}
+
+impl RoutePattern {
+    pub fn new(prefix: impl Into<String>, capability: BridgeCapability, priority: usize) -> Self {
+        RoutePattern { prefix: prefix.into(), capability, priority }
+    }
 }
 
 impl CallResolveResult {
@@ -323,6 +349,7 @@ impl CallResolveResult {
             module_name: String::new(),
             is_macro: false,
             is_template: false,
+                    ret_result: false,
         }
     }
 }
@@ -540,6 +567,31 @@ pub trait Bridge: fmt::Debug {
         None
     }
 
+    // ─── 路由模式（可选能力）───
+
+    /// 返回本桥接的路由模式列表（用于 import/call 路由）
+    fn route_patterns(&self) -> &[RoutePattern] { &[] }
+
+    /// 解析导入路径（返回结构化结果）
+    fn resolve_import(&self, _module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+        None
+    }
+
+    /// 解析函数调用（返回结构化结果）
+    fn resolve_call(&self, _func_name: &str, _args: &[String]) -> Option<CallResolveResult> {
+        None
+    }
+
+    /// 解析类型（返回 Rust 类型路径）
+    fn resolve_type(&self, _lz_type: &str) -> Option<String> {
+        None
+    }
+
+    /// 解析方法调用（返回结构化结果）
+    fn resolve_method(&self, _method: &str, _receiver_type: &str) -> Option<MethodResolveResult> {
+        None
+    }
+
     // ─── 导出枚举（introspection）───
 
     /// 列出指定类型的所有导出符号
@@ -575,6 +627,17 @@ pub trait Bridge: fmt::Debug {
 pub struct BridgeRegistry {
     bridges: Vec<Box<dyn Bridge>>,
     default_bridge: Option<String>,
+    /// 符号表：extern 块 / @export 自动登记的符号（name → (lang, signature)）
+    symbols: HashMap<String, (String, String)>,
+    /// 调用台账（G5）：追加式 TSV 记录
+    ledger: crate::bridge::ledger::Ledger,
+}
+
+/// 符号表条目
+#[derive(Debug, Clone)]
+pub struct SymbolEntry {
+    pub lang: String,
+    pub signature: String,
 }
 
 impl BridgeRegistry {
@@ -582,7 +645,117 @@ impl BridgeRegistry {
         BridgeRegistry {
             bridges: Vec::new(),
             default_bridge: None,
+            symbols: HashMap::new(),
+            ledger: crate::bridge::ledger::Ledger::new(),
         }
+    }
+
+    // ─── 符号层（I3：L2 打通）───
+
+    /// 登记一个外部/导出符号（extern 块解析后、@export codegen 时自动调用）
+    ///
+    /// 重复登记同名符号返回 E_DUP（DuplicateSymbol）。
+    pub fn register_symbol(&mut self, name: &str, lang: &str, signature: &str) -> Result<(), BridgeError> {
+        if self.symbols.contains_key(name) {
+            let err = BridgeError::new(
+                ErrorCode::DuplicateSymbol,
+                format!("symbol '{}' already registered (lang={})", name, self.symbols[name].0),
+                "registry",
+            );
+            self.ledger.record_error(lang, &format!("DUP {}", name));
+            return Err(err);
+        }
+        self.symbols.insert(name.to_string(), (lang.to_string(), signature.to_string()));
+        self.ledger.append("REGISTER", lang, &format!("symbol={} sig={}", name, signature));
+        Ok(())
+    }
+
+    /// 查询已登记符号
+    pub fn lookup_symbol(&self, name: &str) -> Option<SymbolEntry> {
+        self.symbols.get(name).map(|(lang, sig)| SymbolEntry {
+            lang: lang.clone(),
+            signature: sig.clone(),
+        })
+    }
+
+    /// 已登记符号数量
+    pub fn symbol_count(&self) -> usize { self.symbols.len() }
+
+    /// 类型检查 + 分发 + 台账（I3：call）
+    ///
+    /// 流程：
+    /// 1. E_SYM：符号未登记 → 报错
+    /// 2. E_LANG：符号所属语言无对应桥接 → 报错
+    /// 3. E_TYPE：参数个数与签名不匹配 → 报错
+    /// 4. 委托各桥接 resolve_call_full 完成实际分发
+    /// 5. 台账记录 CALL 事件
+    pub fn call(&mut self, name: &str, args: &[String]) -> Result<CallResolveResult, BridgeError> {
+        let (lang, signature) = match self.symbols.get(name) {
+            Some(s) => s.clone(),
+            None => {
+                let err = BridgeError::new(
+                    ErrorCode::SymbolNotFound,
+                    format!("symbol '{}' not registered", name),
+                    "registry",
+                );
+                self.ledger.record_error("?", &format!("SYM {}", name));
+                return Err(err);
+            }
+        };
+
+        // E_LANG：检查是否有桥接支持该语言
+        let lang_supported = self.bridges.iter().any(|b| {
+            b.name() == lang
+                || b.meta().provides.iter().any(|p| p == &lang)
+        });
+        if !lang_supported {
+            let err = BridgeError::new(
+                ErrorCode::LanguageError,
+                format!("no bridge registered for language '{}' (symbol '{}')", lang, name),
+                "registry",
+            );
+            self.ledger.record_error(&lang, &format!("LANG {}", name));
+            return Err(err);
+        }
+
+        // E_TYPE：参数个数校验（签名形如 "fn(a: int, b: int) -> int" 或 "a: int, b: int"）
+        let expected = signature_param_count(&signature);
+        if expected != usize::MAX && args.len() != expected {
+            let err = BridgeError::new(
+                ErrorCode::SymbolTypeError,
+                format!("symbol '{}' expects {} args, got {}", name, expected, args.len()),
+                "registry",
+            );
+            self.ledger.record_error(&lang, &format!("TYPE {} got={}", name, args.len()));
+            return Err(err);
+        }
+
+        // 委托桥接完成实际分发
+        let result = self.resolve_call_full(name, args).ok_or_else(|| {
+            BridgeError::new(
+                ErrorCode::SymbolNotFound,
+                format!("symbol '{}' has no callable bridge route", name),
+                "registry",
+            )
+        })?;
+
+        self.ledger.append("CALL", &lang, &format!("{} n={}", name, args.len()));
+        Ok(result)
+    }
+
+    /// 设置台账落盘路径（G5：bridge-ledger.tsv 追加式）
+    pub fn set_ledger_path(&mut self, path: impl Into<std::path::PathBuf>) -> std::io::Result<()> {
+        self.ledger.set_path(path)
+    }
+
+    /// 访问台账（审计）
+    pub fn ledger(&self) -> &crate::bridge::ledger::Ledger {
+        &self.ledger
+    }
+
+    /// 生成台账审计汇总
+    pub fn emit_bridge_report(&self) -> crate::bridge::ledger::LedgerReport {
+        self.ledger.report()
     }
 
     pub fn register(&mut self, bridge: Box<dyn Bridge>) {
@@ -843,6 +1016,28 @@ pub struct RegistryStats {
 }
 
 // ──────────────── 内部辅助 ────────────────
+
+/// 从函数签名估算参数个数。
+///
+/// 支持两种形态：
+/// - `fn(a: int, b: int) -> int`（extern 块形态）
+/// - `a: int, b: int`（TOML 清单形态）
+/// 无法解析时返回 usize::MAX（跳过 E_TYPE 检查）。
+fn signature_param_count(signature: &str) -> usize {
+    let inner = signature
+        .trim()
+        .strip_prefix("fn")
+        .map(|s| s.trim())
+        .and_then(|s| s.strip_prefix('(').map(|s| s.trim()))
+        .and_then(|s| s.split_once(')').map(|(head, _)| head.trim()))
+        .unwrap_or_else(|| signature.trim());
+    let inner = inner.strip_prefix('(').and_then(|s| s.split_once(')').map(|(h, _)| h.trim())).unwrap_or(inner);
+    if inner.is_empty() {
+        0
+    } else {
+        inner.split(',').count()
+    }
+}
 
 fn uuid_v4() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1264,5 +1459,95 @@ mod tests {
             let h = source.health();
             assert_eq!(h.state, BridgeState::Disconnected);
         }
+    }
+
+    // ─── I3: 符号层 / L2 打通 ───
+
+    #[test]
+    fn test_register_symbol_and_lookup() {
+        let mut reg = BridgeRegistry::new();
+        assert!(reg.register_symbol("numpy_array", "python", "fn(n: int) -> object").is_ok());
+        assert_eq!(reg.symbol_count(), 1);
+        let entry = reg.lookup_symbol("numpy_array").unwrap();
+        assert_eq!(entry.lang, "python");
+        assert_eq!(entry.signature, "fn(n: int) -> object");
+        assert!(reg.lookup_symbol("missing").is_none());
+    }
+
+    #[test]
+    fn test_register_symbol_dup_returns_e_dup() {
+        let mut reg = BridgeRegistry::new();
+        reg.register_symbol("f", "python", "fn() -> void").unwrap();
+        let err = reg.register_symbol("f", "rust", "fn() -> void").unwrap_err();
+        assert_eq!(err.code, ErrorCode::DuplicateSymbol);
+        assert_eq!(err.code.domain(), "symbol");
+    }
+
+    #[test]
+    fn test_call_symbol_not_found_returns_e_sym() {
+        let mut reg = BridgeRegistry::new();
+        let err = reg.call("nope", &[]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::SymbolNotFound);
+    }
+
+    #[test]
+    fn test_call_lang_not_supported_returns_e_lang() {
+        let mut reg = BridgeRegistry::new();
+        reg.register(Box::new(TestBridge {
+            name: "rust".into(), level: BridgeLevel::LinkTime, caps: BridgeCapability::FUNCTION_CALL,
+        }));
+        reg.register_symbol("numpy_array", "python", "fn(n: int) -> object").unwrap();
+        let err = reg.call("numpy_array", &["1".to_string()]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::LanguageError);
+    }
+
+    #[test]
+    fn test_call_arg_count_mismatch_returns_e_type() {
+        let mut reg = BridgeRegistry::new();
+        reg.register(Box::new(TestBridge {
+            name: "rust".into(), level: BridgeLevel::LinkTime, caps: BridgeCapability::FUNCTION_CALL,
+        }));
+        reg.register_symbol("add", "rust", "fn(a: int, b: int) -> int").unwrap();
+        let err = reg.call("add", &["1".to_string()]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::SymbolTypeError);
+    }
+
+    #[test]
+    fn test_call_success_records_ledger() {
+        let mut reg = BridgeRegistry::new();
+        reg.register(Box::new(TestBridge {
+            name: "rust".into(), level: BridgeLevel::LinkTime, caps: BridgeCapability::FUNCTION_CALL,
+        }));
+        reg.register_symbol("add", "rust", "fn(a: int, b: int) -> int").unwrap();
+        // 无桥接实现时 resolve_call_full 返回 None → E_SYM；台账至少记录 REGISTER
+        let _ = reg.call("add", &["1".to_string(), "2".to_string()]);
+        let records = reg.ledger().records();
+        assert!(!records.is_empty());
+        assert!(records.iter().any(|r| r.event == "REGISTER" && r.lang == "rust"));
+    }
+
+    #[test]
+    fn test_ledger_path_and_report() {
+        let dir = crate::util::TempDir::new("lz-reg-ledger").unwrap();
+        let path = dir.path().join("bridge-ledger.tsv");
+        let mut reg = BridgeRegistry::new();
+        reg.set_ledger_path(&path).unwrap();
+        reg.register_symbol("hello", "rust", "fn() -> void").unwrap();
+        let report = reg.emit_bridge_report();
+        assert!(report.total >= 1);
+        assert!(report.render().contains("REGISTER"));
+        // 磁盘上存在 TSV 且可追加读取
+        assert!(path.exists());
+        let disk_records = crate::bridge::ledger::Ledger::read_path(&path);
+        assert!(!disk_records.is_empty());
+        assert_eq!(disk_records[0].event, "REGISTER");
+    }
+
+    #[test]
+    fn test_signature_param_count() {
+        assert_eq!(signature_param_count("fn(a: int, b: int) -> int"), 2);
+        assert_eq!(signature_param_count("fn() -> void"), 0);
+        assert_eq!(signature_param_count("a: int, b: int"), 2);
+        assert_eq!(signature_param_count(""), 0);
     }
 }

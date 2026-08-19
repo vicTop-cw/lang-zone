@@ -1,389 +1,473 @@
-# LZCYC — LZ → Cython 编译器
+# LZ Cython 后端完整实现计划
 
-## 项目定位
-
-`lzcyc` 是 `lzc` 的子编译器，语法完全兼容 LZ，但后端输出 **Cython (.pyx)** → 编译为 **.pyd** 二进制扩展。
-
-```
-lz source.lz ──→ lzcyc transpile ──→ source.pyx
-             ──→ lzcyc compile  ──→ source.pyd
-             ──→ lzcyc run      ──→ (编译 + 执行)
-```
+> 目标：基于 LZIR 实现一个完整的 Cython（.pyx）后端，将 `.lz` 源码通过 IR 翻译为合法 Cython 代码，
+> 对象模型一律为 PyObject，并与 PyO3 桥接层设计保持结构一致。
 
 ---
 
-## 一、项目结构
+## 〇. 现状分析
 
-```
-CY/
-├── Cargo.toml
-├── PLAN.md                      # 本文件
-│
-├── src/
-│   ├── main.rs                  # CLI 入口
-│   ├── cli.rs                   # 命令解析 (transpile/compile/run)
-│   │
-│   ├── lib.rs                   # 库根 — 5 层架构
-│   │
-│   │   # ── L1 基础层 (FROM src/ COPY) ──
-│   ├── lexer/                   # COPY: src/lexer/
-│   │   ├── mod.rs
-│   │   ├── token.rs             # Token 类型
-│   │   ├── lexer.rs             # 缩进敏感词法分析
-│   │   ├── indent.rs            # 缩进栈
-│   │   └── span.rs              # 源码位置
-│   ├── util/                    # COPY: src/util/
-│   ├── config/                  # COPY: src/config/ (简化)
-│   ├── sourcemap/               # COPY: src/sourcemap/
-│   │
-│   │   # ── L2 语法层 (FROM src/ COPY) ──
-│   ├── ast/                     # COPY: src/ast/
-│   │   ├── mod.rs
-│   │   ├── decl.rs              # Module, Function, StructDef, TraitDef, etc.
-│   │   ├── expr.rs              # Expr 枚举
-│   │   └── stmt.rs              # Stmt 枚举 + Pattern
-│   ├── parser/                  # COPY: src/parser/
-│   │   ├── mod.rs
-│   │   ├── parser.rs            # 主解析器
-│   │   ├── expr.rs              # 表达式解析
-│   │   ├── stmt.rs              # 语句解析
-│   │   └── helpers.rs           # 解析辅助
-│   ├── macros/                  # COPY: src/macros/ (简化 — 宏在 Rust 前端展开)
-│   │   ├── mod.rs
-│   │   ├── expand.rs
-│   │   ├── group.rs
-│   │   ├── import_loader.rs
-│   │   ├── interp.rs
-│   │   └── pattern.rs
-│   │
-│   │   # ── L3 语义层 (FROM src/ COPY) ──
-│   ├── types/                   # COPY: src/types/
-│   │   ├── mod.rs
-│   │   └── def.rs               # Type 枚举
-│   ├── typer/                   # COPY: src/typer/ (类型推断)
-│   ├── typing/                  # COPY: src/typing/ (类型检查)
-│   │   ├── mod.rs
-│   │   ├── bounds.rs
-│   │   ├── errors.rs
-│   │   ├── magic_bind.rs
-│   │   ├── relate.rs
-│   │   ├── traits.rs
-│   │   └── variance.rs
-│   ├── hints/                   # COPY: src/hints/ (unification)
-│   ├── scope/                   # COPY: src/scope/
-│   │   ├── mod.rs
-│   │   └── escape.rs
-│   ├── magic/                   # COPY: src/magic/
-│   │   ├── mod.rs
-│   │   └── engine.rs
-│   ├── comptime/                # COPY: src/comptime/
-│   ├── semantic.rs              # COPY: src/semantic.rs
-│   ├── strict.rs                # COPY: src/strict.rs
-│   └── cache.rs                 # COPY: src/cache.rs
-│
-│   # ── L4 Cython 代码生成层 (NEW) ──
-│   ├── codegen_cython/
-│   │   ├── mod.rs               # CythonCodeGen 结构体 + generate()
-│   │   ├── type_mapper.rs       # Type → Cython/C 类型映射表
-│   │   ├── preamble.rs          # .pyx 文件头 + import
-│   │   ├── expr_gen.rs          # gen_expr(&Expr) -> String
-│   │   ├── stmt_gen.rs          # gen_stmt(&Stmt) -> Vec<String>
-│   │   ├── decl_gen.rs          # gen_struct/gen_enum/gen_trait/gen_impl
-│   │   ├── func_gen.rs          # gen_function(&Function) -> Vec<String>
-│   │   ├── pattern_gen.rs       # pattern → if-elif 树
-│   │   ├── magic_gen.rs         # 魔法方法 → __xxx__
-│   │   ├── concurrency_gen.rs   # async/spawn/go
-│   │   └── ownership_gen.rs     # ^ 所有权模拟
-│   │
-│   └── build.rs                 # Cython .pyx → .pyd 编译管道
-│
-├── runtime/                     # Cython 运行时库 (.pxd/.pyx)
-│   ├── lz_types.pxd             # List/Dict/Set 类型声明
-│   ├── lz_types.pyx
-│   ├── lz_option.pxd            # Option/Result
-│   ├── lz_option.pyx
-│   ├── lz_pointers.pxd          # Box/Rc/Arc
-│   ├── lz_pointers.pyx
-│   ├── lz_concurrency.pxd       # Future/spawn/go
-│   ├── lz_concurrency.pyx
-│   ├── lz_iter.pxd              # Range/迭代器/生成器
-│   ├── lz_iter.pyx
-│   ├── lz_exceptions.pxd        # 异常类型
-│   └── lz_test.pxd              # 测试框架
-│
-├── DEMO/                        # (symlink or copy) 用于集成测试
-```
+### 0.1 已有基础
+
+| 文件 | 状态 | 作用 |
+|---|---|---|
+| `src/ir/codegen_cython.rs` | 骨架（468 行） | 已实现：runtime 哨兵 `_Moved`、prelude、`gen_struct`/`gen_method`/`gen_function` 骨架、部分 Stmt/Expr 映射；**大量 WIP**（enum/const/import/trait/impl/test 全是 `# xxx (WIP)`） |
+| `CY/TESTS/*.pyx` | 参考输出样例 | 50+ 份目标风格：`cdef class`/`cpdef`/`cdef public double x` 等 |
+| `src/ir/node.rs` | 完整 IR 节点（947 行） | 后端无关的 Item/Stmt/Expr/Pattern 定义 |
+| `src/ir/types.rs` | 完整 IR 类型（284 行） | `Int/F64/Str/Bool/Unit/Any/Named/Option/Result/Tuple/Fn/Ref/MutRef/Duck/Generic` |
+| `src/ir/codegen/mod.rs` | Rust 后端（8818 行） | **模式参考**：类型映射、所有权、循环 else、checker、变参注入、duck auto-impl 等全部已解决 |
+| `src/bridge/python.rs` | PyO3 桥接（428 行） | **结构参照**：`PyO3Bridge`/`PyExport`/`PyTypeExport`/`PyModuleConfig`、`generate_module`/`generate_pyclass`/`generate_pyfunction`/`generate_pymodule` |
+
+### 0.2 核心差距
+
+1. **类型系统**：当前 `map_type` 直接映射 C 类型（`int`/`double`/`str`/`bint`），**未实现"一律 PyObject" + PyO3 一致结构**
+2. **对象模型缺失**：没有 PyO3 式的 `PyObject` 包装器、引用计数、`PyResult`、`IntoPy`/`FromPyObject` 对应
+3. **Stmt/Expr 覆盖不全**：`ExprStmt`/`Defer`/`ImplicitConvert`/`MagicCall`/`Cast`/`Pipe`/`Lambda`/`Tuple`/`List`/`Dict`/`Range`/`GenExpr`/`GenBuild`/`AssignExpr`/`BlockExpr`/`YieldFrom`/`BreakLabel`/`Continue`/`BlockLabel`/`CheckerBlock`/`Pass`/`TypeAlias` 全部未生成
+4. **Item 覆盖不全**：enum/const/trait/impl/test 全是 WIP
+5. **无构建/验证管线**：CLI 和 `cmd_build` 只走 Rust，无 `lzcyc` 工具、无 `cythonize` 调用
+6. **duck/trait 运行时缺失**：Rust 端靠生成 trait+auto-impl；Cython 端需要等价机制
 
 ---
 
-## 二、复用的代码（从 `lang-zone/src/` COPY）
+## 一、设计原则：PyObject 一律 + PyO3 结构一致
 
-### 2.1 完全 COPY，**不改一行**
+### 1.1 对象模型（对齐 PyO3）
 
-| 源路径 | 目标路径 | 文件数 | 说明 |
-|--------|---------|:-----:|------|
-| `src/ast/` | `src/ast/` | 4 | Module, Expr, Stmt, Function, StructDef 等 |
-| `src/lexer/` | `src/lexer/` | 5 | Token, Lexer, Indent 栈 |
-| `src/parser/` | `src/parser/` | 5 | 递归下降解析器 |
-| `src/types/` | `src/types/` | 2 | Type 枚举 + 结构化类型 |
-| `src/typer/` | `src/typer/` | 1 | 类型推断 |
-| `src/typing/` | `src/typing/` | 8 | 类型检查 + trait 解析 |
-| `src/hints/` | `src/hints/` | 8 | Hindley-Milner 合一 |
-| `src/scope/` | `src/scope/` | 2 | 作用域分析 |
-| `src/magic/` | `src/magic/` | 2 | 魔法方法引擎 |
-| `src/comptime/` | `src/comptime/` | 1 | 编译期求值 |
-| `src/util/` | `src/util/` | 11 | 工具函数 |
-| `src/config/` | `src/config/` | 2 | 配置/路径 |
-| `src/sourcemap/` | `src/sourcemap/` | 1 | 源码映射 |
-| `src/semantic.rs` | `src/semantic.rs` | 1 | 语义校验 |
-| `src/strict.rs` | `src/strict.rs` | 1 | 严格模式 |
-| `src/cache.rs` | `src/cache.rs` | 1 | 增量编译缓存 |
-| `src/lib.rs` | `src/lib.rs` | 1 | 库入口（调整，去掉不 copy 的模块） |
+```
+PyO3 (Rust)                          Cython 后端
+─────────────                        ───────────
+#[pyclass] struct T                 cdef class T:
+    #[pyo3(get, set)] x: f64          cdef public object x
+#[pymethods] impl T                 # 方法直接写在 cdef class 内
+#[pyfunction] fn f(...) -> R        cpdef object f(...):
+#[pymodule] fn mod_py(...)          # module 级 __all__ + 顶层函数
+wrap_pyfunction!(f, m)?             # 无需包装，Cython 原生导出
+m.add_class::<T>()?                 # cdef class 自动注册
+PyResult<T>                         → 用 try/except 或返回 None 表错误
+PyObject                            object
+```
 
-**共 ~56 个文件**，COPY 后不改任何逻辑，只调整 `lib.rs` 中的 `mod` 声明（去掉 `codegen/` `bridge/` `export/` `simd/`）。
+### 1.2 类型映射表（核心决策）
 
-### 2.2 不 COPY
+| IrType | Cython 类型 | 说明 |
+|---|---|---|
+| `Int` | `Py_ssize_t` / `object` | 标量位置用 `Py_ssize_t`（如函数参），泛型/容器内用 `object` |
+| `F64` | `double` / `object` | 同上 |
+| `Str` | `str` | Cython `str` = Python `str` |
+| `Bool` | `bint` | Cython bool |
+| `Unit` | `void` / 不写 | 函数返回 |
+| `Never` | `void` | 永不返回 |
+| `Any` | `object` | 未确定类型 |
+| `Self_` | `<当前 cdef class 名>` | 方法返回 self 类型 |
+| `Ext` | `object` | 外部句柄 → 不透明 PyObject |
+| `Named("List", [T])` | `list` | Python list（元素 object） |
+| `Named("Dict", [K,V])` | `dict` | Python dict |
+| `Named("Set", [T])` | `set` | Python set |
+| `Named("Option", [T])` | `object` | `None` = Some/None 统一用 object+None |
+| `Named("Result", [O,E])` | `object` | 用异常传播或 None 表错 |
+| `Named("Tuple", [...])` | `tuple` | Python tuple |
+| `Named("Box"/"Rc"/"Arc", [T])` | `object` | 智能指针降级为 PyObject |
+| `Named(自定义 struct, [])` | `cdef class 名` | 引用同名 cdef class |
+| `Named(自定义 enum, [])` | `object` / `int` | 见 §1.4 |
+| `Named("Future", [T])` | `object` | 异步句柄 |
+| `Fn { params, ret }` | `object` | 闭包/函数对象 → Python callable |
+| `Ref(T)` / `MutRef(T)` | `object` | Cython 无原生引用 → PyObject |
+| `Duck { fields }` | `object` | duck 约束是编译期检查，运行时为 PyObject |
+| `Generic(name)` | `object` | 泛型参数在运行时擦除 |
 
-| 模块 | 原因 |
-|------|------|
-| `src/codegen/` | 替换为 `codegen_cython/` |
-| `src/bridge/` | Cython 后端用 Python `import`，不需要 Rust FFI 桥接 |
-| `src/export/` | Rust DLL/SO 导出，不需要 |
-| `src/simd/` | SIMD 向量，第一阶段暂不支持 |
-| `src/runtime/` | Rust 运行时 shim，替换为 Cython `.pxd` |
-| `src/main.rs` | 替换为 `lzcyc` CLI |
+**关键规则**：
+- **函数签名**（参数/返回值）优先使用 C 类型标注（`Py_ssize_t`/`double`/`str`/`bint`/`void`）以获得性能，但内部一律可按 `object` 处理
+- **容器/泛型位置**一律用 `object`（PyObject）
+- **所有 cdef class 的字段**：`cdef public object xxx`（PyObject 句柄），若字段是标量且确定类型可用 `cdef public double xxx`
+- **跨 cdef class 引用**：直接持有 `cdef class` 名（Cython 自动管理 PyObject 引用）
+
+### 1.3 Struct → cdef class（对齐 PyO3 `#[pyclass]` + `#[pymethods]`）
+
+```cython
+# LZ:
+# struct Point:
+#     x: f64
+#     y: f64
+#     def area(self) -> f64 = self.x * self.y
+
+# 生成:
+cdef class Point:
+    cdef public double x
+    cdef public double y
+    def __init__(self, double x, double y):
+        self.x = x
+        self.y = y
+    cpdef double area(self):
+        return self.x * self.y
+```
+
+- `cpdef`：既可从 Python 调用也可从 Cython 调用（对齐 PyO3 双重访问）
+- `cdef public`：字段 Python 可读可写（对齐 `#[pyo3(get, set)]`）
+- `__init__` 对齐 PyO3 `#[new]`
+- 方法对齐 PyO3 `#[pymethods]`
+
+### 1.4 Enum → 类层次（对齐 PyO3 `#[pyclass]` enum 或 `IntEnum`）
+
+**决策**：用 `cdef class` 层次 + 类属性，**不用** Cython `cdef enum`（后者不可扩展方法）：
+
+```cython
+# LZ:
+# enum Shape:
+#     Circle(r: f64)
+#     Rect(w: f64, h: f64)
+
+# 生成:
+class Shape:
+    pass
+class Circle(Shape):
+    cdef public double r
+    def __init__(self, double r): self.r = r
+class Rect(Shape):
+    cdef public double w
+    cdef public double h
+    def __init__(self, double w, double h): self.w = w; self.h = h
+```
+
+若 enum 是 C-style 无数据，可退化为 `int` 常量。
+
+### 1.5 Trait/Impl → 抽象基类 + 鸭子方法
+
+Cython 无 trait，**编译期 duck 检查已在 `duck_check.rs` 完成**，运行时：
+- `TraitDef` → 不生成独立运行时结构（或生成空 `class` 作标记）
+- `Impl` → 方法注入到目标 `cdef class` 的 `#[pymethods]` 风格方法列表
+- **duck auto-impl**（Rust 端生成 trait 委托）→ Cython 端：在 `cdef class` 内生成同名方法委托到具体类型的方法
+
+### 1.6 错误处理（对齐 PyO3 `PyResult`）
+
+| LZ 错误语义 | Cython 实现 |
+|---|---|
+| `raise E` | `raise E`（原生） |
+| `Result[T,E]` 返回 | 成功返回值，失败 `raise` 对应异常 |
+| `Option[T]` | `None` = 无值，非 `None` = 有值 |
+| `try/catch` | Cython `try/except/else/finally` |
 
 ---
 
-## 三、新写的代码
+## 二、架构设计
 
-### 3.1 `codegen_cython/` — Cython 代码生成器（~3000 行）
+### 2.1 文件结构
 
-核心思路：**Visitor 模式**，与现有 `codegen/` 相同的 trait 设计，但输出 `.pyx` 文本。
+```
+src/ir/codegen_cython.rs          ← 主生成器（重构扩展）
+src/bridge/python.rs              ← 已存在，Cython 后端复取其 PyExport/PyTypeExport 结构
+src/cli.rs                        ← 新增 --backend=cython 路由
+src/ir/codegen_cython/
+    mod.rs                        ← CythonCodeGen 主结构
+    type_map.rs                   ← IrType → Cython 类型映射
+    runtime.rs                    ← 运行时 prelude 生成（_Moved 哨兵等）
+    struct_gen.rs                 ← StructDef → cdef class
+    enum_gen.rs                   ← EnumDef → 类层次
+    func_gen.rs                   ← FnDef → cpdef/cdef
+    trait_impl_gen.rs             ← Trait/Impl/duck auto-impl
+    stmt_gen.rs                   ← Stmt 生成
+    expr_gen.rs                   ← Expr 生成
+    pattern_gen.rs                ← Pattern 生成
+CY/scripts/cython_build.py        ← 已有，.pyx → .c → .pyd
+CY/scripts/lzcyc                  ← 新增：LZ→Cython 命令行工具（或集成到 lang-zone.exe --backend=cython）
+tests/cython_tests/               ← 新增：Cython 后端测试套件
+```
+
+### 2.2 主生成器 `CythonCodeGen` 状态（对齐 Rust `CodeGen` 的精简子集）
 
 ```rust
-// mod.rs — 核心结构体
 pub struct CythonCodeGen {
-    // 状态
     indent: usize,
-    output: Vec<String>,
-    type_mapper: TypeMapper,
-    struct_defs: HashMap<String, StructDef>,
-    enum_defs: HashMap<String, EnumDef>,
-    local_vars: HashMap<String, String>,   // 变量名 → Cython 类型
-    module: Module,
-    // 运行时依赖跟踪
-    needs_threading: bool,
-    needs_asyncio: bool,
-    needs_weakref: bool,
-    needs_lz_runtime: bool,
+    buf: String,
+    // 上下文
+    current_fn_ret_ty: Option<IrType>,
+    in_cdef_class: bool,           // 是否在 cdef class 体内
+    current_class_name: Option<String>,
+    known_types: HashSet<String>,  // 所有用户自定义类型
+    cdef_classes: HashSet<String>, // cdef class 名集合
+    // 所有权（沿用 Rust 端分析）
+    moved_values: HashSet<String>,
+    // duck 自动 impl 缓冲
+    duck_auto_impls: Vec<String>,
 }
 ```
 
-**类型映射表** (TypeMapper)：
+### 2.3 管线流程
 
 ```
-LZ Type  →  Cython (cpdef)    C (cdef)
-─────────────────────────────────────────
-Int       →  int (Python)     Py_ssize_t / int
-F64       →  float            double
-Str       →  str              str / object
-Bool      →  bool             bint
-Unit      →  None             void
-Never     →  NoReturn         void
-List<T>   →  list / object    object
-Dict<K,V> →  dict             object
-Set<T>    →  set              object
-Option<T> →  object           object (None 哨兵)
-Result<T,E> → object          object (Ok/Err 哨兵)
-Box<T>    →  object           void*
-```
-
-### 3.2 CLI (`cli.rs` + `main.rs`) — ~400 行
-
-参考 cypyc 的命令设计：
-
-```
-lzcyc transpile input.lz          # 生成 .pyx
-lzcyc compile  input.lz           # 生成 .pyd（调用 cythonize + C 编译器）
-lzcyc run     input.lz [func]     # 编译 + 运行
-lzcyc watch   ./src               # 热重载开发（后续）
-```
-
-### 3.3 运行时库 (`runtime/*.pxd/.pyx`) — ~1000 行
-
-在 Cython 层面实现 LZ 标准类型：
-
-| 文件 | 内容 |
-|------|------|
-| `lz_types.pxd/pyx` | `L2List`(Python list + 类型守卫)、`L2Dict`、`L2Set` |
-| `lz_option.pxd/pyx` | `L2Option` (Some/None 双态)、`L2Result` (Ok/Err) |
-| `lz_pointers.pxd/pyx` | `L2Box` (独占)、`L2Rc` (引用计数)、`L2Arc` (原子 RC) |
-| `lz_concurrency.pxd/pyx` | `L2Future`、`spawn`(threading)、`go`(asyncio) |
-| `lz_iter.pxd/pyx` | `L2Range`、生成器包装 |
-| `lz_exceptions.pxd/pyx` | `L2Exception` 层次、`panic()` 实现 |
-
-### 3.4 构建脚本 (`build.rs`) — ~200 行
-
-调用 Cython 的工具链完成编译：
-
-```rust
-// 调用 cythonize 将 .pyx → .c
-// 调用 GCC/MSVC 将 .c → .pyd
-// 支持 --debug 和 --release
+.lz 源码
+  │
+  ▼
+Lexer → Parser → AST（不变）
+  │
+  ▼
+build_ir(ast_module) → IrModule（不变）
+  │
+  ├─ check_duck_satisfaction(...)  ← 编译期结构匹配检查（不变）
+  │
+  ▼
+CythonCodeGen::generate(module) → String（.pyx 源码）
+  │
+  ▼
+写盘 file.pyx
+  │
+  ▼
+cythonize(.pyx) → .c → 编译 → .pyd/.so（CY/scripts/cython_build.py 扩展）
 ```
 
 ---
 
-## 四、阶段实施计划
+## 三、实施阶段（子阶段划分）
 
-### Phase 0：项目骨架 + COPY 代码（1 天）
+### 阶段 A：类型映射与运行时基础（~8 小阶段）
 
-| # | 任务 |
-|:-:|------|
-| 0.1 | 初始化 `CY/Cargo.toml`（依赖: 同 `lang-zone/Cargo.toml` — 零外部依赖） |
-| 0.2 | COPY `ast/` `lexer/` `parser/` `types/` `typer/` `typing/` `hints/` `scope/` `magic/` `comptime/` `util/` `config/` `sourcemap/` 到 `CY/src/` |
-| 0.3 | COPY `semantic.rs` `strict.rs` `cache.rs` |
-| 0.4 | 编写 `lib.rs`（声明所有 COPY 模块，去掉 `codegen` `bridge` `export` `simd` `runtime`） |
-| 0.5 | `cargo check` 通过 — 验证 COPY 代码编译无误 |
+**A1** — 重写 `map_type`：实现 §1.2 完整映射表，处理 `Named`/`Option`/`Result`/`Tuple`/`Fn`/`Ref`/`MutRef`/`Generic`/`Duck`/`Ext`/`Future`
 
-### Phase 1：CLI + 代码生成器骨架（1 天）
+**A2** — 实现 `map_type_with_context`：区分"函数签名位置"（用 C 类型）vs "容器/泛型位置"（用 object）
 
-| # | 任务 |
-|:-:|------|
-| 1.1 | `cli.rs` — `lzcyc {transpile,compile,run}` 参数解析 |
-| 1.2 | `main.rs` — 入口 + 子命令路由 |
-| 1.3 | `codegen_cython/mod.rs` — `CythonCodeGen` 结构体 + `generate(&Module) -> String` |
-| 1.4 | `codegen_cython/type_mapper.rs` — 类型映射表 |
-| 1.5 | `codegen_cython/preamble.rs` — `.pyx` 头 (cython directives + imports) |
+**A3** — 运行时 prelude 扩展：完善 `_Moved`/`_MovedCheck`，增加 `import cython`、`from cpython.ref cimport PyObject`（可选）、标准容器导入
 
-**验证**：`lzcyc transpile hello.lz` 生成合法的 `.pyx` 文件头
+**A4** — 实现 `__name__`/`__file__`/`__all__` 模块魔法（骨架已有，完善）
 
-### Phase 2：表达式生成（2 天）
+**A5** — 实现常量生成 `gen_const`：`cdef object NAME = value` 或 `ctypedef` 风格
 
-| # | 任务 |
-|:-:|------|
-| 2.1 | `expr_gen.rs` — 字面量 (int/float/str/bool/None/List/Dict/Set/Tuple) |
-| 2.2 | `expr_gen.rs` — Ident + 二元运算 + 一元运算 + 复合赋值 |
-| 2.3 | `expr_gen.rs` — 函数调用 + 方法调用 + 字段访问 + 索引 |
-| 2.4 | `expr_gen.rs` — 管道 `|>` + 海象 `:=` + 安全导航 `?.` + 空值合并 `??` + 错误传播 `?` |
-| 2.5 | `expr_gen.rs` — f-string + 三元 `a if b else c` |
-| 2.6 | `expr_gen.rs` — 列表/字典/集合推导式 |
-| 2.7 | `expr_gen.rs` — 闭包 + `if`/`match` 表达式 |
+**A6** — 实现类型别名 `gen_type_alias`：`ctypedef object MyAlias` 或注释
 
-**验证**：`05_expressions/operators.lz` → 正确 `.pyx`
+**A7** — 实现 import 生成 `gen_import`：`import xxx` / `from xxx import yyy`
 
-### Phase 3：语句生成（2 天）
+**A8** — 测试：primitives/const/type_alias/import 四类单文件
 
-| # | 任务 |
-|:-:|------|
-| 3.1 | `stmt_gen.rs` — let/var 绑定 (const/let/默认可变) |
-| 3.2 | `stmt_gen.rs` — if/elif/else + for + while + loop |
-| 3.3 | `stmt_gen.rs` — break/continue (含带值) + return + pass |
-| 3.4 | `stmt_gen.rs` — with + defer |
-| 3.5 | `stmt_gen.rs` — guard + guard let |
-| 3.6 | `stmt_gen.rs` — try/catch/finally + raise + `?` 展开 |
+### 阶段 B：结构体与枚举（~10 小阶段）
 
-**验证**：`06_control_flow/*.lz` + `10_error_handling/*.lz` → 正确 `.pyx`
+**B1** — 重写 `gen_struct`：`cdef class` + `cdef public` 字段 + `__init__` + `cpdef`/`cdef` 方法
 
-### Phase 4：声明生成（2 天）
+**B2** — 实现 `gen_struct` 的 `has_new`/`__new__` 魔术构造（对齐 Rust 端 `__lz_new`）
 
-| # | 任务 |
-|:-:|------|
-| 4.1 | `decl_gen.rs` — struct → `cdef class` 含字段 + `__init__` 关键字构造 |
-| 4.2 | `decl_gen.rs` — struct 方法 (self/mut self) |
-| 4.3 | `decl_gen.rs` — enum 无字段变体 → `cdef class` + int 常量 |
-| 4.4 | `decl_gen.rs` — enum 带字段变体 → `cdef class` + 联合 |
-| 4.5 | `decl_gen.rs` — trait → Python ABC / `cdef class` 虚方法 |
-| 4.6 | `decl_gen.rs` — impl → 目标类型上生成方法 |
-| 4.7 | `decl_gen.rs` — type alias → `ctypedef` / 注释 |
-| 4.8 | `func_gen.rs` — 函数定义 (cpdef/def) + 泛型单态化 + 默认参数 + ref 参数 |
+**B3** — 实现 struct `implicit_froms` 隐式转换 → `__init__` 多态或转换方法
 
-**验证**：`07_data_structures/*.lz` + `04_functions/*.lz`
+**B4** — 实现 struct 泛型：`cdef class Box2[T]` → 退化为 `cdef class Box2` + 字段 `object`（运行时擦除）
 
-### Phase 5：模式匹配 + 魔法方法（2 天）
+**B5** — 实现 `gen_enum`：类层次方案（§1.4），含字段变体
 
-| # | 任务 |
-|:-:|------|
-| 5.1 | `pattern_gen.rs` — match/case 展开为 if-elif 树 |
-| 5.2 | `pattern_gen.rs` — 字面量/变量/变体/元组/通配符模式 |
-| 5.3 | `pattern_gen.rs` — 嵌套模式 + OR 模式 |
-| 5.4 | `magic_gen.rs` — 算术魔法方法 `__add__`~`__pow__` |
-| 5.5 | `magic_gen.rs` — 比较 + 哈希 + 字符串 + 迭代器魔法 |
-| 5.6 | `magic_gen.rs` — 上下文管理器 `__enter__`/`__exit__` |
-| 5.7 | `magic_gen.rs` — 模块级 magic 块 |
+**B6** — 实现 enum 方法：注入到基类或每个变体类
 
-**验证**：match demo + magic_methods.lz
+**B7** — 实现 enum 泛型（运行时擦除）
 
-### Phase 6：所有权模拟 + 并发（2 天）
+**B8** — struct/enum 交叉引用处理（`known_types` 预收集）
 
-| # | 任务 |
-|:-:|------|
-| 6.1 | `ownership_gen.rs` — `^` 编译期标注 + 运行时 sentinel 检测 |
-| 6.2 | `ownership_gen.rs` — `owned` 参数修饰符 → 传值 + 标记 |
-| 6.3 | `concurrency_gen.rs` — `async def` → `async def` |
-| 6.4 | `concurrency_gen.rs` — `await` → `await` |
-| 6.5 | `concurrency_gen.rs` — `spawn` → `threading.Thread` |
-| 6.6 | `concurrency_gen.rs` — `go` → `asyncio.create_task` |
+**B9** — 测试：struct/struct_methods/generic_struct/enum/enum_data
 
-**验证**：`03_variables/ownership.lz` + `11_concurrency/async_spawn.lz`
+**B10** — 测试：enum_multi/impl_demo/mut_self
 
-### Phase 7：运行时库（2 天）
+### 阶段 C：函数与 Item 完整覆盖（~12 小阶段）
 
-| # | 任务 |
-|:-:|------|
-| 7.1 | `runtime/lz_types.pxd/pyx` — L2List/L2Dict/L2Set |
-| 7.2 | `runtime/lz_option.pxd/pyx` — L2Option/L2Result |
-| 7.3 | `runtime/lz_pointers.pxd/pyx` — L2Box/L2Rc/L2Arc |
-| 7.4 | `runtime/lz_concurrency.pxd/pyx` — L2Future/spawn/go |
-| 7.5 | `runtime/lz_exceptions.pxd/pyx` — Exception 层次 + panic |
-| 7.6 | build.rs — .pyx → .c → .pyd 编译管道 |
+**C1** — 重写 `gen_function`：正确处理 `cpdef`/`cdef`/`def` 选择策略、返回类型、参数类型映射
 
-**验证**：`lzcyc compile xxx.lz` → import xxx 可用
+**C2** — 实现函数泛型（运行时擦除，泛型参数 → object）
 
-### Phase 8：集成测试（2 天）
+**C3** — 实现函数 where 约束（编译期检查，运行时忽略，生成注释）
 
-| # | 任务 |
-|:-:|------|
-| 8.1 | 对每份 `DEMO/*.lz` 运行 `lzcyc transpile`，比对 .pyx 快照 |
-| 8.2 | 对可运行 DEMO 运行 `lzcyc run`，验证输出 |
-| 8.3 | 错误测试：预期编译错误的 .lz 验证错误消息 |
-| 8.4 | 所有权运行时测试：`^` 场景行为验证 |
+**C4** — 实现变参函数：`..: Tuple<T>` → `*args`，`..: Dict<K,V>` → `**kwargs`（对齐 `03d-可变参数.md`）
+
+**C5** — 实现变参调用点自动打包
+
+**C6** — 实现 `gen_trait`：生成空 `class TraitName: pass` 作标记 + 方法签名注释
+
+**C7** — 实现 `gen_impl`：方法注入到目标 cdef class
+
+**C8** — 实现 duck auto-impl：在 cdef class 内生成委托方法
+
+**C9** — 实现 checker 块：`def NAME(ps): ...`（对齐 Rust 端 `__Params`）
+
+**C10** — 实现 `gen_test`：`def test_NAME(): ...` + pytest 风格
+
+**C11** — 处理函数重载（mangling）：Cython 不支持重载 → 生成 `_name__0`/`_name__1` + 分发器
+
+**C12** — 测试：functions/basic/generics/overload/variadic/checker
+
+### 阶段 D：语句完整覆盖（~12 小阶段）
+
+**D1** — 补全 `Stmt::Let`：正确处理 `is_mut`/`is_ref`/类型标注、`# type:` 注释
+
+**D2** — 补全 `Stmt::Assign`/`Stmt::Return`/`Stmt::ExprStmt`
+
+**D3** — 补全 `Stmt::If`/`Stmt::For`/`Stmt::While`（含 `guard`、`else_body`）
+
+**D4** — 实现 `Stmt::WhileLet`
+
+**D5** — 实现 `Stmt::Match`：`if/elif` 链 + 模式解构（`Pattern` → 赋值+条件）
+
+**D6** — 实现 `Stmt::Raise`/`Stmt::Assert`/`Stmt::Yield`/`Stmt::YieldFrom`
+
+**D7** — 实现 `Stmt::Break`/`Stmt::Continue`/`Stmt::BreakLabel`/`Stmt::BlockLabel`
+
+**D8** — 实现 `Stmt::Defer`：`try/finally` 包装
+
+**D9** — 实现 `Stmt::TryCatch`：`try/except/else/finally` + 模式匹配 except
+
+**D10** — 实现 `Stmt::Block`（裸块）/`Stmt::Pass`/`Stmt::TypeAlias`
+
+**D11** — 实现 `Stmt::CheckerBlock`：生成 checker 函数
+
+**D12** — 测试：控制流全套（if/for/while/match/break/continue/try_catch/defer）
+
+### 阶段 E：表达式完整覆盖（~14 小阶段）
+
+**E1** — 补全 `ExprKind::Lit`：全部 LitKind（Int/F64/Str/FStr/Bool/Unit/None_）
+
+**E2** — 补全 `ExprKind::Var`/`ExprKind::Call`/`ExprKind::MethodCall`
+
+**E3** — 补全 `ExprKind::FieldAccess`/`ExprKind::IndexGet`/`ExprKind::IndexSet`
+
+**E4** — 补全 `ExprKind::BinOp`/`ExprKind::UnOp`（含比较、位运算、逻辑）
+
+**E5** — 实现 `ExprKind::IfExpr`（三元）
+
+**E6** — 实现 `ExprKind::Lambda`：`lambda args: body`
+
+**E7** — 实现 `ExprKind::StructCtor`：`Name(k=v, ...)` 关键字构造
+
+**E8** — 实现 `ExprKind::EnumCtor`：`Enum.Variant(args)`
+
+**E9** — 实现 `ExprKind::Cast`：`target(expr)` 显式转换
+
+**E10** — 实现 `ExprKind::MagicCall`：`__getitem__`→`[ ]`、`__str__`→`str()`、`__len__`→`len()`、`__iter__`/`__next__` 等
+
+**E11** — 实现 `ExprKind::BlockExpr`：`(...)` 内联或立即执行
+
+**E12** — 实现 `ExprKind::TupleLit`/`ListLit`/`Dict`/`Range`
+
+**E13** — 实现 `ExprKind::Pipe`：`x |> f(args)` → `f(args, x)` 或 `x.f(args)`
+
+**E14** — 实现 `ExprKind::ImplicitConvert`/`ExprKind::AssignExpr`/`ExprKind::GenExpr`/`ExprKind::GenBuild`/`ExprKind::Paren`
+
+### 阶段 F：Pattern 匹配（~6 小阶段）
+
+**F1** — 实现 `Pattern::Wildcard`/`Pattern::Binding`/`Pattern::Literal`
+
+**F2** — 实现 `Pattern::Tuple`/`Pattern::Struct` 解构
+
+**F3** — 实现 `Pattern::Enum` 解构
+
+**F4** — 实现 `Pattern::List`（`[a, b, ..rest]`）
+
+**F5** — 实现 `Pattern::Or`/`Pattern::Guard`/`Pattern::Range`
+
+**F6** — 测试：match_demo/match_patterns/enum_data
+
+### 阶段 G：构建管线与 CLI（~10 小阶段）
+
+**G1** — 扩展 `cli.rs`：`--backend=cython` / `--emit=cython` 标志
+
+**G2** — 实现 `cmd_build` Cython 分支：`.lz → .pyx → cythonize → .pyd`
+
+**G3** — 创建 `CY/scripts/lzcyc`（独立 CLI）或集成到 `lang-zone.exe --backend=cython`
+
+**G4** — 扩展 `CY/scripts/cython_build.py`：支持多文件、自动 `setup.py` 生成、`--inplace`
+
+**G5** — 实现 `cmd_check` Cython 模式：build_ir + duck_check（不生成代码）
+
+**G6** — 实现增量编译：`.lzcache_incr/` 缓存 .pyx 哈希
+
+**G7** — 集成 `CY/TESTS` 批量构建：脚本遍历全部参考 .pyx 验证可 cythonize
+
+**G8** — 错误位置回溯：lexer/parser 错误映射到 `.lz` 行列（复用现有）
+
+**G9** — 测试：端到端 `lz build --backend=cython` 在 3 个 DEMO 项目
+
+**G10** — 文档：`CY/README.md` + `--help` 更新
+
+### 阶段 H：DEMO 覆盖与测试基线（~15 小阶段）
+
+**H1–H5** — 跑通 `DEMO/01_basics` → `DEMO/04_functions`（波兰表示法全集）
+
+**H6–H10** — 跑通 `DEMO/05_expressions` → `DEMO/09_oop`（含 duck_demo/duck_relation/duck_assoc/duck_multigen/duck_nested）
+
+**H11–H13** — 跑通 `DEMO/10_error_handling` / `DEMO/11_concurrency` / `DEMO/12_build_blocks`
+
+**H14–H15** — 跑通 `DEMO/13_macros`（降级为 Str）/ `DEMO/14_pointers`（Box/Rc/Arc → object）/ `DEMO/16_testing`
+
+### 阶段 I：高级特性与打磨（~12 小阶段）
+
+**I1** — 所有权与 move 语义：`_Moved` 哨兵注入、borrow 检查（轻量级）
+
+**I2** — 魔法方法全套（`__eq__`/`__lt__`/`__str__`/`__repr__`/`__hash__`/`__call__`/`__enter__`/`__exit__`）
+
+**I3** — 生成器/`yield`：Python 原生 generator（`yield` 直接可用）
+
+**I4** — 异步/`async`：Cython + `asyncio` 或退化为同步
+
+**I5** — 构建块（`=:`/`~:`/`*:`/`^:`）：闭包 + 立即执行
+
+**I6** — checker 块完整：`__Params` 模拟 + default_checker 链
+
+**I7** — 编译期求值 `comptime`：`__lz_comptime` 调用
+
+**I8** — 装饰器（`@memoize`/`@parallel`/`@export`/`@extern`）：Cython 兼容实现
+
+**I9** — 严格模式 `strict` 与 `no_std` 支持
+
+**I10** — 性能关键路径：`cdef` 局部变量类型推断（标量提升）
+
+**I11** — LSP/热重载对 Cython 后端的支持（`--backend=cython`）
+
+**I12** — 测试套件扩充到 100+ 端到端用例
 
 ---
 
-## 五、关键设计决策
+## 四、验证铁律（沿用项目既有规范）
 
-| 决策 | 方案 |
-|:----:|------|
-| **所有权** | 编译期数据流分析 + 运行时 `_MovedSentinel` 哨兵。`^` 后变量标记为移动，访问时报错 |
-| **泛型** | 单态化 (monomorphization)，在 Rust 前端展开为具体类型再生成 Cython |
-| **match** | 展开为 `isinstance()` / 值比较的 if-elif 链 |
-| **trait** | 简化为 Python ABC（`abc.ABC` + `@abstractmethod`），不做完整虚表 |
-| **import** | 直接映射为 Python `import`，运行时路径依托 Python 模块系统 |
-| **`.pyx` vs `.py`** | 始终输出 `.pyx`，利用 Cython 静态类型优化；纯 Python 回退暂不支持 |
-| **构建** | `build.rs` 中调用 `cythonize` CLI 完成 `.pyx→.c→.pyd` |
+> **生成的 `.pyx` 必须能过 `cythonize` 编译且运行正确，才算完成。**
+
+具体验证层级：
+1. **语法层**：`cythonize(file.pyx)` 无 error（生成 .c）
+2. **编译层**：`.c` → `.pyd` 通过 C 编译器
+3. **运行层**：`import mod; mod.main()` 输出与 Rust 后端一致
+4. **行为层**：错误处理、所有权哨兵、duck 约束在运行期正确
 
 ---
 
-## 六、与 `cypyc` 架构对照
+## 五、关键风险与缓解
 
-```
-cypyc (Python)            lzcyc (Rust)
-─────────────────         ─────────────────
-cypyc/cli.py              src/cli.rs + src/main.rs
-cypyc/parser/lexer.py     src/lexer/    (COPY)
-cypyc/parser/parser.py    src/parser/  (COPY)
-cypyc/analyzer/*.py       src/typer/ + src/typing/ + src/scope/ (COPY)
-cypyc/codegen/            src/codegen_cython/  (NEW)
-  cython_generator.py       expr_gen.rs + stmt_gen.rs + ...
-  type_mapper.py            type_mapper.rs
-  bridge_generator.py       (跳过 — 不需要桥接)
-  setup_generator.py        build.rs (替代)
-runtime/*.pyx              runtime/*.pxd/.pyx (NEW)
-```
+| 风险 | 缓解 |
+|---|---|
+| Cython 无原生引用（`&T`/`&mut T`） | 一律 PyObject，放弃引用语义；所有权靠 `_Moved` 哨兵运行时检查 |
+| Cython 无 trait | duck 检查在编译期完成；运行时 trait 对象用 `object` + 鸭子方法 |
+| Cython 无函数重载 | 自动 mangling + 分发器（与 Rust 端策略一致） |
+| 性能 vs PyObject 一律 | 标量位置（函数参/返回/局部）用 C 类型标注，容器/泛型用 object；两全 |
+| 变参 `..` 语义 | 单 `..`→`*args`(object)，`..: Tuple<T>`→`*args`，`..: Dict<K,V>`→`**kwargs` |
+| 构建管线复杂度 | 复用 `CY/scripts/cython_build.py`，增量扩展 |
 
-**关键差异**：
-- `lzcyc` 用 Rust 做前端（复用现有 LZ 编译器），`cypyc` 用 Python 做前端
-- `lzcyc` 语法 = LZ 语法（缩进敏感 + 类型后置），`cypyc` 语法 = Python 子集
-- `lzcyc` 所有权模拟是独有特性（cypyc 没有 `^` / `owned`）
+---
+
+## 六、建议优先级
+
+按 **A → B → C → D → E → F → G → H → I** 顺序推进，每阶段 6–15 小阶段。理由：
+
+1. **类型映射（A）** 是一切的地基，先做扎实
+2. **结构体/枚举（B）** 是 PyO3 结构对齐的核心，验证"PyObject 一律"策略
+3. **函数（C）** + **语句（D）** + **表达式（E）** 是覆盖面的主体
+4. **Pattern（F）** 依赖 D 完成
+5. **构建管线（G）** 早于大规模 DEMO 验证
+6. **DEMO 覆盖（H）** 是回归基线
+7. **高级特性（I）** 最后打磨
+
+---
+
+## 七、子阶段统计
+
+| 阶段 | 小阶段数 | 核心产出 |
+|---|---|---|
+| A 类型映射与运行时 | 8 | 完整类型映射 + prelude |
+| B 结构体与枚举 | 10 | cdef class + 类层次 enum |
+| C 函数与 Item | 12 | cpdef/cdef + trait/impl/duck |
+| D 语句覆盖 | 12 | 全部 Stmt 变体 |
+| E 表达式覆盖 | 14 | 全部 ExprKind 变体 |
+| F Pattern 匹配 | 6 | 全部 Pattern 变体 |
+| G 构建管线与 CLI | 10 | lzcyc + cythonize 集成 |
+| H DEMO 覆盖 | 15 | 278 个 DEMO 跑通 |
+| I 高级特性 | 12 | 魔法方法/异步/构建块等 |
+| **合计** | **~99** | **完整 Cython 后端** |
+
+---
+
+*文档版本：v1.0 | 创建：2026-08-19 | 关联：src/ir/codegen_cython.rs / CY/TESTS / src/bridge/python.rs*

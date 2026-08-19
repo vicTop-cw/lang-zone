@@ -1,0 +1,50 @@
+{
+  "op": "cy_type_map",
+  "version": "1.0",
+  "definition": {
+    "signature": "map_type(ty: IrType, ctx: TypeCtx) -> String",
+    "note": "IrType → Cython 类型映射：函数签名位置优先 C 类型（性能），容器/泛型位置一律 object（PyObject）。对齐 PyO3 一律 PyObject 结构。"
+  },
+  "preconditions": [
+    "ty 必须是合法的 IrType 变体",
+    "ctx 区分 signature（函数参/返回）vs container（容器元素）vs generic（泛型参数）"
+  ],
+  "laws": ["L1", "L2"],
+  "tests": [
+    {"input": {"ty": "Int", "ctx": "signature"}, "expected": "Py_ssize_t"},
+    {"input": {"ty": "Int", "ctx": "container"}, "expected": "object"},
+    {"input": {"ty": "F64", "ctx": "signature"}, "expected": "double"},
+    {"input": {"ty": "F64", "ctx": "container"}, "expected": "object"},
+    {"input": {"ty": "Str", "ctx": "signature"}, "expected": "str"},
+    {"input": {"ty": "Str", "ctx": "container"}, "expected": "str"},
+    {"input": {"ty": "Bool", "ctx": "signature"}, "expected": "bint"},
+    {"input": {"ty": "Bool", "ctx": "container"}, "expected": "bint"},
+    {"input": {"ty": "Unit", "ctx": "signature"}, "expected": "void"},
+    {"input": {"ty": "Never", "ctx": "signature"}, "expected": "void"},
+    {"input": {"ty": "Any", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Any", "ctx": "container"}, "expected": "object"},
+    {"input": {"ty": "Ext", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Duck{}", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Generic('T')", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Ref(Int)", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "MutRef(Int)", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('List',[Int])", "ctx": "signature"}, "expected": "list"},
+    {"input": {"ty": "Named('Dict',[Str,Int])", "ctx": "signature"}, "expected": "dict"},
+    {"input": {"ty": "Named('Set',[Int])", "ctx": "signature"}, "expected": "set"},
+    {"input": {"ty": "Named('Option',[Int])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('Result',[Int,Str])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('Tuple',[Int,F64])", "ctx": "signature"}, "expected": "tuple"},
+    {"input": {"ty": "Named('Box',[Int])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('Rc',[Int])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('Arc',[Int])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('Future',[Int])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Named('Point',[])", "ctx": "signature"}, "expected": "Point"},
+    {"input": {"ty": "Named('IOError',[])", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Fn{[Int],Int}", "ctx": "signature"}, "expected": "object"},
+    {"input": {"ty": "Self_", "ctx": "signature"}, "expected": "<current_class>"},
+    {"input": {"ty": "Named('List',[Int])", "ctx": "container"}, "expected": "object"},
+    {"input": {"ty": "Named('Point',[])", "ctx": "container"}, "expected": "object"},
+    {"input": {"ty": "Named('List',[Int])", "ctx": "generic"}, "expected": "object"}
+  ],
+  "fingerprint": "fnv1a64:cy_type_map_v1"
+}

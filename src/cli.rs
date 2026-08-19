@@ -41,6 +41,7 @@ pub fn print_help() {
          \x20 peek   <target>   Show tokens/AST/IR of a file (target: <file.lz> or ir:<file.lz>)\n\
          \x20 check  [dir]      Type-check the project without emitting code\n\
          \x20 push   [--dry-run]  Publish to local registry (see push --help)\n\
+         \x20 emit-bridge-report <tsv>  Audit bridge ledger (bridge-ledger.tsv, G5)\n\
          \n\
          Flags (single-file mode): --tokens --ast --emit=... --project --test --std-dir <path>",
         version()
@@ -82,6 +83,15 @@ fn print_subcommand_help(sub: &str) {
             // peek/push: see src/cli.rs (implemented by mainline; placeholder)
             println!("{}: see src/cli.rs (implemented by mainline)", sub);
         }
+        "emit-bridge-report" => println!(
+            "emit-bridge-report: audit the bridge call ledger (G5)\n\
+             \n\
+             Usage: lang-zone emit-bridge-report <ledger.tsv>\n\
+             \n\
+             Reads the append-only TSV ledger (ts\\tevent\\tlang\\tdetail) and\n\
+             prints a summary grouped by event × lang. Fails if the file is\n\
+             missing; never modifies the ledger."
+        ),
         _ => print_help(),
     }
 }
@@ -272,8 +282,23 @@ fn compile_project_to_ir(
 ) -> Result<(lang_zone::ir::IrModule, usize), String> {
     let entry = &paths.entry;
     let mut pc = ProjectCompiler::new(paths.root.clone(), std_dir.map(Path::to_path_buf));
-    let merged = pc.compile(entry)?;
+    let mut merged = pc.compile(entry)?;
     let module_count = pc.unit_count();
+    // 合并模块需要入口文件路径：semantic_check 的 import 存在性检查依赖
+    // mod_dir（AST file_path 的父目录），merge_modules 不设置则误报"import 路径不存在"
+    if merged.file_path.is_none() {
+        merged.file_path = Some(
+            entry
+                .canonicalize()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| entry.display().to_string()),
+        );
+    }
+    // G2: 语义检查（拒绝 17 个语法矩阵反例中的语义错误类）
+    let errs = lang_zone::semantic_check::check_module(&merged);
+    if !errs.is_empty() {
+        return Err(errs.join("\n"));
+    }
     let ir = build_ir(&merged)
         .map_err(|e| format!("IR build error in {}: {}", entry.display(), e))?;
     Ok((ir, module_count))
@@ -772,6 +797,27 @@ fn count_items(paths: &ProjectPaths) -> usize {
             })
         })
         .unwrap_or(0)
+}
+
+// ────────────────────────────── emit-bridge-report ──────────────────────────────
+
+/// emit-bridge-report <ledger.tsv>：审计 bridge 调用台账（方案.md G5）
+///
+/// 读取追加式 TSV 台账（ts \t event \t lang \t detail），按 event × lang 汇总输出。
+/// 只读审计：文件缺失返回明确错误，绝不修改台账文件。
+pub fn cmd_emit_bridge_report(args: &[String]) -> i32 {
+    if args.len() < 3 || args[2] == "--help" || args[2] == "-h" {
+        print_subcommand_help("emit-bridge-report");
+        return if args.len() < 3 { 1 } else { 0 };
+    }
+    let target = Path::new(&args[2]);
+    if !target.is_file() {
+        eprintln!("Error: cannot audit {}: no such ledger file", target.display());
+        return 1;
+    }
+    let report = lang_zone::bridge::ledger::Ledger::report_path(target);
+    print!("{}", report.render());
+    0
 }
 
 #[cfg(test)]

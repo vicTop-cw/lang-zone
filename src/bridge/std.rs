@@ -293,6 +293,7 @@ impl StdBridge {
                     module_name: mod_name.clone(),
                     is_macro: func_entry.rust.ends_with("!"),
                     is_template,
+                    ret_result: false,
                 });
             }
         }
