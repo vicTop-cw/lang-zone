@@ -714,13 +714,20 @@ fn compile_main(args: Vec<String>) -> i32 {
             } else {
                 // ── Rust 后端（默认）──
                 let mut cg = IrCodeGen::new();
-                let rust_code = cg.generate(&ir_module);
+                // I3/I4：注入 BridgeRegistry，extern/@export/embed 符号自动登记
+                let (rust_code, registry) = cg.generate_with_bridge(&ir_module);
                 let out_path = replace_ext(path, ".lz", ".rs");
                 fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", out_path, e);
                     std::process::exit(1);
                 });
                 println!("Generated {} -> {} (IR codegen)", path, out_path);
+                if registry.symbol_count() > 0 {
+                    println!(
+                        "Bridge registry: {} symbol(s) registered (extern/export/embed)",
+                        registry.symbol_count()
+                    );
+                }
 
                 // --test: 编译并运行测试（IR 路径）
                 if run_tests {

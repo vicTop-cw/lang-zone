@@ -753,6 +753,11 @@ impl BridgeRegistry {
         &self.ledger
     }
 
+    /// 可变访问台账（flush 落盘等）
+    pub fn ledger_mut(&mut self) -> &mut crate::bridge::ledger::Ledger {
+        &mut self.ledger
+    }
+
     /// 生成台账审计汇总
     pub fn emit_bridge_report(&self) -> crate::bridge::ledger::LedgerReport {
         self.ledger.report()

@@ -70,7 +70,7 @@ fn builtin_type_names() -> HashSet<&'static str> {
         "HashSet", "BTreeSet", "Option", "Some", "Result", "Ok", "Err", "Tuple",
         "Ptr", "Pointer", "Ref", "MutRef", "Fn", "FnMut", "FnOnce", "Iterator",
         "Iter", "Generator", "Simd", "Box", "Any", "Object", "Json", "JSON",
-        "Rc", "Arc", "Weak", "Maybe", "Never", "Auto",
+        "Rc", "Arc", "Weak", "Maybe", "Never", "Auto", "Ext",
         "Ordered", "Clone", "Copy", "Display", "Debug", "Eq", "Ord", "PartialEq",
         "PartialOrd", "Default", "Hash", "Add", "Sub", "Mul", "Div", "Rem", "Neg",
         "Index", "IndexMut", "IntoIterator", "FromIterator", "AsRef", "AsMut",
@@ -391,6 +391,11 @@ impl Checker {
     }
 
     fn check_function_body(&mut self, f: &Function) {
+        // G7: #[embed(lang)] 函数体为原生代码段（字符串字面量），
+        // 原样插入生成产物，不做 LZ 语义/类型检查（保留签名头检查）
+        if f.decorators.iter().any(|d| d.name == "embed") {
+            return;
+        }
         // 嵌套函数：继承外层作用域；yield/raise 检查属于本函数
         let ctx = FnCtx {
             name: f.name.clone(),

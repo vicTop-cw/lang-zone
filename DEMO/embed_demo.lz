@@ -1,0 +1,13 @@
+// embed_demo.lz — G7: #[embed(lang)] 内嵌原生代码段演示
+// 三机制补充：embed 属性宏将函数体中的字符串字面量（原生代码段）
+// 原样插入生成产物，并自动登记到 BridgeRegistry（I4 联动）。
+// 运行验证：hello_embed 打印内嵌 Rust 代码的 stdout，返回 42。
+
+#[embed(rust)]
+def hello_embed() -> int:
+    return "println!(\"hello from embed\"); 42"
+
+def main():
+    let v = hello_embed()
+    print("embed returned: ")
+    print(v)

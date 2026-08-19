@@ -1,4 +1,9 @@
-def id<T>(x: T) -> T =
-    x
+// neg_generic_missing_t.lz - G2 generic arg cannot be inferred
+// Expect: rejected. make() has no explicit type args and no params
+// to infer return type T; compiler must report "cannot infer generic"
+// instead of passing silently.
+def make<T>() -> T =
+    make<T>()
+
 def main() =
-    print(id(1))
+    print(make())

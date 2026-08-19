@@ -218,6 +218,9 @@ pub enum IntrinsicKind {
     TailCall,
     Export(Vec<String>), // @export(Rust), @export(Python)
     Extern(Vec<String>), // @extern(Rust), @extern(Python) 外部声明（L1 机制）
+    /// #[embed(rust)] / #[embed(py)]：内嵌代码段（G7）
+    /// lang = 目标语言（Rust / Python），code = 原样插入生成产物的代码段
+    Embed { lang: String, code: String },
     Init,
 }
 

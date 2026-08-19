@@ -57,11 +57,13 @@ pub struct Ledger {
     path: Option<PathBuf>,
     /// 内存缓冲（按序追加）
     records: Vec<LedgerRecord>,
+    /// 已落盘条数（append 时若 path 已设置则写盘；set_path 前的内存记录由 flush 补写）
+    flushed: usize,
 }
 
 impl Ledger {
     pub fn new() -> Self {
-        Ledger { path: None, records: Vec::new() }
+        Ledger { path: None, records: Vec::new(), flushed: 0 }
     }
 
     /// 设置台账落盘路径；文件不存在时创建（含父目录），已存在时**追加**。
@@ -86,8 +88,23 @@ impl Ledger {
         if let Some(p) = &self.path {
             if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(p) {
                 let _ = writeln!(f, "{}", rec.to_tsv());
+                self.flushed += 1;
             }
         }
+    }
+
+    /// 将 set_path 前积累的内存记录补写落盘（追加式，避免重复写已落盘条数）
+    pub fn flush(&mut self) -> std::io::Result<()> {
+        let p = match &self.path {
+            Some(p) => p.clone(),
+            None => return Ok(()),
+        };
+        let mut f = OpenOptions::new().create(true).append(true).open(&p)?;
+        for rec in self.records.iter().skip(self.flushed) {
+            writeln!(f, "{}", rec.to_tsv())?;
+        }
+        self.flushed = self.records.len();
+        Ok(())
     }
 
     /// 追加导出事件（codegen 登记 @export 时调用）

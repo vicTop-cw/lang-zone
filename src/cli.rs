@@ -408,7 +408,8 @@ pub fn cmd_build(args: &[String]) -> i32 {
     };
 
     let mut cg = IrCodeGen::new();
-    let rust_code = cg.generate(&ir);
+    // I3/I4：注入 BridgeRegistry，extern/@export/embed 符号自动登记（G5 台账联动）
+    let (rust_code, mut registry) = cg.generate_with_bridge(&ir);
 
     if let Err(e) = fs::create_dir_all(&paths.build_dir) {
         eprintln!(
@@ -428,6 +429,18 @@ pub fn cmd_build(args: &[String]) -> i32 {
         paths.rs_out.display(),
         module_count
     );
+
+    // G5：注册符号落盘台账（追加式 TSV，build/bridge-ledger.tsv）
+    if registry.symbol_count() > 0 {
+        let ledger_path = paths.build_dir.join("bridge-ledger.tsv");
+        let _ = registry.set_ledger_path(&ledger_path);
+        let _ = registry.ledger_mut().flush();
+        println!(
+            "Bridge registry: {} symbol(s) registered -> {}",
+            registry.symbol_count(),
+            ledger_path.display()
+        );
+    }
 
     if let Err(e) = rustc_compile(&paths.rs_out, &paths.exe_out) {
         eprintln!("rustc error:\n{}", e);

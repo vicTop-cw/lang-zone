@@ -261,6 +261,22 @@ impl CodeGen {
         self.bridge_registry = Some(registry);
     }
 
+    /// I3/I4：生成 Rust 代码的同时注入 BridgeRegistry，自动登记
+    /// #[extern]/#[embed]/@export 符号并联动台账。返回 (rust_code, registry)。
+    ///
+    /// 不改变生成产物本身（registry 仅登记，不影响 emit 输出），
+    /// 调用方可对 registry 做台账落盘与审计（G5）。
+    pub fn generate_with_bridge(
+        &mut self,
+        module: &IrModule,
+    ) -> (String, crate::bridge::core::BridgeRegistry) {
+        let reg = crate::bridge::core::BridgeRegistry::new();
+        self.bridge_registry = Some(reg);
+        let code = self.generate(module);
+        let reg = self.bridge_registry.take().unwrap();
+        (code, reg)
+    }
+
     /// 将整个 IrModule 生成为 Rust 源代码
     pub fn generate(&mut self, module: &IrModule) -> String {
         self.buf.clear();
@@ -1998,6 +2014,30 @@ impl CodeGen {
             if matches!(ret.as_ref(), IrType::Fn { .. }));
         // typed main（def main() -> int）走 __lz_main 内部函数，尾表达式需 return
         self.is_main = f.name == "main" && !is_typed_main;
+
+        // I4：@export(Rust/Python/C) 自动登记（不改变生成产物）
+        // 符号在 registry 注入时登记，供 L2 中继路由与 E2E 审计使用。
+        if self.bridge_registry.is_some() {
+            if let Some(export_targets) = f.intrinsics.iter().find_map(|i| {
+                if let IntrinsicKind::Export(t) = &i.kind {
+                    Some(t.clone())
+                } else {
+                    None
+                }
+            }) {
+                let lang = export_targets.first().cloned().unwrap_or_else(|| "Rust".into());
+                let sig_params: Vec<String> = f
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, self.rust_type(&p.ty)))
+                    .collect();
+                let sig = format!("fn({}) -> {}", sig_params.join(", "), self.rust_type(&f.ret_ty));
+                if let Some(reg) = &mut self.bridge_registry {
+                    let _ = reg.register_symbol(&f.name, &lang, &sig);
+                }
+            }
+        }
+
         // #[extern(lang)]：函数体由外部实现提供 → 分发调用（无 extern 关键字）
         let extern_targets: Option<Vec<String>> = f.intrinsics.iter().find_map(|i| {
             if let IntrinsicKind::Extern(targets) = &i.kind {
@@ -2006,7 +2046,32 @@ impl CodeGen {
                 None
             }
         });
-        if let Some(ext) = extern_targets {
+        // #[embed(lang)]：内嵌代码段原样插入函数体（G7）
+        let embed: Option<(String, String)> = f.intrinsics.iter().find_map(|i| {
+            if let IntrinsicKind::Embed { lang, code } = &i.kind {
+                Some((lang.clone(), code.clone()))
+            } else {
+                None
+            }
+        });
+        if let Some((lang, code)) = embed {
+            // G7：内嵌代码段——registry 注入时登记符号，函数体原样输出
+            // 原生代码（不生成 LZ 语义 body，返回类型/参数由用户保证一致）。
+            if self.bridge_registry.is_some() {
+                let sig_params: Vec<String> = f
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, self.rust_type(&p.ty)))
+                    .collect();
+                let sig = format!("fn({}) -> {}", sig_params.join(", "), self.rust_type(&f.ret_ty));
+                if let Some(reg) = &mut self.bridge_registry {
+                    let _ = reg.register_symbol(&f.name, &lang, &sig);
+                }
+            }
+            for line in code.lines() {
+                self.emit_line(line);
+            }
+        } else if let Some(ext) = extern_targets {
             let lang = ext.first().cloned().unwrap_or_else(|| "Rust".into());
             // I3：extern 自动登记（L2 中继打通）——注入 registry 时，
             // #[extern(lang)] 声明自动 register_symbol + 台账 REGISTER。

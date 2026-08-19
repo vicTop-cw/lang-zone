@@ -679,7 +679,7 @@ fn from_ast_type_name(name: &str) -> IrType {
 
 fn resolve_call_generics(
     ret_ty: &IrType,
-    _fn_name: &str,
+    fn_name: &str,
     param_tys: &[IrType],
     arg_tys: &[IrType],
     ctx: &TypeCtx,
@@ -756,6 +756,11 @@ fn resolve_call_generics(
     }
 
     if bindings.is_empty() {
+        // G2 反例：泛型调用既未提供显式类型实参，也无法从实参推断 → 必须拒绝
+        // （如 `def f<T>() -> T` 后 `f()`：返回类型 T 无法绑定）
+        ctx.report_error(format!(
+            "无法推断泛型参数: 调用 {fn_name} 未提供显式类型实参（如 {fn_name}.<T>(...)），且无法从实参推断"
+        ));
         return ret_ty.clone();
     }
 
@@ -6710,6 +6715,33 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                             .collect()
                     })
                 }
+                "embed" => {
+                    // #[embed(rust)] / #[embed(py)]：内嵌代码段（G7）
+                    // 语言参数取 args[0]（rust / py，大小写不敏感归一化）；
+                    // 代码段取函数体首个字符串字面量（原生代码段原样插入生成产物）。
+                    let lang = d
+                        .args
+                        .first()
+                        .and_then(|a| {
+                            if let AstExpr::Ident(n) = a {
+                                Some(n.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .map(|t| {
+                            let mut c = t.chars();
+                            match c.next() {
+                                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                                None => String::new(),
+                            }
+                        })
+                        .unwrap_or_default();
+                    IntrinsicKind::Embed {
+                        lang,
+                        code: extract_embed_code(&body),
+                    }
+                }
                 name if name.starts_with("export") => {
                     // @export(Rust, Python)
                     let targets: Vec<String> = d
@@ -6780,6 +6812,70 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             }
         }
     }
+
+    // #[embed(lang)] 诊断：语言缺失 / 未知语言 / 代码段缺失（G7）
+    {
+        let embed_count = func.decorators.iter().filter(|d| d.name == "embed").count();
+        if embed_count > 1 {
+            ctx.report_error(format!(
+                "#[embed] 重复标记：函数 '{}' 有 {} 个 embed 装饰器",
+                func.name, embed_count
+            ));
+        }
+        if let Some(ei) = intrinsics.iter().find(|i| matches!(i.kind, IntrinsicKind::Embed { .. })) {
+            if let IntrinsicKind::Embed { lang, code } = &ei.kind {
+                if lang.is_empty() {
+                    ctx.report_error(format!(
+                        "#[embed] 缺少语言参数：函数 '{}' 需要 #[embed(rust)] / #[embed(py)]",
+                        func.name
+                    ));
+                } else if !matches!(lang.as_str(), "Rust" | "Python") {
+                    ctx.report_error(format!(
+                        "#[embed] 未知语言 '{}'：函数 '{}' 支持 rust / py",
+                        lang, func.name
+                    ));
+                }
+                if code.is_empty() {
+                    ctx.report_error(format!(
+                        "#[embed] 缺少内嵌代码段：函数 '{}' 的函数体必须为单个字符串字面量（原生代码段）",
+                        func.name
+                    ));
+                }
+            }
+        }
+    }
+
+/// 提取 embed 内嵌代码段（G7）：函数体首个字符串字面量（Return 值 / ExprStmt）
+///
+/// 约定：`#[embed(rust)] def foo(): return "let x = 1; x + 1"` 的代码段为
+/// 字符串字面量本身（原生代码原样插入生成产物，不做 LZ 语义处理）。
+/// 未找到返回空串，由 embed 诊断块报错。
+fn extract_embed_code(body: &Block) -> String {
+    for stmt in &body.stmts {
+        let expr = match stmt {
+            Stmt::Return { value: Some(e) } => e,
+            Stmt::ExprStmt { expr } => expr,
+            _ => continue,
+        };
+        // builder 会按返回类型包装隐式转换（ImplicitConvert→Lit(Str)），
+        // 需穿透一层取其 source 字符串字面量
+        let inner = match &expr.kind {
+            ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
+            ExprKind::ImplicitConvert { source, .. } => {
+                if let ExprKind::Lit(LitKind::Str(s)) = &source.kind {
+                    Some(s.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        if let Some(s) = inner {
+            return s;
+        }
+    }
+    String::new()
+}
 
     // 引用 impl 级泛型的 where 约束（如 `impl<K,V> Dict<K,V>` 方法
     // `where K: Eq + Hash`，K 不在方法泛型中）无法合并到方法泛型，
