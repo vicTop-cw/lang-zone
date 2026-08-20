@@ -15,6 +15,19 @@ AIGC:
 
 本文件记录 LZ 编译器（`lzc` / `lzcyc`）的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v0.1.165] - 2026-08-20
+
+### IR→rustc 通过率提升（74.9% → 76.6%，本轮修复）
+- E0308 类型不匹配（p22_str_index / p27_opt_elif 类）：
+  - codegen/mod.rs 新增 `current_expected_ty`（RefCell<Option<IrType>>）+ `option_none_elem()`，`Option::None` 类型参数选择优先实参期望类型 → 函数返回类型 → 表达式自身类型 → 默认 i64
+  - 字符串单字符索引按当前函数返回类型生成：返回 str/String 时生成 `String`（char 安全，越界 `'\0'`），否则生成 char 码点 i64（兼容 string_index_unicode 场景）
+- E0599 方法不存在（p24_slice_method 类）：内置 str/List 接收者的 `.slice(a, b)` 映射为 `lz_slice`（用户自定义 struct 的 slice 保留原样）
+- E0605/E0308 String→数值（p41_full_tokenize 类）：`as int` 对 String/Any 类型走 `.parse()` 而非 Rust `as`（`as` 不允许 String→数值）
+- 新增 tests/ir_pass_fixes.rs：4 用例全链路（lz→rs→rustc→run）覆盖上述四类修复
+- 全量回归 511 tests passed / 0 failed（基线 507 + 新增 4）；未触碰 Cy 后端
+- 增量重跑原 21 个 rustc 失败用例：修复 6 个（含 2 个 diffwork 噪音），IR→rustc 通过率 266/355 → 272/355（76.6%）
+- 遗留：E0425 use/import/extern 作用域注入（7 例）+ E0609 Option 模式解构（1 例）+ diffwork 内部噪音（7 例），下轮继续
+
 ## [v0.1.164] - 2026-08-20
 
 ### G6 D2 codegen 补缺（impl 块 / 列表推导 / 生成器 / match）
