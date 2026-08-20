@@ -1,0 +1,41 @@
+// ============================================================
+// G6 D2 codegen 补缺 - 生成器（iterator / yield / yield from）
+// 覆盖: iterator 生成器 + yield、生成器消费（for 循环/推导）、
+//       yield from 嵌套生成器
+// 运行: lzc DEMO/g6/g6_generator.lz → rustc → 输出见文件尾部注释
+// ============================================================
+
+iterator gen(n: int) -> int =
+    let mut i = 0
+    while i < n:
+        yield i * i
+        i = i + 1
+
+iterator inner() -> int =
+    yield 1
+    yield 2
+
+iterator outer() -> int =
+    yield 0
+    yield from inner()
+    yield 9
+
+def main() =
+    // for 循环消费生成器
+    mut s = 0
+    for v in gen(6):
+        s = s + v
+    print(s)
+
+    // 推导消费生成器
+    let lst = [v for v in gen(4)]
+    print(lst)
+
+    // yield from 嵌套
+    let from_lst = [v for v in outer()]
+    print(from_lst)
+
+    // 期望输出:
+    // 55
+    // [0, 1, 4, 9]
+    // [0, 1, 2, 9]

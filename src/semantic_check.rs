@@ -59,6 +59,19 @@ struct FnCtx {
     has_raise: bool,
 }
 
+/// 剥离泛型参数：`Iterator<T>` → `Iterator`；`Vec<int>` → `Vec`
+fn base_name(ty: &str) -> &str {
+    ty.split('<').next().unwrap_or(ty)
+}
+
+/// 生成 impl 的可读标签（`impl Trait for Type` / `impl Type`）
+fn imp_label(imp: &ImplDef) -> String {
+    match &imp.trait_name {
+        Some(t) => format!("impl {t} for {}", imp.type_name),
+        None => format!("impl {}", imp.type_name),
+    }
+}
+
 /// 内建类型白名单（codegen 直接映射，不经过自定义类型表）
 fn builtin_type_names() -> HashSet<&'static str> {
     let mut s = HashSet::new();
@@ -166,7 +179,8 @@ impl Checker {
         }
         for im in &m.impls {
             if let Some(tn) = &im.trait_name {
-                self.impl_traits.insert(tn.clone());
+                // 剥去泛型参数（`Iterator<T>` → `Iterator`），供裸名覆盖检查使用
+                self.impl_traits.insert(base_name(tn).to_string());
             }
         }
         for t in &m.type_aliases {
@@ -175,6 +189,9 @@ impl Checker {
         for d in &m.duck_defs {
             self.type_names.insert(d.name.clone());
         }
+
+        // G6: impl 块校验（未知类型 / 未知 trait / 抽象方法缺失 / 多余方法）
+        self.check_impls(m);
 
         // 类型名全部收集完成后再做依赖类型名的检查（避免前向引用误报）：
         // 1) struct 字段未知类型；2) 函数签名（参数/返回/where/泛型默认）
@@ -192,6 +209,57 @@ impl Checker {
             self.fn_names.insert(f.name.clone());
             self.fn_sigs.insert(f.name.clone(), sig);
             self.check_function_header(f);
+        }
+    }
+
+    // G6: impl 块语义校验
+    //  - impl 目标类型必须存在（内建类型或本模块自定义类型）
+    //  - trait impl 的 trait 必须存在
+    //  - trait 声明的抽象方法（is_abstract）必须在 impl 中全部实现（Bug-10）
+    //  - impl 方法不得超出 trait 声明（Bug-9，仅 trait impl 生效）
+    fn check_impls(&mut self, m: &Module) {
+        let builtins = builtin_type_names();
+        for imp in &m.impls {
+            let type_base = base_name(&imp.type_name);
+            if !self.type_names.contains(type_base) && !builtins.contains(type_base) {
+                self.error(format!(
+                    "impl 目标类型不存在: {type_base}（在 {} 中）",
+                    imp_label(imp)
+                ));
+            }
+            let Some(tn) = &imp.trait_name else { continue };
+            let trait_base = base_name(tn);
+            let Some(trait_def) = m.traits.iter().find(|t| t.name == trait_base) else {
+                // 内建 trait（Iterator / Iterable / Display 等）隐式存在，允许 impl 且不做抽象方法校验
+                if builtins.contains(trait_base) {
+                    continue;
+                }
+                self.error(format!(
+                    "impl for unknown trait: {trait_base}（在 {} 中）",
+                    imp_label(imp)
+                ));
+                continue;
+            };
+            // Bug-10：抽象方法必须全部实现（带默认实现的方法可跳过）
+            for tm in &trait_def.methods {
+                if tm.is_abstract && !imp.methods.iter().any(|im| im.name == tm.name) {
+                    self.error(format!(
+                        "trait {trait_base} 要求实现抽象方法 {} 但 {} 未提供",
+                        tm.name,
+                        imp_label(imp)
+                    ));
+                }
+            }
+            // Bug-9：impl 方法不得超出 trait 声明
+            for im in &imp.methods {
+                if !trait_def.methods.iter().any(|tm| tm.name == im.name) {
+                    self.error(format!(
+                        "impl 方法 {} 未在 trait {trait_base} 中声明（{} 中）",
+                        im.name,
+                        imp_label(imp)
+                    ));
+                }
+            }
         }
     }
 
@@ -671,6 +739,9 @@ impl Checker {
             Stmt::BlockCall { args, .. } => self.check_expr(args),
             Stmt::EnumDef(s) => {
                 self.check_enum_dup_variant(s);
+                // 函数内 enum 定义同样注册枚举名（pattern_more.lz 在函数内定义
+                // enum Command 后于 match 模式 Command.Move(..) 中引用，否则误报未绑定）
+                self.enum_names.insert(s.name.clone());
                 for f in &s.fields {
                     self.check_type(&f.ty, &format!("enum {} 变体类型", s.name), &[], &s.generics);
                 }
@@ -891,14 +962,15 @@ impl Checker {
                             self.error(format!("match 分支重复: 模式 {k} 出现多次"));
                         }
                     }
-                    if let Some(g) = &arm.guard {
-                        self.check_expr(g);
-                    }
                     self.push_scope();
                     let mut binds = Vec::new();
                     self.pattern_bindings(&arm.pattern, &mut binds);
                     for b in binds {
                         self.bind(b);
+                    }
+                    // match 守卫可引用模式绑定的变量（如 case x if x > 7），须先 bind 再检查守卫
+                    if let Some(g) = &arm.guard {
+                        self.check_expr(g);
                     }
                     for s in &arm.body {
                         self.check_stmt(s);
@@ -970,10 +1042,8 @@ impl Checker {
                 self.check_expr(iter);
                 self.push_scope();
                 self.bind(var.clone());
-                if let Some(c) = cond {
-                    self.check_expr(c);
-                }
-                self.check_expr(output);
+                // 多 for 子句：先注册所有 extra 循环变量，再检查 output/cond，
+                // 否则 output 引用 extra 变量（如 [(x, y) for x in .. for y in ..] 中的 y）会被误报未绑定
                 for (v, it, c) in extra_clauses {
                     self.bind(v.clone());
                     self.check_expr(it);
@@ -981,6 +1051,10 @@ impl Checker {
                         self.check_expr(cc);
                     }
                 }
+                if let Some(c) = cond {
+                    self.check_expr(c);
+                }
+                self.check_expr(output);
                 self.pop_scope();
             }
             Expr::DictComprehension {
@@ -994,11 +1068,7 @@ impl Checker {
                 self.check_expr(iter);
                 self.push_scope();
                 self.bind(var.clone());
-                if let Some(c) = cond {
-                    self.check_expr(c);
-                }
-                self.check_expr(key);
-                self.check_expr(value);
+                // 多 for 子句：先注册所有 extra 循环变量，再检查 key/value/cond
                 for (v, it, c) in extra_clauses {
                     self.bind(v.clone());
                     self.check_expr(it);
@@ -1006,6 +1076,11 @@ impl Checker {
                         self.check_expr(cc);
                     }
                 }
+                if let Some(c) = cond {
+                    self.check_expr(c);
+                }
+                self.check_expr(key);
+                self.check_expr(value);
                 self.pop_scope();
             }
             Expr::Assign { target, value, .. } => {

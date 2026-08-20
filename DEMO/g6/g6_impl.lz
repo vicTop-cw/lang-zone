@@ -1,0 +1,58 @@
+// ============================================================
+// G6 D2 codegen 补缺 - impl 块
+// 覆盖: inherent impl 块（构造器 + 实例方法 + 静态方法）、
+//       trait impl（抽象方法实现）、泛型 impl
+// 运行: lzc DEMO/g6/g6_impl.lz → rustc → 输出见文件尾部注释
+// ============================================================
+
+// --- inherent impl 块 ---
+struct Point =
+    x: int
+    y: int
+
+impl Point =
+    def new(x: int, y: int) -> Point =
+        Point(x: x, y: y)
+    def dist(self) -> int =
+        self.x * self.x + self.y * self.y
+    def origin() -> Point =
+        Point(x: 0, y: 0)
+
+// --- trait impl ---
+trait Greet =
+    def greet(self) -> str
+
+struct Dog =
+    name: str
+
+impl Greet for Dog =
+    def greet(self) -> str =
+        "woof " + self.name
+
+// --- 泛型 impl ---
+struct Wrap<T> =
+    value: T
+
+impl<T> Wrap<T> =
+    def make(v: T) -> Wrap<T> =
+        Wrap(value: v)
+    def get(self) -> T =
+        self.value
+
+def main() =
+    let p = Point.new(3, 4)
+    print(p.dist())
+    let o = Point.origin()
+    print(o.dist())
+
+    let d = Dog(name: "rex")
+    print(d.greet())
+
+    let w = Wrap.make(42)
+    print(w.get())
+
+    // 期望输出:
+    // 25
+    // 0
+    // "woof rex"
+    // 42
