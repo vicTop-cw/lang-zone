@@ -2,16 +2,28 @@
 AIGC:
     Label: "1"
     ContentProducer: 001191440300708461136T1XGW3
-    ProduceID: 9f2a11add43fbf12a546606fb2b962ab_9f4bc76d9acc11f1a98a525400f8a581
-    ReservedCode1: 5HXw5SYAkMeIB+u+ldEgMTCUo6Ob+mOUe8IurQRGCWpAuwZrunemlEPdctoHuy+ONvfBZGwSw+aiBmQ9yz/2OyHG7Lk5JLn27fv7goM2C9I7gc3/PxkJpYqpdaEvivdRIVS6CQKISQgk97M4yBu3nmZ65VAGjz0Xo4DNpH7ckNrf3yrrUAzwOUKOtSg=
+    ProduceID: 9f2a11add43fbf12a546606fb2b962ab_d1133c179c3b11f1a98a525400f8a581
+    ReservedCode1: bxfu1vV9/zf3BipcZW4e2TYNtBeVW+bHqK4PLgZ15h5rlYpmzg5gYQmbXmk8Fwgv2IkVjIWJL6xOPqTefv4R3SDy9zqdLM/9Smj1IZ5PwQF/DxZfqd/LcN/2BV8YJUdxQ+CcMPyvHkLc7tv5jDambxQuuLYh+RfJL0MFTNyrG4KJFQbqjnNAlnPZYtA=
     ContentPropagator: 001191440300708461136T1XGW3
-    PropagateID: 9f2a11add43fbf12a546606fb2b962ab_9f4bc76d9acc11f1a98a525400f8a581
-    ReservedCode2: 5HXw5SYAkMeIB+u+ldEgMTCUo6Ob+mOUe8IurQRGCWpAuwZrunemlEPdctoHuy+ONvfBZGwSw+aiBmQ9yz/2OyHG7Lk5JLn27fv7goM2C9I7gc3/PxkJpYqpdaEvivdRIVS6CQKISQgk97M4yBu3nmZ65VAGjz0Xo4DNpH7ckNrf3yrrUAzwOUKOtSg=
+    PropagateID: 9f2a11add43fbf12a546606fb2b962ab_d1133c179c3b11f1a98a525400f8a581
+    ReservedCode2: bxfu1vV9/zf3BipcZW4e2TYNtBeVW+bHqK4PLgZ15h5rlYpmzg5gYQmbXmk8Fwgv2IkVjIWJL6xOPqTefv4R3SDy9zqdLM/9Smj1IZ5PwQF/DxZfqd/LcN/2BV8YJUdxQ+CcMPyvHkLc7tv5jDambxQuuLYh+RfJL0MFTNyrG4KJFQbqjnNAlnPZYtA=
 ---
+
+
 
 # CHANGELOG — Lang-Zone (LZ)
 
 本文件记录 LZ 编译器（`lzc` / `lzcyc`）的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
+
+## [v0.1.164] - 2026-08-20
+
+### G6 D2 codegen 补缺（impl 块 / 列表推导 / 生成器 / match）
+- codegen 补齐四类语法 IR→rustc 生成：impl 块（inherent / trait / 泛型）、列表推导（多 for / guard / 嵌套 / 函数调用 / 集合 / 字典）、生成器（yield / yield from）、match（值表达式 / 元组模式 / 范围模式 / 守卫）
+- semantic_check.rs 新增 check_impls 语义校验：impl 未知 trait、impl 目标类型不存在、trait 抽象方法缺失、impl 多余方法均拒绝；match guard 变量先 bind 再检查；多 for 推导 extra 变量预注册后校验 output/cond/key/value
+- 新增 DEMO/g6/ 四类 demo（g6_impl / g6_listcomp / g6_generator / g6_match），编译 + rustc 运行验证
+- 新增 tests/g6_codegen.rs：17 用例（正向 10 + 拒绝 7），覆盖四类特性运行与语义拒绝
+- 全量回归 507 tests passed / 0 failed（基线 490 + 新增 17）
+- 未触碰 Cy 后端（codegen_cython.rs / CY/）与无关文件
 
 ## [v0.1.163] - 2026-08-19
 
@@ -69,4 +81,5 @@ AIGC:
 - 全力走 IR 中间表示路线：代码生成统一以 LZIR 为中间层（AST → LZIR → 目标语言）
 - 旧 `src/codegen/`（AST → Rust 直接 codegen）视为遗留，逐步退役
 - 双后端：Rust（`lzc`）与 Cython/Python（`lzcyc`）
+*（内容由AI生成，仅供参考）*
 *（内容由AI生成，仅供参考）*
