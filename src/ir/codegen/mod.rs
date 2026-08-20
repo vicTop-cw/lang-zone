@@ -27,6 +27,10 @@ pub struct CodeGen {
     /// 当前函数签名返回类型（与 current_ret_ty 不同：后者在 if/match 等块内
     /// 可能被推断覆盖为 None，此字段保存函数级返回类型用于 ref 判断回退）
     current_fn_ret_ty: Option<IrType>,
+    /// 当前表达式期望类型（函数调用实参位置由 fn_param_types 注入，
+    /// 用于 Option::None 等需类型参数的表达式跟随实参类型，E0308 修复）
+    /// 用 RefCell：gen_expr 仅 &self，实参生成时需临时改写
+    current_expected_ty: std::cell::RefCell<Option<IrType>>,
     /// 当前函数是否返回引用（`-> &Self` 等）：builder 对 ref 返回推断可能为 None，
     /// Stmt::Return 中 `return self` 判断是否 clone 时使用
     current_fn_ret_is_ref: bool,
@@ -188,6 +192,7 @@ impl CodeGen {
         type_map.insert("RangeInclusive", "std::ops::RangeInclusive<i64>");
         // 基础类型保持原样
         CodeGen {
+            current_expected_ty: std::cell::RefCell::new(None),
             indent: 0,
             type_map,
             current_ret_ty: None,
@@ -1196,6 +1201,34 @@ impl CodeGen {
     }
 
     // ── Item 生成 ──
+
+    /// Option::None 的类型参数选择：优先调用期望类型（实参位置）→ 函数返回类型
+    /// （均要求 Option<T>）→ 表达式自身类型 → 默认 i64。
+    /// 修复：p27_opt_elif.lz（函数返回 Option<Token> 时 else 分支生成
+    /// Option::<i64>::None 类型不匹配 E0308）、p22_option_pattern.lz
+    /// （main 中 f(Option.None) 实参期望 Option<E>）。
+    fn option_none_elem(&self, expr_ty: &IrType) -> String {
+        let pick = |ty: &IrType| -> Option<String> {
+            // IR 语义标记 Option(T)
+            if let IrType::Option(inner) = ty {
+                return Some(self.rust_type(inner));
+            }
+            // 命名类型 Option<T>
+            if let IrType::Named { path, args } = ty {
+                if path == "Option" && args.len() == 1 {
+                    return Some(self.rust_type(&args[0]));
+                }
+            }
+            None
+        };
+        if let Some(e) = self.current_expected_ty.borrow().as_ref().and_then(|t| pick(t)) {
+            return e;
+        }
+        if let Some(e) = self.current_fn_ret_ty.as_ref().and_then(|t| pick(t)) {
+            return e;
+        }
+        pick(expr_ty).unwrap_or_else(|| "i64".to_string())
+    }
 
     fn gen_item(&mut self, item: &Item) {
         match item {
@@ -5170,7 +5203,25 @@ impl CodeGen {
                     }
                     result_args
                 } else {
-                    args.iter().map(|a| self.gen_expr(a)).collect()
+                    // 实参位置期望类型注入：callee 为具名函数且 fn_param_types 已知时，
+                    // 生成实参时设置 current_expected_ty（Option::None 等跟随实参类型）
+                    let callee_expected: Option<Vec<IrType>> = match &callee.kind {
+                        ExprKind::Var(n) => self.fn_param_types.get(n).cloned(),
+                        _ => None,
+                    };
+                    let prev_expected = self.current_expected_ty.borrow().clone();
+                    let out = args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, a)| {
+                            *self.current_expected_ty.borrow_mut() = callee_expected
+                                .as_ref()
+                                .and_then(|pts| pts.get(i).cloned());
+                            self.gen_expr(a)
+                        })
+                        .collect();
+                    *self.current_expected_ty.borrow_mut() = prev_expected;
+                    out
                 };
                 // 函数参数调用（predicate: fn(ref X) -> bool）：callee 是 Fn 变量且
                 // 参数为 ref 时，实参自动取引用（&item），否则 E0308 expected &
@@ -5513,14 +5564,7 @@ impl CodeGen {
                             if self.in_generic_fn {
                                 return "Option::None".to_string();
                             }
-                            let elem = match &expr.ty {
-                                IrType::Named { path, args }
-                                    if path == "Option" && args.len() == 1 =>
-                                {
-                                    self.rust_type(&args[0])
-                                }
-                                _ => "i64".to_string(),
-                            };
+                            let elem = self.option_none_elem(&expr.ty);
                             return format!("Option::<{}>::None", elem);
                         }
                         return format!("{}::{}({})", base_s, field, wrapped_args.join(", "));
@@ -5559,9 +5603,14 @@ impl CodeGen {
                     return match callee_s.as_str() {
                         "int" => {
                             // 检查参数表达式类型来决定转换方式
+                            // 字符串（Str 或 Named String/str）→ fallible 解析，否则 E0605
+                            // （p41_full_tokenize `num as int` 复现：num: String → parse）
                             if args.len() == 1 {
                                 let arg_ty = &args[0].ty;
-                                if matches!(arg_ty, IrType::Str) {
+                                let is_str = matches!(arg_ty, IrType::Str)
+                                    || matches!(arg_ty, IrType::Named { path, .. }
+                                        if path == "String" || path == "str");
+                                if is_str {
                                     format!("({}).parse::<i64>().unwrap()", args_s[0])
                                 } else {
                                     format!("({} as i64)", args_s[0])
@@ -6414,6 +6463,20 @@ impl CodeGen {
                             "contains"
                         }
                     }
+                    "slice" => {
+                        // LZ .slice(a, b) → StringExt/ListExt::lz_slice（E0599 修复）
+                        // 仅内置 str/List 接收者映射；用户 struct 自定义 slice 保留
+                        let is_str_like = matches!(&receiver.ty, IrType::Named { path, .. }
+                            if path == "str" || path == "String")
+                            || matches!(&receiver.ty, IrType::Str);
+                        let is_list_like = matches!(&receiver.ty, IrType::Named { path, .. }
+                            if path == "List" || path == "Vec" || path == "list");
+                        if is_str_like || is_list_like {
+                            "lz_slice"
+                        } else {
+                            "slice"
+                        }
+                    }
                     "split" => "split",
                     "join" => "join",
                     "replace" => "replace",
@@ -7024,12 +7087,7 @@ impl CodeGen {
                     if self.in_generic_fn {
                         "Option::None".to_string()
                     } else {
-                        let elem = match &expr.ty {
-                            IrType::Named { path, args } if path == "Option" && args.len() == 1 => {
-                                self.rust_type(&args[0])
-                            }
-                            _ => "i64".to_string(),
-                        };
+                        let elem = self.option_none_elem(&expr.ty);
                         format!("Option::<{}>::None", elem)
                     }
                 } else {
@@ -7159,6 +7217,18 @@ impl CodeGen {
                             return format!("{}[{}].to_string()", base_s, key_s);
                         }
                         if base_is_str_any {
+                            // 字符串单字符索引：char 安全；若当前函数返回类型是 str/String，
+                            // 生成 String（'\0'.to_string() / char.to_string()），否则生成
+                            // char 码点 i64（兼容 string_index_unicode `let c = s[i]` 场景）
+                            let idx_wants_string = matches!(&self.current_ret_ty, Some(IrType::Str))
+                                || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
+                                    if path == "str" || path == "String")
+                                || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
+                                || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+                                    if path == "str" || path == "String");
+                            if idx_wants_string {
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s);
+                            }
                             return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
                         }
                         let is_self_field = matches!(&base.kind, ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
@@ -7186,8 +7256,18 @@ impl CodeGen {
                             if base_is_str && is_range_key {
                                 format!("{}[{}].to_string()", base_s, key_s)
                             } else if base_is_str {
-                                // 字符串单字符索引：char 安全
-                                format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
+                                // 字符串单字符索引：char 安全；函数返回 str/String 时生成 String
+                                let idx_wants_string2 = matches!(&self.current_ret_ty, Some(IrType::Str))
+                                    || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
+                                        if path == "str" || path == "String")
+                                    || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
+                                    || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+                                        if path == "str" || path == "String");
+                                if idx_wants_string2 {
+                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s)
+                                } else {
+                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
+                                }
                             } else {
                                 format!("{}[{}].clone()", base_s, key_s)
                             }
@@ -7786,6 +7866,9 @@ impl CodeGen {
             }
             ExprKind::Cast { expr, target } => {
                 // Special cases: as bool → != 0, as str → format/to_string
+                if std::env::var("LZ_DBG_CAST").is_ok() {
+                    eprintln!("CASTDBG target={:?} expr_ty={:?} expr_kind={:?}", target, expr.ty, expr.kind);
+                }
                 if *target == IrType::Bool {
                     return format!("{} != 0", self.gen_expr(expr));
                 }
@@ -7794,8 +7877,10 @@ impl CodeGen {
                 }
                 // String/str → 数值：fallible 解析（str→int 按 09-错误处理.md §2.4）
                 // Rust 的 `as` 不允许 String→数值，必须用 .parse()
+                // 类型 Any（?）：可能是 String（如元组 field 类型丢失），走 parse 安全
                 let src_is_string = matches!(expr.ty, IrType::Str)
-                    || matches!(&expr.ty, IrType::Named { path, .. } if path == "String");
+                    || matches!(&expr.ty, IrType::Named { path, .. } if path == "String")
+                    || matches!(expr.ty, IrType::Any);
                 let tgt_is_numeric = matches!(target, IrType::Int | IrType::F64);
                 // 字符串切片/索引（s[a..b] / s[i]）→ 数值：base 是 String 但
                 // 切片表达式 ty 常推断为 Any（自举试点 parser.lz 复现 E0605
