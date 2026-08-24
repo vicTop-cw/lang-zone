@@ -27,7 +27,7 @@ def compute(x: int) -> int = x * x
 // ── 4. @parallel 自动并行 ──
 @parallel
 def parallel_map(items: List<int>) -> List<int> =
-    items | map(_.2)
+    items |> map(|x| x * 2)
 
 // ── 5. @tail_call 尾递归 ──
 @tail_call

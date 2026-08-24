@@ -323,3 +323,50 @@ impl StringExt for String {
         self.find(substr).map(|i| i as i64)
     }
 }
+
+impl StringExt for str {
+    fn lz_len(&self) -> i64 {
+        self.len() as i64
+    }
+    fn lz_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+    fn lz_contains(&self, substr: &str) -> bool {
+        self.contains(substr)
+    }
+    fn lz_starts_with(&self, prefix: &str) -> bool {
+        self.starts_with(prefix)
+    }
+    fn lz_ends_with(&self, suffix: &str) -> bool {
+        self.ends_with(suffix)
+    }
+    fn lz_split(&self, delimiter: &str) -> Vec<String> {
+        self.split(delimiter).map(|s| s.to_string()).collect()
+    }
+    fn lz_join(&self, iter: Vec<String>) -> String {
+        iter.join(self)
+    }
+    fn lz_replace(&self, from: &str, to: &str) -> String {
+        self.replace(from, to)
+    }
+    fn lz_trim(&self) -> String {
+        self.trim().to_string()
+    }
+    fn lz_to_upper(&self) -> String {
+        self.to_uppercase()
+    }
+    fn lz_to_lower(&self) -> String {
+        self.to_lowercase()
+    }
+    fn lz_slice(&self, start: i64, end: i64) -> String {
+        let s = start.max(0) as usize;
+        let e = (end as usize).min(self.len());
+        if s >= e {
+            return String::new();
+        }
+        self[s..e].to_string()
+    }
+    fn lz_find(&self, substr: &str) -> Option<i64> {
+        self.find(substr).map(|i| i as i64)
+    }
+}

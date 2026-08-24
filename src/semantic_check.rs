@@ -20,6 +20,21 @@ struct FnSig {
     /// 必需参数数（无默认值的参数个数）；调用参数个数 ∈ [param_count_min, param_count]
     param_count_min: usize,
     generic_count: usize,
+    /// 函数声明含 `..` 变参注入：调用时参数个数上限不限
+    variadic: bool,
+    /// 最后参数为 List<T>（安全收集）：允许省略该参数、允许超量实参自动收集为 List
+    collect_list: bool,
+}
+
+/// 判断类型是否为列表类（List<T>/Array<T>/Vec<T> 或裸 List/Array/Vec）
+fn is_list_type(t: &Type) -> bool {
+    match t {
+        Type::Generic { base, .. } => {
+            matches!(base.as_ref(), Type::Named(b) if b == "List" || b == "Array" || b == "Vec")
+        }
+        Type::Named(b) => b == "List" || b == "Array" || b == "Vec",
+        _ => false,
+    }
 }
 
 #[derive(Default)]
@@ -31,6 +46,8 @@ pub struct Checker {
     type_names: HashSet<String>,
     /// 枚举名（enum 的变体是 StuctDef::fields）
     enum_names: HashSet<String>,
+    /// 枚举变体名（`Ordering.Less` 的 base / `case Less` 的裸变体）
+    enum_variants: HashSet<String>,
     /// 导入符号（from x import a, b → 视为已知类型/变量来源，避免误伤跨文件类型）
     imported_names: HashSet<String>,
     /// 模块级函数名（顶层 def 视为模块作用域内可绑定）
@@ -41,12 +58,10 @@ pub struct Checker {
     fn_ctx: Option<FnCtx>,
     /// 循环深度（break/continue 检查）
     loop_depth: usize,
+    /// try/catch 捕获深度（raise 在函数内被 catch 捕获时无需声明 raises）
+    catch_depth: usize,
     /// 作用域栈（unbound 变量 / 不可变赋值检查；值 = 是否可变）
     scopes: Vec<HashMap<String, bool>>,
-    /// trait 名 → 抽象方法（无默认实现）数量，用于「trait 方法必须被 impl 覆盖」
-    trait_abstract: HashMap<String, usize>,
-    /// 已实现的 trait（impl trait_name）
-    impl_traits: HashSet<String>,
 }
 
 #[derive(Default, Clone)]
@@ -84,6 +99,9 @@ fn builtin_type_names() -> HashSet<&'static str> {
         "Ptr", "Pointer", "Ref", "MutRef", "Fn", "FnMut", "FnOnce", "Iterator",
         "Iter", "Generator", "Simd", "Box", "Any", "Object", "Json", "JSON",
         "Rc", "Arc", "Weak", "Maybe", "Never", "Auto", "Ext",
+        "String", "__Params",
+        "Iterable", "Cell", "Ordering", "Error", "Box", "Mutex", "RwLock", "AtomicBool",
+        "AtomicI32", "AtomicU64", "Duration", "Instant", "Path", "PathBuf", "File",
         "Ordered", "Clone", "Copy", "Display", "Debug", "Eq", "Ord", "PartialEq",
         "PartialOrd", "Default", "Hash", "Add", "Sub", "Mul", "Div", "Rem", "Neg",
         "Index", "IndexMut", "IntoIterator", "FromIterator", "AsRef", "AsMut",
@@ -103,6 +121,9 @@ fn builtin_value_names() -> HashSet<&'static str> {
         "to_string", "int", "float", "str", "bool", "list", "dict", "set", "tuple",
         "True", "False", "None", "self", "this", "_", "super",
         "true", "false", "map", "filter", "reduce", "fold", "zip", "enumerate", "sum", "min", "max",
+        "__name__", "__doc__", "__is_macro__", "__slots__", "__file__", "__package__",
+        "__path__", "__module__", "__qualname__", "__", "collect",
+        "inspect",
     ] {
         s.insert(n);
     }
@@ -165,23 +186,14 @@ impl Checker {
             self.type_names.insert(s.name.clone());
             if s.is_enum {
                 self.enum_names.insert(s.name.clone());
+                for f in &s.fields {
+                    self.enum_variants.insert(f.name.clone());
+                }
                 self.check_enum_dup_variant(s);
             }
         }
         for t in &m.traits {
             self.type_names.insert(t.name.clone());
-            // 抽象方法（无默认实现）计数
-            let abstract_count = t.methods.iter().filter(|f| f.body.is_empty()).count();
-            let total = t.methods.len();
-            if total > 0 && abstract_count > 0 {
-                self.trait_abstract.insert(t.name.clone(), abstract_count);
-            }
-        }
-        for im in &m.impls {
-            if let Some(tn) = &im.trait_name {
-                // 剥去泛型参数（`Iterator<T>` → `Iterator`），供裸名覆盖检查使用
-                self.impl_traits.insert(base_name(tn).to_string());
-            }
         }
         for t in &m.type_aliases {
             self.type_names.insert(t.name.clone());
@@ -205,6 +217,12 @@ impl Checker {
                 param_count: f.params.len(),
                 param_count_min: f.params.iter().filter(|p| p.default.is_none()).count(),
                 generic_count: f.generics.len(),
+                variadic: !matches!(f.variadic, VariadicMode::None),
+                collect_list: f
+                    .params
+                    .last()
+                    .map(|p| p.default.is_none() && is_list_type(&p.ty))
+                    .unwrap_or(false),
             };
             self.fn_names.insert(f.name.clone());
             self.fn_sigs.insert(f.name.clone(), sig);
@@ -281,7 +299,20 @@ impl Checker {
     ) {
         match ty {
             Type::Named(name) => {
-                if !self.is_known_type(name, fn_generics, struct_generics) {
+                // 关联类型绑定（Rust 风格 `Output = I.Item` / `Item = T`）：
+                // 形如 `名 = 类型`，只校验右侧实际类型
+                if let Some(eq_idx) = name.find(" = ") {
+                    let rhs = &name[eq_idx + 3..];
+                    let root = rhs.split('.').next().unwrap_or(rhs);
+                    if !self.is_known_type(root, fn_generics, struct_generics) {
+                        self.error(format!("未知类型: {name}（位于 {ctx}）"));
+                    }
+                    return;
+                }
+                // 关联类型路径（I.Item / Self.Item / Self.Output / A.B）：
+                // 只校验根路径类型名，`.` 之后是关联类型访问（Rust 侧生成 I::Item）
+                let root = name.split('.').next().unwrap_or(name);
+                if !self.is_known_type(root, fn_generics, struct_generics) {
                     self.error(format!("未知类型: {name}（位于 {ctx}）"));
                 }
             }
@@ -441,21 +472,6 @@ impl Checker {
         }
         self.fn_ctx = saved_ctx;
         self.pop_scope(); // 模块根作用域
-
-        // G2: trait 声明了抽象方法（无默认实现）但模块内没有任何 impl 覆盖 → 报错
-        let mut abstract_traits: Vec<(String, usize)> = self
-            .trait_abstract
-            .iter()
-            .map(|(k, v)| (k.clone(), *v))
-            .collect();
-        abstract_traits.sort();
-        for (name, count) in abstract_traits {
-            if !self.impl_traits.contains(&name) {
-                self.error(format!(
-                    "trait {name} 声明了 {count} 个无默认实现的方法，但当前模块没有为该 trait 提供任何 impl"
-                ));
-            }
-        }
     }
 
     fn check_function_body(&mut self, f: &Function) {
@@ -476,8 +492,27 @@ impl Checker {
         let saved_loop = self.loop_depth;
         self.loop_depth = 0;
         self.push_scope();
+        // 函数泛型参数（`def collect<C: ...>`）在函数体内可作为类型名引用
+        // （如 `C.from_iter(self)`），需绑定到当前作用域
+        for g in &f.generics {
+            self.bind(g.clone());
+        }
         for p in &f.params {
             self.bind(p.name.clone());
+        }
+        // 变参注入名：`..` → args / kwargs（函数体内可直接引用）
+        match &f.variadic {
+            VariadicMode::ArgsOnly { .. } => self.bind("args".to_string()),
+            VariadicMode::KwargsOnly { .. } => self.bind("kwargs".to_string()),
+            VariadicMode::Both { .. } => {
+                self.bind("args".to_string());
+                self.bind("kwargs".to_string());
+            }
+            VariadicMode::None => {}
+        }
+        // def f[ps: __Params](...) — ps 接收 &mut __Params，函数体内可引用
+        if let Some(cp) = &f.checker_param {
+            self.bind(cp.clone());
         }
         for st in &f.body {
             self.check_stmt(st);
@@ -524,6 +559,7 @@ impl Checker {
             || self.fn_names.contains(name)
             || self.type_names.contains(name)
             || self.enum_names.contains(name)
+            || self.enum_variants.contains(name)
         {
             return true;
         }
@@ -648,7 +684,24 @@ impl Checker {
                 self.check_expr(iter);
                 self.loop_depth += 1;
                 self.push_scope();
-                self.bind(var.clone());
+                // `for (a, b) in ...` / `for a, b in ...`：元组解构多变量
+                let vt = var.trim();
+                let parts: Vec<&str> = if (vt.starts_with('(') && vt.ends_with(')'))
+                    || vt.contains(',')
+                {
+                    let inner = vt
+                        .strip_prefix('(')
+                        .and_then(|s| s.strip_suffix(')'))
+                        .unwrap_or(vt);
+                    inner.split(',').map(|s| s.trim()).collect()
+                } else {
+                    vec![vt]
+                };
+                for part in parts {
+                    if !part.is_empty() {
+                        self.bind(part.to_string());
+                    }
+                }
                 for s in body {
                     self.check_stmt(s);
                 }
@@ -667,7 +720,18 @@ impl Checker {
                 self.pop_scope();
                 self.loop_depth -= 1;
             }
-            Stmt::Break(_) => {
+            Stmt::Break(Some(Expr::Ident(_))) => {
+                // 命名跳出（break NAME）：跳出命名块/循环标签，非 break 表达式，
+                // 不要求循环上下文（05b-block命名块.md 允许 break NAME 跳出词法祖先块）
+            }
+            Stmt::Break(Some(e)) => {
+                // 带值的 break（break 表达式 / 循环带值）：需在循环内
+                if self.loop_depth == 0 {
+                    self.error("break 语句出现在循环（for/while/loop）之外".into());
+                }
+                self.check_expr(e);
+            }
+            Stmt::Break(None) => {
                 if self.loop_depth == 0 {
                     self.error("break 语句出现在循环（for/while/loop）之外".into());
                 }
@@ -689,8 +753,10 @@ impl Checker {
                 }
                 self.pop_scope();
             }
-            Stmt::CheckerBlock { body, .. } => {
+            Stmt::CheckerBlock { ps_name, body, .. } => {
                 self.push_scope();
+                // block NAME[ps: __Params] — ps 是块内可用变量（未显式命名时默认 ps）
+                self.bind(ps_name.clone().unwrap_or_else(|| "ps".to_string()));
                 for s in body {
                     self.check_stmt(s);
                 }
@@ -698,8 +764,12 @@ impl Checker {
             }
             Stmt::Defer(body) => self.check_block(body),
             Stmt::Raise(e) => {
-                if let Some(c) = self.fn_ctx.as_mut() {
-                    c.has_raise = true;
+                // raise 位于函数内 try/catch 的捕获范围内时，不会向函数外传播，
+                // 无需在签名中声明 raises
+                if self.catch_depth == 0 {
+                    if let Some(c) = self.fn_ctx.as_mut() {
+                        c.has_raise = true;
+                    }
                 }
                 self.check_expr(e);
             }
@@ -742,7 +812,9 @@ impl Checker {
                 // 函数内 enum 定义同样注册枚举名（pattern_more.lz 在函数内定义
                 // enum Command 后于 match 模式 Command.Move(..) 中引用，否则误报未绑定）
                 self.enum_names.insert(s.name.clone());
+                self.type_names.insert(s.name.clone());
                 for f in &s.fields {
+                    self.enum_variants.insert(f.name.clone());
                     self.check_type(&f.ty, &format!("enum {} 变体类型", s.name), &[], &s.generics);
                 }
             }
@@ -777,13 +849,22 @@ impl Checker {
             Stmt::Suite {
                 setup, teardown, tests, ..
             } => {
+                // setup/teardown/tests 共享同一作用域（setup 绑定可在 tests 中引用）
+                self.push_scope();
                 if let Some(s) = setup {
-                    self.check_block(s);
+                    for st in s {
+                        self.check_stmt(st);
+                    }
                 }
                 if let Some(t) = teardown {
-                    self.check_block(t);
+                    for st in t {
+                        self.check_stmt(st);
+                    }
                 }
-                self.check_block(tests);
+                for st in tests {
+                    self.check_stmt(st);
+                }
+                self.pop_scope();
             }
             Stmt::Comptime { body } => self.check_block(body),
             Stmt::TypeAlias { ty, .. } => {
@@ -895,20 +976,34 @@ impl Checker {
                 }
                 // G2: 同模块函数调用参数个数不匹配（`def f(a); f(1,2)`）→ 报错
                 if let Expr::Ident(name) = func.as_ref() {
-                    let sig = self.fn_sigs.get(name).map(|s| (s.param_count, s.param_count_min, s.generic_count));
-                    if let Some((param_count, param_count_min, generic_count)) = sig {
+                    let sig = self
+                        .fn_sigs
+                        .get(name)
+                        .map(|s| (s.param_count, s.param_count_min, s.generic_count, s.variadic, s.collect_list));
+                    if let Some((param_count, param_count_min, generic_count, variadic, collect_list)) = sig {
                         let has_kwarg = args.iter().any(|a| matches!(a, Expr::KwArg { .. }));
-                        // 默认参数可省略：参数个数 ∈ [必需数, 总数]
-                        if !has_kwarg && (args.len() < param_count_min || args.len() > param_count) {
-                            let need = if param_count_min == param_count {
-                                format!("需要 {param_count} 个参数")
+                        // 默认参数可省略：参数个数 ∈ [必需数, 总数]；
+                        // 变参（`..`）上限不限；安全收集（最后参数 List<T>）上限不限且允许省略该 List 参数
+                        if !has_kwarg {
+                            let lower = if collect_list {
+                                param_count_min.saturating_sub(1)
                             } else {
-                                format!("需要 {param_count_min}~{param_count} 个参数")
+                                param_count_min
                             };
-                            self.error(format!(
-                                "调用参数个数不匹配: 函数 {name} {need}，但传入了 {} 个",
-                                args.len()
-                            ));
+                            let upper_ok = variadic || collect_list || args.len() <= param_count;
+                            if args.len() < lower || !upper_ok {
+                                let need = if variadic || collect_list {
+                                    format!("至少 {param_count_min} 个参数")
+                                } else if param_count_min == param_count {
+                                    format!("需要 {param_count} 个参数")
+                                } else {
+                                    format!("需要 {param_count_min}~{param_count} 个参数")
+                                };
+                                self.error(format!(
+                                    "调用参数个数不匹配: 函数 {name} {need}，但传入了 {} 个",
+                                    args.len()
+                                ));
+                            }
                         }
                         // 泛型函数调用：显式类型参数缺失时，仅当无实参可推断（空调用）才报错；
                         // 有实参时允许类型推断（typer 层负责推断）
@@ -919,7 +1014,15 @@ impl Checker {
                         }
                     }
                 }
-                for a in args {
+                // __as__(value, type_name)：第二参数是类型名（如 str→String），不做变量绑定检查
+                let callee_name = match func.as_ref() {
+                    Expr::Ident(n) => Some(n.as_str()),
+                    _ => None,
+                };
+                for (idx, a) in args.iter().enumerate() {
+                    if callee_name == Some("__as__") && idx == 1 {
+                        continue;
+                    }
                     self.check_expr(a);
                 }
             }
@@ -1107,7 +1210,14 @@ impl Checker {
                 else_body,
                 finally_body,
             } => {
+                // 进入有 catch 的 try 块：内部 raise 视为被函数内捕获
+                if !catches.is_empty() {
+                    self.catch_depth += 1;
+                }
                 self.check_block(body);
+                if !catches.is_empty() {
+                    self.catch_depth -= 1;
+                }
                 for arm in catches {
                     if let Some(g) = &arm.guard {
                         self.check_expr(g);
@@ -1160,7 +1270,9 @@ fn pattern_key(p: &Pattern) -> Option<String> {
         Pattern::Int(v) => Some(format!("int:{v}")),
         Pattern::Str(s) => Some(format!("str:{s}")),
         Pattern::Bool(b) => Some(format!("bool:{b}")),
-        Pattern::Ident(s) => Some(format!("ident:{s}")),
+        // 裸标识符模式是绑定模式（case x if ...），每个分支独立作用域，重复合法；
+        // 与守卫组合时尤其常见（case s if s>=90 / case s if s>=75），不做去重
+        Pattern::Ident(_) | Pattern::RefMutIdent(_) | Pattern::Wildcard => None,
         _ => None,
     }
 }

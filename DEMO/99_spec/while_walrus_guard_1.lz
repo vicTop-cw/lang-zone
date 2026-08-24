@@ -1,12 +1,13 @@
 // while 条件 + 海象 := 表达式内赋值 + if 守卫 三者组合
 // 出处：SYNTAX/05-控制流.md §3.5（while 守卫）+ SYNTAX/12-操作符.md §1.20（海象 :=）
 // 预期语法：while 条件 + := 表达式内赋值 + if 守卫 三者组合
+count = 0
+
 def next() -> int =
     count += 1
     count
 
 def main() =
-    count = 0
     // while 条件内用 := 绑定每次取到的值；if 守卫只处理偶数
     while (n := next()) <= 6 if n % 2 == 0:
         print(n)          // 预期输出：2, 4, 6

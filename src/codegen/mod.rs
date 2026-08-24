@@ -288,7 +288,12 @@ impl CodeGen {
             }
         }
         if !imp.items.is_empty() {
-            out.push_str(&format!("use {}::{{{}}};\n", result.rust_path, imp.items.join(", ")));
+            // glob 导入（import X::*）→ use X::*;（Rust 不允许 {*})
+            if imp.items.len() == 1 && imp.items[0] == "*" {
+                out.push_str(&format!("use {}::*;\n", result.rust_path));
+            } else {
+                out.push_str(&format!("use {}::{{{}}};\n", result.rust_path, imp.items.join(", ")));
+            }
         } else if let Some(alias) = &imp.alias {
             out.push_str(&format!("use {} as {};\n", result.rust_path, alias));
         } else {

@@ -578,6 +578,8 @@ impl Parser {
         loop {
             match self.advance() {
                 Token::Ident(n) => path.push(n),
+                // glob 导入: import X::* / import X.* —— * 结束路径
+                Token::Star => break,
                 t => return Err(format!("Expected module name, got {:?}", t)),
             }
             // 路径分隔符接受 ::（Rust 风格）或 .（LZ 风格）
@@ -592,8 +594,14 @@ impl Parser {
                 break;
             }
         }
-        // 花括号形式: import X::{a, b} 或 import X.{a, b}
+        // glob 导入: import X::* 或 import X.* → items = ["*"]
         let items = if (self.check(&Token::PathSep) || self.check(&Token::Dot))
+            && self.peek_n(1) == &Token::Star
+        {
+            self.advance(); // :: 或 .
+            self.advance(); // *
+            vec!["*".to_string()]
+        } else if (self.check(&Token::PathSep) || self.check(&Token::Dot))
             && self.peek_n(1) == &Token::LBrace
         {
             self.advance(); // :: 或 .
@@ -1509,12 +1517,25 @@ impl Parser {
                             )));
                         }
                         // type-pack 元素 `Ts...`（03d §2.8 方案 B）：消费尾部 `...`
-                        // （parse_type 解析 Ident(Ts) 后残留 DotDotDot）
+                        // （parse_type 解析 Ident(Ts) 后残留 `...`）
+                        // 注意：词法器把 `...` 拆为 DotDot + Dot 两个 token（lexer.rs
+                        // 仅识别 `..`），因此 DotDotDot 分支实际不可达；真正生效的是
+                        // else-if 的 DotDot + Dot 分支。两者都要做标记：
+                        // 将最后一个实参改为 Named("Ts...")（带省略号后缀），
+                        // 供 `..: Tuple<Ts...>` 变参注入在 builder 阶段识别为 type pack
+                        // （此前 `...` 被静默消费，Tuple<Ts...> 与 Tuple<T> 无法区分，
+                        // 导致异质元组被降级为 &[Ts] 同构切片 → E0308）
                         if self.check(&Token::DotDotDot) {
                             self.advance(); // consume ...
+                            if let Some(last) = inner.last_mut() {
+                                *last = Type::Named(format!("{}...", last.to_string()));
+                            }
                         } else if self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot {
                             self.advance(); // consume ..
                             self.advance(); // consume .
+                            if let Some(last) = inner.last_mut() {
+                                *last = Type::Named(format!("{}...", last.to_string()));
+                            }
                         }
                         if self.check(&Token::Comma) {
                             self.advance();
@@ -1871,24 +1892,24 @@ impl Parser {
                         let has_named_fields = matches!(self.peek(), Token::Ident(_))
                             && self.peek_n(1) == &Token::Colon;
                         if has_named_fields {
-                            let mut field_types = Vec::new();
+                            // 命名字段变体: Circle(x: f64, y: f64) → Record[(name, ty)]
+                            // （保留字段名，供 IR/codegen 生成 Rust 结构体变体与命名字段访问）
+                            let mut named_fields = Vec::new();
                             while !self.check(&Token::RParen) {
-                                match self.advance() {
-                                    Token::Ident(_) => {}
+                                let fname = match self.advance() {
+                                    Token::Ident(n) => n,
                                     t => return Err(format!("Expected field name, got {:?}", t)),
-                                }
+                                };
                                 self.expect(Token::Colon)?;
-                                field_types.push(self.parse_type()?);
+                                let fty = self.parse_type()?;
+                                named_fields.push((fname, fty));
                                 if self.check(&Token::Comma) {
                                     self.advance();
                                 }
                             }
                             self.expect(Token::RParen)?;
-                            if field_types.len() == 1 {
-                                field_types.into_iter().next().unwrap()
-                            } else {
-                                Type::Tuple(field_types)
-                            }
+                            // 复用 Duck 结构化字段类型编码命名字段变体字段（types::Type 无 Record）
+                            Type::Duck { fields: named_fields }
                         } else {
                             let mut types = Vec::new();
                             while !self.check(&Token::RParen) {

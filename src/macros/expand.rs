@@ -18,10 +18,13 @@ use std::cell::Cell;
 ///
 /// 策略：扫描展开结果 token 流，收集宏体自身绑定的名字（`let X` / `let mut X` /
 /// `for X in` / `def X`），将这些名字的所有 Ident 引用重命名为 `X__m{uid}`。
-/// 宏参数（调用方传入的实参 token，如 check_eq 的 actual/expected）本身不是
-/// 宏体绑定名，不会误伤；调用方同名变量（acc=100）也保持不变。
-fn hygienize_tokens(tokens: &[Token], uid: usize) -> Vec<Token> {
-    // 收集宏体局部绑定名
+/// 宏参数（调用方传入的实参 token，如 check_eq 的 actual/expected、wrap_loop
+/// 的 body）本身不是宏体绑定名，不会误伤；调用方同名变量（acc=100）也保持不变。
+/// 参数中的绑定（`exclude`）即使出现在展开结果里（如 wrap_loop 的 body 含
+/// `let v = 5`），也按调用方卫生原样保留、不重命名——否则 p11c_macro_deep
+/// 的 `total = total + v` 在宏外引用 v 会报未绑定。
+fn hygienize_tokens(tokens: &[Token], uid: usize, exclude: &[String]) -> Vec<Token> {
+    // 收集宏体局部绑定名（排除参数中调用方自己的绑定）
     let mut bound: Vec<String> = Vec::new();
     let mut i = 0;
     let len = tokens.len();
@@ -33,7 +36,9 @@ fn hygienize_tokens(tokens: &[Token], uid: usize) -> Vec<Token> {
                     j += 1;
                 }
                 if let Some(Token::Ident(n)) = tokens.get(j) {
-                    bound.push(n.clone());
+                    if !exclude.iter().any(|e| e == n) {
+                        bound.push(n.clone());
+                    }
                 }
             }
             Token::For => {
@@ -42,7 +47,9 @@ fn hygienize_tokens(tokens: &[Token], uid: usize) -> Vec<Token> {
                     j += 1;
                 }
                 if let Some(Token::Ident(n)) = tokens.get(j) {
-                    bound.push(n.clone());
+                    if !exclude.iter().any(|e| e == n) {
+                        bound.push(n.clone());
+                    }
                 }
             }
             // 注意：def 函数名不重命名（模板 make_getter! 产出的 get_double 函数
@@ -69,6 +76,43 @@ fn hygienize_tokens(tokens: &[Token], uid: usize) -> Vec<Token> {
             }
         })
         .collect()
+}
+
+/// 从参数 token 中提取调用方绑定的名字（let/for 绑定），供宏卫生性排除：
+/// 参数是调用方代码，其绑定按调用方卫生原样保留，不重命名。
+fn collect_param_bindings(tokens: &[Token]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut i = 0;
+    let len = tokens.len();
+    while i < len {
+        match &tokens[i] {
+            Token::Let => {
+                let mut j = i + 1;
+                if j < len && tokens[j] == Token::Mut {
+                    j += 1;
+                }
+                if let Some(Token::Ident(n)) = tokens.get(j) {
+                    if !names.iter().any(|e| e == n) {
+                        names.push(n.clone());
+                    }
+                }
+            }
+            Token::For => {
+                let mut j = i + 1;
+                if j < len && tokens[j] == Token::Mut {
+                    j += 1;
+                }
+                if let Some(Token::Ident(n)) = tokens.get(j) {
+                    if !names.iter().any(|e| e == n) {
+                        names.push(n.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    names
 }
 
 // ──────────────── 宏注册中心 ────────────────
@@ -248,8 +292,15 @@ impl TemplateExpander {
                         let after_name = excl_idx + 1;
                         let decl_tokens = self.collect_decl_tokens(tokens, after_name);
                         let decl_end = after_name + decl_tokens.len();
+                        eprintln!("DBG noblock: name={} after_name={} decl_len={} decl_end={} len={}", name, after_name, decl_tokens.len(), decl_end, len);
+                        if len <= 42 {
+                            for (ti, tt) in tokens.iter().enumerate() {
+                                eprintln!("DBG T{:3} {:?}", ti, tt);
+                            }
+                        }
                         if !decl_tokens.is_empty() {
-                            let expanded = self.expand_template(&name, &decl_tokens, depth)?;
+                            let mut expanded = self.expand_template(&name, &decl_tokens, depth)?;
+                            rebalance_expanded_indents(&mut expanded);
                             result.extend(expanded);
                             i = decl_end;
                             continue;
@@ -299,7 +350,9 @@ impl TemplateExpander {
         let hygienic = if is_passthrough {
             result.tokens.clone()
         } else {
-            hygienize_tokens(&result.tokens, uid)
+            // 排除参数中调用方自己的绑定（let/for），按调用方卫生原样保留
+            let exclude = arg_groups.iter().flat_map(|g| collect_param_bindings(g)).collect::<Vec<_>>();
+            hygienize_tokens(&result.tokens, uid, &exclude)
         };
 
         // 先递归展开结果中的嵌套模板/宏（内层各自检查）——产物可能仍含
@@ -353,6 +406,11 @@ impl TemplateExpander {
                     result.push(tokens[i].clone());
                 }
                 Token::Dedent => {
+                    if !seen_indent {
+                        // 无块参数（`@name!` 后是同缩进语句，如 p11c_macro_deep）：
+                        // 不吞外层 Dedent，立即停止，保留 Dedent 给调用方闭合缩进
+                        break;
+                    }
                     indent_level -= 1;
                     result.push(tokens[i].clone());
                     if indent_level == 0 && seen_indent {
@@ -372,6 +430,27 @@ impl TemplateExpander {
             i += 1;
         }
         result
+    }
+}
+
+/// 展开产物缩进平衡：quote 字符串中的 `\n    ` 会生成 Indent，但当宏/模板
+/// 以无块参数方式调用（`@name!` / `name!` 后接同缩进语句，如 p11c_macro_deep）
+/// 时，body 不含闭合 Dedent，导致展开产物 Indent/Dedent 不平衡，最终 Parser
+/// 报 "Expected Dedent, got Eof"。这里在产物末尾补足缺失的 Dedent，使
+/// quote 创建的块在产物内完整闭合（调用方后续同缩进 token 原样保留）。
+fn rebalance_expanded_indents(tokens: &mut Vec<Token>) {
+    let mut depth = 0i32;
+    for t in tokens.iter() {
+        match t {
+            Token::Indent => depth += 1,
+            Token::Dedent => depth -= 1,
+            _ => {}
+        }
+    }
+    eprintln!("DBG rebalance depth={} len={}", depth, tokens.len());
+    while depth > 0 {
+        tokens.push(Token::Dedent);
+        depth -= 1;
     }
 }
 
@@ -668,7 +747,8 @@ impl MacroExpander {
                                 // 有属性宏作用于声明：@name![attr] decl
                                 let decl_tokens = self.collect_decl_tokens(tokens, attr_end + 1);
                                 let decl_end = attr_end + 1 + decl_tokens.len();
-                                let expanded = self.expand_attr_macro(&name, &attr_tokens, &decl_tokens, depth)?;
+                                let mut expanded = self.expand_attr_macro(&name, &attr_tokens, &decl_tokens, depth)?;
+                                rebalance_expanded_indents(&mut expanded);
                                 result.extend(expanded);
                                 i = decl_end;
                                 continue;
@@ -700,8 +780,15 @@ impl MacroExpander {
                         }
                         let decl_tokens = self.collect_decl_tokens(tokens, after_name);
                         let decl_end = after_name + decl_tokens.len();
+                        eprintln!("DBG noblock: name={} after_name={} decl_len={} decl_end={} len={}", name, after_name, decl_tokens.len(), decl_end, len);
+                        if len <= 42 {
+                            for (ti, tt) in tokens.iter().enumerate() {
+                                eprintln!("DBG T{:3} {:?}", ti, tt);
+                            }
+                        }
                         if !decl_tokens.is_empty() {
-                            let expanded = self.expand_macro(&name, &decl_tokens, None, depth)?;
+                            let mut expanded = self.expand_macro(&name, &decl_tokens, None, depth)?;
+                            rebalance_expanded_indents(&mut expanded);
                             result.extend(expanded);
                             i = decl_end;
                             continue;
@@ -759,6 +846,10 @@ impl MacroExpander {
 
         let result = interp.execute_stmts(&def.body)
             .map_err(|e| format!("macro '{}' expansion error: {}", name, e))?;
+        eprintln!("DBG macro {} result len={}", name, result.tokens.len());
+        for (i, t) in result.tokens.iter().enumerate() {
+            eprintln!("  DBG R{:3} {:?}", i, t);
+        }
 
         // 宏卫生性：宏体局部绑定加唯一后缀（避免污染调用方同名变量）。
         // 恒等/透传宏（body = 单个参数引用，如 `macro id(input) = input`）：
@@ -772,7 +863,9 @@ impl MacroExpander {
         let hygienic = if is_passthrough {
             result.tokens.clone()
         } else {
-            hygienize_tokens(&result.tokens, uid)
+            // 排除参数中调用方自己的绑定（let/for），按调用方卫生原样保留
+            let exclude = collect_param_bindings(&cleaned);
+            hygienize_tokens(&result.tokens, uid, &exclude)
         };
 
         // 先递归展开结果中的嵌套宏（内层展开时各自做检查）——
@@ -823,7 +916,10 @@ impl MacroExpander {
     }
 
     /// 收集一个声明（从当前位置到声明结束）
-    /// 声明结束：顶层 Newline（缩进级 0） 或下一个顶层声明
+    /// 声明结束：顶层缩进块闭合回 0（seen_indent 且 indent_level==0）、
+    /// 或缩进块产物结束（含 Indent）、或下一个顶层 Def/Struct/At 声明。
+    /// 无块参数 `@name!`（p11c_macro_deep）：收集同缩进语句直到缩进块
+    /// 结束或下一个顶层声明，作为宏 body（quote 模板把整段包进 for）。
     fn collect_decl_tokens(&self, tokens: &[Token], start: usize) -> Vec<Token> {
         if start >= tokens.len() {
             return vec![];
@@ -841,6 +937,11 @@ impl MacroExpander {
                     result.push(tokens[i].clone());
                 }
                 Token::Dedent => {
+                    if !seen_indent {
+                        // 无块参数（`@name!` 后是同缩进语句，如 p11c_macro_deep）：
+                        // 不吞外层 Dedent，立即停止，保留 Dedent 给调用方闭合缩进
+                        break;
+                    }
                     indent_level -= 1;
                     result.push(tokens[i].clone());
                     if indent_level == 0 && seen_indent {

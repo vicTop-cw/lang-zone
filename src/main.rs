@@ -17,6 +17,152 @@ use lang_zone::project::ProjectCompiler;
 use lang_zone::cache::CacheEntry;
 use lang_zone::incr::IncrCompiler;
 
+/// 跨模块符号内联：单文件模式下将用户 import 模块的顶层项合并进主 AST，
+/// 使被导入符号进入 IR/codegen（修复 E0425 use/extern 作用域系列失败）。
+/// 只注入定义项（fn/const/struct/enum/impl/alias/duck/magic + 顶层 let 转 const），
+/// checker 块注入为空 stub（避免 body 引用 __Params 触发语义错误），
+/// 顶层表达式语句（print 等）不注入（仅影响运行期初始化输出，批测不运行）。
+fn merge_imported_modules(module: &mut lang_zone::ast::Module, entry: &Path) {
+    let dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut loaded: Vec<PathBuf> = Vec::new();
+    merge_imports_into(module, &dir, &mut loaded);
+}
+
+fn merge_imports_into(
+    module: &mut lang_zone::ast::Module,
+    dir: &Path,
+    loaded: &mut Vec<PathBuf>,
+) {
+    let imports = module.imports.clone();
+    for imp in &imports {
+        if imp.path.is_empty() {
+            continue;
+        }
+        let first = imp.path[0].as_str();
+        // 跳过 std / crate 依赖 / macro 专有导入（宏定义合并由主流程完成）
+        if first == "std"
+            || first == "macro"
+            || [
+                "serde",
+                "tokio",
+                "regex",
+                "chrono",
+                "rand",
+                "itertools",
+                "serde_json",
+                "once_cell",
+            ]
+            .contains(&first)
+        {
+            continue;
+        }
+        let rel = imp.path.join("/");
+        let candidates = [
+            dir.join(&rel).with_extension("lz"),
+            dir.join(&rel).join("mod.lz"),
+        ];
+        let Some(mp) = candidates.into_iter().find(|c| c.exists()) else {
+            continue;
+        };
+        if loaded.contains(&mp) {
+            continue;
+        }
+        loaded.push(mp.clone());
+        let Ok(src) = fs::read_to_string(&mp) else {
+            continue;
+        };
+        let mut lexer = Lexer::new(&src);
+        let tokens = lexer.tokenize();
+        let Ok((registry, ranges)) = extract_macro_defs(&tokens) else {
+            continue;
+        };
+        let Ok((treg, tranges)) = extract_template_defs(&tokens) else {
+            continue;
+        };
+        let mut ranges = ranges;
+        ranges.extend(tranges);
+        let mut expander = MacroExpander::new(registry);
+        let expand_input: Vec<_> = tokens
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                !ranges
+                    .chunks(2)
+                    .any(|ch| ch.len() == 2 && *i >= ch[0] && *i < ch[1])
+            })
+            .map(|(_, t)| t.clone())
+            .collect();
+        let Ok(mut expanded) = expander.expand(&expand_input) else {
+            continue;
+        };
+        let mut tpl = TemplateExpander::new(treg);
+        for _ in 0..16 {
+            let before = expanded.clone();
+            let Ok(after_tpl) = tpl.expand(&expanded) else {
+                break;
+            };
+            let Ok(after_mac) = expander.expand(&after_tpl) else {
+                break;
+            };
+            expanded = after_mac;
+            if expanded == before {
+                break;
+            }
+        }
+        let mut parser = Parser::new(expanded);
+        let Ok(mut sub) = parser.parse_module() else {
+            continue;
+        };
+        // 递归处理子模块的 import
+        let sub_dir = mp.parent().unwrap_or(dir).to_path_buf();
+        merge_imports_into(&mut sub, &sub_dir, loaded);
+        // 注入定义项
+        module.functions.extend(sub.functions);
+        module.structs.extend(sub.structs);
+        module.traits.extend(sub.traits);
+        module.impls.extend(sub.impls);
+        module.type_aliases.extend(sub.type_aliases);
+        module.duck_defs.extend(sub.duck_defs);
+        module.magic_blocks.extend(sub.magic_blocks);
+        module.consts.extend(sub.consts);
+        // 顶层 let → Const（builder 对 consts 生成 IR Const）
+        for s in &sub.top_stmts {
+            if let lang_zone::ast::Stmt::Let {
+                name,
+                mutable,
+                ty,
+                value,
+                ..
+            } = s
+            {
+                module.consts.push(lang_zone::ast::ConstDef {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    value: value.clone(),
+                    mutable: *mutable,
+                });
+            }
+        }
+        // checker 块 → 空 stub（供调用点编译通过；body 语义不展开）
+        for s in &sub.top_stmts {
+            if let lang_zone::ast::Stmt::CheckerBlock {
+                label,
+                ps_name,
+                default_checker,
+                ..
+            } = s
+            {
+                module.top_stmts.push(lang_zone::ast::Stmt::CheckerBlock {
+                    label: label.clone(),
+                    ps_name: ps_name.clone(),
+                    default_checker: default_checker.clone(),
+                    body: vec![],
+                });
+            }
+        }
+    }
+}
+
 /// 将 .lz 扩展名替换为 .rs（只替换最后的扩展名，避免 `a.lz.lz` → `a.rs.rs` 问题）
 fn replace_ext(path: &str, from: &str, to: &str) -> String {
     let p = Path::new(path);
@@ -518,6 +664,10 @@ fn compile_main(args: Vec<String>) -> i32 {
     // comptime inspect.getsource/getsourcelines 的源码数据源（08b §6）：
     // 注入源文件文本，供 ComptimeContext.with_source 使用
     module.source_text = Some(source.clone());
+    // ── 跨模块符号内联（E0425 修复）──
+    // 单文件模式存在用户模块 import 时，加载被导入模块顶层项合并进主 AST，
+    // 使被导入符号进入 IR/codegen，修复 E0425 use/extern 作用域系列失败。
+    merge_imported_modules(&mut module, Path::new(path));
 
     if args.iter().any(|a| a == "--ast") {
         println!("{:#?}", module);

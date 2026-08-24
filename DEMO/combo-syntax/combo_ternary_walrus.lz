@@ -1,6 +1,7 @@
 // combo-syntax（绿色回归测试）：三元(if-else)表达式 + 海象运算符 :=
+// 海象变量必须在三元条件(cond)中绑定，then/else 分支才能引用（作用域规则）
 def compute() -> int = 7
 
 def main() =
-    let v = (n := compute()) > 5 if n * 10 else 0
+    let v = n * 10 if (n := compute()) > 5 else 0
     print(v)          // 70

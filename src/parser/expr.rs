@@ -1048,7 +1048,26 @@ impl ParserExprExt for Parser {
                     let then_expr = self.parse_expr()?;
                     let mut elif_clauses = Vec::new();
                     let mut else_body = None;
-                    // else if 链：`if a: x else if b: y else z`
+                    // 支持 then_expr 后换行再接 else / elif（bench.lz 单行 if-else）：
+                    //   if cond: then
+                    //   else: else_expr
+                    //   elif cond2: then2
+                    if self.check(&Token::Newline) {
+                        self.skip_newlines();
+                    }
+                    // elif 链
+                    while self.check(&Token::Elif) {
+                        self.advance();
+                        let eif_cond = self.parse_expr()?;
+                        self.expect(Token::Colon)?;
+                        self.skip_newlines();
+                        let eif_then = self.parse_expr()?;
+                        elif_clauses.push((eif_cond, vec![Stmt::Expr(eif_then)]));
+                        if self.check(&Token::Newline) {
+                            self.skip_newlines();
+                        }
+                    }
+                    // else if 链 / else 分支（同行或换行后）
                     if self.check(&Token::Else) {
                         self.advance();
                         if self.check(&Token::If) {
@@ -1059,6 +1078,11 @@ impl ParserExprExt for Parser {
                             let eif_then = self.parse_expr()?;
                             elif_clauses.push((eif_cond, vec![Stmt::Expr(eif_then)]));
                         } else {
+                            // 支持 `else: expr` 与 `else expr` 两种写法
+                            if self.check(&Token::Colon) {
+                                self.advance();
+                                self.skip_newlines();
+                            }
                             let else_expr = self.parse_expr()?;
                             else_body = Some(vec![Stmt::Expr(else_expr)]);
                         }

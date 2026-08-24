@@ -20,10 +20,8 @@ macro emit_array(items..: Tokens) -> Tokens =
     quote("print([" + items + "])")
 
 // --- template：自由参数（int），返回 Tokens，可内联 ---
-// 注：quote 字符串内转义双引号（\"）会导致宏体解析"未终止的字符串
-// 字面量"——避免转义；宏解释器 if 条件校验暂不可靠，编译期校验待完善
 template checked(x: int, bound: int) -> Tokens =
-    quote("print(x is " + x + ")")
+    quote("print(\"x is \" + " + x + ")")
 
 def main() =
     // 宏调用独占一行 + 缩进块输入（宏作用于缩进块）

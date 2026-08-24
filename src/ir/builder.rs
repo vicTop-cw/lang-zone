@@ -122,9 +122,11 @@ impl TypeCtx {
                     self.enum_variants.insert(f.name.clone(), s.name.clone());
                 }
                 // 收集变体字段类型：variant → [类型]（有序，match 臂绑定用）
-                // 变体字段合并存于 Field.ty：单字段 → AstType::Int；多字段 → AstType::Tuple([..])
+                // 变体字段合并存于 Field.ty：单字段 → AstType::Int；多字段 → AstType::Tuple([..])；
+                // 命名字段（Circle(x: f64, y: f64)）→ AstType::Record([(name, ty)])
                 for v in &s.fields {
                     let types: Vec<IrType> = match &v.ty {
+                        AstType::Duck { fields } => fields.iter().map(|(_, t)| from_ast_type(t)).collect(),
                         AstType::Tuple(items) => items.iter().map(from_ast_type).collect(),
                         AstType::Unit => vec![],
                         other => vec![from_ast_type(other)],
@@ -1013,6 +1015,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 || method == "remove"
                 || method == "clear"
                 || method == "append"
+                || method == "set"
             {
                 return IrType::Unit;
             }
@@ -4954,6 +4957,9 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }
             match crate::comptime::ComptimeEvaluator::eval_block(body, &mut cctx) {
                 Ok(Some(v)) => match comptime_value_to_lit(&v) {
+                    // comptime 块仅打印/副作用（值为 None）时不产出代码，
+                    // 避免生成裸 `None;` 语句导致 rustc E0282
+                    Some(ExprKind::Lit(LitKind::None_)) => Stmt::Pass,
                     Some(kind) => Stmt::ExprStmt {
                         expr: Expr::new(kind, IrType::Any, Span::unknown()),
                     },
@@ -6416,19 +6422,43 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                     variadic: true,
                 });
             } else {
-                let elem = elem_ty
-                    .as_ref()
-                    .map(|t| from_ast_type_with_generics(t, &generics))
-                    .unwrap_or(IrType::Any);
-                variadic_params.push(Param {
-                    name: "args".into(),
-                    ty: elem,
-                    is_mut: false,
-                    is_ref: false,
-                    is_owned: false,
-                    default: None,
-                    variadic: true,
+                // 03d §2.8 方案 B type-pack：`..: Tuple<Ts...>`（元素为 `Ts...`，
+                // parser 已标记为 Named("Ts...")）→ 异质元组，由调用点推断具体
+                // 类型。注册为 IrType::Tuple([Generic("Ts")])，使函数体内
+                // args.N 走元组字段访问（codegen FieldAccess Tuple 分支 → .N），
+                // 且调用点打包为 Rust 元组字面量（Type::Tuple 全 Generic = type pack）。
+                let is_type_pack = elem_ty.as_ref().map_or(false, |t| {
+                    matches!(t, AstType::Named(n) if n.ends_with("..."))
                 });
+                if is_type_pack {
+                    let pack_name = match elem_ty.as_ref().unwrap() {
+                        AstType::Named(n) => n.trim_end_matches("...").to_string(),
+                        _ => String::new(),
+                    };
+                    variadic_params.push(Param {
+                        name: "args".into(),
+                        ty: IrType::Tuple(vec![IrType::Generic(pack_name)]),
+                        is_mut: false,
+                        is_ref: false,
+                        is_owned: false,
+                        default: None,
+                        variadic: true,
+                    });
+                } else {
+                    let elem = elem_ty
+                        .as_ref()
+                        .map(|t| from_ast_type_with_generics(t, &generics))
+                        .unwrap_or(IrType::Any);
+                    variadic_params.push(Param {
+                        name: "args".into(),
+                        ty: elem,
+                        is_mut: false,
+                        is_ref: false,
+                        is_owned: false,
+                        default: None,
+                        variadic: true,
+                    });
+                }
             }
         }
         ast::VariadicMode::KwargsOnly { value_ty, .. } => {
@@ -7103,6 +7133,17 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                     name: f.name.clone(),
                     fields: match &f.ty {
                         AstType::Unit | AstType::None_ => vec![],
+                        AstType::Duck { fields } => {
+                            // 命名字段变体: Circle(x: f64, y: f64) → 带名 Field
+                            // （codegen 生成 Rust 结构体变体 { x: f64, y: f64 }）
+                            fields
+                                .iter()
+                                .map(|(n, t)| Field {
+                                    name: n.clone(),
+                                    ty: from_ast_type(t),
+                                })
+                                .collect()
+                        }
                         AstType::Tuple(elems) => {
                             // 元组变体: Circle(f64, f64, f64) → 三个无名 Field
                             elems

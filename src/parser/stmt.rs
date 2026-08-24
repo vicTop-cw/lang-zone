@@ -57,10 +57,12 @@ impl ParserStmtExt for Parser {
                             | Token::Underscore
                             | Token::Ident(_)
                     );
+                // 跨行 postfix 不含 LParen：let 声明后换行再遇 `(` 应视为新语句
+                // （如 `let x = 1` 后跟元组字面量 `(x, 2)`），若把 `(` 接续为调用
+                // 参数会误合并成 `1(x, 2)`，导致 let 绑定前变量未绑定。
                 matches!(
                     after_nl,
                     Token::Dot
-                        | Token::LParen
                         | Token::LBrack
                         | Token::Question
                         | Token::SafeNav
@@ -70,7 +72,6 @@ impl ParserStmtExt for Parser {
                         && matches!(
                             self.peek_n(2),
                             Token::Dot
-                                | Token::LParen
                                 | Token::LBrack
                                 | Token::Question
                                 | Token::SafeNav
