@@ -67,7 +67,7 @@ struct TakeIter =
             self.remaining = self.remaining - 1
             self.inner.next()
 
-def collect(iter: RangeIter) -> List<int> =
+def collect(iter: Iterator) -> List<int> =
     let result: List<int> = []
     let n = iter.next()
     while n is Some:
@@ -75,7 +75,7 @@ def collect(iter: RangeIter) -> List<int> =
         let n = iter.next()
     result
 
-def sum(iter: RangeIter) -> int =
+def sum(iter: Iterator) -> int =
     mut total = 0
     let n = iter.next()
     while n is Some:

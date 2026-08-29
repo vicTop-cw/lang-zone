@@ -80,9 +80,11 @@ const REJECT_CASES: &[RejectCase] = &[
         phase: "parser",
     },
     RejectCase {
-        name: "raise_without_raises",
-        source: "def f(x: int) -> int =\n    if x < 0:\n        raise \"neg\"\n    x\n",
-        phase: "semantic（G2：raise 未声明 raises 须拒绝）",
+        // 2026-08-28 语义修订：字符串字面量 raise（raise "msg"）为消息式错误，
+        // 免 raises 声明（已移入 ACCEPTED_CASES 锁定）；类型化 raise 仍必须声明。
+        name: "typed_raise_without_raises",
+        source: "def f(x: int) -> int =\n    if x < 0:\n        raise NegError(x)\n    x\n",
+        phase: "semantic（G2：类型化 raise 未声明 raises 须拒绝）",
     },
 ];
 
@@ -113,6 +115,13 @@ const ACCEPTED_CASES: &[RejectCase] = &[
         name: "yield_outside_iterator",
         source: "def f() =\n    yield 1\n",
         phase: "ir（宽松：yield 未强制 iterator 上下文）",
+    },
+    RejectCase {
+        // 2026-08-28 起：字符串字面量 raise 为消息式错误，可免 raises 声明
+        //（codegen has_raise 豁免）；类型化 raise 见 REJECT_CASES。
+        name: "string_raise_without_raises",
+        source: "def f(x: int) -> int =\n    if x < 0:\n        raise \"neg\"\n    x\n",
+        phase: "semantic（宽松：字符串 raise 免 raises 声明）",
     },
 ];
 

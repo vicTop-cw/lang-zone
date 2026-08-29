@@ -800,14 +800,28 @@ fn infer_generic_binding(
             path: p_path,
             args: p_args,
         } => {
-            if let IrType::Named {
-                path: a_path,
-                args: a_args,
-            } = arg_ty
-            {
-                if p_path == a_path {
-                    for (p, a) in p_args.iter().zip(a_args.iter()) {
-                        infer_generic_binding(p, a, bindings);
+            // 跨表示桥接：let 注解经 from_ast_type 产出 Named("Result"/"Option")，
+            // 函数签名经 from_ast_type_with_generics 产出 Result/Option 变体；
+            // 两侧表示不互通会导致泛型零绑定（lib_result and_then 实测）
+            match (p_path.as_str(), arg_ty) {
+                ("Result", IrType::Result { ok: a_ok, err: a_err }) if p_args.len() == 2 => {
+                    infer_generic_binding(&p_args[0], a_ok, bindings);
+                    infer_generic_binding(&p_args[1], a_err, bindings);
+                }
+                ("Option", IrType::Option(a_inner)) if p_args.len() == 1 => {
+                    infer_generic_binding(&p_args[0], a_inner, bindings);
+                }
+                _ => {
+                    if let IrType::Named {
+                        path: a_path,
+                        args: a_args,
+                    } = arg_ty
+                    {
+                        if p_path == a_path {
+                            for (p, a) in p_args.iter().zip(a_args.iter()) {
+                                infer_generic_binding(p, a, bindings);
+                            }
+                        }
                     }
                 }
             }

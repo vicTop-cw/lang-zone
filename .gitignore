@@ -97,3 +97,9 @@ temp/
 reports/
 omega/
 
+
+# FIND_BUG / 找缺中间产物
+.diffwork/
+*.lzcache
+div-tools/syntax_matrix_out.txt
+*.lzi

@@ -157,7 +157,7 @@ fn lib_tree() {
 }
 
 #[test]
-#[ignore = "待转正：LZ_REJECT collect 参数类型（P1b 分诊）"]
+#[ignore = "待转正：需用户 trait 参数（impl Trait/dyn）特性（P2a 功能项，库代码已改目标语义）"]
 fn lib_iterator() {
     assert!(run_lib("lib_iterator").unwrap().contains("OK"));
 }

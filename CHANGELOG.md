@@ -15,6 +15,16 @@ AIGC:
 
 本文件记录 LZ 编译器（`lzc` / `lzcyc`）的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v0.1.180] - 2026-08-29
+
+### 阶段 A 收口 + Result/Option 泛型桥接 + lib_iterator 转正（J1–J4）
+- builder.rs 跨表示桥接：`let` 注解 `Named("Result"/"Option")` 与函数签名 Result/Option 变体互通 → 泛型绑定不再零绑定（修 lib_result and_then）
+- `infer_generic_binding` 对 Named(Result/Option) 与 IrType::Result/Option 变体做显式配对推断
+- FIND_BUG/lib_iterator：`collect/sum` 参数 `RangeIter` → `Iterator` 放宽，用例全链路转正（ignored 12→10）
+- version.rs bump v0.1.165 → **v0.1.180**（此前 version.rs 滞后于 git 版本）
+- 清理根目录临时调试文件（err*.txt / build_*.txt / b3/b4.txt 等 16 个），`.diffwork/`、`*.lzcache` 纳入 .gitignore
+- 回归 514 passed / 0 failed / 10 ignored（基线 512 + iterator 转正 +2）；批测 325/325 正例 + 3/3 反例 100%
+
 ## [v0.1.179] - 2026-08-28
 
 ### 扩展语义检查器 + 负向防线 25/25（ERROR_BUG）
