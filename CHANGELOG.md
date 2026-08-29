@@ -15,6 +15,28 @@ AIGC:
 
 本文件记录 LZ 编译器（`lzc` / `lzcyc`）的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [v0.1.179] - 2026-08-28
+
+### 扩展语义检查器 + 负向防线 25/25（ERROR_BUG）
+- builder.rs 新增 check_extended_semantics / ExWalker 全套扩展语义检查：fn 形参逐参类型检查、闭包实参与 fn 形参匹配、泛型替换（ex_subst）、duck 约束、match 穷尽性与分支类型一致性、未绑定捕获等
+- ERROR_BUG 负向测试集 25 用例（8/24 基线 0/25 全漏报）→ **25/25 全部拦截**
+- 新增 tests/error_bug_libs.rs 回归守护（任一用例被放行即红）
+- 变体载荷解析优先限定名（Enum.Variant）+ scrutinee 枚举消歧：修复跨枚举同名变体（IrType.Tuple vs Pattern.Tuple）导致的误报（.lzlz 自举库实测暴露）
+- 参数类型报错补调用方函数名（诊断改进）
+
+### codegen 修复与自举 gate 三连修
+- 字符串字面量转义 escape_default（json.lz E0308）；字符串字面量参数直接生成 &str；下标 as usize 括号；字符串字面量 raise 豁免 raises 声明（消息式错误，语义见 reject_more 更新）
+- collect_unknown_extern_fns 将 Item::Use 导入名记为已知：修复增量拼接产物中未知函数桩与缓存模块真身重复定义（E0428，incremental_golden 自 v178 起存量失败）
+- LZ_BUILTIN_FN_NAMES 补 print_str / print_val：修复 .lzlz 自举 gate（--emit=ir-lz）被 i64 桩遮蔽内置函数（E0308）
+- 上述三修使 lz_ir_bootstrap 5/5 转绿、incremental_golden 转绿
+
+### 找缺推进与测试基建
+- FIND_BUG 12 库用例入库：全链路 0/12（阶段推进：解析层 fn 类型注解 5/5 修复、lib_pattern 至运行关）
+- tests/find_bug_libs.rs 修正路径约定（按目录实际 .lz 定位）+ rlib 查找兑底；12 用例按失败阶段 #[ignore] 分级，修复一个转正一个
+- tests/reject_more.rs 口径对齐：字符串 raise 免 raises 声明入 ACCEPTED_CASES 锁定，类型化 raise 未声明仍拒绝
+- DEMO 下 124 个 .pyx 生成产物清理；自举/stdlib 中间产物入库（lz_ir_lib.rs 等）
+- **全量回归 512 passed / 0 failed / 12 ignored（12 个 ignore 为 12 库转正队列）**，v178 存量隐藏失败（incremental_golden / lz_ir_bootstrap×3 / reject_more 口径）全部清零
+
 ## [v0.1.165] - 2026-08-20
 
 ### IR→rustc 通过率提升（74.9% → 76.6%，本轮修复）
