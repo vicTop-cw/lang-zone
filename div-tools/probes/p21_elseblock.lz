@@ -1,0 +1,23 @@
+// 隔离实验 3：else 块内调用 + 非递归函数，区分「嵌套块」vs「递归」因素
+enum IrType:
+    Int
+    Named(path: str, args: List<IrType>)
+
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + ("?" if a.len() > 0 else "") + ">")
+
+def display_list(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        let head = display_type(ts[0])
+        head
+
+def main() =
+    let v = IrType.Named(path: "Vec", args: [IrType.Int])
+    print(display_type(v))
+    let ts: List<IrType> = [IrType.Int, IrType.Named(path: "V", args: [IrType.Int])]
+    print(display_list(ts))

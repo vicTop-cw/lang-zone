@@ -1,0 +1,9 @@
+#!bin macro
+
+macro guard_check(cond: Tokens) -> Tokens =
+    quote("guard " + cond + " else:\n    panic(\"check failed\")")
+
+def main() =
+    let x = 5
+    @guard_check!(x > 3)
+    print(x)

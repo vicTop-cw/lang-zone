@@ -1,0 +1,11 @@
+#!bin macro
+
+macro wrap_loop(body: Tokens) -> Tokens =
+    quote("for i in 0..2:\n    " + body)
+
+def main() =
+    let mut total = 0
+    @wrap_loop!
+        let v = 5
+        total = total + v
+    print(total)

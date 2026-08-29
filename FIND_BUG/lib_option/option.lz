@@ -1,0 +1,85 @@
+// lib_option — Option 类型测试（修复版）
+// 修复：避免泛型推断问题，使用具体类型
+
+enum OptionInt:
+    Some(int)
+    None
+
+def is_some(opt: OptionInt) -> bool =
+    match opt:
+        case Some(_):
+            True
+        case None:
+            False
+
+def is_none(opt: OptionInt) -> bool =
+    match opt:
+        case Some(_):
+            False
+        case None:
+            True
+
+def unwrap(opt: OptionInt) -> int =
+    match opt:
+        case Some(v):
+            v
+        case None:
+            panic("unwrap on None")
+
+def unwrap_or(opt: OptionInt, default: int) -> int =
+    match opt:
+        case Some(v):
+            v
+        case None:
+            default
+
+def map_opt(opt: OptionInt, f: fn(int) -> int) -> OptionInt =
+    match opt:
+        case Some(v):
+            Some(f(v))
+        case None:
+            None
+
+def and_then(opt: OptionInt, f: fn(int) -> OptionInt) -> OptionInt =
+    match opt:
+        case Some(v):
+            f(v)
+        case None:
+            None
+
+def filter_opt(opt: OptionInt, pred: fn(int) -> bool) -> OptionInt =
+    match opt:
+        case Some(v):
+            if pred(v):
+                Some(v)
+            else:
+                None
+        case None:
+            None
+
+def main() =
+    let a: OptionInt = Some(42)
+    let b: OptionInt = None
+
+    assert is_some(a) == True
+    assert is_none(b) == True
+    assert unwrap(a) == 42
+    assert unwrap_or(b, 0) == 0
+    assert unwrap_or(a, 0) == 42
+
+    // map
+    let doubled = map_opt(a, |x: int| -> int = x * 2)
+    assert unwrap(doubled) == 84
+
+    // and_then
+    let result = and_then(a, |x: int| -> OptionInt = if x > 0: Some(x * 10) else: None)
+    assert unwrap(result) == 420
+
+    // filter
+    let filtered = filter_opt(a, |x: int| -> bool = x > 100)
+    assert is_none(filtered) == True
+
+    let kept = filter_opt(a, |x: int| -> bool = x > 10)
+    assert unwrap(kept) == 42
+
+    print("lib_option OK")

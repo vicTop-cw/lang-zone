@@ -1,0 +1,9 @@
+def get_pair() -> (str, int) =
+    let res: (str, int) = ("42", 1)
+    res
+
+def main() =
+    let r = get_pair()
+    let num: str = r.0
+    let n = num as int
+    print(n.to_string())

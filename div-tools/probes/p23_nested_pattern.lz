@@ -1,0 +1,15 @@
+// 最小复现：嵌套字段模式（外层 enum 字段 + 内层 Option 模式）
+enum E:
+    X(v: int)
+    Y(o: Option<int>)
+
+def f(e: E) -> str =
+    match e:
+        case E.Y(o: Option.Some(value: n)) => "some:" + n.to_string()
+        case E.Y(o: Option.None) => "none"
+        case E.X(v: n) => "x:" + n.to_string()
+
+def main() =
+    print(f(E.Y(o: Option.Some(value: 42))))
+    print(f(E.Y(o: Option.None)))
+    print(f(E.X(v: 7)))

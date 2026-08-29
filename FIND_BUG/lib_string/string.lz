@@ -1,0 +1,133 @@
+// lib_string — 字符串工具（修复版）
+// 修复：for 循环 range 改用 while；单引号字符改用字符串
+
+def split(s: str, sep: str) -> List<str> =
+    if sep == "":
+        panic("empty separator")
+    let result: List<str> = []
+    mut current = ""
+    mut i = 0
+    while i < s.len():
+        if s[i..i + sep.len()] == sep:
+            let result = result + [current]
+            current = ""
+            i = i + sep.len()
+        else:
+            let current = current + s[i]
+            i = i + 1
+    let result = result + [current]
+    result
+
+def join(parts: List<str>, sep: str) -> str =
+    if parts.len() == 0:
+        ""
+    else:
+        mut result = parts[0]
+        mut idx = 1
+        while idx < parts.len():
+            let result = result + sep + parts[idx]
+            idx = idx + 1
+        result
+
+def trim(s: str) -> str =
+    mut start = 0
+    while start < s.len() and s[start] == " ":
+        start = start + 1
+    mut end = s.len()
+    while end > start and s[end - 1] == " ":
+        end = end - 1
+    s[start..end]
+
+def starts_with(s: str, prefix: str) -> bool =
+    if prefix.len() > s.len():
+        False
+    else:
+        s[0..prefix.len()] == prefix
+
+def ends_with(s: str, suffix: str) -> bool =
+    if suffix.len() > s.len():
+        False
+    else:
+        let start = s.len() - suffix.len()
+        s[start..s.len()] == suffix
+
+def contains(s: str, sub: str) -> bool =
+    if sub.len() == 0:
+        True
+    elif sub.len() > s.len():
+        False
+    else:
+        mut found = False
+        let max_i = s.len() - sub.len() + 1
+        mut i = 0
+        while i < max_i:
+            if s[i..i + sub.len()] == sub:
+                found = True
+            i = i + 1
+        found
+
+def replace(s: str, old: str, new: str) -> str =
+    if old == "":
+        s
+    else:
+        let parts = split(s, old)
+        join(parts, new)
+
+def to_upper(s: str) -> str =
+    mut result = ""
+    mut i = 0
+    while i < s.len():
+        let ch = s[i]
+        if ch >= "a" and ch <= "z":
+            let result = result + chr(ord(ch) - 32)
+        else:
+            let result = result + ch
+        i = i + 1
+    result
+
+def to_lower(s: str) -> str =
+    mut result = ""
+    mut i = 0
+    while i < s.len():
+        let ch = s[i]
+        if ch >= "A" and ch <= "Z":
+            let result = result + chr(ord(ch) + 32)
+        else:
+            let result = result + ch
+        i = i + 1
+    result
+
+def main() =
+    assert split("a,b,c", ",") == ["a", "b", "c"]
+    assert split("hello world", " ") == ["hello", "world"]
+    assert split("abc", ",") == ["abc"]
+    assert split("", ",") == [""]
+
+    assert join(["a", "b", "c"], ",") == "a,b,c"
+    assert join(["hello", "world"], " ") == "hello world"
+    assert join([], ",") == ""
+    assert join(["single"], ",") == "single"
+
+    assert trim("  hello  ") == "hello"
+    assert trim("hello") == "hello"
+    assert trim("   ") == ""
+    assert trim("") == ""
+
+    assert starts_with("hello world", "hello") == True
+    assert starts_with("hello world", "world") == False
+    assert ends_with("hello world", "world") == True
+    assert ends_with("hello world", "hello") == False
+
+    assert contains("hello world", "world") == True
+    assert contains("hello world", "xyz") == False
+    assert contains("hello", "") == True
+
+    assert replace("hello world", "world", "LZ") == "hello LZ"
+    assert replace("aaa", "a", "b") == "bbb"
+    assert replace("hello", "x", "y") == "hello"
+
+    assert to_upper("hello") == "HELLO"
+    assert to_lower("WORLD") == "world"
+    assert to_upper("Hello World") == "HELLO WORLD"
+
+    print("lib_string OK")

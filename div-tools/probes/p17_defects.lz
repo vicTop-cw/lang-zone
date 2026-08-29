@@ -1,0 +1,15 @@
+// 缺陷 B 最小复现：f(list[i]) 索引实参是否自动 clone
+struct Box2<T> =
+    val: T
+
+def ident(x: Box2<int>) -> Box2<int> =
+    x
+
+def main() =
+    let xs: List<Box2<int>> = [Box2(val: 1), Box2(val: 2), Box2(val: 3)]
+    let first = ident(xs[0])
+    print(first.val)
+    // List 拼接（缺陷 A）
+    let ys: List<int> = [1, 2]
+    let zs = ys + [3]
+    print(zs)

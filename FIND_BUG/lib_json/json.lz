@@ -1,0 +1,260 @@
+// lib_json — JSON 子集解析
+// 测试：递归枚举、递归下降、错误传播、match 模式
+
+enum JsonValue:
+    Null
+    Bool(bool)
+    Number(f64)
+    String(str)
+    Array(List<JsonValue>)
+    Object(Dict<str, JsonValue>)
+
+enum ParseError:
+    UnexpectedChar(int, str)
+    UnexpectedEnd
+    InvalidEscape(int)
+
+struct Parser =
+    s: str
+    pos: int
+
+    def peek(self) -> str =
+        if self.pos < self.s.len():
+            self.s[self.pos]
+        else:
+            ""
+
+    def advance(mut self) -> str =
+        let ch = self.peek()
+        self.pos = self.pos + 1
+        ch
+
+    def skip_ws(mut self) =
+        while self.pos < self.s.len() and (self.s[self.pos] == " " or self.s[self.pos] == "\n" or self.s[self.pos] == "\t"):
+            self.pos = self.pos + 1
+
+    def parse_value(mut self) -> JsonValue raises ParseError =
+        self.skip_ws()
+        let ch = self.peek()
+        if ch == "{":
+            self.parse_object()
+        elif ch == "[":
+            self.parse_array()
+        elif ch == "\"":
+            self.parse_string()
+        elif ch == "t":
+            self.parse_true()
+        elif ch == "f":
+            self.parse_false()
+        elif ch == "n":
+            self.parse_null()
+        elif ch == "-" or (ch >= "0" and ch <= "9"):
+            self.parse_number()
+        else:
+            raise ParseError.UnexpectedChar(self.pos, ch)
+
+    def parse_true(mut self) -> JsonValue raises ParseError =
+        if self.s[self.pos..self.pos + 4] == "true":
+            self.pos = self.pos + 4
+            JsonValue.Bool(True)
+        else:
+            raise ParseError.UnexpectedChar(self.pos, self.s[self.pos])
+
+    def parse_false(mut self) -> JsonValue raises ParseError =
+        if self.s[self.pos..self.pos + 5] == "false":
+            self.pos = self.pos + 5
+            JsonValue.Bool(False)
+        else:
+            raise ParseError.UnexpectedChar(self.pos, self.s[self.pos])
+
+    def parse_null(mut self) -> JsonValue raises ParseError =
+        if self.s[self.pos..self.pos + 4] == "null":
+            self.pos = self.pos + 4
+            JsonValue.Null
+        else:
+            raise ParseError.UnexpectedChar(self.pos, self.s[self.pos])
+
+    def parse_number(mut self) -> JsonValue raises ParseError =
+        let start = self.pos
+        if self.peek() == "-":
+            self.advance()
+        while self.pos < self.s.len() and self.s[self.pos] >= "0" and self.s[self.pos] <= "9":
+            self.pos = self.pos + 1
+        if self.pos < self.s.len() and self.s[self.pos] == ".":
+            self.pos = self.pos + 1
+            while self.pos < self.s.len() and self.s[self.pos] >= "0" and self.s[self.pos] <= "9":
+                self.pos = self.pos + 1
+        let num_str = self.s[start..self.pos]
+        let val = num_str.parse_f64()
+        JsonValue.Number(val)
+
+    def parse_string(mut self) -> JsonValue raises ParseError =
+        if self.peek() != "\"":
+            raise ParseError.UnexpectedChar(self.pos, self.peek())
+        self.advance()
+        mut result = ""
+        while self.pos < self.s.len() and self.s[self.pos] != "\"":
+            if self.s[self.pos] == "\\":
+                self.advance()
+                if self.pos >= self.s.len():
+                    raise ParseError.InvalidEscape(self.pos)
+                let esc = self.s[self.pos]
+                if esc == "n":
+                    let result = result + "\n"
+                elif esc == "t":
+                    let result = result + "\t"
+                elif esc == "\\":
+                    let result = result + "\\"
+                elif esc == "\"":
+                    let result = result + "\""
+                else:
+                    raise ParseError.InvalidEscape(self.pos)
+            else:
+                let result = result + self.s[self.pos]
+            self.pos = self.pos + 1
+        if self.pos >= self.s.len():
+            raise ParseError.UnexpectedEnd
+        self.advance()
+        JsonValue.String(result)
+
+    def parse_array(mut self) -> JsonValue raises ParseError =
+        if self.peek() != "[":
+            raise ParseError.UnexpectedChar(self.pos, self.peek())
+        self.advance()
+        self.skip_ws()
+        let items: List<JsonValue> = []
+        if self.peek() == "]":
+            self.advance()
+            return JsonValue.Array(items)
+        let first = self.parse_value()
+        let items2 = items + [first]
+        self.skip_ws()
+        while self.peek() == ",":
+            self.advance()
+            self.skip_ws()
+            let item = self.parse_value()
+            let items2 = items2 + [item]
+            self.skip_ws()
+        if self.peek() != "]":
+            raise ParseError.UnexpectedChar(self.pos, self.peek())
+        self.advance()
+        JsonValue.Array(items2)
+
+    def parse_object(mut self) -> JsonValue raises ParseError =
+        if self.peek() != "{":
+            raise ParseError.UnexpectedChar(self.pos, self.peek())
+        self.advance()
+        self.skip_ws()
+        let obj: Dict<str, JsonValue> = {}
+        if self.peek() == "}":
+            self.advance()
+            return JsonValue.Object(obj)
+        self.skip_ws()
+        let key_val = self.parse_string()
+        let key = match key_val:
+            case JsonValue.String(s):
+                s
+            case _:
+                raise ParseError.UnexpectedChar(self.pos, self.s[self.pos])
+        self.skip_ws()
+        if self.peek() != ":":
+            raise ParseError.UnexpectedChar(self.pos, self.peek())
+        self.advance()
+        self.skip_ws()
+        let val = self.parse_value()
+        let obj2 = obj
+        obj2[key] = val
+        self.skip_ws()
+        while self.peek() == ",":
+            self.advance()
+            self.skip_ws()
+            let key_val2 = self.parse_string()
+            let key2 = match key_val2:
+                case JsonValue.String(s):
+                    s
+                case _:
+                    raise ParseError.UnexpectedChar(self.pos, self.s[self.pos])
+            self.skip_ws()
+            if self.peek() != ":":
+                raise ParseError.UnexpectedChar(self.pos, self.peek())
+            self.advance()
+            self.skip_ws()
+            let val2 = self.parse_value()
+            let obj2 = obj2
+            obj2[key2] = val2
+            self.skip_ws()
+        if self.peek() != "}":
+            raise ParseError.UnexpectedChar(self.pos, self.peek())
+        self.advance()
+        JsonValue.Object(obj2)
+
+def parse(s: str) -> JsonValue raises ParseError =
+    let parser = Parser(s: s, pos: 0)
+    parser.skip_ws()
+    let val = parser.parse_value()
+    parser.skip_ws()
+    if parser.pos < s.len():
+        raise ParseError.UnexpectedChar(parser.pos, s[parser.pos])
+    val
+
+def stringify(val: JsonValue) -> str =
+    match val:
+        case JsonValue.Null:
+            "null"
+        case JsonValue.Bool(True):
+            "true"
+        case JsonValue.Bool(False):
+            "false"
+        case JsonValue.Number(n):
+            if n == n.floor():
+                str(n.floor())
+            else:
+                str(n)
+        case JsonValue.String(s):
+            let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t")
+            f"\"{escaped}\""
+        case JsonValue.Array(items):
+            let parts: List<str> = []
+            for item in items:
+                let p = stringify(item)
+                let parts = parts + [p]
+            "[" + ", ".join(parts) + "]"
+        case JsonValue.Object(obj):
+            let parts: List<str> = []
+            for key in obj.keys():
+                let key_str = stringify(JsonValue.String(key))
+                let val_str = stringify(obj[key])
+                let part = f"{key_str}: {val_str}"
+                let parts = parts + [part]
+            "{" + ", ".join(parts) + "}"
+
+def main() =
+    // basic values
+    let j1 = parse("null")
+    assert stringify(j1) == "null"
+
+    let j2 = parse("true")
+    assert stringify(j2) == "true"
+
+    let j3 = parse("42")
+    assert stringify(j3) == "42"
+
+    let j4 = parse("\"hello\"")
+    assert stringify(j4) == "\"hello\""
+
+    // array
+    let j5 = parse("[1, 2, 3]")
+    assert stringify(j5) == "[1, 2, 3]"
+
+    // object
+    let j6 = parse("{\"a\": 1, \"b\": 2}")
+    assert stringify(j6) == "{\"a\": 1, \"b\": 2}"
+
+    // error handling
+    let bad = try:
+        parse("invalid")
+    catch ParseError.UnexpectedChar(_, _):
+        True
+    assert bad == True
+
+    print("lib_json OK")

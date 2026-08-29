@@ -1,0 +1,33 @@
+// 隔离实验 2：display_type 内部不调用 display_list（去掉互递归），
+// 验证 display_list 内 display_type(ts[0]) 是否 clone
+enum IrType:
+    Int
+    Named(path: str, args: List<IrType>)
+
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + ("?" if a.len() > 0 else "") + ">")
+
+def display_list(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        let head = display_type(ts[0])
+        if ts.len() > 1:
+            head + ", " + display_list(tail(ts))
+        else:
+            head
+
+def tail(ts: List<IrType>) -> List<IrType> =
+    let mut out: List<IrType> = []
+    for i in 1..ts.len():
+        out = out + [ts[i]]
+    out
+
+def main() =
+    let v = IrType.Named(path: "Vec", args: [IrType.Int])
+    print(display_type(v))
+    let ts: List<IrType> = [IrType.Int, IrType.Named(path: "V", args: [IrType.Int])]
+    print(display_list(ts))

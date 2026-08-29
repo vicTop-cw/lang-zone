@@ -1,0 +1,7 @@
+def main() =
+    let mut total = 0
+    def add(x: int) =
+        total = total + x
+    add(5)
+    add(7)
+    print(total)

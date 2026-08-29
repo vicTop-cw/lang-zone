@@ -1,0 +1,137 @@
+// lib_hashmap — HashMap 简化版（修复版）
+// 修复：struct 方法内 for 改 while；避免元组解构
+
+struct HashMap =
+    buckets: List<List<str>>
+    values: List<List<int>>
+    _size: int
+    _num_buckets: int
+
+    def new() -> HashMap =
+        let buckets: List<List<str>> = []
+        let values: List<List<int>> = []
+        let buckets = _fill_16(buckets)
+        let values = _fill_16(values)
+        HashMap(buckets: buckets, values: values, _size: 0, _num_buckets: 16)
+
+    def len(self) -> int =
+        self._size
+
+    def is_empty(self) -> bool =
+        self._size == 0
+
+    def put(mut self, key: str, val: int) =
+        let idx = self._str_hash(key) % self._num_buckets
+        let bucket_k = self.buckets[idx]
+        let bucket_v = self.values[idx]
+        let new_k: List<str> = []
+        let new_v: List<int> = []
+        mut found = False
+        mut i = 0
+        while i < bucket_k.len():
+            if bucket_k[i] == key:
+                let new_k = new_k + [key]
+                let new_v = new_v + [val]
+                found = True
+            else:
+                let new_k = new_k + [bucket_k[i]]
+                let new_v = new_v + [bucket_v[i]]
+            i = i + 1
+        self.buckets[idx] = new_k
+        self.values[idx] = new_v
+        if not found:
+            self._size = self._size + 1
+
+    def get(self, key: str) -> OptionInt =
+        let idx = self._str_hash(key) % self._num_buckets
+        let bucket_k = self.buckets[idx]
+        let bucket_v = self.values[idx]
+        mut i = 0
+        while i < bucket_k.len():
+            if bucket_k[i] == key:
+                return Some(bucket_v[i])
+            i = i + 1
+        None
+
+    def remove(mut self, key: str) -> OptionInt =
+        let idx = self._str_hash(key) % self._num_buckets
+        let bucket_k = self.buckets[idx]
+        let bucket_v = self.values[idx]
+        let new_k: List<str> = []
+        let new_v: List<int> = []
+        let removed: OptionInt = None
+        mut i = 0
+        while i < bucket_k.len():
+            if bucket_k[i] == key:
+                let removed = Some(bucket_v[i])
+                self._size = self._size - 1
+            else:
+                let new_k = new_k + [bucket_k[i]]
+                let new_v = new_v + [bucket_v[i]]
+            i = i + 1
+        self.buckets[idx] = new_k
+        self.values[idx] = new_v
+        removed
+
+    def _str_hash(self, s: str) -> int =
+        mut h = 0
+        mut i = 0
+        while i < s.len():
+            let h = h * 31 + ord(s[i])
+            i = i + 1
+        h
+
+    def keys(self) -> List<str> =
+        let result: List<str> = []
+        for bucket in self.buckets:
+            for k in bucket:
+                let result = result + [k]
+        result
+
+    def values_out(self) -> List<int> =
+        let result: List<int> = []
+        for bucket in self.values:
+            for v in bucket:
+                let result = result + [v]
+        result
+
+def _fill_16(lst: List<List<str>>) -> List<List<str>> =
+    mut result = lst
+    mut i = 0
+    while i < 16:
+        let empty: List<str> = []
+        let result = result + [empty]
+        i = i + 1
+    result
+
+def main() =
+    let m = HashMap.new()
+    assert m.is_empty() == True
+    assert m.len() == 0
+
+    m.put("alice", 30)
+    m.put("bob", 25)
+    m.put("charlie", 35)
+
+    assert m.len() == 3
+    assert m.is_empty() == False
+
+    assert m.get("alice") == Some(30)
+    assert m.get("bob") == Some(25)
+    assert m.get("dave") == None
+
+    m.put("alice", 31)
+    assert m.get("alice") == Some(31)
+    assert m.len() == 3
+
+    let removed = m.remove("bob")
+    assert removed == Some(25)
+    assert m.len() == 2
+    assert m.get("bob") == None
+
+    let ks = m.keys()
+    assert ks.len() == 2
+    let vs = m.values_out()
+    assert vs.len() == 2
+
+    print("lib_hashmap OK")

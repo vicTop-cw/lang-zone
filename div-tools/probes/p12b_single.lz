@@ -1,0 +1,5 @@
+def log(..: Tuple<str, ..>) =
+    print(args[0])
+
+def main() =
+    log("hello", 42, 3.14)

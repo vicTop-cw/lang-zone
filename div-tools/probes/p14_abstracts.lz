@@ -1,0 +1,17 @@
+trait Shape =
+    def area(self) -> f64
+    def name(self) -> str = "shape"
+
+struct Circle =
+    r: f64
+    def area(self) -> f64 = 3.14 * self.r * self.r
+
+def main() =
+    comptime:
+        let abs_shape = inspect.getabstracts("Shape")
+        print("Shape abstracts:", abs_shape.abstract_methods)
+        let abs_circle = inspect.getabstracts("Circle")
+        print("Circle abstracts:", abs_circle.abstract_methods)
+        let abs_none = inspect.getabstracts("Missing")
+        print("Missing abstracts:", abs_none.abstract_methods)
+    print("runtime ok")

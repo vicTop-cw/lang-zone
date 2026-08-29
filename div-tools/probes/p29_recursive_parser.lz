@@ -1,0 +1,53 @@
+// p29_recursive_parser.lz：验证递归下降 parse 函数是否触发 lang-zone 编译栈溢出
+enum Token:
+    IntLit(v: int)
+    Plus
+    Star
+    Eof
+
+def tok_val(t: Token) -> int =
+    match t:
+        case Token.IntLit(v: n) => n
+        case _ => 0
+
+// parse_atom: IntLit | ( expr )
+def parse_atom(toks: List<Token>, pos: int) -> (int, int) =
+    let t = toks[pos].clone()
+    (tok_val(t), pos + 1)
+
+// parse_term: atom (* atom)*
+def parse_term(toks: List<Token>, pos: int) -> (int, int) =
+    let first = parse_atom(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = toks[p].clone()
+        if t == Token.Star:
+            let r = parse_atom(toks, p + 1)
+            value = value * r.0
+            p = r.1
+        else:
+            done = true
+    (value, p)
+
+// parse_expr: term (+ term)*
+def parse_expr(toks: List<Token>, pos: int) -> (int, int) =
+    let first = parse_term(toks, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = toks[p].clone()
+        if t == Token.Plus:
+            let r = parse_term(toks, p + 1)
+            value = value + r.0
+            p = r.1
+        else:
+            done = true
+    (value, p)
+
+def main() =
+    let toks: List<Token> = [Token.IntLit(v: 2), Token.Star, Token.IntLit(v: 3), Token.Plus, Token.IntLit(v: 4), Token.Eof]
+    let r = parse_expr(toks, 0)
+    print("result=" + r.0.to_string())

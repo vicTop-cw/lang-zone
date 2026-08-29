@@ -1,0 +1,91 @@
+// lib_closure — 闭包与高阶函数
+// 测试：lambda、返回闭包、捕获、高阶函数组合
+
+def apply(f: fn(int) -> int, x: int) -> int =
+    f(x)
+
+def compose(f: fn(int) -> int, g: fn(int) -> int) -> fn(int) -> int =
+    |x: int| -> int = g(f(x))
+
+def adder(n: int) -> fn(int) -> int =
+    |x: int| = x + n
+
+def multiplier(n: int) -> fn(int) -> int =
+    |x: int| = x * n
+
+def filter<T>(list: List<T>, pred: fn(T) -> bool) -> List<T> =
+    let result: List<T> = []
+    for item in list:
+        if pred(item):
+            let result = result + [item]
+    result
+
+def transform<T, U>(list: List<T>, f: fn(T) -> U) -> List<U> =
+    let result: List<U> = []
+    for item in list:
+        let result = result + [f(item)]
+    result
+
+def reduce<T, A>(list: List<T>, acc: A, f: fn(A, T) -> A) -> A =
+    mut result = acc
+    for item in list:
+        result = f(result, item)
+    result
+
+def zip_with<T, U, V>(a: List<T>, b: List<U>, f: fn(T, U) -> V) -> List<V> =
+    let n = if a.len() < b.len(): a.len() else: b.len()
+    let result: List<V> = []
+    for i in 0..n:
+        let result = result + [f(a[i], b[i])]
+    result
+
+def main() =
+    // basic apply
+    assert apply(|x: int| -> int = x * 2, 5) == 10
+
+    // compose
+    let double_then_inc = compose(|x: int| -> int = x * 2, |x: int| -> int = x + 1)
+    assert double_then_inc(5) == 11
+
+    // returning closure (capture)
+    let plus3 = adder(3)
+    let times4 = multiplier(4)
+    assert plus3(7) == 10
+    assert times4(6) == 24
+
+    // closure composition chain
+    let op = compose(plus3, times4)
+    assert op(2) == 20
+
+    // filter
+    let nums = [1, 2, 3, 4, 5, 6]
+    let evens = filter(nums, |x: int| -> bool = x % 2 == 0)
+    assert evens == [2, 4, 6]
+
+    let gt3 = filter(nums, |x: int| -> bool = x > 3)
+    assert gt3 == [4, 5, 6]
+
+    // transform
+    let doubled = transform(nums, |x: int| -> int = x * 2)
+    assert doubled == [2, 4, 6, 8, 10, 12]
+
+    let as_str = transform(nums, |x: int| -> str = str(x))
+    assert as_str == ["1", "2", "3", "4", "5", "6"]
+
+    // reduce
+    let sum = reduce(nums, 0, |acc: int, x: int| -> int = acc + x)
+    assert sum == 21
+
+    let product = reduce(nums, 1, |acc: int, x: int| -> int = acc * x)
+    assert product == 720
+
+    // zip_with
+    let aa = [1, 2, 3]
+    let bb = [10, 20, 30]
+    let sums = zip_with(aa, bb, |x: int, y: int| -> int = x + y)
+    assert sums == [11, 22, 33]
+
+    let pairs = zip_with(aa, bb, |x: int, y: int| -> str = f"({x},{y})")
+    assert pairs == ["(1,10)", "(2,20)", "(3,30)"]
+
+    print("lib_closure OK")

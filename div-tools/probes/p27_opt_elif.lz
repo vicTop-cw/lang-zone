@@ -1,0 +1,44 @@
+// p27_opt_elif.lz：验证「11 层 elif 链返回 Option<Token>」是否触发编译栈溢出
+enum Token:
+    Plus
+    Minus
+    Star
+    Slash
+    Colon
+    Comma
+    Dot
+    LParen
+    RParen
+    LBrace
+    RBrace
+
+def punct_token(c: str) -> Option<Token> =
+    if c == "+":
+        Option.Some(value: Token.Plus)
+    elif c == "-":
+        Option.Some(value: Token.Minus)
+    elif c == "*":
+        Option.Some(value: Token.Star)
+    elif c == "/":
+        Option.Some(value: Token.Slash)
+    elif c == ":":
+        Option.Some(value: Token.Colon)
+    elif c == ",":
+        Option.Some(value: Token.Comma)
+    elif c == ".":
+        Option.Some(value: Token.Dot)
+    elif c == "(":
+        Option.Some(value: Token.LParen)
+    elif c == ")":
+        Option.Some(value: Token.RParen)
+    elif c == "{":
+        Option.Some(value: Token.LBrace)
+    elif c == "}":
+        Option.Some(value: Token.RBrace)
+    else:
+        Option.None
+
+def main() =
+    print(punct_token(":"))
+    print(punct_token(")"))
+    print(punct_token("x"))

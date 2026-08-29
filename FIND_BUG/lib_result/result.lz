@@ -1,0 +1,102 @@
+// lib_result — Result 类型测试
+// 测试：多泛型 enum、模式匹配、错误传播、组合子
+
+enum Result<T, E>:
+    Ok(T)
+    Err(E)
+
+def is_ok<T, E>(res: Result<T, E>) -> bool =
+    match res:
+        case Ok(_):
+            True
+        case Err(_):
+            False
+
+def is_err<T, E>(res: Result<T, E>) -> bool =
+    match res:
+        case Ok(_):
+            False
+        case Err(_):
+            True
+
+def unwrap<T, E>(res: Result<T, E>) -> T =
+    match res:
+        case Ok(v):
+            v
+        case Err(_):
+            panic("unwrap on Err")
+
+def unwrap_or<T, E>(res: Result<T, E>, default: T) -> T =
+    match res:
+        case Ok(v):
+            v
+        case Err(_):
+            default
+
+def map_res<T, E, U>(res: Result<T, E>, f: fn(T) -> U) -> Result<U, E> =
+    match res:
+        case Ok(v):
+            Ok(f(v))
+        case Err(e):
+            Err(e)
+
+def map_err<T, E, F>(res: Result<T, E>, f: fn(E) -> F) -> Result<T, F> =
+    match res:
+        case Ok(v):
+            Ok(v)
+        case Err(e):
+            Err(f(e))
+
+def and_then<T, E, U>(res: Result<T, E>, f: fn(T) -> Result<U, E>) -> Result<U, E> =
+    match res:
+        case Ok(v):
+            f(v)
+        case Err(e):
+            Err(e)
+
+def or_else<T, E, F>(res: Result<T, E>, f: fn(E) -> Result<T, F>) -> Result<T, F> =
+    match res:
+        case Ok(v):
+            Ok(v)
+        case Err(e):
+            f(e)
+
+def main() =
+    let a: Result<int, str> = Ok(42)
+    let b: Result<int, str> = Err("error")
+
+    assert is_ok(a) == True
+    assert is_err(b) == True
+    assert unwrap(a) == 42
+    assert unwrap_or(b, 0) == 0
+    assert unwrap_or(a, 0) == 42
+
+    // map
+    let doubled = map_res(a, |x: int| -> int = x * 2)
+    assert unwrap(doubled) == 84
+
+    // map on Err
+    let err_mapped = map_res(b, |x: int| -> int = x * 2)
+    assert is_err(err_mapped) == True
+
+    // map_err
+    let err_changed: Result<int, int> = map_err(b, |e: str| -> int = 999)
+    match err_changed:
+        case Err(code):
+            assert code == 999
+        case Ok(_):
+            panic("expected Err")
+
+    // and_then
+    let result = and_then(a, |x: int| -> Result<int, str> = if x > 0: Ok(x * 10) else: Err("negative"))
+    assert unwrap(result) == 420
+
+    // or_else
+    let recovered = or_else(b, |e: str| -> Result<int, int> = Ok(100))
+    assert unwrap(recovered) == 100
+
+    // chaining
+    let chained = and_then(map_res(a, |x: int| -> int = x + 1), |x: int| -> Result<int, str> = Ok(x * 3))
+    assert unwrap(chained) == 129
+
+    print("lib_result OK")

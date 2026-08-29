@@ -1,0 +1,11 @@
+// p33_enum_cast.lz：复现枚举构造实参中变量 cast 差异
+// `Token.IntLit(v: num as int)` 仍走 as i64（vs p30 独立场景走 parse）
+enum Token:
+    IntLit(v: int)
+
+def main() =
+    let num: str = "42"
+    // 枚举构造实参中的变量 cast
+    let t = Token.IntLit(v: num as int)
+    match t:
+        case Token.IntLit(v: n) => print("val=" + n.to_string())

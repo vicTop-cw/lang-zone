@@ -1,0 +1,12 @@
+// 最小复现：match 一个 Option<Enum> 值的模式语法
+enum E:
+    X(v: int)
+
+def f(o: Option<E>) -> str =
+    match o:
+        case Option.Some(value: x) => "some:" + x.v.to_string()
+        case Option.None => "none"
+
+def main() =
+    print(f(Option.Some(value: E.X(v: 42))))
+    print(f(Option.None))

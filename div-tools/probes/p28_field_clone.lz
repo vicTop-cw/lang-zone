@@ -1,0 +1,16 @@
+// p28_field_clone.lz：验证任务 2 修复——元组字段 r.0 作为实参传给非 Copy
+// 参数后再次使用（FieldAccess 应自动 clone，E0382 修复前会报 moved value）
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "if"
+
+def pair_word(p: (str, int)) -> str =
+    p.0
+
+def main() =
+    let r: (str, int) = ("def", 1)
+    // r.0 传参给 is_keyword（非 Copy 参数），之后 r.0 再用于 pair_word：
+    // 若无 FieldAccess clone 注入 → E0382 use of moved value
+    let k = is_keyword(r.0)
+    let w = pair_word(r)
+    print(k.to_string())
+    print(w)

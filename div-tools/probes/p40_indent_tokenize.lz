@@ -1,0 +1,37 @@
+// p40_indent_tokenize.lz：隔离缩进 tokenize 的 line_start + Indent 拼接结构
+enum Token:
+    Indent(v: int)
+    Newline
+    Eof
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def scan_indent(src: str, start: int) -> (int, int) =
+    let mut j = start
+    while j < str_len(src) && (char_at(src, j) == " " or char_at(src, j) == "\t"):
+        j = j + 1
+    (j - start, j)
+
+def main() =
+    let src = "  abc"
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    let mut line_start = true
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if line_start && (c == " " || c == "\t"):
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        else:
+            i = i + 1
+    tokens = tokens + [Token.Eof]
+    let t = tokens[0].clone()
+    match t:
+        case Token.Indent(v: n) => print("indent=" + n.to_string())
+        case _ => print("none")

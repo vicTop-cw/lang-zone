@@ -1,0 +1,6 @@
+def main() =
+    let fs: str = f"hello {name}"
+    let raw: str = r"\d+\.\d+"
+    let fmulti: str = f"""value is {val}"""
+    let rmulti: str = r"""\d+\.\d+"""
+    print(fs, raw)

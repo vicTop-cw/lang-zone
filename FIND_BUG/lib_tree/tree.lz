@@ -1,0 +1,119 @@
+// lib_tree — 二叉树（修复版）
+// 修复：用空格分隔参数避免泛型解析问题
+
+enum BinaryTree:
+    Node(int, BinaryTree, BinaryTree)
+    Empty
+
+def inorder(tree: BinaryTree) -> List<int> =
+    match tree:
+        case BinaryTree.Empty:
+            []
+        case BinaryTree.Node(val, left, right):
+            inorder(left) + [val] + inorder(right)
+
+def preorder(tree: BinaryTree) -> List<int> =
+    match tree:
+        case BinaryTree.Empty:
+            []
+        case BinaryTree.Node(val, left, right):
+            [val] + preorder(left) + preorder(right)
+
+def postorder(tree: BinaryTree) -> List<int> =
+    match tree:
+        case BinaryTree.Empty:
+            []
+        case BinaryTree.Node(val, left, right):
+            postorder(left) + postorder(right) + [val]
+
+def fold(tree: BinaryTree, acc: int, f: fn(int, int) -> int) -> int =
+    match tree:
+        case BinaryTree.Empty:
+            acc
+        case BinaryTree.Node(val, left, right):
+            let acc1 = fold(left, acc, f)
+            let acc2 = f(acc1, val)
+            fold(right, acc2, f)
+
+def height(tree: BinaryTree) -> int =
+    match tree:
+        case BinaryTree.Empty:
+            0
+        case BinaryTree.Node(_, left, right):
+            let lh = height(left)
+            let rh = height(right)
+            (if lh > rh: lh else: rh) + 1
+
+def size(tree: BinaryTree) -> int =
+    match tree:
+        case BinaryTree.Empty:
+            0
+        case BinaryTree.Node(_, left, right):
+            1 + size(left) + size(right)
+
+def find(tree: BinaryTree, pred: fn(int) -> bool) -> Option<int> =
+    match tree:
+        case BinaryTree.Empty:
+            None
+        case BinaryTree.Node(val, left, right):
+            if pred(val):
+                Some(val)
+            else:
+                let found_left = find(left, pred)
+                if found_left is Some:
+                    found_left
+                else:
+                    find(right, pred)
+
+def sum_tree(tree: BinaryTree) -> int =
+    fold(tree, 0, |acc: int, x: int| -> int = acc + x)
+
+def make_node(val: int, left: BinaryTree, right: BinaryTree) -> BinaryTree =
+    BinaryTree.Node(val, left, right)
+
+def make_empty() -> BinaryTree =
+    BinaryTree.Empty
+
+def main() =
+    //       1
+    //      / \
+    //     2   3
+    //    / \
+    //   4   5
+    let n4 = make_node(4, make_empty(), make_empty())
+    let n5 = make_node(5, make_empty(), make_empty())
+    let n2 = make_node(2, n4, n5)
+    let n3 = make_node(3, make_empty(), make_empty())
+    let tree = make_node(1, n2, n3)
+
+    // traversals
+    assert inorder(tree) == [4, 2, 5, 1, 3]
+    assert preorder(tree) == [1, 2, 4, 5, 3]
+    assert postorder(tree) == [4, 5, 2, 3, 1]
+
+    // fold
+    let sum = fold(tree, 0, |acc: int, x: int| -> int = acc + x)
+    assert sum == 15
+
+    // sum_tree helper
+    assert sum_tree(tree) == 15
+
+    // height and size
+    assert height(tree) == 3
+    assert size(tree) == 5
+
+    // find
+    let found = find(tree, |x: int| -> bool = x == 5)
+    assert found == Some(5)
+
+    let not_found = find(tree, |x: int| -> bool = x == 99)
+    assert not_found == None
+
+    // empty tree
+    let empty: BinaryTree = make_empty()
+    assert inorder(empty) == []
+    assert height(empty) == 0
+    assert size(empty) == 0
+    assert sum_tree(empty) == 0
+
+    print("lib_tree OK")

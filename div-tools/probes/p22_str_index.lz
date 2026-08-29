@@ -1,0 +1,36 @@
+// p22_str_index.lz：定位 lexer.lz 编译栈溢出根因
+// 测试 1：字符串索引 s[idx] 是否可用
+// 测试 2：11 层 elif 链是否触发栈溢出
+def char_at(s: str, idx: int) -> str =
+    s[idx]
+
+def punct_token(c: str) -> str =
+    if c == "+":
+        "plus"
+    elif c == "-":
+        "minus"
+    elif c == "*":
+        "star"
+    elif c == "/":
+        "slash"
+    elif c == ":":
+        "colon"
+    elif c == ",":
+        "comma"
+    elif c == ".":
+        "dot"
+    elif c == "(":
+        "lparen"
+    elif c == ")":
+        "rparen"
+    elif c == "{":
+        "lbrace"
+    else:
+        "none"
+
+def main() =
+    let src = "def add(a, b):"
+    print(char_at(src, 0))
+    print(char_at(src, 4))
+    print(punct_token(":"))
+    print(punct_token(")"))

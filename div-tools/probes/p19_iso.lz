@@ -1,0 +1,32 @@
+// 隔离实验：从 main 直接调用 display_type(ts[0]) 与 ident(xs[0]) 对比
+enum IrType:
+    Int
+    Named(path: str, args: List<IrType>)
+
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + ("?" if a.len() > 0 else "") + ">")
+
+struct Box2<T> =
+    val: T
+
+def ident(x: Box2<int>) -> Box2<int> =
+    x
+
+def main() =
+    let ts: List<IrType> = [IrType.Int, IrType.Named(path: "Vec", args: [IrType.Int])]
+    let h = display_type(ts[0])
+    print(h)
+    let xs: List<Box2<int>> = [Box2(val: 1), Box2(val: 2)]
+    let f = ident(xs[0])
+    print(f.val)
+
+def show_first(ts2: List<IrType>) -> str =
+    let head = display_type(ts2[0])
+    head
+
+def main2() =
+    let ts: List<IrType> = [IrType.Int]
+    print(show_first(ts))

@@ -1,0 +1,105 @@
+// lib_sort — 排序算法库（修复 Ordering 枚举）
+// 修复：使用 Ordering 枚举的完整路径
+
+enum Ordering:
+    Less
+    Greater
+    Equal
+
+def bubble_sort<T: Ordered>(list: List<T>) -> List<T> =
+    let n = list.len()
+    mut result = list.clone()
+    mut i = 0
+    while i < n:
+        mut j = 0
+        while j < n - i - 1:
+            if result[j] > result[j + 1]:
+                let tmp = result[j]
+                result[j] = result[j + 1]
+                result[j + 1] = tmp
+            j = j + 1
+        i = i + 1
+    result
+
+def sub_list<T>(list: List<T>, start: int, end: int) -> List<T> =
+    let result: List<T> = []
+    let max_i = if end > list.len(): list.len() else: end
+    mut i = start
+    while i < max_i:
+        let result = result + [list[i]]
+        i = i + 1
+    result
+
+def quick_sort<T: Ordered>(list: List<T>) -> List<T> =
+    if list.len() <= 1:
+        list
+    else:
+        let pivot = list[0]
+        let rest = sub_list(list, 1, list.len())
+        let left: List<T> = [x for x in rest if x <= pivot]
+        let right: List<T> = [x for x in rest if x > pivot]
+        quick_sort(left) + [pivot] + quick_sort(right)
+
+def merge_sort<T: Ordered>(list: List<T>) -> List<T> =
+    if list.len() <= 1:
+        list
+    else:
+        let mid = list.len() / 2
+        let left = merge_sort(sub_list(list, 0, mid))
+        let right = merge_sort(sub_list(list, mid, list.len()))
+        merge(left, right)
+
+def merge<T: Ordered>(left: List<T>, right: List<T>) -> List<T> =
+    if left.len() == 0:
+        right
+    elif right.len() == 0:
+        left
+    elif left[0] <= right[0]:
+        [left[0]] + merge(sub_list(left, 1, left.len()), right)
+    else:
+        [right[0]] + merge(left, sub_list(right, 1, right.len()))
+
+def binary_search<T: Ordered>(list: List<T>, target: T) -> int =
+    _binary_search_range(list, target, 0, list.len())
+
+def _binary_search_range<T: Ordered>(list: List<T>, target: T, lo: int, hi: int) -> int =
+    if lo >= hi:
+        -1
+    else:
+        let mid = (lo + hi) / 2
+        if list[mid] == target:
+            mid
+        elif list[mid] < target:
+            _binary_search_range(list, target, mid + 1, hi)
+        else:
+            _binary_search_range(list, target, lo, mid)
+
+def sort_by<T>(list: List<T>, cmp: fn(T, T) -> Ordering) -> List<T> =
+    mut result = list.clone()
+    let n = result.len()
+    mut i = 0
+    while i < n:
+        mut j = 0
+        while j < n - i - 1:
+            if cmp(result[j], result[j + 1]) == Ordering.Greater:
+                let tmp = result[j]
+                result[j] = result[j + 1]
+                result[j + 1] = tmp
+            j = j + 1
+        i = i + 1
+    result
+
+def main() =
+    let data = [3, 1, 4, 1, 5, 9, 2, 6]
+    let sorted = [1, 1, 2, 3, 4, 5, 6, 9]
+
+    assert bubble_sort(data) == sorted
+    assert quick_sort(data) == sorted
+    assert merge_sort(data) == sorted
+    assert binary_search(sorted, 3) == 3
+    assert binary_search(sorted, 99) == -1
+
+    let desc = sort_by(data, |a: int, b: int| -> Ordering = if a > b: Ordering.Less elif a < b: Ordering.Greater else: Ordering.Equal)
+    assert desc == [9, 6, 5, 4, 3, 2, 1, 1]
+
+    print("lib_sort OK")

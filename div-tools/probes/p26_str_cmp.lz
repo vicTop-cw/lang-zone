@@ -1,0 +1,13 @@
+// p26_str_cmp.lz：验证字符串范围比较 c >= "a" 是否可用
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def main() =
+    print(is_digit("5"))
+    print(is_digit("a"))
+    print(is_alpha("m"))
+    print(is_alpha("_"))
+    print(is_alpha("1"))

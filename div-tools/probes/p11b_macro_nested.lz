@@ -1,0 +1,11 @@
+#!bin macro
+
+macro guard_check(cond: Tokens) -> Tokens =
+    quote("guard " + cond + " else:\n    panic(\"check failed\")")
+
+def main() =
+    let mut total = 0
+    for i in 0..3:
+        @guard_check!(i < 10)
+        total = total + i
+    print(total)

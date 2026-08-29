@@ -1,0 +1,57 @@
+// p41_full_tokenize.lz：验证完整 tokenize 分支组合（line_start + 多 elif）是否溢出
+enum Token:
+    IntLit(v: int)
+    Indent(v: int)
+    Newline
+    Eof
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def scan_indent(src: str, start: int) -> (int, int) =
+    let mut j = start
+    while j < str_len(src) && char_at(src, j) == " ":
+        j = j + 1
+    (j - start, j)
+
+def scan_int(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+def main() =
+    let src = " 12\n 3"
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    let mut line_start = true
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if line_start && c == " ":
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+            line_start = true
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            let num: str = r.0
+            tokens = tokens + [Token.IntLit(v: num as int)]
+            line_start = false
+        else:
+            i = i + 1
+    tokens = tokens + [Token.Eof]
+    let t = tokens[0].clone()
+    match t:
+        case Token.Indent(v: n) => print("indent=" + n.to_string())
+        case _ => print("none")

@@ -1,0 +1,4 @@
+def main() =
+    let s = "42"
+    let n = s[0..2] as int
+    print(n.to_string())

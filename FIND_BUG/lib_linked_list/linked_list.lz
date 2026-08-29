@@ -1,0 +1,96 @@
+// lib_linked_list — 链表（修复版）
+// 修复：避免泛型递归类型，使用具体 int 链表
+
+struct Node =
+    value: int
+    next: Option<Node>
+
+struct LinkedList =
+    head: Option<Node>
+    _len: int
+
+    def new() -> LinkedList =
+        LinkedList(head: None, _len: 0)
+
+    def len(self) -> int =
+        self._len
+
+    def is_empty(self) -> bool =
+        self._len == 0
+
+    def push_front(mut self, val: int) =
+        let new_node = Node(value: val, next: self.head)
+        self.head = Some(new_node)
+        self._len = self._len + 1
+
+    def pop_front(mut self) -> int =
+        match self.head:
+            case None:
+                panic("pop from empty list")
+            case Some(node):
+                let val = node.value
+                self.head = node.next
+                self._len = self._len - 1
+                val
+
+    def peek_front(self) -> int =
+        match self.head:
+            case None:
+                panic("peek on empty list")
+            case Some(node):
+                node.value
+
+    def to_list(self) -> List<int> =
+        let result: List<int> = []
+        let cur_opt = self.head
+        let result = self._to_list_helper(cur_opt, result)
+        result
+
+    def _to_list_helper(self, cur_opt: Option<Node>, result: List<int>) -> List<int> =
+        match cur_opt:
+            case None:
+                result
+            case Some(node):
+                let result = result + [node.value]
+                self._to_list_helper(node.next, result)
+
+def from_list(list: List<int>) -> LinkedList =
+    let ll = LinkedList.new()
+    for item in list:
+        ll.push_front(item)
+    // reverse
+    let reversed: List<int> = ll.to_list().reverse()
+    let result = LinkedList.new()
+    for item in reversed:
+        result.push_front(item)
+    result
+
+def main() =
+    let ll = LinkedList.new()
+    assert ll.is_empty() == True
+    assert ll.len() == 0
+
+    ll.push_front(1)
+    ll.push_front(2)
+    ll.push_front(3)
+
+    assert ll.len() == 3
+    assert ll.is_empty() == False
+    assert ll.peek_front() == 3
+
+    assert ll.to_list() == [3, 2, 1]
+
+    let popped = ll.pop_front()
+    assert popped == 3
+    assert ll.len() == 2
+    assert ll.to_list() == [2, 1]
+
+    let ll2 = from_list([1, 2, 3, 4, 5])
+    assert ll2.to_list() == [1, 2, 3, 4, 5]
+    assert ll2.len() == 5
+
+    let a = from_list([1, 2, 3])
+    let b = from_list([1, 2, 3])
+    assert a.to_list() == b.to_list()
+
+    print("lib_linked_list OK")

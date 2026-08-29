@@ -1,0 +1,51 @@
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    let mut line_start = true
+    while i < str_len(src):
+        let c = char_at(src, i)
+        // 行首空格 → 缩进计数
+        if line_start && (c == " " || c == "\t"):
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        elif c == " " || c == "\t":
+            i = i + 1
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+            line_start = true
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            tokens = tokens + [Token.IntLit(v: r.0)]
+            line_start = false
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let kw = keyword_token(r.0)
+            if kw.0:
+                tokens = tokens + [kw.1]
+            else:
+                tokens = tokens + [Token.Ident(name: r.0)]
+            line_start = false
+        elif c == ":":
+            tokens = tokens + [Token.Colon]
+            i = i + 1
+            line_start = false
+        else:
+            let r = op_token(c)
+            let found = r.0
+            let tok = r.1
+            if found:
+                tokens = tokens + [tok]
+                i = i + 1
+            else:
+                i = i + 1
+            line_start = false
+    tokens = tokens + [Token.Eof]
+    tokens
+
+// ── Token 流工具 ──
+def tok_at(toks: List<Token>, idx: int) -> Token =

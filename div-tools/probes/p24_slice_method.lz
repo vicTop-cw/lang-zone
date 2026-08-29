@@ -1,0 +1,9 @@
+// p24_slice_method.lz：测试 src.slice(a, b) 方法调用是否触发编译栈溢出
+def main() =
+    let src = "def add"
+    let w = src.slice(0, 3)
+    print(w)
+    let mut i = 0
+    while i < src.len():
+        i = i + 1
+    print("done")

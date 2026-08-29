@@ -1,0 +1,122 @@
+// lib_iterator — 迭代器 trait
+// 测试：trait 对象、关联类型、闭包捕获、链式调用
+
+trait Iterator =
+    def next(mut self) -> Option<int>
+
+struct RangeIter =
+    current: int
+    end: int
+    step: int
+
+    def new(start: int, end: int, step: int = 1) -> RangeIter =
+        RangeIter(current: start, end: end, step: step)
+
+    def next(mut self) -> Option<int> =
+        if self.current >= self.end:
+            None
+        else:
+            let val = self.current
+            self.current = self.current + self.step
+            Some(val)
+
+struct MapIter =
+    inner: RangeIter
+    f: fn(int) -> int
+
+    def new(inner: RangeIter, f: fn(int) -> int) -> MapIter =
+        MapIter(inner: inner, f: f)
+
+    def next(mut self) -> Option<int> =
+        let n = self.inner.next()
+        match n:
+            case Some(v):
+                Some(self.f(v))
+            case None:
+                None
+
+struct FilterIter =
+    inner: RangeIter
+    pred: fn(int) -> bool
+
+    def new(inner: RangeIter, pred: fn(int) -> bool) -> FilterIter =
+        FilterIter(inner: inner, pred: pred)
+
+    def next(mut self) -> Option<int> =
+        let n = self.inner.next()
+        match n:
+            case None:
+                None
+            case Some(v):
+                if self.pred(v):
+                    Some(v)
+                else:
+                    self.next()
+
+struct TakeIter =
+    inner: RangeIter
+    remaining: int
+
+    def new(inner: RangeIter, n: int) -> TakeIter =
+        TakeIter(inner: inner, remaining: n)
+
+    def next(mut self) -> Option<int> =
+        if self.remaining <= 0:
+            None
+        else:
+            self.remaining = self.remaining - 1
+            self.inner.next()
+
+def collect(iter: RangeIter) -> List<int> =
+    let result: List<int> = []
+    let n = iter.next()
+    while n is Some:
+        let result = result + [n.unwrap()]
+        let n = iter.next()
+    result
+
+def sum(iter: RangeIter) -> int =
+    mut total = 0
+    let n = iter.next()
+    while n is Some:
+        let total = total + n.unwrap()
+        let n = iter.next()
+    total
+
+def main() =
+    // basic range
+    let r = RangeIter.new(0, 5)
+    assert collect(r) == [0, 1, 2, 3, 4]
+
+    // range with step
+    let r2 = RangeIter.new(0, 10, 2)
+    assert collect(r2) == [0, 2, 4, 6, 8]
+
+    // map
+    let r3 = RangeIter.new(0, 5)
+    let mapped = MapIter.new(r3, |x: int| -> int = x * 2)
+    assert collect(mapped) == [0, 2, 4, 6, 8]
+
+    // filter
+    let r4 = RangeIter.new(0, 10)
+    let filtered = FilterIter.new(r4, |x: int| -> bool = x % 2 == 0)
+    assert collect(filtered) == [0, 2, 4, 6, 8]
+
+    // take
+    let r5 = RangeIter.new(0, 100)
+    let taken = TakeIter.new(r5, 3)
+    assert collect(taken) == [0, 1, 2]
+
+    // sum
+    let r6 = RangeIter.new(1, 6)
+    assert sum(r6) == 15
+
+    // empty range
+    let r7 = RangeIter.new(5, 5)
+    assert collect(r7) == []
+
+    // single element
+    let r8 = RangeIter.new(0, 1)
+    assert collect(r8) == [0]
+
+    print("lib_iterator OK")

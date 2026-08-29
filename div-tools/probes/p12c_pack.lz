@@ -1,0 +1,5 @@
+def show<Ts...>(..: Tuple<Ts...>) =
+    print(args.0, args.1)
+
+def main() =
+    show(1, "a", True)

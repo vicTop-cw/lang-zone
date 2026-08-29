@@ -5181,11 +5181,11 @@ impl CodeGen {
                 let start = fields
                     .iter()
                     .find(|(n, _)| n == "start")
-                    .map(|(_, v)| format!("({} as usize)", self.gen_expr(v)));
+                    .map(|(_, v)| format!("(({}) as usize)", self.gen_expr(v)));
                 let end = fields
                     .iter()
                     .find(|(n, _)| n == "end")
-                    .map(|(_, v)| format!("({} as usize)", self.gen_expr(v)));
+                    .map(|(_, v)| format!("(({}) as usize)", self.gen_expr(v)));
                 let inclusive = fields.iter().any(|(n, v)| {
                     n == "inclusive" && matches!(&v.kind, ExprKind::Lit(LitKind::Bool(true)))
                 });
@@ -6083,7 +6083,7 @@ impl CodeGen {
                     // 否则 std format! 宏（Vec 等参数报 E0277 Display）
                     let fmt_str = if args.len() >= 1 {
                         if let ExprKind::Lit(LitKind::Str(s)) = &args[0].kind {
-                            format!("\"{}\"", s)
+                            format!("\"{}\"", s.escape_default())
                         } else {
                             args_s[0].clone()
                         }
@@ -7037,7 +7037,10 @@ impl CodeGen {
                         for (idx, arg_expr) in args.iter().enumerate() {
                             if let Some(slot) = args_s.get_mut(idx) {
                                 if let ExprKind::Lit(LitKind::Str(s)) = &arg_expr.kind {
-                                    *slot = format!("\"{}\"", s);
+                                    // 字符串字面量参数直接生成 &str 字面量（避免 .to_string()
+                                    // 与 E0308），但必须 escape_default：`"\\"` 若直接
+                                    // format!("\"{}\"", s) 会生成 `"\`（json.lz E0308/语法错误）
+                                    *slot = format!("\"{}\"", s.escape_default());
                                 } else if !slot.starts_with('&')
                                     && !matches!(&arg_expr.ty, IrType::Ref(_) | IrType::MutRef(_))
                                     && (is_vec_contains
@@ -7846,7 +7849,7 @@ impl CodeGen {
                         //  - String 值（"a".to_string()）用 &* 解引用为 &str
                         //  - char / 其他则原样
                         let elem_arg = if let ExprKind::Lit(LitKind::Str(s)) = &lhs.kind {
-                            format!("\"{}\"", s)
+                            format!("\"{}\"", s.escape_default())
                         } else if elem_s.ends_with(".to_string()") || elem_s.starts_with('&') {
                             if elem_s.starts_with('&') {
                                 format!("*({})", elem_s)
@@ -10067,9 +10070,10 @@ const LZ_BUILTIN_FN_NAMES: &[&str] = &[
     "is_lt", "isclass", "isfunction", "ismethod", "ismodule", "len", "lz_abs", "lz_all",
     "lz_any", "lz_bool", "lz_clamp", "lz_count_if", "lz_ends_with", "lz_float", "lz_int",
     "lz_join_words", "lz_range", "lz_range_step", "lz_sum_ints", "max_f64", "max_i64",
-    "min_f64", "min_i64", "new", "ord", "pow_f64", "pow_i64", "print", "range", "range2",
-    "range3", "read_file", "register", "round", "set_raw", "set_str", "signature",
-    "status_str", "to_std", "type_count", "with_start", "with_step", "write_file",
+    "min_f64", "min_i64", "new", "ord", "pow_f64", "pow_i64", "print", "print_str",
+    "print_val", "range", "range2", "range3", "read_file", "register", "round", "set_raw",
+    "set_str", "signature", "status_str", "to_std", "type_count", "with_start", "with_step",
+    "write_file",
     // collections.rs 集合方法（trait 提供，同样禁止 stub）
     "lz_push", "lz_pop", "lz_len", "lz_get", "lz_set", "lz_contains", "lz_index",
     "lz_remove", "lz_insert", "lz_sort", "lz_reverse", "lz_extend", "lz_clear",
@@ -10411,6 +10415,25 @@ fn collect_unknown_extern_fns(module: &IrModule) -> std::collections::HashMap<St
             }
             Item::DuckDef(d) => {
                 known.insert(d.name.clone());
+            }
+            // 导入符号属于本 crate 已知名字：from lib_stats import sum_squares /
+            // import lib_math 的目标名不得触发未知外部函数桩
+            // （`fn NAME(__a0: i64) -> i64 { i64::MAX }`），否则增量拼接产物中
+            // 桩与依赖模块的真身重复定义（rustc E0428，见
+            // tests/incremental_golden.rs 增量拼接 rustc 校验步骤）。
+            // 真正无签名的外部调用（p16_lzi 类）不走 Use item，兜底语义不变。
+            Item::Use(u) => {
+                if u.is_from {
+                    for n in &u.items {
+                        known.insert(n.clone());
+                    }
+                }
+                if let Some(last) = u.path.last() {
+                    known.insert(last.clone());
+                }
+                if let Some(a) = &u.alias {
+                    known.insert(a.clone());
+                }
             }
             _ => {}
         }

@@ -1,0 +1,4 @@
+import moda as m
+def main() =
+    let r = m.add(2, 3)
+    print(r)
