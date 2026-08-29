@@ -36,30 +36,30 @@ def unwrap_or(opt: OptionInt, default: int) -> int =
 def map_opt(opt: OptionInt, f: fn(int) -> int) -> OptionInt =
     match opt:
         case Some(v):
-            Some(f(v))
+            OptionInt.Some(f(v))
         case None:
-            None
+            OptionInt.None
 
 def and_then(opt: OptionInt, f: fn(int) -> OptionInt) -> OptionInt =
     match opt:
         case Some(v):
             f(v)
         case None:
-            None
+            OptionInt.None
 
 def filter_opt(opt: OptionInt, pred: fn(int) -> bool) -> OptionInt =
     match opt:
         case Some(v):
             if pred(v):
-                Some(v)
+                OptionInt.Some(v)
             else:
-                None
+                OptionInt.None
         case None:
-            None
+            OptionInt.None
 
 def main() =
-    let a: OptionInt = Some(42)
-    let b: OptionInt = None
+    let a: OptionInt = OptionInt.Some(42)
+    let b: OptionInt = OptionInt.None
 
     assert is_some(a) == True
     assert is_none(b) == True
@@ -72,7 +72,7 @@ def main() =
     assert unwrap(doubled) == 84
 
     // and_then
-    let result = and_then(a, |x: int| -> OptionInt = if x > 0: Some(x * 10) else: None)
+    let result = and_then(a, |x: int| -> OptionInt = if x > 0: OptionInt.Some(x * 10) else: OptionInt.None)
     assert unwrap(result) == 420
 
     // filter

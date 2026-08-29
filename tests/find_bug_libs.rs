@@ -99,7 +99,6 @@ fn lib_sort() {
 }
 
 #[test]
-#[ignore = "待转正：LZ_REJECT match 未穷尽 OptionInt（P1b 分诊）"]
 fn lib_option() {
     assert!(run_lib("lib_option").unwrap().contains("OK"));
 }

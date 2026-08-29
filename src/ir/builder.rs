@@ -9332,6 +9332,12 @@ fn ex_check_expr(
                             AstPattern::Ident(n) => {
                                 if n == "_" {
                                     has_wild = true;
+                                } else if variants.iter().any(|v| v == n) {
+                                    // 裸变体名写法（case None:）：parser 产出
+                                    // Ident 模式，codegen gen_pattern 会解析为
+                                    // Enum::Variant（与 `case Less:` 同路），
+                                    // 穷尽性判定须与之一致（lib_option 实测）。
+                                    covered.insert(n.clone());
                                 }
                             }
                             AstPattern::Wildcard => {
