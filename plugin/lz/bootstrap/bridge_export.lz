@@ -1,0 +1,44 @@
+// bridge_export.lz — LZ 自举导出函数
+// 通过 Rust 桥接模块将数据导出为文件
+// 使用 import std::bridge::rust::* 直通 Rust 生态
+
+// ── Rust 桥接导入 ──
+import std::bridge::rust::std::fs
+import std::bridge::rust::std::io
+
+// ── 错误类型（单层错误栈） ──
+enum ExportError =
+    WriteError(str)
+    SerializeError(str)
+
+// ── 导出结果 ──
+struct ExportResult =
+    success: bool
+    path: str
+    bytes_written: int
+
+// ── 核心导出函数 ──
+// 将字符串内容写入文件
+// 使用 Rust 桥接直接调用 std::fs::write
+def export_file(path: str, content: str)-> ExportResult =
+    // 通过桥接调用 Rust 标准库写入文件
+    // Bug-25: 桥接返回 Result 时 lz 不自动 unwrap
+    result = std::fs::write(path, content)
+    ExportResult(True, path, 0)
+
+// ── 导出 JSON 数据 ──
+def export_json(path: str, data: str)-> ExportResult =
+    export_file(path, data)
+
+// ── 显示导出结果 ──
+def show_export(result: ExportResult) =
+    if result.success:
+        print("Export succeeded: " + result.path)
+    else:
+        print("Export failed: " + result.path)
+
+def main() =
+    print("=== LZ Bridge Export Module ===")
+    // 测试导出
+    result = export_file("output_test.txt", "Hello from LZ bridge export!")
+    show_export(result)

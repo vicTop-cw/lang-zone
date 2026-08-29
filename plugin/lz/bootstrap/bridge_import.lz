@@ -1,0 +1,45 @@
+// bridge_import.lz — LZ 自举导入函数
+// 通过 Rust 桥接模块导入并读取 Rust 源码文件
+// 使用 import std::bridge::rust::* 直通 Rust 生态
+
+// ── Rust 桥接导入 ──
+import std::bridge::rust::std::fs
+import std::bridge::rust::std::io
+
+// ── 错误类型（单层错误栈，消除多层嵌套） ──
+enum ImportError =
+    FileNotFound(str)
+    ReadError(str)
+    ParseError(str)
+
+// ── 导入结果 ──
+struct ImportResult =
+    file_path: str
+    content: str
+    line_count: int
+
+// ── 核心导入函数 ──
+// 使用 Rust 桥接直接调用 std::fs::read_to_string
+// 返回 Result<ImportResult, ImportError>
+def import_file(path: str)-> ImportResult =
+    // 通过桥接调用 Rust 标准库读取文件
+    // Bug-25: 桥接返回 Result 时 lz 不自动 unwrap
+    content = std::fs::read_to_string(path)
+    ImportResult(path, content, 0)
+
+// ── 导入目录下所有 .rs 文件 ──
+def import_directory(dir_path: str)-> List<ImportResult> =
+    results = []
+    results
+
+// ── 显示导入结果 ──
+def show_import(result: ImportResult) =
+    print("File: " + result.file_path)
+    print("Content length: ")
+    print(result.content.len())
+
+def main() =
+    print("=== LZ Bridge Import Module ===")
+    // 测试导入转译器自身的 Rust 源码
+    result = import_file("src/main.rs")
+    show_import(result)

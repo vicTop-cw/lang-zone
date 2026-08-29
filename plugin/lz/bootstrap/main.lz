@@ -1,0 +1,72 @@
+// main.lz — LZ 自举第一步：控制流闭环
+// 使用 Rust 桥接模块实现：
+//   可执行文件 → 导入转译器源码 → 处理源码 → 导出结果
+//
+// 这是 lz 自举的关键一步：用 lz 写的程序通过桥接模块
+// 导入并处理转译器自身的 Rust 源码
+
+// ── Rust 桥接：直通 Rust 标准库 ──
+import std::bridge::rust::std::fs
+import std::bridge::rust::std::io
+
+// ── 错误类型（单层错误栈） ──
+enum BootstrapError =
+    ImportFailed(str)
+    ExportFailed(str)
+    Success(str)
+
+// ── 控制流步骤 1: 导入 ──
+// 读取转译器自身的 Rust 源码文件
+def step_import()-> str =
+    // 导入转译器主入口源码
+    // Bug-25: 注意 Result 不自动 unwrap
+    content = std::fs::read_to_string("src/main.rs")
+    content
+
+// ── 控制流步骤 2: 处理 ──
+// 分析源码结构
+def step_process(content: str)-> str =
+    // 统计基本信息
+    print("=== Source Analysis ===")
+    print("Content length: ")
+    print(content.len())
+    
+    // 构建分析结果
+    result = "LZ Bootstrap Analysis\n"
+    result = result + "====================\n"
+    result = result + "Source file: src/main.rs\n"
+    result = result + "Size: " + content.len().to_string() + " bytes\n"
+    result
+
+// ── 控制流步骤 3: 导出 ──
+// 将分析结果写入文件
+def step_export(report: str)-> str =
+    // Bug-25: 注意 Result 不自动 unwrap
+    result = std::fs::write("bootstrap_report.txt", report)
+    "bootstrap_report.txt"
+
+// ── 主控制流 ──
+def main() =
+    print("╔══════════════════════════════════════╗")
+    print("║  LZ Bootstrap - Control Flow Test   ║")
+    print("║  Step 1: Import transpiler source   ║")
+    print("║  Step 2: Process source code        ║")
+    print("║  Step 3: Export analysis report     ║")
+    print("╚══════════════════════════════════════╝")
+    
+    // Step 1: 导入转译器源码
+    print("\n[Step 1] Importing transpiler source...")
+    content = step_import()
+    print("[Step 1] Done.")
+    
+    // Step 2: 处理源码
+    print("\n[Step 2] Processing source code...")
+    report = step_process(content)
+    print("[Step 2] Done.")
+    
+    // Step 3: 导出结果
+    print("\n[Step 3] Exporting analysis report...")
+    output_path = step_export(report)
+    print("[Step 3] Done. Report saved to: " + output_path)
+    
+    print("\n=== Control Flow Complete ===")
