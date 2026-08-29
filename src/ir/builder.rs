@@ -7225,6 +7225,12 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 method_ctx.struct_field_order = ctx.struct_field_order.clone();
                 method_ctx.struct_methods = ctx.struct_methods.clone();
                 method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+                // 枚举/类型注册表必须拷入方法体 ctx：否则方法体内 Type.Variant(...)
+                // 构造推断退化（lib_hashmap get 返回 OptionInt.Some 被推断为 i64，
+                // 误插 ImplicitFrom 转换桥 E0277/E0308），方法返回类型查询也失效
+                method_ctx.enum_variants = ctx.enum_variants.clone();
+                method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                method_ctx.fn_returns = ctx.fn_returns.clone();
                 // enum 内联方法（`enum E = ... def m(self)`）：self 绑定为枚举自身类型，
                 // 否则 self.field / self 索引推断为 Any/Self_（json.lz E0277/E0308）
                 method_ctx.self_ty = Some(IrType::Named {
@@ -7291,6 +7297,10 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 method_ctx.struct_field_order = ctx.struct_field_order.clone();
                 method_ctx.struct_methods = ctx.struct_methods.clone();
                 method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+                // 同上：方法体 ctx 需枚举/类型注册表（lib_hashmap 实测）
+                method_ctx.enum_variants = ctx.enum_variants.clone();
+                method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                method_ctx.fn_returns = ctx.fn_returns.clone();
                 // struct 内联方法（`struct Parser = s: str ... def m(self)`）：self 绑定为
                 // struct 自身类型（含泛型参数），否则 self.s 字段访问推断为 Any/Self_，
                 // 导致 str 字段索引/切片 codegen 生成非法 Rust（json.lz E0277/E0308）
@@ -7321,6 +7331,10 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 method_ctx.struct_field_order = ctx.struct_field_order.clone();
                 method_ctx.struct_methods = ctx.struct_methods.clone();
                 method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+                // 同上：方法体 ctx 需枚举/类型注册表（lib_hashmap 实测）
+                method_ctx.enum_variants = ctx.enum_variants.clone();
+                method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                method_ctx.fn_returns = ctx.fn_returns.clone();
                 // magic 方法同样绑定 self_ty（同 struct 内联方法）
                 method_ctx.self_ty = Some(IrType::Named {
                     path: s.name.clone(),
@@ -9145,8 +9159,12 @@ fn ex_check_expr(
                 }
             }
             if let IrType::Named { path, args: targs } = &rty0 {
+                // 用户自定义 struct 与内置 Dict/HashMap 同名时，用户方法遮蔽内置特检
+                //（lib_hashmap 实测：用户 HashMap.put 被误报为内置 Dict 缺 put）
+                let is_user_struct = work.struct_names.contains(path.as_str());
                 // dict 键参数白名单（hash_key_type_mismatch）
-                if (path == "Dict" || path == "HashMap")
+                if !is_user_struct
+                    && (path == "Dict" || path == "HashMap")
                     && matches!(
                         method.as_str(),
                         "get" | "contains_key" | "contains" | "insert" | "remove" | "set"
@@ -9161,8 +9179,8 @@ fn ex_check_expr(
                         }
                     }
                 }
-                // method_not_found_put：Dict/HashMap 没有 put
-                if (path == "Dict" || path == "HashMap") && method == "put" {
+                // method_not_found_put：内置 Dict/HashMap 没有 put
+                if !is_user_struct && (path == "Dict" || path == "HashMap") && method == "put" {
                     work.report_error("Dict/HashMap 没有 put 方法（请使用 insert/set）".to_string());
                 }
                 // 实例方法 arity（method_call_arity）

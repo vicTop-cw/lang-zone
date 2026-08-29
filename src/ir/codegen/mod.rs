@@ -1089,7 +1089,19 @@ impl CodeGen {
         self.emit_line("#[allow(dead_code)]");
         self.emit_line("#[allow(non_snake_case)]");
         self.buf.push('\n');
-        self.emit_line("use std::collections::{HashMap, HashSet};");
+        // 用户自定义 HashMap/HashSet（如 lib_hashmap 的 struct HashMap）时跳过
+        // std 同名导入，否则 E0255 重复定义 + E0107 缺泛型（与 Rc/Arc 守卫同款）。
+        // 注意保持与 LZ 版自举 codegen 的行序一致（collections 在前，any::Any 在后），
+        // 否则 --emit=rs-lz 双路逐字节 golden 闸失配。
+        let wants_hashmap = !self.known_types.contains("HashMap");
+        let wants_hashset = !self.known_types.contains("HashSet");
+        if wants_hashmap && wants_hashset {
+            self.emit_line("use std::collections::{HashMap, HashSet};");
+        } else if wants_hashmap {
+            self.emit_line("use std::collections::HashMap;");
+        } else if wants_hashset {
+            self.emit_line("use std::collections::HashSet;");
+        }
         // 多类型变参位置约束（03d §2.3 `..: Tuple<T1,T2,..>`）的尾部收集
         // args: (T1, T2, Vec<Box<dyn Any>>) 需要 std::any::Any
         self.emit_line("use std::any::Any;");
@@ -1274,9 +1286,13 @@ impl CodeGen {
                     mapped
                 };
                 if args.is_empty() {
-                    // 常见容器类型需要默认泛型参数，否则 Rust 无法推断
-                    // 使用 i64（LZ 默认数值类型）作为默认元素类型，避免 Vec::new() 无法推断
-                    if path == "List" || path == "Vec" {
+                    if self.emitted_types.contains(path.as_str())
+                        || self.impl_types.contains(path.as_str())
+                    {
+                        // 用户自定义同名类型（如 lib_hashmap 的 struct HashMap）：
+                        // 不加容器默认泛型（否则 E0107 struct takes 0 generic arguments）
+                        mapped
+                    } else if path == "List" || path == "Vec" {
                         format!("{}<i64>", mapped)
                     } else if path == "Dict" || path == "HashMap" {
                         format!("{}<i64, i64>", mapped)
@@ -5376,6 +5392,18 @@ impl CodeGen {
                 args,
                 type_args,
             } => {
+                // ord(s[i])：字符串单字符下标已按 char 码点 i64 生成（v165 语义），
+                // 再包 lz_builtins::ord(char) 会 E0308 expected char, found i64。
+                // 此时 ord 为恒等：直接发射下标表达式（lib_hashmap._str_hash 实测）。
+                if let ExprKind::Var(name) = &callee.kind {
+                    if name == "ord" && args.len() == 1 {
+                        if let ExprKind::IndexGet { base, .. } = &args[0].kind {
+                            if matches!(base.ty, IrType::Str) {
+                                return self.gen_expr(&args[0]);
+                            }
+                        }
+                    }
+                }
                 let callee_s = self.gen_expr(callee);
                 eprintln!("DBG_CALL callee={:?} callee_s={} args={}", callee.kind, callee_s, args.len());
                 // 如果 callee 是 Lambda（立即调用闭包），需要用括号包裹
@@ -6864,6 +6892,14 @@ impl CodeGen {
                 // 判断 receiver 是否为用户自定义 struct（有对应魔术方法时用魔术方法名）
                 let recv_is_struct =
                     matches!(&receiver.ty, IrType::Named { path, .. } if self.is_known_type(path));
+                // 用户 struct 的同名普通方法优先于魔术方法映射：
+                // lib_hashmap 的 HashMap.len(self) 是普通方法，映射成 __len__ 会 E0599
+                let user_plain = match &receiver.ty {
+                    IrType::Named { path, .. } if self.is_known_type(path) => {
+                        self.struct_method_names(path)
+                    }
+                    _ => std::collections::HashSet::new(),
+                };
 
                 // LZ magic methods → Rust equivalents
                 // plus common method name mappings
@@ -6871,13 +6907,14 @@ impl CodeGen {
                 // 因为用户 struct 的 impl 方法就叫 __add__；__str__/__iter__ 用于
                 // str() 转换和迭代的容器场景，继续映射
                 let rust_method = match method.as_str() {
-                    // 用户 struct：len/iter/next/contains 等映射到魔术方法
-                    "len" if recv_is_struct => "__len__",
-                    "iter" if recv_is_struct => "__iter__",
-                    "next" if recv_is_struct => "__next__",
-                    "getitem" if recv_is_struct => "__getitem__",
-                    "setitem" if recv_is_struct => "__setitem__",
-                    "contains" if recv_is_struct => "__contains__",
+                    // 用户 struct：len/iter/next/contains 等映射到魔术方法；
+                    // 但同名普通方法存在时保持原名（普通方法优先）
+                    "len" if recv_is_struct && !user_plain.contains("len") => "__len__",
+                    "iter" if recv_is_struct && !user_plain.contains("iter") => "__iter__",
+                    "next" if recv_is_struct && !user_plain.contains("next") => "__next__",
+                    "getitem" if recv_is_struct && !user_plain.contains("getitem") => "__getitem__",
+                    "setitem" if recv_is_struct && !user_plain.contains("setitem") => "__setitem__",
+                    "contains" if recv_is_struct && !user_plain.contains("contains") => "__contains__",
                     // impl Iterator 块内调用迭代器元素上的迭代方法：
                     // `self.a.__next__()`（A: Iterator 为 std trait，方法是 next）→ .next()
                     // 泛型 receiver（Peekable 的 self.iter.__next__()，I 非已知 struct）
@@ -7035,6 +7072,11 @@ impl CodeGen {
                         // `seen.contains_key(item)` → E0308 expected &_, found T）
                         let is_dict_contains_key = recv_is_dict && method == "contains_key";
                         for (idx, arg_expr) in args.iter().enumerate() {
+                            // 用户 struct 的同名普通方法（如 lib_hashmap 的 get(key: str)
+                            // → String 形参）：不做 &str/& 实参改写，保持原 String 语义
+                            if user_plain.contains(method.as_str()) {
+                                continue;
+                            }
                             if let Some(slot) = args_s.get_mut(idx) {
                                 if let ExprKind::Lit(LitKind::Str(s)) = &arg_expr.kind {
                                     // 字符串字面量参数直接生成 &str 字面量（避免 .to_string()
@@ -7238,7 +7280,9 @@ impl CodeGen {
                 // LZ 的 Vec/List，E0308 expected Vec<K>, found Keys）——显式 DictExt::
                 let recv_is_dict = matches!(&receiver.ty, IrType::Named { path, .. }
                     if path == "Dict" || path == "HashMap");
+                // 用户 struct 同名普通方法（如 lib_hashmap 的 keys()）优先于 DictExt
                 if recv_is_dict
+                    && !user_plain.contains(method.as_str())
                     && matches!(method.as_str(), "keys" | "values" | "items" | "iter" | "iter_keys" | "iter_values")
                 {
                     let recv_ref = if recv == "self" || recv.starts_with('&') {
@@ -7260,7 +7304,9 @@ impl CodeGen {
                 // Union/Intersection 迭代器而非 LZ 的 Set，E0599/E0308）——显式 SetExt::
                 let recv_is_set = matches!(&receiver.ty, IrType::Named { path, .. }
                     if path == "Set" || path == "HashSet");
+                // 用户 struct 同名普通方法优先于 SetExt（同 DictExt 守卫）
                 if recv_is_set
+                    && !user_plain.contains(method.as_str())
                     && matches!(method.as_str(), "union" | "intersection" | "difference" | "symmetric_difference" | "iter")
                 {
                     let recv_ref = if recv == "self" || recv.starts_with('&') {
@@ -7459,7 +7505,11 @@ impl CodeGen {
                     let call_clean = call.trim_start_matches('&').to_string();
                     format!("({} as i64)", call_clean)
                 } else if method == "first" || method == "last"
-                    || (method == "get" && self.is_collection_type(&receiver.ty))
+                    || (method == "get"
+                        && self.is_collection_type(&receiver.ty)
+                        // 用户 struct 自带 get（返回 owned）：不走内置集合的
+                        // Option<&T> → .cloned() 包装（lib_hashmap 实测 E0599）
+                        && !user_plain.contains("get"))
                 {
                     // .first()/.last()/.get() 返回 Option<&T>（LZ ref 语义），需 .cloned()
                     // 转 Option<T>（.copied() 对非 Copy 元素如 String 报 E0277 String: Copy）

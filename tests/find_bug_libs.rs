@@ -145,7 +145,7 @@ fn lib_json() {
 }
 
 #[test]
-#[ignore = "待转正：LZ_REJECT Dict put 方法（P1b 分诊）"]
+#[ignore = "待转正：RUSTC_FAIL E0382 移动语义长尾 13 错（P2a，检查器层已全部修复）"]
 fn lib_hashmap() {
     assert!(run_lib("lib_hashmap").unwrap().contains("OK"));
 }
