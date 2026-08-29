@@ -123,7 +123,6 @@ fn lib_closure() {
 }
 
 #[test]
-#[ignore = "待转正：RUN_FAIL 运行输出不符（P1a 收割）"]
 fn lib_pattern() {
     assert!(run_lib("lib_pattern").unwrap().contains("OK"));
 }

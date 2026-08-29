@@ -9622,6 +9622,41 @@ fn scan_expr_fstrings(e: &Expr, used: &mut std::collections::HashSet<String>) {
     }
 }
 
+/// 收集模式中的绑定名（match 臂 / while let / catch 模式）到 bound：
+/// f-string 插值若引用这些名字，不得降级为空串（lib_pattern 实测：
+/// case Color.RGB(r, g, b) 臂体内 f"#{r}{g}{b}" 曾被降级为 ""）
+fn scan_pattern_bindings(pat: &Pattern, bound: &mut std::collections::HashSet<String>) {
+    match pat {
+        Pattern::Ident(n) | Pattern::RefMutIdent(n) => {
+            bound.insert(n.clone());
+        }
+        Pattern::Tuple(ps) | Pattern::List(ps) => {
+            for p in ps {
+                scan_pattern_bindings(p, bound);
+            }
+        }
+        Pattern::Dict(kvps) => {
+            for (_, p) in kvps {
+                scan_pattern_bindings(p, bound);
+            }
+        }
+        Pattern::Rest(Some(n)) => {
+            bound.insert(n.clone());
+        }
+        Pattern::Struct { fields, .. } => {
+            for (_, p) in fields {
+                scan_pattern_bindings(p, bound);
+            }
+        }
+        Pattern::Enum { args, .. } => {
+            for p in args {
+                scan_pattern_bindings(p, bound);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// 扫描块：let 名收集到 bound，f-string 插值收集到 used
 fn scan_block_fstrings(
     b: &Block,
@@ -9688,8 +9723,12 @@ fn scan_block_fstrings(
                 }
             }
             Stmt::WhileLet {
-                expr, guard, body, ..
+                pattern,
+                expr,
+                guard,
+                body,
             } => {
+                scan_pattern_bindings(pattern, bound);
                 scan_expr_fstrings(expr, used);
                 if let Some(g) = guard {
                     scan_expr_fstrings(g, used);
@@ -9699,6 +9738,8 @@ fn scan_block_fstrings(
             Stmt::Match { scrutinee, arms } => {
                 scan_expr_fstrings(scrutinee, used);
                 for arm in arms {
+                    // 臂模式绑定（含枚举/元组/结构子模式）也是有效绑定
+                    scan_pattern_bindings(&arm.pattern, bound);
                     if let Some(g) = &arm.guard {
                         scan_expr_fstrings(g, used);
                     }
@@ -9729,7 +9770,10 @@ fn scan_block_fstrings(
                 finally_body,
             } => {
                 scan_block_fstrings(body, bound, used);
-                for (_, cb) in catches {
+                for (cpat, cb) in catches {
+                    if let Some(p) = cpat {
+                        scan_pattern_bindings(p, bound);
+                    }
                     scan_block_fstrings(cb, bound, used);
                 }
                 if let Some(eb) = else_body {
