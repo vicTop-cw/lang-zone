@@ -1,0 +1,13 @@
+// ============================================================
+// error_method_arg_type.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_string | 期望检查点：replace 方法传入 int 参数，应报参数类型错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0277,E0308
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+def main() =
+    let s = "hello"
+    let r = s.replace(123, 456)
+    print(r)

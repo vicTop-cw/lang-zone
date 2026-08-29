@@ -1,0 +1,17 @@
+// ============================================================
+// error_enum_field_type_mismatch.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_json | 期望检查点：Num(int) 变体传入 str，应报类型错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0308
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+enum JsonValue:
+    Null
+    Num(int)
+    Str(str)
+
+def main() =
+    let v = Num("not a number")
+    print(v)

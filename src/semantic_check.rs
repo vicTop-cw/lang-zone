@@ -767,8 +767,13 @@ impl Checker {
                 // raise 位于函数内 try/catch 的捕获范围内时，不会向函数外传播，
                 // 无需在签名中声明 raises
                 if self.catch_depth == 0 {
+                    // 字符串字面量 raise（raise "message"）为消息式错误，可免 raises 声明；
+                    // 类型化 raise（raise ErrorType(...)）仍必须声明 raises
+                    let is_str_raise = matches!(e, Expr::StrLit(_) | Expr::FStrLit(_) | Expr::RawStrLit(_));
                     if let Some(c) = self.fn_ctx.as_mut() {
-                        c.has_raise = true;
+                        if !is_str_raise {
+                            c.has_raise = true;
+                        }
                     }
                 }
                 self.check_expr(e);
