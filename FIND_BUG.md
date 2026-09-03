@@ -147,7 +147,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-LX-005 | P2 | lexer | `=:` vs `==` 歧义 | ❌ P1 内联 `x =: expr` 拒绝 |
 | BUG-PR-001 | P0 | parser | 顶层 `x =:` 多行 body | ❌ P1 仅函数内支持，顶层拒绝 |
 | BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ❌ P2 `-> R raises E` 前置语法拒绝 |
-| BUG-PR-003 | P2 | parser | `..` 与 `/` 变参互斥 | ✅ 混用正确拒绝；`..: nums: int` 可用 |
+| BUG-PR-003 | P2 | parser | `..` 与 `/` 变参互斥 | ✅ 混用正确拒绝；用例内 `..: nums: int` 非法（规范是 `nums: List<T>` 收集），拒绝方向正确 |
 | BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ✅ 正确拒绝 |
 | BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ❌ P2 放行（默认参数失效） |
 | BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ❌ P1 生成自引用 trait（E0391） |
@@ -217,7 +217,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-LX-001 | emoji "😀" 全链路正常（p15）；`\u{}` 空转义正确拒绝（p14）；`\u41` 无花括号也正确拒绝（p16） |
 | BUG-LX-003 | 行尾/无右参 `~:` 按留白规范拒绝，报错文案明确 |
 | BUG-LX-004 | 多行字符串公共缩进语义按实现运行正常，s2 无缩进形态也对 |
-| BUG-PR-003 | `def bad(.., /)` 正确拒绝「`/` `*` 与 `..` 不能混用」；`..: nums: int` 变参全链路 15 求和对 |
+| BUG-PR-003 | `def bad(.., /)` 正确拒绝「`/` `*` 与 `..` 不能混用」；用例内 `..: nums: int` 按规范正确拒绝（具名收集应写 `nums: List<T>`，见 03d-可变参数.md §一） |
 | BUG-PR-004 | `type MyAdder = __add__` 正确拒绝「Expected type, got MagicMethod」（探针 p2 锁定）；正向 `type IntPair = (int,int)` 全链路对 |
 | BUG-IR-005 | `comptime:` 块解析 + const 提升折叠（p22/p23）：`z = 6*7` → `const z: i64 = 6i64 * 7i64`，运行 42 正确 |
 | BUG-CG-001 | `def sum_all(..: int)` 变参编译运行全对（sum=15） |

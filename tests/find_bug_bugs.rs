@@ -161,7 +161,9 @@ fn lx004_multiline_indent_ok() {
     full("FIND_BUG/lexer/bug-multiline-indent.lz", "bug-multiline").unwrap();
 }
 
-// BUG-PR-003: .. 与 / 混用正确拒绝 + ..: int 变参正常（同一用例文件）
+// BUG-PR-003: .. 与 / 混用互斥（探针 p28 锁定拒绝）；用例文件内的 `..: nums: int`
+// 按 03d-可变参数.md 规范非法（具名收集应写 `nums: List<T>`），lzc 拒绝方向正确。
+// 该用例文件整体为负向（正例 varargs_ok 用了非法形态），故 reject() 守护。
 #[test]
 fn pr003_varargs_mixed_rejected_negative() {
     reject("FIND_BUG/parser/bug-varargs-slash.lz").unwrap();
