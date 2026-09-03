@@ -1,5 +1,5 @@
 # FIND_BUG.md — Lang-Zone Bug 挖掘测试套件
-> 更新：2026-09-02 18:10（三轮语法核查后修复 11 处错误）
+> 更新：2026-09-03 10:40（首轮全量实测：39 非库用例，判定 36 编号；含 10 个探针复验）
 
 ## 测试文件清单（44 个 .lz）
 
@@ -133,44 +133,109 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 9. **`vec![]` 宏** — 是否在 LZ 中存在
 10. **`...` 展开运算符** — `DotDotDot` token 是否在表达式中生效
 
-## Bug 追踪表（36 个 find_bug 用例）
+## Bug 追踪表（36 个 find_bug 用例）— 2026-09-03 首轮实测
+
+实测环境：`lang-zone.exe 0.1.180-alpha`（release）+ `rustc --edition 2021 --extern lz_builtins=target/debug/liblz_builtins.rlib`。
+图例：✅ 无 bug（按预期工作/正确拒绝）· ❌ 确认 bug（需工程侧修复）· 🟡 部分问题（详见实测记录）。
 
 | ID | 严重 | 分类 | 描述 | 状态 |
 |----|------|------|------|------|
-| BUG-LX-001 | P2 | lexer | `\u{}` 空转义 + emoji 解析 | ⬜ 待测 |
-| BUG-LX-002 | P3 | lexer | `/* /* */ */` 嵌套块注释 | ⬜ 待测 |
-| BUG-LX-003 | P1 | lexer | `~:` 行尾悬挂 LexError | ⬜ 待测 |
-| BUG-LX-004 | P3 | lexer | `"""..."""` 公共缩进边界 | ⬜ 待测 |
-| BUG-LX-005 | P2 | lexer | `=:` vs `==` 歧义 | ⬜ 待测 |
-| BUG-PR-001 | P0 | parser | 顶层 `x =:` 多行 body | ⬜ 待测 |
-| BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ⬜ 待测 |
-| BUG-PR-003 | P2 | parser | `..:` 与 `/` 变参互斥 | ⬜ 待测 |
-| BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ⬜ 待测 |
-| BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ⬜ 待测 |
-| BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ⬜ 待测 |
-| BUG-TY-002 | P2 | typer | `self: Self_` 类型注解 | ⬜ 待测 |
-| BUG-TY-004 | P1 | typer | `__Params` 类型擦除 downcast | ⬜ 待测 |
-| BUG-TY-005 | P2 | typer | 泛型默认 `T: Clone = Vec<int>` | ⬜ 待测 |
-| BUG-IR-001 | P0 | ir | `~:` 构建块 IR 表示 | ⬜ 待测 |
-| BUG-IR-002 | P1 | ir | `defer guard:` IR 表示 | ⬜ 待测 |
-| BUG-IR-003 | P0 | ir | 嵌套 def 提升 / 闭包 IR | ⬜ 待测 |
-| BUG-IR-005 | P1 | ir | `comptime:` 块位置 | ⬜ 待测 |
-| BUG-CG-001 | P0 | codegen | `..:` 变参 Vec Rust | ⬜ 待测 |
-| BUG-CG-002 | P0 | codegen | `__call__` 魔法接线 | ⬜ 待测 |
-| BUG-CG-003 | P1 | codegen | `#!export` → `pub fn` | ⬜ 待测 |
-| BUG-CG-004 | P1 | codegen | `raises` → `Result<T, E>` | ⬜ 待测 |
-| BUG-SB-001 | P1 | stdbridge | `fromMillis` → `from_millis` | ⬜ 待测 |
-| BUG-SB-002 | P1 | stdbridge | `Vec.contains` 映射 | ⬜ 待测 |
-| BUG-SB-003 | P1 | stdbridge | `startsWith` → `starts_with` | ⬜ 待测 |
-| BUG-SB-004 | P2 | stdbridge | kebab-case 透传 | ⬜ 待测 |
-| BUG-SG-002 | P2 | syntax | `??` 空值合并 | ⬜ 待测 |
-| BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ⬜ 待测 |
-| BUG-SG-004 | P2 | syntax | `=:` 块返回值 | ⬜ 待测 |
-| BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ⬜ 待测 |
-| BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ⬜ 待测 |
-| BUG-EC-003 | P2 | edge | `{}` 空 Dict 推断 | ⬜ 待测 |
-| BUG-EC-004 | P3 | edge | `1e308` 浮点精度 | ⬜ 待测 |
-| BUG-EC-006 | P2 | edge | `type_name()` 内省 | ⬜ 待测 |
-| BUG-EC-007 | P3 | edge | `_` 变量名语义 | ⬜ 待测 |
+| BUG-LX-001 | P2 | lexer | `\u{}` 空转义 + emoji 解析 | ✅ emoji 正常；`\u{}` 待单测 |
+| BUG-LX-002 | P3 | lexer | `/* /* */ */` 嵌套块注释 | ❌ P3 嵌套注释内层即终止 |
+| BUG-LX-003 | P1 | lexer | `~:` 行尾悬挂 LexError | ✅ 拒绝符合规范（留白约束） |
+| BUG-LX-004 | P3 | lexer | `"""..."""` 公共缩进边界 | ✅ 全链路通过，语义按当前实现 |
+| BUG-LX-005 | P2 | lexer | `=:` vs `==` 歧义 | ❌ P1 内联 `x =: expr` 拒绝 |
+| BUG-PR-001 | P0 | parser | 顶层 `x =:` 多行 body | ❌ P1 仅函数内支持，顶层拒绝 |
+| BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ❌ P2 `-> R raises E` 前置语法拒绝 |
+| BUG-PR-003 | P2 | parser | `..` 与 `/` 变参互斥 | ✅ 混用正确拒绝；`..: nums: int` 可用 |
+| BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ✅ 正确拒绝 |
+| BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ❌ P2 放行（默认参数失效） |
+| BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ❌ P1 生成自引用 trait（E0391） |
+| BUG-TY-002 | P2 | typer | `self: Self_` 类型注解 | ❌ P1 自由函数 `&self`（E0568） |
+| BUG-TY-004 | P1 | typer | `__Params` 类型擦除 downcast | ❌ P1 `__Params.new()` 点调用错编 |
+| BUG-TY-005 | P2 | typer | 泛型默认 `T: Clone = Vec<int>` | 🟡 语法不支持但报错误导 |
+| BUG-IR-001 | P0 | ir | `~:` 构建块 IR 表示 | ❌ P1 参数位拒绝（BuildCall） |
+| BUG-IR-002 | P1 | ir | `defer guard:` IR 表示 | ❌ P1 双缺陷：push 桩 + 立即执行 |
+| BUG-IR-003 | P0 | ir | 嵌套 def 提升 / 闭包 IR | ❌ P0 static mut 捕获（E0530） |
+| BUG-IR-005 | P1 | ir | `comptime:` 块位置 | ✅ 语法可用；语义常量折叠待测 |
+| BUG-CG-001 | P0 | codegen | `..:` 变参 Vec Rust | ✅ 全链路通过（`..: int` 形态） |
+| BUG-CG-002 | P0 | codegen | `__call__` 魔法接线 | ❌ P1 自由函数 + 未接线 |
+| BUG-CG-003 | P1 | codegen | `#!export` → `pub fn` | ✅ 编译通过；export 语义待 ABI 验证 |
+| BUG-CG-004 | P1 | codegen | `raises` → `Result<T, E>` | ❌ P1 raises 修饰被静默丢弃 |
+| BUG-SB-001 | P1 | stdbridge | `fromMillis` → `from_millis` | ❌ P1 bridge 有映射 codegen 未接线 |
+| BUG-SB-002 | P1 | stdbridge | `Vec.contains` 映射 | ❌ P1 未加 `&`（E0308） |
+| BUG-SB-003 | P1 | stdbridge | `startsWith` → `starts_with` | ❌ P1 同 SB-001 未接线 |
+| BUG-SB-004 | P2 | stdbridge | kebab-case 透传 | ✅ 全链路通过 |
+| BUG-SG-002 | P2 | syntax | `??` 空值合并 | ❌ P1 Option 赋值不自动 Some |
+| BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ❌ P1 同上 + 嵌套 Option 修饰 |
+| BUG-SG-004 | P2 | syntax | `=:` 块返回值 | ✅ 函数内全链路通过 |
+| BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ❌ P2 parser 无 DotDotDot 表达式 |
+| BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ❌ P1 静默 i64 环绕 |
+| BUG-EC-003 | P2 | edge | `{}` 空 Dict 推断 | ✅ 运行正常；类型推断宽度待议 |
+| BUG-EC-004 | P3 | edge | `1e308` 浮点精度 | ✅ 全链路通过 |
+| BUG-EC-006 | P2 | edge | `type_name()` 内省 | ❌ P1 stub 返回 i64::MAX |
+| BUG-EC-007 | P3 | edge | `_` 变量名语义 | ✅ 全链路通过 |
+| —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
+**实测汇总**：36 编号 = ✅12 · ❌21 · 🟡1 · 待单测 2（`\u{}`、comptime 语义）；另 core 3 例全败于 fn 类型注解解析。
+
+## 实测记录（2026-09-03，证据索引）
+
+以下判定均经「.lz → lzc → .rs → rustc（带 lz_builtins rlib）→ 运行」全链路或最小探针复现，证据文件在 `FIND_BUG/_work_0903/`。
+
+### ❌ 确认 bug（21 项，按修复价值排序）
+
+| # | ID | 现象（一手证据） | 影响面 | 建议 |
+|---|----|------------------|--------|------|
+| 1 | BUG-IR-003 (P0) | 嵌套 def 捕获外层参数 x → 生成 `static mut x: i64` + `pub fn inner` 全局提升，`outer(x: i64)` 参数遮蔽 static 报 E0530；即便绕过遮蔽，x 也不是闭包捕获而是全局共享——**语义错误** | 闭包/嵌套函数是函数式核心；当前产物不可编译且捕获语义静默错 | codegen 支持闭包：`move` 闭包或捕获结构体；短期先报「嵌套 def 不支持捕获」 |
+| 2 | BUG-TY-001 (P0) | `duck Comparable = def __lt__(self, other: Comparable)` → `trait Comparable { fn __lt__(&self, other: Comparable) }` 自引用非 dyn 兼容 → E0391 | duck 是 LZ 结构类型核心卖点 | trait 方法参数若引用 duck 自身 → 生成 `&dyn Comparable` |
+| 3 | BUG-CG-002 (P0) | `__init__`/`__call__` 生成为**自由函数** `fn __call__(&self, ...)`（E0568：self 只许在关联函数）；调用点 `add5.__call__(10)` 未接线为可调用 | struct 魔法方法全线不可用 | 方法归属 impl 块 + `__call__` → `impl Fn` 或显式 call 糖 |
+| 4 | BUG-CG-004 (P1) | `def f() raises IOError` 编译为 `-> String` 普通 fn，raises 修饰静默丢弃；`raise "boom"` → `panic!`（运行即崩）；try/catch 语法不存在 | raises/try-catch 语义链断裂 | raises → Result<T, E> + try? 或 catch 语法糖 |
+| 5 | BUG-IR-002 (P1) | defer 体**内联立即执行**（`{ push(log, "cleanup") }` 位置在块中段）+ `push(log, x)` 自由函数调被 stub 成 `fn push(i64,i64)->i64 {i64::MAX}`（E0308） | defer 语义完全缺失 | IR 建 defer 节点 → codegen Drop guard；push 需映射 Vec::push |
+| 6 | BUG-SB-001/003 (P1) | `time::Duration::fromMillis` → `time.Duration.fromMillis`（E0425）；`s.startsWith("x")` 原样透传（E0599）。**StdBridge.resolve_method 有完整 camelCase 映射且有单测（std.rs:970/1192），但 IR codegen 方法映射表（mod.rs:7165 区）未接入** | bridge 能力与 codegen 脱节，camelCase 方法全线不通 | codegen 方法表接入 StdBridge 映射或桥接层 |
+| 7 | BUG-SB-002 (P1) | `v.contains(2i64)` → Rust 需要 `&i64`（Vec::contains 签名），E0308 | List/Vec 方法实参引用化规则缺失 | 按接收者类型给 contains 加 `&` |
+| 8 | BUG-SG-002/003 (P1) | `z: int? = 10` 直接生成 `let z: Option<i64> = 10i64`（E0308）；`??` 本体在两侧类型吻合时可用，但 Option 注解赋值不自动 Some 包装；`?.` 链依赖该前提，连带失败 | Option 语义糖不可用 | 注解为 `T?` 的字面量初始化生成 `Some(...)` |
+| 9 | BUG-TY-002 (P1) | `def get_count(self: Counter)` 生成为 `fn get_count(&self)` **自由函数**（无 impl 归属），E0568；同 BUG-CG-002 根因 | 所有带 self 的 def 不可编译 | struct 方法统一挂 impl |
+| 10 | BUG-TY-004 (P1) | `__Params::new()` → `__Params.new`（点调用，E0423 struct 不能当值）；`p.set(0, 42)` 静默丢弃 → `()` | 运行时反射库不可用 | `::` 静态调用保留 + 方法链接线 |
+| 11 | BUG-EC-002 (P1) | `9223372036854775808` 静默编成 i64 → 运行输出 `-9223372036854775808`（环绕），无警告 | 数值边界静默错 | 超出 i64 应报错或升级 i128 并标注 |
+| 12 | BUG-EC-006 (P1) | `type_name(42)` → stub `fn type_name(i64)->i64 { i64::MAX }`，输出 9223372036854775807 | 内省函数假实现 | 实现 type_name builtin 或拒绝 |
+| 13 | BUG-PR-001 (P1) | 顶层 `greet =: name:` 报「Expected Indent, got Ident("name")」——`=:` 构建块仅支持函数体内，顶层无缩进 body 语法 | 顶层构建块不可用 | parser 顶层项支持 `=:` 块 |
+| 14 | BUG-LX-005 (P1) | 内联 `y =: x + 1`（`=:` 与表达式同行）被拒；`=:` 仅支持「换行缩进块」形态（p9 探针证实块形态正常返回 42） | 语法能力边界，文档需明确 | 若规范允许内联形态需实现；否则文档明确仅块形态 |
+| 15 | BUG-IR-001 (P1) | `nums.filter(~: _ % 2 == 0)` 报「Unexpected token in expression: BuildCall」——加空格后仍拒绝，`~:` 仅支持「值位」不支持「参数位」 | 构建块语法位受限 | parser 表达式层支持 BuildCall 或文档明确边界 |
+| 16 | BUG-PR-002 (P2) | `def f() raises IOError -> str` 拒绝；`-> str raises IOError` 也拒绝；仅 `-> str` 后**换行缩进**的 raises 可解析（parser.rs:831 在 skip_newlines 之后取 Raises） | raises 位置语法窄 | 支持 raises 与返回类型同行两种顺序 |
+| 17 | BUG-PR-005 (P2) | `@decorator` 后接变量赋值被**静默放行**，装饰器修饰无任何效果 | 装饰器边界失守（负向漏洞） | parser 遇 `@dec` 后非 def 应报错 |
+| 18 | BUG-SG-005 (P2) | `[0, ...a, 4]` 报「Unexpected token in expression: DotDotDot」——词法有 token，表达式层无实现 | 展开运算符缺实现 | 列表字面量支持 spread 展开到 Vec::extend |
+| 19 | BUG-LX-002 (P3) | `/* a /* b */ c */` 在第一个 `*/` 即终止注释，剩余 `c */` 变裸 token | 嵌套块注释不支持 | 若规范要嵌套需深度计数；否则文档明确非嵌套 |
+| 20 | core 3 例 (P1) | `fold(xs: List<a>, init: b, f: fn(b, a) -> b)` 报「Expected param, got LParen」——**fn 类型注解作为参数类型不可解析**；fold 用例另有逗号解析失败（Unexpected token: Comma） | 函数类型注解全线不可用，阻塞 core/func.lz 标准库 | parser 支持 `fn(A, B) -> C` 参数类型 |
+| 21 | BUG-TY-005 (🟡→按 bug 计) | `struct Container<T: Clone = List<int>>` 报「Expected type, got Gt」——泛型默认值语法不存在，但报错点在 `= List<int>` 的 `>` 处而非 `=` 处，**报错误导** | 语法不支持 + 诊断质量 | 若语法冻结不加默认值，应报「不支持泛型默认值」并指位 `=` |
+
+### ✅ 无 bug（12 项）
+
+| ID | 实测证据 |
+|----|----------|
+| BUG-LX-001 | emoji "😀" 全链路输出正常（\u{} 空转义形态未在用例中，待补单测） |
+| BUG-LX-003 | 行尾/无右参 `~:` 按留白规范拒绝，报错文案明确 |
+| BUG-LX-004 | 多行字符串公共缩进语义按实现运行正常，s2 无缩进形态也对 |
+| BUG-PR-003 | `def bad(.., /)` 正确拒绝「`/` `*` 与 `..` 不能混用」；`..: nums: int` 变参全链路 15 求和对 |
+| BUG-PR-004 | `type MyAdder = __add__` 正确拒绝「Expected type, got MagicMethod」 |
+| BUG-IR-005 | `comptime:` 块解析通过、全链路运行（块内求值语义待后续验证） |
+| BUG-CG-001 | `def sum_all(..: int)` 变参编译运行全对（sum=15） |
+| BUG-CG-003 | `#!export` 函数编译运行正常（导出 ABI 语义超出本次范围） |
+| BUG-SB-004 | kebab-case 路径透传全链路输出正确 |
+| BUG-SG-004 | 函数内 `=:` 块返回值 30，全链路对 |
+| BUG-EC-003/004/007 | 空 Dict 运行正常、1e308/1e-323 精度无损、`_` 变量正常 |
+
+### 测试基建备忘
+
+- rustc 段必须带 `--extern lz_builtins=target/debug/liblz_builtins.rlib`，否则 22 例假性 E0432（首轮基线的教训）。
+- lzc 默认走 IR codegen；`--ir-codegen` 无需显式。
+- `test_all.sh` 缺 rlib 参数，需同步修正（已在本轮实测中以正确姿势复跑）。
+
+### 下一步建议（工程侧参考，优先级从高到低）
+
+1. **闭包/嵌套 def 捕获**（BUG-IR-003）——牵一发动全身，建议先出 IR 设计再动手。
+2. **struct 方法归属 impl**（BUG-CG-002/TY-002 同根）——一次性解决两类 E0568。
+3. **StdBridge ↔ IR codegen 接线**（BUG-SB-001/002/003）——bridge 已有能力，纯接线工程。
+4. **Option 自动 Some 包装**（BUG-SG-002/003 同根）。
+5. 其余 P2/P3 按表顺位处理。

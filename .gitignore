@@ -121,3 +121,6 @@ plugin/lz-zed/**/*.exp
 
 # 本地工具产物
 .freebuff/
+_work_0903/
+.probe_0903/
+*.lz.tmp
