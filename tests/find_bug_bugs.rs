@@ -283,9 +283,8 @@ fn ty001_duck_generic() {
     full("FIND_BUG/typer/bug-duck-generic", "duck-generic.lz").unwrap();
 }
 
-// BUG-TY-002: 自由函数 &self E0568
+// BUG-TY-002: 已修（2026-09-03）——顶层 self-def 挂 impl + 调用点方法语法 + mut self 透传
 #[test]
-#[ignore = "待修 BUG-TY-002：带 self 的 def 生成自由函数 RUSTC_FAIL E0568（P1，同 CG-002 根因）"]
 fn ty002_self_underscore() {
     full("FIND_BUG/typer/bug-self-underscore.lz", "bug-self-underscore.lz done").unwrap();
 }
@@ -325,9 +324,8 @@ fn ir003_nested_function() {
     full("FIND_BUG/ir/bug-ir-nested-function.lz", "outer(5)(10): 15").unwrap();
 }
 
-// BUG-CG-002: __call__ 自由函数 E0568
+// BUG-CG-002: 已修（2026-09-03）——__call__/__init__ 挂 impl + add5(10) → add5.__call__(10) 接线
 #[test]
-#[ignore = "待修 BUG-CG-002：__call__/__init__ 自由函数 &self RUSTC_FAIL E0568 + 未接线（P0）"]
 fn cg002_call_magic() {
     full("FIND_BUG/codegen/bug-codegen-call-magic.lz", "bug-codegen-call-magic.lz done").unwrap();
 }

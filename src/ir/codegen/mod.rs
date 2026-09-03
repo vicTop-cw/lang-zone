@@ -128,6 +128,12 @@ pub struct CodeGen {
     /// （用于生成具体化签名 `args: (T1, T2, T3)`，修复异质元组被降级为
     /// &[Ts] 同构切片的 E0308 根因）
     typepack_sigs: HashMap<String, Vec<Vec<IrType>>>,
+    /// 顶层 `def m(self: StructName, ...)` 归属表（BUG-CG-002/TY-002 修复）：
+    /// 函数名 → (struct 名, self 是否 mut)。命中的函数发射为 `impl StructName`
+    /// 方法而非自由函数（E0568：Rust 的 self 参数只许出现在 impl/trait 关联项），
+    /// 调用点同步改写为 `recv.m(...)` 方法语法。仅当 self 注解类型是本模块
+    /// struct 时归属（外部类型的扩展方法仍走自由函数路径）。
+    self_fns: HashMap<String, (String, bool)>,
     /// checker 块名称集合（fn NAME(ps: &mut __Params)），用于 default_checker 链
     /// 调用时区分 checker 块与普通值函数（fn NAME(ps: __Params) -> __Params）
     checker_blocks: std::collections::HashSet<String>,
@@ -267,6 +273,7 @@ impl CodeGen {
             fn_param_types: HashMap::new(),
             typepack_param: HashMap::new(),
             typepack_sigs: HashMap::new(),
+            self_fns: HashMap::new(),
             checker_blocks: std::collections::HashSet::new(),
             checker_captures: std::collections::HashMap::new(),
             current_checker_captures: std::collections::HashSet::new(),
@@ -726,6 +733,35 @@ impl CodeGen {
             }
         }
 
+        // 顶层 self-def 归属判定（BUG-CG-002/TY-002，E0568 修复）：
+        // 顶层 `def m(self: StructName, ...)` 的 self 注解类型是本模块
+        // struct → 登记归属表（发射为 impl 方法 + 调用点方法语法）。
+        // 独立 pass 的原因：struct 定义与 def 的源码顺序任意（struct 可在
+        // def 之后），须在 struct_method_names_map 全量收集完成后判定。
+        // 不含 self 或注解非本模块 struct（如基础类型/外部类型）→ 不归属。
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                let Some(self_p) = f.params.first() else { continue };
+                if self_p.name != "self" {
+                    continue;
+                }
+                if let IrType::Named { path, .. } = &self_p.ty {
+                    // 剥离泛型参数（部分场景注解带 <>）后按基础名归属
+                    let base = path.split('<').next().unwrap_or(path);
+                    if self.struct_method_names_map.contains_key(base) {
+                        // 方法名并入 struct 方法集合（user_plain 判定、
+                        // magic 映射守卫等已有逻辑自动生效）
+                        self.struct_method_names_map
+                            .get_mut(base)
+                            .unwrap()
+                            .insert(f.name.clone());
+                        self.self_fns
+                            .insert(f.name.clone(), (base.to_string(), self_p.is_mut));
+                    }
+                }
+            }
+        }
+
         // 标准 prelude
         self.module_uses_ext = module.items.iter().any(|item| match item {
             Item::FnDef(f) => {
@@ -776,6 +812,11 @@ impl CodeGen {
                 if f.name == "main" {
                     has_main = true;
                 }
+                // 已归属 struct 的顶层 self-def 不作自由函数发射（E0568），
+                // 改由下方 gen_self_fn_impls 挂 impl 块
+                if self.self_fns.contains_key(&f.name) {
+                    continue;
+                }
             }
             // 跳过已在 prelude 中导入的重复 use 语句
             if let Item::Use(u) = item {
@@ -804,6 +845,11 @@ impl CodeGen {
                 "pub fn main() {\n    // auto-generated: LZ module has no main entry point\n}\n",
             );
         }
+
+        // 顶层 self-def → impl 块（BUG-CG-002/TY-002，E0568 修复）：
+        // 按 struct 分组发射 `impl StructName { fn m(...) }`，
+        // 复用 gen_fn_def 的方法生成路径（is_method 分支渲染 &self 等）
+        self.gen_self_fn_impls(module);
 
         // duck 结构匹配自动 impl：结构满足 duck 的具体类型 → impl Duck for Type
         self.gen_duck_auto_impls(module);
@@ -3608,6 +3654,41 @@ impl CodeGen {
     /// 方法体委托到该类型自己的同名方法（结构匹配 → 运行时零开销）。
     /// 支持多泛型关系 duck（Mapper<T,R>）与泛型具体类型（Wrapper<T>）：
     /// 通过 duck 方法签名与具体类型方法签名的 unify，反推 duck 泛型参数 → 具体类型的绑定。
+    /// 顶层 self-def → 按结构体分组发射 impl 块（BUG-CG-002/TY-002，E0568 修复）。
+    /// `def m(self: S, ...)` 发射为 `impl S { fn m(&self, ...) }`，
+    /// 方法体生成复用 gen_fn_def（is_method 路径渲染 &self / &mut self）。
+    /// mut self 标记：self_p.is_mut 已在归属判定时登记，此处透传——
+    /// gen_fn_def 的 self 参数渲染逻辑按 p.is_mut 生成 &mut self。
+    fn gen_self_fn_impls(&mut self, module: &IrModule) {
+        if self.self_fns.is_empty() {
+            return;
+        }
+        // 按 struct 分组保持方法序稳定（源码顺序）
+        let mut groups: Vec<(String, Vec<&FnDef>)> = Vec::new();
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if let Some((sname, _)) = self.self_fns.get(&f.name) {
+                    if let Some(g) = groups.iter_mut().find(|(s, _)| s == sname) {
+                        g.1.push(f);
+                    } else {
+                        groups.push((sname.clone(), vec![f]));
+                    }
+                }
+            }
+        }
+        for (sname, fns) in groups {
+            self.emit_line(&format!("impl {} {{", sname));
+            self.indent += 1;
+            for f in fns {
+                self.gen_fn_def(f);
+                self.buf.push('\n');
+            }
+            self.indent -= 1;
+            self.emit_line("}");
+            self.buf.push('\n');
+        }
+    }
+
     fn gen_duck_auto_impls(&mut self, module: &IrModule) {
         let pairs = crate::ir::duck_check::collect_duck_impls(module);
         if pairs.is_empty() {
@@ -4523,6 +4604,13 @@ impl CodeGen {
                             "&"
                         };
                         self.emit_line(&format!("return {}{}.{};", prefix, "self", field));
+                    } else if matches!(&expr.kind, ExprKind::Var(n) if n == "self" || n == "self_")
+                        && !self.current_fn_ret_is_ref
+                    {
+                        // 尾表达式 `self` 返回 owned（顶层 self-def 的链式方法
+                        // `def inc(mut self: T) -> T = ...; self`）：self 是
+                        // &self/&mut self 引用，需 clone 为 owned（E0308）
+                        self.emit_line("return self.clone();");
                     } else {
                         self.emit_line(&format!("return {};", expr_s));
                     }
@@ -5516,6 +5604,23 @@ impl CodeGen {
                                 }
                             }
                         }
+                    }
+                }
+                // 顶层 self-def 调用改写（BUG-CG-002/TY-002，E0568 修复）：
+                // `inc(c)` → `c.inc()`；`get_count(c, 1)` → `c.get_count(1)`。
+                // 方法语法是借用调用（&self/&mut self），不走值语义自动 clone。
+                // 需在通用 callee 处理（args_s 值语义 clone 注入）之前拦截。
+                // （~: 元组解包叠加 self-def 调用属极端边缘组合，不支持）
+                if let ExprKind::Var(name) = &callee.kind {
+                    if self.self_fns.contains_key(name) && !args.is_empty() {
+                        let recv_s = self.gen_expr(&args[0]);
+                        let rest: Vec<String> =
+                            args[1..].iter().map(|a| self.gen_expr(a)).collect();
+                        return if rest.is_empty() {
+                            format!("{}.{}()", recv_s, name)
+                        } else {
+                            format!("{}.{}({})", recv_s, name, rest.join(", "))
+                        };
                     }
                 }
                 let callee_s = self.gen_expr(callee);
@@ -7312,7 +7417,6 @@ impl CodeGen {
                     }
                     _ => method,
                 };
-                eprintln!("DBG mcall2: method={} rust_method={}", method, rust_method);
                 // String Pattern trait方法 + 集合contains等需要引用的方法
                 // String Pattern trait方法 + 集合contains等需要引用的方法
                 let pattern_methods = [

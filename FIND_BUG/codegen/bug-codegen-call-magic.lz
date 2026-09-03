@@ -5,7 +5,7 @@
 struct Adder =
   x: int
 
-def __init__(self: Adder, x: int) =
+def __init__(mut self: Adder, x: int) =
   self.x = x
 
 def __call__(self: Adder, y: int) -> int =

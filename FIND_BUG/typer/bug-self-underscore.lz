@@ -8,7 +8,7 @@ struct Counter =
 def get_count(self: Counter) -> int =
   self.count
 
-def inc(self: Counter) -> Counter =
+def inc(mut self: Counter) -> Counter =
   self.count = self.count + 1
   self
 

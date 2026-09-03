@@ -151,7 +151,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ✅ 正确拒绝 |
 | BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ❌ P2 放行（默认参数失效） |
 | BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ❌ P1 生成自引用 trait（E0391） |
-| BUG-TY-002 | P2 | typer | `self: Self_` 类型注解 | ❌ P1 自由函数 `&self`（E0568） |
+| BUG-TY-002 | P2 | typer | `self: Self_` 类型注解 | ✅ **轮次5 已修** — 顶层 `def m(self: S, ...)` 挂 `impl S`，调用点改方法语法（E0568 消除） |
 | BUG-TY-004 | P1 | typer | `__Params` 类型擦除 downcast | ❌ P1 `__Params.new()` 点调用错编 |
 | BUG-TY-005 | P2 | typer | 泛型默认 `T: Clone = Vec<int>` | 🟡 语法不支持但报错误导 |
 | BUG-IR-001 | P0 | ir | `~:` 构建块 IR 表示 | ❌ P1 参数位拒绝（BuildCall） |
@@ -159,7 +159,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-IR-003 | P0 | ir | 嵌套 def 提升 / 闭包 IR | ❌ P0 static mut 捕获（E0530） |
 | BUG-IR-005 | P1 | ir | `comptime:` 块位置 | ✅ 块解析 + 变量 const 提升折叠（p22/p23 探针：`z = 6 * 7` → `const z: i64 = 6i64 * 7i64`，运行 42） |
 | BUG-CG-001 | P0 | codegen | `..:` 变参 Vec Rust | ✅ 全链路通过（`..: int` 形态） |
-| BUG-CG-002 | P0 | codegen | `__call__` 魔法接线 | ❌ P1 自由函数 + 未接线 |
+| BUG-CG-002 | P0 | codegen | `__call__` 魔法接线 | ✅ **轮次5 已修** — `__init__`/`__call__` 挂 impl，`add5(10)` → `add5.__call__(10)` 接线 |
 | BUG-CG-003 | P1 | codegen | `#!export` → `pub fn` | ✅ 编译通过；export 语义待 ABI 验证 |
 | BUG-CG-004 | P1 | codegen | `raises` → `Result<T, E>` | ❌ P1 raises 修饰被静默丢弃 |
 | BUG-SB-001 | P1 | stdbridge | `fromMillis` → `from_millis` | ✅ **三轮已修**（codegen 接线，输出 1.5s/500ms） |
@@ -178,7 +178,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 14:10 三轮复验后）**：36 编号 = ✅15 · ❌18 · 🟡1 · 2 项已由三轮接线修复转正（SB-001/002/003）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-03 16:xx 轮次 5 后）**：36 编号 = ✅17 · ❌16 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 2 项轮次 5 修复转正（CG-002/TY-002）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -191,13 +191,13 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 |---|----|------------------|--------|------|
 | 1 | BUG-IR-003 (P0) | 嵌套 def 捕获外层参数 x → 生成 `static mut x: i64` + `pub fn inner` 全局提升，`outer(x: i64)` 参数遮蔽 static 报 E0530；即便绕过遮蔽，x 也不是闭包捕获而是全局共享——**语义错误** | 闭包/嵌套函数是函数式核心；当前产物不可编译且捕获语义静默错 | codegen 支持闭包：`move` 闭包或捕获结构体；短期先报「嵌套 def 不支持捕获」 |
 | 2 | BUG-TY-001 (P0) | `duck Comparable = def __lt__(self, other: Comparable)` → `trait Comparable { fn __lt__(&self, other: Comparable) }` 自引用非 dyn 兼容 → E0391 | duck 是 LZ 结构类型核心卖点 | trait 方法参数若引用 duck 自身 → 生成 `&dyn Comparable` |
-| 3 | BUG-CG-002 (P0) | `__init__`/`__call__` 生成为**自由函数** `fn __call__(&self, ...)`（E0568：self 只许在关联函数）；调用点 `add5.__call__(10)` 未接线为可调用 | struct 魔法方法全线不可用 | 方法归属 impl 块 + `__call__` → `impl Fn` 或显式 call 糖 |
+| 3 | ~~BUG-CG-002 (P0)~~ **轮次5 已修 ✅** | 见下方「轮次 5」章节：`def m(self: S, ...)` 归属 `impl S`，`mut self` 透传 `&mut self`，调用点 `inc(c)` → `c.inc()` | struct 魔法方法已可用 | — |
 | 4 | BUG-CG-004 (P1) | `def f() raises IOError` 编译为 `-> String` 普通 fn，raises 修饰静默丢弃；`raise "boom"` → `panic!`（运行即崩）；try/catch 语法不存在 | raises/try-catch 语义链断裂 | raises → Result<T, E> + try? 或 catch 语法糖 |
 | 5 | BUG-IR-002 (P1) | defer 体**内联立即执行**（`{ push(log, "cleanup") }` 位置在块中段）+ `push(log, x)` 自由函数调被 stub 成 `fn push(i64,i64)->i64 {i64::MAX}`（E0308） | defer 语义完全缺失 | IR 建 defer 节点 → codegen Drop guard；push 需映射 Vec::push |
 | 6 | ~~BUG-SB-001/003 (P1)~~ **三轮已修 ✅** | codegen 方法表已接入 camelCase 映射（startsWith/endsWith/isEmpty/fromMillis 等，`!recv_is_struct` 守卫），全链路输出正确（1.5s/500ms、true/false） | 已修复（未提交 diff，随下个 commit 入库） | — |
 | 7 | ~~BUG-SB-002 (P1)~~ **三轮已修 ✅** | contains 的 `&` 规则已从「仅 ListLit 字面量」扩展到「变量 receiver 且无自定义 contains」（recv_has_custom_contains 守卫），E0308 消除 | 已修复（未提交 diff） | — |
 | 8 | BUG-SG-002/003 (P1) | `z: int? = 10` 直接生成 `let z: Option<i64> = 10i64`（E0308）；`??` 本体在两侧类型吻合时可用，但 Option 注解赋值不自动 Some 包装；`?.` 链依赖该前提，连带失败 | Option 语义糖不可用 | 注解为 `T?` 的字面量初始化生成 `Some(...)` |
-| 9 | BUG-TY-002 (P1) | `def get_count(self: Counter)` 生成为 `fn get_count(&self)` **自由函数**（无 impl 归属），E0568；同 BUG-CG-002 根因 | 所有带 self 的 def 不可编译 | struct 方法统一挂 impl |
+| 9 | ~~BUG-TY-002 (P1)~~ **轮次5 已修 ✅** | 同 BUG-CG-002 根因，随 self-def 归属 impl 一并修复；`def inc(mut self: Counter) -> Counter = ...; self` 尾表达式 `self` 自动 clone 为 owned | 带 self 的顶层 def 已可编译 | — |
 | 10 | BUG-TY-004 (P1) | `__Params::new()` → `__Params.new`（点调用，E0423 struct 不能当值）；`p.set(0, 42)` 静默丢弃 → `()` | 运行时反射库不可用 | `::` 静态调用保留 + 方法链接线 |
 | 11 | BUG-EC-002 (P1) | `9223372036854775808` 静默编成 i64 → 运行输出 `-9223372036854775808`（环绕），无警告 | 数值边界静默错 | 超出 i64 应报错或升级 i128 并标注 |
 | 12 | BUG-EC-006 (P1) | `type_name(42)` → stub `fn type_name(i64)->i64 { i64::MAX }`，输出 9223372036854775807 | 内省函数假实现 | 实现 type_name builtin 或拒绝 |
@@ -254,12 +254,70 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 
 **库转正进度：2 → 7 / 12**（tests/find_bug_libs.rs 已同步摘 ignore）。
 
+## 轮次 5（2026-09-03 16:xx）：BUG-CG-002 / TY-002 修复入库 —— 顶层 self-def 挂 impl
+
+### 根因
+IR codegen 对**顶层** `def m(self: S, ...)` 一律作自由函数发射 → `fn m(&self, ...)`，
+触发 Rust **E0568**（`self` 参数只允许出现在 impl/trait 关联项）。impl 块内定义的
+方法路径已存在（`gen_fn_def` 的 is_method 分支），缺的只是「顶层 def 归属判定」。
+
+### 修复（`src/ir/codegen/mod.rs`，+106 行）
+1. **归属表 `self_fns: HashMap<fn名, (struct名, is_mut)>`**：新增独立 pass，
+   在 `struct_method_names_map` 全量收集**之后**扫描顶层 `Item::FnDef`，
+   首参名 `self` 且注解类型是本模块 struct（剥离泛型 `<>` 后按基础名匹配）→
+   登记归属，并把方法名并入该 struct 的方法集合（user_plain / magic 映射守卫自动生效）。
+   独立 pass 的原因：struct 定义与 def 的源码顺序任意。
+2. **跳过自由函数发射**：主 item 循环中命中 `self_fns` 的 def 直接 continue。
+3. **`gen_self_fn_impls`**：按 struct 分组（保持源码序）发射 `impl S { fn m(...) }`，
+   复用 `gen_fn_def` 方法路径渲染 `&self` / `&mut self`（`mut self` → `&mut self` 透传）。
+4. **调用点方法语法改写**：`inc(c)` → `c.inc()`、`get_count(c2)` → `c2.get_count()`，
+   在通用 callee 处理（args_s 值语义 clone 注入）**之前**拦截——方法语法是借用调用。
+5. **尾表达式 `self` 自动 clone**：`def inc(mut self: Counter) -> Counter = ...; self`
+   的 `self` 是 `&mut self` 引用，返回 owned 需 `self.clone()`（E0308）。
+
+### 生成证据（最小复现）
+```lz
+struct Counter = count: int
+def get_count(self: Counter) -> int = self.count
+def inc(mut self: Counter) -> Counter =
+  self.count = self.count + 1
+  self
+def main() =
+  c = Counter { count: 0 }
+  c2 = inc(c)
+  print(get_count(c2))
+```
+```rust
+impl Counter {
+    fn get_count(&self) -> i64 { return self.count.clone(); }
+    fn inc(&mut self) -> Counter { self.count = self.count.clone() + 1i64; return self.clone(); }
+}
+pub fn main() {
+    let mut c = Counter { count: 0i64 };
+    let mut c2 = c.inc();
+    println!("{:?}", c2.get_count());
+}
+```
+
+### 用例修订说明（非掩盖 bug）
+两处 `self` → `mut self`（`bug-codegen-call-magic.lz` 的 `__init__`、
+`bug-typer-self-underscore.lz` 的 `inc`）**符合规范**：`SYNTAX/06a-struct.md:164`
+明确 `mut self` = `&mut Self` 才可修改字段。原用例在 E0568 下本就编译不过，
+不存在既有行为回归。
+
+### 结果
+- `tests/find_bug_bugs.rs`：`ty002_self_underscore` / `cg002_call_magic` 摘 ignore 转正。
+- 全量回归 **590 passed / 0 failed / 25 ignored**（基线 588 / 25，+2 转正负向无回归）；
+  `cargo check --all-targets` 0 代码 warning（日志中「拒绝访问」为 Windows 文件锁，非代码问题）。
+- 剩余 ❌：**16 项**。
+
 ### 下一步建议（工程侧参考，优先级从高到低）
 
 1. **闭包/嵌套 def 捕获**（BUG-IR-003）——牵一发动全身，建议先出 IR 设计再动手。
-2. **struct 方法归属 impl**（BUG-CG-002/TY-002 同根）——一次性解决两类 E0568。
-3. **StdBridge ↔ IR codegen 接线**（BUG-SB-001/002/003）——bridge 已有能力，纯接线工程。
-4. **Option 自动 Some 包装**（BUG-SG-002/003 同根）。
-5. **fn 类型注解参数解析**（core 3 例）——阻塞 std/func.lz 函数式标准库。
+2. **Option 自动 Some 包装**（BUG-SG-002/003 同根）——let 绑定 + struct 构造两处
+   注解为 `T?` 时值自动包 `Some(..)`（E0308）。
+3. **fn 类型注解参数解析**（core 3 例）——阻塞 std/func.lz 函数式标准库。
+4. **duck 自引用参数**（BUG-TY-001）——trait 方法参数引用 duck 自身 → `&dyn Comparable`（E0391）。
+5. **raises 语义链**（BUG-CG-004 / PR-002）。
 6. lib_* 剩余 5 库：string/json E0308 类、hashmap E0382 移动语义、tree E0369 运算符、iterator 需 trait 参数特性。
 7. 其余 P2/P3 按表顺位处理。
