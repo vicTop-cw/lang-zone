@@ -1,0 +1,22 @@
+// find_bug/typer/bug-duck-generic.lz
+// BUG-TY-001: duck 声明与泛型约束冲突
+// duck 声明优先级高于泛型约束（动态结构类型优先）
+// 语法：duck Name = def method(self) -> Ret ...
+
+duck Printable =
+  def __str__(self) -> str
+
+def to_string(x: Printable) -> str =
+  x.__str__()
+
+duck Comparable =
+  def __lt__(self, other: Comparable) -> bool
+
+def min(a: Comparable, b: Comparable) -> Comparable =
+  if a.__lt__(b):
+    a
+  else:
+    b
+
+def main() =
+  print("duck-generic.lz: type system check")

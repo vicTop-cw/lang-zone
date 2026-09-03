@@ -1,0 +1,12 @@
+// find_bug/stdbridge/bug-stdbridge-time-method.lz
+// BUG-SB-001: time::fromMillis camelCase 别名映射
+// StdBridge 应将 fromMillis 映射为 from_millis
+
+#!export
+def test_time() =
+  dur = time::Duration::fromMillis(1500)
+  dur2 = time::Duration::fromMillis(500)
+  print("Duration fromMillis:", dur, dur2)
+
+def main() =
+  test_time()

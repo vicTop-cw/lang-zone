@@ -1,0 +1,83 @@
+// find_bug/core/fold.lz — fold / reduce / fold1 实现
+// 测试 fold 系列函数的正确性
+
+// fold(init, f) — 左折叠，init 为初始累加器
+// fold([1,2,3,4,5], 0, |acc, x| acc + x) = 15
+def fold(xs: List<a>, init: b, f: fn(b, a) -> b) -> b =
+  acc = init
+  for x in xs:
+    acc = f(acc, x)
+  acc
+
+// fold1(f) — 以第一个元素为初始值的折叠
+// fold1([1,2,3,4,5], |acc, x| acc + x) = 15
+// 空列表返回 None
+def fold1(xs: List<a>, f: fn(a, a) -> a) -> a? =
+  if len(xs) == 0:
+    return None
+  acc = xs[0]
+  for i in range(1, len(xs)):
+    acc = f(acc, xs[i])
+  Some(acc)
+
+// reduce(f) — 与 fold1 相同语义，返回 Option
+// reduce([1,2,3,4], |a, b| a + b) = Some(10)
+def reduce(xs: List<a>, f: fn(a, a) -> a) -> a? =
+  fold1(xs, f)
+
+// reduce_by(init, f) — 带初始值的 reduce
+def reduce_by(xs: List<a>, init: a, f: fn(a, a) -> a) -> a =
+  fold(xs, init, f)
+
+// ── 基础测试 ──
+
+def test_fold_sum():
+  r = fold([1, 2, 3, 4, 5], 0, |acc, x| acc + x)
+  print("fold sum:", r)  // 15
+  assert r == 15, "fold sum failed"
+
+def test_fold_product():
+  r = fold([1, 2, 3, 4], 1, |acc, x| acc * x)
+  print("fold product:", r)  // 24
+  assert r == 24, "fold product failed"
+
+def test_fold_concat():
+  r = fold(["a", "b", "c"], "", |acc, s| acc + s)
+  print("fold concat:", r)  // abc
+  assert r == "abc", "fold concat failed"
+
+def test_fold_empty():
+  r: int = fold([], 42, |acc, x| acc + x)
+  print("fold empty:", r)  // 42
+  assert r == 42, "fold empty failed"
+
+def test_fold1_sum():
+  r = fold1([1, 2, 3, 4, 5], |acc, x| acc + x)
+  print("fold1 sum:", r)  // Some(15)
+  assert r == Some(15), "fold1 sum failed"
+
+def test_fold1_empty():
+  r = fold1([], |acc, x| acc + x)
+  print("fold1 empty:", r)  // None
+  assert r == None, "fold1 empty should be None"
+
+def test_fold_max():
+  r = fold([3, 1, 4, 1, 5, 9, 2, 6], -1, |acc, x| if x > acc then x else acc)
+  print("fold max:", r)  // 9
+  assert r == 9, "fold max failed"
+
+def test_reduce_concat():
+  r = reduce(["hello", " ", "world"], |a, b| a + b)
+  print("reduce concat:", r)  // Some(hello world)
+  assert r == Some("hello world"), "reduce concat failed"
+
+def main() =
+  test_fold_sum()
+  test_fold_product()
+  test_fold_concat()
+  test_fold_empty()
+  test_fold1_sum()
+  test_fold1_empty()
+  test_fold_max()
+  test_reduce_concat()
+  print("fold.lz: all passed!")

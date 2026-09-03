@@ -22,11 +22,11 @@ def bubble_sort<T: Ordered>(list: List<T>) -> List<T> =
     result
 
 def sub_list<T>(list: List<T>, start: int, end: int) -> List<T> =
-    let result: List<T> = []
+    let mut result: List<T> = []
     let max_i = if end > list.len(): list.len() else: end
     mut i = start
     while i < max_i:
-        let result = result + [list[i]]
+        result = result + [list[i]]
         i = i + 1
     result
 

@@ -1,0 +1,10 @@
+// find_bug/codegen/bug-codegen-raises.lz
+// BUG-CG-004: raises 编译为 Rust Result<T, Error>
+// raises 声明的函数 → Rust Result，raise → Err
+
+@raises(IOError)
+def risky() -> str =
+  return "ok"
+
+def main() =
+  print("raises test done")

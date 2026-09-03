@@ -1,0 +1,14 @@
+// find_bug/lexer/bug-equals-colon-ambiguity.lz
+// BUG-LX-005: = vs =: 歧义
+// = 是普通赋值，=: 是构建块赋值（需留白边界）
+// 词法器靠 = 前后留白区分 =: 和 =
+
+def test_ambiguity() =
+  x = 42         // 普通赋值
+  y =: x + 1     // 构建块赋值
+  z = y + 1
+  print("x:", x, "y:", y, "z:", z)
+
+def main() =
+  test_ambiguity()
+  print("bug-equals-colon-ambiguity.lz done")

@@ -1,0 +1,17 @@
+// find_bug/syntax/bug-syntax-null-coalesce.lz
+// BUG-SG-002: ?? 空值合并运算符
+// 词法器有 ?? (QuestionQuestion) token
+
+def test_null_coalesce() =
+  x: int? = None
+  y = x ?? 42  // x 为 None，取 42
+  print("None ?? 42:", y)
+  assert y == 42
+
+  z: int? = 10
+  w = z ?? 42  // z 为 Some(10)，取 10
+  print("Some(10) ?? 42:", w)
+  assert w == 10
+
+def main() =
+  test_null_coalesce()

@@ -1,0 +1,18 @@
+// find_bug/ir/bug-ir-build-block.lz
+// BUG-IR-001: ~: 构建块转换为 IR 表达式
+// ~: 是表达式级构建块，IR 如何表示？
+// 注意：~: 两侧必须有空格（词法器强制留白）
+
+def test_build() =
+  nums = [1, 2, 3, 4, 5]
+  evens = nums.filter(~: _ % 2 == 0)  // ~: 表达式 IR
+  print("evens:", evens)
+
+def test_build_plus() =
+  squares = [1, 2, 3, 4].map(~: _ * _)
+  print("squares:", squares)
+
+def main() =
+  test_build()
+  test_build_plus()
+  print("bug-ir-build-block.lz done")

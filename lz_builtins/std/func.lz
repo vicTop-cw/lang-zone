@@ -1,0 +1,260 @@
+// lz_builtins/std/func.lz — 函数式编程工具
+// fold / compose / pipe / unique / chunk / partition / flatten / zip / reverse
+// 全部用 LZ 原语实现，不调用 Rust builtins。
+
+// ── fold ────────────────────────────────────────────────────────
+
+// fold(init, f) — 左折叠
+def fold(xs: List<a>, init: b, f: fn(b, a) -> b) -> b =
+  acc = init
+  for x in xs:
+    acc = f(acc, x)
+  acc
+
+// fold1(f) — 以第一个元素为初始值，空列表返回 None
+def fold1(xs: List<a>, f: fn(a, a) -> a) -> a? =
+  if len(xs) == 0:
+    return None
+  acc = xs[0]
+  for i in range(1, len(xs)):
+    acc = f(acc, xs[i])
+  Some(acc)
+
+// reduce — 与 fold1 语义相同
+def reduce(xs: List<a>, f: fn(a, a) -> a) -> a? =
+  fold1(xs, f)
+
+// ── compose / pipe ──────────────────────────────────────────────
+
+// compose(f, g)(x) = f(g(x))
+def compose(f: fn(b) -> c, g: fn(a) -> b) -> fn(a) -> c =
+  |x| f(g(x))
+
+// pipe(x, f) = f(x)
+def pipe(x: a, f: fn(a) -> b) -> b =
+  f(x)
+
+// pipe2(x, f, g) = g(f(x))
+def pipe2(x: a, f: fn(a) -> b, g: fn(b) -> c) -> c =
+  g(f(x))
+
+// pipe3(x, f, g, h) = h(g(f(x)))
+def pipe3(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d) -> d =
+  h(g(f(x)))
+
+// pipe4(x, f, g, h, i) = i(h(g(f(x))))
+def pipe4(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d, i: fn(d) -> e) -> e =
+  i(h(g(f(x))))
+
+// pipe_many(x, funcs) — 通用多步管道
+def pipe_many(x: a, funcs: List<fn(a) -> a>) -> a =
+  acc = x
+  for f in funcs:
+    acc = f(acc)
+  acc
+
+// and_then(x, f) — Option 链式调用
+def and_then(x: a?, f: fn(a) -> b?) -> b? =
+  if x == None:
+    None
+  else:
+    f(x)
+
+// ── unique / dedup ─────────────────────────────────────────────
+
+// unique — 按值去重，保留首次出现顺序
+def unique(xs: List<a>) -> List<a> =
+  seen: List<a> = []
+  result: List<a> = []
+  for x in xs:
+    found = false
+    for s in seen:
+      if s == x:
+        found = true
+    if not found:
+      push(seen, x)
+      push(result, x)
+  result
+
+// dedup — 压缩连续重复项
+def dedup(xs: List<a>) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = [xs[0]]
+  last = xs[0]
+  for i in range(1, len(xs)):
+    curr = xs[i]
+    if curr != last:
+      push(result, curr)
+      last = curr
+  result
+
+// count_distinct — 不同值的个数
+def count_distinct(xs: List<a>) -> int =
+  len(unique(xs))
+
+// ── chunk / partition ──────────────────────────────────────────
+
+// chunk(n) — 按固定大小分块
+def chunk(xs: List<a>, n: int) -> List<List<a>> =
+  if n <= 0:
+    return []
+  result: List<List<a>> = []
+  i = 0
+  while i < len(xs):
+    group: List<a> = []
+    j = 0
+    while j < n and i + j < len(xs):
+      push(group, xs[i + j])
+      j = j + 1
+    push(result, group)
+    i = i + n
+  result
+
+// partition(pred) — 按谓词分区
+def partition(xs: List<a>, pred: fn(a) -> bool) -> (List<a>, List<a>) =
+  yes: List<a> = []
+  no: List<a> = []
+  for x in xs:
+    if pred(x):
+      push(yes, x)
+    else:
+      push(no, x)
+  (yes, no)
+
+// ── flatten ─────────────────────────────────────────────────────
+
+// flatten — 展平嵌套列表
+def flatten(xss: List<List<a>>) -> List<a> =
+  result: List<a> = []
+  for xs in xss:
+    for x in xs:
+      push(result, x)
+  result
+
+// flatten_map(f) — 先 map 再 flatten
+def flatten_map(xs: List<a>, f: fn(a) -> List<b>) -> List<b> =
+  flatten(map(xs, f))
+
+// ── intersperse ────────────────────────────────────────────────
+
+// intersperse(sep) — 在元素间插入分隔符
+def intersperse(xs: List<a>, sep: a) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = [xs[0]]
+  for i in range(1, len(xs)):
+    push(result, sep)
+    push(result, xs[i])
+  result
+
+// ── zip / unzip ─────────────────────────────────────────────────
+
+// zip — 将两个列表配对
+def zip(xs: List<a>, ys: List<b>) -> List<(a, b)> =
+  min_len = if len(xs) < len(ys) then len(xs) else len(ys)
+  result: List<(a, b)> = []
+  for i in range(0, min_len):
+    push(result, (xs[i], ys[i]))
+  result
+
+// unzip — 将配对列表拆分
+def unzip(pairs: List<(a, b)>) -> (List<a>, List<b>) =
+  xs: List<a> = []
+  ys: List<b> = []
+  for p in pairs:
+    push(xs, p[0])
+    push(ys, p[1])
+  (xs, ys)
+
+// ── reverse ─────────────────────────────────────────────────────
+
+// reverse — 反转列表
+def reverse(xs: List<a>) -> List<a> =
+  n = len(xs)
+  result: List<a> = []
+  i = n - 1
+  while i >= 0:
+    push(result, xs[i])
+    i = i - 1
+  result
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def test_fold() =
+  r = fold([1, 2, 3, 4, 5], 0, |acc, x| acc + x)
+  print("[fold] sum [1..5]:", r)
+  assert r == 15
+
+def test_fold1() =
+  r = fold1([1, 2, 3, 4], |a, b| a + b)
+  print("[fold1] sum:", r)
+  assert r == Some(10)
+
+def test_fold1_empty() =
+  r = fold1([], |a, b| a + b)
+  print("[fold1] empty:", r)
+  assert r == None
+
+def test_compose() =
+  f = compose(|x| x * 2, |x| x + 3)
+  r = f(5)
+  print("[compose] (5+3)*2:", r)
+  assert r == 16
+
+def test_pipe3() =
+  r = pipe3(2, |x| x * 3, |x| x + 4, |x| x * 5)
+  print("[pipe3] ((2*3)+4)*5:", r)
+  assert r == 50
+
+def test_unique() =
+  r = unique([1, 2, 2, 3, 1, 4])
+  print("[unique]:", r)
+  assert r == [1, 2, 3, 4]
+
+def test_dedup() =
+  r = dedup([1, 1, 1, 2, 2, 3, 3, 3])
+  print("[dedup]:", r)
+  assert r == [1, 2, 3]
+
+def test_chunk() =
+  r = chunk([1, 2, 3, 4, 5, 6, 7], 3)
+  print("[chunk 7/3]:", r)
+  assert r == [[1, 2, 3], [4, 5, 6], [7]]
+
+def test_partition() =
+  (yes, no) = partition([1, 2, 3, 4, 5, 6], |x| x % 2 == 0)
+  print("[partition] evens:", yes, "odds:", no)
+  assert yes == [2, 4, 6]
+  assert no == [1, 3, 5]
+
+def test_flatten() =
+  r = flatten([[1, 2], [3, 4], [5]])
+  print("[flatten]:", r)
+  assert r == [1, 2, 3, 4, 5]
+
+def test_zip() =
+  r = zip([1, 2, 3], ["a", "b", "c"])
+  print("[zip]:", r)
+  assert len(r) == 3
+  assert r[0] == (1, "a")
+
+def test_reverse() =
+  r = reverse([1, 2, 3, 4, 5])
+  print("[reverse]:", r)
+  assert r == [5, 4, 3, 2, 1]
+
+def main() =
+  test_fold()
+  test_fold1()
+  test_fold1_empty()
+  test_compose()
+  test_pipe3()
+  test_unique()
+  test_dedup()
+  test_chunk()
+  test_partition()
+  test_flatten()
+  test_zip()
+  test_reverse()
+  print("func.lz: all tests passed!")

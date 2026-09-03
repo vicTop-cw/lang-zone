@@ -1,0 +1,10 @@
+// find_bug/edge/bug-edge-underscore.lz
+// BUG-EC-007: _ 下划线作为变量名
+
+def test_underscore() =
+  _ = 10
+  // _ 赋值后能否使用？LZ 行为待测
+  print("underscore test done")
+
+def main() =
+  test_underscore()

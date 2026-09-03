@@ -1,0 +1,11 @@
+// find_bug/parser/bug-top-level-build.lz
+// BUG-PR-001: 顶层构建块 x =: 后接多行 body
+
+#!export
+// 顶层构建块
+greet =: name:
+  "Hello, " + name
+
+// 顶层 build 块，无缩进 body
+result = greet("World")
+print("greet result:", result)

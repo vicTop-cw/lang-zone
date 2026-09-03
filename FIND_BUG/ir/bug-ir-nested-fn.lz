@@ -1,0 +1,14 @@
+// find_bug/ir/bug-ir-nested-function.lz
+// BUG-IR-003: 嵌套函数提升的 IR 表示
+
+def outer(x: int) -> fn(int) -> int:
+  // 嵌套函数 — 闭包如何 IR 表示？
+  def inner(y: int) -> int:
+    x + y
+  inner
+
+def main() =
+  add5 = outer(5)
+  r = add5(10)
+  print("outer(5)(10):", r)
+  assert r == 15

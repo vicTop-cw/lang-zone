@@ -1,0 +1,251 @@
+// lz_builtins/std/dict.lz — Dict / HashMap 工具库
+// 对标 Python dict，全部用 LZ 原语实现。
+
+// ── 基础查询 ────────────────────────────────────────────────────
+
+// get — 获取 key 对应的值
+def get(d: Dict<k, v>, key: k) -> v? =
+  if contains(d, key):
+    Some(d[key])
+  else:
+    None
+
+// get_or — 获取值或默认值
+def get_or(d: Dict<k, v>, key: k, default: v) -> v =
+  if contains(d, key):
+    d[key]
+  else:
+    default
+
+// has_key — key 是否存在
+def has_key(d: Dict<k, v>, key: k) -> bool =
+  contains(d, key)
+
+// keys — 所有 key 的列表
+def keys(d: Dict<k, v>) -> List<k> =
+  result: List<k> = []
+  for (k, _) in d:
+    push(result, k)
+  result
+
+// values — 所有 value 的列表
+def values(d: Dict<k, v>) -> List<v> =
+  result: List<v> = []
+  for (_, v) in d:
+    push(result, v)
+  result
+
+// items — 所有 (key, value) 对的列表
+def items(d: Dict<k, v>) -> List<(k, v)> =
+  result: List<(k, v)> = []
+  for (k, v) in d:
+    push(result, (k, v))
+  result
+
+// len — key 数量
+def dict_len(d: Dict<k, v>) -> int =
+  len(keys(d))
+
+// is_empty — 是否为空
+def is_empty(d: Dict<k, v>) -> bool =
+  dict_len(d) == 0
+
+// ── 增删改 ────────────────────────────────────────────────────
+
+// set — 插入或更新
+def set(d: Dict<k, v>, key: k, val: v) -> Dict<k, v> =
+  d[key] = val
+  d
+
+// delete — 删除 key
+def delete(d: Dict<k, v>, key: k) -> Dict<k, v> =
+  remove(d, key)
+  d
+
+// clear — 清空字典
+def clear(d: Dict<k, v>) -> Dict<k, v> =
+  d = {}
+  d
+
+// update — 批量合并
+def update(d: Dict<k, v>, other: Dict<k, v>) -> Dict<k, v> =
+  for (k, v) in other:
+    d[k] = v
+  d
+
+// set_default — key 不存在时设置
+def set_default(d: Dict<k, v>, key: k, default: v) -> v =
+  if not contains(d, key):
+    d[key] = default
+  d[key]
+
+// ── 变换 ──────────────────────────────────────────────────────
+
+// map_values — 映射 value
+def map_values(d: Dict<k, v>, f: fn(v) -> w) -> Dict<k, w> =
+  result: Dict<k, w> = {}
+  for (k, v) in d:
+    result[k] = f(v)
+  result
+
+// map_keys — 映射 key
+def map_keys(d: Dict<k, v>, f: fn(k) -> k2) -> Dict<k2, v> =
+  result: Dict<k2, v> = {}
+  for (k, v) in d:
+    result[f(k)] = v
+  result
+
+// filter_dict — 按谓词过滤
+def filter_dict(d: Dict<k, v>, pred: fn(k, v) -> bool) -> Dict<k, v> =
+  result: Dict<k, v> = {}
+  for (k, v) in d:
+    if pred(k, v):
+      result[k] = v
+  result
+
+// invert — key-value 互换（value 须唯一）
+def invert(d: Dict<k, v>) -> Dict<v, k> =
+  result: Dict<v, k> = {}
+  for (k, v) in d:
+    result[v] = k
+  result
+
+// merge — 合并两个字典（后者覆盖前者）
+def merge(d1: Dict<k, v>, d2: Dict<k, v>) -> Dict<k, v> =
+  result: Dict<k, v> = {}
+  for (k, v) in d1:
+    result[k] = v
+  for (k, v) in d2:
+    result[k] = v
+  result
+
+// ── 聚合 ──────────────────────────────────────────────────────
+
+// dict_sum — value 为数值的求和
+def dict_sum(d: Dict<k, int>) -> int =
+  s = 0
+  for (_, v) in d:
+    s = s + v
+  s
+
+// dict_all — 所有 value 是否满足谓词
+def dict_all(d: Dict<k, v>, pred: fn(k, v) -> bool) -> bool =
+  for (k, v) in d:
+    if not pred(k, v):
+      return false
+  true
+
+// dict_any — 是否有 value 满足谓词
+def dict_any(d: Dict<k, v>, pred: fn(k, v) -> bool) -> bool =
+  for (k, v) in d:
+    if pred(k, v):
+      return true
+  false
+
+// ── 转换 ──────────────────────────────────────────────────────
+
+// from_pairs — 从键值对列表构建字典
+def from_pairs(pairs: List<(k, v)>) -> Dict<k, v> =
+  result: Dict<k, v> = {}
+  for (k, v) in pairs:
+    result[k] = v
+  result
+
+// group_by — 将列表按键函数分组
+def group_by(xs: List<a>, key_fn: fn(a) -> k) -> Dict<k, List<a>> =
+  result: Dict<k, List<a>> = {}
+  for x in xs:
+    k = key_fn(x)
+    if not contains(result, k):
+      result[k] = [x]
+    else:
+      group = result[k]
+      push(group, x)
+      result[k] = group
+  result
+
+// count_by — 按 key 函数计数
+def count_by(xs: List<a>, key_fn: fn(a) -> k) -> Dict<k, int> =
+  result: Dict<k, int> = {}
+  for x in xs:
+    k = key_fn(x)
+    if not contains(result, k):
+      result[k] = 1
+    else:
+      result[k] = result[k] + 1
+  result
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def test_basic() =
+  d: Dict<str, int> = {}
+  d["a"] = 1
+  d["b"] = 2
+  d["c"] = 3
+  print("[dict] a:", get(d, "a"))
+  assert get(d, "a") == Some(1)
+  assert get(d, "x") == None
+  assert get_or(d, "x", 99) == 99
+
+def test_keys_values() =
+  d: Dict<str, int> = {"x": 1, "y": 2}
+  print("[keys]:", keys(d))
+  print("[values]:", values(d))
+  assert len(keys(d)) == 2
+  assert len(values(d)) == 2
+
+def test_update() =
+  d1: Dict<str, int> = {"a": 1, "b": 2}
+  d2: Dict<str, int> = {"b": 99, "c": 3}
+  d3 = update(d1, d2)
+  print("[update]:", d3)
+  assert d3["a"] == 1
+  assert d3["b"] == 99
+  assert d3["c"] == 3
+
+def test_filter() =
+  d: Dict<str, int> = {"a": 1, "b": 2, "c": 3, "d": 4}
+  d2 = filter_dict(d, |k, v| v > 2)
+  print("[filter >2]:", d2)
+  assert d2["c"] == 3
+  assert d2["d"] == 4
+  assert not has_key(d2, "a")
+
+def test_map_values() =
+  d: Dict<str, int> = {"a": 1, "b": 2}
+  d2 = map_values(d, |v| v * 10)
+  print("[map_values *10]:", d2)
+  assert d2["a"] == 10
+  assert d2["b"] == 20
+
+def test_group_by() =
+  words = ["apple", "banana", "apricot", "blueberry", "cherry"]
+  grouped = group_by(words, |s: str len(s))
+  print("[group_by len]:", grouped)
+  // 实际: 5->["apple"], 6->["banana","cherry"], 7->["apricot"], 9->["blueberry"]
+  assert len(grouped[6]) == 2  // banana(6) + cherry(6) = 2
+
+def test_from_pairs() =
+  pairs = [("x", 1), ("y", 2), ("z", 3)]
+  d = from_pairs(pairs)
+  print("[from_pairs]:", d)
+  assert d["x"] == 1
+  assert d["z"] == 3
+
+def test_merge() =
+  d1: Dict<str, int> = {"a": 1}
+  d2: Dict<str, int> = {"b": 2}
+  d3 = merge(d1, d2)
+  print("[merge]:", d3)
+  assert len(keys(d3)) == 2
+
+def main() =
+  test_basic()
+  test_keys_values()
+  test_update()
+  test_filter()
+  test_map_values()
+  test_group_by()
+  test_from_pairs()
+  test_merge()
+  print("dict.lz: all tests passed!")

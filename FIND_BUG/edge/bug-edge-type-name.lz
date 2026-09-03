@@ -1,0 +1,12 @@
+// find_bug/edge/bug-edge-type-name.lz
+// BUG-EC-006: type_name 内省函数
+
+def test_type_names() =
+  n = 42
+  // type_name 是 builtin 函数，返回类型的字符串表示
+  t1 = type_name(n)
+  print("type_name(42):", t1)
+  // 预期: "i64" 或类似 Rust 类型名字符串
+
+def main() =
+  test_type_names()

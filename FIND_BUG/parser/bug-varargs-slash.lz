@@ -1,0 +1,18 @@
+// find_bug/parser/bug-varargs-slash.lz
+// BUG-PR-003: 变参 .. 与 / 分隔符混用（互斥）
+
+// 正常变参
+def varargs_ok(..: nums: int) -> int =
+  total = 0
+  for n in nums:
+    total = total + n
+  total
+
+// 混合：.. 和 / 同时出现（预期报错）
+// def varargs_mixed(.., /):
+//   pass
+
+def main() =
+  r = varargs_ok(1, 2, 3, 4, 5)
+  print("varargs:", r)
+  assert r == 15

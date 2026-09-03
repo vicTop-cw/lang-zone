@@ -1,0 +1,21 @@
+// find_bug/typer/bug-self-underscore.lz
+// BUG-TY-002: Self_ 作为 self 参数类型注解
+// struct 定义字段，struct 字面量用 { field: value }
+
+struct Counter =
+  count: int
+
+def get_count(self: Counter) -> int =
+  self.count
+
+def inc(self: Counter) -> Counter =
+  self.count = self.count + 1
+  self
+
+def main() =
+  c = Counter { count: 0 }
+  c = inc(c)
+  c = inc(c)
+  print("counter:", get_count(c))
+  assert get_count(c) == 2
+  print("bug-self-underscore.lz done")

@@ -1,0 +1,13 @@
+// find_bug/typer/bug-generic-default-conflict.lz
+// BUG-TY-005: 泛型默认类型 + trait bound 冲突
+// 语法：struct Name<T: Bound = DefaultType> =
+
+struct Container<T: Clone = List<int>> =
+  data: T
+
+def clone_container(c: Container<>) -> List<int> =
+  // 使用默认值 List<int>，Clone bound 应满足
+  c.data
+
+def main() =
+  print("generic-default-conflict.lz done")

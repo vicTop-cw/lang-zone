@@ -1,0 +1,14 @@
+// find_bug/ir/bug-ir-comptime.lz
+// BUG-IR-005: comptime 表达式在 IR 中的位置
+// comptime: 块（冒号形式）内可写 let 绑定
+
+comptime:
+  x = 1 + 2 + 3
+  y = x * 10
+
+def test_comptime() =
+  print("comptime block parsed successfully")
+
+def main() =
+  test_comptime()
+  print("bug-ir-comptime.lz done")

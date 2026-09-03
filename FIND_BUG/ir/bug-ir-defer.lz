@@ -1,0 +1,16 @@
+// find_bug/ir/bug-ir-defer.lz
+// BUG-IR-002: defer guard 在 IR 中的表示
+// defer guard: 块退出时自动执行清理
+
+def test_defer_basic() =
+  log: List<str> = []
+  push(log, "start")
+  defer guard:
+    push(log, "cleanup")
+  push(log, "middle")
+  push(log, "end")
+  print("log:", log)
+
+def main() =
+  test_defer_basic()
+  print("bug-ir-defer.lz done")

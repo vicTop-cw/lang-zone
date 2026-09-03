@@ -58,10 +58,9 @@ def from_list(list: List<int>) -> LinkedList =
     let ll = LinkedList.new()
     for item in list:
         ll.push_front(item)
-    // reverse
-    let reversed: List<int> = ll.to_list().reverse()
+    // ll 内已是逆序 [5,4,3,2,1]，再逆一次 push_front 恢复正序
     let result = LinkedList.new()
-    for item in reversed:
+    for item in ll.to_list():
         result.push_front(item)
     result
 

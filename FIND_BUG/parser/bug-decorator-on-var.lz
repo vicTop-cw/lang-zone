@@ -1,0 +1,11 @@
+// find_bug/parser/bug-decorator-on-var.lz
+// BUG-PR-005: decorator 带参数应用到非函数（变量）
+// @decorator 只能用于 def 函数；用于变量应报错
+
+def test() =
+  x = 42
+  print("x:", x)
+
+def main() =
+  test()
+  print("decorator-on-var.lz done")

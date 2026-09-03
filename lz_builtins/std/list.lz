@@ -1,0 +1,356 @@
+// lz_builtins/std/list.lz — List 工具库
+// 对标 Python list，补充 Rust Vec 未有的函数。
+// 不含 func.lz 中已有的通用函数（fold/compose/pipe/unique/chunk/partition/zip/...）。
+
+// ── 查找 ────────────────────────────────────────────────────────
+
+// find — 查找第一个满足谓词的元素
+def find(xs: List<a>, pred: fn(a) -> bool) -> a? =
+  for x in xs:
+    if pred(x):
+      return Some(x)
+  None
+
+// find_index — 查找满足谓词的第一个元素索引
+def find_index(xs: List<a>, pred: fn(a) -> bool) -> int? =
+  i = 0
+  for x in xs:
+    if pred(x):
+      return Some(i)
+    i = i + 1
+  None
+
+// find_last — 查找最后一个满足谓词的元素
+def find_last(xs: List<a>, pred: fn(a) -> bool) -> a? =
+  result: a? = None
+  for x in xs:
+    if pred(x):
+      result = Some(x)
+  result
+
+// contains — 是否包含元素
+def contains(xs: List<a>, x: a) -> bool =
+  for y in xs:
+    if y == x:
+      return true
+  false
+
+// count — 统计元素出现次数
+def count(xs: List<a>, x: a) -> int =
+  c = 0
+  for y in xs:
+    if y == x:
+      c = c + 1
+  c
+
+// count_pred — 按谓词统计
+def count_pred(xs: List<a>, pred: fn(a) -> bool) -> int =
+  c = 0
+  for x in xs:
+    if pred(x):
+      c = c + 1
+  c
+
+// all — 所有元素是否满足谓词
+def all(xs: List<a>, pred: fn(a) -> bool) -> bool =
+  for x in xs:
+    if not pred(x):
+      return false
+  true
+
+// any — 是否有元素满足谓词
+def any(xs: List<a>, pred: fn(a) -> bool) -> bool =
+  for x in xs:
+    if pred(x):
+      return true
+  false
+
+// ── 变换 ────────────────────────────────────────────────────────
+
+// lz_map — 映射（用 lz_ 前缀避免与内置 map 冲突）
+def lz_map(xs: List<a>, f: fn(a) -> b) -> List<b> =
+  result: List<b> = []
+  for x in xs:
+    push(result, f(x))
+  result
+
+// lz_filter — 过滤（用 lz_ 前缀避免冲突）
+def lz_filter(xs: List<a>, pred: fn(a) -> bool) -> List<a> =
+  result: List<a> = []
+  for x in xs:
+    if pred(x):
+      push(result, x)
+  result
+
+// flat_map — 先 map 再 flatten
+def flat_map(xs: List<a>, f: fn(a) -> List<b>) -> List<b> =
+  result: List<b> = []
+  for x in xs:
+    ys = f(x)
+    for y in ys:
+      push(result, y)
+  result
+
+// ── 结构操作 ────────────────────────────────────────────────────
+
+// append — 在末尾追加单个元素
+def append(xs: List<a>, x: a) -> List<a> =
+  push(xs, x)
+  xs
+
+// prepend — 在开头插入
+def prepend(xs: List<a>, x: a) -> List<a> =
+  result: List<a> = [x]
+  for y in xs:
+    push(result, y)
+  result
+
+// insert_at — 在索引处插入
+def insert_at(xs: List<a>, i: int, x: a) -> List<a> =
+  if i <= 0:
+    return prepend(xs, x)
+  if i >= len(xs):
+    push(xs, x)
+    return xs
+  result: List<a> = []
+  for j in range(0, i):
+    push(result, xs[j])
+  push(result, x)
+  for j in range(i, len(xs)):
+    push(result, xs[j])
+  result
+
+// remove_at — 删除索引处的元素
+def remove_at(xs: List<a>, i: int) -> List<a> =
+  if i < 0 or i >= len(xs):
+    return xs
+  result: List<a> = []
+  for j in range(0, len(xs)):
+    if j != i:
+      push(result, xs[j])
+  result
+
+// remove_first — 删除第一个匹配的元素
+def remove_first(xs: List<a>, x: a) -> List<a> =
+  idx: int? = None
+  i = 0
+  for y in xs:
+    if y == x and idx == None:
+      idx = Some(i)
+    i = i + 1
+  if idx == None:
+    return xs
+  remove_at(xs, idx?)
+
+// update_at — 更新索引处元素
+def update_at(xs: List<a>, i: int, x: a) -> List<a> =
+  if i < 0 or i >= len(xs):
+    return xs
+  result: List<a> = []
+  for j in range(0, len(xs)):
+    if j == i:
+      push(result, x)
+    else:
+      push(result, xs[j])
+  result
+
+// ── 子集 ────────────────────────────────────────────────────────
+
+// take(n) — 取前 n 个
+def take(xs: List<a>, n: int) -> List<a> =
+  m = if n < len(xs) then n else len(xs)
+  result: List<a> = []
+  for i in range(0, m):
+    push(result, xs[i])
+  result
+
+// drop(n) — 跳过前 n 个
+def drop(xs: List<a>, n: int) -> List<a> =
+  start = if n < len(xs) then n else len(xs)
+  result: List<a> = []
+  for i in range(start, len(xs)):
+    push(result, xs[i])
+  result
+
+// take_while — 取满足谓词的连续前缀
+def take_while(xs: List<a>, pred: fn(a) -> bool) -> List<a> =
+  result: List<a> = []
+  for x in xs:
+    if pred(x):
+      push(result, x)
+    else:
+      return result
+  result
+
+// drop_while — 跳过满足谓词的连续前缀
+def drop_while(xs: List<a>, pred: fn(a) -> bool) -> List<a> =
+  dropping = true
+  result: List<a> = []
+  for x in xs:
+    if dropping and pred(x):
+      // 跳过
+    else:
+      dropping = false
+      push(result, x)
+  result
+
+// ── 排序 ────────────────────────────────────────────────────────
+
+// sorted_by — 按 key 函数排序（返回新列表）
+def sorted_by(xs: List<a>, key_fn: fn(a) -> b) -> List<a> =
+  n = len(xs)
+  result = xs
+  i = 0
+  while i < n - 1:
+    min_j = i
+    j = i + 1
+    while j < n:
+      if key_fn(result[j]) < key_fn(result[min_j]):
+        min_j = j
+      j = j + 1
+    if min_j != i:
+      tmp = result[i]
+      result[i] = result[min_j]
+      result[min_j] = tmp
+    i = i + 1
+  result
+
+// ── 组合 ────────────────────────────────────────────────────────
+
+// concat — 连接多个列表
+def concat(xss: List<List<a>>) -> List<a> =
+  result: List<a> = []
+  for xs in xss:
+    for x in xs:
+      push(result, x)
+  result
+
+// ── 聚合 ────────────────────────────────────────────────────────
+
+// sum — 求和（i64）
+def sum(xs: List<int>) -> int =
+  s = 0
+  for x in xs:
+    s = s + x
+  s
+
+// product — 连乘
+def product(xs: List<int>) -> int =
+  if len(xs) == 0:
+    return 1
+  p = 1
+  for x in xs:
+    p = p * x
+  p
+
+// join_str — 字符串列表用分隔符合并
+def join_str(parts: List<str>, sep: str) -> str =
+  if len(parts) == 0:
+    return ""
+  result = parts[0]
+  for i in range(1, len(parts)):
+    result = result + sep + parts[i]
+  result
+
+// ── 分块与滑动窗口 ─────────────────────────────────────────────
+
+// window(size) — 滑动窗口
+def window(xs: List<a>, size: int) -> List<List<a>> =
+  if size <= 0 or len(xs) < size:
+    return []
+  result: List<List<a>> = []
+  i = 0
+  while i <= len(xs) - size:
+    w: List<a> = []
+    for j in range(i, i + size):
+      push(w, xs[j])
+    push(result, w)
+    i = i + 1
+  result
+
+// ── 去重 ────────────────────────────────────────────────────────
+
+// dedup — 压缩连续重复项
+def dedup(xs: List<a>) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = [xs[0]]
+  last = xs[0]
+  for i in range(1, len(xs)):
+    curr = xs[i]
+    if curr != last:
+      push(result, curr)
+      last = curr
+  result
+
+// unique_by — 按 key 去重（保留首次出现）
+def unique_by(xs: List<a>, key_fn: fn(a) -> b) -> List<a> =
+  seen_keys: List<b> = []
+  result: List<a> = []
+  for x in xs:
+    k = key_fn(x)
+    found = false
+    for s in seen_keys:
+      if s == k:
+        found = true
+    if not found:
+      push(seen_keys, k)
+      push(result, x)
+  result
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def test_find() =
+  r = find([1, 3, 5, 7], |x| x > 4)
+  print("[find] >4:", r)
+  assert r == Some(5)
+  assert find([], |x| x > 0) == None
+
+def test_count() =
+  print("[count] [1,2,2,3,2] of 2:", count([1, 2, 2, 3, 2], 2))
+  assert count([1, 2, 2, 3, 2], 2) == 3
+
+def test_take_drop() =
+  print("[take/drop]:", take([1, 2, 3, 4, 5], 3), drop([1, 2, 3, 4, 5], 2))
+  assert take([1, 2, 3, 4, 5], 3) == [1, 2, 3]
+  assert drop([1, 2, 3, 4, 5], 2) == [3, 4, 5]
+
+def test_insert_remove() =
+  xs = [1, 2, 3]
+  xs2 = insert_at(xs, 1, 99)
+  print("[insert_at]:", xs2)
+  assert xs2 == [1, 99, 2, 3]
+  xs3 = remove_at(xs2, 1)
+  print("[remove_at]:", xs3)
+  assert xs3 == [1, 2, 3]
+
+def test_sorted_by() =
+  r = sorted_by(["banana", "apple", "cherry"], |s: str len(s))
+  print("[sorted_by len]:", r)
+  assert r == ["apple", "banana", "cherry"]
+
+def test_dedup() =
+  r = dedup([1, 1, 1, 2, 2, 3, 3, 3])
+  print("[dedup]:", r)
+  assert r == [1, 2, 3]
+
+def test_window() =
+  r = window([1, 2, 3, 4, 5], 3)
+  print("[window 3]:", r)
+  assert r == [[1, 2, 3], [2, 3, 4], [3, 4, 5]]
+
+def test_flat_map() =
+  r = flat_map([1, 2, 3], |x: int [x, x * 10])
+  print("[flat_map]:", r)
+  assert r == [1, 10, 2, 20, 3, 30]
+
+def main() =
+  test_find()
+  test_count()
+  test_take_drop()
+  test_insert_remove()
+  test_sorted_by()
+  test_dedup()
+  test_window()
+  test_flat_map()
+  print("list.lz: all tests passed!")

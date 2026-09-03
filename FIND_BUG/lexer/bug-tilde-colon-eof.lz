@@ -1,0 +1,14 @@
+// find_bug/lexer/bug-tilde-colon-eof.lz
+// BUG-LX-003: ~: 行尾悬挂（无右操作数）
+// ~: 构建块要求前后有空白边界；行尾 ~: 无操作数 → LexError
+// 文件末尾 ~ 无换行也测试
+
+def test_build() =
+  evens = [1, 2, 3, 4].filter(~: _ % 2 == 0)
+  print("evens:", evens)
+
+def main() =
+  test_build()
+  print("bug-tilde-colon-eof.lz done")
+  // 行尾悬挂 ~:（预期 LexError）:
+  // x = y ~

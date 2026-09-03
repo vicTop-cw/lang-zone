@@ -1,0 +1,10 @@
+// find_bug/stdbridge/bug-stdbridge-kebab.lz
+// BUG-SB-004: kebab-case 模块路径透传
+
+#!export
+def test_kebab() =
+  path = "my-lib-utils::helper::do_work"
+  print("kebab path:", path)
+
+def main() =
+  test_kebab()

@@ -2,17 +2,17 @@
 *.exe
 *.pdb
 
-# generated .rs output from lzc — keep only source in src/
+# generated .rs output from lzc �? keep only source in src/
 *.rs
 !src/**/*.rs
 !tests/**/*.rs
-# workspace 成员的 Rust 源码必须入库（否则干净检出无法构建）
+# workspace 成员�? Rust 源码必须入库（否则干净检出无法构建）
 !lz_builtins/**/*.rs
 !lz-infer/**/*.rs
-# std 目录的 Rust 桥接源（shims.rs，被 src/codegen 引用）同样必须入库
+# std 目录�? Rust 桥接源（shims.rs，被 src/codegen 引用）同样必须入�?
 !std/**/*.rs
 
-# generated LZ IR codegen intermediate (.lzlz → .rs → .exe) from --emit=ir-lz
+# generated LZ IR codegen intermediate (.lzlz �? .rs �? .exe) from --emit=ir-lz
 *.lzlz
 
 # generated output directories
@@ -34,7 +34,7 @@ bootstrap/*
 !bootstrap/02-自举前置条件清单.md
 !bootstrap/03-自举执行计划.md
 !bootstrap/04-当前项目自举具体方案.md
-!bootstrap/05-自举里程碑台账.md
+!bootstrap/05-自举里程碑台�?.md
 !bootstrap/06-自举交接续推文档.md
 !bootstrap/README.md
 !bootstrap/build.sh
@@ -103,3 +103,21 @@ omega/
 *.lzcache
 div-tools/syntax_matrix_out.txt
 *.lzi
+
+# FIND_BUG ����/�����м���2026-09-03��
+FIND_BUG/dbg_dump.txt
+FIND_BUG/test_results.txt
+FIND_BUG/*/debug/
+
+# ��Ŀ¼ɢ��Ĺ�����־��2026-09-03��
+build_err.txt
+build_out.txt
+iter_err.txt
+plugin/lz-zed/**/*.wasm
+plugin/lz-zed/**/*.dll
+plugin/lz-zed/**/*.obj
+plugin/lz-zed/**/*.lib
+plugin/lz-zed/**/*.exp
+
+# ���ع��߲���
+.freebuff/

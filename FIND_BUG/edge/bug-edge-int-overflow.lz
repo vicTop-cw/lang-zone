@@ -1,0 +1,17 @@
+// find_bug/edge/bug-edge-int-overflow.lz
+// BUG-EC-002: 数字字面量 9223372036854775808 溢出
+// i64::MAX = 9223372036854775807
+// 9223372036854775808 有特殊处理（透传 i128）
+
+def test_big_int() =
+  x = 9223372036854775808
+  print("i64::MAX + 1:", x)
+
+def test_big_int_direct() =
+  y = 9223372036854775807
+  print("i64::MAX:", y)
+  assert y == 9223372036854775807
+
+def main() =
+  test_big_int_direct()
+  test_big_int()

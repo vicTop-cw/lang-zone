@@ -1,0 +1,14 @@
+// find_bug/lexer/bug-escape-unicode.lz
+// BUG-LX-001: \u{} 空转义后跟标识符
+// \u{} 是空 Unicode 码点，解析为 U+0000（空字符）
+// lexer 应拒绝 \u{} 语法或报错
+
+def test_unicode() =
+  s = "\u{1F600}"    // emoji 😀
+  print("emoji:", s)
+  // \u{} 空码点（边界情况）
+  // s2 = "\u{}test"  // 应报错
+
+def main() =
+  test_unicode()
+  print("bug-escape-unicode.lz done")

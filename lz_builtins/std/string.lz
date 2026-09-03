@@ -1,0 +1,381 @@
+// lz_builtins/std/string.lz — 字符串工具库
+// 所有函数用 LZ 原语实现，不调用 Rust builtins。
+
+// ── 基础查询 ────────────────────────────────────────────────────
+
+// is_empty — 字符串是否为空
+def is_empty(s: str) -> bool =
+  len(s) == 0
+
+// contains(s, sub) — 是否包含子串
+def contains(s: str, sub: str) -> bool =
+  if len(sub) == 0:
+    return true
+  if len(s) < len(sub):
+    return false
+  i = 0
+  max_i = len(s) - len(sub)
+  found = false
+  while i <= max_i and not found:
+    match = true
+    j = 0
+    while j < len(sub) and match:
+      if s[i + j] != sub[j]:
+        match = false
+      j = j + 1
+    if match:
+      found = true
+    i = i + 1
+  found
+
+// starts_with(s, prefix) — 是否以 prefix 开头
+def starts_with(s: str, prefix: str) -> bool =
+  if len(prefix) == 0:
+    return true
+  if len(s) < len(prefix):
+    return false
+  i = 0
+  while i < len(prefix):
+    if s[i] != prefix[i]:
+      return false
+    i = i + 1
+  true
+
+// ends_with(s, suffix) — 是否以 suffix 结尾
+def ends_with(s: str, suffix: str) -> bool =
+  if len(suffix) == 0:
+    return true
+  if len(s) < len(suffix):
+    return false
+  offset = len(s) - len(suffix)
+  i = 0
+  while i < len(suffix):
+    if s[offset + i] != suffix[i]:
+      return false
+    i = i + 1
+  true
+
+// index_of(s, sub) — 子串首次出现的位置
+def index_of(s: str, sub: str) -> int? =
+  if len(sub) == 0:
+    return Some(0)
+  if len(s) < len(sub):
+    return None
+  i = 0
+  max_i = len(s) - len(sub)
+  while i <= max_i:
+    match = true
+    j = 0
+    while j < len(sub) and match:
+      if s[i + j] != sub[j]:
+        match = false
+      j = j + 1
+    if match:
+      return Some(i)
+    i = i + 1
+  None
+
+// last_index_of(s, sub) — 子串最后出现的位置
+def last_index_of(s: str, sub: str) -> int? =
+  if len(sub) == 0:
+    return Some(len(s))
+  if len(s) < len(sub):
+    return None
+  i = len(s) - len(sub)
+  while i >= 0:
+    match = true
+    j = 0
+    while j < len(sub) and match:
+      if s[i + j] != sub[j]:
+        match = false
+      j = j + 1
+    if match:
+      return Some(i)
+    i = i - 1
+  None
+
+// ── 大小写 ─────────────────────────────────────────────────────
+
+// to_upper — 转为大写
+def to_upper(s: str) -> str =
+  result: List<str> = []
+  for ch in s:
+    code = ord(ch)
+    if code >= 97 and code <= 122:  // a-z
+      push(result, chr(code - 32))
+    else:
+      push(result, ch)
+  join(result, "")
+
+// to_lower — 转为小写
+def to_lower(s: str) -> str =
+  result: List<str> = []
+  for ch in s:
+    code = ord(ch)
+    if code >= 65 and code <= 90:  // A-Z
+      push(result, chr(code + 32))
+    else:
+      push(result, ch)
+  join(result, "")
+
+// capitalize — 首字母大写
+def capitalize(s: str) -> str =
+  if len(s) == 0:
+    return ""
+  first = s[0]
+  code = ord(first)
+  if code >= 97 and code <= 122:
+    first = chr(code - 32)
+  if len(s) == 1:
+    return first
+  rest = slice(s, 1, len(s))
+  first + rest
+
+// ── 修整 ────────────────────────────────────────────────────────
+
+// trim — 去除首尾空白
+def trim(s: str) -> str =
+  trim_start(trim_end(s))
+
+// trim_start — 去除开头空白
+def trim_start(s: str) -> str =
+  i = 0
+  while i < len(s) and is_space(s[i]):
+    i = i + 1
+  slice(s, i, len(s))
+
+// trim_end — 去除末尾空白
+def trim_end(s: str) -> str =
+  i = len(s)
+  while i > 0 and is_space(s[i - 1]):
+    i = i - 1
+  slice(s, 0, i)
+
+// is_space(ch) — 是否为空白字符
+def is_space(ch: str) -> bool =
+  c = ch[0]
+  (c == 32) or (c == 9) or (c == 10) or (c == 13)
+
+// ── 分割与连接 ──────────────────────────────────────────────────
+
+// split(s, sep) — 按分隔符分割
+def split(s: str, sep: str) -> List<str> =
+  if len(sep) == 0:
+    return [s]
+  result: List<str> = []
+  start = 0
+  i = 0
+  while i <= len(s) - len(sep):
+    found = true
+    j = 0
+    while j < len(sep):
+      if s[i + j] != sep[j]:
+        found = false
+      j = j + 1
+    if found:
+      push(result, slice(s, start, i))
+      start = i + len(sep)
+      i = start - 1
+    i = i + 1
+  push(result, slice(s, start, len(s)))
+  result
+
+// join(parts, sep) — 用分隔符连接
+def join(parts: List<str>, sep: str) -> str =
+  if len(parts) == 0:
+    return ""
+  result = parts[0]
+  for i in range(1, len(parts)):
+    result = result + sep + parts[i]
+  result
+
+// lines — 按行分割（支持 \n 和 \r\n）
+def lines(s: str) -> List<str> =
+  split(s, "\n")
+
+// words — 按空白分割
+def words(s: str) -> List<str> =
+  split(trim(s), " ")
+
+// ── 子串 ───────────────────────────────────────────────────────
+
+// slice(s, start, end) — 子串（支持负索引）
+def slice(s: str, start: int, end: int) -> str =
+  n = len(s)
+  // 负索引处理
+  s2 = if start < 0 then (if start + n >= 0 then start + n else 0) else start
+  e2 = if end < 0 then (if end + n >= 0 then end + n else 0) else end
+  if s2 >= e2 or s2 >= n:
+    return ""
+  start3 = if e2 - s2 > n - s2 then n else e2
+  // 手写子串提取
+  result: List<str> = []
+  i = s2
+  while i < start3:
+    push(result, s[i])
+    i = i + 1
+  join(result, "")
+
+// substring — 别名
+def substring(s: str, start: int, end: int) -> str =
+  slice(s, start, end)
+
+// repeat(s, n) — 重复 n 次
+def repeat(s: str, n: int) -> str =
+  if n <= 0:
+    return ""
+  result = s
+  i = 1
+  while i < n:
+    result = result + s
+    i = i + 1
+  result
+
+// pad_left(s, width, ch) — 左填充
+def pad_left(s: str, width: int, ch: str) -> str =
+  if len(s) >= width:
+    return s
+  padding_len = width - len(s)
+  padding: List<str> = []
+  i = 0
+  while i < padding_len:
+    push(padding, ch)
+    i = i + 1
+  join(padding, "") + s
+
+// pad_right(s, width, ch) — 右填充
+def pad_right(s: str, width: int, ch: str) -> str =
+  if len(s) >= width:
+    return s
+  padding_len = width - len(s)
+  padding: List<str> = []
+  i = 0
+  while i < padding_len:
+    push(padding, ch)
+    i = i + 1
+  s + join(padding, "")
+
+// ── 替换 ────────────────────────────────────────────────────────
+
+// replace(s, old, new) — 替换所有出现的 old 为 new
+def replace(s: str, old: str, new: str) -> str =
+  if len(old) == 0:
+    return s
+  parts = split(s, old)
+  join(parts, new)
+
+// replace_first(s, old, new) — 仅替换第一个
+def replace_first(s: str, old: str, new: str) -> str =
+  idx = index_of(s, old)
+  if idx == None:
+    return s
+  start = idx?
+  s[0:start] + new + s[start + len(old):len(s)]
+
+// ── 布尔查询 ────────────────────────────────────────────────────
+
+// is_alpha(s) — 是否全为字母
+def is_alpha(s: str) -> bool =
+  if len(s) == 0:
+    return false
+  for ch in s:
+    c = ord(ch)
+    is_letter = (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+    if not is_letter:
+      return false
+  true
+
+// is_digit(s) — 是否全为数字
+def is_digit(s: str) -> bool =
+  if len(s) == 0:
+    return false
+  for ch in s:
+    c = ord(ch)
+    if c < 48 or c > 57:
+      return false
+  true
+
+// is_alnum(s) — 是否为字母或数字
+def is_alnum(s: str) -> bool =
+  if len(s) == 0:
+    return false
+  for ch in s:
+    c = ord(ch)
+    is_letter = (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+    is_digit2 = (c >= 48 and c <= 57)
+    if not (is_letter or is_digit2):
+      return false
+  true
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def test_contains() =
+  print("[contains] 'hello world' 'world':", contains("hello world", "world"))
+  assert contains("hello world", "world") == true
+  assert contains("hello world", "xyz") == false
+  assert contains("", "") == true
+
+def test_starts_ends() =
+  print("[starts/ends] 'hello':", starts_with("hello", "hel"), ends_with("hello", "llo"))
+  assert starts_with("hello", "hel") == true
+  assert ends_with("hello", "llo") == true
+  assert starts_with("hello", "xyz") == false
+  assert ends_with("hello", "xyz") == false
+
+def test_index_of() =
+  print("[index_of] 'hello' 'll':", index_of("hello", "ll"))
+  assert index_of("hello", "ll") == Some(2)
+  assert index_of("hello", "xyz") == None
+
+def test_to_upper_lower() =
+  print("[upper/lower]:", to_upper("Hello World"), to_lower("Hello World"))
+  assert to_upper("Hello") == "HELLO"
+  assert to_lower("Hello") == "hello"
+
+def test_trim() =
+  print("[trim]:", trim("  hello  "))
+  assert trim("  hello  ") == "hello"
+  assert trim("  hello") == "hello"
+  assert trim("hello  ") == "hello"
+
+def test_split_join() =
+  parts = split("a,b,c", ",")
+  print("[split]:", parts)
+  assert parts == ["a", "b", "c"]
+  assert join(["a", "b", "c"], "-") == "a-b-c"
+
+def test_slice() =
+  print("[slice] 'hello' 1:4:", slice("hello", 1, 4))
+  assert slice("hello", 1, 4) == "ell"
+  assert slice("hello", 0, 5) == "hello"
+  assert slice("hello", -2, 5) == "lo"
+
+def test_replace() =
+  print("[replace]:", replace("hello world world", "world", "lz"))
+  assert replace("hello world", "world", "lz") == "hello lz"
+  assert replace("aaa", "a", "b") == "bbb"
+
+def test_repeat() =
+  print("[repeat] 'ab' 3:", repeat("ab", 3))
+  assert repeat("ab", 3) == "ababab"
+  assert repeat("ab", 0) == ""
+
+def test_is_alpha_digit() =
+  print("[is_alpha/digit]:", is_alpha("abc"), is_digit("123"), is_alnum("abc123"))
+  assert is_alpha("abc") == true
+  assert is_digit("123") == true
+  assert is_alnum("abc123") == true
+  assert is_alpha("123") == false
+
+def main() =
+  test_contains()
+  test_starts_ends()
+  test_index_of()
+  test_to_upper_lower()
+  test_trim()
+  test_split_join()
+  test_slice()
+  test_replace()
+  test_repeat()
+  test_is_alpha_digit()
+  print("string.lz: all tests passed!")

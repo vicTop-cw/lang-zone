@@ -1,0 +1,18 @@
+// find_bug/lexer/bug-comment-nested.lz
+// BUG-LX-002: 嵌套块注释 /* ... /* ... */ ... */
+// /* */ 块注释支持嵌套：外层 /* 遇到内层 /* 时深度+1，
+// 遇到 */ 时深度-1，深度归零时结束
+
+/*
+  outer comment
+  /* nested comment level 2 */
+  back to outer
+*/
+
+def test_nested_comment() =
+  x = 42  // /* this is NOT a nested block start here */
+  print("x:", x)
+
+def main() =
+  test_nested_comment()
+  print("bug-comment-nested.lz done")

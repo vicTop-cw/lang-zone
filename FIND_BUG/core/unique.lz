@@ -1,0 +1,91 @@
+// find_bug/core/unique.lz — 去重、unique / unique_by 实现
+
+// unique — 按值去重（保留首次出现顺序），HashSet 方式
+def unique(xs: List<a>) -> List<a> =
+  seen: List<a> = []
+  result: List<a> = []
+  for x in xs:
+    if not contains(seen, x):
+      push(seen, x)
+      push(result, x)
+  result
+
+// unique_by(key_fn) — 按 key 去重，保留首次出现
+def unique_by(xs: List<a>, key_fn: fn(a) -> b) -> List<a> =
+  seen_keys: List<b> = []
+  result: List<a> = []
+  for x in xs:
+    k = key_fn(x)
+    if not contains(seen_keys, k):
+      push(seen_keys, k)
+      push(result, x)
+  result
+
+// unique_strings — 字符串去重（大小写敏感）
+def unique_strings(xs: List<str>) -> List<str> =
+  seen: List<str> = []
+  result: List<str> = []
+  for x in xs:
+    if not contains(seen, x):
+      push(seen, x)
+      push(result, x)
+  result
+
+// dedup — 连续重复压缩（run-length encoding 前置步骤）
+// [1,1,1,2,2,3,3,3,3] → [1,2,3]
+def dedup(xs: List<a>) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = [xs[0]]
+  last = xs[0]
+  for i in range(1, len(xs)):
+    if xs[i] != last:
+      push(result, xs[i])
+      last = xs[i]
+  result
+
+// count_distinct — 不同值的个数
+def count_distinct(xs: List<a>) -> int =
+  len(unique(xs))
+
+// ── 测试 ──
+
+def main() =
+  // unique int
+  r1 = unique([1, 2, 2, 3, 1, 4, 3])
+  print("unique [1,2,2,3,1,4,3]:", r1)  // [1,2,3,4]
+  assert r1 == [1, 2, 3, 4]
+
+  // unique strings
+  r2 = unique_strings(["a", "b", "a", "c", "b"])
+  print("unique strings:", r2)  // [a,b,c]
+  assert r2 == ["a", "b", "c"]
+
+  // unique_by length
+  words = ["apple", "banana", "apricot", "blueberry", "cherry"]
+  r3 = unique_by(words, |s: str len(s))
+  print("unique_by len:", r3)  // [apple, banana, blueberry] (5,6,9 唯一)
+  // apple(5), banana(6), apricot(5)→skip, blueberry(9), cherry(6)→skip
+  assert len(r3) == 3
+
+  // dedup
+  r4 = dedup([1, 1, 1, 2, 2, 3, 3, 3, 3])
+  print("dedup [1,1,1,2,2,3,3,3,3]:", r4)  // [1,2,3]
+  assert r4 == [1, 2, 3]
+
+  // dedup no consecutive
+  r5 = dedup([1, 2, 3, 1, 2, 3])
+  print("dedup [1,2,3,1,2,3]:", r5)  // [1,2,3,1,2,3]（无连续重复）
+  assert r5 == [1, 2, 3, 1, 2, 3]
+
+  // count_distinct
+  r6 = count_distinct([1, 2, 2, 3, 1, 4, 3, 5])
+  print("count_distinct:", r6)  // 5
+  assert r6 == 5
+
+  // empty
+  r7 = unique([])
+  print("unique empty:", r7)  // []
+  assert r7 == []
+
+  print("unique.lz: all passed!")

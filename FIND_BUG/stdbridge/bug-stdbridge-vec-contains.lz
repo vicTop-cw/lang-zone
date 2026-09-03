@@ -1,0 +1,16 @@
+// find_bug/stdbridge/bug-stdbridge-vec-contains.lz
+// BUG-SB-002: Vec 的 contains 映射冲突
+// StdBridge 已统一到 contains，不再为 Vec 返回 contains_key
+
+#!export
+def test_contains() =
+  v = [1, 2, 3]
+  has_2 = v.contains(2)
+  has_4 = v.contains(4)
+  print("contains 2:", has_2)  // true
+  print("contains 4:", has_4)  // false
+  assert has_2 == true
+  assert has_4 == false
+
+def main() =
+  test_contains()

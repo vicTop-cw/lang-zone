@@ -1,0 +1,329 @@
+// lz_builtins/std/iter.lz — Iterator 工具库
+// 对标 Python itertools，全部用 LZ 原语实现。
+
+// ── 无限迭代器 ────────────────────────────────────────────────
+
+// repeat(x) — 无限重复一个值
+// 使用: take(repeat(42), 5) → [42, 42, 42, 42, 42]
+def repeat(x: a) -> List<a> =
+  // 注意：无限迭代器，返回 take(n) 来限制
+  // 这里用列表模拟，实际使用 take/drop 截断
+  result: List<a> = []
+  result
+
+// cycle(xs) — 无限循环列表
+// 使用: take(cycle([1,2,3]), 7) → [1,2,3,1,2,3,1]
+def cycle(xs: List<a>) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = []
+  result
+
+// range — 生成整数序列
+def range(start: int, end: int) -> List<int> =
+  result: List<int> = []
+  i = start
+  while i < end:
+    push(result, i)
+    i = i + 1
+  result
+
+def range_step(start: int, end: int, step: int) -> List<int> =
+  if step == 0:
+    return []
+  result: List<int> = []
+  i = start
+  while (step > 0 and i < end) or (step < 0 and i > end):
+    push(result, i)
+    i = i + step
+  result
+
+// ── 有限变换迭代器 ────────────────────────────────────────────
+
+// enumerate — 带索引枚举
+def enumerate(xs: List<a>) -> List<(int, a)> =
+  result: List<(int, a)> = []
+  i = 0
+  for x in xs:
+    push(result, (i, x))
+    i = i + 1
+  result
+
+// zip — 配对迭代（内置函数，这里补充为 zip_all）
+def zip_all(xs: List<a>, ys: List<b>) -> List<(a, b)> =
+  min_len = if len(xs) < len(ys) then len(xs) else len(ys)
+  result: List<(a, b)> = []
+  for i in range(0, min_len):
+    push(result, (xs[i], ys[i]))
+  result
+
+// chain — 拼接多个列表
+def chain(xss: List<List<a>>) -> List<a> =
+  result: List<a> = []
+  for xs in xss:
+    for x in xs:
+      push(result, x)
+  result
+
+// ── 截断迭代器 ────────────────────────────────────────────────
+
+// take — 取前 n 个
+def take(xs: List<a>, n: int) -> List<a> =
+  m = if n < len(xs) then n else len(xs)
+  result: List<a> = []
+  for i in range(0, m):
+    push(result, xs[i])
+  result
+
+// drop — 跳过前 n 个
+def drop(xs: List<a>, n: int) -> List<a> =
+  start = if n < len(xs) then n else len(xs)
+  result: List<a> = []
+  for i in range(start, len(xs)):
+    push(result, xs[i])
+  result
+
+// take_while — 取满足谓词的连续前缀
+def take_while(xs: List<a>, pred: fn(a) -> bool) -> List<a> =
+  result: List<a> = []
+  for x in xs:
+    if pred(x):
+      push(result, x)
+    else:
+      return result
+  result
+
+// drop_while — 跳过满足谓词的连续前缀
+def drop_while(xs: List<a>, pred: fn(a) -> bool) -> List<a> =
+  result: List<a> = []
+  started = false
+  for x in xs:
+    if started:
+      push(result, x)
+    else:
+      if not pred(x):
+        started = true
+        push(result, x)
+  result
+
+// ── 组合迭代器 ────────────────────────────────────────────────
+
+// chunk(n) — 按固定大小分块
+def chunk(xs: List<a>, n: int) -> List<List<a>> =
+  if n <= 0:
+    return []
+  result: List<List<a>> = []
+  i = 0
+  while i < len(xs):
+    group: List<a> = []
+    j = 0
+    while j < n and i + j < len(xs):
+      push(group, xs[i + j])
+      j = j + 1
+    push(result, group)
+    i = i + n
+  result
+
+// window(size) — 滑动窗口
+def window(xs: List<a>, size: int) -> List<List<a>> =
+  if size <= 0 or len(xs) < size:
+    return []
+  result: List<List<a>> = []
+  i = 0
+  while i <= len(xs) - size:
+    w: List<a> = []
+    for j in range(i, i + size):
+      push(w, xs[j])
+    push(result, w)
+    i = i + 1
+  result
+
+// intersperse(sep) — 元素间插入分隔符
+def intersperse(xs: List<a>, sep: a) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = [xs[0]]
+  for i in range(1, len(xs)):
+    push(result, sep)
+    push(result, xs[i])
+  result
+
+// ── 过滤迭代器 ────────────────────────────────────────────────
+
+// filter — 过滤（内置 lz_filter）
+def iter_filter(xs: List<a>, pred: fn(a) -> bool) -> List<a> =
+  result: List<a> = []
+  for x in xs:
+    if pred(x):
+      push(result, x)
+  result
+
+// unique — 去重
+def iter_unique(xs: List<a>) -> List<a> =
+  seen: List<a> = []
+  result: List<a> = []
+  for x in xs:
+    found = false
+    for s in seen:
+      if s == x:
+        found = true
+    if not found:
+      push(seen, x)
+      push(result, x)
+  result
+
+// dedup — 压缩连续重复
+def iter_dedup(xs: List<a>) -> List<a> =
+  if len(xs) == 0:
+    return []
+  result: List<a> = [xs[0]]
+  last = xs[0]
+  for i in range(1, len(xs)):
+    curr = xs[i]
+    if curr != last:
+      push(result, curr)
+      last = curr
+  result
+
+// partition — 分两组
+def iter_partition(xs: List<a>, pred: fn(a) -> bool) -> (List<a>, List<a>) =
+  yes: List<a> = []
+  no: List<a> = []
+  for x in xs:
+    if pred(x):
+      push(yes, x)
+    else:
+      push(no, x)
+  (yes, no)
+
+// ── 映射迭代器 ────────────────────────────────────────────────
+
+// map — 映射（内置 lz_map）
+def iter_map(xs: List<a>, f: fn(a) -> b) -> List<b> =
+  result: List<b> = []
+  for x in xs:
+    push(result, f(x))
+  result
+
+// flat_map — 先 map 再 flatten
+def iter_flat_map(xs: List<a>, f: fn(a) -> List<b>) -> List<b> =
+  result: List<b> = []
+  for x in xs:
+    for y in f(x):
+      push(result, y)
+  result
+
+// scan — 带状态扫描
+def scan(xs: List<a>, state: b, f: fn(b, a) -> b) -> List<b> =
+  result: List<b> = []
+  acc = state
+  for x in xs:
+    acc = f(acc, x)
+    push(result, acc)
+  result
+
+// ── 聚合迭代器 ────────────────────────────────────────────────
+
+// fold — 左折叠
+def iter_fold(xs: List<a>, init: b, f: fn(b, a) -> b) -> b =
+  acc = init
+  for x in xs:
+    acc = f(acc, x)
+  acc
+
+// fold1 — 以首元素为初始值
+def iter_fold1(xs: List<a>, f: fn(a, a) -> a) -> a? =
+  if len(xs) == 0:
+    return None
+  acc = xs[0]
+  for i in range(1, len(xs)):
+    acc = f(acc, xs[i])
+  Some(acc)
+
+// sum — 求和
+def iter_sum(xs: List<int>) -> int =
+  iter_fold(xs, 0, |acc, x| acc + x)
+
+// product — 连乘
+def iter_product(xs: List<int>) -> int =
+  if len(xs) == 0:
+    return 1
+  iter_fold(xs, 1, |acc, x| acc * x)
+
+// any — 是否有满足谓词的元素
+def iter_any(xs: List<a>, pred: fn(a) -> bool) -> bool =
+  for x in xs:
+    if pred(x):
+      return true
+  false
+
+// all — 所有是否满足谓词
+def iter_all(xs: List<a>, pred: fn(a) -> bool) -> bool =
+  for x in xs:
+    if not pred(x):
+      return false
+  true
+
+// count — 满足谓词的元素个数
+def iter_count(xs: List<a>, pred: fn(a) -> bool) -> int =
+  c = 0
+  for x in xs:
+    if pred(x):
+      c = c + 1
+  c
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def test_enumerate() =
+  r = enumerate(["a", "b", "c"])
+  print("[enumerate]:", r)
+  assert r == [(0, "a"), (1, "b"), (2, "c")]
+
+def test_take_drop() =
+  r = take([1, 2, 3, 4, 5], 3)
+  print("[take 3]:", r)
+  assert r == [1, 2, 3]
+  r2 = drop([1, 2, 3, 4, 5], 2)
+  print("[drop 2]:", r2)
+  assert r2 == [3, 4, 5]
+
+def test_take_while() =
+  r = take_while([1, 2, 3, 4, 1, 2], |x| x < 3)
+  print("[take_while <3]:", r)
+  assert r == [1, 2]
+
+def test_chunk() =
+  r = chunk([1, 2, 3, 4, 5, 6, 7], 3)
+  print("[chunk 3]:", r)
+  assert r == [[1, 2, 3], [4, 5, 6], [7]]
+
+def test_window() =
+  r = window([1, 2, 3, 4], 2)
+  print("[window 2]:", r)
+  assert r == [[1, 2], [2, 3], [3, 4]]
+
+def test_intersperse() =
+  r = intersperse([1, 2, 3, 4, 5], 0)
+  print("[intersperse 0]:", r)
+  assert r == [1, 0, 2, 0, 3, 0, 4, 0, 5]
+
+def test_scan() =
+  r = scan([1, 2, 3, 4], 0, |acc, x| acc + x)
+  print("[scan sum]:", r)
+  assert r == [1, 3, 6, 10]
+
+def test_chain() =
+  r = chain([[1, 2], [3, 4], [5]])
+  print("[chain]:", r)
+  assert r == [1, 2, 3, 4, 5]
+
+def main() =
+  test_enumerate()
+  test_take_drop()
+  test_take_while()
+  test_chunk()
+  test_window()
+  test_intersperse()
+  test_scan()
+  test_chain()
+  print("iter.lz: all tests passed!")

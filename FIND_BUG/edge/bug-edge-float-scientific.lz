@@ -1,0 +1,11 @@
+// find_bug/edge/bug-edge-float-scientific.lz
+// BUG-EC-004: 浮点数科学计数法精度
+
+def test_scientific() =
+  x = 1e308
+  y = 1e-323
+  print("1e308:", x)
+  print("1e-323:", y)
+
+def main() =
+  test_scientific()

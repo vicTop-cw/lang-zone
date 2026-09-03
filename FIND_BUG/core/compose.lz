@@ -1,0 +1,65 @@
+// find_bug/core/compose.lz — 函数组合、管道操作符
+
+// compose(f, g)(x) = f(g(x))，右到左组合
+def compose(f: fn(b) -> c, g: fn(a) -> b) -> fn(a) -> c =
+  |x| f(g(x))
+
+// pipe(x, f) = f(x)，值导向管道
+def pipe(x: a, f: fn(a) -> b) -> b =
+  f(x)
+
+// pipe2(x, f, g) = g(f(x))
+def pipe2(x: a, f: fn(a) -> b, g: fn(b) -> c) -> c =
+  g(f(x))
+
+// pipe3(x, f, g, h) = h(g(f(x)))
+def pipe3(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d) -> d =
+  h(g(f(x)))
+
+// pipe4 — 四步管道
+def pipe4(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d, i: fn(d) -> e) -> e =
+  i(h(g(f(x))))
+
+// pipe_many(xs, funcs) — 通用多步管道
+def pipe_many(x: a, funcs: List<fn(a) -> a>) -> a =
+  acc = x
+  for f in funcs:
+    acc = f(acc)
+  acc
+
+// and_then(x, f) — Option/Result 链式调用
+// x |> and_then(f) == f(x)
+def and_then(x: a?, f: fn(a) -> b?) -> b? =
+  if x == None:
+    None
+  else:
+    f(x)
+
+def main() =
+  // compose: (x + 3) * 2
+  f = compose(|x| x * 2, |x| x + 3)
+  r1 = f(5)
+  print("compose (5+3)*2:", r1)  // 16
+  assert r1 == 16
+
+  // pipe: 5 |> double == 10
+  r2 = pipe(5, |x| x * 2)
+  print("pipe 5*2:", r2)  // 10
+  assert r2 == 10
+
+  // pipe2: 5 |> double |> add1 == 11
+  r3 = pipe2(5, |x| x * 2, |x| x + 1)
+  print("pipe2 (5*2)+1:", r3)  // 11
+  assert r3 == 11
+
+  // pipe3: 2 |> triple |> add4 |> times5 == 50
+  r4 = pipe3(2, |x| x * 3, |x| x + 4, |x| x * 5)
+  print("pipe3 ((2*3)+4)*5:", r4)  // 50
+  assert r4 == 50
+
+  // pipe_many
+  r5 = pipe_many(1, [|(x: int) x * 2, |(x: int) x + 3, |(x: int) x * 4])
+  print("pipe_many ((1*2)+3)*4:", r5)  // 20
+  assert r5 == 20
+
+  print("compose.lz: all passed!")
