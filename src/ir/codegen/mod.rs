@@ -1207,14 +1207,10 @@ impl CodeGen {
 
     /// 查询 struct 的方法名集合（用于 r? 自定义传播类型判定 __is_ok__ 等）
     fn struct_method_names(&self, name: &str) -> std::collections::HashSet<String> {
-        let r = self.struct_method_names_map
+        self.struct_method_names_map
             .get(name)
             .cloned()
-            .unwrap_or_default();
-        if name.contains("Iter") || name == "Iterator" {
-            eprintln!("DBG smn: {} -> {:?} (map contains {} keys)", name, r, self.struct_method_names_map.len());
-        }
-        r
+            .unwrap_or_default()
     }
 
     /// 生成 duck 方法签名中的类型：关联类型引用（I.Item，§2.3）→ `Self::Item`，
@@ -5482,6 +5478,60 @@ impl CodeGen {
                         }
                     }
                 }
+                // std 模块链调用拦截（BUG-SB-001 修复，2026-09-03）：
+                // `time.Duration.fromMillis(1500)` 的 IR 是 Call {
+                //   callee: FieldAccess { base: FieldAccess { base: Var("time"), field: "Duration" },
+                //                         field: "fromMillis" } } →
+                //   生成 `std::time::Duration::from_millis(1500)`。
+                if let ExprKind::FieldAccess { base, field: method } = &callee.kind {
+                    if let ExprKind::FieldAccess { base: mod_base, field: type_name } = &base.kind {
+                        if let ExprKind::Var(module) = &mod_base.kind {
+                            const STD_MODULES: &[(&str, &[&str])] = &[
+                                ("time", &["Duration", "Instant"]),
+                                ("thread", &["Thread", "JoinHandle"]),
+                            ];
+                            if let Some((rust_mod, types)) = STD_MODULES
+                                .iter()
+                                .find(|(lz_name, _)| *lz_name == module.as_str())
+                            {
+                                if types.contains(&type_name.as_str()) {
+                                    let rust_method = match method.as_str() {
+                                        "fromMillis" => "from_millis",
+                                        "toMillis" => "as_millis",
+                                        "fromSecs" | "fromSeconds" => "from_secs",
+                                        "fromMicros" => "from_micros",
+                                        "fromNanos" => "from_nanos",
+                                        _ => method.as_str(),
+                                    };
+                                    let args_s: Vec<String> = args
+                                        .iter()
+                                        .map(|a| {
+                                            let s = self.gen_expr(a);
+                                            // Duration 构造函数参数是 u64：
+                                            // `1500i64` → `1500u64`（E0308 修复）
+                                            if type_name == "Duration"
+                                                && matches!(a.ty, IrType::Int)
+                                            {
+                                                s.trim_end_matches("i64")
+                                                    .to_string()
+                                                    + "u64"
+                                            } else {
+                                                s
+                                            }
+                                        })
+                                        .collect();
+                                    return format!(
+                                        "std::{}::{}::{}({})",
+                                        rust_mod,
+                                        type_name,
+                                        rust_method,
+                                        args_s.join(", ")
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 let callee_s = self.gen_expr(callee);
                 // 如果 callee 是 Lambda（立即调用闭包），需要用括号包裹
                 // move || { body }() → (move || { body })()
@@ -6763,6 +6813,50 @@ impl CodeGen {
                 args,
             } => {
                 let recv = self.gen_expr(receiver);
+                // std 模块链调用拦截（BUG-SB-001 修复，2026-09-03）：
+                // `time.Duration.fromMillis(1500)` 在 IR 是 MethodCall {
+                //   receiver: FieldAccess { base: Var("time"), field: "Duration" },
+                //   method: "fromMillis" } → 生成 `std::time::Duration::from_millis(1500)`。
+                // 仅拦截已知 std 模块名（非用户变量），避免误伤同名局部变量。
+                if let ExprKind::FieldAccess { base, field } = &receiver.kind {
+                    if let ExprKind::Var(module) = &base.kind {
+                        const STD_MODULES: &[(&str, &[&str])] = &[
+                            ("time", &["Duration", "Instant"]),
+                            ("thread", &["Thread", "JoinHandle"]),
+                            ("fs", &["File", "Dir"]),
+                            ("io", &["Stdout", "Stdin", "BufReader", "BufWriter"]),
+                        ];
+                        if let Some((rust_mod, types)) = STD_MODULES
+                            .iter()
+                            .find(|(lz_name, _)| *lz_name == module.as_str())
+                        {
+                            if types.contains(&field.as_str()) {
+                                // camelCase 方法名 → snake_case（同方法映射表）
+                                let rust_method = match method.as_str() {
+                                    "fromMillis" => "from_millis",
+                                    "toMillis" => "as_millis",
+                                    "fromSecs" | "fromSeconds" => "from_secs",
+                                    "fromMicros" => "from_micros",
+                                    "fromNanos" => "from_nanos",
+                                    "now" => "now",
+                                    "elapsed" => "elapsed",
+                                    _ => method.as_str(),
+                                };
+                                let args_s: Vec<String> = args
+                                    .iter()
+                                    .map(|a| self.gen_expr(a))
+                                    .collect();
+                                return format!(
+                                    "std::{}::{}::{}({})",
+                                    rust_mod,
+                                    field,
+                                    rust_method,
+                                    args_s.join(", ")
+                                );
+                            }
+                        }
+                    }
+                }
                 // 静态调用：`Type::method(args)`（Cell::new / Vec::new / HashMap::new 等）。
                 // receiver 为已知类型名（本文件声明的类型或外部标准类型）时生成
                 // `Type::method(...)`，否则走实例方法路径 `recv.method(...)`
@@ -7141,7 +7235,6 @@ impl CodeGen {
                 // 注意：算术/比较魔术方法（__add__/__eq__ 等）保留原名，
                 // 因为用户 struct 的 impl 方法就叫 __add__；__str__/__iter__ 用于
                 // str() 转换和迭代的容器场景，继续映射
-                eprintln!("DBG mcall: method={} recv={} recv_ty={:?} in_iter_impl={} recv_is_struct={} user_plain={:?}", method, recv, receiver.ty, self.in_iterator_impl, recv_is_struct, user_plain);
                 let rust_method = match method.as_str() {
                     // 用户 struct：len/iter/next/contains 等映射到魔术方法；
                     // 但同名普通方法存在时保持原名（普通方法优先）
@@ -7213,6 +7306,17 @@ impl CodeGen {
                     "trim" => "trim",
                     "starts_with" => "starts_with",
                     "ends_with" => "ends_with",
+                    // StdBridge camelCase 别名接线（BUG-SB-001/003 修复，2026-09-03）：
+                    // bridge/std.rs resolve_method 已有完整映射（含单测），
+                    // 此前 IR codegen 方法表未接入 → startsWith 原样透传 E0599。
+                    // 仅在 receiver 非用户 struct 时映射（用户自定义同名方法优先）。
+                    "startsWith" if !recv_is_struct => "starts_with",
+                    "endsWith" if !recv_is_struct => "ends_with",
+                    "isEmpty" if !recv_is_struct => "is_empty",
+                    "fromMillis" => "from_millis",
+                    "toMillis" => "as_millis",
+                    "fromSecs" | "fromSeconds" => "from_secs",
+                    "fromMicros" => "from_micros",
                     "new"
                         if self.emitted_types.contains(&recv)
                             || recv == "Box"
@@ -7244,7 +7348,12 @@ impl CodeGen {
                     "get",
                     "remove",
                 ];
-                if pattern_methods.contains(&method.as_str()) && !args_s.is_empty() {
+                // BUG-SB-003（2026-09-03）：判定用映射后的 rust_method——
+                // camelCase 别名（startsWith → starts_with）也需走 &str 改写。
+                if (pattern_methods.contains(&method.as_str())
+                    || pattern_methods.contains(&rust_method))
+                    && !args_s.is_empty()
+                {
                     // 仅对 str/String receiver 应用（String Pattern trait 方法）：
                     // 自定义类型的 get（list.lz `lst.get(1)` 参数是 i64）不受影响
                     let recv_is_str = matches!(&receiver.ty, IrType::Str)
@@ -7272,12 +7381,13 @@ impl CodeGen {
                     let is_kwargs = matches!(&receiver.kind, ExprKind::FieldAccess { field, .. }
                         if field == "kwargs");
                     let need_ref = recv_is_str
-                        // Vec contains：仅对**字面量列表** receiver（[1,2,3].contains(2)）
-                        // 加 &（std Vec::contains 需 &T）；变量 receiver 的 contains
-                        // 走 lz_std 自定义 ListExt::contains（参数值语义 T），
-                        // 误加 & 会 E0308 expected i64, found &i64（list.lz）
-                        || (recv_is_vec && method == "contains" && !recv_has_custom_contains
-                            && matches!(&receiver.kind, ExprKind::ListLit(_)))
+                        // Vec contains：receiver 类型为 List/Vec 且无自定义 contains
+                        // 时加 &（std Vec::contains 需 &T）。此前仅限定 ListLit
+                        // 字面量 receiver（BUG-SB-002 修复，2026-09-03）：变量
+                        // receiver `v.contains(2)` 同样走 std Vec::contains，E0308
+                        // expected &i64, found i64；lz_std 自定义 contains 的场景
+                        // 由 recv_has_custom_contains 守卫排除。
+                        || (recv_is_vec && method == "contains" && !recv_has_custom_contains)
                         || (recv_is_dict && (rust_method == "contains_key" || method == "get" || method == "remove"))
                         || (recv_is_set && (method == "contains" || method == "remove"))
                         || (is_kwargs && (rust_method == "contains_key" || method == "get"))
@@ -7297,8 +7407,10 @@ impl CodeGen {
                         // → E0308 expected &i64）。只处理字符串字面量（直接用 &str）、
                         // 字符串类型值（加 &）与 Vec contains 的任意参数（加 &），
                         // 不误伤 Vec::get 的 usize 索引参数。
-                        let is_vec_contains = recv_is_vec && method == "contains"
-                            && matches!(&receiver.kind, ExprKind::ListLit(_));
+                        // BUG-SB-002（2026-09-03）：变量 receiver（v.contains(2)）同样
+                        // 走 std Vec::contains，去掉 ListLit 限定；自定义 contains 由
+                        // 上方 need_ref 的 recv_has_custom_contains 守卫排除。
+                        let is_vec_contains = recv_is_vec && method == "contains";
                         // Set/HashSet 的 remove 参数需 &Q（HashSet::remove 签名 &Q，
                         // `ms.remove(2)` → E0308 expected &i64, found i64）
                         let is_set_remove = recv_is_set && method == "remove";
