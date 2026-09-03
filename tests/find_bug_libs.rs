@@ -93,7 +93,7 @@ fn run_lib(name: &str) -> Result<String, String> {
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0507/E0382 owned 移动语义（P2a）"]
+// 2026-09-03 转正：E0507/E0382 已由 26cd418 语义核查修复消除（本轮实测全链路 OK）
 fn lib_sort() {
     assert!(run_lib("lib_sort").unwrap().contains("OK"));
 }
@@ -104,19 +104,19 @@ fn lib_option() {
 }
 
 #[test]
-#[ignore = "待转正：LZ_REJECT and_then 泛型推断（P1b 分诊）"]
+// 2026-09-03 转正：and_then 泛型推断已通（v180 Result/Option 泛型桥接），全链路 OK
 fn lib_result() {
     assert!(run_lib("lib_result").unwrap().contains("OK"));
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0599 方法未生成（P2a）"]
+// 2026-09-03 转正：E0599 方法未生成已消除（本轮实测全链路 OK）
 fn lib_vector() {
     assert!(run_lib("lib_vector").unwrap().contains("OK"));
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0382 闭包捕获移动（P2a）"]
+// 2026-09-03 转正：E0382 闭包捕获移动已消除（本轮实测全链路 OK）
 fn lib_closure() {
     assert!(run_lib("lib_closure").unwrap().contains("OK"));
 }
@@ -127,7 +127,7 @@ fn lib_pattern() {
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0308/E0599（P2a）"]
+// 2026-09-03 转正：E0308/E0599 已消除（本轮实测全链路 OK）
 fn lib_linked_list() {
     assert!(run_lib("lib_linked_list").unwrap().contains("OK"));
 }

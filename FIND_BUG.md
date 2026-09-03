@@ -1,5 +1,5 @@
 # FIND_BUG.md — Lang-Zone Bug 挖掘测试套件
-> 更新：2026-09-03 10:40（首轮全量实测：39 非库用例，判定 36 编号；含 10 个探针复验）
+> 更新：2026-09-03 11:50（首轮实测落档 + 12 库基线 7/12 转正 + tests/find_bug_bugs.rs 回归守护 15 绿/25 挂）
 
 ## 测试文件清单（44 个 .lz）
 
@@ -140,7 +140,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 
 | ID | 严重 | 分类 | 描述 | 状态 |
 |----|------|------|------|------|
-| BUG-LX-001 | P2 | lexer | `\u{}` 空转义 + emoji 解析 | ✅ emoji 正常；`\u{}` 待单测 |
+| BUG-LX-001 | P2 | lexer | `\u{}` 空转义 + emoji 解析 | ✅ emoji + `\u{1F600}` 全通；`\u{}` 正确拒绝（p14/p15 探针） |
 | BUG-LX-002 | P3 | lexer | `/* /* */ */` 嵌套块注释 | ❌ P3 嵌套注释内层即终止 |
 | BUG-LX-003 | P1 | lexer | `~:` 行尾悬挂 LexError | ✅ 拒绝符合规范（留白约束） |
 | BUG-LX-004 | P3 | lexer | `"""..."""` 公共缩进边界 | ✅ 全链路通过，语义按当前实现 |
@@ -157,7 +157,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-IR-001 | P0 | ir | `~:` 构建块 IR 表示 | ❌ P1 参数位拒绝（BuildCall） |
 | BUG-IR-002 | P1 | ir | `defer guard:` IR 表示 | ❌ P1 双缺陷：push 桩 + 立即执行 |
 | BUG-IR-003 | P0 | ir | 嵌套 def 提升 / 闭包 IR | ❌ P0 static mut 捕获（E0530） |
-| BUG-IR-005 | P1 | ir | `comptime:` 块位置 | ✅ 语法可用；语义常量折叠待测 |
+| BUG-IR-005 | P1 | ir | `comptime:` 块位置 | ✅ 块解析 + 变量 const 提升折叠（p22/p23 探针：`z = 6 * 7` → `const z: i64 = 6i64 * 7i64`，运行 42） |
 | BUG-CG-001 | P0 | codegen | `..:` 变参 Vec Rust | ✅ 全链路通过（`..: int` 形态） |
 | BUG-CG-002 | P0 | codegen | `__call__` 魔法接线 | ❌ P1 自由函数 + 未接线 |
 | BUG-CG-003 | P1 | codegen | `#!export` → `pub fn` | ✅ 编译通过；export 语义待 ABI 验证 |
@@ -214,12 +214,12 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 
 | ID | 实测证据 |
 |----|----------|
-| BUG-LX-001 | emoji "😀" 全链路输出正常（\u{} 空转义形态未在用例中，待补单测） |
+| BUG-LX-001 | emoji "😀" 全链路正常（p15）；`\u{}` 空转义正确拒绝（p14）；`\u41` 无花括号也正确拒绝（p16） |
 | BUG-LX-003 | 行尾/无右参 `~:` 按留白规范拒绝，报错文案明确 |
 | BUG-LX-004 | 多行字符串公共缩进语义按实现运行正常，s2 无缩进形态也对 |
 | BUG-PR-003 | `def bad(.., /)` 正确拒绝「`/` `*` 与 `..` 不能混用」；`..: nums: int` 变参全链路 15 求和对 |
-| BUG-PR-004 | `type MyAdder = __add__` 正确拒绝「Expected type, got MagicMethod」 |
-| BUG-IR-005 | `comptime:` 块解析通过、全链路运行（块内求值语义待后续验证） |
+| BUG-PR-004 | `type MyAdder = __add__` 正确拒绝「Expected type, got MagicMethod」（探针 p2 锁定）；正向 `type IntPair = (int,int)` 全链路对 |
+| BUG-IR-005 | `comptime:` 块解析 + const 提升折叠（p22/p23）：`z = 6*7` → `const z: i64 = 6i64 * 7i64`，运行 42 正确 |
 | BUG-CG-001 | `def sum_all(..: int)` 变参编译运行全对（sum=15） |
 | BUG-CG-003 | `#!export` 函数编译运行正常（导出 ABI 语义超出本次范围） |
 | BUG-SB-004 | kebab-case 路径透传全链路输出正确 |
@@ -230,7 +230,28 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 
 - rustc 段必须带 `--extern lz_builtins=target/debug/liblz_builtins.rlib`，否则 22 例假性 E0432（首轮基线的教训）。
 - lzc 默认走 IR codegen；`--ir-codegen` 无需显式。
-- `test_all.sh` 缺 rlib 参数，需同步修正（已在本轮实测中以正确姿势复跑）。
+- `test_all.sh` 已修正（rlib 参数 / 临时产物目录 / release 直跑）。
+- **回归守护**：`tests/find_bug_bugs.rs`（cargo test --test find_bug_bugs）——15 转正绿 + 25 #[ignore] 挂起（修复一个转正一个）；负向守护（\u{}、type=魔法方法）内联最小源码锁定。
+
+## lib_* 12 库基线（2026-09-03 二轮实测）
+
+全链路（lz→rs→rustc带rlib→run，断言 stdout 含 OK）：
+
+| 库 | 状态 | 卡点 |
+|----|------|------|
+| lib_option / lib_pattern | ✅（v180 前已转正） | — |
+| lib_sort | ✅ **本轮转正** | E0507/E0382 已被 26cd418 修复消除 |
+| lib_result | ✅ **本轮转正** | and_then 泛型推断已通（v180 Result/Option 桥接） |
+| lib_vector | ✅ **本轮转正** | E0599 已消除 |
+| lib_closure | ✅ **本轮转正** | E0382 闭包捕获已消除 |
+| lib_linked_list | ✅ **本轮转正** | E0308/E0599 已消除 |
+| lib_hashmap | ❌ 挂 | E0382 borrow of moved value `key`（移动语义长尾） |
+| lib_iterator | ❌ 挂 | E0599 `&mut MapIter` 无 `f` 方法（需用户 trait 参数特性） |
+| lib_json | ❌ 挂 | E0308 |
+| lib_string | ❌ 挂 | E0308/E0277 |
+| lib_tree | ❌ 挂 | E0369 `Vec<i64> + Vec<i64>` |
+
+**库转正进度：2 → 7 / 12**（tests/find_bug_libs.rs 已同步摘 ignore）。
 
 ### 下一步建议（工程侧参考，优先级从高到低）
 
@@ -238,4 +259,6 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 2. **struct 方法归属 impl**（BUG-CG-002/TY-002 同根）——一次性解决两类 E0568。
 3. **StdBridge ↔ IR codegen 接线**（BUG-SB-001/002/003）——bridge 已有能力，纯接线工程。
 4. **Option 自动 Some 包装**（BUG-SG-002/003 同根）。
-5. 其余 P2/P3 按表顺位处理。
+5. **fn 类型注解参数解析**（core 3 例）——阻塞 std/func.lz 函数式标准库。
+6. lib_* 剩余 5 库：string/json E0308 类、hashmap E0382 移动语义、tree E0369 运算符、iterator 需 trait 参数特性。
+7. 其余 P2/P3 按表顺位处理。
