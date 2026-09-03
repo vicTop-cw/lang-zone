@@ -2423,6 +2423,71 @@ fn infer_yield_elem_ty(body: &[AstStmt], _lhs_ty: IrType, ctx: &TypeCtx) -> IrTy
         .unwrap_or(IrType::Any)
 }
 
+/// 剥掉一层 Option（`T?` 的两种 IR 表示），非 Option 原样返回。
+fn is_option_ty_ir(ty: &IrType) -> bool {
+    matches!(ty, IrType::Option(_))
+        || matches!(ty, IrType::Named { path, args } if path == "Option" && args.len() == 1)
+}
+
+fn strip_option_ty(ty: &IrType) -> IrType {
+    match ty {
+        IrType::Option(inner) => (**inner).clone(),
+        IrType::Named { path, args } if path == "Option" && args.len() == 1 => args[0].clone(),
+        other => other.clone(),
+    }
+}
+
+/// 求 `recv.field` 中 field 的**声明类型**（无法确定时返回 None）。
+///
+/// 用于 SafeNav（`?.`）决定 `map` 还是 `and_then`：字段本身可空（`db: DbConfig?`）
+/// 时 `map` 会得到 `Option<Option<T>>`，必须用 `and_then` 扁平化（E0609）。
+///
+/// 嵌套 SafeNav（`cfg?.db?.host`）需沿链回溯：内层 `cfg?.db` 在 IR 里是
+/// `cfg.and_then(|__sn| __sn.db)`（表达式类型退化成 Any），所以要从 MethodCall
+/// 的最内层接收者出发，逐层取字段类型。
+fn safe_nav_field_ty(recv: &Expr, field: &str, ctx: &TypeCtx) -> Option<IrType> {
+    // 嵌套 SafeNav 编译产物：MethodCall{ method: map/and_then, receiver,
+    //   args: [Lambda{ FieldAccess(Var("__sn"), inner_f) }] }
+    if let ExprKind::MethodCall {
+        receiver,
+        method,
+        args,
+    } = &recv.kind
+    {
+        if (method == "map" || method == "and_then") && args.len() == 1 {
+            if let ExprKind::Lambda { body, .. } = &args[0].kind {
+                if let ExprKind::FieldAccess {
+                    base,
+                    field: inner_f,
+                } = &body.kind
+                {
+                    if matches!(&base.kind, ExprKind::Var(v) if v == "__sn") {
+                        let inner = safe_nav_field_ty(receiver, inner_f, ctx)?;
+                        if let IrType::Named { path, .. } = strip_option_ty(&inner) {
+                            let t = ctx.lookup_field(&path, field);
+                            if !matches!(t, IrType::Any) {
+                                return Some(t);
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+    match strip_option_ty(&recv.ty) {
+        IrType::Named { path, .. } => {
+            let t = ctx.lookup_field(&path, field);
+            if matches!(t, IrType::Any) {
+                None
+            } else {
+                Some(t)
+            }
+        }
+        _ => None,
+    }
+}
+
 fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
     let ty = infer_expr_type(ast_expr, ctx);
     let span = Span::unknown();
@@ -3666,11 +3731,18 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         Span::unknown(),
                     )
                 };
+                // BUG-SG-003：字段本身可空（`db: DbConfig?`）时 map 会得到
+                // Option<Option<T>>，必须 and_then 扁平化；字段类型无法判定
+                // 时保守用 map（保持既有行为）。Dict 键访问同理（get 返 Option）。
+                let field_is_option = safe_nav_field_ty(&recv, field, ctx)
+                    .map_or(false, |t| is_option_ty_ir(&t));
                 ExprKind::MethodCall {
                     receiver: Box::new(recv),
-                    // Dict 键访问（get 返回 Option）→ and_then 扁平化；
-                    // 普通字段访问 → map
-                    method: if recv_is_dict { "and_then".into() } else { "map".into() },
+                    method: if recv_is_dict || field_is_option {
+                        "and_then".into()
+                    } else {
+                        "map".into()
+                    },
                     args: vec![Expr::new(
                         ExprKind::Lambda {
                             params: vec![Param {

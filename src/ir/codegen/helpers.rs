@@ -865,6 +865,49 @@ fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) 
     }
 }
 
+/// 判断表达式是否为 `None` 字面量/构造（None_ 字面量、`None` 变量、
+/// `None` 结构构造、`Option::None` 枚举构造）。
+pub(crate) fn is_none_expr(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::Lit(LitKind::None_) => true,
+        ExprKind::Var(n) if n == "None" => true,
+        ExprKind::StructCtor { name, .. } if name == "None" => true,
+        ExprKind::EnumCtor { variant, .. } if variant == "None" => true,
+        _ => false,
+    }
+}
+
+/// BUG-SG-002/003：目标类型是否是可空类型 `T?`。
+/// LZ 的 `T?` 在 IR 里有两种表示：语义化的 `IrType::Option(T)` 与命名式
+/// `Named("Option", [T])`，两者都要识别。
+pub(crate) fn is_option_ty(ty: &IrType) -> bool {
+    match ty {
+        IrType::Option(_) => true,
+        IrType::Named { path, args } => path == "Option" && args.len() == 1,
+        _ => false,
+    }
+}
+
+/// BUG-SG-002/003：把值写进 `T?`（Option<T>）位置时是否需要自动包 `Some(..)`。
+///
+/// `let z: int? = 10`、`DbConfig { host: "localhost" }`（host 为 `str?`）
+/// 这类「可空位置 + 非空值」组合，Rust 侧必然 E0308（expected Option<T>,
+/// found T），须由编译器补 `Some(..)`。
+///
+/// 不包的情形：
+/// - 值本身已是 Option 类型（含 `Some(x)` 调用与 Option 变量）
+/// - 值是 `None`（各种表示形态）
+/// - 值类型未定（`Any`）——无法判定，交给 Rust 推断，避免误包
+pub(crate) fn needs_some_wrap(target_ty: &IrType, value: &Expr) -> bool {
+    if !is_option_ty(target_ty) {
+        return false;
+    }
+    if is_option_ty(&value.ty) || matches!(value.ty, IrType::Any) {
+        return false;
+    }
+    !is_none_expr(value)
+}
+
 /// 判断表达式是否引用了指定变量名（自引用重绑定检测用，如 `let parts = parts + [p]`）
 pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
     match &expr.kind {

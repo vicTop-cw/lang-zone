@@ -356,18 +356,18 @@ fn sb003_starts_with() {
     full("FIND_BUG/stdbridge/bug-stdbridge-startswith.lz", "startsWith hello:").unwrap();
 }
 
-// BUG-SG-002: ?? Option 赋值不自动 Some
+// BUG-SG-002: 已修（2026-09-03）——T? 位置自动 Some 包装（let 绑定 + struct 构造）
 #[test]
-#[ignore = "待修 BUG-SG-002：T? 注解赋值不自动 Some 包装 RUSTC_FAIL E0308（P1）"]
 fn sg002_null_coalesce() {
-    full("FIND_BUG/syntax/bug-syntax-null-coalesce.lz", "None ?? 42: 42").unwrap();
+    // print 多参逐项带 Debug 引号：实际输出 `"None ?? 42:" 42`
+    full("FIND_BUG/syntax/bug-syntax-null-coalesce.lz", "\"None ?? 42:\" 42").unwrap();
 }
 
-// BUG-SG-003: ?. 链
+// BUG-SG-003: 已修（2026-09-03）——?. 链可空字段走 and_then 扁平化（非 map）
 #[test]
-#[ignore = "待修 BUG-SG-003：?. 链依赖 Option 自动 Some（P1，同 SG-002 根因）"]
 fn sg003_safe_nav() {
-    full("FIND_BUG/syntax/bug-syntax-safe-nav.lz", "safe nav host: localhost").unwrap();
+    // 实际输出 `"safe nav host:" "localhost"`
+    full("FIND_BUG/syntax/bug-syntax-safe-nav.lz", "\"safe nav host:\" \"localhost\"").unwrap();
 }
 
 // BUG-SG-005: ... 展开无表达式实现

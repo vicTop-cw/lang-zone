@@ -166,8 +166,8 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-SB-002 | P1 | stdbridge | `Vec.contains` 映射 | ✅ **三轮已修**（变量 receiver 补 &，输出 true/false） |
 | BUG-SB-003 | P1 | stdbridge | `startsWith` → `starts_with` | ✅ **三轮已修**（camelCase 表接入，输出 true/false） |
 | BUG-SB-004 | P2 | stdbridge | kebab-case 透传 | ✅ 全链路通过 |
-| BUG-SG-002 | P2 | syntax | `??` 空值合并 | ❌ P1 Option 赋值不自动 Some |
-| BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ❌ P1 同上 + 嵌套 Option 修饰 |
+| BUG-SG-002 | P2 | syntax | `??` 空值合并 | ✅ **轮次6 已修** — `T?` 位置自动 Some 包装（let 绑定 + struct 构造） |
+| BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ✅ **轮次6 已修** — 同上 + 可空字段 `?.` 走 and_then 扁平化 |
 | BUG-SG-004 | P2 | syntax | `=:` 块返回值 | ✅ 函数内全链路通过 |
 | BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ❌ P2 parser 无 DotDotDot 表达式 |
 | BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ❌ P1 静默 i64 环绕 |
@@ -178,7 +178,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 16:xx 轮次 5 后）**：36 编号 = ✅17 · ❌16 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 2 项轮次 5 修复转正（CG-002/TY-002）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-03 17:xx 轮次 6 后）**：36 编号 = ✅19 · ❌14 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 4 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -196,7 +196,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 5 | BUG-IR-002 (P1) | defer 体**内联立即执行**（`{ push(log, "cleanup") }` 位置在块中段）+ `push(log, x)` 自由函数调被 stub 成 `fn push(i64,i64)->i64 {i64::MAX}`（E0308） | defer 语义完全缺失 | IR 建 defer 节点 → codegen Drop guard；push 需映射 Vec::push |
 | 6 | ~~BUG-SB-001/003 (P1)~~ **三轮已修 ✅** | codegen 方法表已接入 camelCase 映射（startsWith/endsWith/isEmpty/fromMillis 等，`!recv_is_struct` 守卫），全链路输出正确（1.5s/500ms、true/false） | 已修复（未提交 diff，随下个 commit 入库） | — |
 | 7 | ~~BUG-SB-002 (P1)~~ **三轮已修 ✅** | contains 的 `&` 规则已从「仅 ListLit 字面量」扩展到「变量 receiver 且无自定义 contains」（recv_has_custom_contains 守卫），E0308 消除 | 已修复（未提交 diff） | — |
-| 8 | BUG-SG-002/003 (P1) | `z: int? = 10` 直接生成 `let z: Option<i64> = 10i64`（E0308）；`??` 本体在两侧类型吻合时可用，但 Option 注解赋值不自动 Some 包装；`?.` 链依赖该前提，连带失败 | Option 语义糖不可用 | 注解为 `T?` 的字面量初始化生成 `Some(...)` |
+| 8 | ~~BUG-SG-002/003 (P1)~~ **轮次6 已修 ✅** | 见下方「轮次 6」章节：`T?` 位置（let 绑定、struct 构造）自动补 `Some(..)`；`?.` 链上可空字段改用 `and_then` 扁平化（原 `map` 得 `Option<Option<T>>` → E0609） | Option 语义糖已可用 | — |
 | 9 | ~~BUG-TY-002 (P1)~~ **轮次5 已修 ✅** | 同 BUG-CG-002 根因，随 self-def 归属 impl 一并修复；`def inc(mut self: Counter) -> Counter = ...; self` 尾表达式 `self` 自动 clone 为 owned | 带 self 的顶层 def 已可编译 | — |
 | 10 | BUG-TY-004 (P1) | `__Params::new()` → `__Params.new`（点调用，E0423 struct 不能当值）；`p.set(0, 42)` 静默丢弃 → `()` | 运行时反射库不可用 | `::` 静态调用保留 + 方法链接线 |
 | 11 | BUG-EC-002 (P1) | `9223372036854775808` 静默编成 i64 → 运行输出 `-9223372036854775808`（环绕），无警告 | 数值边界静默错 | 超出 i64 应报错或升级 i128 并标注 |
@@ -314,10 +314,62 @@ pub fn main() {
 ### 下一步建议（工程侧参考，优先级从高到低）
 
 1. **闭包/嵌套 def 捕获**（BUG-IR-003）——牵一发动全身，建议先出 IR 设计再动手。
-2. **Option 自动 Some 包装**（BUG-SG-002/003 同根）——let 绑定 + struct 构造两处
-   注解为 `T?` 时值自动包 `Some(..)`（E0308）。
-3. **fn 类型注解参数解析**（core 3 例）——阻塞 std/func.lz 函数式标准库。
-4. **duck 自引用参数**（BUG-TY-001）——trait 方法参数引用 duck 自身 → `&dyn Comparable`（E0391）。
-5. **raises 语义链**（BUG-CG-004 / PR-002）。
-6. lib_* 剩余 5 库：string/json E0308 类、hashmap E0382 移动语义、tree E0369 运算符、iterator 需 trait 参数特性。
-7. 其余 P2/P3 按表顺位处理。
+2. **fn 类型注解参数解析**（core 3 例）——阻塞 std/func.lz 函数式标准库。
+3. **duck 自引用参数**（BUG-TY-001）——trait 方法参数引用 duck 自身 → `&dyn Comparable`（E0391）。
+4. **raises 语义链**（BUG-CG-004 / PR-002）。
+5. lib_* 剩余 5 库：string/json E0308 类、hashmap E0382 移动语义、tree E0369 运算符、iterator 需 trait 参数特性。
+6. 其余 P2/P3 按表顺位处理。
+
+## 轮次 6（2026-09-03 17:xx）：BUG-SG-002 / SG-003 修复入库 —— Option 自动 Some + ?. and_then 扁平化
+
+### 根因
+`T?`（`Option<T>`）位置的初始化值不会自动包 `Some(..)`，导致 Rust 侧
+`Option<T> = T`（E0308）；连带 `?.` 安全导航链在可空字段上用 `map` 会得到
+`Option<Option<T>>`，二次取字段报 E0609（no field on Option）。
+
+### 修复
+
+**A. `src/ir/codegen/helpers.rs`（新增 3 个 free fn）**
+- `is_none_expr(e)`：`None_/None 变量/None 构造/Option::None` 四种 None 形态判定。
+- `is_option_ty(ty)`：识别 `IrType::Option(T)` 与 `Named("Option",[T])` 两种 `T?` 表示。
+- `needs_some_wrap(target, value)`：`target` 为 `T?` 且 `value` 非 Option、非 None、非
+  `Any` → 需补 `Some(..)`；其余情形不包（避免误包已 Option 值 / 未定类型）。
+
+**B. `src/ir/codegen/mod.rs`**
+- **let 绑定**：`value_s` 算出后，若 `needs_some_wrap(ty, value)` 则 `Some(value_s)`
+  （元组解构 / 空容器分支产出的同样是非 Option 值，一并适用）。
+- **struct 构造（kwarg 路径，即 `S { x: 5 }`）**：查 `struct_fields_info` 取字段声明类型，
+  可空字段 + 非空值 → `fname: Some(value)`，在递归字段 Box 处理之后、普通返回之前。
+  （StructCtor 字面量分支（`ExprKind::StructCtor`）同样加了备用 wrap；kwarg 路径是实际走的路径。）
+
+**C. `src/ir/builder.rs`（SafeNav `?.`）**
+- 新增 `strip_option_ty` / `is_option_ty_ir` / 递归 `safe_nav_field_ty`：
+  沿嵌套 `cfg?.db?.host` 的 `and_then(|__sn| __sn.f)` 链回溯，取到最内层字段声明类型。
+- SafeNav 发射时：字段声明类型为可空（`db: DbConfig?`/`host: str?`）→ 用 `and_then`
+  扁平化；普通字段 → 维持 `map`；Dict 键访问（`get` 返 Option）→ 仍 `and_then`。
+
+### 生成证据
+```rust
+// bug-syntax-null-coalesce.lz
+let mut z: Option<i64> = Some(10i64);   // 原 let z: Option<i64> = 10i64  E0308
+// bug-syntax-safe-nav.lz
+let mut cfg: Option<Config> = Some(Config { db: Some(DbConfig { host: Some("localhost".to_string()) }), logging: None });
+// ?. 链扁平化（关键修复点）
+(cfg).clone().and_then(move |__sn| __sn.db).and_then(move |__sn| __sn.host).unwrap_or("unknown".to_string());
+```
+
+### 结果
+- `tests/find_bug_bugs.rs`：`sg002_null_coalesce` / `sg003_safe_nav` 摘 ignore 转正
+  （期望串按 `{:?}` 逐参带引号输出修正为 `"None ?? 42:" 42` / `"safe nav host:" "localhost"`）。
+- 全量回归 **592 passed / 0 failed / 23 ignored**（轮次 5 基线 590 / 25 → +2 转正）；
+  `cargo check --all-targets` 0 代码 warning。
+- 剩余 ❌：**14 项**。
+
+### 下一步建议（工程侧参考，优先级从高到低）
+
+1. **闭包/嵌套 def 捕获**（BUG-IR-003）——牵一发动全身，建议先出 IR 设计再动手。
+2. **fn 类型注解参数解析**（core 3 例）——阻塞 std/func.lz 函数式标准库。
+3. **duck 自引用参数**（BUG-TY-001）——trait 方法参数引用 duck 自身 → `&dyn Comparable`（E0391）。
+4. **raises 语义链**（BUG-CG-004 / PR-002）。
+5. lib_* 剩余 5 库：string/json E0308 类、hashmap E0382 移动语义、tree E0369 运算符、iterator 需 trait 参数特性。
+6. 其余 P2/P3 按表顺位处理。

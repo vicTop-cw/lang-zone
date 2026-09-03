@@ -4383,6 +4383,15 @@ impl CodeGen {
                 } else {
                     self.gen_expr(value)
                 };
+                // BUG-SG-002/003：`T?` 位置自动 Some 包装。
+                // `let z: int? = 10` / `let cfg: Config? = Config { .. }` 在 Rust
+                // 侧是 `Option<T> = T`（E0308）。注解可空而初始值非空 → 补 Some。
+                // 元组解构/空容器分支产出的同样是非 Option 值，一并适用。
+                let value_s = if needs_some_wrap(ty, value) {
+                    format!("Some({})", value_s)
+                } else {
+                    value_s
+                };
                 self.emit_line(&format!(
                     "let {}{}{} = {};",
                     mut_kw, safe_name, ty_str, value_s
@@ -6632,6 +6641,30 @@ impl CodeGen {
                                         format!("{}: Some(Box::new({}))", fname, val_s)
                                     };
                                 }
+                                // BUG-SG-002/003：可空字段（`host: str?` / `db: DbConfig?`）
+                                // 用非 Option 值构造 → 补 `Some(..)`（E0308）。
+                                // 递归字段已在上一分支处理（Box 包装），不重复。
+                                let fty = self
+                                    .struct_fields_info
+                                    .get(&base_name)
+                                    .and_then(|info| info.iter().find(|(n, _)| n == &fname))
+                                    .map(|(_, t)| t.clone());
+                                if let Some(fty) = fty {
+                                    let val_expr = match &a.kind {
+                                        ExprKind::StructCtor { fields, .. } => fields
+                                            .iter()
+                                            .find(|(n, _)| n == "value")
+                                            .map(|(_, v)| v),
+                                        _ => None,
+                                    };
+                                    if val_expr.map_or(false, |v| needs_some_wrap(&fty, v)) {
+                                        let val_s = s
+                                            .split_once(':')
+                                            .map(|(_, v)| v.trim().to_string())
+                                            .unwrap_or_else(|| s.clone());
+                                        return format!("{}: Some({})", fname, val_s);
+                                    }
+                                }
                             }
                             s
                         })
@@ -8847,9 +8880,29 @@ impl CodeGen {
                         }
                         // 自动补 PhantomData 字段（box.lz `Box(_ptr: 0)` → `Box { _ptr: 0, _lz_phantom_T: PhantomData }`，
                         // 否则 E0063 missing field `_lz_phantom_T`）
+                        // BUG-SG-002/003：可空字段（`host: str?`、`db: DbConfig?`）
+                        // 用非 Option 值初始化时补 `Some(..)`（E0308）。字段类型表
+                        // 来自 struct_fields_info；泛型 struct 的字段类型可能含未绑定
+                        // 参数，此时按不行包装处理（保守，避免误包）。
+                        let field_tys = self
+                            .struct_fields_info
+                            .get(name.as_str())
+                            .cloned()
+                            .unwrap_or_default();
                         let mut fields: Vec<String> = fields
                             .iter()
-                            .map(|(n, v)| format!("{}: {}", n, self.gen_expr(v)))
+                            .map(|(n, v)| {
+                                let v_s = self.gen_expr(v);
+                                let wrap = field_tys
+                                    .iter()
+                                    .find(|(fn_, _)| fn_ == n)
+                                    .map_or(false, |(_, ft)| needs_some_wrap(ft, v));
+                                if wrap {
+                                    format!("{}: Some({})", n, v_s)
+                                } else {
+                                    format!("{}: {}", n, v_s)
+                                }
+                            })
                             .collect();
                         if let Some(phantoms) = self.struct_phantom_generics.get(name.as_str()) {
                             for g in phantoms {
