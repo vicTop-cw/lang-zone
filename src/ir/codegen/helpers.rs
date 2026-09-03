@@ -903,7 +903,7 @@ pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
         ExprKind::StructCtor { fields, .. } => fields.iter().any(|(_, e)| expr_mentions_var(e, name)),
         ExprKind::EnumCtor { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
         ExprKind::GenExpr { yield_of } => expr_mentions_var(yield_of, name),
-        ExprKind::GenBuild { block, .. } => false,
+        ExprKind::GenBuild { .. } => false,
         ExprKind::Cast { expr, .. } => expr_mentions_var(expr, name),
         ExprKind::MagicCall { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
         ExprKind::BlockExpr { block } => block.stmts.iter().any(|s| match s {

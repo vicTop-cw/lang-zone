@@ -15,8 +15,8 @@
 //   4. 与 FfiBridge (extern "C") 完全正交，可同时启用
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta,
-    CallResolveResult, ErrorCode, ExportEntry, ExportKind, ImportResolveResult,
+    Bridge, BridgeCapability, BridgeLevel, BridgeMeta,
+    CallResolveResult, ExportEntry, ExportKind, ImportResolveResult,
     MethodResolveResult,
 };
 use std::cell::RefCell;
@@ -396,7 +396,7 @@ impl Bridge for ExternBridge {
 
     // ─── 方法解析（不支持，直接透传）───
 
-    fn resolve_method(&self, method: &str, _receiver_type: &str) -> Option<MethodResolveResult> {
+    fn resolve_method(&self, _method: &str, _receiver_type: &str) -> Option<MethodResolveResult> {
         None // 透传给其他 bridge
     }
 
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn test_inline_function() {
         let mut bridge = ExternBridge::new();
-        let mut fn_entry = ExternFn {
+        let fn_entry = ExternFn {
             symbol: "hot_path".to_string(),
             params: vec!["i32".to_string()],
             return_type: "i32".to_string(),

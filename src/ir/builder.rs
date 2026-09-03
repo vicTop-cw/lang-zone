@@ -8393,7 +8393,7 @@ fn ex_type_has_generic(t: &IrType, gs: &[String]) -> bool {
 fn ex_has_any_gen(t: &IrType) -> bool {
     match t {
         IrType::Generic(_) => true,
-        IrType::Named { path, args } => args.iter().any(ex_has_any_gen),
+        IrType::Named { path: _, args } => args.iter().any(ex_has_any_gen),
         IrType::Option(x) => ex_has_any_gen(x),
         IrType::Result { ok, err } => ex_has_any_gen(ok) || ex_has_any_gen(err),
         IrType::Tuple(ts) => ts.iter().any(ex_has_any_gen),

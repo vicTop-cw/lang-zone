@@ -37,10 +37,6 @@ pub struct CythonCodeGen {
     cdef_classes: HashSet<String>,
     /// 当前所在的 cdef class 名（用于 Self_ 解析）
     current_class_name: Option<String>,
-    /// 当前函数返回类型（用于尾表达式判断）
-    current_fn_ret_ty: Option<IrType>,
-    /// 当前是否在 cdef class 体内（方法生成 vs 自由函数）
-    in_cdef_class: bool,
     /// 函数名 → 重载签名列表（参数类型向量）
     overload_sigs: std::collections::HashMap<String, Vec<Vec<IrType>>>,
 }
@@ -53,8 +49,6 @@ impl CythonCodeGen {
             known_types: HashSet::new(),
             cdef_classes: HashSet::new(),
             current_class_name: None,
-            current_fn_ret_ty: None,
-            in_cdef_class: false,
             overload_sigs: std::collections::HashMap::new(),
         }
     }
@@ -591,10 +585,7 @@ impl CythonCodeGen {
             IrType::Named { path, args } => self.map_named_type(path, args, ctx),
 
             // ── 容器类型 ──
-            IrType::Option(inner) => match ctx {
-                TypeCtx::Signature | TypeCtx::Field | TypeCtx::Local => "object".into(),  // None = 无值
-                TypeCtx::Container | TypeCtx::Generic => "object".into(),
-            },
+            IrType::Option(_) => "object".into(),  // None = 无值
             IrType::Result { .. } => "object".into(),  // 用异常传播表错
 
             IrType::Tuple(elems) => match ctx {
@@ -826,18 +817,6 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             }
             cg.indent -= 1;
         }
-        Stmt::Match { scrutinee, arms } => {
-            let s = gen_expr(cg, scrutinee);
-            cg.writeln(&format!("# match {}", s));
-            for (i, arm) in arms.iter().enumerate() {
-                let cond = if i == 0 { "if" } else { "elif" };
-                cg.write(&format!("{} True:  # pat={:?}", cond, arm.pattern));
-                cg.writeln("");
-                cg.indent += 1;
-                gen_block(cg, &arm.body);
-                cg.indent -= 1;
-            }
-        }
         Stmt::YieldFrom { iter } => {
             cg.writeln(&format!("yield from {}", gen_expr(cg, iter)));
         }
@@ -849,7 +828,6 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
             }
             cg.writeln("break");
         }
-        Stmt::Continue => cg.writeln("continue"),
         Stmt::BlockLabel { label, body } => {
             cg.writeln(&format!("# block {}:", label));
             gen_block(cg, body);
@@ -868,7 +846,6 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt) {
         Stmt::TypeAlias { name, ty } => {
             cg.writeln(&format!("# type {} = {:?}", name, ty));
         }
-        _ => cg.writeln("# <stmt todo>"),
     }
 }
 
@@ -1095,7 +1072,6 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
         ExprKind::ImplicitConvert { source, target_ty } => {
             format!("{}({})", cg.map_type(target_ty, TypeCtx::Signature), gen_expr(cg, source))
         }
-        _ => String::new(),
     }
 }
 
@@ -1178,7 +1154,7 @@ fn gen_pattern(cg: &CythonCodeGen, pat: &Pattern, scrutinee: &str) -> (String, V
             }
             (conds.join(" && "), bindings)
         }
-        Pattern::Enum { enum_name, variant, args } => {
+        Pattern::Enum { enum_name, variant: _, args } => {
             let mut conds = vec![format!("isinstance({}, {})", scrutinee, enum_name)];
             let mut bindings = vec![];
             for (i, arg) in args.iter().enumerate() {

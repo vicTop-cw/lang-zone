@@ -12,7 +12,7 @@
 // 3. 条件 yield（*: 块内 if 分支）
 // 4. 无 callee 仅收集包（迭代器语义）
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn builtins_rlib() -> PathBuf {

@@ -9,7 +9,7 @@
 use lang_zone::ir::IrModule;
 use lang_zone::parser::Parser;
 
-fn build_module(name: &str, source: &str) -> IrModule {
+fn build_module(_name: &str, source: &str) -> IrModule {
     let tokens = lang_zone::lexer::Lexer::new(source).tokenize();
     let mut parser = Parser::new(tokens);
     let ast = parser.parse_module().expect("parse ok");

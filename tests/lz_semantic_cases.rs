@@ -6,7 +6,7 @@
 // - 覆盖核心语义路径：算术/字符串/递归/容器/循环/闭包/结构体/构建块/异常/布尔
 // - 所有用例仅走 IR 路线（默认），golden 基线精确匹配
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn builtins_rlib() -> PathBuf {

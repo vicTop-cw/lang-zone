@@ -8,7 +8,7 @@
 //
 // 拒绝判定：lang-zone 二进制完整编译管线（宏展开→parse→IR→codegen）退出码非 0。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 struct RejectCase {

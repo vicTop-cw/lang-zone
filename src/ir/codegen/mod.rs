@@ -16,16 +16,6 @@ use super::types::IrType;
 use super::IrModule;
 use std::collections::HashMap;
 
-/// 外部符号（用户模块 use/别名引用）的 stub 类别：
-/// 按被引用位置生成对应兼容定义，仅用于通过 rustc 编译，不保证语义。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExternSymKind {
-    /// 未知标识符：`fn __lz_extern_NAME(args...) -> i64 { i64::MAX }`
-    Unknown,
-    /// 模块级 const：`const NAME: i64 = i64::MAX;`
-    Const,
-}
-
 /// IR → Rust 代码生成器
 pub struct CodeGen {
     /// 缩进级别（空格数）
@@ -128,9 +118,6 @@ pub struct CodeGen {
     fn_variadic: HashMap<String, usize>,
     /// 函数名 → kwargs 注入参数起始索引（kwargs 收集为 &HashMap<String, V>）
     fn_kwargs: HashMap<String, usize>,
-    /// 外部符号 stub：名称 → (类别, 用户可见参数名, 模块别名)。独立收集 pass 后
-    /// 在文件末尾发射兼容性定义，用于解析用户模块 use/别名引用（E0425 修复）。
-    extern_syms: Vec<(String, ExternSymKind, String, String)>,
     /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
     fn_param_types: HashMap<String, Vec<IrType>>,
     /// type-pack 变参函数（`..: Tuple<Ts...>`，03d §2.8 方案 B）：
@@ -277,7 +264,6 @@ impl CodeGen {
             current_variadic_params: std::collections::HashSet::new(),
             fn_variadic: HashMap::new(),
             fn_kwargs: HashMap::new(),
-            extern_syms: Vec::new(),
             fn_param_types: HashMap::new(),
             typepack_param: HashMap::new(),
             typepack_sigs: HashMap::new(),
@@ -5381,7 +5367,7 @@ impl CodeGen {
                                     .iter()
                                     .find(|((e, _), _)| e == path)
                                     .filter(|((_, _), fields)| fields.contains(field))
-                                    .map(|((_, variant), fields)| {
+                                    .map(|((_, variant), _)| {
                                         format!(
                                             "match &{} {{ {}::{} {{ {}, .. }} => {}.clone(), _ => unreachable!() }}",
                                             base_s, path, variant, field, field
@@ -6063,8 +6049,6 @@ impl CodeGen {
                     let is_std_module = known_modules.contains(&base_s.as_str());
                     let is_var_base = matches!(&base.kind, ExprKind::Var(_));
                     let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
-                    let field_is_uppercase =
-                        field.chars().next().map_or(false, |c| c.is_uppercase());
                     let sep =
                         if is_var_base && (is_std_module || is_known_type) {
                             // 类型名上的调用一律关联路径：Cell::new / Option::None /
@@ -6879,7 +6863,7 @@ impl CodeGen {
                     // struct::new 字段类型表（new 形参顺序即字段顺序）：fn 字段实参
                     // 为 lambda 时转 fn 指针（同 Call 分支，lib_iterator MapIter.new）
                     let struct_fields = self.struct_fields_info.get(&recv).cloned();
-                    let mut args_s: Vec<String> = args
+                    let args_s: Vec<String> = args
                         .iter()
                         .enumerate()
                         .map(|(i, a)| {

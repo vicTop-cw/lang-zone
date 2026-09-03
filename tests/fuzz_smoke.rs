@@ -40,6 +40,7 @@ impl Lcg {
     }
 }
 
+#[allow(dead_code)] // 词表备用：新增 fuzz 生成规则时按需启用
 const KEYWORDS: &[&str] = &[
     "def", "let", "if", "else", "for", "while", "return", "import",
     "struct", "print", "true", "false", "None", "match", "case", "yield",

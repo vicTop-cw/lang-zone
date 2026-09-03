@@ -81,7 +81,7 @@ fn merge_imports_into(
         };
         let mut ranges = ranges;
         ranges.extend(tranges);
-        let mut expander = MacroExpander::new(registry);
+        let expander = MacroExpander::new(registry);
         let expand_input: Vec<_> = tokens
             .iter()
             .enumerate()
@@ -95,7 +95,7 @@ fn merge_imports_into(
         let Ok(mut expanded) = expander.expand(&expand_input) else {
             continue;
         };
-        let mut tpl = TemplateExpander::new(treg);
+        let tpl = TemplateExpander::new(treg);
         for _ in 0..16 {
             let before = expanded.clone();
             let Ok(after_tpl) = tpl.expand(&expanded) else {

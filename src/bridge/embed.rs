@@ -28,11 +28,11 @@
 //   magic = 0x4C5A454D ("LZEM")
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta,
+    Bridge, BridgeCapability, BridgeLevel, BridgeMeta,
     CallResolveResult, ExportEntry, ExportKind, ImportResolveResult,
 };
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 // ══════════════════════════════════════════════════════════════
 // 协议常量
@@ -682,6 +682,7 @@ impl Bridge for EmbedBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::Ordering;
 
     fn make_bridge() -> EmbedBridge {
         let mut bridge = EmbedBridge::new("test");
