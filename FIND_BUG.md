@@ -1,5 +1,5 @@
 # FIND_BUG.md — Lang-Zone Bug 挖掘测试套件
-> 更新：2026-09-03 11:50（首轮实测落档 + 12 库基线 7/12 转正 + tests/find_bug_bugs.rs 回归守护 15 绿/25 挂）
+> 更新：2026-09-03 14:10（三轮复验：SB-001/002/003 经未提交 codegen 接线修复转 ✅，21❌→18❌；用当前二进制全量重测）
 
 ## 测试文件清单（44 个 .lz）
 
@@ -162,9 +162,9 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-CG-002 | P0 | codegen | `__call__` 魔法接线 | ❌ P1 自由函数 + 未接线 |
 | BUG-CG-003 | P1 | codegen | `#!export` → `pub fn` | ✅ 编译通过；export 语义待 ABI 验证 |
 | BUG-CG-004 | P1 | codegen | `raises` → `Result<T, E>` | ❌ P1 raises 修饰被静默丢弃 |
-| BUG-SB-001 | P1 | stdbridge | `fromMillis` → `from_millis` | ❌ P1 bridge 有映射 codegen 未接线 |
-| BUG-SB-002 | P1 | stdbridge | `Vec.contains` 映射 | ❌ P1 未加 `&`（E0308） |
-| BUG-SB-003 | P1 | stdbridge | `startsWith` → `starts_with` | ❌ P1 同 SB-001 未接线 |
+| BUG-SB-001 | P1 | stdbridge | `fromMillis` → `from_millis` | ✅ **三轮已修**（codegen 接线，输出 1.5s/500ms） |
+| BUG-SB-002 | P1 | stdbridge | `Vec.contains` 映射 | ✅ **三轮已修**（变量 receiver 补 &，输出 true/false） |
+| BUG-SB-003 | P1 | stdbridge | `startsWith` → `starts_with` | ✅ **三轮已修**（camelCase 表接入，输出 true/false） |
 | BUG-SB-004 | P2 | stdbridge | kebab-case 透传 | ✅ 全链路通过 |
 | BUG-SG-002 | P2 | syntax | `??` 空值合并 | ❌ P1 Option 赋值不自动 Some |
 | BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ❌ P1 同上 + 嵌套 Option 修饰 |
@@ -178,7 +178,8 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总**：36 编号 = ✅12 · ❌21 · 🟡1 · 待单测 2（`\u{}`、comptime 语义）；另 core 3 例全败于 fn 类型注解解析。
+**实测汇总（2026-09-03 14:10 三轮复验后）**：36 编号 = ✅15 · ❌18 · 🟡1 · 2 项已由三轮接线修复转正（SB-001/002/003）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
 
@@ -193,8 +194,8 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 3 | BUG-CG-002 (P0) | `__init__`/`__call__` 生成为**自由函数** `fn __call__(&self, ...)`（E0568：self 只许在关联函数）；调用点 `add5.__call__(10)` 未接线为可调用 | struct 魔法方法全线不可用 | 方法归属 impl 块 + `__call__` → `impl Fn` 或显式 call 糖 |
 | 4 | BUG-CG-004 (P1) | `def f() raises IOError` 编译为 `-> String` 普通 fn，raises 修饰静默丢弃；`raise "boom"` → `panic!`（运行即崩）；try/catch 语法不存在 | raises/try-catch 语义链断裂 | raises → Result<T, E> + try? 或 catch 语法糖 |
 | 5 | BUG-IR-002 (P1) | defer 体**内联立即执行**（`{ push(log, "cleanup") }` 位置在块中段）+ `push(log, x)` 自由函数调被 stub 成 `fn push(i64,i64)->i64 {i64::MAX}`（E0308） | defer 语义完全缺失 | IR 建 defer 节点 → codegen Drop guard；push 需映射 Vec::push |
-| 6 | BUG-SB-001/003 (P1) | `time::Duration::fromMillis` → `time.Duration.fromMillis`（E0425）；`s.startsWith("x")` 原样透传（E0599）。**StdBridge.resolve_method 有完整 camelCase 映射且有单测（std.rs:970/1192），但 IR codegen 方法映射表（mod.rs:7165 区）未接入** | bridge 能力与 codegen 脱节，camelCase 方法全线不通 | codegen 方法表接入 StdBridge 映射或桥接层 |
-| 7 | BUG-SB-002 (P1) | `v.contains(2i64)` → Rust 需要 `&i64`（Vec::contains 签名），E0308 | List/Vec 方法实参引用化规则缺失 | 按接收者类型给 contains 加 `&` |
+| 6 | ~~BUG-SB-001/003 (P1)~~ **三轮已修 ✅** | codegen 方法表已接入 camelCase 映射（startsWith/endsWith/isEmpty/fromMillis 等，`!recv_is_struct` 守卫），全链路输出正确（1.5s/500ms、true/false） | 已修复（未提交 diff，随下个 commit 入库） | — |
+| 7 | ~~BUG-SB-002 (P1)~~ **三轮已修 ✅** | contains 的 `&` 规则已从「仅 ListLit 字面量」扩展到「变量 receiver 且无自定义 contains」（recv_has_custom_contains 守卫），E0308 消除 | 已修复（未提交 diff） | — |
 | 8 | BUG-SG-002/003 (P1) | `z: int? = 10` 直接生成 `let z: Option<i64> = 10i64`（E0308）；`??` 本体在两侧类型吻合时可用，但 Option 注解赋值不自动 Some 包装；`?.` 链依赖该前提，连带失败 | Option 语义糖不可用 | 注解为 `T?` 的字面量初始化生成 `Some(...)` |
 | 9 | BUG-TY-002 (P1) | `def get_count(self: Counter)` 生成为 `fn get_count(&self)` **自由函数**（无 impl 归属），E0568；同 BUG-CG-002 根因 | 所有带 self 的 def 不可编译 | struct 方法统一挂 impl |
 | 10 | BUG-TY-004 (P1) | `__Params::new()` → `__Params.new`（点调用，E0423 struct 不能当值）；`p.set(0, 42)` 静默丢弃 → `()` | 运行时反射库不可用 | `::` 静态调用保留 + 方法链接线 |

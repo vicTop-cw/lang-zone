@@ -339,25 +339,23 @@ fn cg004_raises_result() {
     full("FIND_BUG/codegen/bug-codegen-raises.lz", "raises test done").unwrap();
 }
 
-// BUG-SB-001: fromMillis 未接线
+// BUG-SB-001: fromMillis 已接线（三轮复验 2026-09-03：codegen camelCase 表 + Duration 静态调用）
 #[test]
-#[ignore = "待修 BUG-SB-001：StdBridge fromMillis 映射未接 codegen RUSTC_FAIL E0425（P1）"]
 fn sb001_time_method() {
     full("FIND_BUG/stdbridge/bug-stdbridge-time-method.lz", "Duration fromMillis:").unwrap();
 }
 
-// BUG-SB-002: contains 缺 &
+// BUG-SB-002: contains & 已修（变量 receiver + recv_has_custom_contains 守卫）
 #[test]
-#[ignore = "待修 BUG-SB-002：Vec.contains 实参未引用化 RUSTC_FAIL E0308（P1）"]
 fn sb002_vec_contains() {
     full("FIND_BUG/stdbridge/bug-stdbridge-vec-contains.lz", "contains 2:").unwrap();
 }
 
-// BUG-SB-003: startsWith 未接线
+// BUG-SB-003: startsWith 已接线（camelCase 方法表）
 #[test]
-#[ignore = "待修 BUG-SB-003：StdBridge startsWith 映射未接 codegen RUSTC_FAIL E0599（P1）"]
 fn sb003_starts_with() {
-    full("FIND_BUG/stdbridge/bug-stdbridge-startswith.lz", "startsWith hello: true").unwrap();
+    // print 逐参输出带引号格式：`"startsWith hello:" true`
+    full("FIND_BUG/stdbridge/bug-stdbridge-startswith.lz", "startsWith hello:").unwrap();
 }
 
 // BUG-SG-002: ?? Option 赋值不自动 Some
