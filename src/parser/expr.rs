@@ -1210,7 +1210,7 @@ impl ParserExprExt for Parser {
                     self.advance(); // skip Indent
                 }
                 let body = self.parse_expr()?;
-                Ok(Expr::Closure { params: Vec::new(), param_tys: Vec::new(), body: Box::new(body) })
+                Ok(Expr::Closure { params: Vec::new(), param_tys: Vec::new(), ret_ty: None, body: Box::new(body) })
             }
             Token::Pipe_ => {
                 // 闭包: |x, y| x + y  或  |x: int, y: int| -> int = x + y
@@ -1234,9 +1234,10 @@ impl ParserExprExt for Parser {
                 }
                 self.advance(); // consume |
                 // 支持可选的返回类型注解: |x| -> int = ...
+                let mut ret_ty = None;
                 if self.check(&Token::Arrow) {
                     self.advance(); // consume ->
-                    self.parse_type()?; // skip return type annotation
+                    ret_ty = Some(self.parse_type()?);
                 }
                 // 支持可选的 = 或 => 分隔符: |x| = body  或  |x| => block
                 let has_fat_arrow = self.check(&Token::FatArrow);
@@ -1254,10 +1255,10 @@ impl ParserExprExt for Parser {
                         if self.check(&Token::Dedent) {
                             self.advance();
                         }
-                        Ok(Expr::Closure { params, param_tys, body: Box::new(Expr::BlockExpr(stmts)) })
+                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(Expr::BlockExpr(stmts)) })
                     } else {
                         let body = self.parse_expr()?;
-                        Ok(Expr::Closure { params, param_tys, body: Box::new(body) })
+                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(body) })
                     }
                 } else {
                     // = 后是表达式体；也支持缩进块体（多语句闭包，
@@ -1269,10 +1270,10 @@ impl ParserExprExt for Parser {
                         if self.check(&Token::Dedent) {
                             self.advance();
                         }
-                        Ok(Expr::Closure { params, param_tys, body: Box::new(Expr::BlockExpr(stmts)) })
+                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(Expr::BlockExpr(stmts)) })
                     } else {
                         let body = self.parse_expr()?;
-                        Ok(Expr::Closure { params, param_tys, body: Box::new(body) })
+                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(body) })
                     }
                 }
             }

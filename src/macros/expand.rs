@@ -292,12 +292,6 @@ impl TemplateExpander {
                         let after_name = excl_idx + 1;
                         let decl_tokens = self.collect_decl_tokens(tokens, after_name);
                         let decl_end = after_name + decl_tokens.len();
-                        eprintln!("DBG noblock: name={} after_name={} decl_len={} decl_end={} len={}", name, after_name, decl_tokens.len(), decl_end, len);
-                        if len <= 42 {
-                            for (ti, tt) in tokens.iter().enumerate() {
-                                eprintln!("DBG T{:3} {:?}", ti, tt);
-                            }
-                        }
                         if !decl_tokens.is_empty() {
                             let mut expanded = self.expand_template(&name, &decl_tokens, depth)?;
                             rebalance_expanded_indents(&mut expanded);
@@ -447,7 +441,6 @@ fn rebalance_expanded_indents(tokens: &mut Vec<Token>) {
             _ => {}
         }
     }
-    eprintln!("DBG rebalance depth={} len={}", depth, tokens.len());
     while depth > 0 {
         tokens.push(Token::Dedent);
         depth -= 1;
@@ -780,12 +773,6 @@ impl MacroExpander {
                         }
                         let decl_tokens = self.collect_decl_tokens(tokens, after_name);
                         let decl_end = after_name + decl_tokens.len();
-                        eprintln!("DBG noblock: name={} after_name={} decl_len={} decl_end={} len={}", name, after_name, decl_tokens.len(), decl_end, len);
-                        if len <= 42 {
-                            for (ti, tt) in tokens.iter().enumerate() {
-                                eprintln!("DBG T{:3} {:?}", ti, tt);
-                            }
-                        }
                         if !decl_tokens.is_empty() {
                             let mut expanded = self.expand_macro(&name, &decl_tokens, None, depth)?;
                             rebalance_expanded_indents(&mut expanded);
@@ -846,10 +833,6 @@ impl MacroExpander {
 
         let result = interp.execute_stmts(&def.body)
             .map_err(|e| format!("macro '{}' expansion error: {}", name, e))?;
-        eprintln!("DBG macro {} result len={}", name, result.tokens.len());
-        for (i, t) in result.tokens.iter().enumerate() {
-            eprintln!("  DBG R{:3} {:?}", i, t);
-        }
 
         // 宏卫生性：宏体局部绑定加唯一后缀（避免污染调用方同名变量）。
         // 恒等/透传宏（body = 单个参数引用，如 `macro id(input) = input`）：

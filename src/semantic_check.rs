@@ -124,6 +124,9 @@ fn builtin_value_names() -> HashSet<&'static str> {
         "__name__", "__doc__", "__is_macro__", "__slots__", "__file__", "__package__",
         "__path__", "__module__", "__qualname__", "__", "collect",
         "inspect",
+        // std 模块名（作为 PathAccess 根节点时视为已绑定）
+        "time", "io", "fs", "path", "env", "process", "sync", "thread",
+        "collections", "iter", "ops", "fmt", "mem", "ptr", "ffi",
     ] {
         s.insert(n);
     }
@@ -835,6 +838,8 @@ impl Checker {
             }
             Stmt::FnDef { func } => {
                 self.check_function_header(func);
+                // 嵌套函数：将函数名绑定到当前作用域（供后续表达式引用）
+                self.bind(func.name.clone());
                 self.check_function_body(func);
             }
             Stmt::Pass => {}
@@ -1089,6 +1094,7 @@ impl Checker {
             Expr::Closure {
                 params,
                 param_tys,
+                ret_ty,
                 body,
             } => {
                 self.push_scope();
@@ -1097,6 +1103,9 @@ impl Checker {
                     if let Some(Some(ty)) = param_tys.get(i) {
                         self.check_type(ty, &format!("闭包参数 {p} 的类型"), &[], &[]);
                     }
+                }
+                if let Some(ty) = ret_ty {
+                    self.check_type(ty, "闭包返回类型", &[], &[]);
                 }
                 self.check_expr(body);
                 self.pop_scope();

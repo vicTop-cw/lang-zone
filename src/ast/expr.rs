@@ -79,6 +79,10 @@ pub enum Expr {
         /// 修复 E0282：`|x: int|` 的类型原被 parse_type() 丢弃，导致
         /// Option.None.map(|x: int| ...) 生成无类型闭包无法推断
         param_tys: Vec<Option<Type>>,
+        /// 返回类型注解（`|x| -> T = ...`；无注解为 None）。
+        /// 修复 E0283：`or_else(b, |e: str| -> Result<int, int> = Ok(100))`
+        /// 的返回类型原被丢弃，Rust 闭包无法从 Ok(100) 推断 Err 泛型
+        ret_ty: Option<Type>,
         body: Box<Expr>,
     },
     // 块表达式（|x| => block body）

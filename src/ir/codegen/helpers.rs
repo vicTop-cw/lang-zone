@@ -448,6 +448,31 @@ pub(crate) fn strip_lambda_type_with_ref(lambda: &str) -> String {
     no_types
 }
 
+/// 解析 lambda 字符串为 (参数名列表, body 表达式)
+/// "move |&x| { x <= pivot }" → (["x"], "x <= pivot")
+/// "|x, y| x + y" → (["x", "y"], "x + y")
+/// body 自动剥离最外层花括号。
+pub(crate) fn lambda_split(lambda: &str) -> Option<(Vec<String>, String)> {
+    let s = lambda.trim();
+    // 去掉 "move " 前缀（借用捕获，避免 move 外部变量）
+    let s = s.strip_prefix("move ").unwrap_or(s).trim();
+    let pipe_open = s.find('|')?;
+    let rel_close = s[pipe_open + 1..].find('|')?;
+    let pipe_close = pipe_open + 1 + rel_close;
+    let params: Vec<String> = s[pipe_open + 1..pipe_close]
+        .split(',')
+        .map(|p| p.trim().trim_start_matches('&').to_string())
+        .collect();
+    let after = &s[pipe_close + 1..];
+    let body = after.trim();
+    let body = body
+        .strip_prefix('{')
+        .and_then(|b| b.strip_suffix('}'))
+        .map(|b| b.trim().to_string())
+        .unwrap_or_else(|| body.to_string());
+    Some((params, body))
+}
+
 /// 将 _KwArg { name, value } 展开为 "field: value"
 pub(crate) fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
     if let ExprKind::StructCtor { name, fields } = &arg.kind {
@@ -638,6 +663,281 @@ pub(crate) fn scan_expr_mutations(
             }
         }
         _ => {}
+    }
+}
+
+/// 预扫描函数体，收集需要自动加 `mut` 的局部 let 变量名。
+/// LZ 源码允许 `let v = ...; v.push(1)`（不写 mut），但生成 Rust 时 push
+/// 需要可变绑定（E0596）。这里宽松收集：凡作为方法调用接收者、赋值目标或
+/// IndexSet 基的变量名都标为需 mut（over-approximation 安全：多余的 let mut
+/// 只产生 unused_mut warning，批测以 -A warnings 忽略；漏标则报 E0596）。
+pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::HashSet<String>) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { name, value, .. } => {
+                // 自引用重绑定（`let parts = parts + [p]`）：后续需生成赋值而非
+                // shadow-let，因此初始声明必须为 mut
+                if expr_mentions_var(value, name) {
+                    out.insert(name.clone());
+                }
+                scan_expr_auto_mut(value, out);
+            }
+            Stmt::Assign { target, value } => {
+                if let ExprKind::Var(v) = &target.kind {
+                    out.insert(v.clone());
+                }
+                scan_expr_auto_mut(target, out);
+                scan_expr_auto_mut(value, out);
+            }
+            Stmt::ExprStmt { expr } => scan_expr_auto_mut(expr, out),
+            Stmt::Return { value } => {
+                if let Some(v) = value {
+                    scan_expr_auto_mut(v, out);
+                }
+            }
+            Stmt::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                scan_expr_auto_mut(cond, out);
+                scan_auto_mut_locals(then_branch, out);
+                if let Some(e) = else_branch {
+                    scan_auto_mut_locals(e, out);
+                }
+            }
+            Stmt::For { iter, body, .. } => {
+                scan_expr_auto_mut(iter, out);
+                scan_auto_mut_locals(body, out);
+            }
+            Stmt::While { cond, body, .. } => {
+                scan_expr_auto_mut(cond, out);
+                scan_auto_mut_locals(body, out);
+            }
+            Stmt::WhileLet { expr, body, .. } => {
+                scan_expr_auto_mut(expr, out);
+                scan_auto_mut_locals(body, out);
+            }
+            Stmt::Match { scrutinee, arms } => {
+                scan_expr_auto_mut(scrutinee, out);
+                for arm in arms {
+                    scan_auto_mut_locals(&arm.body, out);
+                }
+            }
+            Stmt::Raise { value, .. } => {
+                scan_expr_auto_mut(value, out);
+            }
+            Stmt::Assert { cond, .. } => scan_expr_auto_mut(cond, out),
+            Stmt::Yield { value } => scan_expr_auto_mut(value, out),
+            Stmt::YieldFrom { iter } => scan_expr_auto_mut(iter, out),
+            Stmt::Block { stmts } => {
+                let inner = Block {
+                    span: Span::unknown(),
+                    stmts: stmts.clone(),
+                    ty: IrType::Unit,
+                };
+                scan_auto_mut_locals(&inner, out);
+            }
+            Stmt::TryCatch {
+                body, catches, ..
+            } => {
+                scan_auto_mut_locals(body, out);
+                for (_, cb) in catches {
+                    scan_auto_mut_locals(cb, out);
+                }
+            }
+            Stmt::CheckerBlock { body, .. } => scan_auto_mut_locals(body, out),
+            Stmt::Defer { body } => scan_auto_mut_locals(body, out),
+            _ => {}
+        }
+    }
+}
+
+/// 递归扫描表达式中的可变使用（方法调用接收者 / 赋值目标 / IndexSet 基）
+fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) {
+    match &expr.kind {
+        ExprKind::Var(_) | ExprKind::Lit(_) => {}
+        ExprKind::Call { callee, args, .. } => {
+            // 闭包变量调用（double_then_inc(5)）：FnMut 闭包需 mut 绑定（E0596）
+            if let ExprKind::Var(v) = &callee.kind {
+                if matches!(callee.ty, IrType::Fn { .. }) {
+                    out.insert(v.clone());
+                }
+            }
+            scan_expr_auto_mut(callee, out);
+            for a in args {
+                scan_expr_auto_mut(a, out);
+            }
+        }
+        ExprKind::MethodCall {
+            receiver, args, ..
+        } => {
+            if let ExprKind::Var(v) = &receiver.kind {
+                out.insert(v.clone());
+            }
+            scan_expr_auto_mut(receiver, out);
+            for a in args {
+                scan_expr_auto_mut(a, out);
+            }
+        }
+        ExprKind::FieldAccess { base, .. } => scan_expr_auto_mut(base, out),
+        ExprKind::IndexGet { base, key } => {
+            scan_expr_auto_mut(base, out);
+            scan_expr_auto_mut(key, out);
+        }
+        ExprKind::IndexSet { base, key, value } => {
+            if let ExprKind::Var(v) = &base.kind {
+                out.insert(v.clone());
+            }
+            scan_expr_auto_mut(base, out);
+            scan_expr_auto_mut(key, out);
+            scan_expr_auto_mut(value, out);
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            scan_expr_auto_mut(lhs, out);
+            scan_expr_auto_mut(rhs, out);
+        }
+        ExprKind::AssignExpr { target, value } => {
+            if let ExprKind::Var(v) = &target.kind {
+                out.insert(v.clone());
+            }
+            scan_expr_auto_mut(target, out);
+            scan_expr_auto_mut(value, out);
+        }
+        ExprKind::UnOp { operand, .. } => scan_expr_auto_mut(operand, out),
+        ExprKind::IfExpr { cond, then, els } => {
+            scan_expr_auto_mut(cond, out);
+            scan_expr_auto_mut(then, out);
+            scan_expr_auto_mut(els, out);
+        }
+        ExprKind::Lambda { body, .. } => scan_expr_auto_mut(body, out),
+        ExprKind::StructCtor { fields, .. } => {
+            for (_, e) in fields {
+                scan_expr_auto_mut(e, out);
+            }
+        }
+        ExprKind::EnumCtor { args, .. } => {
+            for a in args {
+                scan_expr_auto_mut(a, out);
+            }
+        }
+        ExprKind::GenExpr { yield_of } => scan_expr_auto_mut(yield_of, out),
+        ExprKind::GenBuild { block, .. } => scan_auto_mut_locals(block, out),
+        ExprKind::Cast { expr, .. } => scan_expr_auto_mut(expr, out),
+        ExprKind::MagicCall { args, .. } => {
+            for a in args {
+                scan_expr_auto_mut(a, out);
+            }
+        }
+        ExprKind::BlockExpr { block } => scan_auto_mut_locals(block, out),
+        ExprKind::TupleLit(items) | ExprKind::Tuple(items) | ExprKind::ListLit(items)
+        | ExprKind::List(items) => {
+            for i in items {
+                scan_expr_auto_mut(i, out);
+            }
+        }
+        ExprKind::Dict(entries) => {
+            for (k, v) in entries {
+                scan_expr_auto_mut(k, out);
+                scan_expr_auto_mut(v, out);
+            }
+        }
+        ExprKind::Range { start, end, .. } => {
+            if let Some(s) = start {
+                scan_expr_auto_mut(s, out);
+            }
+            scan_expr_auto_mut(end, out);
+        }
+        ExprKind::Pipe {
+            receiver,
+            callee,
+            args,
+        } => {
+            scan_expr_auto_mut(receiver, out);
+            scan_expr_auto_mut(callee, out);
+            for a in args {
+                scan_expr_auto_mut(a, out);
+            }
+        }
+        ExprKind::Paren(inner) => scan_expr_auto_mut(inner, out),
+        ExprKind::ImplicitConvert { source, .. } => scan_expr_auto_mut(source, out),
+    }
+}
+
+/// 判断表达式是否引用了指定变量名（自引用重绑定检测用，如 `let parts = parts + [p]`）
+pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
+    match &expr.kind {
+        ExprKind::Var(v) => v == name,
+        ExprKind::Lit(_) => false,
+        ExprKind::Call { callee, args, .. } => {
+            expr_mentions_var(callee, name) || args.iter().any(|a| expr_mentions_var(a, name))
+        }
+        ExprKind::MethodCall {
+            receiver, args, ..
+        } => {
+            expr_mentions_var(receiver, name) || args.iter().any(|a| expr_mentions_var(a, name))
+        }
+        ExprKind::FieldAccess { base, .. } => expr_mentions_var(base, name),
+        ExprKind::IndexGet { base, key } => {
+            expr_mentions_var(base, name) || expr_mentions_var(key, name)
+        }
+        ExprKind::IndexSet { base, key, value } => {
+            expr_mentions_var(base, name)
+                || expr_mentions_var(key, name)
+                || expr_mentions_var(value, name)
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            expr_mentions_var(lhs, name) || expr_mentions_var(rhs, name)
+        }
+        ExprKind::AssignExpr { target, value } => {
+            expr_mentions_var(target, name) || expr_mentions_var(value, name)
+        }
+        ExprKind::UnOp { operand, .. } => expr_mentions_var(operand, name),
+        ExprKind::IfExpr { cond, then, els } => {
+            expr_mentions_var(cond, name)
+                || expr_mentions_var(then, name)
+                || expr_mentions_var(els, name)
+        }
+        ExprKind::Lambda { body, .. } => expr_mentions_var(body, name),
+        ExprKind::StructCtor { fields, .. } => fields.iter().any(|(_, e)| expr_mentions_var(e, name)),
+        ExprKind::EnumCtor { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
+        ExprKind::GenExpr { yield_of } => expr_mentions_var(yield_of, name),
+        ExprKind::GenBuild { block, .. } => false,
+        ExprKind::Cast { expr, .. } => expr_mentions_var(expr, name),
+        ExprKind::MagicCall { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
+        ExprKind::BlockExpr { block } => block.stmts.iter().any(|s| match s {
+            Stmt::Let {
+                name: n,
+                value,
+                ..
+            } => *n == name && expr_mentions_var(value, name),
+            Stmt::ExprStmt { expr } => expr_mentions_var(expr, name),
+            Stmt::Return { value } => {
+                value.as_ref().map_or(false, |v| expr_mentions_var(v, name))
+            }
+            _ => false,
+        }),
+        ExprKind::TupleLit(items) | ExprKind::Tuple(items) | ExprKind::ListLit(items)
+        | ExprKind::List(items) => items.iter().any(|i| expr_mentions_var(i, name)),
+        ExprKind::Dict(entries) => entries
+            .iter()
+            .any(|(k, v)| expr_mentions_var(k, name) || expr_mentions_var(v, name)),
+        ExprKind::Range { start, end, .. } => {
+            start.as_ref().map_or(false, |s| expr_mentions_var(s, name))
+                || expr_mentions_var(end, name)
+        }
+        ExprKind::Pipe {
+            receiver,
+            callee,
+            args,
+        } => {
+            expr_mentions_var(receiver, name)
+                || expr_mentions_var(callee, name)
+                || args.iter().any(|a| expr_mentions_var(a, name))
+        }
+        ExprKind::Paren(inner) => expr_mentions_var(inner, name),
+        ExprKind::ImplicitConvert { source, .. } => expr_mentions_var(source, name),
     }
 }
 

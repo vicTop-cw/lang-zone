@@ -856,6 +856,17 @@ fn infer_generic_binding(
                 infer_generic_binding(p_inner, a_inner, bindings);
             }
         }
+        IrType::Fn { params: p_ps, ret: p_ret } => {
+            // 闭包实参（infer_expr_type 对带注解闭包产出 Fn）→ 逐参数/返回匹配：
+            // `map_res(a, |x: int| -> int = x*2)` 形参 Fn{params:[T],ret:U} 与
+            // 实参 Fn{params:[Int],ret:Int} 匹配得 T=Int,U=Int（lib_result 链式）
+            if let IrType::Fn { params: a_ps, ret: a_ret } = arg_ty {
+                for (p, a) in p_ps.iter().zip(a_ps.iter()) {
+                    infer_generic_binding(p, a, bindings);
+                }
+                infer_generic_binding(p_ret, a_ret, bindings);
+            }
+        }
         _ => {}
     }
 }
@@ -1201,7 +1212,39 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 .map(|s| infer_stmt_type(s, ctx))
                 .unwrap_or(IrType::Unit)
         }
-        AstExpr::Closure { .. } => IrType::Any,
+        AstExpr::Closure { params, param_tys, body, .. } => {
+            // 闭包有显式参数注解时构造 Fn 类型，供泛型调用推断使用：
+            // 否则 `map_res(a, |x: int| -> int = x*2)` 闭包推断为 Any，导致
+            // 泛型绑定零命中（lib_result and_then 链式调用 RUSTC_FAIL）
+            if param_tys.iter().any(|t| t.is_some()) {
+                let mut sub = ctx.clone();
+                for (i, name) in params.iter().enumerate() {
+                    let declared = param_tys
+                        .get(i)
+                        .and_then(|t| t.as_ref())
+                        .map(|t| from_ast_type(t))
+                        .unwrap_or(IrType::Any);
+                    sub.vars.insert(name.clone(), declared);
+                }
+                let ret = infer_expr_type(body, &sub);
+                IrType::Fn {
+                    params: params
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            param_tys
+                                .get(i)
+                                .and_then(|t| t.as_ref())
+                                .map(|t| from_ast_type(t))
+                                .unwrap_or(IrType::Any)
+                        })
+                        .collect(),
+                    ret: Box::new(ret),
+                }
+            } else {
+                IrType::Any
+            }
+        }
         AstExpr::BlockExpr(_) => IrType::Any,
         AstExpr::Range { .. } => IrType::named("Range"),
         AstExpr::Walrus { value, .. } => infer_expr_type(value, ctx),
@@ -2294,7 +2337,7 @@ fn build_multi_comp(
                     }],
                     body: Box::new(Expr::new(inner, IrType::Any, Span::unknown())),
                     is_move: true,
-                },
+                 ret_ty: None,},
                 IrType::Any,
                 Span::unknown(),
             ),
@@ -2314,7 +2357,7 @@ fn build_multi_comp(
                     }],
                     body: Box::new(convert_expr(c, ctx)),
                     is_move: true,
-                },
+                 ret_ty: None,},
                 IrType::Any,
                 Span::unknown(),
             ));
@@ -2474,7 +2517,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(body),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 );
@@ -2536,7 +2579,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         params: lambda_params,
                         body: Box::new(call),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Fn {
                         params: vec![IrType::Any; param_idx as usize],
                         ret: Box::new(IrType::Any),
@@ -3111,7 +3154,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             }
         }
 
-        AstExpr::Closure { params, param_tys, body } => {
+        AstExpr::Closure { params, param_tys, ret_ty, body } => {
             // 闭包体是独立的词法块：创建新 ctx（继承 vars 但重置 block_declared），
             // 使闭包内 `total = total + x` 能识别为写外部变量（Assign）而非新绑定
             let mut closure_ctx = TypeCtx::new();
@@ -3184,6 +3227,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     .collect(),
                 body: Box::new(convert_expr(body, &closure_ctx)),
                 is_move: true,
+                ret_ty: ret_ty.as_ref().map(|t| from_ast_type_with_generics(t, &ctx.current_generics)),
             }
         }
 
@@ -3528,7 +3572,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                                 params: lambda_params,
                                 body: Box::new(convert_expr(body, &closure_ctx)),
                                 is_move: true,
-                            },
+                             ret_ty: None,},
                             IrType::Any,
                             Span::unknown(),
                         )),
@@ -3640,7 +3684,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             }],
                             body: Box::new(access_expr),
                             is_move: true,
-                        },
+                         ret_ty: None,},
                         IrType::Any,
                         Span::unknown(),
                     )],
@@ -3744,7 +3788,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(out_expr),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 ),
@@ -3765,7 +3809,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(convert_expr(c, ctx)),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 ));
@@ -3818,7 +3862,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(body),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 ),
@@ -3838,7 +3882,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(convert_expr(c, ctx)),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 ));
@@ -3884,7 +3928,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(elem_expr),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 ),
@@ -3904,7 +3948,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                         }],
                         body: Box::new(convert_expr(c, ctx)),
                         is_move: true,
-                    },
+                     ret_ty: None,},
                     IrType::Any,
                     Span::unknown(),
                 ));
@@ -3992,7 +4036,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                                 params: vec![],
                                 body: Box::new(body_expr),
                                 is_move: false,
-                            },
+                             ret_ty: None,},
                             IrType::Any,
                             Span::unknown(),
                         )),
@@ -4017,7 +4061,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                                     params: vec![],
                                     body: Box::new(body_expr),
                                     is_move: false,
-                                },
+                                 ret_ty: None,},
                                 IrType::Any,
                                 Span::unknown(),
                             )),
@@ -4398,7 +4442,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                                 params: vec![],
                                 body: Box::new(body_expr),
                                 is_move: false,
-                            },
+                             ret_ty: None,},
                             IrType::Any,
                             Span::unknown(),
                         )),
@@ -4670,12 +4714,6 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                             IrType::Tuple(ea),
                         ) if ra.len() == ea.len() => {
                             let ok = ra.iter().zip(ea.iter()).all(|(r, e)| same_named_rec(r, e));
-                            if !ok && ra.len() == 2 {
-                                eprintln!(
-                                    "DBG tuple_same: ra={:?} ea={:?} ok={}",
-                                    ra, ea, ok
-                                );
-                            }
                             ok
                         }
                         (
@@ -7756,7 +7794,6 @@ fn build_ir_inner(
             c.ty.as_ref()
                 .map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(&c.value, &ctx));
-        eprintln!("DEBUG const {} ty={:?}", c.name, ty);
         ctx.top_level_consts.insert(c.name.clone(), ty);
         // 顶层 const 编译期求值（comptime 块/表达式内解析 const 引用）
         let empty_module = ast::Module::default();
@@ -8404,6 +8441,14 @@ fn ex_agrees_g(a: &IrType, b: &IrType, gs: &[String], duck: &HashSet<String>) ->
         {
             return true;
         }
+        // trait 对象参数（如 `def collect(iter: Iterator)`）接受任意具名类型：
+        // RangeIter/MapIter 等自定义 struct 鸭子类型满足 trait 方法（next）。
+        // 基础类型（int/str 等）不含 next，仍由后续 rustc 阶段拒绝。
+        if (ap == "Iterator" || bp == "Iterator")
+            && (ap != "Iterator" || bp != "Iterator")
+        {
+            return true;
+        }
         if ap == bp && (aa.is_empty() || ba.is_empty()) {
             return true;
         }
@@ -8980,7 +9025,7 @@ fn ex_check_expr(
                         }
                         if let IrType::Fn { params: fp, ret: fr } = want {
                             // 闭包实参 vs fn 形参检查
-                            if let AstExpr::Closure { params: cps, param_tys: cpts, body: cbody } =
+                            if let AstExpr::Closure { params: cps, param_tys: cpts, body: cbody, .. } =
                                 arg
                             {
                                 let mut actual: Vec<IrType> = Vec::new();
@@ -9055,6 +9100,7 @@ fn ex_check_expr(
                         } else {
                             let at = ex_infer(arg, work, env);
                             if !ex_agrees_g(want, &at, gens, w.duck_names) {
+                                eprintln!("DBG fnarg: fn={} idx={} want={:?} at={:?} gens={:?} duck={:?}", fname, i + 1, want, at, gens, w.duck_names);
                                 let caller = work
                                     .current_fn_name
                                     .clone()
@@ -9450,7 +9496,7 @@ fn ex_check_expr(
                 ex_check_stmts(&arm.body, work, &mut sub, gens, ret, hinted, w);
             }
         }
-        AstExpr::Closure { params, param_tys, body } => {
+        AstExpr::Closure { params, param_tys, body, .. } => {
             let mut sub = env.clone();
             for (i, n) in params.iter().enumerate() {
                 let ty = match param_tys.get(i) {

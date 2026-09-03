@@ -729,6 +729,10 @@ pub enum ExprKind {
         params: Vec<Param>,
         body: Box<Expr>,
         is_move: bool,
+        /// 返回类型注解（`|x| -> T = ...`；无注解为 None）。原被丢弃导致
+        /// `or_else(b, |e: str| -> Result<int,int> = Ok(100))` 生成 Rust 闭包
+        /// 无返回类型，Ok(100) 无法推断 Err 泛型（E0283）
+        ret_ty: Option<IrType>,
     },
 
     /// 结构体构造 Adder(base: 10)

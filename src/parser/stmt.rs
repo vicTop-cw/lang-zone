@@ -512,7 +512,11 @@ impl ParserStmtExt for Parser {
             }
             Token::Defer => {
                 self.advance();
-                // 支持两种形式: defer: block 和 defer expr
+                // 支持三种形式: defer guard: block / defer: block / defer expr
+                // 跳过 `guard` 关键字（defer guard: block → 等价于 defer: block）
+                if self.check(&Token::Guard) {
+                    self.advance();
+                }
                 if self.check(&Token::Colon) {
                     self.advance();
                     self.skip_newlines();
