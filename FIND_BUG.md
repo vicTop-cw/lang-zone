@@ -149,7 +149,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ❌ P2 `-> R raises E` 前置语法拒绝 |
 | BUG-PR-003 | P2 | parser | `..` 与 `/` 变参互斥 | ✅ 混用正确拒绝；用例内 `..: nums: int` 非法（规范是 `nums: List<T>` 收集），拒绝方向正确 |
 | BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ✅ 正确拒绝 |
-| BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ❌ P2 放行（默认参数失效） |
+| BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ✅ **轮次8 已修** — 装饰器后接非声明（变量/语句）解析阶段直接拒绝 |
 | BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ❌ P1 生成自引用 trait（E0391） |
 | BUG-TY-002 | P2 | typer | `self: Self_` 类型注解 | ✅ **轮次5 已修** — 顶层 `def m(self: S, ...)` 挂 `impl S`，调用点改方法语法（E0568 消除） |
 | BUG-TY-004 | P1 | typer | `__Params` 类型擦除 downcast | ❌ P1 `__Params.new()` 点调用错编 |
@@ -178,7 +178,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 轮次 7 后）**：36 编号 = ✅20 · ❌13 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 5 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-03 轮次 8 后）**：36 编号 = ✅21 · ❌12 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 6 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -205,7 +205,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 14 | BUG-LX-005 (P1) | 内联 `y =: x + 1`（`=:` 与表达式同行）被拒；`=:` 仅支持「换行缩进块」形态（p9 探针证实块形态正常返回 42） | 语法能力边界，文档需明确 | 若规范允许内联形态需实现；否则文档明确仅块形态 |
 | 15 | BUG-IR-001 (P1) | `nums.filter(~: _ % 2 == 0)` 报「Unexpected token in expression: BuildCall」——加空格后仍拒绝，`~:` 仅支持「值位」不支持「参数位」 | 构建块语法位受限 | parser 表达式层支持 BuildCall 或文档明确边界 |
 | 16 | BUG-PR-002 (P2) | `def f() raises IOError -> str` 拒绝；`-> str raises IOError` 也拒绝；仅 `-> str` 后**换行缩进**的 raises 可解析（parser.rs:831 在 skip_newlines 之后取 Raises） | raises 位置语法窄 | 支持 raises 与返回类型同行两种顺序 |
-| 17 | BUG-PR-005 (P2) | `@decorator` 后接变量赋值被**静默放行**，装饰器修饰无任何效果 | 装饰器边界失守（负向漏洞） | parser 遇 `@dec` 后非 def 应报错 |
+| 17 | ~~BUG-PR-005 (P2)~~ **轮次8 已修 ✅** | 见下方「轮次 8」章节：`@dec` 后接变量/语句 → 解析阶段 `Err`（装饰器边界护城河），不再静默丢弃 | 装饰器边界已收敛 | — |
 | 18 | BUG-SG-005 (P2) | `[0, ...a, 4]` 报「Unexpected token in expression: DotDotDot」——词法有 token，表达式层无实现 | 展开运算符缺实现 | 列表字面量支持 spread 展开到 Vec::extend |
 | 19 | BUG-LX-002 (P3) | `/* a /* b */ c */` 在第一个 `*/` 即终止注释，剩余 `c */` 变裸 token | 嵌套块注释不支持 | 若规范要嵌套需深度计数；否则文档明确非嵌套 |
 | 20 | core 3 例 (P1) | `fold(xs: List<a>, init: b, f: fn(b, a) -> b)` 报「Expected param, got LParen」——**fn 类型注解作为参数类型不可解析**；fold 用例另有逗号解析失败（Unexpected token: Comma） | 函数类型注解全线不可用，阻塞 core/func.lz 标准库 | parser 支持 `fn(A, B) -> C` 参数类型 |
@@ -414,3 +414,35 @@ Parse error: 无效的整数（可能溢出）: 99999999999999999999999
 4. **raises 语义链**（BUG-CG-004 / PR-002）。
 5. lib_* 剩余 5 库：string/json E0308 类、hashmap E0382 移动语义、tree E0369 运算符、iterator 需 trait 参数特性。
 6. 其余 P2/P3 按表顺位处理。
+
+## 轮次 8（2026-09-03）：BUG-PR-005 修复入库 —— 装饰器修饰非声明显式拒绝
+
+### 根因
+`src/parser/parser.rs` 顶层循环先解析装饰器（`while self.check(&Token::At)`），随后 `match self.peek()`。
+当 `@decorator` 后接非装饰器承载项（顶层变量赋值 `x = 42`、语句等）时，命中 `_ =>` 兜底分支，
+`decorators` 向量被直接丢弃 → **SILENT_PASS**（装饰器无效但变量保留、编译通过、运行无警告）。
+这是装饰器边界的「负向漏洞」：本应拒绝的非法形态被放行。
+
+### 修复
+**`src/parser/parser.rs`（装饰器解析循环后、顶层 `match` 前新增护城河）**
+- 若已解析出装饰器且后续 token **不属于**装饰器合法目标，直接 `return Err(...)`，不再静默丢弃。
+- 合法目标白名单：`def` / `iterator` / `async` / `struct` / `enum`，以及 `comptime def`
+  （`comptime` 后接非 `def` 仍拒绝，因该路径本就丢弃装饰器）。
+- 宏装饰器（`@make_const!(...)` 等）在 token 层展开管线中已在解析前展开，不会以 `@` 形式到达解析层，
+  故白名单不影响宏用法；全量 DEMO（含 `@export`/`@memoize`/`@overload` 等）回归全绿。
+
+### 生成证据
+```
+=== @cache 修饰顶层变量（修复后应拒绝） ===
+Parse error: 装饰器只能用于 def/struct/enum/async/iterator 等声明，不能用于 Ident("x")
+```
+
+### 结果
+- `tests/find_bug_bugs.rs`：`pr005_decorator_on_var_negative` 摘 `#[ignore]` 转正为 `reject(...)`；
+  `FIND_BUG/parser/bug-decorator-on-var.lz` 补回真实复现（`@cache\nx = 42`，原文件缺装饰器、无法复现）。
+- PR-005 单测通过：`test pr005_decorator_on_var_negative ... ok`。
+- 回归：`find_bug_bugs` 24 passed / 16 ignored（pr005 由 ignore→pass）；`lz_frontend_bootstrap`
+  4 passed；`reject_errors` / `reject_more` / `lexer_parser_core` / `lz_semantic_cases` 全绿；
+  `cargo check --all-targets` 0 代码 warning。
+- 剩余 ❌：**12 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002,
+  BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004, BUG-SG-005, BUG-EC-006）。

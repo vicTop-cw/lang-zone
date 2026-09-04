@@ -268,11 +268,10 @@ fn pr002_raises_with_return() {
     full("FIND_BUG/parser/bug-raises-return-type.lz", "raises+return test:").unwrap();
 }
 
-// BUG-PR-005: @decorator 用于变量静默放行（负向失守）
+// BUG-PR-005: @decorator 用于变量应被拒绝（负向护城河）
 #[test]
-#[ignore = "待修 BUG-PR-005：@dec 修饰变量被 SILENT_PASS 放行，应拒绝（P2）"]
 fn pr005_decorator_on_var_negative() {
-    // 该用例当前 SILENT_PASS（装饰器丢弃、变量保留）；修复后应被拒绝
+    // 修复后 lzc 在解析阶段拒绝「装饰器修饰变量」，退出码非 0
     reject("FIND_BUG/parser/bug-decorator-on-var.lz").unwrap();
 }
 

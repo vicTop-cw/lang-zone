@@ -142,6 +142,21 @@ impl Parser {
                 self.skip_newlines();
             }
 
+            // BUG-PR-005 修复：装饰器只能修饰声明（def/struct/enum/async/iterator/
+            // comptime def），修饰变量/语句/其他项会被静默丢弃（SILENT_PASS），此处显式拒绝。
+            if !decorators.is_empty() {
+                let decorator_eligible = matches!(
+                    self.peek(),
+                    Token::Def | Token::Iterator | Token::Async | Token::Struct | Token::Enum
+                ) || (self.check(&Token::Comptime) && self.peek_n(1) == &Token::Def);
+                if !decorator_eligible {
+                    return Err(format!(
+                        "装饰器只能用于 def/struct/enum/async/iterator 等声明，不能用于 {:?}",
+                        self.peek()
+                    ));
+                }
+            }
+
             match self.peek() {
                 Token::Def => {
                     let mut f = self.parse_function(false)?;
