@@ -173,12 +173,12 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ✅ **轮次7 已修** — 拒绝越界字面量（LZ 暂不支持 i128），仅一元负号 `-9223372036854775808` 合法透传 i64::MIN |
 | BUG-EC-003 | P2 | edge | `{}` 空 Dict 推断 | ✅ 运行正常；类型推断宽度待议 |
 | BUG-EC-004 | P3 | edge | `1e308` 浮点精度 | ✅ 全链路通过 |
-| BUG-EC-006 | P2 | edge | `type_name()` 内省 | ❌ P1 stub 返回 i64::MAX |
+| BUG-EC-006 | P2 | edge | `type_name()` 内省 | ✅ **轮次10 已修** — 内建识别 `type_name(x)` → `std::any::type_name::<T>().to_string()`，返回静态类型名 |
 | BUG-EC-007 | P3 | edge | `_` 变量名语义 | ✅ 全链路通过 |
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 轮次 9 后）**：36 编号 = ✅22 · ❌11 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 7 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8、SG-005 轮次 9）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-03 轮次 10 后）**：36 编号 = ✅23 · ❌10 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 8 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8、SG-005 轮次 9、EC-006 轮次 10）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -200,7 +200,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 9 | ~~BUG-TY-002 (P1)~~ **轮次5 已修 ✅** | 同 BUG-CG-002 根因，随 self-def 归属 impl 一并修复；`def inc(mut self: Counter) -> Counter = ...; self` 尾表达式 `self` 自动 clone 为 owned | 带 self 的顶层 def 已可编译 | — |
 | 10 | BUG-TY-004 (P1) | `__Params::new()` → `__Params.new`（点调用，E0423 struct 不能当值）；`p.set(0, 42)` 静默丢弃 → `()` | 运行时反射库不可用 | `::` 静态调用保留 + 方法链接线 |
 | 11 | ~~BUG-EC-002 (P1)~~ **轮次7 已修 ✅** | 见下方「轮次 7」章节：`9223372036854775808` 裸字面量 / 二元减操作数 → LexError 拒绝；仅一元负号 `-9223372036854775808` 合法透传 i64::MIN | 数值边界已收敛 | — |
-| 12 | BUG-EC-006 (P1) | `type_name(42)` → stub `fn type_name(i64)->i64 { i64::MAX }`，输出 9223372036854775807 | 内省函数假实现 | 实现 type_name builtin 或拒绝 |
+| 12 | ~~BUG-EC-006 (P1)~~ **轮次10 已修 ✅** | 见下方「轮次 10」章节：`type_name(42)` 经内建识别 → `std::any::type_name::<i64>().to_string()`，输出 `i64` | 内省函数已可用 | — |
 | 13 | BUG-PR-001 (P1) | 顶层 `greet =: name:` 报「Expected Indent, got Ident("name")」——`=:` 构建块仅支持函数体内，顶层无缩进 body 语法 | 顶层构建块不可用 | parser 顶层项支持 `=:` 块 |
 | 14 | BUG-LX-005 (P1) | 内联 `y =: x + 1`（`=:` 与表达式同行）被拒；`=:` 仅支持「换行缩进块」形态（p9 探针证实块形态正常返回 42） | 语法能力边界，文档需明确 | 若规范允许内联形态需实现；否则文档明确仅块形态 |
 | 15 | BUG-IR-001 (P1) | `nums.filter(~: _ % 2 == 0)` 报「Unexpected token in expression: BuildCall」——加空格后仍拒绝，`~:` 仅支持「值位」不支持「参数位」 | 构建块语法位受限 | parser 表达式层支持 BuildCall 或文档明确边界 |
@@ -502,3 +502,36 @@ spread nested: [1, 2, 3, 4]
 - `cargo check --all-targets` 0 代码 warning。
 - 剩余 ❌：**11 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002,
   BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004, BUG-EC-006）。
+
+## 轮次 10（2026-09-03）：BUG-EC-006 修复入库 —— `type_name()` 内省返回真实类型名
+
+### 根因
+`type_name(x)` 未被识别为内建函数，编译器对未定义函数生成兜底桩
+`fn type_name(__a0: i64) -> i64 { i64::MAX }`（`src/ir/codegen/mod.rs:1195` 的未定义函数桩），
+故 `type_name(42)` 静默返回 `9223372036854775807`，与「返回类型名字符串」的语义完全不符（RUN_WRONG）。
+同时 IR 也未给该调用指派返回类型，沿用桩的 `i64`。
+
+### 修复
+**1. IR 返回类型指派**（`src/ir/builder.rs` `infer_expr_type` 的 `Call` 臂）
+- `type_name` 单参调用 → 返回 `IrType::Str`（与 `str`/`int`/`len` 等内建同列），使 `t1 = type_name(n)` 的类型为字符串。
+
+**2. Rust codegen 内省展开**（`src/ir/codegen/mod.rs` Call 链，与既有 `v.type_name()` 方法形式一致，方案 C）
+- `callee_s == "type_name" && args.len() == 1` → 发射
+  `std::any::type_name::<T>().to_string()`（`T` 取实参静态类型，剥除引用层级；`.to_string()` 对齐 `IrType::Str`→`String`）。
+- 复用既有的 `self.rust_type(&args[0].ty)` 取类型字符串，无需新增类型映射。
+
+### 生成证据
+```
+=== bug-edge-type-name.lz（修复后全链路通过） ===
+type_name(42): "i64"
+```
+
+### 结果
+- `tests/find_bug_bugs.rs`：`ec006_type_name` 摘 `#[ignore]` 转正为 `full(...)`；
+  `FIND_BUG/edge/bug-edge-type-name.lz` 保留真实复现 `type_name(42)`。
+- EC-006 单测通过：`test ec006_type_name ... ok`。
+- 回归：`find_bug_bugs` 26 passed / 14 ignored（ec006 由 ignore→pass）；`lz_frontend_bootstrap`
+  4 passed；`reject_errors` / `reject_more` / `lexer_parser_core` / `lz_semantic_cases` 全绿；
+  `cargo check --all-targets` 0 代码 warning。
+- 剩余 ❌：**10 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002,
+  BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004）。

@@ -919,6 +919,10 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 if fname == "print" || fname == "println" || fname == "panic" {
                     return IrType::Unit;
                 }
+                // type_name(x) 内省内建：返回静态类型名字符串（与 v.type_name() 方法一致，方案 C）
+                if fname == "type_name" && args.len() == 1 {
+                    return IrType::Str;
+                }
                 // 宏系统（08-宏与编译期.md）：quote(...) 是宏体 Token 包装，
                 // IR 后端不展开宏，返回 Str（宏体字符串拼接，参数数量不限）
                 if fname == "quote" && !args.is_empty() {

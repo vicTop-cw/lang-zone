@@ -6393,6 +6393,11 @@ impl CodeGen {
                     } else {
                         format!("({}.len() as i64)", arg0)
                     }
+                } else if callee_s == "type_name" && args_s.len() == 1 {
+                    // BUG-EC-006: type_name(x) 函数式内省 → 静态类型名（方案 C，与 v.type_name() 方法一致）
+                    let t = self.rust_type(&args[0].ty);
+                    let t = t.trim_start_matches('&').trim().to_string();
+                    format!("std::any::type_name::<{}>().to_string()", t)
                 } else if callee_s == "contains" && args_s.len() == 2 {
                     // HashMap/Dict → contains_key; String/Vec → contains
                     let is_dict = matches!(&args[0].ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");

@@ -381,9 +381,8 @@ fn ec002_int_overflow() {
     reject("FIND_BUG/edge/bug-edge-int-overflow.lz").unwrap();
 }
 
-// BUG-EC-006: type_name stub 假实现
+// BUG-EC-006: type_name 内省（已修 轮次10）
 #[test]
-#[ignore = "待修 BUG-EC-006：type_name stub 返回 i64::MAX RUN_WRONG（P1）"]
 fn ec006_type_name() {
     full("FIND_BUG/edge/bug-edge-type-name.lz", "type_name(42):").unwrap();
 }
