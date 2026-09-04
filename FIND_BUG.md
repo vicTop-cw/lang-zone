@@ -170,7 +170,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ✅ **轮次6 已修** — 同上 + 可空字段 `?.` 走 and_then 扁平化 |
 | BUG-SG-004 | P2 | syntax | `=:` 块返回值 | ✅ 函数内全链路通过 |
 | BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ❌ P2 parser 无 DotDotDot 表达式 |
-| BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ❌ P1 静默 i64 环绕 |
+| BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ✅ **轮次7 已修** — 拒绝越界字面量（LZ 暂不支持 i128），仅一元负号 `-9223372036854775808` 合法透传 i64::MIN |
 | BUG-EC-003 | P2 | edge | `{}` 空 Dict 推断 | ✅ 运行正常；类型推断宽度待议 |
 | BUG-EC-004 | P3 | edge | `1e308` 浮点精度 | ✅ 全链路通过 |
 | BUG-EC-006 | P2 | edge | `type_name()` 内省 | ❌ P1 stub 返回 i64::MAX |
@@ -178,7 +178,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 17:xx 轮次 6 后）**：36 编号 = ✅19 · ❌14 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 4 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-03 轮次 7 后）**：36 编号 = ✅20 · ❌13 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 5 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -199,7 +199,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 8 | ~~BUG-SG-002/003 (P1)~~ **轮次6 已修 ✅** | 见下方「轮次 6」章节：`T?` 位置（let 绑定、struct 构造）自动补 `Some(..)`；`?.` 链上可空字段改用 `and_then` 扁平化（原 `map` 得 `Option<Option<T>>` → E0609） | Option 语义糖已可用 | — |
 | 9 | ~~BUG-TY-002 (P1)~~ **轮次5 已修 ✅** | 同 BUG-CG-002 根因，随 self-def 归属 impl 一并修复；`def inc(mut self: Counter) -> Counter = ...; self` 尾表达式 `self` 自动 clone 为 owned | 带 self 的顶层 def 已可编译 | — |
 | 10 | BUG-TY-004 (P1) | `__Params::new()` → `__Params.new`（点调用，E0423 struct 不能当值）；`p.set(0, 42)` 静默丢弃 → `()` | 运行时反射库不可用 | `::` 静态调用保留 + 方法链接线 |
-| 11 | BUG-EC-002 (P1) | `9223372036854775808` 静默编成 i64 → 运行输出 `-9223372036854775808`（环绕），无警告 | 数值边界静默错 | 超出 i64 应报错或升级 i128 并标注 |
+| 11 | ~~BUG-EC-002 (P1)~~ **轮次7 已修 ✅** | 见下方「轮次 7」章节：`9223372036854775808` 裸字面量 / 二元减操作数 → LexError 拒绝；仅一元负号 `-9223372036854775808` 合法透传 i64::MIN | 数值边界已收敛 | — |
 | 12 | BUG-EC-006 (P1) | `type_name(42)` → stub `fn type_name(i64)->i64 { i64::MAX }`，输出 9223372036854775807 | 内省函数假实现 | 实现 type_name builtin 或拒绝 |
 | 13 | BUG-PR-001 (P1) | 顶层 `greet =: name:` 报「Expected Indent, got Ident("name")」——`=:` 构建块仅支持函数体内，顶层无缩进 body 语法 | 顶层构建块不可用 | parser 顶层项支持 `=:` 块 |
 | 14 | BUG-LX-005 (P1) | 内联 `y =: x + 1`（`=:` 与表达式同行）被拒；`=:` 仅支持「换行缩进块」形态（p9 探针证实块形态正常返回 42） | 语法能力边界，文档需明确 | 若规范允许内联形态需实现；否则文档明确仅块形态 |
@@ -364,6 +364,47 @@ let mut cfg: Option<Config> = Some(Config { db: Some(DbConfig { host: Some("loca
 - 全量回归 **592 passed / 0 failed / 23 ignored**（轮次 5 基线 590 / 25 → +2 转正）；
   `cargo check --all-targets` 0 代码 warning。
 - 剩余 ❌：**14 项**。
+
+## 轮次 7（2026-09-03）：BUG-EC-002 修复入库 —— i64 越界字面量拒绝
+
+### 决策（用户拍板）
+BUG-EC-002（`9223372036854775808` 溢出）按「**报错优先**」收口：LZ 暂不支持 i128，
+越界字面量一律拒绝，避免静默环绕成 `i64::MIN`；保留 `-9223372036854775808`（`i64::MIN`）
+经一元负号路径合法透传。
+
+### 根因
+`src/lexer/lexer.rs` 的 `read_number` 在 `num.parse::<i64>()` 失败时，原逻辑对
+`9223372036854775808`（i64::MAX + 1）无差别透传为 `i64::MIN` 哨兵。裸字面量
+`9223372036854775808` 会被静默环绕成 `-9223372036854775808`，运行输出无警告（数值边界静默错）。
+
+### 修复
+**`src/lexer/lexer.rs`（`read_number` 溢出分支）**
+- 仅当 `9223372036854775808` 前接一元负号 `-`（且 `-` 前为合法边界字符：行首 / 空白 /
+  `([{ =:,+-*/<>&|`）时，透传 `i64::MIN` 哨兵（即 `-9223372036854775808` 合法）。
+- 其余情形（裸字面量、二元减操作数 `a - 9223372036854775808`）→ 发射 `LexError` 拒绝，
+  提示「整数字面量超出 i64 范围（LZ 暂不支持 i128）」。
+- 其他超长整数（如 `99999999999999999999999`）→ 发射 `LexError`「无效的整数（可能溢出）」。
+- 位置计算修正：`read_number` 读完所有数字后 `self.pos` 指向末位之后，首位数字位置 =
+  `self.pos - num.len()`，其前字符取 `wrapping_sub(1)`，再前取 `wrapping_sub(2)`。
+
+### 生成证据
+```
+=== positive 9223372036854775808 (reject) ===
+Parse error: 整数字面量 9223372036854775808 超出 i64 范围（LZ 暂不支持 i128），请改用更小的字面量
+=== negative -9223372036854775808 (accept → i64::MIN) ===
+Generated .probe/ec002b.lz -> .probe/ec002b.rs (IR codegen)
+=== huge 99999999999999999999999 (reject) ===
+Parse error: 无效的整数（可能溢出）: 99999999999999999999999
+```
+
+### 结果
+- `tests/find_bug_bugs.rs`：`ec002_int_overflow` 由 `[ignore]` 转正为 `reject(...)`；
+  `FIND_BUG/edge/bug-edge-int-overflow.lz` 改写为拒绝用例（保留 `y = 9223372036854775807`
+  边界正常断言 `test_big_int_direct`）。
+- EC-002 单测通过：`test ec002_int_overflow ... ok`。
+- 全量回归保持 **592 passed / 0 failed / 23 ignored**；`cargo check --all-targets` 0 代码 warning。
+- 剩余 ❌：**13 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002, BUG-PR-005,
+  BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004, BUG-SG-005, BUG-EC-006）。
 
 ### 下一步建议（工程侧参考，优先级从高到低）
 

@@ -377,11 +377,10 @@ fn sg005_spread() {
     full("FIND_BUG/syntax/bug-syntax-spread.lz", "spread [0,...a,4]:").unwrap();
 }
 
-// BUG-EC-002: i64 溢出静默环绕
+// BUG-EC-002: i64 溢出 → 拒绝（LZ 暂不支持 i128，避免静默环绕成 i64::MIN）
 #[test]
-#[ignore = "待修 BUG-EC-002：9223372036854775808 静默 i64 环绕 RUN_WRONG（P1）"]
 fn ec002_int_overflow() {
-    full("FIND_BUG/edge/bug-edge-int-overflow.lz", "bug-edge-int-overflow").unwrap();
+    reject("FIND_BUG/edge/bug-edge-int-overflow.lz").unwrap();
 }
 
 // BUG-EC-006: type_name stub 假实现

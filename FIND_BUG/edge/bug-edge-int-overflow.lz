@@ -1,9 +1,11 @@
 // find_bug/edge/bug-edge-int-overflow.lz
 // BUG-EC-002: 数字字面量 9223372036854775808 溢出
 // i64::MAX = 9223372036854775807
-// 9223372036854775808 有特殊处理（透传 i128）
+// LZ 暂不支持 i128：超出 i64 范围的正字面量一律被词法器拒绝
+// （避免被静默环绕成 i64::MIN）。`-9223372036854775808` 仍合法（i64::MIN）。
 
-def test_big_int() =
+def test_big_int_rejected() =
+  // 该字面量超出 i64 正数范围，lzc 应在词法阶段拒绝整个文件
   x = 9223372036854775808
   print("i64::MAX + 1:", x)
 
@@ -14,4 +16,3 @@ def test_big_int_direct() =
 
 def main() =
   test_big_int_direct()
-  test_big_int()
