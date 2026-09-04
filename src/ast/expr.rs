@@ -21,6 +21,9 @@ pub enum Expr {
     SetLit(Vec<Expr>),
     TupleLit(Vec<Expr>),
 
+    /// 列表展开元素：`[0, ...a, 4]` 中的 `...a`（BUG-SG-005）
+    Spread(Box<Expr>),
+
     // 运算
     Binary {
         left: Box<Expr>,

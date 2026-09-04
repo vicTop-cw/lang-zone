@@ -9347,6 +9347,42 @@ impl CodeGen {
                 }
             }
             ExprKind::ListLit(elems) => {
+                // BUG-SG-005: 含展开元素 → 降级为 { let mut v = Vec::new(); v.extend(..); v.push(..); v }
+                // （vec![] 字面量无法内联 extend，必须用块构造）
+                if elems.iter().any(|e| matches!(e.kind, ExprKind::Spread(_))) {
+                    // 每个展开列表降级为独立 { } 块，__spread_v 块级作用域天然不冲突
+                    let v = "__spread_v";
+                    let mut lines = vec![format!("let mut {} = Vec::new();", v)];
+                    for e in elems {
+                        match &e.kind {
+                            ExprKind::Spread(inner) => {
+                                let s = self.gen_expr(inner);
+                                // inner 通常为 Vec<T>/&[T]；iter().cloned() 产出 T，extend 据此推导元素类型
+                                lines.push(format!("{}.extend({}.iter().cloned());", v, s));
+                            }
+                            _ => {
+                                let s = self.gen_expr(e);
+                                // 与非展开元素一致的 .clone() 规则（E0507/E0382）
+                                let is_copy = matches!(&e.ty, IrType::Int | IrType::F64 | IrType::Bool);
+                                let is_moveable =
+                                    matches!(&e.kind, ExprKind::Var(_) | ExprKind::IndexGet { .. });
+                                let s = if !is_copy
+                                    && is_moveable
+                                    && !s.starts_with('&')
+                                    && !s.ends_with(".clone()")
+                                    && !s.contains("::")
+                                {
+                                    format!("{}.clone()", s)
+                                } else {
+                                    s
+                                };
+                                lines.push(format!("{}.push({});", v, s));
+                            }
+                        }
+                    }
+                    lines.push(v.to_string());
+                    return format!("{{\n{}\n}}", lines.join("\n"));
+                }
                 // 空列表：Nil/Unit/Any → ()，否则 → Vec::new() 或 vec![...]
                 let is_nil = elems.is_empty()
                     && (matches!(expr.ty, IrType::Unit | IrType::Any)

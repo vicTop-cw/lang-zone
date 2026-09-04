@@ -956,6 +956,7 @@ impl Checker {
                     self.check_expr(it);
                 }
             }
+            Expr::Spread(inner) => self.check_expr(inner),
             Expr::TupleLit(items) => {
                 for it in items {
                     self.check_expr(it);

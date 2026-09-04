@@ -369,9 +369,8 @@ fn sg003_safe_nav() {
     full("FIND_BUG/syntax/bug-syntax-safe-nav.lz", "\"safe nav host:\" \"localhost\"").unwrap();
 }
 
-// BUG-SG-005: ... 展开无表达式实现
+// BUG-SG-005: ... 展开运算符（已修 轮次9）
 #[test]
-#[ignore = "待修 BUG-SG-005：DotDotDot 列表展开无表达式实现 LZ_REJECT（P2）"]
 fn sg005_spread() {
     full("FIND_BUG/syntax/bug-syntax-spread.lz", "spread [0,...a,4]:").unwrap();
 }

@@ -169,7 +169,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-SG-002 | P2 | syntax | `??` 空值合并 | ✅ **轮次6 已修** — `T?` 位置自动 Some 包装（let 绑定 + struct 构造） |
 | BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ✅ **轮次6 已修** — 同上 + 可空字段 `?.` 走 and_then 扁平化 |
 | BUG-SG-004 | P2 | syntax | `=:` 块返回值 | ✅ 函数内全链路通过 |
-| BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ❌ P2 parser 无 DotDotDot 表达式 |
+| BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ✅ **轮次9 已修** — 列表字面量支持 `...`/`..` 展开（`Spread` AST+IR 变体；含展开时降级为 `Vec::new()` + `extend`/`push` 块） |
 | BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ✅ **轮次7 已修** — 拒绝越界字面量（LZ 暂不支持 i128），仅一元负号 `-9223372036854775808` 合法透传 i64::MIN |
 | BUG-EC-003 | P2 | edge | `{}` 空 Dict 推断 | ✅ 运行正常；类型推断宽度待议 |
 | BUG-EC-004 | P3 | edge | `1e308` 浮点精度 | ✅ 全链路通过 |
@@ -178,7 +178,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 轮次 8 后）**：36 编号 = ✅21 · ❌12 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 6 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-03 轮次 9 后）**：36 编号 = ✅22 · ❌11 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 7 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8、SG-005 轮次 9）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -206,7 +206,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 15 | BUG-IR-001 (P1) | `nums.filter(~: _ % 2 == 0)` 报「Unexpected token in expression: BuildCall」——加空格后仍拒绝，`~:` 仅支持「值位」不支持「参数位」 | 构建块语法位受限 | parser 表达式层支持 BuildCall 或文档明确边界 |
 | 16 | BUG-PR-002 (P2) | `def f() raises IOError -> str` 拒绝；`-> str raises IOError` 也拒绝；仅 `-> str` 后**换行缩进**的 raises 可解析（parser.rs:831 在 skip_newlines 之后取 Raises） | raises 位置语法窄 | 支持 raises 与返回类型同行两种顺序 |
 | 17 | ~~BUG-PR-005 (P2)~~ **轮次8 已修 ✅** | 见下方「轮次 8」章节：`@dec` 后接变量/语句 → 解析阶段 `Err`（装饰器边界护城河），不再静默丢弃 | 装饰器边界已收敛 | — |
-| 18 | BUG-SG-005 (P2) | `[0, ...a, 4]` 报「Unexpected token in expression: DotDotDot」——词法有 token，表达式层无实现 | 展开运算符缺实现 | 列表字面量支持 spread 展开到 Vec::extend |
+| 18 | ~~BUG-SG-005 (P2)~~ **轮次9 已修 ✅** | 见下方「轮次 9」章节：`[0, ...a, 4]` / `[...x, ...y]` 经 `Spread` AST+IR 变体 → 列表字面量含展开时降级为 `{ let mut __spread_v = Vec::new(); __spread_v.extend(a.iter().cloned()); ...; __spread_v }`，输出 `[0,1,2,3,4]` / `[1,2,3,4]` | 展开运算符已可用 | — |
 | 19 | BUG-LX-002 (P3) | `/* a /* b */ c */` 在第一个 `*/` 即终止注释，剩余 `c */` 变裸 token | 嵌套块注释不支持 | 若规范要嵌套需深度计数；否则文档明确非嵌套 |
 | 20 | core 3 例 (P1) | `fold(xs: List<a>, init: b, f: fn(b, a) -> b)` 报「Expected param, got LParen」——**fn 类型注解作为参数类型不可解析**；fold 用例另有逗号解析失败（Unexpected token: Comma） | 函数类型注解全线不可用，阻塞 core/func.lz 标准库 | parser 支持 `fn(A, B) -> C` 参数类型 |
 | 21 | BUG-TY-005 (🟡→按 bug 计) | `struct Container<T: Clone = List<int>>` 报「Expected type, got Gt」——泛型默认值语法不存在，但报错点在 `= List<int>` 的 `>` 处而非 `=` 处，**报错误导** | 语法不支持 + 诊断质量 | 若语法冻结不加默认值，应报「不支持泛型默认值」并指位 `=` |
@@ -446,3 +446,59 @@ Parse error: 装饰器只能用于 def/struct/enum/async/iterator 等声明，�
   `cargo check --all-targets` 0 代码 warning。
 - 剩余 ❌：**12 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002,
   BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004, BUG-SG-005, BUG-EC-006）。
+
+## 轮次 9（2026-09-03）：BUG-SG-005 修复入库 —— 列表字面量 `...` 展开运算符
+
+### 根因
+`...`（词法 `DotDotDot`，亦接受 `..`+`Dot` 连续两 token）在词法层存在 token，但表达式层
+无对应 AST/IR 节点，解析列表字面量元素时直接命中「Unexpected token in expression: DotDotDot」。
+无展开能力，列表拼接只能靠 `a + b`（产生新 Vec，且类型推断弱），无法就地 `extend`。
+
+### 修复
+**1. AST + IR 新增 `Spread` 变体（语义清晰，优于在 IR 层用 BlockExpr 兜底，后者会引发 `convert_expr` 无限递归）**
+- `src/ast/expr.rs`：`Expr::Spread(Box<Expr>)`。
+- `src/ir/node.rs`：`ExprKind::Spread(Box<Expr>)`，注释明确「codegen 在 ListLit 内遇到 Spread 时
+  降级为 `let mut v = vec![..]; v.extend(..)` 块」。
+
+**2. 解析层 `parse_list_element`（trait + impl）**（`src/parser/expr.rs`）
+- 元素先探测 `DotDotDot` 或 `Dot`+`Dot`；命中则消费并 `parse_expr()` 内层，返回 `Expr::Spread(Box::new(inner))`；
+  否则走普通 `parse_expr()`。列表字面量首元素与循环元素均改走该方法。
+
+**3. 类型推断 / 转换 / 检查补齐 `Spread` 分支**
+- `src/ir/builder.rs`：
+  - `infer_expr_type`：列表元素类型优先取「非展开」首元素；**全为展开时**从首个展开的
+    内部元素类型推导（将 `List[T]`/`Vec[T]` 拆包为 `T`，否则误判为 `List[List[T]]`）；
+  - `convert_expr`：`AstExpr::Spread(inner) => ExprKind::Spread(convert_expr(inner))`；
+  - `ex_check_expr`：递归检查 inner。
+- `src/semantic_check.rs`：`check_expr` 递归检查 inner。
+- 其余 7 处非穷尽 match 补齐（仅递归/透传，不改变语义）：
+  `ir/codegen/mod.rs`（ListLit 降级，见下）、`ir/codegen/helpers.rs`（scan_expr_auto_mut /
+  expr_mentions_var）、`ir/codegen_cython.rs`（Cython `*inner`）、`ir/duck_check.rs`（walk_expr）、
+  `src/ir/lz_codegen.rs`（LZ AST `Expr.Spread`）、`src/codegen/expr.rs`（旧 codegen `...inner`）。
+
+**4. Rust codegen 降级**（`src/ir/codegen/mod.rs` ListLit 臂）
+- 列表元素含任一 `ExprKind::Spread` → 生成块：
+  ```rust
+  {
+      let mut __spread_v = Vec::new();
+      __spread_v.extend(<inner>.iter().cloned());
+      __spread_v.push(<elem>);   // 非展开元素按既有 .clone() 规则
+      __spread_v
+  }
+  ```
+  `__spread_v` 为块级固定名，每个含展开列表独立成块，作用域天然不冲突。
+
+### 生成证据
+```
+=== bug-syntax-spread.lz（修复后全链路通过） ===
+spread [0,...a,4]: [0, 1, 2, 3, 4]
+spread nested: [1, 2, 3, 4]
+```
+
+### 结果
+- `tests/find_bug_bugs.rs`：`sg005_spread` 摘 `#[ignore]` 转正为 `full(...)`；
+  `FIND_BUG/syntax/bug-syntax-spread.lz` 保留真实复现 `[0, ...a, 4]` 与 `[...x, ...y]`。
+- SG-005 单测通过：`test sg005_spread ... ok`。
+- `cargo check --all-targets` 0 代码 warning。
+- 剩余 ❌：**11 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002,
+  BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004, BUG-EC-006）。

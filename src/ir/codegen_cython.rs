@@ -866,6 +866,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             LitKind::None_ | LitKind::Unit => "None".to_string(),
         },
         ExprKind::Var(name) => name.clone(),
+        ExprKind::Spread(inner) => format!("*{}", gen_expr(cg, inner)),
         ExprKind::Call { callee, args, .. } => {
             let f = gen_expr(cg, callee);
             // ── 内建断言降级：assert_eq!(a, b) → assert a == b；assert!(e) → assert e ──

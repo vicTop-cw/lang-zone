@@ -884,6 +884,8 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::StrLit(_) | AstExpr::FStrLit(_) | AstExpr::RawStrLit(_) => IrType::Str,
         AstExpr::BoolLit(_) => IrType::Bool,
         AstExpr::NoneLit => IrType::Any, // None 类型取决于上下文
+        // 展开元素：类型推导回退到内部表达式（仅在 ListLit 内被消费）
+        AstExpr::Spread(inner) => infer_expr_type(inner, ctx),
         AstExpr::Ident(name) => {
             // 裸枚举变体名（Less/Equal/Greater）：类型应为枚举类型而非 Any→i64 fallback，
             // 否则 `return Less` 会插入 <Ordering as ImplicitFrom<i64>> 错误转换（E0277）
@@ -1318,9 +1320,30 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
         }
         AstExpr::ListLit(items) => {
+            // 元素类型推断（BUG-SG-005）：
+            // 1) 优先取首个「非展开」元素的类型；
+            // 2) 若全部是展开元素，则从首个展开的「内部元素类型」推导
+            //    （Spread(x) 的 x 若为 List[T]/Vec[T]，元素类型为 T，而非 List[T]）。
             let elem_ty = items
-                .first()
-                .map(|i| infer_expr_type(i, ctx))
+                .iter()
+                .find_map(|i| match i {
+                    AstExpr::Spread(_) => None,
+                    other => Some(infer_expr_type(other, ctx)),
+                })
+                .or_else(|| {
+                    items.iter().find_map(|i| match i {
+                        AstExpr::Spread(inner) => match infer_expr_type(inner, ctx) {
+                            IrType::Named { path, args }
+                                if (path == "List" || path == "Vec" || path == "Set")
+                                    && !args.is_empty() =>
+                            {
+                                Some(args[0].clone())
+                            }
+                            other => Some(other),
+                        },
+                        _ => None,
+                    })
+                })
                 .unwrap_or(IrType::Any);
             IrType::Named {
                 path: "List".into(),
@@ -2502,6 +2525,8 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::NoneLit => ExprKind::Lit(LitKind::None_),
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
         AstExpr::Paren(inner) => ExprKind::Paren(Box::new(convert_expr(inner, ctx))),
+        // 列表展开元素：透传为 IR Spread（codegen 在 ListLit 内降级为 extend 块）
+        AstExpr::Spread(inner) => ExprKind::Spread(Box::new(convert_expr(inner, ctx))),
         // comptime 表达式：编译期求值，结果内联为字面量（B3）
         AstExpr::Comptime(inner) => {
             // 使用真实模块（comptime 可调用模块内函数/引用 const）
@@ -8999,6 +9024,7 @@ fn ex_check_expr(
     w: &ExWalker,
 ) {
     match e {
+        AstExpr::Spread(inner) => ex_check_expr(inner, work, env, gens, ret, hinted, w),
         AstExpr::Call { func, args, .. } => {
             if let AstExpr::Ident(fname) = func.as_ref() {
                 let plain = !fname.contains('.');

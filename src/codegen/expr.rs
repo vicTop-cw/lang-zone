@@ -41,6 +41,7 @@ impl CodeGenExprExt for CodeGen {
                 }
             }
             Expr::Ident(name) => name.clone(),
+            Expr::Spread(inner) => format!("...{}", self.gen_expr(inner)),
 
             Expr::ListLit(elems) => {
                 let items: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();

@@ -786,6 +786,10 @@ pub enum ExprKind {
     /// List 字面量 (cython 别名)
     List(Vec<Expr>),
 
+    /// 列表展开元素：`[0, ...a, 4]` 中的 `...a`（BUG-SG-005）
+    /// codegen 在 ListLit 内遇到 Spread 时降级为 `let mut v = vec![..]; v.extend(..)` 块
+    Spread(Box<Expr>),
+
     /// Dict 字面量 (cython)
     Dict(Vec<(Expr, Expr)>),
 

@@ -30,6 +30,8 @@ pub trait ParserExprExt {
     /// 从已有表达式继续解析 postfix（跨行方法链用）
     fn parse_postfix_chain(&mut self, expr: Expr) -> Result<Expr, String>;
     fn parse_primary(&mut self) -> Result<Expr, String>;
+    /// 解析列表字面量元素（BUG-SG-005）：支持展开运算符 `...a` / `.. .a`
+    fn parse_list_element(&mut self) -> Result<Expr, String>;
     fn parse_pattern(&mut self) -> Result<Pattern, String>;
     /// 解析 comprehension 的 iter 表达式：支持 range(..) 和 walrus(:=)，
     /// 但不消费 if（避免与 comprehension guard 冲突）
@@ -798,6 +800,25 @@ impl ParserExprExt for Parser {
         Ok(expr)
     }
 
+    /// 解析列表字面量元素，支持展开运算符 `...a` / `.. .a`（BUG-SG-005）。
+    /// 普通元素走 `parse_expr`；展开元素返回 `Expr::Spread(Box::new(inner))`。
+    fn parse_list_element(&mut self) -> Result<Expr, String> {
+        // 仅当为三连点（DotDotDot，或 DotDot 紧跟 Dot）时视为展开，避免与 `..` 区间混淆
+        if self.check(&Token::DotDotDot)
+            || (self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot)
+        {
+            if self.check(&Token::DotDotDot) {
+                self.advance(); // 消费 DotDotDot
+            } else {
+                self.advance(); // 消费 DotDot
+                self.advance(); // 消费第三个 Dot
+            }
+            let inner = self.parse_expr()?;
+            return Ok(Expr::Spread(Box::new(inner)));
+        }
+        self.parse_expr()
+    }
+
     fn parse_primary(&mut self) -> Result<Expr, String> {
         let tok = self.advance();
         match tok {
@@ -878,7 +899,7 @@ impl ParserExprExt for Parser {
                     self.advance();
                     return Ok(Expr::ListLit(Vec::new()));
                 }
-                let first = self.parse_expr()?;
+                let first = self.parse_list_element()?;
                 // 推导式: [output for var in iter if cond]
                 // 支持多个 for 子句: [x * y for x in 0..N for y in 0..N if cond]
                 if self.check(&Token::For) {
@@ -922,7 +943,7 @@ impl ParserExprExt for Parser {
                         self.advance();
                     }
                     if self.check(&Token::RBrack) { break; }
-                    items.push(self.parse_expr()?);
+                    items.push(self.parse_list_element()?);
                     if self.check(&Token::Comma) { self.advance(); }
                     // 跳过逗号后的换行/缩进
                     while self.check(&Token::Newline)

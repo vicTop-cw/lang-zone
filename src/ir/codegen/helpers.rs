@@ -758,6 +758,7 @@ pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::Ha
 fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) {
     match &expr.kind {
         ExprKind::Var(_) | ExprKind::Lit(_) => {}
+        ExprKind::Spread(inner) => scan_expr_auto_mut(inner, out),
         ExprKind::Call { callee, args, .. } => {
             // 闭包变量调用（double_then_inc(5)）：FnMut 闭包需 mut 绑定（E0596）
             if let ExprKind::Var(v) = &callee.kind {
@@ -913,6 +914,7 @@ pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
     match &expr.kind {
         ExprKind::Var(v) => v == name,
         ExprKind::Lit(_) => false,
+        ExprKind::Spread(inner) => expr_mentions_var(inner, name),
         ExprKind::Call { callee, args, .. } => {
             expr_mentions_var(callee, name) || args.iter().any(|a| expr_mentions_var(a, name))
         }

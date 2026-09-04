@@ -495,6 +495,7 @@ impl LzGen {
         let src = match &e.kind {
             ExprKind::Lit(lit) => gen_lit(lit, &ty),
             ExprKind::Var(name) => format!("Expr.Var(name: \"{}\", ty: {})", name, ty),
+            ExprKind::Spread(inner) => format!("Expr.Spread(expr: {}, ty: {})", self.expr(inner), ty),
             ExprKind::Call { callee, args, .. } => {
                 let args_s = self.exprs_ref(args);
                 format!(
