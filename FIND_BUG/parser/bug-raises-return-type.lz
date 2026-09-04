@@ -1,15 +1,16 @@
 // find_bug/parser/bug-raises-return-type.lz
-// BUG-PR-002: raises 与 -> 返回类型同时存在
-// raises 是关键字，可在 -> 之前或之后
-
-@raises(IOError)
-def read_config_v1() -> str =
-  return "config"
+// BUG-PR-002: raises 与 -> 返回类型同时存在，两种顺序都应接受
+//   def f() -> str raises IOError   （顺序 1：-> 在前）
+//   def f() raises IOError -> str   （顺序 2：raises 在前）
 
 #!export
-@raises(IOError)
-def read_config_v2() -> str =
+// 顺序1: -> 在前，raises 在后
+def read_config_v1() -> str raises IOError =
+  return "config_v1"
+
+// 顺序2: raises 在前，-> 在后
+def read_config_v2() raises IOError -> str =
   return "config_v2"
 
 def main() =
-  print("raises+return test:", read_config_v2())
+  print("raises+return test:", read_config_v1(), read_config_v2())

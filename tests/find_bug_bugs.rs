@@ -261,11 +261,16 @@ fn pr001_top_level_build() {
     full("FIND_BUG/parser/bug-top-level-build.lz", "greet result:").unwrap();
 }
 
-// BUG-PR-002: raises + -> 同行共存
+// BUG-PR-002: raises 与 -> 返回类型同行共存，两种顺序都应接受并正确返回
+//   顺序1: def f() -> str raises IOError
+//   顺序2: def f() raises IOError -> str
 #[test]
-#[ignore = "待修 BUG-PR-002：raises 与返回类型同行两种顺序均拒绝（P2）"]
 fn pr002_raises_with_return() {
-    full("FIND_BUG/parser/bug-raises-return-type.lz", "raises+return test:").unwrap();
+    full(
+        "FIND_BUG/parser/bug-raises-return-type.lz",
+        "\"raises+return test:\" \"config_v1\" \"config_v2\"",
+    )
+    .unwrap();
 }
 
 // BUG-PR-005: @decorator 用于变量应被拒绝（负向护城河）

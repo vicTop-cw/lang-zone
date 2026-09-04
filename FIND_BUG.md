@@ -146,7 +146,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-LX-004 | P3 | lexer | `"""..."""` 公共缩进边界 | ✅ 全链路通过，语义按当前实现 |
 | BUG-LX-005 | P2 | lexer | `=:` vs `==` 歧义 | ❌ P1 内联 `x =: expr` 拒绝 |
 | BUG-PR-001 | P0 | parser | 顶层 `x =:` 多行 body | ❌ P1 仅函数内支持，顶层拒绝 |
-| BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ❌ P2 `-> R raises E` 前置语法拒绝 |
+| BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ✅ **轮次11 已修** — 返回类型与 raises 顺序无关（`-> str raises E` 与 `raises E -> str` 均接受） |
 | BUG-PR-003 | P2 | parser | `..` 与 `/` 变参互斥 | ✅ 混用正确拒绝；用例内 `..: nums: int` 非法（规范是 `nums: List<T>` 收集），拒绝方向正确 |
 | BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ✅ 正确拒绝 |
 | BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ✅ **轮次8 已修** — 装饰器后接非声明（变量/语句）解析阶段直接拒绝 |
@@ -178,7 +178,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
-**实测汇总（2026-09-03 轮次 10 后）**：36 编号 = ✅23 · ❌10 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 8 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8、SG-005 轮次 9、EC-006 轮次 10）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
+**实测汇总（2026-09-04 轮次 11 后）**：36 编号 = ✅24 · ❌9 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 9 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8、SG-005 轮次 9、EC-006 轮次 10、PR-002 轮次 11）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
 ⚠️ **首轮实测教训**：首轮跑在旧 release 二进制上，SB 三项的修复当时已在工作区但未重建二进制 → 误判 ❌。**判定前必须重建二进制（cargo build --release）再测**。
 
 ## 实测记录（2026-09-03，证据索引）
@@ -204,7 +204,7 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | 13 | BUG-PR-001 (P1) | 顶层 `greet =: name:` 报「Expected Indent, got Ident("name")」——`=:` 构建块仅支持函数体内，顶层无缩进 body 语法 | 顶层构建块不可用 | parser 顶层项支持 `=:` 块 |
 | 14 | BUG-LX-005 (P1) | 内联 `y =: x + 1`（`=:` 与表达式同行）被拒；`=:` 仅支持「换行缩进块」形态（p9 探针证实块形态正常返回 42） | 语法能力边界，文档需明确 | 若规范允许内联形态需实现；否则文档明确仅块形态 |
 | 15 | BUG-IR-001 (P1) | `nums.filter(~: _ % 2 == 0)` 报「Unexpected token in expression: BuildCall」——加空格后仍拒绝，`~:` 仅支持「值位」不支持「参数位」 | 构建块语法位受限 | parser 表达式层支持 BuildCall 或文档明确边界 |
-| 16 | BUG-PR-002 (P2) | `def f() raises IOError -> str` 拒绝；`-> str raises IOError` 也拒绝；仅 `-> str` 后**换行缩进**的 raises 可解析（parser.rs:831 在 skip_newlines 之后取 Raises） | raises 位置语法窄 | 支持 raises 与返回类型同行两种顺序 |
+| 16 | ~~BUG-PR-002 (P2)~~ **轮次11 已修 ✅** | 见下方「轮次 11」章节：`def f() -> str raises IOError` 与 `def f() raises IOError -> str` 两种顺序均解析并正确返回（`read_config_v1()`→`"config_v1"`、`read_config_v2()`→`"config_v2"`）；parser `parse_function` 改为顺序无关的循环解析 | raises 与返回类型同行两种顺序均可用 | — |
 | 17 | ~~BUG-PR-005 (P2)~~ **轮次8 已修 ✅** | 见下方「轮次 8」章节：`@dec` 后接变量/语句 → 解析阶段 `Err`（装饰器边界护城河），不再静默丢弃 | 装饰器边界已收敛 | — |
 | 18 | ~~BUG-SG-005 (P2)~~ **轮次9 已修 ✅** | 见下方「轮次 9」章节：`[0, ...a, 4]` / `[...x, ...y]` 经 `Spread` AST+IR 变体 → 列表字面量含展开时降级为 `{ let mut __spread_v = Vec::new(); __spread_v.extend(a.iter().cloned()); ...; __spread_v }`，输出 `[0,1,2,3,4]` / `[1,2,3,4]` | 展开运算符已可用 | — |
 | 19 | BUG-LX-002 (P3) | `/* a /* b */ c */` 在第一个 `*/` 即终止注释，剩余 `c */` 变裸 token | 嵌套块注释不支持 | 若规范要嵌套需深度计数；否则文档明确非嵌套 |
@@ -534,4 +534,56 @@ type_name(42): "i64"
   4 passed；`reject_errors` / `reject_more` / `lexer_parser_core` / `lz_semantic_cases` 全绿；
   `cargo check --all-targets` 0 代码 warning。
 - 剩余 ❌：**10 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001, BUG-PR-002,
+  BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004）。
+
+## 轮次 11（2026-09-04）：BUG-PR-002 修复入库 —— `raises` 与 `->` 返回类型顺序无关
+
+### 根因
+`parse_function`（`src/parser/parser.rs`）原以**固定顺序**解析：先取 `->` 返回类型（仅 `Arrow` 分支），再取 `raises` 异常类型（仅 `Raises` 分支）。
+因此：
+- `def f() -> str raises IOError`：取完 `-> str` 后进入 `Raises` 分支，可解析（**顺序 1 仅当 raises 在返回类型之后**）。
+- `def f() raises IOError -> str`：`Raises` 分支在 `->` 之前，原代码此时尚未进入返回类型解析，直接把 `raises` 当非法 token 拒绝。
+
+实证（修复前）：仅 `-> str` 后**换行缩进**的 `raises` 可解析；同行的 `raises ... ->` 与 `-> ... raises` 两种顺序均被拒。
+
+### 修复
+将 `parse_function` 中「先 `Arrow` 后 `Raises`」的两段固定解析，替换为**顺序无关循环**：
+```rust
+let mut return_type: Option<Type> = None;
+let mut raises: Option<Type> = None;
+let mut sig_guard = 0;
+loop {
+    if return_type.is_none() && self.check(&Token::Arrow) {
+        self.advance();
+        return_type = Some(self.parse_type()?);
+    } else if raises.is_none() && self.check(&Token::Raises) {
+        self.advance();
+        raises = Some(self.parse_type()?);
+    } else { break; }
+    self.skip_newlines();
+    sig_guard += 1;
+    if sig_guard >= 4 { break; }
+}
+```
+- `consumed_indent_for_body` 与后续 `where_clause` 逻辑完全保留，仅把返回类型/raises 的解析改为可交换。
+- `sig_guard` 上限 4 防止异常输入（如 `raises raises raises ...`）造成死循环。
+
+### 生成证据
+```
+=== bug-raises-return-type.lz（修复后全链路通过） ===
+"raises+return test:" "config_v1" "config_v2"
+
+（顺序1: def read_config_v1() -> str raises IOError = return "config_v1"）
+（顺序2: def read_config_v2() raises IOError -> str  = return "config_v2"）
+```
+
+### 结果
+- 复现文件 `FIND_BUG/parser/bug-raises-return-type.lz`：改为同时覆盖两种顺序（`read_config_v1` / `read_config_v2`）。
+- `tests/find_bug_bugs.rs`：`pr002_raises_with_return` 摘 `#[ignore]` 转正，断言收紧为全行
+  `"raises+return test:" "config_v1" "config_v2"`，确证两种顺序均正确返回。
+- 单测通过：`test pr002_raises_with_return ... ok`。
+- 回归：`find_bug_bugs` 27 passed / 13 ignored（pr002 由 ignore→pass）；`lz_frontend_bootstrap`
+  4 passed；`lexer_parser_core` 11 passed；`lz_semantic_cases` 14 passed；
+  `reject_errors` / `reject_more` 全绿；`cargo check --all-targets` 0 代码 warning。
+- 剩余 ❌：**9 项**（BUG-LX-002, BUG-LX-005, BUG-PR-001,
   BUG-TY-001, BUG-TY-004, BUG-IR-001, BUG-IR-002, BUG-IR-003, BUG-CG-004）。

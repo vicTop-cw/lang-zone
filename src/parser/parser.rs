@@ -825,17 +825,10 @@ impl Parser {
         self.expect(Token::RParen)?;
 
         // 返回类型: 使用 `-> type`（与参数类型注解 `:` 区分）
-        let return_type = if self.check(&Token::Arrow) {
-            self.advance();
-            Some(self.parse_type()?)
-        } else {
-            None
-        };
-
-        // raises 异常类型标注（允许在返回类型后换行）
+        // 返回类型与 raises 异常标注：顺序无关（支持 `-> str raises E` 与 `raises E -> str`）
         self.skip_newlines();
 
-        // 处理下一行缩进：where 子句可能在缩进块内
+        // 处理下一行缩进：where 子句可能在缩进块内（该 Indent 需在函数体前以 Dedent 配平）
         let consumed_indent_for_body = if self.check(&Token::Indent) {
             self.advance();
             true
@@ -843,12 +836,26 @@ impl Parser {
             false
         };
 
-        let raises = if self.check(&Token::Raises) {
-            self.advance();
-            Some(self.parse_type()?)
-        } else {
-            None
-        };
+        let mut return_type: Option<Type> = None;
+        let mut raises: Option<Type> = None;
+        // 返回类型与 raises 各最多解析一次，任意顺序
+        let mut sig_guard = 0;
+        loop {
+            if return_type.is_none() && self.check(&Token::Arrow) {
+                self.advance();
+                return_type = Some(self.parse_type()?);
+            } else if raises.is_none() && self.check(&Token::Raises) {
+                self.advance();
+                raises = Some(self.parse_type()?);
+            } else {
+                break;
+            }
+            self.skip_newlines();
+            sig_guard += 1;
+            if sig_guard >= 4 {
+                break;
+            }
+        }
 
         // where 子句（允许换行和缩进）
         // def name<T>() -> R where T: Bound
