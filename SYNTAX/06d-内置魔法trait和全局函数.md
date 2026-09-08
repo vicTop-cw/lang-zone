@@ -1,6 +1,6 @@
 # LZ 魔法方法 — 内置魔法 Trait 和全局函数
 
-> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-05
+> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-09-06
 
 本文档列举 Lang-Zone 编译器内置的全部魔法方法（`__xxx__`），以及它们自动生成的 trait 与对应的 Rust trait。
 
@@ -167,9 +167,10 @@ struct Point =
 
 | 魔法方法 | 参数 | 返回 | 用途 |
 |----------|------|------|------|
-| `__unapply__` | `self` | `(T1, T2, ...)` | match 模式解构，将 struct 分解为元组用于 `case Point(x, y):` |
+| `__unapply__` | `self` | `(T1, T2, ...)` | 提取解构：将 struct 分解为元组，用于 `case Point(x,y)` / `let Point(x,y)=p` / `for Point(x,y) in pts` |
 
 ```lz
+// 普通 struct 显式实现：
 struct Point =
     x: int
     y: int
@@ -177,11 +178,18 @@ struct Point =
 
 match p:
     case Point(px, py) => print(px + py)
+// let 提取绑定：
+let Point(a, b) = p        // 糖化为 let (a, b) = p.__unapply__()
+// for 循环变量提取：
+for Point(a, b) in pts:
+    print(a, b)
 ```
 
-- `__unapply__` 使用 `self`（owned），返回元组
-- 返回元组的各元素按位置绑定到 match 模式中的子变量
-- 一个 struct 只能定义一个 `__unapply__`
+- **case struct 自动配**：声明为 `case struct PointEx(...)` 时，编译器自动生成 `__unapply__`（按字段声明顺序返回元组），无需手写（见 [06a-struct.md](06a-struct.md) case struct 章节）；普通 struct 才需上述显式 `magic __unapply__`。
+- `__unapply__` 使用 `self`（owned），返回元组。
+- 返回元组的各元素按位置绑定到模式中的子变量。
+- 同一提取协议在三处通用：`case Point(px,py)` / `let Point(px,py)=p` / `for Point(px,py) in pts` 最终都展开为 `let (px, py) = p.__unapply__()`（再由 IR 复用元组解构）。
+- 一个 struct 只能定义一个 `__unapply__`。
 
 > 详见 [06a-struct.md](06a-struct.md) 与 [05-控制流.md](05-控制流.md) §二 match / case。
 

@@ -172,6 +172,7 @@ fn cy_omega_gate_struct() {
                 variadic: false,
             }],
             ret_ty: IrType::F64,
+            raises: None,
             body: lang_zone::ir::node::Block {
                 stmts: vec![],
                 ty: IrType::F64,
@@ -192,6 +193,7 @@ fn cy_omega_gate_struct() {
         has_init: false,
         init_params: vec![],
         implicit_froms: vec![],
+        is_case: false,
         span: lang_zone::ir::node::Span::unknown(),
     }));
 
@@ -229,6 +231,7 @@ fn cy_omega_gate_function() {
             variadic: false,
         }],
         ret_ty: IrType::Int,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![],
             ty: IrType::Int,
@@ -414,6 +417,7 @@ fn cy_omega_gate_function_generic() {
         generics: vec![GenericParam { name: "T".into(), bounds: vec![], default: None }],
         params: vec![Param { name: "x".into(), ty: IrType::Generic("T".into()), is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
         ret_ty: IrType::Generic("T".into()),
+        raises: None,
         body: lang_zone::ir::node::Block { stmts: vec![], ty: IrType::Generic("T".into()), span: lang_zone::ir::node::Span::unknown() },
         intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
         checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
@@ -436,6 +440,7 @@ fn cy_omega_gate_function_variadic() {
             Param { name: "args".into(), ty: IrType::named("Tuple"), is_mut: false, is_ref: false, is_owned: false, default: None, variadic: true },
         ],
         ret_ty: IrType::Int,
+        raises: None,
         body: lang_zone::ir::node::Block { stmts: vec![], ty: IrType::Int, span: lang_zone::ir::node::Span::unknown() },
         intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
         checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
@@ -530,6 +535,7 @@ fn cy_omega_gate_impl() {
                 variadic: false,
             }],
             ret_ty: IrType::F64,
+            raises: None,
             body: lang_zone::ir::node::Block {
                 stmts: vec![],
                 ty: IrType::F64,
@@ -627,6 +633,7 @@ fn cy_omega_gate_stmt_while_let() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::WhileLet {
@@ -673,6 +680,7 @@ fn cy_omega_gate_stmt_yield_from() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::YieldFrom {
@@ -704,6 +712,7 @@ fn cy_omega_gate_stmt_pass() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![lang_zone::ir::node::Stmt::Pass],
             ty: IrType::Unit,
@@ -727,6 +736,7 @@ fn cy_omega_gate_stmt_defer() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Defer {
@@ -766,6 +776,7 @@ fn cy_omega_gate_stmt_try_catch() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::TryCatch {
@@ -834,6 +845,7 @@ fn cy_omega_gate_expr_assign() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::ExprStmt {
@@ -876,6 +888,7 @@ fn cy_omega_gate_expr_cast() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::ExprStmt {
@@ -914,6 +927,7 @@ fn cy_omega_gate_expr_magic_call() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::ExprStmt {
@@ -952,6 +966,7 @@ fn cy_omega_gate_expr_collections() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::ExprStmt {
@@ -994,6 +1009,7 @@ fn cy_omega_gate_expr_range() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::ExprStmt {
@@ -1037,6 +1053,7 @@ fn cy_omega_gate_expr_paren() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::ExprStmt {
@@ -1093,6 +1110,7 @@ fn cy_omega_gate_overload() {
             variadic: false,
         }],
         ret_ty: IrType::Int,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![],
             ty: IrType::Int,
@@ -1132,6 +1150,7 @@ fn cy_omega_gate_overload() {
             },
         ],
         ret_ty: IrType::Int,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![],
             ty: IrType::Int,
@@ -1171,6 +1190,7 @@ fn cy_omega_gate_pattern_wildcard() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Match {
@@ -1221,6 +1241,7 @@ fn cy_omega_gate_pattern_ident() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Match {
@@ -1271,6 +1292,7 @@ fn cy_omega_gate_pattern_lit() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Match {
@@ -1321,6 +1343,7 @@ fn cy_omega_gate_pattern_tuple() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Match {
@@ -1374,6 +1397,7 @@ fn cy_omega_gate_pattern_list() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Match {
@@ -1427,6 +1451,7 @@ fn cy_omega_gate_pattern_range() {
         generics: vec![],
         params: vec![],
         ret_ty: IrType::Unit,
+        raises: None,
         body: lang_zone::ir::node::Block {
             stmts: vec![
                 lang_zone::ir::node::Stmt::Match {

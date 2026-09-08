@@ -555,7 +555,7 @@ impl ComptimeEvaluator {
             Stmt::Return(Some(e)) => Ok(Some(Self::eval_expr(e, ctx)?)),
             Stmt::Return(None) => Ok(Some(ComptimeValue::None)),
             Stmt::Comptime { body } => Self::eval_block(body, ctx),
-            Stmt::Assert { expr, expected } => {
+            Stmt::Assert { expr, expected, .. } => {
                 let ok = Self::eval_expr(expr, ctx)?.truthy();
                 if !ok {
                     let msg = match expected {

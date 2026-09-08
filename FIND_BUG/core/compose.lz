@@ -27,14 +27,6 @@ def pipe_many(x: a, funcs: List<fn(a) -> a>) -> a =
     acc = f(acc)
   acc
 
-// and_then(x, f) — Option/Result 链式调用
-// x |> and_then(f) == f(x)
-def and_then(x: a?, f: fn(a) -> b?) -> b? =
-  if x == None:
-    None
-  else:
-    f(x)
-
 def main() =
   // compose: (x + 3) * 2
   f = compose(|x| x * 2, |x| x + 3)

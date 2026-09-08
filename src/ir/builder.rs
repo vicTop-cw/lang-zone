@@ -181,11 +181,24 @@ impl TypeCtx {
         }
     }
 
+    /// 计算函数泛型形参列表：显式声明 + 签名中未声明的隐式泛型（如 fold 的 a/b）。
+    /// 排除内建/已知 struct/enum 名，避免把已知类型误当泛型。
+    fn fn_generics(&self, func: &crate::ast::Function) -> Vec<String> {
+        let known = |n: &str| {
+            crate::ast::builtin_type_names().contains(n)
+                || self.struct_field_order.contains_key(n)
+                || self.enum_generics.contains_key(n)
+        };
+        crate::ast::augmented_fn_generics(func, &known)
+    }
+
     fn collect_functions(&mut self, module: &ast::Module) {
         for f in &module.functions {
-            let generics: Vec<String> = f.generics.clone();
-            if let Some(ref ret_ty) = f.return_type {
-                let ret = from_ast_type_with_generics(ret_ty, &generics);
+            let generics: Vec<String> = self.fn_generics(f);
+            let has_ret_annot = f.return_type.is_some();
+            // raises/async/iterator 均经 fn_return_ir 计算（raises 时升级为 Result<ok, err>）
+            let ret = Self::fn_return_ir(&f.return_type, &f.raises, &generics);
+            if has_ret_annot {
                 // async 函数调用返回 Future<T>（Rust async fn 调用产生 Future），
                 // 登记为 Future<T> 供 await / let 标注使用（E0308/E0277 修复）
                 if f.is_async {
@@ -287,6 +300,27 @@ impl TypeCtx {
             }
         }
         IrType::Any
+    }
+
+    /// BUG-CG-004（轮次12）：根据返回类型与 raises 注解计算 IR 返回类型。
+    /// raises 非空时返回 `Result<ok, err>`，与 convert_fn_def 的 ret_ty 升级保持一致，
+    /// 使 `?` 错误传播运算符与函数调用类型推断一致（json.lz 的 self.parse_object()? 等）。
+    fn fn_return_ir(
+        ret_ty: &Option<AstType>,
+        raises: &Option<AstType>,
+        generics: &[String],
+    ) -> IrType {
+        let base = ret_ty
+            .as_ref()
+            .map(|t| from_ast_type_with_generics(t, generics))
+            .unwrap_or(IrType::Unit);
+        match raises {
+            Some(e) => IrType::Result {
+                ok: Box::new(base),
+                err: Box::new(from_ast_type_with_generics(e, generics)),
+            },
+            None => base,
+        }
     }
 
     fn is_struct(&self, name: &str) -> bool {
@@ -767,11 +801,17 @@ fn resolve_call_generics(
     }
 
     if bindings.is_empty() {
-        // G2 反例：泛型调用既未提供显式类型实参，也无法从实参推断 → 必须拒绝
-        // （如 `def f<T>() -> T` 后 `f()`：返回类型 T 无法绑定）
-        ctx.report_error(format!(
-            "无法推断泛型参数: 调用 {fn_name} 未提供显式类型实参（如 {fn_name}.<T>(...)），且无法从实参推断"
-        ));
+        // G2 反例：无实参且无法推断 → 必须拒绝（如 `def f<T>() -> T` 后 `f()`：
+        // 返回类型 T 无法绑定，属于程序错误）。
+        // 注意：带实参的调用（即使本浅层类型检查上下文因变量类型为 Any 而暂时
+        // 无法推断），由真正的 IR 构建/codegen 在拥有完整类型信息的上下文中处理
+        // （如泛型函数内 `fold1(xs, f)` 会经 alt_bindings 传播上层泛型，或 Rust
+        // 在调用点据实参推断）。此处不报错，避免对合法泛型调用误报。
+        if arg_tys.is_empty() {
+            ctx.report_error(format!(
+                "无法推断泛型参数: 调用 {fn_name} 未提供显式类型实参（如 {fn_name}.<T>(...)），且无法从实参推断"
+            ));
+        }
         return ret_ty.clone();
     }
 
@@ -1566,69 +1606,70 @@ fn check_expr_capture(
     e: &AstExpr,
     outer: &HashMap<String, IrType>,
     declared: &mut HashSet<String>,
+    any: bool,
 ) -> Option<String> {
     match e {
         AstExpr::Ident(n) => {
-            // 读取外层变量**不报错**：会被 analyze_global_vars 提升为模块级
-            // 全局（static mut + unsafe 访问），跨函数可见合法（polish_02 的
-            // read_shared 读取 shared、precedence 的 fallible 读取 n 均为此模式）。
-            // 只有**写**（Assign 目标 / 无 let 前缀的默认可变绑定）才在
-            // check_stmt_capture 的 Assign/Let 分支拦截。
-            let _ = (n, outer, declared);
+            // 闭包捕获路径（any=true）需把「读外层变量」也视为捕获；
+            // 默认（any=false）只拦截写（E0425），纯读取交给 analyze_global_vars
+            // 提升为模块级全局（static mut + unsafe 访问），跨函数可见合法。
+            if any && outer.contains_key(n.as_str()) && !declared.contains(n.as_str()) {
+                return Some(n.clone());
+            }
             None
         }
         AstExpr::ListLit(items) | AstExpr::SetLit(items) | AstExpr::TupleLit(items) => {
-            items.iter().find_map(|i| check_expr_capture(i, outer, declared))
+            items.iter().find_map(|i| check_expr_capture(i, outer, declared, any))
         }
         AstExpr::DictLit(items) => items.iter().find_map(|(k, v)| {
-            check_expr_capture(k, outer, declared)
-                .or_else(|| check_expr_capture(v, outer, declared))
+            check_expr_capture(k, outer, declared, any)
+                .or_else(|| check_expr_capture(v, outer, declared, any))
         }),
         AstExpr::Binary { left, right, .. } => {
-            check_expr_capture(left, outer, declared)
-                .or_else(|| check_expr_capture(right, outer, declared))
+            check_expr_capture(left, outer, declared, any)
+                .or_else(|| check_expr_capture(right, outer, declared, any))
         }
-        AstExpr::Unary { operand, .. } => check_expr_capture(operand, outer, declared),
+        AstExpr::Unary { operand, .. } => check_expr_capture(operand, outer, declared, any),
         AstExpr::Call { func, args, .. } => {
-            check_expr_capture(func, outer, declared).or_else(|| {
+            check_expr_capture(func, outer, declared, any).or_else(|| {
                 args.iter()
-                    .find_map(|a| check_expr_capture(a, outer, declared))
+                    .find_map(|a| check_expr_capture(a, outer, declared, any))
             })
         }
-        AstExpr::KwArg { value, .. } => check_expr_capture(value, outer, declared),
+        AstExpr::KwArg { value, .. } => check_expr_capture(value, outer, declared, any),
         AstExpr::MethodCall { receiver, args, .. } => {
-            check_expr_capture(receiver, outer, declared).or_else(|| {
+            check_expr_capture(receiver, outer, declared, any).or_else(|| {
                 args.iter()
-                    .find_map(|a| check_expr_capture(a, outer, declared))
+                    .find_map(|a| check_expr_capture(a, outer, declared, any))
             })
         }
         AstExpr::FieldAccess { receiver, .. }
         | AstExpr::PathAccess { receiver, .. }
-        | AstExpr::SafeNav { receiver, .. } => check_expr_capture(receiver, outer, declared),
+        | AstExpr::SafeNav { receiver, .. } => check_expr_capture(receiver, outer, declared, any),
         AstExpr::Index { receiver, index } => {
-            check_expr_capture(receiver, outer, declared)
-                .or_else(|| check_expr_capture(index, outer, declared))
+            check_expr_capture(receiver, outer, declared, any)
+                .or_else(|| check_expr_capture(index, outer, declared, any))
         }
         AstExpr::If {
             cond,
             then_body,
             elif_clauses,
             else_body,
-        } => check_expr_capture(cond, outer, declared)
-            .or_else(|| check_stmts_capture(then_body, outer, declared))
+        } => check_expr_capture(cond, outer, declared, any)
+            .or_else(|| check_stmts_capture(then_body, outer, declared, any))
             .or_else(|| {
                 elif_clauses.iter().find_map(|(c, b)| {
-                    check_expr_capture(c, outer, declared)
-                        .or_else(|| check_stmts_capture(b, outer, declared))
+                    check_expr_capture(c, outer, declared, any)
+                        .or_else(|| check_stmts_capture(b, outer, declared, any))
                 })
             })
             .or_else(|| {
                 else_body
                     .as_ref()
-                    .and_then(|b| check_stmts_capture(b, outer, declared))
+                    .and_then(|b| check_stmts_capture(b, outer, declared, any))
             }),
         AstExpr::Match { expr, arms } => {
-            check_expr_capture(expr, outer, declared).or_else(|| {
+            check_expr_capture(expr, outer, declared, any).or_else(|| {
                 arms.iter().find_map(|arm| {
                     let mut sub = declared.clone();
                     let mut pv = vec![];
@@ -1637,11 +1678,11 @@ fn check_expr_capture(
                         sub.insert(n);
                     }
                     if let Some(g) = &arm.guard {
-                        if let Some(hit) = check_expr_capture(g, outer, &mut sub) {
+                        if let Some(hit) = check_expr_capture(g, outer, &mut sub, any) {
                             return Some(hit);
                         }
                     }
-                    check_stmts_capture(&arm.body, outer, &mut sub)
+                    check_stmts_capture(&arm.body, outer, &mut sub, any)
                 })
             })
         }
@@ -1650,30 +1691,30 @@ fn check_expr_capture(
             for p in params {
                 sub.insert(p.clone());
             }
-            check_expr_capture(body, outer, &mut sub)
+            check_expr_capture(body, outer, &mut sub, any)
         }
-        AstExpr::BlockExpr(body) => check_stmts_capture(body, outer, declared),
+        AstExpr::BlockExpr(body) => check_stmts_capture(body, outer, declared, any),
         AstExpr::Range { start, end, .. } => start
             .as_ref()
-            .and_then(|s| check_expr_capture(s, outer, declared))
-            .or_else(|| end.as_ref().and_then(|e| check_expr_capture(e, outer, declared))),
+            .and_then(|s| check_expr_capture(s, outer, declared, any))
+            .or_else(|| end.as_ref().and_then(|e| check_expr_capture(e, outer, declared, any))),
         AstExpr::Walrus { target, value } => {
-            check_expr_capture(target, outer, declared)
-                .or_else(|| check_expr_capture(value, outer, declared))
+            check_expr_capture(target, outer, declared, any)
+                .or_else(|| check_expr_capture(value, outer, declared, any))
         }
         AstExpr::Pipe {
             receiver,
             callee,
             args,
-        } => check_expr_capture(receiver, outer, declared)
-            .or_else(|| check_expr_capture(callee, outer, declared))
+        } => check_expr_capture(receiver, outer, declared, any)
+            .or_else(|| check_expr_capture(callee, outer, declared, any))
             .or_else(|| {
                 args.iter()
-                    .find_map(|a| check_expr_capture(a, outer, declared))
+                    .find_map(|a| check_expr_capture(a, outer, declared, any))
             }),
         AstExpr::NullCoalesce { left, right } => {
-            check_expr_capture(left, outer, declared)
-                .or_else(|| check_expr_capture(right, outer, declared))
+            check_expr_capture(left, outer, declared, any)
+                .or_else(|| check_expr_capture(right, outer, declared, any))
         }
         AstExpr::ListComprehension {
             output,
@@ -1693,16 +1734,18 @@ fn check_expr_capture(
             sub.insert(var.clone());
             for (v, i, c) in extra_clauses {
                 sub.insert(v.clone());
-                if let Some(hit) = check_expr_capture(i, outer, &mut sub) {
+                if let Some(hit) = check_expr_capture(i, outer, &mut sub, any) {
                     return Some(hit);
                 }
-                if let Some(hit) = c.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)) {
+                if let Some(hit) =
+                    c.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub, any))
+                {
                     return Some(hit);
                 }
             }
-            check_expr_capture(iter, outer, &mut sub)
-                .or_else(|| cond.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)))
-                .or_else(|| check_expr_capture(output, outer, &mut sub))
+            check_expr_capture(iter, outer, &mut sub, any)
+                .or_else(|| cond.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub, any)))
+                .or_else(|| check_expr_capture(output, outer, &mut sub, any))
         }
         AstExpr::DictComprehension {
             key,
@@ -1716,21 +1759,23 @@ fn check_expr_capture(
             sub.insert(var.clone());
             for (v, i, c) in extra_clauses {
                 sub.insert(v.clone());
-                if let Some(hit) = check_expr_capture(i, outer, &mut sub) {
+                if let Some(hit) = check_expr_capture(i, outer, &mut sub, any) {
                     return Some(hit);
                 }
-                if let Some(hit) = c.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)) {
+                if let Some(hit) =
+                    c.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub, any))
+                {
                     return Some(hit);
                 }
             }
-            check_expr_capture(iter, outer, &mut sub)
-                .or_else(|| cond.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub)))
-                .or_else(|| check_expr_capture(key, outer, &mut sub))
-                .or_else(|| check_expr_capture(value, outer, &mut sub))
+            check_expr_capture(iter, outer, &mut sub, any)
+                .or_else(|| cond.as_ref().and_then(|c| check_expr_capture(c, outer, &mut sub, any)))
+                .or_else(|| check_expr_capture(key, outer, &mut sub, any))
+                .or_else(|| check_expr_capture(value, outer, &mut sub, any))
         }
         AstExpr::Assign { target, value, .. } => {
-            check_expr_capture(target, outer, declared)
-                .or_else(|| check_expr_capture(value, outer, declared))
+            check_expr_capture(target, outer, declared, any)
+                .or_else(|| check_expr_capture(value, outer, declared, any))
         }
         AstExpr::Spawn(inner)
         | AstExpr::Move(inner)
@@ -1738,17 +1783,17 @@ fn check_expr_capture(
         | AstExpr::Await(inner)
         | AstExpr::Try(inner)
         | AstExpr::Paren(inner)
-        | AstExpr::Comptime(inner) => check_expr_capture(inner, outer, declared),
+        | AstExpr::Comptime(inner) => check_expr_capture(inner, outer, declared, any),
         AstExpr::BuildBlock { lhs, body, .. } => {
-            check_expr_capture(lhs, outer, declared)
-                .or_else(|| check_stmts_capture(body, outer, declared))
+            check_expr_capture(lhs, outer, declared, any)
+                .or_else(|| check_stmts_capture(body, outer, declared, any))
         }
         AstExpr::TryCatch {
             body,
             catches,
             else_body,
             finally_body,
-        } => check_stmts_capture(body, outer, declared)
+        } => check_stmts_capture(body, outer, declared, any)
             .or_else(|| {
                 catches.iter().find_map(|arm| {
                     let mut sub = declared.clone();
@@ -1758,22 +1803,22 @@ fn check_expr_capture(
                         sub.insert(n);
                     }
                     if let Some(g) = &arm.guard {
-                        if let Some(hit) = check_expr_capture(g, outer, &mut sub) {
+                        if let Some(hit) = check_expr_capture(g, outer, &mut sub, any) {
                             return Some(hit);
                         }
                     }
-                    check_stmts_capture(&arm.body, outer, &mut sub)
+                    check_stmts_capture(&arm.body, outer, &mut sub, any)
                 })
             })
             .or_else(|| {
                 else_body
                     .as_ref()
-                    .and_then(|b| check_stmts_capture(b, outer, declared))
+                    .and_then(|b| check_stmts_capture(b, outer, declared, any))
             })
             .or_else(|| {
                 finally_body
                     .as_ref()
-                    .and_then(|b| check_stmts_capture(b, outer, declared))
+                    .and_then(|b| check_stmts_capture(b, outer, declared, any))
             }),
         _ => None,
     }
@@ -1783,9 +1828,10 @@ fn check_stmts_capture(
     stmts: &[AstStmt],
     outer: &HashMap<String, IrType>,
     declared: &mut HashSet<String>,
+    any: bool,
 ) -> Option<String> {
     for s in stmts {
-        if let Some(hit) = check_stmt_capture(s, outer, declared) {
+        if let Some(hit) = check_stmt_capture(s, outer, declared, any) {
             return Some(hit);
         }
     }
@@ -1796,6 +1842,7 @@ fn check_stmt_capture(
     s: &AstStmt,
     outer: &HashMap<String, IrType>,
     declared: &mut HashSet<String>,
+    any: bool,
 ) -> Option<String> {
     match s {
         AstStmt::Let { name, mutable, value, .. } => {
@@ -1811,35 +1858,37 @@ fn check_stmt_capture(
                 None
             };
             declared.insert(name.clone());
-            hit.or_else(|| check_expr_capture(value, outer, declared))
+            hit.or_else(|| check_expr_capture(value, outer, declared, any))
         }
         AstStmt::Const { name, value, .. } => {
-            let hit = check_expr_capture(value, outer, declared);
+            let hit = check_expr_capture(value, outer, declared, any);
             declared.insert(name.clone());
             hit
         }
         AstStmt::LetTuple { names, value, .. } => {
-            let hit = check_expr_capture(value, outer, declared);
+            let hit = check_expr_capture(value, outer, declared, any);
             for n in names {
                 declared.insert(n.clone());
             }
             hit
         }
-        AstStmt::Expr(e) => check_expr_capture(e, outer, declared),
-        AstStmt::Return(Some(e)) | AstStmt::Yield(Some(e)) => check_expr_capture(e, outer, declared),
-        AstStmt::YieldFrom(e) | AstStmt::Raise(e) => check_expr_capture(e, outer, declared),
+        AstStmt::Expr(e) => check_expr_capture(e, outer, declared, any),
+        AstStmt::Return(Some(e)) | AstStmt::Yield(Some(e)) => {
+            check_expr_capture(e, outer, declared, any)
+        }
+        AstStmt::YieldFrom(e) | AstStmt::Raise(e) => check_expr_capture(e, outer, declared, any),
         AstStmt::While {
             cond,
             guard,
             body,
             else_body,
-        } => check_expr_capture(cond, outer, declared)
-            .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared)))
-            .or_else(|| check_stmts_capture(body, outer, declared))
+        } => check_expr_capture(cond, outer, declared, any)
+            .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared, any)))
+            .or_else(|| check_stmts_capture(body, outer, declared, any))
             .or_else(|| {
                 else_body
                     .as_ref()
-                    .and_then(|b| check_stmts_capture(b, outer, declared))
+                    .and_then(|b| check_stmts_capture(b, outer, declared, any))
             }),
         AstStmt::WhileLet {
             pattern,
@@ -1848,18 +1897,19 @@ fn check_stmt_capture(
             body,
             else_body,
         } => {
-            let hit = check_expr_capture(expr, outer, declared)
-                .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared)));
+            let hit = check_expr_capture(expr, outer, declared, any)
+                .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared, any)));
             let mut pv = vec![];
             collect_ast_pattern_vars(pattern, &mut pv);
             for n in pv {
                 declared.insert(n);
             }
-            hit.or_else(|| check_stmts_capture(body, outer, declared)).or_else(|| {
-                else_body
-                    .as_ref()
-                    .and_then(|b| check_stmts_capture(b, outer, declared))
-            })
+            hit.or_else(|| check_stmts_capture(body, outer, declared, any))
+                .or_else(|| {
+                    else_body
+                        .as_ref()
+                        .and_then(|b| check_stmts_capture(b, outer, declared, any))
+                })
         }
         AstStmt::For {
             var,
@@ -1868,24 +1918,25 @@ fn check_stmt_capture(
             body,
             else_body,
         } => {
-            let hit = check_expr_capture(iter, outer, declared)
-                .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared)));
+            let hit = check_expr_capture(iter, outer, declared, any)
+                .or_else(|| guard.as_ref().and_then(|g| check_expr_capture(g, outer, declared, any)));
             declared.insert(var.clone());
-            hit.or_else(|| check_stmts_capture(body, outer, declared)).or_else(|| {
-                else_body
-                    .as_ref()
-                    .and_then(|b| check_stmts_capture(b, outer, declared))
-            })
+            hit.or_else(|| check_stmts_capture(body, outer, declared, any))
+                .or_else(|| {
+                    else_body
+                        .as_ref()
+                        .and_then(|b| check_stmts_capture(b, outer, declared, any))
+                })
         }
-        AstStmt::Loop(body) => check_stmts_capture(body, outer, declared),
-        AstStmt::Break(Some(e)) => check_expr_capture(e, outer, declared),
+        AstStmt::Loop(body) => check_stmts_capture(body, outer, declared, any),
+        AstStmt::Break(Some(e)) => check_expr_capture(e, outer, declared, any),
         AstStmt::BreakLabel { value, .. } => {
-            value.as_ref().and_then(|v| check_expr_capture(v, outer, declared))
+            value.as_ref().and_then(|v| check_expr_capture(v, outer, declared, any))
         }
         AstStmt::Block { body, .. }
         | AstStmt::CheckerBlock { body, .. }
         | AstStmt::Defer(body)
-        | AstStmt::Comptime { body } => check_stmts_capture(body, outer, declared),
+        | AstStmt::Comptime { body } => check_stmts_capture(body, outer, declared, any),
         AstStmt::Guard {
             cond,
             let_binding,
@@ -1894,10 +1945,10 @@ fn check_stmt_capture(
         } => {
             let mut hit = cond
                 .as_ref()
-                .and_then(|c| check_expr_capture(c, outer, declared));
+                .and_then(|c| check_expr_capture(c, outer, declared, any));
             if let Some((pat, e)) = let_binding {
                 if hit.is_none() {
-                    hit = check_expr_capture(e, outer, declared);
+                    hit = check_expr_capture(e, outer, declared, any);
                 }
                 let mut pv = vec![];
                 collect_ast_pattern_vars(pat, &mut pv);
@@ -1908,18 +1959,18 @@ fn check_stmt_capture(
             if hit.is_none() {
                 hit = success_expr
                     .as_ref()
-                    .and_then(|s| check_expr_capture(s, outer, declared));
+                    .and_then(|s| check_expr_capture(s, outer, declared, any));
             }
-            hit.or_else(|| check_stmts_capture(else_body, outer, declared))
+            hit.or_else(|| check_stmts_capture(else_body, outer, declared, any))
         }
         AstStmt::With { expr, alias, body } => {
-            let hit = check_expr_capture(expr, outer, declared);
+            let hit = check_expr_capture(expr, outer, declared, any);
             if let Some(a) = alias {
                 declared.insert(a.clone());
             }
-            hit.or_else(|| check_stmts_capture(body, outer, declared))
+            hit.or_else(|| check_stmts_capture(body, outer, declared, any))
         }
-        AstStmt::BlockCall { args, .. } => check_expr_capture(args, outer, declared),
+        AstStmt::BlockCall { args, .. } => check_expr_capture(args, outer, declared, any),
         AstStmt::Assign { target, value, .. } => {
             // 写外层局部变量（total = ... / total += ...）→ 生成新绑定自引用 E0425
             if let AstExpr::Ident(n) = target {
@@ -1927,17 +1978,17 @@ fn check_stmt_capture(
                     return Some(n.clone());
                 }
             }
-            check_expr_capture(target, outer, declared)
-                .or_else(|| check_expr_capture(value, outer, declared))
+            check_expr_capture(target, outer, declared, any)
+                .or_else(|| check_expr_capture(value, outer, declared, any))
         }
-        AstStmt::Test { body, .. } => check_stmts_capture(body, outer, declared),
-        AstStmt::Assert { expr, expected } => {
-            check_expr_capture(expr, outer, declared)
-                .or_else(|| expected.as_ref().and_then(|e| check_expr_capture(e, outer, declared)))
+        AstStmt::Test { body, .. } => check_stmts_capture(body, outer, declared, any),
+        AstStmt::Assert { expr, expected, .. } => {
+            check_expr_capture(expr, outer, declared, any)
+                .or_else(|| expected.as_ref().and_then(|e| check_expr_capture(e, outer, declared, any)))
         }
         AstStmt::Check { expr, message } => {
-            check_expr_capture(expr, outer, declared)
-                .or_else(|| message.as_ref().and_then(|m| check_expr_capture(m, outer, declared)))
+            check_expr_capture(expr, outer, declared, any)
+                .or_else(|| message.as_ref().and_then(|m| check_expr_capture(m, outer, declared, any)))
         }
         AstStmt::Suite {
             setup,
@@ -1947,14 +1998,14 @@ fn check_stmt_capture(
         } => {
             let mut hit = setup
                 .as_ref()
-                .and_then(|s| check_stmts_capture(s, outer, declared));
+                .and_then(|s| check_stmts_capture(s, outer, declared, any));
             if hit.is_none() {
                 hit = teardown
                     .as_ref()
-                    .and_then(|s| check_stmts_capture(s, outer, declared));
+                    .and_then(|s| check_stmts_capture(s, outer, declared, any));
             }
             if hit.is_none() {
-                hit = check_stmts_capture(tests, outer, declared);
+                hit = check_stmts_capture(tests, outer, declared, any);
             }
             hit
         }
@@ -5138,9 +5189,10 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         }
 
         AstStmt::Defer(body) => {
-            // defer → 展开为 Block（不追加 return，让后续代码继续执行）
-            let stmts = convert_block(body, ctx).stmts;
-            Stmt::Block { stmts }
+            // defer → 保留 Stmt::Defer，由 codegen 生成 DeferGuard（块退出时 Drop 执行）
+            Stmt::Defer {
+                body: convert_block(body, ctx),
+            }
         }
 
         AstStmt::Comptime { body } => {
@@ -5181,20 +5233,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }
         }
 
-        AstStmt::Raise(e) => Stmt::ExprStmt {
-            expr: Expr::new(
-                ExprKind::Call {
-                    type_args: vec![],
-                    callee: Box::new(Expr::new(
-                        ExprKind::Var("panic!".into()),
-                        IrType::Any,
-                        Span::unknown(),
-                    )),
-                    args: vec![convert_expr(e, ctx)],
-                },
-                IrType::Never,
-                Span::unknown(),
-            ),
+        // BUG-CG-004（轮次12）：raise 统一表示为 Stmt::Raise 节点（而非 ExprStmt(panic! 调用)），
+        // 否则 builder 的 raises 改写（Stmt::Raise → return Err）无法命中，raises 链仍会丢失。
+        // 非 raises 函数由 codegen 将 Stmt::Raise 降级为 panic!（catch_unwind 仍可捕获），行为不变。
+        AstStmt::Raise(e) => Stmt::Raise {
+            value: convert_expr(e, ctx),
         },
 
         AstStmt::Guard {
@@ -5365,28 +5408,95 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         }
 
         AstStmt::FnDef { func } => {
-            // 嵌套函数提升为模块级 Item::FnDef。但嵌套函数体若引用外层函数
-            // 的局部变量（total = total + x 中 total 是外层局部），提升后
-            // 无法访问（生成 let mut total = total + x → E0425）。编译期报错，
-            // 提示改用闭包捕获（闭包支持写外部变量）。
             let mut declared: HashSet<String> =
                 func.params.iter().map(|p| p.name.clone()).collect();
-            if let Some(captured) = check_stmts_capture(&func.body, &ctx.vars, &mut declared) {
-                ctx.report_error(format!(
-                    "嵌套函数 `{}` 引用了外层局部变量 `{}`：嵌套函数提升为模块级后无法访问外层局部变量（E0425），请改用闭包捕获（如 `let {} = |...| ...`）",
-                    func.name, captured, func.name
-                ));
-            }
+            // 排除 def 自身名：自引用（递归）不视为「捕获外层局部」，
+            // 否则递归嵌套函数会被误转闭包（闭包无法自递归 → E0425/E0391）。
+            declared.insert(func.name.clone());
+            // 写捕获（仅 Assign / 无前缀可变绑定写外层变量）→ 用于错误提示（E0425）
+            let captured = check_stmts_capture(&func.body, &ctx.vars, &mut declared, false);
+            // 任意捕获（含读外层变量）→ 触发闭包路径（IR-003：读外层变量也需捕获）
+            let mut declared_any = declared.clone();
+            let captured_any = check_stmts_capture(&func.body, &ctx.vars, &mut declared_any, true);
+            // IR-003 修复：位于某函数体内（current_fn_name.is_some()）且捕获外层局部
+            // 变量的嵌套 def → 转为本地闭包 `let name = |params| body`，由闭包按
+            // move/借用捕获外层变量（原提升为模块级会丢失外层局部 → E0425）。
+            // 仅非变参、非模块级时走闭包路径；其余保持原提升逻辑（零回归）。
+            if ctx.current_fn_name.is_some()
+                && captured_any.is_some()
+                && matches!(func.variadic, ast::VariadicMode::None)
+            {
+                let is_math = func.decorators.iter().any(|d| d.name == "math");
+                let generics: Vec<String> = if is_math {
+                    vec!["T".to_string()]
+                } else {
+                    let mut g = ctx.fn_generics(func);
+                    for gg in &ctx.current_generics {
+                        if !g.contains(gg) {
+                            g.push(gg.clone());
+                        }
+                    }
+                    g
+                };
+                let params: Vec<Param> = func
+                    .params
+                    .iter()
+                    .map(|p| Param {
+                        name: p.name.clone(),
+                        ty: from_ast_type_with_generics(&p.ty, &generics),
+                        is_mut: p.is_mut,
+                        is_ref: p.is_ref,
+                        is_owned: p.is_owned,
+                        default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
+                        variadic: false,
+                    })
+                    .collect();
+                let ret_ir = TypeCtx::fn_return_ir(&func.return_type, &func.raises, &generics);
+                let body_block = convert_block(&func.body, ctx);
+                let body_expr = Expr::new(
+                    ExprKind::BlockExpr { block: body_block },
+                    ret_ir.clone(),
+                    Span::unknown(),
+                );
+                let fn_ty = IrType::Fn {
+                    params: params.iter().map(|p| p.ty.clone()).collect(),
+                    ret: Box::new(ret_ir.clone()),
+                };
+                let lambda = Expr::new(
+                    ExprKind::Lambda {
+                        params,
+                        body: Box::new(body_expr),
+                        is_move: true,
+                        ret_ty: Some(ret_ir),
+                    },
+                    fn_ty.clone(),
+                    Span::unknown(),
+                );
+                Stmt::Let {
+                    name: func.name.clone(),
+                    ty: fn_ty,
+                    value: lambda,
+                    is_mut: false,
+                    is_ref: false,
+                }
+            } else {
+                // 非捕获 / 模块级 def：提升为模块级 Item::FnDef（原逻辑，零回归）
+                if let Some(captured) = captured {
+                    ctx.report_error(format!(
+                        "嵌套函数 `{}` 引用了外层局部变量 `{}`：嵌套函数提升为模块级后无法访问外层局部变量（E0425），请改用闭包捕获（如 `let {} = |...| ...`）",
+                        func.name, captured, func.name
+                    ));
+                }
+                // 嵌套函数提升为模块级 Item::FnDef
+                let nested_name = func.name.clone();
+                let mut nested_def = convert_fn_def(func, ctx);
+                nested_def.name = nested_name;
+                ctx.pending_items.borrow_mut().push(Item::FnDef(nested_def));
 
-            // 嵌套函数提升为模块级 Item::FnDef
-            let nested_name = func.name.clone();
-            let mut nested_def = convert_fn_def(func, ctx);
-            nested_def.name = nested_name;
-            ctx.pending_items.borrow_mut().push(Item::FnDef(nested_def));
-
-            // 占位语句（嵌套函数不作为语句，已在模块级注册）
-            Stmt::ExprStmt {
-                expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
+                // 占位语句（嵌套函数不作为语句，已在模块级注册）
+                Stmt::ExprStmt {
+                    expr: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
+                }
             }
         }
 
@@ -5409,7 +5519,16 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             Stmt::Block { stmts: blk.stmts }
         }
 
-        AstStmt::Assert { expr, expected } => {
+        AstStmt::Assert { expr, expected, message } => {
+            // assert cond, "msg" → 消息形式（规范 SYNTAX/15 §六）：整体 expr 作条件，
+            // 生成 IR Stmt::Assert { cond, message }，由 Rust codegen 输出
+            // assert!(cond, "{:?}", msg)。与相等形式（assert_eq!）互斥。
+            if let Some(msg) = message {
+                return Stmt::Assert {
+                    cond: convert_expr(expr, ctx),
+                    message: Some(convert_expr(msg, ctx)),
+                };
+            }
             // assert expr == expected → assert_eq!(expr, expected)
             // assert expr（单表达式布尔断言）→ assert!(expr)
             // （否则 assert_eq! 只有单参数 → Rust 宏 "unexpected end of macro invocation"）
@@ -5676,7 +5795,7 @@ fn collect_stmt_walrus(stmt: &AstStmt, ctx: &TypeCtx, out: &mut Vec<(String, IrT
             }
         }
         AstStmt::With { expr, .. } => collect_expr_walrus(expr, ctx, out),
-        AstStmt::Assert { expr, expected } => {
+        AstStmt::Assert { expr, expected, .. } => {
             collect_expr_walrus(expr, ctx, out);
             if let Some(e) = expected {
                 collect_expr_walrus(e, ctx, out);
@@ -5896,6 +6015,37 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                 .map(|t| from_ast_type(t))
                 .unwrap_or_else(|| infer_expr_type(value, &block_ctx));
             block_ctx.add_var(name, ir_ty);
+        }
+        // 前向传播：函数体内的嵌套 def（IR-003 会转为本地闭包 let）也需登记其函数
+        // 类型，否则后续 `return inner` / `inner(...)` 查 lookup_var 回退 Any→i64，
+        // 触发错误的 ImplicitConvert（E0277）或调用推断失败。
+        if let AstStmt::FnDef { func } = s {
+            let mut g = block_ctx.fn_generics(func);
+            for gg in &block_ctx.current_generics {
+                if !g.contains(gg) {
+                    g.push(gg.clone());
+                }
+            }
+            let fparams: Vec<IrType> = func
+                .params
+                .iter()
+                .map(|p| from_ast_type_with_generics(&p.ty, &g))
+                .collect();
+            let fret = func
+                .return_type
+                .as_ref()
+                .map(|t| from_ast_type_with_generics(t, &g))
+                .unwrap_or(IrType::Any);
+            let fty = IrType::Fn {
+                params: fparams,
+                ret: Box::new(fret),
+            };
+            if !block_ctx.vars.contains_key(func.name.as_str())
+                && !block_ctx.top_level_consts.contains_key(func.name.as_str())
+            {
+                block_ctx.block_declared.insert(func.name.clone());
+            }
+            block_ctx.add_var(&func.name, fty);
         }
         // 前向传播：`x =: <构建块>`（AstStmt::Expr 中的 BuildBlock Var）也登记变量，
         // 否则后续 `multiply ~: factors` 的元组拆包查 lookup_var 返回 Any（E0061）
@@ -6569,7 +6719,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let generics: Vec<String> = if is_math {
         vec!["T".to_string()]
     } else {
-        let mut g = func.generics.clone();
+        let mut g = ctx.fn_generics(func);
         for gg in &ctx.current_generics {
             if !g.contains(gg) {
                 g.push(gg.clone());
@@ -6906,6 +7056,26 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     } else {
         body
     };
+    // BUG-CG-004（轮次12）：raises → Result<T, E> 语义收口。
+    // 在已推断出 ok_ty 的函数体内，将 return x → return Ok(x)、raise x → return Err(x)，
+    // 并对隐式尾表达式（非 Result 类型时）包 Ok(...)。ret_ty 同步升为 Result<ok, err>。
+    let body = if func.raises.is_some() {
+        let err_ty = func.raises.as_ref().map(from_ast_type).unwrap();
+        let ok_ty = func.return_type.as_ref().map(from_ast_type).unwrap_or(IrType::Unit);
+        rewrite_raises_block(body, &ok_ty, &err_ty)
+    } else {
+        body
+    };
+    let ret_ty = if let Some(raises_ast) = &func.raises {
+        let err_ty = from_ast_type(raises_ast);
+        let ok_ty = func.return_type.as_ref().map(from_ast_type).unwrap_or(IrType::Unit);
+        IrType::Result {
+            ok: Box::new(ok_ty),
+            err: Box::new(err_ty),
+        }
+    } else {
+        ret_ty
+    };
 
     let is_math = func.decorators.iter().any(|d| d.name == "math");
     let intrinsics: Vec<Intrinsic> = func
@@ -7151,8 +7321,7 @@ fn extract_embed_code(body: &Block) -> String {
                 .iter()
                 .map(|(n, t)| (n.clone(), from_ast_type(t)))
                 .collect();
-            let generics: Vec<GenericParam> = func
-                .generics
+            let generics: Vec<GenericParam> = generics
                 .iter()
                 .map(|g| {
                     let bounds = bounds_map.remove(g).unwrap_or_default();
@@ -7172,6 +7341,7 @@ fn extract_embed_code(body: &Block) -> String {
             all
         },
         ret_ty,
+        raises: func.raises.as_ref().map(from_ast_type),
         body,
         intrinsics,
         // 自动检测：如果函数体包含 await/spawn 且未显式标记 async，自动标记
@@ -7183,6 +7353,128 @@ fn extract_embed_code(body: &Block) -> String {
         where_clause: extra_where,
         span: Span::unknown(),
     }
+}
+
+/// BUG-CG-004（轮次12）：raises → Result<T, E> 函数体改写。
+/// 将 `return x` 包为 `Ok(x)`、`raise x` 包为 `Err(x)`，并对块尾裸表达式（类型非
+/// Result 时）包 `Ok(...)`。递归进入 if/for/while/match/block 等嵌套块。
+fn wrap_ok(e: Expr, ok: &IrType, err: &IrType) -> Expr {
+    Expr::new(
+        ExprKind::EnumCtor {
+            enum_name: "Result".into(),
+            variant: "Ok".into(),
+            args: vec![e],
+        },
+        IrType::Result {
+            ok: Box::new(ok.clone()),
+            err: Box::new(err.clone()),
+        },
+        Span::unknown(),
+    )
+}
+
+fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt {
+    match stmt {
+        Stmt::Return {
+            value: Some(e),
+        } => Stmt::Return {
+            value: Some(wrap_ok(e, ok, err)),
+        },
+        // 注：raise → Err 不在 builder 改写，改由 codegen 的 Stmt::Raise 处理。
+        // 原因：raise 可出现在表达式位（如 if/elif/else 表达式的 else 分支），
+        // builder 的语句级改写无法下降到 Expr 内部；而 `return Err(..)` 在表达式位同样合法
+        // （从外层函数/闭包返回），故统一在 codegen 按 current_fn_raises 决定 panic!/return Err。
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Stmt::If {
+            cond,
+            then_branch: rewrite_raises_block(then_branch, ok, err),
+            else_branch: else_branch.map(|b| rewrite_raises_block(b, ok, err)),
+        },
+        Stmt::For {
+            var,
+            iter,
+            guard,
+            body,
+            else_body,
+        } => Stmt::For {
+            var,
+            iter,
+            guard,
+            body: rewrite_raises_block(body, ok, err),
+            else_body: else_body.map(|b| rewrite_raises_block(b, ok, err)),
+        },
+        Stmt::While {
+            cond,
+            guard,
+            body,
+            else_body,
+        } => Stmt::While {
+            cond,
+            guard,
+            body: rewrite_raises_block(body, ok, err),
+            else_body: else_body.map(|b| rewrite_raises_block(b, ok, err)),
+        },
+        Stmt::WhileLet {
+            pattern,
+            expr,
+            guard,
+            body,
+        } => Stmt::WhileLet {
+            pattern,
+            expr,
+            guard,
+            body: rewrite_raises_block(body, ok, err),
+        },
+        Stmt::Match { scrutinee, arms } => Stmt::Match {
+            scrutinee,
+            arms: arms
+                .into_iter()
+                .map(|mut a| {
+                    a.body = rewrite_raises_block(a.body, ok, err);
+                    a
+                })
+                .collect(),
+        },
+        Stmt::Block { stmts } => Stmt::Block {
+            stmts: rewrite_raises_block(
+                Block {
+                    stmts,
+                    ty: IrType::Unit,
+                    span: Span::unknown(),
+                },
+                ok,
+                err,
+            )
+            .stmts,
+        },
+        // try/catch 内的 raise 已由本改写覆盖（catch 块本身不提升返回类型）
+        other => other,
+    }
+}
+
+fn rewrite_raises_block(mut block: Block, ok: &IrType, err: &IrType) -> Block {
+    // 仅当尾语句是裸表达式且其类型尚非 Result 时，包 Ok(...)。
+    // 若尾表达式已因 raise→Err / callee 返回 Result 而本身是 Result，则不再重复包裹。
+    let wrap_tail = match block.stmts.last() {
+        Some(Stmt::ExprStmt { expr }) => !matches!(expr.ty, IrType::Result { .. }),
+        _ => false,
+    };
+    if wrap_tail {
+        if let Some(Stmt::ExprStmt { expr }) = block.stmts.pop() {
+            block.stmts.push(Stmt::ExprStmt {
+                expr: wrap_ok(expr, ok, err),
+            });
+        }
+    }
+    block.stmts = block
+        .stmts
+        .into_iter()
+        .map(|s| rewrite_raises_stmt(s, ok, err))
+        .collect();
+    block
 }
 
 /// 检测 AST 函数体（Vec<Stmt>）是否包含 async 相关表达式（await/spawn）
@@ -7325,7 +7617,120 @@ fn ast_expr_has_async(expr: &ast::Expr) -> bool {
     }
 }
 
+/// 为 case struct 合成 `__unapply__`（定长提取，对应 Scala unapply）：
+/// 返回 (self.f1, self.f2, ...)，使 `let PointEx(x, y) = p` / `case PointEx(x, y)`
+/// 能经 `__unapply__` 完成提取。
+fn synth_unapply(s: &ast::StructDef) -> ast::Function {
+    use crate::types::Type as AstType;
+    let field_tys: Vec<AstType> = s.fields.iter().map(|f| f.ty.clone()).collect();
+    let elems: Vec<ast::Expr> = s
+        .fields
+        .iter()
+        .map(|f| {
+            ast::Expr::FieldAccess {
+                receiver: Box::new(ast::Expr::Ident("self".into())),
+                field: f.name.clone(),
+            }
+        })
+        .collect();
+    ast::Function {
+        name: "__unapply__".into(),
+        generics: vec![],
+        generic_defaults: vec![],
+        params: vec![ast::Param {
+            name: "self".into(),
+            ty: AstType::Any,
+            default: None,
+            is_mut: false,
+            is_owned: false,
+            is_ref: false,
+        }],
+        return_type: Some(AstType::Tuple(field_tys)),
+        raises: None,
+        where_clause: vec![],
+        body: vec![ast::Stmt::Return(Some(ast::Expr::TupleLit(elems)))],
+        is_async: false,
+        is_abstract: false,
+        is_iterator: false,
+        is_magic: true,
+        is_comptime: false,
+        decorators: vec![],
+        variadic: crate::parser::VariadicMode::None,
+        checker_param: None,
+        default_checker: None,
+    }
+}
+
+/// 为 case struct 合成 `__unapply_seq__`（变长提取，对应 Scala unapplySeq）：
+/// 仅当所有字段类型相同时生成，返回 Vec<T>（T 为字段类型），使
+/// `case PointEx(a, b, ..rest)` 能经 `__unapply_seq__` 完成变长提取。
+fn synth_unapply_seq(s: &ast::StructDef) -> Option<ast::Function> {
+    use crate::types::Type as AstType;
+    if s.fields.is_empty() {
+        return None;
+    }
+    let first = s.fields[0].ty.clone();
+    if !s.fields.iter().all(|f| f.ty == first) {
+        return None;
+    }
+    let elems: Vec<ast::Expr> = s
+        .fields
+        .iter()
+        .map(|f| {
+            ast::Expr::FieldAccess {
+                receiver: Box::new(ast::Expr::Ident("self".into())),
+                field: f.name.clone(),
+            }
+        })
+        .collect();
+    let list_ty = AstType::Generic {
+        base: Box::new(AstType::Named("List".into())),
+        args: vec![first],
+    };
+    Some(ast::Function {
+        name: "__unapply_seq__".into(),
+        generics: vec![],
+        generic_defaults: vec![],
+        params: vec![ast::Param {
+            name: "self".into(),
+            ty: AstType::Any,
+            default: None,
+            is_mut: false,
+            is_owned: false,
+            is_ref: false,
+        }],
+        return_type: Some(list_ty),
+        raises: None,
+        where_clause: vec![],
+        body: vec![ast::Stmt::Return(Some(ast::Expr::ListLit(elems)))],
+        is_async: false,
+        is_abstract: false,
+        is_iterator: false,
+        is_magic: true,
+        is_comptime: false,
+        decorators: vec![],
+        variadic: crate::parser::VariadicMode::None,
+        checker_param: None,
+        default_checker: None,
+    })
+}
+
 fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
+    // case struct 自动配 __unapply__（定长提取，对应 Scala unapply）与
+    // __unapply_seq__（变长提取，对应 Scala unapplySeq，仅当字段同构类型时生成）。
+    // 注入为普通 magic 方法，复用既有 magic 方法 codegen 与类型推断。
+    let s = if s.is_case {
+        let mut owned = s.clone();
+        let mut methods = s.magic_methods.clone();
+        methods.push(synth_unapply(s));
+        if let Some(seq) = synth_unapply_seq(s) {
+            methods.push(seq);
+        }
+        owned.magic_methods = methods;
+        owned
+    } else {
+        s.clone()
+    };
     if s.is_enum {
         let variants: Vec<Variant> = s
             .fields
@@ -7560,6 +7965,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 .collect(),
             fields,
             methods,
+            is_case: s.is_case,
             has_new,
             new_params,
             new_ret_ty,
@@ -7979,6 +8385,16 @@ fn build_ir_inner(
                 }
             }
         }
+        // BUG-CG-004（轮次12）：注册 struct 内联方法返回类型（含 raises→Result），
+        // 供方法调用与 ? 错误传播类型推断一致（json.lz 的 self.parse_object()? 等）。
+        for m in &s.methods {
+            if m.return_type.is_some() || m.raises.is_some() {
+                ctx.fn_returns.insert(
+                    format!("{}.{}", s.name, m.name),
+                    TypeCtx::fn_return_ir(&m.return_type, &m.raises, &s.generics),
+                );
+            }
+        }
         ir_mod.items.push(item);
     }
 
@@ -8009,10 +8425,10 @@ fn build_ir_inner(
         // 用 `类型名.方法名` 作 key：Rc/Arc 都有 try_unwrap，裸方法名会互相覆盖
         // （`rc.try_unwrap()` 误推断为 Arc 的签名 → E0425 cannot find type `T`）
         for m in &imp.methods {
-            if let Some(ref ret) = m.return_type {
+            if m.return_type.is_some() {
                 ctx.fn_returns.insert(
                     format!("{}.{}", imp.type_name, m.name),
-                    from_ast_type_with_generics(ret, &imp.generics),
+                    TypeCtx::fn_return_ir(&m.return_type, &m.raises, &imp.generics),
                 );
             }
         }
@@ -8243,6 +8659,22 @@ fn build_ir_inner(
                 }
             }
             _ => {}
+        }
+    }
+
+    // 9.7b. 收集顶层表达式语句（如顶层 `print(...)`）到 ir_mod.top_level_stmts，
+    // 由 codegen 在无 `def main()` 时注入自动生成的 `main()` 顺序执行（BUG-PR-001）。
+    // 注意：Assign / CheckerBlock 已在上方分别处理，这里只收集其余表达式语句。
+    for s in &ast_module.top_stmts {
+        if let AstStmt::Expr(e) = s {
+            // 顶层赋值（AstExpr::Assign）已在 9.7 转为 Const item，避免重复执行
+            if !matches!(e, AstExpr::Assign { .. }) {
+                ir_mod
+                    .top_level_stmts
+                    .push(Stmt::ExprStmt {
+                        expr: convert_expr(e, &ctx),
+                    });
+            }
         }
     }
 

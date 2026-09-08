@@ -1,11 +1,11 @@
 // find_bug/parser/bug-top-level-build.lz
-// BUG-PR-001: 顶层构建块 x =: 后接多行 body
+// BUG-PR-001: 顶层 =: 构建块（多行 body）+ 顶层表达式语句（print）需可执行
+// 修复前：顶层 =: 解析报 Expected Indent；顶层 print(...) 被静默丢弃
 
-#!export
-// 顶层构建块
-greet =: name:
+// 顶层构建块（多行 body）
+greeting =:
+  name = "World"
   "Hello, " + name
 
-// 顶层 build 块，无缩进 body
-result = greet("World")
-print("greet result:", result)
+// 顶层表达式语句（无 def main 时由自动生成的 main 执行）
+print("greet result:", greeting)

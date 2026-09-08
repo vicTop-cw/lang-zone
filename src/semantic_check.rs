@@ -88,29 +88,8 @@ fn imp_label(imp: &ImplDef) -> String {
 }
 
 /// 内建类型白名单（codegen 直接映射，不经过自定义类型表）
-fn builtin_type_names() -> HashSet<&'static str> {
-    let mut s = HashSet::new();
-    for n in [
-        "int", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64",
-        "u128", "usize", "float", "f32", "f64", "str", "string", "char", "byte",
-        "bool", "None", "unit", "void", "any", "never", "Self", "self",
-        "List", "Array", "Vec", "Dict", "Map", "HashMap", "BTreeMap", "Set",
-        "HashSet", "BTreeSet", "Option", "Some", "Result", "Ok", "Err", "Tuple",
-        "Ptr", "Pointer", "Ref", "MutRef", "Fn", "FnMut", "FnOnce", "Iterator",
-        "Iter", "Generator", "Simd", "Box", "Any", "Object", "Json", "JSON",
-        "Rc", "Arc", "Weak", "Maybe", "Never", "Auto", "Ext",
-        "String", "__Params",
-        "Iterable", "Cell", "Ordering", "Error", "Box", "Mutex", "RwLock", "AtomicBool",
-        "AtomicI32", "AtomicU64", "Duration", "Instant", "Path", "PathBuf", "File",
-        "Ordered", "Clone", "Copy", "Display", "Debug", "Eq", "Ord", "PartialEq",
-        "PartialOrd", "Default", "Hash", "Add", "Sub", "Mul", "Div", "Rem", "Neg",
-        "Index", "IndexMut", "IntoIterator", "FromIterator", "AsRef", "AsMut",
-        "Deref", "Drop", "Send", "Sync", "Into", "From", "ToString",
-    ] {
-        s.insert(n);
-    }
-    s
-}
+/// 现统一由 `crate::ast::builtin_type_names` 提供（详见 ast/mod.rs）。
+use crate::ast::builtin_type_names;
 
 /// 内建函数/值白名单（codegen builtin_items + 常用入口）
 fn builtin_value_names() -> HashSet<&'static str> {
@@ -366,19 +345,27 @@ impl Checker {
                 self.error(format!("重复参数名: {}（函数 {})", p.name, f.name));
             }
         }
+        // 隐式泛型：签名中未声明但作为类型名出现的标识符（如 fold 的 a/b）自动视为泛型形参
+        // （与显式 `def f<a,b>(...)` 等价）。判定依据：排除内建类型与已知 struct/enum/import 名。
+        let known = |n: &str| {
+            crate::ast::builtin_type_names().contains(n)
+                || self.type_names.contains(n)
+                || self.imported_names.contains(n)
+        };
+        let augmented = crate::ast::augmented_fn_generics(f, &known);
         // 未知类型（参数 / 返回 / where / 泛型默认）
         for p in &f.params {
-            self.check_type(&p.ty, &format!("参数 {} 的类型", p.name), &f.generics, &[]);
+            self.check_type(&p.ty, &format!("参数 {} 的类型", p.name), &augmented, &[]);
         }
         if let Some(rt) = &f.return_type {
-            self.check_type(rt, &format!("函数 {} 的返回类型", f.name), &f.generics, &[]);
+            self.check_type(rt, &format!("函数 {} 的返回类型", f.name), &augmented, &[]);
         }
         for (g, ty) in &f.generic_defaults {
-            self.check_type(ty, &format!("泛型 {g} 的默认类型"), &f.generics, &[]);
+            self.check_type(ty, &format!("泛型 {g} 的默认类型"), &augmented, &[]);
         }
         for b in &f.where_clause {
             for bt in &b.bounds {
-                self.check_type(bt, &format!("where 约束 {b:?}"), &f.generics, &[]);
+                self.check_type(bt, &format!("where 约束 {b:?}"), &augmented, &[]);
             }
         }
     }
@@ -844,7 +831,7 @@ impl Checker {
             }
             Stmt::Pass => {}
             Stmt::Test { body, .. } => self.check_block(body),
-            Stmt::Assert { expr, expected } => {
+            Stmt::Assert { expr, expected, .. } => {
                 self.check_expr(expr);
                 if let Some(e) = expected {
                     self.check_expr(e);

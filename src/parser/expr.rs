@@ -838,6 +838,21 @@ impl ParserExprExt for Parser {
             Token::Ident(name) => Ok(Expr::Ident(name)),
             Token::Underscore => Ok(Expr::Ident("_".to_string())),
             Token::Self_ => Ok(Expr::Ident("self".to_string())),
+            Token::BuildCall | Token::BuildGen | Token::BuildIndex => {
+                // 构建块作为表达式（如 f(~: _ % 2 == 0) 的实参，BUG-IR-001）
+                let kind = match tok {
+                    Token::BuildCall => BuildKind::Call,
+                    Token::BuildGen => BuildKind::Gen,
+                    _ => BuildKind::Index,
+                };
+                let body = self.parse_build_block_body()?;
+                self.validate_build_block(kind, &body)?;
+                Ok(Expr::BuildBlock {
+                    kind,
+                    lhs: Box::new(Expr::TupleLit(Vec::new())),
+                    body,
+                })
+            }
             Token::Comptime => {
                 // comptime <expr> — 编译期表达式（求值后内联结果）
                 // comptime: 块 — 编译期块（规范 08b §2.1），块尾表达式值为结果
@@ -1061,6 +1076,22 @@ impl ParserExprExt for Parser {
             }
             Token::If => {
                 let cond = self.parse_expr()?;
+                self.skip_newlines();
+                // Python 式前缀三元：if cond then a else b
+                // （与冒号块形式 `if cond: ...` 并存，desugar 为 Expr::If）
+                if matches!(self.peek(), Token::Ident(n) if n.as_str() == "then") {
+                    self.advance();
+                    let then_val = self.parse_expr()?;
+                    self.skip_newlines();
+                    self.expect(Token::Else)?;
+                    let else_val = self.parse_expr()?;
+                    return Ok(Expr::If {
+                        cond: Box::new(cond),
+                        then_body: vec![Stmt::Expr(then_val)],
+                        elif_clauses: Vec::new(),
+                        else_body: Some(vec![Stmt::Expr(else_val)]),
+                    });
+                }
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 // 内联 if 表达式（`let x = if cond: then else`，math.lz 行 125）：
@@ -1237,23 +1268,54 @@ impl ParserExprExt for Parser {
                 // 闭包: |x, y| x + y  或  |x: int, y: int| -> int = x + y
                 let mut params = Vec::new();
                 let mut param_tys: Vec<Option<Type>> = Vec::new();
-                while !self.check(&Token::Pipe_) {
-                    match self.advance() {
-                        Token::Ident(n) => {
-                            params.push(n.clone());
-                            // 支持可选的类型注解: |x: int|
-                            if self.check(&Token::Colon) {
-                                self.advance(); // consume :
-                                param_tys.push(Some(self.parse_type()?));
-                            } else {
-                                param_tys.push(None);
-                            }
+                if self.check(&Token::LParen) {
+                    // 圆括号参数形式: |(x: int, y) body （类 Python/Rust fn 风格）
+                    self.advance(); // consume (
+                    while !self.check(&Token::RParen) {
+                        let n = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected param name in closure, got {:?}", t)),
+                        };
+                        params.push(n);
+                        // 支持可选的类型注解: |(x: int)|
+                        if self.check(&Token::Colon) {
+                            self.advance(); // consume :
+                            param_tys.push(Some(self.parse_type()?));
+                        } else {
+                            param_tys.push(None);
                         }
-                        t => return Err(format!("Expected param, got {:?}", t)),
+                        if self.check(&Token::Comma) { self.advance(); }
                     }
-                    if self.check(&Token::Comma) { self.advance(); }
+                    self.expect(Token::RParen)?;
+                    // 圆括号形式无尾随 |，直接进入 body
+                } else {
+                    // 参数用逗号分隔；无闭包 | 时（如 `|s: str len(s)`，类 OCaml/Kotlin
+                    // 风格），参数列表在遇到非逗号、非 | 的 token 后即结束，后续为 body。
+                    while !self.check(&Token::Pipe_) {
+                        let n = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected param, got {:?}", t)),
+                        };
+                        params.push(n);
+                        // 支持可选的类型注解: |x: int|
+                        if self.check(&Token::Colon) {
+                            self.advance(); // consume :
+                            param_tys.push(Some(self.parse_type()?));
+                        } else {
+                            param_tys.push(None);
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        } else {
+                            // 无逗号：若下一个是 | 则 while 条件退出并由下方消费；
+                            // 否则视为「无闭包 | 闭包」，参数结束，后续为 body
+                            break;
+                        }
+                    }
+                    if self.check(&Token::Pipe_) {
+                        self.advance(); // consume closing |
+                    }
                 }
-                self.advance(); // consume |
                 // 支持可选的返回类型注解: |x| -> int = ...
                 let mut ret_ty = None;
                 if self.check(&Token::Arrow) {

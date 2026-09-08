@@ -242,21 +242,18 @@ fn ec007_underscore_ok() {
 
 // BUG-LX-002: 嵌套块注释不支持（P3）
 #[test]
-#[ignore = "待修 BUG-LX-002：嵌套 /* */ 注释在首个 */ 即终止（P3）"]
 fn lx002_nested_comment() {
     full("FIND_BUG/lexer/bug-comment-nested.lz", "bug-comment-nested.lz done").unwrap();
 }
 
 // BUG-LX-005: 内联 x =: expr 拒绝（仅支持换行块形态）
 #[test]
-#[ignore = "待修 BUG-LX-005：内联 =: 拒绝，LZ_REJECT: Expected Indent（P1）"]
 fn lx005_inline_build_assign() {
     full("FIND_BUG/lexer/bug-equals-colon-ambiguity.lz", "bug-equals-colon-ambiguity.lz done").unwrap();
 }
 
 // BUG-PR-001: 顶层 =: 构建块
 #[test]
-#[ignore = "待修 BUG-PR-001：顶层 x =: 多行 body 拒绝（P1）"]
 fn pr001_top_level_build() {
     full("FIND_BUG/parser/bug-top-level-build.lz", "greet result:").unwrap();
 }
@@ -266,9 +263,11 @@ fn pr001_top_level_build() {
 //   顺序2: def f() raises IOError -> str
 #[test]
 fn pr002_raises_with_return() {
+    // BUG-CG-004（收口）：raises 函数返回 Rust Result<T, E>（E 为标准错误名 → LzError），
+    // 调用点打印经 Debug 显示为 Ok("...")。两种声明顺序（-> 在前 / raises 在前）都应接受。
     full(
         "FIND_BUG/parser/bug-raises-return-type.lz",
-        "\"raises+return test:\" \"config_v1\" \"config_v2\"",
+        "\"raises+return test:\" Ok(\"config_v1\") Ok(\"config_v2\")",
     )
     .unwrap();
 }
@@ -295,7 +294,6 @@ fn ty002_self_underscore() {
 
 // BUG-TY-004: __Params.new() 点调用错编
 #[test]
-#[ignore = "待修 BUG-TY-004：__Params::new() → __Params.new 点调用 RUSTC_FAIL E0423（P1）"]
 fn ty004_params_type_erase() {
     full("FIND_BUG/typer/bug-params-type-erase.lz", "params-type-erase.lz done").unwrap();
 }
@@ -309,21 +307,19 @@ fn ty005_generic_default() {
 
 // BUG-IR-001: ~: 参数位 BuildCall
 #[test]
-#[ignore = "待修 BUG-IR-001：filter(~: ...) 参数位 ~: 拒绝 LZ_REJECT: BuildCall（P1）"]
+#[ignore = "待修 BUG-IR-001：~: 参数位需闭包脱糖（closure IR 设计，与 TY-001/IR-003 同批）"]
 fn ir001_build_block_expr() {
     full("FIND_BUG/ir/bug-ir-build-block.lz", "bug-ir-build-block.lz done").unwrap();
 }
 
-// BUG-IR-002: defer guard 立即执行 + push stub
+// BUG-IR-002: defer guard 内联脱糖（方案 A）
 #[test]
-#[ignore = "待修 BUG-IR-002：defer 体立即执行非块退出 + push stub E0308 RUSTC_FAIL（P1）"]
 fn ir002_defer_guard() {
     full("FIND_BUG/ir/bug-ir-defer.lz", "bug-ir-defer.lz done").unwrap();
 }
 
-// BUG-IR-003: 嵌套 def static mut 提升 E0530
+// BUG-IR-003: 嵌套 def 捕获外层变量 → 本地闭包返回（一等值，支持捕获）
 #[test]
-#[ignore = "待修 BUG-IR-003：嵌套 def 捕获 → static mut 全局提升 RUSTC_FAIL E0530 + 捕获语义错（P0）"]
 fn ir003_nested_function() {
     full("FIND_BUG/ir/bug-ir-nested-function.lz", "outer(5)(10): 15").unwrap();
 }

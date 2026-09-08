@@ -1,6 +1,6 @@
 # LZ struct（结构体）
 
-> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-08-05
+> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-09-06
 
 本文档详细定义 Lang-Zone 的 struct（结构体）语法：基本定义、字段注解、方法、构造实例、泛型结构体、`__new__`/`__init__` 魔法方法，以及错误语法边界。enum、trait、impl 等类型见 **[06-数据结构](06-数据结构.md)**。
 
@@ -335,7 +335,7 @@ struct CloneablePair<T>
 
 ## 六、`__new__` 和 `__init__`
 
-**（设计考虑 — 默认行为 + 扩展规划）**
+**（默认构造与 __new__/__init__ 定制）**
 
 ### 6.1 默认行为
 
@@ -475,8 +475,30 @@ serve("9090")             // 参数传递，自动转换
 ### 6.5 注意
 
 - `__new__` 和 `__init__` 的签名由用户自定义，不强制匹配字段列表
-- 实现了 `__new__` 后，编译器默认的关键字构造是否仍可用有待确定
-- 与 trait `Constructible` 的交互尚未完全确定
+- 实现了 `__new__` 后，编译器默认的字段—值关键字构造器不再自动生成；实例化走 `__new__`/`__init__` 自定义逻辑（见 §6.2）
+- 实现 `__new__` 的 struct 可纳入 `Constructible` trait（见 §6.3）
+
+### 6.6 case struct（自动提取器）
+
+`case struct` 是带**自动提取器**的结构体：声明后编译器自动生成 `__unapply__`（定长提取）与 `__unapply_seq__`（变长提取，仅当所有字段同类型时），用于模式提取解构。
+
+```lz
+case struct PointEx(x: int, y: int)    // 自动配 __unapply__ -> (int, int)
+
+let p = PointEx(1, 2)
+match p:
+    case PointEx(a, b) => print(a, b)   // a=1, b=2
+let PointEx(a, b) = p                    // 等价：let (a, b) = p.__unapply__()
+for PointEx(a, b) in [p, p]:           // 循环变量提取解构（见 05-控制流.md §3.1）
+    print(a, b)
+```
+
+- **位置构造**：case struct 支持位置构造 `PointEx(1, 2)`（按字段声明顺序填充），普通 struct 仅支持关键字构造（§4.1）。
+- **自动生成约定**：
+  - `__unapply__` 按字段声明顺序返回 `(f1, f2, ...)` 元组；
+  - 若所有字段类型相同，额外生成 `__unapply_seq__`（返回 `Vec`，支持 `case PointEx(x, ..rest)` 变长提取）。
+- **与普通 struct 区别**：普通 struct 若要提取解构，须显式 `magic __unapply__(self)`（见 [06d-内置魔法trait和全局函数.md](06d-内置魔法trait和全局函数.md) §九点五）；case struct 省去手写。
+- 提取协议在 `match` / `let` / `for` 三处通用，详见 [06d-内置魔法trait和全局函数.md](06d-内置魔法trait和全局函数.md) §九点五。
 
 ---
 

@@ -766,6 +766,22 @@ fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) 
                     out.insert(v.clone());
                 }
             }
+            // 集合可变自由函数（push/append/pop/extend/insert/remove）：首参为被修改的
+            // 接收者，需标为 mut，否则降级为 (recv).push(item) 时报 E0596 cannot borrow
+            // immutable（BUG-IR-002 复现 `push(log, ...)` 场景）
+            if let ExprKind::Var(name) = &callee.kind {
+                if matches!(
+                    name.as_str(),
+                    "push" | "append" | "pop" | "extend" | "insert" | "remove"
+                        | "add" | "delete"
+                ) {
+                    if let Some(ExprKind::Var(recv)) =
+                        args.first().map(|a| &a.kind)
+                    {
+                        out.insert(recv.clone());
+                    }
+                }
+            }
             scan_expr_auto_mut(callee, out);
             for a in args {
                 scan_expr_auto_mut(a, out);

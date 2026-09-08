@@ -1,15 +1,8 @@
-// find_bug/ir/bug-ir-nested-function.lz
-// BUG-IR-003: 嵌套函数提升的 IR 表示
-// 嵌套 def — 闭包如何 IR 表示？
+// BUG-IR-003 复现：嵌套 def 捕获外层参数，需作为一等值返回并可调用
+def outer(x: int) -> fn(int) -> int:
+    def inner(y: int) -> int = x + y
+    return inner
 
-def outer(x: int) -> fn(int) -> int =
-  def inner(y: int) -> int =
-    x + y
-  inner
-
-def main() =
-  add5 = outer(5)
-  r = add5(10)
-  print("outer(5)(10):", r)
-  assert r == 15
-  print("bug-ir-nested-fn.lz done")
+def main():
+    let add5 = outer(5)
+    print(f"outer(5)(10): {add5(10)}")

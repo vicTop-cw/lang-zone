@@ -109,6 +109,10 @@ pub enum Stmt {
     Assert {
         expr: Expr,
         expected: Option<Expr>,
+        /// `assert cond, "msg"` 的自定义消息（规范 SYNTAX/15 §六）。
+        /// 与 `expected`（等号 RHS，用于 assert_eq!）互斥：出现 `,` 时整体 expr 作条件，
+        /// 不拆分 `==`。
+        message: Option<Expr>,
     },
     Check {
         expr: Expr,

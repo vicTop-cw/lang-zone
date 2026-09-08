@@ -177,12 +177,21 @@ impl Parser {
                     functions.push(f);
                 }
                 Token::Struct => {
-                    let mut s = self.parse_struct_like(false)?;
+                    let mut s = self.parse_struct_like(false, false)?;
                     s.decorators = decorators;
                     structs.push(s);
                 }
                 Token::Enum => {
-                    let mut s = self.parse_struct_like(true)?;
+                    let mut s = self.parse_struct_like(true, false)?;
+                    s.decorators = decorators;
+                    structs.push(s);
+                }
+                Token::Case => {
+                    self.advance(); // skip `case`
+                    // 不在此消费 struct/enum，交给 parse_struct_like 内部消费，
+                    // 否则会重复消费导致把名字读成 `(`。
+                    let is_enum = matches!(self.peek(), Token::Enum);
+                    let mut s = self.parse_struct_like(is_enum, true)?;
                     s.decorators = decorators;
                     structs.push(s);
                 }
@@ -526,7 +535,12 @@ impl Parser {
                                     };
                                     top_level_builds.push((name, body));
                                 }
-                                _ => {}
+                                _ => {
+                                    // 其他顶层语句（如顶层表达式 print(...)）：收集到
+                                    // top_stmts，由 codegen 在无 def main 时注入自动生成的
+                                    // main 顺序执行（BUG-PR-001）
+                                    top_stmts.push(stmt);
+                                }
                             }
                         }
                     } else {
@@ -1693,7 +1707,7 @@ impl Parser {
 
     // ─── struct / enum ───
 
-    pub fn parse_struct_like(&mut self, is_enum: bool) -> Result<StructDef, String> {
+    pub fn parse_struct_like(&mut self, is_enum: bool, is_case: bool) -> Result<StructDef, String> {
         self.advance(); // skip struct/enum
         let name = match self.advance() {
             Token::Ident(n) => n,
@@ -1705,6 +1719,44 @@ impl Parser {
         } else {
             Vec::new()
         };
+
+        // case struct Point(x: int, y: int) —— 圆括号字段形式（无 = / : 分隔符）
+        if self.check(&Token::LParen) {
+            self.advance(); // consume (
+            let mut fields = Vec::new();
+            while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                let fname = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected field name, got {:?}", t)),
+                };
+                self.expect(Token::Colon)?;
+                let fty = self.parse_type()?;
+                fields.push(Field {
+                    name: fname,
+                    ty: fty,
+                    default: None,
+                });
+                if self.check(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+            return Ok(StructDef {
+                name,
+                generics,
+                generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
+                generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                fields,
+                methods: Vec::new(),
+                magic_methods: Vec::new(),
+                is_enum: false,
+                is_case,
+                decorators: Vec::new(),
+                repr_attr: None,
+            });
+        }
 
         // 支持 = : =: 三种分隔符
         // enum Color: Red, Green, Blue  或  enum Color = Red, Green, Blue
@@ -1772,6 +1824,7 @@ impl Parser {
                 methods,
                 magic_methods: Vec::new(),
                 is_enum,
+                is_case,
                 decorators: Vec::new(),
                 repr_attr: None,
             });
@@ -1990,6 +2043,7 @@ impl Parser {
             methods,
             magic_methods,
             is_enum,
+            is_case,
             decorators: Vec::new(),
             repr_attr,
         })

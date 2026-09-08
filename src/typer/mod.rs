@@ -2458,6 +2458,7 @@ mod tests {
             is_enum: true,
             decorators: vec![],
             attributes: vec![],
+            is_case: false,
             repr_attr: None,
         };
 
@@ -2559,6 +2560,7 @@ mod tests {
             is_enum: true,
             decorators: vec![],
             attributes: vec![],
+            is_case: false,
             repr_attr: None,
         };
 

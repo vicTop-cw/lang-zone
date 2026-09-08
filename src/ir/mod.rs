@@ -13,7 +13,6 @@ pub mod builder;
 pub mod codegen;
 pub mod codegen_cython;
 pub mod duck_check;
-pub mod lz_codegen;
 
 pub use builder::build_ir;
 pub use duck_check::check_duck_satisfaction;
@@ -77,6 +76,9 @@ pub struct IrModule {
     pub exports: Vec<String>,
     /// 模块依赖（模块边界：依赖图）
     pub dependencies: Vec<ModuleDep>,
+    /// 顶层表达式语句（如顶层 `print(...)`）：无 `def main()` 时由自动生成的
+    /// `main()` 顺序执行（BUG-PR-001：顶层语句需可被执行）
+    pub top_level_stmts: Vec<node::Stmt>,
 }
 
 impl IrModule {
@@ -91,6 +93,7 @@ impl IrModule {
             source_text: None,
             exports: vec![],
             dependencies: vec![],
+            top_level_stmts: vec![],
         }
     }
 

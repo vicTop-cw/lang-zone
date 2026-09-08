@@ -4,7 +4,9 @@
 
 ## 状态：✅ 已纳入编译测试 (2026-07-31)
 
-**37/37 文件**（31 主 + 6 combo）已纳入 `tests/compile_demos.rs` 正面测试覆盖。
+**38/38 文件**（32 主 + 6 combo）已纳入正向测试覆盖。
+- 关键示例（含 `extractor_unapply_let_for.lz`）接入 `tests/lz_semantic_cases.rs` 可运行回归（编译→rustc→运行→断言 stdout）
+- 原 `tests/compile_demos.rs`（AST→RUST 直翻路径）已弃用停用，本目录文件作为规范目标示例存档，每个 `.lz` 配 `codegen` 产物 `.rs`
 注：部分示例依赖特定编译器功能（如列表变量推导迭代器），解析通过即标记 ✅。
 
 ## 文件清单
@@ -42,6 +44,7 @@
 | `iterator_demo.lz` | `iterator` 生成器函数 | ✅ |
 | `duck_test.lz` | duck 类型测试 | ✅ |
 | `keyword_downgrade.lz` | 关键字降级 | ✅ |
+| `extractor_unapply_let_for.lz` | case struct 提取：`let`/`for` 解构（自动 `__unapply__`） | ✅ |
 
 ### combo-syntax/ 子目录
 

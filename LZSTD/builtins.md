@@ -69,7 +69,7 @@
 - **状态**：✅ 已在用
 
 ### `Iterator` — 协议 `__next__`
-- **签名**：`def __next__(self) -> Option<T>`
+- **签名**：`def __next__(&mut self) -> Option<T>`（`&mut self` 可变借用，见 [06d-内置魔法trait和全局函数.md](../SYNTAX/06d-内置魔法trait和全局函数.md) §八）
 - **用途**：迭代器推进；返回 `Some(v)` 或 `None`（耗尽）。
 - **状态**：✅ 已在用
 
@@ -106,7 +106,7 @@
 
 ### `Rev` — 协议 `__rev__`
 - **签名**：`def __rev__(self) -> Iterator`
-- **用途**：反向迭代；`Itor` 集成 `DoubleEndedIterator` 时可用。
+- **用途**：反向迭代；与 `__next__` 共存时编译器生成 `DoubleEndedIterator`（`next_back`），见 [06d-内置魔法trait和全局函数.md](../SYNTAX/06d-内置魔法trait和全局函数.md) §八。
 - **状态**：✅ 已在用
 
 ### `Sized` — 协议 `__len__`
@@ -287,20 +287,20 @@
 
 ---
 
-## 8. 并发与错误层次（规划中，源自 Cython 后端 `lz_std` 设计）
+## 8. 并发与错误层次（源自 Cython 后端 `lz_std` 设计）
 
-> CY/USAGE.md §5 规划了 `lz_concurrency`（Future / spawn / go）与 `lz_exceptions`（异常层次）。截至当前，`CY/runtime` 仅落地了 `lz_std/__init__.pyx`（Option / Result / Box / Rc / Arc），`lz_concurrency` / `lz_exceptions` 尚未实现。以下为**规范拟定**，待对应后端落地后转正。它们归 `lz.std`（跨后端语言原语）。
+> CY/USAGE.md §5 规划了 `lz_concurrency`（Future / spawn / go）与 `lz_exceptions`（异常层次）。主 Rust 后端已对 `Future`/`spawn`/`go` 实现 codegen（`go` → `std::thread::spawn`，见 [10-并发与异步.md](../SYNTAX/10-并发与异步.md) 与 [缺失语法特性报告.md](../SYNTAX/overview/缺失语法特性报告.md#p2-2-go--setup--teardown-运行时语义)）；Cython 后端 `lz_concurrency` 尚未落地。以下为跨后端语言原语规范，归 `lz.std`。
 
-### `Future<T>`（规划）
+### `Future<T>`
 - **签名**：`Future<T>`
 - **用途**：异步结果占位；`spawn` 返回 `Future<T>`，可 `await` 获取。
-- **状态**：⚪ 规划中
+- **状态**：✅ 已在用
 
-### `spawn` / `go`（规划）
+### `spawn` / `go`
 - **签名**：`spawn(expr) -> Future<T>` · `go expr`（并发派生，不等结果）
 - **用途**：轻量并发派生；与 `@parallel`（自动并行）互补（显式派生 vs 自动并行化）。
-- **规范**：主项目 `go` 目前为设计阶段关键字，未实现；Cython 后端 `lz_concurrency` 亦未落地。
-- **状态**：⚪ 规划中
+- **规范**：主项目（Rust 后端）`go` 已实现（2026-07-31，codegen 至 `std::thread::spawn`），`spawn` 返回 `Future<T>`；与 [10-并发与异步.md](../SYNTAX/10-并发与异步.md) 一致。Cython 后端 `lz_concurrency` 尚未落地。
+- **状态**：✅ 已在用
 
 ### 异常层次（规划）
 - **签名**：`panic(msg: str)`（已有）· 规划 `Exception` 基类 + 子类（`IOError` / `ValueError` …）

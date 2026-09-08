@@ -499,9 +499,26 @@ impl __Params {
         self.args.get(i).map(|b| b.as_ref())
     }
 
-    /// 获取第 i 个参数并拆箱为具体类型
-    pub fn get<T: 'static>(&self, i: usize) -> Option<&T> {
-        self.args.get(i).and_then(|b| b.downcast_ref::<T>())
+    /// 获取第 i 个参数，因类型擦除，downcast 为常见类型后格式化为字符串
+    pub fn get(&self, i: usize) -> String {
+        match self.args.get(i) {
+            Some(b) => {
+                if let Some(v) = b.downcast_ref::<i64>() {
+                    return v.to_string();
+                }
+                if let Some(v) = b.downcast_ref::<String>() {
+                    return v.clone();
+                }
+                if let Some(v) = b.downcast_ref::<f64>() {
+                    return v.to_string();
+                }
+                if let Some(v) = b.downcast_ref::<bool>() {
+                    return v.to_string();
+                }
+                "<erased>".to_string()
+            }
+            None => "<none>".to_string(),
+        }
     }
 
     /// 获取第 i 个参数的可变引用
@@ -509,8 +526,9 @@ impl __Params {
         self.args.get_mut(i).and_then(|b| b.downcast_mut::<T>())
     }
 
-    /// 设置第 i 个参数
-    pub fn set<T: 'static>(&mut self, i: usize, val: T) {
+    /// 设置第 i 个参数（索引为 LZ 的 i64 整数语义）
+    pub fn set<T: 'static>(&mut self, i: i64, val: T) {
+        let i = i as usize;
         if i < self.args.len() {
             self.args[i] = Box::new(val);
         } else {

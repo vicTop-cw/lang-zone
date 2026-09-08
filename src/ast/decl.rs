@@ -155,6 +155,8 @@ pub struct StructDef {
     pub methods: Vec<Function>,
     pub magic_methods: Vec<Function>,
     pub is_enum: bool,
+    /// 是否由 `case struct` 关键字声明（自动配 __unapply__ / __unapply_seq__ 提取魔法方法）
+    pub is_case: bool,
     pub decorators: Vec<Decorator>,
     pub repr_attr: Option<String>,
 }

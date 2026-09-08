@@ -319,3 +319,27 @@ def main() =
         "5\n104\n",
     );
 }
+
+#[test]
+fn sem_for_case_struct_unapply() {
+    // case struct 自动配 __unapply__；let 绑定与 for 循环变量均支持提取解构；
+    // for guard 在解构之后求值，可引用解构出的变量（见 SYNTAX/05-控制流.md §3.1）
+    check_case(
+        "for_unapply",
+        r#"
+case struct PointEx(x: int, y: int)
+
+def main() =
+    let p = PointEx(1, 2)
+    let PointEx(a, b) = p
+    print("let:", a, b)
+    let pts = [PointEx(1, 2), PointEx(3, 4), PointEx(5, 6)]
+    for PointEx(x, y) in pts:
+        print("for:", x, y)
+    let pts2 = [PointEx(1, 2), PointEx(3, 4), PointEx(5, 6)]
+    for PointEx(x, y) in pts2 if x > 1:
+        print("for-guard:", x + y)
+"#,
+        "\"let:\" 1 2\n\"for:\" 1 2\n\"for:\" 3 4\n\"for:\" 5 6\n\"for-guard:\" 7\n\"for-guard:\" 11\n",
+    );
+}

@@ -3,6 +3,13 @@
 use super::token::Token;
 use crate::util::chars::is_build_ws;
 use super::indent::IndentStack;
+
+/// 构建块符号（`=:` `~:` `*: ` `^:`）之前的合法边界：
+/// 空白字符，或括号/方括号/花括号/逗号（即处于调用实参、下标、元组等位置）。
+/// 用于允许 `f(~: ...)` 这类「符号紧贴 `(`」的合法写法（BUG-IR-001）。
+fn is_build_before(c: Option<char>) -> bool {
+    is_build_ws(c) || matches!(c, Some('(' | ')' | '[' | ']' | '{' | '}' | ','))
+}
 pub struct Lexer {
     chars: Vec<char>,
     pos: usize,
@@ -76,13 +83,23 @@ impl Lexer {
 
     fn skip_block_comment(&mut self) {
         // /* ... */ 多行注释（Java/Rust 体系）；# 预留给宏语法，不再作注释
-        loop {
+        // 支持嵌套 /* /* */ */ ：用深度计数，遇到 /* 深度+1，遇到 */ 深度-1，
+        // 深度归零才真正结束（调用方已消费起始的 /*，故初始深度为 1）。
+        let mut depth: usize = 1;
+        while depth > 0 {
             match self.peek() {
                 None => break,
+                // 嵌套起始 /* → 深度+1
+                Some('/') if self.peek_n(1) == Some('*') => {
+                    self.advance();
+                    self.advance();
+                    depth += 1;
+                }
+                // 注释结束 */ → 深度-1
                 Some('*') if self.peek_n(1) == Some('/') => {
                     self.advance();
                     self.advance();
-                    break;
+                    depth -= 1;
                 }
                 Some(_) => { self.advance(); }
             }
@@ -585,7 +602,7 @@ impl Lexer {
                 }
                 // 构建块符号 =: 变量构建块（前后必须留白，其后必须换行缩进）
                 '=' if self.peek_n(1) == Some(':') => {
-                    if is_build_ws(self.prev_char()) && is_build_ws(self.peek_n(2)) {
+                    if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
                         self.advance(); self.advance();
                         tokens.push(Token::BuildAssign);
                     } else {
@@ -657,7 +674,7 @@ impl Lexer {
 
                 // 构建块符号 *: 生成器调用构建块（前后必须留白，其后必须换行缩进）
                 '*' if self.peek_n(1) == Some(':') => {
-                    if is_build_ws(self.prev_char()) && is_build_ws(self.peek_n(2)) {
+                    if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
                         self.advance(); self.advance();
                         tokens.push(Token::BuildGen);
                     } else {
@@ -725,7 +742,7 @@ impl Lexer {
                 '%' => { self.advance(); tokens.push(Token::Percent); line_start = false; }
                 // 构建块符号 ~: 调用构建块（前后必须留白，其后必须换行缩进）
                 '~' if self.peek_n(1) == Some(':') => {
-                    if is_build_ws(self.prev_char()) && is_build_ws(self.peek_n(2)) {
+                    if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
                         self.advance(); self.advance();
                         tokens.push(Token::BuildCall);
                     } else {

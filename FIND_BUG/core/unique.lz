@@ -64,9 +64,9 @@ def main() =
   // unique_by length
   words = ["apple", "banana", "apricot", "blueberry", "cherry"]
   r3 = unique_by(words, |s: str len(s))
-  print("unique_by len:", r3)  // [apple, banana, blueberry] (5,6,9 唯一)
-  // apple(5), banana(6), apricot(5)→skip, blueberry(9), cherry(6)→skip
-  assert len(r3) == 3
+  print("unique_by len:", r3)  // [apple, banana, apricot, blueberry] (长度 5,6,7,9 唯一)
+  // apple(5), banana(6), apricot(7), blueberry(9), cherry(6)→skip
+  assert len(r3) == 4
 
   // dedup
   r4 = dedup([1, 1, 1, 2, 2, 3, 3, 3, 3])

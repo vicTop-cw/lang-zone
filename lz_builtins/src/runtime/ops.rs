@@ -152,6 +152,16 @@ impl LzNeg for f64 {
     }
 }
 
+// 字符串拼接：LZ 的 `a + b` 对字符串执行拼接（语义同 Python str + str）。
+// Rust 原生 String 未实现 Add<String>，故经 LzAdd 分派；泛型闭包（如
+// fold 的 `acc + s`）凭此对 i64 与 String 同时合法。
+impl LzAdd for String {
+    type Output = String;
+    fn __add__(self, rhs: String) -> String {
+        format!("{}{}", self, rhs)
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // 类型转换 trait
 // ══════════════════════════════════════════════════════════════

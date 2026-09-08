@@ -35,6 +35,3 @@ pub mod infer;
 
 // ── L3.5 中间表示层 ──
 pub mod ir;
-
-// ── L4 代码生成层 ──
-pub mod codegen;

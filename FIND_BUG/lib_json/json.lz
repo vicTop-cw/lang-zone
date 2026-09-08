@@ -37,19 +37,19 @@ struct Parser =
         self.skip_ws()
         let ch = self.peek()
         if ch == "{":
-            self.parse_object()
+            self.parse_object()?
         elif ch == "[":
-            self.parse_array()
+            self.parse_array()?
         elif ch == "\"":
-            self.parse_string()
+            self.parse_string()?
         elif ch == "t":
-            self.parse_true()
+            self.parse_true()?
         elif ch == "f":
-            self.parse_false()
+            self.parse_false()?
         elif ch == "n":
-            self.parse_null()
+            self.parse_null()?
         elif ch == "-" or (ch >= "0" and ch <= "9"):
-            self.parse_number()
+            self.parse_number()?
         else:
             raise ParseError.UnexpectedChar(self.pos, ch)
 
@@ -126,13 +126,13 @@ struct Parser =
         if self.peek() == "]":
             self.advance()
             return JsonValue.Array(items)
-        let first = self.parse_value()
+        let first = self.parse_value()?
         let items2 = items + [first]
         self.skip_ws()
         while self.peek() == ",":
             self.advance()
             self.skip_ws()
-            let item = self.parse_value()
+            let item = self.parse_value()?
             let items2 = items2 + [item]
             self.skip_ws()
         if self.peek() != "]":
@@ -150,7 +150,7 @@ struct Parser =
             self.advance()
             return JsonValue.Object(obj)
         self.skip_ws()
-        let key_val = self.parse_string()
+        let key_val = self.parse_string()?
         let key = match key_val:
             case JsonValue.String(s):
                 s
@@ -161,14 +161,14 @@ struct Parser =
             raise ParseError.UnexpectedChar(self.pos, self.peek())
         self.advance()
         self.skip_ws()
-        let val = self.parse_value()
+        let val = self.parse_value()?
         let obj2 = obj
         obj2[key] = val
         self.skip_ws()
         while self.peek() == ",":
             self.advance()
             self.skip_ws()
-            let key_val2 = self.parse_string()
+            let key_val2 = self.parse_string()?
             let key2 = match key_val2:
                 case JsonValue.String(s):
                     s
@@ -179,7 +179,7 @@ struct Parser =
                 raise ParseError.UnexpectedChar(self.pos, self.peek())
             self.advance()
             self.skip_ws()
-            let val2 = self.parse_value()
+            let val2 = self.parse_value()?
             let obj2 = obj2
             obj2[key2] = val2
             self.skip_ws()
@@ -191,7 +191,7 @@ struct Parser =
 def parse(s: str) -> JsonValue raises ParseError =
     let parser = Parser(s: s, pos: 0)
     parser.skip_ws()
-    let val = parser.parse_value()
+    let val = parser.parse_value()?
     parser.skip_ws()
     if parser.pos < s.len():
         raise ParseError.UnexpectedChar(parser.pos, s[parser.pos])
@@ -230,31 +230,31 @@ def stringify(val: JsonValue) -> str =
 
 def main() =
     // basic values
-    let j1 = parse("null")
+    let j1 = parse("null")?
     assert stringify(j1) == "null"
 
-    let j2 = parse("true")
+    let j2 = parse("true")?
     assert stringify(j2) == "true"
 
-    let j3 = parse("42")
+    let j3 = parse("42")?
     assert stringify(j3) == "42"
 
-    let j4 = parse("\"hello\"")
+    let j4 = parse("\"hello\"")?
     assert stringify(j4) == "\"hello\""
 
     // array
-    let j5 = parse("[1, 2, 3]")
+    let j5 = parse("[1, 2, 3]")?
     assert stringify(j5) == "[1, 2, 3]"
 
     // object
-    let j6 = parse("{\"a\": 1, \"b\": 2}")
+    let j6 = parse("{\"a\": 1, \"b\": 2}")?
     assert stringify(j6) == "{\"a\": 1, \"b\": 2}"
 
     // error handling
     let bad = try:
         parse("invalid")
     catch ParseError.UnexpectedChar(_, _):
-        True
-    assert bad == True
+        JsonValue.Bool(True)
+    assert bad == JsonValue.Bool(True)
 
     print("lib_json OK")

@@ -5,6 +5,31 @@ use super::expr::ParserExprExt;
 use super::parser::Parser;
 use crate::ast::*;
 use crate::lexer::Token;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// 循环变量下糖用的临时名计数器（避免与用户变量冲突）
+static FOR_TMP_CTR: AtomicUsize = AtomicUsize::new(0);
+
+/// 收集解构模式中所有绑定名（扁平化），`let` 与 `for` 解构下糖共用
+fn pattern_bind_names(p: &Pattern) -> Vec<String> {
+    let mut out = Vec::new();
+    fn go(p: &Pattern, out: &mut Vec<String>) {
+        match p {
+            Pattern::Ident(n) => out.push(n.clone()),
+            Pattern::Wildcard => out.push("_".to_string()),
+            Pattern::RefMutIdent(n) => out.push(n.clone()),
+            Pattern::Variant(_, ps) | Pattern::Tuple(ps) | Pattern::List(ps) => {
+                for x in ps {
+                    go(x, out);
+                }
+            }
+            Pattern::Rest(_) => out.push("_".to_string()),
+            _ => {}
+        }
+    }
+    go(p, &mut out);
+    out
+}
 
 /// Parser 的语句解析扩展 trait
 pub trait ParserStmtExt {
@@ -340,8 +365,12 @@ impl ParserStmtExt for Parser {
             }
             Token::For => {
                 self.advance();
-                // 支持解构: for (idx, val) in iter → var = "(idx, val)"
-                let var = if self.check(&Token::LParen) {
+                // 解构循环变量:
+                //   for (idx, val) in iter   → var = "(idx, val)"（元组，存字符串由 codegen/comptime 特殊处理）
+                //   for PointEx(x, y) in pts → 下糖为 for __tmp in iter: let PointEx(x, y) = __tmp; 体
+                //                            （case struct 自动配 __unapply__，复用 let 提取解构机制）
+                let (var, pre_stmts): (String, Vec<Stmt>) = if self.check(&Token::LParen) {
+                    // 现有元组解构（字符串 hack，运行时由 codegen 处理）
                     self.advance(); // (
                     let mut elems: Vec<String> = Vec::new();
                     while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
@@ -353,26 +382,65 @@ impl ParserStmtExt for Parser {
                         }
                     }
                     self.expect(Token::RParen)?;
-                    format!("({})", elems.join(", "))
+                    (format!("({})", elems.join(", ")), Vec::new())
+                } else if matches!(self.peek(), Token::Ident(_)) && self.peek_n(1) == &Token::LParen {
+                    // struct 解构模式（case struct __unapply__ 提取）
+                    let pattern = self.parse_pattern()?;
+                    let names = pattern_bind_names(&pattern);
+                    let id = FOR_TMP_CTR.fetch_add(1, Ordering::SeqCst);
+                    let tmp = format!("__lz_for_tmp_{}", id);
+                    let pre = Stmt::LetTuple {
+                        names,
+                        ty: None,
+                        value: Expr::MethodCall {
+                            receiver: Box::new(Expr::Ident(tmp.clone())),
+                            method: "__unapply__".into(),
+                            args: vec![],
+                        },
+                    };
+                    (tmp, vec![pre])
                 } else {
-                    match self.advance() {
+                    let v = match self.advance() {
                         Token::Ident(n) => n,
                         t => return Err(format!("Expected variable, got {:?}", t)),
-                    }
+                    };
+                    (v, Vec::new())
                 };
+                let struct_destructure = !pre_stmts.is_empty();
                 self.expect(Token::In)?;
                 let iter = self.parse_comprehension_iter()?;
                 // for var in iter if guard:
-                let guard = if self.check(&Token::If) {
+                let mut guard = if self.check(&Token::If) {
                     self.advance();
                     Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                // struct 解构模式：guard 需在解构之后生效（解构在体首完成），
+                // 故下糖为体首 `if !(guard) { continue }`，并清空 Stmt::For.guard
+                // （否则 codegen 会把 guard 包成 .filter(|&__tmp| ...) 闭包，
+                // 而 guard 中引用的解构变量尚未绑定，作用域错位）。
+                let guard_stmt = if struct_destructure {
+                    guard.take().map(|g| Stmt::Expr(Expr::If {
+                        cond: Box::new(Expr::Unary {
+                            op: UnaryOp::Not,
+                            operand: Box::new(g),
+                        }),
+                        then_body: vec![Stmt::Continue],
+                        elif_clauses: vec![],
+                        else_body: None,
+                    }))
                 } else {
                     None
                 };
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
                 self.expect(Token::Indent)?;
-                let body = self.parse_block()?;
+                let mut body = pre_stmts;
+                if let Some(gs) = guard_stmt {
+                    body.push(gs);
+                }
+                body.extend(self.parse_block()?);
                 self.expect(Token::Dedent)?;
                 // for ... else:
                 let else_body = if self.check(&Token::Else) {
@@ -584,6 +652,17 @@ impl ParserStmtExt for Parser {
             Token::Assert => {
                 self.advance();
                 let expr = self.parse_expr()?;
+                // assert expr, "msg" → 消息形式（规范 SYNTAX/15 §六）：整体 expr 作条件，
+                // 不拆分 ==（与 assert_eq! 的相等形式互斥，由 `,` 区分）
+                if self.check(&Token::Comma) {
+                    self.advance();
+                    let message = Some(self.parse_expr()?);
+                    return Ok(Stmt::Assert {
+                        expr,
+                        expected: None,
+                        message,
+                    });
+                }
                 // assert expr == expected → assert_eq!(expr, expected)
                 if let Expr::Binary {
                     left,
@@ -594,6 +673,7 @@ impl ParserStmtExt for Parser {
                     Ok(Stmt::Assert {
                         expr: *left,
                         expected: Some(*right),
+                        message: None,
                     })
                 } else if let Expr::Binary {
                     left,
@@ -611,11 +691,13 @@ impl ParserStmtExt for Parser {
                             right,
                         },
                         expected: None,
+                        message: None,
                     })
                 } else {
                     Ok(Stmt::Assert {
                         expr,
                         expected: None,
+                        message: None,
                     })
                 }
             }
@@ -635,7 +717,7 @@ impl ParserStmtExt for Parser {
                 Ok(Stmt::FnDef { func })
             }
             Token::Enum => {
-                let enum_def = self.parse_struct_like(true)?;
+                let enum_def = self.parse_struct_like(true, false)?;
                 Ok(Stmt::EnumDef(enum_def))
             }
             Token::Async => {
@@ -1089,6 +1171,29 @@ impl ParserStmtExt for Parser {
             }
         }
 
+        // ── struct 解构绑定：let PointEx(x, y) = p ──
+        // 对应 Scala unapply 提取器；PointEx 为 case struct 时自动配 __unapply__，
+        // 解构在 IR 层糖化为 `let (x, y) = (p).__unapply__()`（复用元组解构）。
+        {
+            let n1 = self.peek().clone();
+            let n2 = self.peek_n(1).clone();
+            if matches!(n1, Token::Ident(_)) && matches!(n2, Token::LParen) {
+                let pattern = self.parse_pattern()?;
+                self.expect(Token::Eq)?;
+                let value = self.parse_maybe_build_value()?;
+                let names = pattern_bind_names(&pattern);
+                return Ok(Stmt::LetTuple {
+                    names,
+                    ty: None,
+                    value: Expr::MethodCall {
+                        receiver: Box::new(value),
+                        method: "__unapply__".into(),
+                        args: vec![],
+                    },
+                });
+            }
+        }
+
         // 支持解构绑定: let (a, b) = expr
         if self.check(&Token::LParen) {
             // 解析 tuple 解构模式，收集所有名字
@@ -1283,13 +1388,19 @@ impl ParserStmtExt for Parser {
 
     // ─── 构建块 ───
 
-    /// 解析构建块体：符号后必须换行并缩进，跟一个缩进块
+    /// 解析构建块体：支持两种形式
+    /// - 缩进块：`=:` 后换行并缩进，跟一个缩进块（原有行为）
+    /// - 行内形式：`=:` 后直接跟单个表达式（如 `y =: x + 1` / `f ~: _ % 2 == 0`）
     fn parse_build_block_body(&mut self) -> Result<Vec<Stmt>, String> {
         self.skip_newlines();
-        self.expect(Token::Indent)?;
-        let body = self.parse_block()?;
-        self.expect(Token::Dedent)?;
-        Ok(body)
+        if self.check(&Token::Indent) {
+            self.advance();
+            let body = self.parse_block()?;
+            self.expect(Token::Dedent)?;
+            Ok(body)
+        } else {
+            Ok(vec![Stmt::Expr(self.parse_expr()?)])
+        }
     }
 
     /// 语义检查：构建块返回值 / yield 载荷必须是元组、字典、结构体构造或实现 BuildParams trait 的表达式

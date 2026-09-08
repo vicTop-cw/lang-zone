@@ -317,6 +317,9 @@ pub struct FnDef {
     pub generics: Vec<GenericParam>,
     pub params: Vec<Param>,
     pub ret_ty: IrType,
+    /// BUG-CG-004（轮次12）：raises 异常类型。Some(E) 时 ret_ty 实际为
+    /// `Result<ret_ty, E>`，函数体 return/尾表达式被包 Ok(...)、raise 被包 Err(...)。
+    pub raises: Option<IrType>,
     pub body: Block,
     pub intrinsics: Vec<Intrinsic>,
     pub is_async: bool,
@@ -341,6 +344,8 @@ pub struct StructDef {
     pub generics: Vec<GenericParam>,
     pub fields: Vec<Field>,
     pub methods: Vec<FnDef>,
+    /// 是否由 `case struct` 声明（自动配 __unapply__ / __unapply_seq__ 提取魔法方法）
+    pub is_case: bool,
     /// 是否定义了 __new__ 魔术构造（用于构造时补齐默认字段）
     pub has_new: bool,
     /// __new__ 的参数列表（用于 codegen 生成 __lz_new 函数签名）
