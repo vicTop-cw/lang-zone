@@ -4840,6 +4840,36 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 IrType::Any if ir_ty == IrType::Any => ir_value.ty.clone(),
                 _ => ir_ty,
             };
+            // __from__ 隐式转换触发（06d §十四，P1-2 第一环）：
+            // `let w: Wrapper = 5`——注解类型是用户 struct、值类型与之不同、
+            // 该 struct 定义了 __from__（静态方法）→ 包装为 Wrapper::__from__(value)。
+            // 单步转换：值类型已是注解类型或 Any/泛型时不触发，避免过度转换
+            if ty.is_some() {
+                if let IrType::Named { path, .. } = &ir_ty {
+                    let has_from = ctx
+                        .struct_methods
+                        .get(path)
+                        .map(|ms| ms.contains("__from__"))
+                        .unwrap_or(false);
+                    let val_ty_matches = !matches!(ir_value.ty, IrType::Any | IrType::Generic(_))
+                        && ir_value.ty != ir_ty;
+                    if has_from && val_ty_matches {
+                        ir_value = Expr::new(
+                            ExprKind::Call {
+                                type_args: vec![],
+                                callee: Box::new(Expr::new(
+                                    ExprKind::Var(format!("{}::__from__", path)),
+                                    IrType::Any,
+                                    Span::unknown(),
+                                )),
+                                args: vec![ir_value],
+                            },
+                            ir_ty.clone(),
+                            Span::unknown(),
+                        );
+                    }
+                }
+            }
             // 当 Let 类型注解为 fn(..) -> .. 且 value 是 Lambda 时，
             // 将 fn 的参数类型传播到 Lambda 参数中
             if let IrType::Fn {

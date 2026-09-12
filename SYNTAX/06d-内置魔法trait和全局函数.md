@@ -1,10 +1,16 @@
 # LZ 魔法方法 — 内置魔法 Trait 和全局函数
 
-> 规范版本: 3.3 · 基于编译器源码 · 最后校订: 2026-09-06
+> 规范版本: 3.4 · 基于编译器源码 · 最后校订: 2026-09-12
 
 本文档列举 Lang-Zone 编译器内置的全部魔法方法（`__xxx__`），以及它们自动生成的 trait 与对应的 Rust trait。
 
 当 struct 实现了某个魔法方法时，编译器自动为该 struct 生成对应的 trait impl，同时生成一个全局函数供直接调用。
+
+**实现状态图例**（与编译器实际行为同步，速查索引已逐条标注）：
+
+- ✅ **已接通**：运算符/语法调用点直派该方法，trait impl 自动生成，产物经 rustc 编译运行验证
+- 🔸 **部分支持**：已注册或调用点可用，但 trait impl / 全部场景未覆盖
+- ❌ **未实现**：仅规范声明，编译器无对应处理（写了不报错但不联动）
 
 ---
 
@@ -373,74 +379,79 @@ struct MyFile =
 
 ## 速查索引
 
-| 魔法方法 | Trait | 分类 |
-|----------|-------|------|
-| `__add__` | `std::ops::Add` | 算术 |
-| `__sub__` | `std::ops::Sub` | 算术 |
-| `__mul__` | `std::ops::Mul` | 算术 |
-| `__div__` | `std::ops::Div` | 算术 |
-| `__rem__` | `std::ops::Rem` | 算术 |
-| `__pow__` | `Pow` | 算术 |
-| `__bitand__` | `std::ops::BitAnd` | 位运算 |
-| `__bitor__` | `std::ops::BitOr` | 位运算 |
-| `__bitxor__` | `std::ops::BitXor` | 位运算 |
-| `__shl__` | `std::ops::Shl` | 位运算 |
-| `__shr__` | `std::ops::Shr` | 位运算 |
-| `__neg__` | `std::ops::Neg` | 一元 |
-| `__not__` | `std::ops::Not` | 一元 |
-| `__invert__` | `HasInvert` | 一元 |
-| `__iadd__` | `std::ops::AddAssign` | 复合赋值 |
-| `__isub__` | `std::ops::SubAssign` | 复合赋值 |
-| `__imul__` | `std::ops::MulAssign` | 复合赋值 |
-| `__idiv__` | `std::ops::DivAssign` | 复合赋值 |
-| `__eq__` | `std::cmp::PartialEq` | 比较 |
-| `__ne__` | `std::cmp::PartialEq` | 比较 |
-| `__lt__` | `std::cmp::PartialOrd` | 比较 |
-| `__le__` | `std::cmp::PartialOrd` | 比较 |
-| `__gt__` | `std::cmp::PartialOrd` | 比较 |
-| `__ge__` | `std::cmp::PartialOrd` | 比较 |
-| `__cmp__` | `std::cmp::Ord` | 比较 |
-| `__hash__` | `std::hash::Hash` | 比较 |
-| `__from__` | `std::convert::From` | 类型转换 |
-| `__into__` | `std::convert::Into` | 类型转换 |
-| `__cast__` | `Cast` | 类型转换 |
-| `__try_cast__` | `TryCast` | 类型转换 |
-| `__try_from__` | `std::convert::TryFrom` | 类型转换 |
-| `__try_into__` | `std::convert::TryInto` | 类型转换 |
-| `__str__` | `std::fmt::Display` | 显示/调试 |
-| `__repr__` | `std::fmt::Debug` | 显示/调试 |
-| `__next__` | `std::iter::Iterator` | 容器/迭代 |
-| `__iter__` | `std::iter::IntoIterator` | 容器/迭代 |
-| `__into_iter__` | `std::iter::IntoIterator` | 容器/迭代 |
-| `__rev__` | `std::iter::DoubleEndedIterator` | 容器/迭代 |
-| `__size_hint__` | `std::iter::Iterator` | 容器/迭代 |
-| `__len__` | `HasLen` | 容器/迭代 |
-| `__contains__` | `Contains` | 容器/迭代 |
-| `__drop__` | `std::ops::Drop` | 生命周期 |
-| `__clone__` | `std::clone::Clone` | 生命周期 |
-| `__default__` | `std::default::Default` | 生命周期 |
-| `__call__` | `Callable` | 调用/索引 |
-| `__getitem__` | `std::ops::Index` | 调用/索引 |
-| `__setitem__` | `std::ops::IndexMut` | 调用/索引 |
-| `__lpipe__`/`__rpipe__` | — | 管道（见 04-表达式.md §十） |
-| `__is_ok__`/`__unwrap__` | `SpreadOk` | 错误传播 `?` |
-| `__err__` | `SpreadErr` | 错误传播 `?` |
-| `__bool__` | `HasBool` | 布尔/数学 |
-| `__abs__` | `HasAbs` | 布尔/数学 |
-| `__buildparams__` | `BuildParams` | 构建块 |
-| `__implicit_copy__` | `ImplicitCopy` | 隐式策略 |
-| `__implicit_to__` | `ImplicitInto` | 隐式策略 |
-| `__implicit_from__` | `ImplicitFrom` | 隐式策略 |
-| `__implicit_default__` | `ImplicitDefault` | 隐式策略 |
-| `__guarded_pred__` | `GuardedStrategy` | 守卫策略 |
-| `__guarded_action__` | `GuardedStrategy` | 守卫策略 |
-| `__int__` | `std::convert::From` | 类型缺口 |
-| `__float__` | `std::convert::From` | 类型缺口 |
-| `__pos__` | `Pos` | 类型缺口 |
-| `__deref__` | `std::ops::Deref` | 运算符 |
-| `__enter__` | `Enter` | 上下文 |
-| `__exit__` | `Exit` | 上下文 |
-| `__iter_strategy__` | `std::iter::IntoIterator` | 迭代策略 |
+状态依据 2026-09-12 编译器源码核实 + 探针（转译 → rustc 编译 → 运行）实测：
+
+| 魔法方法 | Trait | 分类 | 状态 |
+|----------|-------|------|:----:|
+| `__add__` | `std::ops::Add` | 算术 | ✅ |
+| `__sub__` | `std::ops::Sub` | 算术 | ✅ |
+| `__mul__` | `std::ops::Mul` | 算术 | ✅ |
+| `__div__` | `std::ops::Div` | 算术 | ✅ |
+| `__rem__` | `std::ops::Rem` | 算术 | ✅ |
+| `__pow__` | `Pow` | 算术 | 🔸 已注册；数值 `**` 走内建 `.pow()`，用户 struct 无 Pow impl 生成 |
+| `__bitand__` | `std::ops::BitAnd` | 位运算 | ✅ |
+| `__bitor__` | `std::ops::BitOr` | 位运算 | ✅ |
+| `__bitxor__` | `std::ops::BitXor` | 位运算 | ✅ |
+| `__shl__` | `std::ops::Shl` | 位运算 | ✅ |
+| `__shr__` | `std::ops::Shr` | 位运算 | ✅ |
+| `__neg__` | `std::ops::Neg` | 一元 | ✅ |
+| `__not__` | `std::ops::Not` | 一元 | ✅ |
+| `__invert__` | `std::ops::Not`（复用） | 一元 | ✅ `~a`/`!a`/`not a` 分派，`__not__` 缺席时回退 |
+| `__iadd__` | `std::ops::AddAssign` | 复合赋值 | ✅ |
+| `__isub__` | `std::ops::SubAssign` | 复合赋值 | 🔸 `a -= b` 直派方法调用；无 SubAssign impl 生成 |
+| `__imul__` | `std::ops::MulAssign` | 复合赋值 | 🔸 同上（MulAssign impl 未生成） |
+| `__idiv__` | `std::ops::DivAssign` | 复合赋值 | 🔸 同上（DivAssign impl 未生成） |
+| `__eq__` | `std::cmp::PartialEq` | 比较 | ✅ |
+| `__ne__` | `std::cmp::PartialEq` | 比较 | ✅ 未定义时由 `!__eq__` 派生 |
+| `__lt__` | `std::cmp::PartialOrd` | 比较 | ✅ `if a < b` 直派 + PartialOrd 由 `__eq__`+`__lt__` 推导 |
+| `__le__` | `std::cmp::PartialOrd` | 比较 | ✅ |
+| `__gt__` | `std::cmp::PartialOrd` | 比较 | ✅ |
+| `__ge__` | `std::cmp::PartialOrd` | 比较 | ✅ |
+| `__cmp__` | `std::cmp::Ord` | 比较 | 🔸 已注册，无 Ord impl 生成 |
+| `__hash__` | `std::hash::Hash` | 比较 | 🔸 已注册，无 Hash impl 生成 |
+| `__from__` | `std::convert::From` | 类型转换 | ✅ From impl 生成 + `let x: T = v` 隐式触发 |
+| `__into__` | `std::convert::Into` | 类型转换 | ✅ Into impl 生成；显式 `.__into__()` 调用 |
+| `__cast__` | `Cast` | 类型转换 | 🔸 语义检查引用，无 impl 生成 |
+| `__try_cast__` | `TryCast` | 类型转换 | 🔸 同上 |
+| `__try_from__` | `std::convert::TryFrom` | 类型转换 | 🔸 已注册，无 impl 生成 |
+| `__try_into__` | `std::convert::TryInto` | 类型转换 | 🔸 已注册，无 impl 生成 |
+| `__str__` | `std::fmt::Display` | 显示/调试 | ✅ |
+| `__repr__` | `std::fmt::Debug` | 显示/调试 | ✅ |
+| `__next__` | `std::iter::Iterator` | 容器/迭代 | ✅ 返回 `Option<T>` 时生成 |
+| `__iter__` | `std::iter::IntoIterator` | 容器/迭代 | ✅ 返回命名迭代器时生成 |
+| `__into_iter__` | `std::iter::IntoIterator` | 容器/迭代 | 🔸 |
+| `__rev__` | `std::iter::DoubleEndedIterator` | 容器/迭代 | 🔸 |
+| `__size_hint__` | `std::iter::Iterator` | 容器/迭代 | ✅ impl Iterator 场景映射 `size_hint` |
+| `__len__` | HasLen | 容器/迭代 | ✅ `len()`/真值链 `__len__ != 0`；无 HasLen trait 生成 |
+| `__contains__` | Contains | 容器/迭代 | ✅ `x in obj` 直派；无 Contains trait 生成 |
+| `__drop__` | `std::ops::Drop` | 生命周期 | 🔸 已注册，无 Drop impl 生成 |
+| `__clone__` | `std::clone::Clone` | 生命周期 | 🔸 struct 自动 derive(Clone) 兜底 |
+| `__default__` | `std::default::Default` | 生命周期 | 🔸 已注册，无 Default impl 生成 |
+| `__call__` | `Callable` | 调用/索引 | 🔸 lz_builtins 有 Callable trait |
+| `__getitem__` | `std::ops::Index` | 调用/索引 | ✅ `obj[key]` 直派 |
+| `__setitem__` | `std::ops::IndexMut` | 调用/索引 | ✅ `obj[key] = v` 直派；无 IndexMut impl 生成 |
+| `__lpipe__`/`__rpipe__` | — | 管道 | ✅ 管道由通用 callable 语义驱动（2026-08-08 决策） |
+| `__is_ok__`/`__unwrap__` | `SpreadOk` | 错误传播 `?` | ✅ 编译器内建协议（`?` 传播三件套） |
+| `__err__` | `SpreadErr` | 错误传播 `?` | ✅ 同上 |
+| `__bool__` | HasBool | 布尔/数学 | ✅ 判定链首环 `__bool__` → `__len__` → 内建 `!is_empty()`；无 HasBool trait 生成 |
+| `__abs__` | HasAbs | 布尔/数学 | ❌ |
+| `__buildparams__` | `BuildParams` | 构建块 | ❌ |
+| `__implicit_copy__` | `ImplicitCopy` | 隐式策略 | ❌ |
+| `__implicit_to__` | ImplicitInto | 隐式策略 | ❌ |
+| `__implicit_from__` | ImplicitFrom | 隐式策略 | 🔸 lz_builtins 有 ImplicitFrom（内建转换用）；用户定义的隐式触发未实现 |
+| `__implicit_default__` | ImplicitDefault | 隐式策略 | ❌ |
+| `__guarded_pred__` | `GuardedStrategy` | 守卫策略 | ❌ |
+| `__guarded_action__` | `GuardedStrategy` | 守卫策略 | ❌ |
+| `__int__` | `std::convert::From` | 类型缺口 | ❌ |
+| `__float__` | `std::convert::From` | 类型缺口 | ❌ |
+| `__pos__` | Pos | 类型缺口 | ❌ |
+| `__deref__` | `std::ops::Deref` | 运算符 | ❌ |
+| `__unapply__` | — | 提取器 | 🔸 case struct 自动配；普通 struct 显式定义见 06a |
+| `__enter__` | Enter | 上下文 | ✅ with 构造链：enter → 体 → exit |
+| `__exit__` | Exit | 上下文 | ✅ 未定义时跳过调用（E0599 防护） |
+| `__iter_strategy__` | `std::iter::IntoIterator` | 迭代策略 | 🔸 |
+| `__new__` | New | 构造 | ✅ `__lz_new` 命名统一 + 体透传 |
+| `__init__` | Init | 构造 | ✅ 构造后 `__lz_init` 调用 |
 
 ---
 

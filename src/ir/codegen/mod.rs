@@ -1762,10 +1762,14 @@ impl CodeGen {
 
         // 未定义外部函数 stub（p16_lzi 等跨模块探测用例：.lzi 签名未加载时兜底）。
         // 名字取自 lz_builtins 导出函数表之外、且模块内无定义的顶层调用。
+        // 含 `::` 的路径调用（如 Struct::__from__ 隐式转换）是模块内已定义方法，
+        // 不是外部函数，跳过——否则生成 `fn Wrapper::__from__(...)` 非法 Rust
+        //（E0530 invalid path separator in function definition）
         if !self.unknown_extern_fns.is_empty() {
             let mut names: Vec<(String, usize)> = self
                 .unknown_extern_fns
                 .iter()
+                .filter(|(k, _)| !k.contains("::"))
                 .map(|(k, v)| (k.clone(), *v))
                 .collect();
             names.sort();
@@ -4419,6 +4423,29 @@ impl CodeGen {
                 self.emit_line(&format!("fn from(value: {}) -> Self {{", src_ty));
                 self.indent += 1;
                 self.emit_line("Self::__from__(value)");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __into__ → std::convert::Into（From→Into 链第二环，06d §十四）：
+        // `def __into__(self) -> TargetTy` →
+        // impl Into<TargetTy> for SelfTy { fn into(self) -> TargetTy { self.__into__() } }
+        // （Rust 已有 From→Into blanket，但用户只定义 __into__ 时无 From，需显式 Into impl）
+        if let Some(im) = methods.iter().find(|m| m.name == "__into__") {
+            if !matches!(im.ret_ty, IrType::Unit) {
+                let tgt_ty = self.rust_type(&im.ret_ty);
+                let where_str = self.magic_impl_where_str(im);
+                self.emit_line(&format!(
+                    "impl{} std::convert::Into<{}> for {} {} {{",
+                    generics, tgt_ty, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("fn into(self) -> {} {{", tgt_ty));
+                self.indent += 1;
+                self.emit_line("self.__into__()");
                 self.indent -= 1;
                 self.emit_line("}");
                 self.indent -= 1;
