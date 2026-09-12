@@ -11216,18 +11216,21 @@ impl CodeGen {
                 if *target == IrType::Str {
                     return format!("format!(\"{{}}\", {})", self.gen_expr(expr));
                 }
-                // __cast__ 缺口魔法直派（06d §六）：用户 struct 定义了 __cast__
-                // 且目标类型与方法返回类型一致 → `x as T` → `x.__cast__()`，
-                // 否则裸 `as` 对非原生类型报 E0605
+                // __cast__/__try_cast__ 缺口魔法直派（06d §六）：用户 struct 定义了
+                // __cast__ → `x as T` → `x.__cast__()`；仅定义 __try_cast__ →
+                // `x.__try_cast__().unwrap()`（可失败转换的断言语义，失败 panic
+                // 与 Rust `as` 截断/panic 兜底一致）；两者均无 → 裸 `as`（E0605 兜底）
                 if let IrType::Named { path, .. } = &expr.ty {
                     if self.is_known_type(path) {
-                        if let Some(cm) = self
-                            .struct_method_names(path)
-                            .into_iter()
-                            .find(|m| m == "__cast__")
-                        {
-                            let _ = cm;
+                        let names = self.struct_method_names(path);
+                        if names.contains("__cast__") {
                             return format!("({}.__cast__())", self.gen_expr(expr));
+                        }
+                        if names.contains("__try_cast__") {
+                            return format!(
+                                "({}.__try_cast__().unwrap())",
+                                self.gen_expr(expr)
+                            );
                         }
                     }
                 }

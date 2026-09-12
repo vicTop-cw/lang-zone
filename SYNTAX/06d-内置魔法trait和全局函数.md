@@ -409,10 +409,10 @@ struct MyFile =
 | `__ge__` | `std::cmp::PartialOrd` | 比较 | ✅ |
 | `__cmp__` | `std::cmp::Ord` | 比较 | ✅ `__eq__`+`__lt__` 同存时生成 Ord impl（int -1/0/1 → Ordering）+ Eq 标记 impl |
 | `__hash__` | `std::hash::Hash` | 比较 | ✅ Hash impl 委托 `__hash__()` |
-| `__from__` | `std::convert::From` | 类型转换 | ✅ From impl 生成 + `let x: T = v` 隐式触发 |
+| `__from__` | `std::convert::From` | 类型转换 | ✅ From impl 生成 + `let`/实参/返回值三触发点隐式转换；A↔B 双向 `__from__` 编译期报循环错误 |
 | `__into__` | `std::convert::Into` | 类型转换 | ✅ Into impl 生成；显式 `.__into__()` 调用 |
 | `__cast__` | `Cast` | 类型转换 | ✅ `x as T` 调用点直派 `x.__cast__()`（原生类型间仍走内置 `as`） |
-| `__try_cast__` | `TryCast` | 类型转换 | 🔸 语义检查引用；`x as T` 分派仅覆盖 `__cast__` |
+| `__try_cast__` | `TryCast` | 类型转换 | ✅ 仅定义 `__try_cast__` 时 `x as T` → `x.__try_cast__().unwrap()`（失败 panic） |
 | `__try_from__` | `std::convert::TryFrom` | 类型转换 | 🔸 已注册，无 impl 生成 |
 | `__try_into__` | `std::convert::TryInto` | 类型转换 | 🔸 已注册，无 impl 生成 |
 | `__str__` | `std::fmt::Display` | 显示/调试 | ✅ |
@@ -443,8 +443,8 @@ struct MyFile =
 | `__guarded_action__` | `GuardedStrategy` | 守卫策略 | ❌ |
 | `__int__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for i64 impl 生成 + `int(x)` 调用点直派 |
 | `__float__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for f64 impl 生成 + `float(x)` 调用点直派 |
-| `__pos__` | Pos | 类型缺口 | ❌ |
-| `__deref__` | `std::ops::Deref` | 运算符 | ❌ |
+| `__pos__` | Pos | 类型缺口 | ✅ `+a` 分派 `a.__pos__()`；无魔术方法时数值恒等 |
+| `__deref__` | `std::ops::Deref` | 运算符 | ✅ `*a` 对用户 struct 分派 `a.__deref__()`；真实引用类型保留裸解引用 |
 | `__unapply__` | — | 提取器 | 🔸 case struct 自动配；普通 struct 显式定义见 06a |
 | `__enter__` | Enter | 上下文 | ✅ with 构造链：enter → 体 → exit |
 | `__exit__` | Exit | 上下文 | ✅ 未定义时跳过调用（E0599 防护） |

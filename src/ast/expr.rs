@@ -190,6 +190,8 @@ pub enum BinOp {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
     Neg, Not, BitNot,
+    /// 一元 `+` 正号（06d §三：`+a` → `a.__pos__()`；内建数值为恒等）
+    Pos,
     /// 一元 `*` 解引用（`*(&(*boxed))` 前缀叠写，12-操作符.md §1.18）
     Deref,
     /// 一元 `&` 取引用（`*(&(*boxed))` 前缀叠写）

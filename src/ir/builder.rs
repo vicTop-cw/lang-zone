@@ -465,6 +465,8 @@ fn magic_method_for_binop(op: &BinOp) -> Option<&'static str> {
 
 fn map_unop(op: &UnaryOp) -> UnOpKind {
     match op {
+        // 不可达：Pos 在 convert_expr 中已恒等返回（数值）或魔术分派（struct）
+        UnaryOp::Pos => UnOpKind::Neg,
         UnaryOp::Neg => UnOpKind::Neg,
         UnaryOp::Not => UnOpKind::Not,
         UnaryOp::BitNot => UnOpKind::Not, // 位非降级为逻辑非
@@ -3286,21 +3288,31 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             //（06d §三：`-a` → `a.__neg__()`、`not a` → `a.__not__()`），
             // 否则裸 `-a` 需 Neg impl 且 `-a.x` 渲染有优先级歧义
             // 位非 `~a` 与 `!a`（parser 均归一为 BitNot，lexer 前缀 ~ → Exclamation）、
-            // 逻辑非 `not a`（Not）：优先 __not__，未定义时回退 __invert__
-            if matches!(op, UnaryOp::Neg | UnaryOp::Not | UnaryOp::BitNot) {
+            // 逻辑非 `not a`（Not）：优先 __not__，未定义时回退 __invert__。
+            // 正号 `+a`（Pos）→ `a.__pos__()`（06d §三）；Neg 已有独立分派。
+            // 解引用 `*a`（Deref）→ `a.__deref__()`（06d §六；非指针类型裸
+            // `*a` 报 E0614，用户 struct 须经魔法方法）
+            if matches!(
+                op,
+                UnaryOp::Neg | UnaryOp::Not | UnaryOp::BitNot | UnaryOp::Pos | UnaryOp::Deref
+            ) {
                 let op_ty = infer_expr_type(operand, ctx);
                 if let IrType::Named { path, .. } = &op_ty {
-                    // 逻辑非 `not a` / 位非 `~a`（lexer 均归一为 Not）：
-                    // 优先 __not__，未定义时回退 __invert__（06d §三：~a → a.__invert__()）
                     let methods = ctx.struct_methods.get(path);
-                    let magic = if matches!(op, UnaryOp::Neg) {
-                        Some("__neg__")
-                    } else if methods.map(|ms| ms.contains("__not__")).unwrap_or(false) {
-                        Some("__not__")
-                    } else if methods.map(|ms| ms.contains("__invert__")).unwrap_or(false) {
-                        Some("__invert__")
-                    } else {
-                        None
+                    let magic = match op {
+                        UnaryOp::Neg => Some("__neg__"),
+                        UnaryOp::Pos => Some("__pos__"),
+                        UnaryOp::Deref => Some("__deref__"),
+                        UnaryOp::Not => {
+                            if methods.map(|ms| ms.contains("__not__")).unwrap_or(false) {
+                                Some("__not__")
+                            } else if methods.map(|ms| ms.contains("__invert__")).unwrap_or(false) {
+                                Some("__invert__")
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
                     };
                     if let Some(magic) = magic {
                         if methods.map(|ms| ms.contains(magic)).unwrap_or(false) {
@@ -3317,6 +3329,11 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             );
                         }
                     }
+                }
+                // 无魔术方法的 `+a`：恒等返回操作数（数值正号不变值；
+                // 不可落到 UnOp——map_unop 无恒等变体，兜底 Neg 会把 +a 变 -a）
+                if matches!(op, UnaryOp::Pos) {
+                    return convert_expr(operand, ctx);
                 }
             }
             ExprKind::UnOp {
@@ -9134,6 +9151,62 @@ fn build_ir_inner(
     let duck_errors = crate::ir::duck_check::check_duck_satisfaction(&ir_mod);
     if !duck_errors.is_empty() {
         return Err(IrBuildError::Generic(duck_errors.join("\n")));
+    }
+
+    // 14. __from__ 循环检测（06d §十四）：A↔B 双向 __from__ 会在隐式转换
+    // 三触发点（let/实参/返回值）互相递归展开直至栈溢出，编译期报错。
+    // 例：struct A { def __from__(b: B) } + struct B { def __from__(a: A) }
+    {
+        // from_edges[from_ty] = [to_ty, ...]：from_ty::__from__(to_ty)
+        let mut from_edges: std::collections::HashMap<
+            String,
+            Vec<String>,
+        > = std::collections::HashMap::new();
+        for item in &ir_mod.items {
+            // __from__ 定义在 impl 块（`impl A = def __from__...`）→ ImplDef.methods；
+            // struct 内联方法（若存在）→ StructDef.methods。两处都扫
+            let (sname, methods): (Option<&String>, &Vec<crate::ir::node::FnDef>) = match item {
+                crate::ir::node::Item::StructDef(sd) => (Some(&sd.name), &sd.methods),
+                crate::ir::node::Item::Impl(im) => {
+                    match &im.for_type {
+                        IrType::Named { path, .. } => (Some(path), &im.methods),
+                        _ => (None, &im.methods),
+                    }
+                }
+                _ => continue,
+            };
+            let sname = match sname {
+                Some(s) => s.clone(),
+                None => continue,
+            };
+            for m in methods {
+                if m.name == "__from__" {
+                    if let Some(p0) = m.params.first() {
+                        if let IrType::Named { path, .. } = &p0.ty {
+                            from_edges.entry(sname.clone()).or_default().push(path.clone());
+                        }
+                    }
+                }
+            }
+        }
+        let mut cyc_errors: Vec<String> = Vec::new();
+        let mut reported: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        for (a, targets) in &from_edges {
+            for b in targets {
+                if let Some(bt) = from_edges.get(b) {
+                    if bt.contains(a) && reported.insert((a.clone(), b.clone())) {
+                        cyc_errors.push(format!(
+                            "__from__ 转换循环：{}::__from__({}) 与 {}::__from__({}) 互为源类型，隐式转换将无限递归（06d §十四）",
+                            a, b, b, a
+                        ));
+                    }
+                }
+            }
+        }
+        if !cyc_errors.is_empty() {
+            return Err(IrBuildError::Generic(cyc_errors.join("\n")));
+        }
     }
 
     Ok(ir_mod)

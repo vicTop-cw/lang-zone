@@ -392,8 +392,10 @@ impl ParserExprExt for Parser {
             }
             Token::Plus => {
                 self.advance();
-                // 一元 + 不改变值，直接返回操作数
-                self.parse_unary()
+                // 一元 `+` 保留为 Pos 节点（06d §三）：内建数值恒等由 codegen
+                // 处理；用户 struct 分派 `a.__pos__()`
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary { op: UnaryOp::Pos, operand: Box::new(operand) })
             }
             Token::Exclamation => {
                 self.advance();
