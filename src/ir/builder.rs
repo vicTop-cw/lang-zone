@@ -5392,14 +5392,40 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             loop_ctx.current_fn_name = ctx.current_fn_name.clone();
             // 推导迭代变量的类型
             let iter_ty = infer_expr_type(iter, ctx);
-            let elem_ty = match &iter_ty {
+            // __into_iter__ 分派（06d §九）：for-in 的迭代对象是定义了
+            // __into_iter__ 的用户 struct → 包装为 `iter.__into_iter__()`
+            //（返回 List<T>，复用 Vec 迭代机制；否则生成裸 .into_iter()
+            // 对非 IntoIterator 类型报 E0599）
+            let iter_expr = if let IrType::Named { path, .. } = &iter_ty {
+                if ctx.struct_methods.get(path).map(|ms| ms.contains("__into_iter__")).unwrap_or(false) {
+                    let recv = convert_expr(iter, ctx);
+                    // 返回类型取方法注解（List<int> 等），注解缺失回退 Any
+                    let ret_ty = ctx
+                        .lookup_fn_return(&format!("{}.__into_iter__", path))
+                        .clone();
+                    Expr::new(
+                        ExprKind::MethodCall {
+                            receiver: Box::new(recv),
+                            method: "__into_iter__".into(),
+                            args: vec![],
+                        },
+                        ret_ty,
+                        Span::unknown(),
+                    )
+                } else {
+                    convert_expr(iter, ctx)
+                }
+            } else {
+                convert_expr(iter, ctx)
+            };
+            let elem_ty = match &iter_expr.ty {
                 IrType::Named { args, .. } if !args.is_empty() => args[0].clone(),
                 _ => IrType::Any,
             };
             loop_ctx.add_var(var, elem_ty);
             Stmt::For {
                 var: var.clone(),
-                iter: convert_expr(iter, ctx),
+                iter: iter_expr,
                 guard: guard.as_ref().map(|g| convert_expr(g, ctx)),
                 body: convert_block_with_ctx(body, &loop_ctx),
                 else_body: else_body.as_ref().map(|b| convert_block(b, ctx)),

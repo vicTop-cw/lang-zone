@@ -419,8 +419,8 @@ struct MyFile =
 | `__repr__` | `std::fmt::Debug` | 显示/调试 | ✅ |
 | `__next__` | `std::iter::Iterator` | 容器/迭代 | ✅ 返回 `Option<T>` 时生成 |
 | `__iter__` | `std::iter::IntoIterator` | 容器/迭代 | ✅ 返回命名迭代器时生成 |
-| `__into_iter__` | `std::iter::IntoIterator` | 容器/迭代 | 🔸 |
-| `__rev__` | `std::iter::DoubleEndedIterator` | 容器/迭代 | 🔸 |
+| `__into_iter__` | `std::iter::IntoIterator` | 容器/迭代 | ✅ for-in 分派 `iter.__into_iter__()`（返回 List 复用 Vec 迭代） |
+| `__rev__` | `std::iter::DoubleEndedIterator` | 容器/迭代 | ✅ 与 __next__ 共存时生成 DoubleEndedIterator impl（next_back 委托） |
 | `__size_hint__` | `std::iter::Iterator` | 容器/迭代 | ✅ impl Iterator 场景映射 `size_hint` |
 | `__len__` | HasLen | 容器/迭代 | ✅ `len()`/真值链 `__len__ != 0`；无 HasLen trait 生成 |
 | `__contains__` | Contains | 容器/迭代 | ✅ `x in obj` 直派；无 Contains trait 生成 |
@@ -437,7 +437,7 @@ struct MyFile =
 | `__buildparams__` | `BuildParams` | 构建块 | ❌ |
 | `__implicit_copy__` | `ImplicitCopy` | 隐式策略 | ❌ |
 | `__implicit_to__` | ImplicitInto | 隐式策略 | ❌ |
-| `__implicit_from__` | ImplicitFrom | 隐式策略 | 🔸 lz_builtins 有 ImplicitFrom（内建转换用）；用户定义的隐式触发未实现 |
+| `__implicit_from__` | ImplicitFrom | 隐式策略 | ✅ 用户定义 `def __implicit_from__(raw: SrcTy) → Self` 生成 impl ImplicitFrom<SrcTy> 委托；内建首字段构造路径见 StructDef 声明式 |
 | `__implicit_default__` | ImplicitDefault | 隐式策略 | ❌ |
 | `__guarded_pred__` | `GuardedStrategy` | 守卫策略 | ❌ |
 | `__guarded_action__` | `GuardedStrategy` | 守卫策略 | ❌ |

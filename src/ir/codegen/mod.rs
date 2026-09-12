@@ -4309,6 +4309,31 @@ impl CodeGen {
             }
         }
 
+        // __rev__ → std::iter::DoubleEndedIterator（06d §九）：仅当 __next__ 共存时
+        // 生成（DoubleEndedIterator 继承 Iterator，需先有 Iterator impl）。
+        // `def __rev__(ref self) -> Option<T>` →
+        // impl DoubleEndedIterator for SelfTy { fn next_back(&mut self) -> Option<Self::Item> { self.__rev__() } }
+        // 注意：不在 let 链中写 `&& let`（Rust 2021 不支持），改用 match 解构
+        if methods.iter().any(|m| m.name == "__next__") {
+            if let Some(rm) = methods.iter().find(|m| m.name == "__rev__") {
+                if let IrType::Option(inner) = &rm.ret_ty {
+                    let where_str = self.magic_impl_where_str(rm);
+                    self.emit_line(&format!(
+                        "impl{} std::iter::DoubleEndedIterator for {} {} {{",
+                        generics, for_ty, where_str
+                    ));
+                    self.indent += 1;
+                    self.emit_line("fn next_back(&mut self) -> Option<Self::Item> {");
+                    self.indent += 1;
+                    self.emit_line("self.__rev__()");
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    self.indent -= 1;
+                    self.emit_line("}");
+                }
+            }
+        }
+
         // __iter__ → std::iter::IntoIterator（仅当返回命名迭代器类型时生成；
         // 返回 () 等非法类型会报 "() is not an iterator"，见 duck_nested.lz）
         if let Some(im) = methods.iter().find(|m| m.name == "__iter__") {
@@ -4570,6 +4595,29 @@ impl CodeGen {
                     self.indent -= 1;
                     self.emit_line("}");
                 }
+            }
+        }
+
+        // __implicit_from__ → ImplicitFrom blanket（06d §十五 隐式策略）：
+        // 用户在 impl 块定义 `def __implicit_from__(raw: SrcTy) -> Self` →
+        // impl ImplicitFrom<SrcTy> for SelfTy，委托用户方法（区别于 struct
+        // 声明式 implicit_froms 的内建首字段构造，见 emit StructDef 处）
+        if let Some(im) = methods.iter().find(|m| m.name == "__implicit_from__") {
+            if let Some(p0) = im.params.first() {
+                let src_ty = self.rust_type(&p0.ty);
+                let where_str = self.magic_impl_where_str(im);
+                self.emit_line(&format!(
+                    "impl{} ImplicitFrom<{}> for {} {} {{",
+                    generics, src_ty, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("fn __implicit_from__(value: {}) -> Self {{", src_ty));
+                self.indent += 1;
+                self.emit_line(&format!("{}::__implicit_from__(value)", for_ty));
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
             }
         }
 
@@ -9953,6 +10001,14 @@ impl CodeGen {
                 {
                     return format!(
                         "{{ let mut __lz_rev = {}; __lz_rev.reverse(); __lz_rev }}",
+                        recv
+                    );
+                }
+                // rev 方法值语义（06d §九）：rev() 在 Iterator trait 上（不在 Vec 上），
+                // `vec![1,2,3].rev()` → `vec![1,2,3].into_iter().rev().collect::<Vec<_>>()`
+                if method == "rev" && !recv_is_struct {
+                    return format!(
+                        "{}.into_iter().rev().collect::<Vec<_>>()",
                         recv
                     );
                 }
