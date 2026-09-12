@@ -11216,6 +11216,21 @@ impl CodeGen {
                 if *target == IrType::Str {
                     return format!("format!(\"{{}}\", {})", self.gen_expr(expr));
                 }
+                // __cast__ 缺口魔法直派（06d §六）：用户 struct 定义了 __cast__
+                // 且目标类型与方法返回类型一致 → `x as T` → `x.__cast__()`，
+                // 否则裸 `as` 对非原生类型报 E0605
+                if let IrType::Named { path, .. } = &expr.ty {
+                    if self.is_known_type(path) {
+                        if let Some(cm) = self
+                            .struct_method_names(path)
+                            .into_iter()
+                            .find(|m| m == "__cast__")
+                        {
+                            let _ = cm;
+                            return format!("({}.__cast__())", self.gen_expr(expr));
+                        }
+                    }
+                }
                 // __Params.args[i]（Box<dyn Any>）→ 数值：downcast 而非 `as` 强转
                 // checker 块体内 `ps.args[i] as int` 的取值路径。
                 // 必须在 src_is_string（ty=Any 也走 parse）之前判断，

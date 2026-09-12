@@ -411,8 +411,8 @@ struct MyFile =
 | `__hash__` | `std::hash::Hash` | 比较 | ✅ Hash impl 委托 `__hash__()` |
 | `__from__` | `std::convert::From` | 类型转换 | ✅ From impl 生成 + `let x: T = v` 隐式触发 |
 | `__into__` | `std::convert::Into` | 类型转换 | ✅ Into impl 生成；显式 `.__into__()` 调用 |
-| `__cast__` | `Cast` | 类型转换 | 🔸 语义检查引用，无 impl 生成 |
-| `__try_cast__` | `TryCast` | 类型转换 | 🔸 同上 |
+| `__cast__` | `Cast` | 类型转换 | ✅ `x as T` 调用点直派 `x.__cast__()`（原生类型间仍走内置 `as`） |
+| `__try_cast__` | `TryCast` | 类型转换 | 🔸 语义检查引用；`x as T` 分派仅覆盖 `__cast__` |
 | `__try_from__` | `std::convert::TryFrom` | 类型转换 | 🔸 已注册，无 impl 生成 |
 | `__try_into__` | `std::convert::TryInto` | 类型转换 | 🔸 已注册，无 impl 生成 |
 | `__str__` | `std::fmt::Display` | 显示/调试 | ✅ |

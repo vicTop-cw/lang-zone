@@ -5220,6 +5220,36 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                                 && expr.ty != *ret_ty
                                 && !matches!(ret_ty, IrType::Unit)
                             {
+                                // __from__ 返回值触发点（06d §十四，P1-2 第三环）：
+                                // `def make() -> Wrap { return 7 }`（Wrap 定义了
+                                // __from__(int)）→ 包装为 Wrap::__from__(7)。优先于
+                                // ImplicitConvert 兜底（用户定义的显式转换语义）
+                                if let IrType::Named { path, .. } = ret_ty {
+                                    let has_from = ctx
+                                        .struct_methods
+                                        .get(path)
+                                        .map(|ms| ms.contains("__from__"))
+                                        .unwrap_or(false);
+                                    let val_ok = !matches!(
+                                        expr.ty,
+                                        IrType::Any | IrType::Generic(_)
+                                    );
+                                    if has_from && val_ok {
+                                        return Expr::new(
+                                            ExprKind::Call {
+                                                type_args: vec![],
+                                                callee: Box::new(Expr::new(
+                                                    ExprKind::Var(format!("{}::__from__", path)),
+                                                    IrType::Any,
+                                                    Span::unknown(),
+                                                )),
+                                                args: vec![expr],
+                                            },
+                                            ret_ty.clone(),
+                                            Span::unknown(),
+                                        );
+                                    }
+                                }
                                 // 返回类型含关联类型路径（`I::Item` / `Option<(A::Item, B::Item)>`，
                                 // iter.lz sum/product/Zip::next）：跳过 ImplicitConvert，
                                 // 让 Rust 从函数签名推断（E0277 ImplicitFrom）
@@ -9714,12 +9744,25 @@ fn ex_check_stmts(
                 if let Some(rty) = ret {
                     let ety = ex_infer(e, work, env);
                     if !ex_type_queer(rty) && !ex_agrees_g(rty, &ety, gens, w.duck_names) {
-                        work.report_error(format!(
-                            "函数返回值类型不匹配：期望 {}，实际返回 {}",
-                            ex_ty_desc(rty),
-                            ex_ty_desc(&ety)
-                        ));
-                        break;
+                        // __from__ 返回值转换放行（06d §十四，P1-2 第三环）：
+                        // 返回类型是用户 struct 且定义了 __from__、实际返回类型
+                        // 可作其源 → 不报错，转换由 builder 在 return 注入
+                        let from_ok = match rty {
+                            IrType::Named { path, .. } => work
+                                .struct_methods
+                                .get(path)
+                                .map(|ms| ms.contains("__from__"))
+                                .unwrap_or(false),
+                            _ => false,
+                        };
+                        if !from_ok {
+                            work.report_error(format!(
+                                "函数返回值类型不匹配：期望 {}，实际返回 {}",
+                                ex_ty_desc(rty),
+                                ex_ty_desc(&ety)
+                            ));
+                            break;
+                        }
                     }
                 }
             }
