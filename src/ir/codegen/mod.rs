@@ -235,6 +235,8 @@ pub struct CodeGen {
     struct_phantom_generics: std::collections::HashMap<String, Vec<String>>,
     /// struct 方法名集合：struct_name → 方法名集合（用于 r? 自定义传播类型判定 __is_ok__ 等）
     struct_method_names_map: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// 结构 __init__ 参数表（仅 self 时可自动注入调用点）
+    struct_init_params_map: std::collections::HashMap<String, Vec<(String, IrType)>>,
     /// struct 是否定义了 __new__：struct_name → 是否
     struct_has_new: std::collections::HashSet<String>,
     /// case struct 集合（自动配 __unapply__ / __unapply_seq__ 提取魔法方法）
@@ -843,6 +845,7 @@ impl CodeGen {
             struct_fields_info: std::collections::HashMap::new(),
             struct_phantom_generics: std::collections::HashMap::new(),
             struct_method_names_map: std::collections::HashMap::new(),
+            struct_init_params_map: std::collections::HashMap::new(),
             struct_has_new: std::collections::HashSet::new(),
             case_structs: std::collections::HashSet::new(),
             struct_has_unapply: std::collections::HashSet::new(),
@@ -1078,7 +1081,16 @@ impl CodeGen {
             if let Item::StructDef(s) = item {
                 let mset: std::collections::HashSet<String> =
                     s.methods.iter().map(|m| m.name.clone()).collect();
+                let mut mset = mset;
+                // __init__ 也被特殊处理，需加入 map 以便构造后调用点检测
+                if s.has_init {
+                    mset.insert("__init__".to_string());
+                }
                 self.struct_method_names_map.insert(s.name.clone(), mset);
+                // 记录 __init__ 参数表，用于判断是否可自动注入（仅 self 参数时）
+                if s.has_init {
+                    self.struct_init_params_map.insert(s.name.clone(), s.init_params.clone());
+                }
                 // struct 内定义方法的 ref/mut ref 参数标记登记 fn_ref_params
                 // （vector.lz `__add__(ref self, ref other)` 的 other 调用点需自动 &，
                 //   否则 (b).clone() 传 owned 报 E0308 expected &VectorInt）
@@ -1101,6 +1113,13 @@ impl CodeGen {
                         .or_default();
                     for m in &i.methods {
                         entry.insert(m.name.clone());
+                        // 若 __init__ 在 impl 块中，也记录其参数表以便注入点判定
+                        if m.name == "__init__" {
+                            let params: Vec<(String, IrType)> = m.params.iter()
+                                .map(|p| (p.name.clone(), p.ty.clone()))
+                                .collect();
+                            self.struct_init_params_map.insert(path.clone(), params);
+                        }
                         // 收集 impl 方法的 ref/mut ref 参数标记（DictExt::get 的
                         // key: ref K 调用点自动 &，否则 d.get("a") 报 E0308
                         // expected &K, found String）
@@ -1323,6 +1342,13 @@ impl CodeGen {
                             .insert(f.name.clone());
                         self.self_fns
                             .insert(f.name.clone(), (base.to_string(), self_p.is_mut));
+                        // 若该顶层方法是 __init__，同步记录参数表以便注入点判定
+                        if f.name == "__init__" {
+                            let params: Vec<(String, IrType)> = f.params.iter()
+                                .map(|p| (p.name.clone(), p.ty.clone()))
+                                .collect();
+                            self.struct_init_params_map.insert(base.to_string(), params);
+                        }
                     }
                 }
             }
@@ -3804,6 +3830,7 @@ impl CodeGen {
                 // 继承 struct 方法名集合（trait 默认方法体内调用用户 struct 的
                 // next/f 等方法时 user_plain 判定需要，否则误映射 __next__）
                 child.struct_method_names_map = self.struct_method_names_map.clone();
+                child.struct_init_params_map = self.struct_init_params_map.clone();
                 // 未使用泛型的 PhantomData 补全需传递（trait 默认方法构造 FlatMap
                 // 等适配器 struct 时，否则 E0063 missing field _lz_phantom_B）
                 child.struct_phantom_generics = self.struct_phantom_generics.clone();
@@ -6519,6 +6546,38 @@ impl CodeGen {
                     "let {}{}{} = {};",
                     mut_kw, safe_name, ty_str, value_s
                 ));
+                // __init__ 构造后调用点注入：let x = Struct { .. } 且 Struct 有 __init__ →
+                // 在同一语句后追加 x.__lz_init(); 以触发用户定义的初始化逻辑。
+                // 仅当变量可变时注入（__lz_init 需要 &mut self）。
+                if mut_kw == "mut " && safe_name != "_" {
+                    let ctor_name = match &value.kind {
+                        ExprKind::StructCtor { name, .. } => Some(name.clone()),
+                        ExprKind::Call { callee, .. } => {
+                            if let ExprKind::Var(n) = &callee.kind {
+                                Some(n.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(ctor_name) = ctor_name {
+                        let has_init = self
+                            .struct_method_names_map
+                            .get(&ctor_name)
+                            .map(|ms| ms.contains("__init__"))
+                            .unwrap_or(false);
+                        // 仅当 __init__ 除 self 外无其他参数时自动注入调用点。
+                        let only_self = self
+                            .struct_init_params_map
+                            .get(&ctor_name)
+                            .map(|ps| ps.iter().filter(|(name, _)| name != "self").count() == 0)
+                            .unwrap_or(true);
+                        if has_init && only_self {
+                            self.emit_line(&format!("{}.__init__();", safe_name));
+                        }
+                    }
+                }
             }
             Stmt::Assign { target, value } => {
                 // Dict/HashMap 索引赋值 → .insert() 替代（HashMap 不实现 IndexMut）
@@ -11402,6 +11461,7 @@ impl CodeGen {
                     // 继承 struct 方法名集合（闭包体内调用用户 struct 方法时
                     // user_plain 判定需要，避免误映射 __next__）
                     child.struct_method_names_map = self.struct_method_names_map.clone();
+                child.struct_init_params_map = self.struct_init_params_map.clone();
                     // 传递 static/global 变量名集合（用于 E0530 冲突检测）
                     child.global_vars = self.global_vars.clone();
                     child.top_level_static_names = self.top_level_static_names.clone();
@@ -11810,6 +11870,7 @@ impl CodeGen {
                 // 继承 struct 方法名集合（块内调用用户 struct 方法时 user_plain 判定
                 // 需要；缺失会导致 self.inner.next() 误映射为 __next__）
                 child.struct_method_names_map = self.struct_method_names_map.clone();
+                child.struct_init_params_map = self.struct_init_params_map.clone();
                 // 泛型函数标志需传递给 child（match 表达式内 Option.None 的裸 None
                 // 推断，combo-struct-method.lz map<R> 泛型方法）
                 child.in_generic_fn = self.in_generic_fn;

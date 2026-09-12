@@ -450,7 +450,7 @@ struct MyFile =
 | `__exit__` | Exit | 上下文 | ✅ 未定义时跳过调用（E0599 防护） |
 | `__iter_strategy__` | `std::iter::IntoIterator` | 迭代策略 | 🔸 |
 | `__new__` | New | 构造 | ✅ `__lz_new` 命名统一 + 体透传 |
-| `__init__` | Init | 构造 | 🔸 函数体生成正确（`self.x = ...`）；构造后调用点未自动生成（需显式调用 `__lz_init`） |
+| `__init__` | Init | 构造 | ✅ 函数体生成正确（`self.x = ...`）；`let mut x = Struct(...)` 后自动注入 `x.__init__()`（Call / StructCtor 两种构造表示均支持）；`struct_method_names_map` 预注入 `__init__` 键以便检测 |
 | `__abs__` | — | 缺口魔法 | ✅ `abs(x)` 调用点直派 `x.__abs__()`；数值仍走内建 |
 
 ---
