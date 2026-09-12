@@ -3283,7 +3283,18 @@ impl CodeGen {
         }
 
         let generics = self.gen_generics(&s.generics);
-        self.emit_line("#[derive(Debug, Clone)]");
+        // __clone__ 自定义克隆语义（06d §十）：定义了 __clone__ 的 struct 不得
+        // derive(Clone)（手动 impl Clone 会 E0119），改为生成委托 impl——
+        // 使 `a.clone()` 走用户的克隆逻辑而非逐字段复制。
+        // 注意方法定义在 impl 块（ImplDef.methods），须查 struct_method_names
+        //（已合并 impl 块方法），仅查 s.methods 会漏判（p35 E0119 复现）
+        let has_clone_magic = self.struct_method_names(&s.name).contains("__clone__")
+            || s.methods.iter().any(|m| m.name == "__clone__");
+        if has_clone_magic {
+            self.emit_line("#[derive(Debug)]");
+        } else {
+            self.emit_line("#[derive(Debug, Clone)]");
+        }
         self.emit_line(&format!("pub struct {}{} {{", s.name, generics));
         self.indent += 1;
         for field in &s.fields {
@@ -4500,6 +4511,25 @@ impl CodeGen {
             }
         }
 
+        // __clone__ → std::clone::Clone 委托（06d §十）：struct 定义处已去掉
+        // derive(Clone)（E0119），此处生成手动 impl，使 `a.clone()` 走用户的
+        // 自定义克隆逻辑（如引用计数 +1）而非逐字段复制
+        if let Some(cm) = methods.iter().find(|m| m.name == "__clone__") {
+            let where_str = self.magic_impl_where_str(cm);
+            self.emit_line(&format!(
+                "impl{} std::clone::Clone for {} {} {{",
+                generics, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line("fn clone(&self) -> Self {");
+            self.indent += 1;
+            self.emit_line("self.__clone__()");
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
         // __default__ → std::default::Default（06d §十）：默认值委托 __default__
         //（静态方法，无 self，返回 Self）
         if let Some(fm) = methods.iter().find(|m| m.name == "__default__") {
@@ -4582,6 +4612,64 @@ impl CodeGen {
                 self.emit_line(&format!("fn into(self) -> {} {{", tgt_ty));
                 self.indent += 1;
                 self.emit_line("self.__into__()");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __try_from__ → std::convert::TryFrom（06d §六）：
+        // `def __try_from__(raw: SrcTy) -> Result<Self, E>` →
+        // impl TryFrom<SrcTy> for SelfTy { type Error = E;
+        //   fn try_from(value: SrcTy) -> Result<Self, Self::Error> { Self::__try_from__(value) } }
+        if let Some(fm) = methods.iter().find(|m| m.name == "__try_from__") {
+            if let (Some(p0), Some(err_ty)) = (fm.params.first(), Self::try_from_err_ty(&fm.ret_ty)) {
+                if !matches!(fm.ret_ty, IrType::Unit) {
+                    let src_ty = self.rust_type(&p0.ty);
+                    let err_s = self.rust_type(&err_ty);
+                    let where_str = self.magic_impl_where_str(fm);
+                    self.emit_line(&format!(
+                        "impl{} std::convert::TryFrom<{}> for {} {} {{",
+                        generics, src_ty, for_ty, where_str
+                    ));
+                    self.indent += 1;
+                    self.emit_line(&format!("type Error = {};", err_s));
+                    self.emit_line(&format!(
+                        "fn try_from(value: {}) -> Result<Self, Self::Error> {{",
+                        src_ty
+                    ));
+                    self.indent += 1;
+                    self.emit_line("Self::__try_from__(value)");
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    self.indent -= 1;
+                    self.emit_line("}");
+                }
+            }
+        }
+
+        // __try_into__ → std::convert::TryInto（06d §六）：
+        // `def __try_into__(self) -> Result<TargetTy, E>` →
+        // impl TryInto<TargetTy> for SelfTy { type Error = E;
+        //   fn try_into(self) -> Result<TargetTy, Self::Error> { self.__try_into__() } }
+        if let Some(im) = methods.iter().find(|m| m.name == "__try_into__") {
+            if let Some((tgt, err_ty)) = Self::try_into_tgt_err(&im.ret_ty) {
+                let tgt_s = self.rust_type(&tgt);
+                let err_s = self.rust_type(&err_ty);
+                let where_str = self.magic_impl_where_str(im);
+                self.emit_line(&format!(
+                    "impl{} std::convert::TryInto<{}> for {} {} {{",
+                    generics, tgt_s, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("type Error = {};", err_s));
+                self.emit_line(&format!(
+                    "fn try_into(self) -> Result<{}, Self::Error> {{",
+                    tgt_s
+                ));
+                self.indent += 1;
+                self.emit_line("self.__try_into__()");
                 self.indent -= 1;
                 self.emit_line("}");
                 self.indent -= 1;
@@ -4704,6 +4792,28 @@ impl CodeGen {
     /// 由魔法方法推导其 trait impl 所需的 `where` 子句（与 __eq__→PartialEq 一致）。
     /// 例如 `def __str__(ref self) -> str where T: Display` 返回 ` where T: std::fmt::Display`。
     /// 单独成方法（而非内联闭包）以避免 `&self` 借用与 `self.indent += 1` 的 `&mut self` 冲突。
+    /// 解出 `Result<T, E>` 的 E（TryFrom 的 Error 关联类型）；非 Result 返回 None
+    fn try_from_err_ty(ret: &IrType) -> Option<IrType> {
+        match ret {
+            IrType::Result { err, .. } => Some((**err).clone()),
+            IrType::Named { path, args } if path == "Result" && args.len() == 2 => {
+                Some(args[1].clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// 解出 `Result<T, E>` 的 (T, E)（TryInto 的目标/错误类型对）；非 Result 返回 None
+    fn try_into_tgt_err(ret: &IrType) -> Option<(IrType, IrType)> {
+        match ret {
+            IrType::Result { ok, err } => Some(((**ok).clone(), (**err).clone())),
+            IrType::Named { path, args } if path == "Result" && args.len() == 2 => {
+                Some((args[0].clone(), args[1].clone()))
+            }
+            _ => None,
+        }
+    }
+
     fn magic_impl_where_str(&self, m: &FnDef) -> String {
         let w: String = m
             .where_clause

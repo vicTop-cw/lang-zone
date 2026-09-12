@@ -413,8 +413,8 @@ struct MyFile =
 | `__into__` | `std::convert::Into` | 类型转换 | ✅ Into impl 生成；显式 `.__into__()` 调用 |
 | `__cast__` | `Cast` | 类型转换 | ✅ `x as T` 调用点直派 `x.__cast__()`（原生类型间仍走内置 `as`） |
 | `__try_cast__` | `TryCast` | 类型转换 | ✅ 仅定义 `__try_cast__` 时 `x as T` → `x.__try_cast__().unwrap()`（失败 panic） |
-| `__try_from__` | `std::convert::TryFrom` | 类型转换 | 🔸 已注册，无 impl 生成 |
-| `__try_into__` | `std::convert::TryInto` | 类型转换 | 🔸 已注册，无 impl 生成 |
+| `__try_from__` | `std::convert::TryFrom` | 类型转换 | ✅ TryFrom impl 生成（`type Error = E` + try_from 委托） |
+| `__try_into__` | `std::convert::TryInto` | 类型转换 | ✅ TryInto impl 生成（`type Error = E` + try_into 委托） |
 | `__str__` | `std::fmt::Display` | 显示/调试 | ✅ |
 | `__repr__` | `std::fmt::Debug` | 显示/调试 | ✅ |
 | `__next__` | `std::iter::Iterator` | 容器/迭代 | ✅ 返回 `Option<T>` 时生成 |
@@ -425,9 +425,9 @@ struct MyFile =
 | `__len__` | HasLen | 容器/迭代 | ✅ `len()`/真值链 `__len__ != 0`；无 HasLen trait 生成 |
 | `__contains__` | Contains | 容器/迭代 | ✅ `x in obj` 直派；无 Contains trait 生成 |
 | `__drop__` | `std::ops::Drop` | 生命周期 | ✅ Drop impl 委托 `__drop__()` |
-| `__clone__` | `std::clone::Clone` | 生命周期 | 🔸 struct 自动 derive(Clone) 兜底 |
+| `__clone__` | `std::clone::Clone` | 生命周期 | ✅ 手动 Clone impl 委托 `__clone__()`（derive 兜底已让位，E0119 规避） |
 | `__default__` | `std::default::Default` | 生命周期 | ✅ Default impl 委托 `__default__()` |
-| `__call__` | `Callable` | 调用/索引 | 🔸 lz_builtins 有 Callable trait |
+| `__call__` | `Callable` | 调用/索引 | ✅ `obj(args)` 直调分派 `obj.__call__(args)`（探针验证） |
 | `__getitem__` | `std::ops::Index` | 调用/索引 | ✅ `obj[key]` 直派 |
 | `__setitem__` | `std::ops::IndexMut` | 调用/索引 | ✅ `obj[key] = v` 直派；无 IndexMut impl 生成 |
 | `__lpipe__`/`__rpipe__` | — | 管道 | ✅ 管道由通用 callable 语义驱动（2026-08-08 决策） |
