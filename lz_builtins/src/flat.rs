@@ -331,6 +331,27 @@ pub trait Callable<Args> {
 }
 
 // ══════════════════════════════════════════════════════════════
+// 构建块参数 trait（LZ 特有，06d §十三）
+// ══════════════════════════════════════════════════════════════
+
+/// 构建块参数协议（06d §十三）：实现此 trait 的结构体可作为构建块
+/// (~: / *:) 的载荷，`into_args` 返回参数元组供 DSL 构建块调用。
+/// 
+/// 典型用法：
+/// ```ignore
+/// struct PipelineConfig = ...;
+/// impl BuildParams for PipelineConfig {
+///     type Args = (i64, String);
+///     fn __buildparams__(&self) -> Self::Args { (self.count, self.name.clone()) }
+/// }
+/// // 构建块调用：task ~: cfg → task(cfg.into_args())
+/// ```
+pub trait BuildParams {
+    type Args: 'static;
+    fn into_args(&self) -> Self::Args;
+}
+
+// ══════════════════════════════════════════════════════════════
 // 索引 trait (LZ 特有，不同于 std::ops::Index)
 // ══════════════════════════════════════════════════════════════
 

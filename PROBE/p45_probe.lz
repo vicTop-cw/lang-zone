@@ -1,0 +1,12 @@
+struct MyInt =
+    v: int
+
+impl MyInt =
+    def __implicit_copy__(ref self) -> MyInt =
+        return MyInt(v: self.v)
+
+def main() =
+    let x = MyInt(v: 42)
+    print(x.v)
+    let y: MyInt = x.__implicit_copy__()
+    print(y.v)

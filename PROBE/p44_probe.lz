@@ -1,0 +1,15 @@
+struct RetryPolicy =
+    max_retries: int
+
+impl RetryPolicy =
+    def __guarded_pred__(ref self, input: int) -> bool =
+        return input < self.max_retries
+
+    def __guarded_action__(self, input: int) -> str =
+        return "retry #"
+
+def main() =
+    policy = RetryPolicy(max_retries: 3)
+    print(policy.__guarded_pred__(2))
+    print(policy.__guarded_pred__(5))
+    print(policy.__guarded_action__(1))

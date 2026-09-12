@@ -7114,6 +7114,89 @@ fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Option<IrType
     None
 }
 
+/// auto-mut 推断辅助：扫描方法体是否存在 `self.field = ...` 赋值。
+/// 存在时 `ref self` 需升级为 `&mut self`，否则 Rust 报 E0594
+///（cannot assign to field behind &ref）
+fn self_field_is_mutated(stmts: &[AstStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            AstStmt::Assign { target, .. } => {
+                if let AstExpr::FieldAccess { receiver, .. } = target {
+                    if let AstExpr::Ident(name) = &**receiver {
+                        if name == "self" || name == "self_" {
+                            return true;
+                        }
+                    }
+                }
+            }
+            AstStmt::While {
+                body, else_body, ..
+            }
+            | AstStmt::For {
+                body, else_body, ..
+            }
+            | AstStmt::WhileLet {
+                body, else_body, ..
+            } => {
+                if self_field_is_mutated(body) {
+                    return true;
+                }
+                if let Some(eb) = else_body {
+                    if self_field_is_mutated(eb) {
+                        return true;
+                    }
+                }
+            }
+            AstStmt::Loop(body)
+            | AstStmt::Block { body, .. }
+            | AstStmt::CheckerBlock { body, .. }
+            | AstStmt::Defer(body)
+            | AstStmt::Test { body, .. }
+            | AstStmt::Comptime { body }
+            | AstStmt::With { body, .. } => {
+                if self_field_is_mutated(body) {
+                    return true;
+                }
+            }
+            AstStmt::Suite {
+                setup,
+                teardown,
+                tests,
+                ..
+            } => {
+                for sub in setup
+                    .iter()
+                    .flatten()
+                    .chain(teardown.iter().flatten())
+                    .chain(tests.iter())
+                {
+                    if self_field_is_mutated(std::slice::from_ref(sub)) {
+                        return true;
+                    }
+                }
+            }
+            AstStmt::Guard {
+                success_expr,
+                else_body,
+                ..
+            } => {
+                if self_field_is_mutated(else_body) {
+                    return true;
+                }
+                if let Some(se) = success_expr {
+                    if let AstExpr::BlockExpr(stmts) = se {
+                        if self_field_is_mutated(stmts) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     let is_math = func.decorators.iter().any(|d| d.name == "math");
     // 方法泛型 + impl 级泛型合并（`impl<T> Box<T>` 的方法 try_unwrap 中
@@ -7137,6 +7220,12 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         .enumerate()
         .map(|(_i, p)| {
             // `..` 注入的 args/kwargs 在下方单独追加；此处只转换具名参数
+            // auto-mut 推断：ref self 方法体内对 self 字段赋值时，翻 is_mut
+            // 使 codegen 签名渲染为 `&mut self`（否则 E0594 cannot assign to
+            // field behind &ref）
+            let auto_mut = (p.name == "self" || p.name == "self_")
+                && !p.is_mut
+                && self_field_is_mutated(&func.body);
             Param {
                 name: p.name.clone(),
                 ty: if is_math {
@@ -7144,7 +7233,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 } else {
                     from_ast_type_with_generics(&p.ty, &generics)
                 },
-                is_mut: p.is_mut,
+                is_mut: p.is_mut || auto_mut,
                 is_ref: p.is_ref,
                 is_owned: p.is_owned,
                 default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
@@ -7332,7 +7421,16 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             // 使 self[key]、key in self、self.field 等按具体类型解析（E0277/E0599）
             if p.name == "self" || p.name == "self_" {
                 if let Some(st) = &ctx.self_ty {
-                    fn_ctx.add_param(&p.name, st.clone());
+                    // auto-mut 推断：方法体内对 self 字段赋值时，`ref self`
+                    // 需升级为 `&mut self`（Rust 否则 E0594 cannot assign to field
+                    // behind &ref）。扫描方法体的 self.field = ... 语句判定
+                    let base_ty = st.clone();
+                    let mutated = self_field_is_mutated(&func.body);
+                    if mutated {
+                        fn_ctx.add_param(&p.name, IrType::MutRef(Box::new(base_ty)));
+                    } else {
+                        fn_ctx.add_param(&p.name, base_ty);
+                    }
                     continue;
                 }
             }

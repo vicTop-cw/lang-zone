@@ -17,6 +17,37 @@ impl<T> ImplicitFrom<T> for T {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ImplicitInto — 隐式类型转换目标端（06d §十四，由 ImplicitFrom blanket 派生）
+// ══════════════════════════════════════════════════════════════
+
+pub trait ImplicitInto<T> {
+    fn __implicit_into__(self) -> T;
+}
+
+impl<S, T> ImplicitInto<T> for S where S: crate::runtime::ImplicitFrom<T> {
+    fn __implicit_into__(self) -> T {
+        // 注意：实际触发点由编译器决策，此处为 trait 占位
+        <S as crate::runtime::ImplicitFrom<T>>::__implicit_from__(self)
+    }
+}
+
+// ══════════════════════════════════════════════════════════════
+// ImplicitCopy — Mojo 风格隐式复制（06d §十四）
+// ══════════════════════════════════════════════════════════════
+
+pub trait ImplicitCopy {
+    fn __implicit_copy__(&self) -> Self;
+}
+
+// ══════════════════════════════════════════════════════════════
+// ImplicitDefault — 隐式默认值填充（06d §十四）
+// ══════════════════════════════════════════════════════════════
+
+pub trait ImplicitDefault {
+    fn __implicit_default__() -> Self;
+}
+
+// ══════════════════════════════════════════════════════════════
 // LZ 显示 / 调试 trait (不与 std::fmt 冲突)
 // ══════════════════════════════════════════════════════════════
 
@@ -35,6 +66,17 @@ pub trait LzRepr {
 pub trait Callable<Args> {
     type Output;
     fn __call__(&self, args: Args) -> Self::Output;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 构建块参数 trait（LZ 特有，06d §十三）
+// ══════════════════════════════════════════════════════════════
+
+/// 构建块参数协议（06d §十三）：实现此 trait 的结构体可作为构建块
+/// (~: / *:) 的载荷，`into_args` 返回参数元组供 DSL 构建块调用。
+pub trait BuildParams {
+    type Args: 'static;
+    fn into_args(&self) -> Self::Args;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -194,4 +236,19 @@ impl LzFrom<bool> for String {
     fn __from__(v: bool) -> String {
         v.to_string()
     }
+}
+
+// ══════════════════════════════════════════════════════════════
+// 守卫策略 trait（LZ 特有，06d §十）
+// ══════════════════════════════════════════════════════════════
+
+/// 守卫策略协议（06d §十）：
+/// - `pred(&self, &Input) -> bool` — 判定是否执行兜底行为
+/// - `action(self, Input) -> Output` — 执行兜底行为
+/// 用户定义 `__guarded_pred__` / `__guarded_action__` 方法，
+/// codegen 自动生成 impl GuardedStrategy for Struct。
+pub trait GuardedStrategy<Input> {
+    type Output;
+    fn pred(&self, input: &Input) -> bool;
+    fn action(self, input: Input) -> Self::Output;
 }

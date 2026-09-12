@@ -4336,20 +4336,51 @@ impl CodeGen {
 
         // __iter__ → std::iter::IntoIterator（仅当返回命名迭代器类型时生成；
         // 返回 () 等非法类型会报 "() is not an iterator"，见 duck_nested.lz）
+        // __iter__ → std::iter::IntoIterator（06d §九）：
+        // `def __iter__(self) -> IterTy` → impl IntoIterator。
+        // 当返回 Vec<T> 时，IntoIter 不能是 Vec<T>（Vec 不满足 Iterator），
+        // 应映射为 std::vec::IntoIter<T> 并在 into_iter 体调用 .into_iter()
+        // 包装（p41 探针暴露：`Vec<i64>` is not an iterator）
         if let Some(im) = methods.iter().find(|m| m.name == "__iter__") {
             if let IrType::Named { .. } = &im.ret_ty {
                 let where_str = self.magic_impl_where_str(im);
-                let iter_ty = self.rust_type(&im.ret_ty);
+                let (iter_ty, body_expr) = match &im.ret_ty {
+                    IrType::Named { path, args }
+                        if path == "Vec" && args.len() == 1 =>
+                    {
+                        let elem = self.rust_type(&args[0]);
+                        (
+                            format!("std::vec::IntoIter<{}>", elem),
+                            "self.__iter__().into_iter()".to_string(),
+                        )
+                    }
+                    IrType::Named { path, args }
+                        if path == "List" && args.len() == 1 =>
+                    {
+                        let elem = self.rust_type(&args[0]);
+                        (
+                            format!("std::vec::IntoIter<{}>", elem),
+                            "self.__iter__().into_iter()".to_string(),
+                        )
+                    }
+                    _ => {
+                        let ty = self.rust_type(&im.ret_ty);
+                        (ty, "self.__iter__()".to_string())
+                    }
+                };
                 self.emit_line(&format!(
                     "impl{} std::iter::IntoIterator for {} {} {{",
                     generics, for_ty, where_str
                 ));
                 self.indent += 1;
                 self.emit_line(&format!("type IntoIter = {};", iter_ty));
-                self.emit_line(&format!("type Item = <{} as std::iter::Iterator>::Item;", iter_ty));
+                self.emit_line(&format!(
+                    "type Item = <{} as std::iter::Iterator>::Item;",
+                    iter_ty
+                ));
                 self.emit_line("fn into_iter(self) -> Self::IntoIter {");
                 self.indent += 1;
-                self.emit_line("self.__iter__()");
+                self.emit_line(&body_expr);
                 self.indent -= 1;
                 self.emit_line("}");
                 self.indent -= 1;
@@ -4829,6 +4860,115 @@ impl CodeGen {
                 } else {
                     self.emit_line(&format!("self.{}(rhs)", magic));
                 }
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __buildparams__ → lz_builtins::BuildParams trait impl（06d §十三 构建块协议）：
+        // `def __buildparams__(ref self) -> ArgsTuple` → impl BuildParams for Struct，
+        // 使 struct 实例可作为构建块载荷（~: / *:）
+        if let Some(bm) = methods.iter().find(|m| m.name == "__buildparams__") {
+            let where_str = self.magic_impl_where_str(bm);
+            let args_ty = self.rust_type(&bm.ret_ty);
+            self.emit_line(&format!(
+                "impl{} lz_builtins::BuildParams for {} {} {{",
+                generics, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line(&format!("type Args = {};", args_ty));
+            self.emit_line("fn into_args(&self) -> Self::Args {");
+            self.indent += 1;
+            self.emit_line("self.__buildparams__()");
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
+        // __guarded_pred__ + __guarded_action__ → lz_builtins::GuardedStrategy impl（06d §十 守卫策略）：
+        // 两者配对生成：pred 判定是否执行兜底行为，action 执行兜底行为。
+        let guarded_pred = methods.iter().find(|m| m.name == "__guarded_pred__");
+        let guarded_action = methods.iter().find(|m| m.name == "__guarded_action__");
+        if let (Some(gp), Some(ga)) = (guarded_pred, guarded_action) {
+            // 提取 Input 类型（__guarded_pred__ 的非 self 参数类型）
+            let input_ty = gp.params.iter()
+                .find(|p| p.name != "self" && p.name != "self_")
+                .map(|p| self.rust_type(&p.ty))
+                .unwrap_or_else(|| "()".to_string());
+            let output_ty = self.rust_type(&ga.ret_ty);
+            let where_str = self.magic_impl_where_str(ga);
+
+            self.emit_line(&format!(
+                "impl{} lz_builtins::GuardedStrategy<{}> for {} {} {{",
+                generics, input_ty, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line(&format!("type Output = {};", output_ty));
+            self.emit_line(&format!(
+                "fn pred(&self, input: &{}) -> bool {{",
+                input_ty
+            ));
+            self.indent += 1;
+            self.emit_line(&format!("self.__guarded_pred__(*input)"));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.emit_line(&format!(
+                "fn action(self, input: {}) -> Self::Output {{",
+                input_ty
+            ));
+            self.indent += 1;
+            self.emit_line(&format!("self.__guarded_action__(input)"));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
+        // __call__ → Callable trait impl（06d §十一 可调用性）：
+        // struct 实例作为闭包传给高阶函数。
+        // 使用 lz_builtins::Callable<Args> trait（stable Rust 兼容）。
+        if let Some(cm) = methods.iter().find(|m| m.name == "__call__") {
+            let arg_types: Vec<String> = cm
+                .params
+                .iter()
+                .filter(|p| p.name != "self" && p.name != "self_")
+                .map(|p| self.rust_type(&p.ty))
+                .collect();
+
+            if !arg_types.is_empty() {
+                let args_tuple = if arg_types.len() == 1 {
+                    arg_types[0].clone()
+                } else {
+                    format!("({})", arg_types.join(", "))
+                };
+                let ret_ty = self.rust_type(&cm.ret_ty);
+                let where_str = self.magic_impl_where_str(cm);
+                let call_args: Vec<String> = cm
+                    .params
+                    .iter()
+                    .filter(|p| p.name != "self" && p.name != "self_")
+                    .enumerate()
+                    .map(|(i, _)| format!("args.{}", i))
+                    .collect();
+
+                self.emit_line(&format!(
+                    "impl{} lz_builtins::Callable<({},)> for {} {} {{",
+                    generics, args_tuple, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("type Output = {};", ret_ty));
+                self.emit_line(&format!(
+                    "fn __call__(&self, args: ({},)) -> Self::Output {{",
+                    args_tuple
+                ));
+                self.indent += 1;
+                self.emit_line(&format!(
+                    "self.__call__({})",
+                    call_args.join(", ")
+                ));
                 self.indent -= 1;
                 self.emit_line("}");
                 self.indent -= 1;

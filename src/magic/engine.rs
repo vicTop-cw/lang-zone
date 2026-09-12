@@ -75,6 +75,7 @@ pub enum MagicKind {
 
     /// 位非 ~a：fn not(self) → Output（std::ops::Not，与 __not__ 逻辑非共用）
     Invert,
+    IterStrategy,
 }
 
 /// 魔法方法映射条目
@@ -316,6 +317,14 @@ impl MagicEngine {
         self.register("__invert__", MagicEntry {
             trait_path: "std::ops::Not", trait_method: "not",
             kind: MagicKind::Invert,
+            multi_dispatch: false,
+        });
+        // __iter_strategy__ → 迭代策略选择（06d §九）：
+        // 返回按优先级排列的迭代器类型名列表（如 ["range", "list"]），
+        // 运行时/编译期选择最优迭代策略（当前直调用接通，策略选择留后续）
+        self.register("__iter_strategy__", MagicEntry {
+            trait_path: "IterStrategy", trait_method: "resolve",
+            kind: MagicKind::IterStrategy,
             multi_dispatch: false,
         });
     }
