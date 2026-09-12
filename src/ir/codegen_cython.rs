@@ -866,6 +866,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             LitKind::None_ | LitKind::Unit => "None".to_string(),
         },
         ExprKind::Var(name) => name.clone(),
+        ExprKind::Default => "<default>".to_string(),
         ExprKind::Spread(inner) => format!("*{}", gen_expr(cg, inner)),
         ExprKind::Call { callee, args, .. } => {
             let f = gen_expr(cg, callee);

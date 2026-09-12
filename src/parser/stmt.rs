@@ -1346,6 +1346,14 @@ impl ParserStmtExt for Parser {
             self.parse_maybe_build_value()?
         };
 
+        // 上下文关键字：`default` 作为 let 赋值右侧时触发隐式默认值
+        // 仅当整个右侧是单个 `default` 标识符时才转换（避免 `default.xxx` 误触发）
+        if let Expr::Ident(ref s) = value {
+            if s == "default" {
+                value = Expr::DefaultExpr;
+            }
+        }
+
         // 跨行方法链：let chain = opt\n    .map(...)\n    .unwrap_or(0)
         // 在 let 绑定上下文中，检查后续是否有跨行 postfix
         value = self.consume_crossline_postfix(value)?;

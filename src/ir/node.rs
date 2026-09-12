@@ -664,6 +664,9 @@ pub enum ExprKind {
     /// 字面量
     Lit(LitKind),
 
+    /// default 关键字（隐式默认值，触发 __implicit_default__）
+    Default,
+
     /// 变量引用
     Var(String),
 

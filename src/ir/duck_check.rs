@@ -1379,6 +1379,6 @@ fn walk_expr(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
         }
         ExprKind::Paren(inner) => walk_expr(inner, f),
         ExprKind::ImplicitConvert { source, .. } => walk_expr(source, f),
-        ExprKind::Lit(_) | ExprKind::Var(_) => {}
+        ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::Default => {}
     }
 }

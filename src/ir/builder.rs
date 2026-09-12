@@ -968,6 +968,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::StrLit(_) | AstExpr::FStrLit(_) | AstExpr::RawStrLit(_) => IrType::Str,
         AstExpr::BoolLit(_) => IrType::Bool,
         AstExpr::NoneLit => IrType::Any, // None 类型取决于上下文
+        AstExpr::DefaultExpr => IrType::Any, // default 类型取决于上下文
         // 展开元素：类型推导回退到内部表达式（仅在 ListLit 内被消费）
         AstExpr::Spread(inner) => infer_expr_type(inner, ctx),
         AstExpr::Ident(name) => {
@@ -2642,6 +2643,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::RawStrLit(s) => ExprKind::Lit(LitKind::Str(s.clone())),
         AstExpr::BoolLit(b) => ExprKind::Lit(LitKind::Bool(*b)),
         AstExpr::NoneLit => ExprKind::Lit(LitKind::None_),
+        AstExpr::DefaultExpr => ExprKind::Default,
         AstExpr::Ident(name) => ExprKind::Var(name.clone()),
         AstExpr::Paren(inner) => ExprKind::Paren(Box::new(convert_expr(inner, ctx))),
         // 列表展开元素：透传为 IR Spread（codegen 在 ListLit 内降级为 extend 块）
@@ -5344,8 +5346,25 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                                         _ => false,
                                     }
                                 }
+                                // 源/目标类型含泛型类型参数（K, V, T 等）：跳过——避免
+                                // 在泛型函数体内对 Box<T>::replace `return old`（T 类型）
+                                // 误生成 <T as ImplicitFrom<i64>>::__implicit_from__ (E0277)
+                                fn contains_generic(ty: &IrType) -> bool {
+                                    match ty {
+                                        IrType::Generic(_) => true,
+                                        IrType::Named { args, .. } => args.iter().any(contains_generic),
+                                        IrType::Option(inner) => contains_generic(inner),
+                                        IrType::Result { ok, err } => {
+                                            contains_generic(ok) || contains_generic(err)
+                                        }
+                                        IrType::Tuple(items) => items.iter().any(contains_generic),
+                                        IrType::Ref(inner) | IrType::MutRef(inner) => contains_generic(inner),
+                                        _ => false,
+                                    }
+                                }
                                 let ret_is_assoc_path = contains_assoc_path(ret_ty);
-                                if !ret_is_assoc_path {
+                                let src_or_ret_has_generic = contains_generic(ret_ty) || contains_generic(&expr.ty);
+                                if !ret_is_assoc_path && !src_or_ret_has_generic {
                                     return Expr::new(
                                         ExprKind::ImplicitConvert {
                                             source: Box::new(expr.clone()),
@@ -10161,6 +10180,7 @@ fn ex_check_expr(
 ) {
     match e {
         AstExpr::Spread(inner) => ex_check_expr(inner, work, env, gens, ret, hinted, w),
+        AstExpr::DefaultExpr => {} /* default 无需参数检查 */
         AstExpr::Call { func, args, .. } => {
             if let AstExpr::Ident(fname) = func.as_ref() {
                 let plain = !fname.contains('.');

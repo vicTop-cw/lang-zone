@@ -21,7 +21,7 @@ impl<T> ImplicitFrom<T> for T {
 // ══════════════════════════════════════════════════════════════
 
 pub trait ImplicitInto<T> {
-    fn __implicit_into__(self) -> T;
+    fn __implicit_into__(&self) -> T;
 }
 
 // 注意：codegen 层直接使用 <T as ImplicitFrom<S>>::__implicit_from__()，

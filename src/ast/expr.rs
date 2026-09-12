@@ -14,6 +14,7 @@ pub enum Expr {
     BoolLit(bool),
     NoneLit,
     Ident(String),
+    DefaultExpr,           // default 关键字：隐式默认值（触发 __implicit_default__）
 
     // 容器
     ListLit(Vec<Expr>),

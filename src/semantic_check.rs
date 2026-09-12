@@ -931,6 +931,7 @@ impl Checker {
             | Expr::RawStrLit(_)
             | Expr::BoolLit(_)
             | Expr::NoneLit => {}
+            | Expr::DefaultExpr => {}
             Expr::Ident(name) => {
                 if !self.is_bound(name) {
                     self.error(format!("未绑定变量: {name}"));

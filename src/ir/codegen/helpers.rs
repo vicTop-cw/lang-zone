@@ -757,7 +757,7 @@ pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::Ha
 /// 递归扫描表达式中的可变使用（方法调用接收者 / 赋值目标 / IndexSet 基）
 fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) {
     match &expr.kind {
-        ExprKind::Var(_) | ExprKind::Lit(_) => {}
+        ExprKind::Var(_) | ExprKind::Lit(_) | ExprKind::Default => {}
         ExprKind::Spread(inner) => scan_expr_auto_mut(inner, out),
         ExprKind::Call { callee, args, .. } => {
             // 闭包变量调用（double_then_inc(5)）：FnMut 闭包需 mut 绑定（E0596）
@@ -929,7 +929,7 @@ pub(crate) fn needs_some_wrap(target_ty: &IrType, value: &Expr) -> bool {
 pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
     match &expr.kind {
         ExprKind::Var(v) => v == name,
-        ExprKind::Lit(_) => false,
+        ExprKind::Lit(_) | ExprKind::Default => false,
         ExprKind::Spread(inner) => expr_mentions_var(inner, name),
         ExprKind::Call { callee, args, .. } => {
             expr_mentions_var(callee, name) || args.iter().any(|a| expr_mentions_var(a, name))

@@ -555,7 +555,7 @@ fn cmp_walk_expr(e: &Expr, my_gen: &HashSet<String>, info: &mut CmpInfo) {
         }
         ExprKind::Paren(x) => cmp_walk_expr(x, my_gen, info),
         ExprKind::ImplicitConvert { source, .. } => cmp_walk_expr(source, my_gen, info),
-        ExprKind::Lit(_) | ExprKind::Var(_) => {}
+        ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::Default => {}
     }
 }
 
@@ -654,7 +654,7 @@ fn count_vars_expr(e: &Expr, count: &mut HashMap<String, usize>) {
         }
         ExprKind::Paren(x) => count_vars_expr(x, count),
         ExprKind::ImplicitConvert { source, .. } => count_vars_expr(source, count),
-        ExprKind::Lit(_) | ExprKind::Var(_) => {}
+        ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::Default => {}
     }
 }
 
@@ -4629,6 +4629,48 @@ impl CodeGen {
             }
         }
 
+        // __implicit_copy__ → lz_builtins::ImplicitCopy（06d §十四 Mojo 风格）：
+        // `def __implicit_copy__(self) -> Self` →
+        // impl ImplicitCopy for SelfTy { fn __implicit_copy__(&self) -> Self { Self::__implicit_copy__(&self) } }
+        if let Some(ic) = methods.iter().find(|m| m.name == "__implicit_copy__") {
+            let where_str = self.magic_impl_where_str(ic);
+            self.emit_line(&format!(
+                "impl{} ImplicitCopy for {} {} {{",
+                generics, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line("fn __implicit_copy__(&self) -> Self {");
+            self.indent += 1;
+            self.emit_line(&format!("{}::__implicit_copy__(&self)", for_ty));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
+        // __implicit_default__ → lz_builtins::ImplicitDefault（06d §十四）：
+        // `def __implicit_default__() -> Self`（静态方法，无 self 参数）→
+        // impl ImplicitDefault for SelfTy { fn __implicit_default__() -> Self { Self::__implicit_default__() } }
+        if methods.iter().any(|m| m.name == "__implicit_default__") {
+            let where_str = if let Some(im) = methods.iter().find(|m| m.name == "__implicit_default__") {
+                self.magic_impl_where_str(im)
+            } else {
+                String::new()
+            };
+            self.emit_line(&format!(
+                "impl{} ImplicitDefault for {} {} {{",
+                generics, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line("fn __implicit_default__() -> Self {");
+            self.indent += 1;
+            self.emit_line(&format!("{}::__implicit_default__()", for_ty));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
         // __implicit_from__ → ImplicitFrom blanket（06d §十五 隐式策略）：
         // 用户在 impl 块定义 `def __implicit_from__(raw: SrcTy) -> Self` →
         // impl ImplicitFrom<SrcTy> for SelfTy，委托用户方法（区别于 struct
@@ -4650,6 +4692,26 @@ impl CodeGen {
                 self.indent -= 1;
                 self.emit_line("}");
             }
+        }
+
+        // __implicit_to__ → lz_builtins::ImplicitInto（06d §十四）：
+        // `def __implicit_to__(self) -> TgtTy` →
+        // impl ImplicitInto<TgtTy> for SelfTy { fn __implicit_into__(&self) -> TgtTy { Self::__implicit_to__(self) } }
+        if let Some(it) = methods.iter().find(|m| m.name == "__implicit_to__") {
+            let tgt_ty = self.rust_type(&it.ret_ty);
+            let where_str = self.magic_impl_where_str(it);
+            self.emit_line(&format!(
+                "impl{} ImplicitInto<{}> for {} {} {{",
+                generics, tgt_ty, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line(&format!("fn __implicit_into__(&self) -> {} {{", tgt_ty));
+            self.indent += 1;
+            self.emit_line(&format!("{}::__implicit_to__(&self)", for_ty));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
         }
 
         // __from__ → std::convert::From（隐式转换第一环，06d §十四）：
@@ -6352,13 +6414,87 @@ impl CodeGen {
                 } else {
                     value_s
                 };
+                // default 关键字桥（let 触发点）：let x: T = default
+                // 当 T 实现了 __implicit_default__ → 生成 <T as ImplicitDefault>::__implicit_default__()
+                let value_s = if let ExprKind::Default = &value.kind {
+                    if let IrType::Named { path: target_path, .. } = ty {
+                        if self.is_known_type(target_path) {
+                            let has_implicit_default = self
+                                .struct_method_names_map
+                                .get(target_path)
+                                .map(|ms| ms.contains("__implicit_default__"))
+                                .unwrap_or(false);
+                            if has_implicit_default {
+                                let target_rust_ty = self.rust_type(&IrType::Named {
+                                    path: target_path.to_string(),
+                                    args: vec![],
+                                });
+                                format!(
+                                    "<{} as lz_builtins::runtime::ImplicitDefault>::__implicit_default__()",
+                                    target_rust_ty
+                                )
+                            } else {
+                                value_s
+                            }
+                        } else {
+                            value_s
+                        }
+                    } else {
+                        value_s
+                    }
+                } else {
+                    value_s
+                };
                 // 隐式转换桥（let 触发点）：let x: TargetTy = src_val
                 // 当 TargetTy 是 Named 类型且 src_val 类型不匹配 → 插入 __implicit_from__ 桥
                 // 注意：不依赖 skip_ty，因为无泛型参数的 struct（如 Celsius）会被 skip_ty 跳过
                 let value_s = if let IrType::Named { path: target_path, .. } = ty {
                     if *ty != IrType::Any && *ty != IrType::Unit {
-                        if let Some(bridge) = self.build_implicit_bridge(target_path, value, &value_s) {
+                        if let Some(bridge) = self.build_implicit_bridge(ty, value, &value_s) {
                             bridge
+                        } else {
+                            value_s
+                        }
+                    } else {
+                        value_s
+                    }
+                } else {
+                    value_s
+                };
+                // __implicit_copy__ 桥（Mojo 风格隐式复制）：
+                // 当目标类型实现了 __implicit_copy__，且源类型与目标类型相同 →
+                // 桥接为 <T as ImplicitCopy>::__implicit_copy__(&value_s)
+                // 注：必须放在 implicit_from 桥之后，避免类型不匹配时错误触发
+                // 仅当值是变量引用时才触发（避免对构造表达式误触发）
+                let value_s = if let IrType::Named { path: target_path, .. } = ty {
+                    if *ty != IrType::Any && *ty != IrType::Unit {
+                        let has_implicit_copy = self
+                            .struct_method_names_map
+                            .get(target_path)
+                            .map(|ms| ms.contains("__implicit_copy__"))
+                            .unwrap_or(false);
+                        if has_implicit_copy {
+                            // 仅当源类型与目标类型相同，且值是变量引用时触发
+                            if let IrType::Named { path: src_path, .. } = &value.ty {
+                                if src_path == target_path {
+                                    if let ExprKind::Var(_) = &value.kind {
+                                        let target_rust_ty = self.rust_type(&IrType::Named {
+                                            path: target_path.to_string(),
+                                            args: vec![],
+                                        });
+                                        format!(
+                                            "<{} as lz_builtins::runtime::ImplicitCopy>::__implicit_copy__(&{})",
+                                            target_rust_ty, value_s
+                                        )
+                                    } else {
+                                        value_s
+                                    }
+                                } else {
+                                    value_s
+                                }
+                            } else {
+                                value_s
+                            }
                         } else {
                             value_s
                         }
@@ -7702,6 +7838,8 @@ impl CodeGen {
                 && !matches!(&key.kind, ExprKind::Var(n) if n == "pass"))
             || (matches!(&key.ty, IrType::Any)
                 && matches!(&key.kind, ExprKind::Var(_)));
+        // 若 key 类型含泛型参数（K, V, T 等）：不可能是数值索引——跳过 as usize
+        let key_is_numeric = key_is_numeric && !matches!(&key.ty, IrType::Generic(_));
         // 对整数 key（i64）转换为 usize，除非目标是 dict（其 key 不是数值索引）
         if !is_dict && key_is_numeric {
             let key_s = self.gen_expr(key);
@@ -10705,8 +10843,9 @@ impl CodeGen {
                     // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
                     let is_kwargs = matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
                     // 用户 struct：ml[0] → ml.__getitem__(0)（key 保持 i64，内部 self.items[i] 再转 usize）
+                    // 注意：必须在 is_dict 之后，否则 Dict 会被误判为 struct
                     let is_struct =
-                        matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
+                        !is_dict && matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                     if is_struct {
                         format!("({}).__getitem__({})", base_s, self.gen_expr(key))
                     } else if is_kwargs {
@@ -12015,14 +12154,42 @@ impl CodeGen {
         self.known_types.contains(base) || self.emitted_types.contains(base)
     }
 
+    /// 判断 IrType 是否完全具体（不含泛型类型参数如 K, V）
+    fn is_fully_concrete(&self, ty: &IrType) -> bool {
+        match ty {
+            IrType::Any | IrType::Unit | IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Never | IrType::Self_ | IrType::Ext => true,
+            IrType::Named { path, args } => {
+                // 单字母类型名（K, V, T 等）视为泛型类型参数，非具体
+                if path.len() == 1 && path.chars().next().unwrap().is_ascii_uppercase() {
+                    return false;
+                }
+                // 必须是已知具体类型
+                if !self.is_known_type(path) {
+                    return false;
+                }
+                args.iter().all(|a| self.is_fully_concrete(a))
+            }
+            IrType::Option(inner) | IrType::Result { ok: inner, .. } | IrType::Ref(inner) | IrType::MutRef(inner) => self.is_fully_concrete(inner),
+            IrType::Tuple(elems) => elems.iter().all(|e| self.is_fully_concrete(e)),
+            IrType::Fn { params, ret } => params.iter().all(|p| self.is_fully_concrete(p)) && self.is_fully_concrete(ret),
+            IrType::Duck { .. } => false,
+            IrType::Generic(_) => false,
+        }
+    }
+
     /// 隐式转换桥：let x: TargetTy = src_val 中，若 TargetTy 实现了 __implicit_from__(SrcTy)，
     /// 生成 `<TargetTy as ImplicitFrom<SrcTy>>::__implicit_from__(value)` 桥接表达式。
     fn build_implicit_bridge(
         &self,
-        target_path: &str,
+        target_ty: &IrType,
         value: &crate::ir::node::Expr,
         value_s: &str,
     ) -> Option<String> {
+        // 提取目标路径
+        let target_path = match target_ty {
+            IrType::Named { path, .. } => path.as_str(),
+            _ => return None,
+        };
         // 目标类型必须是已知的 struct/enum
         if !self.is_known_type(target_path) {
             return None;
@@ -12039,25 +12206,59 @@ impl CodeGen {
         if matches!(src_ty, IrType::Any | IrType::Unit) {
             return None;
         }
+        // 若源类型不是已知具体类型（含泛型参数），保守跳过——避免在泛型上下文（如 fn<K,V> 内）误触发
+        if !self.is_known_type(
+            match src_ty {
+                IrType::Named { path, .. } => path.as_str(),
+                _ => "",
+            }
+        ) && !matches!(src_ty, IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Any)
+        {
+            return None;
+        }
+        // 源/目标类型必须完全具体（不含泛型类型参数），否则跳过——避免
+        // 在泛型函数体内对 Option<(K,V)> 等误生成桥接（E0277）
+        if !self.is_fully_concrete(src_ty) || !self.is_fully_concrete(target_ty) {
+            return None;
+        }
         // 检查目标类型是否实现了 __implicit_from__ 方法
         let has_implicit_from = self
             .struct_method_names_map
             .get(target_path)
             .map(|ms| ms.contains("__implicit_from__"))
             .unwrap_or(false);
-        if !has_implicit_from {
-            return None;
+        if has_implicit_from {
+            let src_rust_ty = self.rust_type(src_ty);
+            let target_rust_ty = self.rust_type(&IrType::Named {
+                path: target_path.to_string(),
+                args: vec![],
+            });
+            return Some(format!(
+                "<{} as lz_builtins::runtime::ImplicitFrom<{}>>::__implicit_from__({})",
+                target_rust_ty, src_rust_ty, value_s
+            ));
         }
-        // 生成桥接表达式
-        let src_rust_ty = self.rust_type(src_ty);
-        let target_rust_ty = self.rust_type(&IrType::Named {
-            path: target_path.to_string(),
-            args: vec![],
-        });
-        Some(format!(
-            "<{} as lz_builtins::runtime::ImplicitFrom<{}>>::__implicit_from__({})",
-            target_rust_ty, src_rust_ty, value_s
-        ))
+        // 回退：检查源类型是否实现了 __implicit_to__ 方法（目标端转换）
+        if let IrType::Named { path: src_path, .. } = src_ty {
+            if self.is_known_type(src_path) {
+                let has_implicit_to = self
+                    .struct_method_names_map
+                    .get(src_path)
+                    .map(|ms| ms.contains("__implicit_to__"))
+                    .unwrap_or(false);
+                if has_implicit_to {
+                    let target_rust_ty = self.rust_type(&IrType::Named {
+                        path: target_path.to_string(),
+                        args: vec![],
+                    });
+                    return Some(format!(
+                        "<{} as lz_builtins::runtime::ImplicitInto<{}>>::__implicit_into__(&{})",
+                        self.rust_type(src_ty), target_rust_ty, value_s
+                    ));
+                }
+            }
+        }
+        None
     }
 
     /// 生成字段类型的默认值（用于 __new__ 补齐）
