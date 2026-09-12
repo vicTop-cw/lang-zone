@@ -1,0 +1,15 @@
+struct Div =
+    b: int
+
+impl Div =
+    def __guarded_pred__(self, input: int) -> bool =
+        return self.b != 0
+
+    def __guarded_action__(self, input: int) -> int =
+        return 0
+
+def main() =
+    div_bad = Div(b: 0)
+    guard div_bad with 42 else:
+        print("guarded triggered")
+    print("done")

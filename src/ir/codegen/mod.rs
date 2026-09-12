@@ -6352,6 +6352,22 @@ impl CodeGen {
                 } else {
                     value_s
                 };
+                // 隐式转换桥（let 触发点）：let x: TargetTy = src_val
+                // 当 TargetTy 是 Named 类型且 src_val 类型不匹配 → 插入 __implicit_from__ 桥
+                // 注意：不依赖 skip_ty，因为无泛型参数的 struct（如 Celsius）会被 skip_ty 跳过
+                let value_s = if let IrType::Named { path: target_path, .. } = ty {
+                    if *ty != IrType::Any && *ty != IrType::Unit {
+                        if let Some(bridge) = self.build_implicit_bridge(target_path, value, &value_s) {
+                            bridge
+                        } else {
+                            value_s
+                        }
+                    } else {
+                        value_s
+                    }
+                } else {
+                    value_s
+                };
                 // Result 基 try 块内：raises 函数返回 Result，需 ? 解包
                 let (value_s, ty_str) = if self.in_result_try && matches!(&value.ty, IrType::Result { .. }) {
                     let unwrapped_ty = if let IrType::Result { ok, .. } = &value.ty {
@@ -11997,6 +12013,51 @@ impl CodeGen {
         // 剥离泛型参数：MyList<i64> → MyList
         let base = name.split('<').next().unwrap_or(name);
         self.known_types.contains(base) || self.emitted_types.contains(base)
+    }
+
+    /// 隐式转换桥：let x: TargetTy = src_val 中，若 TargetTy 实现了 __implicit_from__(SrcTy)，
+    /// 生成 `<TargetTy as ImplicitFrom<SrcTy>>::__implicit_from__(value)` 桥接表达式。
+    fn build_implicit_bridge(
+        &self,
+        target_path: &str,
+        value: &crate::ir::node::Expr,
+        value_s: &str,
+    ) -> Option<String> {
+        // 目标类型必须是已知的 struct/enum
+        if !self.is_known_type(target_path) {
+            return None;
+        }
+        // 源值类型
+        let src_ty = &value.ty;
+        // 若源类型与目标类型已匹配 → 无需桥接
+        if let IrType::Named { path: src_path, .. } = src_ty {
+            if src_path == target_path {
+                return None;
+            }
+        }
+        // 若源类型是 Any/Unit → 无法判断，保守跳过
+        if matches!(src_ty, IrType::Any | IrType::Unit) {
+            return None;
+        }
+        // 检查目标类型是否实现了 __implicit_from__ 方法
+        let has_implicit_from = self
+            .struct_method_names_map
+            .get(target_path)
+            .map(|ms| ms.contains("__implicit_from__"))
+            .unwrap_or(false);
+        if !has_implicit_from {
+            return None;
+        }
+        // 生成桥接表达式
+        let src_rust_ty = self.rust_type(src_ty);
+        let target_rust_ty = self.rust_type(&IrType::Named {
+            path: target_path.to_string(),
+            args: vec![],
+        });
+        Some(format!(
+            "<{} as lz_builtins::runtime::ImplicitFrom<{}>>::__implicit_from__({})",
+            target_rust_ty, src_rust_ty, value_s
+        ))
     }
 
     /// 生成字段类型的默认值（用于 __new__ 补齐）

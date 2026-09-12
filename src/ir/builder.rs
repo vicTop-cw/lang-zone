@@ -4485,6 +4485,63 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                                 .collect(),
                             None => vec![packed],
                         }
+                    } else if let Some(AstStmt::Expr(AstExpr::Ident(n))) = body.last() {
+                        // 块体末尾是 struct 变量且实现了 __buildparams__：调用 into_args() 拆包参数
+                        match ctx.lookup_var(n) {
+                            IrType::Named { path, .. } => {
+                                if ctx
+                                    .struct_methods
+                                    .get(path.as_str())
+                                    .map(|ms| ms.contains("__buildparams__"))
+                                    .unwrap_or(false)
+                                {
+                                    let receiver_expr = Expr::new(
+                                        ExprKind::Var(n.clone()),
+                                        IrType::Named { path: path.clone(), args: vec![] },
+                                        Span::unknown(),
+                                    );
+                                    let into_args_expr = Expr::new(
+                                        ExprKind::MethodCall {
+                                            receiver: Box::new(receiver_expr),
+                                            method: "into_args".to_string(),
+                                            args: vec![],
+                                        },
+                                        IrType::Any,
+                                        Span::unknown(),
+                                    );
+                                    let buildparams_ret =
+                                        ctx.lookup_fn_return(&format!("{}.{}", path, "__buildparams__"));
+                                    if let IrType::Tuple(elements) = buildparams_ret {
+                                        elements
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(i, _)| {
+                                                Expr::new(
+                                                    ExprKind::MagicCall {
+                                                        kind: MagicKind::UnpackBuildCall,
+                                                        args: vec![
+                                                            into_args_expr.clone(),
+                                                            Expr::new(
+                                                                ExprKind::Lit(LitKind::Int(i as i64)),
+                                                                IrType::Int,
+                                                                Span::unknown(),
+                                                            ),
+                                                        ],
+                                                    },
+                                                    IrType::Any,
+                                                    Span::unknown(),
+                                                )
+                                            })
+                                            .collect()
+                                    } else {
+                                        vec![into_args_expr]
+                                    }
+                                } else {
+                                    vec![packed]
+                                }
+                            }
+                            _ => vec![packed],
+                        }
                     } else {
                         vec![packed]
                     };

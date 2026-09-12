@@ -434,13 +434,13 @@ struct MyFile =
 | `__is_ok__`/`__unwrap__` | `SpreadOk` | 错误传播 `?` | ✅ 编译器内建协议（`?` 传播三件套） |
 | `__err__` | `SpreadErr` | 错误传播 `?` | ✅ 同上 |
 | `__bool__` | HasBool | 布尔/数学 | ✅ 判定链首环 `__bool__` → `__len__` → 内建 `!is_empty()`；无 HasBool trait 生成 |
-| `__buildparams__` | `BuildParams` | 构建块 | ❌ |
+| `__buildparams__` | `BuildParams` | 构建块 | ✅ `task ~: cfg` 构建块协议（`cfg.into_args()` → 元组解包传参） |
 | `__implicit_copy__` | `ImplicitCopy` | 隐式策略 | ❌ |
 | `__implicit_to__` | ImplicitInto | 隐式策略 | ❌ |
 | `__implicit_from__` | ImplicitFrom | 隐式策略 | ✅ 用户定义 `def __implicit_from__(raw: SrcTy) → Self` 生成 impl ImplicitFrom<SrcTy> 委托；内建首字段构造路径见 StructDef 声明式 |
 | `__implicit_default__` | ImplicitDefault | 隐式策略 | ❌ |
-| `__guarded_pred__` | `GuardedStrategy` | 守卫策略 | ❌ |
-| `__guarded_action__` | `GuardedStrategy` | 守卫策略 | ❌ |
+| `__guarded_pred__` | `GuardedStrategy` | 守卫策略 | ✅ `guard obj with input` 委托语法；trait impl 生成 |
+| `__guarded_action__` | `GuardedStrategy` | 守卫策略 | ✅ 与 pred 配对；false 分支自动调用 |
 | `__int__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for i64 impl 生成 + `int(x)` 调用点直派 |
 | `__float__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for f64 impl 生成 + `float(x)` 调用点直派 |
 | `__pos__` | Pos | 类型缺口 | ✅ `+a` 分派 `a.__pos__()`；无魔术方法时数值恒等 |

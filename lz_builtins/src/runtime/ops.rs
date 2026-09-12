@@ -24,12 +24,8 @@ pub trait ImplicitInto<T> {
     fn __implicit_into__(self) -> T;
 }
 
-impl<S, T> ImplicitInto<T> for S where S: crate::runtime::ImplicitFrom<T> {
-    fn __implicit_into__(self) -> T {
-        // 注意：实际触发点由编译器决策，此处为 trait 占位
-        <S as crate::runtime::ImplicitFrom<T>>::__implicit_from__(self)
-    }
-}
+// 注意：codegen 层直接使用 <T as ImplicitFrom<S>>::__implicit_from__()，
+// 而非通过 Into blanket，避免 E0362/E0277 blanket 方向冲突。
 
 // ══════════════════════════════════════════════════════════════
 // ImplicitCopy — Mojo 风格隐式复制（06d §十四）

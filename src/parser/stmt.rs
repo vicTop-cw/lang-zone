@@ -517,6 +517,9 @@ impl ParserStmtExt for Parser {
                 //   guard cond else expr                  (内联守卫)
                 //   guard cond success_expr else fail_expr (带成功值的守卫)
                 //   guard let PATTERN = EXPR else: VALUE  (模式守卫 → Rust let...else)
+                // 支持 `guard <obj> with <input>` 委托守卫语法:
+                // 脱糖为 guard obj.__guarded_pred__(input) success_expr else { obj.__guarded_action__(input); body }
+                let mut guard_action: Option<Expr> = None;
                 let (cond, let_binding) = if self.check(&Token::Let) {
                     self.advance();
                     let pattern = self.parse_pattern()?;
@@ -524,7 +527,25 @@ impl ParserStmtExt for Parser {
                     let expr = self.parse_expr()?;
                     (None, Some((pattern, expr)))
                 } else {
-                    (Some(self.parse_expr()?), None)
+                    let obj = self.parse_expr()?;
+                    if self.check(&Token::With) {
+                        self.advance();
+                        let input = self.parse_expr()?;
+                        let pred_call = Expr::MethodCall {
+                            receiver: Box::new(obj.clone()),
+                            method: "__guarded_pred__".to_string(),
+                            args: vec![input.clone()],
+                        };
+                        let action_call = Expr::MethodCall {
+                            receiver: Box::new(obj.clone()),
+                            method: "__guarded_action__".to_string(),
+                            args: vec![input],
+                        };
+                        guard_action = Some(action_call);
+                        (Some(pred_call), None)
+                    } else {
+                        (Some(obj), None)
+                    }
                 };
                 // guard cond success_expr else fail_expr: cond 后非 Else 即 success 值
                 let success_expr = if !self.check(&Token::Else) {
@@ -570,6 +591,14 @@ impl ParserStmtExt for Parser {
                         Stmt::Expr(self.parse_expr()?)
                     };
                     vec![val]
+                };
+                // 委托守卫: 在 else_body 开头注入 action 调用
+                let else_body = if let Some(action) = guard_action {
+                    let mut body = vec![Stmt::Expr(action)];
+                    body.extend(else_body);
+                    body
+                } else {
+                    else_body
                 };
                 Ok(Stmt::Guard {
                     cond,
@@ -875,6 +904,18 @@ impl ParserStmtExt for Parser {
                     self.validate_build_block(BuildKind::Index, &body)?;
                     return Ok(Stmt::Expr(Expr::BuildBlock {
                         kind: BuildKind::Index,
+                        lhs: Box::new(expr),
+                        body,
+                    }));
+                }
+
+                // 构建块（调用）: <lhs> ~: <缩进块>
+                if self.check(&Token::BuildCall) {
+                    self.advance();
+                    let body = self.parse_build_block_body()?;
+                    self.validate_build_block(BuildKind::Call, &body)?;
+                    return Ok(Stmt::Expr(Expr::BuildBlock {
+                        kind: BuildKind::Call,
                         lhs: Box::new(expr),
                         body,
                     }));

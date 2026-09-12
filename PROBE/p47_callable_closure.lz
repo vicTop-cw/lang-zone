@@ -1,0 +1,14 @@
+struct Multiplier =
+    factor: int
+
+impl Multiplier =
+    def __call__(self, x: int) -> int =
+        return self.factor * x
+
+def apply_twice(value: int, f) -> int =
+    return f(f(value))
+
+def main() =
+    mul3 = Multiplier(factor: 3)
+    result = apply_twice(5, mul3)
+    print(result)
