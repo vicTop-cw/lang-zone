@@ -398,17 +398,17 @@ struct MyFile =
 | `__not__` | `std::ops::Not` | 一元 | ✅ |
 | `__invert__` | `std::ops::Not`（复用） | 一元 | ✅ `~a`/`!a`/`not a` 分派，`__not__` 缺席时回退 |
 | `__iadd__` | `std::ops::AddAssign` | 复合赋值 | ✅ |
-| `__isub__` | `std::ops::SubAssign` | 复合赋值 | 🔸 `a -= b` 直派方法调用；无 SubAssign impl 生成 |
-| `__imul__` | `std::ops::MulAssign` | 复合赋值 | 🔸 同上（MulAssign impl 未生成） |
-| `__idiv__` | `std::ops::DivAssign` | 复合赋值 | 🔸 同上（DivAssign impl 未生成） |
+| `__isub__` | `std::ops::SubAssign` | 复合赋值 | ✅ |
+| `__imul__` | `std::ops::MulAssign` | 复合赋值 | ✅ |
+| `__idiv__` | `std::ops::DivAssign` | 复合赋值 | ✅ |
 | `__eq__` | `std::cmp::PartialEq` | 比较 | ✅ |
 | `__ne__` | `std::cmp::PartialEq` | 比较 | ✅ 未定义时由 `!__eq__` 派生 |
 | `__lt__` | `std::cmp::PartialOrd` | 比较 | ✅ `if a < b` 直派 + PartialOrd 由 `__eq__`+`__lt__` 推导 |
 | `__le__` | `std::cmp::PartialOrd` | 比较 | ✅ |
 | `__gt__` | `std::cmp::PartialOrd` | 比较 | ✅ |
 | `__ge__` | `std::cmp::PartialOrd` | 比较 | ✅ |
-| `__cmp__` | `std::cmp::Ord` | 比较 | 🔸 已注册，无 Ord impl 生成 |
-| `__hash__` | `std::hash::Hash` | 比较 | 🔸 已注册，无 Hash impl 生成 |
+| `__cmp__` | `std::cmp::Ord` | 比较 | ✅ `__eq__`+`__lt__` 同存时生成 Ord impl（int -1/0/1 → Ordering）+ Eq 标记 impl |
+| `__hash__` | `std::hash::Hash` | 比较 | ✅ Hash impl 委托 `__hash__()` |
 | `__from__` | `std::convert::From` | 类型转换 | ✅ From impl 生成 + `let x: T = v` 隐式触发 |
 | `__into__` | `std::convert::Into` | 类型转换 | ✅ Into impl 生成；显式 `.__into__()` 调用 |
 | `__cast__` | `Cast` | 类型转换 | 🔸 语义检查引用，无 impl 生成 |
@@ -424,9 +424,9 @@ struct MyFile =
 | `__size_hint__` | `std::iter::Iterator` | 容器/迭代 | ✅ impl Iterator 场景映射 `size_hint` |
 | `__len__` | HasLen | 容器/迭代 | ✅ `len()`/真值链 `__len__ != 0`；无 HasLen trait 生成 |
 | `__contains__` | Contains | 容器/迭代 | ✅ `x in obj` 直派；无 Contains trait 生成 |
-| `__drop__` | `std::ops::Drop` | 生命周期 | 🔸 已注册，无 Drop impl 生成 |
+| `__drop__` | `std::ops::Drop` | 生命周期 | ✅ Drop impl 委托 `__drop__()` |
 | `__clone__` | `std::clone::Clone` | 生命周期 | 🔸 struct 自动 derive(Clone) 兜底 |
-| `__default__` | `std::default::Default` | 生命周期 | 🔸 已注册，无 Default impl 生成 |
+| `__default__` | `std::default::Default` | 生命周期 | ✅ Default impl 委托 `__default__()` |
 | `__call__` | `Callable` | 调用/索引 | 🔸 lz_builtins 有 Callable trait |
 | `__getitem__` | `std::ops::Index` | 调用/索引 | ✅ `obj[key]` 直派 |
 | `__setitem__` | `std::ops::IndexMut` | 调用/索引 | ✅ `obj[key] = v` 直派；无 IndexMut impl 生成 |

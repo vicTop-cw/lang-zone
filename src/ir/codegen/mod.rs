@@ -4321,26 +4321,36 @@ impl CodeGen {
             }
         }
 
-        // __iadd__ → std::ops::AddAssign（Rhs 取 other 参数类型）
-        if let Some(am) = methods.iter().find(|m| m.name == "__iadd__") {
-            let where_str = self.magic_impl_where_str(am);
-            let rhs_ty = am
-                .params
-                .get(1)
-                .map(|p| self.rust_type(&p.ty))
-                .unwrap_or_else(|| "()".to_string());
-            self.emit_line(&format!(
-                "impl{} std::ops::AddAssign<{}> for {} {} {{",
-                generics, rhs_ty, for_ty, where_str
-            ));
-            self.indent += 1;
-            self.emit_line(&format!("fn add_assign(&mut self, other: {}) {{", rhs_ty));
-            self.indent += 1;
-            self.emit_line("self.__iadd__(other)");
-            self.indent -= 1;
-            self.emit_line("}");
-            self.indent -= 1;
-            self.emit_line("}");
+        // 复合赋值族 → std::ops::*Assign（06d §四，对齐 __iadd__ 先例）：
+        // __iadd__→AddAssign、__isub__→SubAssign、__imul__→MulAssign、__idiv__→DivAssign
+        //（Rhs 取 other 参数类型；self 固有方法为 `mut self`，AddAssign 的
+        // add_assign(&mut self, rhs) 经 auto-mut 调用即可）
+        for (magic, trait_path, trait_method) in &[
+            ("__iadd__", "std::ops::AddAssign", "add_assign"),
+            ("__isub__", "std::ops::SubAssign", "sub_assign"),
+            ("__imul__", "std::ops::MulAssign", "mul_assign"),
+            ("__idiv__", "std::ops::DivAssign", "div_assign"),
+        ] {
+            if let Some(am) = methods.iter().find(|m| m.name == *magic) {
+                let where_str = self.magic_impl_where_str(am);
+                let rhs_ty = am
+                    .params
+                    .get(1)
+                    .map(|p| self.rust_type(&p.ty))
+                    .unwrap_or_else(|| "()".to_string());
+                self.emit_line(&format!(
+                    "impl{} {}<{}> for {} {} {{",
+                    generics, trait_path, rhs_ty, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("fn {}(&mut self, other: {}) {{", trait_method, rhs_ty));
+                self.indent += 1;
+                self.emit_line(&format!("self.{}(other)", magic));
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
         }
 
         // 一元 __neg__ → std::ops::Neg / __not__ → std::ops::Not：
@@ -4400,6 +4410,109 @@ impl CodeGen {
                 self.emit_line(&format!("fn not(self) -> {} {{", out_ty));
                 self.indent += 1;
                 self.emit_line("self.__invert__()");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __cmp__ → std::cmp::Ord（06d §五）：全序比较委托 __cmp__。
+        // Ord 要求 Eq + PartialOrd 超trait——仅在 __eq__/__lt__ 同时定义
+        // （PartialEq/PartialOrd impl 已生成）时才生成，否则 E0277。
+        // LZ 的 __cmp__ 返回 int（-1/0/1），映射为 Ordering::Less/Equal/Greater
+        let has_eq_impl = methods.iter().any(|m| m.name == "__eq__");
+        let has_lt_impl = methods.iter().any(|m| m.name == "__lt__");
+        if let Some(cm) = methods.iter().find(|m| m.name == "__cmp__") {
+            if has_eq_impl && has_lt_impl {
+                // Rust 的 Eq 是独立标记 trait（Ord/Hash 超trait 要求 Eq），
+                // 仅 PartialEq 不满足——需一并生成空 Eq 标记 impl
+                let eq_m = methods.iter().find(|m| m.name == "__eq__");
+                let eq_where = eq_m.map(|m| self.magic_impl_where_str(m)).unwrap_or_default();
+                self.emit_line(&format!(
+                    "impl{} std::cmp::Eq for {} {} {{}}",
+                    generics, for_ty, eq_where
+                ));
+                let where_str = self.magic_impl_where_str(cm);
+                self.emit_line(&format!(
+                    "impl{} std::cmp::Ord for {} {} {{",
+                    generics, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line("fn cmp(&self, other: &Self) -> std::cmp::Ordering {");
+                self.indent += 1;
+                // __cmp__ 第二参数 ref 直接传，owned 需解引用克隆
+                let takes_ref = cm.params.get(1).map_or(false, |p| {
+                    p.is_ref || matches!(&p.ty, IrType::Ref(_) | IrType::MutRef(_))
+                });
+                let arg = if takes_ref {
+                    "other".to_string()
+                } else {
+                    "(*other).clone()".to_string()
+                };
+                self.emit_line(&format!(
+                    "let c = self.__cmp__({}); if c < 0 {{ std::cmp::Ordering::Less }} else if c == 0 {{ std::cmp::Ordering::Equal }} else {{ std::cmp::Ordering::Greater }}",
+                    arg
+                ));
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __hash__ → std::hash::Hash（06d §五）：哈希委托 __hash__（返回 int）
+        if let Some(hm) = methods.iter().find(|m| m.name == "__hash__") {
+            let where_str = self.magic_impl_where_str(hm);
+            self.emit_line(&format!(
+                "impl{} std::hash::Hash for {} {} {{",
+                generics, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line("fn hash<H: std::hash::Hasher>(&self, state: &mut H) {");
+            self.indent += 1;
+            self.emit_line("self.__hash__().hash(state)");
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
+        // __drop__ → std::ops::Drop（06d §十）：析构委托 __drop__（&mut self）。
+        // 注意：Drop impl 的泛型参数须与 struct 定义**逐字一致**（E0367）——
+        // generics 串可能带 bounds（`<T: Clone + Debug>`），加上即与无约束的
+        // struct 定义不匹配；裸泛型内调 self.__drop__() 又会因方法约束报 E0599
+        //（box.lz）。故仅方法与泛型串均无约束时生成（保守回退）
+        if let Some(dm) = methods.iter().find(|m| m.name == "__drop__") {
+            if dm.where_clause.is_empty() && !generics.contains(':') {
+                self.emit_line(&format!(
+                    "impl{} std::ops::Drop for {} {{",
+                    generics, for_ty
+                ));
+                self.indent += 1;
+                self.emit_line("fn drop(&mut self) {");
+                self.indent += 1;
+                self.emit_line("self.__drop__()");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __default__ → std::default::Default（06d §十）：默认值委托 __default__
+        //（静态方法，无 self，返回 Self）
+        if let Some(fm) = methods.iter().find(|m| m.name == "__default__") {
+            if !matches!(fm.ret_ty, IrType::Unit) {
+                let where_str = self.magic_impl_where_str(fm);
+                self.emit_line(&format!(
+                    "impl{} std::default::Default for {} {} {{",
+                    generics, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line("fn default() -> Self {");
+                self.indent += 1;
+                self.emit_line("Self::__default__()");
                 self.indent -= 1;
                 self.emit_line("}");
                 self.indent -= 1;
