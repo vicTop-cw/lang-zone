@@ -1258,11 +1258,22 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             // 否则 `n * 10`（n 为 walrus 变量未登记）推断为 Any，三元条件
             // 无法触发 codegen 的真值转换（combo_ternary_walrus.lz E0308）
             let lt = infer_expr_type(left, ctx);
-            if matches!(&lt, IrType::Any) {
+            let lt = if matches!(&lt, IrType::Any) {
                 infer_expr_type(right, ctx)
             } else {
                 lt
+            };
+            // int 与 f64 混合算术 → f64（Rust 语义 i64 * f64 不存在，需 as 提升；
+            // 否则推断为 i64，return 处包 ImplicitFrom<i64> → f64 报 E0277）
+            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod)
+                && matches!(&lt, IrType::Int)
+            {
+                let rt = infer_expr_type(right, ctx);
+                if matches!(&rt, IrType::F64) {
+                    return IrType::F64;
+                }
             }
+            lt
         }
         AstExpr::Unary { op, operand } => match op {
             _ => infer_expr_type(operand, ctx),
@@ -2923,6 +2934,12 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // 函数参数调用（iter.lz filter/find `predicate(item)`，predicate:
             // fn(ref I.Item) -> bool）：callee 是 Fn 类型变量且参数为 ref 时，
             // 实参自动取引用（&item），否则 E0308 expected &I::Item found owned
+            let plain_fn_name: Option<&String> =
+                if let AstExpr::Ident(fname) = func.as_ref() {
+                    Some(fname)
+                } else {
+                    None
+                };
             let fn_arg_refs: Vec<bool> = if let AstExpr::Ident(fname) = func.as_ref() {
                 match ctx.lookup_var(fname) {
                     IrType::Fn { params, .. } => params
@@ -2938,17 +2955,54 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 .iter()
                 .enumerate()
                 .map(|(i, a)| {
+                    let conv = convert_expr(a, ctx);
                     if i < fn_arg_refs.len() && fn_arg_refs[i] {
                         Expr::new(
                             ExprKind::UnOp {
                                 op: UnOpKind::Ref,
-                                operand: Box::new(convert_expr(a, ctx)),
+                                operand: Box::new(conv),
                             },
                             IrType::Any,
                             Span::unknown(),
                         )
                     } else {
-                        convert_expr(a, ctx)
+                        // __from__ 实参触发点（06d §十四，P1-2 第二环）：
+                        // `draw(p)`（p: int，形参类型 Point 定义了 __from__(int)）→
+                        // 包装为 Point::__from__(p)。循环防护：__from__ 自身的实参
+                        // 不再触发（否则 Point::__from__(int raw) 的 raw: int 会试图
+                        // 再经 int.__from__ 转换——int 无 __from__ 自然终止，此处
+                        // 显式跳过内建目标更稳）
+                        if plain_fn_name.is_some() {
+                            if let Some(param_tys) = ctx.fn_params.get(plain_fn_name.unwrap()) {
+                                if let Some(pt) = param_tys.get(i) {
+                                    if let IrType::Named { path, .. } = pt {
+                                        let has_from = ctx
+                                            .struct_methods
+                                            .get(path)
+                                            .map(|ms| ms.contains("__from__"))
+                                            .unwrap_or(false);
+                                        let val_same = conv.ty == *pt
+                                            || matches!(conv.ty, IrType::Any | IrType::Generic(_));
+                                        if has_from && !val_same {
+                                            return Expr::new(
+                                                ExprKind::Call {
+                                                    type_args: vec![],
+                                                    callee: Box::new(Expr::new(
+                                                        ExprKind::Var(format!("{}::__from__", path)),
+                                                        IrType::Any,
+                                                        Span::unknown(),
+                                                    )),
+                                                    args: vec![conv],
+                                                },
+                                                pt.clone(),
+                                                Span::unknown(),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        conv
                     }
                 })
                 .collect();
@@ -9983,18 +10037,33 @@ fn ex_check_expr(
                         } else {
                             let at = ex_infer(arg, work, env);
                             if !ex_agrees_g(want, &at, gens, w.duck_names) {
-                                eprintln!("DBG fnarg: fn={} idx={} want={:?} at={:?} gens={:?} duck={:?}", fname, i + 1, want, at, gens, w.duck_names);
-                                let caller = work
-                                    .current_fn_name
-                                    .clone()
-                                    .unwrap_or_else(|| "<toplevel>".to_string());
-                                work.report_error(format!(
-                                    "调用 {fname} 的参数 {} 类型不匹配：期望 {}，实际 {}（位于函数 {caller}）",
-                                    i + 1,
-                                    ex_ty_desc(want),
-                                    ex_ty_desc(&at)
-                                ));
-                                break;
+                                // __from__ 实参转换放行（06d §十四，P1-2）：形参是
+                                // 用户 struct 且定义了 __from__、实参类型可作其源
+                                // （与 convert_expr 的包装触发点一致）→ 不报错，
+                                // 转换由 builder 在调用点注入
+                                let from_ok = match want {
+                                    IrType::Named { path, .. } => {
+                                        work.struct_methods
+                                            .get(path)
+                                            .map(|ms| ms.contains("__from__"))
+                                            .unwrap_or(false)
+                                    }
+                                    _ => false,
+                                };
+                                if !from_ok {
+                                    eprintln!("DBG fnarg: fn={} idx={} want={:?} at={:?} gens={:?} duck={:?}", fname, i + 1, want, at, gens, w.duck_names);
+                                    let caller = work
+                                        .current_fn_name
+                                        .clone()
+                                        .unwrap_or_else(|| "<toplevel>".to_string());
+                                    work.report_error(format!(
+                                        "调用 {fname} 的参数 {} 类型不匹配：期望 {}，实际 {}（位于函数 {caller}）",
+                                        i + 1,
+                                        ex_ty_desc(want),
+                                        ex_ty_desc(&at)
+                                    ));
+                                    break;
+                                }
                             }
                         }
                     }

@@ -4520,6 +4520,29 @@ impl CodeGen {
             }
         }
 
+        // __int__/__float__ 缺口魔法（06d §十六）：编译器自动生成
+        // impl From<SelfTy> for i64 / impl From<SelfTy> for f64，
+        // 使 int(x)/float(x) 可经 .into() 或调用点直派转换
+        for (magic, std_ty) in &[("__int__", "i64"), ("__float__", "f64")] {
+            if let Some(im) = methods.iter().find(|m| m.name == *magic) {
+                if !matches!(im.ret_ty, IrType::Unit) {
+                    let where_str = self.magic_impl_where_str(im);
+                    self.emit_line(&format!(
+                        "impl{} std::convert::From<{}> for {} {} {{",
+                        generics, for_ty, std_ty, where_str
+                    ));
+                    self.indent += 1;
+                    self.emit_line(&format!("fn from(value: {}) -> Self {{", for_ty));
+                    self.indent += 1;
+                    self.emit_line(&format!("value.{}()", magic));
+                    self.indent -= 1;
+                    self.emit_line("}");
+                    self.indent -= 1;
+                    self.emit_line("}");
+                }
+            }
+        }
+
         // __from__ → std::convert::From（隐式转换第一环，06d §十四）：
         // `def __from__(raw: SrcTy) -> Self`（静态方法，无 self 参数）→
         // impl From<SrcTy> for SelfTy { fn from(value: SrcTy) -> Self { Self::__from__(value) } }
@@ -8286,6 +8309,14 @@ impl CodeGen {
                             // （p41_full_tokenize `num as int` 复现：num: String → parse）
                             if args.len() == 1 {
                                 let arg_ty = &args[0].ty;
+                                // 用户 struct 定义了 __int__ 缺口魔法 → 直派（06d §十六）
+                                if let IrType::Named { path, .. } = arg_ty {
+                                    if self.is_known_type(path)
+                                        && self.struct_method_names(path).contains("__int__")
+                                    {
+                                        return format!("({}).__int__()", args_s[0]);
+                                    }
+                                }
                                 let is_str = matches!(arg_ty, IrType::Str)
                                     || matches!(arg_ty, IrType::Named { path, .. }
                                         if path == "String" || path == "str");
@@ -8317,6 +8348,14 @@ impl CodeGen {
                         "f64" | "float" => {
                             if args.len() == 1 {
                                 let arg_ty = &args[0].ty;
+                                // 用户 struct 定义了 __float__ 缺口魔法 → 直派（06d §十六）
+                                if let IrType::Named { path, .. } = arg_ty {
+                                    if self.is_known_type(path)
+                                        && self.struct_method_names(path).contains("__float__")
+                                    {
+                                        return format!("({}).__float__()", args_s[0]);
+                                    }
+                                }
                                 if matches!(arg_ty, IrType::Str) {
                                     format!("({}).parse::<f64>().unwrap()", args_s[0])
                                 } else {
@@ -8377,6 +8416,17 @@ impl CodeGen {
                         format!("({}.__len__() as i64)", arg0)
                     } else {
                         format!("({}.len() as i64)", arg0)
+                    }
+                } else if callee_s == "abs" && args_s.len() == 1 {
+                    // abs(x)：用户 struct 定义了 __abs__ 缺口魔法 → 直派（06d §六）；
+                    // 其余走 lz_abs 内建（i64/f64 重载经类型分派）
+                    let has_custom_abs = matches!(&args[0].ty, IrType::Named { path, .. }
+                        if self.is_known_type(path)
+                            && self.struct_method_names(path).contains("__abs__"));
+                    if has_custom_abs {
+                        format!("({}.__abs__())", args_s[0])
+                    } else {
+                        format!("lz_abs({})", args_s[0])
                     }
                 } else if callee_s == "type_name" && args_s.len() == 1 {
                     // BUG-EC-006: type_name(x) 函数式内省 → 静态类型名（方案 C，与 v.type_name() 方法一致）

@@ -434,7 +434,6 @@ struct MyFile =
 | `__is_ok__`/`__unwrap__` | `SpreadOk` | 错误传播 `?` | ✅ 编译器内建协议（`?` 传播三件套） |
 | `__err__` | `SpreadErr` | 错误传播 `?` | ✅ 同上 |
 | `__bool__` | HasBool | 布尔/数学 | ✅ 判定链首环 `__bool__` → `__len__` → 内建 `!is_empty()`；无 HasBool trait 生成 |
-| `__abs__` | HasAbs | 布尔/数学 | ❌ |
 | `__buildparams__` | `BuildParams` | 构建块 | ❌ |
 | `__implicit_copy__` | `ImplicitCopy` | 隐式策略 | ❌ |
 | `__implicit_to__` | ImplicitInto | 隐式策略 | ❌ |
@@ -442,8 +441,8 @@ struct MyFile =
 | `__implicit_default__` | ImplicitDefault | 隐式策略 | ❌ |
 | `__guarded_pred__` | `GuardedStrategy` | 守卫策略 | ❌ |
 | `__guarded_action__` | `GuardedStrategy` | 守卫策略 | ❌ |
-| `__int__` | `std::convert::From` | 类型缺口 | ❌ |
-| `__float__` | `std::convert::From` | 类型缺口 | ❌ |
+| `__int__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for i64 impl 生成 + `int(x)` 调用点直派 |
+| `__float__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for f64 impl 生成 + `float(x)` 调用点直派 |
 | `__pos__` | Pos | 类型缺口 | ❌ |
 | `__deref__` | `std::ops::Deref` | 运算符 | ❌ |
 | `__unapply__` | — | 提取器 | 🔸 case struct 自动配；普通 struct 显式定义见 06a |
@@ -452,6 +451,7 @@ struct MyFile =
 | `__iter_strategy__` | `std::iter::IntoIterator` | 迭代策略 | 🔸 |
 | `__new__` | New | 构造 | ✅ `__lz_new` 命名统一 + 体透传 |
 | `__init__` | Init | 构造 | ✅ 构造后 `__lz_init` 调用 |
+| `__abs__` | — | 缺口魔法 | ✅ `abs(x)` 调用点直派 `x.__abs__()`；数值仍走内建 |
 
 ---
 
