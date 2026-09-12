@@ -445,7 +445,7 @@ struct MyFile =
 | `__float__` | `std::convert::From` | 类型缺口 | ✅ From<SelfTy> for f64 impl 生成 + `float(x)` 调用点直派 |
 | `__pos__` | Pos | 类型缺口 | ✅ `+a` 分派 `a.__pos__()`；无魔术方法时数值恒等 |
 | `__deref__` | `std::ops::Deref` | 运算符 | ✅ `*a` 对用户 struct 分派 `a.__deref__()`；真实引用类型保留裸解引用 |
-| `__unapply__` | — | 提取器 | 🔸 case struct 自动配；普通 struct 显式定义见 06a |
+| `__unapply__` | — | 提取器 | ✅ case struct 自动配；普通 struct 显式定义可用（`let Point(a,b)=p` 脱糖为 `__unapply__()`） |
 | `__enter__` | Enter | 上下文 | ✅ with 构造链：enter → 体 → exit |
 | `__exit__` | Exit | 上下文 | ✅ 未定义时跳过调用（E0599 防护） |
 | `__iter_strategy__` | `std::iter::IntoIterator` | 迭代策略 | 🔸 |
