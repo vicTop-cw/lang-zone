@@ -248,7 +248,7 @@ def main() =
     catch e2:
         print("caught:" + e2)
 "#,
-        "42\n\"caught:Any { .. }\"\n",
+        "42\n\"caught:negative\"\n",
     );
 }
 

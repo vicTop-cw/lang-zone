@@ -2,9 +2,23 @@
 // BUG-CG-004: raises 编译为 Rust Result<T, Error>
 // raises 声明的函数 → Rust Result，raise → Err
 
-@raises(IOError)
-def risky() -> str =
+def safe() -> str raises str =
   return "ok"
 
+def risky() -> str raises str =
+  raise "something went wrong"
+
 def main() =
+  try:
+    let v = safe()
+    print(v)
+  catch e:
+    print(e)
+
+  try:
+    let v2 = risky()
+    print(v2)
+  catch e2:
+    print(e2)
+
   print("raises test done")

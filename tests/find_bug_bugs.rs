@@ -281,9 +281,10 @@ fn pr005_decorator_on_var_negative() {
 
 // BUG-TY-001: duck 自引用参数 E0391
 #[test]
-#[ignore = "待修 BUG-TY-001：duck Comparable 自引用 → trait 非 dyn 兼容 RUSTC_FAIL E0391（P0）"]
 fn ty001_duck_generic() {
-    full("FIND_BUG/typer/bug-duck-generic", "duck-generic.lz").unwrap();
+    // main 只打印标记串（LZ print 走 Debug 渲染，外层带引号）；
+    // 回归点：递归 duck `Comparable.__lt__(&self, other: Self)` 能过类型检查+rustc
+    full("FIND_BUG/typer/bug-duck-generic.lz", "duck-generic.lz: type system check").unwrap();
 }
 
 // BUG-TY-002: 已修（2026-09-03）——顶层 self-def 挂 impl + 调用点方法语法 + mut self 透传
@@ -298,16 +299,14 @@ fn ty004_params_type_erase() {
     full("FIND_BUG/typer/bug-params-type-erase.lz", "params-type-erase.lz done").unwrap();
 }
 
-// BUG-TY-005: 泛型默认值语法（报错误导）
+// BUG-TY-005: 泛型默认值 + 空泛型实参 `Container<>`（已修复：parser 空泛型解析）
 #[test]
-#[ignore = "待修 BUG-TY-005：泛型默认值不支持且报错误导（Expected type, got Gt）（P2）"]
 fn ty005_generic_default() {
     full("FIND_BUG/typer/bug-generic-default-conflict.lz", "generic-default-conflict.lz done").unwrap();
 }
 
-// BUG-IR-001: ~: 参数位 BuildCall
+// BUG-IR-001: ~: 参数位 BuildCall → 闭包脱糖（已修复：parser 层 ~: 闭包形态转 Closure）
 #[test]
-#[ignore = "待修 BUG-IR-001：~: 参数位需闭包脱糖（closure IR 设计，与 TY-001/IR-003 同批）"]
 fn ir001_build_block_expr() {
     full("FIND_BUG/ir/bug-ir-build-block.lz", "bug-ir-build-block.lz done").unwrap();
 }
@@ -330,9 +329,8 @@ fn cg002_call_magic() {
     full("FIND_BUG/codegen/bug-codegen-call-magic.lz", "bug-codegen-call-magic.lz done").unwrap();
 }
 
-// BUG-CG-004: raises 静默丢弃
+// BUG-CG-004: raises → Result + try/catch 解包（已修复）
 #[test]
-#[ignore = "待修 BUG-CG-004：raises 修饰静默丢弃 + raise→panic! + try/catch 不存在（P1）"]
 fn cg004_raises_result() {
     full("FIND_BUG/codegen/bug-codegen-raises.lz", "raises test done").unwrap();
 }
@@ -388,21 +386,20 @@ fn ec006_type_name() {
     full("FIND_BUG/edge/bug-edge-type-name.lz", "type_name(42):").unwrap();
 }
 
-// core 组：fn 类型注解参数解析（fold/compose/unique 同根）
+// core 组：隐式泛型（未声明泛型形参）须被拒绝（设计约束：泛型必须显式声明）。
+// 旧实现经 collect_implicit_generics 把 `def fold(xs: List<a>)` 的 a/b 当合法泛型，
+// 现移除后统一报「未知类型: a」，转为负向守护（*Negative 命名）。
 #[test]
-#[ignore = "待修 core/fn-annotation：fn(b, a) -> b 参数类型解析失败 LZ_REJECT: Expected param, got LParen（P1，阻塞 std/func.lz）"]
-fn core_fold() {
-    full("FIND_BUG/core/fold.lz", "fold").unwrap();
+fn core_fold_negative() {
+    reject("FIND_BUG/core/fold.lz").unwrap();
 }
 
 #[test]
-#[ignore = "待修 core/fn-annotation：同 core_fold（P1）"]
-fn core_compose() {
-    full("FIND_BUG/core/compose.lz", "compose").unwrap();
+fn core_compose_negative() {
+    reject("FIND_BUG/core/compose.lz").unwrap();
 }
 
 #[test]
-#[ignore = "待修 core/fn-annotation：同 core_fold（P1）"]
-fn core_unique() {
-    full("FIND_BUG/core/unique.lz", "unique").unwrap();
+fn core_unique_negative() {
+    reject("FIND_BUG/core/unique.lz").unwrap();
 }

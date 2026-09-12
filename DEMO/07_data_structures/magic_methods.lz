@@ -107,7 +107,7 @@ struct Config =
     port: int
     debug: bool
 
-    magic __new__(host: str, port: int) -> Self =
+    def __new__(host: str, port: int) -> Self =
         Self(host: host, port: port, debug: false)
 
 // --- 7. __bool__ magic (ref self) ---

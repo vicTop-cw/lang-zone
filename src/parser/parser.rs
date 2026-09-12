@@ -843,7 +843,7 @@ impl Parser {
         self.skip_newlines();
 
         // 处理下一行缩进：where 子句可能在缩进块内（该 Indent 需在函数体前以 Dedent 配平）
-        let consumed_indent_for_body = if self.check(&Token::Indent) {
+        let mut consumed_indent_for_body = if self.check(&Token::Indent) {
             self.advance();
             true
         } else {
@@ -876,13 +876,20 @@ impl Parser {
         //     where T: Bound2 =
         self.skip_newlines();
         if self.check(&Token::Indent) {
+            // where 子句自身独占一行缩进（与函数体同列），该 Indent 实为
+            // 函数体块的起始 Indent。将其记为已消费，使函数体按缩进块解析
+            // 并在末尾 expect(Dedent) 配平，避免残留的 Dedent 泄漏到外层
+            //（如 impl 块）提前终止，把后续魔法方法误提升为顶层函数。
             self.advance(); // skip Indent before where
+            consumed_indent_for_body = true;
         }
         let mut where_clause = Vec::new();
         loop {
             self.skip_newlines();
             if self.check(&Token::Indent) {
-                self.advance(); // skip Indent before where
+                // 同上：`where` 在首行、但 `=` 独占缩进行时，此 Indent 为体块起始
+                self.advance(); // skip Indent before where/= 
+                consumed_indent_for_body = true;
             }
             if self.check(&Token::Where) {
                 where_clause.extend(self.parse_where_clause()?);
@@ -978,7 +985,7 @@ impl Parser {
                     }
                 }
                 (Vec::new(), true)
-            } else if self.check(&Token::Indent) {
+            } else if self.check(&Token::Indent) && !consumed_indent_for_body {
                 self.advance();
                 let b = self.parse_block()?;
                 self.expect(Token::Dedent)?;
@@ -1522,6 +1529,15 @@ impl Parser {
                 if self.check(&Token::Lt) {
                     self.advance(); // consume <
                     let mut inner = Vec::new();
+                    // 空泛型实参 `Container<>`（使用声明的默认类型，TY-005）：直接闭合
+                    if self.check(&Token::Gt) {
+                        self.advance();
+                        let base = base_ty;
+                        return Ok(Type::Generic {
+                            base: Box::new(base),
+                            args: Vec::new(),
+                        });
+                    }
                     loop {
                         if self.check(&Token::DotDot) {
                             // `..` 通配：位置参数数量不限，push 占位 Any 后继续

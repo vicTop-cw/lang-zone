@@ -10,18 +10,17 @@ def identity<T>(x: T) -> T = x
 def first<T>(a: T, b: T) -> T = a
 
 // ── 2. 带约束的泛型（trait 约束）────────────────────────
-def larger<T: Ordered>(a: T, b: T) -> T =
+def larger<T: PartialOrder>(a: T, b: T) -> T =
     if a > b:
         a
     else:
         b
 
 // ── 3. where 子句 ─────────────────────────────────────
-def clone_all<T>(items: List<T>) -> List<T>
-    where T: Clone =
+def clone_all<T>(items: List<T>) -> List<T> where T: Clone =
     result: List<T> = []
     for item in items:
-        result.push(item.clone())
+        push(result, item)
     result
 
 // ── 4. 泛型默认参数类型 ────────────────────────────────

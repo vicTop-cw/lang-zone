@@ -152,9 +152,9 @@
 struct Point =
     x: int
     y: int
-    magic __new__(x: int, y: int) -> Point =
+    def __new__(x: int, y: int) -> Point =
         Point(x, y)
-    magic __init__(self: Point, x: int, y: int) =
+    def __init__(self: Point, x: int, y: int) =
         self.x = x
         self.y = y
 ```
@@ -174,7 +174,7 @@ struct Point =
 struct Point =
     x: int
     y: int
-    magic __unapply__(self) -> (int, int) = (self.x, self.y)
+    def __unapply__(self) -> (int, int) = (self.x, self.y)
 
 match p:
     case Point(px, py) => print(px + py)
@@ -185,7 +185,7 @@ for Point(a, b) in pts:
     print(a, b)
 ```
 
-- **case struct 自动配**：声明为 `case struct PointEx(...)` 时，编译器自动生成 `__unapply__`（按字段声明顺序返回元组），无需手写（见 [06a-struct.md](06a-struct.md) case struct 章节）；普通 struct 才需上述显式 `magic __unapply__`。
+- **case struct 自动配**：声明为 `case struct PointEx(...)` 时，编译器自动生成 `__unapply__`（按字段声明顺序返回元组），无需手写（见 [06a-struct.md](06a-struct.md) case struct 章节）；普通 struct 才需上述显式 `def __unapply__`。
 - `__unapply__` 使用 `self`（owned），返回元组。
 - 返回元组的各元素按位置绑定到模式中的子变量。
 - 同一提取协议在三处通用：`case Point(px,py)` / `let Point(px,py)=p` / `for Point(px,py) in pts` 最终都展开为 `let (px, py) = p.__unapply__()`（再由 IR 复用元组解构）。
@@ -281,7 +281,7 @@ for Point(a, b) in pts:
 // 示例：让 int 可以从 str 隐式构造
 struct Int =
     value: i64
-    magic __implicit_from__(s: str) -> Self =
+    def __implicit_from__(s: str) -> Self =
         Self(value: s.parse().unwrap_or(0))
 
 s = "1"

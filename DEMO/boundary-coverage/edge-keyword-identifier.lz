@@ -41,25 +41,25 @@ def underscore_semantics() =
 struct MagicBox =
     value: int
 
-    magic __init__(mut self, value: int) =
+    def __init__(mut self, value: int) =
         MagicBox(value: value)
 
-    magic __str__(ref self) -> str =
+    def __str__(ref self) -> str =
         f"MagicBox({self.value})"
 
-    magic __add__(self, other: MagicBox) -> MagicBox =
+    def __add__(self, other: MagicBox) -> MagicBox =
         MagicBox(value: self.value + other.value)
 
-    magic __eq__(ref self, other: MagicBox) -> bool =
+    def __eq__(ref self, other: MagicBox) -> bool =
         self.value == other.value
 
-    magic __getitem__(ref self, index: int) -> int =
+    def __getitem__(ref self, index: int) -> int =
         if index == 0:
             self.value
         else:
             panic("bad_index")
 
-    magic __len__(ref self) -> int = 1
+    def __len__(ref self) -> int = 1
 
 // --- 4. 特殊字面量组合 ---
 def special_literals() =

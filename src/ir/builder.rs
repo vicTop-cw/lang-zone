@@ -28,6 +28,11 @@ struct TypeCtx {
     vars: HashMap<String, IrType>,
     /// 函数名 → 返回类型
     fn_returns: HashMap<String, IrType>,
+    /// 函数名 → raises 异常类型（BUG-CG-004 收口：try 体末尾调用 raises 函数时，
+    /// 其 Rust 实际返回 Result<ok, err>，需据此将 try body 块类型标注为 Result，
+    /// 使 codegen 走 use_result_try（match）而非 catch_unwind（panic 基），
+    /// 否则 match 臂类型不兼容 E0308）
+    fn_raises: HashMap<String, IrType>,
     /// 函数参数类型（用于泛型实例化）
     fn_params: HashMap<String, Vec<IrType>>,
     /// struct 名称集合（用于区分构造调用与普通函数调用）
@@ -85,6 +90,7 @@ impl TypeCtx {
         TypeCtx {
             vars: HashMap::new(),
             fn_returns: HashMap::new(),
+            fn_raises: HashMap::new(),
             fn_params: HashMap::new(),
             struct_names: HashSet::new(),
             struct_fields: HashMap::new(),
@@ -181,19 +187,20 @@ impl TypeCtx {
         }
     }
 
-    /// 计算函数泛型形参列表：显式声明 + 签名中未声明的隐式泛型（如 fold 的 a/b）。
-    /// 排除内建/已知 struct/enum 名，避免把已知类型误当泛型。
+    /// 计算函数泛型形参列表：仅取显式声明的 `func.generics`。
+    /// 泛型必须显式声明；签名中未声明的类型名（如顶层 `def fold(xs: List<a>)` 的 `a`）
+    /// 不再隐式当作泛型，而是报「未知类型」。外层 impl 泛型由 `convert_fn_def` 合并
+    /// `current_generics` 注入，无需在此处理。
     fn fn_generics(&self, func: &crate::ast::Function) -> Vec<String> {
-        let known = |n: &str| {
-            crate::ast::builtin_type_names().contains(n)
-                || self.struct_field_order.contains_key(n)
-                || self.enum_generics.contains_key(n)
-        };
-        crate::ast::augmented_fn_generics(func, &known)
+        crate::ast::augmented_fn_generics(func, &[])
     }
 
     fn collect_functions(&mut self, module: &ast::Module) {
-        for f in &module.functions {
+        // 工作栈：先入顶层函数，处理时再压入函数体内的嵌套 def（FnDef），
+        // 使嵌套 raises 函数也能登记 fn_returns / fn_raises（BUG-CG-004 收口：
+        // try 体末尾调用嵌套 raises 函数需据此将 body 块类型标注为 Result）
+        let mut stack: Vec<&ast::Function> = module.functions.iter().collect();
+        while let Some(f) = stack.pop() {
             let generics: Vec<String> = self.fn_generics(f);
             let has_ret_annot = f.return_type.is_some();
             // raises/async/iterator 均经 fn_return_ir 计算（raises 时升级为 Result<ok, err>）
@@ -237,11 +244,21 @@ impl TypeCtx {
                 // 无返回注解：从函数体最后语句推断并登记。
                 // 否则调用点 lookup_fn_return 回退 Any→i64，
                 // 导致 `main 末尾调用 closure_in_box()` 被误推为 i64（E0308）
-                let ret = f
+                let mut ret = f
                     .body
                     .last()
                     .map(|s| infer_stmt_type(s, self))
                     .unwrap_or(IrType::Unit);
+                // BUG-CG-004 收口：raises 函数即使无返回注解，其 Rust 返回类型也是
+                // Result<ok, err>（ok 为推断返回值，err 为 raises 异常类型），
+                // 否则 fn_returns 漏 raises 包裹 → try 体末尾调用该函数时 body 类型
+                // 非 Result，use_result_try 误判走 catch_unwind（panic 基）导致 E0308
+                if let Some(r) = &f.raises {
+                    ret = IrType::Result {
+                        ok: Box::new(ret),
+                        err: Box::new(from_ast_type_with_generics(r, &generics)),
+                    };
+                }
                 self.fn_returns.insert(f.name.clone(), ret);
             }
             let params: Vec<IrType> = f
@@ -250,6 +267,18 @@ impl TypeCtx {
                 .map(|p| from_ast_type_with_generics(&p.ty, &generics))
                 .collect();
             self.fn_params.insert(f.name.clone(), params);
+            // BUG-CG-004 收口：登记 raises 异常类型，供 try 体末尾调用 raises 函数时
+            // 将 body 块类型标注为 Result<ok, err>（见 convert_expr 的 TryCatch 分支）。
+            if let Some(r) = &f.raises {
+                self.fn_raises
+                    .insert(f.name.clone(), from_ast_type_with_generics(r, &generics));
+            }
+            // 递归收集函数体内的嵌套 def（FnDef），使其 raises 也能登记
+            for s in &f.body {
+                if let AstStmt::FnDef { func: nested } = s {
+                    stack.push(nested);
+                }
+            }
         }
     }
 
@@ -458,6 +487,19 @@ fn map_assign_op(op: &AssignOp) -> BinOpKind {
         AssignOp::ShlEq => BinOpKind::Shl,
         AssignOp::ShrEq => BinOpKind::Shr,
         AssignOp::PowEq => BinOpKind::Pow,
+    }
+}
+
+/// 复合赋值对应的就地魔术方法名（06d §四）：`+=`→`__iadd__` 等。
+/// 目标类型定义了该魔术方法时优先调用，而非脱糖 `a = a + b`
+///（脱糖需要 `Add` impl，只定义 `__iadd__` 的类型会 E0369）。
+fn assign_op_magic(op: &AssignOp) -> Option<&'static str> {
+    match op {
+        AssignOp::AddEq => Some("__iadd__"),
+        AssignOp::SubEq => Some("__isub__"),
+        AssignOp::MulEq => Some("__imul__"),
+        AssignOp::DivEq => Some("__idiv__"),
+        _ => None,
     }
 }
 
@@ -1529,13 +1571,20 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::KwArg { .. } => IrType::Any,
         AstExpr::PathAccess { .. } => IrType::Any,
         AstExpr::SafeNav { .. } => IrType::Any,
-        AstExpr::TryCatch { body, else_body, .. } => {
-            // try/catch 表达式返回类型 = 有 else_body 时取 else 臂类型，否则 try body 最后一表达式
-            // （跳过尾部 let/声明，避免无注解函数推断为 Any→i64，
-            //   如 try_finally_only / try_catch_else_demo 应为 Unit）
+        AstExpr::TryCatch { body, catches, else_body, .. } => {
+            // try/catch 表达式返回类型：
+            // - 有 else_body 时取 else 臂类型；
+            // - 无 else 但有 catch 时，取**最后一个 catch 分支**尾表达式类型
+            //   （try body 尾若是 raises 调用 Result<T,E>，catch 已解包错误，
+            //   整体值类型是 T 而非 Result<T,E>；否则 try_catch_no_pattern 等
+            //   无注解函数会被误推断为 Result<i64,String> → E0308）；
+            // - 两者皆无（仅 finally）时取 try body 尾表达式。
             let src: &Vec<AstStmt> = match else_body {
                 Some(el) => el,
-                None => body,
+                None => match catches.last() {
+                    Some(last) => &last.body,
+                    None => body,
+                },
             };
             src.iter()
                 .rev()
@@ -2173,6 +2222,8 @@ fn lookup_builtin_method_ret(recv_ty: &IrType, method: &str, _ctx: &TypeCtx) -> 
             }),
             "get" | "pop" => Some(IrType::Option(Box::new(args[0].clone()))),
             "first" | "last" => Some(IrType::Option(Box::new(args[0].clone()))),
+            // contains 成员测试 → Bool（否则回退 Any→i64，E0277）
+            "contains" | "starts_with" | "ends_with" | "is_empty" => Some(IrType::Bool),
             _ => None,
         },
         // Option<T> 方法
@@ -4125,6 +4176,27 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     value: Box::new(convert_expr(value, ctx)),
                 }
             } else {
+                // 目标是用户 struct 且定义了对应就地魔术方法（如 __iadd__）→
+                // 生成魔术方法调用而非脱糖 a = a + b（只定义 __iadd__ 无
+                // __add__ 的类型脱糖后 E0369，06d §四）
+                if let Some(magic) = assign_op_magic(op) {
+                    let lhs = convert_expr(target, ctx);
+                    if let IrType::Named { path, .. } = &lhs.ty {
+                        if ctx.struct_methods.get(path).map(|ms| ms.contains(magic)).unwrap_or(false) {
+                            let rhs_v = convert_expr(value, ctx);
+                            let ret_ty = IrType::Unit;
+                            return Expr::new(
+                                ExprKind::MethodCall {
+                                    receiver: Box::new(lhs),
+                                    method: magic.to_string(),
+                                    args: vec![rhs_v],
+                                },
+                                ret_ty,
+                                Span::unknown(),
+                            );
+                        }
+                    }
+                }
                 ExprKind::BinOp {
                     op: map_assign_op(op),
                     lhs: Box::new(convert_expr(target, ctx)),
@@ -4366,7 +4438,14 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             finally_body,
         } => {
             // 构建 Stmt::TryCatch 结构以供 codegen 层正确处理
-            let body_block = convert_block(body, ctx);
+            let mut body_block = convert_block(body, ctx);
+            // BUG-CG-004 收口：若 try 体末尾为「调用 raises 函数」的表达式，其 Rust 实际
+            // 返回 `Result<ok, err>`（raise 已被 builder 改写为 `return Err`），须将 body
+            // 块类型标注为 Result，否则 codegen 的 use_result_try 误判为非 Result 而走
+            // catch_unwind（panic 基），导致 `Ok(val) => val` 臂类型与 Err 臂不兼容 E0308。
+            if let Some(result_ty) = try_body_result_ty(&body_block, ctx) {
+                body_block.ty = result_ty;
+            }
             let ir_catches: Vec<(Option<Pattern>, Block)> = catches
                 .iter()
                 .map(|c| {
@@ -4395,6 +4474,39 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
     };
 
     Expr::new(kind, ty, span)
+}
+
+/// BUG-CG-004 收口：判断 try 体块末尾表达式是否为「调用 raises 函数」，
+/// 是则返回其 IR 返回类型 `Result<ok, err>`，供 TryCatch lowering 将 body 块类型
+/// 标注为 Result，使 codegen 走 use_result_try（match）而非 catch_unwind（panic 基），
+/// 避免 `Ok(val) => val` 臂类型与 Err 臂不兼容（E0308）。
+///
+/// 直接取 `fn_returns[callee]`：collect_functions 已对 raises 函数登记
+/// `Result<ok, err>`（无返回注解时 ok=Unit，有返回注解时 ok=声明类型），可靠且精确。
+/// 仅处理 `Name(...)` 形式调用；方法调用/闭包调用暂无法判定，走原 catch_unwind。
+fn try_body_result_ty(block: &Block, ctx: &TypeCtx) -> Option<IrType> {
+    // body 末尾裸表达式语句
+    let last = block
+        .stmts
+        .iter()
+        .rev()
+        .find(|s| matches!(s, Stmt::ExprStmt { .. }))?;
+    // 取出被调用函数名
+    let callee = match last {
+        Stmt::ExprStmt { expr } => match &expr.kind {
+            ExprKind::Call { callee, .. } => match &callee.kind {
+                ExprKind::Var(name) => name.clone(),
+                _ => return None,
+            },
+            _ => return None,
+        },
+        _ => return None,
+    };
+    // 被调函数若为 raises 函数，其 IR 返回类型已是 Result<ok, err>
+    match ctx.fn_returns.get(&callee) {
+        Some(IrType::Result { .. }) => ctx.fn_returns.get(&callee).cloned(),
+        _ => None,
+    }
 }
 
 /// 将 AST 语句块转为 IR 表达式（用于 if/match 分支）
@@ -5392,18 +5504,40 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     target: target_expr,
                     value: val,
                 },
-                _ => Stmt::Assign {
-                    target: target_expr.clone(),
-                    value: Expr::new(
-                        ExprKind::BinOp {
-                            op: map_assign_op(op),
-                            lhs: Box::new(target_expr),
-                            rhs: Box::new(val),
-                        },
-                        IrType::Any,
-                        Span::unknown(),
-                    ),
-                },
+                _ => {
+                    // 目标是用户 struct 且定义了对应就地魔术方法（如 __iadd__）→
+                    // 生成魔术方法调用而非脱糖 a = a + b（只定义 __iadd__ 无
+                    // __add__ 的类型脱糖后 E0369，06d §四）
+                    if let Some(magic) = assign_op_magic(op) {
+                        if let IrType::Named { path, .. } = &target_expr.ty {
+                            if ctx.struct_methods.get(path).map(|ms| ms.contains(magic)).unwrap_or(false) {
+                                return Stmt::ExprStmt {
+                                    expr: Expr::new(
+                                        ExprKind::MethodCall {
+                                            receiver: Box::new(target_expr),
+                                            method: magic.to_string(),
+                                            args: vec![val],
+                                        },
+                                        IrType::Unit,
+                                        Span::unknown(),
+                                    ),
+                                };
+                            }
+                        }
+                    }
+                    Stmt::Assign {
+                        target: target_expr.clone(),
+                        value: Expr::new(
+                            ExprKind::BinOp {
+                                op: map_assign_op(op),
+                                lhs: Box::new(target_expr),
+                                rhs: Box::new(val),
+                            },
+                            IrType::Any,
+                            Span::unknown(),
+                        ),
+                    }
+                }
             }
         }
 
@@ -5980,6 +6114,9 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     }
     for (name, ty) in &ctx.fn_returns {
         block_ctx.fn_returns.insert(name.clone(), ty.clone());
+    }
+    for (name, ty) in &ctx.fn_raises {
+        block_ctx.fn_raises.insert(name.clone(), ty.clone());
     }
     for (name, p) in &ctx.fn_params {
         block_ctx.fn_params.insert(name.clone(), p.clone());
@@ -6875,6 +7012,9 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // 查 lookup_fn_return——否则 fn_returns 为空 → Any→i64 fallback，
     // return 误插 <String as ImplicitFrom<i64>> 转换（E0277，match_patterns.lz）
     fn_ctx.fn_returns = ctx.fn_returns.clone();
+    // 继承 raises 异常类型表：try 体末尾调用 raises 函数需据此将 body 块类型
+    // 标注为 Result（BUG-CG-004 收口），否则 fn_raises 为空 → 漏标 catch_unwind E0308
+    fn_ctx.fn_raises = ctx.fn_raises.clone();
     // 继承顶层变量（size = 3 等顶层 Assign 转 Const）：函数内 `x = v` 需识别为
     // 修改全局（guard_for_3.lz size = size - 1），否则生成局部新绑定 E0425
     fn_ctx.top_level_consts = ctx.top_level_consts.clone();
@@ -7844,9 +7984,15 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             })
             .collect();
 
+        // 构造器/转换魔法（__new__/__init__/__implicit_from__）是特殊方法：
+        // 它们由 gen_struct_def 单独生成构造器函数，不进 methods（否则会带出被
+        // 降级的 `self(...)` 错误体，见 E0424；且与构造器函数重名）。
+        let special_magic = ["__new__", "__init__", "__implicit_from__"];
+
         let methods: Vec<FnDef> = s
             .methods
             .iter()
+            .filter(|m| !special_magic.contains(&m.name.as_str()))
             .map(|m| {
                 let mut method_ctx = TypeCtx::new();
                 method_ctx.pending_items = ctx.pending_items.clone();
@@ -7876,7 +8022,6 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
 
         // 普通 magic 方法体（__str__/__add__ 等，除 __new__/__init__/__implicit_from__ 特殊处理外）
         // 也转成 FnDef 并入 methods，否则 `magic __str__` 等方法体在 IR 中丢失
-        let special_magic = ["__new__", "__init__", "__implicit_from__"];
         let magic_methods: Vec<FnDef> = s
             .magic_methods
             .iter()
@@ -7908,8 +8053,12 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
         let mut methods = methods;
         methods.extend(magic_methods);
 
-        // 提取 __new__ 的签名信息
-        let new_method = s.magic_methods.iter().find(|m| m.name == "__new__");
+        // 提取 __new__ 的签名信息（构造器魔法可能落在 s.methods 或 s.magic_methods）
+        let new_method = s
+            .magic_methods
+            .iter()
+            .chain(s.methods.iter())
+            .find(|m| m.name == "__new__");
         let has_new = new_method.is_some();
         let new_params: Vec<(String, IrType)> = new_method
             .iter()
@@ -7921,8 +8070,12 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             .collect();
         let new_ret_ty = new_method.and_then(|m| m.return_type.as_ref().map(|t| from_ast_type(t)));
 
-        // 提取 __init__ 的签名信息
-        let init_method = s.magic_methods.iter().find(|m| m.name == "__init__");
+        // 提取 __init__ 的签名信息（同样可能落在 s.methods）
+        let init_method = s
+            .magic_methods
+            .iter()
+            .chain(s.methods.iter())
+            .find(|m| m.name == "__init__");
         let has_init = init_method.is_some();
         let init_params: Vec<(String, IrType)> = init_method
             .iter()
@@ -7933,10 +8086,11 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             })
             .collect();
 
-        // 提取 __implicit_from__ 的源类型列表
+        // 提取 __implicit_from__ 的源类型列表（同样可能落在 s.methods）
         let implicit_froms: Vec<IrType> = s
             .magic_methods
             .iter()
+            .chain(s.methods.iter())
             .filter(|m| m.name == "__implicit_from__")
             .flat_map(|m| m.params.first().map(|p| from_ast_type(&p.ty)))
             .collect();
@@ -8678,15 +8832,53 @@ fn build_ir_inner(
         }
     }
 
-    // 10. 转换 tests
+    // 10. 转换 tests（顶层 test 与 suite 内的 test 都生成 #[test]）
+    //     每个 test 用独立克隆的 ctx，避免 setup 变量跨 test 泄漏（见 suite 作用域）
     for t in &ast_module.tests {
         match t {
             AstStmt::Test { name, body } => {
-                let block = convert_block(body, &ctx);
+                // 每个 test 用独立变量作用域：新建 ctx 并仅复制模块级全局类型信息，
+                // 避免 suite 的 setup 变量跨 test 泄漏（见 suite 作用域 E0425）
+                let mut test_ctx = TypeCtx::new();
+                test_ctx.current_generics = ctx.current_generics.clone();
+                test_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                test_ctx.top_level_consts = ctx.top_level_consts.clone();
+                test_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                let block = convert_block(body, &test_ctx);
                 ir_mod.items.push(Item::Test(TestDef {
                     name: name.clone(),
                     body: block,
                 }));
+            }
+            AstStmt::Suite {
+                setup,
+                teardown,
+                tests,
+                ..
+            } => {
+                // 将 suite 的 setup/teardown 内联进每个 test，逐个生成 Item::Test
+                for inner in tests {
+                    if let AstStmt::Test { name, body } = inner {
+                        let mut combined: Vec<AstStmt> = Vec::new();
+                        if let Some(s) = setup {
+                            combined.extend(s.iter().cloned());
+                        }
+                        combined.extend(body.iter().cloned());
+                        if let Some(td) = teardown {
+                            combined.extend(td.iter().cloned());
+                        }
+                        let mut test_ctx = TypeCtx::new();
+                        test_ctx.current_generics = ctx.current_generics.clone();
+                        test_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+                        test_ctx.top_level_consts = ctx.top_level_consts.clone();
+                        test_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                        let block = convert_block(&combined, &test_ctx);
+                        ir_mod.items.push(Item::Test(TestDef {
+                            name: name.clone(),
+                            body: block,
+                        }));
+                    }
+                }
             }
             _ => {}
         }
@@ -9253,10 +9445,28 @@ fn ex_check_fn(f: &ast::Function, base: &TypeCtx, w: &ExWalker) {
     // 函数体最后一个表达式语句的返回类型检查（return_type_mismatch2）
     if let (Some(rty), Some(AstStmt::Expr(last))) = (ret_ty.as_ref(), f.body.last()) {
         let ety = ex_infer(last, &work, &env);
-        if !matches!(&ety, IrType::Unit)
+        // try/catch 有 catch 分支时：try body 返回 Result<T,E>（raises），
+        // 但 catch 已处理错误，整体等价于 T。解包 Result 与期望类型比较。
+        // 仅当函数声明返回类型本身不是 Result 时才解包：此时 try 体尾是 raises 调用
+        // 返回 Result<T,E>，catch 已处理错误，整体等价于 T。
+        // 若函数本身就返回 Result（如 `parse_int` 显式 Ok/Err 构造），则不解包，
+        // 直接按 Result<int,Any> vs Result<int,str> 比较（Any 属 queer 放行），避免误报。
+        let effective_ty = match last {
+            AstExpr::TryCatch { catches, .. }
+                if !catches.is_empty() && !matches!(rty, IrType::Result { .. }) =>
+            {
+                if let IrType::Result { ok, .. } = &ety {
+                    (**ok).clone()
+                } else {
+                    ety.clone()
+                }
+            }
+            _ => ety.clone(),
+        };
+        if !matches!(&effective_ty, IrType::Unit)
             && !ex_type_queer(rty)
-            && !ex_agrees_g(rty, &ety, &gens, w.duck_names)
-        { 
+            && !ex_agrees_g(rty, &effective_ty, &gens, w.duck_names)
+        {
             work.report_error(format!(
                 "函数 {} 返回类型不匹配：期望 {}，实际 {}",
                 f.name,

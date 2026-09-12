@@ -10,5 +10,5 @@ def test_build() =
 def main() =
   test_build()
   print("bug-tilde-colon-eof.lz done")
-  // 行尾悬挂 ~:（预期 LexError）:
-  // x = y ~
+  // 行尾悬挂 ~:（预期拒绝：~: 后无构建块右操作数 → 解析失败）
+  y ~:

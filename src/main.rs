@@ -663,34 +663,91 @@ fn extract_flag_value(args: &[String], flag: &str) -> Option<String> {
     None
 }
 
-/// 编译生成的 .rs 文件为测试二进制并运行
+/// 在常见构建输出目录中定位 lz_builtins 的 .rlib（生成的 .rs 依赖它）
+fn find_builtins_rlib() -> Option<std::path::PathBuf> {
+    // 开发/测试期：workspace 根 target/debug（与 tests/lz_semantic_cases.rs 一致）
+    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("debug");
+    if let Some(p) = probe_rlib(&base) {
+        return Some(p);
+    }
+    // 回退：从当前可执行文件所在目录向上查找（cargo test 的 exe 位于 target/debug/deps）
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Some(p) = probe_rlib(dir) {
+                return Some(p);
+            }
+            if let Some(parent) = dir.parent() {
+                if let Some(p) = probe_rlib(parent) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn probe_rlib(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let direct = dir.join("liblz_builtins.rlib");
+    if direct.exists() {
+        return Some(direct);
+    }
+    let deps = dir.join("deps");
+    if let Ok(entries) = std::fs::read_dir(&deps) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
+                return Some(e.path());
+            }
+        }
+    }
+    None
+}
+
+/// 编译生成的 .rs 文件为测试二进制并运行（IR 路线的 `lz test`）
 fn run_test_mode(source_path: &str, out_path: &str) {
     let out_name = replace_ext(source_path, ".lz", "");
     #[cfg(target_os = "windows")]
     let test_bin = format!("{}_test.exe", out_name);
     #[cfg(not(target_os = "windows"))]
     let test_bin = format!("{}_test", out_name);
-    let status = std::process::Command::new("rustc")
+
+    // 确保 lz_builtins 的 rlib 存在：cargo 可能因 lang-zone 自身不直接引用其符号
+    // （只生成含 `use lz_builtins::*` 的字符串）而只产出 .rmeta，导致 rustc --test 时
+    // 找不到 crate（E0432）。显式构建该包以生成 .rlib。
+    let _ = std::process::Command::new("cargo")
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["build", "-p", "lz_builtins", "--quiet"])
+        .status();
+
+    let mut cmd = std::process::Command::new("rustc");
+    // 生成的 .rs 使用 2021 版语法，且依赖 lz_builtins crate，必须显式链接其 rlib
+    cmd.arg("--edition")
+        .arg("2021")
         .arg("--test")
         .arg(out_path)
         .arg("-o")
-        .arg(&test_bin)
-        .status();
+        .arg(&test_bin);
+    if let Some(rlib) = find_builtins_rlib() {
+        cmd.arg("--extern")
+            .arg(format!("lz_builtins={}", rlib.display()));
+    } else {
+        eprintln!("warning: 未找到 lz_builtins rlib，测试构建可能因链接失败");
+    }
 
-    match status {
-        Ok(s) if s.success() => {
-            let run = std::process::Command::new(&test_bin).status();
-            match run {
-                Ok(s) if s.success() => {
-                    println!("✅ All tests passed");
-                }
-                _ => {
-                    eprintln!("❌ Some tests failed");
-                    std::process::exit(1);
-                }
+    match cmd.status() {
+        Ok(s) if s.success() => match std::process::Command::new(&test_bin).status() {
+            Ok(s) if s.success() => {
+                println!("✅ All tests passed");
+                let _ = std::fs::remove_file(&test_bin);
             }
-            let _ = std::fs::remove_file(&test_bin);
-        }
+            _ => {
+                eprintln!("❌ Some tests failed");
+                let _ = std::fs::remove_file(&test_bin);
+                std::process::exit(1);
+            }
+        },
         _ => {
             eprintln!("Test compilation failed");
             std::process::exit(1);

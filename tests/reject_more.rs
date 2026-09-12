@@ -86,6 +86,14 @@ const REJECT_CASES: &[RejectCase] = &[
         source: "def f(x: int) -> int =\n    if x < 0:\n        raise NegError(x)\n    x\n",
         phase: "semantic（G2：类型化 raise 未声明 raises 须拒绝）",
     },
+    RejectCase {
+        // 设计约束：泛型必须显式声明（def f<a>(xs: List<a>)）。
+        // 未声明泛型形参（如顶层 `def first(xs: List<a>)` 的 a）须被拒绝，
+        // 报「未知类型: a」——与「隐式泛型」旧行为切割。
+        name: "implicit_generic_undeclared",
+        source: "def first(xs: List<a>) -> a =\n    xs[0]\ndef main() =\n    print(first([1, 2, 3]))\n",
+        phase: "semantic（G2：未声明泛型形参须拒绝）",
+    },
 ];
 
 /// 已知宽松语义（当前编译器接受，非拒绝）：

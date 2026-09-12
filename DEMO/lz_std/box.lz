@@ -16,9 +16,9 @@ struct Box<T> =
 impl<T> Box<T> =
 
     // struct 默认 callable: Box(value) 直接构造
-    // 自定义构造使用 magic __new__, 与 Python __new__/__init__ 一致
+    // 自定义构造使用 def __new__, 与 Python __new__/__init__ 一致
 
-    magic __new__(value: T) -> Box<T> =
+    def __new__(value: T) -> Box<T> =
         Box(value: value)
 
     /// 获取不可变引用
@@ -76,7 +76,7 @@ struct Rc<T> =
 
 impl<T> Rc<T> =
 
-    magic __new__(value: T) -> Rc<T> =
+    def __new__(value: T) -> Rc<T> =
         Rc(value: value)
 
     /// 获取不可变引用
@@ -139,7 +139,7 @@ struct Arc<T> =
 
 impl<T> Arc<T> =
 
-    magic __new__(value: T) -> Arc<T> =
+    def __new__(value: T) -> Arc<T> =
         // 内建: 编译器分配堆内存, 初始引用计数 = 1 (原子)
         Arc(value: value)
 

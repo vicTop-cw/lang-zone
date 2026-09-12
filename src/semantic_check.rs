@@ -345,14 +345,10 @@ impl Checker {
                 self.error(format!("重复参数名: {}（函数 {})", p.name, f.name));
             }
         }
-        // 隐式泛型：签名中未声明但作为类型名出现的标识符（如 fold 的 a/b）自动视为泛型形参
-        // （与显式 `def f<a,b>(...)` 等价）。判定依据：排除内建类型与已知 struct/enum/import 名。
-        let known = |n: &str| {
-            crate::ast::builtin_type_names().contains(n)
-                || self.type_names.contains(n)
-                || self.imported_names.contains(n)
-        };
-        let augmented = crate::ast::augmented_fn_generics(f, &known);
+        // 泛型必须显式声明：签名中未声明且非外层作用域的类型名一律视为「未知类型」，
+        // 不再隐式当作泛型形参（顶层 `def fold(xs: List<a>)` 的 `a` 会报「未知类型: a」）。
+        // 外层泛型（如 `impl<T> List<T>` 的方法内的 `T`）由调用方通过 `enclosing` 传入。
+        let augmented = crate::ast::augmented_fn_generics(f, &[]);
         // 未知类型（参数 / 返回 / where / 泛型默认）
         for p in &f.params {
             self.check_type(&p.ty, &format!("参数 {} 的类型", p.name), &augmented, &[]);
@@ -814,11 +810,24 @@ impl Checker {
                 }
             }
             Stmt::Assign { target, value, .. } => {
-                // G2: 对不可变绑定赋值（`let x = 1; x = 2`）→ 报错
-                if let Expr::Ident(name) = target {
-                    if self.binding_immutable(name.as_str()) {
-                        self.error(format!("对不可变绑定 `{name}` 赋值（声明时未使用 mut）"));
+                match target {
+                    // 裸赋值 `name: T = val` 若 name 尚未绑定，注册为新可变绑定
+                    Expr::Ident(name) => {
+                        if !self.is_bound(name) {
+                            self.bind_mut(name.clone(), true);
+                        } else if self.binding_immutable(name.as_str()) {
+                            self.error(format!("对不可变绑定 `{name}` 赋值（声明时未使用 mut）"));
+                        }
                     }
+                    // 元组解构赋值 `(a, b) = expr`：左侧元素是新绑定，不检查未绑定
+                    Expr::TupleLit(items) => {
+                        for item in items {
+                            if let Expr::Ident(n) = item {
+                                self.bind_mut(n.clone(), true);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 self.check_expr(target);
                 self.check_expr(value);

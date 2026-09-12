@@ -6,6 +6,52 @@
 
 ---
 
+## 零、定位：`magic` 是**声明**，不是实现
+
+> **本节为规范性约束，优先于本文档及 `06d` / `06a` / `06g` 中的任何历史示例。**
+
+`magic` 是**模块级顶层的魔法特性声明**。一次 `magic` 声明同时完成三件事：
+
+| # | 产物 | 例（`magic Eq`） |
+|---|---|---|
+| 1 | 定义一个 **trait**，trait 内含魔法函数签名 | `trait Eq { fn __eq__(...) -> bool }` |
+| 2 | 拟定 **魔法名**（`__xxx__` 形式） | `__eq__` |
+| 3 | 拟定 **全局函数** | `eq(a, b)` |
+
+### 硬性约束
+
+| 约束 | 说明 |
+|---|---|
+| ① **只能在模块级顶层** | `struct` / `impl` / `trait` / 函数体 / 任何缩进块内写 `magic` 均为**编译错误**。**不存在"内联 magic"这一语法糖** |
+| ② `magic` 是**声明/契约**，不是实现 | 实现一律用 `def __xxx__`（写在 `impl` 块内或 struct 内部，二者语义等价） |
+| ③ 声明**可以带默认实现** | 块内 `= expr` 为默认实现，`= ...` 为抽象（实现方必须提供） |
+
+### 错误 vs 正确
+
+```lz
+// ❌ 错误：magic 写在 struct 内（编译错误）
+struct Point =
+    x: int
+    y: int
+    magic __new__(x: int, y: int) -> Point =
+        Point(x, y)
+```
+
+```lz
+// ✅ 正确：顶层声明魔法特性（通常来自标准库，用户一般无需自己写）
+magic New =
+    def __new__(...) -> Self = ...
+
+// ✅ 正确：实现用 def（struct 内或 impl 块内均可）
+struct Point =
+    x: int
+    y: int
+    def __new__(x: int, y: int) -> Point =
+        Point(x: x, y: y)
+```
+
+---
+
 ## 一、magic 声明块语法
 
 magic 块有两种等价书写形式：方法定义式（推荐）和声明式配置。
@@ -173,33 +219,57 @@ magic __map__:
 
 ---
 
-## 内联 magic（struct 内）
+## 六、`magic` 的位置约束与常见误用
 
-struct 内部可使用 `magic __方法名__` 作为 `magic 块` 的语法糖，无需再声明独立的 `magic` 块：
+> **历史勘误（重要）**：本章早期版本曾描述"struct 内部可使用 `magic __方法名__` 作为 magic 块的语法糖"，
+> 并给出 `struct Point = ... magic __new__(...) = ...` 一类示例。
+> 该说法**错误，已废除**——`magic` 不允许出现在 struct 内，也**不存在**这一语法糖。
+> 该错误表述已扩散到 `06d §九`、`06a §六`、`06g §8.2` 以及若干 DEMO，均需按本章修正。
+
+### 6.1 唯一合法位置：模块级顶层
 
 ```lz
+// ✅ 模块级顶层
+magic New =
+    def __new__(...) -> Self = ...
+
+// ❌ struct 内
 struct Point =
-    x: int
-    y: int
+    magic __new__(...) = ...
 
-    // 内联 magic __new__ — 自定义构造器
-    magic __new__(x: int, y: int) -> Point =
-        Point(x, y)
+// ❌ impl 块内（如 DEMO/lz_std/box.lz 的历史写法）
+impl<T> Box<T> =
+    magic __new__(value: T) -> Box<T> = ...
 
-    // 内联 magic __init__ — 初始化器
-    magic __init__(self: Point, x: int, y: int) =
-        self.x = x
-        self.y = y
-
-    // 内联 magic __implicit_from__ — 隐式从 tuple 构造
-    magic __implicit_from__(t: (int, int)) -> Self =
-        Point(x: t.0, y: t.1)
+// ❌ 函数体内 / 任何缩进块内
+def f() =
+    magic __str__(...) = ...
 ```
 
-`magic __new__` 覆盖编译器默认构造器。若未实现，编译器自动生成基于字段名的关键字构造 `Point(x: 1, y: 2)`。
-`magic __implicit_from__` 使编译器在类型不匹配时自动插入转换（如 `let p: Point = (1, 2)`）。
+编译器应在以上非法位置报错：`magic 声明只能出现在模块顶层`。
 
-> 详见 [06a-struct.md](06a-struct.md) §六 构造器魔法方法。
+### 6.2 声明可以提供默认实现
+
+`magic` 是**声明**，但**允许**给出默认实现（详见 §三 / §五）：
+
+```lz
+magic PartialOrd =
+    def __lt__(ref self, ref other: Self) -> bool = ...     // 抽象：实现方必须提供
+    def __le__(ref self, ref other: Self) -> bool =         // 默认实现：由 __lt__ 派生
+        not other.__lt__(self)
+```
+
+实现方只需写 `def __lt__`，`<=` 即自动可用（联动派生）。
+
+### 6.3 迁移对照
+
+| 历史写法（错误） | 现行写法 |
+|---|---|
+| `struct P = ... magic __new__(...) = ...` | 顶层 `magic New = def __new__(...) = ...` + struct 内 `def __new__(...) = ...` |
+| `impl<T> Box<T> = ... magic __new__(...) = ...` | 顶层 `magic New = ...` + `impl<T> Box<T> = def __new__(...) = ...` |
+| `struct P = ... magic __implicit_from__(...) = ...` | 顶层 `magic ImplicitFrom = ...` + struct 内 `def __implicit_from__(...) = ...` |
+
+> 设计依据见 `IR/design-magic-feature.md` §2（`magic` 不是什么）与 §5.4（策略型联动）。
 
 ---
 

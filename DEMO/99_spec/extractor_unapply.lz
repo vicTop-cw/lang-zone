@@ -3,7 +3,7 @@
 struct Point =
     x: int
     y: int
-    magic __unapply__(self) -> (int, int) = (self.x, self.y)
+    def __unapply__(self) -> (int, int) = (self.x, self.y)
 
 def main() =
     let p = Point(x: 3, y: 4)

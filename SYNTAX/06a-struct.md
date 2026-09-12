@@ -356,11 +356,16 @@ struct 可选择性地实现 `__new__` 和 `__init__` 魔法方法，以定制�
 #### `__new__` — 分配器
 
 ```lz
+// ① 模块级顶层：声明魔法特性（标准库提供）
+magic New =
+    def __new__(...) -> Self = ...
+
+// ② 实现：struct 内（或 impl 块内）用 def
 struct Point =
     x: f64
     y: f64
 
-    magic __new__(x: f64, y: f64) -> Self =
+    def __new__(x: f64, y: f64) -> Self =
         Self(x: x, y: y)
 ```
 
@@ -369,16 +374,25 @@ struct Point =
 - 语义上承担"创建实例"的全部责任
 - 如果 struct 实现了 `__new__`，则优先使用自定义逻辑（而非编译器默认的关键字构造）
 
-> **`magic __new__` 内联语法糖**：在 struct 体内使用 `magic __new__` 是 `magic __new__: def __new__(...)` 声明的内联语法糖。等价于在 struct 外写独立的 magic 块。详见 [06f-magic用法.md](06f-magic用法.md)。
+> **勘误（重要）**：本节旧版称"在 struct 体内使用 `magic __new__` 是
+> `magic __new__: def __new__(...)` 声明的内联语法糖"。该说法**错误，已废除**。
+> `magic` 是**模块级顶层的声明**（一次声明产出 trait + 魔法名 + 全局函数，可带默认实现），
+> **不允许**写在 struct / impl / 任何缩进块内；实现一律用 `def __xxx__`。
+> 详见 [`06f-magic用法.md`](06f-magic用法.md) §零、§六。
 
 #### `__init__` — 初始化器
 
 ```lz
+// ① 模块级顶层声明
+magic Init =
+    def __init__(mut self, ...) = ...
+
+// ② struct 内实现
 struct Point =
     x: f64
     y: f64
 
-    magic __init__(mut self, x: f64, y: f64) =
+    def __init__(mut self, x: f64, y: f64) =
         self.x = x
         self.y = y
 ```
@@ -396,15 +410,23 @@ struct Point =
 3. 最终返回初始化后的实例
 
 ```lz
+// 模块级顶层：声明魔法特性（标准库提供）
+magic New =
+    def __new__(...) -> Self = ...
+
+magic Init =
+    def __init__(mut self, ...) = ...
+
+// struct 内（或 impl 块内）实现
 struct Config =
     host: str
     port: int
     debug: bool
 
-    magic __new__(host: str, port: int) -> Self =
+    def __new__(host: str, port: int) -> Self =
         Self(host: host, port: port, debug: false)
 
-    magic __init__(mut self, host: str, port: int) =
+    def __init__(mut self, host: str, port: int) =
         // __new__ 已设置 host 和 port
         // __init__ 可做额外验证或日志
         if self.port <= 0 or self.port > 65535:
@@ -418,11 +440,12 @@ let cfg = Config(host: "localhost", port: 8080)
 如果 struct 实现了 `__new__`（或 `__init__`），则 `Name.new(...)` 调用语法变为有效：
 
 ```lz
+// 顶层已声明 magic New（见 6.1），此处只给实现
 struct Database =
     url: str
     pool_size: int
 
-    magic __new__(url: str) -> Self =
+    def __new__(url: str) -> Self =
         Self(url: url, pool_size: 10)
 
 let db = Database.new("postgres://localhost/test")
@@ -442,15 +465,20 @@ let db = Database.new("postgres://localhost/test")
 当 struct 实现了 `__implicit_from__`，编译器可在类型不匹配时自动插入转换：
 
 ```lz
+// 模块级顶层：声明魔法特性（标准库提供）
+magic ImplicitFrom =
+    def __implicit_from__(source: S) -> Self = ...
+
+// struct 内（或 impl 块内）实现
 struct Port =
     value: int
 
     // 从 str 隐式构造
-    magic __implicit_from__(s: str) -> Self =
+    def __implicit_from__(s: str) -> Self =
         Self(value: s.parse().unwrap_or(8080))
 
     // 从 int 隐式构造
-    magic __implicit_from__(n: int) -> Self =
+    def __implicit_from__(n: int) -> Self =
         Self(value: n)
 ```
 
@@ -497,7 +525,7 @@ for PointEx(a, b) in [p, p]:           // 循环变量提取解构（见 05-控�
 - **自动生成约定**：
   - `__unapply__` 按字段声明顺序返回 `(f1, f2, ...)` 元组；
   - 若所有字段类型相同，额外生成 `__unapply_seq__`（返回 `Vec`，支持 `case PointEx(x, ..rest)` 变长提取）。
-- **与普通 struct 区别**：普通 struct 若要提取解构，须显式 `magic __unapply__(self)`（见 [06d-内置魔法trait和全局函数.md](06d-内置魔法trait和全局函数.md) §九点五）；case struct 省去手写。
+- **与普通 struct 区别**：普通 struct 若要提取解构，须显式 `def __unapply__(self)`（见 [06d-内置魔法trait和全局函数.md](06d-内置魔法trait和全局函数.md) §九点五）；case struct 省去手写。
 - 提取协议在 `match` / `let` / `for` 三处通用，详见 [06d-内置魔法trait和全局函数.md](06d-内置魔法trait和全局函数.md) §九点五。
 
 ---
