@@ -3231,26 +3231,37 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // 用户 struct 定义了 __neg__/__not__ 魔术方法 → 方法调用
             //（06d §三：`-a` → `a.__neg__()`、`not a` → `a.__not__()`），
             // 否则裸 `-a` 需 Neg impl 且 `-a.x` 渲染有优先级歧义
-            if matches!(op, UnaryOp::Neg | UnaryOp::Not) {
+            // 位非 `~a` 与 `!a`（parser 均归一为 BitNot，lexer 前缀 ~ → Exclamation）、
+            // 逻辑非 `not a`（Not）：优先 __not__，未定义时回退 __invert__
+            if matches!(op, UnaryOp::Neg | UnaryOp::Not | UnaryOp::BitNot) {
                 let op_ty = infer_expr_type(operand, ctx);
                 if let IrType::Named { path, .. } = &op_ty {
+                    // 逻辑非 `not a` / 位非 `~a`（lexer 均归一为 Not）：
+                    // 优先 __not__，未定义时回退 __invert__（06d §三：~a → a.__invert__()）
+                    let methods = ctx.struct_methods.get(path);
                     let magic = if matches!(op, UnaryOp::Neg) {
-                        "__neg__"
+                        Some("__neg__")
+                    } else if methods.map(|ms| ms.contains("__not__")).unwrap_or(false) {
+                        Some("__not__")
+                    } else if methods.map(|ms| ms.contains("__invert__")).unwrap_or(false) {
+                        Some("__invert__")
                     } else {
-                        "__not__"
+                        None
                     };
-                    if ctx.struct_methods.get(path).map(|ms| ms.contains(magic)).unwrap_or(false) {
-                        let recv = convert_expr(operand, ctx);
-                        let ret_ty = op_ty;
-                        return Expr::new(
-                            ExprKind::MethodCall {
-                                receiver: Box::new(recv),
-                                method: magic.to_string(),
-                                args: vec![],
-                            },
-                            ret_ty,
-                            Span::unknown(),
-                        );
+                    if let Some(magic) = magic {
+                        if methods.map(|ms| ms.contains(magic)).unwrap_or(false) {
+                            let recv = convert_expr(operand, ctx);
+                            let ret_ty = op_ty;
+                            return Expr::new(
+                                ExprKind::MethodCall {
+                                    receiver: Box::new(recv),
+                                    method: magic.to_string(),
+                                    args: vec![],
+                                },
+                                ret_ty,
+                                Span::unknown(),
+                            );
+                        }
                     }
                 }
             }
@@ -5468,28 +5479,87 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
         }
 
         AstStmt::With { expr, alias, body } => {
-            // with → 展开为 let + defer drop
+            // with → 构造链展开（06d §十七）：
+            //   let mut raw = <expr>
+            //   let alias = raw.__enter__()   （定义了 __enter__ 时，别名绑定其返回值）
+            //   <body>
+            //   alias.__exit__(...)           （定义了 __exit__ 时，体后清理）
+            // 旧实现 __exit__ 在体**前**调用且从不调 __enter__（构造链断裂）；
+            // with <普通表达式>:（无 as 绑定）无 enter/exit 语义，直接执行块
             let val = convert_expr(expr, ctx);
             let val_ty = val.ty.clone();
             let mut with_ctx = TypeCtx::new();
             with_ctx.current_generics = ctx.current_generics.clone();
             let name = alias.clone().unwrap_or_else(|| "_with".into());
-            with_ctx.add_var(&name, val_ty.clone());
-            // 仅当 with 有 as 绑定（上下文管理器）时才生成 __exit__ 清理；
-            // with <普通表达式>: 无 enter/exit 语义，直接执行块
-            let mut stmts = vec![Stmt::Let {
-                name: name.clone(),
-                ty: val_ty.clone(),
-                value: val,
-                // with 资源绑定须可变：块内可被 __exit__/__enter__ 等可变借用
-                // （生成 `let mut res`，否则 E0596 cannot borrow as mutable）
-                is_mut: true,
-                is_ref: false,
-            }];
-            if alias.is_some() {
-                // __exit__ 调用参数数 = 方法实际非 self 参数数。
-                // `def __exit__(mut self)` 0 参 → 不传参（E0061 修复）；
-                // 带参 __exit__(self, exc) → 传绑定的实例副本
+            // 是否定义了 __enter__/__exit__（未定义则跳过对应调用，避免 E0599）
+            let (has_enter, has_exit) = match &val_ty {
+                IrType::Named { path, .. } => {
+                    let ms = ctx.struct_methods.get(path);
+                    (
+                        ms.map(|m| m.contains("__enter__")).unwrap_or(false),
+                        ms.map(|m| m.contains("__exit__")).unwrap_or(false),
+                    )
+                }
+                _ => (false, false),
+            };
+            let mut stmts: Vec<Stmt> = Vec::new();
+            if alias.is_some() && has_enter {
+                // let mut __with_ctx = val; let alias = __with_ctx.__enter__()
+                let ctx_name = format!("__with_{}", name);
+                with_ctx.add_var(&ctx_name, val_ty.clone());
+                stmts.push(Stmt::Let {
+                    name: ctx_name.clone(),
+                    ty: val_ty.clone(),
+                    value: val,
+                    is_mut: true,
+                    is_ref: false,
+                });
+                let enter_ret_ty = match &val_ty {
+                    IrType::Named { path, .. } => ctx
+                        .lookup_fn_return(&format!("{}.{}", path, "__enter__"))
+                        .clone(),
+                    _ => val_ty.clone(),
+                };
+                let enter_ret_ty = if matches!(enter_ret_ty, IrType::Unit | IrType::Any) {
+                    val_ty.clone()
+                } else {
+                    enter_ret_ty
+                };
+                with_ctx.add_var(&name, enter_ret_ty.clone());
+                stmts.push(Stmt::Let {
+                    name: name.clone(),
+                    ty: enter_ret_ty.clone(),
+                    value: Expr::new(
+                        ExprKind::MethodCall {
+                            receiver: Box::new(Expr::new(
+                                ExprKind::Var(ctx_name),
+                                val_ty.clone(),
+                                Span::unknown(),
+                            )),
+                            method: "__enter__".into(),
+                            args: vec![],
+                        },
+                        enter_ret_ty.clone(),
+                        Span::unknown(),
+                    ),
+                    is_mut: true,
+                    is_ref: false,
+                });
+            } else {
+                with_ctx.add_var(&name, val_ty.clone());
+                stmts.push(Stmt::Let {
+                    name: name.clone(),
+                    ty: val_ty.clone(),
+                    value: val,
+                    // with 资源绑定须可变：块内可被 __exit__/__enter__ 等可变借用
+                    // （生成 `let mut res`，否则 E0596 cannot borrow as mutable）
+                    is_mut: true,
+                    is_ref: false,
+                });
+            }
+            stmts.extend(body.iter().map(|s| convert_stmt(s, &with_ctx)));
+            // __exit__ 在体**后**调用（构造链收尾）；参数数 = 方法实际非 self 参数数
+            if alias.is_some() && has_exit {
                 let exit_arity = match &val_ty {
                     IrType::Named { path, .. } => ctx
                         .struct_method_arity
@@ -5532,7 +5602,6 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     ),
                 });
             }
-            stmts.extend(body.iter().map(|s| convert_stmt(s, &with_ctx)));
             Stmt::Block { stmts }
         }
 

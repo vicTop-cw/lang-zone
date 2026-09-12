@@ -4380,6 +4380,51 @@ impl CodeGen {
                 self.emit_line("}");
             }
         }
+        // 位非 ~a：__invert__ 复用 std::ops::Not impl（注册表 Invert kind 同 trait；
+        // Rust 无独立 BitNot trait，Not 即位非/逻辑非统一入口）
+        let has_not = methods.iter().any(|m| m.name == "__not__");
+        if let Some(nm) = methods.iter().find(|m| m.name == "__invert__") {
+            if !has_not && !matches!(nm.ret_ty, IrType::Unit) {
+                let where_str = self.magic_impl_where_str(nm);
+                let out_ty = self.rust_type(&nm.ret_ty);
+                self.emit_line(&format!(
+                    "impl{} std::ops::Not for {} {} {{",
+                    generics, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("type Output = {};", out_ty));
+                self.emit_line(&format!("fn not(self) -> {} {{", out_ty));
+                self.indent += 1;
+                self.emit_line("self.__invert__()");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // __from__ → std::convert::From（隐式转换第一环，06d §十四）：
+        // `def __from__(raw: SrcTy) -> Self`（静态方法，无 self 参数）→
+        // impl From<SrcTy> for SelfTy { fn from(value: SrcTy) -> Self { Self::__from__(value) } }
+        // 返回 Unit / 无参数时无 trait 对应物，跳过
+        if let Some(fm) = methods.iter().find(|m| m.name == "__from__") {
+            if let (Some(p0), false) = (fm.params.first(), matches!(fm.ret_ty, IrType::Unit)) {
+                let src_ty = self.rust_type(&p0.ty);
+                let where_str = self.magic_impl_where_str(fm);
+                self.emit_line(&format!(
+                    "impl{} std::convert::From<{}> for {} {} {{",
+                    generics, src_ty, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("fn from(value: {}) -> Self {{", src_ty));
+                self.indent += 1;
+                self.emit_line("Self::__from__(value)");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
 
         // 比较族 __eq__ + __lt__ → std::cmp::PartialOrd：
         // `<` `>` 等运算符调用点已直派 __lt__/__gt__（本文件 comparison 分派），
@@ -11491,6 +11536,16 @@ impl CodeGen {
         if matches!(&cond.ty, IrType::Int | IrType::F64) {
             let s = self.gen_expr(cond);
             return format!("({}) != 0", s);
+        }
+        // 内建容器/字符串真值（06d §十二）：非空为真——
+        //   String/&str/Vec/HashMap/HashSet → !x.is_empty()
+        // 否则直接透传类型作条件，E0308 expected bool / E0600 !String
+        if matches!(&cond.ty, IrType::Str)
+            || matches!(&cond.ty, IrType::Named { path, .. }
+                if matches!(path.as_str(), "String" | "Vec" | "List" | "Dict" | "HashMap" | "Set" | "HashSet"))
+        {
+            let s = self.gen_expr(cond);
+            return format!("!({}).is_empty()", s);
         }
         self.gen_expr(cond)
     }
