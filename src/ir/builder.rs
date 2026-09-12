@@ -3069,7 +3069,19 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 };
                 if is_user_struct {
                     let recv = convert_expr(left, ctx);
-                    let ret_ty = infer_expr_type(left, ctx);
+                    // 比较魔术方法（__eq__/__ne__/__lt__/__le__/__gt__/__ge__）与
+                    // __contains__ 返回 Bool，而非左操作数类型——否则 if 条件里的
+                    // `a < b` 被标成用户 struct 类型，codegen 真值判定链兜底成
+                    // `true`（比较结果被吞，静默错误）
+                    let ret_ty = if matches!(
+                        magic,
+                        "__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__"
+                            | "__contains__"
+                    ) {
+                        IrType::Bool
+                    } else {
+                        infer_expr_type(left, ctx)
+                    };
                     let expr = Expr::new(
                         ExprKind::MethodCall {
                             receiver: Box::new(recv),
@@ -3215,9 +3227,37 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             }
         }
 
-        AstExpr::Unary { op, operand } => ExprKind::UnOp {
-            op: map_unop(op),
-            operand: Box::new(convert_expr(operand, ctx)),
+        AstExpr::Unary { op, operand } => {
+            // 用户 struct 定义了 __neg__/__not__ 魔术方法 → 方法调用
+            //（06d §三：`-a` → `a.__neg__()`、`not a` → `a.__not__()`），
+            // 否则裸 `-a` 需 Neg impl 且 `-a.x` 渲染有优先级歧义
+            if matches!(op, UnaryOp::Neg | UnaryOp::Not) {
+                let op_ty = infer_expr_type(operand, ctx);
+                if let IrType::Named { path, .. } = &op_ty {
+                    let magic = if matches!(op, UnaryOp::Neg) {
+                        "__neg__"
+                    } else {
+                        "__not__"
+                    };
+                    if ctx.struct_methods.get(path).map(|ms| ms.contains(magic)).unwrap_or(false) {
+                        let recv = convert_expr(operand, ctx);
+                        let ret_ty = op_ty;
+                        return Expr::new(
+                            ExprKind::MethodCall {
+                                receiver: Box::new(recv),
+                                method: magic.to_string(),
+                                args: vec![],
+                            },
+                            ret_ty,
+                            Span::unknown(),
+                        );
+                    }
+                }
+            }
+            ExprKind::UnOp {
+                op: map_unop(op),
+                operand: Box::new(convert_expr(operand, ctx)),
+            }
         },
 
         AstExpr::If {

@@ -56,6 +56,25 @@ pub enum MagicKind {
 
     /// Hash trait：fn hash<H: Hasher>(&self, state: &mut H)
     Hash,
+
+    /// AddAssign 等：fn add_assign(&mut self, rhs: Rhs)
+    ///（__iadd__/__isub__/__imul__/__idiv__）
+    OpAssign,
+
+    /// IndexMut trait：fn index_mut(&mut self, index: Idx) → &mut Output
+    IndexMut,
+
+    /// 容器长度：fn len(&self) → usize（自定义 HasLen trait）
+    Len,
+
+    /// 成员测试：fn contains(&self, item) → bool（自定义 Contains trait）
+    Contains,
+
+    /// 布尔判定：fn lz_bool(&self) → bool（自定义 HasBool trait）
+    Bool,
+
+    /// 位非 ~a：fn not(self) → Output（std::ops::Not，与 __not__ 逻辑非共用）
+    Invert,
 }
 
 /// 魔法方法映射条目
@@ -251,6 +270,52 @@ impl MagicEngine {
         self.register("__iter__", MagicEntry {
             trait_path: "std::iter::IntoIterator", trait_method: "into_iter",
             kind: MagicKind::IntoIterator_,
+            multi_dispatch: false,
+        });
+
+        // ═══════════════════════════════════════════
+        // 七、补齐（06d 规范有、此前漏注册）
+        // ═══════════════════════════════════════════
+        // 容器族：__setitem__ → IndexMut；__len__ → HasLen（自定义）；
+        // __contains__ → Contains（自定义）
+        self.register("__setitem__", MagicEntry {
+            trait_path: "std::ops::IndexMut", trait_method: "index_mut",
+            kind: MagicKind::IndexMut,
+            multi_dispatch: true,
+        });
+        self.register("__len__", MagicEntry {
+            trait_path: "HasLen", trait_method: "len",
+            kind: MagicKind::Len,
+            multi_dispatch: false,
+        });
+        self.register("__contains__", MagicEntry {
+            trait_path: "Contains", trait_method: "contains",
+            kind: MagicKind::Contains,
+            multi_dispatch: false,
+        });
+        // 布尔判定链首环：__bool__ → HasBool（自定义）
+        self.register("__bool__", MagicEntry {
+            trait_path: "HasBool", trait_method: "lz_bool",
+            kind: MagicKind::Bool,
+            multi_dispatch: false,
+        });
+        // 复合赋值族：__iadd__/__isub__/__imul__/__idiv__ → OpAssign
+        for (magic, trait_path, method) in &[
+            ("__iadd__", "std::ops::AddAssign", "add_assign"),
+            ("__isub__", "std::ops::SubAssign", "sub_assign"),
+            ("__imul__", "std::ops::MulAssign", "mul_assign"),
+            ("__idiv__", "std::ops::DivAssign", "div_assign"),
+        ] {
+            self.register(magic, MagicEntry {
+                trait_path, trait_method: method,
+                kind: MagicKind::OpAssign,
+                multi_dispatch: true,
+            });
+        }
+        // 位非 ~a（与 __not__ 逻辑非共用 std::ops::Not，按 ~ 语法分派）
+        self.register("__invert__", MagicEntry {
+            trait_path: "std::ops::Not", trait_method: "not",
+            kind: MagicKind::Invert,
             multi_dispatch: false,
         });
     }

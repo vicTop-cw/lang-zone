@@ -4338,6 +4338,159 @@ impl CodeGen {
             self.indent -= 1;
             self.emit_line("}");
         }
+
+        // 一元 __neg__ → std::ops::Neg / __not__ → std::ops::Not：
+        // 调用点已直派 __neg__/__not__（builder Unary 分派），trait impl 供
+        // 泛型/库代码路径使用
+        if let Some(nm) = methods.iter().find(|m| m.name == "__neg__") {
+            if !matches!(nm.ret_ty, IrType::Unit) {
+                let where_str = self.magic_impl_where_str(nm);
+                let out_ty = self.rust_type(&nm.ret_ty);
+                self.emit_line(&format!(
+                    "impl{} std::ops::Neg for {} {} {{",
+                    generics, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("type Output = {};", out_ty));
+                self.emit_line(&format!("fn neg(self) -> {} {{", out_ty));
+                self.indent += 1;
+                self.emit_line("self.__neg__()");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+        if let Some(nm) = methods.iter().find(|m| m.name == "__not__") {
+            if !matches!(nm.ret_ty, IrType::Unit) {
+                let where_str = self.magic_impl_where_str(nm);
+                let out_ty = self.rust_type(&nm.ret_ty);
+                self.emit_line(&format!(
+                    "impl{} std::ops::Not for {} {} {{",
+                    generics, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!("type Output = {};", out_ty));
+                self.emit_line(&format!("fn not(self) -> {} {{", out_ty));
+                self.indent += 1;
+                self.emit_line("self.__not__()");
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
+
+        // 比较族 __eq__ + __lt__ → std::cmp::PartialOrd：
+        // `<` `>` 等运算符调用点已直派 __lt__/__gt__（本文件 comparison 分派），
+        // 但泛型场景（Vec<V> 排序、sort()）需要 PartialOrd impl。由
+        // __eq__/__lt__ 推导 partial_cmp（Equal/Less/Greater），两者都定义才生成
+        //（PartialOrd: PartialEq 超trait，缺 __eq__ 时 impl 会 E0277）
+        if let (Some(eq_m), Some(lt_m)) = (
+            methods.iter().find(|m| m.name == "__eq__"),
+            methods.iter().find(|m| m.name == "__lt__"),
+        ) {
+            let where_str = self.magic_impl_where_str(lt_m);
+            self.emit_line(&format!(
+                "impl{} std::cmp::PartialOrd for {} {} {{",
+                generics, for_ty, where_str
+            ));
+            self.indent += 1;
+            self.emit_line("fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {");
+            self.indent += 1;
+            // __eq__/__lt__ 第二参数可能为 ref（box.lz `ref other`）或 owned：
+            // ref 直接传 other（&Self），owned 需 (*other).clone() 解引用克隆
+            let arg_of = |m: &FnDef| -> String {
+                let takes_ref = m.params.get(1).map_or(false, |p| {
+                    p.is_ref || matches!(&p.ty, IrType::Ref(_) | IrType::MutRef(_))
+                });
+                if takes_ref {
+                    "other".to_string()
+                } else {
+                    "(*other).clone()".to_string()
+                }
+            };
+            let eq_arg = arg_of(eq_m);
+            let lt_arg = arg_of(lt_m);
+            self.emit_line(&format!(
+                "if self.__eq__({}) {{ Some(std::cmp::Ordering::Equal) }} else if self.__lt__({}) {{ Some(std::cmp::Ordering::Less) }} else {{ Some(std::cmp::Ordering::Greater) }}",
+                eq_arg, lt_arg
+            ));
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+        }
+
+        // 算术/位运算族（注册表签名固定型）→ std::ops trait impl：
+        // __add__→Add、__sub__→Sub、__mul__→Mul、__div__→Div、__rem__→Rem、
+        // __bitand__→BitAnd、__bitor__→BitOr、__bitxor__→BitXor、__shl__→Shl、__shr__→Shr
+        // 价值：`+=` 未定义 __iadd__ 时脱糖为 `a = a + b`，需要 Add impl 才能编译。
+        // Rust 的 Add::add 接收 owned self：用户 `ref self` 时经 auto-ref 调用
+        // &self 版本；rhs 参数 ref 时取 &rhs（与 __eq__ 的 owned/ref 处理一致）。
+        for (magic, trait_path, trait_method) in &[
+            ("__add__", "std::ops::Add", "add"),
+            ("__sub__", "std::ops::Sub", "sub"),
+            ("__mul__", "std::ops::Mul", "mul"),
+            ("__div__", "std::ops::Div", "div"),
+            ("__rem__", "std::ops::Rem", "rem"),
+            ("__bitand__", "std::ops::BitAnd", "bitand"),
+            ("__bitor__", "std::ops::BitOr", "bitor"),
+            ("__bitxor__", "std::ops::BitXor", "bitxor"),
+            ("__shl__", "std::ops::Shl", "shl"),
+            ("__shr__", "std::ops::Shr", "shr"),
+        ] {
+            if let Some(mm) = methods.iter().find(|m| m.name == *magic) {
+                // 输出类型：无返回注解（Unit）的算术魔法方法没有 trait 对应物，跳过
+                if matches!(mm.ret_ty, IrType::Unit) {
+                    continue;
+                }
+                let where_str = self.magic_impl_where_str(mm);
+                let rhs_is_ref = mm.params.get(1).map_or(false, |p| {
+                    p.is_ref || matches!(&p.ty, IrType::Ref(_) | IrType::MutRef(_))
+                });
+                let rhs_ty = mm
+                    .params
+                    .get(1)
+                    .map(|p| self.rust_type(&p.ty))
+                    .unwrap_or_else(|| for_ty.to_string());
+                let output_ty = self.rust_type(&mm.ret_ty);
+                // Rhs 泛型参数：ref 参数（&V）时 impl Add<&V>，调用传 &rhs
+                let rhs_arg = if rhs_is_ref {
+                    format!("&{}", rhs_ty)
+                } else {
+                    rhs_ty.clone()
+                };
+                self.emit_line(&format!(
+                    "impl{} {}<{}> for {} {} {{",
+                    generics, trait_path, rhs_arg, for_ty, where_str
+                ));
+                self.indent += 1;
+                self.emit_line(&format!(
+                    "type Output = {};",
+                    if *magic == "__shl__" || *magic == "__shr__" {
+                        // Shl/Shr 的 Output 可为任意类型，但 trait 默认 ()；显式声明
+                        output_ty.clone()
+                    } else {
+                        output_ty.clone()
+                    }
+                ));
+                self.emit_line(&format!(
+                    "fn {}(self, rhs: {}) -> {} {{",
+                    trait_method, rhs_arg, output_ty
+                ));
+                self.indent += 1;
+                if rhs_is_ref {
+                    self.emit_line(&format!("self.{}(&rhs)", magic));
+                } else {
+                    self.emit_line(&format!("self.{}(rhs)", magic));
+                }
+                self.indent -= 1;
+                self.emit_line("}");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+        }
     }
 
     /// 由魔法方法推导其 trait impl 所需的 `where` 子句（与 __eq__→PartialEq 一致）。
