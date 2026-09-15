@@ -101,7 +101,7 @@ impl MacroInterpreter {
 
     // ──────────────── 表达式求值 ────────────────
 
-    fn eval_expr(&mut self, expr: &MacroExpr) -> Result<Tokens, String> {
+    pub fn eval_expr(&mut self, expr: &MacroExpr) -> Result<Tokens, String> {
         match expr {
             MacroExpr::BacktickBlock { tokens, prefix } => self.eval_backtick(tokens, *prefix),
             MacroExpr::Ident(name) => self
@@ -113,15 +113,96 @@ impl MacroInterpreter {
             MacroExpr::Binary { left, op, right } => {
                 let l = self.eval_expr(left)?;
                 let r = self.eval_expr(right)?;
-                #[allow(unreachable_patterns)]
                 match op {
-                    BinaryOp::Plus => {
-                        // 合并相邻 StrLit：quote("a" + name + "b") 产生
-                        // [StrLit("a"), StrLit("World"), StrLit("b")] → 单个 StrLit，
-                        // 否则 parser 把它们解析为分散语句而非字符串拼接
+                    // 字符串拼接（quote 链：quote("a" + name + "b")）：
+                    // 合并相邻 StrLit，否则 parser 把分散 StrLit 解析为语句而非拼接
+                    BinaryOp::Concat => {
                         let mut merged = l.concat(r);
                         merged.tokens = merge_str_lits(merged.tokens);
                         Ok(merged)
+                    }
+                    // `+` 双重语义（运行时类型分派）：
+                    // 两边求值结果都是纯数值（IntLit/FloatLit）→ 算术加法；
+                    // 任一边含字符串/标识符等 → 字符串拼接（quote 链语义）。
+                    // 这样 `quote("const " + name + " = " + value)` 依旧正确（
+                    // "const " 是 StrLit → 走拼接），而 template 的 `guard a + b`
+                    // （a、b 为 int 参数，求值后是 IntLit）依旧走算术。
+                    BinaryOp::Plus => {
+                        if Self::is_numeric(&l) && Self::is_numeric(&r) {
+                            let (ln, rn) = (Self::extract_int(&l)?, Self::extract_int(&r)?);
+                            Ok(Tokens::new(vec![Token::IntLit(ln + rn)]))
+                        } else {
+                            let mut merged = l.concat(r);
+                            merged.tokens = merge_str_lits(merged.tokens);
+                            Ok(merged)
+                        }
+                    }
+                    // 算术运算（`+` 已拆出单独处理）
+                    BinaryOp::Minus | BinaryOp::Star | BinaryOp::Slash | BinaryOp::Percent => {
+                        let (ln, rn) = (Self::extract_int(&l)?, Self::extract_int(&r)?);
+                        let (a, b) = (ln as f64, rn as f64);
+                        let result = match op {
+                            BinaryOp::Minus => a - b,
+                            BinaryOp::Star => a * b,
+                            BinaryOp::Slash => {
+                                if b == 0.0 {
+                                    return Err("division by zero in macro".into());
+                                }
+                                a / b
+                            }
+                            BinaryOp::Percent => {
+                                if b == 0.0 {
+                                    return Err("modulo by zero in macro".into());
+                                }
+                                a % b
+                            }
+                            _ => unreachable!(),
+                        };
+                        // 除法/取模可能产生浮点，取整输出；若希望保留 FloatLit 可在此扩展
+                        Ok(Tokens::new(vec![Token::IntLit(result as i64)]))
+                    }
+                    // 比较运算
+                    BinaryOp::EqEq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                        let (ln, rn) = (Self::extract_int(&l)?, Self::extract_int(&r)?);
+                        let cmp = match op {
+                            BinaryOp::EqEq => ln == rn,
+                            BinaryOp::NotEq => ln != rn,
+                            BinaryOp::Lt => ln < rn,
+                            BinaryOp::Gt => ln > rn,
+                            BinaryOp::Le => ln <= rn,
+                            BinaryOp::Ge => ln >= rn,
+                            _ => unreachable!(),
+                        };
+                        Ok(Tokens::new(vec![if cmp {
+                            Token::True
+                        } else {
+                            Token::False
+                        }]))
+                    }
+                    // 逻辑运算
+                    BinaryOp::And => {
+                        let left_val = self.bool_value(&l)?;
+                        if !left_val {
+                            return Ok(Tokens::new(vec![Token::False]));
+                        }
+                        let right_val = self.bool_value(&r)?;
+                        Ok(Tokens::new(vec![if right_val {
+                            Token::True
+                        } else {
+                            Token::False
+                        }]))
+                    }
+                    BinaryOp::Or => {
+                        let left_val = self.bool_value(&l)?;
+                        if left_val {
+                            return Ok(Tokens::new(vec![Token::True]));
+                        }
+                        let right_val = self.bool_value(&r)?;
+                        Ok(Tokens::new(vec![if right_val {
+                            Token::True
+                        } else {
+                            Token::False
+                        }]))
                     }
                     _ => Err(format!("unsupported binary op {:?} in macro", op)),
                 }
@@ -144,12 +225,52 @@ impl MacroInterpreter {
                 }
             }
             MacroExpr::IntLit(n) => Ok(Tokens::new(vec![Token::IntLit(*n)])),
+            MacroExpr::FloatLit(n) => Ok(Tokens::new(vec![Token::IntLit(*n as i64)])),
             MacroExpr::StrLit(s) => Ok(Tokens::new(vec![Token::StrLit(s.clone())])),
             MacroExpr::BoolLit(b) => Ok(Tokens::new(vec![if *b {
                 Token::True
             } else {
                 Token::False
             }])),
+            MacroExpr::UnaryMinus(expr) => {
+                let val = self.eval_expr(expr)?;
+                let n = Self::extract_int(&val)?;
+                Ok(Tokens::new(vec![Token::IntLit(-n)]))
+            }
+        }
+    }
+
+    // ──────────────── 辅助 ────────────────
+
+    fn bool_value(&self, tokens: &Tokens) -> Result<bool, String> {
+        if tokens.is_empty() {
+            return Ok(false);
+        }
+        match tokens.tokens.first() {
+            Some(Token::True) => Ok(true),
+            Some(Token::False) => Ok(false),
+            Some(Token::Ident(name)) if name == "None" => Ok(false),
+            _ => Err(format!("expected boolean, got {:?}", tokens.tokens.first())),
+        }
+    }
+
+    fn extract_int(tokens: &Tokens) -> Result<i64, String> {
+        if tokens.is_empty() {
+            return Err("expected numeric value".into());
+        }
+        match &tokens.tokens[0] {
+            Token::IntLit(n) => Ok(*n),
+            Token::FloatLit(n) => Ok(*n as i64),
+            _ => Err(format!("expected integer, got {:?}", tokens.tokens.first())),
+        }
+    }
+
+    /// 判断 Tokens 是否为纯数值（首 token 是 IntLit 或 FloatLit）。
+    /// 用于 `+` 的运行时类型分派：两边都纯数值走算术加法，否则走字符串拼接。
+    fn is_numeric(tokens: &Tokens) -> bool {
+        match tokens.tokens.first() {
+            Some(Token::IntLit(_)) | Some(Token::FloatLit(_)) => true,
+            _ => false,
         }
     }
 
@@ -257,7 +378,14 @@ impl MacroInterpreter {
                     return Err("len requires 1 arg".to_string());
                 }
                 let val = self.eval_expr(&args[0])?;
-                Ok(Tokens::new(vec![Token::IntLit(val.len() as i64)]))
+                // StrLit 长度优先（用于 quote 字符串拼接链，如 quote("const " + name)）；
+                // 否则 Token 数量（用于 token 流长度检查）
+                let n = match val.tokens.first() {
+                    Some(Token::StrLit(s)) => s.len() as i64,
+                    Some(Token::FStrLit(s)) => s.len() as i64,
+                    _ => val.len() as i64,
+                };
+                Ok(Tokens::new(vec![Token::IntLit(n)]))
             }
             "first" => {
                 if args.len() != 1 {
@@ -344,6 +472,20 @@ impl MacroInterpreter {
 
             // quote(tokens) → 原样返回；但其中的 StrLit 内容需重新词法分析为
             // 代码 token（模板/macro 产物是 LZ 代码，字符串字面量只是源码文本载体）
+            "bool" => {
+                if args.len() != 1 {
+                    return Err("bool requires 1 arg".to_string());
+                }
+                let val = self.eval_expr(&args[0])?;
+                let is_true = !val.is_empty()
+                    && !matches!(val.tokens.first(), Some(Token::False))
+                    && !matches!(val.tokens.first(), Some(Token::Ident(name)) if name == "None");
+                Ok(Tokens::new(vec![if is_true {
+                    Token::True
+                } else {
+                    Token::False
+                }]))
+            }
             "quote" => {
                 if args.len() != 1 {
                     return Err("quote requires 1 arg".to_string());
@@ -381,6 +523,30 @@ impl MacroInterpreter {
                             // Newline + Indent，使拼接的 body 进入块内：
                             // `"for i in 0..2:\n    " + body` →
                             //   for i in 0..2: <Newline> <Indent> <body>
+                            if toks.last() != Some(&Token::Newline) {
+                                toks.push(Token::Newline);
+                            }
+                            toks.push(Token::Indent);
+                        }
+                        out.extend(toks);
+                    } else if let Token::FStrLit(s) = &t {
+                        // f"...{expr}..." 插值字符串：lex 其非插值部分，
+                        // 插值 $(expr) 已在词法阶段被替换为 tokens（由 lexer 处理），
+                        // 此处直接 lex 纯字符串部分（不含插值占位），追加结果
+                        let trimmed = s.trim_start();
+                        let needs_indent = match trimmed.rsplit_once('\n') {
+                            Some((_, tail)) => {
+                                !tail.is_empty() && tail.chars().all(|c| c == ' ' || c == '\t')
+                            }
+                            None => false,
+                        };
+                        let mut lexer = crate::lexer::Lexer::new(trimmed);
+                        let mut toks: Vec<Token> = lexer
+                            .tokenize()
+                            .into_iter()
+                            .filter(|t| !matches!(t, Token::Eof | Token::Semicolon))
+                            .collect();
+                        if needs_indent {
                             if toks.last() != Some(&Token::Newline) {
                                 toks.push(Token::Newline);
                             }
@@ -669,14 +835,22 @@ fn is_builtin(name: &str) -> bool {
     )
 }
 
-/// 从 Tokens 中解析整数参数
+/// 从 Tokens 中解析整数参数（用于 take/drop_tokens 等内置函数）
 fn parse_int_arg(val: &Tokens) -> Result<usize, String> {
     if val.is_empty() {
         return Ok(0);
     }
+    // 整数字面量
     match &val.tokens[0] {
         Token::IntLit(n) => Ok(*n as usize),
-        _ => Err(format!("expected integer, got {:?}", val.tokens.first())),
+        Token::FloatLit(n) => Ok(*n as usize),
+        _ => {
+            // 值是个字符串字面量或非纯 numeric，尝试当成「Tokens 数值长度」？
+            // 仅在上面失败时 fallback：若第一个 token 是 StrLit，按字符串长度返回
+            // （兼容旧版 macro 误用 len() 产物作为 numeric 的场景 — 已废弃，
+            // 以下只做容错不推广）
+            Err(format!("expected integer, got {:?}", val.tokens.first()))
+        }
     }
 }
 
@@ -819,9 +993,7 @@ pub enum MacroStmt {
         body: Vec<MacroStmt>,
     },
     Return(MacroExpr),
-}
-
-/// 宏体表达式
+}    /// 宏体表达式
 #[derive(Debug, Clone)]
 pub enum MacroExpr {
     BacktickBlock {
@@ -838,20 +1010,41 @@ pub enum MacroExpr {
         op: BinaryOp,
         right: Box<MacroExpr>,
     },
+    UnaryMinus(Box<MacroExpr>),
     IfExpr {
         cond: Box<MacroExpr>,
         then_expr: Box<MacroExpr>,
         else_expr: Option<Box<MacroExpr>>,
     },
     IntLit(i64),
+    FloatLit(f64),
     StrLit(String),
     BoolLit(bool),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
+    // 算术
     Plus,
-    // 未来可扩展其他操作符
+    Minus,
+    Star,
+    Slash,
+    Percent,
+
+    // 比较
+    EqEq,
+    NotEq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+
+    // 逻辑
+    And,
+    Or,
+
+    // 字符串拼接（专用于 macro 体 quote 拼接，与算术 Minus/Star 等语义区分）
+    Concat,
 }
 
 // ──────────────── 单元测试 ────────────────
