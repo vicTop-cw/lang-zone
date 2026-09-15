@@ -9669,6 +9669,32 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
     }
 
+    // @memoize：约束检查——参数类型须 PartialEq+Clone（缓存键查找 + 值读取），
+    // 返回类型须 Clone（缓存值读取时 clone 返回）。不满足时报编译错误。
+    if func.decorators.iter().any(|d| d.name == "memoize") {
+        for p in &func.params {
+            let ast_ty = from_ast_type(&p.ty);
+            if !is_cloneable_ir_type(&ast_ty) {
+                ctx.report_error(format!(
+                    "@memoize: 参数 '{}' 的类型 {} 不满足约束（参数须 PartialEq + Clone）",
+                    p.name,
+                    ir_type_name(&ast_ty)
+                ));
+            }
+        }
+        let ret_ast_ty = func
+            .return_type
+            .as_ref()
+            .map(from_ast_type)
+            .unwrap_or(IrType::Unit);
+        if !is_cloneable_ir_type(&ret_ast_ty) {
+            ctx.report_error(format!(
+                "@memoize: 返回类型 {} 不满足约束（返回须 Clone）",
+                ir_type_name(&ret_ast_ty)
+            ));
+        }
+    }
+
     // #[extern(lang)] 诊断：语言参数缺失 / 重复标记 / 返回类型必须为 Ext
     {
         let extern_count = func
@@ -13295,4 +13321,65 @@ fn collect_derives(decorators: &[crate::ast::Decorator]) -> Vec<String> {
             })
         })
         .collect()
+}
+
+/// 判断 IR 类型是否可 Clone + PartialEq（@memoize 约束检查用）。
+///
+/// 内置标量（Int/F64/Bool/Str/Unit）均可 Clone+PartialEq；
+/// 容器（Named List/Tuple/Dict）默认可 Clone+PartialEq（元素可 Clone+PartialEq）；
+/// 自定义 struct/enum 由用户 derive 决定——此处保守判定为可 Clone（trust user）。
+fn is_cloneable_ir_type(ty: &IrType) -> bool {
+    match ty {
+        IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Any => true,
+        IrType::Option(inner) => is_cloneable_ir_type(inner),
+        IrType::Result { ok, err } => is_cloneable_ir_type(ok) && is_cloneable_ir_type(err),
+        IrType::Tuple(elems) => elems.iter().all(is_cloneable_ir_type),
+        IrType::Ref(inner) | IrType::MutRef(inner) => is_cloneable_ir_type(inner),
+        IrType::Named { path, args } => {
+            // Named 容器（List/Vec/Dict/Rc/Arc 等）：元素可 Clone 即可
+            let is_container = matches!(path.as_str(), "List" | "Vec" | "Dict" | "Rc" | "Arc" | "HashSet" | "HashMap");
+            if is_container {
+                args.iter().all(is_cloneable_ir_type)
+            } else {
+                // 自定义 struct/enum：保守放行（由 derive 保证）
+                true
+            }
+        }
+        IrType::Generic(_) | IrType::Self_ | IrType::Never | IrType::Ext | IrType::Duck { .. }
+        | IrType::Fn { .. } => true,
+    }
+}
+
+/// 生成 IR 类型的人类可读名称（约束检查错误信息用）。
+fn ir_type_name(ty: &IrType) -> String {
+    match ty {
+        IrType::Int => "int".into(),
+        IrType::F64 => "float".into(),
+        IrType::Bool => "bool".into(),
+        IrType::Str => "str".into(),
+        IrType::Unit => "()".into(),
+        IrType::Any => "any".into(),
+        IrType::Named { path, args } => {
+            if args.is_empty() {
+                path.clone()
+            } else {
+                let names: Vec<String> = args.iter().map(ir_type_name).collect();
+                format!("{}[{}]", path, names.join(", "))
+            }
+        }
+        IrType::Option(inner) => format!("{}?", ir_type_name(inner)),
+        IrType::Result { ok, err } => format!("Result[{}, {}]", ir_type_name(ok), ir_type_name(err)),
+        IrType::Tuple(elems) => {
+            let names: Vec<String> = elems.iter().map(ir_type_name).collect();
+            format!("({})", names.join(", "))
+        }
+        IrType::Ref(inner) => format!("&{}", ir_type_name(inner)),
+        IrType::MutRef(inner) => format!("&mut {}", ir_type_name(inner)),
+        IrType::Generic(name) => name.clone(),
+        IrType::Self_ => "Self".into(),
+        IrType::Never => "!".into(),
+        IrType::Ext => "Ext".into(),
+        IrType::Duck { .. } => "duck".into(),
+        IrType::Fn { .. } => "fn".into(),
+    }
 }
