@@ -10215,7 +10215,10 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
     // case struct 自动配 __unapply__（定长提取，对应 Scala unapply）与
     // __unapply_seq__（变长提取，对应 Scala unapplySeq，仅当字段同构类型时生成）。
     // 注入为普通 magic 方法，复用既有 magic 方法 codegen 与类型推断。
-    let s = if s.is_case {
+    // @case 装饰器与 `case struct` 关键字双用法：装饰器形式
+    // `@case struct Point(x: int, y: int)` 等价于 `case struct Point(x: int, y: int)`。
+    let has_case_decorator = s.decorators.iter().any(|d| d.name == "case");
+    let s = if s.is_case || has_case_decorator {
         let mut owned = s.clone();
         let mut methods = s.magic_methods.clone();
         methods.push(synth_unapply(s));
@@ -10512,7 +10515,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 .collect(),
             fields,
             methods,
-            is_case: s.is_case,
+            is_case: s.is_case || has_case_decorator,
             has_new,
             new_params,
             new_ret_ty,

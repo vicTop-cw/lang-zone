@@ -20,6 +20,7 @@ fn decorator_name_of(tok: &Token) -> Option<String> {
         Token::Const => Some("const".to_string()),
         Token::Comptime => Some("comptime".to_string()),
         Token::Let => Some("let".to_string()),
+        Token::Case => Some("case".to_string()),
         _ => None,
     }
 }
