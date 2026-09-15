@@ -3,7 +3,10 @@
 // 修饰符装饰器「产物断言」——不满足于「能编译」（架构设计 §附·测试语料方案 D 表）：
 //   L2/L3 产物比对 —— 装饰器形式 ≡ 等价关键字形式（golden 冻结快照 + 相对等价三重校验）
 //   L4 类型断言    —— @mutex/@rwlock/@atomic/@rc/@arc/@cell/@lazy 的 Rust 目标类型
-//   L5 运行期语义  —— @lazy 绑定处不求值、首次访问求值且仅一次（计数 == 1）
+//   L5 运行期语义  —— @lazy 绑定处**不求值**（产物形态 + 副作用时序双重判定）、首次访问求值且仅一次
+//                      （KI-4：旧的「计数 == 1」对 eager-once 亦成立，无法区分，已强化）
+//                      + 多语句嵌套块（child CodeGen 路径）内读取仍须延迟改写
+//                      （moddec_lazy_deferred_in_nested_block）
 //
 // 设计原则：只通过「调用编译器二进制 + 检查产物/输出」断言，不引用尚未实现的内部 Rust 类型。
 // 编译一律以 `input.lz` 之名在独立临时目录进行（`__file__` 恒为 "input.lz"，与 golden 一致）。
@@ -314,17 +317,117 @@ fn moddec_generated_target_types() {
 
 // ─────────────────────────────  L5：@lazy 运行期语义  ─────────────────────────────
 
-/// AC4：`@lazy cfg = load_config()` 绑定处不求值；首次访问求值且仅一次（缓存）
+/// 在生成产物中定位变量 `name` 的**绑定行**：首个同时含 `name` 与 `=` 的行（已 `trim`）。
+///
+/// 声明/绑定总先于任何访问，故取首个匹配行即为绑定处；用于断言「绑定处」的产物形态。
+fn binding_line<'a>(rs: &'a str, name: &str) -> Option<&'a str> {
+    rs.lines()
+        .find(|l| l.contains(name) && l.contains('='))
+        .map(str::trim)
+}
+
+/// AC4：`@lazy cfg = load()` **绑定处不求值**；首次访问才求值且仅一次（缓存）。
+///
+/// 强化点（修复 KI-4）：旧断言仅校验 `lazy-eval` 出现 **次数 == 1**——但「eager-once」
+/// （绑定处 `let cfg = load()` 即求值）同样只求值一次，**无法区分**「绑定处求值」与
+/// 「首访求值」，故 AC4 实际未被验证。现补两条判定（至少其一即可钉住，此处两条都做）：
+///
+///   (A) **产物形态**：`@lazy` 产物须含惰性包装类型（`OnceCell<`/`OnceLock<`/`LazyLock<`），
+///       且**绑定行不得出现初始化函数 `load` 的调用**——绑定处应为 `OnceCell::new()` 之类，
+///       而非 `let cfg = load()`。
+///   (B) **运行期副作用时序**：初始化体副作用 `lazy-eval` 必须**出现在 `ready` 之后**
+///       （证明绑定处未求值），且总计 **1 次**（证明缓存）。
 #[test]
 fn moddec_lazy_evaluates_once() {
     let src = corpus("moddec_basic_lazy_var_pos.lz");
+
+    // ── (A) 产物形态断言：绑定处不求值 ─────────────────────────────────
+    let (ok_c, err_c, rs) = compile("lazy_once_shape", &src);
+    assert!(ok_c, "@lazy 用例编译失败: {}", first_error(&err_c));
+    let rs = rs.unwrap_or_default();
+
+    let lazy_markers = ["OnceCell<", "OnceLock<", "LazyLock<"];
+    assert!(
+        lazy_markers.iter().any(|m| rs.contains(*m)),
+        "AC4：@lazy 产物未含惰性包装类型 {:?}（绑定处未走惰性构造）\n--- 生成产物 ---\n{}",
+        lazy_markers,
+        rs
+    );
+
+    if let Some(line) = binding_line(&rs, "cfg") {
+        assert!(
+            !line.contains("load("),
+            "AC4：@lazy **绑定处即求值**——绑定行调用了初始化函数 `load`，应为惰性构造（如 OnceCell::new()）\n绑定行: {line}\n--- 生成产物 ---\n{}",
+            rs
+        );
+    }
+
+    // ── (B) 运行期副作用时序断言：绑定处未求值 + 仅求值一次 ──────────────
     let (ok, err, out) = run_lz("lazy_once", &src);
     assert!(ok, "@lazy 用例编译/运行失败: {err}");
+
     let n = out.matches("lazy-eval").count();
     assert_eq!(
         n, 1,
         "AC4：@lazy 求值次数应为 1（缓存），实际 {} 次；stdout={:?}",
         n, out
+    );
+
+    let pos_ready = out
+        .find("ready")
+        .expect("stdout 未见 `ready`（绑定后的首条语句标记）");
+    let pos_eval = out
+        .find("lazy-eval")
+        .expect("stdout 未见 `lazy-eval`（初始化体副作用探针）");
+    assert!(
+        pos_eval > pos_ready,
+        "AC4：@lazy 在**绑定处**即求值——`lazy-eval` 出现在 `ready` 之前（应在之后，证明绑定处不求值）。\nstdout={:?}",
+        out
+    );
+}
+
+/// AC4（KI-4 续）：`@lazy` 变量在**多语句嵌套块**（if/while/for 体 ≥2 语句 → child CodeGen
+/// 路径）内被读取时，仍须改写为 `*cfg.get_or_init(|| ...)`；否则会**静默退化**为裸 `cfg`
+/// ——能编译但打印的是 `OnceCell` 容器而非值（AC4 静默失效）。
+///
+/// 回归背景：child `CodeGen` 复刻环境时若未继承 `lazy_bindings`，块内读取不被改写。
+/// 语料 `moddec_lazy_nested_block_pos.lz`：`if` 体内 2 条语句，其中一条读取 `cfg`。
+#[test]
+fn moddec_lazy_deferred_in_nested_block() {
+    let src = corpus("moddec_lazy_nested_block_pos.lz");
+
+    // (A) 产物形态：块内 + 块外共 2 处读取均改写为 get_or_init，且不存在裸读 `cfg`。
+    let (ok_c, err_c, rs) = compile("lazy_nested_shape", &src);
+    assert!(ok_c, "@lazy 嵌套块用例编译失败: {}", first_error(&err_c));
+    let rs = rs.unwrap_or_default();
+
+    let reads = rs.matches("get_or_init").count();
+    assert_eq!(
+        reads, 2,
+        "AC4：@lazy 嵌套块内读取未被改写（期望 2 处 `get_or_init`：块内 + 块外，实际 {reads}）\n--- 生成产物 ---\n{rs}"
+    );
+    assert!(
+        !rs.contains(", cfg)"),
+        "AC4：@lazy 嵌套块内存在**未改写**的裸读 `cfg`（将打印 OnceCell 容器而非值）\n--- 生成产物 ---\n{rs}"
+    );
+
+    // (B) 运行期：仅求值一次（缓存），且发生在块内首访（`ready`/`in-block` 之后）。
+    let (ok, err, out) = run_lz("lazy_nested", &src);
+    assert!(ok, "@lazy 嵌套块用例编译/运行失败: {err}");
+    let n = out.matches("lazy-eval").count();
+    assert_eq!(n, 1, "AC4：@lazy 求值次数应为 1（缓存），实际 {n} 次；stdout={out:?}");
+
+    let pos_ready = out.find("ready").expect("stdout 未见 `ready`（绑定后语句标记）");
+    let pos_eval = out
+        .find("lazy-eval")
+        .expect("stdout 未见 `lazy-eval`（初始化体副作用探针）");
+    assert!(
+        pos_eval > pos_ready,
+        "AC4：lazy-eval 应出现在 `ready` 之后（块内首访才求值）；stdout={out:?}"
+    );
+    assert!(
+        !out.contains("OnceCell"),
+        "AC4：stdout 出现 `OnceCell` 容器（块内裸读未改写导致语义泄漏）；stdout={out:?}"
     );
 }
 

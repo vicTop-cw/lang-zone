@@ -15,6 +15,8 @@ pub(crate) use helpers::collect_var_refs;
 use super::node::*;
 use super::types::IrType;
 use super::IrModule;
+// 修饰符装饰器新语义轴（T04）：`@shared` 族 / `@cell` 族 的轴枚举。
+use crate::ast::{InteriorMode, SharedMode};
 use std::collections::{HashMap, HashSet};
 
 /// IR → Rust 代码生成器
@@ -252,6 +254,17 @@ pub struct CodeGen {
     struct_has_unapply_seq: std::collections::HashSet<String>,
     /// 使用 LazyLock 的顶层静态集合名（需解引用访问）
     lazy_static_names: std::collections::HashSet<String>,
+    /// 延迟惰性绑定（`@lazy` / `@lazy_mut`）：源码变量名 → (发射用安全名, 首次访问
+    /// 求值表达式)。绑定处**不求值**，本作用域内对该变量的引用改写为
+    /// `*安全名.get_or_init(|| 表达式)`，仅求值一次（AC4）。
+    lazy_bindings: std::collections::HashMap<String, (String, String)>,
+    /// 修饰符装饰器目标类型所需的 std 导入项：模块路径 → 项名集合
+    /// （如 `std::sync` → {`Mutex`, `RwLock`}）。仅在使用相应轴时登记，
+    /// 未使用时不产生任何导入，保证无装饰器模块产物逐字节不变（T04）。
+    moddec_std_imports:
+        std::collections::BTreeMap<&'static str, std::collections::BTreeSet<&'static str>>,
+    /// `@atomic` 用到的具体原子类型名集合（如 `AtomicI64`），供 prelude 精确导入。
+    moddec_atomic_types: std::collections::BTreeSet<String>,
     /// 已导入的用户模块名（import services → "services"）：模块命名空间访问
     /// （services.service_name）降级为直接引用（模块项已平铺生成到同一 Rust 文件）
     imported_modules: std::collections::HashSet<String>,
@@ -925,6 +938,9 @@ impl CodeGen {
             struct_has_unapply: std::collections::HashSet::new(),
             struct_has_unapply_seq: std::collections::HashSet::new(),
             lazy_static_names: std::collections::HashSet::new(),
+            lazy_bindings: std::collections::HashMap::new(),
+            moddec_std_imports: std::collections::BTreeMap::new(),
+            moddec_atomic_types: std::collections::BTreeSet::new(),
             imported_modules: std::collections::HashSet::new(),
             current_fn_is_async: false,
             current_fn_is_size_hint: false,
@@ -994,6 +1010,9 @@ impl CodeGen {
             }
         }
 
+        // 预扫描修饰符装饰器目标类型所需的 std 导入项（T04；仅实际使用时登记）
+        self.collect_moddec_imports(module);
+
         // 预扫描 raises 函数名（checker 调用点解包其 Result 返回值）
         for item in &module.items {
             if let Item::FnDef(f) = item {
@@ -1046,7 +1065,8 @@ impl CodeGen {
                     IrType::Str => !matches!(&c.value.kind, ExprKind::Lit(LitKind::Str(_))),
                     _ => false,
                 };
-                if ty_is_collection {
+                // `@lazy_static` / `@once` 顶层静态：同样经 LazyLock/OnceLock 解引用访问
+                if ty_is_collection || c.mods.lazy {
                     self.lazy_static_names.insert(c.name.clone());
                 }
             }
@@ -1882,6 +1902,22 @@ impl CodeGen {
         if !self.known_types.contains("Arc") {
             self.emit_line("use std::sync::Arc;");
         }
+        // 修饰符装饰器目标类型（`@mutex`/`@cell`/`@once` 等）所需的 std 导入（T04）。
+        // 仅在模块实际使用相应轴时发射，避免影响无装饰器模块的产物（L2/L3 golden 比对）。
+        let moddec_imports = std::mem::take(&mut self.moddec_std_imports);
+        for (module, items) in &moddec_imports {
+            let names: Vec<&str> = items.iter().copied().collect();
+            if names.len() == 1 {
+                self.emit_line(&format!("use {}::{};", module, names[0]));
+            } else {
+                self.emit_line(&format!("use {}::{{{}}};", module, names.join(", ")));
+            }
+        }
+        let moddec_atomics = std::mem::take(&mut self.moddec_atomic_types);
+        if !moddec_atomics.is_empty() {
+            let names: Vec<String> = moddec_atomics.into_iter().collect();
+            self.emit_line(&format!("use std::sync::atomic::{{{}}};", names.join(", ")));
+        }
         // traits.lz 定义了自定义 trait Debug/Display（LZ 语义）时，不 import
         // std::fmt 的同名 trait，否则 E0255 the name is defined multiple times
         if !self.trait_names.contains("Debug") {
@@ -2572,6 +2608,8 @@ impl CodeGen {
         self.declared.clear();
         // 每函数重新收集字符串类型局部变量（f-string 插值 {} 用）
         self.str_typed_vars.clear();
+        // 每函数清空延迟惰性绑定表（`@lazy`），避免跨函数泄漏（T04/AC4）
+        self.lazy_bindings.clear();
         // 预扫描函数体，收集需自动加 mut 的局部 let 变量名
         // （LZ `let v = vec; v.push(1)` 未写 mut，但 Rust 需可变绑定，E0596）
         self.auto_mut_locals.clear();
@@ -5542,7 +5580,9 @@ impl CodeGen {
                 || val_str.contains("catch_unwind")
                 || val_str.contains("__try_result")
                 || val_str.contains("LazyLock")
-                || val_str.contains(".to_string()"));
+                || val_str.contains(".to_string()")
+                // T04：`@lazy_static` / `@once` 顶层静态 → LazyLock 惰性静态
+                || c.mods.lazy);
         if needs_lazy {
             self.lazy_static_names.insert(c.name.clone());
             let lazy_ty = self.rust_type(&c.ty);
@@ -6456,6 +6496,261 @@ impl CodeGen {
         }
     }
 
+    // ════════════════════════════════════════════════════════════════
+    // 修饰符装饰器新语义轴 → Rust 目标类型（T04）
+    //
+    // 设计真值：workbuddy/plan/2026-09-14-moddec-架构设计.md §1.4。
+    // 组合约定（与 `moddec_emit` 一致）：**内部可变轴在内、共享轴在外**
+    // （`Arc<Mutex<T>>` / `Arc<AtomicI64>`）；惰性轴走 `OnceCell`/`OnceLock`。
+    // ════════════════════════════════════════════════════════════════
+
+    /// 预扫描整个模块，登记修饰符装饰器目标类型所需的 std 导入项与原子类型。
+    ///
+    /// 仅在模块实际使用共享 / 内部可变 / 惰性轴时登记；未使用时**不产生任何导入**，
+    /// 从而保证无装饰器模块的产物逐字节不变（L2/L3 golden 冻结比对）。
+    fn collect_moddec_imports(&mut self, module: &IrModule) {
+        self.moddec_std_imports.clear();
+        self.moddec_atomic_types.clear();
+        for item in &module.items {
+            match item {
+                Item::Const(c) => {
+                    let base = self.rust_type(&c.ty);
+                    // 顶层常量经 `gen_const_def` 发射：惰性轴用**完全限定**的
+                    // `std::sync::LazyLock`（无需导入），故此处不登记惰性导入。
+                    self.note_moddec_imports(&c.mods, &base, false);
+                }
+                Item::FnDef(f) => self.note_moddec_imports_in_block(&f.body),
+                Item::Impl(i) => {
+                    for m in &i.methods {
+                        self.note_moddec_imports_in_block(&m.body);
+                    }
+                }
+                Item::Test(t) => self.note_moddec_imports_in_block(&t.body),
+                Item::CheckerBlock { body, .. } => self.note_moddec_imports_in_block(body),
+                _ => {}
+            }
+        }
+    }
+
+    /// 递归遍历语句块，登记其中 let 绑定的修饰轴所需导入。
+    fn note_moddec_imports_in_block(&mut self, block: &Block) {
+        self.note_moddec_imports_in_stmts(&block.stmts);
+    }
+
+    /// 递归遍历语句序列（覆盖块 / 分支 / 循环 / match 臂 / try-catch 等嵌套）。
+    fn note_moddec_imports_in_stmts(&mut self, stmts: &[Stmt]) {
+        for s in stmts {
+            match s {
+                Stmt::Let {
+                    ty, mods, is_ref, ..
+                } => {
+                    // `ref` 绑定走独立（`&x`）发射路径，不做包装 → 无需登记导入。
+                    if !*is_ref {
+                        let base = self.rust_type(ty);
+                        self.note_moddec_imports(mods, &base, true);
+                    }
+                }
+                Stmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    self.note_moddec_imports_in_block(then_branch);
+                    if let Some(e) = else_branch {
+                        self.note_moddec_imports_in_block(e);
+                    }
+                }
+                Stmt::For {
+                    body, else_body, ..
+                }
+                | Stmt::While {
+                    body, else_body, ..
+                } => {
+                    self.note_moddec_imports_in_block(body);
+                    if let Some(e) = else_body {
+                        self.note_moddec_imports_in_block(e);
+                    }
+                }
+                Stmt::WhileLet { body, .. }
+                | Stmt::BlockLabel { body, .. }
+                | Stmt::Defer { body }
+                | Stmt::CheckerBlock { body, .. } => self.note_moddec_imports_in_block(body),
+                Stmt::Match { arms, .. } => {
+                    for a in arms {
+                        self.note_moddec_imports_in_block(&a.body);
+                    }
+                }
+                Stmt::Block { stmts } => self.note_moddec_imports_in_stmts(stmts),
+                Stmt::TryCatch {
+                    body,
+                    catches,
+                    else_body,
+                    finally_body,
+                } => {
+                    self.note_moddec_imports_in_block(body);
+                    for (_p, b) in catches {
+                        self.note_moddec_imports_in_block(b);
+                    }
+                    if let Some(e) = else_body {
+                        self.note_moddec_imports_in_block(e);
+                    }
+                    if let Some(f) = finally_body {
+                        self.note_moddec_imports_in_block(f);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// 登记单个修饰轴集合所需 std 导入（无包装轴时不登记）。
+    ///
+    /// `base_ty` 为内层基础 Rust 类型串（用于 `@atomic` 的具体标量映射）；
+    /// `lazy_imports` 为是否登记惰性容器导入（顶层常量用完全限定 `LazyLock`，传 `false`）。
+    fn note_moddec_imports(&mut self, mods: &IrMods, base_ty: &str, lazy_imports: bool) {
+        if !mods.needs_wrapper() {
+            return;
+        }
+        // 惰性轴：局部 → `std::cell::OnceCell`；线程安全 → `std::sync::OnceLock`。
+        if mods.lazy && lazy_imports {
+            let (module, item): (&'static str, &'static str) = match mods.origin.as_deref() {
+                Some("once") | Some("lazy_static") => ("std::sync", "OnceLock"),
+                _ => ("std::cell", "OnceCell"),
+            };
+            if !self.known_types.contains(item) {
+                self.moddec_std_imports
+                    .entry(module)
+                    .or_default()
+                    .insert(item);
+            }
+        }
+        // 内部可变轴。
+        match mods.interior {
+            InteriorMode::Cell => {
+                if !self.known_types.contains("Cell") {
+                    self.moddec_std_imports
+                        .entry("std::cell")
+                        .or_default()
+                        .insert("Cell");
+                }
+            }
+            InteriorMode::RefCell => {
+                if !self.known_types.contains("RefCell") {
+                    self.moddec_std_imports
+                        .entry("std::cell")
+                        .or_default()
+                        .insert("RefCell");
+                }
+            }
+            InteriorMode::Mutex => {
+                if !self.known_types.contains("Mutex") {
+                    self.moddec_std_imports
+                        .entry("std::sync")
+                        .or_default()
+                        .insert("Mutex");
+                }
+            }
+            InteriorMode::RwLock => {
+                if !self.known_types.contains("RwLock") {
+                    self.moddec_std_imports
+                        .entry("std::sync")
+                        .or_default()
+                        .insert("RwLock");
+                }
+            }
+            InteriorMode::Atomic => {
+                // 仅登记具体标量原子类型（非标量占位 `Atomic<T>` 交由下游 rustc 报错）。
+                let atom = moddec_emit::atomic_type(base_ty);
+                if atom.starts_with("Atomic")
+                    && !atom.contains('<')
+                    && !self.known_types.contains(&atom)
+                {
+                    self.moddec_atomic_types.insert(atom);
+                }
+            }
+            InteriorMode::None => {}
+        }
+        // 共享轴：`Rc` / `Arc` 已由 prelude 无条件导入，仅 `Weak` 需显式导入。
+        if mods.shared == SharedMode::Weak && !self.known_types.contains("Weak") {
+            self.moddec_std_imports
+                .entry("std::rc")
+                .or_default()
+                .insert("Weak");
+        }
+    }
+
+    /// 计算 let 绑定在新语义轴下的 Rust 目标类型与初值包装（T04）。
+    ///
+    /// 返回 `Some((目标类型, 初值表达式))`；`mods` 无包装轴时返回 `None`，
+    /// 调用方保持原有（无包装）发射逻辑，实现零回归。
+    ///
+    /// - 惰性轴（`@lazy` / `@lazy_mut` / `@once` / `@lazy_static`）：`OnceCell` / `OnceLock`；
+    ///   `@lazy`/`@lazy_mut` 走**延迟**求值（绑定处不求值，登记 [`Self::lazy_bindings`]），
+    ///   `@once`/`@lazy_static` 走即时 `OnceLock::from`。惰性容器自身即一次性线程安全单元，
+    ///   故共享轴并入其中（不再额外包 `Arc`），与 QA L4「按 origin 派发」契约一致。
+    /// - 其余：内部可变轴在内、共享轴在外（`Arc<Mutex<T>>` / `Arc<AtomicI64>`）。
+    /// - `base_ty == None`（未知基础类型）→ 内层用 `_` 占位，交由 Rust 从初值推断。
+    ///
+    /// `lz_name` 为源码变量名（访问点 `ExprKind::Var` 按此名拦截），
+    /// `safe_name` 为发射用的安全 Rust 标识符（可能因关键字降级 / 冲突重命名而不同）。
+    fn moddec_wrap_let(
+        &mut self,
+        lz_name: &str,
+        safe_name: &str,
+        base_ty: Option<&str>,
+        value_s: &str,
+        mods: &IrMods,
+    ) -> Option<(String, String)> {
+        if !mods.needs_wrapper() {
+            return None;
+        }
+        let inner_ty = base_ty.unwrap_or("_");
+
+        // ── 惰性轴（优先于共享/内部可变轴）──
+        if mods.lazy {
+            let lazy_ty = moddec_emit::wrap_lazy(inner_ty, mods.origin.as_deref());
+            let ctor = match mods.origin.as_deref() {
+                Some("once") | Some("lazy_static") => "OnceLock",
+                _ => "OnceCell",
+            };
+            let value = if mods.is_deferred_lazy() {
+                // 延迟惰性：绑定处不求值（AC4），登记首次访问求值表达式。
+                self.lazy_bindings.insert(
+                    lz_name.to_string(),
+                    (safe_name.to_string(), value_s.to_string()),
+                );
+                format!("{ctor}::new()")
+            } else {
+                format!("{ctor}::from({value_s})")
+            };
+            return Some((lazy_ty, value));
+        }
+
+        // ── 内部可变轴（内）→ 共享轴（外）──
+        let interior_ty = moddec_emit::wrap_interior(inner_ty, mods.interior);
+        let target_ty = moddec_emit::wrap_shared(&interior_ty, mods.shared);
+
+        let inner_val = match mods.interior {
+            InteriorMode::None => value_s.to_string(),
+            InteriorMode::Cell => format!("Cell::new({value_s})"),
+            InteriorMode::RefCell => format!("RefCell::new({value_s})"),
+            InteriorMode::Mutex => format!("Mutex::new({value_s})"),
+            InteriorMode::RwLock => format!("RwLock::new({value_s})"),
+            InteriorMode::Atomic => {
+                format!("{}::new({value_s})", moddec_emit::atomic_type(inner_ty))
+            }
+        };
+        let value = match mods.shared {
+            SharedMode::None => inner_val,
+            SharedMode::Rc => format!("Rc::new({inner_val})"),
+            SharedMode::Arc => format!("Arc::new({inner_val})"),
+            // `Weak` 无「由值直接构造」的 API：生成空 `Weak`（编译期合法；
+            // 运行期 `upgrade()` 返回 `None`，语义由调用方管理所有权后补齐）。
+            SharedMode::Weak => "Weak::new()".to_string(),
+        };
+        Some((target_ty, value))
+    }
+
     fn gen_stmt(&mut self, stmt: &Stmt, is_last: bool) {
         self.emit_line(&format!(
             "// STMT:{}",
@@ -6484,7 +6779,7 @@ impl CodeGen {
                 value,
                 is_mut,
                 is_ref,
-                ..
+                mods,
             } => {
                 // IR-003：嵌套 def 转本地闭包产物 `let name = <Lambda>`（ty=Fn 且值
                 // 为 Lambda）→ 值位置，需 Box<dyn Fn> 标注并装箱
@@ -6825,6 +7120,22 @@ impl CodeGen {
                     } else {
                         (value_s, ty_str)
                     };
+                // T04：修饰符装饰器新语义轴 → Rust 目标类型 / 初值包装。
+                // `mods` 无包装轴时 `moddec_wrap_let` 返回 `None`，保持原逻辑（零回归）。
+                let (ty_str, value_s) = {
+                    let base_ty = if skip_ty {
+                        None
+                    } else {
+                        Some(self.rust_type(ty))
+                    };
+                    match self.moddec_wrap_let(name, &safe_name, base_ty.as_deref(), &value_s, mods)
+                    {
+                        Some((wrapped_ty, wrapped_val)) => {
+                            (format!(": {}", wrapped_ty), wrapped_val)
+                        }
+                        None => (ty_str, value_s),
+                    }
+                };
                 self.emit_line(&format!(
                     "let {}{}{} = {};",
                     mut_kw, safe_name, ty_str, value_s
@@ -8366,6 +8677,10 @@ impl CodeGen {
             ExprKind::Var(name) => {
                 if name == "pass" {
                     "()".into()
+                } else if let Some((sym, init)) = self.lazy_bindings.get(name.as_str()) {
+                    // @lazy 延迟绑定（T04/AC4）：首次访问 `get_or_init` 求值一次，
+                    // 之后返回缓存（`OnceCell::get_or_init` / `OnceLock::get_or_init` 接收 &self）。
+                    format!("*{}.get_or_init(|| {})", sym, init)
                 } else if self.downgraded_vars.contains(name.as_str()) {
                     format!("{}_", name)
                 } else if self.global_vars.contains_key(name.as_str()) {
@@ -11986,6 +12301,9 @@ impl CodeGen {
                     child.top_level_static_names = self.top_level_static_names.clone();
                     child.downgraded_vars = self.downgraded_vars.clone();
                     child.mutated_consts = self.mutated_consts.clone();
+                    // 延迟惰性绑定（`@lazy`）需传递给 child：闭包体引用外层 @lazy 变量时
+                    // 同样改写为 `*cfg.get_or_init(..)`（T04/AC4）
+                    child.lazy_bindings = self.lazy_bindings.clone();
                     child.in_generator = self.in_generator;
                     // 泛型函数标志需传递给 child（match 臂内 Option.None 的裸 None 推断，
                     // combo-struct-method.lz map<R> 泛型方法）
@@ -12413,6 +12731,9 @@ impl CodeGen {
                 child.mutated_consts = self.mutated_consts.clone();
                 child.slice_clone_bindings = self.slice_clone_bindings.clone();
                 child.lazy_static_names = self.lazy_static_names.clone();
+                // 延迟惰性绑定（`@lazy`）需传递给 child：多语句 if/while 块体走子
+                // CodeGen，块内引用外层 @lazy 变量时同样改写为 `*cfg.get_or_init(..)`（T04/AC4）
+                child.lazy_bindings = self.lazy_bindings.clone();
                 child.top_level_static_names = self.top_level_static_names.clone();
                 child.struct_phantom_generics = self.struct_phantom_generics.clone();
                 // size_hint 标志需传递给 child：if 分支体内的 `(0, Some(0))` 元组
@@ -12469,6 +12790,9 @@ impl CodeGen {
                 child.mutated_consts = self.mutated_consts.clone();
                 child.slice_clone_bindings = self.slice_clone_bindings.clone();
                 child.lazy_static_names = self.lazy_static_names.clone();
+                // 延迟惰性绑定（`@lazy`）需传递给 child：生成器构建块体内引用外层
+                // @lazy 变量时同样改写为 `*cfg.get_or_init(..)`（T04/AC4）
+                child.lazy_bindings = self.lazy_bindings.clone();
                 child.top_level_static_names = self.top_level_static_names.clone();
                 child.struct_phantom_generics = self.struct_phantom_generics.clone();
                 child.current_fn_is_size_hint = self.current_fn_is_size_hint;

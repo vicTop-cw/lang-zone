@@ -1,0 +1,16 @@
+// 修饰符装饰器语料 — lazy @ var 在**多语句嵌套块**内被读取（AC4 延迟绑定跨 CodeGen child 传播）
+// 规范：SYNTAX/02-变量与绑定.md §八
+// 回归背景：多语句 if/while 体走 child CodeGen；若 child 未继承 `lazy_bindings`，
+//           块内 `cfg` 读取退化为裸 `cfg`（打印 OnceCell 容器，静默语义错，AC4 失效）。
+// 期望：产物中两处读取均改写为 `*cfg.get_or_init(|| load())`；运行期 `lazy-eval` 仅 1 次。
+def load() -> int =
+    print("lazy-eval")
+    99
+
+def main() =
+    @lazy cfg = load()
+    print("ready")
+    if True:
+        print("in-block")
+        print(cfg)
+    print(cfg)
