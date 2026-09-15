@@ -1042,8 +1042,22 @@ pub fn display_pattern(p: Pattern) -> String {
         }
         Pattern::Struct { name: n, fields: fs } => {
             let fs = *fs;
+            // STMT:Let
+            let mut fields_s: String = "".to_string();
+            // STMT:For
+            for idx in (0i64..(fs.len() as i64)).into_iter() {
+                // STMT:Expr
+                if idx > 0i64 {
+                    // STMT:Other
+                    fields_s = fields_s + &", ".to_string()[..];
+                } else { ()};
+                // STMT:Let
+                let f = fs[((idx) as usize)].clone();
+                // STMT:Other
+                fields_s = LzAdd::__add__(LzAdd::__add__(fields_s, f.0) + &": ".to_string()[..], display_pattern(f.1.clone()));
+            }
             // STMT:Expr
-            LzAdd::__add__(n, pat_struct_fields(fs.clone()))
+            n + &" { ".to_string()[..] + &fields_s[..] + &" }".to_string()[..]
         }
         Pattern::Enum { enum_name: en, variant: v, args: a } => {
             let a = *a;
@@ -1097,332 +1111,142 @@ pub fn arg_pat_list(ps: Vec<Pattern>) -> String {
     return if (ps.len() as i64) == 0i64 { "".to_string() } else { "(".to_string().to_string() + &pat_list(ps.clone())[..] + &")".to_string()[..] };
 }
 
-pub fn pat_struct_fields(fs: Vec<(String, Pattern)>) -> String {
-    // STMT:Expr
-    return if (fs.len() as i64) == 0i64 { "".to_string()} else {
-        // STMT:Let
-        let mut out: String = "{ ".to_string();
-        // STMT:For
-        for idx in (0i64..(fs.len() as i64)).into_iter() {
-            // STMT:Let
-            let f = fs[((idx) as usize)].clone();
-            // STMT:Let
-            out = LzAdd::__add__(LzAdd::__add__(out + &(if idx > 0i64 { ", ".to_string() } else { "".to_string() }), f.0) + &": ".to_string()[..], display_pattern(f.1.clone()));
-        }
-        // STMT:Expr
-        LzAdd::__add__(out, " }".to_string())
-    };
-}
-
-pub fn match_block(s: Expr, as_: Vec<(Pattern, MaybeExpr, BlockIR)>) -> String {
+pub fn gen_match_arms(arms: Vec<(Pattern, MaybeExpr, BlockIR)>) -> String {
     // STMT:Let
-    let mut out: String = "match ".to_string().to_string() + &display_expr(s.clone())[..] + &" {".to_string()[..];
+    let mut out: String = "".to_string();
     // STMT:For
-    for idx in (0i64..(as_.len() as i64)).into_iter() {
+    for idx in (0i64..(arms.len() as i64)).into_iter() {
         // STMT:Let
-        let arm = as_[((idx) as usize)].clone();
+        let arm = arms[((idx) as usize)].clone();
         // STMT:Other
-        out = LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(out + &" ".to_string()[..], display_pattern(arm.0.clone())), guard_s(arm.1.clone())) + &" => ".to_string()[..], block_disp(arm.2.clone()));
+        out = LzAdd::__add__(out, gen_match_arm(arm.clone()));
     }
     // STMT:Expr
-    return out + &" }".to_string()[..];
+    return out;
 }
 
-pub fn stmt_block(ss: Vec<Stmt>) -> String {
-    // STMT:Expr
-    return if (ss.len() as i64) == 0i64 { "{ }".to_string()} else {
-        // STMT:Let
-        let mut out: String = "{\n".to_string();
-        // STMT:For
-        for idx in (0i64..(ss.len() as i64)).into_iter() {
-            // STMT:Let
-            out = LzAdd::__add__(out + &"  ".to_string()[..], display_stmt(ss[((idx) as usize)].clone())) + &"\n".to_string()[..];
-        }
+pub fn gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR)) -> String {
+    // STMT:Let
+    let pat = arm.0;
+    // STMT:Let
+    let gd = arm.1;
+    // STMT:Let
+    let blk = arm.2;
+    // STMT:Let
+    let pat_s: String = gen_pattern(pat.clone());
+    // STMT:Let
+    let gd_s: String = {
+// STMT:Other
+match gd.clone() {
+    MaybeExpr::YesExpr { value: vv } => {
         // STMT:Expr
-        LzAdd::__add__(out, "}".to_string())
+        LzAdd::__add__(" if ".to_string(), gen_expr(vv.clone()))
+    }
+    MaybeExpr::NoExpr => {
+        // STMT:Expr
+        "".to_string()
+    }
+}
     };
+    // STMT:Let
+    let blk_s: String = gen_block(blk.clone());
+    // STMT:Expr
+    return "    ".to_string().to_string() + &pat_s[..] + &gd_s[..] + &" => ".to_string()[..] + &blk_s[..] + &",\n".to_string()[..];
 }
 
-pub fn block_disp(b: BlockIR) -> String {
+pub fn gen_pattern(p: Pattern) -> String {
+    // STMT:Other
+    match p.clone() {
+        Pattern::Wildcard => {
+            // STMT:Expr
+            "_".to_string()
+        }
+        Pattern::Ident { name: n } => {
+            // STMT:Expr
+            n
+        }
+        Pattern::RefMutIdent { name: n } => {
+            // STMT:Expr
+            "ref mut ".to_string().to_string() + &n[..]
+        }
+        Pattern::LitInt { v: n } => {
+            // STMT:Expr
+            LzAdd::__add__(n.to_string(), "_i64".to_string())
+        }
+        Pattern::LitStr { s: s } => {
+            // STMT:Expr
+            LzAdd::__add__("\"".to_string(), esc_rust(s.clone())) + &"\"".to_string()[..]
+        }
+        Pattern::LitBool { b: b } => {
+            // STMT:Expr
+            b.to_string()
+        }
+        Pattern::LitF64 { v: n } => {
+            // STMT:Expr
+            LzAdd::__add__(n.to_string(), "_f64".to_string())
+        }
+        Pattern::Tuple { elems: es } => {
+            let es = *es;
+            // STMT:Expr
+            LzAdd::__add__("(".to_string(), pat_list(es.clone())) + &")".to_string()[..]
+        }
+        Pattern::List { elems: es } => {
+            let es = *es;
+            // STMT:Expr
+            LzAdd::__add__("[".to_string(), pat_list(es.clone())) + &"]".to_string()[..]
+        }
+        Pattern::Struct { name: n, fields: fs } => {
+            let fs = *fs;
+            // STMT:Let
+            let mut fields_s: String = " { ".to_string();
+            // STMT:For
+            for idx in (0i64..(fs.len() as i64)).into_iter() {
+                // STMT:Expr
+                if idx > 0i64 {
+                    // STMT:Other
+                    fields_s = fields_s + &", ".to_string()[..];
+                } else { ()};
+                // STMT:Let
+                let f = fs[((idx) as usize)].clone();
+                // STMT:Other
+                fields_s = LzAdd::__add__(LzAdd::__add__(fields_s, f.0) + &": ".to_string()[..], gen_pattern(f.1.clone()));
+            }
+            // STMT:Expr
+            fields_s + &" }".to_string()[..]
+        }
+        Pattern::Enum { enum_name: en, variant: v, args: a } => {
+            let a = *a;
+            // STMT:Expr
+            LzAdd::__add__(en + &"::".to_string()[..] + &v[..], arg_pat_list(a.clone()))
+        }
+        Pattern::Rest { name: rn } => {
+            // STMT:Other
+            match rn.clone() {
+                MaybeStr::YesStr { value: n2 } => {
+                    // STMT:Expr
+                    "..".to_string().to_string() + &n2[..]
+                }
+                MaybeStr::NoStr => {
+                    // STMT:Expr
+                    "..".to_string()
+                }
+            }
+        }
+        Pattern::Range { start: st, end: en, inclusive: inc } => {
+            // STMT:Expr
+            LzAdd::__add__(LzAdd::__add__(st.to_string(), "_i64..".to_string()), en.to_string()) + &"_i64".to_string()[..]
+        }
+    }
+}
+
+pub fn gen_block(b: BlockIR) -> String {
     // STMT:Other
     match b.clone() {
         BlockIR::Block { stmts: ss, ty: t } => {
             // STMT:Expr
-            if (ss.len() as i64) == 0i64 { LzAdd::__add__("{ } [".to_string(), display_type(t.clone())) + &"]".to_string()[..]} else {
-                // STMT:Let
-                let mut out: String = LzAdd::__add__("{ [".to_string(), display_type(t.clone())) + &"]\n".to_string()[..];
-                // STMT:For
-                for idx in (0i64..(ss.len() as i64)).into_iter() {
-                    // STMT:Let
-                    out = LzAdd::__add__(out + &"  ".to_string()[..], display_stmt(ss[((idx) as usize)].clone())) + &"\n".to_string()[..];
-                }
-                // STMT:Expr
-                LzAdd::__add__(out, "}".to_string())
-            }
+            if (ss.len() as i64) == 0i64 { "{}".to_string() } else { LzAdd::__add__("{\n".to_string(), gen_body(ss.clone(), false)) + &"}".to_string()[..] }
         }
     }
-}
-
-pub fn block_with_ty(ss: Vec<Stmt>, t: IrType) -> String {
-    // STMT:Expr
-    return if (ss.len() as i64) == 0i64 { "{ } [".to_string().to_string() + &display_type(t.clone())[..] + &"]".to_string()[..]} else {
-        // STMT:Let
-        let mut out: String = "{ [".to_string().to_string() + &display_type(t.clone())[..] + &"]\n".to_string()[..];
-        // STMT:For
-        for idx in (0i64..(ss.len() as i64)).into_iter() {
-            // STMT:Let
-            out = LzAdd::__add__(out + &"  ".to_string()[..], display_stmt(ss[((idx) as usize)].clone())) + &"\n".to_string()[..];
-        }
-        // STMT:Expr
-        LzAdd::__add__(out, "}".to_string())
-    };
-}
-
-pub fn opt_debug(o: MaybeStr) -> String {
-    // STMT:Other
-    match o.clone() {
-        MaybeStr::YesStr { value: s } => {
-            // STMT:Expr
-            "Some(\"".to_string().to_string() + &s[..] + &"\")".to_string()[..]
-        }
-        MaybeStr::NoStr => {
-            // STMT:Expr
-            "None".to_string()
-        }
-    }
-}
-
-pub fn stmt_lines(ss: Vec<Stmt>) -> String {
-    // STMT:Let
-    let mut out: String = "".to_string();
-    // STMT:For
-    for idx in (0i64..(ss.len() as i64)).into_iter() {
-        // STMT:Other
-        out = LzAdd::__add__(out + &"  ".to_string()[..], display_stmt(ss[((idx) as usize)].clone())) + &"\n".to_string()[..];
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn display_item(it: Item) -> String {
-    // STMT:Other
-    match it.clone() {
-        Item::FnDef { name: n, generics: gs, params: ps, ret: r, body: b } => {
-            // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(LzAdd::__add__("fn ".to_string().to_string() + &n[..], generic_sig(gs.clone())), param_sig(ps.clone())) + &" -> ".to_string()[..], display_type(r.clone())) + &":\n".to_string()[..], stmt_lines(b.clone()))
-        }
-        Item::Const { name: n, ty: t, value: v } => {
-            // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__("const ".to_string().to_string() + &n[..] + &": ".to_string()[..], display_type(t.clone())) + &" = ".to_string()[..], display_expr(v.clone()))
-        }
-        Item::StructDef { name: n, generics: gs, fields: fs } => {
-            // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__("struct ".to_string().to_string() + &n[..], generic_sig(gs.clone())) + &" {\n".to_string()[..], field_lines(fs.clone())) + &"}".to_string()[..]
-        }
-        Item::EnumDef { name: n, generics: gs, variants: vs } => {
-            // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__("enum ".to_string().to_string() + &n[..], generic_sig(gs.clone())) + &" {\n".to_string()[..], variant_lines(vs.clone())) + &"}".to_string()[..]
-        }
-        Item::TraitDef { name: n, supertraits: ss, methods: ms } => {
-            // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__("trait ".to_string().to_string() + &n[..], super_join(ss.clone())) + &" {\n".to_string()[..], method_lines(ms.clone())) + &"}".to_string()[..]
-        }
-        Item::DuckDef { name: n, method_count: c } => {
-            // STMT:Expr
-            LzAdd::__add__("duck ".to_string().to_string() + &n[..] + &" { ".to_string()[..], c.to_string()) + &" methods }".to_string()[..]
-        }
-        Item::UseStmt { path: p, alias: a, items: xs, is_from: f } => {
-            // STMT:Expr
-            (if f { (LzAdd::__add__(LzAdd::__add__("from ".to_string(), dot_join(p.clone())) + &" import ".to_string()[..], str_join(xs.clone()))) } else { (LzAdd::__add__("import ".to_string(), dot_join(p.clone()))) })
-        }
-        Item::TypeAlias { name: n, ty: t } => {
-            // STMT:Expr
-            LzAdd::__add__("type ".to_string().to_string() + &n[..] + &" = ".to_string()[..], display_type(t.clone()))
-        }
-        Item::Impl { trait_: tr, for_type: fty, method_names: ms } => {
-            // STMT:Let
-            let mut out: String = LzAdd::__add__(LzAdd::__add__("impl ".to_string(), impl_head(tr.clone())), display_type(fty.clone())) + &" {\n".to_string()[..];
-            // STMT:For
-            for idx in (0i64..(ms.len() as i64)).into_iter() {
-                // STMT:Other
-                out = LzAdd::__add__(out + &"  fn ".to_string()[..], ms[((idx) as usize)].clone()) + &" ...\n".to_string()[..];
-            }
-            // STMT:Expr
-            out + &"}".to_string()[..]
-        }
-        Item::CheckerBlock { name: n, ps_name: p } => {
-            // STMT:Expr
-            LzAdd::__add__("checker block \'".to_string().to_string() + &n[..] + &"[ps:".to_string()[..], opt_debug(p.clone())) + &"]".to_string()[..]
-        }
-        Item::Test { name: n, body: b } => {
-            // STMT:Expr
-            LzAdd::__add__("test ".to_string().to_string() + &n[..] + &" ".to_string()[..], stmt_block(b.clone()))
-        }
-    }
-}
-
-pub fn generic_sig(gs: Vec<String>) -> String {
-    // STMT:Expr
-    return if (gs.len() as i64) == 0i64 { "".to_string() } else { "<".to_string().to_string() + &str_join(gs.clone())[..] + &">".to_string()[..] };
-}
-
-pub fn variant_lines(vs: Vec<(String, Vec<IrType>)>) -> String {
-    // STMT:Let
-    let mut out: String = "".to_string();
-    // STMT:For
-    for idx in (0i64..(vs.len() as i64)).into_iter() {
-        // STMT:Let
-        let v = vs[((idx) as usize)].clone();
-        // STMT:Other
-        out = LzAdd::__add__(LzAdd::__add__(out + &"  ".to_string()[..], v.0), variant_args(v.1.clone())) + &"\n".to_string()[..];
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn field_lines(fs: Vec<(String, IrType)>) -> String {
-    // STMT:Let
-    let mut out: String = "".to_string();
-    // STMT:For
-    for idx in (0i64..(fs.len() as i64)).into_iter() {
-        // STMT:Let
-        let f = fs[((idx) as usize)].clone();
-        // STMT:Other
-        out = LzAdd::__add__(LzAdd::__add__(out + &"  ".to_string()[..], f.0) + &": ".to_string()[..], display_type(f.1.clone())) + &"\n".to_string()[..];
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn variant_args(ts: Vec<IrType>) -> String {
-    // STMT:Expr
-    return if (ts.len() as i64) == 0i64 { "".to_string() } else { "(".to_string().to_string() + &type_list(ts.clone())[..] + &")".to_string()[..] };
-}
-
-pub fn super_join(ss: Vec<IrType>) -> String {
-    // STMT:Expr
-    return if (ss.len() as i64) == 0i64 { "".to_string()} else {
-        // STMT:Let
-        let mut out: String = " : ".to_string().to_string() + &display_type(ss[((0i64) as usize)].clone())[..];
-        // STMT:For
-        for idx in (1i64..(ss.len() as i64)).into_iter() {
-            // STMT:Let
-            out = LzAdd::__add__(out + &" + ".to_string()[..], display_type(ss[((idx) as usize)].clone()));
-        }
-        // STMT:Expr
-        out
-    };
-}
-
-pub fn method_lines(ms: Vec<(String, Vec<IrType>, IrType)>) -> String {
-    // STMT:Let
-    let mut out: String = "".to_string();
-    // STMT:For
-    for idx in (0i64..(ms.len() as i64)).into_iter() {
-        // STMT:Let
-        let m = ms[((idx) as usize)].clone();
-        // STMT:Other
-        out = LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(out + &"  fn ".to_string()[..], m.0) + &"(".to_string()[..], type_list(m.1.clone())) + &") -> ".to_string()[..], display_type(m.2.clone())) + &"\n".to_string()[..];
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn param_sig(ps: Vec<(String, IrType, bool, bool, bool)>) -> String {
-    // STMT:Expr
-    return if (ps.len() as i64) == 0i64 { "()".to_string() } else { "(".to_string().to_string() + &param_list(ps.clone())[..] + &")".to_string()[..] };
-}
-
-pub fn param_list(ps: Vec<(String, IrType, bool, bool, bool)>) -> String {
-    // STMT:Expr
-    return if (ps.len() as i64) == 0i64 { "".to_string()} else {
-        // STMT:Let
-        let p0 = ps[((0i64) as usize)].clone();
-        // STMT:Expr
-        param_str(p0.clone()) + &(if (ps.len() as i64) > 1i64 { ", ".to_string().to_string() + &param_list(tail_p(ps.clone()))[..] } else { "".to_string() })
-    };
-}
-
-pub fn param_str(p: (String, IrType, bool, bool, bool)) -> String {
-    // STMT:Expr
-    return LzAdd::__add__((if p.3 { "mut ".to_string() } else { "".to_string() }) + &(if p.4 { "owned ".to_string() } else { "".to_string() }) + &(if p.2 { "ref ".to_string() } else { "".to_string() }), p.0) + &": ".to_string()[..] + &display_type(p.1.clone())[..];
-}
-
-pub fn tail_p(ps: Vec<(String, IrType, bool, bool, bool)>) -> Vec<(String, IrType, bool, bool, bool)> {
-    // STMT:Let
-    let mut out: Vec<(String, IrType, bool, bool, bool)> = Vec::new();
-    // STMT:For
-    for idx in (1i64..(ps.len() as i64)).into_iter() {
-        // STMT:Expr
-        out.push(ps[((idx) as usize)].clone());
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn impl_head(tr: MaybeIrType) -> String {
-    // STMT:Other
-    match tr.clone() {
-        MaybeIrType::YesTy { value: t } => {
-            // STMT:Expr
-            LzAdd::__add__(display_type(t.clone()), " for ".to_string())
-        }
-        MaybeIrType::NoTy => {
-            // STMT:Expr
-            "".to_string()
-        }
-    }
-}
-
-pub fn dot_join(xs: Vec<String>) -> String {
-    // STMT:Expr
-    return if (xs.len() as i64) == 0i64 { "".to_string()} else {
-        // STMT:Let
-        let mut out = xs[((0i64) as usize)].clone();
-        // STMT:For
-        for idx in (1i64..(xs.len() as i64)).into_iter() {
-            // STMT:Let
-            out = LzAdd::__add__(out + &".".to_string()[..], xs[((idx) as usize)].clone());
-        }
-        // STMT:Expr
-        out
-    };
-}
-
-pub fn display_module(m: IrModule) -> String {
-    // STMT:Let
-    let mut out: String = LzAdd::__add__(";; LZIR v".to_string(), m.version.to_string()) + &" \u{2014} module \'".to_string()[..] + &m.name + &"\'\n".to_string()[..];
-    // STMT:Let
-    out = LzAdd::__add__(out + &";; ".to_string()[..], (m.items.len() as i64).to_string()) + &" items\n".to_string()[..];
-    // STMT:Expr
-    if (m.prelude.len() as i64) > 0i64 {
-        // STMT:Let
-        out = out + &";; prelude: ".to_string()[..] + &str_join(m.prelude.clone())[..] + &"\n".to_string()[..];
-    } else { ()};
-    // STMT:Let
-    out = out + &"\n".to_string()[..];
-    // STMT:For
-    for idx in (0i64..(m.items.len() as i64)).into_iter() {
-        // STMT:Other
-        out = LzAdd::__add__(out, display_item(m.items[((idx) as usize)].clone())) + &"\n\n".to_string()[..];
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn str_join(xs: Vec<String>) -> String {
-    // STMT:Expr
-    return if (xs.len() as i64) == 0i64 { "".to_string()} else {
-        // STMT:Let
-        let mut out = xs[((0i64) as usize)].clone();
-        // STMT:For
-        for idx in (1i64..(xs.len() as i64)).into_iter() {
-            // STMT:Let
-            out = LzAdd::__add__(out + &", ".to_string()[..], xs[((idx) as usize)].clone());
-        }
-        // STMT:Expr
-        out
-    };
 }
 
 pub fn rust_type(t: IrType) -> String {
@@ -1454,20 +1278,20 @@ pub fn rust_type(t: IrType) -> String {
         }
         IrType::Any => {
             // STMT:Expr
-            "i64".to_string()
+            "Box<dyn Any>".to_string()
         }
         IrType::Self_ => {
             // STMT:Expr
             "Self".to_string()
         }
-        IrType::Generic { name: n } => {
+        IrType::Generic { name: g } => {
             // STMT:Expr
-            n
+            g
         }
         IrType::Named { path: p, args: a } => {
             let a = *a;
             // STMT:Expr
-            named_rust_type(p.clone(), a.clone())
+            p + &(if (a.len() as i64) > 0i64 { LzAdd::__add__("<".to_string(), type_rust_list(a.clone())) + &">".to_string()[..] } else { "".to_string() })
         }
         IrType::Opt { inner: x } => {
             let x = *x;
@@ -1489,7 +1313,7 @@ pub fn rust_type(t: IrType) -> String {
             let ps = *ps;
             let r = *r;
             // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__("impl Fn(".to_string(), type_rust_list(ps.clone())) + &") -> ".to_string()[..], rust_type(r.clone()))
+            LzAdd::__add__(LzAdd::__add__("fn(".to_string(), type_rust_list(ps.clone())) + &") -> ".to_string()[..], rust_type(r.clone()))
         }
         IrType::Ref { inner: x } => {
             let x = *x;
@@ -1504,31 +1328,9 @@ pub fn rust_type(t: IrType) -> String {
         IrType::Duck { fields: fs } => {
             let fs = *fs;
             // STMT:Expr
-            "()".to_string()
+            "Box<dyn Any>".to_string()
         }
     }
-}
-
-pub fn named_rust_type(p: String, a: Vec<IrType>) -> String {
-    // STMT:Let
-    let m: String = named_map(p.clone());
-    // STMT:Expr
-    return if (a.len() as i64) > 0i64 { m + &"<".to_string()[..] + &type_rust_list(a.clone())[..] + &">".to_string()[..] } else { named_default(m.clone()) };
-}
-
-pub fn named_map(p: String) -> String {
-    // STMT:Expr
-    return if p == "int".to_string() || p == "float".to_string() || p == "f64".to_string() || p == "str".to_string() || p == "bool".to_string() || p == "List".to_string() || p == "Dict".to_string() || p == "Set".to_string() || p == "Iter".to_string() || p == "Future".to_string() || p == "Tokens".to_string() { rust_prim_name(p.clone()) } else { p };
-}
-
-pub fn rust_prim_name(p: String) -> String {
-    // STMT:Expr
-    return if p == "int".to_string() { "i64".to_string() } else { if p == "float".to_string() || p == "f64".to_string() { "f64".to_string() } else { if p == "str".to_string() { "String".to_string() } else { if p == "bool".to_string() { "bool".to_string() } else { if p == "List".to_string() { "Vec".to_string() } else { if p == "Dict".to_string() { "HashMap".to_string() } else { if p == "Set".to_string() { "HashSet".to_string() } else { if p == "Iter".to_string() { "Vec".to_string() } else { if p == "Future".to_string() { "std::future::Future<Output = i64>".to_string() } else { if p == "Tokens".to_string() { "String".to_string() } else { p } } } } } } } } } };
-}
-
-pub fn named_default(m: String) -> String {
-    // STMT:Expr
-    return if m == "Vec".to_string() || m == "List".to_string() { "Vec<i64>".to_string() } else { if m == "HashMap".to_string() || m == "Dict".to_string() { "HashMap<i64, i64>".to_string() } else { if m == "HashSet".to_string() || m == "Set".to_string() { "HashSet<i64>".to_string() } else { if m == "Option".to_string() { "Option<i64>".to_string() } else { if m == "Result".to_string() { "Result<i64, i64>".to_string() } else { m } } } } };
 }
 
 pub fn type_rust_list(ts: Vec<IrType>) -> String {
@@ -1537,124 +1339,23 @@ pub fn type_rust_list(ts: Vec<IrType>) -> String {
         // STMT:Let
         let head: String = rust_type(ts[((0i64) as usize)].clone());
         // STMT:Expr
-        if (ts.len() as i64) > 1i64 { LzAdd::__add__(head, ", ".to_string()) + &type_rust_list(tr_tail(ts.clone()))[..] } else { head }
+        if (ts.len() as i64) > 1i64 { LzAdd::__add__(head, ", ".to_string()) + &type_rust_list(tail_t(ts.clone()))[..] } else { head }
     };
 }
 
-pub fn tr_tail(ts: Vec<IrType>) -> Vec<IrType> {
-    // STMT:Let
-    let mut out: Vec<IrType> = Vec::new();
-    // STMT:For
-    for idx in (1i64..(ts.len() as i64)).into_iter() {
-        // STMT:Expr
-        out.push(ts[((idx) as usize)].clone());
-    }
+pub fn generic_sig(gs: Vec<String>) -> String {
     // STMT:Expr
-    return out;
+    return if (gs.len() as i64) == 0i64 { "".to_string() } else { "<".to_string().to_string() + &str_join(gs.clone())[..] + &">".to_string()[..] };
 }
 
-pub fn base_is_dict(b: Expr) -> bool {
-    // STMT:Other
-    match b.clone() {
-        Expr::Var { name: n, ty: t } => {
-            // STMT:Expr
-            is_dict_ty(t.clone())
-        }
-        Expr::FieldAccess { base: bb, field: f, ty: t } => {
-            let bb = *bb;
-            // STMT:Expr
-            is_dict_ty(t.clone())
-        }
-        _ => {
-            // STMT:Expr
-            false
-        }
-    }
-}
-
-pub fn base_is_set(b: Expr) -> bool {
-    // STMT:Other
-    match b.clone() {
-        Expr::Var { name: n, ty: t } => {
-            // STMT:Expr
-            is_set_ty(t.clone())
-        }
-        Expr::FieldAccess { base: bb, field: f, ty: t } => {
-            let bb = *bb;
-            // STMT:Expr
-            is_set_ty(t.clone())
-        }
-        _ => {
-            // STMT:Expr
-            false
-        }
-    }
-}
-
-pub fn is_set_ty(t: IrType) -> bool {
-    // STMT:Other
-    match t.clone() {
-        IrType::Named { path: p, args: a } => {
-            let a = *a;
-            // STMT:Expr
-            p == "Set".to_string() || p == "HashSet".to_string()
-        }
-        _ => {
-            // STMT:Expr
-            false
-        }
-    }
-}
-
-pub fn strip_ts_args(es: Vec<Expr>) -> String {
+pub fn str_join(xs: Vec<String>) -> String {
     // STMT:Expr
-    return if (es.len() as i64) == 0i64 { "".to_string()} else {
+    return if (xs.len() as i64) == 0i64 { "".to_string()} else {
         // STMT:Let
-        let head: String = strip_ts(es[((0i64) as usize)].clone());
+        let head = xs[((0i64) as usize)].clone();
         // STMT:Expr
-        if (es.len() as i64) > 1i64 { LzAdd::__add__(head, ", ".to_string()) + &strip_ts_args(st_tail(es.clone()))[..] } else { head }
+        if (xs.len() as i64) > 1i64 { LzAdd::__add__(head, ", ".to_string()) + &str_join(aj_tail(xs.clone()))[..] } else { head }
     };
-}
-
-pub fn strip_ts(e: Expr) -> String {
-    // STMT:Other
-    match e.clone() {
-        Expr::LitStr { s: sv, ty: tv } => {
-            // STMT:Expr
-            LzAdd::__add__("\"".to_string(), esc_rust(sv.clone())) + &"\"".to_string()[..]
-        }
-        _ => {
-            // STMT:Expr
-            LzAdd::__add__("&".to_string(), gen_expr(e.clone()))
-        }
-    }
-}
-
-pub fn st_tail(es: Vec<Expr>) -> Vec<Expr> {
-    // STMT:Let
-    let mut out: Vec<Expr> = Vec::new();
-    // STMT:For
-    for idx in (1i64..(es.len() as i64)).into_iter() {
-        // STMT:Expr
-        out.push(es[((idx) as usize)].clone());
-    }
-    // STMT:Expr
-    return out;
-}
-
-pub fn is_dict_ty(t: IrType) -> bool {
-    // STMT:Other
-    match t.clone() {
-        IrType::Named { path: p, args: a } => {
-            let a = *a;
-            // STMT:Expr
-            p == "Dict".to_string() || p == "HashMap".to_string()
-        }
-        _ => {
-            // STMT:Expr
-            false
-        }
-    }
 }
 
 pub fn gen_expr(e: Expr) -> String {
@@ -1662,7 +1363,7 @@ pub fn gen_expr(e: Expr) -> String {
     match e.clone() {
         Expr::LitInt { v: n, ty: t } => {
             // STMT:Expr
-            LzAdd::__add__(n.to_string(), "i64".to_string())
+            LzAdd::__add__(n.to_string(), "_i64".to_string())
         }
         Expr::LitF64 { v: n, ty: t } => {
             // STMT:Expr
@@ -1670,7 +1371,7 @@ pub fn gen_expr(e: Expr) -> String {
         }
         Expr::LitStr { s: s, ty: t } => {
             // STMT:Expr
-            LzAdd::__add__("\"".to_string(), esc_rust(s.clone())) + &"\".to_string()".to_string()[..]
+            LzAdd::__add__("\"".to_string(), esc_rust(s.clone())) + &"\"".to_string()[..]
         }
         Expr::LitFStr { s: s, ty: t } => {
             // STMT:Expr
@@ -1692,17 +1393,6 @@ pub fn gen_expr(e: Expr) -> String {
             // STMT:Expr
             n
         }
-        Expr::BinOp { op: o, lhs: l, rhs: r, ty: t } => {
-            let l = *l;
-            let r = *r;
-            // STMT:Expr
-            LzAdd::__add__(LzAdd::__add__(gen_expr(l.clone()), " ".to_string()) + &o[..] + &" ".to_string()[..], gen_expr(r.clone()))
-        }
-        Expr::UnOp { op: o, operand: p, ty: t } => {
-            let p = *p;
-            // STMT:Expr
-            LzAdd::__add__(o, gen_expr(p.clone()))
-        }
         Expr::Call { callee: c, args: a, ty: t } => {
             let c = *c;
             let a = *a;
@@ -1713,7 +1403,7 @@ pub fn gen_expr(e: Expr) -> String {
             let r = *r;
             let a = *a;
             // STMT:Expr
-            if m == "length".to_string() { LzAdd::__add__("(".to_string(), gen_expr(r.clone())) + &".len() as i64)".to_string()[..] } else { if m == "contains".to_string() && base_is_set(r.clone()) { LzAdd::__add__(LzAdd::__add__(gen_expr(r.clone()), ".contains(".to_string()), strip_ts_args(a.clone())) + &")".to_string()[..] } else { LzAdd::__add__(LzAdd::__add__(gen_expr(r.clone()), ".".to_string()) + &m[..] + &"(".to_string()[..], expr_cs_list(a.clone())) + &")".to_string()[..] } }
+            LzAdd::__add__(LzAdd::__add__(gen_expr(r.clone()), ".".to_string()) + &m[..] + &"(".to_string()[..], expr_cs_list(a.clone())) + &")".to_string()[..]
         }
         Expr::FieldAccess { base: b, field: f, ty: t } => {
             let b = *b;
@@ -1724,24 +1414,45 @@ pub fn gen_expr(e: Expr) -> String {
             let b = *b;
             let k = *k;
             // STMT:Expr
-            if base_is_dict(b.clone()) { LzAdd::__add__(LzAdd::__add__("(".to_string(), gen_expr(b.clone())) + &").get(&".to_string()[..], gen_expr(k.clone())) + &").cloned().unwrap()".to_string()[..] } else { LzAdd::__add__(LzAdd::__add__(gen_expr(b.clone()), "[((".to_string()), gen_expr(k.clone())) + &") as usize)]".to_string()[..] }
+            LzAdd::__add__(LzAdd::__add__(gen_expr(b.clone()), "[".to_string()), gen_expr(k.clone())) + &"]".to_string()[..]
         }
         Expr::IndexSet { base: b, key: k, value: v, ty: t } => {
             let b = *b;
             let k = *k;
             let v = *v;
             // STMT:Expr
-            if base_is_dict(b.clone()) { LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(gen_expr(b.clone()), ".insert(".to_string()), gen_expr(k.clone())) + &", ".to_string()[..], gen_expr(v.clone())) + &");".to_string()[..] } else { LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(gen_expr(b.clone()), "[((".to_string()), gen_expr(k.clone())) + &") as usize)] = ".to_string()[..], gen_expr(v.clone())) + &";".to_string()[..] }
+            LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(gen_expr(b.clone()), "[".to_string()), gen_expr(k.clone())) + &"] = ".to_string()[..], gen_expr(v.clone()))
+        }
+        Expr::BinOp { op: o, lhs: l, rhs: r, ty: t } => {
+            let l = *l;
+            let r = *r;
+            // STMT:Expr
+            LzAdd::__add__(LzAdd::__add__(gen_expr(l.clone()), " ".to_string()) + &o[..] + &" ".to_string()[..], gen_expr(r.clone()))
+        }
+        Expr::UnOp { op: o, operand: p, ty: t } => {
+            let p = *p;
+            // STMT:Expr
+            LzAdd::__add__(o + &" ".to_string()[..], gen_expr(p.clone()))
         }
         Expr::StructCtor { name: n, fields: fs, ty: t } => {
             let fs = *fs;
             // STMT:Expr
             if n == "Range".to_string() { gen_range_ctor(fs.clone()) } else { if n == "Dict".to_string() { gen_dict_ctor(fs.clone()) } else { LzAdd::__add__(n + &" { ".to_string()[..], ctor_fields(fs.clone())) + &" }".to_string()[..] } }
         }
-        Expr::ListLit { items: xs, ty: t } => {
-            let xs = *xs;
+        Expr::EnumCtor { enum_name: en, variant: v, args: a, ty: t } => {
+            let a = *a;
             // STMT:Expr
-            if (xs.len() as i64) == 0i64 { "Vec::new()".to_string() } else { LzAdd::__add__("vec![".to_string(), expr_cs_list(xs.clone())) + &"]".to_string()[..] }
+            LzAdd::__add__(en + &"::".to_string()[..] + &v[..] + &"(".to_string()[..], expr_cs_list(a.clone())) + &")".to_string()[..]
+        }
+        Expr::Cast { inner: i, target: tg, ty: t } => {
+            let i = *i;
+            // STMT:Expr
+            LzAdd::__add__(LzAdd::__add__("(".to_string(), gen_expr(i.clone())) + &" as ".to_string()[..], rust_type(tg.clone())) + &")".to_string()[..]
+        }
+        Expr::MagicCall { magic: m, args: a, ty: t } => {
+            let a = *a;
+            // STMT:Expr
+            LzAdd::__add__(m + &"(".to_string()[..], expr_cs_list(a.clone())) + &")".to_string()[..]
         }
         Expr::IfExpr { cond: c, then: th, els: el, ty: t } => {
             let c = *c;
@@ -1750,14 +1461,230 @@ pub fn gen_expr(e: Expr) -> String {
             // STMT:Expr
             LzAdd::__add__(LzAdd::__add__(LzAdd::__add__("if ".to_string(), gen_expr(c.clone())) + &" { ".to_string()[..], gen_expr(th.clone())) + &" } else { ".to_string()[..], gen_expr(el.clone())) + &" }".to_string()[..]
         }
+        Expr::Lambda { params: ps, body: b, ty: t } => {
+            let b = *b;
+            // STMT:Expr
+            LzAdd::__add__(LzAdd::__add__("move |".to_string(), str_join(ps.clone())) + &"| ".to_string()[..], gen_expr(b.clone()))
+        }
+        Expr::Pipe { receiver: r, callee: c, args: a, ty: t } => {
+            let r = *r;
+            let c = *c;
+            let a = *a;
+            // STMT:Expr
+            LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(gen_expr(r.clone()), ".".to_string()), gen_expr(c.clone())) + &"(".to_string()[..], expr_cs_list(a.clone())) + &")".to_string()[..]
+        }
         Expr::TupleLit { elems: es, ty: t } => {
             let es = *es;
             // STMT:Expr
             LzAdd::__add__("(".to_string(), expr_cs_list(es.clone())) + &")".to_string()[..]
         }
+        Expr::ListLit { items: xs, ty: t } => {
+            let xs = *xs;
+            // STMT:Expr
+            LzAdd::__add__("[".to_string(), expr_cs_list(xs.clone())) + &"]".to_string()[..]
+        }
+        Expr::BlockExpr { stmts: ss, ty: t } => {
+            // STMT:Expr
+            LzAdd::__add__("{\n".to_string(), gen_body(ss.clone(), false)) + &"}".to_string()[..]
+        }
+        Expr::GenExpr { yield_of: y, ty: t } => {
+            let y = *y;
+            // STMT:Expr
+            LzAdd::__add__("gen ".to_string(), gen_expr(y.clone()))
+        }
+        Expr::Paren { inner: i, ty: t } => {
+            let i = *i;
+            // STMT:Expr
+            LzAdd::__add__("(".to_string(), gen_expr(i.clone())) + &")".to_string()[..]
+        }
+        Expr::Range { end: en, inclusive: inc, ty: t } => {
+            let en = *en;
+            // STMT:Expr
+            LzAdd::__add__("0_i64..".to_string(), gen_expr(en))
+        }
+        Expr::Dict { pairs: ps, ty: t } => {
+            let ps = *ps;
+            // STMT:Expr
+            "HashMap::new()".to_string()
+        }
+        Expr::AssignExpr { target: tg, value: v, ty: t } => {
+            let tg = *tg;
+            let v = *v;
+            // STMT:Expr
+            LzAdd::__add__(LzAdd::__add__(gen_expr(tg.clone()), " = ".to_string()), gen_expr(v.clone()))
+        }
+        Expr::ImplicitConvert { source: s, target_ty: tt, ty: t } => {
+            let s = *s;
+            // STMT:Expr
+            gen_expr(s.clone())
+        }
         _ => {
             // STMT:Expr
-            LzAdd::__add__("/* TODO ".to_string(), display_expr(e.clone())) + &" */".to_string()[..]
+            "unimplemented!".to_string()
+        }
+    }
+}
+
+pub fn display_item(i: Item) -> String {
+    // STMT:Other
+    match i.clone() {
+        Item::FnDef { name: n, generics: gs, params: ps, ret: r, body: b } => {
+            // STMT:Expr
+            "fn ".to_string().to_string() + &n[..]
+        }
+        Item::Const { name: n, ty: t, value: v } => {
+            // STMT:Expr
+            "const ".to_string().to_string() + &n[..]
+        }
+        Item::StructDef { name: n, generics: gs, fields: fs } => {
+            // STMT:Expr
+            "struct ".to_string().to_string() + &n[..]
+        }
+        Item::EnumDef { name: n, generics: gs, variants: vs } => {
+            // STMT:Expr
+            "enum ".to_string().to_string() + &n[..]
+        }
+        Item::TraitDef { name: n, supertraits: sts, methods: ms } => {
+            // STMT:Expr
+            "trait ".to_string().to_string() + &n[..]
+        }
+        Item::DuckDef { name: n, method_count: mc } => {
+            // STMT:Expr
+            "duck ".to_string().to_string() + &n[..]
+        }
+        Item::UseStmt { path: pth, alias: al, items: its, is_from: fr } => {
+            // STMT:Expr
+            LzAdd::__add__("use ".to_string(), str_join(pth.clone()))
+        }
+        Item::TypeAlias { name: n, ty: t } => {
+            // STMT:Expr
+            "type ".to_string().to_string() + &n[..]
+        }
+        Item::Impl { trait_: tr, for_type: ft, method_names: mns } => {
+            // STMT:Expr
+            LzAdd::__add__("impl ".to_string(), rust_type(ft.clone()))
+        }
+        Item::CheckerBlock { name: n, ps_name: p } => {
+            // STMT:Expr
+            "checker ".to_string().to_string() + &n[..]
+        }
+        Item::Test { name: n, body: b } => {
+            // STMT:Expr
+            "test ".to_string().to_string() + &n[..]
+        }
+        _ => {
+            // STMT:Expr
+            "item".to_string()
+        }
+    }
+}
+
+pub fn opt_debug(p: MaybeStr) -> String {
+    // STMT:Other
+    match p.clone() {
+        MaybeStr::YesStr { value: v } => {
+            // STMT:Expr
+            v
+        }
+        MaybeStr::NoStr => {
+            // STMT:Expr
+            "".to_string()
+        }
+    }
+}
+
+pub fn block_disp(b: BlockIR) -> String {
+    // STMT:Other
+    match b.clone() {
+        BlockIR::Block { stmts: ss, ty: t } => {
+            // STMT:Expr
+            LzAdd::__add__("{\n".to_string(), block_with_ty(ss.clone(), t.clone())) + &"}".to_string()[..]
+        }
+    }
+}
+
+pub fn stmt_block(ss: Vec<Stmt>) -> String {
+    // STMT:Expr
+    return if (ss.len() as i64) == 0i64 { "{}".to_string()} else {
+        // STMT:Let
+        let mut out: String = "{\n".to_string();
+        // STMT:For
+        for idx in (0i64..(ss.len() as i64)).into_iter() {
+            // STMT:Let
+            out = LzAdd::__add__(out, display_stmt(ss[((idx) as usize)].clone())) + &"\n".to_string()[..];
+        }
+        // STMT:Expr
+        LzAdd::__add__(out, "}".to_string())
+    };
+}
+
+pub fn match_block(s: Expr, arms: Vec<(Pattern, MaybeExpr, BlockIR)>) -> String {
+    // STMT:Let
+    let mut out: String = "match ".to_string().to_string() + &display_expr(s.clone())[..] + &" {\n".to_string()[..];
+    // STMT:For
+    for idx in (0i64..(arms.len() as i64)).into_iter() {
+        // STMT:Let
+        let arm = arms[((idx) as usize)].clone();
+        // STMT:Let
+        let pat_s = display_pattern(arm.0.clone());
+        // STMT:Let
+        let gd_s: String = {
+// STMT:Other
+match arm.1 {
+    MaybeExpr::YesExpr { value: vv } => {
+        // STMT:Expr
+        LzAdd::__add__(" if ".to_string(), display_expr(vv.clone()))
+    }
+    MaybeExpr::NoExpr => {
+        // STMT:Expr
+        "".to_string()
+    }
+}
+    };
+        // STMT:Let
+        let blk_s = block_disp(arm.2.clone());
+        // STMT:Other
+        out = LzAdd::__add__(LzAdd::__add__(out + &"    ".to_string()[..], pat_s) + &gd_s[..] + &" => ".to_string()[..], blk_s) + &",\n".to_string()[..];
+    }
+    // STMT:Expr
+    return out + &"}".to_string()[..];
+}
+
+pub fn block_with_ty(ss: Vec<Stmt>, ty: IrType) -> String {
+    // STMT:Expr
+    return if (ss.len() as i64) == 0i64 { "".to_string()} else {
+        // STMT:Let
+        let mut out: String = "".to_string();
+        // STMT:For
+        for idx in (0i64..(ss.len() as i64)).into_iter() {
+            // STMT:Let
+            out = LzAdd::__add__(out, display_stmt(ss[((idx) as usize)].clone())) + &"\n".to_string()[..];
+        }
+        // STMT:Expr
+        out
+    };
+}
+
+pub fn base_is_dict(b: Expr) -> bool {
+    // STMT:Other
+    match b.clone() {
+        Expr::Var { name: n, ty: t } => {
+            // STMT:Other
+            match t.clone() {
+                IrType::Named { path: p, args: a } => {
+                    let a = *a;
+                    // STMT:Expr
+                    p == "Dict".to_string() || p == "HashMap".to_string()
+                }
+                _ => {
+                    // STMT:Expr
+                    false
+                }
+            }
+        }
+        _ => {
+            // STMT:Expr
+            false
         }
     }
 }

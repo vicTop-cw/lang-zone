@@ -5529,13 +5529,21 @@ impl CodeGen {
                 };
                 let ret_ty = self.rust_type(&cm.ret_ty);
                 let where_str = self.magic_impl_where_str(cm);
-                let call_args: Vec<String> = cm
-                    .params
-                    .iter()
-                    .filter(|p| p.name != "self" && p.name != "self_")
-                    .enumerate()
-                    .map(|(i, _)| format!("args.{}", i))
-                    .collect();
+                let call_args: Vec<String> = if arg_types.len() == 1 {
+                    cm.params
+                        .iter()
+                        .filter(|p| p.name != "self" && p.name != "self_")
+                        .enumerate()
+                        .map(|(i, _)| format!("args.{}", i))
+                        .collect()
+                } else {
+                    cm.params
+                        .iter()
+                        .filter(|p| p.name != "self" && p.name != "self_")
+                        .enumerate()
+                        .map(|(i, _)| format!("args.0.{}", i))
+                        .collect()
+                };
 
                 self.emit_line(&format!(
                     "impl{} lz_builtins::Callable<({},)> for {} {} {{",

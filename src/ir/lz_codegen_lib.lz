@@ -394,7 +394,13 @@ def display_pattern(p: Pattern) -> str =
         case Pattern.List(elems: es) =>
             "[" + pat_list(es) + "]"
         case Pattern.Struct(name: n, fields: fs) =>
-            n + pat_struct_fields(fs)
+            let mut fields_s = ""
+            for idx in 0..fs.len():
+                if idx > 0:
+                    fields_s = fields_s + ", "
+                let f = fs[idx].clone()
+                fields_s = fields_s + f.0 + ": " + display_pattern(f.1)
+            n + " { " + fields_s + " }"
         case Pattern.Enum(enum_name: en, variant: v, args: a) =>
             en + "::" + v + arg_pat_list(a)
         case Pattern.Rest(name: rn) =>
@@ -426,203 +432,62 @@ def arg_pat_list(ps: List<Pattern>) -> str =
     else:
         "(" + pat_list(ps) + ")"
 
-def pat_struct_fields(fs: List<(str, Pattern)>) -> str =
-    if fs.len() == 0:
-        ""
-    else:
-        let mut out = "{ "
-        for idx in 0..fs.len():
-            let f = fs[idx].clone()
-            out = out + (", " if idx > 0 else "") + f.0 + ": " + display_pattern(f.1)
-        out + " }"
+def gen_match_arms(arms: List<(Pattern, MaybeExpr, BlockIR)>) -> str =
+    let mut out = ""
+    for idx in 0..arms.len():
+        let arm = arms[idx].clone()
+        out = out + gen_match_arm(arm)
+    out
 
-// ── match_block：Stmt::Match → str ──
-def match_block(s: Expr, as_: List<(Pattern, MaybeExpr, BlockIR)>) -> str =
-    let mut out = "match " + display_expr(s) + " {"
-    for idx in 0..as_.len():
-        let arm = as_[idx].clone()
-        out = out + " " + display_pattern(arm.0) + guard_s(arm.1) + " => " + block_disp(arm.2)
-    out + " }"
+def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR)) -> str =
+    let pat = arm.0
+    let gd = arm.1
+    let blk = arm.2
+    let pat_s = gen_pattern(pat)
+    let gd_s = match gd:
+        case MaybeExpr.YesExpr(v: vv) => " if " + gen_expr(vv)
+        case MaybeExpr.NoExpr => ""
+    let blk_s = gen_block(blk)
+    "    " + pat_s + gd_s + " => " + blk_s + ",\n"
 
-def stmt_block(ss: List<Stmt>) -> str =
-    if ss.len() == 0:
-        "{ }"
-    else:
-        let mut out = "{\n"
-        for idx in 0..ss.len():
-            out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
-        out + "}"
+// D2 缺口补齐：Pattern codegen（复用 display_pattern 的输出格式）
+def gen_pattern(p: Pattern) -> str =
+    match p:
+        case Pattern.Wildcard => "_"
+        case Pattern.Ident(name: n) => n
+        case Pattern.RefMutIdent(name: n) => "ref mut " + n
+        case Pattern.LitInt(v: n) => n.to_string() + "_i64"
+        case Pattern.LitStr(s: s) => "\"" + esc_rust(s) + "\""
+        case Pattern.LitBool(b: b) => b.to_string()
+        case Pattern.LitF64(v: n) => n.to_string() + "_f64"
+        case Pattern.Tuple(elems: es) => "(" + pat_list(es) + ")"
+        case Pattern.List(elems: es) => "[" + pat_list(es) + "]"
+        case Pattern.Struct(name: n, fields: fs) =>
+            let mut fields_s = " { "
+            for idx in 0..fs.len():
+                if idx > 0:
+                    fields_s = fields_s + ", "
+                let f = fs[idx].clone()
+                fields_s = fields_s + f.0 + ": " + gen_pattern(f.1)
+            fields_s + " }"
+        case Pattern.Enum(enum_name: en, variant: v, args: a) => en + "::" + v + arg_pat_list(a)
+        case Pattern.Rest(name: rn) =>
+            match rn:
+                case MaybeStr.YesStr(value: n2) => ".." + n2
+                case MaybeStr.NoStr => ".."
+        case Pattern.Range(start: st, end: en, inclusive: inc) =>
+            st.to_string() + "_i64.." + en.to_string() + "_i64"
 
-// Block Display（Rust 版带 [ty]）：{ [ty]\n  stmt\n} / { } [ty]
-// BlockIR 为单变体 enum，字段访问走 match 解构（LZ 不支持 enum 变体直接 .field）
-def block_disp(b: BlockIR) -> str =
+// D2 缺口补齐：BlockIR codegen
+def gen_block(b: BlockIR) -> str =
     match b:
         case BlockIR.Block(stmts: ss, ty: t) =>
             if ss.len() == 0:
-                "{ } [" + display_type(t) + "]"
+                "{}"
             else:
-                let mut out = "{ [" + display_type(t) + "]\n"
-                for idx in 0..ss.len():
-                    out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
-                out + "}"
+                "{\n" + gen_body(ss, false, "") + "}"
 
-// Expr::BlockExpr 的块显示（ty 用表达式自身类型）
-def block_with_ty(ss: List<Stmt>, t: IrType) -> str =
-    if ss.len() == 0:
-        "{ } [" + display_type(t) + "]"
-    else:
-        let mut out = "{ [" + display_type(t) + "]\n"
-        for idx in 0..ss.len():
-            out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
-        out + "}"
-
-def opt_debug(o: MaybeStr) -> str =
-    match o:
-        case MaybeStr.YesStr(value: s) => "Some(\"" + s + "\")"
-        case MaybeStr.NoStr => "None"
-
-// FnDef body：每行 2 空格缩进（对齐 display.rs Item::FnDef）
-def stmt_lines(ss: List<Stmt>) -> str =
-    let mut out = ""
-    for idx in 0..ss.len():
-        out = out + "  " + display_stmt(ss[idx].clone()) + "\n"
-    out
-
-// ── display_item：Item → str ──
-def display_item(it: Item) -> str =
-    match it:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) =>
-            "fn " + n + generic_sig(gs) + param_sig(ps) + " -> " + display_type(r) + ":\n" + stmt_lines(b)
-        case Item.Const(name: n, ty: t, value: v) =>
-            "const " + n + ": " + display_type(t) + " = " + display_expr(v)
-        case Item.StructDef(name: n, generics: gs, fields: fs) =>
-            "struct " + n + generic_sig(gs) + " {\n" + field_lines(fs) + "}"
-        case Item.EnumDef(name: n, generics: gs, variants: vs) =>
-            "enum " + n + generic_sig(gs) + " {\n" + variant_lines(vs) + "}"
-        case Item.TraitDef(name: n, supertraits: ss, methods: ms) =>
-            "trait " + n + super_join(ss) + " {\n" + method_lines(ms) + "}"
-        case Item.DuckDef(name: n, method_count: c) =>
-            "duck " + n + " { " + c.to_string() + " methods }"
-        case Item.UseStmt(path: p, alias: a, items: xs, is_from: f) =>
-            (("from " + dot_join(p) + " import " + str_join(xs)) if f else ("import " + dot_join(p)))
-        case Item.TypeAlias(name: n, ty: t) =>
-            "type " + n + " = " + display_type(t)
-        case Item.Impl(trait_: tr, for_type: fty, method_names: ms) =>
-            let mut out = "impl " + impl_head(tr) + display_type(fty) + " {\n"
-            for idx in 0..ms.len():
-                out = out + "  fn " + ms[idx].clone() + " ...\n"
-            out + "}"
-        case Item.CheckerBlock(name: n, ps_name: p) =>
-            "checker block '" + n + "[ps:" + opt_debug(p) + "]"
-        case Item.Test(name: n, body: b) =>
-            "test " + n + " " + stmt_block(b)
-
-def generic_sig(gs: List<str>) -> str =
-    if gs.len() == 0:
-        ""
-    else:
-        "<" + str_join(gs) + ">"
-
-def variant_lines(vs: List<(str, List<IrType>)>) -> str =
-    let mut out = ""
-    for idx in 0..vs.len():
-        let v = vs[idx].clone()
-        out = out + "  " + v.0 + variant_args(v.1) + "\n"
-    out
-
-def field_lines(fs: List<(str, IrType)>) -> str =
-    let mut out = ""
-    for idx in 0..fs.len():
-        let f = fs[idx].clone()
-        out = out + "  " + f.0 + ": " + display_type(f.1) + "\n"
-    out
-
-def variant_args(ts: List<IrType>) -> str =
-    if ts.len() == 0:
-        ""
-    else:
-        "(" + type_list(ts) + ")"
-
-def super_join(ss: List<IrType>) -> str =
-    if ss.len() == 0:
-        ""
-    else:
-        let mut out = " : " + display_type(ss[0].clone())
-        for idx in 1..ss.len():
-            out = out + " + " + display_type(ss[idx].clone())
-        out
-
-def method_lines(ms: List<(str, List<IrType>, IrType)>) -> str =
-    let mut out = ""
-    for idx in 0..ms.len():
-        let m = ms[idx].clone()
-        out = out + "  fn " + m.0 + "(" + type_list(m.1) + ") -> " + display_type(m.2) + "\n"
-    out
-
-def param_sig(ps: List<(str, IrType, bool, bool, bool)>) -> str =
-    if ps.len() == 0:
-        "()"
-    else:
-        "(" + param_list(ps) + ")"
-
-def param_list(ps: List<(str, IrType, bool, bool, bool)>) -> str =
-    if ps.len() == 0:
-        ""
-    else:
-        let p0 = ps[0].clone()
-        param_str(p0) + (", " + param_list(tail_p(ps)) if ps.len() > 1 else "")
-
-def param_str(p: (str, IrType, bool, bool, bool)) -> str =
-    // 对齐 display.rs Item::FnDef：mut → owned → ref 前缀顺序
-    ("mut " if p.3 else "") + ("owned " if p.4 else "") + ("ref " if p.2 else "") + p.0 + ": " + display_type(p.1)
-
-def tail_p(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool, bool, bool)> =
-    let mut out: List<(str, IrType, bool, bool, bool)> = []
-    for idx in 1..ps.len():
-        out.push(ps[idx].clone())
-    out
-
-def impl_head(tr: MaybeIrType) -> str =
-    match tr:
-        case MaybeIrType.YesTy(value: t) => display_type(t) + " for "
-        case MaybeIrType.NoTy => ""
-
-def dot_join(xs: List<str>) -> str =
-    if xs.len() == 0:
-        ""
-    else:
-        let mut out = xs[0].clone()
-        for idx in 1..xs.len():
-            out = out + "." + xs[idx].clone()
-        out
-
-// ── display_module：IrModule → str ──
-def display_module(m: IrModule) -> str =
-    let mut out = ";; LZIR v" + m.version.to_string() + " — module '" + m.name + "'\n"
-    out = out + ";; " + m.items.len().to_string() + " items\n"
-    if m.prelude.len() > 0:
-        out = out + ";; prelude: " + str_join(m.prelude) + "\n"
-    out = out + "\n"
-    for idx in 0..m.items.len():
-        out = out + display_item(m.items[idx].clone()) + "\n\n"
-    out
-
-def str_join(xs: List<str>) -> str =
-    if xs.len() == 0:
-        ""
-    else:
-        let mut out = xs[0].clone()
-        for idx in 1..xs.len():
-            out = out + ", " + xs[idx].clone()
-        out
-
-// ═══════════════════════════════════════════════════════════════
-// codegen 模块（自举路线 B D1）：IR → Rust 源码
-// 对齐 src/ir/codegen/mod.rs 的输出格式
-// ═══════════════════════════════════════════════════════════════
-
-// ── Rust 类型映射 ──
-
+// ── IrType → Rust 类型 ──
 def rust_type(t: IrType) -> str =
     match t:
         case IrType.Int => "i64"
@@ -631,68 +496,21 @@ def rust_type(t: IrType) -> str =
         case IrType.Bool => "bool"
         case IrType.Unit => "()"
         case IrType.Never => "!"
-        case IrType.Any => "i64"
+        case IrType.Any => "Box<dyn Any>"
         case IrType.Self_ => "Self"
-        case IrType.Generic(name: n) => n
-        case IrType.Named(path: p, args: a) => named_rust_type(p, a)
+        case IrType.Generic(name: g) => g
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + type_rust_list(a) + ">" if a.len() > 0 else "")
         case IrType.Opt(inner: x) => "Option<" + rust_type(x) + ">"
         case IrType.Res(ok: o, err: e) => "Result<" + rust_type(o) + ", " + rust_type(e) + ">"
-        case IrType.Tuple(elems: es) => "(" + type_rust_list(es) + ")"
-        case IrType.FnType(params: ps, ret: r) => "impl Fn(" + type_rust_list(ps) + ") -> " + rust_type(r)
+        case IrType.Tuple(elems: es) =>
+            "(" + type_rust_list(es) + ")"
+        case IrType.FnType(params: ps, ret: r) =>
+            "fn(" + type_rust_list(ps) + ") -> " + rust_type(r)
         case IrType.Ref(inner: x) => "&" + rust_type(x)
         case IrType.MutRef(inner: x) => "&mut " + rust_type(x)
-        case IrType.Duck(fields: fs) => "()"
-
-def named_rust_type(p: str, a: List<IrType>) -> str =
-    let m = named_map(p)
-    if a.len() > 0:
-        m + "<" + type_rust_list(a) + ">"
-    else:
-        named_default(m)
-
-def named_map(p: str) -> str =
-    if p == "int" or p == "float" or p == "f64" or p == "str" or p == "bool" or p == "List" or p == "Dict" or p == "Set" or p == "Iter" or p == "Future" or p == "Tokens":
-        rust_prim_name(p)
-    else:
-        p  // 用户自定义类型、点号路径等
-
-def rust_prim_name(p: str) -> str =
-    if p == "int":
-        "i64"
-    elif p == "float" or p == "f64":
-        "f64"
-    elif p == "str":
-        "String"
-    elif p == "bool":
-        "bool"
-    elif p == "List":
-        "Vec"
-    elif p == "Dict":
-        "HashMap"
-    elif p == "Set":
-        "HashSet"
-    elif p == "Iter":
-        "Vec"
-    elif p == "Future":
-        "std::future::Future<Output = i64>"
-    elif p == "Tokens":
-        "String"
-    else:
-        p
-
-def named_default(m: str) -> str =
-    if m == "Vec" or m == "List":
-        "Vec<i64>"
-    elif m == "HashMap" or m == "Dict":
-        "HashMap<i64, i64>"
-    elif m == "HashSet" or m == "Set":
-        "HashSet<i64>"
-    elif m == "Option":
-        "Option<i64>"
-    elif m == "Result":
-        "Result<i64, i64>"
-    else:
-        m
+        case IrType.Duck(fields: fs) =>
+            "Box<dyn Any>"
 
 def type_rust_list(ts: List<IrType>) -> str =
     if ts.len() == 0:
@@ -700,63 +518,27 @@ def type_rust_list(ts: List<IrType>) -> str =
     else:
         let head = rust_type(ts[0].clone())
         if ts.len() > 1:
-            head + ", " + type_rust_list(tr_tail(ts))
+            head + ", " + type_rust_list(tail_t(ts))
         else:
             head
 
-def tr_tail(ts: List<IrType>) -> List<IrType> =
-    let mut out: List<IrType> = []
-    for idx in 1..ts.len():
-        out.push(ts[idx].clone())
-    out
-
-// ── HashMap 判定（base 表达式类型为 Dict/HashMap 时 IndexGet/IndexSet 走 get/insert 形态）──
-def base_is_dict(b: Expr) -> bool =
-    match b:
-        case Expr.Var(name: n, ty: t) => is_dict_ty(t)
-        case Expr.FieldAccess(base: bb, field: f, ty: t) => is_dict_ty(t)
-        case _ => false
-
-def base_is_set(b: Expr) -> bool =
-    match b:
-        case Expr.Var(name: n, ty: t) => is_set_ty(t)
-        case Expr.FieldAccess(base: bb, field: f, ty: t) => is_set_ty(t)
-        case _ => false
-
-def is_set_ty(t: IrType) -> bool =
-    match t:
-        case IrType.Named(path: p, args: a) => p == "Set" || p == "HashSet"
-        case _ => false
-
-// Set contains 的字符串字面量实参：剥离 .to_string()（原生 HashSet::contains 参数 &Q）
-def strip_ts_args(es: List<Expr>) -> str =
-    if es.len() == 0:
+def generic_sig(gs: List<str>) -> str =
+    if gs.len() == 0:
         ""
     else:
-        let head = strip_ts(es[0].clone())
-        if es.len() > 1:
-            head + ", " + strip_ts_args(st_tail(es))
+        "<" + str_join(gs) + ">"
+
+def str_join(xs: List<str>) -> str =
+    if xs.len() == 0:
+        ""
+    else:
+        let head = xs[0].clone()
+        if xs.len() > 1:
+            head + ", " + str_join(aj_tail(xs))
         else:
             head
 
-def strip_ts(e: Expr) -> str =
-    match e:
-        case Expr.LitStr(s: sv, ty: tv) => "\"" + esc_rust(sv) + "\""
-        case _ => "&" + gen_expr(e)
-
-def st_tail(es: List<Expr>) -> List<Expr> =
-    let mut out: List<Expr> = []
-    for idx in 1..es.len():
-        out.push(es[idx].clone())
-    out
-
-def is_dict_ty(t: IrType) -> bool =
-    match t:
-        case IrType.Named(path: p, args: a) => p == "Dict" || p == "HashMap"
-        case _ => false
-
-// ── 表达式生成 ──
-
+// ── Expr → Rust 表达式（无 [ty] 前缀）──
 def gen_expr(e: Expr) -> str =
     match e:
         case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64"
@@ -767,27 +549,13 @@ def gen_expr(e: Expr) -> str =
         case Expr.LitUnit(ty: t) => "()"
         case Expr.LitNone(ty: t) => "None"
         case Expr.Var(name: n, ty: t) => n
+        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a)
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r) + "." + m + "(" + expr_cs_list(a) + ")"
+        case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b) + "." + f
+        case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b) + "[" + gen_expr(k) + "]"
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b) + "[" + gen_expr(k) + "] = " + gen_expr(v)
         case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) => gen_expr(l) + " " + o + " " + gen_expr(r)
         case Expr.UnOp(op: o, operand: p, ty: t) => o + gen_expr(p)
-        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a)
-        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
-            if m == "length":
-                "(" + gen_expr(r) + ".len() as i64)"
-            elif m == "contains" && base_is_set(r):
-                gen_expr(r) + ".contains(" + strip_ts_args(a) + ")"
-            else:
-                gen_expr(r) + "." + m + "(" + expr_cs_list(a) + ")"
-        case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b) + "." + f
-        case Expr.IndexGet(base: b, key: k, ty: t) =>
-            if base_is_dict(b):
-                "(" + gen_expr(b) + ").get(&" + gen_expr(k) + ").cloned().unwrap()"
-            else:
-                gen_expr(b) + "[((" + gen_expr(k) + ") as usize)]"
-        case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
-            if base_is_dict(b):
-                gen_expr(b) + ".insert(" + gen_expr(k) + ", " + gen_expr(v) + ");"
-            else:
-                gen_expr(b) + "[((" + gen_expr(k) + ") as usize)] = " + gen_expr(v) + ";"
         case Expr.StructCtor(name: n, fields: fs, ty: t) =>
             if n == "Range":
                 gen_range_ctor(fs)
@@ -795,16 +563,87 @@ def gen_expr(e: Expr) -> str =
                 gen_dict_ctor(fs)
             else:
                 n + " { " + ctor_fields(fs) + " }"
-        case Expr.ListLit(items: xs, ty: t) =>
-            if xs.len() == 0:
-                "Vec::new()"
-            else:
-                "vec![" + expr_cs_list(xs) + "]"
-        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) =>
-            "if " + gen_expr(c) + " { " + gen_expr(th) + " } else { " + gen_expr(el) + " }"
-        case Expr.TupleLit(elems: es, ty: t) =>
-            "(" + expr_cs_list(es) + ")"
-        case _ => "/* TODO " + display_expr(e) + " */"
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) => en + "::" + v + "(" + expr_cs_list(a) + ")"
+        case Expr.Cast(inner: i, target: tg, ty: t) => "(" + gen_expr(i) + " as " + rust_type(tg) + ")"
+        case Expr.MagicCall(magic: m, args: a, ty: t) => m + "(" + expr_cs_list(a) + ")"
+        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if " + gen_expr(c) + " { " + gen_expr(th) + " } else { " + gen_expr(el) + " }"
+        case Expr.Lambda(params: ps, body: b, ty: t) => "move |" + str_join(ps) + "| " + gen_expr(b)
+        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r) + "." + gen_expr(c) + "(" + expr_cs_list(a) + ")"
+        case Expr.TupleLit(elems: es, ty: t) => "(" + expr_cs_list(es) + ")"
+        case Expr.ListLit(items: xs, ty: t) => "[" + expr_cs_list(xs) + "]"
+        case Expr.BlockExpr(stmts: ss, ty: t) => "{\n" + gen_body(ss, false, "") + "}"
+        case Expr.GenExpr(yield_of: y, ty: t) => "gen " + gen_expr(y)
+        case Expr.Paren(inner: i, ty: t) => "(" + gen_expr(i) + ")"
+        case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64.." + gen_expr(en)
+        case Expr.Dict(pairs: ps, ty: t) => "HashMap::new()"
+        case Expr.AssignExpr(target: tg, value: v, ty: t) => gen_expr(tg) + " = " + gen_expr(v)
+        case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) => gen_expr(s)
+        case _ => "unimplemented!"
+
+// ── display 辅助函数 ──
+def display_item(i: Item) -> str =
+    match i:
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) => "fn " + n
+        case Item.Const(name: n, ty: t, value: v) => "const " + n
+        case Item.StructDef(name: n, generics: gs, fields: fs) => "struct " + n
+        case Item.EnumDef(name: n, generics: gs, variants: vs) => "enum " + n
+        case Item.TraitDef(name: n, supertraits: sts, methods: ms) => "trait " + n
+        case Item.DuckDef(name: n, method_count: mc) => "duck " + n
+        case Item.UseStmt(path: pth, alias: al, items: its, is_from: fr) => "use " + str_join(pth)
+        case Item.TypeAlias(name: n, ty: t) => "type " + n
+        case Item.Impl(trait_: tr, for_type: ft, method_names: mns) => "impl " + rust_type(ft)
+        case Item.CheckerBlock(name: n, ps_name: p) => "checker " + n
+        case Item.Test(name: n, body: b) => "test " + n
+        case _ => "item"
+
+def opt_debug(p: MaybeStr) -> str =
+    match p:
+        case MaybeStr.YesStr(value: v) => v
+        case MaybeStr.NoStr => ""
+
+def block_disp(b: BlockIR) -> str =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            "{\n" + block_with_ty(ss, t) + "}"
+
+def stmt_block(ss: List<Stmt>) -> str =
+    if ss.len() == 0:
+        "{}"
+    else:
+        let mut out = "{\n"
+        for idx in 0..ss.len():
+            out = out + display_stmt(ss[idx].clone()) + "\n"
+        out + "}"
+
+def match_block(s: Expr, arms: List<(Pattern, MaybeExpr, BlockIR)>) -> str =
+    let mut out = "match " + display_expr(s) + " {\n"
+    for idx in 0..arms.len():
+        let arm = arms[idx].clone()
+        let pat_s = display_pattern(arm.0)
+        let gd_s = match arm.1:
+            case MaybeExpr.YesExpr(v: vv) => " if " + display_expr(vv)
+            case MaybeExpr.NoExpr => ""
+        let blk_s = block_disp(arm.2)
+        out = out + "    " + pat_s + gd_s + " => " + blk_s + ",\n"
+    out + "}"
+
+def block_with_ty(ss: List<Stmt>, ty: IrType) -> str =
+    if ss.len() == 0:
+        ""
+    else:
+        let mut out = ""
+        for idx in 0..ss.len():
+            out = out + display_stmt(ss[idx].clone()) + "\n"
+        out
+
+// ── 其他辅助函数 ──
+def base_is_dict(b: Expr) -> bool =
+    match b:
+        case Expr.Var(name: n, ty: t) =>
+            match t:
+                case IrType.Named(path: p, args: a) => p == "Dict" || p == "HashMap"
+                case _ => false
+        case _ => false
 
 // Range 构造：fields 可能含 start/end/inclusive（IR 中 `0..10` 被 builder 转为
 // StructCtor(name="Range")，原生 codegen 渲染 `0i64..10i64` / `0i64..=9i64`）
@@ -888,10 +727,10 @@ def ctor_fields(fs: List<(str, Expr)>) -> str =
 
 // ── 语句生成 ──
 
-def gen_stmt(s: Stmt, is_tail: bool, is_main: bool) -> str =
+def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: str) -> str =
     match s:
         case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
-            gen_let(n, t, v, m, r)
+            gen_let(n, t, v, m, r, auto_mut)
         case Stmt.Assign(target: tg, value: v) =>
             match tg:
                 case Expr.IndexGet(base: b, key: k, ty: t) =>
@@ -934,8 +773,8 @@ def block_is_pass_only(b: BlockIR) -> bool =
             else:
                 false
 
-def gen_let(n: str, t: IrType, v: Expr, m: bool, r: bool) -> str =
-    let mut_kw = "mut " if m else ""
+def gen_let(n: str, t: IrType, v: Expr, m: bool, r: bool, auto_mut: str) -> str =
+    let mut_kw = "mut " if (m || str_contains(auto_mut, n)) else ""
     let ref_kw = "ref " if r else ""
     let ty_s = rust_type(t)
     // 空容器强制类型标注（对齐原生 force_ty：空 ListLit / 空 Dict 构造 且 ty 为 Dict/Set）
@@ -1185,16 +1024,16 @@ def gen_type_alias(name: str, ty: IrType) -> str =
 
 // D2 缺口补齐：Test 生成
 def gen_test_def(name: str, body: List<Stmt>) -> str =
-    "#[test]\nfn " + name + "() {\n" + gen_body(body, false) + "}"
+    "#[test]\nfn " + name + "() {\n" + gen_body(body, false, auto_mut_names(body)) + "}"
 
 def gen_item(i: Item) -> str =
     match i:
         case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) =>
             let is_main = (n == "main")
             let ret_s = "" if (is_main && r_eq_unit(r)) else (" -> " + rust_type(r))
-            "pub fn " + n + generic_sig(gs) + "(" + fn_param_list(ps) + ")" + ret_s + " {\n" + gen_body(b, is_main) + "}"
+            "pub fn " + n + generic_sig(gs) + "(" + fn_param_list(ps) + ")" + ret_s + " {\n" + gen_body(b, is_main, auto_mut_names(b)) + "}"
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
-            "#[derive(Debug, Clone)]\npub struct " + n + generic_sig(gs) + " {\n" + gen_struct_fields(fs) + "}"
+            "#[derive(Debug, Clone, PartialEq)]\npub struct " + n + generic_sig(gs) + " {\n" + gen_struct_fields(fs) + "}"
         case Item.EnumDef(name: n, generics: gs, variants: vs) =>
             "#[derive(Debug, Clone, PartialEq)]\npub enum " + n + generic_sig(gs) + " {\n" + gen_enum_variants(vs) + "}"
         case Item.Const(name: n, ty: t, value: v) =>
@@ -1232,7 +1071,7 @@ def pl_tail(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, boo
         out.push(ps[idx].clone())
     out
 
-def gen_body(ss: List<Stmt>, is_main: bool) -> str =
+def gen_body(ss: List<Stmt>, is_main: bool, auto_mut: str) -> str =
     let n = ss.len()
     if n == 0:
         // 空函数体（抽象声明）：对齐原生 loop { unimplemented!() }
@@ -1241,8 +1080,136 @@ def gen_body(ss: List<Stmt>, is_main: bool) -> str =
         let mut out = ""
         for idx in 0..n:
             let is_tail = (idx == n - 1)
-            out = out + "    " + gen_stmt(ss[idx].clone(), is_tail, is_main) + "\n"
+            let stmt_type = stmt_type_label(ss[idx].clone())
+            out = out + "    // STMT:" + stmt_type + "\n    " + gen_stmt(ss[idx].clone(), is_tail, is_main, auto_mut) + "\n"
         out
+
+// STMT 类型标签（对齐原生 codegen 的 // STMT:{Let|Expr|Try|Block|Defer|If|For|Other}）
+def stmt_type_label(s: Stmt) -> str =
+    match s:
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) => "Let"
+        case Stmt.ExprStmt(expr: e) => "Expr"
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) => "Try"
+        case Stmt.Block(stmts: b) => "Block"
+        case Stmt.Defer(body: b) => "Defer"
+        case Stmt.If(cond: c, then: t, els: e) => "If"
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) => "For"
+        case _ => "Other"
+
+// 对齐原生 codegen 的 auto_mut_locals：扫描函数体，找出需要标为 mut 的变量
+// （add/push/append 等集合可变函数的首参、方法调用接收者、赋值目标）
+// 返回逗号分隔的变量名字符串
+def auto_mut_names(ss: List<Stmt>) -> str =
+    let mut out = ""
+    for idx in 0..ss.len():
+        out = scan_stmt_auto_mut(ss[idx].clone(), out)
+    out
+
+def scan_stmt_auto_mut(s: Stmt, out: str) -> str =
+    let mut acc = out.clone()
+    match s:
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+            scan_expr_auto_mut(v, out)
+        case Stmt.Assign(target: tg, value: v) =>
+            acc = add_var_auto_mut(tg, acc)
+            acc = scan_expr_auto_mut(tg, acc)
+            acc = scan_expr_auto_mut(v, acc)
+            acc
+        case Stmt.ExprStmt(expr: e) =>
+            scan_expr_auto_mut(e, out)
+        case Stmt.Return(value: v) =>
+            match v:
+                case MaybeExpr.YesExpr(value: inner) => scan_expr_auto_mut(inner, out)
+                case MaybeExpr.NoExpr => out
+        case Stmt.If(cond: c, then: t, els: e) =>
+            acc = scan_expr_auto_mut(c, acc)
+            acc = scan_block_stmts_auto_mut(t, acc)
+            acc = scan_block_maybe_auto_mut(e, acc)
+            acc
+        case _ => out
+
+def scan_block_stmts_auto_mut(b: BlockIR, out: str) -> str =
+    let mut acc = out.clone()
+    match b:
+        case BlockIR.Block(stmts: bss, ty: bt) =>
+            for idx in 0..bss.len():
+                acc = scan_stmt_auto_mut(bss[idx].clone(), acc)
+            acc
+
+def scan_block_maybe_auto_mut(mb: MaybeBlock, out: str) -> str =
+    let mut acc = out.clone()
+    match mb:
+        case MaybeBlock.YesBlock(value: es) =>
+            scan_block_stmts_auto_mut(es, acc)
+        case MaybeBlock.NoBlock => out
+
+// 如果 expr 是 Var，将其 name 追加到 out（逗号分隔）
+def add_var_auto_mut(e: Expr, out: str) -> str =
+    match e:
+        case Expr.Var(name: n, ty: t) =>
+            if str_contains(out, n):
+                out.clone()
+            else:
+                let sep = "," if out.len() > 0 else ""
+                out + sep + n
+        case _ => out.clone()
+
+def str_contains(s: str, sub: str) -> bool =
+    let len = s.len()
+    let sub_len = sub.len()
+    if sub_len == 0:
+        false
+    else:
+        let mut i = 0
+        let mut found = false
+        while i + sub_len <= len:
+            if s[i..(i + sub_len)] == sub:
+                found = true
+            i = i + 1
+        found
+
+def scan_expr_auto_mut(e: Expr, out: str) -> str =
+    let mut acc = out.clone()
+    match e:
+        case Expr.Call(callee: c, args: a, ty: t) =>
+            acc = scan_expr_auto_mut(c, acc)
+            for idx in 0..a.len():
+                acc = scan_expr_auto_mut(a[idx].clone(), acc)
+            if callee_is_mut_fn(c) && a.len() > 0:
+                acc = add_var_auto_mut(a[0].clone(), acc)
+            acc
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
+            acc = add_var_auto_mut(r, acc)
+            acc = scan_expr_auto_mut(r, acc)
+            for idx in 0..a.len():
+                acc = scan_expr_auto_mut(a[idx].clone(), acc)
+            acc
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
+            acc = add_var_auto_mut(b, acc)
+            acc = scan_expr_auto_mut(b, acc)
+            acc = scan_expr_auto_mut(k, acc)
+            acc = scan_expr_auto_mut(v, acc)
+            acc
+        case Expr.AssignExpr(target: tg, value: v, ty: t) =>
+            acc = add_var_auto_mut(tg, acc)
+            acc = scan_expr_auto_mut(tg, acc)
+            acc = scan_expr_auto_mut(v, acc)
+            acc
+        case Expr.FieldAccess(base: b, field: f, ty: t) =>
+            scan_expr_auto_mut(b, out)
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            acc = scan_expr_auto_mut(b, acc)
+            scan_expr_auto_mut(k, acc)
+        case _ => out
+
+def callee_is_mut_fn(c: Expr) -> bool =
+    match c:
+        case Expr.Var(name: nn, ty: tt) =>
+            if nn == "add" || nn == "push" || nn == "append" || nn == "pop" || nn == "extend" || nn == "insert" || nn == "remove" || nn == "delete":
+                true
+            else:
+                false
+        case _ => false
 
 def gen_struct_fields(fs: List<(str, IrType)>) -> str =
     let mut out = ""
