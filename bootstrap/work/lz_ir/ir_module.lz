@@ -1,0 +1,459 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 2：用 LZ 实现 LZIR 模块 display（对齐 src/ir/display.rs）
+// 覆盖：IrType + Expr/Stmt/Item 核心子集 + IrModule 顶层输出
+// ═══════════════════════════════════════════════════════════════
+
+// ── IrType（16 变体，复用试点 1）──
+enum IrType:
+    Int
+    F64
+    Str
+    Bool
+    Unit
+    Never
+    Any
+    Self_
+    Named(path: str, args: List<IrType>)
+    Opt(inner: IrType)
+    Res(ok: IrType, err: IrType)
+    Tuple(elems: List<IrType>)
+    FnType(params: List<IrType>, ret: IrType)
+    Ref(inner: IrType)
+    MutRef(inner: IrType)
+    Generic(name: str)
+
+// ── Expr 核心子集（单 enum 带 ty 字段：纯 enum 自递归 codegen 已支持 Box，
+//    struct+enum 互递归会触发 E0072 infinite size）──
+enum Expr:
+    LitInt(v: int, ty: IrType)
+    LitF64(v: f64, ty: IrType)
+    LitStr(s: str, ty: IrType)
+    LitBool(b: bool, ty: IrType)
+    LitUnit(ty: IrType)
+    LitNone(ty: IrType)
+    Var(name: str, ty: IrType)
+    Call(callee: Expr, args: List<Expr>, ty: IrType)
+    MethodCall(receiver: Expr, method: str, args: List<Expr>, ty: IrType)
+    FieldAccess(base: Expr, field: str, ty: IrType)
+    IndexGet(base: Expr, key: Expr, ty: IrType)
+    IndexSet(base: Expr, key: Expr, value: Expr, ty: IrType)
+    BinOp(op: str, lhs: Expr, rhs: Expr, ty: IrType)
+    UnOp(op: str, operand: Expr, ty: IrType)
+    StructCtor(name: str, fields: List<(str, Expr)>, ty: IrType)
+    EnumCtor(enum_name: str, variant: str, args: List<Expr>, ty: IrType)
+    Cast(inner: Expr, target: IrType, ty: IrType)
+    MagicCall(magic: str, args: List<Expr>, ty: IrType)
+    IfExpr(cond: Expr, then: Expr, els: Expr, ty: IrType)
+    Pipe(receiver: Expr, callee: Expr, args: List<Expr>, ty: IrType)
+    TupleLit(elems: List<Expr>, ty: IrType)
+    ListLit(items: List<Expr>, ty: IrType)
+    BlockExpr(stmts: List<Stmt>, ty: IrType)
+
+// ── Stmt 核心子集 ──
+enum Stmt:
+    Let(name: str, ty: IrType, value: Expr, is_mut: bool)
+    Assign(target: Expr, value: Expr)
+    Return(value: Option<Expr>)
+    ExprStmt(expr: Expr)
+    If(cond: Expr, then: List<Stmt>, els: Option<List<Stmt>>)
+    For(var: str, iter: Expr, body: List<Stmt>)
+    While(cond: Expr, body: List<Stmt>)
+    Block(stmts: List<Stmt>)
+    Match(scrutinee: Expr, arms: List<(Pattern, List<Stmt>)>)
+    Yield(value: Expr)
+
+// ── Pattern 核心子集 ──
+enum Pattern:
+    Wildcard
+    Ident(name: str)
+    LitInt(v: int)
+    Tuple(elems: List<Pattern>)
+    Enum(enum_name: str, variant: str, args: List<Pattern>)
+    Range(start: int, end: int, inclusive: bool)
+
+// ── Item 核心子集（含扩展：StructDef/EnumDef/TraitDef/DuckDef）──
+enum Item:
+    FnDef(name: str, params: List<(str, IrType)>, ret: IrType, body: List<Stmt>)
+    Const(name: str, ty: IrType, value: Expr)
+    StructDef(name: str, fields: List<(str, IrType)>)
+    EnumDef(name: str, variants: List<(str, List<IrType>)>)
+    TraitDef(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>)
+    DuckDef(name: str, method_count: int)
+
+// ── IrModule 顶层 ──
+struct IrModule =
+    name: str
+    items: List<Item>
+    prelude: List<str>
+    version: int
+
+// ── display_type：IrType → str（对齐 display.rs §IrType）──
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.F64 => "f64"
+        case IrType.Str => "str"
+        case IrType.Bool => "bool"
+        case IrType.Unit => "()"
+        case IrType.Never => "!"
+        case IrType.Any => "?"
+        case IrType.Self_ => "Self"
+        case IrType.Generic(name: g) => g
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + type_list(a) + ">" if a.len() > 0 else "")
+        case IrType.Opt(inner: x) => "Option<" + display_type(x) + ">"
+        case IrType.Res(ok: o, err: e) => "Result<" + display_type(o) + ", " + display_type(e) + ">"
+        case IrType.Tuple(elems: es) =>
+            "(" + type_list(es) + ")"
+        case IrType.FnType(params: ps, ret: r) =>
+            "fn(" + type_list(ps) + ") -> " + display_type(r)
+        case IrType.Ref(inner: x) => "&" + display_type(x)
+        case IrType.MutRef(inner: x) => "&mut " + display_type(x)
+
+def type_list(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        let head = display_type(ts[0])
+        if ts.len() > 1:
+            head + ", " + type_list(tail_t(ts))
+        else:
+            head
+
+def tail_t(ts: List<IrType>) -> List<IrType> =
+    let mut out: List<IrType> = []
+    for idx in 1..ts.len():
+        out = out + [ts[idx]]
+    out
+
+// ── display_expr：Expr → str（对齐 display.rs §Expr，带 [ty] 前缀）──
+def display_expr(e: Expr) -> str =
+    match e:
+        case Expr.LitInt(v: n, ty: t) => "[" + display_type(t) + "] " + n.to_string() + "_i64"
+        case Expr.LitF64(v: n, ty: t) => "[" + display_type(t) + "] " + n.to_string() + "_f64"
+        case Expr.LitStr(s: s, ty: t) => "[" + display_type(t) + "] \"" + s + "\""
+        case Expr.LitBool(b: b, ty: t) => "[" + display_type(t) + "] " + b.to_string()
+        case Expr.LitUnit(ty: t) => "[" + display_type(t) + "] ()"
+        case Expr.LitNone(ty: t) => "[" + display_type(t) + "] None"
+        case Expr.Var(name: n, ty: t) => "[" + display_type(t) + "] " + n
+        case Expr.Call(callee: c, args: a, ty: t) =>
+            "[" + display_type(t) + "] call " + display_expr(c) + arg_list(a)
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
+            "[" + display_type(t) + "] method " + display_expr(r) + "." + m + arg_list(a)
+        case Expr.FieldAccess(base: b, field: f, ty: t) =>
+            "[" + display_type(t) + "] field " + display_expr(b) + "." + f
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            "[" + display_type(t) + "] index " + display_expr(b) + "[" + display_expr(k) + "]"
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
+            "[" + display_type(t) + "] index_set " + display_expr(b) + "[" + display_expr(k) + "] = " + display_expr(v)
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
+            "[" + display_type(t) + "] binop " + display_expr(l) + " " + o + " " + display_expr(r)
+        case Expr.UnOp(op: o, operand: p, ty: t) =>
+            "[" + display_type(t) + "] unop " + o + " " + display_expr(p)
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            "[" + display_type(t) + "] new " + n + field_pairs(fs)
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
+            "[" + display_type(t) + "] " + en + "::" + v + arg_list(a)
+        case Expr.Cast(inner: i, target: tg, ty: t) =>
+            "[" + display_type(t) + "] cast " + display_expr(i) + " as " + display_type(tg)
+        case Expr.MagicCall(magic: m, args: a, ty: t) =>
+            "[" + display_type(t) + "] magic " + m + arg_list(a)
+        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) =>
+            "[" + display_type(t) + "] if " + display_expr(c) + " then " + display_expr(th) + " else " + display_expr(el)
+        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) =>
+            "[" + display_type(t) + "] pipe " + display_expr(r) + " |> " + display_expr(c) + arg_list(a)
+        case Expr.TupleLit(elems: es, ty: t) =>
+            "[" + display_type(t) + "] (" + expr_list(es) + ")"
+        case Expr.ListLit(items: xs, ty: t) =>
+            "[" + display_type(t) + "] [" + expr_list(xs) + "]"
+        case Expr.BlockExpr(stmts: ss, ty: t) =>
+            "[" + display_type(t) + "] block " + stmt_block(ss)
+
+def arg_list(as_: List<Expr>) -> str =
+    if as_.len() == 0:
+        ""
+    else:
+        "(" + expr_list(as_) + ")"
+
+def expr_list(es: List<Expr>) -> str =
+    if es.len() == 0:
+        ""
+    else:
+        let head = display_expr(es[0])
+        if es.len() > 1:
+            head + ", " + expr_list(tail_e(es))
+        else:
+            head
+
+def tail_e(es: List<Expr>) -> List<Expr> =
+    let mut out: List<Expr> = []
+    for idx in 1..es.len():
+        out = out + [es[idx]]
+    out
+
+def field_pairs(fs: List<(str, Expr)>) -> str =
+    if fs.len() == 0:
+        ""
+    else:
+        let f0 = fs[0].clone()
+        "{" + pair_str(f0) + "}"
+
+def pair_str(p: (str, Expr)) -> str =
+    p.0 + ": " + display_expr(p.1)
+
+// ── display_stmt：Stmt → str（对齐 display.rs §Stmt）──
+def display_stmt(s: Stmt) -> str =
+    match s:
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m) =>
+            ("let mut " if m else "let ") + n + ": " + display_type(t) + " = " + display_expr(v)
+        case Stmt.Assign(target: t, value: v) =>
+            display_expr(t) + " = " + display_expr(v)
+        case Stmt.Return(value: v) =>
+            match v:
+                case Option.Some(value: inner) => "return " + display_expr(inner)
+                case Option.None => "return"
+        case Stmt.ExprStmt(expr: e) => display_expr(e)
+        case Stmt.If(cond: c, then: t, els: e) =>
+            let base = "if " + display_expr(c) + " " + stmt_block(t)
+            match e:
+                case Option.Some(value: es) => base + ": " + stmt_block(es)
+                case Option.None => base
+        case Stmt.For(var: v, iter: it, body: b) =>
+            "for " + v + " in " + display_expr(it) + " " + stmt_block(b)
+        case Stmt.While(cond: c, body: b) =>
+            "while " + display_expr(c) + " " + stmt_block(b)
+        case Stmt.Block(stmts: b) =>
+            stmt_block(b)
+        case Stmt.Match(scrutinee: s, arms: as_) =>
+            match_block(s, as_)
+        case Stmt.Yield(value: v) =>
+            "yield " + display_expr(v)
+
+// ── display_pattern：Pattern → str（对齐 display.rs §Pattern）──
+def display_pattern(p: Pattern) -> str =
+    match p:
+        case Pattern.Wildcard => "_"
+        case Pattern.Ident(name: n) => n
+        case Pattern.LitInt(v: n) => n.to_string() + "_i64"
+        case Pattern.Tuple(elems: es) =>
+            "(" + pat_list(es) + ")"
+        case Pattern.Enum(enum_name: en, variant: v, args: a) =>
+            en + "::" + v + arg_pat_list(a)
+        case Pattern.Range(start: st, end: en, inclusive: inc) =>
+            st.to_string() + ("..=" if inc else "..") + en.to_string()
+
+def pat_list(ps: List<Pattern>) -> str =
+    if ps.len() == 0:
+        ""
+    else:
+        let head = display_pattern(ps[0])
+        if ps.len() > 1:
+            head + ", " + pat_list(tail_pat(ps))
+        else:
+            head
+
+def tail_pat(ps: List<Pattern>) -> List<Pattern> =
+    let mut out: List<Pattern> = []
+    for idx in 1..ps.len():
+        out = out + [ps[idx]]
+    out
+
+def arg_pat_list(ps: List<Pattern>) -> str =
+    if ps.len() == 0:
+        ""
+    else:
+        "(" + pat_list(ps) + ")"
+
+// ── match_block：Stmt::Match → str（对齐 display.rs §Match）──
+def match_block(s: Expr, as_: List<(Pattern, List<Stmt>)>) -> str =
+    let mut out = "match " + display_expr(s) + " {"
+    for idx in 0..as_.len():
+        let arm = as_[idx].clone()
+        out = out + " " + display_pattern(arm.0) + " => " + stmt_block(arm.1)
+    out + " }"
+
+def stmt_block(ss: List<Stmt>) -> str =
+    if ss.len() == 0:
+        "{ }"
+    else:
+        let mut out = "{\n"
+        for idx in 0..ss.len():
+            out = out + "  " + display_stmt(ss[idx]) + "\n"
+        out + "}"
+
+// FnDef body：每行 2 空格缩进（对齐 display.rs Item::FnDef，无外层花括号）
+def stmt_lines(ss: List<Stmt>) -> str =
+    let mut out = ""
+    for idx in 0..ss.len():
+        out = out + "  " + display_stmt(ss[idx]) + "\n"
+    out
+
+// ── display_item：Item → str（对齐 display.rs §Item）──
+def display_item(it: Item) -> str =
+    match it:
+        case Item.FnDef(name: n, params: ps, ret: r, body: b) =>
+            "fn " + n + param_sig(ps) + " -> " + display_type(r) + ":\n" + stmt_lines(b)
+        case Item.Const(name: n, ty: t, value: v) =>
+            "const " + n + ": " + display_type(t) + " = " + display_expr(v)
+        case Item.StructDef(name: n, fields: fs) =>
+            "struct " + n + " {\n" + field_lines(fs) + "}"
+        case Item.EnumDef(name: n, variants: vs) =>
+            "enum " + n + " {\n" + variant_lines(vs) + "}"
+        case Item.TraitDef(name: n, supertraits: ss, methods: ms) =>
+            "trait " + n + super_join(ss) + " {\n" + method_lines(ms) + "}"
+        case Item.DuckDef(name: n, method_count: c) =>
+            "duck " + n + " { " + c.to_string() + " methods }"
+
+def variant_lines(vs: List<(str, List<IrType>)>) -> str =
+    let mut out = ""
+    for idx in 0..vs.len():
+        let v = vs[idx].clone()
+        out = out + "  " + v.0 + variant_args(v.1) + "\n"
+    out
+
+def field_lines(fs: List<(str, IrType)>) -> str =
+    let mut out = ""
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        out = out + "  " + f.0 + ": " + display_type(f.1) + "\n"
+    out
+
+def variant_args(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        "(" + type_list(ts) + ")"
+
+def super_join(ss: List<IrType>) -> str =
+    if ss.len() == 0:
+        ""
+    else:
+        let mut out = " : " + display_type(ss[0])
+        for idx in 1..ss.len():
+            out = out + " + " + display_type(ss[idx])
+        out
+
+def method_lines(ms: List<(str, List<IrType>, IrType)>) -> str =
+    let mut out = ""
+    for idx in 0..ms.len():
+        let m = ms[idx].clone()
+        out = out + "  fn " + m.0 + "(" + type_list(m.1) + ") -> " + display_type(m.2) + "\n"
+    out
+
+def param_sig(ps: List<(str, IrType)>) -> str =
+    if ps.len() == 0:
+        "()"
+    else:
+        "(" + param_list(ps) + ")"
+
+def param_list(ps: List<(str, IrType)>) -> str =
+    if ps.len() == 0:
+        ""
+    else:
+        let p0 = ps[0].clone()
+        param_str(p0) + (", " + param_list(tail_p(ps)) if ps.len() > 1 else "")
+
+def param_str(p: (str, IrType)) -> str =
+    p.0 + ": " + display_type(p.1)
+
+def tail_p(ps: List<(str, IrType)>) -> List<(str, IrType)> =
+    let mut out: List<(str, IrType)> = []
+    for idx in 1..ps.len():
+        out = out + [ps[idx]]
+    out
+
+// ── display_module：IrModule → str（对齐 display.rs §IrModule）──
+def display_module(m: IrModule) -> str =
+    let mut out = ";; LZIR v" + m.version.to_string() + " — module '" + m.name + "'\n"
+    out = out + ";; " + m.items.len().to_string() + " items\n"
+    if m.prelude.len() > 0:
+        out = out + ";; prelude: " + str_join(m.prelude) + "\n"
+    out = out + "\n"
+    for idx in 0..m.items.len():
+        out = out + display_item(m.items[idx]) + "\n\n"
+    out
+
+def str_join(xs: List<str>) -> str =
+    if xs.len() == 0:
+        ""
+    else:
+        let mut out = xs[0].clone()
+        for idx in 1..xs.len():
+            out = out + ", " + xs[idx]
+        out
+
+// ── main：构造示例 IR 模块并输出（与 Rust --emit=ir 对比）──
+def main() =
+    // def add(x: int, y: int) -> int = x + y
+    let x_expr = Expr.Var(name: "x", ty: IrType.Int)
+    let y_expr = Expr.Var(name: "y", ty: IrType.Int)
+    let sum_expr = Expr.BinOp(op: "+", lhs: x_expr, rhs: y_expr, ty: IrType.Int)
+    let add_body: List<Stmt> = [
+        // LZ 函数尾表达式 → IR ExprStmt（对齐 Rust 版 `[int] binop`，非 return）
+        Stmt.ExprStmt(expr: sum_expr),
+    ]
+    let add_fn = Item.FnDef(
+        name: "add",
+        params: [("x", IrType.Int), ("y", IrType.Int)],
+        ret: IrType.Int,
+        body: add_body,
+    )
+    // const LIMIT: int = 100
+    let limit = Item.Const(
+        name: "LIMIT",
+        ty: IrType.Int,
+        value: Expr.LitInt(v: 100, ty: IrType.Int),
+    )
+    // def main() -> (): let xs = [1, 2]; print(xs[0])
+    let no_params: List<(str, IrType)> = []
+    let int1 = Expr.LitInt(v: 1, ty: IrType.Int)
+    let int2 = Expr.LitInt(v: 2, ty: IrType.Int)
+    let int0 = Expr.LitInt(v: 0, ty: IrType.Int)
+    let xs_ty = IrType.Named(path: "List", args: [IrType.Int])
+    let xs_lit = Expr.ListLit(items: [int1, int2], ty: xs_ty.clone())
+    let xs_var = Expr.Var(name: "xs", ty: xs_ty.clone())
+    let idx0 = Expr.IndexGet(base: xs_var, key: int0, ty: IrType.Int)
+    let print_var = Expr.Var(name: "print", ty: IrType.Any)
+    let print_call = Expr.Call(callee: print_var, args: [idx0], ty: IrType.Unit)
+    let main_body: List<Stmt> = [
+        Stmt.Let(
+            name: "xs",
+            ty: xs_ty.clone(),
+            value: xs_lit,
+            is_mut: false,
+        ),
+        Stmt.ExprStmt(expr: print_call),
+    ]
+    let main_fn = Item.FnDef(
+        name: "main",
+        params: no_params,
+        ret: IrType.Unit,
+        body: main_body,
+    )
+    // enum Color { Red, Rgb(int, int, int) }
+    let no_variant_args: List<IrType> = []
+    let no_type_args: List<IrType> = []
+    let color = Item.EnumDef(
+        name: "Color",
+        variants: [
+            ("Red", no_variant_args.clone()),
+            ("Rgb", [IrType.Int, IrType.Int, IrType.Int]),
+        ],
+    )
+    // trait Shape : Display { fn area(self) -> f64 }
+    let shape = Item.TraitDef(
+        name: "Shape",
+        supertraits: [IrType.Named(path: "Display", args: no_type_args.clone())],
+        methods: [
+            ("area", [IrType.Self_], IrType.F64),
+        ],
+    )
+    // duck HasArea { 1 methods }
+    let duck_item = Item.DuckDef(name: "HasArea", method_count: 1)
+    let m = IrModule(
+        name: "demo",
+        items: [add_fn, limit, main_fn, color, shape, duck_item],
+        prelude: ["Option", "Result"],
+        version: 1,
+    )
+    print(display_module(m))

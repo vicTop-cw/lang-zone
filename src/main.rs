@@ -18,6 +18,7 @@ use lang_zone::project::ProjectCompiler;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// 跨模块符号内联：单文件模式下将用户 import 模块的顶层项合并进主 AST，
 /// 使被导入符号进入 IR/codegen（修复 E0425 use/extern 作用域系列失败）。
@@ -178,6 +179,103 @@ fn replace_ext(path: &str, from: &str, to: &str) -> String {
         // fallback: just replace
         path.replace(from, to)
     }
+}
+
+// ── 自举路线 B：LZ 写的前端（src/frontend/*.lz）接入主流程 ──
+// --emit=lex-lz / --emit=parse-lz：用 LZ 实现的词法/语法前端处理输入文件，
+// 走与 --emit=ir-lz 相同的 lzc→rustc→run 递归管线，输出可与 Rust 版基线 diff。
+const LZ_LEXER_LIB: &str = include_str!("frontend/lz_lexer.lz");
+const LZ_PARSER_LIB: &str = include_str!("frontend/lz_parser.lz");
+
+/// 剥离 .lz 前端源里自带的 main（保留库代码），由 wrapper main 接管输入
+fn lz_frontend_lib_only(lib: &str) -> &str {
+    match lib.rfind("\ndef main() =") {
+        Some(idx) => &lib[..idx],
+        None => {
+            eprintln!("LZ frontend source missing `def main() =` marker");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// 转义待注入的 .lz 源码（保持单行字符串字面量，避免破坏缩进结构）
+fn escape_lz_wrapper(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+/// 组装 wrapper LZ 源码并递归编译运行（lexer 输出 token 流；parser 输出语句描述）
+fn run_lz_frontend(path: &str, source: &str, mode: &str) {
+    let (lib_only, body) = match mode {
+        "lex" => (
+            lz_frontend_lib_only(LZ_LEXER_LIB),
+            "    let toks = tokenize(src)\n    for idx in 0..toks.len():\n        print(display_token(toks[idx]))\n",
+        ),
+        "parse" => (
+            lz_frontend_lib_only(LZ_PARSER_LIB),
+            "    let toks = tokenize(src)\n    let r = parse_program(toks, 0)\n    let stmts = r.0\n    for idx in 0..stmts.len():\n        print(stmts[idx])\n",
+        ),
+        _ => unreachable!(),
+    };
+    let wrapper = format!(
+        "// 由 lzc --emit={}-lz 生成（自举路线 B：LZ 写的前端处理输入文件）\n{}\n\ndef main() =\n    let src = \"{}\"\n{}\n",
+        mode, lib_only, escape_lz_wrapper(source), body
+    );
+    let lz_path = replace_ext(path, ".lz", ".lzfront");
+    fs::write(&lz_path, &wrapper).unwrap_or_else(|e| {
+        eprintln!("Error writing {}: {}", lz_path, e);
+        std::process::exit(1);
+    });
+    eprintln!("Generated {} -> {} (LZ {} frontend)", path, lz_path, mode);
+
+    // 与 --emit=ir-lz 相同的递归管线：lang-zone → .rs → rustc → exe → stdout
+    let self_exe = std::env::current_exe().unwrap_or_default();
+    let build = Command::new(&self_exe)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone on generated LZ frontend");
+    if !build.status.success() {
+        eprintln!(
+            "LZ {} frontend 编译失败: {}",
+            mode,
+            String::from_utf8_lossy(&build.stderr)
+        );
+        std::process::exit(1);
+    }
+    let rs_path = replace_ext(&lz_path, ".lzfront", ".rs");
+    let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = replace_ext(&lz_path, ".lzfront", ".exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs_path)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on generated .rs");
+    if !rc.status.success() {
+        eprintln!(
+            "LZ {} frontend rustc 失败: {}",
+            mode,
+            String::from_utf8_lossy(&rc.stderr)
+        );
+        std::process::exit(1);
+    }
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    if !run.status.success() {
+        eprintln!(
+            "LZ {} frontend 运行失败: {}",
+            mode,
+            String::from_utf8_lossy(&run.stderr)
+        );
+        std::process::exit(1);
+    }
+    print!("{}", String::from_utf8_lossy(&run.stdout));
 }
 
 // Windows 主线程栈默认仅 1MB（链接器默认），深层递归下降（宏展开、嵌套缩进块
@@ -577,6 +675,148 @@ fn compile_main(args: Vec<String>) -> i32 {
             }
             Err(e) => {
                 eprintln!("IR emission error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // --emit=lex-lz / --emit=parse-lz: 自举路线 B —— 用 LZ 写的前端处理输入文件
+    if args.iter().any(|a| a == "--emit=lex-lz") {
+        run_lz_frontend(path, &source, "lex");
+        return 0;
+    }
+    if args.iter().any(|a| a == "--emit=parse-lz") {
+        run_lz_frontend(path, &source, "parse");
+        return 0;
+    }
+
+    // --emit=ir-lz: 自举路线 B —— 生成 LZ 构造代码（lz_ir_lib.lz 库 + main 构造），
+    // 经 lang-zone → rustc → 运行 输出 IR 文本（与 --emit=ir 逐字符一致）。
+    // 即「用 LZ 实现 IR display」：Rust 编译器只序列化 IR 数据为 LZ 调用，
+    // display 逻辑完全由 LZ 侧承担（bootstrap/work/lz_ir 试点落地）。
+    if args.iter().any(|a| a == "--emit=ir-lz") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                let lz_source =
+                    lang_zone::ir::lz_codegen::ir_module_to_lz_source(&ir_module);
+                let lz_path = replace_ext(path, ".lz", ".lzlz");
+                fs::write(&lz_path, &lz_source).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", lz_path, e);
+                    std::process::exit(1);
+                });
+                eprintln!("Generated {} -> {} (LZ IR codegen)", path, lz_path);
+                // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
+                let self_exe = std::env::current_exe().unwrap_or_default();
+                let build = Command::new(&self_exe)
+                    .arg(&lz_path)
+                    .output()
+                    .expect("run lang-zone on generated LZ");
+                if !build.status.success() {
+                    eprintln!(
+                        "LZ IR codegen 编译失败: {}",
+                        String::from_utf8_lossy(&build.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                let rs_path = replace_ext(&lz_path, ".lzlz", ".rs");
+                let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("target/debug/liblz_builtins.rlib");
+                let exe_path = replace_ext(&lz_path, ".lzlz", ".exe");
+                let rc = Command::new("rustc")
+                    .args(["--edition", "2021"])
+                    .arg(&rs_path)
+                    .arg("--extern")
+                    .arg(format!("lz_builtins={}", builtins.display()))
+                    .arg("-o")
+                    .arg(&exe_path)
+                    .output()
+                    .expect("run rustc on generated .rs");
+                if !rc.status.success() {
+                    eprintln!(
+                        "LZ IR codegen rustc 失败: {}",
+                        String::from_utf8_lossy(&rc.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                let run = Command::new(&exe_path)
+                    .output()
+                    .expect("run generated exe");
+                if !run.status.success() {
+                    eprintln!("LZ IR codegen 运行失败: {}", String::from_utf8_lossy(&run.stderr));
+                    std::process::exit(1);
+                }
+                print!("{}", String::from_utf8_lossy(&run.stdout));
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("IR emission error (ir-lz): {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // --emit=rs-lz: 自举路线 B —— 生成 LZ 版 Rust codegen 源码（lz_codegen_lib.lz 库 + main 构造），
+    // 经 lang-zone → rustc → 运行 输出 Rust 源码（与常规 codegen 逐字符一致）。
+    // 即「用 LZ 实现 Rust 代码生成」：Rust 编译器只序列化 IR 数据为 LZ 调用，
+    // codegen 逻辑完全由 LZ 侧承担。
+    if args.iter().any(|a| a == "--emit=rs-lz") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                let rs_lz_src = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source(&ir_module);
+                let lz_path = replace_ext(path, ".lz", ".lzrs");
+                fs::write(&lz_path, &rs_lz_src).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", lz_path, e);
+                    std::process::exit(1);
+                });
+                eprintln!("Generated {} -> {} (LZ Rust codegen)", path, lz_path);
+                // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
+                let self_exe = std::env::current_exe().unwrap_or_default();
+                let build = Command::new(&self_exe)
+                    .arg(&lz_path)
+                    .output()
+                    .expect("run lang-zone on generated LZ");
+                if !build.status.success() {
+                    eprintln!(
+                        "LZ Rust codegen 编译失败: {}",
+                        String::from_utf8_lossy(&build.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                let rs_path = replace_ext(&lz_path, ".lzrs", ".rs");
+                let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("target/debug/liblz_builtins.rlib");
+                let exe_path = replace_ext(&lz_path, ".lzrs", ".exe");
+                let rc = Command::new("rustc")
+                    .args(["--edition", "2021"])
+                    .arg(&rs_path)
+                    .arg("--extern")
+                    .arg(format!("lz_builtins={}", builtins.display()))
+                    .arg("-o")
+                    .arg(&exe_path)
+                    .output()
+                    .expect("run rustc on generated .rs");
+                if !rc.status.success() {
+                    eprintln!(
+                        "LZ Rust codegen rustc 失败: {}",
+                        String::from_utf8_lossy(&rc.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                let run = Command::new(&exe_path)
+                    .output()
+                    .expect("run generated exe");
+                if !run.status.success() {
+                    eprintln!(
+                        "LZ Rust codegen 运行失败: {}",
+                        String::from_utf8_lossy(&run.stderr)
+                    );
+                    std::process::exit(1);
+                }
+                print!("{}", String::from_utf8_lossy(&run.stdout));
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("RS-LZ emission error: {e}");
                 std::process::exit(1);
             }
         }
