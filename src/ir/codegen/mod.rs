@@ -30,11 +30,7 @@ pub struct CodeGen {
     /// 当前函数 raises 异常类型（BUG-CG-004 轮次12）：Some(E) 时函数返回
     /// `Result<ret_ty, E>`，try/catch 结果基分支据此决定是否按 Result 匹配。
     current_fn_raises: Option<IrType>,
-    /// 当前是否位于 try 块体内。try/catch 是异常语义：raises 函数（返回
-    /// `Result<T,E>`）在 try 块内绑定时应**解包**为 T，失败时由 unwrap 触发
-    /// panic、被外层 catch_unwind 捕获。否则 `let v = checked(21)` 会把
-    /// `Ok(42)` 当值绑定，print 出 `Ok(42)` 且 catch 永不触发。
-    in_try_block: bool,
+
     /// 当前函数签名返回类型（与 current_ret_ty 不同：后者在 if/match 等块内
     /// 可能被推断覆盖为 None，此字段保存函数级返回类型用于 ref 判断回退）
     current_fn_ret_ty: Option<IrType>,
@@ -382,7 +378,7 @@ fn cmp_walk_stmt(s: &Stmt, my_gen: &HashSet<String>, info: &mut CmpInfo) {
             }
         }
         Stmt::For {
-            var,
+            var: _,
             iter,
             guard,
             body,
@@ -413,7 +409,7 @@ fn cmp_walk_stmt(s: &Stmt, my_gen: &HashSet<String>, info: &mut CmpInfo) {
             }
         }
         Stmt::WhileLet {
-            pattern,
+            pattern: _,
             expr,
             guard,
             body,
@@ -452,7 +448,7 @@ fn cmp_walk_stmt(s: &Stmt, my_gen: &HashSet<String>, info: &mut CmpInfo) {
                 cmp_walk_stmt(s2, my_gen, info);
             }
         }
-        Stmt::BlockLabel { label, body } => cmp_walk_block(body, my_gen, info),
+        Stmt::BlockLabel { label: _, body } => cmp_walk_block(body, my_gen, info),
         Stmt::CheckerBlock { body, .. } => cmp_walk_block(body, my_gen, info),
         Stmt::Defer { body } => cmp_walk_block(body, my_gen, info),
         Stmt::TryCatch {
@@ -628,7 +624,7 @@ fn count_vars_expr(e: &Expr, count: &mut HashMap<String, usize>) {
         }
         ExprKind::MethodCall {
             receiver,
-            method,
+            method: _,
             args,
         } => {
             count_vars_expr(receiver, count);
@@ -667,8 +663,8 @@ fn count_vars_expr(e: &Expr, count: &mut HashMap<String, usize>) {
             }
         }
         ExprKind::EnumCtor {
-            enum_name,
-            variant,
+            enum_name: _,
+            variant: _,
             args,
         } => {
             for a in args {
@@ -749,7 +745,7 @@ fn count_vars_stmt(s: &Stmt, count: &mut HashMap<String, usize>) {
             }
         }
         Stmt::For {
-            var,
+            var: _,
             iter,
             guard,
             body,
@@ -780,7 +776,7 @@ fn count_vars_stmt(s: &Stmt, count: &mut HashMap<String, usize>) {
             }
         }
         Stmt::WhileLet {
-            pattern,
+            pattern: _,
             expr,
             guard,
             body,
@@ -896,9 +892,9 @@ impl CodeGen {
             loop_depth: 0,
             slice_clone_bindings: std::collections::HashSet::new(),
             in_iterator_impl: false,
-            in_try_block: false,
+
             in_ext_trait: false,
-            /// 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
+            // 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
             in_result_try: false,
             current_ext_trait: None,
             fn_param_info: HashMap::new(),
@@ -4672,11 +4668,11 @@ impl CodeGen {
         // `assert_eq!(result, Ok(100))` 需 Result<T, Rc<T>>: PartialEq（E0369）——
         // 委托 __eq__ 生成 impl，并携带 __eq__ 的 where 约束（T: Eq）。
         // 枚举已有 #[derive(PartialEq)]（codegen 自动），跳过避免 E0119 冲突
-        let enum_derives_partial_eq = matches!(&i.for_type, IrType::Named { path, .. }
+        let _enum_derives_partial_eq = matches!(&i.for_type, IrType::Named { path, .. }
             if self.enum_variants.values().any(|en| en == path));
         // 外部/内置类型（Vec/str/String/HashMap…）：Rust 孤儿规则禁止为外部类型
         // 实现外部 trait（E0117），且 std 已提供 PartialEq，跳过自动 impl
-        let is_external_type = matches!(&i.for_type, IrType::Named { path, .. }
+        let _is_external_type = matches!(&i.for_type, IrType::Named { path, .. }
             if matches!(path.as_str(),
                 "List" | "Vec" | "Dict" | "HashMap" | "Set" | "HashSet" | "String" | "str"));
         // 自动生成 PartialEq（__eq__） + 其他魔法方法 trait impl。
@@ -4801,7 +4797,7 @@ impl CodeGen {
         // 注意：不在 let 链中写 `&& let`（Rust 2021 不支持），改用 match 解构
         if methods.iter().any(|m| m.name == "__next__") {
             if let Some(rm) = methods.iter().find(|m| m.name == "__rev__") {
-                if let IrType::Option(inner) = &rm.ret_ty {
+                if let IrType::Option(_inner) = &rm.ret_ty {
                     let where_str = self.magic_impl_where_str(rm);
                     self.emit_line(&format!(
                         "impl{} std::iter::DoubleEndedIterator for {} {} {{",
@@ -7255,7 +7251,7 @@ impl CodeGen {
                 // 当 TargetTy 是 Named 类型且 src_val 类型不匹配 → 插入 __implicit_from__ 桥
                 // 注意：不依赖 skip_ty，因为无泛型参数的 struct（如 Celsius）会被 skip_ty 跳过
                 let value_s = if let IrType::Named {
-                    path: target_path, ..
+                    path: _target_path, ..
                 } = ty
                 {
                     if *ty != IrType::Any && *ty != IrType::Unit {

@@ -204,7 +204,7 @@ impl MacroInterpreter {
                             Token::False
                         }]))
                     }
-                    _ => Err(format!("unsupported binary op {:?} in macro", op)),
+
                 }
             }
             MacroExpr::IfExpr {
