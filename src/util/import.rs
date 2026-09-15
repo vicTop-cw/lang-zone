@@ -61,7 +61,9 @@ impl ImportResolver {
         // 检查是否正在栈中（循环依赖）
         for entry in &self.stack {
             if entry.path == path {
-                let cycle: Vec<String> = self.stack.iter()
+                let cycle: Vec<String> = self
+                    .stack
+                    .iter()
                     .skip_while(|e| e.path != path)
                     .map(|e| e.path.join("::"))
                     .collect();
@@ -98,12 +100,12 @@ mod tests {
     #[test]
     fn test_no_cycle() {
         let mut resolver = ImportResolver::new();
-        assert!(resolver.push(
-            vec!["a".to_string()], PathBuf::from("a.lz")
-        ).is_ok());
-        assert!(resolver.push(
-            vec!["b".to_string()], PathBuf::from("b.lz")
-        ).is_ok());
+        assert!(resolver
+            .push(vec!["a".to_string()], PathBuf::from("a.lz"))
+            .is_ok());
+        assert!(resolver
+            .push(vec!["b".to_string()], PathBuf::from("b.lz"))
+            .is_ok());
         resolver.pop();
         resolver.pop();
     }
@@ -111,8 +113,12 @@ mod tests {
     #[test]
     fn test_detect_cycle() {
         let mut resolver = ImportResolver::new();
-        resolver.push(vec!["a".to_string()], PathBuf::from("a.lz")).unwrap();
-        resolver.push(vec!["b".to_string()], PathBuf::from("b.lz")).unwrap();
+        resolver
+            .push(vec!["a".to_string()], PathBuf::from("a.lz"))
+            .unwrap();
+        resolver
+            .push(vec!["b".to_string()], PathBuf::from("b.lz"))
+            .unwrap();
         // b 再次导入 a → 循环
         let err = resolver.push(vec!["a".to_string()], PathBuf::from("a.lz"));
         assert!(err.is_err());
@@ -123,10 +129,18 @@ mod tests {
     fn test_resolve_path() {
         let paths = ImportResolver::resolve_path(
             &["std".to_string(), "vec".to_string()],
-            Path::new("/tmp")
+            Path::new("/tmp"),
         );
         assert_eq!(paths.len(), 2);
-        assert!(paths[0].to_str().unwrap().replace('\\', "/").ends_with("std/vec.lz"));
-        assert!(paths[1].to_str().unwrap().replace('\\', "/").ends_with("std/vec/mod.lz"));
+        assert!(paths[0]
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("std/vec.lz"));
+        assert!(paths[1]
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
+            .ends_with("std/vec/mod.lz"));
     }
 }

@@ -32,15 +32,16 @@ pub fn parse(text: &str) -> Result<TomlDoc, String> {
 
         // [section] 头
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            current_section = trimmed[1..trimmed.len()-1].trim().to_string();
-            doc.entry(current_section.clone()).or_insert_with(HashMap::new);
+            current_section = trimmed[1..trimmed.len() - 1].trim().to_string();
+            doc.entry(current_section.clone())
+                .or_insert_with(HashMap::new);
             continue;
         }
 
         // key = value
         if let Some(eq_pos) = trimmed.find('=') {
             let key = trimmed[..eq_pos].trim().to_string();
-            let val_str = trimmed[eq_pos+1..].trim();
+            let val_str = trimmed[eq_pos + 1..].trim();
 
             let value = parse_value(val_str)?;
             doc.entry(current_section.clone())
@@ -59,7 +60,7 @@ fn parse_value(s: &str) -> Result<TomlValue, String> {
 
     // 字符串 "..."
     if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-        return Ok(TomlValue::Str(s[1..s.len()-1].to_string()));
+        return Ok(TomlValue::Str(s[1..s.len() - 1].to_string()));
     }
 
     // 内联表 { k = v, ... }
@@ -68,8 +69,12 @@ fn parse_value(s: &str) -> Result<TomlValue, String> {
     }
 
     // bool
-    if s == "true" { return Ok(TomlValue::Bool(true)); }
-    if s == "false" { return Ok(TomlValue::Bool(false)); }
+    if s == "true" {
+        return Ok(TomlValue::Bool(true));
+    }
+    if s == "false" {
+        return Ok(TomlValue::Bool(false));
+    }
 
     // integer
     if let Ok(n) = s.parse::<i64>() {
@@ -91,7 +96,7 @@ fn parse_value(s: &str) -> Result<TomlValue, String> {
 
 /// 解析内联表 { key = value, key2 = value2 }
 fn parse_inline_table(s: &str) -> Result<TomlValue, String> {
-    let inner = &s[1..s.len()-1];
+    let inner = &s[1..s.len() - 1];
     let mut table = HashMap::new();
 
     // 逐项分割（使用字节位置，与 find 返回的 byte index 一致）
@@ -104,13 +109,15 @@ fn parse_inline_table(s: &str) -> Result<TomlValue, String> {
         let skip = rest.len() - rest_trimmed.len();
         pos += skip;
 
-        if pos >= inner_bytes.len() { break; }
+        if pos >= inner_bytes.len() {
+            break;
+        }
 
         // 找 = 位置
         let rest = &inner[pos..];
         if let Some(eq) = rest.find('=') {
             let key = rest[..eq].trim().to_string();
-            let after_eq = &rest[eq+1..];
+            let after_eq = &rest[eq + 1..];
 
             // 值终止：逗号或字符串结尾
             let (value_str, consumed) = extract_value_until_comma(after_eq);
@@ -137,15 +144,23 @@ fn extract_value_until_comma(s: &str) -> (&str, usize) {
     let mut i = 0;
 
     // 跳过前导空格
-    while i < bytes.len() && bytes[i] == b' ' { i += 1; }
+    while i < bytes.len() && bytes[i] == b' ' {
+        i += 1;
+    }
 
     // 字符串值
     if i < bytes.len() && bytes[i] == b'"' {
         i += 1;
-        while i < bytes.len() && bytes[i] != b'"' { i += 1; }
-        if i < bytes.len() { i += 1; } // 跳过结束引号
-        // 找逗号
-        while i < bytes.len() && bytes[i] != b',' { i += 1; }
+        while i < bytes.len() && bytes[i] != b'"' {
+            i += 1;
+        }
+        if i < bytes.len() {
+            i += 1;
+        } // 跳过结束引号
+          // 找逗号
+        while i < bytes.len() && bytes[i] != b',' {
+            i += 1;
+        }
         return (&s[..i], i);
     }
 
@@ -154,16 +169,28 @@ fn extract_value_until_comma(s: &str) -> (&str, usize) {
         let mut depth = 1;
         i += 1;
         while i < bytes.len() {
-            if bytes[i] == b'{' { depth += 1; }
-            if bytes[i] == b'}' { depth -= 1; if depth == 0 { i += 1; break; } }
+            if bytes[i] == b'{' {
+                depth += 1;
+            }
+            if bytes[i] == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    i += 1;
+                    break;
+                }
+            }
             i += 1;
         }
-        while i < bytes.len() && bytes[i] != b',' { i += 1; }
+        while i < bytes.len() && bytes[i] != b',' {
+            i += 1;
+        }
         return (&s[..i], i);
     }
 
     // 普通值：到逗号或字符串结尾
-    while i < bytes.len() && bytes[i] != b',' { i += 1; }
+    while i < bytes.len() && bytes[i] != b',' {
+        i += 1;
+    }
     (&s[..i], i)
 }
 
@@ -171,7 +198,9 @@ fn extract_value_until_comma(s: &str) -> (&str, usize) {
 fn strip_inline_comment(s: &str) -> &str {
     let mut in_str = false;
     for (i, c) in s.char_indices() {
-        if c == '"' { in_str = !in_str; }
+        if c == '"' {
+            in_str = !in_str;
+        }
         if c == '#' && !in_str {
             return &s[..i].trim_end();
         }
@@ -296,8 +325,14 @@ mod tests {
     fn test_root_and_section() {
         let text = "root = \"r\"\n[s]\nkey = \"v\"";
         let doc = parse(text).unwrap();
-        assert_eq!(doc.get("").unwrap().get("root").unwrap().as_str(), Some("r"));
-        assert_eq!(doc.get("s").unwrap().get("key").unwrap().as_str(), Some("v"));
+        assert_eq!(
+            doc.get("").unwrap().get("root").unwrap().as_str(),
+            Some("r")
+        );
+        assert_eq!(
+            doc.get("s").unwrap().get("key").unwrap().as_str(),
+            Some("v")
+        );
     }
 
     // ─── 内联表解析 ───
@@ -322,7 +357,10 @@ mod tests {
     fn test_inline_table_nested_path() {
         let doc = parse("f = { rust = \"std::fs::read_to_string\", shim = \"path_ref\" }").unwrap();
         let table = doc.get("").unwrap().get("f").unwrap().as_table().unwrap();
-        assert_eq!(table.get("rust").unwrap().as_str(), Some("std::fs::read_to_string"));
+        assert_eq!(
+            table.get("rust").unwrap().as_str(),
+            Some("std::fs::read_to_string")
+        );
         assert_eq!(table.get("shim").unwrap().as_str(), Some("path_ref"));
     }
 
@@ -338,8 +376,28 @@ mod tests {
         let text = "[modules]\ncore = { tier = 1 }\nstr = { tier = 1 }";
         let doc = parse(text).unwrap();
         let modules = doc.get("modules").unwrap();
-        assert_eq!(modules.get("core").unwrap().as_table().unwrap().get("tier").unwrap().as_int(), Some(1));
-        assert_eq!(modules.get("str").unwrap().as_table().unwrap().get("tier").unwrap().as_int(), Some(1));
+        assert_eq!(
+            modules
+                .get("core")
+                .unwrap()
+                .as_table()
+                .unwrap()
+                .get("tier")
+                .unwrap()
+                .as_int(),
+            Some(1)
+        );
+        assert_eq!(
+            modules
+                .get("str")
+                .unwrap()
+                .as_table()
+                .unwrap()
+                .get("tier")
+                .unwrap()
+                .as_int(),
+            Some(1)
+        );
     }
 
     // ─── 注释处理 ───
@@ -347,14 +405,20 @@ mod tests {
     #[test]
     fn test_inline_comment() {
         let doc = parse("name = \"test\" # this describes name").unwrap();
-        assert_eq!(doc.get("").unwrap().get("name").unwrap().as_str(), Some("test"));
+        assert_eq!(
+            doc.get("").unwrap().get("name").unwrap().as_str(),
+            Some("test")
+        );
     }
 
     #[test]
     fn test_comment_in_section() {
         let text = "[meta]\n# comment line\nvalue = \"ok\"";
         let doc = parse(text).unwrap();
-        assert_eq!(doc.get("meta").unwrap().get("value").unwrap().as_str(), Some("ok"));
+        assert_eq!(
+            doc.get("meta").unwrap().get("value").unwrap().as_str(),
+            Some("ok")
+        );
     }
 
     #[test]
@@ -391,18 +455,37 @@ IOError = "std::io::Error"
         let doc = parse(text).unwrap();
 
         // [module]
-        assert_eq!(doc.get("module").unwrap().get("tier").unwrap().as_int(), Some(1));
-        assert_eq!(doc.get("module").unwrap().get("rust_prefix").unwrap().as_str(), Some("std::io"));
+        assert_eq!(
+            doc.get("module").unwrap().get("tier").unwrap().as_int(),
+            Some(1)
+        );
+        assert_eq!(
+            doc.get("module")
+                .unwrap()
+                .get("rust_prefix")
+                .unwrap()
+                .as_str(),
+            Some("std::io")
+        );
 
         // [types]
         let types = doc.get("types").unwrap();
-        assert_eq!(types.get("IOError").unwrap().as_str(), Some("std::io::Error"));
-        assert_eq!(types.get("BufReader").unwrap().as_str(), Some("std::io::BufReader"));
+        assert_eq!(
+            types.get("IOError").unwrap().as_str(),
+            Some("std::io::Error")
+        );
+        assert_eq!(
+            types.get("BufReader").unwrap().as_str(),
+            Some("std::io::BufReader")
+        );
 
         // [functions]
         let funcs = doc.get("functions").unwrap();
         let f1 = funcs.get("read_to_string").unwrap().as_table().unwrap();
-        assert_eq!(f1.get("rust").unwrap().as_str(), Some("std::fs::read_to_string"));
+        assert_eq!(
+            f1.get("rust").unwrap().as_str(),
+            Some("std::fs::read_to_string")
+        );
         assert_eq!(f1.get("shim").unwrap().as_str(), Some("path_ref"));
         let f2 = funcs.get("write").unwrap().as_table().unwrap();
         assert_eq!(f2.get("rust").unwrap().as_str(), Some("std::fs::write"));
@@ -415,7 +498,10 @@ IOError = "std::io::Error"
 
         // [aliases]
         let aliases = doc.get("aliases").unwrap();
-        assert_eq!(aliases.get("IOError").unwrap().as_str(), Some("std::io::Error"));
+        assert_eq!(
+            aliases.get("IOError").unwrap().as_str(),
+            Some("std::io::Error")
+        );
     }
 
     #[test]
@@ -439,14 +525,33 @@ Never = "!"
         let doc = parse(text).unwrap();
 
         let toolchain = doc.get("toolchain").unwrap();
-        assert_eq!(toolchain.get("tier1_channel").unwrap().as_str(), Some("stable"));
-        assert_eq!(toolchain.get("tier2_channel").unwrap().as_str(), Some("nightly-2026-07-01"));
+        assert_eq!(
+            toolchain.get("tier1_channel").unwrap().as_str(),
+            Some("stable")
+        );
+        assert_eq!(
+            toolchain.get("tier2_channel").unwrap().as_str(),
+            Some("nightly-2026-07-01")
+        );
 
         let modules = doc.get("modules").unwrap();
-        assert_eq!(modules.get("core").unwrap().as_table().unwrap().get("tier").unwrap().as_int(), Some(1));
+        assert_eq!(
+            modules
+                .get("core")
+                .unwrap()
+                .as_table()
+                .unwrap()
+                .get("tier")
+                .unwrap()
+                .as_int(),
+            Some(1)
+        );
 
         let gate = doc.get("tier2_gate").unwrap();
-        assert_eq!(gate.get("enabled_by_default").unwrap().as_bool(), Some(false));
+        assert_eq!(
+            gate.get("enabled_by_default").unwrap().as_bool(),
+            Some(false)
+        );
 
         let aliases = doc.get("type_aliases").unwrap();
         assert_eq!(aliases.get("Never").unwrap().as_str(), Some("!"));
@@ -457,25 +562,37 @@ Never = "!"
     #[test]
     fn test_key_with_underscores() {
         let doc = parse("read_to_string = \"ok\"").unwrap();
-        assert_eq!(doc.get("").unwrap().get("read_to_string").unwrap().as_str(), Some("ok"));
+        assert_eq!(
+            doc.get("").unwrap().get("read_to_string").unwrap().as_str(),
+            Some("ok")
+        );
     }
 
     #[test]
     fn test_value_with_colons() {
         let doc = parse(r#"prefix = "std::collections::HashMap""#).unwrap();
-        assert_eq!(doc.get("").unwrap().get("prefix").unwrap().as_str(), Some("std::collections::HashMap"));
+        assert_eq!(
+            doc.get("").unwrap().get("prefix").unwrap().as_str(),
+            Some("std::collections::HashMap")
+        );
     }
 
     #[test]
     fn test_value_with_spaces_inside_quotes() {
         let doc = parse(r#"desc = "hello world""#).unwrap();
-        assert_eq!(doc.get("").unwrap().get("desc").unwrap().as_str(), Some("hello world"));
+        assert_eq!(
+            doc.get("").unwrap().get("desc").unwrap().as_str(),
+            Some("hello world")
+        );
     }
 
     #[test]
     fn test_value_with_punctuation() {
         let doc = parse(r#"v = "{0}.contains(&{1})""#).unwrap();
-        assert_eq!(doc.get("").unwrap().get("v").unwrap().as_str(), Some("{0}.contains(&{1})"));
+        assert_eq!(
+            doc.get("").unwrap().get("v").unwrap().as_str(),
+            Some("{0}.contains(&{1})")
+        );
     }
 
     #[test]
@@ -494,19 +611,32 @@ c = "3""#;
     #[test]
     fn test_trailing_whitespace() {
         let doc = parse("key = \"value\"   \n").unwrap();
-        assert_eq!(doc.get("").unwrap().get("key").unwrap().as_str(), Some("value"));
+        assert_eq!(
+            doc.get("").unwrap().get("key").unwrap().as_str(),
+            Some("value")
+        );
     }
 
     #[test]
     fn test_special_chars_in_value() {
         let doc = parse(r#"flag = "rustc_private""#).unwrap();
-        assert_eq!(doc.get("").unwrap().get("flag").unwrap().as_str(), Some("rustc_private"));
+        assert_eq!(
+            doc.get("").unwrap().get("flag").unwrap().as_str(),
+            Some("rustc_private")
+        );
     }
 
     #[test]
     fn test_nightly_version_string() {
         let doc = parse(r#"nightly_required = "nightly-2026-07-01""#).unwrap();
-        assert_eq!(doc.get("").unwrap().get("nightly_required").unwrap().as_str(), Some("nightly-2026-07-01"));
+        assert_eq!(
+            doc.get("")
+                .unwrap()
+                .get("nightly_required")
+                .unwrap()
+                .as_str(),
+            Some("nightly-2026-07-01")
+        );
     }
 
     // ─── 错误场景 ───

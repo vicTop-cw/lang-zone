@@ -24,13 +24,13 @@ pub enum Type {
     // ── 基本类型 ──
     Int,
     F64,
-    Float,   // float 别名，等价于 f64
+    Float, // float 别名，等价于 f64
     Str,
     Bool,
     None_,
     Never,
     Any,
-    Unit,    // 枚举无字段变体（空类型）
+    Unit, // 枚举无字段变体（空类型）
 
     // ── 命名类型（自定义 struct/enum/trait 或泛型参数） ──
     Named(String),
@@ -49,7 +49,7 @@ pub enum Type {
     },
 
     // ── 语法糖 ──
-    Optional(Box<Type>),   // T? → Option<T>
+    Optional(Box<Type>), // T? → Option<T>
 
     // ── 引用 ──
     Ref(Box<Type>),
@@ -65,7 +65,10 @@ pub enum Type {
     Tuple(Vec<Type>),
 
     // ── SIMD 向量 ──
-    Simd { elem: Box<Type>, width: usize },
+    Simd {
+        elem: Box<Type>,
+        width: usize,
+    },
 
     // ── Self 占位 ──
     Self_,
@@ -73,7 +76,7 @@ pub enum Type {
     // ── 结构化类型 (duck typing) ──
     /// `duck { field: Type, ... }` — 结构匹配而非名义匹配
     Duck {
-        fields: Vec<(String, Type)>,  // 保持声明顺序
+        fields: Vec<(String, Type)>, // 保持声明顺序
     },
 }
 
@@ -111,15 +114,12 @@ impl Type {
                     other => {
                         // 递归映射（非 Named base 的直接使用其输出）
                         let mapped = other.to_rust_type_string();
-                        let args_s: Vec<String> = args.iter()
-                            .map(|a| a.to_rust_type_string())
-                            .collect();
+                        let args_s: Vec<String> =
+                            args.iter().map(|a| a.to_rust_type_string()).collect();
                         return format!("{}<{}>", mapped, args_s.join(", "));
                     }
                 };
-                let args_s: Vec<String> = args.iter()
-                    .map(|a| a.to_rust_type_string())
-                    .collect();
+                let args_s: Vec<String> = args.iter().map(|a| a.to_rust_type_string()).collect();
                 format!("{}<{}>", rust_base, args_s.join(", "))
             }
 
@@ -128,7 +128,11 @@ impl Type {
             }
 
             Type::Result { ok, err } => {
-                format!("Result<{}, {}>", ok.to_rust_type_string(), err.to_rust_type_string())
+                format!(
+                    "Result<{}, {}>",
+                    ok.to_rust_type_string(),
+                    err.to_rust_type_string()
+                )
             }
 
             Type::Optional(inner) => {
@@ -145,16 +149,17 @@ impl Type {
             }
 
             Type::Fn { params, ret } => {
-                let params_s: Vec<String> = params.iter()
-                    .map(|p| p.to_rust_type_string())
-                    .collect();
-                format!("fn({}) -> {}", params_s.join(", "), ret.to_rust_type_string())
+                let params_s: Vec<String> =
+                    params.iter().map(|p| p.to_rust_type_string()).collect();
+                format!(
+                    "fn({}) -> {}",
+                    params_s.join(", "),
+                    ret.to_rust_type_string()
+                )
             }
 
             Type::Tuple(elems) => {
-                let elems_s: Vec<String> = elems.iter()
-                    .map(|e| e.to_rust_type_string())
-                    .collect();
+                let elems_s: Vec<String> = elems.iter().map(|e| e.to_rust_type_string()).collect();
                 format!("({})", elems_s.join(", "))
             }
 

@@ -1,0 +1,6 @@
+// 修饰符装饰器语料 — mut @ param（期望：编译通过 + 产物断言）
+// 规范：SYNTAX/02-变量与绑定.md §八
+def f(@mut n: int) -> int = n + 1
+
+def main() =
+    print(f(41))

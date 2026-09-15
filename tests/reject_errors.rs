@@ -2,11 +2,11 @@
 // 遍历 DEMO/99_errors/ 目录下所有 .lz 文件，
 // 验证编译器能正确拒绝非法代码并报告错误。
 
-use std::path::PathBuf;
-use std::fs;
 use lang_zone::lexer::Lexer;
-use lang_zone::parser::Parser;
 use lang_zone::macros::expand::{extract_macro_defs, MacroExpander};
+use lang_zone::parser::Parser;
+use std::fs;
+use std::path::PathBuf;
 
 /// 查找 99_errors/ 目录下所有 .lz 文件
 fn find_error_files() -> Vec<PathBuf> {
@@ -49,7 +49,8 @@ fn error_boundaries_are_rejected() {
         };
 
         // 跳过纯注释文件（没有实际代码可以测试编译）
-        let non_comment = source.lines()
+        let non_comment = source
+            .lines()
             .filter(|l| !l.trim().is_empty() && !l.trim().starts_with("//"))
             .count();
 
@@ -61,7 +62,7 @@ fn error_boundaries_are_rejected() {
         // 使用 lexer + parser 尝试解析源码，预期应该失败
         let mut lexer = Lexer::new(&source);
         let tokens = lexer.tokenize();
-        
+
         let parse_result = extract_macro_defs(&tokens)
             .map_err(|e| format!("{e}"))
             .and_then(|(registry, _)| {
@@ -70,16 +71,18 @@ fn error_boundaries_are_rejected() {
                 let mut parser = Parser::new(expanded);
                 parser.parse_module().map_err(|e| format!("{e}"))
             });
-        
+
         match parse_result {
             Err(e) => {
                 // 期望行为：编译失败，记录错误信息
                 rejected += 1;
-                let rel = file.strip_prefix(
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("DEMO")
-                        .join("99_errors")
-                ).unwrap_or(file);
+                let rel = file
+                    .strip_prefix(
+                        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                            .join("DEMO")
+                            .join("99_errors"),
+                    )
+                    .unwrap_or(file);
                 eprintln!("  ✅ 正确拒绝: {} — {}", rel.display(), e.trim());
             }
             Ok(_) => {
@@ -98,11 +101,13 @@ fn error_boundaries_are_rejected() {
     if !unexpectedly_passed.is_empty() {
         println!("\n  意外通过（需要更新边界测试）:");
         for path in &unexpectedly_passed {
-            let rel = path.strip_prefix(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("DEMO")
-                    .join("99_errors")
-            ).unwrap_or(path);
+            let rel = path
+                .strip_prefix(
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("DEMO")
+                        .join("99_errors"),
+                )
+                .unwrap_or(path);
             println!("    ⚠️  {} — 编译器未拒绝此非法代码", rel.display());
         }
     }

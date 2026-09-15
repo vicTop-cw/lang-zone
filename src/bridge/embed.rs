@@ -28,8 +28,8 @@
 //   magic = 0x4C5A454D ("LZEM")
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeLevel, BridgeMeta,
-    CallResolveResult, ExportEntry, ExportKind, ImportResolveResult,
+    Bridge, BridgeCapability, BridgeLevel, BridgeMeta, CallResolveResult, ExportEntry, ExportKind,
+    ImportResolveResult,
 };
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
@@ -72,9 +72,9 @@ pub const LZEM_PAYLOAD_OFFSET: usize = LZEM_RESPONSE_OFFSET + LZEM_RESPONSE_SIZE
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct LzemHeader {
-    pub magic: u32,       // 0x4C5A454D
-    pub version: u32,    // 协议版本
-    pub size: u64,       // 共享内存总大小
+    pub magic: u32,   // 0x4C5A454D
+    pub version: u32, // 协议版本
+    pub size: u64,    // 共享内存总大小
 }
 
 impl LzemHeader {
@@ -257,10 +257,22 @@ impl EmbedBridge {
         out.push_str(&format!("const LZEM_MAGIC: u32 = {:#X};\n", LZEM_MAGIC));
         out.push_str(&format!("const LZEM_VERSION: u32 = {};\n", LZEM_VERSION));
         out.push_str(&format!("const SHM_SIZE: usize = {};\n\n", self.shm_size));
-        out.push_str(&format!("const HEADER_SIZE: usize = {};\n", LZEM_HEADER_SIZE));
-        out.push_str(&format!("const REQUEST_OFFSET: usize = {};\n", LZEM_REQUEST_OFFSET));
-        out.push_str(&format!("const RESPONSE_OFFSET: usize = {};\n", LZEM_RESPONSE_OFFSET));
-        out.push_str(&format!("const PAYLOAD_OFFSET: usize = {};\n\n", LZEM_PAYLOAD_OFFSET));
+        out.push_str(&format!(
+            "const HEADER_SIZE: usize = {};\n",
+            LZEM_HEADER_SIZE
+        ));
+        out.push_str(&format!(
+            "const REQUEST_OFFSET: usize = {};\n",
+            LZEM_REQUEST_OFFSET
+        ));
+        out.push_str(&format!(
+            "const RESPONSE_OFFSET: usize = {};\n",
+            LZEM_RESPONSE_OFFSET
+        ));
+        out.push_str(&format!(
+            "const PAYLOAD_OFFSET: usize = {};\n\n",
+            LZEM_PAYLOAD_OFFSET
+        ));
 
         // Header 结构
         out.push_str("#[repr(C)]\n");
@@ -306,7 +318,9 @@ impl EmbedBridge {
         if self.is_server {
             out.push_str("impl LzemSession {\n");
             out.push_str("    /// 创建（服务端）共享内存\n");
-            out.push_str(&format!("    pub fn create() -> Result<Box<Self>, String> {{\n"));
+            out.push_str(&format!(
+                "    pub fn create() -> Result<Box<Self>, String> {{\n"
+            ));
             out.push_str("        #[cfg(windows)] {\n");
             out.push_str(&format!(
                 "            Err(\"Windows shared memory not yet implemented\".to_string())\n",
@@ -318,12 +332,17 @@ impl EmbedBridge {
             out.push_str("            // 移除已存在的共享内存\n");
             out.push_str("            let _ = fs::remove_file(path);\n");
             out.push_str("            let fd = unsafe {\n");
-            out.push_str("                libc::shm_open(path, libc::O_CREAT | libc::O_RDWR, 0o600)\n");
+            out.push_str(
+                "                libc::shm_open(path, libc::O_CREAT | libc::O_RDWR, 0o600)\n",
+            );
             out.push_str("            };\n");
             out.push_str("            if fd < 0 {\n");
             out.push_str("                return Err(format!(\"shm_open failed\"));\n");
             out.push_str("            }\n");
-            out.push_str(&format!("            if unsafe {{ libc::ftruncate(fd, {} as libc::off_t) }} < 0 {{\n", self.shm_size));
+            out.push_str(&format!(
+                "            if unsafe {{ libc::ftruncate(fd, {} as libc::off_t) }} < 0 {{\n",
+                self.shm_size
+            ));
             out.push_str("                return Err(format!(\"ftruncate failed\"));\n");
             out.push_str("            }\n");
             out.push_str("            let data = unsafe {\n");
@@ -342,9 +361,18 @@ impl EmbedBridge {
             out.push_str("            // 初始化头\n");
             out.push_str("            let header = data as *mut ShmHeader;\n");
             out.push_str("            unsafe {\n");
-            out.push_str(&format!("                (*header).magic = {:#X};\n", LZEM_MAGIC));
-            out.push_str(&format!("                (*header).version = {};\n", LZEM_VERSION));
-            out.push_str(&format!("                (*header).size = {};\n", self.shm_size));
+            out.push_str(&format!(
+                "                (*header).magic = {:#X};\n",
+                LZEM_MAGIC
+            ));
+            out.push_str(&format!(
+                "                (*header).version = {};\n",
+                LZEM_VERSION
+            ));
+            out.push_str(&format!(
+                "                (*header).size = {};\n",
+                self.shm_size
+            ));
             out.push_str("            }\n");
             out.push_str("            Ok(Box::new(LzemSession {\n");
             out.push_str("                data: data as *mut u8,\n");
@@ -356,7 +384,9 @@ impl EmbedBridge {
         } else {
             out.push_str("impl LzemSession {\n");
             out.push_str("    /// 连接（客户端）共享内存\n");
-            out.push_str(&format!("    pub fn connect() -> Result<Box<Self>, String> {{\n"));
+            out.push_str(&format!(
+                "    pub fn connect() -> Result<Box<Self>, String> {{\n"
+            ));
             out.push_str("        #[cfg(windows)] {\n");
             out.push_str(&format!(
                 "            Err(\"Windows shared memory not yet implemented\".to_string())\n",
@@ -364,7 +394,10 @@ impl EmbedBridge {
             out.push_str("        }\n");
             out.push_str("        #[cfg(unix)] {\n");
             out.push_str("            let fd = unsafe {\n");
-            out.push_str(&format!("                libc::shm_open(\"{}\", libc::O_RDWR, 0o600)\n", self.shm_path));
+            out.push_str(&format!(
+                "                libc::shm_open(\"{}\", libc::O_RDWR, 0o600)\n",
+                self.shm_path
+            ));
             out.push_str("            };\n");
             out.push_str("            if fd < 0 {\n");
             out.push_str("                return Err(format!(\"shm_open failed: {{}}\", std::io::Error::last_os_error()));\n");
@@ -404,7 +437,9 @@ impl EmbedBridge {
         // call 方法
         out.push_str("    /// 调用 LZ 函数（通过共享内存）\n");
         out.push_str("    pub fn call(&self, func_name: &str, payload: &[u8]) -> Result<Vec<u8>, String> {\n");
-        out.push_str("        let call_id = self.call_counter.fetch_add(1, Ordering::Relaxed) + 1;\n");
+        out.push_str(
+            "        let call_id = self.call_counter.fetch_add(1, Ordering::Relaxed) + 1;\n",
+        );
         out.push_str("        let req = (self.data as *mut ShmRequest).add(0);\n");
         out.push_str("        let resp = (self.data as *mut ShmResponse).add(0);\n\n");
         out.push_str("        // 写入请求\n");
@@ -417,25 +452,37 @@ impl EmbedBridge {
         out.push_str("            let name_dst = self.data.add(PAYLOAD_OFFSET);\n");
         out.push_str("            ptr::copy_nonoverlapping(func_name.as_ptr(), name_dst, func_name.len());\n");
         out.push_str("            // 写入载荷\n");
-        out.push_str("            let payload_dst = self.data.add(PAYLOAD_OFFSET + func_name.len());\n");
-        out.push_str("            ptr::copy_nonoverlapping(payload.as_ptr(), payload_dst, payload.len());\n");
+        out.push_str(
+            "            let payload_dst = self.data.add(PAYLOAD_OFFSET + func_name.len());\n",
+        );
+        out.push_str(
+            "            ptr::copy_nonoverlapping(payload.as_ptr(), payload_dst, payload.len());\n",
+        );
         out.push_str("        }\n\n");
         out.push_str("        // 等待响应（轮询 version）\n");
         out.push_str("        let mut spin = 0usize;\n");
         out.push_str("        loop {\n");
-        out.push_str("            let resp_version = unsafe { (*resp).version.load(Ordering::SeqCst) };\n");
+        out.push_str(
+            "            let resp_version = unsafe { (*resp).version.load(Ordering::SeqCst) };\n",
+        );
         out.push_str("            if resp_version == call_id {\n");
         out.push_str("                let status = unsafe { (*resp).status };\n");
-        out.push_str("                let payload_len = unsafe { (*resp).payload_len } as usize;\n");
+        out.push_str(
+            "                let payload_len = unsafe { (*resp).payload_len } as usize;\n",
+        );
         out.push_str("                if status != 0 {\n");
-        out.push_str("                    let error_len = unsafe { (*resp).error_len } as usize;\n");
+        out.push_str(
+            "                    let error_len = unsafe { (*resp).error_len } as usize;\n",
+        );
         out.push_str("                    let error_bytes = unsafe {\n");
         out.push_str("                        std::slice::from_raw_parts(\n");
         out.push_str("                            self.data.add(PAYLOAD_OFFSET),\n");
         out.push_str("                            error_len,\n");
         out.push_str("                        )\n");
         out.push_str("                    };\n");
-        out.push_str("                    return Err(String::from_utf8_lossy(error_bytes).to_string());\n");
+        out.push_str(
+            "                    return Err(String::from_utf8_lossy(error_bytes).to_string());\n",
+        );
         out.push_str("                }\n");
         out.push_str("                let result = unsafe {\n");
         out.push_str("                    std::slice::from_raw_parts(\n");
@@ -501,7 +548,10 @@ impl EmbedBridge {
         for (name, ep) in &self.host_funcs {
             out.push_str(&format!("/// embed::host::{} — {}\n", name, ep.signature));
             if ep.is_async {
-                out.push_str(&format!("// async fn embed_host_{}(...) -> ... {{ /* shim to shm_call */ }}\n\n", name));
+                out.push_str(&format!(
+                    "// async fn embed_host_{}(...) -> ... {{ /* shim to shm_call */ }}\n\n",
+                    name
+                ));
             } else {
                 out.push_str(&format!(
                     "// fn embed_host_{}(...) -> ... {{ /* shim to shm_call */ }}\n\n",
@@ -555,14 +605,16 @@ impl EmbedBridge {
 // ══════════════════════════════════════════════════════════════
 
 impl Bridge for EmbedBridge {
-    fn name(&self) -> &str { "embed" }
+    fn name(&self) -> &str {
+        "embed"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::SharedMemory }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::SharedMemory
+    }
 
     fn capabilities(&self) -> BridgeCapability {
-        BridgeCapability::IMPORT
-            | BridgeCapability::FUNCTION_CALL
-            | BridgeCapability::HOT_RELOAD
+        BridgeCapability::IMPORT | BridgeCapability::FUNCTION_CALL | BridgeCapability::HOT_RELOAD
     }
 
     fn meta(&self) -> BridgeMeta {
@@ -580,7 +632,11 @@ impl Bridge for EmbedBridge {
         }
     }
 
-    fn resolve_import(&self, module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import(
+        &self,
+        module_path: &[String],
+        _items: &[String],
+    ) -> Option<ImportResolveResult> {
         if module_path.is_empty() {
             return None;
         }
@@ -604,7 +660,11 @@ impl Bridge for EmbedBridge {
         }
     }
 
-    fn resolve_import_full(&self, module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import_full(
+        &self,
+        module_path: &[String],
+        _items: &[String],
+    ) -> Option<ImportResolveResult> {
         self.resolve_import(module_path, &[])
     }
 
@@ -712,7 +772,9 @@ mod tests {
         let bridge = EmbedBridge::new("game");
         assert_eq!(bridge.name(), "embed");
         assert_eq!(bridge.level(), BridgeLevel::SharedMemory);
-        assert!(bridge.capabilities().contains(BridgeCapability::FUNCTION_CALL));
+        assert!(bridge
+            .capabilities()
+            .contains(BridgeCapability::FUNCTION_CALL));
         assert!(bridge.capabilities().contains(BridgeCapability::HOT_RELOAD));
     }
 
@@ -816,14 +878,18 @@ mod tests {
     #[test]
     fn test_resolve_call() {
         let bridge = make_bridge();
-        let r = bridge.resolve_call("embed::host::get_time_ms", &[]).unwrap();
+        let r = bridge
+            .resolve_call("embed::host::get_time_ms", &[])
+            .unwrap();
         assert_eq!(r.rust_path, "_lz_embed_host_get_time_ms");
     }
 
     #[test]
     fn test_resolve_call_unknown() {
         let bridge = make_bridge();
-        assert!(bridge.resolve_call("embed::host::nonexistent", &[]).is_none());
+        assert!(bridge
+            .resolve_call("embed::host::nonexistent", &[])
+            .is_none());
     }
 
     #[test]
@@ -875,9 +941,15 @@ mod tests {
         let bridge = make_bridge();
         let exports = bridge.list_exports(ExportKind::Function);
         assert_eq!(exports.len(), 3); // 2 host + 1 exported
-        assert!(exports.iter().any(|e| e.name == "get_time_ms" && e.module == "embed"));
-        assert!(exports.iter().any(|e| e.name == "send_event" && e.module == "embed"));
-        assert!(exports.iter().any(|e| e.name == "on_click" && e.module == "lz_export"));
+        assert!(exports
+            .iter()
+            .any(|e| e.name == "get_time_ms" && e.module == "embed"));
+        assert!(exports
+            .iter()
+            .any(|e| e.name == "send_event" && e.module == "embed"));
+        assert!(exports
+            .iter()
+            .any(|e| e.name == "on_click" && e.module == "lz_export"));
     }
 
     #[test]
@@ -945,7 +1017,9 @@ mod tests {
     #[test]
     fn test_resolve_call_full() {
         let bridge = make_bridge();
-        let r = bridge.resolve_call_full("embed::host::send_event", &[]).unwrap();
+        let r = bridge
+            .resolve_call_full("embed::host::send_event", &[])
+            .unwrap();
         assert_eq!(r.rust_path, "_lz_embed_host_send_event");
         assert_eq!(r.module_name, "embed");
         assert!(!r.is_macro);

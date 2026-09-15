@@ -106,7 +106,10 @@ impl MagicEngine {
     }
 
     fn register(&mut self, magic: &str, entry: MagicEntry) {
-        self.mappings.entry(magic.to_string()).or_default().push(entry);
+        self.mappings
+            .entry(magic.to_string())
+            .or_default()
+            .push(entry);
     }
 
     fn init_default_mappings(&mut self) {
@@ -115,191 +118,299 @@ impl MagicEngine {
         // self 和 rhs 均消费，Output 来自返回类型
         // ═══════════════════════════════════════════
         for (magic, trait_path, method) in &[
-            ("__add__",  "std::ops::Add",    "add"),
-            ("__sub__",  "std::ops::Sub",    "sub"),
-            ("__mul__",  "std::ops::Mul",    "mul"),
-            ("__div__",  "std::ops::Div",    "div"),
-            ("__rem__",  "std::ops::Rem",    "rem"),
+            ("__add__", "std::ops::Add", "add"),
+            ("__sub__", "std::ops::Sub", "sub"),
+            ("__mul__", "std::ops::Mul", "mul"),
+            ("__div__", "std::ops::Div", "div"),
+            ("__rem__", "std::ops::Rem", "rem"),
             ("__bitand__", "std::ops::BitAnd", "bitand"),
-            ("__bitor__",  "std::ops::BitOr",  "bitor"),
+            ("__bitor__", "std::ops::BitOr", "bitor"),
             ("__bitxor__", "std::ops::BitXor", "bitxor"),
-            ("__shl__",  "std::ops::Shl",    "shl"),
-            ("__shr__",  "std::ops::Shr",    "shr"),
+            ("__shl__", "std::ops::Shl", "shl"),
+            ("__shr__", "std::ops::Shr", "shr"),
         ] {
-            self.register(magic, MagicEntry {
-                trait_path, trait_method: method,
-                kind: MagicKind::BinaryOp,
-                multi_dispatch: true,
-            });
+            self.register(
+                magic,
+                MagicEntry {
+                    trait_path,
+                    trait_method: method,
+                    kind: MagicKind::BinaryOp,
+                    multi_dispatch: true,
+                },
+            );
         }
         // __pow__ → 自定义 Pow trait
-        self.register("__pow__", MagicEntry {
-            trait_path: "Pow", trait_method: "pow",
-            kind: MagicKind::BinaryOp,
-            multi_dispatch: true,
-        });
+        self.register(
+            "__pow__",
+            MagicEntry {
+                trait_path: "Pow",
+                trait_method: "pow",
+                kind: MagicKind::BinaryOp,
+                multi_dispatch: true,
+            },
+        );
         // __pipe__ 已废弃（用户 2026-08-08 决策）：管道由通用 callable 语义驱动，
         // 左侧 __lpipe__（数据变换，默认返回自身）与右侧 __rpipe__（处理函数生成，优先于 __call__）
         // 由 ir::builder 管道展开直接调用，无需 MagicEngine trait impl 注册。
 
         // 一元运算符
         for (magic, trait_path, method) in &[
-            ("__neg__",  "std::ops::Neg", "neg"),
-            ("__not__",  "std::ops::Not", "not"),
+            ("__neg__", "std::ops::Neg", "neg"),
+            ("__not__", "std::ops::Not", "not"),
         ] {
-            self.register(magic, MagicEntry {
-                trait_path, trait_method: method,
-                kind: MagicKind::UnaryOp,
-                multi_dispatch: false,
-            });
+            self.register(
+                magic,
+                MagicEntry {
+                    trait_path,
+                    trait_method: method,
+                    kind: MagicKind::UnaryOp,
+                    multi_dispatch: false,
+                },
+            );
         }
 
         // ═══════════════════════════════════════════
         // 二、签名受限型 — 比较
         // ═══════════════════════════════════════════
-        self.register("__eq__", MagicEntry {
-            trait_path: "std::cmp::PartialEq", trait_method: "eq",
-            kind: MagicKind::PartialEq,
-            multi_dispatch: true,
-        });
-        self.register("__ne__", MagicEntry {
-            trait_path: "std::cmp::PartialEq", trait_method: "ne",
-            kind: MagicKind::PartialEq,
-            multi_dispatch: true,
-        });
-        self.register("__lt__", MagicEntry {
-            trait_path: "std::cmp::PartialOrd", trait_method: "partial_cmp",
-            kind: MagicKind::PartialOrd,
-            multi_dispatch: true,
-        });
-        self.register("__le__", MagicEntry {
-            trait_path: "std::cmp::PartialOrd", trait_method: "partial_cmp",
-            kind: MagicKind::PartialOrd,
-            multi_dispatch: true,
-        });
-        self.register("__gt__", MagicEntry {
-            trait_path: "std::cmp::PartialOrd", trait_method: "partial_cmp",
-            kind: MagicKind::PartialOrd,
-            multi_dispatch: true,
-        });
-        self.register("__ge__", MagicEntry {
-            trait_path: "std::cmp::PartialOrd", trait_method: "partial_cmp",
-            kind: MagicKind::PartialOrd,
-            multi_dispatch: true,
-        });
-        self.register("__cmp__", MagicEntry {
-            trait_path: "std::cmp::Ord", trait_method: "cmp",
-            kind: MagicKind::Ord,
-            multi_dispatch: false,
-        });
-        self.register("__hash__", MagicEntry {
-            trait_path: "std::hash::Hash", trait_method: "hash",
-            kind: MagicKind::Hash,
-            multi_dispatch: false,
-        });
-        self.register("__getitem__", MagicEntry {
-            trait_path: "std::ops::Index", trait_method: "index",
-            kind: MagicKind::Index,
-            multi_dispatch: true,
-        });
+        self.register(
+            "__eq__",
+            MagicEntry {
+                trait_path: "std::cmp::PartialEq",
+                trait_method: "eq",
+                kind: MagicKind::PartialEq,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__ne__",
+            MagicEntry {
+                trait_path: "std::cmp::PartialEq",
+                trait_method: "ne",
+                kind: MagicKind::PartialEq,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__lt__",
+            MagicEntry {
+                trait_path: "std::cmp::PartialOrd",
+                trait_method: "partial_cmp",
+                kind: MagicKind::PartialOrd,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__le__",
+            MagicEntry {
+                trait_path: "std::cmp::PartialOrd",
+                trait_method: "partial_cmp",
+                kind: MagicKind::PartialOrd,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__gt__",
+            MagicEntry {
+                trait_path: "std::cmp::PartialOrd",
+                trait_method: "partial_cmp",
+                kind: MagicKind::PartialOrd,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__ge__",
+            MagicEntry {
+                trait_path: "std::cmp::PartialOrd",
+                trait_method: "partial_cmp",
+                kind: MagicKind::PartialOrd,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__cmp__",
+            MagicEntry {
+                trait_path: "std::cmp::Ord",
+                trait_method: "cmp",
+                kind: MagicKind::Ord,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__hash__",
+            MagicEntry {
+                trait_path: "std::hash::Hash",
+                trait_method: "hash",
+                kind: MagicKind::Hash,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__getitem__",
+            MagicEntry {
+                trait_path: "std::ops::Index",
+                trait_method: "index",
+                kind: MagicKind::Index,
+                multi_dispatch: true,
+            },
+        );
 
         // ═══════════════════════════════════════════
         // 三、签名受限型 — 显示/调试
         // ═══════════════════════════════════════════
-        self.register("__str__", MagicEntry {
-            trait_path: "std::fmt::Display", trait_method: "fmt",
-            kind: MagicKind::Display,
-            multi_dispatch: false,
-        });
-        self.register("__repr__", MagicEntry {
-            trait_path: "std::fmt::Debug", trait_method: "fmt",
-            kind: MagicKind::Debug,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__str__",
+            MagicEntry {
+                trait_path: "std::fmt::Display",
+                trait_method: "fmt",
+                kind: MagicKind::Display,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__repr__",
+            MagicEntry {
+                trait_path: "std::fmt::Debug",
+                trait_method: "fmt",
+                kind: MagicKind::Debug,
+                multi_dispatch: false,
+            },
+        );
 
         // ═══════════════════════════════════════════
         // 四、签名自由型 — 类型转换
         // ═══════════════════════════════════════════
-        self.register("__from__", MagicEntry {
-            trait_path: "std::convert::From", trait_method: "from",
-            kind: MagicKind::From,
-            multi_dispatch: true,  // 按参数类型多分派
-        });
-        self.register("__into__", MagicEntry {
-            trait_path: "std::convert::Into", trait_method: "into",
-            kind: MagicKind::Into,
-            multi_dispatch: true,  // 按返回类型多分派（罕见）
-        });
-        self.register("__try_from__", MagicEntry {
-            trait_path: "std::convert::TryFrom", trait_method: "try_from",
-            kind: MagicKind::From,
-            multi_dispatch: true,
-        });
-        self.register("__try_into__", MagicEntry {
-            trait_path: "std::convert::TryInto", trait_method: "try_into",
-            kind: MagicKind::Into,
-            multi_dispatch: true,
-        });
+        self.register(
+            "__from__",
+            MagicEntry {
+                trait_path: "std::convert::From",
+                trait_method: "from",
+                kind: MagicKind::From,
+                multi_dispatch: true, // 按参数类型多分派
+            },
+        );
+        self.register(
+            "__into__",
+            MagicEntry {
+                trait_path: "std::convert::Into",
+                trait_method: "into",
+                kind: MagicKind::Into,
+                multi_dispatch: true, // 按返回类型多分派（罕见）
+            },
+        );
+        self.register(
+            "__try_from__",
+            MagicEntry {
+                trait_path: "std::convert::TryFrom",
+                trait_method: "try_from",
+                kind: MagicKind::From,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__try_into__",
+            MagicEntry {
+                trait_path: "std::convert::TryInto",
+                trait_method: "try_into",
+                kind: MagicKind::Into,
+                multi_dispatch: true,
+            },
+        );
 
         // ═══════════════════════════════════════════
         // 五、生命周期/资源
         // ═══════════════════════════════════════════
-        self.register("__drop__", MagicEntry {
-            trait_path: "std::ops::Drop", trait_method: "drop",
-            kind: MagicKind::Drop,
-            multi_dispatch: false,
-        });
-        self.register("__clone__", MagicEntry {
-            trait_path: "std::clone::Clone", trait_method: "clone",
-            kind: MagicKind::Clone,
-            multi_dispatch: false,
-        });
-        self.register("__default__", MagicEntry {
-            trait_path: "std::default::Default", trait_method: "default",
-            kind: MagicKind::Default,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__drop__",
+            MagicEntry {
+                trait_path: "std::ops::Drop",
+                trait_method: "drop",
+                kind: MagicKind::Drop,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__clone__",
+            MagicEntry {
+                trait_path: "std::clone::Clone",
+                trait_method: "clone",
+                kind: MagicKind::Clone,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__default__",
+            MagicEntry {
+                trait_path: "std::default::Default",
+                trait_method: "default",
+                kind: MagicKind::Default,
+                multi_dispatch: false,
+            },
+        );
 
         // ═══════════════════════════════════════════
         // 六、容器/迭代
         // ═══════════════════════════════════════════
-        self.register("__next__", MagicEntry {
-            trait_path: "std::iter::Iterator", trait_method: "next",
-            kind: MagicKind::Iterator_,
-            multi_dispatch: false,
-        });
-        self.register("__iter__", MagicEntry {
-            trait_path: "std::iter::IntoIterator", trait_method: "into_iter",
-            kind: MagicKind::IntoIterator_,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__next__",
+            MagicEntry {
+                trait_path: "std::iter::Iterator",
+                trait_method: "next",
+                kind: MagicKind::Iterator_,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__iter__",
+            MagicEntry {
+                trait_path: "std::iter::IntoIterator",
+                trait_method: "into_iter",
+                kind: MagicKind::IntoIterator_,
+                multi_dispatch: false,
+            },
+        );
 
         // ═══════════════════════════════════════════
         // 七、补齐（06d 规范有、此前漏注册）
         // ═══════════════════════════════════════════
         // 容器族：__setitem__ → IndexMut；__len__ → HasLen（自定义）；
         // __contains__ → Contains（自定义）
-        self.register("__setitem__", MagicEntry {
-            trait_path: "std::ops::IndexMut", trait_method: "index_mut",
-            kind: MagicKind::IndexMut,
-            multi_dispatch: true,
-        });
-        self.register("__len__", MagicEntry {
-            trait_path: "HasLen", trait_method: "len",
-            kind: MagicKind::Len,
-            multi_dispatch: false,
-        });
-        self.register("__contains__", MagicEntry {
-            trait_path: "Contains", trait_method: "contains",
-            kind: MagicKind::Contains,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__setitem__",
+            MagicEntry {
+                trait_path: "std::ops::IndexMut",
+                trait_method: "index_mut",
+                kind: MagicKind::IndexMut,
+                multi_dispatch: true,
+            },
+        );
+        self.register(
+            "__len__",
+            MagicEntry {
+                trait_path: "HasLen",
+                trait_method: "len",
+                kind: MagicKind::Len,
+                multi_dispatch: false,
+            },
+        );
+        self.register(
+            "__contains__",
+            MagicEntry {
+                trait_path: "Contains",
+                trait_method: "contains",
+                kind: MagicKind::Contains,
+                multi_dispatch: false,
+            },
+        );
         // 布尔判定链首环：__bool__ → HasBool（自定义）
-        self.register("__bool__", MagicEntry {
-            trait_path: "HasBool", trait_method: "lz_bool",
-            kind: MagicKind::Bool,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__bool__",
+            MagicEntry {
+                trait_path: "HasBool",
+                trait_method: "lz_bool",
+                kind: MagicKind::Bool,
+                multi_dispatch: false,
+            },
+        );
         // 复合赋值族：__iadd__/__isub__/__imul__/__idiv__ → OpAssign
         for (magic, trait_path, method) in &[
             ("__iadd__", "std::ops::AddAssign", "add_assign"),
@@ -307,26 +418,38 @@ impl MagicEngine {
             ("__imul__", "std::ops::MulAssign", "mul_assign"),
             ("__idiv__", "std::ops::DivAssign", "div_assign"),
         ] {
-            self.register(magic, MagicEntry {
-                trait_path, trait_method: method,
-                kind: MagicKind::OpAssign,
-                multi_dispatch: true,
-            });
+            self.register(
+                magic,
+                MagicEntry {
+                    trait_path,
+                    trait_method: method,
+                    kind: MagicKind::OpAssign,
+                    multi_dispatch: true,
+                },
+            );
         }
         // 位非 ~a（与 __not__ 逻辑非共用 std::ops::Not，按 ~ 语法分派）
-        self.register("__invert__", MagicEntry {
-            trait_path: "std::ops::Not", trait_method: "not",
-            kind: MagicKind::Invert,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__invert__",
+            MagicEntry {
+                trait_path: "std::ops::Not",
+                trait_method: "not",
+                kind: MagicKind::Invert,
+                multi_dispatch: false,
+            },
+        );
         // __iter_strategy__ → 迭代策略选择（06d §九）：
         // 返回按优先级排列的迭代器类型名列表（如 ["range", "list"]），
         // 运行时/编译期选择最优迭代策略（当前直调用接通，策略选择留后续）
-        self.register("__iter_strategy__", MagicEntry {
-            trait_path: "IterStrategy", trait_method: "resolve",
-            kind: MagicKind::IterStrategy,
-            multi_dispatch: false,
-        });
+        self.register(
+            "__iter_strategy__",
+            MagicEntry {
+                trait_path: "IterStrategy",
+                trait_method: "resolve",
+                kind: MagicKind::IterStrategy,
+                multi_dispatch: false,
+            },
+        );
     }
 
     /// 查询魔法方法对应的映射条目
@@ -336,7 +459,8 @@ impl MagicEngine {
 
     /// 是否是多分派方法（同名魔法方法按 other 类型可定义多个）
     pub fn is_multi_dispatch(&self, magic_method: &str) -> bool {
-        self.mappings.get(magic_method)
+        self.mappings
+            .get(magic_method)
             .map(|v| v.first().map(|e| e.multi_dispatch).unwrap_or(false))
             .unwrap_or(false)
     }

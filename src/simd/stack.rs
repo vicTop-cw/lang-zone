@@ -20,7 +20,10 @@ pub struct SimdStack<const N: usize> {
 impl<const N: usize> SimdStack<N> {
     /// 零初始化
     pub fn zero(dtype: DType) -> Self {
-        Self { dtype, data: [0.0; N] }
+        Self {
+            dtype,
+            data: [0.0; N],
+        }
     }
 
     /// 从元素列表构造
@@ -33,7 +36,10 @@ impl<const N: usize> SimdStack<N> {
 
     /// 标量广播到所有 lane（对标 Mojo splat）
     pub fn splat(dtype: DType, value: f64) -> Self {
-        Self { dtype, data: [value; N] }
+        Self {
+            dtype,
+            data: [value; N],
+        }
     }
 
     /// 获取底层数组引用
@@ -47,44 +53,66 @@ impl<const N: usize> SimdStack<N> {
     }
 
     /// 读写 lane
-    pub fn get(&self, idx: usize) -> f64 { self.data[idx] }
-    pub fn set(&mut self, idx: usize, val: f64) { self.data[idx] = val; }
+    pub fn get(&self, idx: usize) -> f64 {
+        self.data[idx]
+    }
+    pub fn set(&mut self, idx: usize, val: f64) {
+        self.data[idx] = val;
+    }
 
     /// 位宽（字节）
-    pub fn byte_width(&self) -> usize { N * 8 }
+    pub fn byte_width(&self) -> usize {
+        N * 8
+    }
 
     // ── 元素级运算 ──
 
     pub fn add(&self, other: &Self) -> Self {
         let mut r = Self::zero(self.dtype);
-        for i in 0..N { r.data[i] = self.data[i] + other.data[i]; }
+        for i in 0..N {
+            r.data[i] = self.data[i] + other.data[i];
+        }
         r
     }
 
     pub fn sub(&self, other: &Self) -> Self {
         let mut r = Self::zero(self.dtype);
-        for i in 0..N { r.data[i] = self.data[i] - other.data[i]; }
+        for i in 0..N {
+            r.data[i] = self.data[i] - other.data[i];
+        }
         r
     }
 
     pub fn mul(&self, other: &Self) -> Self {
         let mut r = Self::zero(self.dtype);
-        for i in 0..N { r.data[i] = self.data[i] * other.data[i]; }
+        for i in 0..N {
+            r.data[i] = self.data[i] * other.data[i];
+        }
         r
     }
 
     pub fn scale(&self, scalar: f64) -> Self {
         let mut r = Self::zero(self.dtype);
-        for i in 0..N { r.data[i] = self.data[i] * scalar; }
+        for i in 0..N {
+            r.data[i] = self.data[i] * scalar;
+        }
         r
     }
 
     // ── 归约 ──
 
-    pub fn reduce_add(&self) -> f64 { self.data.iter().sum() }
-    pub fn reduce_mul(&self) -> f64 { self.data.iter().product() }
-    pub fn reduce_max(&self) -> f64 { self.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max) }
-    pub fn reduce_min(&self) -> f64 { self.data.iter().cloned().fold(f64::INFINITY, f64::min) }
+    pub fn reduce_add(&self) -> f64 {
+        self.data.iter().sum()
+    }
+    pub fn reduce_mul(&self) -> f64 {
+        self.data.iter().product()
+    }
+    pub fn reduce_max(&self) -> f64 {
+        self.data.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+    }
+    pub fn reduce_min(&self) -> f64 {
+        self.data.iter().cloned().fold(f64::INFINITY, f64::min)
+    }
 
     // ── 混洗 / 重排 ──
 
@@ -92,7 +120,9 @@ impl<const N: usize> SimdStack<N> {
     pub fn shuffle(&self, indices: &[usize]) -> Self {
         let mut r = Self::zero(self.dtype);
         for (i, &idx) in indices.iter().enumerate() {
-            if i < N && idx < N { r.data[i] = self.data[idx]; }
+            if i < N && idx < N {
+                r.data[i] = self.data[idx];
+            }
         }
         r
     }
@@ -100,14 +130,18 @@ impl<const N: usize> SimdStack<N> {
     /// 向量比较 (相等)
     pub fn eq(&self, other: &Self) -> [bool; N] {
         let mut r = [false; N];
-        for i in 0..N { r[i] = self.data[i] == other.data[i]; }
+        for i in 0..N {
+            r[i] = self.data[i] == other.data[i];
+        }
         r
     }
 
     /// 向量比较 (大于)
     pub fn gt(&self, other: &Self) -> [bool; N] {
         let mut r = [false; N];
-        for i in 0..N { r[i] = self.data[i] > other.data[i]; }
+        for i in 0..N {
+            r[i] = self.data[i] > other.data[i];
+        }
         r
     }
 
@@ -115,19 +149,35 @@ impl<const N: usize> SimdStack<N> {
     pub fn select(mask: &[bool; N], true_val: &Self, false_val: &Self) -> Self {
         let mut r = Self::zero(true_val.dtype);
         for i in 0..N {
-            r.data[i] = if mask[i] { true_val.data[i] } else { false_val.data[i] };
+            r.data[i] = if mask[i] {
+                true_val.data[i]
+            } else {
+                false_val.data[i]
+            };
         }
         r
     }
 }
 
 impl<const N: usize> Simd for SimdStack<N> {
-    fn dtype(&self) -> DType { self.dtype }
-    fn len(&self) -> usize { N }
-    fn reduce_sum(&self) -> f64 { self.reduce_add() }
-    fn reduce_max(&self) -> f64 { self.reduce_max() }
-    fn reduce_min(&self) -> f64 { self.reduce_min() }
-    fn lane(&self, idx: usize) -> f64 { self.get(idx) }
+    fn dtype(&self) -> DType {
+        self.dtype
+    }
+    fn len(&self) -> usize {
+        N
+    }
+    fn reduce_sum(&self) -> f64 {
+        self.reduce_add()
+    }
+    fn reduce_max(&self) -> f64 {
+        self.reduce_max()
+    }
+    fn reduce_min(&self) -> f64 {
+        self.reduce_min()
+    }
+    fn lane(&self, idx: usize) -> f64 {
+        self.get(idx)
+    }
 
     fn map(&self, f: &dyn Fn(f64) -> f64) -> Vec<f64> {
         self.data.iter().map(|&x| f(x)).collect()
@@ -160,7 +210,8 @@ mod tests {
 
     #[test]
     fn test_stack_reduce() {
-        let v = SimdStack::<8>::from_elements(DType::I32, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        let v =
+            SimdStack::<8>::from_elements(DType::I32, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
         assert_eq!(v.reduce_add(), 36.0);
         assert_eq!(v.reduce_max(), 8.0);
         assert_eq!(v.reduce_min(), 1.0);

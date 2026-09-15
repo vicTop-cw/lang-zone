@@ -23,7 +23,10 @@ struct Parser {
 
 impl Parser {
     fn new(s: &str) -> Self {
-        Self { input: s.chars().collect(), pos: 0 }
+        Self {
+            input: s.chars().collect(),
+            pos: 0,
+        }
     }
 
     fn is_at_end(&self) -> bool {
@@ -54,7 +57,12 @@ impl Parser {
         self.skip_ws();
         match self.advance() {
             Some(c) if c == expected => Ok(()),
-            Some(c) => Err(format!("expected '{}' but found '{}' at pos {}", expected, c, self.pos - 1)),
+            Some(c) => Err(format!(
+                "expected '{}' but found '{}' at pos {}",
+                expected,
+                c,
+                self.pos - 1
+            )),
             None => Err(format!("expected '{}' but reached end of input", expected)),
         }
     }
@@ -82,7 +90,7 @@ impl Parser {
         Ok(flatten_intersection(types))
     }
 
-fn parse_optional(&mut self) -> Result<Type, String> {
+    fn parse_optional(&mut self) -> Result<Type, String> {
         let ty = self.parse_primary()?;
         self.skip_ws();
         if self.peek() == Some('?') {
@@ -146,9 +154,15 @@ fn parse_optional(&mut self) -> Result<Type, String> {
                     let mut args = args;
                     let err = args.pop().unwrap();
                     let ok = args.pop().unwrap();
-                    Ok(Type::Result { ok: Box::new(ok), err: Box::new(err) })
+                    Ok(Type::Result {
+                        ok: Box::new(ok),
+                        err: Box::new(err),
+                    })
                 }
-                _ => Ok(Type::Generic { base: Box::new(ty), args }),
+                _ => Ok(Type::Generic {
+                    base: Box::new(ty),
+                    args,
+                }),
             }
         } else {
             Ok(ty)
@@ -166,9 +180,16 @@ fn parse_optional(&mut self) -> Result<Type, String> {
             args.push(self.parse_type()?);
             self.skip_ws();
             match self.peek() {
-                Some(',') => { self.advance(); }
+                Some(',') => {
+                    self.advance();
+                }
                 Some('>') => break,
-                Some(c) => return Err(format!("expected ',' or '>' but found '{}' at pos {}", c, self.pos)),
+                Some(c) => {
+                    return Err(format!(
+                        "expected ',' or '>' but found '{}' at pos {}",
+                        c, self.pos
+                    ))
+                }
                 None => return Err("unterminated generic args".into()),
             }
         }
@@ -187,9 +208,16 @@ fn parse_optional(&mut self) -> Result<Type, String> {
             params.push(self.parse_type()?);
             self.skip_ws();
             match self.peek() {
-                Some(',') => { self.advance(); }
+                Some(',') => {
+                    self.advance();
+                }
                 Some(')') => break,
-                Some(c) => return Err(format!("expected ',' or ')' but found '{}' at pos {}", c, self.pos)),
+                Some(c) => {
+                    return Err(format!(
+                        "expected ',' or ')' but found '{}' at pos {}",
+                        c, self.pos
+                    ))
+                }
                 None => return Err("unterminated function parameter list".into()),
             }
         }
@@ -198,7 +226,10 @@ fn parse_optional(&mut self) -> Result<Type, String> {
         self.expect('-')?;
         self.expect('>')?;
         let ret = self.parse_type()?;
-        Ok(Type::Fn { params, ret: Box::new(ret) })
+        Ok(Type::Fn {
+            params,
+            ret: Box::new(ret),
+        })
     }
 
     fn parse_paren_or_tuple(&mut self) -> Result<Type, String> {
@@ -325,7 +356,10 @@ mod tests {
     fn parse_generic() {
         assert_eq!(
             parse_type("List<int>").unwrap(),
-            Type::Generic { base: Box::new(Type::Named("List".into())), args: vec![Type::Int] }
+            Type::Generic {
+                base: Box::new(Type::Named("List".into())),
+                args: vec![Type::Int]
+            }
         );
     }
 
@@ -345,7 +379,10 @@ mod tests {
     fn parse_result() {
         assert_eq!(
             parse_type("Result<int, str>").unwrap(),
-            Type::Result { ok: Box::new(Type::Int), err: Box::new(Type::Str) }
+            Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(Type::Str)
+            }
         );
     }
 
@@ -353,7 +390,10 @@ mod tests {
     fn parse_fn() {
         assert_eq!(
             parse_type("fn(int, int) -> int").unwrap(),
-            Type::Fn { params: vec![Type::Int, Type::Int], ret: Box::new(Type::Int) }
+            Type::Fn {
+                params: vec![Type::Int, Type::Int],
+                ret: Box::new(Type::Int)
+            }
         );
     }
 
@@ -367,10 +407,7 @@ mod tests {
 
     #[test]
     fn parse_ref() {
-        assert_eq!(
-            parse_type("&int").unwrap(),
-            Type::Ref(Box::new(Type::Int))
-        );
+        assert_eq!(parse_type("&int").unwrap(), Type::Ref(Box::new(Type::Int)));
         assert_eq!(
             parse_type("&mut int").unwrap(),
             Type::MutRef(Box::new(Type::Int))

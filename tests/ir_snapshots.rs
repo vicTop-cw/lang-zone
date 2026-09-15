@@ -6,9 +6,9 @@
 // - 结构体 / 控制流 / 字面量 / 表达式 IR 输出验证
 // - DEMO 文件批量 IR 快照测试
 
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::fs;
 
 /// 编译单个 .lz 文件并验证 IR 生成，返回 IR 文本
 fn test_ir_emit(file_path: &str) -> Result<String, String> {
@@ -63,20 +63,35 @@ def add(x: int, y: int) -> int =
 def greet(name: str) -> str =
     "Hello, " + name
 "#;
-    run_ir_test(lz_source, "simple_fn", &["LZIR v1", "fn add", "fn greet", "x: int", "y: int", "name: str"]);
+    run_ir_test(
+        lz_source,
+        "simple_fn",
+        &[
+            "LZIR v1",
+            "fn add",
+            "fn greet",
+            "x: int",
+            "y: int",
+            "name: str",
+        ],
+    );
 }
 
 #[test]
 fn ir_empty_module() {
     // v157 起空模块也生成模块级魔法属性 items（__name__/__file__/__package__/
     // __path__/__doc__/__is_macro__），共 6 个
-    run_ir_test("", "empty", &[
-        "LZIR v1",
-        ";; 6 items",
-        "const __name__: str",
-        "const __doc__: str",
-        "const __is_macro__: bool",
-    ]);
+    run_ir_test(
+        "",
+        "empty",
+        &[
+            "LZIR v1",
+            ";; 6 items",
+            "const __name__: str",
+            "const __doc__: str",
+            "const __is_macro__: bool",
+        ],
+    );
 }
 
 #[test]
@@ -89,11 +104,19 @@ def main() -> () =
     let b = true
     let u = None
 "#;
-    run_ir_test(source, "literals", &[
-        "LZIR v1", "fn main",
-        "42_i64", "3.14_f64", "\"hello\"",
-        "true", "None",
-    ]);
+    run_ir_test(
+        source,
+        "literals",
+        &[
+            "LZIR v1",
+            "fn main",
+            "42_i64",
+            "3.14_f64",
+            "\"hello\"",
+            "true",
+            "None",
+        ],
+    );
 }
 
 #[test]
@@ -105,10 +128,11 @@ def check_val(x: int) -> str =
     else:
         "non-positive"
 "#;
-    run_ir_test(source, "if_else", &[
-        "LZIR v1", "fn check_val",
-        "if", "else",
-    ]);
+    run_ir_test(
+        source,
+        "if_else",
+        &["LZIR v1", "fn check_val", "if", "else"],
+    );
 }
 
 #[test]
@@ -121,11 +145,11 @@ struct Point =
 def dist(p: Point) -> f64 =
     0.0
 "#;
-    run_ir_test(source, "struct", &[
-        "LZIR v1", "struct Point",
-        "x: f64", "y: f64",
-        "fn dist",
-    ]);
+    run_ir_test(
+        source,
+        "struct",
+        &["LZIR v1", "struct Point", "x: f64", "y: f64", "fn dist"],
+    );
 }
 
 #[test]
@@ -136,11 +160,11 @@ def demo() -> int =
     let y = x + 1
     y
 "#;
-    run_ir_test(source, "let_bindings", &[
-        "LZIR v1", "fn demo",
-        "let x: int", "let y:",
-        "binop",
-    ]);
+    run_ir_test(
+        source,
+        "let_bindings",
+        &["LZIR v1", "fn demo", "let x: int", "let y:", "binop"],
+    );
 }
 
 #[test]
@@ -154,13 +178,11 @@ def main() =
     for x in counter(5):
         print(x)
 "#;
-    run_ir_test(source, "gen_yield", &[
-        "LZIR v1",
-        "fn counter",
-        "yield",
-        "fn main",
-        "for x",
-    ]);
+    run_ir_test(
+        source,
+        "gen_yield",
+        &["LZIR v1", "fn counter", "yield", "fn main", "for x"],
+    );
 }
 
 /// 批量测试：验证关键 DEMO 文件可成功生成 IR
@@ -225,14 +247,11 @@ fn ir_demo_snapshots() {
                 assert!(
                     ir.contains("LZIR v1"),
                     "{} should contain LZIR v1 header, got:\n{}",
-                    file_path, ir
+                    file_path,
+                    ir
                 );
                 // 确保有实际条目（非空 IR）
-                assert!(
-                    !ir.is_empty(),
-                    "{} produced empty IR output",
-                    file_path
-                );
+                assert!(!ir.is_empty(), "{} produced empty IR output", file_path);
                 passed += 1;
             }
             Err(e) => {

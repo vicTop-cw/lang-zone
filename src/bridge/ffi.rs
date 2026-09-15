@@ -4,8 +4,8 @@
 // 实现 Bridge trait，从 TOML 清单读取 FFI 声明并生成绑定代码。
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta,
-    CallResolveResult, ErrorCode, ExportEntry, ExportKind,
+    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta, CallResolveResult, ErrorCode,
+    ExportEntry, ExportKind,
 };
 use crate::util::parse;
 use std::collections::HashMap;
@@ -18,8 +18,8 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct FfiFunction {
     pub name: String,
-    pub params: Vec<String>,    // C 类型名
-    pub return_type: String,    // C 类型名
+    pub params: Vec<String>, // C 类型名
+    pub return_type: String, // C 类型名
     pub link_kind: LinkKind,
     pub library: Option<String>, // .so/.dll/.dylib 名称
 }
@@ -27,8 +27,8 @@ pub struct FfiFunction {
 /// 链接类型
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkKind {
-    Static,   // #[link(name = "foo", kind = "static")]
-    Dynamic,  // #[link(name = "foo", kind = "dylib")]
+    Static,    // #[link(name = "foo", kind = "static")]
+    Dynamic,   // #[link(name = "foo", kind = "dylib")]
     Framework, // #[link(name = "foo", kind = "framework")] (macOS)
 }
 
@@ -53,8 +53,14 @@ impl Default for TypeMarshal {
         lz_to_c.insert("f64".to_string(), "f64".to_string());
         lz_to_c.insert("str".to_string(), "*const std::os::raw::c_char".to_string());
         lz_to_c.insert("bool".to_string(), "i32".to_string()); // C bool → i32
-        lz_to_c.insert("*const ()".to_string(), "*const std::os::raw::c_void".to_string());
-        lz_to_c.insert("*mut ()".to_string(), "*mut std::os::raw::c_void".to_string());
+        lz_to_c.insert(
+            "*const ()".to_string(),
+            "*const std::os::raw::c_void".to_string(),
+        );
+        lz_to_c.insert(
+            "*mut ()".to_string(),
+            "*mut std::os::raw::c_void".to_string(),
+        );
         lz_to_c.insert("usize".to_string(), "usize".to_string());
 
         // 返回值映射
@@ -94,21 +100,25 @@ impl FfiBridge {
         if let Some(funcs_section) = doc.get("functions") {
             for (name, val) in funcs_section {
                 if let Some(table) = val.as_table() {
-                    let params: Vec<String> = table.get("params")
+                    let params: Vec<String> = table
+                        .get("params")
                         .and_then(|v| v.as_str())
                         .map(|s| s.split(',').map(|p| p.trim().to_string()).collect())
                         .unwrap_or_default();
 
-                    let return_type = table.get("return")
+                    let return_type = table
+                        .get("return")
                         .and_then(|v| v.as_str())
                         .unwrap_or("void")
                         .to_string();
 
-                    let library = table.get("library")
+                    let library = table
+                        .get("library")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
 
-                    let link_kind = table.get("link")
+                    let link_kind = table
+                        .get("link")
                         .and_then(|v| v.as_str())
                         .map(|s| match s {
                             "static" => LinkKind::Static,
@@ -117,13 +127,16 @@ impl FfiBridge {
                         })
                         .unwrap_or(LinkKind::Dynamic);
 
-                    functions.insert(name.clone(), FfiFunction {
-                        name: name.clone(),
-                        params,
-                        return_type,
-                        link_kind,
-                        library,
-                    });
+                    functions.insert(
+                        name.clone(),
+                        FfiFunction {
+                            name: name.clone(),
+                            params,
+                            return_type,
+                            link_kind,
+                            library,
+                        },
+                    );
                 }
             }
         }
@@ -152,8 +165,10 @@ impl FfiBridge {
             } else {
                 func.params.join(", ")
             };
-            out.push_str(&format!("    fn {}({}) -> {};\n",
-                func.name, params, func.return_type));
+            out.push_str(&format!(
+                "    fn {}({}) -> {};\n",
+                func.name, params, func.return_type
+            ));
         }
 
         out.push_str("}\n\n");
@@ -201,14 +216,16 @@ impl FfiBridge {
     }
 
     fn wrapper_params(&self, func: &FfiFunction) -> String {
-        func.params.iter()
+        func.params
+            .iter()
             .map(|p| format!("{}: {}", self.param_name(p), self.marshal_c_to_rust(p)))
             .collect::<Vec<_>>()
             .join(", ")
     }
 
     fn wrapper_args(&self, func: &FfiFunction) -> String {
-        func.params.iter()
+        func.params
+            .iter()
             .map(|p| self.param_name(p))
             .collect::<Vec<_>>()
             .join(", ")
@@ -249,9 +266,13 @@ impl FfiBridge {
 }
 
 impl Bridge for FfiBridge {
-    fn name(&self) -> &str { "ffi" }
+    fn name(&self) -> &str {
+        "ffi"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::Runtime }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::Runtime
+    }
 
     fn capabilities(&self) -> BridgeCapability {
         BridgeCapability::FUNCTION_CALL | BridgeCapability::TYPE_REWRITE
@@ -273,28 +294,29 @@ impl Bridge for FfiBridge {
     }
 
     fn resolve_call_full(&self, func_name: &str, _args: &[String]) -> Option<CallResolveResult> {
-        self.gen_call(func_name, _args).map(|rust_path| {
-            CallResolveResult {
+        self.gen_call(func_name, _args)
+            .map(|rust_path| CallResolveResult {
                 rust_path,
                 shim: String::new(),
                 module_name: "ffi".into(),
                 is_macro: false,
                 is_template: false,
-                    ret_result: false,
-            }
-        })
+                ret_result: false,
+            })
     }
 
     fn list_exports(&self, kind: ExportKind) -> Vec<ExportEntry> {
         match kind {
-            ExportKind::Function => {
-                self.functions.keys().map(|name| ExportEntry {
+            ExportKind::Function => self
+                .functions
+                .keys()
+                .map(|name| ExportEntry {
                     name: name.clone(),
                     kind: ExportKind::Function,
                     signature: format!("extern fn {}", name),
                     module: "ffi".into(),
-                }).collect()
-            }
+                })
+                .collect(),
             _ => vec![],
         }
     }

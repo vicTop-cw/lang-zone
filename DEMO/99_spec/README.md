@@ -57,6 +57,26 @@
 | `combo_for_guard_match.lz` | `for` 守卫 + `match` | ✅ |
 | `combo_while_guard_try.lz` | `while` 守卫 + `try/catch` + `:=` | ✅ |
 
+### moddec/ 子目录 — 修饰符装饰器语料（2026-09-14 新增）
+
+规范真值：[`SYNTAX/02-变量与绑定.md`](../../SYNTAX/02-变量与绑定.md) §八（11 基础 + 17 融合）。
+**语料先行（测试先于实现）**：本批语料用于钉住实现缺口，首轮预期为「红」。
+
+| 文件 | 对应特性 | 状态 |
+|------|---------|:----:|
+| `moddec_basic_<axis>_{var,param}_pos.lz` | 11 基础装饰器 × {变量, 形参} | 🔴 待实现 |
+| `moddec_fusion_<axis>_{var,param}_pos.lz` | 17 融合装饰器 × {变量, 形参} | 🔴 待实现 |
+| `golden/*.rs` | 等价关键字形式的冻结产物（AC1/2/3/11/12） | 🔴 待实现 |
+
+**命名规范**：`moddec_<basic|fusion>_<axis>_<var|param>_{pos|neg}.lz`
+
+- `basic`：`mut` `immut` `ref` `owned` `const` `static` `shared` `cell` `lazy` `comptime` `source`
+- `fusion`：`borrow` `borrow_mut` `rcell` `take` `take_ro` `rc` `arc` `weak` `mutex` `rwlock` `atomic` `lazy_static` `once` `lazy_mut` `static_mut` `compile_time` `meta`
+- 反例位于 [`DEMO/99_errors/moddec/`](../99_errors/moddec/)（unknown / position_inline / position_ownline / multi / let_conflict / owend / axis_conflict）
+- 测试驱动：[`tests/moddec_corpus.rs`](../../tests/moddec_corpus.rs)（L1 编译 / L6 反例）、
+  [`tests/moddec_product_assert.rs`](../../tests/moddec_product_assert.rs)（L2–L5 产物断言）
+- 运行：`cargo test --test moddec_corpus --test moddec_product_assert`
+
 ## 实现摘要
 
 - 本目录多数特性在 2026-07-31 审计中确认已实现（lexer/parser/codegen 全链路）

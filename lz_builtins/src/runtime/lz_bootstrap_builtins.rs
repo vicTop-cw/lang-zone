@@ -12,7 +12,9 @@ pub fn lz_all(xs: Vec<bool>) -> bool {
     for x in (xs).into_iter() {
         if !(x) {
             ok = false;
-        } else { ()};
+        } else {
+            ()
+        };
     }
     return ok;
 }
@@ -22,7 +24,9 @@ pub fn lz_any(xs: Vec<bool>) -> bool {
     for x in (xs).into_iter() {
         if x {
             found = true;
-        } else { ()};
+        } else {
+            ()
+        };
     }
     return found;
 }
@@ -32,7 +36,9 @@ pub fn lz_count_if(xs: Vec<i64>, mut pred: impl FnMut(i64) -> bool) -> i64 {
     for x in (xs).into_iter() {
         if pred(x) {
             c = c + 1i64;
-        } else { ()};
+        } else {
+            ()
+        };
     }
     return c;
 }
@@ -51,7 +57,9 @@ pub fn lz_join_words(xs: Vec<String>, sep: String) -> String {
     for w in (xs).into_iter() {
         if !(first) {
             out = out + &sep[..];
-        } else { ()};
+        } else {
+            ()
+        };
         out = out + &w[..];
         first = false;
     }
@@ -64,9 +72,13 @@ pub fn lz_ends_with(s: String, suffix: String) -> bool {
     let mut ok: bool = n >= m;
     let mut i: i64 = 0i64;
     while ok && i < m {
-        if ((s).as_bytes()[((n - m + i) as usize)] as i64) != ((suffix).as_bytes()[((i) as usize)] as i64) {
+        if ((s).as_bytes()[((n - m + i) as usize)] as i64)
+            != ((suffix).as_bytes()[((i) as usize)] as i64)
+        {
             ok = false;
-        } else { ()};
+        } else {
+            ()
+        };
         i = i + 1i64;
     }
     return ok;
@@ -79,10 +91,14 @@ pub fn lz_abs(x: i64) -> i64 {
 pub fn lz_clamp(x: i64, lo: i64, hi: i64) -> i64 {
     if x < lo {
         return lo;
-    } else { ()};
+    } else {
+        ()
+    };
     if x > hi {
         return hi;
-    } else { ()};
+    } else {
+        ()
+    };
     return x;
 }
 
@@ -124,7 +140,13 @@ mod tests {
 
     #[test]
     fn test_lz_join_words() {
-        assert_eq!(lz_join_words(vec!["a".to_string(), "b".to_string(), "c".to_string()], "-".to_string()), "a-b-c");
+        assert_eq!(
+            lz_join_words(
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                "-".to_string()
+            ),
+            "a-b-c"
+        );
         assert_eq!(lz_join_words(Vec::<String>::new(), "-".to_string()), "");
         assert_eq!(lz_join_words(vec!["x".to_string()], ",".to_string()), "x");
     }

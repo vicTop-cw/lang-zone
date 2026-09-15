@@ -15,9 +15,8 @@
 //   4. 与 FfiBridge (extern "C") 完全正交，可同时启用
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeLevel, BridgeMeta,
-    CallResolveResult, ExportEntry, ExportKind, ImportResolveResult,
-    MethodResolveResult,
+    Bridge, BridgeCapability, BridgeLevel, BridgeMeta, CallResolveResult, ExportEntry, ExportKind,
+    ImportResolveResult, MethodResolveResult,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -91,7 +90,8 @@ impl ExternBridge {
     /// 注册一个 extern 块
     pub fn register_block(&mut self, block: ExternBlock) {
         for func in &block.functions {
-            self.symbol_map.insert(func.symbol.clone(), block.name.clone());
+            self.symbol_map
+                .insert(func.symbol.clone(), block.name.clone());
         }
         self.blocks.insert(block.name.clone(), block);
     }
@@ -104,21 +104,23 @@ impl ExternBridge {
         params: Vec<String>,
         return_type: &str,
     ) {
-        let block = self.blocks.entry(block_name.to_string()).or_insert_with(|| {
-            ExternBlock {
+        let block = self
+            .blocks
+            .entry(block_name.to_string())
+            .or_insert_with(|| ExternBlock {
                 name: block_name.to_string(),
                 crate_name: None,
                 functions: Vec::new(),
                 is_std: false,
-            }
-        });
+            });
         block.functions.push(ExternFn {
             symbol: symbol.to_string(),
             params,
             return_type: return_type.to_string(),
             inline: false,
         });
-        self.symbol_map.insert(symbol.to_string(), block_name.to_string());
+        self.symbol_map
+            .insert(symbol.to_string(), block_name.to_string());
     }
 
     // ─── 代码生成 ───
@@ -144,7 +146,10 @@ impl ExternBridge {
         // #[link] 属性（仅非 std crate）
         if let Some(crate_name) = &block.crate_name {
             if !block.is_std {
-                out.push_str(&format!("#[link(name = \"{}\", kind = \"dylib\")]\n", crate_name));
+                out.push_str(&format!(
+                    "#[link(name = \"{}\", kind = \"dylib\")]\n",
+                    crate_name
+                ));
             }
         }
 
@@ -159,7 +164,10 @@ impl ExternBridge {
             let fn_sig = if func.return_type == "()" {
                 format!("    fn {}({});\n", func.symbol, params)
             } else {
-                format!("    fn {}({}) -> {};\n", func.symbol, params, func.return_type)
+                format!(
+                    "    fn {}({}) -> {};\n",
+                    func.symbol, params, func.return_type
+                )
             };
             if func.inline {
                 out.push_str("    #[inline]\n");
@@ -181,7 +189,8 @@ impl ExternBridge {
                 let params = if func.params.is_empty() {
                     String::new()
                 } else {
-                    func.params.iter()
+                    func.params
+                        .iter()
                         .enumerate()
                         .map(|(i, t)| format!("arg_{}: {}", i, t))
                         .collect::<Vec<_>>()
@@ -261,14 +270,16 @@ impl Default for ExternBridge {
 // ══════════════════════════════════════════════════════════════
 
 impl Bridge for ExternBridge {
-    fn name(&self) -> &str { "extern_rust" }
+    fn name(&self) -> &str {
+        "extern_rust"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::LinkTime }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::LinkTime
+    }
 
     fn capabilities(&self) -> BridgeCapability {
-        BridgeCapability::IMPORT
-            | BridgeCapability::FUNCTION_CALL
-            | BridgeCapability::TYPE_REWRITE
+        BridgeCapability::IMPORT | BridgeCapability::FUNCTION_CALL | BridgeCapability::TYPE_REWRITE
     }
 
     fn meta(&self) -> BridgeMeta {
@@ -292,7 +303,11 @@ impl Bridge for ExternBridge {
     /// 示例：
     ///   import extern::serde_json::to_string  → use serde_json::to_string;
     ///   import extern::rayon::prelude        → use rayon::prelude;
-    fn resolve_import_full(&self, module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import_full(
+        &self,
+        module_path: &[String],
+        _items: &[String],
+    ) -> Option<ImportResolveResult> {
         if module_path.is_empty() {
             return None;
         }
@@ -423,14 +438,16 @@ impl Bridge for ExternBridge {
                 }
                 entries
             }
-            ExportKind::Module => {
-                self.blocks.keys().map(|name| ExportEntry {
+            ExportKind::Module => self
+                .blocks
+                .keys()
+                .map(|name| ExportEntry {
                     name: name.clone(),
                     kind: ExportKind::Module,
                     signature: format!("extern \"Rust\" block: {}", name),
                     module: String::new(),
-                }).collect()
-            }
+                })
+                .collect(),
             _ => vec![],
         }
     }
@@ -451,8 +468,18 @@ mod tests {
     fn make_bridge() -> ExternBridge {
         let mut bridge = ExternBridge::new();
         bridge.register_fn("serde", "to_string", vec!["&str".to_string()], "String");
-        bridge.register_fn("serde", "from_str", vec!["&str".to_string()], "serde_json::Value");
-        bridge.register_fn("rayon", "par_iter", vec!["&[T]".to_string()], "RayonIter<T>");
+        bridge.register_fn(
+            "serde",
+            "from_str",
+            vec!["&str".to_string()],
+            "serde_json::Value",
+        );
+        bridge.register_fn(
+            "rayon",
+            "par_iter",
+            vec!["&[T]".to_string()],
+            "RayonIter<T>",
+        );
         bridge
     }
 
@@ -461,14 +488,21 @@ mod tests {
         let bridge = ExternBridge::new();
         assert_eq!(bridge.name(), "extern_rust");
         assert_eq!(bridge.level(), BridgeLevel::LinkTime);
-        assert!(bridge.capabilities().contains(BridgeCapability::FUNCTION_CALL));
+        assert!(bridge
+            .capabilities()
+            .contains(BridgeCapability::FUNCTION_CALL));
         assert!(bridge.capabilities().contains(BridgeCapability::IMPORT));
     }
 
     #[test]
     fn test_register_fn() {
         let mut bridge = ExternBridge::new();
-        bridge.register_fn("test", "foo", vec!["i32".to_string(), "i64".to_string()], "i64");
+        bridge.register_fn(
+            "test",
+            "foo",
+            vec!["i32".to_string(), "i64".to_string()],
+            "i64",
+        );
         assert_eq!(bridge.export_count(), 1);
     }
 
@@ -515,7 +549,9 @@ mod tests {
     #[test]
     fn test_resolve_call_extern_prefix() {
         let bridge = make_bridge();
-        let r = bridge.resolve_call_full("extern::serde::to_string", &[]).unwrap();
+        let r = bridge
+            .resolve_call_full("extern::serde::to_string", &[])
+            .unwrap();
         assert_eq!(r.rust_path, "to_string");
     }
 
@@ -581,9 +617,15 @@ mod tests {
         let bridge = make_bridge();
         let exports = bridge.list_exports(ExportKind::Function);
         assert_eq!(exports.len(), 3);
-        assert!(exports.iter().any(|e| e.name == "to_string" && e.module == "serde"));
-        assert!(exports.iter().any(|e| e.name == "from_str" && e.module == "serde"));
-        assert!(exports.iter().any(|e| e.name == "par_iter" && e.module == "rayon"));
+        assert!(exports
+            .iter()
+            .any(|e| e.name == "to_string" && e.module == "serde"));
+        assert!(exports
+            .iter()
+            .any(|e| e.name == "from_str" && e.module == "serde"));
+        assert!(exports
+            .iter()
+            .any(|e| e.name == "par_iter" && e.module == "rayon"));
     }
 
     #[test]

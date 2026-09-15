@@ -30,8 +30,14 @@ fn lex_numbers_and_strings() {
     let kinds: Vec<String> = toks.iter().map(|t| format!("{:?}", t)).collect();
     // 至少包含数字与字符串字面量 token
     assert!(kinds.iter().any(|k| k.contains("42")), "缺整数: {kinds:?}");
-    assert!(kinds.iter().any(|k| k.contains("3.14")), "缺浮点: {kinds:?}");
-    assert!(kinds.iter().any(|k| k.contains("hello")), "缺字符串: {kinds:?}");
+    assert!(
+        kinds.iter().any(|k| k.contains("3.14")),
+        "缺浮点: {kinds:?}"
+    );
+    assert!(
+        kinds.iter().any(|k| k.contains("hello")),
+        "缺字符串: {kinds:?}"
+    );
 }
 
 #[test]
@@ -43,7 +49,9 @@ fn lex_rejects_invalid_int_overflow() {
         "溢出整数应产生 LexError: {toks:?}"
     );
     assert!(
-        !toks.iter().any(|t| format!("{:?}", t).starts_with("IntLit(")),
+        !toks
+            .iter()
+            .any(|t| format!("{:?}", t).starts_with("IntLit(")),
         "溢出整数不应成为合法 IntLit token: {toks:?}"
     );
 }
@@ -52,7 +60,8 @@ fn lex_rejects_invalid_int_overflow() {
 fn lex_rejects_unterminated_string() {
     let toks = lex("\"abc");
     assert!(
-        toks.iter().any(|t| format!("{:?}", t).contains("error") || format!("{:?}", t).contains("Error")),
+        toks.iter()
+            .any(|t| format!("{:?}", t).contains("error") || format!("{:?}", t).contains("Error")),
         "未终止字符串应产生错误 token: {toks:?}"
     );
 }
@@ -62,9 +71,15 @@ fn lex_comments_and_operators() {
     let toks = lex("// 行注释\nx = 1 // 尾注释\n");
     let kinds: Vec<String> = toks.iter().map(|t| format!("{:?}", t)).collect();
     // 注释内容不应出现在 token 流
-    assert!(!kinds.iter().any(|k| k.contains("行注释")), "注释被泄漏: {kinds:?}");
+    assert!(
+        !kinds.iter().any(|k| k.contains("行注释")),
+        "注释被泄漏: {kinds:?}"
+    );
     // 运算符应识别（语言用 `=` 赋值，token 为 Eq）
-    assert!(kinds.iter().any(|k| k.contains("Eq")), "缺赋值运算符 Eq: {kinds:?}");
+    assert!(
+        kinds.iter().any(|k| k.contains("Eq")),
+        "缺赋值运算符 Eq: {kinds:?}"
+    );
 }
 
 #[test]
@@ -75,7 +90,11 @@ fn parse_def_signature() {
     assert_eq!(f.name, "add");
     assert_eq!(f.params.len(), 2);
     // 类型标注在语法层规范化为底层类型（int → i64，float → f64）
-    let rt = f.return_type.as_ref().map(|t| t.to_string()).unwrap_or_default();
+    let rt = f
+        .return_type
+        .as_ref()
+        .map(|t| t.to_string())
+        .unwrap_or_default();
     assert!(
         rt == "int" || rt == "i64",
         "返回类型应为 int/i64，实际: {rt}"
@@ -112,9 +131,7 @@ fn parse_top_level_statements_and_control_flow() {
 
 #[test]
 fn parse_try_catch() {
-    let m = parse_ok(
-        "def main() =\n    try:\n        let v = 1\n    catch e:\n        print(e)\n",
-    );
+    let m = parse_ok("def main() =\n    try:\n        let v = 1\n    catch e:\n        print(e)\n");
     assert_eq!(m.functions.len(), 1);
 }
 
@@ -129,11 +146,11 @@ fn parse_enum_like() {
 #[test]
 fn parse_rejects_malformed() {
     let cases = [
-        "def f( = 1\n",                 // 参数缺名
-        "def f() =\n    let = 1\n",      // let 缺变量名
-        "struct = \n",                   // struct 缺名
+        "def f( = 1\n",                                // 参数缺名
+        "def f() =\n    let = 1\n",                    // let 缺变量名
+        "struct = \n",                                 // struct 缺名
         "def f() =\n    if x > 1\n        print(1)\n", // if 缺冒号
-        "def f() =\n    print(1 + )\n",  // 表达式缺操作数
+        "def f() =\n    print(1 + )\n",                // 表达式缺操作数
     ];
     for (i, src) in cases.iter().enumerate() {
         assert!(parse(src).is_err(), "case#{i} 应被拒绝: {src}");

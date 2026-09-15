@@ -3,9 +3,9 @@
 //
 // 对标 Rust `std::error::Error` trait + Python SyntaxError/ImportError 分层设计
 
+use crate::lexer::Span;
 use std::fmt;
 use std::io;
-use crate::lexer::Span;
 
 /// 编译器错误类别
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

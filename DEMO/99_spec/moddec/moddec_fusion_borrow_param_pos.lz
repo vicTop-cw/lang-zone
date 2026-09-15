@@ -1,0 +1,10 @@
+// 修饰符装饰器语料 — borrow @ param（期望：编译通过 + 产物断言）
+// 规范：SYNTAX/02-变量与绑定.md §八
+// 备注：借用族形参在「按值返回」体下命中 lz 既有 codegen 限制（rustc E0308，与装饰器无关）；
+//       改用「只读消费（print）」体，仍验证装饰器落于形参位。
+def f(@borrow v: int) =
+    print(v)
+
+def main() =
+    x = 7
+    f(x)

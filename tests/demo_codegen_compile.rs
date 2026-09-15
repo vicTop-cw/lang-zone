@@ -44,17 +44,17 @@ const KNOWN_TRANSPILE_FAILURES: &[&str] = &[
 
 /// 产物编译阶段（rustc）已知失败 —— 基线快照 2026-09-09（含后续修复收窄后剩余项）
 const KNOWN_RUSTC_FAILURES: &[&str] = &[
-    "DEMO/lz_std/error.lz",                      // E0658: `!` 类型是实验特性 + E0599 chain_str
-    "DEMO/lz_std/traits.lz",                     // 迭代协议 trait 默认方法缺 Item: Clone / LzAdd 约束
-    "DEMO/lz_std/iter.lz",                       // 同 traits：Item 约束 + E0502/E0594 闭包捕获
-    "DEMO/04_functions/spread_protocol.lz",      // E0403: 泛型参数 `T` 重复
+    "DEMO/lz_std/error.lz",  // E0658: `!` 类型是实验特性 + E0599 chain_str
+    "DEMO/lz_std/traits.lz", // 迭代协议 trait 默认方法缺 Item: Clone / LzAdd 约束
+    "DEMO/lz_std/iter.lz",   // 同 traits：Item 约束 + E0502/E0594 闭包捕获
+    "DEMO/04_functions/spread_protocol.lz", // E0403: 泛型参数 `T` 重复
     "DEMO/boundary-coverage/combo-defer-guard.lz", // E0308: 类型不匹配
     // ── 以下 5 项为预存回归（基线 a4ad0a0 即存在，非本次 __init__ 注入引入）──
-    "DEMO/lz_std/string.lz",                       // E0599: no method `slice` found for `String`
-    "DEMO/lz_std/option.lz",                       // E0308: mismatched types
-    "DEMO/lz_std/dict.lz",                         // E0308: mismatched types
+    "DEMO/lz_std/string.lz", // E0599: no method `slice` found for `String`
+    "DEMO/lz_std/option.lz", // E0308: mismatched types
+    "DEMO/lz_std/dict.lz",   // E0308: mismatched types
     "DEMO/07_data_structures/callable_objects.lz", // E0609: no field `1` on type `((i64, i64),)`
-    "DEMO/05_expressions/pipe_semantics.lz",       // E0308: mismatched types
+    "DEMO/05_expressions/pipe_semantics.lz", // E0308: mismatched types
     // 原为转译期失败，where 子句缩进配平修复后已可转译，转入产物编译失败
     "DEMO/04_functions/generics.lz",
     "DEMO/10_error_handling/panic_raise_try.lz",
@@ -302,13 +302,18 @@ fn check_one(lz: &Path, rlib: Option<&Path>, workdir: &Path) -> Result<(), Failu
         .arg("-L")
         .arg(format!(
             "dependency={}",
-            manifest().join("target").join("debug").join("deps").display()
+            manifest()
+                .join("target")
+                .join("debug")
+                .join("deps")
+                .display()
         ))
         .arg(&rs)
         .arg("-o")
         .arg(&out_rlib);
     if let Some(r) = rlib {
-        cmd.arg("--extern").arg(format!("lz_builtins={}", r.display()));
+        cmd.arg("--extern")
+            .arg(format!("lz_builtins={}", r.display()));
     }
 
     let res = cmd.output();
@@ -362,8 +367,18 @@ fn run_gate(files: &[PathBuf], title: &str) {
                 Stage::Transpile => KNOWN_TRANSPILE_FAILURES.contains(&f.file.as_str()),
                 Stage::Rustc => KNOWN_RUSTC_FAILURES.contains(&f.file.as_str()),
             };
-            let mark = if known { "·(已在基线)" } else { " ❌新增" };
-            println!("    [{}]{} {}\n        {}", f.stage.name(), mark, f.file, f.msg);
+            let mark = if known {
+                "·(已在基线)"
+            } else {
+                " ❌新增"
+            };
+            println!(
+                "    [{}]{} {}\n        {}",
+                f.stage.name(),
+                mark,
+                f.file,
+                f.msg
+            );
             if !known {
                 unexpected.push(f);
             }

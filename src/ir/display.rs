@@ -436,9 +436,14 @@ impl fmt::Display for Stmt {
                 value,
                 is_mut,
                 is_ref,
+                ..
             } => {
                 let kw = if *is_ref {
-                    if *is_mut { "let mut ref" } else { "let ref" }
+                    if *is_mut {
+                        "let mut ref"
+                    } else {
+                        "let ref"
+                    }
                 } else if *is_mut {
                     "let mut"
                 } else {

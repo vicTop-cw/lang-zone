@@ -133,7 +133,9 @@ impl Display for LzError {
 
 impl std::error::Error for LzError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.as_ref().map(|e| e.as_ref() as &(dyn std::error::Error + 'static))
+        self.source
+            .as_ref()
+            .map(|e| e.as_ref() as &(dyn std::error::Error + 'static))
     }
 
     fn cause(&self) -> Option<&dyn std::error::Error> {
@@ -227,15 +229,33 @@ impl ErrorKind {
 // 便捷构造函数
 // ══════════════════════════════════════════════════════════════
 
-pub fn error(msg: impl Into<String>) -> LzError { LzError::new(msg) }
-pub fn io_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::IO, msg) }
-pub fn type_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::TypeMismatch, msg) }
-pub fn index_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::IndexOutOfBounds, msg) }
-pub fn value_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::InvalidInput, msg) }
-pub fn parse_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::ParseError, msg) }
-pub fn not_implemented(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::Unimplemented, msg) }
-pub fn internal_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::Internal, msg) }
-pub fn json_error(msg: impl Into<String>) -> LzError { LzError::kind(ErrorKind::JsonError, msg) }
+pub fn error(msg: impl Into<String>) -> LzError {
+    LzError::new(msg)
+}
+pub fn io_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::IO, msg)
+}
+pub fn type_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::TypeMismatch, msg)
+}
+pub fn index_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::IndexOutOfBounds, msg)
+}
+pub fn value_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::InvalidInput, msg)
+}
+pub fn parse_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::ParseError, msg)
+}
+pub fn not_implemented(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::Unimplemented, msg)
+}
+pub fn internal_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::Internal, msg)
+}
+pub fn json_error(msg: impl Into<String>) -> LzError {
+    LzError::kind(ErrorKind::JsonError, msg)
+}
 
 // ══════════════════════════════════════════════════════════════
 // Result 扩展 trait
@@ -246,23 +266,47 @@ pub trait ResultExt<T, E> {
     fn unwrap_or(self, default: T) -> T;
     fn unwrap_or_else<F: FnOnce(E) -> T>(self, f: F) -> T;
     fn expect(self, msg: &str) -> T;
-    fn unwrap(self) -> T where E: Debug;
-    fn map_err<F, F2>(self, op: F) -> Result<T, F2> where F: FnOnce(E) -> F2;
+    fn unwrap(self) -> T
+    where
+        E: Debug;
+    fn map_err<F, F2>(self, op: F) -> Result<T, F2>
+    where
+        F: FnOnce(E) -> F2;
     fn is_ok(&self) -> bool;
     fn is_err(&self) -> bool;
 }
 
 impl<T, E: Debug> ResultExt<T, E> for Result<T, E> {
-    fn ok(self) -> Option<T> { self.ok() }
-    fn unwrap_or(self, default: T) -> T { self.unwrap_or(default) }
-    fn unwrap_or_else<F: FnOnce(E) -> T>(self, f: F) -> T { self.unwrap_or_else(f) }
-    fn expect(self, msg: &str) -> T { self.expect(msg) }
-    fn unwrap(self) -> T where E: Debug { self.unwrap() }
-    fn map_err<F, F2>(self, op: F) -> Result<T, F2> where F: FnOnce(E) -> F2 {
+    fn ok(self) -> Option<T> {
+        self.ok()
+    }
+    fn unwrap_or(self, default: T) -> T {
+        self.unwrap_or(default)
+    }
+    fn unwrap_or_else<F: FnOnce(E) -> T>(self, f: F) -> T {
+        self.unwrap_or_else(f)
+    }
+    fn expect(self, msg: &str) -> T {
+        self.expect(msg)
+    }
+    fn unwrap(self) -> T
+    where
+        E: Debug,
+    {
+        self.unwrap()
+    }
+    fn map_err<F, F2>(self, op: F) -> Result<T, F2>
+    where
+        F: FnOnce(E) -> F2,
+    {
         self.map_err(op)
     }
-    fn is_ok(&self) -> bool { self.is_ok() }
-    fn is_err(&self) -> bool { self.is_err() }
+    fn is_ok(&self) -> bool {
+        self.is_ok()
+    }
+    fn is_err(&self) -> bool {
+        self.is_err()
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -282,15 +326,33 @@ pub trait OptionExt<T> {
 }
 
 impl<T> OptionExt<T> for Option<T> {
-    fn unwrap_or(self, default: T) -> T { self.unwrap_or(default) }
-    fn unwrap_or_else<F: FnOnce() -> T>(self, f: F) -> T { self.unwrap_or_else(f) }
-    fn expect(self, msg: &str) -> T { self.expect(msg) }
-    fn unwrap(self) -> T { self.unwrap() }
-    fn is_some(&self) -> bool { self.is_some() }
-    fn is_none(&self) -> bool { self.is_none() }
-    fn ok_or<E: Debug>(self, err: E) -> Result<T, E> { self.ok_or(err) }
-    fn and_then<U, F: FnOnce(T) -> Option<U>>(self, f: F) -> Option<U> { self.and_then(f) }
-    fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Option<U> { self.map(f) }
+    fn unwrap_or(self, default: T) -> T {
+        self.unwrap_or(default)
+    }
+    fn unwrap_or_else<F: FnOnce() -> T>(self, f: F) -> T {
+        self.unwrap_or_else(f)
+    }
+    fn expect(self, msg: &str) -> T {
+        self.expect(msg)
+    }
+    fn unwrap(self) -> T {
+        self.unwrap()
+    }
+    fn is_some(&self) -> bool {
+        self.is_some()
+    }
+    fn is_none(&self) -> bool {
+        self.is_none()
+    }
+    fn ok_or<E: Debug>(self, err: E) -> Result<T, E> {
+        self.ok_or(err)
+    }
+    fn and_then<U, F: FnOnce(T) -> Option<U>>(self, f: F) -> Option<U> {
+        self.and_then(f)
+    }
+    fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Option<U> {
+        self.map(f)
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -298,12 +360,21 @@ impl<T> OptionExt<T> for Option<T> {
 // ══════════════════════════════════════════════════════════════
 
 pub fn assert_true(condition: bool, message: &str) -> Result<(), LzError> {
-    if condition { Ok(()) } else { Err(LzError::kind(ErrorKind::AssertionFailed, message)) }
+    if condition {
+        Ok(())
+    } else {
+        Err(LzError::kind(ErrorKind::AssertionFailed, message))
+    }
 }
 
 pub fn assert_eq_vals<T: PartialEq + Debug>(a: T, b: T, msg: &str) -> Result<(), LzError> {
-    if a == b { Ok(()) } else {
-        Err(LzError::kind(ErrorKind::AssertionFailed, format!("{}: {:?} != {:?}", msg, a, b)))
+    if a == b {
+        Ok(())
+    } else {
+        Err(LzError::kind(
+            ErrorKind::AssertionFailed,
+            format!("{}: {:?} != {:?}", msg, a, b),
+        ))
     }
 }
 

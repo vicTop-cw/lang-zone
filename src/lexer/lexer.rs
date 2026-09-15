@@ -1,8 +1,8 @@
 // Lang-Zong 编译器 — lexer/lexer.rs
 // 词法分析器: 源码 → Token 流
+use super::indent::IndentStack;
 use super::token::Token;
 use crate::util::chars::is_build_ws;
-use super::indent::IndentStack;
 
 /// 构建块符号（`=:` `~:` `*: ` `^:`）之前的合法边界：
 /// 空白字符，或括号/方括号/花括号/逗号（即处于调用实参、下标、元组等位置）。
@@ -76,7 +76,9 @@ impl Lexer {
 
     fn skip_line_comment(&mut self) {
         while let Some(c) = self.peek() {
-            if c == '\n' { break; }
+            if c == '\n' {
+                break;
+            }
             self.advance();
         }
     }
@@ -101,7 +103,9 @@ impl Lexer {
                     self.advance();
                     depth -= 1;
                 }
-                Some(_) => { self.advance(); }
+                Some(_) => {
+                    self.advance();
+                }
             }
         }
     }
@@ -120,7 +124,9 @@ impl Lexer {
                             num.push(self.advance().unwrap());
                         } else if c == '_' {
                             self.advance();
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
                     match i64::from_str_radix(&num[2..].replace('_', ""), 16) {
                         Ok(val) => return Token::IntLit(val),
@@ -141,11 +147,15 @@ impl Lexer {
                             num.push(self.advance().unwrap());
                         } else if c == '_' {
                             self.advance();
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
                     match i64::from_str_radix(&num[2..].replace('_', ""), 8) {
                         Ok(val) => return Token::IntLit(val),
-                        Err(_) => return Token::LexError(format!("八进制值溢出 i64 范围: {}", num)),
+                        Err(_) => {
+                            return Token::LexError(format!("八进制值溢出 i64 范围: {}", num))
+                        }
                     }
                 }
                 Some('b') | Some('B') => {
@@ -155,11 +165,15 @@ impl Lexer {
                             num.push(self.advance().unwrap());
                         } else if c == '_' {
                             self.advance();
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
                     match i64::from_str_radix(&num[2..].replace('_', ""), 2) {
                         Ok(val) => return Token::IntLit(val),
-                        Err(_) => return Token::LexError(format!("二进制值溢出 i64 范围: {}", num)),
+                        Err(_) => {
+                            return Token::LexError(format!("二进制值溢出 i64 范围: {}", num))
+                        }
                     }
                 }
                 _ => {}
@@ -171,7 +185,8 @@ impl Lexer {
                 num.push(self.advance().unwrap());
             } else if c == '_' {
                 self.advance();
-            } else if c == '.' && !is_float && self.peek_n(1).map_or(false, |c| c.is_ascii_digit()) {
+            } else if c == '.' && !is_float && self.peek_n(1).map_or(false, |c| c.is_ascii_digit())
+            {
                 is_float = true;
                 num.push(self.advance().unwrap());
             } else if (c == 'e' || c == 'E') && !is_float {
@@ -204,9 +219,13 @@ impl Lexer {
                 Ok(v) => Token::FloatLit(v),
                 Err(_) => {
                     // 检查是否形如 "123e"（指数无尾数）
-                    if num.ends_with('e') || num.ends_with('E')
-                        || num.ends_with("e+") || num.ends_with("E+")
-                        || num.ends_with("e-") || num.ends_with("E-") {
+                    if num.ends_with('e')
+                        || num.ends_with('E')
+                        || num.ends_with("e+")
+                        || num.ends_with("E+")
+                        || num.ends_with("e-")
+                        || num.ends_with("E-")
+                    {
                         Token::LexError(format!("科学计数法缺少指数: {}", num))
                     } else {
                         Token::LexError(format!("无效的浮点数: {}", num))
@@ -228,18 +247,26 @@ impl Lexer {
                         let before_first = self.chars.get(first_digit_pos.wrapping_sub(1)).copied();
                         let is_unary_minus = match before_first {
                             Some('-') => {
-                                let before_minus = self
-                                    .chars
-                                    .get(first_digit_pos.wrapping_sub(2))
-                                    .copied();
+                                let before_minus =
+                                    self.chars.get(first_digit_pos.wrapping_sub(2)).copied();
                                 match before_minus {
                                     None => true,
                                     Some(c)
                                         if c.is_whitespace()
-                                            || c == '(' || c == '[' || c == '{'
-                                            || c == '=' || c == ':' || c == ','
-                                            || c == '+' || c == '-' || c == '*' || c == '/'
-                                            || c == '<' || c == '>' || c == '|' || c == '&' =>
+                                            || c == '('
+                                            || c == '['
+                                            || c == '{'
+                                            || c == '='
+                                            || c == ':'
+                                            || c == ','
+                                            || c == '+'
+                                            || c == '-'
+                                            || c == '*'
+                                            || c == '/'
+                                            || c == '<'
+                                            || c == '>'
+                                            || c == '|'
+                                            || c == '&' =>
                                     {
                                         true
                                     }
@@ -270,15 +297,42 @@ impl Lexer {
         self.advance(); // skip '\'
         match self.peek() {
             None => Err("字符串以反斜杠结尾".into()),
-            Some('n') => { self.advance(); Ok("\n".into()) }
-            Some('t') => { self.advance(); Ok("\t".into()) }
-            Some('r') => { self.advance(); Ok("\r".into()) }
-            Some('\\') => { self.advance(); Ok("\\".into()) }
-            Some('"') => { self.advance(); Ok("\"".into()) }
-            Some('\'') => { self.advance(); Ok("'".into()) }
-            Some('0') => { self.advance(); Ok("\0".into()) }
-            Some('{') if allow_braces => { self.advance(); Ok("{{".into()) }
-            Some('}') if allow_braces => { self.advance(); Ok("}}".into()) }
+            Some('n') => {
+                self.advance();
+                Ok("\n".into())
+            }
+            Some('t') => {
+                self.advance();
+                Ok("\t".into())
+            }
+            Some('r') => {
+                self.advance();
+                Ok("\r".into())
+            }
+            Some('\\') => {
+                self.advance();
+                Ok("\\".into())
+            }
+            Some('"') => {
+                self.advance();
+                Ok("\"".into())
+            }
+            Some('\'') => {
+                self.advance();
+                Ok("'".into())
+            }
+            Some('0') => {
+                self.advance();
+                Ok("\0".into())
+            }
+            Some('{') if allow_braces => {
+                self.advance();
+                Ok("{{".into())
+            }
+            Some('}') if allow_braces => {
+                self.advance();
+                Ok("}}".into())
+            }
             Some('u') => {
                 self.advance(); // skip 'u'
                 if self.peek() != Some('{') {
@@ -287,7 +341,9 @@ impl Lexer {
                 self.advance(); // skip '{'
                 let mut hex = String::new();
                 while let Some(h) = self.peek() {
-                    if h == '}' { break; }
+                    if h == '}' {
+                        break;
+                    }
                     if !h.is_ascii_hexdigit() || hex.len() >= 6 {
                         return Err(format!("非法 Unicode 转义: \\u{{{}}}", hex));
                     }
@@ -334,13 +390,17 @@ impl Lexer {
 
     fn read_triple_string(&mut self) -> Token {
         // 已经在 '"""' 的第一个 " 处
-        self.advance(); self.advance(); self.advance(); // skip """
+        self.advance();
+        self.advance();
+        self.advance(); // skip """
         let mut s = String::new();
         loop {
             match self.peek() {
                 None => break,
                 Some('"') if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
-                    self.advance(); self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
+                    self.advance();
                     break;
                 }
                 Some(_c) => s.push(self.advance().unwrap()),
@@ -349,16 +409,24 @@ impl Lexer {
         // 去除公共缩进
         let lines: Vec<&str> = s.lines().collect();
         if lines.len() > 1 {
-            let min_indent = lines[1..].iter()
+            let min_indent = lines[1..]
+                .iter()
                 .filter(|l| !l.trim().is_empty())
                 .map(|l| l.len() - l.trim_start().len())
-                .min().unwrap_or(0);
-            let trimmed: Vec<String> = lines.iter().enumerate()
+                .min()
+                .unwrap_or(0);
+            let trimmed: Vec<String> = lines
+                .iter()
+                .enumerate()
                 .map(|(i, l)| {
                     if i == 0 || l.trim().is_empty() {
                         l.to_string()
                     } else {
-                        if l.len() >= min_indent { l[min_indent..].to_string() } else { l.to_string() }
+                        if l.len() >= min_indent {
+                            l[min_indent..].to_string()
+                        } else {
+                            l.to_string()
+                        }
                     }
                 })
                 .collect();
@@ -370,15 +438,19 @@ impl Lexer {
 
     fn read_fstring(&mut self) -> Token {
         self.advance(); // skip f
-        // Check for triple-quoted f-string
+                        // Check for triple-quoted f-string
         if self.peek() == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
-            self.advance(); self.advance(); self.advance();
+            self.advance();
+            self.advance();
+            self.advance();
             let mut s = String::new();
             loop {
                 match self.peek() {
                     None => break,
                     Some('"') if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
-                        self.advance(); self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
+                        self.advance();
                         break;
                     }
                     Some(_c) => s.push(self.advance().unwrap()),
@@ -406,15 +478,19 @@ impl Lexer {
 
     fn read_raw_string(&mut self) -> Token {
         self.advance(); // skip r
-        // r"""...""" 三引号原始字符串（00-词法基础 §2.1）：不处理转义，读到 """ 结束
+                        // r"""...""" 三引号原始字符串（00-词法基础 §2.1）：不处理转义，读到 """ 结束
         if self.peek() == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
-            self.advance(); self.advance(); self.advance();
+            self.advance();
+            self.advance();
+            self.advance();
             let mut s = String::new();
             loop {
                 match self.peek() {
                     None => break,
                     Some('"') if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
-                        self.advance(); self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
+                        self.advance();
                         break;
                     }
                     Some(_c) => s.push(self.advance().unwrap()),
@@ -457,7 +533,6 @@ impl Lexer {
             "const" => Token::Const,
             "let" => Token::Let,
             "owned" => Token::Owned,
-            "owend" => Token::Owned,
             "return" => Token::Return,
             "yield" => Token::Yield,
             "if" => Token::If,
@@ -508,8 +583,8 @@ impl Lexer {
             "is" => Token::Is,
             "duck" => Token::Duck,
             "block" => Token::Block,
-            "True" => Token::True,
-            "False" => Token::False,
+            "True" | "true" => Token::True,
+            "False" | "false" => Token::False,
             _ => Token::Ident(s),
         }
     }
@@ -552,12 +627,14 @@ impl Lexer {
                         None => break,
                         Some('\n') => continue,
                         Some('/') if self.peek_n(1) == Some('/') => {
-                            self.advance(); self.advance();
+                            self.advance();
+                            self.advance();
                             self.skip_line_comment();
                             continue;
                         }
                         Some('/') if self.peek_n(1) == Some('*') => {
-                            self.advance(); self.advance();
+                            self.advance();
+                            self.advance();
                             self.skip_block_comment();
                             continue;
                         }
@@ -566,8 +643,12 @@ impl Lexer {
                     self.handle_indent(col, &mut tokens);
                     line_start = false;
                 }
-                ' ' | '\t' => { self.advance(); }
-                '\r' => { self.advance(); }
+                ' ' | '\t' => {
+                    self.advance();
+                }
+                '\r' => {
+                    self.advance();
+                }
                 // # 不再作为注释：预留给 Rust 风格宏语法，交由下方 _ 兜底跳过
                 '0'..='9' => {
                     let first = self.advance().unwrap();
@@ -603,33 +684,47 @@ impl Lexer {
                 // 构建块符号 =: 变量构建块（前后必须留白，其后必须换行缩进）
                 '=' if self.peek_n(1) == Some(':') => {
                     if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::BuildAssign);
                     } else {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::LexError(
-                            "构建块符号 '=:' 前后必须留白（符号前需空格，符号后需换行缩进）".into()));
+                            "构建块符号 '=:' 前后必须留白（符号前需空格，符号后需换行缩进）".into(),
+                        ));
                     }
                     line_start = false;
                 }
                 // 赋值/比较
                 '=' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::EqEq);
                     line_start = false;
                 }
                 '=' if self.peek_n(1) == Some('>') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::FatArrow);
                     line_start = false;
                 }
-                '=' => { self.advance(); tokens.push(Token::Eq); line_start = false; }
+                '=' => {
+                    self.advance();
+                    tokens.push(Token::Eq);
+                    line_start = false;
+                }
                 '!' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::NotEq);
                     line_start = false;
                 }
-                '!' => { self.advance(); tokens.push(Token::Exclamation); line_start = false; }
+                '!' => {
+                    self.advance();
+                    tokens.push(Token::Exclamation);
+                    line_start = false;
+                }
 
                 // 比较/约束
                 '<' => {
@@ -675,80 +770,117 @@ impl Lexer {
                 // 构建块符号 *: 生成器调用构建块（前后必须留白，其后必须换行缩进）
                 '*' if self.peek_n(1) == Some(':') => {
                     if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::BuildGen);
                     } else {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::LexError(
-                            "构建块符号 '*:' 前后必须留白（符号前需空格，符号后需换行缩进）".into()));
+                            "构建块符号 '*:' 前后必须留白（符号前需空格，符号后需换行缩进）".into(),
+                        ));
                     }
                     line_start = false;
                 }
                 // 算术
                 '+' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::PlusEq);
                     line_start = false;
                 }
-                '+' => { self.advance(); tokens.push(Token::Plus); line_start = false; }
+                '+' => {
+                    self.advance();
+                    tokens.push(Token::Plus);
+                    line_start = false;
+                }
                 '-' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::MinusEq);
                     line_start = false;
                 }
                 '-' if self.peek_n(1) == Some('>') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::Arrow);
                     line_start = false;
                 }
-                '-' => { self.advance(); tokens.push(Token::Minus); line_start = false; }
+                '-' => {
+                    self.advance();
+                    tokens.push(Token::Minus);
+                    line_start = false;
+                }
                 '*' if self.peek_n(1) == Some('*') => {
                     if self.peek_n(2) == Some('=') {
-                        self.advance(); self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::PowEq);
                     } else {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::StarStar);
                     }
                     line_start = false;
                 }
                 '*' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::StarEq);
                     line_start = false;
                 }
-                '*' => { self.advance(); tokens.push(Token::Star); line_start = false; }
+                '*' => {
+                    self.advance();
+                    tokens.push(Token::Star);
+                    line_start = false;
+                }
                 '/' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::SlashEq);
                     line_start = false;
                 }
                 '/' if self.peek_n(1) == Some('/') => {
                     // 行注释（Java/Rust 体系），可出现在行尾
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     self.skip_line_comment();
                 }
                 '/' if self.peek_n(1) == Some('*') => {
                     // 块注释（Java/Rust 体系）
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     self.skip_block_comment();
                 }
-                '/' => { self.advance(); tokens.push(Token::Slash); line_start = false; }
+                '/' => {
+                    self.advance();
+                    tokens.push(Token::Slash);
+                    line_start = false;
+                }
                 '%' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::PercentEq);
                     line_start = false;
                 }
-                '%' => { self.advance(); tokens.push(Token::Percent); line_start = false; }
+                '%' => {
+                    self.advance();
+                    tokens.push(Token::Percent);
+                    line_start = false;
+                }
                 // 构建块符号 ~: 调用构建块（前后必须留白，其后必须换行缩进）
                 '~' if self.peek_n(1) == Some(':') => {
                     if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::BuildCall);
                     } else {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::LexError(
-                            "构建块符号 '~:' 前后必须留白（符号前需空格，符号后需换行缩进）".into()));
+                            "构建块符号 '~:' 前后必须留白（符号前需空格，符号后需换行缩进）".into(),
+                        ));
                     }
                     line_start = false;
                 }
@@ -758,7 +890,9 @@ impl Lexer {
                     // 先检查前置字符（advance 之前），再 advance
                     let prev_before_tilde = self.prev_char();
                     self.advance();
-                    if prev_before_tilde.map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')') {
+                    if prev_before_tilde
+                        .map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')')
+                    {
                         tokens.push(Token::Tilde);
                     } else {
                         tokens.push(Token::Exclamation);
@@ -766,67 +900,97 @@ impl Lexer {
                     line_start = false;
                 }
                 '^' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::XorEq);
                     line_start = false;
                 }
                 '^' => {
                     // `^:` → BuildIndex（索引构建块）
                     if self.peek_n(1) == Some(':') {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::BuildIndex);
                     } else {
                         let spaced = is_build_ws(self.prev_char());
                         self.advance();
-                        tokens.push(if spaced { Token::CaretInfix } else { Token::CaretOp });
+                        tokens.push(if spaced {
+                            Token::CaretInfix
+                        } else {
+                            Token::CaretOp
+                        });
                     }
                     line_start = false;
                 }
 
                 // 位/逻辑
                 '&' if self.peek_n(1) == Some('&') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::AmpAmp);
                     line_start = false;
                 }
                 '&' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::AndEq);
                     line_start = false;
                 }
-                '&' => { self.advance(); tokens.push(Token::Amp); line_start = false; }
+                '&' => {
+                    self.advance();
+                    tokens.push(Token::Amp);
+                    line_start = false;
+                }
                 '|' if self.peek_n(1) == Some('|') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::PipePipe);
                     line_start = false;
                 }
                 '|' if self.peek_n(1) == Some('>') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::Pipe);
                     line_start = false;
                 }
                 '|' if self.peek_n(1) == Some('=') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::OrEq);
                     line_start = false;
                 }
-                '|' => { self.advance(); tokens.push(Token::Pipe_); line_start = false; }
+                '|' => {
+                    self.advance();
+                    tokens.push(Token::Pipe_);
+                    line_start = false;
+                }
 
                 // 标点
                 ':' => {
                     if self.peek_n(1) == Some(':') {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::PathSep);
                     } else if self.peek_n(1) == Some('=') {
-                        self.advance(); self.advance();
+                        self.advance();
+                        self.advance();
                         tokens.push(Token::ColonEq);
                     } else {
-                        self.advance(); tokens.push(Token::Colon);
+                        self.advance();
+                        tokens.push(Token::Colon);
                     }
                     line_start = false;
                 }
-                ',' => { self.advance(); tokens.push(Token::Comma); line_start = false; }
-                ';' => { self.advance(); tokens.push(Token::Semicolon); line_start = false; }
+                ',' => {
+                    self.advance();
+                    tokens.push(Token::Comma);
+                    line_start = false;
+                }
+                ';' => {
+                    self.advance();
+                    tokens.push(Token::Semicolon);
+                    line_start = false;
+                }
                 '.' => {
                     self.advance();
                     if self.peek() == Some('.') {
@@ -842,28 +1006,69 @@ impl Lexer {
                     }
                     line_start = false;
                 }
-                '(' => { self.advance(); tokens.push(Token::LParen); line_start = false; }
-                ')' => { self.advance(); tokens.push(Token::RParen); line_start = false; }
-                '[' => { self.advance(); tokens.push(Token::LBrack); line_start = false; }
-                ']' => { self.advance(); tokens.push(Token::RBrack); line_start = false; }
-                '{' => { self.advance(); tokens.push(Token::LBrace); line_start = false; }
-                '}' => { self.advance(); tokens.push(Token::RBrace); line_start = false; }
-                '@' => { self.advance(); tokens.push(Token::At); line_start = false; }
-                '$' => { self.advance(); tokens.push(Token::Dollar); line_start = false; }
+                '(' => {
+                    self.advance();
+                    tokens.push(Token::LParen);
+                    line_start = false;
+                }
+                ')' => {
+                    self.advance();
+                    tokens.push(Token::RParen);
+                    line_start = false;
+                }
+                '[' => {
+                    self.advance();
+                    tokens.push(Token::LBrack);
+                    line_start = false;
+                }
+                ']' => {
+                    self.advance();
+                    tokens.push(Token::RBrack);
+                    line_start = false;
+                }
+                '{' => {
+                    self.advance();
+                    tokens.push(Token::LBrace);
+                    line_start = false;
+                }
+                '}' => {
+                    self.advance();
+                    tokens.push(Token::RBrace);
+                    line_start = false;
+                }
+                '@' => {
+                    self.advance();
+                    tokens.push(Token::At);
+                    line_start = false;
+                }
+                '$' => {
+                    self.advance();
+                    tokens.push(Token::Dollar);
+                    line_start = false;
+                }
 
                 // 特殊
                 '?' if self.peek_n(1) == Some('?') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::QuestionQuestion);
                     line_start = false;
                 }
                 '?' if self.peek_n(1) == Some('.') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     tokens.push(Token::SafeNav);
                     line_start = false;
                 }
-                '?' => { self.advance(); tokens.push(Token::Question); line_start = false; }
-                '_' if self.peek_n(1).map_or(true, |c| !c.is_alphanumeric() && c != '_') => {
+                '?' => {
+                    self.advance();
+                    tokens.push(Token::Question);
+                    line_start = false;
+                }
+                '_' if self
+                    .peek_n(1)
+                    .map_or(true, |c| !c.is_alphanumeric() && c != '_') =>
+                {
                     self.advance();
                     tokens.push(Token::Underscore);
                     line_start = false;
@@ -871,7 +1076,8 @@ impl Lexer {
 
                 // #! shebang / #!bin macro 宏模块声明
                 '#' if self.peek_n(1) == Some('!') => {
-                    self.advance(); self.advance();
+                    self.advance();
+                    self.advance();
                     // 收集 #! 后到行尾的内容
                     let start = self.pos;
                     while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
@@ -889,14 +1095,12 @@ impl Lexer {
                         tokens.push(Token::At);
                         let sub_src = format!("export{}", &trimmed[6..]);
                         let mut sub = crate::lexer::Lexer::new(&sub_src);
-                        tokens.extend(
-                            sub.tokenize().into_iter().filter(|t| {
-                                !matches!(
-                                    t,
-                                    Token::Eof | Token::Newline | Token::Indent | Token::Dedent
-                                )
-                            }),
-                        );
+                        tokens.extend(sub.tokenize().into_iter().filter(|t| {
+                            !matches!(
+                                t,
+                                Token::Eof | Token::Newline | Token::Indent | Token::Dedent
+                            )
+                        }));
                     } else if trimmed == "no_std" {
                         // #!no_std → @no_std 属性宏（IR 层 ModuleDirective.no_std 处理）
                         tokens.push(Token::At);
@@ -935,4 +1139,3 @@ impl Lexer {
         tokens
     }
 }
-

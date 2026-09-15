@@ -117,7 +117,10 @@ pub fn run_lsp() -> i32 {
             }
             "initialized" => { /* no response */ }
             "textDocument/didOpen" => {
-                if let Some(uri) = msg.pointer("/params/textDocument/uri").and_then(|v| v.as_str()) {
+                if let Some(uri) = msg
+                    .pointer("/params/textDocument/uri")
+                    .and_then(|v| v.as_str())
+                {
                     let text = msg
                         .pointer("/params/textDocument/text")
                         .and_then(|v| v.as_str())
@@ -128,7 +131,10 @@ pub fn run_lsp() -> i32 {
                 }
             }
             "textDocument/didChange" => {
-                if let Some(uri) = msg.pointer("/params/textDocument/uri").and_then(|v| v.as_str()) {
+                if let Some(uri) = msg
+                    .pointer("/params/textDocument/uri")
+                    .and_then(|v| v.as_str())
+                {
                     // Full-document sync (textDocumentSync=2 advertises incremental; clients may send
                     // incremental changes. Simplified: replace whole document with the last
                     // contentChanges[].text).
@@ -142,14 +148,20 @@ pub fn run_lsp() -> i32 {
                 }
             }
             "textDocument/didSave" => {
-                if let Some(uri) = msg.pointer("/params/textDocument/uri").and_then(|v| v.as_str()) {
+                if let Some(uri) = msg
+                    .pointer("/params/textDocument/uri")
+                    .and_then(|v| v.as_str())
+                {
                     if let Some(text) = state.docs.get(uri) {
                         publish_diagnostics(&mut writer, uri, text);
                     }
                 }
             }
             "textDocument/didClose" => {
-                if let Some(uri) = msg.pointer("/params/textDocument/uri").and_then(|v| v.as_str()) {
+                if let Some(uri) = msg
+                    .pointer("/params/textDocument/uri")
+                    .and_then(|v| v.as_str())
+                {
                     state.docs.remove(uri);
                 }
             }
@@ -162,11 +174,7 @@ pub fn run_lsp() -> i32 {
                     let mut result = Vec::new();
                     if let Some(n) = name {
                         // exact match first, then path-tail match
-                        if let Some(sym) = analysis
-                            .symbols
-                            .iter()
-                            .find(|s| s.name == n)
-                        {
+                        if let Some(sym) = analysis.symbols.iter().find(|s| s.name == n) {
                             result.push(location_json(&uri, sym.line));
                         } else if let Some(sym) = analysis
                             .symbols
@@ -206,11 +214,17 @@ pub fn run_lsp() -> i32 {
                 if let (Some(uri), Some((line, _ch))) = (uri, pos) {
                     if let Some(doc) = state.docs.get(&uri) {
                         for name in local_names_before(doc, line) {
-                            items.push(json!({ "label": name, "kind": 6, "detail": "local variable" }));
+                            items.push(
+                                json!({ "label": name, "kind": 6, "detail": "local variable" }),
+                            );
                         }
                     }
                 }
-                respond(&mut writer, id, json!({ "isIncomplete": false, "items": items }));
+                respond(
+                    &mut writer,
+                    id,
+                    json!({ "isIncomplete": false, "items": items }),
+                );
             }
             "textDocument/hover" => {
                 let (uri, pos) = extract_uri_position(&msg);
@@ -219,11 +233,13 @@ pub fn run_lsp() -> i32 {
                     let text = state.docs.get(&uri).cloned().unwrap_or_default();
                     let analysis = analyze(&text, &uri);
                     if let Some(n) = word_at(&text, line, ch) {
-                        if let Some(sym) = analysis
-                            .symbols
-                            .iter()
-                            .find(|s| s.name == n)
-                            .or_else(|| analysis.symbols.iter().find(|s| s.name.split('.').last() == Some(n.as_str())))
+                        if let Some(sym) =
+                            analysis.symbols.iter().find(|s| s.name == n).or_else(|| {
+                                analysis
+                                    .symbols
+                                    .iter()
+                                    .find(|s| s.name.split('.').last() == Some(n.as_str()))
+                            })
                         {
                             result = json!({
                                 "contents": {
@@ -254,24 +270,23 @@ pub fn run_lsp() -> i32 {
 
 /// LSP completion keyword list
 const KEYWORDS: &[&str] = &[
-    "def", "struct", "enum", "trait", "impl", "let", "mut", "const", "ref",
-    "if", "elif", "else", "match", "case", "for", "in", "while", "loop",
-    "break", "continue", "return", "yield", "iterator", "import", "from", "as",
-    "try", "catch", "finally", "raise", "defer", "async", "await", "spawn",
-    "guard", "macro", "template", "comptime", "print", "assert", "test",
-    "True", "False", "and", "or", "not", "is", "where", "self", "duck",
+    "def", "struct", "enum", "trait", "impl", "let", "mut", "const", "ref", "if", "elif", "else",
+    "match", "case", "for", "in", "while", "loop", "break", "continue", "return", "yield",
+    "iterator", "import", "from", "as", "try", "catch", "finally", "raise", "defer", "async",
+    "await", "spawn", "guard", "macro", "template", "comptime", "print", "assert", "test", "True",
+    "False", "and", "or", "not", "is", "where", "self", "duck",
 ];
 
 /// Map a symbol kind to the LSP CompletionItemKind number
 fn symbol_kind_number(kind: &str) -> u8 {
     match kind {
-        "Function" => 3,   // Function
-        "Struct" => 22,    // Struct
-        "Enum" => 23,      // Enum
-        "Trait" => 6,      // Method; Interface=26 is more accurate but stay conservative
-        "Impl" => 6,       // Method
-        "Import" => 18,    // Module
-        "Local" => 6,      // Variable
+        "Function" => 3, // Function
+        "Struct" => 22,  // Struct
+        "Enum" => 23,    // Enum
+        "Trait" => 6,    // Method; Interface=26 is more accurate but stay conservative
+        "Impl" => 6,     // Method
+        "Import" => 18,  // Module
+        "Local" => 6,    // Variable
         _ => 6,
     }
 }
@@ -344,7 +359,11 @@ fn publish_diagnostics(writer: &mut impl Write, uri: &str, text: &str) {
             })
         })
         .collect();
-    notify(writer, "textDocument/publishDiagnostics", json!({ "uri": uri, "diagnostics": items }));
+    notify(
+        writer,
+        "textDocument/publishDiagnostics",
+        json!({ "uri": uri, "diagnostics": items }),
+    );
 }
 
 /// Full analysis of a document: symbol table + diagnostics
@@ -425,7 +444,11 @@ fn collect_symbols_from_ast(module: &crate::ast::Module, source: &str, out: &mut
         if let Some(line) = line {
             out.push(Symbol {
                 name: s.name.clone(),
-                kind: if s.is_enum { "Enum".into() } else { "Struct".into() },
+                kind: if s.is_enum {
+                    "Enum".into()
+                } else {
+                    "Struct".into()
+                },
                 line,
                 detail: if s.is_enum {
                     format!("enum {}", s.name)
@@ -552,10 +575,7 @@ fn find_decl_line(source: &str, keyword: &str, name: &str) -> Option<usize> {
     let pat_long = format!("{}{} ", keyword, name);
     for (idx, line) in source.lines().enumerate() {
         let t = line.trim_start();
-        if t.starts_with(&pat_short)
-            || t.starts_with(&pat_long)
-            || (t == pat_short.trim_end())
-        {
+        if t.starts_with(&pat_short) || t.starts_with(&pat_long) || (t == pat_short.trim_end()) {
             // exclude comments
             if !t.starts_with("//") && !t.starts_with("/*") {
                 return Some(idx);
@@ -842,7 +862,12 @@ fn find_text_after(source: &str, start: usize, text: &str) -> Option<usize> {
     let mut pos = start.min(bytes.len());
     loop {
         // skip whitespace
-        while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t' || bytes[pos] == b'\r' || bytes[pos] == b'\n') {
+        while pos < bytes.len()
+            && (bytes[pos] == b' '
+                || bytes[pos] == b'\t'
+                || bytes[pos] == b'\r'
+                || bytes[pos] == b'\n')
+        {
             pos += 1;
         }
         if pos >= bytes.len() {
@@ -908,8 +933,15 @@ mod tests {
     fn analyze_clean_source_no_diagnostics() {
         let src = "def main() =\n    print(1)\n";
         let a = analyze(src, "file:///test.lz");
-        assert!(a.diagnostics.is_empty(), "expected no diagnostics, got {:?}", a.diagnostics);
-        assert!(a.symbols.iter().any(|s| s.name == "main" && s.kind == "Function"));
+        assert!(
+            a.diagnostics.is_empty(),
+            "expected no diagnostics, got {:?}",
+            a.diagnostics
+        );
+        assert!(a
+            .symbols
+            .iter()
+            .any(|s| s.name == "main" && s.kind == "Function"));
     }
 
     #[test]

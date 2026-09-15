@@ -7,6 +7,74 @@
 // 支持 JSON / bincode 两种缓存格式（见 ir/mod.rs 的 to_json / to_bincode）。
 
 use super::types::IrType;
+use crate::ast::{InteriorMode, SharedMode};
+
+// ── IR 修饰信息（新语义轴子集） ──
+
+/// IR 修饰信息：镜像 `ast::Modifiers` 的**新语义轴**子集。
+///
+/// 基础轴（`mut`/`ref`/`owned`/`const`/`comptime`）由 [`Stmt::Let`] / [`Param`] /
+/// [`ConstDef`] 的既有布尔字段承载；本结构仅承载 T04 新引入、需 Rust 目标类型包装的轴。
+///
+/// 由 `ir/builder.rs` 从 `ast::Modifiers` 映射而来；`codegen` 据此选择 Rust 目标类型
+/// （`Rc/Arc/Weak/Cell/RefCell/Mutex/RwLock/AtomicXxx/OnceCell/OnceLock/LazyLock/static`）。
+///
+/// 设计真值：架构 §1.4 / §3.1（`IrMods`）。
+#[derive(Debug, Clone, Default, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
+pub struct IrMods {
+    /// 静态存储期（`@static` / `@static_mut` / `@lazy_static`）。
+    pub storage_static: bool,
+    /// 共享模式轴（`@shared` / `@rc` / `@arc` / `@weak` / `@mutex` / `@rwlock` / `@atomic`）。
+    pub shared: SharedMode,
+    /// 内部可变模式轴（`@cell` / `@rcell` / `@mutex` / `@rwlock` / `@atomic`）。
+    pub interior: InteriorMode,
+    /// 惰性初始化（`@lazy` / `@once` / `@lazy_mut` / `@lazy_static`）。
+    pub lazy: bool,
+    /// 实参源码形态（`@source` / `@meta`）。
+    pub source: bool,
+    /// 融合型原名（诊断用）；基础装饰器 / 关键字 = `None`。
+    pub origin: Option<String>,
+}
+
+impl IrMods {
+    /// 是否为空（全部轴为默认、无 `origin`）—— 空时 `codegen` 走普通（无包装）路径。
+    pub fn is_empty(&self) -> bool {
+        !self.storage_static
+            && self.shared == SharedMode::None
+            && self.interior == InteriorMode::None
+            && !self.lazy
+            && !self.source
+            && self.origin.is_none()
+    }
+
+    /// 是否需要「类型包装」（共享 / 内部可变 / 惰性任一置位）。
+    pub fn needs_wrapper(&self) -> bool {
+        self.shared != SharedMode::None || self.interior != InteriorMode::None || self.lazy
+    }
+
+    /// 是否为「延迟惰性」——绑定处**不求值**，首次访问经 `get_or_init` 求值一次（AC4）。
+    ///
+    /// `@once` / `@lazy_static` 为线程安全静态，走**即时** `OnceLock::from`（不延迟）；
+    /// 其余（`@lazy` / `@lazy_mut`）走延迟 `OnceCell`。
+    pub fn is_deferred_lazy(&self) -> bool {
+        self.lazy && !matches!(self.origin.as_deref(), Some("once") | Some("lazy_static"))
+    }
+
+    /// 由 AST `Modifiers` 映射（仅取新语义轴子集）。
+    ///
+    /// 基础轴不入本结构——由构造方从 `Modifiers` 的对应字段派生到 `is_mut`/`is_ref`/`is_owned`。
+    pub fn from_ast(m: &crate::ast::Modifiers) -> IrMods {
+        IrMods {
+            storage_static: m.storage_static,
+            shared: m.shared,
+            interior: m.interior,
+            lazy: m.lazy,
+            source: m.source,
+            origin: m.origin.clone(),
+        }
+    }
+}
 
 // ── 源码位置 ──
 
@@ -220,7 +288,10 @@ pub enum IntrinsicKind {
     Extern(Vec<String>), // @extern(Rust), @extern(Python) 外部声明（L1 机制）
     /// #[embed(rust)] / #[embed(py)]：内嵌代码段（G7）
     /// lang = 目标语言（Rust / Python），code = 原样插入生成产物的代码段
-    Embed { lang: String, code: String },
+    Embed {
+        lang: String,
+        code: String,
+    },
     Init,
 }
 
@@ -257,6 +328,10 @@ pub struct Param {
     pub default: Option<Expr>,
     /// 是否为 variadic 参数（..name: T → 在调用处收集剩余实参为切片）
     pub variadic: bool,
+    /// 形参级 comptime 修饰：`def f(comptime n: int)` —— 要求调用实参编译期已知
+    pub comptime: bool,
+    /// 修饰信息（新语义轴；形参的 `@` 修饰符装饰器落点）。
+    pub mods: IrMods,
 }
 
 // ── 字段 ──
@@ -351,9 +426,13 @@ pub struct StructDef {
     /// __new__ 的参数列表（用于 codegen 生成 __lz_new 函数签名）
     pub new_params: Vec<(String, IrType)>,
     pub new_ret_ty: Option<IrType>,
+    /// __new__ 用户体（struct 体内定义时使用，None 则生成占位体）
+    pub new_body: Option<Block>,
     /// 是否定义了 __init__ 后初始化方法
     pub has_init: bool,
     pub init_params: Vec<(String, IrType)>,
+    /// __init__ 用户体（struct 体内定义时使用）
+    pub init_body: Option<Block>,
     /// __implicit_from__ 隐式转换（源类型列表）
     pub implicit_froms: Vec<IrType>,
     pub span: Span,
@@ -414,6 +493,8 @@ pub struct ConstDef {
     pub name: String,
     pub ty: IrType,
     pub value: Expr,
+    /// 修饰信息（新语义轴：`@static` / `@static_mut` / `@lazy_static` / `@const` / `@comptime`）。
+    pub mods: IrMods,
 }
 
 /// 类型别名定义
@@ -528,6 +609,8 @@ pub enum Stmt {
         is_mut: bool,
         /// 引用绑定（ref r = x / let ref r = x）：codegen 生成 `let r = &mut x;` / `&x`
         is_ref: bool,
+        /// 修饰信息（新语义轴：shared/interior/lazy/static/source）。
+        mods: IrMods,
     },
     Assign {
         target: Expr, // 可赋值左值（Var / FieldAccess / IndexGet）

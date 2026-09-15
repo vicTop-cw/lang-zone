@@ -212,7 +212,10 @@ impl IncrCompiler {
 
         // 6. 增量诊断：有错误立即失败（只含变更模块错误）
         if !errors.is_empty() {
-            return Err(format!("Incremental compile failed:\n{}", errors.join("\n")));
+            return Err(format!(
+                "Incremental compile failed:\n{}",
+                errors.join("\n")
+            ));
         }
 
         // 7. 按拓扑序拼接
@@ -246,7 +249,8 @@ impl IncrCompiler {
                 // use 导入：prelude 只保留首模块；其余按文本去重
                 if t.starts_with("use ") {
                     let key = t.to_string();
-                    let is_prelude = t.starts_with("use std::") || t.starts_with("use lz_builtins::");
+                    let is_prelude =
+                        t.starts_with("use std::") || t.starts_with("use lz_builtins::");
                     if (is_prelude && *idx != 0) || emitted_uses.contains(&key) {
                         continue;
                     }
@@ -311,7 +315,11 @@ impl IncrCompiler {
     }
 
     /// 递归收集模块（DFS 后序 → 拓扑序）
-    fn collect_module(&mut self, abs_path: &Path, loaded: &mut HashSet<PathBuf>) -> Result<(), String> {
+    fn collect_module(
+        &mut self,
+        abs_path: &Path,
+        loaded: &mut HashSet<PathBuf>,
+    ) -> Result<(), String> {
         if loaded.contains(abs_path) {
             return Ok(());
         }
@@ -336,7 +344,11 @@ impl IncrCompiler {
             if imp.path.first().map_or(false, |p| p == "std") {
                 continue;
             }
-            if imp.path.first().map_or(false, |p| CRATE_IMPORTS.contains(&p.as_str())) {
+            if imp
+                .path
+                .first()
+                .map_or(false, |p| CRATE_IMPORTS.contains(&p.as_str()))
+            {
                 continue;
             }
             let base_dir = abs_path.parent().unwrap_or(&self.base_dir);
@@ -377,9 +389,7 @@ impl IncrCompiler {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| abs_s.clone());
         }
-        abs_s[base_s.len()..]
-            .trim_start_matches('/')
-            .to_string()
+        abs_s[base_s.len()..].trim_start_matches('/').to_string()
     }
 
     /// 缓存键（相对路径 → 安全文件名）
@@ -414,10 +424,16 @@ impl IncrCompiler {
         // 依赖哈希（AST imports 模块 + 宏导入文件）
         let mut deps: Vec<(String, String)> = Vec::new();
         for d in &m.deps {
-            deps.push((d.to_string_lossy().to_string(), cache::content_hash(d).unwrap_or_default()));
+            deps.push((
+                d.to_string_lossy().to_string(),
+                cache::content_hash(d).unwrap_or_default(),
+            ));
         }
         for f in &m.macro_files {
-            deps.push((f.to_string_lossy().to_string(), cache::content_hash(f).unwrap_or_default()));
+            deps.push((
+                f.to_string_lossy().to_string(),
+                cache::content_hash(f).unwrap_or_default(),
+            ));
         }
         if deps.len() != meta.deps.len() {
             return false;
@@ -438,10 +454,16 @@ impl IncrCompiler {
             deps: {
                 let mut deps = Vec::new();
                 for d in &m.deps {
-                    deps.push((d.to_string_lossy().to_string(), cache::content_hash(d).unwrap_or_default()));
+                    deps.push((
+                        d.to_string_lossy().to_string(),
+                        cache::content_hash(d).unwrap_or_default(),
+                    ));
                 }
                 for f in &m.macro_files {
-                    deps.push((f.to_string_lossy().to_string(), cache::content_hash(f).unwrap_or_default()));
+                    deps.push((
+                        f.to_string_lossy().to_string(),
+                        cache::content_hash(f).unwrap_or_default(),
+                    ));
                 }
                 deps
             },
@@ -458,18 +480,17 @@ impl IncrCompiler {
 
     /// 从缓存加载代码片段
     fn load_cached_code(&self, m: &IncrModule) -> Result<String, String> {
-        fs::read_to_string(self.code_path(m))
-            .map_err(|e| format!("read {}: {}", m.rel, e))
+        fs::read_to_string(self.code_path(m)).map_err(|e| format!("read {}: {}", m.rel, e))
     }
 }
 
 /// 单模块编译（纯函数）：lexer → 宏展开 → parser → IR → codegen
 fn compile_module(path: &Path) -> Result<String, String> {
-    let source = fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+    let source =
+        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
     let module = parse_source(&source, path)?;
-    let ir = build_ir(&module)
-        .map_err(|e| format!("IR build error in {}: {}", path.display(), e))?;
+    let ir =
+        build_ir(&module).map_err(|e| format!("IR build error in {}: {}", path.display(), e))?;
     let ir = ir
         .with_file_path(path.to_string_lossy().to_string())
         .with_source_text(source);
@@ -483,8 +504,8 @@ fn parse_source(source: &str, path: &Path) -> Result<ast::Module, String> {
     let tokens = lexer.tokenize();
 
     // 宏/template 定义提取
-    let (mut registry, mut macro_ranges) =
-        extract_macro_defs(&tokens).map_err(|e| format!("Macro error in {}: {}", path.display(), e))?;
+    let (mut registry, mut macro_ranges) = extract_macro_defs(&tokens)
+        .map_err(|e| format!("Macro error in {}: {}", path.display(), e))?;
     let (mut template_registry, template_ranges) = extract_template_defs(&tokens)
         .map_err(|e| format!("Template error in {}: {}", path.display(), e))?;
     macro_ranges.extend(template_ranges);
@@ -658,7 +679,11 @@ pub fn module_dep_names(module: &ast::Module) -> Vec<String> {
         .imports
         .iter()
         .filter(|imp| imp.path.first().map(|s| s.as_str()) != Some("std"))
-        .filter(|imp| !imp.path.first().map_or(false, |p| CRATE_IMPORTS.contains(&p.as_str())))
+        .filter(|imp| {
+            !imp.path
+                .first()
+                .map_or(false, |p| CRATE_IMPORTS.contains(&p.as_str()))
+        })
         .filter_map(|imp| imp.path.first().cloned())
         .collect()
 }
@@ -669,10 +694,7 @@ mod tests {
 
     #[test]
     fn incr_cache_key_stable() {
-        let c = IncrCompiler::new(
-            PathBuf::from("E:/proj"),
-            PathBuf::from(".lzcache_incr"),
-        );
+        let c = IncrCompiler::new(PathBuf::from("E:/proj"), PathBuf::from(".lzcache_incr"));
         let m = IncrModule {
             path: PathBuf::from("E:/proj/sub/a.lz"),
             rel: "sub/a.lz".to_string(),
@@ -680,6 +702,9 @@ mod tests {
             macro_files: vec![],
         };
         assert_eq!(c.cache_key(&m), "sub_a.lzcache");
-        assert_eq!(c.code_path(&m), PathBuf::from(".lzcache_incr/sub_a_code.rs"));
+        assert_eq!(
+            c.code_path(&m),
+            PathBuf::from(".lzcache_incr/sub_a_code.rs")
+        );
     }
 }

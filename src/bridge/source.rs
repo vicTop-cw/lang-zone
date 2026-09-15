@@ -3,12 +3,11 @@
 // 编译期消解，零运行时开销。将 lz 符号直接映射为 Rust/std crate 路径。
 // 实现 Bridge trait，包裹现有 StdBridge + 三方 crate 支持。
 
-use crate::bridge::StdBridge;
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta,
-    CallResolveResult, ErrorCode, ExportEntry, ExportKind, ImportResolveResult,
-    MethodResolveResult,
+    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta, CallResolveResult, ErrorCode,
+    ExportEntry, ExportKind, ImportResolveResult, MethodResolveResult,
 };
+use crate::bridge::StdBridge;
 use std::path::PathBuf;
 
 /// Level 0: 源码映射桥接
@@ -39,9 +38,13 @@ impl SourceBridge {
 }
 
 impl Bridge for SourceBridge {
-    fn name(&self) -> &str { "source" }
+    fn name(&self) -> &str {
+        "source"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::CompileTime }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::CompileTime
+    }
 
     fn capabilities(&self) -> BridgeCapability {
         BridgeCapability::IMPORT
@@ -65,7 +68,11 @@ impl Bridge for SourceBridge {
 
         // use 语句
         if !items.is_empty() {
-            out.push_str(&format!("use {}::{{{}}};\n", result.rust_path, items.join(", ")));
+            out.push_str(&format!(
+                "use {}::{{{}}};\n",
+                result.rust_path,
+                items.join(", ")
+            ));
         } else {
             out.push_str(&format!("use {};\n", result.rust_path));
         }
@@ -73,20 +80,23 @@ impl Bridge for SourceBridge {
         out
     }
 
-    fn resolve_import_full(&self, module_path: &[String], items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import_full(
+        &self,
+        module_path: &[String],
+        items: &[String],
+    ) -> Option<ImportResolveResult> {
         // StdBridge.resolve_import 现在直接返回 bridge_core::ImportResolveResult
         Some(self.inner.resolve_import(module_path, items))
     }
 
     fn gen_call(&self, func_name: &str, _args: &[String]) -> Option<String> {
-        self.inner.resolve_call(func_name)
-            .map(|r| {
-                if r.is_macro {
-                    format!("{}!", r.rust_path.trim_end_matches('!'))
-                } else {
-                    r.rust_path.clone()
-                }
-            })
+        self.inner.resolve_call(func_name).map(|r| {
+            if r.is_macro {
+                format!("{}!", r.rust_path.trim_end_matches('!'))
+            } else {
+                r.rust_path.clone()
+            }
+        })
     }
 
     fn gen_method(&self, method: &str, receiver_type: &str) -> String {
@@ -123,7 +133,11 @@ impl Bridge for SourceBridge {
         self.inner.resolve_call(func_name)
     }
 
-    fn resolve_method_full(&self, method: &str, receiver_type: &str) -> Option<MethodResolveResult> {
+    fn resolve_method_full(
+        &self,
+        method: &str,
+        receiver_type: &str,
+    ) -> Option<MethodResolveResult> {
         Some(self.inner.resolve_method(method, receiver_type))
     }
 
@@ -152,7 +166,10 @@ mod tests {
         let r = result.unwrap();
         assert_eq!(r.rust_path, "std::io");
         let has_ioerror = r.type_aliases.iter().any(|(a, _)| a == "IOError");
-        assert!(has_ioerror, "IO import should inject IOError alias via resolve_import_full");
+        assert!(
+            has_ioerror,
+            "IO import should inject IOError alias via resolve_import_full"
+        );
     }
 
     #[test]
@@ -161,7 +178,9 @@ mod tests {
         assert_eq!(bridge.name(), "source");
         assert_eq!(bridge.level(), BridgeLevel::CompileTime);
         assert!(bridge.capabilities().contains(BridgeCapability::IMPORT));
-        assert!(bridge.capabilities().contains(BridgeCapability::METHOD_CALL));
+        assert!(bridge
+            .capabilities()
+            .contains(BridgeCapability::METHOD_CALL));
     }
 
     #[test]

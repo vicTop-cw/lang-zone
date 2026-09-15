@@ -1,0 +1,4 @@
+// 反例：修饰轴冲突（Mut vs Immut）→ E-MODDEC-AXIS-CONFLICT
+def main() =
+    mut @immut w = 1
+    print(w)

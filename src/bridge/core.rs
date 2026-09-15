@@ -67,21 +67,42 @@ pub enum ErrorCode {
 
 impl ErrorCode {
     pub fn is_retryable(&self) -> bool {
-        matches!(self,
+        matches!(
+            self,
             ErrorCode::Timeout | ErrorCode::ConnectionLost | ErrorCode::ConnectionRefused
         )
     }
 
     pub fn domain(&self) -> &'static str {
         match self {
-            ErrorCode::Unknown | ErrorCode::NotSupported | ErrorCode::Timeout | ErrorCode::Cancelled => "core",
-            ErrorCode::ConnectionFailed | ErrorCode::ConnectionLost | ErrorCode::ConnectionRefused | ErrorCode::AlreadyConnected => "connection",
-            ErrorCode::SerializationError | ErrorCode::DeserializationError | ErrorCode::InvalidMessage | ErrorCode::PayloadTooLarge => "data",
-            ErrorCode::TypeMismatch | ErrorCode::UnsupportedType | ErrorCode::MarshalingError => "type",
-            ErrorCode::PermissionDenied | ErrorCode::SandboxViolation | ErrorCode::CapabilityMissing => "security",
-            ErrorCode::OutOfMemory | ErrorCode::QuotaExceeded | ErrorCode::FileDescriptorLimit => "resource",
-            ErrorCode::VersionMismatch | ErrorCode::IncompatibleABI | ErrorCode::DeprecatedAPI => "version",
-            ErrorCode::SymbolNotFound | ErrorCode::SymbolTypeError | ErrorCode::DuplicateSymbol | ErrorCode::LanguageError => "symbol",
+            ErrorCode::Unknown
+            | ErrorCode::NotSupported
+            | ErrorCode::Timeout
+            | ErrorCode::Cancelled => "core",
+            ErrorCode::ConnectionFailed
+            | ErrorCode::ConnectionLost
+            | ErrorCode::ConnectionRefused
+            | ErrorCode::AlreadyConnected => "connection",
+            ErrorCode::SerializationError
+            | ErrorCode::DeserializationError
+            | ErrorCode::InvalidMessage
+            | ErrorCode::PayloadTooLarge => "data",
+            ErrorCode::TypeMismatch | ErrorCode::UnsupportedType | ErrorCode::MarshalingError => {
+                "type"
+            }
+            ErrorCode::PermissionDenied
+            | ErrorCode::SandboxViolation
+            | ErrorCode::CapabilityMissing => "security",
+            ErrorCode::OutOfMemory | ErrorCode::QuotaExceeded | ErrorCode::FileDescriptorLimit => {
+                "resource"
+            }
+            ErrorCode::VersionMismatch | ErrorCode::IncompatibleABI | ErrorCode::DeprecatedAPI => {
+                "version"
+            }
+            ErrorCode::SymbolNotFound
+            | ErrorCode::SymbolTypeError
+            | ErrorCode::DuplicateSymbol
+            | ErrorCode::LanguageError => "symbol",
         }
     }
 }
@@ -117,8 +138,14 @@ impl BridgeError {
 
 impl fmt::Display for BridgeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {} (code={:?}, bridge={})",
-            self.code.domain(), self.message, self.code, self.source_bridge)
+        write!(
+            f,
+            "[{}] {} (code={:?}, bridge={})",
+            self.code.domain(),
+            self.message,
+            self.code,
+            self.source_bridge
+        )
     }
 }
 
@@ -138,21 +165,21 @@ pub enum MessageType {
 /// 消息头部
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
-    pub id: String,                // 请求-响应匹配 id
+    pub id: String, // 请求-响应匹配 id
     pub msg_type: MessageType,
-    pub timestamp: u64,            // Unix 毫秒时间戳
-    pub version: String,           // 协议版本
-    pub trace_id: Option<String>,  // 分布式追踪 id
-    pub span_id: Option<String>,   // 当前 span id
+    pub timestamp: u64,           // Unix 毫秒时间戳
+    pub version: String,          // 协议版本
+    pub trace_id: Option<String>, // 分布式追踪 id
+    pub span_id: Option<String>,  // 当前 span id
 }
 
 /// 统一消息信封
 #[derive(Debug, Clone)]
 pub struct BridgeMessage {
     pub header: MessageHeader,
-    pub method: String,            // 调用的方法/函数名
-    pub params: HashMap<String, String>,  // 参数键值对
-    pub body: Option<String>,      // 二进制数据（Base64 编码）
+    pub method: String,                  // 调用的方法/函数名
+    pub params: HashMap<String, String>, // 参数键值对
+    pub body: Option<String>,            // 二进制数据（Base64 编码）
 }
 
 impl BridgeMessage {
@@ -264,7 +291,9 @@ impl BridgeCapability {
 }
 
 impl Default for BridgeCapability {
-    fn default() -> Self { BridgeCapability::NONE }
+    fn default() -> Self {
+        BridgeCapability::NONE
+    }
 }
 
 impl std::ops::BitOr for BridgeCapability {
@@ -323,8 +352,8 @@ pub struct CallResolveResult {
     pub shim: String,
     pub module_name: String,
     pub is_macro: bool,
-    pub is_template: bool,  // rust_path 含 {0}/{1} 等占位符
-    pub ret_result: bool,   // 返回值是否需要 Result 包装
+    pub is_template: bool, // rust_path 含 {0}/{1} 等占位符
+    pub ret_result: bool,  // 返回值是否需要 Result 包装
 }
 
 /// 路由模式（用于 import/call 路由）
@@ -337,7 +366,11 @@ pub struct RoutePattern {
 
 impl RoutePattern {
     pub fn new(prefix: impl Into<String>, capability: BridgeCapability, priority: usize) -> Self {
-        RoutePattern { prefix: prefix.into(), capability, priority }
+        RoutePattern {
+            prefix: prefix.into(),
+            capability,
+            priority,
+        }
     }
 }
 
@@ -349,7 +382,7 @@ impl CallResolveResult {
             module_name: String::new(),
             is_macro: false,
             is_template: false,
-                    ret_result: false,
+            ret_result: false,
         }
     }
 }
@@ -365,11 +398,19 @@ pub struct MethodResolveResult {
 impl MethodResolveResult {
     pub fn identity(method: impl Into<String>) -> Self {
         let m = method.into();
-        MethodResolveResult { rust_method: m, rewritten: false, shim: String::new() }
+        MethodResolveResult {
+            rust_method: m,
+            rewritten: false,
+            shim: String::new(),
+        }
     }
 
     pub fn mapped(_lz: impl Into<String>, rust: impl Into<String>) -> Self {
-        MethodResolveResult { rust_method: rust.into(), rewritten: true, shim: String::new() }
+        MethodResolveResult {
+            rust_method: rust.into(),
+            rewritten: true,
+            shim: String::new(),
+        }
     }
 }
 
@@ -380,9 +421,9 @@ impl MethodResolveResult {
 pub struct BridgeMeta {
     pub version: String,
     pub description: String,
-    pub lz_version_min: Option<String>,  // 最低兼容 lz 版本
-    pub lz_version_max: Option<String>,  // 最高兼容 lz 版本（None=无上限）
-    pub provides: Vec<String>,           // 提供的功能集名称
+    pub lz_version_min: Option<String>, // 最低兼容 lz 版本
+    pub lz_version_max: Option<String>, // 最高兼容 lz 版本（None=无上限）
+    pub provides: Vec<String>,          // 提供的功能集名称
 }
 
 impl Default for BridgeMeta {
@@ -403,8 +444,8 @@ impl Default for BridgeMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeState {
     Healthy,
-    Degraded,      // 部分功能不可用
-    Unhealthy,      // 核心功能不可用
+    Degraded,  // 部分功能不可用
+    Unhealthy, // 核心功能不可用
     Disconnected,
 }
 
@@ -412,10 +453,10 @@ pub enum BridgeState {
 #[derive(Debug, Clone)]
 pub struct HealthStatus {
     pub state: BridgeState,
-    pub latency: Duration,               // 最近一次 ping 延迟
-    pub active_since: Option<Duration>,  // 自激活以来的运行时间
+    pub latency: Duration,              // 最近一次 ping 延迟
+    pub active_since: Option<Duration>, // 自激活以来的运行时间
     pub error_count: u64,
-    pub detail: String,                  // 人类可读的状态描述
+    pub detail: String, // 人类可读的状态描述
 }
 
 impl HealthStatus {
@@ -457,8 +498,8 @@ pub enum ExportKind {
 pub struct ExportEntry {
     pub name: String,
     pub kind: ExportKind,
-    pub signature: String,   // 人类可读的类型签名
-    pub module: String,      // 符号所属的子模块
+    pub signature: String, // 人类可读的类型签名
+    pub module: String,    // 符号所属的子模块
 }
 
 /// 统一桥接接口
@@ -475,24 +516,38 @@ pub trait Bridge: fmt::Debug {
     // ─── 生命周期 ───
 
     /// 建立连接
-    fn connect(&mut self) -> Result<(), BridgeError> { Ok(()) }
+    fn connect(&mut self) -> Result<(), BridgeError> {
+        Ok(())
+    }
 
     /// 断开连接
-    fn disconnect(&mut self) -> Result<(), BridgeError> { Ok(()) }
+    fn disconnect(&mut self) -> Result<(), BridgeError> {
+        Ok(())
+    }
 
     /// 健康检查
     fn ping(&self) -> Result<Duration, BridgeError> {
-        Err(BridgeError::new(ErrorCode::NotSupported, "ping not supported", self.name()))
+        Err(BridgeError::new(
+            ErrorCode::NotSupported,
+            "ping not supported",
+            self.name(),
+        ))
     }
 
     /// 是否已连接
-    fn is_connected(&self) -> bool { true }
+    fn is_connected(&self) -> bool {
+        true
+    }
 
     // ─── 消息传递（运行时桥接使用）───
 
     /// 发送消息并等待响应
     fn send(&self, _msg: BridgeMessage) -> Result<BridgeMessage, BridgeError> {
-        Err(BridgeError::new(ErrorCode::NotSupported, "send not supported", self.name()))
+        Err(BridgeError::new(
+            ErrorCode::NotSupported,
+            "send not supported",
+            self.name(),
+        ))
     }
 
     // ─── 代码生成（编译期桥接使用）───
@@ -503,7 +558,11 @@ pub trait Bridge: fmt::Debug {
     }
 
     /// 结构化导入解析（返回完整 ImportResolveResult，供 CodeGen 使用）
-    fn resolve_import_full(&self, _module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import_full(
+        &self,
+        _module_path: &[String],
+        _items: &[String],
+    ) -> Option<ImportResolveResult> {
         None
     }
 
@@ -530,7 +589,9 @@ pub trait Bridge: fmt::Debug {
     // ─── 元数据 ───
 
     /// 桥接自身描述（版本、兼容范围等）
-    fn meta(&self) -> BridgeMeta { BridgeMeta::default() }
+    fn meta(&self) -> BridgeMeta {
+        BridgeMeta::default()
+    }
 
     // ─── 改进的健康检查 ───
 
@@ -545,15 +606,21 @@ pub trait Bridge: fmt::Debug {
     // ─── 生命周期钩子 ───
 
     /// 桥接被激活时调用（注册到 Registry 后）
-    fn on_activate(&mut self) -> Result<(), BridgeError> { Ok(()) }
+    fn on_activate(&mut self) -> Result<(), BridgeError> {
+        Ok(())
+    }
 
     /// 桥接被停用时调用（从 Registry 移除前）
-    fn on_deactivate(&mut self) -> Result<(), BridgeError> { Ok(()) }
+    fn on_deactivate(&mut self) -> Result<(), BridgeError> {
+        Ok(())
+    }
 
     // ─── 依赖声明 ───
 
     /// 本桥接依赖的其他桥接名称列表（Registry 验证）
-    fn depends_on(&self) -> &[String] { &[] }
+    fn depends_on(&self) -> &[String] {
+        &[]
+    }
 
     // ─── 结构化解析（与 resolve_import_full 对齐）───
 
@@ -563,17 +630,27 @@ pub trait Bridge: fmt::Debug {
     }
 
     /// 结构化方法名解析
-    fn resolve_method_full(&self, _method: &str, _receiver_type: &str) -> Option<MethodResolveResult> {
+    fn resolve_method_full(
+        &self,
+        _method: &str,
+        _receiver_type: &str,
+    ) -> Option<MethodResolveResult> {
         None
     }
 
     // ─── 路由模式（可选能力）───
 
     /// 返回本桥接的路由模式列表（用于 import/call 路由）
-    fn route_patterns(&self) -> &[RoutePattern] { &[] }
+    fn route_patterns(&self) -> &[RoutePattern] {
+        &[]
+    }
 
     /// 解析导入路径（返回结构化结果）
-    fn resolve_import(&self, _module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import(
+        &self,
+        _module_path: &[String],
+        _items: &[String],
+    ) -> Option<ImportResolveResult> {
         None
     }
 
@@ -595,21 +672,28 @@ pub trait Bridge: fmt::Debug {
     // ─── 导出枚举（introspection）───
 
     /// 列出指定类型的所有导出符号
-    fn list_exports(&self, _kind: ExportKind) -> Vec<ExportEntry> { vec![] }
+    fn list_exports(&self, _kind: ExportKind) -> Vec<ExportEntry> {
+        vec![]
+    }
 
     /// 导出符号总数
-    fn export_count(&self) -> usize { 0 }
+    fn export_count(&self) -> usize {
+        0
+    }
 
     // ─── 批量操作 ───
 
     /// 批量解析导入（性能优化：一次查找多个模块）
     fn batch_import(&self, _requests: &[(&[String], &[String])]) -> Vec<ImportResolveResult> {
         // 默认回退：逐个解析
-        _requests.iter()
-            .map(|(path, items)| match self.resolve_import_full(path, items) {
-                Some(r) => r,
-                None => ImportResolveResult::identity(path),
-            })
+        _requests
+            .iter()
+            .map(
+                |(path, items)| match self.resolve_import_full(path, items) {
+                    Some(r) => r,
+                    None => ImportResolveResult::identity(path),
+                },
+            )
             .collect()
     }
 
@@ -617,7 +701,11 @@ pub trait Bridge: fmt::Debug {
 
     /// 重新加载桥接配置
     fn reload(&mut self) -> Result<(), BridgeError> {
-        Err(BridgeError::new(ErrorCode::NotSupported, "reload not supported", self.name()))
+        Err(BridgeError::new(
+            ErrorCode::NotSupported,
+            "reload not supported",
+            self.name(),
+        ))
     }
 }
 
@@ -655,18 +743,31 @@ impl BridgeRegistry {
     /// 登记一个外部/导出符号（extern 块解析后、@export codegen 时自动调用）
     ///
     /// 重复登记同名符号返回 E_DUP（DuplicateSymbol）。
-    pub fn register_symbol(&mut self, name: &str, lang: &str, signature: &str) -> Result<(), BridgeError> {
+    pub fn register_symbol(
+        &mut self,
+        name: &str,
+        lang: &str,
+        signature: &str,
+    ) -> Result<(), BridgeError> {
         if self.symbols.contains_key(name) {
             let err = BridgeError::new(
                 ErrorCode::DuplicateSymbol,
-                format!("symbol '{}' already registered (lang={})", name, self.symbols[name].0),
+                format!(
+                    "symbol '{}' already registered (lang={})",
+                    name, self.symbols[name].0
+                ),
                 "registry",
             );
             self.ledger.record_error(lang, &format!("DUP {}", name));
             return Err(err);
         }
-        self.symbols.insert(name.to_string(), (lang.to_string(), signature.to_string()));
-        self.ledger.append("REGISTER", lang, &format!("symbol={} sig={}", name, signature));
+        self.symbols
+            .insert(name.to_string(), (lang.to_string(), signature.to_string()));
+        self.ledger.append(
+            "REGISTER",
+            lang,
+            &format!("symbol={} sig={}", name, signature),
+        );
         Ok(())
     }
 
@@ -679,7 +780,9 @@ impl BridgeRegistry {
     }
 
     /// 已登记符号数量
-    pub fn symbol_count(&self) -> usize { self.symbols.len() }
+    pub fn symbol_count(&self) -> usize {
+        self.symbols.len()
+    }
 
     /// 类型检查 + 分发 + 台账（I3：call）
     ///
@@ -704,14 +807,17 @@ impl BridgeRegistry {
         };
 
         // E_LANG：检查是否有桥接支持该语言
-        let lang_supported = self.bridges.iter().any(|b| {
-            b.name() == lang
-                || b.meta().provides.iter().any(|p| p == &lang)
-        });
+        let lang_supported = self
+            .bridges
+            .iter()
+            .any(|b| b.name() == lang || b.meta().provides.iter().any(|p| p == &lang));
         if !lang_supported {
             let err = BridgeError::new(
                 ErrorCode::LanguageError,
-                format!("no bridge registered for language '{}' (symbol '{}')", lang, name),
+                format!(
+                    "no bridge registered for language '{}' (symbol '{}')",
+                    lang, name
+                ),
                 "registry",
             );
             self.ledger.record_error(&lang, &format!("LANG {}", name));
@@ -723,10 +829,16 @@ impl BridgeRegistry {
         if expected != usize::MAX && args.len() != expected {
             let err = BridgeError::new(
                 ErrorCode::SymbolTypeError,
-                format!("symbol '{}' expects {} args, got {}", name, expected, args.len()),
+                format!(
+                    "symbol '{}' expects {} args, got {}",
+                    name,
+                    expected,
+                    args.len()
+                ),
                 "registry",
             );
-            self.ledger.record_error(&lang, &format!("TYPE {} got={}", name, args.len()));
+            self.ledger
+                .record_error(&lang, &format!("TYPE {} got={}", name, args.len()));
             return Err(err);
         }
 
@@ -739,7 +851,8 @@ impl BridgeRegistry {
             )
         })?;
 
-        self.ledger.append("CALL", &lang, &format!("{} n={}", name, args.len()));
+        self.ledger
+            .append("CALL", &lang, &format!("{} n={}", name, args.len()));
         Ok(result)
     }
 
@@ -772,11 +885,15 @@ impl BridgeRegistry {
     }
 
     pub fn find(&self, name: &str) -> Option<&dyn Bridge> {
-        self.bridges.iter().find(|b| b.name() == name).map(|b| b.as_ref())
+        self.bridges
+            .iter()
+            .find(|b| b.name() == name)
+            .map(|b| b.as_ref())
     }
 
     pub fn default(&self) -> Option<&dyn Bridge> {
-        self.default_bridge.as_ref()
+        self.default_bridge
+            .as_ref()
             .and_then(|name| self.find(name))
             .or_else(|| self.bridges.first().map(|b| b.as_ref()))
     }
@@ -806,7 +923,10 @@ impl BridgeRegistry {
     /// 为函数调用选择最佳桥接
     pub fn resolve_call(&self, func_name: &str, args: &[String]) -> Option<String> {
         for bridge in &self.bridges {
-            if bridge.capabilities().contains(BridgeCapability::FUNCTION_CALL) {
+            if bridge
+                .capabilities()
+                .contains(BridgeCapability::FUNCTION_CALL)
+            {
                 if let Some(result) = bridge.gen_call(func_name, args) {
                     return Some(result);
                 }
@@ -816,7 +936,11 @@ impl BridgeRegistry {
     }
 
     /// 为导入解析选择最佳桥接（结构化结果）
-    pub fn resolve_import_full(&self, module_path: &[String], items: &[String]) -> ImportResolveResult {
+    pub fn resolve_import_full(
+        &self,
+        module_path: &[String],
+        items: &[String],
+    ) -> ImportResolveResult {
         for bridge in &self.bridges {
             if bridge.capabilities().contains(BridgeCapability::IMPORT) {
                 if let Some(result) = bridge.resolve_import_full(module_path, items) {
@@ -831,7 +955,10 @@ impl BridgeRegistry {
     /// 为方法调用选择最佳桥接
     pub fn resolve_method(&self, method: &str, receiver_type: &str) -> String {
         for bridge in &self.bridges {
-            if bridge.capabilities().contains(BridgeCapability::METHOD_CALL) {
+            if bridge
+                .capabilities()
+                .contains(BridgeCapability::METHOD_CALL)
+            {
                 let result = bridge.gen_method(method, receiver_type);
                 if result != method {
                     return result;
@@ -844,7 +971,10 @@ impl BridgeRegistry {
     /// 为类型重写选择最佳桥接
     pub fn resolve_type(&self, lz_type: &str) -> Option<String> {
         for bridge in &self.bridges {
-            if bridge.capabilities().contains(BridgeCapability::TYPE_REWRITE) {
+            if bridge
+                .capabilities()
+                .contains(BridgeCapability::TYPE_REWRITE)
+            {
                 if let Some(result) = bridge.gen_type(lz_type) {
                     return Some(result);
                 }
@@ -889,7 +1019,9 @@ impl BridgeRegistry {
         let pos = self.bridges.iter().position(|b| b.name() == name);
         if let Some(idx) = pos {
             // 检查是否是被依赖项
-            let is_dep_of = self.bridges.iter()
+            let is_dep_of = self
+                .bridges
+                .iter()
                 .filter(|b| b.name() != name)
                 .any(|b| b.depends_on().contains(&name.to_string()));
 
@@ -921,7 +1053,8 @@ impl BridgeRegistry {
 
     /// 查找所有支持指定能力的桥接
     pub fn find_by_capability(&self, cap: BridgeCapability) -> Vec<&dyn Bridge> {
-        self.bridges.iter()
+        self.bridges
+            .iter()
             .filter(|b| b.capabilities().contains(cap))
             .map(|b| b.as_ref())
             .collect()
@@ -929,7 +1062,9 @@ impl BridgeRegistry {
 
     /// 按桥接级别排序（编译期优先），返回第一个支持指定能力的桥接
     pub fn best_for(&self, cap: BridgeCapability) -> Option<&dyn Bridge> {
-        let mut candidates: Vec<&dyn Bridge> = self.bridges.iter()
+        let mut candidates: Vec<&dyn Bridge> = self
+            .bridges
+            .iter()
             .filter(|b| b.capabilities().contains(cap))
             .map(|b| b.as_ref())
             .collect();
@@ -943,7 +1078,10 @@ impl BridgeRegistry {
     /// 结构化函数调用解析（返回完整 CallResolveResult）
     pub fn resolve_call_full(&self, func_name: &str, args: &[String]) -> Option<CallResolveResult> {
         for bridge in &self.bridges {
-            if bridge.capabilities().contains(BridgeCapability::FUNCTION_CALL) {
+            if bridge
+                .capabilities()
+                .contains(BridgeCapability::FUNCTION_CALL)
+            {
                 if let Some(result) = bridge.resolve_call_full(func_name, args) {
                     return Some(result);
                 }
@@ -953,9 +1091,16 @@ impl BridgeRegistry {
     }
 
     /// 结构化方法名解析（返回完整 MethodResolveResult）
-    pub fn resolve_method_full(&self, method: &str, receiver_type: &str) -> Option<MethodResolveResult> {
+    pub fn resolve_method_full(
+        &self,
+        method: &str,
+        receiver_type: &str,
+    ) -> Option<MethodResolveResult> {
         for bridge in &self.bridges {
-            if bridge.capabilities().contains(BridgeCapability::METHOD_CALL) {
+            if bridge
+                .capabilities()
+                .contains(BridgeCapability::METHOD_CALL)
+            {
                 if let Some(result) = bridge.resolve_method_full(method, receiver_type) {
                     return Some(result);
                 }
@@ -977,7 +1122,8 @@ impl BridgeRegistry {
             }
         }
         // fallback: 逐项身份透传
-        requests.iter()
+        requests
+            .iter()
             .map(|(path, _)| ImportResolveResult::identity(path))
             .collect()
     }
@@ -1036,7 +1182,10 @@ fn signature_param_count(signature: &str) -> usize {
         .and_then(|s| s.strip_prefix('(').map(|s| s.trim()))
         .and_then(|s| s.split_once(')').map(|(head, _)| head.trim()))
         .unwrap_or_else(|| signature.trim());
-    let inner = inner.strip_prefix('(').and_then(|s| s.split_once(')').map(|(h, _)| h.trim())).unwrap_or(inner);
+    let inner = inner
+        .strip_prefix('(')
+        .and_then(|s| s.split_once(')').map(|(h, _)| h.trim()))
+        .unwrap_or(inner);
     if inner.is_empty() {
         0
     } else {
@@ -1046,7 +1195,9 @@ fn signature_param_count(signature: &str) -> usize {
 
 fn uuid_v4() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{:016x}", ts.as_nanos())
 }
 
@@ -1072,9 +1223,15 @@ mod tests {
     }
 
     impl Bridge for TestBridge {
-        fn name(&self) -> &str { &self.name }
-        fn level(&self) -> BridgeLevel { self.level }
-        fn capabilities(&self) -> BridgeCapability { self.caps }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn level(&self) -> BridgeLevel {
+            self.level
+        }
+        fn capabilities(&self) -> BridgeCapability {
+            self.caps
+        }
     }
 
     #[test]
@@ -1096,9 +1253,13 @@ mod tests {
 
     #[test]
     fn test_bridge_error_display() {
-        let err = BridgeError::new(ErrorCode::ConnectionFailed, "host unreachable", "test-bridge")
-            .with_detail("host", "192.168.1.1")
-            .with_detail("port", "8080");
+        let err = BridgeError::new(
+            ErrorCode::ConnectionFailed,
+            "host unreachable",
+            "test-bridge",
+        )
+        .with_detail("host", "192.168.1.1")
+        .with_detail("port", "8080");
         let s = format!("{}", err);
         assert!(s.contains("connection"));
         assert!(s.contains("host unreachable"));
@@ -1248,10 +1409,18 @@ mod tests {
     }
 
     impl Bridge for FullTestBridge {
-        fn name(&self) -> &str { &self.name }
-        fn level(&self) -> BridgeLevel { self.level }
-        fn capabilities(&self) -> BridgeCapability { self.caps }
-        fn depends_on(&self) -> &[String] { &self.deps }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn level(&self) -> BridgeLevel {
+            self.level
+        }
+        fn capabilities(&self) -> BridgeCapability {
+            self.caps
+        }
+        fn depends_on(&self) -> &[String] {
+            &self.deps
+        }
         fn meta(&self) -> BridgeMeta {
             BridgeMeta {
                 version: "2.0.0".into(),
@@ -1267,7 +1436,8 @@ mod tests {
         // 先注册依赖项
         reg.register(Box::new(FullTestBridge::with_deps("base", vec![])));
         // 再注册依赖 base 的桥接
-        let result = reg.register_with_deps(Box::new(FullTestBridge::with_deps("ext", vec!["base"])));
+        let result =
+            reg.register_with_deps(Box::new(FullTestBridge::with_deps("ext", vec!["base"])));
         assert!(result.is_ok());
         assert_eq!(reg.count(), 2);
     }
@@ -1275,7 +1445,8 @@ mod tests {
     #[test]
     fn test_registry_register_with_deps_missing() {
         let mut reg = BridgeRegistry::new();
-        let result = reg.register_with_deps(Box::new(FullTestBridge::with_deps("ext", vec!["base"])));
+        let result =
+            reg.register_with_deps(Box::new(FullTestBridge::with_deps("ext", vec!["base"])));
         assert!(result.is_err());
         assert_eq!(reg.count(), 0);
     }
@@ -1284,7 +1455,9 @@ mod tests {
     fn test_registry_deregister() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "temp".into(), level: BridgeLevel::CompileTime, caps: BridgeCapability::IMPORT,
+            name: "temp".into(),
+            level: BridgeLevel::CompileTime,
+            caps: BridgeCapability::IMPORT,
         }));
         reg.set_default("temp");
         assert_eq!(reg.count(), 1);
@@ -1305,10 +1478,14 @@ mod tests {
     fn test_registry_names() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "a".into(), level: BridgeLevel::CompileTime, caps: BridgeCapability::IMPORT,
+            name: "a".into(),
+            level: BridgeLevel::CompileTime,
+            caps: BridgeCapability::IMPORT,
         }));
         reg.register(Box::new(TestBridge {
-            name: "b".into(), level: BridgeLevel::Runtime, caps: BridgeCapability::FUNCTION_CALL,
+            name: "b".into(),
+            level: BridgeLevel::Runtime,
+            caps: BridgeCapability::FUNCTION_CALL,
         }));
         let names = reg.names();
         assert!(names.contains(&"a".to_string()));
@@ -1320,15 +1497,18 @@ mod tests {
     fn test_find_by_capability() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "importer".into(), level: BridgeLevel::CompileTime,
+            name: "importer".into(),
+            level: BridgeLevel::CompileTime,
             caps: BridgeCapability::IMPORT,
         }));
         reg.register(Box::new(TestBridge {
-            name: "caller".into(), level: BridgeLevel::Runtime,
+            name: "caller".into(),
+            level: BridgeLevel::Runtime,
             caps: BridgeCapability::FUNCTION_CALL,
         }));
         reg.register(Box::new(TestBridge {
-            name: "both".into(), level: BridgeLevel::CompileTime,
+            name: "both".into(),
+            level: BridgeLevel::CompileTime,
             caps: BridgeCapability::IMPORT | BridgeCapability::FUNCTION_CALL,
         }));
 
@@ -1342,11 +1522,13 @@ mod tests {
     fn test_best_for_prefers_compile_time() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "slow-runtime".into(), level: BridgeLevel::Runtime,
+            name: "slow-runtime".into(),
+            level: BridgeLevel::Runtime,
             caps: BridgeCapability::FUNCTION_CALL,
         }));
         reg.register(Box::new(TestBridge {
-            name: "fast-compile".into(), level: BridgeLevel::CompileTime,
+            name: "fast-compile".into(),
+            level: BridgeLevel::CompileTime,
             caps: BridgeCapability::FUNCTION_CALL,
         }));
 
@@ -1415,7 +1597,9 @@ mod tests {
             let exports = reg.list_exports(ExportKind::Function);
             // std bridge has read_to_string, write, etc.
             assert!(!exports.is_empty());
-            assert!(exports.iter().any(|(bridge_name, _)| bridge_name == "source"));
+            assert!(exports
+                .iter()
+                .any(|(bridge_name, _)| bridge_name == "source"));
         }
     }
 
@@ -1446,7 +1630,9 @@ mod tests {
     fn test_registry_stats() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "main".into(), level: BridgeLevel::CompileTime, caps: BridgeCapability::IMPORT,
+            name: "main".into(),
+            level: BridgeLevel::CompileTime,
+            caps: BridgeCapability::IMPORT,
         }));
         reg.set_default("main");
 
@@ -1471,7 +1657,9 @@ mod tests {
     #[test]
     fn test_register_symbol_and_lookup() {
         let mut reg = BridgeRegistry::new();
-        assert!(reg.register_symbol("numpy_array", "python", "fn(n: int) -> object").is_ok());
+        assert!(reg
+            .register_symbol("numpy_array", "python", "fn(n: int) -> object")
+            .is_ok());
         assert_eq!(reg.symbol_count(), 1);
         let entry = reg.lookup_symbol("numpy_array").unwrap();
         assert_eq!(entry.lang, "python");
@@ -1483,7 +1671,9 @@ mod tests {
     fn test_register_symbol_dup_returns_e_dup() {
         let mut reg = BridgeRegistry::new();
         reg.register_symbol("f", "python", "fn() -> void").unwrap();
-        let err = reg.register_symbol("f", "rust", "fn() -> void").unwrap_err();
+        let err = reg
+            .register_symbol("f", "rust", "fn() -> void")
+            .unwrap_err();
         assert_eq!(err.code, ErrorCode::DuplicateSymbol);
         assert_eq!(err.code.domain(), "symbol");
     }
@@ -1499,9 +1689,12 @@ mod tests {
     fn test_call_lang_not_supported_returns_e_lang() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "rust".into(), level: BridgeLevel::LinkTime, caps: BridgeCapability::FUNCTION_CALL,
+            name: "rust".into(),
+            level: BridgeLevel::LinkTime,
+            caps: BridgeCapability::FUNCTION_CALL,
         }));
-        reg.register_symbol("numpy_array", "python", "fn(n: int) -> object").unwrap();
+        reg.register_symbol("numpy_array", "python", "fn(n: int) -> object")
+            .unwrap();
         let err = reg.call("numpy_array", &["1".to_string()]).unwrap_err();
         assert_eq!(err.code, ErrorCode::LanguageError);
     }
@@ -1510,9 +1703,12 @@ mod tests {
     fn test_call_arg_count_mismatch_returns_e_type() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "rust".into(), level: BridgeLevel::LinkTime, caps: BridgeCapability::FUNCTION_CALL,
+            name: "rust".into(),
+            level: BridgeLevel::LinkTime,
+            caps: BridgeCapability::FUNCTION_CALL,
         }));
-        reg.register_symbol("add", "rust", "fn(a: int, b: int) -> int").unwrap();
+        reg.register_symbol("add", "rust", "fn(a: int, b: int) -> int")
+            .unwrap();
         let err = reg.call("add", &["1".to_string()]).unwrap_err();
         assert_eq!(err.code, ErrorCode::SymbolTypeError);
     }
@@ -1521,14 +1717,19 @@ mod tests {
     fn test_call_success_records_ledger() {
         let mut reg = BridgeRegistry::new();
         reg.register(Box::new(TestBridge {
-            name: "rust".into(), level: BridgeLevel::LinkTime, caps: BridgeCapability::FUNCTION_CALL,
+            name: "rust".into(),
+            level: BridgeLevel::LinkTime,
+            caps: BridgeCapability::FUNCTION_CALL,
         }));
-        reg.register_symbol("add", "rust", "fn(a: int, b: int) -> int").unwrap();
+        reg.register_symbol("add", "rust", "fn(a: int, b: int) -> int")
+            .unwrap();
         // 无桥接实现时 resolve_call_full 返回 None → E_SYM；台账至少记录 REGISTER
         let _ = reg.call("add", &["1".to_string(), "2".to_string()]);
         let records = reg.ledger().records();
         assert!(!records.is_empty());
-        assert!(records.iter().any(|r| r.event == "REGISTER" && r.lang == "rust"));
+        assert!(records
+            .iter()
+            .any(|r| r.event == "REGISTER" && r.lang == "rust"));
     }
 
     #[test]
@@ -1537,7 +1738,8 @@ mod tests {
         let path = dir.path().join("bridge-ledger.tsv");
         let mut reg = BridgeRegistry::new();
         reg.set_ledger_path(&path).unwrap();
-        reg.register_symbol("hello", "rust", "fn() -> void").unwrap();
+        reg.register_symbol("hello", "rust", "fn() -> void")
+            .unwrap();
         let report = reg.emit_bridge_report();
         assert!(report.total >= 1);
         assert!(report.render().contains("REGISTER"));

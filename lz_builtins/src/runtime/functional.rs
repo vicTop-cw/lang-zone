@@ -68,9 +68,18 @@ where
     move |x| f(g(x))
 }
 
-pub fn pipe<A, B>(value: A, f: impl Fn(A) -> B) -> B { f(value) }
-pub fn pipe2<A, B, C>(value: A, f: impl Fn(A) -> B, g: impl Fn(B) -> C) -> C { g(f(value)) }
-pub fn pipe3<A, B, C, D>(value: A, f: impl Fn(A) -> B, g: impl Fn(B) -> C, h: impl Fn(C) -> D) -> D {
+pub fn pipe<A, B>(value: A, f: impl Fn(A) -> B) -> B {
+    f(value)
+}
+pub fn pipe2<A, B, C>(value: A, f: impl Fn(A) -> B, g: impl Fn(B) -> C) -> C {
+    g(f(value))
+}
+pub fn pipe3<A, B, C, D>(
+    value: A,
+    f: impl Fn(A) -> B,
+    g: impl Fn(B) -> C,
+    h: impl Fn(C) -> D,
+) -> D {
     h(g(f(value)))
 }
 
@@ -83,7 +92,9 @@ where
     I::Item: Eq + Hash + Clone,
 {
     let mut seen = std::collections::HashSet::new();
-    iter.into_iter().filter(|item| seen.insert(item.clone())).collect()
+    iter.into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .collect()
 }
 
 pub fn unique_by<I, K>(iter: I, key_fn: impl Fn(&I::Item) -> K) -> Vec<I::Item>
@@ -93,7 +104,9 @@ where
     I::Item: Clone,
 {
     let mut seen = std::collections::HashSet::new();
-    iter.into_iter().filter(|item| seen.insert(key_fn(item))).collect()
+    iter.into_iter()
+        .filter(|item| seen.insert(key_fn(item)))
+        .collect()
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -120,36 +133,68 @@ pub fn chunk<I: IntoIterator>(iter: I, n: usize) -> Vec<Vec<I::Item>> {
 // Sum / Product
 // ══════════════════════════════════════════════════════════════
 
-pub fn sum_i64(iter: impl IntoIterator<Item = i64>) -> i64 { iter.into_iter().sum() }
-pub fn product_i64(iter: impl IntoIterator<Item = i64>) -> i64 { iter.into_iter().product() }
-pub fn sum_f64(iter: impl IntoIterator<Item = f64>) -> f64 { iter.into_iter().sum() }
-pub fn product_f64(iter: impl IntoIterator<Item = f64>) -> f64 { iter.into_iter().product() }
+pub fn sum_i64(iter: impl IntoIterator<Item = i64>) -> i64 {
+    iter.into_iter().sum()
+}
+pub fn product_i64(iter: impl IntoIterator<Item = i64>) -> i64 {
+    iter.into_iter().product()
+}
+pub fn sum_f64(iter: impl IntoIterator<Item = f64>) -> f64 {
+    iter.into_iter().sum()
+}
+pub fn product_f64(iter: impl IntoIterator<Item = f64>) -> f64 {
+    iter.into_iter().product()
+}
 
 // ══════════════════════════════════════════════════════════════
 // find / position / count
 // ══════════════════════════════════════════════════════════════
 
 pub fn find<I: IntoIterator>(iter: I, mut pred: impl FnMut(&I::Item) -> bool) -> Option<I::Item>
-where I::Item: Sized { iter.into_iter().find(|item| pred(item)) }
+where
+    I::Item: Sized,
+{
+    iter.into_iter().find(|item| pred(item))
+}
 
 pub fn find_map<I: IntoIterator, B>(iter: I, f: impl FnMut(I::Item) -> Option<B>) -> Option<B>
-where I: IntoIterator { iter.into_iter().find_map(f) }
+where
+    I: IntoIterator,
+{
+    iter.into_iter().find_map(f)
+}
 
 pub fn position<I: IntoIterator>(iter: I, mut pred: impl FnMut(&I::Item) -> bool) -> Option<usize>
-where I::Item: Sized { iter.into_iter().position(|item| pred(&item)) }
+where
+    I::Item: Sized,
+{
+    iter.into_iter().position(|item| pred(&item))
+}
 
-pub fn count<I: IntoIterator>(iter: I) -> usize { iter.into_iter().count() }
-pub fn nth<I: IntoIterator>(iter: I, n: usize) -> Option<I::Item> { iter.into_iter().nth(n) }
-pub fn last<I: IntoIterator>(iter: I) -> Option<I::Item> { iter.into_iter().last() }
+pub fn count<I: IntoIterator>(iter: I) -> usize {
+    iter.into_iter().count()
+}
+pub fn nth<I: IntoIterator>(iter: I, n: usize) -> Option<I::Item> {
+    iter.into_iter().nth(n)
+}
+pub fn last<I: IntoIterator>(iter: I) -> Option<I::Item> {
+    iter.into_iter().last()
+}
 
 // ══════════════════════════════════════════════════════════════
 // Collect
 // ══════════════════════════════════════════════════════════════
 
-pub fn to_vec<I: IntoIterator>(iter: I) -> Vec<I::Item> { iter.into_iter().collect() }
+pub fn to_vec<I: IntoIterator>(iter: I) -> Vec<I::Item> {
+    iter.into_iter().collect()
+}
 
 pub fn to_hashmap<K, V, I: IntoIterator<Item = (K, V)>>(iter: I) -> HashMap<K, V>
-where K: Eq + Hash { iter.into_iter().collect() }
+where
+    K: Eq + Hash,
+{
+    iter.into_iter().collect()
+}
 
 // ══════════════════════════════════════════════════════════════
 // Tests
@@ -160,41 +205,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_fold() { assert_eq!(fold(vec![1,2,3,4,5], 0, |a,x| a+x), 15); }
+    fn test_fold() {
+        assert_eq!(fold(vec![1, 2, 3, 4, 5], 0, |a, x| a + x), 15);
+    }
 
     #[test]
-    fn test_fold1() { assert_eq!(fold1(vec![1,2,3,4,5], |a,x| a+x), Some(15)); }
+    fn test_fold1() {
+        assert_eq!(fold1(vec![1, 2, 3, 4, 5], |a, x| a + x), Some(15));
+    }
 
     #[test]
-    fn test_fold1_empty() { assert_eq!(fold1(Vec::<i32>::new(), |a,x| a+x), None); }
+    fn test_fold1_empty() {
+        assert_eq!(fold1(Vec::<i32>::new(), |a, x| a + x), None);
+    }
 
     #[test]
-    fn test_reduce() { assert_eq!(reduce(vec![1,2,3,4], |a,b| a+b), Some(10)); }
+    fn test_reduce() {
+        assert_eq!(reduce(vec![1, 2, 3, 4], |a, b| a + b), Some(10));
+    }
 
     #[test]
     fn test_partition() {
         let (even, odd) = partition(0..10, |&x| x % 2 == 0);
-        assert_eq!(even, vec![0,2,4,6,8]);
-        assert_eq!(odd, vec![1,3,5,7,9]);
+        assert_eq!(even, vec![0, 2, 4, 6, 8]);
+        assert_eq!(odd, vec![1, 3, 5, 7, 9]);
     }
 
     #[test]
     fn test_compose() {
-        let h = compose(|x: i32| x*2, |x: i32| x+3);
+        let h = compose(|x: i32| x * 2, |x: i32| x + 3);
         assert_eq!(h(5), 16);
     }
 
     #[test]
-    fn test_pipe() { assert_eq!(pipe(5, |x| x*2), 10); }
-
-    #[test]
-    fn test_unique() { assert_eq!(unique(vec![1,2,2,3,1,4]), vec![1,2,3,4]); }
-
-    #[test]
-    fn test_chunk() {
-        assert_eq!(chunk(vec![1,2,3,4,5,6,7], 3), vec![vec![1,2,3], vec![4,5,6], vec![7]]);
+    fn test_pipe() {
+        assert_eq!(pipe(5, |x| x * 2), 10);
     }
 
     #[test]
-    fn test_sum() { assert_eq!(sum_i64(vec![1,2,3,4,5]), 15); }
+    fn test_unique() {
+        assert_eq!(unique(vec![1, 2, 2, 3, 1, 4]), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_chunk() {
+        assert_eq!(
+            chunk(vec![1, 2, 3, 4, 5, 6, 7], 3),
+            vec![vec![1, 2, 3], vec![4, 5, 6], vec![7]]
+        );
+    }
+
+    #[test]
+    fn test_sum() {
+        assert_eq!(sum_i64(vec![1, 2, 3, 4, 5]), 15);
+    }
 }

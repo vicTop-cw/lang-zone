@@ -119,8 +119,14 @@ mod tests {
             "add".into(),
             LziFunction {
                 params: vec![
-                    LziParam { name: "a".into(), ty: "int".into() },
-                    LziParam { name: "b".into(), ty: "int".into() },
+                    LziParam {
+                        name: "a".into(),
+                        ty: "int".into(),
+                    },
+                    LziParam {
+                        name: "b".into(),
+                        ty: "int".into(),
+                    },
                 ],
                 return_type: Some("int".into()),
                 raises: None,
@@ -131,7 +137,10 @@ mod tests {
         );
         module.consts.insert(
             "PI".into(),
-            LziConst { ty: "f64".into(), value: None },
+            LziConst {
+                ty: "f64".into(),
+                value: None,
+            },
         );
         file.modules.insert("math".into(), module);
 

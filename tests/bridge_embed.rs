@@ -119,10 +119,7 @@ def bad_embed() -> int:
     std::fs::write(&lz, src).expect("write lz source");
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
     let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
-    assert!(
-        !out.status.success(),
-        "缺内嵌代码段的 embed 函数应被拒绝"
-    );
+    assert!(!out.status.success(), "缺内嵌代码段的 embed 函数应被拒绝");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("embed") && err.contains("代码段"),
@@ -167,5 +164,107 @@ def main():
     assert!(
         stdout.contains("Bridge registry: 1 symbol(s)"),
         "export 函数应自动登记 1 个符号，实际 stdout={stdout:?}"
+    );
+}
+
+// ────────────────────────────── M3 comptime 单态化 ──────────────────────────────
+
+/// 仅编译（不运行），返回 lang-zone 生成的 `.rs` 源文本（用于断言特化产物存在/焊死常量）
+fn compile_lz_rs(name: &str, source: &str) -> String {
+    let work = std::env::temp_dir().join(format!("lz_bridge_embed_{name}"));
+    let _ = std::fs::create_dir_all(&work);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, source).expect("write lz source");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "[{name}] lang-zone 编译失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rs = lz.with_extension("rs");
+    std::fs::read_to_string(&rs).expect("read generated rs")
+}
+
+const M3_SRC: &str = r#"
+const N = 7
+
+def add_n(comptime n: int, x: int) -> int =
+    x + n
+
+def classify(comptime limit: int, x: int) -> str =
+    if x > limit:
+        "big"
+    else:
+        "small"
+
+def main() =
+    print(add_n(N, 3))
+    print(add_n(2, 100))
+    print(classify(5, 10))
+    print(classify(5, 2))
+"#;
+
+#[test]
+fn comptime_m3_specialization_bakes_constants_and_runs() {
+    let out = run_lz("comptime_m3", M3_SRC);
+    // print 经 {:?} 输出：整数原样，字符串带引号
+    assert!(
+        out.contains("10"),
+        "add_n(N,3) 应得 10（N=7 焊死），实际: {out:?}"
+    );
+    assert!(
+        out.contains("102"),
+        "add_n(2,100) 应得 102（字面量 2 焊死），实际: {out:?}"
+    );
+    assert!(
+        out.contains("big"),
+        "classify(5,10) 应得 big（limit=5 焊死），实际: {out:?}"
+    );
+    assert!(
+        out.contains("small"),
+        "classify(5,2) 应得 small（limit=5 焊死），实际: {out:?}"
+    );
+}
+
+#[test]
+fn comptime_m3_emits_specialized_fns_with_baked_values() {
+    let rs = compile_lz_rs("comptime_m3_rs", M3_SRC);
+    // 必须生成 mangled 特化函数
+    assert!(
+        rs.contains("__lzspec_"),
+        "M3 未生成特化函数（mangled __lzspec_ 缺失），生成的 .rs:\n{rs}"
+    );
+    // const N=7 必须焊死为字面量 7i64
+    assert!(
+        rs.contains("x + 7i64"),
+        "comptime const N=7 未焊死进函数体，生成的 .rs:\n{rs}"
+    );
+    // 字面量 2 必须焊死
+    assert!(
+        rs.contains("x + 2i64"),
+        "comptime 字面量 2 未焊死进函数体，生成的 .rs:\n{rs}"
+    );
+    // comptime 形参用于控制流条件必须焊死为 5i64
+    assert!(
+        rs.contains("x > 5i64"),
+        "comptime limit=5 未焊死进 if 条件，生成的 .rs:\n{rs}"
+    );
+    // 按 comptime 值区分特化：add_n 的两个不同值（N=7 与 2）应生成 2 个特化函数
+    let add_defs = rs.matches("pub fn add_n__lzspec_").count();
+    assert_eq!(
+        add_defs, 2,
+        "add_n 的 N=7 与 2 应各生成一个特化函数，实际定义数={add_defs}，生成的 .rs:\n{rs}"
+    );
+    // 去重：两个 classify(5, ..) 调用应复用同一特化版本（仅 1 个定义）
+    let classify_defs = rs.matches("pub fn classify__lzspec_").count();
+    assert_eq!(
+        classify_defs, 1,
+        "classify(5,..) 应去重为单一特化函数，实际定义数={classify_defs}，生成的 .rs:\n{rs}"
+    );
+    // 调用点应去掉 comptime 实参：特化函数只收运行时参数（x），签名中无 comptime 形参
+    assert!(
+        rs.contains("pub fn add_n__lzspec_") && !rs.contains("pub fn add_n__lzspec_(comptime"),
+        "add_n 特化函数签名非法地保留了 comptime 形参，生成的 .rs:\n{rs}"
     );
 }

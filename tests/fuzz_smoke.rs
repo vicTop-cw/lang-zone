@@ -32,7 +32,10 @@ struct Lcg(u64);
 
 impl Lcg {
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 33) as u64
     }
     fn below(&mut self, n: usize) -> usize {
@@ -42,8 +45,8 @@ impl Lcg {
 
 #[allow(dead_code)] // 词表备用：新增 fuzz 生成规则时按需启用
 const KEYWORDS: &[&str] = &[
-    "def", "let", "if", "else", "for", "while", "return", "import",
-    "struct", "print", "true", "false", "None", "match", "case", "yield",
+    "def", "let", "if", "else", "for", "while", "return", "import", "struct", "print", "true",
+    "false", "None", "match", "case", "yield",
 ];
 const IDENTS: &[&str] = &["x", "y", "acc", "foo", "main", "value", "items", "self"];
 const OPS: &[&str] = &["+", "-", "*", "//", "%", "==", ">", "<", "and", "or"];
@@ -53,15 +56,42 @@ const BAD_TOKENS: &[&str] = &["@", "#", "0xG", "\"unterminated", "??", "::", "..
 /// 生成一个随机程序行
 fn gen_line(rng: &mut Lcg) -> String {
     match rng.below(10) {
-        0 => format!("let {} = {}", IDENTS[rng.below(IDENTS.len())], LITERALS[rng.below(LITERALS.len())]),
-        1 => format!("def {}({}: int) -> int = {}", IDENTS[rng.below(IDENTS.len())], IDENTS[rng.below(IDENTS.len())], LITERALS[rng.below(LITERALS.len())]),
-        2 => format!("{} = {} {} {}", IDENTS[rng.below(IDENTS.len())], LITERALS[rng.below(LITERALS.len())], OPS[rng.below(OPS.len())], LITERALS[rng.below(LITERALS.len())]),
+        0 => format!(
+            "let {} = {}",
+            IDENTS[rng.below(IDENTS.len())],
+            LITERALS[rng.below(LITERALS.len())]
+        ),
+        1 => format!(
+            "def {}({}: int) -> int = {}",
+            IDENTS[rng.below(IDENTS.len())],
+            IDENTS[rng.below(IDENTS.len())],
+            LITERALS[rng.below(LITERALS.len())]
+        ),
+        2 => format!(
+            "{} = {} {} {}",
+            IDENTS[rng.below(IDENTS.len())],
+            LITERALS[rng.below(LITERALS.len())],
+            OPS[rng.below(OPS.len())],
+            LITERALS[rng.below(LITERALS.len())]
+        ),
         3 => format!("if {}:", "true"),
         4 => "else:".to_string(),
         5 => format!("print({})", LITERALS[rng.below(LITERALS.len())]),
-        6 => format!("for {} in 0..{}:", IDENTS[rng.below(IDENTS.len())], rng.below(20)),
-        7 => format!("while {} < {}:", IDENTS[rng.below(IDENTS.len())], rng.below(10)),
-        8 => format!("import {}.{}", IDENTS[rng.below(IDENTS.len())], IDENTS[rng.below(IDENTS.len())]),
+        6 => format!(
+            "for {} in 0..{}:",
+            IDENTS[rng.below(IDENTS.len())],
+            rng.below(20)
+        ),
+        7 => format!(
+            "while {} < {}:",
+            IDENTS[rng.below(IDENTS.len())],
+            rng.below(10)
+        ),
+        8 => format!(
+            "import {}.{}",
+            IDENTS[rng.below(IDENTS.len())],
+            IDENTS[rng.below(IDENTS.len())]
+        ),
         _ => format!("{}", BAD_TOKENS[rng.below(BAD_TOKENS.len())]),
     }
 }

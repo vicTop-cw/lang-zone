@@ -42,7 +42,10 @@ fn check_case(name: &str, source: &str, expected: &str) {
     let lz = work.join("input.lz");
     std::fs::write(&lz, source).expect("write lz source");
 
-    let out = Command::new(&lang_bin()).arg(&lz).output().expect("run lang-zone");
+    let out = Command::new(&lang_bin())
+        .arg(&lz)
+        .output()
+        .expect("run lang-zone");
     assert!(
         out.status.success(),
         "[{name}] lang-zone 编译失败: {}",
@@ -83,16 +86,13 @@ fn reject_case(name: &str, source: &str) {
     let lz = work.join("input.lz");
     std::fs::write(&lz, source).expect("write lz source");
 
-    let out = Command::new(&lang_bin()).arg(&lz).output().expect("run lang-zone");
-    assert!(
-        !out.status.success(),
-        "[{name}] 编译器未拒绝（应拒绝）"
-    );
+    let out = Command::new(&lang_bin())
+        .arg(&lz)
+        .output()
+        .expect("run lang-zone");
+    assert!(!out.status.success(), "[{name}] 编译器未拒绝（应拒绝）");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !stderr.trim().is_empty(),
-        "[{name}] 拒绝但错误信息为空"
-    );
+    assert!(!stderr.trim().is_empty(), "[{name}] 拒绝但错误信息为空");
 }
 
 // ================================================================ impl 块
@@ -315,10 +315,7 @@ def main() =
 
 #[test]
 fn g6_generator_reject_top_level_yield() {
-    reject_case(
-        "generator_top_level_yield",
-        "yield 1\n",
-    );
+    reject_case("generator_top_level_yield", "yield 1\n");
 }
 
 // ================================================================ match

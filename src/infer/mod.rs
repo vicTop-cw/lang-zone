@@ -83,20 +83,17 @@ impl LziFile {
 
     /// 查找指定模块的指定函数的签名
     pub fn lookup_function(&self, module: &str, name: &str) -> Option<&LziFunction> {
-        self.modules.get(module)
-            .and_then(|m| m.functions.get(name))
+        self.modules.get(module).and_then(|m| m.functions.get(name))
     }
 
     /// 查找指定模块的指定结构体的签名
     pub fn lookup_struct(&self, module: &str, name: &str) -> Option<&LziStruct> {
-        self.modules.get(module)
-            .and_then(|m| m.structs.get(name))
+        self.modules.get(module).and_then(|m| m.structs.get(name))
     }
 
     /// 查找指定模块的指定常量的签名
     pub fn lookup_const(&self, module: &str, name: &str) -> Option<&LziConst> {
-        self.modules.get(module)
-            .and_then(|m| m.consts.get(name))
+        self.modules.get(module).and_then(|m| m.consts.get(name))
     }
 }
 

@@ -158,14 +158,20 @@ fn incremental_golden_cache_hit_and_propagation() {
     let cache = ".incr_cache";
 
     // 1. 首次全量：3 个模块全部重建
-    let (ok1, out1, err1) = run_lz(&work, &["main_app.lz", "--incr", &format!("--incr-cache={cache}")]);
+    let (ok1, out1, err1) = run_lz(
+        &work,
+        &["main_app.lz", "--incr", &format!("--incr-cache={cache}")],
+    );
     assert!(ok1, "首次增量编译失败: {err1}");
     let (cached1, rebuilt1) = parse_incr_stats(&out1).expect("解析首次统计");
     assert_eq!((cached1, rebuilt1), (0, 3), "首次应全量重建");
     let rs_full = std::fs::read_to_string(work.join("main_app.rs")).expect("读首次产物");
 
     // 2. 二次：全部命中缓存
-    let (ok2, out2, err2) = run_lz(&work, &["main_app.lz", "--incr", &format!("--incr-cache={cache}")]);
+    let (ok2, out2, err2) = run_lz(
+        &work,
+        &["main_app.lz", "--incr", &format!("--incr-cache={cache}")],
+    );
     assert!(ok2, "二次增量编译失败: {err2}");
     let (cached2, rebuilt2) = parse_incr_stats(&out2).expect("解析二次统计");
     assert_eq!((cached2, rebuilt2), (3, 0), "未变更应全部命中缓存");
@@ -177,15 +183,25 @@ fn incremental_golden_cache_hit_and_propagation() {
 
     // 3. 修改 lib_stats（依赖 lib_math）：lib_stats + 下游 main_app 级联重编，lib_math 命中
     write(&work, "lib_stats.lz", LIB_STATS_V2);
-    let (ok3, out3, err3) = run_lz(&work, &["main_app.lz", "--incr", &format!("--incr-cache={cache}")]);
+    let (ok3, out3, err3) = run_lz(
+        &work,
+        &["main_app.lz", "--incr", &format!("--incr-cache={cache}")],
+    );
     assert!(ok3, "传播失效后编译失败: {err3}");
     let (cached3, rebuilt3) = parse_incr_stats(&out3).expect("解析传播统计");
-    assert_eq!((cached3, rebuilt3), (1, 2), "lib_math 命中，lib_stats+main_app 应级联重编");
+    assert_eq!(
+        (cached3, rebuilt3),
+        (1, 2),
+        "lib_math 命中，lib_stats+main_app 应级联重编"
+    );
     let rs_prop = std::fs::read_to_string(work.join("main_app.rs")).expect("读传播产物");
 
     // 4. 与「修改后」的增量全量基线对照：清缓存重跑首次
     let _ = std::fs::remove_dir_all(work.join(cache));
-    let (ok4, out4, err4) = run_lz(&work, &["main_app.lz", "--incr", &format!("--incr-cache={cache}")]);
+    let (ok4, out4, err4) = run_lz(
+        &work,
+        &["main_app.lz", "--incr", &format!("--incr-cache={cache}")],
+    );
     assert!(ok4, "清缓存后全量编译失败: {err4}");
     let (cached4, rebuilt4) = parse_incr_stats(&out4).expect("解析全量统计");
     assert_eq!((cached4, rebuilt4), (0, 3), "清缓存后应全量重建");

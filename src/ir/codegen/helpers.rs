@@ -213,7 +213,8 @@ pub(crate) fn expr_has_external_assign(expr: &Expr, params: &[String]) -> bool {
             expr_has_external_assign(then, params) || expr_has_external_assign(els, params)
         }
         ExprKind::Call { callee, args, .. } => {
-            expr_has_external_assign(callee, params) || args.iter().any(|a| expr_has_external_assign(a, params))
+            expr_has_external_assign(callee, params)
+                || args.iter().any(|a| expr_has_external_assign(a, params))
         }
         _ => false,
     }
@@ -284,8 +285,9 @@ pub(crate) fn expr_first_yield_type(expr: &Expr) -> Option<IrType> {
         ExprKind::IfExpr { then, els, .. } => {
             expr_first_yield_type(then).or_else(|| expr_first_yield_type(els))
         }
-        ExprKind::Call { callee, args, .. } => expr_first_yield_type(callee)
-            .or_else(|| args.iter().find_map(expr_first_yield_type)),
+        ExprKind::Call { callee, args, .. } => {
+            expr_first_yield_type(callee).or_else(|| args.iter().find_map(expr_first_yield_type))
+        }
         ExprKind::Lambda { body, .. } => expr_first_yield_type(body),
         _ => None,
     }
@@ -516,12 +518,13 @@ pub(crate) fn gen_kwarg_field(arg: &Expr, cg: &CodeGen) -> String {
 pub(crate) fn kwarg_field_name(arg: &Expr) -> Option<String> {
     if let ExprKind::StructCtor { name, fields } = &arg.kind {
         if name == "_KwArg" {
-            return fields.iter().find(|(n, _)| n == "name").and_then(
-                |(_, v)| match &v.kind {
+            return fields
+                .iter()
+                .find(|(n, _)| n == "name")
+                .and_then(|(_, v)| match &v.kind {
                     ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
                     _ => None,
-                },
-            );
+                });
         }
     }
     None
@@ -739,9 +742,7 @@ pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::Ha
                 };
                 scan_auto_mut_locals(&inner, out);
             }
-            Stmt::TryCatch {
-                body, catches, ..
-            } => {
+            Stmt::TryCatch { body, catches, .. } => {
                 scan_auto_mut_locals(body, out);
                 for (_, cb) in catches {
                     scan_auto_mut_locals(cb, out);
@@ -772,12 +773,9 @@ fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) 
             if let ExprKind::Var(name) = &callee.kind {
                 if matches!(
                     name.as_str(),
-                    "push" | "append" | "pop" | "extend" | "insert" | "remove"
-                        | "add" | "delete"
+                    "push" | "append" | "pop" | "extend" | "insert" | "remove" | "add" | "delete"
                 ) {
-                    if let Some(ExprKind::Var(recv)) =
-                        args.first().map(|a| &a.kind)
-                    {
+                    if let Some(ExprKind::Var(recv)) = args.first().map(|a| &a.kind) {
                         out.insert(recv.clone());
                     }
                 }
@@ -787,9 +785,7 @@ fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) 
                 scan_expr_auto_mut(a, out);
             }
         }
-        ExprKind::MethodCall {
-            receiver, args, ..
-        } => {
+        ExprKind::MethodCall { receiver, args, .. } => {
             if let ExprKind::Var(v) = &receiver.kind {
                 out.insert(v.clone());
             }
@@ -848,7 +844,9 @@ fn scan_expr_auto_mut(expr: &Expr, out: &mut std::collections::HashSet<String>) 
             }
         }
         ExprKind::BlockExpr { block } => scan_auto_mut_locals(block, out),
-        ExprKind::TupleLit(items) | ExprKind::Tuple(items) | ExprKind::ListLit(items)
+        ExprKind::TupleLit(items)
+        | ExprKind::Tuple(items)
+        | ExprKind::ListLit(items)
         | ExprKind::List(items) => {
             for i in items {
                 scan_expr_auto_mut(i, out);
@@ -934,9 +932,7 @@ pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
         ExprKind::Call { callee, args, .. } => {
             expr_mentions_var(callee, name) || args.iter().any(|a| expr_mentions_var(a, name))
         }
-        ExprKind::MethodCall {
-            receiver, args, ..
-        } => {
+        ExprKind::MethodCall { receiver, args, .. } => {
             expr_mentions_var(receiver, name) || args.iter().any(|a| expr_mentions_var(a, name))
         }
         ExprKind::FieldAccess { base, .. } => expr_mentions_var(base, name),
@@ -961,25 +957,23 @@ pub(crate) fn expr_mentions_var(expr: &Expr, name: &str) -> bool {
                 || expr_mentions_var(els, name)
         }
         ExprKind::Lambda { body, .. } => expr_mentions_var(body, name),
-        ExprKind::StructCtor { fields, .. } => fields.iter().any(|(_, e)| expr_mentions_var(e, name)),
+        ExprKind::StructCtor { fields, .. } => {
+            fields.iter().any(|(_, e)| expr_mentions_var(e, name))
+        }
         ExprKind::EnumCtor { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
         ExprKind::GenExpr { yield_of } => expr_mentions_var(yield_of, name),
         ExprKind::GenBuild { .. } => false,
         ExprKind::Cast { expr, .. } => expr_mentions_var(expr, name),
         ExprKind::MagicCall { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
         ExprKind::BlockExpr { block } => block.stmts.iter().any(|s| match s {
-            Stmt::Let {
-                name: n,
-                value,
-                ..
-            } => *n == name && expr_mentions_var(value, name),
+            Stmt::Let { name: n, value, .. } => *n == name && expr_mentions_var(value, name),
             Stmt::ExprStmt { expr } => expr_mentions_var(expr, name),
-            Stmt::Return { value } => {
-                value.as_ref().map_or(false, |v| expr_mentions_var(v, name))
-            }
+            Stmt::Return { value } => value.as_ref().map_or(false, |v| expr_mentions_var(v, name)),
             _ => false,
         }),
-        ExprKind::TupleLit(items) | ExprKind::Tuple(items) | ExprKind::ListLit(items)
+        ExprKind::TupleLit(items)
+        | ExprKind::Tuple(items)
+        | ExprKind::ListLit(items)
         | ExprKind::List(items) => items.iter().any(|i| expr_mentions_var(i, name)),
         ExprKind::Dict(entries) => entries
             .iter()
@@ -1026,12 +1020,8 @@ pub(crate) fn collect_local_lets(block: &Block, locals: &mut std::collections::H
                 collect_for_var_bindings(var, locals);
                 collect_local_lets(body, locals);
             }
-            Stmt::While { body, .. } => {
-                collect_local_lets(body, locals)
-            }
-            Stmt::WhileLet {
-                pattern, body, ..
-            } => {
+            Stmt::While { body, .. } => collect_local_lets(body, locals),
+            Stmt::WhileLet { pattern, body, .. } => {
                 // while-let 模式绑定（如 Some(item) 中的 item）也是局部变量：
                 // 不收集会导致 analyze_global_vars 误判为跨函数全局变量，
                 // 生成 static mut item 与 for 绑定冲突（E0530，while_let.lz）
@@ -1059,7 +1049,10 @@ pub(crate) fn collect_local_lets(block: &Block, locals: &mut std::collections::H
 }
 
 /// 收集模式中的绑定名（match 臂的 Ident/Tuple/Struct/Enum 绑定）
-pub(crate) fn collect_pattern_bindings(pattern: &Pattern, locals: &mut std::collections::HashSet<String>) {
+pub(crate) fn collect_pattern_bindings(
+    pattern: &Pattern,
+    locals: &mut std::collections::HashSet<String>,
+) {
     match pattern {
         Pattern::Ident(name) => {
             locals.insert(name.clone());

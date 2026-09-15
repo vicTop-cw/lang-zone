@@ -20,9 +20,8 @@
 //   → 在生成的文件尾部注明 Cargo.toml 依赖提示
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta,
-    CallResolveResult, ExportEntry, ExportKind, ImportResolveResult,
-    MethodResolveResult, RoutePattern,
+    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta, CallResolveResult, ExportEntry,
+    ExportKind, ImportResolveResult, MethodResolveResult, RoutePattern,
 };
 use std::collections::HashMap;
 
@@ -62,9 +61,21 @@ impl RustBridge {
     }
 
     /// 注册一个 Rust crate
-    pub fn register_crate(&mut self, name: impl Into<String>, version: Option<String>, features: Vec<String>) {
+    pub fn register_crate(
+        &mut self,
+        name: impl Into<String>,
+        version: Option<String>,
+        features: Vec<String>,
+    ) {
         let name = name.into();
-        self.crates.insert(name.clone(), CrateEntry { name, version, features });
+        self.crates.insert(
+            name.clone(),
+            CrateEntry {
+                name,
+                version,
+                features,
+            },
+        );
     }
 
     /// 返回本次编译用到的 crate 列表（供 codegen 生成 Cargo.toml 提示）
@@ -74,9 +85,13 @@ impl RustBridge {
 }
 
 impl Bridge for RustBridge {
-    fn name(&self) -> &str { "rust_bridge" }
+    fn name(&self) -> &str {
+        "rust_bridge"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::CompileTime }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::CompileTime
+    }
 
     fn capabilities(&self) -> BridgeCapability {
         BridgeCapability::IMPORT | BridgeCapability::FUNCTION_CALL | BridgeCapability::TYPE_REWRITE
@@ -95,16 +110,24 @@ impl Bridge for RustBridge {
         &self.patterns
     }
 
-    fn resolve_import(&self, module_path: &[String], _items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import(
+        &self,
+        module_path: &[String],
+        _items: &[String],
+    ) -> Option<ImportResolveResult> {
         // 只处理 std::bridge::rust::xxx 路径
-        if module_path.len() < 4 { return None; }
+        if module_path.len() < 4 {
+            return None;
+        }
         if module_path[0] != "std" || module_path[1] != "bridge" || module_path[2] != "rust" {
             return None;
         }
 
         // 剥离前缀，剩余部分就是 Rust 路径
         let rust_path: String = module_path[3..].join("::");
-        if rust_path.is_empty() { return None; }
+        if rust_path.is_empty() {
+            return None;
+        }
 
         // 提取 crate 名（路径第一个组件）
         let crate_name = &module_path[3];
@@ -113,7 +136,10 @@ impl Bridge for RustBridge {
         if !self.allow_unregistered && !self.crates.contains_key(crate_name) {
             let err = BridgeError::new(
                 crate::bridge::core::ErrorCode::CapabilityMissing,
-                format!("Rust crate '{}' not registered. Use --rust-crate flag or add to bridge TOML.", crate_name),
+                format!(
+                    "Rust crate '{}' not registered. Use --rust-crate flag or add to bridge TOML.",
+                    crate_name
+                ),
                 "rust_bridge",
             );
             return Some(ImportResolveResult {
@@ -178,7 +204,9 @@ impl Bridge for RustBridge {
         vec![]
     }
 
-    fn export_count(&self) -> usize { self.crates.len() }
+    fn export_count(&self) -> usize {
+        self.crates.len()
+    }
 }
 
 #[cfg(test)]
@@ -195,7 +223,12 @@ mod tests {
     #[test]
     fn test_import_rust_crate() {
         let b = make_bridge();
-        let path = vec!["std".into(), "bridge".into(), "rust".into(), "serde_json".into()];
+        let path = vec![
+            "std".into(),
+            "bridge".into(),
+            "rust".into(),
+            "serde_json".into(),
+        ];
         let r = b.resolve_import(&path, &[]).unwrap();
         assert_eq!(r.rust_path, "serde_json");
         assert_eq!(r.extern_crates, vec!["serde_json"]);
@@ -204,7 +237,13 @@ mod tests {
     #[test]
     fn test_import_rust_nested() {
         let b = make_bridge();
-        let path = vec!["std".into(), "bridge".into(), "rust".into(), "tokio".into(), "net".into()];
+        let path = vec![
+            "std".into(),
+            "bridge".into(),
+            "rust".into(),
+            "tokio".into(),
+            "net".into(),
+        ];
         let r = b.resolve_import(&path, &[]).unwrap();
         assert_eq!(r.rust_path, "tokio::net");
     }
@@ -241,7 +280,12 @@ mod tests {
     #[test]
     fn test_crate_not_registered() {
         let b = make_bridge();
-        let path = vec!["std".into(), "bridge".into(), "rust".into(), "nonexistent".into()];
+        let path = vec![
+            "std".into(),
+            "bridge".into(),
+            "rust".into(),
+            "nonexistent".into(),
+        ];
         // allow_unregistered=true 时，未注册 crate 也透传
         let r = b.resolve_import(&path, &[]).unwrap();
         assert_eq!(r.rust_path, "nonexistent");

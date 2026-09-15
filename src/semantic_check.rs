@@ -95,17 +95,78 @@ use crate::ast::builtin_type_names;
 fn builtin_value_names() -> HashSet<&'static str> {
     let mut s = HashSet::new();
     for n in [
-        "print", "read", "len", "panic", "type", "range", "spawn", "await", "yield",
-        "comptime", "input", "assert", "sizeof", "alignof", "iter", "next", "clone",
-        "to_string", "int", "float", "str", "bool", "list", "dict", "set", "tuple",
-        "True", "False", "None", "self", "this", "_", "super",
-        "true", "false", "map", "filter", "reduce", "fold", "zip", "enumerate", "sum", "min", "max",
-        "__name__", "__doc__", "__is_macro__", "__slots__", "__file__", "__package__",
-        "__path__", "__module__", "__qualname__", "__", "collect",
+        "print",
+        "read",
+        "len",
+        "panic",
+        "type",
+        "range",
+        "spawn",
+        "await",
+        "yield",
+        "comptime",
+        "input",
+        "assert",
+        "sizeof",
+        "alignof",
+        "iter",
+        "next",
+        "clone",
+        "to_string",
+        "int",
+        "float",
+        "str",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "True",
+        "False",
+        "None",
+        "self",
+        "this",
+        "_",
+        "super",
+        "true",
+        "false",
+        "map",
+        "filter",
+        "reduce",
+        "fold",
+        "zip",
+        "enumerate",
+        "sum",
+        "min",
+        "max",
+        "__name__",
+        "__doc__",
+        "__is_macro__",
+        "__slots__",
+        "__file__",
+        "__package__",
+        "__path__",
+        "__module__",
+        "__qualname__",
+        "__",
+        "collect",
         "inspect",
         // std 模块名（作为 PathAccess 根节点时视为已绑定）
-        "time", "io", "fs", "path", "env", "process", "sync", "thread",
-        "collections", "iter", "ops", "fmt", "mem", "ptr", "ffi",
+        "time",
+        "io",
+        "fs",
+        "path",
+        "env",
+        "process",
+        "sync",
+        "thread",
+        "collections",
+        "iter",
+        "ops",
+        "fmt",
+        "mem",
+        "ptr",
+        "ffi",
     ] {
         s.insert(n);
     }
@@ -142,7 +203,12 @@ impl Checker {
             if let Some(alias) = &imp.alias {
                 self.imported_names.insert(alias.clone());
             }
-            if !imp.is_from && imp.path.first().map_or(false, |p| p != "std" && p != "macro") {
+            if !imp.is_from
+                && imp
+                    .path
+                    .first()
+                    .map_or(false, |p| p != "std" && p != "macro")
+            {
                 // 裸 import path：模块名作为命名空间前缀（lib_math.square(...)）→ 视为已绑定
                 if let Some(last) = imp.path.last() {
                     self.imported_names.insert(last.clone());
@@ -263,7 +329,12 @@ impl Checker {
         }
     }
 
-    fn is_known_type(&self, name: &str, fn_generics: &[String], struct_generics: &[String]) -> bool {
+    fn is_known_type(
+        &self,
+        name: &str,
+        fn_generics: &[String],
+        struct_generics: &[String],
+    ) -> bool {
         let r = builtin_type_names().contains(name)
             || self.type_names.contains(name)
             || self.imported_names.contains(name)
@@ -598,7 +669,12 @@ impl Checker {
     fn check_stmt(&mut self, st: &Stmt) {
         match st {
             Stmt::Expr(e) => self.check_expr(e),
-            Stmt::Let { name, value, mutable, .. } => {
+            Stmt::Let {
+                name,
+                value,
+                mutable,
+                ..
+            } => {
                 self.check_expr(value);
                 self.bind_mut(name.clone(), *mutable);
             }
@@ -626,7 +702,10 @@ impl Checker {
                 self.check_expr(e);
             }
             Stmt::While {
-                cond, body, else_body, ..
+                cond,
+                body,
+                else_body,
+                ..
             } => {
                 self.check_expr(cond);
                 self.loop_depth += 1;
@@ -641,7 +720,11 @@ impl Checker {
                 }
             }
             Stmt::WhileLet {
-                pattern, expr, body, else_body, ..
+                pattern,
+                expr,
+                body,
+                else_body,
+                ..
             } => {
                 self.check_expr(expr);
                 let mut binds = Vec::new();
@@ -672,17 +755,16 @@ impl Checker {
                 self.push_scope();
                 // `for (a, b) in ...` / `for a, b in ...`：元组解构多变量
                 let vt = var.trim();
-                let parts: Vec<&str> = if (vt.starts_with('(') && vt.ends_with(')'))
-                    || vt.contains(',')
-                {
-                    let inner = vt
-                        .strip_prefix('(')
-                        .and_then(|s| s.strip_suffix(')'))
-                        .unwrap_or(vt);
-                    inner.split(',').map(|s| s.trim()).collect()
-                } else {
-                    vec![vt]
-                };
+                let parts: Vec<&str> =
+                    if (vt.starts_with('(') && vt.ends_with(')')) || vt.contains(',') {
+                        let inner = vt
+                            .strip_prefix('(')
+                            .and_then(|s| s.strip_suffix(')'))
+                            .unwrap_or(vt);
+                        inner.split(',').map(|s| s.trim()).collect()
+                    } else {
+                        vec![vt]
+                    };
                 for part in parts {
                     if !part.is_empty() {
                         self.bind(part.to_string());
@@ -755,7 +837,8 @@ impl Checker {
                 if self.catch_depth == 0 {
                     // 字符串字面量 raise（raise "message"）为消息式错误，可免 raises 声明；
                     // 类型化 raise（raise ErrorType(...)）仍必须声明 raises
-                    let is_str_raise = matches!(e, Expr::StrLit(_) | Expr::FStrLit(_) | Expr::RawStrLit(_));
+                    let is_str_raise =
+                        matches!(e, Expr::StrLit(_) | Expr::FStrLit(_) | Expr::RawStrLit(_));
                     if let Some(c) = self.fn_ctx.as_mut() {
                         if !is_str_raise {
                             c.has_raise = true;
@@ -806,7 +889,12 @@ impl Checker {
                 self.type_names.insert(s.name.clone());
                 for f in &s.fields {
                     self.enum_variants.insert(f.name.clone());
-                    self.check_type(&f.ty, &format!("enum {} 变体类型", s.name), &[], &s.generics);
+                    self.check_type(
+                        &f.ty,
+                        &format!("enum {} 变体类型", s.name),
+                        &[],
+                        &s.generics,
+                    );
                 }
             }
             Stmt::Assign { target, value, .. } => {
@@ -853,7 +941,10 @@ impl Checker {
                 }
             }
             Stmt::Suite {
-                setup, teardown, tests, ..
+                setup,
+                teardown,
+                tests,
+                ..
             } => {
                 // setup/teardown/tests 共享同一作用域（setup 绑定可在 tests 中引用）
                 self.push_scope();
@@ -895,7 +986,9 @@ impl Checker {
 
     /// 返回字面量与声明返回类型不匹配（仅处理可直接判定的字面量，其他放行）
     fn check_return_literal(&mut self, e: &Expr) {
-        let Some(ctx) = self.fn_ctx.as_ref() else { return };
+        let Some(ctx) = self.fn_ctx.as_ref() else {
+            return;
+        };
         let Some(ret) = &ctx.return_type else { return };
         let lit_kind = match e {
             Expr::IntLit(_) => Some("int"),
@@ -931,7 +1024,7 @@ impl Checker {
             | Expr::RawStrLit(_)
             | Expr::BoolLit(_)
             | Expr::NoneLit => {}
-            | Expr::DefaultExpr => {}
+            Expr::DefaultExpr => {}
             Expr::Ident(name) => {
                 if !self.is_bound(name) {
                     self.error(format!("未绑定变量: {name}"));
@@ -962,10 +1055,18 @@ impl Checker {
             Expr::Binary { left, right, .. } => {
                 self.check_expr(left);
                 // 对字面量/容器做解引用（如 `1 +* 2` → `1 + (*2)`）→ 拒绝
-                if matches!(right.as_ref(), Expr::Unary { op: UnaryOp::Deref, .. }) {
+                if matches!(
+                    right.as_ref(),
+                    Expr::Unary {
+                        op: UnaryOp::Deref,
+                        ..
+                    }
+                ) {
                     if let Expr::Unary { operand, .. } = right.as_ref() {
                         if is_literal_expr(operand) {
-                            self.error("非法表达式: 对字面量解引用（如 `+*` 这类非法运算符）".into());
+                            self.error(
+                                "非法表达式: 对字面量解引用（如 `+*` 这类非法运算符）".into(),
+                            );
                         }
                     }
                 }
@@ -977,18 +1078,35 @@ impl Checker {
                 }
                 self.check_expr(operand);
             }
-            Expr::Call { func, args, type_args, .. } => {
+            Expr::Call {
+                func,
+                args,
+                type_args,
+                ..
+            } => {
                 // func 位置不检查 Ident（允许调用尚未显式绑定的函数/宏名）
                 if !matches!(func.as_ref(), Expr::Ident(_)) {
                     self.check_expr(func);
                 }
                 // G2: 同模块函数调用参数个数不匹配（`def f(a); f(1,2)`）→ 报错
                 if let Expr::Ident(name) = func.as_ref() {
-                    let sig = self
-                        .fn_sigs
-                        .get(name)
-                        .map(|s| (s.param_count, s.param_count_min, s.generic_count, s.variadic, s.collect_list));
-                    if let Some((param_count, param_count_min, generic_count, variadic, collect_list)) = sig {
+                    let sig = self.fn_sigs.get(name).map(|s| {
+                        (
+                            s.param_count,
+                            s.param_count_min,
+                            s.generic_count,
+                            s.variadic,
+                            s.collect_list,
+                        )
+                    });
+                    if let Some((
+                        param_count,
+                        param_count_min,
+                        generic_count,
+                        variadic,
+                        collect_list,
+                    )) = sig
+                    {
                         let has_kwarg = args.iter().any(|a| matches!(a, Expr::KwArg { .. }));
                         // 默认参数可省略：参数个数 ∈ [必需数, 总数]；
                         // 变参（`..`）上限不限；安全收集（最后参数 List<T>）上限不限且允许省略该 List 参数
@@ -1126,7 +1244,10 @@ impl Checker {
                 }
             }
             Expr::Pipe {
-                receiver, callee, args, ..
+                receiver,
+                callee,
+                args,
+                ..
             } => {
                 self.check_expr(receiver);
                 self.check_expr(callee);

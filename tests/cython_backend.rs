@@ -6,12 +6,12 @@
 
 use lang_zone::ir::codegen_cython::{CythonCodeGen, TypeCtx};
 use lang_zone::ir::node::{
-    ConstDef, EnumDef, Field, FnDef, GenericParam, Item, Param, StructDef, TypeAliasDef, UseStmt,
-    Variant,
+    ConstDef, EnumDef, Field, FnDef, GenericParam, IrMods, Item, Param, StructDef, TypeAliasDef,
+    UseStmt, Variant,
 };
 use lang_zone::ir::node::{DuckDef, DuckField, DuckMethod, FnSig, ImplDef, TestDef, TraitDef};
-use lang_zone::ir::IrModule;
 use lang_zone::ir::types::IrType;
+use lang_zone::ir::IrModule;
 
 // ── 辅助函数 ──
 
@@ -49,7 +49,10 @@ fn cy_omega_gate_type_map() {
 
     // 容器类型
     assert_eq!(
-        cg.map_type(&IrType::named_with("List", vec![IrType::Int]), TypeCtx::Signature),
+        cg.map_type(
+            &IrType::named_with("List", vec![IrType::Int]),
+            TypeCtx::Signature
+        ),
         "list"
     );
     assert_eq!(
@@ -60,21 +63,33 @@ fn cy_omega_gate_type_map() {
         "dict"
     );
     assert_eq!(
-        cg.map_type(&IrType::named_with("Set", vec![IrType::Int]), TypeCtx::Signature),
+        cg.map_type(
+            &IrType::named_with("Set", vec![IrType::Int]),
+            TypeCtx::Signature
+        ),
         "set"
     );
 
     // 智能指针 → object
     assert_eq!(
-        cg.map_type(&IrType::named_with("Box", vec![IrType::Int]), TypeCtx::Signature),
+        cg.map_type(
+            &IrType::named_with("Box", vec![IrType::Int]),
+            TypeCtx::Signature
+        ),
         "object"
     );
     assert_eq!(
-        cg.map_type(&IrType::named_with("Rc", vec![IrType::Int]), TypeCtx::Signature),
+        cg.map_type(
+            &IrType::named_with("Rc", vec![IrType::Int]),
+            TypeCtx::Signature
+        ),
         "object"
     );
     assert_eq!(
-        cg.map_type(&IrType::named_with("Arc", vec![IrType::Int]), TypeCtx::Signature),
+        cg.map_type(
+            &IrType::named_with("Arc", vec![IrType::Int]),
+            TypeCtx::Signature
+        ),
         "object"
     );
 
@@ -156,8 +171,14 @@ fn cy_omega_gate_struct() {
         name: "Point".into(),
         generics: vec![],
         fields: vec![
-            Field { name: "x".into(), ty: IrType::F64 },
-            Field { name: "y".into(), ty: IrType::F64 },
+            Field {
+                name: "x".into(),
+                ty: IrType::F64,
+            },
+            Field {
+                name: "y".into(),
+                ty: IrType::F64,
+            },
         ],
         methods: vec![FnDef {
             name: "area".into(),
@@ -170,6 +191,8 @@ fn cy_omega_gate_struct() {
                 is_owned: false,
                 default: None,
                 variadic: false,
+                comptime: false,
+                mods: IrMods::default(),
             }],
             ret_ty: IrType::F64,
             raises: None,
@@ -190,8 +213,10 @@ fn cy_omega_gate_struct() {
         has_new: false,
         new_params: vec![],
         new_ret_ty: None,
+        new_body: None,
         has_init: false,
         init_params: vec![],
+        init_body: None,
         implicit_froms: vec![],
         is_case: false,
         span: lang_zone::ir::node::Span::unknown(),
@@ -229,6 +254,8 @@ fn cy_omega_gate_function() {
             is_owned: false,
             default: None,
             variadic: false,
+            comptime: false,
+            mods: IrMods::default(),
         }],
         ret_ty: IrType::Int,
         raises: None,
@@ -268,6 +295,7 @@ fn cy_omega_gate_const() {
             IrType::Int,
             lang_zone::ir::node::Span::unknown(),
         ),
+        mods: IrMods::default(),
     }));
 
     let pyx = gen(module);
@@ -338,13 +366,22 @@ fn cy_omega_gate_enum() {
         variants: vec![
             Variant {
                 name: "Circle".into(),
-                fields: vec![Field { name: "r".into(), ty: IrType::F64 }],
+                fields: vec![Field {
+                    name: "r".into(),
+                    ty: IrType::F64,
+                }],
             },
             Variant {
                 name: "Rect".into(),
                 fields: vec![
-                    Field { name: "w".into(), ty: IrType::F64 },
-                    Field { name: "h".into(), ty: IrType::F64 },
+                    Field {
+                        name: "w".into(),
+                        ty: IrType::F64,
+                    },
+                    Field {
+                        name: "h".into(),
+                        ty: IrType::F64,
+                    },
                 ],
             },
         ],
@@ -382,9 +419,18 @@ fn cy_omega_gate_enum_cstyle() {
         name: "Color".into(),
         generics: vec![],
         variants: vec![
-            Variant { name: "Red".into(), fields: vec![] },
-            Variant { name: "Green".into(), fields: vec![] },
-            Variant { name: "Blue".into(), fields: vec![] },
+            Variant {
+                name: "Red".into(),
+                fields: vec![],
+            },
+            Variant {
+                name: "Green".into(),
+                fields: vec![],
+            },
+            Variant {
+                name: "Blue".into(),
+                fields: vec![],
+            },
         ],
         methods: vec![],
         span: lang_zone::ir::node::Span::unknown(),
@@ -414,17 +460,45 @@ fn cy_omega_gate_function_generic() {
     let mut module = IrModule::new("test".into());
     module.items.push(Item::FnDef(FnDef {
         name: "id".into(),
-        generics: vec![GenericParam { name: "T".into(), bounds: vec![], default: None }],
-        params: vec![Param { name: "x".into(), ty: IrType::Generic("T".into()), is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false }],
+        generics: vec![GenericParam {
+            name: "T".into(),
+            bounds: vec![],
+            default: None,
+        }],
+        params: vec![Param {
+            name: "x".into(),
+            ty: IrType::Generic("T".into()),
+            is_mut: false,
+            is_ref: false,
+            is_owned: false,
+            default: None,
+            variadic: false,
+            comptime: false,
+            mods: IrMods::default(),
+        }],
         ret_ty: IrType::Generic("T".into()),
         raises: None,
-        body: lang_zone::ir::node::Block { stmts: vec![], ty: IrType::Generic("T".into()), span: lang_zone::ir::node::Span::unknown() },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        body: lang_zone::ir::node::Block {
+            stmts: vec![],
+            ty: IrType::Generic("T".into()),
+            span: lang_zone::ir::node::Span::unknown(),
+        },
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["cpdef object id(object x):", "# generic<T>"], "function_generic");
+    assert_contains(
+        &pyx,
+        &["cpdef object id(object x):", "# generic<T>"],
+        "function_generic",
+    );
 }
 
 // ── Ω-spec: cy_function 变参 ──
@@ -436,14 +510,44 @@ fn cy_omega_gate_function_variadic() {
         name: "sum_all".into(),
         generics: vec![],
         params: vec![
-            Param { name: "first".into(), ty: IrType::Int, is_mut: false, is_ref: false, is_owned: false, default: None, variadic: false },
-            Param { name: "args".into(), ty: IrType::named("Tuple"), is_mut: false, is_ref: false, is_owned: false, default: None, variadic: true },
+            Param {
+                name: "first".into(),
+                ty: IrType::Int,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: false,
+                comptime: false,
+                mods: IrMods::default(),
+            },
+            Param {
+                name: "args".into(),
+                ty: IrType::named("Tuple"),
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: true,
+                comptime: false,
+                mods: IrMods::default(),
+            },
         ],
         ret_ty: IrType::Int,
         raises: None,
-        body: lang_zone::ir::node::Block { stmts: vec![], ty: IrType::Int, span: lang_zone::ir::node::Span::unknown() },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        body: lang_zone::ir::node::Block {
+            stmts: vec![],
+            ty: IrType::Int,
+            span: lang_zone::ir::node::Span::unknown(),
+        },
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -533,6 +637,8 @@ fn cy_omega_gate_impl() {
                 is_owned: false,
                 default: None,
                 variadic: false,
+                comptime: false,
+                mods: IrMods::default(),
             }],
             ret_ty: IrType::F64,
             raises: None,
@@ -557,7 +663,10 @@ fn cy_omega_gate_impl() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["# impl HasArea for Circle", "# HasArea.area → 注入到 Circle"],
+        &[
+            "# impl HasArea for Circle",
+            "# HasArea.area → 注入到 Circle",
+        ],
         "impl",
     );
 }
@@ -635,39 +744,45 @@ fn cy_omega_gate_stmt_while_let() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::WhileLet {
-                    pattern: lang_zone::ir::node::Pattern::Ident("x".into()),
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("items".into()),
-                        IrType::named("List"),
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    guard: None,
-                    body: lang_zone::ir::node::Block {
-                        stmts: vec![
-                            lang_zone::ir::node::Stmt::ExprStmt {
-                                expr: lang_zone::ir::node::Expr::new(
-                                    lang_zone::ir::node::ExprKind::Var("print(x)".into()),
-                                    IrType::Unit,
-                                    lang_zone::ir::node::Span::unknown(),
-                                ),
-                            },
-                        ],
-                        ty: IrType::Unit,
-                        span: lang_zone::ir::node::Span::unknown(),
-                    },
+            stmts: vec![lang_zone::ir::node::Stmt::WhileLet {
+                pattern: lang_zone::ir::node::Pattern::Ident("x".into()),
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("items".into()),
+                    IrType::named("List"),
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                guard: None,
+                body: lang_zone::ir::node::Block {
+                    stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                        expr: lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("print(x)".into()),
+                            IrType::Unit,
+                            lang_zone::ir::node::Span::unknown(),
+                        ),
+                    }],
+                    ty: IrType::Unit,
+                    span: lang_zone::ir::node::Span::unknown(),
                 },
-            ],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# while let", "for __while_let__ in items:"], "stmt_while_let");
+    assert_contains(
+        &pyx,
+        &["# while let", "for __while_let__ in items:"],
+        "stmt_while_let",
+    );
 }
 
 // ── Ω-spec: cy_stmt_yield_from ──
@@ -682,20 +797,24 @@ fn cy_omega_gate_stmt_yield_from() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::YieldFrom {
-                    iter: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("other".into()),
-                        IrType::named("Iter"),
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::YieldFrom {
+                iter: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("other".into()),
+                    IrType::named("Iter"),
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: true, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: true,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -718,8 +837,14 @@ fn cy_omega_gate_stmt_pass() {
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -738,28 +863,30 @@ fn cy_omega_gate_stmt_defer() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Defer {
-                    body: lang_zone::ir::node::Block {
-                        stmts: vec![
-                            lang_zone::ir::node::Stmt::ExprStmt {
-                                expr: lang_zone::ir::node::Expr::new(
-                                    lang_zone::ir::node::ExprKind::Var("cleanup()".into()),
-                                    IrType::Unit,
-                                    lang_zone::ir::node::Span::unknown(),
-                                ),
-                            },
-                        ],
-                        ty: IrType::Unit,
-                        span: lang_zone::ir::node::Span::unknown(),
-                    },
+            stmts: vec![lang_zone::ir::node::Stmt::Defer {
+                body: lang_zone::ir::node::Block {
+                    stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                        expr: lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("cleanup()".into()),
+                            IrType::Unit,
+                            lang_zone::ir::node::Span::unknown(),
+                        ),
+                    }],
+                    ty: IrType::Unit,
+                    span: lang_zone::ir::node::Span::unknown(),
                 },
-            ],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -778,61 +905,71 @@ fn cy_omega_gate_stmt_try_catch() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::TryCatch {
-                    body: lang_zone::ir::node::Block {
-                        stmts: vec![
-                            lang_zone::ir::node::Stmt::ExprStmt {
-                                expr: lang_zone::ir::node::Expr::new(
-                                    lang_zone::ir::node::ExprKind::Var("risky()".into()),
-                                    IrType::Unit,
-                                    lang_zone::ir::node::Span::unknown(),
-                                ),
-                            },
-                        ],
+            stmts: vec![lang_zone::ir::node::Stmt::TryCatch {
+                body: lang_zone::ir::node::Block {
+                    stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                        expr: lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("risky()".into()),
+                            IrType::Unit,
+                            lang_zone::ir::node::Span::unknown(),
+                        ),
+                    }],
+                    ty: IrType::Unit,
+                    span: lang_zone::ir::node::Span::unknown(),
+                },
+                catches: vec![(
+                    None,
+                    lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("handle()".into()),
+                                IrType::Unit,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
                         ty: IrType::Unit,
                         span: lang_zone::ir::node::Span::unknown(),
                     },
-                    catches: vec![
-                        (None, lang_zone::ir::node::Block {
-                            stmts: vec![
-                                lang_zone::ir::node::Stmt::ExprStmt {
-                                    expr: lang_zone::ir::node::Expr::new(
-                                        lang_zone::ir::node::ExprKind::Var("handle()".into()),
-                                        IrType::Unit,
-                                        lang_zone::ir::node::Span::unknown(),
-                                    ),
-                                },
-                            ],
-                            ty: IrType::Unit,
-                            span: lang_zone::ir::node::Span::unknown(),
-                        }),
-                    ],
-                    else_body: None,
-                    finally_body: Some(lang_zone::ir::node::Block {
-                        stmts: vec![
-                            lang_zone::ir::node::Stmt::ExprStmt {
-                                expr: lang_zone::ir::node::Expr::new(
-                                    lang_zone::ir::node::ExprKind::Var("finalize()".into()),
-                                    IrType::Unit,
-                                    lang_zone::ir::node::Span::unknown(),
-                                ),
-                            },
-                        ],
-                        ty: IrType::Unit,
-                        span: lang_zone::ir::node::Span::unknown(),
-                    }),
-                },
-            ],
+                )],
+                else_body: None,
+                finally_body: Some(lang_zone::ir::node::Block {
+                    stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                        expr: lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("finalize()".into()),
+                            IrType::Unit,
+                            lang_zone::ir::node::Span::unknown(),
+                        ),
+                    }],
+                    ty: IrType::Unit,
+                    span: lang_zone::ir::node::Span::unknown(),
+                }),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["try:", "except:", "finally:", "risky()", "handle()", "finalize()"], "stmt_try_catch");
+    assert_contains(
+        &pyx,
+        &[
+            "try:",
+            "except:",
+            "finally:",
+            "risky()",
+            "handle()",
+            "finalize()",
+        ],
+        "stmt_try_catch",
+    );
 }
 
 // ── Ω-spec: cy_expr_assign ──
@@ -847,31 +984,37 @@ fn cy_omega_gate_expr_assign() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::ExprStmt {
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::AssignExpr {
-                            target: Box::new(lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Var("x".into()),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
+            stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::AssignExpr {
+                        target: Box::new(lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("x".into()),
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        )),
+                        value: Box::new(lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(
+                                10,
                             )),
-                            value: Box::new(lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(10)),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
-                            )),
-                        },
-                        IrType::Unit,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        )),
+                    },
+                    IrType::Unit,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -890,27 +1033,31 @@ fn cy_omega_gate_expr_cast() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::ExprStmt {
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Cast {
-                            expr: Box::new(lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Var("x".into()),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
-                            )),
-                            target: IrType::F64,
-                        },
-                        IrType::F64,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Cast {
+                        expr: Box::new(lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("x".into()),
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        )),
+                        target: IrType::F64,
+                    },
+                    IrType::F64,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -929,27 +1076,31 @@ fn cy_omega_gate_expr_magic_call() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::ExprStmt {
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::MagicCall {
-                            kind: lang_zone::ir::node::MagicKind::Display,
-                            args: vec![lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Var("x".into()),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
-                            )],
-                        },
-                        IrType::Str,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::MagicCall {
+                        kind: lang_zone::ir::node::MagicKind::Display,
+                        args: vec![lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Var("x".into()),
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        )],
+                    },
+                    IrType::Str,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -968,31 +1119,39 @@ fn cy_omega_gate_expr_collections() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::ExprStmt {
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::TupleLit(vec![
-                            lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(1)),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
-                            ),
-                            lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(2)),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
-                            ),
-                        ]),
-                        IrType::Tuple(vec![IrType::Int, IrType::Int]),
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::TupleLit(vec![
+                        lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(
+                                1,
+                            )),
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        ),
+                        lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(
+                                2,
+                            )),
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        ),
+                    ]),
+                    IrType::Tuple(vec![IrType::Int, IrType::Int]),
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -1011,32 +1170,40 @@ fn cy_omega_gate_expr_range() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::ExprStmt {
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Range {
-                            start: Some(Box::new(lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(0)),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
-                            ))),
-                            end: Box::new(lang_zone::ir::node::Expr::new(
-                                lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(10)),
-                                IrType::Int,
-                                lang_zone::ir::node::Span::unknown(),
+            stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Range {
+                        start: Some(Box::new(lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(
+                                0,
                             )),
-                            inclusive: false,
-                        },
-                        IrType::named("Range"),
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        ))),
+                        end: Box::new(lang_zone::ir::node::Expr::new(
+                            lang_zone::ir::node::ExprKind::Lit(lang_zone::ir::node::LitKind::Int(
+                                10,
+                            )),
+                            IrType::Int,
+                            lang_zone::ir::node::Span::unknown(),
+                        )),
+                        inclusive: false,
+                    },
+                    IrType::named("Range"),
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -1055,36 +1222,40 @@ fn cy_omega_gate_expr_paren() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::ExprStmt {
-                    expr: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Paren(Box::new(lang_zone::ir::node::Expr::new(
-                            lang_zone::ir::node::ExprKind::BinOp {
-                                op: lang_zone::ir::node::BinOpKind::Add,
-                                lhs: Box::new(lang_zone::ir::node::Expr::new(
-                                    lang_zone::ir::node::ExprKind::Var("a".into()),
-                                    IrType::Int,
-                                    lang_zone::ir::node::Span::unknown(),
-                                )),
-                                rhs: Box::new(lang_zone::ir::node::Expr::new(
-                                    lang_zone::ir::node::ExprKind::Var("b".into()),
-                                    IrType::Int,
-                                    lang_zone::ir::node::Span::unknown(),
-                                )),
-                            },
-                            IrType::Int,
-                            lang_zone::ir::node::Span::unknown(),
-                        ))),
+            stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                expr: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Paren(Box::new(lang_zone::ir::node::Expr::new(
+                        lang_zone::ir::node::ExprKind::BinOp {
+                            op: lang_zone::ir::node::BinOpKind::Add,
+                            lhs: Box::new(lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("a".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            )),
+                            rhs: Box::new(lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("b".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            )),
+                        },
                         IrType::Int,
                         lang_zone::ir::node::Span::unknown(),
-                    ),
-                },
-            ],
+                    ))),
+                    IrType::Int,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -1108,6 +1279,8 @@ fn cy_omega_gate_overload() {
             is_owned: false,
             default: None,
             variadic: false,
+            comptime: false,
+            mods: IrMods::default(),
         }],
         ret_ty: IrType::Int,
         raises: None,
@@ -1138,6 +1311,8 @@ fn cy_omega_gate_overload() {
                 is_owned: false,
                 default: None,
                 variadic: false,
+                comptime: false,
+                mods: IrMods::default(),
             },
             Param {
                 name: "y".into(),
@@ -1147,6 +1322,8 @@ fn cy_omega_gate_overload() {
                 is_owned: false,
                 default: None,
                 variadic: false,
+                comptime: false,
+                mods: IrMods::default(),
             },
         ],
         ret_ty: IrType::Int,
@@ -1192,39 +1369,39 @@ fn cy_omega_gate_pattern_wildcard() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Match {
-                    scrutinee: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("x".into()),
-                        IrType::Int,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    arms: vec![
-                        lang_zone::ir::node::MatchArm {
-                            pattern: lang_zone::ir::node::Pattern::Wildcard,
-                            guard: None,
-                            body: lang_zone::ir::node::Block {
-                                stmts: vec![
-                                    lang_zone::ir::node::Stmt::ExprStmt {
-                                        expr: lang_zone::ir::node::Expr::new(
-                                            lang_zone::ir::node::ExprKind::Var("42".into()),
-                                            IrType::Int,
-                                            lang_zone::ir::node::Span::unknown(),
-                                        ),
-                                    },
-                                ],
-                                ty: IrType::Int,
-                                span: lang_zone::ir::node::Span::unknown(),
-                            },
-                        },
-                    ],
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::Match {
+                scrutinee: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("x".into()),
+                    IrType::Int,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                arms: vec![lang_zone::ir::node::MatchArm {
+                    pattern: lang_zone::ir::node::Pattern::Wildcard,
+                    guard: None,
+                    body: lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("42".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
+                        ty: IrType::Int,
+                        span: lang_zone::ir::node::Span::unknown(),
+                    },
+                }],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
@@ -1243,43 +1420,47 @@ fn cy_omega_gate_pattern_ident() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Match {
-                    scrutinee: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("x".into()),
-                        IrType::Int,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    arms: vec![
-                        lang_zone::ir::node::MatchArm {
-                            pattern: lang_zone::ir::node::Pattern::Ident("n".into()),
-                            guard: None,
-                            body: lang_zone::ir::node::Block {
-                                stmts: vec![
-                                    lang_zone::ir::node::Stmt::ExprStmt {
-                                        expr: lang_zone::ir::node::Expr::new(
-                                            lang_zone::ir::node::ExprKind::Var("n".into()),
-                                            IrType::Int,
-                                            lang_zone::ir::node::Span::unknown(),
-                                        ),
-                                    },
-                                ],
-                                ty: IrType::Int,
-                                span: lang_zone::ir::node::Span::unknown(),
-                            },
-                        },
-                    ],
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::Match {
+                scrutinee: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("x".into()),
+                    IrType::Int,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                arms: vec![lang_zone::ir::node::MatchArm {
+                    pattern: lang_zone::ir::node::Pattern::Ident("n".into()),
+                    guard: None,
+                    body: lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("n".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
+                        ty: IrType::Int,
+                        span: lang_zone::ir::node::Span::unknown(),
+                    },
+                }],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# match x", "if True  # bind n:", "n = __scrutinee__"], "pattern_ident");
+    assert_contains(
+        &pyx,
+        &["# match x", "if True  # bind n:", "n = __scrutinee__"],
+        "pattern_ident",
+    );
 }
 
 // ── Ω-spec: cy_pattern_lit ──
@@ -1294,43 +1475,49 @@ fn cy_omega_gate_pattern_lit() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Match {
-                    scrutinee: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("x".into()),
-                        IrType::Int,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    arms: vec![
-                        lang_zone::ir::node::MatchArm {
-                            pattern: lang_zone::ir::node::Pattern::Lit(lang_zone::ir::node::LitKind::Int(0)),
-                            guard: None,
-                            body: lang_zone::ir::node::Block {
-                                stmts: vec![
-                                    lang_zone::ir::node::Stmt::ExprStmt {
-                                        expr: lang_zone::ir::node::Expr::new(
-                                            lang_zone::ir::node::ExprKind::Var("zero".into()),
-                                            IrType::Int,
-                                            lang_zone::ir::node::Span::unknown(),
-                                        ),
-                                    },
-                                ],
-                                ty: IrType::Int,
-                                span: lang_zone::ir::node::Span::unknown(),
-                            },
-                        },
-                    ],
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::Match {
+                scrutinee: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("x".into()),
+                    IrType::Int,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                arms: vec![lang_zone::ir::node::MatchArm {
+                    pattern: lang_zone::ir::node::Pattern::Lit(lang_zone::ir::node::LitKind::Int(
+                        0,
+                    )),
+                    guard: None,
+                    body: lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("zero".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
+                        ty: IrType::Int,
+                        span: lang_zone::ir::node::Span::unknown(),
+                    },
+                }],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# match x", "if __scrutinee__ == 0:"], "pattern_lit");
+    assert_contains(
+        &pyx,
+        &["# match x", "if __scrutinee__ == 0:"],
+        "pattern_lit",
+    );
 }
 
 // ── Ω-spec: cy_pattern_tuple ──
@@ -1345,46 +1532,53 @@ fn cy_omega_gate_pattern_tuple() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Match {
-                    scrutinee: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("x".into()),
-                        IrType::named("Tuple"),
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    arms: vec![
-                        lang_zone::ir::node::MatchArm {
-                            pattern: lang_zone::ir::node::Pattern::Tuple(vec![
-                                lang_zone::ir::node::Pattern::Ident("a".into()),
-                                lang_zone::ir::node::Pattern::Ident("b".into()),
-                            ]),
-                            guard: None,
-                            body: lang_zone::ir::node::Block {
-                                stmts: vec![
-                                    lang_zone::ir::node::Stmt::ExprStmt {
-                                        expr: lang_zone::ir::node::Expr::new(
-                                            lang_zone::ir::node::ExprKind::Var("a".into()),
-                                            IrType::Int,
-                                            lang_zone::ir::node::Span::unknown(),
-                                        ),
-                                    },
-                                ],
-                                ty: IrType::Int,
-                                span: lang_zone::ir::node::Span::unknown(),
-                            },
-                        },
-                    ],
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::Match {
+                scrutinee: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("x".into()),
+                    IrType::named("Tuple"),
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                arms: vec![lang_zone::ir::node::MatchArm {
+                    pattern: lang_zone::ir::node::Pattern::Tuple(vec![
+                        lang_zone::ir::node::Pattern::Ident("a".into()),
+                        lang_zone::ir::node::Pattern::Ident("b".into()),
+                    ]),
+                    guard: None,
+                    body: lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("a".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
+                        ty: IrType::Int,
+                        span: lang_zone::ir::node::Span::unknown(),
+                    },
+                }],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# match x", "isinstance(__scrutinee__, tuple) && len(__scrutinee__) == 2"], "pattern_tuple");
+    assert_contains(
+        &pyx,
+        &[
+            "# match x",
+            "isinstance(__scrutinee__, tuple) && len(__scrutinee__) == 2",
+        ],
+        "pattern_tuple",
+    );
 }
 
 // ── Ω-spec: cy_pattern_list ──
@@ -1399,46 +1593,53 @@ fn cy_omega_gate_pattern_list() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Match {
-                    scrutinee: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("x".into()),
-                        IrType::named("List"),
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    arms: vec![
-                        lang_zone::ir::node::MatchArm {
-                            pattern: lang_zone::ir::node::Pattern::List(vec![
-                                lang_zone::ir::node::Pattern::Ident("first".into()),
-                                lang_zone::ir::node::Pattern::Rest(Some("rest".into())),
-                            ]),
-                            guard: None,
-                            body: lang_zone::ir::node::Block {
-                                stmts: vec![
-                                    lang_zone::ir::node::Stmt::ExprStmt {
-                                        expr: lang_zone::ir::node::Expr::new(
-                                            lang_zone::ir::node::ExprKind::Var("first".into()),
-                                            IrType::Int,
-                                            lang_zone::ir::node::Span::unknown(),
-                                        ),
-                                    },
-                                ],
-                                ty: IrType::Int,
-                                span: lang_zone::ir::node::Span::unknown(),
-                            },
-                        },
-                    ],
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::Match {
+                scrutinee: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("x".into()),
+                    IrType::named("List"),
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                arms: vec![lang_zone::ir::node::MatchArm {
+                    pattern: lang_zone::ir::node::Pattern::List(vec![
+                        lang_zone::ir::node::Pattern::Ident("first".into()),
+                        lang_zone::ir::node::Pattern::Rest(Some("rest".into())),
+                    ]),
+                    guard: None,
+                    body: lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("first".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
+                        ty: IrType::Int,
+                        span: lang_zone::ir::node::Span::unknown(),
+                    },
+                }],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# match x", "isinstance(__scrutinee__, list) && len(__scrutinee__) == 2"], "pattern_list");
+    assert_contains(
+        &pyx,
+        &[
+            "# match x",
+            "isinstance(__scrutinee__, list) && len(__scrutinee__) == 2",
+        ],
+        "pattern_list",
+    );
 }
 
 // ── Ω-spec: cy_pattern_range ──
@@ -1453,45 +1654,49 @@ fn cy_omega_gate_pattern_range() {
         ret_ty: IrType::Unit,
         raises: None,
         body: lang_zone::ir::node::Block {
-            stmts: vec![
-                lang_zone::ir::node::Stmt::Match {
-                    scrutinee: lang_zone::ir::node::Expr::new(
-                        lang_zone::ir::node::ExprKind::Var("x".into()),
-                        IrType::Int,
-                        lang_zone::ir::node::Span::unknown(),
-                    ),
-                    arms: vec![
-                        lang_zone::ir::node::MatchArm {
-                            pattern: lang_zone::ir::node::Pattern::Range {
-                                start: 1,
-                                end: 10,
-                                inclusive: true,
-                            },
-                            guard: None,
-                            body: lang_zone::ir::node::Block {
-                                stmts: vec![
-                                    lang_zone::ir::node::Stmt::ExprStmt {
-                                        expr: lang_zone::ir::node::Expr::new(
-                                            lang_zone::ir::node::ExprKind::Var("in_range".into()),
-                                            IrType::Int,
-                                            lang_zone::ir::node::Span::unknown(),
-                                        ),
-                                    },
-                                ],
-                                ty: IrType::Int,
-                                span: lang_zone::ir::node::Span::unknown(),
-                            },
-                        },
-                    ],
-                },
-            ],
+            stmts: vec![lang_zone::ir::node::Stmt::Match {
+                scrutinee: lang_zone::ir::node::Expr::new(
+                    lang_zone::ir::node::ExprKind::Var("x".into()),
+                    IrType::Int,
+                    lang_zone::ir::node::Span::unknown(),
+                ),
+                arms: vec![lang_zone::ir::node::MatchArm {
+                    pattern: lang_zone::ir::node::Pattern::Range {
+                        start: 1,
+                        end: 10,
+                        inclusive: true,
+                    },
+                    guard: None,
+                    body: lang_zone::ir::node::Block {
+                        stmts: vec![lang_zone::ir::node::Stmt::ExprStmt {
+                            expr: lang_zone::ir::node::Expr::new(
+                                lang_zone::ir::node::ExprKind::Var("in_range".into()),
+                                IrType::Int,
+                                lang_zone::ir::node::Span::unknown(),
+                            ),
+                        }],
+                        ty: IrType::Int,
+                        span: lang_zone::ir::node::Span::unknown(),
+                    },
+                }],
+            }],
             ty: IrType::Unit,
             span: lang_zone::ir::node::Span::unknown(),
         },
-        intrinsics: vec![], is_async: false, is_iterator: false, is_test: false,
-        checker_param: None, default_checker: None, where_clause: vec![], span: lang_zone::ir::node::Span::unknown(),
+        intrinsics: vec![],
+        is_async: false,
+        is_iterator: false,
+        is_test: false,
+        checker_param: None,
+        default_checker: None,
+        where_clause: vec![],
+        span: lang_zone::ir::node::Span::unknown(),
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# match x", "1 <= __scrutinee__ <= 10"], "pattern_range");
+    assert_contains(
+        &pyx,
+        &["# match x", "1 <= __scrutinee__ <= 10"],
+        "pattern_range",
+    );
 }

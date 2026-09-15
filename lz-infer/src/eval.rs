@@ -65,8 +65,14 @@ mod tests {
     #[test]
     fn eval_literals() {
         assert_eq!(eval_const_expr(&Expr::IntLit(42)), Some("42".to_string()));
-        assert_eq!(eval_const_expr(&Expr::StrLit("hello".into())), Some("hello".to_string()));
-        assert_eq!(eval_const_expr(&Expr::BoolLit(true)), Some("true".to_string()));
+        assert_eq!(
+            eval_const_expr(&Expr::StrLit("hello".into())),
+            Some("hello".to_string())
+        );
+        assert_eq!(
+            eval_const_expr(&Expr::BoolLit(true)),
+            Some("true".to_string())
+        );
         assert_eq!(eval_const_expr(&Expr::NoneLit), Some("None".to_string()));
     }
 

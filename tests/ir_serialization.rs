@@ -46,7 +46,11 @@ fn ir_json_roundtrip() {
     // 往返后核心边界保持
     assert_eq!(back.name, m.name);
     assert_eq!(back.exports, m.exports, "exports 应一致");
-    assert_eq!(back.dependencies.len(), m.dependencies.len(), "dependencies 应一致");
+    assert_eq!(
+        back.dependencies.len(),
+        m.dependencies.len(),
+        "dependencies 应一致"
+    );
     assert!(!back.items.is_empty(), "items 不应为空");
     assert_eq!(back.source_hash(), m.source_hash(), "source_hash 应一致");
     // 再序列化仍稳定（幂等）
@@ -61,8 +65,16 @@ fn ir_bincode_roundtrip() {
     assert!(!bytes.is_empty(), "bincode 不应为空");
     let back = IrModule::from_bincode(&bytes).expect("from_bincode ok");
     assert_eq!(back.name, m.name);
-    assert_eq!(back.source_hash(), m.source_hash(), "bincode 往返后 source_hash 一致");
-    assert_eq!(back.exports.len(), m.exports.len(), "bincode 往返后 exports 一致");
+    assert_eq!(
+        back.source_hash(),
+        m.source_hash(),
+        "bincode 往返后 source_hash 一致"
+    );
+    assert_eq!(
+        back.exports.len(),
+        m.exports.len(),
+        "bincode 往返后 exports 一致"
+    );
     // 双格式一致性：同一模块 json 与 bincode 往返应产生相同的 exports 集合
     let via_json = IrModule::from_json(&m.to_json().unwrap()).unwrap();
     assert_eq!(
@@ -101,12 +113,21 @@ fn ir_module_boundaries_contract() {
     );
     // 导出边界：struct Point / def dist / def main 至少存在
     let exports = m.collect_exports();
-    assert!(exports.iter().any(|e| e.contains("Point")), "exports 应含 Point: {exports:?}");
-    assert!(exports.iter().any(|e| e.contains("dist")), "exports 应含 dist: {exports:?}");
+    assert!(
+        exports.iter().any(|e| e.contains("Point")),
+        "exports 应含 Point: {exports:?}"
+    );
+    assert!(
+        exports.iter().any(|e| e.contains("dist")),
+        "exports 应含 dist: {exports:?}"
+    );
     // 依赖边界：import std.math → 模块依赖 std
     let deps = m.collect_dependencies();
     assert!(!deps.is_empty(), "应有 import 依赖");
-    assert!(deps.iter().any(|d| d.module == "std"), "依赖应含 std: {deps:?}");
+    assert!(
+        deps.iter().any(|d| d.module == "std"),
+        "依赖应含 std: {deps:?}"
+    );
 }
 
 #[test]

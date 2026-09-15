@@ -3,10 +3,10 @@
 
 use crate::lexer::Token;
 use crate::macros::group::Tokens;
-use crate::macros::interp::{MacroInterpreter, MacroStmt, MacroExpr, BinaryOp};
+use crate::macros::interp::{BinaryOp, MacroExpr, MacroInterpreter, MacroStmt};
 
-use std::collections::HashMap;
 use std::cell::Cell;
+use std::collections::HashMap;
 
 // ──────────────── 宏卫生性辅助 ────────────────
 
@@ -136,7 +136,9 @@ pub struct MacroDef {
 
 impl MacroRegistry {
     pub fn new() -> Self {
-        MacroRegistry { macros: HashMap::new() }
+        MacroRegistry {
+            macros: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, def: MacroDef) {
@@ -182,7 +184,9 @@ pub struct TemplateRegistry {
 
 impl TemplateRegistry {
     pub fn new() -> Self {
-        TemplateRegistry { templates: HashMap::new() }
+        TemplateRegistry {
+            templates: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, def: TemplateDef) {
@@ -245,7 +249,12 @@ pub struct TemplateExpander {
 
 impl TemplateExpander {
     pub fn new(registry: TemplateRegistry) -> Self {
-        TemplateExpander { registry, max_depth: 128, hygiene_counter: Cell::new(0), check_mode: CheckMode::default() }
+        TemplateExpander {
+            registry,
+            max_depth: 128,
+            hygiene_counter: Cell::new(0),
+            check_mode: CheckMode::default(),
+        }
     }
 
     /// 设置逐层检查模式（08 §3.6 规则 4）：Loose / Light（默认）/ Strict
@@ -259,7 +268,10 @@ impl TemplateExpander {
 
     fn expand_inner(&self, tokens: &[Token], depth: usize) -> Result<Vec<Token>, String> {
         if depth > self.max_depth {
-            return Err(format!("template expansion depth exceeded (max {})", self.max_depth));
+            return Err(format!(
+                "template expansion depth exceeded (max {})",
+                self.max_depth
+            ));
         }
         let mut result: Vec<Token> = Vec::new();
         let mut i = 0;
@@ -273,15 +285,25 @@ impl TemplateExpander {
                 };
                 // 跳过空白找 !
                 let mut excl_idx = i + 1;
-                while excl_idx < len && matches!(&tokens[excl_idx], Token::Newline | Token::Indent) {
+                while excl_idx < len && matches!(&tokens[excl_idx], Token::Newline | Token::Indent)
+                {
                     excl_idx += 1;
                 }
                 let has_exclam = excl_idx < len && tokens[excl_idx] == Token::Exclamation;
                 if has_exclam && self.registry.contains(&name) {
                     // 模板调用 name!(...)
-                    let after_exclam = if excl_idx + 1 < len { Some(&tokens[excl_idx + 1]) } else { None };
+                    let after_exclam = if excl_idx + 1 < len {
+                        Some(&tokens[excl_idx + 1])
+                    } else {
+                        None
+                    };
                     if after_exclam == Some(&Token::LParen) {
-                        if let Some((input_tokens, input_end)) = self.collect_bracket_group(tokens, excl_idx + 2, Token::LParen, Token::RParen) {
+                        if let Some((input_tokens, input_end)) = self.collect_bracket_group(
+                            tokens,
+                            excl_idx + 2,
+                            Token::LParen,
+                            Token::RParen,
+                        ) {
                             let expanded = self.expand_template(&name, &input_tokens, depth)?;
                             result.extend(expanded);
                             i = input_end + 1;
@@ -309,12 +331,20 @@ impl TemplateExpander {
     }
 
     /// 展开模板调用：绑定参数 → 执行模板体 → 递归展开结果
-    fn expand_template(&self, name: &str, input: &[Token], depth: usize) -> Result<Vec<Token>, String> {
-        let def = self.registry.get(name)
+    fn expand_template(
+        &self,
+        name: &str,
+        input: &[Token],
+        depth: usize,
+    ) -> Result<Vec<Token>, String> {
+        let def = self
+            .registry
+            .get(name)
             .ok_or_else(|| format!("undefined template '{}'", name))?;
 
         // 剥离缩进 token
-        let cleaned: Vec<Token> = input.iter()
+        let cleaned: Vec<Token> = input
+            .iter()
             .filter(|t| !matches!(t, Token::Indent | Token::Dedent))
             .cloned()
             .collect();
@@ -329,7 +359,8 @@ impl TemplateExpander {
             interp.bind_param(pname.clone(), Tokens::new(value));
         }
 
-        let result = interp.execute_stmts(&def.body)
+        let result = interp
+            .execute_stmts(&def.body)
             .map_err(|e| format!("template '{}' expansion error: {}", name, e))?;
 
         // 宏卫生性：宏体局部绑定加唯一后缀（避免污染调用方同名变量）。
@@ -345,7 +376,10 @@ impl TemplateExpander {
             result.tokens.clone()
         } else {
             // 排除参数中调用方自己的绑定（let/for），按调用方卫生原样保留
-            let exclude = arg_groups.iter().flat_map(|g| collect_param_bindings(g)).collect::<Vec<_>>();
+            let exclude = arg_groups
+                .iter()
+                .flat_map(|g| collect_param_bindings(g))
+                .collect::<Vec<_>>();
             hygienize_tokens(&result.tokens, uid, &exclude)
         };
 
@@ -355,14 +389,24 @@ impl TemplateExpander {
 
         // 逐层硬检查（08 §3.6 规则 4）：对本层**完全展开**的产物按 check_mode 校验
         if self.check_mode != CheckMode::Loose {
-            check_expanded_tokens(&expanded, &format!("template '{}' 第 {} 层展开", name, depth + 1), self.check_mode)?;
+            check_expanded_tokens(
+                &expanded,
+                &format!("template '{}' 第 {} 层展开", name, depth + 1),
+                self.check_mode,
+            )?;
         }
 
         Ok(expanded)
     }
 
     // ──────────────── Token 收集辅助函数 ────────────────
-    fn collect_bracket_group(&self, tokens: &[Token], start: usize, open: Token, close: Token) -> Option<(Vec<Token>, usize)> {
+    fn collect_bracket_group(
+        &self,
+        tokens: &[Token],
+        start: usize,
+        open: Token,
+        close: Token,
+    ) -> Option<(Vec<Token>, usize)> {
         if start >= tokens.len() {
             return None;
         }
@@ -456,12 +500,30 @@ fn split_top_level_args(tokens: &[Token]) -> Vec<Vec<Token>> {
     let mut brace = 0i32;
     for t in tokens {
         match t {
-            Token::LParen => { paren += 1; current.push(t.clone()); }
-            Token::RParen => { paren -= 1; current.push(t.clone()); }
-            Token::LBrack => { bracket += 1; current.push(t.clone()); }
-            Token::RBrack => { bracket -= 1; current.push(t.clone()); }
-            Token::LBrace => { brace += 1; current.push(t.clone()); }
-            Token::RBrace => { brace -= 1; current.push(t.clone()); }
+            Token::LParen => {
+                paren += 1;
+                current.push(t.clone());
+            }
+            Token::RParen => {
+                paren -= 1;
+                current.push(t.clone());
+            }
+            Token::LBrack => {
+                bracket += 1;
+                current.push(t.clone());
+            }
+            Token::RBrack => {
+                bracket -= 1;
+                current.push(t.clone());
+            }
+            Token::LBrace => {
+                brace += 1;
+                current.push(t.clone());
+            }
+            Token::RBrace => {
+                brace -= 1;
+                current.push(t.clone());
+            }
             Token::Comma if paren == 0 && bracket == 0 && brace == 0 => {
                 groups.push(std::mem::take(&mut current));
             }
@@ -563,7 +625,10 @@ fn light_check_tokens(tokens: &[Token], ctx: &str) -> Result<(), String> {
         return Err(format!("{}: 花括号未闭合", ctx));
     }
     if indent_depth != 0 {
-        return Err(format!("{}: 缩进未闭合（剩余 {} 层 Indent）", ctx, indent_depth));
+        return Err(format!(
+            "{}: 缩进未闭合（剩余 {} 层 Indent）",
+            ctx, indent_depth
+        ));
     }
     Ok(())
 }
@@ -633,7 +698,12 @@ pub fn contains_pending_call(tokens: &[Token]) -> bool {
 
 impl MacroExpander {
     pub fn new(registry: MacroRegistry) -> Self {
-        MacroExpander { registry, max_depth: 128, hygiene_counter: Cell::new(0), check_mode: CheckMode::default() }
+        MacroExpander {
+            registry,
+            max_depth: 128,
+            hygiene_counter: Cell::new(0),
+            check_mode: CheckMode::default(),
+        }
     }
 
     /// 设置逐层检查模式（08 §3.6 规则 4）：Loose / Light（默认）/ Strict
@@ -648,7 +718,10 @@ impl MacroExpander {
 
     fn expand_inner(&self, tokens: &[Token], depth: usize) -> Result<Vec<Token>, String> {
         if depth > self.max_depth {
-            return Err(format!("macro expansion depth exceeded (max {})", self.max_depth));
+            return Err(format!(
+                "macro expansion depth exceeded (max {})",
+                self.max_depth
+            ));
         }
 
         let mut result: Vec<Token> = Vec::new();
@@ -664,10 +737,14 @@ impl MacroExpander {
                 // （`let x = @twice!(y) + 1`）非法。
                 // 注意：template 定义的 name!（无 @）不受此限制，可内联（§3.5 末尾）
                 let at_line_start = i == 0
-                    || matches!(&tokens[i - 1], Token::Newline | Token::Indent | Token::Dedent);
+                    || matches!(
+                        &tokens[i - 1],
+                        Token::Newline | Token::Indent | Token::Dedent
+                    );
                 // 找到紧跟的 Ident（跳过 Newline/Indent）
                 let mut name_idx = i + 1;
-                while name_idx < len && matches!(&tokens[name_idx], Token::Newline | Token::Indent) {
+                while name_idx < len && matches!(&tokens[name_idx], Token::Newline | Token::Indent)
+                {
                     name_idx += 1;
                 }
                 if name_idx >= len || !matches!(&tokens[name_idx], Token::Ident(_)) {
@@ -683,12 +760,13 @@ impl MacroExpander {
                 // （import macro X as sm → @sm.check_eq! 等价 @check_eq!）
                 let mut name = name;
                 let mut name_end = name_idx + 1;
-                while name_end < len && matches!(&tokens[name_end], Token::Newline | Token::Indent) {
+                while name_end < len && matches!(&tokens[name_end], Token::Newline | Token::Indent)
+                {
                     name_end += 1;
                 }
                 if name_end + 1 < len
                     && tokens[name_end] == Token::Dot
-                    && matches!(&tokens[name_end + 1], Token::Ident(n2) if n2 == "check_eq" || true)
+                    && matches!(&tokens[name_end + 1], Token::Ident(_))
                 {
                     if let Token::Ident(n2) = &tokens[name_end + 1] {
                         name = n2.clone();
@@ -698,7 +776,8 @@ impl MacroExpander {
 
                 // 检查 name 后面是否有 !（跳过空白；别名解析后从 name_end 开始）
                 let mut excl_idx = name_end;
-                while excl_idx < len && matches!(&tokens[excl_idx], Token::Newline | Token::Indent) {
+                while excl_idx < len && matches!(&tokens[excl_idx], Token::Newline | Token::Indent)
+                {
                     excl_idx += 1;
                 }
                 let has_exclamation = excl_idx < len && tokens[excl_idx] == Token::Exclamation;
@@ -713,7 +792,11 @@ impl MacroExpander {
                         ));
                     }
                     // 这是宏调用 @name!
-                    let after_exclam = if excl_idx + 1 < len { Some(&tokens[excl_idx + 1]) } else { None };
+                    let after_exclam = if excl_idx + 1 < len {
+                        Some(&tokens[excl_idx + 1])
+                    } else {
+                        None
+                    };
 
                     // 检查是否有属性 [attr]
                     let has_attr = after_exclam == Some(&Token::LBrack);
@@ -721,7 +804,12 @@ impl MacroExpander {
                     if has_attr {
                         // 有属性宏 @name![attr](input)
                         let attr_start = excl_idx + 2; // 跳过 [
-                        if let Some((attr_tokens, attr_end)) = self.collect_bracket_group(tokens, attr_start, Token::LBrack, Token::RBrack) {
+                        if let Some((attr_tokens, attr_end)) = self.collect_bracket_group(
+                            tokens,
+                            attr_start,
+                            Token::LBrack,
+                            Token::RBrack,
+                        ) {
                             if attr_end + 1 >= len {
                                 // 属性收集完成但文件结束 — 保留原 token 不展开
                                 result.push(tokens[i].clone());
@@ -730,8 +818,18 @@ impl MacroExpander {
                             }
                             let after_attr = &tokens[attr_end + 1];
                             if after_attr == &Token::LParen {
-                                if let Some((input_tokens, input_end)) = self.collect_bracket_group(tokens, attr_end + 2, Token::LParen, Token::RParen) {
-                                    let expanded = self.expand_attr_macro(&name, &attr_tokens, &input_tokens, depth)?;
+                                if let Some((input_tokens, input_end)) = self.collect_bracket_group(
+                                    tokens,
+                                    attr_end + 2,
+                                    Token::LParen,
+                                    Token::RParen,
+                                ) {
+                                    let expanded = self.expand_attr_macro(
+                                        &name,
+                                        &attr_tokens,
+                                        &input_tokens,
+                                        depth,
+                                    )?;
                                     result.extend(expanded);
                                     i = input_end + 1;
                                     continue;
@@ -740,7 +838,12 @@ impl MacroExpander {
                                 // 有属性宏作用于声明：@name![attr] decl
                                 let decl_tokens = self.collect_decl_tokens(tokens, attr_end + 1);
                                 let decl_end = attr_end + 1 + decl_tokens.len();
-                                let mut expanded = self.expand_attr_macro(&name, &attr_tokens, &decl_tokens, depth)?;
+                                let mut expanded = self.expand_attr_macro(
+                                    &name,
+                                    &attr_tokens,
+                                    &decl_tokens,
+                                    depth,
+                                )?;
                                 rebalance_expanded_indents(&mut expanded);
                                 result.extend(expanded);
                                 i = decl_end;
@@ -749,7 +852,12 @@ impl MacroExpander {
                         }
                     } else if after_exclam == Some(&Token::LParen) {
                         // 无属性宏 @name!(input)
-                        if let Some((input_tokens, input_end)) = self.collect_bracket_group(tokens, excl_idx + 2, Token::LParen, Token::RParen) {
+                        if let Some((input_tokens, input_end)) = self.collect_bracket_group(
+                            tokens,
+                            excl_idx + 2,
+                            Token::LParen,
+                            Token::RParen,
+                        ) {
                             let expanded = self.expand_macro(&name, &input_tokens, None, depth)?;
                             result.extend(expanded);
                             i = input_end + 1;
@@ -763,7 +871,9 @@ impl MacroExpander {
                         // 被吞（combo2 丢弃 input → main 缺语句/Dedent →
                         // "Expected Dedent, got Eof"）。有参数宏（note_block 等）
                         // 仍按规则 5 作用于后续缩进块。
-                        let no_param = self.registry.get(&name)
+                        let no_param = self
+                            .registry
+                            .get(&name)
                             .map_or(false, |d| d.param_names.is_empty());
                         if no_param {
                             let expanded = self.expand_macro(&name, &[], None, depth)?;
@@ -774,7 +884,8 @@ impl MacroExpander {
                         let decl_tokens = self.collect_decl_tokens(tokens, after_name);
                         let decl_end = after_name + decl_tokens.len();
                         if !decl_tokens.is_empty() {
-                            let mut expanded = self.expand_macro(&name, &decl_tokens, None, depth)?;
+                            let mut expanded =
+                                self.expand_macro(&name, &decl_tokens, None, depth)?;
                             rebalance_expanded_indents(&mut expanded);
                             result.extend(expanded);
                             i = decl_end;
@@ -792,12 +903,21 @@ impl MacroExpander {
     }
 
     /// 展开无属性宏调用
-    fn expand_macro(&self, name: &str, input: &[Token], attr: Option<&[Token]>, depth: usize) -> Result<Vec<Token>, String> {
-        let def = self.registry.get(name)
+    fn expand_macro(
+        &self,
+        name: &str,
+        input: &[Token],
+        attr: Option<&[Token]>,
+        depth: usize,
+    ) -> Result<Vec<Token>, String> {
+        let def = self
+            .registry
+            .get(name)
             .ok_or_else(|| format!("undefined macro '{}'", name))?;
 
         // 剥离缩进 token（括号内的 Indent/Dedent 不应该传递）
-        let cleaned: Vec<Token> = input.iter()
+        let cleaned: Vec<Token> = input
+            .iter()
             .filter(|t| !matches!(t, Token::Indent | Token::Dedent))
             .cloned()
             .collect();
@@ -831,7 +951,8 @@ impl MacroExpander {
         // 无参数宏（len()==0，如 `macro combo2() -> Tokens = ...`）：不绑定参数，
         // 避免 param_names[0] 越界 panic（index out of bounds）
 
-        let result = interp.execute_stmts(&def.body)
+        let result = interp
+            .execute_stmts(&def.body)
             .map_err(|e| format!("macro '{}' expansion error: {}", name, e))?;
 
         // 宏卫生性：宏体局部绑定加唯一后缀（避免污染调用方同名变量）。
@@ -861,14 +982,24 @@ impl MacroExpander {
         // 的产物校验——Light：轻量结构校验（括号/缩进/else-elif）；Strict：
         // 完整 Parser（中间层产物须独立合法 LZ）；Loose：跳过（最终 Parser 兜底）
         if self.check_mode != CheckMode::Loose {
-            check_expanded_tokens(&expanded, &format!("macro '{}' 第 {} 层展开", name, depth + 1), self.check_mode)?;
+            check_expanded_tokens(
+                &expanded,
+                &format!("macro '{}' 第 {} 层展开", name, depth + 1),
+                self.check_mode,
+            )?;
         }
 
         Ok(expanded)
     }
 
     /// 展开有属性宏调用
-    fn expand_attr_macro(&self, name: &str, attr: &[Token], input: &[Token], depth: usize) -> Result<Vec<Token>, String> {
+    fn expand_attr_macro(
+        &self,
+        name: &str,
+        attr: &[Token],
+        input: &[Token],
+        depth: usize,
+    ) -> Result<Vec<Token>, String> {
         self.expand_macro(name, input, Some(attr), depth)
     }
 
@@ -876,11 +1007,17 @@ impl MacroExpander {
 
     /// 收集括号/方括号内的 token 序列（括号匹配，支持嵌套）
     /// 调用方已经跳过了开括号，所以 depth 从 1 开始
-    fn collect_bracket_group(&self, tokens: &[Token], start: usize, open: Token, close: Token) -> Option<(Vec<Token>, usize)> {
+    fn collect_bracket_group(
+        &self,
+        tokens: &[Token],
+        start: usize,
+        open: Token,
+        close: Token,
+    ) -> Option<(Vec<Token>, usize)> {
         if start >= tokens.len() {
             return None;
         }
-        let mut depth: i32 = 1;  // 调用方已消费开括号
+        let mut depth: i32 = 1; // 调用方已消费开括号
         let mut result = Vec::new();
         let mut i = start;
         while i < tokens.len() {
@@ -941,7 +1078,12 @@ impl MacroExpander {
                     }
                     result.push(tokens[i].clone());
                 }
-                Token::Def | Token::Struct | Token::Enum | Token::Trait | Token::Impl | Token::Const
+                Token::Def
+                | Token::Struct
+                | Token::Enum
+                | Token::Trait
+                | Token::Impl
+                | Token::Const
                     if indent_level == 0 && !result.is_empty() =>
                 {
                     // 下一个顶层声明开始 → 当前声明结束
@@ -974,8 +1116,7 @@ pub fn has_bin_macro_declaration(tokens: &[Token]) -> bool {
             // 前一个 token：文件开头或 Newline（独立声明行）
             let prev_ok = i == 0 || matches!(&tokens[i - 1], Token::Newline);
             // 后一个 token：Newline 或 Eof（声明行结束，无宏名）
-            let next_ok = (i + 1 < len && matches!(&tokens[i + 1], Token::Newline))
-                || i + 1 >= len;
+            let next_ok = (i + 1 < len && matches!(&tokens[i + 1], Token::Newline)) || i + 1 >= len;
             if prev_ok && next_ok {
                 return true;
             }
@@ -1037,7 +1178,13 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
             if tokens.get(after_name) != Some(&Token::LParen) {
                 continue;
             }
-            i = skip_to(tokens, i, len, &Token::LParen, &format!("expected '(' after macro name '{}'", name))?;
+            i = skip_to(
+                tokens,
+                i,
+                len,
+                &Token::LParen,
+                &format!("expected '(' after macro name '{}'", name),
+            )?;
             i += 1; // 跳过 (
 
             // 解析参数: name: Tokens 或 name: Tokens, name2: Tokens
@@ -1048,11 +1195,17 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
             loop {
                 param_iter += 1;
                 if param_iter > param_loop_max {
-                    return Err(format!("parameter parsing exceeded limit in macro '{}'", name));
+                    return Err(format!(
+                        "parameter parsing exceeded limit in macro '{}'",
+                        name
+                    ));
                 }
                 i = skip_blanks(tokens, i, len);
                 match tokens.get(i) {
-                    Some(Token::RParen) => { i += 1; break; }
+                    Some(Token::RParen) => {
+                        i += 1;
+                        break;
+                    }
                     Some(Token::Ident(pname)) => {
                         param_names.push(pname.clone());
                         i += 1;
@@ -1080,16 +1233,33 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
                         }
                         // 检查逗号或右括号
                         i = skip_blanks(tokens, i, len);
-                        if i < len && tokens[i] == Token::Comma { i += 1; is_attr = param_names.len() >= 2; }
-                        if i < len && tokens[i] == Token::RParen { i += 1; break; }
+                        if i < len && tokens[i] == Token::Comma {
+                            i += 1;
+                            is_attr = param_names.len() >= 2;
+                        }
+                        if i < len && tokens[i] == Token::RParen {
+                            i += 1;
+                            break;
+                        }
                     }
-                    _ => return Err(format!("expected parameter name in macro '{}' at token {}", name, i)),
+                    _ => {
+                        return Err(format!(
+                            "expected parameter name in macro '{}' at token {}",
+                            name, i
+                        ))
+                    }
                 }
             }
 
             // 签名校验：macro 参数与返回类型必须为 Tokens（08 §3.1「签名固定 Tokens -> Tokens」）
             // 参数类型在循环中已跳过 Ident("Tokens")，此处校验返回类型
-            i = skip_to(tokens, i, len, &Token::Arrow, &format!("expected '->' in macro '{}'", name))?;
+            i = skip_to(
+                tokens,
+                i,
+                len,
+                &Token::Arrow,
+                &format!("expected '->' in macro '{}'", name),
+            )?;
             i += 1;
             i = skip_blanks(tokens, i, len);
             if !matches!(&tokens[i], Token::Ident(s) if s == "Tokens") {
@@ -1100,8 +1270,14 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
             }
             i += 1;
 
-            // 跳过 = 
-            i = skip_to(tokens, i, len, &Token::Eq, &format!("expected '=' in macro '{}'", name))?;
+            // 跳过 =
+            i = skip_to(
+                tokens,
+                i,
+                len,
+                &Token::Eq,
+                &format!("expected '=' in macro '{}'", name),
+            )?;
             i += 1;
 
             // 收集宏体
@@ -1116,7 +1292,12 @@ pub fn extract_macro_defs(tokens: &[Token]) -> Result<(MacroRegistry, Vec<usize>
                     name
                 ));
             }
-            registry.register(MacroDef { name, is_attr, param_names, body });
+            registry.register(MacroDef {
+                name,
+                is_attr,
+                param_names,
+                body,
+            });
             consumed_ranges.push(start);
             consumed_ranges.push(i);
         } else {
@@ -1193,17 +1374,25 @@ pub fn extract_template_defs(tokens: &[Token]) -> Result<(TemplateRegistry, Vec<
             loop {
                 param_iter += 1;
                 if param_iter > param_loop_max {
-                    return Err(format!("parameter parsing exceeded limit in template '{}'", name));
+                    return Err(format!(
+                        "parameter parsing exceeded limit in template '{}'",
+                        name
+                    ));
                 }
                 i = skip_blanks(tokens, i, len);
                 match tokens.get(i) {
-                    Some(Token::RParen) => { i += 1; break; }
+                    Some(Token::RParen) => {
+                        i += 1;
+                        break;
+                    }
                     Some(Token::Ident(pname)) => {
                         param_names.push(pname.clone());
                         i += 1;
                         // 跳过 : Type
                         i = skip_blanks(tokens, i, len);
-                        if i < len && tokens[i] == Token::Colon { i += 1; }
+                        if i < len && tokens[i] == Token::Colon {
+                            i += 1;
+                        }
                         i = skip_blanks(tokens, i, len);
                         // 类型名：Ident（含 Tokens/str/int）或点路径（module.Tokens）
                         if let Some(Token::Ident(tn)) = tokens.get(i) {
@@ -1222,23 +1411,36 @@ pub fn extract_template_defs(tokens: &[Token]) -> Result<(TemplateRegistry, Vec<
                         }
                         // 变参标记 `..`（fields..: Tokens）
                         i = skip_blanks(tokens, i, len);
-                        if i + 1 < len
-                            && tokens[i] == Token::Dot
-                            && tokens[i + 1] == Token::Dot
-                        {
+                        if i + 1 < len && tokens[i] == Token::Dot && tokens[i + 1] == Token::Dot {
                             i += 2;
                         }
                         i = skip_blanks(tokens, i, len);
-                        if i < len && tokens[i] == Token::Comma { i += 1; }
-                        if i < len && tokens[i] == Token::RParen { i += 1; break; }
+                        if i < len && tokens[i] == Token::Comma {
+                            i += 1;
+                        }
+                        if i < len && tokens[i] == Token::RParen {
+                            i += 1;
+                            break;
+                        }
                     }
-                    _ => return Err(format!("expected parameter name in template '{}' at token {}", name, i)),
+                    _ => {
+                        return Err(format!(
+                            "expected parameter name in template '{}' at token {}",
+                            name, i
+                        ))
+                    }
                 }
             }
 
             // 跳过 -> Tokens（返回类型必须为 Tokens，08 §四「template 的产物一定是
             // Token 流」——参数签名自由（str/int/Tokens/泛型），但返回必须 Tokens）
-            i = skip_to(tokens, i, len, &Token::Arrow, &format!("expected '->' in template '{}'", name))?;
+            i = skip_to(
+                tokens,
+                i,
+                len,
+                &Token::Arrow,
+                &format!("expected '->' in template '{}'", name),
+            )?;
             i += 1;
             i = skip_blanks(tokens, i, len);
             if !matches!(&tokens[i], Token::Ident(s) if s == "Tokens") {
@@ -1250,7 +1452,13 @@ pub fn extract_template_defs(tokens: &[Token]) -> Result<(TemplateRegistry, Vec<
             i += 1;
 
             // 跳过 =
-            i = skip_to(tokens, i, len, &Token::Eq, &format!("expected '=' in template '{}'", name))?;
+            i = skip_to(
+                tokens,
+                i,
+                len,
+                &Token::Eq,
+                &format!("expected '=' in template '{}'", name),
+            )?;
             i += 1;
 
             // 收集模板体
@@ -1294,9 +1502,18 @@ fn skip_blanks(tokens: &[Token], mut i: usize, len: usize) -> usize {
 }
 
 /// 跳过非目标 token（只允许 Newline），找到目标或报错
-fn skip_to(tokens: &[Token], mut i: usize, len: usize, target: &Token, err_msg: &str) -> Result<usize, String> {
+fn skip_to(
+    tokens: &[Token],
+    mut i: usize,
+    len: usize,
+    target: &Token,
+    err_msg: &str,
+) -> Result<usize, String> {
     while i < len && &tokens[i] != target {
-        if tokens[i] == Token::Newline { i += 1; continue; }
+        if tokens[i] == Token::Newline {
+            i += 1;
+            continue;
+        }
         return Err(err_msg.to_string());
     }
     if i >= len {
@@ -1312,7 +1529,10 @@ fn collect_indented_block(tokens: &[Token], start: usize) -> Result<Vec<Token>, 
 }
 
 /// 收集缩进块，同时返回块结束后的位置（包括闭合的 Dedent）
-fn collect_indented_block_with_end(tokens: &[Token], start: usize) -> Result<(Vec<Token>, usize), String> {
+fn collect_indented_block_with_end(
+    tokens: &[Token],
+    start: usize,
+) -> Result<(Vec<Token>, usize), String> {
     let mut result = Vec::new();
     let mut i = start;
     let mut indent_depth = 0;
@@ -1366,17 +1586,16 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
         while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) {
             i += 1;
         }
-        if i >= len { break; }
+        if i >= len {
+            break;
+        }
 
         // 检测反引号块 ``` ... ```（前缀形式 f``` / r```：Ident("f"/"r") 在反引号前）
         // token 顺序：`f``` → Ident("f") Backtick Backtick Backtick；纯 ``` → Backtick...
         let backtick_prefix = if tokens[i] == Token::Backtick {
             crate::macros::group::BacktickPrefix::None
         } else if let Token::Ident(s) = &tokens[i] {
-            if (s == "f" || s == "r")
-                && i + 1 < len
-                && tokens[i + 1] == Token::Backtick
-            {
+            if (s == "f" || s == "r") && i + 1 < len && tokens[i + 1] == Token::Backtick {
                 if s == "f" {
                     crate::macros::group::BacktickPrefix::F
                 } else {
@@ -1411,19 +1630,35 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
             Token::Let => {
                 // let name = expr
                 i += 1;
-                while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; }
+                while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) {
+                    i += 1;
+                }
                 let name = match &tokens[i] {
-                    Token::Ident(n) => { i += 1; n.clone() }
+                    Token::Ident(n) => {
+                        i += 1;
+                        n.clone()
+                    }
                     _ => return Err("expected variable name after let".to_string()),
                 };
                 while i < len && tokens[i] != Token::Eq {
-                    if matches!(&tokens[i], Token::Newline | Token::Indent | Token::Colon) { i += 1; continue; }
-                    if matches!(&tokens[i], Token::Ident(s) if s == "Tokens") { i += 1; continue; }
+                    if matches!(&tokens[i], Token::Newline | Token::Indent | Token::Colon) {
+                        i += 1;
+                        continue;
+                    }
+                    if matches!(&tokens[i], Token::Ident(s) if s == "Tokens") {
+                        i += 1;
+                        continue;
+                    }
                     break;
                 }
-                if i < len && tokens[i] == Token::Eq { i += 1; }
+                if i < len && tokens[i] == Token::Eq {
+                    i += 1;
+                }
                 let (value_expr, next_i) = parse_macro_expr(tokens, i)?;
-                stmts.push(MacroStmt::Let { name, value: value_expr });
+                stmts.push(MacroStmt::Let {
+                    name,
+                    value: value_expr,
+                });
                 i = next_i;
             }
             Token::If => {
@@ -1431,8 +1666,12 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
                 i += 1;
                 let (cond, next_i) = parse_macro_expr(tokens, i)?;
                 i = next_i;
-                while i < len && tokens[i] != Token::Colon { i += 1; }
-                if i < len { i += 1; } // 跳过 :
+                while i < len && tokens[i] != Token::Colon {
+                    i += 1;
+                }
+                if i < len {
+                    i += 1;
+                } // 跳过 :
 
                 // 收集 then_body（缩进块内）
                 let (then_body, next_i) = collect_stmt_block(tokens, i)?;
@@ -1440,16 +1679,26 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
 
                 // 检查 else
                 let mut else_body = None;
-                while i < len && matches!(&tokens[i], Token::Newline | Token::Dedent) { i += 1; }
+                while i < len && matches!(&tokens[i], Token::Newline | Token::Dedent) {
+                    i += 1;
+                }
                 if i < len && tokens[i] == Token::Else {
                     i += 1;
-                    while i < len && tokens[i] != Token::Colon { i += 1; }
-                    if i < len { i += 1; }
+                    while i < len && tokens[i] != Token::Colon {
+                        i += 1;
+                    }
+                    if i < len {
+                        i += 1;
+                    }
                     let (else_stmts, next_i) = collect_stmt_block(tokens, i)?;
                     else_body = Some(else_stmts);
                     i = next_i;
                 }
-                stmts.push(MacroStmt::If { cond, then_body, else_body });
+                stmts.push(MacroStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                });
             }
             Token::Return => {
                 i += 1;
@@ -1460,28 +1709,46 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
             Token::For => {
                 // for var in expr: body
                 i += 1;
-                while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; }
+                while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) {
+                    i += 1;
+                }
                 let var = match &tokens[i] {
-                    Token::Ident(n) => { i += 1; n.clone() }
+                    Token::Ident(n) => {
+                        i += 1;
+                        n.clone()
+                    }
                     _ => return Err("expected loop variable after for".to_string()),
                 };
                 while i < len && tokens[i] != Token::In {
-                    if matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; continue; }
+                    if matches!(&tokens[i], Token::Newline | Token::Indent) {
+                        i += 1;
+                        continue;
+                    }
                     return Err("expected 'in' in for loop".to_string());
                 }
                 i += 1; // skip 'in'
                 let (iter_expr, next_i) = parse_macro_expr(tokens, i)?;
                 i = next_i;
-                while i < len && tokens[i] != Token::Colon { i += 1; }
-                if i < len { i += 1; }
+                while i < len && tokens[i] != Token::Colon {
+                    i += 1;
+                }
+                if i < len {
+                    i += 1;
+                }
                 let (body, next_i) = collect_stmt_block(tokens, i)?;
-                stmts.push(MacroStmt::For { var, iter: iter_expr, body });
+                stmts.push(MacroStmt::For {
+                    var,
+                    iter: iter_expr,
+                    body,
+                });
                 i = next_i;
             }
             Token::Ident(name) => {
                 // 可能是函数调用或标识符表达式
                 let mut next_i = i + 1;
-                while next_i < len && matches!(&tokens[next_i], Token::Newline | Token::Indent) { next_i += 1; }
+                while next_i < len && matches!(&tokens[next_i], Token::Newline | Token::Indent) {
+                    next_i += 1;
+                }
                 if next_i < len && tokens[next_i] == Token::LParen {
                     // 函数调用 ident(args)
                     let name = name.clone();
@@ -1515,7 +1782,9 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
                     stmts.push(MacroStmt::Expr(MacroExpr::Ident(name.clone())));
                     i = next_i;
                     // 检查是否有二元操作符 +
-                    while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; }
+                    while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) {
+                        i += 1;
+                    }
                     if i < len && tokens[i] == Token::Plus && stmts.len() > 0 {
                         // 处理二元表达式: expr + expr
                         let left = match &stmts[stmts.len() - 1] {
@@ -1524,7 +1793,9 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
                         };
                         stmts.pop();
                         i += 1; // 跳过 +
-                        while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; }
+                        while i < len && matches!(&tokens[i], Token::Newline | Token::Indent) {
+                            i += 1;
+                        }
                         let (right, next_i) = parse_macro_expr(tokens, i)?;
                         stmts.push(MacroStmt::Expr(MacroExpr::Binary {
                             left: Box::new(left),
@@ -1536,7 +1807,10 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
                 }
             }
             _ => {
-                return Err(format!("unexpected token {:?} in macro body at position {}", tokens[i], i));
+                return Err(format!(
+                    "unexpected token {:?} in macro body at position {}",
+                    tokens[i], i
+                ));
             }
         }
     }
@@ -1585,15 +1859,27 @@ fn collect_backtick_block(tokens: &[Token], start: usize) -> Result<(Vec<Token>,
 /// 收集语句块（缩进块内的一组语句）
 fn collect_stmt_block(tokens: &[Token], start: usize) -> Result<(Vec<MacroStmt>, usize), String> {
     let mut i = start;
-    while i < tokens.len() && matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; }
+    while i < tokens.len() && matches!(&tokens[i], Token::Newline | Token::Indent) {
+        i += 1;
+    }
 
     let mut block_tokens = Vec::new();
     let mut depth = 1; // 当前在缩进块内
     while i < tokens.len() && depth > 0 {
         match &tokens[i] {
-            Token::Indent => { depth += 1; block_tokens.push(tokens[i].clone()); }
-            Token::Dedent => { depth -= 1; if depth > 0 { block_tokens.push(tokens[i].clone()); } }
-            _ => { block_tokens.push(tokens[i].clone()); }
+            Token::Indent => {
+                depth += 1;
+                block_tokens.push(tokens[i].clone());
+            }
+            Token::Dedent => {
+                depth -= 1;
+                if depth > 0 {
+                    block_tokens.push(tokens[i].clone());
+                }
+            }
+            _ => {
+                block_tokens.push(tokens[i].clone());
+            }
         }
         i += 1;
     }
@@ -1625,13 +1911,18 @@ fn parse_macro_primary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usi
         return Ok((MacroExpr::IntLit(0), start));
     }
     let mut i = start;
-    while i < tokens.len() && matches!(&tokens[i], Token::Newline | Token::Indent) { i += 1; }
+    while i < tokens.len() && matches!(&tokens[i], Token::Newline | Token::Indent) {
+        i += 1;
+    }
 
     match &tokens[i] {
         Token::Ident(name) => {
             // 可能是函数调用或标识符
             let mut next_i = i + 1;
-            while next_i < tokens.len() && matches!(&tokens[next_i], Token::Newline | Token::Indent) { next_i += 1; }
+            while next_i < tokens.len() && matches!(&tokens[next_i], Token::Newline | Token::Indent)
+            {
+                next_i += 1;
+            }
             if next_i < tokens.len() && tokens[next_i] == Token::LParen {
                 // 函数调用
                 let name = name.clone();
@@ -1668,28 +1959,43 @@ fn parse_macro_primary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usi
         Token::If => {
             // if expr: then_expr else: else_expr
             let mut j = i + 1;
-            while j < tokens.len() && matches!(&tokens[j], Token::Newline | Token::Indent) { j += 1; }
+            while j < tokens.len() && matches!(&tokens[j], Token::Newline | Token::Indent) {
+                j += 1;
+            }
             let (cond, nj) = parse_macro_expr(tokens, j)?;
             j = nj;
-            while j < tokens.len() && tokens[j] != Token::Colon { j += 1; }
-            if j < tokens.len() { j += 1; }
+            while j < tokens.len() && tokens[j] != Token::Colon {
+                j += 1;
+            }
+            if j < tokens.len() {
+                j += 1;
+            }
             let (then_expr, nj) = parse_macro_expr(tokens, j)?;
             j = nj;
             let mut else_expr = None;
-            while j < tokens.len() && matches!(&tokens[j], Token::Newline | Token::Dedent) { j += 1; }
+            while j < tokens.len() && matches!(&tokens[j], Token::Newline | Token::Dedent) {
+                j += 1;
+            }
             if j < tokens.len() && tokens[j] == Token::Else {
                 j += 1;
-                while j < tokens.len() && tokens[j] != Token::Colon { j += 1; }
-                if j < tokens.len() { j += 1; }
+                while j < tokens.len() && tokens[j] != Token::Colon {
+                    j += 1;
+                }
+                if j < tokens.len() {
+                    j += 1;
+                }
                 let (else_e, nj) = parse_macro_expr(tokens, j)?;
                 else_expr = Some(Box::new(else_e));
                 j = nj;
             }
-            Ok((MacroExpr::IfExpr {
-                cond: Box::new(cond),
-                then_expr: Box::new(then_expr),
-                else_expr,
-            }, j))
+            Ok((
+                MacroExpr::IfExpr {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(then_expr),
+                    else_expr,
+                },
+                j,
+            ))
         }
         Token::IntLit(n) => Ok((MacroExpr::IntLit(*n), i + 1)),
         Token::StrLit(s) => Ok((MacroExpr::StrLit(s.clone()), i + 1)),
@@ -1697,13 +2003,19 @@ fn parse_macro_primary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usi
         Token::False => Ok((MacroExpr::BoolLit(false), i + 1)),
         Token::Backtick => {
             let (block_tokens, next_i) = collect_backtick_block(tokens, i)?;
-            Ok((MacroExpr::BacktickBlock {
-                tokens: block_tokens,
-                prefix: crate::macros::group::BacktickPrefix::None,
-            }, next_i))
+            Ok((
+                MacroExpr::BacktickBlock {
+                    tokens: block_tokens,
+                    prefix: crate::macros::group::BacktickPrefix::None,
+                },
+                next_i,
+            ))
         }
         _ => {
-            return Err(format!("unexpected token {:?} in macro expression at position {}", tokens[i], i));
+            return Err(format!(
+                "unexpected token {:?} in macro expression at position {}",
+                tokens[i], i
+            ));
         }
     }
 }
@@ -1737,9 +2049,14 @@ mod tests {
     fn test_collect_bracket_group_simple() {
         let expander = MacroExpander::new(MacroRegistry::new());
         let tokens = vec![
-            Token::IntLit(1), Token::Comma, Token::IntLit(2), Token::RParen,
+            Token::IntLit(1),
+            Token::Comma,
+            Token::IntLit(2),
+            Token::RParen,
         ];
-        let (result, end) = expander.collect_bracket_group(&tokens, 0, Token::LParen, Token::RParen).unwrap();
+        let (result, end) = expander
+            .collect_bracket_group(&tokens, 0, Token::LParen, Token::RParen)
+            .unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(end, 3);
     }
@@ -1753,7 +2070,9 @@ mod tests {
             Token::RParen,
             Token::RParen, // 外层闭合
         ];
-        let (result, end) = expander.collect_bracket_group(&tokens, 0, Token::LParen, Token::RParen).unwrap();
+        let (result, end) = expander
+            .collect_bracket_group(&tokens, 0, Token::LParen, Token::RParen)
+            .unwrap();
         assert_eq!(end, 3);
         assert_eq!(result.len(), 3);
     }
@@ -1792,9 +2111,7 @@ mod tests {
             name: "id".into(),
             is_attr: false,
             param_names: vec!["input".into()],
-            body: vec![
-                MacroStmt::Expr(MacroExpr::Ident("input".into())),
-            ],
+            body: vec![MacroStmt::Expr(MacroExpr::Ident("input".into()))],
         });
 
         let expander = MacroExpander::new(registry);
@@ -1836,22 +2153,20 @@ mod tests {
             name: "inner".into(),
             is_attr: false,
             param_names: vec!["input".into()],
-            body: vec![
-                MacroStmt::Expr(MacroExpr::BacktickBlock {
-                    tokens: vec![
-                        Token::Ident("input".into()),
-                        Token::Star,
-                        Token::IntLit(2),
-                    ],
-                    prefix: crate::macros::group::BacktickPrefix::F,
-                }),
-            ],
+            body: vec![MacroStmt::Expr(MacroExpr::BacktickBlock {
+                tokens: vec![Token::Ident("input".into()), Token::Star, Token::IntLit(2)],
+                prefix: crate::macros::group::BacktickPrefix::F,
+            })],
         });
 
         let expander = MacroExpander::new(registry);
         let tokens = vec![
-            Token::At, Token::Ident("inner".into()), Token::Exclamation,
-            Token::LParen, Token::IntLit(5), Token::RParen,
+            Token::At,
+            Token::Ident("inner".into()),
+            Token::Exclamation,
+            Token::LParen,
+            Token::IntLit(5),
+            Token::RParen,
         ];
         let result = expander.expand(&tokens).unwrap();
         // 5 * 2 的展开取决于 f``` 插值处理

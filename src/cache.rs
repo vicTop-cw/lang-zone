@@ -50,7 +50,8 @@ impl CacheEntry {
                     "hash" => entry.hash = value.to_string(),
                     "output" => entry.output = value.to_string(),
                     "deps" => {
-                        entry.deps = value.split(',')
+                        entry.deps = value
+                            .split(',')
                             .filter(|s| !s.is_empty())
                             .filter_map(|s| {
                                 // 新格式 `path|hash`；兼容旧格式 `path:hash`
@@ -72,7 +73,9 @@ impl CacheEntry {
         let mut out = String::new();
         out.push_str(&format!("hash={}\n", self.hash));
         if !self.deps.is_empty() {
-            let deps_str: Vec<String> = self.deps.iter()
+            let deps_str: Vec<String> = self
+                .deps
+                .iter()
                 .map(|(p, h)| format!("{}|{}", p, h))
                 .collect();
             out.push_str(&format!("deps={}\n", deps_str.join(",")));
@@ -148,12 +151,17 @@ fn cache_file_path(cache_dir: &Path, source: &Path) -> PathBuf {
 
 /// 产物文件名：module.lz → module.rs
 pub fn output_filename(source: &Path) -> String {
-    format!("{}.rs", source.file_stem().unwrap_or_default().to_string_lossy())
+    format!(
+        "{}.rs",
+        source.file_stem().unwrap_or_default().to_string_lossy()
+    )
 }
 
 /// 从 AST 模块提取依赖（非 std 的 import 语句）
 pub fn scan_deps(module: &crate::ast::Module) -> Vec<String> {
-    module.imports.iter()
+    module
+        .imports
+        .iter()
         .filter(|imp| imp.path.first().map(|s| s.as_str()) != Some("std"))
         .map(|imp| format!("{}.lz", imp.path.first().unwrap()))
         .collect()
@@ -170,7 +178,9 @@ pub fn prune_stale(cache_dir: &Path, known_sources: &[PathBuf]) -> io::Result<us
             if path.extension().map(|e| e == "lzcache").unwrap_or(false) {
                 let stem = path.file_stem().unwrap_or_default().to_string_lossy();
                 let source_exists = known_sources.iter().any(|s| {
-                    s.file_stem().map(|st| st.to_string_lossy() == stem).unwrap_or(false)
+                    s.file_stem()
+                        .map(|st| st.to_string_lossy() == stem)
+                        .unwrap_or(false)
                 });
                 if !source_exists {
                     let _ = fs::remove_file(&path);

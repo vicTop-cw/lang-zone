@@ -85,12 +85,20 @@ mod tests {
 
     fn assert_indent(tokens: &[Token], expected_count: usize) {
         let indent_count = tokens.iter().filter(|t| matches!(t, Token::Indent)).count();
-        assert_eq!(indent_count, expected_count, "Expected {} Indent(s)", expected_count);
+        assert_eq!(
+            indent_count, expected_count,
+            "Expected {} Indent(s)",
+            expected_count
+        );
     }
 
     fn assert_dedent(tokens: &[Token], expected_count: usize) {
         let dedent_count = tokens.iter().filter(|t| matches!(t, Token::Dedent)).count();
-        assert_eq!(dedent_count, expected_count, "Expected {} Dedent(s)", expected_count);
+        assert_eq!(
+            dedent_count, expected_count,
+            "Expected {} Dedent(s)",
+            expected_count
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@
 use super::decl::Function;
 use super::decl::StructDef;
 use super::expr::{AssignOp, Expr};
+use super::modifier::Modifiers;
 use crate::types::Type;
 
 #[derive(Debug, Clone)]
@@ -17,11 +18,15 @@ pub enum Stmt {
         is_owned: bool,
         ty: Option<Type>,
         value: Expr,
+        /// 修饰轴集合（关键字形式与 `@` 装饰器形式的统一表示；旧布尔字段由 here 派生）
+        mods: Modifiers,
     },
     Const {
         name: String,
         ty: Option<Type>,
         value: Expr,
+        /// 修饰轴集合（承载 `@const/@comptime/@static/...`）
+        mods: Modifiers,
     },
     Return(Option<Expr>),
     Yield(Option<Expr>),

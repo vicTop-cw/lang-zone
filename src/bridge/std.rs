@@ -95,7 +95,11 @@ impl StdBridge {
                 let entry = entry.map_err(|e| e.to_string())?;
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    let name = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     if !name.is_empty() && top.modules.contains_key(&name) {
                         let man = Self::load_module_manifest(&path)?;
                         module_mans.insert(name, man);
@@ -111,7 +115,9 @@ impl StdBridge {
         // 扁平化：收集各模块导入时需追加的类型别名
         let mut import_aliases = HashMap::new();
         for (mod_name, man) in &module_mans {
-            let aliases: Vec<(String, String)> = man.aliases.iter()
+            let aliases: Vec<(String, String)> = man
+                .aliases
+                .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             if !aliases.is_empty() {
@@ -129,8 +135,16 @@ impl StdBridge {
         // 收集各模块所需 shim
         let mut required_shims = HashMap::new();
         for (mod_name, man) in &module_mans {
-            let shims: Vec<String> = man.functions.iter()
-                .filter_map(|(_, f)| if f.shim.is_empty() { None } else { Some(f.shim.clone()) })
+            let shims: Vec<String> = man
+                .functions
+                .iter()
+                .filter_map(|(_, f)| {
+                    if f.shim.is_empty() {
+                        None
+                    } else {
+                        Some(f.shim.clone())
+                    }
+                })
                 .collect();
             if !shims.is_empty() {
                 required_shims.insert(mod_name.clone(), shims);
@@ -223,7 +237,10 @@ impl StdBridge {
                     is_tier2: true,
                     feature_flags: vec!["rustc_private".to_string()],
                     extern_crates: vec![],
-                    error: Some("[lang-zone] Tier-2 rustc_private 模块需要 --allow-rustc-private 标志".to_string()),
+                    error: Some(
+                        "[lang-zone] Tier-2 rustc_private 模块需要 --allow-rustc-private 标志"
+                            .to_string(),
+                    ),
                 };
             }
             let crate_entry = self.tier2_crates.get(module_name);
@@ -253,7 +270,9 @@ impl StdBridge {
                 format!("{}::{}", man.rust_prefix, rust_rest)
             };
 
-            let type_aliases = self.import_aliases.get(module_name)
+            let type_aliases = self
+                .import_aliases
+                .get(module_name)
                 .cloned()
                 .unwrap_or_default();
             let requires_shim = self.required_shims.contains_key(module_name);
@@ -361,7 +380,9 @@ impl StdBridge {
             return Tier2CheckResult::DeniedFlag;
         }
         let required = &self.tier2_nightly_required;
-        if self.rustc_version.contains(required.replace("nightly-", "").as_str())
+        if self
+            .rustc_version
+            .contains(required.replace("nightly-", "").as_str())
             || self.rustc_version.is_empty()
         {
             Tier2CheckResult::Allowed
@@ -375,13 +396,17 @@ impl StdBridge {
 
     // ─── shims_required ───
     pub fn shims_required(&self, module_name: &str) -> Vec<String> {
-        self.required_shims.get(module_name)
+        self.required_shims
+            .get(module_name)
             .cloned()
             .unwrap_or_default()
     }
 
     /// 列出指定类型的所有导出符号（用于 bridge introspection）
-    pub fn list_exports(&self, kind: crate::bridge::core::ExportKind) -> Vec<crate::bridge::core::ExportEntry> {
+    pub fn list_exports(
+        &self,
+        kind: crate::bridge::core::ExportKind,
+    ) -> Vec<crate::bridge::core::ExportEntry> {
         use crate::bridge::core::{ExportEntry, ExportKind};
         let mut entries = Vec::new();
 
@@ -441,9 +466,11 @@ impl StdBridge {
 
     /// 导出符号总数
     pub fn export_count(&self) -> usize {
-        self.module_mans.values()
+        self.module_mans
+            .values()
             .map(|m| m.functions.len() + m.types.len() + m.methods.len())
-            .sum::<usize>() + self.module_mans.len()
+            .sum::<usize>()
+            + self.module_mans.len()
     }
 
     // ─── 内部辅助 ───
@@ -459,28 +486,35 @@ impl StdBridge {
     }
 
     fn load_top_manifest(path: &Path) -> Result<BridgeManifest, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("读取 {}: {}", path.display(), e))?;
-        let doc = parse(&content)
-            .map_err(|e| format!("解析 {}: {}", path.display(), e))?;
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("读取 {}: {}", path.display(), e))?;
+        let doc = parse(&content).map_err(|e| format!("解析 {}: {}", path.display(), e))?;
 
         let _meta = doc.get("meta").ok_or("bridge.toml 缺少 [meta]")?;
         let toolchain = doc.get("toolchain").ok_or("bridge.toml 缺少 [toolchain]")?;
         let modules = doc.get("modules").ok_or("bridge.toml 缺少 [modules]")?;
 
-        let tier1_channel = toolchain.get("tier1_channel")
-            .and_then(|v| v.as_str()).unwrap_or("stable").to_string();
-        let tier2_channel = toolchain.get("tier2_channel")
-            .and_then(|v| v.as_str()).unwrap_or("nightly").to_string();
+        let tier1_channel = toolchain
+            .get("tier1_channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("stable")
+            .to_string();
+        let tier2_channel = toolchain
+            .get("tier2_channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("nightly")
+            .to_string();
 
-        let tier2_enabled_by_default = doc.get("tier2_gate")
+        let tier2_enabled_by_default = doc
+            .get("tier2_gate")
             .and_then(|t| t.get("enabled_by_default"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
         let mut module_entries = HashMap::new();
         for (name, val) in modules {
-            let tier = val.as_table()
+            let tier = val
+                .as_table()
                 .and_then(|t| t.get("tier"))
                 .and_then(|v| v.as_int())
                 .unwrap_or(1) as u8;
@@ -506,17 +540,22 @@ impl StdBridge {
     }
 
     fn load_module_manifest(path: &Path) -> Result<ModuleManifest, String> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("读取 {}: {}", path.display(), e))?;
-        let doc = parse(&content)
-            .map_err(|e| format!("解析 {}: {}", path.display(), e))?;
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("读取 {}: {}", path.display(), e))?;
+        let doc = parse(&content).map_err(|e| format!("解析 {}: {}", path.display(), e))?;
 
-        let module_section = doc.get("module")
+        let module_section = doc
+            .get("module")
             .ok_or_else(|| format!("{} 缺少 [module]", path.display()))?;
-        let tier = module_section.get("tier")
-            .and_then(|v| v.as_int()).unwrap_or(1) as u8;
-        let rust_prefix = module_section.get("rust_prefix")
-            .and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let tier = module_section
+            .get("tier")
+            .and_then(|v| v.as_int())
+            .unwrap_or(1) as u8;
+        let rust_prefix = module_section
+            .get("rust_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         // types
         let mut types = HashMap::new();
@@ -533,8 +572,16 @@ impl StdBridge {
         if let Some(funcs_section) = doc.get("functions") {
             for (name, val) in funcs_section {
                 if let Some(table) = val.as_table() {
-                    let rust = table.get("rust").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let shim = table.get("shim").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let rust = table
+                        .get("rust")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let shim = table
+                        .get("shim")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     functions.insert(name.clone(), FuncEntry { rust, shim });
                 }
             }
@@ -570,32 +617,46 @@ impl StdBridge {
         })
     }
 
-    fn load_tier2_manifest(path: &Path) -> Result<(HashMap<String, Tier2CrateEntry>, String), String> {
+    fn load_tier2_manifest(
+        path: &Path,
+    ) -> Result<(HashMap<String, Tier2CrateEntry>, String), String> {
         if !path.exists() {
             return Ok((HashMap::new(), String::new()));
         }
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("读取 {}: {}", path.display(), e))?;
-        let doc = parse(&content)
-            .map_err(|e| format!("解析 {}: {}", path.display(), e))?;
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("读取 {}: {}", path.display(), e))?;
+        let doc = parse(&content).map_err(|e| format!("解析 {}: {}", path.display(), e))?;
 
-        let meta = doc.get("meta")
+        let meta = doc
+            .get("meta")
             .ok_or_else(|| format!("{} 缺少 [meta]", path.display()))?;
-        let nightly_required = meta.get("nightly_required")
-            .and_then(|v| v.as_str()).unwrap_or("nightly").to_string();
+        let nightly_required = meta
+            .get("nightly_required")
+            .and_then(|v| v.as_str())
+            .unwrap_or("nightly")
+            .to_string();
 
         let mut crates = HashMap::new();
         if let Some(crates_section) = doc.get("crates") {
             for (name, val) in crates_section {
                 if let Some(table) = val.as_table() {
-                    let extern_name = table.get("extern").and_then(|v| v.as_str())
-                        .unwrap_or(name).to_string();
-                    let path_str = table.get("path").and_then(|v| v.as_str())
-                        .unwrap_or(name).to_string();
-                    crates.insert(name.clone(), Tier2CrateEntry {
-                        extern_name,
-                        path: path_str,
-                    });
+                    let extern_name = table
+                        .get("extern")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(name)
+                        .to_string();
+                    let path_str = table
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(name)
+                        .to_string();
+                    crates.insert(
+                        name.clone(),
+                        Tier2CrateEntry {
+                            extern_name,
+                            path: path_str,
+                        },
+                    );
                 }
             }
         }
@@ -629,24 +690,37 @@ impl StdBridge {
         if !path.exists() {
             return Ok(HashMap::new());
         }
-        let content = fs::read_to_string(path)
-            .map_err(|e| format!("读取 {}: {}", path.display(), e))?;
-        let doc = parse(&content)
-            .map_err(|e| format!("解析 {}: {}", path.display(), e))?;
+        let content =
+            fs::read_to_string(path).map_err(|e| format!("读取 {}: {}", path.display(), e))?;
+        let doc = parse(&content).map_err(|e| format!("解析 {}: {}", path.display(), e))?;
 
         let mut crates = HashMap::new();
         if let Some(crates_section) = doc.get("crates") {
             for (name, val) in crates_section {
                 if let Some(table) = val.as_table() {
-                    let version = table.get("version")
-                        .and_then(|v| v.as_str()).unwrap_or("*").to_string();
-                    let features: Vec<String> = table.get("features")
+                    let version = table
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("*")
+                        .to_string();
+                    let features: Vec<String> = table
+                        .get("features")
                         .and_then(|v| v.as_str())
                         .map(|s| s.split(',').map(|f| f.trim().to_string()).collect())
                         .unwrap_or_default();
-                    let description = table.get("description")
-                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    crates.insert(name.clone(), CrateEntry { version, features, description });
+                    let description = table
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    crates.insert(
+                        name.clone(),
+                        CrateEntry {
+                            version,
+                            features,
+                            description,
+                        },
+                    );
                 }
             }
         }
@@ -657,7 +731,7 @@ impl StdBridge {
 // ──────────────── resolve 返回类型 ────────────────
 
 // ImportResolveResult 定义移至 bridge_core.rs（统一桥接层公共类型）
-pub use crate::bridge::core::{ImportResolveResult, CallResolveResult, MethodResolveResult};
+pub use crate::bridge::core::{CallResolveResult, ImportResolveResult, MethodResolveResult};
 
 #[derive(Debug)]
 pub enum Tier2CheckResult {
@@ -682,7 +756,11 @@ mod tests {
     #[test]
     fn test_load_bridge_success() {
         let result = StdBridge::load(&std_dir());
-        assert!(result.is_ok(), "Load std/ should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Load std/ should succeed: {:?}",
+            result.err()
+        );
     }
 
     #[test]
@@ -741,7 +819,7 @@ mod tests {
         let bridge = StdBridge::load(&std_dir()).unwrap();
         let result = bridge.resolve_import(
             &["std".into(), "collections".into()],
-            &["HashMap".into(), "HashSet".into()]
+            &["HashMap".into(), "HashSet".into()],
         );
         assert_eq!(result.rust_path, "std::collections");
     }
@@ -889,7 +967,10 @@ mod tests {
     #[test]
     fn test_rewrite_type_io_error() {
         let bridge = StdBridge::load(&std_dir()).unwrap();
-        assert_eq!(bridge.rewrite_type("IOError"), Some("std::io::Error".to_string()));
+        assert_eq!(
+            bridge.rewrite_type("IOError"),
+            Some("std::io::Error".to_string())
+        );
     }
 
     #[test]
@@ -989,13 +1070,38 @@ mod tests {
     fn test_all_24_modules_load() {
         let bridge = StdBridge::load(&std_dir()).unwrap();
         let expected = vec![
-            "core", "collections", "io", "fs", "thread", "fmt", "str", "vec",
-            "time", "path", "env", "process", "sync", "iter", "num", "net",
-            "mem", "cmp", "cell", "rc", "convert", "any", "marker", "hash", "os",
+            "core",
+            "collections",
+            "io",
+            "fs",
+            "thread",
+            "fmt",
+            "str",
+            "vec",
+            "time",
+            "path",
+            "env",
+            "process",
+            "sync",
+            "iter",
+            "num",
+            "net",
+            "mem",
+            "cmp",
+            "cell",
+            "rc",
+            "convert",
+            "any",
+            "marker",
+            "hash",
+            "os",
         ];
         for name in expected {
-            assert!(bridge.module_mans.contains_key(name),
-                "Missing module: {}", name);
+            assert!(
+                bridge.module_mans.contains_key(name),
+                "Missing module: {}",
+                name
+            );
         }
     }
 
@@ -1043,8 +1149,13 @@ mod tests {
     fn test_resolve_import_deeply_nested() {
         let bridge = StdBridge::load(&std_dir()).unwrap();
         let result = bridge.resolve_import(
-            &["std".into(), "collections".into(), "hash_map".into(), "Entry".into()],
-            &[]
+            &[
+                "std".into(),
+                "collections".into(),
+                "hash_map".into(),
+                "Entry".into(),
+            ],
+            &[],
         );
         assert_eq!(result.rust_path, "std::collections::hash_map::Entry");
     }
@@ -1145,7 +1256,10 @@ mod tests {
         let mut bridge = StdBridge::load(&std_dir()).unwrap();
 
         // State 1: denied by flag
-        assert!(matches!(bridge.tier2_allowed(), Tier2CheckResult::DeniedFlag));
+        assert!(matches!(
+            bridge.tier2_allowed(),
+            Tier2CheckResult::DeniedFlag
+        ));
 
         // State 2: allowed, no version check
         bridge.set_tier2_allowed(true);
@@ -1153,11 +1267,17 @@ mod tests {
 
         // State 3: version mismatch
         bridge.set_rustc_version("rustc 1.0.0 (000000 2000-01-01)".to_string());
-        assert!(matches!(bridge.tier2_allowed(), Tier2CheckResult::VersionMismatch { .. }));
+        assert!(matches!(
+            bridge.tier2_allowed(),
+            Tier2CheckResult::VersionMismatch { .. }
+        ));
 
         // State 4: back to denied
         bridge.set_tier2_allowed(false);
-        assert!(matches!(bridge.tier2_allowed(), Tier2CheckResult::DeniedFlag));
+        assert!(matches!(
+            bridge.tier2_allowed(),
+            Tier2CheckResult::DeniedFlag
+        ));
     }
 
     #[test]
@@ -1173,14 +1293,21 @@ mod tests {
     fn test_resolve_method_all_vec_aliases() {
         let bridge = StdBridge::load(&std_dir()).unwrap();
         let aliases = vec![
-            ("append", "push"), ("length", "len"), ("size", "len"),
-            ("isEmpty", "is_empty"), ("sort", "sort"), ("reverse", "reverse"),
+            ("append", "push"),
+            ("length", "len"),
+            ("size", "len"),
+            ("isEmpty", "is_empty"),
+            ("sort", "sort"),
+            ("reverse", "reverse"),
             ("contains", "contains"),
         ];
         for (lz, rust) in aliases {
             let result = bridge.resolve_method(lz, "Vec");
-            assert_eq!(result.rust_method, rust,
-                "Method '{}' should map to '{}', got '{}'", lz, rust, result.rust_method);
+            assert_eq!(
+                result.rust_method, rust,
+                "Method '{}' should map to '{}', got '{}'",
+                lz, rust, result.rust_method
+            );
         }
     }
 
@@ -1188,14 +1315,20 @@ mod tests {
     fn test_resolve_method_all_str_aliases() {
         let bridge = StdBridge::load(&std_dir()).unwrap();
         let aliases = vec![
-            ("length", "len"), ("isEmpty", "is_empty"), ("trim", "trim"),
-            ("startsWith", "starts_with"), ("endsWith", "ends_with"),
+            ("length", "len"),
+            ("isEmpty", "is_empty"),
+            ("trim", "trim"),
+            ("startsWith", "starts_with"),
+            ("endsWith", "ends_with"),
             ("contains", "contains"),
         ];
         for (lz, rust) in aliases {
             let result = bridge.resolve_method(lz, "String");
-            assert_eq!(result.rust_method, rust,
-                "String method '{}' should map to '{}', got '{}'", lz, rust, result.rust_method);
+            assert_eq!(
+                result.rust_method, rust,
+                "String method '{}' should map to '{}', got '{}'",
+                lz, rust, result.rust_method
+            );
         }
     }
 

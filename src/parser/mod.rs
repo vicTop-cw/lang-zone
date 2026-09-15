@@ -1,16 +1,16 @@
 // Lang-Zong 编译器 — parser/mod.rs
 // 语法分析模块入口：子模块声明 + Re-export + Token::to_string 实现
 
-mod parser;
-mod stmt;
 mod expr;
 mod helpers;
+mod parser;
+mod stmt;
 
 // Re-export 所有公开类型（保持 crate::parser::* 兼容性）
 pub use crate::ast::*;
-pub use parser::Parser;
-pub use helpers::{is_expr_start, validate_fstring};
 pub use expr::ParserExprExt;
+pub use helpers::{is_expr_start, validate_fstring};
+pub use parser::Parser;
 
 // Token::to_string 实现（放在解析器模块中以便访问 Token 类型）
 use crate::lexer::Token;

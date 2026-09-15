@@ -141,8 +141,8 @@ mod tests {
     #[test]
     fn test_simd_width_elements() {
         let w = SimdWidth::B256;
-        assert_eq!(w.element_count(DType::F32), 8);  // 256/32 = 8
-        assert_eq!(w.element_count(DType::F64), 4);  // 256/64 = 4
-        assert_eq!(w.element_count(DType::I8), 32);  // 256/8 = 32
+        assert_eq!(w.element_count(DType::F32), 8); // 256/32 = 8
+        assert_eq!(w.element_count(DType::F64), 4); // 256/64 = 4
+        assert_eq!(w.element_count(DType::I8), 32); // 256/8 = 32
     }
 }

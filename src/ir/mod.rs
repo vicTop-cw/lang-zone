@@ -6,13 +6,13 @@
 //
 // 形态：强类型树 / ANF 风格，每 Expr 携带 IrType + Span。
 
-pub mod types;
-pub mod node;
-pub mod display;
 pub mod builder;
 pub mod codegen;
 pub mod codegen_cython;
+pub mod display;
 pub mod duck_check;
+pub mod node;
+pub mod types;
 
 pub use builder::build_ir;
 pub use duck_check::check_duck_satisfaction;
@@ -154,9 +154,7 @@ impl IrModule {
         for d in &self.directive.deps {
             deps.push(ModuleDep {
                 module: d.clone(),
-                span: node::Span::unknown_with_file(
-                    self.file_path.clone().unwrap_or_default(),
-                ),
+                span: node::Span::unknown_with_file(self.file_path.clone().unwrap_or_default()),
             });
         }
         for item in &self.items {
@@ -238,8 +236,7 @@ impl IrModule {
     /// JSON 序列化（开发期缓存格式，可读可 diff）
     #[cfg(feature = "infer")]
     pub fn to_json(&self) -> Result<String, String> {
-        serde_json::to_string_pretty(self)
-            .map_err(|e| format!("LZIR JSON serialize error: {e}"))
+        serde_json::to_string_pretty(self).map_err(|e| format!("LZIR JSON serialize error: {e}"))
     }
 
     /// 从 JSON 反序列化
@@ -283,19 +280,27 @@ fn count_stmt_spans(stmt: &node::Stmt, count: &mut impl FnMut(&node::Span)) {
             }
         }
         Stmt::ExprStmt { expr } => count_expr_spans(expr, count),
-        Stmt::If { then_branch, else_branch, .. } => {
+        Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
             count_block_spans(then_branch, count);
             if let Some(b) = else_branch {
                 count_block_spans(b, count);
             }
         }
-        Stmt::For { body, else_body, .. } => {
+        Stmt::For {
+            body, else_body, ..
+        } => {
             count_block_spans(body, count);
             if let Some(b) = else_body {
                 count_block_spans(b, count);
             }
         }
-        Stmt::While { body, else_body, .. } => {
+        Stmt::While {
+            body, else_body, ..
+        } => {
             count_block_spans(body, count);
             if let Some(b) = else_body {
                 count_block_spans(b, count);
@@ -324,7 +329,12 @@ fn count_stmt_spans(stmt: &node::Stmt, count: &mut impl FnMut(&node::Span)) {
         Stmt::BlockLabel { body, .. } => count_block_spans(body, count),
         Stmt::CheckerBlock { body, .. } => count_block_spans(body, count),
         Stmt::Defer { body } => count_block_spans(body, count),
-        Stmt::TryCatch { body, catches, else_body, finally_body } => {
+        Stmt::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
             count_block_spans(body, count);
             for (_, b) in catches {
                 count_block_spans(b, count);
@@ -404,7 +414,10 @@ fn count_expr_spans(expr: &node::Expr, count: &mut impl FnMut(&node::Span)) {
             }
         }
         ExprKind::BlockExpr { block } => count_block_spans(block, count),
-        ExprKind::TupleLit(es) | ExprKind::Tuple(es) | ExprKind::ListLit(es) | ExprKind::List(es) => {
+        ExprKind::TupleLit(es)
+        | ExprKind::Tuple(es)
+        | ExprKind::ListLit(es)
+        | ExprKind::List(es) => {
             for e in es {
                 count_expr_spans(e, count);
             }
@@ -421,7 +434,11 @@ fn count_expr_spans(expr: &node::Expr, count: &mut impl FnMut(&node::Span)) {
             }
             count_expr_spans(end, count);
         }
-        ExprKind::Pipe { receiver, callee, args } => {
+        ExprKind::Pipe {
+            receiver,
+            callee,
+            args,
+        } => {
             count_expr_spans(receiver, count);
             count_expr_spans(callee, count);
             for a in args {
@@ -438,26 +455,27 @@ fn count_expr_spans(expr: &node::Expr, count: &mut impl FnMut(&node::Span)) {
 mod tests {
     use super::*;
     use crate::lexer::Lexer;
-    use crate::parser::Parser;
     use crate::macros::expand::{extract_macro_defs, MacroExpander};
+    use crate::parser::Parser;
 
     /// 编译 LZ 源码字符串 → AST → IR
     fn lz_to_ir(source: &str) -> Result<IrModule, String> {
         let mut lexer = Lexer::new(source);
         let tokens = lexer.tokenize();
 
-        let (registry, _ranges) = extract_macro_defs(&tokens)
-            .map_err(|e| format!("Macro error: {e}"))?;
+        let (registry, _ranges) =
+            extract_macro_defs(&tokens).map_err(|e| format!("Macro error: {e}"))?;
         let expander = MacroExpander::new(registry);
-        let expanded = expander.expand(&tokens)
+        let expanded = expander
+            .expand(&tokens)
             .map_err(|e| format!("Expand error: {e}"))?;
 
         let mut parser = Parser::new(expanded);
-        let module = parser.parse_module()
+        let module = parser
+            .parse_module()
             .map_err(|e| format!("Parse error: {e}"))?;
 
-        builder::build_ir(&module)
-            .map_err(|e| format!("IR build error: {e}"))
+        builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))
     }
 
     #[test]

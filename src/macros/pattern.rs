@@ -37,7 +37,9 @@ pub struct Captures {
 
 impl Captures {
     pub fn new() -> Self {
-        Captures { groups: HashMap::new() }
+        Captures {
+            groups: HashMap::new(),
+        }
     }
 
     pub fn capture(&mut self, name: &str, token: Token) {
@@ -85,13 +87,13 @@ impl TokenPattern {
             patterns.push(pat);
             i = next;
         }
-            if patterns.len() == 1 {
-                Ok((patterns.remove(0), i))
-            } else {
-                // 先折叠 Repeat，再返回
-                let folded = Self::fold_repeat(&patterns);
-                Ok((folded, i))
-            }
+        if patterns.len() == 1 {
+            Ok((patterns.remove(0), i))
+        } else {
+            // 先折叠 Repeat，再返回
+            let folded = Self::fold_repeat(&patterns);
+            Ok((folded, i))
+        }
     }
 
     fn parse_one(tokens: &[Token], i: usize) -> Result<(TokenPattern, usize), String> {
@@ -100,9 +102,7 @@ impl TokenPattern {
         }
         match &tokens[i] {
             // `_` → Wildcard
-            Token::Underscore => {
-                Ok((TokenPattern::Wildcard, i + 1))
-            }
+            Token::Underscore => Ok((TokenPattern::Wildcard, i + 1)),
             // `:ident` / `:int` / `:str` / `:bool` → Type*
             Token::Colon => {
                 if i + 1 >= tokens.len() {
@@ -128,9 +128,7 @@ impl TokenPattern {
                     return Err("expected identifier after '$'".to_string());
                 }
                 match &tokens[i + 1] {
-                    Token::Ident(name) => {
-                        Ok((TokenPattern::Capture(name.clone()), i + 2))
-                    }
+                    Token::Ident(name) => Ok((TokenPattern::Capture(name.clone()), i + 2)),
                     _ => Err("expected identifier after '$'".to_string()),
                 }
             }
@@ -139,9 +137,7 @@ impl TokenPattern {
                 Err("'...' must follow a pattern element, not stand alone".to_string())
             }
             // 其他 → Exact(Token)
-            other => {
-                Ok((TokenPattern::Exact(other.clone()), i + 1))
-            }
+            other => Ok((TokenPattern::Exact(other.clone()), i + 1)),
         }
     }
 
@@ -150,7 +146,9 @@ impl TokenPattern {
         let mut result: Vec<TokenPattern> = Vec::new();
         let mut i = 0;
         while i < patterns.len() {
-            if i + 1 < patterns.len() && matches!(&patterns[i + 1], TokenPattern::Exact(Token::DotDotDot)) {
+            if i + 1 < patterns.len()
+                && matches!(&patterns[i + 1], TokenPattern::Exact(Token::DotDotDot))
+            {
                 let repeated = Box::new(patterns[i].clone());
                 result.push(TokenPattern::Repeat(repeated));
                 i += 2; // 跳过模式和 ...
@@ -178,7 +176,12 @@ impl TokenPattern {
         Some((consumed, captures))
     }
 
-    fn match_inner(&self, tokens: &[Token], start: usize, captures: &mut Captures) -> Option<usize> {
+    fn match_inner(
+        &self,
+        tokens: &[Token],
+        start: usize,
+        captures: &mut Captures,
+    ) -> Option<usize> {
         if start > tokens.len() {
             return None;
         }
@@ -240,7 +243,9 @@ impl TokenPattern {
                 while let Some(n) = inner.match_inner(tokens, current, captures) {
                     total += n;
                     current += n;
-                    if n == 0 { break; } // 防止无限循环
+                    if n == 0 {
+                        break;
+                    } // 防止无限循环
                 }
                 Some(total)
             }
@@ -287,7 +292,7 @@ impl TokenPattern {
 #[derive(Debug, Clone)]
 pub struct ReplaceRule {
     pub from: TokenPattern,
-    pub to: Vec<Token>,  // 模板 tokens，$name 会被替换
+    pub to: Vec<Token>, // 模板 tokens，$name 会被替换
 }
 
 impl ReplaceRule {
@@ -298,7 +303,9 @@ impl ReplaceRule {
         let mut i = 0;
         while i < tokens.len() {
             // 找到 =>
-            let arrow_pos = tokens[i..].iter().position(|t| matches!(t, Token::Arrow | Token::FatArrow));
+            let arrow_pos = tokens[i..]
+                .iter()
+                .position(|t| matches!(t, Token::Arrow | Token::FatArrow));
             let arrow_pos = match arrow_pos {
                 Some(p) => i + p,
                 None => break,
@@ -306,18 +313,29 @@ impl ReplaceRule {
             let from_tokens = &tokens[i..arrow_pos];
             let to_start = arrow_pos + 1;
             // 找到下一个规则分隔符（逗号后的 next from）
-            let to_end = tokens[to_start..].iter().position(|t| {
-                // 简单启发：在顶层逗号处分割
-                // 更精确的做法是括号匹配，但这里简化
-                matches!(t, Token::Comma)
-            }).map(|p| to_start + p).unwrap_or(tokens.len());
+            let to_end = tokens[to_start..]
+                .iter()
+                .position(|t| {
+                    // 简单启发：在顶层逗号处分割
+                    // 更精确的做法是括号匹配，但这里简化
+                    matches!(t, Token::Comma)
+                })
+                .map(|p| to_start + p)
+                .unwrap_or(tokens.len());
 
             let to_tokens = tokens[to_start..to_end].to_vec();
 
             let from_pattern = TokenPattern::parse(from_tokens)?;
-            rules.push(ReplaceRule { from: from_pattern, to: to_tokens });
+            rules.push(ReplaceRule {
+                from: from_pattern,
+                to: to_tokens,
+            });
 
-            i = if to_end < tokens.len() { to_end + 1 } else { to_end };
+            i = if to_end < tokens.len() {
+                to_end + 1
+            } else {
+                to_end
+            };
         }
         Ok(rules)
     }
@@ -344,10 +362,7 @@ impl ReplaceRule {
 }
 
 /// 执行替换：在 source 中查找所有匹配，用规则替换
-pub fn apply_replace(
-    source: &[Token],
-    rules: &[ReplaceRule],
-) -> Vec<Token> {
+pub fn apply_replace(source: &[Token], rules: &[ReplaceRule]) -> Vec<Token> {
     if rules.is_empty() {
         return source.to_vec();
     }
@@ -373,10 +388,7 @@ pub fn apply_replace(
 }
 
 /// 执行移除：在 source 中查找所有匹配模式的序列并移除
-pub fn apply_remove(
-    source: &[Token],
-    pattern: &TokenPattern,
-) -> Vec<Token> {
+pub fn apply_remove(source: &[Token], pattern: &TokenPattern) -> Vec<Token> {
     let mut result: Vec<Token> = Vec::new();
     let mut i = 0;
     while i < source.len() {
@@ -460,7 +472,10 @@ mod tests {
         let tokens = vec![Token::Ident("hello".into())];
         let (n, caps) = pat.match_from(&tokens, 0).unwrap();
         assert_eq!(n, 1);
-        assert_eq!(caps.get("var").unwrap(), &vec![Token::Ident("hello".into())]);
+        assert_eq!(
+            caps.get("var").unwrap(),
+            &vec![Token::Ident("hello".into())]
+        );
     }
 
     #[test]
@@ -530,9 +545,11 @@ mod tests {
             TokenPattern::Capture("b".into()),
         ]);
         let to = vec![
-            Token::Dollar, Token::Ident("b".into()),   // $b
+            Token::Dollar,
+            Token::Ident("b".into()), // $b
             Token::Plus,
-            Token::Dollar, Token::Ident("a".into()),   // $a
+            Token::Dollar,
+            Token::Ident("a".into()), // $a
         ];
         let rules = vec![ReplaceRule { from, to }];
         let result = apply_replace(&source, &rules);

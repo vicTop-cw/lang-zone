@@ -4,17 +4,20 @@
 
 mod cli;
 
+use lang_zone::cache::CacheEntry;
+use lang_zone::incr::IncrCompiler;
+use lang_zone::ir::builder::build_ir;
+use lang_zone::ir::codegen::CodeGen as IrCodeGen;
+use lang_zone::lexer::Lexer;
+use lang_zone::macros::expand::{
+    contains_pending_call, extract_macro_defs, extract_template_defs, has_bin_macro_declaration,
+    MacroExpander, TemplateExpander,
+};
+use lang_zone::parser::Parser;
+use lang_zone::project::ProjectCompiler;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use lang_zone::lexer::Lexer;
-use lang_zone::parser::Parser;
-use lang_zone::macros::expand::{contains_pending_call, extract_macro_defs, extract_template_defs, has_bin_macro_declaration, MacroExpander, TemplateExpander};
-use lang_zone::ir::builder::build_ir;
-use lang_zone::ir::codegen::CodeGen as IrCodeGen;
-use lang_zone::project::ProjectCompiler;
-use lang_zone::cache::CacheEntry;
-use lang_zone::incr::IncrCompiler;
 
 /// 跨模块符号内联：单文件模式下将用户 import 模块的顶层项合并进主 AST，
 /// 使被导入符号进入 IR/codegen（修复 E0425 use/extern 作用域系列失败）。
@@ -27,11 +30,7 @@ fn merge_imported_modules(module: &mut lang_zone::ast::Module, entry: &Path) {
     merge_imports_into(module, &dir, &mut loaded);
 }
 
-fn merge_imports_into(
-    module: &mut lang_zone::ast::Module,
-    dir: &Path,
-    loaded: &mut Vec<PathBuf>,
-) {
+fn merge_imports_into(module: &mut lang_zone::ast::Module, dir: &Path, loaded: &mut Vec<PathBuf>) {
     let imports = module.imports.clone();
     for imp in &imports {
         if imp.path.is_empty() {
@@ -131,6 +130,7 @@ fn merge_imports_into(
                 mutable,
                 ty,
                 value,
+                mods,
                 ..
             } = s
             {
@@ -139,6 +139,7 @@ fn merge_imports_into(
                     ty: ty.clone(),
                     value: value.clone(),
                     mutable: *mutable,
+                    mods: mods.clone(),
                 });
             }
         }
@@ -179,8 +180,6 @@ fn replace_ext(path: &str, from: &str, to: &str) -> String {
     }
 }
 
-
-
 // Windows 主线程栈默认仅 1MB（链接器默认），深层递归下降（宏展开、嵌套缩进块
 // 解析、深层嵌套表达式 codegen）会栈溢出（p43 复现：thread 'main' has
 // overflowed its stack）。将整个编译流水线移入 512MB 大栈线程，解除该限制。
@@ -207,7 +206,10 @@ fn compile_main(args: Vec<String>) -> i32 {
                 return 0;
             }
             "--version" => {
-                println!("Lang-Zone compiler (lz) {}", lang_zone::util::version::version());
+                println!(
+                    "Lang-Zone compiler (lz) {}",
+                    lang_zone::util::version::version()
+                );
                 return 0;
             }
             "create" => return cli::cmd_create(&args),
@@ -251,11 +253,10 @@ fn compile_main(args: Vec<String>) -> i32 {
     // 本地函数查不到返回类型时回退查询外部模块签名（可选增强，infer 特性门控）
     #[cfg(feature = "infer")]
     let lzi_registry = extract_flag_value(&args, "--lzi").map(|p| {
-        let reg = lang_zone::infer::LziRegistry::load_single(Path::new(&p))
-            .unwrap_or_else(|e| {
-                eprintln!("lzi load error ({}): {}", p, e);
-                std::process::exit(1);
-            });
+        let reg = lang_zone::infer::LziRegistry::load_single(Path::new(&p)).unwrap_or_else(|e| {
+            eprintln!("lzi load error ({}): {}", p, e);
+            std::process::exit(1);
+        });
         std::rc::Rc::new(reg)
     });
     // 非 infer 构建：无 .lzi 支持，占位（build_ir_opt 非 infer 版本忽略该参数）
@@ -282,12 +283,10 @@ fn compile_main(args: Vec<String>) -> i32 {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(IncrCompiler::default_cache_dir()));
         let mut ic = IncrCompiler::new(base_dir, cache_dir);
-        let outcome = ic
-            .compile(std::path::Path::new(path))
-            .unwrap_or_else(|e| {
-                eprintln!("Incremental compile error: {}", e);
-                std::process::exit(1);
-            });
+        let outcome = ic.compile(std::path::Path::new(path)).unwrap_or_else(|e| {
+            eprintln!("Incremental compile error: {}", e);
+            std::process::exit(1);
+        });
         let out_path = replace_ext(path, ".lz", ".rs");
         fs::write(&out_path, &outcome.code).unwrap_or_else(|e| {
             eprintln!("Error writing {}: {}", out_path, e);
@@ -307,13 +306,14 @@ fn compile_main(args: Vec<String>) -> i32 {
 
     // --project: 递归加载 import 的所有 .lz 依赖，合并编译
     if should_use_project {
-        let base_dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("."));
+        let base_dir = std::path::Path::new(path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
         let mut pc = ProjectCompiler::new(base_dir.to_path_buf(), std_dir.clone());
-        let mut merged = pc.compile(std::path::Path::new(path))
-            .unwrap_or_else(|e| {
-                eprintln!("Project compile error: {}", e);
-                std::process::exit(1);
-            });
+        let mut merged = pc.compile(std::path::Path::new(path)).unwrap_or_else(|e| {
+            eprintln!("Project compile error: {}", e);
+            std::process::exit(1);
+        });
         // 项目模式合并模块也需带 file_path：语义检查 import 同目录解析依赖它
         if merged.file_path.is_none() {
             merged.file_path = Some(path.to_string());
@@ -334,7 +334,13 @@ fn compile_main(args: Vec<String>) -> i32 {
             eprintln!("Error writing {}: {}", out_path, e);
             std::process::exit(1);
         });
-        println!("Generated {} -> {} (project mode, {}, {} modules)", path, out_path, "IR codegen", pc.unit_count());
+        println!(
+            "Generated {} -> {} (project mode, {}, {} modules)",
+            path,
+            out_path,
+            "IR codegen",
+            pc.unit_count()
+        );
         return 0;
     }
 
@@ -351,11 +357,10 @@ fn compile_main(args: Vec<String>) -> i32 {
         // 不新鲜则继续编译；编译成功后在末尾保存缓存
     }
 
-    let source = fs::read_to_string(path)
-        .unwrap_or_else(|e| {
-            eprintln!("Error reading {}: {}", path, e);
-            std::process::exit(1);
-        });
+    let source = fs::read_to_string(path).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", path, e);
+        std::process::exit(1);
+    });
 
     // Tokenize
     let mut lexer = Lexer::new(&source);
@@ -463,7 +468,9 @@ fn compile_main(args: Vec<String>) -> i32 {
     // 从 Token 流中移除宏定义（展开后不再需要）
     let mut expander = MacroExpander::new(registry);
     expander.set_check_mode(macro_check_mode);
-    let expand_input: Vec<_> = tokens.iter().enumerate()
+    let expand_input: Vec<_> = tokens
+        .iter()
+        .enumerate()
         .filter(|(i, _)| {
             // 过滤掉宏定义占用的 token
             let mut skip = false;
@@ -631,7 +638,9 @@ fn build_ir_opt(
 ) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
     let errs = lang_zone::semantic_check::check_module(module);
     if !errs.is_empty() {
-        return Err(lang_zone::ir::builder::IrBuildError::Generic(errs.join("\n")));
+        return Err(lang_zone::ir::builder::IrBuildError::Generic(
+            errs.join("\n"),
+        ));
     }
     match lzi {
         Some(reg) => lang_zone::ir::builder::build_ir_with_lzi(module, reg.clone()),
@@ -648,7 +657,9 @@ fn build_ir_opt(
 ) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
     let errs = lang_zone::semantic_check::check_module(module);
     if !errs.is_empty() {
-        return Err(lang_zone::ir::builder::IrBuildError::Generic(errs.join("\n")));
+        return Err(lang_zone::ir::builder::IrBuildError::Generic(
+            errs.join("\n"),
+        ));
     }
     build_ir(module)
 }

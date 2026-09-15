@@ -1,12 +1,12 @@
 // Lang-Zong 编译器 — lexer/mod.rs
 
-pub mod token;
+pub mod indent;
 pub mod lexer;
 pub mod span;
-pub mod indent;
+pub mod token;
 
-pub use token::Token;
-pub use token::is_build_ws;
+pub use indent::IndentStack;
 pub use lexer::Lexer;
 pub use span::{SourcePos, Span, Spanned};
-pub use indent::IndentStack;
+pub use token::is_build_ws;
+pub use token::Token;

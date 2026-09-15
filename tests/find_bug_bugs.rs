@@ -25,7 +25,11 @@ fn builtins_rlib() -> PathBuf {
             .flatten()
             .map(|e| e.path())
             .filter(|p| {
-                let n = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let n = p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 n.starts_with("liblz_builtins-") && n.ends_with(".rlib")
             })
             .collect();
@@ -58,7 +62,9 @@ fn run_case(rel: &str, stage: &Stage) -> Result<(), String> {
     let rs = lz.with_extension("rs");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
-    let out = Command::new(&bin).arg(&lz).output()
+    let out = Command::new(&bin)
+        .arg(&lz)
+        .output()
         .map_err(|e| format!("lz compile err: {}", e))?;
 
     match stage {
@@ -87,8 +93,10 @@ fn run_case(rel: &str, stage: &Stage) -> Result<(), String> {
                 .arg(&rs)
                 .arg("--extern")
                 .arg(format!("lz_builtins={}", builtins_rlib().display()))
-                .arg("-A").arg("warnings")
-                .arg("-o").arg(&exe)
+                .arg("-A")
+                .arg("warnings")
+                .arg("-o")
+                .arg(&exe)
                 .output()
                 .map_err(|e| format!("rustc err: {}", e))?;
             if !rc.status.success() {
@@ -98,7 +106,8 @@ fn run_case(rel: &str, stage: &Stage) -> Result<(), String> {
                     String::from_utf8_lossy(&rc.stderr)
                 ));
             }
-            let run = Command::new(&exe).output()
+            let run = Command::new(&exe)
+                .output()
                 .map_err(|e| format!("run err: {}", e))?;
             if !run.status.success() {
                 return Err(format!(
@@ -134,7 +143,11 @@ fn reject(rel: &str) -> Result<(), String> {
 // BUG-LX-001: emoji + \u{1F600} 正常；\u{} 空转义正确拒绝（两形态都锁）
 #[test]
 fn lx001_unicode_escape_ok() {
-    full("FIND_BUG/lexer/bug-escape-unicode.lz", "bug-escape-unicode.lz done").unwrap();
+    full(
+        "FIND_BUG/lexer/bug-escape-unicode.lz",
+        "bug-escape-unicode.lz done",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -173,7 +186,11 @@ fn pr003_varargs_mixed_rejected_negative() {
 // 负向部分（type X = __add__ 拒绝）已由探针 p2 锁定，这里跑正向全链路
 #[test]
 fn pr004_typealias_magic_ok() {
-    full("FIND_BUG/parser/bug-typealias-magic.lz", "typealias-magic.lz done").unwrap();
+    full(
+        "FIND_BUG/parser/bug-typealias-magic.lz",
+        "typealias-magic.lz done",
+    )
+    .unwrap();
 }
 
 #[test]
@@ -182,7 +199,11 @@ fn pr004_typealias_magic_rejected_negative() {
     let dir = manifest().join("target/tmp_negative_pr004");
     let _ = std::fs::create_dir_all(&dir);
     let lz = dir.join("ta_magic.lz");
-    std::fs::write(&lz, "type MyAdder = __add__\ndef main() =\n  print(\"no\")\n").unwrap();
+    std::fs::write(
+        &lz,
+        "type MyAdder = __add__\ndef main() =\n  print(\"no\")\n",
+    )
+    .unwrap();
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
     let out = Command::new(&bin).arg(&lz).output().unwrap();
     assert!(!out.status.success(), "type = 魔法方法 应被 lzc 拒绝");
@@ -191,25 +212,41 @@ fn pr004_typealias_magic_rejected_negative() {
 // BUG-IR-005: comptime: 块解析 + const 提升（Rust 编译期折叠）
 #[test]
 fn ir005_comptime_block_ok() {
-    full("FIND_BUG/ir/bug-ir-comptime.lz", "comptime block parsed successfully").unwrap();
+    full(
+        "FIND_BUG/ir/bug-ir-comptime.lz",
+        "comptime block parsed successfully",
+    )
+    .unwrap();
 }
 
 // BUG-CG-001: ..: int 变参全链路
 #[test]
 fn cg001_varargs_full_ok() {
-    full("FIND_BUG/codegen/bug-codegen-varargs.lz", "bug-codegen-varargs.lz done").unwrap();
+    full(
+        "FIND_BUG/codegen/bug-codegen-varargs.lz",
+        "bug-codegen-varargs.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-CG-003: #!export 编译运行
 #[test]
 fn cg003_export_ok() {
-    full("FIND_BUG/codegen/bug-codegen-export.lz", "bug-codegen-export.lz done").unwrap();
+    full(
+        "FIND_BUG/codegen/bug-codegen-export.lz",
+        "bug-codegen-export.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-SB-004: kebab-case 透传
 #[test]
 fn sb004_kebab_ok() {
-    full("FIND_BUG/stdbridge/bug-stdbridge-kebab.lz", "my-lib-utils::helper::do_work").unwrap();
+    full(
+        "FIND_BUG/stdbridge/bug-stdbridge-kebab.lz",
+        "my-lib-utils::helper::do_work",
+    )
+    .unwrap();
 }
 
 // BUG-SG-004: =: 块返回值（函数内）
@@ -231,7 +268,11 @@ fn ec004_float_precision_ok() {
 
 #[test]
 fn ec007_underscore_ok() {
-    full("FIND_BUG/edge/bug-edge-underscore.lz", "underscore test done").unwrap();
+    full(
+        "FIND_BUG/edge/bug-edge-underscore.lz",
+        "underscore test done",
+    )
+    .unwrap();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -243,13 +284,21 @@ fn ec007_underscore_ok() {
 // BUG-LX-002: 嵌套块注释不支持（P3）
 #[test]
 fn lx002_nested_comment() {
-    full("FIND_BUG/lexer/bug-comment-nested.lz", "bug-comment-nested.lz done").unwrap();
+    full(
+        "FIND_BUG/lexer/bug-comment-nested.lz",
+        "bug-comment-nested.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-LX-005: 内联 x =: expr 拒绝（仅支持换行块形态）
 #[test]
 fn lx005_inline_build_assign() {
-    full("FIND_BUG/lexer/bug-equals-colon-ambiguity.lz", "bug-equals-colon-ambiguity.lz done").unwrap();
+    full(
+        "FIND_BUG/lexer/bug-equals-colon-ambiguity.lz",
+        "bug-equals-colon-ambiguity.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-PR-001: 顶层 =: 构建块
@@ -284,31 +333,51 @@ fn pr005_decorator_on_var_negative() {
 fn ty001_duck_generic() {
     // main 只打印标记串（LZ print 走 Debug 渲染，外层带引号）；
     // 回归点：递归 duck `Comparable.__lt__(&self, other: Self)` 能过类型检查+rustc
-    full("FIND_BUG/typer/bug-duck-generic.lz", "duck-generic.lz: type system check").unwrap();
+    full(
+        "FIND_BUG/typer/bug-duck-generic.lz",
+        "duck-generic.lz: type system check",
+    )
+    .unwrap();
 }
 
 // BUG-TY-002: 已修（2026-09-03）——顶层 self-def 挂 impl + 调用点方法语法 + mut self 透传
 #[test]
 fn ty002_self_underscore() {
-    full("FIND_BUG/typer/bug-self-underscore.lz", "bug-self-underscore.lz done").unwrap();
+    full(
+        "FIND_BUG/typer/bug-self-underscore.lz",
+        "bug-self-underscore.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-TY-004: __Params.new() 点调用错编
 #[test]
 fn ty004_params_type_erase() {
-    full("FIND_BUG/typer/bug-params-type-erase.lz", "params-type-erase.lz done").unwrap();
+    full(
+        "FIND_BUG/typer/bug-params-type-erase.lz",
+        "params-type-erase.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-TY-005: 泛型默认值 + 空泛型实参 `Container<>`（已修复：parser 空泛型解析）
 #[test]
 fn ty005_generic_default() {
-    full("FIND_BUG/typer/bug-generic-default-conflict.lz", "generic-default-conflict.lz done").unwrap();
+    full(
+        "FIND_BUG/typer/bug-generic-default-conflict.lz",
+        "generic-default-conflict.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-IR-001: ~: 参数位 BuildCall → 闭包脱糖（已修复：parser 层 ~: 闭包形态转 Closure）
 #[test]
 fn ir001_build_block_expr() {
-    full("FIND_BUG/ir/bug-ir-build-block.lz", "bug-ir-build-block.lz done").unwrap();
+    full(
+        "FIND_BUG/ir/bug-ir-build-block.lz",
+        "bug-ir-build-block.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-IR-002: defer guard 内联脱糖（方案 A）
@@ -326,7 +395,11 @@ fn ir003_nested_function() {
 // BUG-CG-002: 已修（2026-09-03）——__call__/__init__ 挂 impl + add5(10) → add5.__call__(10) 接线
 #[test]
 fn cg002_call_magic() {
-    full("FIND_BUG/codegen/bug-codegen-call-magic.lz", "bug-codegen-call-magic.lz done").unwrap();
+    full(
+        "FIND_BUG/codegen/bug-codegen-call-magic.lz",
+        "bug-codegen-call-magic.lz done",
+    )
+    .unwrap();
 }
 
 // BUG-CG-004: raises → Result + try/catch 解包（已修复）
@@ -338,34 +411,54 @@ fn cg004_raises_result() {
 // BUG-SB-001: fromMillis 已接线（三轮复验 2026-09-03：codegen camelCase 表 + Duration 静态调用）
 #[test]
 fn sb001_time_method() {
-    full("FIND_BUG/stdbridge/bug-stdbridge-time-method.lz", "Duration fromMillis:").unwrap();
+    full(
+        "FIND_BUG/stdbridge/bug-stdbridge-time-method.lz",
+        "Duration fromMillis:",
+    )
+    .unwrap();
 }
 
 // BUG-SB-002: contains & 已修（变量 receiver + recv_has_custom_contains 守卫）
 #[test]
 fn sb002_vec_contains() {
-    full("FIND_BUG/stdbridge/bug-stdbridge-vec-contains.lz", "contains 2:").unwrap();
+    full(
+        "FIND_BUG/stdbridge/bug-stdbridge-vec-contains.lz",
+        "contains 2:",
+    )
+    .unwrap();
 }
 
 // BUG-SB-003: startsWith 已接线（camelCase 方法表）
 #[test]
 fn sb003_starts_with() {
     // print 逐参输出带引号格式：`"startsWith hello:" true`
-    full("FIND_BUG/stdbridge/bug-stdbridge-startswith.lz", "startsWith hello:").unwrap();
+    full(
+        "FIND_BUG/stdbridge/bug-stdbridge-startswith.lz",
+        "startsWith hello:",
+    )
+    .unwrap();
 }
 
 // BUG-SG-002: 已修（2026-09-03）——T? 位置自动 Some 包装（let 绑定 + struct 构造）
 #[test]
 fn sg002_null_coalesce() {
     // print 多参逐项带 Debug 引号：实际输出 `"None ?? 42:" 42`
-    full("FIND_BUG/syntax/bug-syntax-null-coalesce.lz", "\"None ?? 42:\" 42").unwrap();
+    full(
+        "FIND_BUG/syntax/bug-syntax-null-coalesce.lz",
+        "\"None ?? 42:\" 42",
+    )
+    .unwrap();
 }
 
 // BUG-SG-003: 已修（2026-09-03）——?. 链可空字段走 and_then 扁平化（非 map）
 #[test]
 fn sg003_safe_nav() {
     // 实际输出 `"safe nav host:" "localhost"`
-    full("FIND_BUG/syntax/bug-syntax-safe-nav.lz", "\"safe nav host:\" \"localhost\"").unwrap();
+    full(
+        "FIND_BUG/syntax/bug-syntax-safe-nav.lz",
+        "\"safe nav host:\" \"localhost\"",
+    )
+    .unwrap();
 }
 
 // BUG-SG-005: ... 展开运算符（已修 轮次9）

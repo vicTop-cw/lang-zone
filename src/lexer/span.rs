@@ -40,7 +40,10 @@ impl Span {
 
     /// 单字符跨度（起点和终点相同）
     pub fn point(pos: SourcePos) -> Self {
-        Self { start: pos, end: pos }
+        Self {
+            start: pos,
+            end: pos,
+        }
     }
 
     /// 合并两个跨度

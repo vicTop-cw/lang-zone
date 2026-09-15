@@ -40,9 +40,13 @@ impl SimdLayout {
     /// - 更大 → cache-line 对齐（64 字节）
     pub const fn compute_alignment(dtype: DType, len: usize) -> usize {
         let total = len * dtype.byte_width();
-        if total <= 16 { 16 }
-        else if total <= 32 { 32 }
-        else { 64 } // AVX-512 / cache line
+        if total <= 16 {
+            16
+        } else if total <= 32 {
+            32
+        } else {
+            64
+        } // AVX-512 / cache line
     }
 
     /// 是否为 cache-line 对齐（64 字节）
@@ -99,7 +103,11 @@ impl AlignedAlloc {
     }
 
     /// 释放对齐内存
-    pub fn free(ptr: *mut u8, byte_size: usize, alignment: usize) {
+    ///
+    /// # Safety
+    /// `ptr` 必须来自本分配器的 `alloc`/`alloc_zeroed`，且 `byte_size`/`alignment`
+    /// 与分配时完全一致，否则行为未定义。
+    pub unsafe fn free(ptr: *mut u8, byte_size: usize, alignment: usize) {
         let layout = std::alloc::Layout::from_size_align(byte_size, alignment)
             .expect("AlignedAlloc: invalid layout");
         unsafe { std::alloc::dealloc(ptr, layout) }
@@ -132,6 +140,6 @@ mod tests {
     fn test_aligned_alloc() {
         let ptr = AlignedAlloc::alloc_zeroed(128, 64);
         assert!(SimdLayout::is_aligned(ptr, 64));
-        AlignedAlloc::free(ptr, 128, 64);
+        unsafe { AlignedAlloc::free(ptr, 128, 64) };
     }
 }

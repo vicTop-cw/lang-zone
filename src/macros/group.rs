@@ -8,9 +8,9 @@ use crate::lexer::Token;
 /// 分隔符组类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delimiter {
-    Paren,    // ( )
-    Bracket,  // [ ]
-    Brace,    // { }
+    Paren,   // ( )
+    Bracket, // [ ]
+    Brace,   // { }
 }
 
 // ──────────────── TokenTree 层级结构 ────────────────
@@ -54,20 +54,36 @@ impl TokenTree {
         }
         match &tokens[i] {
             Token::LParen => {
-                let (children, next) = Self::parse_delimited(tokens, i + 1, Token::LParen, Token::RParen, Delimiter::Paren)?;
+                let (children, next) = Self::parse_delimited(
+                    tokens,
+                    i + 1,
+                    Token::LParen,
+                    Token::RParen,
+                    Delimiter::Paren,
+                )?;
                 Ok((TokenTree::Group(Delimiter::Paren, children), next))
             }
             Token::LBrack => {
-                let (children, next) = Self::parse_delimited(tokens, i + 1, Token::LBrack, Token::RBrack, Delimiter::Bracket)?;
+                let (children, next) = Self::parse_delimited(
+                    tokens,
+                    i + 1,
+                    Token::LBrack,
+                    Token::RBrack,
+                    Delimiter::Bracket,
+                )?;
                 Ok((TokenTree::Group(Delimiter::Bracket, children), next))
             }
             Token::LBrace => {
-                let (children, next) = Self::parse_delimited(tokens, i + 1, Token::LBrace, Token::RBrace, Delimiter::Brace)?;
+                let (children, next) = Self::parse_delimited(
+                    tokens,
+                    i + 1,
+                    Token::LBrace,
+                    Token::RBrace,
+                    Delimiter::Brace,
+                )?;
                 Ok((TokenTree::Group(Delimiter::Brace, children), next))
             }
-            _ => {
-                Ok((TokenTree::Atom(tokens[i].clone()), i + 1))
-            }
+            _ => Ok((TokenTree::Atom(tokens[i].clone()), i + 1)),
         }
     }
 
@@ -94,7 +110,11 @@ impl TokenTree {
                 match &tokens[i] {
                     Token::LParen => {
                         let (inner, next) = Self::parse_delimited(
-                            tokens, i + 1, Token::LParen, Token::RParen, Delimiter::Paren,
+                            tokens,
+                            i + 1,
+                            Token::LParen,
+                            Token::RParen,
+                            Delimiter::Paren,
                         )?;
                         children.push(TokenTree::Group(Delimiter::Paren, inner));
                         i = next;
@@ -102,7 +122,11 @@ impl TokenTree {
                     }
                     Token::LBrack => {
                         let (inner, next) = Self::parse_delimited(
-                            tokens, i + 1, Token::LBrack, Token::RBrack, Delimiter::Bracket,
+                            tokens,
+                            i + 1,
+                            Token::LBrack,
+                            Token::RBrack,
+                            Delimiter::Bracket,
                         )?;
                         children.push(TokenTree::Group(Delimiter::Bracket, inner));
                         i = next;
@@ -110,7 +134,11 @@ impl TokenTree {
                     }
                     Token::LBrace => {
                         let (inner, next) = Self::parse_delimited(
-                            tokens, i + 1, Token::LBrace, Token::RBrace, Delimiter::Brace,
+                            tokens,
+                            i + 1,
+                            Token::LBrace,
+                            Token::RBrace,
+                            Delimiter::Brace,
                         )?;
                         children.push(TokenTree::Group(Delimiter::Brace, inner));
                         i = next;
@@ -249,17 +277,29 @@ pub struct Tokens {
 impl Tokens {
     pub fn new(tokens: Vec<Token>) -> Self {
         let kind = classify_token_group(&tokens);
-        Tokens { tokens, kind, tree: None }
+        Tokens {
+            tokens,
+            kind,
+            tree: None,
+        }
     }
 
     pub fn empty() -> Self {
-        Tokens { tokens: vec![], kind: TokenGroupKind::Any, tree: None }
+        Tokens {
+            tokens: vec![],
+            kind: TokenGroupKind::Any,
+            tree: None,
+        }
     }
 
     /// 创建带有树形结构的 Tokens
     pub fn with_tree(tokens: Vec<Token>, tree: Vec<TokenTree>) -> Self {
         let kind = classify_token_group(&tokens);
-        Tokens { tokens, kind, tree: Some(tree) }
+        Tokens {
+            tokens,
+            kind,
+            tree: Some(tree),
+        }
     }
 
     /// 拼接两个 Tokens（拼接后树形结构失效）
@@ -300,7 +340,8 @@ impl Tokens {
 
     /// 调试用的字符串表示
     pub fn to_string(&self) -> String {
-        self.tokens.iter()
+        self.tokens
+            .iter()
             .map(|t| match t {
                 Token::Ident(s) => s.clone(),
                 Token::IntLit(n) => n.to_string(),
@@ -413,9 +454,13 @@ fn is_whitespace_token(t: &Token) -> bool {
 fn matches_decl_start(tokens: &[Token]) -> bool {
     matches!(
         tokens.first(),
-        Some(Token::Def) | Some(Token::Struct) | Some(Token::Enum)
-        | Some(Token::Trait) | Some(Token::Impl) | Some(Token::Const)
-        | Some(Token::Macro)
+        Some(Token::Def)
+            | Some(Token::Struct)
+            | Some(Token::Enum)
+            | Some(Token::Trait)
+            | Some(Token::Impl)
+            | Some(Token::Const)
+            | Some(Token::Macro)
     )
 }
 
@@ -423,12 +468,21 @@ fn matches_decl_start(tokens: &[Token]) -> bool {
 fn matches_stmt_start(tokens: &[Token]) -> bool {
     matches!(
         tokens.first(),
-        Some(Token::Return) | Some(Token::If) | Some(Token::For)
-        | Some(Token::While) | Some(Token::Loop) | Some(Token::Match)
-        | Some(Token::Let) | Some(Token::Guard) | Some(Token::Try)
-        | Some(Token::Raise) | Some(Token::Yield) | Some(Token::Defer)
-        | Some(Token::Break) | Some(Token::Continue)
-        | Some(Token::Assert)
+        Some(Token::Return)
+            | Some(Token::If)
+            | Some(Token::For)
+            | Some(Token::While)
+            | Some(Token::Loop)
+            | Some(Token::Match)
+            | Some(Token::Let)
+            | Some(Token::Guard)
+            | Some(Token::Try)
+            | Some(Token::Raise)
+            | Some(Token::Yield)
+            | Some(Token::Defer)
+            | Some(Token::Break)
+            | Some(Token::Continue)
+            | Some(Token::Assert)
     )
 }
 
@@ -438,8 +492,7 @@ fn matches_pattern_start(tokens: &[Token]) -> bool {
         Some(Token::Underscore) => true,
         Some(Token::Ident(_)) => {
             // 模式一般是 Ident(LParen)，且不应是类型关键字
-            tokens.len() > 1 && matches!(tokens.get(1), Some(Token::LParen))
-            || tokens.len() == 1
+            tokens.len() > 1 && matches!(tokens.get(1), Some(Token::LParen)) || tokens.len() == 1
         }
         // 字面量模式仅在 match 上下文中有效，这里不做启发式判断
         _ => false,
@@ -453,15 +506,28 @@ fn matches_type_start(tokens: &[Token]) -> bool {
         // 内置类型关键字
         Some(Token::Ident(s)) if is_type_keyword(s) => true,
         // 泛型类型: Ident + LT
-        Some(Token::Ident(_)) if tokens.len() > 1 && matches!(tokens.get(1), Some(Token::Lt)) => true,
+        Some(Token::Ident(_)) if tokens.len() > 1 && matches!(tokens.get(1), Some(Token::Lt)) => {
+            true
+        }
         _ => false,
     }
 }
 
 fn is_type_keyword(s: &str) -> bool {
-    matches!(s, "int" | "f64" | "str" | "bool"
-        | "List" | "Dict" | "Set" | "Option" | "Result"
-        | "Self" | "self")
+    matches!(
+        s,
+        "int"
+            | "f64"
+            | "str"
+            | "bool"
+            | "List"
+            | "Dict"
+            | "Set"
+            | "Option"
+            | "Result"
+            | "Self"
+            | "self"
+    )
 }
 
 // ──────────────── 反引号块前缀 ────────────────
@@ -491,7 +557,12 @@ mod tests {
 
     #[test]
     fn test_classify_decl() {
-        let tokens = vec![Token::Def, Token::Ident("foo".into()), Token::LParen, Token::RParen];
+        let tokens = vec![
+            Token::Def,
+            Token::Ident("foo".into()),
+            Token::LParen,
+            Token::RParen,
+        ];
         assert_eq!(classify_token_group(&tokens), TokenGroupKind::Decl);
 
         let tokens2 = vec![Token::Struct, Token::Ident("Bar".into())];
@@ -509,7 +580,12 @@ mod tests {
 
     #[test]
     fn test_classify_pattern() {
-        let tokens = vec![Token::Ident("Some".into()), Token::LParen, Token::Ident("x".into()), Token::RParen];
+        let tokens = vec![
+            Token::Ident("Some".into()),
+            Token::LParen,
+            Token::Ident("x".into()),
+            Token::RParen,
+        ];
         assert_eq!(classify_token_group(&tokens), TokenGroupKind::Pattern);
 
         let tokens2 = vec![Token::Underscore];
@@ -518,13 +594,23 @@ mod tests {
 
     #[test]
     fn test_classify_type() {
-        let tokens = vec![Token::Ident("List".into()), Token::Lt, Token::Ident("int".into()), Token::Gt];
+        let tokens = vec![
+            Token::Ident("List".into()),
+            Token::Lt,
+            Token::Ident("int".into()),
+            Token::Gt,
+        ];
         assert_eq!(classify_token_group(&tokens), TokenGroupKind::Type);
     }
 
     #[test]
     fn test_classify_skip_whitespace() {
-        let tokens = vec![Token::Newline, Token::Newline, Token::Return, Token::Ident("x".into())];
+        let tokens = vec![
+            Token::Newline,
+            Token::Newline,
+            Token::Return,
+            Token::Ident("x".into()),
+        ];
         assert_eq!(classify_token_group(&tokens), TokenGroupKind::Stmt);
     }
 
@@ -560,11 +646,7 @@ mod tests {
 
     #[test]
     fn test_token_tree_parse_simple() {
-        let tokens = vec![
-            Token::Ident("x".into()),
-            Token::Plus,
-            Token::IntLit(1),
-        ];
+        let tokens = vec![Token::Ident("x".into()), Token::Plus, Token::IntLit(1)];
         let tree = TokenTree::parse_all(&tokens).unwrap();
         assert_eq!(tree.len(), 3);
         assert_eq!(tree[0], TokenTree::Atom(Token::Ident("x".into())));
@@ -610,7 +692,10 @@ mod tests {
         if let TokenTree::Group(Delimiter::Paren, children) = &tree[0] {
             // 1 + (2 * 3) → 3 个顶层节点: Atom(1), Atom(+), Group(Paren, [2, *, 3])
             assert_eq!(children.len(), 3);
-            assert!(matches!(&children[2], TokenTree::Group(Delimiter::Paren, _)));
+            assert!(matches!(
+                &children[2],
+                TokenTree::Group(Delimiter::Paren, _)
+            ));
         }
     }
 
@@ -652,7 +737,8 @@ mod tests {
             TokenTree::Group(_, _) => {}
             _ => {
                 // 遍历所有节点查找 Brace
-                let all_braces: Vec<_> = tree.iter()
+                let all_braces: Vec<_> = tree
+                    .iter()
                     .flat_map(|t| t.find_all_groups(Delimiter::Brace))
                     .collect();
                 assert!(!all_braces.is_empty());

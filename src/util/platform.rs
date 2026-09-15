@@ -65,7 +65,11 @@ fn host_target_os() -> &'static str {
 
 /// 平台路径分隔符（`\\` 或 `/`）
 pub fn path_separator() -> char {
-    if cfg!(target_os = "windows") { '\\' } else { '/' }
+    if cfg!(target_os = "windows") {
+        '\\'
+    } else {
+        '/'
+    }
 }
 
 /// 将平台路径统一为正斜杠格式（内部规范化）
@@ -84,7 +88,8 @@ pub fn to_native_path(path: &str) -> String {
 
 /// 规范化路径（展开 ~、转换分隔符、去除冗余 `.` 和 `..`）
 pub fn canonicalize(path: &Path) -> Option<String> {
-    std::fs::canonicalize(path).ok()
+    std::fs::canonicalize(path)
+        .ok()
         .map(|p| normalize_path(&p.to_string_lossy()))
 }
 

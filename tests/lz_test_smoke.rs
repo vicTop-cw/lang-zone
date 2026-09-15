@@ -24,7 +24,11 @@ fn lz_test_basic_test_block() {
     )
     .unwrap();
 
-    let out = Command::new(lang_zone()).arg(&lz).arg("--test").output().unwrap();
+    let out = Command::new(lang_zone())
+        .arg(&lz)
+        .arg("--test")
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "lz test 编译/运行失败:\n{stderr}");
     assert!(
@@ -46,7 +50,11 @@ fn lz_test_suite_setup_teardown() {
     )
     .unwrap();
 
-    let out = Command::new(lang_zone()).arg(&lz).arg("--test").output().unwrap();
+    let out = Command::new(lang_zone())
+        .arg(&lz)
+        .arg("--test")
+        .output()
+        .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success(),

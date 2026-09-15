@@ -47,7 +47,9 @@ impl SourceCache {
 
     /// 获取指定行（行号从 1 开始）
     pub fn line(&self, line_no: usize) -> Option<&str> {
-        if line_no == 0 { return None; }
+        if line_no == 0 {
+            return None;
+        }
         self.lines.get(line_no - 1).map(|s| s.as_str())
     }
 
@@ -64,7 +66,13 @@ impl SourceCache {
     ///     |              ^^^
     ///  43 |     bar()
     /// ```
-    pub fn snippet(&self, start_line: usize, end_line: usize, highlight_start_col: usize, highlight_end_col: usize) -> String {
+    pub fn snippet(
+        &self,
+        start_line: usize,
+        end_line: usize,
+        highlight_start_col: usize,
+        highlight_end_col: usize,
+    ) -> String {
         let mut out = String::new();
         let start = start_line.max(1);
         let end = end_line.min(self.lines.len());
@@ -78,8 +86,16 @@ impl SourceCache {
 
                 // 高亮行
                 if line_no >= start_line && line_no <= end_line {
-                    let col_start = if line_no == start_line { highlight_start_col.max(1) } else { 1 };
-                    let col_end = if line_no == end_line { highlight_end_col } else { line.len() + 1 };
+                    let col_start = if line_no == start_line {
+                        highlight_start_col.max(1)
+                    } else {
+                        1
+                    };
+                    let col_end = if line_no == end_line {
+                        highlight_end_col
+                    } else {
+                        line.len() + 1
+                    };
                     let spaces = " ".repeat(prefix.len());
                     out.push_str(&spaces);
                     let carets_len = (col_end.saturating_sub(col_start)).max(1);
@@ -104,7 +120,8 @@ pub fn write_output(path: &Path, code: &str) -> io::Result<()> {
 
 /// 生成输出文件路径（输入 .lz → 输出 .rs）
 pub fn output_path(input: &Path) -> std::path::PathBuf {
-    let stem = input.file_stem()
+    let stem = input
+        .file_stem()
         .map(|s| s.to_string_lossy())
         .unwrap_or_else(|| "output".into());
     let parent = input.parent().unwrap_or_else(|| Path::new("."));

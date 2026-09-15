@@ -31,9 +31,51 @@ fn pattern_bind_names(p: &Pattern) -> Vec<String> {
     out
 }
 
+/// 将「`@` 前置修饰符装饰器」的轴合并进已解析的绑定（`@...` 后跟关键字形式的兼容路径）。
+/// `Let`/`Const` 以外语句原样返回。
+fn merge_dec_into_stmt(stmt: Stmt, dec: Modifiers) -> Result<Stmt, String> {
+    if dec.is_empty() {
+        return Ok(stmt);
+    }
+    match stmt {
+        Stmt::Let {
+            name,
+            ty,
+            value,
+            mods,
+            ..
+        } => {
+            let m = mods.merge(dec).map_err(|e| e.to_message())?;
+            Ok(Stmt::Let {
+                name,
+                mutable: m.mutability != Mutability::Immut,
+                is_ref: m.is_ref,
+                is_owned: m.owned,
+                ty,
+                value,
+                mods: m,
+            })
+        }
+        Stmt::Const {
+            name,
+            ty,
+            value,
+            mods,
+        } => {
+            let m = mods.merge(dec).map_err(|e| e.to_message())?;
+            Ok(Stmt::Const {
+                name,
+                ty,
+                value,
+                mods: m,
+            })
+        }
+        other => Ok(other),
+    }
+}
+
 /// Parser 的语句解析扩展 trait
-pub trait ParserStmtExt {
-    fn parse_block(&mut self) -> Result<Vec<Stmt>, String>;
+pub trait ParserStmtExt {    fn parse_block(&mut self) -> Result<Vec<Stmt>, String>;
     fn parse_stmt(&mut self) -> Result<Stmt, String>;
     fn parse_binding_stmt(&mut self) -> Result<Stmt, String>;
     fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String>;
@@ -87,11 +129,7 @@ impl ParserStmtExt for Parser {
                 // 参数会误合并成 `1(x, 2)`，导致 let 绑定前变量未绑定。
                 matches!(
                     after_nl,
-                    Token::Dot
-                        | Token::LBrack
-                        | Token::Question
-                        | Token::SafeNav
-                        | Token::CaretOp
+                    Token::Dot | Token::LBrack | Token::Question | Token::SafeNav | Token::CaretOp
                 ) && !is_list_lit
                     || (matches!(after_nl, Token::Indent)
                         && matches!(
@@ -140,6 +178,20 @@ impl ParserStmtExt for Parser {
             self.advance();
         }
         match self.peek() {
+            Token::At => {
+                // `@` 前置修饰符装饰器（如 `@mut x = 42`）——语句位允许变量绑定
+                let dec = self.parse_modifier_decorators()?;
+                let stmt = match self.peek() {
+                    Token::Let => {
+                        self.advance();
+                        self.parse_binding_stmt_let()?
+                    }
+                    Token::Mut | Token::Ref | Token::Const | Token::Owned => self.parse_binding_stmt()?,
+                    // 裸绑定（Ident 起始）：`@mut x = 42` / `@const MAX = 1`
+                    _ => return self.parse_binding_body(dec),
+                };
+                merge_dec_into_stmt(stmt, dec)
+            }
             Token::Let => {
                 // let x = 1  → 不可变绑定
                 // let ref r = x  → 不可变引用
@@ -383,7 +435,8 @@ impl ParserStmtExt for Parser {
                     }
                     self.expect(Token::RParen)?;
                     (format!("({})", elems.join(", ")), Vec::new())
-                } else if matches!(self.peek(), Token::Ident(_)) && self.peek_n(1) == &Token::LParen {
+                } else if matches!(self.peek(), Token::Ident(_)) && self.peek_n(1) == &Token::LParen
+                {
                     // struct 解构模式（case struct __unapply__ 提取）
                     let pattern = self.parse_pattern()?;
                     let names = pattern_bind_names(&pattern);
@@ -421,15 +474,17 @@ impl ParserStmtExt for Parser {
                 // （否则 codegen 会把 guard 包成 .filter(|&__tmp| ...) 闭包，
                 // 而 guard 中引用的解构变量尚未绑定，作用域错位）。
                 let guard_stmt = if struct_destructure {
-                    guard.take().map(|g| Stmt::Expr(Expr::If {
-                        cond: Box::new(Expr::Unary {
-                            op: UnaryOp::Not,
-                            operand: Box::new(g),
-                        }),
-                        then_body: vec![Stmt::Continue],
-                        elif_clauses: vec![],
-                        else_body: None,
-                    }))
+                    guard.take().map(|g| {
+                        Stmt::Expr(Expr::If {
+                            cond: Box::new(Expr::Unary {
+                                op: UnaryOp::Not,
+                                operand: Box::new(g),
+                            }),
+                            then_body: vec![Stmt::Continue],
+                            elif_clauses: vec![],
+                            else_body: None,
+                        })
+                    })
                 } else {
                     None
                 };
@@ -851,6 +906,7 @@ impl ParserStmtExt for Parser {
                             is_owned: false,
                             ty: Some(ty),
                             value,
+                            mods: Modifiers::from_keywords(true, false, false, false, false),
                         });
                     }
                 }
@@ -869,6 +925,7 @@ impl ParserStmtExt for Parser {
                             is_owned: false,
                             ty: None,
                             value,
+                            mods: Modifiers::from_keywords(true, false, false, false, false),
                         });
                     }
                 }
@@ -878,7 +935,11 @@ impl ParserStmtExt for Parser {
                 // 可能已抢先消费 `=`：语句级 `a[i] = v` / `obj.f = v` 需转回 Stmt::Assign，
                 // 否则 builder 把 Assign 转 BinOp == → 生成比较而非赋值（E0369 Box<dyn Any>）
                 if let Expr::Assign { target, op, value } = expr {
-                    return Ok(Stmt::Assign { target: *target, op, value: *value });
+                    return Ok(Stmt::Assign {
+                        target: *target,
+                        op,
+                        value: *value,
+                    });
                 }
                 let _lhs_name = match &expr {
                     Expr::Ident(n) => n.clone(),
@@ -982,6 +1043,7 @@ impl ParserStmtExt for Parser {
                                 is_owned: false,
                                 ty: None,
                                 value,
+                                mods: Modifiers::from_keywords(true, false, false, false, false),
                             }),
                             _ => Ok(Stmt::Assign {
                                 target: expr,
@@ -1139,6 +1201,12 @@ impl ParserStmtExt for Parser {
             }
         }
 
+        // 关键字之后可跟 `@` 修饰符装饰器（如 `mut @immut w`）→ 组合校验（AC8/AC9）
+        let dec = self.parse_modifier_decorators()?;
+        let mods = Modifiers::from_keywords(mutable, is_ref, is_owned, is_const, false)
+            .merge(dec)
+            .map_err(|e| e.to_message())?;
+
         let name = match self.advance() {
             Token::Ident(n) => n,
             t => return Err(format!("Expected variable name, got {:?}", t)),
@@ -1155,16 +1223,17 @@ impl ParserStmtExt for Parser {
         // 构建块（直接）: mut name = *: / ~: <缩进块>
         let value = self.parse_maybe_build_value()?;
 
-        if is_const {
-            Ok(Stmt::Const { name, ty, value })
+        if mods.is_const {
+            Ok(Stmt::Const { name, ty, value, mods })
         } else {
             Ok(Stmt::Let {
                 name,
-                mutable,
-                is_ref,
-                is_owned,
+                mutable: mods.mutability != Mutability::Immut,
+                is_ref: mods.is_ref,
+                is_owned: mods.owned,
                 ty,
                 value,
+                mods,
             })
         }
     }
@@ -1211,6 +1280,12 @@ impl ParserStmtExt for Parser {
                 _ => break,
             }
         }
+
+        // 关键字之后可跟 `@` 修饰符装饰器（`let @mut z` → AC9 let 冲突）
+        let dec = self.parse_modifier_decorators()?;
+        let mods = Modifiers::from_keywords(mutable, is_ref, is_owned, is_const, false)
+            .merge(dec)
+            .map_err(|e| e.to_message())?;
 
         // ── struct 解构绑定：let PointEx(x, y) = p ──
         // 对应 Scala unapply 提取器；PointEx 为 case struct 时自动配 __unapply__，
@@ -1289,16 +1364,17 @@ impl ParserStmtExt for Parser {
             if names.len() == 1 {
                 // Single name destructuring → regular Let
                 let name = names.into_iter().next().unwrap();
-                if is_const {
-                    return Ok(Stmt::Const { name, ty, value });
+                if mods.is_const {
+                    return Ok(Stmt::Const { name, ty, value, mods });
                 } else {
                     return Ok(Stmt::Let {
                         name,
-                        mutable,
-                        is_ref,
-                        is_owned,
+                        mutable: mods.mutability != Mutability::Immut,
+                        is_ref: mods.is_ref,
+                        is_owned: mods.owned,
                         ty,
                         value,
+                        mods,
                     });
                 }
             }
@@ -1358,17 +1434,18 @@ impl ParserStmtExt for Parser {
         // 在 let 绑定上下文中，检查后续是否有跨行 postfix
         value = self.consume_crossline_postfix(value)?;
 
-        if is_const {
-            Ok(Stmt::Const { name, ty, value })
+        if mods.is_const {
+            Ok(Stmt::Const { name, ty, value, mods })
         } else {
             // let 前缀 → 默认可变（let mut 显式声明）
             Ok(Stmt::Let {
                 name,
-                mutable,
-                is_ref,
-                is_owned,
+                mutable: mods.mutability != Mutability::Immut,
+                is_ref: mods.is_ref,
+                is_owned: mods.owned,
                 ty,
                 value,
+                mods,
             })
         }
     }

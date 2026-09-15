@@ -9,24 +9,24 @@
 //   SimdArc<D>          →  Arc<[T]>  共享所有权，并发安全
 //   SimdView<'a, D>     →  &[T]      借用视图，零拷贝
 
+mod arc;
+#[cfg(test)]
+mod bench;
+mod boxed;
 pub mod dtype;
 pub mod layout;
 pub mod ops;
-#[cfg(test)]
-mod bench;
 mod stack;
-mod boxed;
 mod vector;
-mod arc;
 mod view;
 
+pub use arc::SimdArc;
+pub use boxed::SimdBox;
 pub use dtype::{DType, SimdWidth};
-pub use layout::{SimdLayout, AlignedAlloc, CACHE_LINE, PAGE_SIZE};
+pub use layout::{AlignedAlloc, SimdLayout, CACHE_LINE, PAGE_SIZE};
 pub use ops::SimdOps;
 pub use stack::SimdStack;
-pub use boxed::SimdBox;
 pub use vector::SimdVec;
-pub use arc::SimdArc;
 pub use view::SimdView;
 
 // ──────────────── Simd 核心 trait ────────────────
@@ -40,7 +40,9 @@ pub trait Simd {
     fn dtype(&self) -> DType;
     /// 元素数量（向量宽度）
     fn len(&self) -> usize;
-    fn is_empty(&self) -> bool { self.len() == 0 }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     // ── 归约 ──
     fn reduce_sum(&self) -> f64;

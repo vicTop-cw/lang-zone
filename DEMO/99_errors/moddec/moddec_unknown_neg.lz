@@ -1,0 +1,4 @@
+// 反例：非内置修饰符装饰器（内置封闭集）→ E-MODDEC-UNKNOWN (AC5)
+def main() =
+    @magic_mod w = 1
+    print(w)

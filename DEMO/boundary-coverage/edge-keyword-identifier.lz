@@ -42,7 +42,7 @@ struct MagicBox =
     value: int
 
     def __init__(mut self, value: int) =
-        MagicBox(value: value)
+        self.value = value
 
     def __str__(ref self) -> str =
         f"MagicBox({self.value})"

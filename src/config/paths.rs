@@ -59,8 +59,8 @@ impl Default for SearchPaths {
     fn default() -> Self {
         Self {
             entries: vec![
-                PathBuf::from("."),           // 当前目录
-                PathBuf::from("std"),         // 标准库
+                PathBuf::from("."),   // 当前目录
+                PathBuf::from("std"), // 标准库
             ],
         }
     }

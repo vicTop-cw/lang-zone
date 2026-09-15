@@ -122,6 +122,14 @@ pub trait LzDiv<Rhs = Self> {
     fn __div__(self, rhs: Rhs) -> Self::Output;
 }
 
+// 幂运算 `**`（LZ 特有，std::ops 无直接对应 trait）。用户 struct 定义
+// `__pow__(self, rhs: Rhs) -> Ret` 时编译器生成 `impl LzPow<Rhs>`，
+// 使泛型场景（`fn f<T: LzPow<Rhs>>`）可约束幂运算。见 SYNTAX/06d §一。
+pub trait LzPow<Rhs = Self> {
+    type Output;
+    fn pow(self, rhs: Rhs) -> Self::Output;
+}
+
 pub trait LzNeg {
     type Output;
     fn __neg__(self) -> Self::Output;

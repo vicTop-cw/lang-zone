@@ -69,8 +69,8 @@ fn infer_as_expression() {
 
 #[test]
 fn type_parser_primitives() {
-    use lz_infer::type_parser::parse_type;
     use lang_zone::types::Type;
+    use lz_infer::type_parser::parse_type;
 
     assert_eq!(parse_type("int").unwrap(), Type::Int);
     assert_eq!(parse_type("str").unwrap(), Type::Str);
@@ -82,7 +82,6 @@ fn type_parser_primitives() {
         }
     );
 }
-
 
 #[test]
 fn infer_type_test_narrowing() {
@@ -115,24 +114,31 @@ fn infer_where_clause() {
     .unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let combine = &module.functions["combine"];
     assert_eq!(combine.generics, vec!["T"]);
-    assert_eq!(combine.where_clause.get("T"), Some(&vec!["Number".to_string()]));
+    assert_eq!(
+        combine.where_clause.get("T"),
+        Some(&vec!["Number".to_string()])
+    );
 }
 
 #[test]
 fn infer_const_value() {
     let tmp = std::env::temp_dir().join("lz_infer_test_const_value.lz");
-    fs::write(
-        &tmp,
-        "const x: int = 1 + 2\nconst y: str = \"hello\"\n",
-    )
-    .unwrap();
+    fs::write(&tmp, "const x: int = 1 + 2\nconst y: str = \"hello\"\n").unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
 
     let x = &module.consts["x"];
@@ -159,7 +165,11 @@ fn infer_union_type() {
     .unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let choose = &module.functions["choose"];
     assert_eq!(choose.return_type.as_deref(), Some("int | str"));
@@ -180,7 +190,11 @@ fn infer_union_type_match() {
     .unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let pick = &module.functions["pick"];
     assert_eq!(pick.return_type.as_deref(), Some("int | str | bool"));
@@ -189,14 +203,14 @@ fn infer_union_type_match() {
 #[test]
 fn infer_intersection_type() {
     let tmp = std::env::temp_dir().join("lz_infer_intersection.lz");
-    fs::write(
-        &tmp,
-        "def both(x: Clone & Debug) -> Clone & Debug = x\n",
-    )
-    .unwrap();
+    fs::write(&tmp, "def both(x: Clone & Debug) -> Clone & Debug = x\n").unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let both = &module.functions["both"];
     assert_eq!(both.params[0].ty, "Clone & Debug");
@@ -205,8 +219,8 @@ fn infer_intersection_type() {
 
 #[test]
 fn type_parser_intersection() {
-    use lz_infer::type_parser::parse_type;
     use lang_zone::types::Type;
+    use lz_infer::type_parser::parse_type;
 
     assert_eq!(
         parse_type("A & B").unwrap(),
@@ -225,7 +239,6 @@ fn type_parser_intersection() {
     );
 }
 
-
 #[test]
 fn infer_hkt_map_signature() {
     let tmp = std::env::temp_dir().join("lz_infer_hkt_map_signature.lz");
@@ -236,7 +249,11 @@ fn infer_hkt_map_signature() {
     .unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let map = &module.functions["map"];
     assert_eq!(map.generics, vec!["F", "A", "B"]);
@@ -261,7 +278,11 @@ def use_map() -> List<int> =
     .unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let use_map = &module.functions["use_map"];
     assert_eq!(use_map.return_type.as_deref(), Some("List<int>"));
@@ -282,7 +303,11 @@ def use_map() -> Option<int> =
     .unwrap();
 
     let file = infer_path(&tmp).unwrap();
-    assert!(file.unresolved.is_empty(), "unresolved: {:?}", file.unresolved);
+    assert!(
+        file.unresolved.is_empty(),
+        "unresolved: {:?}",
+        file.unresolved
+    );
     let module = file.modules.values().next().unwrap();
     let use_map = &module.functions["use_map"];
     assert_eq!(use_map.return_type.as_deref(), Some("Option<int>"));
@@ -381,8 +406,13 @@ fn infer_cross_module_no_cross_flag_fallback() {
 
     assert_eq!(file.modules.len(), 2, "unresolved: {:?}", file.unresolved);
     // legacy 模式不应有 [cross_module] 注记
-    let cross_markers: Vec<_> = file.unresolved.iter()
+    let cross_markers: Vec<_> = file
+        .unresolved
+        .iter()
         .filter(|s| s.starts_with("[cross_module]"))
         .collect();
-    assert!(cross_markers.is_empty(), "legacy mode should not have cross_module markers");
+    assert!(
+        cross_markers.is_empty(),
+        "legacy mode should not have cross_module markers"
+    );
 }

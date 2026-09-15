@@ -40,10 +40,15 @@ impl ComptimeValue {
     pub fn to_rust_literal(&self) -> Result<String, String> {
         match self {
             ComptimeValue::Int(i) => Ok(i.to_string()),
-            ComptimeValue::Float(f) => Ok(if f.is_nan() { "f64::NAN".into() }
-                else if f.is_infinite() && *f > 0.0 { "f64::INFINITY".into() }
-                else if f.is_infinite() { "f64::NEG_INFINITY".into() }
-                else { format!("{f:?}") }),
+            ComptimeValue::Float(f) => Ok(if f.is_nan() {
+                "f64::NAN".into()
+            } else if f.is_infinite() && *f > 0.0 {
+                "f64::INFINITY".into()
+            } else if f.is_infinite() {
+                "f64::NEG_INFINITY".into()
+            } else {
+                format!("{f:?}")
+            }),
             ComptimeValue::Bool(b) => Ok(b.to_string()),
             ComptimeValue::Str(s) => Ok(format!("{:?}", s)),
             ComptimeValue::None => Ok("()".into()),
@@ -54,7 +59,11 @@ impl ComptimeValue {
             ComptimeValue::Tuple(xs) => {
                 let items: Result<Vec<_>, _> = xs.iter().map(|x| x.to_rust_literal()).collect();
                 let inner = items?.join(", ");
-                Ok(if xs.len() == 1 { format!("({inner},)") } else { format!("({inner})") })
+                Ok(if xs.len() == 1 {
+                    format!("({inner},)")
+                } else {
+                    format!("({inner})")
+                })
             }
             ComptimeValue::Map(_) => Err("Map 类型不能直接内联为字面量".into()),
             ComptimeValue::Type(_) => Err("Type 值不能内联为运行代码".into()),
@@ -229,7 +238,9 @@ impl<'a> ComptimeContext<'a> {
         self.depth += 1;
         if self.depth > MAX_COMPTIME_DEPTH {
             return Err(format!(
-                "comptime 嵌套深度超限（{} > MAX={}），疑似死循环", self.depth - 1, MAX_COMPTIME_DEPTH
+                "comptime 嵌套深度超限（{} > MAX={}），疑似死循环",
+                self.depth - 1,
+                MAX_COMPTIME_DEPTH
             ));
         }
         Ok(())
@@ -263,9 +274,13 @@ impl ComptimeEvaluator {
             Expr::IntLit(i) => Ok(ComptimeValue::Int(*i)),
             Expr::FloatLit(f) => Ok(ComptimeValue::Float(*f)),
             Expr::BoolLit(b) => Ok(ComptimeValue::Bool(*b)),
-            Expr::StrLit(s) | Expr::FStrLit(s) | Expr::RawStrLit(s) => Ok(ComptimeValue::Str(s.clone())),
+            Expr::StrLit(s) | Expr::FStrLit(s) | Expr::RawStrLit(s) => {
+                Ok(ComptimeValue::Str(s.clone()))
+            }
             Expr::NoneLit => Ok(ComptimeValue::None),
-            Expr::Ident(name) => ctx.symtab.get(name.as_str())
+            Expr::Ident(name) => ctx
+                .symtab
+                .get(name.as_str())
                 .cloned()
                 .ok_or_else(|| format!("未定义的编译期变量 `{}`", name)),
 
@@ -304,7 +319,12 @@ impl ComptimeEvaluator {
             }
 
             // 控制流表达式
-            Expr::If { cond, then_body, elif_clauses, else_body } => {
+            Expr::If {
+                cond,
+                then_body,
+                elif_clauses,
+                else_body,
+            } => {
                 if Self::eval_expr(cond, ctx)?.truthy() {
                     Ok(Self::eval_block(then_body, ctx)?.unwrap_or(ComptimeValue::None))
                 } else {
@@ -336,7 +356,9 @@ impl ComptimeEvaluator {
                     Expr::FieldAccess { receiver, field } => {
                         let rcv = match receiver.as_ref() {
                             Expr::Ident(n) => n.clone(),
-                            other => return Err(format!("inspect 调用不支持复杂接收器: {:?}", other)),
+                            other => {
+                                return Err(format!("inspect 调用不支持复杂接收器: {:?}", other))
+                            }
                         };
                         if rcv == "inspect" {
                             format!("inspect::{}", field)
@@ -347,7 +369,8 @@ impl ComptimeEvaluator {
                     other => return Err(format!("编译期仅支持函数名调用: {:?}", other)),
                 };
 
-                let args: Vec<ComptimeValue> = args.iter()
+                let args: Vec<ComptimeValue> = args
+                    .iter()
                     .map(|a| Self::eval_expr(a, ctx))
                     .collect::<Result<Vec<_>, _>>()?;
 
@@ -373,7 +396,11 @@ impl ComptimeEvaluator {
                 } else {
                     // 编译期函数调用：查模块内同名函数，绑定参数后求值函数体
                     // （comptime def / 纯函数编译期执行，如生成查找表、计算哈希）
-                    let f = ctx.module.functions.iter().find(|f| f.name == func_name)
+                    let f = ctx
+                        .module
+                        .functions
+                        .iter()
+                        .find(|f| f.name == func_name)
                         .ok_or_else(|| format!("编译期函数 `{}` 未找到", func_name))?;
                     let mut fctx = ComptimeContext::new(ctx.module);
                     // 继承外层 depth：递归函数调用时深度限制生效（否则无限递归栈溢出）
@@ -404,14 +431,19 @@ impl ComptimeEvaluator {
             }
 
             // 列表方法调用：push（编译期构建查找表 `primes.push(n)`）
-            Expr::MethodCall { receiver, method, args } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
                 // inspect 命名空间：`inspect.getabstracts("Shape")` 在 parser 中
                 // 解析为 MethodCall（而非 Call{FieldAccess}），此处识别 receiver
                 // 为 `inspect` 的调用并转发到 eval_inspect_call（与 Call 分支的
                 // inspect:: 前缀等价，否则报「未定义的编译期变量 inspect」）
                 if let Expr::Ident(n) = receiver.as_ref() {
                     if n == "inspect" {
-                        let iargs: Vec<ComptimeValue> = args.iter()
+                        let iargs: Vec<ComptimeValue> = args
+                            .iter()
                             .map(|a| Self::eval_expr(a, ctx))
                             .collect::<Result<Vec<_>, _>>()?;
                         return Self::eval_inspect_call(method, &iargs, ctx);
@@ -468,7 +500,9 @@ impl ComptimeEvaluator {
                         // 字典索引 d["key"]（08b §7：dict 索引可用）
                         let key = match Self::eval_expr(index, ctx)? {
                             ComptimeValue::Str(k) => k,
-                            other => return Err(format!("编译期 dict 索引需字符串键，got {:?}", other)),
+                            other => {
+                                return Err(format!("编译期 dict 索引需字符串键，got {:?}", other))
+                            }
                         };
                         m.get(&key)
                             .cloned()
@@ -505,7 +539,13 @@ impl ComptimeEvaluator {
                 // 不能走 eval_expr（其 If 分支把 return 值当表达式值丢弃），
                 // 需按语句级处理并传播 return（否则递归函数 factorial 无法终止，
                 // 无限递归栈溢出）
-                if let Expr::If { cond, then_body, elif_clauses, else_body } = e {
+                if let Expr::If {
+                    cond,
+                    then_body,
+                    elif_clauses,
+                    else_body,
+                } = e
+                {
                     if Self::eval_expr(cond, ctx)?.truthy() {
                         return Self::eval_block(then_body, ctx);
                     }
@@ -521,7 +561,12 @@ impl ComptimeEvaluator {
                 }
                 // `primes.push(n)` 表达式语句：求值后写回 receiver 变量（副作用），
                 // 否则 push 结果被丢弃，查找表构建失败（fib_table 空列表）
-                if let Expr::MethodCall { receiver, method, args: _ } = e {
+                if let Expr::MethodCall {
+                    receiver,
+                    method,
+                    args: _,
+                } = e
+                {
                     if method == "push" {
                         if let Expr::Ident(name) = receiver.as_ref() {
                             let v = Self::eval_expr(e, ctx)?;
@@ -559,8 +604,12 @@ impl ComptimeEvaluator {
                 let ok = Self::eval_expr(expr, ctx)?.truthy();
                 if !ok {
                     let msg = match expected {
-                        Some(exp) => format!("comptime assert 失败：期望 {}，实际 falsy",
-                            Self::eval_expr(exp, ctx)?.to_rust_literal().unwrap_or_default()),
+                        Some(exp) => format!(
+                            "comptime assert 失败：期望 {}，实际 falsy",
+                            Self::eval_expr(exp, ctx)?
+                                .to_rust_literal()
+                                .unwrap_or_default()
+                        ),
                         None => "comptime assert 失败".into(),
                     };
                     return Err(msg);
@@ -592,7 +641,9 @@ impl ComptimeEvaluator {
                 }
                 Ok(None)
             }
-            Stmt::For { var, iter, body, .. } => {
+            Stmt::For {
+                var, iter, body, ..
+            } => {
                 let coll = Self::eval_expr(iter, ctx)?;
                 let items = match coll {
                     ComptimeValue::List(xs) => xs,
@@ -639,7 +690,9 @@ impl ComptimeEvaluator {
                 }
                 Ok(None)
             }
-            Stmt::Guard { cond, else_body, .. } => {
+            Stmt::Guard {
+                cond, else_body, ..
+            } => {
                 // guard b != 0 else: body — 条件假时执行 else_body，然后中止
                 if let Some(c) = cond {
                     if !Self::eval_expr(c, ctx)?.truthy() {
@@ -661,7 +714,9 @@ impl ComptimeEvaluator {
                 Self::eval_block(body, ctx)
             }
             Stmt::Raise(e) => {
-                let msg = Self::eval_expr(e, ctx)?.to_rust_literal().unwrap_or_default();
+                let msg = Self::eval_expr(e, ctx)?
+                    .to_rust_literal()
+                    .unwrap_or_default();
                 Err(format!("comptime raise: {}", msg))
             }
             Stmt::Loop(body) => {
@@ -677,19 +732,15 @@ impl ComptimeEvaluator {
                     }
                 }
             }
-            Stmt::Break(v) => {
-                match v {
-                    Some(e) => return Ok(Some(Self::eval_expr(e, ctx)?)),
-                    None => return Ok(Some(ComptimeValue::None)),
-                }
-            }
+            Stmt::Break(v) => match v {
+                Some(e) => return Ok(Some(Self::eval_expr(e, ctx)?)),
+                None => return Ok(Some(ComptimeValue::None)),
+            },
             Stmt::Continue => Ok(None),
-            Stmt::Yield(v) => {
-                match v {
-                    Some(e) => return Ok(Some(Self::eval_expr(e, ctx)?)),
-                    None => return Ok(Some(ComptimeValue::None)),
-                }
-            }
+            Stmt::Yield(v) => match v {
+                Some(e) => return Ok(Some(Self::eval_expr(e, ctx)?)),
+                None => return Ok(Some(ComptimeValue::None)),
+            },
             // 不支持编译期求值的语句：直接跳过（值为 Unit）
             Stmt::Test { .. }
             | Stmt::Suite { .. }
@@ -707,7 +758,10 @@ impl ComptimeEvaluator {
     // ── 块求值 ──
 
     /// 求值语句块。Some(v) 表示 return v；None 正常结束。
-    pub fn eval_block(stmts: &[Stmt], ctx: &mut ComptimeContext) -> Result<Option<ComptimeValue>, String> {
+    pub fn eval_block(
+        stmts: &[Stmt],
+        ctx: &mut ComptimeContext,
+    ) -> Result<Option<ComptimeValue>, String> {
         let n = stmts.len();
         // 块尾表达式（Stmt::Expr）的值作为块结果（规范 08b §2.1「块尾表达式的值
         // 即为 comptime 结果」）。逐语句求值，遇到 return 提前返回。
@@ -729,7 +783,10 @@ impl ComptimeEvaluator {
     /// 循环体求值：逐语句执行，仅传播显式 return（不把块尾表达式值当返回值）。
     /// 与 eval_block 的区别：`for x in [1,2,3]: out.push(x)` 中 push 是表达式语句，
     /// 若按块尾值处理会提前 return 导致只迭代一次。
-    fn eval_block_loop(stmts: &[Stmt], ctx: &mut ComptimeContext) -> Result<Option<ComptimeValue>, String> {
+    fn eval_block_loop(
+        stmts: &[Stmt],
+        ctx: &mut ComptimeContext,
+    ) -> Result<Option<ComptimeValue>, String> {
         for s in stmts {
             if let Some(v) = Self::eval_stmt(s, ctx)? {
                 return Ok(Some(v));
@@ -740,7 +797,11 @@ impl ComptimeEvaluator {
 
     // ── 二元运算 ──
 
-    fn apply_binop(l: ComptimeValue, op: &BinOp, r: ComptimeValue) -> Result<ComptimeValue, String> {
+    fn apply_binop(
+        l: ComptimeValue,
+        op: &BinOp,
+        r: ComptimeValue,
+    ) -> Result<ComptimeValue, String> {
         use BinOp::*;
         match (&l, op, &r) {
             // 整数算术
@@ -748,69 +809,131 @@ impl ComptimeEvaluator {
             (ComptimeValue::Int(a), Sub, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a - *b)),
             (ComptimeValue::Int(a), Mul, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a * *b)),
             (ComptimeValue::Int(a), Div, ComptimeValue::Int(b)) => {
-                if *b == 0 { Err("整数除法：除数为零".into()) }
-                else { Ok(ComptimeValue::Int(*a / *b)) }
+                if *b == 0 {
+                    Err("整数除法：除数为零".into())
+                } else {
+                    Ok(ComptimeValue::Int(*a / *b))
+                }
             }
             (ComptimeValue::Int(a), Mod, ComptimeValue::Int(b)) => {
-                if *b == 0 { Err("整数取模：除数为零".into()) }
-                else { Ok(ComptimeValue::Int(*a % *b)) }
+                if *b == 0 {
+                    Err("整数取模：除数为零".into())
+                } else {
+                    Ok(ComptimeValue::Int(*a % *b))
+                }
             }
             (ComptimeValue::Int(a), Pow, ComptimeValue::Int(b)) => {
                 Ok(ComptimeValue::Int(a.saturating_pow(*b as u32)))
             }
 
             // 浮点算术
-            (ComptimeValue::Float(a), Add, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a + *b)),
-            (ComptimeValue::Float(a), Sub, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a - *b)),
-            (ComptimeValue::Float(a), Mul, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a * *b)),
-            (ComptimeValue::Float(a), Div, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a / *b)),
-            (ComptimeValue::Float(a), Mod, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a % *b)),
-            (ComptimeValue::Float(a), Pow, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(a.powf(*b))),
+            (ComptimeValue::Float(a), Add, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a + *b))
+            }
+            (ComptimeValue::Float(a), Sub, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a - *b))
+            }
+            (ComptimeValue::Float(a), Mul, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a * *b))
+            }
+            (ComptimeValue::Float(a), Div, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a / *b))
+            }
+            (ComptimeValue::Float(a), Mod, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a % *b))
+            }
+            (ComptimeValue::Float(a), Pow, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(a.powf(*b)))
+            }
 
             // 字符串加法（拼接）
-            (ComptimeValue::Str(a), Add, ComptimeValue::Str(b)) => Ok(ComptimeValue::Str(format!("{}{}", a, b))),
+            (ComptimeValue::Str(a), Add, ComptimeValue::Str(b)) => {
+                Ok(ComptimeValue::Str(format!("{}{}", a, b)))
+            }
 
             // 整数与浮点自动提升
-            (ComptimeValue::Int(a), Add, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a as f64 + *b)),
-            (ComptimeValue::Float(a), Add, ComptimeValue::Int(b)) => Ok(ComptimeValue::Float(*a + *b as f64)),
-            (ComptimeValue::Int(a), Mul, ComptimeValue::Float(b)) => Ok(ComptimeValue::Float(*a as f64 * *b)),
-            (ComptimeValue::Float(a), Mul, ComptimeValue::Int(b)) => Ok(ComptimeValue::Float(*a * *b as f64)),
+            (ComptimeValue::Int(a), Add, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a as f64 + *b))
+            }
+            (ComptimeValue::Float(a), Add, ComptimeValue::Int(b)) => {
+                Ok(ComptimeValue::Float(*a + *b as f64))
+            }
+            (ComptimeValue::Int(a), Mul, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Float(*a as f64 * *b))
+            }
+            (ComptimeValue::Float(a), Mul, ComptimeValue::Int(b)) => {
+                Ok(ComptimeValue::Float(*a * *b as f64))
+            }
 
             // 比较运算
-            (ComptimeValue::Int(a), Eq,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a == *b)),
-            (ComptimeValue::Int(a), Ne,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a != *b)),
-            (ComptimeValue::Int(a), Lt,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a < *b)),
-            (ComptimeValue::Int(a), Le,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a <= *b)),
-            (ComptimeValue::Int(a), Gt,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a > *b)),
-            (ComptimeValue::Int(a), Ge,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a >= *b)),
-            (ComptimeValue::Float(a), Eq, ComptimeValue::Float(b)) => Ok(ComptimeValue::Bool(*a == *b)),
-            (ComptimeValue::Float(a), Ne, ComptimeValue::Float(b)) => Ok(ComptimeValue::Bool(*a != *b)),
-            (ComptimeValue::Float(a), Lt, ComptimeValue::Float(b)) => Ok(ComptimeValue::Bool(*a < *b)),
-            (ComptimeValue::Float(a), Le, ComptimeValue::Float(b)) => Ok(ComptimeValue::Bool(*a <= *b)),
-            (ComptimeValue::Float(a), Gt, ComptimeValue::Float(b)) => Ok(ComptimeValue::Bool(*a > *b)),
-            (ComptimeValue::Float(a), Ge, ComptimeValue::Float(b)) => Ok(ComptimeValue::Bool(*a >= *b)),
-            (ComptimeValue::Bool(a), Eq, ComptimeValue::Bool(b)) => Ok(ComptimeValue::Bool(*a == *b)),
-            (ComptimeValue::Bool(a), Ne, ComptimeValue::Bool(b)) => Ok(ComptimeValue::Bool(*a != *b)),
+            (ComptimeValue::Int(a), Eq, ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a == *b)),
+            (ComptimeValue::Int(a), Ne, ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a != *b)),
+            (ComptimeValue::Int(a), Lt, ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a < *b)),
+            (ComptimeValue::Int(a), Le, ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a <= *b)),
+            (ComptimeValue::Int(a), Gt, ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a > *b)),
+            (ComptimeValue::Int(a), Ge, ComptimeValue::Int(b)) => Ok(ComptimeValue::Bool(*a >= *b)),
+            (ComptimeValue::Float(a), Eq, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Bool(*a == *b))
+            }
+            (ComptimeValue::Float(a), Ne, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Bool(*a != *b))
+            }
+            (ComptimeValue::Float(a), Lt, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Bool(*a < *b))
+            }
+            (ComptimeValue::Float(a), Le, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Bool(*a <= *b))
+            }
+            (ComptimeValue::Float(a), Gt, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Bool(*a > *b))
+            }
+            (ComptimeValue::Float(a), Ge, ComptimeValue::Float(b)) => {
+                Ok(ComptimeValue::Bool(*a >= *b))
+            }
+            (ComptimeValue::Bool(a), Eq, ComptimeValue::Bool(b)) => {
+                Ok(ComptimeValue::Bool(*a == *b))
+            }
+            (ComptimeValue::Bool(a), Ne, ComptimeValue::Bool(b)) => {
+                Ok(ComptimeValue::Bool(*a != *b))
+            }
             (ComptimeValue::Str(a), Eq, ComptimeValue::Str(b)) => Ok(ComptimeValue::Bool(*a == *b)),
             (ComptimeValue::Str(a), Ne, ComptimeValue::Str(b)) => Ok(ComptimeValue::Bool(*a != *b)),
 
             // 逻辑运算
-            (ComptimeValue::Bool(a), And, ComptimeValue::Bool(b)) => Ok(ComptimeValue::Bool(*a && *b)),
-            (ComptimeValue::Bool(a), Or,  ComptimeValue::Bool(b)) => Ok(ComptimeValue::Bool(*a || *b)),
+            (ComptimeValue::Bool(a), And, ComptimeValue::Bool(b)) => {
+                Ok(ComptimeValue::Bool(*a && *b))
+            }
+            (ComptimeValue::Bool(a), Or, ComptimeValue::Bool(b)) => {
+                Ok(ComptimeValue::Bool(*a || *b))
+            }
 
             // Bitwise
-            (ComptimeValue::Int(a), BitAnd, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a & *b)),
-            (ComptimeValue::Int(a), BitOr,  ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a | *b)),
-            (ComptimeValue::Int(a), BitXor, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a ^ *b)),
-            (ComptimeValue::Int(a), Shl,    ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a << *b)),
-            (ComptimeValue::Int(a), Shr,    ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a >> *b)),
-            (ComptimeValue::Int(a), BitOr,  ComptimeValue::Bool(b)) => Ok(ComptimeValue::Int(*a | *b as i64)),
-            (ComptimeValue::Bool(a), BitOr, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a as i64 | *b)),
-            (ComptimeValue::Bool(a), BitAnd,ComptimeValue::Bool(b)) => Ok(ComptimeValue::Bool(*a && *b)),
-
+            (ComptimeValue::Int(a), BitAnd, ComptimeValue::Int(b)) => {
+                Ok(ComptimeValue::Int(*a & *b))
+            }
+            (ComptimeValue::Int(a), BitOr, ComptimeValue::Int(b)) => {
+                Ok(ComptimeValue::Int(*a | *b))
+            }
+            (ComptimeValue::Int(a), BitXor, ComptimeValue::Int(b)) => {
+                Ok(ComptimeValue::Int(*a ^ *b))
+            }
+            (ComptimeValue::Int(a), Shl, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a << *b)),
+            (ComptimeValue::Int(a), Shr, ComptimeValue::Int(b)) => Ok(ComptimeValue::Int(*a >> *b)),
+            (ComptimeValue::Int(a), BitOr, ComptimeValue::Bool(b)) => {
+                Ok(ComptimeValue::Int(*a | *b as i64))
+            }
+            (ComptimeValue::Bool(a), BitOr, ComptimeValue::Int(b)) => {
+                Ok(ComptimeValue::Int(*a as i64 | *b))
+            }
+            (ComptimeValue::Bool(a), BitAnd, ComptimeValue::Bool(b)) => {
+                Ok(ComptimeValue::Bool(*a && *b))
+            }
 
             // 剩余未匹配算子 → 报错
-            (l_val, op_val, r_val) => Err(format!("编译期不支持 {:?} {:?} {:?} 的运算", l_val, op_val, r_val)),
+            (l_val, op_val, r_val) => Err(format!(
+                "编译期不支持 {:?} {:?} {:?} 的运算",
+                l_val, op_val, r_val
+            )),
         }
     }
 
@@ -840,16 +963,36 @@ impl ComptimeEvaluator {
                 None => Ok(ComptimeValue::None),
             },
             (InspectObject::Module(m), "functions") => Ok(ComptimeValue::List(
-                m.functions.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                m.functions
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Module(m), "structs") => Ok(ComptimeValue::List(
-                m.structs.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                m.structs
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Module(m), "traits") => Ok(ComptimeValue::List(
-                m.traits.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                m.traits
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Module(m), "consts") => Ok(ComptimeValue::List(
-                m.consts.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                m.consts
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Function(f), "name") => Ok(ComptimeValue::Str(f.name.clone())),
             (InspectObject::Function(f), "parameters") => Ok(ComptimeValue::List(
-                f.parameters.iter().map(|p| ComptimeValue::Inspect(InspectObject::Parameter(p.clone()))).collect())),
+                f.parameters
+                    .iter()
+                    .map(|p| ComptimeValue::Inspect(InspectObject::Parameter(p.clone())))
+                    .collect(),
+            )),
             (InspectObject::Function(f), "return_annotation") => match &f.return_annotation {
                 Some(t) => Ok(ComptimeValue::Type(t.clone())),
                 None => Ok(ComptimeValue::None),
@@ -857,31 +1000,53 @@ impl ComptimeEvaluator {
             (InspectObject::Function(f), "is_comptime") => Ok(ComptimeValue::Bool(f.is_comptime)),
             (InspectObject::Class(c), "name") => Ok(ComptimeValue::Str(c.name.clone())),
             (InspectObject::Class(c), "bases") => Ok(ComptimeValue::List(
-                c.bases.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                c.bases
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Class(c), "methods") => Ok(ComptimeValue::List(
-                c.methods.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                c.methods
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Signature(s), "name") => match &s.name {
                 Some(n) => Ok(ComptimeValue::Str(n.clone())),
                 None => Ok(ComptimeValue::None),
             },
             (InspectObject::Signature(s), "parameters") => Ok(ComptimeValue::List(
-                s.parameters.iter().map(|p| ComptimeValue::Inspect(InspectObject::Parameter(p.clone()))).collect())),
+                s.parameters
+                    .iter()
+                    .map(|p| ComptimeValue::Inspect(InspectObject::Parameter(p.clone())))
+                    .collect(),
+            )),
             (InspectObject::Signature(s), "return_annotation") => match &s.return_annotation {
                 Some(t) => Ok(ComptimeValue::Type(t.clone())),
                 None => Ok(ComptimeValue::None),
             },
             (InspectObject::Parameter(p), "name") => Ok(ComptimeValue::Str(p.name.clone())),
-            (InspectObject::Parameter(p), "kind") => Ok(ComptimeValue::Str(p.kind.as_str().to_string())),
+            (InspectObject::Parameter(p), "kind") => {
+                Ok(ComptimeValue::Str(p.kind.as_str().to_string()))
+            }
             (InspectObject::Parameter(p), "annotation") => match &p.annotation {
                 Some(t) => Ok(ComptimeValue::Type(t.clone())),
                 None => Ok(ComptimeValue::None),
             },
             (InspectObject::Mro(m), "name") => Ok(ComptimeValue::Str(m.name.clone())),
             (InspectObject::Mro(m), "mro") => Ok(ComptimeValue::List(
-                m.mro.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                m.mro
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Abstracts(a), "name") => Ok(ComptimeValue::Str(a.name.clone())),
             (InspectObject::Abstracts(a), "abstract_methods") => Ok(ComptimeValue::List(
-                a.abstract_methods.iter().map(|s| ComptimeValue::Str(s.clone())).collect())),
+                a.abstract_methods
+                    .iter()
+                    .map(|s| ComptimeValue::Str(s.clone()))
+                    .collect(),
+            )),
             (InspectObject::Frame(f), "function") => match &f.function {
                 Some(n) => Ok(ComptimeValue::Str(n.clone())),
                 None => Ok(ComptimeValue::None),
@@ -895,7 +1060,11 @@ impl ComptimeEvaluator {
             (InspectObject::Source(s), "source") => Ok(ComptimeValue::Str(s.source.clone())),
             (InspectObject::Source(s), "first_lineno") => Ok(ComptimeValue::Int(s.first_lineno)),
             (InspectObject::Source(s), "lines") => Ok(ComptimeValue::List(
-                s.lines.iter().map(|l| ComptimeValue::Str(l.clone())).collect())),
+                s.lines
+                    .iter()
+                    .map(|l| ComptimeValue::Str(l.clone()))
+                    .collect(),
+            )),
             _ => Err(format!("inspect 对象不支持字段 `{}`", field)),
         }
     }
@@ -903,7 +1072,9 @@ impl ComptimeEvaluator {
     // ── inspect 内建函数分发 ──
 
     fn eval_inspect_call(
-        name: &str, args: &[ComptimeValue], ctx: &mut ComptimeContext,
+        name: &str,
+        args: &[ComptimeValue],
+        ctx: &mut ComptimeContext,
     ) -> Result<ComptimeValue, String> {
         match name {
             // ── 类型检视 ──
@@ -924,36 +1095,67 @@ impl ComptimeEvaluator {
                     for c in &m.consts {
                         members.push(("const".into(), ComptimeValue::Str(c.clone())));
                     }
-                    Ok(ComptimeValue::List(members.into_iter().map(|(kind, val)|
-                        ComptimeValue::Tuple(vec![ComptimeValue::Str(kind), val])
-                    ).collect()))
+                    Ok(ComptimeValue::List(
+                        members
+                            .into_iter()
+                            .map(|(kind, val)| {
+                                ComptimeValue::Tuple(vec![ComptimeValue::Str(kind), val])
+                            })
+                            .collect(),
+                    ))
                 } else {
                     Err("getmembers 暂只支无参调用（全模块）".into())
                 }
             }
-            "getmodulename" => {
-                Ok(ComptimeValue::Str(ctx.module.name.clone().unwrap_or_default()))
-            }
+            "getmodulename" => Ok(ComptimeValue::Str(
+                ctx.module.name.clone().unwrap_or_default(),
+            )),
             "ismodule" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("ismodule 需字符串参数")?;
-                Ok(ComptimeValue::Bool(name == ctx.module.name.as_deref().unwrap_or("")))
+                Ok(ComptimeValue::Bool(
+                    name == ctx.module.name.as_deref().unwrap_or(""),
+                ))
             }
             "isclass" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("isclass 需字符串参数")?;
-                Ok(ComptimeValue::Bool(ctx.module.structs.iter().any(|s| s.name == name)))
+                Ok(ComptimeValue::Bool(
+                    ctx.module.structs.iter().any(|s| s.name == name),
+                ))
             }
             "isfunction" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("isfunction 需字符串参数")?;
-                Ok(ComptimeValue::Bool(ctx.module.functions.iter().any(|f| f.name == name)))
+                Ok(ComptimeValue::Bool(
+                    ctx.module.functions.iter().any(|f| f.name == name),
+                ))
             }
             "ismethod" => {
-                if args.len() < 2 { return Err("ismethod 需 2 参数 (class_name, method_name)".into()); }
+                if args.len() < 2 {
+                    return Err("ismethod 需 2 参数 (class_name, method_name)".into());
+                }
                 let cls = args[0].as_str().ok_or("ismethod cls 需字符串")?;
                 let method = args[1].as_str().ok_or("ismethod method 需字符串")?;
-                let has = ctx.module.structs.iter()
+                let has = ctx
+                    .module
+                    .structs
+                    .iter()
                     .filter(|s| s.name == cls)
                     .any(|s| s.methods.iter().any(|m| m.name == method));
                 Ok(ComptimeValue::Bool(has))
@@ -961,37 +1163,56 @@ impl ComptimeEvaluator {
 
             // ── 签名 ──
             "signature" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("signature 需字符串参数（函数名）")?;
-                let f = ctx.module.functions.iter().find(|f| f.name == name)
+                let f = ctx
+                    .module
+                    .functions
+                    .iter()
+                    .find(|f| f.name == name)
                     .ok_or_else(|| format!("未找到函数 `{}`", name))?;
-                let params: Vec<Parameter> = f.params.iter().map(|p| Parameter {
-                    name: p.name.clone(),
-                    kind: ParameterKind::PositionalOrKeyword,
-                    annotation: Some(p.ty.clone()),
-                    default: None,
-                }).collect();
-                Ok(ComptimeValue::Inspect(InspectObject::Signature(Signature {
-                    name: Some(f.name.clone()),
-                    parameters: params,
-                    return_annotation: f.return_type.clone(),
-                })))
+                let params: Vec<Parameter> = f
+                    .params
+                    .iter()
+                    .map(|p| Parameter {
+                        name: p.name.clone(),
+                        kind: ParameterKind::PositionalOrKeyword,
+                        annotation: Some(p.ty.clone()),
+                        default: None,
+                    })
+                    .collect();
+                Ok(ComptimeValue::Inspect(InspectObject::Signature(
+                    Signature {
+                        name: Some(f.name.clone()),
+                        parameters: params,
+                        return_annotation: f.return_type.clone(),
+                    },
+                )))
             }
 
             // ── 源码 ──
             "getsource" | "getsourcefile" | "getsourcelines" | "getdoc" | "getcomments" => {
                 // 源码文本由编译入口（main.rs）注入 Module.source_text →
                 // builder 的 ComptimeContext::with_source；未注入时报错提示
-                let src = ctx
-                    .source
+                let src = ctx.source.clone().ok_or_else(|| {
+                    format!(
+                        "inspect::{} 需要注入源码文本（ComptimeContext::with_source）",
+                        name
+                    )
+                })?;
+                let filename = ctx
+                    .module
+                    .file_path
                     .clone()
-                    .ok_or_else(|| format!("inspect::{} 需要注入源码文本（ComptimeContext::with_source）", name))?;
-                let filename = ctx.module.file_path.clone().unwrap_or_else(|| "<unknown>".into());
+                    .unwrap_or_else(|| "<unknown>".into());
                 let lines: Vec<String> = src.lines().map(|l| l.to_string()).collect();
                 match name {
-                    "getsourcefile" => {
-                        Ok(ComptimeValue::Str(filename))
-                    }
+                    "getsourcefile" => Ok(ComptimeValue::Str(filename)),
                     "getsource" | "getsourcelines" => {
                         Ok(ComptimeValue::Inspect(InspectObject::Source(SourceInfo {
                             filename,
@@ -1015,35 +1236,67 @@ impl ComptimeEvaluator {
                 Ok(ComptimeValue::Inspect(InspectObject::Module(m)))
             }
             "function_info" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("function_info 需字符串参数（函数名）")?;
-                let f = ctx.module.functions.iter().find(|f| f.name == name)
+                let f = ctx
+                    .module
+                    .functions
+                    .iter()
+                    .find(|f| f.name == name)
                     .ok_or_else(|| format!("未找到函数 `{}`", name))?;
-                let params: Vec<Parameter> = f.params.iter().map(|p| Parameter {
-                    name: p.name.clone(),
-                    kind: ParameterKind::PositionalOrKeyword,
-                    annotation: Some(p.ty.clone()),
-                    default: None,
-                }).collect();
-                Ok(ComptimeValue::Inspect(InspectObject::Function(FunctionInfo {
-                    name: f.name.clone(),
-                    parameters: params,
-                    return_annotation: f.return_type.clone(),
-                    is_comptime: false,
-                })))
+                let params: Vec<Parameter> = f
+                    .params
+                    .iter()
+                    .map(|p| Parameter {
+                        name: p.name.clone(),
+                        kind: ParameterKind::PositionalOrKeyword,
+                        annotation: Some(p.ty.clone()),
+                        default: None,
+                    })
+                    .collect();
+                Ok(ComptimeValue::Inspect(InspectObject::Function(
+                    FunctionInfo {
+                        name: f.name.clone(),
+                        parameters: params,
+                        return_annotation: f.return_type.clone(),
+                        is_comptime: false,
+                    },
+                )))
             }
 
             // ── 类型层级 ──
             "getmro" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("getmro 需字符串参数（类名）")?;
-                let _ = ctx.module.structs.iter().find(|s| s.name == name)
+                let _ = ctx
+                    .module
+                    .structs
+                    .iter()
+                    .find(|s| s.name == name)
                     .ok_or_else(|| format!("未找到类 `{}`", name))?;
                 let mro = vec![name.clone()];
-                Ok(ComptimeValue::Inspect(InspectObject::Mro(MroInfo { name: name.clone(), mro })))
+                Ok(ComptimeValue::Inspect(InspectObject::Mro(MroInfo {
+                    name: name.clone(),
+                    mro,
+                })))
             }
             "getabstracts" => {
-                let name = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let name = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("getabstracts 需字符串参数（类名）")?;
                 // 检测 struct/trait 中声明为 abstract 的方法（is_abstract，无方法体）
                 let mut abstract_methods: Vec<String> = Vec::new();
@@ -1063,15 +1316,22 @@ impl ComptimeEvaluator {
                 }
                 abstract_methods.sort();
                 abstract_methods.dedup();
-                Ok(ComptimeValue::Inspect(InspectObject::Abstracts(Abstracts {
-                    name: name.clone(),
-                    abstract_methods,
-                })))
+                Ok(ComptimeValue::Inspect(InspectObject::Abstracts(
+                    Abstracts {
+                        name: name.clone(),
+                        abstract_methods,
+                    },
+                )))
             }
 
             // ── 编译时断言 ──
             "assert_module_has" => {
-                let target = args.first().and_then(|a| match a { ComptimeValue::Str(s) => Some(s.clone()), _ => None })
+                let target = args
+                    .first()
+                    .and_then(|a| match a {
+                        ComptimeValue::Str(s) => Some(s.clone()),
+                        _ => None,
+                    })
                     .ok_or("assert_module_has 需字符串参数")?;
                 let m = Self::module_info(ctx.module);
                 let ok = m.functions.contains(&target)
@@ -1086,10 +1346,15 @@ impl ComptimeEvaluator {
 
             // ── 字段/成员检查 ──
             "has_field" => {
-                if args.len() < 2 { return Err("has_field 需 2 参数 (struct, field)".into()); }
+                if args.len() < 2 {
+                    return Err("has_field 需 2 参数 (struct, field)".into());
+                }
                 let s_name = args[0].as_str().ok_or("has_field struct 名需字符串")?;
                 let f_name = args[1].as_str().ok_or("has_field field 名需字符串")?;
-                let has = ctx.module.structs.iter()
+                let has = ctx
+                    .module
+                    .structs
+                    .iter()
                     .filter(|s| s.name == s_name)
                     .any(|s| s.fields.iter().any(|f| f.name == f_name));
                 Ok(ComptimeValue::Bool(has))

@@ -16,14 +16,18 @@ use std::path::{Path, PathBuf};
 /// 单条台账记录
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LedgerRecord {
-    pub ts: String,      // 时间戳（unix 毫秒）
-    pub event: String,   // REGISTER / CALL / EXPORT / ERROR
-    pub lang: String,    // rust / python / cy / ...
-    pub detail: String,  // 符号名/参数摘要/错误信息
+    pub ts: String,     // 时间戳（unix 毫秒）
+    pub event: String,  // REGISTER / CALL / EXPORT / ERROR
+    pub lang: String,   // rust / python / cy / ...
+    pub detail: String, // 符号名/参数摘要/错误信息
 }
 
 impl LedgerRecord {
-    pub fn new(event: impl Into<String>, lang: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub fn new(
+        event: impl Into<String>,
+        lang: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
         LedgerRecord {
             ts: now_millis(),
             event: event.into(),
@@ -34,13 +38,18 @@ impl LedgerRecord {
 
     /// 序列化为 TSV 行（不含换行）
     pub fn to_tsv(&self) -> String {
-        format!("{}\t{}\t{}\t{}", self.ts, self.event, self.lang, self.detail)
+        format!(
+            "{}\t{}\t{}\t{}",
+            self.ts, self.event, self.lang, self.detail
+        )
     }
 
     /// 从 TSV 行解析
     pub fn from_tsv(line: &str) -> Option<Self> {
         let parts: Vec<&str> = line.trim().split('\t').collect();
-        if parts.len() < 4 { return None; }
+        if parts.len() < 4 {
+            return None;
+        }
         Some(LedgerRecord {
             ts: parts[0].to_string(),
             event: parts[1].to_string(),
@@ -63,7 +72,11 @@ pub struct Ledger {
 
 impl Ledger {
     pub fn new() -> Self {
-        Ledger { path: None, records: Vec::new(), flushed: 0 }
+        Ledger {
+            path: None,
+            records: Vec::new(),
+            flushed: 0,
+        }
     }
 
     /// 设置台账落盘路径；文件不存在时创建（含父目录），已存在时**追加**。
@@ -82,7 +95,12 @@ impl Ledger {
     }
 
     /// 追加一条记录（写内存 + 追加落盘）
-    pub fn append(&mut self, event: impl Into<String>, lang: impl Into<String>, detail: impl Into<String>) {
+    pub fn append(
+        &mut self,
+        event: impl Into<String>,
+        lang: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
         let rec = LedgerRecord::new(event, lang, detail);
         self.records.push(rec.clone());
         if let Some(p) = &self.path {
@@ -118,12 +136,18 @@ impl Ledger {
     }
 
     /// 当前内存缓冲记录数
-    pub fn len(&self) -> usize { self.records.len() }
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
 
-    pub fn is_empty(&self) -> bool { self.records.is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
 
     /// 所有记录（内存缓冲）
-    pub fn records(&self) -> &[LedgerRecord] { &self.records }
+    pub fn records(&self) -> &[LedgerRecord] {
+        &self.records
+    }
 
     /// 从已落盘的 TSV 文件读取全部记录（审计用）
     pub fn read_from_disk(&self) -> Vec<LedgerRecord> {
@@ -139,7 +163,8 @@ impl Ledger {
             Ok(c) => c,
             Err(_) => return vec![],
         };
-        content.lines()
+        content
+            .lines()
             .filter(|l| !l.trim().is_empty() && !l.trim_start().starts_with("ts\t"))
             .filter_map(LedgerRecord::from_tsv)
             .collect()
@@ -159,7 +184,9 @@ impl Ledger {
         let mut events: HashMap<(String, String), usize> = HashMap::new();
         let mut total = 0usize;
         for rec in recs {
-            *events.entry((rec.event.clone(), rec.lang.clone())).or_insert(0) += 1;
+            *events
+                .entry((rec.event.clone(), rec.lang.clone()))
+                .or_insert(0) += 1;
             total += 1;
         }
         LedgerReport { total, events }
@@ -239,9 +266,27 @@ mod tests {
 
         let report = l2.report();
         assert_eq!(report.total, 4);
-        assert_eq!(report.events.get(&("CALL".to_string(), "python".to_string())), Some(&1));
-        assert_eq!(report.events.get(&("CALL".to_string(), "cy".to_string())), Some(&1));
-        assert_eq!(report.events.get(&("REGISTER".to_string(), "python".to_string())), Some(&1));
-        assert_eq!(report.events.get(&("EXPORT".to_string(), "rust".to_string())), Some(&1));
+        assert_eq!(
+            report
+                .events
+                .get(&("CALL".to_string(), "python".to_string())),
+            Some(&1)
+        );
+        assert_eq!(
+            report.events.get(&("CALL".to_string(), "cy".to_string())),
+            Some(&1)
+        );
+        assert_eq!(
+            report
+                .events
+                .get(&("REGISTER".to_string(), "python".to_string())),
+            Some(&1)
+        );
+        assert_eq!(
+            report
+                .events
+                .get(&("EXPORT".to_string(), "rust".to_string())),
+            Some(&1)
+        );
     }
 }

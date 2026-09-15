@@ -1,12 +1,12 @@
 // Lang-Zong 编译器 — parser/expr.rs
 // 表达式解析（优先级递降）+ Pattern 解析（作为 Parser 的 trait 扩展）
 
+use super::helpers::validate_fstring;
+use super::parser::Parser;
+use super::stmt::ParserStmtExt;
+use crate::ast::*;
 use crate::lexer::Token;
 use crate::types::Type;
-use crate::ast::*;
-use super::parser::Parser;
-use super::helpers::validate_fstring;
-use super::stmt::ParserStmtExt;
 
 /// Parser 的表达式解析扩展 trait
 pub trait ParserExprExt {
@@ -78,7 +78,10 @@ impl ParserExprExt for Parser {
         if self.check(&Token::ColonEq) {
             self.advance();
             let value = self.parse_expr()?;
-            return Ok(Expr::Walrus { target: Box::new(left), value: Box::new(value) });
+            return Ok(Expr::Walrus {
+                target: Box::new(left),
+                value: Box::new(value),
+            });
         }
         // 赋值表达式: x = expr（闭包体 `|x: int| = total = total + x`、复合赋值 += 等）。
         // 注意 `==` 是比较（EqEq），此处是单 `=` 赋值
@@ -99,9 +102,13 @@ impl ParserExprExt for Parser {
         if self.check(&Token::DotDot) || self.check(&Token::DotDotEq) {
             let inclusive = self.check(&Token::DotDotEq);
             self.advance();
-            let end = if self.check(&Token::Colon) || self.check(&Token::Newline)
-                || self.check(&Token::Dedent) || self.check(&Token::Eof)
-                || self.check(&Token::RParen) || self.check(&Token::RBrack) {
+            let end = if self.check(&Token::Colon)
+                || self.check(&Token::Newline)
+                || self.check(&Token::Dedent)
+                || self.check(&Token::Eof)
+                || self.check(&Token::RParen)
+                || self.check(&Token::RBrack)
+            {
                 None
             } else {
                 Some(Box::new(self.parse_or()?))
@@ -122,16 +129,24 @@ impl ParserExprExt for Parser {
         if self.check(&Token::ColonEq) {
             self.advance();
             let value = self.parse_expr()?;
-            return Ok(Expr::Walrus { target: Box::new(left), value: Box::new(value) });
+            return Ok(Expr::Walrus {
+                target: Box::new(left),
+                value: Box::new(value),
+            });
         }
         // Range
         if self.check(&Token::DotDot) || self.check(&Token::DotDotEq) {
             let inclusive = self.check(&Token::DotDotEq);
             self.advance();
-            let end = if self.check(&Token::Colon) || self.check(&Token::Newline)
-                || self.check(&Token::Dedent) || self.check(&Token::Eof)
-                || self.check(&Token::RParen) || self.check(&Token::RBrack)
-                || self.check(&Token::RBrace) || self.check(&Token::If) {
+            let end = if self.check(&Token::Colon)
+                || self.check(&Token::Newline)
+                || self.check(&Token::Dedent)
+                || self.check(&Token::Eof)
+                || self.check(&Token::RParen)
+                || self.check(&Token::RBrack)
+                || self.check(&Token::RBrace)
+                || self.check(&Token::If)
+            {
                 None
             } else {
                 Some(Box::new(self.parse_or()?))
@@ -149,12 +164,29 @@ impl ParserExprExt for Parser {
         // `?` 后紧跟一个表达式开始（三元 true 分支）→ 是三元中缀
         // 注意：当前位置是 `?`，需检查其后的 token
         match self.peek_n(1) {
-            Token::IntLit(_) | Token::FloatLit(_) | Token::StrLit(_) | Token::FStrLit(_)
-            | Token::RawStrLit(_) | Token::TripleStrLit(_) | Token::True | Token::False
-            | Token::Ident(_) | Token::MagicMethod(_) | Token::Underscore | Token::Self_
-            | Token::LParen | Token::LBrack | Token::LBrace | Token::If
-            | Token::Not | Token::Minus | Token::Plus | Token::Pipe | Token::BackPipe
-            | Token::Try | Token::Async => true,
+            Token::IntLit(_)
+            | Token::FloatLit(_)
+            | Token::StrLit(_)
+            | Token::FStrLit(_)
+            | Token::RawStrLit(_)
+            | Token::TripleStrLit(_)
+            | Token::True
+            | Token::False
+            | Token::Ident(_)
+            | Token::MagicMethod(_)
+            | Token::Underscore
+            | Token::Self_
+            | Token::LParen
+            | Token::LBrack
+            | Token::LBrace
+            | Token::If
+            | Token::Not
+            | Token::Minus
+            | Token::Plus
+            | Token::Pipe
+            | Token::BackPipe
+            | Token::Try
+            | Token::Async => true,
             _ => false,
         }
     }
@@ -164,7 +196,11 @@ impl ParserExprExt for Parser {
         while self.check(&Token::Or) || self.check(&Token::PipePipe) {
             self.advance();
             let right = self.parse_and()?;
-            left = Expr::Binary { left: Box::new(left), op: BinOp::Or, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::Or,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -174,7 +210,11 @@ impl ParserExprExt for Parser {
         while self.check(&Token::And) || self.check(&Token::AmpAmp) {
             self.advance();
             let right = self.parse_not()?;
-            left = Expr::Binary { left: Box::new(left), op: BinOp::And, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::And,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -183,7 +223,10 @@ impl ParserExprExt for Parser {
         if self.check(&Token::Not) {
             self.advance();
             let operand = self.parse_not()?;
-            return Ok(Expr::Unary { op: UnaryOp::Not, operand: Box::new(operand) });
+            return Ok(Expr::Unary {
+                op: UnaryOp::Not,
+                operand: Box::new(operand),
+            });
         }
         self.parse_comparison()
     }
@@ -202,7 +245,11 @@ impl ParserExprExt for Parser {
             };
             self.advance();
             let right = self.parse_in_is()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -214,26 +261,39 @@ impl ParserExprExt for Parser {
                 Token::In => {
                     self.advance();
                     let right = self.parse_pipe()?;
-                    left = Expr::Binary { left: Box::new(left), op: BinOp::In, right: Box::new(right) };
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: BinOp::In,
+                        right: Box::new(right),
+                    };
                 }
                 Token::Not => {
                     self.advance();
                     // not in 运算符
                     self.expect(Token::In)?;
                     let right = self.parse_pipe()?;
-                    left = Expr::Binary { left: Box::new(left), op: BinOp::NotIn, right: Box::new(right) };
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: BinOp::NotIn,
+                        right: Box::new(right),
+                    };
                 }
                 Token::Is => {
                     self.advance();
                     let right = self.parse_pipe()?;
-                    left = Expr::Binary { left: Box::new(left), op: BinOp::Is, right: Box::new(right) };
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: BinOp::Is,
+                        right: Box::new(right),
+                    };
                 }
                 Token::As => {
                     self.advance();
                     // 解析 as 右侧的类型
                     let ty = self.parse_type()?;
                     let ty_name = ty.to_string();
-                    left = Expr::Call { type_args: vec![],
+                    left = Expr::Call {
+                        type_args: vec![],
                         func: Box::new(Expr::Ident("__as__".to_string())),
                         args: vec![left, Expr::Ident(ty_name)],
                     };
@@ -273,7 +333,11 @@ impl ParserExprExt for Parser {
             // 拆分 Call → (callee, args)：`f(1,2)` → callee=f, args=[1,2]，
             // 由 IR 端把 receiver 预填充为首参（f(recv, 1, 2)）
             let (callee, args) = match rhs {
-                Expr::Call { type_args: _, func, args } => (*func, args),
+                Expr::Call {
+                    type_args: _,
+                    func,
+                    args,
+                } => (*func, args),
                 other => (other, Vec::new()),
             };
             left = Expr::Pipe {
@@ -290,7 +354,10 @@ impl ParserExprExt for Parser {
         while self.check(&Token::QuestionQuestion) {
             self.advance();
             let right = self.parse_bit_or()?;
-            left = Expr::NullCoalesce { left: Box::new(left), right: Box::new(right) };
+            left = Expr::NullCoalesce {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -300,7 +367,11 @@ impl ParserExprExt for Parser {
         while self.check(&Token::Pipe_) {
             self.advance();
             let right = self.parse_bit_xor()?;
-            left = Expr::Binary { left: Box::new(left), op: BinOp::BitOr, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::BitOr,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -312,7 +383,11 @@ impl ParserExprExt for Parser {
         while self.check(&Token::CaretOp) || self.check(&Token::CaretInfix) {
             self.advance();
             let right = self.parse_bit_and()?;
-            left = Expr::Binary { left: Box::new(left), op: BinOp::BitXor, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::BitXor,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -322,7 +397,11 @@ impl ParserExprExt for Parser {
         while self.check(&Token::Amp) {
             self.advance();
             let right = self.parse_shift()?;
-            left = Expr::Binary { left: Box::new(left), op: BinOp::BitAnd, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::BitAnd,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -337,7 +416,11 @@ impl ParserExprExt for Parser {
             };
             self.advance();
             let right = self.parse_additive()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -352,7 +435,11 @@ impl ParserExprExt for Parser {
             };
             self.advance();
             let right = self.parse_multiplicative()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -368,7 +455,11 @@ impl ParserExprExt for Parser {
             };
             self.advance();
             let right = self.parse_power()?;
-            left = Expr::Binary { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -378,7 +469,11 @@ impl ParserExprExt for Parser {
         if self.check(&Token::StarStar) {
             self.advance();
             let right = self.parse_power()?; // 右结合
-            return Ok(Expr::Binary { left: Box::new(left), op: BinOp::Pow, right: Box::new(right) });
+            return Ok(Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::Pow,
+                right: Box::new(right),
+            });
         }
         Ok(left)
     }
@@ -388,36 +483,54 @@ impl ParserExprExt for Parser {
             Token::Minus => {
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::Unary { op: UnaryOp::Neg, operand: Box::new(operand) })
+                Ok(Expr::Unary {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(operand),
+                })
             }
             Token::Plus => {
                 self.advance();
                 // 一元 `+` 保留为 Pos 节点（06d §三）：内建数值恒等由 codegen
                 // 处理；用户 struct 分派 `a.__pos__()`
                 let operand = self.parse_unary()?;
-                Ok(Expr::Unary { op: UnaryOp::Pos, operand: Box::new(operand) })
+                Ok(Expr::Unary {
+                    op: UnaryOp::Pos,
+                    operand: Box::new(operand),
+                })
             }
             Token::Exclamation => {
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::Unary { op: UnaryOp::BitNot, operand: Box::new(operand) })
+                Ok(Expr::Unary {
+                    op: UnaryOp::BitNot,
+                    operand: Box::new(operand),
+                })
             }
             Token::Not => {
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::Unary { op: UnaryOp::Not, operand: Box::new(operand) })
+                Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    operand: Box::new(operand),
+                })
             }
             Token::Star => {
                 // 一元 * 解引用（*(&(*boxed)) 前缀叠写，12-操作符.md §1.18）
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::Unary { op: UnaryOp::Deref, operand: Box::new(operand) })
+                Ok(Expr::Unary {
+                    op: UnaryOp::Deref,
+                    operand: Box::new(operand),
+                })
             }
             Token::Amp => {
                 // 一元 & 取引用（*(&(*boxed)) 前缀叠写；位与是二元，此处仅表达式前缀）
                 self.advance();
                 let operand = self.parse_unary()?;
-                Ok(Expr::Unary { op: UnaryOp::Ref, operand: Box::new(operand) })
+                Ok(Expr::Unary {
+                    op: UnaryOp::Ref,
+                    operand: Box::new(operand),
+                })
             }
             _ => self.parse_postfix(),
         }
@@ -494,10 +607,16 @@ impl ParserExprExt for Parser {
                             let mut args = Vec::new();
                             while !self.check(&Token::RParen) {
                                 args.push(self.parse_expr()?);
-                                if self.check(&Token::Comma) { self.advance(); }
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                }
                             }
                             self.expect(Token::RParen)?;
-                            expr = Expr::Call { type_args, func: Box::new(expr), args };
+                            expr = Expr::Call {
+                                type_args,
+                                func: Box::new(expr),
+                                args,
+                            };
                         }
                         continue;
                     }
@@ -514,36 +633,57 @@ impl ParserExprExt for Parser {
                         self.advance();
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
-                        // 跳过参数间的换行和缩进
-                        self.skip_newlines();
-                        if self.check(&Token::Indent) { self.advance(); }
-                        if self.check(&Token::Dedent) { break; }
-                        // 关键字参数: name: value 或 name~ 语法糖
-                        let arg = if let Token::Ident(_) = self.peek() {
-                            if self.peek_n(1) == &Token::Tilde {
-                                let name = self.advance().to_string();
-                                self.advance(); // 消费 ~
-                                Expr::KwArg { name: name.clone(), value: Box::new(Expr::Ident(name)) }
-                            } else if self.peek_n(1) == &Token::Colon {
-                                let name = self.advance().to_string();
-                                self.advance(); // 消费 :
-                                let v = self.parse_expr()?;
-                                Expr::KwArg { name, value: Box::new(v) }
+                            // 跳过参数间的换行和缩进
+                            self.skip_newlines();
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Dedent) {
+                                break;
+                            }
+                            // 关键字参数: name: value 或 name~ 语法糖
+                            let arg = if let Token::Ident(_) = self.peek() {
+                                if self.peek_n(1) == &Token::Tilde {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // 消费 ~
+                                    Expr::KwArg {
+                                        name: name.clone(),
+                                        value: Box::new(Expr::Ident(name)),
+                                    }
+                                } else if self.peek_n(1) == &Token::Colon {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // 消费 :
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else {
+                                    self.parse_expr()?
+                                }
                             } else {
                                 self.parse_expr()?
-                            }
-                        } else {
-                            self.parse_expr()?
-                        };
+                            };
                             args.push(arg);
-                            if self.check(&Token::Comma) { self.advance(); }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
                         }
                         // Dedent 表示参数列表的缩进块结束，跳过它
-                        if self.check(&Token::Dedent) { self.advance(); }
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
                         self.expect(Token::RParen)?;
-                        expr = Expr::MethodCall { receiver: Box::new(expr), method: name, args };
+                        expr = Expr::MethodCall {
+                            receiver: Box::new(expr),
+                            method: name,
+                            args,
+                        };
                     } else {
-                        expr = Expr::FieldAccess { receiver: Box::new(expr), field: name };
+                        expr = Expr::FieldAccess {
+                            receiver: Box::new(expr),
+                            field: name,
+                        };
                     }
                 }
                 Token::PathSep => {
@@ -557,14 +697,23 @@ impl ParserExprExt for Parser {
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
                             self.skip_newlines();
-                            if self.check(&Token::Indent) { self.advance(); }
-                            if self.check(&Token::Dedent) { break; }
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Dedent) {
+                                break;
+                            }
                             args.push(self.parse_expr()?);
-                            if self.check(&Token::Comma) { self.advance(); }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
                         }
-                        if self.check(&Token::Dedent) { self.advance(); }
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
                         self.expect(Token::RParen)?;
-                        expr = Expr::Call { type_args: vec![],
+                        expr = Expr::Call {
+                            type_args: vec![],
                             func: Box::new(Expr::PathAccess {
                                 receiver: Box::new(expr),
                                 segment: seg,
@@ -572,7 +721,10 @@ impl ParserExprExt for Parser {
                             args,
                         };
                     } else {
-                        expr = Expr::PathAccess { receiver: Box::new(expr), segment: seg };
+                        expr = Expr::PathAccess {
+                            receiver: Box::new(expr),
+                            segment: seg,
+                        };
                     }
                 }
                 Token::Lt => {
@@ -589,23 +741,40 @@ impl ParserExprExt for Parser {
                         match self.peek_n(idx) {
                             Token::Gt | Token::Shr => {
                                 // 检查 > 后面是否是 (
-                                let after_gt = if matches!(self.peek_n(idx), Token::Shr) { idx + 1 } else { idx + 1 };
+                                let after_gt = if matches!(self.peek_n(idx), Token::Shr) {
+                                    idx + 1
+                                } else {
+                                    idx + 1
+                                };
                                 if matches!(self.peek_n(after_gt), Token::LParen) {
                                     is_generic_call = true;
                                 }
                                 break;
                             }
-                            Token::Comma => { idx += 1; }
-                            Token::Ident(_) | Token::IntLit(_) | Token::StrLit(_) | Token::True | Token::False => { idx += 1; }
+                            Token::Comma => {
+                                idx += 1;
+                            }
+                            Token::Ident(_)
+                            | Token::IntLit(_)
+                            | Token::StrLit(_)
+                            | Token::True
+                            | Token::False => {
+                                idx += 1;
+                            }
                             Token::LBrack => {
                                 // 跳过 [Type] 如 List[int]
                                 idx += 1;
                                 let mut depth = 1;
                                 while depth > 0 {
                                     match self.peek_n(idx) {
-                                        Token::RBrack => { depth -= 1; idx += 1; }
+                                        Token::RBrack => {
+                                            depth -= 1;
+                                            idx += 1;
+                                        }
                                         Token::Eof => break,
-                                        _ => { idx += 1; }
+                                        _ => {
+                                            idx += 1;
+                                        }
                                     }
                                 }
                             }
@@ -641,18 +810,28 @@ impl ParserExprExt for Parser {
                     let mut args = Vec::new();
                     while !self.check(&Token::RParen) {
                         self.skip_newlines();
-                        if self.check(&Token::Indent) { self.advance(); }
-                        if self.check(&Token::Dedent) { break; }
+                        if self.check(&Token::Indent) {
+                            self.advance();
+                        }
+                        if self.check(&Token::Dedent) {
+                            break;
+                        }
                         let arg = if let Token::Ident(_) = self.peek() {
                             if self.peek_n(1) == &Token::Tilde {
                                 let name = self.advance().to_string();
                                 self.advance(); // ~
-                                Expr::KwArg { name: name.clone(), value: Box::new(Expr::Ident(name)) }
+                                Expr::KwArg {
+                                    name: name.clone(),
+                                    value: Box::new(Expr::Ident(name)),
+                                }
                             } else if self.peek_n(1) == &Token::Colon {
                                 let name = self.advance().to_string();
                                 self.advance(); // :
                                 let v = self.parse_expr()?;
-                                Expr::KwArg { name, value: Box::new(v) }
+                                Expr::KwArg {
+                                    name,
+                                    value: Box::new(v),
+                                }
                             } else {
                                 self.parse_expr()?
                             }
@@ -660,12 +839,21 @@ impl ParserExprExt for Parser {
                             self.parse_expr()?
                         };
                         args.push(arg);
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                     }
-                    if self.check(&Token::Dedent) { self.advance(); }
+                    if self.check(&Token::Dedent) {
+                        self.advance();
+                    }
                     let _ = self.expect(Token::RParen)?;
-                    let type_arg_names: Vec<String> = type_args.iter().map(|t| t.to_string()).collect();
-                    expr = Expr::Call { type_args: type_arg_names, func: Box::new(expr), args };
+                    let type_arg_names: Vec<String> =
+                        type_args.iter().map(|t| t.to_string()).collect();
+                    expr = Expr::Call {
+                        type_args: type_arg_names,
+                        func: Box::new(expr),
+                        args,
+                    };
                 }
                 Token::LParen => {
                     self.advance();
@@ -680,12 +868,18 @@ impl ParserExprExt for Parser {
                                 if self.peek_n(1) == &Token::Tilde {
                                     let name = self.advance().to_string();
                                     self.advance(); // ~
-                                    Expr::KwArg { name: name.clone(), value: Box::new(Expr::Ident(name)) }
+                                    Expr::KwArg {
+                                        name: name.clone(),
+                                        value: Box::new(Expr::Ident(name)),
+                                    }
                                 } else if self.peek_n(1) == &Token::Colon {
                                     let name = self.advance().to_string();
                                     self.advance(); // :
                                     let v = self.parse_expr()?;
-                                    Expr::KwArg { name, value: Box::new(v) }
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
                                 } else {
                                     self.parse_expr()?
                                 }
@@ -693,30 +887,44 @@ impl ParserExprExt for Parser {
                                 self.parse_expr()?
                             };
                             args.push(arg);
-                            if self.check(&Token::Comma) { self.advance(); }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
                             self.skip_newlines();
                         }
                         self.expect(Token::Dedent)?;
                         // 消费闭合的 RParen（Dedent 后紧跟 )）
-                        if self.check(&Token::RParen) { self.advance(); }
+                        if self.check(&Token::RParen) {
+                            self.advance();
+                        }
                         args
                     } else {
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
                             self.skip_newlines();
-                            if self.check(&Token::Indent) { self.advance(); }
-                            if self.check(&Token::Dedent) { break; }
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Dedent) {
+                                break;
+                            }
                             // 关键字参数: name: value 或 name~ 语法糖
                             let arg = if let Token::Ident(_) = self.peek() {
                                 if self.peek_n(1) == &Token::Tilde {
                                     let name = self.advance().to_string();
                                     self.advance(); // ~
-                                    Expr::KwArg { name: name.clone(), value: Box::new(Expr::Ident(name)) }
+                                    Expr::KwArg {
+                                        name: name.clone(),
+                                        value: Box::new(Expr::Ident(name)),
+                                    }
                                 } else if self.peek_n(1) == &Token::Colon {
                                     let name = self.advance().to_string();
                                     self.advance(); // :
                                     let v = self.parse_expr()?;
-                                    Expr::KwArg { name, value: Box::new(v) }
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
                                 } else {
                                     self.parse_expr()?
                                 }
@@ -724,13 +932,21 @@ impl ParserExprExt for Parser {
                                 self.parse_expr()?
                             };
                             args.push(arg);
-                            if self.check(&Token::Comma) { self.advance(); }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
                         }
-                        if self.check(&Token::Dedent) { self.advance(); }
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
                         self.expect(Token::RParen)?;
                         args
                     };
-                    expr = Expr::Call { type_args: vec![], func: Box::new(expr), args };
+                    expr = Expr::Call {
+                        type_args: vec![],
+                        func: Box::new(expr),
+                        args,
+                    };
                 }
                 Token::LBrace => {
                     // Struct ctor: Point{x: 10, y: 20} 或 Point{x~, y~}
@@ -739,26 +955,46 @@ impl ParserExprExt for Parser {
                     while !self.check(&Token::RBrace) {
                         let name = match self.advance() {
                             Token::Ident(n) => n,
-                            t => return Err(format!("Expected field name in struct ctor, got {:?}", t)),
+                            t => {
+                                return Err(format!(
+                                    "Expected field name in struct ctor, got {:?}",
+                                    t
+                                ))
+                            }
                         };
                         if self.check(&Token::Tilde) {
                             self.advance(); // ~
-                            args.push(Expr::KwArg { name: name.clone(), value: Box::new(Expr::Ident(name)) });
+                            args.push(Expr::KwArg {
+                                name: name.clone(),
+                                value: Box::new(Expr::Ident(name)),
+                            });
                         } else {
                             self.expect(Token::Colon)?;
                             let v = self.parse_expr()?;
-                            args.push(Expr::KwArg { name, value: Box::new(v) });
+                            args.push(Expr::KwArg {
+                                name,
+                                value: Box::new(v),
+                            });
                         }
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                     }
                     self.expect(Token::RBrace)?;
-                    expr = Expr::Call { type_args: vec![], func: Box::new(expr), args };
+                    expr = Expr::Call {
+                        type_args: vec![],
+                        func: Box::new(expr),
+                        args,
+                    };
                 }
                 Token::LBrack => {
                     self.advance();
                     let index = self.parse_expr()?;
                     self.expect(Token::RBrack)?;
-                    expr = Expr::Index { receiver: Box::new(expr), index: Box::new(index) };
+                    expr = Expr::Index {
+                        receiver: Box::new(expr),
+                        index: Box::new(index),
+                    };
                 }
                 Token::Question => {
                     // 区分三元 `cond ? a : b` 与错误传播 `expr?`：
@@ -776,7 +1012,10 @@ impl ParserExprExt for Parser {
                         Token::Ident(n) => n,
                         t => return Err(format!("Expected field name, got {:?}", t)),
                     };
-                    expr = Expr::SafeNav { receiver: Box::new(expr), field };
+                    expr = Expr::SafeNav {
+                        receiver: Box::new(expr),
+                        field,
+                    };
                 }
                 // ^ 后缀 move（y^）：紧邻标识符的 CaretOp（无前置留白）
                 Token::CaretOp => {
@@ -839,7 +1078,9 @@ impl ParserExprExt for Parser {
             Token::From => Ok(Expr::Ident("from".to_string())),
             Token::Ident(name) => Ok(Expr::Ident(name)),
             Token::Underscore => Ok(Expr::Ident("_".to_string())),
-            Token::Self_ => Ok(Expr::Ident("self".to_string())),
+            // Self 在表达式位置保持大写，用于结构体构造 Self(host: host, ...)
+            // builder 端根据 self_ty 上下文区分为 StructCtor 或类型引用
+            Token::Self_ => Ok(Expr::Ident("Self".to_string())),
             Token::BuildCall | Token::BuildGen | Token::BuildIndex => {
                 // 构建块作为表达式（如 f(~: _ % 2 == 0) 的实参，BUG-IR-001）
                 let kind = match tok {
@@ -901,7 +1142,9 @@ impl ParserExprExt for Parser {
                     self.advance();
                     while !self.check(&Token::RParen) {
                         items.push(self.parse_expr()?);
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                     }
                     self.expect(Token::RParen)?;
                     Ok(Expr::TupleLit(items))
@@ -948,7 +1191,9 @@ impl ParserExprExt for Parser {
                             None
                         };
                         clauses.push((var, Box::new(iter), cond));
-                        if !self.check(&Token::For) { break; }
+                        if !self.check(&Token::For) {
+                            break;
+                        }
                     }
                     self.expect(Token::RBrack)?;
                     return Ok(Expr::ListComprehension {
@@ -961,7 +1206,9 @@ impl ParserExprExt for Parser {
                 }
                 // 列表字面量
                 let mut items = vec![first];
-                if self.check(&Token::Comma) { self.advance(); }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
                 while !self.check(&Token::RBrack) {
                     // 跨行列表字面量（如闭包数组 `[\n |x| x + 1,\n |x| x * 2\n]`）：
                     // 跳过元素间的 Newline/Indent/Dedent，否则 parse_expr 遇 Newline 报错
@@ -971,9 +1218,13 @@ impl ParserExprExt for Parser {
                     {
                         self.advance();
                     }
-                    if self.check(&Token::RBrack) { break; }
+                    if self.check(&Token::RBrack) {
+                        break;
+                    }
                     items.push(self.parse_list_element()?);
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
                     // 跳过逗号后的换行/缩进
                     while self.check(&Token::Newline)
                         || self.check(&Token::Indent)
@@ -1004,7 +1255,12 @@ impl ParserExprExt for Parser {
                             self.advance(); // for
                             let var = match self.advance() {
                                 Token::Ident(n) => n,
-                                t => return Err(format!("Expected var in dict comprehension, got {:?}", t)),
+                                t => {
+                                    return Err(format!(
+                                        "Expected var in dict comprehension, got {:?}",
+                                        t
+                                    ))
+                                }
                             };
                             self.expect(Token::In)?;
                             let iter = self.parse_comprehension_iter()?;
@@ -1015,27 +1271,33 @@ impl ParserExprExt for Parser {
                                 None
                             };
                             clauses.push((var, Box::new(iter), cond));
-                            if !self.check(&Token::For) { break; }
+                            if !self.check(&Token::For) {
+                                break;
+                            }
                         }
                         self.expect(Token::RBrace)?;
                         return Ok(Expr::DictComprehension {
-                                key: Box::new(first),
-                                value: Box::new(val),
-                                var: clauses[0].0.clone(),
-                                iter: clauses[0].1.clone(),
-                                cond: clauses[0].2.clone(),
-                                extra_clauses: clauses[1..].to_vec(),
-                            });
+                            key: Box::new(first),
+                            value: Box::new(val),
+                            var: clauses[0].0.clone(),
+                            iter: clauses[0].1.clone(),
+                            cond: clauses[0].2.clone(),
+                            extra_clauses: clauses[1..].to_vec(),
+                        });
                     }
                     // 常规字典字面量 {k: v, k2: v2}
                     let mut entries = vec![(first, val)];
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
                     while !self.check(&Token::RBrace) {
                         let k = self.parse_expr()?;
                         self.expect(Token::Colon)?;
                         let v = self.parse_expr()?;
                         entries.push((k, v));
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                     }
                     self.expect(Token::RBrace)?;
                     Ok(Expr::DictLit(entries))
@@ -1047,7 +1309,12 @@ impl ParserExprExt for Parser {
                         self.advance(); // for
                         let var = match self.advance() {
                             Token::Ident(n) => n,
-                            t => return Err(format!("Expected var in set comprehension, got {:?}", t)),
+                            t => {
+                                return Err(format!(
+                                    "Expected var in set comprehension, got {:?}",
+                                    t
+                                ))
+                            }
                         };
                         self.expect(Token::In)?;
                         let iter = self.parse_comprehension_iter()?;
@@ -1058,16 +1325,18 @@ impl ParserExprExt for Parser {
                             None
                         };
                         clauses.push((var, Box::new(iter), cond));
-                        if !self.check(&Token::For) { break; }
+                        if !self.check(&Token::For) {
+                            break;
+                        }
                     }
                     self.expect(Token::RBrace)?;
                     Ok(Expr::SetComprehension {
-                            elem: Box::new(first),
-                            var: clauses[0].0.clone(),
-                            iter: clauses[0].1.clone(),
-                            cond: clauses[0].2.clone(),
-                            extra_clauses: clauses[1..].to_vec(),
-                        })
+                        elem: Box::new(first),
+                        var: clauses[0].0.clone(),
+                        iter: clauses[0].1.clone(),
+                        cond: clauses[0].2.clone(),
+                        extra_clauses: clauses[1..].to_vec(),
+                    })
                 } else {
                     // 集合字面量 {a, b, c}
                     let mut items = vec![first];
@@ -1196,7 +1465,12 @@ impl ParserExprExt for Parser {
                         self.expect(Token::Dedent)?;
                     }
                 }
-                Ok(Expr::If { cond: Box::new(cond), then_body, elif_clauses, else_body })
+                Ok(Expr::If {
+                    cond: Box::new(cond),
+                    then_body,
+                    elif_clauses,
+                    else_body,
+                })
             }
             Token::Match => {
                 let expr = self.parse_expr()?;
@@ -1209,10 +1483,14 @@ impl ParserExprExt for Parser {
                 let mut arms = Vec::new();
                 while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                     self.skip_newlines();
-                    if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+                    if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        break;
+                    }
 
                     // 可选 case 关键字
-                    if self.check(&Token::Case) { self.advance(); }
+                    if self.check(&Token::Case) {
+                        self.advance();
+                    }
 
                     // 模式支持 | 分隔多模式
                     let mut patterns = Vec::new();
@@ -1251,12 +1529,19 @@ impl ParserExprExt for Parser {
                     };
                     // 对于多模式，每个模式复制一份 arm（简化处理）
                     for pat in &patterns {
-                        arms.push(MatchArm { pattern: pat.clone(), guard: guard.clone(), body: body.clone() });
+                        arms.push(MatchArm {
+                            pattern: pat.clone(),
+                            guard: guard.clone(),
+                            body: body.clone(),
+                        });
                     }
                     self.skip_newlines();
                 }
                 self.expect(Token::Dedent)?;
-                Ok(Expr::Match { expr: Box::new(expr), arms })
+                Ok(Expr::Match {
+                    expr: Box::new(expr),
+                    arms,
+                })
             }
             Token::PipePipe => {
                 // 空参数闭包: || expr
@@ -1276,7 +1561,12 @@ impl ParserExprExt for Parser {
                     self.advance(); // skip Indent
                 }
                 let body = self.parse_expr()?;
-                Ok(Expr::Closure { params: Vec::new(), param_tys: Vec::new(), ret_ty: None, body: Box::new(body) })
+                Ok(Expr::Closure {
+                    params: Vec::new(),
+                    param_tys: Vec::new(),
+                    ret_ty: None,
+                    body: Box::new(body),
+                })
             }
             Token::Pipe_ => {
                 // 闭包: |x, y| x + y  或  |x: int, y: int| -> int = x + y
@@ -1288,7 +1578,9 @@ impl ParserExprExt for Parser {
                     while !self.check(&Token::RParen) {
                         let n = match self.advance() {
                             Token::Ident(n) => n,
-                            t => return Err(format!("Expected param name in closure, got {:?}", t)),
+                            t => {
+                                return Err(format!("Expected param name in closure, got {:?}", t))
+                            }
                         };
                         params.push(n);
                         // 支持可选的类型注解: |(x: int)|
@@ -1298,7 +1590,9 @@ impl ParserExprExt for Parser {
                         } else {
                             param_tys.push(None);
                         }
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                     }
                     self.expect(Token::RParen)?;
                     // 圆括号形式无尾随 |，直接进入 body
@@ -1352,10 +1646,20 @@ impl ParserExprExt for Parser {
                         if self.check(&Token::Dedent) {
                             self.advance();
                         }
-                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(Expr::BlockExpr(stmts)) })
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(Expr::BlockExpr(stmts)),
+                        })
                     } else {
                         let body = self.parse_expr()?;
-                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(body) })
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
                     }
                 } else {
                     // = 后是表达式体；也支持缩进块体（多语句闭包，
@@ -1367,10 +1671,20 @@ impl ParserExprExt for Parser {
                         if self.check(&Token::Dedent) {
                             self.advance();
                         }
-                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(Expr::BlockExpr(stmts)) })
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(Expr::BlockExpr(stmts)),
+                        })
                     } else {
                         let body = self.parse_expr()?;
-                        Ok(Expr::Closure { params, param_tys, ret_ty, body: Box::new(body) })
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
                     }
                 }
             }
@@ -1381,9 +1695,14 @@ impl ParserExprExt for Parser {
                 let mut body = Vec::new();
                 while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                     self.skip_newlines();
-                    if self.check(&Token::Dedent) || self.check(&Token::Eof) { break; }
+                    if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        break;
+                    }
                     // 允许直接 catch 在新的 try-catch 中
-                    if self.check(&Token::Catch) || self.check(&Token::Else) || self.check(&Token::Finally) {
+                    if self.check(&Token::Catch)
+                        || self.check(&Token::Else)
+                        || self.check(&Token::Finally)
+                    {
                         break;
                     }
                     body.push(self.parse_stmt()?);
@@ -1414,7 +1733,11 @@ impl ParserExprExt for Parser {
                     self.expect(Token::Indent)?;
                     let catch_body = self.parse_block()?;
                     self.expect(Token::Dedent)?;
-                    catches.push(MatchArm { pattern, guard, body: catch_body });
+                    catches.push(MatchArm {
+                        pattern,
+                        guard,
+                        body: catch_body,
+                    });
                 }
 
                 let else_body = if self.check(&Token::Else) {
@@ -1441,7 +1764,12 @@ impl ParserExprExt for Parser {
                     None
                 };
 
-                Ok(Expr::TryCatch { body, catches, else_body, finally_body })
+                Ok(Expr::TryCatch {
+                    body,
+                    catches,
+                    else_body,
+                    finally_body,
+                })
             }
             Token::Spawn | Token::Go => {
                 let expr = self.parse_expr()?;
@@ -1476,36 +1804,41 @@ impl ParserExprExt for Parser {
         let first = self.advance();
         match first {
             // 负数模式: case -999 =>
-            Token::Minus => {
-                match self.advance() {
-                    Token::IntLit(n) => Ok(Pattern::Int(-n)),
-                    t => Err(format!("Expected integer after minus in pattern, got {:?}", t)),
-                }
-            }
+            Token::Minus => match self.advance() {
+                Token::IntLit(n) => Ok(Pattern::Int(-n)),
+                t => Err(format!(
+                    "Expected integer after minus in pattern, got {:?}",
+                    t
+                )),
+            },
             Token::IntLit(n) => {
                 // 范围模式: n..m 或 n..=m
                 if self.check(&Token::DotDot) {
                     self.advance(); // ..
                     match self.advance() {
-                        Token::IntLit(end) => Ok(Pattern::Range { start: n, end, inclusive: false }),
+                        Token::IntLit(end) => Ok(Pattern::Range {
+                            start: n,
+                            end,
+                            inclusive: false,
+                        }),
                         t => Err(format!("Expected end of range pattern, got {:?}", t)),
                     }
                 } else if self.check(&Token::DotDotEq) {
                     self.advance(); // ..=
                     match self.advance() {
-                        Token::IntLit(end) => Ok(Pattern::Range { start: n, end, inclusive: true }),
+                        Token::IntLit(end) => Ok(Pattern::Range {
+                            start: n,
+                            end,
+                            inclusive: true,
+                        }),
                         t => Err(format!("Expected end of range pattern, got {:?}", t)),
                     }
                 } else {
                     Ok(Pattern::Int(n))
                 }
             }
-            Token::FloatLit(f) => {
-                Ok(Pattern::Str(f.to_string()))
-            }
-            Token::StrLit(s) => {
-                Ok(Pattern::Str(s))
-            }
+            Token::FloatLit(f) => Ok(Pattern::Str(f.to_string())),
+            Token::StrLit(s) => Ok(Pattern::Str(s)),
             Token::True => Ok(Pattern::Bool(true)),
             Token::False => Ok(Pattern::Bool(false)),
             Token::Underscore => Ok(Pattern::Wildcard),
@@ -1538,14 +1871,17 @@ impl ParserExprExt for Parser {
                     let mut pats = Vec::new();
                     while !self.check(&Token::RParen) {
                         // 处理关键字参数风格模式: name: pattern
-                        if matches!(self.peek(), Token::Ident(_)) && self.peek_n(1) == &Token::Colon {
+                        if matches!(self.peek(), Token::Ident(_)) && self.peek_n(1) == &Token::Colon
+                        {
                             self.advance(); // field name
                             self.advance(); // :
                             pats.push(self.parse_pattern()?);
                         } else {
                             pats.push(self.parse_pattern()?);
                         }
-                        if self.check(&Token::Comma) { self.advance(); }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
                     }
                     self.expect(Token::RParen)?;
                     if pats.is_empty() {
@@ -1592,7 +1928,7 @@ impl ParserExprExt for Parser {
                 while !self.check(&Token::RBrack) {
                     if self.check(&Token::DotDot) {
                         self.advance(); // ..
-                        // .. 后面可能有 rest 绑定名: ..rest
+                                        // .. 后面可能有 rest 绑定名: ..rest
                         let rest_pat = if let Token::Ident(_) = self.peek() {
                             let name = self.advance().to_string();
                             Pattern::Rest(Some(name))
@@ -1603,7 +1939,9 @@ impl ParserExprExt for Parser {
                     } else {
                         patterns.push(self.parse_pattern()?);
                     }
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
                 }
                 self.expect(Token::RBrack)?;
                 Ok(Pattern::List(patterns))
@@ -1617,16 +1955,15 @@ impl ParserExprExt for Parser {
                         Token::StrLit(s) => s,
                         Token::Ident(s) => s,
                         t => {
-                            return Err(format!(
-                                "Expected string key in dict pattern, got {:?}",
-                                t
-                            ))
+                            return Err(format!("Expected string key in dict pattern, got {:?}", t))
                         }
                     };
                     self.expect(Token::Colon)?; // :
                     let pat = self.parse_pattern()?;
                     entries.push((key, pat));
-                    if self.check(&Token::Comma) { self.advance(); }
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
                 }
                 self.expect(Token::RBrace)?;
                 Ok(Pattern::Dict(entries))
@@ -1661,14 +1998,24 @@ fn rename_stmt_underscore(stmt: &mut crate::ast::Stmt, name: &str) {
         Stmt::Expr(e) => rename_expr_underscore(e, name),
         Stmt::Let { value, .. } | Stmt::Const { value, .. } => rename_expr_underscore(value, name),
         Stmt::Return(Some(e)) | Stmt::Yield(Some(e)) => rename_expr_underscore(e, name),
-        Stmt::While { cond, body, else_body, .. } => {
+        Stmt::While {
+            cond,
+            body,
+            else_body,
+            ..
+        } => {
             rename_expr_underscore(cond, name);
             rename_underscore_params(body, name);
             if let Some(b) = else_body {
                 rename_underscore_params(b, name);
             }
         }
-        Stmt::For { iter, body, else_body, .. } => {
+        Stmt::For {
+            iter,
+            body,
+            else_body,
+            ..
+        } => {
             rename_expr_underscore(iter, name);
             rename_underscore_params(body, name);
             if let Some(b) = else_body {
@@ -1734,8 +2081,13 @@ fn rename_expr_underscore(e: &mut crate::ast::Expr, name: &str) {
                 rename_expr_underscore(v, name);
             }
         }
-        Expr::Paren(inner) | Expr::Try(inner) | Expr::Move(inner) | Expr::Panic(inner)
-        | Expr::Spawn(inner) | Expr::Await(inner) | Expr::Comptime(inner)
+        Expr::Paren(inner)
+        | Expr::Try(inner)
+        | Expr::Move(inner)
+        | Expr::Panic(inner)
+        | Expr::Spawn(inner)
+        | Expr::Await(inner)
+        | Expr::Comptime(inner)
         | Expr::Spread(inner) => rename_expr_underscore(inner, name),
         Expr::KwArg { value, .. } => rename_expr_underscore(value, name),
         Expr::Closure { body, .. } => rename_expr_underscore(body, name),
@@ -1750,15 +2102,33 @@ fn stmt_uses_underscore(stmt: &crate::ast::Stmt) -> bool {
         Stmt::Expr(e) => expr_uses_underscore(e),
         Stmt::Let { value, .. } | Stmt::Const { value, .. } => expr_uses_underscore(value),
         Stmt::Return(Some(e)) | Stmt::Yield(Some(e)) => expr_uses_underscore(e),
-        Stmt::While { cond, body, else_body, .. } => {
+        Stmt::While {
+            cond,
+            body,
+            else_body,
+            ..
+        } => {
             expr_uses_underscore(cond)
                 || body.iter().any(stmt_uses_underscore)
-                || else_body.as_deref().unwrap_or_default().iter().any(stmt_uses_underscore)
+                || else_body
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(stmt_uses_underscore)
         }
-        Stmt::For { iter, body, else_body, .. } => {
+        Stmt::For {
+            iter,
+            body,
+            else_body,
+            ..
+        } => {
             expr_uses_underscore(iter)
                 || body.iter().any(stmt_uses_underscore)
-                || else_body.as_deref().unwrap_or_default().iter().any(stmt_uses_underscore)
+                || else_body
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(stmt_uses_underscore)
         }
         _ => false,
     }
@@ -1807,8 +2177,13 @@ fn expr_uses_underscore(e: &crate::ast::Expr) -> bool {
         Expr::DictLit(pairs) => pairs
             .iter()
             .any(|(k, v)| expr_uses_underscore(k) || expr_uses_underscore(v)),
-        Expr::Paren(inner) | Expr::Try(inner) | Expr::Move(inner) | Expr::Panic(inner)
-        | Expr::Spawn(inner) | Expr::Await(inner) | Expr::Comptime(inner)
+        Expr::Paren(inner)
+        | Expr::Try(inner)
+        | Expr::Move(inner)
+        | Expr::Panic(inner)
+        | Expr::Spawn(inner)
+        | Expr::Await(inner)
+        | Expr::Comptime(inner)
         | Expr::Spread(inner) => expr_uses_underscore(inner),
         Expr::KwArg { value, .. } => expr_uses_underscore(value),
         Expr::Closure { body, .. } => expr_uses_underscore(body),

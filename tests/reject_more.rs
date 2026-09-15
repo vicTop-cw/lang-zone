@@ -91,7 +91,8 @@ const REJECT_CASES: &[RejectCase] = &[
         // 未声明泛型形参（如顶层 `def first(xs: List<a>)` 的 a）须被拒绝，
         // 报「未知类型: a」——与「隐式泛型」旧行为切割。
         name: "implicit_generic_undeclared",
-        source: "def first(xs: List<a>) -> a =\n    xs[0]\ndef main() =\n    print(first([1, 2, 3]))\n",
+        source:
+            "def first(xs: List<a>) -> a =\n    xs[0]\ndef main() =\n    print(first([1, 2, 3]))\n",
         phase: "semantic（G2：未声明泛型形参须拒绝）",
     },
 ];
@@ -160,7 +161,12 @@ fn inline_error_boundaries_are_rejected() {
                 case.name
             );
             rejected += 1;
-            eprintln!("  ✅ {} ({}): {}", case.name, case.phase, stderr.lines().next().unwrap_or(""));
+            eprintln!(
+                "  ✅ {} ({}): {}",
+                case.name,
+                case.phase,
+                stderr.lines().next().unwrap_or("")
+            );
         } else {
             failures.push(case.name);
         }
@@ -189,7 +195,10 @@ fn inline_error_boundaries_are_rejected() {
     for case in ACCEPTED_CASES {
         let lz_path = work.join(format!("acc_{}.lz", case.name));
         std::fs::write(&lz_path, case.source).expect("write lz source");
-        let out = Command::new(&bin).arg(&lz_path).output().expect("run lang-zone");
+        let out = Command::new(&bin)
+            .arg(&lz_path)
+            .output()
+            .expect("run lang-zone");
         assert!(
             out.status.success(),
             "[{}] 已知宽松语义被拒绝——行为收紧？({})",

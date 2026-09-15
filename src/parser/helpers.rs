@@ -1,18 +1,28 @@
 // Lang-Zong 编译器 — parser/helpers.rs
 // 解析器辅助函数
 
-use crate::lexer::{Token, Lexer};
-use super::parser::Parser;
 use super::expr::ParserExprExt;
+use super::parser::Parser;
+use crate::lexer::{Lexer, Token};
 
 /// 判断 token 是否可能开启一个新表达式（用于 ^ 后缀 move 与中缀 XOR 消歧）
 pub fn is_expr_start(tok: &Token) -> bool {
-    matches!(tok,
-        Token::IntLit(_) | Token::FloatLit(_) | Token::StrLit(_)
-        | Token::FStrLit(_) | Token::RawStrLit(_)
-        | Token::True | Token::False | Token::Ident(_)
-        | Token::LParen | Token::LBrack | Token::LBrace
-        | Token::Minus | Token::Exclamation | Token::Not
+    matches!(
+        tok,
+        Token::IntLit(_)
+            | Token::FloatLit(_)
+            | Token::StrLit(_)
+            | Token::FStrLit(_)
+            | Token::RawStrLit(_)
+            | Token::True
+            | Token::False
+            | Token::Ident(_)
+            | Token::LParen
+            | Token::LBrack
+            | Token::LBrace
+            | Token::Minus
+            | Token::Exclamation
+            | Token::Not
     )
 }
 
@@ -29,7 +39,9 @@ pub fn validate_fstring(s: &str) -> Result<(), String> {
             }
             let mut expr = String::new();
             while let Some(ec) = chars.next() {
-                if ec == '}' { break; }
+                if ec == '}' {
+                    break;
+                }
                 expr.push(ec);
             }
             let expr_str = expr.trim();

@@ -184,11 +184,7 @@ pub fn cmd_create(args: &[String]) -> i32 {
         }
     }
 
-    println!(
-        "Created LZ project '{}' at {}",
-        name,
-        target.display()
-    );
+    println!("Created LZ project '{}' at {}", name, target.display());
     println!("  Next: cd {} && lang-zone build", target.display());
     0
 }
@@ -210,8 +206,8 @@ fn locate_manifest(dir: &Path) -> Option<PathBuf> {
 
 /// 解析 lz.toml → Manifest（name/version/entry；缺省值兜底）
 fn parse_manifest(path: &Path) -> Result<Manifest, String> {
-    let text = fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
     let doc = parse_toml(&text)
         .map_err(|e| format!("Manifest parse error in {}: {}", path.display(), e))?;
     let root = doc.get("").cloned().unwrap_or_default();
@@ -254,7 +250,10 @@ impl ProjectPaths {
             )
         })?;
         let manifest = parse_manifest(&manifest_path)?;
-        let root = manifest_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let root = manifest_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
         let entry = if Path::new(&manifest.entry).is_absolute() {
             PathBuf::from(&manifest.entry)
         } else {
@@ -299,8 +298,8 @@ fn compile_project_to_ir(
     if !errs.is_empty() {
         return Err(errs.join("\n"));
     }
-    let ir = build_ir(&merged)
-        .map_err(|e| format!("IR build error in {}: {}", entry.display(), e))?;
+    let ir =
+        build_ir(&merged).map_err(|e| format!("IR build error in {}: {}", entry.display(), e))?;
     Ok((ir, module_count))
 }
 
@@ -389,10 +388,7 @@ pub fn cmd_build(args: &[String]) -> i32 {
         let cache_dir = paths.build_dir.join(".lzcache");
         if let Ok(Some(entry)) = CacheEntry::load(&cache_dir, &paths.entry) {
             if entry.is_fresh(&paths.entry, &cache_dir) && paths.rs_out.exists() {
-                println!(
-                    "Incremental hit (unchanged): {}",
-                    paths.entry.display()
-                );
+                println!("Incremental hit (unchanged): {}", paths.entry.display());
                 return 0;
             }
         }
@@ -412,11 +408,7 @@ pub fn cmd_build(args: &[String]) -> i32 {
     let (rust_code, mut registry) = cg.generate_with_bridge(&ir);
 
     if let Err(e) = fs::create_dir_all(&paths.build_dir) {
-        eprintln!(
-            "Error: cannot create {}: {}",
-            paths.build_dir.display(),
-            e
-        );
+        eprintln!("Error: cannot create {}: {}", paths.build_dir.display(), e);
         return 1;
     }
     if let Err(e) = fs::write(&paths.rs_out, &rust_code) {
@@ -457,7 +449,13 @@ pub fn cmd_build(args: &[String]) -> i32 {
     let hashes = source_hashes(&paths.entry);
     let entry_hash = hashes
         .iter()
-        .find(|(p, _)| Path::new(p) == paths.entry.canonicalize().unwrap_or_else(|_| paths.entry.clone()))
+        .find(|(p, _)| {
+            Path::new(p)
+                == paths
+                    .entry
+                    .canonicalize()
+                    .unwrap_or_else(|_| paths.entry.clone())
+        })
         .map(|(_, h)| h.clone())
         .or_else(|| lang_zone::cache::content_hash(&paths.entry).ok())
         .unwrap_or_default();
@@ -465,14 +463,24 @@ pub fn cmd_build(args: &[String]) -> i32 {
         hash: entry_hash,
         deps: hashes
             .iter()
-            .filter(|(p, _)| Path::new(p) != paths.entry.canonicalize().unwrap_or_else(|_| paths.entry.clone()))
+            .filter(|(p, _)| {
+                Path::new(p)
+                    != paths
+                        .entry
+                        .canonicalize()
+                        .unwrap_or_else(|_| paths.entry.clone())
+            })
             .map(|(p, h)| (p.clone(), h.clone()))
             .collect(),
         // CacheEntry::output 相对于缓存目录：缓存目录为 build/.lzcache，
         // 产物为 build/<name>.rs → 相对路径 ../<name>.rs（is_fresh 据此检查存在性）
         output: format!(
             "../{}",
-            paths.rs_out.file_name().unwrap_or_default().to_string_lossy()
+            paths
+                .rs_out
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         ),
     };
     let cache_dir = paths.build_dir.join(".lzcache");
@@ -543,11 +551,7 @@ pub fn cmd_check(args: &[String]) -> i32 {
     );
     let _ = fs::create_dir_all(&paths.build_dir);
     if let Err(e) = fs::write(&check_cache, &summary) {
-        eprintln!(
-            "Warning: cannot write {}: {}",
-            check_cache.display(),
-            e
-        );
+        eprintln!("Warning: cannot write {}: {}", check_cache.display(), e);
     }
 
     println!("check ok: {} modules, {} items", module_count, item_count);
@@ -574,7 +578,10 @@ pub fn cmd_peek(args: &[String]) -> i32 {
         fwd.push(a.clone());
     }
     // 默认输出 IR（可读、稳定）；带 --tokens/--ast 时输出对应视图
-    if !fwd.iter().any(|a| a == "--tokens" || a == "--ast" || a.starts_with("--emit=")) {
+    if !fwd
+        .iter()
+        .any(|a| a == "--tokens" || a == "--ast" || a.starts_with("--emit="))
+    {
         fwd.push("--emit=ir".to_string());
     }
     crate::compile_main(fwd)
@@ -631,12 +638,7 @@ pub fn cmd_push(args: &[String]) -> i32 {
         }
     };
 
-    let reg_dir = Path::new(
-        registry
-            .as_deref()
-            .unwrap_or("local-registry"),
-    )
-    .to_path_buf();
+    let reg_dir = Path::new(registry.as_deref().unwrap_or("local-registry")).to_path_buf();
     // 包条目：<registry>/<name>/<version>/（含校验和）
     let pkg_dir = reg_dir
         .join(&paths.manifest.name)
@@ -657,9 +659,7 @@ pub fn cmd_push(args: &[String]) -> i32 {
     let hashes = source_hashes(&paths.entry);
     let mut checksum_input = format!(
         "name={}\nversion={}\nmodules={}\n",
-        paths.manifest.name,
-        paths.manifest.version,
-        module_count
+        paths.manifest.name, paths.manifest.version, module_count
     );
     for (p, h) in &hashes {
         checksum_input.push_str(&format!("{} {}\n", h, p));
@@ -677,7 +677,11 @@ pub fn cmd_push(args: &[String]) -> i32 {
             pkg_dir.display(),
             checksum
         );
-        println!("[dry-run] {} modules, {} source files", module_count, hashes.len());
+        println!(
+            "[dry-run] {} modules, {} source files",
+            module_count,
+            hashes.len()
+        );
         return 0;
     }
 
@@ -688,16 +692,17 @@ pub fn cmd_push(args: &[String]) -> i32 {
         paths.manifest.version,
         std::process::id()
     ));
-    let tmp_pkg = tmp
-        .join(&paths.manifest.name)
-        .join(&paths.manifest.version);
+    let tmp_pkg = tmp.join(&paths.manifest.name).join(&paths.manifest.version);
     let build_result = (|| -> Result<(), String> {
         fs::create_dir_all(&tmp_pkg).map_err(|e| e.to_string())?;
-        fs::write(tmp_pkg.join("checksum.txt"), format!("{}\n{}", checksum, checksum_input))
-            .map_err(|e| e.to_string())?;
+        fs::write(
+            tmp_pkg.join("checksum.txt"),
+            format!("{}\n{}", checksum, checksum_input),
+        )
+        .map_err(|e| e.to_string())?;
         // 发布源码快照（清单 + 源文件）
-        let manifest_text = fs::read_to_string(&paths.root.join("lz.toml"))
-            .map_err(|e| e.to_string())?;
+        let manifest_text =
+            fs::read_to_string(&paths.root.join("lz.toml")).map_err(|e| e.to_string())?;
         fs::write(tmp_pkg.join("lz.toml"), manifest_text).map_err(|e| e.to_string())?;
         fs::create_dir_all(tmp_pkg.join("src")).map_err(|e| e.to_string())?;
         let src_dir = paths.entry.parent().unwrap_or(Path::new("."));
@@ -714,7 +719,10 @@ pub fn cmd_push(args: &[String]) -> i32 {
                 for e in rd.flatten() {
                     let ep = e.path();
                     if ep.is_dir() && ep.file_name().map(|n| n != "build").unwrap_or(false) {
-                        stack.push((ep.clone(), rel_prefix.join(ep.file_name().unwrap_or_default())));
+                        stack.push((
+                            ep.clone(),
+                            rel_prefix.join(ep.file_name().unwrap_or_default()),
+                        ));
                     } else if ep.extension().map(|x| x == "lz").unwrap_or(false) {
                         let rel = rel_prefix.join(ep.file_name().unwrap_or_default());
                         let dest = tmp_pkg.join("src").join(&rel);
@@ -825,7 +833,10 @@ pub fn cmd_emit_bridge_report(args: &[String]) -> i32 {
     }
     let target = Path::new(&args[2]);
     if !target.is_file() {
-        eprintln!("Error: cannot audit {}: no such ledger file", target.display());
+        eprintln!(
+            "Error: cannot audit {}: no such ledger file",
+            target.display()
+        );
         return 1;
     }
     let report = lang_zone::bridge::ledger::Ledger::report_path(target);
@@ -842,7 +853,11 @@ mod tests {
         let dir = std::env::temp_dir().join("lz_cli_test_manifest");
         let _ = fs::create_dir_all(&dir);
         let toml = dir.join("lz.toml");
-        fs::write(&toml, "name = \"demo\"\nversion = \"0.2.0\"\nentry = \"src/main.lz\"\n").unwrap();
+        fs::write(
+            &toml,
+            "name = \"demo\"\nversion = \"0.2.0\"\nentry = \"src/main.lz\"\n",
+        )
+        .unwrap();
         let m = parse_manifest(&toml).unwrap();
         assert_eq!(m.name, "demo");
         assert_eq!(m.version, "0.2.0");

@@ -92,7 +92,9 @@ fn main() {
     let struct_count: usize = file.modules.values().map(|m| m.structs.len()).sum();
     let unresolved_count = file.unresolved.len();
     // 统计跨模块注记数量
-    let cross_module_markers: usize = file.unresolved.iter()
+    let cross_module_markers: usize = file
+        .unresolved
+        .iter()
         .filter(|s| s.starts_with("[cross_module]"))
         .count();
 

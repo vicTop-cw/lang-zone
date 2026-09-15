@@ -1,0 +1,9 @@
+struct P =
+    v: int
+    def __pow__(self, e: int) -> P =
+        P(v: self.v ** e)
+
+def main() =
+    a = P(v: 2)
+    b = a ** 3
+    print(b.v)

@@ -2,13 +2,10 @@
 // 编译期宏解释器：在编译时执行宏体，操作 Tokens 类型
 
 use crate::lexer::Token;
-use crate::macros::group::{Tokens, TokenGroupKind, BacktickPrefix, TokenTree};
 #[cfg(test)]
 use crate::macros::group::Delimiter;
-use crate::macros::pattern::{
-    TokenPattern, ReplaceRule,
-    apply_remove, apply_replace,
-};
+use crate::macros::group::{BacktickPrefix, TokenGroupKind, TokenTree, Tokens};
+use crate::macros::pattern::{apply_remove, apply_replace, ReplaceRule, TokenPattern};
 use std::collections::HashMap;
 
 // ──────────────── 解释器 ────────────────
@@ -69,10 +66,12 @@ impl MacroInterpreter {
                 self.variables.insert(name.clone(), val);
                 Ok(Tokens::empty())
             }
-            MacroStmt::Expr(expr) => {
-                self.eval_expr(expr)
-            }
-            MacroStmt::If { cond, then_body, else_body } => {
+            MacroStmt::Expr(expr) => self.eval_expr(expr),
+            MacroStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
                 let cond_val = self.eval_expr(cond)?;
                 let is_true = !cond_val.is_empty()
                     && !matches!(cond_val.tokens.first(), Some(Token::False))
@@ -85,15 +84,14 @@ impl MacroInterpreter {
                     Ok(Tokens::empty())
                 }
             }
-            MacroStmt::Return(expr) => {
-                self.eval_expr(expr)
-            }
+            MacroStmt::Return(expr) => self.eval_expr(expr),
             MacroStmt::For { var, iter, body } => {
                 let iter_tokens = self.eval_expr(iter)?;
                 // 将 Tokens 按 token 逐个迭代
                 let mut last = Tokens::empty();
                 for token in &iter_tokens.tokens {
-                    self.variables.insert(var.clone(), Tokens::new(vec![token.clone()]));
+                    self.variables
+                        .insert(var.clone(), Tokens::new(vec![token.clone()]));
                     last = self.execute_stmts(body)?;
                 }
                 Ok(last)
@@ -105,17 +103,13 @@ impl MacroInterpreter {
 
     fn eval_expr(&mut self, expr: &MacroExpr) -> Result<Tokens, String> {
         match expr {
-            MacroExpr::BacktickBlock { tokens, prefix } => {
-                self.eval_backtick(tokens, *prefix)
-            }
-            MacroExpr::Ident(name) => {
-                self.variables.get(name)
-                    .cloned()
-                    .ok_or_else(|| format!("undefined variable '{}'", name))
-            }
-            MacroExpr::Call { func, args } => {
-                self.eval_builtin(func, args)
-            }
+            MacroExpr::BacktickBlock { tokens, prefix } => self.eval_backtick(tokens, *prefix),
+            MacroExpr::Ident(name) => self
+                .variables
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("undefined variable '{}'", name)),
+            MacroExpr::Call { func, args } => self.eval_builtin(func, args),
             MacroExpr::Binary { left, op, right } => {
                 let l = self.eval_expr(left)?;
                 let r = self.eval_expr(right)?;
@@ -132,7 +126,11 @@ impl MacroInterpreter {
                     _ => Err(format!("unsupported binary op {:?} in macro", op)),
                 }
             }
-            MacroExpr::IfExpr { cond, then_expr, else_expr } => {
+            MacroExpr::IfExpr {
+                cond,
+                then_expr,
+                else_expr,
+            } => {
                 let cond_val = self.eval_expr(cond)?;
                 let is_true = !cond_val.is_empty()
                     && !matches!(cond_val.tokens.first(), Some(Token::False))
@@ -145,21 +143,23 @@ impl MacroInterpreter {
                     Ok(Tokens::empty())
                 }
             }
-            MacroExpr::IntLit(n) => {
-                Ok(Tokens::new(vec![Token::IntLit(*n)]))
-            }
-            MacroExpr::StrLit(s) => {
-                Ok(Tokens::new(vec![Token::StrLit(s.clone())]))
-            }
-            MacroExpr::BoolLit(b) => {
-                Ok(Tokens::new(vec![if *b { Token::True } else { Token::False }]))
-            }
+            MacroExpr::IntLit(n) => Ok(Tokens::new(vec![Token::IntLit(*n)])),
+            MacroExpr::StrLit(s) => Ok(Tokens::new(vec![Token::StrLit(s.clone())])),
+            MacroExpr::BoolLit(b) => Ok(Tokens::new(vec![if *b {
+                Token::True
+            } else {
+                Token::False
+            }])),
         }
     }
 
     // ──────────────── 反引号块求值 ────────────────
 
-    fn eval_backtick(&mut self, tokens: &[Token], prefix: BacktickPrefix) -> Result<Tokens, String> {
+    fn eval_backtick(
+        &mut self,
+        tokens: &[Token],
+        prefix: BacktickPrefix,
+    ) -> Result<Tokens, String> {
         match prefix {
             BacktickPrefix::None => {
                 // 普通 ``` — 直接返回 tokens 副本
@@ -171,7 +171,8 @@ impl MacroInterpreter {
                 let mut i = 0;
                 while i < tokens.len() {
                     // 检测 $(expr) 模式: Dollar + LParen
-                    if tokens[i] == Token::Dollar && i + 1 < tokens.len()
+                    if tokens[i] == Token::Dollar
+                        && i + 1 < tokens.len()
                         && tokens[i + 1] == Token::LParen
                     {
                         // 找到匹配的 RParen（需要括号计数）
@@ -184,7 +185,9 @@ impl MacroInterpreter {
                                 Token::RParen => depth -= 1,
                                 _ => {}
                             }
-                            if depth > 0 { j += 1; }
+                            if depth > 0 {
+                                j += 1;
+                            }
                         }
                         if depth != 0 {
                             return Err("unmatched parenthesis in $() interpolation".to_string());
@@ -239,27 +242,41 @@ impl MacroInterpreter {
     fn eval_builtin(&mut self, func: &str, args: &[MacroExpr]) -> Result<Tokens, String> {
         match func {
             "is_empty" => {
-                if args.len() != 1 { return Err("is_empty requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("is_empty requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
-                Ok(Tokens::new(vec![if val.is_empty() { Token::True } else { Token::False }]))
+                Ok(Tokens::new(vec![if val.is_empty() {
+                    Token::True
+                } else {
+                    Token::False
+                }]))
             }
             "len" => {
-                if args.len() != 1 { return Err("len requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("len requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 Ok(Tokens::new(vec![Token::IntLit(val.len() as i64)]))
             }
             "first" => {
-                if args.len() != 1 { return Err("first requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("first requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 Ok(val.first())
             }
             "rest" => {
-                if args.len() != 1 { return Err("rest requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("rest requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 Ok(val.rest())
             }
             "classify" => {
-                if args.len() != 1 { return Err("classify requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("classify requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let kind_str = match val.kind {
                     TokenGroupKind::Expr => "Expr",
@@ -272,19 +289,25 @@ impl MacroInterpreter {
                 Ok(Tokens::new(vec![Token::StrLit(kind_str.to_string())]))
             }
             "to_string" => {
-                if args.len() != 1 { return Err("to_string requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("to_string requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 Ok(Tokens::new(vec![Token::StrLit(val.to_string())]))
             }
             "set_context" => {
-                if args.len() != 2 { return Err("set_context requires 2 args".to_string()); }
+                if args.len() != 2 {
+                    return Err("set_context requires 2 args".to_string());
+                }
                 let k = self.eval_expr(&args[0])?;
                 let v = self.eval_expr(&args[1])?;
                 self.context.insert(k.to_string(), v.to_string());
                 Ok(Tokens::empty())
             }
             "get_context" => {
-                if args.len() != 1 { return Err("get_context requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("get_context requires 1 arg".to_string());
+                }
                 let k = self.eval_expr(&args[0])?;
                 match self.context.get(&k.to_string()) {
                     Some(v) => Ok(Tokens::new(vec![Token::StrLit(v.clone())])),
@@ -292,7 +315,9 @@ impl MacroInterpreter {
                 }
             }
             "assert_parent" => {
-                if args.len() != 1 { return Err("assert_parent requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("assert_parent requires 1 arg".to_string());
+                }
                 let expected = self.eval_expr(&args[0])?;
                 match self.context.get("__parent_name") {
                     Some(parent) if parent == &expected.to_string() => Ok(Tokens::empty()),
@@ -300,11 +325,19 @@ impl MacroInterpreter {
                 }
             }
             "inside_parent" => {
-                if args.len() != 1 { return Err("inside_parent requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("inside_parent requires 1 arg".to_string());
+                }
                 let name = self.eval_expr(&args[0])?;
-                let is_inside = self.context.get("__parent_name")
+                let is_inside = self
+                    .context
+                    .get("__parent_name")
                     .map_or(false, |p| p == &name.to_string());
-                Ok(Tokens::new(vec![if is_inside { Token::True } else { Token::False }]))
+                Ok(Tokens::new(vec![if is_inside {
+                    Token::True
+                } else {
+                    Token::False
+                }]))
             }
 
             // ── 宏 API 工具集 ──
@@ -312,7 +345,9 @@ impl MacroInterpreter {
             // quote(tokens) → 原样返回；但其中的 StrLit 内容需重新词法分析为
             // 代码 token（模板/macro 产物是 LZ 代码，字符串字面量只是源码文本载体）
             "quote" => {
-                if args.len() != 1 { return Err("quote requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("quote requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let mut out: Vec<Token> = Vec::new();
                 for t in val.tokens {
@@ -330,8 +365,7 @@ impl MacroInterpreter {
                         // 形态时在 lex 结果末尾补一个 Indent，使 body 进入块内。
                         let needs_indent = match trimmed.rsplit_once('\n') {
                             Some((_, tail)) => {
-                                !tail.is_empty()
-                                    && tail.chars().all(|c| c == ' ' || c == '\t')
+                                !tail.is_empty() && tail.chars().all(|c| c == ' ' || c == '\t')
                             }
                             None => false,
                         };
@@ -381,7 +415,9 @@ impl MacroInterpreter {
 
             // merge_tokens(a, b, ...) → 拼接多个 Tokens
             "merge_tokens" => {
-                if args.is_empty() { return Err("merge_tokens requires at least 1 arg".to_string()); }
+                if args.is_empty() {
+                    return Err("merge_tokens requires at least 1 arg".to_string());
+                }
                 let mut result = self.eval_expr(&args[0])?;
                 for arg in &args[1..] {
                     let next = self.eval_expr(arg)?;
@@ -392,25 +428,37 @@ impl MacroInterpreter {
 
             // token_count(stream) → 顶层 token 数
             "token_count" => {
-                if args.len() != 1 { return Err("token_count requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("token_count requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 Ok(Tokens::new(vec![Token::IntLit(val.len() as i64)]))
             }
 
             // is_empty_tokens(stream) → 是否为空
             "is_empty_tokens" => {
-                if args.len() != 1 { return Err("is_empty_tokens requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("is_empty_tokens requires 1 arg".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
-                Ok(Tokens::new(vec![if val.is_empty() { Token::True } else { Token::False }]))
+                Ok(Tokens::new(vec![if val.is_empty() {
+                    Token::True
+                } else {
+                    Token::False
+                }]))
             }
 
             // filter_tokens(stream, kind) → 按类型过滤
             "filter_tokens" => {
-                if args.len() != 2 { return Err("filter_tokens requires 2 args: (source, kind)".to_string()); }
+                if args.len() != 2 {
+                    return Err("filter_tokens requires 2 args: (source, kind)".to_string());
+                }
                 let src = self.eval_expr(&args[0])?;
                 let kind_val = self.eval_expr(&args[1])?;
                 let kind = kind_val.to_string().trim_matches('"').to_string();
-                let filtered: Vec<Token> = src.tokens.into_iter()
+                let filtered: Vec<Token> = src
+                    .tokens
+                    .into_iter()
                     .filter(|t| token_matches_kind(t, &kind))
                     .collect();
                 Ok(Tokens::new(filtered))
@@ -418,7 +466,9 @@ impl MacroInterpreter {
 
             // remove_tokens(source, pattern) → 移除匹配的 token 序列
             "remove_tokens" => {
-                if args.len() != 2 { return Err("remove_tokens requires 2 args: (source, pattern)".to_string()); }
+                if args.len() != 2 {
+                    return Err("remove_tokens requires 2 args: (source, pattern)".to_string());
+                }
                 let src = self.eval_expr(&args[0])?;
                 let pattern_val = self.eval_expr(&args[1])?;
                 let pattern = TokenPattern::parse(&pattern_val.tokens)
@@ -429,7 +479,9 @@ impl MacroInterpreter {
 
             // replace_tokens(source, rules) → 查找替换
             "replace_tokens" => {
-                if args.len() != 2 { return Err("replace_tokens requires 2 args: (source, rules)".to_string()); }
+                if args.len() != 2 {
+                    return Err("replace_tokens requires 2 args: (source, rules)".to_string());
+                }
                 let src = self.eval_expr(&args[0])?;
                 let rules_val = self.eval_expr(&args[1])?;
                 // rules 格式: from_pattern => to_tokens, from2 => to2, ...
@@ -441,7 +493,9 @@ impl MacroInterpreter {
 
             // token_stream(source) → 解析为树形 TokenTree 结构
             "token_stream" => {
-                if args.len() != 1 { return Err("token_stream requires 1 arg".to_string()); }
+                if args.len() != 1 {
+                    return Err("token_stream requires 1 arg".to_string());
+                }
                 let src = self.eval_expr(&args[0])?;
                 let tree = TokenTree::parse_all(&src.tokens)
                     .map_err(|e| format!("token_stream: {}", e))?;
@@ -452,7 +506,9 @@ impl MacroInterpreter {
 
             // take(tokens, n) — 取前 n 个 token
             "take" => {
-                if args.len() != 2 { return Err("take requires 2 args: (tokens, n)".to_string()); }
+                if args.len() != 2 {
+                    return Err("take requires 2 args: (tokens, n)".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let n_val = self.eval_expr(&args[1])?;
                 let n = parse_int_arg(&n_val)?;
@@ -462,7 +518,9 @@ impl MacroInterpreter {
 
             // drop(tokens, n) — 去掉前 n 个 token
             "drop_tokens" => {
-                if args.len() != 2 { return Err("drop_tokens requires 2 args: (tokens, n)".to_string()); }
+                if args.len() != 2 {
+                    return Err("drop_tokens requires 2 args: (tokens, n)".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let n_val = self.eval_expr(&args[1])?;
                 let n = parse_int_arg(&n_val)?;
@@ -475,7 +533,9 @@ impl MacroInterpreter {
 
             // split_at(tokens, sep) — 按分隔符拆分 Token 序列
             "split_at" => {
-                if args.len() != 2 { return Err("split_at requires 2 args: (tokens, sep)".to_string()); }
+                if args.len() != 2 {
+                    return Err("split_at requires 2 args: (tokens, sep)".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let sep_val = self.eval_expr(&args[1])?;
                 if sep_val.is_empty() {
@@ -506,7 +566,9 @@ impl MacroInterpreter {
 
             // join(tokens, sep) — 用分隔符连接 Tokens 中的 token 序列
             "join" => {
-                if args.len() != 2 { return Err("join requires 2 args: (tokens, sep)".to_string()); }
+                if args.len() != 2 {
+                    return Err("join requires 2 args: (tokens, sep)".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let sep_val = self.eval_expr(&args[1])?;
                 if sep_val.is_empty() {
@@ -525,19 +587,29 @@ impl MacroInterpreter {
 
             // error(msg) — 编译期报错
             "error" => {
-                if args.len() != 1 { return Err("error requires 1 arg: (message)".to_string()); }
+                if args.len() != 1 {
+                    return Err("error requires 1 arg: (message)".to_string());
+                }
                 let msg = self.eval_expr(&args[0])?;
-                Err(format!("macro error: {}", msg.to_string().trim_matches('"')))
+                Err(format!(
+                    "macro error: {}",
+                    msg.to_string().trim_matches('"')
+                ))
             }
 
             // assert_eq(a, b) — 断言两个 Token 流相等
             "assert_eq" => {
-                if args.len() != 2 { return Err("assert_eq requires 2 args: (a, b)".to_string()); }
+                if args.len() != 2 {
+                    return Err("assert_eq requires 2 args: (a, b)".to_string());
+                }
                 let a = self.eval_expr(&args[0])?;
                 let b = self.eval_expr(&args[1])?;
                 if a.tokens != b.tokens {
-                    Err(format!("assertion failed: expected '{}', got '{}'",
-                        b.to_string(), a.to_string()))
+                    Err(format!(
+                        "assertion failed: expected '{}', got '{}'",
+                        b.to_string(),
+                        a.to_string()
+                    ))
                 } else {
                     Ok(Tokens::empty())
                 }
@@ -545,14 +617,20 @@ impl MacroInterpreter {
 
             // contains(tokens, pattern_token) — 检查是否包含某 token
             "contains" => {
-                if args.len() != 2 { return Err("contains requires 2 args: (tokens, token)".to_string()); }
+                if args.len() != 2 {
+                    return Err("contains requires 2 args: (tokens, token)".to_string());
+                }
                 let val = self.eval_expr(&args[0])?;
                 let pat_val = self.eval_expr(&args[1])?;
                 if pat_val.is_empty() {
                     return Ok(Tokens::new(vec![Token::False]));
                 }
                 let found = val.tokens.contains(&pat_val.tokens[0]);
-                Ok(Tokens::new(vec![if found { Token::True } else { Token::False }]))
+                Ok(Tokens::new(vec![if found {
+                    Token::True
+                } else {
+                    Token::False
+                }]))
             }
 
             _ => Err(format!("unknown builtin function '{}'", func)),
@@ -561,11 +639,34 @@ impl MacroInterpreter {
 }
 
 fn is_builtin(name: &str) -> bool {
-    matches!(name, "is_empty" | "len" | "first" | "rest" | "classify"
-        | "to_string" | "set_context" | "get_context" | "assert_parent" | "inside_parent"
-        | "quote" | "merge_tokens" | "token_count" | "is_empty_tokens"
-        | "filter_tokens" | "remove_tokens" | "replace_tokens" | "token_stream"
-        | "take" | "drop_tokens" | "split_at" | "join" | "error" | "assert_eq" | "contains")
+    matches!(
+        name,
+        "is_empty"
+            | "len"
+            | "first"
+            | "rest"
+            | "classify"
+            | "to_string"
+            | "set_context"
+            | "get_context"
+            | "assert_parent"
+            | "inside_parent"
+            | "quote"
+            | "merge_tokens"
+            | "token_count"
+            | "is_empty_tokens"
+            | "filter_tokens"
+            | "remove_tokens"
+            | "replace_tokens"
+            | "token_stream"
+            | "take"
+            | "drop_tokens"
+            | "split_at"
+            | "join"
+            | "error"
+            | "assert_eq"
+            | "contains"
+    )
 }
 
 /// 从 Tokens 中解析整数参数
@@ -583,32 +684,115 @@ fn parse_int_arg(val: &Tokens) -> Result<usize, String> {
 fn token_matches_kind(token: &Token, kind: &str) -> bool {
     match kind {
         "ident" => matches!(token, Token::Ident(_)),
-        "literal" => matches!(token, Token::IntLit(_) | Token::FloatLit(_) | Token::StrLit(_)
-            | Token::FStrLit(_) | Token::RawStrLit(_) | Token::True | Token::False),
-        "keyword" => matches!(token,
-            Token::Def | Token::Struct | Token::Enum | Token::Trait | Token::Impl | Token::Const
-            | Token::If | Token::Elif | Token::Else | Token::Match | Token::Case | Token::Guard
-            | Token::For | Token::In | Token::While | Token::Loop | Token::Break | Token::Continue
-            | Token::Return | Token::With | Token::Defer | Token::Try | Token::Catch | Token::Finally
-            | Token::Raise | Token::Raises | Token::Async | Token::Await
-            | Token::Spawn | Token::Select | Token::Yield | Token::Mut | Token::Ref | Token::Owned
-            | Token::Where | Token::Import | Token::From | Token::As | Token::Macro | Token::Comptime
-            | Token::Self_ | Token::And | Token::Or | Token::Not | Token::Is
+        "literal" => matches!(
+            token,
+            Token::IntLit(_)
+                | Token::FloatLit(_)
+                | Token::StrLit(_)
+                | Token::FStrLit(_)
+                | Token::RawStrLit(_)
+                | Token::True
+                | Token::False
         ),
-        "operator" => matches!(token,
-            Token::Plus | Token::Minus | Token::Star | Token::Slash | Token::Percent
-            | Token::StarStar | Token::Eq | Token::EqEq | Token::NotEq | Token::Lt | Token::Gt
-            | Token::Le | Token::Ge | Token::PlusEq | Token::MinusEq
-            | Token::StarEq | Token::SlashEq | Token::PercentEq | Token::Amp | Token::Pipe_
-            | Token::Caret | Token::CaretOp | Token::CaretInfix | Token::Shl | Token::Shr
-            | Token::AmpAmp | Token::PipePipe | Token::Arrow | Token::FatArrow
-            | Token::Pipe | Token::BackPipe | Token::Question | Token::QuestionQuestion
-            | Token::SafeNav | Token::Exclamation | Token::At | Token::Dollar
-            | Token::BuildAssign | Token::BuildCall | Token::BuildGen
+        "keyword" => matches!(
+            token,
+            Token::Def
+                | Token::Struct
+                | Token::Enum
+                | Token::Trait
+                | Token::Impl
+                | Token::Const
+                | Token::If
+                | Token::Elif
+                | Token::Else
+                | Token::Match
+                | Token::Case
+                | Token::Guard
+                | Token::For
+                | Token::In
+                | Token::While
+                | Token::Loop
+                | Token::Break
+                | Token::Continue
+                | Token::Return
+                | Token::With
+                | Token::Defer
+                | Token::Try
+                | Token::Catch
+                | Token::Finally
+                | Token::Raise
+                | Token::Raises
+                | Token::Async
+                | Token::Await
+                | Token::Spawn
+                | Token::Select
+                | Token::Yield
+                | Token::Mut
+                | Token::Ref
+                | Token::Owned
+                | Token::Where
+                | Token::Import
+                | Token::From
+                | Token::As
+                | Token::Macro
+                | Token::Comptime
+                | Token::Self_
+                | Token::And
+                | Token::Or
+                | Token::Not
+                | Token::Is
         ),
-        "delimiter" => matches!(token,
-            Token::LParen | Token::RParen | Token::LBrack | Token::RBrack
-            | Token::LBrace | Token::RBrace
+        "operator" => matches!(
+            token,
+            Token::Plus
+                | Token::Minus
+                | Token::Star
+                | Token::Slash
+                | Token::Percent
+                | Token::StarStar
+                | Token::Eq
+                | Token::EqEq
+                | Token::NotEq
+                | Token::Lt
+                | Token::Gt
+                | Token::Le
+                | Token::Ge
+                | Token::PlusEq
+                | Token::MinusEq
+                | Token::StarEq
+                | Token::SlashEq
+                | Token::PercentEq
+                | Token::Amp
+                | Token::Pipe_
+                | Token::Caret
+                | Token::CaretOp
+                | Token::CaretInfix
+                | Token::Shl
+                | Token::Shr
+                | Token::AmpAmp
+                | Token::PipePipe
+                | Token::Arrow
+                | Token::FatArrow
+                | Token::Pipe
+                | Token::BackPipe
+                | Token::Question
+                | Token::QuestionQuestion
+                | Token::SafeNav
+                | Token::Exclamation
+                | Token::At
+                | Token::Dollar
+                | Token::BuildAssign
+                | Token::BuildCall
+                | Token::BuildGen
+        ),
+        "delimiter" => matches!(
+            token,
+            Token::LParen
+                | Token::RParen
+                | Token::LBrack
+                | Token::RBrack
+                | Token::LBrace
+                | Token::RBrace
         ),
         _ => false,
     }
@@ -679,12 +863,10 @@ mod tests {
     #[test]
     fn test_empty_macro_body() {
         let mut interp = MacroInterpreter::new();
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::BacktickBlock {
-                tokens: vec![],
-                prefix: BacktickPrefix::None,
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::BacktickBlock {
+            tokens: vec![],
+            prefix: BacktickPrefix::None,
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert!(result.is_empty());
     }
@@ -695,12 +877,10 @@ mod tests {
         let input = Tokens::new(vec![Token::IntLit(42)]);
         interp.bind_param("input".into(), input);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::BacktickBlock {
-                tokens: vec![],
-                prefix: BacktickPrefix::None,
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::BacktickBlock {
+            tokens: vec![],
+            prefix: BacktickPrefix::None,
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert!(result.is_empty());
     }
@@ -712,21 +892,19 @@ mod tests {
         interp.bind_param("input".into(), input);
 
         // f``` $input + 1 ```
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::BacktickBlock {
-                // 模拟 f``` $input + 1 ``` — 注意这里 $(expr) 需要特殊 token 模式
-                // 在真实场景中，Dollar + LParen 会被词法分析为插值标记
-                tokens: vec![
-                    Token::Dollar, // $ 符号
-                    Token::LParen,
-                    Token::Ident("input".into()),
-                    Token::RParen,
-                    Token::Plus,
-                    Token::IntLit(1),
-                ],
-                prefix: BacktickPrefix::F,
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::BacktickBlock {
+            // 模拟 f``` $input + 1 ``` — 注意这里 $(expr) 需要特殊 token 模式
+            // 在真实场景中，Dollar + LParen 会被词法分析为插值标记
+            tokens: vec![
+                Token::Dollar, // $ 符号
+                Token::LParen,
+                Token::Ident("input".into()),
+                Token::RParen,
+                Token::Plus,
+                Token::IntLit(1),
+            ],
+            prefix: BacktickPrefix::F,
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         // $input → 42, 所以应该是 42 + 1
         assert_eq!(result.to_string(), "42+1");
@@ -735,19 +913,17 @@ mod tests {
     #[test]
     fn test_r_backtick_raw() {
         let mut interp = MacroInterpreter::new();
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::BacktickBlock {
-                tokens: vec![
-                    Token::At,
-                    Token::Ident("some_macro".into()),
-                    Token::Exclamation, // !
-                    Token::LParen,
-                    Token::Ident("x".into()),
-                    Token::RParen,
-                ],
-                prefix: BacktickPrefix::R,
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::BacktickBlock {
+            tokens: vec![
+                Token::At,
+                Token::Ident("some_macro".into()),
+                Token::Exclamation, // !
+                Token::LParen,
+                Token::Ident("x".into()),
+                Token::RParen,
+            ],
+            prefix: BacktickPrefix::R,
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         // r``` 原样返回
         assert!(result.to_string().contains("@some_macro!"));
@@ -777,12 +953,10 @@ mod tests {
         let empty = Tokens::empty();
         interp.bind_param("t".into(), empty);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "is_empty".into(),
-                args: vec![MacroExpr::Ident("t".into())],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "is_empty".into(),
+            args: vec![MacroExpr::Ident("t".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert_eq!(result.tokens, vec![Token::True]);
     }
@@ -790,19 +964,14 @@ mod tests {
     #[test]
     fn test_builtin_first_rest() {
         let mut interp = MacroInterpreter::new();
-        let t = Tokens::new(vec![
-            Token::Ident("a".into()),
-            Token::Ident("b".into()),
-        ]);
+        let t = Tokens::new(vec![Token::Ident("a".into()), Token::Ident("b".into())]);
         interp.bind_param("t".into(), t);
 
         // first(t)
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "first".into(),
-                args: vec![MacroExpr::Ident("t".into())],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "first".into(),
+            args: vec![MacroExpr::Ident("t".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert_eq!(result.to_string(), "a");
     }
@@ -815,12 +984,10 @@ mod tests {
         let input = Tokens::new(vec![Token::IntLit(42)]);
         interp.bind_param("x".into(), input);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "quote".into(),
-                args: vec![MacroExpr::Ident("x".into())],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "quote".into(),
+            args: vec![MacroExpr::Ident("x".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert_eq!(result.tokens, vec![Token::IntLit(42)]);
     }
@@ -833,15 +1000,10 @@ mod tests {
         interp.bind_param("a".into(), a);
         interp.bind_param("b".into(), b);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "merge_tokens".into(),
-                args: vec![
-                    MacroExpr::Ident("a".into()),
-                    MacroExpr::Ident("b".into()),
-                ],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "merge_tokens".into(),
+            args: vec![MacroExpr::Ident("a".into()), MacroExpr::Ident("b".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result.to_string(), "foo()");
@@ -853,12 +1015,10 @@ mod tests {
         let t = Tokens::new(vec![Token::IntLit(1), Token::Plus, Token::IntLit(2)]);
         interp.bind_param("t".into(), t);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "token_count".into(),
-                args: vec![MacroExpr::Ident("t".into())],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "token_count".into(),
+            args: vec![MacroExpr::Ident("t".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert_eq!(result.tokens, vec![Token::IntLit(3)]);
     }
@@ -877,15 +1037,10 @@ mod tests {
         let kind = Tokens::new(vec![Token::StrLit("ident".into())]);
         interp.bind_param("k".into(), kind);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "filter_tokens".into(),
-                args: vec![
-                    MacroExpr::Ident("t".into()),
-                    MacroExpr::Ident("k".into()),
-                ],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "filter_tokens".into(),
+            args: vec![MacroExpr::Ident("t".into()), MacroExpr::Ident("k".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         // 应该只保留 Ident("foo") 和 Ident("x")
         assert_eq!(result.len(), 2);
@@ -915,15 +1070,10 @@ mod tests {
         interp.bind_param("s".into(), src);
         interp.bind_param("p".into(), pattern);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "remove_tokens".into(),
-                args: vec![
-                    MacroExpr::Ident("s".into()),
-                    MacroExpr::Ident("p".into()),
-                ],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "remove_tokens".into(),
+            args: vec![MacroExpr::Ident("s".into()), MacroExpr::Ident("p".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         // debug(...) 被移除，剩下 ; real()
         assert_eq!(result.len(), 4);
@@ -947,15 +1097,10 @@ mod tests {
         interp.bind_param("s".into(), src);
         interp.bind_param("r".into(), rules);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "replace_tokens".into(),
-                args: vec![
-                    MacroExpr::Ident("s".into()),
-                    MacroExpr::Ident("r".into()),
-                ],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "replace_tokens".into(),
+            args: vec![MacroExpr::Ident("s".into()), MacroExpr::Ident("r".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert_eq!(result.tokens[0], Token::Ident("new".into()));
         assert_eq!(result.tokens[1], Token::Dot);
@@ -973,12 +1118,10 @@ mod tests {
         ]);
         interp.bind_param("t".into(), t);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "token_stream".into(),
-                args: vec![MacroExpr::Ident("t".into())],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "token_stream".into(),
+            args: vec![MacroExpr::Ident("t".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         // token_stream 应该填充 tree
         assert!(result.tree.is_some());
@@ -1011,12 +1154,10 @@ mod tests {
         ]);
         interp.bind_param("t".into(), t);
 
-        let body: Vec<MacroStmt> = vec![
-            MacroStmt::Expr(MacroExpr::Call {
-                func: "token_stream".into(),
-                args: vec![MacroExpr::Ident("t".into())],
-            }),
-        ];
+        let body: Vec<MacroStmt> = vec![MacroStmt::Expr(MacroExpr::Call {
+            func: "token_stream".into(),
+            args: vec![MacroExpr::Ident("t".into())],
+        })];
         let result = interp.execute_stmts(&body).unwrap();
         assert!(result.tree.is_some());
         let tree = result.tree.unwrap();

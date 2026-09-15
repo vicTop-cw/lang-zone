@@ -139,14 +139,8 @@ pub fn deps_fingerprint(deps: &[PathBuf]) -> String {
 }
 
 /// 增量编译 entry → 写入 .rs；返回 (rs 路径, exe 路径, 统计摘要)
-pub fn compile_to_rs(
-    entry: &Path,
-    cache_dir: &Path,
-) -> Result<ReloadResult, String> {
-    let base_dir = entry
-        .parent()
-        .unwrap_or(Path::new("."))
-        .to_path_buf();
+pub fn compile_to_rs(entry: &Path, cache_dir: &Path) -> Result<ReloadResult, String> {
+    let base_dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let mut ic = IncrCompiler::new(base_dir.clone(), cache_dir.to_path_buf());
     let outcome = ic.compile(entry)?;
     let rs_path = replace_ext(entry, ".lz", ".rs");
@@ -267,7 +261,10 @@ pub fn run_watch(config: WatchConfig) -> i32 {
                 child_exit_notified = true;
                 eprintln!(
                     "[watch] child exited with {}; waiting for source changes...",
-                    status.code().map(|c| c.to_string()).unwrap_or_else(|| "?".to_string())
+                    status
+                        .code()
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "?".to_string())
                 );
             }
             // 循环继续；不 spawn（避免无变更自动重启的无限循环）
@@ -292,7 +289,10 @@ pub fn run_watch(config: WatchConfig) -> i32 {
                                 eprintln!("[watch] restart {}", exe_path.display());
                                 match spawn_child(&exe_path, &config.run_args) {
                                     Some(c) => child = c,
-                                    None => eprintln!("Error: failed to relaunch {}", exe_path.display()),
+                                    None => eprintln!(
+                                        "Error: failed to relaunch {}",
+                                        exe_path.display()
+                                    ),
                                 }
                             }
                             Err(e) => {

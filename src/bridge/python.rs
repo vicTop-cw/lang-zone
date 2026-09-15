@@ -4,8 +4,8 @@
 // 实现 Bridge trait，从 TOML 清单读取导出声明并生成 pyo3 包装代码。
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta,
-    CallResolveResult, ErrorCode, ExportEntry, ExportKind, ImportResolveResult,
+    Bridge, BridgeCapability, BridgeError, BridgeLevel, BridgeMeta, CallResolveResult, ErrorCode,
+    ExportEntry, ExportKind, ImportResolveResult,
 };
 use crate::util::parse;
 use std::collections::HashMap;
@@ -18,23 +18,23 @@ use std::path::Path;
 #[derive(Debug, Clone)]
 pub struct PyExport {
     pub name: String,
-    pub args: Vec<(String, String)>,  // (name, lz_type)
-    pub ret: String,                  // lz return type
-    pub doc: String,                  // Python docstring
+    pub args: Vec<(String, String)>, // (name, lz_type)
+    pub ret: String,                 // lz return type
+    pub doc: String,                 // Python docstring
 }
 
 /// Python 导出类型声明（lz struct → Python class）
 #[derive(Debug, Clone)]
 pub struct PyTypeExport {
     pub name: String,
-    pub fields: Vec<(String, String)>,  // (field_name, lz_type)
+    pub fields: Vec<(String, String)>, // (field_name, lz_type)
     pub doc: String,
 }
 
 /// Python 模块配置
 #[derive(Debug, Clone)]
 pub struct PyModuleConfig {
-    pub name: String,            // Python 模块名
+    pub name: String, // Python 模块名
     pub version: String,
     pub description: String,
 }
@@ -80,23 +80,47 @@ impl PyO3Bridge {
     /// Point = { fields = "x: f64, y: f64", doc = "2D point" }
     /// ```
     pub fn load(path: &Path) -> Result<Self, BridgeError> {
-        let content = fs::read_to_string(path)
-            .map_err(|e| BridgeError::new(ErrorCode::ConnectionFailed,
-                format!("read {}: {}", path.display(), e), "pyo3"))?;
+        let content = fs::read_to_string(path).map_err(|e| {
+            BridgeError::new(
+                ErrorCode::ConnectionFailed,
+                format!("read {}: {}", path.display(), e),
+                "pyo3",
+            )
+        })?;
 
-        let doc = parse(&content)
-            .map_err(|e| BridgeError::new(ErrorCode::InvalidMessage,
-                format!("parse {}: {}", path.display(), e), "pyo3"))?;
+        let doc = parse(&content).map_err(|e| {
+            BridgeError::new(
+                ErrorCode::InvalidMessage,
+                format!("parse {}: {}", path.display(), e),
+                "pyo3",
+            )
+        })?;
 
         // [bridge] section
-        let bridge_sec = doc.get("bridge")
-            .ok_or_else(|| BridgeError::new(ErrorCode::InvalidMessage,
-                "missing [bridge] section", "pyo3"))?;
+        let bridge_sec = doc.get("bridge").ok_or_else(|| {
+            BridgeError::new(
+                ErrorCode::InvalidMessage,
+                "missing [bridge] section",
+                "pyo3",
+            )
+        })?;
 
         let module = PyModuleConfig {
-            name: bridge_sec.get("name").and_then(|v| v.as_str()).unwrap_or("lz_module").to_string(),
-            version: bridge_sec.get("version").and_then(|v| v.as_str()).unwrap_or("0.1.0").to_string(),
-            description: bridge_sec.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            name: bridge_sec
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("lz_module")
+                .to_string(),
+            version: bridge_sec
+                .get("version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0.1.0")
+                .to_string(),
+            description: bridge_sec
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         };
 
         // [functions] section
@@ -104,22 +128,46 @@ impl PyO3Bridge {
         if let Some(funcs_map) = doc.get("functions") {
             for (name, entry) in funcs_map.iter() {
                 let table = entry.as_table();
-                let args_str = table.and_then(|t| t.get("args")).and_then(|v| v.as_str()).unwrap_or("");
-                let ret = table.and_then(|t| t.get("ret")).and_then(|v| v.as_str()).unwrap_or("None").to_string();
-                let doc = table.and_then(|t| t.get("doc")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let args_str = table
+                    .and_then(|t| t.get("args"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let ret = table
+                    .and_then(|t| t.get("ret"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("None")
+                    .to_string();
+                let doc = table
+                    .and_then(|t| t.get("doc"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 let args: Vec<(String, String)> = if args_str.is_empty() {
                     vec![]
                 } else {
-                    args_str.split(',').filter_map(|p| {
-                        let parts: Vec<&str> = p.trim().splitn(2, ':').collect();
-                        if parts.len() == 2 {
-                            Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
-                        } else { None }
-                    }).collect()
+                    args_str
+                        .split(',')
+                        .filter_map(|p| {
+                            let parts: Vec<&str> = p.trim().splitn(2, ':').collect();
+                            if parts.len() == 2 {
+                                Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
                 };
 
-                functions.insert(name.clone(), PyExport { name: name.clone(), args, ret, doc });
+                functions.insert(
+                    name.clone(),
+                    PyExport {
+                        name: name.clone(),
+                        args,
+                        ret,
+                        doc,
+                    },
+                );
             }
         }
 
@@ -128,21 +176,40 @@ impl PyO3Bridge {
         if let Some(type_map) = doc.get("types") {
             for (name, entry) in type_map.iter() {
                 let table = entry.as_table();
-                let fields_str = table.and_then(|t| t.get("fields")).and_then(|v| v.as_str()).unwrap_or("");
-                let doc = table.and_then(|t| t.get("doc")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let fields_str = table
+                    .and_then(|t| t.get("fields"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let doc = table
+                    .and_then(|t| t.get("doc"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 let fields: Vec<(String, String)> = if fields_str.is_empty() {
                     vec![]
                 } else {
-                    fields_str.split(',').filter_map(|f| {
-                        let parts: Vec<&str> = f.trim().splitn(2, ':').collect();
-                        if parts.len() == 2 {
-                            Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
-                        } else { None }
-                    }).collect()
+                    fields_str
+                        .split(',')
+                        .filter_map(|f| {
+                            let parts: Vec<&str> = f.trim().splitn(2, ':').collect();
+                            if parts.len() == 2 {
+                                Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
                 };
 
-                types.insert(name.clone(), PyTypeExport { name: name.clone(), fields, doc });
+                types.insert(
+                    name.clone(),
+                    PyTypeExport {
+                        name: name.clone(),
+                        fields,
+                        doc,
+                    },
+                );
             }
         }
 
@@ -204,14 +271,21 @@ impl PyO3Bridge {
         out.push_str("#[pymethods]\n");
         out.push_str(&format!("impl {} {{\n", ty.name));
         out.push_str("    #[new]\n");
-        let params: Vec<String> = ty.fields.iter()
+        let params: Vec<String> = ty
+            .fields
+            .iter()
             .map(|(n, t)| format!("{}: {}", n, self.map_to_pyo3_type(t)))
             .collect();
-        let field_inits: Vec<String> = ty.fields.iter()
-            .map(|(n, _)| n.clone())
-            .collect();
-        out.push_str(&format!("    pub fn new({}) -> Self {{\n", params.join(", ")));
-        out.push_str(&format!("        {} {{ {} }}\n", ty.name, field_inits.join(", ")));
+        let field_inits: Vec<String> = ty.fields.iter().map(|(n, _)| n.clone()).collect();
+        out.push_str(&format!(
+            "    pub fn new({}) -> Self {{\n",
+            params.join(", ")
+        ));
+        out.push_str(&format!(
+            "        {} {{ {} }}\n",
+            ty.name,
+            field_inits.join(", ")
+        ));
         out.push_str("    }\n");
         out.push_str("}\n");
 
@@ -226,13 +300,23 @@ impl PyO3Bridge {
         }
         out.push_str("#[pyfunction]\n");
 
-        let params: Vec<String> = func.args.iter()
+        let params: Vec<String> = func
+            .args
+            .iter()
             .map(|(n, t)| format!("{}: {}", n, self.lz_to_rust(t)))
             .collect();
         let ret = self.lz_to_rust(&func.ret);
 
-        out.push_str(&format!("pub fn {}({}) -> {} {{\n", func.name, params.join(", "), ret));
-        out.push_str(&format!("    // TODO: delegate to lz function __py_{}\n", func.name));
+        out.push_str(&format!(
+            "pub fn {}({}) -> {} {{\n",
+            func.name,
+            params.join(", "),
+            ret
+        ));
+        out.push_str(&format!(
+            "    // TODO: delegate to lz function __py_{}\n",
+            func.name
+        ));
         out.push_str(&format!("    todo!(\"Implement __py_{}\")\n", func.name));
         out.push_str("}\n");
 
@@ -243,10 +327,16 @@ impl PyO3Bridge {
     fn generate_pymodule(&self) -> String {
         let mut out = String::new();
         out.push_str("#[pymodule]\n");
-        out.push_str(&format!("fn {}_py(_py: Python, m: &PyModule) -> PyResult<()> {{\n", self.module.name));
+        out.push_str(&format!(
+            "fn {}_py(_py: Python, m: &PyModule) -> PyResult<()> {{\n",
+            self.module.name
+        ));
 
         for name in self.functions.keys() {
-            out.push_str(&format!("    m.add_function(wrap_pyfunction!({}, m)?)?;\n", name));
+            out.push_str(&format!(
+                "    m.add_function(wrap_pyfunction!({}, m)?)?;\n",
+                name
+            ));
         }
         for name in self.types.keys() {
             out.push_str(&format!("    m.add_class::<{}>()?;\n", name));
@@ -286,9 +376,13 @@ impl PyO3Bridge {
 // ──────────────── Bridge trait ────────────────
 
 impl Bridge for PyO3Bridge {
-    fn name(&self) -> &str { "pyo3" }
+    fn name(&self) -> &str {
+        "pyo3"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::LinkTime }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::LinkTime
+    }
 
     fn capabilities(&self) -> BridgeCapability {
         BridgeCapability::FUNCTION_CALL | BridgeCapability::TYPE_REWRITE | BridgeCapability::IMPORT
@@ -302,7 +396,7 @@ impl Bridge for PyO3Bridge {
                 module_name: "pyo3".into(),
                 is_macro: false,
                 is_template: false,
-                    ret_result: false,
+                ret_result: false,
             })
         } else {
             None
@@ -314,15 +408,16 @@ impl Bridge for PyO3Bridge {
     /// 正向导入：`python::numpy` / `python::{numpy}` / `from python import numpy`
     ///
     /// 返回 PyO3 `Python::import_module` 惰性加载 shim 的入口符号 `__py_mod_<module>`。
-    fn resolve_import_full(&self, module_path: &[String], items: &[String]) -> Option<ImportResolveResult> {
+    fn resolve_import_full(
+        &self,
+        module_path: &[String],
+        items: &[String],
+    ) -> Option<ImportResolveResult> {
         // 仅处理 python 命名空间
         if module_path.first().map(|s| s.as_str()) != Some("python") {
             return None;
         }
-        let module = module_path
-            .get(1)
-            .or_else(|| items.first())
-            .cloned()?;
+        let module = module_path.get(1).or_else(|| items.first()).cloned()?;
         if !self.python_modules.contains_key(&module) {
             return None;
         }
@@ -393,10 +488,7 @@ impl Bridge for PyO3Bridge {
             ));
             out.push_str("}\n\n");
             for callable in callables {
-                out.push_str(&format!(
-                    "/// 正向调用 `{}.{}`\n",
-                    mod_name, callable
-                ));
+                out.push_str(&format!("/// 正向调用 `{}.{}`\n", mod_name, callable));
                 out.push_str(&format!(
                     "fn __py_call_{}_{}(args: &[pyo3::PyObject]) -> pyo3::PyObject {{\n",
                     mod_name, callable
@@ -428,8 +520,12 @@ impl Bridge for PyO3Bridge {
     fn meta(&self) -> BridgeMeta {
         BridgeMeta {
             version: self.module.version.clone(),
-            description: format!("PyO3 bridge: {} ({} functions, {} types)",
-                self.module.description, self.functions.len(), self.types.len()),
+            description: format!(
+                "PyO3 bridge: {} ({} functions, {} types)",
+                self.module.description,
+                self.functions.len(),
+                self.types.len()
+            ),
             provides: vec!["pyo3".into(), "python".into()],
             ..Default::default()
         }
@@ -437,25 +533,43 @@ impl Bridge for PyO3Bridge {
 
     fn list_exports(&self, kind: ExportKind) -> Vec<ExportEntry> {
         match kind {
-            ExportKind::Function => {
-                self.functions.values().map(|f| ExportEntry {
+            ExportKind::Function => self
+                .functions
+                .values()
+                .map(|f| ExportEntry {
                     name: f.name.clone(),
                     kind: ExportKind::Function,
-                    signature: format!("def {}({}) -> {}", f.name,
-                        f.args.iter().map(|(n, t)| format!("{}: {}", n, t)).collect::<Vec<_>>().join(", "),
-                        f.ret),
+                    signature: format!(
+                        "def {}({}) -> {}",
+                        f.name,
+                        f.args
+                            .iter()
+                            .map(|(n, t)| format!("{}: {}", n, t))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        f.ret
+                    ),
                     module: self.module.name.clone(),
-                }).collect()
-            }
-            ExportKind::Type => {
-                self.types.values().map(|t| ExportEntry {
+                })
+                .collect(),
+            ExportKind::Type => self
+                .types
+                .values()
+                .map(|t| ExportEntry {
                     name: t.name.clone(),
                     kind: ExportKind::Type,
-                    signature: format!("class {}: {}", t.name,
-                        t.fields.iter().map(|(n, ty)| format!("{}: {}", n, ty)).collect::<Vec<_>>().join(", ")),
+                    signature: format!(
+                        "class {}: {}",
+                        t.name,
+                        t.fields
+                            .iter()
+                            .map(|(n, ty)| format!("{}: {}", n, ty))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                     module: self.module.name.clone(),
-                }).collect()
-            }
+                })
+                .collect(),
             _ => vec![],
         }
     }
@@ -497,7 +611,9 @@ Point = { fields = "x: f64, y: f64", doc = "A 2D point" }
 
         assert_eq!(bridge.name(), "pyo3");
         assert_eq!(bridge.level(), BridgeLevel::LinkTime);
-        assert!(bridge.capabilities().contains(BridgeCapability::FUNCTION_CALL));
+        assert!(bridge
+            .capabilities()
+            .contains(BridgeCapability::FUNCTION_CALL));
         assert_eq!(bridge.functions.len(), 2);
         assert_eq!(bridge.types.len(), 1);
     }
@@ -508,8 +624,14 @@ Point = { fields = "x: f64, y: f64", doc = "A 2D point" }
         let path = create_test_manifest(&dir);
         let bridge = PyO3Bridge::load(&path).unwrap();
 
-        assert_eq!(bridge.resolve_call("greet", &[]).map(|r| r.rust_path), Some("__py_greet".to_string()));
-        assert_eq!(bridge.resolve_call("add", &[]).map(|r| r.rust_path), Some("__py_add".to_string()));
+        assert_eq!(
+            bridge.resolve_call("greet", &[]).map(|r| r.rust_path),
+            Some("__py_greet".to_string())
+        );
+        assert_eq!(
+            bridge.resolve_call("add", &[]).map(|r| r.rust_path),
+            Some("__py_add".to_string())
+        );
         assert!(bridge.resolve_call("nonexistent", &[]).is_none());
     }
 
@@ -521,21 +643,29 @@ Point = { fields = "x: f64, y: f64", doc = "A 2D point" }
         bridge.register_python_module("numpy", vec!["array".into(), "zeros".into()]);
 
         // import python::numpy
-        let imp = bridge.resolve_import_full(&["python".into(), "numpy".into()], &[]).unwrap();
+        let imp = bridge
+            .resolve_import_full(&["python".into(), "numpy".into()], &[])
+            .unwrap();
         assert_eq!(imp.rust_path, "__py_mod_numpy");
         assert!(imp.requires_shim);
         assert!(imp.feature_flags.iter().any(|f| f == "py-bridge"));
         assert!(imp.extern_crates.iter().any(|e| e == "pyo3"));
 
         // from python import numpy
-        let imp2 = bridge.resolve_import_full(&["python".into()], &["numpy".into()]).unwrap();
+        let imp2 = bridge
+            .resolve_import_full(&["python".into()], &["numpy".into()])
+            .unwrap();
         assert_eq!(imp2.rust_path, "__py_mod_numpy");
 
         // 非 python 命名空间不接管
-        assert!(bridge.resolve_import_full(&["std".into(), "io".into()], &[]).is_none());
+        assert!(bridge
+            .resolve_import_full(&["std".into(), "io".into()], &[])
+            .is_none());
 
         // 正向调用 array
-        let call = bridge.resolve_call_full("array", &["1".to_string()]).unwrap();
+        let call = bridge
+            .resolve_call_full("array", &["1".to_string()])
+            .unwrap();
         assert_eq!(call.rust_path, "__py_call_numpy_array");
         // 反向导出兜底
         let rev = bridge.resolve_call_full("add", &[]).unwrap();

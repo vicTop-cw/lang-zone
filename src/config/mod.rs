@@ -48,8 +48,8 @@ impl ProjectConfig {
 
     /// 从 TOML 字符串解析
     pub fn parse(toml_str: &str) -> Result<Self, String> {
-        let doc = mini_toml::parse(toml_str)
-            .map_err(|e| format!("Failed to parse config: {}", e))?;
+        let doc =
+            mini_toml::parse(toml_str).map_err(|e| format!("Failed to parse config: {}", e))?;
 
         let mut config = Self::default();
 
@@ -89,18 +89,30 @@ impl ProjectConfig {
                 match val {
                     // 简单版本: serde = "1.0"
                     mini_toml::TomlValue::Str(version) => {
-                        config.dependencies.push((name.clone(), version.clone(), vec![]));
+                        config
+                            .dependencies
+                            .push((name.clone(), version.clone(), vec![]));
                     }
                     // 内联表: tokio = { version = "1.0", features = "full,macros" }
                     mini_toml::TomlValue::InlineTable(table) => {
-                        let version = table.get("version")
-                            .and_then(|v| if let mini_toml::TomlValue::Str(s) = v { Some(s.clone()) } else { None })
+                        let version = table
+                            .get("version")
+                            .and_then(|v| {
+                                if let mini_toml::TomlValue::Str(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            })
                             .unwrap_or_default();
-                        let features = table.get("features")
+                        let features = table
+                            .get("features")
                             .and_then(|v| {
                                 if let mini_toml::TomlValue::Str(s) = v {
                                     Some(s.split(',').map(|s| s.trim().to_string()).collect())
-                                } else { None }
+                                } else {
+                                    None
+                                }
                             })
                             .unwrap_or_default();
                         config.dependencies.push((name.clone(), version, features));

@@ -185,7 +185,10 @@ pub fn collect_duck_impls(ir: &IrModule) -> Vec<(String, String, HashMap<String,
                                 continue;
                             }
                             let Some(arg) = args.get(pi) else { continue };
-                            let IrType::Named { path: type_name, .. } = &arg.ty else {
+                            let IrType::Named {
+                                path: type_name, ..
+                            } = &arg.ty
+                            else {
                                 continue;
                             };
                             let type_name = type_name.clone();
@@ -255,7 +258,11 @@ pub fn collect_duck_impls(ir: &IrModule) -> Vec<(String, String, HashMap<String,
                                                 IrType::named(&type_name)
                                             };
                                             bindings.insert(dg_name, self_ty);
-                                        } else if let IrType::Named { path: bp, args: bargs } = ba {
+                                        } else if let IrType::Named {
+                                            path: bp,
+                                            args: bargs,
+                                        } = ba
+                                        {
                                             // bound 实参引用的是另一个函数泛型参数 → 从调用点实参推断
                                             if fdef.generics.iter().any(|gp| &gp.name == bp) {
                                                 if let Some(pi2) = fdef.params.iter().position(|p| {
@@ -279,10 +286,7 @@ pub fn collect_duck_impls(ir: &IrModule) -> Vec<(String, String, HashMap<String,
                                             }
                                         }
                                     }
-                                    let key = format!(
-                                        "{}::{}::{:?}",
-                                        type_name, dname, bindings
-                                    );
+                                    let key = format!("{}::{}::{:?}", type_name, dname, bindings);
                                     if seen.insert((type_name.clone(), dname.to_string(), key)) {
                                         result.push((
                                             type_name.clone(),
@@ -318,7 +322,9 @@ fn check_call_site(
         let duck_bounds: Vec<&IrType> = g
             .bounds
             .iter()
-            .filter(|b| matches!(b, IrType::Named { path, .. } if ducks.contains_key(path.as_str())))
+            .filter(
+                |b| matches!(b, IrType::Named { path, .. } if ducks.contains_key(path.as_str())),
+            )
             .collect();
         if duck_bounds.is_empty() {
             continue;
@@ -330,10 +336,16 @@ fn check_call_site(
             }
             let Some(arg) = args.get(pi) else { continue };
             // 实参类型必须是具体类型（Named path 且在 types 索引中）
-            let IrType::Named { path, args: type_args } = &arg.ty else {
+            let IrType::Named {
+                path,
+                args: type_args,
+            } = &arg.ty
+            else {
                 continue;
             };
-            let Some(type_info) = types.get(path.as_str()) else { continue };
+            let Some(type_info) = types.get(path.as_str()) else {
+                continue;
+            };
             // 该具体类型已经检查过该 duck → 跳过（避免重复报错）
             if !checked.insert((path.clone(), g.name.clone())) {
                 continue;
@@ -370,10 +382,16 @@ fn check_call_site(
             continue;
         }
         let Some(arg) = args.get(pi) else { continue };
-        let IrType::Named { path, args: type_args } = &arg.ty else {
+        let IrType::Named {
+            path,
+            args: type_args,
+        } = &arg.ty
+        else {
             continue;
         };
-        let Some(type_info) = types.get(path.as_str()) else { continue };
+        let Some(type_info) = types.get(path.as_str()) else {
+            continue;
+        };
         if !checked.insert((path.clone(), dname.clone())) {
             continue;
         }
@@ -422,9 +440,14 @@ fn verify_type_satisfies_duck(
     let mut subst: HashMap<String, IrType> = HashMap::new();
     if duck.generics.is_empty() {
         subst.insert(generic_name.to_string(), IrType::named(type_name));
-    } else if let IrType::Named { args: bound_args, .. } = bound {
+    } else if let IrType::Named {
+        args: bound_args, ..
+    } = bound
+    {
         for (i, ba) in bound_args.iter().enumerate() {
-            let Some(dg) = duck.generics.get(i) else { continue };
+            let Some(dg) = duck.generics.get(i) else {
+                continue;
+            };
             let dname = dg.name.clone();
             let is_self = matches!(ba, IrType::Generic(n) if n == generic_name)
                 || matches!(ba, IrType::Named { path, .. } if path == generic_name);
@@ -440,9 +463,10 @@ fn verify_type_satisfies_duck(
             } else if let IrType::Named { path, args } = ba {
                 // bound 实参引用的是函数泛型参数 → 从调用点实参推断其实际类型
                 if fdef_generics.iter().any(|gp| &gp.name == path) {
-                    if let Some(pi) = fdef_params.iter().position(|p| {
-                        matches!(&p.ty, IrType::Generic(n) if n == path)
-                    }) {
+                    if let Some(pi) = fdef_params
+                        .iter()
+                        .position(|p| matches!(&p.ty, IrType::Generic(n) if n == path))
+                    {
                         if let Some(at) = arg_tys.get(pi) {
                             subst.insert(dname, at.clone());
                         }
@@ -489,10 +513,7 @@ fn verify_type_satisfies_duck(
                 .keys()
                 .any(|name| regex_like_match(pat, name));
             if !matched {
-                errors.push(format!(
-                    "{prefix}: no method matches pattern `{}`",
-                    pat
-                ));
+                errors.push(format!("{prefix}: no method matches pattern `{}`", pat));
             }
             continue; // 正则约束只检查存在性，签名逐项检查留给普通方法
         }
@@ -533,11 +554,9 @@ fn verify_type_satisfies_duck(
                 Some((lo, hi)) if lo == hi => {
                     format!("exactly {}", duck_params.len() + lo)
                 }
-                Some((lo, hi)) => format!(
-                    "{} to {}",
-                    duck_params.len() + lo,
-                    duck_params.len() + hi
-                ),
+                Some((lo, hi)) => {
+                    format!("{} to {}", duck_params.len() + lo, duck_params.len() + hi)
+                }
                 None => duck_params.len().to_string(),
             };
             errors.push(format!(
@@ -585,7 +604,9 @@ fn verify_type_satisfies_duck(
             let Some(IrType::Named { path: rel_path, .. }) = subst.get(rel_owner) else {
                 continue; // 关系方未绑定具体类型 → 保守跳过
             };
-            let Some(rel_info) = types.get(rel_path.as_str()) else { continue };
+            let Some(rel_info) = types.get(rel_path.as_str()) else {
+                continue;
+            };
             let Some(rel_ty) = rel_info.fields.get(rel_name) else {
                 errors.push(format!(
                     "{prefix}: related type `{rel_path}` missing field `{rel_name}`"
@@ -685,7 +706,9 @@ fn verify_type_satisfies_duck(
         if sname == &duck.name {
             continue;
         }
-        let Some(nested_info) = types.get(type_name) else { continue };
+        let Some(nested_info) = types.get(type_name) else {
+            continue;
+        };
         if depth >= 8 {
             continue;
         }
@@ -889,7 +912,11 @@ fn match_regex_at(
                 // 每个备选：递归匹配 [start, end) 内容 + 后续
                 for k in 0..alts.len() {
                     let start = alts[k];
-                    let stop = if k + 1 < alts.len() { alts[k + 1] - 1 } else { end };
+                    let stop = if k + 1 < alts.len() {
+                        alts[k + 1] - 1
+                    } else {
+                        end
+                    };
                     let mut rest_ok = false;
                     // 尝试备选内容匹配任意长度后，继续后续模式
                     for split in si..=s.len() {
@@ -991,7 +1018,11 @@ fn char_matches(pat: char, c: char) -> bool {
 
 /// 判断类型中引用的 duck 泛型是否全部已在 subst 中确定绑定
 /// （未确定的 duck 泛型引用 → 返回 false，调用方保守跳过，避免误报）
-fn ty_fully_bound(ty: &IrType, duck_generics: &[GenericParam], subst: &HashMap<String, IrType>) -> bool {
+fn ty_fully_bound(
+    ty: &IrType,
+    duck_generics: &[GenericParam],
+    subst: &HashMap<String, IrType>,
+) -> bool {
     match ty {
         IrType::Named { path, args } => {
             if duck_generics.iter().any(|g| &g.name == path) {
@@ -1000,9 +1031,7 @@ fn ty_fully_bound(ty: &IrType, duck_generics: &[GenericParam], subst: &HashMap<S
                 args.iter().all(|a| ty_fully_bound(a, duck_generics, subst))
             }
         }
-        IrType::Generic(n) => {
-            !duck_generics.iter().any(|g| &g.name == n) || subst.contains_key(n)
-        }
+        IrType::Generic(n) => !duck_generics.iter().any(|g| &g.name == n) || subst.contains_key(n),
         IrType::Option(inner) | IrType::Ref(inner) | IrType::MutRef(inner) => {
             ty_fully_bound(inner, duck_generics, subst)
         }
@@ -1121,11 +1150,7 @@ fn unify_sig_type(
             }
         }
         IrType::Result { ok, err } => {
-            if let IrType::Result {
-                ok: cok,
-                err: cerr,
-            } = c
-            {
+            if let IrType::Result { ok: cok, err: cerr } = c {
                 unify_sig_type(ok, cok, is_duck_generic, subst);
                 unify_sig_type(err, cerr, is_duck_generic, subst);
             }
@@ -1211,7 +1236,9 @@ fn walk_stmt(stmt: &Stmt, f: &mut dyn FnMut(&Expr)) {
                 walk_block(b, f);
             }
         }
-        Stmt::For { iter, guard, body, .. } => {
+        Stmt::For {
+            iter, guard, body, ..
+        } => {
             walk_expr(iter, f);
             if let Some(g) = guard {
                 walk_expr(g, f);
@@ -1230,7 +1257,9 @@ fn walk_stmt(stmt: &Stmt, f: &mut dyn FnMut(&Expr)) {
             }
             walk_block(body, f);
         }
-        Stmt::WhileLet { expr, guard, body, .. } => {
+        Stmt::WhileLet {
+            expr, guard, body, ..
+        } => {
             walk_expr(expr, f);
             if let Some(g) = guard {
                 walk_expr(g, f);
@@ -1353,7 +1382,9 @@ fn walk_expr(expr: &Expr, f: &mut dyn FnMut(&Expr)) {
             }
         }
         ExprKind::BlockExpr { block } => walk_block(block, f),
-        ExprKind::TupleLit(items) | ExprKind::Tuple(items) | ExprKind::ListLit(items)
+        ExprKind::TupleLit(items)
+        | ExprKind::Tuple(items)
+        | ExprKind::ListLit(items)
         | ExprKind::List(items) => {
             for e in items {
                 walk_expr(e, f);

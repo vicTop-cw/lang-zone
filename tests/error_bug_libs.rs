@@ -34,7 +34,9 @@ fn error_bug_all_rejected() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
     let mut leaked: Vec<String> = Vec::new();
     for lz in &cases {
-        let out = Command::new(&bin).arg(lz).output()
+        let out = Command::new(&bin)
+            .arg(lz)
+            .output()
             .map_err(|e| format!("spawn err: {}", e))
             .expect("spawn lang-zone");
         if out.status.success() {

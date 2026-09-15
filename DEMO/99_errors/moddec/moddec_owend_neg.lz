@@ -1,0 +1,4 @@
+// 反例：owend 非 owned 的合法别名 → E-MODDEC-UNKNOWN (AC13)
+def main() =
+    owend x = 1
+    print(x)

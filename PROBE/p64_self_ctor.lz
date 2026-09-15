@@ -1,0 +1,11 @@
+struct Config =
+    host: str
+    port: int
+    debug: bool
+    def __new__(host: str, port: int, debug: bool) -> Self = Self(host: host, port: port, debug: false)
+
+def main() =
+    let c = Config(host: "localhost", port: 8080, debug: true)
+    println(c.host)
+    println(c.port)
+    println(c.debug)

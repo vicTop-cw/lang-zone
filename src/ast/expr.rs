@@ -1,7 +1,7 @@
 // Lang-Zong 编译器 — ast/expr.rs
 // 表达式类 AST 节点：Expr, BuildKind, BinOp, UnaryOp, AssignOp
 
-use super::stmt::{Stmt, MatchArm};
+use super::stmt::{MatchArm, Stmt};
 use crate::types::Type;
 
 #[derive(Debug, Clone)]
@@ -14,7 +14,7 @@ pub enum Expr {
     BoolLit(bool),
     NoneLit,
     Ident(String),
-    DefaultExpr,           // default 关键字：隐式默认值（触发 __implicit_default__）
+    DefaultExpr, // default 关键字：隐式默认值（触发 __implicit_default__）
 
     // 容器
     ListLit(Vec<Expr>),
@@ -181,16 +181,35 @@ pub enum BuildKind {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
-    Add, Sub, Mul, Div, Mod, Pow,
-    Eq, Ne, Lt, Gt, Le, Ge,
-    And, Or,
-    BitAnd, BitOr, BitXor, Shl, Shr,
-    In, NotIn, Is,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+    Eq,
+    Ne,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    In,
+    NotIn,
+    Is,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnaryOp {
-    Neg, Not, BitNot,
+    Neg,
+    Not,
+    BitNot,
     /// 一元 `+` 正号（06d §三：`+a` → `a.__pos__()`；内建数值为恒等）
     Pos,
     /// 一元 `*` 解引用（`*(&(*boxed))` 前缀叠写，12-操作符.md §1.18）
@@ -201,6 +220,16 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AssignOp {
-    Eq, AddEq, SubEq, MulEq, DivEq, ModEq,
-    AndEq, OrEq, XorEq, ShlEq, ShrEq, PowEq,
+    Eq,
+    AddEq,
+    SubEq,
+    MulEq,
+    DivEq,
+    ModEq,
+    AndEq,
+    OrEq,
+    XorEq,
+    ShlEq,
+    ShrEq,
+    PowEq,
 }

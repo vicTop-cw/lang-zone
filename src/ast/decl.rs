@@ -2,6 +2,7 @@
 // 声明类 AST 节点：Module, Function, StructDef, TraitDef, ImplDef 等
 
 use super::expr::Expr;
+use super::modifier::Modifiers;
 use super::stmt::Stmt;
 use crate::types::Type;
 
@@ -38,6 +39,12 @@ pub struct Module {
 pub struct MagicDef {
     pub method_name: String, // __str__
     pub function: Function,  // def __str__(self: MyStruct) -> str
+    /// 方法定义式（06f §七.1）块名：`magic map<T, R> = def __map__(...) ...`
+    /// Some = 方法定义式（块名即全局函数名，如 map）；None = 声明式 `magic __xxx__:`
+    pub block_name: Option<String>,
+    /// 块级泛型参数表（方法定义式 `magic map<T, R>` 的 T, R）；声明式为 []。
+    /// 解析后若 def 自身无泛型，会同时写入 function.generics 供 builder 作 trait 泛型。
+    pub block_generics: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +68,8 @@ pub struct ConstDef {
     pub ty: Option<Type>,
     pub value: Expr,
     pub mutable: bool,
+    /// 修饰轴集合（承载 `@const/@comptime/@static/@lazy_static/@source/...`）
+    pub mods: Modifiers,
 }
 
 /// 可变参数模式：`..` 是变参注入标记（非边界分隔符），最多出现 2 次。
@@ -135,6 +144,10 @@ pub struct Param {
     pub is_mut: bool,
     pub is_owned: bool,
     pub is_ref: bool,
+    /// 形参级 comptime 修饰：`def f(comptime n: int)` —— 要求调用实参编译期已知
+    pub comptime: bool,
+    /// 修饰轴集合（承载 `@mut/@ref/@owned/@comptime/...` 与融合型）
+    pub mods: Modifiers,
 }
 
 #[derive(Debug, Clone)]

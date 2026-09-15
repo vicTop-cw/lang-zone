@@ -1,0 +1,8 @@
+// M2 反例：comptime 形参的实参为运行时变量 → 应编译失败
+def repeat(comptime n: int, s: str) -> str = s
+
+def bad(x: int) -> str =
+    repeat(x, "runtime-bad")
+
+def main() =
+    print(bad(3))

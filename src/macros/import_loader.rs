@@ -6,19 +6,20 @@
 // - 递归加载依赖宏模块（用 ImportResolver 做循环检测）
 // - 仅宏模块（含 #!bin macro）可被 macro import
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use crate::lexer::Token;
 use crate::lexer::Lexer;
+use crate::lexer::Token;
 use crate::macros::expand::{
-    extract_macro_defs, extract_template_defs,
-    MacroRegistry, TemplateRegistry,
+    extract_macro_defs, extract_template_defs, MacroRegistry, TemplateRegistry,
 };
 use crate::util::import::ImportResolver;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// 检测 source 首行是否为 `#!bin macro` 宏模块指令
 pub fn is_macro_module_source(source: &str) -> bool {
-    source.lines().next()
+    source
+        .lines()
+        .next()
         .map(|line| {
             let t = line.trim();
             t == "#!bin macro" || (t.starts_with("#!bin") && t.contains("macro"))
@@ -42,26 +43,44 @@ pub fn load_macro_imports(
         // 检测 `macro import`
         if tokens[i] == Token::Macro {
             let mut j = i + 1;
-            while j < len && matches!(&tokens[j], Token::Newline | Token::Indent) { j += 1; }
+            while j < len && matches!(&tokens[j], Token::Newline | Token::Indent) {
+                j += 1;
+            }
             if j < len && tokens[j] == Token::Import {
                 j += 1;
                 let mut path = Vec::new();
                 // 在同一行内收集路径段（不跨过 Newline）
                 loop {
-                    while j < len && tokens[j] == Token::Indent { j += 1; }
+                    while j < len && tokens[j] == Token::Indent {
+                        j += 1;
+                    }
                     if let Token::Ident(n) = &tokens[j] {
                         path.push(n.clone());
                         j += 1;
-                    } else { break; }
-                    while j < len && tokens[j] == Token::Indent { j += 1; }
-                    if j < len && tokens[j] == Token::PathSep { j += 1; } else { break; }
+                    } else {
+                        break;
+                    }
+                    while j < len && tokens[j] == Token::Indent {
+                        j += 1;
+                    }
+                    if j < len && tokens[j] == Token::PathSep {
+                        j += 1;
+                    } else {
+                        break;
+                    }
                 }
                 // 跳过 as Alias（同行内，初版忽略别名）
-                while j < len && tokens[j] == Token::Indent { j += 1; }
+                while j < len && tokens[j] == Token::Indent {
+                    j += 1;
+                }
                 if j < len && tokens[j] == Token::As {
                     j += 1;
-                    while j < len && tokens[j] == Token::Indent { j += 1; }
-                    if j < len && matches!(&tokens[j], Token::Ident(_)) { j += 1; }
+                    while j < len && tokens[j] == Token::Indent {
+                        j += 1;
+                    }
+                    if j < len && matches!(&tokens[j], Token::Ident(_)) {
+                        j += 1;
+                    }
                 }
                 let stmt_end = find_stmt_end(tokens, j);
                 ranges.push(i);
@@ -85,7 +104,9 @@ fn load_module_recursive(
     templates: &mut TemplateRegistry,
 ) -> Result<(), String> {
     let candidates = ImportResolver::resolve_path(path, base_dir);
-    let file: PathBuf = candidates.into_iter().find(|p| p.exists())
+    let file: PathBuf = candidates
+        .into_iter()
+        .find(|p| p.exists())
         .ok_or_else(|| format!("macro module not found: {}", path.join("::")))?;
 
     // 循环依赖检测
@@ -125,9 +146,17 @@ fn find_stmt_end(tokens: &[Token], start: usize) -> usize {
     let mut indent: i32 = 0;
     while i < len {
         match &tokens[i] {
-            Token::Newline => { if indent <= 0 { return i + 1; } }
+            Token::Newline => {
+                if indent <= 0 {
+                    return i + 1;
+                }
+            }
             Token::Indent => indent += 1,
-            Token::Dedent => { if indent > 0 { indent -= 1; } }
+            Token::Dedent => {
+                if indent > 0 {
+                    indent -= 1;
+                }
+            }
             _ => {}
         }
         i += 1;

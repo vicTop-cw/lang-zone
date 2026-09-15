@@ -18,7 +18,11 @@ fn builtins_rlib() -> PathBuf {
             .flatten()
             .map(|e| e.path())
             .filter(|p| {
-                let n = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let n = p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 n.starts_with("liblz_builtins-") && n.ends_with(".rlib")
             })
             .collect();
@@ -59,7 +63,9 @@ fn run_lib(name: &str) -> Result<String, String> {
 
     let _ = std::fs::create_dir_all(lib_dir.join("debug"));
 
-    let out = Command::new(&bin).arg(&lz).output()
+    let out = Command::new(&bin)
+        .arg(&lz)
+        .output()
         .map_err(|e| format!("lz compile err: {}", e))?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).to_string());
@@ -80,7 +86,8 @@ fn run_lib(name: &str) -> Result<String, String> {
         return Err(String::from_utf8_lossy(&rc.stderr).to_string());
     }
 
-    let run = Command::new(&exe).output()
+    let run = Command::new(&exe)
+        .output()
         .map_err(|e| format!("run err: {}", e))?;
     if !run.status.success() {
         return Err(format!(

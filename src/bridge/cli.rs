@@ -4,8 +4,7 @@
 // 实现 Bridge trait，生成子进程管理的 Rust 代码。
 
 use crate::bridge::core::{
-    Bridge, BridgeCapability, BridgeLevel, BridgeMeta,
-    CallResolveResult, ExportEntry, ExportKind,
+    Bridge, BridgeCapability, BridgeLevel, BridgeMeta, CallResolveResult, ExportEntry, ExportKind,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -16,12 +15,12 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct CliEndpoint {
     pub name: String,
-    pub command: String,          // 可执行文件路径
-    pub args: Vec<String>,        // 命令行参数
-    pub timeout_ms: u64,          // 超时（毫秒）
-    pub max_retries: u32,         // 最大重试次数
+    pub command: String,             // 可执行文件路径
+    pub args: Vec<String>,           // 命令行参数
+    pub timeout_ms: u64,             // 超时（毫秒）
+    pub max_retries: u32,            // 最大重试次数
     pub format: SerializationFormat, // 序列化格式
-    pub pool_size: usize,         // 进程池大小（0=无池，每次启动新进程）
+    pub pool_size: usize,            // 进程池大小（0=无池，每次启动新进程）
 }
 
 /// 序列化格式
@@ -56,7 +55,9 @@ pub struct CliBridge {
 
 impl CliBridge {
     pub fn new() -> Self {
-        CliBridge { endpoints: HashMap::new() }
+        CliBridge {
+            endpoints: HashMap::new(),
+        }
     }
 
     pub fn register(&mut self, endpoint: CliEndpoint) {
@@ -175,9 +176,13 @@ impl CliBridge {
 }
 
 impl Bridge for CliBridge {
-    fn name(&self) -> &str { "cli" }
+    fn name(&self) -> &str {
+        "cli"
+    }
 
-    fn level(&self) -> BridgeLevel { BridgeLevel::InterProcess }
+    fn level(&self) -> BridgeLevel {
+        BridgeLevel::InterProcess
+    }
 
     fn capabilities(&self) -> BridgeCapability {
         BridgeCapability::FUNCTION_CALL
@@ -203,28 +208,29 @@ impl Bridge for CliBridge {
     }
 
     fn resolve_call_full(&self, func_name: &str, _args: &[String]) -> Option<CallResolveResult> {
-        self.gen_call(func_name, _args).map(|rust_path| {
-            CallResolveResult {
+        self.gen_call(func_name, _args)
+            .map(|rust_path| CallResolveResult {
                 rust_path,
                 shim: String::new(),
                 module_name: "cli".into(),
                 is_macro: false,
                 is_template: false,
-                    ret_result: false,
-            }
-        })
+                ret_result: false,
+            })
     }
 
     fn list_exports(&self, kind: ExportKind) -> Vec<ExportEntry> {
         match kind {
-            ExportKind::Function => {
-                self.endpoints.keys().map(|name| ExportEntry {
+            ExportKind::Function => self
+                .endpoints
+                .keys()
+                .map(|name| ExportEntry {
                     name: name.clone(),
                     kind: ExportKind::Function,
                     signature: format!("cli endpoint: {}", name),
                     module: "cli".into(),
-                }).collect()
-            }
+                })
+                .collect(),
             _ => vec![],
         }
     }

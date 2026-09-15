@@ -42,10 +42,9 @@ pub fn infer_path(input: &Path) -> Result<LziFile, String> {
 
 /// 推断单个 `.lz` 文件，返回 (模块名, 推断后的 Module, 错误列表)。
 fn infer_file(path: &Path) -> Result<(String, Module, Vec<String>), String> {
-    let source = fs::read_to_string(path)
-        .map_err(|e| format!("read error: {}", e))?;
-    let mut module = parse_module_from_source(&source)
-        .map_err(|e| format!("parse error: {}", e))?;
+    let source = fs::read_to_string(path).map_err(|e| format!("read error: {}", e))?;
+    let mut module =
+        parse_module_from_source(&source).map_err(|e| format!("parse error: {}", e))?;
 
     let module_name = derive_module_name(path);
     module.name = Some(module_name.clone());
@@ -66,10 +65,19 @@ fn module_to_lzi(module: &Module, unresolved: &mut Vec<String>) -> LziModule {
     }
 
     // 常量
-    for ConstDef { name, ty, value, .. } in &module.consts {
+    for ConstDef {
+        name, ty, value, ..
+    } in &module.consts
+    {
         if let Some(t) = ty {
             let evaluated = crate::eval::eval_const_expr(value);
-            lzi.consts.insert(name.clone(), crate::lzi::LziConst { ty: type_to_lz_string(t), value: evaluated });
+            lzi.consts.insert(
+                name.clone(),
+                crate::lzi::LziConst {
+                    ty: type_to_lz_string(t),
+                    value: evaluated,
+                },
+            );
         } else {
             unresolved.push(format!("const '{}': type could not be inferred", name));
         }
@@ -77,7 +85,8 @@ fn module_to_lzi(module: &Module, unresolved: &mut Vec<String>) -> LziModule {
 
     // 结构体
     for s in &module.structs {
-        lzi.structs.insert(s.name.clone(), struct_to_lzi(s, unresolved));
+        lzi.structs
+            .insert(s.name.clone(), struct_to_lzi(s, unresolved));
     }
 
     // 顶层函数
@@ -154,10 +163,7 @@ fn function_to_lzi(f: &Function, unresolved: &mut Vec<String>) -> Option<LziFunc
 
     let mut generic_bounds = HashMap::new();
     for (name, bounds) in &f.generic_bounds {
-        generic_bounds.insert(
-            name.clone(),
-            bounds.iter().map(type_to_lz_string).collect(),
-        );
+        generic_bounds.insert(name.clone(), bounds.iter().map(type_to_lz_string).collect());
     }
 
     let mut where_clause = HashMap::new();
@@ -359,11 +365,7 @@ pub fn infer_path_cross_module(input: &Path) -> Result<LziFile, String> {
     let mut phase1_errors: Vec<String> = Vec::new();
 
     // 如果输入是目录，模块名应相对于该目录推导
-    let base_dir: Option<&Path> = if input.is_dir() {
-        Some(input)
-    } else {
-        None
-    };
+    let base_dir: Option<&Path> = if input.is_dir() { Some(input) } else { None };
 
     for path in &entries {
         match infer_file(path) {
@@ -393,7 +395,9 @@ pub fn infer_path_cross_module(input: &Path) -> Result<LziFile, String> {
         let source = match fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
-                result.unresolved.push(format!("{}: Phase2 read error: {}", path.display(), e));
+                result
+                    .unresolved
+                    .push(format!("{}: Phase2 read error: {}", path.display(), e));
                 continue;
             }
         };
@@ -401,7 +405,9 @@ pub fn infer_path_cross_module(input: &Path) -> Result<LziFile, String> {
         let mut module = match parse_module_from_source(&source) {
             Ok(m) => m,
             Err(e) => {
-                result.unresolved.push(format!("{}: Phase2 parse error: {}", path.display(), e));
+                result
+                    .unresolved
+                    .push(format!("{}: Phase2 parse error: {}", path.display(), e));
                 continue;
             }
         };
@@ -419,8 +425,10 @@ pub fn infer_path_cross_module(input: &Path) -> Result<LziFile, String> {
         let imported_modules = collect_imported_modules(&module);
 
         // 预注入跨模块 struct 定义和 type_alias
-        let injected_structs = inject_cross_module_defs(&mut module, &phase1, &imported_modules, &module_name);
-        let injected_aliases = inject_cross_module_aliases(&mut module, &phase1, &imported_modules, &module_name);
+        let injected_structs =
+            inject_cross_module_defs(&mut module, &phase1, &imported_modules, &module_name);
+        let injected_aliases =
+            inject_cross_module_aliases(&mut module, &phase1, &imported_modules, &module_name);
 
         // 构建 LziRegistry（从 Phase 1 其他模块的签名）
         let registry = build_phase1_registry(&phase1, &module_name);
@@ -522,8 +530,11 @@ fn inject_cross_module_aliases(
     imported: &[String],
     _current_module: &str,
 ) -> usize {
-    let local_alias_names: HashSet<String> =
-        module.type_aliases.iter().map(|ta| ta.name.clone()).collect();
+    let local_alias_names: HashSet<String> = module
+        .type_aliases
+        .iter()
+        .map(|ta| ta.name.clone())
+        .collect();
 
     let mut injected = 0;
     for import_name in imported {

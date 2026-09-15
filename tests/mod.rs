@@ -8,9 +8,9 @@
 // 注：原 compile_demos（AST→RUST 全量代码生成路径）因违反 IR-only 技术路线约束，
 // 已移入 tests/deprecated/ 并停用（见 issues/2026-08-05-tech-debt-compile-demos-ast-rust.md）。
 
-mod reject_errors;
+mod cython_backend;
+mod fuzz_smoke;
 mod ir_snapshots;
 mod lz_semantic_cases;
+mod reject_errors;
 mod reject_more;
-mod fuzz_smoke;
-mod cython_backend;

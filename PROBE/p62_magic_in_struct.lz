@@ -1,0 +1,10 @@
+struct P =
+    v: int
+    magic __eq__(ref self, other: P) -> bool =
+        self.v == other.v
+
+def main() =
+    a = P(v: 1)
+    b = P(v: 1)
+    if a == b:
+        print(1)
