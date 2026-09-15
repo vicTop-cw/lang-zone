@@ -1,0 +1,90 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 1：用 LZ 实现 LZIR 类型系统（IrType）+ display 序列化
+// 对齐 src/ir/types.rs（枚举）+ src/ir/display.rs（输出格式）
+// ═══════════════════════════════════════════════════════════════
+
+// ── IrType 定义（16 变体，递归自引用）──
+enum IrType:
+    Int
+    F64
+    Str
+    Bool
+    Unit
+    Never
+    Any
+    Self_
+    Named(path: str, args: List<IrType>)
+    Option(inner: IrType)
+    Result(ok: IrType, err: IrType)
+    Tuple(elems: List<IrType>)
+    FnType(params: List<IrType>, ret: IrType)
+    Ref(inner: IrType)
+    MutRef(inner: IrType)
+    Generic(name: str)
+
+// ── display_type：递归渲染 IrType 为字符串（对齐 Rust display.rs）──
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.F64 => "f64"
+        case IrType.Str => "str"
+        case IrType.Bool => "bool"
+        case IrType.Unit => "()"
+        case IrType.Never => "!"
+        case IrType.Any => "?"
+        case IrType.Self_ => "Self"
+        case IrType.Generic(name: g) => g
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + display_list(a) + ">" if a.len() > 0 else "")
+        case IrType.Option(inner: i) => "Option<" + display_type(i) + ">"
+        case IrType.Result(ok: o, err: e) => "Result<" + display_type(o) + ", " + display_type(e) + ">"
+        case IrType.Tuple(elems: es) =>
+            "(" + display_list(es) + ")"
+        case IrType.FnType(params: ps, ret: r) =>
+            "fn(" + display_list(ps) + ") -> " + display_type(r)
+        case IrType.Ref(inner: i) => "&" + display_type(i)
+        case IrType.MutRef(inner: i) => "&mut " + display_type(i)
+
+// ── display_list：递归渲染 IrType 列表（逗号分隔，空列表 → ""）──
+def display_list(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        let head = display_type(ts[0])
+        if ts.len() > 1:
+            head + ", " + display_list(tail(ts))
+        else:
+            head
+
+// ── tail：列表去掉首元素（自举用：递归遍历列表）──
+def tail(ts: List<IrType>) -> List<IrType> =
+    let mut out: List<IrType> = []
+    for i in 1..ts.len():
+        out = out + [ts[i]]
+    out
+
+// ── main：构造典型类型并打印（与 Rust --emit=ir 对比）──
+def main() =
+    // Vec<int>
+    let v1 = IrType.Named(path: "Vec", args: [IrType.Int])
+    print(display_type(v1))                          // Vec<int>
+    // Option<Vec<int>>
+    let v2 = IrType.Named(path: "Vec", args: [IrType.Int])
+    let ov = IrType.Option(inner: v2)
+    print(display_type(ov))                          // Option<Vec<int>>
+    // fn(int, str) -> bool
+    let f = IrType.FnType(params: [IrType.Int, IrType.Str], ret: IrType.Bool)
+    print(display_type(f))                           // fn(int, str) -> bool
+    // (int, f64)
+    let tup = IrType.Tuple(elems: [IrType.Int, IrType.F64])
+    print(display_type(tup))                         // (int, f64)
+    // Result<str, int>
+    let res = IrType.Result(ok: IrType.Str, err: IrType.Int)
+    print(display_type(res))                         // Result<str, int>
+    // &mut Vec<int>
+    let v3 = IrType.Named(path: "Vec", args: [IrType.Int])
+    let m = IrType.MutRef(inner: v3)
+    print(display_type(m))                           // &mut Vec<int>
+    // 泛型 T
+    let g = IrType.Generic(name: "T")
+    print(display_type(g))                           // T

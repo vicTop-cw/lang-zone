@@ -582,6 +582,21 @@ fn compile_main(args: Vec<String>) -> i32 {
         }
     }
 
+    // --emit=rs-lz: 输出 LZ 版 Rust codegen 源码（自举路线 B：LZ 实现 Rust 代码生成）
+    if args.iter().any(|a| a == "--emit=rs-lz") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                let rs_lz_src = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source(&ir_module);
+                println!("{rs_lz_src}");
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("RS-LZ emission error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // 默认 codegen 路径: AST → LZIR → Rust（IR 路线；原 AST 直接 codegen 与
     // 自举路线 B 的 rs-lz/ir-lz/lex-lz/parse-lz 均已移除，仅保留此单一 IR 路线）
     match build_ir_opt(&module, lzi_registry.as_ref()) {
