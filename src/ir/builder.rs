@@ -4130,7 +4130,18 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
         AstExpr::BoolLit(b) => ExprKind::Lit(LitKind::Bool(*b)),
         AstExpr::NoneLit => ExprKind::Lit(LitKind::None_),
         AstExpr::DefaultExpr => ExprKind::Default,
-        AstExpr::Ident(name) => ExprKind::Var(name.clone()),
+        AstExpr::Ident(name) => {
+            // comptime const 内联：顶层 `comptime const X = ...` 求值后，
+            // 普通表达式中的 X 引用直接内联为字面量（而非运行时变量引用）
+            if let Some(cv) = ctx.comptime_consts.get(name.as_str()) {
+                match comptime_value_to_lit(cv) {
+                    Some(kind) => kind,
+                    None => ExprKind::Var(name.clone()),
+                }
+            } else {
+                ExprKind::Var(name.clone())
+            }
+        }
         AstExpr::Paren(inner) => ExprKind::Paren(Box::new(convert_expr(inner, ctx))),
         // 列表展开元素：透传为 IR Spread（codegen 在 ListLit 内降级为 extend 块）
         AstExpr::Spread(inner) => ExprKind::Spread(Box::new(convert_expr(inner, ctx))),

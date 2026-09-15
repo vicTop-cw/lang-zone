@@ -1125,8 +1125,20 @@ impl ParserExprExt for Parser {
                         Ok(Expr::Comptime(Box::new(inner)))
                     }
                 } else {
-                    let inner = self.parse_expr()?;
-                    Ok(Expr::Comptime(Box::new(inner)))
+                    // comptime <换行> <缩进块> — 等价于 comptime: 块（省略冒号）
+                    let save_pos = self.pos;
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let block = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        Ok(Expr::Comptime(Box::new(Expr::BlockExpr(block))))
+                    } else {
+                        // 回退：comptime <expr> — 编译期表达式
+                        self.pos = save_pos;
+                        let inner = self.parse_expr()?;
+                        Ok(Expr::Comptime(Box::new(inner)))
+                    }
                 }
             }
             Token::LParen => {

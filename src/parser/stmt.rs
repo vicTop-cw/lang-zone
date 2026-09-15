@@ -329,11 +329,22 @@ impl ParserStmtExt for Parser {
                     self.expect(Token::Dedent)?;
                     Ok(Stmt::Comptime { body })
                 } else {
-                    // comptime <expr> — 编译期表达式语句（print 调试输出等）
-                    let expr = self.parse_expr()?;
-                    Ok(Stmt::Comptime {
-                        body: vec![Stmt::Expr(expr)],
-                    })
+                    // comptime <换行> <缩进块> — 等价于 comptime: 块（省略冒号）
+                    let save_pos = self.pos;
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let body = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        Ok(Stmt::Comptime { body })
+                    } else {
+                        // 回退：comptime <expr> — 编译期表达式语句（print 调试输出等）
+                        self.pos = save_pos;
+                        let expr = self.parse_expr()?;
+                        Ok(Stmt::Comptime {
+                            body: vec![Stmt::Expr(expr)],
+                        })
+                    }
                 }
             }
             Token::If => {
