@@ -3614,12 +3614,26 @@ impl CodeGen {
             self.emit_line("return __lz_ext_ret;");
         } else if is_async_main {
             // async main → 使用 block_on 包装：fn main() { __block_on(async { body }) }
-            self.emit_line("let __async_main = async {");
-            self.indent += 1;
-            self.gen_block_inner(&f.body);
-            self.indent -= 1;
-            self.emit_line("};");
-            self.emit_line("__block_on(__async_main);");
+            // @init：模块初始化函数按声明顺序注入 async 块开头
+            if !self.init_fns.is_empty() {
+                let init_fns = self.init_fns.clone();
+                self.emit_line("let __async_main = async {");
+                self.indent += 1;
+                for init_name in &init_fns {
+                    self.emit_line(&format!("{}();", init_name));
+                }
+                self.gen_block_inner(&eff_body);
+                self.indent -= 1;
+                self.emit_line("};");
+                self.emit_line("__block_on(__async_main);");
+            } else {
+                self.emit_line("let __async_main = async {");
+                self.indent += 1;
+                self.gen_block_inner(&eff_body);
+                self.indent -= 1;
+                self.emit_line("};");
+                self.emit_line("__block_on(__async_main);");
+            }
         } else {
             // @init：模块初始化函数按声明顺序注入 main 开头
             if f.name == "main" && !self.init_fns.is_empty() {
@@ -15582,6 +15596,11 @@ fn collect_unknown_extern_fns(module: &IrModule) -> std::collections::HashMap<St
 // 把 @parallel 函数体内的 `xs.map(f)` 方法调用重写为
 // `lz_builtins::__lz_par_map(xs, f)`（std::thread 分块并行）。
 
+/// 判断 IR 类型是否为 List（@parallel 改写条件收窄用）。
+fn is_list_type(ty: &IrType) -> bool {
+    matches!(ty, IrType::Named { path, .. } if path == "List")
+}
+
 fn rewrite_parallel_block(block: &mut Block) {
     for stmt in &mut block.stmts {
         rewrite_parallel_stmt(stmt);
@@ -15680,8 +15699,13 @@ fn rewrite_parallel_stmt(stmt: &mut Stmt) {
 
 fn rewrite_parallel_expr(expr: &mut Expr) {
     // `xs.map(lambda)` → `__lz_par_map(xs, lambda)`
+    // 收窄条件：仅当 receiver 是 List 类型、lambda 参数数为 1 时改写
     if let ExprKind::MethodCall { receiver, method, args } = &mut expr.kind {
-        if method == "map" && args.len() == 1 && matches!(args[0].kind, ExprKind::Lambda { .. }) {
+        if method == "map"
+            && args.len() == 1
+            && matches!(args[0].kind, ExprKind::Lambda { .. })
+            && is_list_type(&receiver.ty)
+        {
             let span = expr.span.clone();
             let ty = expr.ty.clone();
             let recv = std::mem::replace(
