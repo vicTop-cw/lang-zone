@@ -204,6 +204,10 @@ pub struct CodeGen {
     top_level_static_names: std::collections::HashSet<String>,
     /// 当前函数的参数重命名映射（原名 → 新名），用于 E0530 冲突解决
     param_renames: HashMap<String, String>,
+    /// @parallel 装饰的当前函数：函数内 `xs.map(f)` 方法调用生成并行版本
+    cur_fn_is_parallel: bool,
+    /// @init 装饰的模块初始化函数名（main 开头按声明顺序自动注入调用）
+    init_fns: Vec<String>,
     /// 所有用户自定义类型名（struct/enum），预收集用于判断表达式是否为自定义类型
     known_types: std::collections::HashSet<String>,
     /// 所有用户自定义 trait 名（TraitDef），用于 trait 对象引用生成 `dyn Trait`
@@ -910,6 +914,8 @@ impl CodeGen {
             overload_explicit: HashMap::new(),
             top_level_static_names: std::collections::HashSet::new(),
             param_renames: HashMap::new(),
+            cur_fn_is_parallel: false,
+            init_fns: Vec::new(),
             known_types: std::collections::HashSet::new(),
             trait_names: std::collections::HashSet::new(),
             custom_iterator_is_protocol: true,
@@ -1285,6 +1291,14 @@ impl CodeGen {
                         .entry(f.name.clone())
                         .or_insert_with(Vec::new)
                         .push(explicit);
+                }
+                // @init：模块初始化函数登记（main 开头按声明顺序注入调用）
+                if f
+                    .intrinsics
+                    .iter()
+                    .any(|i| matches!(i.kind, IntrinsicKind::Init))
+                {
+                    self.init_fns.push(f.name.clone());
                 }
                 // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
                 // 注意：kwargs 注入参数单独记录在 fn_kwargs，不参与位置变参打包
@@ -2592,6 +2606,19 @@ impl CodeGen {
         }
         // 记录当前函数是否为 async（用于 __go 的异步/同步分派）
         self.current_fn_is_async = f.is_async || (f.name == "main" && block_has_await(&f.body));
+        // @parallel：标记当前函数为并行模式（map 方法调用生成并行版本）
+        self.cur_fn_is_parallel = f
+            .intrinsics
+            .iter()
+            .any(|i| matches!(i.kind, IntrinsicKind::Parallel));
+        // @parallel：对函数体做 AST 级变换（xs.map(f) → lz_builtins::__lz_par_map(xs, f)）
+        let eff_body: Block = if self.cur_fn_is_parallel {
+            let mut b = f.body.clone();
+            rewrite_parallel_block(&mut b);
+            b
+        } else {
+            f.body.clone()
+        };
         // 记录当前是否在生成 impl Iterator 的 size_hint 方法体（返回元组需 usize）
         self.current_fn_is_size_hint =
             self.in_iterator_impl && (f.name == "size_hint" || f.name == "__size_hint__");
@@ -3222,23 +3249,147 @@ impl CodeGen {
                 &f.params.iter().map(|p| p.ty.clone()).collect::<Vec<_>>(),
             )
         };
-        let sig = format!(
-            "{}{}{}fn {}{}({}){}{}{}{}{}",
-            if f.is_test { "#[test]\n" } else { "" },
-            vis,
-            async_kw,
-            fn_name,
-            generics,
-            params.join(", "),
-            ret,
-            math_where,
-            duck_where,
-            rel_where,
-            extra_where,
-        );
+        // @memoize：函数前置缓存 static（OnceLock 风格：Mutex<Option<Vec<(Key, Ret)>>>）
+        let is_memoize = f
+            .intrinsics
+            .iter()
+            .any(|i| matches!(i.kind, IntrinsicKind::Memoize));
+        // @curry：柯里化（n 元 → n 层嵌套一元闭包）
+        let is_curry = f
+            .intrinsics
+            .iter()
+            .any(|i| matches!(i.kind, IntrinsicKind::Curry));
+        let memo_static_name = if is_memoize {
+            let sn = format!("__LZ_MEMO_{}", f.name.to_uppercase());
+            let key_types: Vec<String> = f
+                .params
+                .iter()
+                .map(|p| self.rust_type(&p.ty))
+                .collect();
+            let ret_ty_s = self.rust_type(&f.ret_ty);
+            self.emit_line(&format!(
+                "static {}: std::sync::Mutex<Option<Vec<(({},), {})>>> = std::sync::Mutex::new(None);",
+                sn,
+                key_types.join(", "),
+                ret_ty_s
+            ));
+            sn
+        } else {
+            String::new()
+        };
+
+        let sig = if is_curry && f.params.len() >= 2 {
+            // fn a(A) -> Box<dyn Fn(B) -> Box<dyn Fn(C) -> R>>
+            let mut ret_chain = self.rust_type(&f.ret_ty);
+            for p in &f.params[1..] {
+                ret_chain = format!("Box<dyn Fn({}) -> {}>", self.rust_type(&p.ty), ret_chain);
+            }
+            format!(
+                "{}{}{}fn {}{}({}) -> {}",
+                if f.is_test { "#[test]\n" } else { "" },
+                vis,
+                "",
+                fn_name,
+                generics,
+                params[0],
+                ret_chain
+            )
+        } else {
+            format!(
+                "{}{}{}fn {}{}({}){}{}{}{}{}",
+                if f.is_test { "#[test]\n" } else { "" },
+                vis,
+                async_kw,
+                fn_name,
+                generics,
+                params.join(", "),
+                ret,
+                math_where,
+                duck_where,
+                rel_where,
+                extra_where,
+            )
+        };
 
         self.emit_line(&format!("{} {{", sig));
         self.indent += 1;
+
+        // @curry：嵌套闭包链生成后直接收尾（跳过 checker/默认参数/extern 等普通流程）
+        if is_curry && f.params.len() >= 2 {
+            for p in &f.params[1..] {
+                let pname = self
+                    .param_renames
+                    .get(&p.name)
+                    .cloned()
+                    .unwrap_or_else(|| p.name.clone());
+                self.declared.insert(pname);
+            }
+            let last_idx = f.params.len() - 1;
+            for (i, p) in f.params[1..].iter().enumerate() {
+                let pname = self
+                    .param_renames
+                    .get(&p.name)
+                    .cloned()
+                    .unwrap_or_else(|| p.name.clone());
+                let pty = self.rust_type(&p.ty);
+                if i == last_idx - 1 {
+                    self.emit_line(&format!(
+                        "Box::new(move |{}: {}| -> {} {{",
+                        pname,
+                        pty,
+                        self.rust_type(&f.ret_ty)
+                    ));
+                } else {
+                    self.emit_line(&format!("Box::new(move |{}: {}| {{", pname, pty));
+                }
+                self.indent += 1;
+            }
+            self.gen_block_inner(&eff_body);
+            for _ in 1..f.params.len() {
+                self.indent -= 1;
+                self.emit_line("})");
+            }
+            self.indent -= 1;
+            self.emit_line("}");
+            self.cur_fn_name = saved_name;
+            return;
+        }
+
+        // @memoize：函数体包装——先查缓存（命中直接返回），未命中计算结果并缓存
+        if is_memoize {
+            let key_names: Vec<String> = f
+                .params
+                .iter()
+                .map(|p| {
+                    self.param_renames
+                        .get(&p.name)
+                        .cloned()
+                        .unwrap_or_else(|| p.name.clone())
+                })
+                .collect();
+            self.emit_line(&format!("let __lz_memo_key = ({},);", key_names.join(", ")));
+            self.emit_line("{");
+            self.indent += 1;
+            self.emit_line(&format!(
+                "let mut __lz_memo_guard = {}.lock().unwrap();",
+                memo_static_name
+            ));
+            self.emit_line("if __lz_memo_guard.is_none() { *__lz_memo_guard = Some(Vec::new()); }");
+            self.emit_line("let __lz_memo = __lz_memo_guard.as_mut().unwrap();");
+            self.emit_line("if let Some(__lz_hit) = __lz_memo.iter().find(|(k, _)| *k == __lz_memo_key) {");
+            self.indent += 1;
+            self.emit_line("return __lz_hit.1.clone();");
+            self.indent -= 1;
+            self.emit_line("}");
+            self.indent -= 1;
+            self.emit_line("}");
+            // 主体包进内部闭包：body 内的 return 只返回闭包值（不跳出缓存逻辑）
+            self.emit_line(&format!(
+                "let __lz_result = (move || -> {} {{",
+                self.rust_type(&f.ret_ty)
+            ));
+            self.indent += 1;
+        }
 
         // 生成器：body 包含 Yield → prepend __gen_vec
         if has_yield {
@@ -3432,7 +3583,31 @@ impl CodeGen {
             self.emit_line("};");
             self.emit_line("__block_on(__async_main);");
         } else {
-            self.gen_block_inner(&f.body);
+            // @init：模块初始化函数按声明顺序注入 main 开头
+            if f.name == "main" && !self.init_fns.is_empty() {
+                let init_fns = self.init_fns.clone();
+                for init_name in &init_fns {
+                    self.emit_line(&format!("{}();", init_name));
+                }
+            }
+            self.gen_block_inner(&eff_body);
+        }
+
+        // @memoize：收尾——将计算结果写入缓存并返回
+        if is_memoize {
+            self.indent -= 1;
+            self.emit_line("})();");
+            self.emit_line("{");
+            self.indent += 1;
+            self.emit_line(&format!(
+                "let mut __lz_memo_guard = {}.lock().unwrap();",
+                memo_static_name
+            ));
+            self.emit_line("let __lz_memo = __lz_memo_guard.as_mut().unwrap();");
+            self.emit_line("__lz_memo.push((__lz_memo_key.clone(), __lz_result.clone()));");
+            self.indent -= 1;
+            self.emit_line("}");
+            self.emit_line("__lz_result");
         }
         self.nested_fn_ret = saved_nested_fn_ret;
         self.current_ret_ty = None;
@@ -3512,19 +3687,23 @@ impl CodeGen {
             method_names_set.contains("__eq__") || s.methods.iter().any(|m| m.name == "__eq__");
         // derive 与手动 impl 互斥：__eq__ 由 gen_magic_trait_impls 手动生成 PartialEq，
         // __repr__ 手动生成 Debug，__clone__ 手动生成 Clone，均不再 derive。
-        let derive_debug = !has_repr_magic;
-        let derive_clone = !has_clone_magic;
-        let derive_partial_eq = !has_eq_magic;
-        match (derive_debug, derive_clone, derive_partial_eq) {
-            (true, true, true) => self.emit_line("#[derive(Debug, Clone, PartialEq)]"),
-            (true, true, false) => self.emit_line("#[derive(Debug, Clone)]"),
-            (true, false, true) => self.emit_line("#[derive(Debug, PartialEq)]"),
-            (true, false, false) => self.emit_line("#[derive(Debug)]"),
-            (false, true, true) => self.emit_line("#[derive(Clone, PartialEq)]"),
-            (false, true, false) => self.emit_line("#[derive(Clone)]"),
-            (false, false, true) => self.emit_line("#[derive(PartialEq)]"),
-            (false, false, false) => self.emit_line("#[derive()]"),
+        // @derive(...) 装饰器合并：默认 derive（Debug/Clone/PartialEq）基础上追加用户请求的 trait
+        let mut derives_all: Vec<String> = vec!["Debug".into(), "Clone".into(), "PartialEq".into()];
+        if has_repr_magic {
+            derives_all.retain(|d| d != "Debug");
         }
+        if has_clone_magic {
+            derives_all.retain(|d| d != "Clone");
+        }
+        if has_eq_magic {
+            derives_all.retain(|d| d != "PartialEq");
+        }
+        for u in &s.derives {
+            if !derives_all.iter().any(|d| d == u) {
+                derives_all.push(u.clone());
+            }
+        }
+        self.emit_line(&format!("#[derive({})]", derives_all.join(", ")));
         self.emit_line(&format!("pub struct {}{} {{", s.name, generics));
         self.indent += 1;
         for field in &s.fields {
@@ -3799,7 +3978,14 @@ impl CodeGen {
         self.emitted_types.insert(e.name.clone());
 
         let generics = self.gen_generics(&e.generics);
-        self.emit_line(&format!("#[derive(Debug, Clone, PartialEq)]"));
+        // @derive(...) 装饰器合并：默认 derive 基础上追加用户请求的 trait
+        let mut derives_all: Vec<String> = vec!["Debug".into(), "Clone".into(), "PartialEq".into()];
+        for u in &e.derives {
+            if !derives_all.iter().any(|d| d == u) {
+                derives_all.push(u.clone());
+            }
+        }
+        self.emit_line(&format!("#[derive({})]", derives_all.join(", ")));
         self.emit_line(&format!("pub enum {}{} {{", e.name, generics));
         self.indent += 1;
         for variant in &e.variants {
@@ -15066,6 +15252,224 @@ fn collect_unknown_extern_fns(module: &IrModule) -> std::collections::HashMap<St
         }
     }
     out
+}
+
+// ── @parallel：AST 级并行化变换 ────────────────────────────────────
+// 把 @parallel 函数体内的 `xs.map(f)` 方法调用重写为
+// `lz_builtins::__lz_par_map(xs, f)`（std::thread 分块并行）。
+
+fn rewrite_parallel_block(block: &mut Block) {
+    for stmt in &mut block.stmts {
+        rewrite_parallel_stmt(stmt);
+    }
+}
+
+fn rewrite_parallel_stmt(stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Let { value, .. } => rewrite_parallel_expr(value),
+        Stmt::Assign { value, .. } => rewrite_parallel_expr(value),
+        Stmt::Return { value: Some(v) } => rewrite_parallel_expr(v),
+        Stmt::ExprStmt { expr } => rewrite_parallel_expr(expr),
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            rewrite_parallel_expr(cond);
+            rewrite_parallel_block(then_branch);
+            if let Some(b) = else_branch {
+                rewrite_parallel_block(b);
+            }
+        }
+        Stmt::For {
+            iter,
+            guard,
+            body,
+            else_body,
+            ..
+        } => {
+            rewrite_parallel_expr(iter);
+            if let Some(g) = guard {
+                rewrite_parallel_expr(g);
+            }
+            rewrite_parallel_block(body);
+            if let Some(b) = else_body {
+                rewrite_parallel_block(b);
+            }
+        }
+        Stmt::While {
+            cond,
+            guard,
+            body,
+            ..
+        } => {
+            rewrite_parallel_expr(cond);
+            if let Some(g) = guard {
+                rewrite_parallel_expr(g);
+            }
+            rewrite_parallel_block(body);
+        }
+        Stmt::WhileLet { expr, guard, body, .. } => {
+            rewrite_parallel_expr(expr);
+            if let Some(g) = guard {
+                rewrite_parallel_expr(g);
+            }
+            rewrite_parallel_block(body);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            rewrite_parallel_expr(scrutinee);
+            for arm in arms {
+                if let Some(g) = &mut arm.guard {
+                    rewrite_parallel_expr(g);
+                }
+                rewrite_parallel_block(&mut arm.body);
+            }
+        }
+        Stmt::Block { stmts } => {
+            for s in stmts {
+                rewrite_parallel_stmt(s);
+            }
+        }
+        Stmt::BlockLabel { body, .. } => rewrite_parallel_block(body),
+        Stmt::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
+            rewrite_parallel_block(body);
+            for (_, b) in catches {
+                rewrite_parallel_block(b);
+            }
+            if let Some(b) = else_body {
+                rewrite_parallel_block(b);
+            }
+            if let Some(b) = finally_body {
+                rewrite_parallel_block(b);
+            }
+        }
+        Stmt::Defer { body } => rewrite_parallel_block(body),
+        _ => {}
+    }
+}
+
+fn rewrite_parallel_expr(expr: &mut Expr) {
+    // `xs.map(lambda)` → `__lz_par_map(xs, lambda)`
+    if let ExprKind::MethodCall { receiver, method, args } = &mut expr.kind {
+        if method == "map" && args.len() == 1 && matches!(args[0].kind, ExprKind::Lambda { .. }) {
+            let span = expr.span.clone();
+            let ty = expr.ty.clone();
+            let recv = std::mem::replace(
+                receiver,
+                Box::new(Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, span.clone())),
+            );
+            let lam = args[0].clone();
+            expr.kind = ExprKind::Call {
+                callee: Box::new(Expr::new(
+                    ExprKind::Var("__lz_par_map".into()),
+                    IrType::Any,
+                    span.clone(),
+                )),
+                args: vec![*recv, lam],
+                type_args: vec![],
+            };
+            expr.ty = ty;
+            return;
+        }
+    }
+    // 递归遍历所有子表达式
+    match &mut expr.kind {
+        ExprKind::Call { callee, args, .. } => {
+            rewrite_parallel_expr(callee);
+            for a in args {
+                rewrite_parallel_expr(a);
+            }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            rewrite_parallel_expr(receiver);
+            for a in args {
+                rewrite_parallel_expr(a);
+            }
+        }
+        ExprKind::FieldAccess { base, .. } => rewrite_parallel_expr(base),
+        ExprKind::IndexGet { base, key } => {
+            rewrite_parallel_expr(base);
+            rewrite_parallel_expr(key);
+        }
+        ExprKind::IndexSet { base, key, value } => {
+            rewrite_parallel_expr(base);
+            rewrite_parallel_expr(key);
+            rewrite_parallel_expr(value);
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            rewrite_parallel_expr(lhs);
+            rewrite_parallel_expr(rhs);
+        }
+        ExprKind::AssignExpr { target, value } => {
+            rewrite_parallel_expr(target);
+            rewrite_parallel_expr(value);
+        }
+        ExprKind::UnOp { operand, .. } => rewrite_parallel_expr(operand),
+        ExprKind::IfExpr { cond, then, els } => {
+            rewrite_parallel_expr(cond);
+            rewrite_parallel_expr(then);
+            rewrite_parallel_expr(els);
+        }
+        ExprKind::Lambda { body, .. } => rewrite_parallel_expr(body),
+        ExprKind::StructCtor { fields, .. } => {
+            for (_, e) in fields {
+                rewrite_parallel_expr(e);
+            }
+        }
+        ExprKind::EnumCtor { args, .. } => {
+            for a in args {
+                rewrite_parallel_expr(a);
+            }
+        }
+        ExprKind::GenExpr { yield_of } => rewrite_parallel_expr(yield_of),
+        ExprKind::GenBuild { callee, block } => {
+            if let Some(c) = callee {
+                rewrite_parallel_expr(c);
+            }
+            rewrite_parallel_block(block);
+        }
+        ExprKind::Cast { expr, .. } => rewrite_parallel_expr(expr),
+        ExprKind::MagicCall { args, .. } => {
+            for a in args {
+                rewrite_parallel_expr(a);
+            }
+        }
+        ExprKind::BlockExpr { block } => rewrite_parallel_block(block),
+        ExprKind::TupleLit(es) | ExprKind::Tuple(es) | ExprKind::ListLit(es) | ExprKind::List(es) => {
+            for e in es {
+                rewrite_parallel_expr(e);
+            }
+        }
+        ExprKind::Spread(e) => rewrite_parallel_expr(e),
+        ExprKind::Dict(pairs) => {
+            for (k, v) in pairs {
+                rewrite_parallel_expr(k);
+                rewrite_parallel_expr(v);
+            }
+        }
+        ExprKind::Range { start, end, .. } => {
+            if let Some(s) = start {
+                rewrite_parallel_expr(s);
+            }
+            rewrite_parallel_expr(end);
+        }
+        ExprKind::Pipe { receiver, callee, args } => {
+            rewrite_parallel_expr(receiver);
+            rewrite_parallel_expr(callee);
+            for a in args {
+                rewrite_parallel_expr(a);
+            }
+        }
+        ExprKind::Paren(e) => rewrite_parallel_expr(e),
+        ExprKind::ImplicitConvert { source, .. } => rewrite_parallel_expr(source),
+        _ => {}
+    }
 }
 
 #[cfg(test)]

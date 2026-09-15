@@ -278,6 +278,8 @@ pub struct Intrinsic {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum IntrinsicKind {
+    /// 无操作（未知/未识别的普通装饰器如 @unsafe/@simd 等）：builder 映射后 codegen 忽略。
+    None,
     Memoize,
     Parallel,
     Curry,
@@ -435,6 +437,8 @@ pub struct StructDef {
     pub init_body: Option<Block>,
     /// __implicit_from__ 隐式转换（源类型列表）
     pub implicit_froms: Vec<IrType>,
+    /// @derive(...) 装饰器请求的派生 trait（codegen 注入 #[derive(...)]）
+    pub derives: Vec<String>,
     pub span: Span,
 }
 
@@ -446,6 +450,8 @@ pub struct EnumDef {
     pub generics: Vec<GenericParam>,
     pub variants: Vec<Variant>,
     pub methods: Vec<FnDef>,
+    /// @derive(...) 装饰器请求的派生 trait（codegen 注入 #[derive(...)]）
+    pub derives: Vec<String>,
     pub span: Span,
 }
 

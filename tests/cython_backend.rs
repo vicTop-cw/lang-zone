@@ -180,7 +180,7 @@ fn cy_omega_gate_struct() {
                 ty: IrType::F64,
             },
         ],
-        methods: vec![FnDef {
+        derives: vec![],methods: vec![FnDef {
             name: "area".into(),
             generics: vec![],
             params: vec![Param {
@@ -363,6 +363,7 @@ fn cy_omega_gate_enum() {
     module.items.push(Item::EnumDef(EnumDef {
         name: "Shape".into(),
         generics: vec![],
+        derives: vec![],
         variants: vec![
             Variant {
                 name: "Circle".into(),
@@ -418,6 +419,7 @@ fn cy_omega_gate_enum_cstyle() {
     module.items.push(Item::EnumDef(EnumDef {
         name: "Color".into(),
         generics: vec![],
+        derives: vec![],
         variants: vec![
             Variant {
                 name: "Red".into(),

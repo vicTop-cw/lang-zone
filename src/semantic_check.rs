@@ -42,6 +42,8 @@ pub struct Checker {
     errors: Vec<String>,
     /// 模块级函数签名表
     fn_sigs: HashMap<String, FnSig>,
+    /// @curry 装饰的函数名：调用时允许部分应用（参数个数 < 声明个数）
+    curry_fns: HashSet<String>,
     /// 自定义类型名（struct / enum / trait / type alias）
     type_names: HashSet<String>,
     /// 枚举名（enum 的变体是 StuctDef::fields）
@@ -274,6 +276,9 @@ impl Checker {
             };
             self.fn_names.insert(f.name.clone());
             self.fn_sigs.insert(f.name.clone(), sig);
+            if f.decorators.iter().any(|d| d.name == "curry") {
+                self.curry_fns.insert(f.name.clone());
+            }
             self.check_function_header(f);
         }
     }
@@ -1108,9 +1113,11 @@ impl Checker {
                     )) = sig
                     {
                         let has_kwarg = args.iter().any(|a| matches!(a, Expr::KwArg { .. }));
+                        // @curry 函数允许部分应用（add(1) / add(1)(2)），跳过 arity 检查
+                        let is_curry = self.curry_fns.contains(name.as_str());
                         // 默认参数可省略：参数个数 ∈ [必需数, 总数]；
                         // 变参（`..`）上限不限；安全收集（最后参数 List<T>）上限不限且允许省略该 List 参数
-                        if !has_kwarg {
+                        if !has_kwarg && !is_curry {
                             let lower = if collect_list {
                                 param_count_min.saturating_sub(1)
                             } else {
