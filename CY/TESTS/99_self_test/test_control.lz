@@ -32,8 +32,9 @@ def main() =
 
     // 简单的 if 语句
     let x = 42
+    pos = False
     if x > 0:
-        let pos = True
+        pos = True
     assert pos == True
 
     // guard
