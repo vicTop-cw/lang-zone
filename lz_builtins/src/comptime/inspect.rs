@@ -69,7 +69,7 @@ pub fn compile_warn(_msg: &str) {}
 // ══════════════════════════════════════════════════════════════
 
 pub mod inspect {
-    use super::*;
+    
 
     pub fn getmembers() -> Vec<(&'static str, String)> {
         unimplemented!("comptime only")

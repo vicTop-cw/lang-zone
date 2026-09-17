@@ -15,7 +15,7 @@ where
     iter.into_iter().fold(init, f)
 }
 
-pub fn fold1<T, F>(iter: impl IntoIterator<Item = T>, mut f: F) -> Option<T>
+pub fn fold1<T, F>(iter: impl IntoIterator<Item = T>, f: F) -> Option<T>
 where
     F: FnMut(T, T) -> T,
 {

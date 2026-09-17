@@ -1,4 +1,5 @@
 // lz_builtins::runtime — 任何上下文可用
+#![allow(ambiguous_glob_reexports)]
 pub mod builtins;
 pub mod collections;
 pub mod error;

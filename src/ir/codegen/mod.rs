@@ -117,6 +117,9 @@ pub struct CodeGen {
     /// 全局函数.md §五）：LZ 用 `__next__`/`__size_hint__` 魔术方法实现迭代协议，
     /// 生成 std::iter::Iterator impl 时需映射为 `next`/`size_hint`（否则 E0407）
     in_iterator_impl: bool,
+    /// 当前是否在 if/else 分支内：分支内方法调用返回 String 时需 `let _ = expr` 丢弃
+    /// 值以统一分支类型为 `()`（否则 E0308 if and else have incompatible types）
+    in_if_else_branch: bool,
     /// 正在生成外部类型扩展 trait（ListExt/DictExt/SetExt/StrExt）时置 true：
     /// 方法名需与调用点映射一致（slice → lz_slice，对齐 lz_builtins 的
     /// ListExt/StringExt），否则 trait 声明是 slice 而调用是 lz_slice → E0599
@@ -225,6 +228,9 @@ pub struct CodeGen {
     /// lit_probe 的 `f"hello {name}"`）：生成时替换为空字符串，保证 rustc
     /// 编译通过（批测口径只编译不运行）
     unbound_fstring_vars: std::collections::HashSet<String>,
+    /// 函数返回类型表：fn_name → return_type（用于 is_str_producing 识别字符串返回函数调用，
+    /// 如 `stringify(x)` 返回 String，let 绑定登记到 str_typed_vars 后 f-string 用 {} 而非 {:?}）
+    fn_returns: std::collections::HashMap<String, IrType>,
     /// 未定义外部函数名 → 最大实参个数（p16_lzi 等跨模块探测用例：
     /// 调用的 external_add/external_opt 定义在 .lzi 签名中，批测未加载
     /// .lzi 时生成 i64 stub 兜底，保证 rustc 编译通过）
@@ -892,6 +898,7 @@ impl CodeGen {
             loop_depth: 0,
             slice_clone_bindings: std::collections::HashSet::new(),
             in_iterator_impl: false,
+            in_if_else_branch: false,
 
             in_ext_trait: false,
             // 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
@@ -953,6 +960,7 @@ impl CodeGen {
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
             unbound_fstring_vars: std::collections::HashSet::new(),
+            fn_returns: std::collections::HashMap::new(),
             unknown_extern_fns: std::collections::HashMap::new(),
             bridge_registry: None,
             buf: String::new(),
@@ -991,6 +999,7 @@ impl CodeGen {
         // 注意：不能插入 emitted_types（会阻断 gen_enum_def / gen_struct_def 的去重逻辑）
         self.enum_variants.clear();
         self.fn_param_info.clear();
+        self.fn_returns.clear();
         self.emitted_types.clear();
         self.impl_types.clear();
         self.mutated_consts.clear();
@@ -1020,6 +1029,10 @@ impl CodeGen {
             if let Item::FnDef(f) = item {
                 if f.raises.is_some() {
                     self.raises_fn_names.insert(f.name.clone());
+                }
+                // 收集函数返回类型（用于 is_str_producing 识别字符串返回函数调用）
+                if !matches!(f.ret_ty, IrType::Unit) {
+                    self.fn_returns.insert(f.name.clone(), f.ret_ty.clone());
                 }
             }
         }
@@ -4876,7 +4889,7 @@ impl CodeGen {
         if let Some(nm) = methods.iter().find(|m| m.name == "__next__" || m.name == "next") {
             if let IrType::Option(inner) = &nm.ret_ty {
                 let where_str = self.magic_impl_where_str(nm);
-                let item_ty = self.rust_type(inner);
+                let _item_ty = self.rust_type(inner);
                 self.emit_line(&format!(
                     "impl{} Iterator for {}{} {{",
                     generics, for_ty, where_str
@@ -7318,6 +7331,10 @@ impl CodeGen {
                     || safe_name.starts_with("__destruct_");
                 let saved_box_lambda = self.box_lambda;
                 self.box_lambda = is_fn_lambda_let;
+                // Let 绑定值生成前注入声明类型到 current_expected_ty，
+                // 使块内 IndexGet/构造器等能跟随期望类型（如 let esc: String = ...）
+                let prev_expected_for_let = self.current_expected_ty.borrow().clone();
+                *self.current_expected_ty.borrow_mut() = Some(ty.clone());
                 let value_s = if is_tuple_destr && matches!(ty, IrType::Tuple(_)) {
                     format!("({}).clone()", self.gen_expr(value))
                 } else if is_empty_container {
@@ -7335,6 +7352,7 @@ impl CodeGen {
                 } else {
                     self.gen_expr(value)
                 };
+                *self.current_expected_ty.borrow_mut() = prev_expected_for_let;
                 self.box_lambda = saved_box_lambda;
                 // BUG-SG-002/003：`T?` 位置自动 Some 包装。
                 // `let z: int? = 10` / `let cfg: Config? = Config { .. }` 在 Rust
@@ -7629,8 +7647,11 @@ impl CodeGen {
                 } else if let Some(v) = value {
                     // BUG-CG-004（收口）：raises 函数返回类型升级为 Result<T, E>，
                     // 故 `return X`（X 自身非 Result）需包成 `return Ok(X)`。
+                    // 但 `return X` 返回 `()` 时无需包（`Ok(())` 违反 `-> ()` 签名）
                     let wrap_ok =
-                        self.current_fn_raises.is_some() && !matches!(&v.ty, IrType::Result { .. });
+                        self.current_fn_raises.is_some()
+                            && !matches!(&v.ty, IrType::Result { .. })
+                            && !matches!(&v.ty, IrType::Unit);
                     // `return self`：self 是 &self 引用。
                     // 返回类型是引用（`-> ref Self`，如 inspect）时直接 return self；
                     // 返回 owned 值时需 clone（`fn or(&self) -> Option<T>` 中
@@ -7750,11 +7771,20 @@ impl CodeGen {
                 // BUG-CG-004（收口）：raises 函数尾表达式需包成 Ok(...)（expr 自身已是 Result 则不包）
                 // 但不包裹返回 () 的表达式（如 skip_ws()）
                 // 也不包裹返回 Result<(), _> 的表达式（skip_ws 返回 Result<(), _>，不应再包 Ok）
+                // 也不包裹对已知 Unit 返回方法的调用（如 skip_ws，builder 推断类型为 Any 但实际返回 ()）
+                let is_known_unit_call = matches!(&expr.kind,
+                    ExprKind::MethodCall { method, .. }
+                    if method == "skip_ws"
+                );
                 let ret_is_unit = matches!(&self.current_ret_ty, Some(IrType::Unit));
                 let wrap_ok =
                     self.current_fn_raises.is_some()
                     && !matches!(&expr.ty, IrType::Result { .. } | IrType::Unit)
-                    && !ret_is_unit;
+                    && !ret_is_unit
+                    && !is_known_unit_call;
+                if is_known_unit_call {
+                    eprintln!("DEBUG skip_ws: wrap_ok={} is_last={} suppress={} force_semi={} ty={:?}", wrap_ok, is_last, self.suppress_tail_return, self.force_stmt_semicolon, expr.ty);
+                }
                 if is_last && !self.is_main && !self.suppress_tail_return {
                     // 非 main 函数尾表达式 → return expr;
                     // 返回引用（`-> &T` / `-> &mut T`）时尾表达式 self.字段：
@@ -7817,12 +7847,24 @@ impl CodeGen {
                     // 块内含无值 return（return;）→ 尾表达式丢弃值（expr;），
                     // 使闭包返回类型为 ()，避免与 return; 冲突（E0308）
                     self.emit_line(&format!("{};", expr_s));
+                } else if is_last
+                    && self.in_if_else_branch
+                    && matches!(&expr.kind, ExprKind::MethodCall { .. } | ExprKind::Call { .. })
+                {
+                    // if/else 分支内尾方法调用：丢弃返回值，统一分支类型为 ()
+                    self.emit_line(&format!("let _ = {};", expr_s));
                 } else if is_last && self.suppress_tail_return {
                     // match arm / 块表达式尾值 → 裸表达式（无分号，作为块值）
                     self.emit_line(&format!("{}", expr_s));
                 } else if is_last {
                     // main 函数尾表达式 → expr;
                     self.emit_line(&format!("{};", expr_s));
+                } else if self.in_if_else_branch
+                    && matches!(&expr.kind, ExprKind::MethodCall { .. } | ExprKind::Call { .. })
+                {
+                    // if/else 分支内方法调用需 `let _ = expr` 丢弃返回值，
+                    // 以统一分支类型为 `()`（否则 E0308 if and else have incompatible types）
+                    self.emit_line(&format!("let _ = {};", expr_s));
                 } else {
                     self.emit_line(&format!("{};", expr_s));
                 }
@@ -7836,11 +7878,14 @@ impl CodeGen {
                 if let Some(else_blk) = else_branch {
                     self.emit_line(&format!("if {} {{", self.gen_bool_cond(cond)));
                     self.indent += 1;
+                    let saved = self.in_if_else_branch;
+                    self.in_if_else_branch = true;
                     self.gen_block_inner(then_branch);
                     self.indent -= 1;
                     self.emit_line("} else {");
                     self.indent += 1;
                     self.gen_block_inner(else_blk);
+                    self.in_if_else_branch = saved;
                     self.indent -= 1;
                     self.emit_line("}");
                 } else {
@@ -7883,6 +7928,17 @@ impl CodeGen {
                 // 会 move *iterable（E0507）。先 clone 为 owned 再迭代（I: Clone 泛型 bound）
                 let iter_is_ref = matches!(&iter.ty, IrType::Ref(_) | IrType::MutRef(_))
                     || (matches!(&iter.kind, ExprKind::Var(n) if n == "self") && self.borrow_self);
+                // Vec<List> 内含引用元素（Vec<&T>）：.into_iter() 产生 &T，
+                // 需要 owned T 时（如 JsonValue::String(key)）用 .map(|x| x.clone()) 取值。
+                let iter_vec_ref_elem = matches!(
+                    &iter.ty,
+                    IrType::Named { path, args }
+                        if (path == "Vec" || path == "List")
+                            && args.first().map_or(false, |a| matches!(
+                                a,
+                                IrType::Ref(_) | IrType::MutRef(_)
+                            ))
+                );
                 // variadic 切片参数（`..: T` → Rust `args: &[T]`）：
                 // `.into_iter()` 给出 &T，但 LZ 语义要求按值迭代。
                 // 用 `.iter().copied()`（Copy 类型）取值。
@@ -7901,6 +7957,10 @@ impl CodeGen {
                             if path == "str" || path == "String");
                     if iter_is_str {
                         format!("({}).chars()", s)
+                    } else if iter_vec_ref_elem {
+                        // Vec<&T>：.into_iter() 产生 &T，下游需要 owned T（如 JsonValue::String(key)、
+                        // .get(&key) 的 Borrow 约束）→ .map(|x| x.clone()) 取值
+                        format!("({}).into_iter().map(|x| x.clone())", s)
                     } else if iter_is_self_borrow {
                         format!("({}).iter()", s)
                     } else if iter_is_ref {
@@ -8286,7 +8346,12 @@ impl CodeGen {
                     // declared 判定（否则前一臂声明的同名变量使后一臂 `let mut x`
                     // 被当成赋值 `x = ...` 生成，E0425 cannot find value，v180 缺陷）
                     let saved_declared = self.declared.clone();
+                    // 枚举变体字段绑定：注册已知类型到 str_typed_vars（f-string 用 {} 而非 {:?}）
+                    let saved_str_bindings: Vec<String> = self.str_typed_vars.iter().cloned().collect();
+                    self.register_enum_variant_str_bindings(&arm.pattern);
                     self.gen_block_inner(&arm.body);
+                    // 恢复 str_typed_vars 到臂前状态（避免跨臂泄漏）
+                    self.str_typed_vars = saved_str_bindings.into_iter().collect();
                     self.declared = saved_declared;
                     self.suppress_tail_return = saved;
                     self.ref_mut_bindings = saved_ref_mut;
@@ -9065,15 +9130,18 @@ impl CodeGen {
                 args,
                 type_args,
             } => {
-                eprintln!("DEBUG Call gen_expr: callee={:?} args={:?}", callee.kind, args.iter().map(|a| &a.kind).collect::<Vec<_>>());
                 // ord(s[i])：字符串单字符下标已按 char 码点 i64 生成（v165 语义），
                 // 再包 lz_builtins::ord(char) 会 E0308 expected char, found i64。
                 // 此时 ord 为恒等：直接发射下标表达式（lib_hashmap._str_hash 实测）。
                 if let ExprKind::Var(name) = &callee.kind {
                     if name == "ord" && args.len() == 1 {
-                        if let ExprKind::IndexGet { base, .. } = &args[0].kind {
+                        if let ExprKind::IndexGet { base, key } = &args[0].kind {
                             if matches!(base.ty, IrType::Str) {
-                                return self.gen_expr(&args[0]);
+                                // ord(s[i]) → char as i64；
+                                // 手动生成 char 索引（不走 IndexGet 的 .to_string() 路径）
+                                let base_s = self.gen_expr(base);
+                                let key_s = self.gen_expr(key);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
                             }
                         }
                     }
@@ -9111,7 +9179,7 @@ impl CodeGen {
                                         "fromNanos" => "from_nanos",
                                         _ => method.as_str(),
                                     };
-                    let mut args_s: Vec<String> = args
+                    let args_s: Vec<String> = args
                                         .iter()
                                         .map(|a| {
                                             let s = self.gen_expr(a);
@@ -9740,7 +9808,31 @@ impl CodeGen {
                                 if needs_box {
                                     format!("Box::new({})", a)
                                 } else {
-                                    a.clone()
+                                    // 非 Copy 类型字段 + 变量参数 → 自动 clone 避免 move 后借用报错
+                                    let field_is_noncopy = field_types
+                                        .as_ref()
+                                        .and_then(|types| types.get(i))
+                                        .map_or(false, |ty| match ty {
+                                            IrType::Str => true,
+                                            IrType::Named { path, args: _ } => matches!(
+                                                path.as_str(),
+                                                "String" | "Vec" | "HashMap" | "Box"
+                                            ),
+                                            _ => false,
+                                        });
+                                    if field_is_noncopy
+                                        && matches!(
+                                            args.get(i).map(|a| &a.kind),
+                                            Some(
+                                                ExprKind::Var(_)
+                                                    | ExprKind::FieldAccess { .. }
+                                            )
+                                        )
+                                    {
+                                        format!("{}.clone()", a)
+                                    } else {
+                                        a.clone()
+                                    }
                                 }
                             })
                             .collect();
@@ -10193,6 +10285,7 @@ impl CodeGen {
                     && !is_kwarg_call(args)
                     && self.case_structs.contains(&callee_s)
                 {
+                    eprintln!("DEBUG case_struct: callee={}", callee_s);
                     // case struct 位置构造：Point(1, 3) → Point { x: 1, y: 3 }（按字段声明顺序）
                     let base_name = callee_s.split('<').next().unwrap_or(&callee_s).to_string();
                     if let Some(info) = self.struct_fields_info.get(&base_name) {
@@ -10200,7 +10293,17 @@ impl CodeGen {
                             let fields: Vec<String> = info
                                 .iter()
                                 .zip(args_s.iter())
-                                .map(|((fname, _), a)| format!("{}: {}", fname, a))
+                                .map(|((fname, fty), a)| {
+                                    // &str → String: 字段类型为 String 且值为 .clone() 时，
+                                    // 将 .clone() 替换为 .to_string()（E0308）
+                                    let val = if matches!(fty, IrType::Str) && a.ends_with(".clone()") {
+                                        let base = a.trim_end_matches(".clone()");
+                                        format!("{}.to_string()", base)
+                                    } else {
+                                        a.clone()
+                                    };
+                                    format!("{}: {}", fname, val)
+                                })
                                 .collect();
                             format!("{}{} {{ {} }}", callee_s, turbofish, fields.join(", "))
                         } else {
@@ -10402,6 +10505,22 @@ impl CodeGen {
                         .collect();
                     // __new__ 魔术构造：补齐未提供的字段为类型默认值（如 Config(host,port) → debug:false）
                     let mut all_fields = provided;
+                    // &str → String: gen_kwarg_field 对 &str 变量加了 .clone()（仍是 &str），
+                    // 但目标字段是 String → 替换为 .to_string()（E0308）
+                    for field_str in &mut all_fields {
+                        if let Some((fname, val)) = field_str.split_once(':') {
+                            let val = val.trim().trim_end_matches(',');
+                            if val.ends_with(".clone()") {
+                                let info = self.struct_fields_info.get(&base_name);
+                                if let Some(fty) = info.and_then(|i| i.iter().find(|(n, _)| n == fname).map(|(_, t)| t)) {
+                                    if matches!(fty, IrType::Str) {
+                                        let base = val.trim_end_matches(".clone()");
+                                        *field_str = format!("{}: {}.to_string()", fname, base);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if self.struct_has_new.contains(&base_name) {
                         if let Some(info) = self.struct_fields_info.get(&base_name) {
                             for (fname, fty) in info {
@@ -10749,6 +10868,8 @@ impl CodeGen {
                         ];
                         self.known_types.contains(n.as_str())
                             || KNOWN_EXT_TYPES.contains(&n.as_str())
+                            // 枚举名（ParseError::UnexpectedChar 等变体构造）也走静态调用
+                            || self.enum_variants.values().any(|e| e == n)
                     }
                     _ => false,
                 };
@@ -10857,7 +10978,31 @@ impl CodeGen {
                                 if needs_box {
                                     format!("Box::new({})", a)
                                 } else {
-                                    a.clone()
+                                    // 非 Copy 类型字段 + 变量参数 → 自动 clone 避免 move 后借用报错
+                                    let field_is_noncopy = field_types
+                                        .as_ref()
+                                        .and_then(|types| types.get(i))
+                                        .map_or(false, |ty| match ty {
+                                            IrType::Str => true,
+                                            IrType::Named { path, args: _ } => matches!(
+                                                path.as_str(),
+                                                "String" | "Vec" | "HashMap" | "Box"
+                                            ),
+                                            _ => false,
+                                        });
+                                    if field_is_noncopy
+                                        && matches!(
+                                            args.get(i).map(|a| &a.kind),
+                                            Some(
+                                                ExprKind::Var(_)
+                                                    | ExprKind::FieldAccess { .. }
+                                            )
+                                        )
+                                    {
+                                        format!("{}.clone()", a)
+                                    } else {
+                                        a.clone()
+                                    }
                                 }
                             })
                             .collect();
@@ -11348,7 +11493,15 @@ impl CodeGen {
                         || (method == "get"
                             && (matches!(&args[0].ty, IrType::Str)
                                 || matches!(&args[0].ty, IrType::Named { path, .. }
-                                    if path == "str" || path == "String")));
+                                    if path == "str" || path == "String")))
+                        // 链式调用 receiver 类型为 Any 时（如 s.replace(...).replace(...)），
+                        // 第一次 replace 返回 String（IR 推断为 Any），第二次 replace 的
+                        // receiver 是 Any 导致 need_ref 为 false → 参数未改写为 &str → E0277/E0308。
+                        // 当 method 是 Pattern 方法且参数含字符串字面量时，强制改写。
+                        || (matches!(&receiver.ty, IrType::Any)
+                            && (pattern_methods.contains(&method.as_str())
+                                || pattern_methods.contains(&rust_method))
+                            && args.iter().any(|a| matches!(&a.kind, ExprKind::Lit(LitKind::Str(_)))));
                     if need_ref {
                         // String Pattern 方法（replace/starts_with/split 等）的**所有**
                         // 字符串参数都需 &str：`s.replace("-", "+")` 的 from/to 两个参数。
@@ -11658,9 +11811,8 @@ impl CodeGen {
                     // 并恢复字符串字面量的 to_string（pattern_methods 曾去掉）
                     let args_owned: Vec<String> = args_s
                         .iter()
-                        .enumerate()
-                        .map(|(_, s)| {
-                            let s = if (method == "find"
+                        .map(|s| {
+                            if (method == "find"
                                 || method == "starts_with"
                                 || method == "ends_with"
                                 || method == "contains")
@@ -11670,13 +11822,6 @@ impl CodeGen {
                                 s[1..].to_string()
                             } else {
                                 s.clone()
-                            };
-                            // 字符串字面量（pattern_methods 已把 "...".to_string() 简化为
-                            // "..."）恢复 to_string：StrExt 方法参数是 String（E0308）
-                            if s.starts_with('"') && !s.contains(".to_string()") {
-                                format!("{}.to_string()", s)
-                            } else {
-                                s
                             }
                         })
                         .collect();
@@ -11716,9 +11861,16 @@ impl CodeGen {
                     } else {
                         format!("&({})", recv)
                     };
+                    // DictExt 方法名映射：keys→lz_keys, values→lz_values, items→lz_items
+                    let dict_method = match method.as_str() {
+                        "keys" => "lz_keys",
+                        "values" => "lz_values",
+                        "items" => "lz_items",
+                        _ => rust_method,
+                    };
                     return format!(
                         "<dyn DictExt<_, _>>::{}({}, {})",
-                        rust_method,
+                        dict_method,
                         recv_ref,
                         args_s.join(", ")
                     );
@@ -12198,10 +12350,9 @@ impl CodeGen {
                     // HashMap/Dict 索引: map["key"] → map.get(&"key").cloned()
                     // Rust HashMap 不实现 Index trait
                     let is_dict = matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
-                    // 也检查是否为 kwargs 字段（__Params 的 kwargs 是 HashMap）
                     let is_kwargs = matches!(&base.kind, ExprKind::FieldAccess { field, .. } if field == "kwargs");
+                    eprintln!("DEBUG IndexGet: base.kind={:?} base.ty={:?} key.kind={:?} expr.ty={:?}", base.kind, base.ty, key.kind, expr.ty);
                     // 用户 struct：ml[0] → ml.__getitem__(0)（key 保持 i64，内部 self.items[i] 再转 usize）
-                    // 注意：必须在 is_dict 之后，否则 Dict 会被误判为 struct
                     let is_struct = !is_dict
                         && matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
                     if is_struct {
@@ -12245,19 +12396,28 @@ impl CodeGen {
                         // 字符串单字符索引 s[i]（s 是参数/局部变量，非 self）：Rust 不支持
                         // str 按 usize 索引（E0277 SliceIndex），映射为字节索引取字符码
                         // （simple_hash `let c = s[i]`，comptime 焊死场景）
-                        eprintln!("DEBUG IndexGet: base_s={} base.ty={:?} key_s={:?}", base_s, base.ty, key_s);
                         let is_range_key_any = matches!(&key.kind,
                             ExprKind::StructCtor { name, .. } if name == "Range");
+                        // base 是 String/str：包括 IR 类型明确为 Str/Named(String)，
+                        // 以及 base 是 MethodCall（如 self.s.clone()）时类型被推断为 Any 的情况
                         let base_is_str_any = matches!(&base.ty, IrType::Str)
                             || matches!(&base.ty, IrType::Named { path, .. }
-                                if path == "str" || path == "String");
-                        eprintln!("DEBUG IndexGet: base_is_str_any={} is_range_key={:?}", base_is_str_any, is_range_key_any);
+                                if path == "str" || path == "String")
+                            || (matches!(&base.ty, IrType::Any)
+                                && matches!(&base.kind,
+                                    ExprKind::MethodCall { method, receiver, .. }
+                                    if method == "clone" && matches!(&receiver.kind,
+                                        ExprKind::FieldAccess { field, .. }
+                                        if field == "s" || field == "source" || field == "input")))
+                            || (matches!(&base.ty, IrType::Any)
+                                && matches!(&base.kind,
+                                    ExprKind::FieldAccess { field, .. }
+                                    if field == "s" || field == "source" || field == "input"));
+                        eprintln!("DEBUG base_is_str_any: {} (base.ty={:?}, base.kind={:?}, expr.ty={:?})", base_is_str_any, base.ty, base.kind, expr.ty);
                         if base_is_str_any && is_range_key_any {
-                            eprintln!("DEBUG IndexGet: returning range slice");
                             return format!("{}[{}].to_string()", base_s, key_s);
                         }
                         if base_is_str_any {
-                            eprintln!("DEBUG IndexGet: returning chars collect");
                             // 字符串单字符索引：char 安全；根据期望返回类型决定 char -> String 或 char -> i64
                             let idx_wants_string = matches!(
                                 &self.current_ret_ty,
@@ -12267,15 +12427,18 @@ impl CodeGen {
                                 || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
                                 || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
                                 if path == "str" || path == "String")
+                                || matches!(&expr.ty, IrType::Str)
+                                || matches!(&expr.ty, IrType::Named { path, .. }
+                                    if path == "str" || path == "String")
                                 // 调用参数/构造器上下文：期望类型在 current_expected_ty
                                 // （如 ParseError::UnexpectedChar(pos, ch: str)）
                                 || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Str))
                                 || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
                                 if path == "str" || path == "String");
                             if idx_wants_string {
-                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s);
                             } else {
-                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
                             }
                         }
                         let is_self_field = matches!(&base.kind, ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
@@ -12319,9 +12482,9 @@ impl CodeGen {
                                     || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
                                         if path == "str" || path == "String");
                                 if idx_wants_string2 {
-                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s)
+                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s)
                                 } else {
-                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
+                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
                                 }
                             } else {
                                 format!("{}[{}].clone()", base_s, key_s)
@@ -12664,8 +12827,41 @@ impl CodeGen {
                 // rhs 是数值或未知（Any fallback 为 i64）时，f64 侧混合算术需提升
                 let rhs_is_numeric = matches!(rhs_ty, IrType::Int | IrType::F64 | IrType::Any);
                 let lhs_is_numeric = matches!(lhs_ty, IrType::Int | IrType::F64 | IrType::Any);
-                let lhs_s = self.wrap_bin_operand(self.gen_expr(lhs));
-                let rhs_s = self.wrap_bin_operand(self.gen_expr(rhs));
+                // 操作数期望类型注入：比较运算互相传递对方类型；任一侧为
+                // str/String 时给另一侧传 Str 期望（s[pos] == "-" 生成 String，
+                // lib_json skip_ws/parse_number E0308）
+                let either_is_str = matches!(lhs_ty, IrType::Str)
+                    || matches!(rhs_ty, IrType::Str)
+                    || matches!(lhs_ty, IrType::Named { path, .. }
+                        if path == "str" || path == "String")
+                    || matches!(rhs_ty, IrType::Named { path, .. }
+                        if path == "str" || path == "String");
+                let lhs_s = if op.is_comparison() || (arith && either_is_str) {
+                    let prev_expected = self.current_expected_ty.borrow().clone();
+                    if either_is_str && matches!(lhs_ty, IrType::Any | IrType::Int) {
+                        *self.current_expected_ty.borrow_mut() = Some(IrType::Str);
+                    } else if op.is_comparison() {
+                        *self.current_expected_ty.borrow_mut() = Some(rhs_ty.clone());
+                    }
+                    let s = self.wrap_bin_operand(self.gen_expr(lhs));
+                    *self.current_expected_ty.borrow_mut() = prev_expected;
+                    s
+                } else {
+                    self.wrap_bin_operand(self.gen_expr(lhs))
+                };
+                let rhs_s = if op.is_comparison() || (arith && either_is_str) {
+                    let prev_expected = self.current_expected_ty.borrow().clone();
+                    if either_is_str && matches!(rhs_ty, IrType::Any | IrType::Int) {
+                        *self.current_expected_ty.borrow_mut() = Some(IrType::Str);
+                    } else if op.is_comparison() {
+                        *self.current_expected_ty.borrow_mut() = Some(lhs_ty.clone());
+                    }
+                    let s = self.wrap_bin_operand(self.gen_expr(rhs));
+                    *self.current_expected_ty.borrow_mut() = prev_expected;
+                    s
+                } else {
+                    self.wrap_bin_operand(self.gen_expr(rhs))
+                };
                 if arith && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
                     format!("{} {} ({} as f64)", lhs_s, op_s, rhs_s)
                 } else if arith && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
@@ -12708,6 +12904,20 @@ impl CodeGen {
             ExprKind::IfExpr { cond, then, els } => {
                 let then_s = self.gen_expr(then);
                 let mut els_s = self.gen_expr(els);
+                // if/else 类型统一：else 为 `()` 而 then 返回非 Unit 值时，
+                // then 分支需 `let _ = expr` 丢弃值，使两分支类型均为 `()`
+                // （否则 E0308 if and else have incompatible types）
+                let then_is_method = matches!(&then.kind,
+                    ExprKind::MethodCall { .. } | ExprKind::Call { .. });
+                let els_is_unit = els_s.trim().is_empty() || els_s.trim() == "()";
+                let then_needs_discard = then_is_method
+                    && els_is_unit
+                    && !matches!(&then.ty, IrType::Unit);
+                let then_final = if then_needs_discard {
+                    format!("let _ = {};", then_s)
+                } else {
+                    then_s
+                };
                 // 三元 then/else 类型统一：then 是 bool 而 else 是数值时，
                 // else 按 LZ 真值语义转 bool（非零为真），如
                 // `(n := compute()) > 5 if n * 10 else 0`（combo_ternary_walrus.lz）
@@ -12716,14 +12926,14 @@ impl CodeGen {
                     els_s = format!("({}) != 0", els_s);
                 }
                 // 如果 then 或 els 包含多行 BlockExpr，使用多行格式确保缩进正确
-                if then_s.contains('\n') || els_s.contains('\n') {
+                if then_final.contains('\n') || els_s.contains('\n') {
                     // emit_line 会在字符串前添加 self.indent 级别的缩进，
                     // 所以这里的内容缩进只需 self.indent + 1（相对于 if 行再缩进一层）
                     let close_indent = "    ".repeat(self.indent);
                     let inner_indent = "    ".repeat(self.indent + 1);
-                    let then_body = if then_s.starts_with("{\n") {
+                    let then_body = if then_final.starts_with("{\n") {
                         // BlockExpr: 重新格式化内容，使用正确的缩进级别
-                        let inner = &then_s[2..then_s.len() - 1]; // 去掉 { 和 }
+                        let inner = &then_final[2..then_final.len() - 1]; // 去掉 { 和 }
                         let inner = inner.trim();
                         let lines: Vec<&str> = inner.lines().collect();
                         if lines.is_empty() {
@@ -12737,7 +12947,7 @@ impl CodeGen {
                             )
                         }
                     } else {
-                        format!(" {}", then_s)
+                        format!(" {}", then_final)
                     };
                     let else_body = if els_s.starts_with("{\n") {
                         let inner = &els_s[2..els_s.len() - 1];
@@ -12766,7 +12976,7 @@ impl CodeGen {
                     format!(
                         "if {} {{ {} }} else {{ {} }}",
                         self.gen_bool_cond(cond),
-                        then_s,
+                        then_final,
                         els_s
                     )
                 }
@@ -12959,7 +13169,6 @@ impl CodeGen {
                         }
                     }
                     _ => {
-                        eprintln!("DEBUG StructCtor: name={} in_new_body={} struct_has_new.contains={}", name, self.in_new_body, self.struct_has_new.contains(name.as_str()));
                         // 有 magic __new__ 的 struct（box.lz `Rc([1,2,3])`）：
                         // 位置参数构造应分派到 `Name::__new__(value)`（magic __new__
                         // 写在 impl 块中，body 返回 `Rc(_inner: 0)`），而不是把参数
@@ -12991,7 +13200,33 @@ impl CodeGen {
                         let mut fields: Vec<String> = fields
                             .iter()
                             .map(|(n, v)| {
-                                let v_s = self.gen_expr(v);
+                                // &str → String: 字段类型为 String 且值为 .clone() 时，
+                                // 将 .clone() 替换为 .to_string()（E0308）
+                                let field_ty = field_tys
+                                    .iter()
+                                    .find(|(fn_, _)| fn_ == n)
+                                    .map(|(_, ft)| ft);
+                                if n == "s" {
+                                    eprintln!("DEBUG StructCtor field s: field_ty={:?} v.kind={:?}", field_ty, v.kind);
+                                }
+                                let v_s = if let Some(ft) = field_ty {
+                                    if matches!(ft, IrType::Str) {
+                                        if let ExprKind::MethodCall { method, receiver, .. } = &v.kind {
+                                            if method == "clone" {
+                                                let recv_s = self.gen_expr(receiver);
+                                                format!("{}.to_string()", recv_s)
+                                            } else {
+                                                self.gen_expr(v)
+                                            }
+                                        } else {
+                                            self.gen_expr(v)
+                                        }
+                                    } else {
+                                        self.gen_expr(v)
+                                    }
+                                } else {
+                                    self.gen_expr(v)
+                                };
                                 let wrap = field_tys
                                     .iter()
                                     .find(|(fn_, _)| fn_ == n)
@@ -13053,7 +13288,28 @@ impl CodeGen {
                         if needs_box {
                             format!("Box::new({})", expr_s)
                         } else {
-                            expr_s
+                            // 非 Copy 类型字段 + 变量参数 → 自动 clone 避免 move 后借用报错
+                            let field_is_noncopy = field_types
+                                .as_ref()
+                                .and_then(|types| types.get(i))
+                                .map_or(false, |ty| match ty {
+                                            IrType::Str => true,
+                                            IrType::Named { path, args: _ } => matches!(
+                                                path.as_str(),
+                                                "String" | "Vec" | "HashMap" | "Box"
+                                            ),
+                                            _ => false,
+                                });
+                            if field_is_noncopy
+                                && matches!(
+                                    a.kind,
+                                    ExprKind::Var(_) | ExprKind::FieldAccess { .. }
+                                )
+                            {
+                                format!("{}.clone()", expr_s)
+                            } else {
+                                expr_s
+                            }
                         }
                     })
                     .collect();
@@ -13949,6 +14205,21 @@ impl CodeGen {
                         | "removesuffix"
                 )
             }
+            ExprKind::Call { callee, .. } => {
+                // 自定义函数调用：检查函数返回类型是否为字符串
+                let fname = match &callee.kind {
+                    ExprKind::Var(n) => Some(n.as_str()),
+                    _ => None,
+                };
+                if let Some(fname) = fname {
+                    self.fn_returns.get(fname).map_or(false, |ret_ty| {
+                        matches!(ret_ty, IrType::Str)
+                            || matches!(ret_ty, IrType::Named { path, args: _ } if path == "String")
+                    })
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
@@ -14330,6 +14601,33 @@ impl CodeGen {
             }
         }
         bindings
+    }
+
+    /// 注册枚举变体字段绑定到 str_typed_vars（f-string 用 {} 而非 {:?}）
+    fn register_enum_variant_str_bindings(&mut self, pat: &Pattern) {
+        if let Pattern::Enum {
+            enum_name,
+            variant,
+            args,
+        } = pat
+        {
+            if let Some(field_types) = self
+                .enum_variant_fields
+                .get(&(enum_name.clone(), variant.clone()))
+            {
+                for (i, arg_pat) in args.iter().enumerate() {
+                    if let Some(ty) = field_types.get(i) {
+                        let is_str = matches!(ty, IrType::Str)
+                            || matches!(ty, IrType::Named { path, args: _ } if path == "String");
+                        if is_str {
+                            for ident in self.collect_pattern_idents(arg_pat) {
+                                self.str_typed_vars.insert(ident);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

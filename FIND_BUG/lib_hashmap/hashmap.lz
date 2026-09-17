@@ -43,10 +43,12 @@ struct HashMap =
                 let new_k = new_k + [bucket_k[i]]
                 let new_v = new_v + [bucket_v[i]]
             i = i + 1
+        if not found:
+            let new_k = new_k + [key]
+            let new_v = new_v + [val]
+            self._size = self._size + 1
         self.buckets[idx] = new_k
         self.values[idx] = new_v
-        if not found:
-            self._size = self._size + 1
 
     def get(self, key: str) -> OptionInt =
         let idx = self._str_hash(key) % self._num_buckets
@@ -65,11 +67,11 @@ struct HashMap =
         let bucket_v = self.values[idx]
         let new_k: List<str> = []
         let new_v: List<int> = []
-        let removed: OptionInt = OptionInt.None
+        mut removed: OptionInt = OptionInt.None
         mut i = 0
         while i < bucket_k.len():
             if bucket_k[i] == key:
-                let removed = OptionInt.Some(bucket_v[i])
+                removed = OptionInt.Some(bucket_v[i])
                 self._size = self._size - 1
             else:
                 let new_k = new_k + [bucket_k[i]]

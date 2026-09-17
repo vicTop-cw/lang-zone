@@ -140,31 +140,33 @@ fn lib_linked_list() {
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0308/E0277（P2a）"]
+// 2026-09-17 转正：E0308/E0277 已消除（chr_unchecked + to_string + contains Pattern 修复），全链路 OK
 fn lib_string() {
     assert!(run_lib("lib_string").unwrap().contains("OK"));
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0308（P2a）"]
+
 fn lib_json() {
     assert!(run_lib("lib_json").unwrap().contains("OK"));
 }
 
 #[test]
-#[ignore = "待转正：RUSTC_FAIL E0382 移动语义长尾 13 错（P2a，检查器层已全部修复）"]
-fn lib_hashmap() {
-    assert!(run_lib("lib_hashmap").unwrap().contains("OK"));
-}
 
-#[test]
-#[ignore = "待转正：RUSTC_FAIL E0369/E0599（P2a）"]
 fn lib_tree() {
     assert!(run_lib("lib_tree").unwrap().contains("OK"));
 }
 
 #[test]
-#[ignore = "待转正：需用户 trait 参数（impl Trait/dyn）特性（P2a 功能项，库代码已改目标语义）"]
+// 2026-09-17 转正：函数指针字段调用 (self.f)(v) + 默认参数 + 循环内变量重新赋值已修复，全链路 OK
 fn lib_iterator() {
     assert!(run_lib("lib_iterator").unwrap().contains("OK"));
 }
+
+#[test]
+// 2026-09-17 转正：E0382 已消除（str→&str 映射 + fn_ref_params + 枚举 __eq__ 自动生成），
+// LZ 源码 put/remove 追加&赋值逻辑补齐，全链路 OK
+fn lib_hashmap() {
+    assert!(run_lib("lib_hashmap").unwrap().contains("OK"));
+}
+

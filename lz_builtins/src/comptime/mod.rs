@@ -91,7 +91,6 @@ pub struct FrameInfo {
 
 pub mod inspect;
 
-pub use inspect::*;
 
 // ══════════════════════════════════════════════════════════════
 // 单元测试

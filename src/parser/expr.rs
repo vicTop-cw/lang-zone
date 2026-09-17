@@ -674,6 +674,7 @@ impl ParserExprExt for Parser {
                             self.advance();
                         }
                         self.expect(Token::RParen)?;
+                        eprintln!("DEBUG parser: MethodCall receiver={:?} method={} args={:?}", expr, name, args);
                         expr = Expr::MethodCall {
                             receiver: Box::new(expr),
                             method: name,

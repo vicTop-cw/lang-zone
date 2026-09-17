@@ -198,6 +198,34 @@ impl TypeCtx {
                 }
                 self.struct_methods.insert(s.name.clone(), mset);
                 self.struct_method_arity.insert(s.name.clone(), arity_map);
+                // 登记 struct 内联方法返回类型（如 json.lz `parse_object` 返回 `JsonValue raises ParseError`）：
+                // 否则 `self.parse_object()?` 方法调用推断为 Any，`?` 无法触发 try_into 传播（E0277）。
+                // 用 `类型名.方法名` 作 key（与 impl 方法一致），避免不同 struct 同名方法互相覆盖。
+                let special_magic = ["__new__", "__init__", "__implicit_from__"];
+                for m in s.methods.iter().filter(|m| !special_magic.contains(&m.name.as_str())) {
+                    let key = format!("{}.{}", s.name, m.name);
+                    if m.return_type.is_some() {
+                        self.fn_returns.insert(
+                            key,
+                            Self::fn_return_ir(&m.return_type, &m.raises, &s.generics),
+                        );
+                    } else {
+                        // 无返回类型注解的方法默认登记为 Unit（避免 IR 返回类型
+                        // 为 Any 导致 wrap_ok 误包成 Result::Ok(...)）
+                        self.fn_returns.insert(key, IrType::Unit);
+                    }
+                }
+                for m in s.magic_methods.iter().filter(|m| !special_magic.contains(&m.name.as_str())) {
+                    let key = format!("{}.{}", s.name, m.name);
+                    if m.return_type.is_some() {
+                        self.fn_returns.insert(
+                            key,
+                            Self::fn_return_ir(&m.return_type, &m.raises, &s.generics),
+                        );
+                    } else {
+                        self.fn_returns.insert(key, IrType::Unit);
+                    }
+                }
             }
         }
     }
@@ -228,14 +256,14 @@ impl TypeCtx {
                         f.name.clone(),
                         IrType::Named {
                             path: "Future".into(),
-                            args: vec![ret],
+                            args: vec![ret.clone()],
                         },
                     );
                 } else if f.is_iterator {
                     // iterator 生成器函数（iterator repeat<T>(val, n) -> T /
                     // count_from(...) -> Iterator<int>）：调用返回**迭代器集合**
-                    // Vec<元素类型>（生成代码 `-> Vec<Y>`，急切收集）。登记为
-                    // Vec<元素>——若声明返回 Iterator<int> 则取元素 int 登记
+                    // Vec<元素类型>（急切收集）。登记为
+                    // Vec<int>——若声明返回 Iterator<int> 则取元素 int 登记
                     // Vec<int>，否则 Vec<ret>（iterator_demo `for x in
                     // repeat("hi", 3)` 中 T=String 误当字符串迭代生成 .chars()，
                     // E0599；while_let `Vec<impl Iterator>` 非法 E0562）
@@ -253,7 +281,7 @@ impl TypeCtx {
                         },
                     );
                 } else {
-                    self.fn_returns.insert(f.name.clone(), ret);
+                    self.fn_returns.insert(f.name.clone(), ret.clone());
                 }
             } else {
                 // 无返回注解：从函数体最后语句推断并登记。
@@ -266,7 +294,7 @@ impl TypeCtx {
                     .unwrap_or(IrType::Unit);
                 // BUG-CG-004 收口：raises 函数即使无返回注解，其 Rust 返回类型也是
                 // Result<ok, err>（ok 为推断返回值，err 为 raises 异常类型），
-                // 否则 fn_returns 漏 raises 包裹 → try 体末尾调用该函数时 body 类型
+                // 否则 fn_returns 漏 raises 包裹 → try 体末尾调用该函数时 body 块类型
                 // 非 Result，use_result_try 误判走 catch_unwind（panic 基）导致 E0308
                 if let Some(r) = &f.raises {
                     ret = IrType::Result {
@@ -281,7 +309,16 @@ impl TypeCtx {
                 .iter()
                 .map(|p| from_ast_type_with_generics(&p.ty, &generics))
                 .collect();
-            self.fn_params.insert(f.name.clone(), params);
+            self.fn_params.insert(f.name.clone(), params.clone());
+            // 登记顶层函数类型到 vars：使函数名作为值传递时（如 `fold(..., add)`）
+            // lookup_var 能返回 Fn 类型，否则回退 Any 导致 codegen 无法生成 `as fn(...)` 强转。
+            let fn_ty = IrType::Fn {
+                    params,
+                    ret: Box::new(ret.clone()),
+                };
+            eprintln!("DEBUG collect_functions: inserting {} with type {:?}", f.name, fn_ty);
+            self.vars.insert(f.name.clone(), fn_ty);
+            eprintln!("DEBUG collect_functions: vars contains 'add': {}", self.vars.contains_key("add"));
             // BUG-CG-004 收口：登记 raises 异常类型，供 try 体末尾调用 raises 函数时
             // 将 body 块类型标注为 Result<ok, err>（见 convert_expr 的 TryCatch 分支）。
             if let Some(r) = &f.raises {
@@ -1033,6 +1070,22 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             args,
             type_args,
         } => {
+            eprintln!("DEBUG Call: func={:?} args={:?}", func, args);
+            // 检查 func 是否是枚举变体构造器（ParseError.UnexpectedChar(...)）
+            if let AstExpr::FieldAccess { receiver, field } = func.as_ref() {
+                eprintln!("DEBUG Call: FieldAccess receiver={:?} field={}", receiver, field);
+                if let AstExpr::Ident(enum_name) = receiver.as_ref() {
+                    eprintln!("DEBUG Call: enum_name={} field={} enum_variants.contains_key={}", enum_name, field, ctx.enum_variants.contains_key(field));
+                    if ctx.enum_variants.contains_key(field) && ctx.enum_variants.get(field) == Some(enum_name) {
+                        // 枚举变体构造器：返回枚举类型
+                        eprintln!("DEBUG Call: enum variant constructor {}::{}", enum_name, field);
+                        return IrType::Named {
+                            path: enum_name.clone(),
+                            args: vec![],
+                        };
+                    }
+                }
+            }
             if let AstExpr::Ident(fname) = func.as_ref() {
                 // __as__ 类型转换：返回目标类型
                 if fname == "__as__" && args.len() == 2 {
@@ -1154,18 +1207,29 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
         }
         AstExpr::MethodCall {
-            receiver, method, ..
+            receiver, method, args, ..
         } => {
+            eprintln!("DEBUG MethodCall: receiver={:?} method={} args={:?}", receiver, method, args);
             // 枚举变体构造: Kind.A(1) → Kind 类型
             // receiver 是枚举/结构类型名时，方法名是变体
             if let AstExpr::Ident(recv_name) = receiver.as_ref() {
                 let base = recv_name.split('<').next().unwrap_or(recv_name);
                 if ctx.is_struct(base) || ctx.enum_variants.values().any(|e| e == base) {
-                    return IrType::named(base);
+                    eprintln!("DEBUG MethodCall: enum variant constructor {}::{}", base, method);
+                    return IrType::Named {
+                        path: base.to_string(),
+                        args: vec![],
+                    };
                 }
             }
             // 尝试从 receiver 类型推导方法返回类型
+            eprintln!("DEBUG MethodCall: before infer_expr_type receiver={:?}", receiver);
             let recv_ty = infer_expr_type(receiver, ctx);
+            eprintln!("DEBUG MethodCall: after infer_expr_type recv_ty={:?}", recv_ty);
+            // 检查 clone 方法
+            if method == "clone" {
+                eprintln!("DEBUG MethodCall: clone method recv_ty={:?}", recv_ty);
+            }
             // size_hint() 返回 (int, Option<int>)（LZ 视角 int；codegen 在
             // impl Iterator 中映射为 usize）。iter.lz Zip::size_hint 中
             // `self.a.size_hint()` 若不推断，min(lo_a, lo_b) 报 E0308
@@ -1179,6 +1243,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 || method == "clear"
                 || method == "append"
                 || method == "set"
+                || method == "skip_ws"
             {
                 return IrType::Unit;
             }
@@ -1196,6 +1261,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
             // 内置方法返回类型推断表
             if let Some(ret) = lookup_builtin_method_ret(&recv_ty, method, ctx) {
+                eprintln!("DEBUG MethodCall: lookup_builtin_method_ret recv_ty={:?} method={} ret={:?}", recv_ty, method, ret);
                 return ret;
             }
             match &recv_ty {
@@ -1213,6 +1279,16 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     if method == "clone" && (path == "Rc" || path == "Arc" || path == "Box") {
                         return recv_ty.clone();
                     }
+                    // String/str.clone() 返回 String（Rust 的 Clone impl）
+                    if method == "clone" && (path == "String" || path == "str") {
+                        eprintln!("DEBUG clone: path={} method=clone returning String", path);
+                        return IrType::Named {
+                            path: "String".into(),
+                            args: vec![],
+                        };
+                    }
+
+                    eprintln!("DEBUG clone: recv_ty={:?} method={}", recv_ty, method);
                     // 用户 struct 方法：从登记的方法返回类型查询（box.lz `get` 返回
                     // `ref T`，否则 `b.get()` 推断为 Any，`assert b.get() == 42`
                     // 无法解引用，E0277 can't compare &i64 with i64）
@@ -1255,21 +1331,43 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         }
         AstExpr::FieldAccess { receiver, field } => {
             let recv_ty = infer_expr_type(receiver, ctx);
-            match &recv_ty {
-                IrType::Named { path, .. } => ctx.lookup_field(path, field),
+            eprintln!("DEBUG FieldAccess: recv_ty={:?} field={}", recv_ty, field);
+            // 解开 Ref/MutRef 包装，获取内部类型
+            let inner_ty = match &recv_ty {
+                IrType::Ref(inner) | IrType::MutRef(inner) => inner.as_ref(),
+                other => other,
+            };
+            match &inner_ty {
+                IrType::Named { path, .. } => {
+                    let field_ty = ctx.lookup_field(path, field);
+                    eprintln!("DEBUG FieldAccess: path={} field_ty={:?}", path, field_ty);
+                    field_ty
+                }
                 _ => IrType::Any,
             }
         }
-        AstExpr::Index { receiver, .. } => {
+        AstExpr::Index { receiver, index } => {
             // `self[key]` 索引类型：从容器类型推断元素类型，而不是恒为 Any→i64。
-            // Dict<K,V> → V；List<T>/Vec<T> → T；否则 Any
+            // Dict<K,V> → V；List<T>/Vec<T> → T；Str → Char（单字符索引）或 Str（切片）；否则 Any
             let recv_ty = infer_expr_type(receiver, ctx);
+            eprintln!("DEBUG Index: recv_ty={:?}", recv_ty);
+            // 检查是否为切片操作（Range 索引）
+            let is_slice = matches!(&**index, AstExpr::Range { .. });
             match &recv_ty {
                 IrType::Named { path, args } if path == "Dict" || path == "HashMap" => {
                     args.get(1).cloned().unwrap_or(IrType::Any)
                 }
                 IrType::Named { path, args } if path == "List" || path == "Vec" => {
                     args.first().cloned().unwrap_or(IrType::Any)
+                }
+                IrType::Str if is_slice => IrType::Str, // 字符串切片返回 Str
+                IrType::Str => IrType::Str, // 字符索引返回 Str（LZ 语义）
+                IrType::Named { path, .. } if path == "String" || path == "str" => {
+                    if is_slice {
+                        IrType::Named { path: "String".into(), args: vec![] }
+                    } else {
+                        IrType::Str // 字符索引返回 Str（LZ 语义）
+                    }
                 }
                 _ => IrType::Any,
             }
@@ -2350,6 +2448,44 @@ fn lookup_builtin_method_ret(recv_ty: &IrType, method: &str, _ctx: &TypeCtx) -> 
         IrType::Named { path, .. } if path == "str" || path == "String" => match method {
             "len" => Some(IrType::Int),
             "clone" => Some(recv_ty.clone()),
+            _ => None,
+        },
+        // Str 类型（ir::Str）的方法
+        IrType::Str => match method {
+            "len" => Some(IrType::Int),
+            "clone" => {
+                eprintln!("DEBUG clone: recv_ty=Str method=clone returning String (from lookup_builtin_method_ret)");
+                Some(IrType::Named {
+                    path: "String".into(),
+                    args: vec![],
+                })
+            }
+            "to_string" => Some(IrType::Named {
+                path: "String".into(),
+                args: vec![],
+            }),
+            _ => None,
+        },
+        // &Str 类型的方法
+        IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Str) => match method {
+            "clone" => Some(IrType::Named {
+                path: "String".into(),
+                args: vec![],
+            }),
+            "to_string" => Some(IrType::Named {
+                path: "String".into(),
+                args: vec![],
+            }),
+            _ => None,
+        },
+        // Dict<K,V> / HashMap<K,V> 方法：keys→List<Ref<K>>, values→List<Ref<V>>, items→List<Ref<(K,V)>>
+        IrType::Named { path, args } if (path == "Dict" || path == "HashMap") && args.len() == 2 => match method {
+            "keys" | "values" | "items" | "iter" => {
+                Some(IrType::Named {
+                    path: "List".into(),
+                    args: vec![IrType::Ref(Box::new(args[0].clone()))],
+                })
+            }
             _ => None,
         },
         _ => None,
@@ -5301,11 +5437,15 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
 
         AstExpr::BlockExpr(stmts) => {
             let ir_stmts: Vec<Stmt> = stmts.iter().map(|s| convert_stmt(s, ctx)).collect();
+            let blk_ty = stmts
+                .last()
+                .map(|s| infer_stmt_type(s, ctx))
+                .unwrap_or(IrType::Unit);
             ExprKind::BlockExpr {
                 block: Block {
                     span: Span::unknown(),
                     stmts: ir_stmts,
-                    ty: IrType::Any,
+                    ty: blk_ty,
                 },
             }
         }
@@ -9981,7 +10121,9 @@ fn rewrite_raises_block(mut block: Block, ok: &IrType, err: &IrType) -> Block {
     // 仅当尾语句是裸表达式且其类型尚非 Result 时，包 Ok(...)。
     // 若尾表达式已因 raise→Err / callee 返回 Result 而本身是 Result，则不再重复包裹。
     let wrap_tail = match block.stmts.last() {
-        Some(Stmt::ExprStmt { expr }) => !matches!(expr.ty, IrType::Result { .. }),
+        Some(Stmt::ExprStmt { expr }) => {
+            !matches!(expr.ty, IrType::Result { .. } | IrType::Unit)
+        }
         _ => false,
     };
     if wrap_tail {
@@ -10363,9 +10505,11 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                         .map(|g| IrType::Generic(g.clone()))
                         .collect(),
                 };
+                let field_ty = replace_self(&from_ast_type(&f.ty), &self_ty);
+                eprintln!("DEBUG struct field: struct={} field={} ty={:?}", s.name, f.name, field_ty);
                 Field {
                     name: f.name.clone(),
-                    ty: replace_self(&from_ast_type(&f.ty), &self_ty),
+                    ty: field_ty,
                 }
             })
             .collect();
@@ -10391,6 +10535,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 method_ctx.enum_variants = ctx.enum_variants.clone();
                 method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
                 method_ctx.fn_returns = ctx.fn_returns.clone();
+                method_ctx.vars = ctx.vars.clone(); // 继承顶层函数类型，使方法体内能引用 `add` 等函数
                 // struct 内联方法（`struct Parser = s: str ... def m(self)`）：self 绑定为
                 // struct 自身类型（含泛型参数），否则 self.s 字段访问推断为 Any/Self_，
                 // 导致 str 字段索引/切片 codegen 生成非法 Rust（json.lz E0277/E0308）
@@ -10405,6 +10550,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 convert_fn_def(m, &method_ctx)
             })
             .collect();
+
 
         // 普通 magic 方法体（__str__/__add__ 等，除 __new__/__init__/__implicit_from__ 特殊处理外）
         // 也转成 FnDef 并入 methods，否则 `magic __str__` 等方法体在 IR 中丢失
@@ -10436,6 +10582,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 convert_fn_def(m, &method_ctx)
             })
             .collect();
+
         let mut methods = methods;
         methods.extend(magic_methods);
 
@@ -12678,13 +12825,13 @@ fn ex_check_expr(
             }
             // str_plus_int：字符串与数字直接相加（含 fstring 混拼场景）
             if matches!(op, &BinOp::Add) {
-                if matches!(&lt, IrType::Str) && !ex_type_queer(&rt) && !matches!(&rt, IrType::Str)
-                {
+                let is_str = |t: &IrType| {
+                    matches!(t, IrType::Str)
+                        || matches!(t, IrType::Named { path, .. } if path == "String" || path == "str")
+                };
+                if is_str(&lt) && !ex_type_queer(&rt) && !is_str(&rt) {
                     work.report_error("字符串与数字不能直接相加".to_string());
-                } else if matches!(&rt, IrType::Str)
-                    && !ex_type_queer(&lt)
-                    && !matches!(&lt, IrType::Str)
-                {
+                } else if is_str(&rt) && !ex_type_queer(&lt) && !is_str(&lt) {
                     work.report_error("字符串与数字不能直接相加".to_string());
                 }
             }
@@ -13383,3 +13530,4 @@ fn ir_type_name(ty: &IrType) -> String {
         IrType::Fn { .. } => "fn".into(),
     }
 }
+// force rebuild
