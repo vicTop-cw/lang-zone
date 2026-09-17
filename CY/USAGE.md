@@ -145,11 +145,11 @@ lzcyc 依赖 Cython 运行时库（`CY/runtime/`）：
 lzcyc CLI 已落地（`CY/src/main.rs`），复用主编译器 lib 完整管线：
 
 - ✅ **transpile**：lex → 宏/模板展开 → parse → **import 合并**（源目录 + `--std-dir`）→ semantic_check → build_ir → Cython 后端 → **生成后处理**（运行期缺口兜底）
-  - TESTS 全量 54 样例 **53 通过**（1 个失败为主编译器前端既有行为：作用域检查，与 lzc 行为一致）
+  - TESTS 全量 54 样例 **54 通过（全绿）**
 - ✅ **run**：运行层验证
   - 本机有 cython → pyximport 即时编译
   - 无 cython → **纯 Python 降级运行**（按项目验证约定剥离 cdef/cpdef/ctypedef/参数 C 类型/返回标注）
-  - TESTS 全量 run 回归 **53/54 通过**；唯一挂账：作用域检查（前端既有行为，与 lzc 一致，见 BACKLOG）
+  - TESTS 全量 run 回归 **54/54 通过（全绿）**
 - ✅ **宏/模板展开已接入**：`lexer → 宏/模板展开（交替至稳定，16 轮上限）→ parser`，编排复用 lib 公开层 `lang_zone::macros::*`，支持 `@name!` 宏调用、`name!` 模板调用、跨模块 `macro import`；`--macro-check=loose|light|strict` 透传
 - ✅ **compile**：transpile + `cythonize`（调 `CY/scripts/cython_build.py`；.c → .pyd 需本机 C 编译器）
 

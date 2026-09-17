@@ -1,21 +1,17 @@
 // lzcyc CLI 回归测试 — 把全量验证基线固化为 cargo test
 //
-// 基线（2026-09-17）：transpile 51/53、run 45/53、宏展开 smoke 通过。
-// 挂账期望与 CY/BACKLOG.md 保持同步：
-// - transpile 失败 2 个 = 主编译器前端既有行为（import 解析/作用域）
-// - run 额外失败 6 个 = 主编译器 Cython 后端运行期语义缺口（Box 索引/Option 方法/_variant 等）
-// 任何偏离基线的变化都会让本套件变红，防止无感回退。
+// 基线（2026-09-17 第二轮）：transpile 54/54、run 54/54、宏展开 smoke 通过——全绿。
+// 历史挂账已清零：运行期语义缺口由 postprocess_pyx 兜底；import 解析由 lzcyc
+// merge_imports 解决；test_control.lz 样例作用域笔误已修正（无 let 赋值形态）。
+// 任何样例回归都会让本套件变红。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-const TRANSPILE_EXPECTED_FAIL: &[&str] = &["test_control.lz"];
+const TRANSPILE_EXPECTED_FAIL: &[&str] = &[];
 
-const RUN_EXPECTED_FAIL: &[&str] = &[
-    // 前端既有行为（与主编译器一致）：嵌套块内 let 外部引用的作用域检查
-    "test_control.lz",
-];
+const RUN_EXPECTED_FAIL: &[&str] = &[];
 
 fn lzcyc_cmd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_lzcyc"))

@@ -7,13 +7,13 @@
 
 | 验证 | 结果 | 说明 |
 |---|---|---|
-| transpile 全量 | **53/54** | CY/TESTS 54 样例（新增 lz_std.lz 运行时 fixture） |
-| run 全量（纯 Python 降级） | **53/54** | 唯一挂账：test_control.lz（前端作用域） |
+| transpile 全量 | **54/54** | CY/TESTS 54 样例全绿（含 lz_std.lz 运行时 fixture） |
+| run 全量（纯 Python 降级） | **54/54** | 全绿（test_control 样例作用域笔误已修正，checker 派发已兜底） |
 | cargo test 回归 | 3/3 | testsrc/cli.rs 固化基线，偏离即红 |
 
 产物：`CY/output/tests/*.pyx`；降级运行副本：`CY/output/pyrun/*.py`（git 已忽略）
 
-## 二、运行期语义缺口：5 个已由 lzcyc 生成后处理兜底，1 个仍挂
+## 二、运行期语义缺口：全部由 lzcyc 生成后处理兜底
 
 lzcyc 新增 `postprocess_pyx`（锚点匹配、匹配不上原样保留），以下缺口在 lzcyc 侧已解决：
 
@@ -26,12 +26,12 @@ lzcyc 新增 `postprocess_pyx`（锚点匹配、匹配不上原样保留），�
 | 列表推导 filter 谓词缺调用 | `if (lambda ...)` 补 `(__cv)` | ✅ 已兜底 |
 | checker 派发 `函数[checker]` | `__Params` 垫片（`_LzKwargsMap`：contains/`[k]`）+ 包装器派发（形参名 zip 位置实参进 kwargs，checker 先行检查再透传） | ✅ 已兜底 |
 
-> 融入时：以上兜底逻辑应下沉回 lib codegen（生成正确形态），后处理退位为兼容层。
+> 融入时：以上兜底逻辑应下沉回 lib codegen（生成正确形态），后处理退位为兼容层。下沉计划见 `docs/融入计划-2026-09-17.md` M1。
 
-## 三、前端既有行为（1 个，与 lzc 一致）
+## 三、前端既有行为（已闭环）
 
-1. `99_self_test/test_control.lz`：`未绑定变量: pos`（嵌套块内 let 外部引用的作用域检查）
-   （原 import_runtime.lz 的 `import lz_std` 已由 lzcyc import 合并 + lz_std.lz fixture 解决）
+1. ~~`99_bootstrap/import_runtime.lz`：`import lz_std` 路径解析~~ → 已由 lzcyc import 合并 + lz_std.lz fixture 解决
+2. ~~`99_self_test/test_control.lz`：`未绑定变量: pos`~~ → 样例作用域笔误已修正（`let` 块级绑定改为无 let 函数级赋值，对齐文件内 total/even_sum 风格；`let` 与无 let 赋值的作用域双轨制已写入融入计划 M2.1）
 
 ## 四、挂账：lzcyc 自身待办
 
