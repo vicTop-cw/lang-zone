@@ -7,5 +7,14 @@ description = "LZ → Cython compiler — transpile LZ to .pyx, compile to .pyd"
 [workspace]
 
 [dependencies]
-# 零外部依赖：与 LZ 原版编译器一致
+# 复用主编译器 lib 公开层（lexer/parser/ast/semantic_check/ir/codegen_cython）
+# 注意：主编译器 lib 存在少量无条件 serde_json 引用（infer feature 保护不全），
+# 因此必须保持 default features（含 infer）；serde/serde_json/bincode 会被带入，
+# 待主编译器融入子编译器时一并收敛为真正的零外部依赖
 lang-zone = { path = ".." }
+
+# 集成测试显式声明：Windows 下 tests/ 与参考样例集 TESTS/ 大小写不敏同目录，
+# 测试源码放 testsrc/ 避免混入参考集
+[[test]]
+name = "cli"
+path = "testsrc/cli.rs"

@@ -1,0 +1,8 @@
+# 构建产物
+target/
+
+# 运行/验证产物（.pyx、pyrun 降级副本等）
+output/
+
+# 豁免：lzcyc 集成测试源码（根 .gitignore 的 *.rs 会忽略新增 .rs）
+!testsrc/*.rs

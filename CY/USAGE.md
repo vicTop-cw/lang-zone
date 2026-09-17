@@ -132,24 +132,36 @@ lzcyc 依赖 Cython 运行时库（`CY/runtime/`）：
 | 目标 | 原生二进制 | Python 扩展 |
 | 用途 | 生产编译 | 自举 + 原型开发 |
 | 语法 | LZ 完整规范 | LZ 完整规范 |
-| 前端 | 共享 parser/ast/typer（从 `src/` COPY） | 共享 parser/ast/typer |
+| 前端 | 共享 parser/ast/typer（依赖 `lang-zone` lib，零 COPY） | 共享 parser/ast/typer |
+
+> **架构约束（长期决策）**：lzc 是主编译器（默认 Rust 后端），lzcyc 只能在 `CY/`
+> 范围内开发，复用主编译器 lib 公开层（lexer/parser/ast/semantic_check/ir/codegen_cython），
+> 不修改 `src/` 下任何文件。主编译器后续将融入子编译器，届时以 lzcyc 为主干。
 
 ---
 
-## 七、开发状态
+## 七、开发状态（2026-09-17 更新）
 
-lzcyc 处于 Phase 0–2 阶段，当前支持：
-- ✅ 词法分析、语法解析（与 lzc 共享）
-- ✅ CLI 框架（transpile/compile/run）
-- ✅ 基本表达式生成（字面量、二元运算、函数调用）
-- 🟡 语句生成、声明生成、类型推断接入进行中
-- ❌ 模式匹配、魔法方法、并发、所有权模拟
+lzcyc CLI 已落地（`CY/src/main.rs`），复用主编译器 lib 完整管线：
 
-```bash
-# 运行集成测试
-cd E:\IDEProjects\AI\lang-zone\CY
+- ✅ **transpile**：lex → parse → semantic_check → build_ir → Cython 后端 → .pyx
+  - TESTS 全量 53 样例 **51 通过**（2 个失败为主编译器前端既有行为：`import lz_std` 路径解析、`test_control.lz` 作用域，与 lzc 行为一致）
+- ✅ **run**：运行层验证
+  - 本机有 cython → pyximport 即时编译
+  - 无 cython → **纯 Python 降级运行**（按项目验证约定剥离 cdef/cpdef/ctypedef/参数 C 类型/返回标注）
+  - TESTS 全量 run 回归 **45/53 通过**；8 个失败中 6 个为主编译器 Cython 后端运行期语义缺口（Box 下标访问、Option.is_none、enum match `_variant` 字段等，挂账待融入后修复），2 个同 transpile
+- ✅ **宏/模板展开已接入**：`lexer → 宏/模板展开（交替至稳定，16 轮上限）→ parser`，编排复用 lib 公开层 `lang_zone::macros::*`，支持 `@name!` 宏调用、`name!` 模板调用、跨模块 `macro import`；`--macro-check=loose|light|strict` 透传
+- ✅ **compile**：transpile + `cythonize`（调 `CY/scripts/cython_build.py`；.c → .pyd 需本机 C 编译器）
+
+```powershell
+# 构建（CY 独立 workspace）
+cd F:\AI\lang-zone\CY
+cargo build
+
+# 验证（回归基线已固化为测试：transpile 51/53、run 45/53 期望）
 cargo test
 
-# 运行已有转译测试（验证 .pyx 输出）
-cargo run --bin lzcyc -- transpile TESTS/01_basics/literals.lz
+# 手动验证
+.\target\debug\lzcyc.exe transpile TESTS/01_basics/literals.lz
+.\target\debug\lzcyc.exe run TESTS/01_basics/literals.lz
 ```
