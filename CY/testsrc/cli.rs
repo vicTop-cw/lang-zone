@@ -10,19 +10,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-const TRANSPILE_EXPECTED_FAIL: &[&str] = &["import_runtime.lz", "test_control.lz"];
+const TRANSPILE_EXPECTED_FAIL: &[&str] = &["test_control.lz"];
 
 const RUN_EXPECTED_FAIL: &[&str] = &[
     // 前端既有行为（与主编译器一致）
-    "import_runtime.lz",
     "test_control.lz",
-    // 主编译器 Cython 后端运行期语义缺口
-    "call_block.lz",
+    // 主编译器 Cython 后端运行期语义缺口：checker 派发（`函数[checker]` 下标语义）
     "checker_call.lz",
-    "box_rc_arc.lz",
-    "test_string_ops.lz",
-    "test_struct.lz",
-    "test_types.lz",
 ];
 
 fn lzcyc_cmd() -> Command {

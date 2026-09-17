@@ -1,34 +1,37 @@
 # lzcyc 挂账清单（BACKLOG）
 
 > 约束：`src/`（主编译器 lzc）不可修改，以下事项待主编译器融入子编译器时统一处理。
-> 更新：2026-09-17
+> 更新：2026-09-17（第二轮：生成后处理落地，5/6 运行期缺口兜底解决）
 
-## 一、验证基线（今日实测）
+## 一、验证基线（最新实测）
 
 | 验证 | 结果 | 说明 |
 |---|---|---|
-| transpile 全量 | **51/53** | CY/TESTS 53 样例 |
-| run 全量（纯 Python 降级） | **45/53** | 含 cdef 剥离降级 |
+| transpile 全量 | **53/54** | CY/TESTS 54 样例（新增 lz_std.lz 运行时 fixture） |
+| run 全量（纯 Python 降级） | **52/54** | 挂账：test_control.lz（前端）、checker_call.lz（checker 派发） |
+| cargo test 回归 | 3/3 | testsrc/cli.rs 固化基线，偏离即红 |
 
 产物：`CY/output/tests/*.pyx`；降级运行副本：`CY/output/pyrun/*.py`（git 已忽略）
 
-## 二、挂账：主编译器 Cython 后端运行期语义缺口（6 个 run 失败）
+## 二、运行期语义缺口：5 个已由 lzcyc 生成后处理兜底，1 个仍挂
 
-lib `codegen_cython.rs` 生成形态在运行期的缺口（cythonize 与纯 Python 降级同样命中）：
+lzcyc 新增 `postprocess_pyx`（锚点匹配、匹配不上原样保留），以下缺口在 lzcyc 侧已解决：
 
-| 样例 | 现象 | 缺口 |
+| 缺口 | 兜底方式 | 状态 |
 |---|---|---|
-| box_rc_arc.lz | `'Box' object is not subscriptable` | Box/Rc/Arc 包装类缺 `__getitem__`/`__setitem__`（仅 `__getattr__` 委托） |
-| test_string_ops.lz | `'NoneType' object has no attribute 'is_none'` | `None_()` 返回裸 None，Option 实例方法（is_none/unwrap）无着落 |
-| test_types.lz | 同上 | 同上 |
-| test_struct.lz | `'Red' object has no attribute '_variant'` | enum match 解构依赖 `_variant` 字段，类层次生成时未写入 |
-| call_block.lz | `'tuple' object is not callable` | 构建块 `=:` 产物调用形态 |
-| checker_call.lz | `'function' object is not subscriptable` | checker 块 `__Params` 模拟形态 |
+| Box/Rc/Arc 下标 | prelude 类定义注入 `__getitem__`/`__setitem__` | ✅ 已兜底 |
+| Option/None 字面量 | `_LZNONE` 单例垫片（is_none/is_some/unwrap/expect + __eq__ None）+ 行级 `x = None` 替换 | ✅ 已兜底 |
+| enum match `_variant` | AST 收集变体序号，向变体类注入 `_variant = N` | ✅ 已兜底 |
+| 构建块下标 `()(N)` | `))()(N)` → `))()[N]` | ✅ 已兜底 |
+| 列表推导 filter 谓词缺调用 | `if (lambda ...)` 补 `(__cv)` | ✅ 已兜底 |
+| **checker 派发** `函数[checker]` | 需 `__Params` kwargs 参数名映射语义，后处理做不对会引入伪语义 | ❌ 仍挂账 |
 
-## 三、挂账：主编译器前端既有行为（2 个，与 lzc 行为一致）
+> 融入时：以上兜底逻辑应下沉回 lib codegen（生成正确形态），后处理退位为兼容层。
 
-1. `99_bootstrap/import_runtime.lz`：`import lz_std` 路径解析（主编译器加 `--std-dir std` 同样报"路径不存在"）
-2. `99_self_test/test_control.lz`：`未绑定变量: pos`（嵌套块内 let 外部引用的作用域检查）
+## 三、前端既有行为（1 个，与 lzc 一致）
+
+1. `99_self_test/test_control.lz`：`未绑定变量: pos`（嵌套块内 let 外部引用的作用域检查）
+   （原 import_runtime.lz 的 `import lz_std` 已由 lzcyc import 合并 + lz_std.lz fixture 解决）
 
 ## 四、挂账：lzcyc 自身待办
 
