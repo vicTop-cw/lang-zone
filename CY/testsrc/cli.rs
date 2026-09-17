@@ -13,10 +13,8 @@ use std::time::{Duration, Instant};
 const TRANSPILE_EXPECTED_FAIL: &[&str] = &["test_control.lz"];
 
 const RUN_EXPECTED_FAIL: &[&str] = &[
-    // 前端既有行为（与主编译器一致）
+    // 前端既有行为（与主编译器一致）：嵌套块内 let 外部引用的作用域检查
     "test_control.lz",
-    // 主编译器 Cython 后端运行期语义缺口：checker 派发（`函数[checker]` 下标语义）
-    "checker_call.lz",
 ];
 
 fn lzcyc_cmd() -> Command {

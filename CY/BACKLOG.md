@@ -8,7 +8,7 @@
 | 验证 | 结果 | 说明 |
 |---|---|---|
 | transpile 全量 | **53/54** | CY/TESTS 54 样例（新增 lz_std.lz 运行时 fixture） |
-| run 全量（纯 Python 降级） | **52/54** | 挂账：test_control.lz（前端）、checker_call.lz（checker 派发） |
+| run 全量（纯 Python 降级） | **53/54** | 唯一挂账：test_control.lz（前端作用域） |
 | cargo test 回归 | 3/3 | testsrc/cli.rs 固化基线，偏离即红 |
 
 产物：`CY/output/tests/*.pyx`；降级运行副本：`CY/output/pyrun/*.py`（git 已忽略）
@@ -24,7 +24,7 @@ lzcyc 新增 `postprocess_pyx`（锚点匹配、匹配不上原样保留），�
 | enum match `_variant` | AST 收集变体序号，向变体类注入 `_variant = N` | ✅ 已兜底 |
 | 构建块下标 `()(N)` | `))()(N)` → `))()[N]` | ✅ 已兜底 |
 | 列表推导 filter 谓词缺调用 | `if (lambda ...)` 补 `(__cv)` | ✅ 已兜底 |
-| **checker 派发** `函数[checker]` | 需 `__Params` kwargs 参数名映射语义，后处理做不对会引入伪语义 | ❌ 仍挂账 |
+| checker 派发 `函数[checker]` | `__Params` 垫片（`_LzKwargsMap`：contains/`[k]`）+ 包装器派发（形参名 zip 位置实参进 kwargs，checker 先行检查再透传） | ✅ 已兜底 |
 
 > 融入时：以上兜底逻辑应下沉回 lib codegen（生成正确形态），后处理退位为兼容层。
 
