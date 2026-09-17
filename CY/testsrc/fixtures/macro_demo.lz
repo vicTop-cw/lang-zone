@@ -1,0 +1,8 @@
+#!bin macro
+
+// 恒等宏：lzcyc 宏展开管线验证 fixture
+macro id(input: Tokens) -> Tokens = input
+
+@id!
+def main() =
+    print("macro expand ok")
