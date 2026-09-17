@@ -1162,7 +1162,13 @@ impl CodeGen {
                     let field_types: Vec<IrType> =
                         variant.fields.iter().map(|f| f.ty.clone()).collect();
                     self.enum_variant_fields
-                        .insert((e.name.clone(), variant.name.clone()), field_types);
+                        .insert((e.name.clone(), variant.name.clone()), field_types.clone());
+                    // 变体字段类型（dotted + 裸名双键，与 builder.rs:156-158 一致）：
+                    // MethodCall 构造器分支按 "Enum.Variant" 查表设置参数期望类型，
+                    // 不填充则查表恒 None，String 索引期望类型推断失效（lib_json E0308）
+                    self.enum_variant_fields
+                        .insert((e.name.clone(), variant.name.clone()), field_types.clone());
+
                     // 命名字段列表（全命名 = 结构体变体）
                     let named_fields: Vec<String> = variant
                         .fields
@@ -7742,8 +7748,13 @@ impl CodeGen {
                 };
                 self.box_lambda = saved_box_lambda;
                 // BUG-CG-004（收口）：raises 函数尾表达式需包成 Ok(...)（expr 自身已是 Result 则不包）
+                // 但不包裹返回 () 的表达式（如 skip_ws()）
+                // 也不包裹返回 Result<(), _> 的表达式（skip_ws 返回 Result<(), _>，不应再包 Ok）
+                let ret_is_unit = matches!(&self.current_ret_ty, Some(IrType::Unit));
                 let wrap_ok =
-                    self.current_fn_raises.is_some() && !matches!(&expr.ty, IrType::Result { .. });
+                    self.current_fn_raises.is_some()
+                    && !matches!(&expr.ty, IrType::Result { .. } | IrType::Unit)
+                    && !ret_is_unit;
                 if is_last && !self.is_main && !self.suppress_tail_return {
                     // 非 main 函数尾表达式 → return expr;
                     // 返回引用（`-> &T` / `-> &mut T`）时尾表达式 self.字段：
@@ -8863,6 +8874,9 @@ impl CodeGen {
         }
         let is_dict =
             matches!(&base.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
+        // String/str 不能用 usize 索引（Rust 限制），需用 chars().nth()
+        let is_str = matches!(&base.ty, IrType::Str)
+            || matches!(&base.ty, IrType::Named { path, .. } if path == "String" || path == "str");
         // 容器（Vec/List）索引的 key 需为 usize：
         // - 整数 key（i64）直接转换
         // - 类型未知（Any）的变量 key（如 for 循环变量 items[i]）也转换，
@@ -8876,8 +8890,8 @@ impl CodeGen {
             || (matches!(&key.ty, IrType::Any) && matches!(&key.kind, ExprKind::Var(_)));
         // 若 key 类型含泛型参数（K, V, T 等）：不可能是数值索引——跳过 as usize
         let key_is_numeric = key_is_numeric && !matches!(&key.ty, IrType::Generic(_));
-        // 对整数 key（i64）转换为 usize，除非目标是 dict（其 key 不是数值索引）
-        if !is_dict && key_is_numeric {
+        // 对整数 key（i64）转换为 usize，除非目标是 dict（其 key 不是数值索引）或 String/str
+        if !is_dict && !is_str && key_is_numeric {
             let key_s = self.gen_expr(key);
             // key 是复合表达式（如 self.len() - 1）时需整体加括号再 as usize，
             // 否则 `A - 1 as usize` 的 as 只应用到尾部（E0277 i64 - usize）
@@ -8892,7 +8906,7 @@ impl CodeGen {
                 ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
             let is_container_base = matches!(&base.ty, IrType::Named { path, .. }
                 if path == "Vec" || path == "List" || path == "Array" || path == "HashMap" || path == "Dict" || path == "Set");
-            if !is_dict && is_self_field_key && (is_self_field_base || is_container_base) {
+            if !is_dict && !is_str && is_self_field_key && (is_self_field_base || is_container_base) {
                 format!("({} as usize)", key_s)
             } else {
                 key_s
@@ -10742,11 +10756,25 @@ impl CodeGen {
                     // struct::new 字段类型表（new 形参顺序即字段顺序）：fn 字段实参
                     // 为 lambda 时转 fn 指针（同 Call 分支，lib_iterator MapIter.new）
                     let struct_fields = self.struct_fields_info.get(&recv).cloned();
+                    // 枚举变体构造器（ParseError::UnexpectedChar(...)）：
+                    // 按 (Enum, Variant) 查字段类型表，为每个实参注入期望类型，
+                    // 使 String 索引（s[pos]）生成 String 而非 i64（lib_json E0308）
+                    let ctor_field_types = self
+                        .enum_variant_fields
+                        .get(&(recv.clone(), method.clone()))
+                        .cloned();
                     let mut args_s: Vec<String> = args
                         .iter()
                         .enumerate()
                         .map(|(i, a)| {
+                            let prev_expected = self.current_expected_ty.borrow().clone();
+                            if let Some(types) = &ctor_field_types {
+                                if i < types.len() {
+                                    *self.current_expected_ty.borrow_mut() = Some(types[i].clone());
+                                }
+                            }
                             let s = self.gen_expr(a);
+                            *self.current_expected_ty.borrow_mut() = prev_expected;
                             if let Some(fields) = &struct_fields {
                                 if let Some((_, IrType::Fn { params, ret })) = fields.get(i) {
                                     if matches!(&a.kind, ExprKind::Lambda { .. }) {
@@ -10950,6 +10978,10 @@ impl CodeGen {
                     }
                 }
 
+                // parse_f64: String.parse_f64() -> parse::<f64>().unwrap()
+                if method == "parse_f64" {
+                    return format!("({}).parse::<f64>().unwrap()", recv);
+                }
 
                 // size_hint：std Iterator 返回 (usize, Option<usize>)，LZ 语义是
                 // (int, Option<int>)（iter.lz Zip::size_hint 中 `self.a.size_hint()`），
@@ -11685,7 +11717,7 @@ impl CodeGen {
                         format!("&({})", recv)
                     };
                     return format!(
-                        "DictExt::{}({}, {})",
+                        "<dyn DictExt<_, _>>::{}({}, {})",
                         rust_method,
                         recv_ref,
                         args_s.join(", ")
@@ -12234,6 +12266,11 @@ impl CodeGen {
                                 if path == "str" || path == "String")
                                 || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
                                 || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+                                if path == "str" || path == "String")
+                                // 调用参数/构造器上下文：期望类型在 current_expected_ty
+                                // （如 ParseError::UnexpectedChar(pos, ch: str)）
+                                || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Str))
+                                || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
                                 if path == "str" || path == "String");
                             if idx_wants_string {
                                 return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s);
@@ -12275,6 +12312,11 @@ impl CodeGen {
                                         if path == "str" || path == "String")
                                     || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
                                     || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+                                        if path == "str" || path == "String")
+                                    // 调用参数/构造器上下文：期望类型在 current_expected_ty
+                                    // （如 ParseError::UnexpectedChar(pos, ch: str)）
+                                    || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Str))
+                                    || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
                                         if path == "str" || path == "String");
                                 if idx_wants_string2 {
                                     format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s)
