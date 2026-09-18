@@ -2474,6 +2474,13 @@ fn escape_str_literal(s: &str) -> String {
 }
 
 fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
+    // float→complex 提升：将 f64 表达式提升为 Python complex 字面量
+    fn gen_complex_promote(cg: &CythonCodeGen, expr: &Expr) -> String {
+        match &expr.kind {
+            ExprKind::Lit(LitKind::F64(f)) => format!("({} + 0j)", f),
+            _ => format!("({} + 0j)", gen_expr(cg, expr)),
+        }
+    }
     match &expr.kind {
         ExprKind::Lit(lit) => match lit {
             LitKind::Int(n) => n.to_string(),
@@ -3176,6 +3183,9 @@ fn gen_pattern(
         Pattern::Lit(lit) => {
             let lit_str = match lit {
                 LitKind::Int(n) => n.to_string(),
+                LitKind::Int128(n) => n.to_string(),
+                LitKind::BigInt(s) => s.clone(),
+                LitKind::Complex(re, im) => format!("({} + {}j)", re, im),
                 LitKind::F64(f) => f.to_string(),
                 LitKind::Str(s) => format!("\"{}\"", escape_str_literal(s)),
                 LitKind::FStr(s) => format!("f\"{}\"", escape_str_literal(s)),
