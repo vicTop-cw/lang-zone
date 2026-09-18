@@ -1,17 +1,17 @@
-//! 编译期常量表达式求值
+﻿//! 缂栬瘧鏈熷父閲忚〃杈惧紡姹傚€?
 //!
-//! 仅处理可在 AST 层面静态求值的简单字面量与算术表达式，
-//! 不引入副作用或复杂语义。
+//! 浠呭鐞嗗彲鍦?AST 灞傞潰闈欐€佹眰鍊肩殑绠€鍗曞瓧闈㈤噺涓庣畻鏈〃杈惧紡锛?
+//! 涓嶅紩鍏ュ壇浣滅敤鎴栧鏉傝涔夈€?
 
-use lang_zone::ast::expr::{BinOp, Expr};
+use lang_zone::ast::{BinOp, Expr};
 
-/// 对常量表达式做编译期求值，返回其字面量字符串表示。
+/// 瀵瑰父閲忚〃杈惧紡鍋氱紪璇戞湡姹傚€硷紝杩斿洖鍏跺瓧闈㈤噺瀛楃涓茶〃绀恒€?
 ///
-/// 当前支持：
-/// - 字面量（int、float、str、bool、None）
-/// - 二元运算 `+ - * /`，对 int/float 做简单算术
+/// 褰撳墠鏀寔锛?
+/// - 瀛楅潰閲忥紙int銆乫loat銆乻tr銆乥ool銆丯one锛?
+/// - 浜屽厓杩愮畻 `+ - * /`锛屽 int/float 鍋氱畝鍗曠畻鏈?
 ///
-/// 无法求值时返回 `None`。
+/// 鏃犳硶姹傚€兼椂杩斿洖 `None`銆?
 pub fn eval_const_expr(expr: &Expr) -> Option<String> {
     match expr {
         Expr::IntLit(n) => Some(n.to_string()),
@@ -24,7 +24,7 @@ pub fn eval_const_expr(expr: &Expr) -> Option<String> {
             let lv = eval_const_expr(left)?;
             let rv = eval_const_expr(right)?;
 
-            // 尝试按整数解析
+            // 灏濊瘯鎸夋暣鏁拌В鏋?
             let li = lv.parse::<i64>();
             let ri = rv.parse::<i64>();
 
@@ -60,7 +60,7 @@ pub fn eval_const_expr(expr: &Expr) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lang_zone::ast::expr::{BinOp, Expr};
+    use lang_zone::ast::{BinOp, Expr};
 
     #[test]
     fn eval_literals() {

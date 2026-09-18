@@ -69,25 +69,21 @@ impl Parser {
 
     fn parse_type(&mut self) -> Result<Type, String> {
         self.skip_ws();
-        let mut types = vec![self.parse_intersection()?];
+        let ty = self.parse_intersection()?;
         self.skip_ws();
-        while self.peek() == Some('|') {
-            self.advance();
-            types.push(self.parse_intersection()?);
-            self.skip_ws();
+        if self.peek() == Some('|') {
+            return Err("union types ('|') are not supported in .lzi type strings".into());
         }
-        Ok(flatten_union(types))
+        Ok(ty)
     }
 
     fn parse_intersection(&mut self) -> Result<Type, String> {
-        let mut types = vec![self.parse_optional()?];
+        let ty = self.parse_optional()?;
         self.skip_ws();
-        while self.peek() == Some('&') {
-            self.advance();
-            types.push(self.parse_optional()?);
-            self.skip_ws();
+        if self.peek() == Some('&') {
+            return Err("intersection types ('&') are not supported in .lzi type strings".into());
         }
-        Ok(flatten_intersection(types))
+        Ok(ty)
     }
 
     fn parse_optional(&mut self) -> Result<Type, String> {
@@ -289,46 +285,6 @@ impl Parser {
             }
         }
         Ok(self.input[start..self.pos].iter().collect())
-    }
-}
-
-fn flatten_intersection(types: Vec<Type>) -> Type {
-    let mut flat = Vec::new();
-    for t in types {
-        if let Type::Intersection(inner) = t {
-            for it in inner {
-                if !flat.contains(&it) {
-                    flat.push(it);
-                }
-            }
-        } else if !flat.contains(&t) {
-            flat.push(t);
-        }
-    }
-    if flat.len() == 1 {
-        flat.into_iter().next().unwrap()
-    } else {
-        Type::Intersection(flat)
-    }
-}
-
-fn flatten_union(types: Vec<Type>) -> Type {
-    let mut flat = Vec::new();
-    for t in types {
-        if let Type::Union(inner) = t {
-            for it in inner {
-                if !flat.contains(&it) {
-                    flat.push(it);
-                }
-            }
-        } else if !flat.contains(&t) {
-            flat.push(t);
-        }
-    }
-    if flat.len() == 1 {
-        flat.into_iter().next().unwrap()
-    } else {
-        Type::Union(flat)
     }
 }
 

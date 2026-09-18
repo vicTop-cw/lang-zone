@@ -140,9 +140,7 @@ fn lib_linked_list() {
 }
 
 #[test]
-// 2026-09-17 曾转正；合并混合态回归：str 参数 ty=Ref(String) 生成 &String，
-// 与值语义 String 比较触发 E0277（需 BinOp 比较生成处 str 对齐，见 BACKLOG）
-#[ignore = "E0277 str 参数比较对齐待专项修复（M2 期间处理）"]
+// 2026-09-18 转正：E0277 str 参数比较对齐已由 BinOp 比较生成处 str 对齐修复
 fn lib_string() {
     assert!(run_lib("lib_string").unwrap().contains("OK"));
 }
@@ -166,8 +164,7 @@ fn lib_iterator() {
 }
 
 #[test]
-// 2026-09-17 曾转正；合并混合态回归：同 lib_string 的 E0277 str 对齐问题（见 BACKLOG）
-#[ignore = "E0277 str 参数比较对齐待专项修复（M2 期间处理）"]
+// 2026-09-18 转正：E0277 str 参数比较对齐已由 BinOp 比较生成处 str 对齐修复
 fn lib_hashmap() {
     assert!(run_lib("lib_hashmap").unwrap().contains("OK"));
 }

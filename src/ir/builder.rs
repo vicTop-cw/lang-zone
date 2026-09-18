@@ -316,9 +316,9 @@ impl TypeCtx {
                     params,
                     ret: Box::new(ret.clone()),
                 };
-            eprintln!("DEBUG collect_functions: inserting {} with type {:?}", f.name, fn_ty);
+            
             self.vars.insert(f.name.clone(), fn_ty);
-            eprintln!("DEBUG collect_functions: vars contains 'add': {}", self.vars.contains_key("add"));
+            
             // BUG-CG-004 收口：登记 raises 异常类型，供 try 体末尾调用 raises 函数时
             // 将 body 块类型标注为 Result<ok, err>（见 convert_expr 的 TryCatch 分支）。
             if let Some(r) = &f.raises {
@@ -1077,15 +1077,15 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             args,
             type_args,
         } => {
-            eprintln!("DEBUG Call: func={:?} args={:?}", func, args);
+            
             // 检查 func 是否是枚举变体构造器（ParseError.UnexpectedChar(...)）
             if let AstExpr::FieldAccess { receiver, field } = func.as_ref() {
-                eprintln!("DEBUG Call: FieldAccess receiver={:?} field={}", receiver, field);
+                
                 if let AstExpr::Ident(enum_name) = receiver.as_ref() {
-                    eprintln!("DEBUG Call: enum_name={} field={} enum_variants.contains_key={}", enum_name, field, ctx.enum_variants.contains_key(field));
+                    
                     if ctx.enum_variants.contains_key(field) && ctx.enum_variants.get(field) == Some(enum_name) {
                         // 枚举变体构造器：返回枚举类型
-                        eprintln!("DEBUG Call: enum variant constructor {}::{}", enum_name, field);
+                        
                         return IrType::Named {
                             path: enum_name.clone(),
                             args: vec![],
@@ -1214,15 +1214,15 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
         }
         AstExpr::MethodCall {
-            receiver, method, args, ..
+            receiver, method, args: _, ..
         } => {
-            eprintln!("DEBUG MethodCall: receiver={:?} method={} args={:?}", receiver, method, args);
+            
             // 枚举变体构造: Kind.A(1) → Kind 类型
             // receiver 是枚举/结构类型名时，方法名是变体
             if let AstExpr::Ident(recv_name) = receiver.as_ref() {
                 let base = recv_name.split('<').next().unwrap_or(recv_name);
                 if ctx.is_struct(base) || ctx.enum_variants.values().any(|e| e == base) {
-                    eprintln!("DEBUG MethodCall: enum variant constructor {}::{}", base, method);
+                    
                     return IrType::Named {
                         path: base.to_string(),
                         args: vec![],
@@ -1230,12 +1230,12 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 }
             }
             // 尝试从 receiver 类型推导方法返回类型
-            eprintln!("DEBUG MethodCall: before infer_expr_type receiver={:?}", receiver);
+            
             let recv_ty = infer_expr_type(receiver, ctx);
-            eprintln!("DEBUG MethodCall: after infer_expr_type recv_ty={:?}", recv_ty);
+            
             // 检查 clone 方法
             if method == "clone" {
-                eprintln!("DEBUG MethodCall: clone method recv_ty={:?}", recv_ty);
+                
             }
             // size_hint() 返回 (int, Option<int>)（LZ 视角 int；codegen 在
             // impl Iterator 中映射为 usize）。iter.lz Zip::size_hint 中
@@ -1268,7 +1268,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             }
             // 内置方法返回类型推断表
             if let Some(ret) = lookup_builtin_method_ret(&recv_ty, method, ctx) {
-                eprintln!("DEBUG MethodCall: lookup_builtin_method_ret recv_ty={:?} method={} ret={:?}", recv_ty, method, ret);
+                
                 return ret;
             }
             match &recv_ty {
@@ -1288,14 +1288,14 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     }
                     // String/str.clone() 返回 String（Rust 的 Clone impl）
                     if method == "clone" && (path == "String" || path == "str") {
-                        eprintln!("DEBUG clone: path={} method=clone returning String", path);
+                        
                         return IrType::Named {
                             path: "String".into(),
                             args: vec![],
                         };
                     }
 
-                    eprintln!("DEBUG clone: recv_ty={:?} method={}", recv_ty, method);
+                    
                     // 用户 struct 方法：从登记的方法返回类型查询（box.lz `get` 返回
                     // `ref T`，否则 `b.get()` 推断为 Any，`assert b.get() == 42`
                     // 无法解引用，E0277 can't compare &i64 with i64）
@@ -1354,7 +1354,7 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             // `self[key]` 索引类型：从容器类型推断元素类型，而不是恒为 Any→i64。
             // Dict<K,V> → V；List<T>/Vec<T> → T；Str → Char（单字符索引）或 Str（切片）；否则 Any
             let recv_ty = infer_expr_type(receiver, ctx);
-            eprintln!("DEBUG Index: recv_ty={:?}", recv_ty);
+            
             // 检查是否为切片操作（Range 索引）
             let is_slice = matches!(&**index, AstExpr::Range { .. });
             match &recv_ty {
@@ -2461,7 +2461,7 @@ fn lookup_builtin_method_ret(recv_ty: &IrType, method: &str, _ctx: &TypeCtx) -> 
         IrType::Str => match method {
             "len" => Some(IrType::Int),
             "clone" => {
-                eprintln!("DEBUG clone: recv_ty=Str method=clone returning String (from lookup_builtin_method_ret)");
+                
                 Some(IrType::Named {
                     path: "String".into(),
                     args: vec![],
@@ -9352,21 +9352,11 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             } else {
                 from_ast_type_with_generics(&p.ty, &generics)
             };
-            // str 参数自动标记为 ref：避免调用时移动 owned String（lib_hashmap _str_hash 移动 key 后 E0382）
-            // 仅对非 self 参数处理（self 已有专门 auto-mut 逻辑）
-            let is_str_param = matches!(&param_ty, IrType::Str)
-                || matches!(&param_ty, IrType::Named { path, .. } if path == "str" || path == "String");
-            let is_ref_for_param = p.is_ref
-                || (p.name != "self"
-                    && p.name != "self_"
-                    && is_str_param
-                    && !p.is_mut
-                    && !p.is_owned);
             Param {
                 name: p.name.clone(),
                 ty: param_ty,
                 is_mut: p.is_mut || auto_mut,
-                is_ref: is_ref_for_param,
+                is_ref: p.is_ref,
                 is_owned: p.is_owned,
                 default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
                 variadic: false,
@@ -9375,7 +9365,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             }
         })
         .collect();
-    eprintln!("DBG convert_fn_def: {} params = {:?}", func.name, params.iter().map(|p| format!("{}({:?},{:?})", p.name, p.is_ref, p.ty)).collect::<Vec<_>>());
+
     // `..` 变参注入：追加 args/kwargs 隐式参数（variadic 收集）
     // 文档 03d-可变参数.md §2：任何 `..` 出现即触发注入；
     // 单 `..` 无注解 → 注入 args（元素 Any）；`..: Tuple<T>` → args-only；
@@ -10556,7 +10546,7 @@ fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                         .collect(),
                 };
                 let field_ty = replace_self(&from_ast_type(&f.ty), &self_ty);
-                eprintln!("DEBUG struct field: struct={} field={} ty={:?}", s.name, f.name, field_ty);
+                
                 Field {
                     name: f.name.clone(),
                     ty: field_ty,

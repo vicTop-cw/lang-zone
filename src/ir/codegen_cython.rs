@@ -76,6 +76,8 @@ pub struct CythonCodeGen {
     deferred: Vec<Vec<Block>>,
     /// 临时变量计数（match scrutinee 等唯一名）
     tmp_counter: usize,
+    /// 是否在生成器构建块内（控制 yield 语义转换）
+    in_gen_build: bool,
 }
 
 impl CythonCodeGen {
@@ -102,6 +104,7 @@ impl CythonCodeGen {
             impl_injected: HashSet::new(),
             deferred: Vec::new(),
             tmp_counter: 0,
+            in_gen_build: false,
         }
     }
 
@@ -1253,7 +1256,7 @@ impl CythonCodeGen {
             IrType::Option(_) => "object".into(),     // None = 无值
             IrType::Result { .. } => "object".into(), // 异常传播表错
 
-            IrType::Tuple(elems) => match ctx {
+            IrType::Tuple(_elems) => match ctx {
                 TypeCtx::Container | TypeCtx::Generic => "object".into(),
                 _ => "tuple".into(),
             },
@@ -1472,8 +1475,8 @@ fn block_has_defer(block: &Block) -> bool {
         Stmt::For { body, .. }
         | Stmt::While { body, .. }
         | Stmt::WhileLet { body, .. }
-        | Stmt::BlockLabel { body, .. }
-        | Stmt::Defer { body } => block_has_defer(body),
+        | Stmt::BlockLabel { body, .. } => block_has_defer(body),
+
         Stmt::Match { arms, .. } => arms.iter().any(|a| block_has_defer(&a.body)),
         Stmt::TryCatch { body, catches, else_body, finally_body } => {
             block_has_defer(body)
@@ -2142,7 +2145,7 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt, raises_mode: bool) {
             }
             match value {
                 Some(v) => {
-                    let mut v_s = gen_expr(cg, v);
+                    let v_s = gen_expr(cg, v);
                     // 异常传播模型：return Err(e) → raise（可被 try/except 捕获）
                     if is_err_ctor(v) {
                         let e_str = match &v.kind {
@@ -2471,6 +2474,62 @@ fn escape_str_literal(s: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('\t', "\\t")
+}
+
+/// 查找 Block 中第一个 yield 表达式的 IR 类型（生成器构建块 func *: 收集器类型用）
+fn first_yield_type(block: &Block) -> Option<IrType> {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Yield { value } => return Some(value.ty.clone()),
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if let Some(t) = first_yield_type(then_branch) {
+                    return Some(t);
+                }
+                if let Some(e) = else_branch {
+                    if let Some(t) = first_yield_type(e) {
+                        return Some(t);
+                    }
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
+                if let Some(t) = first_yield_type(body) {
+                    return Some(t);
+                }
+            }
+            Stmt::ExprStmt { expr } => {
+                if let Some(t) = expr_first_yield_type(expr) {
+                    return Some(t);
+                }
+            }
+            Stmt::Let { value, .. } => {
+                if let Some(t) = expr_first_yield_type(value) {
+                    return Some(t);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 查找 Expr 中第一个 yield 表达式的 IR 类型
+fn expr_first_yield_type(expr: &Expr) -> Option<IrType> {
+    match &expr.kind {
+        ExprKind::BlockExpr { block } => first_yield_type(block),
+        ExprKind::GenBuild { block, .. } => first_yield_type(block),
+        ExprKind::IfExpr { then, els, .. } => {
+            expr_first_yield_type(then).or_else(|| expr_first_yield_type(els))
+        }
+        ExprKind::Call { callee, args, .. } => {
+            expr_first_yield_type(callee).or_else(|| args.iter().find_map(expr_first_yield_type))
+        }
+        ExprKind::Lambda { body, .. } => expr_first_yield_type(body),
+        _ => None,
+    }
 }
 
 fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
@@ -3037,12 +3096,76 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             format!("{} = {}", gen_expr(cg, target), gen_expr(cg, value))
         }
         ExprKind::GenBuild { callee, block } => {
-            // TODO(I5)：构建块生成器（收集 yield 参数包逐包调用 callee）
-            let callee_str = match callee {
-                Some(c) => gen_expr(cg, c),
-                None => "None".into(),
+            // 生成器构建块 func *: { yield ... }
+            // 有 callee：收集 yield 参数包（闭包收集器 __bb），逐包调用 callee → list
+            // 无 callee：仅收集参数包返回 list（迭代器语义）
+            let elem_ty = first_yield_type(block).unwrap_or(IrType::Unit);
+            let _elem_cy = cg.map_type(&elem_ty, TypeCtx::Local);
+            // 生成 block 体（收集 yield 参数到 __bb）
+            let mut child = CythonCodeGen::new();
+            child.indent = cg.indent + 2;
+            child.known_types = cg.known_types.clone();
+            child.cdef_classes = cg.cdef_classes.clone();
+            child.enum_variants = cg.enum_variants.clone();
+            child.variant_fields = cg.variant_fields.clone();
+            child.has_new_structs = cg.has_new_structs.clone();
+            child.lambda_map = cg.lambda_map.clone();
+            child.checker_wrappers = cg.checker_wrappers.clone();
+            child.fn_params = cg.fn_params.clone();
+            child.in_gen_build = true;
+            // 收集 yield 语句：转换为 __bb.append(...)
+            for stmt in &block.stmts {
+                match stmt {
+                    Stmt::Yield { value } => {
+                        let v = gen_expr(&child, value);
+                        child.writeln(&format!("__bb.append({})", v));
+                    }
+                    Stmt::YieldFrom { iter } => {
+                        let v = gen_expr(&child, iter);
+                        child.writeln(&format!("__bb.extend({})", v));
+                    }
+                    _ => {
+                        // 其他语句正常生成
+                        gen_stmt(&mut child, stmt, false);
+                    }
+                }
+            }
+            let body_s = child.buf;
+            let tail = match callee {
+                Some(callee_expr) => {
+                    let callee_s = gen_expr(cg, callee_expr);
+                    match &elem_ty {
+                        IrType::Tuple(elems) => {
+                            let binds: Vec<String> =
+                                (0..elems.len()).map(|i| format!("__a{}", i)).collect();
+                            let _pat = if binds.len() == 1 {
+                                format!("({},)", binds.join(", "))
+                            } else {
+                                format!("({})", binds.join(", "))
+                            };
+                            format!(
+                                "[{} for __p in __bb]",
+                                if binds.len() == 1 {
+                                    format!("{}({})", callee_s, binds[0])
+                                } else {
+                                    format!(
+                                        "({}({}))",
+                                        callee_s,
+                                        binds.join(", ")
+                                    )
+                                }
+                            )
+                        }
+                        IrType::Unit => format!("[{}() for _ in __bb]", callee_s),
+                        _ => format!("[{}(__p) for __p in __bb]", callee_s),
+                    }
+                }
+                None => "__bb".to_string(),
             };
-            format!("None  # gen_build {} ({} stmts)", callee_str, block.stmts.len())
+            format!(
+                "{{\n    __bb: list = []\n    (lambda: None)(\n{}    )\n    {}}}\n",
+                body_s, tail
+            )
         }
         ExprKind::Cast { expr, target } => {
             let inner = gen_expr(cg, expr);
