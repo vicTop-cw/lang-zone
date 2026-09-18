@@ -57,6 +57,11 @@ pub struct CythonCodeGen {
     enum_names: HashSet<String>,
     /// enum 名 → 变体名集合
     enum_variants: HashMap<String, HashSet<String>>,
+    /// 函数形参名表（checker 派发包装器生成用：位置实参 zip 进 kwargs）
+    fn_params: HashMap<String, Vec<String>>,
+    /// checker 派发包装器文本（gen_expr 内收集，generate 收尾统一追加；
+    /// gen_expr 持有 &cg 故用 RefCell 内部可变）
+    checker_wrappers: std::cell::RefCell<Vec<String>>,
     /// 当前函数返回类型（尾表达式 return 转换 / 尾部块处理用）
     current_fn_ret_ty: Option<IrType>,
     /// 模块级变量名（Const + 顶层 let）：函数内赋值这些名字需要 global 声明
@@ -88,6 +93,8 @@ impl CythonCodeGen {
             self_methods: HashMap::new(),
             enum_names: HashSet::new(),
             enum_variants: HashMap::new(),
+            fn_params: HashMap::new(),
+            checker_wrappers: std::cell::RefCell::new(vec![]),
             current_fn_ret_ty: None,
             module_var_names: HashSet::new(),
             lambda_map: HashMap::new(),
@@ -253,6 +260,24 @@ impl CythonCodeGen {
                 self.writeln("pass");
             }
             self.indent -= 1;
+        }
+        // checker 派发包装器：__Params 垫片 + 包装器统一追加在文件尾
+        // （模块级 def 先于任何调用执行，尾部安全；仅在有 checker 调用时生成）
+        if !self.checker_wrappers.borrow().is_empty() {
+            let wrappers: Vec<String> = self.checker_wrappers.borrow().clone();
+            self.writeln("");
+            self.writeln("class _LzKwargsMap:");
+            self.writeln("    def __init__(self, d): self._d = dict(d)");
+            self.writeln("    def contains(self, k): return k in self._d");
+            self.writeln("    def __getitem__(self, k): return self._d[k]");
+            self.writeln("");
+            self.writeln("class __Params:");
+            self.writeln("    def __init__(self, kwargs=None, args=None): self.kwargs = _LzKwargsMap(kwargs)");
+            self.writeln("");
+            for w in wrappers {
+                self.writeln(&w);
+                self.writeln("");
+            }
         }
         &self.buf
     }
@@ -470,6 +495,11 @@ impl CythonCodeGen {
     }
 
     fn gen_function(&mut self, f: &FnDef) {
+        // 形参名表登记（checker 派发包装器用）
+        self.fn_params.insert(
+            f.name.clone(),
+            f.params.iter().map(|p| p.name.clone()).collect(),
+        );
         // ── 函数重载：同名函数 >1 个时启用 mangling（Name__N）──
         let overload_info: Option<usize> = self
             .overload_sigs
@@ -1384,6 +1414,21 @@ fn replace_ident(s: &str, name: &str, val: &str) -> String {
 }
 
 /// 提取块的尾表达式（BlockExpr 语句提升用）：最后一个 ExprStmt 的表达式。
+/// 解析 checker 派发调用形态 `fn[checker]`（严格：两侧均为合法标识符）。
+/// 返回 (函数名, checker 名)；非该形态返回 None。
+fn parse_checker_index(s: &str) -> Option<(String, String)> {
+    let close = s.strip_suffix(']')?;
+    let open = close.rfind('[')?;
+    let (fname, cname) = (close[..open].trim(), close[open + 1..].trim());
+    let valid =
+        |t: &str| !t.is_empty() && t.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false) && t.chars().all(|c| c.is_alphanumeric() || c == '_');
+    if valid(fname) && valid(cname) {
+        Some((fname.to_string(), cname.to_string()))
+    } else {
+        None
+    }
+}
+
 /// 语句性产物（assert!/assert_eq!/panic! 特判生成的 assert/raise）不能作为值 → None
 fn block_tail_expr(cg: &CythonCodeGen, block: &Block) -> Option<String> {
     match block.stmts.last() {
@@ -2582,6 +2627,33 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 .collect();
             // ── type_args 泛型参数：Cython 无泛型运行时，静默擦除（注释放括号内
             // 会吞掉闭合括号，故不生成）──
+            // checker 派发：callee 为 `fn[checker]` 形态 → 改写为包装器调用
+            // （包装器在 generate 收尾统一追加，形参名 zip 位置实参进 kwargs，
+            //   checker 先行检查再透传；对齐 SYNTAX/03c-检查站 __Params 接口）
+            let routed = match parse_checker_index(&routed) {
+                Some((fname, cname)) => {
+                    let params = cg.fn_params.get(&fname).cloned().unwrap_or_default();
+                    let zip_list = if params.is_empty() {
+                        "()".to_string()
+                    } else {
+                        let names = params
+                            .iter()
+                            .map(|p| format!("'{p}'"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("({names},)")
+                    };
+                    let wrapper = format!("__lz_checked_{fname}_{cname}");
+                    let text = format!(
+                        "def {wrapper}(*__args, **__kwargs):\n    __params = __Params(kwargs=dict(list(zip({zip_list}, __args)), **__kwargs))\n    {cname}(__params)\n    return {fname}(*__args, **__kwargs)"
+                    );
+                    if !cg.checker_wrappers.borrow().contains(&text) {
+                        cg.checker_wrappers.borrow_mut().push(text);
+                    }
+                    wrapper
+                }
+                None => routed,
+            };
             format!("{}({})", routed, a.join(", "))
         }
         ExprKind::MethodCall {
