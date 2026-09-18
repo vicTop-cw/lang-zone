@@ -316,46 +316,8 @@ fn postprocess_pyx(
         code = format!("{}))()[{}]{}", &code[..p], idx, &after[close + 1..]);
     }
 
-    // 5) 列表推导 filter 谓词补调用：`if (lambda ...)` 尾部补 `(__cv)`
-    {
-        let mut out = Vec::with_capacity(code.lines().count());
-        for l in code.lines() {
-            if l.contains("for __cv in") && l.contains("if (lambda") {
-                if let Some(lf) = l.find("if (lambda") {
-                    // 从 lambda 的左括号做括号配对，找到表达式结束的右括号
-                    let bytes: Vec<char> = l.chars().collect();
-                    let start = lf + 3; // "(lambda" 的 '('
-                    if let Some(&c0) = bytes.get(start) {
-                        if c0 == '(' {
-                            let mut depth = 0i32;
-                            let mut end = None;
-                            for j in start..bytes.len() {
-                                match bytes[j] {
-                                    '(' => depth += 1,
-                                    ')' => {
-                                        depth -= 1;
-                                        if depth == 0 {
-                                            end = Some(j);
-                                            break;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            if let Some(e) = end {
-                                let head: String = bytes[..=e].iter().collect();
-                                let tail: String = bytes[e + 1..].iter().collect();
-                                out.push(format!("{head}(__cv){tail}"));
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            out.push(l.to_string());
-        }
-        code = out.join("\n");
-    }
+    // 5) 列表推导 filter 谓词补调用：已下沉 lib（filter 为 lambda 时直出 `(__cv)` 调用），
+    //    postprocess 分支退位删除（M1.5——叠加生成会导致 `(__cv)(__cv)` 双调用）
 
     // 6) 已合并 import：删除 `import X` 行 + 剥离 `X.` 限定前缀
     for m in merged_modules {
