@@ -6582,6 +6582,7 @@ impl CodeGen {
                 } else {
                     format!("{}: &{}", p.name, self.rust_type(&p.ty))
                 }
+
             } else {
                 format!("{}: {}", p.name, self.rust_type(&p.ty))
             }

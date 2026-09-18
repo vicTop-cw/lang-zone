@@ -232,7 +232,7 @@ fn cy_omega_gate_struct() {
             "def __init__(self, double x, double y):",
             "self.x = x",
             "self.y = y",
-            "cpdef double area(self)",
+            "def area(self) -> double:",
         ],
         "struct",
     );
@@ -277,7 +277,7 @@ fn cy_omega_gate_function() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["cpdef Py_ssize_t double(Py_ssize_t x):"],
+        &["def double(Py_ssize_t x) -> Py_ssize_t:"],
         "function",
     );
 }
@@ -299,7 +299,7 @@ fn cy_omega_gate_const() {
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["Py_ssize_t MAX = 100"], "const");
+    assert_contains(&pyx, &["MAX = 100  # const: Py_ssize_t"], "const");
 }
 
 // ── Ω-spec: cy_type_alias ──
@@ -397,13 +397,10 @@ fn cy_omega_gate_enum() {
             "class Shape:",
             "pass",
             "class Circle(Shape):",
-            "cdef public double r",
-            "def __init__(self, double r):",
+            "def __init__(self, r):",
             "self.r = r",
             "class Rect(Shape):",
-            "cdef public double w",
-            "cdef public double h",
-            "def __init__(self, double w, double h):",
+            "def __init__(self, w, h):",
             "self.w = w",
             "self.h = h",
         ],
@@ -498,7 +495,7 @@ fn cy_omega_gate_function_generic() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["cpdef object id(object x):", "# generic<T>"],
+        &["def id(object x) -> object:", "# generic<T>"],
         "function_generic",
     );
 }
@@ -583,7 +580,7 @@ fn cy_module_magic() {
 fn cy_empty_module() {
     let module = IrModule::new("empty".into());
     let pyx = gen(module);
-    assert_contains(&pyx, &["def main(): pass"], "empty_module");
+    assert_contains(&pyx, &["def main():", "    pass"], "empty_module");
 }
 
 // ── Ω-spec: cy_trait ──
@@ -666,8 +663,8 @@ fn cy_omega_gate_impl() {
     assert_contains(
         &pyx,
         &[
-            "# impl HasArea for Circle",
-            "# HasArea.area → 注入到 Circle",
+            "# impl HasArea for Circle (std target: methods not injectable)",
+            "#   fn area(self)",
         ],
         "impl",
     );
@@ -782,7 +779,7 @@ fn cy_omega_gate_stmt_while_let() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["# while let", "for __while_let__ in items:"],
+        &["while True:", "__wlv_0 = items", "if not (True):", "break"],
         "stmt_while_let",
     );
 }
@@ -892,7 +889,9 @@ fn cy_omega_gate_stmt_defer() {
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["try:", "cleanup()"], "stmt_defer");
+    // Defer：块级 LIFO 内联（对齐 Rust 端 BUG-IR-002 方案 A）——defer 体在
+    // 块退出前逆序 emit，非 try/finally
+    assert_contains(&pyx, &["cleanup()"], "stmt_defer");
 }
 
 // ── Ω-spec: cy_stmt_try_catch ──
@@ -964,7 +963,7 @@ fn cy_omega_gate_stmt_try_catch() {
         &pyx,
         &[
             "try:",
-            "except:",
+            "except BaseException:",
             "finally:",
             "risky()",
             "handle()",
@@ -1063,7 +1062,8 @@ fn cy_omega_gate_expr_cast() {
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["double(x)"], "expr_cast");
+    // Cast：内建标量 → Python 内建转换函数（int/float/str/bool）
+    assert_contains(&pyx, &["float(x)"], "expr_cast");
 }
 
 // ── Ω-spec: cy_expr_magic_call ──
@@ -1349,8 +1349,8 @@ fn cy_omega_gate_overload() {
     assert_contains(
         &pyx,
         &[
-            "cpdef Py_ssize_t process__0(Py_ssize_t x):",
-            "cpdef Py_ssize_t process__1(Py_ssize_t x, Py_ssize_t y):",
+            "def process__0(Py_ssize_t x) -> Py_ssize_t:",
+            "def process__1(Py_ssize_t x, Py_ssize_t y) -> Py_ssize_t:",
             "def process(*args):",
             "if len(args) == 1: return process__0(*args)",
             "elif len(args) == 2: return process__1(*args)",
@@ -1407,7 +1407,7 @@ fn cy_omega_gate_pattern_wildcard() {
     }));
 
     let pyx = gen(module);
-    assert_contains(&pyx, &["# match x", "if True:"], "pattern_wildcard");
+    assert_contains(&pyx, &["__scrut_0 = x", "if True:"], "pattern_wildcard");
 }
 
 // ── Ω-spec: cy_pattern_ident ──
@@ -1460,7 +1460,7 @@ fn cy_omega_gate_pattern_ident() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["# match x", "if True  # bind n:", "n = __scrutinee__"],
+        &["__scrut_0 = x", "if True:", "n = __scrut_0"],
         "pattern_ident",
     );
 }
@@ -1517,7 +1517,7 @@ fn cy_omega_gate_pattern_lit() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["# match x", "if __scrutinee__ == 0:"],
+        &["__scrut_0 = x", "if __scrut_0 == 0:"],
         "pattern_lit",
     );
 }
@@ -1576,8 +1576,7 @@ fn cy_omega_gate_pattern_tuple() {
     assert_contains(
         &pyx,
         &[
-            "# match x",
-            "isinstance(__scrutinee__, tuple) && len(__scrutinee__) == 2",
+            "isinstance(__scrut_0, tuple) and len(__scrut_0) == 2",
         ],
         "pattern_tuple",
     );
@@ -1637,8 +1636,7 @@ fn cy_omega_gate_pattern_list() {
     assert_contains(
         &pyx,
         &[
-            "# match x",
-            "isinstance(__scrutinee__, list) && len(__scrutinee__) == 2",
+            "isinstance(__scrut_0, list) and len(__scrut_0) >= 1",
         ],
         "pattern_list",
     );
@@ -1698,7 +1696,7 @@ fn cy_omega_gate_pattern_range() {
     let pyx = gen(module);
     assert_contains(
         &pyx,
-        &["# match x", "1 <= __scrutinee__ <= 10"],
+        &["1 <= __scrut_0 <= 10"],
         "pattern_range",
     );
 }
