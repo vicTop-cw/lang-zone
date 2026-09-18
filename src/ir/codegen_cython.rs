@@ -2954,11 +2954,16 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 MagicKind::IntoIter => format!("iter({})", first),
                 MagicKind::SizeHint => "# __size_hint__()".to_string(),
                 MagicKind::IterStrategy => "# __iter_strategy__()".to_string(),
-                MagicKind::UnpackBuildCall => format!(
-                    "{}({})",
-                    first,
-                    a.iter().skip(1).cloned().collect::<Vec<_>>().join(", ")
-                ),
+                MagicKind::UnpackBuildCall => {
+                    // ~: 构建块元组解包：args[0]=闭包立即调用表达式, args[1]=元素索引
+                    // Python 元组用下标访问（packed 为复杂表达式，括号包裹）；
+                    // 索引从 IR 直接提取裸整数（对齐 Rust 端，避免类型后缀）
+                    let idx = match args.get(1).map(|a| &a.kind) {
+                        Some(ExprKind::Lit(LitKind::Int(n))) => n.to_string(),
+                        _ => a.get(1).cloned().unwrap_or_else(|| "0".into()),
+                    };
+                    format!("({})[{}]", first, idx)
+                }
             }
         }
         ExprKind::BlockExpr { block } => {
