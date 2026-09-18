@@ -3249,12 +3249,13 @@ impl CodeGen {
                         let ty_str = self.rust_type(&p.ty).to_string();
                         eprintln!("DEBUG param: name={} p.ty={:?} ty_str={} p.is_ref={}", pname, p.ty, ty_str, p.is_ref);
                         // str 参数类型映射为 &str，避免 E0382 移动语义错误
-                        if ty_str == "String" && !p.is_ref {
+                        // p.is_ref 为 true 时也生成 &str（builder 标记 is_ref 但保持 ty 为 Str）
+                        if (ty_str == "String" && !p.is_ref) || (p.is_ref && matches!(&p.ty, IrType::Str)) {
                             "&str".into()
                         } else {
                             ty_str
                         }
-                        }
+                    }
                     };
                     // __Params 值参数（checker 链值函数，如 def double_ps(ps: __Params)）
                     // 体内会写 ps.args，必须生成 `mut ps: __Params`（否则 E0596）
@@ -6820,6 +6821,7 @@ impl CodeGen {
                 // ref x: T → &T（不可变引用）；mut ref x: T → &mut T（可变引用）
                 // 特殊处理 str 类型：生成 &str 而非 &String
                 // p.ty 可能是 Str（builder 标记 is_ref 但保持 ty 为 Str）或 Ref(Str)
+                eprintln!("DBG gen_param: name={} is_ref={} ty={:?}", p.name, p.is_ref, p.ty);
                 let is_str_ty = matches!(&p.ty, IrType::Str)
                     || matches!(&p.ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Str));
                 if is_str_ty {
@@ -12634,6 +12636,26 @@ impl CodeGen {
                 }
             }
             ExprKind::BinOp { op, lhs, rhs } => {
+                // Eq/Neq 的字符串对齐：任一侧为 &String/&str 引用（str 参数）时，
+                // 两侧统一 to_string() 做值比较（&String == String 未实现 → E0277）
+                if matches!(op, BinOpKind::Eq | BinOpKind::Neq) {
+                    let is_str_ty = |t: &IrType| match t {
+                        IrType::Str => true,
+                        IrType::Ref(inner) | IrType::MutRef(inner) => {
+                            matches!(inner.as_ref(), IrType::Str)
+                        }
+                        _ => false,
+                    };
+                    if is_str_ty(&lhs.ty) && is_str_ty(&rhs.ty) {
+                        let o = if matches!(op, BinOpKind::Eq) { "==" } else { "!=" };
+                        let lhs_s = self.gen_expr(lhs);
+                        let rhs_s = self.gen_expr(rhs);
+                        return format!(
+                            "({}).to_string() {} ({}).to_string()",
+                            lhs_s, o, rhs_s
+                        );
+                    }
+                }
                 // Pow: ** → .pow() 方法调用 (a ** b → a.pow(b))
                 if matches!(op, BinOpKind::Pow) {
                     // a ** b → a.pow(b)。gen_lit 已为整数字面量附加 i64 后缀

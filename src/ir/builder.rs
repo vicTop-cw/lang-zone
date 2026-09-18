@@ -9375,6 +9375,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             }
         })
         .collect();
+    eprintln!("DBG convert_fn_def: {} params = {:?}", func.name, params.iter().map(|p| format!("{}({:?},{:?})", p.name, p.is_ref, p.ty)).collect::<Vec<_>>());
     // `..` 变参注入：追加 args/kwargs 隐式参数（variadic 收集）
     // 文档 03d-可变参数.md §2：任何 `..` 出现即触发注入；
     // 单 `..` 无注解 → 注入 args（元素 Any）；`..: Tuple<T>` → args-only；
