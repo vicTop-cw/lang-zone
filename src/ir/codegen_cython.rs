@@ -2534,7 +2534,15 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 let f_s = gen_expr(cg, &args[0]);
                 let it = gen_expr(cg, &args[1]);
                 let filter = if args.len() >= 3 {
-                    format!(" if ({})", gen_expr(cg, &args[2]))
+                    let fe = gen_expr(cg, &args[2]);
+                    // filter 为 lambda 时需补谓词调用（对齐映射位 `(__cv)` 形态，
+                    // 否则 lambda 对象恒真，过滤失效）
+                    let is_lambda = matches!(&args[2].kind, ExprKind::Lambda { .. });
+                    if is_lambda {
+                        format!(" if ({}){}", fe, "(__cv)")
+                    } else {
+                        format!(" if ({})", fe)
+                    }
                 } else {
                     String::new()
                 };
