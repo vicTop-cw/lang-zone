@@ -1524,6 +1524,8 @@ impl ParserStmtExt for Parser {
             let body = self.parse_block()?;
             self.expect(Token::Dedent)?;
             Ok(body)
+        } else if self.check(&Token::Eof) || self.check(&Token::Dedent) {
+            Err("调用构建块(~:) 缺少块体：文件末尾 ~: 后无操作数（BUG-LX-003）".to_string())
         } else {
             Ok(vec![Stmt::Expr(self.parse_expr()?)])
         }

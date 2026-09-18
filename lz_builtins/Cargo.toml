@@ -6,3 +6,7 @@ description = "Lang-Zone runtime builtins — shared by all generated Rust outpu
 
 [dependencies]
 # 零外部依赖，纯 std
+# num-bigint 用于 BigInt 基础类型运行时支持
+num-bigint = "0.4"
+# num-complex 用于 Complex 基础类型运行时支持
+num-complex = "0.4"

@@ -90,7 +90,10 @@ pub enum Token {
 
     // ── 字面量值 ──
     IntLit(i64),
+    Int128Lit(i128),
+    BigIntLit(String),
     FloatLit(f64),
+    ComplexLit(f64, f64),
     StrLit(String),
     FStrLit(String),      // f"..." 字符串插值
     RawStrLit(String),    // r"..." 原始字符串

@@ -1025,6 +1025,9 @@ impl Checker {
     fn check_expr(&mut self, e: &Expr) {
         match e {
             Expr::IntLit(_)
+            | Expr::Int128Lit(_)
+            | Expr::BigIntLit(_)
+            | Expr::ComplexLit(_, _)
             | Expr::FloatLit(_)
             | Expr::StrLit(_)
             | Expr::FStrLit(_)

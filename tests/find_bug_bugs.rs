@@ -467,10 +467,10 @@ fn sg005_spread() {
     full("FIND_BUG/syntax/bug-syntax-spread.lz", "spread [0,...a,4]:").unwrap();
 }
 
-// BUG-EC-002: i64 溢出 → 拒绝（LZ 暂不支持 i128，避免静默环绕成 i64::MIN）
+// BUG-EC-002: i128 支持后，9223372036854775808 透传为 i128（转正）
 #[test]
 fn ec002_int_overflow() {
-    reject("FIND_BUG/edge/bug-edge-int-overflow.lz").unwrap();
+    full("FIND_BUG/edge/bug-edge-int-overflow.lz", "i64::MAX:").unwrap();
 }
 
 // BUG-EC-006: type_name 内省（已修 轮次10）
@@ -479,20 +479,18 @@ fn ec006_type_name() {
     full("FIND_BUG/edge/bug-edge-type-name.lz", "type_name(42):").unwrap();
 }
 
-// core 组：隐式泛型（未声明泛型形参）须被拒绝（设计约束：泛型必须显式声明）。
-// 旧实现经 collect_implicit_generics 把 `def fold(xs: List<a>)` 的 a/b 当合法泛型，
-// 现移除后统一报「未知类型: a」，转为负向守护（*Negative 命名）。
+// core 组：fn 类型注解参数已修复 → 转正为正向测试
 #[test]
-fn core_fold_negative() {
-    reject("FIND_BUG/core/fold.lz").unwrap();
+fn core_fold_ok() {
+    full("FIND_BUG/core/fold.lz", "fold sum:").unwrap();
 }
 
 #[test]
-fn core_compose_negative() {
-    reject("FIND_BUG/core/compose.lz").unwrap();
+fn core_compose_ok() {
+    full("FIND_BUG/core/compose.lz", "compose (5+3)*2:").unwrap();
 }
 
 #[test]
-fn core_unique_negative() {
-    reject("FIND_BUG/core/unique.lz").unwrap();
+fn core_unique_ok() {
+    full("FIND_BUG/core/unique.lz", "unique [1,2,2,3,1,4,3]:").unwrap();
 }

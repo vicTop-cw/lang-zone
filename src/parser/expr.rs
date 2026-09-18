@@ -1067,6 +1067,9 @@ impl ParserExprExt for Parser {
             // 跳过缩进 token（用于 Lambda body 跨行时外层的缩进）
             Token::Indent => self.parse_primary(),
             Token::IntLit(n) => Ok(Expr::IntLit(n)),
+            Token::Int128Lit(n) => Ok(Expr::Int128Lit(n)),
+            Token::BigIntLit(s) => Ok(Expr::BigIntLit(s.clone())),
+            Token::ComplexLit(re, im) => Ok(Expr::ComplexLit(re, im)),
             Token::FloatLit(f) => Ok(Expr::FloatLit(f)),
             Token::StrLit(s) => Ok(Expr::StrLit(s)),
             Token::FStrLit(s) => {
@@ -1838,6 +1841,9 @@ impl ParserExprExt for Parser {
                     Ok(Pattern::Int(n))
                 }
             }
+            Token::Int128Lit(n) => Ok(Pattern::Int128(n)),
+            Token::BigIntLit(s) => Ok(Pattern::BigInt(s.clone())),
+            Token::ComplexLit(re, im) => Ok(Pattern::Complex(re, im)),
             Token::FloatLit(f) => Ok(Pattern::Str(f.to_string())),
             Token::StrLit(s) => Ok(Pattern::Str(s)),
             Token::True => Ok(Pattern::Bool(true)),

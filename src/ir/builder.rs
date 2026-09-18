@@ -586,6 +586,8 @@ fn normalize_gen(ty: &IrType, generics: &[String]) -> IrType {
 fn name_to_ir_type(name: &str) -> IrType {
     match name {
         "int" | "i64" => IrType::Int,
+        "bigint" | "BigInt" => IrType::BigInt,
+        "complex" | "Complex" | "Complex64" => IrType::Complex,
         "str" | "String" => IrType::Str,
         "f64" | "float" => IrType::F64,
         "bool" => IrType::Bool,
@@ -820,6 +822,8 @@ fn apply_explicit_type_args(ret_ty: &IrType, type_args: &[String]) -> IrType {
 fn from_ast_type_name(name: &str) -> IrType {
     match name {
         "int" | "i64" => IrType::Int,
+        "bigint" | "BigInt" => IrType::BigInt,
+        "complex" | "Complex" | "Complex64" => IrType::Complex,
         "str" | "String" => IrType::Str,
         "f64" | "float" => IrType::F64,
         "bool" => IrType::Bool,
@@ -1042,6 +1046,9 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         // comptime 表达式：类型与内部表达式一致（B3 求值内联）
         AstExpr::Comptime(inner) => infer_expr_type(inner, ctx),
         AstExpr::IntLit(_) => IrType::Int,
+        AstExpr::Int128Lit(_) => IrType::Int128,
+        AstExpr::BigIntLit(_) => IrType::BigInt,
+        AstExpr::ComplexLit(_, _) => IrType::Complex,
         AstExpr::FloatLit(_) => IrType::F64,
         AstExpr::StrLit(_) | AstExpr::FStrLit(_) | AstExpr::RawStrLit(_) => IrType::Str,
         AstExpr::BoolLit(_) => IrType::Bool,
@@ -2311,6 +2318,9 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
         AstPattern::Ident(name) => Some(Pattern::Ident(name.clone())),
         AstPattern::RefMutIdent(name) => Some(Pattern::RefMutIdent(name.clone())),
         AstPattern::Int(n) => Some(Pattern::Lit(LitKind::Int(*n))),
+        AstPattern::Int128(n) => Some(Pattern::Lit(LitKind::Int128(*n))),
+        AstPattern::BigInt(s) => Some(Pattern::Lit(LitKind::BigInt(s.clone()))),
+        AstPattern::Complex(re, im) => Some(Pattern::Lit(LitKind::Complex(*re, *im))),
         AstPattern::Str(s) => Some(Pattern::Lit(LitKind::Str(s.clone()))),
         AstPattern::Bool(b) => Some(Pattern::Lit(LitKind::Bool(*b))),
         AstPattern::Variant(name, args) => {
@@ -2502,7 +2512,7 @@ fn collect_ast_pattern_vars(pat: &AstPattern, out: &mut Vec<String>) {
         AstPattern::RefMutIdent(name) => {
             out.push(name.clone());
         }
-        AstPattern::Int(_) | AstPattern::Str(_) | AstPattern::Bool(_) => {}
+        AstPattern::Int(_) | AstPattern::Int128(_) | AstPattern::BigInt(_) | AstPattern::Complex(_, _) | AstPattern::Str(_) | AstPattern::Bool(_) => {}
         AstPattern::Variant(_, args) | AstPattern::Tuple(args) | AstPattern::List(args) => {
             for a in args {
                 collect_ast_pattern_vars(a, out);
@@ -2928,6 +2938,9 @@ fn specialize_expr(
     match e {
         AstExpr::Ident(_)
         | AstExpr::IntLit(_)
+        | AstExpr::Int128Lit(_)
+        | AstExpr::BigIntLit(_)
+        | AstExpr::ComplexLit(_, _)
         | AstExpr::FloatLit(_)
         | AstExpr::StrLit(_)
         | AstExpr::FStrLit(_)
@@ -4259,6 +4272,9 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
 
     let kind = match ast_expr {
         AstExpr::IntLit(n) => ExprKind::Lit(LitKind::Int(*n)),
+        AstExpr::Int128Lit(n) => ExprKind::Lit(LitKind::Int128(*n)),
+        AstExpr::BigIntLit(s) => ExprKind::Lit(LitKind::BigInt(s.clone())),
+        AstExpr::ComplexLit(re, im) => ExprKind::Lit(LitKind::Complex(*re, *im)),
         AstExpr::FloatLit(n) => ExprKind::Lit(LitKind::F64(*n)),
         AstExpr::StrLit(s) => ExprKind::Lit(LitKind::Str(s.clone())),
         AstExpr::FStrLit(s) => ExprKind::Lit(LitKind::FStr(s.clone())),
@@ -6905,6 +6921,11 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 } else {
                     convert_expr(value, ctx)
                 };
+            // 若声明类型为 BigInt 且值为字面量，覆盖值为 BigInt 类型
+            // 使 codegen 生成 BigInt::from(...) 而非 i128 后缀
+            if matches!(&ir_ty, IrType::BigInt) && matches!(&ir_value.kind, ExprKind::Lit(_)) {
+                ir_value.ty = IrType::BigInt;
+            }
             // 当 value 是 Lambda（部分应用展开等），使用 Lambda 的类型而非 infer 的类型
             // 当 value 的 IR 类型为 Any 且无显式类型注解时，也使用 IR 类型避免错误标注
             // 注意：若存在显式类型注解（如 let n: Option<int> = None），必须保留注解类型
@@ -9703,7 +9724,7 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         .iter()
         .map(|d| {
             let kind = match d.name.as_str() {
-                "memoize" => IntrinsicKind::Memoize,
+                "memoize" | "cache" => IntrinsicKind::Memoize,
                 "parallel" => IntrinsicKind::Parallel,
                 "curry" => IntrinsicKind::Curry,
                 "overload" => IntrinsicKind::Overload,
@@ -10951,6 +10972,8 @@ impl std::fmt::Display for IrBuildError {
 fn lzi_type_to_ir(s: &str) -> IrType {
     match s.trim() {
         "int" | "i64" => IrType::Int,
+        "bigint" | "BigInt" => IrType::BigInt,
+        "complex" | "Complex" | "Complex64" => IrType::Complex,
         "f64" => IrType::F64,
         "str" | "String" => IrType::Str,
         "bool" => IrType::Bool,
@@ -11220,13 +11243,24 @@ fn build_ir_inner(
     // 9. 转换 consts
     // 9.0. 模块级魔法属性（06e-模块级魔法属性.md）：__name__/__file__/__package__/
     // __path__/__doc__/__is_macro__ 等自动填充
-    // __file__/__package__/__path__ 从源文件路径派生（main.rs 注入 Module.file_path）
-    let src_path = ast_module.file_path.clone().unwrap_or_default();
-    let src_parent = std::path::Path::new(&src_path)
+    // __file__/__package__/__path__ 从模块名派生（跨机器可复现，不含本机绝对路径）
+    // 取源文件路径的"文件名.lz"作为 __file__（与 codegen_cython.rs 一致）
+    let src_full = ast_module.file_path.clone().unwrap_or_default();
+    let src_file = std::path::Path::new(&src_full)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // 若文件名不含 .lz 后缀则补上，保证与 CY 后端 __name__/__file__ 一致
+    let file_const = if src_file.ends_with(".lz") {
+        src_file
+    } else {
+        format!("{}.lz", src_file)
+    };
+    let path_const = std::path::Path::new(&src_full)
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    let package_name = std::path::Path::new(&src_path)
+    let package_const = std::path::Path::new(&src_full)
         .parent()
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
@@ -11240,17 +11274,17 @@ fn build_ir_inner(
         (
             "__file__".to_string(),
             IrType::Str,
-            ExprKind::Lit(LitKind::Str(src_path.clone())),
+            ExprKind::Lit(LitKind::Str(file_const)),
         ),
         (
             "__package__".to_string(),
             IrType::Str,
-            ExprKind::Lit(LitKind::Str(package_name)),
+            ExprKind::Lit(LitKind::Str(package_const)),
         ),
         (
             "__path__".to_string(),
             IrType::Str,
-            ExprKind::Lit(LitKind::Str(src_parent)),
+            ExprKind::Lit(LitKind::Str(path_const)),
         ),
         (
             "__doc__".to_string(),
@@ -11281,10 +11315,15 @@ fn build_ir_inner(
                 .unwrap_or_else(|| infer_expr_type(&c.value, &ctx));
         // 记录顶层 const 类型，供函数内 lookup_var 查询（如生成器集合迭代）
         ctx.top_level_consts.insert(c.name.clone(), ty.clone());
+        // 若声明类型为 BigInt/Complex，将字面量值类型也设为对应类型，使 codegen 正确生成
+        let mut val_expr = convert_expr(&c.value, &ctx);
+        if matches!(ty, IrType::BigInt | IrType::Complex) && matches!(val_expr.kind, ExprKind::Lit(_)) {
+            val_expr.ty = ty.clone();
+        }
         ir_mod.items.push(Item::Const(ConstDef {
             name: c.name.clone(),
             ty,
-            value: convert_expr(&c.value, &ctx),
+            value: val_expr,
             mods: IrMods::from_ast(&c.mods),
         }));
     }
@@ -11939,10 +11978,13 @@ fn ex_bind_pattern(
                 env.insert(n.clone(), scrut_ty.clone());
             }
         }
+        AstPattern::Complex(_, _) => {}
         AstPattern::RefMutIdent(n) => {
             env.insert(n.clone(), scrut_ty.clone());
         }
         AstPattern::Wildcard => {}
+        AstPattern::Int128(_) => {}
+        AstPattern::BigInt(_) => {}
         AstPattern::Variant(vname, subpats) => {
             let base = ex_base_of(vname);
             // 变体载荷解析优先限定名（Enum.Variant），其次 scrutinee 枚举名消歧，
@@ -12387,6 +12429,9 @@ fn ex_check_expr(
     match e {
         AstExpr::Spread(inner) => ex_check_expr(inner, work, env, gens, ret, hinted, w),
         AstExpr::DefaultExpr => {} /* default 无需参数检查 */
+        AstExpr::Int128Lit(_) => {} /* i128 字面量无需检查 */
+        AstExpr::BigIntLit(_) => {} /* bigint 字面量无需检查 */
+        AstExpr::ComplexLit(_, _) => {} /* complex 字面量无需检查 */
         AstExpr::Call { func, args, .. } => {
             if let AstExpr::Ident(fname) = func.as_ref() {
                 let plain = !fname.contains('.');
@@ -13181,6 +13226,9 @@ fn ex_check_expr(
 fn ex_ty_desc(t: &IrType) -> String {
     match t {
         IrType::Int => "int".into(),
+        IrType::Int128 => "int128".into(),
+        IrType::BigInt => "bigint".into(),
+        IrType::Complex => "complex".into(),
         IrType::F64 => "float".into(),
         IrType::Str => "str".into(),
         IrType::Bool => "bool".into(),
@@ -13477,7 +13525,7 @@ fn collect_derives(decorators: &[crate::ast::Decorator]) -> Vec<String> {
 /// 自定义 struct/enum 由用户 derive 决定——此处保守判定为可 Clone（trust user）。
 fn is_cloneable_ir_type(ty: &IrType) -> bool {
     match ty {
-        IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Any => true,
+        IrType::Int | IrType::Int128 | IrType::BigInt | IrType::Complex | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Any => true,
         IrType::Option(inner) => is_cloneable_ir_type(inner),
         IrType::Result { ok, err } => is_cloneable_ir_type(ok) && is_cloneable_ir_type(err),
         IrType::Tuple(elems) => elems.iter().all(is_cloneable_ir_type),
@@ -13501,6 +13549,9 @@ fn is_cloneable_ir_type(ty: &IrType) -> bool {
 fn ir_type_name(ty: &IrType) -> String {
     match ty {
         IrType::Int => "int".into(),
+        IrType::Int128 => "int128".into(),
+        IrType::BigInt => "bigint".into(),
+        IrType::Complex => "complex".into(),
         IrType::F64 => "float".into(),
         IrType::Bool => "bool".into(),
         IrType::Str => "str".into(),

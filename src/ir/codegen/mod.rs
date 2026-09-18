@@ -287,6 +287,10 @@ pub struct CodeGen {
     duck_defs: std::collections::HashMap<String, DuckDef>,
     /// 本模块是否使用 Ext 类型或 #[extern] 装饰器（仅此时生成 ExtHandle）
     module_uses_ext: bool,
+    /// 本模块是否使用 BigInt 类型（仅此时注入 use num_bigint::BigInt;）
+    module_uses_bigint: bool,
+    /// 本模块是否使用 Complex 类型（仅此时注入 use num_complex::Complex64;）
+    module_uses_complex: bool,
     /// I3：L2 中继——extern 自动登记目标 registry。注入后 codegen 处理
     /// #[extern(lang)] 函数时自动 register_symbol 并联动台账（REGISTER）。
     /// None = 不登记（默认，保持既有生成行为不变）。
@@ -851,11 +855,29 @@ fn count_vars_block(block: &Block, count: &mut HashMap<String, usize>) {
     }
 }
 
+/// 检查类型是否为 BigInt（IrType::BigInt 或 Named "bigint"/"BigInt"）
+fn is_bigint_ty(ty: &IrType) -> bool {
+    match ty {
+        IrType::BigInt => true,
+        IrType::Named { path, .. } => path == "bigint" || path == "BigInt",
+        _ => false,
+    }
+}
+
+/// 检查类型是否为 Complex（IrType::Complex 或 Named "complex"/"Complex"/"Complex64"）
+fn is_complex_ty(ty: &IrType) -> bool {
+    match ty {
+        IrType::Complex => true,
+        IrType::Named { path, .. } => path == "complex" || path == "Complex" || path == "Complex64",
+        _ => false,
+    }
+}
+
 impl CodeGen {
     pub fn new() -> Self {
         let mut type_map = HashMap::new();
         type_map.insert("List", "Vec");
-        type_map.insert("Dict", "HashMap");
+        type_map.insert("Dict", "BTreeMap");
         type_map.insert("Set", "HashSet");
         type_map.insert("String", "String");
         type_map.insert("Nil", "()");
@@ -863,6 +885,10 @@ impl CodeGen {
         type_map.insert("Range", "std::ops::Range<i64>");
         type_map.insert("RangeInclusive", "std::ops::RangeInclusive<i64>");
         // 基础类型保持原样
+        type_map.insert("int", "i64");
+        type_map.insert("int128", "i128");
+        type_map.insert("bigint", "num_bigint::BigInt");
+        type_map.insert("complex", "num_complex::Complex64");
         CodeGen {
             current_expected_ty: std::cell::RefCell::new(None),
             indent: 0,
@@ -957,6 +983,8 @@ impl CodeGen {
             duck_field_members: std::collections::HashMap::new(),
             duck_defs: std::collections::HashMap::new(),
             module_uses_ext: false,
+            module_uses_bigint: false,
+            module_uses_complex: false,
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
             unbound_fstring_vars: std::collections::HashSet::new(),
@@ -1548,6 +1576,24 @@ impl CodeGen {
             }
             _ => false,
         });
+        self.module_uses_bigint = module.items.iter().any(|item| match item {
+            Item::FnDef(f) => {
+                is_bigint_ty(&f.ret_ty)
+                    || f.params.iter().any(|p| is_bigint_ty(&p.ty))
+            }
+            Item::Const(c) => is_bigint_ty(&c.ty),
+            Item::StructDef(s) => s.fields.iter().any(|f| is_bigint_ty(&f.ty)),
+            _ => false,
+        });
+        self.module_uses_complex = module.items.iter().any(|item| match item {
+            Item::FnDef(f) => {
+                is_complex_ty(&f.ret_ty)
+                    || f.params.iter().any(|p| is_complex_ty(&p.ty))
+            }
+            Item::Const(c) => is_complex_ty(&c.ty),
+            Item::StructDef(s) => s.fields.iter().any(|f| is_complex_ty(&f.ty)),
+            _ => false,
+        });
         // 比较约束传播：预扫描全部 FnDef 体，计算各函数「参与比较运算」的泛型集合
         // （含调用图不动点），供 gen_fn_generics 注入 PartialEq/Eq/Ord（修复泛型比较算法）
         self.compute_cmp_constraints(module);
@@ -1739,13 +1785,16 @@ impl CodeGen {
     fn const_default_value(&self, ty: &IrType) -> String {
         match ty {
             IrType::Int => "0".into(),
+            IrType::Int128 => "0i128".into(),
+            IrType::BigInt => "num_bigint::BigInt::from(0)".into(),
+            IrType::Complex => "num_complex::Complex64::new(0.0, 0.0)".into(),
             IrType::F64 => "0.0".into(),
             IrType::Bool => "false".into(),
             IrType::Str => "String::new()".into(),
             IrType::Named { path, .. } => match path.as_str() {
                 "String" => "String::new()".into(),
                 "Vec" | "List" => "Vec::new()".into(),
-                "HashMap" | "Dict" => "std::collections::HashMap::new()".into(),
+                "HashMap" | "Dict" => "std::collections::BTreeMap::new()".into(),
                 "HashSet" | "Set" => "std::collections::HashSet::new()".into(),
                 _ => "0".into(),
             },
@@ -1854,6 +1903,9 @@ impl CodeGen {
             // 否则硬编码 i64 与后续 Option 值比较时 E0308
             let ty_str = match ty {
                 IrType::Int => "i64".to_string(),
+                IrType::Int128 => "i128".to_string(),
+                IrType::BigInt => "num_bigint::BigInt".to_string(),
+                IrType::Complex => "num_complex::Complex64".to_string(),
                 IrType::F64 => "f64".to_string(),
                 IrType::Bool => "bool".to_string(),
                 IrType::Str => "String".to_string(),
@@ -1941,6 +1993,15 @@ impl CodeGen {
         } else if wants_hashset {
             self.emit_line("use std::collections::HashSet;");
         }
+        // Dict → BTreeMap（有序，保证 JSON 序列化字段顺序稳定）
+        self.emit_line("use std::collections::BTreeMap;");
+        // BigInt 基础类型（任意精度整数）——仅在模块实际使用时注入
+        if self.module_uses_bigint {
+            self.emit_line("use num_bigint::BigInt;");
+        }
+        if self.module_uses_complex {
+            self.emit_line("use num_complex::Complex64;");
+        }
         // 多类型变参位置约束（03d §2.3 `..: Tuple<T1,T2,..>`）的尾部收集
         // args: (T1, T2, Vec<Box<dyn Any>>) 需要 std::any::Any
         self.emit_line("use std::any::Any;");
@@ -2018,7 +2079,7 @@ impl CodeGen {
             "str" => "String".into(),
             "bool" => "bool".into(),
             "List" => "Vec".into(),
-            "Dict" => "HashMap".into(),
+            "Dict" => "BTreeMap".into(),
             "Set" => "HashSet".into(),
             other => other.to_string(),
         }
@@ -2193,6 +2254,9 @@ impl CodeGen {
     fn rust_type(&self, ty: &IrType) -> String {
         match ty {
             IrType::Int => "i64".into(),
+            IrType::Int128 => "i128".into(),
+            IrType::BigInt => "num_bigint::BigInt".into(),
+            IrType::Complex => "num_complex::Complex64".into(),
             IrType::F64 => "f64".into(),
             IrType::Str => "String".into(),
             IrType::Bool => "bool".into(),
@@ -5746,7 +5810,7 @@ impl CodeGen {
         // 以及相对路径前缀映射：. → self, .. → super
         let lz_to_rust: HashMap<&str, &str> = [
             ("List", "Vec"),
-            ("Dict", "HashMap"),
+            ("Dict", "BTreeMap"),
             ("Set", "HashSet"),
             ("String", "String"),
             ("Nil", "()"),
@@ -5893,6 +5957,26 @@ impl CodeGen {
                 } else {
                     (self.rust_type(&c.ty), self.gen_expr(&c.value))
                 }
+            }
+            // BigInt 字面量：直接生成 BigInt::from(...) 而非依赖 gen_lit 的类型判断
+            IrType::BigInt => {
+                let val = match &c.value.kind {
+                    ExprKind::Lit(LitKind::Int128(n)) => {
+                        if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
+                            format!("num_bigint::BigInt::from({})", n)
+                        } else {
+                            format!("num_bigint::BigInt::from({}i128)", n)
+                        }
+                    }
+                    ExprKind::Lit(LitKind::Int(n)) => {
+                        format!("num_bigint::BigInt::from({})", n)
+                    }
+                    ExprKind::Lit(LitKind::BigInt(s)) => {
+                        format!("num_bigint::BigInt::from({})", s)
+                    }
+                    _ => self.gen_expr(&c.value),
+                };
+                (self.rust_type(&c.ty), val)
             }
             _ => (self.rust_type(&c.ty), self.gen_expr(&c.value)),
         };
@@ -7341,11 +7425,15 @@ impl CodeGen {
                     match ty {
                         IrType::Named { path, .. }
                             if path == "Dict"
-                                || path == "Set"
-                                || path == "HashMap"
+                                || path == "HashMap" =>
+                        {
+                            "std::collections::BTreeMap::new()".to_string()
+                        }
+                        IrType::Named { path, .. }
+                            if path == "Set"
                                 || path == "HashSet" =>
                         {
-                            "std::collections::HashMap::new()".to_string()
+                            "std::collections::HashSet::new()".to_string()
                         }
                         _ => "Vec::new()".to_string(),
                     }
@@ -10082,13 +10170,20 @@ impl CodeGen {
                     if is_dict {
                         format!("({}).contains_key(&{})", args_s[0], args_s[1])
                     } else {
+                        // 判断是否为 Vec/List（Vec::contains 需要 &T）
+                        let is_vec = matches!(&args[0].ty, IrType::Named { path, .. } if path == "List" || path == "Vec")
+                            || matches!(&args[0].ty, IrType::Generic(_));
                         // 第二个参数：String → 裸字符串字面量（String::contains 接受 Pattern，&String 不实现 Pattern）
                         let arg1 = if args_s[1].ends_with(".to_string()") {
                             args_s[1].trim_end_matches(".to_string()").to_string()
                         } else {
                             args_s[1].clone()
                         };
-                        format!("({}).contains({})", args_s[0], arg1)
+                        if is_vec {
+                            format!("({}).contains(&{})", args_s[0], arg1)
+                        } else {
+                            format!("({}).contains({})", args_s[0], arg1)
+                        }
                     }
                 } else if callee_s == "iter" && args_s.len() == 1 {
                     format!("({}).iter()", args_s[0])
@@ -10701,7 +10796,7 @@ impl CodeGen {
                     match callee_s.as_str() {
                         "List" | "Vec" => "Vec::new()".to_string(),
                         "Set" | "HashSet" => "std::collections::HashSet::new()".to_string(),
-                        "Dict" | "HashMap" => "std::collections::HashMap::new()".to_string(),
+                        "Dict" | "HashMap" => "std::collections::BTreeMap::new()".to_string(),
                         _ => {
                             let call_str =
                                 format!("{}{}({})", callee_s, turbofish, args_s.join(", "));
@@ -12862,7 +12957,15 @@ impl CodeGen {
                 } else {
                     self.wrap_bin_operand(self.gen_expr(rhs))
                 };
-                if arith && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
+                let lhs_is_complex = is_complex_ty(lhs_ty);
+                let rhs_is_complex = is_complex_ty(rhs_ty);
+                // 复数提升：算术运算中一侧是 Complex、另一侧是数值 → 将数值侧提升为 Complex::new(x, 0.0)
+                // （如 `3.0 + 4.0i` → `Complex64::new(3.0, 0.0) + Complex64::new(0, 4)`）
+                if arith && lhs_is_complex && (rhs_is_numeric || rhs_is_f64) && !rhs_is_complex {
+                    format!("{} {} num_complex::Complex64::new({}, 0.0)", lhs_s, op_s, rhs_s)
+                } else if arith && rhs_is_complex && (lhs_is_numeric || lhs_is_f64) && !lhs_is_complex {
+                    format!("num_complex::Complex64::new({}, 0.0) {} {}", lhs_s, op_s, rhs_s)
+                } else if arith && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
                     format!("{} {} ({} as f64)", lhs_s, op_s, rhs_s)
                 } else if arith && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
                     format!("({} as f64) {} {}", lhs_s, op_s, rhs_s)
@@ -13855,6 +13958,9 @@ impl CodeGen {
             IrType::Any
             | IrType::Unit
             | IrType::Int
+            | IrType::Int128
+            | IrType::BigInt
+            | IrType::Complex
             | IrType::F64
             | IrType::Bool
             | IrType::Str
@@ -14238,6 +14344,26 @@ impl CodeGen {
                     format!("{}i64", n)
                 }
             }
+            LitKind::Int128(n) => {
+                // 目标类型为 BigInt 时生成 BigInt::from(...)，否则生成 i128 字面量
+                if matches!(_ty, IrType::BigInt) {
+                    if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
+                        return format!("num_bigint::BigInt::from({})", n);
+                    }
+                    return format!("num_bigint::BigInt::from({}i128)", n);
+                }
+                if self.in_math_fn {
+                    format!("T::from({}i32)", *n as i32)
+                } else {
+                    format!("{}i128", *n)
+                }
+            }
+            LitKind::BigInt(s) => {
+                format!("num_bigint::BigInt::from({})", s)
+            }
+            LitKind::Complex(re, im) => {
+                format!("num_complex::Complex64::new({:?}, {:?})", re, im)
+            }
             LitKind::F64(f) => {
                 // 加 f64 后缀固定类型：泛型调用（@math）推断参数时，
                 // 无后缀浮点字面量会探索 f32/f64/f128，触发 unstable f128（E0658）
@@ -14433,6 +14559,11 @@ impl CodeGen {
                 // Pattern literals: no .to_string() wrapper
                 match lit {
                     LitKind::Int(n) => format!("{}i64", n),
+                    LitKind::Int128(n) => {
+                        // 检查周围上下文确定目标类型（此处无 ty 参数，保守生成 i128）
+                        format!("{}i128", n)
+                    }
+                    LitKind::BigInt(s) => format!("num_bigint::BigInt::from({})", s),
                     LitKind::Str(s) => format!("\"{}\"", s.escape_default()),
                     LitKind::Bool(b) => b.to_string(),
                     _ => self.gen_lit(lit, &IrType::Any),

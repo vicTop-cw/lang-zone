@@ -208,6 +208,16 @@ impl Lexer {
                 break;
             }
         }
+        // 复数字面量后缀：浮点后紧跟 `i` 或 `I` → ComplexLit(0.0, imag)
+        if is_float {
+            let imag = num.parse::<f64>().unwrap_or(0.0);
+            if let Some(c) = self.peek() {
+                if c == 'i' || c == 'I' {
+                    self.advance();
+                    return Token::ComplexLit(0.0, imag);
+                }
+            }
+        }
         // G2: 数字后紧跟字母/下划线（如 `12abc`）→ 非法数字字面量
         if let Some(c) = self.peek() {
             if c.is_alphabetic() || c == '_' {
@@ -239,7 +249,8 @@ impl Lexer {
                     // i64::MAX = 9223372036854775807，其 +1 = 9223372036854775808 超出 i64 正数范围。
                     // 该值仅在作为一元负号操作数（即源码 `-9223372036854775808` == i64::MIN）
                     // 时合法，透传为 i64::MIN 哨兵；其余情形（裸 `9223372036854775808` 或二元减
-                    // 操作数）一律拒绝，避免被静默环绕成 i64::MIN（BUG-EC-002）。LZ 暂不支持 i128。
+                    // 操作数）一律拒绝，避免被静默环绕成 i64::MIN（BUG-EC-002）。
+                    // 超出 i128 范围的值尝试解析为 BigInt（LZ 支持 BigInt 基础类型）。
                     if num == "9223372036854775808" {
                         // read_number 在此分支时所有数字已读完，self.pos 指向末位之后。
                         // 首位数字的位置 = self.pos - num.len()，其前字符位于 -1，再前 -2。
@@ -278,12 +289,18 @@ impl Lexer {
                         if is_unary_minus {
                             Token::IntLit(i64::MIN)
                         } else {
-                            Token::LexError(format!(
-                                "整数字面量 {num} 超出 i64 范围（LZ 暂不支持 i128），请改用更小的字面量"
-                            ))
+                            // 尝试解析为 i128，溢出则回退到 BigInt
+                            match num.parse::<i128>() {
+                                Ok(v) => Token::Int128Lit(v),
+                                Err(_) => Token::BigIntLit(num.clone()),
+                            }
                         }
                     } else {
-                        Token::LexError(format!("无效的整数（可能溢出）: {}", num))
+                        // 尝试解析为 i128，溢出则回退到 BigInt
+                        match num.parse::<i128>() {
+                            Ok(v) => Token::Int128Lit(v),
+                            Err(_) => Token::BigIntLit(num.clone()),
+                        }
                     }
                 }
             }

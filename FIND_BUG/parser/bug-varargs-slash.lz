@@ -1,7 +1,8 @@
 // find_bug/parser/bug-varargs-slash.lz
 // BUG-PR-003: 变参 .. 与 / 分隔符混用（互斥）
 
-// 正常变参
+// 非法变参：..: nums: int 不是合法的变参语法
+// 具名收集应写 nums: List<T>，变参应写 ..: int 或 ..
 def varargs_ok(..: nums: int) -> int =
   total = 0
   for n in nums:

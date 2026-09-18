@@ -726,6 +726,9 @@ impl LzGen {
                 let fields_s = self.list_ref("(str, IrType)", fields_items);
                 format!("IrType.Duck(fields: {})", fields_s)
             }
+            IrType::Int128 => "IrType.Int128".to_string(),
+            IrType::BigInt => "IrType.BigInt".to_string(),
+            IrType::Complex => "IrType.Complex".to_string(),
             IrType::Generic(name) => format!("IrType.Generic(name: \"{}\")", escape_lz(name)),
         }
     }
@@ -806,6 +809,9 @@ fn is_simple_expr(kind: &ExprKind) -> bool {
 fn gen_lit(lit: &LitKind, ty: &str) -> String {
     match lit {
         LitKind::Int(n) => format!("Expr.LitInt(v: {}, ty: {})", n, ty),
+        LitKind::Int128(n) => format!("Expr.LitInt128(v: {}, ty: {})", n, ty),
+        LitKind::BigInt(s) => format!("Expr.LitBigInt(v: {}, ty: {})", s, ty),
+        LitKind::Complex(re, im) => format!("Expr.LitComplex(v: ({}, {}), ty: {})", re, im, ty),
         // LZ 中 `3` 是 int（3_i64），f64 字面量需带小数点（3.0）
         LitKind::F64(n) => {
             let s = format!("{}", n);

@@ -1,7 +1,7 @@
 // find_bug/core/unique.lz — 去重、unique / unique_by 实现
 
 // unique — 按值去重（保留首次出现顺序），HashSet 方式
-def unique(xs: List<a>) -> List<a> =
+def unique<a>(xs: List<a>) -> List<a> =
   seen: List<a> = []
   result: List<a> = []
   for x in xs:
@@ -11,7 +11,7 @@ def unique(xs: List<a>) -> List<a> =
   result
 
 // unique_by(key_fn) — 按 key 去重，保留首次出现
-def unique_by(xs: List<a>, key_fn: fn(a) -> b) -> List<a> =
+def unique_by<a, b>(xs: List<a>, key_fn: fn(a) -> b) -> List<a> =
   seen_keys: List<b> = []
   result: List<a> = []
   for x in xs:
@@ -33,7 +33,7 @@ def unique_strings(xs: List<str>) -> List<str> =
 
 // dedup — 连续重复压缩（run-length encoding 前置步骤）
 // [1,1,1,2,2,3,3,3,3] → [1,2,3]
-def dedup(xs: List<a>) -> List<a> =
+def dedup<a>(xs: List<a>) -> List<a> =
   if len(xs) == 0:
     return []
   result: List<a> = [xs[0]]
@@ -45,7 +45,7 @@ def dedup(xs: List<a>) -> List<a> =
   result
 
 // count_distinct — 不同值的个数
-def count_distinct(xs: List<a>) -> int =
+def count_distinct<a>(xs: List<a>) -> int =
   len(unique(xs))
 
 // ── 测试 ──

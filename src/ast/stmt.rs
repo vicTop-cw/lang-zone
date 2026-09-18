@@ -159,6 +159,9 @@ pub struct MatchArm {
 #[derive(Debug, Clone)]
 pub enum Pattern {
     Int(i64),
+    Int128(i128),
+    BigInt(String),
+    Complex(f64, f64),
     Str(String),
     Bool(bool),
     Ident(String),
