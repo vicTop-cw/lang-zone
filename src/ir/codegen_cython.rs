@@ -2484,6 +2484,10 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Lit(lit) => match lit {
             LitKind::Int(n) => n.to_string(),
+            LitKind::Int128(n) => n.to_string(),
+            // BigInt：Python 原生 int 任意精度，字符串形式直出
+            LitKind::BigInt(s) => s.clone(),
+            LitKind::Complex(re, im) => format!("({} + {}j)", re, im),
             LitKind::F64(f) => {
                 // 保证浮点字面量带小数点（1.0 不能渲染为 1，否则 int 语义）
                 let s = f.to_string();
