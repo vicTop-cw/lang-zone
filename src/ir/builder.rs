@@ -1255,7 +1255,14 @@ fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         }
         AstExpr::FieldAccess { receiver, field } => {
             let recv_ty = infer_expr_type(receiver, ctx);
-            match &recv_ty {
+            // self 是 &mut self / &self 时，解引用后再查字段类型
+            // （skip_ws(mut self) → self 类型为 MutRef(Named("Parser"))，
+            // 不解引用则 self.s 推断为 Any，str 字段索引 codegen 退化）
+            let base_ty = match &recv_ty {
+                IrType::Ref(inner) | IrType::MutRef(inner) => inner.as_ref().clone(),
+                other => other.clone(),
+            };
+            match &base_ty {
                 IrType::Named { path, .. } => ctx.lookup_field(path, field),
                 _ => IrType::Any,
             }
@@ -6599,6 +6606,14 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     arm_ctx.current_generics = ctx.current_generics.clone();
                     arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
                     arm_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                    // 拷贝 fn_returns：match 臂内函数调用的返回类型推断依赖此表
+                    // （postorder(left) 在 case 分支内 → lhs.ty=Any → List+List 误走 LzAdd）
+                    arm_ctx.fn_returns = ctx.fn_returns.clone();
+                    arm_ctx.fn_raises = ctx.fn_raises.clone();
+                    arm_ctx.fn_params = ctx.fn_params.clone();
+                    arm_ctx.struct_fields = ctx.struct_fields.clone();
+                    arm_ctx.struct_methods = ctx.struct_methods.clone();
+                    arm_ctx.self_ty = ctx.self_ty.clone();
                     // 复制 enum_variants 以便模式匹配能正确解析枚举类型
                     for (vn, en) in &ctx.enum_variants {
                         arm_ctx.enum_variants.insert(vn.clone(), en.clone());
@@ -7856,7 +7871,19 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                         || ctx.enum_variants.values().any(|e| e == path.as_str()))
                         && !["List", "Dict", "Set", "Option", "Result", "String"]
                             .contains(&path.as_str()));
-                if is_user_struct {
+                // 用户自定义类型须实际定义了 __eq__ 才走魔法方法路径；
+                // 否则回退到 assert_eq!（依赖 Rust PartialEq，枚举默认 derive）
+                let has_eq_magic = is_user_struct && {
+                    let ty_name = match &ir_expr.ty {
+                        IrType::Named { path, .. } => path.clone(),
+                        _ => String::new(),
+                    };
+                    ctx.struct_methods
+                        .get(&ty_name)
+                        .map(|ms| ms.contains("__eq__"))
+                        .unwrap_or(false)
+                };
+                if has_eq_magic {
                     // parser 把 `assert a != c` 拆成 expected=Not(c)：
                     // 若 struct 未定义 __ne__（box.lz 只有 __eq__），生成 !a.__eq__(&c)
                     let is_ne = matches!(

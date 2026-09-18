@@ -8914,14 +8914,18 @@ impl CodeGen {
                 args,
                 type_args,
             } => {
-                // ord(s[i])：字符串单字符下标已按 char 码点 i64 生成（v165 语义），
-                // 再包 lz_builtins::ord(char) 会 E0308 expected char, found i64。
-                // 此时 ord 为恒等：直接发射下标表达式（lib_hashmap._str_hash 实测）。
+                // ord(s[i])：字符串单字符下标取 char 码点 i64。
+                // s[i] 默认生成 String（用于拼接/比较），ord 需 i64 码点，
+                // 故此处直接生成 i64 版本，不走 gen_expr 默认 String 路径。
                 if let ExprKind::Var(name) = &callee.kind {
                     if name == "ord" && args.len() == 1 {
-                        if let ExprKind::IndexGet { base, .. } = &args[0].kind {
-                            if matches!(base.ty, IrType::Str) {
-                                return self.gen_expr(&args[0]);
+                        if let ExprKind::IndexGet { base, key } = &args[0].kind {
+                            if matches!(base.ty, IrType::Str)
+                                || matches!(&base.ty, IrType::Named { path, .. } if path == "str" || path == "String")
+                            {
+                                let base_s = self.gen_expr(base);
+                                let key_s = self.gen_expr(key);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ 0i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
                             }
                         }
                     }
@@ -11937,14 +11941,20 @@ impl CodeGen {
                             // 字符串单字符索引：char 安全；若当前函数返回类型是 str/String，
                             // 生成 String（'\0'.to_string() / char.to_string()），否则生成
                             // char 码点 i64（兼容 string_index_unicode `let c = s[i]` 场景）
-                            let idx_wants_string = matches!(
-                                &self.current_ret_ty,
-                                Some(IrType::Str)
-                            ) || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
-                                    if path == "str" || path == "String")
-                                || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
-                                || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
-                                    if path == "str" || path == "String");
+                            // self 字段索引（self.s[i]）默认生成 String：str 字段索引返回
+                            // 字符（str），用于比较/拼接等字符串上下文，非 i64 码点
+                            let base_is_self_field = matches!(&base.kind,
+                                ExprKind::FieldAccess { base: b, .. }
+                                if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
+                            let idx_wants_string = base_is_self_field
+                                || matches!(
+                                    &self.current_ret_ty,
+                                    Some(IrType::Str)
+                                ) || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
+                                        if path == "str" || path == "String")
+                                    || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
+                                    || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+                                        if path == "str" || path == "String");
                             if idx_wants_string {
                                 return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s);
                             }
@@ -11977,14 +11987,17 @@ impl CodeGen {
                                 format!("{}[{}].to_string()", base_s, key_s)
                             } else if base_is_str {
                                 // 字符串单字符索引：char 安全；函数返回 str/String 时生成 String
-                                let idx_wants_string2 = matches!(
-                                    &self.current_ret_ty,
-                                    Some(IrType::Str)
-                                ) || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
-                                        if path == "str" || path == "String")
-                                    || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
-                                    || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
-                                        if path == "str" || path == "String");
+                                // self 字段索引（self.s[i]）默认生成 String：LZ str 字段索引
+                                // 返回字符（str），用于比较/拼接等字符串上下文，非 i64 码点
+                                let idx_wants_string2 = is_self_field
+                                    || matches!(
+                                        &self.current_ret_ty,
+                                        Some(IrType::Str)
+                                    ) || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
+                                            if path == "str" || path == "String")
+                                        || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
+                                        || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+                                            if path == "str" || path == "String");
                                 if idx_wants_string2 {
                                     format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = ({} as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s)
                                 } else {
@@ -12104,6 +12117,7 @@ impl CodeGen {
                         || matches!(&rhs.kind, ExprKind::ListLit(_))
                         || matches!(&lhs.ty, IrType::Named { path, .. } if path == "List" || path == "Vec")
                         || matches!(&rhs.ty, IrType::Named { path, .. } if path == "List" || path == "Vec"));
+
                 if add_is_list_concat {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
