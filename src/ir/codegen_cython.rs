@@ -144,6 +144,9 @@ impl CythonCodeGen {
             self.writeln(&format!("    @staticmethod"));
             self.writeln(&format!("    def new(v=None): return {}(v)", name));
             self.writeln("    def __getattr__(self, n): return getattr(self._v, n)");
+            // 下标协议：`x[0]` 取内部值 / `x[0] = v` 存内部值（指针解引用语义）
+            self.writeln("    def __getitem__(self, i): return self._v");
+            self.writeln("    def __setitem__(self, i, v): self._v = v");
             self.writeln(&format!("    def __repr__(self): return '{}(' + repr(self._v) + ')'", name));
             self.writeln("");
         }
