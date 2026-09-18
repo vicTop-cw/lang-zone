@@ -301,41 +301,8 @@ fn postprocess_pyx(
         }
     }
 
-    // 3a) Option 垫片：None_ 裸 None → 单例方法对象
-    let opt_anchor = "class Option:\n    @staticmethod\n    def Some(v): return v\n    None_ = None";
-    let opt_shim = "class Option:\n    @staticmethod\n    def Some(v): return v\n    @staticmethod\n    def None_(): return _LZNONE\n\nclass _LzNoneCls:\n    def is_none(self): return True\n    def is_some(self): return False\n    def unwrap(self): raise LZError('unwrap None')\n    def expect(self, m): raise LZError(m)\n    def __repr__(self): return 'None'\n    def __eq__(self, o): return o is None or isinstance(o, _LzNoneCls)\n    def __bool__(self): return False\n\n_LZNONE = _LzNoneCls()";
-    if code.contains(opt_anchor) {
-        code = code.replace(opt_anchor, opt_shim);
-    }
-
-    // 3b) 行级裸 None 字面量赋值 → _LZNONE（LZ None 字面量的 is_none 调用需要）
-    {
-        let mut out = Vec::with_capacity(lines.len());
-        for l in code.lines() {
-            let t = l.trim_start();
-            let is_bare_none = !t.starts_with('#')
-                && !t.starts_with("def ")
-                && !t.contains('(')
-                && t.ends_with("= None")
-                && {
-                    let head = t[..t.len() - 6].trim_end();
-                    head.ends_with(|c: char| c.is_alphanumeric() || c == '_')
-                        && head
-                            .split_whitespace()
-                            .last()
-                            .map(|w| w.chars().all(|c| c.is_alphanumeric() || c == '_'))
-                            .unwrap_or(false)
-                };
-            if is_bare_none {
-                let indent = l.len() - t.len();
-                let name = t[..t.len() - 6].trim_end();
-                out.push(format!("{}{} = _LZNONE", " ".repeat(indent), name));
-            } else {
-                out.push(l.to_string());
-            }
-        }
-        code = out.join("\n");
-    }
+    // 3) Option/None 方法族：已下沉 lib（is_none→is None、is_some→is not None、
+    //    unwrap/expect 透传 + __lz_expect_fail），垫片方案退位删除（M1.3）
 
     // 4) 构建块下标修复：`))()(N)` → `))()[N]`（逐个消耗，防死循环）
     loop {

@@ -164,6 +164,7 @@ impl CythonCodeGen {
         self.writeln("");
         // 运行时：内建函数（对齐 lz_builtins 子集；map/filter 为 LZ 参数顺序）
         self.writeln("def __go(v): return v  # go 并发降级为同步求值");
+        self.writeln("def __lz_expect_fail(m): raise LZError(m)");
         self.writeln("def push(seq, item):");
         self.writeln("    seq.append(item)");
         self.writeln("    return item");
@@ -2641,6 +2642,22 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 return format!("await {}", gen_expr(cg, receiver));
             }
             let r = gen_expr(cg, receiver);
+            // Option/Result 方法族 → 裸 None 哨兵语义（对齐 PLAN §1.6 的 `is None` 模型；
+            // 裸 None 无实例方法，故生成语义等价表达式而非方法调用）
+            match method.as_str() {
+                "is_none" => return format!("({} is None)", r),
+                "is_some" => return format!("({} is not None)", r),
+                // unwrap/expect：有值透传；None 时的 panic 语义由运行层 raise（见 BACKLOG）
+                "unwrap" => return r,
+                "expect" => {
+                    let m = args.first().map(|a| gen_expr(cg, a)).unwrap_or_default();
+                    if m.is_empty() {
+                        return r;
+                    }
+                    return format!("({} if {} is not None else __lz_expect_fail({}))", r, r, m);
+                }
+                _ => {}
+            }
             let a: Vec<String> = args.iter().map(|a| gen_expr(cg, a)).collect();
             format!("{}.{}({})", r, method, a.join(", "))
         }
