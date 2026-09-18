@@ -2382,7 +2382,14 @@ impl CodeGen {
                 let params: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();
                 format!("fn({}) -> {}", params.join(", "), self.rust_type(ret))
             }
-            IrType::Ref(inner) => format!("&{}", self.rust_type(inner)),
+            IrType::Ref(inner) => {
+                // 特殊处理 Str 引用：生成 &str 而非 &String
+                if matches!(inner.as_ref(), IrType::Str) {
+                    "&str".into()
+                } else {
+                    format!("&{}", self.rust_type(inner))
+                }
+            }
             IrType::MutRef(inner) => format!("&mut {}", self.rust_type(inner)),
             IrType::Generic(name) => name.clone(),
         }
@@ -6811,7 +6818,13 @@ impl CodeGen {
                 p.name.clone()
             } else if p.is_ref {
                 // ref x: T → &T（不可变引用）；mut ref x: T → &mut T（可变引用）
-                if p.is_mut {
+                // 特殊处理 str 类型：生成 &str 而非 &String
+                // p.ty 可能是 Str（builder 标记 is_ref 但保持 ty 为 Str）或 Ref(Str)
+                let is_str_ty = matches!(&p.ty, IrType::Str)
+                    || matches!(&p.ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Str));
+                if is_str_ty {
+                    format!("{}: &str", p.name)
+                } else if p.is_mut {
                     format!("{}: &mut {}", p.name, self.rust_type(&p.ty))
                 } else {
                     format!("{}: &{}", p.name, self.rust_type(&p.ty))

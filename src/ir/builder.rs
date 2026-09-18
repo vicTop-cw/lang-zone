@@ -9347,15 +9347,26 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             let auto_mut = (p.name == "self" || p.name == "self_")
                 && !p.is_mut
                 && self_field_is_mutated(&func.body);
+            let param_ty = if is_math {
+                IrType::Generic("T".into())
+            } else {
+                from_ast_type_with_generics(&p.ty, &generics)
+            };
+            // str 参数自动标记为 ref：避免调用时移动 owned String（lib_hashmap _str_hash 移动 key 后 E0382）
+            // 仅对非 self 参数处理（self 已有专门 auto-mut 逻辑）
+            let is_str_param = matches!(&param_ty, IrType::Str)
+                || matches!(&param_ty, IrType::Named { path, .. } if path == "str" || path == "String");
+            let is_ref_for_param = p.is_ref
+                || (p.name != "self"
+                    && p.name != "self_"
+                    && is_str_param
+                    && !p.is_mut
+                    && !p.is_owned);
             Param {
                 name: p.name.clone(),
-                ty: if is_math {
-                    IrType::Generic("T".into())
-                } else {
-                    from_ast_type_with_generics(&p.ty, &generics)
-                },
+                ty: param_ty,
                 is_mut: p.is_mut || auto_mut,
-                is_ref: p.is_ref,
+                is_ref: is_ref_for_param,
                 is_owned: p.is_owned,
                 default: p.default.as_ref().map(|d| convert_expr(d, ctx)),
                 variadic: false,
