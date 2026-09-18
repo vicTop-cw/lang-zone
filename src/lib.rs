@@ -12,6 +12,8 @@ pub mod util;
 
 // ─── FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D） ───
 pub mod hotreload;
+// LSP 依赖 serde_json（仅 infer feature 提供），故同 gate
+#[cfg(feature = "infer")]
 pub mod lsp;
 
 // ── L2 语法与宏层 ──

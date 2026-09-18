@@ -11,6 +11,9 @@ impl fmt::Display for IrType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             IrType::Int => f.write_str("int"),
+            IrType::Int128 => f.write_str("int128"),
+            IrType::BigInt => f.write_str("BigInt"),
+            IrType::Complex => f.write_str("Complex"),
             IrType::F64 => f.write_str("f64"),
             IrType::Str => f.write_str("str"),
             IrType::Bool => f.write_str("bool"),
@@ -237,6 +240,9 @@ impl fmt::Display for LitKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LitKind::Int(n) => write!(f, "{n}_i64"),
+            LitKind::Int128(n) => write!(f, "{n}_i128"),
+            LitKind::BigInt(s) => write!(f, "BigInt({s})"),
+            LitKind::Complex(re, im) => write!(f, "Complex({re}, {im})"),
             LitKind::F64(n) => write!(f, "{n}_f64"),
             LitKind::Str(s) => write!(f, "\"{s}\""),
             LitKind::FStr(s) => write!(f, "f\"{s}\""),

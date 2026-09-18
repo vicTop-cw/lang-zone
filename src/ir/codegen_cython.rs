@@ -282,6 +282,17 @@ impl CythonCodeGen {
         &self.buf
     }
 
+    /// 完整管线：generate + postprocess_pyx（共享后处理，下沉自 lzcyc）
+    pub fn generate_full(
+        &mut self,
+        module: &IrModule,
+        enum_variants: &[(String, usize)],
+        merged_modules: &[String],
+    ) -> String {
+        let raw = self.generate(module).to_string();
+        postprocess_pyx(&raw, enum_variants, merged_modules)
+    }
+
     fn gen_item(&mut self, item: &Item) {
         match item {
             Item::FnDef(f) => self.gen_function(f),
@@ -1216,6 +1227,9 @@ impl CythonCodeGen {
                 TypeCtx::Signature | TypeCtx::Field | TypeCtx::Local => "Py_ssize_t".into(),
                 TypeCtx::Container | TypeCtx::Generic => "object".into(),
             },
+            IrType::Int128 => "object".into(),
+            IrType::BigInt => "object".into(),
+            IrType::Complex => "object".into(),
             IrType::F64 => match ctx {
                 TypeCtx::Signature | TypeCtx::Field | TypeCtx::Local => "double".into(),
                 TypeCtx::Container | TypeCtx::Generic => "object".into(),
@@ -2797,7 +2811,20 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 BinOpKind::In => "in",
                 BinOpKind::NotIn => "not in",
             };
-            format!("{} {} {}", gen_expr(cg, lhs), o, gen_expr(cg, rhs))
+            // float→complex 提升：当 BinOp 整体类型为 Complex 而某侧为 f64 时，
+            // 将 f64 字面量/表达式提升为 complex(re, im) 形式
+            let is_complex_binop = matches!(expr.ty, IrType::Complex);
+            let lhs_str = if is_complex_binop && matches!(lhs.ty, IrType::F64) {
+                gen_complex_promote(cg, lhs)
+            } else {
+                gen_expr(cg, lhs)
+            };
+            let rhs_str = if is_complex_binop && matches!(rhs.ty, IrType::F64) {
+                gen_complex_promote(cg, rhs)
+            } else {
+                gen_expr(cg, rhs)
+            };
+            format!("{} {} {}", lhs_str, o, rhs_str)
         }
         ExprKind::UnOp { op, operand } => {
             let o = match op {
@@ -3329,4 +3356,286 @@ fn gen_pattern(
             (join_conds(conds), bindings)
         }
     }
+}
+
+// ── 生成后处理（下沉自 lzcyc/CY/src/main.rs） ───────────────────────────
+// 各项均以生成代码的稳定形态为锚点，匹配不上则原样保留：
+// 1. enum 无数据变体注入 `_variant = <序号>`（match 解构依赖）
+// 2. Box/Rc/Arc 补 `__getitem__`/`__setitem__`（`x[0]` 取/存内部值）
+// 3. Option 垫片：`None_()` 返回带方法的 `_LZNONE` 单例；行级 `x = None` → `x = _LZNONE`
+// 4. 构建块下标：`(lambda : (...)))()(N)` → `...))()[N]`
+// 5. 列表推导 filter 谓词补调用：`for __cv in ... if (lambda ...)` → `...(__cv)`
+// 6. 已合并 import 的限定前缀剥离：`lz_std.X` → `X`，并删除对应 `import X` 行
+// 7. checker 派发：`fn[checker](...)` 调用改写为包装器；注入 `__Params` 垫片
+
+pub fn postprocess_pyx(
+    code: &str,
+    enum_variants: &[(String, usize)],
+    merged_modules: &[String],
+) -> String {
+    let mut lines: Vec<String> = code.lines().map(String::from).collect();
+
+    // 1) _variant 注入
+    for i in 0..lines.len() {
+        let t = lines[i].trim_start().to_string();
+        if let Some(rest) = t.strip_prefix("class ") {
+            if let Some(paren) = rest.find('(') {
+                let cname = rest[..paren].trim();
+                if let Some((_, idx)) = enum_variants.iter().find(|(n, _)| n == cname) {
+                    if i + 1 < lines.len() && lines[i + 1].trim() == "pass" {
+                        let indent = lines[i + 1].len() - lines[i + 1].trim_start().len();
+                        lines[i + 1] =
+                            format!("{}{}", " ".repeat(indent), format!("_variant = {idx}"));
+                    }
+                }
+            }
+        }
+    }
+    let mut code = lines.join("\n");
+
+    // 2) Box/Rc/Arc 下标增强
+    for cls in ["Box", "Rc", "Arc"] {
+        let anchor = format!(
+            "class {cls}:\n    def __init__(self, v=None): self._v = v\n    @staticmethod\n    def new(v=None): return {cls}(v)\n    def __getattr__(self, n): return getattr(self._v, n)"
+        );
+        let enhanced = format!(
+            "{anchor}\n    def __getitem__(self, i): return self._v\n    def __setitem__(self, i, v): self._v = v"
+        );
+        if code.contains(&anchor) {
+            code = code.replace(&anchor, &enhanced);
+        }
+    }
+
+    // 3a) Option 垫片：None_ 裸 None → 单例方法对象
+    let opt_anchor = "class Option:\n    @staticmethod\n    def Some(v): return v\n    None_ = None";
+    let opt_shim = "class Option:\n    @staticmethod\n    def Some(v): return v\n    @staticmethod\n    def None_(): return _LZNONE\n\nclass _LzNoneCls:\n    def is_none(self): return True\n    def is_some(self): return False\n    def unwrap(self): raise LZError('unwrap None')\n    def expect(self, m): raise LZError(m)\n    def __repr__(self): return 'None'\n    def __eq__(self, o): return o is None or isinstance(o, _LzNoneCls)\n    def __bool__(self): return False\n\n_LZNONE = _LzNoneCls()";
+    if code.contains(opt_anchor) {
+        code = code.replace(opt_anchor, opt_shim);
+    }
+
+    // 3b) 行级裸 None 字面量赋值 → _LZNONE
+    {
+        let mut out = Vec::with_capacity(lines.len());
+        for l in code.lines() {
+            let t = l.trim_start();
+            let is_bare_none = !t.starts_with('#')
+                && !t.starts_with("def ")
+                && !t.contains('(')
+                && t.ends_with("= None")
+                && {
+                    let head = t[..t.len() - 6].trim_end();
+                    head.ends_with(|c: char| c.is_alphanumeric() || c == '_')
+                        && head
+                            .split_whitespace()
+                            .last()
+                            .map(|w| w.chars().all(|c| c.is_alphanumeric() || c == '_'))
+                            .unwrap_or(false)
+                };
+            if is_bare_none {
+                let indent = l.len() - t.len();
+                let name = t[..t.len() - 6].trim_end();
+                out.push(format!("{}{} = _LZNONE", " ".repeat(indent), name));
+            } else {
+                out.push(l.to_string());
+            }
+        }
+        code = out.join("\n");
+    }
+
+    // 4) 构建块下标修复：`))()(N)` → `))()[N]`
+    loop {
+        let Some(p) = code.find("))()(") else { break };
+        let after = &code[p + 5..];
+        let Some(close) = after.find(')') else { break };
+        let idx = &after[..close];
+        if idx.is_empty() || !idx.chars().all(|c| c.is_ascii_digit()) {
+            break;
+        }
+        code = format!("{}))()[{}]{}", &code[..p], idx, &after[close + 1..]);
+    }
+
+    // 5) 列表推导 filter 谓词补调用
+    {
+        let mut out = Vec::with_capacity(code.lines().count());
+        for l in code.lines() {
+            if l.contains("for __cv in") && l.contains("if (lambda") {
+                if let Some(lf) = l.find("if (lambda") {
+                    let bytes: Vec<char> = l.chars().collect();
+                    let start = lf + 3;
+                    if let Some(&c0) = bytes.get(start) {
+                        if c0 == '(' {
+                            let mut depth = 0i32;
+                            let mut end = None;
+                            for j in start..bytes.len() {
+                                match bytes[j] {
+                                    '(' => depth += 1,
+                                    ')' => {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            end = Some(j);
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if let Some(e) = end {
+                                let head: String = bytes[..=e].iter().collect();
+                                let tail: String = bytes[e + 1..].iter().collect();
+                                out.push(format!("{head}(__cv){tail}"));
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+            out.push(l.to_string());
+        }
+        code = out.join("\n");
+    }
+
+    // 6) 已合并 import：删除 `import X` 行 + 剥离 `X.` 限定前缀
+    for m in merged_modules {
+        code = code.replace(&format!("{m}."), "");
+        let mut out = Vec::with_capacity(code.lines().count());
+        let import_stmt = format!("import {m}");
+        for l in code.lines() {
+            if l.trim() == import_stmt {
+                continue;
+            }
+            out.push(l.to_string());
+        }
+        code = out.join("\n");
+    }
+
+    // 7) checker 派发
+    {
+        use std::collections::BTreeSet;
+        let mut wrappers: Vec<String> = Vec::new();
+        let mut pairs: BTreeSet<(String, String)> = BTreeSet::new();
+        let mut out = Vec::with_capacity(code.lines().count());
+        for l in code.lines() {
+            let mut fixed = l.to_string();
+            if !fixed.trim_start().starts_with('#') && fixed.contains('[') {
+                let chars: Vec<char> = fixed.chars().collect();
+                let mut i = 0;
+                let mut rebuilt = String::new();
+                while i < chars.len() {
+                    if chars[i] == '[' {
+                        let head_end = i;
+                        let mut fs = i;
+                        while fs > 0 {
+                            let c = chars[fs - 1];
+                            if c.is_alphanumeric() || c == '_' {
+                                fs -= 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let mut j = i + 1;
+                        while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                            j += 1;
+                        }
+                        if j < chars.len()
+                            && chars[j] == ']'
+                            && j + 1 < chars.len()
+                            && chars[j + 1] == '('
+                            && head_end > fs
+                        {
+                            let fname: String = chars[fs..head_end].iter().collect();
+                            let checker: String = chars[i + 1..j].iter().collect();
+                            let valid = |s: &str| {
+                                !s.is_empty()
+                                    && s.chars().next().map(|c| c.is_alphabetic() || c == '_')
+                                        .unwrap_or(false)
+                            };
+                            if valid(&fname)
+                                && valid(&checker)
+                                && code.contains(&format!("def {checker}("))
+                                && code.contains(&format!("def {fname}("))
+                            {
+                                let wrapper = format!("__lz_checked_{fname}_{checker}");
+                                let fname_len = head_end - fs;
+                                rebuilt.truncate(rebuilt.len() - fname_len);
+                                rebuilt.push_str(&wrapper);
+                                pairs.insert((fname.clone(), checker.clone()));
+                                i = j + 1;
+                                continue;
+                            }
+                        }
+                    }
+                    rebuilt.push(chars[i]);
+                    i += 1;
+                }
+                fixed = rebuilt;
+            }
+            out.push(fixed);
+        }
+        code = out.join("\n");
+
+        for (fname, checker) in &pairs {
+            let params = extract_def_params(&code, fname);
+            let zip_list = if params.is_empty() {
+                "()".to_string()
+            } else {
+                let names = params
+                    .iter()
+                    .map(|p| format!("'{p}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({names},)")
+            };
+            wrappers.push(format!(
+                "def __lz_checked_{fname}_{checker}(*__args, **__kwargs):\n    __params = __Params(kwargs=dict(list(zip({zip_list}, __args)), **__kwargs))\n    {checker}(__params)\n    return {fname}(*__args, **__kwargs)"
+            ));
+        }
+        if !wrappers.is_empty() {
+            let shim = "class _LzKwargsMap:\n    def __init__(self, d): self._d = dict(d)\n    def contains(self, k): return k in self._d\n    def __getitem__(self, k): return self._d[k]\n\nclass __Params:\n    def __init__(self, kwargs=None, args=None): self.kwargs = _LzKwargsMap(kwargs)";
+            let block = format!("{}\n{}", shim, wrappers.join("\n\n"));
+            let anchor = "\ndef main(";
+            match code.find(anchor) {
+                Some(p) => {
+                    code = format!("{}\n\n{}\n{}", &code[..p], block, &code[p + 1..]);
+                }
+                None => code = format!("{code}\n\n{block}\n"),
+            }
+        }
+    }
+
+    code
+}
+
+/// 从生成代码中提取 `def fname(...)` 的形参名列表
+pub fn extract_def_params(code: &str, fname: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for l in code.lines() {
+        let t = l.trim_start();
+        let head = format!("def {fname}(");
+        if t.starts_with(&head) {
+            if let Some(open) = t.find('(') {
+                if let Some(close) = t.rfind(')') {
+                    if close > open {
+                        for seg in t[open + 1..close].split(',') {
+                            let seg_t = seg.trim();
+                            if seg_t.is_empty() || seg_t.starts_with('*') {
+                                continue;
+                            }
+                            let head_t = seg_t.split('=').next().unwrap_or(seg_t).trim();
+                            if head_t.contains(':') {
+                                continue;
+                            }
+                            if let Some(last) = head_t.split_whitespace().last() {
+                                if last == "self" || last == "ps" {
+                                    continue;
+                                }
+                                out.push(last.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+    }
+    out
 }

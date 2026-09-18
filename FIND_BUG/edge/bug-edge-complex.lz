@@ -1,0 +1,5 @@
+// Complex 端到端测试 — 复数基础类型
+let a: complex = 3.0 + 4.0i
+let b: complex = 1.0 + 2.0i
+let c: complex = a + b
+println(c)

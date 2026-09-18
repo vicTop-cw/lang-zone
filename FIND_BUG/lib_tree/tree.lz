@@ -24,9 +24,12 @@ def postorder(tree: BinaryTree) -> List<int> =
         case BinaryTree.Empty:
             []
         case BinaryTree.Node(val, left, right):
-            postorder(left) + postorder(right) + [val]
+            let result: List<int> = []
+            let result = result + postorder(left)
+            let result = result + postorder(right)
+            result + [val]
 
-def fold(tree: BinaryTree, acc: int, f: fn(int, int) -> int) -> int =
+def fold(tree: BinaryTree, acc: int, ref f: fn(int, int) -> int) -> int =
     match tree:
         case BinaryTree.Empty:
             acc
@@ -35,23 +38,7 @@ def fold(tree: BinaryTree, acc: int, f: fn(int, int) -> int) -> int =
             let acc2 = f(acc1, val)
             fold(right, acc2, f)
 
-def height(tree: BinaryTree) -> int =
-    match tree:
-        case BinaryTree.Empty:
-            0
-        case BinaryTree.Node(_, left, right):
-            let lh = height(left)
-            let rh = height(right)
-            (if lh > rh: lh else: rh) + 1
-
-def size(tree: BinaryTree) -> int =
-    match tree:
-        case BinaryTree.Empty:
-            0
-        case BinaryTree.Node(_, left, right):
-            1 + size(left) + size(right)
-
-def find(tree: BinaryTree, pred: fn(int) -> bool) -> Option<int> =
+def find(tree: BinaryTree, ref pred: fn(int) -> bool) -> Option<int> =
     match tree:
         case BinaryTree.Empty:
             None
@@ -65,14 +52,39 @@ def find(tree: BinaryTree, pred: fn(int) -> bool) -> Option<int> =
                 else:
                     find(right, pred)
 
+def add(acc: int, x: int) -> int =
+    acc + x
+
 def sum_tree(tree: BinaryTree) -> int =
-    fold(tree, 0, |acc: int, x: int| -> int = acc + x)
+    fold(tree, 0, add)
 
 def make_node(val: int, left: BinaryTree, right: BinaryTree) -> BinaryTree =
     BinaryTree.Node(val, left, right)
 
 def make_empty() -> BinaryTree =
     BinaryTree.Empty
+
+def eq_5(x: int) -> bool =
+    x == 5
+
+def eq_99(x: int) -> bool =
+    x == 99
+
+def height(tree: BinaryTree) -> int =
+    match tree:
+        case BinaryTree.Empty:
+            0
+        case BinaryTree.Node(_, left, right):
+            let left_h = height(left)
+            let right_h = height(right)
+            if left_h > right_h: left_h + 1 else: right_h + 1
+
+def size(tree: BinaryTree) -> int =
+    match tree:
+        case BinaryTree.Empty:
+            0
+        case BinaryTree.Node(_, left, right):
+            size(left) + size(right) + 1
 
 def main() =
     //       1
@@ -92,7 +104,7 @@ def main() =
     assert postorder(tree) == [4, 5, 2, 3, 1]
 
     // fold
-    let sum = fold(tree, 0, |acc: int, x: int| -> int = acc + x)
+    let sum = fold(tree, 0, add)
     assert sum == 15
 
     // sum_tree helper
@@ -103,10 +115,10 @@ def main() =
     assert size(tree) == 5
 
     // find
-    let found = find(tree, |x: int| -> bool = x == 5)
+    let found = find(tree, eq_5)
     assert found == Some(5)
 
-    let not_found = find(tree, |x: int| -> bool = x == 99)
+    let not_found = find(tree, eq_99)
     assert not_found == None
 
     // empty tree

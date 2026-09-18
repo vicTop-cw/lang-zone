@@ -263,6 +263,7 @@ impl Checker {
             }
         }
         for f in &m.functions {
+            eprintln!("DEBUG semantic_check collect: found function {}", f.name);
             let sig = FnSig {
                 param_count: f.params.len(),
                 param_count_min: f.params.iter().filter(|p| p.default.is_none()).count(),
@@ -274,6 +275,7 @@ impl Checker {
                     .map(|p| p.default.is_none() && is_list_type(&p.ty))
                     .unwrap_or(false),
             };
+            eprintln!("DEBUG semantic_check collect: inserting {} into fn_names", f.name);
             self.fn_names.insert(f.name.clone());
             self.fn_sigs.insert(f.name.clone(), sig);
             if f.decorators.iter().any(|d| d.name == "curry") {
@@ -1023,6 +1025,9 @@ impl Checker {
     fn check_expr(&mut self, e: &Expr) {
         match e {
             Expr::IntLit(_)
+            | Expr::Int128Lit(_)
+            | Expr::BigIntLit(_)
+            | Expr::ComplexLit(_, _)
             | Expr::FloatLit(_)
             | Expr::StrLit(_)
             | Expr::FStrLit(_)

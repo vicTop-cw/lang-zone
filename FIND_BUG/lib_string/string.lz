@@ -4,25 +4,29 @@
 def split(s: str, sep: str) -> List<str> =
     if sep == "":
         panic("empty separator")
-    let result: List<str> = []
-    mut current = ""
-    mut i = 0
-    while i < s.len():
-        if s[i..i + sep.len()] == sep:
-            let result = result + [current]
-            current = ""
-            i = i + sep.len()
-        else:
-            let current = current + s[i]
-            i = i + 1
-    let result = result + [current]
+    result: List<str> = []
+    start = 0
+    i = 0
+    while i <= s.len() - sep.len():
+        found = True
+        j = 0
+        while j < sep.len() and found:
+            if s[i + j] != sep[j]:
+                found = False
+            j = j + 1
+        if found:
+            push(result, s[start..i])
+            start = i + sep.len()
+            i = start - 1
+        i = i + 1
+    push(result, s[start..s.len()])
     result
 
 def join(parts: List<str>, sep: str) -> str =
     if parts.len() == 0:
         ""
     else:
-        mut result = parts[0]
+        mut result = parts[0].clone()
         mut idx = 1
         while idx < parts.len():
             let result = result + sep + parts[idx]
@@ -67,35 +71,31 @@ def contains(s: str, sub: str) -> bool =
         found
 
 def replace(s: str, old: str, new: str) -> str =
-    if old == "":
-        s
+    if len(old) == 0:
+        "" + s
     else:
         let parts = split(s, old)
         join(parts, new)
 
 def to_upper(s: str) -> str =
-    mut result = ""
-    mut i = 0
-    while i < s.len():
-        let ch = s[i]
-        if ch >= "a" and ch <= "z":
-            let result = result + chr(ord(ch) - 32)
+    result: List<str> = []
+    for ch in s:
+        code = ord(ch)
+        if code >= 97 and code <= 122:
+            push(result, chr_unchecked(code - 32).to_string())
         else:
-            let result = result + ch
-        i = i + 1
-    result
+            push(result, ch.to_string())
+    join(result, "")
 
 def to_lower(s: str) -> str =
-    mut result = ""
-    mut i = 0
-    while i < s.len():
-        let ch = s[i]
-        if ch >= "A" and ch <= "Z":
-            let result = result + chr(ord(ch) + 32)
+    result: List<str> = []
+    for ch in s:
+        code = ord(ch)
+        if code >= 65 and code <= 90:
+            push(result, chr_unchecked(code + 32).to_string())
         else:
-            let result = result + ch
-        i = i + 1
-    result
+            push(result, ch.to_string())
+    join(result, "")
 
 def main() =
     assert split("a,b,c", ",") == ["a", "b", "c"]

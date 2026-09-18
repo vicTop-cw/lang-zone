@@ -319,6 +319,7 @@ fn compile_main(args: Vec<String>) -> i32 {
             "emit-bridge-report" => return cli::cmd_emit_bridge_report(&args),
             // FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D）
             "watch" => return lang_zone::hotreload::cmd_watch(&args),
+            #[cfg(feature = "infer")]
             "lsp" => return lang_zone::lsp::run_lsp(),
             _ => { /* 单文件编译路径（行为保持原样） */ }
         }
@@ -827,15 +828,15 @@ fn compile_main(args: Vec<String>) -> i32 {
     match build_ir_opt(&module, lzi_registry.as_ref()) {
         Ok(ir_module) => {
             if backend_cython {
-                // ── Cython 后端：IR → .pyx ──
+                // ── Cython 后端：IR → .pyx（与 lzcyc 共享 codegen_cython）──
                 let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
-                let pyx_code = cg.generate(&ir_module);
+                let pyx_code = cg.generate(&ir_module).to_string();
                 let out_path = replace_ext(path, ".lz", ".pyx");
-                fs::write(&out_path, pyx_code).unwrap_or_else(|e| {
+                fs::write(&out_path, &pyx_code).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", out_path, e);
                     std::process::exit(1);
                 });
-                println!("Generated {} -> {} (Cython backend)", path, out_path);
+                println!("Generated {} -> {} (Cython backend, shared codegen with lzcyc)", path, out_path);
             } else {
                 // ── Rust 后端（默认）──
                 let mut cg = IrCodeGen::new();

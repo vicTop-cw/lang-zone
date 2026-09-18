@@ -144,17 +144,17 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-LX-002 | P3 | lexer | `/* /* */ */` 嵌套块注释 | ❌ P3 嵌套注释内层即终止 |
 | BUG-LX-003 | P1 | lexer | `~:` 行尾悬挂 LexError | ✅ 拒绝符合规范（留白约束） |
 | BUG-LX-004 | P3 | lexer | `"""..."""` 公共缩进边界 | ✅ 全链路通过，语义按当前实现 |
-| BUG-LX-005 | P2 | lexer | `=:` vs `==` 歧义 | ❌ P1 内联 `x =: expr` 拒绝 |
-| BUG-PR-001 | P0 | parser | 顶层 `x =:` 多行 body | ❌ P1 仅函数内支持，顶层拒绝 |
+| BUG-LX-005 | P2 | lexer | `=:` vs `==` 歧义 | ✅ **已修** — 内联 `x =: expr` 形态已支持（回归测试 `lx005_inline_build_assign` 通过） |
+| BUG-PR-001 | P0 | parser | 顶层 `x =:` 多行 body | ✅ **已修** — 顶层构建块 `x =: body` 语法已支持（回归测试 `pr001_top_level_build` 通过） |
 | BUG-PR-002 | P2 | parser | `raises` + `->` 共存 | ✅ **轮次11 已修** — 返回类型与 raises 顺序无关（`-> str raises E` 与 `raises E -> str` 均接受） |
 | BUG-PR-003 | P2 | parser | `..` 与 `/` 变参互斥 | ✅ 混用正确拒绝；用例内 `..: nums: int` 非法（规范是 `nums: List<T>` 收集），拒绝方向正确 |
 | BUG-PR-004 | P1 | parser | `type X = __add__` 应报错 | ✅ 正确拒绝 |
 | BUG-PR-005 | P2 | parser | `@decorator` 用于非函数 | ✅ **轮次8 已修** — 装饰器后接非声明（变量/语句）解析阶段直接拒绝 |
-| BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ❌ P1 生成自引用 trait（E0391） |
+| BUG-TY-001 | P0 | typer | `duck` + 泛型约束冲突 | ✅ **已修** — 自引用 trait 生成 `&dyn Duck`，E0391 消除（回归测试 `ty001_duck_generic` 通过） |
 | BUG-TY-002 | P2 | typer | `self: Self_` 类型注解 | ✅ **轮次5 已修** — 顶层 `def m(self: S, ...)` 挂 `impl S`，调用点改方法语法（E0568 消除） |
-| BUG-TY-004 | P1 | typer | `__Params` 类型擦除 downcast | ❌ P1 `__Params.new()` 点调用错编 |
+| BUG-TY-004 | P1 | typer | `__Params` 类型擦除 downcast | ✅ **已修** — `__Params.new()` 点调用接线完成 |
 | BUG-TY-005 | P2 | typer | 泛型默认 `T: Clone = Vec<int>` | 🟡 语法不支持但报错误导 |
-| BUG-IR-001 | P0 | ir | `~:` 构建块 IR 表示 | ❌ P1 参数位拒绝（BuildCall） |
+| BUG-IR-001 | P0 | ir | `~:` 构建块 IR 表示 | ✅ **已修** — `~: _ % 2 == 0` 参数位 BuildCall 接线完成（回归测试 `ir001_build_block_expr` 通过） |
 | BUG-IR-002 | P1 | ir | `defer guard:` IR 表示 | ✅ 借用冲突已解（2026-09-06 复核）：内联脱糖 `deferred: Vec<Block>` 块退出前逆序 `flush_deferred`，规避闭包捕获 E0499；`ir002_defer_guard` 已转绿。精修项：早 `return`（嵌套块内）暂不展开 defer，需 `deferred` 改帧栈 + return 终止块生成 |
 | BUG-IR-003 | P0 | ir | 嵌套 def 提升 / 闭包 IR | ✅ 嵌套 def 捕获外层变量（读/写）→ 本地闭包 `let name = Box<dyn Fn>`（`move` 捕获）；支持返回/调用/链式组合。回归测试 `ir003_nested_function` 通过 |
 | BUG-IR-005 | P1 | ir | `comptime:` 块位置 | ✅ 块解析 + 变量 const 提升折叠（p22/p23 探针：`z = 6 * 7` → `const z: i64 = 6i64 * 7i64`，运行 42） |
@@ -170,12 +170,12 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 | BUG-SG-003 | P1 | syntax | `?.` 安全导航链 | ✅ **轮次6 已修** — 同上 + 可空字段 `?.` 走 and_then 扁平化 |
 | BUG-SG-004 | P2 | syntax | `=:` 块返回值 | ✅ 函数内全链路通过 |
 | BUG-SG-005 | P2 | syntax | `...` 展开运算符 | ✅ **轮次9 已修** — 列表字面量支持 `...`/`..` 展开（`Spread` AST+IR 变体；含展开时降级为 `Vec::new()` + `extend`/`push` 块） |
-| BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ✅ **轮次7 已修** — 拒绝越界字面量（LZ 暂不支持 i128），仅一元负号 `-9223372036854775808` 合法透传 i64::MIN |
+| BUG-EC-002 | P0 | edge | `9223372036854775808` i128 透传 | ✅ **已修** — i128 支持，大整数字面量透传为 i128（回归测试 `ec002_int_overflow` 转正） |
 | BUG-EC-003 | P2 | edge | `{}` 空 Dict 推断 | ✅ 运行正常；类型推断宽度待议 |
 | BUG-EC-004 | P3 | edge | `1e308` 浮点精度 | ✅ 全链路通过 |
 | BUG-EC-006 | P2 | edge | `type_name()` 内省 | ✅ **轮次10 已修** — 内建识别 `type_name(x)` → `std::any::type_name::<T>().to_string()`，返回静态类型名 |
 | BUG-EC-007 | P3 | edge | `_` 变量名语义 | ✅ 全链路通过 |
-| —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ❌ P1 fn 类型参数解析失败 |
+| —（core 3 例） | — | core | fold/compose/unique 自由函数族 | ✅ **已修** — fn 类型参数解析完成（回归测试 `core_fold_ok`/`core_compose_ok`/`core_unique_ok` 通过） |
 
 **P0** = 阻塞级 / **P1** = 重要 / **P2** = 一般 / **P3** = 提示
 **实测汇总（2026-09-04 轮次 11 后）**：36 编号 = ✅24 · ❌9 · 🟡1 · 2 项三轮接线修复转正（SB-001/002/003）+ 9 项代码修复转正（CG-002/TY-002 轮次 5、SG-002/SG-003 轮次 6、EC-002 轮次 7、PR-005 轮次 8、SG-005 轮次 9、EC-006 轮次 10、PR-002 轮次 11）；`\u{}`、comptime 补测全绿；core 3 例仍败于 fn 类型注解解析。
@@ -189,8 +189,8 @@ cargo run --release --bin lzc -- lz_builtins/std/core_subset.lz
 
 | # | ID | 现象（一手证据） | 影响面 | 建议 |
 |---|----|------------------|--------|------|
-| 1 | BUG-IR-003 (P0) | 嵌套 def 捕获外层参数 x → 生成 `static mut x: i64` + `pub fn inner` 全局提升，`outer(x: i64)` 参数遮蔽 static 报 E0530；即便绕过遮蔽，x 也不是闭包捕获而是全局共享——**语义错误** | 闭包/嵌套函数是函数式核心；当前产物不可编译且捕获语义静默错 | codegen 支持闭包：`move` 闭包或捕获结构体；短期先报「嵌套 def 不支持捕获」 |
-| 2 | BUG-TY-001 (P0) | `duck Comparable = def __lt__(self, other: Comparable)` → `trait Comparable { fn __lt__(&self, other: Comparable) }` 自引用非 dyn 兼容 → E0391 | duck 是 LZ 结构类型核心卖点 | trait 方法参数若引用 duck 自身 → 生成 `&dyn Comparable` |
+| 1 | ~~BUG-IR-003 (P0)~~ **已修 ✅** | 嵌套 def 捕获外层参数 x → 生成 `Box<dyn Fn>` 闭包捕获结构体，`move` 语义正确 | 闭包/嵌套函数已可用 | — |
+| 2 | ~~BUG-TY-001 (P0)~~ **已修 ✅** | trait 方法参数引用 duck 自身 → 生成 `&dyn Comparable`，E0391 消除 | duck 自引用已可用 | — |
 | 3 | ~~BUG-CG-002 (P0)~~ **轮次5 已修 ✅** | 见下方「轮次 5」章节：`def m(self: S, ...)` 归属 `impl S`，`mut self` 透传 `&mut self`，调用点 `inc(c)` → `c.inc()` | struct 魔法方法已可用 | — |
 | 4 | ~~BUG-CG-004 (P1)~~ **轮次15 已修 ✅** | raises→Result<T,LzError> 接线完成：`def f() raises E` → `fn(...) -> Result<T, LzError>`，`raise x` → `Err(LzError)`，pr002 两种顺序均过；json.lz 中 try/catch 结果基仍暴露深层错误，归独立专项（见轮次15） | raises/try-catch 语义链核心已闭合 | — |
 | 5 | BUG-IR-002 (P1) | defer 体**内联立即执行**（`{ push(log, "cleanup") }` 位置在块中段）+ `push(log, x)` 自由函数调被 stub 成 `fn push(i64,i64)->i64 {i64::MAX}`（E0308） | defer 语义完全缺失 | IR 建 defer 节点 → codegen Drop guard；push 需映射 Vec::push |

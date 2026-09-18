@@ -12,7 +12,10 @@
 pub enum IrType {
     // ── 内建原语 ──
     Int,
+    Int128,
+    BigInt,
     F64,
+    Complex,
     Str,
     Bool,
     Unit,  // ()

@@ -700,6 +700,50 @@ impl<K: Eq + Hash, V> DictExt<K, V> for HashMap<K, V> {
     }
 }
 
+impl<K: Ord + Eq + Hash, V> DictExt<K, V> for BTreeMap<K, V> {
+    fn lz_get(&self, key: &K) -> Option<&V> {
+        self.get(key)
+    }
+    fn lz_set(&mut self, key: K, value: V) {
+        self.insert(key, value);
+    }
+    fn lz_contains(&self, key: &K) -> bool {
+        self.contains_key(key)
+    }
+    fn lz_remove(&mut self, key: &K) -> Option<V> {
+        self.remove(key)
+    }
+    fn lz_keys(&self) -> Vec<&K> {
+        self.keys().collect()
+    }
+    fn lz_values(&self) -> Vec<&V> {
+        self.values().collect()
+    }
+    fn lz_items(&self) -> Vec<(&K, &V)> {
+        self.iter().collect()
+    }
+    fn lz_len(&self) -> i64 {
+        self.len() as i64
+    }
+    fn lz_is_empty(&self) -> bool {
+        self.is_empty()
+    }
+    fn lz_clear(&mut self) {
+        self.clear();
+    }
+    fn lz_update(&mut self, other: HashMap<K, V>) {
+        self.extend(other.into_iter());
+    }
+    fn lz_set_default(&mut self, key: K, default: V) -> &V
+    where
+        K: Clone + Eq + Hash + Ord,
+        V: Clone,
+    {
+        self.entry(key.clone()).or_insert(default);
+        self.get(&key).unwrap()
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // HashSet / Set 扩展方法
 // ══════════════════════════════════════════════════════════════

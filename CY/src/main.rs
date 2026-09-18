@@ -198,13 +198,13 @@ fn transpile_source(path: &Path) -> Result<String, String> {
     let ir =
         lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
 
-    // Cython 后端
-    let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
-    let raw = cg.generate(&ir).to_string();
-
-    // 生成后处理（运行期语义缺口兜底，见 postprocess_pyx 注释）
+    // Cython 后端（共享管线：generate + postprocess_pyx）
     let enum_variants = collect_enum_variants(&module);
-    Ok(postprocess_pyx(&raw, &enum_variants, &merged_modules))
+    Ok(lang_zone::ir::codegen_cython::CythonCodeGen::new().generate_full(
+        &ir,
+        &enum_variants,
+        &merged_modules,
+    ))
 }
 
 /// 解析 `-o/--output <dir>` 选项，返回 (剩余位置参数, 输出目录)

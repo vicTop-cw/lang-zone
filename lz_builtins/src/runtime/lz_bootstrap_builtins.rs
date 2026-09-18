@@ -67,13 +67,13 @@ pub fn lz_join_words(xs: Vec<String>, sep: String) -> String {
 }
 
 pub fn lz_ends_with(s: String, suffix: String) -> bool {
-    let mut n: i64 = (s.len() as i64);
-    let mut m: i64 = (suffix.len() as i64);
+    let n: i64 = s.len() as i64;
+    let m: i64 = suffix.len() as i64;
     let mut ok: bool = n >= m;
     let mut i: i64 = 0i64;
     while ok && i < m {
-        if ((s).as_bytes()[((n - m + i) as usize)] as i64)
-            != ((suffix).as_bytes()[((i) as usize)] as i64)
+        if ((s).as_bytes()[(n - m + i) as usize] as i64)
+            != ((suffix).as_bytes()[(i) as usize] as i64)
         {
             ok = false;
         } else {

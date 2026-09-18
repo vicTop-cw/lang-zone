@@ -1786,7 +1786,7 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
                         i += 1;
                     }
                     if i < len && tokens[i] == Token::Plus && stmts.len() > 0 {
-                        // 处理二元表达式: expr + expr
+                        // 处理二元表达式: expr + expr（plus 专用）
                         let left = match &stmts[stmts.len() - 1] {
                             MacroStmt::Expr(e) => e.clone(),
                             _ => break,
@@ -1799,7 +1799,7 @@ fn parse_macro_body(tokens: &[Token]) -> Result<Vec<MacroStmt>, String> {
                         let (right, next_i) = parse_macro_expr(tokens, i)?;
                         stmts.push(MacroStmt::Expr(MacroExpr::Binary {
                             left: Box::new(left),
-                            op: BinaryOp::Plus,
+                            op: crate::macros::interp::BinaryOp::Plus,
                             right: Box::new(right),
                         }));
                         i = next_i;
@@ -1886,18 +1886,19 @@ fn collect_stmt_block(tokens: &[Token], start: usize) -> Result<(Vec<MacroStmt>,
     let stmts = parse_macro_body(&block_tokens)?;
     Ok((stmts, i))
 }
-
-/// 解析宏表达式（简化版）
-/// 解析宏/模板表达式（含二元 `+` 拼接：a + b + c）
+/// 解析宏表达式（分层递归下降，优先级从低到高）
+/// 优先级：|| < && < 比较(== != < > <= >=) < 加减(+ -) < 乘除模(* / %) < 一元负号 < 原子
+/// 中缀运算符统一映射到 BinaryOp（`+` 保持 BinaryOp::Plus，运行时按类型分派字符串拼接
+/// 与算术加法）。此前的 parse_macro_expr_or 与主函数逻辑重复、优先级语义混乱，已废弃。
 pub fn parse_macro_expr(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
-    let (mut expr, mut i) = parse_macro_primary(tokens, start)?;
-    // 处理二元 + 链：quote("a" + name + "b") — 参数解析只取 primary 会丢 + 后续
-    while i < tokens.len() && tokens[i] == Token::Plus {
+    let (mut expr, mut i) = parse_macro_and(tokens, start)?;
+    // 逻辑或：||（优先级最低，左结合）
+    while i < tokens.len() && tokens[i] == Token::PipePipe {
         i += 1;
-        let (right, ni) = parse_macro_primary(tokens, i)?;
+        let (right, ni) = parse_macro_and(tokens, i)?;
         expr = MacroExpr::Binary {
             left: Box::new(expr),
-            op: BinaryOp::Plus,
+            op: BinaryOp::Or,
             right: Box::new(right),
         };
         i = ni;
@@ -1905,8 +1906,117 @@ pub fn parse_macro_expr(tokens: &[Token], start: usize) -> Result<(MacroExpr, us
     Ok((expr, i))
 }
 
+/// 解析逻辑与表达式：&&
+fn parse_macro_and(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
+    let (mut expr, mut i) = parse_macro_cmp(tokens, start)?;
+    while i < tokens.len() && tokens[i] == Token::AmpAmp {
+        i += 1;
+        let (right, ni) = parse_macro_cmp(tokens, i)?;
+        expr = MacroExpr::Binary {
+            left: Box::new(expr),
+            op: BinaryOp::And,
+            right: Box::new(right),
+        };
+        i = ni;
+    }
+    Ok((expr, i))
+}
+
+/// 解析比较表达式：== != < > <= >=
+fn parse_macro_cmp(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
+    let (mut expr, mut i) = parse_macro_additive(tokens, start)?;
+    while i < tokens.len()
+        && matches!(
+            &tokens[i],
+            Token::EqEq | Token::NotEq | Token::Lt | Token::Gt | Token::Le | Token::Ge
+        )
+    {
+        let op_token = tokens[i].clone();
+        i += 1;
+        let (right, ni) = parse_macro_additive(tokens, i)?;
+        let op = match op_token {
+            Token::EqEq => BinaryOp::EqEq,
+            Token::NotEq => BinaryOp::NotEq,
+            Token::Lt => BinaryOp::Lt,
+            Token::Gt => BinaryOp::Gt,
+            Token::Le => BinaryOp::Le,
+            Token::Ge => BinaryOp::Ge,
+            _ => unreachable!(),
+        };
+        expr = MacroExpr::Binary {
+            left: Box::new(expr),
+            op,
+            right: Box::new(right),
+        };
+        i = ni;
+    }
+    Ok((expr, i))
+}
+
+/// 解析加减表达式：+ -
+fn parse_macro_additive(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
+    let (mut expr, mut i) = parse_macro_multiplicative(tokens, start)?;
+    while i < tokens.len() && matches!(&tokens[i], Token::Plus | Token::Minus) {
+        let op_token = tokens[i].clone();
+        i += 1;
+        let (right, ni) = parse_macro_multiplicative(tokens, i)?;
+        let op = match op_token {
+            Token::Plus => BinaryOp::Plus,
+            Token::Minus => BinaryOp::Minus,
+            _ => unreachable!(),
+        };
+        expr = MacroExpr::Binary {
+            left: Box::new(expr),
+            op,
+            right: Box::new(right),
+        };
+        i = ni;
+    }
+    Ok((expr, i))
+}
+
+/// 解析乘除模表达式：* / %
+fn parse_macro_multiplicative(
+    tokens: &[Token],
+    start: usize,
+) -> Result<(MacroExpr, usize), String> {
+    let (mut expr, mut i) = parse_macro_unary(tokens, start)?;
+    while i < tokens.len() && matches!(&tokens[i], Token::Star | Token::Slash | Token::Percent) {
+        let op_token = tokens[i].clone();
+        i += 1;
+        let (right, ni) = parse_macro_unary(tokens, i)?;
+        let op = match op_token {
+            Token::Star => BinaryOp::Star,
+            Token::Slash => BinaryOp::Slash,
+            Token::Percent => BinaryOp::Percent,
+            _ => unreachable!(),
+        };
+        expr = MacroExpr::Binary {
+            left: Box::new(expr),
+            op,
+            right: Box::new(right),
+        };
+        i = ni;
+    }
+    Ok((expr, i))
+}
+
+/// 解析一元表达式：-expr（右结合）
+fn parse_macro_unary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
+    let mut i = start;
+    while i < tokens.len() && matches!(&tokens[i], Token::Newline | Token::Indent) {
+        i += 1;
+    }
+    if i < tokens.len() && tokens[i] == Token::Minus {
+        let (expr, ni) = parse_macro_unary(tokens, i + 1)?;
+        Ok((MacroExpr::UnaryMinus(Box::new(expr)), ni))
+    } else {
+        parse_macro_primary_inner(tokens, i)
+    }
+}
+
 /// 解析单个 primary 宏表达式（无二元运算符）
-fn parse_macro_primary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
+fn parse_macro_primary_inner(tokens: &[Token], start: usize) -> Result<(MacroExpr, usize), String> {
     if start >= tokens.len() {
         return Ok((MacroExpr::IntLit(0), start));
     }
@@ -1919,8 +2029,7 @@ fn parse_macro_primary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usi
         Token::Ident(name) => {
             // 可能是函数调用或标识符
             let mut next_i = i + 1;
-            while next_i < tokens.len() && matches!(&tokens[next_i], Token::Newline | Token::Indent)
-            {
+            while next_i < tokens.len() && matches!(&tokens[next_i], Token::Newline | Token::Indent) {
                 next_i += 1;
             }
             if next_i < tokens.len() && tokens[next_i] == Token::LParen {
@@ -2001,6 +2110,12 @@ fn parse_macro_primary(tokens: &[Token], start: usize) -> Result<(MacroExpr, usi
         Token::StrLit(s) => Ok((MacroExpr::StrLit(s.clone()), i + 1)),
         Token::True => Ok((MacroExpr::BoolLit(true), i + 1)),
         Token::False => Ok((MacroExpr::BoolLit(false), i + 1)),
+        Token::Minus => {
+            // 一元负号：-expr
+            let (expr, ni) = parse_macro_primary_inner(tokens, i + 1)?;
+            Ok((MacroExpr::UnaryMinus(Box::new(expr)), ni))
+        }
+        Token::FloatLit(n) => Ok((MacroExpr::FloatLit(*n), i + 1)),
         Token::Backtick => {
             let (block_tokens, next_i) = collect_backtick_block(tokens, i)?;
             Ok((
@@ -2173,4 +2288,179 @@ mod tests {
         // 这里验证至少没有崩溃
         assert!(!result.is_empty());
     }
+
+    // 验证扩展后的 compile-time 数值运算：算术、比较、逻辑、一元负号、FloatLit
+    #[test]
+    fn test_compile_time_numeric_ops() {
+        use crate::macros::interp::{MacroExpr, MacroInterpreter, BinaryOp};
+
+        let mut interp = MacroInterpreter::new();
+
+        // 算术
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(10)),
+            op: BinaryOp::Plus,
+            right: Box::new(MacroExpr::IntLit(32)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(42)]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(100)),
+            op: BinaryOp::Minus,
+            right: Box::new(MacroExpr::IntLit(3)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(97)]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(6)),
+            op: BinaryOp::Star,
+            right: Box::new(MacroExpr::IntLit(7)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(42)]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(84)),
+            op: BinaryOp::Slash,
+            right: Box::new(MacroExpr::IntLit(2)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(42)]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(100)),
+            op: BinaryOp::Percent,
+            right: Box::new(MacroExpr::IntLit(58)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(42)]);
+
+        // 比较
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(42)),
+            op: BinaryOp::EqEq,
+            right: Box::new(MacroExpr::IntLit(42)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::True]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(1)),
+            op: BinaryOp::Lt,
+            right: Box::new(MacroExpr::IntLit(2)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::True]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(5)),
+            op: BinaryOp::Gt,
+            right: Box::new(MacroExpr::IntLit(3)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::True]);
+
+        // 逻辑
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::BoolLit(true)),
+            op: BinaryOp::And,
+            right: Box::new(MacroExpr::BoolLit(true)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::True]);
+
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::BoolLit(true)),
+            op: BinaryOp::Or,
+            right: Box::new(MacroExpr::BoolLit(false)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::True]);
+
+        // 一元负号
+        let expr = MacroExpr::UnaryMinus(Box::new(MacroExpr::IntLit(42)));
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(-42)]);
+    }
+
+    // 验证 `+` 的双重语义：两边都是纯数值走算术加法，任一边含字符串/标识符走字符串拼接
+    #[test]
+    fn test_plus_string_concat_vs_arithmetic() {
+        use crate::macros::group::Tokens;
+        use crate::macros::interp::{BinaryOp, MacroExpr, MacroInterpreter};
+
+        // 1) 两边都是 StrLit → 字符串拼接，且相邻 StrLit 合并为单个
+        let mut interp = MacroInterpreter::new();
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::StrLit("const ".into())),
+            op: BinaryOp::Plus,
+            right: Box::new(MacroExpr::StrLit("X".into())),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::StrLit("const X".into())]);
+
+        // 2) 左边 StrLit、右边 Ident（形如 quote("const " + name)）→ 字符串拼接
+        let mut interp2 = MacroInterpreter::new();
+        interp2.bind_param(
+            "X".into(),
+            Tokens::new(vec![Token::Ident("LIMIT".into())]),
+        );
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::StrLit("const ".into())),
+            op: BinaryOp::Plus,
+            right: Box::new(MacroExpr::Ident("X".into())),
+        };
+        let tok = interp2.eval_expr(&expr).unwrap();
+        assert_eq!(
+            tok.tokens,
+            vec![Token::StrLit("const ".into()), Token::Ident("LIMIT".into())]
+        );
+
+        // 3) 整条链 "const " + name + " = " + value（多层 Binary::Plus）→ 字符串拼接，
+        //    而非对 IntLit(100) 做算术、也非报 expected integer
+        let mut interp3 = MacroInterpreter::new();
+        interp3.bind_param(
+            "name".into(),
+            Tokens::new(vec![Token::Ident("LIMIT".into())]),
+        );
+        interp3.bind_param(
+            "value".into(),
+            Tokens::new(vec![Token::IntLit(100)]),
+        );
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::Binary {
+                left: Box::new(MacroExpr::Binary {
+                    left: Box::new(MacroExpr::StrLit("const ".into())),
+                    op: BinaryOp::Plus,
+                    right: Box::new(MacroExpr::Ident("name".into())),
+                }),
+                op: BinaryOp::Plus,
+                right: Box::new(MacroExpr::StrLit(" = ".into())),
+            }),
+            op: BinaryOp::Plus,
+            right: Box::new(MacroExpr::Ident("value".into())),
+        };
+        let tok = interp3.eval_expr(&expr).unwrap();
+        assert_eq!(
+            tok.tokens,
+            vec![
+                Token::StrLit("const ".into()),
+                Token::Ident("LIMIT".into()),
+                Token::StrLit(" = ".into()),
+                Token::IntLit(100),
+            ]
+        );
+
+        // 4) 两边纯数值 IntLit(1) + IntLit(2) → 仍是算术加法
+        let expr = MacroExpr::Binary {
+            left: Box::new(MacroExpr::IntLit(1)),
+            op: BinaryOp::Plus,
+            right: Box::new(MacroExpr::IntLit(2)),
+        };
+        let tok = interp.eval_expr(&expr).unwrap();
+        assert_eq!(tok.tokens, vec![Token::IntLit(3)]);
+    }
 }
+

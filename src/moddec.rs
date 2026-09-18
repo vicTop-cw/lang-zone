@@ -310,12 +310,13 @@ fn build_registry() -> Vec<DecoratorSpec> {
         },
     ));
 
-    // ── ③ 普通装饰器（13 个既有；独占一行；axes 为空）──
+    // ── ③ 普通装饰器（含 @cache 记忆化，与 @memoize 同义）──
     for name in [
         "export",
         "extern",
         "embed",
         "memoize",
+        "cache",
         "parallel",
         "simd",
         "tail_call",
@@ -462,11 +463,11 @@ mod tests {
             .filter(|s| s.class == DecoratorClass::Normal)
             .count();
         let fusions = all.iter().filter(|s| s.fusion).count();
-        // 11 基础 + 17 融合 = 28 修饰符装饰器；14 普通；共 42。
+        // 11 基础 + 17 融合 = 28 修饰符装饰器；15 普通（含 @cache）；共 43。
         assert_eq!(modifiers, 28, "修饰符装饰器应为 28 个");
-        assert_eq!(normals, 14, "普通装饰器应为 14 个");
+        assert_eq!(normals, 15, "普通装饰器应为 15 个");
         assert_eq!(fusions, 17, "融合型应为 17 个");
-        assert_eq!(all.len(), 42, "内置封闭集应为 42 个");
+        assert_eq!(all.len(), 43, "内置封闭集应为 43 个");
     }
 
     #[test]

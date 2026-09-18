@@ -922,7 +922,10 @@ pub enum ExprKind {
 #[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub enum LitKind {
     Int(i64),
+    Int128(i128),
+    BigInt(String),
     F64(f64),
+    Complex(f64, f64),
     Str(String),
     /// f-string 字面量（保留原始内容，含 {expr} 插值标记）
     FStr(String),

@@ -7,7 +7,10 @@ use crate::types::Type;
 #[derive(Debug, Clone)]
 pub enum Expr {
     IntLit(i64),
+    Int128Lit(i128),
+    BigIntLit(String),
     FloatLit(f64),
+    ComplexLit(f64, f64),
     StrLit(String),
     FStrLit(String),
     RawStrLit(String),

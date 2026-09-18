@@ -1,27 +1,27 @@
 // find_bug/core/compose.lz — 函数组合、管道操作符
 
 // compose(f, g)(x) = f(g(x))，右到左组合
-def compose(f: fn(b) -> c, g: fn(a) -> b) -> fn(a) -> c =
+def compose<a, b, c>(f: fn(b) -> c, g: fn(a) -> b) -> fn(a) -> c =
   |x| f(g(x))
 
 // pipe(x, f) = f(x)，值导向管道
-def pipe(x: a, f: fn(a) -> b) -> b =
+def pipe<a, b>(x: a, f: fn(a) -> b) -> b =
   f(x)
 
 // pipe2(x, f, g) = g(f(x))
-def pipe2(x: a, f: fn(a) -> b, g: fn(b) -> c) -> c =
+def pipe2<a, b, c>(x: a, f: fn(a) -> b, g: fn(b) -> c) -> c =
   g(f(x))
 
 // pipe3(x, f, g, h) = h(g(f(x)))
-def pipe3(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d) -> d =
+def pipe3<a, b, c, d>(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d) -> d =
   h(g(f(x)))
 
 // pipe4 — 四步管道
-def pipe4(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d, i: fn(d) -> e) -> e =
+def pipe4<a, b, c, d, e>(x: a, f: fn(a) -> b, g: fn(b) -> c, h: fn(c) -> d, i: fn(d) -> e) -> e =
   i(h(g(f(x))))
 
 // pipe_many(xs, funcs) — 通用多步管道
-def pipe_many(x: a, funcs: List<fn(a) -> a>) -> a =
+def pipe_many<a>(x: a, funcs: List<fn(a) -> a>) -> a =
   acc = x
   for f in funcs:
     acc = f(acc)
