@@ -41,18 +41,38 @@ fn lex_numbers_and_strings() {
 }
 
 #[test]
-fn lex_rejects_invalid_int_overflow() {
-    let toks = lex("99999999999999999999999999999");
-    // 溢出整数被 lexer 拒绝（LexError 进入 token 流），不得成为合法数值 token
+fn lex_promotes_int_overflow_to_wider_types() {
+    // 十进制整数溢出按当前设计提升更宽类型（lexer read_number 注释：
+    // 「超出 i128 范围的值尝试解析为 BigInt（LZ 支持 BigInt 基础类型）」），
+    // 不产生 LexError；LexError 仅用于进制字面量（hex/oct/bin）溢出。
+    // 旧断言「i64 溢出 → LexError」已过时（i128/BigInt 回退引入前）。
+    let kinds = |src: &str| -> Vec<String> {
+        lex(src)
+            .iter()
+            .map(|t| format!("{:?}", t))
+            .collect()
+    };
+    // 29 位（10^29-1）：超出 i64、在 i128 内 → Int128Lit
+    let toks = kinds("99999999999999999999999999999");
     assert!(
-        toks.iter().any(|t| format!("{:?}", t).contains("LexError")),
-        "溢出整数应产生 LexError: {toks:?}"
+        toks.iter().any(|k| k.starts_with("Int128Lit(")),
+        "i64 溢出但在 i128 范围内的整数应为 Int128Lit: {toks:?}"
     );
     assert!(
-        !toks
-            .iter()
-            .any(|t| format!("{:?}", t).starts_with("IntLit(")),
-        "溢出整数不应成为合法 IntLit token: {toks:?}"
+        !toks.iter().any(|k| k.starts_with("IntLit(")),
+        "i64 溢出整数不应成为 i64 IntLit token: {toks:?}"
+    );
+    // 50 位：超出 i128 → BigIntLit
+    let toks = kinds("99999999999999999999999999999999999999999999999999");
+    assert!(
+        toks.iter().any(|k| k.starts_with("BigIntLit(")),
+        "超出 i128 的整数应为 BigIntLit: {toks:?}"
+    );
+    // 进制字面量溢出仍拒绝（20 个 F > u64）
+    let toks = kinds("0xFFFFFFFFFFFFFFFFFF");
+    assert!(
+        toks.iter().any(|k| k.contains("LexError")),
+        "十六进制溢出应产生 LexError: {toks:?}"
     );
 }
 

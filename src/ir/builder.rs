@@ -11718,6 +11718,25 @@ fn ex_infer(e: &AstExpr, work: &TypeCtx, env: &HashMap<String, IrType>) -> IrTyp
     infer_expr_type(e, &tmp)
 }
 
+/// 字符串单字符索引表达式（非切片）？
+/// codegen 对 `s[i]` 按上下文多态生成：字符串上下文 → String，数值上下文 →
+/// char 码点 i64（src/ir/codegen/mod.rs `s[i]` 分支，注释点名 comptime
+/// simple_hash 场景；FIND_BUG.md G3 已固化 `"你好世界"[1]`→22909）。
+/// 因此绑定为该类表达式的变量类型「无法定论」，在 ex 检查环境登记为 Any，
+/// 避免对 `let c = s[i]; h = h * 31 + c` 误报 str_plus_int
+/// （DEMO/09_macros/comptime_external_lib.lz，ir_demo_snapshots 回归）。
+fn ex_is_str_char_index(e: &AstExpr, work: &TypeCtx, env: &HashMap<String, IrType>) -> bool {
+    if let AstExpr::Index { receiver, index } = e {
+        if matches!(index.as_ref(), AstExpr::Range { .. }) {
+            return false; // 切片是真字符串（s[i..j] → Str），不多态
+        }
+        let rt = ex_infer(receiver, work, env);
+        return matches!(rt, IrType::Str)
+            || matches!(rt, IrType::Named { path, .. } if path == "str" || path == "String");
+    }
+    false
+}
+
 /// 无法定论（禁止据其报错）的类型
 fn ex_type_queer(t: &IrType) -> bool {
     matches!(
@@ -12227,12 +12246,22 @@ fn ex_check_stmts(
             }
             AstStmt::Let { name, value, .. } => {
                 ex_check_expr(value, work, env, gens, ret, hinted, w);
-                let vt = ex_infer(value, work, env);
+                // 绑定自字符串单字符索引的变量：codegen 按上下文多态生成
+                // （String 或 i64 码点），类型无法定论 → 登记 Any 防误报
+                let vt = if ex_is_str_char_index(value, work, env) {
+                    IrType::Any
+                } else {
+                    ex_infer(value, work, env)
+                };
                 env.insert(name.clone(), vt);
             }
             AstStmt::Const { name, value, .. } => {
                 ex_check_expr(value, work, env, gens, ret, hinted, w);
-                let vt = ex_infer(value, work, env);
+                let vt = if ex_is_str_char_index(value, work, env) {
+                    IrType::Any
+                } else {
+                    ex_infer(value, work, env)
+                };
                 env.insert(name.clone(), vt);
             }
             AstStmt::LetTuple { names, value, .. } => {
@@ -12407,7 +12436,11 @@ fn ex_check_stmts(
                 ex_check_expr(target, work, env, gens, ret, hinted, w);
                 ex_check_expr(value, work, env, gens, ret, hinted, w);
                 if let AstExpr::Ident(n) = target {
-                    let vt = ex_infer(value, work, env);
+                    let vt = if ex_is_str_char_index(value, work, env) {
+                        IrType::Any
+                    } else {
+                        ex_infer(value, work, env)
+                    };
                     env.insert(n.clone(), vt);
                 }
             }

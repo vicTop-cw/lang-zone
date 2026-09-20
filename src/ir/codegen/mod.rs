@@ -12639,9 +12639,20 @@ impl CodeGen {
                 }
             }
             ExprKind::BinOp { op, lhs, rhs } => {
-                // Eq/Neq 的字符串对齐：任一侧为 &String/&str 引用（str 参数）时，
-                // 两侧统一 to_string() 做值比较（&String == String 未实现 → E0277）
-                if matches!(op, BinOpKind::Eq | BinOpKind::Neq) {
+                // 字符串比较对齐：任一侧为 &String/&str 引用（str 参数）时，
+                // 两侧统一 to_string() 做值比较（&String == String 未实现 → E0277）。
+                // 覆盖 Eq/Neq 及顺序比较 Lt/Gt/Le/Ge：str 参数与字面量比较
+                // `c >= "0"` 生成 &str >= String（E0308，自举 lz_parser.lz
+                // is_digit/is_alpha 复现）
+                if matches!(
+                    op,
+                    BinOpKind::Eq
+                        | BinOpKind::Neq
+                        | BinOpKind::Lt
+                        | BinOpKind::Gt
+                        | BinOpKind::Le
+                        | BinOpKind::Ge
+                ) {
                     let is_str_ty = |t: &IrType| match t {
                         IrType::Str => true,
                         IrType::Ref(inner) | IrType::MutRef(inner) => {
@@ -12650,7 +12661,14 @@ impl CodeGen {
                         _ => false,
                     };
                     if is_str_ty(&lhs.ty) && is_str_ty(&rhs.ty) {
-                        let o = if matches!(op, BinOpKind::Eq) { "==" } else { "!=" };
+                        let o = match op {
+                            BinOpKind::Eq => "==",
+                            BinOpKind::Neq => "!=",
+                            BinOpKind::Lt => "<",
+                            BinOpKind::Gt => ">",
+                            BinOpKind::Le => "<=",
+                            _ => ">=",
+                        };
                         let lhs_s = self.gen_expr(lhs);
                         let rhs_s = self.gen_expr(rhs);
                         return format!(
@@ -12764,6 +12782,19 @@ impl CodeGen {
                             &lhs.kind,
                             ExprKind::Var(name)
                                 if self.top_level_static_names.contains(name.as_str())
+                        )
+                        // &str 引用参数（str 引用语义：builder 标 is_ref 但 ty 保持
+                        // Str，参数名登记于 str_typed_vars，生成 &str）作 lhs：
+                        // `&str + &str` 非法（E0369，自举 lz_parser.lz
+                        // `let key: str = c1 + c2` 复现），同样需先转 String
+                        || matches!(
+                            &lhs.kind,
+                            ExprKind::Var(name) if self.str_typed_vars.contains(name)
+                        )
+                        || matches!(
+                            &lhs.ty,
+                            IrType::Ref(inner) | IrType::MutRef(inner)
+                                if matches!(inner.as_ref(), IrType::Str)
                         );
                     let lhs_base = if lhs_is_ref_str {
                         format!("{}.to_string()", lhs_s)
