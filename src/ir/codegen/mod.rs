@@ -291,6 +291,8 @@ pub struct CodeGen {
     module_uses_bigint: bool,
     /// 本模块是否使用 Complex 类型（仅此时注入 use num_complex::Complex64;）
     module_uses_complex: bool,
+    /// 本模块是否使用 Dict/HashMap 类型（仅此时注入 use std::collections::BTreeMap;）
+    module_uses_dict: bool,
     /// I3：L2 中继——extern 自动登记目标 registry。注入后 codegen 处理
     /// #[extern(lang)] 函数时自动 register_symbol 并联动台账（REGISTER）。
     /// None = 不登记（默认，保持既有生成行为不变）。
@@ -873,6 +875,122 @@ fn is_complex_ty(ty: &IrType) -> bool {
     }
 }
 
+/// 检查类型是否为 Dict/HashMap（Named "Dict"/"HashMap"）
+fn is_dict_ty(ty: &IrType) -> bool {
+    matches!(ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap")
+}
+
+/// 递归检查语句块是否使用 Dict（类型标注或 Dict 字面量）
+fn block_uses_dict(block: &Block) -> bool {
+    block.stmts.iter().any(stmt_uses_dict)
+}
+
+fn stmt_uses_dict(s: &Stmt) -> bool {
+    match s {
+        Stmt::Let { ty, value, .. } => is_dict_ty(ty) || expr_uses_dict(value),
+        Stmt::Assign { target, value } => expr_uses_dict(target) || expr_uses_dict(value),
+        Stmt::Return { value } => value.as_ref().map(expr_uses_dict).unwrap_or(false),
+        Stmt::ExprStmt { expr } => expr_uses_dict(expr),
+        Stmt::If { cond, then_branch, else_branch } => {
+            expr_uses_dict(cond)
+                || block_uses_dict(then_branch)
+                || else_branch.as_ref().map(block_uses_dict).unwrap_or(false)
+        }
+        Stmt::For { iter, body, else_body, .. } => {
+            expr_uses_dict(iter)
+                || block_uses_dict(body)
+                || else_body.as_ref().map(block_uses_dict).unwrap_or(false)
+        }
+        Stmt::While { cond, body, else_body, .. } => {
+            expr_uses_dict(cond)
+                || block_uses_dict(body)
+                || else_body.as_ref().map(block_uses_dict).unwrap_or(false)
+        }
+        Stmt::WhileLet { expr, body, .. } => expr_uses_dict(expr) || block_uses_dict(body),
+        Stmt::Match { scrutinee, arms } => {
+            expr_uses_dict(scrutinee)
+                || arms.iter().any(|a| {
+                    a.guard.as_ref().map(expr_uses_dict).unwrap_or(false)
+                        || block_uses_dict(&a.body)
+                })
+        }
+        Stmt::Raise { value } => expr_uses_dict(value),
+        Stmt::Assert { cond, message } => {
+            expr_uses_dict(cond) || message.as_ref().map(expr_uses_dict).unwrap_or(false)
+        }
+        Stmt::Yield { value } => expr_uses_dict(value),
+        Stmt::YieldFrom { iter } => expr_uses_dict(iter),
+        Stmt::Break | Stmt::Continue | Stmt::Pass => false,
+        Stmt::BreakLabel { value, .. } => value.as_ref().map(expr_uses_dict).unwrap_or(false),
+        Stmt::BlockLabel { body, .. } => block_uses_dict(body),
+        Stmt::CheckerBlock { body, .. } => block_uses_dict(body),
+        Stmt::Defer { body } => block_uses_dict(body),
+        Stmt::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
+            block_uses_dict(body)
+                || catches.iter().any(|(_, b)| block_uses_dict(b))
+                || else_body.as_ref().map(block_uses_dict).unwrap_or(false)
+                || finally_body.as_ref().map(block_uses_dict).unwrap_or(false)
+        }
+        Stmt::Block { stmts } => stmts.iter().any(stmt_uses_dict),
+        Stmt::TypeAlias { .. } => false,
+    }
+}
+
+fn expr_uses_dict(e: &Expr) -> bool {
+    is_dict_ty(&e.ty)
+        || match &e.kind {
+            ExprKind::Dict(_) => true,
+            ExprKind::Lit(_) | ExprKind::Var(_) | ExprKind::Default => false,
+            ExprKind::BinOp { lhs, rhs, .. } => expr_uses_dict(lhs) || expr_uses_dict(rhs),
+            ExprKind::UnOp { operand, .. } => expr_uses_dict(operand),
+            ExprKind::Call { callee, args, .. } => {
+                expr_uses_dict(callee) || args.iter().any(expr_uses_dict)
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                expr_uses_dict(receiver) || args.iter().any(expr_uses_dict)
+            }
+            ExprKind::FieldAccess { base, .. } => expr_uses_dict(base),
+            ExprKind::IndexGet { base, key } => expr_uses_dict(base) || expr_uses_dict(key),
+            ExprKind::IndexSet { base, key, value } => {
+                expr_uses_dict(base) || expr_uses_dict(key) || expr_uses_dict(value)
+            }
+            ExprKind::AssignExpr { target, value } => expr_uses_dict(target) || expr_uses_dict(value),
+            ExprKind::IfExpr { cond, then, els } => {
+                expr_uses_dict(cond) || expr_uses_dict(then) || expr_uses_dict(els)
+            }
+            ExprKind::Lambda { body, .. } => expr_uses_dict(body),
+            ExprKind::StructCtor { fields, .. } => fields.iter().any(|(_, f)| expr_uses_dict(f)),
+            ExprKind::EnumCtor { args, .. } => args.iter().any(expr_uses_dict),
+            ExprKind::GenExpr { yield_of } => expr_uses_dict(yield_of),
+            ExprKind::GenBuild { callee, block } => {
+                callee.as_ref().map(|c| expr_uses_dict(c)).unwrap_or(false) || block_uses_dict(block)
+            }
+            ExprKind::Cast { expr, .. } => expr_uses_dict(expr),
+            ExprKind::MagicCall { args, .. } => args.iter().any(expr_uses_dict),
+            ExprKind::BlockExpr { block } => block_uses_dict(block),
+            ExprKind::TupleLit(v) | ExprKind::Tuple(v) | ExprKind::ListLit(v) | ExprKind::List(v) => {
+                v.iter().any(expr_uses_dict)
+            }
+            ExprKind::Spread(x) => expr_uses_dict(x),
+            ExprKind::Range { start, end, .. } => {
+                start.as_ref().map(|s| expr_uses_dict(s)).unwrap_or(false) || expr_uses_dict(end)
+            }
+            ExprKind::Pipe { receiver, callee, args } => {
+                expr_uses_dict(receiver)
+                    || expr_uses_dict(callee)
+                    || args.iter().any(expr_uses_dict)
+            }
+            ExprKind::Paren(x) => expr_uses_dict(x),
+            ExprKind::ImplicitConvert { source, .. } => expr_uses_dict(source),
+
+        }
+}
+
 impl CodeGen {
     pub fn new() -> Self {
         let mut type_map = HashMap::new();
@@ -985,6 +1103,7 @@ impl CodeGen {
             module_uses_ext: false,
             module_uses_bigint: false,
             module_uses_complex: false,
+            module_uses_dict: false,
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
             unbound_fstring_vars: std::collections::HashSet::new(),
@@ -1247,15 +1366,16 @@ impl CodeGen {
                 // struct 内定义方法的 ref/mut ref 参数标记登记 fn_ref_params
                 // （vector.lz `__add__(ref self, ref other)` 的 other 调用点需自动 &，
                 //   否则 (b).clone() 传 owned 报 E0308 expected &VectorInt）
-                // str 参数也登记为 ref（自动 &str），避免 _str_hash(s: str) 等方法的 E0382 移动语义错误
+                // str 参数不登记为 ref：参数类型映射已改为 String（按值），
+                // 调用点由 9556-9648 行的值语义逻辑自动 .clone()，避免 &String vs String E0308
                 for m in &s.methods {
-                    let has_ref_or_str = m.params.iter().any(|p| p.is_ref || matches!(&p.ty, IrType::Str));
+                    let has_ref_or_str = m.params.iter().any(|p| p.is_ref);
                     if has_ref_or_str {
                         self.fn_ref_params.insert(
                             m.name.clone(),
                             m.params.iter()
                                 .map(|p| {
-                                    let is_ref = p.is_ref || matches!(&p.ty, IrType::Str);
+                                    let is_ref = p.is_ref;
                                     (is_ref, p.is_mut)
                                 })
                                 .collect(),
@@ -1295,14 +1415,15 @@ impl CodeGen {
                         // 收集 impl 方法的 ref/mut ref 参数标记（DictExt::get 的
                         // key: ref K 调用点自动 &，否则 d.get("a") 报 E0308
                         // expected &K, found String）
-                        // str 参数也登记为 ref（自动 &str），避免 E0382 移动语义错误
-                        let has_ref_or_str = m.params.iter().any(|p| p.is_ref || matches!(&p.ty, IrType::Str));
+                        // str 参数不登记为 ref：参数类型映射已改为 String（按值），
+                        // 调用点由值语义逻辑自动 .clone()，避免 &String vs String E0308
+                        let has_ref_or_str = m.params.iter().any(|p| p.is_ref);
                         if has_ref_or_str {
                             self.fn_ref_params.insert(
                                 m.name.clone(),
                                 m.params.iter()
                                     .map(|p| {
-                                        let is_ref = p.is_ref || matches!(&p.ty, IrType::Str);
+                                        let is_ref = p.is_ref;
                                         (is_ref, p.is_mut)
                                     })
                                     .collect(),
@@ -1318,13 +1439,14 @@ impl CodeGen {
                         .insert(f.name.clone(), (f.params.len(), default_count));
                 }
                 // 收集 ref/mut ref 参数标记（函数名 → 每参数 (is_ref, is_mut)）
-                // str 参数也登记为 ref（自动 &str），避免 E0382 移动语义错误
-                if f.params.iter().any(|p| p.is_ref || matches!(&p.ty, IrType::Str)) {
+                // str 参数不登记为 ref：参数类型映射已改为 String（按值），
+                // 调用点由值语义逻辑自动 .clone()，避免 &String vs String E0308
+                if f.params.iter().any(|p| p.is_ref) {
                     self.fn_ref_params.insert(
                         f.name.clone(),
                         f.params.iter()
                             .map(|p| {
-                                let is_ref = p.is_ref || matches!(&p.ty, IrType::Str);
+                                let is_ref = p.is_ref;
                                 (is_ref, p.is_mut)
                             })
                             .collect(),
@@ -1592,6 +1714,16 @@ impl CodeGen {
             }
             Item::Const(c) => is_complex_ty(&c.ty),
             Item::StructDef(s) => s.fields.iter().any(|f| is_complex_ty(&f.ty)),
+            _ => false,
+        });
+        self.module_uses_dict = module.items.iter().any(|item| match item {
+            Item::FnDef(f) => {
+                is_dict_ty(&f.ret_ty)
+                    || f.params.iter().any(|p| is_dict_ty(&p.ty))
+                    || block_uses_dict(&f.body)
+            }
+            Item::Const(c) => is_dict_ty(&c.ty) || expr_uses_dict(&c.value),
+            Item::StructDef(s) => s.fields.iter().any(|f| is_dict_ty(&f.ty)),
             _ => false,
         });
         // 比较约束传播：预扫描全部 FnDef 体，计算各函数「参与比较运算」的泛型集合
@@ -1993,8 +2125,10 @@ impl CodeGen {
         } else if wants_hashset {
             self.emit_line("use std::collections::HashSet;");
         }
-        // Dict → BTreeMap（有序，保证 JSON 序列化字段顺序稳定）
-        self.emit_line("use std::collections::BTreeMap;");
+        // Dict → BTreeMap（有序，保证 JSON 序列化字段顺序稳定）——仅当模块用到 Dict/HashMap 时注入
+        if self.module_uses_dict {
+            self.emit_line("use std::collections::BTreeMap;");
+        }
         // BigInt 基础类型（任意精度整数）——仅在模块实际使用时注入
         if self.module_uses_bigint {
             self.emit_line("use num_bigint::BigInt;");
@@ -3251,9 +3385,9 @@ impl CodeGen {
                     } else {
                         let ty_str = self.rust_type(&p.ty).to_string();
 
-                        // str 参数类型映射为 &str，避免 E0382 移动语义错误
-                        // p.is_ref 为 true 时也生成 &str（builder 标记 is_ref 但保持 ty 为 Str）
-                        if (ty_str == "String" && !p.is_ref) || (p.is_ref && matches!(&p.ty, IrType::Str)) {
+                        // 只有显式 is_ref 的 Str 参数才生成 &str；
+                        // 普通 String 参数保持 String，避免调用点传 String 实参时 E0308
+                        if p.is_ref && matches!(&p.ty, IrType::Str) {
                             "&str".into()
                         } else {
                             ty_str
@@ -4180,7 +4314,7 @@ impl CodeGen {
                 derives_all.push(u.clone());
             }
         }
-        let derives_partial_eq = derives_all.iter().any(|d| d == "PartialEq" || d == "Eq");
+        let _derives_partial_eq = derives_all.iter().any(|d| d == "PartialEq" || d == "Eq");
         self.emit_line(&format!("#[derive({})]", derives_all.join(", ")));
         self.emit_line(&format!("pub enum {}{} {{", e.name, generics));
         self.indent += 1;
@@ -4258,47 +4392,7 @@ impl CodeGen {
             self.emit_line("}");
         }
 
-        // 为派生 PartialEq 的枚举自动生成 __eq__ 方法（兼容 assert 表达式）
-        // 仅当枚举未显式定义 __eq__ 时生成
-        let has_eq_method = e.methods.iter().any(|m| m.name == "__eq__");
-
-        if !has_eq_method && derives_partial_eq {
-            self.buf.push('\n');
-            let eq_generics = if e.generics.is_empty() {
-                String::new()
-            } else {
-                let params: Vec<String> = e
-                    .generics
-                    .iter()
-                    .map(|g| {
-                        if g.bounds.is_empty() {
-                            format!("{}: Clone + std::fmt::Debug + PartialEq", g.name)
-                        } else {
-                            let bounds: Vec<String> =
-                                g.bounds.iter().map(|b| self.rust_type(b)).collect();
-                            format!(
-                                "{}: Clone + std::fmt::Debug + {}",
-                                g.name,
-                                bounds.join(" + ")
-                            )
-                        }
-                    })
-                    .collect();
-                format!("<{}>", params.join(", "))
-            };
-            self.emit_line(&format!("impl{} {}{} {{", eq_generics, e.name, generics));
-            self.indent += 1;
-            self.emit_line(&format!(
-                "fn __eq__(&self, other: {}{}) -> bool {{",
-                e.name, generics
-            ));
-            self.indent += 1;
-            self.emit_line("self == &other");
-            self.indent -= 1;
-            self.emit_line("}");
-            self.indent -= 1;
-            self.emit_line("}");
-        }
+        // 枚举 __eq__ 自动生成已移除——与 lz codegen 对齐（lz codegen 不自动生成枚举 __eq__）
     }
 
     fn gen_trait_def(&mut self, t: &TraitDef) {
@@ -12770,7 +12864,9 @@ impl CodeGen {
                 }
                 // String + 拼接: 右侧需借用 & 以匹配 Rust Add<&str>
                 // 但如果 rhs 是 variadic 参数（类型已是 &[T]），不应再加 &
-                let str_concat = matches!(&rhs.ty, IrType::Str) || matches!(&lhs.ty, IrType::Str);
+                let str_concat = matches!(&rhs.ty, IrType::Str) || matches!(&lhs.ty, IrType::Str)
+                    || matches!(&rhs.ty, IrType::Named { path, .. } if path == "String" || path == "str")
+                    || matches!(&lhs.ty, IrType::Named { path, .. } if path == "String" || path == "str");
                 if *op == BinOpKind::Add && str_concat {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
@@ -12813,12 +12909,16 @@ impl CodeGen {
                     }
                     // lhs 非字符串类型（int + str / float + str 等）：
                     // Rust i64 未实现 Add<&str>，需整体用 format! 拼接
-                    if !matches!(&lhs.ty, IrType::Str) {
+                    if !matches!(&lhs.ty, IrType::Str)
+                        && !matches!(&lhs.ty, IrType::Named { path, .. } if path == "String" || path == "str")
+                    {
                         return format!("format!(\"{{}}{{}}\", {}, {})", lhs_base, rhs_s);
                     }
                     // rhs 非字符串类型（str + int / str + float / str + bool 等）：
                     // Rust String 未实现 Add<i64> 等，需将 rhs 转为 &str 再拼接
-                    if !matches!(&rhs.ty, IrType::Str) {
+                    if !matches!(&rhs.ty, IrType::Str)
+                        && !matches!(&rhs.ty, IrType::Named { path, .. } if path == "String" || path == "str")
+                    {
                         return format!("{} + format!(\"{{}}\", {}).as_str()", lhs_base, rhs_s);
                     }
                     // String + String → String + &str（Rust Add<&str>）

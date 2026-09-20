@@ -11767,6 +11767,8 @@ fn ex_type_agrees(a: &IrType, b: &IrType) -> bool {
         | (IrType::Str, IrType::Str)
         | (IrType::Bool, IrType::Bool)
         | (IrType::Unit, IrType::Unit) => true,
+        (IrType::Str, IrType::Named { path, .. }) | (IrType::Named { path, .. }, IrType::Str)
+            if path == "String" || path == "str" => true,
         (IrType::Named { path: ap, args: aa }, IrType::Named { path: bp, args: ba }) => {
             if ap != bp {
                 return false;

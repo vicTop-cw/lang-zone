@@ -543,7 +543,7 @@ def gen_expr(e: Expr) -> String =
     match e:
         case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64".to_string()
         case Expr.LitF64(v: n, ty: t) => fmt_f64(n).to_string()
-        case Expr.LitStr(s: s, ty: t) => "\"".to_string() + esc_rust(s) + "\"".to_string()
+        case Expr.LitStr(s: s, ty: t) => "\"".to_string() + esc_rust(s) + "\".to_string()".to_string()
         case Expr.LitFStr(s: s, ty: t) => gen_fstring(s).to_string()
         case Expr.LitBool(b: b, ty: t) => b.to_string()
         case Expr.LitUnit(ty: t) => "()".to_string()
@@ -1024,18 +1024,18 @@ def gen_type_alias(name: str, ty: IrType) -> String =
 
 // D2 缺口补齐：Test 生成
 def gen_test_def(name: str, body: List<Stmt>) -> String =
-    "#[test]\nfn ".to_string() + name.to_string() + "() {\n".to_string() + gen_body(body, false, auto_mut_names(body)) + "\n}".to_string()
+    "#[test]\nfn ".to_string() + name.to_string() + "() {\n".to_string() + gen_body(body, false, auto_mut_names(body)) + "}".to_string()
 
 def gen_item(i: Item) -> String =
     match i:
         case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) =>
             let is_main = (n == "main")
             let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
-            "pub fn ".to_string() + n.to_string() + generic_sig(gs) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b)) + "\n}".to_string()
+            "pub fn ".to_string() + n.to_string() + generic_sig(gs) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b)) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
-            "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "\n}".to_string()
+            "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
         case Item.EnumDef(name: n, generics: gs, variants: vs) =>
-            "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs) + "\n}".to_string()
+            "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs) + "}".to_string()
         case Item.Const(name: n, ty: t, value: v) =>
             gen_const_item(n, t, v)
         case Item.TraitDef(name: n, supertraits: sts, methods: ms) =>
@@ -1237,9 +1237,9 @@ def gen_const_item(n: str, t: IrType, v: Expr) -> String =
         case IrType.Str =>
             match v:
                 case Expr.LitStr(s: sv, ty: tv) =>
-                    "const ".to_string() + n.to_string() + ": &str = \"".to_string() + esc_rust(sv) + "\";\n".to_string()
-                case _ => "const ".to_string() + n.to_string() + ": String = ".to_string() + gen_expr(v) + ";\n".to_string()
-        case _ => "const ".to_string() + n.to_string() + ": ".to_string() + rust_type(t) + " = ".to_string() + gen_expr(v) + ";\n".to_string()
+                    "const ".to_string() + n.to_string() + ": &str = \"".to_string() + esc_rust(sv) + "\";".to_string()
+                case _ => "const ".to_string() + n.to_string() + ": String = ".to_string() + gen_expr(v) + ";".to_string()
+        case _ => "const ".to_string() + n.to_string() + ": ".to_string() + rust_type(t) + " = ".to_string() + gen_expr(v) + ";".to_string()
 
 def is_magic_name(n: str) -> bool =
     n == "__name__" || n == "__file__" || n == "__package__" || n == "__path__" || n == "__doc__" || n == "__is_macro__"
