@@ -1959,6 +1959,45 @@ pub fn gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> Stri
                 // STMT:Let
                 let last_idx: i64 = (cs.len() as i64) - 1i64;
                 // STMT:Let
+                let mut skipped_comments = String::new();
+                // STMT:For
+                for ci in (0i64..last_idx).into_iter() {
+                    // STMT:Let
+                    let pre_catch = cs[((ci) as usize)].clone();
+                    // STMT:Let
+                    let pre_pat = pre_catch.0;
+                    // STMT:Let
+                    let cmt = {
+                // STMT:Other
+                match pre_pat.clone() {
+                    MaybePattern::YesPat { value: pp } => {
+                        // STMT:Other
+                        match pp.clone() {
+                            Pattern::Ident { name: pn } => {
+                                // STMT:Expr
+                                LzAdd::__add__("// catch ".to_string().to_string(), pn) + &" skipped\n".to_string().to_string()[..]
+                            }
+                            Pattern::Enum { enum_name: en, variant: vv, args: _ } => {
+                                let _ = *_;
+                                // STMT:Expr
+                                LzAdd::__add__(LzAdd::__add__("// catch ".to_string().to_string(), en) + &"::".to_string().to_string()[..], vv) + &" skipped\n".to_string().to_string()[..]
+                            }
+                            _ => {
+                                // STMT:Expr
+                                "// catch _ skipped\n".to_string().to_string()
+                            }
+                        }
+                    }
+                    _ => {
+                        // STMT:Expr
+                        "// catch _ skipped\n".to_string().to_string()
+                    }
+                }
+                    };
+                    // STMT:Let
+                    skipped_comments = skipped_comments + &cmt[..];
+                }
+                // STMT:Let
                 let last_catch = cs[((last_idx) as usize)].clone();
                 // STMT:Let
                 let pat = last_catch.0;
@@ -2026,7 +2065,7 @@ pub fn gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> Stri
                 }
                     };
                 // STMT:Expr
-                LzAdd::__add__(LzAdd::__add__(LzAdd::__add__("match __pr { Ok(_v) => ".to_string().to_string(), ok_arm) + &", Err(_p) => { ".to_string().to_string()[..], binds), catch_body) + &" } }".to_string().to_string()[..]
+                LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(LzAdd::__add__(skipped_comments, "match __pr { Ok(_v) => ".to_string().to_string()), ok_arm) + &", Err(_p) => { ".to_string().to_string()[..], binds), catch_body) + &" } }".to_string().to_string()[..]
             };
             // STMT:Let
             let try_val_stmt = "let __try_val = ".to_string().to_string() + &match_expr[..] + &"; ".to_string().to_string()[..];

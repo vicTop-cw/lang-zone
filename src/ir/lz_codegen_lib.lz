@@ -790,6 +790,22 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
                         "__pr.unwrap_or_else(|_p| ())".to_string()
             else:
                 let last_idx = cs.len() - 1
+                let mut skipped_comments: String = String::new()
+                for ci in 0..last_idx:
+                    let pre_catch = cs[ci].clone()
+                    let pre_pat = pre_catch.0
+                    let cmt: String = match pre_pat:
+                        case MaybePattern.YesPat(value: pp) =>
+                            match pp:
+                                case Pattern.Ident(name: pn) =>
+                                    "// catch ".to_string() + pn + " skipped\n".to_string()
+                                case Pattern.Enum(enum_name: en, variant: vv, args: _) =>
+                                    "// catch ".to_string() + en + "::".to_string() + vv + " skipped\n".to_string()
+                                case _ =>
+                                    "// catch _ skipped\n".to_string()
+                        case _ =>
+                            "// catch _ skipped\n".to_string()
+                    skipped_comments = skipped_comments + cmt
                 let last_catch = cs[last_idx].clone()
                 let pat = last_catch.0
                 let catch_blk = last_catch.1
@@ -825,7 +841,7 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
                         "{ _v; ".to_string() + gen_block(eb_blk2) + " }".to_string()
                     case _ =>
                         "_v".to_string()
-                "match __pr { Ok(_v) => ".to_string() + ok_arm + ", Err(_p) => { ".to_string() + binds + catch_body + " } }".to_string()
+                skipped_comments + "match __pr { Ok(_v) => ".to_string() + ok_arm + ", Err(_p) => { ".to_string() + binds + catch_body + " } }".to_string()
             let try_val_stmt = "let __try_val = ".to_string() + match_expr + "; ".to_string()
             let finally_part: String = match fb:
                 case MaybeBlock.YesBlock(value: fb_blk) =>
