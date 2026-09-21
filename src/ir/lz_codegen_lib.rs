@@ -1925,6 +1925,130 @@ pub fn gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> Stri
             // STMT:Expr
             "while let ".to_string().to_string() + &gen_pattern(p.clone())[..] + &" = ".to_string().to_string()[..] + &gen_expr(e.clone())[..] + &" ".to_string().to_string()[..] + &gen_block(b.clone())[..]
         }
+        Stmt::Defer { body: b } => {
+            // STMT:Expr
+            "{ /* defer */ ".to_string().to_string() + &gen_block(b.clone())[..] + &" }".to_string().to_string()[..]
+        }
+        Stmt::CheckerBlock { label: l, ps_name: p } => {
+            // STMT:Expr
+            "();  // checker block (defined at module level)".to_string().to_string()
+        }
+        Stmt::TryCatch { body: b, catches: cs, else_body: eb, finally_body: fb } => {
+            // STMT:Let
+            let try_body = gen_block(b.clone());
+            // STMT:Let
+            let pr_prefix = "{ let __pr = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {".to_string().to_string();
+            // STMT:Let
+            let pr_mid = " })); ".to_string().to_string();
+            // STMT:Let
+            let match_expr = if (cs.len() as i64) == 0i64 {
+                // STMT:Other
+                match eb.clone() {
+                    MaybeBlock::YesBlock { value: eb_blk } => {
+                        // STMT:Let
+                        let else_body_s = gen_block(eb_blk.clone());
+                        // STMT:Expr
+                        LzAdd::__add__("match __pr { Ok(_v) => { _v; ".to_string().to_string(), else_body_s) + &" }, Err(_p) => () }".to_string().to_string()[..]
+                    }
+                    _ => {
+                        // STMT:Expr
+                        "__pr.unwrap_or_else(|_p| ())".to_string().to_string()
+                    }
+                }
+            } else {
+                // STMT:Let
+                let last_idx: i64 = (cs.len() as i64) - 1i64;
+                // STMT:Let
+                let last_catch = cs[((last_idx) as usize)].clone();
+                // STMT:Let
+                let pat = last_catch.0;
+                // STMT:Let
+                let catch_blk = last_catch.1;
+                // STMT:Let
+                let catch_body = gen_block(catch_blk.clone());
+                // STMT:Let
+                let mut binds = String::new();
+                // STMT:Other
+                let _ = match pat.clone() {
+                    MaybePattern::YesPat { value: p2 } => {
+                        // STMT:Other
+                        match p2.clone() {
+                            Pattern::Ident { name: n } => {
+                                // STMT:Let
+                                let safe_n: String = if (n).to_string() == ("line".to_string()).to_string() || (n).to_string() == ("column".to_string()).to_string() || (n).to_string() == ("file".to_string()).to_string() { n.to_string() + &"_".to_string().to_string()[..] } else { n };
+                                // STMT:Let
+                                binds = "let ".to_string().to_string() + &safe_n[..] + &" = format!(\"{:?}\", _p); ".to_string().to_string()[..];
+                            }
+                            Pattern::Enum { enum_name: en, variant: v, args: a } => {
+                                let a = *a;
+                                // STMT:For
+                                for ai in (0i64..(a.len() as i64)).into_iter() {
+                                    // STMT:Let
+                                    let arg_p = a[((ai) as usize)].clone();
+                                    // STMT:Other
+                                    match arg_p.clone() {
+                                        Pattern::Ident { name: n2 } => {
+                                            // STMT:Let
+                                            let safe_n2 = if n2 == "line".to_string() || n2 == "column".to_string() || n2 == "file".to_string() { LzAdd::__add__(n2, "_".to_string().to_string()) } else { n2 };
+                                            // STMT:Let
+                                            binds = binds + &"let ".to_string().to_string()[..] + &safe_n2[..] + &" = format!(\"{:?}\", _p); ".to_string().to_string()[..];
+                                        }
+                                        _ => {
+                                            // STMT:Expr
+                                            ();
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {
+                                // STMT:Expr
+                                ()
+                            }
+                        }
+                    }
+                    _ => {
+                        // STMT:Expr
+                        ()
+                    }
+                };
+                // STMT:Let
+                let ok_arm = {
+                // STMT:Other
+                match eb.clone() {
+                    MaybeBlock::YesBlock { value: eb_blk2 } => {
+                        // STMT:Expr
+                        LzAdd::__add__("{ _v; ".to_string().to_string(), gen_block(eb_blk2.clone())) + &" }".to_string().to_string()[..]
+                    }
+                    _ => {
+                        // STMT:Expr
+                        "_v".to_string().to_string()
+                    }
+                }
+                    };
+                // STMT:Expr
+                LzAdd::__add__(LzAdd::__add__(LzAdd::__add__("match __pr { Ok(_v) => ".to_string().to_string(), ok_arm) + &", Err(_p) => { ".to_string().to_string()[..], binds), catch_body) + &" } }".to_string().to_string()[..]
+            };
+            // STMT:Let
+            let try_val_stmt = "let __try_val = ".to_string().to_string() + &match_expr[..] + &"; ".to_string().to_string()[..];
+            // STMT:Let
+            let finally_part = {
+// STMT:Other
+match fb.clone() {
+    MaybeBlock::YesBlock { value: fb_blk } => {
+        // STMT:Let
+        let fb_body = gen_block(fb_blk.clone());
+        // STMT:Expr
+        LzAdd::__add__("let __final_val = __try_val; ".to_string().to_string(), fb_body) + &"; __final_val".to_string().to_string()[..]
+    }
+    _ => {
+        // STMT:Expr
+        "__try_val".to_string().to_string()
+    }
+}
+    };
+            // STMT:Expr
+            pr_prefix + &try_body[..] + &pr_mid[..] + &try_val_stmt[..] + &finally_part[..] + &" }".to_string().to_string()[..]
+        }
         _ => {
             // STMT:Expr
             "// TODO stmt".to_string().to_string()
@@ -2513,6 +2637,14 @@ pub fn gen_item(i: Item) -> String {
         Item::Test { name: n, body: b } => {
             // STMT:Expr
             gen_test_def(n.clone(), b.clone())
+        }
+        Item::CheckerBlock { name: n, ps_name: p } => {
+            // STMT:Expr
+            "fn ".to_string().to_string() + &n.to_string()[..] + &"(ps: &mut __Params) { unimplemented!() }".to_string().to_string()[..]
+        }
+        Item::DuckDef { name: n, method_count: mc } => {
+            // STMT:Expr
+            LzAdd::__add__("pub trait ".to_string().to_string() + &n.to_string()[..] + &" { /* ".to_string().to_string()[..], mc.to_string()) + &" methods */ }".to_string().to_string()[..]
         }
         _ => {
             // STMT:Expr

@@ -773,6 +773,67 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
             "'".to_string() + l + ": ".to_string() + gen_block(b)
         case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) =>
             "while let ".to_string() + gen_pattern(p) + " = ".to_string() + gen_expr(e) + " ".to_string() + gen_block(b)
+        case Stmt.Defer(body: b) =>
+            "{ /* defer */ ".to_string() + gen_block(b) + " }".to_string()
+        case Stmt.CheckerBlock(label: l, ps_name: p) =>
+            "();  // checker block (defined at module level)".to_string()
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let try_body = gen_block(b)
+            let pr_prefix = "{ let __pr = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {".to_string()
+            let pr_mid = " })); ".to_string()
+            let match_expr: String = if cs.len() == 0:
+                match eb:
+                    case MaybeBlock.YesBlock(value: eb_blk) =>
+                        let else_body_s = gen_block(eb_blk)
+                        "match __pr { Ok(_v) => { _v; ".to_string() + else_body_s + " }, Err(_p) => () }".to_string()
+                    case _ =>
+                        "__pr.unwrap_or_else(|_p| ())".to_string()
+            else:
+                let last_idx = cs.len() - 1
+                let last_catch = cs[last_idx].clone()
+                let pat = last_catch.0
+                let catch_blk = last_catch.1
+                let catch_body = gen_block(catch_blk)
+                let mut binds: String = String::new()
+                match pat:
+                    case MaybePattern.YesPat(value: p2) =>
+                        match p2:
+                            case Pattern.Ident(name: n) =>
+                                let safe_n = if n == "line" || n == "column" || n == "file":
+                                    n + "_".to_string()
+                                else:
+                                    n
+                                binds = "let ".to_string() + safe_n + " = format!(\"{:?}\", _p); ".to_string()
+                            case Pattern.Enum(enum_name: en, variant: v, args: a) =>
+                                for ai in 0..a.len():
+                                    let arg_p = a[ai].clone()
+                                    match arg_p:
+                                        case Pattern.Ident(name: n2) =>
+                                            let safe_n2 = if n2 == "line" || n2 == "column" || n2 == "file":
+                                                n2 + "_".to_string()
+                                            else:
+                                                n2
+                                            binds = binds + "let ".to_string() + safe_n2 + " = format!(\"{:?}\", _p); ".to_string()
+                                        case _ =>
+                                            ()
+                            case _ =>
+                                ()
+                    case _ =>
+                        ()
+                let ok_arm: String = match eb:
+                    case MaybeBlock.YesBlock(value: eb_blk2) =>
+                        "{ _v; ".to_string() + gen_block(eb_blk2) + " }".to_string()
+                    case _ =>
+                        "_v".to_string()
+                "match __pr { Ok(_v) => ".to_string() + ok_arm + ", Err(_p) => { ".to_string() + binds + catch_body + " } }".to_string()
+            let try_val_stmt = "let __try_val = ".to_string() + match_expr + "; ".to_string()
+            let finally_part: String = match fb:
+                case MaybeBlock.YesBlock(value: fb_blk) =>
+                    let fb_body = gen_block(fb_blk)
+                    "let __final_val = __try_val; ".to_string() + fb_body + "; __final_val".to_string()
+                case _ =>
+                    "__try_val".to_string()
+            pr_prefix + try_body + pr_mid + try_val_stmt + finally_part + " }".to_string()
         case _ => "// TODO stmt".to_string()
 
 // while true { pass } → loop { unimplemented!() }（对齐原生：无限循环 + pass 占位）
@@ -1080,6 +1141,10 @@ def gen_item(i: Item) -> String =
             gen_type_alias(n, t)
         case Item.Test(name: n, body: b) =>
             gen_test_def(n, b)
+        case Item.CheckerBlock(name: n, ps_name: p) =>
+            "fn ".to_string() + n.to_string() + "(ps: &mut __Params) { unimplemented!() }".to_string()
+        case Item.DuckDef(name: n, method_count: mc) =>
+            "pub trait ".to_string() + n.to_string() + " { /* ".to_string() + mc.to_string() + " methods */ }".to_string()
         case _ => "// TODO Item ".to_string() + display_item(i)
 
 def r_eq_unit(t: IrType) -> bool =
