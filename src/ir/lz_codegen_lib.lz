@@ -667,8 +667,8 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.LitUnit(ty: t) => "()".to_string()
         case Expr.LitNone(ty: t) => "None".to_string()
         case Expr.Var(name: n, ty: t) => n.to_string()
-        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a).to_string()
-        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + m.to_string() + "(".to_string() + expr_cs_list(a) + ")".to_string()
+        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, fn_raises).to_string()
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b, fn_raises) + ".".to_string() + f.to_string()
         case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "]".to_string()
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "] = ".to_string() + gen_expr(v, fn_raises)
@@ -681,14 +681,14 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
                 gen_dict_ctor(fs)
             else:
                 n.to_string() + " { ".to_string() + ctor_fields(fs) + " }".to_string()
-        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) => en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list(a) + ")".to_string()
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) => en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.Cast(inner: i, target: tg, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + " as ".to_string() + rust_type(tg).to_string() + ")".to_string()
-        case Expr.MagicCall(magic: m, args: a, ty: t) => m.to_string() + "(".to_string() + expr_cs_list(a) + ")".to_string()
+        case Expr.MagicCall(magic: m, args: a, ty: t) => m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if ".to_string() + gen_expr(c, fn_raises) + " { ".to_string() + gen_expr(th, fn_raises) + " } else { ".to_string() + gen_expr(el, fn_raises) + " }".to_string()
         case Expr.Lambda(params: ps, body: b, ty: t) => "move |".to_string() + str_join(ps).to_string() + "| ".to_string() + gen_expr(b, fn_raises)
-        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a) + ")".to_string()
-        case Expr.TupleLit(elems: es, ty: t) => "(".to_string() + expr_cs_list(es) + ")".to_string()
-        case Expr.ListLit(items: xs, ty: t) => "[".to_string() + expr_cs_list(xs) + "]".to_string()
+        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.TupleLit(elems: es, ty: t) => "(".to_string() + expr_cs_list(es, fn_raises) + ")".to_string()
+        case Expr.ListLit(items: xs, ty: t) => "[".to_string() + expr_cs_list(xs, fn_raises) + "]".to_string()
         case Expr.BlockExpr(stmts: ss, ty: t) => "{\n".to_string() + gen_body(ss, false, "".to_string(), fn_raises) + "}"
         case Expr.GenExpr(yield_of: y, ty: t) => "gen ".to_string() + gen_expr(y, fn_raises)
         case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + ")".to_string()
@@ -798,18 +798,18 @@ def gen_dict_ctor(fs: List<(str, Expr)>) -> String =
             i = i + 2
         "[".to_string() + pairs + "].into_iter().collect()".to_string()
 
-def gen_call(c: Expr, a: List<Expr>) -> String =
+def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
     match c:
         case Expr.Var(name: n, ty: t) =>
             if n == "print":
-                "println!(".to_string() + print_fmt(a) + expr_cs_list(a) + ")".to_string()
+                "println!(".to_string() + print_fmt(a) + expr_cs_list(a, fn_raises) + ")".to_string()
             elif n == "len":
-                "(".to_string() + expr_cs_list(a) + ".len() as i64)".to_string()
+                "(".to_string() + expr_cs_list(a, fn_raises) + ".len() as i64)".to_string()
             elif n == "set!":
-                "[".to_string() + expr_cs_list(a) + "].into_iter().collect()".to_string()
+                "[".to_string() + expr_cs_list(a, fn_raises) + "].into_iter().collect()".to_string()
             else:
-                n.to_string() + "(".to_string() + expr_cs_list(a) + ")".to_string()
-        case _ => gen_expr(c, MaybeIrType.NoTy) + "(".to_string() + expr_cs_list(a) + ")".to_string()
+                n.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case _ => gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
 
 def print_fmt(as_: List<Expr>) -> String =
     if as_.len() == 0:
@@ -820,13 +820,13 @@ def print_fmt(as_: List<Expr>) -> String =
             out = out + " {:?}".to_string()
         out + "\", ".to_string()
 
-def expr_cs_list(es: List<Expr>) -> String =
+def expr_cs_list(es: List<Expr>, fn_raises: MaybeIrType) -> String =
     if es.len() == 0:
         "".to_string()
     else:
-        let head = gen_expr(es[0].clone(), MaybeIrType.NoTy)
+        let head = gen_expr(es[0].clone(), fn_raises)
         if es.len() > 1:
-            head + ", ".to_string() + expr_cs_list(ec_tail(es))
+            head + ", ".to_string() + expr_cs_list(ec_tail(es), fn_raises)
         else:
             head
 
