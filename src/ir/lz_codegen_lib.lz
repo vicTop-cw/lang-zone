@@ -547,7 +547,7 @@ def is_result_ctor(e: Expr) -> bool =
             match c:
                 case Expr.Var(name: n, ty: t2) => n == "Ok" || n == "Err"
                 case _ => false
-        case Expr.EnumCtor(enum_name: en, variant: v, args: a) =>
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
             en == "Result" && (v == "Ok" || v == "Err")
         case _ => false
 

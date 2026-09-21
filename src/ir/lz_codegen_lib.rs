@@ -1376,7 +1376,7 @@ pub fn is_result_ctor(e: Expr) -> bool {
                 }
             }
         }
-        Expr::EnumCtor(en, v, a) => {
+        Expr::EnumCtor { enum_name: en, variant: v, args: a, ty: t } => {
             let a = *a;
             // STMT:Expr
             (en).to_string() == ("Result".to_string()).to_string() && ((v).to_string() == ("Ok".to_string()).to_string() || (v).to_string() == ("Err".to_string()).to_string())

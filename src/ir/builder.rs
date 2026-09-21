@@ -2323,8 +2323,9 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
         AstPattern::Variant(name, args) => {
             let ir_args: Vec<Pattern> = args
                 .iter()
-                .filter_map(|a| convert_ast_pattern(a, ctx))
+                .map(|a| convert_ast_pattern(a, ctx).unwrap_or(Pattern::Wildcard))
                 .collect();
+
             // 区分 struct 解构 vs enum 变体模式
             if ctx.is_struct(name) {
                 // struct 模式: Point(px, py) → Point { x: px, y: py }

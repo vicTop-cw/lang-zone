@@ -537,6 +537,11 @@ impl Lexer {
             }
         }
 
+        // 单独的 `_` 是通配符 token（pattern 中 → Wildcard，表达式中 → Ident("_")）
+        if s == "_" {
+            return Token::Underscore;
+        }
+
         // 魔法方法 __xxx__
         if s.starts_with("__") && s.ends_with("__") && s.len() > 4 {
             return Token::MagicMethod(s);
