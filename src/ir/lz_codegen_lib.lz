@@ -970,6 +970,10 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
                 case _ =>
                     "__try_val".to_string()
             result_marker + pr_prefix + try_body + pr_mid + try_val_stmt + finally_part + " }".to_string()
+        case Stmt.Yield(value: v) =>
+            "__gen_vec.push(".to_string() + gen_expr(v) + ");".to_string()
+        case Stmt.YieldFrom(iter: it) =>
+            "__gen_vec.extend(".to_string() + gen_expr(it) + ".into_iter());".to_string()
         case _ => "// TODO stmt".to_string()
 
 // while true { pass } → loop { unimplemented!() }（对齐原生：无限循环 + pass 占位）
