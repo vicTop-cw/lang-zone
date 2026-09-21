@@ -2374,21 +2374,21 @@ fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pattern> {
         AstPattern::Tuple(elems) => {
             let ir_elems: Vec<Pattern> = elems
                 .iter()
-                .filter_map(|e| convert_ast_pattern(e, ctx))
+                .map(|e| convert_ast_pattern(e, ctx).unwrap_or(Pattern::Wildcard))
                 .collect();
             Some(Pattern::Tuple(ir_elems))
         }
         AstPattern::List(elems) => {
             let ir_elems: Vec<Pattern> = elems
                 .iter()
-                .filter_map(|e| convert_ast_pattern(e, ctx))
+                .map(|e| convert_ast_pattern(e, ctx).unwrap_or(Pattern::Wildcard))
                 .collect();
             Some(Pattern::List(ir_elems))
         }
         AstPattern::Dict(entries) => {
             let ir_entries: Vec<(String, Pattern)> = entries
                 .iter()
-                .filter_map(|(k, p)| convert_ast_pattern(p, ctx).map(|ip| (k.clone(), ip)))
+                .map(|(k, p)| (k.clone(), convert_ast_pattern(p, ctx).unwrap_or(Pattern::Wildcard)))
                 .collect();
             Some(Pattern::Dict(ir_entries))
         }
