@@ -748,6 +748,31 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
             ret_prefix + gen_expr(e) + ";".to_string()
         case Stmt.While(cond: c, guard_e: g, body: b, else_body: eb) =>
             gen_while(c, b)
+        case Stmt.If(cond: c, then: tb, els: eb) =>
+            gen_if(c, tb, eb)
+        case Stmt.Break => "break;".to_string()
+        case Stmt.Continue => "continue;".to_string()
+        case Stmt.Pass => "();  // pass".to_string()
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) =>
+            "for ".to_string() + v + " in ".to_string() + gen_expr(it) + " ".to_string() + gen_block(b)
+        case Stmt.Match(scrutinee: s, arms: as_) =>
+            "match ".to_string() + gen_expr(s) + " {\n".to_string() + gen_match_arms(as_) + "}".to_string()
+        case Stmt.Block(stmts: ss) =>
+            "{\n".to_string() + gen_body(ss, false, "".to_string()) + "}".to_string()
+        case Stmt.Assert(cond: c) =>
+            "assert!(".to_string() + gen_expr(c) + ");".to_string()
+        case Stmt.Raise(value: v) =>
+            "panic!(".to_string() + gen_expr(v) + ");".to_string()
+        case Stmt.TypeAlias(name: n, ty: t) =>
+            "type ".to_string() + n.to_string() + " = ".to_string() + rust_type(t) + ";".to_string()
+        case Stmt.BreakLabel(label: l, value: v) =>
+            match v:
+                case MaybeExpr.YesExpr(value: inner) => "break '".to_string() + l + "' ".to_string() + gen_expr(inner) + ";".to_string()
+                case MaybeExpr.NoExpr => "break '".to_string() + l + "';".to_string()
+        case Stmt.BlockLabel(label: l, body: b) =>
+            "'".to_string() + l + ": ".to_string() + gen_block(b)
+        case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) =>
+            "while let ".to_string() + gen_pattern(p) + " = ".to_string() + gen_expr(e) + " ".to_string() + gen_block(b)
         case _ => "// TODO stmt".to_string()
 
 // while true { pass } → loop { unimplemented!() }（对齐原生：无限循环 + pass 占位）
@@ -756,7 +781,14 @@ def gen_while(c: Expr, b: BlockIR) -> String =
     if inf && block_is_pass_only(b):
         "loop {\n        unimplemented!()\n    }".to_string()
     else:
-        "// TODO while".to_string()
+        "while ".to_string() + gen_expr(c) + " ".to_string() + gen_block(b)
+
+// if cond { then } else { els }（无 else 时省略 else 块，对齐原生 codegen/mod.rs:8072-8098）
+def gen_if(c: Expr, tb: BlockIR, eb: MaybeBlock) -> String =
+    let base = "if ".to_string() + gen_expr(c) + " ".to_string() + gen_block(tb)
+    match eb:
+        case MaybeBlock.YesBlock(value: b) => base + " else ".to_string() + gen_block(b)
+        case MaybeBlock.NoBlock => base
 
 def is_true_cond(c: Expr) -> bool =
     match c:

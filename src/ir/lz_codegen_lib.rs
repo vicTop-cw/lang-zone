@@ -1863,6 +1863,68 @@ pub fn gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> Stri
             // STMT:Expr
             gen_while(c.clone(), b.clone())
         }
+        Stmt::If { cond: c, then: tb, els: eb } => {
+            // STMT:Expr
+            gen_if(c.clone(), tb.clone(), eb.clone())
+        }
+        Stmt::Break => {
+            // STMT:Expr
+            "break;".to_string().to_string()
+        }
+        Stmt::Continue => {
+            // STMT:Expr
+            "continue;".to_string().to_string()
+        }
+        Stmt::Pass => {
+            // STMT:Expr
+            "();  // pass".to_string().to_string()
+        }
+        Stmt::For { var: v, iter: it, guard_e: g, body: b, else_body: eb } => {
+            // STMT:Expr
+            "for ".to_string().to_string() + &v[..] + &" in ".to_string().to_string()[..] + &gen_expr(it.clone())[..] + &" ".to_string().to_string()[..] + &gen_block(b.clone())[..]
+        }
+        Stmt::Match { scrutinee: s, arms: as_ } => {
+            // STMT:Expr
+            "match ".to_string().to_string() + &gen_expr(s.clone())[..] + &" {\n".to_string().to_string()[..] + &gen_match_arms(as_.clone())[..] + &"}".to_string().to_string()[..]
+        }
+        Stmt::Block { stmts: ss } => {
+            let ss = *ss;
+            // STMT:Expr
+            "{\n".to_string().to_string() + &gen_body(ss.clone(), false, "".to_string().to_string())[..] + &"}".to_string().to_string()[..]
+        }
+        Stmt::Assert { cond: c } => {
+            // STMT:Expr
+            "assert!(".to_string().to_string() + &gen_expr(c.clone())[..] + &");".to_string().to_string()[..]
+        }
+        Stmt::Raise { value: v } => {
+            // STMT:Expr
+            "panic!(".to_string().to_string() + &gen_expr(v.clone())[..] + &");".to_string().to_string()[..]
+        }
+        Stmt::TypeAlias { name: n, ty: t } => {
+            // STMT:Expr
+            "type ".to_string().to_string() + &n.to_string()[..] + &" = ".to_string().to_string()[..] + &rust_type(t.clone())[..] + &";".to_string().to_string()[..]
+        }
+        Stmt::BreakLabel { label: l, value: v } => {
+            // STMT:Other
+            match v.clone() {
+                MaybeExpr::YesExpr { value: inner } => {
+                    // STMT:Expr
+                    "break \'".to_string().to_string() + &l[..] + &"\' ".to_string().to_string()[..] + &gen_expr(inner.clone())[..] + &";".to_string().to_string()[..]
+                }
+                MaybeExpr::NoExpr => {
+                    // STMT:Expr
+                    "break \'".to_string().to_string() + &l[..] + &"\';".to_string().to_string()[..]
+                }
+            }
+        }
+        Stmt::BlockLabel { label: l, body: b } => {
+            // STMT:Expr
+            "\'".to_string().to_string() + &l[..] + &": ".to_string().to_string()[..] + &gen_block(b.clone())[..]
+        }
+        Stmt::WhileLet { pattern: p, expr: e, guard_e: g, body: b } => {
+            // STMT:Expr
+            "while let ".to_string().to_string() + &gen_pattern(p.clone())[..] + &" = ".to_string().to_string()[..] + &gen_expr(e.clone())[..] + &" ".to_string().to_string()[..] + &gen_block(b.clone())[..]
+        }
         _ => {
             // STMT:Expr
             "// TODO stmt".to_string().to_string()
@@ -1874,7 +1936,23 @@ pub fn gen_while(c: Expr, b: BlockIR) -> String {
     // STMT:Let
     let inf: bool = is_true_cond(c.clone());
     // STMT:Expr
-    return if inf && block_is_pass_only(b.clone()) { "loop {\n        unimplemented!()\n    }".to_string().to_string() } else { "// TODO while".to_string().to_string() };
+    return if inf && block_is_pass_only(b.clone()) { "loop {\n        unimplemented!()\n    }".to_string().to_string() } else { "while ".to_string().to_string() + &gen_expr(c.clone())[..] + &" ".to_string().to_string()[..] + &gen_block(b.clone())[..] };
+}
+
+pub fn gen_if(c: Expr, tb: BlockIR, eb: MaybeBlock) -> String {
+    // STMT:Let
+    let base = "if ".to_string().to_string() + &gen_expr(c.clone())[..] + &" ".to_string().to_string()[..] + &gen_block(tb.clone())[..];
+    // STMT:Other
+    match eb.clone() {
+        MaybeBlock::YesBlock { value: b } => {
+            // STMT:Expr
+            base + &" else ".to_string().to_string()[..] + &gen_block(b.clone())[..]
+        }
+        MaybeBlock::NoBlock => {
+            // STMT:Expr
+            base
+        }
+    }
 }
 
 pub fn is_true_cond(c: Expr) -> bool {
