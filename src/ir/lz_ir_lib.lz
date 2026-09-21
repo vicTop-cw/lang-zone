@@ -133,7 +133,7 @@ enum Pattern:
 
 // ── Item ──
 enum Item:
-    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, body: List<Stmt>)
+    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
     StructDef(name: str, generics: List<str>, fields: List<(str, IrType)>)
     EnumDef(name: str, generics: List<str>, variants: List<(str, List<IrType>)>)
@@ -489,8 +489,8 @@ def stmt_lines(ss: List<Stmt>) -> String =
 // ── display_item：Item → String ──
 def display_item(it: Item) -> String =
     match it:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) =>
-            "fn ".to_string() + n + generic_sig(gs) + param_sig(ps) + " -> ".to_string() + display_type(r) + ":\n".to_string() + stmt_lines(b)
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, body: b) =>
+            "fn ".to_string() + n + generic_sig(gs) + param_sig(ps) + " -> ".to_string() + display_type(r) + raises_sig(rs) + ":\n".to_string() + stmt_lines(b)
         case Item.Const(name: n, ty: t, value: v) =>
             "const ".to_string() + n + ": ".to_string() + display_type(t) + " = ".to_string() + display_expr(v)
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
@@ -583,6 +583,11 @@ def tail_p(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool
 def impl_head(tr: MaybeIrType) -> String =
     match tr:
         case MaybeIrType.YesTy(value: t) => display_type(t) + " for ".to_string()
+        case MaybeIrType.NoTy => "".to_string()
+
+def raises_sig(rs: MaybeIrType) -> String =
+    match rs:
+        case MaybeIrType.YesTy(value: t) => " raises ".to_string() + display_type(t)
         case MaybeIrType.NoTy => "".to_string()
 
 def dot_join(xs: List<str>) -> String =
