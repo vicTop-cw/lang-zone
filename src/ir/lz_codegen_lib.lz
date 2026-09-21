@@ -538,6 +538,124 @@ def str_join(xs: List<str>) -> String =
         else:
             head
 
+// ── TryCatch Result 基检测与类型推断（对齐原生 codegen/mod.rs:8724-8774）──
+// 本轮纯新增，不接入 gen_stmt 主流程；为下一轮 Result 基实现打基础
+
+def is_result_ctor(e: Expr) -> bool =
+    match e:
+        case Expr.Call(callee: c, args: a, ty: t) =>
+            match c:
+                case Expr.Var(name: n, ty: t2) => n == "Ok" || n == "Err"
+                case _ => false
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a) =>
+            en == "Result" && (v == "Ok" || v == "Err")
+        case _ => false
+
+def block_tail_expr(b: BlockIR) -> MaybeExpr =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            let mut result: MaybeExpr = MaybeExpr.NoExpr
+            for si in 0..ss.len():
+                match ss[si].clone():
+                    case Stmt.ExprStmt(expr: e) => result = MaybeExpr.YesExpr(value: e)
+                    case _ => ()
+            result
+
+def is_res_type(t: IrType) -> bool =
+    match t:
+        case IrType.Res(ok: o, err: e) => true
+        case _ => false
+
+def scan_result_let(ss: List<Stmt>) -> bool =
+    let mut found: bool = false
+    for si in 0..ss.len():
+        match ss[si].clone():
+            case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+                if is_res_type(t) && !is_result_ctor(v):
+                    found = true
+            case Stmt.ExprStmt(expr: e) =>
+                if is_res_type(expr_ty(e)) && !is_result_ctor(e):
+                    found = true
+            case _ => ()
+    found
+
+def is_result_body(b: BlockIR) -> bool =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            let tail = block_tail_expr(b)
+            let tail_is_ctor = match tail:
+                case MaybeExpr.YesExpr(value: e) => is_result_ctor(e)
+                case _ => false
+            let rule1 = is_res_type(t) && !tail_is_ctor
+            if rule1:
+                true
+            else:
+                scan_result_let(ss)
+
+def scan_result_ty(ss: List<Stmt>) -> MaybeIrType =
+    let mut result: MaybeIrType = MaybeIrType.NoTy
+    for si in 0..ss.len():
+        match ss[si].clone():
+            case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+                match result:
+                    case MaybeIrType.NoTy =>
+                        match t:
+                            case IrType.Res(ok: o, err: e) => result = MaybeIrType.YesTy(value: IrType.Res(ok: o, err: e))
+                            case _ => ()
+                    case _ => ()
+            case Stmt.ExprStmt(expr: e) =>
+                match result:
+                    case MaybeIrType.NoTy =>
+                        match expr_ty(e):
+                            case IrType.Res(ok: o, err: e) => result = MaybeIrType.YesTy(value: IrType.Res(ok: o, err: e))
+                            case _ => ()
+                    case _ => ()
+            case _ => ()
+    result
+
+def result_ty_from_body(b: BlockIR) -> MaybeIrType =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            match t:
+                case IrType.Res(ok: o, err: e) => MaybeIrType.YesTy(value: IrType.Res(ok: o, err: e))
+                case _ => scan_result_ty(ss)
+
+// ── expr_ty：Expr → IrType（统一类型访问器，对齐原生 expr.ty）──
+// 31 变体逐一提取 ty 字段；为 TryCatch Result 基规则2 完整扫描（含 ExprStmt）打基础
+def expr_ty(e: Expr) -> IrType =
+    match e:
+        case Expr.LitInt(v: _, ty: t) => t
+        case Expr.LitF64(v: _, ty: t) => t
+        case Expr.LitStr(s: _, ty: t) => t
+        case Expr.LitFStr(s: _, ty: t) => t
+        case Expr.LitBool(b: _, ty: t) => t
+        case Expr.LitUnit(ty: t) => t
+        case Expr.LitNone(ty: t) => t
+        case Expr.Var(name: _, ty: t) => t
+        case Expr.Call(callee: _, args: _, ty: t) => t
+        case Expr.MethodCall(receiver: _, method: _, args: _, ty: t) => t
+        case Expr.FieldAccess(base: _, field: _, ty: t) => t
+        case Expr.IndexGet(base: _, key: _, ty: t) => t
+        case Expr.IndexSet(base: _, key: _, value: _, ty: t) => t
+        case Expr.BinOp(op: _, lhs: _, rhs: _, ty: t) => t
+        case Expr.UnOp(op: _, operand: _, ty: t) => t
+        case Expr.StructCtor(name: _, fields: _, ty: t) => t
+        case Expr.EnumCtor(enum_name: _, variant: _, args: _, ty: t) => t
+        case Expr.Cast(inner: _, target: _, ty: t) => t
+        case Expr.MagicCall(magic: _, args: _, ty: t) => t
+        case Expr.IfExpr(cond: _, then: _, els: _, ty: t) => t
+        case Expr.Lambda(params: _, body: _, ty: t) => t
+        case Expr.Pipe(receiver: _, callee: _, args: _, ty: t) => t
+        case Expr.TupleLit(elems: _, ty: t) => t
+        case Expr.ListLit(items: _, ty: t) => t
+        case Expr.BlockExpr(stmts: _, ty: t) => t
+        case Expr.GenExpr(yield_of: _, ty: t) => t
+        case Expr.Paren(inner: _, ty: t) => t
+        case Expr.Range(end: _, inclusive: _, ty: t) => t
+        case Expr.Dict(pairs: _, ty: t) => t
+        case Expr.AssignExpr(target: _, value: _, ty: t) => t
+        case Expr.ImplicitConvert(source: _, target_ty: _, ty: t) => t
+
 // ── Expr → Rust 表达式（无 [ty] 前缀）──
 def gen_expr(e: Expr) -> String =
     match e:
@@ -778,6 +896,8 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
         case Stmt.CheckerBlock(label: l, ps_name: p) =>
             "();  // checker block (defined at module level)".to_string()
         case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let use_result_try = is_result_body(b)
+            let result_marker = ("// [Result base detected]\n".to_string() if use_result_try else "".to_string())
             let try_body = gen_block(b)
             let pr_prefix = "{ let __pr = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {".to_string()
             let pr_mid = " })); ".to_string()
@@ -849,7 +969,7 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> String 
                     "let __final_val = __try_val; ".to_string() + fb_body + "; __final_val".to_string()
                 case _ =>
                     "__try_val".to_string()
-            pr_prefix + try_body + pr_mid + try_val_stmt + finally_part + " }".to_string()
+            result_marker + pr_prefix + try_body + pr_mid + try_val_stmt + finally_part + " }".to_string()
         case _ => "// TODO stmt".to_string()
 
 // while true { pass } → loop { unimplemented!() }（对齐原生：无限循环 + pass 占位）

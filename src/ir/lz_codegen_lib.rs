@@ -1358,6 +1358,386 @@ pub fn str_join(xs: Vec<String>) -> String {
     };
 }
 
+pub fn is_result_ctor(e: Expr) -> bool {
+    // STMT:Other
+    match e.clone() {
+        Expr::Call { callee: c, args: a, ty: t } => {
+            let c = *c;
+            let a = *a;
+            // STMT:Other
+            match c.clone() {
+                Expr::Var { name: n, ty: t2 } => {
+                    // STMT:Expr
+                    (n).to_string() == ("Ok".to_string()).to_string() || (n).to_string() == ("Err".to_string()).to_string()
+                }
+                _ => {
+                    // STMT:Expr
+                    false
+                }
+            }
+        }
+        Expr::EnumCtor(en, v, a) => {
+            let a = *a;
+            // STMT:Expr
+            (en).to_string() == ("Result".to_string()).to_string() && ((v).to_string() == ("Ok".to_string()).to_string() || (v).to_string() == ("Err".to_string()).to_string())
+        }
+        _ => {
+            // STMT:Expr
+            false
+        }
+    }
+}
+
+pub fn block_tail_expr(b: BlockIR) -> MaybeExpr {
+    // STMT:Other
+    match b.clone() {
+        BlockIR::Block { stmts: ss, ty: t } => {
+            // STMT:Let
+            let mut result = MaybeExpr::NoExpr;
+            // STMT:For
+            for si in (0i64..(ss.len() as i64)).into_iter() {
+                // STMT:Other
+                match ss[((si) as usize)].clone() {
+                    Stmt::ExprStmt { expr: e } => {
+                        // STMT:Other
+                        result = MaybeExpr::YesExpr { value: e };
+                    }
+                    _ => {
+                        // STMT:Expr
+                        ();
+                    }
+                }
+            }
+            // STMT:Expr
+            result
+        }
+    }
+}
+
+pub fn is_res_type(t: IrType) -> bool {
+    // STMT:Other
+    match t.clone() {
+        IrType::Res { ok: o, err: e } => {
+            let o = *o;
+            let e = *e;
+            // STMT:Expr
+            true
+        }
+        _ => {
+            // STMT:Expr
+            false
+        }
+    }
+}
+
+pub fn scan_result_let(ss: Vec<Stmt>) -> bool {
+    // STMT:Let
+    let mut found: bool = false;
+    // STMT:For
+    for si in (0i64..(ss.len() as i64)).into_iter() {
+        // STMT:Other
+        match ss[((si) as usize)].clone() {
+            Stmt::Let { name: n, ty: t, value: v, is_mut: m, is_ref: r } => {
+                // STMT:Expr
+                if is_res_type(t.clone()) && !is_result_ctor(v.clone()) {
+                    // STMT:Other
+                    found = true;
+                } else { ()};
+            }
+            Stmt::ExprStmt { expr: e } => {
+                // STMT:Expr
+                if is_res_type(expr_ty(e.clone())) && !is_result_ctor(e.clone()) {
+                    // STMT:Other
+                    found = true;
+                } else { ()};
+            }
+            _ => {
+                // STMT:Expr
+                ();
+            }
+        }
+    }
+    // STMT:Expr
+    return found;
+}
+
+pub fn is_result_body(b: BlockIR) -> bool {
+    // STMT:Other
+    match b.clone() {
+        BlockIR::Block { stmts: ss, ty: t } => {
+            // STMT:Let
+            let tail = block_tail_expr(b.clone());
+            // STMT:Let
+            let tail_is_ctor: bool = {
+// STMT:Other
+match tail.clone() {
+    MaybeExpr::YesExpr { value: e } => {
+        // STMT:Expr
+        is_result_ctor(e.clone())
+    }
+    _ => {
+        // STMT:Expr
+        false
+    }
+}
+    };
+            // STMT:Let
+            let rule1: bool = is_res_type(t.clone()) && !tail_is_ctor;
+            // STMT:Expr
+            if rule1 { true } else { scan_result_let(ss.clone()) }
+        }
+    }
+}
+
+pub fn scan_result_ty(ss: Vec<Stmt>) -> MaybeIrType {
+    // STMT:Let
+    let mut result = MaybeIrType::NoTy;
+    // STMT:For
+    for si in (0i64..(ss.len() as i64)).into_iter() {
+        // STMT:Other
+        match ss[((si) as usize)].clone() {
+            Stmt::Let { name: n, ty: t, value: v, is_mut: m, is_ref: r } => {
+                // STMT:Other
+                match result.clone() {
+                    MaybeIrType::NoTy => {
+                        // STMT:Other
+                        match t.clone() {
+                            IrType::Res { ok: o, err: e } => {
+                                let o = *o;
+                                let e = *e;
+                                // STMT:Other
+                                result = MaybeIrType::YesTy { value: IrType::Res { ok: Box::new(o), err: Box::new(e) } };
+                            }
+                            _ => {
+                                // STMT:Expr
+                                ();
+                            }
+                        }
+                    }
+                    _ => {
+                        // STMT:Expr
+                        ();
+                    }
+                }
+            }
+            Stmt::ExprStmt { expr: e } => {
+                // STMT:Other
+                match result.clone() {
+                    MaybeIrType::NoTy => {
+                        // STMT:Other
+                        match expr_ty(e.clone()) {
+                            IrType::Res { ok: o, err: e } => {
+                                let o = *o;
+                                let e = *e;
+                                // STMT:Other
+                                result = MaybeIrType::YesTy { value: IrType::Res { ok: Box::new(o), err: Box::new(e) } };
+                            }
+                            _ => {
+                                // STMT:Expr
+                                ();
+                            }
+                        }
+                    }
+                    _ => {
+                        // STMT:Expr
+                        ();
+                    }
+                }
+            }
+            _ => {
+                // STMT:Expr
+                ();
+            }
+        }
+    }
+    // STMT:Expr
+    return result;
+}
+
+pub fn result_ty_from_body(b: BlockIR) -> MaybeIrType {
+    // STMT:Other
+    match b.clone() {
+        BlockIR::Block { stmts: ss, ty: t } => {
+            // STMT:Other
+            match t.clone() {
+                IrType::Res { ok: o, err: e } => {
+                    let o = *o;
+                    let e = *e;
+                    // STMT:Expr
+                    MaybeIrType::YesTy { value: IrType::Res { ok: Box::new(o), err: Box::new(e) } }
+                }
+                _ => {
+                    // STMT:Expr
+                    scan_result_ty(ss.clone())
+                }
+            }
+        }
+    }
+}
+
+pub fn expr_ty(e: Expr) -> IrType {
+    // STMT:Other
+    match e.clone() {
+        Expr::LitInt { v: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::LitF64 { v: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::LitStr { s: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::LitFStr { s: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::LitBool { b: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::LitUnit { ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::LitNone { ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::Var { name: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::Call { callee: _, args: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::MethodCall { receiver: _, method: _, args: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::FieldAccess { base: _, field: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::IndexGet { base: _, key: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::IndexSet { base: _, key: _, value: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::BinOp { op: _, lhs: _, rhs: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::UnOp { op: _, operand: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::StructCtor { name: _, fields: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::EnumCtor { enum_name: _, variant: _, args: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::Cast { inner: _, target: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::MagicCall { magic: _, args: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::IfExpr { cond: _, then: _, els: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::Lambda { params: _, body: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::Pipe { receiver: _, callee: _, args: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::TupleLit { elems: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::ListLit { items: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::BlockExpr { stmts: _, ty: t } => {
+            // STMT:Expr
+            t
+        }
+        Expr::GenExpr { yield_of: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::Paren { inner: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::Range { end: _, inclusive: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::Dict { pairs: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::AssignExpr { target: _, value: _, ty: t } => {
+            let _ = *_;
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+        Expr::ImplicitConvert { source: _, target_ty: _, ty: t } => {
+            let _ = *_;
+            // STMT:Expr
+            t
+        }
+    }
+}
+
 pub fn gen_expr(e: Expr) -> String {
     // STMT:Other
     match e.clone() {
@@ -1935,6 +2315,10 @@ pub fn gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String) -> Stri
         }
         Stmt::TryCatch { body: b, catches: cs, else_body: eb, finally_body: fb } => {
             // STMT:Let
+            let use_result_try: bool = is_result_body(b.clone());
+            // STMT:Let
+            let result_marker = (if use_result_try { "// [Result base detected]\n".to_string().to_string() } else { "".to_string().to_string() });
+            // STMT:Let
             let try_body = gen_block(b.clone());
             // STMT:Let
             let pr_prefix = "{ let __pr = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {".to_string().to_string();
@@ -2086,7 +2470,7 @@ match fb.clone() {
 }
     };
             // STMT:Expr
-            pr_prefix + &try_body[..] + &pr_mid[..] + &try_val_stmt[..] + &finally_part[..] + &" }".to_string().to_string()[..]
+            result_marker + &pr_prefix[..] + &try_body[..] + &pr_mid[..] + &try_val_stmt[..] + &finally_part[..] + &" }".to_string().to_string()[..]
         }
         _ => {
             // STMT:Expr
