@@ -7847,11 +7847,10 @@ impl CodeGen {
                 } else if let Some(v) = value {
                     // BUG-CG-004（收口）：raises 函数返回类型升级为 Result<T, E>，
                     // 故 `return X`（X 自身非 Result）需包成 `return Ok(X)`。
-                    // 但 `return X` 返回 `()` 时无需包（`Ok(())` 违反 `-> ()` 签名）
+                    // raises 函数中 `return X` 返回 `()` 时也需包（签名是 Result<(), E>）
                     let wrap_ok =
                         self.current_fn_raises.is_some()
-                            && !matches!(&v.ty, IrType::Result { .. })
-                            && !matches!(&v.ty, IrType::Unit);
+                            && !matches!(&v.ty, IrType::Result { .. });
                     // `return self`：self 是 &self 引用。
                     // 返回类型是引用（`-> ref Self`，如 inspect）时直接 return self；
                     // 返回 owned 值时需 clone（`fn or(&self) -> Option<T>` 中
@@ -7979,7 +7978,7 @@ impl CodeGen {
                 let ret_is_unit = matches!(&self.current_ret_ty, Some(IrType::Unit));
                 let wrap_ok =
                     self.current_fn_raises.is_some()
-                    && !matches!(&expr.ty, IrType::Result { .. } | IrType::Unit)
+                    && !matches!(&expr.ty, IrType::Result { .. })
                     && !ret_is_unit
                     && !is_known_unit_call;
                 if is_known_unit_call {

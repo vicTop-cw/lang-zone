@@ -253,6 +253,33 @@ def main() =
 }
 
 #[test]
+fn sem_lambda_raise() {
+    check_case(
+        "lambda_raise",
+        r#"
+def checked(x: int) -> int raises str =
+    if x < 0:
+        raise "negative"
+    x * 2
+
+def main() =
+    let double = |x: int| -> int = x * 2
+    try:
+        let v = checked(21)
+        print(double(v))
+    catch e:
+        print("err:" + e)
+    try:
+        let v2 = checked(-1)
+        print(double(v2))
+    catch e2:
+        print("caught:" + e2)
+"#,
+        "84\n\"caught:negative\"\n",
+    );
+}
+
+#[test]
 fn sem_bool_compare() {
     check_case(
         "bool",
@@ -341,5 +368,27 @@ def main() =
         print("for-guard:", x + y)
 "#,
         "\"let:\" 1 2\n\"for:\" 1 2\n\"for:\" 3 4\n\"for:\" 5 6\n\"for-guard:\" 7\n\"for-guard:\" 11\n",
+    );
+}
+#[test]
+fn sem_raises_unit_tail() {
+    // raises 函数无显式返回类型，尾表达式为 Unit（print），
+    // codegen 需包成 Ok(()) 匹配签名 Result<(), String>
+    check_case(
+        "raises_unit_tail",
+        r#"
+def emit(x: int) raises str =
+    if x < 0:
+        raise "negative"
+    print(x)
+
+def main() =
+    try:
+        emit(42)
+        emit(-1)
+    catch e:
+        print("caught:" + e)
+"#,
+        "42\n\"caught:negative\"\n",
     );
 }
