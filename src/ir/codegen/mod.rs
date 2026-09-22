@@ -12633,9 +12633,7 @@ impl CodeGen {
                                 || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
                                 || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
                                 if path == "str" || path == "String")
-                                || matches!(&expr.ty, IrType::Str)
-                                || matches!(&expr.ty, IrType::Named { path, .. }
-                                    if path == "str" || path == "String")
+
                                 // 调用参数/构造器上下文：期望类型在 current_expected_ty
                                 // （如 ParseError::UnexpectedChar(pos, ch: str)）
                                 || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Str))
