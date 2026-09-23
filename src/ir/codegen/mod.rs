@@ -6795,6 +6795,13 @@ impl CodeGen {
                         }
                     }
                 }
+                Item::StructDef(s) => {
+                    for m in &s.methods {
+                        let mut uc = HashMap::new();
+                        count_vars_block(&m.body, &mut uc);
+                        self.fn_use_count.insert(m.name.clone(), uc);
+                    }
+                }
                 _ => {}
             }
         }
