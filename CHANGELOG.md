@@ -39,7 +39,39 @@ AIGC:
 - 清理全部编译 warning，恢复 0-warning 基线（1ba5cd3）
 - 修正 BUG-PR-003 判定措辞：..: nums: int 按规范非法（具名收集应写 nums: List<T>）（48eac6c）
 
-> 本段为分批补条目第一批（09-03 ~ 09-04，15 commit）。剩余 09-04 后 ~83 commit 待后续轮次补。
+> 第一批（09-03 ~ 09-04，15 commit）见上。
+
+### magic 系统起步（2026-09-05 ~ 09-12，18 commit）
+
+#### magic 系统 batch 1 + guard 策略
+- magic system batch 1 — auto-mut infer + 5 magic traits（455b886）
+- complete guard strategy, let-bridge, and ops fix（a4ad0a0）
+
+#### magic trait impl 生成
+- generalize trait-impl generation for operator magic methods P1-0/P1-1（51c0c34）
+- complete *Assign/Ord/Hash/Drop/Default trait impl generation（21d069d）
+- TryFrom/TryInto impl generation and custom __clone__ semantics（bffb23f）
+
+#### magic 方法 wire
+- wire __contains__/in, __iadd__/+= and Bool inference（aa6aed1）
+- wire __invert__, __bool__ truth chain, with-statement constructor chain, __from__ → From impl（25b3ad2）
+- __into__ → Into impl, __from__ implicit conversion at let sites, guard keyword param fix（95f5a15）
+- gap magics __int__/__float__/__abs__ + __from__ implicit conversion at call args（7c8175b）
+- __from__ return-site trigger (P1-2) + __cast__ dispatch for `x as T`（cddbaba）
+- __try_cast__ fallible dispatch, __pos__/__deref__ unary magics, __from__ cycle detection（d107075）
+- __implicit_from__ blanket + __into_iter__/__rev__ dispatch + .rev() semantics（3050f86）
+- wire __implicit_copy__, __implicit_default__, __implicit_to__ traits（0734680）
+
+#### magic docs/status + __init__ 修复
+- docs: mark __unapply__ as ✅ (explicit impl on struct works)（0dd1da1）
+- docs: correct __init__ status to 🔸 (body generated, call-site not auto-wired)（38a20ca）
+- fix(codegen): __init__ 注入点仅当无额外参数时触发（754af9b）
+
+#### 卫生
+- 清理生成物并统一 IR 路线；补 for 解构测试与语法文档（000506f）
+- clean PROBE temp files（5d59693）
+
+> 本段为分批补条目第二批（09-05 ~ 09-12，18 commit）。剩余 09-12 后 ~65 commit 待后续轮次补。
 
 ## [v0.1.180] - 2026-08-29
 
