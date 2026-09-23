@@ -4,7 +4,7 @@ LZ 是一门面向系统编程的静态类型语言：默认可变绑定、结�
 
 > **路线决策（2026-07-31，2026-09-05 落实）**：全力走 **IR 中间表示** 路线。代码生成统一以 LZIR 为中间层（AST → LZIR → 目标语言），**不再使用 AST → Rust 直接 codegen 路线**；旧 `src/codegen/` 等路线 B 代码已于 2026-09-05 彻底移除，编译器仅剩唯一 IR 路线。
 
-> **当前状态（2026-09-05 更新）**：路线 B 自举/替代线路（含 `src/codegen/` 的 AST→Rust 直接 codegen、`src/frontend/` 的 lex-lz/parse-lz、`src/ir/lz_codegen*` 等）已**彻底移除**。编译器默认管线**仅有唯一一条 IR 路线**：`AST → LZIR → Rust`（及 Cython 后端）。旧路线源码已备份至仓库外 `E:\IDEProjects\AI\_backup_langzone_routeB_20260905`，不再参与维护。
+> **当前状态（2026-09-23 更新）**：路线 B 自举/替代线路（含 `src/codegen/` 的 AST→Rust 直接 codegen、`src/frontend/` 的 lex-lz/parse-lz、`src/ir/lz_codegen*` 等）已**彻底移除**。编译器默认管线**仅有唯一一条 IR 路线**：`AST → LZIR → Rust`（及 Cython 后端）。旧路线源码已备份至仓库外 `E:\IDEProjects\AI\_backup_langzone_routeB_20260905`，不再参与维护。自 2026-09-05 起，magic 运算符重载系统全链路（`__contains__`/`__iadd__`/`__from__`/`__into__`/`__cast__` 等自动生成 trait impl）、装饰器系统（`@derive`/`@lazy`/`@case`/`@memoize`/`@parallel`/`@init`）、`lzcyc` CLI（transpile/compile/run）、raises 全链路 codegen（`fn_raises` 透传）已陆续落地。
 
 ---
 
@@ -141,4 +141,4 @@ issue/            决策与问题追踪
 
 ---
 
-*Lang-Zone 编译器 · IR 优先路线（路线 B 已于 2026-09-05 移除）· 2026-09-08*
+*Lang-Zone 编译器 · IR 优先路线（路线 B 已于 2026-09-05 移除）· 2026-09-23*
