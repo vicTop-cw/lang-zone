@@ -127,7 +127,47 @@ AIGC:
 - c92c26b docs: 同步函数类型注解 fn(...) -> ... 语法规范到 SYNTAX 文档体系
 - 2a869cc docs: 生成任务提示词 - lib_string 回归 + 编译警告清理
 
-> 第三批（09-13 ~ 09-18，42 commit）见上。剩余 09-18 后 ~23 commit 待后续轮次补。
+> 第三批（09-13 ~ 09-18，42 commit）见上。剩余 09-18 后 22 commit 由第四批补全。
+
+### raises 全链路 / TryCatch 异常处理 / codegen 作用域与模式修复 / 字符串索引语义 / str→String 收尾 / Cython GenBuild / parser+docs（2026-09-19 ~ 09-23，22 commit）
+
+#### raises 全链路透传
+- 199cad2 feat(codegen): raises 支持全链路 — gen_expr fn_raises 透传 IfExpr/BlockExpr
+- d89dd4f feat(codegen): expr_cs_list/gen_call 透传 fn_raises — 嵌套调用 raise 正确生成 return Err
+- ca9070b fix(codegen): raises 函数 Unit 尾表达式/return 包 Ok — 移除 wrap_ok 的 Unit 排除
+
+#### TryCatch 异常处理增强
+- ac33b44 feat(codegen): TryCatch 全套增强 + Defer/CheckerBlock 骨架 + Item.CheckerBlock/Item.DuckDef 分支
+- 5f514fc feat(codegen): TryCatch 多 catch 前置注释生成 — 跳过的 catch 输出 // catch <pattern> skipped
+- 7d02a4f feat(codegen): TryCatch Result 基检测函数 + gen_stmt 注释标记接入
+- 9460bb6 feat(codegen): gen_stmt BreakLabel/BlockLabel/WhileLet 分支实现
+
+#### codegen 作用域与模式修复
+- 36f5a4a fix(codegen): convert_ast_pattern Tuple/List/Dict filter_map → map + unwrap_or(Wildcard) 保留位置
+- 5c28a92 fix(codegen): E0164 Variant args 保留 Wildcard + EnumCtor struct 模式 + lexer _ token
+- dbeb540 fix(codegen): gen_stmt 补全 Yield/YieldFrom 分支对齐原生 codegen
+- 2e556e6 fix(codegen): for 循环体 declared 快照恢复 — 修复块作用域变量泄漏
+- 4d162e4 fix(codegen): while/while-let 循环体 declared 快照恢复 — 对齐 for 循环块作用域隔离
+- 785f0e3 fix(codegen): compute_use_counts 补 StructDef 内联方法 — 修复 lib_hashmap E0382
+
+#### 字符串单字符索引语义对齐
+- 007fd9b feat(ir): 字符串单字符索引类型推断与比较对齐
+- b6aba3e fix(codegen): 字符串单字符索引返回字节码 i64 — 移除 idx_wants_string 的 expr.ty 条件
+
+#### str→String 类型修复收尾
+- 448d133 fix(codegen): str → String 类型修复收尾
+- 419949c fix: str→String 类型修复 (lz_codegen_lib.lz + lz_ir_lib.lz)
+- 386d902 fix: 补充 stmt_uses_dict 剩余变体 + module_uses_dict 漏检修复
+
+#### Cython GenBuild 代码生成
+- ffe8e4a feat(cython): GenBuild 代码生成 + str 引用语义修复 + E0277 测试转正
+
+#### parser / docs / test 卫生
+- 33b5ca2 fix(parser): 支持 _ 作为函数参数名 — 修复 identifiers.lz 解析回归
+- 6beae89 docs(readme): 状态段同步至 2026-09-23 — 补 09-05 后 magic/装饰器/lzcyc/raises 进展
+- 2c87319 test(lz-infer): update ignore comments for pending inference capabilities
+
+> 第四批（09-19 ~ 09-23，22 commit）见上。[Unreleased] 段已补全 09-03 ~ 09-23 共 97 commit（第一批 15 + 第二批 18 + 第三批 42 + 第四批 22）。
 
 ## [v0.1.180] - 2026-08-29
 
