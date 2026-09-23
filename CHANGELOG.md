@@ -73,6 +73,62 @@ AIGC:
 
 > 本段为分批补条目第二批（09-05 ~ 09-12，18 commit）。剩余 09-12 后 ~65 commit 待后续轮次补。
 
+### lzcyc 子编译器 CLI 落地与 M1.x 下沉 / codegen 修复 / 装饰器系统 / --emit=rs-lz / 卫生（2026-09-13 ~ 09-18，42 commit）
+
+#### lzcyc 子编译器 CLI 落地与 M1.x 下沉
+- 39025a3 feat: lzcyc 子编译器 CLI 落地 — transpile/compile/run 全链路
+- b05e705 fix: lzcyc 运行期缺口兜底 + import 合并 + 主源码入库补漏
+- b258aa1 feat: checker 派发兜底 — run 基线 53/54
+- 31f8788 feat: 全绿基线 54/54 + 主编译器融入计划
+- 0ea9858 Merge gitcode/feature/lzcyc-cli
+- aefc10d Merge gitcode/feature/lzcyc-cli
+- b5eec92 feat(cython): codegen 重构扩展 + _variant 下沉（M1.1）
+- 2116beb feat(cython): Box/Rc/Arc 下标下沉（M1.2）
+- 2b472ba feat(cython): Option 方法族下沉（M1.3）— 垫片退位
+- 0eff34d fix(cython): 构建块元组解包下标修复（M1.4）
+- 2910a27 feat(cython): 推导式 filter 谓词补调用下沉（M1.5）
+- 9679488 fix(lzcyc): postprocess filter 分支退位（M1.5 配套）
+- 082820b feat(cython): checker 派发下沉（M1.6）
+- b236432 docs: 融入计划 M1 主体完成（6/7 下沉）
+- 5750756 Merge origin/master into feature/m1-variant-sink
+
+#### codegen / cython 修复
+- 56f7ac1 fix(codegen): Eq/Neq 字符串对齐 — E0277 根治
+- 4abcfbd fix(codegen): str 引用语义修复收尾（Ref(Str)→&str + &&str 防御）+ lz_std 基线登记
+- 54919a8 fix(cython): gen_expr Lit 分支补全（merge 配套）
+- cd86f33 fix(cython): 合并后补 complex/Int128/BigInt 字面量渲染（merge 配套）
+- d5d21cf fix(codegen): 字符串索引取全绿基线版 — 修 ir_pass_fixes E0308/E0277
+- 595c33e fix(codegen): 修复 3 个 codegen 缺陷
+- d43d32a fix: 全绿基线 — lib_json/lib_string/lib_hashmap/lib_tree 编译错误消除
+- 4c8c245 fix: wrap_ok logic, DictExt generics, parse_f64, string index
+- ccb63e8 fix: 修复 lib_hashmap 字符索引类型不匹配
+- 1e40069 feat: 修复 --emit=rs-lz golden 对比测试 - E0384/E0382 - auto_mut 切 List<str>→str
+
+#### 装饰器系统推进
+- 75eee02 fix: macro/template + 运算符双重语义 + 分层递归下降优先级解析
+- 7a3ac49 fix: @memoize 约束检查 + @parallel 收窄 + @init async 分支
+- 5615958 Merge gitcode/feature/lz-decorator-improve：6 个内置装饰器 + @case
+- 3177627 feat: 新增 @case 装饰器（struct 双用法，自动配 __unapply__/__unapply_seq__）
+- 89e85c1 feat: 实现 5 个内置装饰器 + 修复 @derive 参数 + 未知装饰器 fallback
+- 2e67f34 feat(moddec): 修饰符装饰器全链路（P0 完成；P1 新轴 codegen 待续）
+- 8dddb06 feat(moddec): T04 新语义轴 codegen（L4 转绿、@lazy 真惰性）
+- ea5832c Merge gitcode/feature/lz-decorator-improve
+- 60a3d9a Merge gitcode/master
+
+#### --emit=rs-lz + moddec golden
+- 6ce2ddc feat: 推进 D2 缺口 — 补 5 种 Item codegen + 打通 --emit=rs-lz
+- 19ea60e chore(moddec): 补提 golden 快照 + .gitignore 例外
+
+#### 卫生 / docs / 清理
+- e739ff4 chore: clean build artifacts, fix absolute path in __file__/__path__
+- 024b332 fix: 删除冗余的 grammars/lz 和 tree-sitter-lz 目录
+- 12787fb fix: 合并 tree-sitter 查询文件并删除冗余目录
+- 2d7b552 fix: 清理 15 个编译警告（unreachable pattern、unused variables/doc comments）
+- c92c26b docs: 同步函数类型注解 fn(...) -> ... 语法规范到 SYNTAX 文档体系
+- 2a869cc docs: 生成任务提示词 - lib_string 回归 + 编译警告清理
+
+> 第三批（09-13 ~ 09-18，42 commit）见上。剩余 09-18 后 ~23 commit 待后续轮次补。
+
 ## [v0.1.180] - 2026-08-29
 
 ### 阶段 A 收口 + Result/Option 泛型桥接 + lib_iterator 转正（J1–J4）
