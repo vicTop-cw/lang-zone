@@ -226,6 +226,7 @@ struct Point =
 | 魔法方法 | 参数 | 返回 | 用途 |
 |----------|------|------|------|
 | `__unapply__` | `self` | `(T1, T2, ...)` | 提取解构：将 struct 分解为元组，用于 `case Point(x,y)` / `let Point(x,y)=p` / `for Point(x,y) in pts` |
+| `__unapply_seq__` | `self` | `Vec<T>` | 变长提取：仅当 case struct 所有字段同类型时自动生成，支持 `case PointEx(x, ..rest)` 变长提取 |
 
 ```lz
 // 普通 struct 显式实现：
@@ -504,6 +505,7 @@ struct MyFile =
 | `__pos__` | Pos（规划） | 类型缺口 | B | ✅ `+a` 分派 `a.__pos__()`；无 Pos trait impl；无魔术方法时数值恒等 |
 | `__deref__` | `std::ops::Deref`（规划） | 运算符 | B | ✅ `*a` 对用户 struct 分派 `a.__deref__()`（调用点直派）；无 Deref trait impl；真实引用类型保留裸解引用 |
 | `__unapply__` | — | 提取器 | B | ✅ case struct 自动配；普通 struct 显式定义可用（`let Point(a,b)=p` / `case Point(x,y)` / `for Point(a,b) in pts` 三处脱糖为 `__unapply__()`） |
+| `__unapply_seq__` | — | 提取器 | B | ✅ case struct 所有字段同类型时自动配（返回 `Vec<T>`，支持 `case PointEx(x, ..rest)` 变长提取） |
 | `__enter__` | Enter（规划） | 上下文 | B | ✅ with 构造链：enter → 体 → exit（with 语句展开，调用点直派）；无 Enter trait impl |
 | `__exit__` | Exit（规划） | 上下文 | B | ✅ 未定义时跳过调用（E0599 防护）；无 Exit trait impl |
 | `__iter_strategy__` | `IterStrategy`（规划） | 迭代策略 | B | 🔸 仅注册表 + 直调占位；`__iter_resolve` 策略选择机制未实现（`lz_builtins` 无 `IterStrategy` 家族、无 for-in 消费点、`@Mode` 注解不可用）——规范目标见 §十八 注，05-控制流 §3.1、99 §3.2 已同步标注 ❌ 规划中 |
