@@ -4933,7 +4933,7 @@ impl CodeGen {
         for m in &i.methods {
             // __new__ 体内抑制 kwarg→__new__ 路由（避免 Self(v:...) 无限递归）
             let prev_in_new_body = self.in_new_body;
-            if m.name == "__new__" {
+            if m.name == "__new__" || m.name == "new" {
                 self.in_new_body = true;
             }
             self.gen_fn_def(m);
