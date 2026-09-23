@@ -8299,7 +8299,9 @@ impl CodeGen {
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
                 self.loop_depth += 1;
+                let saved_declared = self.declared.clone();
                 self.gen_block_inner(body);
+                self.declared = saved_declared;
                 self.loop_depth -= 1;
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
@@ -8338,7 +8340,9 @@ impl CodeGen {
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
                 self.loop_depth += 1;
+                let saved_declared = self.declared.clone();
                 self.gen_block_inner(body);
+                self.declared = saved_declared;
                 self.loop_depth -= 1;
                 self.suppress_tail_return = saved;
                 self.indent -= 1;
