@@ -15,6 +15,32 @@ AIGC:
 
 本文件记录 LZ 编译器（`lzc` / `lzcyc`）的版本变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [Unreleased]
+
+### FIND_BUG 挖掘套件入库与首轮修复（2026-09-03 ~ 09-04）
+- FIND_BUG 挖掘套件入库 + lz_builtins 扩展（error/functional/std）+ 测试基建（4ca253d）
+- ExternBridge + EmbedBridge 两大桥接落地 + 测试断言对齐（e11517d）
+- FIND_BUG 首轮修复：语法核查 11 处修正（parser/IR/codegen/语义检查）（26cd418）
+- FIND_BUG 全量实测：36 编号判定落档（✅12/❌21/🟡1）+ test_all.sh 基建修正（990af98）
+- FIND_BUG 二轮收口：12 库基线 7/12 转正 + find_bug_bugs.rs 回归守护套件（15绿/25挂）（96f3797）
+- 三轮复验：SB-001/002/003 经 codegen 修复转正（❌21→18），守护套件 18绿/22挂（d441940）
+
+### codegen / lexer / parser / compiler 修复
+- IR codegen 接入 StdBridge 方法映射，修 SB-001/002/003（d42ff8c）
+- 顶层 self-def 归属 impl，修 BUG-CG-002/TY-002（E0568）（5ec6b64）
+- Option 自动 Some 包装 + ?. 链 and_then 扁平化，修 SG-002/003（6631057）
+- lexer 拒绝 i64 越界字面量，修 BUG-EC-002（避免静默环绕为 i64::MIN）（928bd46）
+- parser 装饰器修饰非声明显式拒绝，修 BUG-PR-005（关闭 SILENT_PASS 负向漏洞）（da00cc7）
+- BUG-SG-005 列表字面量 ... 展开运算符（040d704）
+- BUG-EC-006 type_name() 内省返回真实类型名（5a5583d）
+- BUG-PR-002 raises 与 -> 返回类型顺序无关（937af9a）
+
+### 卫生
+- 清理全部编译 warning，恢复 0-warning 基线（1ba5cd3）
+- 修正 BUG-PR-003 判定措辞：..: nums: int 按规范非法（具名收集应写 nums: List<T>）（48eac6c）
+
+> 本段为分批补条目第一批（09-03 ~ 09-04，15 commit）。剩余 09-04 后 ~83 commit 待后续轮次补。
+
 ## [v0.1.180] - 2026-08-29
 
 ### 阶段 A 收口 + Result/Option 泛型桥接 + lib_iterator 转正（J1–J4）
