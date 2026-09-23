@@ -8242,7 +8242,9 @@ impl CodeGen {
                 let saved_semi = self.force_stmt_semicolon;
                 self.force_stmt_semicolon = true;
                 self.loop_depth += 1;
+                let saved_declared = self.declared.clone();
                 self.gen_block_inner(body);
+                self.declared = saved_declared;
                 self.loop_depth -= 1;
                 self.force_stmt_semicolon = saved_semi;
                 self.suppress_tail_return = saved;
