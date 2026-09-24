@@ -402,43 +402,37 @@ impl Parser {
                     // 顶层循环用 match peek() 未消费 token：先 advance 消费 comptime
                     self.advance();
                     // comptime def f(...) — 编译期函数（仅编译期存在，不生成运行时代码）
+                    // 支持 `comptime def` 和 `comptime <换行> def` 两种写法
                     if self.check(&Token::Def) {
                         let mut f = self.parse_function(false)?;
                         f.is_comptime = true;
                         f.decorators = decorators;
                         functions.push(f);
-                        continue; // 继续处理后续 top-level 语句（不能 break 跳出顶层循环）
+                        continue;
                     }
-                    if self.check(&Token::Colon) {
+                    // 检查 `comptime <换行> def`（跳过换行后看是否为 def）
+                    let save_pos = self.pos;
+                    self.skip_newlines();
+                    if self.check(&Token::Def) {
+                        let mut f = self.parse_function(false)?;
+                        f.is_comptime = true;
+                        f.decorators = decorators;
+                        functions.push(f);
+                        continue;
+                    }
+                    self.pos = save_pos; // 回退：不是 def，恢复位置
+                    // comptime: <缩进块> 或 comptime <换行> <缩进块> — 编译期求值块
+                    let is_colon = self.check(&Token::Colon);
+                    if is_colon {
                         self.advance();
-                        self.skip_newlines();
-                        if self.check(&Token::Indent) {
-                            self.advance();
-                            let block = self.parse_block()?;
-                            self.expect(Token::Dedent)?;
-                            // 将 comptime 块体内容存入 consts（标记 comptime 语义）
-                            for stmt in &block {
-                                if let Stmt::Let {
-                                    name,
-                                    ty,
-                                    value,
-                                    mutable,
-                                    mods,
-                                    ..
-                                } = stmt
-                                {
-                                    consts.push(ConstDef {
-                                        name: name.clone(),
-                                        ty: ty.clone(),
-                                        value: value.clone(),
-                                        mutable: *mutable,
-                                        mods: mods.clone(),
-                                    });
-                                }
-                            }
-                        } else if !self.check(&Token::Newline) && !self.check(&Token::Eof) {
-                            // 单行: comptime x = expr
-                            let stmt = self.parse_stmt()?;
+                    }
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let block = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        // 将 comptime 块体内容存入 consts（标记 comptime 语义）
+                        for stmt in &block {
                             if let Stmt::Let {
                                 name,
                                 ty,
@@ -446,7 +440,7 @@ impl Parser {
                                 mutable,
                                 mods,
                                 ..
-                            } = &stmt
+                            } = stmt
                             {
                                 consts.push(ConstDef {
                                     name: name.clone(),
@@ -456,6 +450,30 @@ impl Parser {
                                     mods: mods.clone(),
                                 });
                             }
+                        }
+                    } else if self.check(&Token::Const) {
+                        // comptime const X = ... — 编译期常量（求值后内联到使用处）
+                        let c = self.parse_const()?;
+                        consts.push(c);
+                    } else if !self.check(&Token::Newline) && !self.check(&Token::Eof) {
+                        // 单行: comptime x = expr
+                        let stmt = self.parse_stmt()?;
+                        if let Stmt::Let {
+                            name,
+                            ty,
+                            value,
+                            mutable,
+                            mods,
+                            ..
+                        } = &stmt
+                        {
+                            consts.push(ConstDef {
+                                name: name.clone(),
+                                ty: ty.clone(),
+                                value: value.clone(),
+                                mutable: *mutable,
+                                mods: mods.clone(),
+                            });
                         }
                     }
                 }
