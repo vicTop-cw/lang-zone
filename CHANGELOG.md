@@ -17,6 +17,11 @@ AIGC:
 
 ## [Unreleased]
 
+### FIND_BUG 收尾修复（2026-09-24）
+- `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）
+- 字符串单字符索引在拼接/比较语境直出 String 形态（新增 `gen_str_char_index_tostring` 上下文辅助），修复 lib_json E0308 与 `s[pos] != "\""` 码点十进制化导致的运行期 UnexpectedEnd；find_bug_libs 12/12 全绿
+- int_overflow 边界随 BigInt 字面量特性迁移 ACCEPTED_CASES（超大整数合法），移除 99_errors/00c_lexer_overflow.lz；全量 cargo test 0 failed
+
 ### FIND_BUG 挖掘套件入库与首轮修复（2026-09-03 ~ 09-04）
 - FIND_BUG 挖掘套件入库 + lz_builtins 扩展（error/functional/std）+ 测试基建（4ca253d）
 - ExternBridge + EmbedBridge 两大桥接落地 + 测试断言对齐（e11517d）

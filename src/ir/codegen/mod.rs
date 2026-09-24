@@ -5073,7 +5073,13 @@ impl CodeGen {
                     generics, for_ty, where_str
                 ));
                 self.indent += 1;
-                self.emit_line(&format!("type Item = {};", item_ty));
+                // 本模块自定义了 `trait Iterator`（会生成 pub trait Iterator 遮蔽 std）时，
+                // 该 impl 解析到本地 trait（无 Item 关联类型），补 type Item 反报
+                // E0437 type Item is not a member of trait Iterator（lib_iterator 复现）。
+                // 仅当模块未声明 Iterator trait（impl 落 std::iter::Iterator）时补 Item。
+                if !self.trait_names.contains("Iterator") {
+                    self.emit_line(&format!("type Item = {};", item_ty));
+                }
                 self.emit_line(&format!("fn next(&mut self) -> Option<{}> {{", item_ty));
                 self.indent += 1;
                 // 调用对应的方法：如果是 __next__ 则调用 self.__next__()，否则调用结构体的 next 方法
@@ -12782,8 +12788,14 @@ impl CodeGen {
                             BinOpKind::Le => "<=",
                             _ => ">=",
                         };
-                        let lhs_s = self.gen_expr(lhs);
-                        let rhs_s = self.gen_expr(rhs);
+                        // 单字符索引操作数直出 String 形态（否则 i64 码点块被
+                        // .to_string() 成十进制数字串，比较运行期永不相等——lib_json）
+                        let lhs_s = self
+                            .gen_str_char_index_tostring(lhs)
+                            .unwrap_or_else(|| self.gen_expr(lhs));
+                        let rhs_s = self
+                            .gen_str_char_index_tostring(rhs)
+                            .unwrap_or_else(|| self.gen_expr(rhs));
                         return format!(
                             "({}).to_string() {} ({}).to_string()",
                             lhs_s, o, rhs_s
@@ -12923,6 +12935,12 @@ impl CodeGen {
                         lhs_s
                     };
                     let rhs_is_variadic = matches!(&rhs.kind, ExprKind::Var(name) if self.current_variadic_params.contains(name));
+                    // rhs 为字符串单字符索引（`result + s[pos]`，lib_json 复现）：
+                    // 拼接语境直出 to_string 形态（通用路径会落 i64 码点变体，
+                    // 拼进 String 语境报 E0308 expected &str found &i64）。
+                    if let Some(idx_s) = self.gen_str_char_index_tostring(rhs) {
+                        return format!("{} + &{}[..]", lhs_base, idx_s);
+                    }
                     if rhs_is_variadic {
                         return format!("{} + {}", lhs_base, rhs_s);
                     }
@@ -14599,6 +14617,42 @@ impl CodeGen {
             s
         }
     }
+    /// 字符串单字符索引的 String 形态直出（拼接/比较等字符串语境专用）：
+    /// `s[i]` 的 IndexGet 通用路径按 current_ret_ty/current_expected_ty 判定，
+    /// 落不到字符串语境时生成 i64 码点块——该块再被字符串比较/拼接约定包一层
+    /// .to_string() 会变成**码点十进制数字串**（如 104 → "104"），运行期比较
+    /// 永不相等（lib_json `while s[pos] != "\""` 跑飞 UnexpectedEnd 实测）。
+    /// 对「str 基底 + 非 Range 键」的单字符索引直出 to_string 形态；
+    /// 其余形态返回 None，调用方回退通用生成。
+    fn gen_str_char_index_tostring(&self, e: &Expr) -> Option<String> {
+        let (base, key) = match &e.kind {
+            ExprKind::IndexGet { base, key } => (base, key),
+            _ => return None,
+        };
+        let base_is_str = matches!(&base.ty, IrType::Str)
+            || matches!(&base.ty, IrType::Named { path, .. }
+                if path == "str" || path == "String")
+            || (matches!(&base.ty, IrType::Any)
+                && matches!(&base.kind,
+                    ExprKind::MethodCall { method, receiver, .. }
+                    if method == "clone" && matches!(&receiver.kind,
+                        ExprKind::FieldAccess { field, .. }
+                        if field == "s" || field == "source" || field == "input")))
+            || (matches!(&base.ty, IrType::Any)
+                && matches!(&base.kind,
+                    ExprKind::FieldAccess { field, .. }
+                    if field == "s" || field == "source" || field == "input"));
+        if !base_is_str {
+            return None;
+        }
+        if matches!(&key.kind, ExprKind::StructCtor { name, .. } if name == "Range") {
+            return None; // 切片已有 .to_string() 形态，走通用路径
+        }
+        let base_s = self.gen_expr(base);
+        let key_s = self.gen_expr(key);
+        Some(format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s))
+    }
+
     fn binop_str(&self, op: &BinOpKind) -> &'static str {
         match op {
             BinOpKind::Add => "+",
