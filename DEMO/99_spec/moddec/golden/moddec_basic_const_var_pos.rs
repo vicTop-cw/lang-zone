@@ -15,7 +15,7 @@ use lz_builtins::*;
 
 pub fn main() {
     // STMT:Expr
-    println!("{:?}", MAX);
+    println!("{:?}", 1000i64);
 }
 
 const __name__: &str = "main";

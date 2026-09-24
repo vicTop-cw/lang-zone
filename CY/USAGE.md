@@ -11,7 +11,7 @@
 
 ```bash
 # 构建（从 CY/ 目录内）
-cd E:\IDEProjects\AI\lang-zone\CY
+cd %LANG_ZONE_ROOT%\CY
 cargo build --bin lzcyc
 
 # 查看帮助

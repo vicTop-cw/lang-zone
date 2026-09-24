@@ -75,7 +75,11 @@ fn golden(name: &str) -> String {
         .join("moddec")
         .join("golden")
         .join(name);
-    std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read golden {}: {e}", p.display()))
+    // core.autocrlf=true 检出会把 golden 变成 CRLF，而编译器产物恒为 LF：
+    // 读取时归一化，避免 EOL 环境差异导致快照比对假失败
+    std::fs::read_to_string(&p)
+        .map(|s| s.replace("\r\n", "\n"))
+        .unwrap_or_else(|e| panic!("read golden {}: {e}", p.display()))
 }
 
 /// 编译源码（以 input.lz 之名）→ 返回 (ok, stderr, 生成的 .rs)

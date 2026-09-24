@@ -159,3 +159,4 @@ cd <目录> && rustc --edition 2021 xxx.rs -o xxx && ./xxx   # 验证生成的 R
 - 自举路线 B 前端已入库 src/frontend/（lz_lexer.lz ~259 行 + lz_parser.lz ~284 行，v173），自举度 LZ 占比 1.7%（997/57597 行，v174）
 - LZ 编译器递归限制（v174/v175 定位）：「缩进 tokenize（行首 Indent 生成）+ parse_block↔parse_stmt 互相递归」完整组合触发 lang-zone 编译栈溢出；规避：line_start 仅行首缩进分支处理（无条件 `if line_start:` 或分散 line_start 赋值都会溢出），用「空格 && line_start」+「line_start」两个简单分支
 - 自举 Parser 嵌套块递归：p44 实证 parse_stmt If 分支递归调 parse_block 逻辑可用（固定 token 列表 → `if 1 {return 2}`，rustc 0 错误）；v174 入库版 tokenize 实际不生成 Indent（残留 line_start=false 无声明）是 `def foo {}` 空体根因；提交链 v174 4ef57fb / v175 5ff637a
+- lang-zone：gitcode 推送/删除分支走 SSH（`ssh://git@gitcode.com/VictorTop/lang-zone.git`，认证 OK）；HTTPS 方式会弹 terminal prompt 被禁用而失败。GitHub origin 直接 `git push` 即可。
