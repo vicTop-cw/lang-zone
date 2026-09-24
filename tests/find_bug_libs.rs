@@ -140,7 +140,7 @@ fn lib_linked_list() {
 }
 
 #[test]
-// 2026-09-17 转正：E0308/E0277 已消除（chr_unchecked + to_string + contains Pattern 修复），全链路 OK
+// 2026-09-18 转正：E0277 str 参数比较对齐已由 BinOp 比较生成处 str 对齐修复
 fn lib_string() {
     assert!(run_lib("lib_string").unwrap().contains("OK"));
 }
@@ -164,8 +164,7 @@ fn lib_iterator() {
 }
 
 #[test]
-// 2026-09-17 转正：E0382 已消除（str→&str 映射 + fn_ref_params + 枚举 __eq__ 自动生成），
-// LZ 源码 put/remove 追加&赋值逻辑补齐，全链路 OK
+// 2026-09-18 转正：E0277 str 参数比较对齐已由 BinOp 比较生成处 str 对齐修复
 fn lib_hashmap() {
     assert!(run_lib("lib_hashmap").unwrap().contains("OK"));
 }

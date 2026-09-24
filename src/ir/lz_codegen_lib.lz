@@ -135,7 +135,7 @@ enum Pattern:
 
 // ── Item ──
 enum Item:
-    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, body: List<Stmt>)
+    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
     StructDef(name: str, generics: List<str>, fields: List<(str, IrType)>)
     EnumDef(name: str, generics: List<str>, variants: List<(str, List<IrType>)>)
@@ -154,38 +154,38 @@ struct IrModule =
     prelude: List<str>
     version: int
 
-// ── display_type：IrType → str ──
-def display_type(t: IrType) -> str =
+// ── display_type：IrType → String ──
+def display_type(t: IrType) -> String =
     match t:
-        case IrType.Int => "int"
-        case IrType.F64 => "f64"
-        case IrType.Str => "str"
-        case IrType.Bool => "bool"
-        case IrType.Unit => "()"
-        case IrType.Never => "!"
-        case IrType.Any => "?"
-        case IrType.Self_ => "Self"
-        case IrType.Generic(name: g) => g
+        case IrType.Int => "int".to_string()
+        case IrType.F64 => "f64".to_string()
+        case IrType.Str => "str".to_string()
+        case IrType.Bool => "bool".to_string()
+        case IrType.Unit => "()".to_string()
+        case IrType.Never => "!".to_string()
+        case IrType.Any => "?".to_string()
+        case IrType.Self_ => "Self".to_string()
+        case IrType.Generic(name: g) => g.to_string()
         case IrType.Named(path: p, args: a) =>
-            p + ("<" + type_list(a) + ">" if a.len() > 0 else "")
-        case IrType.Opt(inner: x) => "Option<" + display_type(x) + ">"
-        case IrType.Res(ok: o, err: e) => "Result<" + display_type(o) + ", " + display_type(e) + ">"
+            p + ("<".to_string() + type_list(a) + ">".to_string() if a.len() > 0 else "".to_string())
+        case IrType.Opt(inner: x) => "Option<".to_string() + display_type(x) + ">".to_string()
+        case IrType.Res(ok: o, err: e) => "Result<".to_string() + display_type(o) + ", ".to_string() + display_type(e) + ">".to_string()
         case IrType.Tuple(elems: es) =>
-            "(" + type_list(es) + ")"
+            "(".to_string() + type_list(es) + ")".to_string()
         case IrType.FnType(params: ps, ret: r) =>
-            "fn(" + type_list(ps) + ") -> " + display_type(r)
-        case IrType.Ref(inner: x) => "&" + display_type(x)
-        case IrType.MutRef(inner: x) => "&mut " + display_type(x)
+            "fn(".to_string() + type_list(ps) + ") -> ".to_string() + display_type(r)
+        case IrType.Ref(inner: x) => "&".to_string() + display_type(x)
+        case IrType.MutRef(inner: x) => "&mut ".to_string() + display_type(x)
         case IrType.Duck(fields: fs) =>
-            "duck {" + duck_fields(fs) + "}"
+            "duck {".to_string() + duck_fields(fs) + "}".to_string()
 
-def type_list(ts: List<IrType>) -> str =
+def type_list(ts: List<IrType>) -> String =
     if ts.len() == 0:
-        ""
+        "".to_string()
     else:
         let head = display_type(ts[0].clone())
         if ts.len() > 1:
-            head + ", " + type_list(tail_t(ts))
+            head + ", ".to_string() + type_list(tail_t(ts))
         else:
             head
 
@@ -195,84 +195,84 @@ def tail_t(ts: List<IrType>) -> List<IrType> =
         out.push(ts[idx].clone())
     out
 
-def duck_fields(fs: List<(str, IrType)>) -> str =
-    let mut out = ""
+def duck_fields(fs: List<(str, IrType)>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..fs.len():
         let f = fs[idx].clone()
-        out = out + (", " if idx > 0 else "") + f.0 + ": " + display_type(f.1)
+        out = out + (", ".to_string() if idx > 0 else "".to_string()) + f.0.to_string() + ": ".to_string() + display_type(f.1)
     out
 
-// ── display_expr：Expr → str（带 [ty] 前缀）──
-def display_expr(e: Expr) -> str =
+// ── display_expr：Expr → String（带 [ty] 前缀）──
+def display_expr(e: Expr) -> String =
     match e:
-        case Expr.LitInt(v: n, ty: t) => "[" + display_type(t) + "] " + n.to_string() + "_i64"
-        case Expr.LitF64(v: n, ty: t) => "[" + display_type(t) + "] " + n.to_string() + "_f64"
-        case Expr.LitStr(s: s, ty: t) => "[" + display_type(t) + "] \"" + s + "\""
-        case Expr.LitFStr(s: s, ty: t) => "[" + display_type(t) + "] f\"" + s + "\""
-        case Expr.LitBool(b: b, ty: t) => "[" + display_type(t) + "] " + b.to_string()
-        case Expr.LitUnit(ty: t) => "[" + display_type(t) + "] ()"
-        case Expr.LitNone(ty: t) => "[" + display_type(t) + "] None"
-        case Expr.Var(name: n, ty: t) => "[" + display_type(t) + "] " + n
+        case Expr.LitInt(v: n, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + n.to_string() + "_i64".to_string()
+        case Expr.LitF64(v: n, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + n.to_string() + "_f64".to_string()
+        case Expr.LitStr(s: s, ty: t) => "[".to_string() + display_type(t) + "] \"".to_string() + s + "\"".to_string()
+        case Expr.LitFStr(s: s, ty: t) => "[".to_string() + display_type(t) + "] f\"".to_string() + s + "\"".to_string()
+        case Expr.LitBool(b: b, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + b.to_string()
+        case Expr.LitUnit(ty: t) => "[".to_string() + display_type(t) + "] ()".to_string()
+        case Expr.LitNone(ty: t) => "[".to_string() + display_type(t) + "] None".to_string()
+        case Expr.Var(name: n, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + n
         case Expr.Call(callee: c, args: a, ty: t) =>
-            "[" + display_type(t) + "] call " + display_expr(c) + arg_list(a)
+            "[".to_string() + display_type(t) + "] call ".to_string() + display_expr(c) + arg_list(a)
         case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
-            "[" + display_type(t) + "] method " + display_expr(r) + "." + m + arg_list(a)
+            "[".to_string() + display_type(t) + "] method ".to_string() + display_expr(r) + ".".to_string() + m + arg_list(a)
         case Expr.FieldAccess(base: b, field: f, ty: t) =>
-            "[" + display_type(t) + "] field " + display_expr(b) + "." + f
+            "[".to_string() + display_type(t) + "] field ".to_string() + display_expr(b) + ".".to_string() + f
         case Expr.IndexGet(base: b, key: k, ty: t) =>
-            "[" + display_type(t) + "] index " + display_expr(b) + "[" + display_expr(k) + "]"
+            "[".to_string() + display_type(t) + "] index ".to_string() + display_expr(b) + "[".to_string() + display_expr(k) + "]".to_string()
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
-            "[" + display_type(t) + "] index_set " + display_expr(b) + "[" + display_expr(k) + "] = " + display_expr(v)
+            "[".to_string() + display_type(t) + "] index_set ".to_string() + display_expr(b) + "[".to_string() + display_expr(k) + "] = ".to_string() + display_expr(v)
         case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
-            "[" + display_type(t) + "] binop " + display_expr(l) + " " + o + " " + display_expr(r)
+            "[".to_string() + display_type(t) + "] binop ".to_string() + display_expr(l) + " ".to_string() + o + " ".to_string() + display_expr(r)
         case Expr.UnOp(op: o, operand: p, ty: t) =>
-            "[" + display_type(t) + "] unop " + o + " " + display_expr(p)
+            "[".to_string() + display_type(t) + "] unop ".to_string() + o + " ".to_string() + display_expr(p)
         case Expr.StructCtor(name: n, fields: fs, ty: t) =>
-            "[" + display_type(t) + "] new " + n + field_pairs(fs)
+            "[".to_string() + display_type(t) + "] new ".to_string() + n + field_pairs(fs)
         case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
-            "[" + display_type(t) + "] " + en + "::" + v + arg_list(a)
+            "[".to_string() + display_type(t) + "] ".to_string() + en + "::".to_string() + v + arg_list(a)
         case Expr.Cast(inner: i, target: tg, ty: t) =>
-            "[" + display_type(t) + "] cast " + display_expr(i) + " as " + display_type(tg)
+            "[".to_string() + display_type(t) + "] cast ".to_string() + display_expr(i) + " as ".to_string() + display_type(tg)
         case Expr.MagicCall(magic: m, args: a, ty: t) =>
-            "[" + display_type(t) + "] magic " + m + arg_list(a)
+            "[".to_string() + display_type(t) + "] magic ".to_string() + m + arg_list(a)
         case Expr.IfExpr(cond: c, then: th, els: el, ty: t) =>
-            "[" + display_type(t) + "] if " + display_expr(c) + " then " + display_expr(th) + " else " + display_expr(el)
+            "[".to_string() + display_type(t) + "] if ".to_string() + display_expr(c) + " then ".to_string() + display_expr(th) + " else ".to_string() + display_expr(el)
         case Expr.Lambda(params: ps, body: b, ty: t) =>
-            "[" + display_type(t) + "] |" + str_join(ps) + "| " + display_expr(b)
+            "[".to_string() + display_type(t) + "] |".to_string() + str_join(ps) + "| ".to_string() + display_expr(b)
         case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) =>
-            "[" + display_type(t) + "] pipe " + display_expr(r) + " |> " + display_expr(c) + arg_list(a)
+            "[".to_string() + display_type(t) + "] pipe ".to_string() + display_expr(r) + " |> ".to_string() + display_expr(c) + arg_list(a)
         case Expr.TupleLit(elems: es, ty: t) =>
-            "[" + display_type(t) + "] (" + expr_list(es) + ")"
+            "[".to_string() + display_type(t) + "] (".to_string() + expr_list(es) + ")".to_string()
         case Expr.ListLit(items: xs, ty: t) =>
-            "[" + display_type(t) + "] [" + expr_list(xs) + "]"
+            "[".to_string() + display_type(t) + "] [".to_string() + expr_list(xs) + "]".to_string()
         case Expr.BlockExpr(stmts: ss, ty: t) =>
-            "[" + display_type(t) + "] block " + block_with_ty(ss, t)
+            "[".to_string() + display_type(t) + "] block ".to_string() + block_with_ty(ss, t)
         case Expr.GenExpr(yield_of: y, ty: t) =>
-            "[" + display_type(t) + "] gen " + display_expr(y)
+            "[".to_string() + display_type(t) + "] gen ".to_string() + display_expr(y)
         case Expr.Paren(inner: i, ty: t) =>
-            "[" + display_type(t) + "] (" + display_expr(i) + ")"
+            "[".to_string() + display_type(t) + "] (".to_string() + display_expr(i) + ")".to_string()
         case Expr.Range(end: en, inclusive: inc, ty: t) =>
-            "[" + display_type(t) + "] <expr>"
+            "[".to_string() + display_type(t) + "] <expr>".to_string()
         case Expr.Dict(pairs: ps, ty: t) =>
-            "[" + display_type(t) + "] <expr>"
+            "[".to_string() + display_type(t) + "] <expr>".to_string()
         case Expr.AssignExpr(target: tg, value: v, ty: t) =>
-            "[" + display_type(t) + "] <expr>"
+            "[".to_string() + display_type(t) + "] <expr>".to_string()
         case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) =>
-            "[" + display_type(t) + "] <expr>"
+            "[".to_string() + display_type(t) + "] <expr>".to_string()
 
-def arg_list(as_: List<Expr>) -> str =
+def arg_list(as_: List<Expr>) -> String =
     if as_.len() == 0:
-        ""
+        "".to_string()
     else:
-        "(" + expr_list(as_) + ")"
+        "(".to_string() + expr_list(as_) + ")".to_string()
 
-def expr_list(es: List<Expr>) -> str =
+def expr_list(es: List<Expr>) -> String =
     if es.len() == 0:
-        ""
+        "".to_string()
     else:
         let head = display_expr(es[0].clone())
         if es.len() > 1:
-            head + ", " + expr_list(tail_e(es))
+            head + ", ".to_string() + expr_list(tail_e(es))
         else:
             head
 
@@ -282,20 +282,20 @@ def tail_e(es: List<Expr>) -> List<Expr> =
         out.push(es[idx].clone())
     out
 
-def field_pairs(fs: List<(str, Expr)>) -> str =
+def field_pairs(fs: List<(str, Expr)>) -> String =
     if fs.len() == 0:
-        ""
+        "".to_string()
     else:
-        let mut out = "{ "
+        let mut out: String = "{ ".to_string()
         for idx in 0..fs.len():
-            out = out + (", " if idx > 0 else "") + pair_str(fs[idx].clone())
-        out + " }"
+            out = out + (", ".to_string() if idx > 0 else "".to_string()) + pair_str(fs[idx].clone())
+        out + " }".to_string()
 
-def pair_str(p: (str, Expr)) -> str =
-    p.0 + ": " + display_expr(p.1)
+def pair_str(p: (str, Expr)) -> String =
+    p.0 + ": ".to_string() + display_expr(p.1)
 
-// ── display_stmt：Stmt → str ──
-def display_stmt(s: Stmt) -> str =
+// ── display_stmt：Stmt → String ──
+def display_stmt(s: Stmt) -> String =
     match s:
         case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
             let_kw(m, r) + n + ": " + display_type(t) + " = " + display_expr(v)
@@ -349,74 +349,74 @@ def display_stmt(s: Stmt) -> str =
         case Stmt.TypeAlias(name: n, ty: t) => "<stmt>"
         case Stmt.Pass => "<stmt>"
 
-def let_kw(m: bool, r: bool) -> str =
-    ("let mut ref " if (m && r) else ("let ref " if r else ("let mut " if m else "let ")))
+def let_kw(m: bool, r: bool) -> String =
+    ("let mut ref ".to_string() if (m && r) else ("let ref ".to_string() if r else ("let mut ".to_string() if m else "let ".to_string())))
 
-def guard_s(g: MaybeExpr) -> str =
+def guard_s(g: MaybeExpr) -> String =
     match g:
-        case MaybeExpr.YesExpr(value: e) => " if " + display_expr(e)
-        case MaybeExpr.NoExpr => ""
+        case MaybeExpr.YesExpr(value: e) => " if ".to_string() + display_expr(e)
+        case MaybeExpr.NoExpr => "".to_string()
 
-def else_s(eb: MaybeBlock) -> str =
+def else_s(eb: MaybeBlock) -> String =
     match eb:
-        case MaybeBlock.YesBlock(value: b) => " else " + block_disp(b)
-        case MaybeBlock.NoBlock => ""
+        case MaybeBlock.YesBlock(value: b) => " else ".to_string() + block_disp(b)
+        case MaybeBlock.NoBlock => "".to_string()
 
-def finally_s(fb: MaybeBlock) -> str =
+def finally_s(fb: MaybeBlock) -> String =
     match fb:
-        case MaybeBlock.YesBlock(value: b) => " finally " + block_disp(b)
-        case MaybeBlock.NoBlock => ""
+        case MaybeBlock.YesBlock(value: b) => " finally ".to_string() + block_disp(b)
+        case MaybeBlock.NoBlock => "".to_string()
 
-def try_catches_str(cs: List<(MaybePattern, BlockIR)>) -> str =
-    let mut out = ""
+def try_catches_str(cs: List<(MaybePattern, BlockIR)>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..cs.len():
         let c = cs[idx].clone()
         out = out + catch_str(c)
     out
 
-def catch_str(c: (MaybePattern, BlockIR)) -> str =
+def catch_str(c: (MaybePattern, BlockIR)) -> String =
     match c.0:
-        case MaybePattern.YesPat(value: p) => " catch(" + display_pattern(p) + ") " + block_disp(c.1)
-        case MaybePattern.NoPat => " catch " + block_disp(c.1)
+        case MaybePattern.YesPat(value: p) => " catch(".to_string() + display_pattern(p) + ") ".to_string() + block_disp(c.1)
+        case MaybePattern.NoPat => " catch ".to_string() + block_disp(c.1)
 
-// ── display_pattern：Pattern → str ──
-def display_pattern(p: Pattern) -> str =
+// ── display_pattern：Pattern → String ──
+def display_pattern(p: Pattern) -> String =
     match p:
-        case Pattern.Wildcard => "_"
+        case Pattern.Wildcard => "_".to_string()
         case Pattern.Ident(name: n) => n
-        case Pattern.RefMutIdent(name: n) => "ref mut " + n
-        case Pattern.LitInt(v: n) => n.to_string() + "_i64"
-        case Pattern.LitStr(s: s) => "\"" + s + "\""
+        case Pattern.RefMutIdent(name: n) => "ref mut ".to_string() + n
+        case Pattern.LitInt(v: n) => n.to_string() + "_i64".to_string()
+        case Pattern.LitStr(s: s) => "\"".to_string() + s + "\"".to_string()
         case Pattern.LitBool(b: b) => b.to_string()
-        case Pattern.LitF64(v: n) => n.to_string() + "_f64"
+        case Pattern.LitF64(v: n) => n.to_string() + "_f64".to_string()
         case Pattern.Tuple(elems: es) =>
-            "(" + pat_list(es) + ")"
+            "(".to_string() + pat_list(es) + ")".to_string()
         case Pattern.List(elems: es) =>
-            "[" + pat_list(es) + "]"
+            "[".to_string() + pat_list(es) + "]".to_string()
         case Pattern.Struct(name: n, fields: fs) =>
-            let mut fields_s = ""
+            let mut fields_s: String = "".to_string()
             for idx in 0..fs.len():
                 if idx > 0:
-                    fields_s = fields_s + ", "
+                    fields_s = fields_s + ", ".to_string()
                 let f = fs[idx].clone()
-                fields_s = fields_s + f.0 + ": " + display_pattern(f.1)
-            n + " { " + fields_s + " }"
+                fields_s = fields_s + f.0 + ": ".to_string() + display_pattern(f.1)
+            n + " { ".to_string() + fields_s + " }".to_string()
         case Pattern.Enum(enum_name: en, variant: v, args: a) =>
-            en + "::" + v + arg_pat_list(a)
+            en + "::".to_string() + v + arg_pat_list(a)
         case Pattern.Rest(name: rn) =>
             match rn:
-                case MaybeStr.YesStr(value: n2) => ".." + n2
-                case MaybeStr.NoStr => ".."
+                case MaybeStr.YesStr(value: n2) => "..".to_string() + n2
+                case MaybeStr.NoStr => "..".to_string()
         case Pattern.Range(start: st, end: en, inclusive: inc) =>
-            st.to_string() + ("..=" if inc else "..") + en.to_string()
+            st.to_string() + ("..=".to_string() if inc else "..".to_string()) + en.to_string()
 
-def pat_list(ps: List<Pattern>) -> str =
+def pat_list(ps: List<Pattern>) -> String =
     if ps.len() == 0:
-        ""
+        "".to_string()
     else:
         let head = display_pattern(ps[0].clone())
         if ps.len() > 1:
-            head + ", " + pat_list(tail_pat(ps))
+            head + ", ".to_string() + pat_list(tail_pat(ps))
         else:
             head
 
@@ -426,214 +426,332 @@ def tail_pat(ps: List<Pattern>) -> List<Pattern> =
         out.push(ps[idx].clone())
     out
 
-def arg_pat_list(ps: List<Pattern>) -> str =
+def arg_pat_list(ps: List<Pattern>) -> String =
     if ps.len() == 0:
-        ""
+        "".to_string()
     else:
-        "(" + pat_list(ps) + ")"
+        "(".to_string() + pat_list(ps) + ")".to_string()
 
-def gen_match_arms(arms: List<(Pattern, MaybeExpr, BlockIR)>) -> str =
-    let mut out = ""
+def gen_match_arms(arms: List<(Pattern, MaybeExpr, BlockIR)>, fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..arms.len():
         let arm = arms[idx].clone()
-        out = out + gen_match_arm(arm)
+        out = out + gen_match_arm(arm, fn_raises)
     out
 
-def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR)) -> str =
+def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR), fn_raises: MaybeIrType) -> String =
     let pat = arm.0
     let gd = arm.1
     let blk = arm.2
     let pat_s = gen_pattern(pat)
     let gd_s = match gd:
-        case MaybeExpr.YesExpr(v: vv) => " if " + gen_expr(vv)
-        case MaybeExpr.NoExpr => ""
-    let blk_s = gen_block(blk)
-    "    " + pat_s + gd_s + " => " + blk_s + ",\n"
+        case MaybeExpr.YesExpr(v: vv) => " if ".to_string() + gen_expr(vv, MaybeIrType.NoTy)
+        case MaybeExpr.NoExpr => "".to_string()
+    let blk_s = gen_block(blk, fn_raises)
+    "    ".to_string() + pat_s + gd_s + " => ".to_string() + blk_s + ",\n".to_string()
 
 // D2 缺口补齐：Pattern codegen（复用 display_pattern 的输出格式）
-def gen_pattern(p: Pattern) -> str =
+def gen_pattern(p: Pattern) -> String =
     match p:
-        case Pattern.Wildcard => "_"
+        case Pattern.Wildcard => "_".to_string()
         case Pattern.Ident(name: n) => n
-        case Pattern.RefMutIdent(name: n) => "ref mut " + n
-        case Pattern.LitInt(v: n) => n.to_string() + "_i64"
-        case Pattern.LitStr(s: s) => "\"" + esc_rust(s) + "\""
+        case Pattern.RefMutIdent(name: n) => "ref mut ".to_string() + n
+        case Pattern.LitInt(v: n) => n.to_string() + "_i64".to_string()
+        case Pattern.LitStr(s: s) => "\"".to_string() + esc_rust(s) + "\"".to_string()
         case Pattern.LitBool(b: b) => b.to_string()
-        case Pattern.LitF64(v: n) => n.to_string() + "_f64"
-        case Pattern.Tuple(elems: es) => "(" + pat_list(es) + ")"
-        case Pattern.List(elems: es) => "[" + pat_list(es) + "]"
+        case Pattern.LitF64(v: n) => n.to_string() + "_f64".to_string()
+        case Pattern.Tuple(elems: es) => "(".to_string() + pat_list(es) + ")".to_string()
+        case Pattern.List(elems: es) => "[".to_string() + pat_list(es) + "]".to_string()
         case Pattern.Struct(name: n, fields: fs) =>
-            let mut fields_s = " { "
+            let mut fields_s: String = " { ".to_string()
             for idx in 0..fs.len():
                 if idx > 0:
-                    fields_s = fields_s + ", "
+                    fields_s = fields_s + ", ".to_string()
                 let f = fs[idx].clone()
-                fields_s = fields_s + f.0 + ": " + gen_pattern(f.1)
-            fields_s + " }"
-        case Pattern.Enum(enum_name: en, variant: v, args: a) => en + "::" + v + arg_pat_list(a)
+                fields_s = fields_s + f.0 + ": ".to_string() + gen_pattern(f.1)
+            fields_s + " }".to_string()
+        case Pattern.Enum(enum_name: en, variant: v, args: a) => en + "::".to_string() + v + arg_pat_list(a)
         case Pattern.Rest(name: rn) =>
             match rn:
-                case MaybeStr.YesStr(value: n2) => ".." + n2
-                case MaybeStr.NoStr => ".."
+                case MaybeStr.YesStr(value: n2) => "..".to_string() + n2
+                case MaybeStr.NoStr => "..".to_string()
         case Pattern.Range(start: st, end: en, inclusive: inc) =>
-            st.to_string() + "_i64.." + en.to_string() + "_i64"
+            st.to_string() + "_i64..".to_string() + en.to_string() + "_i64".to_string()
 
 // D2 缺口补齐：BlockIR codegen
-def gen_block(b: BlockIR) -> str =
+def gen_block(b: BlockIR, fn_raises: MaybeIrType) -> String =
     match b:
         case BlockIR.Block(stmts: ss, ty: t) =>
             if ss.len() == 0:
-                "{}"
+                String::new()
             else:
-                "{\n" + gen_body(ss, false, "") + "}"
+                "{\n" + gen_body(ss, false, "".to_string(), fn_raises) + "}"
 
 // ── IrType → Rust 类型 ──
-def rust_type(t: IrType) -> str =
+def rust_type(t: IrType) -> String =
     match t:
-        case IrType.Int => "i64"
-        case IrType.F64 => "f64"
-        case IrType.Str => "String"
-        case IrType.Bool => "bool"
-        case IrType.Unit => "()"
-        case IrType.Never => "!"
-        case IrType.Any => "Box<dyn Any>"
-        case IrType.Self_ => "Self"
-        case IrType.Generic(name: g) => g
+        case IrType.Int => "i64".to_string()
+        case IrType.F64 => "f64".to_string()
+        case IrType.Str => "String".to_string()
+        case IrType.Bool => "bool".to_string()
+        case IrType.Unit => "()".to_string()
+        case IrType.Never => "!".to_string()
+        case IrType.Any => "Box<dyn Any>".to_string()
+        case IrType.Self_ => "Self".to_string()
+        case IrType.Generic(name: g) => g.to_string()
         case IrType.Named(path: p, args: a) =>
             p + ("<" + type_rust_list(a) + ">" if a.len() > 0 else "")
-        case IrType.Opt(inner: x) => "Option<" + rust_type(x) + ">"
-        case IrType.Res(ok: o, err: e) => "Result<" + rust_type(o) + ", " + rust_type(e) + ">"
+        case IrType.Opt(inner: x) => "Option<" + rust_type(x) + ">".to_string()
+        case IrType.Res(ok: o, err: e) => "Result<" + rust_type(o) + ", " + rust_type(e) + ">".to_string()
         case IrType.Tuple(elems: es) =>
-            "(" + type_rust_list(es) + ")"
+            "(" + type_rust_list(es) + ")".to_string()
         case IrType.FnType(params: ps, ret: r) =>
             "fn(" + type_rust_list(ps) + ") -> " + rust_type(r)
-        case IrType.Ref(inner: x) => "&" + rust_type(x)
-        case IrType.MutRef(inner: x) => "&mut " + rust_type(x)
+        case IrType.Ref(inner: x) => "&".to_string() + rust_type(x)
+        case IrType.MutRef(inner: x) => "&mut ".to_string() + rust_type(x)
         case IrType.Duck(fields: fs) =>
-            "Box<dyn Any>"
+            "Box<dyn Any>".to_string()
 
-def type_rust_list(ts: List<IrType>) -> str =
+def type_rust_list(ts: List<IrType>) -> String =
     if ts.len() == 0:
-        ""
+        "".to_string()
     else:
         let head = rust_type(ts[0].clone())
         if ts.len() > 1:
-            head + ", " + type_rust_list(tail_t(ts))
+            head + ", ".to_string() + type_rust_list(tail_t(ts))
         else:
             head
 
-def generic_sig(gs: List<str>) -> str =
+def generic_sig(gs: List<str>) -> String =
     if gs.len() == 0:
-        ""
+        "".to_string()
     else:
-        "<" + str_join(gs) + ">"
+        "<".to_string() + str_join(gs) + ">".to_string()
 
-def str_join(xs: List<str>) -> str =
+def str_join(xs: List<str>) -> String =
     if xs.len() == 0:
-        ""
+        "".to_string()
     else:
         let head = xs[0].clone()
         if xs.len() > 1:
-            head + ", " + str_join(aj_tail(xs))
+            head + ", ".to_string() + str_join(aj_tail(xs))
         else:
             head
 
-// ── Expr → Rust 表达式（无 [ty] 前缀）──
-def gen_expr(e: Expr) -> str =
+// ── TryCatch Result 基检测与类型推断（对齐原生 codegen/mod.rs:8724-8774）──
+// 本轮纯新增，不接入 gen_stmt 主流程；为下一轮 Result 基实现打基础
+
+def is_result_ctor(e: Expr) -> bool =
     match e:
-        case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64"
-        case Expr.LitF64(v: n, ty: t) => fmt_f64(n)
-        case Expr.LitStr(s: s, ty: t) => "\"" + esc_rust(s) + "\".to_string()"
-        case Expr.LitFStr(s: s, ty: t) => gen_fstring(s)
+        case Expr.Call(callee: c, args: a, ty: t) =>
+            match c:
+                case Expr.Var(name: n, ty: t2) => n == "Ok" || n == "Err"
+                case _ => false
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
+            en == "Result" && (v == "Ok" || v == "Err")
+        case _ => false
+
+def block_tail_expr(b: BlockIR) -> MaybeExpr =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            let mut result: MaybeExpr = MaybeExpr.NoExpr
+            for si in 0..ss.len():
+                match ss[si].clone():
+                    case Stmt.ExprStmt(expr: e) => result = MaybeExpr.YesExpr(value: e)
+                    case _ => ()
+            result
+
+def is_res_type(t: IrType) -> bool =
+    match t:
+        case IrType.Res(ok: o, err: e) => true
+        case _ => false
+
+def scan_result_let(ss: List<Stmt>) -> bool =
+    let mut found: bool = false
+    for si in 0..ss.len():
+        match ss[si].clone():
+            case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+                if is_res_type(t) && !is_result_ctor(v):
+                    found = true
+            case Stmt.ExprStmt(expr: e) =>
+                if is_res_type(expr_ty(e)) && !is_result_ctor(e):
+                    found = true
+            case _ => ()
+    found
+
+def is_result_body(b: BlockIR) -> bool =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            let tail = block_tail_expr(b)
+            let tail_is_ctor = match tail:
+                case MaybeExpr.YesExpr(value: e) => is_result_ctor(e)
+                case _ => false
+            let rule1 = is_res_type(t) && !tail_is_ctor
+            if rule1:
+                true
+            else:
+                scan_result_let(ss)
+
+def scan_result_ty(ss: List<Stmt>) -> MaybeIrType =
+    let mut result: MaybeIrType = MaybeIrType.NoTy
+    for si in 0..ss.len():
+        match ss[si].clone():
+            case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+                match result:
+                    case MaybeIrType.NoTy =>
+                        match t:
+                            case IrType.Res(ok: o, err: e) => result = MaybeIrType.YesTy(value: IrType.Res(ok: o, err: e))
+                            case _ => ()
+                    case _ => ()
+            case Stmt.ExprStmt(expr: e) =>
+                match result:
+                    case MaybeIrType.NoTy =>
+                        match expr_ty(e):
+                            case IrType.Res(ok: o, err: e) => result = MaybeIrType.YesTy(value: IrType.Res(ok: o, err: e))
+                            case _ => ()
+                    case _ => ()
+            case _ => ()
+    result
+
+def result_ty_from_body(b: BlockIR) -> MaybeIrType =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            match t:
+                case IrType.Res(ok: o, err: e) => MaybeIrType.YesTy(value: IrType.Res(ok: o, err: e))
+                case _ => scan_result_ty(ss)
+
+// ── expr_ty：Expr → IrType（统一类型访问器，对齐原生 expr.ty）──
+// 31 变体逐一提取 ty 字段；为 TryCatch Result 基规则2 完整扫描（含 ExprStmt）打基础
+def expr_ty(e: Expr) -> IrType =
+    match e:
+        case Expr.LitInt(v: _, ty: t) => t
+        case Expr.LitF64(v: _, ty: t) => t
+        case Expr.LitStr(s: _, ty: t) => t
+        case Expr.LitFStr(s: _, ty: t) => t
+        case Expr.LitBool(b: _, ty: t) => t
+        case Expr.LitUnit(ty: t) => t
+        case Expr.LitNone(ty: t) => t
+        case Expr.Var(name: _, ty: t) => t
+        case Expr.Call(callee: _, args: _, ty: t) => t
+        case Expr.MethodCall(receiver: _, method: _, args: _, ty: t) => t
+        case Expr.FieldAccess(base: _, field: _, ty: t) => t
+        case Expr.IndexGet(base: _, key: _, ty: t) => t
+        case Expr.IndexSet(base: _, key: _, value: _, ty: t) => t
+        case Expr.BinOp(op: _, lhs: _, rhs: _, ty: t) => t
+        case Expr.UnOp(op: _, operand: _, ty: t) => t
+        case Expr.StructCtor(name: _, fields: _, ty: t) => t
+        case Expr.EnumCtor(enum_name: _, variant: _, args: _, ty: t) => t
+        case Expr.Cast(inner: _, target: _, ty: t) => t
+        case Expr.MagicCall(magic: _, args: _, ty: t) => t
+        case Expr.IfExpr(cond: _, then: _, els: _, ty: t) => t
+        case Expr.Lambda(params: _, body: _, ty: t) => t
+        case Expr.Pipe(receiver: _, callee: _, args: _, ty: t) => t
+        case Expr.TupleLit(elems: _, ty: t) => t
+        case Expr.ListLit(items: _, ty: t) => t
+        case Expr.BlockExpr(stmts: _, ty: t) => t
+        case Expr.GenExpr(yield_of: _, ty: t) => t
+        case Expr.Paren(inner: _, ty: t) => t
+        case Expr.Range(end: _, inclusive: _, ty: t) => t
+        case Expr.Dict(pairs: _, ty: t) => t
+        case Expr.AssignExpr(target: _, value: _, ty: t) => t
+        case Expr.ImplicitConvert(source: _, target_ty: _, ty: t) => t
+
+// ── Expr → Rust 表达式（无 [ty] 前缀）──
+def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64".to_string()
+        case Expr.LitF64(v: n, ty: t) => fmt_f64(n).to_string()
+        case Expr.LitStr(s: s, ty: t) => "\"".to_string() + esc_rust(s) + "\".to_string()".to_string()
+        case Expr.LitFStr(s: s, ty: t) => gen_fstring(s).to_string()
         case Expr.LitBool(b: b, ty: t) => b.to_string()
-        case Expr.LitUnit(ty: t) => "()"
-        case Expr.LitNone(ty: t) => "None"
-        case Expr.Var(name: n, ty: t) => n
-        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a)
-        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r) + "." + m + "(" + expr_cs_list(a) + ")"
-        case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b) + "." + f
-        case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b) + "[" + gen_expr(k) + "]"
-        case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b) + "[" + gen_expr(k) + "] = " + gen_expr(v)
-        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) => gen_expr(l) + " " + o + " " + gen_expr(r)
-        case Expr.UnOp(op: o, operand: p, ty: t) => o + gen_expr(p)
+        case Expr.LitUnit(ty: t) => "()".to_string()
+        case Expr.LitNone(ty: t) => "None".to_string()
+        case Expr.Var(name: n, ty: t) => n.to_string()
+        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, fn_raises).to_string()
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b, fn_raises) + ".".to_string() + f.to_string()
+        case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "]".to_string()
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "] = ".to_string() + gen_expr(v, fn_raises)
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) => gen_expr(l, fn_raises) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr(r, fn_raises)
+        case Expr.UnOp(op: o, operand: p, ty: t) => o.to_string() + gen_expr(p, fn_raises)
         case Expr.StructCtor(name: n, fields: fs, ty: t) =>
             if n == "Range":
                 gen_range_ctor(fs)
             elif n == "Dict":
                 gen_dict_ctor(fs)
             else:
-                n + " { " + ctor_fields(fs) + " }"
-        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) => en + "::" + v + "(" + expr_cs_list(a) + ")"
-        case Expr.Cast(inner: i, target: tg, ty: t) => "(" + gen_expr(i) + " as " + rust_type(tg) + ")"
-        case Expr.MagicCall(magic: m, args: a, ty: t) => m + "(" + expr_cs_list(a) + ")"
-        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if " + gen_expr(c) + " { " + gen_expr(th) + " } else { " + gen_expr(el) + " }"
-        case Expr.Lambda(params: ps, body: b, ty: t) => "move |" + str_join(ps) + "| " + gen_expr(b)
-        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r) + "." + gen_expr(c) + "(" + expr_cs_list(a) + ")"
-        case Expr.TupleLit(elems: es, ty: t) => "(" + expr_cs_list(es) + ")"
-        case Expr.ListLit(items: xs, ty: t) => "[" + expr_cs_list(xs) + "]"
-        case Expr.BlockExpr(stmts: ss, ty: t) => "{\n" + gen_body(ss, false, "") + "}"
-        case Expr.GenExpr(yield_of: y, ty: t) => "gen " + gen_expr(y)
-        case Expr.Paren(inner: i, ty: t) => "(" + gen_expr(i) + ")"
-        case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64.." + gen_expr(en)
-        case Expr.Dict(pairs: ps, ty: t) => "HashMap::new()"
-        case Expr.AssignExpr(target: tg, value: v, ty: t) => gen_expr(tg) + " = " + gen_expr(v)
-        case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) => gen_expr(s)
-        case _ => "unimplemented!"
+                n.to_string() + " { ".to_string() + ctor_fields(fs) + " }".to_string()
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) => en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.Cast(inner: i, target: tg, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + " as ".to_string() + rust_type(tg).to_string() + ")".to_string()
+        case Expr.MagicCall(magic: m, args: a, ty: t) => m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if ".to_string() + gen_expr(c, fn_raises) + " { ".to_string() + gen_expr(th, fn_raises) + " } else { ".to_string() + gen_expr(el, fn_raises) + " }".to_string()
+        case Expr.Lambda(params: ps, body: b, ty: t) => "move |".to_string() + str_join(ps).to_string() + "| ".to_string() + gen_expr(b, fn_raises)
+        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.TupleLit(elems: es, ty: t) => "(".to_string() + expr_cs_list(es, fn_raises) + ")".to_string()
+        case Expr.ListLit(items: xs, ty: t) => "[".to_string() + expr_cs_list(xs, fn_raises) + "]".to_string()
+        case Expr.BlockExpr(stmts: ss, ty: t) => "{\n".to_string() + gen_body(ss, false, "".to_string(), fn_raises) + "}"
+        case Expr.GenExpr(yield_of: y, ty: t) => "gen ".to_string() + gen_expr(y, fn_raises)
+        case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + ")".to_string()
+        case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64..".to_string() + gen_expr(en, fn_raises)
+        case Expr.Dict(pairs: ps, ty: t) => "HashMap::new()".to_string()
+        case Expr.AssignExpr(target: tg, value: v, ty: t) => gen_expr(tg, fn_raises) + " = ".to_string() + gen_expr(v, fn_raises)
+        case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) => gen_expr(s, fn_raises)
+        case _ => "unimplemented!".to_string()
 
 // ── display 辅助函数 ──
-def display_item(i: Item) -> str =
+def display_item(i: Item) -> String =
     match i:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) => "fn " + n
-        case Item.Const(name: n, ty: t, value: v) => "const " + n
-        case Item.StructDef(name: n, generics: gs, fields: fs) => "struct " + n
-        case Item.EnumDef(name: n, generics: gs, variants: vs) => "enum " + n
-        case Item.TraitDef(name: n, supertraits: sts, methods: ms) => "trait " + n
-        case Item.DuckDef(name: n, method_count: mc) => "duck " + n
-        case Item.UseStmt(path: pth, alias: al, items: its, is_from: fr) => "use " + str_join(pth)
-        case Item.TypeAlias(name: n, ty: t) => "type " + n
-        case Item.Impl(trait_: tr, for_type: ft, method_names: mns) => "impl " + rust_type(ft)
-        case Item.CheckerBlock(name: n, ps_name: p) => "checker " + n
-        case Item.Test(name: n, body: b) => "test " + n
-        case _ => "item"
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: _rs, body: b) => "fn ".to_string() + n
+        case Item.Const(name: n, ty: t, value: v) => "const ".to_string() + n
+        case Item.StructDef(name: n, generics: gs, fields: fs) => "struct ".to_string() + n
+        case Item.EnumDef(name: n, generics: gs, variants: vs) => "enum ".to_string() + n
+        case Item.TraitDef(name: n, supertraits: sts, methods: ms) => "trait ".to_string() + n
+        case Item.DuckDef(name: n, method_count: mc) => "duck ".to_string() + n
+        case Item.UseStmt(path: pth, alias: al, items: its, is_from: fr) => "use ".to_string() + str_join(pth)
+        case Item.TypeAlias(name: n, ty: t) => "type ".to_string() + n
+        case Item.Impl(trait_: tr, for_type: ft, method_names: mns) => "impl ".to_string() + rust_type(ft)
+        case Item.CheckerBlock(name: n, ps_name: p) => "checker ".to_string() + n
+        case Item.Test(name: n, body: b) => "test ".to_string() + n
+        case _ => "item".to_string()
 
-def opt_debug(p: MaybeStr) -> str =
+def opt_debug(p: MaybeStr) -> String =
     match p:
         case MaybeStr.YesStr(value: v) => v
-        case MaybeStr.NoStr => ""
+        case MaybeStr.NoStr => "".to_string()
 
-def block_disp(b: BlockIR) -> str =
+def block_disp(b: BlockIR) -> String =
     match b:
         case BlockIR.Block(stmts: ss, ty: t) =>
-            "{\n" + block_with_ty(ss, t) + "}"
+            "{\n".to_string() + block_with_ty(ss, t) + "}".to_string()
 
-def stmt_block(ss: List<Stmt>) -> str =
+def stmt_block(ss: List<Stmt>) -> String =
     if ss.len() == 0:
-        "{}"
+        "{}".to_string()
     else:
-        let mut out = "{\n"
+        let mut out: String = "{\n".to_string()
         for idx in 0..ss.len():
-            out = out + display_stmt(ss[idx].clone()) + "\n"
-        out + "}"
+            out = out + display_stmt(ss[idx].clone()) + "\n".to_string()
+        out + "}".to_string()
 
-def match_block(s: Expr, arms: List<(Pattern, MaybeExpr, BlockIR)>) -> str =
-    let mut out = "match " + display_expr(s) + " {\n"
+def match_block(s: Expr, arms: List<(Pattern, MaybeExpr, BlockIR)>) -> String =
+    let mut out: String = "match ".to_string() + display_expr(s) + " {\n".to_string()
     for idx in 0..arms.len():
         let arm = arms[idx].clone()
         let pat_s = display_pattern(arm.0)
         let gd_s = match arm.1:
-            case MaybeExpr.YesExpr(v: vv) => " if " + display_expr(vv)
-            case MaybeExpr.NoExpr => ""
+            case MaybeExpr.YesExpr(v: vv) => " if ".to_string() + display_expr(vv)
+            case MaybeExpr.NoExpr => "".to_string()
         let blk_s = block_disp(arm.2)
-        out = out + "    " + pat_s + gd_s + " => " + blk_s + ",\n"
-    out + "}"
+        out = out + "    ".to_string() + pat_s + gd_s + " => ".to_string() + blk_s + ",\n".to_string()
+    out + "}".to_string()
 
-def block_with_ty(ss: List<Stmt>, ty: IrType) -> str =
+def block_with_ty(ss: List<Stmt>, ty: IrType) -> String =
     if ss.len() == 0:
-        ""
+        "".to_string()
     else:
-        let mut out = ""
+        let mut out: String = "".to_string()
         for idx in 0..ss.len():
-            out = out + display_stmt(ss[idx].clone()) + "\n"
+            out = out + display_stmt(ss[idx].clone()) + "\n".to_string()
         out
 
 // ── 其他辅助函数 ──
@@ -647,68 +765,68 @@ def base_is_dict(b: Expr) -> bool =
 
 // Range 构造：fields 可能含 start/end/inclusive（IR 中 `0..10` 被 builder 转为
 // StructCtor(name="Range")，原生 codegen 渲染 `0i64..10i64` / `0i64..=9i64`）
-def gen_range_ctor(fs: List<(str, Expr)>) -> str =
-    let mut start_s = ""
-    let mut end_s = ""
+def gen_range_ctor(fs: List<(str, Expr)>) -> String =
+    let mut start_s: String = "".to_string()
+    let mut end_s: String = "".to_string()
     let mut incl = false
     for idx in 0..fs.len():
         let f = fs[idx].clone()
         if f.0 == "start":
-            start_s = gen_expr(f.1)
+            start_s = gen_expr(f.1, MaybeIrType.NoTy)
         elif f.0 == "end":
-            end_s = gen_expr(f.1)
+            end_s = gen_expr(f.1, MaybeIrType.NoTy)
         elif f.0 == "inclusive":
             match f.1:
                 case Expr.LitBool(b: bv, ty: tv) => incl = bv
                 case _ => incl = incl
-    start_s + ("..=" if incl else "..") + end_s
+    start_s + (if incl: "..=".to_string() else: "..".to_string()) + end_s
 
 // Dict 构造：IR 用 StructCtor(name="Dict", fields=[(_k0, v), (_v0, v), ...]) 表示字典字面量，
 // 原生 codegen 渲染 std::collections::HashMap::from([(k, v), ...])；空字典 HashMap::new()
-def gen_dict_ctor(fs: List<(str, Expr)>) -> str =
+def gen_dict_ctor(fs: List<(str, Expr)>) -> String =
     if fs.len() == 0:
-        "std::collections::HashMap::new()"
+        "std::collections::HashMap::new()".to_string()
     else:
-        let mut pairs = ""
+        let mut pairs: String = "".to_string()
         let mut i = 0
         while i + 1 < fs.len():
             let k = fs[i].clone()
             let v = fs[i + 1].clone()
-            pairs = pairs + ("(" + gen_expr(k.1) + ", " + gen_expr(v.1) + ")")
+            pairs = pairs + "(".to_string() + gen_expr(k.1, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v.1, MaybeIrType.NoTy) + ")".to_string()
             if i + 2 < fs.len():
-                pairs = pairs + ", "
+                pairs = pairs + ", ".to_string()
             i = i + 2
-        "std::collections::HashMap::from([" + pairs + "])"
+        "[".to_string() + pairs + "].into_iter().collect()".to_string()
 
-def gen_call(c: Expr, a: List<Expr>) -> str =
+def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
     match c:
         case Expr.Var(name: n, ty: t) =>
             if n == "print":
-                "println!(" + print_fmt(a) + expr_cs_list(a) + ")"
+                "println!(".to_string() + print_fmt(a) + expr_cs_list(a, fn_raises) + ")".to_string()
             elif n == "len":
-                "(" + expr_cs_list(a) + ".len() as i64)"
+                "(".to_string() + expr_cs_list(a, fn_raises) + ".len() as i64)".to_string()
             elif n == "set!":
-                "std::collections::HashSet::from([" + expr_cs_list(a) + "])"
+                "[".to_string() + expr_cs_list(a, fn_raises) + "].into_iter().collect()".to_string()
             else:
-                n + "(" + expr_cs_list(a) + ")"
-        case _ => gen_expr(c) + "(" + expr_cs_list(a) + ")"
+                n.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case _ => gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
 
-def print_fmt(as_: List<Expr>) -> str =
+def print_fmt(as_: List<Expr>) -> String =
     if as_.len() == 0:
-        "\"\""
+        "\"\"".to_string()
     else:
-        let mut out = "\"{:?}"
+        let mut out: String = "\"{:?}".to_string()
         for idx in 1..as_.len():
-            out = out + " {:?}"
-        out + "\", "
+            out = out + " {:?}".to_string()
+        out + "\", ".to_string()
 
-def expr_cs_list(es: List<Expr>) -> str =
+def expr_cs_list(es: List<Expr>, fn_raises: MaybeIrType) -> String =
     if es.len() == 0:
-        ""
+        "".to_string()
     else:
-        let head = gen_expr(es[0].clone())
+        let head = gen_expr(es[0].clone(), fn_raises)
         if es.len() > 1:
-            head + ", " + expr_cs_list(ec_tail(es))
+            head + ", ".to_string() + expr_cs_list(ec_tail(es), fn_raises)
         else:
             head
 
@@ -718,45 +836,162 @@ def ec_tail(es: List<Expr>) -> List<Expr> =
         out.push(es[idx].clone())
     out
 
-def ctor_fields(fs: List<(str, Expr)>) -> str =
-    let mut out = ""
+def ctor_fields(fs: List<(str, Expr)>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..fs.len():
         let f = fs[idx].clone()
-        out = out + (", " if idx > 0 else "") + f.0 + ": " + gen_expr(f.1)
+        out = out + (if idx > 0: ", ".to_string() else: "".to_string()) + f.0.to_string() + ": ".to_string() + gen_expr(f.1, MaybeIrType.NoTy)
     out
 
 // ── 语句生成 ──
 
-def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: str) -> str =
+def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises: MaybeIrType) -> String =
     match s:
         case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
-            gen_let(n, t, v, m, r, auto_mut)
+            gen_let(n, t, v, m, r, auto_mut, fn_raises)
         case Stmt.Assign(target: tg, value: v) =>
             match tg:
                 case Expr.IndexGet(base: b, key: k, ty: t) =>
                     if base_is_dict(b):
-                        gen_expr(b) + ".insert(" + gen_expr(k) + ", " + gen_expr(v) + ");"
+                        gen_expr(b, MaybeIrType.NoTy) + ".insert(".to_string() + gen_expr(k, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ");".to_string()
                     else:
-                        gen_expr(tg) + " = " + gen_expr(v) + ";"
-                case _ => gen_expr(tg) + " = " + gen_expr(v) + ";"
+                        gen_expr(tg, MaybeIrType.NoTy) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
+                case _ => gen_expr(tg, MaybeIrType.NoTy) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
         case Stmt.Return(value: v) =>
             match v:
-                case MaybeExpr.YesExpr(value: inner) => "return " + gen_expr(inner) + ";"
-                case MaybeExpr.NoExpr => "return;"
+                case MaybeExpr.YesExpr(value: inner) => "return ".to_string() + gen_expr(inner, fn_raises) + ";".to_string()
+                case MaybeExpr.NoExpr => "return;".to_string()
         case Stmt.ExprStmt(expr: e) =>
-            let ret_prefix = "return " if (is_tail && !is_main) else ""
-            ret_prefix + gen_expr(e) + ";"
+            let ret_prefix = ("return " if (is_tail && !is_main) else "").to_string()
+            ret_prefix + gen_expr(e, fn_raises) + ";".to_string()
         case Stmt.While(cond: c, guard_e: g, body: b, else_body: eb) =>
-            gen_while(c, b)
-        case _ => "// TODO stmt"
+            gen_while(c, b, fn_raises)
+        case Stmt.If(cond: c, then: tb, els: eb) =>
+            gen_if(c, tb, eb, fn_raises)
+        case Stmt.Break => "break;".to_string()
+        case Stmt.Continue => "continue;".to_string()
+        case Stmt.Pass => "();  // pass".to_string()
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) =>
+            "for ".to_string() + v + " in ".to_string() + gen_expr(it, fn_raises) + " ".to_string() + gen_block(b, fn_raises)
+        case Stmt.Match(scrutinee: s, arms: as_) =>
+            "match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
+        case Stmt.Block(stmts: ss) =>
+            "{\n".to_string() + gen_body(ss, false, "".to_string(), fn_raises) + "}".to_string()
+        case Stmt.Assert(cond: c) =>
+            "assert!(".to_string() + gen_expr(c, fn_raises) + ");".to_string()
+        case Stmt.Raise(value: v) =>
+            match fn_raises:
+                case MaybeIrType.YesTy(value: _t) => "return Result::Err(".to_string() + gen_expr(v, fn_raises) + ");".to_string()
+                case MaybeIrType.NoTy => "panic!(".to_string() + gen_expr(v, fn_raises) + ");".to_string()
+        case Stmt.TypeAlias(name: n, ty: t) =>
+            "type ".to_string() + n.to_string() + " = ".to_string() + rust_type(t) + ";".to_string()
+        case Stmt.BreakLabel(label: l, value: v) =>
+            match v:
+                case MaybeExpr.YesExpr(value: inner) => "break '".to_string() + l + "' ".to_string() + gen_expr(inner, fn_raises) + ";".to_string()
+                case MaybeExpr.NoExpr => "break '".to_string() + l + "';".to_string()
+        case Stmt.BlockLabel(label: l, body: b) =>
+            "'".to_string() + l + ": ".to_string() + gen_block(b, fn_raises)
+        case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) =>
+            "while let ".to_string() + gen_pattern(p) + " = ".to_string() + gen_expr(e, fn_raises) + " ".to_string() + gen_block(b, fn_raises)
+        case Stmt.Defer(body: b) =>
+            "{ /* defer */ ".to_string() + gen_block(b, fn_raises) + " }".to_string()
+        case Stmt.CheckerBlock(label: l, ps_name: p) =>
+            "();  // checker block (defined at module level)".to_string()
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let use_result_try = is_result_body(b)
+            let result_marker = ("// [Result base detected]\n".to_string() if use_result_try else "".to_string())
+            let try_body = gen_block(b, MaybeIrType.NoTy)
+            let pr_prefix = "{ let __pr = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {".to_string()
+            let pr_mid = " })); ".to_string()
+            let match_expr: String = if cs.len() == 0:
+                match eb:
+                    case MaybeBlock.YesBlock(value: eb_blk) =>
+                        let else_body_s = gen_block(eb_blk, MaybeIrType.NoTy)
+                        "match __pr { Ok(_v) => { _v; ".to_string() + else_body_s + " }, Err(_p) => () }".to_string()
+                    case _ =>
+                        "__pr.unwrap_or_else(|_p| ())".to_string()
+            else:
+                let last_idx = cs.len() - 1
+                let mut skipped_comments: String = String::new()
+                for ci in 0..last_idx:
+                    let pre_catch = cs[ci].clone()
+                    let pre_pat = pre_catch.0
+                    let cmt: String = match pre_pat:
+                        case MaybePattern.YesPat(value: pp) =>
+                            match pp:
+                                case Pattern.Ident(name: pn) =>
+                                    "// catch ".to_string() + pn + " skipped\n".to_string()
+                                case Pattern.Enum(enum_name: en, variant: vv, args: _) =>
+                                    "// catch ".to_string() + en + "::".to_string() + vv + " skipped\n".to_string()
+                                case _ =>
+                                    "// catch _ skipped\n".to_string()
+                        case _ =>
+                            "// catch _ skipped\n".to_string()
+                    skipped_comments = skipped_comments + cmt
+                let last_catch = cs[last_idx].clone()
+                let pat = last_catch.0
+                let catch_blk = last_catch.1
+                let catch_body = gen_block(catch_blk, MaybeIrType.NoTy)
+                let mut binds: String = String::new()
+                match pat:
+                    case MaybePattern.YesPat(value: p2) =>
+                        match p2:
+                            case Pattern.Ident(name: n) =>
+                                let safe_n = if n == "line" || n == "column" || n == "file":
+                                    n + "_".to_string()
+                                else:
+                                    n
+                                binds = "let ".to_string() + safe_n + " = format!(\"{:?}\", _p); ".to_string()
+                            case Pattern.Enum(enum_name: en, variant: v, args: a) =>
+                                for ai in 0..a.len():
+                                    let arg_p = a[ai].clone()
+                                    match arg_p:
+                                        case Pattern.Ident(name: n2) =>
+                                            let safe_n2 = if n2 == "line" || n2 == "column" || n2 == "file":
+                                                n2 + "_".to_string()
+                                            else:
+                                                n2
+                                            binds = binds + "let ".to_string() + safe_n2 + " = format!(\"{:?}\", _p); ".to_string()
+                                        case _ =>
+                                            ()
+                            case _ =>
+                                ()
+                    case _ =>
+                        ()
+                let ok_arm: String = match eb:
+                    case MaybeBlock.YesBlock(value: eb_blk2) =>
+                        "{ _v; ".to_string() + gen_block(eb_blk2, MaybeIrType.NoTy) + " }".to_string()
+                    case _ =>
+                        "_v".to_string()
+                skipped_comments + "match __pr { Ok(_v) => ".to_string() + ok_arm + ", Err(_p) => { ".to_string() + binds + catch_body + " } }".to_string()
+            let try_val_stmt = "let __try_val = ".to_string() + match_expr + "; ".to_string()
+            let finally_part: String = match fb:
+                case MaybeBlock.YesBlock(value: fb_blk) =>
+                    let fb_body = gen_block(fb_blk, MaybeIrType.NoTy)
+                    "let __final_val = __try_val; ".to_string() + fb_body + "; __final_val".to_string()
+                case _ =>
+                    "__try_val".to_string()
+            result_marker + pr_prefix + try_body + pr_mid + try_val_stmt + finally_part + " }".to_string()
+        case Stmt.Yield(value: v) =>
+            "__gen_vec.push(".to_string() + gen_expr(v, fn_raises) + ");".to_string()
+        case Stmt.YieldFrom(iter: it) =>
+            "__gen_vec.extend(".to_string() + gen_expr(it, fn_raises) + ".into_iter());".to_string()
+        case _ => "// TODO stmt".to_string()
 
 // while true { pass } → loop { unimplemented!() }（对齐原生：无限循环 + pass 占位）
-def gen_while(c: Expr, b: BlockIR) -> str =
+def gen_while(c: Expr, b: BlockIR, fn_raises: MaybeIrType) -> String =
     let inf = is_true_cond(c)
     if inf && block_is_pass_only(b):
-        "loop {\n        unimplemented!()\n    }"
+        "loop {\n        unimplemented!()\n    }".to_string()
     else:
-        "// TODO while"
+        "while ".to_string() + gen_expr(c, fn_raises) + " ".to_string() + gen_block(b, fn_raises)
+
+// if cond { then } else { els }（无 else 时省略 else 块，对齐原生 codegen/mod.rs:8072-8098）
+def gen_if(c: Expr, tb: BlockIR, eb: MaybeBlock, fn_raises: MaybeIrType) -> String =
+    let base = "if ".to_string() + gen_expr(c, fn_raises) + " ".to_string() + gen_block(tb, fn_raises)
+    match eb:
+        case MaybeBlock.YesBlock(value: b) => base + " else ".to_string() + gen_block(b, fn_raises)
+        case MaybeBlock.NoBlock => base
 
 def is_true_cond(c: Expr) -> bool =
     match c:
@@ -773,17 +1008,17 @@ def block_is_pass_only(b: BlockIR) -> bool =
             else:
                 false
 
-def gen_let(n: str, t: IrType, v: Expr, m: bool, r: bool, auto_mut: str) -> str =
-    let mut_kw = "mut " if (m || str_contains(auto_mut, n)) else ""
-    let ref_kw = "ref " if r else ""
+def gen_let(n: str, t: IrType, v: Expr, m: bool, r: bool, auto_mut: String, fn_raises: MaybeIrType) -> String =
+    let mut_kw = ("mut " if (m || str_contains(auto_mut, n)) else "").to_string()
+    let ref_kw = ("ref " if r else "").to_string()
     let ty_s = rust_type(t)
     // 空容器强制类型标注（对齐原生 force_ty：空 ListLit / 空 Dict 构造 且 ty 为 Dict/Set）
     let empty_c = is_empty_container(v)
     let force = empty_c && is_dict_or_set_ty(t)
     if skip_ty_ann(t) && !force:
-        "let " + mut_kw + ref_kw + n + " = " + gen_expr(v) + ";"
+        "let ".to_string() + mut_kw + ref_kw + n.to_string() + " = ".to_string() + gen_expr(v, fn_raises) + ";".to_string()
     else:
-        "let " + mut_kw + ref_kw + n + ": " + ty_s + " = " + gen_expr(v) + ";"
+        "let ".to_string() + mut_kw + ref_kw + n.to_string() + ": ".to_string() + ty_s + " = ".to_string() + gen_expr(v, fn_raises) + ";".to_string()
 
 def is_empty_container(v: Expr) -> bool =
     match v:
@@ -831,12 +1066,12 @@ def args_is_empty_or_generic(a: List<IrType>) -> bool =
 
 // ── f64 字面量格式化：对齐 Rust to_string + 补 .0 规则 ──
 // Rust: let s = f.to_string(); if s.contains('.') || s.contains('e') { s } else { s + ".0" }
-def fmt_f64(n: f64) -> str =
+def fmt_f64(n: f64) -> String =
     let s = n.to_string()
     if has_dot_or_e(s):
-        s + "f64"
+        s + "f64".to_string()
     else:
-        s + ".0f64"
+        s + ".0f64".to_string()
 
 def has_dot_or_e(s: str) -> bool =
     let len = s.len()
@@ -851,8 +1086,8 @@ def has_dot_or_e(s: str) -> bool =
 
 // ── f-string 模板解析（对齐原生 gen_fstring）──
 // {expr} → {:?} 占位 + 参数列表；{{ → {{；}} → }}；无插值 → 普通字符串
-def gen_fstring(s: str) -> str =
-    let mut fmt = ""
+def gen_fstring(s: str) -> String =
+    let mut fmt: String = "".to_string()
     let mut args: List<str> = []
     let n = s.len()
     let mut i = 0
@@ -862,7 +1097,7 @@ def gen_fstring(s: str) -> str =
             if i + 1 < n:
                 let c2 = s[(i + 1)..(i + 2)]
                 if c2 == "{":
-                    fmt = fmt + "{{"
+                    fmt = fmt + "{{".to_string()
                     i = i + 2
                 else:
                     // 提取插值表达式 {expr} 到匹配的 }
@@ -873,42 +1108,42 @@ def gen_fstring(s: str) -> str =
                             break
                         j = j + 1
                     let expr = s[(i + 1)..j]
-                    fmt = fmt + "{:?}"
+                    fmt = fmt + "{:?}".to_string()
                     args.push(expr)
                     i = j + 1
             else:
-                fmt = fmt + "{"
+                fmt = fmt + "{".to_string()
                 i = i + 1
         elif c == "}":
             if i + 1 < n:
                 let c2 = s[(i + 1)..(i + 2)]
                 if c2 == "}":
-                    fmt = fmt + "}}"
+                    fmt = fmt + "}}".to_string()
                     i = i + 2
                 else:
-                    fmt = fmt + "}"
+                    fmt = fmt + "}".to_string()
                     i = i + 1
             else:
-                fmt = fmt + "}"
+                fmt = fmt + "}".to_string()
                 i = i + 1
         else:
             fmt = fmt + c
             i = i + 1
-    let fmt_q = "\"" + esc_quote_only(fmt) + "\""
+    let fmt_q = "\"".to_string() + esc_quote_only(fmt) + "\"".to_string()
     if args.len() == 0:
-        fmt_q + ".to_string()"
+        fmt_q + ".to_string()".to_string()
     else:
-        "format!(" + fmt_q + ", " + args_join(args) + ")"
+        "format!(".to_string() + fmt_q + ", ".to_string() + args_join(args) + ")".to_string()
 
-def args_join(xs: List<str>) -> str =
+def args_join(xs: List<str>) -> String =
     if xs.len() == 0:
-        ""
+        "".to_string()
     else:
         let head = xs[0].clone()
         if xs.len() > 1:
-            head + ", " + args_join(aj_tail(xs))
+            head.to_string() + ", ".to_string() + args_join(aj_tail(xs))
         else:
-            head
+            head.to_string()
 
 def aj_tail(xs: List<str>) -> List<str> =
     let mut out: List<str> = []
@@ -917,23 +1152,23 @@ def aj_tail(xs: List<str>) -> List<str> =
     out
 
 // 仅转义双引号（f-string 格式串对齐原生 gen_fstring：只 replace('"', "\\\"")，换行保持原样）
-def esc_quote_only(s: str) -> str =
+def esc_quote_only(s: String) -> String =
     let len = s.len()
-    let mut out = ""
+    let mut out: String = "".to_string()
     let mut i = 0
     while i < len:
         let c = s[i..(i + 1)]
         if c == "\"":
-            out = out + "\\\""
+            out = out + "\\\"".to_string()
         else:
             out = out + c
         i = i + 1
     out
 
 // ── Rust 字符串转义（escape_default 常用子集）──
-def esc_rust(s: str) -> str =
+def esc_rust(s: str) -> String =
     let len = s.len()
-    let mut out = ""
+    let mut out = "".to_string()
     let mut i = 0
     while i < len:
         let c = s[i..(i + 1)]
@@ -955,87 +1190,87 @@ def esc_rust(s: str) -> str =
 // ── Item 生成 ──
 
 // D2 缺口补齐：TraitDef 生成
-def gen_trait_def(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>) -> str =
+def gen_trait_def(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>) -> String =
     let st_str = if supertraits.len() == 0:
-        ""
+        "".to_string()
     else:
-        let mut st_parts = ""
+        let mut st_parts: String = "".to_string()
         for idx in 0..supertraits.len():
             let st = supertraits[idx].clone()
             if idx > 0:
-                st_parts = st_parts + " + "
+                st_parts = st_parts + " + ".to_string()
             st_parts = st_parts + rust_type(st)
-        ": " + st_parts
-    "pub trait " + name + st_str + " {\n" + gen_trait_methods(methods) + "}"
+        ": ".to_string() + st_parts
+    "pub trait ".to_string() + name.to_string() + st_str + " {\n".to_string() + gen_trait_methods(methods) + "\n}".to_string()
 
-def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>) -> str =
-    let mut out = ""
+def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..methods.len():
         let m = methods[idx].clone()
-        let mut params = ""
+        let mut params: String = "".to_string()
         for pidx in 0..m.1.len():
             let pt = m.1[pidx].clone()
             if pidx > 0:
-                params = params + ", "
+                params = params + ", ".to_string()
             params = params + rust_type(pt)
-        out = out + "    fn " + m.0 + "(" + params + ") -> " + rust_type(m.2) + ";\n"
+        out = out + "    fn ".to_string() + m.0.to_string() + "(".to_string() + params + ") -> ".to_string() + rust_type(m.2) + ";\n".to_string()
     out
 
 // D2 缺口补齐：Impl 生成
-def gen_impl_def(trait_: MaybeIrType, for_type: IrType, method_names: List<str>) -> str =
+def gen_impl_def(trait_: MaybeIrType, for_type: IrType, method_names: List<str>) -> String =
     let trait_part = match trait_:
-        case MaybeIrType.YesTy(t: ty) => rust_type(ty) + " for "
-        case MaybeIrType.NoTy => ""
-    "impl " + trait_part + rust_type(for_type) + " {\n" + gen_impl_methods(method_names) + "}"
+        case MaybeIrType.YesTy(t: ty) => rust_type(ty) + " for ".to_string()
+        case MaybeIrType.NoTy => "".to_string()
+    "impl ".to_string() + trait_part + rust_type(for_type) + " {\n".to_string() + gen_impl_methods(method_names) + "\n}".to_string()
 
-def gen_impl_methods(method_names: List<str>) -> str =
-    let mut out = ""
+def gen_impl_methods(method_names: List<str>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..method_names.len():
         let mn = method_names[idx].clone()
-        out = out + "    fn " + mn + "(&self) {\n        unimplemented!()\n    }\n"
+        out = out + "    fn ".to_string() + mn.to_string() + "(&self) {\n        unimplemented!()\n    }\n".to_string()
     out
 
 // D2 缺口补齐：UseStmt 生成
-def gen_use_stmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool) -> str =
-    let mut path_parts = ""
+def gen_use_stmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool) -> String =
+    let mut path_parts: String = "".to_string()
     for idx in 0..path.len():
         let ps = path[idx].clone()
         if idx > 0:
-            path_parts = path_parts + "::"
-        path_parts = path_parts + ps
+            path_parts = path_parts + "::".to_string()
+        path_parts = path_parts + ps.to_string()
     let path_str = path_parts
     if is_from:
         if items.len() == 1 && items[0] == "*":
-            "use " + path_str + "::*;"
+            "use ".to_string() + path_str + "::*;".to_string()
         else:
-            let mut item_parts = ""
+            let mut item_parts: String = "".to_string()
             for idx in 0..items.len():
                 let it = items[idx].clone()
                 if idx > 0:
-                    item_parts = item_parts + ", "
-                item_parts = item_parts + it
-            "use " + path_str + "::{" + item_parts + "};"
+                    item_parts = item_parts + ", ".to_string()
+                item_parts = item_parts + it.to_string()
+            "use ".to_string() + path_str + "::{".to_string() + item_parts + "}".to_string()
     else:
-        "use " + path_str + ";"
+        "use ".to_string() + path_str + ";".to_string()
 
 // D2 缺口补齐：TypeAlias 生成
-def gen_type_alias(name: str, ty: IrType) -> str =
-    "pub type " + name + " = " + rust_type(ty) + ";"
+def gen_type_alias(name: str, ty: IrType) -> String =
+    "pub type ".to_string() + name.to_string() + " = ".to_string() + rust_type(ty) + ";".to_string()
 
 // D2 缺口补齐：Test 生成
-def gen_test_def(name: str, body: List<Stmt>) -> str =
-    "#[test]\nfn " + name + "() {\n" + gen_body(body, false, auto_mut_names(body)) + "}"
+def gen_test_def(name: str, body: List<Stmt>) -> String =
+    "#[test]\nfn ".to_string() + name.to_string() + "() {\n".to_string() + gen_body(body, false, auto_mut_names(body), MaybeIrType.NoTy) + "}".to_string()
 
-def gen_item(i: Item) -> str =
+def gen_item(i: Item) -> String =
     match i:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, body: b) =>
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, body: b) =>
             let is_main = (n == "main")
-            let ret_s = "" if (is_main && r_eq_unit(r)) else (" -> " + rust_type(r))
-            "pub fn " + n + generic_sig(gs) + "(" + fn_param_list(ps) + ")" + ret_s + " {\n" + gen_body(b, is_main, auto_mut_names(b)) + "}"
+            let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
+            "pub fn ".to_string() + n.to_string() + generic_sig(gs) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b), rs) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
-            "#[derive(Debug, Clone, PartialEq)]\npub struct " + n + generic_sig(gs) + " {\n" + gen_struct_fields(fs) + "}"
+            "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
         case Item.EnumDef(name: n, generics: gs, variants: vs) =>
-            "#[derive(Debug, Clone, PartialEq)]\npub enum " + n + generic_sig(gs) + " {\n" + gen_enum_variants(vs) + "}"
+            "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs) + "}".to_string()
         case Item.Const(name: n, ty: t, value: v) =>
             gen_const_item(n, t, v)
         case Item.TraitDef(name: n, supertraits: sts, methods: ms) =>
@@ -1048,22 +1283,26 @@ def gen_item(i: Item) -> str =
             gen_type_alias(n, t)
         case Item.Test(name: n, body: b) =>
             gen_test_def(n, b)
-        case _ => "// TODO Item " + display_item(i)
+        case Item.CheckerBlock(name: n, ps_name: p) =>
+            "fn ".to_string() + n.to_string() + "(ps: &mut __Params) { unimplemented!() }".to_string()
+        case Item.DuckDef(name: n, method_count: mc) =>
+            "pub trait ".to_string() + n.to_string() + " { /* ".to_string() + mc.to_string() + " methods */ }".to_string()
+        case _ => "// TODO Item ".to_string() + display_item(i)
 
 def r_eq_unit(t: IrType) -> bool =
     match t:
         case IrType.Unit => true
         case _ => false
 
-def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>) -> str =
+def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>) -> String =
     if ps.len() == 0:
-        ""
+        "".to_string()
     else:
         let p0 = ps[0].clone()
         fn_param_str(p0) + (", " + fn_param_list(pl_tail(ps)) if ps.len() > 1 else "")
 
-def fn_param_str(p: (str, IrType, bool, bool, bool)) -> str =
-    p.0 + ": " + rust_type(p.1)  // D1: 忽略 ref/mut/owned 前缀（原生 codegen 对 fn 参数只输出 name: type）
+def fn_param_str(p: (str, IrType, bool, bool, bool)) -> String =
+    p.0.to_string() + ": ".to_string() + rust_type(p.1)  // D1: 忽略 ref/mut/owned 前缀（原生 codegen 对 fn 参数只输出 name: type）
 
 def pl_tail(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool, bool, bool)> =
     let mut out: List<(str, IrType, bool, bool, bool)> = []
@@ -1071,41 +1310,41 @@ def pl_tail(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, boo
         out.push(ps[idx].clone())
     out
 
-def gen_body(ss: List<Stmt>, is_main: bool, auto_mut: str) -> str =
+def gen_body(ss: List<Stmt>, is_main: bool, auto_mut: String, fn_raises: MaybeIrType) -> String =
     let n = ss.len()
     if n == 0:
         // 空函数体（抽象声明）：对齐原生 loop { unimplemented!() }
-        "    loop {\n        unimplemented!()\n    }\n"
+        "    loop {\n        unimplemented!()\n    }\n".to_string()
     else:
-        let mut out = ""
+        let mut out: String = String::new()
         for idx in 0..n:
             let is_tail = (idx == n - 1)
             let stmt_type = stmt_type_label(ss[idx].clone())
-            out = out + "    // STMT:" + stmt_type + "\n    " + gen_stmt(ss[idx].clone(), is_tail, is_main, auto_mut) + "\n"
+            out = out + "    // STMT:".to_string() + stmt_type + "\n    ".to_string() + gen_stmt(ss[idx].clone(), is_tail, is_main, auto_mut, fn_raises) + "\n".to_string()
         out
 
 // STMT 类型标签（对齐原生 codegen 的 // STMT:{Let|Expr|Try|Block|Defer|If|For|Other}）
-def stmt_type_label(s: Stmt) -> str =
+def stmt_type_label(s: Stmt) -> String =
     match s:
-        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) => "Let"
-        case Stmt.ExprStmt(expr: e) => "Expr"
-        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) => "Try"
-        case Stmt.Block(stmts: b) => "Block"
-        case Stmt.Defer(body: b) => "Defer"
-        case Stmt.If(cond: c, then: t, els: e) => "If"
-        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) => "For"
-        case _ => "Other"
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) => "Let".to_string()
+        case Stmt.ExprStmt(expr: e) => "Expr".to_string()
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) => "Try".to_string()
+        case Stmt.Block(stmts: b) => "Block".to_string()
+        case Stmt.Defer(body: b) => "Defer".to_string()
+        case Stmt.If(cond: c, then: t, els: e) => "If".to_string()
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) => "For".to_string()
+        case _ => "Other".to_string()
 
 // 对齐原生 codegen 的 auto_mut_locals：扫描函数体，找出需要标为 mut 的变量
 // （add/push/append 等集合可变函数的首参、方法调用接收者、赋值目标）
 // 返回逗号分隔的变量名字符串
-def auto_mut_names(ss: List<Stmt>) -> str =
-    let mut out = ""
+def auto_mut_names(ss: List<Stmt>) -> String =
+    let mut out: String = String::new()
     for idx in 0..ss.len():
         out = scan_stmt_auto_mut(ss[idx].clone(), out)
     out
 
-def scan_stmt_auto_mut(s: Stmt, out: str) -> str =
+def scan_stmt_auto_mut(s: Stmt, out: String) -> String =
     let mut acc = out.clone()
     match s:
         case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
@@ -1128,7 +1367,7 @@ def scan_stmt_auto_mut(s: Stmt, out: str) -> str =
             acc
         case _ => out
 
-def scan_block_stmts_auto_mut(b: BlockIR, out: str) -> str =
+def scan_block_stmts_auto_mut(b: BlockIR, out: String) -> String =
     let mut acc = out.clone()
     match b:
         case BlockIR.Block(stmts: bss, ty: bt) =>
@@ -1136,7 +1375,7 @@ def scan_block_stmts_auto_mut(b: BlockIR, out: str) -> str =
                 acc = scan_stmt_auto_mut(bss[idx].clone(), acc)
             acc
 
-def scan_block_maybe_auto_mut(mb: MaybeBlock, out: str) -> str =
+def scan_block_maybe_auto_mut(mb: MaybeBlock, out: String) -> String =
     let mut acc = out.clone()
     match mb:
         case MaybeBlock.YesBlock(value: es) =>
@@ -1144,17 +1383,17 @@ def scan_block_maybe_auto_mut(mb: MaybeBlock, out: str) -> str =
         case MaybeBlock.NoBlock => out
 
 // 如果 expr 是 Var，将其 name 追加到 out（逗号分隔）
-def add_var_auto_mut(e: Expr, out: str) -> str =
+def add_var_auto_mut(e: Expr, out: String) -> String =
     match e:
         case Expr.Var(name: n, ty: t) =>
             if str_contains(out, n):
                 out.clone()
             else:
-                let sep = "," if out.len() > 0 else ""
-                out + sep + n
+                let sep = ",".to_string() if out.len() > 0 else "".to_string()
+                out + sep + n.to_string()
         case _ => out.clone()
 
-def str_contains(s: str, sub: str) -> bool =
+def str_contains(s: String, sub: str) -> bool =
     let len = s.len()
     let sub_len = sub.len()
     if sub_len == 0:
@@ -1168,7 +1407,7 @@ def str_contains(s: str, sub: str) -> bool =
             i = i + 1
         found
 
-def scan_expr_auto_mut(e: Expr, out: str) -> str =
+def scan_expr_auto_mut(e: Expr, out: String) -> String =
     let mut acc = out.clone()
     match e:
         case Expr.Call(callee: c, args: a, ty: t) =>
@@ -1211,54 +1450,54 @@ def callee_is_mut_fn(c: Expr) -> bool =
                 false
         case _ => false
 
-def gen_struct_fields(fs: List<(str, IrType)>) -> str =
-    let mut out = ""
+def gen_struct_fields(fs: List<(str, IrType)>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..fs.len():
         let f = fs[idx].clone()
-        out = out + "    pub " + f.0 + ": " + rust_type(f.1) + ",\n"
+        out = out + "    pub ".to_string() + f.0.to_string() + ": ".to_string() + rust_type(f.1) + ",\n".to_string()
     out
 
-def gen_enum_variants(vs: List<(str, List<IrType>)>) -> str =
-    let mut out = ""
+def gen_enum_variants(vs: List<(str, List<IrType>)>) -> String =
+    let mut out: String = "".to_string()
     for idx in 0..vs.len():
         let v = vs[idx].clone()
-        out = out + "    " + v.0 + gen_enum_variant_args(v.1) + ",\n"
+        out = out + "    ".to_string() + v.0.to_string() + gen_enum_variant_args(v.1) + ",\n".to_string()
     out
 
-def gen_enum_variant_args(ts: List<IrType>) -> str =
+def gen_enum_variant_args(ts: List<IrType>) -> String =
     if ts.len() == 0:
-        ""
+        "".to_string()
     else:
-        "(" + type_rust_list(ts) + ")"
+        "(".to_string() + type_rust_list(ts) + ")".to_string()
 
-def gen_const_item(n: str, t: IrType, v: Expr) -> str =
+def gen_const_item(n: str, t: IrType, v: Expr) -> String =
     // 对齐原生 gen_const_def：ty=Str 且值为字符串字面量 → &str 裸字面量（转义）
     match t:
         case IrType.Str =>
             match v:
                 case Expr.LitStr(s: sv, ty: tv) =>
-                    "const " + n + ": &str = \"" + esc_rust(sv) + "\";"
-                case _ => "const " + n + ": String = " + gen_expr(v) + ";"
-        case _ => "const " + n + ": " + rust_type(t) + " = " + gen_expr(v) + ";"
+                    "const ".to_string() + n.to_string() + ": &str = \"".to_string() + esc_rust(sv) + "\";".to_string()
+                case _ => "const ".to_string() + n.to_string() + ": String = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
+        case _ => "const ".to_string() + n.to_string() + ": ".to_string() + rust_type(t) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
 
 def is_magic_name(n: str) -> bool =
     n == "__name__" || n == "__file__" || n == "__package__" || n == "__path__" || n == "__doc__" || n == "__is_macro__"
 
-def gen_magic_const(n: str, t: IrType, v: Expr) -> str =
+def gen_magic_const(n: str, t: IrType, v: Expr) -> String =
     if n == "__is_macro__":
-        "const " + n + ": bool = " + gen_expr(v) + ";"
+        "const ".to_string() + n.to_string() + ": bool = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
     else:
         // __name__/__file__/__package__/__path__/__doc__ → &str
-        "const " + n + ": &str = " + gen_expr(v) + ";"
+        "const ".to_string() + n.to_string() + ": &str = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
 
 // ── 模块组装 ──
 
-def codegen_module(m: IrModule) -> str =
-    let mut out = module_header()
+def codegen_module(m: IrModule) -> String =
+    let mut out: String = module_header()
     for idx in 0..m.items.len():
-        out = out + gen_item(m.items[idx].clone()) + "\n\n"
+        out = out + gen_item(m.items[idx].clone()) + "\n\n".to_string()
     // print_str 用 println! 会再补一个换行：裁剪末尾 "\n\n" 后补一个 "\n"
-    out[0..(out.len() - 2)] + "\n"
+    out[0..(out.len() - 2)] + "\n".to_string()
 
-def module_header() -> str =
-    "\n#[allow(unused_imports)]\n#[allow(unused_variables)]\n#[allow(dead_code)]\n#[allow(non_snake_case)]\n\nuse std::collections::{HashMap, HashSet};\nuse std::any::Any;\nuse std::rc::Rc;\nuse std::sync::Arc;\nuse std::fmt::Debug;\nuse std::fmt::Display;\n\nuse lz_builtins::*;\n\n"
+def module_header() -> String =
+    "\n#[allow(unused_imports)]\n#[allow(unused_variables)]\n#[allow(dead_code)]\n#[allow(non_snake_case)]\n\nuse std::collections::{HashMap, HashSet};\nuse std::any::Any;\nuse std::rc::Rc;\nuse std::sync::Arc;\nuse std::fmt::Debug;\nuse std::fmt::Display;\n\nuse lz_builtins::*;\n\n".to_string()

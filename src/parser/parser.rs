@@ -1479,6 +1479,7 @@ impl Parser {
                 // guard 是检查站软关键字（stmt.rs `guard cond:`），作参数名时
                 // 豁免为普通标识符（否则 `def f(guard: File)` 报 Parse error）
                 Token::Guard => "guard".to_string(),
+                Token::Underscore => "_".to_string(),
                 t => return Err(format!("Expected param name, got {:?}", t)),
             };
 
@@ -1654,6 +1655,7 @@ impl Parser {
             Token::From => "from".to_string(),
             // guard 软关键字作参数名豁免（与上方 parse_params 同步）
             Token::Guard => "guard".to_string(),
+            Token::Underscore => "_".to_string(),
             t => return Err(format!("Expected param name, got {:?}", t)),
         };
 

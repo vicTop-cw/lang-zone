@@ -45,11 +45,6 @@ const REJECT_CASES: &[RejectCase] = &[
         phase: "lexer",
     },
     RejectCase {
-        name: "int_overflow",
-        source: "let x = 99999999999999999999999999999\n",
-        phase: "lexer",
-    },
-    RejectCase {
         name: "unterminated_string",
         source: "def main() =\n    let s = \"abc\n    print(s)\n",
         phase: "lexer",
@@ -100,6 +95,14 @@ const REJECT_CASES: &[RejectCase] = &[
 /// 已知宽松语义（当前编译器接受，非拒绝）：
 /// 作为语义边界回归锁定——若未来收紧为拒绝，本表须同步迁移至 REJECT_CASES。
 const ACCEPTED_CASES: &[RejectCase] = &[
+    RejectCase {
+        // 2026-09-24 语义修订：complex/Int128/BigInt 字面量三变体融合（LitKind）后，
+        // 超大整数字面量解析为大整数正常编译，不再作为词法溢出拒绝；
+        // 同步从 REJECT_CASES 迁出，DEMO/99_errors/00c_lexer_overflow.lz 一并移除。
+        name: "int_overflow_bigint_literal",
+        source: "let x = 99999999999999999999999999999\n",
+        phase: "lexer（宽松：BigInt 字面量特性落地，超大整数合法）",
+    },
     RejectCase {
         name: "bad_indent_body",
         source: "def main() =\nprint(1)\n",

@@ -198,13 +198,13 @@ fn transpile_source(path: &Path) -> Result<String, String> {
     let ir =
         lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
 
-    // Cython 后端（共享管线：generate + postprocess_pyx）
+    // Cython 后端（generate 出原始形态 + 本地 postprocess_pyx 兜底管线）
+    // 注意：不用 lib 的 generate_full——其内置 postprocess_pyx 为远端精简线副本，
+    // 与本地 M1 下沉叠加会双处理（(__cv)(__cv) 双调用/_LZNONE 垫片污染 is None）
+    let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
+    let raw = cg.generate(&ir).to_string();
     let enum_variants = collect_enum_variants(&module);
-    Ok(lang_zone::ir::codegen_cython::CythonCodeGen::new().generate_full(
-        &ir,
-        &enum_variants,
-        &merged_modules,
-    ))
+    Ok(postprocess_pyx(&raw, &enum_variants, &merged_modules))
 }
 
 /// 解析 `-o/--output <dir>` 选项，返回 (剩余位置参数, 输出目录)
@@ -250,6 +250,93 @@ fn collect_enum_variants(module: &lang_zone::ast::Module) -> Vec<(String, usize)
         }
     }
     out
+}
+
+/// 生成后处理：修复主编译器 Cython 后端的运行期语义缺口（挂账项，融入前由 lzcyc 兜底）。
+/// 各项均以生成代码的稳定形态为锚点，匹配不上则原样保留：
+/// 1. enum 无数据变体注入 `_variant = <序号>`（match 解构依赖）
+/// 2. Box/Rc/Arc 补 `__getitem__`/`__setitem__`（`x[0]` 取/存内部值）
+/// 3. Option 垫片：`None_()` 返回带方法的 `_LZNONE` 单例；行级 `x = None` → `x = _LZNONE`
+///    （LZ `is None` 生成 `.is_none()` 调用，裸 None 无方法）
+/// 4. 构建块下标：`(lambda : (...)))()(N)` → `...))()[N]`（lib 把下标生成了调用）
+/// 5. 列表推导 filter 谓词补调用：`for __cv in ... if (lambda ...)` → `...(__cv)`
+/// 6. 已合并 import 的限定前缀剥离：`lz_std.X` → `X`，并删除对应 `import X` 行
+/// 7. checker 派发：`fn[checker](...)` 调用改写为包装器；注入 `__Params` 垫片
+///    （规范接口：ps.kwargs.contains(k) / ps.kwargs[k]，kwargs 为形参名到实参映射）
+fn postprocess_pyx(
+    code: &str,
+    enum_variants: &[(String, usize)],
+    merged_modules: &[String],
+) -> String {
+    let mut lines: Vec<String> = code.lines().map(String::from).collect();
+
+    // 1) _variant 注入：`class Red(Color):` 的下一行 `pass` → `_variant = N`
+    for i in 0..lines.len() {
+        let t = lines[i].trim_start().to_string();
+        if let Some(rest) = t.strip_prefix("class ") {
+            if let Some(paren) = rest.find('(') {
+                let cname = rest[..paren].trim();
+                if let Some((_, idx)) = enum_variants.iter().find(|(n, _)| n == cname) {
+                    if i + 1 < lines.len() && lines[i + 1].trim() == "pass" {
+                        let indent = lines[i + 1].len() - lines[i + 1].trim_start().len();
+                        lines[i + 1] =
+                            format!("{}{}", " ".repeat(indent), format!("_variant = {idx}"));
+                    }
+                }
+            }
+        }
+    }
+    let mut code = lines.join("\n");
+
+    // 2) Box/Rc/Arc 下标增强（prelude 固定形态为锚点）
+    for cls in ["Box", "Rc", "Arc"] {
+        let anchor = format!(
+            "class {cls}:\n    def __init__(self, v=None): self._v = v\n    @staticmethod\n    def new(v=None): return {cls}(v)\n    def __getattr__(self, n): return getattr(self._v, n)"
+        );
+        let enhanced = format!(
+            "{anchor}\n    def __getitem__(self, i): return self._v\n    def __setitem__(self, i, v): self._v = v"
+        );
+        if code.contains(&anchor) {
+            code = code.replace(&anchor, &enhanced);
+        }
+    }
+
+    // 3) Option/None 方法族：已下沉 lib（is_none→is None、is_some→is not None、
+    //    unwrap/expect 透传 + __lz_expect_fail），垫片方案退位删除（M1.3）
+
+    // 4) 构建块下标修复：`))()(N)` → `))()[N]`（逐个消耗，防死循环）
+    loop {
+        let Some(p) = code.find("))()(") else { break };
+        let after = &code[p + 5..];
+        let Some(close) = after.find(')') else { break };
+        let idx = &after[..close];
+        if idx.is_empty() || !idx.chars().all(|c| c.is_ascii_digit()) {
+            break;
+        }
+        code = format!("{}))()[{}]{}", &code[..p], idx, &after[close + 1..]);
+    }
+
+    // 5) 列表推导 filter 谓词补调用：已下沉 lib（filter 为 lambda 时直出 `(__cv)` 调用），
+    //    postprocess 分支退位删除（M1.5——叠加生成会导致 `(__cv)(__cv)` 双调用）
+
+    // 6) 已合并 import：删除 `import X` 行 + 剥离 `X.` 限定前缀
+    for m in merged_modules {
+        code = code.replace(&format!("{m}."), "");
+        let mut out = Vec::with_capacity(code.lines().count());
+        let import_stmt = format!("import {m}");
+        for l in code.lines() {
+            if l.trim() == import_stmt {
+                continue;
+            }
+            out.push(l.to_string());
+        }
+        code = out.join("\n");
+    }
+
+    // 7) checker 派发：已下沉 lib（Call 生成识别 `fn[checker]` 形态 → 包装器调用，
+    //    __Params 垫片与包装器由 generate 收尾统一追加），postprocess 分支退位删除（M1.6）
+
+    code
 }
 
 /// 简版 import 合并（对齐主编译器 merge_imports_into 语义）：

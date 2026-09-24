@@ -193,12 +193,17 @@ impl LzGen {
                 let generics = self.list_ref("str", gen_items);
                 let params = self.param_pairs(&f.params);
                 let body = self.stmts_ref(&f.body.stmts);
+                let raises_s = match &f.raises {
+                    Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
+                    None => "MaybeIrType.NoTy".to_string(),
+                };
                 format!(
-                    "Item.FnDef(name: \"{}\", generics: {}, params: {}, ret: {}, body: {})",
+                    "Item.FnDef(name: \"{}\", generics: {}, params: {}, ret: {}, exc: {}, body: {})",
                     f.name,
                     generics,
                     params,
                     self.irtype(&f.ret_ty),
+                    raises_s,
                     body
                 )
             }

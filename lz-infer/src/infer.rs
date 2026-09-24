@@ -11,13 +11,22 @@
 //!   - 通过 `LziRegistry` 提供函数签名（仅限模块内函数补充签名）
 
 use crate::lzi::{LziFile, LziFunction, LziModule, LziParam, LziStruct};
-use lang_zone::ast::{ConstDef, Function, Module, StructDef, TypeAlias};
-use lang_zone::parser::parse_module_from_source;
-use lang_zone::typer::Typer;
+use lang_zone::ast::{ConstDef, Function, Module, StructDef, TypeAliasDef};
 use lang_zone::types::Type;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// 解析 `.lz` 源码为 Module（Lexer → Parser::parse_module 标准管线）。
+///
+/// 对齐主 crate 公开 API（src/main.rs 同款管线）：
+/// `lang_zone::lexer::Lexer::tokenize` → `lang_zone::parser::Parser::parse_module`。
+fn parse_module_from_source(source: &str) -> Result<Module, String> {
+    let mut lexer = lang_zone::lexer::Lexer::new(source);
+    let tokens = lexer.tokenize();
+    let mut parser = lang_zone::parser::Parser::new(tokens);
+    parser.parse_module()
+}
 
 /// 从文件或目录收集 `.lz` 文件的类型签名。
 pub fn infer_path(input: &Path) -> Result<LziFile, String> {
@@ -40,19 +49,20 @@ pub fn infer_path(input: &Path) -> Result<LziFile, String> {
     Ok(file)
 }
 
-/// 推断单个 `.lz` 文件，返回 (模块名, 推断后的 Module, 错误列表)。
+/// 推断单个 `.lz` 文件，返回 (模块名, 解析后的 Module, 错误列表)。
+///
+/// 类型信息以源码显式注解为准（Param.ty / return_type 由 parser 填充，
+/// 未注解处为 Type::Any）。主 crate 的 Typer 属未导出的内部模块，
+/// 不作为 lz-infer 的依赖面。
 fn infer_file(path: &Path) -> Result<(String, Module, Vec<String>), String> {
     let source = fs::read_to_string(path).map_err(|e| format!("read error: {}", e))?;
-    let mut module =
-        parse_module_from_source(&source).map_err(|e| format!("parse error: {}", e))?;
+    let mut module = parse_module_from_source(&source).map_err(|e| format!("parse error: {}", e))?;
 
     let module_name = derive_module_name(path);
     module.name = Some(module_name.clone());
     module.file_path = Some(path.to_string_lossy().to_string());
-    module.package = derive_package(path);
 
-    let errors = Typer::infer_module(&mut module);
-    Ok((module_name, module, errors))
+    Ok((module_name, module, Vec::new()))
 }
 
 /// 将推断后的 Module 转换为 LziModule。
@@ -60,7 +70,7 @@ fn module_to_lzi(module: &Module, unresolved: &mut Vec<String>) -> LziModule {
     let mut lzi = LziModule::default();
 
     // 类型别名
-    for TypeAlias { name, ty, .. } in &module.type_aliases {
+    for TypeAliasDef { name, ty, .. } in &module.type_aliases {
         lzi.type_aliases.insert(name.clone(), type_to_lz_string(ty));
     }
 
@@ -130,18 +140,19 @@ fn function_to_lzi(f: &Function, unresolved: &mut Vec<String>) -> Option<LziFunc
     let mut all_resolved = true;
 
     for p in &f.params {
-        match &p.ty {
-            Some(t) => params.push(LziParam {
+        // Param.ty 为非 Option 的 Type：parser 对未注解参数填充 Type::Any。
+        // Type::Any 视为「未解析」，标记进 unresolved。
+        if matches!(p.ty, Type::Any) {
+            all_resolved = false;
+            params.push(LziParam {
                 name: p.name.clone(),
-                ty: type_to_lz_string(t),
-            }),
-            None => {
-                all_resolved = false;
-                params.push(LziParam {
-                    name: p.name.clone(),
-                    ty: "?".into(),
-                });
-            }
+                ty: "?".into(),
+            });
+        } else {
+            params.push(LziParam {
+                name: p.name.clone(),
+                ty: type_to_lz_string(&p.ty),
+            });
         }
     }
 
@@ -161,11 +172,8 @@ fn function_to_lzi(f: &Function, unresolved: &mut Vec<String>) -> Option<LziFunc
         // 仍然输出已解析的部分
     }
 
-    let mut generic_bounds = HashMap::new();
-    for (name, bounds) in &f.generic_bounds {
-        generic_bounds.insert(name.clone(), bounds.iter().map(type_to_lz_string).collect());
-    }
-
+    // Function 无 generic_bounds 字段（泛型内联约束挂在 StructDef 上），
+    // 仅导出 where_clause 形式的 bounds。
     let mut where_clause = HashMap::new();
     for wb in &f.where_clause {
         where_clause.insert(
@@ -179,7 +187,7 @@ fn function_to_lzi(f: &Function, unresolved: &mut Vec<String>) -> Option<LziFunc
         return_type,
         raises: f.raises.as_ref().map(type_to_lz_string),
         generics: f.generics.clone(),
-        generic_bounds,
+        generic_bounds: HashMap::new(),
         where_clause,
     })
 }
@@ -197,13 +205,6 @@ pub fn type_to_lz_string(ty: &Type) -> String {
         Type::None_ => "None".into(),
         Type::Self_ => "Self".into(),
         Type::Named(name) => name.clone(),
-        Type::Var(_) => "?".into(),
-        Type::Constructor { name, .. } => name.clone(),
-        Type::Apply { constructor, args } => {
-            let base_s = type_to_lz_string(constructor);
-            let args_s: Vec<String> = args.iter().map(type_to_lz_string).collect();
-            format!("{}<{}>", base_s, args_s.join(", "))
-        }
         Type::Generic { base, args } => {
             let base_s = type_to_lz_string(base);
             let args_s: Vec<String> = args.iter().map(type_to_lz_string).collect();
@@ -226,29 +227,14 @@ pub fn type_to_lz_string(ty: &Type) -> String {
             let elems_s: Vec<String> = elems.iter().map(type_to_lz_string).collect();
             format!("({})", elems_s.join(", "))
         }
-        Type::Record(fields) => {
+        Type::Simd { elem, width } => format!("Simd[{}, {}]", type_to_lz_string(elem), width),
+        Type::Duck { fields } => {
             let fields_s: Vec<String> = fields
                 .iter()
                 .map(|(n, t)| format!("{}: {}", n, type_to_lz_string(t)))
                 .collect();
-            format!("{{ {} }}", fields_s.join(", "))
+            format!("duck {{ {} }}", fields_s.join(", "))
         }
-        Type::Simd { elem, width } => format!("Simd[{}, {}]", type_to_lz_string(elem), width),
-        Type::Future(inner) => format!("Future<{}>", type_to_lz_string(inner)),
-        Type::Futures(types) => {
-            let s: Vec<String> = types.iter().map(type_to_lz_string).collect();
-            format!("Futures<{}>", s.join(", "))
-        }
-        Type::Intersection(members) => {
-            let members_s: Vec<String> = members.iter().map(type_to_lz_string).collect();
-            members_s.join(" & ")
-        }
-        Type::Union(members) => {
-            let members_s: Vec<String> = members.iter().map(type_to_lz_string).collect();
-            members_s.join(" | ")
-        }
-        Type::PathDependent { path, member } => format!("{}.{}", path, member),
-        Type::Wildcard => "_".into(),
     }
 }
 
@@ -289,16 +275,6 @@ fn derive_module_name_relative(path: &Path, base: &Path) -> String {
     derive_module_name(rel)
 }
 
-/// 从文件路径推导包名（相对于指定 base 目录）。
-fn derive_package_relative(path: &Path, base: Option<&Path>) -> Option<String> {
-    if let Some(base) = base {
-        let rel = path.strip_prefix(base).unwrap_or(path);
-        derive_package(rel)
-    } else {
-        derive_package(path)
-    }
-}
-
 /// 从文件路径推导模块名（src/utils/math.lz → "src::utils::math"）。
 fn derive_module_name(path: &Path) -> String {
     let stem = path
@@ -322,6 +298,9 @@ fn derive_module_name(path: &Path) -> String {
 }
 
 /// 从文件路径推导包名（src/utils/math.lz → Some("src::utils")）。
+///
+/// 保留供工具/测试使用；Module 已无 package 字段，主流程不再写入。
+#[allow(dead_code)]
 fn derive_package(path: &Path) -> Option<String> {
     let parent = path.parent()?;
     let parts: Vec<String> = parent
@@ -344,16 +323,17 @@ fn derive_package(path: &Path) -> Option<String> {
 
 /// Phase 1 结果：一个模块独立推断后的完整信息
 struct Phase1Module {
+    #[allow(dead_code)] // 保留以备 Phase 2 扩展（如函数签名级注入）
     lzi: LziModule,
     ast: Module,
 }
 
-/// 两阶段跨模块类型推断
+/// 两阶段跨模块类型签名收集
 ///
-/// Phase 1: 所有模块独立推断
-/// Phase 2: 使用共享上下文重新推断每个模块
+/// Phase 1: 所有模块独立收集签名
+/// Phase 2: 使用共享上下文重新收集每个模块（预注入导入模块的 struct/alias）
 ///
-/// 输出中标记了跨模块解析的类型（`#[cross_module]` 注记在 unresolved 中）。
+/// 输出中标记了跨模块解析的类型（`[cross_module]` 注记在 unresolved 中）。
 pub fn infer_path_cross_module(input: &Path) -> Result<LziFile, String> {
     let entries = collect_lz_files(input)?;
     if entries.is_empty() {
@@ -419,23 +399,18 @@ pub fn infer_path_cross_module(input: &Path) -> Result<LziFile, String> {
         };
         module.name = Some(module_name.clone());
         module.file_path = Some(path.to_string_lossy().to_string());
-        module.package = derive_package_relative(path, base_dir);
 
         // 收集当前模块的导入依赖
         let imported_modules = collect_imported_modules(&module);
 
-        // 预注入跨模块 struct 定义和 type_alias
+        // 预注入跨模块 struct 定义和 type_alias（纯 AST 层操作，
+        // 使导入的类型在本模块签名中可见，并以 [cross_module] 注记标记）
         let injected_structs =
             inject_cross_module_defs(&mut module, &phase1, &imported_modules, &module_name);
         let injected_aliases =
             inject_cross_module_aliases(&mut module, &phase1, &imported_modules, &module_name);
 
-        // 构建 LziRegistry（从 Phase 1 其他模块的签名）
-        let registry = build_phase1_registry(&phase1, &module_name);
-
-        // 使用跨模块上下文推断
-        let errors = Typer::infer_module_with(&mut module, registry.as_ref());
-        let mut errs = errors.clone();
+        let mut errs = Vec::new();
         let lzi_module = module_to_lzi(&module, &mut errs);
 
         // 标记跨模块解析的项
@@ -551,34 +526,6 @@ fn inject_cross_module_aliases(
     }
 
     injected
-}
-
-/// 从 Phase 1 结果构建 `lang_zone::infer::LziRegistry`
-///
-/// 通过 JSON 往返转换：`lz_infer::lzi::LziFile` → JSON → `lang_zone::infer::LziFile`。
-/// exclude_module 为当前模块名，不包含在 registry 中。
-fn build_phase1_registry(
-    phase1: &HashMap<String, Phase1Module>,
-    exclude_module: &str,
-) -> Option<lang_zone::infer::LziRegistry> {
-    // 构建仅包含其他模块的 LziFile
-    let mut external = LziFile::new();
-    for (name, m) in phase1 {
-        if name != exclude_module {
-            external.modules.insert(name.clone(), m.lzi.clone());
-        }
-    }
-
-    if external.modules.is_empty() {
-        return None;
-    }
-
-    // JSON 往返转换为 lang_zone::infer::LziFile
-    let json = external.to_json().ok()?;
-    let lz_file = lang_zone::infer::LziFile::from_json(&json).ok()?;
-    let mut reg = lang_zone::infer::LziRegistry::new();
-    reg.files.push(lz_file);
-    Some(reg)
 }
 
 #[cfg(test)]

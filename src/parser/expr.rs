@@ -674,7 +674,7 @@ impl ParserExprExt for Parser {
                             self.advance();
                         }
                         self.expect(Token::RParen)?;
-                        eprintln!("DEBUG parser: MethodCall receiver={:?} method={} args={:?}", expr, name, args);
+
                         expr = Expr::MethodCall {
                             receiver: Box::new(expr),
                             method: name,
@@ -1491,7 +1491,7 @@ impl ParserExprExt for Parser {
             Token::Match => {
                 let expr = self.parse_expr()?;
                 if !self.check(&Token::Colon) {
-                    eprintln!("[DEBUG Match FAIL] after expr, next={:?}", self.peek());
+
                 }
                 self.expect(Token::Colon)?;
                 self.skip_newlines();

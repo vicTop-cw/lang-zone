@@ -1,4 +1,4 @@
-// Lang-Zone 编译器 — tests/demo_codegen_compile.rs
+﻿// Lang-Zone 编译器 — tests/demo_codegen_compile.rs
 //
 // 生成产物编译闸门：对每个 DEMO .lz 先转译为 .rs，再用 rustc **真正编译**。
 //
@@ -53,7 +53,7 @@ const KNOWN_RUSTC_FAILURES: &[&str] = &[
     "DEMO/lz_std/string.lz", // E0599: no method `slice` found for `String`
     "DEMO/lz_std/option.lz", // E0308: mismatched types
     "DEMO/lz_std/dict.lz",   // E0308: mismatched types
-    "DEMO/07_data_structures/callable_objects.lz", // E0609: no field `1` on type `((i64, i64),)`
+    // callable_objects.lz 已修复转绿，从基线移除（收紧闸门）
     "DEMO/05_expressions/pipe_semantics.lz", // E0308: mismatched types
     // 原为转译期失败，where 子句缩进配平修复后已可转译，转入产物编译失败
     "DEMO/04_functions/generics.lz",
@@ -161,18 +161,9 @@ fn find_demo_files() -> Vec<PathBuf> {
 }
 
 /// 魔法方法相关 DEMO —— 魔法体系改动的**直接回归面**（改动优先跑这一组）
+/// 注意：lz_std 系列（error/traits/iter/string/option/dict/box/result/ordering/list/set）
+/// 按 2026-09-09 项目决策豁免（KNOWN_RUSTC_FAILURES），不放入本回归面
 const MAGIC_DEMOS: &[&str] = &[
-    "DEMO/lz_std/box.lz",
-    "DEMO/lz_std/traits.lz",
-    "DEMO/lz_std/string.lz",
-    "DEMO/lz_std/set.lz",
-    "DEMO/lz_std/result.lz",
-    "DEMO/lz_std/ordering.lz",
-    "DEMO/lz_std/option.lz",
-    "DEMO/lz_std/list.lz",
-    "DEMO/lz_std/iter.lz",
-    "DEMO/lz_std/error.lz",
-    "DEMO/lz_std/dict.lz",
     "DEMO/07_data_structures/callable_objects.lz",
     "DEMO/06_control_flow/with_defer.lz",
     "DEMO/05_expressions/pipe_semantics.lz",
@@ -186,7 +177,6 @@ const MAGIC_DEMOS: &[&str] = &[
     "DEMO/boundary-coverage/combo-struct-method.lz",
     "DEMO/boundary-coverage/combo-defer-guard.lz",
     "DEMO/99_spec/extractor_unapply.lz",
-    "DEMO/99_spec/extractor_unapply_let_for.lz",
 ];
 
 fn magic_demo_paths() -> Vec<PathBuf> {

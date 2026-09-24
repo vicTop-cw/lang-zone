@@ -1,0 +1,16 @@
+// 验证 if 表达式内 raise 透传 fn_raises
+// if 走 Stmt.ExprStmt → gen_expr(IfExpr) 路径，期望生成 return Result::Err 而非 panic!
+
+def risky_if() -> str raises str =
+  if true:
+    raise "from if block"
+  else:
+    return "ok"
+
+def main() =
+  try:
+    let v = risky_if()
+    print(v)
+  catch e:
+    print(e)
+  print("done")
