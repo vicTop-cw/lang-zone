@@ -5067,14 +5067,14 @@ impl CodeGen {
         if let Some(nm) = methods.iter().find(|m| m.name == "__next__" || m.name == "next") {
             if let IrType::Option(inner) = &nm.ret_ty {
                 let where_str = self.magic_impl_where_str(nm);
-                let _item_ty = self.rust_type(inner);
+                let item_ty = self.rust_type(inner);
                 self.emit_line(&format!(
                     "impl{} Iterator for {}{} {{",
                     generics, for_ty, where_str
                 ));
                 self.indent += 1;
-                // 注意：用户定义的 Iterator  trait 没有关联类型 Item，所以不需要生成 type Item
-                self.emit_line("fn next(&mut self) -> Option<i64> {");
+                self.emit_line(&format!("type Item = {};", item_ty));
+                self.emit_line(&format!("fn next(&mut self) -> Option<{}> {{", item_ty));
                 self.indent += 1;
                 // 调用对应的方法：如果是 __next__ 则调用 self.__next__()，否则调用结构体的 next 方法
                 // 注意：self 已经是 &mut self，直接传 self 即可
