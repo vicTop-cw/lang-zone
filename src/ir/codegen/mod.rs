@@ -13391,7 +13391,7 @@ impl CodeGen {
                     }
                     "Dict" => {
                         if fields.is_empty() {
-                            "std::collections::HashMap::new()".to_string()
+                            "std::collections::BTreeMap::new()".to_string()
                         } else {
                             // 带条目的 Dict: HashMap::from([(k, v), ...])
                             let mut pairs = Vec::new();
@@ -13408,7 +13408,7 @@ impl CodeGen {
                                 }
                                 i += 1;
                             }
-                            format!("std::collections::HashMap::from([{}])", pairs.join(", "))
+                            format!("std::collections::BTreeMap::from([{}])", pairs.join(", "))
                         }
                     }
                     "Range" => {
