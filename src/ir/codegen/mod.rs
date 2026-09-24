@@ -3384,6 +3384,15 @@ impl CodeGen {
                             }
                     } else {
                         let ty_str = self.rust_type(&p.ty).to_string();
+                        let ty_str = if let IrType::Named { path, args } = &p.ty {
+                            if path == "Iterator" && !args.is_empty() {
+                                format!("impl Iterator<Item = {}>", self.rust_type(&args[0]))
+                            } else {
+                                ty_str
+                            }
+                        } else {
+                            ty_str
+                        };
 
                         // 只有显式 is_ref 的 Str 参数才生成 &str；
                         // 普通 String 参数保持 String，避免调用点传 String 实参时 E0308
