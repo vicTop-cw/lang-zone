@@ -35,10 +35,15 @@ fn builtins_rlib() -> PathBuf {
 
 /// 编译并运行单个 .lz 源，返回运行 stdout
 fn run_lz(name: &str, source: &str) -> String {
+    run_lz_bytes(name, source.as_bytes())
+}
+
+/// 同 `run_lz`，但以原始字节写入源码（用于 BOM / 行尾等字节级用例）
+fn run_lz_bytes(name: &str, bytes: &[u8]) -> String {
     let work = std::env::temp_dir().join(format!("lzc_loop_bg_{name}"));
     let _ = std::fs::create_dir_all(&work);
     let lz = work.join("input.lz");
-    std::fs::write(&lz, source).expect("write lz source");
+    std::fs::write(&lz, bytes).expect("write lz source");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
     let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
@@ -198,6 +203,16 @@ fn wrong_arity_call_is_rejected() {
 // #[test] fn bigint_struct_field_end_to_end() { ... "123456789012345678901234567891" }
 // #[test] fn complex_arithmetic_end_to_end() { ... "Complex { re: 4.0, im: -2.0 }\nComplex { re: 11.0, im: 2.0 }" }
 // #[test] fn four_level_nested_empty_lists_end_to_end() { ... "[[], [[]], [[[]]]]" }
+
+/// BUG-16 闸门：UTF-8 带 BOM（EF BB BF）的源文件必须能正常编译运行
+/// （修复前报 `Parse error: Unexpected token at top level: Unknown(U+FEFF)`）
+#[test]
+fn utf8_bom_source_is_accepted() {
+    let mut bytes = vec![0xEFu8, 0xBB, 0xBF];
+    bytes.extend_from_slice(b"def main() =\n    println(7)\n");
+    let out = run_lz_bytes("bom", &bytes);
+    assert_eq!(out, "7");
+}
 
 #[test]
 fn utf8_string_roundtrip_end_to_end() {

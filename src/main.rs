@@ -20,6 +20,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// 读取 .lz 源码并剥离 UTF-8 BOM（EF BB BF）。
+///
+/// Windows 记事本等编辑器默认「UTF-8 带 BOM」保存；未剥离时 BOM 会作为首字符进入
+/// 词法层，报 `Parse error: Unexpected token at top level: Unknown(U+FEFF)`，
+/// 且错误信息不含 BOM 字样、排查成本高（BUG-16）。与 `util::source::SourceCache::read`
+/// 同一口径（后者另做行尾归一化，此处保持原始行尾以免影响既有产物对比）。
+fn read_source_lossy(path: &Path) -> std::io::Result<String> {
+    let raw = fs::read(path)?;
+    Ok(String::from_utf8_lossy(lang_zone::util::platform::strip_bom(&raw)).into_owned())
+}
+
 /// 跨模块符号内联：单文件模式下将用户 import 模块的顶层项合并进主 AST，
 /// 使被导入符号进入 IR/codegen（修复 E0425 use/extern 作用域系列失败）。
 /// 只注入定义项（fn/const/struct/enum/impl/alias/duck/magic + 顶层 let 转 const），
@@ -67,7 +78,7 @@ fn merge_imports_into(module: &mut lang_zone::ast::Module, dir: &Path, loaded: &
             continue;
         }
         loaded.push(mp.clone());
-        let Ok(src) = fs::read_to_string(&mp) else {
+        let Ok(src) = read_source_lossy(&mp) else {
             continue;
         };
         let mut lexer = Lexer::new(&src);
@@ -456,7 +467,7 @@ fn compile_main(args: Vec<String>) -> i32 {
         // 不新鲜则继续编译；编译成功后在末尾保存缓存
     }
 
-    let source = fs::read_to_string(path).unwrap_or_else(|e| {
+    let source = read_source_lossy(Path::new(path)).unwrap_or_else(|e| {
         eprintln!("Error reading {}: {}", path, e);
         std::process::exit(1);
     });
@@ -540,7 +551,7 @@ fn compile_main(args: Vec<String>) -> i32 {
             if is_macro_import {
                 if let Some(mname) = mod_name {
                     let macro_path = dir.join(format!("{}.lz", mname));
-                    if let Ok(src) = std::fs::read_to_string(&macro_path) {
+                    if let Ok(src) = read_source_lossy(&macro_path) {
                         let mut mlexer = lang_zone::lexer::Lexer::new(&src);
                         let mtokens = mlexer.tokenize();
                         if let Ok((mreg, _mranges)) = extract_macro_defs(&mtokens) {
