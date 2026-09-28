@@ -100,6 +100,55 @@ fn reject_lz(name: &str, source: &str, needle: &str) {
     );
 }
 
+/// 期望**前端接受**：lang-zone 必须零退出。
+/// 说明：bigint/complex 产物当前在 rustc 阶段仍被 BUG-14（IR 裸 `use num_bigint::BigInt`）阻塞，
+/// 故本组只锁前端阶段；BUG-14 修复后再补 rustc/运行级断言。
+fn accept_lz(name: &str, source: &str) {
+    let work = std::env::temp_dir().join(format!("lzc_loop_bg_acc_{name}"));
+    let _ = std::fs::create_dir_all(&work);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "[{name}] 期望被前端接受，实际被拒: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+// ── 0. bigint / complex 类型注解位（BUG-6 清偿：各注解位口径统一） ──
+
+#[test]
+fn bigint_complex_annotations_are_accepted() {
+    // struct 字段位
+    accept_lz(
+        "bigint_struct_field",
+        "struct Big = val: bigint\ndef main() =\n    println(1)\n",
+    );
+    // 函数参数 + 返回位
+    accept_lz(
+        "bigint_fn_signature",
+        "def addbig(a: bigint, b: bigint) -> bigint =\n    a + b\ndef main() =\n    println(1)\n",
+    );
+    // complex 注解位
+    accept_lz(
+        "complex_fn_signature",
+        "def zf(c: complex) -> complex =\n    c\ndef main() =\n    println(1)\n",
+    );
+}
+
+/// 反向闸门：白名单未放宽过度——真正的未知类型仍须被拒绝
+#[test]
+fn unknown_type_annotation_is_still_rejected() {
+    reject_lz(
+        "unknown_type",
+        "def f(x: Nope) -> int =\n    1\ndef main() =\n    println(1)\n",
+        "未知类型",
+    );
+}
+
 // ── 1. 畸形输入：一律 LZ 层 Parse error（不 panic、不静默通过） ──
 
 #[test]

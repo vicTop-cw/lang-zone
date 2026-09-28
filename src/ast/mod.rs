@@ -34,6 +34,11 @@ pub fn builtin_type_names() -> HashSet<&'static str> {
         "float",
         "f32",
         "f64",
+        // 数值扩展类型（IR 侧 src/ir/builder.rs 已支持 bigint/complex 映射）：
+        // 缺此二项时 `struct X = v: bigint` / `def f(a: bigint)` 会被 G2 语义校验
+        // 误报「未知类型: bigint」（注解位支持不一致，见 memory/bugs.md BUG-6）。
+        "bigint",
+        "complex",
         "str",
         "string",
         "char",
