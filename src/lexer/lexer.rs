@@ -1,8 +1,19 @@
 // Lang-Zong 编译器 — lexer/lexer.rs
 // 词法分析器: 源码 → Token 流
+//
+// 大文件拆分（move-only，2026-10-06）：数字字面量 → lexer/numbers.rs，
+// 字符串/f-string → lexer/strings.rs，主循环保留在本文件，逻辑零改动。
+#[path = "numbers.rs"]
+mod numbers;
+#[path = "strings.rs"]
+mod strings;
+
 use super::indent::IndentStack;
+
 use super::token::{Token, EmbedForm};
+
 use crate::util::chars::is_build_ws;
+
 
 /// 构建块符号（`=:` `~:` `*: ` `^:`）之前的合法边界：
 /// 空白字符，或括号/方括号/花括号/逗号（即处于调用实参、下标、元组等位置）。
@@ -10,6 +21,7 @@ use crate::util::chars::is_build_ws;
 fn is_build_before(c: Option<char>) -> bool {
     is_build_ws(c) || matches!(c, Some('(' | ')' | '[' | ']' | '{' | '}' | ','))
 }
+
 pub struct Lexer {
     chars: Vec<char>,
     pos: usize,
@@ -17,8 +29,9 @@ pub struct Lexer {
     line: usize,
     col: usize,
 }
-
 impl Lexer {
+
+
     pub fn new(source: &str) -> Self {
         Self {
             chars: source.chars().collect(),
@@ -29,16 +42,16 @@ impl Lexer {
         }
     }
 
-    fn peek(&self) -> Option<char> {
+    pub(crate) fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }
 
-    fn peek_n(&self, n: usize) -> Option<char> {
+    pub(crate) fn peek_n(&self, n: usize) -> Option<char> {
         self.chars.get(self.pos + n).copied()
     }
 
     /// 返回当前位置的前一个字符（pos==0 时返回 None，视作输入边界）
-    fn prev_char(&self) -> Option<char> {
+    pub(crate) fn prev_char(&self) -> Option<char> {
         if self.pos == 0 {
             None
         } else {
@@ -46,7 +59,7 @@ impl Lexer {
         }
     }
 
-    fn advance(&mut self) -> Option<char> {
+    pub(crate) fn advance(&mut self) -> Option<char> {
         let c = self.chars.get(self.pos).copied()?;
         self.pos += 1;
         if c == '\n' {
@@ -58,7 +71,7 @@ impl Lexer {
         Some(c)
     }
 
-    fn skip_inline_whitespace(&mut self) -> usize {
+    pub(crate) fn skip_inline_whitespace(&mut self) -> usize {
         let mut spaces = 0;
         while let Some(c) = self.peek() {
             if c == ' ' {
@@ -74,7 +87,7 @@ impl Lexer {
         spaces
     }
 
-    fn skip_line_comment(&mut self) {
+    pub(crate) fn skip_line_comment(&mut self) {
         while let Some(c) = self.peek() {
             if c == '\n' {
                 break;
@@ -83,7 +96,7 @@ impl Lexer {
         }
     }
 
-    fn skip_block_comment(&mut self) {
+    pub(crate) fn skip_block_comment(&mut self) {
         // /* ... */ 多行注释（Java/Rust 体系）；# 预留给宏语法，不再作注释
         // 支持嵌套 /* /* */ */ ：用深度计数，遇到 /* 深度+1，遇到 */ 深度-1，
         // 深度归零才真正结束（调用方已消费起始的 /*，故初始深度为 1）。
@@ -110,424 +123,7 @@ impl Lexer {
         }
     }
 
-    fn read_number(&mut self, first: char) -> Token {
-        let mut num = String::from(first);
-        let mut is_float = false;
-
-        // 处理进制前缀 0x 0o 0b
-        if first == '0' {
-            match self.peek() {
-                Some('x') | Some('X') => {
-                    num.push(self.advance().unwrap());
-                    while let Some(c) = self.peek() {
-                        if c.is_ascii_hexdigit() {
-                            num.push(self.advance().unwrap());
-                        } else if c == '_' {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    match i64::from_str_radix(&num[2..].replace('_', ""), 16) {
-                        Ok(val) => return Token::IntLit(val),
-                        Err(_) => {
-                            let hex_str = &num[2..].replace('_', "");
-                            // 如果值在 u64 范围内，作为 i64 返回（允许负数表示）
-                            if let Ok(val) = u64::from_str_radix(hex_str, 16) {
-                                return Token::IntLit(val as i64);
-                            }
-                            return Token::LexError(format!("无效的十六进制数字: {}", num));
-                        }
-                    }
-                }
-                Some('o') | Some('O') => {
-                    num.push(self.advance().unwrap());
-                    while let Some(c) = self.peek() {
-                        if c.is_ascii_digit() && c < '8' {
-                            num.push(self.advance().unwrap());
-                        } else if c == '_' {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    match i64::from_str_radix(&num[2..].replace('_', ""), 8) {
-                        Ok(val) => return Token::IntLit(val),
-                        Err(_) => {
-                            return Token::LexError(format!("八进制值溢出 i64 范围: {}", num))
-                        }
-                    }
-                }
-                Some('b') | Some('B') => {
-                    num.push(self.advance().unwrap());
-                    while let Some(c) = self.peek() {
-                        if c == '0' || c == '1' {
-                            num.push(self.advance().unwrap());
-                        } else if c == '_' {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    match i64::from_str_radix(&num[2..].replace('_', ""), 2) {
-                        Ok(val) => return Token::IntLit(val),
-                        Err(_) => {
-                            return Token::LexError(format!("二进制值溢出 i64 范围: {}", num))
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                num.push(self.advance().unwrap());
-            } else if c == '_' {
-                self.advance();
-            } else if c == '.' && !is_float && self.peek_n(1).map_or(false, |c| c.is_ascii_digit())
-            {
-                is_float = true;
-                num.push(self.advance().unwrap());
-            } else if (c == 'e' || c == 'E') && !is_float {
-                is_float = true;
-                num.push(self.advance().unwrap());
-                if let Some(sign) = self.peek() {
-                    if sign == '+' || sign == '-' {
-                        num.push(self.advance().unwrap());
-                    }
-                }
-            } else if c == 'e' || c == 'E' {
-                num.push(self.advance().unwrap());
-                if let Some(sign) = self.peek() {
-                    if sign == '+' || sign == '-' {
-                        num.push(self.advance().unwrap());
-                    }
-                }
-            } else {
-                break;
-            }
-        }
-        // 复数字面量后缀：浮点后紧跟 `i` 或 `I` → ComplexLit(0.0, imag)
-        if is_float {
-            let imag = num.parse::<f64>().unwrap_or(0.0);
-            if let Some(c) = self.peek() {
-                if c == 'i' || c == 'I' {
-                    self.advance();
-                    return Token::ComplexLit(0.0, imag);
-                }
-            }
-        }
-        // G2: 数字后紧跟字母/下划线（如 `12abc`）→ 非法数字字面量
-        if let Some(c) = self.peek() {
-            if c.is_alphabetic() || c == '_' {
-                return Token::LexError(format!("非法数字字面量: {}（后跟 `{}`）", num, c));
-            }
-        }
-        if is_float {
-            match num.parse::<f64>() {
-                Ok(v) => Token::FloatLit(v),
-                Err(_) => {
-                    // 检查是否形如 "123e"（指数无尾数）
-                    if num.ends_with('e')
-                        || num.ends_with('E')
-                        || num.ends_with("e+")
-                        || num.ends_with("E+")
-                        || num.ends_with("e-")
-                        || num.ends_with("E-")
-                    {
-                        Token::LexError(format!("科学计数法缺少指数: {}", num))
-                    } else {
-                        Token::LexError(format!("无效的浮点数: {}", num))
-                    }
-                }
-            }
-        } else {
-            match num.parse::<i64>() {
-                Ok(v) => Token::IntLit(v),
-                Err(_) => {
-                    // i64::MAX = 9223372036854775807，其 +1 = 9223372036854775808 超出 i64 正数范围。
-                    // 该值仅在作为一元负号操作数（即源码 `-9223372036854775808` == i64::MIN）
-                    // 时合法，透传为 i64::MIN 哨兵；其余情形（裸 `9223372036854775808` 或二元减
-                    // 操作数）一律拒绝，避免被静默环绕成 i64::MIN（BUG-EC-002）。
-                    // 超出 i128 范围的值尝试解析为 BigInt（LZ 支持 BigInt 基础类型）。
-                    if num == "9223372036854775808" {
-                        // read_number 在此分支时所有数字已读完，self.pos 指向末位之后。
-                        // 首位数字的位置 = self.pos - num.len()，其前字符位于 -1，再前 -2。
-                        let first_digit_pos = self.pos - num.len();
-                        let before_first = self.chars.get(first_digit_pos.wrapping_sub(1)).copied();
-                        let is_unary_minus = match before_first {
-                            Some('-') => {
-                                let before_minus =
-                                    self.chars.get(first_digit_pos.wrapping_sub(2)).copied();
-                                match before_minus {
-                                    None => true,
-                                    Some(c)
-                                        if c.is_whitespace()
-                                            || c == '('
-                                            || c == '['
-                                            || c == '{'
-                                            || c == '='
-                                            || c == ':'
-                                            || c == ','
-                                            || c == '+'
-                                            || c == '-'
-                                            || c == '*'
-                                            || c == '/'
-                                            || c == '<'
-                                            || c == '>'
-                                            || c == '|'
-                                            || c == '&' =>
-                                    {
-                                        true
-                                    }
-                                    _ => false,
-                                }
-                            }
-                            _ => false,
-                        };
-                        if is_unary_minus {
-                            Token::IntLit(i64::MIN)
-                        } else {
-                            // 尝试解析为 i128，溢出则回退到 BigInt
-                            match num.parse::<i128>() {
-                                Ok(v) => Token::Int128Lit(v),
-                                Err(_) => Token::BigIntLit(num.clone()),
-                            }
-                        }
-                    } else {
-                        // 尝试解析为 i128，溢出则回退到 BigInt
-                        match num.parse::<i128>() {
-                            Ok(v) => Token::Int128Lit(v),
-                            Err(_) => Token::BigIntLit(num.clone()),
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// 解析反斜杠转义序列（调用时当前字符为 `\`，尚未 advance）。
-    /// 返回要写入字符串的内容；Err 为非法转义错误（00-词法基础 §2.1）。
-    /// allow_braces: f-string 中允许 `\{` `\}`（字面花括号 → `{{`/`}}`，与 format! 一致）。
-    fn lex_escape(&mut self, allow_braces: bool) -> Result<String, String> {
-        self.advance(); // skip '\'
-        match self.peek() {
-            None => Err("字符串以反斜杠结尾".into()),
-            Some('n') => {
-                self.advance();
-                Ok("\n".into())
-            }
-            Some('t') => {
-                self.advance();
-                Ok("\t".into())
-            }
-            Some('r') => {
-                self.advance();
-                Ok("\r".into())
-            }
-            Some('\\') => {
-                self.advance();
-                Ok("\\".into())
-            }
-            Some('"') => {
-                self.advance();
-                Ok("\"".into())
-            }
-            Some('\'') => {
-                self.advance();
-                Ok("'".into())
-            }
-            Some('0') => {
-                self.advance();
-                Ok("\0".into())
-            }
-            Some('{') if allow_braces => {
-                self.advance();
-                Ok("{{".into())
-            }
-            Some('}') if allow_braces => {
-                self.advance();
-                Ok("}}".into())
-            }
-            Some('u') => {
-                self.advance(); // skip 'u'
-                if self.peek() != Some('{') {
-                    return Err("非法转义序列: \\u 后应跟 {".into());
-                }
-                self.advance(); // skip '{'
-                let mut hex = String::new();
-                while let Some(h) = self.peek() {
-                    if h == '}' {
-                        break;
-                    }
-                    if !h.is_ascii_hexdigit() || hex.len() >= 6 {
-                        return Err(format!("非法 Unicode 转义: \\u{{{}}}", hex));
-                    }
-                    hex.push(h);
-                    self.advance();
-                }
-                if self.peek() != Some('}') || hex.is_empty() {
-                    return Err(format!("非法 Unicode 转义: \\u{{{}}}", hex));
-                }
-                self.advance(); // skip '}'
-                match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-                    Some(ch) => Ok(ch.to_string()),
-                    None => Err(format!("非法 Unicode 码点: \\u{{{}}}", hex)),
-                }
-            }
-            Some(other) => Err(format!("非法转义序列: \\{}", other)),
-        }
-    }
-
-    fn read_string(&mut self) -> Token {
-        self.advance(); // skip opening "
-        let mut s = String::new();
-        let mut closed = false;
-        while let Some(c) = self.peek() {
-            if c == '"' {
-                self.advance();
-                closed = true;
-                break;
-            } else if c == '\\' {
-                match self.lex_escape(false) {
-                    Ok(part) => s.push_str(&part),
-                    Err(e) => return Token::LexError(e),
-                }
-            } else {
-                s.push(self.advance().unwrap());
-            }
-        }
-        if closed {
-            Token::StrLit(s)
-        } else {
-            Token::LexError(format!("未终止的字符串字面量: \"{}\"", s))
-        }
-    }
-
-    fn read_triple_string(&mut self) -> Token {
-        // 已经在 '"""' 的第一个 " 处
-        self.advance();
-        self.advance();
-        self.advance(); // skip """
-        let mut s = String::new();
-        loop {
-            match self.peek() {
-                None => break,
-                Some('"') if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
-                    self.advance();
-                    self.advance();
-                    self.advance();
-                    break;
-                }
-                Some(_c) => s.push(self.advance().unwrap()),
-            }
-        }
-        // 去除公共缩进
-        let lines: Vec<&str> = s.lines().collect();
-        if lines.len() > 1 {
-            let min_indent = lines[1..]
-                .iter()
-                .filter(|l| !l.trim().is_empty())
-                .map(|l| l.len() - l.trim_start().len())
-                .min()
-                .unwrap_or(0);
-            let trimmed: Vec<String> = lines
-                .iter()
-                .enumerate()
-                .map(|(i, l)| {
-                    if i == 0 || l.trim().is_empty() {
-                        l.to_string()
-                    } else {
-                        if l.len() >= min_indent {
-                            l[min_indent..].to_string()
-                        } else {
-                            l.to_string()
-                        }
-                    }
-                })
-                .collect();
-            Token::StrLit(trimmed.join("\n"))
-        } else {
-            Token::StrLit(s)
-        }
-    }
-
-    fn read_fstring(&mut self) -> Token {
-        self.advance(); // skip f
-                        // Check for triple-quoted f-string
-        if self.peek() == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
-            self.advance();
-            self.advance();
-            self.advance();
-            let mut s = String::new();
-            loop {
-                match self.peek() {
-                    None => break,
-                    Some('"') if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
-                        self.advance();
-                        self.advance();
-                        self.advance();
-                        break;
-                    }
-                    Some(_c) => s.push(self.advance().unwrap()),
-                }
-            }
-            return Token::FStrLit(s);
-        }
-        self.advance(); // skip opening "
-        let mut s = String::new();
-        while let Some(c) = self.peek() {
-            if c == '"' {
-                self.advance();
-                break;
-            } else if c == '\\' {
-                match self.lex_escape(true) {
-                    Ok(part) => s.push_str(&part),
-                    Err(e) => return Token::LexError(e),
-                }
-            } else {
-                s.push(self.advance().unwrap());
-            }
-        }
-        Token::FStrLit(s)
-    }
-
-    fn read_raw_string(&mut self) -> Token {
-        self.advance(); // skip r
-                        // r"""...""" 三引号原始字符串（00-词法基础 §2.1）：不处理转义，读到 """ 结束
-        if self.peek() == Some('"') && self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') {
-            self.advance();
-            self.advance();
-            self.advance();
-            let mut s = String::new();
-            loop {
-                match self.peek() {
-                    None => break,
-                    Some('"') if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
-                        self.advance();
-                        self.advance();
-                        self.advance();
-                        break;
-                    }
-                    Some(_c) => s.push(self.advance().unwrap()),
-                }
-            }
-            return Token::RawStrLit(s);
-        }
-        self.advance(); // skip opening "
-        let mut s = String::new();
-        while let Some(c) = self.peek() {
-            if c == '"' {
-                self.advance();
-                break;
-            }
-            s.push(self.advance().unwrap());
-        }
-        Token::RawStrLit(s)
-    }
-
-    fn read_ident_or_keyword(&mut self, first: char) -> Token {
+    pub(crate) fn read_ident_or_keyword(&mut self, first: char) -> Token {
         let mut s = String::from(first);
         while let Some(c) = self.peek() {
             if c.is_alphanumeric() || c == '_' {
@@ -611,13 +207,13 @@ impl Lexer {
         }
     }
 
-    fn handle_indent(&mut self, col: usize, tokens: &mut Vec<Token>) {
+    pub(crate) fn handle_indent(&mut self, col: usize, tokens: &mut Vec<Token>) {
         if let Some(mut virtual_tokens) = self.indent.handle(col) {
             tokens.append(&mut virtual_tokens);
         }
     }
 
-    fn try_match_embed_attr(&self) -> Option<(String, usize)> {
+    pub(crate) fn try_match_embed_attr(&self) -> Option<(String, usize)> {
         let mut p = self.pos;
         if self.chars.get(p) != Some(&'[') {
             return None;
@@ -656,7 +252,7 @@ impl Lexer {
         Some((lang, p))
     }
 
-    fn read_embed_backtick_block(&mut self) -> (String, EmbedForm) {
+    pub(crate) fn read_embed_backtick_block(&mut self) -> (String, EmbedForm) {
         let form = match self.peek() {
             Some('r') if self.peek_n(1) == Some('`') => {
                 self.advance();
@@ -709,7 +305,7 @@ impl Lexer {
         (src, form)
     }
 
-    fn read_embed_indent_block(&mut self) -> String {
+    pub(crate) fn read_embed_indent_block(&mut self) -> String {
         while let Some(c) = self.peek() {
             if c == '\n' || c == '\r' {
                 self.advance();
@@ -1368,5 +964,4 @@ impl Lexer {
         }
         tokens.push(Token::Eof);
         tokens
-    }
-}
+    }}
