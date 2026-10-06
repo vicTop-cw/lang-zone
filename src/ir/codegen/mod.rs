@@ -65,21 +65,27 @@ pub struct CodeGen {
     /// 循环体（for/while）内所有表达式语句强制加分号：循环体不是值上下文，
     /// 尾表达式裸生成会导致 E0308（如 go print(...) → std::thread::spawn(...) 缺 `;`）
     force_stmt_semicolon: bool,
-    /// 函数返回类型为嵌套 Fn（fn -> fn -> T）时：内层闭包返回需 Box::new 包装，
-    /// 且返回类型用 Box<dyn Fn>（Rust 不允许 impl Fn -> impl Fn 嵌套，E0562）
+    /// 函数返回类型为嵌套 Fn（fn -> fn -> T）时：内层闭包返回需 Arc::new 包装，
+    /// 且返回类型用 Arc<dyn Fn … + Send + Sync>（Rust 不允许 impl Fn -> impl Fn 嵌套，E0562）
     nested_fn_ret: bool,
     /// IR-003：Lambda 作为一等值（let = Lambda / return Lambda 的值位置）时
-    /// 需 Box::new 包装为 `Box<dyn Fn>`。仅在值位置置 true，避免借用捕获闭包被误装箱
+    /// 需 Arc::new 包装为 `Arc<dyn Fn … + Send + Sync>`（Arc 而非 Box：LZ fn 值是值语义，产物会 .clone()，
+    /// Box<dyn Fn> 不实现 Clone）。仅在值位置置 true，避免借用捕获闭包被误装箱
     /// （for_each |x| total += x 必须保持 impl FnMut 借用捕获，见 gen_param）
     box_lambda: bool,
-    /// 顶层 def 名称集合：用作值（Var）时需 Box::new(f)；局部 fn-let 由 let 值位置已
-    /// 装箱，不重复装箱（避免 Rc/Box 双层嵌套）
+    /// 顶层 def 名称集合：用作值（Var）时需 Arc::new(f)；局部 fn-let 由 let 值位置已
+    /// 装箱，不重复装箱（避免 Rc 双层嵌套）
     top_level_fns: std::collections::HashSet<String>,
+    /// 值位置 fn 变量的名字 → 参数个数（Rust 侧载体为 `Arc<dyn Fn … + Send + Sync> …>`）：由 `let x = <闭包>`
+    /// 装箱或 `let x = 返回 fn 的调用` 建立。std 未给 `Arc<dyn Fn … + Send + Sync>` 实现 `Fn`，故把这类值传给
+    /// `impl Fn(…) + 'static` / 迭代器 `FnMut` 时需用转发闭包（见 fn_value_fwd）。
+    /// 记个数而非类型：IR 有时把 fn 值变量标成非 Fn（偏应用 `add(_, 1)`），名字是唯一可靠线索
+    fn_value_carriers: HashMap<String, usize>,
     /// @math 函数标志：体内整数字面量经 T::from(i32) 转换（使 `x * 2` 中 2 推断为 T）。
     /// 普通泛型函数不应转换（否则 `total = 0` 生成 T::from(0i32) 与 i64 冲突，E0308）
     in_math_fn: bool,
     /// 当前是否在 Lambda 块体（BlockExpr child）内：嵌套 Fn 返回时，
-    /// 仅块体尾闭包需 Box::new 包装，函数体本身的尾表达式（外层闭包）不包装
+    /// 仅块体尾闭包需 Arc::new 包装，函数体本身的尾表达式（外层闭包）不包装
     in_lambda_block: bool,
     /// 当前是否在生成器（iterator/yield）函数内：体内 return 等价 raise（panic）
     in_generator: bool,
@@ -238,6 +244,15 @@ pub struct CodeGen {
     /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
     /// struct 字段信息（供 __new__ 补齐默认字段）
     struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// f-string 插值静态判定：当前函数可见的变量名 → IR 类型（形参在 gen_fn_def 登记，
+    /// let 绑定在 gen_stmt 的 Let 分支登记）。
+    /// `f"{r.name}"` 里 r 是 struct 时，需按 `struct_fields_info` 查 `name` 是否 str——
+    /// 否则 str 字段被判成非字符串走 `{:?}` 带引号，既违反
+    /// SYNTAX/00-词法基础.md:188（str 插值 = Display 无引号），也与 cy 后端的
+    /// 运行时判定（`_lz_fs` 按值类型去引号）分叉。台账 BUG-23。
+    fstr_var_types: std::collections::HashMap<String, IrType>,
+    /// 当前方法所属 struct 名（`self.field` 的同款判定）
+    fstr_self_type: Option<String>,
     /// struct 名 → 自动追加的 PhantomData 泛型参数列表
     /// （box.lz `struct Box<T> { _ptr: int }` 中 T 未使用，E0392 修复；
     /// 构造点需自动补 `_lz_phantom_T: PhantomData` 字段，否则 E0063）
@@ -287,16 +302,14 @@ pub struct CodeGen {
     duck_defs: std::collections::HashMap<String, DuckDef>,
     /// 本模块是否使用 Ext 类型或 #[extern] 装饰器（仅此时生成 ExtHandle）
     module_uses_ext: bool,
-    /// 本模块是否使用 BigInt 类型（仅此时注入 use num_bigint::BigInt;）
-    module_uses_bigint: bool,
-    /// 本模块是否使用 Complex 类型（仅此时注入 use num_complex::Complex64;）
-    module_uses_complex: bool,
     /// 本模块是否使用 Dict/HashMap 类型（仅此时注入 use std::collections::BTreeMap;）
     module_uses_dict: bool,
     /// I3：L2 中继——extern 自动登记目标 registry。注入后 codegen 处理
     /// #[extern(lang)] 函数时自动 register_symbol 并联动台账（REGISTER）。
     /// None = 不登记（默认，保持既有生成行为不变）。
     pub bridge_registry: Option<crate::bridge::core::BridgeRegistry>,
+    /// embed 生成的模块名集合（如 `foo_tnr`），供 gen_use_stmt 自动路由。
+    embed_modules: std::collections::HashSet<String>,
     buf: String,
 }
 
@@ -866,6 +879,37 @@ fn is_bigint_ty(ty: &IrType) -> bool {
     }
 }
 
+/// bigint / complex 在生成码里的 Rust 类型路径（BUG-1 根因站点）。
+/// 用 `lz_builtins::` 而非 `num_bigint::` / `num_complex::`：num-* 只是
+/// lz_builtins 的传递依赖，孤立 crate（闸门同款 `--extern lz_builtins=…`）里
+/// 裸 crate 名路径解析不到 ⇒ E0432/E0433。lz_builtins 侧已 `pub use` 这两个
+/// 类型，产物里的所有 bigint/complex 路径都经它联结，不留未联结的 crate 名。
+const BIGINT_RS: &str = "lz_builtins::BigInt";
+const COMPLEX_RS: &str = "lz_builtins::Complex64";
+/// const 语境可用的零值（`BigInt::from(0)` 是非常量函数 ⇒ const/static 位 E0015）
+const BIGINT_ZERO: &str = "lz_builtins::BigInt::ZERO";
+const COMPLEX_ZERO: &str = "lz_builtins::Complex64::new(0.0, 0.0)";
+
+/// 有界整数（i128 可表示）→ BigInt 构造式；i64 域内省掉后缀便于 const 折叠。
+fn bigint_from_code(n: i128) -> String {
+    if n >= i64::MIN as i128 && n <= i64::MAX as i128 {
+        format!("{BIGINT_RS}::from({n})")
+    } else {
+        format!("{BIGINT_RS}::from({n}i128)")
+    }
+}
+
+/// 任意精度整数字面量（十进制串，可能超出 i128）→ BigInt 构造式。
+/// 不发 `BigInt::from(999…)`：该字面量超出所有 Rust 整数类型范围（E0584）；
+/// 也不发 `BigInt::from("999…")`：num-bigint 0.4 无 `From<&str>`（E0277）。
+/// ⇒ 走 `FromStr`（num-bigint 0.4 已实现 `FromStr for BigInt`）。
+fn bigint_lit_code(s: &str) -> String {
+    match s.parse::<i128>() {
+        Ok(n) => bigint_from_code(n),
+        Err(_) => format!("\"{s}\".parse::<{BIGINT_RS}>().unwrap()"),
+    }
+}
+
 /// 检查类型是否为 Complex（IrType::Complex 或 Named "complex"/"Complex"/"Complex64"）
 fn is_complex_ty(ty: &IrType) -> bool {
     match ty {
@@ -1005,8 +1049,8 @@ impl CodeGen {
         // 基础类型保持原样
         type_map.insert("int", "i64");
         type_map.insert("int128", "i128");
-        type_map.insert("bigint", "num_bigint::BigInt");
-        type_map.insert("complex", "num_complex::Complex64");
+        type_map.insert("bigint", BIGINT_RS);
+        type_map.insert("complex", COMPLEX_RS);
         CodeGen {
             current_expected_ty: std::cell::RefCell::new(None),
             indent: 0,
@@ -1028,6 +1072,7 @@ impl CodeGen {
             nested_fn_ret: false,
             box_lambda: false,
             top_level_fns: std::collections::HashSet::new(),
+            fn_value_carriers: HashMap::new(),
             in_lambda_block: false,
             in_math_fn: false,
             in_generator: false,
@@ -1081,6 +1126,8 @@ impl CodeGen {
             custom_iterator_is_protocol: true,
             borrow_self: false,
             struct_fields_info: std::collections::HashMap::new(),
+            fstr_var_types: std::collections::HashMap::new(),
+            fstr_self_type: None,
             struct_phantom_generics: std::collections::HashMap::new(),
             struct_method_names_map: std::collections::HashMap::new(),
             struct_init_params_map: std::collections::HashMap::new(),
@@ -1101,8 +1148,6 @@ impl CodeGen {
             duck_field_members: std::collections::HashMap::new(),
             duck_defs: std::collections::HashMap::new(),
             module_uses_ext: false,
-            module_uses_bigint: false,
-            module_uses_complex: false,
             module_uses_dict: false,
             global_vars: std::collections::HashMap::new(),
             downgraded_vars: std::collections::HashSet::new(),
@@ -1110,6 +1155,7 @@ impl CodeGen {
             fn_returns: std::collections::HashMap::new(),
             unknown_extern_fns: std::collections::HashMap::new(),
             bridge_registry: None,
+            embed_modules: std::collections::HashSet::new(),
             buf: String::new(),
         }
     }
@@ -1130,7 +1176,9 @@ impl CodeGen {
         &mut self,
         module: &IrModule,
     ) -> (String, crate::bridge::core::BridgeRegistry) {
-        let reg = crate::bridge::core::BridgeRegistry::new();
+        let mut reg = crate::bridge::core::BridgeRegistry::new();
+        // P3：注册默认桥接——TnrBridge 处理 tnr::/tnr_lib:: 路由
+        reg.register(Box::new(crate::bridge::tnr::TnrBridge::new()));
         self.bridge_registry = Some(reg);
         let code = self.generate(module);
         let reg = self.bridge_registry.take().unwrap();
@@ -1170,6 +1218,20 @@ impl CodeGen {
 
         // 预扫描修饰符装饰器目标类型所需的 std 导入项（T04；仅实际使用时登记）
         self.collect_moddec_imports(module);
+
+        // P1：收集 embed 生成的模块名，供 gen_use_stmt 自动路由
+        self.embed_modules.clear();
+        {
+            let mut ec = crate::ir::embed_collector::EmbedCollector::new();
+            ec.collect(module);
+            let source_name = module
+                .file_path
+                .as_deref()
+                .unwrap_or(&module.name);
+            for name in ec.module_names(source_name) {
+                self.embed_modules.insert(name);
+            }
+        }
 
         // 预扫描 raises 函数名（checker 调用点解包其 Result 返回值）
         for item in &module.items {
@@ -1698,24 +1760,6 @@ impl CodeGen {
             }
             _ => false,
         });
-        self.module_uses_bigint = module.items.iter().any(|item| match item {
-            Item::FnDef(f) => {
-                is_bigint_ty(&f.ret_ty)
-                    || f.params.iter().any(|p| is_bigint_ty(&p.ty))
-            }
-            Item::Const(c) => is_bigint_ty(&c.ty),
-            Item::StructDef(s) => s.fields.iter().any(|f| is_bigint_ty(&f.ty)),
-            _ => false,
-        });
-        self.module_uses_complex = module.items.iter().any(|item| match item {
-            Item::FnDef(f) => {
-                is_complex_ty(&f.ret_ty)
-                    || f.params.iter().any(|p| is_complex_ty(&p.ty))
-            }
-            Item::Const(c) => is_complex_ty(&c.ty),
-            Item::StructDef(s) => s.fields.iter().any(|f| is_complex_ty(&f.ty)),
-            _ => false,
-        });
         self.module_uses_dict = module.items.iter().any(|item| match item {
             Item::FnDef(f) => {
                 is_dict_ty(&f.ret_ty)
@@ -1918,8 +1962,10 @@ impl CodeGen {
         match ty {
             IrType::Int => "0".into(),
             IrType::Int128 => "0i128".into(),
-            IrType::BigInt => "num_bigint::BigInt::from(0)".into(),
-            IrType::Complex => "num_complex::Complex64::new(0.0, 0.0)".into(),
+            // BUG-3：`BigInt::from(0)` 不是 const fn，用在 const/static 默认值位
+            // 直接 E0015 ⇒ 用 `BigInt::ZERO`（num-bigint 0.4 的关联常量）
+            IrType::BigInt => BIGINT_ZERO.into(),
+            IrType::Complex => COMPLEX_ZERO.into(),
             IrType::F64 => "0.0".into(),
             IrType::Bool => "false".into(),
             IrType::Str => "String::new()".into(),
@@ -1928,6 +1974,9 @@ impl CodeGen {
                 "Vec" | "List" => "Vec::new()".into(),
                 "HashMap" | "Dict" => "std::collections::BTreeMap::new()".into(),
                 "HashSet" | "Set" => "std::collections::HashSet::new()".into(),
+                // bigint/complex 注解在 IR 里也常以 Named 形态出现
+                _ if is_bigint_ty(ty) => BIGINT_ZERO.into(),
+                _ if is_complex_ty(ty) => COMPLEX_ZERO.into(),
                 _ => "0".into(),
             },
             _ => "0".into(),
@@ -2036,8 +2085,8 @@ impl CodeGen {
             let ty_str = match ty {
                 IrType::Int => "i64".to_string(),
                 IrType::Int128 => "i128".to_string(),
-                IrType::BigInt => "num_bigint::BigInt".to_string(),
-                IrType::Complex => "num_complex::Complex64".to_string(),
+                IrType::BigInt => BIGINT_RS.to_string(),
+                IrType::Complex => COMPLEX_RS.to_string(),
                 IrType::F64 => "f64".to_string(),
                 IrType::Bool => "bool".to_string(),
                 IrType::Str => "String".to_string(),
@@ -2105,6 +2154,19 @@ impl CodeGen {
     }
 
     fn emit_prelude_base(&mut self) {
+        // BUG-10 产品化（方案 A，2026-10-01）：文件头静态链接配方。
+        // 确定性文本（不含本机路径）⇒ 跨机稳定、可进 golden 快照。
+        // lz_builtins re-export num-bigint/num-complex ⇒ 孤立 rustc 编译
+        // 必须带 -L dependency，否则连不用 bigint 的程序也报 E0463。
+        // 本机解析后的完整可复制命令由 CLI 在生成后打到 stderr（不落盘）。
+        self.emit_line("// ── LZ rustc link recipe (BUG-10: lz_builtins re-exports num-bigint/num-complex) ──");
+        self.emit_line("// To compile & run this generated file in isolation:");
+        self.emit_line("//   rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O <this_file>.rs");
+        self.emit_line("//   <rlib>     = liblz_builtins.rlib (build it: `cargo build -p lz_builtins`)");
+        self.emit_line("//   <deps_dir> = the directory containing that rlib (e.g. <workspace>/target/debug/deps)");
+        self.emit_line("// Omitting -L gives error[E0463] even if this program never uses BigInt/Complex.");
+        self.emit_line("// ─────────────────────────────────────────────────────────────────────────────────────");
+        self.buf.push('\n');
         // Rust 2021 edition support (async/await, etc.)
         // 使用 outer attributes (#[..]) 而非 inner attributes (#![..])
         // 因为 type alias 可能已在 prelude 之前输出，inner attributes 不允许出现在 item 之后
@@ -2129,13 +2191,11 @@ impl CodeGen {
         if self.module_uses_dict {
             self.emit_line("use std::collections::BTreeMap;");
         }
-        // BigInt 基础类型（任意精度整数）——仅在模块实际使用时注入
-        if self.module_uses_bigint {
-            self.emit_line("use num_bigint::BigInt;");
-        }
-        if self.module_uses_complex {
-            self.emit_line("use num_complex::Complex64;");
-        }
+        // BUG-1：不再注入 `use num_bigint::BigInt;` / `use num_complex::Complex64;`。
+        // num-* 只是 lz_builtins 的传递依赖，孤立 crate 里这条 `use` 路径解析不到
+        // （rustc E0432）；类型串已统一为经 lz_builtins re-export 的
+        // `lz_builtins::BigInt` / `lz_builtins::Complex64`（见 BIGINT_RS），
+        // 由下方恒发 `use lz_builtins::*;` 联结，无需按模块再判定。
         // 多类型变参位置约束（03d §2.3 `..: Tuple<T1,T2,..>`）的尾部收集
         // args: (T1, T2, Vec<Box<dyn Any>>) 需要 std::any::Any
         self.emit_line("use std::any::Any;");
@@ -2215,6 +2275,8 @@ impl CodeGen {
             "List" => "Vec".into(),
             "Dict" => "BTreeMap".into(),
             "Set" => "HashSet".into(),
+            #[cfg(feature = "tnr-embed")]
+            "Tensor" => "tnr::tensor::Tensor".into(),
             other => other.to_string(),
         }
     }
@@ -2389,8 +2451,8 @@ impl CodeGen {
         match ty {
             IrType::Int => "i64".into(),
             IrType::Int128 => "i128".into(),
-            IrType::BigInt => "num_bigint::BigInt".into(),
-            IrType::Complex => "num_complex::Complex64".into(),
+            IrType::BigInt => BIGINT_RS.into(),
+            IrType::Complex => COMPLEX_RS.into(),
             IrType::F64 => "f64".into(),
             IrType::Str => "String".into(),
             IrType::Bool => "bool".into(),
@@ -2503,10 +2565,24 @@ impl CodeGen {
                 }
             }
             IrType::Option(inner) => {
-                format!("Option<{}>", self.rust_type(inner))
+                // BUG-error-Never：Never 作为 Option 内部类型（Option<!>）不稳定，
+                // 退化为 ()（纯 `-> !` 仍保留 `!`）
+                let inner_s = if matches!(**inner, IrType::Never) {
+                    "()".to_string()
+                } else {
+                    self.rust_type(inner)
+                };
+                format!("Option<{}>", inner_s)
             }
             IrType::Result { ok, err } => {
-                format!("Result<{}, {}>", self.rust_type(ok), self.rust_type(err))
+                // BUG-error-Never：Never 作为 Result 内部类型（Result<!, E>）不稳定，
+                // 退化为 ()（纯 `-> !` 仍保留 `!`）
+                let ok_s = if matches!(**ok, IrType::Never) {
+                    "()".to_string()
+                } else {
+                    self.rust_type(ok)
+                };
+                format!("Result<{}, {}>", ok_s, self.rust_type(err))
             }
             IrType::Tuple(elems) => {
                 let elems: Vec<String> = elems.iter().map(|e| self.rust_type(e)).collect();
@@ -2529,11 +2605,18 @@ impl CodeGen {
         }
     }
 
-    /// LZ `fn` **值**（变量绑定 / 函数返回值）的 Rust 表示：`Box<dyn Fn(P) -> R>`。
-    /// 嵌套 `fn -> fn -> T` 递归为 `Box<dyn Fn(P) -> Box<dyn Fn(Q) -> R>>`。
+    /// LZ `fn` **值**（变量绑定 / 函数返回值）的 Rust 表示：
+    /// `Arc<dyn Fn(P) -> R + Send + Sync>`。
+    /// 嵌套 `fn -> fn -> T` 递归为
+    /// `Arc<dyn Fn(P) -> Arc<dyn Fn(Q) -> R + Send + Sync> + Send + Sync>`。
+    /// Arc 而非 Box：LZ 的 fn 值是值语义（可重复传入/调用），生成代码会对它们
+    /// `.clone()`；`Box<dyn Fn>` 不实现 Clone → E0599，Arc/Rc 的 clone 是廉价共享。
+    /// Arc 而非 Rc（BUG-9）：`go`/spawn 会把 fn 值捕获进 `std::thread::spawn`，
+    /// 该处要求 `Send + 'static`；实测 `Box<dyn Fn>`（HEAD 旧载体）、`Rc<dyn Fn>`、
+    /// 裸 `Arc<dyn Fn>` 三种载体均 E0277，只有带 `+ Send + Sync` 上界的 Arc 可编译。
     ///
     /// 注意区分三种位置（IR-003 / 设计文档）：
-    /// - **值位置**（变量 / 返回值）：用此处 `Box<dyn Fn>`（支持捕获闭包作一等值）。
+    /// - **值位置**（变量 / 返回值）：用此处 `Arc<dyn Fn … + Send + Sync>`（支持捕获闭包作一等值）。
     /// - **HOF 形参位置**：保留 `impl FnMut`（借用捕获，见 gen_param），不读此函数。
     /// - **struct 字段位置**：保留 `fn` 指针（Clone 安全，见 gen_struct_def 字段覆盖），
     ///   不读此函数。
@@ -2542,7 +2625,7 @@ impl CodeGen {
             IrType::Fn { params, ret } => {
                 let p: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();
                 format!(
-                    "Box<dyn Fn({}) -> {}>",
+                    "Arc<dyn Fn({}) -> {} + Send + Sync>",
                     p.join(", "),
                     self.fn_value_type(ret)
                 )
@@ -2562,12 +2645,24 @@ impl CodeGen {
         let pick = |ty: &IrType| -> Option<String> {
             // IR 语义标记 Option(T)
             if let IrType::Option(inner) = ty {
+                // inner 即 Some 的元素类型；本 None 的真实类型是 Option<inner>。
+                // 发射器会包成 `Option::<pick>::None`，故 pick 必须是 inner 对应的 Rust 类型。
+                // 若 inner 自身也是 Option（如 `Option<Option<X>>` 中 `None` 作 `Some`
+                // 实参），再解一层避免双重 Option 包装（edge-values-boundary.lz 的
+                // `Option.Some(Option.None)` 曾生成 Option::<Option<i64>>::None → E0308）。
+                if let IrType::Option(x) = inner.as_ref() {
+                    return Some(self.rust_type(x));
+                }
                 return Some(self.rust_type(inner));
             }
             // 命名类型 Option<T>
             if let IrType::Named { path, args } = ty {
                 if path == "Option" && args.len() == 1 {
-                    return Some(self.rust_type(&args[0]));
+                    let a = &args[0];
+                    if let IrType::Option(x) = a {
+                        return Some(self.rust_type(x));
+                    }
+                    return Some(self.rust_type(a));
                 }
             }
             None
@@ -2592,6 +2687,11 @@ impl CodeGen {
     /// 返回 List<a>）误生成 Vec::<i64>::new() 导致 E0308（如 dedup 的 `return []`）。
     /// 元素为泛型参数时：来自当前函数返回类型（泛型在当前作用域）→ 用具体名；
     /// 来自调用点期望类型（泛型属被调函数，调用点不在作用域）→ 用 `_` 让 Rust 推断。
+    /// BUG-5：`current_expected_ty` 这一档由 ListLit 元素位下推提供，语义是
+    /// **「本空列表字面量自身的类型」**（见 `list_lit_elem_ty`），所以直接取
+    /// args[0] 即元素类型，任意深度都成立。`current_fn_ret_ty` 那一档仍是
+    /// **外层**列表类型（`return [[], []]` 的返回类型描述整个字面量），
+    /// 该来源没有下推通道，保留「剥一层」的补偿。
     fn empty_list_elem(&self, expr_ty: &IrType) -> String {
         let pick = |ty: &IrType, allow_generic: bool| -> Option<String> {
             if let IrType::Named { path, args } = ty {
@@ -2604,6 +2704,18 @@ impl CodeGen {
                         // 泛型在当前作用域，可用具体名。
                         if matches!(&args[0], IrType::Generic(_)) && !allow_generic {
                             return None;
+                        }
+                        // 仅函数返回类型来源需要剥一层（理由见上方 doc 注释）：
+                        // 否则 `Vec<Vec<X>>` 槽位发 Vec::<Vec<X>>::new() 双重包装
+                        // （polish_30_edge.lz 的 grid_with_empty）。
+                        // 期望类型来源已由 ListLit 元素位下推到本字面量自身类型，
+                        // 再剥就会把第 3 层嵌套的空列表错借到外层更浅槽位（BUG-5）。
+                        if allow_generic {
+                            if let IrType::Named { path: ep, args: ea } = &args[0] {
+                                if (ep == "List" || ep == "Vec") && ea.len() == 1 {
+                                    return Some(self.rust_type(&ea[0]));
+                                }
+                            }
                         }
                         return Some(self.rust_type(&args[0]));
                     }
@@ -2629,6 +2741,32 @@ impl CodeGen {
             }
         }
         "i64".to_string()
+    }
+
+    /// BUG-5：ListLit 元素位的期望类型 = 本列表字面量的**元素类型**。
+    /// 优先取 `current_expected_ty`（Let/const 注解、实参位、上层元素位下推来的
+    /// 精确类型）的 args[0]，退到字面量自身 `expr.ty` 的 args[0]；两者都不是
+    /// List/Vec\<_\> 时返回 None（元素沿用环境期望类型，行为同改前）。
+    /// 改前 ListLit 从不下推元素期望类型，内层空列表 `[]` 只能借到外层槽位，
+    /// `empty_list_elem` 用「剥一层」补丁兜住两层，第 3 层起即错位
+    /// （`Vec<Vec<Vec<i64>>>` 的 `[]` 发成 `Vec::<i64>::new()`，E0308）。
+    fn list_lit_elem_ty(&self, expr_ty: &IrType) -> Option<IrType> {
+        fn arg0(ty: &IrType) -> Option<IrType> {
+            match ty {
+                IrType::Named { path, args }
+                    if (path == "List" || path == "Vec") && args.len() == 1 =>
+                {
+                    Some(args[0].clone())
+                }
+                _ => None,
+            }
+        }
+        let from_expected = self
+            .current_expected_ty
+            .borrow()
+            .as_ref()
+            .and_then(|t| arg0(t).filter(|e| !matches!(e, IrType::Any)));
+        from_expected.or_else(|| arg0(expr_ty))
     }
 
     fn gen_item(&mut self, item: &Item) {
@@ -2722,6 +2860,51 @@ impl CodeGen {
                 self.emit_line("}");
             }
             Item::DuckDef(d) => self.gen_duck_def(d),
+            Item::EmbedBlock { lang, src, .. } => {
+                if lang == "tnr" {
+                    #[cfg(feature = "tnr-embed")]
+                    {
+                        self.gen_embed_tnr(src);
+                    }
+                    #[cfg(not(feature = "tnr-embed"))]
+                    {
+                        self.emit_line("// #[embed(tnr)] — tnr-embed feature 未启用");
+                        for line in src.lines() {
+                            self.emit_line(&format!("// {}", line));
+                        }
+                    }
+                } else {
+                    self.emit_line(&format!("// #[embed({})]", lang));
+                    for line in src.lines() {
+                        self.emit_line(line);
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "tnr-embed")]
+    fn gen_embed_tnr(&mut self, src: &str) {
+        self.emit_line("// #[embed(tnr)] → tnr lib 转译 → Rust 模块");
+        match tnr::frontend::parser::parse(src) {
+            Ok(prog) => match tnr::ir::lower_program_to_lir_ast(&prog, tnr::ir::Backend::Rust) {
+                Ok(lir) => match tnr::codegen::lirgen::transpile_lir(&lir) {
+                    Ok(rust_src) => {
+                        for line in rust_src.lines() {
+                            self.emit_line(line);
+                        }
+                    }
+                    Err(e) => {
+                        self.emit_line(&format!("// tnr transpile error: {:?}", e));
+                    }
+                },
+                Err(e) => {
+                    self.emit_line(&format!("// tnr lower error: {:?}", e));
+                }
+            },
+            Err(e) => {
+                self.emit_line(&format!("// tnr parse error: {:?}", e));
+            }
         }
     }
 
@@ -3363,7 +3546,7 @@ impl CodeGen {
                         // fn(...) 类型参数 → impl Fn(...)：可接受闭包（03e §五），
                         // 直接生成 fn 指针无法接收 move 闭包（E0308）。
                         // 用 impl Fn（非 FnMut）：闭包体内调用此类参数得到的是 Fn 闭包，
-                        // 才能作为 Box<dyn Fn> 返回（compose 返回 |x| g(f(x))，E0596）。
+                        // 才能作为 fn 值载体返回（compose 返回 |x| g(f(x))，E0596）。
                         // for_each 类「接收 FnMut 用户闭包」需求由 lib_iterator 负责
                         // （该库当前 ignored，待转正时再按需细化 FnMut 形参）。
                         if let IrType::Fn { params, ret } = &p.ty {
@@ -3376,10 +3559,23 @@ impl CodeGen {
                             if f.name == "new" {
                                 format!("fn({}) -> {}", ps.join(", "), self.rust_type(ret))
                             } else {
+                                // BUG-9 的连带收紧：本函数**返回 fn 值**时，体内会把 fn
+                                // 形参捕获进 `Arc<dyn Fn … + Send + Sync>` 载体，形参自身
+                                // 必须 Send + Sync，否则 compose 一类「组合并返回闭包」
+                                // 报 E0277（rustc 原文：consider restricting opaque type
+                                // `impl Fn(b) -> c + 'static` with trait `Send`）。
+                                // 只在这一种函数收紧；map/filter/for_each 等返回非 fn 值
+                                // 的 HOF 形参保持原样，既有的借用捕获语义不受影响。
+                                let send_bound = if matches!(&f.ret_ty, IrType::Fn { .. }) {
+                                    " + Send + Sync"
+                                } else {
+                                    ""
+                                };
                                 format!(
-                                    "impl Fn({}) -> {} + 'static",
+                                    "impl Fn({}) -> {} + 'static{}",
                                     ps.join(", "),
-                                    self.rust_type(ret)
+                                    self.rust_type(ret),
+                                    send_bound
                                 )
                             }
                     } else {
@@ -3479,18 +3675,13 @@ impl CodeGen {
                 format!(" -> std::option::Option<{}>", self.rust_type(&item))
             } else {
                 let ret_ty_str = match &f.ret_ty {
-                    IrType::Fn { params, ret } => {
-                        // LZ `fn` 值返回：统一用 Box<dyn Fn（IR-003，支持捕获闭包作返回）。
-                        // 嵌套 fn -> fn -> T 由 fn_value_type 递归为
-                        // Box<dyn Fn(P) -> Box<dyn Fn(Q) -> R>；
-                        // 单层 fn(int)->int → Box<dyn Fn(i64) -> i64>
+                    IrType::Fn { .. } => {
+                        // LZ `fn` 值返回：统一走 fn_value_type 的 Arc<dyn Fn … + Send + Sync>
+                        // （IR-003：支持捕获闭包作返回，载体可 clone —— LZ fn 值是值语义；
+                        //   BUG-9：带 + Send + Sync 才能被 `go` 捕获进 thread::spawn）。
+                        // 单层 fn(int)->int → Arc<dyn Fn(i64) -> i64 + Send + Sync>
                         // （原 impl Fn(P) -> i64 为误生成，E0308）。
-                        let p: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();
-                        format!(
-                            "Box<dyn Fn({}) -> {}>",
-                            p.join(", "),
-                            self.fn_value_type(ret)
-                        )
+                        self.fn_value_type(&f.ret_ty)
                     }
                     // 返回类型是 duck 约束名（min -> Comparable）：Rust 无自由 trait
                     // 类型，渲染为统一后的 duck 泛型参数名（E0277 修复）
@@ -3579,10 +3770,14 @@ impl CodeGen {
         };
 
         let sig = if is_curry && f.params.len() >= 2 {
-            // fn a(A) -> Box<dyn Fn(B) -> Box<dyn Fn(C) -> R>>
+            // fn a(A) -> Arc<dyn Fn(B) -> Arc<dyn Fn(C) -> R + Send + Sync> + Send + Sync>
             let mut ret_chain = self.rust_type(&f.ret_ty);
             for p in &f.params[1..] {
-                ret_chain = format!("Box<dyn Fn({}) -> {}>", self.rust_type(&p.ty), ret_chain);
+                ret_chain = format!(
+                    "Arc<dyn Fn({}) -> {} + Send + Sync>",
+                    self.rust_type(&p.ty),
+                    ret_chain
+                );
             }
             format!(
                 "{}{}{}fn {}{}({}) -> {}",
@@ -3634,13 +3829,13 @@ impl CodeGen {
                 let pty = self.rust_type(&p.ty);
                 if i == last_idx - 1 {
                     self.emit_line(&format!(
-                        "Box::new(move |{}: {}| -> {} {{",
+                        "Arc::new(move |{}: {}| -> {} {{",
                         pname,
                         pty,
                         self.rust_type(&f.ret_ty)
                     ));
                 } else {
-                    self.emit_line(&format!("Box::new(move |{}: {}| {{", pname, pty));
+                    self.emit_line(&format!("Arc::new(move |{}: {}| {{", pname, pty));
                 }
                 self.indent += 1;
             }
@@ -3758,9 +3953,17 @@ impl CodeGen {
         self.current_fn_ret_ty = Some(f.ret_ty.clone());
         // BUG-CG-004（轮次12）：记录当前函数 raises 异常类型，供 try/catch 结果基分支判断
         self.current_fn_raises = f.raises.clone();
-        // 登记顶层 def 名称（IR-003：顶层函数作值时需 Box::new(f)，局部 fn-let 已装箱不重包）
+        // f-string 静态判定表：本函数形参的类型（`{r.name}` 要能查到 r 是 Rec）
+        let saved_fstr_params = std::mem::take(&mut self.fstr_var_types);
+        self.fstr_var_types = f
+            .params
+            .iter()
+            .filter(|prm| prm.name != "self")
+            .map(|prm| (prm.name.clone(), prm.ty.clone()))
+            .collect();
+        // 登记顶层 def 名称（IR-003：顶层函数作值时需 Arc::new(f)，局部 fn-let 已装箱不重包）
         self.top_level_fns.insert(f.name.clone());
-        // 嵌套 Fn 返回类型（fn -> fn -> T）：内层闭包返回值需 Box::new 包装
+        // 嵌套 Fn 返回类型（fn -> fn -> T）：内层闭包返回值需 Arc::new 包装
         let saved_nested_fn_ret = self.nested_fn_ret;
         self.nested_fn_ret = matches!(&f.ret_ty, IrType::Fn { ret, .. }
             if matches!(ret.as_ref(), IrType::Fn { .. }));
@@ -3926,6 +4129,7 @@ impl CodeGen {
         self.nested_fn_ret = saved_nested_fn_ret;
         self.current_ret_ty = None;
         self.current_fn_raises = None;
+        self.fstr_var_types = saved_fstr_params;
         self.is_main = false;
         self.in_generator = saved_generator;
         self.in_generic_fn = saved_generic_fn;
@@ -4243,6 +4447,8 @@ impl CodeGen {
             self.in_impl_generic = !s.generics.is_empty();
             let saved_impl_generics = std::mem::take(&mut self.current_impl_generics);
             self.current_impl_generics = s.generics.iter().map(|g| g.name.clone()).collect();
+            let saved_fstr_self = self.fstr_self_type.take();
+            self.fstr_self_type = Some(s.name.clone());
             for m in &s.methods {
                 // 登记 struct 方法的默认参数信息，供调用点补 None
                 // 键用 struct::method 格式，避免不同 struct 的同名方法（如 new）冲突
@@ -4270,6 +4476,7 @@ impl CodeGen {
                 self.buf.push('\n');
             }
             self.current_impl_generics = saved_impl_generics;
+            self.fstr_self_type = saved_fstr_self;
             self.in_impl_generic = saved_impl_generic;
             self.indent -= 1;
             self.emit_line("}");
@@ -4499,12 +4706,30 @@ impl CodeGen {
                 // Self.Item 时才追加；纯抽象方法（如 lib_iterator 的
                 // `def next(mut self) -> Option<int>`）签名不含关联类型，
                 // 不应加，否则 collect(mut iter: dyn Iterator) 报 E0038
+                // BUG-traits-SelfItem：递归检测类型中是否出现 Self.Item / Self. 关联类型
+                // （含 fn(...) 参数、Option<T> 嵌套），缺失会导致 `where Self:
+                // std::iter::Iterator` 漏加 → E0277 Self is not an iterator。
+                fn ty_has_self_item(ty: &IrType) -> bool {
+                    match ty {
+                        IrType::Named { path, args } => {
+                            path.contains("Self.") || path == "Self"
+                                || args.iter().any(ty_has_self_item)
+                        }
+                        IrType::Ref(i) | IrType::MutRef(i) => ty_has_self_item(i),
+                        IrType::Option(i) => ty_has_self_item(i),
+                        IrType::Result { ok, err } => {
+                            ty_has_self_item(ok) || ty_has_self_item(err)
+                        }
+                        IrType::Tuple(e) => e.iter().any(ty_has_self_item),
+                        IrType::Fn { params, ret } => {
+                            params.iter().any(ty_has_self_item) || ty_has_self_item(ret)
+                        }
+                        _ => false,
+                    }
+                }
                 let uses_self_item = sig.body.is_some()
-                    || matches!(&sig.ret, IrType::Named { path, .. } if path.contains("Self."))
-                    || sig
-                        .params
-                        .iter()
-                        .any(|p| matches!(p, IrType::Named { path, .. } if path.contains("Self.")));
+                    || ty_has_self_item(&sig.ret)
+                    || sig.params.iter().any(ty_has_self_item);
                 if t.name == "Iterator" && self.custom_iterator_is_protocol && uses_self_item {
                     "\nwhere\nSelf: std::iter::Iterator".to_string()
                 } else {
@@ -4686,7 +4911,7 @@ impl CodeGen {
     fn gen_impl_def(&mut self, i: &ImplDef) {
         // Rust impl 泛型不允许默认类型参数（E0741），剥离默认值仅保留 bounds；
         // 追加 Clone + Debug bound（LZ 值语义自动 .clone()，泛型需可 Clone）
-        let stripped: Vec<GenericParam> = i
+        let mut stripped: Vec<GenericParam> = i
             .generics
             .iter()
             .map(|g| {
@@ -4704,6 +4929,16 @@ impl CodeGen {
                 }
             })
             .collect();
+        // BUG-dict-Ord：Dict/HashMap → BTreeMap<K,V> 要求键泛型 K: Ord。
+        // 仅给第一个泛型（键 K）注入 Ord，不污染值泛型 V（Set/HashSet 不走此分支）。
+        if matches!(&i.for_type, IrType::Named { path, .. } if path == "Dict" || path == "HashMap") {
+            if let Some(k) = stripped.first_mut() {
+                let ord = IrType::named("Ord");
+                if !k.bounds.iter().any(|b| self.gen_trait_bound(b) == self.gen_trait_bound(&ord)) {
+                    k.bounds.push(ord);
+                }
+            }
+        }
         let generics = self.gen_generics(&stripped);
         let trait_part = i
             .trait_
@@ -4939,6 +5174,11 @@ impl CodeGen {
         self.in_impl_generic = !i.generics.is_empty();
         let saved_impl_generics = std::mem::take(&mut self.current_impl_generics);
         self.current_impl_generics = i.generics.iter().map(|g| g.name.clone()).collect();
+        let saved_fstr_self = self.fstr_self_type.take();
+        self.fstr_self_type = match &i.for_type {
+            IrType::Named { path, .. } => Some(path.clone()),
+            _ => None,
+        };
         for m in &i.methods {
             // __new__ 体内抑制 kwarg→__new__ 路由（避免 Self(v:...) 无限递归）
             let prev_in_new_body = self.in_new_body;
@@ -4950,6 +5190,7 @@ impl CodeGen {
             self.buf.push('\n');
         }
         self.current_impl_generics = saved_impl_generics;
+        self.fstr_self_type = saved_fstr_self;
         self.in_impl_generic = saved_impl_generic;
         self.in_iterator_impl = saved_iterator_impl;
         self.in_ext_trait = saved_ext_trait;
@@ -5863,6 +6104,22 @@ impl CodeGen {
                         .collect()
                 };
 
+                // 检测 inherent __call__ 的 self 是否为 mut（→ Rust &mut self）。
+                // 若是，Callable trait 的 &self __call__ 无法直接调用 inherent 的
+                // &mut self 方法，需在体内部克隆出可变副本来转发。
+                let self_mut = cm
+                    .params
+                    .iter()
+                    .any(|p| (p.name == "self" || p.name == "self_") && p.is_mut);
+                // 全限定 inherent 调用所需的类型路径（含泛型时转 `Foo::<T>` 形式，
+                // 避免 `Foo<T>::__call__` 非法语法）。for_ty 已含泛型后缀。
+                let ty_path = if generics.is_empty() {
+                    for_ty.to_string()
+                } else {
+                    let base = for_ty.strip_suffix(generics).unwrap_or(for_ty);
+                    format!("{}::{}", base, generics)
+                };
+
                 self.emit_line(&format!(
                     "impl{} lz_builtins::Callable<({},)> for {} {} {{",
                     generics, args_tuple, for_ty, where_str
@@ -5874,7 +6131,21 @@ impl CodeGen {
                     args_tuple
                 ));
                 self.indent += 1;
-                self.emit_line(&format!("self.__call__({})", call_args.join(", ")));
+                if self_mut {
+                    // inherent __call__ 为 mut self（&mut self）：经 &self 的 Callable
+                    // 无法调用 &mut self 方法，克隆可变副本后用「全限定 inherent 调用」
+                    // 转发（Rust 方法解析会先承诺 &T 接收者，同名 trait 方法会抢走
+                    // 解析，故必须显式 `Type::__call__(&mut copy, ..)` 绕过歧义）。
+                    // Clone / 泛型 turbofish 由 struct derive 与 generics 保证。
+                    self.emit_line("let mut __call_self = self.clone();");
+                    self.emit_line(&format!(
+                        "{}::__call__(&mut __call_self, {})",
+                        ty_path,
+                        call_args.join(", ")
+                    ));
+                } else {
+                    self.emit_line(&format!("self.__call__({})", call_args.join(", ")));
+                }
                 self.indent -= 1;
                 self.emit_line("}");
                 self.indent -= 1;
@@ -6007,13 +6278,41 @@ impl CodeGen {
             return;
         }
 
+        // P1：embed 模块自动路由——embed 生成的模块（如 foo_tnr）直接生成 use 语句
+        if self.embed_modules.contains(path_str.as_str()) {
+            if u.is_from && u.items.len() == 1 && u.items[0] == "*" {
+                self.emit_line(&format!("use {}::*;", path_str));
+            } else if u.is_from && !u.items.is_empty() {
+                self.emit_line(&format!("use {}::{{{}}};", path_str, u.items.join(", ")));
+            } else {
+                self.emit_line(&format!("use {};", path_str));
+            }
+            return;
+        }
+
         // 非相对路径：检查是否为已知模块或已知模块的子路径
         let is_known = known_module_paths.contains(path_str.as_str());
         let parent_path = path_str.rsplitn(2, "::").nth(1).unwrap_or("");
         let parent_is_known = known_module_paths.contains(parent_path);
         let is_std_root = path_str == "std";
         if !is_known && !parent_is_known && !is_std_root {
-            // 未知模块路径，跳过（如 std::math, std::bridge.rust.serde_json）
+            // P3：bridge registry 路由——非 embed、非已知 std 模块，尝试桥接
+            if let Some(reg) = &self.bridge_registry {
+                let result = reg.resolve_import_full(&path, &u.items);
+                if !result.rust_path.is_empty() && result.rust_path != path_str {
+                    if u.is_from && !u.items.is_empty() && u.items[0] != "*" {
+                        self.emit_line(&format!(
+                            "use {}::{{{}}};",
+                            result.rust_path,
+                            u.items.join(", ")
+                        ));
+                    } else {
+                        self.emit_line(&format!("use {};", result.rust_path));
+                    }
+                    return;
+                }
+            }
+            // 桥接也未匹配，跳过
             return;
         }
 
@@ -6068,6 +6367,11 @@ impl CodeGen {
 
     fn gen_const_def(&mut self, c: &ConstDef) {
         let is_mutated = self.mutated_consts.contains(&c.name);
+        // 顶层 let→const 位的期望类型注入（对齐 gen_stmt 的 Let 分支）：
+        // 改前这里从不把声明类型送进 current_expected_ty，于是 const 值里的
+        // bigint 字面量（BUG-2 族）和嵌套空列表（BUG-5 族）都拿不到期望类型。
+        let prev_expected_for_const = self.current_expected_ty.borrow().clone();
+        *self.current_expected_ty.borrow_mut() = Some(c.ty.clone());
         // const 不支持 .to_string()，直接用 &str
         let (ty_str, val_str) = match &c.ty {
             IrType::Str => {
@@ -6078,28 +6382,29 @@ impl CodeGen {
                     (self.rust_type(&c.ty), self.gen_expr(&c.value))
                 }
             }
-            // BigInt 字面量：直接生成 BigInt::from(...) 而非依赖 gen_lit 的类型判断
-            IrType::BigInt => {
+            // BUG-2：BigInt 字面量直接生成 BigInt::from(...)，不依赖 gen_lit 的类型判断。
+            // 分派条件用 is_bigint_ty（覆盖 `IrType::BigInt` 与注解形态
+            // `Named{path:"bigint"/"BigInt"}`）——原来只匹配 `IrType::BigInt`，
+            // 而 `let x: bigint = …` 在 IR 里落成 Named 形态，本臂从不命中，
+            // 于是走 `_ =>` 的 gen_expr 分支发出裸 `…i128`（E0308）。
+            _ty if is_bigint_ty(_ty) => {
+                // 期望类型注入：BigInt 的算术/比较非常量可求值，顶层 let 会被
+                // 发成 const ⇒ E0015，needs_lazy 已把它归入 LazyLock 惰性求值
+                // （BUG-3），此处按运行期表达式生成。
+                // 期望类型由函数开头的 prev_expected_for_const 统一注入
                 let val = match &c.value.kind {
-                    ExprKind::Lit(LitKind::Int128(n)) => {
-                        if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
-                            format!("num_bigint::BigInt::from({})", n)
-                        } else {
-                            format!("num_bigint::BigInt::from({}i128)", n)
-                        }
-                    }
+                    ExprKind::Lit(LitKind::Int128(n)) => bigint_from_code(*n),
                     ExprKind::Lit(LitKind::Int(n)) => {
-                        format!("num_bigint::BigInt::from({})", n)
+                        format!("{BIGINT_RS}::from({n})")
                     }
-                    ExprKind::Lit(LitKind::BigInt(s)) => {
-                        format!("num_bigint::BigInt::from({})", s)
-                    }
+                    ExprKind::Lit(LitKind::BigInt(s)) => bigint_lit_code(s),
                     _ => self.gen_expr(&c.value),
                 };
                 (self.rust_type(&c.ty), val)
             }
             _ => (self.rust_type(&c.ty), self.gen_expr(&c.value)),
         };
+        *self.current_expected_ty.borrow_mut() = prev_expected_for_const;
         let kw = if is_mutated { "static mut" } else { "const" };
         // 需要使用 lhs!() 惰性初始化的情况：
         // 1. 集合类型（Vec, HashMap, HashSet）— 不能 const 初始化（需要 .to_string() 等）
@@ -6109,6 +6414,11 @@ impl CodeGen {
                 IrType::Named { path, .. }
                 if ["Vec","List","HashMap","HashSet","Dict","Set"].contains(&path.as_str())
             ) || matches!(&c.ty, IrType::Tuple(_))
+                // BUG-3：BigInt / Complex 的构造（`BigInt::from`）与算术运算符
+                // 都不是 const fn ⇒ 顶层 let 发成 const 会撞 E0015
+                // 「cannot call non-const fn in constants」，与集合类型同款走惰性静态
+                || is_bigint_ty(&c.ty)
+                || is_complex_ty(&c.ty)
                 || val_str.contains("catch_unwind")
                 || val_str.contains("__try_result")
                 || val_str.contains("LazyLock")
@@ -6822,6 +7132,30 @@ impl CodeGen {
         }
     }
 
+    /// LZ fn 值（载体 `Arc<dyn Fn … + Send + Sync>`）不实现 `Fn`/`FnMut`——std 只为 `Box<dyn Fn>` 提供
+    /// 这些 impl。把它作为实参传给 `impl Fn(…) + 'static` 形参或迭代器 `FnMut` 方法时，
+    /// 套一层持有 Arc clone 的转发闭包：既满足 bound，又不 move 原变量（LZ fn 值是值语义，
+    /// 否则 E0382 use of moved value）。参数个数：Var 实参查 fn_value_carriers 登记表（IR 常把
+    /// 偏应用变量标成非 Fn），调用/块实参取自身 `IrType::Fn` 的参数表。
+    fn fn_value_fwd(&self, s: &str, a: &Expr) -> Option<String> {
+        let arity = match &a.kind {
+            ExprKind::Var(name) => self.fn_value_carriers.get(name.as_str()).copied(),
+            ExprKind::Call { .. } | ExprKind::BlockExpr { .. } => match &a.ty {
+                IrType::Fn { params, .. } => Some(params.len()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let arity = arity?;
+        let fwd: Vec<String> = (0..arity).map(|k| format!("__lz_fv{}", k)).collect();
+        Some(format!(
+            "{{ let __lz_fv = std::sync::Arc::clone(&{}); move |{}| __lz_fv({}) }}",
+            s,
+            fwd.join(", "),
+            fwd.join(", ")
+        ))
+    }
+
     /// move 语义修复：若实参为「被多次使用的非 Copy 变量」，自动 .clone()，
     /// 避免 `for x in xs: push(seen, x); push(result, x)` 类的二次移动 E0382。
     /// Copy 类型克隆无害（i64.clone() 等价），此处统一克隆以保证安全。
@@ -7344,7 +7678,7 @@ impl CodeGen {
                 mods,
             } => {
                 // IR-003：嵌套 def 转本地闭包产物 `let name = <Lambda>`（ty=Fn 且值
-                // 为 Lambda）→ 值位置，需 Box<dyn Fn> 标注并装箱
+                // 为 Lambda）→ 值位置，需 Arc<dyn Fn … + Send + Sync> 标注并装箱
                 let is_fn_lambda_let = matches!(ty, IrType::Fn { .. })
                     && matches!(value.kind, ExprKind::Lambda { .. });
                 // 关键字降级变量（Ok/Some/None/Err 用作变量名）：注册并重命名为 name_
@@ -7414,6 +7748,11 @@ impl CodeGen {
                 {
                     self.str_typed_vars.insert(safe_name.clone());
                 }
+                // 字段插值判定要的是「这个变量的 IR 类型」，比 str_typed_vars 宽一档：
+                // builder 在 value 上带的 ty 已能认出 struct 值（`let res = MyResource(...)`），
+                // 而 str_typed_vars 只认字符串。
+                self.fstr_var_types.insert(name.clone(), value.ty.clone());
+                self.fstr_var_types.insert(safe_name.clone(), value.ty.clone());
                 // ref 绑定（ref r = x / let ref r = x，02-变量与绑定 §5、13-指针与引用 §2.1）：
                 //   ref r = x     → let r = &mut x;（无 let 前缀，默认可变引用）
                 //   let ref r = x → let r = &x;（let 强制不可变引用）
@@ -7498,6 +7837,11 @@ impl CodeGen {
                     } else {
                         false
                     };
+                // BUG-4：bigint/complex 注解在 IR 里是 `Named{path:"bigint", args:[]}`
+                // （builder 的 bigint 映射产出物），会命中上面 `args.is_empty()` 而被
+                // 丢弃标注 → 函数体内 `let x: bigint = 123…` 坍塌成裸 i128。
+                // 二者是内置标量、Rust 类型名恒定可解析，标注始终可发射。
+                let skip_ty = skip_ty && !(is_bigint_ty(ty) || is_complex_ty(ty));
                 // 空容器需要类型提示 Vec<_> / HashMap<_, _>（Nil 类型除外）
                 // Dir/Set 空容器：即使 skip_ty 为 true，也强制输出类型标注（Rust 无法推断 K, V）
                 let is_empty_container = match &value.kind {
@@ -7537,8 +7881,8 @@ impl CodeGen {
                 } else {
                     format!(": {}", self.rust_type(ty))
                 };
-                // IR-003：fn 值 let（嵌套 def 闭包）显式标注 Box<dyn Fn>，否则
-                // `let inner = Box::new(closure)` 无法推断目标 trait object（E0282/E0308）
+                // IR-003：fn 值 let（嵌套 def 闭包）显式标注 Arc<dyn Fn … + Send + Sync>，否则
+                // `let inner = Arc::new(closure)` 无法推断目标 trait object（E0282/E0308）
                 if is_fn_lambda_let {
                     ty_str = format!(": {}", self.fn_value_type(ty));
                 }
@@ -7576,6 +7920,24 @@ impl CodeGen {
                 };
                 *self.current_expected_ty.borrow_mut() = prev_expected_for_let;
                 self.box_lambda = saved_box_lambda;
+                // 登记 `Arc<dyn Fn … + Send + Sync>` 载体变量名 + 参数个数（闭包装箱 let / 返回 fn 的调用
+                // 结果），供实参边界生成转发闭包（见 fn_value_fwd）
+                let fn_arity = match ty {
+                    IrType::Fn { params, .. } => Some(params.len()),
+                    _ => match &value.ty {
+                        IrType::Fn { params, .. } => Some(params.len()),
+                        _ => None,
+                    },
+                };
+                let is_rc_fn_let = is_fn_lambda_let
+                    || (matches!(&value.kind, ExprKind::Call { .. })
+                        && matches!(&value.ty, IrType::Fn { .. }));
+                if let Some(arity) = fn_arity {
+                    if is_rc_fn_let {
+                        self.fn_value_carriers.insert(safe_name.clone(), arity);
+                        self.fn_value_carriers.insert(name.clone(), arity);
+                    }
+                }
                 // BUG-SG-002/003：`T?` 位置自动 Some 包装。
                 // `let z: int? = 10` / `let cfg: Config? = Config { .. }` 在 Rust
                 // 侧是 `Option<T> = T`（E0308）。注解可空而初始值非空 → 补 Some。
@@ -7973,8 +8335,8 @@ impl CodeGen {
             }
             Stmt::ExprStmt { expr } => {
                 self.emit_walrus_predecls(expr);
-                // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Box::new 包装
-                // （factory_chain: |a| => |b| => x + a + b → move |a| { Box::new(move |b| {...}) }）。
+                // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Arc::new 包装
+                // （factory_chain: |a| => |b| => x + a + b → move |a| { Arc::new(move |b| {...}) }）。
                 // 仅在 Lambda 块体内生效；函数体本身的尾表达式（外层闭包）不包装
                 let nested_fn_body = self.nested_fn_ret
                     && self.in_lambda_block
@@ -7984,7 +8346,7 @@ impl CodeGen {
                     && matches!(&expr.kind, ExprKind::Lambda { .. })
                     && !self.in_lambda_block;
                 let expr_s = if nested_fn_body {
-                    format!("Box::new({})", self.gen_expr(expr))
+                    format!("Arc::new({})", self.gen_expr(expr))
                 } else {
                     self.gen_expr(expr)
                 };
@@ -9345,9 +9707,10 @@ impl CodeGen {
                 } else if matches!(&expr.ty, IrType::Fn { .. })
                     && self.top_level_fns.contains(name.as_str())
                 {
-                    // IR-003：顶层 def 作一等值 → 装箱为 Box<dyn Fn>。
-                    // 局部 fn-let 已在 let 值位置装箱，不重复装箱（避免双层 Box）
-                    format!("Box::new({})", name)
+                    // IR-003：顶层 def 作一等值 → 装箱为 Arc<dyn Fn … + Send + Sync>（可 clone，
+                    // Box<dyn Fn> 不实现 Clone → E0599）。
+                    // 局部 fn-let 已在 let 值位置装箱，不重复装箱（避免双层 Rc）
+                    format!("Arc::new({})", name)
                 } else {
                     name.clone()
                 }
@@ -9371,6 +9734,23 @@ impl CodeGen {
                                 return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
                             }
                         }
+                    }
+                }
+                // 构造器调用 Rc(...)/Box(...)/Arc(...) → Rc::new(...)/Box::new(...)/Arc::new(...)
+                // （BUG-CONSTRUCTOR 修复，box.lz / magic_methods.lz）：直接调用语法与 MethodCall
+                // 路径 `Rc.new(x)` → `Rc::new(x)` 对称。否则 Rc 被当作未知外部函数生成
+                // `fn Rc(__a0: i64) -> i64 { i64::MAX }` 桩，导致编译失败。
+                if let ExprKind::Var(cname) = &callee.kind {
+                    // 仅当 Rc/Box/Arc 不是本模块用户自定义类型（struct/enum）时才路由到
+                    // std 的 `::new`。否则会误伤 box.lz 等自定义 `struct Box/Rc/Arc`——
+                    // 其构造应走已有的 `Name::__new__` 路由（见 13586-13595），而非 `Box::new`
+                    // （用户 struct 没有 std 的 `new` 关联函数，E0599）。
+                    if (cname == "Rc" || cname == "Box" || cname == "Arc")
+                        && !self.is_known_type(cname)
+                    {
+                        let ctor_args: Vec<String> =
+                            args.iter().map(|a| self.gen_expr(a)).collect();
+                        return format!("{}::new({})", cname, ctor_args.join(", "));
                     }
                 }
                 // std 模块链调用拦截（BUG-SB-001 修复，2026-09-03）：
@@ -9580,6 +9960,10 @@ impl CodeGen {
                             *self.current_expected_ty.borrow_mut() =
                                 callee_expected.as_ref().and_then(|pts| pts.get(i).cloned());
                             let s = self.gen_expr(a);
+                            // fn 值实参（Arc 载体）→ 转发闭包（见 fn_value_fwd）
+                            if let Some(fwd) = self.fn_value_fwd(&s, a) {
+                                return fwd;
+                            }
                             // fn(...) 类型形参接收 lambda 实参：需转 fn 指针。参数声明
                             // 生成 impl FnMut（可收闭包），但存入 fn 字段/传给 fn 形参时
                             // opaque impl 无法 .clone()/赋值（E0599/E0308，lib_iterator
@@ -9661,7 +10045,15 @@ impl CodeGen {
                                 | ExprKind::FieldAccess { .. }
                         );
                         let arg_is_copy = matches!(&a.ty, IrType::Int | IrType::F64 | IrType::Bool);
-                        if arg_is_var && !arg_is_copy {
+                        let arg_is_assoc = if let IrType::Named { path, .. } = &a.ty {
+                            // 仅关联类型（含 :: 如 I::Item，或以 < 开头的 <I as Trait>::Item）
+                            // 豁免自动 clone；普通大写开头的结构体类型（Cow/Point/Dog 等）
+                            // 仍需 clone（E0382：combined/structs/polish_16_duck 回归）
+                            path.contains("::") || path.starts_with('<')
+                        } else {
+                            false
+                        };
+                        if arg_is_var && !arg_is_copy && !arg_is_assoc {
                             let s = &args_s[i];
                             let is_none_lit = s.trim_end() == "None";
                             if !s.starts_with('&')
@@ -9669,7 +10061,15 @@ impl CodeGen {
                                 && !s.contains("::")
                                 && !is_none_lit
                             {
-                                args_s[i] = format!("{}.clone()", s);
+                                let is_ref_str = matches!(&a.ty, IrType::Ref(inner)
+                                    if matches!(inner.as_ref(), IrType::Str)
+                                        || matches!(inner.as_ref(), IrType::Named { path, .. }
+                                            if path == "str" || path == "String"));
+                                args_s[i] = if is_ref_str {
+                                    format!("{}.to_string()", s)
+                                } else {
+                                    format!("{}.clone()", s)
+                                };
                             }
                         }
                     }
@@ -9744,6 +10144,14 @@ impl CodeGen {
                             );
                             let arg_is_copy =
                                 matches!(&a.ty, IrType::Int | IrType::F64 | IrType::Bool);
+                            let arg_is_assoc = if let IrType::Named { path, .. } = &a.ty {
+                                // 仅关联类型（含 :: 如 I::Item，或以 < 开头的 <I as Trait>::Item）
+                                // 豁免自动 clone；普通大写开头的结构体类型（Cow/Point/Dog 等）
+                                // 仍需 clone（E0382：combined/structs/polish_16_duck 回归）
+                                path.contains("::") || path.starts_with('<')
+                            } else {
+                                false
+                            };
                             // Fn 类型参数（impl Fn(...) opaque）不可 clone（E0599）：
                             // 实参是闭包变量时直接传引用即可，不自动 .clone()
                             let param_is_fn = matches!(&callee_ptypes[i], IrType::Fn { .. });
@@ -9754,6 +10162,7 @@ impl CodeGen {
                                 && arg_is_var
                                 && !arg_is_copy
                                 && !param_is_fn
+                                && !arg_is_assoc
                                 && i < args_s.len()
                             {
                                 let s = &args_s[i];
@@ -9763,7 +10172,24 @@ impl CodeGen {
                                     && !s.contains("::")
                                     && !is_none_lit
                                 {
-                                    args_s[i] = format!("{}.clone()", s);
+                                    // 字符串实参按形态层归一（与 Fn 变量调用路径 9759 对齐）：
+                                    // &str / &String 借用视图传给拥有值形参（String）需
+                                    // .to_string()，不能用 .clone()（&str.clone() 仍是 &str，E0308）。
+                                    let is_ref_str = matches!(
+                                        &a.ty,
+                                        IrType::Ref(inner)
+                                            if matches!(inner.as_ref(), IrType::Str)
+                                            || matches!(
+                                                inner.as_ref(),
+                                                IrType::Named { path, .. }
+                                                    if path == "str" || path == "String"
+                                            )
+                                    );
+                                    args_s[i] = if is_ref_str {
+                                        format!("{}.to_string()", s)
+                                    } else {
+                                        format!("{}.clone()", s)
+                                    };
                                 }
                             }
                         }
@@ -10090,6 +10516,24 @@ impl CodeGen {
                                 .map(|(f, a)| format!("{}: {}", f, a))
                                 .collect();
                             return format!("{}::{} {{ {} }}", base_s, field, pairs.join(", "));
+                        }
+                        // 无数据变体的调用式构造 `Shape.Point()` → `Shape::Point`。
+                        // Rust 的单元变体不是函数，带 `()` 即 E0618（2026-10-02 实测：
+                        // CY/TESTS/07_data_structures/enum_data.lz 走 rust 后端 rustc 失败，
+                        // 同一份 .lz 在 cy 后端能跑 ⇒ 跨后端行为分叉）。
+                        // 限定在「field 确是 base 的变体」且「该变体零字段」，
+                        // 否则 Cell::new() / Vec::new() 这类零参关联函数会被摘掉括号。
+                        let unit_variant_ctor = wrapped_args.is_empty()
+                            && self
+                                .enum_variants
+                                .get(field)
+                                .map_or(false, |en| en == &base_s)
+                            && self
+                                .enum_variant_fields
+                                .get(&(base_s.clone(), field.clone()))
+                                .map_or(true, |v| v.is_empty());
+                        if unit_variant_ctor {
+                            return format!("{}::{}", base_s, field);
                         }
                         return format!("{}::{}({})", base_s, field, wrapped_args.join(", "));
                     }
@@ -10603,7 +11047,18 @@ impl CodeGen {
                             })
                             .collect();
                         
-                        return format!("{}::new({})", callee_s, positional.join(", "));
+                        // 构造器方法名：魔法 `__new__`（无论写在 struct 体——
+                        // 由 struct_has_new 登记，如 magic_methods 的 Config——
+                        // 还是 impl 块——由 struct_method_names_map 含 "__new__" 判定，
+                        // 如 box.lz 的 Rc/Arc/Box）用 `__new__`；仅 impl 块里用户定义的
+                        // 普通 `new` 方法（如 g6_impl 的 Point）用 `new`。
+                        let is_magic_new = self.struct_has_new.contains(&base_name)
+                            || self
+                                .struct_method_names_map
+                                .get(&base_name)
+                                .map_or(false, |s| s.contains("__new__"));
+                        let new_method = if is_magic_new { "__new__" } else { "new" };
+                        return format!("{}::{}({})", callee_s, new_method, positional.join(", "));
                     }
 
                     // 递归字段集合：字段类型直接引用 struct 自身（如 next: Self?）→ 构造时自动 Box
@@ -11188,7 +11643,27 @@ impl CodeGen {
                         }
                     }
                     return if args_s.is_empty() {
-                        format!("{}::{}()", recv, method)
+                        // 无数据变体的调用式构造 `Shape.Point()` → `Shape::Point`：
+                        // Rust 的单元变体不是函数，带 `()` 即 E0618（2026-10-02 实测
+                        // CY/TESTS/07_data_structures/enum_data.lz 走 rust 后端 rustc 失败，
+                        // 同一份 .lz 在 cy 后端能跑 ⇒ 跨后端分叉）。
+                        // 本分支是 `Type.method(...)` 的**静态调用**路线，早于 FieldAccess
+                        // 分支返回，所以两处都要拦（只改 FieldAccess 那处实测无效）。
+                        // 限定「method 确是 recv 的变体」且「该变体零字段」，
+                        // 否则 Cell::new() / Vec::new() 这类零参关联函数会被摘掉括号。
+                        let unit_variant_ctor = self
+                            .enum_variants
+                            .get(method.as_str())
+                            .map_or(false, |en| en.as_str() == recv.as_str())
+                            && self
+                                .enum_variant_fields
+                                .get(&(recv.clone(), method.clone()))
+                                .map_or(true, |v| v.is_empty());
+                        if unit_variant_ctor {
+                            format!("{}::{}", recv, method)
+                        } else {
+                            format!("{}::{}()", recv, method)
+                        }
                     } else {
                         // 命名字段枚举变体构造：Type.Variant(field: v) → Type::Variant { field: v }
                         // static_type_call 早于 is_enum_variant 分支返回，必须在此处理，
@@ -11262,7 +11737,15 @@ impl CodeGen {
                 };
                 let mut args_s: Vec<String> = args
                     .iter()
-                    .map(|a| self.clone_if_multiuse(self.gen_expr(a), a))
+                    .map(|a| {
+                        let s = self.gen_expr(a);
+                        // fn 值实参（Arc 载体）→ 转发闭包：链式 `xs.map(f)`/`filter(f)` 的
+                        // 形参要 FnMut，`Arc<dyn Fn … + Send + Sync>` 不满足（见 fn_value_fwd）
+                        if let Some(fwd) = self.fn_value_fwd(&s, a) {
+                            return fwd;
+                        }
+                        self.clone_if_multiuse(s, a)
+                    })
                     .collect();
                 // 用户导入模块（含别名）的方法调用 m.add(...) → add(...)：
                 // 模块项已平铺生成到同一 Rust 文件，直接调用 method 即可
@@ -11415,6 +11898,23 @@ impl CodeGen {
                         })
                         .unwrap_or(false);
                     if ret_is_result_like || self.current_fn_raises.is_some() {
+                        // BUG-spread：返回 Result/raises 的上下文中对 Option 用 `?`
+                        // 必须先转 Result（E0277：? 不能作用于 Option）。
+                        // 但若函数本身返回 Option，`Option?` 直接传播 None，合法，不转换。
+                        let recv_is_option = matches!(&receiver.ty, IrType::Option(_))
+                            || matches!(&receiver.ty, IrType::Named { path, .. }
+                                if path == "Option");
+                        let ret_is_result = self.current_fn_raises.is_some()
+                            || self.current_ret_ty.as_ref().map_or(false, |rt| {
+                                matches!(rt, IrType::Result { .. })
+                                    || matches!(rt, IrType::Named { path, .. } if path == "Result")
+                            });
+                        if recv_is_option && ret_is_result {
+                            return format!(
+                                "({}).ok_or_else(|| LzError::new(\"None\".to_string()))?",
+                                recv
+                            );
+                        }
                         return format!("({})?", recv);
                     }
                     return format!("{}.unwrap()", recv);
@@ -11649,8 +12149,16 @@ impl CodeGen {
                             || recv == "Rc"
                             || recv == "Arc" =>
                     {
-                        // Static method on type → use :: syntax
-                        return format!("{}::new({})", recv, args_s.join(", "));
+                        // Static ctor on type → use :: syntax.
+                        // 魔法构造器是 `__new__`（struct 体由 struct_has_new 登记，impl 块由
+                        // struct_method_names_map 含 "__new__" 判定），普通 impl `new` 才是 `new`。
+                        let is_magic_new = self.struct_has_new.contains(&recv)
+                            || self
+                                .struct_method_names_map
+                                .get(&recv)
+                                .map_or(false, |m| m.contains("__new__"));
+                        let ctor = if is_magic_new { "__new__" } else { "new" };
+                        return format!("{}::{}({})", recv, ctor, args_s.join(", "));
                     }
                     _ => method,
                 };
@@ -11683,7 +12191,11 @@ impl CodeGen {
                     // 自定义类型的 get（list.lz `lst.get(1)` 参数是 i64）不受影响
                     let recv_is_str = matches!(&receiver.ty, IrType::Str)
                         || matches!(&receiver.ty, IrType::Named { path, .. }
-                            if path == "str" || path == "String");
+                            if path == "str" || path == "String")
+                        || matches!(&receiver.ty, IrType::Ref(inner) | IrType::MutRef(inner)
+                            if matches!(inner.as_ref(), IrType::Str)
+                                || matches!(inner.as_ref(), IrType::Named { path, .. }
+                                    if path == "str" || path == "String"));
                     // HashMap/Dict 的 contains_key：key 需 &（HashMap::contains_key 参数 &Q）
                     // Set/HashSet 的 contains：参数 &Q（containers.lz `tags.contains("rust")`，
                     // E0308 expected &_, found String）；kwargs 字段（checker 的 __Params.kwargs
@@ -12045,11 +12557,59 @@ impl CodeGen {
                     // 并恢复字符串字面量的 to_string（pattern_methods 曾去掉）
                     let args_owned: Vec<String> = args_s
                         .iter()
-                        .map(|s| {
-                            if (method == "find"
+                        .enumerate()
+                        .map(|(i, s)| {
+                            // StrExt 这些方法（find/starts_with/ends_with/contains/split/
+                            // rfind/replace）的字符串形态实参均归一到 Owned String：裸 &str
+                            // 字面量（如 `&"hello"` 剥 & 后仍是 &str）与 &str/&String 变量
+                            // 必须 .to_string()，否则 E0308（expected String, found &str）。
+                            // 非字符串形态实参（如 repeat 的 i64）由下方 arg_is_str 守卫排除。
+                            let needs_own = method == "find"
                                 || method == "starts_with"
                                 || method == "ends_with"
-                                || method == "contains")
+                                || method == "contains"
+                                || method == "split"
+                                || method == "rfind"
+                                || method == "replace";
+                            // 字符串形态实参归一到 Owned String：裸 &str 字面量（如
+                            // `&"hello"` 剥 & 后仍是 &str）与 &str/&String 变量必须
+                            // .to_string()，否则 E0308（expected String, found &str）。
+                            let arg_is_str = args
+                                .get(i)
+                                .map(|a| {
+                                    matches!(&a.ty, IrType::Str)
+                                        || matches!(
+                                            &a.ty,
+                                            IrType::Ref(inner)
+                                                if matches!(inner.as_ref(), IrType::Str)
+                                        )
+                                        || matches!(
+                                            &a.ty,
+                                            IrType::Ref(inner)
+                                                if matches!(
+                                                    inner.as_ref(),
+                                                    IrType::Named { path, .. }
+                                                        if path == "str" || path == "String"
+                                                )
+                                        )
+                                        || matches!(
+                                            &a.ty,
+                                            IrType::Named { path, .. } if path == "String"
+                                        )
+                                })
+                                .unwrap_or(false);
+                            let stripped = if s.starts_with('&') && !s.starts_with("&&") {
+                                &s[1..]
+                            } else {
+                                s.as_str()
+                            };
+                            if needs_own
+                                && arg_is_str
+                                && !stripped.ends_with(".to_string()")
+                                && !stripped.ends_with(".clone()")
+                            {
+                                format!("{}.to_string()", stripped)
+                            } else if needs_own
                                 && s.starts_with('&')
                                 && !s.starts_with("&&")
                             {
@@ -12726,7 +13286,28 @@ impl CodeGen {
                             // （sort_by<T>/bubble_sort 冒泡 result[j]），自动 clone 为 owned
                             format!("{}[{}].clone()", base_s, key_s)
                         } else {
-                            format!("{}[{}]", base_s, key_s)
+                            // Range 键落在**非 self 基底**上时，`xs[1..3]` 的类型是 unsized
+                            // `[i64]`：作「值」使用（print 实参 / let 绑定 / for 迭代）rustc 直接
+                            // E0277 `the size for values of type [i64] cannot be known`
+                            // （实测 TEMP/probe10/a_slice_as_value.lz，同件在 cy 面出 `[1, 2]`），
+                            // 而规范明写切片返回 `List<int>`（SYNTAX/01-类型系统.md:442）。
+                            // 取 owned Vec 而不是 `&[..]`：`{:?}` 可打、与数组字面量可比
+                            // （`impl PartialEq<[U;N]> for Vec<T>`）、可按值迭代，
+                            // 三种上下文都不引入引用生命周期。比较位原本就能过，改成 Vec 后照样过。
+                            if matches!(&key.kind, ExprKind::StructCtor { name, .. } if name == "Range") {
+                                // 基底是文本时切片出 `&str`，owned 化走 `to_string()`；
+                                // 走 `to_vec()` 会 E0599 `no method named to_vec found for
+                                // type str`（实测 2026-10-02：自举语料 lz_lex_flag/rich.rs:261
+                                // 的 `word[0..2]`，`word` 的 IR 类型是 Any ⇒ 类型判定不够，
+                                // 还要查 str 登记表，见 base_is_str_like）。
+                                if self.base_is_str_like(base) {
+                                    format!("{}[{}].to_string()", base_s, key_s)
+                                } else {
+                                    format!("{}[{}].to_vec()", base_s, key_s)
+                                }
+                            } else {
+                                format!("{}[{}]", base_s, key_s)
+                            }
                         }
                     }
                 }
@@ -13168,9 +13749,9 @@ impl CodeGen {
                 // 复数提升：算术运算中一侧是 Complex、另一侧是数值 → 将数值侧提升为 Complex::new(x, 0.0)
                 // （如 `3.0 + 4.0i` → `Complex64::new(3.0, 0.0) + Complex64::new(0, 4)`）
                 if arith && lhs_is_complex && (rhs_is_numeric || rhs_is_f64) && !rhs_is_complex {
-                    format!("{} {} num_complex::Complex64::new({}, 0.0)", lhs_s, op_s, rhs_s)
+                    format!("{lhs_s} {op_s} {COMPLEX_RS}::new({rhs_s}, 0.0)")
                 } else if arith && rhs_is_complex && (lhs_is_numeric || lhs_is_f64) && !lhs_is_complex {
-                    format!("num_complex::Complex64::new({}, 0.0) {} {}", lhs_s, op_s, rhs_s)
+                    format!("{COMPLEX_RS}::new({lhs_s}, 0.0) {op_s} {rhs_s}")
                 } else if arith && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
                     format!("{} {} ({} as f64)", lhs_s, op_s, rhs_s)
                 } else if arith && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
@@ -13296,8 +13877,8 @@ impl CodeGen {
                 ret_ty,
                 ..
             } => {
-                // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Box::new 包装
-                // （factory_chain: |a| => |b| => x + a + b → move |a| { Box::new(move |b| {...}) }）
+                // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Arc::new 包装
+                // （factory_chain: |a| => |b| => x + a + b → move |a| { Arc::new(move |b| {...}) }）
                 let nested = self.nested_fn_ret && matches!(&body.kind, ExprKind::Lambda { .. });
                 // 闭包返回类型注解（`|x| -> T = ...`）：生成 `-> T` 让 Rust 闭包显式标注，
                 // 否则 `or_else(b, |e: str| -> Result<int,int> = Ok(100))` 无法从 Ok(100)
@@ -13310,7 +13891,7 @@ impl CodeGen {
                 // （如 Option.None.and_then(|x| Option.None)，E0282）
                 let mut body_s = self.gen_expr(body);
                 if nested {
-                    body_s = format!("Box::new({})", body_s);
+                    body_s = format!("Arc::new({})", body_s);
                 }
                 let params: Vec<String> = params
                     .iter()
@@ -13356,7 +13937,7 @@ impl CodeGen {
                     child.in_generic_fn = self.in_generic_fn;
                     // Lambda 体内不生成 return，让尾表达式成为闭包返回值
                     child.suppress_tail_return = true;
-                    // 嵌套 Fn 返回：内层闭包尾表达式需 Box::new 包装（E0562）
+                    // 嵌套 Fn 返回：内层闭包尾表达式需 Arc::new 包装（E0562）
                     child.nested_fn_ret = self.nested_fn_ret;
                     child.in_lambda_block = true;
                     // 块内含无值 return（return;）→ 尾表达式丢弃值（生成 expr;），
@@ -13387,11 +13968,11 @@ impl CodeGen {
                         body_s
                     )
                 };
-                // IR-003：值位置（let = Lambda / return Lambda）的闭包需 Box::new 包装为
-                // Box<dyn Fn>；参数位置（传给 impl FnMut，如 map/filter/for_each）不包装，
+                // IR-003：值位置（let = Lambda / return Lambda）的闭包需 Arc::new 包装为
+                // Arc<dyn Fn … + Send + Sync>（可 clone）；参数位置（传给 impl FnMut，如 map/filter/for_each）不包装，
                 // 保留借用捕获（for_each |x| total += x 修改外层变量）
                 if self.box_lambda {
-                    format!("Box::new({})", lam)
+                    format!("Arc::new({})", lam)
                 } else {
                     lam
                 }
@@ -13493,7 +14074,15 @@ impl CodeGen {
                         {
                             let values: Vec<String> =
                                 fields.iter().map(|(_, v)| self.gen_expr(v)).collect();
-                            return format!("{}::__new__({})", name, values.join(", "));
+                            // 同 kwarg 路径：魔法 `__new__`（struct 体由 struct_has_new 登记，
+                            // impl 块由方法集合含 "__new__" 判定）用 `__new__`，普通 impl `new` 用 `new`。
+                            let is_magic_new = self.struct_has_new.contains(name.as_str())
+                                || self
+                                    .struct_method_names_map
+                                    .get(name.as_str())
+                                    .map_or(false, |m| m.contains("__new__"));
+                            let new_method = if is_magic_new { "__new__" } else { "new" };
+                            return format!("{}::{}({})", name, new_method, values.join(", "));
                         }
                         // 自动补 PhantomData 字段（box.lz `Box(_ptr: 0)` → `Box { _ptr: 0, _lz_phantom_T: PhantomData }`，
                         // 否则 E0063 missing field `_lz_phantom_T`）
@@ -13842,6 +14431,7 @@ impl CodeGen {
                 // 索引元素自动 .clone()，E0382/E0507）依赖 fn_param_types 查询，
                 // 否则 if 分支块内的 `f(list[i])` 不 clone（bootstrap/lz_ir 试点暴露）
                 child.fn_param_types = self.fn_param_types.clone();
+                child.fn_value_carriers = self.fn_value_carriers.clone();
                 child.fn_ref_params = self.fn_ref_params.clone();
                 child.overload_sigs = self.overload_sigs.clone();
                 child.fn_variadic = self.fn_variadic.clone();
@@ -13893,6 +14483,7 @@ impl CodeGen {
                 child.current_fn_ret_is_ref = self.current_fn_ret_is_ref;
                 child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
                 child.fn_param_types = self.fn_param_types.clone();
+                child.fn_value_carriers = self.fn_value_carriers.clone();
                 child.fn_ref_params = self.fn_ref_params.clone();
                 child.overload_sigs = self.overload_sigs.clone();
                 child.fn_variadic = self.fn_variadic.clone();
@@ -14042,7 +14633,42 @@ impl CodeGen {
                         .collect();
                     format!("({})", elems.join(", "))
                 } else {
-                    let elems: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
+                    // BUG-11：元组槽位的期望类型下推，形状对齐 ListLit 元素位
+                    // （save/restore 约定同 Call 实参位）。改前 TupleLit 从不下推，
+                    // `let t: (List<List<int>>, List<int>) = ([], [1, 2])` 的第 0 槽
+                    // 空列表借不到声明类型 `List<List<int>>`，只能按自身默认推断
+                    // 发成 `Vec::<i64>::new()` ⇒ E0308 expected Vec<Vec<i64>>,
+                    // found Vec<i64>（静态定义与内联引用两侧同错）。
+                    let tuple_expected = self.current_expected_ty.borrow().clone();
+                    let elems: Vec<String> = elems
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let pushed = match &tuple_expected {
+                                Some(IrType::Tuple(tys))
+                                    if matches!(
+                                        &e.kind,
+                                        ExprKind::ListLit(_) | ExprKind::TupleLit(_)
+                                    ) =>
+                                {
+                                    tys.get(i).cloned()
+                                }
+                                _ => None,
+                            };
+                            let prev_expected = if pushed.is_some() {
+                                let prev = self.current_expected_ty.borrow().clone();
+                                *self.current_expected_ty.borrow_mut() = pushed;
+                                Some(prev)
+                            } else {
+                                None
+                            };
+                            let s = self.gen_expr(e);
+                            if let Some(prev) = prev_expected {
+                                *self.current_expected_ty.borrow_mut() = prev;
+                            }
+                            s
+                        })
+                        .collect();
                     format!("({})", elems.join(", "))
                 }
             }
@@ -14091,10 +14717,31 @@ impl CodeGen {
                 if is_nil {
                     "()".to_string()
                 } else {
+                    // BUG-5：元素位期望类型下推（save/restore 约定同 Call 实参位）。
+                    // 只对「元素本身又是列表/元组字面量」的位置下推，其余元素保持原环境。
+                    let elem_expected = self.list_lit_elem_ty(&expr.ty);
                     let elems_s: Vec<String> = elems
                         .iter()
                         .map(|e| {
+                            let pushed = if matches!(
+                                &e.kind,
+                                ExprKind::ListLit(_) | ExprKind::TupleLit(_)
+                            ) {
+                                elem_expected.clone()
+                            } else {
+                                None
+                            };
+                            let prev_expected = if pushed.is_some() {
+                                let prev = self.current_expected_ty.borrow().clone();
+                                *self.current_expected_ty.borrow_mut() = pushed;
+                                Some(prev)
+                            } else {
+                                None
+                            };
                             let s = self.gen_expr(e);
+                            if let Some(prev) = prev_expected {
+                                *self.current_expected_ty.borrow_mut() = prev;
+                            }
                             // 列表字面量元素：IndexGet/Var 且元素类型非 Copy 时
                             // 自动 .clone()（E0507 cannot move out of index /
                             // E0382 moved value，如 `out + [ts[i]]` 的 vec![ts[i]]）
@@ -14432,7 +15079,14 @@ impl CodeGen {
         let mut fmt_quoted = escaped;
         for i in 0..arg_idx {
             // 字符串语义插值（String/str 变量、字面量等）用 {}（Display，无引号）；
-            // 其余（容器/Option/HashMap 等只有 Debug）用 {:?}（E0277 规避）
+            // 其余（容器/Option/HashMap 等只有 Debug）用 {:?}（E0277 规避）。
+            // 口径出处是规范而不是实现：SYNTAX/00-词法基础.md:188 明确
+            // `f"x={x}"` → `format!("x={}", x)`，即 str 插值**不带引号**；
+            // 该断言由 tests/str_boundary.rs 的 c7_fstring 用例实跑锁死
+            // （`assert msg == "name=LZ, age=30"`，2026-10-02 复测为绿）。
+            // 注：DEMO/01_basics/strings.lz:43 与 DEMO/01_basics/polish_28_strings.lz:28
+            // 曾断言**带引号**形态，与该规范行冲突（台账 BUG-22）——DEMO 闸门只做
+            // 转译+rustc 编译，从不执行这些 assert，故其文案一直不构成判据。
             let spec = if str_specs.get(i).copied().unwrap_or(false) {
                 "{}"
             } else {
@@ -14453,14 +15107,51 @@ impl CodeGen {
         expr.trim().to_string()
     }
 
+    /// 基底是否**文本**：决定索引/切片的 owned 化走 `to_string()` 还是 `to_vec()`。
+    /// 不能只看 `base.ty`——builder 对逐字符累加的变量（自举词法器里的 `word`）推断成
+    /// `Any`，只看类型会把 str 切片发成 `to_vec()`（E0599）。故再查两张 str 登记表与
+    /// 字段名启发式（与既有 `base_is_str_any` 同源，收紧成一处）。
+    fn base_is_str_like(&self, base: &Expr) -> bool {
+        let named_str = |t: &IrType| match t {
+            IrType::Str => true,
+            IrType::Named { path, .. } => path == "str" || path == "String",
+            IrType::Ref(inner) | IrType::MutRef(inner) => matches!(&**inner, IrType::Str),
+            _ => false,
+        };
+        if named_str(&base.ty) {
+            return true;
+        }
+        if let ExprKind::FieldAccess { field, .. } = &base.kind {
+            if matches!(field.as_str(), "s" | "source" | "input") {
+                return true;
+            }
+        }
+        if matches!(&base.ty, IrType::Any) {
+            if let ExprKind::Var(n) = &base.kind {
+                return self.str_typed_vars.contains(n)
+                    || self.fstr_var_types.get(n).map_or(false, |t| named_str(t));
+            }
+        }
+        false
+    }
+
     /// f-string 插值表达式是否为字符串语义（生成 {} 而非 {:?}）：
     /// 已登记的字符串变量或字符串字面量。其余（int/容器/属性等）用 Debug {:?}
     fn is_str_expr(&self, expr: &str) -> bool {
         let t = expr.trim();
+        let strish = |ty: &IrType| matches!(ty, IrType::Str)
+            || matches!(ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Str))
+            || matches!(ty, IrType::MutRef(inner) if matches!(inner.as_ref(), IrType::Str));
         if t.starts_with('"') || t.starts_with('\'') {
             return true;
         }
         if self.str_typed_vars.contains(t) {
+            return true;
+        }
+        // 按 IR 类型复核：`str_typed_vars` 存的是**降级后的安全名**（`file` → `file_`），
+        // 而插值文本永远是源码名 ⇒ 降级变量在那里必然查不到，会被当成非字符串走
+        // `{:?}` 加引号（违反 SYNTAX/00-词法基础.md:188）。fstr_var_types 两个名字都登记。
+        if self.fstr_var_types.get(t).map_or(false, strish) {
             return true;
         }
         // 字符串方法链（如 x.to_upper()）— 已登记变量首段
@@ -14468,6 +15159,35 @@ impl CodeGen {
             let base = &t[..dot];
             if self.str_typed_vars.contains(base) {
                 return true;
+            }
+            // `recv.field`：recv 是 self 或本函数的 struct 形参时，按字段声明类型判定
+            let field = t[dot + 1..].trim();
+            if !field.is_empty() && !field.contains('.') && !field.contains('(') {
+                let struct_name = if base == "self" {
+                    self.fstr_self_type.clone()
+                } else {
+                    match self.fstr_var_types.get(base) {
+                        Some(IrType::Named { path, .. }) => Some(path.clone()),
+                        Some(IrType::Ref(inner)) | Some(IrType::MutRef(inner)) => {
+                            match inner.as_ref() {
+                                IrType::Named { path, .. } => Some(path.clone()),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(name) = struct_name {
+                    let b = name.split('<').next().unwrap_or(&name).to_string();
+                    if let Some(info) = self.struct_fields_info.get(&b) {
+                        if info
+                            .iter()
+                            .any(|(fname, fty)| fname == field && strish(fty))
+                        {
+                            return true;
+                        }
+                    }
+                }
             }
         }
         false
@@ -14536,9 +15256,23 @@ impl CodeGen {
         }
     }
 
+    /// BUG-4：当前「期望类型」是否为 BigInt。
+    /// Let 注解位（gen_stmt Let 在生成值前把声明类型写入 `current_expected_ty`）、
+    /// 实参位、比较运算对方类型都走这条通道；字面量发射点只有 expr.ty 时
+    /// 拿不到它（IR 里 `12345678901234567890` 的 expr.ty 是 int128，注解 bigint
+    /// 挂在 let/const 上），于是 bigint 变量在函数体内静默坍塌成 i128。
+    fn expected_is_bigint(&self) -> bool {
+        matches!(&*self.current_expected_ty.borrow(), Some(t) if is_bigint_ty(t))
+    }
+
     fn gen_lit(&self, lit: &LitKind, _ty: &IrType) -> String {
         match lit {
             LitKind::Int(n) => {
+                // BigInt 槽位（let x: bigint = 100 / 期望类型来自 bigint 注解）：
+                // 裸 `100i64` 与 BigInt 目标类型不符（E0308），需 from 包装
+                if self.expected_is_bigint() {
+                    return format!("{BIGINT_RS}::from({n})");
+                }
                 // @math 函数体内整数字面量经 T::from(2i32) 转换，
                 // 使 `x * 2` 中 2 可推断为 T（裸 2 默认 i64，E0308；
                 // f64 无 From<i64>，需 From<i32> 约束）。
@@ -14551,12 +15285,10 @@ impl CodeGen {
                 }
             }
             LitKind::Int128(n) => {
-                // 目标类型为 BigInt 时生成 BigInt::from(...)，否则生成 i128 字面量
-                if matches!(_ty, IrType::BigInt) {
-                    if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
-                        return format!("num_bigint::BigInt::from({})", n);
-                    }
-                    return format!("num_bigint::BigInt::from({}i128)", n);
+                // 目标类型为 BigInt（字面量自身类型 or Let/实参注入的期望类型）
+                // 时生成 BigInt::from(...)，否则生成 i128 字面量
+                if is_bigint_ty(_ty) || self.expected_is_bigint() {
+                    return bigint_from_code(*n);
                 }
                 if self.in_math_fn {
                     format!("T::from({}i32)", *n as i32)
@@ -14564,16 +15296,25 @@ impl CodeGen {
                     format!("{}i128", *n)
                 }
             }
-            LitKind::BigInt(s) => {
-                format!("num_bigint::BigInt::from({})", s)
-            }
+            LitKind::BigInt(s) => bigint_lit_code(s),
             LitKind::Complex(re, im) => {
-                format!("num_complex::Complex64::new({:?}, {:?})", re, im)
+                format!("{COMPLEX_RS}::new({re:?}, {im:?})")
             }
             LitKind::F64(f) => {
+                // NaN / 无穷：f64 文本化后为 "NaN"/"inf"/"-inf"，若走下方后缀逻辑
+                // 会变成 `NaN.0f64` 等非法元组下标（math.lz 的 `const NAN = 0.0/0.0`
+                // 被 comptime 内联为字面量时触发 E0658 / 非法 tuple index）。
+                let s = f.to_string();
+                let lower = s.to_ascii_lowercase();
+                if lower == "nan" {
+                    return "f64::NAN".to_string();
+                } else if lower == "inf" {
+                    return "f64::INFINITY".to_string();
+                } else if lower == "-inf" {
+                    return "(-f64::INFINITY)".to_string();
+                }
                 // 加 f64 后缀固定类型：泛型调用（@math）推断参数时，
                 // 无后缀浮点字面量会探索 f32/f64/f128，触发 unstable f128（E0658）
-                let s = f.to_string();
                 if s.contains('.') || s.contains('e') {
                     format!("{}f64", s)
                 } else {
@@ -14805,7 +15546,11 @@ impl CodeGen {
                         // 检查周围上下文确定目标类型（此处无 ty 参数，保守生成 i128）
                         format!("{}i128", n)
                     }
-                    LitKind::BigInt(s) => format!("num_bigint::BigInt::from({})", s),
+                    // BUG-4 同类点穷尽：match 模式位**不能**发 BigInt 构造式——
+                    // `BigInt::from(..)` 不是合法模式（rustc E0532 pattern 非恒定），
+                    // BigInt 也不满足结构相等匹配；发 `from(...)` 只会把 E0308
+                    // 换成更难的错。此处保持类型串统一（BUG-1），语义限制记入台账残留。
+                    LitKind::BigInt(s) => bigint_lit_code(s),
                     LitKind::Str(s) => format!("\"{}\"", s.escape_default()),
                     LitKind::Bool(b) => b.to_string(),
                     _ => self.gen_lit(lit, &IrType::Any),

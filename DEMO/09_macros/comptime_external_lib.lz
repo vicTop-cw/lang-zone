@@ -52,8 +52,7 @@ def simple_hash(s: str) -> int =
     mut h = 0
     mut i = 0
     while i < len(s):
-        let c = s[i]
-        h = h * 31 + c
+        h = h * 31 + ord(s[i])
         i = i + 1
     return h
 

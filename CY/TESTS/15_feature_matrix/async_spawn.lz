@@ -1,0 +1,13 @@
+// ============================
+// LZ Concurrency & Async
+// ============================
+
+async def fetch_data(id: int) -> str =
+    f"data_{id}"
+
+def main() =
+    let f1 = spawn fetch_data(10)
+    let f2 = spawn fetch_data(20)
+    let r1 = await f1
+    let r2 = await f2
+    print(r1, r2)

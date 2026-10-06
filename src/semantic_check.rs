@@ -102,6 +102,7 @@ fn builtin_value_names() -> HashSet<&'static str> {
         "len",
         "panic",
         "type",
+        "type_name", // BUG-EC-006：补入白名单，CY 后端 type_name() 不再误报 E0433
         "range",
         "spawn",
         "await",
@@ -980,6 +981,7 @@ impl Checker {
                     self.bind(n.clone());
                 }
             }
+            Stmt::EmbedBlock { .. } => {}
         }
     }
 

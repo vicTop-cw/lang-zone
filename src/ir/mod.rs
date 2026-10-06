@@ -11,6 +11,7 @@ pub mod codegen;
 pub mod codegen_cython;
 pub mod display;
 pub mod duck_check;
+pub mod embed_collector;
 pub mod lz_codegen;
 pub mod node;
 pub mod types;

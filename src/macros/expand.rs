@@ -910,6 +910,31 @@ impl MacroExpander {
         attr: Option<&[Token]>,
         depth: usize,
     ) -> Result<Vec<Token>, String> {
+        const LANG_MACROS: &[&str] = &["rust", "py", "tnr", "scala", "c"];
+        if LANG_MACROS.contains(&name) {
+            let (src, form) = if input.len() == 1 {
+                match &input[0] {
+                    Token::RawStrLit(s) => (s.clone(), crate::lexer::EmbedForm::Raw),
+                    Token::TripleStrLit(s) => (s.clone(), crate::lexer::EmbedForm::Raw),
+                    Token::FStrLit(s) => (s.clone(), crate::lexer::EmbedForm::Interp),
+                    _ => (
+                        tokens_to_string(input),
+                        crate::lexer::EmbedForm::Indent,
+                    ),
+                }
+            } else {
+                (
+                    tokens_to_string(input),
+                    crate::lexer::EmbedForm::Indent,
+                )
+            };
+            return Ok(vec![Token::EmbedBlock {
+                lang: name.to_string(),
+                src,
+                form,
+            }]);
+        }
+
         let def = self
             .registry
             .get(name)
@@ -2133,6 +2158,45 @@ fn parse_macro_primary_inner(tokens: &[Token], start: usize) -> Result<(MacroExp
             ));
         }
     }
+}
+
+fn tokens_to_string(tokens: &[Token]) -> String {
+    let mut s = String::new();
+    for t in tokens {
+        match t {
+            Token::Ident(name) => {
+                s.push_str(name);
+                s.push(' ');
+            }
+            Token::StrLit(val)
+            | Token::RawStrLit(val)
+            | Token::FStrLit(val)
+            | Token::TripleStrLit(val) => s.push_str(val),
+            Token::IntLit(n) => s.push_str(&n.to_string()),
+            Token::Int128Lit(n) => s.push_str(&n.to_string()),
+            Token::BigIntLit(n) => s.push_str(n),
+            Token::FloatLit(n) => s.push_str(&n.to_string()),
+            Token::True => s.push_str("true"),
+            Token::False => s.push_str("false"),
+            Token::Newline => s.push('\n'),
+            Token::Indent => s.push_str("    "),
+            Token::Comma => s.push_str(", "),
+            Token::Colon => s.push_str(": "),
+            Token::LParen => s.push('('),
+            Token::RParen => s.push(')'),
+            Token::LBrack => s.push('['),
+            Token::RBrack => s.push(']'),
+            Token::LBrace => s.push('{'),
+            Token::RBrace => s.push('}'),
+            Token::Eq => s.push_str(" = "),
+            Token::Plus => s.push_str(" + "),
+            Token::Minus => s.push_str(" - "),
+            Token::Star => s.push_str(" * "),
+            Token::Slash => s.push_str(" / "),
+            _ => {}
+        }
+    }
+    s
 }
 
 // ──────────────── 单元测试 ────────────────

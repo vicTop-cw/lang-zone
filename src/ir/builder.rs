@@ -48,6 +48,9 @@ struct TypeCtx {
     struct_method_arity: HashMap<String, HashMap<String, usize>>,
     /// 顶层 const/static 类型：name → type
     top_level_consts: HashMap<String, IrType>,
+    /// 被重新赋值的顶层 const 名称（可变全局）：这些不能内联为字面量，
+    /// 否则 `count = 0; count += 1` 会生成 `0i64 = 0i64 + 1i64`（BUG-7/walrus 簇）
+    mutated_top_level_consts: std::collections::HashSet<String>,
     /// enum variant → enum name 映射
     enum_variants: HashMap<String, String>,
     /// enum 变体字段类型：variant → [类型]（有序，match 臂绑定用）
@@ -101,6 +104,7 @@ impl TypeCtx {
             struct_methods: HashMap::new(),
             struct_method_arity: HashMap::new(),
             top_level_consts: HashMap::new(),
+            mutated_top_level_consts: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
             enum_variant_field_types: HashMap::new(),
             enum_generics: HashMap::new(),
@@ -2764,7 +2768,13 @@ fn build_multi_comp(
 /// 将编译期求值结果转为 IR 表达式（Int/Float/Bool/Str/None → 字面量；
 /// List/Tuple → vec![...]/元组递归内联，供查找表「焊死」；
 /// Map/Type/Inspect 不支持内联，返回 None）
-fn comptime_value_to_lit(v: &crate::comptime::ComptimeValue) -> Option<ExprKind> {
+///
+/// `ty` 是该值的**声明类型**（来自 `ctx.top_level_consts`），用于把元素类型
+/// 递归带进内联产物。传 None 时子表达式退回 `IrType::Any`，与改前行为一致。
+/// BUG-5：嵌套空列表在 codegen 侧按 `IrType::Any` 发成 `()`（见 `ListLit` 的
+/// `is_nil` 判据），所以引用点的声明类型必须下推，否则 `let a: List<List<i64>>
+/// = [[], [[]]]` 的静态定义正确、`println(a)` 的内联体却是 `vec![(), vec![()]]`。
+fn comptime_value_to_lit(v: &crate::comptime::ComptimeValue, ty: Option<&IrType>) -> Option<ExprKind> {
     use crate::comptime::ComptimeValue;
     match v {
         ComptimeValue::Int(i) => Some(ExprKind::Lit(LitKind::Int(*i))),
@@ -2772,34 +2782,39 @@ fn comptime_value_to_lit(v: &crate::comptime::ComptimeValue) -> Option<ExprKind>
         ComptimeValue::Bool(b) => Some(ExprKind::Lit(LitKind::Bool(*b))),
         ComptimeValue::Str(s) => Some(ExprKind::Lit(LitKind::Str(s.clone()))),
         ComptimeValue::None => Some(ExprKind::Lit(LitKind::None_)),
-        ComptimeValue::List(xs) => {
-            let elems: Vec<Expr> = xs
-                .iter()
-                .map(|x| {
-                    Expr::new(
-                        comptime_value_to_lit(x).unwrap_or(ExprKind::Lit(LitKind::None_)),
-                        IrType::Any,
-                        Span::unknown(),
-                    )
-                })
-                .collect();
-            Some(ExprKind::ListLit(elems))
-        }
-        ComptimeValue::Tuple(xs) => {
-            let elems: Vec<Expr> = xs
-                .iter()
-                .map(|x| {
-                    Expr::new(
-                        comptime_value_to_lit(x).unwrap_or(ExprKind::Lit(LitKind::None_)),
-                        IrType::Any,
-                        Span::unknown(),
-                    )
-                })
-                .collect();
-            Some(ExprKind::TupleLit(elems))
-        }
+        ComptimeValue::List(xs) => Some(ExprKind::ListLit(comptime_inline_elems(xs, ty))),
+        ComptimeValue::Tuple(xs) => Some(ExprKind::TupleLit(comptime_inline_elems(xs, ty))),
         _ => None,
     }
+}
+
+/// 内联容器第 `i` 个子元素的声明类型：List/Vec 取唯一泛型实参，Tuple 按下标取。
+/// 其它形状（Any / 未标注 / 形状不符）返回 None，子元素退回 `IrType::Any`。
+fn comptime_child_ty(ty: Option<&IrType>, i: usize) -> Option<IrType> {
+    match ty? {
+        IrType::Named { path, args }
+            if (path == "List" || path == "Vec") && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        IrType::Tuple(elems) => elems.get(i).cloned(),
+        _ => None,
+    }
+}
+
+fn comptime_inline_elems(
+    xs: &[crate::comptime::ComptimeValue],
+    ty: Option<&IrType>,
+) -> Vec<Expr> {
+    xs.iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let child = comptime_child_ty(ty, i);
+            let kind = comptime_value_to_lit(x, child.as_ref())
+                .unwrap_or(ExprKind::Lit(LitKind::None_));
+            Expr::new(kind, child.unwrap_or(IrType::Any), Span::unknown())
+        })
+        .collect()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4108,6 +4123,7 @@ fn specialize_stmt(
                 value: specialize_expr(value, subst, orig_name, spec_name, comptime_positions, &sh),
             }
         }
+        AstStmt::EmbedBlock { .. } => s.clone(),
     }
 }
 
@@ -4284,9 +4300,26 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // comptime const 内联：顶层 `comptime const X = ...` 求值后，
             // 普通表达式中的 X 引用直接内联为字面量（而非运行时变量引用）
             if let Some(cv) = ctx.comptime_consts.get(name.as_str()) {
-                match comptime_value_to_lit(cv) {
-                    Some(kind) => kind,
-                    None => ExprKind::Var(name.clone()),
+                // BUG-7：被重新赋值的顶层 const（可变全局，如 walrus.lz 的
+                // `count`）不能内联为字面量，否则 `count += 1` 会变成
+                // `0i64 = 0i64 + 1i64`。此类保留 Var 引用，交给 codegen 走
+                // `mutated_consts` → `static mut` + `unsafe {}` 路径。
+                // 作用域保护：若 name 在当前作用域是局部变量/形参（如泛型函数
+                // collect_items 的形参 items 与模块级 `let items` 同名），必须
+                // 保留 Var 引用，否则会把模块级字面量错误内联进函数体，破坏泛型
+                // 并触发 E0308（operators.lz 的 collect_items、comptime_external_lib.lz）。
+                if ctx.mutated_top_level_consts.contains(name.as_str())
+                    || ctx.vars.contains_key(name.as_str())
+                {
+                    ExprKind::Var(name.clone())
+                } else {
+                    match comptime_value_to_lit(
+                        cv,
+                        ctx.top_level_consts.get(name.as_str()),
+                    ) {
+                        Some(kind) => kind,
+                        None => ExprKind::Var(name.clone()),
+                    }
                 }
             } else {
                 ExprKind::Var(name.clone())
@@ -4314,7 +4347,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                 cctx.symtab.insert(n.clone(), v.clone());
             }
             match crate::comptime::ComptimeEvaluator::eval_expr(inner, &mut cctx) {
-                Ok(v) => match comptime_value_to_lit(&v) {
+                Ok(v) => match comptime_value_to_lit(&v, None) {
                     Some(kind) => kind,
                     None => ExprKind::Paren(Box::new(convert_expr(inner, ctx))),
                 },
@@ -5783,6 +5816,7 @@ fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                     closure_ctx.enum_variants = ctx.enum_variants.clone();
                     closure_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
                     closure_ctx.top_level_consts = ctx.top_level_consts.clone();
+                    closure_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
                     closure_ctx.fn_returns = ctx.fn_returns.clone();
                     closure_ctx.fn_params = ctx.fn_params.clone();
                     for name in params {
@@ -6778,6 +6812,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     }
                     for (cn, ct) in &ctx.top_level_consts {
                         arm_ctx.top_level_consts.insert(cn.clone(), ct.clone());
+                        arm_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
                     }
                     // 也复制 struct 信息用于模式匹配
                     for sn in &ctx.struct_names {
@@ -7603,7 +7638,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 cctx.symtab.insert(n.clone(), v.clone());
             }
             match crate::comptime::ComptimeEvaluator::eval_block(body, &mut cctx) {
-                Ok(Some(v)) => match comptime_value_to_lit(&v) {
+                Ok(Some(v)) => match comptime_value_to_lit(&v, None) {
                     // comptime 块仅打印/副作用（值为 None）时不产出代码，
                     // 避免生成裸 `None;` 语句导致 rustc E0282
                     Some(ExprKind::Lit(LitKind::None_)) => Stmt::Pass,
@@ -7790,7 +7825,28 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     mods: IrMods::default(),
                 });
             }
-            stmts.extend(body.iter().map(|s| convert_stmt(s, &with_ctx)));
+            // 捕获 with 体的值：把体包成块表达式绑定到临时变量，__exit__() 作为
+            // 非尾副作用语句（自动带 `;`），最后返回临时变量。否则 __exit__() 会占据
+            // 块尾、丢弃体值，导致 with 作为值表达式（如函数尾值 / 赋值右值）时返回 ()。
+            // 用 IrType::Any 让 codegen 跳过类型标注（Rust 自动推断临时变量类型）。
+            let body_block = Block {
+                stmts: body.iter().map(|s| convert_stmt(s, &with_ctx)).collect(),
+                ty: IrType::Any,
+                span: Span::unknown(),
+            };
+            let body_val_name = format!("__with_val_{}", name);
+            stmts.push(Stmt::Let {
+                name: body_val_name.clone(),
+                ty: IrType::Any,
+                value: Expr::new(
+                    ExprKind::BlockExpr { block: body_block },
+                    IrType::Any,
+                    Span::unknown(),
+                ),
+                is_mut: false,
+                is_ref: false,
+                mods: IrMods::default(),
+            });
             // __exit__ 在体**后**调用（构造链收尾）；参数数 = 方法实际非 self 参数数
             if alias.is_some() && has_exit {
                 let exit_arity = match &val_ty {
@@ -7835,7 +7891,34 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                     ),
                 });
             }
-            Stmt::Block { stmts }
+            // with 块尾返回体值（__exit__ 已在上方作为非尾语句，返回值被 `;` 丢弃）
+            stmts.push(Stmt::ExprStmt {
+                expr: Expr::new(
+                    ExprKind::Var(body_val_name),
+                    IrType::Any,
+                    Span::unknown(),
+                ),
+            });
+            // with 整体表现为块表达式语句（Stmt::ExprStmt{BlockExpr}）而非 Stmt::Block：
+            // 当 with 是含 defer 函数的最后一条语句时，gen_block_inner 的 capture_tail
+            // 仅对「末语句为 Stmt::ExprStmt」触发；若 with 为 Stmt::Block 则 capture_tail
+            // 不触发、force_stmt_semicolon 补 `;`、函数落尾返回 ()（E0308 家族）。
+            // BlockExpr codegen 用全新子 CodeGen（deferred/force_stmt_semicolon 重置），
+            // 不污染函数级 deferred；capture_tail 据此正确生效：先求值块（体值 + __exit__），
+            // 再 flush 函数 defer，最后 return 捕获值。候选脚手架代码沿用同一 IR 形态。
+            Stmt::ExprStmt {
+                expr: Expr::new(
+                    ExprKind::BlockExpr {
+                        block: Block {
+                            stmts,
+                            ty: IrType::Any,
+                            span: Span::unknown(),
+                        },
+                    },
+                    IrType::Any,
+                    Span::unknown(),
+                ),
+            }
         }
 
         AstStmt::Assign { target, op, value } => {
@@ -8242,6 +8325,7 @@ fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                 stmts: convert_stmts(&ir_tests, ctx),
             }
         }
+        AstStmt::EmbedBlock { .. } => Stmt::Pass,
     }
 }
 
@@ -8486,6 +8570,7 @@ fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     block_ctx.pending_items = ctx.pending_items.clone();
     block_ctx.errors = ctx.errors.clone();
     block_ctx.comptime_consts = ctx.comptime_consts.clone();
+    block_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
     block_ctx.comptime_module = ctx.comptime_module.clone();
     for sn in &ctx.struct_names {
         block_ctx.struct_names.insert(sn.clone());
@@ -9508,11 +9593,34 @@ fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         }
         ast::VariadicMode::None => {}
     }
+    // `..` 注入槽不得与显式形参重名。冻结语法 SYNTAX/03d §2 里 `..` 是**无名标记**，
+    // 收集槽固定叫 args/kwargs；「带名字的 ..」（`def f(..args)`）不在语法内，
+    // 而改前照单注入会让形参表出现两个 `args`，两个后端各自产出非法代码：
+    //   Rust   `pub fn sum_all(args: i64, args: &[i64]) -> i64`（重复形参）
+    //   Cython `def sum_all(object args, *args)`（cython 报 Previous declaration is here）
+    // ⇒ 把语法错误静默降级成"产物不可编译"。这里按 IR 错误硬拒并给出改法。
+    {
+        let mut taken: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        for vp in &variadic_params {
+            if taken.contains(&vp.name.as_str()) {
+                ctx.errors.borrow_mut().push(format!(
+                    "函数 {}：`..` 注入的 `{}` 与显式形参重名。`..` 是无名标记，\
+                     收集参数固定叫 {}；请把形参 `..{}` 写成 `..`，函数体内直接用 {} 即可",
+                    func.name, vp.name, vp.name, vp.name, vp.name
+                ));
+            } else {
+                taken.push(vp.name.as_str());
+            }
+        }
+    }
     // 构建函数体上下文
     let mut fn_ctx = TypeCtx::new();
     fn_ctx.pending_items = ctx.pending_items.clone();
     fn_ctx.errors = ctx.errors.clone();
     fn_ctx.comptime_consts = ctx.comptime_consts.clone();
+    // BUG-7：继承被重赋值的顶层 const 集合，避免 `count = 0; count += 1`
+    // 被内联为字面量（0i64 = 0i64 + 1i64）
+    fn_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
     fn_ctx.comptime_module = ctx.comptime_module.clone();
     fn_ctx.current_fn_name = Some(func.name.clone());
     // 继承顶层函数返回类型表：嵌套函数内调用其他函数（`return classify(0)`）需
@@ -11064,6 +11172,135 @@ pub fn build_ir_with_lzi(
     build_ir_inner(ast_module, |ctx| ctx.lzi_signatures = Some(lzi))
 }
 
+/// BUG-7：扫描模块，收集被重新赋值的顶层 const 名称（可变全局）。
+/// 顶层 `count = 0` 经 comptime 求值进入 `comptime_consts`，普通引用会被内联为字面量；
+/// 但若该 const 在函数体内被重新赋值（`count += 1` / `count = x`），内联会破坏可变性，
+/// 故将其排除出内联集合，交给 codegen 走 `mutated_consts` → `static mut` + `unsafe {}`。
+fn collect_mutated_top_level_consts(
+    module: &ast::Module,
+    top_level: &std::collections::HashMap<String, IrType>,
+    out: &mut std::collections::HashSet<String>,
+) {
+    for f in &module.functions {
+        walk_top_level_stmts(&f.body, top_level, out);
+    }
+    walk_top_level_stmts(&module.tests, top_level, out);
+    for (_, body) in &module.top_level_builds {
+        walk_top_level_stmts(body, top_level, out);
+    }
+}
+
+fn walk_top_level_stmts(
+    stmts: &[AstStmt],
+    top_level: &std::collections::HashMap<String, IrType>,
+    out: &mut std::collections::HashSet<String>,
+) {
+    for s in stmts {
+        match s {
+            AstStmt::Let { name, mutable, .. } => {
+                if *mutable && top_level.contains_key(name) {
+                    out.insert(name.clone());
+                }
+            }
+            AstStmt::Assign { target, .. } => {
+                if let AstExpr::Ident(name) = &target {
+                    if top_level.contains_key(name) {
+                        out.insert(name.clone());
+                    }
+                }
+            }
+            AstStmt::Block { body, .. } => walk_top_level_stmts(body, top_level, out),
+            AstStmt::While { body, else_body, .. } => {
+                walk_top_level_stmts(body, top_level, out);
+                if let Some(b) = else_body {
+                    walk_top_level_stmts(b, top_level, out);
+                }
+            }
+            AstStmt::WhileLet { body, else_body, .. } => {
+                walk_top_level_stmts(body, top_level, out);
+                if let Some(b) = else_body {
+                    walk_top_level_stmts(b, top_level, out);
+                }
+            }
+            AstStmt::For { body, else_body, .. } => {
+                walk_top_level_stmts(body, top_level, out);
+                if let Some(b) = else_body {
+                    walk_top_level_stmts(b, top_level, out);
+                }
+            }
+            AstStmt::Loop(body) => walk_top_level_stmts(body, top_level, out),
+            AstStmt::CheckerBlock { body, .. } => walk_top_level_stmts(body, top_level, out),
+            AstStmt::Defer(body) => walk_top_level_stmts(body, top_level, out),
+            AstStmt::With { body, .. } => walk_top_level_stmts(body, top_level, out),
+            AstStmt::Guard { else_body, .. } => walk_top_level_stmts(else_body, top_level, out),
+            AstStmt::Comptime { body } => walk_top_level_stmts(body, top_level, out),
+            AstStmt::Test { body, .. } => walk_top_level_stmts(body, top_level, out),
+            AstStmt::Suite { setup, teardown, tests, .. } => {
+                if let Some(b) = setup {
+                    walk_top_level_stmts(b, top_level, out);
+                }
+                if let Some(b) = teardown {
+                    walk_top_level_stmts(b, top_level, out);
+                }
+                walk_top_level_stmts(tests, top_level, out);
+            }
+            AstStmt::Expr(e) => walk_top_level_expr(e, top_level, out),
+            AstStmt::Return(e) | AstStmt::Yield(e) => {
+                if let Some(e) = e {
+                    walk_top_level_expr(e, top_level, out);
+                }
+            }
+            AstStmt::Raise(e)
+            | AstStmt::YieldFrom(e)
+            | AstStmt::Assert { expr: e, .. }
+            | AstStmt::Check { expr: e, .. } => {
+                walk_top_level_expr(e, top_level, out);
+            }
+            AstStmt::FnDef { func } => walk_top_level_stmts(&func.body, top_level, out),
+            // 其余变体不含语句级赋值，无需递归
+            AstStmt::Const { .. }
+            | AstStmt::EnumDef(_)
+            | AstStmt::TypeAlias { .. }
+            | AstStmt::Pass
+            | AstStmt::Continue
+            | AstStmt::Break(_)
+            | AstStmt::BreakLabel { .. }
+            | AstStmt::LetTuple { .. }
+            | AstStmt::BlockCall { .. }
+            | AstStmt::EmbedBlock { .. } => {}
+        }
+    }
+}
+
+fn walk_top_level_expr(
+    e: &AstExpr,
+    top_level: &std::collections::HashMap<String, IrType>,
+    out: &mut std::collections::HashSet<String>,
+) {
+    match e {
+        AstExpr::Match { arms, .. } => {
+            for arm in arms {
+                walk_top_level_stmts(&arm.body, top_level, out);
+            }
+        }
+        AstExpr::If {
+            then_body,
+            elif_clauses,
+            else_body,
+            ..
+        } => {
+            walk_top_level_stmts(then_body, top_level, out);
+            for (_, b) in elif_clauses {
+                walk_top_level_stmts(b, top_level, out);
+            }
+            if let Some(b) = else_body {
+                walk_top_level_stmts(b, top_level, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn build_ir_inner(
     ast_module: &ast::Module,
     init_ctx: impl FnOnce(&mut TypeCtx),
@@ -11103,6 +11340,12 @@ fn build_ir_inner(
             ctx.comptime_consts.insert(c.name.clone(), v);
         }
     }
+
+    // 收集被重新赋值的顶层 const（可变全局）：这些不能内联为字面量
+    // （walrus.lz `count = 0` + `count_up` 内 `count += 1` → 内联会生成
+    // `0i64 = 0i64 + 1i64` 的 E0070；保留 Var 引用交给 codegen 的
+    // `mutated_consts` → `static mut` + `unsafe {}` 路径）。
+    collect_mutated_top_level_consts(ast_module, &ctx.top_level_consts, &mut ctx.mutated_top_level_consts);
 
     // 2. 构建 IR 模块
     let name = ast_module
@@ -11381,6 +11624,7 @@ fn build_ir_inner(
         block_ctx.current_generics = ctx.current_generics.clone();
         block_ctx.errors = ctx.errors.clone();
         block_ctx.comptime_consts = ctx.comptime_consts.clone();
+    block_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
         block_ctx.comptime_module = ctx.comptime_module.clone();
         // 预扫描：收集构建块内局部变量类型（x = value 赋值），供元组/表达式推断
         for s in body {
@@ -11467,6 +11711,13 @@ fn build_ir_inner(
                     }));
                 }
             }
+            AstStmt::EmbedBlock { lang, src, form } => {
+                ir_mod.items.push(Item::EmbedBlock {
+                    lang: lang.clone(),
+                    src: src.clone(),
+                    form: form.clone(),
+                });
+            }
             _ => {}
         }
     }
@@ -11497,6 +11748,11 @@ fn build_ir_inner(
                 test_ctx.current_ret_ty = ctx.current_ret_ty.clone();
                 test_ctx.top_level_consts = ctx.top_level_consts.clone();
                 test_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                // test 体内的嵌套 def 也要提升进模块：pending_items 必须与模块共享，
+                // 否则 `convert_block` 提升出的 `fn add(...)` 随 test_ctx 一起被丢弃，
+                // 只剩语句位的 Lit(Unit) 占位 —— Rust 侧得到 `fn add(..) { i64::MAX }`
+                // 桩、Cython 侧 `add` 直接未定义（CY/TESTS/99_self_test 实测）。
+                test_ctx.pending_items = ctx.pending_items.clone();
                 let block = convert_block(body, &test_ctx);
                 ir_mod.items.push(Item::Test(TestDef {
                     name: name.clone(),
@@ -11525,6 +11781,8 @@ fn build_ir_inner(
                         test_ctx.current_ret_ty = ctx.current_ret_ty.clone();
                         test_ctx.top_level_consts = ctx.top_level_consts.clone();
                         test_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+                        // 同 lone test 分支：suite 内 test 体的嵌套 def 也要能提升进模块
+                        test_ctx.pending_items = ctx.pending_items.clone();
                         let block = convert_block(&combined, &test_ctx);
                         ir_mod.items.push(Item::Test(TestDef {
                             name: name.clone(),
@@ -12478,6 +12736,7 @@ fn ex_check_stmts(
                     }
                 }
             }
+            AstStmt::EmbedBlock { .. } => {}
         }
     }
 }

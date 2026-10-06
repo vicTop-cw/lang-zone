@@ -44,7 +44,7 @@ for f in $(find FIND_BUG -name "*.lz" -not -path "*/debug/*" | sort); do
     fi
 
     # 3) rustc 段（带 rlib）
-    RUSTC_OUTPUT=$(rustc --edition 2021 --extern lz_builtins="$BUILTINS" -A warnings "$RS_FILE" -o "$WORK/$(basename "${f%.lz}").exe" 2>&1)
+    RUSTC_OUTPUT=$(rustc --edition 2021 --extern lz_builtins="$BUILTINS" -L "dependency=$(dirname "$BUILTINS")/deps" -A warnings "$RS_FILE" -o "$WORK/$(basename "${f%.lz}").exe" 2>&1)
     RUSTC_EXIT=$?
     if [ $RUSTC_EXIT -eq 0 ]; then
         echo "OK" | tee -a "$RESULTS"

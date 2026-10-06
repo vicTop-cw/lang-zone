@@ -53,7 +53,7 @@
   - **开发阶段禁止使用缓存 / 增量编译 / 热重载 / 代码动态感知自动编译**等机制；`--cached` 选项、未变文件跳过等一律不用。
   - 上述加速机制仅在**使用阶段**（正式发布/使用者侧）才允许启用。
   - 构建用 `cargo build`（改源码后 cargo 会自动重编译，正常），但**测试必须全量跑**。
-- DEMO 全量回归：逐个 `.lz` → IR codegen → `rustc --edition 2021 --extern lz_builtins=<rlib>` 编译 → 运行。
+- DEMO 全量回归：逐个 `.lz` → IR codegen → `rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps目录>` 编译 → 运行。
 - 排除 `DEMO/99_errors/`（故意错误语法演示，预期报错）。
 - 失败先查测试文件是否正确（是否过时/用错语法），修正后仍失败的才算编译器 bug，记录到 `issue/` 测试报告。
 - `lz_std/` 的 DEMO 测试**暂不处理**（2026-08-08 用户决策），避免混淆。
@@ -71,5 +71,5 @@
 - `IrType::Any` 在 rust_type 映射为 `"i64"`（fallback）。
 - duck 检查器在 `build_ir` 末尾运行，报错会阻止 codegen。
 - 关键字实参语法是 `name: value`（`:`）或 `name~` 糖，不是 `=`。
-- 生成代码链接 builtins：`rustc --extern lz_builtins=<rlib>`（rlib 由 `cargo build -p lz_builtins` 产出）。
+- 生成代码链接 builtins：`rustc --extern lz_builtins=<rlib> -L dependency=<rlib所在目录>/deps`（rlib 由 `cargo build -p lz_builtins` 产出）。**注意**：lz_builtins re-export 了 num-bigint/num-complex，它们因此成为可加载依赖——孤立 rustc 编译不带 `-L` 会整体报 `error[E0463]: can't find crate for lz_builtins`（即使程序不用 bigint），见账本 BUG-10。
 - 完整坑清单见项目记忆 / `issue/`。

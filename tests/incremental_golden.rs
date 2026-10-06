@@ -78,6 +78,8 @@ fn rustc_run(work: &Path, rs_name: &str) -> (bool, String) {
         .arg(&rs)
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins_rlib().display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins_rlib().parent().unwrap().join("deps").display()))
         .arg("-o")
         .arg(&exe)
         .output()

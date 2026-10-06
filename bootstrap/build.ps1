@@ -48,7 +48,7 @@ function Compile-And-Run([string]$lzFile) {
 
     # Step 2: Rust → Binary
     Log-Info "  [RUSTC] Rust -> Binary..."
-    $rustcErr = & rustc --edition 2021 $rsFile --extern "lz_builtins=$BuiltinsRlib" -o $exeFile 2>&1
+    $rustcErr = & rustc --edition 2021 $rsFile --extern "lz_builtins=$BuiltinsRlib" -L "dependency=$(Split-Path $BuiltinsRlib -Parent)\deps" -o $exeFile 2>&1
     if ($LASTEXITCODE -ne 0) {
         Log-Fail "  [RUSTC] rustc 编译失败: $lzFile"
         $rustcErr | Select-String -Pattern "error\[" | Select-Object -First 5 | ForEach-Object { Write-Host $_ }

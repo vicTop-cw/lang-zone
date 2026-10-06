@@ -37,43 +37,40 @@ fn gate_lock() -> MutexGuard<'static, ()> {
 const KNOWN_TRANSPILE_FAILURES: &[&str] = &[
     // 基线原记为产物编译失败，实际为转译期失败（IR build: parse_int 返回类型
     // Result<int,str> vs Result<int,unknown>）——早于本次改动即存在，仅基线阶段记错
-    "DEMO/05_expressions/operators.lz",
+    // DEMO/05_expressions/operators.lz —— 转译期已转绿（2026-09-30 复跑 --ignored 闸门现通过），移出清单
     // ── 以下 1 项仍为转译期失败（全量基线 2026-09-09）──
     "DEMO/99_spec/combo-syntax/combo_while_guard_try.lz",
 ];
 
 /// 产物编译阶段（rustc）已知失败 —— 基线快照 2026-09-09（含后续修复收窄后剩余项）
 const KNOWN_RUSTC_FAILURES: &[&str] = &[
-    "DEMO/lz_std/error.lz",  // E0658: `!` 类型是实验特性 + E0599 chain_str
-    "DEMO/lz_std/traits.lz", // 迭代协议 trait 默认方法缺 Item: Clone / LzAdd 约束
-    "DEMO/lz_std/iter.lz",   // 同 traits：Item 约束 + E0502/E0594 闭包捕获
-    "DEMO/04_functions/spread_protocol.lz", // E0403: 泛型参数 `T` 重复
-    "DEMO/boundary-coverage/combo-defer-guard.lz", // E0308: 类型不匹配
-    // ── 以下 5 项为预存回归（基线 a4ad0a0 即存在，非本次 __init__ 注入引入）──
-    "DEMO/lz_std/string.lz", // E0599: no method `slice` found for `String`
-    "DEMO/lz_std/option.lz", // E0308: mismatched types
-    "DEMO/lz_std/dict.lz",   // E0308: mismatched types
-    // callable_objects.lz 已修复转绿，从基线移除（收紧闸门）
-    "DEMO/05_expressions/pipe_semantics.lz", // E0308: mismatched types
-    // 原为转译期失败，where 子句缩进配平修复后已可转译，转入产物编译失败
-    "DEMO/04_functions/generics.lz",
-    "DEMO/10_error_handling/panic_raise_try.lz",
-    // ── 以下 20 项来自全量基线（2026-09-09）──
-    "DEMO/01_basics/keywords.lz",
-    "DEMO/01_basics/polish_07_closures.lz",
-    "DEMO/01_basics/polish_19_checker.lz",
-    "DEMO/01_basics/polish_27_use.lz",
-    "DEMO/01_basics/polish_29_combined.lz",
-    "DEMO/02_types/method_chains.lz",
-    "DEMO/04_functions/checker.lz",
-    "DEMO/04_functions/closures_more.lz",
-    "DEMO/10_error_handling/try_more.lz",
-    "DEMO/99_spec/iterator_demo.lz",
-    "DEMO/boundary-coverage/combo-error-control.lz",
-    "DEMO/boundary-coverage/combo-iterator-generator.lz",
-    "DEMO/boundary-coverage/combo-pipe-lambda.lz",
-    "DEMO/boundary-coverage/nesting-closure-lambda.lz",
-    "DEMO/combo-syntax/combo_defer_guard_try.lz",
+    "DEMO/lz_std/error.lz",  // E0599: no method `chain_str` for &LzError（LzError 未 impl Error）
+    "DEMO/lz_std/traits.lz", // E0599: <Self as std::iter::Iterator>::Item clone（需 <Self as ...>::Item::default() 限定）
+    "DEMO/lz_std/iter.lz",   // E0599: <I as IntoIterator>::Item clone（关联类型豁免未覆盖此 clone 位点）
+    // ── 预存回归（基线 a4ad0a0 即存在）──
+    // combo-defer-guard.lz 已修复转绿（2026-10-06：with 块整体包成块表达式语句
+    // Stmt::ExprStmt{BlockExpr}，使 capture_tail 正确捕获 with 体尾值，消解 E0308），移出清单
+    // string.lz 已修复（E0308 字符串形态实参归一到 .to_string()，2026-09-29）移出清单
+    "DEMO/lz_std/dict.lz",   // E0277: K2: Ord not satisfied（+ str/String 设计问题 ④）
+    // list.lz 与 dict.lz 同源：codegen 有意将 Dict 映射为 BTreeMap（有序，保证
+    // JSON 序列化字段顺序稳定，见 codegen/mod.rs::module_uses_dict 注释），要求键
+    // 泛型 K: Ord；但 LZ 源 Dict 方法均声明 `where K: Eq + Hash`（哈希表语义）。
+    // list.lz 的 `unique`（用 Dict() 去重）声明 `where T: Eq + Hash`，BTreeMap 要求
+    // T: Ord → E0277 T: Ord。此非 T2-T5 回归（Dict 映射从未被本次改动触碰），属与
+    // dict.lz 相同的设计层面不一致（设计问题 ④），故与 dict.lz 一并列入基线。
+    "DEMO/lz_std/list.lz",   // E0277: T: Ord not satisfied（Dict→BTreeMap 设计问题 ④）
+    // callable_objects.lz 已修复转绿
+    // pipe_semantics.lz 已修复转绿（2026-10-06：__call__ mut self → Callable 转发经克隆+全限定 inherent 调用消解 E0308），移出清单
+    // ── 全量基线（2026-09-09）──
+    // DEMO/01_basics/polish_07_closures.lz —— 已修复（闭包载体 Box<dyn Fn>→Rc<dyn Fn>，2026-09-30 T0r3），移出清单
+    // DEMO/01_basics/polish_27_use.lz —— 已修复（同上），移出清单
+    // DEMO/01_basics/polish_29_combined.lz —— 已修复（同上），移出清单
+    // DEMO/04_functions/closures_more.lz —— 已修复（同上，E0382 由 Rc 转发闭包消解），移出清单
+    "DEMO/99_spec/iterator_demo.lz",         // E0308: 迭代协议
+    "DEMO/boundary-coverage/combo-error-control.lz",    // E0308
+    "DEMO/boundary-coverage/combo-iterator-generator.lz", // E0308
+    "DEMO/boundary-coverage/combo-pipe-lambda.lz",       // E0308
+    "DEMO/boundary-coverage/nesting-closure-lambda.lz",  // E0308
 ];
 
 // ────────────────────────────────────────────────────────────────

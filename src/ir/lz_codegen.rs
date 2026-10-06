@@ -265,6 +265,9 @@ impl LzGen {
             Item::DuckDef(d) => {
                 format!("Item.DuckDef(name: \"{}\", method_count: {})", d.name, d.methods.len())
             }
+            Item::EmbedBlock { lang, src, .. } => {
+                format!("Item.EmbedBlock(lang: \"{}\", src_len: {})", lang, src.len())
+            }
             Item::Use(u) => {
                 let path = u.path.join(".");
                 let items = u.items.join(", ");

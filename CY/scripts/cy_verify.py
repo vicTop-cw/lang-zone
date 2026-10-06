@@ -67,7 +67,9 @@ def main() -> int:
 
     lzc = find_lzc(args.lzc)
     cython_cmd = find_cython()
-    demo = Path(args.demo) if args.demo else REPO / "DEMO"
+    # 必须绝对化：下面 cython 以 cwd=pyx.parent 运行，传相对路径会让 cython 自己报
+    # "No such file or directory"，把判据的缺陷伪装成 54/54 全红的产品缺陷（2026-10-01 实测）。
+    demo = (Path(args.demo) if args.demo else REPO / "DEMO").resolve()
     files = collect_lz(demo)
 
     print(f"lzc    = {lzc}")

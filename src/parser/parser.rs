@@ -149,6 +149,13 @@ impl Parser {
                 self.skip_newlines();
                 continue;
             }
+            // #[embed(lang)] 原样块：lexer 已捕获为 Token::EmbedBlock
+            if let Token::EmbedBlock { lang, src, form } = self.peek().clone() {
+                self.advance();
+                top_stmts.push(Stmt::EmbedBlock { lang, src, form });
+                self.skip_newlines();
+                continue;
+            }
             let mut decorators = Vec::new();
             let mut modifier_mods: Option<Modifiers> = None;
             // 解析装饰器（先不跳过换行，以便判定「同行 / 独占行」）

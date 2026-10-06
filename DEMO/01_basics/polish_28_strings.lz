@@ -21,11 +21,13 @@ line3"""
     assert s.trim().to_lower() == "hello world"
     assert s.trim().to_upper() == "HELLO WORLD"
 
-    // ── 格式化（f-string Debug 语义） ──
+    // ── 格式化（f-string：str 走 Display 不带引号，其余走 Debug；
+    //     规范 SYNTAX/00-词法基础.md:188。原注释写「Debug 语义」并断言带引号，
+    //     与规范相反且无人执行，2026-10-02 按台账 BUG-22 改正）──
     let name = "LZ"
     let ver = 2
     let msg = f"lang-zone v{ver} by {name}"
-    assert msg == "lang-zone v2 by \"LZ\""
+    assert msg == "lang-zone v2 by LZ"
 
     // ── 字符串拼接组合 ──
     let parts: List<str> = ["a", "b", "c"]

@@ -16,6 +16,7 @@ rayon = { version = "1.10", optional = true }
 # PyO3：Python 绑定后端，@export(Python) 代码生成的目标依赖
 # 精确版本锁定，仅在 py-bridge feature 启用时编译
 pyo3 = { version = "0.22.6", optional = true, features = ["extension-module"] }
+tnr = { path = "../Tnr", optional = true }
 
 [features]
 # infer：外部 lz-infer / .lzi 跨模块类型签名（可选增强，非主编译管线依赖；
@@ -23,6 +24,8 @@ pyo3 = { version = "0.22.6", optional = true, features = ["extension-module"] }
 default = ["infer"]
 infer = ["serde", "serde_json", "bincode"]
 parallel = ["rayon"]
+# tnr-embed：#[embed(tnr)] 原样块经 tnr lib 转译为 Rust 模块
+tnr-embed = ["dep:tnr"]
 # py-bridge：Python 桥接绑定（PyO3），启用后 @export(Python) 产物可编译
 # 未启用时 export(Python) 仅生成绑定源码字符串，不编译 pyo3
 py-bridge = ["dep:pyo3"]

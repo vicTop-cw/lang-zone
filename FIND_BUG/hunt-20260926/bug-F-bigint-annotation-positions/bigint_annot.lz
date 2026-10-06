@@ -1,0 +1,8 @@
+struct Big = val: bigint
+def make_big() -> bigint =
+  let x: bigint = 99999999999999999999999
+  x
+def main() =
+  let b = Big { val: 123456789012345678901234567890 }
+  println(make_big())
+  println(b.val)

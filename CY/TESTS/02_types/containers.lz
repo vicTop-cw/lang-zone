@@ -1,6 +1,12 @@
 // 02_types - 容器
+// 这件**不能**整包 print(Set)：实测 rust 面同一个 exe 连跑三次给出三种顺序
+// （`{2, 3, 1}` / `{2, 1, 3}` / `{3, 1, 2}`，std HashSet 的 RandomState 每进程随机），
+// 而 SYNTAX/02 从未承诺 Set 的迭代顺序 ⇒ 顺序本身就是未定义行为，拿它当逐字 golden
+// 等于把「量具随机」封成「产品契约」。这里只打与顺序无关的事实（长度 / 成员判定 / 按键取值）。
 def main() =
     let xs: List<int> = [1, 2, 3]
     let d: Dict<str, int> = {"a": 1}
     let st: Set<int> = {1, 2, 3}
-    print(xs, d, st)
+    print(xs.len(), d.len(), st.len())
+    print(st.contains(2))
+    print(d["a"])

@@ -393,6 +393,19 @@ impl ComptimeEvaluator {
                         .collect();
                     eprintln!("[comptime] {}", parts.join(" "));
                     Ok(ComptimeValue::None)
+                } else if func_name == "ord" && args.len() == 1 {
+                    // 内建 ord()：字符码点 → i64。comptime 里 `s[i]` 已产出 Int(字符码)，
+                    // 故 ord(Int) 恒等返回；ord(Str) 取首字符码点（LZ 语义）；
+                    // 否则报错（comptime_external_lib.lz 的 simple_hash 编译期求值）。
+                    match &args[0] {
+                        ComptimeValue::Int(i) => Ok(ComptimeValue::Int(*i)),
+                        ComptimeValue::Str(s) => s
+                            .chars()
+                            .next()
+                            .map(|c| ComptimeValue::Int(c as i64))
+                            .ok_or_else(|| "ord 作用于空字符串".to_string()),
+                        other => Err(format!("编译期 ord 不支持 {:?}", other)),
+                    }
                 } else {
                     // 编译期函数调用：查模块内同名函数，绑定参数后求值函数体
                     // （comptime def / 纯函数编译期执行，如生成查找表、计算哈希）
@@ -752,6 +765,7 @@ impl ComptimeEvaluator {
             | Stmt::CheckerBlock { .. }
             | Stmt::BlockCall { .. }
             | Stmt::EnumDef(_) => Ok(None),
+            Stmt::EmbedBlock { .. } => Ok(None),
         }
     }
 

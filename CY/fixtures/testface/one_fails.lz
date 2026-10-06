@@ -1,0 +1,8 @@
+// BUG-18 判据语料：一成一败——执行面必须逐条报状态且整体非零退出
+suite "lz_testface_mixed":
+
+    test "good":
+        assert 2 * 3 == 6
+
+    test "bad":
+        assert 1 + 1 == 3

@@ -36,11 +36,14 @@ def main() =
         part_count = part_count + 1
     assert part_count == 3
 
-    // ── f-string 插值（LZ 按 Debug 语义输出：字符串值带引号） ──
+    // ── f-string 插值（规范 SYNTAX/00-词法基础.md:188：`f"x={x}"` → `format!("x={}", x)`，
+    //     即 str 值走 Display **不带引号**；int 等其余走 Debug。实跑判据见
+    //     tests/str_boundary.rs c7_fstring。本行断言原先写的是带引号形态，
+    // 与规范相反，2026-10-02 按台账 BUG-22 改正）──
     let name = "LZ"
     let age = 30
     let msg = f"name={name}, age={age}"
-    assert msg == "name=\"LZ\", age=30"
+    assert msg == "name=LZ, age=30"
 
     let val = 42
     let combined = f"val is {val}"

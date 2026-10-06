@@ -147,6 +147,12 @@ pub enum Stmt {
         ty: Option<Type>,
         value: Expr,
     },
+
+    EmbedBlock {
+        lang: String,
+        src: String,
+        form: crate::lexer::EmbedForm,
+    },
 }
 
 #[derive(Debug, Clone)]

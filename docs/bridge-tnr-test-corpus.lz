@@ -1,0 +1,37 @@
+// ═══ P1: embed 模块导入 ═══
+
+#[embed(tnr)]
+fn matmul_tnr(a, b) {
+    a @ b
+}
+
+import foo_tnr::*
+let result = matmul_tnr(x, y)
+
+
+// ═══ P2: tnr lib API 转译 ═══
+
+import tnr::matmul
+let r2 = matmul(a, b)
+
+
+// ═══ P3: 已编译 tnr 库 ═══
+
+import tnr_lib::tensor::Tensor
+let t = Tensor::zeros([3, 3])
+
+
+// ═══ P4: tnr 计算后端 ═══
+
+import tnr::compute::kernel
+letF r4 = kernel(data)
+
+
+// ═══ P5: 混合导入 ═══
+
+import std::collections::HashMap
+import foo_tnr::*
+import tnr::matmul
+
+let m = HashMap::new()
+let r5 = matmul(x, y)

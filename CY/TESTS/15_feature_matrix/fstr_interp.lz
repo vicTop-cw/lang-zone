@@ -1,0 +1,34 @@
+// f-string 插值口径 —— 逐档钉住规范行 SYNTAX/00-词法基础.md:188
+// （`f"x={x}"` → `format!("x={}", x)`：str 值走 Display **不带引号**，其余走 Debug）。
+//
+// 这条判据存在的原因是 2026-10-02 的一次真实回退：把两侧插值「统一成 Debug」能
+// 让 DEMO/01_basics/strings.lz:43、polish_28_strings.lz:28 那两句**从不执行**的断言
+// 变得自洽，代价是打红实跑的 tests/str_boundary.rs c7_fstring，并把跨后端分叉
+// 从「bool/None/容器」挪到了「str」。台账 BUG-22 / BUG-23。
+//
+// 期望值由 Rust 后端实跑生成（TEMP/xdiff_ds07.py + LZ_SEAL_EXP=1，2026-10-02）。
+struct Box2 =
+    label: str
+    count: int
+
+def show_named(b: Box2) -> str =
+    f"named={b.label}/{b.count}"
+
+def main() =
+    let s = "LZ"
+    let n = 42
+    let t = True
+    let f = False
+    let none = None
+    let xs = [1, 2, 3]
+    let rec = Box2(label: "field", count: 7)   // 06a-struct.md:99 构造是 `字段: 值` 形态
+    // 逐档渲染：str 无引号，int/bool/None/容器按 Debug 口径
+    print(f"s={s} n={n} t={t} f={f} none={none} xs={xs}")
+    print(show_named(rec))
+    // 断言形态本身就是判据（红了说明某侧口径又漂了）
+    assert f"s={s}" == "s=LZ"
+    assert f"n={n}" == "n=42"
+    assert f"t={t} f={f}" == "t=true f=false"
+    assert f"none={none}" == "none=None"
+    assert f"xs={xs}" == "xs=[1, 2, 3]"
+    assert show_named(rec) == "named=field/7"

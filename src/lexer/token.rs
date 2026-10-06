@@ -6,6 +6,14 @@
 // 2026-07-31：删除了零引用的冗余 Lexer 结构体（原 L122-871），该死代码含有旧版 P0 bug（unwap_or(0)）。
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
+pub enum EmbedForm {
+    Indent,
+    Raw,
+    Interp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // ── 声明关键字 ──
     Def,
@@ -191,6 +199,12 @@ pub enum Token {
     /// 未知 token：lexer 无法识别的内容（携带原始文本）。
     /// 供宏/模板展开器与前端检查层识别未知输入，而非静默跳过
     Unknown(String),
+
+    EmbedBlock {
+        lang: String,
+        src: String,
+        form: EmbedForm,
+    },
 
     Eof,
 }

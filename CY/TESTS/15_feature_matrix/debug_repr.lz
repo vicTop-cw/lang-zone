@@ -1,0 +1,24 @@
+// 15_feature_matrix - debug_repr：对象打印形态对齐 Rust `#[derive(Debug)]`
+// （struct / 嵌套 struct / 无数据变体 / struct 列表）。期望值取自 **Rust 后端**的
+// 运行产物（lzc → rustc → run，与 tests/find_bug_libs.rs::run_lib 同配方），
+// 不是抄 cy 自己的输出——否则等于把 cy 的错读成对的。
+struct Point =
+    x: f64
+    y: f64
+
+struct Pair =
+    a: Point
+    b: i64
+
+enum Color:
+    Red
+    Green
+
+def main() =
+    let p = Point(x: 3.0, y: 4.0)
+    print(p)
+    let q = Pair(a: p, b: 7)
+    print(q)
+    print(Color.Red)
+    let xs: List<Point> = [p]
+    print(xs)

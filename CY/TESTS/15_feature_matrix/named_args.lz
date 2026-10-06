@@ -1,0 +1,21 @@
+// 命名实参 `k=v`（SYNTAX/02-变量与绑定.md:226 的 `name~` 糖写全形、
+// SYNTAX/01b-duck关系约束.md:481 的 build(name="x", version=1)）。
+//
+// **本件不封 .exp**：Rust 后端把 `k=v` 原样抄进产物 ⇒ `add(b = 2i64, a = 1i64)`
+// 语法不可编译（实测 2026-10-02，TEMP/probe13/kw2.rs 的 main 体），拿不到 Rust
+// 侧实跑 stdout 就当不了期望值——用 cy 自己的产物封 golden 等于把当期行为
+// 钉成规范，台账 BUG-24 记的是这件事。cy 侧走 Python 原生关键字实参，形态正确：
+// L1 转译 + L2 `python -m cython` 两层都吃得住，这正是本件承重的地方。
+def greet(name: str = "world") -> str =
+    f"hi {name}"
+
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    print(add(b=2, a=1))
+    print(add(1, b=2))
+    print(greet(name="LZ"))
+    print(greet())
+    assert add(b=2, a=1) == 3
+    assert greet(name="LZ") == "hi LZ"
+    assert greet() == "hi world"

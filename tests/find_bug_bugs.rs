@@ -5,6 +5,9 @@
 //     修复后移除 #[ignore] 转正（任一用例被放行即红的负向守护用 *Negative 命名）
 //   - 判定证据：FIND_BUG.md「实测记录（2026-09-03）」章节
 // 全量基线：39 非库用例 = 12 无bug / 21 确认bug / 1 部分问题 / 2 待单测（已补测全绿）
+// ↑ 那是 2026-09-03 的口径。此后每轮往里加锁，对照请以**实测当轮数**为准：
+//   2026-10-01 起本套件 45 收集 / 45 passed / 0 ignored（D6 三条 + 本轮 BUG-11 一条，
+//   另 BUG-5、BUG-9 两条 #[ignore] 转正）。
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -93,6 +96,8 @@ fn run_case(rel: &str, stage: &Stage) -> Result<(), String> {
                 .arg(&rs)
                 .arg("--extern")
                 .arg(format!("lz_builtins={}", builtins_rlib().display()))
+                .arg("-L")
+                .arg(format!("dependency={}", builtins_rlib().parent().unwrap().join("deps").display()))
                 .arg("-A")
                 .arg("warnings")
                 .arg("-o")
@@ -493,4 +498,144 @@ fn core_compose_ok() {
 #[test]
 fn core_unique_ok() {
     full("FIND_BUG/core/unique.lz", "unique [1,2,2,3,1,4,3]:").unwrap();
+}
+
+// ══════════════════════════════════════════════════════════════
+// ✅ 已转正：fn 值载体可跨线程（BUG-9，2026-10-01 T0r5 续轮）
+// ══════════════════════════════════════════════════════════════
+
+// BUG-RC-SEND: fn 值被 go/spawn 捕获时载体必须 `Send + Sync`，否则 E0277。
+// 归因校正（本轮实测，推翻 2026-09-30 卡片里的「T0r3 引入」）：把生成码的载体
+// 逐一手改跑同一组 rustc 参数——
+//   `Box<dyn Fn(i64) -> i64>`（HEAD 旧载体）⇒ E0277 cannot be sent between threads safely
+//   `Rc<dyn Fn(i64) -> i64>`（T0r3 载体）   ⇒ E0277 同错
+//   `Arc<dyn Fn(i64) -> i64>`（裸换指针）    ⇒ E0277 send + shared 两条
+//   `Arc<dyn Fn(i64) -> i64 + Send + Sync>` ⇒ 编译通过、运行输出 "rc-send-marker ok"
+// 即：这条缺口在 Box 时代同样存在，换 Arc 单独也不够，必须带 `+ Send + Sync` 上界。
+// 落点：src/ir/codegen/mod.rs 的 fn_value_type / 柯里链 / 6 处闭包装箱统一发
+// `Arc<dyn Fn(…) -> … + Send + Sync>` + `Arc::new(…)`。
+#[test]
+fn cg_fn_value_carrier_send_sync_in_spawn() {
+    full(
+        "FIND_BUG/codegen/bug-rc-fn-not-send-in-spawn.lz",
+        "rc-send-marker ok",
+    )
+    .unwrap();
+}
+
+// ══════════════════════════════════════════════════════════════
+// ✅ 已转正：元组槽位的空列表期望类型下推（BUG-11，2026-10-01 同轮）
+// 由 BUG-5 的内联侧修复暴露：引用位修好后，定义位仍按字面量自身默认推断。
+// ══════════════════════════════════════════════════════════════
+
+// `let t: (List<List<int>>, List<int>) = ([], [1, 2])` 的第 0 槽：
+// ListLit 元素位有下推（BUG-5），TupleLit 槽位改前没有 ⇒
+// 发成 `Vec::<i64>::new()` 而槽位要 `Vec<Vec<i64>>`，E0308 expected Vec<Vec<i64>>, found Vec<i64>。
+// 落点：src/ir/codegen/mod.rs 的 ExprKind::TupleLit 非 size_hint 臂（按位下推
+// `IrType::Tuple` 的元素类型），并把 ListLit 的下推目标从「仅列表字面量」
+// 扩到「列表/元组字面量」，使嵌套元组也能接力。
+#[test]
+fn cg_tuple_slot_empty_list_elem_ty_pushdown() {
+    full(
+        "FIND_BUG/codegen/bug-tuple-slot-empty-list-pushdown.lz",
+        "([], [1, 2])",
+    )
+    .unwrap();
+}
+
+// ══════════════════════════════════════════════════════════════
+// D6「BigInt 类型系统对齐」批次（2026-09-30，ns lz-explore / T0r4）
+// 语料源：FIND_BUG/hunt-20260926/bug-{A,B,C,D}-*/（台账 BUG-1~4）
+// 此前这 6 个复现件不在任何门禁里（grep tests/ = 0 命中）⇒ 闸门全绿也测不到它们。
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn d6_bigint_import_and_const_and_fnbody() {
+    // BUG-1 + BUG-2 + BUG-3：顶层 `let x: bigint` 走 const 内联路径
+    //   （改前：裸发 use num_bigint::BigInt ⇒ E0432；无 BigInt::from ⇒ E0308；const 上下文调用非 const ⇒ E0015）
+    full("FIND_BUG/hunt-20260926/bug-A-numcrate-import-e0432/bigint_min.lz", "1234567890123456789000").unwrap();
+    // BUG-4：函数体内 `let x: bigint = <huge>` 改前坍塌为 i128 且连 import 都不发
+    full("FIND_BUG/hunt-20260926/bug-D-bigint-fnbody-type-collapse/bigint_fnbody.lz", "1234567890123456789000").unwrap();
+}
+
+#[test]
+fn d6_complex_import_route() {
+    // BUG-1 的 complex 同族：改前裸发 use num_complex::Complex64 ⇒ 孤立 crate E0432
+    full("FIND_BUG/hunt-20260926/bug-A-numcrate-import-e0432/complex_min.lz", "Complex { re: 1.0, im: 2.0 }").unwrap();
+}
+
+// BUG-5（收口）：三层嵌套空列表的 comptime 内联位。
+// 前半段（static 定义位）由 D6 轮的 ListLit 元素位下推修好；后半段是引用位——
+// `println(a)` 走 ctx.comptime_consts 内联，`comptime_value_to_lit` 原先给每个
+// 子表达式一律标 `IrType::Any`，codegen 的 ListLit 臂按 `is_nil`（Any→`()`）
+// 把空列表发成 `()` ⇒ `vec![(), vec![()]]` E0308。
+// 落点：src/ir/builder.rs 的 comptime_value_to_lit 增加声明类型入参，沿
+// `ctx.top_level_consts` 递归带出元素类型（List/Vec 取 args[0]、Tuple 按位取），
+// 取不到类型时仍退 Any ⇒ 与改前逐字相同。同类点：Tuple 臂一并修；
+// `comptime <expr>`（:4335）与 comptime 块（:7626）两个调用点无声明类型可传，
+// 显式传 None（行为不变）。
+#[test]
+fn d6_list3_nested_empty_pushdown_inlined() {
+    full("FIND_BUG/hunt-20260926/bug-E-list3-empty-nested-pushdown-e0308/rv_list3.lz", "[[], [[]]]").unwrap();
+}
+
+// ══════════════════════════════════════════════════════════════
+// ✅ 已转正：生成产物头部链接配方 + CLI stderr 可复制命令（BUG-10，2026-10-01）
+// ══════════════════════════════════════════════════════════════
+// lz_builtins re-export num-bigint/num-complex ⇒ 孤立 rustc 编译必须带
+// `-L dependency`，否则连不用 bigint 的程序也整体报 E0463。产品化方案 A：
+// ① 每个生成 .rs 的文件头带确定性（跨机稳定、可进 golden 快照）的静态配方块；
+// ② CLI 单文件生成后在 stderr 打印本机解析好的完整可复制命令（不落盘）。
+// 落点：src/ir/codegen/mod.rs 的 emit_prelude_base（静态块）＋
+//       src/main.rs 的 print_link_recipe（stderr，接增量/项目/常规三条写出路径）。
+#[test]
+fn cg_generated_rs_header_link_recipe() {
+    let rel = "FIND_BUG/codegen/bug-link-recipe-header.lz";
+    let (lz, _dir) = case_lz(rel);
+    let rs = lz.with_extension("rs");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .arg(&lz)
+        .output()
+        .expect("lzc run");
+    assert!(
+        out.status.success(),
+        "LZ_FAIL {}: {}",
+        lz.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rs_text = std::fs::read_to_string(&rs)
+        .unwrap_or_else(|e| panic!("no .rs generated: {}: {}", rs.display(), e));
+    // ① 产物头部静态配方块（确定性文本；prelude 前既有前导空行，故 trim 后断言）
+    let head = rs_text.trim_start();
+    assert!(
+        head.starts_with("// ── LZ rustc link recipe (BUG-10"),
+        "产物头部缺链接配方块，前 2 行: {}",
+        rs_text.lines().take(2).collect::<Vec<_>>().join(" | ")
+    );
+    assert!(
+        head.contains("//   rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir>"),
+        "配方块缺可复制命令模板"
+    );
+    assert!(
+        head.contains("Omitting -L gives error[E0463]"),
+        "配方块缺 E0463 告警行"
+    );
+    // ② stderr 本机解析后的完整命令（-L dependency 必在场）
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("LZ LINK RECIPE (BUG-10)"),
+        "stderr 缺配方行: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("-L dependency="),
+        "stderr 配方缺 -L dependency: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("--extern lz_builtins="),
+        "stderr 配方缺 --extern lz_builtins: {}",
+        stderr
+    );
 }

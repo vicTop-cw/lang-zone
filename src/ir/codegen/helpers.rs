@@ -674,16 +674,41 @@ pub(crate) fn scan_expr_mutations(
 /// 需要可变绑定（E0596）。这里宽松收集：凡作为方法调用接收者、赋值目标或
 /// IndexSet 基的变量名都标为需 mut（over-approximation 安全：多余的 let mut
 /// 只产生 unused_mut warning，批测以 -A warnings 忽略；漏标则报 E0596）。
+/// 预扫描函数体，收集需自动加 mut 的局部 let 变量名（LZ `let v = vec; v.push(1)`
+/// 未写 mut，但 Rust 需可变绑定，E0596）。宽松收集：
+/// - 作为方法调用接收者 / 赋值目标 / IndexSet 基；
+/// - 自引用重绑定（`let parts = parts + [p]`，value 引用自身）；
+/// - 循环内重绑定外层已声明变量（`let counter = i*10`，外层 `let counter = 0`
+///   会被 gen_stmt 的 loop_rebind 发射成赋值，故首声明须为 mut，否则 E0384）。
+/// over-approximation 安全：多余的 let mut 只产生 unused_mut warning（批测 -A warnings
+/// 忽略）；漏标则报 E0596 / E0384。
 pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::HashSet<String>) {
+    let mut bound: std::collections::HashSet<String> = std::collections::HashSet::new();
+    scan_auto_mut_block(block, &mut bound, false, out);
+}
+
+/// 作用域感知的预扫描：递归穿行语句序列，`bound` 记录当前作用域内已声明的变量名，
+/// `in_loop` 标注是否处于循环体内（用于触发 loop_rebind 的 mut 需求）。
+fn scan_auto_mut_block(
+    block: &Block,
+    bound: &mut std::collections::HashSet<String>,
+    in_loop: bool,
+    out: &mut std::collections::HashSet<String>,
+) {
     for stmt in &block.stmts {
         match stmt {
             Stmt::Let { name, value, .. } => {
-                // 自引用重绑定（`let parts = parts + [p]`）：后续需生成赋值而非
-                // shadow-let，因此初始声明必须为 mut
-                if expr_mentions_var(value, name) {
+                // 覆盖基线行为（自引用重绑定 `let parts = parts + [p]`：value 引用自身即标
+                // mut），并叠加 T3 的循环内重绑定外层已声明变量（`let counter = i*10`：
+                // bound 已含 name 且处于循环体）。注意：必须是基线判定的超集，否则会漏标
+                // 导致 E0384（lib_hashmap/lib_closure 回归）。
+                if expr_mentions_var(value, name)
+                    || (bound.contains(name.as_str()) && in_loop)
+                {
                     out.insert(name.clone());
                 }
                 scan_expr_auto_mut(value, out);
+                bound.insert(name.clone());
             }
             Stmt::Assign { target, value } => {
                 if let ExprKind::Var(v) = &target.kind {
@@ -705,27 +730,27 @@ pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::Ha
                 ..
             } => {
                 scan_expr_auto_mut(cond, out);
-                scan_auto_mut_locals(then_branch, out);
+                scan_auto_mut_block(then_branch, &mut bound.clone(), in_loop, out);
                 if let Some(e) = else_branch {
-                    scan_auto_mut_locals(e, out);
+                    scan_auto_mut_block(e, &mut bound.clone(), in_loop, out);
                 }
             }
             Stmt::For { iter, body, .. } => {
                 scan_expr_auto_mut(iter, out);
-                scan_auto_mut_locals(body, out);
+                scan_auto_mut_block(body, &mut bound.clone(), true, out);
             }
             Stmt::While { cond, body, .. } => {
                 scan_expr_auto_mut(cond, out);
-                scan_auto_mut_locals(body, out);
+                scan_auto_mut_block(body, &mut bound.clone(), true, out);
             }
             Stmt::WhileLet { expr, body, .. } => {
                 scan_expr_auto_mut(expr, out);
-                scan_auto_mut_locals(body, out);
+                scan_auto_mut_block(body, &mut bound.clone(), true, out);
             }
             Stmt::Match { scrutinee, arms } => {
                 scan_expr_auto_mut(scrutinee, out);
                 for arm in arms {
-                    scan_auto_mut_locals(&arm.body, out);
+                    scan_auto_mut_block(&arm.body, &mut bound.clone(), in_loop, out);
                 }
             }
             Stmt::Raise { value, .. } => {
@@ -740,16 +765,16 @@ pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::Ha
                     stmts: stmts.clone(),
                     ty: IrType::Unit,
                 };
-                scan_auto_mut_locals(&inner, out);
+                scan_auto_mut_block(&inner, &mut bound.clone(), in_loop, out);
             }
             Stmt::TryCatch { body, catches, .. } => {
-                scan_auto_mut_locals(body, out);
+                scan_auto_mut_block(body, &mut bound.clone(), in_loop, out);
                 for (_, cb) in catches {
-                    scan_auto_mut_locals(cb, out);
+                    scan_auto_mut_block(cb, &mut bound.clone(), in_loop, out);
                 }
             }
-            Stmt::CheckerBlock { body, .. } => scan_auto_mut_locals(body, out),
-            Stmt::Defer { body } => scan_auto_mut_locals(body, out),
+            Stmt::CheckerBlock { body, .. } => scan_auto_mut_block(body, &mut bound.clone(), in_loop, out),
+            Stmt::Defer { body } => scan_auto_mut_block(body, &mut bound.clone(), in_loop, out),
             _ => {}
         }
     }

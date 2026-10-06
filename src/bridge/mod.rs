@@ -10,6 +10,7 @@ pub mod python;
 pub mod rust;
 pub mod source;
 pub mod std; // Level 4: 共享内存嵌入桥接
+pub mod tnr; // Tnr 桥接：lib API 转译 + 已编译库链接 + 计算后端委托
 
 pub use core::*; // Re-export Bridge trait, BridgeRegistry, etc.
 pub use ledger::*;

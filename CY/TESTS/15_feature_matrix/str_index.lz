@@ -1,0 +1,16 @@
+// 索引与切片形态：str 索引给**码点整数**（`"abc"[0] == 97`，见 DEMO/01_basics/strings.lz:18
+// 的断言）；序列切片 `xs[a..b]` 按 Python 语义（SYNTAX/01-类型系统.md:436、442）。
+// 本件**不含**负索引行：`xs[-1]` 规范写明取末位（:441），cy 面出 5 是对的，但 Rust 面
+// 运行期 panic（`index out of bounds: the len is 6 but the index is 18446744073709551615`，
+// 实测 TEMP/probe10/xdiff.log）——oracle 拿不到产物就没有期望值，收进来等于抄 cy 自己，
+// 故留缺陷卡 BUG-19，修好 oracle 后这行必须补回来重封。
+// 期望值由 Rust 后端实跑生成（TEMP/xdiff_ds07.py + LZ_SEAL_EXP=1，2026-10-02）。
+def main() =
+    let s: str = "abc"
+    print(s[0], s[2])
+    let xs: List<int> = [0, 1, 2, 3, 4, 5]
+    print(xs[1..3])
+    print(xs[2..5])
+    print(xs[0..2])
+    let grid: List<List<int>> = [[1, 2], [3, 4]]
+    print(grid[0][1], grid[1][0])

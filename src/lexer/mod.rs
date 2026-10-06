@@ -10,3 +10,4 @@ pub use lexer::Lexer;
 pub use span::{SourcePos, Span, Spanned};
 pub use token::is_build_ws;
 pub use token::Token;
+pub use token::EmbedForm;

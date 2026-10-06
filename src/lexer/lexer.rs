@@ -1,7 +1,7 @@
 // Lang-Zong 编译器 — lexer/lexer.rs
 // 词法分析器: 源码 → Token 流
 use super::indent::IndentStack;
-use super::token::Token;
+use super::token::{Token, EmbedForm};
 use crate::util::chars::is_build_ws;
 
 /// 构建块符号（`=:` `~:` `*: ` `^:`）之前的合法边界：
@@ -617,6 +617,177 @@ impl Lexer {
         }
     }
 
+    fn try_match_embed_attr(&self) -> Option<(String, usize)> {
+        let mut p = self.pos;
+        if self.chars.get(p) != Some(&'[') {
+            return None;
+        }
+        p += 1;
+        for ec in "embed".chars() {
+            if self.chars.get(p) != Some(&ec) {
+                return None;
+            }
+            p += 1;
+        }
+        if self.chars.get(p) != Some(&'(') {
+            return None;
+        }
+        p += 1;
+        let mut lang = String::new();
+        while let Some(&c) = self.chars.get(p) {
+            if c.is_alphanumeric() || c == '_' {
+                lang.push(c);
+                p += 1;
+            } else {
+                break;
+            }
+        }
+        if lang.is_empty() {
+            return None;
+        }
+        if self.chars.get(p) != Some(&')') {
+            return None;
+        }
+        p += 1;
+        if self.chars.get(p) != Some(&']') {
+            return None;
+        }
+        p += 1;
+        Some((lang, p))
+    }
+
+    fn read_embed_backtick_block(&mut self) -> (String, EmbedForm) {
+        let form = match self.peek() {
+            Some('r') if self.peek_n(1) == Some('`') => {
+                self.advance();
+                EmbedForm::Raw
+            }
+            Some('f') if self.peek_n(1) == Some('`') => {
+                self.advance();
+                EmbedForm::Interp
+            }
+            Some('`') => EmbedForm::Raw,
+            _ => return (String::new(), EmbedForm::Raw),
+        };
+        if self.peek() != Some('`') {
+            return (String::new(), form);
+        }
+        let triple = self.peek_n(1) == Some('`') && self.peek_n(2) == Some('`');
+        if triple {
+            self.advance();
+            self.advance();
+            self.advance();
+        } else {
+            self.advance();
+        }
+        let mut src = String::new();
+        if triple {
+            loop {
+                match self.peek() {
+                    None => break,
+                    Some('`') if self.peek_n(1) == Some('`') && self.peek_n(2) == Some('`') => {
+                        self.advance();
+                        self.advance();
+                        self.advance();
+                        break;
+                    }
+                    Some(c) => {
+                        src.push(c);
+                        self.advance();
+                    }
+                }
+            }
+        } else {
+            while let Some(c) = self.peek() {
+                if c == '`' {
+                    self.advance();
+                    break;
+                }
+                src.push(self.advance().unwrap());
+            }
+        }
+        (src, form)
+    }
+
+    fn read_embed_indent_block(&mut self) -> String {
+        while let Some(c) = self.peek() {
+            if c == '\n' || c == '\r' {
+                self.advance();
+            } else if c == ' ' || c == '\t' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let block_indent = self.col;
+        let mut src = String::new();
+        let mut first_line = true;
+        loop {
+            if self.peek().is_none() {
+                break;
+            }
+            let line_start_pos = self.pos;
+            let mut line_content = String::new();
+            while let Some(c) = self.peek() {
+                if c == '\n' {
+                    break;
+                }
+                line_content.push(self.advance().unwrap());
+            }
+            let trimmed = line_content.trim();
+            if trimmed.is_empty() {
+                if self.peek() == Some('\n') {
+                    self.advance();
+                }
+                if !first_line {
+                    src.push('\n');
+                }
+                continue;
+            }
+            let leading_ws: usize = line_content
+                .chars()
+                .take_while(|&c| c == ' ' || c == '\t')
+                .count();
+            if leading_ws < block_indent {
+                self.pos = line_start_pos;
+                let consumed: String = self.chars[..line_start_pos]
+                    .iter()
+                    .filter(|&&c| c == '\n')
+                    .map(|_| '\n')
+                    .collect();
+                let newlines = consumed.matches('\n').count();
+                self.line = self.line.saturating_sub(newlines);
+                self.col = 0;
+                for &c in &self.chars[line_start_pos..] {
+                    if c == '\n' {
+                        break;
+                    }
+                    if c == ' ' || c == '\t' {
+                        self.col += 1;
+                    } else {
+                        self.col += 1;
+                    }
+                }
+                self.col = leading_ws;
+                break;
+            }
+            let dedented = if line_content.len() >= block_indent {
+                &line_content[block_indent..]
+            } else {
+                &line_content[..]
+            };
+            if !first_line {
+                src.push('\n');
+            }
+            src.push_str(dedented);
+            first_line = false;
+            if self.peek() == Some('\n') {
+                self.advance();
+            }
+        }
+        src
+    }
+
     pub fn tokenize(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
         let mut line_start = true;
@@ -1133,6 +1304,44 @@ impl Lexer {
                 }
                 '#' => {
                     self.advance();
+                    if let Some((lang, end_pos)) = self.try_match_embed_attr() {
+                        let mut p = end_pos;
+                        while let Some(&c) = self.chars.get(p) {
+                            if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+                                p += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let is_old_string_form = matches!(lang.as_str(), "rust" | "py")
+                            && self.chars.get(p) == Some(&'d')
+                            && self.chars.get(p + 1) == Some(&'e')
+                            && self.chars.get(p + 2) == Some(&'f')
+                            && matches!(self.chars.get(p + 3), Some(' ') | Some('\t'));
+                        if is_old_string_form {
+                            if self.chars.get(self.pos) == Some(&'[') {
+                                self.advance();
+                            }
+                            tokens.push(Token::At);
+                            line_start = false;
+                            continue;
+                        }
+                        self.pos = end_pos;
+                        if self.chars.get(p) == Some(&'`') {
+                            self.pos = p;
+                            let (src, form) = self.read_embed_backtick_block();
+                            tokens.push(Token::EmbedBlock { lang, src, form });
+                        } else {
+                            let src = self.read_embed_indent_block();
+                            tokens.push(Token::EmbedBlock {
+                                lang,
+                                src,
+                                form: EmbedForm::Indent,
+                            });
+                        }
+                        line_start = false;
+                        continue;
+                    }
                     // #[attr] 属性宏写法：'#' 后跟 '[' 时跳过 '['，等价于 @attr
                     if self.chars.get(self.pos) == Some(&'[') {
                         self.advance();

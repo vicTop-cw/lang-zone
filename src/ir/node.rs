@@ -288,8 +288,8 @@ pub enum IntrinsicKind {
     TailCall,
     Export(Vec<String>), // @export(Rust), @export(Python)
     Extern(Vec<String>), // @extern(Rust), @extern(Python) 外部声明（L1 机制）
-    /// #[embed(rust)] / #[embed(py)]：内嵌代码段（G7）
-    /// lang = 目标语言（Rust / Python），code = 原样插入生成产物的代码段
+    /// #[embed(lang)] / @lang!：内嵌代码段（G7 + 计划一 P1）
+    /// lang = 目标语言（rust / py / tnr / scala / c），code = 原样块文本或兼容字符串字面量
     Embed {
         lang: String,
         code: String,
@@ -384,6 +384,12 @@ pub enum Item {
     },
     /// duck 类型约束 → 编译为 Rust trait
     DuckDef(DuckDef),
+    /// #[embed(lang)] 原样块 → codegen 原样输出 / tnr lib 转译
+    EmbedBlock {
+        lang: String,
+        src: String,
+        form: crate::lexer::EmbedForm,
+    },
 }
 
 /// 函数定义

@@ -1,0 +1,9 @@
+// `false`/`true` 字面量与布尔运算：关键词普查实测 `false` 在 cy 语料里**零出现**
+// （CY/TESTS 全部 .lz 里搜不到一次），所以「布尔字面量渲染成 true/false」这条
+// 对齐 Rust Debug 的规则，此前没有任何语料钉着它。
+// 期望值由 Rust 后端实跑生成（TEMP/xdiff_ds07.py + LZ_SEAL_EXP=1，2026-10-02）。
+def main() =
+    let f = false
+    let t = true
+    print(f, t)
+    print(not f, f == false, t && f, t || f)

@@ -125,6 +125,7 @@ fn run_lz(name: &str, source: &str) -> (bool, String, String) {
         .arg(&exe);
     if let Some(r) = find_builtins_rlib() {
         cmd.arg("--extern").arg(format!("lz_builtins={}", r.display()));
+    cmd.arg("-L").arg(format!("dependency={}", r.parent().unwrap().join("deps").display()));
     }
     let rc = cmd.output().expect("run rustc");
     if !rc.status.success() {

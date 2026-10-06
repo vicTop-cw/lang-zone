@@ -49,7 +49,7 @@ run_one() {
     fi
 
     # Step 2: rustc
-    err=$(rustc --edition 2021 --extern lz_builtins="$RLIB" "$rs" -o "$exe" 2>&1)
+    err=$(rustc --edition 2021 --extern lz_builtins="$RLIB" -L "dependency=$(dirname "$RLIB")/deps" "$rs" -o "$exe" 2>&1)
     rc=$?
     if [[ $rc -ne 0 ]]; then
         RUSTC_FAIL=$((RUSTC_FAIL+1)); FAIL=$((FAIL+1))

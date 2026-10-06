@@ -36,13 +36,20 @@ fn read_source_lossy(path: &Path) -> std::io::Result<String> {
 /// 只注入定义项（fn/const/struct/enum/impl/alias/duck/magic + 顶层 let 转 const），
 /// checker 块注入为空 stub（避免 body 引用 __Params 触发语义错误），
 /// 顶层表达式语句（print 等）不注入（仅影响运行期初始化输出，批测不运行）。
-fn merge_imported_modules(module: &mut lang_zone::ast::Module, entry: &Path) {
+fn merge_imported_modules(module: &mut lang_zone::ast::Module, entry: &Path) -> Vec<String> {
     let dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
     let mut loaded: Vec<PathBuf> = Vec::new();
-    merge_imports_into(module, &dir, &mut loaded);
+    let mut merged: Vec<String> = Vec::new();
+    merge_imports_into(module, &dir, &mut loaded, &mut merged);
+    merged
 }
 
-fn merge_imports_into(module: &mut lang_zone::ast::Module, dir: &Path, loaded: &mut Vec<PathBuf>) {
+fn merge_imports_into(
+    module: &mut lang_zone::ast::Module,
+    dir: &Path,
+    loaded: &mut Vec<PathBuf>,
+    merged: &mut Vec<String>,
+) {
     let imports = module.imports.clone();
     for imp in &imports {
         if imp.path.is_empty() {
@@ -125,7 +132,34 @@ fn merge_imports_into(module: &mut lang_zone::ast::Module, dir: &Path, loaded: &
         };
         // 递归处理子模块的 import
         let sub_dir = mp.parent().unwrap_or(dir).to_path_buf();
-        merge_imports_into(&mut sub, &sub_dir, loaded);
+        merge_imports_into(&mut sub, &sub_dir, loaded, merged);
+        // 记下「已被平铺合并」的模块名：Cython 后端据此不发射 `import X` 行、
+        // 并把 `X.sym` 剥成裸名 `sym`（Rust 后端发的从来就是裸名）。
+        if !merged.iter().any(|m| m == first) {
+            merged.push(first.to_string());
+        }
+        // ── 平铺合并的同名重复定义过滤 ──
+        // 这里把被导入模块的项**平铺**进主模块的同一个命名空间，于是
+        // 「同名同签名」= 重复定义：Rust 后端发出两个 `pub fn main__()`
+        // ⇒ E0428 the name `main__` is defined multiple times；Cython 后端发出两个
+        // `def main__0()` 加上指向从未发射的 `main__1` 的分发器
+        // ⇒ cython: undeclared name not builtin: main__1（CY/TESTS/99_bootstrap 实测）。
+        // 被导入模块的定义让位给已在场的定义（本地/先导入者胜）——一个模块的 `main`
+        // 是它自己的入口，不是导出给 importing 方的 API。
+        // 不同签名的同名 def **不**过滤：那是合法重载。
+        {
+            let dup_def = |f: &lang_zone::ast::Function| {
+                module.functions.iter().any(|g| {
+                    g.name == f.name
+                        && g.params.len() == f.params.len()
+                        && g.params
+                            .iter()
+                            .zip(f.params.iter())
+                            .all(|(a, b)| a.ty == b.ty)
+                })
+            };
+            sub.functions.retain(|f| !dup_def(f));
+        }
         // 注入定义项
         module.functions.extend(sub.functions);
         module.structs.extend(sub.structs);
@@ -176,6 +210,51 @@ fn merge_imports_into(module: &mut lang_zone::ast::Module, dir: &Path, loaded: &
 }
 
 /// 将 .lz 扩展名替换为 .rs（只替换最后的扩展名，避免 `a.lz.lz` → `a.rs.rs` 问题）
+/// BUG-10 产品化（方案 A，2026-10-01）：单文件生成 .rs 后，把**本机解析好的
+/// 完整可复制** rustc 链接命令打到 stderr。只打印不落盘 ⇒ golden 快照零影响。
+/// 解析顺序：lzc exe 同目录 liblz_builtins.rlib → 同目录 deps/ 下的带哈希 rlib。
+fn print_link_recipe(out_path: &std::path::Path) {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    let rlib: Option<PathBuf> = exe_dir.and_then(|d| {
+        let direct = d.join("liblz_builtins.rlib");
+        if direct.exists() {
+            return Some(direct);
+        }
+        let deps = d.join("deps");
+        std::fs::read_dir(&deps).ok().and_then(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| {
+                    let n = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    n.starts_with("liblz_builtins-") && n.ends_with(".rlib")
+                })
+        })
+    });
+    match rlib {
+        Some(r) => {
+            let deps_dir = r
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            eprintln!(
+                "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins={} -L dependency={} -O {}",
+                r.display(),
+                deps_dir,
+                out_path.display()
+            );
+        }
+        None => {
+            eprintln!(
+                "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O {}   (rlib 未在 lzc 同目录找到；先 `cargo build -p lz_builtins`)",
+                out_path.display()
+            );
+        }
+    }
+}
+
 fn replace_ext(path: &str, from: &str, to: &str) -> String {
     let p = Path::new(path);
     if let Some(stem) = p.file_stem() {
@@ -265,6 +344,8 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
         .arg(&rs_path)
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
         .arg("-o")
         .arg(&exe_path)
         .output()
@@ -358,6 +439,23 @@ fn compile_main(args: Vec<String>) -> i32 {
     let use_cache = args.iter().any(|a| a == "--cached");
     // --backend=cython：选择 Cython 后端（默认 Rust）
     let backend_cython = args.iter().any(|a| a == "--backend=cython");
+    // `--test` 的执行面：Rust 面直调 `rustc --test`（run_test_mode），cy 面发射
+    // `_lz_run_tests()` 运行器再用 pyximport 跑它（run_cy_test_mode）。
+    // 历史形状（2026-10-02 之前）：cy 面把 `--test` 当作不存在——实测只打一行
+    // 「Generated ... sp.pyx」并以 rc=0 退出 ⇒ 调用方读到的是「测试跑过了」而实际一个 test
+    // 都没执行（台账 BUG-18）。缺能力可以接受，**装作有能力**不行，所以当时先改成带原因拒绝，
+    // 本轮按「判据先行」补上执行面（判据：CY/scripts/cy_test_gate.py）。
+    if backend_cython && run_tests {
+        // 执行面需要宿主 Python；取不到数的那一侧必须拒绝出数（非零），不能报绿。
+        if cy_python_program().is_none() {
+            eprintln!(
+                "error: --test 在 cython 后端需要 Python 宿主来编译并执行 .pyx（缺陷卡：memory/bugs.md BUG-18）。\n\
+                 出路：把 python/python3 放进 PATH，或设 LZ_PYTHON=<解释器路径>；\n\
+                 跑测试也可直接用默认 Rust 后端（去掉 --backend=cython）。"
+            );
+            std::process::exit(1);
+        }
+    }
 
     // --lzi <file>：加载 lz-infer 生成的跨模块类型签名（.lzi），注入 IR builder，
     // 本地函数查不到返回类型时回退查询外部模块签名（可选增强，infer 特性门控）
@@ -402,6 +500,7 @@ fn compile_main(args: Vec<String>) -> i32 {
             eprintln!("Error writing {}: {}", out_path, e);
             std::process::exit(1);
         });
+        print_link_recipe(std::path::Path::new(&out_path));
         println!(
             "Incremental: {} -> {} ({} modules: {} cached, {} rebuilt, {} ms)",
             path,
@@ -444,6 +543,7 @@ fn compile_main(args: Vec<String>) -> i32 {
             eprintln!("Error writing {}: {}", out_path, e);
             std::process::exit(1);
         });
+        print_link_recipe(std::path::Path::new(&out_path));
         println!(
             "Generated {} -> {} (project mode, {}, {} modules)",
             path,
@@ -671,7 +771,8 @@ fn compile_main(args: Vec<String>) -> i32 {
     // ── 跨模块符号内联（E0425 修复）──
     // 单文件模式存在用户模块 import 时，加载被导入模块顶层项合并进主 AST，
     // 使被导入符号进入 IR/codegen，修复 E0425 use/extern 作用域系列失败。
-    merge_imported_modules(&mut module, Path::new(path));
+    // 返回值是「被合并掉的模块名」清单，Cython 后端拿它剥限定前缀/省掉 import 行。
+    let merged_modules = merge_imported_modules(&mut module, Path::new(path));
 
     if args.iter().any(|a| a == "--ast") {
         println!("{:#?}", module);
@@ -739,6 +840,8 @@ fn compile_main(args: Vec<String>) -> i32 {
                     .arg(&rs_path)
                     .arg("--extern")
                     .arg(format!("lz_builtins={}", builtins.display()))
+                    .arg("-L")
+                    .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
                     .arg("-o")
                     .arg(&exe_path)
                     .output()
@@ -803,6 +906,8 @@ fn compile_main(args: Vec<String>) -> i32 {
                     .arg(&rs_path)
                     .arg("--extern")
                     .arg(format!("lz_builtins={}", builtins.display()))
+                    .arg("-L")
+                    .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
                     .arg("-o")
                     .arg(&exe_path)
                     .output()
@@ -841,13 +946,22 @@ fn compile_main(args: Vec<String>) -> i32 {
             if backend_cython {
                 // ── Cython 后端：IR → .pyx（与 lzcyc 共享 codegen_cython）──
                 let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
+                // 平铺合并掉的模块在 Python 侧不存在：不发射 `import X`，`X.sym` → `sym`
+                cg.set_merged_modules(merged_modules);
+                cg.set_test_runner(run_tests);
                 let pyx_code = cg.generate(&ir_module).to_string();
                 let out_path = replace_ext(path, ".lz", ".pyx");
                 fs::write(&out_path, &pyx_code).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", out_path, e);
                     std::process::exit(1);
                 });
-                println!("Generated {} -> {} (Cython backend, shared codegen with lzcyc)", path, out_path);
+                println!(
+                    "Generated {} -> {} (Cython backend, shared codegen with lzcyc)",
+                    path, out_path
+                );
+                if run_tests {
+                    run_cy_test_mode(&out_path);
+                }
             } else {
                 // ── Rust 后端（默认）──
                 let mut cg = IrCodeGen::new();
@@ -858,6 +972,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                     eprintln!("Error writing {}: {}", out_path, e);
                     std::process::exit(1);
                 });
+                print_link_recipe(std::path::Path::new(&out_path));
                 println!("Generated {} -> {} (IR codegen)", path, out_path);
                 if registry.symbol_count() > 0 {
                     println!(
@@ -969,6 +1084,160 @@ fn probe_rlib(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 /// 编译生成的 .rs 文件为测试二进制并运行（IR 路线的 `lz test`）
+/// 找一个可用的宿主 Python：`LZ_PYTHON` 优先，其次 `python`/`python3`（要求 `--version` 真跑得通）。
+/// 取不到就返回 None —— 调用方必须拒绝出数（非零），不能把「没跑」报成「跑过」。
+fn cy_python_program() -> Option<String> {
+    if let Ok(p) = std::env::var("LZ_PYTHON") {
+        if !p.trim().is_empty() {
+            if python_usable(&p) {
+                return Some(p);
+            }
+            return None;
+        }
+    }
+    ["python", "python3"]
+        .iter()
+        .find(|p| python_usable(p))
+        .map(|p| p.to_string())
+}
+
+fn python_usable(prog: &str) -> bool {
+    std::process::Command::new(prog)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// pyximport 宿主：把 .pyx 复制成一个谁也不可能预占的别名再编译导入。
+/// 别名与身份校验不是洁癖——`sys.meta_path` 里 pyx 的 finder 排在最后，同名的
+/// site-packages/stdlib 包会先命中（cy L3 实测过 `enum`/`struct`/`test_suite` 被抢，
+/// 那一轮的 ok 里含假绿）。
+///
+/// 两条本轮实测到的坑，都写进代码里免得下一轮再踩：
+///  ① 身份**不许读 `mod.__file__`**：LZ 产物自己在模块级发 `__file__ = "<源文件>.lz"`
+///     （const 机制），读它会把真产物判成冒名（假红）。用导入机器形写入的 `spec.origin`。
+///  ② 归属比较不许用字符串前缀：`.../target/cy-testface/x.lz` 以 `.../target/cy-test`
+///     开头却是隔壁目录（假绿）。用 `os.path.commonpath` 按分量比。
+const CY_TEST_HOST: &str = r#"import os, subprocess, sys
+
+def inside(child, parent):
+    a, b = os.path.realpath(child), os.path.realpath(parent)
+    try:
+        return os.path.commonpath([a, b]) == b
+    except ValueError:
+        return False
+
+pyx_path, alias, work = sys.argv[1], sys.argv[2], sys.argv[3]
+
+if os.environ.get("LZCYT_STAGE") != "run":
+    # 第一遍把 pyximport/setuptools 的编译噪声关进子进程（它会往 stdout 打 MSVC 链接器
+    # 日志，冷缓存那一遍尤其明显），第二遍缓存命中 ⇒ stdout 只剩测试行，跨后端才可比。
+    env = dict(os.environ)
+    env["LZCYT_STAGE"] = "run"
+    subprocess.call([sys.executable, os.path.abspath(__file__), pyx_path, alias, work],
+                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+except Exception:
+    pass
+
+try:
+    import pyximport
+    pyximport.install(language_level=3, build_dir=work)
+    if work not in sys.path:
+        sys.path.insert(0, work)
+    mod = __import__(alias)
+except Exception as exc:
+    sys.stderr.write("error: .pyx 编译或导入失败：%s\n" % exc)
+    sys.exit(5)
+
+origin = getattr(getattr(mod, "__spec__", None), "origin", None)
+if not origin:
+    origin = getattr(getattr(mod, "__loader__", None), "path", None)
+if not origin or not inside(origin, work):
+    sys.stderr.write("error: 加载到的模块不是本次产物：%r\n" % (origin,))
+    sys.exit(4)
+
+run = getattr(mod, "_lz_run_tests", None)
+if run is None:
+    sys.stderr.write("error: 产物里没有 _lz_run_tests 运行器（发射失败）\n")
+    sys.exit(3)
+sys.exit(1 if run() else 0)
+"#;
+
+/// cy 面的 `--test`：用 pyximport 编译并执行刚写出的 .pyx，逐条状态由发射的运行器打印。
+/// 尾巴的 ✅/❌ 与退出码对齐 Rust 面的 run_test_mode，两面同一份 .lz 才有可比性。
+fn run_cy_test_mode(pyx_path: &str) {
+    let py = match cy_python_program() {
+        Some(p) => p,
+        None => {
+            eprintln!("Test compilation failed: 找不到可用的 python");
+            std::process::exit(1);
+        }
+    };
+    let stem = Path::new(pyx_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mod".to_string());
+    let alias = format!("_lzcyt_{}", stem);
+    let work = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("cy-test");
+    if let Err(e) = std::fs::create_dir_all(&work) {
+        eprintln!("Test compilation failed: 建不出 {}：{e}", work.display());
+        std::process::exit(1);
+    }
+    // 每次起手摘掉旧产物：宁可慢一遍编译，也不让上一轮的 .pyd 冒充本轮的代码
+    for ext in [".pyx", ".c", ".pyd", ".so"].iter() {
+        let mut f = work.join(&alias);
+        f.set_extension(format!("{}", ext.trim_start_matches('.')));
+        let _ = std::fs::remove_file(&f);
+    }
+    let aliased = work.join(format!("{}.pyx", alias));
+    if let Err(e) = std::fs::copy(pyx_path, &aliased) {
+        eprintln!("Test compilation failed: 复制不出 {}：{e}", aliased.display());
+        std::process::exit(1);
+    }
+    let host = work.join("lz_cy_test_host.py");
+    if let Err(e) = fs::write(&host, CY_TEST_HOST) {
+        eprintln!("Test compilation failed: 写不出宿主：{e}");
+        std::process::exit(1);
+    }
+    let status = std::process::Command::new(&py)
+        .arg(&host)
+        .arg(&aliased)
+        .arg(&alias)
+        .arg(&work)
+        .status();
+    match status {
+        Ok(s) if s.success() => println!("✅ All tests passed"),
+        Ok(s) if s.code() == Some(1) => {
+            eprintln!("❌ Some tests failed");
+            std::process::exit(1);
+        }
+        Ok(s) if s.code() == Some(5) => {
+            eprintln!("Test compilation failed（.pyx 编译或导入失败，宿主退出码 5）");
+            std::process::exit(1);
+        }
+        Ok(s) => {
+            eprintln!(
+                "❌ 测试执行面未能给出判定（宿主退出码 {:?}：3=产物里没有运行器，\
+                 4=加载到的模块不是本次产物，5=编译或导入失败）",
+                s.code()
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Test compilation failed: 起不了 {}：{e}", py);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn run_test_mode(source_path: &str, out_path: &str) {
     let out_name = replace_ext(source_path, ".lz", "");
     #[cfg(target_os = "windows")]
@@ -995,6 +1264,8 @@ fn run_test_mode(source_path: &str, out_path: &str) {
     if let Some(rlib) = find_builtins_rlib() {
         cmd.arg("--extern")
             .arg(format!("lz_builtins={}", rlib.display()));
+        cmd.arg("-L")
+            .arg(format!("dependency={}", rlib.parent().unwrap().join("deps").display()));
     } else {
         eprintln!("warning: 未找到 lz_builtins rlib，测试构建可能因链接失败");
     }

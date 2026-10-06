@@ -1,0 +1,15 @@
+// 04_functions - 模块级块体闭包（const 初值写成 `|a, b| =>` 块）
+//
+// 缺陷现场（本轮实测）：cy 的表达式通道对 `BlockExpr` **只留尾表达式**
+// （`src/ir/codegen_cython.rs` 的 `ExprKind::BlockExpr` 臂：「深嵌套位置（无法语句提升）：降级为尾表达式」），
+// 于是产物里是 `sq = lambda a, b: (c * c)` —— 前缀语句 `c = a + b` 整个丢掉，
+// Cython 报 `undeclared name not builtin: c`（这一例恰好响；换成被丢的语句不产生未绑定名字时就是**静默少副作用**）。
+// 期望值 `25` 由 **Rust 面实跑**封盘，封之前先做跨后端 stdout 差分（本件形态的两侧实测：
+// `rust='25\n' / cy='25\n'`，取数件 `TEMP/closure_probes_r10.py` A 组）。
+
+let sq = |a: int, b: int| =>
+    c = a + b
+    c * c
+
+def main() =
+    print(sq(2, 3))

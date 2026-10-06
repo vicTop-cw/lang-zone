@@ -1,0 +1,8 @@
+// 用例：元组槽位的空列表要按声明类型下推元素类型
+// 出处：2026-10-01 T0r5 续轮（BUG-5 的 comptime 内联侧修好后才暴露）——
+//       ListLit 元素位有期望类型下推（BUG-5），TupleLit 槽位没有，
+//       `let t: (List<List<int>>, List<int>) = ([], [1, 2])` 的第 0 槽空列表
+//       借不到声明类型，按字面量自身默认推断发成 Vec::<i64>::new()。
+// 卡点阶段：RUSTC_FAIL（E0308 expected Vec<Vec<i64>>, found Vec<i64>）→ 本轮转绿
+let t: (List<List<int>>, List<int>) = ([], [1, 2])
+println(t)

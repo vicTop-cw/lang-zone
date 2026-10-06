@@ -730,6 +730,9 @@ impl fmt::Display for Item {
             Item::DuckDef(d) => {
                 write!(f, "duck {} {{ {} methods }}", d.name, d.methods.len())
             }
+            Item::EmbedBlock { lang, src, .. } => {
+                write!(f, "embed({}) {{ {} chars }}", lang, src.len())
+            }
         }
     }
 }

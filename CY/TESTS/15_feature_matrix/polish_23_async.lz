@@ -1,0 +1,33 @@
+// ============================================================
+// 轮23: 并发基础 — async/await
+// 每项用 assert 确保正确
+// ============================================================
+
+async def fetch_value(x: int) -> int =
+    x * 2
+
+def main() =
+    // ── async 函数调用（返回 Future，await 取结果） ──
+    let fut = fetch_value(21)
+    let val = await fut
+    assert val == 42
+
+    // ── async 多调用组合 ──
+    let f1 = fetch_value(1)
+    let f2 = fetch_value(2)
+    let r1 = await f1
+    let r2 = await f2
+    assert r1 == 2
+    assert r2 == 4
+
+    // ── 普通函数不受影响 ──
+    def plain(x: int) -> int = x + 100
+    assert plain(1) == 101
+
+    // ── 基础验证确保流程正常 ──
+    mut total = 0
+    for i in 0..5:
+        total = total + i
+    assert total == 10
+
+    print("P23 async OK")

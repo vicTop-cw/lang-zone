@@ -51,6 +51,8 @@ fn run_lz(name: &str, source: &str) -> String {
         .arg(&rs)
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins_rlib().display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins_rlib().parent().unwrap().join("deps").display()))
         .arg("-o")
         .arg(&exe)
         .output()
@@ -266,5 +268,52 @@ fn comptime_m3_emits_specialized_fns_with_baked_values() {
     assert!(
         rs.contains("pub fn add_n__lzspec_") && !rs.contains("pub fn add_n__lzspec_(comptime"),
         "add_n 特化函数签名非法地保留了 comptime 形参，生成的 .rs:\n{rs}"
+    );
+}
+
+// ────────────────────── #[embed(tnr)] 原样块 ──────────────────────
+
+#[test]
+fn embed_tnr_indent_block_compiles() {
+    let src = r#"#[embed(tnr)]
+fn add(a, b)
+    a + b
+
+def main():
+    print(1)
+"#;
+    let work = std::env::temp_dir().join("lz_bridge_embed_tnr_indent");
+    let _ = std::fs::create_dir_all(&work);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, src).expect("write lz source");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "[tnr_indent] lang-zone 编译失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn embed_tnr_backtick_raw_compiles() {
+    let src = r#"@tnr!
+r```
+fn add(a, b) { a + b }
+```
+
+def main():
+    print(1)
+"#;
+    let work = std::env::temp_dir().join("lz_bridge_embed_tnr_backtick");
+    let _ = std::fs::create_dir_all(&work);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, src).expect("write lz source");
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "[tnr_backtick] lang-zone 编译失败: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
