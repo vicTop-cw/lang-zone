@@ -257,3 +257,38 @@ lz 编译器在**无标注**时自动检测「直接自调用全部处于尾位�
   `cargo test -j 1` = **772 passed / 0 failed**（37 个测试二进制）；
   `demo_codegen_compile -- --include-ignored` = **2 / 0**（348 DEMO 全部转译 + rustc 通过）。
 - 同批把 `071aa1f` 误纳入的他人未完成改动从提交中剔除，使 **HEAD 可独立编译**。
+
+---
+
+## 十、第二轮覆盖审计（2026-10-07，`4cccc29`）
+
+### 10.1 方法：从「逐例黑盒」升级为「结构性交叉核对」
+矩阵是黑盒逐例，能发现**已想到**的形态；本轮补一层结构性核对：
+1. **语句形态覆盖交叉核对**：把「分析器按尾位置传播的形态集合」与「改写器实际改写的
+   形态集合」求差集——差集里的形态就是「判为可优化但改不动」的危险区。
+2. **变体覆盖核对**：枚举 `ExprKind`（30 个）与 `Stmt`（23 个）全部变体，逐一确认
+   被扫描器 / 改写器 / 通用子树收集器覆盖。
+
+结果：`ExprKind` 30/30 覆盖；`Stmt` 23/23 全部归入四类之一
+（尾传播且改写器已覆盖 / 非尾黑名单 / 逐次调用语义阻断 / 叶子）。
+
+### 10.2 追加发现并修复的三处缺陷
+| # | 缺陷 | 症状 | 修复 |
+|---|---|---|---|
+| ④ | 命名块（`block NAME:`）体在尾位置 | 分析器尾传播、改写器无分支 → 块内递归留在循环里 → **无限递归（实测挂死）**；`break/continue <label>` 标签语义亦冲突 | `find_defer` 泛化为 `find_per_call_semantics`（defer / 命名块 / 带标签跳转）；扫描器不再把命名块当尾位置容器 |
+| ⑤ | **match 守卫**里的自调用是检测盲区 | 扫描器完全不遍历 `MatchArm.guard`（计数与改写都漏）；函数别处有真尾调用时被判可优化，守卫里的递归留在循环内 → **无限递归** | `scan()` 与 `collect_stmt_subtrees` 都补守卫（按非尾处理） |
+| ⑥ | `Result` 返回类型初值取 `None` | Result 无 nil 值 → `let __tco_res: Result<T,E> = None;` ⇒ **E0308** | `default_value` 对 Result 返回 `None`（⇒ `NotTransformable`）；`Option` 保持 `None`；`Set` 仍可优化（`HashSet::new()`） |
+
+三处各配一条回归用例（`labeled_block_tail_call_is_not_transformed`、
+`match_guard_self_call_is_not_transformed`、`result_returning_tail_recursive_fn_is_not_transformed`）。
+
+### 10.3 本轮全量验收（含并行 agent 的在途改动，主工作树）
+| 闸门 | 结果 |
+|---|---|
+| `cargo build`（含双方改动） | 0 error |
+| `cargo test -j 1` | **775 passed / 0 failed**（37 个测试二进制） |
+| `demo_codegen_compile -- --include-ignored` | **2 / 0**，且此时 `KNOWN_TRANSPILE_FAILURES` 与 `KNOWN_RUSTC_FAILURES` **均为空清单** |
+| `cy_codegen_gate -- --include-ignored`（Cython 三层） | **4 / 0**：L1 转译 84 件、L2 cythonize **84/84**、L3 编译运行 + `.exp` oracle 逐字比对全通过 |
+
+Cython 后端未被触碰，且 IR 层改动（含 TCO 的 desugar）经L3 oracle 逐字比对确认
+**未引入跨后端语义漂移**。
