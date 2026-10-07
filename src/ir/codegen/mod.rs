@@ -18,6 +18,7 @@ mod magic_gen;
 mod pattern_gen;
 mod scan;
 mod stmt_gen;
+mod str_boundary;
 mod types_emit;
 
 // 注：子模块内部符号不再在 mod.rs 统一 re-export —— 方法经 impl 自动可见，
