@@ -205,3 +205,55 @@ lz 编译器在**无标注**时自动检测「直接自调用全部处于尾位�
 
 ### M4 未做
 `SYNTAX/` 尾递归章节 + CHANGELOG + bench 报告尚未补；`BENCH/` 有无可用对照项待确认。
+
+---
+
+## 九、递归形态系统性检测矩阵（2026-10-07，`tests/tail_recursion_matrix.rs`）
+
+### 9.1 检测方法
+40 例数据表，每例同时断言两件事：
+- **优化是否生效**：解析编译器自己的 `[tco] 自动改写 N 个` 计数行（**不能**只看
+  产物里的 `__tco_res`——Unit 返回的函数改写后不引入结果变量），并与产物中的
+  改写痕迹（`__tco_res` / `__tco_a`）交叉验证；
+- **语义是否保持**：产物真编译（rustc）真运行，输出逐行比对。
+
+判定口径：**「未优化」不是失败**（保守边界是设计的一部分），失败条件只有
+「期望优化却没优化 / 期望不改写却改了 / 语义漂移 / 编译或运行失败」。
+运行方式：`cargo test -j 1 --test tail_recursion_matrix -- --nocapture`（会打印全表）。
+
+### 9.2 覆盖形态与结论
+| 组 | 形态 | 结论 |
+|---|---|---|
+| A（17 例） | 直接尾递归：if/else、累加器形参、gcd 形参轮换、match 分支、match 守卫、`&&`/`||` 右操作数、let 后尾调用、提前 return、实参互依、Unit 返回、str 返回、10 万层深递归、实参含副作用、实参含非尾自调用、三形参轮换、实参来自 λ 形参 | 除「实参含副作用/含非尾自调用」两类本身非尾外，其余**全部优化且语义一致** |
+| B（6 例） | 非尾递归：阶乘、朴素斐波那契、局部累加器、树形分叉、尾递归后在外层再运算、**10 万层非尾递归** | 全部不优化；深非尾递归**仍会栈溢出**（已固化为 `Run::Crash` 用例，明确记录 TCO 的边界） |
+| C（3 例） | 互递归：偶奇尾互调、非尾互调、三函数环 | 全部不优化（v1 只改写直接自调用） |
+| D（14 例） | 边界绕过：while 体调用方、for 体调用方、λ 内递归、内嵌 def 自调用、defer 函数、try 块内自调用、raises 函数、递归生成器、类方法 self 递归、经函数形参递归、无自调用、let 绑定非尾、bool 返回、Option 返回 | λ / try / raises / 生成器 / self / 函数形参 → 不优化；while·for 调用方、内嵌 def、bool/Option 返回 → 优化 |
+
+汇总：**40 例 = 优化生效 22 + 未优化 18，问题 0**。
+
+### 9.3 矩阵暴露并已修复的三处真缺陷
+| # | 缺陷 | 症状 | 修复 |
+|---|---|---|---|
+| 1 | 改写器不处理 `Stmt::Match` | 分析器判尾位置、函数被裹进循环，但 match 变语句、分支值被丢弃 ⇒ **E0308** | 改写器补 `Match` / 尾位置 `Block` 分支，逐分支改写为「赋 `__tco_res` + break」或「形参重赋 + continue」 |
+| 2 | Unit 返回仍声明结果变量 | 后端省略 `let x: () = ();`，循环内赋值 ⇒ **E0425** | Unit 走「裸表达式 + break」，不声明结果变量、不生成尾部 `return` |
+| 3 | 含 `defer` 的函数被改写 | defer 是**逐次调用**的清理块，改写后只执行一次且落在循环体不可达分支 ⇒ 递归 4 层打印 4 次变 0 次 | 结构层新增 `find_defer` ⇒ `NotTransformable` |
+
+三处均已补回归用例（`tests/tail_recursion.rs`：`match_arm_tail_call_is_rewritten_with_branch_values_kept`、
+`unit_return_tail_call_emits_no_result_var`、`defer_in_tail_recursive_fn_is_not_transformed`）。
+
+### 9.4 与 TCO 无关的既有缺陷（矩阵中显式标注，不计入 TCO 判定）
+| 形态 | 症状 | 状态 |
+|---|---|---|
+| `try` + `enum` 异常 | 产物 E0308（`match` 分支类型不一致），`--no-tco` 同样失败 | 既有缺陷，未修 |
+| `raises` + `enum` 异常 | 产物 E0308，`--no-tco` 同样失败 | 既有缺陷，未修 |
+| 递归生成器 `yield from` | IR build 直接拒绝：`函数 X 返回类型不匹配：期望 int，实际 Itor<Vec<int>>` | 既有缺陷，未修 |
+
+这三类在矩阵里以 `TranspileOnly` / `TranspileBlocked` 模式记录事实：既不掩盖，也不
+把锅算到 TCO 头上。
+
+### 9.5 提交与验收
+- `f610849 fix(tailrec): match/unit/defer three defects found by recursion matrix`
+- 隔离环境（`git worktree`，避开并行 agent 的在途改动）全量：
+  `cargo test -j 1` = **772 passed / 0 failed**（37 个测试二进制）；
+  `demo_codegen_compile -- --include-ignored` = **2 / 0**（348 DEMO 全部转译 + rustc 通过）。
+- 同批把 `071aa1f` 误纳入的他人未完成改动从提交中剔除，使 **HEAD 可独立编译**。
