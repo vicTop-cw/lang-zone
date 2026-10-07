@@ -252,6 +252,111 @@ def main() =
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// 1.5 回归闸门（由tests/tail_recursion_matrix.rs 系统性检测后修复的三处缺陷）
+//
+// ① match 分支体里的尾调用：分析器判为尾位置，但改写器原先不处理 Match，
+//    函数被裹进循环而分支值被丢弃 ⇒ E0308。
+// ② Unit 返回的函数：原先无条件声明 `let mut __tco_res`，后端把 `let x: () = ();`
+//    省略掉，循环内 `__tco_res = ...` ⇒ E0425。改为 Unit 走「裸表达式 + break」。
+// ③ 函数体含 defer：defer 是**逐次调用**的清理块，改写成循环后不但只执行一次，
+//    还会落在循环体不可达分支里（实测「递归 4 层打印 4次」变0 次）。
+//    改为在结构层直接判定不可转换。
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn match_arm_tail_call_is_rewritten_with_branch_values_kept() {
+    let src = r#"
+def step(n: int) -> int =
+    match n:
+        case 0 => 0
+        case 1 => 1
+        case _ => step(n - 1)
+
+def main() =
+    print(step(4))
+    print(step(9))
+"#;
+    let out = run_lz("match_arm", src, &[], None);
+    assert!(out.ok, "match 分支尾调用应能编译运行：\n{}", out.stderr);
+    // step(4) 递推到 n=1 → 1；step(9) 递推到 n=1 → 1
+    assert_eq!(out.stdout.trim(), "1\n1", "match 分支值必须保留");
+    let body = fn_body(&out.rs, "step");
+    assert!(
+        body.contains("loop {"),
+        "match 分支体里的尾调用应改写为循环：\n{}",
+        body
+    );
+    // 值分支须转成「赋结果变量 + break」，否则 match 作为语句被求值丢弃
+    assert!(
+        body.contains("break;"),
+        "值分支应产生 break：\n{}",
+        body
+    );
+    assert_no_self_call(body, "step");
+}
+
+#[test]
+fn unit_return_tail_call_emits_no_result_var() {
+    let src = r#"
+def tick(n: int) =
+    if n <= 0:
+        print("done")
+    else:
+        tick(n - 1)
+
+def main() =
+    tick(3)
+"#;
+    let out = run_lz("unit_ret", src, &[], None);
+    assert!(out.ok, "Unit 返回的尾递归应能编译运行：\n{}", out.stderr);
+    assert_eq!(out.stdout.trim(), "\"done\"");
+    let body = fn_body(&out.rs, "tick");
+    assert!(
+        !body.contains("__tco_res"),
+        "Unit 返回不应引入结果变量（后端会省略 `let x: () = ();`）：\n{}",
+        body
+    );
+    assert!(body.contains("loop {"), "应改写为循环：\n{}", body);
+}
+
+#[test]
+fn defer_in_tail_recursive_fn_is_not_transformed() {
+    let src = r#"
+def run(n: int) -> int =
+    defer:
+        print("bye")
+    if n <= 0:
+        0
+    else:
+        run(n - 1)
+
+def main() =
+    print(run(3))
+"#;
+    let on = run_lz("defer_on", src, &[], None);
+    let off = run_lz("defer_off", src, &["--no-tco"], None);
+    assert!(on.ok && off.ok, "含 defer 的函数应保持可编译：\n{}", on.stderr);
+    // defer 是逐次调用的清理块：4 层递归打印 4 次，改写不得改变这一语义
+    let expected = "\"bye\"\n\"bye\"\n\"bye\"\n\"bye\"\n0";
+    assert_eq!(
+        on.stdout.trim(),
+        expected,
+        "含 defer 的函数必须保持逐次调用语义"
+    );
+    assert_eq!(
+        on.stdout.trim(),
+        off.stdout.trim(),
+        "含 defer 的函数不应被改写（开关无关）"
+    );
+    let body = fn_body(&on.rs, "run");
+    assert!(
+        !body.contains("loop {"),
+        "含 defer 的函数不得改写为循环：\n{}",
+        body
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // 2. 开关
 // ═══════════════════════════════════════════════════════════════════
 

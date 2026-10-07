@@ -545,6 +545,62 @@ fn structural_blocker(inp: &TcoInput, s: &Scan) -> Option<String> {
             inp.ret_ty
         ));
     }
+    // defer：每次函数调用都会执行一次清理块；递归改写成循环后只会执行一次，
+    // 且原位置会落在循环体的不可达分支里（break/continue 都跳过它），
+    // 实测「递归 4 层打印 4次 bye」会变成「0 次」。语义不可保持 ⇒ 不改写。
+    if let Some(site) = find_defer(inp.body) {
+        return Some(format!(
+            "函数体含 defer 块（{}），逐次调用的清理语义无法用循环保持",
+            site
+        ));
+    }
+    None
+}
+
+/// 探测函数体（不含嵌套 λ / 生成器体）里是否有 defer 块，返回位置描述
+fn find_defer(body: &Block) -> Option<String> {
+    let mut stack: Vec<&Stmt> = body.stmts.iter().rev().collect();
+    while let Some(st) = stack.pop() {
+        match st {
+            Stmt::Defer { .. } => return Some("defer".into()),
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                stack.extend(then_branch.stmts.iter().rev());
+                if let Some(b) = else_branch {
+                    stack.extend(b.stmts.iter().rev());
+                }
+            }
+            Stmt::Block { stmts } | Stmt::BlockLabel { body: Block { stmts, .. }, .. } => {
+                stack.extend(stmts.iter().rev())
+            }
+            Stmt::Match { arms, .. } => {
+                for a in arms {
+                    stack.extend(a.body.stmts.iter().rev());
+                }
+            }
+            // 循环/异常体本身已是不可转换结构，无需再深入
+            Stmt::While { .. }
+            | Stmt::WhileLet { .. }
+            | Stmt::For { .. }
+            | Stmt::TryCatch { .. }
+            | Stmt::ExprStmt { .. }
+            | Stmt::Let { .. }
+            | Stmt::Assign { .. }
+            | Stmt::Return { .. }
+            | Stmt::Pass
+            | Stmt::Break
+            | Stmt::Continue
+            | Stmt::Yield { .. }
+            | Stmt::YieldFrom { .. }
+            | Stmt::Raise { .. }
+            | Stmt::Assert { .. }
+            | Stmt::TypeAlias { .. } => {}
+            _ => {}
+        }
+    }
     None
 }
 
@@ -583,6 +639,10 @@ pub(crate) fn verdict_reason(v: &TcoVerdict) -> String {
 
 struct Rewriter {
     fname: String,
+    /// 返回类型是 Unit：结果变量无意义（`let x: () = ();` 会被后端省略，
+    /// 导致循环内 `__tco_res = ...` 引用未定义变量）。此时改写为
+    /// 「裸表达式语句 + break」，函数尾部也不需要 return。
+    unit_ret: bool,
     res: String,
     params: Vec<Param>,
     /// 已在函数体出现过的名字（用于 `__tco_*` 去重）
@@ -650,6 +710,15 @@ impl Rewriter {
             let a = self.call_args(e);
             return self.assign_from_call(&a);
         }
+        if self.unit_ret {
+            // Unit 返回：值本身无意义，保留副作用后直接退出循环
+            return vec![
+                Stmt::ExprStmt {
+                    expr: e.clone(),
+                },
+                Stmt::Break,
+            ];
+        }
         let mut out = vec![Stmt::Assign {
             target: self.var(&self.res),
             value: e.clone(),
@@ -704,6 +773,39 @@ impl Rewriter {
                             span: b.span.clone(),
                         }),
                     });
+                }
+                // match 分支体逐条改写：分支值原本是 match 表达式的值，而
+                // 改写后 match 变成 loop 内的**语句**（值被丢弃），因此每个分支
+                // 必须自带「赋__tco_res + break」或「重赋 + continue」，
+                // 由 `block()` 递归处理各分支体尾表达式完成。
+                //
+                // 守卫不影响正确性：守卫在进入分支体之前求值，守卫不通过时落到
+                // 下一个分支，与改写后的控制流一致。
+                Stmt::Match {
+                    scrutinee,
+                    arms,
+                } if is_last => {
+                    let new_arms: Vec<MatchArm> = arms
+                        .iter()
+                        .map(|a| MatchArm {
+                            pattern: a.pattern.clone(),
+                            guard: a.guard.clone(),
+                            body: Block {
+                                stmts: self.block(&a.body.stmts),
+                                ty: IrType::Unit,
+                                span: a.body.span.clone(),
+                            },
+                        })
+                        .collect();
+                    out.push(Stmt::Match {
+                        scrutinee: scrutinee.clone(),
+                        arms: new_arms,
+                    });
+                }
+                Stmt::Block { stmts } if is_last => {
+                    // 块作为尾表达式：块内最后一条语句的值即函数返回值
+                    let inner = self.block(stmts);
+                    out.extend(inner);
                 }
                 other => out.push(other.clone()),
             }
@@ -812,9 +914,9 @@ fn rewrite_fn(f: &mut FnDef) -> bool {
     }
     let mut used = std::collections::HashSet::new();
     collect_used_names(&f.body, &f.params, &mut used);
-    let has_res = f.ret_ty != IrType::Unit;
     let mut rw = Rewriter {
         fname: f.name.clone(),
+        unit_ret: f.ret_ty == IrType::Unit,
         res: String::new(),
         params: f.params.clone(),
         used,
@@ -823,8 +925,11 @@ fn rewrite_fn(f: &mut FnDef) -> bool {
     let loop_body = rw.block(&f.body.stmts);
     let res_name = rw.res.clone();
 
+    let unit_ret = f.ret_ty == IrType::Unit;
     let mut out: Vec<Stmt> = Vec::new();
-    if has_res {
+    // 结果变量仅在**非 Unit** 返回时声明：Unit 函数的尾位置值无意义，
+    // 后端也会省略 `let x: () = ();`，若仍生成 `__tco_res = ...` 会E0425。
+    if !unit_ret {
         let dv = default_value(&f.ret_ty).expect("verdict 已保证存在默认初值");
         out.push(Stmt::Let {
             name: res_name.clone(),
@@ -845,13 +950,15 @@ fn rewrite_fn(f: &mut FnDef) -> bool {
         },
         else_body: None,
     });
-    out.push(Stmt::Return {
-        value: Some(Expr::new(
-            ExprKind::Var(res_name),
-            f.ret_ty.clone(),
-            Span::unknown(),
-        )),
-    });
+    if !unit_ret {
+        out.push(Stmt::Return {
+            value: Some(Expr::new(
+                ExprKind::Var(res_name),
+                f.ret_ty.clone(),
+                Span::unknown(),
+            )),
+        });
+    }
     // 形参需要可重赋（循环体内每次尾调用都重写全部形参）。
     // 带默认值的形参例外：Rust 侧形参是 `Option<T>`，真正的绑定是 codegen 发的
     // `let mut x = x.unwrap_or(..)` 影子（见 decl_gen::block_assigns_param），

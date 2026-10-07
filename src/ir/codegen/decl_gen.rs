@@ -914,16 +914,6 @@ impl CodeGen {
             (!f.generics.is_empty() && !is_typepack_concretized) || self.in_impl_generic;
         let saved_math_fn = self.in_math_fn;
         self.in_math_fn = is_math;
-        // 当前函数 where 子句含显式算术约束（Add/Mul/...）→ `+`/`*` 走 Rust 原生运算符，
-        // 不经 LzAdd（iter.lz `sum`/`product`：where I.Item: Add/Mul<Output=...>）。
-        let saved_bounded_binop = self.in_bounded_binop_fn;
-        self.in_bounded_binop_fn = f.where_clause.iter().any(|(_, bounds)| {
-            bounds.iter().any(|b| {
-                matches!(b, IrType::Named { path, .. }
-                    if matches!(path.as_str(),
-                        "Add" | "Mul" | "Sub" | "Div" | "Rem" | "Neg"))
-            })
-        });
         // Rust 不允许 async main，对于 async main 使用 block_on 包装
         let is_async_main = f.is_async && f.name == "main";
         // LZ 允许 def main() -> int：Rust main 只能返回 ()，需生成内部函数
@@ -1450,7 +1440,6 @@ impl CodeGen {
         self.in_generator = saved_generator;
         self.in_generic_fn = saved_generic_fn;
         self.in_math_fn = saved_math_fn;
-        self.in_bounded_binop_fn = saved_bounded_binop;
 
         // 生成器：追加 return __gen_vec
         if has_yield {
