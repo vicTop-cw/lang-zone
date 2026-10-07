@@ -1116,7 +1116,7 @@ impl CodeGen {
                     && !ret_is_unit
                     && !is_known_unit_call;
                 if is_known_unit_call {}
-                if is_last && !self.is_main && !self.suppress_tail_return {
+                if is_last && !self.is_main && !self.suppress_tail_return && !self.in_generator {
                     // 非 main 函数尾表达式 → return expr;
                     // 返回引用（`-> &T` / `-> &mut T`）时尾表达式 self.字段：
                     // 生成 &self.field / &mut self.field，而非 borrow_self 误加的
@@ -1745,7 +1745,18 @@ impl CodeGen {
             Stmt::BlockLabel { label, body } => {
                 // plain 块：压缩为无参闭包（定义即执行，闭包语义）
                 // block scan: ... break scan → (|| { ... return; })()
-                self.emit_line(&format!("(|| {{ // block '{}", label));
+                //
+                // **尾位置例外**：命名块恰好是函数尾表达式时，块值就是返回值。
+                // 原先一律发 `(|| { .. })();` 会把值丢掉 ⇒ E0308
+                // （`pub fn f(..) -> i64 { (|| { .. })(); }`）。
+                // 此时先把闭包结果绑到临时量再 return；块内 `break label`
+                // 仍编译成 `return;`（退出闭包）⇒ 该路径块值为 ()，语义一致。
+                let tail_pos = is_last && !self.suppress_tail_return && !self.is_main;
+                if tail_pos {
+                    self.emit_line(&format!("let __blk_val = (|| {{ // block '{} tail", label));
+                } else {
+                    self.emit_line(&format!("(|| {{ // block '{}", label));
+                }
                 self.indent += 1;
                 self.plain_block_depth += 1;
                 let saved = self.suppress_tail_return;
@@ -1755,6 +1766,9 @@ impl CodeGen {
                 self.plain_block_depth -= 1;
                 self.indent -= 1;
                 self.emit_line("})();");
+                if tail_pos {
+                    self.emit_line("return __blk_val;");
+                }
             }
             Stmt::CheckerBlock { .. } => {
                 // checker 块已提升为模块级 Item::CheckerBlock（惰性登记）

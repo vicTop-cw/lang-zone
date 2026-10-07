@@ -561,6 +561,15 @@ pub(crate) fn ex_check_fn(f: &ast::Function, base: &TypeCtx, w: &ExWalker) {
         w,
     );
     // 函数体最后一个表达式语句的返回类型检查（return_type_mismatch2）
+    //
+    // 生成器（iterator）**排除**：它声明的返回类型是「yield 出的元素类型」（`-> int`），
+    // 而函数体尾表达式是 `yield` / `yield from`，推断类型是迭代器对象本身
+    // （`Itor<Vec<int>>`）。二者语义本就不同类，拿尾表达式比声明类型会误报
+    // 「返回类型不匹配：期望 int，实际 Itor<Vec<int>>」，导致**递归生成器无法编译**
+    // （`yield from self(...)` 是生成器递归的唯一表达方式）。
+    if f.is_iterator {
+        return;
+    }
     if let (Some(rty), Some(AstStmt::Expr(last))) = (ret_ty.as_ref(), f.body.last()) {
         let ety = ex_infer(last, &work, &env);
         // try/catch 有 catch 分支时：try body 返回 Result<T,E>（raises），
