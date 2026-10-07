@@ -67,3 +67,11 @@
 - **关键经验**：判定「优化是否生效」必须解析编译器的 `[tco] 自动改写 N 个` 计数行（**走 stderr**，cli.rs 用 eprintln!），不能只看产物里的 `__tco_res`——Unit 返回函数改写后**不引入结果变量**，只看标记会误判成「未优化」。
 - **另一经验**：并行 agent 的在途改动会让主树编译不过（本次是 `src/ir/codegen/scan.rs`），此时用 `git worktree add --detach <path> HEAD` 建隔离环境验证自己的功能（本轮全部门禁数据均来自该隔离环境）；同时把早前误纳入提交的他人未完成代码剔除，使 HEAD 可独立编译。
 - 隔离环境验收：`cargo test -j 1` = **772 passed / 0 failed**（37 个二进制）；`demo_codegen_compile -- --include-ignored` = **2/0**。
+
+## 2026-10-07（矩阵暴露的既有缺陷处置：修 2 留 2）
+
+- **已修**（提交 `66315ed`，已推送）：①**递归生成器完全无法编译**（`yield from self(..)` 是生成器递归的唯一表达方式）——两处独立缺陷叠加：extended_check 拿「尾表达式类型」比「声明返回类型」（生成器声明的是 yield 元素类型，尾表达式类型是 `Itor<Vec<int>>`）⇒ IR build 拒绝；codegen 把生成器尾表达式包 `return ..;` ⇒ E0308。②**尾位置命名块丢值**（`block NAME:` 为尾表达式时块值即返回值，原先一律发 IIFE 丢弃）⇒ E0308。
+- **未修（设计级限制，已给经验证的绕过方式）**：try/catch panic 基载荷只能拿回 String（类型化需 `raises` + `?`）；raises 漏 `?` 的根因是返回类型不一致。曾尝试加精确 `compile_error!` 诊断，因误报 `spread_protocol.lz` 已回退。
+- **并发教训**：测试**不得依赖他人未提交改动** —— 带 raise 的递归生成器用例原断言「编译通过」，在纯本分支隔离 worktree 必失败，已降级为「转译成功」。
+- 验收：主树 775/0 + demo 闸门 2/0；**隔离 worktree（纯本分支）779 passed / 0 failed（39 个二进制）**。
+- 环境：`git push` 持续报 `Internal Server Error`（fetch 正常、任何分支都推不上），判定为远端侧故障；实质修复 `66315ed` 已在远端，仅测试范围调整与文档两个提交待推。
