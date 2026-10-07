@@ -393,6 +393,31 @@ pub enum Item {
 }
 
 /// 函数定义
+/// 尾递归优化判定（IR/tailrec-auto-plan.md）。
+///
+/// 由 builder 的 `analyze_tail_recursion()` 挂到 [`FnDef::tco`]，
+/// `build_ir_inner` 收口处 `rewrite_tco()` 消费：`TailOptimizable` ⇒ 就地改写为循环。
+/// 其余 verdict 一律**原样保留**（相互递归 / 非尾递归不转换、不报错）；
+/// 只有 `@tailrec` / `#[tail_call]` **标注**函数才据此静态报错。
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
+pub enum TcoVerdict {
+    /// 无直接自调用（非递归函数）
+    NoSelfCall,
+    /// 至少一处直接自调用，且全部处于尾位置、体结构可改写 → 可改写为循环
+    TailOptimizable,
+    /// 存在非尾位置的自调用（如 `f(x)+0`、let 绑定、循环体 / try 体内）
+    NotTailPosition {
+        /// 每处违规的描述（报错文案用）
+        sites: Vec<String>,
+    },
+    /// 尾位置合法，但体结构超出 v1 改写能力（raises / 生成器 / 引用形参等）
+    NotTransformable {
+        /// 不可转换的具体原因
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "infer", derive(serde::Serialize, serde::Deserialize))]
 pub struct FnDef {
@@ -417,6 +442,8 @@ pub struct FnDef {
     /// builder 合并不到方法泛型上，需原样输出到方法签名（codegen 用）
     pub where_clause: Vec<(String, Vec<IrType>)>,
     pub span: Span,
+    /// 尾递归优化判定（builder 填入；`rewrite_tco()` 消费后置 None 防二次改写）
+    pub tco: Option<TcoVerdict>,
 }
 
 /// 结构体定义

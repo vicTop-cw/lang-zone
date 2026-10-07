@@ -9,6 +9,152 @@ use super::types_emit::is_complex_ty;
 use super::types_emit::BIGINT_RS;
 use super::*;
 
+/// 体内是否对该形参名做赋值（`x = ..` / `x += ..`）。
+///
+/// 用途：默认形参在 Rust 侧是 `Option<T>` 形参 + `let x = x.unwrap_or(..)` 影子，
+/// TCO 改写后的重赋落在影子上，需要 `let mut x`（否则 E0384）。只为确有赋值的
+/// 形参加 mut，避免给普通函数引入 unused_mut 告警。显式栈遍历，防深体爆栈。
+pub(crate) fn block_assigns_param(body: &Block, pname: &str) -> bool {
+    fn expr_targets(e: &Expr, pname: &str) -> bool {
+        matches!(&e.kind, ExprKind::Var(n) if n == pname)
+    }
+    let mut stmts: Vec<&[Stmt]> = vec![&body.stmts];
+    let mut stack: Vec<&Expr> = Vec::new();
+    // 单一工作队列交替处理语句片与表达式：表达式里发现的 BlockExpr 块要能回到
+    // 语句阶段（分成两个先后循环会漏掉「表达式 → 块 → 语句」这条路径）。
+    loop {
+        if let Some(ss) = stmts.pop() {
+            for st in ss {
+            match st {
+                Stmt::Assign { target, .. } if expr_targets(target, pname) => return true,
+                Stmt::Let { value, .. } => stack.push(value),
+                Stmt::Assign { value, .. } => stack.push(value),
+                Stmt::Return { value: Some(v) } => stack.push(v),
+                Stmt::ExprStmt { expr } => stack.push(expr),
+                Stmt::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    stmts.push(&then_branch.stmts);
+                    if let Some(b) = else_branch {
+                        stmts.push(&b.stmts);
+                    }
+                }
+                Stmt::Block { stmts: inner } => stmts.push(inner),
+                Stmt::For {
+                    body, else_body, ..
+                } => {
+                    stmts.push(&body.stmts);
+                    if let Some(b) = else_body {
+                        stmts.push(&b.stmts);
+                    }
+                }
+                Stmt::While {
+                    body, else_body, ..
+                } => {
+                    stmts.push(&body.stmts);
+                    if let Some(b) = else_body {
+                        stmts.push(&b.stmts);
+                    }
+                }
+                Stmt::WhileLet { body, .. } => stmts.push(&body.stmts),
+                Stmt::BlockLabel { body, .. } => stmts.push(&body.stmts),
+                Stmt::Defer { body } => stmts.push(&body.stmts),
+                Stmt::CheckerBlock { body, .. } => stmts.push(&body.stmts),
+                Stmt::Match { arms, .. } => {
+                    for a in arms {
+                        stmts.push(&a.body.stmts);
+                    }
+                }
+                Stmt::TryCatch {
+                    body,
+                    catches,
+                    else_body,
+                    finally_body,
+                } => {
+                    stmts.push(&body.stmts);
+                    for (_, b) in catches {
+                        stmts.push(&b.stmts);
+                    }
+                    if let Some(b) = else_body {
+                        stmts.push(&b.stmts);
+                    }
+                    if let Some(b) = finally_body {
+                        stmts.push(&b.stmts);
+                    }
+                }
+                Stmt::Raise { value } => stack.push(value),
+                Stmt::Yield { value } => stack.push(value),
+                _ => {}
+            }
+            }
+            continue;
+        }
+        let Some(e) = stack.pop() else { break };
+        // walrus / 表达式赋值：`x += 1` 编译为 AssignExpr
+        if let ExprKind::AssignExpr { target, .. } = &e.kind {
+            if expr_targets(target, pname) {
+                return true;
+            }
+        }
+        if let ExprKind::BlockExpr { block } = &e.kind {
+            stmts.push(&block.stmts);
+        }
+        match &e.kind {
+            ExprKind::Call { callee, args, .. } => {
+                stack.push(callee);
+                stack.extend(args.iter());
+            }
+            ExprKind::MethodCall {
+                receiver, args, ..
+            } => {
+                stack.push(receiver);
+                stack.extend(args.iter());
+            }
+            ExprKind::BinOp { lhs, rhs, .. } => {
+                stack.push(lhs);
+                stack.push(rhs);
+            }
+            ExprKind::UnOp { operand, .. } => stack.push(operand),
+            ExprKind::IfExpr { cond, then, els } => {
+                stack.push(cond);
+                stack.push(then);
+                stack.push(els);
+            }
+            ExprKind::TupleLit(es)
+            | ExprKind::Tuple(es)
+            | ExprKind::ListLit(es)
+            | ExprKind::List(es) => stack.extend(es.iter()),
+            ExprKind::Cast { expr, .. }
+            | ExprKind::Spread(expr)
+            | ExprKind::Paren(expr)
+            | ExprKind::ImplicitConvert { source: expr, .. } => stack.push(expr),
+            ExprKind::Dict(pairs) => stack.extend(pairs.iter().flat_map(|(k, v)| vec![k, v])),
+            ExprKind::StructCtor { fields, .. } => stack.extend(fields.iter().map(|(_, e)| e)),
+            ExprKind::EnumCtor { args, .. } | ExprKind::MagicCall { args, .. } => {
+                stack.extend(args.iter())
+            }
+            ExprKind::FieldAccess { base, .. } => stack.push(base),
+            ExprKind::IndexGet { base, key } | ExprKind::IndexSet { base, key, .. } => {
+                stack.push(base);
+                stack.push(key);
+            }
+            ExprKind::Pipe {
+                receiver,
+                callee,
+                args,
+            } => {
+                stack.push(receiver);
+                stack.push(callee);
+                stack.extend(args.iter());
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 impl CodeGen {
     pub(crate) fn gen_item(&mut self, item: &Item) {
         match item {
@@ -768,6 +914,16 @@ impl CodeGen {
             (!f.generics.is_empty() && !is_typepack_concretized) || self.in_impl_generic;
         let saved_math_fn = self.in_math_fn;
         self.in_math_fn = is_math;
+        // 当前函数 where 子句含显式算术约束（Add/Mul/...）→ `+`/`*` 走 Rust 原生运算符，
+        // 不经 LzAdd（iter.lz `sum`/`product`：where I.Item: Add/Mul<Output=...>）。
+        let saved_bounded_binop = self.in_bounded_binop_fn;
+        self.in_bounded_binop_fn = f.where_clause.iter().any(|(_, bounds)| {
+            bounds.iter().any(|b| {
+                matches!(b, IrType::Named { path, .. }
+                    if matches!(path.as_str(),
+                        "Add" | "Mul" | "Sub" | "Div" | "Rem" | "Neg"))
+            })
+        });
         // Rust 不允许 async main，对于 async main 使用 block_on 包装
         let is_async_main = f.is_async && f.name == "main";
         // LZ 允许 def main() -> int：Rust main 只能返回 ()，需生成内部函数
@@ -1029,6 +1185,13 @@ impl CodeGen {
         }
 
         // checker 注入：有 default_checker 时打包参数→调checker→拆包
+        //
+        // 拆包影子 `let n = …` 会遮蔽同名形参；尾递归优化（TCO）改写后循环体内
+        // `n = ..` 重赋的正是这个影子绑定，故体内确有对该形参赋值时影子必须 `mut`，
+        // 否则 E0384（def_checker.lz 的 fib/fact：checker 局部 n 遮蔽 mut 形参 n，
+        // TCO 循环再赋值 → cannot assign twice to immutable variable `n`）。
+        // 与下方「默认参数 unwrap 影子」同一判据（block_assigns_param）。
+        let body_assigns = |pname: &str| block_assigns_param(&f.body, pname);
         if let Some(ref checker_name) = f.default_checker {
             let user_params: Vec<(String, String)> = f
                 .params
@@ -1064,12 +1227,27 @@ impl CodeGen {
                 self.emit_line(&format!("__ps = {}(__ps);", checker_name));
             }
             for (i, (pname, pty)) in user_params.iter().enumerate() {
-                let line = format!("let {0}: {1} = (*__ps.args[{2}usize].downcast_ref::<{1}>().expect(\"checker arg cast failed\"));", pname, pty, i);
+                // 形参本体名（f.params[i].name）用于 body_assigns 判定；pname 是
+                // 可能的重命名后名字。TCO/体内赋值命中时影子加 mut（见上方注释）。
+                let orig_name = f
+                    .params
+                    .iter()
+                    .filter(|p| p.name != "self")
+                    .nth(i)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| pname.clone());
+                let kw = if body_assigns(&orig_name) { "mut " } else { "" };
+                let line = format!("let {}{}: {} = (*__ps.args[{}usize].downcast_ref::<{}>().expect(\"checker arg cast failed\"));", kw, pname, pty, i, pty);
                 self.emit_line(&line);
             }
         }
 
         // 默认参数 unwrap: greet(name: str = "World") → let name = name.unwrap_or_else(|| "World".to_string());
+        //
+        // 尾递归优化（TCO）改写后，形参会在循环体内被重赋（`acc = ..`），此时 Rust侧
+        // 绑定是**这个 unwrap影子**而非 `Option<T>` 形参本身，故影子必须 `mut`，
+        // 否则 E0384。仅为「体内确有对该形参赋值」的形参加 mut，避免给普通函数
+        // 引入 unused_mut 告警。（body_assigns 闭包已在 checker 注入段之前定义。）
         for p in &f.params {
             if let Some(ref default_val) = p.default {
                 let pname = self
@@ -1078,9 +1256,10 @@ impl CodeGen {
                     .cloned()
                     .unwrap_or_else(|| p.name.clone());
                 let def_s = self.gen_expr(default_val);
+                let kw = if body_assigns(&p.name) { "mut " } else { "" };
                 self.emit_line(&format!(
-                    "let {} = {}.unwrap_or_else(|| {});",
-                    p.name, pname, def_s
+                    "let {}{} = {}.unwrap_or_else(|| {});",
+                    kw, p.name, pname, def_s
                 ));
             }
         }
@@ -1271,6 +1450,7 @@ impl CodeGen {
         self.in_generator = saved_generator;
         self.in_generic_fn = saved_generic_fn;
         self.in_math_fn = saved_math_fn;
+        self.in_bounded_binop_fn = saved_bounded_binop;
 
         // 生成器：追加 return __gen_vec
         if has_yield {

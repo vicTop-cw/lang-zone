@@ -439,6 +439,11 @@ fn compile_main(args: Vec<String>) -> i32 {
     let use_cache = args.iter().any(|a| a == "--cached");
     // --backend=cython：选择 Cython 后端（默认 Rust）
     let backend_cython = args.iter().any(|a| a == "--backend=cython");
+    // --no-tco：关闭尾递归自动改写（环境变量 LZ_TCO=0 等价）。
+    // 只影响**自动**优化；@tailrec / #[tail_call] 标注的静态校验始终生效。
+    if args.iter().any(|a| a == "--no-tco") {
+        lang_zone::ir::builder::set_tco_enabled(false);
+    }
     // `--test` 的执行面：Rust 面直调 `rustc --test`（run_test_mode），cy 面发射
     // `_lz_run_tests()` 运行器再用 pyximport 跑它（run_cy_test_mode）。
     // 历史形状（2026-10-02 之前）：cy 面把 `--test` 当作不存在——实测只打一行
@@ -1013,6 +1018,17 @@ fn build_ir_opt(
         Some(reg) => lang_zone::ir::builder::build_ir_with_lzi(module, reg.clone()),
         None => build_ir(module),
     }
+    .map(|m| {
+        report_tco_warnings();
+        m
+    })
+}
+
+/// 打印尾递归优化的非致命提示（如 `#[tail_call]` 弃用别名）
+fn report_tco_warnings() {
+    for w in lang_zone::ir::builder::take_tco_warnings() {
+        eprintln!("{}", w);
+    }
 }
 
 /// 非 infer 构建：无 .lzi 支持，直接走默认 build_ir（忽略 lzi 占位参数）
@@ -1028,7 +1044,10 @@ fn build_ir_opt(
             errs.join("\n"),
         ));
     }
-    build_ir(module)
+    build_ir(module).map(|m| {
+        report_tco_warnings();
+        m
+    })
 }
 
 /// 从 CLI 参数中提取标志值（如 --std-dir <path>）

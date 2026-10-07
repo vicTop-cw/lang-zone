@@ -1314,7 +1314,8 @@ mod tests {
             default_checker: None,
             where_clause: vec![],
             span: Span::unknown(),
-        }));
+        
+            tco: None,}));
         let reg = crate::bridge::core::BridgeRegistry::new();
         let mut cg = CodeGen::new();
         cg.set_bridge_registry(reg);
@@ -1366,7 +1367,8 @@ mod tests {
             default_checker: None,
             where_clause: vec![],
             span: Span::unknown(),
-        }));
+        
+            tco: None,}));
         let mut cg = CodeGen::new();
         let rust = cg.generate(&module);
         assert!(rust.contains("pub fn hello()"));
@@ -1435,7 +1437,8 @@ mod tests {
             default_checker: None,
             where_clause: vec![],
             span: Span::unknown(),
-        }));
+        
+            tco: None,}));
         let mut cg = CodeGen::new();
         let rust = cg.generate(&module);
         assert!(rust.contains("pub fn add(a: i64, b: i64) -> i64"));

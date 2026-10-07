@@ -856,6 +856,9 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 "overload" => IntrinsicKind::Overload,
                 "derive" => IntrinsicKind::Derive,
                 "tail_call" => IntrinsicKind::TailCall,
+                // @tailrec：尾递归保证性标注（Auto TCO，Scala 语义）；
+                // 与 tail_call 同义，校验逻辑已统一到 tco verdict
+                "tailrec" => IntrinsicKind::TailCall,
                 "math" => IntrinsicKind::Export(vec!["Math".into()]),
                 "extern" => {
                     // #[extern(Rust, Python)] 外部声明（L1 机制）
@@ -942,15 +945,35 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         })
         .collect();
 
-    // #[tail_call]：尾递归结构编译期验证（Rust 不保证 TCO，装饰器的价值在于
-    // 保证递归调用全部处于尾位置，使 LLVM -O2+ 有机会优化为循环）。
-    // 检查规则：函数体内任何对自身的调用都必须位于尾位置（块末尾语句的
-    // 末尾表达式链），否则报编译错误。
-    if func.decorators.iter().any(|d| d.name == "tail_call") {
-        if !tail_call_positions_ok(&body, &func.name) {
+    // ── 尾递归优化（Auto TCO + @tailrec 严格标注）────────────────────
+    // 无标注：仅判定并把 verdict 挂到 FnDef.tco，由 build_ir_inner 收口处
+    // rewrite_tco() 自动改写为循环（尾位置自调用 → 形参重赋 + while）。
+    // 有标注：verdict != TailOptimizable ⇒ 编译错误（Scala 式保证性契约）；
+    //         `tail_call` 为 `tailrec` 的弃用别名，语义一致 + info 提示。
+    let tco_verdict = analyze_tail_recursion(&TcoInput {
+        fname: &func.name,
+        params: &params,
+        ret_ty: &ret_ty,
+        raises: func.raises.is_some(),
+        is_iterator: func.is_iterator,
+        is_async: func.is_async || ast_body_has_async(&func.body),
+        intrinsics: &intrinsics,
+        body: &body,
+    });
+    let has_tailrec = func.decorators.iter().any(|d| d.name == "tailrec");
+    let has_tail_call = func.decorators.iter().any(|d| d.name == "tail_call");
+    if has_tailrec || has_tail_call {
+        if tco_verdict != TcoVerdict::TailOptimizable {
+            let label = if has_tailrec { "@tailrec" } else { "#[tail_call]" };
             ctx.report_error(format!(
-                "#[tail_call] 尾递归验证失败：函数 '{}' 的递归调用未处于尾位置 \
-                 （每个分支末尾必须直接调用自身，或返回不包含递归的基本值）",
+                "{} 标注函数 '{}' 不是可优化的尾递归：{}",
+                label,
+                func.name,
+                verdict_reason(&tco_verdict)
+            ));
+        } else if has_tail_call {
+            push_tco_warning(format!(
+                "提示：#[tail_call] 是弃用别名，请改用 @tailrec（函数 '{}'）",
                 func.name
             ));
         }
@@ -1163,6 +1186,8 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         default_checker: func.default_checker.clone(),
         where_clause: extra_where,
         span: Span::unknown(),
+        // 尾递归判定（rewrite_tco 消费；标注校验已在上面完成）
+        tco: Some(tco_verdict),
     }
 }
 

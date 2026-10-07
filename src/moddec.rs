@@ -320,6 +320,7 @@ fn build_registry() -> Vec<DecoratorSpec> {
         "parallel",
         "simd",
         "tail_call",
+        "tailrec",
         "overload",
         "math",
         "derive",
@@ -463,11 +464,11 @@ mod tests {
             .filter(|s| s.class == DecoratorClass::Normal)
             .count();
         let fusions = all.iter().filter(|s| s.fusion).count();
-        // 11 基础 + 17 融合 = 28 修饰符装饰器；15 普通（含 @cache）；共 43。
+        // 11 基础 + 17 融合 = 28 修饰符装饰器；16 普通（含 @cache / @tailrec）；共 44。
         assert_eq!(modifiers, 28, "修饰符装饰器应为 28 个");
-        assert_eq!(normals, 15, "普通装饰器应为 15 个");
+        assert_eq!(normals, 16, "普通装饰器应为 16 个");
         assert_eq!(fusions, 17, "融合型应为 17 个");
-        assert_eq!(all.len(), 43, "内置封闭集应为 43 个");
+        assert_eq!(all.len(), 44, "内置封闭集应为 43 个");
     }
 
     #[test]

@@ -209,6 +209,8 @@ fn cy_omega_gate_struct() {
             default_checker: None,
             where_clause: vec![],
             span: lang_zone::ir::node::Span::unknown(),
+        
+            tco: None,
         }],
         has_new: false,
         new_params: vec![],
@@ -272,7 +274,9 @@ fn cy_omega_gate_function() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -490,7 +494,9 @@ fn cy_omega_gate_function_generic() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -547,7 +553,9 @@ fn cy_omega_gate_function_variadic() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["Py_ssize_t first", "*args"], "function_variadic");
@@ -655,6 +663,8 @@ fn cy_omega_gate_impl() {
             default_checker: None,
             where_clause: vec![],
             span: lang_zone::ir::node::Span::unknown(),
+        
+            tco: None,
         }],
         assoc_type_bindings: vec![],
         where_clause: vec![],
@@ -775,7 +785,9 @@ fn cy_omega_gate_stmt_while_let() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -815,7 +827,9 @@ fn cy_omega_gate_stmt_yield_from() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["yield from other"], "stmt_yield_from");
@@ -845,7 +859,9 @@ fn cy_omega_gate_stmt_pass() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["pass"], "stmt_pass");
@@ -887,7 +903,9 @@ fn cy_omega_gate_stmt_defer() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     // Defer：块级 LIFO 内联（对齐 Rust 端 BUG-IR-002 方案 A）——defer 体在
@@ -957,7 +975,9 @@ fn cy_omega_gate_stmt_try_catch() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1017,7 +1037,9 @@ fn cy_omega_gate_expr_assign() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["x = 10"], "expr_assign");
@@ -1060,7 +1082,9 @@ fn cy_omega_gate_expr_cast() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     // Cast：内建标量 → Python 内建转换函数（int/float/str/bool）
@@ -1104,7 +1128,9 @@ fn cy_omega_gate_expr_magic_call() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["str(x)"], "expr_magic_call");
@@ -1155,7 +1181,9 @@ fn cy_omega_gate_expr_collections() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["(1, 2)"], "expr_tuple");
@@ -1207,7 +1235,9 @@ fn cy_omega_gate_expr_range() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["range(0, 10)"], "expr_range");
@@ -1259,7 +1289,9 @@ fn cy_omega_gate_expr_paren() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["(a + b)"], "expr_paren");
@@ -1300,7 +1332,9 @@ fn cy_omega_gate_overload() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
     // 第二个重载: process(x: int, y: int) -> int
     module.items.push(Item::FnDef(FnDef {
         name: "process".into(),
@@ -1344,7 +1378,9 @@ fn cy_omega_gate_overload() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1405,7 +1441,9 @@ fn cy_omega_gate_pattern_wildcard() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(&pyx, &["__scrut_0 = x", "if True:"], "pattern_wildcard");
@@ -1456,7 +1494,9 @@ fn cy_omega_gate_pattern_ident() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1513,7 +1553,9 @@ fn cy_omega_gate_pattern_lit() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1571,7 +1613,9 @@ fn cy_omega_gate_pattern_tuple() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1631,7 +1675,9 @@ fn cy_omega_gate_pattern_list() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1692,7 +1738,9 @@ fn cy_omega_gate_pattern_range() {
         default_checker: None,
         where_clause: vec![],
         span: lang_zone::ir::node::Span::unknown(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     assert_contains(
@@ -1736,6 +1784,8 @@ fn cy_return_annotation_policy() {
             default_checker: None,
             where_clause: vec![],
             span: lang_zone::ir::node::Span::unknown(),
+        
+            tco: None,
         }));
         m
     };
@@ -1894,7 +1944,9 @@ fn cy_block_expr_tail_runs_once() {
         default_checker: None,
         where_clause: vec![],
         span: sp(),
-    }));
+    
+            tco: None,
+        }));
 
     let pyx = gen(module);
     // 尾语句只跑一次：绑定它就是那次执行，不该再有第二条裸 print
@@ -1965,6 +2017,8 @@ fn cy_go_dispatch_is_async_gated() {
             default_checker: None,
             where_clause: vec![],
             span: sp(),
+        
+            tco: None,
         }));
         gen(module)
     };
@@ -2206,7 +2260,9 @@ fn cy_closure_write_capture_decls() {
         default_checker: None,
         where_clause: vec![],
         span: sp(),
-    }));
+    
+            tco: None,
+        }));
     let out = gen(module);
 
     assert_contains(&out, &["def __lambda_0(v):"], "写捕获的块体闭包要 hoist");

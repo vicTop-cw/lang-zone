@@ -37,6 +37,8 @@ pub(crate) use ops_map::*;
 pub(crate) use pattern::*;
 pub(crate) use specialize::*;
 pub(crate) use tail_call::*;
+// TCO 开关与提示通道需由二进制（main.rs / cli.rs）调用，不能只走 pub(crate) 重导出
+pub use tail_call::{set_tco_enabled, tco_enabled, take_tco_warnings};
 pub(crate) use util::*;
 
 use crate::ast::{
@@ -1309,6 +1311,12 @@ fn build_ir_inner(
             return Err(IrBuildError::Generic(cyc_errors.join("\n")));
         }
     }
+
+    // 15. 尾递归自动优化（TCO）：verdict == TailOptimizable 的 FnDef 就地改写为
+    // `while true` 循环（IR 层 desugar ⇒ Rust / Cython 两个后端同时受益，
+    // codegen 零改动）。开关：`--no-tco` / `LZ_TCO=0` 关闭**自动**改写，
+    // `@tailrec` / `#[tail_call]` 标注的静态校验不受开关影响（已在 convert_decl 完成）。
+    rewrite_tco(&mut ir_mod);
 
     Ok(ir_mod)
 }

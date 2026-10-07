@@ -300,6 +300,10 @@ fn compile_project_to_ir(
     }
     let ir =
         build_ir(&merged).map_err(|e| format!("IR build error in {}: {}", entry.display(), e))?;
+    // 尾递归优化的非致命提示（如 #[tail_call] 弃用别名）
+    for w in lang_zone::ir::builder::take_tco_warnings() {
+        eprintln!("{}", w);
+    }
     Ok((ir, module_count))
 }
 
@@ -779,6 +783,9 @@ fn parse_dir_and_flags(args: &[String], sub: &str) -> (String, bool) {
     for a in args.iter().skip(2) {
         if a == "--incremental" {
             incremental = true;
+        } else if a == "--no-tco" {
+            // 关闭尾递归自动改写（等价环境变量 LZ_TCO=0）
+            lang_zone::ir::builder::set_tco_enabled(false);
         } else if a == "--help" || a == "-h" {
             print_subcommand_help(sub);
             std::process::exit(0);
