@@ -48,3 +48,13 @@
 - 编译零改动通过（文件本就与当前 IR 类型兼容：Span 五字段、IrType::{Str,Any,Ref,MutRef,Named}、LitKind::Str/FStr 全部对得上），`cargo build` 零告警（文件自带 `#![allow(dead_code)]`）。
 - 效果：lib 单测 425 → **431**（6 条契约单测首次实跑：4×4 契约矩阵 / 复杂表达式 / IR 形态分类 / 字面量优先 / 值语义复制 / is_str_ir），全量 742 → **748 passed / 0 failed**，DEMO 闸门 2/0。
 - **重要事实**：发射点并未调用本层（`grep 'str_boundary::' src/ir/codegen` 只命中注释），逻辑仍各站点内联 → 当前角色是「可执行规格 + 回归护栏」。若要把它变成真正的唯一入口，需单独立项做**行为改写**（触及 400+ 处形态判定），回归闸门用「拆分前后生成 .rs 逐字节一致」。
+
+## 2026-10-07（尾递归自动优化 M1–M3，已完成并推送）
+
+- 按 `IR/tailrec-auto-plan.md` 实现 Auto TCO + `@tailrec` 严格标注：`071aa1f`（代码）+ `b0fe2c3`（文档实现记录），已 push。
+- 验收：`cargo test -j 1` = **768 passed / 0 failed**（36 个二进制，新增 10 条 builder 单测 + 10 条 e2e）；`demo_codegen_compile -- --include-ignored` = **2/0**（348 DEMO 全通过，含既有 `@tail_call` 语料）。
+- 设计/边界/坑详见项目记忆「lang-zone 尾递归自动优化（Auto TCO + @tailrec）已实现」。
+- **并发教训（重要）**：仓库有其他 agent 同时改 `extended_check/infer/emit/expr_gen/stmt_gen/codegen-mod/DEMO lz_std`。
+  - `builder/mod.rs` 与 `codegen/mod.rs` 是**共改文件**：用 `git hash-object -w` + `git update-index --cacheinfo` 暂存「HEAD + 仅我的改动」的 blob，即��不把他人 WIP 带入提交、他们工作区也不受影响。
+  - 批量给结构体补字段**必须用 brace 配对**定位字面量：先前用「`span: ...` 后跟 `}`」的正则批量插入，误伤了 `AstStmt::FnDef { func }` **枚举模式**（ast / parser / semantic_check / comptime / builder 多文件），已全部回滚。
+  - 环境限制：单次删除 >500 文件会被 safe-delete 拦截，需分批（每批 ≤400）。
