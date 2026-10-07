@@ -58,3 +58,12 @@
   - `builder/mod.rs` 与 `codegen/mod.rs` 是**共改文件**：用 `git hash-object -w` + `git update-index --cacheinfo` 暂存「HEAD + 仅我的改动」的 blob，即��不把他人 WIP 带入提交、他们工作区也不受影响。
   - 批量给结构体补字段**必须用 brace 配对**定位字面量：先前用「`span: ...` 后跟 `}`」的正则批量插入，误伤了 `AstStmt::FnDef { func }` **枚举模式**（ast / parser / semantic_check / comptime / builder 多文件），已全部回滚。
   - 环境限制：单次删除 >500 文件会被 safe-delete 拦截，需分批（每批 ≤400）。
+
+## 2026-10-07（递归形态检测矩阵 + 修复三处缺陷，已完成并推送）
+
+- 新增 `tests/tail_recursion_matrix.rs`：**40 例**系统性检测矩阵，每例同时断言「优化是否生效」+「语义是否保持」；判定口径「未优化不算失败」。覆盖直接/累加器/形参轮换/match 分支与守卫/短路/Unit·str·bool·Option 返回/深递归 10 万层/非尾六类/互递归三类/边界绕过十四类。结论：优化生效 22、未优化 18、问题 0。
+- **修三处真缺陷**（提交 `f610849`）：①改写器缺 `Stmt::Match` 分支 → match 尾调用被裹进循环、分支值丢弃 E0308；②Unit 返回仍声明 `let mut __tco_res`、后端省略 `let x: () = ();` → E0425，Unit 改走「裸表达式+break」；③含 `defer` 的函数被改写 → defer 只执行一次且落在循环不可达分支（4 次打印变 0 次），结构层加 `find_defer` ⇒ NotTransformable。三处均有回归用例。
+- 文档 `9bdb412` 补第九章（矩阵方法 / 形态结论 / 三缺陷 / 既有缺陷清单 / 验收）。
+- **关键经验**：判定「优化是否生效」必须解析编译器的 `[tco] 自动改写 N 个` 计数行（**走 stderr**，cli.rs 用 eprintln!），不能只看产物里的 `__tco_res`——Unit 返回函数改写后**不引入结果变量**，只看标记会误判成「未优化」。
+- **另一经验**：并行 agent 的在途改动会让主树编译不过（本次是 `src/ir/codegen/scan.rs`），此时用 `git worktree add --detach <path> HEAD` 建隔离环境验证自己的功能（本轮全部门禁数据均来自该隔离环境）；同时把早前误纳入提交的他人未完成代码剔除，使 HEAD 可独立编译。
+- 隔离环境验收：`cargo test -j 1` = **772 passed / 0 failed**（37 个二进制）；`demo_codegen_compile -- --include-ignored` = **2/0**。
