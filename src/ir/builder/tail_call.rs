@@ -214,6 +214,11 @@ fn collect_stmt_subtrees<'a>(ss: &'a [Stmt], stmts: &mut Vec<&'a [Stmt]>, es: &m
             Stmt::Match { arms, .. } => {
                 for a in arms {
                     stmts.push(&a.body.stmts);
+                    // 守卫表达式必须一并收集：守卫里的自调用同样参与求值，
+                    // 若漏掉，改写后它会留在循环体里形成无限递归
+                    if let Some(g) = &a.guard {
+                        es.push(g);
+                    }
                 }
             }
             Stmt::Raise { value } => es.push(value),
@@ -268,9 +273,13 @@ fn scan(body: &Block, fname: &str) -> Scan {
                         stack.push(Step::Stmt(s2, tail && i + 1 == n));
                     }
                 }
-                Stmt::BlockLabel { body, .. } => stack.push(Step::Block(body, tail)),
+                Stmt::BlockLabel { body, .. } => stack.push(Step::Block(body, false)),
                 Stmt::Match { arms, .. } => {
                     for a in arms {
+                        // 守卫在分支体之前求值：守卫里的自调用永远不是尾调用
+                        if let Some(g) = &a.guard {
+                            stack.push(Step::Expr(g, false));
+                        }
                         stack.push(Step::Block(&a.body, tail));
                     }
                 }
@@ -454,11 +463,14 @@ fn default_value(ty: &IrType) -> Option<Expr> {
         IrType::Complex => (LitKind::Complex(0.0, 0.0), ty.clone()),
         IrType::Bool => (LitKind::Bool(false), ty.clone()),
         IrType::Str => (LitKind::Str(String::new()), ty.clone()),
-        IrType::Option(_) | IrType::Result { .. } => (LitKind::None_, ty.clone()),
+        // 只有 Option 能用 `None` 当初值；**Result 没有 nil 值**，
+        // 若也走 None 会生成 `let __tco_res: Result<T, E> = None;` ⇒ E0308。
+        IrType::Result { .. } => return None,
+        IrType::Option(_) => (LitKind::None_, ty.clone()),
         IrType::Named { path, .. }
             if matches!(
                 path.as_str(),
-                "List" | "Vec" | "Dict" | "HashMap" | "Set" | "HashSet" | "String" | "Iter"
+                "List" | "Vec" | "Dict" | "HashMap" | "Set" | "HashSet" | "String"
             ) =>
         {
             if path == "String" {
@@ -545,24 +557,41 @@ fn structural_blocker(inp: &TcoInput, s: &Scan) -> Option<String> {
             inp.ret_ty
         ));
     }
-    // defer：每次函数调用都会执行一次清理块；递归改写成循环后只会执行一次，
-    // 且原位置会落在循环体的不可达分支里（break/continue 都跳过它），
-    // 实测「递归 4 层打印 4次 bye」会变成「0 次」。语义不可保持 ⇒ 不改写。
-    if let Some(site) = find_defer(inp.body) {
-        return Some(format!(
-            "函数体含 defer 块（{}），逐次调用的清理语义无法用循环保持",
-            site
-        ));
+    // 逐次调用语义 / 标签控制流：改写成循环后无法保持，一律不改写。
+    if let Some(what) = find_per_call_semantics(inp.body) {
+        return Some(match what {
+            Found::Defer => "函数体含 defer 块：逐次调用的清理语义无法用循环保持".to_string(),
+            Found::BlockLabel(label) => format!(
+                "函数体含命名块 `{label}`：块体在循环内被求值、且 `break/continue {label}` \
+                 的标签语义与循环冲突，改写不安全"
+            ),
+            Found::LabelBreak => "函数体含带标签的 break/continue：标签指向循环层，改写不安全"
+                .to_string(),
+        });
     }
     None
 }
 
-/// 探测函数体（不含嵌套 λ / 生成器体）里是否有 defer 块，返回位置描述
-fn find_defer(body: &Block) -> Option<String> {
+/// 函数体里影响「逐次调用语义」或「标签控制流」的结构
+#[derive(Debug)]
+enum Found {
+    Defer,
+    BlockLabel(String),
+    LabelBreak,
+}
+
+/// 探测函数体（不含嵌套 λ / 生成器体）里的 defer / 命名块 / 带标签跳转
+fn find_per_call_semantics(body: &Block) -> Option<Found> {
     let mut stack: Vec<&Stmt> = body.stmts.iter().rev().collect();
     while let Some(st) = stack.pop() {
         match st {
-            Stmt::Defer { .. } => return Some("defer".into()),
+            Stmt::Defer { .. } => return Some(Found::Defer),
+            Stmt::BlockLabel { label, .. } => {
+                return Some(Found::BlockLabel(label.clone()));
+            }
+            Stmt::BreakLabel { .. } => {
+                return Some(Found::LabelBreak)
+            }
             Stmt::If {
                 then_branch,
                 else_branch,
@@ -573,31 +602,12 @@ fn find_defer(body: &Block) -> Option<String> {
                     stack.extend(b.stmts.iter().rev());
                 }
             }
-            Stmt::Block { stmts } | Stmt::BlockLabel { body: Block { stmts, .. }, .. } => {
-                stack.extend(stmts.iter().rev())
-            }
+            Stmt::Block { stmts } => stack.extend(stmts.iter().rev()),
             Stmt::Match { arms, .. } => {
                 for a in arms {
                     stack.extend(a.body.stmts.iter().rev());
                 }
             }
-            // 循环/异常体本身已是不可转换结构，无需再深入
-            Stmt::While { .. }
-            | Stmt::WhileLet { .. }
-            | Stmt::For { .. }
-            | Stmt::TryCatch { .. }
-            | Stmt::ExprStmt { .. }
-            | Stmt::Let { .. }
-            | Stmt::Assign { .. }
-            | Stmt::Return { .. }
-            | Stmt::Pass
-            | Stmt::Break
-            | Stmt::Continue
-            | Stmt::Yield { .. }
-            | Stmt::YieldFrom { .. }
-            | Stmt::Raise { .. }
-            | Stmt::Assert { .. }
-            | Stmt::TypeAlias { .. } => {}
             _ => {}
         }
     }

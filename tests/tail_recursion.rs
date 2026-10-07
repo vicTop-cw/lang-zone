@@ -357,6 +357,87 @@ def main() =
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// 1.6 回归闸门（第二轮审计：语句形态覆盖交叉核对 + 表达式覆盖核对）
+//
+// ④ 命名块（`block NAME:`）体在尾位置：分析器按尾传播、改写器无对应分支，
+//    块体被留���循环内 → 改写后仍是递归调用 → 无限递归。
+//    另 `break/continue <label>` 的标签语义也与循环冲突。
+// ⑤ match **守卫**里的自调用：扫描器完全不遍历 `MatchArm.guard`（计数与改写都漏），
+//    若函数别处还有真尾调用，就会被判定为可优化，守卫里的递归留在循环内 → 无限递归。
+// ⑥ `Result` 返回类型：初值取了 `None`，而 Result 没有 nil 值
+//    → `let __tco_res: Result<T,E> = None;` ⇒ E0308。
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn labeled_block_tail_call_is_not_transformed() {
+    let src = r#"
+def walk(n: int) -> int =
+    if n <= 0:
+        return 0
+    block step:
+        walk(n - 1)
+
+def main() =
+    print(walk(3))
+"#;
+    let out = run_lz("blklabel", src, &[], None);
+    assert!(
+        !out.rs.contains("loop {") && !out.rs.contains("__tco_res"),
+        "含命名块的函数不得改写为循环（块内递归会变成死循环）：\n{}",
+        out.rs
+    );
+    assert!(
+        out.rs.contains("walk(n - 1"),
+        "原递归调用应保留：\n{}",
+        out.rs
+    );
+}
+
+#[test]
+fn match_guard_self_call_is_not_transformed() {
+    let src = r#"
+def f(n: int) -> int =
+    match n:
+        case 0 => 0
+        case _ if n > 0 && f(n - 1) > 100 => 1
+        case _ => f(n - 1)
+
+def main() =
+    print(f(3))
+"#;
+    let out = run_lz("match_guard", src, &[], None);
+    assert!(out.ok, "守卫用例应可编译运行：\n{}", out.stderr);
+    assert_eq!(out.stdout.trim(), "0");
+    assert!(
+        !out.rs.contains("loop {"),
+        "守卫里的自调用是检测盲区，含它的函数不得改写：\n{}",
+        out.rs
+    );
+}
+
+#[test]
+fn result_returning_tail_recursive_fn_is_not_transformed() {
+    let src = r#"
+def safe(n: int) -> Result<int, str> =
+    if n <= 0:
+        Ok(0)
+    else:
+        safe(n - 1)
+
+def main() =
+    let r = safe(3)
+    print(r)
+"#;
+    let out = run_lz("result_ret", src, &[], None);
+    assert!(out.ok, "Result 返回的用例应可编译运行：\n{}", out.stderr);
+    assert!(
+        !out.rs.contains("__tco_res"),
+        "Result 没有 nil 初值，不得构造结果变量：\n{}",
+        out.rs
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // 2. 开关
 // ═══════════════════════════════════════════════════════════════════
 
