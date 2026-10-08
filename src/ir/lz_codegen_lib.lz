@@ -1319,8 +1319,12 @@ def gen_body(ss: List<Stmt>, is_main: bool, auto_mut: String, fn_raises: MaybeIr
         let mut out: String = String::new()
         for idx in 0..n:
             let is_tail = (idx == n - 1)
-            let stmt_type = stmt_type_label(ss[idx].clone())
-            out = out + "    // STMT:".to_string() + stmt_type + "\n    ".to_string() + gen_stmt(ss[idx].clone(), is_tail, is_main, auto_mut, fn_raises) + "\n".to_string()
+            // 2026-10-08（方向 E）：与原生 codegen 对齐 —— 逐语句 `// STMT:*` 定位
+            // 注释默认**不再发射**（它让生成 .rs 行数近乎翻倍、抬升 rustc 段开销，
+            // 且全仓无断言依赖）。原生侧可用 `--stmt-marks` / `LZ_STMT_MARKS=1`
+            // 恢复；本镜像跟随默认形态，保证 `tests/lz_ir_bootstrap.rs` 的
+            // 「rs-lz 产物 == 常规 codegen 产物」逐字节等价断言成立。
+            out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), is_tail, is_main, auto_mut, fn_raises) + "\n".to_string()
         out
 
 // STMT 类型标签（对齐原生 codegen 的 // STMT:{Let|Expr|Try|Block|Defer|If|For|Other}）

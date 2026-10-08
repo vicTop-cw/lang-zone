@@ -102,7 +102,7 @@ def main() =
     let b = "LZ!"
     print(a + b)
 "#,
-        "\"Hello, LZ!\"\n",
+        "Hello, LZ!\n",
     );
 }
 
@@ -250,7 +250,7 @@ def main() =
     catch e2:
         print("caught:" + e2)
 "#,
-        "42\n\"caught:negative\"\n",
+        "42\ncaught:negative\n",
     );
 }
 
@@ -277,7 +277,7 @@ def main() =
     catch e2:
         print("caught:" + e2)
 "#,
-        "84\n\"caught:negative\"\n",
+        "84\ncaught:negative\n",
     );
 }
 
@@ -312,7 +312,7 @@ def main() =
     print(classify(3))
     print(classify(10))
 "#,
-        "\"small\"\n\"big\"\n",
+        "small\nbig\n",
     );
 }
 
@@ -369,7 +369,7 @@ def main() =
     for PointEx(x, y) in pts2 if x > 1:
         print("for-guard:", x + y)
 "#,
-        "\"let:\" 1 2\n\"for:\" 1 2\n\"for:\" 3 4\n\"for:\" 5 6\n\"for-guard:\" 7\n\"for-guard:\" 11\n",
+        "let: 1 2\nfor: 1 2\nfor: 3 4\nfor: 5 6\nfor-guard: 7\nfor-guard: 11\n",
     );
 }
 #[test]
@@ -391,6 +391,6 @@ def main() =
     catch e:
         print("caught:" + e)
 "#,
-        "42\n\"caught:negative\"\n",
+        "42\ncaught:negative\n",
     );
 }

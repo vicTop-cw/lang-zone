@@ -22,7 +22,6 @@ use std::fmt::Display;
 use lz_builtins::*;
 
 pub fn main() {
-    // STMT:Expr
     println!("{:?}", 1000i64);
 }
 

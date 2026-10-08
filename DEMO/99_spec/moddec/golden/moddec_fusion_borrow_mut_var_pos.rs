@@ -22,11 +22,8 @@ use std::fmt::Display;
 use lz_builtins::*;
 
 pub fn main() {
-    // STMT:Let
     let mut x: i64 = 42i64;
-    // STMT:Let
     let r = &mut x;
-    // STMT:Expr
     println!("{:?}", r);
 }
 

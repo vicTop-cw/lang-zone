@@ -348,17 +348,34 @@ fn source_hashes(entry: &Path) -> Vec<(String, String)> {
 }
 
 /// rustc 编译产物（--extern lz_builtins=<rlib>）
+///
+/// 方向 D：冷启动里最贵的一段就是 rustc。这里做两件事：
+///   1. **分段计时**：把 rustc 段耗时打到 stderr（`[build] rustc: N ms`），
+///      与 lzc 段（前端 + IR + codegen）分开可测 —— 建议书的验收判据
+///      「rustc 段下降 >=50%」需要这个计数才能验证；
+///   2. **增量对象复用**：加 `-C incremental=<dir>`（与 `hotreload.rs` 的
+///      watch 路径同款）。rustc 会把中间产物与查询缓存落盘，重复构建同一工程时
+///      只重编变更的 crate 部分，二次构建的 rustc 段显著缩短。
+///      `LZ_RUSTC_INCREMENTAL=0` 可关闭（需要完全可复现的 rustc 调用时）。
 fn rustc_compile(rs: &Path, exe: &Path) -> Result<(), String> {
+    let started = std::time::Instant::now();
     let builtins = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
-    let out = Command::new("rustc")
-        .args(["--edition", "2021"])
+    let mut cmd = Command::new("rustc");
+    cmd.args(["--edition", "2021"])
         .arg(rs)
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins.display()))
         .arg("-o")
-        .arg(exe)
-        .output()
-        .map_err(|e| format!("Failed to run rustc: {}", e))?;
+        .arg(exe);
+    if rustc_incremental_enabled() {
+        let inc_dir = exe.with_extension("rustc-incremental");
+        cmd.arg("-C").arg(format!("incremental={}", inc_dir.display()));
+    }
+    let out = cmd.output().map_err(|e| format!("Failed to run rustc: {}", e))?;
+    let ms = started.elapsed().as_secs_f64() * 1000.0;
+    if rustc_timing_enabled() {
+        eprintln!("[build] rustc: {:.0} ms", ms);
+    }
     if out.status.success() {
         Ok(())
     } else {
@@ -366,11 +383,45 @@ fn rustc_compile(rs: &Path, exe: &Path) -> Result<(), String> {
     }
 }
 
+/// rustc 分段计时开关（`--stats` 或 `LZ_TIME=1`）。默认静默，避免污染既有输出。
+static RUSTC_TIMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn rustc_timing_enabled() -> bool {
+    if RUSTC_TIMING.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    match std::env::var("LZ_TIME") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            v == "1" || v == "true" || v == "on"
+        }
+        Err(_) => false,
+    }
+}
+
+/// rustc `-C incremental` 开关（`LZ_RUSTC_INCREMENTAL=0` 关闭）。
+fn rustc_incremental_enabled() -> bool {
+    match std::env::var("LZ_RUSTC_INCREMENTAL") {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !(v == "0" || v == "false" || v == "off" || v == "no")
+        }
+        Err(_) => true,
+    }
+}
+
 // ────────────────────────────── build ──────────────────────────────
 
 /// build [dir] [--incremental]：.lz → .rs → exe
 pub fn cmd_build(args: &[String]) -> i32 {
-    let (dir_arg, incremental) = parse_dir_and_flags(args, "build");
+    // `--stats` / `LZ_TIME=1` 打开分段计时（rustc 段由 rustc_compile 打印）
+    if args.iter().any(|a| a == "--stats") {
+        RUSTC_TIMING.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let (dir_arg, incremental_flag) = parse_dir_and_flags(args, "build");
+    // 方向C：增量**默认开启**（未变更工程的二次构建只补最少的活）。
+    // 需要每次全量重编时显式 `--no-incremental`。
+    let incremental = incremental_flag && !args.iter().any(|a| a == "--no-incremental");
     let dir = Path::new(&dir_arg);
 
     let paths = match ProjectPaths::resolve(dir) {
@@ -387,13 +438,60 @@ pub fn cmd_build(args: &[String]) -> i32 {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
 
-    // 增量模式：哈希一致 + .rs 存在 → 跳过重编
+    // ── 增量路径（方向C：默认开启）────────────────────────────────────
+    // 命中判定 = 源与全部依赖哈希一致（cache::is_fresh）+ 缓存里有产物。
+    //命中后**分两段各自判断**：
+    //   前端+codegen 段（lzc段）：直接复用缓存 .rs，跳过；
+    //   rustc 段：exe 缺失或比 .rs 旧时才跑（`-C incremental` 复用对象缓存）。
+    // 修复前的行为：命中即 return 0，连 exe 都不检查 —— 删掉 exe 后
+    // `build --incremental` 会「成功」但没有产物。
+    let build_started = std::time::Instant::now();
     if incremental {
         let cache_dir = paths.build_dir.join(".lzcache");
         if let Ok(Some(entry)) = CacheEntry::load(&cache_dir, &paths.entry) {
-            if entry.is_fresh(&paths.entry, &cache_dir) && paths.rs_out.exists() {
-                println!("Incremental hit (unchanged): {}", paths.entry.display());
-                return 0;
+            if entry.is_fresh(&paths.entry, &cache_dir) && !entry.output.is_empty() {
+                let cached_rs = cache_dir.join(&entry.output);
+                if cached_rs.exists() {
+                    let need_rs = !paths.rs_out.exists()
+                        || fs::metadata(&paths.rs_out).and_then(|m| m.modified()).ok()
+                            != fs::metadata(&cached_rs).and_then(|m| m.modified()).ok();
+                    if need_rs {
+                        if let Some(dir) = paths.rs_out.parent() {
+                            let _ = fs::create_dir_all(dir);
+                        }
+                        if fs::copy(&cached_rs, &paths.rs_out).is_err() {
+                            // 复用失败 → 退回全量
+                        } else {
+                            println!("Incremental hit: lzc stage skipped ({})", entry.output);
+                        }
+                    } else {
+                        println!("Incremental hit: lzc stage skipped ({})", entry.output);
+                    }
+                    // rustc 段：exe 比 .rs 旧或缺失才重跑
+                    let exe_fresh = paths.exe_out.exists()
+                        && match (
+                            fs::metadata(&paths.exe_out).and_then(|m| m.modified()),
+                            fs::metadata(&paths.rs_out).and_then(|m| m.modified()),
+                        ) {
+                            (Ok(a), Ok(b)) => a >= b,
+                            _ => false,
+                        };
+                    if exe_fresh {
+                        if rustc_timing_enabled() {
+                            eprintln!(
+                                "[build] rustc: skipped (exe up to date), total {:.0} ms",
+                                build_started.elapsed().as_secs_f64() * 1000.0
+                            );
+                        }
+                        return 0;
+                    }
+                    // .rs 已是最新产物，只补 rustc 段
+                    if let Err(e) = rustc_compile(&paths.rs_out, &paths.exe_out) {
+                        eprintln!("rustc error:\n{}", e);
+                        return 1;
+                    }
+                    return 0;
+                }
             }
         }
     }
@@ -547,6 +645,25 @@ pub fn cmd_check(args: &[String]) -> i32 {
         return 1;
     }
 
+    // `--rustc`：再加一段 rustc 类型检查（--emit=metadata，不链接）。
+    // 需先生成 .rs —— 这一段也顺带让 codegen 参与，覆盖「产物能不能过 rustc」。
+    if args.iter().any(|a| a == "--rustc") {
+        let mut cg = IrCodeGen::new();
+        let (rust_code, _) = cg.generate_with_bridge(&ir);
+        if let Err(e) = fs::create_dir_all(&paths.build_dir) {
+            eprintln!("Error: cannot create {}: {}", paths.build_dir.display(), e);
+            return 1;
+        }
+        if let Err(e) = fs::write(&paths.rs_out, &rust_code) {
+            eprintln!("Error: cannot write {}: {}", paths.rs_out.display(), e);
+            return 1;
+        }
+        if let Err(e) = rustc_metadata_check(&paths.rs_out) {
+            eprintln!("rustc error:\n{}", e);
+            return 1;
+        }
+    }
+
     // 写 .lzcheck（内容 = 全部源哈希摘要 + 计数）
     let item_count = ir.items.len();
     let summary = format!(
@@ -560,6 +677,37 @@ pub fn cmd_check(args: &[String]) -> i32 {
 
     println!("check ok: {} modules, {} items", module_count, item_count);
     0
+}
+
+/// `rustc --emit=metadata` 快路径（方向 D）：只做类型检查，不做 codegen、不链接。
+///
+/// 与 `check` 的分工：
+///   - `check`         = LZ 侧检查（parse + IR + duck 结构匹配），**不碰 rustc**；
+///   - `check --rustc` = 再加一段 rustc 类型检查（`--emit=metadata`），无需链接，
+///     实测比完整 build 的 rustc 段快一个量级，适合 CI 的「提交前必过」位。
+///
+/// 退出码与错误输出口径与 build 一致（stderr 原样透传）。
+fn rustc_metadata_check(rs: &Path) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    let builtins = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let out = Command::new("rustc")
+        .args(["--edition", "2021", "--emit=metadata", "--crate-type", "lib"])
+        .arg(rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .output()
+        .map_err(|e| format!("Failed to run rustc: {}", e))?;
+    if rustc_timing_enabled() {
+        eprintln!(
+            "[check] rustc --emit=metadata: {:.0} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
+    }
 }
 
 // ────────────────────────────── peek ──────────────────────────────

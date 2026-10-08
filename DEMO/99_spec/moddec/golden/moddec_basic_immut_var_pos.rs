@@ -22,9 +22,7 @@ use std::fmt::Display;
 use lz_builtins::*;
 
 pub fn main() {
-    // STMT:Let
     let pi: f64 = 3.14159f64;
-    // STMT:Expr
     println!("{:?}", pi);
 }
 

@@ -375,6 +375,10 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
 // overflowed its stack）。将整个编译流水线移入 512MB 大栈线程，解除该限制。
 fn main() {
     let args: Vec<String> = env::args().collect();
+    // 方向 D：冷启动分段计时。lzc 段= 前端+IR+codegen（本进程），rustc 段由
+    // 调用方（cli::rustc_compile / run_test_mode）各自打印，两段可分别归因。
+    let stats = args.iter().any(|a| a == "--stats");
+    let started = std::time::Instant::now();
     let code = std::thread::Builder::new()
         .name("lang-zone-compile".to_string())
         .stack_size(512 * 1024 * 1024)
@@ -382,6 +386,12 @@ fn main() {
         .expect("failed to spawn compile thread")
         .join()
         .unwrap_or(1);
+    if stats {
+        eprintln!(
+            "[stats] lzc total: {:.1} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
     std::process::exit(code);
 }
 
@@ -443,6 +453,33 @@ fn compile_main(args: Vec<String>) -> i32 {
     // 只影响**自动**优化；@tailrec / #[tail_call] 标注的静态校验始终生效。
     if args.iter().any(|a| a == "--no-tco") {
         lang_zone::ir::builder::set_tco_enabled(false);
+    }
+    // --stmt-marks：恢复逐语句 `// STMT:*` 定位注释（方向 E：默认关闭，
+    // 因为注释使生成 .rs 行数近乎翻倍、抬升 rustc 段开销且无运行时价值）。
+    // 等价环境变量：LZ_STMT_MARKS=1。
+    if args.iter().any(|a| a == "--stmt-marks") {
+        lang_zone::ir::codegen::set_stmt_marks(true);
+    }
+    // --opt=N | --opt N：IR 优化 pass 层级（方向 A，0=关闭/1=常量折叠+分支简化/
+    // 2=+死绑定消除）。默认 0 —— 保证与优化前逐字节一致，便于用既有 golden 回归。
+    // 两种写法都收（`--emit=ir` 家族用 `=`，`--std-dir` 家族用空格）。
+    let opt_arg = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--opt=").map(|v| v.to_string()))
+        .or_else(|| {
+            args.iter()
+                .position(|a| a == "--opt")
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        });
+    if let Some(v) = opt_arg {
+        match v.trim().parse::<u8>() {
+            Ok(level) => lang_zone::ir::opt::set_opt_level(level),
+            Err(_) => {
+                eprintln!("error: --opt 需要 0/1/2 整数，收到 {:?}", v);
+                std::process::exit(2);
+            }
+        }
     }
     // `--test` 的执行面：Rust 面直调 `rustc --test`（run_test_mode），cy 面发射
     // `_lz_run_tests()` 运行器再用 pyximport 跑它（run_cy_test_mode）。

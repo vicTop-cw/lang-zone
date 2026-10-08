@@ -11,10 +11,12 @@ mod helpers;
 pub mod moddec_emit;
 
 // 大文件拆分（move-only，2026-10-06）：原单文件按职责切分为子模块，逻辑零改动
+mod cap_hint;
 mod decl_gen;
 mod emit;
 mod expr_gen;
 mod magic_gen;
+mod marks;
 mod pattern_gen;
 mod scan;
 mod stmt_gen;
@@ -33,6 +35,9 @@ use helpers::*;
 
 // builder.rs 直接依赖 collect_var_refs（AST→IR 的全局变量收集），重导出保持路径稳定
 pub(crate) use helpers::collect_var_refs;
+
+// 方向 E 的产物形态开关（CLI `--stmt-marks` 入口）
+pub use marks::set_stmt_marks;
 
 
 use super::node::*;
@@ -338,6 +343,10 @@ pub struct CodeGen {
     pub bridge_registry: Option<crate::bridge::core::BridgeRegistry>,
     /// embed 生成的模块名集合（如 `foo_tnr`），供 gen_use_stmt 自动路由。
     embed_modules: std::collections::HashSet<String>,
+    /// 方向 E：`[]` 字面量 + 紧随其后的纯 push 循环 → 预分配容量（Rust 表达式文本）。
+    /// 由 gen_block_inner 的相邻语句前瞻写入，空列表字面量发射处 `take` 一次。
+    /// gen_expr 走 `&self`（内部 RefCell 承担可变状态），故用 RefCell 而非裸字段。
+    vec_cap_hint: std::cell::RefCell<Option<String>>,
     buf: String,
 }
 impl CodeGen {
@@ -463,6 +472,8 @@ impl CodeGen {
             unknown_extern_fns: std::collections::HashMap::new(),
             bridge_registry: None,
             embed_modules: std::collections::HashSet::new(),
+            // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
+            vec_cap_hint: std::cell::RefCell::new(None),
             buf: String::new(),
         }
     }

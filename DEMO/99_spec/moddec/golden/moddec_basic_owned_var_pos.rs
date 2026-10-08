@@ -22,9 +22,7 @@ use std::fmt::Display;
 use lz_builtins::*;
 
 pub fn __lz_main() -> i64 {
-    // STMT:Let
     let fd: i64 = 7i64;
-    // STMT:Expr
     return fd;
 }
 pub fn main() {

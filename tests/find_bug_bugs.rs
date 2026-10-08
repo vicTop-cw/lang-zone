@@ -319,9 +319,13 @@ fn pr001_top_level_build() {
 fn pr002_raises_with_return() {
     // BUG-CG-004（收口）：raises 函数返回 Rust Result<T, E>（E 为标准错误名 → LzError），
     // 调用点打印经 Debug 显示为 Ok("...")。两种声明顺序（-> 在前 / raises 在前）都应接受。
+    //
+    // 2026-10-08（方向 Eprint 占位符）：f-string 实参原先被整体套一层 `{:?}`，
+    // 输出成 `"...整行..."`（带引号+ 转义）；现在 f-string 走 Display（`{}`），
+    // 行内各值仍按各自类型格式化。期望值随之去掉最外层引号。
     full(
         "FIND_BUG/parser/bug-raises-return-type.lz",
-        "\"raises+return test:\" Ok(\"config_v1\") Ok(\"config_v2\")",
+        "raises+return test: Ok(\"config_v1\") Ok(\"config_v2\")",
     )
     .unwrap();
 }
@@ -447,10 +451,10 @@ fn sb003_starts_with() {
 // BUG-SG-002: 已修（2026-09-03）——T? 位置自动 Some 包装（let 绑定 + struct 构造）
 #[test]
 fn sg002_null_coalesce() {
-    // print 多参逐项带 Debug 引号：实际输出 `"None ?? 42:" 42`
+    // f-string 走 Display（方向 E，2026-10-08）：实际输出 `None ?? 42: 42`
     full(
         "FIND_BUG/syntax/bug-syntax-null-coalesce.lz",
-        "\"None ?? 42:\" 42",
+        "None ?? 42: 42",
     )
     .unwrap();
 }
@@ -458,10 +462,10 @@ fn sg002_null_coalesce() {
 // BUG-SG-003: 已修（2026-09-03）——?. 链可空字段走 and_then 扁平化（非 map）
 #[test]
 fn sg003_safe_nav() {
-    // 实际输出 `"safe nav host:" "localhost"`
+    // f-string 走 Display（方向 E，2026-10-08）：实际输出 `safe nav host: "localhost"`
     full(
         "FIND_BUG/syntax/bug-syntax-safe-nav.lz",
-        "\"safe nav host:\" \"localhost\"",
+        "safe nav host: \"localhost\"",
     )
     .unwrap();
 }

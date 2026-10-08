@@ -1318,6 +1318,10 @@ fn build_ir_inner(
     // `@tailrec` / `#[tail_call]` 标注的静态校验不受开关影响（已在 convert_decl 完成）。
     rewrite_tco(&mut ir_mod);
 
+    // 16. LZIR 优化 pass 层（建议书方向A）：常量折叠 / 分支简化 / 死绑定消除。
+    // 挂在 TCO 之后 —— TCO 就地把尾递归改写成 `while true` + 临时槽，折叠与分支
+    // 简化放在其前会与循环形态互相干扰。默认 `--opt=0` 全部关闭（产物逐字节不变）。
+    crate::ir::opt::optimize_ir(&mut ir_mod);
+
     Ok(ir_mod)
 }
-// force rebuild

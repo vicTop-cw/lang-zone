@@ -309,7 +309,7 @@ def main() =
 "#;
     let out = run_lz("unit_ret", src, &[], None);
     assert!(out.ok, "Unit 返回的尾递归应能编译运行：\n{}", out.stderr);
-    assert_eq!(out.stdout.trim(), "\"done\"");
+    assert_eq!(out.stdout.trim(), "done");
     let body = fn_body(&out.rs, "tick");
     assert!(
         !body.contains("__tco_res"),
@@ -337,7 +337,7 @@ def main() =
     let off = run_lz("defer_off", src, &["--no-tco"], None);
     assert!(on.ok && off.ok, "含 defer 的函数应保持可编译：\n{}", on.stderr);
     // defer 是逐次调用的清理块：4 层递归打印 4 次，改写不得改变这一语义
-    let expected = "\"bye\"\n\"bye\"\n\"bye\"\n\"bye\"\n0";
+    let expected = "bye\nbye\nbye\nbye\n0";
     assert_eq!(
         on.stdout.trim(),
         expected,

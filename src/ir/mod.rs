@@ -14,6 +14,7 @@ pub mod duck_check;
 pub mod embed_collector;
 pub mod lz_codegen;
 pub mod node;
+pub mod opt;
 pub mod types;
 
 pub use builder::build_ir;

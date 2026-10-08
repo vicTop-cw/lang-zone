@@ -433,7 +433,7 @@ def main() =
             tco: Tco::Optimized,
             run: Run::Ok,
             why: "Unit 返回：改写为「裸表达式 + break」，不引入结果变量",
-            out: "\"done\"",
+            out: "done",
         },
         Case {
             group: "A直接尾递归",
@@ -451,7 +451,7 @@ def main() =
             tco: Tco::Optimized,
             run: Run::Ok,
             why: "返回 str：结果变量需 String 初值（print 用 {:?} 故带引号）",
-            out: "\"end\"",
+            out: "end",
         },
         Case {
             group: "A直接尾递归",
@@ -491,7 +491,7 @@ def main() =
             tco: Tco::Untouched,
             run: Run::Ok,
             why: "自调用结果参与加法 ⇒ 非尾位置（与副作用无关）",
-            out: "\"t\"\n\"t\"\n2",
+            out: "t\nt\n2",
         },
         Case {
             group: "A直接尾递归",
@@ -857,7 +857,7 @@ def main() =
             tco: Tco::Untouched,
             run: Run::Ok,
             why: "函数体含 defer：逐次调用的清理语义无法用循环保持 ⇒ 不改写",
-            out: "\"bye\"\n\"bye\"\n\"bye\"\n\"bye\"\n0",
+            out: "bye\nbye\nbye\nbye\n0",
         },
         Case {
             group: "D边界绕过",

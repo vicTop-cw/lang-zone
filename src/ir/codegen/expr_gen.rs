@@ -13,6 +13,85 @@ use super::types_emit::COMPLEX_RS;
 use super::*;
 
 impl CodeGen {
+    /// 方向 B：实参是否为「新鲜临时」（可安全 move 的表达式形态）。
+    ///
+    /// 背景：`sorted(xs)` / `reversed(xs)` 过去一律发
+    /// `{ let mut _tmp = <arg>.clone(); _tmp.sort(); _tmp }`。当 `<arg>` 本身是
+    /// 刚算出来的临时值（调用结果 / 构造 / 字面量 / 块表达式）时，这份 clone
+    /// 是纯浪费：一次堆分配 + 一次全量拷贝，而手写 Rust 直接就地消费。
+    ///
+    /// 保守边界：Var / FieldAccess / IndexGet 一律仍走 clone —— 它们可能别处
+    /// 还要用（LZ 值语义允许重复读），也可能是 Copy 或借用视图，move 会触发
+    /// E0382 / E0507。实参文本已是 `&x` / `x.clone()` / `x.to_string()` 时，
+    /// 说明上游已做过借用/拷贝决策，保持原样不动。
+    pub(crate) fn is_fresh_temp_arg(arg: &Expr, rendered: &str) -> bool {
+        let t = rendered.trim_start();
+        if t.starts_with('&')
+            || t.ends_with(".clone()")
+            || t.ends_with(".to_string()")
+            || t.ends_with(".to_owned()")
+        {
+            return false;
+        }
+        matches!(
+            arg.kind,
+            ExprKind::Call { .. }
+                | ExprKind::MethodCall { .. }
+                | ExprKind::StructCtor { .. }
+                | ExprKind::EnumCtor { .. }
+                | ExprKind::ListLit(_)
+                | ExprKind::List(_)
+                | ExprKind::TupleLit(_)
+                | ExprKind::BlockExpr { .. }
+                | ExprKind::IfExpr { .. }
+                | ExprKind::GenExpr { .. }
+                | ExprKind::Pipe { .. }
+                | ExprKind::Cast { .. }
+                | ExprKind::ImplicitConvert { .. }
+                | ExprKind::MagicCall { .. }
+        )
+    }
+
+    /// `sort(x)` / `reverse(x)` 的块发射：能move 就 move，否则 clone。
+    pub(crate) fn sort_like_block(&self, arg: &Expr, arg_text: &str, method: &str) -> String {
+        if Self::is_fresh_temp_arg(arg, arg_text) {
+            format!(
+                "{{ let mut _tmp = {0}; _tmp.{1}(); _tmp }}",
+                arg_text, method
+            )
+        } else {
+            format!(
+                "{{ let mut _tmp = {0}.clone(); _tmp.{1}(); _tmp }}",
+                arg_text, method
+            )
+        }
+    }
+
+    /// print/println 实参是否可确定走 Display（`{}`）而非 Debug（`{:?}`）。
+    ///
+    /// 方向 E：`{:?}` 对字符串会加引号并转义，且 f-string 实参会多一次
+    /// `format!` 堆分配 + 二次格式化。这里只对「无歧义的字符串」返回 true：
+    /// 字符串字面量、f-string 字面量、以及类型为 str/String/&str 的表达式。
+    /// 其余一律保持 `{:?}`（用户 struct 未必实现 Display，贸然换会 E0277）。
+    pub(crate) fn print_arg_is_display(e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::Lit(LitKind::Str(_)) | ExprKind::Lit(LitKind::FStr(_)) => return true,
+            // 显式转成字符串的实参：`x as str` / `"a" ++ "b"` 渲染出的 String
+            ExprKind::Cast { target, .. }
+                if matches!(target, IrType::Str)
+                    || matches!(target, IrType::Named { path, .. } if path == "String") =>
+            {
+                return true
+            }
+            _ => {}
+        }
+        match &e.ty {
+            IrType::Str => true,
+            IrType::Ref(inner) | IrType::MutRef(inner) => matches!(inner.as_ref(), IrType::Str),
+            IrType::Named { path, .. } => path == "String" || path == "str",
+            _ => false,
+        }
+    }
     /// 比较约束传播：预扫描模块内所有 FnDef 体（含 impl/trait 默认方法），
     /// 经调用图不动点计算「参与比较运算」的泛型集合，存入 `self.fn_cmp`。
     /// 调用图传播：若 F 调用 G（G 比较其泛型 → 需 Eq/Ord），且调用实参类型中
@@ -1275,7 +1354,7 @@ impl CodeGen {
 
                 if callee_s == "print" || callee_s == "println" {
                     let fmt_placeholders: String =
-                        args_s.iter().map(|_| "{:?}").collect::<Vec<_>>().join(" ");
+                        args.iter().map(|a| if Self::print_arg_is_display(a) { "{}" } else { "{:?}" }).collect::<Vec<_>>().join(" ");
                     let fmt = format!("\"{}\"", fmt_placeholders);
                     // 顶层静态（LazyLock<..>）需解引用才能打印值：print(config) → print(*config)
                     // 注意：gen_expr 的 Var 分支已对 lazy_static 生成 `(*name).clone()`，
@@ -1283,7 +1362,15 @@ impl CodeGen {
                     let print_args: Vec<String> = args
                         .iter()
                         .zip(args_s.iter())
-                        .map(|(_a, s)| s.clone())
+                        .map(|(a, s)| {
+                            // 字符串字面量：去掉多余的 .to_string()（Display 已足够，
+                            // 省一次堆分配 + 一次拷贝）
+                            if matches!(a.kind, ExprKind::Lit(LitKind::Str(_))) {
+                                s.trim_end_matches(".to_string()").to_string()
+                            } else {
+                                s.clone()
+                            }
+                        })
                         .collect();
                     format!("println!({}, {})", fmt, print_args.join(", "))
                 } else if callee_s == "eprintln!" {
@@ -1381,15 +1468,9 @@ impl CodeGen {
                     // 注意：fetch 是 async fn，直接调用返回 Future
                     format!("__spawn_task({})", args_s.join(", "))
                 } else if callee_s == "sort" && args_s.len() == 1 {
-                    format!(
-                        "{{ let mut _tmp = {0}.clone(); _tmp.sort(); _tmp }}",
-                        args_s[0]
-                    )
+                    self.sort_like_block(&args[0], &args_s[0], "sort")
                 } else if callee_s == "reverse" && args_s.len() == 1 {
-                    format!(
-                        "{{ let mut _tmp = {0}.clone(); _tmp.reverse(); _tmp }}",
-                        args_s[0]
-                    )
+                    self.sort_like_block(&args[0], &args_s[0], "reverse")
                 } else if callee_s == "format" && !self.fn_param_types.contains_key("format") {
                     // format("fmt", args...) → format!("fmt", args...)
                     // 用户自定义 format 函数（string.lz）优先调用自定义函数，
@@ -1498,15 +1579,9 @@ impl CodeGen {
                     let lambda = strip_lambda_type(&args_s[1]);
                     format!("({}).iter().all({})", args_s[0], lambda)
                 } else if callee_s == "sorted" && args_s.len() == 1 {
-                    format!(
-                        "{{ let mut _tmp = {0}.clone(); _tmp.sort(); _tmp }}",
-                        args_s[0]
-                    )
+                    self.sort_like_block(&args[0], &args_s[0], "sort")
                 } else if callee_s == "reversed" && args_s.len() == 1 {
-                    format!(
-                        "{{ let mut _tmp = {0}.clone(); _tmp.reverse(); _tmp }}",
-                        args_s[0]
-                    )
+                    self.sort_like_block(&args[0], &args_s[0], "reverse")
                 } else if (callee_s == "push" || callee_s == "append") && args_s.len() == 2 {
                     // 自由函数 push/append(list, item) → (list).push(item)
                     // （Vec 固有方法，自动 &mut 借用；recv 经 auto_mut_locals 标为 mut）
@@ -4404,6 +4479,42 @@ impl CodeGen {
                 {
                     els_s = format!("({}) != 0", els_s);
                 }
+                // 方向 E：else 分支是「空 unit」且 then 也是 unit → 整条 IfExpr 按
+                // 无 else 的 `if` 发射。语义等价（Rust 里 `if c { .. }` 与
+                // `if c { .. } else { () }` 同为 ()），产物少一半分支噪声
+                // （原产物形如 `} else { ()};`）。
+                // 前置条件缺一不可：Rust 要求无 else 的 if 其 then 块必须求值为 unit，
+                // 否则 E0308（实测 `if c { 5 }` 报 mismatched types）。
+                let drop_unit_else = els_is_unit
+                    && matches!(els.ty, IrType::Unit)
+                    && matches!(then.ty, IrType::Unit);
+                if drop_unit_else {
+                    let cond_s = self.gen_bool_cond(cond);
+                    return if then_final.contains('\n') {
+                        let close_indent = "    ".repeat(self.indent);
+                        let inner_indent = "    ".repeat(self.indent + 1);
+                        let then_body = if then_final.starts_with("{\n") {
+                            let inner = &then_final[2..then_final.len() - 1];
+                            let inner = inner.trim();
+                            let lines: Vec<&str> = inner.lines().collect();
+                            if lines.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    "\n{}{}\n{}",
+                                    inner_indent,
+                                    lines.join(&format!("\n{}", inner_indent)),
+                                    close_indent
+                                )
+                            }
+                        } else {
+                            format!(" {}", then_final)
+                        };
+                        format!("if {} {{{}}}", cond_s, then_body)
+                    } else {
+                        format!("if {} {{ {} }}", cond_s, then_final)
+                    };
+                }
                 // 如果 then 或 els 包含多行 BlockExpr，使用多行格式确保缩进正确
                 if then_final.contains('\n') || els_s.contains('\n') {
                     // emit_line 会在字符串前添加 self.indent 级别的缩进，
@@ -5353,6 +5464,22 @@ impl CodeGen {
                         })
                         .collect();
                     if elems_s.is_empty() {
+                        // 方向 E：`[]` + 紧随其后的「纯 push 循环」→ 预分配容量。
+                        // 经典 `mut v: List<T> = []` + `for i in range(n..m): v.push(x)`
+                        // 否则要经历 ceil(log2(count)) 次「realloc + 全量拷贝」。
+                        // vec_cap_hint 由 gen_block_inner 的相邻语句前瞻写入。
+                        if let Some(cap) = self.take_vec_cap_hint() {
+                            // 元素类型可推导时保留 turbofish（泛型返回位依赖它定T）
+                            let turbo = match &expr.ty {
+                                IrType::Named { path, args }
+                                    if (path == "List" || path == "Vec") && !args.is_empty() =>
+                                {
+                                    format!("::<{}>", self.empty_list_elem(&expr.ty))
+                                }
+                                _ => String::new(),
+                            };
+                            return format!("Vec{}::with_capacity({})", turbo, cap);
+                        }
                         // 空列表：元素类型推断。字面量 `[]` 在 IR 中常默认推断为
                         // List<i64>，但函数返回/调用上下文可能要求 List<a>（泛型）。
                         // 优先用期望类型/返回类型覆盖，否则误生成 Vec::<i64>::new()（E0308）。

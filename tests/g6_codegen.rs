@@ -124,7 +124,7 @@ def main() =
     print(d.speak().len())
     print(d.speak())
 "#,
-        "5\n8\n\"rex woof\"\n",
+        "5\n8\nrex woof\n",
     );
 }
 
@@ -338,7 +338,7 @@ def main() =
     print(describe(1))
     print(describe(42))
 "#,
-        "\"zero\"\n\"one\"\n\"many\"\n",
+        "zero\none\nmany\n",
     );
 }
 
@@ -362,7 +362,7 @@ def main() =
     print(classify((60, 80)))
     print(classify((5, 5)))
 "#,
-        "\"first\"\n\"second\"\n\"low\"\n\"big\"\n\"other\"\n",
+        "first\nsecond\nlow\nbig\nother\n",
     );
 }
 

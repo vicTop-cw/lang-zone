@@ -220,5 +220,5 @@ fn utf8_string_roundtrip_end_to_end() {
         "utf8_str",
         "def main() =\n    let s = \"中文字符串 hello\"\n    println(s.len())\n    println(s)\n",
     );
-    assert_eq!(out, "21\n\"中文字符串 hello\"");
+    assert_eq!(out, "21\n中文字符串 hello");
 }

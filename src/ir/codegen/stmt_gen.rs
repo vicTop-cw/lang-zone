@@ -124,6 +124,9 @@ impl CodeGen {
         let n = block.stmts.len();
         for (i, stmt) in block.stmts.iter().enumerate() {
             let is_last = i == n - 1;
+            // 方向 E：相邻语句前瞻 —— `mut v = []` + 纯push 范围循环 → 预分配容量。
+            // 每轮先清空上一轮残留（异常路径不消费也不会泄漏到下条语句）。
+            self.set_vec_cap_hint(self.push_loop_capacity_hint(&block.stmts, i));
             self.gen_stmt(stmt, is_last);
         }
         self.flush_deferred();
@@ -405,26 +408,30 @@ impl CodeGen {
     }
 
     pub(crate) fn gen_stmt(&mut self, stmt: &Stmt, is_last: bool) {
-        self.emit_line(&format!(
-            "// STMT:{}",
-            if matches!(stmt, Stmt::Let { .. }) {
-                "Let"
-            } else if matches!(stmt, Stmt::ExprStmt { .. }) {
-                "Expr"
-            } else if matches!(stmt, Stmt::TryCatch { .. }) {
-                "Try"
-            } else if matches!(stmt, Stmt::Block { .. }) {
-                "Block"
-            } else if matches!(stmt, Stmt::Defer { .. }) {
-                "Defer"
-            } else if matches!(stmt, Stmt::If { .. }) {
-                "If"
-            } else if matches!(stmt, Stmt::For { .. }) {
-                "For"
-            } else {
-                "Other"
-            }
-        ));
+        //逐语句定位注释：默认关闭（方向 E：注释使生成 .rs 行数翻倍、抬升 rustc 段
+        // 开销且无运行时价值）。需要时 `--stmt-marks` 或 LZ_STMT_MARKS=1 恢复。
+        if marks::stmt_marks() {
+            self.emit_line(&format!(
+                "// STMT:{}",
+                if matches!(stmt, Stmt::Let { .. }) {
+                    "Let"
+                } else if matches!(stmt, Stmt::ExprStmt { .. }) {
+                    "Expr"
+                } else if matches!(stmt, Stmt::TryCatch { .. }) {
+                    "Try"
+                } else if matches!(stmt, Stmt::Block { .. }) {
+                    "Block"
+                } else if matches!(stmt, Stmt::Defer { .. }) {
+                    "Defer"
+                } else if matches!(stmt, Stmt::If { .. }) {
+                    "If"
+                } else if matches!(stmt, Stmt::For { .. }) {
+                    "For"
+                } else {
+                    "Other"
+                }
+            ));
+        }
         match stmt {
             Stmt::Let {
                 name,
@@ -657,6 +664,8 @@ impl CodeGen {
                 let value_s = if is_tuple_destr && matches!(ty, IrType::Tuple(_)) {
                     format!("({}).clone()", self.gen_expr(value))
                 } else if is_empty_container {
+                    // 方向 E：`mut v = []` + 紧随的纯 push 范围循环 → 预分配容量。
+                    // （本分支不走 gen_expr，故必须在这里消费 vec_cap_hint）
                     match ty {
                         IrType::Named { path, .. } if path == "Dict" || path == "HashMap" => {
                             "std::collections::BTreeMap::new()".to_string()
@@ -664,7 +673,10 @@ impl CodeGen {
                         IrType::Named { path, .. } if path == "Set" || path == "HashSet" => {
                             "std::collections::HashSet::new()".to_string()
                         }
-                        _ => "Vec::new()".to_string(),
+                        _ => match self.take_vec_cap_hint() {
+                            Some(cap) => format!("Vec::with_capacity({})", cap),
+                            None => "Vec::new()".to_string(),
+                        },
                     }
                 } else {
                     self.gen_expr(value)

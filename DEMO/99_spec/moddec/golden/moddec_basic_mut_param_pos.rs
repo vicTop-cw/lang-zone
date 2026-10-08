@@ -22,12 +22,10 @@ use std::fmt::Display;
 use lz_builtins::*;
 
 pub fn f(mut n: i64) -> i64 {
-    // STMT:Expr
     return n + 1i64;
 }
 
 pub fn main() {
-    // STMT:Expr
     println!("{:?}", f(41i64));
 }
 
