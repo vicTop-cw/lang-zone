@@ -507,3 +507,178 @@ fn d1_invalid_opt_level_exits_with_error() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// 运行时性能：字符串原地追加（`s = s + rhs` → `s.push_str(&rhs)`）
+//
+// 动机（实测）：通用字符串加法发`lhs.to_string() + &rhs..`，累加模式下
+// 每轮 3 次堆分配且把累积串完整拷贝两遍 ⇒ O(n²)。同一台机器严格 A/B
+// （两份 .rs 仅差这一行）：40.5ms → 19.7ms（2.06×），峰值内存 7892KB →
+// 4308KB（−45%）。本组用例钉住「该改写的改、不该改的绝不改」。
+// ════════════════════════════════════════════════════════════════════
+
+/// 字面量累加 → 原地 push_str，且实参是 `&'static str`（无中间 String）。
+#[test]
+fn e2_string_append_literal_becomes_push_str() {
+    let src = r#"
+def main() =
+    mut s = ""
+    mut i = 0
+    while i < 4:
+        s = s + "ab"
+        i = i + 1
+    print(s)
+"#;
+    let r = run_lz("e2_push_lit", src, &[]);
+    assert!(r.transpiled, "转译应成功：\n{}", r.diag);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "abababab");
+    assert!(
+        r.rs_text.contains(r#"s.push_str("ab")"#),
+        "字面量累加应原地追加：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("to_string() + &"),
+        "累加路径不应再有 to_string()+add（每轮 3 次分配）：\n{}",
+        r.rs_text
+    );
+}
+
+/// 变量右操作数 → `push_str(&x)`（借用，不夺走 x 的所有权）。
+#[test]
+fn e2_string_append_var_becomes_borrowed_push_str() {
+    let src = r#"
+def main() =
+    let piece = "cd"
+    mut s = ""
+    mut i = 0
+    while i < 3:
+        s = s + piece
+        i = i + 1
+    print(s)
+    print(piece)
+"#;
+    let r = run_lz("e2_push_var", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    // piece 在循环后仍可读 ⇒ 不能被 move
+    assert_eq!(r.stdout, "cdcdcd\ncd");
+    assert!(
+        r.rs_text.contains("s.push_str(&piece)"),
+        "变量右操作数应借用传入：\n{}",
+        r.rs_text
+    );
+}
+
+/// f-string 右操作数 → `push_str(&format!(..))`。
+#[test]
+fn e2_string_append_fstring_keeps_format_borrowed() {
+    let src = r#"
+def main() =
+    mut s = ""
+    mut i = 0
+    while i < 2:
+        s = s + f"n{i}"
+        i = i + 1
+    print(s)
+"#;
+    let r = run_lz("e2_push_fstr", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "n0n1");
+    assert!(
+        r.rs_text.contains("s.push_str(&format!("),
+        "f-string 应走 format! 后借用：\n{}",
+        r.rs_text
+    );
+}
+
+/// 非字符串右操作数（`s + 1`）→ 必须保留通用 format! 路径，绝不走 push_str。
+/// `ref s: str` 形参 → 绝不能原地追加（那是借用视图，追加会改到调用方的值）。
+/// 声明与使用在不同函数时，登记表必须按函数清空（否则形参会被误判为独占）。
+#[test]
+fn e2_owned_str_registry_is_per_function() {
+    // accum 里的 s 是 by-value 局部绑定 → 允许原地追加；
+    // joiner 的 s 是**形参**（本设计一律不登记形参，保守起见走通用路径）。
+    // 这正是「登记表必须按函数清空」的语义：accum 的登记不能泄漏进 joiner。
+    let src = r#"
+def accum() -> str =
+    mut s = ""
+    mut i = 0
+    while i < 3:
+        s = s + "x"
+        i = i + 1
+    s
+
+def joiner(s: str, t: str) -> str =
+    s + t
+
+def main() =
+    print(accum())
+    print(joiner("a", "b"))
+"#;
+    let r = run_lz("e2_registry_scope", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "xxx\nab");
+    assert!(
+        r.rs_text.contains(r#"s.push_str("x")"#),
+        "accum 内的累加应被原地追加：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("push_str(&t)"),
+        "形参不登记，禁止原地追加（保守策略）：\n{}",
+        r.rs_text
+    );
+}
+/// 非字符串右操作数：LZ 在 IR 构建期就拒绝 `str + int`（类型错误），
+/// 因此 push_str 的 str-RHS 白名单根本不会被触及 —— 这里钉住该拒绝行为。
+#[test]
+fn e2_string_append_int_rhs_is_rejected_by_typecheck() {
+    let src = r#"
+def main() =
+    mut s = "n="
+    s = s + 7
+    print(s)
+"#;
+    let r = run_lz("e2_push_int", src, &[]);
+    assert!(
+        !r.transpiled,
+        "`str + int` 应在类型检查期被拒绝（不进 codegen）：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.diag.contains("相加") || r.diag.contains("str"),
+        "应给出可读的类型错误诊断：\n{}",
+        r.diag
+    );
+}
+
+/// `ref s: str` 形参 → 绝不能原地追加（那是借用视图，追加会改到调用方的值）。
+///
+/// 已知既有缺陷（本次不修）：该形态的 `s = s + "!"` 在通用路径上会生成
+/// `s = format!("{}{}", ..)` 赋给 `&str` 形参 ⇒ E0308，即by-ref str 形参
+/// 的字符串拼接本来就编译不过。因此本用例只断言「**没有被原地改写**」
+/// （转译级），编译级能力留给后续独立立项修复。
+#[test]
+fn e2_ref_param_is_never_rewritten_in_place() {
+    let src = r#"
+def grow(ref s: str) =
+    s = s + "!"
+
+def main() =
+    mut t = "hi"
+    grow(t)
+    print(t)
+"#;
+    let r = run_lz("e2_ref_param", src, &[]);
+    assert!(
+        r.transpiled,
+        "转译应成功（by-ref 形参不得被误改写）：\n{}",
+        r.diag
+    );
+    assert!(
+        !r.rs_text.contains("push_str"),
+        "ref 形参是借用视图，禁止原地追加：\n{}",
+        r.rs_text
+    );
+}

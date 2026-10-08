@@ -17,6 +17,7 @@ mod emit;
 mod expr_gen;
 mod magic_gen;
 mod marks;
+mod owned_str;
 mod pattern_gen;
 mod scan;
 mod stmt_gen;
@@ -347,6 +348,12 @@ pub struct CodeGen {
     /// 由 gen_block_inner 的相邻语句前瞻写入，空列表字面量发射处 `take` 一次。
     /// gen_expr 走 `&self`（内部 RefCell 承担可变状态），故用 RefCell 而非裸字段。
     vec_cap_hint: std::cell::RefCell<Option<String>>,
+    /// 运行时优化：`s = s + rhs` → `s.push_str(&rhs)`。
+    /// 登记**当前函数内**by-value 的 str 局部绑定（`is_ref == false`），
+    /// 由 `gen_fn_def` 入口清空；只有登记在册的变量才允许原地追加，
+    /// 从而保证不会把 `&str` / `&String` 形参误当独占 String 改写。
+    /// 详见 owned_str.rs 的安全性论证。
+    owned_str_vars: owned_str::OwnedStrSet,
     buf: String,
 }
 impl CodeGen {
@@ -474,6 +481,7 @@ impl CodeGen {
             embed_modules: std::collections::HashSet::new(),
             // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
             vec_cap_hint: std::cell::RefCell::new(None),
+            owned_str_vars: std::cell::RefCell::new(std::collections::HashSet::new()),
             buf: String::new(),
         }
     }

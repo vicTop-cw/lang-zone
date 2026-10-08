@@ -3,6 +3,7 @@
 
 use super::types_emit::is_bigint_ty;
 use super::types_emit::is_complex_ty;
+use super::owned_str;
 use super::*;
 
 impl CodeGen {
@@ -474,6 +475,34 @@ impl CodeGen {
                 } else {
                     name.clone()
                 };
+                // 运行时优化：`s = s + rhs` → `s.push_str(&rhs)`。
+                // 必须在「已声明 → 纯赋值」分支之前拦截，否则会退化成
+                // `s = s.to_string() + &"ab".to_string()[..]`（每轮 3 次堆分配 +
+                // 累积串被完整拷贝两遍 ⇒ O(n²)）。仅对登记在册的 by-value str
+                // 局部变量生效（ref/ 形参不在册），详见 owned_str.rs。
+                if self.declared.contains(&safe_name) && self.owned_str_contains(name) {
+                    if let Some(rhs) = self.str_append_rhs(name, value) {
+                        let mut rhs_s = self.gen_expr(rhs);
+                        // 字符串字面量：gen_expr 给的是 `"ab".to_string()`（LZ 值语义
+                        // 的 owned String），而 push_str 只要 `&'static str` —— 剥掉
+                        // 后缀即省掉一次纯浪费的堆分配。
+                        let is_str_lit = matches!(&rhs.kind, ExprKind::Lit(LitKind::Str(_)));
+                        if is_str_lit {
+                            if let Some(raw) = rhs_s.strip_suffix(".to_string()") {
+                                rhs_s = raw.to_string();
+                            }
+                        }
+                        // 仅字符串**字面量** 已是 &'static str 形态；f-string 的 `format!(..)` 与
+                        // 变量/调用结果都返回 String，必须加 &才能匹配 push_str(&str)
+                        let rhs_is_borrowed = is_str_lit;
+                        self.emit_line(&format!(
+                            "{}.push_str({});",
+                            safe_name,
+                            owned_str::push_str_arg(&rhs_s, rhs_is_borrowed)
+                        ));
+                        return;
+                    }
+                }
                 // 自引用重绑定（`let parts = parts + [p]`）：虽未写 mut，但 value
                 // 引用自身，LZ 语义为重绑定（Python 风格），生成赋值而非 shadow-let
                 // （Rust shadow-let 在循环内不会累积，vector.__str__ 曾返回 [""]）
@@ -510,6 +539,18 @@ impl CodeGen {
                     || self.is_str_producing(value)
                 {
                     self.str_typed_vars.insert(safe_name.clone());
+                }
+                // 登记「独占 String 局部绑定」（`s = s + x` → push_str 的前提）。
+                // 只登记 by-value 且非 `Ref(Str)`/`MutRef(Str)` 类型：这两类在 Rust
+                // 侧是 `&str`/`&mut String`，原地追加会改到别人的值（且 push_str
+                // 根本无法编译）。`ref r = x` 走下方独立发射路径，也不登记。
+                if owned_str::is_str_ty(ty)
+                    && !*is_ref
+                    && !matches!(ty, IrType::Ref(_) | IrType::MutRef(_))
+                {
+                    self.owned_str_mark(&safe_name);
+                } else if *is_ref {
+                    self.owned_str_unmark(&safe_name);
                 }
                 // 字段插值判定要的是「这个变量的 IR 类型」，比 str_typed_vars 宽一档：
                 // builder 在 value 上带的 ty 已能认出 struct 值（`let res = MyResource(...)`），
