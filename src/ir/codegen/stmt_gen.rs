@@ -483,6 +483,20 @@ impl CodeGen {
                 // 仅对登记在册的 by-value 局部绑定生效（ref 绑定/形参不在册），
                 // 详见 owned_local.rs。
                 if self.declared.contains(&safe_name) {
+                    // 只读 `ref` 形参不可赋值（LZ 语义）：给出精确诊断，而不是让
+                    // Rust 报 E0384（cannot assign to &i64）/ E0308（expected &str,
+                    // found String）——后者指向生成代码，开发者无从定位。
+                    if matches!(
+                        self.owned_local_kind(name),
+                        Some(owned_local::LocalKind::ReadonlyBorrow)
+                    ) {
+                        self.emit_line(&format!(
+                            "compile_error!(\"不能给只读引用 `{}` 赋值：`ref` 参数是只读借用；\
+                             若需修改，请改用可变局部变量或返回值回写（LZ: `{} = ...`）\");",
+                            name, name
+                        ));
+                        return;
+                    }
                     match self.owned_local_kind(name) {
                         Some(owned_local::LocalKind::Str) => {
                             if let Some(rhs) = self.str_append_rhs(name, value) {
@@ -537,7 +551,9 @@ impl CodeGen {
                                 return;
                             }
                         }
-                        None => {}
+                        // 只读借用形参：上面已给出精确诊断并return，这里只是让
+                        // match穷尽（语义上不会走到）。
+                        Some(owned_local::LocalKind::ReadonlyBorrow) | None => {}
                     }
                 }
                 // 自引用重绑定（`let parts = parts + [p]`）：虽未写 mut，但 value
@@ -1024,6 +1040,18 @@ impl CodeGen {
                 if let ExprKind::Var(name) = &target.kind {
                     if self.ref_bindings.contains(name.as_str()) {
                         self.emit_line(&format!("*{} = {};", target_s, val_s));
+                        return;
+                    }
+                    // 只读 `ref` 形参不可赋值：给精确诊断（见 Let 路径的同一说明）。
+                    if matches!(
+                        self.owned_local_kind(name),
+                        Some(owned_local::LocalKind::ReadonlyBorrow)
+                    ) {
+                        self.emit_line(&format!(
+                            "compile_error!(\"不能给只读引用 `{}` 赋值：`ref` 参数是只读借用；\
+                             若需修改，请改用可变局部变量或返回值回写（LZ: `{} = ...`）\");",
+                            name, name
+                        ));
                         return;
                     }
                 }

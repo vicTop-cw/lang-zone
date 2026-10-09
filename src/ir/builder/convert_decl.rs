@@ -739,11 +739,21 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             if func.is_iterator {
                 // 递归扫描（yield 可嵌套在 while/for/if 块内），并预登记 let 绑定类型
                 scan_iterator_yield_ty(&func.body, &mut fn_ctx).unwrap_or(IrType::Unit)
+            } else if let Some(tail) = func.body.last() {
+                // 尾表达式类型在体转换**之前**推断，而 `let` 绑定的类型登记发生在体
+                // 转换过程中 ⇒ 尾表达式若引用本函数体顶层的 let 变量，`lookup_var`
+                // 落空 → 回退 Any → codegen 渲染成 i64 ⇒ `def accum() = ... s`
+                //（尾表达式是 str）报 E0308。
+                //
+                // 用**一次性探测副本**把顶层 let 绑定预登记进去再推断：副本随即丢弃，
+                // 不会污染 fn_ctx。若直接登记进 fn_ctx，convert_block 的预扫描
+                // （`!vars.contains(name)` 才登记 block_declared）会把这些变量误判为
+                // 「已声明」而跳过真实声明，Rust 侧变量未定义 ⇒ E0425（实测）。
+                let mut probe = fn_ctx.clone();
+                prescan_body_let_bindings(&func.body, &mut probe);
+                infer_stmt_type(tail, &probe)
             } else {
-                func.body
-                    .last()
-                    .map(|stmt| infer_stmt_type(stmt, &fn_ctx))
-                    .unwrap_or(IrType::Unit)
+                IrType::Unit
             }
         });
     // 注意：Iterator 函数的 Vec<T> 包装由 codegen 负责（基于 has_yield 检测），

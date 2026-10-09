@@ -43,6 +43,8 @@ pub(crate) enum LocalKind {
     Str,
     /// `Vec<T>`：可 `push` / `extend`。
     List,
+    /// 只读借用形参（`ref x: T` → Rust `&T`）：不可赋值，只用于诊断。
+    ReadonlyBorrow,
 }
 
 /// 列表追加的落地形态。
@@ -66,6 +68,13 @@ impl CodeGen {
         self.owned_locals
             .borrow_mut()
             .insert(name.to_string(), LocalKind::Str);
+    }
+
+    /// 登记只读借用形参（`ref x: T`，非 mut）：不可赋值，仅用于诊断。
+    pub(crate) fn owned_local_mark_readonly(&self, name: &str) {
+        self.owned_locals
+            .borrow_mut()
+            .insert(name.to_string(), LocalKind::ReadonlyBorrow);
     }
 
     /// 登记 by-value 的列表局部绑定。

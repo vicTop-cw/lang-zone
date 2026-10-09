@@ -831,3 +831,189 @@ def main() =
     assert!(r.rs_text.contains(r#"s.push_str("a")"#), "str 走 push_str：\n{}", r.rs_text);
     assert!(r.rs_text.contains("xs.push(i);"), "list 走 push：\n{}", r.rs_text);
 }
+
+// ════════════════════════════════════════════════════════════════════
+// 既有缺陷修复的回归闸门（三个缺陷都是「先记录、后修复」，这里钉住修复后行为）
+//════════════════════════════════════════════════════════════════════
+
+/// 缺陷A：`xs.sum()` / `xs.product()` 此前生成 `(xs).sum()` ⇒ E0599
+/// 「Vec<i64> is not an iterator」。List/Set 不是 Iterator，且 Rust 的
+/// Vec/HashSet 本身没有 sum/product，必须先取迭代器。
+#[test]
+fn fix_a_list_sum_iterates_instead_of_passthrough() {
+    let src = r#"
+def main() =
+    let xs: List<int> = [1, 2, 3]
+    println(xs.sum())
+    println(xs.product())
+"#;
+    let r = run_lz("fix_a_sum", src, &[]);
+    assert!(r.ok, "List.sum()/product() 应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "6\n6");
+    assert!(
+        r.rs_text.contains("iter().copied().sum::<i64>()"),
+        "sum 必须走迭代器链：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("iter().copied().product::<i64>()"),
+        "product 必须走迭代器链：\n{}",
+        r.rs_text
+    );
+}
+
+/// 缺陷A 的类型正确性：归约类型取**元素类型**而非硬编码 i64，
+/// 否则 `List<float>.sum()` 会生成 `.sum::<i64>()` ⇒ E0308。
+#[test]
+fn fix_a_list_sum_uses_element_type_not_hardcoded_i64() {
+    let src = r#"
+def main() =
+    let xs: List<float> = [1.5, 2.5]
+    println(xs.sum())
+"#;
+    let r = run_lz("fix_a_sum_f64", src, &[]);
+    assert!(r.ok, "List<float>.sum() 应可编译运行：\n{}", r.diag);
+    assert!(
+        r.rs_text.contains("sum::<f64>()"),
+        "归约类型应取元素类型 f64：\n{}",
+        r.rs_text
+    );
+}
+
+/// 缺陷A 不能破坏「sum 后仍可读该变量」：用 `.iter()` 而非 `.into_iter()`，
+/// 后者会 move 接收者，而 LZ 值语义允许重复读。
+#[test]
+fn fix_a_list_sum_does_not_move_receiver() {
+    let src = r#"
+def main() =
+    let xs: List<int> = [1, 2, 3]
+    println(xs.sum())
+    println(xs.len())
+"#;
+    let r = run_lz("fix_a_sum_nomove", src, &[]);
+    assert!(r.ok, "sum 之后仍应能读 xs：\n{}", r.diag);
+    assert_eq!(r.stdout, "6\n3");
+}
+
+/// 缺陷C：无显式返回注解时，尾表达式引用**函数体顶层 let 变量**，
+/// 此前 `lookup_var` 落空 →回退 Any → codegen 渲染成 i64 ⇒ E0308。
+/// 修复用一次性探测ctx 预登记顶层 let（不污染真实 ctx，否则变量会被
+/// 误判为已声明而跳过声明 ⇒ E0425）。
+#[test]
+fn fix_c_str_tail_without_return_annotation_infers_string() {
+    let src = r#"
+def accum() =
+    mut s = ""
+    mut i = 0
+    while i < 3:
+        s = s + "x"
+        i = i + 1
+    s
+
+def main() =
+    println(accum())
+"#;
+    let r = run_lz("fix_c_tail_str", src, &[]);
+    assert!(r.ok, "str 尾表达式应推断为 String 而非 i64：\n{}", r.diag);
+    // 注意：调用点仍把「推断出来的返回类型」视为 Any，故 println 走 Debug（带引号）。
+    // 缺陷 C 修的是**函数自身的签名**（此前渲染成 i64 ⇒ E0308 编译不过）；调用点的
+    // 返回类型推断（fn_returns 只登记显式注解）是另一层缺口，不在本次范围。
+    assert_eq!(r.stdout, "\"xxx\"");
+    assert!(
+        r.rs_text.contains("-> String"),
+        "返回类型应是 String：\n{}",
+        r.rs_text
+    );
+    // 关键回归：探测不得影响真实声明（否则 Rust 侧变量未定义 E0425）
+    assert!(
+        r.rs_text.contains("let mut s: String"),
+        "顶层 let 的真实声明必须仍在（探测不能污染声明路径）：\n{}",
+        r.rs_text
+    );
+}
+
+/// 缺陷C 的反向确认：显式注解不受影响，且 int 尾表达式仍推断为 i64。
+#[test]
+fn fix_c_explicit_and_int_tails_unchanged() {
+    let src = r#"
+def annotated() -> str =
+    let s = "k"
+    s
+
+def int_tail() =
+    let n = 42
+    n
+
+def main() =
+    println(annotated())
+    println(int_tail())
+"#;
+    let r = run_lz("fix_c_tail_int", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "k\n42");
+    assert!(
+        r.rs_text.contains("fn annotated() -> String"),
+        "显式 str 注解仍渲染为 String：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("fn int_tail() -> i64"),
+        "int 尾表达式仍是 i64：\n{}",
+        r.rs_text
+    );
+}
+
+/// 缺陷B：给只读 `ref` 形参赋值此前生成非法 Rust（`s = format!(..)`赋给
+/// `&str` ⇒ E0308；`s = s + 1` 赋给 `&i64` ⇒ E0384），诊断指向生成代码。
+/// 现在给精确诊断。**不能**改成发射 `&mut T`：`ref self` 是 std 协议 trait
+/// 方法的常规写法，改签名会与 trait 不匹配（E0053/E0195）。
+#[test]
+fn fix_b_assigning_to_readonly_ref_param_gives_precise_diagnostic() {
+    let src = r#"
+def grow(ref s: str) =
+    s = s + "!"
+
+def main() =
+    mut t = "hi"
+    grow(t)
+    println(t)
+"#;
+    let r = run_lz("fix_b_ref_assign", src, &[]);
+    assert!(r.transpiled, "转译应成功：\n{}", r.diag);
+    assert!(
+        r.rs_text.contains("compile_error!") && r.rs_text.contains("只读引用"),
+        "应发射精确诊断（而非让 Rust 报 E0308/E0384）：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("s = format!"),
+        "不应再生成给&str 形参赋 String 的非法代码：\n{}",
+        r.rs_text
+    );
+}
+
+/// 缺陷B 的边界：只读 `ref` 形参**只读**是完全正常的（std 协议 trait 全靠它），
+/// 不能被误伤（`ref self` 必须仍然渲染成 `&self`）。
+#[test]
+fn fix_b_readonly_ref_param_is_still_usable_for_reading() {
+    let src = r#"
+def width(ref s: str) -> int =
+    s.len()
+
+def main() =
+    println(width("abc"))
+"#;
+    let r = run_lz("fix_b_ref_read", src, &[]);
+    assert!(r.ok, "只读 ref 形参的只读用法必须照常工作：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("s: &str"),
+        "ref 形参仍应渲染成 &str：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("&mut str"),
+        "不得改成 &mut str（会与 trait 签名不匹配）：\n{}",
+        r.rs_text
+    );
+}

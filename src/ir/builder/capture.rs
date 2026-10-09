@@ -508,6 +508,31 @@ pub(crate) fn check_stmt_capture(
     }
 }
 
+/// 预扫描函数体，登记**顶层 let 绑定**的推断类型（用于返回类型推断）。
+///
+/// 缺口：`ret_ty` 在**体转换之前**就算好（见 convert_decl 的 ret_ty 计算），
+/// 而 `let` 绑定的类型登记发生在体转换过程中 ⇒ 无显式返回注解时，若尾表达式
+/// 引用了本函数体顶层的 let 变量，`lookup_var` 落空 → 回退 `Any` →
+/// codegen 渲染成 `i64` ⇒ `def accum() = ... s`（尾表达式是 str）报 E0308。
+///
+/// 只扫**顶层**、不下钻嵌套块：块内可能有同名遮蔽（`let s = "a"` 之后块内再
+/// `let s = 5`），预登记会把类型写错；而「尾表达式引用顶层 let」已是完整覆盖。
+/// 闭包绑定跳过：交给 `prescan_closure_bindings`（它还要标记 block_declared）。
+pub(crate) fn prescan_body_let_bindings(stmts: &[AstStmt], ctx: &mut TypeCtx) {
+    for stmt in stmts {
+        if let AstStmt::Let { name, value, .. } = stmt {
+            if matches!(value, AstExpr::Closure { .. }) {
+                continue;
+            }
+            let ty = infer_expr_type(value, ctx);
+            // Any 不登记：与「查不到」的旧行为等价，不引入更差的推断。
+            if !matches!(ty, IrType::Any) {
+                ctx.add_var(name, ty);
+            }
+        }
+    }
+}
+
 /// 预扫描函数体，登记闭包 let 绑定为 Fn 类型（用于返回类型推断）。
 /// 否则 `def f() = ... consume()` 末尾的闭包调用在推断 ret_ty 时
 /// lookup_var 查不到 consume → 回退 Any→i64（E0308）。

@@ -512,6 +512,20 @@ impl CodeGen {
                 duck_param_names.insert(i, pname.clone());
             }
         }
+
+        // 登记只读 `ref` 形参（`ref x: T` → Rust `&T`）。LZ 语义下它不可赋值，
+        // 此前放行后 codegen 生成 `s = format!(..)` / `s = s + 1`，Rust 报
+        // E0308（expected &str, found String）/ E0384（cannot assign to &i64），
+        // 诊断指向生成代码而非源码。这里登记后在赋值点给精确诊断。
+        //
+        // 不能改成发射 `&mut T`：`ref self` 是 std 协议 trait 方法的常规写法
+        // （`__eq__(ref self, ..)` → `&self`），改成 &mut 会与 trait 签名不匹配
+        // ⇒ E0053/E0195，波及所有扩展 trait。
+        for p in f.params.iter() {
+            if p.is_ref && !p.is_mut {
+                self.owned_local_mark_readonly(&p.name);
+            }
+        }
         // duck 参数 → 泛型参数名（同 duck 的多参数共享一个泛型，去重：
         // min(a: C, b: C) → [DuckParam0] 而非 [DuckParam0, DuckParam0] E0403）
         let mut duck_params: Vec<String> = f

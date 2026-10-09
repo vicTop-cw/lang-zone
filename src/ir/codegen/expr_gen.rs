@@ -3538,8 +3538,31 @@ impl CodeGen {
                     if method == "skip" && args_s.len() == 1 {
                         return format!("({}).skip({} as usize)", recv, args_s[0]);
                     }
-                    if method == "sum" && args_s.is_empty() {
-                        return format!("({}).sum()", recv);
+                    if (method == "sum" || method == "product") && args_s.is_empty() {
+                        // List/Set 不是 Iterator，且 Rust 的 Vec/HashSet **没有**
+                        // sum/product（这正是它与 LZ 迭代协议的关键差别）—— 直接透传会
+                        // 生成 `(xs).sum()` ⇒ E0599「Vec<i64> is not an iterator」。
+                        // 必须先取迭代器；用 `.iter().copied()` 而非 `.into_iter()`：
+                        // 后者会 move 接收者，而 LZ 值语义允许重复读该变量。
+                        // `::<i64>` 显式标注，否则 E0283 cannot infer type parameter S。
+                        // 渲染与自由函数路径 `sum(collection)` 完全一致（同一操作两种
+                        // 写法现在产出相同的 Rust）。product 同理。
+                        if recv_is_list {
+                            // 归约类型取**元素类型**而非硬编码 i64：否则
+                            // `List<float>.sum()` 会生成 `.sum::<i64>()` ⇒ E0308
+                            // （自由函数路径遗留的同类硬编码不在本次改动范围内）。
+                            let elem_ty = match &receiver.ty {
+                                IrType::Named { args, .. } if !args.is_empty() => {
+                                    self.rust_type(&args[0])
+                                }
+                                _ => "i64".to_string(),
+                            };
+                            return format!(
+                                "({}).iter().copied().{}::<{}>()",
+                                recv, method, elem_ty
+                            );
+                        }
+                        return format!("({}).{}()", recv, method);
                     }
                 }
                 // Option/Result 消费型方法（map/and_then/unwrap_or 等）：receiver 按值
