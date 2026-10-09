@@ -523,24 +523,60 @@ impl CodeGen {
                                 return;
                             }
                         }
-                        Some(owned_local::LocalKind::List) => {
-                            if let Some(plan) = self.list_append_rhs(name, value) {
+                        Some(owned_local::LocalKind::List)
+                        | Some(owned_local::LocalKind::Dict)
+                        | Some(owned_local::LocalKind::Set) => {
+                            if let Some(plan) = self.container_append_rhs(name, value) {
                                 match plan {
-                                    owned_local::ListAppend::Push(elem) => {
+                                    owned_local::ContainerAppend::Push(elem) => {
                                         let elem_s = self.gen_expr(elem);
-                                        self.emit_line(&format!("{}.push({});", safe_name, elem_s));
-                                    }
-                                    owned_local::ListAppend::ExtendLit(parts) => {
                                         self.emit_line(&format!(
-                                            "{}.extend(vec![{}]);",
+                                            "{}.push({});",
+                                            safe_name, elem_s
+                                        ));
+                                    }
+                                    owned_local::ContainerAppend::InsertOne(elem) => {
+                                        // Set 单元素：零分配，优于「建 1-element HashSet 再整表合并」
+                                        let elem_s = self.gen_expr(elem);
+                                        self.emit_line(&format!(
+                                            "{}.insert({});",
+                                            safe_name, elem_s
+                                        ));
+                                    }
+                                    owned_local::ContainerAppend::ExtendItems(parts) => {
+                                        // 列表 / 集合字面量：`extend([..])` 直接吃数组，
+                                        // 不必先构造 Vec/HashSet 临时值
+                                        self.emit_line(&format!(
+                                            "{}.extend([{}]);",
                                             safe_name,
                                             parts.join(", ")
                                         ));
                                     }
-                                    owned_local::ListAppend::ExtendExpr(rhs) => {
-                                        // 实参文本与通用路径的 `__cat.extend(..)` 完全
-                                        // 一致 ⇒ move 语义不变（后续再用该变量仍会
-                                        // 编译失败，与改写前同构）
+                                    owned_local::ContainerAppend::ExtendPairs(pairs) => {
+                                        // Dict 字面量：单条目 → insert(k, v)（零分配，
+                                        // 优于「建一张1-entry 的表再整表合并」）；
+                                        // 多条目 → extend([(k, v), ..])
+                                        if pairs.len() == 1 {
+                                            let (k, v) = &pairs[0];
+                                            self.emit_line(&format!(
+                                                "{}.insert({}, {});",
+                                                safe_name, k, v
+                                            ));
+                                        } else {
+                                            let joined = pairs
+                                                .iter()
+                                                .map(|(k, v)| format!("({}, {})", k, v))
+                                                .collect::<Vec<_>>()
+                                                .join(", ");
+                                            self.emit_line(&format!(
+                                                "{}.extend([{}]);",
+                                                safe_name, joined
+                                            ));
+                                        }
+                                    }
+                                    owned_local::ContainerAppend::ExtendExpr(rhs) => {
+                                        // 实参文本与通用路径完全一致 ⇒ move 语义不变
+                                        // （后续再用该变量仍会编译失败，与改写前同构）
                                         let rhs_s = self.gen_expr(rhs);
                                         self.emit_line(&format!(
                                             "{}.extend({});",
@@ -602,6 +638,10 @@ impl CodeGen {
                     self.owned_local_mark_str(&safe_name);
                 } else if by_value && owned_local::is_list_ty(ty) {
                     self.owned_local_mark_list(&safe_name);
+                } else if by_value && owned_local::is_dict_ty(ty) {
+                    self.owned_local_mark_dict(&safe_name);
+                } else if by_value && owned_local::is_set_ty(ty) {
+                    self.owned_local_mark_set(&safe_name);
                 } else if *is_ref {
                     self.owned_local_unmark(&safe_name);
                 }

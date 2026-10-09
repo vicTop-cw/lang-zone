@@ -750,7 +750,7 @@ def main() =
     assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
     assert_eq!(r.stdout, "4 6");
     assert!(
-        r.rs_text.contains("xs.extend(vec![1i64, 2i64, 3i64]);"),
+        r.rs_text.contains("xs.extend([1i64, 2i64, 3i64]);"),
         "多元素字面量应走 extend(vec![..])：\n{}",
         r.rs_text
     );
@@ -1014,6 +1014,180 @@ def main() =
     assert!(
         !r.rs_text.contains("&mut str"),
         "不得改成 &mut str（会与 trait 签名不匹配）：\n{}",
+        r.rs_text
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Dict / Set 的 `+` 合并：此前生成的代码**根本无法编译**
+//
+// Rust 的 std **没有**为 BTreeMap / Vec / HashSet 实现 `Add`（已实证：
+// 三者全部 E0369「cannot add X to X」）。而通用路径对 dict/set 直接透传
+// `+` ⇒ `d = d + BTreeMap::from([(i, i)])` / `s = s + HashSet::from([i])`
+// 必然编译失败。这不是性能问题而是**硬缺陷**，本组用例钉住修复后的行为。
+//
+// 附带收益：单条目改为 insert 后零分配（不再每轮新建一张 1-entry 的表）。
+// 严格 A/B（8000 / 50000 元素，两侧仅差这一行）：21.3 vs 22.8ms /
+// 28.1 vs 29.0ms —— **在噪声内无差异**。如实记录：本次收益是「能编译」，不是「更快」。
+//════════════════════════════════════════════════════════════════════
+
+/// 缺陷E：dict 累加此前 E0369 编译失败，现在可编译可运行，且走 insert 零分配。
+#[test]
+fn fix_e_dict_accumulate_uses_insert_not_add() {
+    let src = r#"
+def fill(n: int) -> Dict<int, int> =
+    mut d: Dict<int, int> = Dict()
+    mut i = 0
+    while i < n:
+        d = d + {i: i}
+        i = i + 1
+    d
+
+def main() =
+    println(fill(3).len())
+"#;
+    let r = run_lz("fix_e_dict_acc", src, &[]);
+    assert!(r.ok, "dict累加应可编译运行（此前 E0369）：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("d.insert(i, i);"),
+        "单条目 dict 字面量应走 insert（零分配）：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("d = d +"),
+        "不得再透传 Rust 未实现的 Add 运算符：\n{}",
+        r.rs_text
+    );
+}
+
+/// 缺陷E 的 set 版本：此前同样 E0369。
+#[test]
+fn fix_e_set_accumulate_uses_insert_not_add() {
+    let src = r#"
+def fill(n: int) -> Set<int> =
+    mut s: Set<int> = Set()
+    mut i = 0
+    while i < n:
+        s = s + {i}
+        i = i + 1
+    s
+
+def main() =
+    println(fill(3).len())
+"#;
+    let r = run_lz("fix_e_set_acc", src, &[]);
+    assert!(r.ok, "set 累加应可编译运行（此前 E0369）：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("s.insert(i);"),
+        "单元素 set 字面量应走 insert：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("s = s +"),
+        "不得再透传 Rust 未实现的 Add 运算符：\n{}",
+        r.rs_text
+    );
+}
+
+/// 多条目 dict 字面量 → extend([(k, v), ..])，语义与逐条 insert 等价。
+#[test]
+fn fix_e_dict_multi_entry_literal_extends() {
+    let src = r#"
+def main() =
+    mut d: Dict<int, int> = Dict()
+    d = d + {1: 1, 2: 4, 3: 9}
+    println(d.len())
+"#;
+    let r = run_lz("fix_e_dict_multi", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("d.extend([(1i64, 1i64), (2i64, 4i64), (3i64, 9i64)]);"),
+        "多条目应走 extend([(k, v), ..])：\n{}",
+        r.rs_text
+    );
+}
+
+/// 多元素 set 字面量 → extend([..])。
+#[test]
+fn fix_e_set_multi_element_literal_extends() {
+    let src = r#"
+def main() =
+    mut s: Set<int> = Set()
+    s = s + {7, 8, 9}
+    println(s.len())
+"#;
+    let r = run_lz("fix_e_set_multi", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("s.extend([7i64, 8i64, 9i64]);"),
+        "多元素应走 extend([..])：\n{}",
+        r.rs_text
+    );
+}
+
+/// 变量右操作数 → extend(rhs)；实参文本与「道德等价基线」一致，move 语义不变。
+#[test]
+fn fix_e_dict_and_set_variable_rhs_extends() {
+    let src = r#"
+def merge_d(a: Dict<int, int>, b: Dict<int, int>) -> Dict<int, int> =
+    mut d = Dict()
+    d = a
+    d = d + b
+    d
+
+def merge_s(a: Set<int>, b: Set<int>) -> Set<int> =
+    mut s = Set()
+    s = a
+    s = s + b
+    s
+
+def main() =
+    println(merge_d({1: 1}, {2: 2}).len())
+    println(merge_s({1}, {2}).len())
+"#;
+    let r = run_lz("fix_e_dict_var", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "2\n2");
+    assert!(
+        r.rs_text.contains("d.extend(b);"),
+        "dict 变量右操作数应直接 extend：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("s.extend(b);"),
+        "set 变量右操作数应直接 extend：\n{}",
+        r.rs_text
+    );
+}
+
+/// 回归：list 的三种形态不受 Dict/Set 扩展影响（push / extend([..]) / extend(rhs)）。
+#[test]
+fn fix_e_list_forms_still_intact_after_container_extension() {
+    let src = r#"
+def main() =
+    mut xs: List<int> = []
+    xs = xs + [1]
+    xs = xs + [2, 3]
+    let other: List<int> = [4]
+    xs = xs + other
+    println(xs.len())
+"#;
+    let r = run_lz("fix_e_list_intact", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "4");
+    assert!(r.rs_text.contains("xs.push(1i64);"), "单元素仍走 push：\n{}", r.rs_text);
+    assert!(
+        r.rs_text.contains("xs.extend([2i64, 3i64]);"),
+        "多元素仍走 extend([..])：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("xs.extend(other);"),
+        "变量仍走 extend(rhs)：\n{}",
         r.rs_text
     );
 }

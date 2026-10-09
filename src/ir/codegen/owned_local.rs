@@ -43,17 +43,26 @@ pub(crate) enum LocalKind {
     Str,
     /// `Vec<T>`：可 `push` / `extend`。
     List,
+    /// `BTreeMap<K, V>`：可 `insert` / `extend`。
+    Dict,
+    /// `HashSet<T>`：可 `insert` / `extend`。
+    Set,
     /// 只读借用形参（`ref x: T` → Rust `&T`）：不可赋值，只用于诊断。
     ReadonlyBorrow,
 }
 
-/// 列表追加的落地形态。
-pub(crate) enum ListAppend<'e> {
-    /// 单元素列表字面量 → `push(e)`（零分配，优于 extend(vec![e])）。
+/// 容器追加的落地形态（List / Dict / Set 共用）。
+pub(crate) enum ContainerAppend<'e> {
+    /// 单元素 → `push(e)`（列表，零分配，优于 `extend(vec![e])`）。
     Push(&'e Expr),
-    /// 多元素列表字面量 → `extend(vec![..])`。
-    ExtendLit(Vec<String>),
-    /// 其他表达式 → `extend(<expr>)`（与通用路径的实参文本一致）。
+    /// 单元素 → `insert(e)`（Set，零分配）。
+    InsertOne(&'e Expr),
+    /// 多元素列表/集合字面量 → `extend([e, ..])`。
+    ExtendItems(Vec<String>),
+    /// 字典字面量的条目：单条目 → `insert(k, v)`（零分配），
+    /// 多条目 → `extend([(k, v), ..])`。
+    ExtendPairs(Vec<(String, String)>),
+    /// 其他表达式 → `extend(<expr>)`（与通用路径的实参文本一致，move 语义不变）。
     ExtendExpr(&'e Expr),
 }
 
@@ -84,6 +93,20 @@ impl CodeGen {
             .insert(name.to_string(), LocalKind::List);
     }
 
+    /// 登记 by-value 的字典局部绑定。
+    pub(crate) fn owned_local_mark_dict(&self, name: &str) {
+        self.owned_locals
+            .borrow_mut()
+            .insert(name.to_string(), LocalKind::Dict);
+    }
+
+    /// 登记 by-value 的集合局部绑定。
+    pub(crate) fn owned_local_mark_set(&self, name: &str) {
+        self.owned_locals
+            .borrow_mut()
+            .insert(name.to_string(), LocalKind::Set);
+    }
+
     /// 撤销登记（`ref` 绑定遮蔽同名 by-value 绑定时）。
     pub(crate) fn owned_local_unmark(&self, name: &str) {
         self.owned_locals.borrow_mut().remove(name);
@@ -106,24 +129,98 @@ impl CodeGen {
         Some(rhs)
     }
 
-    /// `value` 是否形如 `name + <list>`（列表追加），是则给出落地形态。
-    pub(crate) fn list_append_rhs<'e>(&self, name: &str, value: &'e Expr) -> Option<ListAppend<'e>> {
+    /// `value` 是否形如 `name + <容器>`（列表/字典/集合合并），是则给出落地形态。
+    ///
+    /// 通用路径对四类容器都发Rust 原生 `+`：
+    /// - `Vec`：`{ let mut __cat = a.clone(); __cat.extend(..); __cat }`（每轮全量 clone）
+    /// - `BTreeMap`/`HashSet`：`d = d + BTreeMap::from([(k, v)])` —— 每轮先**新建一张表**
+    ///   再整表合并，字典/集合越大越慢（同样 O(n^2)）。
+    /// 本函数把它们统一降级为 `insert` / `push` / `extend`。
+    pub(crate) fn container_append_rhs<'e>(
+        &self,
+        name: &str,
+        value: &'e Expr,
+    ) -> Option<ContainerAppend<'e>> {
         let (lhs, rhs) = self.add_operands(name, value)?;
-        if !is_list_ty(&lhs.ty) || !is_list_ty(&rhs.ty) {
-            return None;
-        }
-        match &rhs.kind {
-            // 列表字面量：单元素走 push（零分配），多元素走 extend(vec![..])
-            ExprKind::ListLit(elems) if elems.len() == 1 => Some(ListAppend::Push(&elems[0])),
-            ExprKind::ListLit(elems) => {
-                let mut parts = Vec::with_capacity(elems.len());
-                for e in elems {
-                    parts.push(self.gen_expr(e));
+        match self.owned_local_kind(name)? {
+            LocalKind::List => {
+                if !is_list_ty(&lhs.ty) || !is_list_ty(&rhs.ty) {
+                    return None;
                 }
-                Some(ListAppend::ExtendLit(parts))
+                match &rhs.kind {
+                    // 列表字面量：单元素走 push（零分配），多元素走 extend([..])
+                    ExprKind::ListLit(elems) if elems.len() == 1 => {
+                        Some(ContainerAppend::Push(&elems[0]))
+                    }
+                    ExprKind::ListLit(elems) => {
+                        let mut parts = Vec::with_capacity(elems.len());
+                        for e in elems {
+                            parts.push(self.gen_expr(e));
+                        }
+                        Some(ContainerAppend::ExtendItems(parts))
+                    }
+                    // 其他：实参文本与通用路径一致，move 语义不变
+                    _ => Some(ContainerAppend::ExtendExpr(rhs)),
+                }
             }
-            // 其他：实参文本与通用路径一致（`__cat.extend(<rhs>)`），语义不变
-            _ => Some(ListAppend::ExtendExpr(rhs)),
+            LocalKind::Dict => {
+                if !is_dict_ty(&lhs.ty) {
+                    return None;
+                }
+                // Dict 字面量：StructCtor { name: "Dict", fields: [("_k0", k), ("_v0", v), ..] }
+                if let ExprKind::StructCtor { name: n, fields } = &rhs.kind {
+                    if n == "Dict" || n == "BTreeMap" || n == "HashMap" {
+                        let mut pairs: Vec<(String, String)> = Vec::new();
+                        let mut i = 0;
+                        loop {
+                            let key = fields.iter().find(|(n, _)| *n == format!("_k{}", i));
+                            let val = fields.iter().find(|(n, _)| *n == format!("_v{}", i));
+                            match (key, val) {
+                                (Some((_, k)), Some((_, v))) => {
+                                    pairs.push((self.gen_expr(k), self.gen_expr(v)));
+                                }
+                                _ => break,
+                            }
+                            i += 1;
+                        }
+                        if pairs.is_empty() {
+                            // 空 Dict 字面量：无条目可追加（等价于 no-op），交回通用路径
+                            return None;
+                        }
+                        return Some(ContainerAppend::ExtendPairs(pairs));
+                    }
+                }
+                if !is_dict_ty(&rhs.ty) {
+                    return None;
+                }
+                Some(ContainerAppend::ExtendExpr(rhs))
+            }
+            LocalKind::Set => {
+                if !is_set_ty(&lhs.ty) {
+                    return None;
+                }
+                // Set 字面量 `{a, b}` 被脱糖成 `set!(a, b)` 调用
+                if let ExprKind::Call { callee, args, .. } = &rhs.kind {
+                    if matches!(&callee.kind, ExprKind::Var(v) if v == "set!" || v == "set") {
+                        if args.len() == 1 {
+                            return Some(ContainerAppend::InsertOne(&args[0]));
+                        }
+                        if args.len() > 1 {
+                            let mut parts = Vec::with_capacity(args.len());
+                            for a in args {
+                                parts.push(self.gen_expr(a));
+                            }
+                            return Some(ContainerAppend::ExtendItems(parts));
+                        }
+                        return None;
+                    }
+                }
+                if !is_set_ty(&rhs.ty) {
+                    return None;
+                }
+                Some(ContainerAppend::ExtendExpr(rhs))
+            }
+            LocalKind::ReadonlyBorrow | LocalKind::Str => None,
         }
     }
 
@@ -168,6 +265,28 @@ pub(crate) fn is_list_ty(ty: &IrType) -> bool {
 }
 
 /// 表达式本身是否产出字符串（字面量 / f-string / 字符串方法链）。
+/// IR 类型是否为字典（BTreeMap / HashMap）。
+pub(crate) fn is_dict_ty(ty: &IrType) -> bool {
+    match ty {
+        IrType::Named { path, .. } => {
+            let p = path.as_str();
+            p == "Dict" || p == "HashMap" || p == "BTreeMap"
+        }
+        _ => false,
+    }
+}
+
+/// IR 类型是否为集合（HashSet）。
+pub(crate) fn is_set_ty(ty: &IrType) -> bool {
+    match ty {
+        IrType::Named { path, .. } => {
+            let p = path.as_str();
+            p == "Set" || p == "HashSet"
+        }
+        _ => false,
+    }
+}
+
 fn is_str_producing(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Lit(LitKind::Str(_)) | ExprKind::Lit(LitKind::FStr(_)) => true,
