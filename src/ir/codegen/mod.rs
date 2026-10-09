@@ -17,7 +17,7 @@ mod emit;
 mod expr_gen;
 mod magic_gen;
 mod marks;
-mod owned_str;
+mod owned_local;
 mod pattern_gen;
 mod scan;
 mod stmt_gen;
@@ -353,7 +353,7 @@ pub struct CodeGen {
     /// 由 `gen_fn_def` 入口清空；只有登记在册的变量才允许原地追加，
     /// 从而保证不会把 `&str` / `&String` 形参误当独占 String 改写。
     /// 详见 owned_str.rs 的安全性论证。
-    owned_str_vars: owned_str::OwnedStrSet,
+    owned_locals: owned_local::OwnedLocals,
     buf: String,
 }
 impl CodeGen {
@@ -481,7 +481,7 @@ impl CodeGen {
             embed_modules: std::collections::HashSet::new(),
             // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
             vec_cap_hint: std::cell::RefCell::new(None),
-            owned_str_vars: std::cell::RefCell::new(std::collections::HashSet::new()),
+            owned_locals: std::cell::RefCell::new(std::collections::HashMap::new()),
             buf: String::new(),
         }
     }

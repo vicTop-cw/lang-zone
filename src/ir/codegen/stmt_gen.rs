@@ -3,7 +3,7 @@
 
 use super::types_emit::is_bigint_ty;
 use super::types_emit::is_complex_ty;
-use super::owned_str;
+use super::owned_local;
 use super::*;
 
 impl CodeGen {
@@ -475,32 +475,69 @@ impl CodeGen {
                 } else {
                     name.clone()
                 };
-                // 运行时优化：`s = s + rhs` → `s.push_str(&rhs)`。
-                // 必须在「已声明 → 纯赋值」分支之前拦截，否则会退化成
-                // `s = s.to_string() + &"ab".to_string()[..]`（每轮 3 次堆分配 +
-                // 累积串被完整拷贝两遍 ⇒ O(n²)）。仅对登记在册的 by-value str
-                // 局部变量生效（ref/ 形参不在册），详见 owned_str.rs。
-                if self.declared.contains(&safe_name) && self.owned_str_contains(name) {
-                    if let Some(rhs) = self.str_append_rhs(name, value) {
-                        let mut rhs_s = self.gen_expr(rhs);
-                        // 字符串字面量：gen_expr 给的是 `"ab".to_string()`（LZ 值语义
-                        // 的 owned String），而 push_str 只要 `&'static str` —— 剥掉
-                        // 后缀即省掉一次纯浪费的堆分配。
-                        let is_str_lit = matches!(&rhs.kind, ExprKind::Lit(LitKind::Str(_)));
-                        if is_str_lit {
-                            if let Some(raw) = rhs_s.strip_suffix(".to_string()") {
-                                rhs_s = raw.to_string();
+                // 运行时优化：`s = s + rhs` / `a = a + rhs` → 原地追加。
+                // 必须在「已声明 → 纯赋值」分支之前拦截，否则字符串会退化成
+                // `s.to_string() + &"ab".to_string()[..]`（每轮 3 次堆分配 + 累积串
+                // 被完整拷贝两遍 ⇒ O(n²)），列表会退化成 `a.clone()` + extend
+                // （每轮一次全量拷贝，同样 O(n²)）。
+                // 仅对登记在册的 by-value 局部绑定生效（ref 绑定/形参不在册），
+                // 详见 owned_local.rs。
+                if self.declared.contains(&safe_name) {
+                    match self.owned_local_kind(name) {
+                        Some(owned_local::LocalKind::Str) => {
+                            if let Some(rhs) = self.str_append_rhs(name, value) {
+                                let mut rhs_s = self.gen_expr(rhs);
+                                // 字符串字面量：gen_expr 给的是 `"ab".to_string()`（LZ 值语义
+                                // 的 owned String），而 push_str 只要 `&'static str` —— 剥掉
+                                // 后缀即省掉一次纯浪费的堆分配。
+                                let is_str_lit =
+                                    matches!(&rhs.kind, ExprKind::Lit(LitKind::Str(_)));
+                                if is_str_lit {
+                                    if let Some(raw) = rhs_s.strip_suffix(".to_string()") {
+                                        rhs_s = raw.to_string();
+                                    }
+                                }
+                                // 仅字符串**字面量** 已是 &'static str 形态；f-string 的
+                                // `format!(..)` 与变量/调用结果都返回 String，必须加 &
+                                // 才能匹配 push_str(&str)
+                                let rhs_is_borrowed = is_str_lit;
+                                self.emit_line(&format!(
+                                    "{}.push_str({});",
+                                    safe_name,
+                                    owned_local::push_str_arg(&rhs_s, rhs_is_borrowed)
+                                ));
+                                return;
                             }
                         }
-                        // 仅字符串**字面量** 已是 &'static str 形态；f-string 的 `format!(..)` 与
-                        // 变量/调用结果都返回 String，必须加 &才能匹配 push_str(&str)
-                        let rhs_is_borrowed = is_str_lit;
-                        self.emit_line(&format!(
-                            "{}.push_str({});",
-                            safe_name,
-                            owned_str::push_str_arg(&rhs_s, rhs_is_borrowed)
-                        ));
-                        return;
+                        Some(owned_local::LocalKind::List) => {
+                            if let Some(plan) = self.list_append_rhs(name, value) {
+                                match plan {
+                                    owned_local::ListAppend::Push(elem) => {
+                                        let elem_s = self.gen_expr(elem);
+                                        self.emit_line(&format!("{}.push({});", safe_name, elem_s));
+                                    }
+                                    owned_local::ListAppend::ExtendLit(parts) => {
+                                        self.emit_line(&format!(
+                                            "{}.extend(vec![{}]);",
+                                            safe_name,
+                                            parts.join(", ")
+                                        ));
+                                    }
+                                    owned_local::ListAppend::ExtendExpr(rhs) => {
+                                        // 实参文本与通用路径的 `__cat.extend(..)` 完全
+                                        // 一致 ⇒ move 语义不变（后续再用该变量仍会
+                                        // 编译失败，与改写前同构）
+                                        let rhs_s = self.gen_expr(rhs);
+                                        self.emit_line(&format!(
+                                            "{}.extend({});",
+                                            safe_name, rhs_s
+                                        ));
+                                    }
+                                }
+                                return;
+                            }
+                        }
+                        None => {}
                     }
                 }
                 // 自引用重绑定（`let parts = parts + [p]`）：虽未写 mut，但 value
@@ -540,17 +577,17 @@ impl CodeGen {
                 {
                     self.str_typed_vars.insert(safe_name.clone());
                 }
-                // 登记「独占 String 局部绑定」（`s = s + x` → push_str 的前提）。
-                // 只登记 by-value 且非 `Ref(Str)`/`MutRef(Str)` 类型：这两类在 Rust
-                // 侧是 `&str`/`&mut String`，原地追加会改到别人的值（且 push_str
+                // 登记「独占局部绑定」（原地追加的前提）。
+                // 只登记 by-value 且非 `Ref(..)`/`MutRef(..)` 类型：这两类在 Rust
+                // 侧是 `&T`/`&mut T`，原地追加会改到别人的值（且 push_str/push
                 // 根本无法编译）。`ref r = x` 走下方独立发射路径，也不登记。
-                if owned_str::is_str_ty(ty)
-                    && !*is_ref
-                    && !matches!(ty, IrType::Ref(_) | IrType::MutRef(_))
-                {
-                    self.owned_str_mark(&safe_name);
+                let by_value = !*is_ref && !matches!(ty, IrType::Ref(_) | IrType::MutRef(_));
+                if by_value && owned_local::is_str_ty(ty) {
+                    self.owned_local_mark_str(&safe_name);
+                } else if by_value && owned_local::is_list_ty(ty) {
+                    self.owned_local_mark_list(&safe_name);
                 } else if *is_ref {
-                    self.owned_str_unmark(&safe_name);
+                    self.owned_local_unmark(&safe_name);
                 }
                 // 字段插值判定要的是「这个变量的 IR 类型」，比 str_typed_vars 宽一档：
                 // builder 在 value 上带的 ty 已能认出 struct 值（`let res = MyResource(...)`），

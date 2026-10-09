@@ -334,7 +334,7 @@ impl CodeGen {
         // 每函数清空「by-value str 局部绑定」登记表（`s = s + x` → push_str 的
         // 前提）。必须按函数清空：形参从不在这里登记，若跨函数残留会把同名
         // `ref s: str` 形参误判为独占 String。
-        self.owned_str_reset();
+        self.owned_local_reset();
         // 每函数清空延迟惰性绑定表（`@lazy`），避免跨函数泄漏（T04/AC4）
         self.lazy_bindings.clear();
         // 预扫描函数体，收集需自动加 mut 的局部 let 变量名

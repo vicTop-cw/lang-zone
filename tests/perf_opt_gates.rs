@@ -682,3 +682,152 @@ def main() =
         r.rs_text
     );
 }
+
+// ════════════════════════════════════════════════════════════════════
+// 运行时性能：列表累加改原地追加（`a = a + rhs` → `a.push(..)` / `a.extend(..)`）
+//
+// 动机（实测）：通用列表加法发`a = { let mut __cat = a.clone(); __cat.extend(..); __cat }`
+// —— **每轮一次全量 clone**，累加模式下拷贝量 O(n^2)。同机严格 A/B（两份 .rs 仅差
+// 这一行，2 万元素）：230.6ms → 12.6ms（18.3×），峰值内存 5192KB → 4508KB（-13%）。
+// 规模越大差距越夸张（旧的随 n 平方增长，新的随 n 线性）。
+// 本组用例钉住「该改写的改、不该改的绝不改」。
+// ════════════════════════════════════════════════════════════════════
+
+/// 单元素列表字面量 → `push`（零分配）。
+#[test]
+fn e3_list_append_single_literal_becomes_push() {
+    let src = r#"
+def build(n: int) -> List<int> =
+    mut acc: List<int> = []
+    mut i = 0
+    while i < n:
+        acc = acc + [i]
+        i = i + 1
+    acc
+
+def total(xs: List<int>) -> int =
+    mut s = 0
+    mut k = 0
+    while k < xs.len():
+        s = s + xs[k]
+        k = k + 1
+    s
+
+def main() =
+    let xs = build(4)
+    print(xs.len(), total(xs))
+"#;
+    let r = run_lz("e3_list_push", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "4 6");
+    assert!(
+        r.rs_text.contains("acc.push(i);"),
+        "单元素字面量应走 push：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("__cat"),
+        "列表累加不应再有 clone+extend 模板：\n{}",
+        r.rs_text
+    );
+}
+
+/// 多元素列表字面量 → `extend(vec![..])`，元素按序追加。
+#[test]
+fn e3_list_append_multi_literal_becomes_extend() {
+    let src = r#"
+def main() =
+    mut xs: List<int> = [0]
+    xs = xs + [1, 2, 3]
+    mut s = 0
+    mut k = 0
+    while k < xs.len():
+        s = s + xs[k]
+        k = k + 1
+    print(xs.len(), s)
+"#;
+    let r = run_lz("e3_list_extend_lit", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "4 6");
+    assert!(
+        r.rs_text.contains("xs.extend(vec![1i64, 2i64, 3i64]);"),
+        "多元素字面量应走 extend(vec![..])：\n{}",
+        r.rs_text
+    );
+}
+
+/// 变量右操作数 → `extend(rhs)`（实参文本与通用路径一致，move 语义不变）。
+#[test]
+fn e3_list_append_var_becomes_extend() {
+    let src = r#"
+def main() =
+    let a: List<int> = [1, 2]
+    let b: List<int> = [3, 4]
+    mut r = a
+    r = r + b
+    mut s = 0
+    mut k = 0
+    while k < r.len():
+        s = s + r[k]
+        k = k + 1
+    print(r.len(), s)
+"#;
+    let r = run_lz("e3_list_extend_var", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "4 10");
+    assert!(
+        r.rs_text.contains("r.extend(b);"),
+        "变量右操作数应直接 extend：\n{}",
+        r.rs_text
+    );
+}
+
+/// 形参不做登记：`a = a + b`（a 是形参）必须保留通用 clone+extend 路径，
+/// 这样「参数是否独占」的判断永远不需要跨函数推断。
+#[test]
+fn e3_list_param_is_not_rewritten() {
+    let src = r#"
+def cat(mut a: List<int>, b: List<int>) -> List<int> =
+    a = a + b
+    a
+
+def main() =
+    let ys = cat([1], [2])
+    mut s = 0
+    mut k = 0
+    while k < ys.len():
+        s = s + ys[k]
+        k = k + 1
+    print(s)
+"#;
+    let r = run_lz("e3_list_param", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("__cat"),
+        "形参不登记，必须保留通用 clone+extend：\n{}",
+        r.rs_text
+    );
+}
+
+/// 字符串与列表两类登记互不串扰：同一个函数里str 追加仍走 push_str，
+/// 列表追加走 push。
+#[test]
+fn e3_str_and_list_registries_do_not_cross_talk() {
+    let src = r#"
+def main() =
+    mut s = ""
+    mut xs: List<int> = []
+    mut i = 0
+    while i < 3:
+        s = s + "a"
+        xs = xs + [i]
+        i = i + 1
+    print(s, xs.len())
+"#;
+    let r = run_lz("e3_mixed", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "aaa 3");
+    assert!(r.rs_text.contains(r#"s.push_str("a")"#), "str 走 push_str：\n{}", r.rs_text);
+    assert!(r.rs_text.contains("xs.push(i);"), "list 走 push：\n{}", r.rs_text);
+}
