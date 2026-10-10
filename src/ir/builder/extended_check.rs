@@ -562,15 +562,17 @@ pub(crate) fn ex_check_fn(f: &ast::Function, base: &TypeCtx, w: &ExWalker) {
     );
     // 函数体最后一个表达式语句的返回类型检查（return_type_mismatch2）
     //
-    // 生成器（iterator）**排除**：它声明的返回类型是「yield 出的元素类型」（`-> int`），
-    // 而函数体尾表达式是 `yield` / `yield from`，推断类型是迭代器对象本身
-    // （`Itor<Vec<int>>`）。二者语义本就不同类，拿尾表达式比声明类型会误报
+    // 生成器（iterator）**排除**：它声明的返回类型是「yield 出的元素类型」（如 `-> int`），
+    // 而函数体的尾表达式是 `yield` / `yield from`，推断类型是迭代器对象本身
+    // （`Itor<Vec<int>>`）。二者语义上本就不同类，拿尾表达式去比声明类型会误报
     // 「返回类型不匹配：期望 int，实际 Itor<Vec<int>>」，导致**递归生成器无法编译**
     // （`yield from self(...)` 是生成器递归的唯一表达方式）。
-    if f.is_iterator {
-        return;
-    }
-    if let (Some(rty), Some(AstStmt::Expr(last))) = (ret_ty.as_ref(), f.body.last()) {
+    if let (Some(rty), Some(AstStmt::Expr(last))) =
+        (ret_ty.as_ref(), f.body.last())
+    {
+        if f.is_iterator {
+            return;
+        }
         let ety = ex_infer(last, &work, &env);
         // try/catch 有 catch 分支时：try body 返回 Result<T,E>（raises），
         // 但 catch 已处理错误，整体等价于 T。解包 Result 与期望类型比较。
@@ -619,20 +621,27 @@ pub(crate) fn ex_check_stmts(
             AstStmt::Expr(e) => {
                 ex_check_expr(e, work, env, gens, ret, hinted, w);
             }
-            AstStmt::Let { name, value, .. } => {
+            AstStmt::Let { name, value, ty, .. } => {
                 ex_check_expr(value, work, env, gens, ret, hinted, w);
+                // 显式类型注解优先：注解是变量权威类型（与 codegen 一致），
+                // 否则退回值推断。修复 T0r6：此前忽略 `: bigint` 注解，
+                // 把 bigint 变量登记成 Int128，导致传给 `bigint` 形参时类型不匹配。
                 // 绑定自字符串单字符索引的变量：codegen 按上下文多态生成
                 // （String 或 i64 码点），类型无法定论 → 登记 Any 防误报
-                let vt = if ex_is_str_char_index(value, work, env) {
+                let vt = if let Some(ann) = ty {
+                    from_ast_type_with_generics(ann, &gens)
+                } else if ex_is_str_char_index(value, work, env) {
                     IrType::Any
                 } else {
                     ex_infer(value, work, env)
                 };
                 env.insert(name.clone(), vt);
             }
-            AstStmt::Const { name, value, .. } => {
+            AstStmt::Const { name, value, ty, .. } => {
                 ex_check_expr(value, work, env, gens, ret, hinted, w);
-                let vt = if ex_is_str_char_index(value, work, env) {
+                let vt = if let Some(ann) = ty {
+                    from_ast_type_with_generics(ann, &gens)
+                } else if ex_is_str_char_index(value, work, env) {
                     IrType::Any
                 } else {
                     ex_infer(value, work, env)
@@ -1293,7 +1302,18 @@ pub(crate) fn ex_check_expr(
             let lt = ex_infer(left, work, env);
             let rt = ex_infer(right, work, env);
             // use_result_without_unwrap：Result 直接参与运算
-            if matches!(&lt, IrType::Result { .. }) || matches!(&rt, IrType::Result { .. }) {
+            // 例外：walrus 赋值（`n := step()`）会解包 Result 并把内层值绑定给变量，
+            // 整个 walrus 表达式的有效类型是内层值而非 Result（combo_while_guard_try：
+            // `while (n := step()) <= 3`，step() 返回 int raises E）。故 walrus（含括号包裹）
+            // 作为操作数时不报此错，避免误报。
+            let is_unwrap_form = |e: &AstExpr| match e {
+                AstExpr::Walrus { .. } => true,
+                AstExpr::Paren(inner) => matches!(inner.as_ref(), AstExpr::Walrus { .. }),
+                _ => false,
+            };
+            let lt_bad = matches!(&lt, IrType::Result { .. }) && !is_unwrap_form(left.as_ref());
+            let rt_bad = matches!(&rt, IrType::Result { .. }) && !is_unwrap_form(right.as_ref());
+            if lt_bad || rt_bad {
                 work.report_error("Result 值未经解包（unwrap/?）直接参与运算".to_string());
             }
             // str_plus_int：字符串与数字直接相加（含 fstring 混拼场景）

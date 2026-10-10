@@ -365,6 +365,11 @@ fn rustc_compile(rs: &Path, exe: &Path) -> Result<(), String> {
         .arg(rs)
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!(
+            "dependency={}",
+            builtins.parent().unwrap().join("deps").display()
+        ))
         .arg("-o")
         .arg(exe);
     if rustc_incremental_enabled() {

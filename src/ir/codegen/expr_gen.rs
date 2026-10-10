@@ -376,12 +376,15 @@ impl CodeGen {
                     // type-pack 切片模式绑定（03d §2.8 方案 B）：臂体内引用 a
                     // 需 a.clone()（a 绑定 &Ts，返回/使用需 owned Ts，E0308 修复）
                     format!("{}.clone()", name)
-                } else if matches!(&expr.ty, IrType::Fn { .. })
-                    && self.top_level_fns.contains(name.as_str())
+                } else if self.top_level_fns.contains(name.as_str())
+                    && matches!(&expr.ty, IrType::Fn { .. } | IrType::Any)
                 {
                     // IR-003：顶层 def 作一等值 → 装箱为 Arc<dyn Fn … + Send + Sync>（可 clone，
                     // Box<dyn Fn> 不实现 Clone → E0599）。
-                    // 局部 fn-let 已在 let 值位置装箱，不重复装箱（避免双层 Rc）
+                    // 局部 fn-let 已在 let 值位置装箱，不重复装箱（避免双层 Rc）。
+                    // builder 对函数名引用常推导为 IrType::Any（lookup_var 不含函数表），
+                    // 故此处对 Any 也装箱；仅当 expr.ty 为具体非 Fn 类型（局部变量遮蔽同名
+                    // 顶层 fn）时不装箱，避免误包。
                     format!("Arc::new({})", name)
                 } else {
                     name.clone()
@@ -514,7 +517,20 @@ impl CodeGen {
                         };
                     }
                 }
-                let callee_s = self.gen_expr(callee);
+                // 调用位置的顶层 def 直接按 fn item 调用，不装箱：
+                // 装箱（Arc::new）只用于「把 def 当值传递/返回」（如
+                // `double if flag else inc`）。否则 collect_list(x) 会生成
+                // `Arc::new(collect_list)(x)`（E0599 Arc<dyn Fn> 不可直接调用）
+                // 与 `::<T>` turbofish 落到 Arc 上（E0107 解析错误）。
+                let callee_s = if let ExprKind::Var(name) = &callee.kind {
+                    if self.top_level_fns.contains(name.as_str()) {
+                        name.clone()
+                    } else {
+                        self.gen_expr(callee)
+                    }
+                } else {
+                    self.gen_expr(callee)
+                };
                 // 如果 callee 是 Lambda（立即调用闭包），需要用括号包裹
                 // move || { body }() → (move || { body })()
                 let callee_s = if matches!(&callee.kind, ExprKind::Lambda { .. }) {
@@ -669,6 +685,15 @@ impl CodeGen {
                                                     params.iter().map(|pt| self.rust_type(pt)).collect();
                                                 let type_text =
                                                     format!("fn({}) -> {}", ps.join(", "), self.rust_type(ret));
+                                                // 顶层 def 作值会被 Var 分支装箱为
+                                                // `Arc::new(add)`（IR-003），但 fn 指针
+                                                // 强转需 fn item：剥掉 Arc 包装，否则
+                                                // `Arc::new(add) as fn(..)` 报 E0605
+                                                // non-primitive cast（lib_tree/tree.lz）。
+                                                let s = s
+                                                    .strip_prefix(&format!("Arc::new({})", name))
+                                                    .map(|_| name.clone())
+                                                    .unwrap_or(s);
                                                 if is_ref_fn {
                                                     return format!("&({} as {})", s, type_text);
                                                 } else {
@@ -2454,14 +2479,21 @@ impl CodeGen {
                         if matches!(&base.kind, ExprKind::Var(n) if n != "self")
                             && field.chars().next().map_or(false, |c| c.is_uppercase())
                             && !self.known_types.contains(field.as_str())
-                            // 关联类型路径（I::Item::default()）只出现在泛型函数/impl 中；
-                            // 非泛型上下文里 `Ordering.Less.is_lt()` 是枚举变体方法调用，
-                            // 误判会生成 `Ordering.Less::is_lt()`（E0601 语法错误）
                             && (self.in_generic_fn
                                 || self.in_impl_generic
-                                || !self.param_renames.is_empty())
+                                || !self.param_renames.is_empty()
+                                // `Self.Item.default()` 出现在 trait 默认方法
+                                // （Iterator.sum/product）：`Self` 基类型即关联类型
+                                // 路径信号，不受「泛型上下文」限制
+                                || matches!(&base.kind, ExprKind::Var(n) if n == "Self"))
                 );
                 if recv_is_assoc_path {
+                    // `default()` 用显式限定 `<T as Default>::default()`：`Self::Item`
+                    // 是关联**类型**而非关联函数，`Self::Item::default()` 在 Rust 中
+                    // 仍解析为「Self 的名为 Item 的关联函数」→ E0599。
+                    if method == "default" && args.is_empty() {
+                        return format!("<{} as Default>::default()", recv);
+                    }
                     let assoc_sep = "::";
                     // 方法调用用 :: 连接（I::Item::default()）
                     return if args.is_empty() {
@@ -3301,7 +3333,14 @@ impl CodeGen {
                 let recv_is_dict = matches!(&receiver.ty, IrType::Named { path, .. }
                     if path == "Dict" || path == "HashMap");
                 // 用户 struct 同名普通方法（如 lib_hashmap 的 keys()）优先于 DictExt
+                //
+                // 仅当本模块确实有 DictExt（本模块存在 `impl Dict/HashMap …` 块时
+                // 由 generate() 登记进 trait_names）才走 trait 路由；否则回落到
+                // BTreeMap 固有 keys()/values()——独立编译的库（如 FIND_BUG/lib_json，
+                // 不 import dict.lz）根本没有 DictExt trait，强制路由会报
+                // E0576 cannot find method `keys` in trait `DictExt`。
                 if recv_is_dict
+                    && self.trait_names.contains("DictExt")
                     && !user_plain.contains(method.as_str())
                     && matches!(
                         method.as_str(),
@@ -3315,15 +3354,19 @@ impl CodeGen {
                     } else {
                         format!("&({})", recv)
                     };
-                    // DictExt 方法名映射：keys→lz_keys, values→lz_values, items→lz_items
-                    let dict_method = match method.as_str() {
-                        "keys" => "lz_keys",
-                        "values" => "lz_values",
-                        "items" => "lz_items",
-                        _ => rust_method,
-                    };
+                    // DictExt 方法名映射：直接用 trait 声明名（keys/values/items）。
+                    // 原先映射到 lz_keys/lz_values/lz_items 是错的——DictExt 实际
+                    // 声明的是 `fn keys(&self) -> Vec<K>`，无 lz_ 前缀；此前被
+                    // `<dyn DictExt>` 的 E0038 抢先报错掩盖（E0576 名字找不到）。
+                    let dict_method = method.as_str();
+                    // 用完全限定调用 `<Dict<K,V> as DictExt<K,V>>::keys(...)`：
+                    // 带泛型参数 + 方法级 where 的 trait 不能作 trait object
+                    // （E0038 "DictExt is not dyn compatible"，dict.lz 的
+                    // DictIter/DictKeyIter/DictValueIter 构造点）。
+                    // 键泛型由 collect_dict_key_generics 统一注入 Ord。
                     return format!(
-                        "<dyn DictExt<_, _>>::{}({}, {})",
+                        "<{} as DictExt<_, _>>::{}({}, {})",
+                        self.rust_type(&receiver.ty),
                         dict_method,
                         recv_ref,
                         args_s.join(", ")
@@ -4146,10 +4189,21 @@ impl CodeGen {
                         lhs_s, rhs_s
                     );
                 }
+                // 多态 `+` 分派：仅当操作数是**裸**泛型形参（T）或 Any（真正多态——同一
+                // 份闭包体需对 i64 与 String 等同时合法）才经 LzAdd。关联类型路径
+                // （`I::Item`/`Self::Item`，名字含 `::`/`.`）在 LZ 侧带显式
+                // `where ... : Add<Output=...>` 约束，应走 Rust 原生 `+`；否则 iter.lz
+                // `sum`（where I.Item: Add<Output=I.Item>）走 LzAdd 报 E0277
+                // （`<I as IntoIterator>::Item: LzAdd` 不满足）。
+                let is_poly_add_ty = |t: &IrType| match t {
+                    IrType::Any => true,
+                    IrType::Generic(n) => !n.contains("::") && !n.contains('.'),
+                    _ => false,
+                };
                 if *op == BinOpKind::Add
                     && !self.in_math_fn
-                    && (matches!(&lhs.ty, IrType::Generic(_) | IrType::Any)
-                        || matches!(&rhs.ty, IrType::Generic(_) | IrType::Any))
+                    && !self.in_bounded_binop_fn
+                    && (is_poly_add_ty(&lhs.ty) || is_poly_add_ty(&rhs.ty))
                 {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
@@ -4428,6 +4482,19 @@ impl CodeGen {
                 };
                 let lhs_is_complex = is_complex_ty(lhs_ty);
                 let rhs_is_complex = is_complex_ty(rhs_ty);
+                // 非 Copy 数值类型（bigint / complex）参与算术时，操作数按值消费会移动
+                // 原变量，若之后复用则报 E0382（如 `let y = x * 2; print(x)`）。统一克隆
+                // 操作数以兼容值语义复用（Copy 类型 clone 零成本，不改变语义）。
+                let lhs_s = if is_bigint_ty(lhs_ty) || is_complex_ty(lhs_ty) {
+                    format!("({}).clone()", lhs_s)
+                } else {
+                    lhs_s
+                };
+                let rhs_s = if is_bigint_ty(rhs_ty) || is_complex_ty(rhs_ty) {
+                    format!("({}).clone()", rhs_s)
+                } else {
+                    rhs_s
+                };
                 // 复数提升：算术运算中一侧是 Complex、另一侧是数值 → 将数值侧提升为 Complex::new(x, 0.0)
                 // （如 `3.0 + 4.0i` → `Complex64::new(3.0, 0.0) + Complex64::new(0, 4)`）
                 if arith && lhs_is_complex && (rhs_is_numeric || rhs_is_f64) && !rhs_is_complex {
@@ -4713,11 +4780,25 @@ impl CodeGen {
                     }
                     "_Walrus" => {
                         // := walrus 运算符：变量已在 emit_walrus_predecls 中预声明
-                        // 这里做赋值（非 let 绑定）并返回变量值
+                        // （已按内层值类型声明，如 `n := step()` 中 step() 返回 Result<i64,E>
+                        // → n: i64）。此处赋值需先解包 Result（Err 时 panic，与 transpiler
+                        // 的 raises/panic 模型一致），再返回变量值，否则 n: i64 = step()
+                        // 触发 E0308（combo_while_guard_try：`while (n := step()) <= 3`）。
                         let bind = fields.iter().find(|(n, _)| n == "_bind");
                         let val = fields.iter().find(|(n, _)| n == "_val");
                         let bind_s = bind.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
-                        let val_s = val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default();
+                        let val_expr = val.map(|(_, v)| v);
+                        let val_is_result =
+                            matches!(val_expr, Some(e) if matches!(&e.ty, IrType::Result { .. }));
+                        let val_s = if val_is_result {
+                            // 解包 Result：Err 分支 panic（transpiler 当前不传播 Err 到调用点）
+                            format!(
+                                "({}).unwrap_or_else(|__e| panic!(\"raises: {{:?}}\", __e))",
+                                val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default()
+                            )
+                        } else {
+                            val.map(|(_, v)| self.gen_expr(v)).unwrap_or_default()
+                        };
                         format!("{{ {} = {}; {} }}", bind_s, val_s, bind_s)
                     }
                     "Dict" => {
@@ -5084,7 +5165,20 @@ impl CodeGen {
                 let args_s: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let mut all = vec![recv];
                 all.extend(args_s);
-                let callee_s = self.gen_expr(callee);
+                // 调用位置的顶层 def 直接按 fn item 调用，不装箱：
+                // 装箱（Arc::new）只用于「把 def 当值传递/返回」（如
+                // `double if flag else inc`）。否则 collect_list(x) 会生成
+                // `Arc::new(collect_list)(x)`（E0599 Arc<dyn Fn> 不可直接调用）
+                // 与 `::<T>` turbofish 落到 Arc 上（E0107 解析错误）。
+                let callee_s = if let ExprKind::Var(name) = &callee.kind {
+                    if self.top_level_fns.contains(name.as_str()) {
+                        name.clone()
+                    } else {
+                        self.gen_expr(callee)
+                    }
+                } else {
+                    self.gen_expr(callee)
+                };
                 // 闭包作为 callee 需括号包裹：(|x| ...)(recv)
                 if matches!(&callee.kind, ExprKind::Lambda { .. }) {
                     format!("({})({})", callee_s, all.join(", "))
