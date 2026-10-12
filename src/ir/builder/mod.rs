@@ -431,6 +431,15 @@ impl TypeCtx {
                 }
             }
         }
+        // 小写容器构造调用：dict()/list()/set() 无用户同名函数时按内置容器类型
+        // 登记（否则调用点类型为 Any，let 绑定后 `d["k"] = v` 索引赋值不走
+        // Dict 的 insert 分支，生成 BTreeMap 不支持的 Index/Set 索引 → E0308）。
+        match name {
+            "dict" => return IrType::Named { path: "Dict".into(), args: vec![] },
+            "list" => return IrType::Named { path: "List".into(), args: vec![] },
+            "set" => return IrType::Named { path: "Set".into(), args: vec![] },
+            _ => {}
+        }
         IrType::Any
     }
 

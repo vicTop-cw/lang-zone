@@ -714,6 +714,17 @@ fn scan_auto_mut_block(
                 if let ExprKind::Var(v) = &target.kind {
                     out.insert(v.clone());
                 }
+                // 索引赋值目标（d["k"] = v → d.insert(..)，p[i] = v → d[i] = ..）：
+                // 基变量被可变借用，需标 mut，否则 E0596 cannot borrow as mutable
+                // （Dict 空构造 + 索引赋值是既有漏标场景）
+                match &target.kind {
+                    ExprKind::IndexGet { base, .. } | ExprKind::IndexSet { base, .. } => {
+                        if let ExprKind::Var(v) = &base.kind {
+                            out.insert(v.clone());
+                        }
+                    }
+                    _ => {}
+                }
                 scan_expr_auto_mut(target, out);
                 scan_expr_auto_mut(value, out);
             }

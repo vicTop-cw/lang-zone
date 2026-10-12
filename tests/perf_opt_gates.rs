@@ -1191,3 +1191,85 @@ def main() =
         r.rs_text
     );
 }
+
+/// 小写 dict()/list()/set() 空构造：此前透传为裸调用生成未定义函数 → E0425
+/// （perf §14.5 遗留缺口）。现接线到 std 容器构造。
+#[test]
+fn fix_f_lowercase_container_ctors() {
+    let src = r#"
+def main() =
+    let d = dict()
+    d["a"] = 1
+    println(d["a"])
+    let xs = list()
+    xs.push(1)
+    println(xs[0])
+    let s = set()
+    s.insert(2)
+    println(s.len())
+"#;
+    let r = run_lz("fix_f_lower_ctors", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "1\n1\n1");
+    assert!(
+        !r.rs_text.contains("dict()") && !r.rs_text.contains("list()") && !r.rs_text.contains("set()"),
+        "不得再生成裸的 dict()/list()/set() 调用（E0425）：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("let mut d = std::collections::BTreeMap::new();"),
+        "dict() 应接线 BTreeMap::new：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("let mut xs = Vec::new();"),
+        "list() 应接线 Vec::new（push 触发 auto-mut）：\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("std::collections::HashSet::new()"),
+        "set() 应接线 HashSet::new：\n{}",
+        r.rs_text
+    );
+}
+
+/// 回归：大写 Dict() 空构造 + 索引赋值（`let d = Dict(); d["k"]=v` → d.insert）
+/// 此前未被 auto-mut 扫描覆盖（IndexGet/IndexSet 赋值目标基变量漏标）→ E0596。
+#[test]
+fn fix_f_dict_index_assign_auto_mut() {
+    let src = r#"
+def main() =
+    let d = Dict()
+    d["a"] = 1
+    d["b"] = 2
+    println(d["a"] + d["b"])
+"#;
+    let r = run_lz("fix_f_dict_mut", src, &[]);
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "3");
+    assert!(
+        r.rs_text.contains("let mut d = std::collections::BTreeMap::new();"),
+        "索引赋值目标基变量应生成 let mut（E0596）:\n{}",
+        r.rs_text
+    );
+    assert!(
+        r.rs_text.contains("d.insert("),
+        "字典索引赋值应走 insert：\n{}",
+        r.rs_text
+    );
+}
+
+/// 反向：用户自定义同名 `fn dict()` 优先于内置容器构造，不被遮蔽。
+#[test]
+fn fix_f_user_dict_fn_not_shadowed() {
+    let src = r#"
+def dict() -> int =
+    42
+
+def main() =
+    println(dict())
+"#;
+    let r = run_lz("fix_f_user_dict", src, &[]);
+    assert!(r.ok, "用户自定义 dict() 不应被内置接线遮蔽：\n{}", r.diag);
+    assert_eq!(r.stdout, "42");
+}
