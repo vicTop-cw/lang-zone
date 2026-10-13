@@ -1013,6 +1013,9 @@ impl BinOpKind {
 pub enum UnOpKind {
     Neg,
     Not,
+    /// 位非 `~x`（SYNTAX/12 §3.2）——与逻辑非 `not x` 区分并保留到 IR（BUG-36），
+    /// 发射端按 UnOpKind 分派（rust 侧 `!` 两义皆对；cy 收敛待补，当前按操作数类型还原）
+    BitNot,
     Ref,
     MutRef,
     Deref,

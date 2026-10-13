@@ -290,6 +290,7 @@ impl fmt::Display for UnOpKind {
         match self {
             UnOpKind::Neg => f.write_str("-"),
             UnOpKind::Not => f.write_str("!"),
+            UnOpKind::BitNot => f.write_str("~"),
             UnOpKind::Ref => f.write_str("&"),
             UnOpKind::MutRef => f.write_str("&mut"),
             UnOpKind::Deref => f.write_str("*"),

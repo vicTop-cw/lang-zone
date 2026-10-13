@@ -481,12 +481,14 @@
 - repro: `python -u TEMP/magic_probes_r11.py`（看 m_iter / m_next 两支）；`cargo test -j 1 --test cython_backend`
 - reported_by: qoder-explore-worker(cy 后端轮 T0r11)
 
-## BUG-36 [2026-10-08T03:05:58Z] [low] 入账未修（共享 IR；本车道不改 `src/ir/builder/ops_map.rs`）：`~x` 的位非在 `map_unop` 里被降级成逻辑非，IR 里 `~` 与 `not` 同形
+## BUG-36 [2026-10-08T03:05:58Z] [low] FIXED（2026-10-14，共享 IR 保留 `~`/`not` 区分；cy 协议收敛挂起）：`~x` 位非现保留为 `UnOpKind::BitNot`，IR 里 `~` 与 `not` 不再同形
 - summary: `src/ir/builder/ops_map.rs` 里 `UnaryOp::BitNot => UnOpKind::Not, // 位非降级为逻辑非`（本轮实测该行仍在，卡里不写行号以免漂移）⇒ AST 层的 `~x` 与 `not x` 进了同一个 UnOpKind，下游只能靠操作数类型猜。
 - detail: 规范 SYNTAX/12 §3.2 明写 `~x` → `__invert__`（Rust 无独立 BitNot trait，`__not__` 缺席时生成 `impl Not` 委托）。rust 面**恰好**不受影响：它发 `!`，对 bool 是逻辑非、对整数是位非、对用户类走生成的 `impl Not`，一个符号三种语义都对。cy 面必须分档（bool ⇒ `not `，其余 ⇒ `~`），本轮已在 `codegen_cython.rs` 的 UnOp 分支实现并锁住。
   **为什么这条仍要入账**：那是**补救不是修复**。任何第三个后端读同一份 IR 都会把 `~6` 当逻辑非；而 IR 里已经丢掉的信息，前端改一次就得在两个后端各猜一次。
   同族在册：移位两族不在 `magic_method_for_binop`（`__shl__`/`__shr__` 缺席），本轮同样只在 cy 侧点名直派，共享 IR 未动 ⇒ rust 面靠 `impl Shl/Shr` 恰好成立、cy 面靠类型闸门成立，两张皮都不是规范层的解。
   转正前置: builder 保留区分（新增 `UnOpKind::BitNot`，或给 Not 带一个 bit 标记；并把 `__shl__`/`__shr__` 补进 `magic_method_for_binop`），两侧按各自协议发射；改完 cy 侧这两条按类型还原的臂可以收敛成一条按 UnOpKind 分派的臂。改动落在共享 IR ⇒ **需要另一条车道**，本车道不改 `src/ir/builder/`、不改 `src/ir/codegen/`。
+- 修复（2026-10-14）：`UnOpKind` 新增 `BitNot`，`map_unop` 的 `UnaryOp::BitNot => UnOpKind::BitNot`（不再降级）。同步更新全部穷尽 match 臂：rust `unop_str`（BitNot⇒`!`，两义皆对）、`display`（BitNot⇒`~`）、`lz_codegen`（BitNot⇒`!`）、Not 括号特判扩到 `Not|BitNot`；cy 侧 `Not|BitNot` 暂同按操作数类型还原（**行为零变化**），协议收敛（Not⇒`not`/BitNot⇒`~`，含 `not <user-class>`/`~ <user-class>` 分派）待 cy 工具链 co-verify 后补。`__shl__`/`__shr__` 补 `magic_method_for_binop` 那一族（BUG-34 同族）本轮**未动**（独立洞，另卡）。
+- 验证: cargo build + 全量 cargo test 441/0（IR 新增变体无 golden 回归——tests/ 无 `~` fixture）；探针 bittest `~5`/`~0`/`~True`/`not False`/`not True` 实跑 -6/-1/false/true/false，与改前逐字一致。
 - repro: `python -u TEMP/magic_probes_r11.py`（`m_bits` 两支的 rust/cy 读数与判读）；`grep -n 'BitNot' src/ir/builder/ops_map.rs`
 - reported_by: qoder-explore-worker(cy 后端轮 T0r11)
 

@@ -2318,7 +2318,8 @@ fn cy_bitnot_is_restored_from_operand_type() {
          \x20   def __invert__(self) -> Bits =\n        Bits(v: ~self.v)\n\n\
          def main() =\n    let p = Bits(v: 6)\n    print((~p).v)\n    let flag = true\n    print(not flag)\n",
     );
-    // 共享 IR 把 BitNot 降级成 Not，发射端按操作数类型还原：整数/用户类 ⇒ `~`，bool ⇒ `not `
+    // IR 现区分 BitNot(`~`) 与 Not(`not`)（BUG-36）；cy 收敛（BitNot⇒`~`/Not⇒`not `）待
+    // cy 工具链 co-verify 后补，当前按操作数类型还原：整数/用户类 ⇒ `~`，bool ⇒ `not `
     assert_contains(&out, &["~self.v"], "整数位非要发 ~（发 not 会恒为 False）");
     assert_contains(&out, &["~p"], "用户类的 ~ 落到 __invert__ 协议");
     assert!(

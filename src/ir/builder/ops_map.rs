@@ -63,7 +63,9 @@ pub(crate) fn map_unop(op: &UnaryOp) -> UnOpKind {
         UnaryOp::Pos => UnOpKind::Neg,
         UnaryOp::Neg => UnOpKind::Neg,
         UnaryOp::Not => UnOpKind::Not,
-        UnaryOp::BitNot => UnOpKind::Not, // 位非降级为逻辑非
+        // 位非保留为 BitNot（SYNTAX/12 §3.2），与逻辑非 `not` 区分到 IR（BUG-36）；
+        // 发射端按 UnOpKind 分派（rust 侧 `!` 两义皆对；cy 收敛待补，当前按操作数类型还原）
+        UnaryOp::BitNot => UnOpKind::BitNot,
         UnaryOp::Deref => UnOpKind::Deref,
         UnaryOp::Ref => UnOpKind::Ref,
     }

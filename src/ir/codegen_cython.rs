@@ -4051,15 +4051,17 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             format!("{} {} {}", lhs_str, o, rhs_str)
         }
         ExprKind::UnOp { op, operand } => {
-            // `UnOpKind::Not` 是**两个 LZ 运算符共用**的形态：`src/ir/builder/ops_map.rs::map_unop`
-            // 把 `~x`（BitNot）降级成了 Not（注释原话「位非降级为逻辑非」），信息只能在发射端按
-            // 操作数类型还原。Rust 侧 `!` 对 bool 是逻辑非、对整数是位非，两种都对；
+            // `UnOpKind` 现已区分 `not x`（Not）与 `~x`（BitNot）（BUG-36，ops_map 不再降级）。
+            // 理想发射是按 UnOpKind 分派：Not ⇒ `not `、BitNot ⇒ `~`。但 cy 的协议收敛（
+            // `not <user-class>` 走 `__not__`、`~ <user-class>` 走 `__invert__`）需 cy 工具链
+            // co-verify 后才能安全切换，故本轮让 BitNot 与 Not 同按操作数类型还原（bool ⇒
+            // `not `、其余 ⇒ `~`），保持既有语料（magic_cmp_arith / magic_shift_invert 等）逐字
+            // 不变。Rust 侧 `!` 对 bool 是逻辑非、对整数是位非，两义皆对（已按 UnOpKind 发射）；
             // Python 侧 `not x` 对整数恒为真、`~x` 才是位非 ⇒ 一律发 `not ` 会让 `~6` 出 `False`
-            // 并让 `~obj`（走 `__invert__` 协议）塌成 bool（实测 TEMP/magic-probes-*.log m_bits：
-            // rust `'…-7'` vs cy `AttributeError: 'bool' object has no attribute 'v'`）。
+            // 并让 `~obj`（走 `__invert__` 协议）塌成 bool（实测 TEMP/magic-probes-*.log m_bits）。
             let o = match op {
                 UnOpKind::Neg => "-",
-                UnOpKind::Not => {
+                UnOpKind::Not | UnOpKind::BitNot => {
                     if matches!(operand.ty, IrType::Bool) {
                         "not "
                     } else {

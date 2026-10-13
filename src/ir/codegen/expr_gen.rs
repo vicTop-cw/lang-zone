@@ -4672,7 +4672,8 @@ impl CodeGen {
                 // 且 `not self.__eq__(other)` 生成 `!self == other`（inner 含比较
                 // 运算符）时 ! 只应用到 self（E0600 cannot apply ! to &Self），
                 // 需 `!(self == other)` 括号包裹
-                if *op == UnOpKind::Not {
+                // 位非 `~`（rust 侧同为 `!`）与逻辑非同优先级：操作数是 BinOp/比较时需括号
+                if *op == UnOpKind::Not || *op == UnOpKind::BitNot {
                     let has_cmp = inner.contains(" == ")
                         || inner.contains(" != ")
                         || inner.contains(" < ")
@@ -6296,6 +6297,8 @@ impl CodeGen {
         match op {
             UnOpKind::Neg => "-",
             UnOpKind::Not => "!",
+            // 位非 `~` 在 rust 侧同为 `!`（对整数是位非、对 bool 是逻辑非，两义皆对）
+            UnOpKind::BitNot => "!",
             UnOpKind::Ref => "&",
             UnOpKind::MutRef => "&mut ",
             UnOpKind::Deref => "*",

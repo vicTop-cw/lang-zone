@@ -860,7 +860,7 @@ fn binop_str(op: &super::node::BinOpKind) -> &'static str {
 fn unop_str(op: &super::node::UnOpKind) -> &'static str {
     use super::node::UnOpKind::*;
     match op {
-        Neg => "-", Not => "!", Ref => "&", MutRef => "&mut ", Deref => "*",
+        Neg => "-", Not => "!", BitNot => "!", Ref => "&", MutRef => "&mut ", Deref => "*",
     }
 }
 
