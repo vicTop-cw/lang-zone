@@ -537,7 +537,7 @@
 - repro: `python -u TEMP/rust_expect_evidence_r13.py`；`python -u TEMP/uncond_arms_probes_r13.py`（看 x_expect_option / x_expect_none 两行）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r13)
 
-## BUG-43 [2026-10-08T07:03:13Z] [medium] 入账未修（rust 后端；本车道不改 `src/ir/codegen/mod.rs`）：内建 `remove` 的实参被无条件强转 `as usize`，不看接收者 ⇒ 用户类自带的 remove 编不出
+## BUG-43 [2026-10-08T07:03:13Z] [medium] FIXED（v186，添加 has_custom_remove 守卫排除用户自定义 struct）：内建 `remove` 的实参被无条件强转 `as usize`，不看接收者 ⇒ 用户类自带的 remove 编不出
 - summary: `struct Cfg` 自带 `def remove(ref self, i: int) -> int`，cy 面按原名调用并跑出 `'4\n'`；rust 面在**调用点**按内建 `Vec::remove` 的口径把实参强转 `as usize`（`src/ir/codegen/mod.rs` 一侧），于是 rustc 在用户类自己的 `fn remove(&self, i: i64)` 上报 mismatched types
 - detail: 证据件 `TEMP/uncond-x13-before-r13.log ＋ TEMP/uncond-x13-after2-r13.log ＋ TEMP/uncond-x13-rsdetail-r13.log`：生成的 .rs 里方法定义是 `fn remove(&self, i: i64) -> i64 {`，调用点却是 `Cfg { n: 1i64 }.remove((3i64 as usize))`，rustc 指认 `expected `i64`, found `usize`。探针侧：`x_remove_static` / `x_remove_duck` 两支都是 rust=RUSTC_FAIL 而 cy=OK。
   这与 BUG-39 是**同一张表的同一个缺闸门**（改名表不看接收者是不是用户类），只是机制不同：BUG-39 换的是**名字**（`to_lower`→`to_lowercase`、`try_into`→`unwrap`），这条换的是**实参类型**。所以.cy 侧 T0r12/T0r13 补的反向闸门（`user_class_has_method`）可以直接抄过去当判据形状。

@@ -3154,6 +3154,18 @@ impl CodeGen {
                 // List 自定义 remove（list.lz `remove_at` 内部调 `self.remove(index)`）：
                 // 该 remove 是 std Vec::remove 语义（index 需 usize），仍要转换；
                 // 仅当 receiver 是 Set/HashSet 时跳过（值语义）
+                // BUG-43 修复：用户自定义 struct 的 `remove` 方法不走 Vec::remove 的 `as usize`
+                // 强转（用户方法的参数是 i64，强转成 usize ⇒ E0308 expected i64, found usize）。
+                // 仅排除非内置集合类型（List/Vec/Set/HashSet/Dict/HashMap 这些仍走 std 语义需转）。
+                let recv_is_builtin_collection = matches!(&receiver.ty, IrType::Named { path, .. }
+                    if path == "List" || path == "Vec" || path == "Set" || path == "HashSet"
+                    || path == "Dict" || path == "HashMap");
+                let has_custom_remove = method == "remove"
+                    && !recv_is_builtin_collection
+                    && self
+                        .struct_method_names_map
+                        .get(&recv_ty_name)
+                        .map_or(false, |s| s.contains("remove"));
                 if (method == "insert"
                     || method == "insert_at"
                     || method == "remove"
@@ -3163,6 +3175,7 @@ impl CodeGen {
                     && !args_s[0].starts_with('&')
                     && !has_custom_get
                     && !recv_is_set_ty
+                    && !has_custom_remove
                 {
                     args_s[0] = format!("({} as usize)", args_s[0]);
                 }

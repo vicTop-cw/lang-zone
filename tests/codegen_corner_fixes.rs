@@ -236,3 +236,26 @@ def main() =
     assert!(r.ok, "Result::expect(&str) 编译应通过：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "7");
 }
+
+#[test]
+fn user_struct_remove_keeps_i64_arg_no_usize_cast() {
+    // BUG-43 回归：用户自定义 struct 的 `remove(i: int)` 参数不应被强转 `as usize`
+    // （用户方法参数是 i64，强转 usize ⇒ E0308 expected i64, found usize）。
+    let src = r#"
+struct Cfg:
+    n: int
+
+impl Cfg:
+    def remove(ref self, i: int) -> int:
+        self.n = self.n - i
+        self.n
+
+def main() =
+    mut cfg = Cfg(n: 10)
+    print(cfg.remove(3))
+"#;
+    let r = run_lz("user_remove", src);
+    assert!(r.transpiled, "用户 struct remove 应可转译：\n{}", r.diag);
+    assert!(r.ok, "用户 struct remove(i64) 编译应通过：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "7");
+}
