@@ -4107,7 +4107,9 @@ impl CodeGen {
                                     if path == "Option"
                                         && args.first().map_or(false, |a| matches!(a, IrType::Ref(_) | IrType::MutRef(_))));
                         if ret_is_ref_like && is_self_base {
-                            format!("&{}[{}]", base_s, key_s)
+                            self.gen_seq_neg_index(base, key, &base_s)
+                                .map(|n| format!("&{}", n))
+                                .unwrap_or_else(|| format!("&{}[{}]", base_s, key_s))
                         } else if is_self_field || is_self_base {
                             // str 的 Range 切片（self[start..end]）返回 &str，
                             // 需 to_string 转 String（string.lz slice，E0599）
@@ -4139,12 +4141,16 @@ impl CodeGen {
                                     format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
                                 }
                             } else {
-                                format!("{}[{}].clone()", base_s, key_s)
+                                self.gen_seq_neg_index(base, key, &base_s)
+                                    .map(|n| format!("{}.clone()", n))
+                                    .unwrap_or_else(|| format!("{}[{}].clone()", base_s, key_s))
                             }
                         } else if self.in_generic_fn {
                             // 泛型函数内普通容器索引：T 非 Copy，直接 move 出容器报 E0507
                             // （sort_by<T>/bubble_sort 冒泡 result[j]），自动 clone 为 owned
-                            format!("{}[{}].clone()", base_s, key_s)
+                            self.gen_seq_neg_index(base, key, &base_s)
+                                .map(|n| format!("{}.clone()", n))
+                                .unwrap_or_else(|| format!("{}[{}].clone()", base_s, key_s))
                         } else {
                             // Range 键落在**非 self 基底**上时，`xs[1..3]` 的类型是 unsized
                             // `[i64]`：作「值」使用（print 实参 / let 绑定 / for 迭代）rustc 直接
@@ -4167,7 +4173,8 @@ impl CodeGen {
                                     format!("{}[{}].to_vec()", base_s, key_s)
                                 }
                             } else {
-                                format!("{}[{}]", base_s, key_s)
+                                self.gen_seq_neg_index(base, key, &base_s)
+                                    .unwrap_or_else(|| format!("{}[{}]", base_s, key_s))
                             }
                         }
                     }

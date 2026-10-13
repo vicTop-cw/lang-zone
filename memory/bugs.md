@@ -257,7 +257,7 @@
   （`TEMP/cybuild-iso2-0824.log`，RC_TEST=0）；语料面不受影响的依据是发射被 `test_runner` 旗标
   夹住，旗标默认关，且判据的「关了不发」那一侧由同一个测试断言。
 
-## BUG-19 [2026-10-02T02:48:10Z] [medium] OPEN（rust 后端；cy 面已对，本轮不动它）
+## BUG-19 [2026-10-02T02:48:10Z] [medium] FIXED（2026-10-14，rust 后端负整数字面量下标归一化为 len+k；cy 面本就对）
 - summary: 规范明写的序列负索引 `xs[-1]` 在 rust 后端编不过（E0277 unsized `[i64]`）
 - summary: [规范 vs rust 后端] SYNTAX/01-类型系统.md:436/441 明确 `lst[-1]` 取末位（Python 风）， 但 `print(xs[-1])` 在 rust 后端产物里直接发 `xs[-1]` ⇒ rustc `error[E0277]: the size for values of type `[i64]` cannot be known at compilation time`（terminal 观察，取证级：本轮未把 probe9 那次运行另存日志； 复跑命令 `python TEMP/xdiff_ds07.py TEMP/probe9`）。cy 面走 Python 原生负索引，**行为正确**（出 5）。
 - 后果与本轮处置: 语料**不能**收这条——L3 的期望值必须来自另一后端的实跑产物，oracle 编不过就没有产物， 收进来等于抄 cy 自己（这正是本项目反复禁止的「用被测面自证」）。故 `str_index.lz` 里没有负索引行， 并在该件头部注释写明原因与卡号，避免下一个人以为是漏写。
@@ -268,6 +268,10 @@
   ② **切片作值 `print(xs[1..3])`**：才是 E0277 unsized `[i64]` 那个形状——本轮已修，另立 BUG-21。
   ③ **切片在比较位 `assert xs[1..3] == [1,2]`**：两后端本来就一致（`TEMP/probe10/xdiff.log` 里 b_slice_in_cmp 一致行），所以「切片整体在 rust 面坏」这种写法是错的，坏的是**值位**。
 - 状态维持 OPEN：本卡只指①，属 rust 后端；本轮不动它（cy 面已对，且修它要动全仓最热的索引发射路径）。
+### 修复(2026-10-14)
+- rust 后端：codegen 新增 `gen_seq_neg_index`（stmt_gen.rs），对「负整数字面量下标 + 可安全二次求值的序列 place（Var/FieldAccess/IndexGet）」把 `xs[-k]` 归一化为 `xs[(xs.len() as i64 + (-k)) as usize]`（Python 风取末位，:441）。四个容器索引发射点（self.base ref / self.field / in_generic / 普通基底）统一接入。非负下标与变量下标走原快路径（全仓最热索引发射点，零额外开销），仅负字面量新增一次 `.len()`。
+- 语料：`str_index.lz` 补回 `print(xs[-1])`/`print(xs[-2])` 并重封 .exp（`97 99 / [1, 2] / [2, 3, 4] / [0, 1] / 5 / 4 / 2 3`），双后端一致。
+- 验证：cargo build + 全量 cargo test 绿；探针 `xs[-1]=5 xs[-2]=4 xs[0]=0` 过 rustc 实跑；DEMO 语料 0 件用负索引，回归面不受影响。
 
 ## BUG-20 [2026-10-02T02:48:10Z] [low] OPEN（rust 后端；cy 面本轮别名后已对）
 - summary: `ref f = h.n` 字段位引用在 rust 后端编不过（E0308），cy 面写回正确

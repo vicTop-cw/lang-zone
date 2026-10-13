@@ -2623,6 +2623,48 @@ impl CodeGen {
         }
     }
 
+    /// BUG-19：序列（Vec/List/Array）负索引 `xs[-1]` 取末位（Python 风，
+    /// SYNTAX/01-类型系统.md:441）。Rust 的 `i64 as usize` 对负数回绕成 usize::MAX
+    /// ⇒ 运行期 out-of-bounds panic（`the index is 18446744073709551615`）。
+    /// 归一化：负整数字面量下标 `k` → `len + k`（i64 域求和、非负后 as usize）。
+    /// 仅对「负整数字面量 key + 可安全二次求值的序列 place（Var/FieldAccess/IndexGet）」
+    /// 启用；非负下标与变量下标走原快路径（本路径是全仓最热的索引发射点，
+    /// 零额外开销）。返回 Some(归一化后的 `base[..]` 表达式) 或 None（调用方回退）。
+    pub(crate) fn gen_seq_neg_index(
+        &self,
+        base: &Expr,
+        key: &Expr,
+        base_s: &str,
+    ) -> Option<String> {
+        let is_seq = matches!(&base.ty, IrType::Named { path, .. }
+            if path == "Vec" || path == "List" || path == "Array");
+        if !is_seq {
+            return None;
+        }
+        let is_neg_lit = match &key.kind {
+            ExprKind::Lit(LitKind::Int(n)) => *n < 0,
+            ExprKind::UnOp { op: UnOpKind::Neg, operand } => {
+                matches!(&operand.kind, ExprKind::Lit(LitKind::Int(_)))
+            }
+            _ => false,
+        };
+        if !is_neg_lit {
+            return None;
+        }
+        let base_is_place = matches!(
+            &base.kind,
+            ExprKind::Var(_) | ExprKind::FieldAccess { .. } | ExprKind::IndexGet { .. }
+        );
+        if !base_is_place {
+            return None;
+        }
+        let key_s = self.gen_expr(key);
+        Some(format!(
+            "{}[({}.len() as i64 + ({})) as usize]",
+            base_s, base_s, key_s
+        ))
+    }
+
     /// 生成赋值目标表达式（不放 unsafe 包装，用于 Stmt::Assign 等）
     pub(crate) fn gen_target_expr(&self, expr: &Expr) -> String {
         match &expr.kind {
