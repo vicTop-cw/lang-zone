@@ -194,6 +194,8 @@ pub struct CodeGen {
     fn_kwargs: HashMap<String, usize>,
     /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
     fn_param_types: HashMap<String, Vec<IrType>>,
+    /// 函数名 → 参数名列表（用于命名实参 k=v 按声明顺序重排，BUG-24）
+    fn_param_names: HashMap<String, Vec<String>>,
     /// 比较约束传播：函数名 → (eq 泛型集合, ord 泛型集合)。
     /// 由 gen_module 预扫描所有 FnDef 体（含调用图不动点）得到，
     /// 用于为参与比较运算（==/!= → PartialEq+Eq；<,>,<=,>= → PartialEq+Eq+Ord）
@@ -448,6 +450,7 @@ impl CodeGen {
             fn_variadic: HashMap::new(),
             fn_kwargs: HashMap::new(),
             fn_param_types: HashMap::new(),
+            fn_param_names: HashMap::new(),
             fn_cmp: HashMap::new(),
             fn_use_count: HashMap::new(),
             cur_fn_name: String::new(),
@@ -876,6 +879,11 @@ impl CodeGen {
                 self.fn_param_types.insert(
                     f.name.clone(),
                     f.params.iter().map(|p| p.ty.clone()).collect(),
+                );
+                // 收集所有参数名（用于命名实参 k=v 按声明顺序重排，BUG-24）
+                self.fn_param_names.insert(
+                    f.name.clone(),
+                    f.params.iter().map(|p| p.name.clone()).collect(),
                 );
                 // 登记 type-pack 变参（..: Tuple<Ts...>）：args 参数类型为
                 // Tuple([Generic("Ts")])（builder 标记）→ 记录 pack 泛型名，

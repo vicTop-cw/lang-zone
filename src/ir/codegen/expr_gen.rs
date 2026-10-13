@@ -13,6 +13,56 @@ use super::types_emit::COMPLEX_RS;
 use super::*;
 
 impl CodeGen {
+    /// BUG-24：把关键字实参按被调函数声明参数顺序重排为位置实参值表达式。
+    /// 覆盖两种字形：`name~` 糖（IR `_KwArg` StructCtor）与 `name=value` 全形
+    /// （parser 解析为 `AssignExpr{target: 简单变量}`）。位置实参保持相对顺序；
+    /// 返回纯值表达式序列，交由常规实参渲染路径（current_expected_ty 的 Option
+    /// 默认值形参 Some 包裹、类型转换、clone 注入）统一处理。
+    fn reorder_kwarg_args(&self, args: &Vec<Expr>, callee: &str) -> Vec<Expr> {
+        let param_names: Vec<String> = self
+            .fn_param_names
+            .get(callee)
+            .cloned()
+            .unwrap_or_default();
+        // 声明参数名不可得：退化为剥壳（关键字实参取其 value，其余原样）
+        if param_names.is_empty() {
+            return args
+                .iter()
+                .map(|a| {
+                    kwarg_name_value(a)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or_else(|| a.clone())
+                })
+                .collect();
+        }
+        let mut kwarg_map: std::collections::HashMap<String, Expr> =
+            std::collections::HashMap::new();
+        let mut positional: Vec<Expr> = Vec::new();
+        for a in args.iter() {
+            match kwarg_name_value(a) {
+                Some((name, v)) => {
+                    kwarg_map.insert(name, v.clone());
+                }
+                None => {
+                    positional.push(a.clone());
+                }
+            }
+        }
+        // 按声明参数顺序：优先取同名关键字实参值，否则消费下一个位置实参
+        let mut ordered: Vec<Expr> = Vec::new();
+        let mut pos_iter = positional.into_iter();
+        for pname in &param_names {
+            if let Some(v) = kwarg_map.remove(pname) {
+                ordered.push(v);
+            } else if let Some(p) = pos_iter.next() {
+                ordered.push(p);
+            }
+        }
+        // 多余位置实参追加到末尾（保持原相对顺序）
+        ordered.extend(pos_iter);
+        ordered
+    }
+
     /// 方向 B：实参是否为「新鲜临时」（可安全 move 的表达式形态）。
     ///
     /// 背景：`sorted(xs)` / `reversed(xs)` 过去一律发
@@ -542,6 +592,28 @@ impl CodeGen {
                         };
                     }
                 }
+                // BUG-24: 关键字实参按被调函数声明参数顺序重排为位置实参。两种字形
+                // 统一在此收口：`name~` 糖（IR `_KwArg`）与 `name=value` 全形（parser
+                // 解析为 AssignExpr{target: 简单变量}）。重排后交由常规实参渲染
+                // （current_expected_ty → 默认值形参 Some 包裹、类型转换、clone 注入）
+                // 统一处理，替代原先绕过这些机制、漏掉 Some 包裹的特例分支。
+                // 仅在 callee 是已知具名函数且非 kwargs 注入/变参函数时重排（后者有
+                // 专门分支，若在此重排会丢弃其 kwargs/变参实参）；仅在确有关键字实参
+                // 时克隆，避免对每个调用点无谓 .to_vec()（方向 B 分配消除）。
+                // 统一为 &[Expr]，下游实参渲染逻辑不变。
+                let reordered: Option<Vec<Expr>> = (args.iter().any(is_kwarg_arg)
+                    && matches!(
+                        &callee.kind,
+                        ExprKind::Var(cn)
+                            if self.fn_param_names.contains_key(cn.as_str())
+                                && !self.fn_kwargs.contains_key(cn)
+                                && !self.fn_variadic.contains_key(cn)
+                    ))
+                .then(|| match &callee.kind {
+                    ExprKind::Var(cn) => self.reorder_kwarg_args(args, cn),
+                    _ => args.to_vec(),
+                });
+                let args: &[Expr] = reordered.as_deref().unwrap_or(args);
                 // 调用位置的顶层 def 直接按 fn item 调用，不装箱：
                 // 装箱（Arc::new）只用于「把 def 当值传递/返回」（如
                 // `double if flag else inc`）。否则 collect_list(x) 会生成
@@ -2003,11 +2075,6 @@ impl CodeGen {
                     };
                     normal.push(format!("&{}", map));
                     format!("{}{}({})", callee_s, turbofish, normal.join(", "))
-                } else if !args.is_empty() && is_kwarg_call(args) {
-                    // Function call with named args: func(a, b~) → func(a, b)
-                    let flat_args: Vec<String> =
-                        args.iter().map(|a| gen_kwarg_value(a, self)).collect();
-                    format!("{}{}({})", callee_s, turbofish, flat_args.join(", "))
                 } else if let Some(&variadic_idx) = self.fn_variadic.get(&callee_s) {
                     // Variadic 函数调用: 将 variadic_idx 及之后的实参打包为 &[...]
                     let normal_args = &args_s[..variadic_idx.min(args_s.len())];

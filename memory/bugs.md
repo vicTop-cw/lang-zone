@@ -314,7 +314,7 @@
 - 判据（可红）: `tests/str_boundary.rs::c7_fstring` 维持绿；`CY/TESTS/15_feature_matrix/fstr_interp.lz` + `with_defer.lz` 的跨后端差分（`TEMP/seal-15-0442.log`）——任一侧口径漂了就分叉红
 - reported_by: qoder-explore-worker(cy 后端轮 T0r7)
 
-## BUG-24 [2026-10-02T05:11:25Z] [medium] 入账未修（rust 后端命名实参，挡 cy 封盘）
+## BUG-24 [2026-10-02T05:11:25Z] [medium] FIXED（2026-10-14，rust 后端命名实参按声明顺序重排，封 .exp）
 - summary: [规范 vs rust 后端] 命名实参 `k=v`（SYNTAX/02-变量与绑定.md:226 的 `name~` 糖的展开形、SYNTAX/01b-duck关系约束.md:481 的 `build(name="x", version=1)`）在 rust 后端**原样抄进产物** ⇒ 生成的 Rust 语法不可编译；cy 后端走 Python 原生关键字实参，行为正确
 - detail: 实测逐字。跨后端差分器（`python TEMP/xdiff_ds07.py CY/TESTS/15_feature_matrix`，日志 `TEMP/seal-15-0442.log:81-84`）：`named_args.lz` 一格 `rust=RUSTC_FAIL / cy=OK`，rust 侧诊断 `error[E0425]: cannot find value `b` in this scope | error[E0425]: cannot find value `a` in this scope`，cy 侧 stdout `"3
 3
@@ -323,6 +323,7 @@
 "`（值全对）。产物文本逐字：无默认值形参 `TEMP/probe13/kw2.rs` 的 main 体 = `println!("{:?}", add(b = 2i64, a = 1i64));`（Rust 表达式位不允许赋值）；有默认值形参（发成 Option）`TEMP/probe13/kw.rs:38` = `greet(Some(name = "LZ".to_string()))`；struct 关键字构造写 `=` 时同型 `Box2 { label: label = \"field\".to_string(), ... }`（键名重复一份）。
   为什么算在 cy 轮里：cy 侧不是坏的，但 L3 的期望值只能取**另一后端**的实跑产物（BUG-21 同一条口径），oracle 编不过就没有产物 ⇒ 用到命名实参的语料只能做 L1/L2，不能封 `.exp`。本轮按此把 `CY/TESTS/15_feature_matrix/named_args.lz` 落成「转译+cythonize 断言、执行不断言」，并在件头写明拿不到 oracle 的原因。
   转正前置：rust 侧把 `k=v` 实参按被调函数的形参顺序重排成位置实参（需要 形参名表，现只有 `fn_param_info` 的 (arity, default_count)），缺位用默认值/`None` 填；然后 `named_args.lz` 连同 Rust 面产物一起封盘。
+  修复（2026-10-14，本轮）：codegen Call 分支头部统一收口关键字实参——新增 `CodeGen::reorder_kwarg_args`（`src/ir/codegen/expr_gen.rs`），按 `fn_param_names`（builder 新登记的 函数名→形参名 表，`mod.rs`）把两种字形（`_KwArg` 糖 与 `AssignExpr{target: 变量}` 全形，识别器 `helpers::kwarg_name_value`）重排为位置实参**值表达式**，交常规实参渲染路径处理（current_expected_ty 的 Option 默认值形参 Some 包裹 / 类型转换 / clone 注入）——替代原先绕过这些机制、漏掉 Some 包裹的特例分支。守卫排除 kwargs 注入与变参函数（各有专门分支，若在此重排会丢弃其 kwargs/变参实参），仅确有关键字实参时克隆（方向 B 分配消除）。删除旧 WIP 特例分支与 5 处 `__TRACE__` 调试打印。`named_args.lz` 扩展覆盖 `name~` 糖并封 `.exp`（stdout `3/3/hi LZ/hi LZ/hi world`），双后端差分转正。
 - 判据（可红）: `CY/TESTS/15_feature_matrix/named_args.lz` 过 L1/L2；rust 面产物可编译性由 `TEMP/probe13/kw2.rs` 手工复跑 rustc 判（当前必红）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r7)
 

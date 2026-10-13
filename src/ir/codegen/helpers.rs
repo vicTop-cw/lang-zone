@@ -11,6 +11,37 @@ pub(crate) fn is_kwarg_call(args: &[Expr]) -> bool {
         .any(|a| matches!(&a.kind, ExprKind::StructCtor { name, .. } if name == "_KwArg"))
 }
 
+/// 判断实参是否为关键字实参节点：`_KwArg`（`name~` 糖）或
+/// `AssignExpr { target: 简单变量 }`（`name=value` 全形，parser 按赋值表达式解析）。
+pub(crate) fn is_kwarg_arg(a: &Expr) -> bool {
+    kwarg_name_value(a).is_some()
+}
+
+/// 提取关键字实参的（参数名, 值表达式）。非关键字实参返回 None。
+pub(crate) fn kwarg_name_value(a: &Expr) -> Option<(String, &Expr)> {
+    match &a.kind {
+        ExprKind::StructCtor { name, fields } if name == "_KwArg" => {
+            let k = fields
+                .iter()
+                .find(|(n, _)| n == "name")
+                .and_then(|(_, v)| match &v.kind {
+                    ExprKind::Lit(LitKind::Str(s)) => Some(s.clone()),
+                    _ => None,
+                })?;
+            let value = fields.iter().find(|(n, _)| n == "value")?;
+            Some((k, &value.1))
+        }
+        ExprKind::AssignExpr { target, value } => {
+            if let ExprKind::Var(name) = &target.kind {
+                Some((name.clone(), value))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// 判断模式是否为列表模式（[a, b, c] / [first, ..rest]）或其子模式包含列表模式
 pub(crate) fn pattern_is_list(pat: &Pattern) -> bool {
     match pat {
