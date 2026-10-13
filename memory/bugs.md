@@ -434,7 +434,7 @@
 - repro: `python -u TEMP/closure_probes_r10.py`（A 组）；单测 `cargo test -j 1 --test cython_backend`；全量 `cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`
 - reported_by: qoder-explore-worker(cy 后端轮 T0r10)
 
-## BUG-33 [2026-10-06T13:06:08Z] [medium] 入账未修（rust 后端；本车道不改 `src/ir/codegen/mod.rs`）：闭包写捕获（SYNTAX/03e §五「可写捕获 → FnMut」）在 rust 面编不出东西，cy 面已实现
+## BUG-33 [2026-10-06T13:06:08Z] [medium] FIXED（v188，写捕获闭包不装箱为 Arc<dyn Fn>，保持栈上 let mut 闭包自动推断 FnMut）：闭包写捕获（SYNTAX/03e §五「可写捕获 → FnMut」）在 rust 面编不出东西，cy 面已实现
 - summary: 合法写法 `let add = |v: int| =>` 换行块体 `{ total = total + v; total }`（§二 的多行体规则），cy 面按 §五 实现并实跑出 `'7\n'`，**rust 面 rustc 直接拒绝** ⇒ 跨后端取不到 oracle
 - detail: 逐字取自证据件 `TEMP/closure-probes-201234.log`（B 组 `p_writecap.lz`）：
   rust 侧原文：`error[E0594]: cannot assign to `total`, as it is a captured variable in a `Fn` closure` 与 `error[E0502]: cannot borrow `total` as immutable because it is also borrowed as mutable`；cy 侧：`rust=RUSTC_FAIL cy=OK`、stdout `'7\n'`。

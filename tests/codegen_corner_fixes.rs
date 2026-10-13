@@ -305,3 +305,23 @@ def main() =
     assert!(r.ok, "用户 struct convert 编译应通过（不被替换为 unwrap）：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "42");
 }
+
+#[test]
+fn closure_write_capture_fn_mut() {
+    // BUG-33 回归：闭包体内赋值外部变量（写捕获）不能装箱为 Arc<dyn Fn>，
+    // 否则 Arc 不可变，体内修改捕获变量会报 E0599 / E0384。
+    // 应保持栈上 `let mut` 闭包，Rust 自动推断 FnMut。
+    let src = r#"
+def main() =
+    mut total = 0
+    let add = |v: int| =>
+        total = total + v
+        total
+    print(add(3))
+    print(add(4))
+"#;
+    let r = run_lz("closure_write_cap", src);
+    assert!(r.transpiled, "写捕获闭包应可转译：\n{}", r.diag);
+    assert!(r.ok, "写捕获闭包编译应通过（Arc<dyn Fn> → 栈上 FnMut）：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "3\n7");
+}

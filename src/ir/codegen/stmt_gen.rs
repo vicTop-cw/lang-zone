@@ -444,8 +444,22 @@ impl CodeGen {
             } => {
                 // IR-003：嵌套 def 转本地闭包产物 `let name = <Lambda>`（ty=Fn 且值
                 // 为 Lambda）→ 值位置，需 Arc<dyn Fn … + Send + Sync> 标注并装箱
+                // BUG-33 修复：写捕获闭包（体内赋值外部变量）不能装箱为 Arc<dyn Fn>，
+                // 否则 Arc 不可变，体内修改捕获变量会报 E0599 / E0384。
+                // 保持栈上 `let mut` 闭包，Rust 自动推断 FnMut。
                 let is_fn_lambda_let = matches!(ty, IrType::Fn { .. })
                     && matches!(value.kind, ExprKind::Lambda { .. });
+                let lambda_write_capture = if let ExprKind::Lambda { params, body, .. } = &value.kind {
+                    let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+                    match &body.kind {
+                        ExprKind::BlockExpr { block } => block_has_external_assign(block, &param_names),
+                        _ => expr_has_external_assign(body, &param_names),
+                    }
+                } else {
+                    false
+                };
+                // 写捕获闭包不装箱（保持栈上 FnMut），也不标注 Arc<dyn Fn> 类型
+                let is_fn_lambda_let = is_fn_lambda_let && !lambda_write_capture;
                 // 关键字降级变量（Ok/Some/None/Err 用作变量名）：注册并重命名为 name_
                 // line/column/file 与 Rust 内置宏（line!/column!/file!）冲突，同样降级
                 if matches!(
