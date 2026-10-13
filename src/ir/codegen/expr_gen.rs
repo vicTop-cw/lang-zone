@@ -5370,6 +5370,13 @@ impl CodeGen {
                 child.mutated_consts = self.mutated_consts.clone();
                 child.slice_clone_bindings = self.slice_clone_bindings.clone();
                 child.lazy_static_names = self.lazy_static_names.clone();
+                // f-string 的 {} / {:?} 分档依赖 str 类型登记表；块表达式走子 CodeGen，
+                // 若不继承，块内 `f"…{recv.field}"`（如 with 体的 res.name）查不到 recv
+                // 的 struct 类型 ⇒ 落 Debug（BUG-28/44，违反 SYNTAX/00-词法基础.md:188）。
+                child.str_typed_vars = self.str_typed_vars.clone();
+                child.fstr_var_types = self.fstr_var_types.clone();
+                child.struct_fields_info = self.struct_fields_info.clone();
+                child.fstr_self_type = self.fstr_self_type.clone();
                 // 延迟惰性绑定（`@lazy`）需传递给 child：多语句 if/while 块体走子
                 // CodeGen，块内引用外层 @lazy 变量时同样改写为 `*cfg.get_or_init(..)`（T04/AC4）
                 child.lazy_bindings = self.lazy_bindings.clone();

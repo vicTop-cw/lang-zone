@@ -375,7 +375,7 @@
   把 `gen_block_prefix` 的 `n` 改回全量跑一次该测试，必须红。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r8)
 
-## BUG-28 [2026-10-06T09:13:36Z] [medium] 入账未修（rust 后端；本车道不改 src/ir/codegen/mod.rs）
+## BUG-28 [2026-10-06T09:13:36Z] [medium] FIXED（rust 后端 2026-10-14；与 BUG-44 同根因同修复）
 - summary: [BUG-23 复发 / 跨后端 oracle 分叉] `with ... as res` 绑定出来的接收者，其 str 字段插值又落回 Debug：
   `f"using {res.name}"` 发成 `format!("using {:?}", res.name)` ⇒ 违反 SYNTAX/00-词法基础.md:188，
   并与**它自己 2026-10-02 封盘的** `CY/TESTS/15_feature_matrix/with_defer.exp` 分叉
@@ -396,6 +396,9 @@
   ⇒ rust 面这条分叉没有任何门在测，本轮靠 cy 侧的 `.exp` 比对才暴露。
   转正前置：先在**能被执行的**门里加一条「with 绑定接收者的 str 插值 = Display」的实跑断言（要能红），
   再动 `gen_fstring` 的登记臂；改完 with_defer.exp 与 rust 产物要同向。
+- 修复（rust 2026-10-14）：根因**不在**共享层绑定类型——`let mut res: MyResource` 在 IR 里已正确落地（本卡假设「落成 Any」不成立），真正障碍在 **codegen 块表达式子 CodeGen 未继承 f-string str 类型登记表**：with 体是块表达式，走全新子 CodeGen（expr_gen.rs BlockExpr 臂），`is_str_expr("res.name")` 查 `fstr_var_types["res"]`/`struct_fields_info` 全空 ⇒ 落 Debug。`self.name`（在 `__enter__` 直接体、非嵌套块）不受影响，故当时「self.name 两侧一致」的读数具误导性。修法：给子 CodeGen 继承 `str_typed_vars`/`fstr_var_types`/`struct_fields_info`/`fstr_self_type` 四表（模块/函数级、体积小，块路径克隆可忽略）。探针 withas（`with MyResource(name:"database") as res: print(f"using {res.name}")`）实跑 `using database`（无引号＝Display，合 SYNTAX/00-词法基础.md:188）。
+- 语料：`with_as_binding_fstr.lz` 已在语料（2026-10-09 拆出）；本轮**未封** `with_as_binding_fstr.exp`、**未移** `NO_ORACLE_EXPLAINED`——封盘要求两后端逐字一致（seal_missing_exp.py），本环境无 cython/cythonize（L2/L3 门不可跑），cy 侧 co-verify 挂起。母件 with_defer.lz 产物逐字不变（其 f-string 均为简单变量插值、非嵌套块字段访问；.exp 与产物内容一致，仅 CRLF/LF 行尾差异）。
+- 验证: cargo build + 全量 cargo test 441/0（无 golden 回归）；探针 withas 过 rustc 实跑 Display。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r8)
 
 ## BUG-29 [2026-10-06T09:56:34Z] [medium] 入账未修（rust 后端；挡 cy 语料封 golden）
@@ -554,7 +557,7 @@
 - 转正前置: rust 侧的内建方法处理按「接收者是用户类且它定义了原名 ⇒ 不动名字也不动实参类型」之后，把 `x_remove_static`/`x_remove_duck` 两支升级成语料并封盘。
 - repro: `python -u TEMP/rust_expect_evidence_r13.py`（f_remove_user 那一段）；`python -u TEMP/uncond_arms_probes_r13.py`（看 x_remove_static / x_remove_duck 两行）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r13)
-## BUG-44 [2026-10-09T03:20:29Z] [medium] 入账未修（共享层：`with ... as` 绑定的类型没落地；本车道不改 `src/ir/builder/`）：`f"using {res.name}"` 在 rust 面落 `{:?}`、cy 面按规范落 Display ⇒ 两侧逐字不等
+## BUG-44 [2026-10-09T03:20:29Z] [medium] FIXED（rust 后端 2026-10-14；与 BUG-28 同根因——子 CodeGen 未继承 str 类型表）：`f"using {res.name}"` 已落 Display，两侧应逐字一致（cy co-verify/封盘挂起）
 - summary: `struct MyResource = name: str` 之后 `with MyResource(name: "database") as res:`，语句体里 `print(f"using {res.name}")`。rust 面出 `using "database"`（带引号＝Debug 档），cy 面出 `using database`。两边都不报错、退出码都是 0，只是值不一样 ⇒ 比异常更难发现。
 - detail: 逐字凭据（`TEMP/wdseal-r14-apply.log`，同一份源码两后端各跑一遍）：
   rust: 'acquiring database\nusing "database"\nreleasing database\n'
@@ -563,5 +566,7 @@
   **缩小范围的关键读数**：同一个 struct 里 `def __enter__(self)` 的 `print(f"acquiring {self.name}")` 两侧逐字一致（都是 `acquiring database`）⇒ 缺的**不是**「字段访问的类型落地」，而是「`with ... as` 那个**绑定**的类型落地」——绑定没定成 `MyResource`（多半落成 `Any`），于是 `res.name` 的类型未知，rust 侧的逐实参分档 （`src/ir/codegen/expr_gen.rs:76` 的 `print_arg_is_display`）按「未知 ⇒ `{:?}`」走。规范 `SYNTAX/00-词法基础.md:188`（str 在插值里走 Display）站在 cy 这侧，所以要修的是共享层的类型落地，不是 cy 的分档。同洞的另一朝向：`.to_string()` 的 IR 返回类型也不是 `str` ⇒ `print(n.to_string())` **两侧都**出带引号的 Debug（凭据 `TEMP/corp-z1-r14.log` 的 `z_tstr_ty.lz` 那格）——那条两侧同错、这条只错 rust 一侧。
 - 本轮处置（不动共享层代码、不放宽任何门禁）：把这一句从语料 `with_defer.lz` 拆成独立语料 `CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz`（写盘件 `TEMP/split_withdefer_r14.py`，它的红对照 `TEMP/split_ctl_r14.py`），母件余下 8 行按**当日** rust 面重封（`TEMP/wd_reseal_r14.py --apply`，老那份改名留盘 `with_defer.exp.presplitr14`）。拆的判据是硬的：老 golden 摘掉的 3 行必须与新语料 rust 输出的 3 行「摘引号后逐字相等」，余下行必须「只差引号」，且母件 cy 实测 == 当日 rust 逐字（三格红对照：少摘一行、多摘一行、oracle 改一个字符，全被拦下）。新语料**不封** `.exp`，登记在 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`（该表双向可红）。照 cy 封它违反「期望值来自另一后端」的封盘纪律（那句话就写在母件第 2 行注释里）；照 rust 封它等于把本卡描述的缺陷钉成 cy 的验收标准。
 - 转正前置: 共享层把 `with ... as` 的绑定类型落成被管理值的类型之后，`f"using {res.name}"` 两侧应逐字一致（都是 `using database`）；届时 `python -u TEMP/seal_missing_exp.py` 会补封 `with_as_binding_fstr.exp`（该工具只在两后端逐字一致时封、不覆盖已有 `.exp`、空 stdout 不封），而 `NO_ORACLE_EXPLAINED` 那条随即被门禁的「登记了但 `.exp` 在场 ⇒ 红」反向门逼着同轮移出。顺手一起看 `print(n.to_string())` 那一族（`.to_string()` 的 IR 返回类型应为 `str`）。
+- 修复（rust 2026-10-14，与 BUG-28 同根因）：本卡假设「绑定落成 Any」**不成立**——`let mut res: MyResource` 在 IR 里已正确落地。真正障碍：with 体是**块表达式**，codegen 走全新子 CodeGen（expr_gen.rs BlockExpr 臂）而未继承 f-string str 类型登记表（`fstr_var_types`/`struct_fields_info`/`str_typed_vars`/`fstr_self_type`），`is_str_expr("res.name")` 查表全空 ⇒ 落 Debug。`self.name` 在 `__enter__` 直接体（非嵌套块）故两侧一致，误导了本卡的「共享层绑定类型」定位。修法＝子 CodeGen 继承四表（模块/函数级、体积小、块路径克隆可忽略）。探针 withas 实跑 `using database`（无引号＝Display）。
+- 语料/封盘：rust 侧已对，但**未封** `with_as_binding_fstr.exp`、**未移** `NO_ORACLE_EXPLAINED`——封盘须两后端逐字一致（seal_missing_exp.py），本环境无 cython/cythonize（L2/L3 不可跑），cy 侧 co-verify 挂起，待有 cy 环境时补封并同轮移出登记表。`.to_string()` IR 返回类型应为 `str` 那一族（两侧同错）本轮**未动**（独立洞，另卡）。
 - repro: `python -u TEMP/wd_reseal_r14.py`（DRY，含三格红对照，出两侧原文逐字）；`python -u TEMP/withdefer_diag_r14.py`（拆前母件的三方逐行分类：陈旧引号 10 行 / 真分叉 1 行）；`cargo test --test cy_codegen_gate`（L1，含登记表与语料的双向对表）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r14)
