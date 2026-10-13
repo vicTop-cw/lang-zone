@@ -2609,7 +2609,11 @@ impl CodeGen {
 
                 // try_into (the ? operator): convert to Result::unwrap() for now
                 // In the future, this should emit ? operator when in a Result-returning context
-                if method == "try_into" {
+                // BUG-39 修复：用户自定义 struct 的 try_into 方法不应被替换为 .unwrap()
+                // （用户方法有独立语义，改名后 rustc 报 E0599 no method named `unwrap`）。
+                let recv_has_custom_try_into = matches!(&receiver.ty, IrType::Named { path, .. }
+                    if self.struct_method_names(path).contains("try_into"));
+                if method == "try_into" && !recv_has_custom_try_into {
                     // 自定义传播类型（实现 __is_ok__/__unwrap__/__err__ 的 struct，
                     // 如 spread_protocol.lz 的 HttpResult）：生成 is_ok 判定 + 失败
                     // panic(err) + 成功解包，语义与 Result.unwrap 等价
@@ -2816,12 +2820,20 @@ impl CodeGen {
                     }
                     "__iter__" if !recv_is_struct => "iter",
                     "length" => "len", // LZ .length() → Rust .len()
-                    "to_upper" => "to_uppercase",
-                    "to_lower" => "to_lowercase",
+                    // BUG-39 修复：用户自定义 struct 的 to_lower/to_upper/lower/upper 方法
+                    // 不应被改名为 to_lowercase/to_uppercase（用户方法参数/返回类型可能不同，
+                    // 改名后 rustc 报 E0599 no method named `to_lowercase`）。
+                    // 守卫：仅当 receiver 无自定义同名方法时才改名。
+                    "to_upper" if !matches!(&receiver.ty, IrType::Named { path, .. }
+                        if self.struct_method_names(path).contains("to_upper")) => "to_uppercase",
+                    "to_lower" if !matches!(&receiver.ty, IrType::Named { path, .. }
+                        if self.struct_method_names(path).contains("to_lower")) => "to_lowercase",
                     // string.lz to_lower/to_upper 内部调用 self.lower()/self.upper()
                     // （编译器映射标记）：lower/upper 映射到 std to_lowercase/to_uppercase
-                    "lower" => "to_lowercase",
-                    "upper" => "to_uppercase",
+                    "lower" if !matches!(&receiver.ty, IrType::Named { path, .. }
+                        if self.struct_method_names(path).contains("lower")) => "to_lowercase",
+                    "upper" if !matches!(&receiver.ty, IrType::Named { path, .. }
+                        if self.struct_method_names(path).contains("upper")) => "to_uppercase",
                     "push" | "append" => "push",
                     // add → insert 仅在 receiver **无自定义 add 方法**时映射：
                     // - set_tuple.lz 的 {1,2} 字面量是原生 HashSet（无 add）→ insert

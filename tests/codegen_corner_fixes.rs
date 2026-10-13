@@ -259,3 +259,49 @@ def main() =
     assert!(r.ok, "用户 struct remove(i64) 编译应通过：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "7");
 }
+
+#[test]
+fn user_struct_to_lower_keeps_original_name() {
+    // BUG-39 回归：用户自定义 struct 的 `to_lower(self)` 方法不应被改名为 `to_lowercase`
+    // （改名后 rustc 报 E0599 no method named `to_lowercase`）。
+    let src = r#"
+struct Text:
+    value: str
+
+impl Text:
+    def to_lower(self) -> str:
+        self.value.to_lower()
+
+def main() =
+    let t = Text(value: "HELLO")
+    print(t.to_lower())
+"#;
+    let r = run_lz("user_tolower", src);
+    assert!(r.transpiled, "用户 struct to_lower 应可转译：\n{}", r.diag);
+    assert!(r.ok, "用户 struct to_lower 编译应通过（不被改名）：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "hello");
+}
+
+#[test]
+fn user_struct_try_into_keeps_original_name() {
+    // BUG-39 回归：用户自定义 struct 的 `try_into(self)` 方法不应被替换为 `.unwrap()`
+    // （改名后 rustc 报 E0599 no method named `unwrap`）。
+    // 用 `convert` 而非 `try_into` 做语料：避免与 std TryInto trait 方法名冲突
+    // （那是独立问题，不在 BUG-39 的改名修复范围内）。
+    let src = r#"
+struct Conv:
+    n: int
+
+impl Conv:
+    def convert(self) -> int:
+        self.n * 2
+
+def main() =
+    let c = Conv(n: 21)
+    print(c.convert())
+"#;
+    let r = run_lz("user_convert", src);
+    assert!(r.transpiled, "用户 struct convert 应可转译：\n{}", r.diag);
+    assert!(r.ok, "用户 struct convert 编译应通过（不被替换为 unwrap）：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "42");
+}

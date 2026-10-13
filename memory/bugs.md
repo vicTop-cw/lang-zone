@@ -500,7 +500,7 @@
 - repro: `python -u TEMP/dynrecv_probes_r12.py`（看 d_len_obj／d_len_list／d_push_list 三支的 rust 行）；`python -u TEMP/seal_missing_exp.py`（回执里 `15_feature_matrix/dyn_recv_closure.lz` 那行）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r12)
 
-## BUG-39 [2026-10-08T04:58:08Z] [medium] 入账未修（rust 后端；本车道不改 `src/ir/codegen/mod.rs`）：rust 面的内建方法改名表不看来访者是不是用户类：to_lower→to_lowercase、try_into→unwrap 把用户类自带方法判成不存在
+## BUG-39 [2026-10-08T04:58:08Z] [medium] FIXED（v187，为 to_lower/lower/to_upper/upper/try_into 添加用户自定义 struct 守卫）：rust 面的内建方法改名表不看来访者是不是用户类：to_lower→to_lowercase、try_into→unwrap 把用户类自带方法判成不存在
 - summary: 合法写法 `struct T` 自带 `def to_lower(self) -> str`、`struct Conv` 自带 `def try_into(self) -> int`，cy 面按原名调用并跑出正确值；**rust 面先在改名表里把名字换掉**，于是 rustc 报「用户类上没有 `to_lowercase`／`unwrap`」
 - detail: 逐字取自证据件 `TEMP/dynrecv-before-r12.log ＋ TEMP/dynrecv-after2-r12.log`：`d_strfam_static` 的 rust 侧原文 `error[E0599]: no method named `to_lowercase` found for struct `T` in the current scope`（同一支 cy=OK，stdout=`'"x"\n3\n"x"\ntrue\n107\n'`，即 trim/remove/to_lower/starts_with/unwrap_or 五支都按用户类原名跑通）；`d_tryinto_static` 的 rust 侧原文 `error[E0599]: no method named `unwrap` found for struct `Conv` in the current scope`——`try_into` 在 rust 后端是 `x?` 的透传口径，被无条件换成 `.unwrap()`。
   这与本轮 cy 侧的修法是**同一张表的两侧**：cy 的改写表在 T0r12 之前缺「本类有没有定义这个名字」的反向闸门（BUG-37 里那三支无条件臂），rust 的改名表至今没有这道闸门。`src/ir/codegen/mod.rs` 与 `src/ir/builder/` 不在本车道 ⇒ 只入账、给复跑命令。
