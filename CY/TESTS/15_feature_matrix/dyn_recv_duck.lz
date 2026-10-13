@@ -1,0 +1,44 @@
+// 15_feature_matrix - dyn_recv_duck：泛型形参上的方法名分派（SYNTAX/03b §二 + 01b §一）
+//
+// `def sz<T: HasLen>(x: T) = x.len()` 这种写法里，接收者的静态类型是**类型参数**而不是某个
+// 具体类。Rust 侧按实参类型解析方法（`x.len()` → trait 方法），cy 侧发的是 `def sz(object x)`，
+// 编译期拿不到任何形状信息 ⇒ 旧发射把方法改写表的「反向闸门」（接收者是用户类时保留原名）
+// 当恒假用，直接发 `len(x)`：
+//   修前逐字 `TypeError: object of type '_lzcyg_d_duck_len.Bucket' has no len()`
+//   （`TEMP/dynrecv-before-r12.log` 的 d_duck_len，同一件 rust 面 `'3\n8\n'`）；
+//   `.is_empty()` 同一条路：`TypeError: object of type '_lzcyg_d_duck_empty.Bucket' has no len()`。
+// 现在的产物是 `return _lz_len(x, "len")` / `return _lz_isempty(x)`：**按运行时实际类型**分派，
+// 名单 `_LZ_TYPES` 与静态判据同源（`known_types ∪ cdef_classes`），非本模块用户类走 Python 内建。
+//
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分（`python -u TEMP/seal_missing_exp.py`）。
+duck HasLen =
+    def len(self) -> int
+
+duck HasEmpty =
+    def is_empty(self) -> bool
+
+struct Bucket =
+    items: List<int>
+    def len(self) -> int =
+        self.items.len()
+    def is_empty(self) -> bool =
+        self.items.len() == 0
+
+struct Wrapper =
+    n: int
+    def len(self) -> int =
+        self.n * 2
+    def is_empty(self) -> bool =
+        self.n == 0
+
+def main() =
+    def sz<T: HasLen>(x: T) -> int =
+        x.len()
+    def e<T: HasEmpty>(x: T) -> bool =
+        x.is_empty()
+
+    print(sz(Bucket(items: [1, 2, 3])))
+    print(sz(Wrapper(n: 4)))
+    print(e(Bucket(items: [7])))
+    print(e(Bucket(items: [])))
+    print(e(Wrapper(n: 0)))

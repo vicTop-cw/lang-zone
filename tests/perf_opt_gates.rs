@@ -915,10 +915,9 @@ def main() =
 "#;
     let r = run_lz("fix_c_tail_str", src, &[]);
     assert!(r.ok, "str 尾表达式应推断为 String 而非 i64：\n{}", r.diag);
-    // 注意：调用点仍把「推断出来的返回类型」视为 Any，故 println 走 Debug（带引号）。
-    // 缺陷 C 修的是**函数自身的签名**（此前渲染成 i64 ⇒ E0308 编译不过）；调用点的
-    // 返回类型推断（fn_returns 只登记显式注解）是另一层缺口，不在本次范围。
-    assert_eq!(r.stdout, "\"xxx\"");
+    // 调用点返回类型推断已闭环（builder 预推断无注解函数返回类型，v183）：
+    // println(accum()) 与显式 -> str 一致走 Display，输出不带引号。
+    assert_eq!(r.stdout, "xxx");
     assert!(
         r.rs_text.contains("-> String"),
         "返回类型应是 String：\n{}",
@@ -1217,17 +1216,17 @@ def main() =
         r.rs_text
     );
     assert!(
-        r.rs_text.contains("let mut d = std::collections::BTreeMap::new();"),
-        "dict() 应接线 BTreeMap::new：\n{}",
+        r.rs_text.contains("let mut d: std::collections::BTreeMap<_, _> = std::collections::BTreeMap::new();"),
+        "dict() 应接线 BTreeMap::new（占位符标注，键类型由使用点推断）：\n{}",
         r.rs_text
     );
     assert!(
-        r.rs_text.contains("let mut xs = Vec::new();"),
+        r.rs_text.contains("let mut xs: Vec<_> = Vec::new();"),
         "list() 应接线 Vec::new（push 触发 auto-mut）：\n{}",
         r.rs_text
     );
     assert!(
-        r.rs_text.contains("std::collections::HashSet::new()"),
+        r.rs_text.contains("std::collections::HashSet<_>"),
         "set() 应接线 HashSet::new：\n{}",
         r.rs_text
     );
@@ -1248,7 +1247,8 @@ def main() =
     assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
     assert_eq!(r.stdout, "3");
     assert!(
-        r.rs_text.contains("let mut d = std::collections::BTreeMap::new();"),
+        r.rs_text.contains("let mut d = std::collections::BTreeMap::new();")
+            || r.rs_text.contains("let mut d:"),
         "索引赋值目标基变量应生成 let mut（E0596）:\n{}",
         r.rs_text
     );

@@ -1,5 +1,9 @@
 // 出处：DEMO/06_control_flow/with_defer.lz（逐字拷贝，仅加本注释头）
 // 期望值 with_defer.exp 由 **Rust 后端**实跑生成（TEMP/xdiff_ds07.py + LZ_SEAL_EXP=1，2026-10-02），不是抄 cy 自己的产物。
+// 2026-10-09（T0r14）：本件的 with_defer.exp 由 TEMP/reseal_stale_exp_r14.py --apply 按**当日** Rust 面重封
+// （原 golden 封在 rust 面对裸字符串也发 `{:?}` 的年代，10 行只差引号形态）。同批把**唯一一条真分叉**
+// （`with ... as res` 绑定后的 `f"using {res.name}"`：rust 出 Debug、cy 按 SYNTAX/00-词法基础.md:188 出 Display）
+// 拆到 with_as_binding_fstr.lz —— 那条语句的期望值是缺陷产物，封它等于把缺陷钉成验收标准（BUG-44 在册，交对面）。
 // ============================================================
 // with (context manager) / defer (LIFO) / pass (no-op)
 // LZ Spec §9, §10, §11
@@ -19,10 +23,6 @@ struct MyResource =
         print(f"releasing {self.name}")
 
 def main() =
-    // --- 10 with context manager + as binding ---
-    with MyResource(name: "database") as res:
-        print(f"using {res.name}")
-    // automatically calls res.__exit__()
 
     // --- with without as (no enter/exit) ---
     with print("standalone with block"):

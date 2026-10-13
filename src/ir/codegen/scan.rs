@@ -2394,3 +2394,241 @@ pub(crate) fn rewrite_parallel_expr(expr: &mut Expr) {
         _ => {}
     }
 }
+
+// ════════════════════════════════════════════════════════════════
+// Dict 键泛型的 Ord 约束收集
+// ════════════════════════════════════════════════════════════════
+//
+// Dict/HashMap 映射为 `BTreeMap<K,V>`（有序，保证 JSON 序列化字段顺序稳定），
+// Rust 侧要求键类型 `K: Ord`。凡是出现在 Dict/HashMap **第一个类型实参**位的
+// 泛型参数都需 `Ord`。此处预扫描模块，收集这些泛型名存入
+// `CodeGen::dict_key_generics`，由 `gen_generics` / `gen_fn_generics` 统一注入。
+
+/// 若类型是 Dict/HashMap 且首参为泛型 `Generic(name)`，把 name 记入 out。
+pub(crate) fn dict_key_gen_of_ty(ty: &IrType, out: &mut HashSet<String>) {
+    match ty {
+        IrType::Named { args, .. } => {
+            if is_dict_ty(ty) {
+                if let Some(IrType::Generic(name)) = args.first() {
+                    out.insert(name.clone());
+                }
+            }
+            for a in args {
+                dict_key_gen_of_ty(a, out);
+            }
+        }
+        IrType::Option(inner) => dict_key_gen_of_ty(inner, out),
+        IrType::Result { ok, err } => {
+            dict_key_gen_of_ty(ok, out);
+            dict_key_gen_of_ty(err, out);
+        }
+        IrType::Tuple(elems) => {
+            for e in elems {
+                dict_key_gen_of_ty(e, out);
+            }
+        }
+        IrType::Fn { params, ret } => {
+            for p in params {
+                dict_key_gen_of_ty(p, out);
+            }
+            dict_key_gen_of_ty(ret, out);
+        }
+        IrType::Ref(inner) | IrType::MutRef(inner) => dict_key_gen_of_ty(inner, out),
+        IrType::Duck { fields } => {
+            for (_, t) in fields {
+                dict_key_gen_of_ty(t, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 递归遍历语句块，收集 Dict 键泛型名（含 let 绑定类型标注与嵌套块）。
+fn dict_key_gen_walk_block(block: &Block, out: &mut HashSet<String>) {
+    for s in &block.stmts {
+        dict_key_gen_walk_stmt(s, out);
+    }
+}
+
+fn dict_key_gen_walk_stmt(stmt: &Stmt, out: &mut HashSet<String>) {
+    match stmt {
+        Stmt::Let { ty, value, .. } => {
+            dict_key_gen_of_ty(ty, out);
+            dict_key_gen_walk_expr(value, out);
+        }
+        Stmt::Return { value: Some(e) } => dict_key_gen_walk_expr(e, out),
+        Stmt::ExprStmt { expr } | Stmt::Yield { value: expr } => dict_key_gen_walk_expr(expr, out),
+        Stmt::YieldFrom { iter } => dict_key_gen_walk_expr(iter, out),
+        Stmt::Raise { value } => dict_key_gen_walk_expr(value, out),
+        Stmt::Assert { cond, message } => {
+            dict_key_gen_walk_expr(cond, out);
+            if let Some(m) = message {
+                dict_key_gen_walk_expr(m, out);
+            }
+        }
+        Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            dict_key_gen_walk_expr(cond, out);
+            dict_key_gen_walk_block(then_branch, out);
+            if let Some(eb) = else_branch {
+                dict_key_gen_walk_block(eb, out);
+            }
+        }
+        Stmt::For {
+            iter,
+            body,
+            else_body,
+            ..
+        } => {
+            dict_key_gen_walk_expr(iter, out);
+            dict_key_gen_walk_block(body, out);
+            if let Some(eb) = else_body {
+                dict_key_gen_walk_block(eb, out);
+            }
+        }
+        Stmt::While {
+            cond, body, else_body, ..
+        } => {
+            dict_key_gen_walk_expr(cond, out);
+            dict_key_gen_walk_block(body, out);
+            if let Some(eb) = else_body {
+                dict_key_gen_walk_block(eb, out);
+            }
+        }
+        Stmt::WhileLet { expr, body, .. } => {
+            dict_key_gen_walk_expr(expr, out);
+            dict_key_gen_walk_block(body, out);
+        }
+        Stmt::Match { scrutinee, arms } => {
+            dict_key_gen_walk_expr(scrutinee, out);
+            for arm in arms {
+                dict_key_gen_walk_block(&arm.body, out);
+            }
+        }
+        Stmt::Defer { body } | Stmt::BlockLabel { body, .. } => {
+            dict_key_gen_walk_block(body, out)
+        }
+        Stmt::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
+            dict_key_gen_walk_block(body, out);
+            for (_, cb) in catches {
+                dict_key_gen_walk_block(cb, out);
+            }
+            if let Some(b) = else_body {
+                dict_key_gen_walk_block(b, out);
+            }
+            if let Some(b) = finally_body {
+                dict_key_gen_walk_block(b, out);
+            }
+        }
+        Stmt::Block { stmts } => {
+            for s in stmts {
+                dict_key_gen_walk_stmt(s, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn dict_key_gen_walk_expr(expr: &Expr, out: &mut HashSet<String>) {
+    // 表达式自身类型（构造器/调用的结果类型可能含 Dict<泛型,_>）
+    dict_key_gen_of_ty(&expr.ty, out);
+    match &expr.kind {
+        ExprKind::BlockExpr { block } => dict_key_gen_walk_block(block, out),
+        ExprKind::Lambda { params, body, .. } => {
+            for p in params {
+                dict_key_gen_of_ty(&p.ty, out);
+            }
+            dict_key_gen_walk_expr(body, out);
+        }
+        ExprKind::Call { args, .. } | ExprKind::MethodCall { args, .. } => {
+            for a in args {
+                dict_key_gen_walk_expr(a, out);
+            }
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            dict_key_gen_walk_expr(lhs, out);
+            dict_key_gen_walk_expr(rhs, out);
+        }
+        ExprKind::UnOp { operand, .. } => dict_key_gen_walk_expr(operand, out),
+        ExprKind::AssignExpr { target, value } => {
+            dict_key_gen_walk_expr(target, out);
+            dict_key_gen_walk_expr(value, out);
+        }
+        ExprKind::Paren(inner) | ExprKind::ImplicitConvert { source: inner, .. } => {
+            dict_key_gen_walk_expr(inner, out)
+        }
+        ExprKind::IfExpr { cond, then, els } => {
+            dict_key_gen_walk_expr(cond, out);
+            dict_key_gen_walk_expr(then, out);
+            dict_key_gen_walk_expr(els, out);
+        }
+        ExprKind::StructCtor { fields, .. } => {
+            for (_, v) in fields {
+                dict_key_gen_walk_expr(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 收集整个模块中「被用作 Dict/HashMap 键」的泛型参数名。
+pub(crate) fn collect_dict_key_generics(module: &IrModule) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for item in &module.items {
+        match item {
+            Item::StructDef(s) => {
+                for f in &s.fields {
+                    dict_key_gen_of_ty(&f.ty, &mut out);
+                }
+            }
+            Item::FnDef(f) => {
+                for p in &f.params {
+                    dict_key_gen_of_ty(&p.ty, &mut out);
+                }
+                dict_key_gen_of_ty(&f.ret_ty, &mut out);
+                dict_key_gen_walk_block(&f.body, &mut out);
+            }
+            Item::Impl(i) => {
+                // impl 目标类型实参（如 `impl Iterator for DictIter<K, V>` 的 K/V）
+                match &i.for_type {
+                    IrType::Named { args, .. } => {
+                        for a in args {
+                            dict_key_gen_of_ty(a, &mut out);
+                        }
+                    }
+                    other => dict_key_gen_of_ty(other, &mut out),
+                }
+                // Impl::methods 是 Vec<FnDef>（params: Vec<Param>，返回字段 ret_ty）
+                for m in &i.methods {
+                    for p in &m.params {
+                        dict_key_gen_of_ty(&p.ty, &mut out);
+                    }
+                    dict_key_gen_of_ty(&m.ret_ty, &mut out);
+                    dict_key_gen_walk_block(&m.body, &mut out);
+                }
+            }
+            Item::TraitDef(t) => {
+                // TraitDef::methods 是 Vec<FnSig>（params: Vec<IrType>，返回字段 ret）
+                for m in &t.methods {
+                    for p in &m.params {
+                        dict_key_gen_of_ty(p, &mut out);
+                    }
+                    dict_key_gen_of_ty(&m.ret, &mut out);
+                    if let Some(b) = &m.body {
+                        dict_key_gen_walk_block(b, &mut out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}

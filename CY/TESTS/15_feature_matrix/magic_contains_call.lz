@@ -1,0 +1,56 @@
+// 15_feature_matrix - magic_contains_call：`__contains__` / `__call__` / `__setitem__`
+// （SYNTAX/12 §3.1 的成员判定与调用面、§1.8 索引与调用）
+//
+// 本轮修掉的 cy 分叉（探针 `TEMP/magic_probes_r11.py` 的 m_contains / m_setitem）：
+// ① 用户类实现 `__contains__` 时，LZ 的 `x.contains(y)` 在 Rust 侧走那条魔法，
+//    而 Python **没有**同名方法（协议面是 `y in x` ⇒ `__contains__`）。旧发射把
+//    `.contains(` 原样发出去 ⇒ AttributeError: 'Word' object has no attribute 'contains'。
+//    现在只有「接收者是用户类且它确实实现了 `__contains__`」才改写成 `in`；
+//    内建接收者（str/list/dict-keys）走的是表里另一条既有臂，用户自写的 `def contains` 仍原样发。
+// ② `__setitem__` 的写侧要 `mut` 绑定（DEMO/07_data_structures/magic_methods.lz:143 同款），
+//    少了 `mut` 时 Rust 面按所有权拒绝、cy 面无 borrowck 会照跑——那是**接受面**分叉，
+//    本件按合法写法（`mut`）钉住行为。
+//
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分。
+struct Word =
+    s: str
+
+impl Word =
+    def __contains__(ref self, t: str) -> bool =
+        self.s.contains(t)
+
+struct Times =
+    factor: int
+
+impl Times =
+    def __call__(self, x: int) -> int =
+        self.factor * x
+
+struct Bag =
+    items: List<int>
+
+impl Bag =
+    def __getitem__(ref self, i: int) -> int =
+        self.items[i]
+    def __setitem__(mut self, i: int, v: int) =
+        self.items[i] = v
+
+def main() =
+    // ── 成员判定的两个调用面必须同形 ──
+    let w = Word(s: "hello")
+    print("ell" in w)
+    print("xyz" in w)
+    print(w.contains("ell"))
+    print(w.contains("xyz"))
+
+    // ── 可调用对象 ──
+    let m = Times(factor: 3)
+    print(m(4))
+    print(m(5))
+
+    // ── 读索引 + 写索引 ──
+    mut b = Bag(items: [1, 2, 3])
+    b[1] = 99
+    print(b[0])
+    print(b[1])
+    print(b[2])

@@ -2079,10 +2079,17 @@ impl CodeGen {
                     // type alias 空构造：List()/Vec() → Vec::new()；Set()/HashSet() →
                     // HashSet::new()；Dict()/HashMap() → HashMap::new()（type alias
                     // 不能当函数调用，E0423 expected function, found type alias）
+                    // 小写别名同款接线：dict()/list()/set() 此前透传为裸调用，
+                    // 生成未定义函数 → E0425（perf §14.5 遗留缺口）。本分支在
+                    // fn_param_types（用户自定义函数）检查之后，不遮蔽同名用户函数。
                     match callee_s.as_str() {
-                        "List" | "Vec" => "Vec::new()".to_string(),
-                        "Set" | "HashSet" => "std::collections::HashSet::new()".to_string(),
-                        "Dict" | "HashMap" => "std::collections::BTreeMap::new()".to_string(),
+                        "List" | "Vec" | "list" => "Vec::new()".to_string(),
+                        "Set" | "HashSet" | "set" => {
+                            "std::collections::HashSet::new()".to_string()
+                        }
+                        "Dict" | "HashMap" | "dict" => {
+                            "std::collections::BTreeMap::new()".to_string()
+                        }
                         _ => {
                             let call_str =
                                 format!("{}{}({})", callee_s, turbofish, args_s.join(", "));

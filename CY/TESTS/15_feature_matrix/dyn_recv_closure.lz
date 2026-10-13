@@ -1,0 +1,89 @@
+// 15_feature_matrix - dyn_recv_closure：无注解闭包形参上的方法分派（SYNTAX/03e §一 第 14 行）
+//
+// `let sz = |x| => x.len()` 是规范里的合法写法（单参数、省略注解、单行 `=>`），
+// `src/ir/builder/capture.rs:528` 把这类形参恒落成 `IrType::Any` ⇒ cy 侧接收者毫无静态形状信息。
+// 修前一条程序里七个面全坏（六支运行期响 + 一支静默少做，逐字取自 `TEMP/dynrecv-before-r12.log`，
+// 探针名注在引号里）：
+//   `x.len()` → `TypeError: object of type '_lzcyg_d_len_obj.Bucket' has no len()`
+//   `x.push(9)` → `AttributeError: '_lzcyg_d_push_obj.Bucket' object has no attribute 'append'`
+//   `x.contains(2)` → `TypeError: argument of type '_lzcyg_d_contains_obj.Bucket' is not iterable`
+//   `x.is_empty()` → `TypeError: object of type '_lzcyg_d_empty_obj.Bucket' has no len()`
+//   `x.unwrap_or(7)` → 不响，**静默返回对象本身**（旧产物 `f5 = lambda x: (_lz_or(x, 7))`）
+//   `for x in it` → `TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'`
+//     （`__next__` 的 Option.None 被当成**一个元素**，见 BUG-35；适配器只在静态判得出用户类时才套过）
+//   `x << Money(v: 2)` → `TypeError: unsupported operand type(s) for <<: '_lzcyg_d_shl_dyn.Money'
+//     and '_lzcyg_d_shl_dyn.Money'`（LZ 的 `__shl__` 与 Python 的 `__lshift__` 不同名，
+//     裸运算符在动态接收者上必响）
+// 现在这些位置分别发 `_lz_len` / `_lz_meth` / `_lz_contains` / `_lz_isempty` / `_lz_iter` / `_lz_shift`，
+// 由 `_LZ_TYPES` 名单或属性存在性决定走 LZ 原名还是 Python 协议面。
+//
+// **这一份故意没有 `.exp`**：同一份源码 rust 面恒 `error[E0282]: type annotations needed`
+// （无注解闭包形参在 Rust 侧无法定标），取不到跨后端 oracle ⇒ 已登记在
+// `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`（双向对表，补封后不移出会把门禁判红）。
+// 行为期望由单元锁 `cy_dynamic_receiver_dispatches_at_runtime` /
+// `cy_dynamic_for_site_wraps_and_the_helper_self_guards` 钉住**发射形态**，
+// 本件在 L3 只保证「跑通、不响」。
+struct Bucket =
+    items: List<int>
+    def len(self) -> int =
+        self.items.len()
+    def push(mut self, v: int) -> int =
+        self.items.push(v)
+        self.items.len()
+    def contains(self, v: int) -> bool =
+        self.items.contains(v)
+    def is_empty(self) -> bool =
+        self.items.len() == 0
+    def unwrap_or(self, d: int) -> int =
+        100 + d
+
+struct Money =
+    v: int
+    def __shl__(self, o: Money) -> Money =
+        Money(v: self.v << o.v)
+
+struct Steps =
+    n: int
+
+impl Steps =
+    def __iter__(self) -> StepsIter =
+        StepsIter(i: 0, n: self.n)
+
+struct StepsIter =
+    i: int
+    n: int
+
+impl StepsIter =
+    def __next__(mut self) -> Option<int> =
+        if self.i < self.n:
+            let r = self.i
+            self.i = self.i + 1
+            Option.Some(value: r)
+        else:
+            Option.None
+
+def main() =
+    let sz = |x| => x.len()
+    let add = |x| => x.push(9)
+    let has = |x| => x.contains(2)
+    let e = |x| => x.is_empty()
+    let orv = |x| => x.unwrap_or(7)
+    let mv = |x| => (x << Money(v: 2)).v
+    let run = |it| =>
+        mut t = 0
+        for x in it:
+            t = t + x
+        t
+
+    print(sz(Bucket(items: [1, 2, 3])))
+    print(add(Bucket(items: [1])))
+    print(has(Bucket(items: [1, 2])))
+    print(e(Bucket(items: [])))
+    print(orv(Bucket(items: [1])))
+    print(mv(Money(v: 6)))
+    print(run(Steps(n: 4)))
+    // 同一条分派在内建容器上要给出同一语义（名单判不出 ⇒ 走 Python 内建那半边）
+    print(sz([7, 8]))
+    print(has([1, 2]))
+    print(e([]))
+    print(run([1, 2, 3]))

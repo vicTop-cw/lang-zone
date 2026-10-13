@@ -1,0 +1,29 @@
+// 15_feature_matrix - uncond_arms_closure：无注解闭包形参上的 is_none / is_some / expect
+// （SYNTAX/03e §一 第 14 行的合法写法；`src/ir/builder/capture.rs:528` 把这类形参恒落成 `IrType::Any`）
+//
+// 静态判据在 `Any` 上取不到任何信息 ⇒ 三条臂的「本类有没有定义这个名字」恒假，
+// 旧行为等于「无条件把一次调用换成与 None 的 identity 比较」。现在这一支发运行时助手：
+//   f = lambda x: _lz_isnone(x, "is_none")
+//   g = lambda y: _lz_issome(y, "is_some")
+//   h = lambda z: _lz_exp(z, "m", "expect")
+// （发射形态凭据 = 实测 `TEMP/uncond-x13-after2-r13.log` 的 x_expect_closure；
+//  行为凭据 = 本件 cy 面跑出 'true\nfalse\n42\n'，与静态那份 `uncond_arms_user_methods.lz` 同值。）
+//
+// 这份**故意没有 .exp**：同一份源码在 rust 面恒 `error[E0282]: type annotations needed`
+// （上一轮 BUG-38 在册）⇒ 取不到 oracle，已登记 NO_ORACLE_EXPLAINED。
+struct Cfg =
+    n: int
+    def expect(ref self, msg: str) -> int =
+        self.n * 2
+    def is_none(ref self) -> bool =
+        true
+    def is_some(ref self) -> bool =
+        false
+
+def main() =
+    let f = |x| => x.is_none()
+    let g = |y| => y.is_some()
+    let h = |z| => z.expect("m")
+    print(f(Cfg(n: 1)))
+    print(g(Cfg(n: 1)))
+    print(h(Cfg(n: 21)))

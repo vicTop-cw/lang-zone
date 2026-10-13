@@ -72,6 +72,12 @@ const KNOWN_DIFF_NOT_COMPARABLE: &[(&str, &str)] = &[];
 
 /// L3 的 **oracle 覆盖登记表**——不是豁免清单，登记的是「这件没有逐字期望值，为什么」。
 ///
+/// 表里只有两种合法形状（都必须在 reason 里写明）：
+/// (a) rust 面**取不到** oracle（编不出／跑不出）；
+/// (b) oracle 在场但它是**在册缺陷**的产物（本轮新增，BUG-44 那类）——照它封盘等于把缺陷钉成
+///     本后端的验收标准，所以不封，同时给出**转正前置**（对面修好后补封，本表那条由反向门逼着移出）。
+/// 「这件在 cy 面行为不对」不属于任何一种：那走 `KNOWN_*`，而那三份清单的立场是**必须为空**。
+///
 /// 为什么要它：L3 汇总行原先只有「执行通过 81」，而 81 件里只有 75 件做了 stdout 逐字比对，
 /// 另外 6 件仅证明「编译过、跑完没抛」。没有这张表，报告面会把 81 读成 81 项行为被钉住
 /// ——覆盖面窄于主张，是这类门禁最常见的说谎形状（本轮实测来源：`TEMP/why-unsealed-r9.log`）。
@@ -85,6 +91,22 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
     (
         "99_bootstrap/lz_std.lz",
         "rust 面 rustc E0308 取不到 oracle（BUG-30 在册）",
+    ),
+    // T0r14：这两件原本**有** `.exp`，而那份期望值是「裸字符串也发 `{:?}`」的年代封的。
+    // print 口径对齐规范后 cy 不再带引号，而 rust 面今天自己编不出这两个程序（就地取数：
+    // `TEMP/tworeseal-r14-dry.log`，`cwd` 设在语料目录，兄弟模块解析得到），
+    // ⇒ 权威缺失 ⇒ 不许照 cy 改 golden，也不许留着一份 oracle 已不再生成的期望值。
+    // 处置：`.exp` 退役为同名 `.exp.staler14`（留盘可查），件移入本表；rust 侧的两条编译错
+    // 已在台账点名给对面车道（E0308×3 / E0609 `no field _variant on type Color`）。
+    (
+        "99_bootstrap/import_runtime.lz",
+        "rust 面今天 rustc E0308×3 取不到 oracle（就地取数 TEMP/tworeseal-r14-dry.log）；\
+         原 .exp 是 print 旧口径（裸字符串带引号）年代封的 ⇒ 退役为 .exp.staler14，交对面修 E0308",
+    ),
+    (
+        "99_self_test/test_struct.lz",
+        "rust 面今天 rustc E0609 `no field _variant on type Color` 取不到 oracle（同上 log）；\
+         原 .exp 同上处置（退役留盘），cy 侧输出 '✅ 所有数据结构测试通过' 与规范口径一致",
     ),
     (
         "04_functions/generic_min.lz",
@@ -101,6 +123,37 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
     (
         "04_functions/closure_write_capture.lz",
         "cy 面按 SYNTAX/03e §五 已实现（'7'），rust 面 E0594 编不出 ⇒ 取不到 oracle（BUG-33 在册）",
+    ),
+    (
+        "15_feature_matrix/dyn_recv_closure.lz",
+        "无注解闭包形参在 rust 面恒 E0282（类型定不下标）⇒ 取不到 oracle，本件只证跑通；\
+         发射形态由 tests/cython_backend.rs 的 cy_dynamic_receiver_dispatches_at_runtime 与 \
+         cy_dynamic_for_site_wraps_and_the_helper_self_guards 钉住（T0r12，BUG-37 在册）",
+    ),
+    (
+        "15_feature_matrix/expect_receiver_once.lz",
+        "同一份源码在 rust 面恒 E0308：生成的是 `.expect(\"m\".to_string())`，而 \
+         `Option::expect(self, msg: &str)`（BUG-42 在册，本车道不改 `src/ir/codegen/mod.rs`）\
+         ⇒ 取不到 oracle。本件只证 cy 面「接收者只求值一次」（旧发射拼两遍 ⇒ 副作用跑两遍、退出码 0），\
+         凭据是发射形态锁 cy_expect_evaluates_receiver_once（T0r13，BUG-41 在册）",
+    ),
+    (
+        "15_feature_matrix/uncond_arms_closure.lz",
+        "无注解闭包形参在 rust 面恒 E0282（BUG-38 在册）⇒ 取不到 oracle；\
+         is_none/is_some/expect 三条臂在 `Any` 接收者上的运行时分派由 \
+         cy_dynamic_arms_dispatch_by_name_list 钉住（T0r13，BUG-40 在册）",
+    ),
+    (
+        "15_feature_matrix/with_as_binding_fstr.lz",
+        "**这件的 oracle 在场但是缺陷产物** ⇒ 不封：`with MyResource(name: \"database\") as res:` 之后 \
+         `print(f\"using {res.name}\")`，rust 面出 `using \"database\"`（`{:?}`）、cy 面出 `using database`，\
+         差在 `with as` 绑定的类型没落成 `MyResource`（BUG-44 在册，交对面车道修共享层，本车道不改 \
+         `src/ir/builder/`）；规范 `SYNTAX/00-词法基础.md:188` 说 str 在插值里走 Display ⇒ 照 rust 封它 \
+         等于把缺陷钉成 cy 的验收标准，照 cy 封它违反「期望值来自另一后端」的封盘纪律。同一构造的 \
+         `self.name` 插值两侧逐字一致（见母件 `with_defer.lz`）⇒ 缺的不是字段访问的类型落地。 \
+         凭据 `TEMP/wdseal-r14-apply.log`（两侧原文逐字）。**转正条件**：对面修好后 \
+         `TEMP/seal_missing_exp.py` 会在两侧一致时补封，本表那条随即被「登记了但 `.exp` 在场 ⇒ 红」\
+         的反向门逼着同轮移出。本件仍被 L3 执行（计入「无 oracle 仅跑通」）⇒ 崩溃类回归照样能抓。",
     ),
 ];
 

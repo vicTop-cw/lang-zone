@@ -260,6 +260,30 @@ impl CodeGen {
             IrType::Self_ => "Self".into(),
             IrType::Duck { .. } => "()".into(), // Duck types: cannot determine Rust type, use unit
             IrType::Named { path, args } => {
+                // 迭代器 impl 内的 `X.Item`（X 为受 Iterator 约束的泛型/类型）：
+                // LZ `Iterator` 走 std 协议后不再自带 `type Item`，故 `X.Item` 须
+                // 完全限定到协议 Item，否则 E0220 "associated type `Item` not found"
+                // （traits.lz 的 `impl Iterator for Rev<I> { type Item = I.Item }`
+                // 与 `fn next(...) -> Option<I.Item>`）。
+                if self.in_iterator_impl {
+                    if let Some((owner, member)) = path.split_once('.') {
+                        if member == "Item" && !owner.is_empty() && owner != "Self" {
+                            let base = self.rust_type(&IrType::Named {
+                                path: owner.to_string(),
+                                args: vec![],
+                            });
+                            if !args.is_empty() {
+                                return format!(
+                                    "<{} as std::iter::Iterator>::{}<{}>",
+                                    base,
+                                    member,
+                                    self.gen_type_args(args)
+                                );
+                            }
+                            return format!("<{} as std::iter::Iterator>::{}", base, member);
+                        }
+                    }
+                }
                 // BUG-CG-004（收口）：LZ 标准错误名 → 统一的 LzError 类型。
                 // 用户自定义错误类型（emitted_types/impl_types 命中）保留原名，
                 // 以免破坏 `raise ParseError.UnexpectedChar(...)` 等构造器调用。
@@ -695,6 +719,22 @@ impl CodeGen {
                         p.bounds.iter().map(|b| self.gen_trait_bound(b)).collect();
                     s.push_str(&format!(": {}", bounds.join(" + ")));
                 }
+                // Dict/HashMap → BTreeMap 要求键 K: Ord；键位泛型统一注入 Ord
+                // （dict.lz 的 `impl Iterator for DictIter<K,V>` 等自身不含
+                //   Dict<K,_> 直接出现、但 struct 字段含 Dict 的场景）。
+                if self.dict_key_generics.contains(&p.name) {
+                    let has_ord = p
+                        .bounds
+                        .iter()
+                        .any(|b| self.gen_trait_bound(b).contains("Ord"));
+                    if !has_ord {
+                        if s.contains(':') {
+                            s.push_str(" + Ord");
+                        } else {
+                            s.push_str(": Ord");
+                        }
+                    }
+                }
                 if let Some(ref def) = p.default {
                     s.push_str(&format!(" = {}", self.rust_type(def)));
                 }
@@ -765,6 +805,14 @@ impl CodeGen {
                 // （@math 泛型函数，如 `x * 2` 中 2 推断为 T）
                 if self.in_math_fn && !all_bounds.iter().any(|b| b.contains("From<i32>")) {
                     all_bounds.push("std::convert::From<i32>".to_string());
+                }
+                // Dict/HashMap → BTreeMap 要求键 K: Ord。方法级泛型（dict.map<K2,V2>
+                // 返回 Dict<K2,V2>）与以 Dict 当集合的函数泛型（list.unique<T> 的
+                // `seen: Dict<T,_>`）的键位泛型在此注入（struct/impl 级见 gen_generics）。
+                if self.dict_key_generics.contains(&p.name)
+                    && !all_bounds.iter().any(|b| b.ends_with("Ord"))
+                {
+                    all_bounds.push("std::cmp::Ord".to_string());
                 }
                 if !all_bounds.is_empty() {
                     s.push_str(&format!(": {}", all_bounds.join(" + ")));

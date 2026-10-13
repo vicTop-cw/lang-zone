@@ -306,10 +306,10 @@ def main() =
         let mut d: Dict<str, int> = Dict()
         d.insert("a", 1)
         d.insert("b", 2)
-        mut ks = d.keys()
+        mut ks: List<str> = d.keys()
         ks.sort()
         assert ks == ["a", "b"]
-        mut vs = d.values()
+        mut vs: List<int> = d.values()
         vs.sort()
         assert vs == [1, 2]
 
@@ -351,7 +351,7 @@ def main() =
         d.insert("a", 1)
         d.insert("b", 2)
         d.insert("c", 3)
-        let filtered = d.filter(|k: ref str, v: ref int| -> bool = v > 1)
+        let filtered = d.filter(|k: ref String, v: ref int| -> bool = v > 1)
         assert filtered.len() == 2
         assert not filtered.contains_key("a")
 
@@ -359,7 +359,7 @@ def main() =
         let mut d: Dict<str, int> = Dict()
         d.insert("a", 1)
         d.insert("b", 2)
-        let sum = d.fold(0, |acc: int, k: ref str, v: ref int| -> int = acc + v)
+        let sum = d.fold(0, |acc: int, k: ref String, v: ref int| -> int = acc + v)
         assert sum == 3
 
     test "iteration":

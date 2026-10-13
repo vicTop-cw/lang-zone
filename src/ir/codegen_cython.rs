@@ -88,6 +88,10 @@ pub struct CythonCodeGen {
     has_new_structs: HashSet<String>,
     /// impl 方法收集：目标类型名 → 方法列表（gen_struct 时注入到 cdef class 体内）
     impl_methods: HashMap<String, Vec<FnDef>>,
+    /// 类型名 → 它实现的方法名（struct 体内自写 + impl 块注入都算）。
+    /// `impl_methods` 在类生成时会被 `remove` 走（防重复注入），所以**调用点**要查魔法名
+    /// 是否被实现，只能查这张不被消费的表。
+    class_method_names: HashMap<String, HashSet<String>>,
     /// self-def 顶层函数收集：`Point.sum` 形态 → owner 类型 → 方法列表
     /// （对齐 Rust 端 gen_self_fn_impls：生成时注入到 cdef class 体内）
     self_methods: HashMap<String, Vec<FnDef>>,
@@ -148,6 +152,7 @@ impl CythonCodeGen {
             variant_fields: HashMap::new(),
             has_new_structs: HashSet::new(),
             impl_methods: HashMap::new(),
+            class_method_names: HashMap::new(),
             self_methods: HashMap::new(),
             enum_names: HashSet::new(),
             enum_variants: HashMap::new(),
@@ -273,6 +278,9 @@ impl CythonCodeGen {
         self.writeln("    __t.start()");
         self.writeln("    return __t");
         self.writeln("def __lz_expect_fail(m): raise LZError(m)");
+        // 接收者**只求值一次**：旧发射拼成 `(r if r is not None else …)`，r 带副作用就跑两遍
+        // （实测 cy 面 `mk()` 打印两次而退出码仍是 0 —— 本后端最坏的那一类：不响，只是多做一次）。
+        self.writeln("def __lz_expect(v, m): return v if v is not None else __lz_expect_fail(m)");
         self.writeln("def push(seq, item):");
         self.writeln("    seq.append(item)");
         self.writeln("    return item");
@@ -321,7 +329,51 @@ impl CythonCodeGen {
         // 取 str(e) 再走一遍 Debug 口径，两侧逐字一致。
         self.writeln("    if isinstance(v, BaseException):");
         self.writeln("        return _lz_dbg(str(v))");
+        // 浮点：Python 的 repr 与 Rust 的 `{:?}` **数字串相同、指数写法不同**
+        // （`1e+16`/`1e-05` 对 `1e16`/`1e-5`）。不响、只是值不对那一类，所以按指数梯
+        // 逐值实测取 oracle：`TEMP/f64ladd-y0-r14.log` 的 `u_dbg_ladder` 里 22 个值中
+        // 6 个分叉（1e16／1e17／1e20／1e21／1e-5／1.7976931348623157e308），
+        // 进指数的阈值（|x|≥1e16 与 |x|<1e-4）两侧本来就一致 ⇒ 只改写指数拼法。
+        self.writeln(r#"    if isinstance(v, float):"#);
+        self.writeln(r#"        s = repr(v)"#);
+        self.writeln(r#"        if "e" not in s: return s"#);
+        self.writeln(r#"        m, e = s.split("e")"#);
+        self.writeln(r#"        return m + "e" + str(int(e))"#);
         self.writeln(r#"    return repr(v)"#);
+        self.writeln("");
+        // Display 口径（`.to_string()`／`{}`）：Rust **恒用定位记法**且**整值不带 `.0`**
+        // ——实测同一张梯的 `u_disp_ladder`：1e20 ⇒ `100000000000000000000`、1e-7 ⇒
+        // `0.0000001`、1.0 ⇒ `1`、-0.0 ⇒ `-0`、f64 最大 ⇒ 309 位定位数字。Python 的 `str()`
+        // 两处都不是（`1e+20`／`1.0`）⇒ 取 repr 的最短数字再重排成定位记法。
+        // 非 Display 的接收者（容器／没实现 Display 的用户类）交 `_lz_dbg`：rust 面那种写法
+        // 根本编译不过（`t_list.lz` 实测 E0599 `Vec<i64>` doesn't implement `std::fmt::Display`），
+        // 而本侧不许漏出 `<object at 0x…>` 这种带地址的形态。
+        self.writeln(r#"def _lz_disp_f(x):"#);
+        self.writeln(r#"    s = repr(x)"#);
+        self.writeln(r#"    m, e = (s.split("e") + ["0"])[:2] if "e" in s else (s, "0")"#);
+        self.writeln(r#"    neg = m.startswith("-")"#);
+        self.writeln(r#"    if neg: m = m[1:]"#);
+        self.writeln(r#"    ip, _, fp = m.partition(".")"#);
+        self.writeln(r#"    dig = ip + fp"#);
+        self.writeln(r#"    pt = len(ip) + int(e)"#);
+        self.writeln(r#"    if pt <= 0: out = "0." + "0" * (-pt) + dig"#);
+        self.writeln(r#"    elif pt >= len(dig): out = dig + "0" * (pt - len(dig))"#);
+        self.writeln(r#"    else: out = dig[:pt] + "." + dig[pt:]"#);
+        self.writeln(r#"    if "." in out: out = out.rstrip("0").rstrip(".")"#);
+        self.writeln(r#"    return "-" + out if neg else out"#);
+        self.writeln(r#"def _lz_disp(v):"#);
+        self.writeln(r#"    if v is True: return "true""#);
+        self.writeln(r#"    if v is False: return "false""#);
+        self.writeln(r#"    if isinstance(v, str): return v"#);
+        self.writeln(r#"    if isinstance(v, float): return _lz_disp_f(v)"#);
+        self.writeln(r#"    if isinstance(v, int): return str(v)"#);
+        self.writeln(r#"    return _lz_dbg(v)"#);
+        // 动态接收者（Any／泛型形参）上两条静态闸门同时失效（机制见 `ty_is_dynamic_receiver`
+        // 的注释），而**用户类自带的 `to_string` 在现网是一致的那一侧**（`t_class_duck` 实测
+        // 两侧 `'cfg-str\n'`）⇒ 先按属性存在性取用户自己的方法，取不到才落到 Display 口径。
+        self.writeln(r#"def _lz_tostr(o):"#);
+        self.writeln(r#"    f = getattr(o, "to_string", None)"#);
+        self.writeln(r#"    return f() if f is not None else _lz_disp(o)"#);
         self.writeln("");
         // str 索引的元素口径：码点整数、越界（含负索引）给 0——与 Rust 后端逐字对齐，
         // 理由与判定见 gen_expr 的 IndexGet 分支注释。名字单下划线开头，同 `_lz_dbg`。
@@ -336,6 +388,89 @@ impl CythonCodeGen {
         // 否则 Python 原生 `f"{True}"` 出 `True` 而 Rust 侧出 `true`（实测跨后端分叉）。
         self.writeln(r#"def _lz_fs(v):"#);
         self.writeln(r#"    return v if isinstance(v, str) else _lz_dbg(v)"#);
+        self.writeln("");
+        // `.unwrap_or(d)` 的分档（调用点见方法表）：None 位由调用方给默认值。
+        self.writeln(r#"def _lz_or(v, d):"#);
+        self.writeln(r#"    return d if (v is None or v.__class__.__name__ == "_LzNoneCls") else v"#);
+        self.writeln("");
+        // LZ 的迭代子协议用 `Option.None` 表示「取完了」，Python 的协议要求抛 `StopIteration`。
+        // 直接把实现 `__iter__/__next__` 的用户类交给 `for`，那个 `None` 会被当成**一个元素**
+        // （实测 m_iter：`total = total + None` ⇒ TypeError，程序跑到一半才响）。
+        // 只在 for 的取数面套这层适配器，用户的 `__next__` 原样保留 ⇒ `next(it)` 与
+        // `it.__next__()` 仍返回 Option 形态，不会把 StopIteration 抛进用户程序。
+        // 认 `_LzNoneCls` 用类名而不是那个模块级单例：本函数定义点在垫片之前。
+        // 第一行是**自卫**：适配器只翻 LZ 用户类的 Option-None；内建容器/生成器原样交回
+        // Python。有了这层守卫，动态接收者（`Any`／泛型形参）也能一律套上——静态判不出
+        // 归属时由运行时名单决定（`d_iter_obj`：`for x in it` 里 `it` 是 `object`）。
+        self.writeln(r#"def _lz_iter(o):"#);
+        self.writeln(r#"    if type(o).__name__ not in _LZ_TYPES:"#);
+        self.writeln(r#"        for v in o: yield v"#);
+        self.writeln(r#"        return"#);
+        self.writeln(r#"    it = o.__iter__() if hasattr(o, "__iter__") else o"#);
+        self.writeln(r#"    while True:"#);
+        self.writeln(r#"        v = it.__next__()"#);
+        self.writeln(r#"        if v is None or v.__class__.__name__ == "_LzNoneCls": return"#);
+        self.writeln(r#"        yield v"#);
+        self.writeln("");
+        // ── 动态接收者的运行时分派（`Any`／泛型形参 ⇒ cy 侧形参就是 `object`）──
+        // 静态闸门在这两种接收者上判不出「是用户类还是内建容器」，两边都瞎：
+        // 用户类自带的 `len`／`push` 被强改成 `len(o)`／`o.append`（实测 `TypeError:
+        // object of type 'Bucket' has no len()`），而 `.clone()` 被透传吃掉（实测
+        // rust 出 `8`、cy 出 `7` —— 不响，静默少一步）。这里按**运行时的实际类型**分派，
+        // 与 rust 面「按实参类型解析方法」同口径；名单与静态判据同源
+        // （`known_types ∪ cdef_classes`）并排序，保证同一份源码产物逐字稳定。
+        let mut lz_type_names: Vec<&str> = self
+            .known_types
+            .iter()
+            .map(|s| s.as_str())
+            .chain(self.cdef_classes.iter().map(|s| s.as_str()))
+            .collect();
+        lz_type_names.sort();
+        lz_type_names.dedup();
+        self.writeln(&format!(
+            "_LZ_TYPES = ({})",
+            lz_type_names
+                .iter()
+                .map(|n| format!("\"{}\",", n))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
+        self.writeln(r#"def _lz_dyn(o):"#);
+        self.writeln(r#"    return type(o).__name__ in _LZ_TYPES"#);
+        self.writeln(r#"def _lz_meth(o, lz_name, py_name, args):"#);
+        self.writeln(r#"    return getattr(o, lz_name if _lz_dyn(o) else py_name)(*args)"#);
+        self.writeln(r#"def _lz_len(o, lz_name):"#);
+        self.writeln(r#"    return getattr(o, lz_name)() if _lz_dyn(o) else len(o)"#);
+        self.writeln(r#"def _lz_isempty(o):"#);
+        self.writeln(r#"    return o.is_empty() if _lz_dyn(o) else (len(o) == 0)"#);
+        // 下面三支按「属性在不在」分派而不是按名单：这些 LZ 名字内建容器上都没有同名方法，
+        // 而接收者**可能是一个用户类实例本身**（`Option[MyClass]` 在本后端就是裸值），
+        // 按名单判会把它误当「用户类的方法调用」⇒ `AttributeError`（`getattr` 兜住即透传）。
+        self.writeln(r#"def _lz_contains(o, v):"#);
+        self.writeln(r#"    f = getattr(o, "contains", None)"#);
+        self.writeln(r#"    return f(v) if f is not None else (v in o)"#);
+        self.writeln(r#"def _lz_orv(o, d):"#);
+        self.writeln(r#"    f = getattr(o, "unwrap_or", None)"#);
+        self.writeln(r#"    return f(d) if f is not None else _lz_or(o, d)"#);
+        self.writeln(r#"def _lz_self(o, lz_name):"#);
+        self.writeln(r#"    f = getattr(o, lz_name, None)"#);
+        self.writeln(r#"    return f() if f is not None else o"#);
+        self.writeln(r#"def _lz_shift(a, b, lz_name, is_shr):"#);
+        self.writeln(r#"    f = getattr(a, lz_name, None)"#);
+        self.writeln(r#"    if f is not None: return f(b)"#);
+        self.writeln(r#"    return (a >> b) if is_shr else (a << b)"#);
+        // 余下三条**无条件**臂的运行时分派（T0r13）：`is_none`/`is_some`/`expect` 的兜底本来就是
+        // 「与 None 比」的表达式而不是方法调用，所以这里要**名单与属性都在**才走方法那一支
+        // ——裸 `getattr` 存在性判会把任何恰好带 `is_none` 属性的对象都当 LZ Option。
+        self.writeln(r#"def _lz_isnone(o, lz_name):"#);
+        self.writeln(r#"    f = getattr(o, lz_name, None)"#);
+        self.writeln(r#"    return f() if _lz_dyn(o) and f is not None else (o is None)"#);
+        self.writeln(r#"def _lz_issome(o, lz_name):"#);
+        self.writeln(r#"    f = getattr(o, lz_name, None)"#);
+        self.writeln(r#"    return f() if _lz_dyn(o) and f is not None else (o is not None)"#);
+        self.writeln(r#"def _lz_exp(o, m, lz_name):"#);
+        self.writeln(r#"    f = getattr(o, lz_name, None)"#);
+        self.writeln(r#"    return f(m) if _lz_dyn(o) and f is not None else __lz_expect(o, m)"#);
         self.writeln("");
         // 模块级魔法
         let fname = module.name.replace("::", ".");
@@ -1527,6 +1662,10 @@ impl CythonCodeGen {
                 Item::StructDef(s) => {
                     self.known_types.insert(s.name.clone());
                     self.cdef_classes.insert(s.name.clone());
+                    self.class_method_names
+                        .entry(s.name.clone())
+                        .or_default()
+                        .extend(s.methods.iter().map(|m| m.name.clone()));
                     if s.has_new {
                         self.has_new_structs.insert(s.name.clone());
                     }
@@ -1560,6 +1699,10 @@ impl CythonCodeGen {
                 Item::Impl(i) => {
                     if let IrType::Named { path, .. } = &i.for_type {
                         self.known_types.insert(path.clone());
+                        self.class_method_names
+                            .entry(path.clone())
+                            .or_default()
+                            .extend(i.methods.iter().map(|m| m.name.clone()));
                         self.impl_methods
                             .entry(path.clone())
                             .or_default()
@@ -1908,11 +2051,65 @@ fn fs_interp(s: &str) -> String {
 /// 静态类型是否指向**用户自定义类**（cdef class / enum 变体类）。
 /// 方法名改写表（`push`→`append` 这类）只能作用于非用户类接收者 ——
 /// 用户自己写的 `def push(self)` 必须原样发出去。
+/// `print` 实参的 Display／Debug 分档，**逐条抄 Rust 面**（`codegen/expr_gen.rs:76`，同一份判据
+/// 两处各写一遍是刻意的：本车道不改对面文件；分叉一旦再现，这两处必须一起改）。
+fn print_arg_is_display(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Lit(LitKind::Str(_)) | ExprKind::Lit(LitKind::FStr(_)) => return true,
+        ExprKind::Cast { target, .. }
+            if matches!(target, IrType::Str)
+                || matches!(target, IrType::Named { path, .. } if path == "String") =>
+        {
+            return true
+        }
+        _ => {}
+    }
+    match &e.ty {
+        IrType::Str => true,
+        IrType::Ref(inner) | IrType::MutRef(inner) => matches!(inner.as_ref(), IrType::Str),
+        IrType::Named { path, .. } => path == "String" || path == "str",
+        _ => false,
+    }
+}
+
 fn ty_is_user_class(cg: &CythonCodeGen, ty: &IrType) -> bool {
     match ty {
         IrType::Named { path, .. } => {
             cg.known_types.contains(path.as_str()) || cg.cdef_classes.contains(path.as_str())
         }
+        _ => false,
+    }
+}
+
+/// 接收者的静态类型**判不出归属**：`Any`（无注解闭包形参，`builder/capture.rs:528` 恒落 Any）
+/// 或 `Generic`（泛型形参，`builder/convert_decl.rs:665`）。cy 侧这两种都发成 `object`，
+/// 于是方法改写表的两类闸门同时失明：`!ty_is_user_class` 臂**恒真**（把用户类自带的方法名
+/// 强改成 Python 名），`ty_is_user_class`/`user_class_has_method` 臂**恒假**（该改写的没改）。
+/// 判定见 `TEMP/dynrecv_probes_r12.py`（`d_duck_len`／`d_duck_empty` 两侧都有 rust 面 oracle）。
+fn ty_is_dynamic_receiver(ty: &IrType) -> bool {
+    matches!(ty, IrType::Any | IrType::Generic(_))
+}
+
+/// 动态接收者的实参元组：`(v, )`／`()`——`_lz_meth` 按元组收实参，接收者只求值一次。
+fn dyn_arg_tuple(cg: &CythonCodeGen, args: &[Expr]) -> String {
+    let mut s = String::from("(");
+    for a in args {
+        s.push_str(&gen_expr(cg, a));
+        s.push_str(", ");
+    }
+    s.push(')');
+    s
+}
+
+/// 静态类型指向的用户类是否**实现了**某个魔法名（`impl` 块里的方法）。
+/// 魔法名分派表只能对「本类真的有这个名字」的接收者生效，否则改写会把
+/// `AttributeError: No such name` 变成另一种响法（垫片类同理：它们没实现就不改）。
+fn user_class_has_method(cg: &CythonCodeGen, ty: &IrType, magic: &str) -> bool {
+    match ty {
+        IrType::Named { path, .. } => cg
+            .class_method_names
+            .get(path.as_str())
+            .map_or(false, |ms| ms.contains(magic)),
         _ => false,
     }
 }
@@ -2851,7 +3048,22 @@ fn gen_stmt(cg: &mut CythonCodeGen, stmt: &Stmt, raises_mode: bool) {
             else_body,
         } => {
             // Python for-else 原生对应 LZ for-else（无 break 时执行）
-            cg.writeln(&format!("for {} in {}:", var, gen_expr(cg, iter)));
+            // 可迭代对象是「实现了迭代魔法的用户类」时套 `_lz_iter`（Option.None → 结束）；
+            // 内建 list/str/dict/range 必须原样过去 —— 它们里的 `None` **是元素不是结束**，
+            // 一律套适配器会把序列截断。
+            // 动态接收者（`Any`／泛型形参）静态判不出归属 ⇒ 也套，由 `_lz_iter` 第一行的
+            // 运行时名单自卫（非本模块用户类 ⇒ 原样透传），两边都不会截断内建序列。
+            let it_src = gen_expr(cg, iter);
+            let adapt = ty_is_dynamic_receiver(&iter.ty)
+                || (ty_is_user_class(cg, &iter.ty)
+                    && (user_class_has_method(cg, &iter.ty, "__iter__")
+                        || user_class_has_method(cg, &iter.ty, "__next__")));
+            let adapted = if adapt {
+                format!("_lz_iter({})", it_src)
+            } else {
+                it_src
+            };
+            cg.writeln(&format!("for {} in {}:", var, adapted));
             cg.indent += 1;
             if let Some(g) = guard {
                 cg.writeln(&format!("if not ({}): continue", gen_expr(cg, g)));
@@ -3221,15 +3433,28 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             type_args: _,
         } => {
             let f = gen_expr(cg, callee);
-            // ── print/println 走 Rust 的 `{:?}`（Debug）口径 ──
-            // 逐实参套 `_lz_dbg(...)`：字符串带引号、bool→true/false、None→None、容器递归。
-            // Rust 端 `print(a, b)` 发 `println!("{:?} {:?}", a, b)`（空格连接，见
-            // src/ir/codegen/mod.rs 的 print 分支），Python `print(x, y)` 也是空格连接 ⇒
-            // 只需包装参数。两套 stdout 一旦不一致，跨后端差分（L3 的 oracle）就无从谈起。
+            // ── print/println 的口径：**逐实参分 Display／Debug 两档**，抄 Rust 面那一条判据 ──
+            // 规范行：SYNTAX/99-内置预导入库.md:50 `print(...)` → `println!("{}", ...)`。
+            // Rust 面按 `print_arg_is_display`（src/ir/codegen/expr_gen.rs:76）逐实参选 `{}` 还是
+            // `{:?}`：Str 字面量／f-string／`as str`／`ty==Str`／`&str`／`String` 走 Display，其余走 Debug。
+            // 本分支以前**一律** `_lz_dbg`（Debug），于是 `print("after")` 在 cy 面出 `"after"`（带引号）
+            // 而 rust 面出 `after`——实测 `TEMP/qmark-y1-r14.log` 的 `z_qmark_none`：
+            //   rust `'None\n'` / cy `'"after"\nNone\n'`；`TEMP/strq14` 最小面：
+            //   rust `'after\nhi\na 1\n'` / cy `'"after"\n"hi"\n"a" 1\n'`。
+            // 这条一直没被抓到，是因为**没有任何判据覆盖它**：唯一打印裸字符串的语料
+            // `01_basics/literals.lz` 在 no-oracle 名单里（rust 面 E0282，BUG-29 在册）⇒ L3 只跑不判。
+            // bool／None／容器仍走 Debug：rust 的 `{:?}` 出 `true`／`None`／`["a"]`，Python 原生出
+            // `True`／`None`／`['a']`，不分档就会分叉（`_lz_dbg` 就是为这个存在的）。
             if f == "print" {
                 let a: Vec<String> = args
                     .iter()
-                    .map(|e| format!("_lz_dbg({})", gen_expr(cg, e)))
+                    .map(|e| {
+                        if print_arg_is_display(e) {
+                            gen_expr(cg, e)
+                        } else {
+                            format!("_lz_dbg({})", gen_expr(cg, e))
+                        }
+                    })
                     .collect();
                 return format!("print({})", a.join(", "));
             }
@@ -3481,20 +3706,70 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             // Option/Result 方法族 → 裸 None 哨兵语义（对齐 PLAN §1.6 的 `is None` 模型；
             // 裸 None 无实例方法，故生成语义等价表达式而非方法调用）
             match method.as_str() {
-                "is_none" => return format!("({} is None)", r),
-                "is_some" => return format!("({} is not None)", r),
+                // 三条**无条件**臂（T0r13 前）：`is_none`/`is_some`/`expect` 的立论是
+                // 「cy 的 Option 就是裸值／None」，那是**值表示**而不是**接收者类型**——
+                // 于是用户类自带的同名方法被整条换成一次 identity 比较。实测（`TEMP/uncond-x13-before-r13.log`）：
+                //   x_expect_static  rust `'42\n'`  / cy `'Cfg { n: 21 }\n'`
+                //   x_isnone_static  rust `'true\n'` / cy `'false\n'`
+                //   x_issome_static  rust `'false\n'` / cy `'true\n'`
+                //   x_expect_twice   cy `'\"mk\"\n\"mk\"\n5\n'` —— 接收者被拼两遍，**副作用跑两次**且退出码 0
+                // 闸门与 T0r12 同一条纪律：看「本类有没有定义这个名字」，动态接收者走运行时名单。
+                "is_none" if !user_class_has_method(cg, &receiver.ty, "is_none") => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_isnone({}, \"is_none\")", r);
+                    }
+                    return format!("({} is None)", r);
+                }
+                "is_some" if !user_class_has_method(cg, &receiver.ty, "is_some") => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_issome({}, \"is_some\")", r);
+                    }
+                    return format!("({} is not None)", r);
+                }
                 // unwrap/expect：有值透传；None 时的 panic 语义由运行层 raise（见 BACKLOG）
-                "unwrap" => return r,
+                // 反向闸门（T0r12 补）：用户类**自己定义了** unwrap 时，透传会把这一层调用整条
+                // 吃掉 ⇒ 落回通用尾巴发 `x.unwrap()`。闸门取「本类有没有这个名字」而不是
+                // 「是不是用户类」——with 脱糖在共享 IR 里就对用户类发 `alias.clone()`，
+                // 那种类没有 clone，必须继续透传（DEMO/06_control_flow/with_defer.lz）。
+                // 实测 `d_unwrap_static`：rust 面 `'101\n'`，旧 cy 产物 `'Opt2 { v: 1 }\n'`
+                // ——**不响，静默少一步**，比运行期报错更难发现。
+                "unwrap" if !user_class_has_method(cg, &receiver.ty, "unwrap") => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_self({}, \"unwrap\")", r);
+                    }
+                    return r;
+                }
+                // `.unwrap_or(d)`：cy 侧的 Option 就是「值本身 / None」，所以它不是方法而是分档。
+                // 落到通用兜底会发出 `0.unwrap_or(-1)` ⇒ AttributeError: 'int' object has no
+                // attribute 'unwrap_or'（实测 TEMP/magic-probes-*.log m_next）。
+                // None 有两种真实形态（Python `None` 与垫片单例 `_LzNoneCls`），两者都算「没有值」。
+                // 动态接收者 ⇒ `_lz_orv`：用户类自带 unwrap_or 时**静默返回对象本身**是旧形态
+                // （实测 `d_strfam_dyn` 的 `f5 = lambda x: (_lz_or(x, 7))`），改成按运行时名单分派。
+                "unwrap_or" if args.len() == 1 && !ty_is_user_class(cg, &receiver.ty) => {
+                    let d = gen_expr(cg, &args[0]);
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_orv({}, {})", r, d);
+                    }
+                    return format!("(_lz_or({}, {}))", r, d);
+                }
                 // LZ 的 `x?` 在 IR 里就是 `try_into()`（Rust 后端发 `.unwrap()`）⇒ 同一口径透传。
                 // 落到通用兜底会得到 `x.try_into()`：AttributeError: 'int' object has no attribute 'try_into'
-                // （DEMO/13_operators/precedence.lz 实测）。
-                "try_into" if args.is_empty() => return r,
+                // （DEMO/13_operators/precedence.lz 实测）。反向闸门同 unwrap。
+                "try_into" if args.is_empty() && !user_class_has_method(cg, &receiver.ty, "try_into") => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_self({}, \"try_into\")", r);
+                    }
+                    return r;
+                }
                 // LZ 的 Vec 方法名 `push` → Python list 的 `append`；
                 // prelude 只有自由函数 `push(seq,item)`，方法形态 `xs.push(v)` 落到通用兜底就是
                 // AttributeError: type object 'list' has no attribute 'push'
                 // （DEMO/01_basics/polish_18_iterator.lz 实测）。
                 // 反向闸门：接收者是用户类实例时保留原方法名（用户自己定义的 push 不许改写）。
                 "push" if args.len() == 1 && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_meth({}, \"push\", \"append\", {})", r, dyn_arg_tuple(cg, args));
+                    }
                     let v = gen_expr(cg, &args[0]);
                     return format!("{}.append({})", r, v);
                 }
@@ -3503,7 +3778,15 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 // 落到通用兜底就是 AttributeError: 'MyResource' object has no attribute 'clone'
                 // （DEMO/06_control_flow/with_defer.lz 实测）。透传与本后端已声明的引用模型一致
                 // （见 UnOp Ref/MutRef「Python 对象本为引用 ⇒ 透传」），不是新口径。
-                "clone" if args.is_empty() => return r,
+                // 反向闸门同 unwrap：用户类自带 `clone` 时透传会静默少一次调用
+                // （实测 `d_clone_static`：rust `'8\n'` / 旧 cy `'7\n'`）；
+                // 没有 clone 的用户类（with 脱糖发的那个）**必须**继续透传。
+                "clone" if args.is_empty() && !user_class_has_method(cg, &receiver.ty, "clone") => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_self({}, \"clone\")", r);
+                    }
+                    return r;
+                }
                 // `.len()`：Rust 后端把 `s.len()` 原样交给 rustc（str/slice 的内建关联方法），
                 // Python 侧 str/list/dict 都没有 `.len()` 方法 ⇒
                 // AttributeError: type object 'str' has no attribute 'len'
@@ -3511,7 +3794,16 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 // 规范口径是自由函数：`len(x)` 走 `__len__`（SYNTAX/99-内置预导入库.md:128）
                 // ⇒ 方法形态改写成自由函数，与本后端的 `len(x)` 同一条实现路径。
                 // 反向闸门：用户类自定义 len 保留方法形态（与 push 同一纪律）。
+                // **动态接收者**（`Any`／泛型形参）两处闸门都判不出 ⇒ 这张表里每一条
+                // `!ty_is_user_class` 臂恒真、每一条正向臂恒假。T0r12 起每条都补一个
+                // 运行时分支（`_lz_meth`／`_lz_len`／…），逐臂实测取证：
+                // `TEMP/dynrecv_probes_r12.py`（`d_duck_len` rust='3\n8\n' 而旧 cy
+                // `TypeError: object of type 'Bucket' has no len()`；`d_strfam_dyn` 的
+                // `f1 = lambda x: x.strip()` 之类）。
                 "len" if args.is_empty() && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_len({}, \"len\")", r);
+                    }
                     return format!("len({})", r);
                 }
                 // 同一族的其余成员：LZ/Rust 侧的内建方法形态在 Python 上没有同名方法，
@@ -3522,6 +3814,9 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 // 实测：TEMP/probe6/p_str_len.lz、p_list_len.lz（rust=3,3,3 / cy AttributeError:
                 // type object 'list' has no attribute 'length'）。
                 "length" if args.is_empty() && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_len({}, \"length\")", r);
+                    }
                     return format!("len({})", r);
                 }
                 // `.is_empty()`：Rust str/Vec/HashMap 的内建方法（同 `.len()` 走的是「另一后端
@@ -3529,24 +3824,53 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 // 实测：TEMP/probe6/p_is_empty.lz（rust=false,false / cy AttributeError:
                 // type object 'list' has no attribute 'is_empty'）。
                 "is_empty" if args.is_empty() && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_isempty({})", r);
+                    }
                     return format!("(len({}) == 0)", r);
                 }
                 // `starts_with`/`ends_with`/`trim`：Rust 侧改名表里就写着它们（`"trim" => "trim"`
                 // 之类），Python 方法是另一个名字 ⇒ 不改写就是 AttributeError。
                 // 实测来源：DEMO/01_basics/strings.lz、polish_28_strings.lz 用过这三个（TEMP/diff_method_tables.py 清单）。
                 "starts_with" if args.len() == 1 && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!(
+                            "_lz_meth({}, \"starts_with\", \"startswith\", {})",
+                            r,
+                            dyn_arg_tuple(cg, args)
+                        );
+                    }
                     return format!("{}.startswith({})", r, gen_expr(cg, &args[0]));
                 }
                 "ends_with" if args.len() == 1 && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!(
+                            "_lz_meth({}, \"ends_with\", \"endswith\", {})",
+                            r,
+                            dyn_arg_tuple(cg, args)
+                        );
+                    }
                     return format!("{}.endswith({})", r, gen_expr(cg, &args[0]));
                 }
                 "trim" if args.is_empty() && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_meth({}, \"trim\", \"strip\", ())", r);
+                    }
                     return format!("{}.strip()", r);
                 }
                 // `contains`：Rust 侧对结构体接收者有特殊派发（`"contains" if recv_is_struct …`），
                 // 内建接收者上 Python 没有 `.contains()` 方法，只有 `in` 运算符
                 // （str/list/dict-keys 三者语义一致）。实测来源：DEMO/01_basics/dicts.lz。
                 "contains" if args.len() == 1 && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_contains({}, {})", r, gen_expr(cg, &args[0]));
+                    }
+                    return format!("({} in {})", gen_expr(cg, &args[0]), r);
+                }
+                // 用户类实现 `__contains__` 时，LZ 的 `x.contains(y)` 在 Rust 侧走那条魔法，
+                // 而 Python 侧同名方法**不存在**（协议名是 `in` 运算符 ⇒ `__contains__`）。
+                // 实测：`w.contains("ell")` 在 cy 面 AttributeError（TEMP/magic-probes-*.log m_contains）。
+                "contains" if args.len() == 1 && user_class_has_method(cg, &receiver.ty, "__contains__") => {
                     return format!("({} in {})", gen_expr(cg, &args[0]), r);
                 }
                 // `remove(i)`/`remove(k)`：LZ 侧按**位置/键**移除（DEMO/01_basics/lists.lz
@@ -3557,6 +3881,9 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 // `.pop(i)`/`.pop(k)` 在 list/dict 上都正是「按位置/按键移除并返回被移除项」，
                 // 与 Rust 侧 `"remove" => "remove"`（Vec::remove 按索引）同口径。
                 "remove" if args.len() == 1 && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_meth({}, \"remove\", \"pop\", {})", r, dyn_arg_tuple(cg, args));
+                    }
                     return format!("{}.pop({})", r, gen_expr(cg, &args[0]));
                 }
                 // `to_lower()`/`to_upper()`：Rust 后端点名改名到 to_lowercase/to_uppercase
@@ -3564,17 +3891,39 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 // 实测：DEMO/01_basics/strings.lz 的 `cleaned.to_lower()`（AttributeError:
                 // 'str' object has no attribute 'to_lower'）。
                 "to_lower" if args.is_empty() && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_meth({}, \"to_lower\", \"lower\", ())", r);
+                    }
                     return format!("{}.lower()", r);
                 }
                 "to_upper" if args.is_empty() && !ty_is_user_class(cg, &receiver.ty) => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_meth({}, \"to_upper\", \"upper\", ())", r);
+                    }
                     return format!("{}.upper()", r);
                 }
-                "expect" => {
+                // `.to_string()` = Rust 的 `ToString`（Display 的 blanket impl；规范把它写成
+                // 内建——`SYNTAX/00-词法基础.md:187` `"hello".to_string()`、
+                // `SYNTAX/01-类型系统.md:735`「对应 Display trait 的 to_string」）。
+                // Python 的原生类型上**没有**这个名字 ⇒ 本表缺这条臂时一律落通用尾巴，
+                // 实测 `TEMP/tostr-y0-r14.log`：str 字面量／str 变量／int／bool／f64／拼接
+                // 共 6 支 rust 面 OK 而 cy 面 AttributeError；自带 to_string 的用户类两支
+                // 本来就一致 ⇒ 闸门按「本类有没有定义这个名字」，动态侧走 `_lz_tostr`。
+                "to_string" if args.is_empty() && !user_class_has_method(cg, &receiver.ty, "to_string") => {
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_tostr({})", r);
+                    }
+                    return format!("_lz_disp({})", r);
+                }
+                "expect" if !user_class_has_method(cg, &receiver.ty, "expect") => {
                     let m = args.first().map(|a| gen_expr(cg, a)).unwrap_or_default();
                     if m.is_empty() {
                         return r;
                     }
-                    return format!("({} if {} is not None else __lz_expect_fail({}))", r, r, m);
+                    if ty_is_dynamic_receiver(&receiver.ty) {
+                        return format!("_lz_exp({}, {}, \"expect\")", r, m);
+                    }
+                    return format!("__lz_expect({}, {})", r, m);
                 }
                 _ => {}
             }
@@ -3629,6 +3978,33 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             format!("{}[{}]", gen_expr(cg, base), gen_expr(cg, key))
         }
         ExprKind::BinOp { op, lhs, rhs } => {
+            // 移位两族在共享 IR 的分派表（`src/ir/builder/ops_map.rs::magic_method_for_binop`）里
+            // **缺席**：那边把 `<<` 原样交给后端，Rust 侧靠生成的 `impl Shl` 兜住，
+            // 而 Python 的运算符协议名是 `__lshift__`/`__rshift__`，与 LZ 的 `__shl__`/`__shr__`
+            // 不同名 ⇒ 裸 `a << b` 在 cy 面运行期 TypeError（实测 TEMP/magic-probes-*.log m_bits）。
+            // 这里点名直派，闸门仍是「本类实现了那个魔法名」，数值接收者不受影响。
+            let shift_magic = match op {
+                BinOpKind::Shl => Some(("__shl__", false)),
+                BinOpKind::Shr => Some(("__shr__", true)),
+                _ => None,
+            };
+            if let Some((m, is_shr)) = shift_magic {
+                if user_class_has_method(cg, &lhs.ty, m) {
+                    return format!("{}.{}({})", gen_expr(cg, lhs), m, gen_expr(cg, rhs));
+                }
+                // 动态接收者：正向臂恒假 ⇒ 旧产物发裸 `<<`，实测
+                // `TypeError: unsupported operand type(s) for <<: 'Money' and 'Money'`
+                // （TEMP/dynrecv-before-r12.log 的 d_shl_dyn）。改成运行时按属性分派。
+                if ty_is_dynamic_receiver(&lhs.ty) {
+                    return format!(
+                        "_lz_shift({}, {}, \"{}\", {})",
+                        gen_expr(cg, lhs),
+                        gen_expr(cg, rhs),
+                        m,
+                        if is_shr { "True" } else { "False" }
+                    );
+                }
+            }
             let o = match op {
                 BinOpKind::Add => "+",
                 BinOpKind::Sub => "-",
@@ -3675,9 +4051,21 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
             format!("{} {} {}", lhs_str, o, rhs_str)
         }
         ExprKind::UnOp { op, operand } => {
+            // `UnOpKind::Not` 是**两个 LZ 运算符共用**的形态：`src/ir/builder/ops_map.rs::map_unop`
+            // 把 `~x`（BitNot）降级成了 Not（注释原话「位非降级为逻辑非」），信息只能在发射端按
+            // 操作数类型还原。Rust 侧 `!` 对 bool 是逻辑非、对整数是位非，两种都对；
+            // Python 侧 `not x` 对整数恒为真、`~x` 才是位非 ⇒ 一律发 `not ` 会让 `~6` 出 `False`
+            // 并让 `~obj`（走 `__invert__` 协议）塌成 bool（实测 TEMP/magic-probes-*.log m_bits：
+            // rust `'…-7'` vs cy `AttributeError: 'bool' object has no attribute 'v'`）。
             let o = match op {
                 UnOpKind::Neg => "-",
-                UnOpKind::Not => "not ",
+                UnOpKind::Not => {
+                    if matches!(operand.ty, IrType::Bool) {
+                        "not "
+                    } else {
+                        "~"
+                    }
+                }
                 // Python 对象本为引用：Ref/MutRef 透传；Deref 透传（无指针）
                 UnOpKind::Ref | UnOpKind::MutRef | UnOpKind::Deref => "",
             };
@@ -3910,6 +4298,7 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 child.emitted_fns = cg.emitted_fns.clone();
                 child.merged_modules = cg.merged_modules.clone();
                 child.impl_methods = cg.impl_methods.clone();
+                child.class_method_names = cg.class_method_names.clone();
                 child.self_methods = cg.self_methods.clone();
                 child.enum_names = cg.enum_names.clone();
                 child.in_gen_build = true;
@@ -4010,6 +4399,9 @@ fn gen_expr(cg: &CythonCodeGen, expr: &Expr) -> String {
                 MagicKind::Eq => format!("{} == {}", first, second),
                 MagicKind::Cmp => format!("{} < {}", first, second),
                 MagicKind::Iter => format!("iter({})", first),
+                // 单参 `next`：LZ 的 `__next__` 以 `Option.None` 表示结束，cy 侧迭代协议适配器
+                // （`_lz_iter`）只在 for 循环的取数面把它翻成 StopIteration，
+                // 所以 `next(it)` 这里保持原形——取尽返回 None，与 Rust 侧 `it.next()` 同形。
                 MagicKind::Next => format!("next({})", first),
                 MagicKind::Call => format!("{}({})", first, a.iter().skip(1).cloned().collect::<Vec<_>>().join(", ")),
                 MagicKind::Add => format!("{} + {}", first, second),

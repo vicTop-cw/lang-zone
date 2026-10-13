@@ -211,7 +211,9 @@ trait Iterator =
     // --- 消费器 (Consumer) ---
 
     /// 对每个元素执行操作
-    def for_each(mut self, f: fn(Self.Item) -> ()) =
+    def for_each(mut self, f: fn(Self.Item) -> ())
+        where Self.Item: Clone
+        =
         while let Some(item) = self.__next__():
             f(item)
 
@@ -220,14 +222,18 @@ trait Iterator =
         C.from_iter(self)
 
     /// 折叠
-    def fold<B>(mut self, init: B, f: fn(B, Self.Item) -> B) -> B =
+    def fold<B>(mut self, init: B, f: fn(B, Self.Item) -> B) -> B
+        where Self.Item: Clone
+        =
         mut acc = init
         while let Some(item) = self.__next__():
             acc = f(acc, item)
         return acc
 
     /// 归约 (无初始值的 fold)
-    def reduce(mut self, f: fn(Self.Item, Self.Item) -> Self.Item) -> Option<Self.Item> =
+    def reduce(mut self, f: fn(Self.Item, Self.Item) -> Self.Item) -> Option<Self.Item>
+        where Self.Item: Clone
+        =
         match self.__next__():
             case Some(first):
                 mut acc = first
@@ -267,14 +273,18 @@ trait Iterator =
                 return Self.Item.default()
 
     /// 全部满足
-    def all(mut self, predicate: fn(Self.Item) -> bool) -> bool =
+    def all(mut self, predicate: fn(Self.Item) -> bool) -> bool
+        where Self.Item: Clone
+        =
         while let Some(item) = self.__next__():
             if not predicate(item):
                 return False
         return True
 
     /// 任一满足
-    def any(mut self, predicate: fn(Self.Item) -> bool) -> bool =
+    def any(mut self, predicate: fn(Self.Item) -> bool) -> bool
+        where Self.Item: Clone
+        =
         while let Some(item) = self.__next__():
             if predicate(item):
                 return True
@@ -423,7 +433,9 @@ struct Map<I: Iterator, B> =
     iter: I
     func: fn(I.Item) -> B
 
-impl<I: Iterator, B> Iterator for Map<I, B> =
+impl<I: Iterator, B> Iterator for Map<I, B>
+    where I.Item: Clone
+    =
     type Item = B
 
     def __next__(mut self) -> Option<B> =
@@ -550,7 +562,7 @@ struct FlatMap<I: Iterator, J: Iterator, B> =
     inner: Option<J>
 
 impl<I: Iterator, J: Iterator, B> Iterator for FlatMap<I, J, B>
-    where J: Iterator<Item = B> + Clone
+    where J: Iterator<Item = B> + Clone, I.Item: Clone
     =
     type Item = B
 

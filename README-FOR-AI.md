@@ -65,6 +65,11 @@
 - 每 100 小阶段发布一次 PyPI（100 小阶段 = 0.0.1）。
 - 完全自主自由发挥演化，不弹询问（除非涉及风险操作）。
 
+## 七·一、仓库同步（只需同步 GitCode）
+
+- **同步/发布只需推 GitCode 即可**：https://gitcode.com/VictorTop/lang-zone —— GitHub 镜像（https://github.com/vicTop-cw/lang-zone）由 CI 自动同步（GitCode 根目录 `.sync-to-github` 开关控制，只增不删，以 GitCode 为源覆盖同名分支），**无需手动推送 GitHub，也不要直接改动 GitHub 镜像**。
+- 本机 `git remote` 以 GitCode 为权威源；提交信息 English + Conventional Commits（同第五节）。
+
 ## 八、已知注意点（避免踩坑）
 
 - `IrType` 无 `List/Dict/Set` 变体——用 `Named { path, args }` 表达。

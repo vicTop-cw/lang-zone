@@ -338,10 +338,22 @@ impl TypeCtx {
                 // 无返回注解：从函数体最后语句推断并登记。
                 // 否则调用点 lookup_fn_return 回退 Any→i64，
                 // 导致 `main 末尾调用 closure_in_box()` 被误推为 i64（E0308）
+                // 预登记顶层 let 绑定到探测副本：尾 `return s` 中 s 是本函数体顶层
+                // let 时，collect 阶段 vars 无此名 → Any → 调用点 print 分档退回 {:?}
+                //（输出带引号），与显式 -> str 的 {} 不一致（perf §13.5）。
+                // 用副本登记而非直接改 self.vars——直接登记会与 convert_block 的
+                // block_declared 预扫描冲突（把这些变量误判为已声明 → E0425，§13.2 教训）
+                let mut probe = self.clone();
+                for st in &f.body {
+                    if let ast::Stmt::Let { name, value, .. } = st {
+                        let ty = infer_expr_type(value, &probe);
+                        probe.vars.insert(name.clone(), ty);
+                    }
+                }
                 let mut ret = f
                     .body
                     .last()
-                    .map(|s| infer_stmt_type(s, self))
+                    .map(|s| infer_stmt_type(s, &probe))
                     .unwrap_or(IrType::Unit);
                 // BUG-CG-004 收口：raises 函数即使无返回注解，其 Rust 返回类型也是
                 // Result<ok, err>（ok 为推断返回值，err 为 raises 异常类型），

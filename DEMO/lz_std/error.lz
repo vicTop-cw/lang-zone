@@ -197,6 +197,17 @@ impl LzError =
     def __eq__(ref self, ref other: LzError) -> bool =
         self.kind() == other.kind() and self.message() == other.message()
 
+// --- Error trait 实现 ---
+// LzError 必须实现 Error trait，否则 Error::chain_str 默认实现里
+// `src.chain_str()`（src: &LzError）无法解析（E0599: &LzError 无 chain_str）。
+// 此处提供抽象方法 `description` 的实例，source 沿用 trait 默认（None），
+// chain_str 沿用 trait 默认（递归打印，对本类型无 source 故不递归）。
+
+impl Error for LzError =
+    /// 错误描述（Error trait 抽象方法的实现）
+    def description(ref self) -> str =
+        self.__str__()
+
 
 // ============================================================
 // 便捷异常抛出函数

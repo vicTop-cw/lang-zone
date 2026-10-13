@@ -1,0 +1,23 @@
+// 出处：从 with_defer.lz 拆出来的**一条语句**（2026-10-09，T0r14）；母件余下行为仍由 with_defer.exp 逐字钉住。
+// 本件**没有** `.exp`，已登记 tests/cy_codegen_gate.rs 的 NO_ORACLE_EXPLAINED，理由：
+//   Rust 面拿 `with MyResource(...) as res` 的绑定时取不到 `str` ⇒ `f"using {res.name}"` 发 `{:?}`，
+//   cy 面按 Python 运行时类型发 Display ⇒ 两者逐字不等。规范 SYNTAX/00-词法基础.md:188 站 cy 这边；
+//   同构造的 `self.name` 插值两侧一致（见 with_defer.lz）⇒ 缺的是「`with as` 绑定的类型落地」
+//   （BUG-44 在册，交对面车道修共享层；本车道不改 `src/ir/builder/`，也不照 cy 封这份缺陷期望值）。
+// 判据：L3 执行本件并计入「无 oracle 仅跑通」；对面修好后 TEMP/seal_missing_exp.py 会在两侧一致时补封，
+//       届时门禁的「登记了但 `.exp` 在场 ⇒ 红」反向门逼着同轮把这条从表里移出。
+
+struct MyResource =
+    name: str
+
+    def __enter__(self) -> MyResource =
+        print(f"acquiring {self.name}")
+        self
+
+    def __exit__(mut self, _guard: MyResource) =
+        print(f"releasing {self.name}")
+
+def main() =
+    with MyResource(name: "database") as res:
+        print(f"using {res.name}")
+    // 退出 with 时自动调用 res.__exit__() ⇒ 三行输出把「绑定类型没落地」这一处单独隔离出来

@@ -1,0 +1,33 @@
+// 跨后端口径：`.to_string()` 走 Rust 的 Display（`{}`），不是 `{:?}`。
+// 规范把这个名字写成内建：SYNTAX/00-词法基础.md:187 `"hello".to_string()"、
+// SYNTAX/01-类型系统.md:735「对应 Display trait 的 to_string」。
+// Display 的规矩是逐值实测来的（TEMP/f64ladd-y0-r14.log 的 u_disp_ladder，22 个 f64）：
+//   恒用定位记法（1e20 ⇒ 100000000000000000000、1e-7 ⇒ 0.0000001），整值不带 .0（1.0 ⇒ 1）。
+// 末三行另钉 Debug 侧（同一张梯的 u_dbg_ladder）：Python 的 repr 指数拼法 `1e+20`/`1e-07`
+// 与 Rust 的 `{:?}` `1e20`/`1e-7` 不是一回事，这一类不响、只是值不对。
+// 判据：tests/cython_backend.rs 的 cy_to_string_uses_display_ruling（正向）、
+//       cy_to_string_keeps_user_method 与 cy_to_string_dynamic_probes_attr_first（成对反向）；
+//       行为面凭 L3 与 Rust golden 逐字比对。
+struct Tag =
+    k: str
+    def to_string(ref self) -> str =
+        "tag-str"
+
+def main() =
+    let s: str = "hi"
+    print("<" + s.to_string() + ">")
+    print("<" + "lit".to_string() + ">")
+    let n: int = -7
+    print("<" + n.to_string() + ">")
+    let b: bool = false
+    print("<" + b.to_string() + ">")
+    let f1: f64 = 1.0
+    print("<" + f1.to_string() + ">")
+    let f2: f64 = 1e20
+    print("<" + f2.to_string() + ">")
+    let f3: f64 = 1e-7
+    print("<" + f3.to_string() + ">")
+    print("<" + Tag(k: "x").to_string() + ">")
+    print(f1)
+    print(f2)
+    print(f3)

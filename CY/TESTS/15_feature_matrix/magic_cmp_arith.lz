@@ -1,0 +1,76 @@
+// 15_feature_matrix - magic_cmp_arith：比较族／`__ne__` 派生／算术族／一元族
+// （SYNTAX/12 §3.1 二元、§3.2 一元、§3.3 比较三张映射表）
+//
+// 这一组本轮**没有改发射**：它们在 cy 面此前是零覆盖，探针（`TEMP/magic_probes_r11.py`
+// 的 m_cmp / m_arith / m_unary）两后端逐字一致 ⇒ 补成语料把「恰好一致」钉成判据。
+// 为什么值得钉：`__lt__/__gt__/__le__/__ge__/__eq__` 在 Python 协议里**同名**，所以裸比较符
+// 天然派发；这是命名巧合不是实现保证，将来谁把魔法名改成 LZ 风格以外的东西（`__shl__` 那类
+// 已经踩过一次）就不会有任何信号。`a != b` 走的是「实现 `__eq__` 后 `__ne__` 自动派生为
+// `!__eq__`」（§3.3 派生关系），Python 侧的默认 `__ne__` 也恰好是取反 ⇒ 两侧都成立。
+//
+// 每一步用新绑定：二元魔法按值消费 self/rhs（§3.1），复用同一个变量会让 Rust 面撞 E0382。
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分。
+struct Money =
+    v: int
+
+impl Money =
+    def __eq__(self, o: Money) -> bool =
+        self.v == o.v
+    def __lt__(self, o: Money) -> bool =
+        self.v < o.v
+    def __gt__(self, o: Money) -> bool =
+        self.v > o.v
+    def __le__(self, o: Money) -> bool =
+        self.v <= o.v
+    def __ge__(self, o: Money) -> bool =
+        self.v >= o.v
+    def __sub__(self, o: Money) -> Money =
+        Money(v: self.v - o.v)
+    def __mul__(self, o: Money) -> Money =
+        Money(v: self.v * o.v)
+    def __rem__(self, o: Money) -> Money =
+        Money(v: self.v % o.v)
+    def __neg__(self) -> Money =
+        Money(v: 0 - self.v)
+    def __not__(self) -> bool =
+        self.v == 0
+
+def main() =
+    // ── 比较族 + `__ne__` 由 `__eq__` 派生 ──
+    let a1 = Money(v: 1)
+    let b1 = Money(v: 2)
+    print(a1 < b1)
+    let a2 = Money(v: 1)
+    let b2 = Money(v: 2)
+    print(b2 > a2)
+    let a3 = Money(v: 1)
+    let b3 = Money(v: 2)
+    print(a3 <= b3)
+    let a4 = Money(v: 2)
+    let b4 = Money(v: 1)
+    print(a4 >= b4)
+    let a5 = Money(v: 1)
+    let b5 = Money(v: 2)
+    print(a5 != b5)
+    let a6 = Money(v: 1)
+    let b6 = Money(v: 1)
+    print(a6 == b6)
+
+    // ── 算术族 ──
+    let p1 = Money(v: 10)
+    let q1 = Money(v: 3)
+    print((p1 - q1).v)
+    let p2 = Money(v: 10)
+    let q2 = Money(v: 3)
+    print((p2 * q2).v)
+    let p3 = Money(v: 10)
+    let q3 = Money(v: 3)
+    print((p3 % q3).v)
+
+    // ── 一元族：`-x` 走 __neg__、`not x` 走 __not__（B 类仅直派）──
+    let n1 = Money(v: 5)
+    print((-n1).v)
+    let n2 = Money(v: 5)
+    print(not n2)
+    let n3 = Money(v: 0)
+    print(not n3)

@@ -1,0 +1,36 @@
+// 15_feature_matrix - uncond_arms_user_methods：方法表里三条**无条件**臂吃掉用户类同名方法
+// （SYNTAX/12 §3.1 同名方法 + 01b §一 duck 约束）
+//
+// `is_none` / `is_some` / `expect` 三条臂的立论是「cy 的 Option 就是裸值／None」——那是**值表示**，
+// 不是**接收者是谁**。三条都不看接收者 ⇒ 用户类自带的同名方法被整条换成一次与 None 的
+// identity 比较，两侧都不报错、只是数不对（本后端最难发现的那一类）：
+//   x_expect_static  rust '42\n'  / 旧 cy 'Cfg { n: 21 }\n'  —— 打印的是对象而不是返回值
+//   x_isnone_static  rust 'true\n' / 旧 cy 'false\n'
+//   x_issome_static  rust 'false\n' / 旧 cy 'true\n'
+// （三份修前读数在 `TEMP/uncond-x13-before-r13.log`）。
+// 现在闸门与上一轮的 clone/unwrap 同一条纪律：看「本类**有没有**定义这个名字」——
+// 有 ⇒ 落回通用尾巴发 `a.is_none()`；没有（含真 Option）⇒ 保持原来的表达式形态。
+// 动态接收者（duck 泛型形参／无注解闭包形参）静态判不出 ⇒ 发 `_lz_isnone(x, "is_none")`
+// 之类的运行时助手，按 `_LZ_TYPES` 名单**加上**属性存在才走方法那一支。
+//
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分（`python -u TEMP/seal_missing_exp.py`）。
+struct Cfg =
+    n: int
+    def expect(ref self, msg: str) -> int =
+        self.n * 2
+    def is_none(ref self) -> bool =
+        true
+    def is_some(ref self) -> bool =
+        false
+
+duck HasExpect =
+    def expect(self, msg: str) -> int
+
+def e<T: HasExpect>(x: T) -> int =
+    x.expect("m")
+
+def main() =
+    print(Cfg(n: 21).expect("m"))
+    print(Cfg(n: 1).is_none())
+    print(Cfg(n: 1).is_some())
+    print(e(Cfg(n: 21)))

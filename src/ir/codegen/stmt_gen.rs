@@ -748,14 +748,62 @@ impl CodeGen {
                             && !matches!(ty, IrType::Named { path, .. } if path == "Nil")
                     }
                     ExprKind::StructCtor { name: n, fields } => n == "Dict" && fields.is_empty(),
+                    // 小写 dict()/list()/set() 空构造（expr_gen 已接线 BTreeMap/Vec/HashSet::new()）：
+                    // `let d = dict()` 此前不命中空容器 → 无类型标注 → E0282 type annotations needed
+                    ExprKind::Call { callee, args, type_args: _ } if args.is_empty() => matches!(
+                        &callee.kind,
+                        ExprKind::Var(n)
+                            if matches!(
+                                n.as_str(),
+                                "dict" | "list" | "set" | "Dict" | "List" | "Vec" | "Set"
+                                    | "HashSet" | "HashMap"
+                            )
+                    ),
                     _ => false,
                 };
-                // 空 Dict/Set 强制输出类型标注
-                let force_ty = is_empty_container
-                    && matches!(ty, IrType::Named { path, .. } if path == "Dict" || path == "Set");
+                // 空 Dict/Set 强制输出类型标注；小写空构造调用（值本身就是精确构造器）
+                // 同样强制标注 —— 但仅当 ty 是对应容器 Named 时（ty 为 Any 时 rust_type
+                // 回退 i64，标注反而是 E0308），ListLit 保持原有推断策略不变
+                let is_empty_ctor_call = matches!(
+                    &value.kind,
+                    ExprKind::Call { callee, args, type_args: _ }
+                        if args.is_empty()
+                            && matches!(
+                                &callee.kind,
+                                ExprKind::Var(n)
+                                    if matches!(
+                                        n.as_str(),
+                                        "dict" | "list" | "set" | "Dict" | "List" | "Vec"
+                                            | "Set" | "HashSet" | "HashMap"
+                                    )
+                            )
+                );
+                let force_ty = (is_empty_container
+                    && matches!(ty, IrType::Named { path, .. } if path == "Dict" || path == "Set"))
+                    || (is_empty_ctor_call
+                        && matches!(ty, IrType::Named { path, .. }
+                            if matches!(path.as_str(), "Dict" | "List" | "Vec" | "Set" | "HashMap" | "HashSet")));
                 let mut ty_str = if is_empty_container {
                     // 优先使用声明的类型；若无则使用占位符
-                    if !skip_ty || force_ty {
+                    // 小写空构造调用（dict()/list()/set()）：用占位符标注（与下方空
+                    // Dict StructCtor 的 HashMap<_, _> 约定一致）——具体类型（K 可能是
+                    // String 也可能是 i64）由后续使用点推断，强制 i64 默认会 E0308
+                    // （实测 `d["a"]=1` 生成 insert("a".to_string(),..) 而 `d[0]=1`
+                    // 生成 insert(0i64,..)，两种键都合法）
+                    if is_empty_ctor_call {
+                        match &value.kind {
+                            ExprKind::Call { callee, .. } => match &callee.kind {
+                                ExprKind::Var(n) if matches!(n.as_str(), "dict" | "Dict" | "HashMap") => {
+                                    ": std::collections::BTreeMap<_, _>".to_string()
+                                }
+                                ExprKind::Var(n) if matches!(n.as_str(), "set" | "Set" | "HashSet") => {
+                                    ": std::collections::HashSet<_>".to_string()
+                                }
+                                _ => ": Vec<_>".to_string(),
+                            },
+                            _ => String::new(),
+                        }
+                    } else if !skip_ty || force_ty {
                         format!(": {}", self.rust_type(ty))
                     } else if let ExprKind::StructCtor { name: n, .. } = &value.kind {
                         if n == "Dict" {
@@ -1131,9 +1179,15 @@ impl CodeGen {
                     // 生成器构建块闭包内 return 等价提前退出收集（闭包返回 ()）
                     self.emit_line("return;");
                 } else if self.in_generator {
-                    // iterator 体内 return 等价 raise：终止迭代并抛出
-                    // （return expr 为错误信息；return 无值 → 空 panic）
-                    if let Some(v) = value {
+                    // iterator 体内 return 等价 raise：
+                    // - raises 生成器：把 Err 压入收集 Vec 并提前返回（签名 Vec<Result<T,E>>）
+                    // - 非 raises 生成器：保持 panic!（catch_unwind 捕获）
+                    if self.current_fn_raises.is_some() {
+                        if let Some(v) = value {
+                            self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(v)));
+                        }
+                        self.emit_line("return __gen_vec;");
+                    } else if let Some(v) = value {
                         self.emit_line(&format!("panic!(\"{{:?}}\", {});", self.gen_expr(v)));
                     } else {
                         self.emit_line("panic!(\"generator return\");");
@@ -1276,6 +1330,12 @@ impl CodeGen {
                 if is_known_unit_call {}
                 if is_last && !self.is_main && !self.suppress_tail_return && !self.in_generator {
                     // 非 main 函数尾表达式 → return expr;
+                    // **生成器例外**：生成器的返回值由函数末尾的 `return __gen_vec;`
+                    // 给出，体内尾表达式必须按语句发射（`expr;`）。
+                    // 否则 `yield from ...` 所在的尾 `if` 会被包成
+                    // `return if ... { ... } else { () };` ⇒ E0308
+                    // （返回类型是 Vec<T>，而尾表达式值是 ()），
+                    // 递归生成器（`yield from self(..)`）必踩。
                     // 返回引用（`-> &T` / `-> &mut T`）时尾表达式 self.字段：
                     // 生成 &self.field / &mut self.field，而非 borrow_self 误加的
                     // self.field.clone()（box.lz get/get_mut，E0308 expected &T, found T）
@@ -1452,6 +1512,11 @@ impl CodeGen {
                             if path == "str" || path == "String");
                     if iter_is_str {
                         format!("({}).chars()", s)
+                    } else if matches!(&iter.ty, IrType::Named { path, .. } if path == "Range") {
+                        // Range 本身就是 Iterator 且 Copy（0..n 生成 0i64..ni64）：
+                        // `(0..5).into_iter()` 的 .into_iter() 是恒等转换，
+                        // 直接使用 —— 对齐手写 Rust 的 `for i in 0..n` 形态
+                        s
                     } else if iter_vec_ref_elem {
                         // Vec<&T>：.into_iter() 产生 &T，下游需要 owned T（如 JsonValue::String(key)、
                         // .get(&key) 的 Borrow 约束）→ .map(|x| x.clone()) 取值
@@ -1905,9 +1970,9 @@ impl CodeGen {
                 // block scan: ... break scan → (|| { ... return; })()
                 //
                 // **尾位置例外**：命名块恰好是函数尾表达式时，块值就是返回值。
-                // 原先一律发 `(|| { .. })();` 会把值丢掉 ⇒ E0308
-                // （`pub fn f(..) -> i64 { (|| { .. })(); }`）。
-                // 此时先把闭包结果绑到临时量再 return；块内 `break label`
+                // 原先一律发`(|| { .. })();` 会把值丢掉 ⇒ E0308
+                //（`pub fn f(..) -> i64 { (|| { .. })(); }`）。
+                // 此时先把闭包结果绑到临时量再 return，块内 `break label`
                 // 仍编译成 `return;`（退出闭包）⇒ 该路径块值为 ()，语义一致。
                 let tail_pos = is_last && !self.suppress_tail_return && !self.is_main;
                 if tail_pos {
@@ -1923,9 +1988,11 @@ impl CodeGen {
                 self.suppress_tail_return = saved;
                 self.plain_block_depth -= 1;
                 self.indent -= 1;
-                self.emit_line("})();");
                 if tail_pos {
+                    self.emit_line("})();");
                     self.emit_line("return __blk_val;");
+                } else {
+                    self.emit_line("})();");
                 }
             }
             Stmt::CheckerBlock { .. } => {
@@ -1947,12 +2014,17 @@ impl CodeGen {
                 self.emit_line(&format!("// type {} = {};", name, self.rust_type(ty)));
             }
             Stmt::Raise { value } => {
-                // BUG-CG-004（轮次12）：raises 函数内 raise → `return Result::Err(..)`，
-                // 使错误经 Result 传播（而非 panic!）。非 raises 函数保持 panic!（catch_unwind 仍可捕获）。
-                // `return Err` 在表达式位同样合法（从外层函数/闭包返回），故无需在 builder 层提升。
-                if self.current_fn_raises.is_some() {
+                // 生成器内 raise：函数签名为 Vec<Result<T, E>>，须把 Err 压入收集 Vec
+                // 并提前返回（return __gen_vec），否则 `return Result::Err(..)` 与 Vec 类型
+                // 不匹配触发 E0308（iterator_demo / combo-iterator-generator 的 -> T raises str 生成器）。
+                if self.in_generator {
+                    self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(value)));
+                    self.emit_line("return __gen_vec;");
+                } else if self.current_fn_raises.is_some() {
+                    // 普通 raises 函数：raise → `return Result::Err(..)`，错误经 Result 传播
                     self.emit_line(&format!("return Result::Err({});", self.gen_expr(value)));
                 } else {
+                    // 非 raises 函数：保持 panic!（catch_unwind 仍可捕获）
                     self.emit_line(&format!("panic!(\"{{:?}}\", {});", self.gen_expr(value)));
                 }
             }
@@ -1991,6 +2063,14 @@ impl CodeGen {
                     val_s
                 } else {
                     format!("{}.clone()", val_s)
+                };
+                // 生成器含 raises：函数签名是 Vec<Result<T, E>>，yield 须包成 Ok(x)
+                // 与 raise 的 Err 一致，否则 `return __gen_vec` 触发 E0308
+                // （iterator_demo / combo-iterator-generator 的 -> T raises str 生成器）
+                let val_s = if self.in_generator && self.current_fn_raises.is_some() {
+                    format!("Ok({})", val_s)
+                } else {
+                    val_s
                 };
                 self.emit_line(&format!("__gen_vec.push({});", val_s));
             }
@@ -2118,14 +2198,29 @@ impl CodeGen {
                         self.in_result_try = true;
                         self.gen_block_inner(body);
                         self.in_result_try = saved_rt;
-                        // body 尾表达式非 Result 时（如 print(v)→Unit），闭包体末尾
-                        // 需包 Ok() 使返回类型匹配 Result<(), E>
+                        // body 尾表达式非 Result 时（如 f"success:{r}" → str，或 print(v) → Unit），
+                        // 闭包必须以 Ok(<尾值>) 收尾，使闭包返回类型匹配 Result<ok, E>，
+                        // 且尾值得以保留。旧逻辑盲目 emit Ok(())：丢失尾值并触发
+                        // E0308 (expected <ok>, found ())（见 combo-error-control::multi_catch_control）。
                         if !matches!(&body.ty, IrType::Result { .. }) {
-                            let last = self.last_emitted_line().to_string();
-                            if !last.ends_with(';') && !last.ends_with('}') && !last.is_empty() {
-                                self.append_to_last_line(";");
+                            // 单独渲染尾值表达式（始终为单条表达式），用于覆盖 gen_block_inner
+                            // 已发出的尾语句：截断最后一行后改 emit Ok(<尾值>)。
+                            let ok_val_src = match body.stmts.last() {
+                                Some(Stmt::ExprStmt { expr }) => self.gen_expr(expr).trim().to_string(),
+                                _ => "()".to_string(),
+                            };
+                            if ok_val_src.is_empty() {
+                                self.emit_line("Ok(())");
+                            } else {
+                                // 移除已发出的尾语句（单行），避免遗留裸表达式或多余 `;`。
+                                let trimmed_len = self.buf.trim_end().len();
+                                let last_line_start = self.buf[..trimmed_len]
+                                    .rfind('\n')
+                                    .map(|i| i + 1)
+                                    .unwrap_or(0);
+                                self.buf.truncate(last_line_start);
+                                self.emit_line(&format!("Ok({})", ok_val_src));
                             }
-                            self.emit_line("Ok(())");
                         }
                         self.suppress_tail_return = saved;
                         self.indent -= 1;
@@ -2475,8 +2570,18 @@ impl CodeGen {
         if !is_dict && !is_str && key_is_numeric {
             let key_s = self.gen_expr(key);
             // key 是复合表达式（如 self.len() - 1）时需整体加括号再 as usize，
-            // 否则 `A - 1 as usize` 的 as 只应用到尾部（E0277 i64 - usize）
-            format!("(({}) as usize)", key_s)
+            // 否则 `A - 1 as usize` 的 as 只应用到尾部（E0277 i64 - usize）。
+            // 简单标识符/字面量（无空格无括号）则省去内层冗余括号：
+            // `((i) as usize)` → `(i as usize)`，对齐手写 Rust 形态
+            let simple = !key_s.is_empty()
+                && !key_s.contains(char::is_whitespace)
+                && !key_s.contains('(')
+                && !key_s.contains(')');
+            if simple {
+                format!("({} as usize)", key_s)
+            } else {
+                format!("(({}) as usize)", key_s)
+            }
         } else {
             let key_s = self.gen_expr(key);
             // 在容器索引（Vec/List）场景下，若 key 是 self 的 int 字段（impl 内），也转 usize

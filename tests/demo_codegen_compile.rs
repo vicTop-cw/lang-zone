@@ -38,39 +38,36 @@ const KNOWN_TRANSPILE_FAILURES: &[&str] = &[
     // 基线原记为产物编译失败，实际为转译期失败（IR build: parse_int 返回类型
     // Result<int,str> vs Result<int,unknown>）——早于本次改动即存在，仅基线阶段记错
     // DEMO/05_expressions/operators.lz —— 转译期已转绿（2026-09-30 复跑 --ignored 闸门现通过），移出清单
-    // ── 以下 1 项仍为转译期失败（全量基线 2026-09-09）──
-    "DEMO/99_spec/combo-syntax/combo_while_guard_try.lz",
+    // combo_while_guard_try.lz 已修复（2026-10-07：extended_check 豁免海象操作数 +
+    // 海象 codegen 对 Result 解包并按内层类型声明变量），转译期已转绿，移出清单
 ];
 
-/// 产物编译阶段（rustc）已知失败 —— 基线快照 2026-09-09（含后续修复收窄后剩余项）
+/// 产物编译阶段（rustc）已知失败 —— 基线快照 2026-09-09
+///
+/// **2026-10-07 起为空**：文档 known-bugs-2026-10-06.md 记录的全部 11 项已全部修复并
+/// 经全量闸门（327/327）实证转绿，allowlist 清空以收紧闸门。修复要点：
+/// - dict.lz / list.lz：Dict→BTreeMap 的 K: Ord 改由模块级预扫描
+///   `collect_dict_key_generics` 统一注入（覆盖方法级泛型、struct 字段含 Dict 的
+///   Iterator impl、以 Dict 当集合的 unique<T>）；DictExt 调用去 `dyn` 改完全限定。
+/// - traits.lz：协议 Iterator 不再声明孤儿 `type Item;`（消解 E0221 二义性），
+///   配套 extends_iter 概念统一 Item 映射到 `<X as std::iter::Iterator>::Item`。
 const KNOWN_RUSTC_FAILURES: &[&str] = &[
-    "DEMO/lz_std/error.lz",  // E0599: no method `chain_str` for &LzError（LzError 未 impl Error）
-    "DEMO/lz_std/traits.lz", // E0599: <Self as std::iter::Iterator>::Item clone（需 <Self as ...>::Item::default() 限定）
-    "DEMO/lz_std/iter.lz",   // E0599: <I as IntoIterator>::Item clone（关联类型豁免未覆盖此 clone 位点）
-    // ── 预存回归（基线 a4ad0a0 即存在）──
     // combo-defer-guard.lz 已修复转绿（2026-10-06：with 块整体包成块表达式语句
     // Stmt::ExprStmt{BlockExpr}，使 capture_tail 正确捕获 with 体尾值，消解 E0308），移出清单
     // string.lz 已修复（E0308 字符串形态实参归一到 .to_string()，2026-09-29）移出清单
-    "DEMO/lz_std/dict.lz",   // E0277: K2: Ord not satisfied（+ str/String 设计问题 ④）
-    // list.lz 与 dict.lz 同源：codegen 有意将 Dict 映射为 BTreeMap（有序，保证
-    // JSON 序列化字段顺序稳定，见 codegen/mod.rs::module_uses_dict 注释），要求键
-    // 泛型 K: Ord；但 LZ 源 Dict 方法均声明 `where K: Eq + Hash`（哈希表语义）。
-    // list.lz 的 `unique`（用 Dict() 去重）声明 `where T: Eq + Hash`，BTreeMap 要求
-    // T: Ord → E0277 T: Ord。此非 T2-T5 回归（Dict 映射从未被本次改动触碰），属与
-    // dict.lz 相同的设计层面不一致（设计问题 ④），故与 dict.lz 一并列入基线。
-    "DEMO/lz_std/list.lz",   // E0277: T: Ord not satisfied（Dict→BTreeMap 设计问题 ④）
+    // dict.lz / list.lz 已修复转绿（2026-10-07，见上方常量注释），移出清单
     // callable_objects.lz 已修复转绿
     // pipe_semantics.lz 已修复转绿（2026-10-06：__call__ mut self → Callable 转发经克隆+全限定 inherent 调用消解 E0308），移出清单
-    // ── 全量基线（2026-09-09）──
-    // DEMO/01_basics/polish_07_closures.lz —— 已修复（闭包载体 Box<dyn Fn>→Rc<dyn Fn>，2026-09-30 T0r3），移出清单
-    // DEMO/01_basics/polish_27_use.lz —— 已修复（同上），移出清单
-    // DEMO/01_basics/polish_29_combined.lz —— 已修复（同上），移出清单
-    // DEMO/04_functions/closures_more.lz —— 已修复（同上，E0382 由 Rc 转发闭包消解），移出清单
-    "DEMO/99_spec/iterator_demo.lz",         // E0308: 迭代协议
-    "DEMO/boundary-coverage/combo-error-control.lz",    // E0308
-    "DEMO/boundary-coverage/combo-iterator-generator.lz", // E0308
-    "DEMO/boundary-coverage/combo-pipe-lambda.lz",       // E0308
-    "DEMO/boundary-coverage/nesting-closure-lambda.lz",  // E0308
+    // error.lz 已修复转绿（2026-10-07：补 impl Error for LzError 提供 description，
+    // 使 Error::chain_str 默认实现里 src.chain_str() 可解析），移出清单
+    // iter.lz 已修复转绿（2026-10-07：8 处 `where I.Item: Clone` + 泛型 `+` 改走
+    // Rust 原生运算符（in_bounded_binop_fn）+ for_each 自测改用 print 副作用），移出清单
+    // traits.lz 已修复转绿（2026-10-07：协议 Iterator 去孤儿 type Item 消解 E0221），移出清单
+    // iterator_demo.lz / combo-error-control.lz / combo-iterator-generator.lz /
+    // combo-pipe-lambda.lz / nesting-closure-lambda.lz 均已修复转绿（2026-10-07），
+    // 根因分别为：生成器内 raise/return-as-raise 产出 __gen_vec 的 Ok/Err 并提前返回；
+    // 顶层 def 作值装箱（top_level_fns ∧ {Fn,Any}）且调用点不装箱；
+    // 闭包 `-> T` 注解不再丢弃 + 多语句闭包体顺序登记 let 推断尾表达式类型。移出清单
 ];
 
 // ────────────────────────────────────────────────────────────────

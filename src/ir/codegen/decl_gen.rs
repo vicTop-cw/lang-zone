@@ -932,6 +932,16 @@ impl CodeGen {
             (!f.generics.is_empty() && !is_typepack_concretized) || self.in_impl_generic;
         let saved_math_fn = self.in_math_fn;
         self.in_math_fn = is_math;
+        // 当前函数 where 子句含显式算术约束（Add/Mul/...）→ `+`/`*` 走 Rust 原生运算符，
+        // 不经 LzAdd（iter.lz `sum`/`product`：where I.Item: Add/Mul<Output=...>）。
+        let saved_bounded_binop = self.in_bounded_binop_fn;
+        self.in_bounded_binop_fn = f.where_clause.iter().any(|(_, bounds)| {
+            bounds.iter().any(|b| {
+                matches!(b, IrType::Named { path, .. }
+                    if matches!(path.as_str(),
+                        "Add" | "Mul" | "Sub" | "Div" | "Rem" | "Neg"))
+            })
+        });
         // Rust 不允许 async main，对于 async main 使用 block_on 包装
         let is_async_main = f.is_async && f.name == "main";
         // LZ 允许 def main() -> int：Rust main 只能返回 ()，需生成内部函数
@@ -1458,6 +1468,7 @@ impl CodeGen {
         self.in_generator = saved_generator;
         self.in_generic_fn = saved_generic_fn;
         self.in_math_fn = saved_math_fn;
+        self.in_bounded_binop_fn = saved_bounded_binop;
 
         // 生成器：追加 return __gen_vec
         if has_yield {
@@ -1935,6 +1946,17 @@ impl CodeGen {
 
     pub(crate) fn gen_trait_def(&mut self, t: &TraitDef) {
         let generics = self.gen_generics(&t.generics);
+        // 本 trait 是否「就是或继承了」协议 Iterator。协议 Iterator 已不再自带
+        // `type Item`（见下方 assoc_types 跳过逻辑），故这类 trait 内的 `Self.Item`
+        // 必须完全限定为 `<Self as std::iter::Iterator>::Item` 并补 `Self: std::iter::Iterator`
+        // 约束——否则 E0220（找不到 Item）/ E0576（supertrait 里找不到关联类型）。
+        let extends_iter = self.custom_iterator_is_protocol
+            && (t.name == "Iterator"
+                || t.supertraits.iter().any(|s| {
+                    matches!(s, IrType::Named { path, .. } if path == "Iterator")
+                }));
+        let saved_extends_iter = self.current_trait_extends_iter;
+        self.current_trait_extends_iter = extends_iter;
         let supertraits = if t.supertraits.is_empty() {
             String::new()
         } else {
@@ -1944,6 +1966,16 @@ impl CodeGen {
                 .supertraits
                 .iter()
                 .map(|s| match s {
+                    // `trait DoubleEndedIterator: Iterator` 的协议 supertrait 须指向
+                    // std::iter::Iterator（LZ 本地 trait 已无 Item 且被 std 遮蔽），
+                    // 否则 Self: Iterator 解析到本地 trait、其 Item 不存在（E0220）。
+                    IrType::Named { path, args }
+                        if args.is_empty()
+                            && path == "Iterator"
+                            && self.custom_iterator_is_protocol =>
+                    {
+                        "std::iter::Iterator".to_string()
+                    }
                     IrType::Named { path, args } if args.is_empty() => self.rust_type_name(path),
                     _ => self.rust_type(s),
                 })
@@ -1958,7 +1990,20 @@ impl CodeGen {
         // trait 自身泛型名（用于下方 trait 方法签名去重，避免 E0403 重复声明）
         let trait_gen_names: Vec<String> = t.generics.iter().map(|g| g.name.clone()).collect();
         // 关联类型声明（§五 `type Item`）→ Rust trait 关联类型
+        //
+        // LZ `Iterator` 走 std 迭代协议时：其实 `type Item` 是**孤儿声明**——
+        // 所有方法签名/体都用 `<Self as std::iter::Iterator>::Item`（协议 Item），
+        // 而 `impl Iterator for X { type Item = .. }` 绑定的也是 std 的 Item。
+        // 若此处再声明一个同名的 `type Item;`，`Self::Item` 就有两个候选 →
+        // E0221 "ambiguous associated type `Item`"（traits.lz sum/product 的
+        // `Self.Item.default()` 即因此失败）。故协议 Iterator 跳过该声明，
+        // 让 `Self::Item` 唯一指向 std::iter::Iterator::Item。
+        let skip_item_decl =
+            t.name == "Iterator" && self.custom_iterator_is_protocol;
         for a in &t.assoc_types {
+            if skip_item_decl && a == "Item" {
+                continue;
+            }
             self.emit_line(&format!("type {};", a));
         }
         for sig in &t.methods {
@@ -2051,7 +2096,7 @@ impl CodeGen {
                 let uses_self_item = sig.body.is_some()
                     || ty_has_self_item(&sig.ret)
                     || sig.params.iter().any(ty_has_self_item);
-                if t.name == "Iterator" && self.custom_iterator_is_protocol && uses_self_item {
+                if extends_iter && uses_self_item {
                     "\nwhere\nSelf: std::iter::Iterator".to_string()
                 } else {
                     String::new()
@@ -2060,7 +2105,7 @@ impl CodeGen {
                 // trait Iterator 的方法：where 约束里的 Self::Item（sum 的
                 // where Self.Item: Add）需完全限定（E0221 歧义），并追加
                 // Self: std::iter::Iterator（E0277 Self is not an iterator）
-                let is_iter_trait = t.name == "Iterator" && self.custom_iterator_is_protocol;
+                let is_iter_trait = extends_iter;
                 let mut wc: Vec<String> = sig
                     .where_clause
                     .iter()
@@ -2108,6 +2153,16 @@ impl CodeGen {
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = self.in_generator;
                 child.suppress_tail_return = true;
+                // trait 默认方法的 where 子句若有算术约束（Iterator.sum 的
+                // `where Self.Item: Add<Output=Self.Item>`），其 `+` 须走 Rust 原生
+                // 运算符（泛型操作数默认会被派发到 LzAdd → E0277）
+                child.in_bounded_binop_fn = sig.where_clause.iter().any(|(_, bounds)| {
+                    bounds.iter().any(|b| {
+                        matches!(b, IrType::Named { path, .. }
+                            if matches!(path.as_str(),
+                                "Add" | "Mul" | "Sub" | "Div" | "Rem" | "Neg"))
+                    })
+                });
                 // 继承 struct 方法名集合（trait 默认方法体内调用用户 struct 的
                 // next/f 等方法时 user_plain 判定需要，否则误映射 __next__）
                 child.struct_method_names_map = self.struct_method_names_map.clone();
@@ -2146,9 +2201,11 @@ impl CodeGen {
         }
         self.indent -= 1;
         self.emit_line("}");
+        self.current_trait_extends_iter = saved_extends_iter;
     }
 
     /// 生成 trait 方法签名中的类型：`Self.Item`（§五 关联类型引用）→ `Self::Item`，
+    /// 其余类型走 rust_type。仅用于 trait 方法签名。
     /// 其余类型走 rust_type。仅用于 trait 方法签名。
     pub(crate) fn trait_sig_type(&self, ty: &IrType, current_trait: &str) -> String {
         match ty {
@@ -2162,7 +2219,10 @@ impl CodeGen {
                             // 其他 trait（TryFrom<T>/DoubleEndedIterator: Iterator）
                             // 用简单 Self::member（避免 E0107 missing generics /
                             // E0576 cannot find associated type in supertrait）
-                            if current_trait == "Iterator" && self.custom_iterator_is_protocol {
+                            if (current_trait == "Iterator"
+                    && self.custom_iterator_is_protocol)
+                || self.current_trait_extends_iter
+            {
                                 // 完全限定需用 std::iter::Iterator（where Self:
                                 // std::iter::Iterator 的约束）——Map 等适配器 struct
                                 // 的字段类型（I::Item → std Item）与 f 参数一致，

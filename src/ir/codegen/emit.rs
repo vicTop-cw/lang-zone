@@ -170,18 +170,26 @@ impl CodeGen {
         match &expr.kind {
             ExprKind::StructCtor { name, fields } if name == "_Walrus" => {
                 if let Some((_, bind_expr)) = fields.iter().find(|(n, _)| n == "_bind") {
-                    if let ExprKind::Var(v) = &bind_expr.kind {
-                        // walrus 绑定变量类型来自值表达式（first := values.first()
-                        // → Option<i64>，非 i64）；否则硬编码 i64 会 E0308
-                        let val_ty = fields
-                            .iter()
-                            .find(|(n, _)| n == "_val")
-                            .map(|(_, v)| v.ty.clone())
-                            .unwrap_or(IrType::Int);
-                        if !vars.iter().any(|(n, _)| n == v) {
-                            vars.push((v.clone(), val_ty));
-                        }
+                if let ExprKind::Var(v) = &bind_expr.kind {
+                    // walrus 绑定变量类型来自值表达式（first := values.first()
+                    // → Option<i64>，非 i64）；否则硬编码 i64 会 E0308
+                    let val_ty = fields
+                        .iter()
+                        .find(|(n, _)| n == "_val")
+                        .map(|(_, v)| v.ty.clone())
+                        .unwrap_or(IrType::Int);
+                    // walrus 值为 Result（如 `n := raises_fn()`）时，变量应绑定内层值类型
+                    // （n: i64 而非 Result<i64, E>），否则 `n <= 3` 等后续运算类型冲突
+                    // E0308/E0369（combo_while_guard_try：`while (n := step()) <= 3`）。
+                    // 解包由 _Walrus codegen 负责（unwrap_or_else(panic)）。
+                    let var_ty = match &val_ty {
+                        IrType::Result { ok, .. } => (**ok).clone(),
+                        _ => val_ty.clone(),
+                    };
+                    if !vars.iter().any(|(n, _)| n == v) {
+                        vars.push((v.clone(), var_ty));
                     }
+                }
                 }
             }
             ExprKind::BinOp { lhs, rhs, .. } => {

@@ -423,8 +423,8 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::Closure {
             params,
             param_tys,
+            ret_ty,
             body,
-            ..
         } => {
             // 闭包有显式参数注解时构造 Fn 类型，供泛型调用推断使用：
             // 否则 `map_res(a, |x: int| -> int = x*2)` 闭包推断为 Any，导致
@@ -439,7 +439,15 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                         .unwrap_or(IrType::Any);
                     sub.vars.insert(name.clone(), declared);
                 }
-                let ret = infer_expr_type(body, &sub);
+                // 返回类型：优先用显式 `-> T` 注解（如 `|x: int| -> str = ...`），
+                // 否则从闭包体推断。多语句体（`|a| => let x = …; x`）需顺序登记
+                // let 绑定后推断尾表达式；否则尾表达式（可能是闭包）lookup_var 失败
+                // → Any → i64，触发 E0308（nesting-closure-lambda 的三层嵌套闭包：
+                // outer 返回 middle、middle 返回 inner，均被误推断为 i64）。
+                let ret = match ret_ty {
+                    Some(t) => from_ast_type(t),
+                    None => infer_closure_body_type(body, &sub),
+                };
                 IrType::Fn {
                     params: params
                         .iter()
@@ -724,6 +732,36 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 .unwrap_or(IrType::Unit)
         }
         AstExpr::Paren(inner) => infer_expr_type(inner, ctx),
+    }
+}
+
+/// 闭包体返回类型推断：单表达式体直接推断；多语句体（BlockExpr）顺序登记
+/// let 绑定后推断尾表达式类型，使尾表达式为闭包时能拿到真实 Fn 类型
+/// （nesting-closure-lambda 的 outer/middle 嵌套闭包）。
+fn infer_closure_body_type(body: &AstExpr, ctx: &TypeCtx) -> IrType {
+    match body {
+        AstExpr::BlockExpr(stmts) => {
+            let mut cur = ctx.clone();
+            let mut last_ty = IrType::Unit;
+            let n = stmts.len();
+            for (i, s) in stmts.iter().enumerate() {
+                if let AstStmt::Let {
+                    name, ty, value, ..
+                } = s
+                {
+                    let vty = match ty {
+                        Some(t) => from_ast_type(t),
+                        None => infer_expr_type(value, &cur),
+                    };
+                    cur.vars.insert(name.clone(), vty);
+                }
+                if i + 1 == n {
+                    last_ty = infer_stmt_type(s, &cur);
+                }
+            }
+            last_ty
+        }
+        _ => infer_expr_type(body, ctx),
     }
 }
 

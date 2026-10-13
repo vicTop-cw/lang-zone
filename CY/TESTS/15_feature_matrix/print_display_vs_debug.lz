@@ -1,0 +1,19 @@
+// 跨后端口径：print 的实参分 Display／Debug 两档（规范 SYNTAX/99-内置预导入库.md:50）。
+// 裸字符串／f-string／`as str` ⇒ Display（不带引号）；bool／None／容器／对象 ⇒ Rust 的 `{:?}` 形态。
+// 判据：tests/cython_backend.rs 的 cy_print_uses_display_for_string_args 与
+//       cy_print_keeps_debug_for_non_string_args（成对反向锁）；行为面凭 L3 与 Rust golden 逐字比对。
+def main() =
+    print("after")
+    let s: str = "hi"
+    print(s)
+    print("a", 1)
+    let b: bool = true
+    print(b)
+    let xs: List<int> = [1, 2]
+    print(xs)
+    let m: Dict<str, int> = {"k": 3}
+    print(m)
+    let n: Option<int> = None
+    print(n)
+    print(f"s={s}, b={b}")
+    print("s=" + s + ", b=" + b.to_string())

@@ -118,6 +118,10 @@ pub struct CodeGen {
     /// @math 函数标志：体内整数字面量经 T::from(i32) 转换（使 `x * 2` 中 2 推断为 T）。
     /// 普通泛型函数不应转换（否则 `total = 0` 生成 T::from(0i32) 与 i64 冲突，E0308）
     in_math_fn: bool,
+    /// 当前函数 where 子句对操作数类型有显式算术约束（Add/Mul/Sub/Div/Rem）。
+    /// 此时 `+`/`*` 走 Rust 原生运算符（约束已在签名里），不经 LzAdd 分派
+    /// （iter.lz `sum`：where I.Item: Add<Output=I.Item>，走 LzAdd 报 E0277）。
+    in_bounded_binop_fn: bool,
     /// 当前是否在 Lambda 块体（BlockExpr child）内：嵌套 Fn 返回时，
     /// 仅块体尾闭包需 Arc::new 包装，函数体本身的尾表达式（外层闭包）不包装
     in_lambda_block: bool,
@@ -278,6 +282,23 @@ pub struct CodeGen {
     /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
     /// struct 字段信息（供 __new__ 补齐默认字段）
     struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// 「被用作 Dict/HashMap 键」的泛型参数名集合（Dict→BTreeMap 要求 K: Ord）。
+    ///
+    /// Dict 映射为 `BTreeMap<K,V>`（有序，保证 JSON 序列化字段顺序稳定，见
+    /// types_emit.rs），故任何出现在 Dict/HashMap **第一个类型实参**位的泛型
+    /// 参数都必须 `Ord`。原先只在 `impl Dict/HashMap` 块注入（decl_gen.rs 的
+    /// BUG-dict-Ord 补丁），漏掉三类用法：① 方法级泛型（`dict.map<K2,V2>` 返回
+    /// `Dict<K2,V2>`）② 自身字段含 Dict 的 struct 的 `impl Iterator` 块
+    /// （`DictIter<K,V>` 的 `dict: Dict<K,V>` 字段 → `self.dict[key]` 需 K: Ord）
+    /// ③ 以 Dict 当集合用的泛型函数（`list.unique<T>` 的 `seen: Dict<T,_>`）。
+    ///
+    /// 这里预扫描全模块（含 struct 字段与 impl 泛型实参）收集该集合，
+    /// 由 `gen_generics` / `gen_fn_generics` 统一注入 `Ord`，避免逐点打补丁。
+    dict_key_generics: std::collections::HashSet<String>,
+    /// 当前正在生成的 trait「是或继承了」协议 Iterator（gen_trait_def 设置）。
+    /// 供 trait_sig_type 把 `Self.Item` 完全限定为 `<Self as std::iter::Iterator>::Item`
+    /// ——协议 Iterator 已不自带 `type Item`，未限定的 `Self::Item` 会 E0220。
+    current_trait_extends_iter: bool,
     /// f-string 插值静态判定：当前函数可见的变量名 → IR 类型（形参在 gen_fn_def 登记，
     /// let 绑定在 gen_stmt 的 Let 分支登记）。
     /// `f"{r.name}"` 里 r 是 struct 时，需按 `struct_fields_info` 查 `name` 是否 str——
@@ -398,6 +419,7 @@ impl CodeGen {
             fn_value_carriers: HashMap::new(),
             in_lambda_block: false,
             in_math_fn: false,
+            in_bounded_binop_fn: false,
             in_generator: false,
             in_gen_build: false,
             in_generic_fn: false,
@@ -449,6 +471,8 @@ impl CodeGen {
             custom_iterator_is_protocol: true,
             borrow_self: false,
             struct_fields_info: std::collections::HashMap::new(),
+        dict_key_generics: std::collections::HashSet::new(),
+        current_trait_extends_iter: false,
             fstr_var_types: std::collections::HashMap::new(),
             fstr_self_type: None,
             struct_phantom_generics: std::collections::HashMap::new(),
@@ -542,6 +566,10 @@ impl CodeGen {
             }
         }
 
+        // 预扫描：收集被用作 Dict/HashMap 键的泛型参数（Dict→BTreeMap 要求 K: Ord），
+        // 由 gen_generics / gen_fn_generics 统一注入 Ord 约束（详见 dict_key_generics 字段注释）
+        self.dict_key_generics = crate::ir::codegen::scan::collect_dict_key_generics(module);
+
         // 预扫描修饰符装饰器目标类型所需的 std 导入项（T04；仅实际使用时登记）
         self.collect_moddec_imports(module);
 
@@ -565,6 +593,10 @@ impl CodeGen {
                 if f.raises.is_some() {
                     self.raises_fn_names.insert(f.name.clone());
                 }
+                // 登记顶层 def 名称（IR-003：顶层函数作一等值需 Arc::new(f)）。
+                // 前置收集保证任意源码顺序下函数体引用靠后定义的 def 也能识别
+                // （combo-pipe-lambda 的 `double if flag else inc`：double/inc 作值需装箱）。
+                self.top_level_fns.insert(f.name.clone());
                 // 收集函数返回类型（用于 is_str_producing 识别字符串返回函数调用）
                 if !matches!(f.ret_ty, IrType::Unit) {
                     self.fn_returns.insert(f.name.clone(), f.ret_ty.clone());
@@ -1334,7 +1366,8 @@ mod tests {
             where_clause: vec![],
             span: Span::unknown(),
         
-            tco: None,}));
+            tco: None,
+        }));
         let reg = crate::bridge::core::BridgeRegistry::new();
         let mut cg = CodeGen::new();
         cg.set_bridge_registry(reg);
@@ -1387,7 +1420,8 @@ mod tests {
             where_clause: vec![],
             span: Span::unknown(),
         
-            tco: None,}));
+            tco: None,
+        }));
         let mut cg = CodeGen::new();
         let rust = cg.generate(&module);
         assert!(rust.contains("pub fn hello()"));
@@ -1457,7 +1491,8 @@ mod tests {
             where_clause: vec![],
             span: Span::unknown(),
         
-            tco: None,}));
+            tco: None,
+        }));
         let mut cg = CodeGen::new();
         let rust = cg.generate(&module);
         assert!(rust.contains("pub fn add(a: i64, b: i64) -> i64"));

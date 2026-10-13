@@ -221,8 +221,11 @@ impl<T> List<T> =
     // --- 集合操作 ---
 
     /// 去重 (保持顺序, 保留首次出现)
+    //
+    // Dict 映射为 BTreeMap（有序，保证 JSON 字段顺序稳定），其键需 Ord：
+    // `seen: Dict<T, bool>` 的键即元素类型 T，故 T 除 Eq+Hash 外还需 Ord。
     def unique(ref self) -> List<T>
-        where T: Eq + Hash
+        where T: Eq + Hash + Ord
         =
         let mut seen = Dict()
         mut result = List()
