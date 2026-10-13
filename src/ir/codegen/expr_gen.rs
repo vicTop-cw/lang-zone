@@ -286,6 +286,31 @@ impl CodeGen {
         s
     }
 
+    /// 返回 MethodCall 实参在已知消费型方法下的期望类型（用于字符串字面量等需要区分 &str / String 的场景）。
+    /// 修复 BUG-42：Option::expect(&str) / Result::expect(&str) 等收 &str 的方法，
+    /// 实参位置需注入 `IrType::Ref(IrType::Str)` 使 gen_lit 生成裸字符串字面量。
+    fn method_param_expected_ty(&self, method: &str, _receiver_ty: &IrType, arg_idx: usize) -> Option<IrType> {
+        match method {
+            "expect" | "unwrap_or_else" | "ok_or" | "err_or" | "expect_err" => {
+                // Result::expect(&str) / Option::expect(&str)
+                if arg_idx == 0 {
+                    Some(IrType::Ref(Box::new(IrType::Str)))
+                } else {
+                    None
+                }
+            }
+            "ok" | "err" | "flatten" | "map" | "and_then" | "filter" | "or" | "and" => {
+                // 这些方法收闭包，不涉及字符串字面量期望类型问题
+                None
+            }
+            "unwrap" | "unwrap_or" => {
+                // unwrap_or 收同类型 T，unwrap 无参数
+                None
+            }
+            _ => None,
+        }
+    }
+
     /// 类型中是否含未解析的关联类型路径（`Vec<I::Item>` 中 I 不在当前作用域，
     /// 如 main 里引用 collect_list 的泛型参数 I → E0433 cannot find type `I`）。
     /// 有此类路径时跳过变量类型标注，让 Rust 从右侧推断。
@@ -2433,8 +2458,18 @@ impl CodeGen {
                 };
                 let mut args_s: Vec<String> = args
                     .iter()
-                    .map(|a| {
+                    .enumerate()
+                    .map(|(i, a)| {
+                        // 为 MethodCall 实参注入期望类型（修复 BUG-42）：
+                        // Option::expect(&str)、Result::expect(&str)、Option::ok_or(String) 等方法
+                        // 需要知道期望类型才能正确生成裸 &str 或 owned T，而非一律加 .to_string()。
+                        let expected_for_arg = self.method_param_expected_ty(method, &receiver.ty, i);
+                        let prev_expected = self.current_expected_ty.borrow().clone();
+                        if let Some(ref et) = expected_for_arg {
+                            *self.current_expected_ty.borrow_mut() = Some(et.clone());
+                        }
                         let s = self.gen_expr(a);
+                        *self.current_expected_ty.borrow_mut() = prev_expected;
                         // fn 值实参（Arc 载体）→ 转发闭包：链式 `xs.map(f)`/`filter(f)` 的
                         // 形参要 FnMut，`Arc<dyn Fn … + Send + Sync>` 不满足（见 fn_value_fwd）
                         if let Some(fwd) = self.fn_value_fwd(&s, a) {

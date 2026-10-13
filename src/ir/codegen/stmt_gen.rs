@@ -1556,7 +1556,15 @@ impl CodeGen {
                     let base = if use_lazy_iter {
                         format!("({}).iter().cloned()", self.gen_expr(iter))
                     } else {
-                        iter_expr(self)
+                        let b = iter_expr(self);
+                        // 裸 Range 迭代源（`0..n`，Range 分支不再发 .into_iter()）与
+                        // `..` 的低优先级冲突：直接拼 `.filter(...)` 会绑定到右端点
+                        // （`6i64.filter(..)` ⇒ E0689 can't call method on i64），须整体括号
+                        if matches!(&iter.ty, IrType::Named { path, .. } if path == "Range") {
+                            format!("({})", b)
+                        } else {
+                            b
+                        }
                     };
                     // guard 中若使用 var.field（struct 字段），闭包参数用引用 |p| 以自动解引用；
                     // 否则（原始类型比较）用 |&x| 按值解构（Copy）

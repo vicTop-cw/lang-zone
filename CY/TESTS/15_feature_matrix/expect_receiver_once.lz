@@ -6,10 +6,8 @@
 //   修前 cy stdout 'mk\nmk\n5\n'，修后 'mk\n5\n'，而两遍的**退出码都是 0**。
 // ⇒ 现在发射 `__lz_expect(mk(), "m")`：接收者只求值一次。
 //
-// 这份**故意没有 .exp**：同一份源码在 rust 面恒 `error[E0308]: mismatched types`
-// ——生成的 `.expect("m".to_string())` 对上 `Option::expect(self, msg: &str)`（台账在册，
-// 本车道不改 `src/ir/codegen/mod.rs`）。所以这里只登记「cy 面跑通且副作用一次」，
-// 跨后端逐字对照取不到（见 `tests/cy_codegen_gate.rs` 的 NO_ORACLE_EXPLAINED）。
+// BUG-42 修复：字符串实参 `.expect("m")` 现在生成裸 `&str`（`expect("m")`），不再
+// 无条件加 `.to_string()` 导致 rust 面 E0308（expected `&str`, found `String`）。
 def mk() -> Option<int> =
     print("mk")
     Some(5)

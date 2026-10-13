@@ -203,3 +203,36 @@ def main() =
     assert!(r.ok, "非尾位置命名块行为不变：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "5");
 }
+
+#[test]
+fn option_expect_str_literal_no_to_string() {
+    // BUG-42 回归：`.expect("msg")` 的字符串实参应生成裸 `&str`，
+    // 而非 `"msg".to_string()`（后者对上 `Option::expect(self, msg: &str)` ⇒ E0308）。
+    let src = r#"
+def get() -> Option<int> =
+    Some(42)
+
+def main() =
+    print(get().expect("should be some"))
+"#;
+    let r = run_lz("opt_expect", src);
+    assert!(r.transpiled, "Option::expect 应可转译：\n{}", r.diag);
+    assert!(r.ok, "Option::expect(&str) 编译应通过：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "42");
+}
+
+#[test]
+fn result_expect_str_literal_no_to_string() {
+    // BUG-42 回归：Result::expect(&str) 同理
+    let src = r#"
+def get() -> Result<int, String> =
+    Ok(7)
+
+def main() =
+    print(get().expect("should be ok"))
+"#;
+    let r = run_lz("res_expect", src);
+    assert!(r.transpiled, "Result::expect 应可转译：\n{}", r.diag);
+    assert!(r.ok, "Result::expect(&str) 编译应通过：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "7");
+}
