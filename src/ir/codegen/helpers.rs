@@ -718,6 +718,87 @@ pub(crate) fn scan_auto_mut_locals(block: &Block, out: &mut std::collections::Ha
     scan_auto_mut_block(block, &mut bound, false, out);
 }
 
+/// 可赋值 place 表达式的根变量名：Var → 自身；FieldAccess/IndexGet → 递归基底。
+/// 非 place（字面量/调用/构造/元组）返回 None。用于 ref 别名（ref f = h.n）的
+/// 基底可变性判定——基底 h 须 let mut，否则别名写入 `h.n = v` 报 E0596。
+pub(crate) fn root_var_of_place(e: &Expr) -> Option<String> {
+    match &e.kind {
+        ExprKind::Var(n) => Some(n.clone()),
+        ExprKind::FieldAccess { base, .. } => root_var_of_place(base),
+        ExprKind::IndexGet { base, .. } => root_var_of_place(base),
+        _ => None,
+    }
+}
+
+/// 遍历 stmts 内所有语句（含 if/for/while/while-let/match/try/checker/defer/block
+/// 等嵌套块），对每条语句调用 f。
+fn for_each_stmts<'a>(stmts: &'a [Stmt], f: &mut dyn FnMut(&'a Stmt)) {
+    for s in stmts {
+        f(s);
+        match s {
+            Stmt::If { then_branch, else_branch, .. } => {
+                for_each_stmts(&then_branch.stmts, f);
+                if let Some(e) = else_branch {
+                    for_each_stmts(&e.stmts, f);
+                }
+            }
+            Stmt::For { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::WhileLet { body, .. }
+            | Stmt::CheckerBlock { body, .. }
+            | Stmt::Defer { body } => {
+                for_each_stmts(&body.stmts, f);
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    for_each_stmts(&arm.body.stmts, f);
+                }
+            }
+            Stmt::TryCatch { body, catches, .. } => {
+                for_each_stmts(&body.stmts, f);
+                for (_, cb) in catches {
+                    for_each_stmts(&cb.stmts, f);
+                }
+            }
+            Stmt::Block { stmts } => for_each_stmts(stmts, f),
+            _ => {}
+        }
+    }
+}
+
+/// BUG-20：预扫 ref 别名（is_ref Let + value 是可赋值 place）的「写穿」——别名名
+/// 在声明之外被赋值（re-Let is_ref=false 或 Assign target）。写穿 ref 走别名替换
+/// （避免 `&mut` 引用的 E0502 借用冲突）；只读 ref（moddec @ref）保持 `&mut` 形态。
+/// 仅收写穿名到 out；基底可变性由 scan_auto_mut_block 的 Let 臂处理。
+pub(crate) fn scan_ref_write_through(
+    block: &Block,
+    out: &mut std::collections::HashSet<String>,
+) {
+    let mut decls: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for_each_stmts(&block.stmts, &mut |s| {
+        if let Stmt::Let { name, value, is_ref: true, .. } = s {
+            if root_var_of_place(value).is_some() {
+                decls.insert(name.clone());
+            }
+        }
+    });
+    for_each_stmts(&block.stmts, &mut |s| {
+        match s {
+            Stmt::Let { name, is_ref: false, .. } if decls.contains(name) => {
+                out.insert(name.clone());
+            }
+            Stmt::Assign { target, .. } => {
+                if let ExprKind::Var(n) = &target.kind {
+                    if decls.contains(n) {
+                        out.insert(n.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
+}
+
 /// 作用域感知的预扫描：递归穿行语句序列，`bound` 记录当前作用域内已声明的变量名，
 /// `in_loop` 标注是否处于循环体内（用于触发 loop_rebind 的 mut 需求）。
 fn scan_auto_mut_block(
@@ -728,7 +809,14 @@ fn scan_auto_mut_block(
 ) {
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Let { name, value, .. } => {
+            Stmt::Let { name, value, is_ref, .. } => {
+                // BUG-20：ref 别名字段/位置（ref f = h.n）：基底变量 h 需 let mut，
+                // 否则别名写入 `h.n = v` 报 E0596 cannot borrow as mutable。
+                if *is_ref {
+                    if let Some(v) = root_var_of_place(value) {
+                        out.insert(v);
+                    }
+                }
                 // 覆盖基线行为（自引用重绑定 `let parts = parts + [p]`：value 引用自身即标
                 // mut），并叠加 T3 的循环内重绑定外层已声明变量（`let counter = i*10`：
                 // bound 已含 name 且处于循环体）。注意：必须是基线判定的超集，否则会漏标

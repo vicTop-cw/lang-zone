@@ -617,6 +617,15 @@ impl CodeGen {
                 let loop_rebind =
                     self.loop_depth > 0 && self.declared.contains(&safe_name) && !*is_mut;
                 if (*is_mut || self_rebind || loop_rebind) && self.declared.contains(&safe_name) {
+                    // BUG-20：ref 别名（ref f = h.n）：f = v → h.n = v（写位置，非解引用）
+                    if let Some(alias) = self.ref_aliases.get(name.as_str()) {
+                        self.emit_line(&format!(
+                            "{} = {};",
+                            self.gen_target_expr(alias),
+                            self.gen_expr(value)
+                        ));
+                        return;
+                    }
                     // ref 绑定变量（ref r = x）：r = v → *r = v（解引用赋值修改原值）
                     if self.ref_bindings.contains(name.as_str()) {
                         self.emit_line(&format!("*{} = {};", safe_name, self.gen_expr(value)));
@@ -671,6 +680,19 @@ impl CodeGen {
                 //   ref r = 42    → let mut __lz_ref_r = 42; let r = &mut __lz_ref_r;
                 //   let ref r = 42 → let __lz_ref_r = 42; let r = &__lz_ref_r;
                 if *is_ref {
+                    // BUG-20：写穿 ref（ref f = h.n; f = 9）走「别名替换」而非
+                    // `let f = &mut h.n` 的 &mut 引用——后者要求基底 let mut（E0596），
+                    // 且引用存活期间读基底会 E0502。别名把 f 视作 h.n 的位置别名：
+                    // 读 f → 读 h.n，写 f = v → h.n = v，零借用冲突。
+                    // 只读 ref（@ref r = x; print(r)，moddec）无写穿，保持 &mut 形态。
+                    // 登记 declared 使后续 `f = v` 走 Let-rebind 分支命中下方别名检查。
+                    if root_var_of_place(value).is_some()
+                        && self.ref_write_through.contains(name.as_str())
+                    {
+                        self.ref_aliases.insert(safe_name.clone(), value.clone());
+                        self.declared.insert(safe_name.clone());
+                        return;
+                    }
                     let val_s = self.gen_expr(value);
                     let ref_kw = if *is_mut { "&mut " } else { "&" };
                     let is_literal = matches!(&value.kind, ExprKind::Lit(_))
@@ -1140,6 +1162,11 @@ impl CodeGen {
                 let val_s = self.gen_expr(value);
                 // ref 绑定变量（ref r = x）：r = v → *r = v（跨块赋值，同块走 Let 分支）
                 if let ExprKind::Var(name) = &target.kind {
+                    // BUG-20：ref 别名（ref f = h.n）：f = v → h.n = v（写位置，非解引用）
+                    if let Some(alias) = self.ref_aliases.get(name.as_str()) {
+                        self.emit_line(&format!("{} = {};", self.gen_target_expr(alias), val_s));
+                        return;
+                    }
                     if self.ref_bindings.contains(name.as_str()) {
                         self.emit_line(&format!("*{} = {};", target_s, val_s));
                         return;

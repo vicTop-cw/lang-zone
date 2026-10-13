@@ -273,10 +273,14 @@
 - 语料：`str_index.lz` 补回 `print(xs[-1])`/`print(xs[-2])` 并重封 .exp（`97 99 / [1, 2] / [2, 3, 4] / [0, 1] / 5 / 4 / 2 3`），双后端一致。
 - 验证：cargo build + 全量 cargo test 绿；探针 `xs[-1]=5 xs[-2]=4 xs[0]=0` 过 rustc 实跑；DEMO 语料 0 件用负索引，回归面不受影响。
 
-## BUG-20 [2026-10-02T02:48:10Z] [low] OPEN（rust 后端；cy 面本轮别名后已对）
+## BUG-20 [2026-10-02T02:48:10Z] [low] FIXED（rust 后端 2026-10-14，写穿感知别名替换）
 - summary: `ref f = h.n` 字段位引用在 rust 后端编不过（E0308），cy 面写回正确
 - summary: [规范/另一后端] `ref f = h.n` 然后 `f = 9` 应当写回字段（引用指向**位置**）。 cy 面本轮加别名后实测 9/9/9 正确；rust 面同一件 `error[E0308]: mismatched types` （terminal 观察，取证级，复跑同 BUG-19）。
-- 处置: 不进语料（同 BUG-19 的 oracle 论证）。挂此卡，转正前置：rust 侧把字段位引用发成 `let f = &mut h.n;` 并在赋值位解引用，再连同 cy 面一起封盘。
+- 根因: codegen 把 `ref f = h.n` 发成 `let f = &mut h.n;` + 赋值位 `*f = v`，触发 E0596（基底 h 非 mut）与 E0502（引用存活期间读基底 h.n）。原始报告的 E0308 是更早形态；本轮实测定位到 E0596/E0502 才是真正障碍（复跑 refpos/refvar 两探针证实）。
+- 修复: **写穿感知别名替换**——`ref f = <place>`（place = Var/FieldAccess/IndexGet 且 helpers::root_var_of_place 命中）且别名名被后续写穿（re-Let is_ref=false 或 Assign target，由 helpers::scan_ref_write_through 预扫登记 CodeGen.ref_write_through）时，f 视作目标位置别名：读 f → `gen_expr(目标)`，写 f=v → `gen_target_expr(目标) = v`；基底登记 auto_mut（scan_auto_mut_block 的 Let 臂经 root_var_of_place）使 `let h` 升 `let mut h`。零借用冲突。
+- 分流（关键）: 只读 ref（moddec `@ref r = x; print(r)`）无写穿，**保持** `let r = &mut x;` 原形态——plain `ref` 与 moddec `@ref` 的 IR 完全同构（`let ref r`），无法按 IR 区分，只能按写穿分流，否则 moddec_product_assert AC3 golden（`let r = &mut x`）会被别名替换破坏（首轮无门控别名替换曾致该 golden 失败）。
+- 语料: 本轮未新增/改 .exp（rust 侧已对，但 cy 面未在本环境 L2/L3 复验，沿用原「不进语料」论证挂起；跨后端封盘待 cy 侧 co-verify）。探针 refpos（`ref f = h.n; f = 9; print(h.n); print(f)`）→ `h.n = 9` 实跑 9/9；refro（只读）→ 保持 `&mut` 形态与 moddec golden 逐字一致。
+- 验证: cargo build + 全量 cargo test 441/0（moddec_product_assert AC3 转绿）；DEMO 回归 319/8（8 件全为既有——git stash A/B 实证本轮 0 新增，owned_var_pos 恒 exit 7 等）。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r7)
 
 ## BUG-21 [2026-10-02T02:55:06Z] [medium] FIXED（本轮修，rust 后端；动因是它挡住了 cy 的封盘）

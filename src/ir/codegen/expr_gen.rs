@@ -421,7 +421,10 @@ impl CodeGen {
         match &expr.kind {
             ExprKind::Lit(lit) => self.gen_lit(lit, &expr.ty),
             ExprKind::Var(name) => {
-                if name == "pass" {
+                // BUG-20：ref 别名（ref f = h.n）：读 f 替换为读目标位置 h.n（零借用冲突）
+                if let Some(alias) = self.ref_aliases.get(name.as_str()) {
+                    return self.gen_expr(alias);
+                } else if name == "pass" {
                     "()".into()
                 } else if let Some((sym, init)) = self.lazy_bindings.get(name.as_str()) {
                     // @lazy 延迟绑定（T04/AC4）：首次访问 `get_or_init` 求值一次，

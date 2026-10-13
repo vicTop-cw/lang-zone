@@ -82,6 +82,13 @@ pub struct CodeGen {
     str_typed_vars: std::collections::HashSet<String>,
     /// ref 绑定变量名集合（ref r = x / let ref r = x）：后续赋值 r = v 需生成 `*r = v`
     ref_bindings: std::collections::HashSet<String>,
+    /// ref 别名字符串替换（ref f = h.n，value 是可赋值 place）：f → 目标位置表达式
+    /// （h.n）。读 f 替换为读 h.n、写 f 替换为 `h.n = v`，避免 &mut 引用的 E0596/E0502
+    /// 借用冲突（BUG-20）。基底可变性由 scan_auto_mut_block 预扫登记 auto_mut_locals。
+    ref_aliases: std::collections::HashMap<String, Expr>,
+    /// ref 别名写穿名集合（ref f = h.n; f = 9）：由 scan_ref_write_through 预扫，
+    /// 仅写穿 ref 走别名替换；只读 ref（moddec @ref）保持 &mut 形态（BUG-20）。
+    ref_write_through: std::collections::HashSet<String>,
     emitted_types: std::collections::HashSet<String>,
     /// 仅 impl 块（非 struct/enum）的类型名，用于 FieldAccess 生成 :: 语法
     impl_types: std::collections::HashSet<String>,
@@ -408,6 +415,8 @@ impl CodeGen {
             declared: std::collections::HashSet::new(),
             str_typed_vars: std::collections::HashSet::new(),
             ref_bindings: std::collections::HashSet::new(),
+            ref_aliases: std::collections::HashMap::new(),
+            ref_write_through: std::collections::HashSet::new(),
             emitted_types: std::collections::HashSet::new(),
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),

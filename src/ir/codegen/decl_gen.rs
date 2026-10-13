@@ -342,6 +342,8 @@ impl CodeGen {
         self.auto_mut_locals.clear();
         self.deferred.clear(); // 每函数清空块级 defer 收集（gen_block_inner 内 mem::take 接管）
         scan_auto_mut_locals(&f.body, &mut self.auto_mut_locals);
+        // BUG-20: 预扫写穿 ref 别名（ref f = h.n; f = 9）→ 别名替换
+        scan_ref_write_through(&f.body, &mut self.ref_write_through);
         // 记录当前函数名（嵌套 gen_fn_def 时保存/恢复，确保 move 修复按正确
         // 函数作用域查 fn_use_count）。use_count 由 gen_module 预计算。
         let saved_name = std::mem::take(&mut self.cur_fn_name);
