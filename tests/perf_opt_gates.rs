@@ -358,6 +358,44 @@ def main() =
     );
 }
 
+/// 方向 B 补全：`reversed` 与 `sorted` 同走 move-elision —— 新鲜临时 move、
+/// 变量实参保留 clone（与 `b1` 一起钉住 4 个自由函数 sorted/reversed/sort/reverse
+/// 的完整安全集；再往下的 clone 点需变量活跃性设施，见 perf-optimization 报告 §四）。
+#[test]
+fn b1_reversed_of_fresh_temp_moves_instead_of_cloning() {
+    let src = r#"
+def build() -> List<int> =
+    [3, 1, 2]
+
+def main() =
+    mut xs = [5, 4, 6]
+    let a = reversed(build())
+    print(a)
+    let b = reversed(xs)
+    xs.push(9)
+    print(b)
+    print(xs)
+"#;
+    let r = run_lz("b1_reversed", src, &[]);
+    assert!(
+        r.transpiled,
+        "LZ → .rs 转译应成功（产物文本可供断言）：\n{}",
+        r.diag
+    );
+    assert!(r.ok, "产物应可编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout, "[2, 1, 3]\n[6, 4, 5]\n[5, 4, 6, 9]");
+    assert!(
+        r.rs_text.contains("_tmp = xs.clone()"),
+        "变量实参必须保留 clone：\n{}",
+        r.rs_text
+    );
+    assert!(
+        !r.rs_text.contains("_tmp = build().clone()"),
+        "新鲜临时（函数结果）不应再 clone：\n{}",
+        r.rs_text
+    );
+}
+
 // ==================== E1 print 占位符 ====================
 
 #[test]
