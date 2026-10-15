@@ -376,6 +376,10 @@ fn rustc_compile(rs: &Path, exe: &Path) -> Result<(), String> {
         let inc_dir = exe.with_extension("rustc-incremental");
         cmd.arg("-C").arg(format!("incremental={}", inc_dir.display()));
     }
+    if lang_zone::ir::codegen::release_mode() {
+        // -O：等价 --release profile（无需指定 profile，仅注入优化参数）
+        cmd.arg("-C").arg("opt-level=3");
+    }
     let out = cmd.output().map_err(|e| format!("Failed to run rustc: {}", e))?;
     let ms = started.elapsed().as_secs_f64() * 1000.0;
     if rustc_timing_enabled() {
@@ -936,6 +940,10 @@ fn parse_dir_and_flags(args: &[String], sub: &str) -> (String, bool) {
     for a in args.iter().skip(2) {
         if a == "--incremental" {
             incremental = true;
+        } else if a == "--hide-type-annotations" {
+            lang_zone::ir::codegen::set_hide_type_annotations(true);
+        } else if a == "--release" {
+            lang_zone::ir::codegen::set_release_mode(true);
         } else if a == "--no-tco" {
             // 关闭尾递归自动改写（等价环境变量 LZ_TCO=0）
             lang_zone::ir::builder::set_tco_enabled(false);

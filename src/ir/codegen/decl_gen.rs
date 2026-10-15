@@ -2145,9 +2145,17 @@ impl CodeGen {
             // trait 默认方法（带 body）：生成方法体而非分号结尾的抽象签名
             if let Some(block) = &sig.body {
                 let mut child = CodeGen::new();
+                child.known_types = self.known_types.clone();
+                child.struct_fields_info = self.struct_fields_info.clone();
                 child.current_fn_raises = self.current_fn_raises.clone();
                 child.current_ret_ty = self.current_ret_ty.clone();
-                child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
+                // BUG-29 回归轮（2026-10-14）：trait 默认方法体应使用**自身**签名返回
+                // 类型（如 Option<Self::Item>），不再继承外层（trait 上下文 current_fn_ret_ty
+                // 为 None，导致 `return None` 失去上下文 → option_none_elem 回退 i64 →
+                // None::<i64> E0308，见 DEMO/02_types/trait_assoc.lz、DEMO/lz_std/error.lz、
+                // DEMO/lz_std/traits.lz）。设置后 gen_none_ref 判定「有 Option 上下文」
+                // → 裸 None 由 rustc 推导。
+                child.current_fn_ret_ty = Some(sig.ret.clone());
                 child.enum_variant_named_fields = self.enum_variant_named_fields.clone();
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();

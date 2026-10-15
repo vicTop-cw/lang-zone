@@ -1057,6 +1057,21 @@ impl CodeGen {
                         None => (ty_str, value_s),
                     }
                 };
+                // A1：隐藏类型标注开关 —— 仅当开关开启且当前标注「可安全省略」时跳过。
+                // 不可省略（skip_ty 已为 false 且无 moddec 包装）的场景：空容器 Vec<_>、
+                // Option<i64>、Result ok 解包等 —— 这些标注有类型语义作用，开关不碰。
+                let ty_str = if hide_type_annotations_str()
+                    && !is_empty_container
+                    && !is_fn_lambda_let
+                    && !matches!(ty, IrType::Ref(_) | IrType::MutRef(_))
+                    && !matches!(ty, IrType::Result { ok, err }
+                        if matches!(ok.as_ref(), IrType::Any)
+                            || matches!(err.as_ref(), IrType::Any))
+                {
+                    String::new()
+                } else {
+                    ty_str
+                };
                 self.emit_line(&format!(
                     "let {}{}{} = {};",
                     mut_kw, safe_name, ty_str, value_s

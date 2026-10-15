@@ -15,6 +15,7 @@ mod cap_hint;
 mod decl_gen;
 mod emit;
 mod expr_gen;
+mod hide_ty;
 mod magic_gen;
 mod marks;
 mod owned_local;
@@ -23,6 +24,9 @@ mod scan;
 mod stmt_gen;
 mod str_boundary;
 mod types_emit;
+
+// 隐藏类型标注/release 开关需由二进制（main.rs / cli.rs）调用，重导出到 crate 根
+pub use hide_ty::{hide_type_annotations_str, release_mode, set_hide_type_annotations, set_release_mode};
 
 // 注：子模块内部符号不再在 mod.rs 统一 re-export —— 方法经 impl 自动可见，
 // 自由函数由使用方 `use super::<mod>::<name>;` 显式引入。

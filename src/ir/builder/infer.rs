@@ -855,6 +855,11 @@ pub(crate) fn lookup_builtin_method_ret(
         IrType::Named { path, .. } if path == "str" || path == "String" => match method {
             "len" => Some(IrType::Int),
             "clone" => Some(recv_ty.clone()),
+            // BUG-44：to_string() 在 str/String 上应返回 String，使 print 走 Display 而非 Debug
+            "to_string" => Some(IrType::Named {
+                path: "String".into(),
+                args: vec![],
+            }),
             _ => None,
         },
         // Str 类型（ir::Str）的方法
@@ -882,6 +887,17 @@ pub(crate) fn lookup_builtin_method_ret(
             }),
             _ => None,
         },
+        // ── 字符串化：所有原语类型调用 .to_string() 应返回 String，
+        //    使 print_arg_is_display 识别为字符串走 `{}`（Display）而非 `{:?}`（Debug）。
+        //    BUG-44：此前 Int/F64/Bool 等臂缺失，导致 print(n.to_string()) 走 Debug 加引号。
+        IrType::Int | IrType::Int128 | IrType::BigInt | IrType::F64 | IrType::Bool => {
+            if method == "to_string" {
+                return Some(IrType::Named { path: "String".into(), args: vec![] });
+            }
+            None
+        }
+
+
         // Dict<K,V> / HashMap<K,V> 方法：keys→List<Ref<K>>, values→List<Ref<V>>, items→List<Ref<(K,V)>>
         IrType::Named { path, args }
             if (path == "Dict" || path == "HashMap") && args.len() == 2 =>

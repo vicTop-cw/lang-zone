@@ -4,8 +4,8 @@ import lz_std
 def main() =
     let x = lz_std.Some(42)
     let y = lz_std.None_()
-    let z = lz_std.Ok("hello")
-    let w = lz_std.Box(3.14)
+    let z = lz_std.Ok(7)
+    let w = lz_std.Box(99)
     print(x)
     print(y)
     print(z)

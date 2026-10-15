@@ -454,6 +454,14 @@ fn compile_main(args: Vec<String>) -> i32 {
     if args.iter().any(|a| a == "--no-tco") {
         lang_zone::ir::builder::set_tco_enabled(false);
     }
+    // --hide-type-annotations：隐藏局部 let 绑定的安全类型标注（等价 LZ_HIDE_TYPE_ANNOTATIONS=1）
+    if args.iter().any(|a| a == "--hide-type-annotations") {
+        lang_zone::ir::codegen::set_hide_type_annotations(true);
+    }
+    // --release：rustc 调用注入 -C opt-level=3（等价 LZ_RELEASE=1）
+    if args.iter().any(|a| a == "--release") {
+        lang_zone::ir::codegen::set_release_mode(true);
+    }
     // --stmt-marks：恢复逐语句 `// STMT:*` 定位注释（方向 E：默认关闭，
     // 因为注释使生成 .rs 行数近乎翻倍、抬升 rustc 段开销且无运行时价值）。
     // 等价环境变量：LZ_STMT_MARKS=1。

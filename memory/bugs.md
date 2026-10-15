@@ -401,7 +401,7 @@
 - 验证: cargo build + 全量 cargo test 441/0（无 golden 回归）；探针 withas 过 rustc 实跑 Display。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r8)
 
-## BUG-29 [2026-10-06T09:56:34Z] [medium] 入账未修（rust 后端；挡 cy 语料封 golden）
+## BUG-29 [2026-10-06T09:56:34Z] [medium] FIXED（2026-10-14 收尾：半成品修复验证通过，`CY/TESTS/01_basics/literals.exp` 已补封）
 - summary: `CY/TESTS/01_basics/literals.lz` 在 rust 面 rustc 失败（`error[E0282]: type annotations needed`），cy 面同一份源码跑通 ⇒ 这一件的期望值**取不到 oracle**，L3 只能执行、不能判定
 - detail: 逐字取自本轮封盘回执（TEMP/seal-missing-1741.log）：
   `未封 CY/TESTS/01_basics/literals.lz :: 不封：rust=RUSTC_FAIL error[E0282]: type annotations needed | error: aborting due to 1 previous error; 6 warnings emitted`
@@ -409,18 +409,20 @@
   性质是「**挡路**」不是「cy 坏了」：cy 侧对字面量的处理已跑通，缺的是 rust 侧的类型推断。
   复跑：`python -u TEMP/xdiff_ds07.py CY/TESTS/01_basics`（不带 LZ_SEAL_EXP=1，只看差分）。
   转正前置：rust 面让该件产物可编译后，用 `python -u TEMP/seal_missing_exp.py` 补封（该工具**不会覆盖已存在的 .exp**）。
+  收尾记录（2026-10-14）：工作区半成品修复（`src/ir/codegen/expr_gen.rs` +93 行：None 变量引用选型、字段期望类型注入、`LitKind::None_` 加类型参数、`ty_has_unbound_generic` 辅助）经复现验证有效——单文件转译 → rustc → run：`run_rc=0`，stdout=`'42\n3.14\nhello\ntrue\nfalse\nNone\n'`（与 cy 面一致）。已按 BUG-21 纪律取 **rust 面实跑 stdout** 补封 `CY/TESTS/01_basics/literals.exp`，并同轮从 `tests/cy_codegen_gate.rs::NO_ORACLE_EXPLAINED` 移出（该表双向对表，补封后不移出会把门禁判红）。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r8)
 
-## BUG-30 [2026-10-06T09:56:34Z] [medium] 入账未修（rust 后端；自举语料在单文件取数面上编不过）
+## BUG-30 [2026-10-06T09:56:34Z] [medium] FIXED（2026-10-14 收尾：半成品修复验证通过，`CY/TESTS/99_bootstrap/lz_std.exp` 已补封）
 - summary: `CY/TESTS/99_bootstrap/lz_std.lz` 在本轮差分器的取数面（`lzc` 单文件转译 → `rustc --extern lz_builtins` → run）下 rustc 失败（`error[E0308]: mismatched types`），cy 面 OK ⇒ 该件同样封不了盘
 - detail: 逐字取自 TEMP/seal-missing-1741.log：
   `未封 CY/TESTS/99_bootstrap/lz_std.lz :: 不封：rust=RUSTC_FAIL error[E0308]: mismatched types | error: aborting due to 1 previous error; 6 warnings emitted`
   **主张范围要收窄**：这只证明「单文件转译 + 那条 rustc 配方」跑不通 lz_std.lz，**不**等于「rust 后端跑不了 LZ 标准库」——自举面在仓库里另有体系（`tests/lz_ir_bootstrap.rs`），本轮没在那里取证，也不在那边下结论。
   对本车道的实际影响只有一个：L3 的 golden 覆盖清单里这一件与 BUG-24（named_args，rust 面 E0425）长期是缺口。
   复跑：`python -u TEMP/xdiff_ds07.py CY/TESTS/99_bootstrap`。
+  收尾记录（2026-10-14）：工作区半成品修复（`src/ir/builder/convert_decl.rs` +28 行：`tail_is_none_expr` + None 尾表达式返回类型升级 `Option`）经复现验证有效——单文件转译 → rustc → run：`run_rc=0`，stdout=`'lz_std ok\n'`（与 cy 面一致）。已取 **rust 面实跑 stdout** 补封 `CY/TESTS/99_bootstrap/lz_std.exp`，并同轮从 `tests/cy_codegen_gate.rs::NO_ORACLE_EXPLAINED` 移出。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r8)
 
-## BUG-31 [2026-10-06T09:56:34Z] [low] 入账未修（rust 后端 Set 打印每进程随机；不是 cy 缺陷，是「Set 类语料无法封 golden」的根因）
+## BUG-31 [2026-10-06T09:56:34Z] [low] 已处置（2026-10-14 决策：维持「语言层未定义」，规范补声明 + 语料不承重；不改产品码）
 - summary: 同一份源码编译出的 rust 程序连跑三次打印出三种 `Set` 顺序 ⇒ 任何直接 `print(Set)` 的语料都没有可比对的逐字期望值（cy 面同一件三次输出稳定，问题在另一侧）
 - detail: 实测逐字（TEMP/evidence-r8/set-order-3runs.txt；源码 `TEMP/probe8/set_order.lz` 就是 `let st: Set<int> = {1, 2, 3}` + `print(st)`）：
   - rust 面三跑（去重 3 种）：`'{1, 2, 3}\n'`、`'{2, 1, 3}\n'`、`'{3, 2, 1}\n'`
@@ -433,6 +435,7 @@
   ——放宽比较＝放水，这条纪律比覆盖数值钱。
   转正前置（要产品侧改的时候，二选一，不能两头都当没事）：① LZ 给 Set 一个有定义的可打印形态（排序后打印，规范先补一行）；
   ② 规范明文 Set 打印不承重、不许进 golden。
+  处置决策（2026-10-14，选定方案 ②）：维持「语言层未定义」，不改产品码。已在 `SYNTAX/01-类型系统.md` §2.1 补声明：`Set<T>` 迭代/打印顺序未定义、跨进程不稳定、双后端不可比，**直接 `print(Set)` 的输出不承重，不得作为逐字 golden**；语料侧维持既有规避（`CY/TESTS/02_types/containers.lz` 只打与顺序无关的事实，已在库）。后续若需可打印形态再走方案 ①（独立立项：排序后打印 + 规范补行）。
 - reported_by: qoder-explore-worker(cy 后端轮 T0r8)
 
 ## BUG-32 [2026-10-06T13:06:08Z] [high] FIXED（本轮修，cy 后端；`src/ir/codegen_cython.rs`）：块体闭包（`|a, b| =>` 多行体）的前缀语句被整条丢掉
@@ -504,13 +507,14 @@
 - repro: `python -u TEMP/dynrecv_probes_r12.py`；`cargo test -j 1 --test cython_backend`；`cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`
 - reported_by: qoder-explore-worker(cy 后端轮 T0r12)
 
-## BUG-38 [2026-10-08T04:58:08Z] [medium] 入账未修（rust 后端；本车道不改 `src/ir/codegen/mod.rs`、`src/ir/builder/`）：无注解闭包形参在 rust 面恒 E0282，cy 面却接受并跑出结果 ⇒ 接受面分叉、oracle 取不到
+## BUG-38 [2026-10-08T04:58:08Z] [medium] 已处置（2026-10-14 决策：规范回写确认「变量绑定必须注解」为接受面差异，rust 面 E0282 属预期；不改产品码、不补封 oracle）
 - summary: `SYNTAX/03e-closure闭包.md` §一 把 `|x| x + 1`（省略注解、省略 `=>`）列为合法字形，现存语料 `CY/TESTS/04_functions/closure_basic.lz` 也就这么写的；但**闭包先绑到变量再调用**（`let sz = |x| => x.len()`）时 rust 面恒 `error[E0282]: type annotations needed`，而 cy 面接受并跑出正常结果 ⇒ 同一份源码一面能跑、一面编不出
 - detail: 逐字取自证据件 `TEMP/dynrecv-before-r12.log ＋ TEMP/dynrecv-after2-r12.log`：`d_len_obj`/`d_len_list`/`d_push_obj`/`d_push_list`/`d_contains_obj`/`d_empty_obj`/`d_iter_obj`/`d_strfam_dyn`/`d_shl_dyn`/`d_generic_len` 每一支的 rust 行都是 `error[E0282]: type annotations needed`。其中 `d_len_list`（cy stdout=`'3\n'`）与 `d_push_list`（cy stdout=`'1\n'`）是**内建容器**那一半：它们本来就跑对，说明这条不是「cy 也坏」而是**接受面**分叉。
   为什么归到 rust 侧：`IrType::Any` 是**共享 IR** 给闭包形参定的类型（`src/ir/builder/capture.rs:528`），rust 后端原样交给 rustc、rustc 拒绝推断；cy 侧的 `object` 什么都能装，于是只有 cy 面能跑。泛型那一支同型：`d_generic_len` 的 rust 侧原文 `error[E0599]: no method named `len` found for type parameter `T` in the current scope`（无约束的 `T` 上找方法），而带 duck 约束的 `d_duck_len` rust 面就过了——⇒ 「规范 §03e §一 的无注解写法」与「rust 面能否定标」之间没有判据在管。
   对本车道的实际影响：`CY/TESTS/15_feature_matrix/dyn_recv_closure.lz` **故意没有 `.exp`**，已登记在 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`（该表与盘面双向对表，补封后不移出会把门禁判红）；行为期望暂由 BUG-37 那四支单元锁的**发射形态**断言承担。
   与既往那条流程债同源（上一轮记的「`cy` 的接受面比 rust 宽（无 borrowck）」）：这一族缺陷都要靠**前端类型检查**才判得动，不在本车道。
 - 转正前置: rust 面给无注解闭包形参定标（按调用点推断并单态化，或按规范回写「必须注解」并改 §一）后，用 `python -u TEMP/seal_missing_exp.py` 补封 `dyn_recv_closure.exp`（该工具不覆盖已存在的 `.exp`），并同轮把该条从 `NO_ORACLE_EXPLAINED` 移出。
+  处置决策（2026-10-14，选定转正前置第 2 条「规范回写」路线）：确认 `SYNTAX/03e-closure闭包.md` §三 已有「变量绑定必须注解」规则，本轮在 §三 补**接受面差异注记**：该规则当前未被前端强制检查（`src/ir/builder/capture.rs` 恒落 `Any`），rust 后端在无 fn 期望上下文时对未注解绑定闭包形参恒报 `E0282`（预期行为），cy 后端扩展接受（动态分派）。据此：`closure_basic.lz` 的无注解闭包实参（fn 上下文可定标）合法、rust 面可编译（已 rustc 实跑验证）；`dyn_recv_closure.lz` / `uncond_arms_closure.lz` 保持无 `.exp`、保留在 `NO_ORACLE_EXPLAINED`（登记注释引用本决策），**不补封 oracle**。若未来按调用点单态化（转正前置第 1 条）立项，再补封并从表移除。
 - repro: `python -u TEMP/dynrecv_probes_r12.py`（看 d_len_obj／d_len_list／d_push_list 三支的 rust 行）；`python -u TEMP/seal_missing_exp.py`（回执里 `15_feature_matrix/dyn_recv_closure.lz` 那行）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r12)
 
@@ -572,3 +576,14 @@
 - 语料/封盘：rust 侧已对，但**未封** `with_as_binding_fstr.exp`、**未移** `NO_ORACLE_EXPLAINED`——封盘须两后端逐字一致（seal_missing_exp.py），本环境无 cython/cythonize（L2/L3 不可跑），cy 侧 co-verify 挂起，待有 cy 环境时补封并同轮移出登记表。`.to_string()` IR 返回类型应为 `str` 那一族（两侧同错）本轮**未动**（独立洞，另卡）。
 - repro: `python -u TEMP/wd_reseal_r14.py`（DRY，含三格红对照，出两侧原文逐字）；`python -u TEMP/withdefer_diag_r14.py`（拆前母件的三方逐行分类：陈旧引号 10 行 / 真分叉 1 行）；`cargo test --test cy_codegen_gate`（L1，含登记表与语料的双向对表）
 - reported_by: qoder-explore-worker(cy 后端轮 T0r14)
+
+
+## BUG-45 [2026-10-15T06:30:00Z] [high] FIXED（rust 后端 2026-10-15，expr_gen.rs 两处）：DEMO 闸门 demo_codegen_compile 暴露的 Option.None 期望类型下推缺口
+- summary: `combo-struct-method.lz`（StructCtor 字段位 `Option.None`，未绑定泛型 T）与 `result.lz`（`assert val.err() == None`，err() 返回 Option<String>）生成产物编译失败：前者 E0425 cannot find type `T`，后者 E0308 expected Option<String> found Option<i64>。
+- detail: 根因两处共享同一缺口「期望类型下推未覆盖 Option.None 裸 None 发射」：
+  1. expr_gen.rs FieldAccess `Option.None` 分支仅 `if self.in_generic_fn` 返回裸 `Option::None`，否则走 `Option::<elem>::None`；当 StructCtor 字段位已注入 `current_expected_ty=Option<T>`（未绑定泛型）时仍展开 elem=T → E0425。
+  2. `assert_eq!(a,b)` 实参位置期望类型注入未识别 lhs 为 `ok()/err()` 方法调用（IR 未做方法返回类型推断，lhs_ty 为 Any），右侧 `None` 无 Option 上下文 → 按 expr.ty 默认展开 i64 → E0308。
+- 修复：①FieldAccess 分支增加 `has_opt_ctx` 判定（current_expected_ty / current_fn_ret_ty 为 Option 形态即裸 `Option::None`）；②assert_eq! 两实参注入分支扩展：lhs 为 MethodCall ok/err 时从 receiver 的 Result 类型推导 Option 元素类型并注入两侧。
+- 判据：`cargo test -j 1 --test demo_codegen_compile -- --include-ignored` 2 passed；combo-struct-method.lz / result.lz 生成产物 rustc 编译通过；`cargo test -j 1` 全量 27 目标全绿。
+- repro: `cargo test -j 1 --test demo_codegen_compile -- --include-ignored`（修复前 magic_demos 1 failed / all_demos 2 failed）
+- reported_by: file-agent 收尾轮验证闸门

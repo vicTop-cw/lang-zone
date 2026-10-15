@@ -1,0 +1,9 @@
+RUN|01_basics/polish_01_literals.lz|
+RUN|01_basics/polish_02_scope.lz|
+RUN|02_types/fallible_as.lz|7.0
+RUN|04_functions/spread_protocol.lz|Ok(400)
+RUN|99_spec/moddec/moddec_basic_owned_var_pos.lz|
+RUN|99_spec/moddec/moddec_fusion_take_ro_var_pos.lz|
+RUN|99_spec/moddec/moddec_fusion_take_var_pos.lz|
+RUN|lz_std/ordering.lz|
+TOTAL_PASS=319 TOTAL_FAIL=8 PARSE=0 RUSTC=0 RUN=8

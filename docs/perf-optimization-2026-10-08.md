@@ -212,12 +212,78 @@ cast / 隐式转换 / 魔法调用）时，这份 clone 是纯浪费。
    每行显式类型标注（`let mut acc: i64 = 0i64;`）、`return` 显式化、
    `(0..n+1).into_iter()` 的冗余 `.into_iter()`、下标处`((x) as usize)` 的冗余括号。
    进一步收敛要放宽类型标注（牺牲可读性与诊断质量），属独立立项。
+   > 2026-10-14 处置更新：维持「独立立项」结论，本轮**未再扩大收敛面**（剩余差异全部是
+   > 显式标注/显式 return/冗余括号等「代码形态选择」，非性能缺口；强行压行数会牺牲
+   > 诊断质量与可读性）。如需推进，另行立项评估「默认隐藏类型标注开关」。
 2. **方向 A 的 pass 是「有框架、少收益」**（见 §二末段）。
 3. **方向 B 只覆盖 4 个自由函数**（见 §四末段）。
 4. **`-O` 没有加进 `build` 的 rustc 调用**：会改变产物语义与时序，且 `print_link_recipe`
    的文本被流程依赖。建议作为独立开关（`--release`）单独评估。
 5. **未提交**：仓库存在并行 agent 的在途改动，本次未做任何 git 提交（避免把他人 WIP 带入）。
    相关文件清单见 §十。
+   > 2026-10-14 核实更新：写作当时的并行 agent 在途状态已解除（本轮专项核查确认无活跃
+   > agent、无 git 锁），§14.5 的「小写 dict/list/set 未接线」也确认已随提交 `aaae217` 关闭。
+
+---
+
+## 八・一、遗留项核实（2026-10-14 补充）
+
+针对 FIST 遗留项台账的逐项核实结果：
+
+| 遗留项 | 核实结论 | 处置 |
+|---|---|---|
+| diff 行数降 ≥50% 未达标（实测 −34.1%） | 属实，剩余差异为代码形态选择（显式标注/return/冗余括号），非性能缺口 | 维持独立立项（见 §八-1 更新） |
+| lzcyc 并发降级部分遗留 | **文档中无此条目出处**（全篇检索 `lzcyc`/`并发`/`降级` 零命中；git log 无对应提交） | 判定为早期台账误记/滞后，从本轮待办**移除**；若确有并发降级需求需重新立项 |
+| 小写 dict/list/set 接线 | 已随提交 `aaae217` 完成（§14.5 已同步） | 关闭，无需再动 |
+
+---
+
+## 八・二、补性能缺口核实与 diff 收敛面分析（2026-10-15 专项）
+
+针对「本轮交付未含性能优化实际落地改动」的补缺口核实。三项遗留逐一复核：
+
+### 1. 小写 dict/list/set 接线 — 核实关闭（三处一致）
+
+- `git log aaae217`：提交「小写 dict/list/set 构造接线 + IndexGet/IndexSet 赋值目标 auto-mut 修复，版本 181→182」确实存在；
+- 代码现状：`src/ir/codegen/stmt_gen.rs` 空容器判定已含 `"dict" | "list" | "set"`，`expr_gen.rs` 空构造接线 BTreeMap/Vec/HashSet::new；
+- 闸门：`tests/perf_opt_gates.rs::fix_f_lowercase_container_ctors` 通过（本轮实测 42/42 全绿）。
+- 结论：文档 §14.5 与代码一致，无落后，关闭。
+
+### 2. lzcyc 并发降级遗留 — 核实为台账误记（已从待办移除）
+
+文档全篇检索 `lzcyc`/`并发`/`降级` 零命中、git log 无对应提交，与 §八・一 结论一致。CY/ 侧仅存的已知缺口是「cythonize→.pyd 端到端未验」（本机无 C 编译器 + pip 损坏），与「并发降级」无关联。关闭。
+
+### 3. diff 行数降 ≥50% — 收敛面分析：纯语法收敛上限 −42%，仍不达标
+
+用 `.fist-perf-20261008/perf/measure.py` 复测最新工作区：`gen_lines=70 / anchor_lines=51 / diff_changed_lines=58`（与文档记录一致，−34.1%）。逐行归因 58 行变化：
+
+| 差异来源 | 行数 | 类别 |
+|---|---|---|
+| 头部样板（BUG-10 link recipe 注释 7 + allow/use 导入 10 + `pub fn` 3） | ~20 | 必需样板（编译链接依赖） |
+| 显式类型标注（`let mut count: i64 = 0i64;`、main 内 `let f: i64` 等） | ~9 | 类型标注体系（文档已论证不动） |
+| 字面量类型后缀（`32i64` / `1i64`） | ~8 | 类型标注体系（同上） |
+| 显式 `return`（3 处尾部表达式） | ~3 | 形态选择 |
+| 冗余 `.into_iter()`（range 循环） | 2 | **纯语法冗余，可省** |
+| 冗余括号（`[(0i64 as usize)]`、`((n + 1i64))`） | ~4 | **纯语法冗余，可省** |
+| `println!("{}", format!(...))` 包装折叠（3 处 f-string） | 3 | **包装函数，可省** |
+| 复合赋值展开（`a = a + b` → `a += b`，局部标量） | ~5 | **局部等价，可省** |
+| 尾部模块元数据（`const __name__` 等 6 行） | 6 | 必需样板（语言特性） |
+| 其他（`.max(0)` 防御、`0..n+1` vs `0..=n` 形态、`as usize` 显式转换） | 少量 | 保守生成/防御性语义 |
+
+**模拟结论**：对 bench 产物应用全部「纯语法等价」收敛（去 `.into_iter()` / 冗余括号 / println 包装折叠 / 局部复合赋值回写 / 空语句分号），`diff_changed` 理论值 **58 → 51（−42.0%）**，仍低于 ≥50% 目标。剩余差距全部落在显式类型标注 / 字面量后缀 / 显式 return / 头部与模块样板——收敛需放宽类型标注体系（牺牲诊断质量与可读性），维持 §八-1 的「独立立项」结论，建议路径不变：评估「默认隐藏类型标注开关」。
+
+**本轮处置**：鉴于 ①纯语法收敛上限仍不达标；②仓库存在大量未提交 WIP（并行在途状态未解除）；③文档已两次维持「不扩大收敛面」，本轮**未强行落地 codegen 形态改动**，改为完成核实与分析闭环。如需推进，最小可行步骤为：先提交/隔离当前 WIP → 落地上述「纯语法冗余」三类（预计 −34.1% → −42%）→ 全量回归；再独立立项「隐藏类型标注开关」冲刺 ≥50%。
+
+### 4. CY/ 侧 transpile 产物冗余 — 受环境限制，单轮不可安全达成
+
+`CY/output/pyrun/*.pyx` 冗余来源为**跨文件重复的运行时样板**（`_Moved`/`LZError`/`_BreakLabel`/`Box`/`Rc` 等辅助类，每个产物约 40+ 行）。收敛需抽公共 runtime 模块，属架构级改动且破坏单文件独立性；本机无 cython 编译环境（无 C 编译器 + pip 损坏），改动后无法端到端验证。维持 CY/BACKLOG.md 记录，不做。
+
+### 5. 本轮验证记录
+
+- `cargo build --release`：通过（后台构建确认 `Finished release profile`，产物 7048704 B）；
+- `cargo test --test cy_codegen_gate --test demo_codegen_compile --test perf_opt_gates -j 1`：**2+1+42 passed / 0 failed**（含 `fix_f_lowercase_container_ctors`）；
+- `demo_codegen_compile` / `cy_codegen_gate` 的 `--include-ignored` 真编译闸门：本轮补跑见 §14.8 记录；
+- `measure.py` 复测：diff_changed_lines=58（与文档一致），stdout_match=true。
 
 ---
 
@@ -472,11 +538,15 @@ extend，即「不建临时表」的正确写法）比：
 - `cargo test -j 1 --no-fail-fast` = **855 passed / 0 failed**（39 个二进制，全绿）
 - `demo_codegen_compile --include-ignored` = **2 / 0**（空 allowlist，348 DEMO 真编译）
 
-### 14.5 又记录一个未修的既有缺口
+### 14.5 小写容器构造接线（已关闭 2026-10-14，提交 `aaae217`）
 
-空容器只能靠**大写类型名**构造（`Dict()` / `List()` / `Set()` 已有映射），
+原记录：空容器只能靠**大写类型名**构造（`Dict()` / `List()` / `Set()` 已有映射），
 小写 `dict()` / `list()` / `set()` 未接线（会生成 `fn set() -> i64 { i64::MAX }` 桩
 ⇒ rustc E0425）。lz_std 用的都是大写形式，故非阻塞，但错误信息对用户不友好。
+
+更新：**该缺口已随提交 `aaae217` 关闭**——小写 `dict()` / `list()` / `set()` 构造已接线
+（经 `git log aaae217` 确认，且当前工作区全量验证通过，见下）。本篇撰写时该提交尚在途，
+属文档滞后；本轮核实后标记为已完成。
 
 ### 14.6 五轮累计
 
@@ -499,3 +569,16 @@ FIST 台账 **35/35 全部 verified**。
 2. **量化能力有边界**：当基线根本不可编译时，唯一诚实的做法是如实说明
    「无法对旧形态做 A/B」，再退到与「道德等价基线」比，并明确结论是
    「无可测差异」而不是硬凑一个加速比。
+
+### 14.8 真编译闸门补跑（2026-10-15，补性能缺口轮）
+
+上轮 §八-1 记录了 `--include-ignored` 真编译闸门口径，本轮在未改代码的前提下补跑复核（工作区含上轮 BUG-29/30/31/38 修复后状态）：
+
+| 闸门 | 命令 | 结果 |
+|---|---|---|
+| demo_codegen_compile（DEMO 真编译全语料） | `cargo test --test demo_codegen_compile -j 1 -- --include-ignored` | **2 passed / 0 failed**（122s，含 `all_demos_generated_rust_compiles`） |
+| cy_codegen_gate（CY corpus transpile/run） | `cargo test --test cy_codegen_gate -j 1 -- --include-ignored` | **4 passed / 0 failed**（241s，含 `cy_l2_cythonize_all_corpus`、`cy_l3_run_all_corpus`） |
+| perf_opt_gates | `cargo test --test perf_opt_gates -j 1` | **42 passed / 0 failed**（8s，含 `fix_f_lowercase_container_ctors`） |
+
+结论：上轮 BUG 修复未引入回归，性能相关闸门全绿。
+

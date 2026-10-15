@@ -1068,7 +1068,9 @@ pub(crate) fn ex_check_expr(
                                         _ => false,
                                     };
                                     if !from_ok {
-                                        eprintln!("DBG fnarg: fn={} idx={} want={:?} at={:?} gens={:?} duck={:?}", fname, i + 1, want, at, gens, w.duck_names);
+                                        if std::env::var("LZ_DBG_FNARG").is_ok() {
+                                            eprintln!("DBG fnarg: fn={} idx={} want={:?} at={:?} gens={:?} duck={:?}", fname, i + 1, want, at, gens, w.duck_names);
+                                        }
                                         let caller = work
                                             .current_fn_name
                                             .clone()

@@ -61,6 +61,11 @@ LZ 闭包使用 `|params| body` 语法。**无参闭包用 `| |`**（中间**必
 | `func(\|x\| body)`（作为函数实参） | 注解可选（由上下文 `fn(...)` 类型推断） |
 | `@overload def f(g: fn(...))` 传闭包实参 | **参数必须注解** |
 
+> **接受面差异（2026-10-14 规范回写，对应 BUG-38）**：上表「变量绑定必须注解」的规则当前**未被前端强制检查**（`src/ir/builder/capture.rs` 对未注解形参恒落 `Any`，语义检查待立项）。实际接受面：
+> - **rust 后端**：闭包形参无注解时，仅当处于 **fn 类型期望上下文**（作为实参传入 `fn(...)` 形参，发射 `as fn` 约束）可定标；**绑到变量后无注解** ⇒ rustc `E0282: type annotations needed`，属**预期行为**（需按上表加注解）。
+> - **cy 后端**：扩展接受无注解形参（`Any` 接收者运行时动态分派），如 `CY/TESTS/15_feature_matrix/dyn_recv_closure.lz`。
+> 该差异导致无注解绑定闭包**取不到跨后端 oracle**，相关语料不得封 `.exp`（已在 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED` 登记）。
+
 ```lz
 // 变量绑定：参数必须注解
 let double = |x: int| -> int = x * 2

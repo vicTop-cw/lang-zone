@@ -13,6 +13,40 @@ use super::types_emit::COMPLEX_RS;
 use super::*;
 
 impl CodeGen {
+    /// 字段期望类型是否含未绑定泛型参数（Generic 或单大写字母 Named，如 T/R）：
+    /// 含则禁止设为 current_expected_ty —— rust_type 会展开成裸 `T` 导致 E0425
+    /// （combo-struct-method 泛型 struct Container<T> 构造实测回归）。
+    /// 注：contains_generics 只认 IrType::Generic，builder 对 `Option<T>` 的 T
+    /// 可能以 Named{path:"T"} 表示，需在此兜底。
+    /// 2026-10-14：StructCtor 字段期望类型已改为「含未绑定泛型也设置」（None 走
+    /// gen_none_ref 裸 None 不再展开元素类型），本函数暂无外部调用，保留待后续复用。
+    #[allow(dead_code)]
+    fn ty_has_unbound_generic(&self, t: &IrType) -> bool {
+        match t {
+            IrType::Generic(_) => true,
+            IrType::Named { path, args } => {
+                let single_upper = path.len() == 1
+                    && path
+                        .chars()
+                        .next()
+                        .map_or(false, |c| c.is_ascii_uppercase());
+                single_upper || args.iter().any(|a| self.ty_has_unbound_generic(a))
+            }
+            IrType::Option(inner) => self.ty_has_unbound_generic(inner),
+            IrType::Result { ok, err } => {
+                self.ty_has_unbound_generic(ok) || self.ty_has_unbound_generic(err)
+            }
+            IrType::Tuple(elems) => elems.iter().any(|e| self.ty_has_unbound_generic(e)),
+            IrType::Fn { params, ret } => {
+                params.iter().any(|p| self.ty_has_unbound_generic(p))
+                    || self.ty_has_unbound_generic(ret)
+            }
+            IrType::Ref(inner) | IrType::MutRef(inner) => self.ty_has_unbound_generic(inner),
+            IrType::Duck { fields } => fields.iter().any(|(_, t)| self.ty_has_unbound_generic(t)),
+            _ => false,
+        }
+    }
+
     /// BUG-24：把关键字实参按被调函数声明参数顺序重排为位置实参值表达式。
     /// 覆盖两种字形：`name~` 糖（IR `_KwArg` StructCtor）与 `name=value` 全形
     /// （parser 解析为 `AssignExpr{target: 简单变量}`）。位置实参保持相对顺序；
@@ -424,6 +458,27 @@ impl CodeGen {
                 // BUG-20：ref 别名（ref f = h.n）：读 f 替换为读目标位置 h.n（零借用冲突）
                 if let Some(alias) = self.ref_aliases.get(name.as_str()) {
                     return self.gen_expr(alias);
+                } else if name == "None"
+                    && !self.downgraded_vars.contains(name.as_str())
+                    && !self.param_renames.contains_key(name.as_str())
+                {
+                    // BUG-29：`None` 经解析为 Var("None")（变量引用）而非 None 字面量，
+                    // 无类型上下文（如 print(None)）裸发射 `None` 触发 rustc E0282
+                    // type annotations needed。
+                    // 修复（2026-10-14 回归轮）：统一走 gen_none_ref 选型——
+                    // ① 自定义 `enum Option<T>`（known_types 含 Option）发射 Option::None；
+                    // ② 有明确 Option 上下文（当前期望类型/函数返回类型）→ 裸 None 由 rustc
+                    //    推导，避免注入错误类型参数（关联类型投影 Self::Item / 泛型 I.Item /
+                    //    未绑定泛型 T 的 None::<i64> → E0308，见 DEMO/02_types/trait_assoc.lz、
+                    //    DEMO/07_data_structures/self_recursive.lz、DEMO/lz_std/traits.lz）；
+                    // ③ 无上下文 → 注入类型参数（option_none_elem 期望类型/函数返回类型 →
+                    //    表达式自身类型 → 默认 i64）。
+                    // 原 in_generic_fn 分支移除：泛型函数内裸 None 在自定义 Option 场景
+                    // 会被 std prelude 抢占（option.rs map/and 的 `return None` → E0308），
+                    // 统一由前两档判定接管。
+                    // 若用户作用域内存在名为 None 的变量（`let None = 300` 降级为 None_，
+                    // 或参数重命名），则按普通变量发射，避免遮蔽误伤（E0277 Option+i64 回归）。
+                    self.gen_none_ref(&expr.ty)
                 } else if name == "pass" {
                     "()".into()
                 } else if let Some((sym, init)) = self.lazy_bindings.get(name.as_str()) {
@@ -484,7 +539,7 @@ impl CodeGen {
                                 // 手动生成 char 索引（不走 IndexGet 的 .to_string() 路径）
                                 let base_s = self.gen_expr(base);
                                 let key_s = self.gen_expr(key);
-                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i] as i64}}", base_s, key_s);
                             }
                         }
                     }
@@ -737,6 +792,54 @@ impl CodeGen {
                     // 实参位置期望类型注入：callee 为具名函数且 fn_param_types 已知时，
                     // 生成实参时设置 current_expected_ty（Option::None 等跟随实参类型）
                     let callee_expected: Option<Vec<IrType>> = match &callee.kind {
+                        // assert_eq!(a, b)：b 为 None 字面量时按 a 的类型注入期望，
+                        // 避免 `assert val.err() == None` 生成 None::<i64>（E0308，result.lz）
+                        ExprKind::Var(n) if n == "assert_eq!" && args.len() == 2 => {
+                            let lhs_ty = &args[0].ty;
+                            // lhs 为 ok()/err() 方法调用时，从 receiver 的 Result 类型
+                            // 推导 Option 元素类型（IR 未做方法返回类型推断，lhs_ty 为 Any）
+                            let lhs_opt_ty: Option<IrType> = match &args[0].kind {
+                                ExprKind::MethodCall { receiver, method, .. }
+                                    if method == "ok" || method == "err" =>
+                                {
+                                    let recv_ty = receiver.ty.clone();
+                                    let opt_inner = match (&recv_ty, method.as_str()) {
+                                        (IrType::Result { ok, .. }, "ok") => Some(ok.as_ref().clone()),
+                                        (IrType::Result { err, .. }, "err") => Some(err.as_ref().clone()),
+                                        (IrType::Named { path, args }, "ok") if path == "Result" => {
+                                            args.first().cloned()
+                                        }
+                                        (IrType::Named { path, args }, "err") if path == "Result" => {
+                                            args.get(1).cloned()
+                                        }
+                                        _ => None,
+                                    };
+                                    opt_inner.map(|inner| {
+                                        if inner == IrType::Any {
+                                            IrType::Option(Box::new(IrType::Any))
+                                        } else {
+                                            IrType::Option(Box::new(inner))
+                                        }
+                                    })
+                                }
+                                _ => None,
+                            };
+                            let lhs_is_opt = matches!(lhs_ty, IrType::Option(_))
+                                || matches!(lhs_ty, IrType::Named { path, .. } if path == "Option")
+                                || lhs_opt_ty.is_some();
+                            if lhs_is_opt {
+                                let inject_ty = if matches!(lhs_ty, IrType::Option(_))
+                                    || matches!(lhs_ty, IrType::Named { path, .. } if path == "Option")
+                                {
+                                    lhs_ty.clone()
+                                } else {
+                                    lhs_opt_ty.expect("lhs_opt_ty 已判 is_some")
+                                };
+                                Some(vec![inject_ty.clone(), inject_ty.clone()])
+                            } else {
+                                self.fn_param_types.get(n).cloned()
+                            }
+                        }
                         ExprKind::Var(n) => self.fn_param_types.get(n).cloned(),
                         _ => None,
                     };
@@ -1289,8 +1392,25 @@ impl CodeGen {
                             // 泛型函数（如 map<R> 内 `case Option.None => Option.None`）中
                             // 硬编码 i64 错误：Option::None 让 Rust 从 match 臂配对推断（combo-struct-method.lz）；
                             // 且用户自定义 `enum Option<T>` 会遮蔽 std Option（enum.lz），
-                            // 裸 None 是 std 变体类型不匹配（E0308），必须带 Option:: 前缀
-                            if self.in_generic_fn {
+                            // 裸 None 是 std 变体类型不匹配（E0308），必须带 Option:: 前缀。
+                            // has_option_context（字段位期望类型/函数返回类型为 Option 形态，
+                            // 含未绑定泛型 Option<T>）时也裸 Option::None 由 rustc 推断，
+                            // 否则 option_none_elem 展开 T → E0425（combo-struct-method.lz）。
+                            // has_option_context 为 types_emit 私有方法，此处内联等价判断
+                            let is_option_ty = |t: &IrType| -> bool {
+                                matches!(t, IrType::Option(_))
+                                    || matches!(t, IrType::Named { path, .. } if path == "Option")
+                            };
+                            let has_opt_ctx = self
+                                .current_expected_ty
+                                .borrow()
+                                .as_ref()
+                                .map_or(false, |t| is_option_ty(t))
+                                || self
+                                    .current_fn_ret_ty
+                                    .as_ref()
+                                    .map_or(false, |t| is_option_ty(t));
+                            if self.in_generic_fn || has_opt_ctx {
                                 return "Option::None".to_string();
                             }
                             let elem = self.option_none_elem(&expr.ty);
@@ -1866,7 +1986,33 @@ impl CodeGen {
                     let provided: Vec<String> = args
                         .iter()
                         .map(|a| {
+                            // 字段值生成期间以字段类型为期望类型（与实参渲染对称）：字段位
+                            // `logging: None` 的 None 由 rust 按字段类型推断，避免 option_none_elem
+                            // 误回退 expr.ty（safe-nav BUG-SG-003 曾生成 None::<Config> → E0308）。
+                            let fname = kwarg_field_name(a);
+                            let prev_expected = self.current_expected_ty.borrow().clone();
+                            if let Some(fname) = fname.as_deref() {
+                                if let Some((_, fty)) = self
+                                    .struct_fields_info
+                                    .get(&base_name)
+                                    .and_then(|info| info.iter().find(|(n, _)| n == fname))
+                                {
+                                    // BUG-29 回归轮（2026-10-14）：不再因含未绑定泛型
+                                    // 参数（如 Container<T>.data: Option<T>、递归
+                                    // TreeNode.left: Option<Box<TreeNode<T>>>）跳过设置。
+                                    // 旧逻辑防的是 option_none_elem 注入 rust_type(T)
+                                    // 展开未绑定泛型名（E0425）；现在 None 经 gen_none_ref
+                                    // 走「有 Option 上下文 → 裸 None」，不再展开元素类型；
+                                    // 其余使用 current_expected_ty 的点均为形态判断
+                                    // （Named/Str/Option/bigint），不会展开 T。设置后
+                                    // 字段位 `left: None` / `data: None` 才由 rustc 推导，
+                                    // 修复 self_recursive.lz 的 None::<i64>.map(Box::new)
+                                    // 与 trait 默认方法内 None::<i64>（E0308 回归轮）。
+                                    *self.current_expected_ty.borrow_mut() = Some(fty.clone());
+                                }
+                            }
                             let s = gen_kwarg_field(a, self);
+                            *self.current_expected_ty.borrow_mut() = prev_expected;
                             // 空列表字段（neighbors: []）：按字段类型生成 Vec::<T>::new()，
                             // 避免推断为 Vec<i64> 与字段类型（如 Vec<Rc<SharedNode>>）不匹配
                             if let Some(fname) = kwarg_field_name(a) {
@@ -2817,8 +2963,23 @@ impl CodeGen {
                         //   case Option.Some(value: v) => Option.Some(value: f(v))
                         //   case Option.None => Option.None)`）中硬编码 i64 错误：
                         // Option::None 让 Rust 从 match 臂配对推断（combo-struct-method.lz E0308）；
-                        // 且用户自定义 `enum Option<T>` 遮蔽 std Option 时裸 None 类型不匹配（enum.lz）
-                        if self.in_generic_fn {
+                        // 且用户自定义 `enum Option<T>` 遮蔽 std Option 时裸 None 类型不匹配（enum.lz）。
+                        // 字段位期望类型为 Option 形态（含未绑定泛型 Option<T>）时也裸
+                        // Option::None 由 rustc 推断，否则 elem 展开 T → E0425。
+                        let is_option_ty2 = |t: &IrType| -> bool {
+                            matches!(t, IrType::Option(_))
+                                || matches!(t, IrType::Named { path, .. } if path == "Option")
+                        };
+                        let has_opt_ctx = self
+                            .current_expected_ty
+                            .borrow()
+                            .as_ref()
+                            .map_or(false, |t| is_option_ty2(t))
+                            || self
+                                .current_fn_ret_ty
+                                .as_ref()
+                                .map_or(false, |t| is_option_ty2(t));
+                        if self.in_generic_fn || has_opt_ctx {
                             return "Option::None".to_string();
                         }
                         return format!("Option::<{}>::None", elem);
@@ -3930,7 +4091,23 @@ impl CodeGen {
                     // 泛型函数（如 map<R> 内 `case Option.None => Option.None`）中
                     // 硬编码 i64 错误：Option::None 让 Rust 从 match 臂配对推断（combo-struct-method.lz）；
                     // 用户自定义 `enum Option<T>` 遮蔽 std Option 时裸 None 类型不匹配（enum.lz）
-                    if self.in_generic_fn {
+                    // 字段位期望类型为 Option 形态（含未绑定泛型 Option<T>）时也裸
+                    // Option::None 由 rustc 推断，否则 elem 展开 T → E0425
+                    // （combo-struct-method.lz StructCtor 字段 Option.None，T 未绑定）
+                    let is_option_ty2 = |t: &IrType| -> bool {
+                        matches!(t, IrType::Option(_))
+                            || matches!(t, IrType::Named { path, .. } if path == "Option")
+                    };
+                    let has_opt_ctx = self
+                        .current_expected_ty
+                        .borrow()
+                        .as_ref()
+                        .map_or(false, |t| is_option_ty2(t))
+                        || self
+                            .current_fn_ret_ty
+                            .as_ref()
+                            .map_or(false, |t| is_option_ty2(t));
+                    if self.in_generic_fn || has_opt_ctx {
                         "Option::None".to_string()
                     } else {
                         let elem = self.option_none_elem(&expr.ty);
@@ -4091,9 +4268,9 @@ impl CodeGen {
                                 || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
                                 if path == "str" || path == "String");
                             if idx_wants_string {
-                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i].to_string()}}", base_s, key_s);
                             } else {
-                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s);
+                                return format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i] as i64}}", base_s, key_s);
                             }
                         }
                         let is_self_field = matches!(&base.kind, ExprKind::FieldAccess { base: b, .. } if matches!(&b.kind, ExprKind::Var(n) if n == "self"));
@@ -4139,9 +4316,9 @@ impl CodeGen {
                                     || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
                                         if path == "str" || path == "String");
                                 if idx_wants_string2 {
-                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s)
+                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i].to_string()}}", base_s, key_s)
                                 } else {
-                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0' as i64 }} else {{ __cs[__i] as i64 }}}}", base_s, key_s)
+                                    format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i] as i64}}", base_s, key_s)
                                 }
                             } else {
                                 self.gen_seq_neg_index(base, key, &base_s)
@@ -4843,6 +5020,8 @@ impl CodeGen {
                 // 当 body 是 BlockExpr 时，抑制 return 关键字让尾表达式正常工作
                 let lam = if let ExprKind::BlockExpr { block } = &body.kind {
                     let mut child = CodeGen::new();
+                    child.known_types = self.known_types.clone();
+                    child.struct_fields_info = self.struct_fields_info.clone();
                     child.current_fn_raises = self.current_fn_raises.clone();
                     child.current_ret_ty = self.current_ret_ty.clone();
                     child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
@@ -5047,10 +5226,21 @@ impl CodeGen {
                         let mut fields: Vec<String> = fields
                             .iter()
                             .map(|(n, v)| {
-                                // &str → String: 字段类型为 String 且值为 .clone() 时，
-                                // 将 .clone() 替换为 .to_string()（E0308）
+                                // 字段值生成期间以字段类型作为期望类型（与实参渲染对称，
+                                // expr_gen.rs Call 分支同款机制）：字段位 `logging: None`
+                                // 的 None 由此选型 Option<String> 而非错误回退到 expr.ty
+                                // （safe-nav FIND_BUG 曾生成 None::<Config> → E0308）。
                                 let field_ty =
                                     field_tys.iter().find(|(fn_, _)| fn_ == n).map(|(_, ft)| ft);
+                                let prev_expected = self.current_expected_ty.borrow().clone();
+                                if let Some(ft) = field_ty {
+                                    // BUG-29 回归轮（2026-10-14）：与 kwarg 字段路径同款
+                                    // 放宽——含未绑定泛型（Option<T> / Option<Box<TreeNode<T>>>）
+                                    // 也设置期望类型；None 经 gen_none_ref 走「有 Option 上下文
+                                    // → 裸 None」不再展开元素类型，无 E0425 风险，且字段位
+                                    // None 由 rustc 按字段类型推导（E0308 回归轮 6 个 DEMO）。
+                                    *self.current_expected_ty.borrow_mut() = Some(ft.clone());
+                                }
                                 if n == "s" {}
                                 let v_s = if let Some(ft) = field_ty {
                                     if matches!(ft, IrType::Str) {
@@ -5073,6 +5263,7 @@ impl CodeGen {
                                 } else {
                                     self.gen_expr(v)
                                 };
+                                *self.current_expected_ty.borrow_mut() = prev_expected;
                                 let wrap = field_tys
                                     .iter()
                                     .find(|(fn_, _)| fn_ == n)
@@ -5334,6 +5525,8 @@ impl CodeGen {
             ExprKind::BlockExpr { block } => {
                 let mut child = CodeGen::new();
                 // 复制父 CodeGen 的枚举/类型映射到子实例
+                child.known_types = self.known_types.clone();
+child.struct_fields_info = self.struct_fields_info.clone();
                 child.current_fn_raises = self.current_fn_raises.clone();
                 child.current_ret_ty = self.current_ret_ty.clone();
                 child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
@@ -5418,6 +5611,8 @@ impl CodeGen {
                 let elem_ty = first_yield_type(block).unwrap_or(IrType::Unit);
                 let elem_rust = self.rust_type(&elem_ty);
                 let mut child = CodeGen::new();
+                child.known_types = self.known_types.clone();
+                child.struct_fields_info = self.struct_fields_info.clone();
                 child.current_fn_raises = self.current_fn_raises.clone();
                 child.current_ret_ty = self.current_ret_ty.clone();
                 child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
@@ -6209,14 +6404,12 @@ impl CodeGen {
             LitKind::Bool(b) => b.to_string(),
             LitKind::Unit => "()".to_string(),
             LitKind::None_ => {
-                // 自定义 `enum Option<T>`（lz_std/option.lz）场景：裸 None 需生成
-                // Option::None（自定义枚举变体），否则 Rust 把 None 解析为 std
-                // Option 变体 → E0308 expected Option<i64>, found Option<_>
-                if self.known_types.contains("Option") {
-                    "Option::None".to_string()
-                } else {
-                    "None".to_string()
-                }
+                // BUG-29 配套修复：None 字面量发射需注入类型参数（无类型上下文 E0282）。
+                // 2026-10-14 回归轮：与 Var("None") 分支统一走 gen_none_ref 选型——
+                // 自定义 Option → Option::None；有 Option 上下文 → 裸 None（rustc 推导，
+                // 避免 None::<i64> 在关联类型/泛型/未绑定元素上下文 E0308）；无上下文
+                // → 注入类型参数。
+                self.gen_none_ref(_ty)
             }
         }
     }
@@ -6264,7 +6457,7 @@ impl CodeGen {
         }
         let base_s = self.gen_expr(base);
         let key_s = self.gen_expr(key);
-        Some(format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); if __i >= __cs.len() {{ '\\0'.to_string() }} else {{ __cs[__i].to_string() }}}}", base_s, key_s))
+        Some(format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i].to_string()}}", base_s, key_s))
     }
 
     pub(crate) fn binop_str(&self, op: &BinOpKind) -> &'static str {

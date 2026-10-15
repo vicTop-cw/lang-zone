@@ -233,6 +233,22 @@ pub(crate) fn rewrite_iterator_returns(block: &mut Block) {
     }
 }
 
+/// BUG-30：判断函数尾语句是否是 None 字面量（`def f() = None` 的单表达式
+/// 函数体，或 `return None` 显式返回）。配合返回类型推断把 Any 升级为
+/// Option(Any)，使函数签名与函数体发射的 Option 值自洽。
+pub(crate) fn tail_is_none_expr(stmt: &AstStmt) -> bool {
+    fn is_none_expr(e: &AstExpr) -> bool {
+        // 字面量 None（NoneLit）与解析为变量引用的 None（Ident("None")）都算，
+        // 后者是词法层的既有事实（print(None) 的 None 就是 Ident，见 BUG-29）。
+        matches!(e, AstExpr::NoneLit) || matches!(e, AstExpr::Ident(n) if n == "None")
+    }
+    match stmt {
+        AstStmt::Expr(e) => is_none_expr(e),
+        AstStmt::Return(Some(v)) => is_none_expr(v),
+        _ => false,
+    }
+}
+
 /// 递归扫描生成器函数体，返回第一个 `yield expr` 中 expr 的推断类型。
 /// 同时预登记函数体（含嵌套块）内的 let 绑定，使 `yield i` 能推断出 i 的类型。
 pub(crate) fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Option<IrType> {
@@ -751,7 +767,17 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 // 「已声明」而跳过真实声明，Rust 侧变量未定义 ⇒ E0425（实测）。
                 let mut probe = fn_ctx.clone();
                 prescan_body_let_bindings(&func.body, &mut probe);
-                infer_stmt_type(tail, &probe)
+                let mut ty = infer_stmt_type(tail, &probe);
+                // BUG-30：`def f() = None`（无注解返回类型）尾表达式是 None 字面量时，
+                // infer 对 None 按「取决于上下文」返回 Any → codegen 把返回类型落成
+                // i64，而函数体 None 发射成 Option 值（None::<i64>）⇒ E0308 mismatched
+                // types（`CY/TESTS/99_bootstrap/lz_std.lz` 的 `def None_() = None`）。
+                // 函数返回位本身就是 Option 上下文：None 尾表达式应把返回类型升级为
+                // Option<T>（T 由 Any→i64 兜底），使签名与函数体自洽。
+                if matches!(ty, IrType::Any) && tail_is_none_expr(tail) {
+                    ty = IrType::Option(Box::new(IrType::Any));
+                }
+                ty
             } else {
                 IrType::Unit
             }

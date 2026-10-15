@@ -456,6 +456,45 @@ impl CodeGen {
 
     // ── Item 生成 ──
 
+    /// BUG-29 回归轮（2026-10-14）：None 值发射的统一定型，供 Var("None") 分支与
+    /// LitKind::None_ 分支共用。
+    /// ① 自定义 `enum Option<T>`（known_types 含 Option）→ `Option::None`
+    ///    （裸 None 会被 std prelude 抢占 → E0308，见 lz_std/option.lz 泛型方法）；
+    /// ② 有明确 Option 上下文（当前期望类型 / 当前函数返回类型）→ 裸 `None`，
+    ///    由 rustc 按上下文推导元素类型，避免注入错误类型参数（`None::<i64>` 在
+    ///    `Option<Self::Item>` / `Option<I.Item>` / `Option<T>` 等关联投影与未绑定
+    ///    泛型上下文 → E0308 回归轮 6 个 DEMO：trait_assoc/self_recursive/option/
+    ///    result/error/traits）；
+    /// ③ 无上下文（print(None) 等）→ 注入类型参数（option_none_elem 选型，防 E0282）。
+    pub(crate) fn gen_none_ref(&self, expr_ty: &IrType) -> String {
+        if self.known_types.contains("Option") {
+            return "Option::None".to_string();
+        }
+        if self.has_option_context() {
+            return "None".to_string();
+        }
+        format!("None::<{}>", self.option_none_elem(expr_ty))
+    }
+
+    /// gen_none_ref 的上下文判定：当前期望类型或当前函数返回类型是否为 Option。
+    /// 只做形态判定（不展开元素类型），因此含关联类型投影（Self::Item / I.Item）
+    /// 或未绑定泛型（T / U）的 Option 同样成立——这些场景正是「裸 None 让 rustc
+    /// 推导」的动机（注入具体类型参数反而 E0308/E0425）。
+    fn has_option_context(&self) -> bool {
+        let is_option_ty = |t: &IrType| -> bool {
+            matches!(t, IrType::Option(_))
+                || matches!(t, IrType::Named { path, .. } if path == "Option")
+        };
+        self.current_expected_ty
+            .borrow()
+            .as_ref()
+            .map_or(false, |t| is_option_ty(t))
+            || self
+                .current_fn_ret_ty
+                .as_ref()
+                .map_or(false, |t| is_option_ty(t))
+    }
+
     /// Option::None 的类型参数选择：优先调用期望类型（实参位置）→ 函数返回类型
     /// （均要求 Option<T>）→ 表达式自身类型 → 默认 i64。
     /// 修复：p27_opt_elif.lz（函数返回 Option<Token> 时 else 分支生成

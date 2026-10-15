@@ -83,15 +83,10 @@ const KNOWN_DIFF_NOT_COMPARABLE: &[(&str, &str)] = &[];
 /// ——覆盖面窄于主张，是这类门禁最常见的说谎形状（本轮实测来源：`TEMP/why-unsealed-r9.log`）。
 /// 双向可红：件无 `.exp` 而未登记 ⇒ 红（覆盖悄悄变小）；已登记但 `.exp` 在场 ⇒ 红（表陈旧，该件其实已覆盖）。
 const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
-    ("01_basics/literals.lz", "rust 面 rustc E0282 取不到 oracle（BUG-29 在册）"),
-    (
-        "15_feature_matrix/named_args.lz",
-        "rust 面 rustc E0425 取不到 oracle（BUG-24 在册）",
-    ),
-    (
-        "99_bootstrap/lz_std.lz",
-        "rust 面 rustc E0308 取不到 oracle（BUG-30 在册）",
-    ),
+    // 2026-10-14：BUG-29/30 已修（半成品修复收尾），rust 面编译运行通过，
+    // literals.lz / lz_std.lz 已补封 rust 面实跑 .exp，从本表移出。
+    // 2026-10-15：named_args.lz 已有 oracle（BUG-24 已修，rust 面 E0425 消除），
+    // 已从本表移出，改走逐字比对（CY/TESTS/15_feature_matrix/named_args.exp）。
     // T0r14：这两件原本**有** `.exp`，而那份期望值是「裸字符串也发 `{:?}`」的年代封的。
     // print 口径对齐规范后 cy 不再带引号，而 rust 面今天自己编不出这两个程序（就地取数：
     // `TEMP/tworeseal-r14-dry.log`，`cwd` 设在语料目录，兄弟模块解析得到），
@@ -128,7 +123,8 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
         "15_feature_matrix/dyn_recv_closure.lz",
         "无注解闭包形参在 rust 面恒 E0282（类型定不下标）⇒ 取不到 oracle，本件只证跑通；\
          发射形态由 tests/cython_backend.rs 的 cy_dynamic_receiver_dispatches_at_runtime 与 \
-         cy_dynamic_for_site_wraps_and_the_helper_self_guards 钉住（T0r12，BUG-37 在册）",
+         cy_dynamic_for_site_wraps_and_the_helper_self_guards 钉住（T0r12，BUG-37 在册）；\
+         2026-10-14 经 BUG-38 处置决策确认：变量绑定无注解形参为 cy 后端扩展、rust 面 E0282 属预期（见 SYNTAX/03e §三），不补封",
     ),
     (
         "15_feature_matrix/expect_receiver_once.lz",
@@ -141,7 +137,8 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
         "15_feature_matrix/uncond_arms_closure.lz",
         "无注解闭包形参在 rust 面恒 E0282（BUG-38 在册）⇒ 取不到 oracle；\
          is_none/is_some/expect 三条臂在 `Any` 接收者上的运行时分派由 \
-         cy_dynamic_arms_dispatch_by_name_list 钉住（T0r13，BUG-40 在册）",
+         cy_dynamic_arms_dispatch_by_name_list 钉住（T0r13，BUG-40 在册）；\
+         2026-10-14 经 BUG-38 处置决策确认：不补封（见 SYNTAX/03e §三）",
     ),
     (
         "15_feature_matrix/with_as_binding_fstr.lz",

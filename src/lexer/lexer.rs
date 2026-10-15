@@ -33,6 +33,9 @@ impl Lexer {
 
 
     pub fn new(source: &str) -> Self {
+        // UTF-8 BOM（EF BB BF）剥离：read_to_string 后 BOM 表现为首字符 U+FEFF。
+        // 词法层统一剥离，project/build/check 与单文件入口全部受益；无 BOM 输入零变化。
+        let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
         Self {
             chars: source.chars().collect(),
             pos: 0,

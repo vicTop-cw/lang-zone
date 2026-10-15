@@ -164,47 +164,63 @@ fn collect_std_dirs() -> Vec<std::path::PathBuf> {
 /// lex → 宏/模板展开 → parse → import 合并 → semantic_check（G2）
 /// → build_ir → Cython 后端 → 生成后处理。
 fn transpile_source(path: &Path) -> Result<String, String> {
-    let source = fs::read_to_string(path)
-        .map_err(|e| format!("Error reading {}: {}", path.display(), e))?;
+    // 核心管线在显式大栈线程中执行（栈溢出修复）：
+    // debug 构建下 IR 构建链（build_ir → convert_fn_def → convert_block →
+    // convert_expr）各帧较大，默认 1MB 主线程栈在特定表达式组合下溢出——
+    // 如 print 参数为 FieldAccess(Binary(<<))、用户自定义 to_string 方法。
+    // 主编译器 lzc 链路较浅不触发；lzcyc 额外包一层 Cython 管线后触发
+    // （0xC0000409 栈溢出）。64MB 栈对 debug/release 均足够且仅按需提交。
+    const PIPELINE_STACK: usize = 64 * 1024 * 1024;
+    let path = path.to_path_buf();
+    std::thread::Builder::new()
+        .stack_size(PIPELINE_STACK)
+        .spawn(move || {
+            let path: &Path = &path;
+            let source = fs::read_to_string(path)
+                .map_err(|e| format!("Error reading {}: {}", path.display(), e))?;
 
-    // L1 词法
-    let tokens = lang_zone::lexer::Lexer::new(&source).tokenize();
+            // L1 词法
+            let tokens = lang_zone::lexer::Lexer::new(&source).tokenize();
 
-    // 宏/模板展开（lexer 之后、parser 之前，对齐主编译器位置）
-    let expanded_tokens = expand_macro_pipeline(path, &tokens)?;
+            // 宏/模板展开（lexer 之后、parser 之前，对齐主编译器位置）
+            let expanded_tokens = expand_macro_pipeline(path, &tokens)?;
 
-    // L2 语法
-    let mut parser = lang_zone::parser::Parser::new(expanded_tokens);
-    // 宏模块检测：用原始 token 流（展开前）检测 #!bin macro 声明
-    parser.is_macro = lang_zone::macros::has_bin_macro_declaration(&tokens);
-    let mut module = parser
-        .parse_module()
-        .map_err(|e| format!("Parse error: {e}"))?;
-    // 模块级魔法属性与 comptime 源码数据源（对齐主编译器编译入口行为）
-    module.file_path = Some(path.to_string_lossy().to_string());
-    module.source_text = Some(source);
+            // L2 语法
+            let mut parser = lang_zone::parser::Parser::new(expanded_tokens);
+            // 宏模块检测：用原始 token 流（展开前）检测 #!bin macro 声明
+            parser.is_macro = lang_zone::macros::has_bin_macro_declaration(&tokens);
+            let mut module = parser
+                .parse_module()
+                .map_err(|e| format!("Parse error: {e}"))?;
+            // 模块级魔法属性与 comptime 源码数据源（对齐主编译器编译入口行为）
+            module.file_path = Some(path.to_string_lossy().to_string());
+            module.source_text = Some(source);
 
-    // import 合并（lzcyc 侧增强：源目录 + --std-dir 候选）
-    let std_dirs = collect_std_dirs();
-    let merged_modules = merge_imports(&mut module, path, &std_dirs)?;
+            // import 合并（lzcyc 侧增强：源目录 + --std-dir 候选）
+            let std_dirs = collect_std_dirs();
+            let merged_modules = merge_imports(&mut module, path, &std_dirs)?;
 
-    // L3 语义检查（G2，与主编译器 build_ir_opt 前置检查一致）
-    let errs = lang_zone::semantic_check::check_module(&module);
-    if !errs.is_empty() {
-        return Err(format!("Semantic error:\n{}", errs.join("\n")));
-    }
+            // L3 语义检查（G2，与主编译器 build_ir_opt 前置检查一致）
+            let errs = lang_zone::semantic_check::check_module(&module);
+            if !errs.is_empty() {
+                return Err(format!("Semantic error:\n{}", errs.join("\n")));
+            }
 
-    // L3.5 IR 构建
-    let ir =
-        lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
+            // L3.5 IR 构建
+            let ir =
+                lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
 
-    // Cython 后端（generate 出原始形态 + 本地 postprocess_pyx 兜底管线）
-    // 注意：不用 lib 的 generate_full——其内置 postprocess_pyx 为远端精简线副本，
-    // 与本地 M1 下沉叠加会双处理（(__cv)(__cv) 双调用/_LZNONE 垫片污染 is None）
-    let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
-    let raw = cg.generate(&ir).to_string();
-    let enum_variants = collect_enum_variants(&module);
-    Ok(postprocess_pyx(&raw, &enum_variants, &merged_modules))
+            // Cython 后端（generate 出原始形态 + 本地 postprocess_pyx 兜底管线）
+            // 注意：不用 lib 的 generate_full——其内置 postprocess_pyx 为远端精简线副本，
+            // 与本地 M1 下沉叠加会双处理（(__cv)(__cv) 双调用/_LZNONE 垫片污染 is None）
+            let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
+            let raw = cg.generate(&ir).to_string();
+            let enum_variants = collect_enum_variants(&module);
+            Ok(postprocess_pyx(&raw, &enum_variants, &merged_modules))
+        })
+        .map_err(|e| format!("无法创建编译线程: {e}"))?
+        .join()
+        .map_err(|_| "编译管线线程异常终止".to_string())?
 }
 
 /// 解析 `-o/--output <dir>` 选项，返回 (剩余位置参数, 输出目录)
@@ -400,6 +416,23 @@ fn merge_imports_into(
         // 递归处理子模块的 import
         let sub_dir = mp.parent().unwrap_or(dir).to_path_buf();
         merge_imports_into(&mut sub, &sub_dir, std_dirs, loaded, merged)?;
+        // ── 平铺合并的同名重复定义过滤（对齐主编译器 src/main.rs）──
+        // 被导入模块的定义让位给已在场的定义（本地/先导入者胜）——一个模块的
+        // `main` 是它自己的入口，不是导出给 importing 方的 API。不同签名的
+        // 同名 def **不**过滤：那是合法重载。
+        {
+            let dup_def = |f: &lang_zone::ast::Function| {
+                module.functions.iter().any(|g| {
+                    g.name == f.name
+                        && g.params.len() == f.params.len()
+                        && g.params
+                            .iter()
+                            .zip(f.params.iter())
+                            .all(|(a, b)| a.ty == b.ty)
+                })
+            };
+            sub.functions.retain(|f| !dup_def(f));
+        }
         // 注入定义项（对齐主编译器合并字段）
         module.functions.extend(sub.functions);
         module.structs.extend(sub.structs);
@@ -494,12 +527,15 @@ fn strip_cython_syntax(code: &str) -> String {
             let indent: String = line.chars().take(line.len() - trimmed.len()).collect();
             let is_fn_line = trimmed.starts_with("def ")
                 || trimmed.starts_with("cpdef ")
-                || trimmed.starts_with("cdef ");
+                || trimmed.starts_with("cdef ")
+                || trimmed.starts_with("async def ");
             if trimmed.starts_with("cdef class ") {
                 format!("{indent}{}", trimmed.replacen("cdef ", "", 1))
             } else if is_fn_line && trimmed.contains('(') {
                 // 函数定义行：统一剥前缀/返回标注/参数 C 类型
+                let is_async = trimmed.starts_with("async def ");
                 let body = trimmed
+                    .trim_start_matches("async def ")
                     .trim_start_matches("cpdef ")
                     .trim_start_matches("cdef ");
                 let name_part = match (body.find('('), body.rfind(')')) {
@@ -518,7 +554,7 @@ fn strip_cython_syntax(code: &str) -> String {
                             },
                             None => suffix.to_string(),
                         };
-                        format!("def {fname}({params}){suffix}")
+                        format!("{}def {fname}({params}){suffix}", if is_async { "async " } else { "" })
                     }
                     _ => format!("# [pyrun] {trimmed}"),
                 };
@@ -681,14 +717,45 @@ fn cmd_run(args: &[String]) {
         .unwrap_or(false);
 
     let (code, note): (String, &str) = if has_cython {
-        // Cython 可用：pyximport 即时编译导入（本机有 C 编译器时生成 .pyd 缓存）
+        // Cython 可用：pyximport 即时编译导入（本机有 C 编译器时生成 .pyd 缓存）。
+        // 修复 1：把 PyxImportMetaFinder 提到 meta_path 首位，避免 `enum`/`struct` 等
+        //   stdlib 同名模块被前置 finder 抢先导入（实测 `module 'enum' has no attribute 'main'`）。
+        // 修复 2：编译失败（环境升级后 distutils 不再识别 `--cython-c-in-temp`，
+        //   或 Cython 语法错误）时回退到剥离语法的 .py 降级加载，保证验证约定可跑。
+        let pyrun_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output/pyrun");
+        let _ = fs::create_dir_all(&pyrun_dir);
+        let py_path = pyrun_dir.join(format!("{stem}.py"));
+        if let Err(e) = fs::write(&py_path, strip_cython_syntax(&pyx)) {
+            eprintln!("Error writing {}: {}", py_path.display(), e);
+            std::process::exit(1);
+        }
         (
             format!(
-                "import sys; sys.path.insert(0, r'{}'); \
-                 import pyximport; pyximport.install(); \
-                 import {stem}; \
-                 getattr({stem}, '{func}')()",
-                module_dir.display()
+                concat!(
+                    "import sys, types\n",
+                    "try:\n",
+                    "    import cython\n",
+                    "except ImportError:\n",
+                    "    sys.modules['cython'] = types.ModuleType('cython')\n",
+                    "sys.path.insert(0, r'{module_dir_disp}')\n",
+                    "import pyximport; pyximport.install()\n",
+                    "import pyximport.pyximport as _pp\n",
+                    "for _i, _f in enumerate(sys.meta_path):\n",
+                    "    if isinstance(_f, _pp.PyxImportMetaFinder):\n",
+                    "        sys.meta_path.pop(_i); sys.meta_path.insert(0, _f); break\n",
+                    "sys.modules.pop('{stem}', None)\n",
+                    "try:\n",
+                    "    import {stem}\n",
+                    "except Exception:\n",
+                    "    sys.meta_path[:] = [_f for _f in sys.meta_path if not isinstance(_f, _pp.PyxImportMetaFinder)]\n",
+                    "    sys.path.insert(0, r'{pyrun_dir_disp}')\n",
+                    "    import {stem}\n",
+                    "getattr({stem}, '{func}')()",
+                ),
+                module_dir_disp = module_dir.display(),
+                pyrun_dir_disp = pyrun_dir.display(),
+                stem = stem,
+                func = func,
             ),
             "pyximport",
         )
