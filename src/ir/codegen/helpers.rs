@@ -1530,3 +1530,127 @@ pub(crate) fn replace_ident_boundary(s: &str, from: &str, to: &str) -> String {
     out.push_str(rest);
     out
 }
+
+/// 闭包体内是否含嵌套 move 闭包且该嵌套闭包捕获了非 Copy 外部变量
+/// （matrix.lz 列表推导 `|i| { ...map(move |j| { default }) }`）。
+/// 若命中，外层闭包应改用借用捕获（非 move），否则外层把变量移入自身，
+/// 内层 move 闭包再次移出即 E0507 cannot move out of captured variable.
+pub(crate) fn block_contains_nested_move_lambda(block: &Block, params: &[String]) -> bool {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::ExprStmt { expr } => {
+                if expr_contains_nested_move_lambda(expr, params) {
+                    return true;
+                }
+            }
+            Stmt::Let { value, .. } => {
+                if expr_contains_nested_move_lambda(value, params) {
+                    return true;
+                }
+            }
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if block_contains_nested_move_lambda(then_branch, params)
+                    || else_branch.as_ref().map_or(false, |e| {
+                        block_contains_nested_move_lambda(e, params)
+                    })
+                {
+                    return true;
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } => {
+                if block_contains_nested_move_lambda(body, params) {
+                    return true;
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                if arms.iter().any(|a| block_contains_nested_move_lambda(&a.body, params)) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// 表达式内是否含嵌套 Lambda，且该 Lambda 体内引用了非本 Lambda 形参的
+/// 非 Copy 外部变量（此时嵌套闭包需 move 捕获该变量）
+pub(crate) fn expr_contains_nested_move_lambda(e: &Expr, params: &[String]) -> bool {
+    match &e.kind {
+        ExprKind::Lambda { params: lparams, body, .. } => {
+            // 嵌套闭包体内的变量引用：非本闭包形参、非 Copy 类型 → 需 move 捕获
+            let lparam_names: Vec<String> =
+                lparams.iter().map(|p| p.name.clone()).collect();
+            body_refs_noncopy_external(body, &lparam_names)
+        }
+        ExprKind::BlockExpr { block } => block_contains_nested_move_lambda(block, params),
+        ExprKind::Call { callee, args, .. } => {
+            expr_contains_nested_move_lambda(callee, params)
+                || args
+                    .iter()
+                    .any(|a| expr_contains_nested_move_lambda(a, params))
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            expr_contains_nested_move_lambda(receiver, params)
+                || args
+                    .iter()
+                    .any(|a| expr_contains_nested_move_lambda(a, params))
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            expr_contains_nested_move_lambda(lhs, params)
+                || expr_contains_nested_move_lambda(rhs, params)
+        }
+        ExprKind::UnOp { operand, .. } => expr_contains_nested_move_lambda(operand, params),
+        ExprKind::AssignExpr { target, value, .. } => {
+            expr_contains_nested_move_lambda(target, params)
+                || expr_contains_nested_move_lambda(value, params)
+        }
+        ExprKind::FieldAccess { base, .. } => expr_contains_nested_move_lambda(base, params),
+        ExprKind::IndexGet { base, key, .. } => {
+            expr_contains_nested_move_lambda(base, params)
+                || expr_contains_nested_move_lambda(key, params)
+        }
+        ExprKind::IfExpr { cond, then, els } => {
+            expr_contains_nested_move_lambda(cond, params)
+                || expr_contains_nested_move_lambda(then, params)
+                || expr_contains_nested_move_lambda(els, params)
+        }
+        ExprKind::TupleLit(items) => {
+            items
+                .iter()
+                .any(|i| expr_contains_nested_move_lambda(i, params))
+        }
+        ExprKind::ListLit(items) => {
+            items
+                .iter()
+                .any(|i| expr_contains_nested_move_lambda(i, params))
+        }
+        _ => false,
+    }
+}
+
+/// Lambda 体内是否引用非本 Lambda 形参的裸外部变量，且该变量类型非 Copy
+/// （matrix.lz `|j| { default }` 的 default: T）
+pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -> bool {
+    match &body.kind {
+        ExprKind::Var(name) => {
+            !lparam_names.contains(name)
+                && !matches!(body.ty, IrType::Int | IrType::F64 | IrType::Bool)
+        }
+        ExprKind::BlockExpr { block } => {
+            // block 单条语句是裸外部变量
+            if block.stmts.len() == 1 {
+                if let Stmt::ExprStmt { expr: e } = &block.stmts[0] {
+                    return body_refs_noncopy_external(e, lparam_names);
+                }
+            }
+            // 更深层嵌套闭包递归
+            block_contains_nested_move_lambda(block, lparam_names)
+        }
+        _ => false,
+    }
+}

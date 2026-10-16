@@ -638,7 +638,39 @@ impl CodeGen {
                             self.gen_expr(value)
                         ));
                     } else {
-                        self.emit_line(&format!("{} = {};", safe_name, self.gen_expr(value)));
+                        // 纯语法收敛：`a = a op b`（变量在 lhs）→ `a op= b`
+                        // （+= -= *= /= %= &= |= ^= <<= >>=），对齐手写 Rust 惯用形态。
+                        // 仅限普通标量局部变量（String/BigInt 等无 AddAssign，回写会 E0308），
+                        // 且只回写「变量在 lhs」的形态 —— `a = b + a` 与 `a += b` 不等价，不回写。
+                        let t_scalar = matches!(ty, IrType::Int | IrType::F64 | IrType::Bool);
+                        let compound = t_scalar
+                            && matches!(
+                                &value.kind,
+                                ExprKind::BinOp { op, lhs, .. }
+                                    if matches!(lhs.kind, ExprKind::Var(ref n) if n == name)
+                                        && matches!(
+                                            op,
+                                            BinOpKind::Add | BinOpKind::Sub | BinOpKind::Mul
+                                                | BinOpKind::Div | BinOpKind::Mod
+                                                | BinOpKind::BitAnd | BinOpKind::BitOr
+                                                | BinOpKind::Xor | BinOpKind::Shl | BinOpKind::Shr
+                                        )
+                            );
+                        if compound {
+                            let op_s = if let ExprKind::BinOp { op, .. } = &value.kind {
+                                self.binop_str(op)
+                            } else {
+                                unreachable!()
+                            };
+                            let rhs_s = if let ExprKind::BinOp { rhs, .. } = &value.kind {
+                                self.gen_expr(rhs)
+                            } else {
+                                unreachable!()
+                            };
+                            self.emit_line(&format!("{} {}= {};", safe_name, op_s, rhs_s));
+                        } else {
+                            self.emit_line(&format!("{} = {};", safe_name, self.gen_expr(value)));
+                        }
                     }
                     return;
                 }
@@ -1227,7 +1259,48 @@ impl CodeGen {
                 if self.mutated_consts.contains(&target_s) {
                     self.emit_line(&format!("unsafe {{ {} = {}; }}", target_s, val_s));
                 } else {
-                    self.emit_line(&format!("{} = {};", target_s, val_s));
+                    // 纯语法收敛：`a = a op b`（变量在 lhs）→ `a op= b`
+                    // （+= -= *= /= %= &= |= ^= <<= >>=），对齐手写 Rust 惯用形态。
+                    // 仅限普通标量局部变量（dict/struct/ref/global 等特例已提前 return，
+                    // String 只实现 AddAssign<&str>、结构体/BigInt 等无 AddAssign，
+                    // 回写会 E0308 —— 用标量类型 Int/F64/Bool 收窄），
+                    // 且只回写「变量在 lhs」的形态 —— `a = b + a` 与 `a += b` 不等价，不回写
+                    let t_scalar = matches!(&target.ty, IrType::Int | IrType::F64 | IrType::Bool);
+                    let compound = match (&target.kind, &value.kind) {
+                        (ExprKind::Var(tname), ExprKind::BinOp { op, lhs, rhs })
+                            if t_scalar && matches!(lhs.kind, ExprKind::Var(ref n) if n == tname) =>
+                        {
+                            matches!(
+                                op,
+                                BinOpKind::Add
+                                    | BinOpKind::Sub
+                                    | BinOpKind::Mul
+                                    | BinOpKind::Div
+                                    | BinOpKind::Mod
+                                    | BinOpKind::BitAnd
+                                    | BinOpKind::BitOr
+                                    | BinOpKind::Xor
+                                    | BinOpKind::Shl
+                                    | BinOpKind::Shr
+                            )
+                        }
+                        _ => false,
+                    };
+                    if compound {
+                        let op_s = if let ExprKind::BinOp { op, .. } = &value.kind {
+                            self.binop_str(op)
+                        } else {
+                            unreachable!()
+                        };
+                        let rhs_s = if let ExprKind::BinOp { rhs, .. } = &value.kind {
+                            self.gen_expr(rhs)
+                        } else {
+                            unreachable!()
+                        };
+                        self.emit_line(&format!("{} {}= {};", target_s, op_s, rhs_s));
+                    } else {
+                        self.emit_line(&format!("{} = {};", target_s, val_s));
+                    }
                 }
             }
             Stmt::Return { value } => {
@@ -1353,6 +1426,7 @@ impl CodeGen {
                 }
             }
             Stmt::ExprStmt { expr } => {
+                eprintln!("[DBG-ExprStmt] {:?}", expr.kind);
                 self.emit_walrus_predecls(expr);
                 // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Arc::new 包装
                 // （factory_chain: |a| => |b| => x + a + b → move |a| { Arc::new(move |b| {...}) }）。
@@ -1386,6 +1460,8 @@ impl CodeGen {
                 if is_known_unit_call {}
                 if is_last && !self.is_main && !self.suppress_tail_return && !self.in_generator {
                     // 非 main 函数尾表达式 → return expr;
+                    // hide_return_keyword 模式下省略 `return` 关键字（对齐手写 Rust 惯用形态）
+                    let hide_ret = super::hide_return_keyword();
                     // **生成器例外**：生成器的返回值由函数末尾的 `return __gen_vec;`
                     // 给出，体内尾表达式必须按语句发射（`expr;`）。
                     // 否则 `yield from ...` 所在的尾 `if` 会被包成
@@ -1408,13 +1484,17 @@ impl CodeGen {
                         } else {
                             "&"
                         };
+                        let ret_prefix = if hide_ret { "" } else { "return " };
+                        let semi = if hide_ret { "" } else { ";" };
                         self.emit_line(&format!(
-                            "return {};",
+                            "{}{}{}",
+                            ret_prefix,
                             if wrap_ok {
                                 format!("Ok({}{}.{})", prefix, "self", field)
                             } else {
                                 format!("{}{}.{}", prefix, "self", field)
-                            }
+                            },
+                            semi
                         ));
                     } else if matches!(&expr.kind, ExprKind::Var(n) if n == "self" || n == "self_")
                         && !self.current_fn_ret_is_ref
@@ -1422,19 +1502,26 @@ impl CodeGen {
                         // 尾表达式 `self` 返回 owned（顶层 self-def 的链式方法
                         // `def inc(mut self: T) -> T = ...; self`）：self 是
                         // &self/&mut self 引用，需 clone 为 owned（E0308）
-                        self.emit_line(if wrap_ok {
-                            "return Ok(self.clone());"
+                        let ret_prefix = if hide_ret { "" } else { "return " };
+                        let semi = if hide_ret { "" } else { ";" };
+                        let val = if wrap_ok {
+                            format!("Ok(self.clone())")
                         } else {
-                            "return self.clone();"
-                        });
+                            "self.clone()".to_string()
+                        };
+                        self.emit_line(&format!("{}{}{}", ret_prefix, val, semi));
                     } else {
+                        let ret_prefix = if hide_ret { "" } else { "return " };
+                        let semi = if hide_ret { "" } else { ";" };
                         self.emit_line(&format!(
-                            "return {};",
+                            "{}{}{}",
+                            ret_prefix,
                             if wrap_ok {
                                 format!("Ok({})", expr_s)
                             } else {
                                 expr_s
-                            }
+                            },
+                            semi
                         ));
                     }
                 } else if is_last && self.pending_tail_capture.is_some() {
@@ -1446,8 +1533,14 @@ impl CodeGen {
                         expr_s
                     ));
                 } else if is_last && self.suppress_tail_return && self.force_stmt_semicolon {
-                    // 循环体尾表达式：非值上下文，需加分号（否则 E0308）
-                    self.emit_line(&format!("{};", expr_s));
+                    // 循环体尾表达式：非值上下文，需加分号（否则 E0308）。
+                    // 块形态表达式（`if .. { .. }` / 块字面量）本身求值为 ()，
+                    // 尾随 `;` 是冗余空语句（`};`），省略（纯语法收敛）
+                    if expr_s.trim_end().ends_with('}') {
+                        self.emit_line(&expr_s);
+                    } else {
+                        self.emit_line(&format!("{};", expr_s));
+                    }
                 } else if is_last && self.suppress_tail_return && self.force_unit_tail {
                     // 块内含无值 return（return;）→ 尾表达式丢弃值（expr;），
                     // 使闭包返回类型为 ()，避免与 return; 冲突（E0308）
@@ -1477,7 +1570,13 @@ impl CodeGen {
                     // 以统一分支类型为 `()`（否则 E0308 if and else have incompatible types）
                     self.emit_line(&format!("let _ = {};", expr_s));
                 } else {
-                    self.emit_line(&format!("{};", expr_s));
+                    // 块形态表达式（`if .. { .. }`）本身求值为 ()，尾随 `;` 是
+                    // 冗余空语句（`};`），省略（纯语法收敛）
+                    if expr_s.trim_end().ends_with('}') {
+                        self.emit_line(&expr_s);
+                    } else {
+                        self.emit_line(&format!("{};", expr_s));
+                    }
                 }
             }
             Stmt::If {
@@ -1568,10 +1667,14 @@ impl CodeGen {
                             if path == "str" || path == "String");
                     if iter_is_str {
                         format!("({}).chars()", s)
-                    } else if matches!(&iter.ty, IrType::Named { path, .. } if path == "Range") {
+                    } else if matches!(&iter.kind, ExprKind::Range { .. })
+                        || matches!(&iter.ty, IrType::Named { path, .. } if path == "Range")
+                    {
                         // Range 本身就是 Iterator 且 Copy（0..n 生成 0i64..ni64）：
                         // `(0..5).into_iter()` 的 .into_iter() 是恒等转换，
-                        // 直接使用 —— 对齐手写 Rust 的 `for i in 0..n` 形态
+                        // 直接使用 —— 对齐手写 Rust 的 `for i in 0..n` 形态。
+                        // ExprKind::Range（源文本 `0..n` 的 IR）类型未标注为 Range 时
+                        // 同样免 .into_iter()（纯语法收敛：`(0..n + 1i64).into_iter()`）
                         s
                     } else if iter_vec_ref_elem {
                         // Vec<&T>：.into_iter() 产生 &T，下游需要 owned T（如 JsonValue::String(key)、
@@ -2636,13 +2739,14 @@ impl CodeGen {
             // key 是复合表达式（如 self.len() - 1）时需整体加括号再 as usize，
             // 否则 `A - 1 as usize` 的 as 只应用到尾部（E0277 i64 - usize）。
             // 简单标识符/字面量（无空格无括号）则省去内层冗余括号：
-            // `((i) as usize)` → `(i as usize)`，对齐手写 Rust 形态
+            // `((i) as usize)` → `i as usize`，对齐手写 Rust 的 `arr[i as usize]`
+            // （`[...]` 索引上下文内 `i as usize` 优先级已由 `as` 保证，无需外层括号）
             let simple = !key_s.is_empty()
                 && !key_s.contains(char::is_whitespace)
                 && !key_s.contains('(')
                 && !key_s.contains(')');
             if simple {
-                format!("({} as usize)", key_s)
+                format!("{} as usize", key_s)
             } else {
                 format!("(({}) as usize)", key_s)
             }
@@ -2774,7 +2878,14 @@ impl CodeGen {
                         if let Some(expr_s) = named_enum_field {
                             expr_s
                         } else {
-                            format!("{}.{}", base_s, field)
+                            // Option 字段写入自动解包：`root.left = v` 当 root 是
+                            // `Option<TreeNode<T>>` 时生成 `root.as_mut().unwrap().left`
+                            // （否则 E0609 no field left on Option<...>）
+                            if matches!(&base.ty, IrType::Option(_)) && base_s != "self" {
+                                format!("{}.as_mut().unwrap().{}", base_s, field)
+                            } else {
+                                format!("{}.{}", base_s, field)
+                            }
                         }
                     }
                 }

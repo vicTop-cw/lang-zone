@@ -1093,10 +1093,16 @@ impl CodeGen {
                             {
                                 let s = &args_s[i];
                                 let is_none_lit = s.trim_end() == "None";
+                                // 递归 Option 字段透明解 Box（n.next.map(|__b| *__b)）已把
+                                // 字段值映射为 Option<Self> 正确类型，此时不能再追加 .clone()
+                                // （会把 Option<T> 克隆成 Option<T>，类型错 E0308）
+                                let is_recursive_opt_field = s.contains(".map(|__b| *__b)")
+                                    || s.contains(".map(|__b|*__b)");
                                 if !s.starts_with('&')
                                     && !s.ends_with(".clone()")
                                     && !s.contains("::")
                                     && !is_none_lit
+                                    && !is_recursive_opt_field
                                 {
                                     // 字符串实参按形态层归一（与 Fn 变量调用路径 9759 对齐）：
                                     // &str / &String 借用视图传给拥有值形参（String）需
@@ -1886,7 +1892,13 @@ impl CodeGen {
                         args_s[0],
                         self.clone_if_multiuse(args_s[1].clone(), &args[1])
                     )
-                } else if (callee_s == "insert" || callee_s == "remove") && args_s.len() == 2 {
+                } else if (callee_s == "insert" || callee_s == "remove")
+                    && args_s.len() == 2
+                    && !self.fn_param_types.contains_key(&callee_s)
+                {
+                    // 仅当 insert/remove 不是用户自定义函数时路由为方法调用（Dict.insert）。
+                    // 用户 `def insert(root, v)`（bst.lz）必须保持自由函数调用，否则
+                    // E0308 expected TreeNode, found i64（Option::insert 遮蔽）。
                     format!(
                         "({}).{}({})",
                         args_s[0],
@@ -1911,11 +1923,28 @@ impl CodeGen {
                         parts.join(" + ")
                     }
                 // --- End prelude mappings ---
+                } else if args.is_empty()
+                    && !self.in_new_body
+                    && self.struct_new_params_map.contains_key(
+                        &callee_s.split('<').next().unwrap_or(&callee_s).to_string(),
+                    )
+                {
+                    // 零参构造：`Stack()` → `Stack::__new__()`（不生成 `Stack {}` 缺字段 E0063）
+                    let base_name =
+                        callee_s.split('<').next().unwrap_or(&callee_s).to_string();
+                    let is_magic_new = self.struct_has_new.contains(&base_name)
+                        || self
+                            .struct_method_names_map
+                            .get(&base_name)
+                            .map_or(false, |s| s.contains("__new__"));
+                    let ctor = if is_magic_new { "__new__" } else { "new" };
+                    // turbofish 形如 `<i64>`；无泛型时为空，需剥掉多余 `::<>`
+                    let tf = turbofish.trim().to_string();
+                    format!("{}{}::{}()", base_name, tf, ctor)
                 } else if !args.is_empty()
                     && !is_kwarg_call(args)
                     && self.case_structs.contains(&callee_s)
-                {
-                    // case struct 位置构造：Point(1, 3) → Point { x: 1, y: 3 }（按字段声明顺序）
+                {                    // case struct 位置构造：Point(1, 3) → Point { x: 1, y: 3 }（按字段声明顺序）
                     let base_name = callee_s.split('<').next().unwrap_or(&callee_s).to_string();
                     if let Some(info) = self.struct_fields_info.get(&base_name) {
                         if info.len() == args_s.len() {
@@ -1986,15 +2015,20 @@ impl CodeGen {
                             .iter()
                             .enumerate()
                             .map(|(i, (pname, pty))| {
-                                // 尝试用字段名查找 kwarg_map（struct 构造时用的是字段名，不是参数名）
-                                let field_name =
-                                    field_names.get(i).cloned().unwrap_or_else(|| pname.clone());
-                                if let Some(val) = kwarg_map.get(&field_name) {
+                                // 优先按参数名匹配（如 `ResultBox(value=42)` 的 `value`），
+                                // 再退回字段名（struct 构造时可使用字段名）
+                                if let Some(val) = kwarg_map.get(pname) {
                                     val.clone()
                                 } else {
-                                    let default = self.default_value_for(pty);
-
-                                    default
+                                    let field_name = field_names
+                                        .get(i)
+                                        .cloned()
+                                        .unwrap_or_else(|| pname.clone());
+                                    if let Some(val) = kwarg_map.get(&field_name) {
+                                        val.clone()
+                                    } else {
+                                        self.default_value_for(pty)
+                                    }
                                 }
                             })
                             .collect();
@@ -2010,7 +2044,16 @@ impl CodeGen {
                                 .get(&base_name)
                                 .map_or(false, |s| s.contains("__new__"));
                         let new_method = if is_magic_new { "__new__" } else { "new" };
-                        return format!("{}::{}({})", callee_s, new_method, positional.join(", "));
+                        // turbofish 追加：显式 `ResultBox<int, str>(value=42)` 需生成
+                        // `ResultBox::<i64, str>::__new__(42)`，否则 E 类型参数无法推断
+                        // （E0283 type annotations needed for `ResultBox<i64, _>`）
+                        return format!(
+                            "{}{}::{}({})",
+                            callee_s,
+                            turbofish,
+                            new_method,
+                            positional.join(", ")
+                        );
                     }
 
                     // 递归字段集合：字段类型直接引用 struct 自身（如 next: Self?）→ 构造时自动 Box
@@ -4117,6 +4160,15 @@ impl CodeGen {
                     "."
                 };
                 let mut access_s = format!("{}{}{}", base_s, sep, field);
+                // Option 字段访问自动解包：`root.val` 当 root 是 `Option<TreeNode<T>>`
+                // 时生成 `root.as_ref().unwrap().val`（否则 E0609 no field val on
+                // Option<...>）。仅小写字段（非枚举变体/关联类型）走此路径；self 已
+                // 在上方返回，此处只处理普通 base。
+                if sep == "." && base_s != "self" {
+                    if matches!(&base.ty, IrType::Option(_)) {
+                        access_s = format!("{}.as_ref().unwrap().{}", base_s, field);
+                    }
+                }
                 // 命名字段枚举字段访问: enum E: X(v: i64) 中 `x.v`
                 // → match &x { E::X { v, .. } => v.clone(), _ => unreachable!() }
                 // （Rust 不允许对枚举值直接 .v 访问，需解构；仅小写字段走此路径）
@@ -5071,6 +5123,43 @@ impl CodeGen {
                 // Use move for all closures - LZ doesn't have Rust borrow semantics
                 // 当 body 是 BlockExpr 时，抑制 return 关键字让尾表达式正常工作
                 let lam = if let ExprKind::BlockExpr { block } = &body.kind {
+                    // 闭包体是「单条表达式语句=裸外部变量」（`|j| { default }`）：
+                    // move 闭包首次调用即移出该变量，第二次调用 E0507。改为
+                    // `|j| { default.clone() }`（matrix.lz 列表推导嵌套泛型 T）。
+                    // 变量类型非 Copy（非 Int/F64/Bool）才需要 clone。
+                    let mut block_owned = block.clone();
+                    let body_was_var = if block.stmts.len() == 1 {
+                        if let Some(Stmt::ExprStmt { expr: e }) = block_owned.stmts.first() {
+                            if let ExprKind::Var(name) = &e.kind {
+                                let is_copy = matches!(
+                                    e.ty,
+                                    IrType::Int | IrType::F64 | IrType::Bool
+                                );
+                                let is_param = params
+                                    .iter()
+                                    .any(|p| p.split(':').next().unwrap_or(p) == name);
+                                if !is_copy && !is_param {
+                                    let mut new_e = e.clone();
+                                    new_e.kind = ExprKind::MethodCall {
+                                        receiver: Box::new(e.clone()),
+                                        method: "clone".to_string(),
+                                        args: vec![],
+                                    };
+                                    block_owned.stmts[0] = Stmt::ExprStmt { expr: new_e };
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    let block_ref = if body_was_var { &block_owned } else { block };
                     let mut child = CodeGen::new();
                     child.known_types = self.known_types.clone();
                     child.struct_fields_info = self.struct_fields_info.clone();
@@ -5108,14 +5197,27 @@ impl CodeGen {
                     child.in_lambda_block = true;
                     // 块内含无值 return（return;）→ 尾表达式丢弃值（生成 expr;），
                     // 使闭包返回类型为 ()（var_call_block.lz demo_return_no_value）
-                    child.force_unit_tail = block_has_bare_return(block);
+                    child.force_unit_tail = block_has_bare_return(block_ref);
                     // move 语义修复：继承当前函数名与引用计数表（同 BlockExpr 处理）
                     child.cur_fn_name = self.cur_fn_name.clone();
                     child.fn_use_count = self.fn_use_count.clone();
-                    child.gen_block_inner(block);
+                    child.gen_block_inner(block_ref);
                     // 闭包体内赋值外部捕获变量（iter.lz for_each `|x| total = total + x`）：
                     // 用借用捕获（非 move），否则 move 复制 total 副本，外部变量不更新
-                    let uses_move = !block_has_external_assign(block, &params);
+                    let mut uses_move = !block_has_external_assign(block_ref, &params);
+                    // 闭包体内引用非 Copy 外部变量（`|j| { default }`，default: T）：
+                    // move 闭包首次调用即移出 default，第二次调用 E0507。
+                    // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
+                    if uses_move && body_refs_noncopy_external(body, &params) {
+                        uses_move = false;
+                    }
+                    // 闭包体内含嵌套闭包且嵌套闭包 move 捕获了非 Copy 外部变量
+                    // （matrix.lz 列表推导 `|i| { ...map(move |j| { default }) }`）：
+                    // 外层若用 move 会把 default 移入自身，内层再 move 捕获即 E0507。
+                    // 外层改为借用捕获（default: &T），内层 `default.clone()` 由引用克隆得 T。
+                    if uses_move && block_contains_nested_move_lambda(block_ref, &params) {
+                        uses_move = false;
+                    }
                     let move_kw = if uses_move { "move " } else { "" };
                     format!(
                         "{move_kw}|{}|{} {{\n{}        }}",
@@ -5125,8 +5227,31 @@ impl CodeGen {
                     )
                 } else {
                     // 闭包体内赋值外部捕获变量 → 借用捕获（非 move）
-                    let uses_move = !expr_has_external_assign(body, &params);
+                    let mut uses_move = !expr_has_external_assign(body, &params);
+                    // 闭包体内引用非 Copy 外部变量（`|j| default`，default: T）：
+                    // move 闭包把 default 移入自身，闭包被 map/collect 多次调用即 E0507。
+                    // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
+                    if uses_move && body_refs_noncopy_external(body, &params) {
+                        uses_move = false;
+                    }
+                    // 闭包体内含嵌套 move 闭包且捕获了非 Copy 外部变量
+                    // （matrix.lz 列表推导 `|i| comp!(|j| { default }, c)`）：
+                    // 外层用 move 会把 default 移入自身，内层再 move 捕获即 E0507。
+                    if uses_move && expr_contains_nested_move_lambda(body, &params) {
+                        uses_move = false;
+                    }
                     let move_kw = if uses_move { "move " } else { "" };
+                    // 闭包体是裸外部变量（`|j| default`，非 Copy 类型）：
+                    // move 闭包首次调用即移出 default，第二次调用 E0507。clone 到闭包体内
+                    // `|j| default.clone()`（matrix.lz 列表推导嵌套）。
+                    let body_s = if matches!(&body.kind, ExprKind::Var(name)
+                        if !matches!(body.ty, IrType::Int | IrType::F64 | IrType::Bool)
+                        && !params.iter().any(|p| p.split(':').next().unwrap_or(p) == name))
+                    {
+                        format!("{}.clone()", body_s)
+                    } else {
+                        body_s
+                    };
                     format!(
                         "{move_kw}|{}|{} {{ {} }}",
                         params.join(", "),

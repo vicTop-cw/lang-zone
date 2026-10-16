@@ -715,19 +715,34 @@ pub(crate) fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
             // 特殊处理 `is` 运算符：编译期类型检查
             if matches!(op, BinOp::Is) {
                 let left_ty = infer_expr_type(left, ctx);
-                if let AstExpr::Ident(type_name) = right.as_ref() {
-                    // Option 构造器同一性检查：`x is Some` / `x is None` 是运行时
-                    // 变体检查（iterator.lz `while n is Some:` / tree.lz
-                    // `if found_left is Some:`），必须生成 n.is_some()/is_none()。
-                    // 若走编译期类型兼容性静态求值，while 条件会被固化为
-                    // Bool(true) 导致死循环（loop {}）。
-                    // left 类型为 Any（方法调用返回类型推断不完整）时同样按
-                    // 运行时变体检查处理，保证 iterator.lz `let n = iter.next()` 生效。
+                // `is not X`：`n is not None` → `n.is_some()`。RHS 是 `not <Ident>` 形式
+                // 时取反（否则落到下方 fallback → false，使 `if n is not None` 恒为死分支）
+                let (type_name, negated): (Option<String>, bool) = if let AstExpr::Ident(t) =
+                    right.as_ref()
+                {
+                    (Some(t.clone()), false)
+                } else if let AstExpr::Unary {
+                    op: UnaryOp::Not,
+                    operand,
+                } = right.as_ref()
+                {
+                    if let AstExpr::Ident(t) = operand.as_ref() {
+                        (Some(t.clone()), true)
+                    } else {
+                        (None, false)
+                    }
+                } else {
+                    (None, false)
+                };
+                if let Some(type_name) = type_name {
                     let left_is_option = matches!(&left_ty, IrType::Option(_))
                         || matches!(&left_ty, IrType::Any)
                         || matches!(&left_ty, IrType::Named { path, .. } if path == "Option");
                     if left_is_option && (type_name == "Some" || type_name == "None") {
-                        let method = if type_name == "Some" {
+                        let method = if negated {
+                            // `is not Some` ⇔ `is_none`；`is not None` ⇔ `is_some`
+                            if type_name == "Some" { "is_none" } else { "is_some" }
+                        } else if type_name == "Some" {
                             "is_some"
                         } else {
                             "is_none"
@@ -742,10 +757,10 @@ pub(crate) fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
                             Span::unknown(),
                         );
                     }
-                    let expected = name_to_ir_type(type_name);
+                    let expected = name_to_ir_type(&type_name);
                     let result = ir_types_compatible(&left_ty, &expected);
                     return Expr::new(
-                        ExprKind::Lit(LitKind::Bool(result)),
+                        ExprKind::Lit(LitKind::Bool(if negated { !result } else { result })),
                         IrType::Bool,
                         Span::unknown(),
                     );
