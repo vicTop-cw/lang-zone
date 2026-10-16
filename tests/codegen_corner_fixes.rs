@@ -325,3 +325,48 @@ def main() =
     assert!(r.ok, "写捕获闭包编译应通过（Arc<dyn Fn> → 栈上 FnMut）：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "3\n7");
 }
+
+#[test]
+fn struct_kwarg_eq_syntax() {
+    // BUG-A 回归（marvis 寻虫 2026-10-17）：`Node(val=n, next=None)` 里 `=` 形式的
+    // 关键字参数此前被当作赋值表达式（Expr::Assign），codegen 生成 `Node { val: val = n }`
+    // → rustc E0425 cannot find value `val`。修复：调用参数位识别 `Ident = expr` 为 KwArg
+    // （与 `Ident : expr`、`Ident~` 一致）。
+    let src = r#"
+struct Node:
+    val: int
+    next: int?
+
+def main() =
+    let n = Node(val=10, next=None)
+    print(n.val)
+"#;
+    let r = run_lz("struct_kwarg_eq", src);
+    assert!(r.transpiled, "`=` 关键字参数应可转译：\n{}", r.diag);
+    assert!(r.ok, "`=` 关键字参数产物编译应通过（不再生成 val: val = n）：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "10");
+}
+
+#[test]
+fn generic_struct_eq_injects_partial_eq() {
+    // BUG-B 回归（marvis 寻虫 2026-10-17）：泛型 struct 内联 `__eq__` 比较泛型字段
+    // （`def __eq__(self, other: Box<T>) -> bool = self.val == other.val`）此前未把
+    // `T: PartialEq` 注入 impl 块（compute_cmp_constraints 不扫描 StructDef 方法，且
+    // scan 不识别 `Named{path:"T"}` 形式的泛型）→ rustc E0369 binary operation `==`
+    // cannot be applied to type `T`。
+    let src = r#"
+struct Box<T> =
+    val: T
+    def __eq__(self, other: Box<T>) -> bool =
+        self.val == other.val
+
+def main() =
+    let b1 = Box<int>(val=42)
+    let b2 = Box<int>(val=42)
+    print(b1 == b2)
+"#;
+    let r = run_lz("generic_struct_eq", src);
+    assert!(r.transpiled, "泛型 struct __eq__ 应可转译：\n{}", r.diag);
+    assert!(r.ok, "泛型 struct __eq__ 产物编译应通过（T: PartialEq 注入 impl）：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "true");
+}

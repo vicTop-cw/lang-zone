@@ -194,7 +194,16 @@ pub(crate) fn cmp_walk_expr(e: &Expr, my_gen: &HashSet<String>, info: &mut CmpIn
     if let ExprKind::BinOp { op, lhs, rhs } = &e.kind {
         if op.is_comparison() {
             for t in [&lhs.ty, &rhs.ty] {
-                if let IrType::Generic(name) = t {
+                // 泛型可能表示为 `Generic("T")` 或 `Named { path: "T", args: [] }`
+                // （struct 字段访问经 from_ast_type 未规范化，box.lz `self.val` → Named("T")）
+                let gen_name: Option<&String> = match t {
+                    IrType::Generic(name) => Some(name),
+                    IrType::Named { path, args } if args.is_empty() => {
+                        if my_gen.contains(path) { Some(path) } else { None }
+                    }
+                    _ => None,
+                };
+                if let Some(name) = gen_name {
                     if my_gen.contains(name) {
                         if *op == BinOpKind::Eq || *op == BinOpKind::Neq {
                             info.eq.insert(name.clone());

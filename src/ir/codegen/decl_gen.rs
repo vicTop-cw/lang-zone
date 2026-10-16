@@ -7,6 +7,14 @@ use super::types_emit::bigint_lit_code;
 use super::types_emit::is_bigint_ty;
 use super::types_emit::is_complex_ty;
 use super::types_emit::BIGINT_RS;
+
+/// 判断是否为模块元数据常量（__name__、__file__、__package__、__path__、__doc__、__is_macro__）。
+fn is_module_magic_const(name: &str) -> bool {
+    matches!(
+        name,
+        "__name__" | "__file__" | "__package__" | "__path__" | "__doc__" | "__is_macro__"
+    )
+}
 use super::*;
 
 /// 体内是否对该形参名做赋值（`x = ..` / `x += ..`）。
@@ -181,7 +189,13 @@ impl CodeGen {
             Item::TraitDef(t) => self.gen_trait_def(t),
             Item::Impl(i) => self.gen_impl_def(i),
             Item::Use(u) => self.gen_use_stmt(u),
-            Item::Const(c) => self.gen_const_def(c),
+            Item::Const(c) => {
+                // 模块元数据常量（__name__、__file__ 等）在 hide_module_meta 模式下跳过
+                if super::hide_module_meta() && is_module_magic_const(&c.name) {
+                    return;
+                }
+                self.gen_const_def(c)
+            }
             Item::TypeAlias(_) => { /* 已提前生成，跳过 */ }
             Item::Test(t) => self.gen_test_def(t),
             Item::CheckerBlock {
@@ -1493,6 +1507,48 @@ impl CodeGen {
         self.cur_fn_name = saved_name;
     }
 
+    /// 计算 struct 的 impl 泛型参数串（`<T: Clone + Debug + PartialEq + Eq>`）。
+    /// 在默认 Clone + Debug（+ struct 声明 bounds）基础上，合并 struct 内联方法
+    /// 的比较约束（fn_cmp 由 compute_cmp_constraints 扫描计算）——若 __eq__ 比较
+    /// 泛型字段（`self.val == other.val`），T 需 PartialEq+Eq，否则 rustc 报 E0369。
+    fn struct_impl_generics(&mut self, s: &StructDef) -> String {
+        if s.generics.is_empty() {
+            return String::new();
+        }
+        let mut union_eq: HashSet<String> = HashSet::new();
+        let mut union_ord: HashSet<String> = HashSet::new();
+        for m in &s.methods {
+            if let Some((eq, ord)) = self.fn_cmp.get(&m.name) {
+                for g in eq {
+                    union_eq.insert(g.clone());
+                }
+                for g in ord {
+                    union_ord.insert(g.clone());
+                }
+            }
+        }
+        let params: Vec<String> = s
+            .generics
+            .iter()
+            .map(|g| {
+                let mut parts: Vec<String> = vec!["Clone".into(), "std::fmt::Debug".into()];
+                for b in &g.bounds {
+                    parts.push(self.rust_type(b));
+                }
+                if union_eq.contains(&g.name) || union_ord.contains(&g.name) {
+                    parts.push("PartialEq".into());
+                    parts.push("Eq".into());
+                }
+                if union_ord.contains(&g.name) {
+                    parts.push("PartialOrd".into());
+                    parts.push("Ord".into());
+                }
+                format!("{}: {}", g.name, parts.join(" + "))
+            })
+            .collect();
+        format!("<{}>", params.join(", "))
+    }
+
     pub(crate) fn gen_struct_def(&mut self, s: &StructDef) {
         if self.emitted_types.contains(&s.name) {
             return;
@@ -1617,16 +1673,7 @@ impl CodeGen {
         // 如果 struct 有 __new__ 或 __init__，生成 impl 块
         if s.has_new || s.has_init {
             self.buf.push('\n');
-            let impl_generics = if s.generics.is_empty() {
-                String::new()
-            } else {
-                let params: Vec<String> = s
-                    .generics
-                    .iter()
-                    .map(|g| format!("{}: Clone + std::fmt::Debug", g.name))
-                    .collect();
-                format!("<{}>", params.join(", "))
-            };
+            let impl_generics = self.struct_impl_generics(s);
             self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
             self.indent += 1;
             // 生成 __new__ 函数签名（如有）
@@ -1750,30 +1797,8 @@ impl CodeGen {
         // 方法（impl 块）
         if !s.methods.is_empty() {
             self.buf.push('\n');
-            // 为泛型参数添加 Clone + Debug 约束
-            // Clone 支持 self.clone() 提取值，Debug 支持 f-string {:?} 插值
-            let impl_generics = if s.generics.is_empty() {
-                String::new()
-            } else {
-                let params: Vec<String> = s
-                    .generics
-                    .iter()
-                    .map(|g| {
-                        if g.bounds.is_empty() {
-                            format!("{}: Clone + std::fmt::Debug", g.name)
-                        } else {
-                            let bounds: Vec<String> =
-                                g.bounds.iter().map(|b| self.rust_type(b)).collect();
-                            format!(
-                                "{}: Clone + std::fmt::Debug + {}",
-                                g.name,
-                                bounds.join(" + ")
-                            )
-                        }
-                    })
-                    .collect();
-                format!("<{}>", params.join(", "))
-            };
+            // 为泛型参数添加 Clone + Debug 约束（+ 比较约束，见 struct_impl_generics）
+            let impl_generics = self.struct_impl_generics(s);
             self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
             self.indent += 1;
             // 泛型 struct（struct MyIterator<T>）内联方法按泛型上下文处理：
@@ -1823,28 +1848,7 @@ impl CodeGen {
         // 因约束未满足报 E0599（MyList<T>/MyIterator<T> 实测）。
         if !s.methods.is_empty() {
             self.buf.push('\n');
-            let impl_generics = if s.generics.is_empty() {
-                String::new()
-            } else {
-                let params: Vec<String> = s
-                    .generics
-                    .iter()
-                    .map(|g| {
-                        if g.bounds.is_empty() {
-                            format!("{}: Clone + std::fmt::Debug", g.name)
-                        } else {
-                            let bounds: Vec<String> =
-                                g.bounds.iter().map(|b| self.rust_type(b)).collect();
-                            format!(
-                                "{}: Clone + std::fmt::Debug + {}",
-                                g.name,
-                                bounds.join(" + ")
-                            )
-                        }
-                    })
-                    .collect();
-                format!("<{}>", params.join(", "))
-            };
+            let impl_generics = self.struct_impl_generics(s);
             let for_ty = format!("{}{}", s.name, generics);
             self.gen_magic_trait_impls(&for_ty, &impl_generics, &s.methods);
         }
@@ -1914,21 +1918,37 @@ impl CodeGen {
             let impl_generics = if e.generics.is_empty() {
                 String::new()
             } else {
+                // 合并枚举方法的比较约束（enum 已有 #[derive(PartialEq)]，
+                // 但方法体内 `a == b` 仍需泛型字段 PartialEq）
+                let mut union_eq: HashSet<String> = HashSet::new();
+                let mut union_ord: HashSet<String> = HashSet::new();
+                for m in &e.methods {
+                    if let Some((eq, ord)) = self.fn_cmp.get(&m.name) {
+                        for g in eq {
+                            union_eq.insert(g.clone());
+                        }
+                        for g in ord {
+                            union_ord.insert(g.clone());
+                        }
+                    }
+                }
                 let params: Vec<String> = e
                     .generics
                     .iter()
                     .map(|g| {
-                        if g.bounds.is_empty() {
-                            format!("{}: Clone + std::fmt::Debug", g.name)
-                        } else {
-                            let bounds: Vec<String> =
-                                g.bounds.iter().map(|b| self.rust_type(b)).collect();
-                            format!(
-                                "{}: Clone + std::fmt::Debug + {}",
-                                g.name,
-                                bounds.join(" + ")
-                            )
+                        let mut parts: Vec<String> = vec!["Clone".into(), "std::fmt::Debug".into()];
+                        for b in &g.bounds {
+                            parts.push(self.rust_type(b));
                         }
+                        if union_eq.contains(&g.name) || union_ord.contains(&g.name) {
+                            parts.push("PartialEq".into());
+                            parts.push("Eq".into());
+                        }
+                        if union_ord.contains(&g.name) {
+                            parts.push("PartialOrd".into());
+                            parts.push("Ord".into());
+                        }
+                        format!("{}: {}", g.name, parts.join(" + "))
                     })
                     .collect();
                 format!("<{}>", params.join(", "))

@@ -207,6 +207,32 @@ impl CodeGen {
                         ));
                     }
                 }
+                Item::StructDef(s) => {
+                    // struct 内联方法（如 `struct Box<T> { def __eq__ }`）继承 struct 泛型；
+                    // 不扫描则 __eq__ 内的 `self.val == other.val` 缺少 T: PartialEq 约束
+                    // （magic_generics 回归：E0369 binary operation `==` cannot be applied）。
+                    let struct_gen: Vec<String> =
+                        s.generics.iter().map(|g| g.name.clone()).collect();
+                    for m in &s.methods {
+                        fns.push((
+                            m.name.clone(),
+                            struct_gen.clone(),
+                            m.body.clone(),
+                        ));
+                    }
+                }
+                Item::EnumDef(e) => {
+                    // 枚举方法继承枚举泛型（Enum<A, B> 的 __eq__ 比较字段 → 需 PartialEq）
+                    let enum_gen: Vec<String> =
+                        e.generics.iter().map(|g| g.name.clone()).collect();
+                    for m in &e.methods {
+                        fns.push((
+                            m.name.clone(),
+                            enum_gen.clone(),
+                            m.body.clone(),
+                        ));
+                    }
+                }
                 Item::TraitDef(t) => {
                     for m in &t.methods {
                         if let Some(body) = &m.body {
@@ -1617,7 +1643,23 @@ impl CodeGen {
                             }
                         })
                         .collect();
-                    format!("println!({}, {})", fmt, print_args.join(", "))
+                    // 纯语法收敛：单 FStr 实参 `println!("{}", format!(...))` → `println!(...)`
+                    // （f-string 生成的 format! 已是完整格式串，外层 `"{}"` 包装冗余）
+                    let folded_fstr = if args.len() == 1
+                        && matches!(&args[0].kind, ExprKind::Lit(LitKind::FStr(_)))
+                    {
+                        print_args[0]
+                            .strip_prefix("format!(")
+                            .and_then(|t| t.strip_suffix(')'))
+                            .map(|body| format!("println!({})", body))
+                    } else {
+                        None
+                    };
+                    if let Some(f) = folded_fstr {
+                        f
+                    } else {
+                        format!("println!({}, {})", fmt, print_args.join(", "))
+                    }
                 } else if callee_s == "eprintln!" {
                     // check 语句生成的 eprintln! 调用：格式宏第一个参数必须是字面量
                     // 格式串（Str 字面量不能 .to_string()，E0308/E0061），
@@ -2876,6 +2918,16 @@ impl CodeGen {
                         return format!("({})?", recv);
                     }
                     return format!("{}.unwrap()", recv);
+                }
+
+                // BUG-39 续：用户类自定义 try_into 保留原名，但 Rust 2021 prelude
+                // 的 TryInto trait 使任意 `.try_into()` 方法调用恒 E0283（固有方法与
+                // trait 同名，rvalue/place 接收者均复现；纯 Rust 实测）。唯一可靠形态
+                // 是固有关联函数调用：`Conv::try_into(&recv)`（借用，调用后可复用）。
+                if method == "try_into" && recv_has_custom_try_into {
+                    if let IrType::Named { path, .. } = &receiver.ty {
+                        return format!("{}::try_into(&{})", path, recv);
+                    }
                 }
 
                 // Enum variant 构造: Type.Variant(kwargs...) → Type::Variant(val1, val2, ...)
@@ -5966,7 +6018,51 @@ child.struct_fields_info = self.struct_fields_info.clone();
             }
             ExprKind::AssignExpr { target, value } => {
                 // 纯赋值表达式（闭包体 `total = total + x`）：渲染 `target = value`
-                format!("{} = {}", self.gen_expr(target), self.gen_expr(value))
+                // 纯语法收敛：`a = a op b`（变量在 lhs、标量类型）→ `a op= b`，
+                // 与 Stmt::Assign 的复合回写保持同规则（String/结构体无 AddAssign 不回写）
+                let t_scalar = matches!(&target.ty, IrType::Int | IrType::F64 | IrType::Bool);
+                let compound = match (&target.kind, &value.kind) {
+                    (ExprKind::Var(tname), ExprKind::BinOp { op, lhs, rhs })
+                        if t_scalar && matches!(lhs.kind, ExprKind::Var(ref n) if n == tname) =>
+                    {
+                        matches!(
+                            op,
+                            BinOpKind::Add
+                                | BinOpKind::Sub
+                                | BinOpKind::Mul
+                                | BinOpKind::Div
+                                | BinOpKind::Mod
+                                | BinOpKind::BitAnd
+                                | BinOpKind::BitOr
+                                | BinOpKind::Xor
+                                | BinOpKind::Shl
+                                | BinOpKind::Shr
+                        )
+                    }
+                    _ => false,
+                };
+                if compound {
+                    let rhs_s = self.gen_expr(
+                        match &value.kind {
+                            ExprKind::BinOp { rhs, .. } => rhs,
+                            _ => unreachable!(),
+                        },
+                    );
+                    let op_s = self.binop_str(
+                        match &value.kind {
+                            ExprKind::BinOp { op, .. } => op,
+                            _ => unreachable!(),
+                        },
+                    );
+                    format!(
+                        "{} {} {}",
+                        self.gen_expr(target),
+                        format!("{}=", op_s),
+                        rhs_s
+                    )
+                } else {
+                    format!("{} = {}", self.gen_expr(target), self.gen_expr(value))
+                }
             }
             _ => unreachable!("unsupported expr kind: {:?}", expr.kind),
         }

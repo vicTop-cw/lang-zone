@@ -641,7 +641,7 @@ impl ParserExprExt for Parser {
                             if self.check(&Token::Dedent) {
                                 break;
                             }
-                            // 关键字参数: name: value 或 name~ 语法糖
+                            // 关键字参数: name: value / name~ 语法糖 / name=value
                             let arg = if let Token::Ident(_) = self.peek() {
                                 if self.peek_n(1) == &Token::Tilde {
                                     let name = self.advance().to_string();
@@ -653,6 +653,14 @@ impl ParserExprExt for Parser {
                                 } else if self.peek_n(1) == &Token::Colon {
                                     let name = self.advance().to_string();
                                     self.advance(); // 消费 :
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else if self.peek_n(1) == &Token::Eq {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // 消费 =
                                     let v = self.parse_expr()?;
                                     Expr::KwArg {
                                         name,
@@ -833,6 +841,14 @@ impl ParserExprExt for Parser {
                                     name,
                                     value: Box::new(v),
                                 }
+                            } else if self.peek_n(1) == &Token::Eq {
+                                let name = self.advance().to_string();
+                                self.advance(); // =
+                                let v = self.parse_expr()?;
+                                Expr::KwArg {
+                                    name,
+                                    value: Box::new(v),
+                                }
                             } else {
                                 self.parse_expr()?
                             }
@@ -909,7 +925,7 @@ impl ParserExprExt for Parser {
                             if self.check(&Token::Dedent) {
                                 break;
                             }
-                            // 关键字参数: name: value 或 name~ 语法糖
+                            // 关键字参数: name: value / name~ 语法糖 / name=value
                             let arg = if let Token::Ident(_) = self.peek() {
                                 if self.peek_n(1) == &Token::Tilde {
                                     let name = self.advance().to_string();
@@ -921,6 +937,14 @@ impl ParserExprExt for Parser {
                                 } else if self.peek_n(1) == &Token::Colon {
                                     let name = self.advance().to_string();
                                     self.advance(); // :
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else if self.peek_n(1) == &Token::Eq {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // =
                                     let v = self.parse_expr()?;
                                     Expr::KwArg {
                                         name,
