@@ -31,6 +31,7 @@ AIGC:
 - Bool 拦截带**比较链豁免**：`1 < 5 < 10` 解析为 `(1<5) < 10`（lhs 为 bool），codegen 才分解成 `(1<5) && (5<10)`；豁免使 `DEMO/13_operators/precedence.lz` 与 `CY/TESTS/15_feature_matrix/precedence.lz` 保持转绿（否则 cy_l1_transpile_all_corpus FAILED）
 - 合法形态回归锁定：`f64 + int`（1.5+2=3.5）、`str + str` 拼接、`list + list` 拼接（`__cat`）均不受影响；`stdlib 自由函数（约 158 个）不接 rlib` 记为 BUG-270 待修（OPEN，潜伏、0 语料命中）
 - 标量运算补类型族交叉拦截（BUG-272）：`两侧皆 Option 的算术`（`Option * Option`，收窄 BUG-269 的「两侧皆 Option 放行」到仅比较/Eq）、`浮点位/移位`（`1.5 << 2`）、`字符串跨族比较`（`"a" < 1`）、`Bool 跨族 Eq/Ne`（`true == 1`，Eq/Ne 不在 scalar_op，另开独立块）四类原先直出 E0369 的坏 Rust 现于 LZ 阶段拦截；合法形态（`Option 比较`、`list < list`、`bool == bool`、`f64 + int`）锁定不受影响；`None + 1` 因 None 落 `Any` 仍放行，记待评
+- `None` 字面量参与算术/位拦截（BUG-273）：`None + 1` 生成 `LzAdd::__add__(None, 1i64)` → E0369，现于 LZ 阶段拦「None 值不能直接参与算术/位运算」。`None` 既可能是 `NoneLit` 也可能是 `Ident("None")`（词法层事实），且 `let None = 300` 可把 `None` 遮蔽为普通变量（`DEMO/boundary-coverage/edge-keyword-identifier.lz` 显式测此场景）——故 `Ident("None")` 仅当类型为 `Any`（prelude None 的推断类型）时按 None 处理，被遮蔽的 `None`（类型 Int）不拦，避免误伤遮蔽演示；`None == None` 因 codegen 不注入类型标注仍 RUSTC_FAIL，记 BUG-274 待修（OPEN）
 
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）

@@ -614,6 +614,17 @@ fn scalar_op_type_family_cross_is_clean_lz_type_error() {
     assert_clean("str_lt_int", "\"a\" < 1", "字符串与其他类型不能直接比较");
     // ④ Bool 跨族 Eq/Ne
     assert_clean("bool_eq_int", "true == 1", "Bool 值不能与其他类型比较");
+    // ⑤ None 字面量（含 Ident("None") 形态）参与算术/位 → E0369
+    assert_clean(
+        "none_plus_int",
+        "None + 1",
+        "None 值不能直接参与算术/位运算",
+    );
+    assert_clean(
+        "none_bitand_int",
+        "None & 1",
+        "None 值不能直接参与算术/位运算",
+    );
 
     // 合法形态回归
     let ok_src = r#"
@@ -624,11 +635,12 @@ def main() =
     print([1] < [2])
     print(true == true)
     print(1.5 + 2)
+    print(a == None)
 "#;
     let ok = run_lz("scalar_family_valid_kept", ok_src);
     assert!(ok.ok, "合法标量运算应继续通过：\n{}", ok.diag);
     assert_eq!(
         ok.stdout.replace('\n', " ").trim(),
-        "true true true 3.5"
+        "true true true 3.5 false"
     );
 }

@@ -744,3 +744,21 @@
 - 回归面：全量 cargo test -j 1 零失败（含 demo_codegen_compile 441 passed + cy_l1_transpile_all_corpus 通过；codegen_corner_fixes 20 passed）。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/opt_mul_opt.lz（及 f64_shl_int / str_lt_int / bool_eq_int）
 - reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-273 [2026-10-19T01:20:00+08:00] [medium] 待验证（rust 后端 2026-10-19，extended_check.rs Binary 臂补 None 字面量算术/位拦截）：None + 1 直出 LzAdd::__add__(None, 1i64) → E0369
+- summary: None 字面量参与算术/位运算不被 LZ 类型检查拦截。let v = None + 1 生成 let v: i64 = LzAdd::__add__(None, 1i64);，rustc 报 E0369（TEMP/probe/sweep2/none_plus_int.lz 实测 RUSTC_FAIL exit=1）。
+- detail: 根因是 None 字面量在 infer_expr_type 落 IrType::Any（infer.rs L21「None 类型取决于上下文」），Any 属 queer（ex_type_queer）被 BUG-269/271/272 全部 option/bool 检查放行。语义上 None 是 Option<T> 的值，参与算术/位运算必错；但比较与 Eq/Ne 合法（x == None、None < Some(y)，Option 有 PartialOrd/PartialEq）。
+- 修复（已落码未验证——build 因宿主内存耗尽 os error 1455 暂不可跑）：Binary 臂在 lopt != ropt 之前插入 none_in_arith_bit 检查——op 为算术（Add/Sub/Mul/Div/Mod/Pow）或位/移位（BitAnd/BitOr/BitXor/Shl/Shr）且任一操作数是 AstExpr::NoneLit 时报「None 值不能直接参与算术/位运算（None 是 Option 的值，需先给类型与解包）」。比较与 Eq/Ne 不拦（放行 x == None）。
+- 判据：TEMP/probe/sweep2/none_plus_int.lz 修复后应 LZ 报错不再产出 .rs；TEMP/probe/sweep2/none_eq.lz（x == None + None == None）应继续编译运行。
+- 回归面：待跑全量 cargo test -j 1（含 demo_codegen_compile 441 passed + cy_l1_transpile_all_corpus + codegen_corner_fixes 20 passed 单线程）。
+- 环境备注：本轮全量测试多次 link.exe 0xc000012d / ustc STATUS_STACK_BUFFER_OVERRUN / os error 1455 页面文件太小，系宿主物理内存耗尽（FreePhysicalMemory 一度 2-3 MB），非语义回归；codegen_corner_fixes --test-threads=1 单线程 20/20 通过证明语义无回归。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/none_plus_int.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-274 [2026-10-19T07:15:00+08:00] [medium] OPEN（codegen expr_gen，非标量运算族）：None == None 直出无类型标注的比较 → rustc E0282
+- summary: print(None == None) 生成 println!("{:?}", None == None);，rustc 报 E0282（type annotations needed）——TEMP/probe/sweep2/none_eq.lz 实测 RUSTC_FAIL exit=1。
+- detail: x == None（x 为有类型 Option）被 codegen 正确路由为 x.is_none()（expr_gen 已有 None 相等特判），但两侧都是裸 None 时无上下文定类型，codegen 未注入 Option::<T>::None 标注。属 codegen 侧类型上下文缺失，与 extended_check 标量运算族拦截（BUG-269~273）不同族。
+- 判据：TEMP/probe/sweep2/none_eq.lz 应编译运行（打印 alse 与 	rue）；x == None 形态已正常（[1].first() == None 走 is_none()）。
+- 回归面：0 语料命中（语料库未见 None == None），不影响现有门。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/none_eq.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮，None 算术拦截修复验证时顺带发现）

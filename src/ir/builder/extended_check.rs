@@ -1386,9 +1386,32 @@ pub(crate) fn ex_check_expr(
                         || matches!(t, IrType::Named { path, .. } if path == "str" || path == "String")
                 };
                 let is_bool_ty = |t: &IrType| matches!(t, IrType::Bool);
+                let is_none_lit = |e: &AstExpr, ty: &IrType| {
+                    // None 既可能是字面量（NoneLit），也可能被解析为变量引用
+                    // （Ident("None")，词法层既有事实）——convert_decl.rs L241-243 同口径。
+                    // 但 `let None = 300` 可遮蔽 None 为普通变量（DEMO/boundary-coverage/
+                    // edge-keyword-identifier.lz 显式测此场景），被遮蔽的 None 类型为 Int，
+                    // 不能按 None 字面量拦。prelude None 在 infer_expr_type 落 IrType::Any
+                    // （infer.rs L21「None 类型取决于上下文」），故 Ident("None") 仅当类型为
+                    // Any 时按 None 字面量处理。
+                    matches!(e, AstExpr::NoneLit)
+                        || matches!(e, AstExpr::Ident(n) if n == "None" && matches!(ty, IrType::Any))
+                };
                 let lopt = strip_option(&lt) && !ex_type_queer(&rt);
                 let ropt = strip_option(&rt) && !ex_type_queer(&lt);
-                if lopt != ropt {
+                // none_in_arith_bit：`None + 1` 生成 `LzAdd::__add__(None, 1i64)` → E0369
+                // （TEMP/probe/sweep2/none_plus_int.lz 实测 RUSTC_FAIL）。`None` 字面量在
+                // infer_expr_type 落 `IrType::Any`（infer.rs L21「None 类型取决于上下文」），
+                // Any 属 queer 被下方 option/bool 检查全部放行，故须直接按 AST 形态拦。
+                // 仅拦算术/位/移位；比较与 Eq/Ne 放行（`x == None` / `None < Some(y)` 合法）。
+                if (is_arith || is_bit_shift)
+                    && (is_none_lit(left.as_ref(), &lt) || is_none_lit(right.as_ref(), &rt))
+                {
+                    work.report_error(
+                        "None 值不能直接参与算术/位运算（None 是 Option 的值，需先给类型与解包）"
+                            .to_string(),
+                    );
+                } else if lopt != ropt {
                     work.report_error(
                         "Option 值不能直接参与运算，需先 .unwrap_or(default)/.unwrap()/? 解包取内层值"
                             .to_string(),
