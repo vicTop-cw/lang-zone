@@ -6,7 +6,10 @@ use super::*;
 impl CodeGen {
     /// 扩展 trait（ListExt/StrExt 等）方法名映射：与调用点 MethodCall 的
     /// `slice → lz_slice` 映射保持一致，否则 trait 声明是 slice、调用是
-    /// lz_slice → E0599（list.lz 复现）
+    /// lz_slice → E0599（list.lz 复现）。
+    /// 注意：find/rfind 不在 trait 侧映射（trait 仍声明 find/rfind）；
+    /// BUG-280 映射在 impl 体生成时通过 `in_ext_trait` 守卫跳过，
+    /// 保证 trait 声明与 impl 体调用名一致（E0576/E0407 修复）。
     pub(crate) fn ext_trait_method_name(&self, name: &str, _ext_name: &str) -> String {
         match name {
             "slice" => "lz_slice".to_string(),

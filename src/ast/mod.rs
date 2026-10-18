@@ -76,6 +76,7 @@ pub fn builtin_type_names() -> HashSet<&'static str> {
         "FnOnce",
         "Iterator",
         "Iter",
+        "Range",
         "Generator",
         "Simd",
         "Box",

@@ -3,6 +3,7 @@
 
 use super::types_emit::is_bigint_ty;
 use super::types_emit::is_complex_ty;
+use super::helpers::collect_pattern_bindings;
 use super::owned_local;
 use super::*;
 
@@ -514,7 +515,15 @@ impl CodeGen {
                     match self.owned_local_kind(name) {
                         Some(owned_local::LocalKind::Str) => {
                             if let Some(rhs) = self.str_append_rhs(name, value) {
+                                // 设定期望类型为 str：`self.s[self.pos]` 这类字符串索引
+                                // gen_expr 默认走 ord 路径（`as i64`），需要 str 期望类型
+                                // 才生成 `__cs[__i].to_string()`（E0308 push_str 要 &str；
+                                // 通用 BinOp + 路径在 L4892-4912 已有同款设定）
+                                let prev_expected =
+                                    self.current_expected_ty.borrow().clone();
+                                *self.current_expected_ty.borrow_mut() = Some(IrType::Str);
                                 let mut rhs_s = self.gen_expr(rhs);
+                                *self.current_expected_ty.borrow_mut() = prev_expected;
                                 // 字符串字面量：gen_expr 给的是 `"ab".to_string()`（LZ 值语义
                                 // 的 owned String），而 push_str 只要 `&'static str` —— 剥掉
                                 // 后缀即省掉一次纯浪费的堆分配。
@@ -541,9 +550,34 @@ impl CodeGen {
                         | Some(owned_local::LocalKind::Dict)
                         | Some(owned_local::LocalKind::Set) => {
                             if let Some(plan) = self.container_append_rhs(name, value) {
+                                // 追加元素可能是从容器索引/变量中取出（`ts[idx]`、
+                                // `some_list[j]`、`self.s[self.pos]`）：Rust 对非 Copy 类型的
+                                // `vec.push(ts[i])` / `vec.insert(ts[i])` 报 E0507
+                                // （cannot move out of index）。与 ListLit 元素位同款收敛
+                                // （expr_gen L6091-6108）与 Assign 路径（本函数下方）一致。
+                                let maybe_clone = |s: String, item: &Expr| {
+                                    let is_copy = matches!(
+                                        &item.ty,
+                                        IrType::Int | IrType::F64 | IrType::Bool
+                                    );
+                                    let is_moveable = matches!(
+                                        &item.kind,
+                                        ExprKind::Var(_) | ExprKind::IndexGet { .. }
+                                    );
+                                    if !is_copy
+                                        && is_moveable
+                                        && !s.starts_with('&')
+                                        && !s.ends_with(".clone()")
+                                        && !s.contains("::")
+                                    {
+                                        format!("{}.clone()", s)
+                                    } else {
+                                        s
+                                    }
+                                };
                                 match plan {
                                     owned_local::ContainerAppend::Push(elem) => {
-                                        let elem_s = self.gen_expr(elem);
+                                        let elem_s = maybe_clone(self.gen_expr(elem), elem);
                                         self.emit_line(&format!(
                                             "{}.push({});",
                                             safe_name, elem_s
@@ -551,7 +585,7 @@ impl CodeGen {
                                     }
                                     owned_local::ContainerAppend::InsertOne(elem) => {
                                         // Set 单元素：零分配，优于「建 1-element HashSet 再整表合并」
-                                        let elem_s = self.gen_expr(elem);
+                                        let elem_s = maybe_clone(self.gen_expr(elem), elem);
                                         self.emit_line(&format!(
                                             "{}.insert({});",
                                             safe_name, elem_s
@@ -669,7 +703,24 @@ impl CodeGen {
                             };
                             self.emit_line(&format!("{} {}= {};", safe_name, op_s, rhs_s));
                         } else {
-                            self.emit_line(&format!("{} = {};", safe_name, self.gen_expr(value)));
+                            // 变量已声明且重新赋值（`mut root = None` → `root = insert(...)`）：
+                            // 若新值类型 T 非 Option/Any/Unit，包 Some(T)。
+                            // 否则 `let mut root: Option<i64> = None` 后 `root = insert(root, 5)`
+                            // 期望 Option<TreeNode<i64>> 却得 TreeNode<i64>（bst.lz E0308）。
+                            let val_s = if !matches!(
+                                &value.ty,
+                                IrType::Option(_) | IrType::Any | IrType::Unit
+                            ) && !matches!(&value.kind, ExprKind::Lit(LitKind::None_))
+                                && self
+                                    .fstr_var_types
+                                    .get(name.as_str())
+                                    .map_or(false, |t| matches!(t, IrType::Option(_)))
+                            {
+                                format!("Some({})", self.gen_expr(value))
+                            } else {
+                                self.gen_expr(value)
+                            };
+                            self.emit_line(&format!("{} = {};", safe_name, val_s));
                         }
                     }
                     return;
@@ -883,15 +934,10 @@ impl CodeGen {
                         format!(": {}", self.rust_type(ty))
                     }
                 } else if skip_ty {
-                    // None 字面量/构造/变量：类型未知时用 Option<i64> 默认，避免 Rust 无法推断
-                    let is_none = matches!(&value.kind, ExprKind::Lit(LitKind::None_))
-                        || matches!(&value.kind, ExprKind::StructCtor { name: n, .. } if n == "None")
-                        || matches!(&value.kind, ExprKind::Var(n) if n == "None");
-                    if is_none {
-                        ": Option<i64>".to_string()
-                    } else {
-                        String::new()
-                    }
+                    // None 字面量/构造/变量：不再硬编码 `Option<i64>`——让 Rust 从
+                    // 后续赋值/使用推断类型（`mut root = None` → `root = Some(insert(...))`
+                    // 时 Rust 能推断 root: Option<TreeNode<i64>>；硬编码 i64 会导致 E0308）
+                    String::new()
                 } else {
                     format!(": {}", self.rust_type(ty))
                 };
@@ -1104,6 +1150,32 @@ impl CodeGen {
                 } else {
                     ty_str
                 };
+                // BUG-31x：`let x = None`（非 mut、无类型标注）生成裸 `None` → rustc E0282
+                // （无后续赋值/约束可推断元素类型）。注入 `None::<i64>`（LZ 默认元素类型），
+                // 与 `assert_eq!(x, None.clone())` 等后续 Option 比较兼容。
+                // 注意：仅在 value_s 确为裸 `None`（gen_none_ref 对非 Option 上下文的 i64
+                // 回退）时触发；已知类型含 Option（用户自定义 enum）时 gen_none_ref 已输出
+                // `Option::None`，不会命中此特判，避免破坏自定义 Option 遮蔽场景。
+                let value_s = if !*is_mut && value_s.trim() == "None" && ty_str.is_empty() {
+                    "None::<i64>".to_string()
+                } else {
+                    value_s
+                };
+                // BUG-31y：集合方法 pop/first/last/get 保留 Option 语义后，IR 标注仍为
+                // `: i64` 等标量类型，与生成的 Option<T> 冲突（lists.lz/containers.lz/
+                // prelude_demo.lz/operators.lz 的 E0308：expected i64, found Option<i64>）。
+                // 去掉标注让 Rust 推断为 Option<T>：后续 `== Some(..)` 比较（lists.lz L38）
+                // 与 `{:?}` 打印（containers/prelude_demo）均兼容；用户显式写了 Option
+                // 标注（ty_str 含 "Option"）时保留标注。
+                let ty_str = if (value_s.trim().ends_with(".pop()")
+                    || value_s.trim().ends_with(").cloned()"))
+                    && !ty_str.is_empty()
+                    && !ty_str.contains("Option")
+                {
+                    String::new()
+                } else {
+                    ty_str
+                };
                 self.emit_line(&format!(
                     "let {}{}{} = {};",
                     mut_kw, safe_name, ty_str, value_s
@@ -1206,7 +1278,136 @@ impl CodeGen {
                     }
                 }
                 let target_s = self.gen_target_expr(target);
-                let val_s = self.gen_expr(value);
+                let mut val_s = self.gen_expr(value);
+                // 容器原地追加（`xs = xs + [1, 2, 3]` → `xs.extend([1, 2, 3])`）：
+                // 与 Let 分支的同款优化（L492-608），避免 `xs = { let mut __cat =
+                // xs.clone(); __cat.extend(...); __cat };` 的 O(n²) 全量拷贝。
+                // 仅普通局部容器变量（ref/字段/全局已提前 return）。
+                if let ExprKind::Var(name) = &target.kind {
+                    let safe_name = if self.downgraded_vars.contains(name.as_str())
+                        || self.global_vars.contains_key(name.as_str())
+                        || self.top_level_static_names.contains(name.as_str())
+                    {
+                        format!("{}_", name)
+                    } else {
+                        name.clone()
+                    };
+                    if self.declared.contains(&safe_name)
+                        && self.owned_local_kind(name).is_some()
+                    {
+                        use owned_local::ContainerAppend;
+                        match self.owned_local_kind(name) {
+                            Some(owned_local::LocalKind::List)
+                            | Some(owned_local::LocalKind::Dict)
+                            | Some(owned_local::LocalKind::Set) => {
+                                if let Some(ca) = self.container_append_rhs(name, value) {
+                                    // 追加元素可能是从容器索引/变量中取出（`ts[idx]`、
+                                    // `some_list[j]`）：Rust 对非 Copy 类型的
+                                    // `vec.push(ts[i])` / `vec.insert(ts[i])` 报 E0507
+                                    // （cannot move out of index）。与 ListLit 元素位
+                                    // 同款收敛（expr_gen L6091-6108）：Var/IndexGet 且
+                                    // 非 Copy → .clone()。
+                                    let maybe_clone = |s: String, item: &Expr| {
+                                        let is_copy = matches!(
+                                            &item.ty,
+                                            IrType::Int | IrType::F64 | IrType::Bool
+                                        );
+                                        let is_moveable = matches!(
+                                            &item.kind,
+                                            ExprKind::Var(_) | ExprKind::IndexGet { .. }
+                                        );
+                                        if !is_copy
+                                            && is_moveable
+                                            && !s.starts_with('&')
+                                            && !s.ends_with(".clone()")
+                                            && !s.contains("::")
+                                        {
+                                            format!("{}.clone()", s)
+                                        } else {
+                                            s
+                                        }
+                                    };
+                                    match ca {
+                                        ContainerAppend::Push(item) => {
+                                            let item_s = maybe_clone(
+                                                self.gen_expr(item),
+                                                item,
+                                            );
+                                            self.emit_line(&format!(
+                                                "{}.push({});",
+                                                safe_name, item_s
+                                            ));
+                                            return;
+                                        }
+                                        ContainerAppend::InsertOne(item) => {
+                                            let item_s = maybe_clone(
+                                                self.gen_expr(item),
+                                                item,
+                                            );
+                                            self.emit_line(&format!(
+                                                "{}.insert({});",
+                                                safe_name, item_s
+                                            ));
+                                            return;
+                                        }
+                                        ContainerAppend::ExtendItems(parts) => {
+                                            self.emit_line(&format!(
+                                                "{}.extend([{}]);",
+                                                safe_name,
+                                                parts.join(", ")
+                                            ));
+                                            return;
+                                        }
+                                        ContainerAppend::ExtendPairs(pairs) => {
+                                            if pairs.len() == 1 {
+                                                let (k, v) = &pairs[0];
+                                                self.emit_line(&format!(
+                                                    "{}.insert({}, {});",
+                                                    safe_name, k, v
+                                                ));
+                                            } else {
+                                                let joined = pairs
+                                                    .iter()
+                                                    .map(|(k, v)| format!("({}, {})", k, v))
+                                                    .collect::<Vec<_>>()
+                                                    .join(", ");
+                                                self.emit_line(&format!(
+                                                    "{}.extend([{}]);",
+                                                    safe_name, joined
+                                                ));
+                                            }
+                                            return;
+                                        }
+                                        ContainerAppend::ExtendExpr(rhs) => {
+                                            let rhs_s = self.gen_expr(rhs);
+                                            self.emit_line(&format!(
+                                                "{}.extend({});",
+                                                safe_name, rhs_s
+                                            ));
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                // 递归字段赋值 Box 包装：`root.left = insert(...)` 中 left 是
+                // `Option<Box<TreeNode<T>>>`（递归字段），赋值侧需补 `Some(Box::new(..))`。
+                // 否则 E0308 expected Option<Box<TreeNode<i64>>>, found TreeNode<i64>
+                // （bst.lz 递归 insert 赋值，StructCtor 构造分支已有同名处理）。
+                if let ExprKind::FieldAccess { base, field } = &target.kind {
+                    if let Some(sname) = struct_name_from_ty(&base.ty) {
+                        if let Some(info) = self.struct_fields_info.get(&sname) {
+                            if let Some((_, fty)) = info.iter().find(|(n, _)| n == field) {
+                                if crate::ir::codegen::helpers::field_needs_box(fty, &sname) {
+                                    val_s = format!("Some(Box::new({}))", val_s);
+                                }
+                            }
+                        }
+                    }
+                }
                 // ref 绑定变量（ref r = x）：r = v → *r = v（跨块赋值，同块走 Let 分支）
                 if let ExprKind::Var(name) = &target.kind {
                     // BUG-20：ref 别名（ref f = h.n）：f = v → h.n = v（写位置，非解引用）
@@ -1299,7 +1500,22 @@ impl CodeGen {
                         };
                         self.emit_line(&format!("{} {}= {};", target_s, op_s, rhs_s));
                     } else {
-                        self.emit_line(&format!("{} = {};", target_s, val_s));
+                        // 变量是 Option<T> 而赋值值是 T（非 Option/Any）：
+                        // `mut root = None` + `root = insert(root, 5)`（insert 返回
+                        // TreeNode<i64>）→ `root = Some(insert(root, 5))`。否则 E0308
+                        // expected Option<TreeNode<i64>>, found TreeNode<i64>（bst.lz 家族）。
+                        if std::env::var("LZ_DBG_ASSIGN").is_ok() {
+                            eprintln!(
+                                "[DBG-assign] target={:?} tty={:?} vty={:?} val={}",
+                                target_s, target.ty, value.ty, val_s
+                            );
+                        }
+                        let val_s2 = if needs_some_wrap(&target.ty, value) {
+                            format!("Some({})", val_s)
+                        } else {
+                            val_s
+                        };
+                        self.emit_line(&format!("{} = {};", target_s, val_s2));
                     }
                 }
             }
@@ -1409,6 +1625,20 @@ impl CodeGen {
                                 } else {
                                     "return self.to_string();"
                                 });
+                            } else if ret_is_string
+                                && matches!(&v.kind, ExprKind::Var(n)
+                                    if self.str_match_bindings.contains(n))
+                            {
+                                // BUG-284：match on Str scrutinee 的通配绑定为 &str，
+                                // 返回 String 需 to_string()
+                                self.emit_line(&format!(
+                                    "return {};",
+                                    if wrap_ok {
+                                        format!("Ok({}.to_string())", ret_s)
+                                    } else {
+                                        format!("{}.to_string()", ret_s)
+                                    }
+                                ));
                             } else {
                                 self.emit_line(&format!(
                                     "return {};",
@@ -1426,7 +1656,6 @@ impl CodeGen {
                 }
             }
             Stmt::ExprStmt { expr } => {
-                eprintln!("[DBG-ExprStmt] {:?}", expr.kind);
                 self.emit_walrus_predecls(expr);
                 // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Arc::new 包装
                 // （factory_chain: |a| => |b| => x + a + b → move |a| { Arc::new(move |b| {...}) }）。
@@ -1513,13 +1742,25 @@ impl CodeGen {
                     } else {
                         let ret_prefix = if hide_ret { "" } else { "return " };
                         let semi = if hide_ret { "" } else { ";" };
+                        // 尾表达式类型是 Option 而函数返回类型非 Option：加 .unwrap()
+                        // （`def insert(root: TreeNode<int>?, v: int) -> TreeNode<int>` 尾 `root`
+                        // 是 Option<TreeNode<i64>>，需 unwrap 得 TreeNode<i64>，E0308）。
+                        let expr_s_owned: String = {
+                            let ret_is_opt = matches!(&self.current_ret_ty, Some(IrType::Option(_)));
+                            let expr_is_opt = matches!(&expr.ty, IrType::Option(_));
+                            if !ret_is_opt && expr_is_opt {
+                                format!("{}.unwrap()", expr_s)
+                            } else {
+                                expr_s
+                            }
+                        };
                         self.emit_line(&format!(
                             "{}{}{}",
                             ret_prefix,
                             if wrap_ok {
-                                format!("Ok({})", expr_s)
+                                format!("Ok({})", expr_s_owned)
                             } else {
-                                expr_s
+                                expr_s_owned
                             },
                             semi
                         ));
@@ -1556,7 +1797,39 @@ impl CodeGen {
                     self.emit_line(&format!("let _ = {};", expr_s));
                 } else if is_last && self.suppress_tail_return {
                     // match arm / 块表达式尾值 → 裸表达式（无分号，作为块值）
-                    self.emit_line(&format!("{}", expr_s));
+                    // 尾表达式是 Option 而块期望类型（current_ret_ty）非 Option 时
+                    // 补 .unwrap()：`else { ...; root }` 在 `def f(...) -> TreeNode<int>`
+                    // 中 root 是 Option<TreeNode<i64>>，需 unwrap（bst.lz E0308）
+                    if std::env::var("LZ_DBG_TAIL").is_ok() {
+                        eprintln!(
+                            "[DBG-tail] kind={:?} ty={:?} ret={:?} exp={:?} in_lambda={} in_if_else={}",
+                            expr.kind, expr.ty, self.current_ret_ty, self.current_expected_ty.borrow(), self.in_lambda_block, self.in_if_else_branch
+                        );
+                    }
+                    let emitted = if let Some(ret_ty) = self.current_ret_ty.as_ref() {
+                        // BUG-262：unwrap 只在「值确流向函数返回」时适用。若外层
+                        // current_expected_ty 已期望 Option（`let hi: Option<int> =
+                        // match (hi_a, hi_b) { case (Some(x), Some(y)) => Some(min(x, y)) ...}`
+                        // 的臂尾值流向局部 Option 绑定，而非函数返回 Tuple），此时
+                        // 加 .unwrap() 会让 `Some(min(x,y)).unwrap()` = i64 塞进
+                        // Option<i64> 绑定 → E0308（iter.lz Zip::size_hint）。
+                        let expected_is_opt = matches!(
+                            &*self.current_expected_ty.borrow(),
+                            Some(IrType::Option(_))
+                        );
+                        if !matches!(ret_ty, IrType::Option(_))
+                            && matches!(&expr.ty, IrType::Option(_))
+                            && !self.in_lambda_block
+                            && !expected_is_opt
+                        {
+                            format!("{}.unwrap()", expr_s)
+                        } else {
+                            expr_s
+                        }
+                    } else {
+                        expr_s
+                    };
+                    self.emit_line(&format!("{}", emitted));
                 } else if is_last {
                     // main 函数尾表达式 → expr;
                     self.emit_line(&format!("{};", expr_s));
@@ -1763,6 +2036,23 @@ impl CodeGen {
                 };
                 self.emit_line(&format!("for {} in {} {{", var, iter_s));
                 self.indent += 1;
+                // BUG-268：字符串 for 循环（`for c in s` 或 `for c in s.chars()`）
+                // 循环变量在 Rust 是 char，但 IR ty 为 Str。登记到 str_loop_vars 供
+                // 拼接语境生成 `c.to_string()`（否则 `&c[..]` 报 E0608）。
+                // 注意：split()/lines() 返回 &str 元素（非 char），其循环变量是 &str
+                // 而 Rust String::to_string() 对 &str 是必要转换——不登记 str_loop_vars，
+                // 让 clone_if_multiuse 正常生成 .to_string()。
+                let iter_is_str = matches!(&iter.ty, IrType::Str)
+                    || matches!(&iter.ty, IrType::Named { path, .. }
+                        if path == "str" || path == "String")
+                    // chars() 显式调用：`for c in s.chars()` → Iterator<Str>
+                    || (matches!(&iter.ty, IrType::Named { path, args }
+                        if path == "Iterator" && args.first().map_or(false, |a| matches!(a, IrType::Str)))
+                        && matches!(&iter.kind, ExprKind::MethodCall { method, .. } if method == "chars"));
+                let was_str_loop_var = self.str_loop_vars.contains(var);
+                if iter_is_str {
+                    self.str_loop_vars.insert(var.clone());
+                }
                 // For loop body should not emit return for tail expressions
                 let saved = self.suppress_tail_return;
                 self.suppress_tail_return = true;
@@ -1773,6 +2063,10 @@ impl CodeGen {
                 let saved_declared = self.declared.clone();
                 self.gen_block_inner(body);
                 self.declared = saved_declared;
+                // 清理 str_loop_vars（仅当是本循环新插入的，避免误删外层同名）
+                if iter_is_str && !was_str_loop_var {
+                    self.str_loop_vars.remove(var);
+                }
                 self.loop_depth -= 1;
                 self.force_stmt_semicolon = saved_semi;
                 self.suppress_tail_return = saved;
@@ -2083,9 +2377,19 @@ impl CodeGen {
                     let saved_str_bindings: Vec<String> =
                         self.str_typed_vars.iter().cloned().collect();
                     self.register_enum_variant_str_bindings(&arm.pattern);
+                    // BUG-284：Str 类型 scrutinee 经 .as_str() 转 &str，通配绑定为 &str；
+                    // 注册到 str_match_bindings，返回 String 语境需 .to_string()
+                    let saved_str_match: Vec<String> =
+                        self.str_match_bindings.iter().cloned().collect();
+                    if matches!(&scrutinee.ty, IrType::Str)
+                        && matches!(&arm.pattern, Pattern::Ident(_))
+                    {
+                        collect_pattern_bindings(&arm.pattern, &mut self.str_match_bindings);
+                    }
                     self.gen_block_inner(&arm.body);
                     // 恢复 str_typed_vars 到臂前状态（避免跨臂泄漏）
                     self.str_typed_vars = saved_str_bindings.into_iter().collect();
+                    self.str_match_bindings = saved_str_match.into_iter().collect();
                     self.declared = saved_declared;
                     self.suppress_tail_return = saved;
                     self.ref_mut_bindings = saved_ref_mut;

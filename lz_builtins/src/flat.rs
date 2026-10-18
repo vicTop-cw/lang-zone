@@ -820,6 +820,7 @@ pub trait StringExt {
     fn lz_to_lower(&self) -> String;
     fn lz_slice(&self, start: i64, end: i64) -> String;
     fn lz_find(&self, substr: &str) -> Option<i64>;
+    fn lz_rfind(&self, substr: &str) -> Option<i64>;
 }
 
 impl StringExt for String {
@@ -866,6 +867,9 @@ impl StringExt for String {
     }
     fn lz_find(&self, substr: &str) -> Option<i64> {
         self.find(substr).map(|i| i as i64)
+    }
+    fn lz_rfind(&self, substr: &str) -> Option<i64> {
+        self.rfind(substr).map(|i| i as i64)
     }
 }
 

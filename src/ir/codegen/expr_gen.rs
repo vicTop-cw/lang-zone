@@ -367,8 +367,11 @@ impl CodeGen {
             return s;
         }
         // &str 类型变量需要 to_string() 而非 clone()
-        if matches!(&a.ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Str))
-            || matches!(&a.ty, IrType::Str)
+        // BUG-268：字符串 for 循环变量（`for c in s` → Rust `char`）不加 .to_string()，
+        // 否则 `ord(c)`（ord 期望 char）收到 String 报 E0308。仅在拼接语境处理。
+        if !self.str_loop_vars.contains(&loop_var_name(&a))
+            && (matches!(&a.ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Str))
+                || matches!(&a.ty, IrType::Str))
         {
             if let ExprKind::Var(name) = &a.kind {
                 if let Some(cnt) = self
@@ -877,6 +880,15 @@ impl CodeGen {
                             *self.current_expected_ty.borrow_mut() =
                                 callee_expected.as_ref().and_then(|pts| pts.get(i).cloned());
                             let s = self.gen_expr(a);
+                            // 可空形参（T?）接收非空实参 → 包 Some(..)（E0308）。
+                            // BUG-SG-002/003 语义：`let z: int? = 10` 也走同一判据。
+                            if let Some(pts) = callee_expected.as_ref() {
+                                if let Some(p_ty) = pts.get(i) {
+                                    if needs_some_wrap(p_ty, a) {
+                                        return format!("Some({})", s);
+                                    }
+                                }
+                            }
                             // fn 值实参（Arc 载体）→ 转发闭包（见 fn_value_fwd）
                             if let Some(fwd) = self.fn_value_fwd(&s, a) {
                                 return fwd;
@@ -1096,8 +1108,8 @@ impl CodeGen {
                                 // 递归 Option 字段透明解 Box（n.next.map(|__b| *__b)）已把
                                 // 字段值映射为 Option<Self> 正确类型，此时不能再追加 .clone()
                                 // （会把 Option<T> 克隆成 Option<T>，类型错 E0308）
-                                let is_recursive_opt_field = s.contains(".map(|__b| *__b)")
-                                    || s.contains(".map(|__b|*__b)");
+                                let is_recursive_opt_field = s.contains(".map(|__b| (*__b).clone())")
+                                    || s.contains(".map(|__b|(*__b).clone())");
                                 if !s.starts_with('&')
                                     && !s.ends_with(".clone()")
                                     && !s.contains("::")
@@ -1712,6 +1724,16 @@ impl CodeGen {
                     } else {
                         format!("lz_abs({})", args_s[0])
                     }
+                } else if callee_s == "pow" && args_s.len() == 2 {
+                    // pow(base, exp)：LZ std math.lz 有 def pow(base:int,exp:int)->int
+                    // 与 def pow_f(base:float,exp:float)->float；lz_builtins 只有
+                    // pow_i64(base:i64,exp:u32) 与 pow_f64(base:f64,exp:f64)。
+                    // 按 arg0 类型选重载（i64 → pow_i64，f64 → pow_f64）；exp 需转 u32。
+                    if matches!(&args[0].ty, IrType::F64) {
+                        format!("pow_f64({}, {})", args_s[0], args_s[1])
+                    } else {
+                        format!("pow_i64({}, {} as u32)", args_s[0], args_s[1])
+                    }
                 } else if callee_s == "type_name" && args_s.len() == 1 {
                     // BUG-EC-006: type_name(x) 函数式内省 → 静态类型名（方案 C，与 v.type_name() 方法一致）
                     let t = self.rust_type(&args[0].ty);
@@ -1789,10 +1811,12 @@ impl CodeGen {
                     format!("({} != 0)", args_s[0])
                 } else if callee_s == "range" && args_s.len() >= 1 {
                     // range(start, end) or range(end) → start..end or 0..end
+                    // 加括号：`range(0,10).len()` 若无括号，`.len()` 会绑定到 `10i64`
+                    // 而非整个 Range（E0599 i64 无 len）
                     if args_s.len() == 1 {
-                        format!("0..{}", args_s[0])
+                        format!("(0..{})", args_s[0])
                     } else {
-                        format!("{}..{}", args_s[0], args_s[1])
+                        format!("({}..{})", args_s[0], args_s[1])
                     }
                 // ── Iterator/collection free-function → method mappings ──
                 // Pipe inserts receiver as first arg: [1,2,3] |> f(args) → f([1,2,3], args)
@@ -1858,6 +1882,60 @@ impl CodeGen {
                     // into_iter() 对两者都有效（Iterator: IntoIterator 恒等，Vec 消费）
                     // 守卫：用户自定义同名函数（iterator.lz `def collect(iter: Iterator)`）优先
                     format!("({}).into_iter().collect::<Vec<_>>()", args_s[0])
+                } else if callee_s == "collect_list"
+                    && args_s.len() == 1
+                    && !self.fn_param_types.contains_key("collect_list")
+                {
+                    // BUG-317：iter.lz `collect_list` 未被 inline → 生成存根
+                    // `fn collect_list(__a0: i64) -> i64 { i64::MAX }`，
+                    // `collect_list(range(0,5))` E0308 expected i64 found Range。
+                    // 与 collect 同语义：into_iter().collect::<Vec<_>>()。
+                    format!("({}).into_iter().collect::<Vec<_>>()", args_s[0])
+                } else if callee_s == "range_inclusive" && args_s.len() >= 1 {
+                    format!("({}..={})", args_s[0], args_s.get(1).cloned().unwrap_or_else(|| args_s[0].clone()))
+                } else if callee_s == "step_range" && args_s.len() == 3 {
+                    // step_range(start, end, step) → (start..end).step_by(step as usize)
+                    format!("({}..{}).step_by({} as usize)", args_s[0], args_s[1], args_s[2])
+                } else if callee_s == "once" && args_s.len() == 1 {
+                    format!("std::iter::once({})", args_s[0])
+                } else if callee_s == "repeat" && args_s.len() == 1 {
+                    format!("std::iter::repeat({})", args_s[0])
+                } else if callee_s == "repeat_n" && args_s.len() == 2 {
+                    format!("std::iter::repeat({}).take({} as usize)", args_s[0], args_s[1])
+                } else if callee_s == "empty" {
+                    // empty() / empty.<T>()：turbofish 已由 L1171 计算（如 `::<i64>`）。
+                    // 若无 turbofish（type_args 空），用 i64 兜底。
+                    if turbofish.is_empty() {
+                        "std::iter::empty::<i64>()".to_string()
+                    } else {
+                        format!("std::iter::empty{}()", turbofish)
+                    }
+                } else if callee_s == "find"
+                    && args_s.len() == 2
+                    && !self.fn_param_types.contains_key("find")
+                {
+                    // iter.lz find(iterable, pred) → iterable.into_iter().find(pred)
+                    // 闭包参数需带 &（谓词收 &Item），strip_lambda_type_with_ref。
+                    let lambda = strip_lambda_type_with_ref(&args_s[1]);
+                    format!("({}).into_iter().find({})", args_s[0], lambda)
+                } else if callee_s == "count_if"
+                    && args_s.len() == 2
+                    && !self.fn_param_types.contains_key("count_if")
+                {
+                    let lambda = strip_lambda_type(&args_s[1]);
+                    format!("({}).into_iter().filter({}).count() as i64", args_s[0], lambda)
+                } else if callee_s == "product"
+                    && args_s.len() == 1
+                    && !self.fn_param_types.contains_key("product")
+                {
+                    // product(iterable) → 与 sum 类似，.iter().copied().product::<i64>()
+                    format!("({}).iter().copied().product::<i64>()", args_s[0])
+                } else if callee_s == "for_each"
+                    && args_s.len() == 2
+                    && !self.fn_param_types.contains_key("for_each")
+                {
+                    let lambda = strip_lambda_type(&args_s[1]);
+                    format!("({}).into_iter().for_each({})", args_s[0], lambda)
                 } else if callee_s == "max"
                     && args_s.len() == 1
                     && !self.fn_param_types.contains_key("max")
@@ -1875,6 +1953,21 @@ impl CodeGen {
                     self.sort_like_block(&args[0], &args_s[0], "sort")
                 } else if callee_s == "reversed" && args_s.len() == 1 {
                     self.sort_like_block(&args[0], &args_s[0], "reverse")
+                } else if (callee_s == "take_while" || callee_s == "drop_while") && args_s.len() == 2 {
+                    // BUG-288：take_while/drop_while 未映射 prelude，生成 Rust 中
+                    // 不存在的自由函数调用 → E0599
+                    // Rust 1.96 中 Iterator 只有 take_while / skip_while，无 drop_while
+                    // 谓词接收 &Item → strip_lambda_type_with_ref 给参数加 &
+                    let lambda = strip_lambda_type_with_ref(&args_s[1]);
+                    let op = if callee_s == "take_while" {
+                        "take_while"
+                    } else {
+                        "skip_while"
+                    };
+                    format!(
+                        "({}).into_iter().{}({}).collect::<Vec<_>>()",
+                        args_s[0], op, lambda
+                    )
                 } else if (callee_s == "push" || callee_s == "append") && args_s.len() == 2 {
                     // 自由函数 push/append(list, item) → (list).push(item)
                     // （Vec 固有方法，自动 &mut 借用；recv 经 auto_mut_locals 标为 mut）
@@ -1970,6 +2063,65 @@ impl CodeGen {
                         }
                     } else {
                         format!("{}{}({})", callee_s, turbofish, args_s.join(", "))
+                    }
+                } else if !args.is_empty()
+                    && !is_kwarg_call(args)
+                    && !self.fn_param_types.contains_key(&callee_s)
+                    && matches!(callee_s.as_str(), "Range" | "RangeInclusive")
+                {
+                    // BUG-293：`Range(1, 6)` 位置构造被生成 `fn Range(__a0, __a1) -> i64`
+                    // 存根 + 裸调用 → 运行期返回 i64::MAX。Range 是 type alias 不是
+                    // struct，非空构造应生成 Rust 范围字面量 `1i64..6i64`。
+                    let inclusive = callee_s == "RangeInclusive";
+                    let start = args_s.first().cloned().unwrap_or_else(|| "0".into());
+                    let end = args_s.get(1).cloned().unwrap_or_else(|| "0".into());
+                    if inclusive {
+                        format!("{}..={}", start, end)
+                    } else {
+                        format!("{}..{}", start, end)
+                    }
+                } else if !args.is_empty()
+                    && !is_kwarg_call(args)
+                    && !self.fn_param_types.contains_key(&callee_s)
+                    && matches!(
+                        callee_s.as_str(),
+                        "Set" | "HashSet" | "set" | "Dict" | "HashMap" | "dict"
+                    )
+                {
+                    // BUG-290：`Set([1,2,3])` / `Dict({"a":1,"b":2})` 非空构造
+                    // type alias 是别名不是 struct，按函数调用生成 `Set(vec![...])`
+                    // → E0308 expected i64, found Vec<i64>
+                    // 若实参已是同类型 StructCtor（Dict{_k0,_v0,...} 字面量），
+                    // 直接透传（args_s 已是 BTreeMap::from([...]) / HashSet::from([...])）
+                    // Set([1,2,3])：实参是 ListLit → from([...]) 取 ListLit 的元素
+                    if args.len() == 1
+                        && matches!(
+                            &args[0].kind,
+                            ExprKind::StructCtor { name, .. }
+                                if name == "Dict" || name == "Set"
+                                    || name == "HashMap" || name == "HashSet"
+                        )
+                    {
+                        args_s[0].clone()
+                    } else if matches!(callee_s.as_str(), "Set" | "HashSet" | "set")
+                        && args.len() == 1
+                    {
+                        if let ExprKind::ListLit(elems) = &args[0].kind {
+                            let inner: Vec<String> = elems.iter().map(|e| self.gen_expr(e)).collect();
+                            format!(
+                                "std::collections::HashSet::from([{}])",
+                                inner.join(", ")
+                            )
+                        } else {
+                            format!(
+                                "std::collections::HashSet::from([{}])",
+                                args_s.join(", ")
+                            )
+                        }
+                    } else if matches!(callee_s.as_str(), "Set" | "HashSet" | "set") {
+                        format!("std::collections::HashSet::from([{}])", args_s.join(", "))
+                    } else {
+                        format!("std::collections::BTreeMap::from([{}])", args_s.join(", "))
                     }
                 } else if !args.is_empty() && is_kwarg_call(args) && self.is_known_type(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
@@ -3208,6 +3360,25 @@ impl CodeGen {
                     "trim" => "trim",
                     "starts_with" => "starts_with",
                     "ends_with" => "ends_with",
+                    // BUG-280：str 的 find 走 StringExt::lz_find（返回 Option<i64>）。
+                    // Rust std String::find 返回 Option<usize>，IR 类型 Option<Int>（i64）
+                    // 不匹配 → E0308。lz_find 签名 &str 参数与 pattern_methods 一致。
+                    // in_ext_trait 守卫：扩展 trait impl 体中不映射（trait 声明是 find/rfind，
+                    // 不是 lz_find/lz_rfind），否则生成 `<str as StrExt>::lz_find(...)` → E0576/E0407。
+                    "find" if {
+                        !self.in_ext_trait
+                            && (matches!(&receiver.ty, IrType::Named { path, .. }
+                                if path == "str" || path == "String")
+                                || matches!(&receiver.ty, IrType::Str))
+                    } => "lz_find",
+                    // BUG-313：rfind 走 lz_rfind（尾部查找），否则误映射 lz_find
+                    // `test_str_rfind("hello")` 返回 2（首 l）而非 3（末 l）
+                    "rfind" if {
+                        !self.in_ext_trait
+                            && (matches!(&receiver.ty, IrType::Named { path, .. }
+                                if path == "str" || path == "String")
+                                || matches!(&receiver.ty, IrType::Str))
+                    } => "lz_rfind",
                     // StdBridge camelCase 别名接线（BUG-SB-001/003 修复，2026-09-03）：
                     // bridge/std.rs resolve_method 已有完整映射（含单测），
                     // 此前 IR codegen 方法表未接入 → startsWith 原样透传 E0599。
@@ -3345,7 +3516,10 @@ impl CodeGen {
                         let is_set_contains = recv_is_set && method == "contains";
                         // Dict/HashMap 的 contains_key 参数需 &Q（list.lz unique
                         // `seen.contains_key(item)` → E0308 expected &_, found T）
-                        let is_dict_contains_key = recv_is_dict && method == "contains_key";
+                        // Dict/HashMap 的 get/remove 也需 &Q（BUG-313：`d.get(1)` 报
+                        // E0308 expected &i64, found i64，因 BTreeMap::get 签名 &Q）
+                        let is_dict_contains_key = recv_is_dict
+                            && (method == "contains_key" || method == "get" || method == "remove");
                         for (idx, arg_expr) in args.iter().enumerate() {
                             // 用户 struct 的同名普通方法（如 lib_hashmap 的 get(key: str)
                             // → String 形参）：不做 &str/& 实参改写，保持原 String 语义。
@@ -3466,7 +3640,99 @@ impl CodeGen {
                         }
                     }
                     let call = format!("{}.{}({})", recv_c, rust_method, args_c.join(", "));
-                    return call;
+                    // BUG-295：`s.split(",")` 生成 Split<&str>，LZ 语义是 List<str>
+                    // （Vec<String>）→ `.len()` 报 E0599。收集为 Vec<String>。
+                    let call = if rust_method == "split"
+                        && (matches!(&receiver.ty, IrType::Named { path, .. }
+                            if path == "str" || path == "String")
+                            || matches!(&receiver.ty, IrType::Str))
+                    {
+                        format!(
+                            "{}.split({}).map(|s| s.to_string()).collect::<Vec<_>>()",
+                            recv_c,
+                            args_c.join(", ")
+                        )
+                    } else {
+                        call
+                    };
+                    // BUG-280：lz_find 返回 Option<i64>，LZ 用 -1 编码 None → unwrap_or(-1)
+                    // 平铺为 i64，与 IR 类型 Int 一致（否则 match -1 报 E0308）
+                    // BUG-313：lz_rfind 同（Option<i64>，LZ rfind 返回 Int，-1 编码 None）
+                    return if rust_method == "lz_find" || rust_method == "lz_rfind" {
+                        format!("{}.unwrap_or(-1i64)", call)
+                    } else {
+                        call
+                    };
+                }
+                // ── List/Vec LZ stdlib 方法（list.lz）─ 这些方法无对应 Rust std
+                // 固有方法，需要 inline 展开或调用 lz_builtins 自由函数 ──
+                // BUG-313：`lst.reversed()` E0599 no method named `reversed` on Vec
+                let recv_is_vec_like = matches!(&receiver.ty, IrType::Named { path, .. }
+                    if path == "List" || path == "Vec" || path == "list");
+                let recv_is_set_like = matches!(&receiver.ty, IrType::Named { path, .. }
+                    if path == "Set" || path == "HashSet");
+                if recv_is_vec_like {
+                    match method.as_str() {
+                        // LZ .reversed() → lz_builtins::reversed(lst.clone())
+                        "reversed" => {
+                            return format!("reversed({}.clone())", recv);
+                        }
+                        // LZ .unique() → lz_builtins::unique(lst.clone())
+                        "unique" => {
+                            return format!("unique({}.clone())", recv);
+                        }
+                        // LZ .index_of(value) → ListExt::lz_index(&value)
+                        // 返回 Option<i64>（LZ `Option<int>`），不做 unwrap_or 平铺——
+                        // 调用方可自行 .unwrap_or(-1)（list.lz:48 签名 Option<int>）
+                        // BUG-318：用户 `impl List { def index_of(..) }`（list.lz）生成的
+                        // ListExt trait 方法是原名 index_of（返回 Option<i64>）；恒映射
+                        // lz_index 会 E0599 no method named `lz_index`（list.rs L191/
+                        // L478/L479）。与 set union/intersection 的 struct_method_names
+                        // 判定一致：有用户同名方法走原名，否则 lz_builtins::ListExt::lz_index。
+                        "index_of" if !args_s.is_empty() => {
+                            let a0_raw = &args_s[0];
+                            let list_path = match &receiver.ty {
+                                IrType::Named { path, .. } => path.as_str(),
+                                _ => "",
+                            };
+                            let user_has_index_of =
+                                self.struct_method_names(list_path).contains("index_of");
+                            return if user_has_index_of {
+                                // 用户 `impl List { def index_of(&self, value: T) }`
+                                // （list.lz L50）签名按值：value: T → 参数原样直传。
+                                format!("{}.index_of({})", recv, a0_raw)
+                            } else {
+                                // lz_builtins::ListExt::lz_index 签名 &T → 包 &
+                                let a0 = if a0_raw.starts_with('&') {
+                                    a0_raw.clone()
+                                } else {
+                                    format!("&{}", a0_raw)
+                                };
+                                format!("{}.lz_index({})", recv, a0)
+                            };
+                        }
+                        // LZ .count_of(value) → filter().count()
+                        "count_of" if !args_s.is_empty() => {
+                            let a0 = &args_s[0];
+                            return format!(
+                                "({}).iter().filter(|x| **x == {}).count() as i64",
+                                recv, a0
+                            );
+                        }
+                        // LZ .remove_at(index) → Option<T>（LZ stdlib 返回 Option<T>）
+                        "remove_at" if !args_s.is_empty() => {
+                            let a0 = &args_s[0];
+                            // 生成带边界检查的 remove：i64 索引转 usize 并检查越界
+                            // 对 a0 加括号防止 `as usize` 优先级高于 `-` 导致
+                            // `(self.len() as i64) - 1i64 as usize` 解析为
+                            // `(self.len() as i64) - (1i64 as usize)` → E0277
+                            return format!(
+                                "(if {} >= 0i64 && (({}) as usize) < {}.len() {{ Some({}.remove(({}) as usize)) }} else {{ None }})",
+                                a0, a0, recv, recv, a0
+                            );
+                        }
+                        _ => {}
+                    }
                 }
                 // Vec::insert/remove/get 需要 usize 索引（LZ int 是 i64）：
                 // `self.insert_at(index, value)`（编译器映射标记，list.lz insert 方法）、
@@ -3478,7 +3744,9 @@ impl CodeGen {
                 // expected i64, found usize）
                 let recv_ty_name = match &receiver.ty {
                     IrType::Named { path, .. } => path.clone(),
-                    _ => String::new(),
+                    _ => {
+                        String::new()
+                    }
                 };
                 let has_custom_get = method == "get"
                     && self
@@ -3500,10 +3768,18 @@ impl CodeGen {
                     || path == "Dict" || path == "HashMap");
                 let has_custom_remove = method == "remove"
                     && !recv_is_builtin_collection
-                    && self
-                        .struct_method_names_map
-                        .get(&recv_ty_name)
-                        .map_or(false, |s| s.contains("remove"));
+                    && {
+                        let r = self
+                            .struct_method_names_map
+                            .get(&recv_ty_name)
+                            .map_or(false, |s| s.contains("remove"));
+                        r
+                    };
+                // Dict/HashMap 的 get/remove/insert 的 key 是 i64（非 usize），
+                // 不走 Vec 的 `as usize` 强转（BUG-313：`d.get(1)` 报 E0308
+                // expected &i64, found usize）
+                let recv_is_dict_ty = matches!(&receiver.ty, IrType::Named { path, .. }
+                    if path == "Dict" || path == "HashMap");
                 if (method == "insert"
                     || method == "insert_at"
                     || method == "remove"
@@ -3513,7 +3789,30 @@ impl CodeGen {
                     && !args_s[0].starts_with('&')
                     && !has_custom_get
                     && !recv_is_set_ty
+                    && !recv_is_dict_ty
                     && !has_custom_remove
+                {
+                    args_s[0] = format!("({} as usize)", args_s[0]);
+                }
+                // BUG-276：str::splitn/rsplitn/repeat 的 n 参数在 Rust std 是 usize，
+                // LZ int 是 i64。`s.splitn(2, ",")` 生成 `2i64` → E0308。
+                // 与 take/skip（L3938）同一转换逻辑。
+                let str_repeat_path = match &receiver.ty {
+                    IrType::Named { path, .. } => path.as_str(),
+                    IrType::Str => "str",
+                    _ => "",
+                };
+                if (method.as_str() == "splitn"
+                    || method.as_str() == "rsplitn"
+                    || method.as_str() == "repeat")
+                    && !args_s.is_empty()
+                    && matches!(&args[0].ty, IrType::Int)
+                    && !args_s[0].starts_with('&')
+                    // BUG-318：用户 `impl str { def repeat(n: i64) }`（string.lz）生成的
+                    // StrExt::repeat 签名是 i64；恒转 usize 会 E0308（string.rs L370
+                    // expected i64, found usize）。有用户同名方法时不转换，走用户签名。
+                    && !(self.struct_method_names(str_repeat_path).contains("repeat")
+                        || self.struct_method_names("String").contains("repeat"))
                 {
                     args_s[0] = format!("({} as usize)", args_s[0]);
                 }
@@ -3576,7 +3875,61 @@ impl CodeGen {
                     if recv_is_fn_field {
                         format!("({}.{})({})", recv, method, args_s.join(", "))
                     } else {
-                        format!("{}.{}({})", recv, rust_method, args_s.join(", "))
+                        let call_s = format!("{}.{}({})", recv, rust_method, args_s.join(", "));
+                        // BUG-269：str 变换方法（trim/to_upper/to_lower/replace/repeat/
+                        // reverse/strip/pad_*）在 Rust 返回 &str 或 String，但 IR 类型为 Str
+                        // （LZ 值语义 String）。`let cleaned = raw.trim()` 生成 `raw.trim()`
+                        // （返回 &str）赋给 String → E0308。检测到 receiver 是 String/str
+                        // 且方法名在 str 变换表内时追加 `.to_string()` 保证 owned String。
+                        const STR_TRANSFORM_METHODS: &[&str] = &[
+                            "trim",
+                            "trim_start",
+                            "trim_end",
+                            "to_upper",
+                            "to_lower",
+                            "replace",
+                            "repeat",
+                            "upper",
+                            "lower",
+                        ];
+                        let recv_is_str_owned = matches!(&receiver.ty, IrType::Str)
+                            || matches!(&receiver.ty, IrType::Named { path, .. }
+                                if path == "str" || path == "String");
+                        let is_user_struct_method = matches!(&receiver.ty, IrType::Named { path, .. }
+                            if self.struct_method_names(path).contains(method.as_str()));
+                        if recv_is_str_owned
+                            && STR_TRANSFORM_METHODS.contains(&rust_method)
+                            && !is_user_struct_method
+                        {
+                            format!("{}.to_string()", call_s)
+                        } else if recv_is_str_owned && rust_method == "split" {
+                            // BUG-295：`s.split(",")` 生成 Split<&str>，LZ 语义是
+                            // List<str>（Vec<String>）→ `.len()` 报 E0599。
+                            // 收集为 Vec<String>。
+                            format!(
+                                "{}.split({}).map(|s| s.to_string()).collect::<Vec<_>>()",
+                                recv,
+                                args_s.join(", ")
+                            )
+                        } else if rust_method == "lz_find" || rust_method == "lz_rfind" {
+                            // BUG-280：lz_find 返回 Option<i64>，LZ 用 -1 编码 None
+                            // → unwrap_or(-1) 平铺为 i64（否则 match -1 报 E0308）
+                            // BUG-313：lz_rfind 同
+                            format!("{}.unwrap_or(-1i64)", call_s)
+                        } else if (method == "get" || rust_method == "get")
+                            && matches!(&receiver.ty, IrType::Named { path, .. }
+                                if path == "List" || path == "Vec")
+                            && !recv_is_fn_field
+                        {
+                            // BUG-281：List.get 走 std Vec::get 返回 Option<&T>，
+                            // 后续 L4139 追加 .cloned() → Option<T>；LZ 用 -1 编码 None
+                            // 需在 cloned 之后 unwrap_or。此处标记一个标志，由 L4139 区域
+                            // 在 .cloned() 之后追加 .unwrap_or()。
+                            // 为简化：此处返回原 call_s，unwrap_or 由 L4139 处理。
+                            call_s
+                        } else {
+                            call_s
+                        }
                     }
                 };
                 // LZ 值语义：List.reverse() 返回新列表（Rust Vec::reverse 原地返回 ()，
@@ -3715,7 +4068,7 @@ impl CodeGen {
                     };
                     return format!(
                         "<str as StrExt>::{}({}, {})",
-                        rust_method,
+                        method, // StrExt 声明的是 find/rfind，非 lz_find/lz_rfind（BUG-280 映射仅用于非限定调用）
                         recv_ref,
                         args_owned.join(", ")
                     );
@@ -3723,8 +4076,8 @@ impl CodeGen {
                 // DictExt trait 方法强制调用：HashMap 的 keys/values/items/iter 与
                 // std HashMap 固有方法同名（固有优先返回 Keys/Values 迭代器而非
                 // LZ 的 Vec/List，E0308 expected Vec<K>, found Keys）——显式 DictExt::
-                let recv_is_dict = matches!(&receiver.ty, IrType::Named { path, .. }
-                    if path == "Dict" || path == "HashMap");
+                let recv_is_dict = matches!(&receiver.ty, IrType::Named { path, args }
+                    if (path == "Dict" || path == "HashMap") && args.len() == 2);
                 // 用户 struct 同名普通方法（如 lib_hashmap 的 keys()）优先于 DictExt
                 //
                 // 仅当本模块确实有 DictExt（本模块存在 `impl Dict/HashMap …` 块时
@@ -3765,6 +4118,40 @@ impl CodeGen {
                         args_s.join(", ")
                     );
                 }
+                // BUG-285：Dict/HashMap 的 values()/keys() 未走 DictExt（无该 trait 时）
+                // 落到 BTreeMap/HashMap 固有方法，返回 Values/Keys 迭代器而非 Vec。
+                // LZ 语义要求 List<T> → 追加 .collect::<Vec<_>>()。
+                if recv_is_dict
+                    && !self.trait_names.contains("DictExt")
+                    && matches!(method.as_str(), "values" | "keys" | "items")
+                    && !user_plain.contains(method.as_str())
+                {
+                    let recv_ref = if recv == "self" || recv.starts_with('&') {
+                        recv.clone()
+                    } else if recv.starts_with('(') {
+                        format!("&{}", recv)
+                    } else {
+                        format!("&({})", recv)
+                    };
+                    // keys/values → List<K>/List<V>（.cloned().collect::<Vec<_>>()）；
+                    // items → List<(K, V)>：BTreeMap::iter() 已取 &self，
+                    // 不要再包 &（`&(d).iter()` 变 &&BTreeMap → E0308）
+                    if method == "items" {
+                        let iter_recv = if recv.starts_with('&') {
+                            format!("({})", recv)
+                        } else {
+                            format!("(&({}))", recv)
+                        };
+                        return format!(
+                            "{}.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Vec<_>>()",
+                            iter_recv
+                        );
+                    }
+                    return format!(
+                        "{}.{}({}).cloned().collect::<Vec<_>>()",
+                        recv, method, args_s.join(", ")
+                    );
+                }
                 // SetExt trait 方法强制调用：HashSet 的 union/intersection/difference/
                 // symmetric_difference 与 std HashSet 固有方法同名（固有优先返回
                 // Union/Intersection 迭代器而非 LZ 的 Set，E0599/E0308）——显式 SetExt::
@@ -3776,6 +4163,12 @@ impl CodeGen {
                     && matches!(
                         method.as_str(),
                         "union" | "intersection" | "difference" | "symmetric_difference" | "iter"
+                            // BUG-313：HashSet::is_subset 需要 &HashSet 参数；
+                            // 不加到此表则落到通用方法路径，`a.is_subset(b)` 生成
+                            // `a.is_subset(b)` → E0308 expected &HashSet, found HashSet
+                            | "is_subset"
+                            | "is_superset"
+                            | "is_disjoint"
                     )
                 {
                     let recv_ref = if recv == "self" || recv.starts_with('&') {
@@ -3785,9 +4178,104 @@ impl CodeGen {
                     } else {
                         format!("&({})", recv)
                     };
+                    // 方法名取舍：lz_builtins::SetExt 的方法叫 lz_union/lz_intersection，
+                    // 但用户 `impl<T> Set<T> { def union(..) }`（如 set.lz）会被代码生成
+                    // 成 `trait SetExt<T>` + `impl SetExt for HashSet<T>`，其方法名是
+                    // 原样的 `union`/`intersection`（覆盖/遮蔽 lz_builtins::SetExt，
+                    // 本模块内 glob use 导入的同名 trait 让位于本地声明）。
+                    // 若此处恒映射到 lz_union → 用户生成的 SetExt 无此方法 → E0576
+                    // （BUG-263：set.lz `self.union(other)` → `<HashSet as SetExt>::
+                    // lz_union`，但 set.lz 生成的 SetExt 只声明 `union`）。
+                    // 判据：该 Set 类型是否已在 struct_method_names_map 登记同名方法
+                    // （含 impl 块方法，mod.rs:832）。有则用原名（用户 trait），
+                    // 无则用 lz_union/lz_intersection（lz_builtins::SetExt）。
+                    let set_path = match &receiver.ty {
+                        IrType::Named { path, .. } => path.as_str(),
+                        _ => "",
+                    };
+                    let set_has_user_method =
+                        self.struct_method_names(set_path).contains(method.as_str());
+                    let set_method = if set_has_user_method {
+                        rust_method
+                    } else {
+                        match rust_method {
+                            "union" => "lz_union",
+                            "intersection" => "lz_intersection",
+                            other => other,
+                        }
+                    };
+                    // BUG-313：HashSet::is_subset 签名 (&self, &HashSet<T>)，LZ `a.is_subset(b)`
+                    // 直接生成 `a.is_subset(b)` → E0308 expected &HashSet, found HashSet。
+                    // 用 & 包第二个参数；receiver 已 ref 化（recv_ref）。
+                    if rust_method == "is_subset" || rust_method == "is_superset" {
+                        let arg0 = if args_s.is_empty() {
+                            "".to_string()
+                        } else {
+                            let a0 = &args_s[0];
+                            if a0.starts_with('&') {
+                                a0.clone()
+                            } else {
+                                format!("&({})", a0)
+                            }
+                        };
+                        // BUG-313：`&(a).is_subset(...)` 会被 Rust 解析成
+                        // `&((a).is_subset(...))`（方法调用优先级高于一元 &）→ 返回 &bool。
+                        // 直接使用 recv（方法自动借用 self），只对第二参数加 &。
+                        return format!("{}.{}({})", recv, rust_method, arg0);
+                    }
+                    // SetExt::union/intersection（无论 lz_builtins 的 lz_union 还是 set.lz 生成的
+                    // `trait SetExt { fn union(&self, other: &Set<T>) }`）签名都是
+                    // (self: &HashSet, other: &HashSet)，需把第二个参数也包 &。
+                    if matches!(
+                        set_method,
+                        "lz_union" | "lz_intersection" | "union" | "intersection"
+                    ) {
+                        let arg0 = if args_s.is_empty() {
+                            "".to_string()
+                        } else {
+                            let a0 = &args_s[0];
+                            if a0.starts_with('&') {
+                                a0.clone()
+                            } else {
+                                // 第二个参数须为 &HashSet<T>；b.clone() 是 owned HashSet，
+                                // 也要包 &（`&(b.clone())` 借用临时，生命周期覆盖本表达式）。
+                                format!("&({})", a0)
+                            }
+                        };
+                        return format!(
+                            "<{} as SetExt<_>>::{}({}, {})",
+                            self.rust_type(&receiver.ty),
+                            set_method,
+                            recv_ref,
+                            arg0
+                        );
+                    }
+                    // difference/symmetric_difference：std HashSet 固有方法需要 &HashSet，
+                    // 结果迭代器再 .cloned().collect::<HashSet<_>>() 变 LZ Set<T>。
+                    if matches!(rust_method, "difference" | "symmetric_difference") {
+                        let arg0 = if args_s.is_empty() {
+                            "".to_string()
+                        } else {
+                            let a0 = &args_s[0];
+                            if a0.starts_with('&') {
+                                a0.clone()
+                            } else {
+                                format!("&({})", a0)
+                            }
+                        };
+                        // BUG-318：recv_ref 是 `&(expr)`，Rust 一元 & 优先级低于方法调用，
+                        // `&(union(...)).difference(...)` 解析为 `&((...).difference(...))`
+                        // → 返回 &HashSet → E0308（set.rs L206 expected HashSet, found &HashSet）。
+                        // 用 recv（方法调用自动借用 self，对 owned HashSet 同样成立）。
+                        return format!(
+                            "{}.{}({}).cloned().collect::<HashSet<_>>()",
+                            recv, rust_method, arg0
+                        );
+                    }
                     return format!(
-                        "SetExt::{}({}, {})",
-                        rust_method,
+                        "<{} as SetExt<_>>::{}({}, {})",
+                        self.rust_type(&receiver.ty),
+                        set_method,
                         recv_ref,
                         args_s.join(", ")
                     );
@@ -4000,6 +4488,35 @@ impl CodeGen {
                         }
                         return format!("({}).{}()", recv, method);
                     }
+                    if (method == "max" || method == "min") && args_s.is_empty() && recv_is_list {
+                        // BUG-291：List.max()/.min() 未走方法路由，直接透传
+                        // `xs.max()` → E0599/E0061（Vec 无 max/min）。
+                        // 与 sum/product 同款迭代器链；max/min 返回 Option，
+                        // LZ 空 List 语义由 .unwrap() 表达（与自由函数 max(xs) 一致）。
+                        return format!(
+                            "(*({}).iter().{}().unwrap())",
+                            recv, method
+                        );
+                    }
+                    if method == "sort" && recv_is_list {
+                        // BUG-296：Python 风格原地修改，返回 Unit（void）。
+                        return format!("{}.{}()", recv, rust_method);
+                    }
+                    if method == "reverse" && recv_is_list {
+                        return format!("{}.{}()", recv, rust_method);
+                    }
+                    if method == "join" && recv_is_list && !args_s.is_empty() {
+                        // BUG-297：Vec<i64> 无 join（slice::Join 需 String 元素）。
+                        // 映射元素到 String 后 join；参数需 &str（剥掉 .to_string()）。
+                        let sep = args_s[0]
+                            .strip_suffix(".to_string()")
+                            .unwrap_or(&args_s[0])
+                            .trim_start_matches('&');
+                        return format!(
+                            "({}).iter().map(|x| x.to_string()).collect::<Vec<_>>().join({})",
+                            recv, sep
+                        );
+                    }
                 }
                 // Option/Result 消费型方法（map/and_then/unwrap_or 等）：receiver 按值
                 // 消费，非 Copy 类型（内部含 String 等）的变量需 clone 才能复用（E0382 修复，
@@ -4031,6 +4548,58 @@ impl CodeGen {
                 } else {
                     call
                 };
+                let is_dict_receiver = matches!(&receiver.ty, IrType::Named { path, args }
+                    if (path == "Dict" || path == "HashMap") && args.len() == 2);
+                // Dict.get(key, default)：DictExt::get 只收 1 个 key 参数，
+                // 第 2 个参数是 None 编码的默认值 → unwrap_or(default)。
+                // 注意：call 已经是 2 参形式（E0061），需重建为 1 参 + unwrap_or。
+                if (method == "get" || rust_method == "get")
+                    && args_s.len() == 2
+                    && is_dict_receiver
+                {
+                    format!(
+                        "({}).cloned().unwrap_or({})",
+                        format!("{}.{}({})", recv, rust_method, args_s[0]),
+                        args_s[1]
+                    )
+                } else if (method == "get" || rust_method == "get")
+                    && args_s.len() == 1
+                    && is_dict_receiver
+                {
+                    // BUG-313：Dict.get(k) 返回 Option<&V>（BTreeMap::get），
+                    // LZ `get` 签名 `Option<ref V>`，语义上用户可再 .unwrap_or(default)。
+                    // 此处需 .cloned() 把 Option<&V> 转 Option<V>，让后续 .unwrap_or(V)
+                    // 得到 owned 值而非 &V（否则 `unwrap_or("")` 报 E0308 &String vs String）。
+                    format!("({}).cloned()", format!("{}.{}({})", recv, rust_method, args_s[0]))
+                } else if rust_method == "remove"
+                    && args_s.len() == 1
+                    && is_dict_receiver
+                {
+                    // Dict.remove(key) 返回 Option<V>（BUG-289 已登记）。
+                    // LZ 语义保留 Option<V>（`d.remove(1) == Some("a")`），
+                    // 不做 unwrap_or 平铺——若平铺成 V，则与 Some(...) 比较报
+                    // E0308 mismatched types（String vs Option<String>）。
+                    call
+                } else
+                // Range/Chars/Keys/Values 等迭代器无 .len() → .count()（或 end-start）
+                if (method == "len" || method == "length")
+                    && matches!(&receiver.ty, IrType::Named { path, .. }
+                        if path == "Range" || path == "RangeInclusive")
+                {
+                    // Range<T> 无 .len()（E0599），用 end - start 求长度；
+                    // RangeInclusive<T> 用 end - start + 1
+                    if matches!(&receiver.ty, IrType::Named { path, .. } if path == "RangeInclusive") {
+                        format!("(({}).end - ({}).start + 1i64)", recv, recv)
+                    } else {
+                        format!("(({}).end - ({}).start)", recv, recv)
+                    }
+                } else if (method == "len" || method == "length")
+                    && matches!(&receiver.ty, IrType::Named { path, args }
+                        if (path == "Chars" || path == "Bytes" || path == "Keys" || path == "Values"
+                            || path == "Iterator") && args.len() == 1)
+                {
+                    format!("(({}).count() as i64)", recv)
+                } else
                 // .len()/.length() on collections → cast usize to i64
                 if method == "len" || method == "length" {
                     // 某些路径会生成 &self.len()（&usize），去掉多余的 &（E0606
@@ -4039,17 +4608,47 @@ impl CodeGen {
                     format!("({} as i64)", call_clean)
                 } else if method == "first"
                     || method == "last"
+                    || (method == "pop"
+                        && self.is_collection_type(&receiver.ty)
+                        && !user_plain.contains("pop"))
                     || (method == "get"
                         && self.is_collection_type(&receiver.ty)
                         // 用户 struct 自带 get（返回 owned）：不走内置集合的
                         // Option<&T> → .cloned() 包装（lib_hashmap 实测 E0599）
-                        && !user_plain.contains("get"))
+                        && !user_plain.contains("get")
+                        // BUG-313：Dict/HashMap 的 get 返回 Option<V>（LZ `Option<ref V>`），
+                        // 语义即 Option，不应 auto-unwrap_or 平铺（否则调用方手写
+                        // `.unwrap_or(...)` 会落到 String::unwrap_or → E0599）
+                        && !recv_is_dict_ty)
                 {
                     // .first()/.last()/.get() 返回 Option<&T>（LZ ref 语义），需 .cloned()
                     // 转 Option<T>（.copied() 对非 Copy 元素如 String 报 E0277 String: Copy）
                     // get 仅 List/Vec 集合（ListExt::get 返回 Option<&T>）——box.lz 的
                     // Box::get 返回 &T（非 Option），.cloned() 报 E0599 &T is not an iterator
-                    format!("({}).cloned()", call)
+                    // BUG-281：LZ 用 -1 编码 None → .cloned() 之后追加 .unwrap_or(默认值)
+                    // pop 返回 Option<T>（非 &T），无需 .cloned()（否则 E0599 Option<&T>
+                    // 的 &T 不是迭代器）；unwrap_or 仍要追加（LZ pop 返回 T 值语义）
+                    // BUG-316：用户已手写 `.unwrap_or(...)` 时不再追加自动注入，
+                    // 否则 `values.first().unwrap_or(0)` 生成
+                    // `(first()).cloned().unwrap_or(-1i64).unwrap_or(0i64)` → E0599
+                    // LZ 语义：first/last/get 返回 Option<&T>，pop 返回 Option<T>，
+                    // 不再自动追加 unwrap_or 平铺。原因：
+                    // 1) 平铺破坏 Option 语义：`assert last == Some(4)` 生成
+                    //    `last = pop().unwrap_or(-1)` 与 Some(4i64) 比较 → E0308；
+                    //    `while let Some(top) = nums.pop()` 的 scrutinee 变 i64 → E0308。
+                    // 2) 用户已手写 `.unwrap_or(...)` 时自动注入产生双重 unwrap：
+                    //    `values.first().unwrap_or(0)` 生成
+                    //    `.cloned().unwrap_or(-1i64).unwrap_or(0i64)` → E0599。
+                    // 修复：保留 Option，用户显式需要平铺时自写 `.unwrap_or(...)`/`.unwrap()`。
+                    if method == "pop" {
+                        // pop 返回 Option<T>（非 &T），无需 .cloned()（否则 E0599 Option<&T>
+                        // 的 &T 不是迭代器）；直接保留 Option
+                        call
+                    } else {
+                        // first/last/get 返回 Option<&T>，需 .cloned() 转 Option<T>
+                        // （.copied() 对非 Copy 元素如 String 报 E0277 String: Copy）
+                        format!("({}).cloned()", call)
+                    }
                 } else if method == "type_name" && args_s.is_empty() {
                     // 运行时类型自省（03d §2.8 方案 C）：v.type_name() →
                     // std::any::type_name::<T>()（T 为 receiver 静态类型，去掉引用层级）
@@ -4244,7 +4843,11 @@ impl CodeGen {
                                 .map(|(_, t)| t.clone());
                             let is_option = matches!(&field_ty, Some(IrType::Option(_)));
                             return if is_option {
-                                format!("{}.map(|__b| *__b)", access_s)
+                                // BUG-261 配套：递归 Option<Box<Self>> 字段透明解 Box。
+                                // 字段访问在 `&Self` 上得到 `Option<Box<Self>>`（借自引用，
+                                // 不能 move），需 `.clone()` 先复制；`__b` 是 `Box<Self>`，
+                                // `(*__b).clone()` 克隆出 `Self`（`**__b` 会 E0614）。
+                                format!("{}.clone().map(|__b| (*__b).clone())", access_s)
                             } else {
                                 format!("(*{})", access_s)
                             };
@@ -4685,6 +5288,18 @@ impl CodeGen {
                     }
                     if rhs_is_variadic {
                         return format!("{} + {}", lhs_base, rhs_s);
+                    }
+                    // BUG-268：字符串 for 循环变量（`for c in s` 生成 Rust `char`）
+                    // 在拼接语境需先转 String 再 &str：`&c[..]` 对 char 报 E0608。
+                    // 循环变量在 for 体 ctx 中登记于 declared 但 IR ty 为 Str（LZ
+                    // 语义），与 Rust char 不对应——此特殊路径把 `result + c` 生成
+                    // `result + c.to_string().as_str()`。
+                    if let ExprKind::Var(cname) = &rhs.kind {
+                        if self.str_loop_vars.contains(cname.as_str())
+                            && !rhs_s.starts_with('&')
+                        {
+                            return format!("{} + {}.to_string().as_str()", lhs_base, rhs_s);
+                        }
                     }
                     // lhs 非字符串类型（int + str / float + str 等）：
                     // Rust i64 未实现 Add<&str>，需整体用 format! 拼接
@@ -5707,6 +6322,13 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 child.current_fn_raises = self.current_fn_raises.clone();
                 child.current_ret_ty = self.current_ret_ty.clone();
                 child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
+                // BUG-262：继承 current_expected_ty（Let 绑定 `let hi: Option<int> =
+                // { match ... }` 已把它设为 Some(Option(int))）。子 CodeGen 的
+                // current_expected_ty 默认为 None，丢失后块内 match 臂尾值会被误判为
+                // 「流向函数返回」而多加 `.unwrap()`（iter.lz Zip::size_hint
+                // `Some(min(x,y)).unwrap()` 塞进 Option<i64> → E0308）
+                *child.current_expected_ty.borrow_mut() =
+                    self.current_expected_ty.borrow().clone();
                 child.enum_variant_named_fields = self.enum_variant_named_fields.clone();
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
@@ -5729,6 +6351,12 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 // 赋值应生成 `x = ...` 而非 `let mut x = ...` 遮蔽（edge-walrus-operator
                 // walrus_if 的 result = first；t_seq 同块顺序赋值正常因 declared 共享）
                 child.declared = self.declared.clone();
+                // 继承独占局部登记表（`xs = xs + [..]` 的原地追加优化前提）：
+                // 块表达式走子 CodeGen，若不继承，块内对外层 `xs` 的追加式赋值
+                // 查不到 owned_local_kind(xs) → 退化为 `xs = { let mut __cat =
+                // xs.clone(); __cat.extend(..); __cat }` 的 O(n²) 全量拷贝
+                // （edge_probe 的 if 分支暴露，与 str_typed_vars 同一批继承教训）
+                child.owned_locals = self.owned_locals.clone();
                 // 块表达式尾值应为块尾表达式（非 return）
                 child.suppress_tail_return = true;
                 // 复制变量重命名表：math.lz `let sign` 遮蔽模块级 fn sign 时，
@@ -5745,6 +6373,7 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 // 若不继承，块内 `f"…{recv.field}"`（如 with 体的 res.name）查不到 recv
                 // 的 struct 类型 ⇒ 落 Debug（BUG-28/44，违反 SYNTAX/00-词法基础.md:188）。
                 child.str_typed_vars = self.str_typed_vars.clone();
+                child.str_loop_vars = self.str_loop_vars.clone();
                 child.fstr_var_types = self.fstr_var_types.clone();
                 child.struct_fields_info = self.struct_fields_info.clone();
                 child.fstr_self_type = self.fstr_self_type.clone();
@@ -5803,6 +6432,7 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 child.in_generic_fn = self.in_generic_fn;
                 child.in_new_body = self.in_new_body;
                 child.declared = self.declared.clone();
+                child.owned_locals = self.owned_locals.clone();
                 child.suppress_tail_return = true;
                 child.param_renames = self.param_renames.clone();
                 child.downgraded_vars = self.downgraded_vars.clone();
@@ -5814,6 +6444,8 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 // @lazy 变量时同样改写为 `*cfg.get_or_init(..)`（T04/AC4）
                 child.lazy_bindings = self.lazy_bindings.clone();
                 child.top_level_static_names = self.top_level_static_names.clone();
+                child.str_typed_vars = self.str_typed_vars.clone();
+                child.str_loop_vars = self.str_loop_vars.clone();
                 child.struct_phantom_generics = self.struct_phantom_generics.clone();
                 child.current_fn_is_size_hint = self.current_fn_is_size_hint;
                 child.in_iterator_impl = self.in_iterator_impl;
@@ -6681,6 +7313,43 @@ child.struct_fields_info = self.struct_fields_info.clone();
         Some(format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i].to_string()}}", base_s, key_s))
     }
 
+    /// BUG-281：LZ 用 -1/"" 编码 None，.first()/.last()/.get() 经 .cloned()
+    /// 后是 Option<T>，按元素类型追加 unwrap_or 默认值。
+    /// Dict 的 args[0] 是 key、args[1] 是 value，需取 value 类型（args[1]）。
+    pub(crate) fn list_get_unwrap_or_default(&self, recv_ty: &IrType) -> &'static str {
+        match recv_ty {
+            IrType::Named { path, args } if (path == "Dict" || path == "HashMap" || path == "BTreeMap") => {
+                // value 类型在 args[1]；args[0] 是 key
+                if args.len() > 1 {
+                    match &args[1] {
+                        IrType::Int => ".unwrap_or(-1i64)",
+                        IrType::Str => ".unwrap_or(\"\".to_string())",
+                        IrType::Named { path: p, .. }
+                            if p == "str" || p == "String" =>
+                        {
+                            ".unwrap_or(\"\".to_string())"
+                        }
+                        _ => ".unwrap_or(Default::default())",
+                    }
+                } else {
+                    ".unwrap_or(Default::default())"
+                }
+            }
+            IrType::Named { args, .. } if args.first().map_or(false, |t| matches!(t, IrType::Int)) => {
+                ".unwrap_or(-1i64)"
+            }
+            IrType::Named { args, .. }
+                if args.first().map_or(false, |t| {
+                    matches!(t, IrType::Str)
+                        || matches!(t, IrType::Named { path, .. } if path == "str" || path == "String")
+                }) =>
+            {
+                ".unwrap_or(\"\".to_string())"
+            }
+            _ => ".unwrap_or(Default::default())",
+        }
+    }
+
     pub(crate) fn binop_str(&self, op: &BinOpKind) -> &'static str {
         match op {
             BinOpKind::Add => "+",
@@ -6717,5 +7386,14 @@ child.struct_fields_info = self.struct_fields_info.clone();
             UnOpKind::MutRef => "&mut ",
             UnOpKind::Deref => "*",
         }
+    }
+}
+
+/// 从表达式中取出变量名（若非 Var 表达式返回空串）
+fn loop_var_name(a: &Expr) -> String {
+    if let ExprKind::Var(name) = &a.kind {
+        name.clone()
+    } else {
+        String::new()
     }
 }

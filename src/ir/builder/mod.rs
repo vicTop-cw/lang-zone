@@ -106,6 +106,11 @@ pub(crate) struct TypeCtx {
     /// 本块（convert_block 循环）内首次声明的变量：区分「首次绑定」与「重新赋值」
     /// （闭包体内 `total = total + x` 写外部变量 → 应转 Assign，而非新 let 绑定）
     block_declared: std::collections::HashSet<String>,
+    /// 本块转换循环内**已实际声明**的变量（随语句推进动态累积）：
+    /// 用于识别 `mut root = None` 之后的 `root = insert(root, 5)`（预扫描把 root
+    /// 登记到 block_declared，但第二次出现其实是重新赋值 → Assign）。
+    /// block_declared 是预扫描的静态登记，本字段是转换期的动态登记。
+    block_declared_so_far: std::collections::HashSet<String>,
     /// 当前函数泛型参数
     current_generics: Vec<String>,
     /// 当前函数返回类型
@@ -156,6 +161,7 @@ impl TypeCtx {
             enum_variant_field_types: HashMap::new(),
             enum_generics: HashMap::new(),
             block_declared: std::collections::HashSet::new(),
+            block_declared_so_far: std::collections::HashSet::new(),
             current_generics: vec![],
             current_ret_ty: None,
             self_ty: None,
@@ -355,6 +361,13 @@ impl TypeCtx {
                     .last()
                     .map(|s| infer_stmt_type(s, &probe))
                     .unwrap_or(IrType::Unit);
+                // Any → Unit 收敛：递归调用自身（fn_returns 尚未登记）或调用未知名
+                // 函数时推断为 Any，而 rust_type(Any) 回退 i64 会让无返回注解的函数
+                // 变成 `-> i64`（bst.lz `inorder` 递归调用自身被推为 i64，E0308）。
+                // 无返回注解即承诺 Unit，Any 一律收敛。
+                if ret == IrType::Any {
+                    ret = IrType::Unit;
+                }
                 // BUG-CG-004 收口：raises 函数即使无返回注解，其 Rust 返回类型也是
                 // Result<ok, err>（ok 为推断返回值，err 为 raises 异常类型），
                 // 否则 fn_returns 漏 raises 包裹 → try 体末尾调用该函数时 body 块类型

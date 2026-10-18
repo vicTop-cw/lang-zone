@@ -88,6 +88,122 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     "len" => return IrType::Int,
                     _ => {}
                 }
+                // range(start, end) / range(end) 内建：返回 Range<T>
+                // 否则 `range(0,10).len()` 推断为 Any→i64，
+                // codegen 走到通用 .len() 分支生成 `Range::len()` → E0599
+                if fname == "range" && !args.is_empty() {
+                    let elem_ty = args
+                        .first()
+                        .map(|a| infer_expr_type(a, ctx))
+                        .unwrap_or(IrType::Int);
+                    return IrType::Named {
+                        path: "Range".into(),
+                        args: vec![elem_ty],
+                    };
+                }
+                // BUG-317：iter.lz 自由函数缺少类型推断 → 全部回退 Any→i64，
+                // 导致 `collect_list(range(0,5)).len()` 生成 `collect_list(i64) -> i64` 存根
+                // （E0308 expected i64 found Range）、`r.len()` E0599 on i64。
+                // 显式按语义回传：collect_list→List<T>、range_inclusive/step_range→Range、
+                // zip→List<(A,B)>、once/repeat_n/empty→对应迭代器（codegen 走 iter 适配）、
+                // find→Option<T>、count_if/sum→T、product→T、for_each→Unit。
+                if args.len() >= 1 || fname == "empty" || fname == "for_each" {
+                    let elem_ty = args
+                        .first()
+                        .map(|a| infer_expr_type(a, ctx))
+                        .unwrap_or(IrType::Any);
+                    let elem_ty = if matches!(elem_ty, IrType::Any) {
+                        // 若第一参是迭代器（Range/List），取其 Item；否则 Any→Int
+                        IrType::Int
+                    } else {
+                        elem_ty
+                    };
+                    match fname.as_str() {
+                        // collect_list(iterable) → List<Item>
+                        // 参数若是 Iter<X> 需取出 X 作为元素类型（否则 List<Iter<X>>）
+                        "collect_list" | "collect" => {
+                            let list_ty = if let IrType::Named { args: inner, .. } = &elem_ty {
+                                inner.first().cloned().unwrap_or(IrType::Int)
+                            } else {
+                                elem_ty
+                            };
+                            return IrType::Named {
+                                path: "List".into(),
+                                args: vec![list_ty],
+                            }
+                        }
+                        // range_inclusive/step_range 同 range 语义（迭代器）
+                        "range_inclusive" | "step_range" => {
+                            return IrType::Named {
+                                path: "Range".into(),
+                                args: vec![elem_ty],
+                            }
+                        }
+                        // once/repeat_n/empty：迭代器包装（codegen 走 iter 适配）
+                        "once" | "repeat" | "repeat_n" | "empty" => {
+                            return IrType::Named {
+                                path: "Iter".into(),
+                                args: vec![elem_ty],
+                            }
+                        }
+                        // zip(a, b) → 元素类型为 (ItemA, ItemB) 元组
+                        // 两个参数都是迭代器（Range/Iter/List），需取出各自元素类型
+                        "zip" => {
+                            let unwrap_elem = |t: IrType| -> IrType {
+                                if let IrType::Named { args: inner, .. } = &t {
+                                    inner.first().cloned().unwrap_or(IrType::Int)
+                                } else {
+                                    IrType::Int
+                                }
+                            };
+                            let a_ty = unwrap_elem(elem_ty);
+                            let b_ty = args
+                                .get(1)
+                                .map(|a| unwrap_elem(infer_expr_type(a, ctx)))
+                                .unwrap_or(IrType::Int);
+                            return IrType::Named {
+                                path: "Iter".into(),
+                                args: vec![IrType::Tuple(vec![a_ty, b_ty])],
+                            }
+                        }
+                        // find → Option<Item>（elem_ty 是集合类型，需取出元素类型）
+                        "find" | "find_iter" => {
+                            let item_ty = if let IrType::Named { args: inner, .. } = &elem_ty {
+                                inner.first().cloned().unwrap_or(IrType::Int)
+                            } else {
+                                elem_ty
+                            };
+                            return IrType::Option(Box::new(item_ty))
+                        }
+                        // map/filter 自由函数 → List<T>（闭包返回 U 时是 List<U>，这里先按
+                        // 迭代器元素类型兜底，闭包推断在 codegen 层负责）
+                        "map" | "filter" => {
+                            let list_ty = if let IrType::Named { args: inner, .. } = &elem_ty {
+                                inner.first().cloned().unwrap_or(IrType::Int)
+                            } else {
+                                elem_ty
+                            };
+                            return IrType::Named {
+                                path: "List".into(),
+                                args: vec![list_ty],
+                            }
+                        }
+                        // count_if → Int（计数，与 sum/product 不同）
+                        "count_if" => return IrType::Int,
+                        // sum/product → Item（元素类型，不是集合类型）
+                        "sum" | "product" => {
+                            let item_ty = if let IrType::Named { args: inner, .. } = &elem_ty {
+                                inner.first().cloned().unwrap_or(IrType::Int)
+                            } else {
+                                IrType::Int
+                            };
+                            return item_ty;
+                        }
+                        // for_each → Unit
+                        "for_each" => return IrType::Unit,
+                        _ => {}
+                    }
+                }
                 // Ok/Err/Some/None 变体构造：返回 Result/Option 类型。
                 // 否则 `let ok = Ok(10)` 推断为 Any，后续 ok.map(...) 无法
                 // 触发 codegen 的消费型方法 clone 注入（E0382 moved value）
@@ -122,8 +238,7 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     "None" => return IrType::Option(Box::new(IrType::Any)),
                     _ => {}
                 }
-                if ctx.is_struct(fname) {
-                    return IrType::named(fname);
+                if ctx.is_struct(fname) { return IrType::named(fname);
                 }
                 // 容器空构造：`List()` / `Set()` / `Dict()` 返回对应容器类型，
                 // 否则推断为 Any→i64（`let mut result = List()` 后 `return result`
@@ -210,7 +325,6 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             // 常见无返回值方法 → Unit
             if method == "push"
                 || method == "insert"
-                || method == "remove"
                 || method == "clear"
                 || method == "append"
                 || method == "set"
@@ -308,6 +422,14 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             };
             match &base_ty {
                 IrType::Named { path, .. } => ctx.lookup_field(path, field),
+                // BUG-313：元组字段访问 `t.1` / `inner.1`（LZ 元组索引语义）。
+                // 未处理时回退 Any→i64，`inner.1`（bool 元素）误生成
+                // `<bool as ImplicitFrom<i64>>::__implicit_from__(inner.1)` → E0277
+                IrType::Tuple(items) => field
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| items.get(i).cloned())
+                    .unwrap_or(IrType::Any),
                 _ => IrType::Any,
             }
         }
@@ -337,6 +459,15 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                         IrType::Str // 字符索引返回 Str（LZ 语义）
                     }
                 }
+                // 元组索引 t[i]：从元组类型取对应元素类型
+                // BUG-287：先前回退 Any→i64，`return t[1]`（t: (int, str)）误插
+                // <String as ImplicitFrom<i64>>，E0277
+                IrType::Tuple(items) => match &**index {
+                    AstExpr::IntLit(n) => {
+                        items.get(*n as usize).cloned().unwrap_or(IrType::Any)
+                    }
+                    _ => IrType::Any,
+                },
                 _ => IrType::Any,
             }
         }
@@ -816,6 +947,32 @@ pub(crate) fn lookup_builtin_method_ret(
                 path: "List".into(),
                 args: args.clone(),
             }),
+            "filter" | "map" | "take" | "skip" | "cloned" | "skip_while" | "take_while" => {
+                Some(recv_ty.clone())
+            }
+            _ => None,
+        },
+        // Range<T> 视作 Iterator<T>（BUG-294：Range 未登记，`r.collect()` 回退 Any→?）
+        IrType::Named { path, args } if path == "Range" && args.len() == 1 => match method {
+            "next" => Some(IrType::Option(Box::new(args[0].clone()))),
+            "len" | "count" => Some(IrType::Int),
+            "collect" => Some(IrType::Named {
+                path: "List".into(),
+                args: args.clone(),
+            }),
+            "filter" | "map" | "take" | "skip" | "cloned" | "skip_while" | "take_while" => {
+                Some(recv_ty.clone())
+            }
+            _ => None,
+        },
+        // Int 内建方法（abs 等保持 Int）
+        IrType::Int => match method {
+            "abs" => Some(IrType::Int),
+            _ => None,
+        },
+        // F64 内建方法（abs 等保持 F64）
+        IrType::F64 => match method {
+            "abs" => Some(IrType::F64),
             _ => None,
         },
         // List<T> 方法
@@ -826,10 +983,33 @@ pub(crate) fn lookup_builtin_method_ret(
                 path: "Iterator".into(),
                 args: args.clone(),
             }),
-            "get" | "pop" => Some(IrType::Option(Box::new(args[0].clone()))),
-            "first" | "last" => Some(IrType::Option(Box::new(args[0].clone()))),
+            // get/pop → T（LZ 用 -1/"" 编码 None，代码生成 unwrap_or 平铺）
+            // BUG-281：先前标 Option<T>，`let r = xs.get(1); match r { -1 => ... }`
+            // 报 E0308（Option<i64> 无法匹配 -1i64）
+            "get" | "pop" => Some(args[0].clone()),
+            "first" | "last" => Some(args[0].clone()),
+            // remove → T（Vec::remove 返回 V）
+            "remove" => Some(args[0].clone()),
+            // remove_at → Option<T>（list.lz:89 签名 `Option<T>`，越界 None）
+            "remove_at" => Some(IrType::Option(Box::new(args[0].clone()))),
             // contains 成员测试 → Bool（否则回退 Any→i64，E0277）
             "contains" | "starts_with" | "ends_with" | "is_empty" => Some(IrType::Bool),
+            // index_of → Option<Int>（list.lz:48 签名 `Option<int>`）
+            "index_of" => Some(IrType::Option(Box::new(IrType::Int))),
+            // count_of → Int
+            "count_of" => Some(IrType::Int),
+            // find/rfind → Int（LZ 用 -1 编码 None，lz_find 返回 Option<i64> 由代码生成
+            // 转成 `unwrap_or(-1)` 平铺为 i64）
+            "find" | "rfind" => Some(IrType::Int),
+            // join → String（`",".join(parts)` 生成 `parts.join(",")`）
+            "join" => Some(IrType::Str),
+            // reversed/unique/slice → List<T>
+            "reversed" | "unique" => Some(recv_ty.clone()),
+            "slice" => Some(recv_ty.clone()),
+            // extend → Unit
+            "extend" => Some(IrType::Unit),
+            // sort/reverse → Unit：Python 风格原地修改，返回 void（LZ 无 sorted）
+            "sort" | "reverse" => Some(IrType::Unit),
             _ => None,
         },
         // Option<T> 方法
@@ -846,9 +1026,20 @@ pub(crate) fn lookup_builtin_method_ret(
             _ => None,
         },
         // Result<T,E>.unwrap() / expect() → T
+        IrType::Result { ok, .. } => match method {
+            "unwrap" | "expect" => Some((**ok).clone()),
+            "map" | "and_then" => Some(recv_ty.clone()),
+            // Result<T,E>.is_ok() / is_err() → bool（此前缺失导致 is_ok 返回 Any，
+            // codegen 把它当 i64 用 ImplicitFrom<bool,i64> 包装 → E0277）
+            "is_ok" | "is_err" => Some(IrType::Bool),
+            _ => None,
+        },
+        // Result<T,E>.unwrap() / expect() → T
         IrType::Named { path, args } if path == "Result" && args.len() >= 1 => match method {
             "unwrap" | "expect" => Some(args[0].clone()),
             "map" | "and_then" => Some(recv_ty.clone()),
+            // Result<T,E>.is_ok() / is_err() → bool（BUG-309）
+            "is_ok" | "is_err" => Some(IrType::Bool),
             _ => None,
         },
         // String 方法
@@ -860,6 +1051,11 @@ pub(crate) fn lookup_builtin_method_ret(
                 path: "String".into(),
                 args: vec![],
             }),
+            // str/String 上的 find/rfind → Int（LZ 用 -1 编码 None）
+            "find" | "rfind" => Some(IrType::Int),
+            "contains" | "starts_with" | "ends_with" | "is_empty" => Some(IrType::Bool),
+            "slice" => Some(IrType::Str),
+            "join" => Some(IrType::Str),
             _ => None,
         },
         // Str 类型（ir::Str）的方法
@@ -873,6 +1069,41 @@ pub(crate) fn lookup_builtin_method_ret(
                 path: "String".into(),
                 args: vec![],
             }),
+            // BUG-267：str 变换方法未登记 → `s.trim()`/`s.upper()` 等推断为 Any，
+            // `result + s.trim()` 走 LzAdd 分派（需 String + String）报 E0308。
+            // 与 owned_local::is_str_method 保持一致清单。
+            // 仅保留 Rust std 真实存在的方法（trim/trim_start/trim_end/to_upper/to_lower/
+            // replace/repeat）与代码生成器映射过的方法（upper→to_uppercase,
+            // lower→to_lowercase）；reverse/capitalize/pad_*/strip 在 String 上无对应
+            // Rust 方法，保留会让编译失败后无提示地生成非法 Rust 代码。
+            "trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower"
+            | "replace" | "repeat" | "upper" | "lower" => Some(IrType::Str),
+            // chars() 返回 char 迭代器（`for c in s.chars()` → c: char）
+            "chars" => Some(IrType::Named {
+                path: "Iterator".into(),
+                args: vec![IrType::Str],
+            }),
+            // BUG-275：split/lines/split_whitespace 返回 &str 元素迭代器
+            // （LZ 值语义 String）。此前未登记 → 循环变量 Any → `out + part`
+            // 走 LzAdd 分派报 E0308。
+            // BUG-308：LZ 语义下 split 返回 List<str>（codegen 收集为 Vec），
+            // 标 Iterator<str> 会让 `.len()` 走 .count() → E0599 count not found on Vec。
+            "split" | "lines" | "split_whitespace" | "split_inclusive"
+            | "splitn" | "rsplit" | "rsplitn" | "split_terminator" => {
+                Some(IrType::Named {
+                    path: "List".into(),
+                    args: vec![IrType::Str],
+                })
+            }
+            "find" | "rfind" => Some(IrType::Int),
+            // BUG-277：contains/starts_with/ends_with/is_empty 在 Str 上返回 Bool，
+            // 但只在容器 arm 登记过 → `s.contains("x")` 推断为 Any → 代码生成
+            // `ImplicitFrom<i64>` 包装报 E0277。
+            "contains" | "starts_with" | "ends_with" | "is_empty" => Some(IrType::Bool),
+            // slice(start, end) → Str（StringExt::lz_slice 返回 String）
+            "slice" => Some(IrType::Str),
+            // `",".join(parts)` 接收者 Str → 代码生成反转 `parts.join(",")` 返回 String
+            "join" => Some(IrType::Str),
             _ => None,
         },
         // &Str 类型的方法
@@ -885,6 +1116,23 @@ pub(crate) fn lookup_builtin_method_ret(
                 path: "String".into(),
                 args: vec![],
             }),
+            "trim" | "trim_start" | "trim_end" | "to_upper" | "to_lower"
+            | "replace" | "repeat" | "upper" | "lower" => Some(IrType::Str),
+            "chars" => Some(IrType::Named {
+                path: "Iterator".into(),
+                args: vec![IrType::Str],
+            }),
+            "split" | "lines" | "split_whitespace" | "split_inclusive"
+            | "splitn" | "rsplit" | "rsplitn" | "split_terminator" => {
+                Some(IrType::Named {
+                    path: "List".into(),
+                    args: vec![IrType::Str],
+                })
+            }
+            "find" | "rfind" => Some(IrType::Int),
+            "contains" | "starts_with" | "ends_with" | "is_empty" => Some(IrType::Bool),
+            "slice" => Some(IrType::Str),
+            "join" => Some(IrType::Str),
             _ => None,
         },
         // ── 字符串化：所有原语类型调用 .to_string() 应返回 String，
@@ -903,9 +1151,48 @@ pub(crate) fn lookup_builtin_method_ret(
             if (path == "Dict" || path == "HashMap") && args.len() == 2 =>
         {
             match method {
-                "keys" | "values" | "items" | "iter" => Some(IrType::Named {
+                // BUG-285：keys → List<K>（owned，dict.lz keys 定义）
+                "keys" => Some(IrType::Named {
                     path: "List".into(),
-                    args: vec![IrType::Ref(Box::new(args[0].clone()))],
+                    args: vec![args[0].clone()],
+                }),
+                "values" => Some(IrType::Named {
+                    path: "List".into(),
+                    args: vec![args[1].clone()],
+                }),
+                "items" => Some(IrType::Named {
+                    path: "List".into(),
+                    args: vec![IrType::Tuple(vec![args[0].clone(), args[1].clone()])],
+                }),
+                "iter" => Some(IrType::Named {
+                    path: "Iterator".into(),
+                    args: vec![IrType::Tuple(vec![args[0].clone(), args[1].clone()])],
+                }),
+                // BUG-282：contains 成员测试 → Bool（否则回退 Any→i64，E0277）
+                // BUG-313：Dict.contains_key → Bool（dict.lz contains_key 定义）
+                "contains" | "contains_key" | "has_key" | "is_empty" => Some(IrType::Bool),
+                "len" | "size" => Some(IrType::Int),
+                // get → V（LZ 用 -1/"" 编码 None，代码生成 unwrap_or 平铺）
+                "get" | "pop" => Some(args[1].clone()),
+                // BUG-289：BTreeMap/HashMap::remove 返回 Option<V>，
+                // LZ 视角 remove 返回 V?（Option<V>），先前回退 Any→Unit
+                "remove" => Some(IrType::Option(Box::new(args[1].clone()))),
+                _ => None,
+            }
+        }
+        // Set<T> / HashSet<T> 方法
+        IrType::Named { path, args } if (path == "Set" || path == "HashSet") && args.len() == 1 => {
+            match method {
+                // BUG-283：contains 成员测试 → Bool（否则回退 Any→i64，E0277）
+                // BUG-313：is_subset/is_superset/is_disjoint 返回 bool，
+                // 未登记则回退 Any→i64 → E0277 bool: ImplicitFrom<i64>
+                "contains" | "is_empty" | "is_subset" | "is_superset" | "is_disjoint" => {
+                    Some(IrType::Bool)
+                }
+                "len" | "size" => Some(IrType::Int),
+                "iter" => Some(IrType::Named {
+                    path: "Iterator".into(),
+                    args: args.clone(),
                 }),
                 _ => None,
             }

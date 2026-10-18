@@ -363,6 +363,11 @@ impl CodeGen {
                         mapped
                     }
                 } else {
+                    // BUG-292：Range<int> 生成 std::ops::Range<i64><i64>（type_map 已
+                    // 含 <i64>，args 再追加一层）。Range 是非泛型类型，直接返回 mapped。
+                    if path == "Range" || path == "RangeInclusive" {
+                        return mapped;
+                    }
                     // Box<fn(...)> → Box<dyn FnOnce(...)>：闭包可装箱（03e §六 dyn 环境），
                     // fn 指针类型无法容纳 move 闭包（E0308）；
                     // 闭包 `|| -> str = msg` 移动捕获 → FnOnce（E0525 若标 Fn）
@@ -473,7 +478,20 @@ impl CodeGen {
         if self.has_option_context() {
             return "None".to_string();
         }
-        format!("None::<{}>", self.option_none_elem(expr_ty))
+        // BUG-261 配套修正：仅当 expr_ty 明确是 Option<T> 时注入类型参数
+        // （`let x = None` 无上下文场景，rustc 无法推断裸 None 的元素类型 → E0282）。
+        // expr_ty 非 Option 时回退裸 None，让 rustc 从后续赋值/使用推断
+        // （`mut root = None` + `root = Some(insert(...))` 能正确推断，避免 BUG-261 的
+        // None::<i64> 与 TreeNode 冲突 E0308）。
+        let elem_ty = self.option_none_elem(expr_ty);
+        if elem_ty == "i64" {
+            // option_none_elem 在 expr_ty 非 Option 时回退 "i64"，此时不注入；
+            // 让 rustc 从后续赋值/使用推断（`mut root = None` + `root = Some(insert(...))`）
+            "None".to_string()
+        } else {
+            // expr_ty 明确是 Option<T> → 注入类型参数防 E0282（`let x = None`）
+            format!("None::<{}>", elem_ty)
+        }
     }
 
     /// gen_none_ref 的上下文判定：当前期望类型或当前函数返回类型是否为 Option。

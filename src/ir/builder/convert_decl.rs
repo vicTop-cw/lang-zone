@@ -342,12 +342,24 @@ pub(crate) fn self_field_is_mutated(stmts: &[AstStmt]) -> bool {
     for stmt in stmts {
         match stmt {
             AstStmt::Assign { target, .. } => {
+                // `self.x = v`：直接字段赋值
                 if let AstExpr::FieldAccess { receiver, .. } = target {
                     if let AstExpr::Ident(name) = &**receiver {
                         if name == "self" || name == "self_" {
                             return true;
                         }
                     }
+                }
+                // `self.rows[i][j] = v`：索引赋值也视为 self 字段变更
+                if self_target_is_self(target) {
+                    return true;
+                }
+            }
+            AstStmt::Expr(expr) => {
+                // `self.field.method(..)` 方法调用会修改 self 字段（如 `self.items.append(v)`）。
+                // 若只识别 Assign，`push` 方法会被推断为 `&self` → rustc E0596 cannot borrow as mutable。
+                if self_expr_mutates_field(expr) {
+                    return true;
                 }
             }
             AstStmt::While {
@@ -416,6 +428,45 @@ pub(crate) fn self_field_is_mutated(stmts: &[AstStmt]) -> bool {
         }
     }
     false
+}
+
+/// 判断表达式是否是对 `self.<field>` 的可变操作（方法调用/索引赋值）。
+/// 与 self_field_is_mutated 配合，覆盖 `self.items.append(v)`、`self.count += 1` 等
+/// 未写成显式 Assign 的变更方式（否则 push/pop 等方法被推断 &self → E0596）。
+fn self_expr_mutates_field(e: &AstExpr) -> bool {
+    match e {
+        // `self.items.append(v)`：方法调用在 self 字段 receiver 上
+        AstExpr::MethodCall { receiver, .. } => {
+            if let AstExpr::FieldAccess { receiver: base, .. } = &**receiver {
+                if let AstExpr::Ident(name) = &**base {
+                    return name == "self" || name == "self_";
+                }
+            }
+            false
+        }
+        // `self.count += 1`：表达式级赋值
+        AstExpr::Assign { target, .. } => self_target_is_self(target),
+        // 递归：块/if/for 内的自变更
+        AstExpr::BlockExpr(stmts) => stmts.iter().any(|s| match s {
+            AstStmt::Expr(expr) => self_expr_mutates_field(expr),
+            _ => false,
+        }),
+        _ => false,
+    }
+}
+
+/// 判断赋值目标是否涉及 `self.<field>` 的任何层级（含 `self.rows[i][j]` 索引）。
+fn self_target_is_self(target: &AstExpr) -> bool {
+    match target {
+        AstExpr::FieldAccess { receiver, .. } => {
+            if let AstExpr::Ident(name) = &**receiver {
+                return name == "self" || name == "self_";
+            }
+            self_target_is_self(receiver)
+        }
+        AstExpr::Index { receiver, .. } => self_target_is_self(receiver),
+        _ => false,
+    }
 }
 
 pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
@@ -1803,6 +1854,7 @@ pub(crate) fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
             .flat_map(|m| {
                 m.params
                     .iter()
+                    .filter(|p| p.name != "self" && p.name != "self_")
                     .map(|p| (p.name.clone(), from_ast_type(&p.ty)))
             })
             .collect();

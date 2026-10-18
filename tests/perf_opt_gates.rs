@@ -1311,3 +1311,54 @@ def main() =
     assert!(r.ok, "用户自定义 dict() 不应被内置接线遮蔽：\n{}", r.diag);
     assert_eq!(r.stdout, "42");
 }
+
+/// Task 1: 调用点返回类型推断 —— 推断返回 str 的函数在 println 中走 Display（无引号），
+/// 与显式 -> str 标注的行为一致（perf-optimization-2026-10-08.md §13.5）。
+#[test]
+fn fix_call_site_inferred_str_ret_display() {
+    let src = r#"
+def get_name() =
+    let s = "Alice"
+    s
+
+def get_age() =
+    let age = 30
+    age
+
+def get_list() =
+    let items = [1, 2, 3]
+    items
+
+def main() =
+    println(get_name())
+    println(get_age())
+    println(get_list())
+"#;
+    let r = run_lz("fix_call_ret_display", src, &[]);
+    assert!(r.ok, "推断返回 str 的函数调用应走 Display：\n{}", r.diag);
+    // get_name() 推断返回 str → println!("{}", "Alice")（无引号）
+    // get_age() 推断返回 int → println!("{:?}", 30i64)（Debug，但数字不带引号）
+    // get_list() 推断返回 list → println!("{:?}", ..)（Debug）
+    assert_eq!(r.stdout, "Alice\n30\n[1, 2, 3]");
+    assert!(
+        r.rs_text.contains(r#"println!("{}", get_name())"#)
+            || r.rs_text.contains("println!(\"{}\", get_name())"),
+        "推断 str 返回应走 Display：\n{}",
+        r.rs_text
+    );
+}
+
+/// 反向：显式 -> int 与推断 int 行为一致，不误走 Display。
+#[test]
+fn fix_call_site_inferred_int_ret_debug() {
+    let src = r#"
+def get_num() -> int =
+    42
+
+def main() =
+    println(get_num())
+"#;
+    let r = run_lz("fix_call_ret_dbg", src, &[]);
+    assert!(r.ok, "显式 int 返回应走 Debug：\n{}", r.diag);
+    assert_eq!(r.stdout, "42");
+}

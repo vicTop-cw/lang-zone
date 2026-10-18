@@ -1,0 +1,36 @@
+// 15_feature_matrix - builtin_name_guard：rust 面内建方法改名表的用户类守卫（BUG-39）。
+//
+// rust 后端的改名表此前不看接收者是不是用户类：`to_lower → to_lowercase`、`try_into → unwrap`
+// 把用户类自带的方法判成不存在 ⇒ E0599 no method `to_lowercase`/`unwrap`；cy 面一直按原名调用
+// （BUG-43 的 remove 实参强转 `as usize` 是同一张表的另一个缺闸门）。
+// 修法＝改名表每条加「接收者是用户类且它定义了原名 ⇒ 不改名、不动实参」闸门（判据形状同 cy 侧
+// `user_class_has_method`，落地在 src/ir/codegen/expr_gen.rs 的 struct_method_names 判据）。
+// 每支方法用新绑定：二元/按值消费 self 时复用同一变量会触发 rust 面 E0382（SYNTAX/12 §3.1）。
+// 期望值取自 rust 后端实跑产物，封盘前已做跨后端逐字差分（seal_missing_exp.py 两后端逐字一致才封）。
+
+struct T =
+    s: str
+    def trim(self) -> str =
+        self.s
+    def remove(self, i: int) -> int =
+        i + 1
+    def to_lower(self) -> str =
+        self.s
+    def starts_with(self, p: str) -> bool =
+        True
+    def unwrap_or(self, d: int) -> int =
+        100 + d
+
+struct Conv =
+    v: int
+    def try_into(self) -> int =
+        self.v + 7
+
+def main() =
+    let t = T(s: "x")
+    print(t.trim())
+    print(t.remove(2))
+    print(t.to_lower())
+    print(t.starts_with("y"))
+    print(t.unwrap_or(7))
+    print(Conv(v: 1).try_into())

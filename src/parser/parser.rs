@@ -1822,7 +1822,8 @@ impl Parser {
             }
             Token::Ident(n) => {
                 let base_ty = match n.as_str() {
-                    "int" => Type::Int,
+                    "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16"
+                    | "u8" | "usize" | "isize" | "long" | "int64" => Type::Int,
                     "f64" => Type::F64,
                     "float" => Type::Float,
                     "str" => Type::Str,

@@ -3,6 +3,8 @@ name = "lz_builtins"
 version = "0.1.0"
 edition = "2021"
 description = "Lang-Zone runtime builtins — shared by all generated Rust output"
+license = "MIT"
+repository = "https://github.com/vicTop-cw/lang-zone"
 
 [dependencies]
 # 零外部依赖，纯 std

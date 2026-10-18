@@ -51,6 +51,15 @@ pub(crate) fn magic_method_for_binop(op: &BinOp) -> Option<&'static str> {
         BinOp::BitAnd => Some("__bitand__"),
         BinOp::BitOr => Some("__bitor__"),
         BinOp::BitXor => Some("__bitxor__"),
+        // 移位两族补进分派表（BUG-36 遗留，2026-10-15）：此前缺席时用户 struct
+        // 的 `a << b` 被原样交给后端——rust 靠生成的 `impl Shl/Shr` 兜住，而 Python
+        // 的运算符协议名是 `__lshift__`/`__rshift__`，与 LZ 的 `__shl__`/`__shr__`
+        // 不同名 ⇒ cy 面运行期 TypeError（实测 TEMP/magic-probes-*.log m_bits；
+        // cy 后端曾在 BinOp 发射处点名直派兜底，见 codegen_cython.rs shift_magic）。
+        // 补表后用户类移位在共享 IR 即转 MethodCall("__shl__"/"__shr__")，双后端
+        // 落同一形态；未定义该魔术名的类型仍走 BinOp 原样发射。
+        BinOp::Shl => Some("__shl__"),
+        BinOp::Shr => Some("__shr__"),
         BinOp::Pow => Some("__pow__"),
         BinOp::In => Some("__contains__"),
         _ => None,

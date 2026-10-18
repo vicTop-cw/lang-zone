@@ -65,7 +65,7 @@ fn emit_lex_lz_flag_runs() {
     assert!(stdout.contains("Gt") && stdout.contains("If") && stdout.contains("Else"), "缺关键字/比较符: {}", stdout);
 }
 
-const SAMPLE_BASIC_GOLDEN: &str = "\"def f(x) {return x + 1}\"";
+const SAMPLE_BASIC_GOLDEN: &str = "def f(x) {return x + 1}";
 
 /// B1/B2：LZ 版 parser 行为对齐 + 主流程入口
 /// golden：固定输入集解析描述（2026-08-16 验证输出；parse_params 支持

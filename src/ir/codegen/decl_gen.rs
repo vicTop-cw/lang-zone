@@ -927,7 +927,10 @@ impl CodeGen {
                     let ty_is_iterator = matches!(&p.ty, IrType::Named { path, .. } if path == "Iterator")
                         || matches!(&p.ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Named { path, .. } if path == "Iterator"));
                     // fn 类型参数生成 impl Fn：调用无需可变借用，不再强制 `mut f`
-                    if p.is_mut || ty_is_params || ty_is_iterator {
+                    // BUG-261：参数在体内被可变使用（`root.left = ...` FieldAccess 赋值目标）
+                    // 时也需 `mut`，否则 E0596（Option<Box<T>> 递归字段赋值）
+                    let ty_is_mutated_param = self.auto_mut_locals.contains(&p.name);
+                    if p.is_mut || ty_is_params || ty_is_iterator || ty_is_mutated_param {
                         format!("mut {}: {}", pname, ty_str)
                     } else {
                         format!("{}: {}", pname, ty_str)
@@ -1681,6 +1684,7 @@ impl CodeGen {
                 let params: Vec<String> = s
                     .new_params
                     .iter()
+                    .filter(|(n, _)| n != "self" && n != "self_")
                     .map(|(n, t)| format!("{}: {}", n, self.rust_type(t)))
                     .collect();
                 let ret_ty = s
@@ -1827,6 +1831,7 @@ impl CodeGen {
                     let params: Vec<(String, IrType)> = m
                         .params
                         .iter()
+                        .filter(|p| p.name != "self" && p.name != "self_")
                         .map(|p| (p.name.clone(), p.ty.clone()))
                         .collect();
 

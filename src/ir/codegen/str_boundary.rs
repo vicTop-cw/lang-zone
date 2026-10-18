@@ -104,7 +104,7 @@ use crate::ir::types::IrType;
 
 /// 表达式在 Rust 侧的字符串形态（由 IR 类型 + 表达式种类判定）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StrForm {
+pub enum StrForm {
     /// 拥有值：Rust `String`（let 绑定 / 字段 / 调用结果 / 插值结果）。
     Owned,
     /// 借用视图：Rust `&str`（`ref str` 形参、`Ref(Str)` 局部、切片结果）。
@@ -117,7 +117,7 @@ pub(super) enum StrForm {
 
 /// 目标位置对字符串形态的要求。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum StrWant {
+pub enum StrWant {
     /// 拥有值位：`String` 形参 / `String` 字段 / `-> str` 返回值 / 容器元素。
     Owned,
     /// 可 deref 的借用位：`&str` 形参（具体类型），实参位靠 deref coercion。

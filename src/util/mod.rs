@@ -5,6 +5,7 @@ pub mod error;
 pub mod import;
 pub mod mini_toml;
 pub mod platform;
+pub mod registry;
 pub mod source;
 pub mod version;
 

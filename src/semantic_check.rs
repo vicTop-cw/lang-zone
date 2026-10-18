@@ -9,11 +9,45 @@
 // 无法可靠判断的场景一律放行交给后续阶段。
 
 use crate::ast::*;
+use crate::ir::codegen::str_boundary::StrWant;
 use crate::types::def::Type;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// 单函数签名（用于 arity 检查）
+/// 阶段 3（G3）：判断 import 路径是否命中 registry 中的已发布包。
+///
+/// `import mylib`（或 `import pkg.sub`）在当前模块目录下找不到时，
+/// 尝试解析为 registry 包：从 `dir` 逐级向上找 `local-registry/`，
+/// 再看 `<registry>/<首段>/<某版本>/` 下是否存在对应 `.lz`。
+/// 命中即认为 import 合法（真正取文件由 main.rs 的加载侧负责）。
+fn registry_package_exists(dir: &Path, path: &[String]) -> bool {
+    let Some(first) = path.first() else {
+        return false;
+    };
+    let Some(root) = crate::util::registry::find_registry_root(dir) else {
+        return false;
+    };
+    let versions = crate::util::registry::list_versions(&root, first);
+    if versions.is_empty() {
+        return false;
+    }
+    // 包内相对路径：<pkg>/<version>/<rest...>.lz
+    let rest = &path[1..];
+    versions.iter().any(|v| {
+        let base = root.join(first).join(v);
+        if rest.is_empty() {
+            base.join("lib.lz").is_file()
+                || base.join("mod.lz").is_file()
+                || base.join("src/main.lz").is_file()
+        } else {
+            let rel = rest.join("/");
+            base.join(&rel).with_extension("lz").is_file()
+                || base.join(&rel).join("mod.lz").is_file()
+        }
+    })
+}
+
 #[derive(Clone)]
 struct FnSig {
     param_count: usize,
@@ -62,6 +96,8 @@ pub struct Checker {
     loop_depth: usize,
     /// try/catch 捕获深度（raise 在函数内被 catch 捕获时无需声明 raises）
     catch_depth: usize,
+    /// 当前表达式/位置对 str/String 的期望形态（用于语义检查阶段的自动转换）
+    current_str_want: Option<StrWant>,
     /// 作用域栈（unbound 变量 / 不可变赋值检查；值 = 是否可变）
     scopes: Vec<HashMap<String, bool>>,
 }
@@ -216,13 +252,41 @@ impl Checker {
                 if let Some(last) = imp.path.last() {
                     self.imported_names.insert(last.clone());
                 }
-                // 检查同目录文件存在性（模块文件）
-                let rel_dir = self.mod_dir.clone();
-                let ok = match (rel_dir, imp.path.last()) {
-                    (Some(dir), Some(last)) => dir.join(format!("{last}.lz")).exists(),
+                // 检查模块文件存在性。
+                //
+                // G1修复：此前只查 `dir/{末段}.lz`（平铺），导致 `import a.b`
+                // 这类**子目录模块**被误判为"路径不存在"而整个编译提前终止——
+                // 而真正的加载器（main.rs::merge_imports_into / project.rs /
+                // macros::import_loader）都走 ImportResolver::resolve_path，
+                // 它按完整路径逐段拼接（a/b.lz、a/b/mod.lz）。本检查此前与
+                // 加载器口径不一致，是子目录 import 不可用的唯一阻塞点。
+                //
+                // 现改为复用同一套候选推导（保持与加载器一致），并保留
+                // 「末段平铺」作为向后兼容兜底（旧行为允许的写法不多，但
+                // 保持可解析更安全）。候选全不存在才报错。
+                let dir = self.mod_dir.clone();
+                let found = match (&dir, imp.path.first(), imp.path.last()) {
+                    (Some(dir), _, Some(last)) => {
+                        let rel = imp.path.join("/");
+                        let nested = [
+                            dir.join(&rel).with_extension("lz"),
+                            dir.join(&rel).join("mod.lz"),
+                        ];
+                        // 向后兼容：末段平铺（旧检查唯一认可的形态）
+                        let flat = dir.join(format!("{last}.lz"));
+                        if nested.iter().any(|c| c.exists()) || flat.exists() {
+                            true
+                        } else {
+                            // 阶段 3（G3）：本地目录找不到时，查registry。
+                            // `import mylib` 的包由 `push` 落在
+                            // <root>/local-registry/mylib/<version>/；从当前模块
+                            // 目录逐级向上找 registry 根即命中。
+                            registry_package_exists(dir, &imp.path)
+                        }
+                    }
                     _ => false,
                 };
-                if !ok {
+                if !found {
                     self.error(format!(
                         "import 路径不存在: {}（在当前模块目录下找不到 {}.lz）",
                         imp.path.join("."),
@@ -546,6 +610,8 @@ impl Checker {
             return;
         }
         // 嵌套函数：继承外层作用域；yield/raise 检查属于本函数
+        // 保存并恢复 current_str_want，确保函数体内的 let 绑定能正确传播期望类型
+        let saved_str_want = self.current_str_want.take();
         let ctx = FnCtx {
             name: f.name.clone(),
             return_type: f.return_type.clone(),
@@ -564,6 +630,18 @@ impl Checker {
         }
         for p in &f.params {
             self.bind(p.name.clone());
+            // 如果函数参数类型是 str 或 String，设置期望为 Owned
+            let want = match &p.ty {
+                Type::Str => Some(StrWant::Owned),
+                Type::Named(n) if n == "String" => Some(StrWant::Owned),
+                _ => None,
+            };
+            if want.is_some() {
+                // 仅在无 prior expected type 时设置
+                if self.current_str_want.is_none() {
+                    self.current_str_want = want;
+                }
+            }
         }
         // 变参注入名：`..` → args / kwargs（函数体内可直接引用）
         match &f.variadic {
@@ -582,6 +660,8 @@ impl Checker {
         for st in &f.body {
             self.check_stmt(st);
         }
+        // 恢复函数外的 current_str_want
+        self.current_str_want = saved_str_want;
         // G2: 函数体尾部表达式（隐式返回）也做返回类型字面量匹配检查
         if let Some(Stmt::Expr(e)) = f.body.last() {
             self.check_return_literal(e);
@@ -681,9 +761,26 @@ impl Checker {
                 name,
                 value,
                 mutable,
+                ty,
                 ..
             } => {
+                // 语义检查阶段：如果有显式类型注解 Str/String，传播期望类型给值表达式
+                if let Some(ref ty) = ty {
+                    let want = match ty {
+                        Type::Str => Some(StrWant::Owned),
+                        Type::Named(n) if n == "String" => Some(StrWant::Owned),
+                        _ => None,
+                    };
+                    if want.is_some() {
+                        // 保存原有期望，检查值表达式时使用新期望，检查后恢复
+                        let prev = std::mem::replace(&mut self.current_str_want, want);
+                        // 如果已有期望且不同，记录冲突（但不阻止）
+                        let _ = prev;
+                    }
+                }
                 self.check_expr(value);
+                // 恢复先前的期望类型
+                self.current_str_want = None;
                 self.bind_mut(name.clone(), *mutable);
             }
             Stmt::Const { name, value, .. } => {

@@ -27,6 +27,10 @@ pub struct Manifest {
     pub name: String,
     pub version: String,
     pub entry: String,
+    /// 三方库依赖：`包名 = "版本约束"`（如 `mylib = "0.1.0"`）。
+    /// 阶段 3（G2）新增——此前清单只有 name/version/entry，依赖无从声明，
+    /// 导致「发布给他人使用」这条链路整体缺失（import 解析器不认 registry）。
+    pub dependencies: Vec<(String, String)>,
 }
 
 /// 顶层帮助文本（MoonBit 形态参考，非逐字兼容）
@@ -217,6 +221,27 @@ fn parse_manifest(path: &Path) -> Result<Manifest, String> {
             _ => None,
         })
     };
+    // 依赖声明：`[dependencies]` 段下每个 `包名 = "版本"`（阶段 3 / G2）。
+    // 段缺失或为空 → 空 vec（向后兼容：既有 lz.toml 无该段仍照常工作）。
+    let mut dependencies: Vec<(String, String)> = Vec::new();
+    if let Some(deps) = doc.get("dependencies") {
+        let mut names: Vec<&String> = deps.keys().collect();
+        names.sort(); // 保证诊断输出稳定
+        for dep_name in names {
+            let version = match deps.get(dep_name) {
+                Some(TomlValue::Str(v)) => Some(v.clone()),
+                // 内联表 `{ version = "0.1.0" }` 形态（与 config/mod.rs 同口径）
+                Some(TomlValue::InlineTable(t)) => match t.get("version") {
+                    Some(TomlValue::Str(v)) => Some(v.clone()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(v) = version {
+                dependencies.push((dep_name.clone(), v));
+            }
+        }
+    }
     Ok(Manifest {
         name: get_str("name").unwrap_or_else(|| {
             path.parent()
@@ -226,6 +251,7 @@ fn parse_manifest(path: &Path) -> Result<Manifest, String> {
         }),
         version: get_str("version").unwrap_or_else(|| "0.1.0".to_string()),
         entry: get_str("entry").unwrap_or_else(|| "src/main.lz".to_string()),
+        dependencies,
     })
 }
 
@@ -440,6 +466,39 @@ pub fn cmd_build(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    // 阶段 3（G4）：构建前校验依赖声明 —— lz.toml 的 [dependencies] 逐项在
+    // registry 中存在且版本匹配。与 push 侧「已发布则报错」互补：push 管写、
+    // build 管读。失败一次报全（避免用户改一个报一个来回试）。
+    if !paths.manifest.dependencies.is_empty() {
+        // 查找起点是**包根**（paths.root，lz.toml 所在目录），而非 entry 所在目录——
+        // 后者会从 `src/` 起步，向上少找一级，registry 与包同级时找不到。
+        match lang_zone::util::registry::find_registry_root(&paths.root) {
+            Some(root) => {
+                match lang_zone::util::registry::resolve_dependencies(
+                    &root,
+                    &paths.manifest.dependencies,
+                ) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        return 1;
+                    }
+                }
+            }
+            None => {
+                eprintln!(
+                    "Error: lz.toml 声明了 {} 个依赖，但未找到 registry 目录\
+                     （自包根 {} 向上查找均无 `{}`）。\n\
+                     请先 `lang-zone push` 发布依赖包，或移除 [dependencies] 段。",
+                    paths.manifest.dependencies.len(),
+                    paths.root.display(),
+                    lang_zone::util::registry::REGISTRY_DIR_NAME
+                );
+                return 1;
+            }
+        }
+    }
 
     let std_dir = args
         .iter()
@@ -942,6 +1001,10 @@ fn parse_dir_and_flags(args: &[String], sub: &str) -> (String, bool) {
             incremental = true;
         } else if a == "--hide-type-annotations" {
             lang_zone::ir::codegen::set_hide_type_annotations(true);
+        } else if a == "--hide-module-meta" {
+            lang_zone::ir::codegen::set_hide_module_meta(true);
+        } else if a == "--hide-return-keyword" {
+            lang_zone::ir::codegen::set_hide_return_keyword(true);
         } else if a == "--release" {
             lang_zone::ir::codegen::set_release_mode(true);
         } else if a == "--no-tco" {

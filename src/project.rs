@@ -16,6 +16,40 @@ use crate::macros::expand::{
 use crate::parser::Parser;
 use crate::util::import::ImportResolver;
 
+/// 阶段 3（G3）：把 import 路径解析为 registry 包内的文件。
+///
+/// 与 main.rs 的同名函数同口径：`import pkg` 取包入口（`lib.lz` > `mod.lz`
+/// > `src/main.lz`），`import pkg.sub` 定位包内 `sub.lz`。
+/// 返回 None = 不是 registry 包（调用方继续既有逻辑）。
+pub(crate) fn resolve_registry_package(dir: &Path, path: &[String]) -> Option<PathBuf> {
+    let first = path.first()?;
+    let root = crate::util::registry::find_registry_root(dir)?;
+    let versions = crate::util::registry::list_versions(&root, first);
+    let rest = &path[1..];
+    for v in &versions {
+        let base = root.join(first).join(v);
+        if rest.is_empty() {
+            for cand in ["lib.lz", "mod.lz", "src/main.lz"] {
+                let p = base.join(cand);
+                if p.is_file() {
+                    return Some(p);
+                }
+            }
+        } else {
+            let rel = rest.join("/");
+            let p = base.join(&rel).with_extension("lz");
+            if p.is_file() {
+                return Some(p);
+            }
+            let p = base.join(&rel).join("mod.lz");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 /// 编译单元：一个 .lz 文件的解析结果
 #[derive(Debug)]
 pub struct CompileUnit {
@@ -260,7 +294,14 @@ impl ProjectCompiler {
         let base_dir = from_file.parent().unwrap_or(&self.base_dir);
 
         // 查找模块文件
-        let candidates = ImportResolver::resolve_path(import_path, base_dir);
+        let mut candidates = ImportResolver::resolve_path(import_path, base_dir);
+        // 阶段 3（G3）：本地目录未命中时查registry（`push` 发布的三方包）。
+        // 追加而非替换 ⇒ 既有本地优先行为完全不变。
+        if !candidates.iter().any(|c| c.exists()) {
+            if let Some(p) = resolve_registry_package(base_dir, import_path) {
+                candidates.push(p);
+            }
+        }
         let mut found = false;
         for candidate in &candidates {
             if candidate.exists() {

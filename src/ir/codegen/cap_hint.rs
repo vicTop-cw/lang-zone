@@ -138,12 +138,22 @@ impl CodeGen {
                     BinOpKind::Mod => "%",
                     _ => return None,
                 };
-                Some(format!(
-                    "({} {} {})",
-                    Self::render_pure_arith(&**lhs)?,
-                    o,
-                    Self::render_pure_arith(&**rhs)?
-                ))
+                // 子操作数仅当本身是 BinOp 时加括号（保持优先级），
+                // 消除 Paren 包装 + BinOp 生成的冗余双层括号：
+                // `((n + 1i64))` → `n + 1i64`（最终 `({}).max(0)` 外层已兜底优先级）
+                let l = Self::render_pure_arith(&**lhs)?;
+                let r = Self::render_pure_arith(&**rhs)?;
+                let l = if matches!(lhs.kind, ExprKind::BinOp { .. }) {
+                    format!("({})", l)
+                } else {
+                    l
+                };
+                let r = if matches!(rhs.kind, ExprKind::BinOp { .. }) {
+                    format!("({})", r)
+                } else {
+                    r
+                };
+                Some(format!("{} {} {}", l, o, r))
             }
             _ => None,
         }

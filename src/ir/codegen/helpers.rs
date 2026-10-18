@@ -451,34 +451,42 @@ pub(crate) fn strip_lambda_type(lambda: &str) -> String {
     lambda.to_string()
 }
 
-/// Strip type annotations AND add `&` before each param for filter-style closures
-/// "move |x: i64| { ... }" → "move |&x| { ... }"
-/// "move |x| { ... }" → "move |&x| { ... }"
+/// Strip type annotations for filter-style closures that receive `&Item`.
+/// 旧实现在参数名前硬加 `&`（`|&x|`）。这会与**两种**闭包体冲突：
+///   1. body 已含 `*x`（free function `filter(items, |x| x % 2 == 0)` 经
+///      ref 解引用生成 `*x % 2`）→ `|&x|` + `*x` = E0614 双重解引用；
+///   2. body 直接用 `x`（comprehension `[f(x) for x in xs if x > 0]` 的
+///      cond 闭包生成 `x > 0`）→ 参数必须为 `&x` 模式才能把 `&i64` 解引用
+///      成 `i64`，否则 E0308。
+/// 正确做法（按 body 决策，v10）：
+///   - body 含 `*<param>` → 保留裸参数（`|x|`），`*x` 解引用 &i64；
+///   - body 无解引用    → 加 `&` 模式（`|&x|`），体内 `x` 直接是 i64。
+/// "move |x: i64| { *x % 2 }" → "move |x| { *x % 2 }"
+/// "move |item: int| { item > 0 }" → "move |&item| { item > 0 }"
 pub(crate) fn strip_lambda_type_with_ref(lambda: &str) -> String {
-    let no_types = strip_lambda_type(lambda);
-    // Now add `&` before each parameter name
-    // Format: "move |x, y| { ... }" or "|x| { ... }"
-    if let Some(pipe_open) = no_types.find('|') {
-        if let Some(pipe_close) = no_types[pipe_open + 1..].find('|') {
-            let params_part = &no_types[pipe_open + 1..pipe_open + 1 + pipe_close];
-            let ref_params: String = params_part
-                .split(',')
-                .map(|p| {
-                    let trimmed = p.trim();
-                    if trimmed.is_empty() {
-                        String::new()
-                    } else {
-                        format!("&{}", trimmed)
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            let before = &no_types[..pipe_open + 1];
-            let after = &no_types[pipe_open + 1 + pipe_close..];
-            return format!("{}{}{}", before, ref_params, after);
+    let stripped = strip_lambda_type(lambda);
+    // 用 lambda_split 解析 (参数名, body)；失败则回退 stripped。
+    if let Some((params, body)) = lambda_split(&stripped) {
+        // 任一参数被 body 显式 `*` 解引用 → 参数保持裸名
+        let deref_used = params
+            .iter()
+            .any(|p| body.contains(&format!("*{}", p)));
+        if !deref_used && !params.is_empty() {
+            // body 直接用参数名 → 加 & 模式
+            let ref_params: String = params.iter().map(|p| format!("&{}", p)).collect::<Vec<_>>().join(", ");
+            // 找到管道位置重建 "move |&item| { body }"（stripped 前缀含 "move "，
+            // 故不再另加 head）
+            if let Some(pipe_open) = stripped.find('|') {
+                if let Some(rel_close) = stripped[pipe_open + 1..].find('|') {
+                    let pipe_close = pipe_open + 1 + rel_close;
+                    // after 需跳过闭管 `|` 本身，否则拼出 `|&item||`（E0214）
+                    let after = &stripped[pipe_close + 1..];
+                    return format!("{}|{}|{}", &stripped[..pipe_open], ref_params, after);
+                }
+            }
         }
     }
-    no_types
+    stripped
 }
 
 /// 解析 lambda 字符串为 (参数名列表, body 表达式)
@@ -594,6 +602,19 @@ pub(crate) fn field_needs_box(ty: &IrType, name: &str) -> bool {
             _ => false,
         },
         _ => false,
+    }
+}
+
+/// 从 IR 类型中提取命名字构体名：`Named{path:..}` 直接取 path，`Option(Named{..})`
+/// 递归取内层（字段赋值 `root.left = ...` 中 base.ty 是 `Option<TreeNode<T>>`）。
+pub(crate) fn struct_name_from_ty(ty: &IrType) -> Option<String> {
+    match ty {
+        IrType::Named { path, .. } => Some(path.clone()),
+        IrType::Option(inner) => match inner.as_ref() {
+            IrType::Named { path, .. } => Some(path.clone()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -841,6 +862,15 @@ fn scan_auto_mut_block(
                         if let ExprKind::Var(v) = &base.kind {
                             out.insert(v.clone());
                         }
+                    }
+                    // BUG-261：`root.left = ...` 的 FieldAccess 赋值目标（如
+                    // `root.as_mut().unwrap().left = Some(...)`）需要基底 `root` 为 mut，
+                    // 否则 E0596 cannot borrow `root` as mutable（Option<Box<T>> 递归字段）
+                    ExprKind::FieldAccess { base, .. } => {
+                        if let Some(v) = root_var_of_place(target) {
+                            out.insert(v);
+                        }
+                        let _ = base;
                     }
                     _ => {}
                 }

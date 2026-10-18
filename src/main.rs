@@ -44,6 +44,41 @@ fn merge_imported_modules(module: &mut lang_zone::ast::Module, entry: &Path) -> 
     merged
 }
 
+/// 阶段 3（G3）：把 import 路径解析为 registry 中的包内文件。
+///
+/// `import mylib` → 从 `dir` 逐级向上找 `local-registry/`，取 `<pkg>` 最新的
+/// 已发布版本，返回包内的入口 `.lz`（`import pkg.sub` 则定位 `sub.lz`）。
+/// 返回 None 表示「不是 registry 包」，调用方继续走既有本地查找/跳过逻辑。
+fn resolve_registry_import(dir: &Path, path: &[String]) -> Option<PathBuf> {
+    let first = path.first()?;
+    let root = lang_zone::util::registry::find_registry_root(dir)?;
+    let versions = lang_zone::util::registry::list_versions(&root, first);
+    let rest = &path[1..];
+    for v in &versions {
+        let base = root.join(first).join(v);
+        if rest.is_empty() {
+            // 包入口约定：lib.lz > mod.lz > src/main.lz
+            for cand in ["lib.lz", "mod.lz", "src/main.lz"] {
+                let p = base.join(cand);
+                if p.is_file() {
+                    return Some(p);
+                }
+            }
+        } else {
+            let rel = rest.join("/");
+            let p = base.join(&rel).with_extension("lz");
+            if p.is_file() {
+                return Some(p);
+            }
+            let p = base.join(&rel).join("mod.lz");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
 fn merge_imports_into(
     module: &mut lang_zone::ast::Module,
     dir: &Path,
@@ -78,7 +113,15 @@ fn merge_imports_into(
             dir.join(&rel).with_extension("lz"),
             dir.join(&rel).join("mod.lz"),
         ];
-        let Some(mp) = candidates.into_iter().find(|c| c.exists()) else {
+        // 阶段 3（G3）：本地目录未命中时，查registry（`push` 发布的三方包）。
+        // 追加在既有候选之后 ⇒ 纯增量，本地优先的行为完全不变。
+        let mut all: Vec<PathBuf> = candidates.to_vec();
+        if !candidates.iter().any(|c| c.exists()) {
+            if let Some(found) = resolve_registry_import(dir, &imp.path) {
+                all.push(found);
+            }
+        }
+        let Some(mp) = all.into_iter().find(|c| c.exists()) else {
             continue;
         };
         if loaded.contains(&mp) {
@@ -457,6 +500,14 @@ fn compile_main(args: Vec<String>) -> i32 {
     // --hide-type-annotations：隐藏局部 let 绑定的安全类型标注（等价 LZ_HIDE_TYPE_ANNOTATIONS=1）
     if args.iter().any(|a| a == "--hide-type-annotations") {
         lang_zone::ir::codegen::set_hide_type_annotations(true);
+    }
+    // --hide-module-meta：隐藏模块元数据常量（__name__、__file__、__package__、__path__、__doc__、__is_macro__）
+    if args.iter().any(|a| a == "--hide-module-meta") {
+        lang_zone::ir::codegen::set_hide_module_meta(true);
+    }
+    // --hide-return-keyword：隐藏显式 return 关键字（尾表达式裸写，对齐手写 Rust 惯用形态）
+    if args.iter().any(|a| a == "--hide-return-keyword") {
+        lang_zone::ir::codegen::set_hide_return_keyword(true);
     }
     // --release：rustc 调用注入 -C opt-level=3（等价 LZ_RELEASE=1）
     if args.iter().any(|a| a == "--release") {

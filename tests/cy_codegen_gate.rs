@@ -87,6 +87,9 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
     // literals.lz / lz_std.lz 已补封 rust 面实跑 .exp，从本表移出。
     // 2026-10-15：named_args.lz 已有 oracle（BUG-24 已修，rust 面 E0425 消除），
     // 已从本表移出，改走逐字比对（CY/TESTS/15_feature_matrix/named_args.exp）。
+    // 2026-10-16：expect_receiver_once.lz / closure_write_capture.lz / uncond_arms_closure.lz
+    // 三件 rust 面均编译+运行绿，expect_receiver_once 与 closure_write_capture 补封移出；
+    // uncond_arms_closure 仍无 .exp（接受面差异），保留在册。
     // T0r14：这两件原本**有** `.exp`，而那份期望值是「裸字符串也发 `{:?}`」的年代封的。
     // print 口径对齐规范后 cy 不再带引号，而 rust 面今天自己编不出这两个程序（就地取数：
     // `TEMP/tworeseal-r14-dry.log`，`cwd` 设在语料目录，兄弟模块解析得到），
@@ -115,10 +118,8 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
         "07_data_structures/enum_minimal.lz",
         "两侧 stdout 恒为空 ⇒ 空 golden 不承重，只能证「跑通」",
     ),
-    (
-        "04_functions/closure_write_capture.lz",
-        "cy 面按 SYNTAX/03e §五 已实现（'7'），rust 面 E0594 编不出 ⇒ 取不到 oracle（BUG-33 在册）",
-    ),
+    // 2026-10-16：BUG-33 已收（v188，写捕获闭包栈上 let mut 自动推断 FnMut），
+    // rust 面编译+运行绿（stdout '7'），已补封 closure_write_capture.exp，从本表移出。
     (
         "15_feature_matrix/dyn_recv_closure.lz",
         "无注解闭包形参在 rust 面恒 E0282（类型定不下标）⇒ 取不到 oracle，本件只证跑通；\
@@ -126,13 +127,9 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
          cy_dynamic_for_site_wraps_and_the_helper_self_guards 钉住（T0r12，BUG-37 在册）；\
          2026-10-14 经 BUG-38 处置决策确认：变量绑定无注解形参为 cy 后端扩展、rust 面 E0282 属预期（见 SYNTAX/03e §三），不补封",
     ),
-    (
-        "15_feature_matrix/expect_receiver_once.lz",
-        "同一份源码在 rust 面恒 E0308：生成的是 `.expect(\"m\".to_string())`，而 \
-         `Option::expect(self, msg: &str)`（BUG-42 在册，本车道不改 `src/ir/codegen/mod.rs`）\
-         ⇒ 取不到 oracle。本件只证 cy 面「接收者只求值一次」（旧发射拼两遍 ⇒ 副作用跑两遍、退出码 0），\
-         凭据是发射形态锁 cy_expect_evaluates_receiver_once（T0r13，BUG-41 在册）",
-    ),
+    // 2026-10-16：BUG-42 已收（v185 MethodCall 路径注入 current_expected_ty），
+    // expect 不再无条件加 `.to_string()`；rust 面编译+运行绿（stdout 'mk\n5\n'），
+    // 已补封 expect_receiver_once.exp，从本表移出。
     (
         "15_feature_matrix/uncond_arms_closure.lz",
         "无注解闭包形参在 rust 面恒 E0282（BUG-38 在册）⇒ 取不到 oracle；\
@@ -140,18 +137,7 @@ const NO_ORACLE_EXPLAINED: &[(&str, &str)] = &[
          cy_dynamic_arms_dispatch_by_name_list 钉住（T0r13，BUG-40 在册）；\
          2026-10-14 经 BUG-38 处置决策确认：不补封（见 SYNTAX/03e §三）",
     ),
-    (
-        "15_feature_matrix/with_as_binding_fstr.lz",
-        "**这件的 oracle 在场但是缺陷产物** ⇒ 不封：`with MyResource(name: \"database\") as res:` 之后 \
-         `print(f\"using {res.name}\")`，rust 面出 `using \"database\"`（`{:?}`）、cy 面出 `using database`，\
-         差在 `with as` 绑定的类型没落成 `MyResource`（BUG-44 在册，交对面车道修共享层，本车道不改 \
-         `src/ir/builder/`）；规范 `SYNTAX/00-词法基础.md:188` 说 str 在插值里走 Display ⇒ 照 rust 封它 \
-         等于把缺陷钉成 cy 的验收标准，照 cy 封它违反「期望值来自另一后端」的封盘纪律。同一构造的 \
-         `self.name` 插值两侧逐字一致（见母件 `with_defer.lz`）⇒ 缺的不是字段访问的类型落地。 \
-         凭据 `TEMP/wdseal-r14-apply.log`（两侧原文逐字）。**转正条件**：对面修好后 \
-         `TEMP/seal_missing_exp.py` 会在两侧一致时补封，本表那条随即被「登记了但 `.exp` 在场 ⇒ 红」\
-         的反向门逼着同轮移出。本件仍被 L3 执行（计入「无 oracle 仅跑通」）⇒ 崩溃类回归照样能抓。",
-    ),
+    // 2026-10-16：with_as_binding_fstr.lz / unop_user_class.lz 已有 .exp 并逐字比对，移出。
 ];
 
 fn walk_lz(dir: &Path, out: &mut Vec<PathBuf>) {

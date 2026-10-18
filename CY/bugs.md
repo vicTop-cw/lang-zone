@@ -56,4 +56,4 @@
 - [x] **BUG-B11**：跨模块 enum 无数据变体模式匹配 —— 已修复。无数据变体判定退化为按模式参数个数（`args` 为空即视为无数据变体），跨模块合并 `variant_fields` 缺失时也能正确生成 `x is Variant`。
 - [x] **BUG-EC-006**：type_name 白名单 —— 已修复。`builtin_value_names()` 已补入 `type_name`，CY 后端 `type_name()` 不再误报 E0433。
 
-> 注：CY 后端完整端到端运行仍需 cython 编译环境（C 编译器 / .pyd），当前 Windows 沙箱缺失，无法端到端验证；以上为代码级修复 + `cargo check -p lang-zone` 编译通过。
+> 注：CY 后端完整端到端运行需 cython 编译环境（C 编译器 / .pyd）。2026-09-28 时 Windows 沙箱缺失，**无法端到端验证**。本次开发轮（2026-10-15）已确认 cython 3.3.0 + setuptools 链路可用，下表按**代码级修复 + cargo check 通过 + cythonize 实测**三档标记。

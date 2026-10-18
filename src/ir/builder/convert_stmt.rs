@@ -315,16 +315,36 @@ pub(crate) fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             }
             // 无 let 前缀的默认可变绑定（x = v）且变量在**本块之外**已存在 → 重新赋值
             // （闭包内写外部变量：total = total + x → total = total + x 而非新绑定）
-            // 本块首次声明（block_declared 含 name）保持 Let；外部已有但本块未声明 → Assign
+            // 本块首次声明（block_declared 含 name 且尚未在转换循环中实际声明）保持 Let；
+            // 外部已有或本块先前已声明 → Assign
             // 顶层变量（top_level_consts 含 name）→ 修改全局（guard_for_3.lz size = size - 1）
             let is_top_level_mut = ctx.top_level_consts.contains_key(name.as_str());
+            // 区分「本块首次绑定」与「本块重赋值」：
+            // block_declared 含 name 表示预扫描登记过首次绑定；
+            // block_declared_so_far 含 name 表示本块转换循环已实际声明过 → 重赋值。
+            let is_first_binding = ctx.block_declared.contains(name.as_str())
+                && !ctx.block_declared_so_far.contains(name.as_str());
             if *mutable
                 && ty.is_none()
                 && (ctx.vars.contains_key(name.as_str()) || is_top_level_mut)
-                && !ctx.block_declared.contains(name.as_str())
+                && !is_first_binding
             {
+                // 目标类型取变量的已声明类型（如 `mut root = None` → Option(Any)，
+                // 后续 `root = insert(root, 5)` 时 vars 已传播为 Option(TreeNode<T>)），
+                // 而非值类型 TreeNode<T>——否则 codegen 的 Some(...) 包装判断
+                // `target.ty is Option(_)` 不成立，生成 `root = insert(...)`
+                // 而非 `root = Some(insert(...))`，rustc E0308（bst.lz 家族）。
+                let target_ty = ctx
+                    .vars
+                    .get(name.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| ir_ty.clone());
                 Stmt::Assign {
-                    target: Expr::new(ExprKind::Var(name.clone()), ir_ty.clone(), Span::unknown()),
+                    target: Expr::new(
+                        ExprKind::Var(name.clone()),
+                        target_ty,
+                        Span::unknown(),
+                    ),
                     value: ir_value,
                 }
             } else {
@@ -481,6 +501,23 @@ pub(crate) fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
                         }
                     };
                     let same_container_any = match (ctx.current_ret_ty.as_ref(), &expr.ty) {
+                        // 表达式类型 Any/Generic + 返回类型是容器 Named（List/Vec/Dict/
+                        // HashMap/Set/HashSet/Range/Iterator）：类型未知（如未导入的
+                        // 外部函数 map/filter/fold 返回），放行让 Rust 从返回类型推断
+                        // （BUG-286 return 误插 <Vec<i64> as ImplicitFrom<i64>>，E0277）
+                        (Some(ret_ty), IrType::Any) | (Some(ret_ty), IrType::Generic(_))
+                            if matches!(
+                                ret_ty,
+                                IrType::Named { path, .. }
+                                    if matches!(
+                                        path.as_str(),
+                                        "List" | "Vec" | "Dict" | "HashMap" | "BTreeMap"
+                                            | "Set" | "HashSet" | "Range" | "Iterator"
+                                    )
+                            ) =>
+                        {
+                            true
+                        }
                         // 元组返回（size_hint 的 `return (lower, upper)`）：元素递归
                         // 比较（Any 元素兼容），否则 (i64, Any) vs (i64, Option<i64>)
                         // 插入错误 ImplicitFrom（E0277）
@@ -801,6 +838,10 @@ pub(crate) fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
             };
             let elem_ty = match &iter_expr.ty {
                 IrType::Named { args, .. } if !args.is_empty() => args[0].clone(),
+                // BUG-268：字符串 for 迭代（`for c in s`）元素类型应为 Str（单字符）。
+                // 此前回退 Any → `result + c` 走 LzAdd 分派（需 String+String）报 E0308。
+                IrType::Str => IrType::Str,
+                IrType::Named { path, .. } if path == "str" || path == "String" => IrType::Str,
                 _ => IrType::Any,
             };
             loop_ctx.add_var(var, elem_ty);
@@ -1901,6 +1942,20 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             name, ty, value, ..
         } = s
         {
+            // None 字面量（`mut root = None`）：infer_expr_type 返回 Any，
+            // 但实际语义是 Option(Any)——否则后续 `root = insert(root, 5)`
+            // 的 Option 传播不触发，vars 被覆盖为 TreeNode<T>，codegen 的
+            // Some(...) 包装失效（bst.lz E0308 家族）。
+            let ir_ty = if ty.is_none()
+                && (matches!(value, AstExpr::NoneLit)
+                    || matches!(value, AstExpr::Ident(n) if n == "None"))
+            {
+                IrType::Option(Box::new(IrType::Any))
+            } else {
+                ty.as_ref()
+                    .map(|t| from_ast_type(t))
+                    .unwrap_or_else(|| infer_expr_type(value, &block_ctx))
+            };
             // 本块首次声明的变量：登记到 block_declared（区分首次绑定与重新赋值）。
             // 顶层变量（size = 3 等顶层 Assign 转 Const）不属于本块首次声明：
             // 否则 `size = size - 1`（无 let 前缀可变绑定）被误判为本块绑定走
@@ -1910,11 +1965,38 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             {
                 block_ctx.block_declared.insert(name.clone());
             }
-            let ir_ty = ty
-                .as_ref()
-                .map(|t| from_ast_type(t))
-                .unwrap_or_else(|| infer_expr_type(value, &block_ctx));
-            block_ctx.add_var(name, ir_ty);
+            // 重新赋值时的类型传播：变量已声明（`mut root = None` → `root = insert(...)`），
+            // 若新值类型更具体（非 Any），更新 vars 中的类型。
+            // 特别地：`mut x = None` 登记为 Option(Any)，后续 `x = f(...)` 值类型为 T
+            // 时更新为 Option(T)——否则 codegen 里 x 仍是 Option<i64>（Any 默认），
+            // 与 f 返回的 T 冲突（bst.lz `root = insert(root, 5)` E0308 家族）。
+            let new_ty = if matches!(&ir_ty, IrType::Any) {
+                None
+            } else if matches!(&ir_ty, IrType::Option(_)) {
+                Some(ir_ty.clone())
+            } else if let Some(IrType::Option(inner)) = block_ctx.vars.get(name.as_str()) {
+                if matches!(**inner, IrType::Any) {
+                    // 值类型 T 且变量已是 Option(Any) → Option(T)
+                    Some(IrType::Option(Box::new(ir_ty.clone())))
+                } else {
+                    // 值类型 T 且变量已是 Option(U) → 保持 Option(U)（保守）
+                    None
+                }
+            } else {
+                Some(ir_ty.clone())
+            };
+            if let Some(t) = new_ty {
+                if block_ctx.vars.contains_key(name.as_str()) {
+                    block_ctx.add_var(name, t);
+                } else {
+                    // 变量在本块首次声明（未被父级 vars 继承），用新类型登记。
+                    // 否则 `mut cfg = Cfg(n: 10)` 后 `cfg` 仍为 Any，
+                    // codegen 无法识别自定义 struct 的 remove/get 方法（`as usize` 误转）。
+                    block_ctx.add_var(name, t);
+                }
+            } else if !block_ctx.vars.contains_key(name.as_str()) {
+                block_ctx.add_var(name, ir_ty.clone());
+            }
         }
         // 前向传播：函数体内的嵌套 def（IR-003 会转为本地闭包 let）也需登记其函数
         // 类型，否则后续 `return inner` / `inner(...)` 查 lookup_var 回退 Any→i64，
@@ -1976,6 +2058,22 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             for name in names {
                 if name != "_" {
                     block_ctx.add_var(name, ir_ty.clone());
+                }
+            }
+        }
+        // 前向传播：`mut x = None`（Option<Any>）后续 `x = f(...)` 时，
+        // 若 f 返回 T（非 Any/Unit/Option），更新 x 类型为 Option<T>。
+        // 否则 `root = insert(root, 5)` 中 root 保持 Option<i64>（Any 默认），
+        // 与 insert 返回的 TreeNode<i64> 冲突（bst.lz E0308 家族）。
+        if let AstStmt::Assign { target, value, .. } = s {
+            if let AstExpr::Ident(name) = target {
+                if let Some(existing) = block_ctx.vars.get(name.as_str()) {
+                    if matches!(existing, IrType::Option(inner) if matches!(**inner, IrType::Any)) {
+                        let val_ty = infer_expr_type(value, &block_ctx);
+                        if !matches!(val_ty, IrType::Any | IrType::Unit) {
+                            block_ctx.add_var(name, IrType::Option(Box::new(val_ty)));
+                        }
+                    }
                 }
             }
         }
@@ -2054,7 +2152,14 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                 }
             }
         }
-        ir_stmts.extend(convert_stmts(std::slice::from_ref(s), &block_ctx));
+        let converted = convert_stmts(std::slice::from_ref(s), &block_ctx);
+        // 动态声明跟踪：把本块转换循环中已实际声明（产生 Stmt::Let）的名字登记到
+        // block_declared_so_far，供后续 `root = insert(root, 5)` 之类重赋值
+        // 识别为 Assign（block_declared 预扫描仍含 root，但已实际声明过 → 重赋值）。
+        if let Some(Stmt::Let { name, .. }) = converted.iter().find(|st| matches!(st, Stmt::Let { .. })) {
+            block_ctx.block_declared_so_far.insert(name.clone());
+        }
+        ir_stmts.extend(converted);
     }
 
     // 后处理：递归收集所有被赋值的变量名，标记对应首次 let 为 mut

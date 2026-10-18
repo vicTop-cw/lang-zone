@@ -297,7 +297,7 @@
   `error[E0599]: no method named `to_vec` found for type `str` `，把自举语料打红了。
   本卡的修复范围（只解决「切片作值 unsized」）没错，缺的是**按基底类型分叉**——见 BUG-26。
 
-## BUG-22 [2026-10-02T05:11:25Z] [medium] 入账未修（DEMO 语料文案，非产品码）
+## BUG-22 [2026-10-02T05:11:25Z] [medium] FIXED（2026-10-02 改正 DEMO 断言；2026-10-16 补销状态位漂移，见卡内 FIXED 段）
 - summary: [规范 vs DEMO 语料] `DEMO/01_basics/strings.lz:43` 与 `DEMO/01_basics/polish_28_strings.lz:28` 断言 f-string 插值给 str 值**加引号**（`name=\"LZ\"` / `by \"LZ\"`），与规范行 SYNTAX/00-词法基础.md:188（`f\"x={x}\"` → `format!(\"x={}\", x)`，Display 不带引号）相反
 - detail: 这两句从来没人执行——`tests/demo_codegen_compile.rs` 的 `run_gate` 只做「转译 + rustc 编译」两段（Stage 只有 Transpile/Rustc），不跑产物，所以断言写反也不响。危害是**它会被当证据读**：本轮我据此把两个后端的插值统一成 Debug，实测打红了真正在跑的判据 `tests/str_boundary.rs::c7_fstring`（`left: \"name=\\\"LZ\\\", age=30\"` vs `right: \"name=LZ, age=30\"`，证据 `TEMP/fsb-c-0320.log`），回退后同一判据绿（`TEMP/fsb-c-after-0327.log`）。规范行 + 实跑判据两边一致，DEMO 文案孤立，故判 DEMO 侧为错。
 - 处置建议: 把这两行断言改成无引号形态（`name=LZ, age=30` / `lang-zone v2 by LZ`），并在件头注释里把「f-string Debug 语义」这句改掉——它现在是错的口径来源。属 DEMO/Rust 车道产物，本卡只记账不代改。
@@ -314,6 +314,24 @@
   复跑差分器 ⇒ `TEMP/probe7/xdiff-after.log`：`合计 4 件 | 一致 4 | 分叉 0`。
 - 全仓再扫一遍同形断言：`grep -rn 'f"' DEMO/*/*.lz CY/TESTS/*/*.lz | grep '\\\\"'` ⇒ 零命中，没有第三处。
 - 判据（可红）: `python TEMP/xdiff_ds07.py TEMP/probe7`（末行必须是 `一致 4 | 分叉 0`；把任一句断言改回带引号形态，该件立刻分叉）
+
+### FIXED 2026-10-16（qoder-explore-worker，销账轮：抬头状态位漂移修正 + 判据复绿）
+- 旧抬头逐字（本条留档，不覆盖当次可见性）：`## BUG-22 [2026-10-02T05:11:25Z] [medium] 入账未修（DEMO 语料文案，非产品码）`
+- **状态位漂移，非代码缺陷**：上方「追记 2026-10-02T06:00:04Z」已记录本卡代码实际改完
+  （`DEMO/01_basics/strings.lz:41-45` 与 `polish_28_strings.lz:24-29` 断言改无引号形态 +
+  注释指回 SYNTAX/00-词法基础.md:188，差分器复跑 `一致 4 | 分叉 0`，全仓同形断言零命中），
+  但抬头一直停留在「入账未修」，与本卡内文自相矛盾 ⇒ 台账漂移，本轮只补状态位。
+- 本轮实证（2026-10-16）：
+  - `DEMO/01_basics/strings.lz:44` 实测已是 `assert msg == "name=LZ, age=30"`（无引号），
+    注释含「2026-10-02 按台账 BUG-22 改正」；`polish_28_strings.lz:28` 同形为
+    `assert msg == "lang-zone v2 by LZ"` ⇒ 代码侧确已修，非「未修」。
+  - 判据复绿：`cargo test --test str_boundary` → **3 passed / 0 failed**（含 `c7_fstring`）。
+  - 全量闸门旁证：`cargo test --test demo_codegen_compile all_demos_generated_rust_compiles
+    -- --ignored` → **327 文件 / 327 通过 / 0 失败**（两个 DEMO 件在该闸门内转译+编译全绿）。
+  - 全工作区扫描：`cargo test --workspace --exclude lang-zone` → **零失败**。
+- 结论：**本卡代码无需再改**（DEMO 语料层，非产品码）；销账仅因状态位与文内实证不符。
+  回退方式：无需回退（未动任何产品码）；若判据 `c7_fstring` 转红，则按上方「追记」段的
+  原结论处理——把两处断言改回规范形态并复核双后端差分器。
 
 ## BUG-23 [2026-10-02T05:11:25Z] [medium] FIXED（本轮修，rust 后端 f-string 静态判定）
 - summary: [规范 vs rust 后端] `format!("{{x}}")` 的 Display/Debug 分档只认「已登记的 str 变量」，`self.field` / `param.field` / `let` 绑定的 str 字段与降级变量（`file`→`file_`）全部落到 Debug 分支 ⇒ str 插值被加引号，违反 SYNTAX/00-词法基础.md:188，并与 cy 后端分叉
@@ -587,3 +605,49 @@
 - 判据：`cargo test -j 1 --test demo_codegen_compile -- --include-ignored` 2 passed；combo-struct-method.lz / result.lz 生成产物 rustc 编译通过；`cargo test -j 1` 全量 27 目标全绿。
 - repro: `cargo test -j 1 --test demo_codegen_compile -- --include-ignored`（修复前 magic_demos 1 failed / all_demos 2 failed）
 - reported_by: file-agent 收尾轮验证闸门
+
+## BUG-260 [2026-10-17T05:20:00+08:00] [high] FIXED（rust 后端 2026-10-17，convert_stmt.rs + stmt_gen.rs）：BST 例子编译失败（mut root = None 后 oot = insert(...) 的类型传播缺口）
+- summary: TEMP/marvis-probe/bst.lz（mut root = None + oot = insert(root, 5) + &mut TreeNode 递归）生成产物 rustc 编译失败：E0308（root 类型 Option<i64> vs insert 返回 TreeNode<T>）、E0596（root 非 mut）、E0507（move out of shared ref）、E0614（TreeNode 不可 deref）。
+- detail: 根因 4 处共享类型落地/借用缺口：
+  1. convert_stmt.rs Let 分支：lock_ctx.add_var(name, ir_ty) 无条件覆盖变量类型，mut x = None 后 x = f(...) 时 f 返回 T 被写成裸 T（丢掉 Option 包裹），且变量首次声明时未用新类型登记（mut cfg = Cfg(n:10) 后 cfg 仍 Any）。
+  2. infer.rs infer_expr_type：struct 构造 Counter(n:10) 之前被误判为 Any（缺少 is_struct 检查），导致 codegen 无法识别自定义 struct 的 remove/get 方法（s usize 误转）。
+  3. stmt_gen.rs Let 分支的 Some(...) 包装：无条件把 RHS 包进 Some(...)（只要值类型非 Option/Any/Unit 且非 None），未检查变量声明类型；c = c.inc()（c 是 Counter）被生成成 c = Some(c.inc()) → E0308。
+  4. 	ypes_emit.rs gen_none_ref：(**__b).clone() 应改为 (*__b).clone()（双 deref 越界）。
+- 修复：
+  - convert_stmt.rs：Let 分支增加类型传播（新值类型非 Any 时更新 vars；变量已是 Option(Any) 且新值是 T 时升级为 Option(T)；首次声明变量用新类型登记）。Assign 分支同族：x = f(...) 且 x 已是 Option(Any) 时升级。
+  - infer.rs：infer_expr_type 的 is_struct(fname) 检查提前到返回 Named(fname)（原本在容器分支之后，struct 被误判为 Any）。
+  - stmt_gen.rs：Some(...) 包装增加变量声明类型检查（fstr_var_types 查该变量是否 Option(_)），非 Option 变量不包装。
+  - types_emit.rs：gen_none_ref 修正 deref 层级。
+- 判据：cargo test --release 全量 0 failed（含 codegen_corner_fixes 12 passed、find_bug_bugs 46 passed、demo_codegen_compile 1 passed）；bst.lz 生成产物 rustc 编译通过并正确输出 1 3 5 7 9；bug-self-underscore.lz 生成产物 rustc 编译通过（c = c.inc() 无 Some(...) 包装）。
+- repro: .\target\release\lang-zone.exe TEMP/marvis-probe/bst.lz --emit=rs && rustc <bst.rs>
+- reported_by: marvis-probe
+
+## BUG-261 [2026-10-17T20:10:00+08:00] [medium] FIXED（rust 后端 2026-10-17，helpers.rs `strip_lambda_type_with_ref`）：推导式 filter 闭包缺 `&` 参数模式（nesting-data-types.lz `[mapper(item) for item in items if item > 0]`）
+- summary: DEMO/boundary-coverage/nesting-data-types.lz 生成产物 rustc 编译失败：`filter(|item| { item > 0i64 })` 中 `item` 是 `&i64` 却按 `i64` 比较，E0308 expected `&i64`, found `i64`（同族 nesting-closure-lambda.lz 也命中）。根因是 `strip_lambda_type_with_ref`（helpers.rs）只做 passthrough：只剥离参数类型注解，既不区分 body 是否已含 `*param` 解引用，也不补 `&` 模式，导致两类闭包体互相打架。
+- detail: 该 helper 旧注释声称「给参数加 `&`」但实现只是 `strip_lambda_type(lambda)` 裸转；历史曾硬加 `&`（`|&x|`），却与 body 已由 ref 解引用生成的 `*x`（free function `filter(items, |x| x % 2 == 0)` → `*x % 2`）冲突，构成 E0614 双重解引用。两种闭包体需求相反：
+  1. body 已含 `*param` → 参数须保持裸名（`|x|`），`*x` 解引用 `&i64`；
+  2. body 直接用 `param` → 参数须为 `&param` 模式，才能把 `&i64` 解引用成 `i64`。
+- 修复：helpers.rs `strip_lambda_type_with_ref` 改为按 body 决策——先用 `lambda_split` 解析 (params, body)，若 body 含 `*<param>` 则保留裸参数；否则给每个参数加 `&` 前缀并重建 `move |&item| { ... }`。重建时 `after` 须跳过闭管 `|` 本身（否则拼成 `|&item||`，E0214，首版即踩此坑）。
+- 判据：demo_codegen_compile 全量闸门（`-- --ignored`）失败数由 20（临时加 LZ_NEUTER_REF 环境变量把 helper 退回 passthrough 对照）降到 13，纯收益无新增回归；magic_demos 12→13 全绿；lib 441 passed；cy_codegen_gate 2 passed；perf_opt_gates 44 passed；str_boundary/dual_route/incremental_golden/ir_pass_fixes/lzc_*/moddec_* 全绿。修复后 nesting-data-types.rs 生成 `filter(|&item|| { item > 0i64 })`，rustc 编译通过。剩余 13 个 DEMO 失败（lists/polish_01/polish_04/operators/ir-edge-empty-collections/edge-values-boundary/edge-walrus-operator/iter/list/option/set/string/traits）在 passthrough 对照下同样失败，属既有 E0308/E0282 基线，与本修复无关。
+- repro: .\target\release\lang-zone.exe DEMO/boundary-coverage/nesting-data-types.lz --emit=rs && rustc <nesting-data-types.rs>
+- reported_by: marvis-probe
+
+## BUG-262 [2026-10-17T20:30:00+08:00] [high] FIXED（rust 后端 2026-10-17，expr_gen.rs BlockExpr 分支 + stmt_gen.rs 尾值 unwrap 条件）：BlockExpr 子 CodeGen 不继承 `current_expected_ty` → match 臂尾 Option 值被误加 `.unwrap()`（iter.lz Zip::size_hint E0308）
+- summary: DEMO/lz_std/iter.lz 的 `Chain::size_hint` 源码 `let hi = match (hi_a, hi_b): case (Some(x), Some(y)): Some(min(x, y)); case _: None` 生成产物里 `Some(min(x, y))` 被错加成 `Some(min(x, y)).unwrap()`，导致 `hi: Option<i64>` 绑定处 E0308（expected Option<i64>, found i64）。`.unwrap()` 不在源码，是代码生成错误注入。
+- detail: 根因两处叠加：
+  1. `expr_gen.rs` 的 `ExprKind::BlockExpr` 分支用 `CodeGen::new()` 造子 CodeGen，逐项复制了 current_ret_ty / current_fn_ret_ty / enum_variant_* / known_types / str_typed_vars 等，但**漏复制 `current_expected_ty`**（新实例经 mod.rs:418 恒为 None）。外层 `let hi: Option<int> = { match ... }` 已在 Let 分支（stmt_gen.rs L959）把 current_expected_ty 设为 Some(Option<int>)，但 match 臂经 BlockExpr 落到子 CodeGen 后 expected_ty 变回 None。
+  2. `stmt_gen.rs` L1782 的尾值 unwrap 启发式只参考 `current_ret_ty`（函数返回 Tuple，非 Option）→ 对 Option 臂尾 `Some(min(x,y))` 加 `.unwrap()`，误判「值流向函数返回」。
+- 修复：
+  - expr_gen.rs BlockExpr 分支（L6252 后）加 `*child.current_expected_ty.borrow_mut() = self.current_expected_ty.borrow().clone();`。
+  - stmt_gen.rs L1789 尾值 unwrap 条件加 `&& !expected_is_opt` 双保险（current_expected_ty 已期望 Option 时绝不 unwrap，防其它路径同类误判）。
+- 判据：LZ_DBG_TAIL 调试输出对臂尾 `Some(min(x,y))` 从 `exp=None` 变为 `exp=Some(Option(Int))`；重新 emit iter.lz 后 `.unwrap()` 消失，`rustc --edition 2021 --extern lz_builtins=target\release\deps\liblz_builtins-45a30ac52ea72cb9.rlib -L dependency=target\release\deps -O iter.rs` 编译 EXIT=0（修复前 1 error E0308）。
+- repro: .\target\release\lang-zone.exe DEMO\lz_std\iter.lz --emit=rs && rustc --edition 2021 --extern lz_builtins=target\release\deps\liblz_builtins-45a30ac52ea72cb9.rlib -L dependency=target\release\deps -O DEMO\lz_std\iter.rs
+- reported_by: marvis-probe
+
+## BUG-263 [2026-10-17T22:00:00+08:00] [high] FIXED（rust 后端 2026-10-17，stmt_gen.rs Assign 分支）：`self.inner = None` 生成 `Some(Option::None)` 双重 Some 包装（option.lz Iterator::next 清空迭代器）
+- summary: DEMO/lz_std/option.lz 的 `Iterator::next` 源码 `self.inner = None`（清空内部 Option<i64>），生成产物 `self.inner = Some(Option::None);` → E0308 expected `Option<i64>`, found `Option<Option<_>>`。`.unwrap()`/双重 `Some` 均为代码生成错误注入。
+- detail: stmt_gen.rs Assign 分支（原 L1481）在「变量是 Option<T> 而赋值值是 T」时补 `Some(...)`（bst.lz 家族 `root = Some(insert(root,5))`），但守卫条件只排除 `IrType::Option(_) | IrType::Any | IrType::Unit`。而 `None` 字面量的 IR 类型是 `Named { path: "Option", args: [] }`（不是 `IrType::Option(_)`，args 空），守卫放行 → 把已经是 `Option::None` 的值再包一层 `Some(...)` → `Some(Option::None)`，塞进 `Option<i64>` 字段 → E0308。
+- 修复：stmt_gen.rs Assign 分支改用 helpers.rs 已有的 `needs_some_wrap(&target.ty, value)`（它内部用 `is_option_ty` 识别 `Named{path:"Option"}` 形态，且用 `is_none_expr(value)` 排除 None 字面量，正是本场景语义），删掉手写的脆弱匹配。
+- 判据：重新 emit option.lz 后 L298 从 `self.inner = Some(Option::None);` 变为 `self.inner = Option::None;`，rustc 编译 EXIT=0（修复前 1 error E0308）。demo_codegen_compile 全量闸门失败数由 12 降到 11（本修复净 −1，无新增回归）。
+- repro: .\target\release\lang-zone.exe DEMO\lz_std\option.lz --emit=rs && rustc --edition 2021 --extern lz_builtins=target\release\deps\liblz_builtins-45a30ac52ea72cb9.rlib -L dependency=target\release\deps -O DEMO\lz_std\option.rs
+- reported_by: marvis-probe

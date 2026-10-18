@@ -22,11 +22,11 @@ mod owned_local;
 mod pattern_gen;
 mod scan;
 mod stmt_gen;
-mod str_boundary;
+pub mod str_boundary;
 mod types_emit;
 
-// 隐藏类型标注/release 开关需由二进制（main.rs / cli.rs）调用，重导出到 crate 根
-pub use hide_ty::{hide_type_annotations_str, release_mode, set_hide_type_annotations, set_release_mode};
+// 隐藏类型标注/release/module-meta/return-keyword 开关需由二进制（main.rs / cli.rs）调用，重导出到 crate 根
+pub use hide_ty::{hide_type_annotations_str, hide_module_meta, hide_return_keyword, release_mode, set_hide_type_annotations, set_hide_module_meta, set_hide_return_keyword, set_release_mode};
 
 // 注：子模块内部符号不再在 mod.rs 统一 re-export —— 方法经 impl 自动可见，
 // 自由函数由使用方 `use super::<mod>::<name>;` 显式引入。
@@ -84,6 +84,12 @@ pub struct CodeGen {
     /// 已知为字符串类型的局部变量名（let 绑定 ty=Str / 字符串字面量 / 参数 ty=Str）：
     /// f-string 插值用 `{}` 而非 `{:?}`（`{:?}` 会给字符串加引号，如 `f"[{joined}]"`）
     str_typed_vars: std::collections::HashSet<String>,
+    /// 字符串 for 循环变量名集合（`for c in s` 生成 Rust `char`，IR ty 为 Str）：
+    /// 拼接语境需 `c.to_string()`（BUG-268）
+    str_loop_vars: std::collections::HashSet<String>,
+    /// BUG-284：Str 类型 match scrutinee 经 `.as_str()` 转为 &str，通配绑定为 &str；
+    /// 返回 String 语境需 `.to_string()`
+    str_match_bindings: std::collections::HashSet<String>,
     /// ref 绑定变量名集合（ref r = x / let ref r = x）：后续赋值 r = v 需生成 `*r = v`
     ref_bindings: std::collections::HashSet<String>,
     /// ref 别名字符串替换（ref f = h.n，value 是可赋值 place）：f → 目标位置表达式
@@ -418,6 +424,8 @@ impl CodeGen {
             is_main: false,
             declared: std::collections::HashSet::new(),
             str_typed_vars: std::collections::HashSet::new(),
+            str_loop_vars: std::collections::HashSet::new(),
+            str_match_bindings: std::collections::HashSet::new(),
             ref_bindings: std::collections::HashSet::new(),
             ref_aliases: std::collections::HashMap::new(),
             ref_write_through: std::collections::HashSet::new(),
@@ -843,6 +851,7 @@ impl CodeGen {
                             let params: Vec<(String, IrType)> = m
                                 .params
                                 .iter()
+                                .filter(|p| p.name != "self" && p.name != "self_")
                                 .map(|p| (p.name.clone(), p.ty.clone()))
                                 .collect();
                             
