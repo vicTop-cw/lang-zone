@@ -1191,8 +1191,12 @@ pub(crate) fn lookup_builtin_method_ret(
                 // BUG-313：Dict.contains_key → Bool（dict.lz contains_key 定义）
                 "contains" | "contains_key" | "has_key" | "is_empty" => Some(IrType::Bool),
                 "len" | "size" => Some(IrType::Int),
-                // get → V（LZ 用 -1/"" 编码 None，代码生成 unwrap_or 平铺）
-                "get" | "pop" => Some(args[1].clone()),
+                // get → Option<V>（BUG-313：Dict.get 返回 `Option<ref V>`，codegen 生成
+                // `.cloned()` → Option<V>，见 expr_gen.rs L4578）。原先标 V 与产物值
+                // Some(1)/None 矛盾（TEMP/probe/dict_get.lz），同 BUG-265 家族。
+                // pop → Option<V>：LZ Dict.pop(key) 语义 = BTreeMap::remove(key)
+                // （返回 Option<V>），见 BUG-268（codegen 尚缺 pop→remove 路由）。
+                "get" | "pop" => Some(IrType::Option(Box::new(args[1].clone()))),
                 // BUG-289：BTreeMap/HashMap::remove 返回 Option<V>，
                 // LZ 视角 remove 返回 V?（Option<V>），先前回退 Any→Unit
                 "remove" => Some(IrType::Option(Box::new(args[1].clone()))),

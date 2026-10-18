@@ -679,3 +679,21 @@
 - 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）——证明语料中 46 处集合 get/first/last/pop 用法都已在 codegen 侧按 Option 处理，infer 跟进后无新失败。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/list_get_default.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-267 [2026-10-18T23:45:00+08:00] [high] FIXED（rust 后端 2026-10-18，infer.rs Dict 臂）：`Dict.get(key)` 的 IR 类型标 V，但 codegen 产物是 `Option<V>`（`Some(1)`/`None`）
+- summary: `let d={"a":1,"b":2}; print(d.get("a")); print(d.get("zzz"))` IR 显示 `[int] method [Dict<str,int>] d.get`，实跑却输出 `Some(1)` / `None`。类型（int）与值（Option）矛盾——这是 BUG-265 的 **Dict 孪生洞**（同一漂移家族，infer 与 codegen 各说各话）。
+- detail: codegen 在 expr_gen.rs L4578 按 BUG-313 生成 `(d.get(k)).cloned()`（BTreeMap::get 返回 `Option<&V>`，`.cloned()` 转 `Option<V>`）；infer.rs Dict 臂仍标 `"get"|"pop" => Some(args[1])`（V），两边不一致 ⇒ 合法 LZ 形态在 IR 层面谎报类型。语料实证：全语料 0 处 2 参 `d.get(k, default)`（codegen L4566 的 unwrap_or 分支是死代码），35 处 `.get(` 多为用户 struct 自带 get（`Box2.get`/`I.get`），非 Dict。
+- 修复：infer.rs Dict 臂 `"get" => Some(IrType::Option(args[1]))`，与 codegen 对齐。因 `lookup_builtin_method_ret` 签名**不含参数个数**（`fn(recv_ty, method, ctx)`），无法区分 1 参/2 参形态；2 参 `get(k,default)` 现标 Option 会与 codegen 的 `unwrap_or` 平铺产物（V）再漂移，故一并登记为 BUG-269 待拆（需把 arg-count 传入 lookup 或把 2 参形态单独路由）。全语料无 2 参用法，本轮改零冲击。
+- 判据：`TEMP/probe/dict_get.lz` IR 修复前 `[int]`、修复后 `[Option<int>]`；实跑修复前后均为 `Some(1)\nNone\n2`（codegen 侧本就是 Option，值不变，修的是 IR 与值的一致）。回归用例：`tests/codegen_corner_fixes.rs::dict_get_is_option_matching_codegen`。
+- 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/dict_get.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-268 [2026-10-18T23:48:00+08:00] [high] FIXED（rust 后端 2026-10-18，expr_gen.rs Dict pop 路由 + pattern_methods）：`Dict.pop(key)` 生成 `d.pop(key)`，BTreeMap/HashMap 无 pop 方法 → E0599
+- summary: `let p = d.pop("a")` 生成 Rust `let p: i64 = d.pop("a".to_string())`，rustc 报 `E0599 no method named 'pop' found for struct 'BTreeMap'`（TEMP/probe/dict_pop.lz 实测 RUSTC_FAIL exit=1）。语义上 Dict.pop(key) = BTreeMap::remove(key)（返回 Option<V>），与 Dict.remove（BUG-289）同源，但 codegen 没路由。
+- detail: 三层洞叠一起——① `pattern_methods`（expr_gen.rs L3410-3431，need_ref 的入口门）**没有 pop**，故整个 need_ref 块被跳过，`args_s[0]` 保持 `"a".to_string()`（owned String）而非 `&str` 字面量；② `is_dict_contains_key`（L3522-3523）也没有 pop，`&` 未加；③ rust_method 映射 `"pop" => "pop"`（L3330），生成 `d.pop(...)` 落到 BTreeMap 固有方法名 → E0599。stdlib 全语料 0 处 `pop` 定义（List.pop 是 builtin 魔法，不在此列），故未被语料覆盖。
+- 修复：三处补 pop——`pattern_methods` 加 `"pop"`（放行 need_ref）、`is_dict_contains_key` 加 `|| method == "pop"`（加 `&`）、新增 codegen 臂把 Dict `pop` 路由到 `{recv}.remove({key})`（返回 Option<V>，与 remove 一致，保留 Option 不平铺）。`need_ref` 布尔（L3481）同步加 pop。全语料 0 处 `Dict.pop(key)`，本轮改零冲击。
+- 判据：`TEMP/probe/dict_pop.lz` 修复前 `let p: i64 = d.pop("a".to_string())` → E0599；修复后 `let p: Option<i64> = d.remove("a")` → 实跑 `Some(1)`（`d.pop("zzz")` → `None`）。回归用例：`tests/codegen_corner_fixes.rs::dict_pop_routes_to_remove_and_returns_option`。
+- 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/dict_pop.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）

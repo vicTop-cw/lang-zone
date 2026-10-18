@@ -454,3 +454,41 @@ def main() =
         "max/min 应为 Option<T>：非空给 Some，空 List 给 None（unwrap_or 后 -1）"
     );
 }
+
+#[test]
+fn dict_get_is_option_matching_codegen() {
+    // BUG-267 回归（fist-agent 寻虫 2026-10-18）：Dict.get 的 IR 类型原先标 V
+    // （infer.rs "get" => args[1]），但 codegen 生成 `(d.get(k)).cloned()` →
+    // Option<V>（TEMP/probe/dict_get.lz 实测 `Some(1)` / `None`），类型与值矛盾
+    // （同 BUG-265 家族）。infer 跟进标 Option<V> 后两边一致。
+    let src = r#"
+def main() =
+    let d = {"a": 1, "b": 2}
+    print(d.get("a"))
+    print(d.get("zzz"))
+    print(d.get("b").unwrap_or(-1))
+"#;
+    let r = run_lz("dict_get", src);
+    assert!(r.transpiled, "Dict.get 应可转译：\n{}", r.diag);
+    assert!(r.ok, "Dict.get 应编译运行通过：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "Some(1)\nNone\n2", "Dict.get 应为 Option<V>：命中给 Some，未命中给 None");
+}
+
+#[test]
+fn dict_pop_routes_to_remove_and_returns_option() {
+    // BUG-268 回归（fist-agent 寻虫 2026-10-18）：LZ Dict.pop(key) 原先生成
+    // `d.pop(key)`，但 BTreeMap/HashMap 无 pop 方法 → E0599
+    // `no method named 'pop'`（TEMP/probe/dict_pop.lz 实测 RUSTC_FAIL）。
+    // 现路由到 `d.remove(key)`（返回 Option<V>），与 Dict.remove（BUG-289）一致。
+    let src = r#"
+def main() =
+    let d = {"a": 1, "b": 2}
+    let p = d.pop("a")
+    print(p)
+    print(d.pop("zzz"))
+"#;
+    let r = run_lz("dict_pop", src);
+    assert!(r.transpiled, "Dict.pop 应可转译：\n{}", r.diag);
+    assert!(r.ok, "Dict.pop 不应报 E0599 no method named `pop`：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "Some(1)\nNone", "Dict.pop 应返回 Option<V>：命中给 Some，未命中给 None");
+}

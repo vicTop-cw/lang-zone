@@ -3428,6 +3428,10 @@ impl CodeGen {
                     "rsplitn",
                     "get",
                     "remove",
+                    // BUG-268：Dict.pop(key) 也需 &Q（pop→remove 路由后同 remove）；
+                    // 不在本列表则整个 need_ref 块被跳过，args_s[0] 保持
+                    // "a".to_string()（owned String）→ E0308 expected &String。
+                    "pop",
                 ];
                 // BUG-SB-003（2026-09-03）：判定用映射后的 rust_method——
                 // camelCase 别名（startsWith → starts_with）也需走 &str 改写。
@@ -3478,7 +3482,7 @@ impl CodeGen {
                         // expected &i64, found i64；lz_std 自定义 contains 的场景
                         // 由 recv_has_custom_contains 守卫排除。
                         || (recv_is_vec && method == "contains" && !recv_has_custom_contains)
-                        || (recv_is_dict && (rust_method == "contains_key" || method == "get" || method == "remove"))
+                        || (recv_is_dict && (rust_method == "contains_key" || method == "get" || method == "remove" || method == "pop"))
                         || (recv_is_set && (method == "contains" || method == "remove"))
                         || (is_kwargs && (rust_method == "contains_key" || method == "get"))
                         // closure 参数 receiver（operators.lz `__sn.get("key")`，__sn 类型
@@ -3520,7 +3524,7 @@ impl CodeGen {
                         // Dict/HashMap 的 get/remove 也需 &Q（BUG-313：`d.get(1)` 报
                         // E0308 expected &i64, found i64，因 BTreeMap::get 签名 &Q）
                         let is_dict_contains_key = recv_is_dict
-                            && (method == "contains_key" || method == "get" || method == "remove");
+                            && (method == "contains_key" || method == "get" || method == "remove" || method == "pop");
                         for (idx, arg_expr) in args.iter().enumerate() {
                             // 用户 struct 的同名普通方法（如 lib_hashmap 的 get(key: str)
                             // → String 形参）：不做 &str/& 实参改写，保持原 String 语义。
@@ -4585,6 +4589,17 @@ impl CodeGen {
                     // 不做 unwrap_or 平铺——若平铺成 V，则与 Some(...) 比较报
                     // E0308 mismatched types（String vs Option<String>）。
                     call
+                } else if method == "pop"
+                    && args_s.len() == 1
+                    && is_dict_receiver
+                    && !user_plain.contains("pop")
+                {
+                    // BUG-268：LZ Dict.pop(key) 原先生成 `d.pop(key)`，但 BTreeMap/
+                    // HashMap 没有 pop 方法 → E0599 no method named `pop`
+                    // （TEMP/probe/dict_pop.lz）。Dict.pop 语义 = remove(key)，返回
+                    // Option<V>，与 Dict.remove（BUG-289）一致，保留 Option 不平铺。
+                    // 参数已由上方 need_ref 加 &（pop 已并入 recv_is_dict 分支）。
+                    format!("{}.remove({})", recv, args_s[0])
                 } else
                 // Range/Chars/Keys/Values 等迭代器无 .len() → .count()（或 end-start）
                 if (method == "len" || method == "length")
