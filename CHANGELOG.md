@@ -30,6 +30,7 @@ AIGC:
 - `true + 1` / `true < 5` 不再产出坏 Rust（原先 `bool + i64` → E0369），同臂补 `bool_in_scalar_op`：任一侧为 Bool 即报「Bool 值不能直接参与运算」，`bool == bool` 放行（BUG-271）
 - Bool 拦截带**比较链豁免**：`1 < 5 < 10` 解析为 `(1<5) < 10`（lhs 为 bool），codegen 才分解成 `(1<5) && (5<10)`；豁免使 `DEMO/13_operators/precedence.lz` 与 `CY/TESTS/15_feature_matrix/precedence.lz` 保持转绿（否则 cy_l1_transpile_all_corpus FAILED）
 - 合法形态回归锁定：`f64 + int`（1.5+2=3.5）、`str + str` 拼接、`list + list` 拼接（`__cat`）均不受影响；`stdlib 自由函数（约 158 个）不接 rlib` 记为 BUG-270 待修（OPEN，潜伏、0 语料命中）
+- 标量运算补类型族交叉拦截（BUG-272）：`两侧皆 Option 的算术`（`Option * Option`，收窄 BUG-269 的「两侧皆 Option 放行」到仅比较/Eq）、`浮点位/移位`（`1.5 << 2`）、`字符串跨族比较`（`"a" < 1`）、`Bool 跨族 Eq/Ne`（`true == 1`，Eq/Ne 不在 scalar_op，另开独立块）四类原先直出 E0369 的坏 Rust 现于 LZ 阶段拦截；合法形态（`Option 比较`、`list < list`、`bool == bool`、`f64 + int`）锁定不受影响；`None + 1` 因 None 落 `Any` 仍放行，记待评
 
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）

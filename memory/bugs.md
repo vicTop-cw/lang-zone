@@ -725,3 +725,22 @@
 - 回归面：全量 cargo test -j 1 零失败（含 demo_codegen_compile 441 passed + cy_l1_transpile_all_corpus 通过——后者在本修复前因 precedence.lz 触发 Bool 拦截而 FAILED，已回绿）。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/bool_plus_int.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-272 [2026-10-19T01:15:00+08:00] [high] FIXED（rust 后端 2026-10-19，extended_check.rs Binary 臂标量运算补类型族交叉拦截）：标量运算缺类型族相容性校验，4 类跨族组合直出坏 Rust（E0369）
+- summary: extended_check Binary 臂的标量运算拦截此前只覆盖 Option/Bool/Result/str_plus_int 少数几例，跨类型族组合（浮点位运算、两侧皆 Option 的算术、字符串跨族比较、Bool 跨族 Eq/Ne）不拦，codegen 直出坏 Rust。TEMP/probe/sweep2 四组实测 RUSTC_FAIL：
+  - [1,2].first() * [1,2].first() → let v: Option<i64> = (vec.first()).cloned() * (vec.first()).cloned(); → E0369（两侧皆 Option 的算术）
+  - 1.5 << 2 → let v: f64 = 1.5f64 << 2i64; → E0369（f64 未实现 Shl）
+  - 1.5 & 2 → let v: f64 = 1.5f64 & 2i64; → E0369（f64 未实现 BitAnd）
+  - "a" < 1 → let v: bool = "a".to_string() < 1i64; → E0369（String 未实现 PartialOrd<i64>）
+  - 	rue == 1 → let v: bool = true == 1i64; → E0369（bool 未实现 PartialEq<i64>；Eq/Ne 不在 scalar_op 内，此前完全无拦截）
+- detail（三处新增/修正）：
+  ① **both_opt_arith**：BUG-269 的「两侧皆 Option 放行」过宽——仅比较（Lt/Gt/Le/Ge）与 Eq/Ne 应放行（Option 实现 PartialOrd/PartialEq），算术（Add/Sub/Mul/Div/Mod/Pow）与位/移位（BitAnd/BitOr/BitXor/Shl/Shr）两侧皆 Option 仍应拒。
+  ② **f64_bit_shift**：位/移位运算任一侧为 F64 → 拒（浮点无位语义）。
+  ③ **str_cmp_cross**：序比较（Lt/Gt/Le/Ge）两侧字符串性不同（is_str_ty(lt) != is_str_ty(rt)）→ 拒。注意 s[i] != "-" 是 Eq（不在 scalar_op），不受影响。
+  ④ **bool_eq_cross**（新增独立块）：Eq/Ne 两侧 Bool 性不同 → 拒。保护 ool == bool。
+- 已知未修：None + 1 → LzAdd::__add__(None, 1i64) → E0369。None 字面量在 infer_expr_type 落 IrType::Any（infer.rs L21「None 类型取决于上下文」），Any 属 queer 被全部放行。需单独把 NoneLit 语境化或对 None 参与算术/位显式拒，风险高，暂记待评。
+- 合法形态回归：Option<Lt>Option（[1,2].first() < [3,4].first() → true）、list < list、ool == bool、64 + int 均不受影响。
+- 判据：	ests/codegen_corner_fixes.rs::scalar_op_type_family_cross_is_clean_lz_type_error（4 拒 + 4 合法形态锁定）。
+- 回归面：全量 cargo test -j 1 零失败（含 demo_codegen_compile 441 passed + cy_l1_transpile_all_corpus 通过；codegen_corner_fixes 20 passed）。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/opt_mul_opt.lz（及 f64_shl_int / str_lt_int / bool_eq_int）
+- reported_by: fist-agent（lz-combo-r2 组合轮）

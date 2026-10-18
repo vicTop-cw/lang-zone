@@ -580,3 +580,55 @@ def main() =
         b2.stderr
     );
 }
+
+/// 标量运算的类型族交叉拦截（TEMP/probe/sweep2 五组实测 RUSTC_FAIL 反哺）：
+/// ① `Option * Option`（两侧皆 Option 的算术）② `f64 << int`（浮点位/移位）
+/// ③ `str < int`（字符串跨族比较）④ `bool == int`（Bool 跨族 Eq/Ne）。
+/// 同时锁定合法形态未被误伤：`Option<Lt>Option` 比较、`list < list`、
+/// `bool == bool`、`f64 + int` 数字混算。
+#[test]
+fn scalar_op_type_family_cross_is_clean_lz_type_error() {
+    let assert_clean = |tag: &str, body: &str, needle: &str| {
+        let src = format!("def main() =\n    let v = {}\n    print(v)\n", body);
+        let r = run_lz(tag, &src);
+        let all = format!("{}\n{}", r.diag, r.stderr);
+        assert!(
+            !r.transpiled && all.contains(needle),
+            "`{}` 应报干净 LZ 类型错误（含 `{}`），实际：\n{}{}",
+            body,
+            needle,
+            r.diag,
+            r.stderr
+        );
+    };
+    // ① 两侧皆 Option 的算术
+    assert_clean(
+        "opt_mul_opt",
+        "[1,2].first() * [1,2].first()",
+        "Option 值不能直接参与算术/位运算",
+    );
+    // ② 浮点位/移位
+    assert_clean("f64_shl_int", "1.5 << 2", "浮点值不能参与位/移位运算");
+    assert_clean("f64_bitand", "1.5 & 2", "浮点值不能参与位/移位运算");
+    // ③ 字符串跨族比较
+    assert_clean("str_lt_int", "\"a\" < 1", "字符串与其他类型不能直接比较");
+    // ④ Bool 跨族 Eq/Ne
+    assert_clean("bool_eq_int", "true == 1", "Bool 值不能与其他类型比较");
+
+    // 合法形态回归
+    let ok_src = r#"
+def main() =
+    let a = [1, 2].first()
+    let b = [3, 4].first()
+    print(a < b)
+    print([1] < [2])
+    print(true == true)
+    print(1.5 + 2)
+"#;
+    let ok = run_lz("scalar_family_valid_kept", ok_src);
+    assert!(ok.ok, "合法标量运算应继续通过：\n{}", ok.diag);
+    assert_eq!(
+        ok.stdout.replace('\n', " ").trim(),
+        "true true true 3.5"
+    );
+}

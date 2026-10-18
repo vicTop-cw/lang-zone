@@ -1363,6 +1363,29 @@ pub(crate) fn ex_check_expr(
                         _ => false,
                     }
                 };
+                let is_arith = matches!(
+                    op,
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Pow
+                );
+                let is_bit_shift = matches!(
+                    op,
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+                );
+                let is_cmp =
+                    matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge);
+                // 链式比较：`a < b < c` 解析为 `(a<b) < c`，lhs 为比较表达式
+                let is_chain_cmp = is_cmp
+                    && matches!(
+                        left.as_ref(),
+                        AstExpr::Binary { op: lop, .. }
+                            if matches!(lop, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+                    );
+                let is_f64 = |t: &IrType| matches!(t, IrType::F64);
+                let is_str_ty = |t: &IrType| {
+                    matches!(t, IrType::Str)
+                        || matches!(t, IrType::Named { path, .. } if path == "str" || path == "String")
+                };
+                let is_bool_ty = |t: &IrType| matches!(t, IrType::Bool);
                 let lopt = strip_option(&lt) && !ex_type_queer(&rt);
                 let ropt = strip_option(&rt) && !ex_type_queer(&lt);
                 if lopt != ropt {
@@ -1371,28 +1394,42 @@ pub(crate) fn ex_check_expr(
                             .to_string(),
                     );
                 } else if !ex_type_queer(&lt) && !ex_type_queer(&rt) {
-                    // bool_in_scalar_op：bool 不参与算术/位/序运算。
-                    // `true + 1` 之类 codegen 直出 `b + 1i64`（b: bool）→ rustc E0369
-                    // （TEMP/probe/edge_scalar_ops.lz 实测 RUSTC_FAIL）。
-                    // 注意 `bool == bool`（Eq/Ne）不在 scalar_op 内，仍允许。
-                    // 链式比较豁免：`a < b < c` 解析为 `(a<b) < c`（lhs 为 bool），
-                    // 但 codegen 在 expr_gen.rs ~L5460 把它分解成 `(a<b) && (b<c)`，
-                    // 是合法的比较链（CY/15_feature_matrix/precedence.lz 依赖），
-                    // 故 lhs 为比较表达式时不报 Bool 错误。
-                    let is_cmp = matches!(
-                        op,
-                        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge
-                    );
-                    let is_chain_cmp = is_cmp
-                        && matches!(
-                            left.as_ref(),
-                            AstExpr::Binary { op: lop, .. }
-                                if matches!(lop, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+                    // both_opt_arith：两侧皆 Option 的算术/位运算仍非法——`Option * Option`
+                    // codegen 直出 `Option<i64> * Option<i64>` → E0369（TEMP/probe/sweep2/opt_mul_opt.lz
+                    // 实测 RUSTC_FAIL）。仅比较（Lt/Gt/Le/Ge）与 Eq/Ne 放行：Option 实现 PartialOrd/PartialEq。
+                    if lopt && ropt && (is_arith || is_bit_shift) {
+                        work.report_error(
+                            "Option 值不能直接参与算术/位运算，需先解包取内层值".to_string(),
                         );
-                    let is_bool_ty = |t: &IrType| matches!(t, IrType::Bool);
-                    if (is_bool_ty(&lt) || is_bool_ty(&rt)) && !is_chain_cmp {
+                    } else if is_bit_shift && (is_f64(&lt) || is_f64(&rt)) {
+                        // f64_bit_shift：f64 未实现 Shl/Shr/BitAnd/BitOr/BitXor → `1.5 << 2` → E0369
+                        // （TEMP/probe/sweep2/f64_shl_int.lz 实测 RUSTC_FAIL）。
+                        work.report_error("浮点值不能参与位/移位运算".to_string());
+                    } else if is_cmp && is_str_ty(&lt) != is_str_ty(&rt) {
+                        // str_cmp_cross：字符串与其他族比较——`"a" < 1` 生成 `String < i64` → E0369
+                        // （TEMP/probe/sweep2/str_lt_int.lz 实测 RUSTC_FAIL）。
+                        // 注意 `s[i] != "-"` 是 Eq（不在 scalar_op），不在此拦。
+                        work.report_error("字符串与其他类型不能直接比较".to_string());
+                    } else if (is_bool_ty(&lt) || is_bool_ty(&rt)) && !is_chain_cmp {
+                        // bool_in_scalar_op：bool 不参与算术/位/序运算。
+                        // `true + 1` 之类 codegen 直出 `b + 1i64`（b: bool）→ rustc E0369
+                        // （TEMP/probe/edge_scalar_ops.lz 实测 RUSTC_FAIL）。
+                        // 注意 `bool == bool`（Eq/Ne）不在 scalar_op 内，另用下方块拦跨族比较。
+                        // 链式比较豁免：`a < b < c` 解析为 `(a<b) < c`（lhs 为 bool），
+                        // 但 codegen 在 expr_gen.rs ~L5460 把它分解成 `(a<b) && (b<c)`，
+                        // 是合法的比较链（CY/15_feature_matrix/precedence.lz 依赖），
+                        // 故 lhs 为比较表达式时不报 Bool 错误。
                         work.report_error("Bool 值不能直接参与运算".to_string());
                     }
+                }
+            }
+            // bool_eq_cross：`true == 1` 生成 `bool == i64` → E0369
+            // （TEMP/probe/sweep2/bool_eq_int.lz 实测 RUSTC_FAIL）。Eq/Ne 不在 scalar_op
+            // 内，须单独拦跨族比较；`bool == bool`（如 `a > 1 == b < 2`）放行。
+            if matches!(op, BinOp::Eq | BinOp::Ne) {
+                let is_bool_ty = |t: &IrType| matches!(t, IrType::Bool);
+                if !ex_type_queer(&lt) && !ex_type_queer(&rt) && (is_bool_ty(&lt) != is_bool_ty(&rt)) {
+                    work.report_error("Bool 值不能与其他类型比较".to_string());
                 }
             }
             // unconstrained_generic_cmp：无约束泛型参数参与 < > <= >=
