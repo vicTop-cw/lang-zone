@@ -755,7 +755,7 @@
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/none_plus_int.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
 
-## BUG-274 [2026-10-19T07:15:00+08:00] [medium] OPEN（codegen expr_gen，非标量运算族）：None == None 直出无类型标注的比较 → rustc E0282
+## BUG-274 [2026-10-19T07:15:00+08:00] [medium] FIXED（codegen expr_gen，None 比较短路）：None == None 直出无类型标注的比较 → rustc E0282
 - summary: print(None == None) 生成 println!("{:?}", None == None);，rustc 报 E0282（type annotations needed）——TEMP/probe/sweep2/none_eq.lz 实测 RUSTC_FAIL exit=1。
 - detail: x == None（x 为有类型 Option）被 codegen 正确路由为 x.is_none()（expr_gen 已有 None 相等特判），但两侧都是裸 None 时无上下文定类型，codegen 未注入 Option::<T>::None 标注。属 codegen 侧类型上下文缺失，与 extended_check 标量运算族拦截（BUG-269~273）不同族。
 - 判据：TEMP/probe/sweep2/none_eq.lz 应编译运行（打印 alse 与 	rue）；x == None 形态已正常（[1].first() == None 走 is_none()）。

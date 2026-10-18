@@ -5456,6 +5456,17 @@ impl CodeGen {
                             format!("{}.is_some()", other)
                         };
                     }
+                    // 两侧皆 None（`None == None` / `None != None`）：Option<T>::None ==
+                    // Option<T>::None 恒为 true/false，与内层类型无关；直接短路为布尔字面量，
+                    // 避免 codegen 输出无类型标注的 `None == None` → rustc E0282
+                    // （BUG-274，TEMP/probe/sweep2/none_eq.lz 实测 RUSTC_FAIL）。
+                    if rhs_none && lhs_none {
+                        return if *op == BinOpKind::Eq {
+                            "true".to_string()
+                        } else {
+                            "false".to_string()
+                        };
+                    }
                 }
                 // 链式比较分解: a < b < c → (a < b) && (b < c)
                 // 检测：LHS 是比较表达式 且 当前操作符也是比较

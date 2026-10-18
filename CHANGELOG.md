@@ -32,6 +32,7 @@ AIGC:
 - 合法形态回归锁定：`f64 + int`（1.5+2=3.5）、`str + str` 拼接、`list + list` 拼接（`__cat`）均不受影响；`stdlib 自由函数（约 158 个）不接 rlib` 记为 BUG-270 待修（OPEN，潜伏、0 语料命中）
 - 标量运算补类型族交叉拦截（BUG-272）：`两侧皆 Option 的算术`（`Option * Option`，收窄 BUG-269 的「两侧皆 Option 放行」到仅比较/Eq）、`浮点位/移位`（`1.5 << 2`）、`字符串跨族比较`（`"a" < 1`）、`Bool 跨族 Eq/Ne`（`true == 1`，Eq/Ne 不在 scalar_op，另开独立块）四类原先直出 E0369 的坏 Rust 现于 LZ 阶段拦截；合法形态（`Option 比较`、`list < list`、`bool == bool`、`f64 + int`）锁定不受影响；`None + 1` 因 None 落 `Any` 仍放行，记待评
 - `None` 字面量参与算术/位拦截（BUG-273）：`None + 1` 生成 `LzAdd::__add__(None, 1i64)` → E0369，现于 LZ 阶段拦「None 值不能直接参与算术/位运算」。`None` 既可能是 `NoneLit` 也可能是 `Ident("None")`（词法层事实），且 `let None = 300` 可把 `None` 遮蔽为普通变量（`DEMO/boundary-coverage/edge-keyword-identifier.lz` 显式测此场景）——故 `Ident("None")` 仅当类型为 `Any`（prelude None 的推断类型）时按 None 处理，被遮蔽的 `None`（类型 Int）不拦，避免误伤遮蔽演示；`None == None` 因 codegen 不注入类型标注仍 RUSTC_FAIL，记 BUG-274 待修（OPEN）
+- `None == None` / `None != None` 短路（BUG-274）：两侧皆裸 None 时 codegen 输出 `None == None` 无类型标注 → rustc E0282。`expr_gen` Binary 臂的 `x == None → x.is_none()` 守卫只覆盖「恰一侧 None」（`rhs_none != lhs_none`），两侧皆 None 时短路为布尔字面量——`Option<T>::None == Option<T>::None` 恒为 true/false 与内层类型无关，避免 E0282。`x == None` 形态仍走 `is_none()` 不受影响；遮蔽 `let None = 300` 下短路同样成立（`x == x` 恒 true）。回归用例 `scalar_op_type_family_cross_is_clean_lz_type_error` 增补 `None == None` / `None != None` 合法形态，期望输出 `true true true 3.5 false true false`
 
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）
