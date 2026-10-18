@@ -370,3 +370,61 @@ def main() =
     assert!(r.ok, "泛型 struct __eq__ 产物编译应通过（T: PartialEq 注入 impl）：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "true");
 }
+
+#[test]
+fn to_string_on_primitives_prints_display_not_debug() {
+    // BUG-44(续) 回归（fist-agent 寻虫 2026-10-18）：`.to_string()` 的 IR 返回类型
+    // 推断存在 **match 顺序缺陷**——`IrType::Int`/`IrType::F64` 臂先于末尾追加的
+    // 「字符串化」臂命中，`to_string => String` 对 int/f64 不可达 ⇒ `n.to_string()`
+    // 推断为 Any → `print` 走 `{:?}` Debug 输出 `"42"`（带引号）。Bool/Int128/BigInt
+    // 没有更早的臂、能到达字符串化臂，故此前只有 int/f64 出错（BUG-44 曾记录「两侧
+    // 同错」并标记为独立洞未修）。
+    // 修复：把 `to_string => String` 提前登记到 Int/F64 自身臂。
+    let src = r#"
+def main() =
+    let n = 42
+    print(n.to_string())
+    let x = 3.14
+    print(x.to_string())
+    let b = true
+    print(b.to_string())
+    print("abc".to_string())
+"#;
+    let r = run_lz("tostr_display", src);
+    assert!(r.transpiled, "to_string() 应可转译：\n{}", r.diag);
+    assert!(r.ok, "to_string() 产物应可编译运行：\n{}", r.diag);
+    assert_eq!(
+        r.stdout.trim(),
+        "42\n3.14\ntrue\nabc",
+        "print(<primitive>.to_string()) 应走 Display（无引号），而非 Debug（带引号）"
+    );
+}
+
+#[test]
+fn list_first_get_are_option_consistent_with_codegen() {
+    // BUG-281 vs BUG-316 类型漂移回归（fist-agent 寻虫 2026-10-18）：
+    // codegen 已按 BUG-316 保留 Option（`values.first()` → `Option<&T>` → `.cloned()`
+    // → `Option<T>`），但 infer.rs 仍把 `.get()/.first()/.last()/.pop()` 标成 `T`，
+    // 造成 IR 类型与产物值矛盾——`xs.get(1) + 1` 在 IR 层面通过（都算 int），
+    // 产物却是 `Option<i64> + i64` → rustc E0369。
+    // 修复：infer 跟进 codegen，把这四个方法标成 `Option<T>`。
+    // 语料实证（全语料无一处与 `-1` 比较）：DEMO/edge-walrus-operator.lz:12 写
+    // `values.first().unwrap_or(0)` ⇒ Option 是现行语义。
+    let src = r#"
+def main() =
+    let xs = [10, 20, 30]
+    print(xs.first().unwrap_or(0))
+    print(xs.get(1).unwrap_or(-1))
+    let last = xs.last().unwrap_or(0)
+    print(last)
+    print(xs.get(99).unwrap_or(-1))
+"#;
+    let r = run_lz("list_opt", src);
+    assert!(r.transpiled, "first/get/last 应按 Option 语义转译：\n{}", r.diag);
+    assert!(r.ok, "unwrap_or 后产物应编译运行通过：\n{}", r.diag);
+    assert_eq!(
+        r.stdout.trim(),
+        "10\n20\n30\n-1",
+        "first/get/last 应为 Option<T>（调用方可 unwrap_or），越界回退到 -1"
+    );
+}

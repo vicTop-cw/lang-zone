@@ -651,3 +651,22 @@
 - 判据：重新 emit option.lz 后 L298 从 `self.inner = Some(Option::None);` 变为 `self.inner = Option::None;`，rustc 编译 EXIT=0（修复前 1 error E0308）。demo_codegen_compile 全量闸门失败数由 12 降到 11（本修复净 −1，无新增回归）。
 - repro: .\target\release\lang-zone.exe DEMO\lz_std\option.lz --emit=rs && rustc --edition 2021 --extern lz_builtins=target\release\deps\liblz_builtins-45a30ac52ea72cb9.rlib -L dependency=target\release\deps -O DEMO\lz_std\option.rs
 - reported_by: marvis-probe
+
+## BUG-264 [2026-10-18T22:55:00+08:00] [high] FIXED（rust 后端 2026-10-18，infer.rs Int/F64 两臂）：`print(n.to_string())` 走 Debug 加引号（Int/F64 的 to_string 推断为 Any）
+- summary: `let n = 42; print(n.to_string())` 实跑输出 `"42"`（带引号＝Debug 档），应为 `42`（Display 无引号）。这是 BUG-44 挂账时点名「两侧同错、本轮未动」的独立洞，本轮补上。
+- detail: 根因是 **match 顺序缺陷**：infer.rs 的 `infer_method_ret_type`（原 L1138-1146）在函数末尾追加了「字符串化」臂 `IrType::Int | IrType::Int128 | IrType::BigInt | IrType::F64 | IrType::Bool => { if method=="to_string" { return String } ... }`。但**更早**的 `IrType::Int` 臂（原 L969）与 `IrType::F64` 臂（原 L974）已先命中 `_ => None`，把 Int/F64 消费掉 ⇒ 末尾那条 `to_string => String` 对 int/f64 **不可达**，推断回退 Any。Bool/Int128/BigInt 没有更早的臂、能到达字符串化臂，故此前只有 int/f64 出错（`print(b.to_string())` 一直是对的 `true`）。IR 实测：修复前 `[?] method [int] n.to_string`（Any），修复后 `[String] method [int] n.to_string`。
+- 修复：把 `"to_string" => Some(String)` 提前登记到 `IrType::Int` 与 `IrType::F64` 自身臂（各 3 行），保留末尾臂不动（覆盖 Bool/Int128/BigInt）。
+- 判据：`TEMP/probe/tostr_ty.lz`（`print(42.to_string()/3.14.to_string()/true.to_string()/"abc".to_string())`）实跑修复前 `"42"\nabc\ntrue`、修复后 `42\n3.14\ntrue\nabc`（int/f64 去引号，str/bool 原本就对）。回归用例：`tests/codegen_corner_fixes.rs::to_string_on_primitives_prints_display_not_debug`（`run_lz` 实跑比对 stdout == "42\n3.14\ntrue\nabc"）。
+- 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）；无新增警告。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/tostr_ty.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-265 [2026-10-18T22:55:00+08:00] [high] FIXED（rust 后端 2026-10-18，infer.rs List 臂）：`List.get/first/last/pop` 的 IR 类型（T）与 codegen 产物（Option<T>）矛盾 ⇒ `xs.get(1)+1` 生成 `Option<i64>+i64` → E0369
+- summary: `let xs=[10,20,30]; print(xs.get(1)+1)` IR 层面通过（get 推断为 int），产物却是 `(xs.get(1)).cloned() + 1i64`（`xs.get(1).cloned()` 是 `Option<i64>`）→ rustc E0369 binary operation `+` cannot be applied to `Option<i64>`。同时 `print(xs.get(1))` 输出 `Some(20)`、`print(xs.get(99))` 输出 `None`。
+- detail: 这是 BUG-281 与 BUG-316 两轮决策**漂移**的后果：BUG-281 让 codegen 把 `first/last/get` 经 `.cloned()` 后追加 `.unwrap_or(-1)` 平铺（LZ 用 -1 编码 None），`infer.rs` 随之把返回类型标成 `T`；但 BUG-316（更新）**推翻**平铺、改为「保留 Option：first/last/get 返回 `Option<&T>`、pop 返回 `Option<T>`，调用方自写 `.unwrap_or(0)`」，expr_gen.rs 已按新语义改（`values.first().unwrap_or(0)` → `(first()).cloned().unwrap_or(0)`）。问题在 infer.rs **没跟进**：List 臂（原 L1000-1001）仍标 `"get"|"pop"|"first"|"last" => Some(args[0])`（T），于是 IR 类型说谎、产物是 Option，两边不一致 ⇒ 合法形态的 LZ 生成不可编译的 Rust。
+- 语义裁定依据（Option 是现行正确语义）：全语料 46 处 `.get()/.first()/.last()/.pop()` 用法中 4 处走 `.unwrap_or()`（DEMO/edge-walrus-operator.lz:12 `values.first().unwrap_or(0)`、string.lz:231/234/250），**零处**与 `-1` 比较；BUG-316 注释并列举 `assert last == Some(4)` / `while let Some(top)=nums.pop()` 若平铺则 E0308 的反例。
+- 修复：`infer.rs` List 臂把 `"get"|"pop"|"first"|"last"` 合并标成 `Some(IrType::Option(Box::new(args[0].clone())))`，与 codegen 一致；`remove`（Vec::remove 返回 V）保持 T，`remove_at` 保持已有 Option。
+- 判据：`TEMP/probe/list_get_default.lz` IR 修复前 `[int] method [List<int>] xs.get`、修复后 `[Option<int>]`；`TEMP/probe/list_get_arith.lz`（`xs.get(1)+1`）修复前后都 rustc 失败，但失败面从「IR 谎报类型后静默生成坏 Rust」变为「IR 如实标 Option<int>」——`+` 未被 extended_check 拦截属另一独立洞（Option+int 未在类型检查处报错），本卡只收类型一致性。回归用例：`tests/codegen_corner_fixes.rs::list_first_get_are_option_consistent_with_codegen`（`first()/get()/last().unwrap_or(...)` 实跑 stdout == "10\n20\n30\n-1"）。
+- 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）——证明语料中 46 处集合 get/first/last/pop 用法都已在 codegen 侧按 Option 处理，infer 跟进后无新失败。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/list_get_default.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）

@@ -968,11 +968,22 @@ pub(crate) fn lookup_builtin_method_ret(
         // Int 内建方法（abs 等保持 Int）
         IrType::Int => match method {
             "abs" => Some(IrType::Int),
+            // BUG-44(续)：本臂先于下方「字符串化」臂命中，to_string 必须在此登记，
+            // 否则落到 `_ => None` 返回 Any → print(n.to_string()) 走 `{:?}` Debug 加引号。
+            "to_string" => Some(IrType::Named {
+                path: "String".into(),
+                args: vec![],
+            }),
             _ => None,
         },
         // F64 内建方法（abs 等保持 F64）
         IrType::F64 => match method {
             "abs" => Some(IrType::F64),
+            // BUG-44(续)：同上，F64 也被本臂先命中。
+            "to_string" => Some(IrType::Named {
+                path: "String".into(),
+                args: vec![],
+            }),
             _ => None,
         },
         // List<T> 方法
@@ -983,11 +994,15 @@ pub(crate) fn lookup_builtin_method_ret(
                 path: "Iterator".into(),
                 args: args.clone(),
             }),
-            // get/pop → T（LZ 用 -1/"" 编码 None，代码生成 unwrap_or 平铺）
-            // BUG-281：先前标 Option<T>，`let r = xs.get(1); match r { -1 => ... }`
-            // 报 E0308（Option<i64> 无法匹配 -1i64）
-            "get" | "pop" => Some(args[0].clone()),
-            "first" | "last" => Some(args[0].clone()),
+            // get/pop/first/last → Option<T>。
+            // BUG-281 曾把它们标成 T（意图让代码生成 unwrap_or 平铺成 -1 哨兵），
+            // 但 BUG-316（更新）已在 expr_gen 改为**保留 Option**：`values.first()`
+            // 生成 `Option<&T>` 经 `.cloned()` 转 `Option<T>`，调用方自写 `.unwrap_or(0)`。
+            // infer 若不跟进仍标 T，就会出现类型/值矛盾：`xs.get(1) + 1` 在 IR 层面
+            // 通过（都算 int），产物却是 `Option<i64> + i64` → rustc E0369。
+            // 语料实证：DEMO/edge-walrus-operator.lz:12 写 `values.first().unwrap_or(0)`，
+            // 全语料无一处把 first/last/get/pop 与 `-1` 比较 ⇒ Option 是现行语义。
+            "get" | "pop" | "first" | "last" => Some(IrType::Option(Box::new(args[0].clone()))),
             // remove → T（Vec::remove 返回 V）
             "remove" => Some(args[0].clone()),
             // remove_at → Option<T>（list.lz:89 签名 `Option<T>`，越界 None）
