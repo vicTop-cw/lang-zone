@@ -1330,6 +1330,48 @@ pub(crate) fn ex_check_expr(
                     work.report_error("字符串与数字不能直接相加".to_string());
                 }
             }
+            // option_in_scalar_op：Option 不能直接参与标量运算（算术/位/序比较）。
+            // 与上方 Result 家族同源：LZ 需先 .unwrap_or(default)/.unwrap()/? 取内层值，
+            // 否则 codegen 直出 `Option<i64> + 1i64` → rustc E0369
+            // （TEMP/probe/option_plus_int.lz 实测 RUSTC_FAIL）。
+            // 两侧都是 Option（如 `Option<int> == Option<int>`、`a.unwrap_or(0) + 1` 之外的
+            // 对 Option 整体运算）放行——那是容器对容器，语义合法。
+            let scalar_op = matches!(
+                op,
+                BinOp::Add
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Mod
+                    | BinOp::Pow
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+            );
+            if scalar_op {
+                // 需剥 Ref 包裹再判 Option（`&xs.first()` 实参形态）
+                let strip_option = |t: &IrType| -> bool {
+                    match t {
+                        IrType::Option(_) => true,
+                        IrType::Ref(i) | IrType::MutRef(i) => matches!(i.as_ref(), IrType::Option(_)),
+                        _ => false,
+                    }
+                };
+                let lopt = strip_option(&lt) && !ex_type_queer(&rt);
+                let ropt = strip_option(&rt) && !ex_type_queer(&lt);
+                if lopt != ropt {
+                    work.report_error(
+                        "Option 值不能直接参与运算，需先 .unwrap_or(default)/.unwrap()/? 解包取内层值"
+                            .to_string(),
+                    );
+                }
+            }
             // unconstrained_generic_cmp：无约束泛型参数参与 < > <= >=
             if matches!(&op, &BinOp::Lt | &BinOp::Gt | &BinOp::Le | &BinOp::Ge) {
                 let unbound: Vec<String> = gens

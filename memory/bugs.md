@@ -697,3 +697,12 @@
 - 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/dict_pop.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
+
+## BUG-269 [2026-10-19T00:10:00+08:00] [high] FIXED（rust 后端 2026-10-19，extended_check.rs Binary 臂补 Option 拦截）：`Option<int> + int` 不被 LZ 类型检查拦截，产出坏 Rust（E0369）
+- summary: `let a = xs.first() + 1`（first() 返回 Option<int>）在 LZ 阶段无诊断，codegen 直出 `let a: Option<i64> = (xs.first()).cloned() + 1i64;`，rustc 报 `E0369 no implementation for Option<i64> + i64`（TEMP/probe/option_plus_int.lz 实测 RUSTC_FAIL exit=1）——与 Result 家族同源，但 extended_check Binary 臂只拦 Result（L1316），漏了 Option。
+- detail: `extended_check.rs` 的 `AstExpr::Binary` 臂三段检查——① Result 未经解包直接参与运算（L1316-1320，`matches!(&lt, IrType::Result{..})`）；② str_plus_int（L1322-1332）；③ unconstrained_generic_cmp（L1334-1348）。三者都覆盖不到「一侧 Option、另一侧非 Option」的标量运算。而 `ex_type_agrees`（L123-124）对 `(Option(x), y)` 剥壳递归，把 `Option<int>` 与 `int` 判为兼容——该函数服务于 mixed_list_type 等宽语境，不能用于运算两侧的一致性判定。LZ 语义上 Option 需 `.unwrap_or(default)/.unwrap()/?` 取内层值后才能参与标量运算。
+- 修复：Binary 臂在 str_plus_int 之后补 `option_in_scalar_op`——对算术/位/序比较（Add/Sub/Mul/Div/Mod/Pow/BitAnd/BitOr/BitXor/Shl/Shr/Lt/Gt/Le/Ge，Eq/Ne 放行避免误伤 Option 整体相等比较）判 `strip_option(lt) != strip_option(rt)`（恰一侧 Option 即报错），`strip_option` 剥 Ref/MutRef 后再判 Option（覆盖 `&xs.first()` 实参形态）。两侧皆 Option（如 `Option<int> == Option<int>`）或任一侧 queer（Any/Generic/Never/Self_/Ext/Duck/Unit）放行。
+- 判据：`TEMP/probe/option_plus_int.lz` 修复前 EMIT 阶段无诊断 → rustc E0369；修复后 LZ 直接报 `IR build error: Option 值不能直接参与运算，需先 .unwrap_or(default)/.unwrap()/? 解包取内层值`（exit=1，不再产出 .rs）。回归用例：`tests/codegen_corner_fixes.rs::option_in_scalar_op_is_clean_lz_type_error`。
+- 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）——证明语料中所有 Option 参与运算的合法形态（皆先 unwrap_or/unwrap/? 解包）未被误伤；Eq/Ne 未纳入拦截范围以保护 Option 整体比较。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/option_plus_int.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）

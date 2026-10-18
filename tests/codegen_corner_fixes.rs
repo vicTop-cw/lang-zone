@@ -492,3 +492,28 @@ def main() =
     assert!(r.ok, "Dict.pop 不应报 E0599 no method named `pop`：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "Some(1)\nNone", "Dict.pop 应返回 Option<V>：命中给 Some，未命中给 None");
 }
+
+#[test]
+fn option_in_scalar_op_is_clean_lz_type_error() {
+    // Option<int> 直接参与运算（`xs.first() + 1`），原先 codegen 直出
+    // `Option<i64> + 1i64` → rustc E0369（TEMP/probe/option_plus_int.lz 实测
+    // RUSTC_FAIL exit=1），而非干净 LZ 类型错误——与 Result 家族同源（extended_check
+    // Binary 臂 L1316 只拦 Result）。现补 Option 拦截，报引导性错误提示解包方式。
+    let src = r#"
+def main() =
+    let xs = [1, 2, 3]
+    let a = xs.first() + 1
+    print(a)
+"#;
+    let r = run_lz("option_plus_int", src);
+    assert!(
+        !r.transpiled,
+        "Option<int> + int 应在 LZ 类型检查阶段被拦截，不应产出坏 Rust 到 rustc"
+    );
+    let all = format!("{}\n{}", r.diag, r.stderr);
+    assert!(
+        all.contains("Option 值不能直接参与运算"),
+        "应报干净 LZ 类型错误（含解包提示），实际诊断：\n{}",
+        all
+    );
+}
