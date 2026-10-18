@@ -1370,6 +1370,29 @@ pub(crate) fn ex_check_expr(
                         "Option 值不能直接参与运算，需先 .unwrap_or(default)/.unwrap()/? 解包取内层值"
                             .to_string(),
                     );
+                } else if !ex_type_queer(&lt) && !ex_type_queer(&rt) {
+                    // bool_in_scalar_op：bool 不参与算术/位/序运算。
+                    // `true + 1` 之类 codegen 直出 `b + 1i64`（b: bool）→ rustc E0369
+                    // （TEMP/probe/edge_scalar_ops.lz 实测 RUSTC_FAIL）。
+                    // 注意 `bool == bool`（Eq/Ne）不在 scalar_op 内，仍允许。
+                    // 链式比较豁免：`a < b < c` 解析为 `(a<b) < c`（lhs 为 bool），
+                    // 但 codegen 在 expr_gen.rs ~L5460 把它分解成 `(a<b) && (b<c)`，
+                    // 是合法的比较链（CY/15_feature_matrix/precedence.lz 依赖），
+                    // 故 lhs 为比较表达式时不报 Bool 错误。
+                    let is_cmp = matches!(
+                        op,
+                        BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge
+                    );
+                    let is_chain_cmp = is_cmp
+                        && matches!(
+                            left.as_ref(),
+                            AstExpr::Binary { op: lop, .. }
+                                if matches!(lop, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+                        );
+                    let is_bool_ty = |t: &IrType| matches!(t, IrType::Bool);
+                    if (is_bool_ty(&lt) || is_bool_ty(&rt)) && !is_chain_cmp {
+                        work.report_error("Bool 值不能直接参与运算".to_string());
+                    }
                 }
             }
             // unconstrained_generic_cmp：无约束泛型参数参与 < > <= >=

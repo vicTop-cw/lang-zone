@@ -517,3 +517,66 @@ def main() =
         all
     );
 }
+
+#[test]
+fn bool_in_scalar_op_is_clean_lz_type_error() {
+    // bool 不参与算术/位/序运算：`true + 1` 原先 codegen 直出 `b + 1i64`（b: bool）→
+    // rustc E0369（TEMP/probe/bool_plus_int.lz 实测 RUSTC_FAIL），现补 Bool 拦截。
+    // 同时验证合法形态未被误伤：f64+int=3.5、str+str 拼接、list+list 拼接。
+    let src = r#"
+def main() =
+    let b = true
+    print(b + 1)
+"#;
+    let r = run_lz("bool_plus_int", src);
+    assert!(!r.transpiled, "Bool + int 应在 LZ 阶段被拦截，不应到达 rustc");
+    let all = format!("{}\n{}", r.diag, r.stderr);
+    assert!(
+        all.contains("Bool 值不能直接参与运算"),
+        "应报干净 LZ 类型错误，实际诊断：\n{}",
+        all
+    );
+    // 合法形态回归：数字混算 / str 拼接 / list 拼接
+    let ok_src = r#"
+def main() =
+    let a = 1.5
+    let b = 2
+    print(a + b)
+    let s1 = "hi"
+    let s2 = " there"
+    print(s1 + s2)
+    let xs = [1, 2]
+    print(xs + [3])
+"#;
+    let ok = run_lz("arith_valid_kept", ok_src);
+    assert!(ok.ok, "合法算术/拼接应继续通过：\n{}", ok.diag);
+    assert_eq!(
+        ok.stdout.replace('\n', " ").trim(),
+        "3.5 hi there [1, 2, 3]"
+    );
+    // 链式比较豁免：`1 < 5 < 10` 解析为 `(1<5) < 10`（lhs 为 bool），
+    // codegen 会分解为 `1<5 && 5<10`（expr_gen.rs ~L5460）。bool 拦截需放行，
+    // 否则破坏 CY/15_feature_matrix/precedence.lz 与 DEMO/13_operators/precedence.lz。
+    let chain_src = r#"
+def main() =
+    let chain = 1 < 5 < 10
+    print(chain)
+"#;
+    let c = run_lz("cmp_chain_valid", chain_src);
+    assert!(c.ok, "比较链应编译运行：\n{}", c.diag);
+    assert_eq!(c.stdout.trim(), "true");
+    // 真 bool 错误仍拦截：`true < 5`（非链，lhs 为字面量）
+    let bad_src = r#"
+def main() =
+    let b = true
+    print(b < 5)
+"#;
+    let b2 = run_lz("bool_lt_int", bad_src);
+    assert!(
+        !b2.transpiled
+            && format!("{}\n{}", b2.diag, b2.stderr).contains("Bool 值不能直接参与运算"),
+        "`true < 5` 应报干净 LZ 类型错误：\n{}{}",
+        b2.diag,
+        b2.stderr
+    );
+}

@@ -25,6 +25,12 @@ AIGC:
 - `Dict.pop(key)` 不再生成 `d.pop(key)`（BTreeMap/HashMap 无 `pop` 方法 → E0599），路由到 `d.remove(key)` 返回 `Option<V>`（BUG-268）
 - 清理死代码：移除无人调用的 `list_get_unwrap_or_default`（BUG-281 遗留），build 警告 5→4
 
+### Option / Bool 参与标量运算的 LZ 类型检查拦截（2026-10-19，fist-agent lz-combo-r2 组合轮）
+- `Option<int> + int` 不再产出坏 Rust（原先 codegen 直出 `Option<i64> + i64` → E0369），`extended_check` Binary 臂补 `option_in_scalar_op`：算术/位/序比较内恰一侧为 Option 即报「需先解包」，`bool == bool` 与两侧皆 Option 的容器比较放行（BUG-269）
+- `true + 1` / `true < 5` 不再产出坏 Rust（原先 `bool + i64` → E0369），同臂补 `bool_in_scalar_op`：任一侧为 Bool 即报「Bool 值不能直接参与运算」，`bool == bool` 放行（BUG-271）
+- Bool 拦截带**比较链豁免**：`1 < 5 < 10` 解析为 `(1<5) < 10`（lhs 为 bool），codegen 才分解成 `(1<5) && (5<10)`；豁免使 `DEMO/13_operators/precedence.lz` 与 `CY/TESTS/15_feature_matrix/precedence.lz` 保持转绿（否则 cy_l1_transpile_all_corpus FAILED）
+- 合法形态回归锁定：`f64 + int`（1.5+2=3.5）、`str + str` 拼接、`list + list` 拼接（`__cat`）均不受影响；`stdlib 自由函数（约 158 个）不接 rlib` 记为 BUG-270 待修（OPEN，潜伏、0 语料命中）
+
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）
 - 字符串单字符索引在拼接/比较语境直出 String 形态（新增 `gen_str_char_index_tostring` 上下文辅助），修复 lib_json E0308 与 `s[pos] != "\""` 码点十进制化导致的运行期 UnexpectedEnd；find_bug_libs 12/12 全绿
