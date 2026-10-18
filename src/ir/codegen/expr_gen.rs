@@ -1940,9 +1940,10 @@ impl CodeGen {
                     && args_s.len() == 1
                     && !self.fn_param_types.contains_key("max")
                 {
-                    format!("(*(&{}).iter().max().unwrap())", args_s[0])
+                    format!("(&{}).iter().max().cloned()", args_s[0])
                 } else if callee_s == "min" && args_s.len() == 1 {
-                    format!("(*(&{}).iter().min().unwrap())", args_s[0])
+                    // BUG-266：同 max，`.unwrap()` 在空 List 上 panic，改保留 Option<T>。
+                    format!("(&{}).iter().min().cloned()", args_s[0])
                 } else if callee_s == "any" && args_s.len() == 2 {
                     let lambda = strip_lambda_type(&args_s[1]);
                     format!("({}).iter().any({})", args_s[0], lambda)
@@ -4491,10 +4492,14 @@ impl CodeGen {
                     if (method == "max" || method == "min") && args_s.is_empty() && recv_is_list {
                         // BUG-291：List.max()/.min() 未走方法路由，直接透传
                         // `xs.max()` → E0599/E0061（Vec 无 max/min）。
-                        // 与 sum/product 同款迭代器链；max/min 返回 Option，
-                        // LZ 空 List 语义由 .unwrap() 表达（与自由函数 max(xs) 一致）。
+                        // 与 sum/product 同款迭代器链；max/min 返回 Option。
+                        // BUG-266：原先 `(*recv.iter().max().unwrap())` 在空 List 上
+                        // 实跑 panic `called Option::unwrap() on a None value`
+                        // （TEMP/probe/list_minmax_empty.lz）。改走 `.cloned()` 保留
+                        // Option<T>，与 first/last/get/pop（BUG-316/BUG-265）同一语义族，
+                        // 调用方自写 `.unwrap_or(-1)`。
                         return format!(
-                            "(*({}).iter().{}().unwrap())",
+                            "({}).iter().{}().cloned()",
                             recv, method
                         );
                     }
@@ -7311,43 +7316,6 @@ child.struct_fields_info = self.struct_fields_info.clone();
         let base_s = self.gen_expr(base);
         let key_s = self.gen_expr(key);
         Some(format!("{{let __cs: Vec<char> = ({}).chars().collect(); let __i = (({}) as usize); __cs[__i].to_string()}}", base_s, key_s))
-    }
-
-    /// BUG-281：LZ 用 -1/"" 编码 None，.first()/.last()/.get() 经 .cloned()
-    /// 后是 Option<T>，按元素类型追加 unwrap_or 默认值。
-    /// Dict 的 args[0] 是 key、args[1] 是 value，需取 value 类型（args[1]）。
-    pub(crate) fn list_get_unwrap_or_default(&self, recv_ty: &IrType) -> &'static str {
-        match recv_ty {
-            IrType::Named { path, args } if (path == "Dict" || path == "HashMap" || path == "BTreeMap") => {
-                // value 类型在 args[1]；args[0] 是 key
-                if args.len() > 1 {
-                    match &args[1] {
-                        IrType::Int => ".unwrap_or(-1i64)",
-                        IrType::Str => ".unwrap_or(\"\".to_string())",
-                        IrType::Named { path: p, .. }
-                            if p == "str" || p == "String" =>
-                        {
-                            ".unwrap_or(\"\".to_string())"
-                        }
-                        _ => ".unwrap_or(Default::default())",
-                    }
-                } else {
-                    ".unwrap_or(Default::default())"
-                }
-            }
-            IrType::Named { args, .. } if args.first().map_or(false, |t| matches!(t, IrType::Int)) => {
-                ".unwrap_or(-1i64)"
-            }
-            IrType::Named { args, .. }
-                if args.first().map_or(false, |t| {
-                    matches!(t, IrType::Str)
-                        || matches!(t, IrType::Named { path, .. } if path == "str" || path == "String")
-                }) =>
-            {
-                ".unwrap_or(\"\".to_string())"
-            }
-            _ => ".unwrap_or(Default::default())",
-        }
     }
 
     pub(crate) fn binop_str(&self, op: &BinOpKind) -> &'static str {

@@ -1003,6 +1003,10 @@ pub(crate) fn lookup_builtin_method_ret(
             // 语料实证：DEMO/edge-walrus-operator.lz:12 写 `values.first().unwrap_or(0)`，
             // 全语料无一处把 first/last/get/pop 与 `-1` 比较 ⇒ Option 是现行语义。
             "get" | "pop" | "first" | "last" => Some(IrType::Option(Box::new(args[0].clone()))),
+            // max/min → Option<T>（与上述同一语义族）：codegen 生成 `iter().max().cloned()`，
+            // 空 List 为 None；若继续生成 `iter().max().unwrap()`，空 List 实跑直接 panic
+            // `called Option::unwrap() on a None value`（TEMP/probe/list_minmax_empty.lz 实测）。
+            "max" | "min" => Some(IrType::Option(Box::new(args[0].clone()))),
             // remove → T（Vec::remove 返回 V）
             "remove" => Some(args[0].clone()),
             // remove_at → Option<T>（list.lz:89 签名 `Option<T>`，越界 None）

@@ -661,6 +661,15 @@
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/tostr_ty.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
 
+## BUG-266 [2026-10-18T23:20:00+08:00] [high] FIXED（rust 后端 2026-10-18，expr_gen.rs max/min 两处 + infer.rs List 臂）：`List.max()/.min()` 在空 List 上实跑 panic `called Option::unwrap() on a None value`
+- summary: `let empty: List<int> = []; print(empty.max())` 实跑直接 panic（退出码 1），程序崩溃。根因：codegen 生成 `(*recv.iter().max().unwrap())`，`Vec::iter().max()` 对空 Vec 返回 `None`，`.unwrap()` panic。
+- detail: 两处同源：① List 方法路径（expr_gen.rs 原 L4491-4500，BUG-291 补的路由）`(*({}).iter().{}().unwrap())`；② 自由函数路径（原 L1939-1945）`(*(&arg).iter().max().unwrap())`。二者都把 `.unwrap()` 当「空 List 语义」——但这是**实跑崩溃**，不是 -1 哨兵，也与其他集合方法不一致。叠加 infer.rs 对 `max/min` **未标注**（IR 实测 `[?] method [List<int>] xs.max`，Any），等于类型与行为双失明。语料实证：全语料无一处对 List 用 `.max()/.min()` 方法；`basic.lz:16`/`iter.lz:320` 的 `max(a,b)`/`min(a,b)` 是 2 参 int 自由函数（有 `fn_param_types`，不走本路径），故修复零冲击。
+- 修复：与 BUG-316/BUG-265 的「保留 Option」语义族对齐——codegen 两处改为 `({}).iter().{}().cloned()` / `(&arg).iter().max().cloned()`（`.cloned()` 对 Copy 的 i64 与非 Copy 的 String 元素都成立，`.copied()` 对 String 报 E0277），infer.rs List 臂补 `"max" | "min" => Some(Option<T>)`（从 Any 收口）。空 List 现返回 `None`，调用方自写 `.unwrap_or(-1)`；max/min 空集本就无自然哨兵（-1 只是回退），Option 是诚实语义。
+- 判据：`TEMP/probe/list_minmax_empty.lz`（`print(xs.max()/xs.min()/empty.max())`）修复前 `5` 后 panic、修复后 `Some(5)\nSome(1)\nNone`；IR 修复前 `[?]`、修复后 `[Option<int>]`。回归用例：`tests/codegen_corner_fixes.rs::list_max_min_return_option_and_empty_does_not_panic`（`xs.max().unwrap_or(-1)` 实跑 stdout == "5\n1\n-1\n-1"）。
+- 回归面：全量 `cargo test -j 1` 零失败（含 demo_codegen_compile 441 passed）。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/list_minmax_empty.lz
+- reported_by: fist-agent（lz-combo-r2 组合轮）
+
 ## BUG-265 [2026-10-18T22:55:00+08:00] [high] FIXED（rust 后端 2026-10-18，infer.rs List 臂）：`List.get/first/last/pop` 的 IR 类型（T）与 codegen 产物（Option<T>）矛盾 ⇒ `xs.get(1)+1` 生成 `Option<i64>+i64` → E0369
 - summary: `let xs=[10,20,30]; print(xs.get(1)+1)` IR 层面通过（get 推断为 int），产物却是 `(xs.get(1)).cloned() + 1i64`（`xs.get(1).cloned()` 是 `Option<i64>`）→ rustc E0369 binary operation `+` cannot be applied to `Option<i64>`。同时 `print(xs.get(1))` 输出 `Some(20)`、`print(xs.get(99))` 输出 `None`。
 - detail: 这是 BUG-281 与 BUG-316 两轮决策**漂移**的后果：BUG-281 让 codegen 把 `first/last/get` 经 `.cloned()` 后追加 `.unwrap_or(-1)` 平铺（LZ 用 -1 编码 None），`infer.rs` 随之把返回类型标成 `T`；但 BUG-316（更新）**推翻**平铺、改为「保留 Option：first/last/get 返回 `Option<&T>`、pop 返回 `Option<T>`，调用方自写 `.unwrap_or(0)`」，expr_gen.rs 已按新语义改（`values.first().unwrap_or(0)` → `(first()).cloned().unwrap_or(0)`）。问题在 infer.rs **没跟进**：List 臂（原 L1000-1001）仍标 `"get"|"pop"|"first"|"last" => Some(args[0])`（T），于是 IR 类型说谎、产物是 Option，两边不一致 ⇒ 合法形态的 LZ 生成不可编译的 Rust。

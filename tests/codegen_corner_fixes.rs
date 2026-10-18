@@ -428,3 +428,29 @@ def main() =
         "first/get/last 应为 Option<T>（调用方可 unwrap_or），越界回退到 -1"
     );
 }
+
+#[test]
+fn list_max_min_return_option_and_empty_does_not_panic() {
+    // BUG-266 回归（fist-agent 寻虫 2026-10-18）：`List.max()/.min()` 原先生成
+    // `(*recv.iter().max().unwrap())`，空 List 实跑 panic
+    // `called Option::unwrap() on a None value`（TEMP/probe/list_minmax_empty.lz）。
+    // 改为 `.iter().max().cloned()` 保留 Option<T>，与 first/last/get/pop
+    // （BUG-316 / BUG-265）同一语义族，调用方自写 `.unwrap_or(-1)`。
+    let src = r#"
+def main() =
+    let xs = [3, 1, 4, 1, 5]
+    print(xs.max().unwrap_or(-1))
+    print(xs.min().unwrap_or(-1))
+    let empty: List<int> = []
+    print(empty.max().unwrap_or(-1))
+    print(empty.min().unwrap_or(-1))
+"#;
+    let r = run_lz("list_minmax", src);
+    assert!(r.transpiled, "List.max()/.min() 应可转译：\n{}", r.diag);
+    assert!(r.ok, "空 List 的 max/min 不应 panic（Option 语义，unwrap_or 兜底）：\n{}", r.diag);
+    assert_eq!(
+        r.stdout.trim(),
+        "5\n1\n-1\n-1",
+        "max/min 应为 Option<T>：非空给 Some，空 List 给 None（unwrap_or 后 -1）"
+    );
+}
