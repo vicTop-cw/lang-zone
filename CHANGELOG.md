@@ -17,6 +17,14 @@ AIGC:
 
 ## [Unreleased]
 
+### Option 语义族收口（2026-10-18，fist-agent lz-combo-r2 组合轮）
+- `Int/F64.to_string()` 现推断为 `String`（原先因 match 顺序缺陷被 `IrType::Int/F64` 臂先行消费、回退 Any → `print` 走 Debug 加引号），`print(n.to_string())` 从 `"42"` 变 `42`（BUG-264）
+- `List.get/first/last/pop` 与 `List.max/min` 的 IR 类型收口为 `Option<T>`（原先标 `T`，与 codegen 的 `.cloned()` → `Option<T>` 产物矛盾，同 BUG-281/BUG-316 语义漂移）（BUG-265、BUG-266）
+- `List.max()/.min()` 在空 List 上不再 panic（原先生成 `(*recv.iter().max().unwrap())`，空集触发 `Option::unwrap on None`），改为 `.iter().max().cloned()` 保留 `Option<T>`，调用方自写 `.unwrap_or(...)`（BUG-266）
+- `Dict.get(key)` 的 IR 类型收口为 `Option<V>`（原先标 `V`，与 codegen 的 `(d.get(k)).cloned()` → `Some(1)`/`None` 矛盾）（BUG-267）
+- `Dict.pop(key)` 不再生成 `d.pop(key)`（BTreeMap/HashMap 无 `pop` 方法 → E0599），路由到 `d.remove(key)` 返回 `Option<V>`（BUG-268）
+- 清理死代码：移除无人调用的 `list_get_unwrap_or_default`（BUG-281 遗留），build 警告 5→4
+
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）
 - 字符串单字符索引在拼接/比较语境直出 String 形态（新增 `gen_str_char_index_tostring` 上下文辅助），修复 lib_json E0308 与 `s[pos] != "\""` 码点十进制化导致的运行期 UnexpectedEnd；find_bug_libs 12/12 全绿
