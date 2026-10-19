@@ -5214,6 +5214,41 @@ impl CodeGen {
                     // List/Set/其他集合: elem in container → container.contains(&elem)
                     return format!("{}{}.contains(&{})", not_prefix, cont_s, elem_s);
                 }
+                // str/List 重复（`*`）："ab" * 3 → "ababab"、[1,2] * 2 → [1,2,1,2]
+                // Rust 无 String/Vec 的 Mul<i64>，直出 `"ab".to_string() * 2i64` / `a * 2i64`
+                // 报 E0369（TEMP/probe/sweep3/string_mult.lz / list_mult.lz 实测 RUSTC_FAIL）。
+                // 必须在下方 num_mixed f64 提升（会把 int 提升为 f64，str/List 侧会错配）
+                // 与泛型 Add 分派**之前**拦截。
+                if *op == BinOpKind::Mul {
+                    let lhs_is_str = matches!(&lhs.ty, IrType::Str)
+                        || matches!(&lhs.ty, IrType::Named { path, .. }
+                            if path == "String" || path == "str")
+                        || matches!(&lhs.kind, ExprKind::Lit(LitKind::Str(_)));
+                    let lhs_is_list = matches!(&lhs.ty, IrType::Named { path, .. }
+                            if path == "List" || path == "Vec")
+                        || matches!(&lhs.kind, ExprKind::ListLit(_));
+                    let rhs_is_int = matches!(&rhs.ty, IrType::Int)
+                        || matches!(&rhs.kind, ExprKind::Lit(LitKind::Int(_)));
+                    if lhs_is_str && rhs_is_int {
+                        let lhs_s = self.gen_expr(lhs);
+                        let rhs_s = self.gen_expr(rhs);
+                        // const &str（字面量/静态）无 .repeat()，先 to_string 统一为 String；
+                        // 次数取 max(0) 对齐 Python 语义（"ab" * -1 → ""）。
+                        return format!(
+                            "{{ let __rep: String = ({}).to_string(); let __n = ({}).max(0) as usize; __rep.repeat(__n) }}",
+                            lhs_s, rhs_s
+                        );
+                    }
+                    if lhs_is_list && rhs_is_int {
+                        let lhs_s = self.gen_expr(lhs);
+                        let rhs_s = self.gen_expr(rhs);
+                        // clone 避免移动原变量（值语义复用），逐次 extend 重复。
+                        return format!(
+                            "{{ let __rep = {}.clone(); let mut __v: Vec<_> = Vec::new(); for _ in 0..(({}).max(0) as usize) {{ __v.extend(__rep.iter().cloned()); }} __v }}",
+                            lhs_s, rhs_s
+                        );
+                    }
+                }
                 // 泛型闭包/函数内的 `+`：操作数类型为 Generic（a/b 等隐式泛型形参），
                 // 同一份闭包体需对 i64 与 String 等同时合法，而 Rust 原生 `+` 无法兼顾
                 // （String 未实现 Add<String>）。经 LZ 多态运算符 trait LzAdd 分派——

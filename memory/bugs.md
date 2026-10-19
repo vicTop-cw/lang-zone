@@ -762,3 +762,7 @@
 - 回归面：0 语料命中（语料库未见 None == None），不影响现有门。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/none_eq.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮，None 算术拦截修复验证时顺带发现）
+
+## BUG-275 [2026-10-19T09:55:00+08:00] [medium] FIXED（codegen expr_gen，float×int 混合比较提升）：1.5 == 1 直出 f64 == i64 → rustc E0308
+## BUG-276 [2026-10-19T09:55:00+08:00] [medium] OPEN（codegen expr_gen，str 重复语义）："ab" * 2 直出 String * i64 → rustc E0369
+## BUG-277 [2026-10-19T09:55:00+08:00] [medium] OPEN（codegen expr_gen，list 重复语义）：[1,2] * 2 直出 Vec * i64 → rustc E0369
