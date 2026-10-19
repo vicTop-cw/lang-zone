@@ -419,6 +419,13 @@ pub(crate) fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Op
                 ctx.block_declared.insert(name.clone());
             }
             AstStmt::Yield(Some(e)) => {
+                // BUG-290：`yield None` 的元素类型应为 Option<T>（yield None 是
+                // Option 值），而 NoneLit 推断为 Any → 归一 i64 → Vec<i64> 却
+                // push(Option::None) → E0308（TEMP/probe/sweep6/gen_opt.lz
+                // `yield None; yield Some(1)`）。
+                if matches!(e, AstExpr::NoneLit) || matches!(e, AstExpr::Ident(n) if n == "None") {
+                    return Some(IrType::Option(Box::new(IrType::Any)));
+                }
                 return Some(infer_expr_type(e, ctx));
             }
             AstStmt::Expr(ast_expr) => {

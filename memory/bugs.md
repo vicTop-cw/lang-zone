@@ -804,4 +804,12 @@
     → ret_ty 推断为 Itor<i64> 而非 Vec<i64>。
 修法：三处均补 Stmt::TryCatch / AstExpr::TryCatch 分支，递归下钻
 body/catches/else_body/finally_body。
-实测 gen_try.lz RUN-OK `Some(1)`。
+实测 gen_try.lz RUN-OK `Some(1)`。## BUG-290 [2026-10-19T13:40:00+08:00] [high] FIXED（生成器 yield None 元素类型推断错）
+`def gen(): yield None; yield Some(1)` — scan_iterator_yield_ty 对 NoneLit
+返回 IrType::Any → 归一 i64 → 生成器返回类型 Vec<i64>，codegen 却
+push(Option::None)（None 经 gen_none_ref 发射为 Option::None）→ E0308
+（TEMP/probe/sweep6/gen_opt.lz）。
+修法：scan_iterator_yield_ty 对 yield None（NoneLit / Ident("None")）返回
+Option(Any)（归一为 Option<i64>），生成器返回类型 Vec<Option<i64>>，
+push(None.clone()) 与 push(Some(1i64)) 均匹配。
+实测 gen_opt.lz RUN-OK Some(None)。

@@ -368,4 +368,8 @@ demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-289**：
   - `convert_decl.rs ast_expr_has_yield / scan_expr_yield_ty`：无
     `AstExpr::TryCatch` 分支 → `scan_iterator_yield_ty` 漏检。
   修法：三处均补 `Stmt::TryCatch` / `AstExpr::TryCatch` 分支，递归下钻
-  body/catches/else_body/finally_body。新增回归 generator_try_yield。
+  body/catches/else_body/finally_body。新增回归 generator_try_yield。- **BUG-290**：生成器 `yield None; yield Some(1)` 元素类型推断错。
+  `scan_iterator_yield_ty` 对 `NoneLit` 返回 `Any` → 归一 `i64` →
+  `Vec<i64>` 却 `push(Option::None)` E0308。修法：yield None 返回
+  `Option(Any)`（归一 `Option<i64>`），生成器返回类型 `Vec<Option<i64>>`。
+  新增回归 generator_yield_none。

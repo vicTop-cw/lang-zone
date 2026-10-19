@@ -921,4 +921,20 @@ def main() =
     let ok = run_lz("generator_try_yield", src);
     assert!(ok.ok, "生成器内 try/catch yield：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
+}// BUG-290：生成器 `yield None; yield Some(1)` 元素类型推断。
+// scan_iterator_yield_ty 对 NoneLit 返回 Any → 归一 i64 → Vec<i64> 却
+// push(Option::None) → E0308（TEMP/probe/sweep6/gen_opt.lz）。
+#[test]
+fn generator_yield_none() {
+    let src = r#"
+def gen():
+    yield None
+    yield Some(1)
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_yield_none", src);
+    assert!(ok.ok, "生成器 yield None + Some(1)：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(None)");
 }
