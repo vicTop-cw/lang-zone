@@ -776,3 +776,26 @@ def main() =
     assert!(ok.ok, "未注解生成器应通过：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
 }
+
+// BUG-284：`def evens(n: int) = ... while ...: if ...: yield i` 中 yield 位于
+// `if` 表达式分支体内。`ast_body_has_yield` / `scan_iterator_yield_ty` 只遍历
+// AstStmt 语句，未下钻 Stmt::Expr(Expr::If) 的分支体 → yield 漏检 → 元素类型
+// 推断回退 Unit → `-> Vec<()>`（E0599 Vec<()> 无 next）。
+// 修法：新增 ast_expr_has_yield / scan_expr_yield_ty 下钻 If/Match/BlockExpr/Closure。
+#[test]
+fn generator_if_in_while() {
+    let src = r#"
+def evens(n: int) =
+    let mut i = 0
+    while i < n:
+        if i % 2 == 0:
+            yield i
+        i += 1
+def main() =
+    let g = evens(6)
+    print(g.next())
+"#;
+    let ok = run_lz("generator_if_in_while", src);
+    assert!(ok.ok, "if 分支内的 yield 应正确推断元素类型：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(0)");
+}

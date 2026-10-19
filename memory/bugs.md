@@ -776,3 +776,5 @@
 ## BUG-282 [2026-10-19T10:49:00+08:00] [medium] FIXED（元组索引后字段 move）：let s = b[0][1]（b: List[(int, str)]）生成 let s: String = b[0].1; → rustc E0507（从借用里 move String，Vec 索引返回 &T）。修法：IndexGet 元组分支在 base 是 IndexGet 且字段非 Copy 时追加 .clone()，新增 is_copy_ty 辅助（Int/Int128/F64/Bool/Unit/usize/u8/i8/char 为 Copy）。
 
 ## BUG-283 [2026-10-19T11:33:00+08:00] [high] FIXED（未标 iterator 关键字的生成器不可用）：def gen(): yield 1; yield 2; yield 3（无 -> T 注解）两处缺陷叠加——① collect_functions 对无返回注解函数取尾表达式 yield 3 的 infer_stmt_type → Itor<i64>（lz_builtins 无此类型，TEMP/probe/sweep6/generator_func.lz → E0425 cannot find type Itor），convert_decl 同 bug；② 调用点 let g = gen() 登记为 Itor<i64>，且裸 Vec 无 .next()（E0599）。修法：collect_functions/convert_decl 对含 yield 的无注解函数按 yield 元素类型推断（调用点登记 Vec<T>）；codegen 把 Vec 上的 .next() 路由到 into_iter().next()。实测输出 Some(1)。
+
+## BUG-284 [2026-10-19T11:54:00+08:00] [high] FIXED（if 分支内的 yield 漏检）：def evens(n): while ...: if i%2==0: yield i —— ast_body_has_yield / scan_iterator_yield_ty 只遍历 AstStmt，未下钻 Stmt::Expr(Expr::If) 的分支体，yield 漏检 → 元素类型推断回退 Unit → -> Vec<()>（E0599 Vec<()> 无 next）。修法：新增 ast_expr_has_yield / scan_expr_yield_ty 下钻 If/Match/BlockExpr/Closure 嵌套语句块。实测输出 Some(0)。

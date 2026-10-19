@@ -127,10 +127,88 @@ fn ast_body_has_yield(stmts: &[AstStmt]) -> bool {
                     return true;
                 }
             }
+            // `if` 在 LZ 中是表达式（Stmt::Expr(Expr::If)），分支体是 Vec<Stmt>，
+            // 需递归才能命中分支内的 yield（TEMP/probe/sweep6/gen_cond.lz
+            // `while ...: if i%2==0: yield i` 原漏检 → Vec<()> 元素类型错误）。
+            AstStmt::Expr(ast_expr) => {
+                if ast_expr_has_yield(ast_expr) {
+                    return true;
+                }
+            }
             _ => {}
         }
     }
     false
+}
+
+/// 检测 AST 表达式内是否含 yield（if/match 的分支体、闭包体等嵌套语句块）
+fn ast_expr_has_yield(expr: &AstExpr) -> bool {
+    match expr {
+        AstExpr::If {
+            then_body,
+            elif_clauses,
+            else_body,
+            ..
+        } => {
+            if ast_body_has_yield(then_body) {
+                return true;
+            }
+            for (_, eb) in elif_clauses {
+                if ast_body_has_yield(eb) {
+                    return true;
+                }
+            }
+            if let Some(eb) = else_body {
+                if ast_body_has_yield(eb) {
+                    return true;
+                }
+            }
+            false
+        }
+        AstExpr::Match { arms, .. } => arms
+            .iter()
+            .any(|arm| ast_body_has_yield(&arm.body)),
+        AstExpr::Closure { body, .. } => ast_expr_has_yield(body),
+        AstExpr::BlockExpr(body) => ast_body_has_yield(body),
+        _ => false,
+    }
+}
+
+/// 扫描 AST 表达式内的首个 yield 元素类型（if/match 分支体、闭包体）
+fn scan_expr_yield_ty(expr: &AstExpr, ctx: &mut TypeCtx) -> Option<IrType> {
+    match expr {
+        AstExpr::If {
+            then_body,
+            elif_clauses,
+            else_body,
+            ..
+        } => {
+            if let Some(t) = scan_iterator_yield_ty(then_body, ctx) {
+                return Some(t);
+            }
+            for (_, eb) in elif_clauses {
+                if let Some(t) = scan_iterator_yield_ty(eb, ctx) {
+                    return Some(t);
+                }
+            }
+            if let Some(eb) = else_body {
+                if let Some(t) = scan_iterator_yield_ty(eb, ctx) {
+                    return Some(t);
+                }
+            }
+            None
+        }
+        AstExpr::Match { arms, .. } => {
+            for arm in arms {
+                if let Some(t) = scan_iterator_yield_ty(&arm.body, ctx) {
+                    return Some(t);
+                }
+            }
+            None
+        }
+        AstExpr::BlockExpr(body) => scan_iterator_yield_ty(body, ctx),
+        _ => None,
+    }
 }
 
 /// 检测 IR Block 是否包含 yield 语句（递归嵌套块）
@@ -301,6 +379,11 @@ pub(crate) fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Op
             }
             AstStmt::Yield(Some(e)) => {
                 return Some(infer_expr_type(e, ctx));
+            }
+            AstStmt::Expr(ast_expr) => {
+                if let Some(t) = scan_expr_yield_ty(ast_expr, ctx) {
+                    return Some(t);
+                }
             }
             AstStmt::While {
                 body, else_body, ..
