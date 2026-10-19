@@ -674,3 +674,27 @@ def main() =
     assert!(ok.ok, "type alias 元组索引应通过：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "1 2 7");
 }
+
+// BUG-279：裸 Vec 的 `.filter(|x| => x > 2)` 方法闭包。Rust Iterator::filter 的
+// 闭包参数是 &Item，body 若直接用参数名比较则 `x > 2i64` 是 &i64 > i64 → E0308。
+// 修法：裸 Vec filter 走 into_iter 链时对闭包套 strip_lambda_type_with_ref（加 & 模式）。
+// map 闭包参数是 owned，不能加 &，故只 filter 套。
+#[test]
+fn vec_filter_method_closure_ref_param() {
+    let src = r#"
+def main() =
+    let a = [1, 2, 3, 4, 5]
+    let b = a.filter(|x| => x > 2)
+    print(b)
+    let c = [1, 2, 3, 4, 5].map(|x| => x * 2)
+    print(c)
+    let d = [1, 2, 3, 4, 5].filter(|x| => x % 2 == 0)
+    print(d)
+"#;
+    let ok = run_lz("vec_filter_method_closure", src);
+    assert!(ok.ok, "裸 Vec filter/map 闭包应通过：\n{}", ok.diag);
+    assert_eq!(
+        ok.stdout.replace('\n', " ").trim(),
+        "[3, 4, 5] [2, 4, 6, 8, 10] [2, 4]"
+    );
+}

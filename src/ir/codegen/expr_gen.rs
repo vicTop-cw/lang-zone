@@ -4483,9 +4483,19 @@ impl CodeGen {
                         if has_ext_method {
                             return format!("({}).{}({})", recv, method, args_s[0]);
                         }
+                        // 裸 Vec：into_iter 产出 owned Item。map 闭包参数是 owned（直接 x）；
+                        // filter 闭包参数是 &Item（Rust Iterator::filter 签名），body 若直接用
+                        // 参数名比较则需 |&x| 模式解引用，否则 `x > 2i64` 比较 &i64 > i64 →
+                        // E0308（BUG-279，TEMP/probe/sweep5/closure_filter.lz 实测）。
+                        // body 已含 `*x`（如 free function filter）时 strip 不加 &（保留裸参）。
+                        let lambda_arg = if method == "filter" {
+                            strip_lambda_type_with_ref(&args_s[0])
+                        } else {
+                            args_s[0].clone()
+                        };
                         return format!(
                             "({}).into_iter().{}({}).collect::<Vec<_>>()",
-                            recv, method, args_s[0]
+                            recv, method, lambda_arg
                         );
                     }
                     // std 迭代器链的 filter（nesting-expressions `xs.iter().cloned()
