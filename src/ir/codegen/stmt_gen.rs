@@ -2495,11 +2495,18 @@ impl CodeGen {
                     // 重写为 `raise ()`（等价 Python StopIteration）。但只有 raises
                     // 生成器才是 Vec<Result<T,E>>，可 push(Err(..))；非 raises 生成器
                     // 返回 Vec<T>，push Err 会 E0308（TEMP/probe/sweep6/gen_return.lz）。
-                    if self.current_fn_raises.is_some() {
+                    // BUG-293：raises 生成器内裸 `return` 重写为 `raise ()`，value 类型
+                    // 是 Unit（无错误可抛）→ 不应 push(Err(()))（Vec<Result<String,
+                    // String>> 会 E0308），应视为成功终止（return __gen_vec）
+                    // （TEMP/probe/sweep7/gen_if_yield_ret.lz）。
+                    if self.current_fn_raises.is_some()
+                        && !matches!(value.ty, IrType::Unit)
+                    {
                         self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(value)));
                         self.emit_line("return __gen_vec;");
                     } else {
-                        // 非 raises 生成器：提前退出收集（等价结束迭代）
+                        // 非 raises 生成器，或 raises 生成器的裸 return（Unit 无错误）：
+                        // 提前退出收集（等价结束迭代）
                         self.emit_line("return __gen_vec;");
                     }
                 } else if self.current_fn_raises.is_some() {

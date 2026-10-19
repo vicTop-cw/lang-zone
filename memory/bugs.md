@@ -828,3 +828,13 @@ ExprKind::IfExpr。两处下钻缺口：
 Stmt::ExprStmt 分支，经新增 rewrite_expr_returns 递归重写 if 分支体内
 Stmt::Return → Stmt::Raise。
 实测 gen_nested_if_ret.lz RUN-OK `Some(1)`（yield 1 后 return 终止迭代）。
+## BUG-293 [2026-10-19T14:25:00+08:00] [high] FIXED（raises 生成器裸 return 误 push Err）
+`def gen() raises str: if true: yield "ok"; return; yield "bad"` —
+BUG-292 后 `rewrite_iterator_returns` 把裸 `return` 重写为 `raise ()`
+（value=Unit）。raises 生成器返回 `Vec<Result<String, String>>`，codegen
+Stmt::Raise 一律 `push(Err(..))` → `push(Err(()))` 与
+`Result<String, String>` 不匹配 E0308（TEMP/probe/sweep7/gen_if_yield_ret.lz）。
+修法：stmt_gen.rs Stmt::Raise 生成器分支，仅当 raises 存在且 value 类型
+非 Unit 才 `push(Err(..))`；Unit（裸 return）视为成功终止
+（`return __gen_vec`）。
+实测 gen_if_yield_ret.lz RUN-OK `Some(Ok("ok"))`。

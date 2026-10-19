@@ -378,4 +378,8 @@ demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-289**：
   `Stmt::ExprStmt` → codegen 生成 `panic!("generator return")`。
   修法：两处均补 `Stmt::ExprStmt` 分支，经新增 `ir_expr_has_yield` /
   `rewrite_expr_returns` 递归下钻 `ExprKind::IfExpr` / `BlockExpr`。
-  新增回归 generator_if_return。
+  新增回归 generator_if_return。- **BUG-293**：raises 生成器 `if: yield "ok"; return` 裸 `return` 重写为
+  `raise ()`（value=Unit），codegen 一律 `push(Err(..))` →
+  `push(Err(()))` 与 `Vec<Result<String,String>>` E0308。修法：
+  `Stmt::Raise` 生成器分支仅当 raises 存在且 value 非 Unit 才 push Err，
+  Unit 视为成功终止。新增回归 generator_raises_if_return。

@@ -956,4 +956,23 @@ def main() =
     let ok = run_lz("generator_if_return", src);
     assert!(ok.ok, "生成器 if 内 return：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
+}// BUG-293：raises 生成器 if 分支体内裸 `return`。`rewrite_iterator_returns` 把裸
+// return 重写为 `raise ()`（value=Unit），raises 生成器是 Vec<Result<String,String>>，
+// push(Err(())) → E0308（TEMP/probe/sweep7/gen_if_yield_ret.lz）。修法：Stmt::Raise
+// codegen 对 raises 生成器的 Unit 值视为成功终止（return __gen_vec），不 push Err。
+#[test]
+fn generator_raises_if_return() {
+    let src = r#"
+def gen() raises str:
+    if true:
+        yield "ok"
+        return
+    yield "bad"
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_raises_if_return", src);
+    assert!(ok.ok, "raises 生成器 if 内裸 return：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Ok(\"ok\"))");
 }
