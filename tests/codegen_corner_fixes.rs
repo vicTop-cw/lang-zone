@@ -842,3 +842,23 @@ def main() =
     assert!(ok.ok, "yield g.next() 应正确推断 Option<elem>：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Some(1))");
 }
+
+// BUG-287：`rewrite_iterator_returns` 把生成器内所有 `return` 重写为 `raise ()`
+// （等价 Python StopIteration）。但 Raise 的 codegen 只要 `in_generator` 就
+// `push(Err(..))`，无视函数是否有 `raises` 子句 → 非 raises 生成器 `Vec<T>`
+// 里 push `Err(())` → E0308（TEMP/probe/sweep6/gen_return.lz）。
+#[test]
+fn generator_return_stops() {
+    let src = r#"
+def gen():
+    yield 1
+    return
+    yield 2
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_return_stops", src);
+    assert!(ok.ok, "生成器内 return 应提前退出收集：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
+}

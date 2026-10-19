@@ -2491,8 +2491,17 @@ impl CodeGen {
                 // 并提前返回（return __gen_vec），否则 `return Result::Err(..)` 与 Vec 类型
                 // 不匹配触发 E0308（iterator_demo / combo-iterator-generator 的 -> T raises str 生成器）。
                 if self.in_generator {
-                    self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(value)));
-                    self.emit_line("return __gen_vec;");
+                    // BUG-287：`rewrite_iterator_returns` 把生成器内所有 `return`
+                    // 重写为 `raise ()`（等价 Python StopIteration）。但只有 raises
+                    // 生成器才是 Vec<Result<T,E>>，可 push(Err(..))；非 raises 生成器
+                    // 返回 Vec<T>，push Err 会 E0308（TEMP/probe/sweep6/gen_return.lz）。
+                    if self.current_fn_raises.is_some() {
+                        self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(value)));
+                        self.emit_line("return __gen_vec;");
+                    } else {
+                        // 非 raises 生成器：提前退出收集（等价结束迭代）
+                        self.emit_line("return __gen_vec;");
+                    }
                 } else if self.current_fn_raises.is_some() {
                     // 普通 raises 函数：raise → `return Result::Err(..)`，错误经 Result 传播
                     self.emit_line(&format!("return Result::Err({});", self.gen_expr(value)));

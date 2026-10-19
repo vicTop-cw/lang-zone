@@ -335,4 +335,13 @@ um_mixed = arith || is_comparison || Eq/Ne\ 让提升分支对比较也生效，
 ext → Option<elem>。
 
 新增回归：generator_if_in_while / generator_match_arms / generator_yield_next_of_gen。
-五门核验：corner 27 ✓、demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。
+五门核验：corner 27 ✓、demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-287**：ewrite_iterator_returns 把生成器内所有 eturn 重写为
+  Stmt::Raise(())（等价 Python StopIteration）。但 Stmt::Raise 的 codegen
+  只要 in_generator 就 push(Err(..))，无视函数是否有 aises 子句 →
+  非 raises 生成器 Vec<i64> 里 push Err(()) → E0308
+  （TEMP/probe/sweep6/gen_return.lz）。修法：Stmt::Raise 在 in_generator
+  时检查 current_fn_raises.is_some()——有 aises 才 push Err，否则直接
+  eturn __gen_vec（提前结束收集）。
+
+新增回归：generator_return_stops。全门核验：corner 30 ✓、demo ✓、
+ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。
