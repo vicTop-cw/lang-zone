@@ -93,6 +93,14 @@ pub(crate) fn block_has_yield(block: &Block) -> bool {
                     return true;
                 }
             }
+            // BUG-285：`Stmt::Match` 各分支体是 Block，yield 嵌套其中需下钻
+            // （TEMP/probe/sweep6/gen_match.lz：match 分支内 yield 漏检 →
+            // 返回类型 i64 而非 Vec<i64>，且 __gen_vec 未声明 → E0425）。
+            Stmt::Match { arms, .. } => {
+                if arms.iter().any(|arm| block_has_yield(&arm.body)) {
+                    return true;
+                }
+            }
             Stmt::Block { stmts } => {
                 if block_has_yield(&Block {
                     span: Span::unknown(),
@@ -290,6 +298,13 @@ pub(crate) fn first_yield_type(block: &Block) -> Option<IrType> {
             Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
                 if let Some(t) = first_yield_type(body) {
                     return Some(t);
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms {
+                    if let Some(t) = first_yield_type(&arm.body) {
+                        return Some(t);
+                    }
                 }
             }
             Stmt::ExprStmt { expr } => {

@@ -986,9 +986,15 @@ pub(crate) fn lookup_builtin_method_ret(
             }),
             _ => None,
         },
-        // List<T> 方法
-        IrType::Named { path, args } if path == "List" && args.len() == 1 => match method {
-            "len" | "size" => Some(IrType::Int),
+        // List<T> / Vec<T> 方法（BUG-286：生成器返回值 Vec<T>，next 需返回 Option<elem>
+        // 与 Iterator<T>::next 同构；此前 Vec 未登记 → 回退 Any → `yield g.next()`
+        // 元素类型被归一成 i64 → Vec<i64> 却 push(Option<i64>)）
+        IrType::Named { path, args } if (path == "List" || path == "Vec") && args.len() == 1 => {
+            match method {
+                "len" | "size" => Some(IrType::Int),
+                // BUG-286：生成器返回值 Vec<T> 的 `.next()` 与 Iterator<T>::next
+                // 同构 → Option<elem>（TEMP/probe/sweep6/gen_nested.lz `yield g.next()`）
+                "next" => Some(IrType::Option(Box::new(args[0].clone()))),
             "clone" => Some(recv_ty.clone()),
             "iter" => Some(IrType::Named {
                 path: "Iterator".into(),
@@ -1038,6 +1044,7 @@ pub(crate) fn lookup_builtin_method_ret(
             // sort/reverse → Unit：Python 风格原地修改，返回 void（LZ 无 sorted）
             "sort" | "reverse" => Some(IrType::Unit),
             _ => None,
+            }
         },
         // Option<T> 方法
         IrType::Option(inner) => match method {

@@ -319,3 +319,20 @@ um_mixed = arith || is_comparison || Eq/Ne\ 让提升分支对比较也生效，
 
 - 裸 Vec 的 reduce/enumerate 方法路由（BUG-280/281）：\.reduce(\|acc,x\| => acc+x, 0)\ 生成 \.reduce(...)\ → E0599，改为 \into_iter().fold(init, closure)\；\.enumerate()\ → E0599、自由函数缺 \.collect()\ → E0608，改为 \into_iter().enumerate().map(\|(i,x)\| (i as i64, x)).collect()\，并在 infer.rs 登记返回类型 \List<Tuple(Int, T)>\。
 - 元组索引后字段 clone（BUG-282）：\[0][1]\（b: List<(int, str)>）\let s = b[0].1\ → E0507（从借用 move String）。IndexGet 元组分支在 base 是 IndexGet 且字段非 Copy 时追加 \.clone()\，新增 is_copy_ty 辅助。
+
+### 2026-10-19 - BUG-284/285/286：yield 嵌套与 Vec.next() 类型
+
+- **BUG-284**：def evens(n): while ...: if i%2==0: yield i —— AST 预扫描
+  st_body_has_yield / scan_iterator_yield_ty 未下钻 Stmt::Expr(Expr::If)
+  分支体 → 元素类型回退 Unit → Vec<()>（E0599）。新增 st_expr_has_yield /
+  scan_expr_yield_ty 下钻 If/Match/BlockExpr/Closure。
+- **BUG-285**：match x: 0 => yield 100 ... —— IR 层 lock_has_yield /
+  irst_yield_type 未下钻 Stmt::Match 各分支 Block → 返回类型 i64 且
+  __gen_vec 未声明（E0425）。补 Stmt::Match 分支。
+- **BUG-286**：生成器返回值 Vec<T>.next() 未在 lookup_builtin_method_ret
+  登记 → 回退 Any → yield g.next() 归一成 i64 → Vec<i64> 却 push
+  Option<i64>（E0308）。List/Vec 分支补 
+ext → Option<elem>。
+
+新增回归：generator_if_in_while / generator_match_arms / generator_yield_next_of_gen。
+五门核验：corner 27 ✓、demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。

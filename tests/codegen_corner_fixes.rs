@@ -799,3 +799,46 @@ def main() =
     assert!(ok.ok, "if 分支内的 yield 应正确推断元素类型：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(0)");
 }
+
+// BUG-285：`match` 分支体是 Block，`Stmt::Match` 各分支内的 yield 未被
+// block_has_yield 下钻 → 函数返回类型 i64（而非 Vec<i64>）且 __gen_vec 未声明
+// → E0425（TEMP/probe/sweep6/gen_match.lz）。修法：helpers.rs block_has_yield /
+// first_yield_type 增加 Stmt::Match 分支。
+#[test]
+fn generator_match_arms() {
+    let src = r#"
+def classify(x: int) =
+    match x:
+        0 => yield 100
+        1 => yield 200
+        _ => yield 300
+def main() =
+    let g = classify(0)
+    print(g.next())
+"#;
+    let ok = run_lz("generator_match_arms", src);
+    assert!(ok.ok, "match 分支内的 yield 应正确推断：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(100)");
+}
+
+// BUG-286：生成器返回值 Vec<T> 的 `.next()` 应返回 Option<elem>（与
+// Iterator<T>::next 同构）；此前 lookup_builtin_method_ret 无 Vec 分支 → 回退
+// Any → `yield g.next()` 元素类型归一成 i64 → Vec<i64> 却 push(Option<i64>)
+// → E0308（TEMP/probe/sweep6/gen_nested.lz）。
+#[test]
+fn generator_yield_next_of_gen() {
+    let src = r#"
+def make_gen():
+    yield 1
+    yield 2
+def outer():
+    let g = make_gen()
+    yield g.next()
+def main() =
+    let o = outer()
+    print(o.next())
+"#;
+    let ok = run_lz("generator_yield_next_of_gen", src);
+    assert!(ok.ok, "yield g.next() 应正确推断 Option<elem>：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Some(1))");
+}
