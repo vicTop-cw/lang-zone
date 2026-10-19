@@ -779,4 +779,17 @@
 
 ## BUG-284 [2026-10-19T11:54:00+08:00] [high] FIXED（if 分支内的 yield 漏检）：def evens(n): while ...: if i%2==0: yield i —— ast_body_has_yield / scan_iterator_yield_ty 只遍历 AstStmt，未下钻 Stmt::Expr(Expr::If) 的分支体，yield 漏检 → 元素类型推断回退 Unit → -> Vec<()>（E0599 Vec<()> 无 next）。修法：新增 ast_expr_has_yield / scan_expr_yield_ty 下钻 If/Match/BlockExpr/Closure 嵌套语句块。实测输出 Some(0)。## BUG-285 [2026-10-19T12:20:00+08:00] [high] FIXED（match 分支内 yield 漏检）：def classify(x): match x: 0 => yield 100 ... —— block_has_yield / first_yield_type 未下钻 Stmt::Match 的各分支 Block → 函数返回类型 i64（而非 Vec<i64>）且 __gen_vec 未声明 → E0425（TEMP/probe/sweep6/gen_match.lz）。修法：helpers.rs 增加 Stmt::Match 分支下钻 arm.body。实测输出 Some(100)。
 
-## BUG-286 [2026-10-19T12:22:00+08:00] [high] FIXED（Vec<T>.next() 未登记 → yield g.next() E0308）：lookup_builtin_method_ret 无 Vec 分支 → g.next() 回退 Any → yield g.next() 元素类型归一成 i64 → Vec<i64> 却 push(Option<i64>)（TEMP/probe/sweep6/gen_nested.lz E0308）。修法：List/Vec 分支增加 next → Option<elem>，与 Iterator<T>::next 同构。实测输出 Some(Some(1))。## BUG-287 [2026-10-19T12:45:00+08:00] [high] FIXED（非 raises 生成器内 return → push(Err(())) E0308）：rewrite_iterator_returns 把生成器内所有 return 重写为 Stmt::Raise(())（等价 Python StopIteration）；但 Raise codegen 只要 in_generator 就 push(Err(..))，无视函数是否有 raises 子句 → 非 raises 生成器 Vec<i64> 里 push Err(()) → E0308（TEMP/probe/sweep6/gen_return.lz）。修法：Stmt::Raise 在 in_generator 时检查 current_fn_raises.is_some()——有 raises 才 push(Err)，否则直接 return __gen_vec（提前结束收集）。实测输出 Some(1)。
+## BUG-286 [2026-10-19T12:22:00+08:00] [high] FIXED（Vec<T>.next() 未登记 → yield g.next() E0308）：lookup_builtin_method_ret 无 Vec 分支 → g.next() 回退 Any → yield g.next() 元素类型归一成 i64 → Vec<i64> 却 push(Option<i64>)（TEMP/probe/sweep6/gen_nested.lz E0308）。修法：List/Vec 分支增加 next → Option<elem>，与 Iterator<T>::next 同构。实测输出 Some(Some(1))。## BUG-287 [2026-10-19T12:45:00+08:00] [high] FIXED（非 raises 生成器内 return → push(Err(())) E0308）：rewrite_iterator_returns 把生成器内所有 return 重写为 Stmt::Raise(())（等价 Python StopIteration）；但 Raise codegen 只要 in_generator 就 push(Err(..))，无视函数是否有 raises 子句 → 非 raises 生成器 Vec<i64> 里 push Err(()) → E0308（TEMP/probe/sweep6/gen_return.lz）。修法：Stmt::Raise 在 in_generator 时检查 current_fn_raises.is_some()——有 raises 才 push(Err)，否则直接 return __gen_vec（提前结束收集）。实测输出 Some(1)。## BUG-288 [2026-10-19T12:55:00+08:00] [high] FIXED（生成器 + raises 类型错配 E0308/E0599/E0277）
+(1) convert_decl.rs ret_ty：`def gen() raises str:` 无返回注解时 ok_ty 取
+    unwrap_or(Unit) → Vec<Result<(),String>> 与 `push(Ok(1i64))` E0308。
+    修法：无注解时取 scan_iterator_yield_ty 推断出的 ret_ty（yield 元素类型）。
+(2) mod.rs 调用点：生成器 + raises 时应为 Vec<Result<T,E>>（每次 yield 一个
+    Result），旧逻辑先包 Vec<T> 再包 Result → Result<Vec<T>,E>，调用点
+    `let g: Result<Vec<T>,E>` 与实际 codegen 的 Vec<Result<T,E>> 不符 →
+    g.next() E0599（gen_raises.lz）。
+(3) current_is_iterator 只按 func.is_iterator 设置，漏掉 body 含 yield 的函数
+    → return 值触发隐式转换（"boom" → i64），随后 rewrite_iterator_returns
+    转成 Stmt::Raise 时值已被污染 → push(Err(<i64 as ImplicitFrom<String>>::
+    __implicit_from__("boom"))) E0277（gen_raises_ret.lz）。修法：
+    current_is_iterator = func.is_iterator || ast_body_has_yield(&func.body)。
+实测 gen_raises.lz / gen_raises_ret.lz 均 RUN-OK Some(Ok(1))。

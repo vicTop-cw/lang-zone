@@ -344,4 +344,20 @@ ext → Option<elem>。
   eturn __gen_vec（提前结束收集）。
 
 新增回归：generator_return_stops。全门核验：corner 30 ✓、demo ✓、
-ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。
+ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-288**：生成器 + raises 类型错配（3 处）：
+  - `convert_decl.rs`：`def gen() raises str:` 无返回注解时 `ok_ty` 取
+    `unwrap_or(Unit)` → `Vec<Result<(),String>>` 与 `push(Ok(1i64))` E0308。
+    修法：无注解时取 `scan_iterator_yield_ty` 推断出的 `ret_ty`。
+  - `mod.rs`：生成器 + raises 应为 `Vec<Result<T,E>>`（每次 yield 一个
+    Result），旧逻辑先包 `Vec<T>` 再包 `Result` → `Result<Vec<T>,E>`，
+    调用点 `let g: Result<Vec<T>,E>` 与实际 codegen 的 `Vec<Result<T,E>>`
+    不符 → `g.next()` E0599。
+  - `current_is_iterator` 只按 `func.is_iterator` 设置，漏掉 body 含 yield
+    的函数 → `return` 值触发隐式转换（`"boom"` → `i64`），随后
+    `rewrite_iterator_returns` 转成 `Stmt::Raise` 时值已被污染 →
+    `push(Err(<i64 as ImplicitFrom<String>>::__implicit_from__("boom")))`
+    E0277。修法：`current_is_iterator = func.is_iterator ||
+    ast_body_has_yield(&func.body)`。
+
+新增回归：generator_raises、generator_raises_return。全门核验：corner 32 ✓、
+demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。

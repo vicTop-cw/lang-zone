@@ -381,10 +381,27 @@ impl TypeCtx {
                 // Result<ok, err>（ok 为推断返回值，err 为 raises 异常类型），
                 // 否则 fn_returns 漏 raises 包裹 → try 体末尾调用该函数时 body 块类型
                 // 非 Result，use_result_try 误判走 catch_unwind（panic 基）导致 E0308
+                // BUG-288：生成器 + raises 的顺序——生成器返回 Vec<T>（yield 收集），
+                // raises 应把**每个元素**包成 Result<T,E> → Vec<Result<T,E>>；
+                // 旧逻辑先 Vec<T> 再包成 Result<Vec<T>,E>，调用点 `let g: Result<Vec<T>,E>`
+                // 与实际 codegen 的 `Vec<Result<T,E>>` 不符 → g.next() E0599
+                // （TEMP/probe/sweep6/gen_raises.lz）。
                 if let Some(r) = &f.raises {
-                    ret = IrType::Result {
-                        ok: Box::new(ret),
-                        err: Box::new(from_ast_type_with_generics(r, &generics)),
+                    let err_ty = from_ast_type_with_generics(r, &generics);
+                    ret = match ret {
+                        IrType::Named { path, args } if path == "Vec" && args.len() == 1 => {
+                            IrType::Named {
+                                path: "Vec".into(),
+                                args: vec![IrType::Result {
+                                    ok: Box::new(args[0].clone()),
+                                    err: Box::new(err_ty),
+                                }],
+                            }
+                        }
+                        other => IrType::Result {
+                            ok: Box::new(other),
+                            err: Box::new(err_ty),
+                        },
                     };
                 }
                 self.fn_returns.insert(f.name.clone(), ret);

@@ -956,7 +956,12 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // 注意：Iterator 函数的 Vec<T> 包装由 codegen 负责（基于 has_yield 检测），
     // 此处不包装，避免 Vec<Vec<T>> 双重包装。
     fn_ctx.current_ret_ty = Some(ret_ty.clone());
-    fn_ctx.current_is_iterator = func.is_iterator;
+    // BUG-288：生成器检测要覆盖「未标 iterator 关键字但 body 含 yield」的函数
+    // （`def gen() raises str:`），否则 current_is_iterator=false → return 值
+    // 触发隐式转换（"boom" → i64），随后 rewrite_iterator_returns 转成
+    // Stmt::Raise 时值已被污染成 i64 → codegen push(Err(<i64 as ImplicitFrom<
+    // String>>::__implicit_from__("boom"))) → E0277（gen_raises_ret.lz）。
+    fn_ctx.current_is_iterator = func.is_iterator || ast_body_has_yield(&func.body);
 
     // #[extern(lang)]：外部声明无 lz 函数体，codegen 生成分发调用
     let has_extern = func.decorators.iter().any(|d| d.name == "extern");
@@ -1027,11 +1032,16 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // 并对隐式尾表达式（非 Result 类型时）包 Ok(...)。ret_ty 同步升为 Result<ok, err>。
     let body = if func.raises.is_some() {
         let err_ty = func.raises.as_ref().map(from_ast_type).unwrap();
+        // BUG-288：`def gen() raises str:` 无返回类型注解时，ok_ty 应为
+        // 从 yield 推断的元素类型（ret_ty），而不是 func.return_type 的
+        // unwrap_or(Unit)。旧逻辑取 Unit → 函数体 `return Ok(x)` / `raise Err(x)`
+        // 与 `Vec<Result<(), String>>` 匹配不上 yield 的 i64 → E0308
+        // （TEMP/probe/sweep6/gen_raises.lz）。
         let ok_ty = func
             .return_type
             .as_ref()
             .map(from_ast_type)
-            .unwrap_or(IrType::Unit);
+            .unwrap_or_else(|| ret_ty.clone());
         rewrite_raises_block(body, &ok_ty, &err_ty)
     } else {
         body
@@ -1042,7 +1052,10 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             .return_type
             .as_ref()
             .map(from_ast_type)
-            .unwrap_or(IrType::Unit);
+            .unwrap_or_else(|| ret_ty.clone());
+        // BUG-288：生成器 + raises 时，`ok_ty` 应为 yield 元素类型（无注解时取
+        // 推断出的 ret_ty），而不是 unwrap_or(Unit)。codegen 对 has_yield 函数
+        // 再包一层 Vec<...> → 最终 `Vec<Result<T,E>>` 与调用点一致。
         IrType::Result {
             ok: Box::new(ok_ty),
             err: Box::new(err_ty),

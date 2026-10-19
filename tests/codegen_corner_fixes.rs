@@ -862,3 +862,44 @@ def main() =
     assert!(ok.ok, "生成器内 return 应提前退出收集：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
 }
+
+// BUG-288：生成器 + raises 的返回类型与调用点类型错配。
+// (1) convert_decl.rs：`def gen() raises str:` 无返回注解时 ok_ty 应取
+//     scan_iterator_yield_ty 推断出的 yield 元素类型（旧逻辑 unwrap_or(Unit) →
+//     Vec<Result<(),String>> 与 `push(Ok(1i64))` E0308）。
+// (2) mod.rs：生成器 + raises 时返回类型应为 `Vec<Result<T,E>>`（每次 yield 一个
+//     Result），不是 `Result<Vec<T>,E>`；否则调用点 `let g: Result<Vec<T>,E>`
+//     与实际 codegen 的 `Vec<Result<T,E>>` 不符 → g.next() E0599。
+// (3) current_is_iterator 只按 func.is_iterator 设置，漏掉 body 含 yield 的函数
+//     → return 值触发隐式转换（"boom" → i64），随后 rewrite_iterator_returns
+//     转成 Stmt::Raise 时值已被污染 → push(Err(<i64 as ImplicitFrom<String>>::
+//     __implicit_from__("boom"))) E0277。
+#[test]
+fn generator_raises() {
+    let src = r#"
+def gen() raises str:
+    yield 1
+    raise "boom"
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_raises", src);
+    assert!(ok.ok, "生成器 + raises：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Ok(1))");
+}
+
+#[test]
+fn generator_raises_return() {
+    let src = r#"
+def gen() raises str:
+    yield 1
+    return "boom"
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_raises_return", src);
+    assert!(ok.ok, "生成器 + raises + return 应视为 raise：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Ok(1))");
+}
