@@ -975,4 +975,26 @@ def main() =
     let ok = run_lz("generator_raises_if_return", src);
     assert!(ok.ok, "raises 生成器 if 内裸 return：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Ok(\"ok\"))");
+}// BUG-294：struct impl 方法生成器调用返回类型在 IR 侧为 Any（`let g: ? =
+// c.gen()`），codegen .next() 特判 recv_is_list=false → 未转 into_iter().next()
+// → E0599 no method next found for Vec<i64>（TEMP/probe/sweep8/gen_struct.lz）。
+// 修法：.next() 特判增加 Any 接收者（codegen 发射 `fn gen(&self) -> Vec<i64>`，
+// 运行期确实是 Vec）。
+#[test]
+fn generator_struct_method() {
+    let src = r#"
+struct Counter:
+    n: int
+impl Counter:
+    def gen(self):
+        yield self.n
+        yield self.n + 1
+def main() =
+    let c = Counter { n: 42 }
+    let g = c.gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_struct_method", src);
+    assert!(ok.ok, "struct impl 生成器 .next()：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(42)");
 }

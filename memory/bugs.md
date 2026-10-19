@@ -838,3 +838,15 @@ Stmt::Raise 一律 `push(Err(..))` → `push(Err(()))` 与
 非 Unit 才 `push(Err(..))`；Unit（裸 return）视为成功终止
 （`return __gen_vec`）。
 实测 gen_if_yield_ret.lz RUN-OK `Some(Ok("ok"))`。
+## BUG-294 [2026-10-19T14:35:00+08:00] [high] FIXED（struct impl 生成器 .next() 未转 into_iter）
+`struct Counter: n: int; impl Counter: def gen(self): yield self.n; ...`
+`let g = c.gen(); print(g.next())` — struct impl 方法生成器调用返回类型在
+IR 侧为 Any（peek：`let g: ? = [?] method [Counter] c.gen`），
+codegen .next() 特判 recv_is_list=false（receiver.ty=Any 非 Vec）→
+未转 `into_iter().next()` → E0599 no method next found for Vec<i64>
+（TEMP/probe/sweep8/gen_struct.lz；.rs 里 `fn gen(&self) -> Vec<i64>`
+正确，`g.next()` 裸发）。
+修法：expr_gen.rs .next() 特判增加 `receiver.ty == Any` 接收者
+（codegen 发射签名已是 Vec<i64>，运行期确实是 Vec，into_iter().next()
+合法）。
+实测 gen_struct.lz RUN-OK `Some(42)`。

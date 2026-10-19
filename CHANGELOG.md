@@ -382,4 +382,7 @@ demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-289**：
   `raise ()`（value=Unit），codegen 一律 `push(Err(..))` →
   `push(Err(()))` 与 `Vec<Result<String,String>>` E0308。修法：
   `Stmt::Raise` 生成器分支仅当 raises 存在且 value 非 Unit 才 push Err，
-  Unit 视为成功终止。新增回归 generator_raises_if_return。
+  Unit 视为成功终止。新增回归 generator_raises_if_return。- **BUG-294**：struct impl 方法生成器 `let g = c.gen(); g.next()`，
+  IR 侧接收者类型为 Any → codegen .next() 特判 recv_is_list=false 未转
+  `into_iter().next()` → E0599。修法：.next() 特判增加 Any 接收者。
+  新增回归 generator_struct_method。

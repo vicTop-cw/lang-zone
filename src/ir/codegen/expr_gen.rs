@@ -4621,7 +4621,15 @@ impl CodeGen {
                     }
                     // BUG-283：生成器函数调用返回 Vec<T>（急切收集），LZ 侧按迭代器
                     // 消费（.next()），裸 Vec 无 next 方法 → E0599。改 into_iter().next()。
-                    if method == "next" && args_s.is_empty() && recv_is_list {
+                    // BUG-294：struct impl 方法生成器调用返回类型在 IR 侧为 Any
+                    // （gen_struct.lz IR：`let g: ? = ...`），recv_is_list=false →
+                    // .next() 未转 into_iter().next() → E0599（TEMP/probe/sweep8/
+                    // gen_struct.lz）。Any 接收者亦按 Vec 处理（codegen 发射
+                    // `fn gen(&self) -> Vec<i64>`，运行期确实是 Vec）。
+                    if method == "next"
+                        && args_s.is_empty()
+                        && (recv_is_list || matches!(receiver.ty, IrType::Any))
+                    {
                         return format!("({}).into_iter().next()", recv);
                     }
                 }
