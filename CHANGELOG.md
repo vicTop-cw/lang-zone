@@ -313,3 +313,6 @@ AIGC:
 - float×int 混合比较提升（BUG-275）：\1.5 == 1\ 生成 \ == 1i64\（f64 == i64）→ rustc E0308。根因是 f64 提升只挂在 \rith\（Add/Sub/Mul/Div/Mod）分支，比较（Lt/Le/Gt/Ge）与 Eq/Ne 走不到 \({} as f64)\ 提升分支，且整数/浮点字面量不随 \current_expected_ty\ 改自身类型。新增 \
 um_mixed = arith || is_comparison || Eq/Ne\ 让提升分支对比较也生效，\1.5 == 1 → 1.5f64 == (1i64 as f64)\。TEMP/probe/sweep3/f64_cmp_reg.lz 验证 1.5>2 false、3<2.5 false、1==1 true。
 - str/List 重复（\*\）（BUG-276/277）：\"ab" * 2\ 生成 \String * i64\、\[1,2] * 2\ 生成 \Vec * i64\ → rustc E0369。根因是 Mul 未像 Add 那样做集合/字符串特判，str/List 侧落到 f64 提升后被当原生 \*\ 直出。在 Mul 分支前置拦截：str/String × int → \__rep.repeat(n)\、List/Vec × int → 循环 extend 重复，次数取 \max(0)\ 对齐 Python 语义（\"ab" * -1 → ""\、\[1] * 0 → []\）。\"ab"*2 → abab\、\[1,2]*2 → [1,2,1,2]\ 验证通过。
+
+- type alias 元组索引（BUG-278）：\	ype Pair = (int, int); let p: Pair = (1,2); print(p[0])\ 生成 \p[0i64 as usize]\ → rustc E0608。根因是 \p: Pair\ 的 IR 类型是 Named("Pair")，IndexGet 的元组分支只匹配 IrType::Tuple(_)。CodeGen 增加 type_aliases 映射（模块级 gen_type_alias_def 与函数内 Stmt::TypeAlias 都登记），新增 resolve_type_alias 递归解析，IndexGet 元组判定改用解析结果。\p[0] → p.0\。
+- 裸 Vec filter 方法闭包参数（BUG-279）：\[1,2,3].filter(|x| => x > 2)\ 生成 \\|x\| { x > 2i64 }\ → rustc E0308（Rust Iterator::filter 闭包参数是 &Item）。裸 Vec filter 分支套 strip_lambda_type_with_ref 加 & 模式（body 含 \*x\ 时保留裸参），map 分支保持 owned 参数不变。

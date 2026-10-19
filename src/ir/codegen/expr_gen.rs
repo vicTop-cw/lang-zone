@@ -488,6 +488,20 @@ impl CodeGen {
         self.resolve_type_alias_depth(ty, 0)
     }
 
+    /// Rust `Copy` 类型判定（BUG-282）：仅标量与 Unit/Char 是 Copy；String/Vec/Dict/
+    /// 用户 struct/enum/Option<T>（内部可能非 Copy）等都非 Copy，需显式 `.clone()`。
+    fn is_copy_ty(&self, ty: &IrType) -> bool {
+        match ty {
+            IrType::Int | IrType::Int128 | IrType::F64 | IrType::Bool | IrType::Unit => true,
+            IrType::Named { path, .. }
+                if path == "usize" || path == "u8" || path == "i8" || path == "char" =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn resolve_type_alias_depth(&self, ty: &IrType, depth: u8) -> IrType {
         if depth > 16 {
             return ty.clone();
@@ -1805,7 +1819,11 @@ impl CodeGen {
                 } else if callee_s == "iter" && args_s.len() == 1 {
                     format!("({}).iter()", args_s[0])
                 } else if callee_s == "enumerate" && args_s.len() == 1 {
-                    format!("({}).iter().enumerate()", args_s[0])
+                    // BUG-281：旧实现在 `.iter().enumerate()` 后缺 `.collect()`，
+                    // 产出 Enumerate<Iter<&String>> 迭代器（b[0] → E0608）。
+                    // 走 into_iter 拿 owned，并把 Rust 的 usize 索引映射回 LZ 的
+                    // i64 int，与方法形式一致。
+                    format!("({}).into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect::<Vec<_>>()", args_s[0])
                 } else if callee_s == "zip" && args_s.len() == 2 {
                     format!("({}).into_iter().zip({}.into_iter())", args_s[0], args_s[1])
                 } else if callee_s == "clone" && args_s.len() == 1 {
@@ -4578,6 +4596,29 @@ impl CodeGen {
                             recv, sep
                         );
                     }
+                    // BUG-280：Vec 无 `.reduce(closure, init)`。Rust 归约是
+                    // `Iterator::fold(init, closure)`（LZ 的 reduce 带初值参数）。
+                    // 裸 Vec 走 into_iter 链；ListExt 等扩展 trait 同名 reduce 由
+                    // has_ext_method 分支提前返回，不会进到这里。
+                    if method == "reduce" && args_s.len() == 2 && recv_is_list {
+                        let lambda = strip_lambda_type(&args_s[0]);
+                        return format!(
+                            "({}).into_iter().fold({}, {})",
+                            recv, args_s[1], lambda
+                        );
+                    }
+                    // BUG-281：Vec 无 `.enumerate()`（E0599）。裸 Vec 走迭代器链
+                    // into_iter().enumerate()，产出 Vec<(usize, Item)>。
+                    if method == "enumerate" && args_s.is_empty() && recv_is_list {
+                        // BUG-281：Vec 无 `.enumerate()`（E0599）；裸 Vec 走迭代器链。
+                        // Rust Enumerate 产出 (usize, T)，LZ 是 int（i64）→ 映射回 i64，
+                        // 否则与 IR 类型 Tuple(Int, T) 冲突（`let b: Vec<(i64,String)>`
+                        // = collect 的 Vec<(usize,String)> → E0308）。
+                        return format!(
+                            "({}).into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect::<Vec<_>>()",
+                            recv
+                        );
+                    }
                 }
                 // Option/Result 消费型方法（map/and_then/unwrap_or 等）：receiver 按值
                 // 消费，非 Copy 类型（内部含 String 等）的变量需 clone 才能复用（E0382 修复，
@@ -4956,12 +4997,20 @@ impl CodeGen {
                     // BUG-278：base.ty 可能是 type alias（Named("Pair")），先解析回
                     // Tuple 再判定，否则落通用路径生成 `p[0i64 as usize]` → E0608。
                     let base_resolved_ty = self.resolve_type_alias(&base.ty);
-                    if let IrType::Tuple(_) = &base_resolved_ty {
+                    if let IrType::Tuple(elems) = &base_resolved_ty {
                         let idx = match &key.kind {
                             ExprKind::Lit(LitKind::Int(n)) => n.to_string(),
                             _ => key_s.trim_end_matches("i64").trim().to_string(),
                         };
-                        return format!("{}.{}", base_s, idx);
+                        // BUG-282：元组字段是 String/Vec 等非 Copy 类型，且 base 是
+                        // IndexGet（`b[0][1]`，Vec 索引返回 &T）时，`b[0].1` 会从借用
+                        // 里 move → E0507。非 Copy 字段需 `.clone()`；Copy 字段保持裸访问。
+                        let need_clone = matches!(&base.kind, ExprKind::IndexGet { .. })
+                            && elems
+                                .get(idx.parse::<usize>().unwrap_or(usize::MAX))
+                                .map_or(false, |e| !self.is_copy_ty(e));
+                        let clone_suffix = if need_clone { ".clone()" } else { "" };
+                        return format!("{}.{}{}", base_s, idx, clone_suffix);
                     }
                     // HashMap/Dict 索引: map["key"] → map.get(&"key").cloned()
                     // Rust HashMap 不实现 Index trait

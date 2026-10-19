@@ -1025,6 +1025,14 @@ pub(crate) fn lookup_builtin_method_ret(
             // reversed/unique/slice → List<T>
             "reversed" | "unique" => Some(recv_ty.clone()),
             "slice" => Some(recv_ty.clone()),
+            // BUG-281：enumerate 未登记 → 返回类型 Any，`b[0][0]` 的 b[0] 推断 Any，
+            // IndexGet 的元组分支不命中，生成 `b[0][0]` → rustc E0608
+            // （TEMP/probe/sweep6/enumerate_method.lz）。LZ 语义 enumerate 返回
+            // List<(usize, T)>，登记为 List<Tuple(Int, T)>。
+            "enumerate" => Some(IrType::Named {
+                path: "List".into(),
+                args: vec![IrType::Tuple(vec![IrType::Int, args[0].clone()])],
+            }),
             // extend → Unit
             "extend" => Some(IrType::Unit),
             // sort/reverse → Unit：Python 风格原地修改，返回 void（LZ 无 sorted）

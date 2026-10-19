@@ -698,3 +698,60 @@ def main() =
         "[3, 4, 5] [2, 4, 6, 8, 10] [2, 4]"
     );
 }
+
+// BUG-280：裸 Vec 无 `.reduce(closure, init)`（E0599）。Rust 归约是 `Iterator::fold`。
+#[test]
+fn vec_reduce_method_fold() {
+    let src = r#"
+def main() =
+    let a = [1, 2, 3, 4]
+    let b = a.reduce(|acc, x| => acc + x, 0)
+    print(b)
+    let c = [1, 2, 3].reduce(|acc, x| => acc * x, 1)
+    print(c)
+"#;
+    let ok = run_lz("vec_reduce_method", src);
+    assert!(ok.ok, "裸 Vec reduce 应通过：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "10 6");
+}
+
+// BUG-281：裸 Vec 无 `.enumerate()`（E0599），自由函数 enumerate 缺 `.collect()`（E0608）。
+// 且 Rust Enumerate 产出 (usize, T)，需映射回 LZ 的 int（i64），否则类型注解
+// `let b: Vec<(i64, String)>` 与 collect 的 `Vec<(usize, String)>` 冲突 → E0308。
+#[test]
+fn vec_enumerate_method_and_freefn() {
+    let src = r#"
+def main() =
+    let a = ["x", "y"]
+    let b = a.enumerate()
+    let c = enumerate(["p", "q"])
+    print(b[0])
+    print(b[1][0])
+    print(b[1][1])
+    print(c[0])
+"#;
+    let ok = run_lz("vec_enumerate_method", src);
+    assert!(ok.ok, "裸 Vec enumerate 应通过：\n{}", ok.diag);
+    assert_eq!(
+        ok.stdout.replace('\n', " ").trim(),
+        "(0, \"x\") 1 y (0, \"p\")"
+    );
+}
+
+// BUG-282：`b[0][1]`（b 是 List<(int, str)>）—— Vec 索引返回 &T，字段 String 非 Copy
+// 时从借用 move → E0507。需 `.clone()`。
+#[test]
+fn tuple_index_after_index_clone() {
+    let src = r#"
+def main() =
+    let a = ["x", "y"]
+    let b = a.enumerate()
+    let i = b[0][0]
+    let s = b[0][1]
+    print(i)
+    print(s)
+"#;
+    let ok = run_lz("tuple_index_after_index_clone", src);
+    assert!(ok.ok, "元组索引后字段访问应通过：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "0 x");
+}

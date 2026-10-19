@@ -770,3 +770,7 @@
 ## BUG-278 [2026-10-19T10:18:00+08:00] [medium] FIXED（codegen type_alias 解析）：	ype Pair = (int, int); let p: Pair = (1,2); print(p[0]) 直出 p[0i64 as usize] → rustc E0608（Named("Pair") 未解析回 Tuple）
 
 ## BUG-279 [2026-10-19T10:28:00+08:00] [medium] FIXED（filter 闭包参数 & 模式）：裸 Vec .filter(\|x\| => x > 2) 生成 \|x\| { x > 2i64 }（filter 闭包参数是 &Item）→ rustc E0308
+
+## BUG-280 [2026-10-19T10:38:00+08:00] [medium] FIXED（裸 Vec 无 reduce 方法）：.reduce(\|acc, x\| => acc + x, 0) 生成 .reduce(move \|acc, x\| {...}, 0i64) → rustc E0599（Vec 无 reduce）。Rust 归约是 Iterator::fold(init, closure)，加方法路由 educe(closure, init) → ({}).into_iter().fold({}, {})。
+## BUG-281 [2026-10-19T10:38:00+08:00] [medium] FIXED（Vec 无 enumerate）：方法 .enumerate() → .enumerate() E0599；自由函数 numerate(a) → (a).iter().enumerate() 产出 Enumerate<Iter<&String>> 迭代器（[0] → E0608）。修法：方法形式走 into_iter().enumerate().map(\|(i,x)\| (i as i64, x)).collect()；自由函数同样补 .collect()；infer.rs 登记 numerate → List<Tuple(Int, T)>。
+## BUG-282 [2026-10-19T10:49:00+08:00] [medium] FIXED（元组索引后字段 move）：let s = b[0][1]（b: List[(int, str)]）生成 let s: String = b[0].1; → rustc E0507（从借用里 move String，Vec 索引返回 &T）。修法：IndexGet 元组分支在 base 是 IndexGet 且字段非 Copy 时追加 .clone()，新增 is_copy_ty 辅助（Int/Int128/F64/Bool/Unit/usize/u8/i8/char 为 Copy）。
