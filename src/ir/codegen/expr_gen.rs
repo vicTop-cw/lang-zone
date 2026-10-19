@@ -4619,6 +4619,11 @@ impl CodeGen {
                             recv
                         );
                     }
+                    // BUG-283：生成器函数调用返回 Vec<T>（急切收集），LZ 侧按迭代器
+                    // 消费（.next()），裸 Vec 无 next 方法 → E0599。改 into_iter().next()。
+                    if method == "next" && args_s.is_empty() && recv_is_list {
+                        return format!("({}).into_iter().next()", recv);
+                    }
                 }
                 // Option/Result 消费型方法（map/and_then/unwrap_or 等）：receiver 按值
                 // 消费，非 Copy 类型（内部含 String 等）的变量需 clone 才能复用（E0382 修复，

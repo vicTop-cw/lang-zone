@@ -755,3 +755,24 @@ def main() =
     assert!(ok.ok, "元组索引后字段访问应通过：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "0 x");
 }
+
+// BUG-283：`def gen(): yield 1; yield 2; yield 3`（未标 `iterator` 关键字）的生成器。
+// ① 返回类型推断把尾表达式 `yield 3` 推成 Itor<i64>（lz_builtins 无此类型）→ E0425；
+// ② 调用点 `let g: Vec<i64> = gen()` 后 `g.next()` —— 裸 Vec 无 next（E0599）。
+// 修法：collect_functions/convert_decl 对含 yield 的无注解函数按 yield 元素类型推断，
+// 调用点登记为 Vec<T>；codegen 把 Vec 上的 `.next()` 路由到 `into_iter().next()`。
+#[test]
+fn generator_func_unannotated() {
+    let src = r#"
+def gen():
+    yield 1
+    yield 2
+    yield 3
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_func_unannotated", src);
+    assert!(ok.ok, "未注解生成器应通过：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
+}

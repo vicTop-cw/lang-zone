@@ -101,6 +101,38 @@ pub(crate) fn convert_duck_def(d: &ast::DuckDef) -> DuckDef {
     }
 }
 
+/// 检测 AST 函数体是否含 yield（递归嵌套控制流）。用于 `def gen(): yield 1` 这类
+/// 未标 `iterator` 关键字的生成器：is_iterator 标志缺失但 body 实际含 yield。
+fn ast_body_has_yield(stmts: &[AstStmt]) -> bool {
+    for stmt in stmts {
+        match stmt {
+            AstStmt::Yield(_) | AstStmt::YieldFrom(_) => return true,
+            AstStmt::While { body, else_body, .. }
+            | AstStmt::For { body, else_body, .. }
+            | AstStmt::WhileLet { body, else_body, .. } => {
+                if ast_body_has_yield(body) {
+                    return true;
+                }
+                if let Some(eb) = else_body {
+                    if ast_body_has_yield(eb) {
+                        return true;
+                    }
+                }
+            }
+            AstStmt::Loop(body)
+            | AstStmt::Block { body, .. }
+            | AstStmt::Defer(body)
+            | AstStmt::With { body, .. } => {
+                if ast_body_has_yield(body) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// 检测 IR Block 是否包含 yield 语句（递归嵌套块）
 pub(crate) fn ir_block_has_yield(block: &Block) -> bool {
     for stmt in &block.stmts {
@@ -803,7 +835,12 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
         .as_ref()
         .map(|t| from_ast_type_with_generics(t, &generics))
         .unwrap_or_else(|| {
-            if func.is_iterator {
+            // 生成器（is_iterator 或 body 实际含 yield）：从 yield 表达式推断元素类型
+            // （codegen 会包装 Vec<T>）。仅按 is_iterator 判断会漏掉 `def gen(): yield 1`
+            // 这类未标 `iterator` 关键字的函数：其尾表达式是 `yield 3`，推断为
+            // Itor<i64>（TEMP/probe/sweep6/generator_func.lz → E0425 cannot find type
+            // `Itor`，lz_builtins 无此类型）。
+            if func.is_iterator || ast_body_has_yield(&func.body) {
                 // 递归扫描（yield 可嵌套在 while/for/if 块内），并预登记 let 绑定类型
                 scan_iterator_yield_ty(&func.body, &mut fn_ctx).unwrap_or(IrType::Unit)
             } else if let Some(tail) = func.body.last() {

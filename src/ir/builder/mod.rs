@@ -356,11 +356,20 @@ impl TypeCtx {
                         probe.vars.insert(name.clone(), ty);
                     }
                 }
-                let mut ret = f
-                    .body
-                    .last()
+                let mut ret = if let Some(elem) = scan_iterator_yield_ty(&f.body, &mut probe) {
+                // 生成器（body 含 yield，未标 iterator 关键字亦含）：返回类型是
+                // yield 元素类型 → 调用点登记为 Vec<T>（codegen 会包装 Vec<T>）。
+                // 否则尾表达式 `yield 3` 经 infer_stmt_type 推断为 Itor<i64>，
+                // 调用点 `let g: Itor<i64> = gen()` → E0425（lz_builtins 无 Itor）。
+                IrType::Named {
+                    path: "Vec".into(),
+                    args: vec![elem],
+                }
+            } else {
+                f.body.last()
                     .map(|s| infer_stmt_type(s, &probe))
-                    .unwrap_or(IrType::Unit);
+                    .unwrap_or(IrType::Unit)
+            };
                 // Any → Unit 收敛：递归调用自身（fn_returns 尚未登记）或调用未知名
                 // 函数时推断为 Any，而 rust_type(Any) 回退 i64 会让无返回注解的函数
                 // 变成 `-> i64`（bst.lz `inorder` 递归调用自身被推为 i64，E0308）。

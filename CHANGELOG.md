@@ -316,3 +316,6 @@ um_mixed = arith || is_comparison || Eq/Ne\ 让提升分支对比较也生效，
 
 - type alias 元组索引（BUG-278）：\	ype Pair = (int, int); let p: Pair = (1,2); print(p[0])\ 生成 \p[0i64 as usize]\ → rustc E0608。根因是 \p: Pair\ 的 IR 类型是 Named("Pair")，IndexGet 的元组分支只匹配 IrType::Tuple(_)。CodeGen 增加 type_aliases 映射（模块级 gen_type_alias_def 与函数内 Stmt::TypeAlias 都登记），新增 resolve_type_alias 递归解析，IndexGet 元组判定改用解析结果。\p[0] → p.0\。
 - 裸 Vec filter 方法闭包参数（BUG-279）：\[1,2,3].filter(|x| => x > 2)\ 生成 \\|x\| { x > 2i64 }\ → rustc E0308（Rust Iterator::filter 闭包参数是 &Item）。裸 Vec filter 分支套 strip_lambda_type_with_ref 加 & 模式（body 含 \*x\ 时保留裸参），map 分支保持 owned 参数不变。
+
+- 裸 Vec 的 reduce/enumerate 方法路由（BUG-280/281）：\.reduce(\|acc,x\| => acc+x, 0)\ 生成 \.reduce(...)\ → E0599，改为 \into_iter().fold(init, closure)\；\.enumerate()\ → E0599、自由函数缺 \.collect()\ → E0608，改为 \into_iter().enumerate().map(\|(i,x)\| (i as i64, x)).collect()\，并在 infer.rs 登记返回类型 \List<Tuple(Int, T)>\。
+- 元组索引后字段 clone（BUG-282）：\[0][1]\（b: List<(int, str)>）\let s = b[0].1\ → E0507（从借用 move String）。IndexGet 元组分支在 base 是 IndexGet 且字段非 Copy 时追加 \.clone()\，新增 is_copy_ty 辅助。
