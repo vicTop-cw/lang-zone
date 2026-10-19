@@ -5516,6 +5516,12 @@ impl CodeGen {
                 // rhs 是数值或未知（Any fallback 为 i64）时，f64 侧混合算术需提升
                 let rhs_is_numeric = matches!(rhs_ty, IrType::Int | IrType::F64 | IrType::Any);
                 let lhs_is_numeric = matches!(lhs_ty, IrType::Int | IrType::F64 | IrType::Any);
+                // float×int 混合比较也需提升：`1.5 == 1` 生成 f64 == i64 → E0308
+                // （TEMP/probe/sweep3/float_eq_int.lz 实测）。arith 只覆盖 Add/Sub/Mul/Div/Mod，
+                // 比较与 Eq/Ne 走不到下面的 f64 提升分支；故单独开 num_mixed 让比较也参与。
+                let num_mixed = arith
+                    || op.is_comparison()
+                    || matches!(op, BinOpKind::Eq | BinOpKind::Neq);
                 // 操作数期望类型注入：比较运算互相传递对方类型；任一侧为
                 // str/String 时给另一侧传 Str 期望（s[pos] == "-" 生成 String，
                 // lib_json skip_ws/parse_number E0308）
@@ -5576,9 +5582,9 @@ impl CodeGen {
                     && !lhs_is_complex
                 {
                     format!("{COMPLEX_RS}::new({lhs_s}, 0.0) {op_s} {rhs_s}")
-                } else if arith && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
+                } else if num_mixed && lhs_is_f64 && rhs_is_numeric && !rhs_is_f64 {
                     format!("{} {} ({} as f64)", lhs_s, op_s, rhs_s)
-                } else if arith && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
+                } else if num_mixed && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
                     format!("({} as f64) {} {}", lhs_s, op_s, rhs_s)
                 } else {
                     format!("{} {} {}", lhs_s, op_s, rhs_s)

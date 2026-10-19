@@ -638,11 +638,15 @@ def main() =
     print(a == None)
     print(None == None)
     print(None != None)
+    print(1.5 == 1)
+    print(1.5 > 2)
+    print(3 < 2.5)
+    print(1 == 1)
 "#;
     let ok = run_lz("scalar_family_valid_kept", ok_src);
     assert!(ok.ok, "合法标量运算应继续通过：\n{}", ok.diag);
     assert_eq!(
         ok.stdout.replace('\n', " ").trim(),
-        "true true true 3.5 false true false"
+        "true true true 3.5 false true false false false false true"
     );
 }
