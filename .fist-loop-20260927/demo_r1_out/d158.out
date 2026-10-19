@@ -1,0 +1,15 @@
+division attempted
+5
+division attempted
+-1
+LazyLock(<uninit>)
+LazyLock(<uninit>)
+config loaded successfully
+read_config attempted
+user: "user_1"
+invalid input: "id must be positive"
+result: 10
+value error caught
+open resource
+close resource
+something went wrong (no details): "division by zero"

@@ -1,0 +1,5 @@
+def addbig(a: bigint, b: bigint) -> bigint =
+    a + b
+struct Big = val: bigint
+def main() =
+    println(1)

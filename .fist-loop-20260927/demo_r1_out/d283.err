@@ -1,0 +1,31 @@
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:38:9:
+"zero_value"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:38:9:
+"zero_value"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:64:9:
+"too_large"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:67:9:
+"negative"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:95:9:
+"div_by_zero"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:124:9:
+"negative_code"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:126:9:
+"zero_code"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:150:23:
+attempt to divide by zero
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:172:9:
+"empty_path"
+
+thread 'main' (14976) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-error-control.rs:198:9:
+"no_ops"

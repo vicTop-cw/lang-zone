@@ -1,0 +1,22 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running tests\cy_codegen_gate.rs (target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe)
+
+running 4 tests
+test cy_l1_corpus_and_allowlist_invariants ... ok
+test cy_l1_transpile_all_corpus ... ok
+test cy_l2_cythonize_all_corpus has been running for over 60 seconds
+test cy_l3_run_all_corpus has been running for over 60 seconds
+test cy_l2_cythonize_all_corpus ... ok
+test cy_l3_run_all_corpus ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 241.43s
+
+     Running tests\demo_codegen_compile.rs (target\debug\deps\demo_codegen_compile-d2f4bd2577ecc517.exe)
+
+running 2 tests
+test magic_demos_generated_rust_compiles ... ok
+test all_demos_generated_rust_compiles has been running for over 60 seconds
+test all_demos_generated_rust_compiles ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 122.25s
+

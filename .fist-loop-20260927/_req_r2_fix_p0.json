@@ -1,0 +1,3 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","description":"[lzc-loop:修复:R2] 闭环 BUG-16（非 IR 域）：剥离 UTF-8 BOM，使带 BOM 的 .lz 可正常编译；配回归闸门；其余 OPEN 单落 src/ir 者标记避让待人工裁定","created_by":"human_steward","namespace":"lzc-loop-20260927","now":"2026-09-29T12:05:00+08:00"}}
+]

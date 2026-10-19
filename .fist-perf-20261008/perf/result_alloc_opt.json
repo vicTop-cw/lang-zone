@@ -1,0 +1,35 @@
+{
+  "label": "alloc_opt",
+  "rounds": 5,
+  "extra_args": "",
+  "lz": {
+    "lzc_ms": 31.64,
+    "rustc_ms": 416.16,
+    "run_ms": 492.48,
+    "peak_kb": 7692.0,
+    "stdout": [
+      "283146"
+    ],
+    "codegen_metrics": {
+      "gen_lines": 53,
+      "anchor_lines": 29,
+      "let_temps": 4,
+      "clone_calls": 0,
+      "to_string_calls": 0,
+      "vec_new": 0,
+      "with_capacity": 1,
+      "rc_arc_box": 0,
+      "diff_changed_lines": 45,
+      "diff_ratio": 1.5517
+    }
+  },
+  "anchor_rust": {
+    "rustc_ms": 432.7,
+    "run_ms": 690.49,
+    "peak_kb": 7684.0,
+    "stdout": [
+      "283146"
+    ]
+  },
+  "stdout_match": true
+}

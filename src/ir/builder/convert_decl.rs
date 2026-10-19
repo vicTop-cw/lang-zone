@@ -259,6 +259,16 @@ pub(crate) fn ir_block_has_yield(block: &Block) -> bool {
             return true;
         }
         match stmt {
+            // BUG-292：`Stmt::ExprStmt` 承载 if/match/try 表达式（AST 的 if/match/try
+            // 在语句位置是 AstStmt::Expr，convert_stmt 降为 Stmt::ExprStmt 包裹
+            // ExprKind::IfExpr/Match/TryCatch），原 ir_block_has_yield 未下钻 →
+            // `if true: yield 1; return` 中 return 未重写为 raise → codegen 生成
+            // panic!("generator return")（TEMP/probe/sweep6/gen_nested_if_ret.lz）。
+            Stmt::ExprStmt { expr } => {
+                if ir_expr_has_yield(expr) {
+                    return true;
+                }
+            }
             Stmt::If {
                 then_branch,
                 else_branch,
@@ -316,8 +326,32 @@ pub(crate) fn ir_block_has_yield(block: &Block) -> bool {
     false
 }
 
+/// BUG-292：IR 表达式内是否包含 yield（递归 if/match/try/block 分支体）。
+/// ir_block_has_yield 的表达式侧搭档：`Stmt::ExprStmt` 包裹的 if/match/try
+/// 需经此函数下钻，否则 `if true: yield 1; return` 中 return 未重写为 raise。
+fn ir_expr_has_yield(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::IfExpr { then, els, .. } => {
+            ir_expr_has_yield(then) || ir_expr_has_yield(els)
+        }
+        ExprKind::BlockExpr { block } => ir_block_has_yield(block),
+        _ => false,
+    }
+}
+
+/// 递归重写表达式内的 return → raise（BUG-292：if 表达式分支体内 return）。
+fn rewrite_expr_returns(expr: &mut Expr) {
+    match &mut expr.kind {
+        ExprKind::IfExpr { then, els, .. } => {
+            rewrite_expr_returns(then);
+            rewrite_expr_returns(els);
+        }
+        ExprKind::BlockExpr { block } => rewrite_iterator_returns(block),
+        _ => {}
+    }
+}
+
 /// 将 iterator（生成器）函数体内的带值 return 重写为 raise（等价终止并抛出）。
-/// 递归遍历嵌套块（if/for/while/match/try 等），codegen 会把 Stmt::Raise 生成 panic!。
 pub(crate) fn rewrite_iterator_returns(block: &mut Block) {
     for stmt in &mut block.stmts {
         match stmt {
@@ -334,6 +368,14 @@ pub(crate) fn rewrite_iterator_returns(block: &mut Block) {
                 *stmt = Stmt::Raise {
                     value: Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown()),
                 };
+            }
+            // BUG-292：`Stmt::ExprStmt` 承载 if 表达式（AST 的 if 语句位置是
+            // AstStmt::Expr，convert_stmt 降为 Stmt::ExprStmt 包裹 ExprKind::IfExpr），
+            // 原 rewrite_iterator_returns 未下钻 → if 分支体内 `return` 未重写为
+            // raise → codegen 生成 panic!("generator return")
+            // （TEMP/probe/sweep6/gen_nested_if_ret.lz）。
+            Stmt::ExprStmt { expr } => {
+                rewrite_expr_returns(expr);
             }
             Stmt::If {
                 then_branch,

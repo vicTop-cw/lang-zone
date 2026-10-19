@@ -1,0 +1,8 @@
+def main() = {
+    let n: int = 42
+    print(n.to_string())
+    let s: String = "hello"
+    print(s.to_string())
+    let b: bool = true
+    print(b.to_string())
+}

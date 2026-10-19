@@ -1,0 +1,911 @@
+src/ir/builder/convert_expr.rs-73-                },
+src/ir/builder/convert_expr.rs-74-                Err(e) => {
+src/ir/builder/convert_expr.rs-75-                    ctx.errors
+src/ir/builder/convert_expr.rs-76-                        .borrow_mut()
+src/ir/builder/convert_expr.rs-77-                        .push(format!("comptime 求值失败: {}", e));
+src/ir/builder/convert_expr.rs-78-                    ExprKind::Paren(Box::new(convert_expr(inner, ctx)))
+src/ir/builder/convert_expr.rs-79-                }
+src/ir/builder/convert_expr.rs-80-            }
+src/ir/builder/convert_expr.rs-81-        }
+src/ir/builder/convert_expr.rs-82-
+src/ir/builder/convert_expr.rs:83:        AstExpr::Call {
+src/ir/builder/convert_expr.rs-84-            func,
+src/ir/builder/convert_expr.rs-85-            args,
+src/ir/builder/convert_expr.rs-86-            type_args,
+src/ir/builder/convert_expr.rs-87-        } => {
+src/ir/builder/convert_expr.rs-88-            // M3：调用点特化状态（默认不特化；命中 comptime 全已知后改写调用）
+src/ir/builder/convert_expr.rs-89-            let mut specialized_callee: Option<String> = None;
+src/ir/builder/convert_expr.rs-90-            let mut comptime_arg_positions: Vec<usize> = Vec::new();
+src/ir/builder/convert_expr.rs-91-            // ── M2：comptime 形参的调用点编译期已知性校验 ──
+src/ir/builder/convert_expr.rs-92-            // 被调函数含 `comptime` 形参时，对应实参须为编译期已知值
+src/ir/builder/convert_expr.rs-93-            // （字面量 / const / comptime 结果）；否则记编译错误（指向调用点）。
+--
+src/ir/builder/convert_expr.rs-258-            }
+src/ir/builder/convert_expr.rs-259-            // SafeNav 后接方法调用：config?.get("key") →
+src/ir/builder/convert_expr.rs-260-            // config.map(|__sn| __sn.get("key").copied())（field 与 args 合并进闭包体，
+src/ir/builder/convert_expr.rs-261-            // 否则生成 config.map(|__sn| __sn.get)("key")，E0615；
+src/ir/builder/convert_expr.rs-262-            // get 返回 Option<&V> 需 .copied() 转 Option<V>，否则 ?? 30 unwrap_or 类型不匹配）
+src/ir/builder/convert_expr.rs-263-            if let AstExpr::SafeNav { receiver, field } = func.as_ref() {
+src/ir/builder/convert_expr.rs-264-                let recv = convert_expr(receiver, ctx);
+src/ir/builder/convert_expr.rs-265-                let param = "__sn".to_string();
+src/ir/builder/convert_expr.rs-266-                let call_args: Vec<Expr> = args.iter().map(|a| convert_expr(a, ctx)).collect();
+src/ir/builder/convert_expr.rs-267-                let get_call = Expr::new(
+src/ir/builder/convert_expr.rs:268:                    ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-269-                        receiver: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-270-                            ExprKind::Var(param.clone()),
+src/ir/builder/convert_expr.rs-271-                            IrType::Any,
+src/ir/builder/convert_expr.rs-272-                            Span::unknown(),
+src/ir/builder/convert_expr.rs-273-                        )),
+src/ir/builder/convert_expr.rs-274-                        method: field.clone(),
+src/ir/builder/convert_expr.rs-275-                        args: call_args,
+src/ir/builder/convert_expr.rs-276-                    },
+src/ir/builder/convert_expr.rs-277-                    IrType::Any,
+src/ir/builder/convert_expr.rs-278-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-279-                );
+src/ir/builder/convert_expr.rs-280-                // get/方法调用结果若是 Option<&V>（如 HashMap::get），需 .copied()；
+src/ir/builder/convert_expr.rs-281-                // 对一般方法（如 len() 返回 i64）不附加
+src/ir/builder/convert_expr.rs-282-                let body = if field == "get" {
+src/ir/builder/convert_expr.rs-283-                    Expr::new(
+src/ir/builder/convert_expr.rs:284:                        ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-285-                            receiver: Box::new(get_call),
+src/ir/builder/convert_expr.rs-286-                            method: "copied".into(),
+src/ir/builder/convert_expr.rs-287-                            args: vec![],
+src/ir/builder/convert_expr.rs-288-                        },
+src/ir/builder/convert_expr.rs-289-                        IrType::Any,
+src/ir/builder/convert_expr.rs-290-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-291-                    )
+src/ir/builder/convert_expr.rs-292-                } else {
+src/ir/builder/convert_expr.rs-293-                    get_call
+src/ir/builder/convert_expr.rs-294-                };
+--
+src/ir/builder/convert_expr.rs-306-                            mods: IrMods::default(),
+src/ir/builder/convert_expr.rs-307-                        }],
+src/ir/builder/convert_expr.rs-308-                        body: Box::new(body),
+src/ir/builder/convert_expr.rs-309-                        is_move: true,
+src/ir/builder/convert_expr.rs-310-                        ret_ty: None,
+src/ir/builder/convert_expr.rs-311-                    },
+src/ir/builder/convert_expr.rs-312-                    IrType::Any,
+src/ir/builder/convert_expr.rs-313-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-314-                );
+src/ir/builder/convert_expr.rs-315-                return Expr::new(
+src/ir/builder/convert_expr.rs:316:                    ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-317-                        receiver: Box::new(recv),
+src/ir/builder/convert_expr.rs-318-                        // get 返回 Option → and_then 扁平化（map 会得 Option<Option<..>>，
+src/ir/builder/convert_expr.rs-319-                        // ?? 30 unwrap_or 类型不匹配 E0308）
+src/ir/builder/convert_expr.rs-320-                        method: "and_then".into(),
+src/ir/builder/convert_expr.rs-321-                        args: vec![lambda],
+src/ir/builder/convert_expr.rs-322-                    },
+src/ir/builder/convert_expr.rs-323-                    IrType::Any,
+src/ir/builder/convert_expr.rs-324-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-325-                );
+src/ir/builder/convert_expr.rs-326-            }
+--
+src/ir/builder/convert_expr.rs-352-                            ExprKind::Var(param_name),
+src/ir/builder/convert_expr.rs-353-                            IrType::Any,
+src/ir/builder/convert_expr.rs-354-                            Span::unknown(),
+src/ir/builder/convert_expr.rs-355-                        ));
+src/ir/builder/convert_expr.rs-356-                    } else {
+src/ir/builder/convert_expr.rs-357-                        filled_args.push(convert_expr(a, ctx));
+src/ir/builder/convert_expr.rs-358-                    }
+src/ir/builder/convert_expr.rs-359-                }
+src/ir/builder/convert_expr.rs-360-                let callee = convert_expr(func, ctx);
+src/ir/builder/convert_expr.rs-361-                let call = Expr::new(
+src/ir/builder/convert_expr.rs:362:                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-363-                        type_args: vec![],
+src/ir/builder/convert_expr.rs-364-                        callee: Box::new(callee),
+src/ir/builder/convert_expr.rs-365-                        args: filled_args,
+src/ir/builder/convert_expr.rs-366-                    },
+src/ir/builder/convert_expr.rs-367-                    IrType::Any,
+src/ir/builder/convert_expr.rs-368-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-369-                );
+src/ir/builder/convert_expr.rs-370-                return Expr::new(
+src/ir/builder/convert_expr.rs-371-                    ExprKind::Lambda {
+src/ir/builder/convert_expr.rs-372-                        params: lambda_params,
+--
+src/ir/builder/convert_expr.rs-465-                if !ctx.fn_returns.contains_key(fname)
+src/ir/builder/convert_expr.rs-466-                    && !ctx.is_builtin_function(fname)
+src/ir/builder/convert_expr.rs-467-                    && !ctx.is_struct(fname)
+src/ir/builder/convert_expr.rs-468-                {
+src/ir/builder/convert_expr.rs-469-                    // 变量可能是一个 struct 实例 → 使用 __call__
+src/ir/builder/convert_expr.rs-470-                    let var_ty = ctx.lookup_var(fname);
+src/ir/builder/convert_expr.rs-471-                    if ctx.is_struct_type(&var_ty) {
+src/ir/builder/convert_expr.rs-472-                        let recv = convert_expr(actual_func, ctx);
+src/ir/builder/convert_expr.rs-473-                        let ret_ty = recv.ty.clone();
+src/ir/builder/convert_expr.rs-474-                        return Expr::new(
+src/ir/builder/convert_expr.rs:475:                            ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-476-                                receiver: Box::new(recv),
+src/ir/builder/convert_expr.rs-477-                                method: "__call__".to_string(),
+src/ir/builder/convert_expr.rs-478-                                args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
+src/ir/builder/convert_expr.rs-479-                            },
+src/ir/builder/convert_expr.rs-480-                            ret_ty,
+src/ir/builder/convert_expr.rs-481-                            Span::unknown(),
+src/ir/builder/convert_expr.rs-482-                        );
+src/ir/builder/convert_expr.rs-483-                    }
+src/ir/builder/convert_expr.rs-484-                }
+src/ir/builder/convert_expr.rs-485-            }
+--
+src/ir/builder/convert_expr.rs-608-                                    if let IrType::Named { path, .. } = pt {
+src/ir/builder/convert_expr.rs-609-                                        let has_from = ctx
+src/ir/builder/convert_expr.rs-610-                                            .struct_methods
+src/ir/builder/convert_expr.rs-611-                                            .get(path)
+src/ir/builder/convert_expr.rs-612-                                            .map(|ms| ms.contains("__from__"))
+src/ir/builder/convert_expr.rs-613-                                            .unwrap_or(false);
+src/ir/builder/convert_expr.rs-614-                                        let val_same = conv.ty == *pt
+src/ir/builder/convert_expr.rs-615-                                            || matches!(conv.ty, IrType::Any | IrType::Generic(_));
+src/ir/builder/convert_expr.rs-616-                                        if has_from && !val_same {
+src/ir/builder/convert_expr.rs-617-                                            return Expr::new(
+src/ir/builder/convert_expr.rs:618:                                                ExprKind::Call {
+src/ir/builder/convert_expr.rs-619-                                                    type_args: vec![],
+src/ir/builder/convert_expr.rs-620-                                                    callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-621-                                                        ExprKind::Var(format!(
+src/ir/builder/convert_expr.rs-622-                                                            "{}::__from__",
+src/ir/builder/convert_expr.rs-623-                                                            path
+src/ir/builder/convert_expr.rs-624-                                                        )),
+src/ir/builder/convert_expr.rs-625-                                                        IrType::Any,
+src/ir/builder/convert_expr.rs-626-                                                        Span::unknown(),
+src/ir/builder/convert_expr.rs-627-                                                    )),
+src/ir/builder/convert_expr.rs-628-                                                    args: vec![conv],
+--
+src/ir/builder/convert_expr.rs-647-                    let filtered: Vec<Expr> = args
+src/ir/builder/convert_expr.rs-648-                        .iter()
+src/ir/builder/convert_expr.rs-649-                        .enumerate()
+src/ir/builder/convert_expr.rs-650-                        .filter(|(i, _)| !comptime_arg_positions.contains(i))
+src/ir/builder/convert_expr.rs-651-                        .map(|(_, a)| a.clone())
+src/ir/builder/convert_expr.rs-652-                        .collect();
+src/ir/builder/convert_expr.rs-653-                    (Box::new(callee_expr), filtered)
+src/ir/builder/convert_expr.rs-654-                } else {
+src/ir/builder/convert_expr.rs-655-                    (Box::new(convert_expr(actual_func, ctx)), args)
+src/ir/builder/convert_expr.rs-656-                };
+src/ir/builder/convert_expr.rs:657:            ExprKind::Call {
+src/ir/builder/convert_expr.rs-658-                type_args: ir_type_args,
+src/ir/builder/convert_expr.rs-659-                callee: final_callee,
+src/ir/builder/convert_expr.rs-660-                args: final_args,
+src/ir/builder/convert_expr.rs-661-            }
+src/ir/builder/convert_expr.rs-662-        }
+src/ir/builder/convert_expr.rs-663-
+src/ir/builder/convert_expr.rs:664:        AstExpr::MethodCall {
+src/ir/builder/convert_expr.rs-665-            receiver,
+src/ir/builder/convert_expr.rs-666-            method,
+src/ir/builder/convert_expr.rs-667-            args,
+src/ir/builder/convert_expr.rs:668:        } => ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-669-            receiver: Box::new(convert_expr(receiver, ctx)),
+src/ir/builder/convert_expr.rs-670-            method: method.clone(),
+src/ir/builder/convert_expr.rs-671-            args: args.iter().map(|a| convert_expr(a, ctx)).collect(),
+src/ir/builder/convert_expr.rs-672-        },
+src/ir/builder/convert_expr.rs-673-
+src/ir/builder/convert_expr.rs-674-        AstExpr::FieldAccess { receiver, field } => ExprKind::FieldAccess {
+src/ir/builder/convert_expr.rs-675-            base: Box::new(convert_expr(receiver, ctx)),
+src/ir/builder/convert_expr.rs-676-            field: field.clone(),
+src/ir/builder/convert_expr.rs-677-        },
+src/ir/builder/convert_expr.rs-678-
+src/ir/builder/convert_expr.rs-679-        AstExpr::Index { receiver, index } => {
+src/ir/builder/convert_expr.rs-680-            // `services.validate_port[(r,)]`：模块命名空间 + 元组实参 → checker 块调用
+src/ir/builder/convert_expr.rs-681-            // （services.X 在 codegen 层降级为 X，此处转为函数调用而非索引）
+src/ir/builder/convert_expr.rs-682-            if let AstExpr::FieldAccess { receiver: _, field } = receiver.as_ref() {
+src/ir/builder/convert_expr.rs-683-                if let AstExpr::TupleLit(_) = index.as_ref() {
+src/ir/builder/convert_expr.rs-684-                    return Expr::new(
+src/ir/builder/convert_expr.rs:685:                        ExprKind::Call {
+src/ir/builder/convert_expr.rs-686-                            type_args: vec![],
+src/ir/builder/convert_expr.rs-687-                            callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-688-                                ExprKind::Var(field.clone()),
+src/ir/builder/convert_expr.rs-689-                                IrType::Any,
+src/ir/builder/convert_expr.rs-690-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-691-                            )),
+src/ir/builder/convert_expr.rs-692-                            args: vec![convert_expr(index, ctx)],
+src/ir/builder/convert_expr.rs-693-                        },
+src/ir/builder/convert_expr.rs-694-                        IrType::Any,
+src/ir/builder/convert_expr.rs-695-                        Span::unknown(),
+--
+src/ir/builder/convert_expr.rs-726-                    let left_is_option = matches!(&left_ty, IrType::Option(_))
+src/ir/builder/convert_expr.rs-727-                        || matches!(&left_ty, IrType::Any)
+src/ir/builder/convert_expr.rs-728-                        || matches!(&left_ty, IrType::Named { path, .. } if path == "Option");
+src/ir/builder/convert_expr.rs-729-                    if left_is_option && (type_name == "Some" || type_name == "None") {
+src/ir/builder/convert_expr.rs-730-                        let method = if type_name == "Some" {
+src/ir/builder/convert_expr.rs-731-                            "is_some"
+src/ir/builder/convert_expr.rs-732-                        } else {
+src/ir/builder/convert_expr.rs-733-                            "is_none"
+src/ir/builder/convert_expr.rs-734-                        };
+src/ir/builder/convert_expr.rs-735-                        return Expr::new(
+src/ir/builder/convert_expr.rs:736:                            ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-737-                                receiver: Box::new(convert_expr(left, ctx)),
+src/ir/builder/convert_expr.rs-738-                                method: method.to_string(),
+src/ir/builder/convert_expr.rs-739-                                args: vec![],
+src/ir/builder/convert_expr.rs-740-                            },
+src/ir/builder/convert_expr.rs-741-                            IrType::Bool,
+src/ir/builder/convert_expr.rs-742-                            Span::unknown(),
+src/ir/builder/convert_expr.rs-743-                        );
+src/ir/builder/convert_expr.rs-744-                    }
+src/ir/builder/convert_expr.rs-745-                    let expected = name_to_ir_type(type_name);
+src/ir/builder/convert_expr.rs-746-                    let result = ir_types_compatible(&left_ty, &expected);
+--
+src/ir/builder/convert_expr.rs-783-                            | "__le__"
+src/ir/builder/convert_expr.rs-784-                            | "__gt__"
+src/ir/builder/convert_expr.rs-785-                            | "__ge__"
+src/ir/builder/convert_expr.rs-786-                            | "__contains__"
+src/ir/builder/convert_expr.rs-787-                    ) {
+src/ir/builder/convert_expr.rs-788-                        IrType::Bool
+src/ir/builder/convert_expr.rs-789-                    } else {
+src/ir/builder/convert_expr.rs-790-                        infer_expr_type(left, ctx)
+src/ir/builder/convert_expr.rs-791-                    };
+src/ir/builder/convert_expr.rs-792-                    let expr = Expr::new(
+src/ir/builder/convert_expr.rs:793:                        ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-794-                            receiver: Box::new(recv),
+src/ir/builder/convert_expr.rs-795-                            method: magic.to_string(),
+src/ir/builder/convert_expr.rs-796-                            args: vec![convert_expr(right, ctx)],
+src/ir/builder/convert_expr.rs-797-                        },
+src/ir/builder/convert_expr.rs-798-                        ret_ty,
+src/ir/builder/convert_expr.rs-799-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-800-                    );
+src/ir/builder/convert_expr.rs-801-                    return expr;
+src/ir/builder/convert_expr.rs-802-                }
+src/ir/builder/convert_expr.rs-803-            }
+--
+src/ir/builder/convert_expr.rs-808-            // 支持单类型参数 ident < T > 和多类型参数 ident < T, U >
+src/ir/builder/convert_expr.rs-809-            if matches!(ir_op, BinOpKind::Gt) {
+src/ir/builder/convert_expr.rs-810-                if let AstExpr::Binary {
+src/ir/builder/convert_expr.rs-811-                    left: inner_left,
+src/ir/builder/convert_expr.rs-812-                    op: BinOp::Lt,
+src/ir/builder/convert_expr.rs-813-                    right: inner_right,
+src/ir/builder/convert_expr.rs-814-                } = left.as_ref()
+src/ir/builder/convert_expr.rs-815-                {
+src/ir/builder/convert_expr.rs-816-                    if let AstExpr::Ident(fname) = inner_left.as_ref() {
+src/ir/builder/convert_expr.rs-817-                        if let Some(type_names) = extract_type_names(inner_right) {
+src/ir/builder/convert_expr.rs:818:                            if let AstExpr::Call {
+src/ir/builder/convert_expr.rs-819-                                func: call_func,
+src/ir/builder/convert_expr.rs-820-                                args: call_args,
+src/ir/builder/convert_expr.rs-821-                                ..
+src/ir/builder/convert_expr.rs-822-                            } = right.as_ref()
+src/ir/builder/convert_expr.rs-823-                            {
+src/ir/builder/convert_expr.rs-824-                                if let AstExpr::Ident(call_fname) = call_func.as_ref() {
+src/ir/builder/convert_expr.rs-825-                                    if call_fname == fname {
+src/ir/builder/convert_expr.rs-826-                                        // 这是泛型调用: f < T, U > (args)
+src/ir/builder/convert_expr.rs-827-                                        let ir_callee = convert_expr(inner_left, ctx);
+src/ir/builder/convert_expr.rs-828-                                        let ir_args: Vec<Expr> = call_args
+src/ir/builder/convert_expr.rs-829-                                            .iter()
+src/ir/builder/convert_expr.rs-830-                                            .map(|a| convert_expr(a, ctx))
+src/ir/builder/convert_expr.rs-831-                                            .collect();
+src/ir/builder/convert_expr.rs-832-                                        let ir_type_args = map_type_args(&type_names);
+src/ir/builder/convert_expr.rs-833-                                        return Expr::new(
+src/ir/builder/convert_expr.rs:834:                                            ExprKind::Call {
+src/ir/builder/convert_expr.rs-835-                                                callee: Box::new(ir_callee),
+src/ir/builder/convert_expr.rs-836-                                                args: ir_args,
+src/ir/builder/convert_expr.rs-837-                                                type_args: ir_type_args,
+src/ir/builder/convert_expr.rs-838-                                            },
+src/ir/builder/convert_expr.rs-839-                                            IrType::Any,
+src/ir/builder/convert_expr.rs-840-                                            Span::unknown(),
+src/ir/builder/convert_expr.rs-841-                                        );
+src/ir/builder/convert_expr.rs-842-                                    }
+src/ir/builder/convert_expr.rs-843-                                }
+src/ir/builder/convert_expr.rs-844-                            }
+--
+src/ir/builder/convert_expr.rs-848-                                call_args = elems.clone();
+src/ir/builder/convert_expr.rs-849-                            } else {
+src/ir/builder/convert_expr.rs-850-                                call_args = vec![right.as_ref().clone()];
+src/ir/builder/convert_expr.rs-851-                            }
+src/ir/builder/convert_expr.rs-852-                            let ir_callee = convert_expr(inner_left, ctx);
+src/ir/builder/convert_expr.rs-853-                            let ir_args: Vec<Expr> =
+src/ir/builder/convert_expr.rs-854-                                call_args.iter().map(|a| convert_expr(a, ctx)).collect();
+src/ir/builder/convert_expr.rs-855-                            let ir_type_args = map_type_args(&type_names);
+src/ir/builder/convert_expr.rs-856-                            let ret_ty = ctx.lookup_fn_return(&fname);
+src/ir/builder/convert_expr.rs-857-                            return Expr::new(
+src/ir/builder/convert_expr.rs:858:                                ExprKind::Call {
+src/ir/builder/convert_expr.rs-859-                                    callee: Box::new(ir_callee),
+src/ir/builder/convert_expr.rs-860-                                    args: ir_args,
+src/ir/builder/convert_expr.rs-861-                                    type_args: ir_type_args,
+src/ir/builder/convert_expr.rs-862-                                },
+src/ir/builder/convert_expr.rs-863-                                ret_ty,
+src/ir/builder/convert_expr.rs-864-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-865-                            );
+src/ir/builder/convert_expr.rs-866-                        }
+src/ir/builder/convert_expr.rs-867-                    }
+src/ir/builder/convert_expr.rs-868-                }
+--
+src/ir/builder/convert_expr.rs-963-                                None
+src/ir/builder/convert_expr.rs-964-                            }
+src/ir/builder/convert_expr.rs-965-                        }
+src/ir/builder/convert_expr.rs-966-                        _ => None,
+src/ir/builder/convert_expr.rs-967-                    };
+src/ir/builder/convert_expr.rs-968-                    if let Some(magic) = magic {
+src/ir/builder/convert_expr.rs-969-                        if methods.map(|ms| ms.contains(magic)).unwrap_or(false) {
+src/ir/builder/convert_expr.rs-970-                            let recv = convert_expr(operand, ctx);
+src/ir/builder/convert_expr.rs-971-                            let ret_ty = op_ty;
+src/ir/builder/convert_expr.rs-972-                            return Expr::new(
+src/ir/builder/convert_expr.rs:973:                                ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-974-                                    receiver: Box::new(recv),
+src/ir/builder/convert_expr.rs-975-                                    method: magic.to_string(),
+src/ir/builder/convert_expr.rs-976-                                    args: vec![],
+src/ir/builder/convert_expr.rs-977-                                },
+src/ir/builder/convert_expr.rs-978-                                ret_ty,
+src/ir/builder/convert_expr.rs-979-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-980-                            );
+src/ir/builder/convert_expr.rs-981-                        }
+src/ir/builder/convert_expr.rs-982-                    }
+src/ir/builder/convert_expr.rs-983-                }
+--
+src/ir/builder/convert_expr.rs-1296-            // 左侧 __lpipe__：类型实现 __lpipe__ 时，数据 = recv.__lpipe__()（默认实现返回自身）
+src/ir/builder/convert_expr.rs-1297-            let data_ir = {
+src/ir/builder/convert_expr.rs-1298-                let recv_ty = infer_expr_type(receiver, ctx);
+src/ir/builder/convert_expr.rs-1299-                if let IrType::Named { path, .. } = &recv_ty {
+src/ir/builder/convert_expr.rs-1300-                    let has_lpipe = ctx
+src/ir/builder/convert_expr.rs-1301-                        .struct_methods
+src/ir/builder/convert_expr.rs-1302-                        .get(path)
+src/ir/builder/convert_expr.rs-1303-                        .map_or(false, |m| m.contains("__lpipe__"));
+src/ir/builder/convert_expr.rs-1304-                    if has_lpipe {
+src/ir/builder/convert_expr.rs-1305-                        Expr::new(
+src/ir/builder/convert_expr.rs:1306:                            ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1307-                                receiver: Box::new(recv_ir),
+src/ir/builder/convert_expr.rs-1308-                                method: "__lpipe__".into(),
+src/ir/builder/convert_expr.rs-1309-                                args: vec![],
+src/ir/builder/convert_expr.rs-1310-                            },
+src/ir/builder/convert_expr.rs-1311-                            recv_ty.clone(),
+src/ir/builder/convert_expr.rs-1312-                            Span::unknown(),
+src/ir/builder/convert_expr.rs-1313-                        )
+src/ir/builder/convert_expr.rs-1314-                    } else {
+src/ir/builder/convert_expr.rs-1315-                        recv_ir
+src/ir/builder/convert_expr.rs-1316-                    }
+--
+src/ir/builder/convert_expr.rs-1321-            // 右侧分类
+src/ir/builder/convert_expr.rs-1322-            match callee.as_ref() {
+src/ir/builder/convert_expr.rs-1323-                AstExpr::Ident(name) => {
+src/ir/builder/convert_expr.rs-1324-                    // 变量（实例）→ __rpipe__ 优先，其次 __call__（须单参函数，否则报错）
+src/ir/builder/convert_expr.rs-1325-                    let var_ty = ctx.lookup_var(name);
+src/ir/builder/convert_expr.rs-1326-                    if let IrType::Named { path, .. } = &var_ty {
+src/ir/builder/convert_expr.rs-1327-                        if let Some(methods) = ctx.struct_methods.get(path) {
+src/ir/builder/convert_expr.rs-1328-                            if methods.contains("__rpipe__") {
+src/ir/builder/convert_expr.rs-1329-                                // (right.__rpipe__(recv))(recv)
+src/ir/builder/convert_expr.rs-1330-                                return Expr::new(
+src/ir/builder/convert_expr.rs:1331:                                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-1332-                                        type_args: vec![],
+src/ir/builder/convert_expr.rs-1333-                                        callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs:1334:                                            ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1335-                                                receiver: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1336-                                                    ExprKind::Var(name.clone()),
+src/ir/builder/convert_expr.rs-1337-                                                    var_ty.clone(),
+src/ir/builder/convert_expr.rs-1338-                                                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1339-                                                )),
+src/ir/builder/convert_expr.rs-1340-                                                method: "__rpipe__".into(),
+src/ir/builder/convert_expr.rs-1341-                                                args: vec![data_ir.clone()],
+src/ir/builder/convert_expr.rs-1342-                                            },
+src/ir/builder/convert_expr.rs-1343-                                            IrType::Any,
+src/ir/builder/convert_expr.rs-1344-                                            Span::unknown(),
+--
+src/ir/builder/convert_expr.rs-1361-                                    ctx.report_error(format!(
+src/ir/builder/convert_expr.rs-1362-                                        "管道右值 `{}` 的 __call__ 不是单参函数（参数数 {}，期望 1）；\
+src/ir/builder/convert_expr.rs-1363-                                         实现 __rpipe__ 或改为单参 __call__",
+src/ir/builder/convert_expr.rs-1364-                                        name, arity
+src/ir/builder/convert_expr.rs-1365-                                    ));
+src/ir/builder/convert_expr.rs-1366-                                }
+src/ir/builder/convert_expr.rs-1367-                                // right.__call__(recv, ...args)（首参预填充）
+src/ir/builder/convert_expr.rs-1368-                                let mut call_args = vec![data_ir];
+src/ir/builder/convert_expr.rs-1369-                                call_args.extend(args_ir);
+src/ir/builder/convert_expr.rs-1370-                                return Expr::new(
+src/ir/builder/convert_expr.rs:1371:                                    ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1372-                                        receiver: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1373-                                            ExprKind::Var(name.clone()),
+src/ir/builder/convert_expr.rs-1374-                                            var_ty.clone(),
+src/ir/builder/convert_expr.rs-1375-                                            Span::unknown(),
+src/ir/builder/convert_expr.rs-1376-                                        )),
+src/ir/builder/convert_expr.rs-1377-                                        method: "__call__".into(),
+src/ir/builder/convert_expr.rs-1378-                                        args: call_args,
+src/ir/builder/convert_expr.rs-1379-                                    },
+src/ir/builder/convert_expr.rs-1380-                                    ty,
+src/ir/builder/convert_expr.rs-1381-                                    span,
+--
+src/ir/builder/convert_expr.rs-1436-                            } else {
+src/ir/builder/convert_expr.rs-1437-                                filled.push(convert_expr(a, ctx));
+src/ir/builder/convert_expr.rs-1438-                            }
+src/ir/builder/convert_expr.rs-1439-                        }
+src/ir/builder/convert_expr.rs-1440-                        if !data_used {
+src/ir/builder/convert_expr.rs-1441-                            filled.insert(0, data_ir);
+src/ir/builder/convert_expr.rs-1442-                        }
+src/ir/builder/convert_expr.rs-1443-                        filled
+src/ir/builder/convert_expr.rs-1444-                    } else if callee_ret_is_fn {
+src/ir/builder/convert_expr.rs-1445-                        // if_func(flag) 返回函数 → 先调 callee(args...)，再以 data 为参数调用
+src/ir/builder/convert_expr.rs:1446:                        let inner_call = ExprKind::Call {
+src/ir/builder/convert_expr.rs-1447-                            type_args: vec![],
+src/ir/builder/convert_expr.rs-1448-                            callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1449-                                ExprKind::Var(name.clone()),
+src/ir/builder/convert_expr.rs-1450-                                IrType::Any,
+src/ir/builder/convert_expr.rs-1451-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-1452-                            )),
+src/ir/builder/convert_expr.rs-1453-                            args: args_ir,
+src/ir/builder/convert_expr.rs-1454-                        };
+src/ir/builder/convert_expr.rs-1455-                        return Expr::new(
+src/ir/builder/convert_expr.rs:1456:                            ExprKind::Call {
+src/ir/builder/convert_expr.rs-1457-                                type_args: vec![],
+src/ir/builder/convert_expr.rs-1458-                                callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1459-                                    inner_call,
+src/ir/builder/convert_expr.rs-1460-                                    IrType::Any,
+src/ir/builder/convert_expr.rs-1461-                                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1462-                                )),
+src/ir/builder/convert_expr.rs-1463-                                args: vec![data_ir],
+src/ir/builder/convert_expr.rs-1464-                            },
+src/ir/builder/convert_expr.rs-1465-                            ty,
+src/ir/builder/convert_expr.rs-1466-                            span,
+src/ir/builder/convert_expr.rs-1467-                        );
+src/ir/builder/convert_expr.rs-1468-                    } else {
+src/ir/builder/convert_expr.rs-1469-                        let mut pre = vec![data_ir];
+src/ir/builder/convert_expr.rs-1470-                        pre.extend(args_ir);
+src/ir/builder/convert_expr.rs-1471-                        pre
+src/ir/builder/convert_expr.rs-1472-                    };
+src/ir/builder/convert_expr.rs:1473:                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-1474-                        type_args: vec![],
+src/ir/builder/convert_expr.rs-1475-                        callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1476-                            ExprKind::Var(name.clone()),
+src/ir/builder/convert_expr.rs-1477-                            IrType::Any,
+src/ir/builder/convert_expr.rs-1478-                            Span::unknown(),
+src/ir/builder/convert_expr.rs-1479-                        )),
+src/ir/builder/convert_expr.rs-1480-                        args: all_args,
+src/ir/builder/convert_expr.rs-1481-                    }
+src/ir/builder/convert_expr.rs-1482-                }
+src/ir/builder/convert_expr.rs-1483-                // 右侧是调用且含 `_` 洞（v |> f(_, 5)）：用左侧数据填充洞，而非盲目前置
+src/ir/builder/convert_expr.rs:1484:                AstExpr::Call {
+src/ir/builder/convert_expr.rs-1485-                    func,
+src/ir/builder/convert_expr.rs-1486-                    args: call_args,
+src/ir/builder/convert_expr.rs-1487-                    ..
+src/ir/builder/convert_expr.rs-1488-                } if call_args
+src/ir/builder/convert_expr.rs-1489-                    .iter()
+src/ir/builder/convert_expr.rs-1490-                    .any(|a| matches!(a, AstExpr::Ident(s) if s == "_")) =>
+src/ir/builder/convert_expr.rs-1491-                {
+src/ir/builder/convert_expr.rs-1492-                    let mut filled: Vec<Expr> = Vec::new();
+src/ir/builder/convert_expr.rs-1493-                    let mut data_used = false;
+src/ir/builder/convert_expr.rs-1494-                    for a in call_args.iter() {
+--
+src/ir/builder/convert_expr.rs-1496-                            filled.push(data_ir.clone());
+src/ir/builder/convert_expr.rs-1497-                            data_used = true;
+src/ir/builder/convert_expr.rs-1498-                        } else {
+src/ir/builder/convert_expr.rs-1499-                            filled.push(convert_expr(a, ctx));
+src/ir/builder/convert_expr.rs-1500-                        }
+src/ir/builder/convert_expr.rs-1501-                    }
+src/ir/builder/convert_expr.rs-1502-                    // 无洞（防御）→ 首参预填充
+src/ir/builder/convert_expr.rs-1503-                    if !data_used {
+src/ir/builder/convert_expr.rs-1504-                        filled.insert(0, data_ir);
+src/ir/builder/convert_expr.rs-1505-                    }
+src/ir/builder/convert_expr.rs:1506:                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-1507-                        type_args: vec![],
+src/ir/builder/convert_expr.rs-1508-                        callee: Box::new(convert_expr(func, ctx)),
+src/ir/builder/convert_expr.rs-1509-                        args: filled,
+src/ir/builder/convert_expr.rs-1510-                    }
+src/ir/builder/convert_expr.rs-1511-                }
+src/ir/builder/convert_expr.rs-1512-                // 闭包/方法/复杂表达式 → 保留 Pipe 节点，codegen 兜底展开
+src/ir/builder/convert_expr.rs-1513-                // 闭包作为管道右侧（val |> (|x| => ...)）：参数类型从 receiver 推断，
+src/ir/builder/convert_expr.rs-1514-                // 否则生成无类型闭包导致 E0282（combo-pipe-lambda.lz pipe_match）
+src/ir/builder/convert_expr.rs-1515-                AstExpr::Closure { params, body, .. } => {
+src/ir/builder/convert_expr.rs-1516-                    let recv_ty = infer_expr_type(receiver, ctx);
+--
+src/ir/builder/convert_expr.rs-1554-                            },
+src/ir/builder/convert_expr.rs-1555-                            is_mut: false,
+src/ir/builder/convert_expr.rs-1556-                            is_ref: false,
+src/ir/builder/convert_expr.rs-1557-                            is_owned: false,
+src/ir/builder/convert_expr.rs-1558-                            default: None,
+src/ir/builder/convert_expr.rs-1559-                            variadic: false,
+src/ir/builder/convert_expr.rs-1560-                            comptime: false,
+src/ir/builder/convert_expr.rs-1561-                            mods: IrMods::default(),
+src/ir/builder/convert_expr.rs-1562-                        })
+src/ir/builder/convert_expr.rs-1563-                        .collect();
+src/ir/builder/convert_expr.rs:1564:                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-1565-                        type_args: vec![],
+src/ir/builder/convert_expr.rs-1566-                        callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1567-                            ExprKind::Lambda {
+src/ir/builder/convert_expr.rs-1568-                                params: lambda_params,
+src/ir/builder/convert_expr.rs-1569-                                body: Box::new(convert_expr(body, &closure_ctx)),
+src/ir/builder/convert_expr.rs-1570-                                is_move: true,
+src/ir/builder/convert_expr.rs-1571-                                ret_ty: None,
+src/ir/builder/convert_expr.rs-1572-                            },
+src/ir/builder/convert_expr.rs-1573-                            IrType::Any,
+src/ir/builder/convert_expr.rs-1574-                            Span::unknown(),
+--
+src/ir/builder/convert_expr.rs-1617-                ) || matches!(
+src/ir/builder/convert_expr.rs-1618-                    &recv.ty,
+src/ir/builder/convert_expr.rs-1619-                    IrType::Option(inner)
+src/ir/builder/convert_expr.rs-1620-                        if matches!(inner.as_ref(), IrType::Named { path, .. } if path == "Dict" || path == "HashMap")
+src/ir/builder/convert_expr.rs-1621-                );
+src/ir/builder/convert_expr.rs-1622-                let access_expr = if recv_is_dict {
+src/ir/builder/convert_expr.rs-1623-                    // Dict 键访问：__sn.get("field") 返回 Option<&V>，
+src/ir/builder/convert_expr.rs-1624-                    // 链式 SafeNav 需 and_then 扁平化（map 会得 Option<Option<..>>）
+src/ir/builder/convert_expr.rs-1625-                    // 且 get 结果需 .copied() 转 Option<V>（否则 unwrap_or(30) 类型不匹配）
+src/ir/builder/convert_expr.rs-1626-                    let get_call = Expr::new(
+src/ir/builder/convert_expr.rs:1627:                        ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1628-                            receiver: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1629-                                ExprKind::Var(param.clone()),
+src/ir/builder/convert_expr.rs-1630-                                IrType::Any,
+src/ir/builder/convert_expr.rs-1631-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-1632-                            )),
+src/ir/builder/convert_expr.rs-1633-                            method: "get".into(),
+src/ir/builder/convert_expr.rs-1634-                            args: vec![Expr::new(
+src/ir/builder/convert_expr.rs-1635-                                ExprKind::Lit(LitKind::Str(field.clone())),
+src/ir/builder/convert_expr.rs-1636-                                IrType::Str,
+src/ir/builder/convert_expr.rs-1637-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-1638-                            )],
+src/ir/builder/convert_expr.rs-1639-                        },
+src/ir/builder/convert_expr.rs-1640-                        IrType::Any,
+src/ir/builder/convert_expr.rs-1641-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-1642-                    );
+src/ir/builder/convert_expr.rs-1643-                    Expr::new(
+src/ir/builder/convert_expr.rs:1644:                        ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1645-                            receiver: Box::new(get_call),
+src/ir/builder/convert_expr.rs-1646-                            method: "copied".into(),
+src/ir/builder/convert_expr.rs-1647-                            args: vec![],
+src/ir/builder/convert_expr.rs-1648-                        },
+src/ir/builder/convert_expr.rs-1649-                        IrType::Any,
+src/ir/builder/convert_expr.rs-1650-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-1651-                    )
+src/ir/builder/convert_expr.rs-1652-                } else {
+src/ir/builder/convert_expr.rs-1653-                    Expr::new(
+src/ir/builder/convert_expr.rs-1654-                        ExprKind::FieldAccess {
+--
+src/ir/builder/convert_expr.rs-1661-                        },
+src/ir/builder/convert_expr.rs-1662-                        IrType::Any,
+src/ir/builder/convert_expr.rs-1663-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-1664-                    )
+src/ir/builder/convert_expr.rs-1665-                };
+src/ir/builder/convert_expr.rs-1666-                // BUG-SG-003：字段本身可空（`db: DbConfig?`）时 map 会得到
+src/ir/builder/convert_expr.rs-1667-                // Option<Option<T>>，必须 and_then 扁平化；字段类型无法判定
+src/ir/builder/convert_expr.rs-1668-                // 时保守用 map（保持既有行为）。Dict 键访问同理（get 返 Option）。
+src/ir/builder/convert_expr.rs-1669-                let field_is_option =
+src/ir/builder/convert_expr.rs-1670-                    safe_nav_field_ty(&recv, field, ctx).map_or(false, |t| is_option_ty_ir(&t));
+src/ir/builder/convert_expr.rs:1671:                ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1672-                    receiver: Box::new(recv),
+src/ir/builder/convert_expr.rs-1673-                    method: if recv_is_dict || field_is_option {
+src/ir/builder/convert_expr.rs-1674-                        "and_then".into()
+src/ir/builder/convert_expr.rs-1675-                    } else {
+src/ir/builder/convert_expr.rs-1676-                        "map".into()
+src/ir/builder/convert_expr.rs-1677-                    },
+src/ir/builder/convert_expr.rs-1678-                    args: vec![Expr::new(
+src/ir/builder/convert_expr.rs-1679-                        ExprKind::Lambda {
+src/ir/builder/convert_expr.rs-1680-                            params: vec![Param {
+src/ir/builder/convert_expr.rs-1681-                                name: param.clone(),
+--
+src/ir/builder/convert_expr.rs-1704-            let inner_ty = infer_expr_type(inner, ctx);
+src/ir/builder/convert_expr.rs-1705-            let result_like = matches!(&inner_ty, IrType::Result { .. } | IrType::Option(_))
+src/ir/builder/convert_expr.rs-1706-                || matches!(&inner_ty,
+src/ir/builder/convert_expr.rs-1707-                    IrType::Named { path, .. } if path == "Result" || path == "Option"
+src/ir/builder/convert_expr.rs-1708-                );
+src/ir/builder/convert_expr.rs-1709-            // 自定义传播类型（实现 __is_ok__/__unwrap__/__err__ 的 struct）：
+src/ir/builder/convert_expr.rs-1710-            // 与 Result/Option 一样走解包路径（spread_protocol.lz 的 HttpResult）
+src/ir/builder/convert_expr.rs-1711-            let custom_propagating = matches!(&inner_ty, IrType::Named { path, .. }
+src/ir/builder/convert_expr.rs-1712-                if ctx.struct_methods.get(path).map_or(false, |ms| ms.contains("__is_ok__")));
+src/ir/builder/convert_expr.rs-1713-            if result_like || custom_propagating {
+src/ir/builder/convert_expr.rs:1714:                ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1715-                    receiver: Box::new(convert_expr(inner, ctx)),
+src/ir/builder/convert_expr.rs-1716-                    method: "try_into".into(),
+src/ir/builder/convert_expr.rs-1717-                    args: vec![],
+src/ir/builder/convert_expr.rs-1718-                }
+src/ir/builder/convert_expr.rs-1719-            } else {
+src/ir/builder/convert_expr.rs-1720-                // Non-Result type: just pass through (raises-type propagation)
+src/ir/builder/convert_expr.rs-1721-                convert_expr(inner, ctx).kind
+src/ir/builder/convert_expr.rs-1722-            }
+src/ir/builder/convert_expr.rs-1723-        }
+src/ir/builder/convert_expr.rs-1724-
+src/ir/builder/convert_expr.rs-1725-        AstExpr::NullCoalesce { left, right } => {
+src/ir/builder/convert_expr.rs-1726-            // a ?? b → null_coalesce 特殊方法调用（codegen 层按类型展开）
+src/ir/builder/convert_expr.rs-1727-            let l = convert_expr(left, ctx);
+src/ir/builder/convert_expr.rs-1728-            let r = convert_expr(right, ctx);
+src/ir/builder/convert_expr.rs:1729:            ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-1730-                receiver: Box::new(l),
+src/ir/builder/convert_expr.rs-1731-                method: "__null_coalesce".into(),
+src/ir/builder/convert_expr.rs-1732-                args: vec![r],
+src/ir/builder/convert_expr.rs-1733-            }
+src/ir/builder/convert_expr.rs-1734-        }
+src/ir/builder/convert_expr.rs-1735-
+src/ir/builder/convert_expr.rs-1736-        AstExpr::ListLit(items) => {
+src/ir/builder/convert_expr.rs-1737-            ExprKind::ListLit(items.iter().map(|i| convert_expr(i, ctx)).collect())
+src/ir/builder/convert_expr.rs-1738-        }
+src/ir/builder/convert_expr.rs-1739-
+--
+src/ir/builder/convert_expr.rs-1743-            for (i, (k, v)) in entries.iter().enumerate() {
+src/ir/builder/convert_expr.rs-1744-                fields.push((format!("_k{}", i), convert_expr(k, ctx)));
+src/ir/builder/convert_expr.rs-1745-                fields.push((format!("_v{}", i), convert_expr(v, ctx)));
+src/ir/builder/convert_expr.rs-1746-            }
+src/ir/builder/convert_expr.rs-1747-            ExprKind::StructCtor {
+src/ir/builder/convert_expr.rs-1748-                name: "Dict".into(),
+src/ir/builder/convert_expr.rs-1749-                fields,
+src/ir/builder/convert_expr.rs-1750-            }
+src/ir/builder/convert_expr.rs-1751-        }
+src/ir/builder/convert_expr.rs-1752-
+src/ir/builder/convert_expr.rs:1753:        AstExpr::SetLit(items) => ExprKind::Call {
+src/ir/builder/convert_expr.rs-1754-            type_args: vec![],
+src/ir/builder/convert_expr.rs-1755-            callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1756-                ExprKind::Var("set!".into()),
+src/ir/builder/convert_expr.rs-1757-                IrType::Any,
+src/ir/builder/convert_expr.rs-1758-                Span::unknown(),
+src/ir/builder/convert_expr.rs-1759-            )),
+src/ir/builder/convert_expr.rs-1760-            args: items.iter().map(|i| convert_expr(i, ctx)).collect(),
+src/ir/builder/convert_expr.rs-1761-        },
+src/ir/builder/convert_expr.rs-1762-
+src/ir/builder/convert_expr.rs-1763-        AstExpr::TupleLit(elems) => {
+--
+src/ir/builder/convert_expr.rs-1824-                            mods: IrMods::default(),
+src/ir/builder/convert_expr.rs-1825-                        }],
+src/ir/builder/convert_expr.rs-1826-                        body: Box::new(convert_expr(c, ctx)),
+src/ir/builder/convert_expr.rs-1827-                        is_move: true,
+src/ir/builder/convert_expr.rs-1828-                        ret_ty: None,
+src/ir/builder/convert_expr.rs-1829-                    },
+src/ir/builder/convert_expr.rs-1830-                    IrType::Any,
+src/ir/builder/convert_expr.rs-1831-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1832-                ));
+src/ir/builder/convert_expr.rs-1833-            }
+src/ir/builder/convert_expr.rs:1834:            ExprKind::Call {
+src/ir/builder/convert_expr.rs-1835-                type_args: vec![],
+src/ir/builder/convert_expr.rs-1836-                callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1837-                    ExprKind::Var("comp!".into()),
+src/ir/builder/convert_expr.rs-1838-                    IrType::Any,
+src/ir/builder/convert_expr.rs-1839-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1840-                )),
+src/ir/builder/convert_expr.rs-1841-                args,
+src/ir/builder/convert_expr.rs-1842-            }
+src/ir/builder/convert_expr.rs-1843-        }
+src/ir/builder/convert_expr.rs-1844-
+--
+src/ir/builder/convert_expr.rs-1907-                            mods: IrMods::default(),
+src/ir/builder/convert_expr.rs-1908-                        }],
+src/ir/builder/convert_expr.rs-1909-                        body: Box::new(convert_expr(c, ctx)),
+src/ir/builder/convert_expr.rs-1910-                        is_move: true,
+src/ir/builder/convert_expr.rs-1911-                        ret_ty: None,
+src/ir/builder/convert_expr.rs-1912-                    },
+src/ir/builder/convert_expr.rs-1913-                    IrType::Any,
+src/ir/builder/convert_expr.rs-1914-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1915-                ));
+src/ir/builder/convert_expr.rs-1916-            }
+src/ir/builder/convert_expr.rs:1917:            ExprKind::Call {
+src/ir/builder/convert_expr.rs-1918-                type_args: vec![],
+src/ir/builder/convert_expr.rs-1919-                callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-1920-                    ExprKind::Var("dict_comp!".into()),
+src/ir/builder/convert_expr.rs-1921-                    IrType::Any,
+src/ir/builder/convert_expr.rs-1922-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1923-                )),
+src/ir/builder/convert_expr.rs-1924-                args,
+src/ir/builder/convert_expr.rs-1925-            }
+src/ir/builder/convert_expr.rs-1926-        }
+src/ir/builder/convert_expr.rs-1927-
+--
+src/ir/builder/convert_expr.rs-1987-                            mods: IrMods::default(),
+src/ir/builder/convert_expr.rs-1988-                        }],
+src/ir/builder/convert_expr.rs-1989-                        body: Box::new(convert_expr(c, ctx)),
+src/ir/builder/convert_expr.rs-1990-                        is_move: true,
+src/ir/builder/convert_expr.rs-1991-                        ret_ty: None,
+src/ir/builder/convert_expr.rs-1992-                    },
+src/ir/builder/convert_expr.rs-1993-                    IrType::Any,
+src/ir/builder/convert_expr.rs-1994-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-1995-                ));
+src/ir/builder/convert_expr.rs-1996-            }
+src/ir/builder/convert_expr.rs:1997:            ExprKind::Call {
+src/ir/builder/convert_expr.rs-1998-                type_args: vec![],
+src/ir/builder/convert_expr.rs-1999-                callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-2000-                    ExprKind::Var("set_comp!".into()),
+src/ir/builder/convert_expr.rs-2001-                    IrType::Any,
+src/ir/builder/convert_expr.rs-2002-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-2003-                )),
+src/ir/builder/convert_expr.rs-2004-                args,
+src/ir/builder/convert_expr.rs-2005-            }
+src/ir/builder/convert_expr.rs-2006-        }
+src/ir/builder/convert_expr.rs-2007-
+--
+src/ir/builder/convert_expr.rs-2022-                    if let IrType::Named { path, .. } = &lhs.ty {
+src/ir/builder/convert_expr.rs-2023-                        if ctx
+src/ir/builder/convert_expr.rs-2024-                            .struct_methods
+src/ir/builder/convert_expr.rs-2025-                            .get(path)
+src/ir/builder/convert_expr.rs-2026-                            .map(|ms| ms.contains(magic))
+src/ir/builder/convert_expr.rs-2027-                            .unwrap_or(false)
+src/ir/builder/convert_expr.rs-2028-                        {
+src/ir/builder/convert_expr.rs-2029-                            let rhs_v = convert_expr(value, ctx);
+src/ir/builder/convert_expr.rs-2030-                            let ret_ty = IrType::Unit;
+src/ir/builder/convert_expr.rs-2031-                            return Expr::new(
+src/ir/builder/convert_expr.rs:2032:                                ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-2033-                                    receiver: Box::new(lhs),
+src/ir/builder/convert_expr.rs-2034-                                    method: magic.to_string(),
+src/ir/builder/convert_expr.rs-2035-                                    args: vec![rhs_v],
+src/ir/builder/convert_expr.rs-2036-                                },
+src/ir/builder/convert_expr.rs-2037-                                ret_ty,
+src/ir/builder/convert_expr.rs-2038-                                Span::unknown(),
+src/ir/builder/convert_expr.rs-2039-                            );
+src/ir/builder/convert_expr.rs-2040-                        }
+src/ir/builder/convert_expr.rs-2041-                    }
+src/ir/builder/convert_expr.rs-2042-                }
+--
+src/ir/builder/convert_expr.rs-2044-                    op: map_assign_op(op),
+src/ir/builder/convert_expr.rs-2045-                    lhs: Box::new(convert_expr(target, ctx)),
+src/ir/builder/convert_expr.rs-2046-                    rhs: Box::new(convert_expr(value, ctx)),
+src/ir/builder/convert_expr.rs-2047-                }
+src/ir/builder/convert_expr.rs-2048-            }
+src/ir/builder/convert_expr.rs-2049-        }
+src/ir/builder/convert_expr.rs-2050-
+src/ir/builder/convert_expr.rs-2051-        AstExpr::Spawn(inner) => {
+src/ir/builder/convert_expr.rs-2052-            // go expr → 并行线程：thread::spawn(move || { expr })
+src/ir/builder/convert_expr.rs-2053-            // 与显式 spawn(expr)（异步任务）区分，使用内部标记 __go
+src/ir/builder/convert_expr.rs:2054:            ExprKind::Call {
+src/ir/builder/convert_expr.rs-2055-                type_args: vec![],
+src/ir/builder/convert_expr.rs-2056-                callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-2057-                    ExprKind::Var("__go".into()),
+src/ir/builder/convert_expr.rs-2058-                    IrType::Any,
+src/ir/builder/convert_expr.rs-2059-                    Span::unknown(),
+src/ir/builder/convert_expr.rs-2060-                )),
+src/ir/builder/convert_expr.rs-2061-                args: vec![convert_expr(inner, ctx)],
+src/ir/builder/convert_expr.rs-2062-            }
+src/ir/builder/convert_expr.rs-2063-        }
+src/ir/builder/convert_expr.rs-2064-
+src/ir/builder/convert_expr.rs-2065-        AstExpr::Move(inner) => {
+src/ir/builder/convert_expr.rs-2066-            convert_expr(inner, ctx).kind // move 语义在 IR 中由所有权表达，暂透传
+src/ir/builder/convert_expr.rs-2067-        }
+src/ir/builder/convert_expr.rs-2068-
+src/ir/builder/convert_expr.rs:2069:        AstExpr::Panic(inner) => ExprKind::Call {
+src/ir/builder/convert_expr.rs-2070-            type_args: vec![],
+src/ir/builder/convert_expr.rs-2071-            callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-2072-                ExprKind::Var("panic!".into()),
+src/ir/builder/convert_expr.rs-2073-                IrType::Any,
+src/ir/builder/convert_expr.rs-2074-                Span::unknown(),
+src/ir/builder/convert_expr.rs-2075-            )),
+src/ir/builder/convert_expr.rs-2076-            args: vec![convert_expr(inner, ctx)],
+src/ir/builder/convert_expr.rs-2077-        },
+src/ir/builder/convert_expr.rs-2078-
+src/ir/builder/convert_expr.rs:2079:        AstExpr::Await(inner) => ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-2080-            receiver: Box::new(convert_expr(inner, ctx)),
+src/ir/builder/convert_expr.rs-2081-            method: "await".into(),
+src/ir/builder/convert_expr.rs-2082-            args: vec![],
+src/ir/builder/convert_expr.rs-2083-        },
+src/ir/builder/convert_expr.rs-2084-
+src/ir/builder/convert_expr.rs-2085-        AstExpr::BuildBlock { kind, lhs, body } => {
+src/ir/builder/convert_expr.rs-2086-            // 构建块脱糖：将 body 转换为 BlockExpr，然后包装为闭包立即调用
+src/ir/builder/convert_expr.rs-2087-            // 参考 AST codegen 的 gen_build_block 实现
+src/ir/builder/convert_expr.rs-2088-            match kind {
+src/ir/builder/convert_expr.rs-2089-                BuildKind::Var => {
+src/ir/builder/convert_expr.rs-2090-                    // =: → { let __tmp = (|| { body; __result })(); __tmp }
+src/ir/builder/convert_expr.rs-2091-                    // body 中的变量声明在此作用域中，闭包立即执行
+src/ir/builder/convert_expr.rs-2092-                    let body_block = convert_block_with_ctx(body, ctx);
+src/ir/builder/convert_expr.rs-2093-                    // 用 BlockExpr 包装 body（作为 Lambda 立即调用）
+src/ir/builder/convert_expr.rs-2094-                    let body_expr = Expr::new(
+src/ir/builder/convert_expr.rs-2095-                        ExprKind::BlockExpr { block: body_block },
+src/ir/builder/convert_expr.rs-2096-                        IrType::Any,
+src/ir/builder/convert_expr.rs-2097-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-2098-                    );
+src/ir/builder/convert_expr.rs:2099:                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-2100-                        type_args: vec![],
+src/ir/builder/convert_expr.rs-2101-                        callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-2102-                            ExprKind::Lambda {
+src/ir/builder/convert_expr.rs-2103-                                params: vec![],
+src/ir/builder/convert_expr.rs-2104-                                body: Box::new(body_expr),
+src/ir/builder/convert_expr.rs-2105-                                is_move: false,
+src/ir/builder/convert_expr.rs-2106-                                ret_ty: None,
+src/ir/builder/convert_expr.rs-2107-                            },
+src/ir/builder/convert_expr.rs-2108-                            IrType::Any,
+src/ir/builder/convert_expr.rs-2109-                            Span::unknown(),
+--
+src/ir/builder/convert_expr.rs-2115-                    // ~: → callee(args...) 其中 args = body 返回元组的元素
+src/ir/builder/convert_expr.rs-2116-                    // 如果 body 最后返回的是元组，解包为独立参数
+src/ir/builder/convert_expr.rs-2117-                    let body_block = convert_block_with_ctx(body, ctx);
+src/ir/builder/convert_expr.rs-2118-                    let block_ty = body_block.ty.clone(); // 在 move 之前提取类型
+src/ir/builder/convert_expr.rs-2119-                    let body_expr = Expr::new(
+src/ir/builder/convert_expr.rs-2120-                        ExprKind::BlockExpr { block: body_block },
+src/ir/builder/convert_expr.rs-2121-                        IrType::Any,
+src/ir/builder/convert_expr.rs-2122-                        Span::unknown(),
+src/ir/builder/convert_expr.rs-2123-                    );
+src/ir/builder/convert_expr.rs-2124-                    let packed = Expr::new(
+src/ir/builder/convert_expr.rs:2125:                        ExprKind::Call {
+src/ir/builder/convert_expr.rs-2126-                            type_args: vec![],
+src/ir/builder/convert_expr.rs-2127-                            callee: Box::new(Expr::new(
+src/ir/builder/convert_expr.rs-2128-                                ExprKind::Lambda {
+src/ir/builder/convert_expr.rs-2129-                                    params: vec![],
+src/ir/builder/convert_expr.rs-2130-                                    body: Box::new(body_expr),
+src/ir/builder/convert_expr.rs-2131-                                    is_move: false,
+src/ir/builder/convert_expr.rs-2132-                                    ret_ty: None,
+src/ir/builder/convert_expr.rs-2133-                                },
+src/ir/builder/convert_expr.rs-2134-                                IrType::Any,
+src/ir/builder/convert_expr.rs-2135-                                Span::unknown(),
+--
+src/ir/builder/convert_expr.rs-2153-                    } else {
+src/ir/builder/convert_expr.rs-2154-                        block_ty.clone()
+src/ir/builder/convert_expr.rs-2155-                    };
+src/ir/builder/convert_expr.rs-2156-                    let args: Vec<Expr> = if let IrType::Tuple(elements) = block_ty_for_unpack {
+src/ir/builder/convert_expr.rs-2157-                        // 元组解包：为每个元素生成一个 packed 字段访问
+src/ir/builder/convert_expr.rs-2158-                        elements
+src/ir/builder/convert_expr.rs-2159-                            .iter()
+src/ir/builder/convert_expr.rs-2160-                            .enumerate()
+src/ir/builder/convert_expr.rs-2161-                            .map(|(i, _elem)| {
+src/ir/builder/convert_expr.rs-2162-                                Expr::new(
+src/ir/builder/convert_expr.rs:2163:                                    ExprKind::MagicCall {
+src/ir/builder/convert_expr.rs-2164-                                        kind: MagicKind::UnpackBuildCall,
+src/ir/builder/convert_expr.rs-2165-                                        args: vec![
+src/ir/builder/convert_expr.rs-2166-                                            packed.clone(),
+src/ir/builder/convert_expr.rs-2167-                                            Expr::new(
+src/ir/builder/convert_expr.rs-2168-                                                ExprKind::Lit(LitKind::Int(i as i64)),
+src/ir/builder/convert_expr.rs-2169-                                                IrType::Int,
+src/ir/builder/convert_expr.rs-2170-                                                Span::unknown(),
+src/ir/builder/convert_expr.rs-2171-                                            ),
+src/ir/builder/convert_expr.rs-2172-                                        ],
+src/ir/builder/convert_expr.rs-2173-                                    },
+--
+src/ir/builder/convert_expr.rs-2218-                                {
+src/ir/builder/convert_expr.rs-2219-                                    let receiver_expr = Expr::new(
+src/ir/builder/convert_expr.rs-2220-                                        ExprKind::Var(n.clone()),
+src/ir/builder/convert_expr.rs-2221-                                        IrType::Named {
+src/ir/builder/convert_expr.rs-2222-                                            path: path.clone(),
+src/ir/builder/convert_expr.rs-2223-                                            args: vec![],
+src/ir/builder/convert_expr.rs-2224-                                        },
+src/ir/builder/convert_expr.rs-2225-                                        Span::unknown(),
+src/ir/builder/convert_expr.rs-2226-                                    );
+src/ir/builder/convert_expr.rs-2227-                                    let into_args_expr = Expr::new(
+src/ir/builder/convert_expr.rs:2228:                                        ExprKind::MethodCall {
+src/ir/builder/convert_expr.rs-2229-                                            receiver: Box::new(receiver_expr),
+src/ir/builder/convert_expr.rs-2230-                                            method: "into_args".to_string(),
+src/ir/builder/convert_expr.rs-2231-                                            args: vec![],
+src/ir/builder/convert_expr.rs-2232-                                        },
+src/ir/builder/convert_expr.rs-2233-                                        IrType::Any,
+src/ir/builder/convert_expr.rs-2234-                                        Span::unknown(),
+src/ir/builder/convert_expr.rs-2235-                                    );
+src/ir/builder/convert_expr.rs-2236-                                    let buildparams_ret = ctx.lookup_fn_return(&format!(
+src/ir/builder/convert_expr.rs-2237-                                        "{}.{}",
+src/ir/builder/convert_expr.rs-2238-                                        path, "__buildparams__"
+src/ir/builder/convert_expr.rs-2239-                                    ));
+src/ir/builder/convert_expr.rs-2240-                                    if let IrType::Tuple(elements) = buildparams_ret {
+src/ir/builder/convert_expr.rs-2241-                                        elements
+src/ir/builder/convert_expr.rs-2242-                                            .iter()
+src/ir/builder/convert_expr.rs-2243-                                            .enumerate()
+src/ir/builder/convert_expr.rs-2244-                                            .map(|(i, _)| {
+src/ir/builder/convert_expr.rs-2245-                                                Expr::new(
+src/ir/builder/convert_expr.rs:2246:                                                    ExprKind::MagicCall {
+src/ir/builder/convert_expr.rs-2247-                                                        kind: MagicKind::UnpackBuildCall,
+src/ir/builder/convert_expr.rs-2248-                                                        args: vec![
+src/ir/builder/convert_expr.rs-2249-                                                            into_args_expr.clone(),
+src/ir/builder/convert_expr.rs-2250-                                                            Expr::new(
+src/ir/builder/convert_expr.rs-2251-                                                                ExprKind::Lit(LitKind::Int(
+src/ir/builder/convert_expr.rs-2252-                                                                    i as i64,
+src/ir/builder/convert_expr.rs-2253-                                                                )),
+src/ir/builder/convert_expr.rs-2254-                                                                IrType::Int,
+src/ir/builder/convert_expr.rs-2255-                                                                Span::unknown(),
+src/ir/builder/convert_expr.rs-2256-                                                            ),
+--
+src/ir/builder/convert_expr.rs-2266-                                    }
+src/ir/builder/convert_expr.rs-2267-                                } else {
+src/ir/builder/convert_expr.rs-2268-                                    vec![packed]
+src/ir/builder/convert_expr.rs-2269-                                }
+src/ir/builder/convert_expr.rs-2270-                            }
+src/ir/builder/convert_expr.rs-2271-                            _ => vec![packed],
+src/ir/builder/convert_expr.rs-2272-                        }
+src/ir/builder/convert_expr.rs-2273-                    } else {
+src/ir/builder/convert_expr.rs-2274-                        vec![packed]
+src/ir/builder/convert_expr.rs-2275-                    };
+src/ir/builder/convert_expr.rs:2276:                    ExprKind::Call {
+src/ir/builder/convert_expr.rs-2277-                        type_args: vec![],
+src/ir/builder/convert_expr.rs-2278-                        callee: Box::new(convert_expr(lhs, ctx)),
+src/ir/builder/convert_expr.rs-2279-                        args,
+src/ir/builder/convert_expr.rs-2280-                    }
+src/ir/builder/convert_expr.rs-2281-                }
+src/ir/builder/convert_expr.rs-2282-                BuildKind::Gen => {
+src/ir/builder/convert_expr.rs-2283-                    // *: → 生成器构建块：callee 为左侧函数/方法引用（有 callee 时逐包调用，
+src/ir/builder/convert_expr.rs-2284-                    // 无 callee 时仅收集参数包返回迭代器）。body 中的 yield 由 codegen 收集。
+src/ir/builder/convert_expr.rs-2285-                    let body_block = convert_block_with_ctx(body, ctx);
+src/ir/builder/convert_expr.rs-2286-                    let callee = match &**lhs {
+src/ir/builder/convert_expr.rs-2287-                        AstExpr::Ident(_)
+src/ir/builder/convert_expr.rs:2288:                        | AstExpr::MethodCall { .. }
+src/ir/builder/convert_expr.rs-2289-                        | AstExpr::FieldAccess { .. } => Some(Box::new(convert_expr(lhs, ctx))),
+src/ir/builder/convert_expr.rs-2290-                        _ => None,
+src/ir/builder/convert_expr.rs-2291-                    };
+src/ir/builder/convert_expr.rs-2292-                    ExprKind::GenBuild {
+src/ir/builder/convert_expr.rs-2293-                        callee,
+src/ir/builder/convert_expr.rs-2294-                        block: body_block,
+src/ir/builder/convert_expr.rs-2295-                    }
+src/ir/builder/convert_expr.rs-2296-                }
+src/ir/builder/convert_expr.rs-2297-                BuildKind::Index => {
+src/ir/builder/convert_expr.rs-2298-                    // ^: → IndexGet。key = body 块中的最后一个表达式值。
+--
+src/ir/builder/convert_expr.rs-2394-pub(crate) fn try_body_result_ty(block: &Block, ctx: &TypeCtx) -> Option<IrType> {
+src/ir/builder/convert_expr.rs-2395-    // body 末尾裸表达式语句
+src/ir/builder/convert_expr.rs-2396-    let last = block
+src/ir/builder/convert_expr.rs-2397-        .stmts
+src/ir/builder/convert_expr.rs-2398-        .iter()
+src/ir/builder/convert_expr.rs-2399-        .rev()
+src/ir/builder/convert_expr.rs-2400-        .find(|s| matches!(s, Stmt::ExprStmt { .. }))?;
+src/ir/builder/convert_expr.rs-2401-    // 取出被调用函数名
+src/ir/builder/convert_expr.rs-2402-    let callee = match last {
+src/ir/builder/convert_expr.rs-2403-        Stmt::ExprStmt { expr } => match &expr.kind {
+src/ir/builder/convert_expr.rs:2404:            ExprKind::Call { callee, .. } => match &callee.kind {
+src/ir/builder/convert_expr.rs-2405-                ExprKind::Var(name) => name.clone(),
+src/ir/builder/convert_expr.rs-2406-                _ => return None,
+src/ir/builder/convert_expr.rs-2407-            },
+src/ir/builder/convert_expr.rs-2408-            _ => return None,
+src/ir/builder/convert_expr.rs-2409-        },
+src/ir/builder/convert_expr.rs-2410-        _ => return None,
+src/ir/builder/convert_expr.rs-2411-    };
+src/ir/builder/convert_expr.rs-2412-    // 被调函数若为 raises 函数，其 IR 返回类型已是 Result<ok, err>
+src/ir/builder/convert_expr.rs-2413-    match ctx.fn_returns.get(&callee) {
+src/ir/builder/convert_expr.rs-2414-        Some(IrType::Result { .. }) => ctx.fn_returns.get(&callee).cloned(),

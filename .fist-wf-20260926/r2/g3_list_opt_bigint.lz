@@ -1,0 +1,5 @@
+def main() =
+    let xs: List<bigint> = [BigInt::from(1), BigInt::from(2), BigInt::from(3)]
+    let o: Option<bigint> = Some(BigInt::from(42))
+    println(xs)
+    println(o)

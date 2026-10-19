@@ -1,0 +1,35 @@
+{
+  "label": "str_after",
+  "rounds": 3,
+  "extra_args": "",
+  "lz": {
+    "lzc_ms": 23.9,
+    "rustc_ms": 378.27,
+    "run_ms": 532.61,
+    "peak_kb": 7844.0,
+    "stdout": [
+      "40000"
+    ],
+    "codegen_metrics": {
+      "gen_lines": 33,
+      "anchor_lines": 9,
+      "let_temps": 2,
+      "clone_calls": 0,
+      "to_string_calls": 3,
+      "vec_new": 0,
+      "with_capacity": 0,
+      "rc_arc_box": 0,
+      "diff_changed_lines": 31,
+      "diff_ratio": 3.4444
+    }
+  },
+  "anchor_rust": {
+    "rustc_ms": 383.02,
+    "run_ms": 205.32,
+    "peak_kb": 4300.0,
+    "stdout": [
+      "40000"
+    ]
+  },
+  "stdout_match": true
+}

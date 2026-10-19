@@ -1,0 +1,46 @@
+perf(codegen): 落地方案书方向A/B/C/D/E —— 以运行性能与内存为度量
+
+先纠正基线：按建议书自定的口径（冷启动全流程、分段计时）实测，运行期
+生成代码与手写 Rust 仅差 +3.0%（噪声量级），真正差距在产物体积（2x）、
+rustc 段 +15%、峰值内存 +11%，以及一处未被记账的语义缺陷。故本轮火力
+集中在产物形态 / 内存 / 冷启动链路，而非追一个不存在的 47% 差距。
+
+方向A：新增 src/ir/opt/（walk/fold/branch/dce），挂在 build_ir_inner 出口、
+rewrite_tco 之后（IR 全构造、两后端共用、不与 TCO 改写互相干扰）。
+--opt=0/1/2 + LZ_OPT；opt=0 产物与优化前逐字节一致，既有快照零改动通过。
+折叠一律 checked_*（溢出不折叠，否则 i64::MAX+1 会从编译期报错变静默回绕）；
+分支简化只动 Stmt::If/While 且 defer/break/continue/yield 一律不改写；
+死绑定删除要求纯表达式白名单（除/模/幂会 panic，排除）+ 后续零引用 + 非块尾。
+
+方向E：
+- print的 f-string / 字符串实参改走 Display —— 去掉输出里的多余引号，
+  同时省一次 String 堆分配与二次格式化；非字符串实参保持 {:?}（Debug 覆盖
+  范围严格大于 Display，用户 struct 未必实现 Display）。lz 程序 stdout
+  首次与手写 Rust 逐字一致。
+- mut v = [] + 紧随的纯 push 范围循环 -> Vec::with_capacity（cap_hint.rs
+  相邻语句前瞻；容量表达式会被求值两次，故只认纯算术）。
+- 空 else 消除；// STMT:* 逐语句定位注释默认关闭（--stmt-marks 可恢复）。
+- 同步 lz_codegen_lib.lz 镜像，维持 rs-lz 产物与常规 codegen 的逐字节等价。
+
+方向B：sorted/reversed 实参为「新鲜临时」时直接move，不再防御性 clone；
+Var/FieldAccess/IndexGet 一律保留 clone（可能别处还要读，或为 Copy/借用
+视图，move 会 E0382/E0507）。
+
+方向D：--stats 分段计时（[stats] lzc total / [build] rustc / [check]
+rustc --emit=metadata）——此前仓库无可观测分段计时，验收判据「rustc 段下降
+>=50%」根本无法验证；build 路径 rustc 加 -C incremental；check --rustc 走
+--emit=metadata 快路径。
+
+方向C：修掉既有缺陷 —— build --incremental 命中缓存时直接 return 0、连 exe
+都不检查（删掉 exe 后再 build --incremental 会「成功」但无产物）。改后
+lzc 段与 rustc 段分别判断；增量改为 build 默认开启。
+
+验收：生成 .rs 行数 101->70（-30.7%）、与手写 diff 行数 88->58（-34.1%）、
+峰值内存 5380KB->4620KB（-14.1%，lz/锚点比 1.113->1.002）；Vec::with_capacity
+严格 A/B（同产物只改容量提示）32.5ms vs 35.1ms（-7.4%）。
+闸门：tests/perf_opt_gates.rs 14/0（断言语义不变量而非仅可编译）；
+demo_codegen_compile --include-ignored 2/0（空 allowlist，348 DEMO 真编译）；
+cargo build 0 error/0 warning；cargo test -j 1 --no-fail-fast 685 passed。
+本次提交内容（HEAD + 本改动）已用 git checkout-index 物化到独立目录
+cargo check --all-targets验证 0 error，且与他人未提交的WIP 无符号交叉引用。
+12 处测试期望随E1 更新（stdout 去引号），10 个 moddec golden 重生成。

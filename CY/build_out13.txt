@@ -1,0 +1,2 @@
+   Compiling lzcyc v0.1.0 (E:\IDEProjects\AI\lang-zone\CY)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.63s

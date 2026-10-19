@@ -1,0 +1,53 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+warning: field `stderr` is never read
+  --> tests\codegen_corner_fixes.rs:42:5
+   |
+38 | struct Run {
+   |        --- field in this struct
+...
+42 |     stderr: String,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `lang-zone` (test "codegen_corner_fixes") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3m 52s
+     Running unittests src\lib.rs (target\debug\deps\lang_zone-894916d93cb3dd72.exe)
+     Running unittests src\main.rs (target\debug\deps\lang_zone-55b23eebacfe5eeb.exe)
+     Running tests\bridge_boundary.rs (target\debug\deps\bridge_boundary-8cea0cef175a0b1a.exe)
+     Running tests\bridge_e2e.rs (target\debug\deps\bridge_e2e-2087d0962b328101.exe)
+     Running tests\bridge_embed.rs (target\debug\deps\bridge_embed-80b9c9cefcc11d08.exe)
+     Running tests\bridge_import.rs (target\debug\deps\bridge_import-d81f11e09ceb3a38.exe)
+     Running tests\codegen_corner_fixes.rs (target\debug\deps\codegen_corner_fixes-e0d029e2c13c89d5.exe)
+     Running tests\cy_codegen_gate.rs (target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe)
+     Running tests\cython_backend.rs (target\debug\deps\cython_backend-ae3015987cc48de7.exe)
+     Running tests\demo_codegen_compile.rs (target\debug\deps\demo_codegen_compile-d2f4bd2577ecc517.exe)
+     Running tests\dual_route_golden.rs (target\debug\deps\dual_route_golden-989dd90a453a3185.exe)
+     Running tests\error_bug_libs.rs (target\debug\deps\error_bug_libs-e6474a4c8459d6cb.exe)
+     Running tests\find_bug_bugs.rs (target\debug\deps\find_bug_bugs-ad2f3a2359698717.exe)
+     Running tests\find_bug_libs.rs (target\debug\deps\find_bug_libs-80e1cafdcaf38327.exe)
+     Running tests\fuzz_smoke.rs (target\debug\deps\fuzz_smoke-0e6c0172980f14f1.exe)
+     Running tests\g6_codegen.rs (target\debug\deps\g6_codegen-67ccddffbe2e2f1d.exe)
+     Running tests\gen_build_block.rs (target\debug\deps\gen_build_block-b225f1a49b11121a.exe)
+     Running tests\incremental_golden.rs (target\debug\deps\incremental_golden-9040a4d3fdb0ffcb.exe)
+     Running tests\ir_pass_fixes.rs (target\debug\deps\ir_pass_fixes-800a018710eb1439.exe)
+     Running tests\ir_serialization.rs (target\debug\deps\ir_serialization-3f3cc5e8a210d14c.exe)
+     Running tests\ir_snapshots.rs (target\debug\deps\ir_snapshots-564e65eaec54c7fb.exe)
+     Running tests\lexer_parser_core.rs (target\debug\deps\lexer_parser_core-b07e77b6cff0534b.exe)
+     Running tests\lz_frontend_bootstrap.rs (target\debug\deps\lz_frontend_bootstrap-adbf44ff1902e842.exe)
+     Running tests\lz_ir_bootstrap.rs (target\debug\deps\lz_ir_bootstrap-7ad6414e66f3e85d.exe)
+     Running tests\lz_semantic_cases.rs (target\debug\deps\lz_semantic_cases-f45809df6f08dd53.exe)
+     Running tests\lz_test_smoke.rs (target\debug\deps\lz_test_smoke-b82af6e090bc07f8.exe)
+     Running tests\lzc_loop_boundary_gates.rs (target\debug\deps\lzc_loop_boundary_gates-eac49f733a511423.exe)
+     Running tests\lzc_loop_nested_def.rs (target\debug\deps\lzc_loop_nested_def-ec0ca1ea46a9d5c3.exe)
+     Running tests\lzc_loop_unit_variant.rs (target\debug\deps\lzc_loop_unit_variant-6c3765371f78757b.exe)
+     Running tests\mod.rs (target\debug\deps\mod-b539b2e18d38e11d.exe)
+     Running tests\moddec_corpus.rs (target\debug\deps\moddec_corpus-59ed3a7701dc0aad.exe)
+     Running tests\moddec_product_assert.rs (target\debug\deps\moddec_product_assert-67240347aa4f2c5b.exe)
+     Running tests\perf_opt_gates.rs (target\debug\deps\perf_opt_gates-827e6bde6a3e6796.exe)
+     Running tests\reject_errors.rs (target\debug\deps\reject_errors-db014a5b3ea4b508.exe)
+     Running tests\reject_more.rs (target\debug\deps\reject_more-9a7b4734d055c7ce.exe)
+     Running tests\str_boundary.rs (target\debug\deps\str_boundary-5dd1bfa3a8f2d13f.exe)
+     Running tests\tail_recursion.rs (target\debug\deps\tail_recursion-1605ee716b6689f1.exe)
+     Running tests\tail_recursion_matrix.rs (target\debug\deps\tail_recursion_matrix-bbd48143d62bbe9c.exe)
+   Doc-tests lang_zone

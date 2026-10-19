@@ -1,0 +1,38 @@
+// ============================================================
+// 轮7: 函数进阶 — 可变参数、闭包、泛型函数
+// 每项用 assert 确保正确
+// ============================================================
+
+def sum_all(..: int) -> int =
+    mut total = 0
+    for x in args:
+        total = total + x
+    return total
+
+def first_of(..: int) -> int =
+    args[0]
+
+def generic_id<T>(x: T) -> T =
+    x
+
+def main() =
+    // ── 可变参数（..） ──
+    assert sum_all() == 0
+    assert sum_all(1) == 1
+    assert sum_all(1, 2, 3) == 6
+    assert sum_all(1, 2, 3, 4, 5) == 15
+    assert first_of(7, 8, 9) == 7
+
+    // ── 泛型函数（id 函数：int/str/float 均适用） ──
+    assert generic_id(42) == 42
+    assert generic_id("str") == "str"
+    assert generic_id(3.5) == 3.5
+
+    // ── 闭包（匿名函数） ──
+    let double = |x: int| x * 2
+    assert double(5) == 10
+
+    let add_fn = |a: int, b: int| a + b
+    assert add_fn(3, 4) == 7
+
+    // �

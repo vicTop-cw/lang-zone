@@ -1,0 +1,559 @@
+src/ir/codegen/expr_gen.rs-391-                }
+src/ir/codegen/expr_gen.rs-392-            }
+src/ir/codegen/expr_gen.rs-393-            ExprKind::Call {
+src/ir/codegen/expr_gen.rs-394-                callee,
+src/ir/codegen/expr_gen.rs-395-                args,
+src/ir/codegen/expr_gen.rs-396-                type_args,
+src/ir/codegen/expr_gen.rs-397-            } => {
+src/ir/codegen/expr_gen.rs-398-                // ord(s[i])：字符串单字符下标已按 char 码点 i64 生成（v165 语义），
+src/ir/codegen/expr_gen.rs:399:                // 再包 lz_builtins::ord(char) 会 E0308 expected char, found i64。
+src/ir/codegen/expr_gen.rs-400-                // 此时 ord 为恒等：直接发射下标表达式（lib_hashmap._str_hash 实测）。
+src/ir/codegen/expr_gen.rs-401-                if let ExprKind::Var(name) = &callee.kind {
+src/ir/codegen/expr_gen.rs-402-                    if name == "ord" && args.len() == 1 {
+src/ir/codegen/expr_gen.rs-403-                        if let ExprKind::IndexGet { base, key } = &args[0].kind {
+src/ir/codegen/expr_gen.rs-404-                            if matches!(base.ty, IrType::Str) {
+src/ir/codegen/expr_gen.rs-405-                                // ord(s[i]) → char as i64；
+src/ir/codegen/expr_gen.rs-406-                                // 手动生成 char 索引（不走 IndexGet 的 .to_string() 路径）
+src/ir/codegen/expr_gen.rs-407-                                let base_s = self.gen_expr(base);
+--
+src/ir/codegen/expr_gen.rs-554-                    } else {
+src/ir/codegen/expr_gen.rs-555-                        callee_s
+src/ir/codegen/expr_gen.rs-556-                    }
+src/ir/codegen/expr_gen.rs-557-                } else {
+src/ir/codegen/expr_gen.rs-558-                    callee_s
+src/ir/codegen/expr_gen.rs-559-                };
+src/ir/codegen/expr_gen.rs-560-                // 函数参数调用（iter.lz `predicate(item)`，predicate: fn(ref I.Item) -> bool）：
+src/ir/codegen/expr_gen.rs-561-                // callee 是 Fn 类型变量且其参数是 ref，实参自动取引用（&item），
+src/ir/codegen/expr_gen.rs:562:                // 否则 E0308 expected &<I as IntoIterator>::Item, found associated type
+src/ir/codegen/expr_gen.rs-563-                let callee_fn_refs: Option<Vec<bool>> = match &callee.ty {
+src/ir/codegen/expr_gen.rs-564-                    // callee 是 fn 类型表达式（Var 或 self.pred.clone() 等字段访问）：
+src/ir/codegen/expr_gen.rs:565:                    // 参数是 ref 时实参自动取引用（&item），否则 E0308 expected
+src/ir/codegen/expr_gen.rs-566-                    // &Item, found Item（iter.lz find / traits.lz Filter 的 predicate(item)）
+src/ir/codegen/expr_gen.rs-567-                    IrType::Fn { params, .. } => Some(
+src/ir/codegen/expr_gen.rs-568-                        params
+src/ir/codegen/expr_gen.rs-569-                            .iter()
+src/ir/codegen/expr_gen.rs-570-                            .map(|p| matches!(p, IrType::Ref(_) | IrType::MutRef(_)))
+src/ir/codegen/expr_gen.rs-571-                            .collect(),
+src/ir/codegen/expr_gen.rs-572-                    ),
+src/ir/codegen/expr_gen.rs-573-                    _ => None,
+--
+src/ir/codegen/expr_gen.rs-630-                            }
+src/ir/codegen/expr_gen.rs-631-                        } else {
+src/ir/codegen/expr_gen.rs-632-                            result_args.push(self.gen_expr(a));
+src/ir/codegen/expr_gen.rs-633-                        }
+src/ir/codegen/expr_gen.rs-634-                    }
+src/ir/codegen/expr_gen.rs-635-                    result_args
+src/ir/codegen/expr_gen.rs-636-                } else {
+src/ir/codegen/expr_gen.rs-637-                    // 实参位置期望类型注入：callee 为具名函数且 fn_param_types 已知时，
+src/ir/codegen/expr_gen.rs:638:                    // 生成实参时设置 current_expected_ty（Option::None 等跟随实参类型）
+src/ir/codegen/expr_gen.rs:639:                    let callee_expected: Option<Vec<IrType>> = match &callee.kind {
+src/ir/codegen/expr_gen.rs-640-                        ExprKind::Var(n) => self.fn_param_types.get(n).cloned(),
+src/ir/codegen/expr_gen.rs-641-                        _ => None,
+src/ir/codegen/expr_gen.rs-642-                    };
+src/ir/codegen/expr_gen.rs:643:                    let prev_expected = self.current_expected_ty.borrow().clone();
+src/ir/codegen/expr_gen.rs-644-                    let out = args
+src/ir/codegen/expr_gen.rs-645-                        .iter()
+src/ir/codegen/expr_gen.rs-646-                        .enumerate()
+src/ir/codegen/expr_gen.rs-647-                        .map(|(i, a)| {
+src/ir/codegen/expr_gen.rs:648:                            *self.current_expected_ty.borrow_mut() =
+src/ir/codegen/expr_gen.rs:649:                                callee_expected.as_ref().and_then(|pts| pts.get(i).cloned());
+src/ir/codegen/expr_gen.rs-650-                            let s = self.gen_expr(a);
+src/ir/codegen/expr_gen.rs-651-                            // fn 值实参（Arc 载体）→ 转发闭包（见 fn_value_fwd）
+src/ir/codegen/expr_gen.rs-652-                            if let Some(fwd) = self.fn_value_fwd(&s, a) {
+src/ir/codegen/expr_gen.rs-653-                                return fwd;
+src/ir/codegen/expr_gen.rs-654-                            }
+src/ir/codegen/expr_gen.rs-655-                            // fn(...) 类型形参接收 lambda 实参：需转 fn 指针。参数声明
+src/ir/codegen/expr_gen.rs-656-                            // 生成 impl FnMut（可收闭包），但存入 fn 字段/传给 fn 形参时
+src/ir/codegen/expr_gen.rs-657-                            // opaque impl 无法 .clone()/赋值（E0599/E0308，lib_iterator
+src/ir/codegen/expr_gen.rs-658-                            // MapIter.new(f)）。无捕获闭包可 `as fn(...)` 强转。
+src/ir/codegen/expr_gen.rs:659:                            if let Some(expected_ty) = callee_expected.as_ref().and_then(|pts| pts.get(i)) {
+src/ir/codegen/expr_gen.rs-660-                                // 检测形参是否为 `&fn(...)` 引用类型：若是，命名函数需 `&(f as fn(...))`
+src/ir/codegen/expr_gen.rs-661-                                // 而非 `&(f) as fn(...)`（后者 `&` 优先级高于 `as`，会编译失败）
+src/ir/codegen/expr_gen.rs:662:                                let is_ref_fn = matches!(expected_ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Fn { .. }));
+src/ir/codegen/expr_gen.rs:663:                                if let IrType::Fn { params, ret } = expected_ty {
+src/ir/codegen/expr_gen.rs-664-                                    if matches!(&a.kind, ExprKind::Lambda { .. }) {
+src/ir/codegen/expr_gen.rs-665-                                        let ps: Vec<String> =
+src/ir/codegen/expr_gen.rs-666-                                            params.iter().map(|pt| self.rust_type(pt)).collect();
+src/ir/codegen/expr_gen.rs-667-                                        let type_text =
+src/ir/codegen/expr_gen.rs-668-                                            format!("fn({}) -> {}", ps.join(", "), self.rust_type(ret));
+src/ir/codegen/expr_gen.rs-669-                                        let chars: Vec<char> = type_text.chars().collect();
+src/ir/codegen/expr_gen.rs-670-                                        let has_placeholder = chars.iter().enumerate().any(|(i, c)| {
+src/ir/codegen/expr_gen.rs-671-                                            c.is_ascii_alphabetic()
+--
+src/ir/codegen/expr_gen.rs-702-                                            }
+src/ir/codegen/expr_gen.rs-703-                                        }
+src/ir/codegen/expr_gen.rs-704-                                    }
+src/ir/codegen/expr_gen.rs-705-                                }
+src/ir/codegen/expr_gen.rs-706-                            }
+src/ir/codegen/expr_gen.rs-707-                            s
+src/ir/codegen/expr_gen.rs-708-                        })
+src/ir/codegen/expr_gen.rs-709-                        .collect();
+src/ir/codegen/expr_gen.rs:710:                    *self.current_expected_ty.borrow_mut() = prev_expected;
+src/ir/codegen/expr_gen.rs-711-                    out
+src/ir/codegen/expr_gen.rs-712-                };
+src/ir/codegen/expr_gen.rs-713-                // 函数参数调用（predicate: fn(ref X) -> bool）：callee 是 Fn 变量且
+src/ir/codegen/expr_gen.rs:714:                // 参数为 ref 时，实参自动取引用（&item），否则 E0308 expected &
+src/ir/codegen/expr_gen.rs-715-                if let Some(ref_flags) = &callee_fn_refs {
+src/ir/codegen/expr_gen.rs-716-                    for (i, s) in args_s.iter_mut().enumerate() {
+src/ir/codegen/expr_gen.rs-717-                        if i < ref_flags.len() && ref_flags[i] && !s.starts_with('&') {
+src/ir/codegen/expr_gen.rs-718-                            // 检查实参是否已是 &fn(...) 类型：若是则不再加 &（避免 `&&fn(...)`）
+src/ir/codegen/expr_gen.rs-719-                            let arg = args.get(i);
+src/ir/codegen/expr_gen.rs-720-                            let is_already_ref_fn = matches!(arg, Some(a) if matches!(&a.ty, IrType::Ref(inner) if matches!(inner.as_ref(), IrType::Fn { .. })))
+src/ir/codegen/expr_gen.rs-721-                                || matches!(arg, Some(a) if matches!(&a.kind, ExprKind::Var(_)) && matches!(&a.ty, IrType::Fn { .. }));
+src/ir/codegen/expr_gen.rs-722-                            if !is_already_ref_fn {
+--
+src/ir/codegen/expr_gen.rs-902-                                let s = &args_s[i];
+src/ir/codegen/expr_gen.rs-903-                                // 避免重复引用（已是 &x 或 &mut x 时跳过）
+src/ir/codegen/expr_gen.rs-904-                                if !s.starts_with('&') {
+src/ir/codegen/expr_gen.rs-905-                                    args_s[i] = if is_mut {
+src/ir/codegen/expr_gen.rs-906-                                        format!("&mut {}", s)
+src/ir/codegen/expr_gen.rs-907-                                    } else {
+src/ir/codegen/expr_gen.rs-908-                                        // Range 实参（0i64..5i64）取引用需括号：
+src/ir/codegen/expr_gen.rs-909-                                        // `&(0i64..5i64)`，否则解析为 `(&0i64)..5i64`
+src/ir/codegen/expr_gen.rs:910:                                        // （iter.lz collect_list(&0i64..5i64)，E0308 expected &i64 found i64）
+src/ir/codegen/expr_gen.rs-911-                                        if s.contains("..") {
+src/ir/codegen/expr_gen.rs-912-                                            format!("&({})", s)
+src/ir/codegen/expr_gen.rs-913-                                        } else {
+src/ir/codegen/expr_gen.rs-914-                                            format!("&{}", s)
+src/ir/codegen/expr_gen.rs-915-                                        }
+src/ir/codegen/expr_gen.rs-916-                                    };
+src/ir/codegen/expr_gen.rs-917-                                }
+src/ir/codegen/expr_gen.rs-918-                            }
+--
+src/ir/codegen/expr_gen.rs-1250-                    };
+src/ir/codegen/expr_gen.rs-1251-                if !enum_name.is_empty() {
+src/ir/codegen/expr_gen.rs-1252-                    return if args_s.is_empty() {
+src/ir/codegen/expr_gen.rs-1253-                        format!("{}::{}", enum_name, variant_name)
+src/ir/codegen/expr_gen.rs-1254-                    } else {
+src/ir/codegen/expr_gen.rs-1255-                        // 命名字段变体（`Some(value: 42)` / 裸简写 `Some(42)`）→ 结构体形式：
+src/ir/codegen/expr_gen.rs-1256-                        // `Enum::Variant { field: arg, ... }`；否则元组形式 `Enum::Variant(a, b)`
+src/ir/codegen/expr_gen.rs-1257-                        // （enum.lz 自定义 `enum Option<T>: Some(value: T)` 后 `Some(42)`
+src/ir/codegen/expr_gen.rs:1258:                        //   生成 `Option::Some(42)` 会报 E0533 expected value, found struct variant）
+src/ir/codegen/expr_gen.rs-1259-                        let named_fields = self
+src/ir/codegen/expr_gen.rs-1260-                            .enum_variant_named_fields
+src/ir/codegen/expr_gen.rs-1261-                            .get(&(enum_name.clone(), variant_name.clone()))
+src/ir/codegen/expr_gen.rs-1262-                            .cloned()
+src/ir/codegen/expr_gen.rs-1263-                            .unwrap_or_default();
+src/ir/codegen/expr_gen.rs-1264-                        if !named_fields.is_empty() {
+src/ir/codegen/expr_gen.rs-1265-                            let args_c: Vec<String> = args_s
+src/ir/codegen/expr_gen.rs-1266-                                .iter()
+--
+src/ir/codegen/expr_gen.rs-1554-                    && args_s.len() == 2
+src/ir/codegen/expr_gen.rs-1555-                    && !self.fn_param_types.contains_key("filter")
+src/ir/codegen/expr_gen.rs-1556-                {
+src/ir/codegen/expr_gen.rs-1557-                    // filter(iterator, fn) → iterator.into_iter().filter(fn)[.copied()].collect()
+src/ir/codegen/expr_gen.rs-1558-                    // Vec/List 无 filter 方法（E0599），需先转迭代器；
+src/ir/codegen/expr_gen.rs-1559-                    // filter 闭包接收 &Item，strip_lambda_type_with_ref 给参数加 &。
+src/ir/codegen/expr_gen.rs-1560-                    // .copied() 仅当输入是引用（iter.lz `filter(&vec, ...)` → into_iter
+src/ir/codegen/expr_gen.rs-1561-                    // 产出 &i64，需转值）；owned 输入（pipe_spec 管道链 map 后的 Vec，
+src/ir/codegen/expr_gen.rs:1562:                    // into_iter 产出 i64）加 .copied() 报 E0271 expected &_ yields i64
+src/ir/codegen/expr_gen.rs-1563-                    let lambda = strip_lambda_type_with_ref(&args_s[1]);
+src/ir/codegen/expr_gen.rs-1564-                    let copied = if args_s[0].trim_start().starts_with('&') {
+src/ir/codegen/expr_gen.rs-1565-                        ".copied()"
+src/ir/codegen/expr_gen.rs-1566-                    } else {
+src/ir/codegen/expr_gen.rs-1567-                        ""
+src/ir/codegen/expr_gen.rs-1568-                    };
+src/ir/codegen/expr_gen.rs-1569-                    format!(
+src/ir/codegen/expr_gen.rs-1570-                        "({}).into_iter().filter({}){}.collect::<Vec<_>>()",
+--
+src/ir/codegen/expr_gen.rs-2073-                        "Option" | "Result" | "Some" | "None" | "Ok" | "Err"
+src/ir/codegen/expr_gen.rs-2074-                    )
+src/ir/codegen/expr_gen.rs-2075-                {
+src/ir/codegen/expr_gen.rs-2076-                    // 空字段 struct 构造：Text() → Text {}
+src/ir/codegen/expr_gen.rs-2077-                    format!("{} {{}}", callee_s)
+src/ir/codegen/expr_gen.rs-2078-                } else if args_s.is_empty() {
+src/ir/codegen/expr_gen.rs-2079-                    // type alias 空构造：List()/Vec() → Vec::new()；Set()/HashSet() →
+src/ir/codegen/expr_gen.rs-2080-                    // HashSet::new()；Dict()/HashMap() → HashMap::new()（type alias
+src/ir/codegen/expr_gen.rs:2081:                    // 不能当函数调用，E0423 expected function, found type alias）
+src/ir/codegen/expr_gen.rs-2082-                    // 小写别名同款接线：dict()/list()/set() 此前透传为裸调用，
+src/ir/codegen/expr_gen.rs-2083-                    // 生成未定义函数 → E0425（perf §14.5 遗留缺口）。本分支在
+src/ir/codegen/expr_gen.rs-2084-                    // fn_param_types（用户自定义函数）检查之后，不遮蔽同名用户函数。
+src/ir/codegen/expr_gen.rs-2085-                    match callee_s.as_str() {
+src/ir/codegen/expr_gen.rs-2086-                        "List" | "Vec" | "list" => "Vec::new()".to_string(),
+src/ir/codegen/expr_gen.rs-2087-                        "Set" | "HashSet" | "set" => {
+src/ir/codegen/expr_gen.rs-2088-                            "std::collections::HashSet::new()".to_string()
+src/ir/codegen/expr_gen.rs-2089-                        }
+--
+src/ir/codegen/expr_gen.rs-2251-                            "f32",
+src/ir/codegen/expr_gen.rs-2252-                            "f64",
+src/ir/codegen/expr_gen.rs-2253-                            "bool",
+src/ir/codegen/expr_gen.rs-2254-                            "str",
+src/ir/codegen/expr_gen.rs-2255-                            "char",
+src/ir/codegen/expr_gen.rs-2256-                        ];
+src/ir/codegen/expr_gen.rs-2257-                        self.known_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-2258-                            || KNOWN_EXT_TYPES.contains(&n.as_str())
+src/ir/codegen/expr_gen.rs:2259:                            // 枚举名（ParseError::UnexpectedChar 等变体构造）也走静态调用
+src/ir/codegen/expr_gen.rs-2260-                            || self.enum_variants.values().any(|e| e == n)
+src/ir/codegen/expr_gen.rs-2261-                    }
+src/ir/codegen/expr_gen.rs-2262-                    _ => false,
+src/ir/codegen/expr_gen.rs-2263-                };
+src/ir/codegen/expr_gen.rs-2264-                if static_type_call {
+src/ir/codegen/expr_gen.rs-2265-                    // struct::new 字段类型表（new 形参顺序即字段顺序）：fn 字段实参
+src/ir/codegen/expr_gen.rs-2266-                    // 为 lambda 时转 fn 指针（同 Call 分支，lib_iterator MapIter.new）
+src/ir/codegen/expr_gen.rs-2267-                    let struct_fields = self.struct_fields_info.get(&recv).cloned();
+src/ir/codegen/expr_gen.rs:2268:                    // 枚举变体构造器（ParseError::UnexpectedChar(...)）：
+src/ir/codegen/expr_gen.rs-2269-                    // 按 (Enum, Variant) 查字段类型表，为每个实参注入期望类型，
+src/ir/codegen/expr_gen.rs-2270-                    // 使 String 索引（s[pos]）生成 String 而非 i64（lib_json E0308）
+src/ir/codegen/expr_gen.rs-2271-                    let ctor_field_types = self
+src/ir/codegen/expr_gen.rs-2272-                        .enum_variant_fields
+src/ir/codegen/expr_gen.rs-2273-                        .get(&(recv.clone(), method.clone()))
+src/ir/codegen/expr_gen.rs-2274-                        .cloned();
+src/ir/codegen/expr_gen.rs-2275-                    let mut args_s: Vec<String> = args
+src/ir/codegen/expr_gen.rs-2276-                        .iter()
+src/ir/codegen/expr_gen.rs-2277-                        .enumerate()
+src/ir/codegen/expr_gen.rs-2278-                        .map(|(i, a)| {
+src/ir/codegen/expr_gen.rs:2279:                            let prev_expected = self.current_expected_ty.borrow().clone();
+src/ir/codegen/expr_gen.rs-2280-                            if let Some(types) = &ctor_field_types {
+src/ir/codegen/expr_gen.rs-2281-                                if i < types.len() {
+src/ir/codegen/expr_gen.rs:2282:                                    *self.current_expected_ty.borrow_mut() = Some(types[i].clone());
+src/ir/codegen/expr_gen.rs-2283-                                }
+src/ir/codegen/expr_gen.rs-2284-                            }
+src/ir/codegen/expr_gen.rs-2285-                            let s = self.gen_expr(a);
+src/ir/codegen/expr_gen.rs:2286:                            *self.current_expected_ty.borrow_mut() = prev_expected;
+src/ir/codegen/expr_gen.rs-2287-                            if let Some(fields) = &struct_fields {
+src/ir/codegen/expr_gen.rs-2288-                                if let Some((_, IrType::Fn { params, ret })) = fields.get(i) {
+src/ir/codegen/expr_gen.rs-2289-                                    if matches!(&a.kind, ExprKind::Lambda { .. }) {
+src/ir/codegen/expr_gen.rs-2290-                                        let ps: Vec<String> =
+src/ir/codegen/expr_gen.rs-2291-                                            params.iter().map(|pt| self.rust_type(pt)).collect();
+src/ir/codegen/expr_gen.rs-2292-                                        let type_text = format!(
+src/ir/codegen/expr_gen.rs-2293-                                            "fn({}) -> {}",
+src/ir/codegen/expr_gen.rs-2294-                                            ps.join(", "),
+--
+src/ir/codegen/expr_gen.rs-2451-                {
+src/ir/codegen/expr_gen.rs-2452-                    return if args_s.is_empty() {
+src/ir/codegen/expr_gen.rs-2453-                        format!("{}()", method)
+src/ir/codegen/expr_gen.rs-2454-                    } else {
+src/ir/codegen/expr_gen.rs-2455-                        format!("{}({})", method, args_s.join(", "))
+src/ir/codegen/expr_gen.rs-2456-                    };
+src/ir/codegen/expr_gen.rs-2457-                }
+src/ir/codegen/expr_gen.rs-2458-                // ref 参数：调用点自动 &x（DictExt::get 的 key: ref K → d.get(&key)，
+src/ir/codegen/expr_gen.rs:2459:                // 否则 expected &_, found String E0308）
+src/ir/codegen/expr_gen.rs-2460-                if let Some(ref_flags) = self.fn_ref_params.get(method.as_str()).cloned() {
+src/ir/codegen/expr_gen.rs-2461-                    for (i, _a) in args.iter().enumerate() {
+src/ir/codegen/expr_gen.rs-2462-                        // 跳过 self 参数：fn_ref_params[0] 是 self 标记，方法调用
+src/ir/codegen/expr_gen.rs-2463-                        // args 不含 self（Dict::remove 的 key: ref K → d.remove(&key)）
+src/ir/codegen/expr_gen.rs-2464-                        let fi = i + 1;
+src/ir/codegen/expr_gen.rs-2465-                        if fi >= ref_flags.len() || i >= args_s.len() {
+src/ir/codegen/expr_gen.rs-2466-                            break;
+src/ir/codegen/expr_gen.rs-2467-                        }
+--
+src/ir/codegen/expr_gen.rs-2507-                        format!("{}{}{}()", recv, assoc_sep, method)
+src/ir/codegen/expr_gen.rs-2508-                    } else {
+src/ir/codegen/expr_gen.rs-2509-                        format!("{}{}{}({})", recv, assoc_sep, method, args_s.join(", "))
+src/ir/codegen/expr_gen.rs-2510-                    };
+src/ir/codegen/expr_gen.rs-2511-                }
+src/ir/codegen/expr_gen.rs-2512-
+src/ir/codegen/expr_gen.rs-2513-                // 类型参数 receiver 的关联函数调用（collect 的 `C.from_iter(self)`）：
+src/ir/codegen/expr_gen.rs-2514-                // C 是类型参数（大写），方法调用用 ::（C::from_iter），否则 E0423
+src/ir/codegen/expr_gen.rs:2515:                // expected value, found type parameter C
+src/ir/codegen/expr_gen.rs-2516-                if let ExprKind::Var(n) = &receiver.kind {
+src/ir/codegen/expr_gen.rs-2517-                    let is_type_param = n != "self"
+src/ir/codegen/expr_gen.rs-2518-                        && n.chars().next().map_or(false, |c| c.is_uppercase())
+src/ir/codegen/expr_gen.rs-2519-                        && !self.known_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-2520-                        && !self.emitted_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-2521-                        && !self.global_vars.contains_key(n.as_str())
+src/ir/codegen/expr_gen.rs-2522-                        && !self.downgraded_vars.contains(n.as_str());
+src/ir/codegen/expr_gen.rs-2523-                    if is_type_param {
+--
+src/ir/codegen/expr_gen.rs-2896-                        || matches!(&receiver.ty, IrType::Named { path, .. }
+src/ir/codegen/expr_gen.rs-2897-                            if path == "str" || path == "String")
+src/ir/codegen/expr_gen.rs-2898-                        || matches!(&receiver.ty, IrType::Ref(inner) | IrType::MutRef(inner)
+src/ir/codegen/expr_gen.rs-2899-                            if matches!(inner.as_ref(), IrType::Str)
+src/ir/codegen/expr_gen.rs-2900-                                || matches!(inner.as_ref(), IrType::Named { path, .. }
+src/ir/codegen/expr_gen.rs-2901-                                    if path == "str" || path == "String"));
+src/ir/codegen/expr_gen.rs-2902-                    // HashMap/Dict 的 contains_key：key 需 &（HashMap::contains_key 参数 &Q）
+src/ir/codegen/expr_gen.rs-2903-                    // Set/HashSet 的 contains：参数 &Q（containers.lz `tags.contains("rust")`，
+src/ir/codegen/expr_gen.rs:2904:                    // E0308 expected &_, found String）；kwargs 字段（checker 的 __Params.kwargs
+src/ir/codegen/expr_gen.rs-2905-                    // 是 HashMap）同 dict；HashMap/Dict 的 get 也需 &Q（operators.lz
+src/ir/codegen/expr_gen.rs:2906:                    // `__sn.get("key")`，E0308 expected &_, found String）
+src/ir/codegen/expr_gen.rs-2907-                    let recv_is_dict = matches!(&receiver.ty, IrType::Named { path, .. }
+src/ir/codegen/expr_gen.rs-2908-                        if path == "Dict" || path == "HashMap");
+src/ir/codegen/expr_gen.rs-2909-                    let recv_is_set = matches!(&receiver.ty, IrType::Named { path, .. }
+src/ir/codegen/expr_gen.rs-2910-                        if path == "Set" || path == "HashSet");
+src/ir/codegen/expr_gen.rs-2911-                    // Vec/List 的 contains：参数需 &T（Vec::contains 签名 &T，
+src/ir/codegen/expr_gen.rs:2912:                    // `[1,2,3].contains(2)` → E0308 expected &i64, found i64）。
+src/ir/codegen/expr_gen.rs-2913-                    // 注意：仅当 receiver **无自定义 contains 方法**时才加 &——
+src/ir/codegen/expr_gen.rs-2914-                    // lz_std/list.lz 自定义 contains(ref self, value: T) 参数为值
+src/ir/codegen/expr_gen.rs:2915:                    // （T 非引用），误加 & 会 E0308 expected i64, found &i64
+src/ir/codegen/expr_gen.rs-2916-                    let recv_is_vec = matches!(&receiver.ty, IrType::Named { path, .. }
+src/ir/codegen/expr_gen.rs-2917-                        if path == "List" || path == "Vec");
+src/ir/codegen/expr_gen.rs-2918-                    // 自定义 contains 判定：直接查该类型名下已收集的方法集合（struct
+src/ir/codegen/expr_gen.rs-2919-                    // 方法 + impl 块方法均已并入 struct_method_names_map）。
+src/ir/codegen/expr_gen.rs-2920-                    // 原实现额外要求 is_known_type(path)，但 `impl List<T>` 这类扩展
+src/ir/codegen/expr_gen.rs-2921-                    // trait 类型既不进 known_types/emitted_types 也不进 impl_types，
+src/ir/codegen/expr_gen.rs-2922-                    // 导致误判为「无自定义 contains」而加 & → E0308
+src/ir/codegen/expr_gen.rs-2923-                    // （lz_std/list.lz `lst.contains(20)` → `lst.contains(&20i64)`）。
+--
+src/ir/codegen/expr_gen.rs-2925-                        if self.struct_method_names(path).contains("contains"));
+src/ir/codegen/expr_gen.rs-2926-                    let is_kwargs = matches!(&receiver.kind, ExprKind::FieldAccess { field, .. }
+src/ir/codegen/expr_gen.rs-2927-                        if field == "kwargs");
+src/ir/codegen/expr_gen.rs-2928-                    let need_ref = recv_is_str
+src/ir/codegen/expr_gen.rs-2929-                        // Vec contains：receiver 类型为 List/Vec 且无自定义 contains
+src/ir/codegen/expr_gen.rs-2930-                        // 时加 &（std Vec::contains 需 &T）。此前仅限定 ListLit
+src/ir/codegen/expr_gen.rs-2931-                        // 字面量 receiver（BUG-SB-002 修复，2026-09-03）：变量
+src/ir/codegen/expr_gen.rs-2932-                        // receiver `v.contains(2)` 同样走 std Vec::contains，E0308
+src/ir/codegen/expr_gen.rs:2933:                        // expected &i64, found i64；lz_std 自定义 contains 的场景
+src/ir/codegen/expr_gen.rs-2934-                        // 由 recv_has_custom_contains 守卫排除。
+src/ir/codegen/expr_gen.rs-2935-                        || (recv_is_vec && method == "contains" && !recv_has_custom_contains)
+src/ir/codegen/expr_gen.rs-2936-                        || (recv_is_dict && (rust_method == "contains_key" || method == "get" || method == "remove"))
+src/ir/codegen/expr_gen.rs-2937-                        || (recv_is_set && (method == "contains" || method == "remove"))
+src/ir/codegen/expr_gen.rs-2938-                        || (is_kwargs && (rust_method == "contains_key" || method == "get"))
+src/ir/codegen/expr_gen.rs-2939-                        // closure 参数 receiver（operators.lz `__sn.get("key")`，__sn 类型
+src/ir/codegen/expr_gen.rs-2940-                        // 推断为 Any）：get 的实参是 String 时必为 HashMap::get（需 &Q），
+src/ir/codegen/expr_gen.rs-2941-                        // Vec::get 的实参是 int（走 usize 转换），不会误伤
+--
+src/ir/codegen/expr_gen.rs-2950-                        || (matches!(&receiver.ty, IrType::Any)
+src/ir/codegen/expr_gen.rs-2951-                            && (pattern_methods.contains(&method.as_str())
+src/ir/codegen/expr_gen.rs-2952-                                || pattern_methods.contains(&rust_method))
+src/ir/codegen/expr_gen.rs-2953-                            && args.iter().any(|a| matches!(&a.kind, ExprKind::Lit(LitKind::Str(_)))));
+src/ir/codegen/expr_gen.rs-2954-                    if need_ref {
+src/ir/codegen/expr_gen.rs-2955-                        // String Pattern 方法（replace/starts_with/split 等）的**所有**
+src/ir/codegen/expr_gen.rs-2956-                        // 字符串参数都需 &str：`s.replace("-", "+")` 的 from/to 两个参数。
+src/ir/codegen/expr_gen.rs-2957-                        // 旧实现只处理 args_s[0]，第二个字符串字面量参数被包装成
+src/ir/codegen/expr_gen.rs:2958:                        // "+".to_string()（String）→ E0308 expected &str。
+src/ir/codegen/expr_gen.rs-2959-                        // Vec/List 的 contains 参数需 &T（含 int：`[1,2,3].contains(2)`
+src/ir/codegen/expr_gen.rs:2960:                        // → E0308 expected &i64）。只处理字符串字面量（直接用 &str）、
+src/ir/codegen/expr_gen.rs-2961-                        // 字符串类型值（加 &）与 Vec contains 的任意参数（加 &），
+src/ir/codegen/expr_gen.rs-2962-                        // 不误伤 Vec::get 的 usize 索引参数。
+src/ir/codegen/expr_gen.rs-2963-                        // BUG-SB-002（2026-09-03）：变量 receiver（v.contains(2)）同样
+src/ir/codegen/expr_gen.rs-2964-                        // 走 std Vec::contains，去掉 ListLit 限定；自定义 contains 由
+src/ir/codegen/expr_gen.rs-2965-                        // 上方 need_ref 的 recv_has_custom_contains 守卫排除。
+src/ir/codegen/expr_gen.rs-2966-                        let is_vec_contains = recv_is_vec && method == "contains";
+src/ir/codegen/expr_gen.rs-2967-                        // Set/HashSet 的 remove 参数需 &Q（HashSet::remove 签名 &Q，
+src/ir/codegen/expr_gen.rs:2968:                        // `ms.remove(2)` → E0308 expected &i64, found i64）
+src/ir/codegen/expr_gen.rs-2969-                        let is_set_remove = recv_is_set && method == "remove";
+src/ir/codegen/expr_gen.rs-2970-                        // Set/HashSet 的 contains 参数也需 &Q（containers.lz
+src/ir/codegen/expr_gen.rs:2971:                        // `numbers.contains(3)` → E0308 expected &i64, found i64）
+src/ir/codegen/expr_gen.rs-2972-                        let is_set_contains = recv_is_set && method == "contains";
+src/ir/codegen/expr_gen.rs-2973-                        // Dict/HashMap 的 contains_key 参数需 &Q（list.lz unique
+src/ir/codegen/expr_gen.rs:2974:                        // `seen.contains_key(item)` → E0308 expected &_, found T）
+src/ir/codegen/expr_gen.rs-2975-                        let is_dict_contains_key = recv_is_dict && method == "contains_key";
+src/ir/codegen/expr_gen.rs-2976-                        for (idx, arg_expr) in args.iter().enumerate() {
+src/ir/codegen/expr_gen.rs-2977-                            // 用户 struct 的同名普通方法（如 lib_hashmap 的 get(key: str)
+src/ir/codegen/expr_gen.rs-2978-                            // → String 形参）：不做 &str/& 实参改写，保持原 String 语义。
+src/ir/codegen/expr_gen.rs-2979-                            // 但 str/String 接收者除外：扩展 trait（StrExt）的同名方法是
+src/ir/codegen/expr_gen.rs-2980-                            // trait 方法，压不过原生 inherent `str::starts_with`（参数需
+src/ir/codegen/expr_gen.rs-2981-                            // Pattern），解析仍落到原生方法 → 仍需改写实参加 &。
+src/ir/codegen/expr_gen.rs-2982-                            // （string.lz `self.starts_with(other.clone())`，
+--
+src/ir/codegen/expr_gen.rs-3097-                }
+src/ir/codegen/expr_gen.rs-3098-                // Vec::insert/remove/get 需要 usize 索引（LZ int 是 i64）：
+src/ir/codegen/expr_gen.rs-3099-                // `self.insert_at(index, value)`（编译器映射标记，list.lz insert 方法）、
+src/ir/codegen/expr_gen.rs-3100-                // remove_at 的 `self.remove(index)`（std Vec::remove 语义）与
+src/ir/codegen/expr_gen.rs-3101-                // parts.get(i)（Vec::get）首个 int 参数需转 usize（E0308/E0277）。
+src/ir/codegen/expr_gen.rs-3102-                // 已自动 & 的参数（ref 参数，如 set.lz remove 的 value: ref T → &1i64）
+src/ir/codegen/expr_gen.rs-3103-                // 是元素值而非索引，不转（E0606 casting &i64 as usize）；
+src/ir/codegen/expr_gen.rs-3104-                // 自定义 get（list.lz ListExt::get 参数 i64 值）也不转（E0308
+src/ir/codegen/expr_gen.rs:3105:                // expected i64, found usize）
+src/ir/codegen/expr_gen.rs-3106-                let recv_ty_name = match &receiver.ty {
+src/ir/codegen/expr_gen.rs-3107-                    IrType::Named { path, .. } => path.clone(),
+src/ir/codegen/expr_gen.rs-3108-                    _ => String::new(),
+src/ir/codegen/expr_gen.rs-3109-                };
+src/ir/codegen/expr_gen.rs-3110-                let has_custom_get = method == "get"
+src/ir/codegen/expr_gen.rs-3111-                    && self
+src/ir/codegen/expr_gen.rs-3112-                        .struct_method_names_map
+src/ir/codegen/expr_gen.rs-3113-                        .get(&recv_ty_name)
+--
+src/ir/codegen/expr_gen.rs-3164-                        self.current_ext_trait.clone().unwrap_or_default()
+src/ir/codegen/expr_gen.rs-3165-                    } else {
+src/ir/codegen/expr_gen.rs-3166-                        "StrExt".to_string()
+src/ir/codegen/expr_gen.rs-3167-                    };
+src/ir/codegen/expr_gen.rs-3168-                    format!("{}::{}(self, {})", ext_name, rust_method, args_s.join(", "))
+src/ir/codegen/expr_gen.rs-3169-                } else if recv.starts_with('<') && recv.contains(">::") && !recv.ends_with(')') {
+src/ir/codegen/expr_gen.rs-3170-                    // 关联类型路径 receiver（`<Self as std::iter::Iterator>::Item.default()`）：
+src/ir/codegen/expr_gen.rs-3171-                    // Item 是关联类型，方法调用用 ::（`<Self as std::iter::Iterator>::Item::default()`），
+src/ir/codegen/expr_gen.rs:3172:                    // 否则 E0575 expected method, found associated type Iterator::Item。
+src/ir/codegen/expr_gen.rs-3173-                    // 注意：StrExt 强制调用 `<str as StrExt>::find(self, substr)` 以 ) 结尾
+src/ir/codegen/expr_gen.rs-3174-                    // （函数调用而非关联路径），后续 .is_some() 必须用 .（E0308 语法错误）
+src/ir/codegen/expr_gen.rs-3175-                    format!("{}::{}({})", recv, rust_method, args_s.join(", "))
+src/ir/codegen/expr_gen.rs-3176-                } else {
+src/ir/codegen/expr_gen.rs-3177-                    // 函数指针字段调用（如 `self.f(v)`）：需生成 `(self.f)(v)` 而非 `self.f(v)`
+src/ir/codegen/expr_gen.rs-3178-                    // （Rust 中 fn 类型字段是 fn item，直接调用需括号包裹转为 fn pointer）
+src/ir/codegen/expr_gen.rs-3179-                    // 检查 receiver 类型是否有 fn 类型的字段名为 method
+src/ir/codegen/expr_gen.rs-3180-                    let recv_is_fn_field = if let IrType::Named { path, .. } = &receiver.ty {
+--
+src/ir/codegen/expr_gen.rs-3189-                    };
+src/ir/codegen/expr_gen.rs-3190-                    if recv_is_fn_field {
+src/ir/codegen/expr_gen.rs-3191-                        format!("({}.{})({})", recv, method, args_s.join(", "))
+src/ir/codegen/expr_gen.rs-3192-                    } else {
+src/ir/codegen/expr_gen.rs-3193-                        format!("{}.{}({})", recv, rust_method, args_s.join(", "))
+src/ir/codegen/expr_gen.rs-3194-                    }
+src/ir/codegen/expr_gen.rs-3195-                };
+src/ir/codegen/expr_gen.rs-3196-                // LZ 值语义：List.reverse() 返回新列表（Rust Vec::reverse 原地返回 ()，
+src/ir/codegen/expr_gen.rs:3197:                // `ll.to_list().reverse()` E0308 expected Vec<i64>, found ()）。
+src/ir/codegen/expr_gen.rs-3198-                // receiver 为 List/Vec/Array 且调用点是临时表达式（非简单变量，
+src/ir/codegen/expr_gen.rs-3199-                // 如方法调用链 to_list().reverse()）时，生成 克隆+reverse+返回 块。
+src/ir/codegen/expr_gen.rs-3200-                // 注意：简单变量 receiver 的 `xs.reverse()` 语句级调用保留原地语义
+src/ir/codegen/expr_gen.rs-3201-                // （sort.lz 等已通过库依赖），仅临时表达式才需值语义包装。
+src/ir/codegen/expr_gen.rs-3202-                if std::env::var("LZ_DBG_REVERSE").is_ok() {
+src/ir/codegen/expr_gen.rs-3203-                    eprintln!(
+src/ir/codegen/expr_gen.rs-3204-                        "REVDBG method={:?} recv={:?} recv_ty={:?} kind={:?} recv_is_struct={:?}",
+src/ir/codegen/expr_gen.rs-3205-                        method, recv, receiver.ty, receiver.kind, recv_is_struct
+--
+src/ir/codegen/expr_gen.rs-3259-                    // 并恢复字符串字面量的 to_string（pattern_methods 曾去掉）
+src/ir/codegen/expr_gen.rs-3260-                    let args_owned: Vec<String> = args_s
+src/ir/codegen/expr_gen.rs-3261-                        .iter()
+src/ir/codegen/expr_gen.rs-3262-                        .enumerate()
+src/ir/codegen/expr_gen.rs-3263-                        .map(|(i, s)| {
+src/ir/codegen/expr_gen.rs-3264-                            // StrExt 这些方法（find/starts_with/ends_with/contains/split/
+src/ir/codegen/expr_gen.rs-3265-                            // rfind/replace）的字符串形态实参均归一到 Owned String：裸 &str
+src/ir/codegen/expr_gen.rs-3266-                            // 字面量（如 `&"hello"` 剥 & 后仍是 &str）与 &str/&String 变量
+src/ir/codegen/expr_gen.rs:3267:                            // 必须 .to_string()，否则 E0308（expected String, found &str）。
+src/ir/codegen/expr_gen.rs-3268-                            // 非字符串形态实参（如 repeat 的 i64）由下方 arg_is_str 守卫排除。
+src/ir/codegen/expr_gen.rs-3269-                            let needs_own = method == "find"
+src/ir/codegen/expr_gen.rs-3270-                                || method == "starts_with"
+src/ir/codegen/expr_gen.rs-3271-                                || method == "ends_with"
+src/ir/codegen/expr_gen.rs-3272-                                || method == "contains"
+src/ir/codegen/expr_gen.rs-3273-                                || method == "split"
+src/ir/codegen/expr_gen.rs-3274-                                || method == "rfind"
+src/ir/codegen/expr_gen.rs-3275-                                || method == "replace";
+src/ir/codegen/expr_gen.rs-3276-                            // 字符串形态实参归一到 Owned String：裸 &str 字面量（如
+src/ir/codegen/expr_gen.rs-3277-                            // `&"hello"` 剥 & 后仍是 &str）与 &str/&String 变量必须
+src/ir/codegen/expr_gen.rs:3278:                            // .to_string()，否则 E0308（expected String, found &str）。
+src/ir/codegen/expr_gen.rs-3279-                            let arg_is_str = args
+src/ir/codegen/expr_gen.rs-3280-                                .get(i)
+src/ir/codegen/expr_gen.rs-3281-                                .map(|a| {
+src/ir/codegen/expr_gen.rs-3282-                                    matches!(&a.ty, IrType::Str)
+src/ir/codegen/expr_gen.rs-3283-                                        || matches!(
+src/ir/codegen/expr_gen.rs-3284-                                            &a.ty,
+src/ir/codegen/expr_gen.rs-3285-                                            IrType::Ref(inner)
+src/ir/codegen/expr_gen.rs-3286-                                                if matches!(inner.as_ref(), IrType::Str)
+--
+src/ir/codegen/expr_gen.rs-3331-                        "<str as StrExt>::{}({}, {})",
+src/ir/codegen/expr_gen.rs-3332-                        rust_method,
+src/ir/codegen/expr_gen.rs-3333-                        recv_ref,
+src/ir/codegen/expr_gen.rs-3334-                        args_owned.join(", ")
+src/ir/codegen/expr_gen.rs-3335-                    );
+src/ir/codegen/expr_gen.rs-3336-                }
+src/ir/codegen/expr_gen.rs-3337-                // DictExt trait 方法强制调用：HashMap 的 keys/values/items/iter 与
+src/ir/codegen/expr_gen.rs-3338-                // std HashMap 固有方法同名（固有优先返回 Keys/Values 迭代器而非
+src/ir/codegen/expr_gen.rs:3339:                // LZ 的 Vec/List，E0308 expected Vec<K>, found Keys）——显式 DictExt::
+src/ir/codegen/expr_gen.rs-3340-                let recv_is_dict = matches!(&receiver.ty, IrType::Named { path, .. }
+src/ir/codegen/expr_gen.rs-3341-                    if path == "Dict" || path == "HashMap");
+src/ir/codegen/expr_gen.rs-3342-                // 用户 struct 同名普通方法（如 lib_hashmap 的 keys()）优先于 DictExt
+src/ir/codegen/expr_gen.rs-3343-                //
+src/ir/codegen/expr_gen.rs-3344-                // 仅当本模块确实有 DictExt（本模块存在 `impl Dict/HashMap …` 块时
+src/ir/codegen/expr_gen.rs-3345-                // 由 generate() 登记进 trait_names）才走 trait 路由；否则回落到
+src/ir/codegen/expr_gen.rs-3346-                // BTreeMap 固有 keys()/values()——独立编译的库（如 FIND_BUG/lib_json，
+src/ir/codegen/expr_gen.rs-3347-                // 不 import dict.lz）根本没有 DictExt trait，强制路由会报
+--
+src/ir/codegen/expr_gen.rs-3517-                    matches!(
+src/ir/codegen/expr_gen.rs-3518-                        &receiver.ty,
+src/ir/codegen/expr_gen.rs-3519-                        IrType::Named { path, .. } if path == "Option" || path == "Result"
+src/ir/codegen/expr_gen.rs-3520-                    ) || matches!(&receiver.ty, IrType::Option(_) | IrType::Result { .. });
+src/ir/codegen/expr_gen.rs-3521-                if !recv_is_option {
+src/ir/codegen/expr_gen.rs-3522-                    if method == "iter" && self.is_collection_type(&receiver.ty) {
+src/ir/codegen/expr_gen.rs-3523-                        // 区分自定义 iter（ListExt::iter，item=T 值语义，list.lz 有
+src/ir/codegen/expr_gen.rs-3524-                        // ListExt trait）与 std Vec::iter（item=&T，traits.lz 无自定义
+src/ir/codegen/expr_gen.rs:3525:                        // iter → .cloned() 转 T，否则 filter 闭包 E0631 expected fn(&&_))
+src/ir/codegen/expr_gen.rs-3526-                        let recv_ty_name = match &receiver.ty {
+src/ir/codegen/expr_gen.rs-3527-                            IrType::Named { path, .. } => path.clone(),
+src/ir/codegen/expr_gen.rs-3528-                            _ => String::new(),
+src/ir/codegen/expr_gen.rs-3529-                        };
+src/ir/codegen/expr_gen.rs-3530-                        let has_custom_iter = self
+src/ir/codegen/expr_gen.rs-3531-                            .struct_method_names_map
+src/ir/codegen/expr_gen.rs-3532-                            .get(&recv_ty_name)
+src/ir/codegen/expr_gen.rs-3533-                            .map_or(false, |s| s.contains("iter"));
+--
+src/ir/codegen/expr_gen.rs-3564-                        }
+src/ir/codegen/expr_gen.rs-3565-                        return format!(
+src/ir/codegen/expr_gen.rs-3566-                            "({}).into_iter().{}({}).collect::<Vec<_>>()",
+src/ir/codegen/expr_gen.rs-3567-                            recv, method, args_s[0]
+src/ir/codegen/expr_gen.rs-3568-                        );
+src/ir/codegen/expr_gen.rs-3569-                    }
+src/ir/codegen/expr_gen.rs-3570-                    // std 迭代器链的 filter（nesting-expressions `xs.iter().cloned()
+src/ir/codegen/expr_gen.rs-3571-                    // .filter(|x| x > 0)`）：闭包参数是 &Item（&&T 因 cloned 后是
+src/ir/codegen/expr_gen.rs:3572:                    // &T），需 |&x| 模式（否则 E0308 expected &i64, found i64）。
+src/ir/codegen/expr_gen.rs-3573-                    // 注意：带类型注解的闭包（|x: ref T|，DictExt/SetExt/ListExt 的
+src/ir/codegen/expr_gen.rs-3574-                    // filter）body 已用 *x 解引用（E0614 type i64 cannot be
+src/ir/codegen/expr_gen.rs-3575-                    // dereferenced），不能再加 & 模式——仅无注解闭包需 strip
+src/ir/codegen/expr_gen.rs-3576-                    if method == "filter" && args_s.len() == 1 && !recv_is_list {
+src/ir/codegen/expr_gen.rs-3577-                        if !args_s[0].contains(": &") {
+src/ir/codegen/expr_gen.rs-3578-                            return format!(
+src/ir/codegen/expr_gen.rs-3579-                                "({}).filter({})",
+src/ir/codegen/expr_gen.rs-3580-                                recv,
+--
+src/ir/codegen/expr_gen.rs-3628-                        "map"
+src/ir/codegen/expr_gen.rs-3629-                            | "and_then"
+src/ir/codegen/expr_gen.rs-3630-                            | "unwrap_or"
+src/ir/codegen/expr_gen.rs-3631-                            | "unwrap"
+src/ir/codegen/expr_gen.rs-3632-                            | "unwrap_or_else"
+src/ir/codegen/expr_gen.rs-3633-                            | "ok"
+src/ir/codegen/expr_gen.rs-3634-                            | "err"
+src/ir/codegen/expr_gen.rs-3635-                            | "flatten"
+src/ir/codegen/expr_gen.rs:3636:                            | "expect"
+src/ir/codegen/expr_gen.rs-3637-                            | "filter"
+src/ir/codegen/expr_gen.rs-3638-                            | "or"
+src/ir/codegen/expr_gen.rs-3639-                            | "and"
+src/ir/codegen/expr_gen.rs-3640-                    )
+src/ir/codegen/expr_gen.rs-3641-                    && !matches!(&receiver.ty, IrType::Named { args, .. }
+src/ir/codegen/expr_gen.rs-3642-                        if args.iter().all(|a| matches!(a, IrType::Int | IrType::F64 | IrType::Bool)))
+src/ir/codegen/expr_gen.rs-3643-                {
+src/ir/codegen/expr_gen.rs-3644-                    format!("({}).clone().{}({})", recv, rust_method, args_s.join(", "))
+--
+src/ir/codegen/expr_gen.rs-3733-                    return format!("{}.{}.clone()", base_s, field);
+src/ir/codegen/expr_gen.rs-3734-                }
+src/ir/codegen/expr_gen.rs-3735-                let known_modules = ["std", "core", "alloc", "crate", "self", "super"];
+src/ir/codegen/expr_gen.rs-3736-                let is_var_base = matches!(&base.kind, ExprKind::Var(_));
+src/ir/codegen/expr_gen.rs-3737-                let root = base_s.split("::").next().unwrap_or("");
+src/ir/codegen/expr_gen.rs-3738-                let is_root_known = known_modules.contains(&root) && root != base_s;
+src/ir/codegen/expr_gen.rs-3739-                let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
+src/ir/codegen/expr_gen.rs-3740-                // 关联类型路径（06c-trait定义.md §五）：`I.Item` → `I::Item`
+src/ir/codegen/expr_gen.rs:3741:                // （泛型参数上的关联类型用 ::，E0423 expected value, found type parameter）。
+src/ir/codegen/expr_gen.rs-3742-                // 判断：base 是裸泛型参数名（非 self/已知类型/变量），field 大写开头（Item）
+src/ir/codegen/expr_gen.rs-3743-                let base_is_generic_param = matches!(&base.kind, ExprKind::Var(n)
+src/ir/codegen/expr_gen.rs-3744-                    if n != "self"
+src/ir/codegen/expr_gen.rs-3745-                        && !self.downgraded_vars.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3746-                        && !self.global_vars.contains_key(n.as_str())
+src/ir/codegen/expr_gen.rs-3747-                        && !self.known_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3748-                        && !self.emitted_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3749-                        && !self.struct_method_names_map.contains_key(n.as_str())
+src/ir/codegen/expr_gen.rs-3750-                        && (self.in_generic_fn
+src/ir/codegen/expr_gen.rs-3751-                            || self.in_impl_generic
+src/ir/codegen/expr_gen.rs-3752-                            || self.current_variadic_params.contains(n.as_str())));
+src/ir/codegen/expr_gen.rs-3753-                // 仅当 field 是大写开头（枚举变体/模块/关联类型）时才用 ::；小写开头为方法/字段，用 .
+src/ir/codegen/expr_gen.rs-3754-                let field_is_uppercase = field.chars().next().map_or(false, |c| c.is_uppercase());
+src/ir/codegen/expr_gen.rs-3755-                // 未声明的"类型风格"标识符（prelude.lz 引用 lz_builtins 的 Ordering）：
+src/ir/codegen/expr_gen.rs-3756-                // 大写开头、非局部变量/常量/已声明类型 → 视为外部枚举变体访问 Ordering::Less，
+src/ir/codegen/expr_gen.rs:3757:                // 否则生成 `Ordering.Less` 报 E0423 expected value, found enum
+src/ir/codegen/expr_gen.rs-3758-                let base_is_unresolved_type = matches!(&base.kind, ExprKind::Var(n)
+src/ir/codegen/expr_gen.rs-3759-                    if n != "self"
+src/ir/codegen/expr_gen.rs-3760-                        && !self.downgraded_vars.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3761-                        && !self.global_vars.contains_key(n.as_str())
+src/ir/codegen/expr_gen.rs-3762-                        && !self.known_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3763-                        && !self.emitted_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3764-                        && !self.impl_types.contains(n.as_str())
+src/ir/codegen/expr_gen.rs-3765-                        && n.chars().next().map_or(false, |c| c.is_uppercase()));
+--
+src/ir/codegen/expr_gen.rs-3884-                        && matches!(&base.ty, IrType::Named { path, .. } if self.is_known_type(path));
+src/ir/codegen/expr_gen.rs-3885-                    if is_struct {
+src/ir/codegen/expr_gen.rs-3886-                        format!("({}).__getitem__({})", base_s, self.gen_expr(key))
+src/ir/codegen/expr_gen.rs-3887-                    } else if is_kwargs {
+src/ir/codegen/expr_gen.rs-3888-                        // __Params.kwargs 值是 Box<dyn Any>：索引取值需 downcast
+src/ir/codegen/expr_gen.rs-3889-                        // （.cloned() 会要求 Box<dyn Any>: Clone，E0277）
+src/ir/codegen/expr_gen.rs-3890-                        let val_ty = self.rust_type(&expr.ty);
+src/ir/codegen/expr_gen.rs-3891-                        format!(
+src/ir/codegen/expr_gen.rs:3892:                            "(*(({base}).get(&{key}).unwrap())).downcast_ref::<{val_ty}>().expect(\"kwargs cast failed\").clone()",
+src/ir/codegen/expr_gen.rs-3893-                            base = base_s,
+src/ir/codegen/expr_gen.rs-3894-                            key = key_s,
+src/ir/codegen/expr_gen.rs-3895-                            val_ty = val_ty,
+src/ir/codegen/expr_gen.rs-3896-                        )
+src/ir/codegen/expr_gen.rs-3897-                    } else if is_dict {
+src/ir/codegen/expr_gen.rs-3898-                        // HashMap 索引：dict[key] 返回 &V（LZ ref 语义）或 V 值
+src/ir/codegen/expr_gen.rs-3899-                        // ref 返回上下文（get/set_default 返回 Option<ref V>/ref V）用
+src/ir/codegen/expr_gen.rs-3900-                        // .get(&key).unwrap()（&V），否则 .cloned().unwrap()（V 值）
+--
+src/ir/codegen/expr_gen.rs-3950-                                &self.current_ret_ty,
+src/ir/codegen/expr_gen.rs-3951-                                Some(IrType::Str)
+src/ir/codegen/expr_gen.rs-3952-                            ) || matches!(&self.current_ret_ty, Some(IrType::Named { path, .. })
+src/ir/codegen/expr_gen.rs-3953-                                if path == "str" || path == "String")
+src/ir/codegen/expr_gen.rs-3954-                                || matches!(&self.current_fn_ret_ty, Some(IrType::Str))
+src/ir/codegen/expr_gen.rs-3955-                                || matches!(&self.current_fn_ret_ty, Some(IrType::Named { path, .. })
+src/ir/codegen/expr_gen.rs-3956-                                if path == "str" || path == "String")
+src/ir/codegen/expr_gen.rs-3957-
+src/ir/codegen/expr_gen.rs:3958:                                // 调用参数/构造器上下文：期望类型在 current_expected_ty
+src/ir/codegen/expr_gen.rs:3959:                                // （如 ParseError::UnexpectedChar(pos, ch: str)）
+src/ir/codegen/expr_gen.rs:3960:                                || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Str))
+src/ir/codegen/expr_gen.rs:3961:                                || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Named { path, .. })
+
+[Results capped at 50 matches]

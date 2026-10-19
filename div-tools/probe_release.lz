@@ -1,0 +1,4 @@
+def main() = {
+    let n: int = 42
+    print(n.to_string())
+}

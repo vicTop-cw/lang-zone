@@ -1,0 +1,18 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r19","assignee":"human_steward","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0r19","omega_strong_verify":true,"laya_auto":true,"reinject_context":true,"spec":"[{\"id\":\"A1\",\"title\":\"新增端到端闸门\",\"goal\":\"把本轮实跑取证但无闸门的路径固化为 tests/lzc_loop_boundary_gates.rs（仅新增测试文件）\",\"acceptance\":\"新闸门全绿；全量门禁无新增失败且测试数 +4\",\"constraints\":[\"不修改 src/**\",\"依赖 IR 复发病例不得入闸\"]},{\"id\":\"A2\",\"title\":\"新发现 IR 回归入账\",\"goal\":\"BUG-14（裸 num_* import 复发）/ BUG-15（四层嵌套空列表 E0308 复发）入账并避让\",\"acceptance\":\"两单带最小复现与对照证据入库\",\"constraints\":[\"只入账不修 IR\"]}]","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"claim","arguments":{"task_id":"T0r19.1.1","assignee":"human_steward","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r19.1.1","content":"A1 新增 tests/lzc_loop_boundary_gates.rs：畸形输入 Parse error 拒绝（6 例）、未绑定变量/参数个数不匹配 Semantic error 拒绝、UTF-8 字符串端到端；bigint/complex/四层嵌套空列表因 IR 复发暂不入闸（注释留位）。","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r19.1.1","verdict":"approve","note":"仅新增测试文件，非 IR 域","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r19.1.1","by":"human_steward","deliverable":"tests/lzc_loop_boundary_gates.rs","summary":"4 用例全绿；全量门禁 734/1 -> 738/1（+4，无新增失败）","evidence":["tests/lzc_loop_boundary_gates.rs",".fist-loop-20260927/_gate_adv_r1.txt"],"now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r19.1.1","by":"human_steward","deliverable":"tests/lzc_loop_boundary_gates.rs（4 用例）","summary":"边界闸门交付","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r19.1.1","by":"verifier","verdict":"pass","summary":"新闸门 4/4 绿，全量门禁无新增失败","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r19.1.1","verifier":"verifier","pass":true,"note":"交付物硬门满足","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"claim","arguments":{"task_id":"T0r19.1.2","assignee":"human_steward","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r19.1.2","content":"A2 把推进环节发现的两项 IR 回归（BUG-14 裸 num_* import、BUG-15 四层嵌套空列表）入账避让。","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r19.1.2","verdict":"approve","note":"只入账不修","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r19.1.2","by":"human_steward","deliverable":"BUG-14 / BUG-15","summary":"两单均附最小复现、生成码证据与「09-28 通过 / 09-29 失败」回归对照","evidence":["memory/bugs-lzc-loop-20260927.md"],"now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r19.1.2","by":"human_steward","deliverable":"BUG-14 / BUG-15 入账","summary":"IR 回归入账完成","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r19.1.2","by":"verifier","verdict":"pass","summary":"两单均含最小复现与对照证据","now":"2026-09-29T10:15:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r19.1.2","verifier":"verifier","pass":true,"note":"入账合规","now":"2026-09-29T10:15:00+08:00"}}
+]

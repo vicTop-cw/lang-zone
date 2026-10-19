@@ -1,0 +1,20 @@
+diff --git a/src/ir/codegen/mod.rs b/src/ir/codegen/mod.rs
+index 8f7e208..4afb986 100644
+--- a/src/ir/codegen/mod.rs
++++ b/src/ir/codegen/mod.rs
+@@ -13,0 +14,1 @@ pub mod moddec_emit;
++mod cap_hint;
+@@ -17,0 +19,1 @@ mod magic_gen;
++mod marks;
+@@ -36,0 +39,3 @@ pub(crate) use helpers::collect_var_refs;
++// 方向 E 的产物形态开关（CLI `--stmt-marks` 入口）
++pub use marks::set_stmt_marks;
++
+@@ -340,0 +346,4 @@ pub struct CodeGen {
++    /// 方向 E：`[]` 字面量 + 紧随其后的纯 push 循环 → 预分配容量（Rust 表达式文本）。
++    /// 由 gen_block_inner 的相邻语句前瞻写入，空列表字面量发射处 `take` 一次。
++    /// gen_expr 走 `&self`（内部 RefCell 承担可变状态），故用 RefCell 而非裸字段。
++    vec_cap_hint: std::cell::RefCell<Option<String>>,
+@@ -465,0 +475,2 @@ impl CodeGen {
++            // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
++            vec_cap_hint: std::cell::RefCell::new(None),

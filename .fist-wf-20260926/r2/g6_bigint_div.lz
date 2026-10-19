@@ -1,0 +1,6 @@
+def main() =
+    let x: bigint = BigInt::from(100)
+    let y: bigint = x / BigInt::from(7)
+    let z: bigint = x % BigInt::from(7)
+    println(y)
+    println(z)

@@ -1,0 +1,4 @@
+def addbig(a: bigint, b: bigint) -> bigint =
+    a + b
+def main() =
+    println(addbig(12345678901234567890, 1))

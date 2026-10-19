@@ -1,0 +1,31 @@
+=== combo-defer-guard ===
+body
+defer_3
+defer_2
+defer_1
+finally:10
+positive:10
+negative
+is_five
+10
+0
+attempted
+cleanup_step
+100
+-100
+open:hello
+close:hello
+defer_cleanup
+5
+open:
+close:
+defer_cleanup
+0
+50
+-1
+open:a.txt
+nested_work
+close:a.txt
+success
+caught
+combo-defer-guard done

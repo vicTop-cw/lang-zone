@@ -1,0 +1,5 @@
+def f() -> List<int> =
+    let xs = [1, 2, 3]
+    [x * 2 for x in xs]
+print(f())
+

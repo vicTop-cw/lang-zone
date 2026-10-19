@@ -1,0 +1,17 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r23.1.1","assignee":"human_steward","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r23.1.1","content":"C1 BUG-16 闭环：src/main.rs 新增 read_source_lossy（复用 lang_zone::util::platform::strip_bom），主编译路径/模块预加载/宏导入三处改用；tests 增 utf8_bom_source_is_accepted。","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r23.1.1","verdict":"approve","note":"非 IR 域，最小改动","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r23.1.1","by":"human_steward","deliverable":"src/main.rs（+14/-3）、tests/lzc_loop_boundary_gates.rs（+17/-1）","summary":"BOM 最小复现 n16/n01 由 Parse error 转为正常编译；新闸门 7/7 绿；全量门禁 740/1 -> 741/1（+1 无新增失败）；commit ddf6e6b","evidence":["src/main.rs","tests/lzc_loop_boundary_gates.rs",".fist-loop-20260927/_gate_fix_r2.txt"],"now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r23.1.1","by":"human_steward","deliverable":"BUG-16 修复 + 闸门","summary":"BUG-16 闭环","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r23.1.1","by":"verifier","verdict":"pass","summary":"最小复现转绿、闸门绿、全量门禁无新增失败","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r23.1.1","verifier":"verifier","pass":true,"note":"交付物硬门满足","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"claim","arguments":{"task_id":"T0r23.1.2","assignee":"human_steward","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r23.1.2","content":"C2 OPEN 单避让盘点：逐单确认落点，src/ir 者标记避让待人工裁定。","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r23.1.2","verdict":"approve","note":"只入账不修 IR","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r23.1.2","by":"human_steward","deliverable":"账本 C2 段","summary":"本轮可闭环 2 单（BUG-6 推进环节 / BUG-16 本环节）；余下 BUG-3/4/5/6(残留端到端)/7/8/9/11/12/14/15 落 src/ir 标记避让；BUG-2→BUG-13、BUG-10 待人工裁定","evidence":[".fist-loop-20260927/loop_progress.md"],"now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r23.1.2","by":"human_steward","deliverable":"避让盘点表","summary":"C2 完成","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r23.1.2","by":"verifier","verdict":"pass","summary":"逐单给出归属","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r23.1.2","verifier":"verifier","pass":true,"note":"盘点交付物齐备","now":"2026-09-29T12:25:00+08:00"}},
+ {"name":"call_log","arguments":{"limit":25,"now":"2026-09-29T12:25:00+08:00"}}
+]

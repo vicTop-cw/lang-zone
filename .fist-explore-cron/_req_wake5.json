@@ -1,0 +1,3 @@
+[
+ {"name":"bug_mark_status","arguments":{"project_dir":".","bug_id":"BUG-1","status":"FALSE_POSITIVE","note":"冷启动 Step0 落点试例，非真实缺陷；落点已定死为 ./. -> ./memory/bugs.md","now":"2026-09-29T13:26:00+08:00"}}
+]

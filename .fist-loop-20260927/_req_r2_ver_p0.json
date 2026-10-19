@@ -1,0 +1,3 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","description":"[lzc-loop:验证:R2] 四门禁实跑（R2）：cargo test 全量 / DEMO 全量回归（排除 99_errors 与 lz_std）/ golden 快照对账 / 测试数只增不减 + omega_status 盘点 + PROJECT-SPEC/04 进度报告落盘","created_by":"human_steward","namespace":"lzc-loop-20260927","now":"2026-09-29T12:35:00+08:00"}}
+]

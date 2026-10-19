@@ -1,0 +1,7 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0","assignee":"lang-zone-explore-cron","now":"2026-09-30T09:10:00+08:00"}},
+ {"name":"conflicts_check","arguments":{"task_id":"T0","assignee":"lang-zone-explore-cron","now":"2026-09-30T09:10:00+08:00"}},
+ {"name":"heartbeat","arguments":{"task_id":"T0","signal":"running","now":"2026-09-30T09:10:00+08:00"}},
+ {"name":"output_validate","arguments":{"project_dir":".","artifacts":[{"path":"prompts/20260929.13.15.00.md","contains":"chosen_mode"},{"path":"memory/bugs.md","min_chars":1}],"evidence":"c=1（文档词+0；子树0+0；提及既有失败项+1；LADDER 档 易 限定 0..2）| chosen_mode=verify | parallel_requested=0 | blocked_by=none（单模式不进入并行四道门）| dispatched=T0（ns=lz-explore）| scope=memory/reviews/ reserved=true | signals: cargo test 741/1（--lib 420/0）；DEMO 312->ok295/rc16/lz1（unexpected≠0 红）；golden 绿；git status 99；DEMO .lz 347","require_evidence":true,"now":"2026-09-30T09:10:00+08:00"}},
+ {"name":"reserve_release","arguments":{"scope":"memory/reviews/","agent":"lang-zone-explore-cron"}}
+]

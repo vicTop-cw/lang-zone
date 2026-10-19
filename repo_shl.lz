@@ -1,0 +1,18 @@
+struct Bits =
+    v: int
+
+impl Bits =
+    def __shl__(self, o: Bits) -> Bits =
+        Bits(v: self.v * (2 ** o.v))
+    def __shr__(self, o: Bits) -> Bits =
+        Bits(v: self.v // (2 ** o.v))
+    def to_string(self) -> str =
+        "Bits(" + self.v.to_string() + ")"
+
+def main() =
+    let p = Bits(v: 8)
+    let q = Bits(v: 2)
+    let r = p << q
+    print(r.to_string())
+    let s = p >> Bits(v: 1)
+    print(s.to_string())

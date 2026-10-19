@@ -1,0 +1,45 @@
+ M .codeartsdoer/.codebase/file-index.db
+ M .codeartsdoer/.codebase/upload_state.json
+ M .codeartsdoer/mcp/mcp_settings.json
+ M DEMO/lz_std/iter.lz
+ M DEMO/lz_std/traits.lz
+ M FIND_BUG/FIND_BUG.md
+ M lz_builtins/src/lib.rs
+ M src/ast/mod.rs
+ M src/bridge/python.rs
+ M src/cli.rs
+ M src/hotreload.rs
+ M src/ir/builder.rs
+ M src/ir/codegen/mod.rs
+ M src/ir/lz_codegen_lib.rs
+ M src/ir/types.rs
+ M src/main.rs
+ M src/parser/expr.rs
+ M src/typer/mod.rs
+ M tests/bridge_embed.rs
+ M tests/demo_codegen_compile.rs
+ M tests/dual_route_golden.rs
+ M tests/find_bug_bugs.rs
+ M tests/find_bug_libs.rs
+ M tests/g6_codegen.rs
+ M tests/gen_build_block.rs
+ M tests/incremental_golden.rs
+ M tests/ir_pass_fixes.rs
+ M tests/lz_ir_bootstrap.rs
+ M tests/lz_semantic_cases.rs
+ M tests/moddec_product_assert.rs
+?? .codebuddy/plans/
+?? .fist-hunt-20260926/
+?? .fist-loop-20260927/
+?? .fist-night/
+?? .fist-wf-20260926/
+?? CY/test_all.py
+?? FIND_BUG/hunt-20260926/
+?? bug3.md
+?? "docs/DEMO\345\237\272\347\272\277\345\244\261\350\264\245\344\277\256\345\244\215\346\212\245\345\221\212-2026-09-26.md"
+?? docs/str-boundary-contract-2026-09-27.md
+?? fist-mbt.db-shm
+?? fist-mbt.db-wal
+?? memory/
+?? src/ir/codegen/str_boundary.rs
+?? tests/str_boundary.rs

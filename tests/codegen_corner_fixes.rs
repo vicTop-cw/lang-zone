@@ -937,4 +937,23 @@ def main() =
     let ok = run_lz("generator_yield_none", src);
     assert!(ok.ok, "生成器 yield None + Some(1)：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(None)");
+}// BUG-292：生成器 if 分支体内 `return`（语句位置的 if 是 Stmt::ExprStmt 包裹
+// ExprKind::IfExpr，原 ir_block_has_yield / rewrite_iterator_returns 均未下钻
+// Stmt::ExprStmt）。旧行为：return 未重写为 raise → codegen 生成
+// panic!("generator return")（TEMP/probe/sweep6/gen_nested_if_ret.lz）。
+#[test]
+fn generator_if_return() {
+    let src = r#"
+def gen():
+    if true:
+        yield 1
+        return
+    yield 2
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_if_return", src);
+    assert!(ok.ok, "生成器 if 内 return：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
 }

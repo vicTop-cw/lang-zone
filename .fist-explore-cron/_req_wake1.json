@@ -1,0 +1,6 @@
+[
+ {"name":"report_bug","arguments":{"project_dir":".","summary":"[explore 落点试例] 冷启动 Step0：测定 report_bug 在本 cwd 下的落盘位置（试例，不污染项目账本）","detail":"server cwd = E:\\IDEProjects\\AI\\lang-zone\\.fist-explore-cron；project_dir=\".\" 。测定后按冷启动清单处理试例。","severity":"low","publish_task":false,"now":"2026-09-29T13:05:00+08:00"}},
+ {"name":"watchdog_tick","arguments":{"mode":"explore","namespace":"lz-explore","meta_prompt_path":"E:\\IDEProjects\\AI\\FIST-Mbt\\templates\\pipeline_mode_explore.md","timeout_sec":2400,"next_created_by":"watchdog","now":"2026-09-29T13:05:00+08:00"}},
+ {"name":"mode_list","arguments":{}},
+ {"name":"mode_templates","arguments":{}}
+]

@@ -1,0 +1,6 @@
+// C05 consumer: import a package that was published with `lang-zone push`.
+import mathlib
+
+def main() =
+    assert cube(3) == 27
+    print("C05 OK")

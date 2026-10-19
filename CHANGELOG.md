@@ -372,4 +372,10 @@ demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-289**：
   `scan_iterator_yield_ty` 对 `NoneLit` 返回 `Any` → 归一 `i64` →
   `Vec<i64>` 却 `push(Option::None)` E0308。修法：yield None 返回
   `Option(Any)`（归一 `Option<i64>`），生成器返回类型 `Vec<Option<i64>>`。
-  新增回归 generator_yield_none。
+  新增回归 generator_yield_none。- **BUG-292**：生成器 `if true: yield 1; return` 分支体内 `return` 未重写为
+  `raise`。LZ 语句位置的 if 是 `Stmt::ExprStmt` 包裹 `ExprKind::IfExpr`，
+  原 `ir_block_has_yield` / `rewrite_iterator_returns` 均未下钻
+  `Stmt::ExprStmt` → codegen 生成 `panic!("generator return")`。
+  修法：两处均补 `Stmt::ExprStmt` 分支，经新增 `ir_expr_has_yield` /
+  `rewrite_expr_returns` 递归下钻 `ExprKind::IfExpr` / `BlockExpr`。
+  新增回归 generator_if_return。

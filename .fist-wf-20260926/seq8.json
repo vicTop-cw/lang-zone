@@ -1,0 +1,14 @@
+[
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.1.1", "content": "验收语料：hunt-20260926 五项确诊 bug（BUG-1~5）必须在基线二进制上 100% 复现——A: bigint/complex 孤立编译 E0432；B: BigInt const 裸 i128 E0308；C: BigInt const 运算 E0015；D: 函数体 bigint 坍塌 i128 E0308/E0277；E: 三层嵌套空列表下推 E0308。证据：repro.ps1 全跑 + 每项 rustc 实际报错码", "author": "spec_author", "max_rounds": 3}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.1.2", "content": "验收语料：新寻虫至少覆盖 issue_scan 规则扫描（留痕）+ 对抗样例探针（BigInt 相邻位形：struct 字段/返回类型/混合嵌套），新发现按 report_bug 入账 bugs.md", "author": "spec_author", "max_rounds": 3}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.1.1", "verdict": "approve", "reviewer": "verifier", "reason": "语料判据明确可核验：五个复现命令文档 + 报错码口径齐全"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.1.2", "verdict": "approve", "reviewer": "verifier", "reason": "扫描+对抗双路线覆盖，入账路径明确"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.1.1", "deliverable": "复现报告：BUG-1~5 全部 100% 复现（A:E0432×2 / B:E0308 / C:E0015 / D:E0308+E0277 / E:E0308×2），证据 repro.ps1 输出与 .fist-wf-20260926/tmp 产物", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.1.2", "deliverable": "issue_scan(src,lz_builtins)=0 findings 留痕；对抗样例确诊 BUG-6（bigint 注解支持位不一致）已 report_bug 入账 memory/bugs.md", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "submit", "args": {"task_id": "T0r8.1.1", "now": "2026-09-26T16:30:00Z"}},
+  {"tool": "submit", "args": {"task_id": "T0r8.1.2", "now": "2026-09-26T16:30:05Z"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.1.1", "verdict": "pass", "reviewer": "verifier", "reason": "五项复现报错码与账本一致，复现率 5/5"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.1.2", "verdict": "pass", "reviewer": "verifier", "reason": "BUG-6 已入账且可复现；扫描留痕完整"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.1.1", "verifier": "CodeBuddyMain", "now": "2026-09-26T16:31:00Z"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.1.2", "verifier": "CodeBuddyMain", "now": "2026-09-26T16:31:05Z"}}
+]

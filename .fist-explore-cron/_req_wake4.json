@@ -1,0 +1,4 @@
+[
+ {"name":"output_validate","arguments":{"project_dir":".","artifacts":[{"path":"prompts/20260929.13.15.00.md","contains":"chosen_mode"}],"evidence":{"c":"1","basis":"文档词+0；子树0+0；提及既有失败项+1；LADDER 档 易 限定 0..2","chosen_mode":"verify","parallel_requested":"0","blocked_by":"none","signals":"cargo test 741/1；DEMO 312->ok295/rc16/lz1；golden 绿；git status 99；DEMO .lz 347"},"require_evidence":true,"now":"2026-09-29T13:24:00+08:00"}},
+ {"name":"bug_mark_status","arguments":{"project_dir":".","bug_id":"BUG-1","status":"resolved","now":"2026-09-29T13:24:00+08:00"}}
+]

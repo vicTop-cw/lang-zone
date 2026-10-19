@@ -1,0 +1,18 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r20","assignee":"human_steward","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0r20","omega_strong_verify":true,"laya_auto":true,"reinject_context":true,"spec":"[{\"id\":\"B1\",\"title\":\"BUG-6 清偿（非 IR 域）\",\"goal\":\"src/ast/mod.rs builtin_type_names 补入 bigint/complex，使 struct 字段 / 函数参数 / 返回位注解不再误报未知类型\",\"acceptance\":\"三个注解位 lang-zone 前端接受；未知类型仍被拒\",\"constraints\":[\"不触碰 src/ir/**\",\"最小改动\"]},{\"id\":\"B2\",\"title\":\"双向闸门 + 门禁复核\",\"goal\":\"新增 bigint_complex_annotations_are_accepted 与 unknown_type_annotation_is_still_rejected；全量 cargo test 复核无新增失败\",\"acceptance\":\"新闸门绿；全量门禁 passed 只增、failed 不增\",\"constraints\":[\"门禁新增失败即回滚\"]}]","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"claim","arguments":{"task_id":"T0r20.1.1","assignee":"human_steward","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r20.1.1","content":"B1：src/ast/mod.rs builtin_type_names 增加 \"bigint\"/\"complex\"（含注释说明 BUG-6 与 IR 侧已支持的映射）。","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r20.1.1","verdict":"approve","note":"非 IR 域，最小改动","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r20.1.1","by":"human_steward","deliverable":"src/ast/mod.rs","summary":"补入 bigint/complex 后：struct 字段位、函数参数+返回位、complex 注解位三个探针 lang-zone 均零退出（修复前报「未知类型: bigint」）","evidence":["src/ast/mod.rs"],"now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r20.1.1","by":"human_steward","deliverable":"src/ast/mod.rs（+5）","summary":"BUG-6 前端侧修复","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r20.1.1","by":"verifier","verdict":"pass","summary":"三个注解位实跑接受，符合 acceptance","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r20.1.1","verifier":"verifier","pass":true,"note":"交付物硬门满足","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"claim","arguments":{"task_id":"T0r20.1.2","assignee":"human_steward","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r20.1.2","content":"B2：tests/lzc_loop_boundary_gates.rs 增 accept_lz 助手 + bigint_complex_annotations_are_accepted + unknown_type_annotation_is_still_rejected，并跑全量门禁。","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r20.1.2","verdict":"approve","note":"双向闸门防放宽过度","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r20.1.2","by":"human_steward","deliverable":"tests/lzc_loop_boundary_gates.rs","summary":"新闸门 6/6 绿；全量 cargo test 738/1 -> 740/1（+2，无新增失败）","evidence":["tests/lzc_loop_boundary_gates.rs",".fist-loop-20260927/_gate_adv_r2.txt"],"now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r20.1.2","by":"human_steward","deliverable":"tests/lzc_loop_boundary_gates.rs（+49）","summary":"双向闸门交付","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r20.1.2","by":"verifier","verdict":"pass","summary":"闸门绿且全量门禁无新增失败","now":"2026-09-29T11:10:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r20.1.2","verifier":"verifier","pass":true,"note":"交付物硬门满足","now":"2026-09-29T11:10:00+08:00"}}
+]

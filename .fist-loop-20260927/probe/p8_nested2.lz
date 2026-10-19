@@ -1,0 +1,7 @@
+def outer(a: int) -> int =
+    def mid(b: int) -> int =
+        def leaf(c: int) -> int = c * 2
+        leaf(b) + 1
+    mid(a) + 1
+print(outer(3))
+

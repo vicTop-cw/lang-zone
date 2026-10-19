@@ -1,0 +1,6 @@
+
+thread 'main' (77724) panicked at E:\IDEProjects\AI\lang-zone\DEMO\01_basics\polish_01_literals.rs:61:5:
+assertion `left == right` failed
+  left: "hello LZ"
+ right: "hello \"LZ\""
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

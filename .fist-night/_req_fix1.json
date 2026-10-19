@@ -1,0 +1,3 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","namespace":"default","description":"[night:2026-09-26-night:R1-修复] lang-zone 夜间循环 R1 修复：清偿缺陷账 OPEN 单（BUG-N1/N2 最小修复 + 隔离副本实跑验证；BUG-N3 语义级挂账）","priority":"高","importance":"高","now":"2026-09-27T03:12:00+08:00"}}
+]

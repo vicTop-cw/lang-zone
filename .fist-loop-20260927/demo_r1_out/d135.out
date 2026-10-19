@@ -1,0 +1,14 @@
+Vector(4.0, 6.0) Vector(2.0, 2.0) Vector(5.0, 10.0) true
+true
+false
+Point(1, 2)
+10 20
+3
+25
+42
+opening test.txt
+"test.txt"
+closing test.txt
+localhost 8080 false
+acc1 is active
+acc2 is inactive

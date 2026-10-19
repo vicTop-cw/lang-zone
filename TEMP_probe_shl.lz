@@ -1,0 +1,11 @@
+struct Bits:
+    val: int
+    def __shl__(self, other: int) -> Bits:
+        return Bits(val=self.val * (2 ** other))
+    def __shr__(self, other: int) -> Bits:
+        return Bits(val=self.val // (2 ** other))
+
+def main():
+    let b = Bits(val=8)
+    print((b << 2).val)
+    print((b >> 1).val)

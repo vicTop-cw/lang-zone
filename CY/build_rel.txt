@@ -1,0 +1,11 @@
+   Compiling unicode-ident v1.0.27
+   Compiling serde_json v1.0.154
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling syn v3.0.9
+   Compiling serde_derive v1.0.229
+   Compiling serde v1.0.229
+   Compiling bincode v1.3.3
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+   Compiling lzcyc v0.1.0 (E:\IDEProjects\AI\lang-zone\CY)
+    Finished `release` profile [optimized] target(s) in 2m 17s

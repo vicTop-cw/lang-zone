@@ -1,0 +1,7 @@
+def main() =
+    mut s = ""
+    mut i = 0
+    while i < 20000:
+        s = s + "ab"
+        i = i + 1
+    print(s.len())

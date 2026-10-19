@@ -1,0 +1,22 @@
+def sieve(n: int) -> int =
+    mut count = 0
+    mut is_prime: List<bool> = []
+    for i in range(n + 1):
+        is_prime.push(true)
+    is_prime[0] = false
+    is_prime[1] = false
+    mut p = 2
+    while p * p <= n:
+        if is_prime[p]:
+            mut multiple = p * p
+            while multiple <= n:
+                is_prime[multiple] = false
+                multiple = multiple + p
+        p = p + 1
+    for i in range(n + 1):
+        if is_prime[i]:
+            count = count + 1
+    count
+
+def main() =
+    print(sieve(4000000))

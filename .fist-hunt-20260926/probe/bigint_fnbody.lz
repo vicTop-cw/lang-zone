@@ -1,0 +1,4 @@
+def main() =
+    let x: bigint = 12345678901234567890
+    let y: bigint = x * 100
+    println(y)

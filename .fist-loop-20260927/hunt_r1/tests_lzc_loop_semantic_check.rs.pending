@@ -1,0 +1,132 @@
+// Lang-Zone 编译器 — tests/lzc_loop_semantic_check.rs
+//
+// lzc-loop 修复 R1（非 IR 域）回归闸门：未定义函数调用必须编译期报错。
+//
+// 背景（缺陷 BUG-2，lzc-loop 寻虫 R1 确诊）：
+// `def main() = println(foo())` 此前**静默编译通过** —— semantic_check 的
+// Expr::Call 分支显式跳过 func 位置的 Ident 检查，IR/codegen 随之为未知外部函数
+// 生成 `fn NAME(__a0: i64) -> i64 { i64::MAX }` 桩，程序能运行但输出错误结果
+// 9223372036854775807。本闸门锁死「未知 callee → Semantic error」这一契约。
+//
+// 对照口径：未绑定**变量** `println(zzz)` 早已被拒绝（未绑定变量），
+// 未定义**函数**现与之对齐。
+//
+// 设计原则（PROJECT-SPEC/03 §2）：用例只增不删；LZ 源码 → lang-zone → rustc → 运行 → 断言。
+
+use std::path::PathBuf;
+use std::process::Command;
+
+fn builtins_rlib() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug");
+    let direct = dir.join("liblz_builtins.rlib");
+    if direct.exists() {
+        return direct;
+    }
+    let deps = dir.join("deps");
+    if let Ok(entries) = std::fs::read_dir(&deps) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
+                return e.path();
+            }
+        }
+    }
+    panic!("lz_builtins rlib not found under target/debug");
+}
+
+/// 编译并运行单个 .lz 源，返回运行 stdout；任一环节失败则 panic 并附诊断
+fn run_lz(name: &str, source: &str) -> String {
+    let work = std::env::temp_dir().join(format!("lzc_loop_sem_{name}"));
+    let _ = std::fs::create_dir_all(&work);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "[{name}] lang-zone 编译失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let rs = lz.with_extension("rs");
+    assert!(rs.exists(), "[{name}] 未生成 .rs 产物");
+    let exe = lz.with_extension("exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs)
+        .arg("-L")
+        .arg(format!(
+            "dependency={}/target/debug/deps",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins_rlib().display()))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rc.status.success(),
+        "[{name}] rustc 编译失败:\n{}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    let run = Command::new(&exe).output().expect("run generated binary");
+    assert!(
+        run.status.success(),
+        "[{name}] 运行失败: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    String::from_utf8_lossy(&run.stdout).trim().to_string()
+}
+
+/// 期望 **被拒绝** 的 .lz：lang-zone 必须非零退出，且 stderr 含 `needle`
+fn reject_lz(name: &str, source: &str, needle: &str) {
+    let work = std::env::temp_dir().join(format!("lzc_loop_sem_rej_{name}"));
+    let _ = std::fs::create_dir_all(&work);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz).output().expect("run lang-zone");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(
+        !out.status.success(),
+        "[{name}] 期望被拒绝，但 lang-zone 编译成功（缺陷回归：未知函数被静默接受）"
+    );
+    assert!(
+        stderr.contains(needle),
+        "[{name}] 期望错误信息含 `{needle}`，实际 stderr:\n{stderr}"
+    );
+}
+
+/// 缺陷闸门：未定义函数 `foo()` 必须在编译期被拒绝
+#[test]
+fn undefined_function_call_is_rejected() {
+    reject_lz(
+        "undefined_fn",
+        "def main() =\n    println(foo())\n",
+        "未定义函数: foo",
+    );
+}
+
+/// 反向闸门 1：本模块已定义函数照常调用（不得误伤前向/后向引用）
+#[test]
+fn defined_function_call_is_accepted() {
+    let out = run_lz(
+        "defined_fn",
+        "def add(a: int, b: int) -> int =\n    a + b\n\ndef main() =\n    println(add(40, 2))\n",
+    );
+    assert_eq!(out, "42", "已定义函数调用应正常编译运行并输出 42");
+}
+
+/// 反向闸门 2：前向引用（被调用者定义在调用者之后）不得被误判为未定义
+#[test]
+fn forward_reference_call_is_accepted() {
+    let out = run_lz(
+        "forward_ref",
+        "def main() =\n    println(later())\n\ndef later() -> int =\n    7\n",
+    );
+    assert_eq!(out, "7", "前向引用函数应正常解析");
+}

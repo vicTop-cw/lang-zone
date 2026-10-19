@@ -1,0 +1,5 @@
+[
+ {"name":"project_standards","arguments":{"project_dir":"..","now":"2026-09-27T12:10:00+08:00"}},
+ {"name":"publish","arguments":{"project_dir":"..","description":"[lzc-loop:推进:R1] lang-zone 主编译器循环推进（非 IR 域）：清偿非 IR 侧可落地项 + BigInt/Complex 端到端支撑面 + 前端/CLI 能力推进，IR 上游只读避让","created_by":"human_steward","namespace":"lzc-loop-20260927","now":"2026-09-27T12:10:00+08:00"}},
+ {"name":"report_bug","arguments":{"project_dir":".","summary":"[lzc-loop 落点试例] Step0 落点口径测定（测完即留档于任务库本地账本，不污染项目账本）","detail":"server cwd = .fist-loop-20260927；本条用于确认 project_dir 相对 cwd 的解析落点。","severity":"low","publish_task":false,"now":"2026-09-27T12:10:00+08:00"}}
+]

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fist-mbt": {
+      "command": "fist-mbt",
+      "args": ["serve"]
+    }
+  }
+}

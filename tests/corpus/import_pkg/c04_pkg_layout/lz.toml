@@ -1,0 +1,4 @@
+# C04: multi-file package layout (entry + sibling modules)
+name = "c04pkg"
+version = "0.1.0"
+entry = "src/main.lz"

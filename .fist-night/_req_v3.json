@@ -1,0 +1,5 @@
+[{"name":"list_tools","arguments":{"now":"2026-09-27T06:09:00+08:00"}},
+ {"name":"help","arguments":{"now":"2026-09-27T06:09:00+08:00"}},
+ {"name":"tools","arguments":{"now":"2026-09-27T06:09:00+08:00"}},
+ {"name":"manifest","arguments":{"now":"2026-09-27T06:09:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0r9","split_n":1,"by":"night-executor","title":"R1-验证","description":"probe","spec":"{}","now":"2026-09-27T06:09:00+08:00"}}]

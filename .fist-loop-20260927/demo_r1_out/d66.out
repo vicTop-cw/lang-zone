@@ -1,0 +1,6 @@
+list: [1, 2, 3, 4], first: 1, len: 5, popped: Some(5)
+alice is 30
+math: 95.5
+has rust: true, has java: false
+set has 3: true
+[1.1, 2.2, 3.3] {1: "one", 2: "two"} {true, false}

@@ -1,0 +1,6 @@
+def g(d: Dict<str,int>) -> int =
+    match d:
+        {"a": v} => v
+        _ => 0
+print(g({"a": 1}))
+

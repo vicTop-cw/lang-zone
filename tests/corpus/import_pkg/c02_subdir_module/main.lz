@@ -1,0 +1,6 @@
+// C02 consumer: import a module that lives in a subdirectory
+import mathx.util
+
+def main() =
+    assert twice(21) == 42
+    print("C02 OK")

@@ -1,0 +1,25 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r2.1.1","assignee":"human_steward","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r2.1.1","content":"H1 审查报告复核：对 memory/bugs.md BUG-1~6 逐条用 FIND_BUG/hunt-20260926 样例实测（lang-zone→rustc→run），判定 CURRENT/已修；IR 域落点标 [ir-upstream]。交付：复核表 + 证据输出。","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r2.1.1","verdict":"approve","note":"覆盖 6 单全量实测，产出可复现结论","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r2.1.1","by":"human_steward","deliverable":"memory/bugs-lzc-loop-20260927.md 第一节复核表","summary":"BUG-1~6 六单复现实测：全部 rustc 通过且运行输出正确（bigint/complex/LazyLock/三层空列表/bigint 注解位），判定已修未销账","evidence":[".fist-loop-20260927/hunt_r1/bigint_min.rs",".fist-loop-20260927/hunt_r1/rv_list3.rs"],"now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r2.1.1","by":"human_steward","deliverable":"memory/bugs-lzc-loop-20260927.md 第一节复核表","summary":"存量 6 单复核结论：全部已修","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r2.1.1","by":"verifier","verdict":"pass","summary":"每条均有 rustc+运行输出实证；结论与实跑一致","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r2.1.1","by":"verifier","pass":true,"note":"H1 硬门：6 单逐条实测证据齐备","now":"2026-09-28T10:50:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r2.1.2","assignee":"human_steward","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r2.1.2","content":"H2 对抗样例：dict 推导式 over 列表变量（上轮转结）+ BigInt/Complex 边界 + 空/超深嵌套/截断/混合编码/畸形输入，逐个 lang-zone→rustc→run，提炼最小复现。","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r2.1.2","verdict":"approve","note":"含转结项优先复核","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r2.1.2","by":"human_steward","deliverable":".fist-loop-20260927/hunt_r1/probes/（39 例）+ memory/bugs-lzc-loop-20260927.md 第二节","summary":"转结项 dict 推导式已转绿（{\"k\": 3}）；新确诊 5 单：未定义函数桩/超 i128 字面量/bigint 形参/负号 bigint/字符串越界静默 0","evidence":[".fist-loop-20260927/hunt_r1/probes/m19_undefined_fn.lz",".fist-loop-20260927/hunt_r1/probes/m10_int_i128max_p1.lz",".fist-loop-20260927/hunt_r1/probes/p03_bigint_neg.lz"],"now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r2.1.2","by":"human_steward","deliverable":"39 例对抗样例 + 5 单最小复现","summary":"对抗样例狩猎完成","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r2.1.2","by":"verifier","verdict":"pass","summary":"每个缺陷均附可复现 .lz 与实跑输出；无复现者进观察区不入账","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r2.1.2","by":"verifier","pass":true,"note":"H2 硬门：最小复现齐备 + 观察区单列","now":"2026-09-28T10:50:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r2.2.1","assignee":"human_steward","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r2.2.1","content":"H3 模式化读码：扫描 src/（排除 src/ir 修改面）与 lz_builtins/ 的裸 unwrap/panic/expect/未门控调试输出/整除/越界切片。","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r2.2.1","verdict":"approve","note":"只找不修","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r2.2.1","by":"human_steward","deliverable":"BUG-7（src/ir/builder.rs:12825 未门控 DBG）+ 非 IR 侧 eprintln 全量排查结论","summary":"src/cli.rs/main.rs/hotreload.rs/typer 的 eprintln 均为合法用户面输出；lz_builtins 零 eprintln/dbg!；唯一未门控调试输出在 src/ir/builder.rs:12825","evidence":["memory/bugs-lzc-loop-20260927.md"],"now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r2.2.1","by":"human_steward","deliverable":"H3 排查结论 + BUG-7","summary":"模式化读码完成","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r2.2.1","by":"verifier","verdict":"pass","summary":"扫描覆盖非 IR 全部 eprintln 点并逐条判定","now":"2026-09-28T10:50:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r2.2.1","by":"verifier","pass":true,"note":"H3 硬门：可达性判定齐全","now":"2026-09-28T10:50:00+08:00"}}
+]

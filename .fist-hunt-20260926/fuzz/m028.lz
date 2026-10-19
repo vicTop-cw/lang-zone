@@ -1,0 +1,62 @@
+// ============================================================
+// 04_functions / generics.lz
+// 覆盖: 03b-函数泛型.md — <T>、trait 约束、where 子句、
+//       泛型默认参数类型、错误语法边界
+// ============================================================
+
+// ── 1. 基本泛型 ────────────────────────────────────────
+def identity<T>(x: T) -> T = x
+
+def first<T>(a: T, b: T) -> T = a
+
+// ── 2. 带约束的泛型（trait 约束）────────────────────────
+def larger<T: PartialOrder>(a: T, b: T) -> T =
+    if a > b:
+        a
+    else:
+        b
+
+// ── 3. where 子句 ─────────────────────────────────────
+def clone_all<T>(items: List<T>) -> List<T> where T: Clone =
+    result: List<T> = []
+    for item in items:
+        push(result, item)
+    result
+
+// ── 4. 泛型默认参数类型 ────────────────────────────────
+def make_pair<T = int>(x: T, y: T) -> (T, T) =
+    (x, y)
+
+// ── 5. 混合泛型 + trait 约束 + 默认类型 ─────────h��──────
+def wrap_or_default<T: Display = str>(val: T, prefix: str) -> str =
+    f"{prefix}: {val}"
+
+// ── 6. 多泛型参数 ─────────────────────────────────────
+def convert<A, B>(a: A, f: fn(A) -> B) -> B =
+    f(a)
+
+// ── main 入口 ──────────────────────────────────────────
+def main() =
+    print("=== generics.lz ===")
+    print(identity(42))                    // 42
+    print(identity("hello"))               // hello
+    print(first(1, 2))                     // 1
+    print(larger(10, 20))                  // 20
+    print(larger(3.14, 2.71))             // 3.14
+    cloned = clone_all(["a", "b", "c"])
+    print(cloned)                          // ["a", "b", "c"]
+    p1 = make_pair(1, 2)                  // (1, 2)  T = int
+    p2 = make_pair.<str>("x", "y")        // (x, y)  T = str
+    print(p1)
+    print(p2)
+    print(wrap_or_default("LZ", "name"))
+    print(wrap_or_default.<int>(42, "val"))
+    print(convert.<int, str>(10, |n| f"num: {n}")) // num: 10
+
+// ── 边界情况（注释说明）────────────────────────────────
+// ❌ 错误：泛型尖括号后有空格
+// def foo <T> (x: T) = x
+// ❌ 错误：缺少类型参数
+// def bar<T>(x) = x
+// ❌ 错误：约束使用未定义的 trait
+// def baz<T: NonExistent>(x: T) = x

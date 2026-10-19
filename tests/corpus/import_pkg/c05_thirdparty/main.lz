@@ -1,0 +1,7 @@
+// C05 third-party library import: import a package published to the local registry.
+// Expected to FAIL today: Manifest has no dependencies field and there is no
+// registry-aware import resolution, so a package name cannot be resolved.
+import local_registry.mylib
+
+def main() =
+    print("C05 OK")

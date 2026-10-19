@@ -1,0 +1,737 @@
+src/ir/builder/convert_decl.rs-604-    let mut fn_ctx = TypeCtx::new();
+src/ir/builder/convert_decl.rs-605-    fn_ctx.pending_items = ctx.pending_items.clone();
+src/ir/builder/convert_decl.rs-606-    fn_ctx.errors = ctx.errors.clone();
+src/ir/builder/convert_decl.rs-607-    fn_ctx.comptime_consts = ctx.comptime_consts.clone();
+src/ir/builder/convert_decl.rs-608-    // BUG-7：继承被重赋值的顶层 const 集合，避免 `count = 0; count += 1`
+src/ir/builder/convert_decl.rs-609-    // 被内联为字面量（0i64 = 0i64 + 1i64）
+src/ir/builder/convert_decl.rs-610-    fn_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
+src/ir/builder/convert_decl.rs-611-    fn_ctx.comptime_module = ctx.comptime_module.clone();
+src/ir/builder/convert_decl.rs-612-    fn_ctx.current_fn_name = Some(func.name.clone());
+src/ir/builder/convert_decl.rs-613-    // 继承顶层函数返回类型表：嵌套函数内调用其他函数（`return classify(0)`）需
+src/ir/builder/convert_decl.rs:614:    // 查 lookup_fn_return——否则 fn_returns 为空 → Any→i64 fallback，
+src/ir/builder/convert_decl.rs-615-    // return 误插 <String as ImplicitFrom<i64>> 转换（E0277，match_patterns.lz）
+src/ir/builder/convert_decl.rs:616:    fn_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_decl.rs-617-    // 继承 raises 异常类型表：try 体末尾调用 raises 函数需据此将 body 块类型
+src/ir/builder/convert_decl.rs-618-    // 标注为 Result（BUG-CG-004 收口），否则 fn_raises 为空 → 漏标 catch_unwind E0308
+src/ir/builder/convert_decl.rs-619-    fn_ctx.fn_raises = ctx.fn_raises.clone();
+src/ir/builder/convert_decl.rs-620-    // 继承顶层变量（size = 3 等顶层 Assign 转 Const）：函数内 `x = v` 需识别为
+src/ir/builder/convert_decl.rs-621-    // 修改全局（guard_for_3.lz size = size - 1），否则生成局部新绑定 E0425
+src/ir/builder/convert_decl.rs-622-    fn_ctx.top_level_consts = ctx.top_level_consts.clone();
+src/ir/builder/convert_decl.rs-623-    fn_ctx.current_generics = generics.clone();
+src/ir/builder/convert_decl.rs-624-    // 复制全局 struct 信息
+src/ir/builder/convert_decl.rs-625-    for sn in &ctx.struct_names {
+src/ir/builder/convert_decl.rs-626-        fn_ctx.struct_names.insert(sn.clone());
+--
+src/ir/builder/convert_decl.rs-645-        fn_ctx.top_level_consts.insert(cn.clone(), ct.clone());
+src/ir/builder/convert_decl.rs-646-    }
+src/ir/builder/convert_decl.rs-647-    for (vn, en) in &ctx.enum_variants {
+src/ir/builder/convert_decl.rs-648-        fn_ctx.enum_variants.insert(vn.clone(), en.clone());
+src/ir/builder/convert_decl.rs-649-    }
+src/ir/builder/convert_decl.rs-650-    for (vn, ft) in &ctx.enum_variant_field_types {
+src/ir/builder/convert_decl.rs-651-        fn_ctx
+src/ir/builder/convert_decl.rs-652-            .enum_variant_field_types
+src/ir/builder/convert_decl.rs-653-            .insert(vn.clone(), ft.clone());
+src/ir/builder/convert_decl.rs-654-    }
+src/ir/builder/convert_decl.rs:655:    for (name, ty) in &ctx.fn_returns {
+src/ir/builder/convert_decl.rs:656:        fn_ctx.fn_returns.insert(name.clone(), ty.clone());
+src/ir/builder/convert_decl.rs-657-    }
+src/ir/builder/convert_decl.rs-658-    for (name, p) in &ctx.fn_params {
+src/ir/builder/convert_decl.rs-659-        fn_ctx.fn_params.insert(name.clone(), p.clone());
+src/ir/builder/convert_decl.rs-660-    }
+src/ir/builder/convert_decl.rs-661-
+src/ir/builder/convert_decl.rs-662-    // 添加参数到作用域
+src/ir/builder/convert_decl.rs-663-    if is_math {
+src/ir/builder/convert_decl.rs-664-        for p in &func.params {
+src/ir/builder/convert_decl.rs-665-            fn_ctx.add_param(&p.name, IrType::Generic("T".into()));
+src/ir/builder/convert_decl.rs-666-        }
+--
+src/ir/builder/convert_decl.rs-1628-                method_ctx.struct_names = ctx.struct_names.clone();
+src/ir/builder/convert_decl.rs-1629-                method_ctx.struct_fields = ctx.struct_fields.clone();
+src/ir/builder/convert_decl.rs-1630-                method_ctx.struct_field_order = ctx.struct_field_order.clone();
+src/ir/builder/convert_decl.rs-1631-                method_ctx.struct_methods = ctx.struct_methods.clone();
+src/ir/builder/convert_decl.rs-1632-                method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+src/ir/builder/convert_decl.rs-1633-                // 枚举/类型注册表必须拷入方法体 ctx：否则方法体内 Type.Variant(...)
+src/ir/builder/convert_decl.rs-1634-                // 构造推断退化（lib_hashmap get 返回 OptionInt.Some 被推断为 i64，
+src/ir/builder/convert_decl.rs-1635-                // 误插 ImplicitFrom 转换桥 E0277/E0308），方法返回类型查询也失效
+src/ir/builder/convert_decl.rs-1636-                method_ctx.enum_variants = ctx.enum_variants.clone();
+src/ir/builder/convert_decl.rs-1637-                method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+src/ir/builder/convert_decl.rs:1638:                method_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_decl.rs-1639-                // enum 内联方法（`enum E = ... def m(self)`）：self 绑定为枚举自身类型，
+src/ir/builder/convert_decl.rs-1640-                // 否则 self.field / self 索引推断为 Any/Self_（json.lz E0277/E0308）
+src/ir/builder/convert_decl.rs-1641-                method_ctx.self_ty = Some(IrType::Named {
+src/ir/builder/convert_decl.rs-1642-                    path: s.name.clone(),
+src/ir/builder/convert_decl.rs-1643-                    args: s
+src/ir/builder/convert_decl.rs-1644-                        .generics
+src/ir/builder/convert_decl.rs-1645-                        .iter()
+src/ir/builder/convert_decl.rs-1646-                        .map(|g| IrType::Generic(g.clone()))
+src/ir/builder/convert_decl.rs-1647-                        .collect(),
+src/ir/builder/convert_decl.rs-1648-                });
+--
+src/ir/builder/convert_decl.rs-1707-                let mut method_ctx = TypeCtx::new();
+src/ir/builder/convert_decl.rs-1708-                method_ctx.pending_items = ctx.pending_items.clone();
+src/ir/builder/convert_decl.rs-1709-                method_ctx.struct_names = ctx.struct_names.clone();
+src/ir/builder/convert_decl.rs-1710-                method_ctx.struct_fields = ctx.struct_fields.clone();
+src/ir/builder/convert_decl.rs-1711-                method_ctx.struct_field_order = ctx.struct_field_order.clone();
+src/ir/builder/convert_decl.rs-1712-                method_ctx.struct_methods = ctx.struct_methods.clone();
+src/ir/builder/convert_decl.rs-1713-                method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+src/ir/builder/convert_decl.rs-1714-                // 同上：方法体 ctx 需枚举/类型注册表（lib_hashmap 实测）
+src/ir/builder/convert_decl.rs-1715-                method_ctx.enum_variants = ctx.enum_variants.clone();
+src/ir/builder/convert_decl.rs-1716-                method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+src/ir/builder/convert_decl.rs:1717:                method_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_decl.rs-1718-                method_ctx.vars = ctx.vars.clone(); // 继承顶层函数类型，使方法体内能引用 `add` 等函数
+src/ir/builder/convert_decl.rs-1719-                                                    // struct 内联方法（`struct Parser = s: str ... def m(self)`）：self 绑定为
+src/ir/builder/convert_decl.rs-1720-                                                    // struct 自身类型（含泛型参数），否则 self.s 字段访问推断为 Any/Self_，
+src/ir/builder/convert_decl.rs-1721-                                                    // 导致 str 字段索引/切片 codegen 生成非法 Rust（json.lz E0277/E0308）
+src/ir/builder/convert_decl.rs-1722-                method_ctx.self_ty = Some(IrType::Named {
+src/ir/builder/convert_decl.rs-1723-                    path: s.name.clone(),
+src/ir/builder/convert_decl.rs-1724-                    args: s
+src/ir/builder/convert_decl.rs-1725-                        .generics
+src/ir/builder/convert_decl.rs-1726-                        .iter()
+src/ir/builder/convert_decl.rs-1727-                        .map(|g| IrType::Generic(g.clone()))
+--
+src/ir/builder/convert_decl.rs-1741-                let mut method_ctx = TypeCtx::new();
+src/ir/builder/convert_decl.rs-1742-                method_ctx.pending_items = ctx.pending_items.clone();
+src/ir/builder/convert_decl.rs-1743-                method_ctx.struct_names = ctx.struct_names.clone();
+src/ir/builder/convert_decl.rs-1744-                method_ctx.struct_fields = ctx.struct_fields.clone();
+src/ir/builder/convert_decl.rs-1745-                method_ctx.struct_field_order = ctx.struct_field_order.clone();
+src/ir/builder/convert_decl.rs-1746-                method_ctx.struct_methods = ctx.struct_methods.clone();
+src/ir/builder/convert_decl.rs-1747-                method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+src/ir/builder/convert_decl.rs-1748-                // 同上：方法体 ctx 需枚举/类型注册表（lib_hashmap 实测）
+src/ir/builder/convert_decl.rs-1749-                method_ctx.enum_variants = ctx.enum_variants.clone();
+src/ir/builder/convert_decl.rs-1750-                method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+src/ir/builder/convert_decl.rs:1751:                method_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_decl.rs-1752-                // magic 方法同样绑定 self_ty（同 struct 内联方法）
+src/ir/builder/convert_decl.rs-1753-                method_ctx.self_ty = Some(IrType::Named {
+src/ir/builder/convert_decl.rs-1754-                    path: s.name.clone(),
+src/ir/builder/convert_decl.rs-1755-                    args: s
+src/ir/builder/convert_decl.rs-1756-                        .generics
+src/ir/builder/convert_decl.rs-1757-                        .iter()
+src/ir/builder/convert_decl.rs-1758-                        .map(|g| IrType::Generic(g.clone()))
+src/ir/builder/convert_decl.rs-1759-                        .collect(),
+src/ir/builder/convert_decl.rs-1760-                });
+src/ir/builder/convert_decl.rs-1761-                convert_fn_def(m, &method_ctx)
+--
+src/ir/builder/convert_decl.rs-1786-        let new_body: Option<Block> = new_method.map(|m| {
+src/ir/builder/convert_decl.rs-1787-            let mut method_ctx = TypeCtx::new();
+src/ir/builder/convert_decl.rs-1788-            method_ctx.pending_items = ctx.pending_items.clone();
+src/ir/builder/convert_decl.rs-1789-            method_ctx.struct_names = ctx.struct_names.clone();
+src/ir/builder/convert_decl.rs-1790-            method_ctx.struct_fields = ctx.struct_fields.clone();
+src/ir/builder/convert_decl.rs-1791-            method_ctx.struct_field_order = ctx.struct_field_order.clone();
+src/ir/builder/convert_decl.rs-1792-            method_ctx.struct_methods = ctx.struct_methods.clone();
+src/ir/builder/convert_decl.rs-1793-            method_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+src/ir/builder/convert_decl.rs-1794-            method_ctx.enum_variants = ctx.enum_variants.clone();
+src/ir/builder/convert_decl.rs-1795-            method_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+src/ir/builder/convert_decl.rs:1796:            method_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_decl.rs-1797-            method_ctx.self_ty = Some(IrType::Named {
+src/ir/builder/convert_decl.rs-1798-                path: s.name.clone(),
+src/ir/builder/convert_decl.rs-1799-                args: s
+src/ir/builder/convert_decl.rs-1800-                    .generics
+src/ir/builder/convert_decl.rs-1801-                    .iter()
+src/ir/builder/convert_decl.rs-1802-                    .map(|g| IrType::Generic(g.clone()))
+src/ir/builder/convert_decl.rs-1803-                    .collect(),
+src/ir/builder/convert_decl.rs-1804-            });
+src/ir/builder/convert_decl.rs-1805-            Block {
+src/ir/builder/convert_decl.rs-1806-                stmts: convert_stmts(&m.body, &method_ctx),
+--
+src/ir/builder/convert_decl.rs-2016-            // impl 方法体内裸枚举变体名（`return Less`）需枚举映射做类型推断，
+src/ir/builder/convert_decl.rs-2017-            // 否则回退 Any→i64 生成 <Ordering as ImplicitFrom<i64>> 错误转换（E0277）
+src/ir/builder/convert_decl.rs-2018-            for (vn, en) in &ctx.enum_variants {
+src/ir/builder/convert_decl.rs-2019-                impl_ctx.enum_variants.insert(vn.clone(), en.clone());
+src/ir/builder/convert_decl.rs-2020-            }
+src/ir/builder/convert_decl.rs-2021-            for (vn, ft) in &ctx.enum_variant_field_types {
+src/ir/builder/convert_decl.rs-2022-                impl_ctx
+src/ir/builder/convert_decl.rs-2023-                    .enum_variant_field_types
+src/ir/builder/convert_decl.rs-2024-                    .insert(vn.clone(), ft.clone());
+src/ir/builder/convert_decl.rs-2025-            }
+src/ir/builder/convert_decl.rs:2026:            for (name, ty) in &ctx.fn_returns {
+src/ir/builder/convert_decl.rs:2027:                impl_ctx.fn_returns.insert(name.clone(), ty.clone());
+src/ir/builder/convert_decl.rs-2028-            }
+src/ir/builder/convert_decl.rs-2029-            impl_ctx.current_generics = imp.generics.clone();
+src/ir/builder/convert_decl.rs-2030-            // self 参数绑定为 impl 目标类型（如 Dict<K,V>→HashMap<K,V>）：
+src/ir/builder/convert_decl.rs-2031-            // 否则 self[key] 推断为 i64、key in self 无法走 contains_key 分支（E0277/E0599）
+src/ir/builder/convert_decl.rs-2032-            impl_ctx.self_ty = Some(if imp.generics.is_empty() {
+src/ir/builder/convert_decl.rs-2033-                IrType::named(&imp.type_name)
+src/ir/builder/convert_decl.rs-2034-            } else {
+src/ir/builder/convert_decl.rs-2035-                IrType::Named {
+src/ir/builder/convert_decl.rs-2036-                    path: imp.type_name.clone(),
+src/ir/builder/convert_decl.rs-2037-                    args: imp
+src/ir/builder/convert_expr.rs-235-                                if !already {
+src/ir/builder/convert_expr.rs-236-                                    let spec_fn = build_specialized_fn(
+src/ir/builder/convert_expr.rs-237-                                        &orig_clone,
+src/ir/builder/convert_expr.rs-238-                                        &positions,
+src/ir/builder/convert_expr.rs-239-                                        &subst,
+src/ir/builder/convert_expr.rs-240-                                        &mangled,
+src/ir/builder/convert_expr.rs-241-                                    );
+src/ir/builder/convert_expr.rs-242-                                    // 用克隆 ctx 注册特化函数返回类型（不污染外层 ctx），
+src/ir/builder/convert_expr.rs-243-                                    // 使特化函数体内的自递归调用获得正确类型推断
+src/ir/builder/convert_expr.rs-244-                                    let mut spec_ctx = ctx.clone();
+src/ir/builder/convert_expr.rs:245:                                    if let Some(rt) = ctx.fn_returns.get(callee) {
+src/ir/builder/convert_expr.rs:246:                                        spec_ctx.fn_returns.insert(mangled.clone(), rt.clone());
+src/ir/builder/convert_expr.rs-247-                                    }
+src/ir/builder/convert_expr.rs-248-                                    let spec_item = convert_fn_def(&spec_fn, &spec_ctx);
+src/ir/builder/convert_expr.rs-249-                                    ctx.pending_items.borrow_mut().push(Item::FnDef(spec_item));
+src/ir/builder/convert_expr.rs-250-                                    ctx.specialization_set.borrow_mut().insert(mangled.clone());
+src/ir/builder/convert_expr.rs-251-                                }
+src/ir/builder/convert_expr.rs-252-                                specialized_callee = Some(mangled);
+src/ir/builder/convert_expr.rs-253-                                comptime_arg_positions = positions;
+src/ir/builder/convert_expr.rs-254-                            }
+src/ir/builder/convert_expr.rs-255-                        }
+src/ir/builder/convert_expr.rs-256-                    }
+--
+src/ir/builder/convert_expr.rs-426-                    }
+src/ir/builder/convert_expr.rs-427-                }
+src/ir/builder/convert_expr.rs-428-            }
+src/ir/builder/convert_expr.rs-429-            // 处理 func[type_arg](args) → 泛型调用: func::<type_arg>(args)
+src/ir/builder/convert_expr.rs-430-            // 例外：`[checker]` 挂载（已知函数名）不是泛型参数（03c-检查站.md），
+src/ir/builder/convert_expr.rs-431-            // 调用点重复挂载由定义处 default_checker 处理，此处忽略
+src/ir/builder/convert_expr.rs-432-            let actual_func: &AstExpr;
+src/ir/builder/convert_expr.rs-433-            let extra_type_args: Vec<String>;
+src/ir/builder/convert_expr.rs-434-            if let AstExpr::Index { receiver, index } = func.as_ref() {
+src/ir/builder/convert_expr.rs-435-                if let AstExpr::Ident(ref type_name) = index.as_ref() {
+src/ir/builder/convert_expr.rs:436:                    if ctx.fn_returns.contains_key(type_name) {
+src/ir/builder/convert_expr.rs-437-                        actual_func = receiver;
+src/ir/builder/convert_expr.rs-438-                        extra_type_args = vec![];
+src/ir/builder/convert_expr.rs-439-                    } else {
+src/ir/builder/convert_expr.rs-440-                        actual_func = receiver;
+src/ir/builder/convert_expr.rs-441-                        extra_type_args = vec![type_name.clone()];
+src/ir/builder/convert_expr.rs-442-                    }
+src/ir/builder/convert_expr.rs-443-                } else {
+src/ir/builder/convert_expr.rs-444-                    actual_func = func;
+src/ir/builder/convert_expr.rs-445-                    extra_type_args = vec![];
+src/ir/builder/convert_expr.rs-446-                }
+--
+src/ir/builder/convert_expr.rs-455-                    "str" => "String".to_string(),
+src/ir/builder/convert_expr.rs-456-                    "f64" | "float" => "f64".to_string(),
+src/ir/builder/convert_expr.rs-457-                    "bool" => "bool".to_string(),
+src/ir/builder/convert_expr.rs-458-                    other => other.to_string(),
+src/ir/builder/convert_expr.rs-459-                })
+src/ir/builder/convert_expr.rs-460-                .collect();
+src/ir/builder/convert_expr.rs-461-            ir_type_args.extend(extra_type_args);
+src/ir/builder/convert_expr.rs-462-
+src/ir/builder/convert_expr.rs-463-            // __call__ 检测：如果是 struct 实例变量调用，转换为 MethodCall
+src/ir/builder/convert_expr.rs-464-            if let AstExpr::Ident(ref fname) = actual_func {
+src/ir/builder/convert_expr.rs:465:                if !ctx.fn_returns.contains_key(fname)
+src/ir/builder/convert_expr.rs-466-                    && !ctx.is_builtin_function(fname)
+src/ir/builder/convert_expr.rs-467-                    && !ctx.is_struct(fname)
+src/ir/builder/convert_expr.rs-468-                {
+src/ir/builder/convert_expr.rs-469-                    // 变量可能是一个 struct 实例 → 使用 __call__
+src/ir/builder/convert_expr.rs-470-                    let var_ty = ctx.lookup_var(fname);
+src/ir/builder/convert_expr.rs-471-                    if ctx.is_struct_type(&var_ty) {
+src/ir/builder/convert_expr.rs-472-                        let recv = convert_expr(actual_func, ctx);
+src/ir/builder/convert_expr.rs-473-                        let ret_ty = recv.ty.clone();
+src/ir/builder/convert_expr.rs-474-                        return Expr::new(
+src/ir/builder/convert_expr.rs-475-                            ExprKind::MethodCall {
+--
+src/ir/builder/convert_expr.rs-1160-                closure_ctx.enum_variants.insert(vn.clone(), en.clone());
+src/ir/builder/convert_expr.rs-1161-            }
+src/ir/builder/convert_expr.rs-1162-            for (vn, ft) in &ctx.enum_variant_field_types {
+src/ir/builder/convert_expr.rs-1163-                closure_ctx
+src/ir/builder/convert_expr.rs-1164-                    .enum_variant_field_types
+src/ir/builder/convert_expr.rs-1165-                    .insert(vn.clone(), ft.clone());
+src/ir/builder/convert_expr.rs-1166-            }
+src/ir/builder/convert_expr.rs-1167-            for (cn, ct) in &ctx.top_level_consts {
+src/ir/builder/convert_expr.rs-1168-                closure_ctx.top_level_consts.insert(cn.clone(), ct.clone());
+src/ir/builder/convert_expr.rs-1169-            }
+src/ir/builder/convert_expr.rs:1170:            for (name, ty) in &ctx.fn_returns {
+src/ir/builder/convert_expr.rs:1171:                closure_ctx.fn_returns.insert(name.clone(), ty.clone());
+src/ir/builder/convert_expr.rs-1172-            }
+src/ir/builder/convert_expr.rs-1173-            for (name, p) in &ctx.fn_params {
+src/ir/builder/convert_expr.rs-1174-                closure_ctx.fn_params.insert(name.clone(), p.clone());
+src/ir/builder/convert_expr.rs-1175-            }
+src/ir/builder/convert_expr.rs-1176-            // 闭包参数登记到 closure_ctx.vars（遮蔽外部同名变量）：
+src/ir/builder/convert_expr.rs-1177-            // 否则体内 `x + y` 中 y 会错误回退到外部 f64 变量，触发混合提升
+src/ir/builder/convert_expr.rs-1178-            // （E0282 参数类型注解丢失的过渡方案：参数以 Any 登记，Any→i64 fallback）。
+src/ir/builder/convert_expr.rs-1179-            // 带类型注解的 ref 参数（`|x: ref int|`）按 Ref 登记，使体内 `x > 2`
+src/ir/builder/convert_expr.rs-1180-            // 能识别 x 是引用（codegen 解引用，iter.lz find 闭包 E0308）
+src/ir/builder/convert_expr.rs-1181-            for (i, name) in params.iter().enumerate() {
+--
+src/ir/builder/convert_expr.rs-1530-                    closure_ctx.errors = ctx.errors.clone();
+src/ir/builder/convert_expr.rs-1531-                    closure_ctx.struct_names = ctx.struct_names.clone();
+src/ir/builder/convert_expr.rs-1532-                    closure_ctx.struct_fields = ctx.struct_fields.clone();
+src/ir/builder/convert_expr.rs-1533-                    closure_ctx.struct_field_order = ctx.struct_field_order.clone();
+src/ir/builder/convert_expr.rs-1534-                    closure_ctx.struct_methods = ctx.struct_methods.clone();
+src/ir/builder/convert_expr.rs-1535-                    closure_ctx.struct_method_arity = ctx.struct_method_arity.clone();
+src/ir/builder/convert_expr.rs-1536-                    closure_ctx.enum_variants = ctx.enum_variants.clone();
+src/ir/builder/convert_expr.rs-1537-                    closure_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+src/ir/builder/convert_expr.rs-1538-                    closure_ctx.top_level_consts = ctx.top_level_consts.clone();
+src/ir/builder/convert_expr.rs-1539-                    closure_ctx.mutated_top_level_consts = ctx.mutated_top_level_consts.clone();
+src/ir/builder/convert_expr.rs:1540:                    closure_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_expr.rs-1541-                    closure_ctx.fn_params = ctx.fn_params.clone();
+src/ir/builder/convert_expr.rs-1542-                    for name in params {
+src/ir/builder/convert_expr.rs-1543-                        closure_ctx.vars.insert(name.clone(), IrType::Any);
+src/ir/builder/convert_expr.rs-1544-                    }
+src/ir/builder/convert_expr.rs-1545-                    let lambda_params: Vec<Param> = params
+src/ir/builder/convert_expr.rs-1546-                        .iter()
+src/ir/builder/convert_expr.rs-1547-                        .enumerate()
+src/ir/builder/convert_expr.rs-1548-                        .map(|(i, name)| Param {
+src/ir/builder/convert_expr.rs-1549-                            name: name.clone(),
+src/ir/builder/convert_expr.rs-1550-                            ty: if i == 0 {
+--
+src/ir/builder/convert_expr.rs-2381-    };
+src/ir/builder/convert_expr.rs-2382-
+src/ir/builder/convert_expr.rs-2383-    Expr::new(kind, ty, span)
+src/ir/builder/convert_expr.rs-2384-}
+src/ir/builder/convert_expr.rs-2385-
+src/ir/builder/convert_expr.rs-2386-/// BUG-CG-004 收口：判断 try 体块末尾表达式是否为「调用 raises 函数」，
+src/ir/builder/convert_expr.rs-2387-/// 是则返回其 IR 返回类型 `Result<ok, err>`，供 TryCatch lowering 将 body 块类型
+src/ir/builder/convert_expr.rs-2388-/// 标注为 Result，使 codegen 走 use_result_try（match）而非 catch_unwind（panic 基），
+src/ir/builder/convert_expr.rs-2389-/// 避免 `Ok(val) => val` 臂类型与 Err 臂不兼容（E0308）。
+src/ir/builder/convert_expr.rs-2390-///
+src/ir/builder/convert_expr.rs:2391:/// 直接取 `fn_returns[callee]`：collect_functions 已对 raises 函数登记
+src/ir/builder/convert_expr.rs-2392-/// `Result<ok, err>`（无返回注解时 ok=Unit，有返回注解时 ok=声明类型），可靠且精确。
+src/ir/builder/convert_expr.rs-2393-/// 仅处理 `Name(...)` 形式调用；方法调用/闭包调用暂无法判定，走原 catch_unwind。
+src/ir/builder/convert_expr.rs-2394-pub(crate) fn try_body_result_ty(block: &Block, ctx: &TypeCtx) -> Option<IrType> {
+src/ir/builder/convert_expr.rs-2395-    // body 末尾裸表达式语句
+src/ir/builder/convert_expr.rs-2396-    let last = block
+src/ir/builder/convert_expr.rs-2397-        .stmts
+src/ir/builder/convert_expr.rs-2398-        .iter()
+src/ir/builder/convert_expr.rs-2399-        .rev()
+src/ir/builder/convert_expr.rs-2400-        .find(|s| matches!(s, Stmt::ExprStmt { .. }))?;
+src/ir/builder/convert_expr.rs-2401-    // 取出被调用函数名
+--
+src/ir/builder/convert_expr.rs-2403-        Stmt::ExprStmt { expr } => match &expr.kind {
+src/ir/builder/convert_expr.rs-2404-            ExprKind::Call { callee, .. } => match &callee.kind {
+src/ir/builder/convert_expr.rs-2405-                ExprKind::Var(name) => name.clone(),
+src/ir/builder/convert_expr.rs-2406-                _ => return None,
+src/ir/builder/convert_expr.rs-2407-            },
+src/ir/builder/convert_expr.rs-2408-            _ => return None,
+src/ir/builder/convert_expr.rs-2409-        },
+src/ir/builder/convert_expr.rs-2410-        _ => return None,
+src/ir/builder/convert_expr.rs-2411-    };
+src/ir/builder/convert_expr.rs-2412-    // 被调函数若为 raises 函数，其 IR 返回类型已是 Result<ok, err>
+src/ir/builder/convert_expr.rs:2413:    match ctx.fn_returns.get(&callee) {
+src/ir/builder/convert_expr.rs:2414:        Some(IrType::Result { .. }) => ctx.fn_returns.get(&callee).cloned(),
+src/ir/builder/convert_expr.rs-2415-        _ => None,
+src/ir/builder/convert_expr.rs-2416-    }
+src/ir/builder/convert_expr.rs-2417-}
+src/ir/builder/convert_expr.rs-2418-
+src/ir/builder/convert_expr.rs-2419-/// 将 AST 语句块转为 IR 表达式（用于 if/match 分支）
+src/ir/builder/convert_expr.rs-2420-pub(crate) fn block_to_expr(stmts: &[AstStmt], ctx: &TypeCtx) -> Expr {
+src/ir/builder/convert_expr.rs-2421-    if stmts.is_empty() {
+src/ir/builder/convert_expr.rs-2422-        return Expr::new(ExprKind::Lit(LitKind::Unit), IrType::Unit, Span::unknown());
+src/ir/builder/convert_expr.rs-2423-    }
+src/ir/builder/convert_expr.rs-2424-    if stmts.len() == 1 {
+src/ir/builder/convert_stmt.rs-70-            let ir_arms: Vec<MatchArm> = arms
+src/ir/builder/convert_stmt.rs-71-                .iter()
+src/ir/builder/convert_stmt.rs-72-                .map(|arm| {
+src/ir/builder/convert_stmt.rs-73-                    let pat = convert_ast_pattern(&arm.pattern, ctx).unwrap_or(Pattern::Wildcard);
+src/ir/builder/convert_stmt.rs-74-                    let guard = arm.guard.as_ref().map(|g| convert_expr(g, ctx));
+src/ir/builder/convert_stmt.rs-75-                    let mut arm_ctx = TypeCtx::new();
+src/ir/builder/convert_stmt.rs-76-                    arm_ctx.vars = ctx.vars.clone();
+src/ir/builder/convert_stmt.rs-77-                    arm_ctx.current_generics = ctx.current_generics.clone();
+src/ir/builder/convert_stmt.rs-78-                    arm_ctx.current_ret_ty = ctx.current_ret_ty.clone();
+src/ir/builder/convert_stmt.rs-79-                    arm_ctx.enum_variant_field_types = ctx.enum_variant_field_types.clone();
+src/ir/builder/convert_stmt.rs:80:                    // 拷贝 fn_returns：match 臂内函数调用的返回类型推断依赖此表
+src/ir/builder/convert_stmt.rs-81-                    // （postorder(left) 在 case 分支内 → lhs.ty=Any → List+List 误走 LzAdd）
+src/ir/builder/convert_stmt.rs:82:                    arm_ctx.fn_returns = ctx.fn_returns.clone();
+src/ir/builder/convert_stmt.rs-83-                    arm_ctx.fn_raises = ctx.fn_raises.clone();
+src/ir/builder/convert_stmt.rs-84-                    arm_ctx.fn_params = ctx.fn_params.clone();
+src/ir/builder/convert_stmt.rs-85-                    arm_ctx.struct_fields = ctx.struct_fields.clone();
+src/ir/builder/convert_stmt.rs-86-                    arm_ctx.struct_methods = ctx.struct_methods.clone();
+src/ir/builder/convert_stmt.rs-87-                    arm_ctx.self_ty = ctx.self_ty.clone();
+src/ir/builder/convert_stmt.rs-88-                    // 复制 enum_variants 以便模式匹配能正确解析枚举类型
+src/ir/builder/convert_stmt.rs-89-                    for (vn, en) in &ctx.enum_variants {
+src/ir/builder/convert_stmt.rs-90-                        arm_ctx.enum_variants.insert(vn.clone(), en.clone());
+src/ir/builder/convert_stmt.rs-91-                    }
+src/ir/builder/convert_stmt.rs-92-                    for (cn, ct) in &ctx.top_level_consts {
+--
+src/ir/builder/convert_stmt.rs-1866-        block_ctx.struct_methods.insert(sn.clone(), ms.clone());
+src/ir/builder/convert_stmt.rs-1867-    }
+src/ir/builder/convert_stmt.rs-1868-    for (sn, arity) in &ctx.struct_method_arity {
+src/ir/builder/convert_stmt.rs-1869-        block_ctx
+src/ir/builder/convert_stmt.rs-1870-            .struct_method_arity
+src/ir/builder/convert_stmt.rs-1871-            .insert(sn.clone(), arity.clone());
+src/ir/builder/convert_stmt.rs-1872-    }
+src/ir/builder/convert_stmt.rs-1873-    for (vn, vt) in &ctx.vars {
+src/ir/builder/convert_stmt.rs-1874-        block_ctx.vars.insert(vn.clone(), vt.clone());
+src/ir/builder/convert_stmt.rs-1875-    }
+src/ir/builder/convert_stmt.rs:1876:    for (name, ty) in &ctx.fn_returns {
+src/ir/builder/convert_stmt.rs:1877:        block_ctx.fn_returns.insert(name.clone(), ty.clone());
+src/ir/builder/convert_stmt.rs-1878-    }
+src/ir/builder/convert_stmt.rs-1879-    for (name, ty) in &ctx.fn_raises {
+src/ir/builder/convert_stmt.rs-1880-        block_ctx.fn_raises.insert(name.clone(), ty.clone());
+src/ir/builder/convert_stmt.rs-1881-    }
+src/ir/builder/convert_stmt.rs-1882-    for (name, p) in &ctx.fn_params {
+src/ir/builder/convert_stmt.rs-1883-        block_ctx.fn_params.insert(name.clone(), p.clone());
+src/ir/builder/convert_stmt.rs-1884-    }
+src/ir/builder/convert_stmt.rs-1885-    for (vn, en) in &ctx.enum_variants {
+src/ir/builder/convert_stmt.rs-1886-        block_ctx.enum_variants.insert(vn.clone(), en.clone());
+src/ir/builder/convert_stmt.rs-1887-    }
+src/ir/builder/infer.rs-663-                    // 否则从 body 中第一个 yield 表达式推导
+src/ir/builder/infer.rs-664-                    let has_callee = matches!(
+src/ir/builder/infer.rs-665-                        &**lhs,
+src/ir/builder/infer.rs-666-                        AstExpr::Ident(_)
+src/ir/builder/infer.rs-667-                            | AstExpr::MethodCall { .. }
+src/ir/builder/infer.rs-668-                            | AstExpr::FieldAccess { .. }
+src/ir/builder/infer.rs-669-                    );
+src/ir/builder/infer.rs-670-                    // 优先从函数符号表取返回类型（Ident 直接引用函数时 lookup_var 回退 Any，
+src/ir/builder/infer.rs-671-                    // 会导致 *: 构建块元素类型错误地取 yield 包类型）
+src/ir/builder/infer.rs-672-                    let elem_ty = if let AstExpr::Ident(fname) = &**lhs {
+src/ir/builder/infer.rs:673:                        if let Some(ret) = ctx.fn_returns.get(fname) {
+src/ir/builder/infer.rs-674-                            ret.clone()
+src/ir/builder/infer.rs-675-                        } else {
+src/ir/builder/infer.rs-676-                            infer_yield_elem_ty(body, lhs_ty, ctx)
+src/ir/builder/infer.rs-677-                        }
+src/ir/builder/infer.rs-678-                    } else if has_callee {
+src/ir/builder/infer.rs-679-                        match &lhs_ty {
+src/ir/builder/infer.rs-680-                            IrType::Fn { ret, .. } => *ret.clone(),
+src/ir/builder/infer.rs-681-                            _ => infer_yield_elem_ty(body, lhs_ty, ctx),
+src/ir/builder/infer.rs-682-                        }
+src/ir/builder/infer.rs-683-                    } else {
+src/ir/builder/mod.rs-66-
+src/ir/builder/mod.rs-67-/// 类型推导上下文
+src/ir/builder/mod.rs-68-///
+src/ir/builder/mod.rs-69-/// 注：拆分后子模块函数（pub(crate)）签名中出现该类型，故提升为 `pub(crate)`
+src/ir/builder/mod.rs-70-/// （仅可见性调整，字段与逻辑零改动）。
+src/ir/builder/mod.rs-71-#[derive(Clone)]
+src/ir/builder/mod.rs-72-pub(crate) struct TypeCtx {
+src/ir/builder/mod.rs-73-    /// 变量名 → 类型
+src/ir/builder/mod.rs-74-    vars: HashMap<String, IrType>,
+src/ir/builder/mod.rs-75-    /// 函数名 → 返回类型
+src/ir/builder/mod.rs:76:    fn_returns: HashMap<String, IrType>,
+src/ir/builder/mod.rs-77-    /// 函数名 → raises 异常类型（BUG-CG-004 收口：try 体末尾调用 raises 函数时，
+src/ir/builder/mod.rs-78-    /// 其 Rust 实际返回 Result<ok, err>，需据此将 try body 块类型标注为 Result，
+src/ir/builder/mod.rs-79-    /// 使 codegen 走 use_result_try（match）而非 catch_unwind（panic 基），
+src/ir/builder/mod.rs-80-    /// 否则 match 臂类型不兼容 E0308）
+src/ir/builder/mod.rs-81-    fn_raises: HashMap<String, IrType>,
+src/ir/builder/mod.rs-82-    /// 函数参数类型（用于泛型实例化）
+src/ir/builder/mod.rs-83-    fn_params: HashMap<String, Vec<IrType>>,
+src/ir/builder/mod.rs-84-    /// struct 名称集合（用于区分构造调用与普通函数调用）
+src/ir/builder/mod.rs-85-    struct_names: HashSet<String>,
+src/ir/builder/mod.rs-86-    /// struct 字段类型：struct_name → field_name → type
+--
+src/ir/builder/mod.rs-135-    /// M3 单态化：已生成特化函数名的集合（去重，避免同一 (函数, comptime值) 组合
+src/ir/builder/mod.rs-136-    /// 重复发射 pending item）。与 ctx 一同克隆，全模块共享同一份。
+src/ir/builder/mod.rs-137-    specialization_set: std::rc::Rc<std::cell::RefCell<std::collections::HashSet<String>>>,
+src/ir/builder/mod.rs-138-}
+src/ir/builder/mod.rs-139-impl TypeCtx {
+src/ir/builder/mod.rs-140-
+src/ir/builder/mod.rs-141-
+src/ir/builder/mod.rs-142-    pub(crate) fn new() -> Self {
+src/ir/builder/mod.rs-143-        TypeCtx {
+src/ir/builder/mod.rs-144-            vars: HashMap::new(),
+src/ir/builder/mod.rs:145:            fn_returns: HashMap::new(),
+src/ir/builder/mod.rs-146-            fn_raises: HashMap::new(),
+src/ir/builder/mod.rs-147-            fn_params: HashMap::new(),
+src/ir/builder/mod.rs-148-            struct_names: HashSet::new(),
+src/ir/builder/mod.rs-149-            struct_fields: HashMap::new(),
+src/ir/builder/mod.rs-150-            struct_field_order: HashMap::new(),
+src/ir/builder/mod.rs-151-            struct_methods: HashMap::new(),
+src/ir/builder/mod.rs-152-            struct_method_arity: HashMap::new(),
+src/ir/builder/mod.rs-153-            top_level_consts: HashMap::new(),
+src/ir/builder/mod.rs-154-            mutated_top_level_consts: std::collections::HashSet::new(),
+src/ir/builder/mod.rs-155-            enum_variants: HashMap::new(),
+--
+src/ir/builder/mod.rs-249-                }
+src/ir/builder/mod.rs-250-                self.struct_methods.insert(s.name.clone(), mset);
+src/ir/builder/mod.rs-251-                self.struct_method_arity.insert(s.name.clone(), arity_map);
+src/ir/builder/mod.rs-252-                // 登记 struct 内联方法返回类型（如 json.lz `parse_object` 返回 `JsonValue raises ParseError`）：
+src/ir/builder/mod.rs-253-                // 否则 `self.parse_object()?` 方法调用推断为 Any，`?` 无法触发 try_into 传播（E0277）。
+src/ir/builder/mod.rs-254-                // 用 `类型名.方法名` 作 key（与 impl 方法一致），避免不同 struct 同名方法互相覆盖。
+src/ir/builder/mod.rs-255-                let special_magic = ["__new__", "__init__", "__implicit_from__"];
+src/ir/builder/mod.rs-256-                for m in s.methods.iter().filter(|m| !special_magic.contains(&m.name.as_str())) {
+src/ir/builder/mod.rs-257-                    let key = format!("{}.{}", s.name, m.name);
+src/ir/builder/mod.rs-258-                    if m.return_type.is_some() {
+src/ir/builder/mod.rs:259:                        self.fn_returns.insert(
+src/ir/builder/mod.rs-260-                            key,
+src/ir/builder/mod.rs-261-                            Self::fn_return_ir(&m.return_type, &m.raises, &s.generics),
+src/ir/builder/mod.rs-262-                        );
+src/ir/builder/mod.rs-263-                    } else {
+src/ir/builder/mod.rs-264-                        // 无返回类型注解的方法默认登记为 Unit（避免 IR 返回类型
+src/ir/builder/mod.rs-265-                        // 为 Any 导致 wrap_ok 误包成 Result::Ok(...)）
+src/ir/builder/mod.rs:266:                        self.fn_returns.insert(key, IrType::Unit);
+src/ir/builder/mod.rs-267-                    }
+src/ir/builder/mod.rs-268-                }
+src/ir/builder/mod.rs-269-                for m in s.magic_methods.iter().filter(|m| !special_magic.contains(&m.name.as_str())) {
+src/ir/builder/mod.rs-270-                    let key = format!("{}.{}", s.name, m.name);
+src/ir/builder/mod.rs-271-                    if m.return_type.is_some() {
+src/ir/builder/mod.rs:272:                        self.fn_returns.insert(
+src/ir/builder/mod.rs-273-                            key,
+src/ir/builder/mod.rs-274-                            Self::fn_return_ir(&m.return_type, &m.raises, &s.generics),
+src/ir/builder/mod.rs-275-                        );
+src/ir/builder/mod.rs-276-                    } else {
+src/ir/builder/mod.rs:277:                        self.fn_returns.insert(key, IrType::Unit);
+src/ir/builder/mod.rs-278-                    }
+src/ir/builder/mod.rs-279-                }
+src/ir/builder/mod.rs-280-            }
+src/ir/builder/mod.rs-281-        }
+src/ir/builder/mod.rs-282-    }
+src/ir/builder/mod.rs-283-
+src/ir/builder/mod.rs-284-    /// 计算函数泛型形参列表：仅取显式声明的 `func.generics`。
+src/ir/builder/mod.rs-285-    /// 泛型必须显式声明；签名中未声明的类型名（如顶层 `def fold(xs: List<a>)` 的 `a`）
+src/ir/builder/mod.rs-286-    /// 不再隐式当作泛型，而是报「未知类型」。外层 impl 泛型由 `convert_fn_def` 合并
+src/ir/builder/mod.rs-287-    /// `current_generics` 注入，无需在此处理。
+src/ir/builder/mod.rs-288-    pub(crate) fn fn_generics(&self, func: &crate::ast::Function) -> Vec<String> {
+src/ir/builder/mod.rs-289-        crate::ast::augmented_fn_generics(func, &[])
+src/ir/builder/mod.rs-290-    }
+src/ir/builder/mod.rs-291-
+src/ir/builder/mod.rs-292-    pub(crate) fn collect_functions(&mut self, module: &ast::Module) {
+src/ir/builder/mod.rs-293-        // 工作栈：先入顶层函数，处理时再压入函数体内的嵌套 def（FnDef），
+src/ir/builder/mod.rs:294:        // 使嵌套 raises 函数也能登记 fn_returns / fn_raises（BUG-CG-004 收口：
+src/ir/builder/mod.rs-295-        // try 体末尾调用嵌套 raises 函数需据此将 body 块类型标注为 Result）
+src/ir/builder/mod.rs-296-        let mut stack: Vec<&ast::Function> = module.functions.iter().collect();
+src/ir/builder/mod.rs-297-        while let Some(f) = stack.pop() {
+src/ir/builder/mod.rs-298-            let generics: Vec<String> = self.fn_generics(f);
+src/ir/builder/mod.rs-299-            let has_ret_annot = f.return_type.is_some();
+src/ir/builder/mod.rs-300-            // raises/async/iterator 均经 fn_return_ir 计算（raises 时升级为 Result<ok, err>）
+src/ir/builder/mod.rs-301-            let ret = Self::fn_return_ir(&f.return_type, &f.raises, &generics);
+src/ir/builder/mod.rs-302-            if has_ret_annot {
+src/ir/builder/mod.rs-303-                // async 函数调用返回 Future<T>（Rust async fn 调用产生 Future），
+src/ir/builder/mod.rs-304-                // 登记为 Future<T> 供 await / let 标注使用（E0308/E0277 修复）
+src/ir/builder/mod.rs-305-                if f.is_async {
+src/ir/builder/mod.rs:306:                    self.fn_returns.insert(
+src/ir/builder/mod.rs-307-                        f.name.clone(),
+src/ir/builder/mod.rs-308-                        IrType::Named {
+src/ir/builder/mod.rs-309-                            path: "Future".into(),
+src/ir/builder/mod.rs-310-                            args: vec![ret.clone()],
+src/ir/builder/mod.rs-311-                        },
+src/ir/builder/mod.rs-312-                    );
+src/ir/builder/mod.rs-313-                } else if f.is_iterator {
+src/ir/builder/mod.rs-314-                    // iterator 生成器函数（iterator repeat<T>(val, n) -> T /
+src/ir/builder/mod.rs-315-                    // count_from(...) -> Iterator<int>）：调用返回**迭代器集合**
+src/ir/builder/mod.rs-316-                    // Vec<元素类型>（急切收集）。登记为
+src/ir/builder/mod.rs-317-                    // Vec<int>——若声明返回 Iterator<int> 则取元素 int 登记
+src/ir/builder/mod.rs-318-                    // Vec<int>，否则 Vec<ret>（iterator_demo `for x in
+src/ir/builder/mod.rs-319-                    // repeat("hi", 3)` 中 T=String 误当字符串迭代生成 .chars()，
+src/ir/builder/mod.rs-320-                    // E0599；while_let `Vec<impl Iterator>` 非法 E0562）
+src/ir/builder/mod.rs-321-                    let elem = match &ret {
+src/ir/builder/mod.rs-322-                        IrType::Named { path, args } if path == "Iterator" && args.len() == 1 => {
+src/ir/builder/mod.rs-323-                            args[0].clone()
+src/ir/builder/mod.rs-324-                        }
+src/ir/builder/mod.rs-325-                        _ => ret.clone(),
+src/ir/builder/mod.rs-326-                    };
+src/ir/builder/mod.rs:327:                    self.fn_returns.insert(
+src/ir/builder/mod.rs-328-                        f.name.clone(),
+src/ir/builder/mod.rs-329-                        IrType::Named {
+src/ir/builder/mod.rs-330-                            path: "Vec".into(),
+src/ir/builder/mod.rs-331-                            args: vec![elem],
+src/ir/builder/mod.rs-332-                        },
+src/ir/builder/mod.rs-333-                    );
+src/ir/builder/mod.rs-334-                } else {
+src/ir/builder/mod.rs:335:                    self.fn_returns.insert(f.name.clone(), ret.clone());
+src/ir/builder/mod.rs-336-                }
+src/ir/builder/mod.rs-337-            } else {
+src/ir/builder/mod.rs-338-                // 无返回注解：从函数体最后语句推断并登记。
+src/ir/builder/mod.rs-339-                // 否则调用点 lookup_fn_return 回退 Any→i64，
+src/ir/builder/mod.rs-340-                // 导致 `main 末尾调用 closure_in_box()` 被误推为 i64（E0308）
+src/ir/builder/mod.rs-341-                let mut ret = f
+src/ir/builder/mod.rs-342-                    .body
+src/ir/builder/mod.rs-343-                    .last()
+src/ir/builder/mod.rs-344-                    .map(|s| infer_stmt_type(s, self))
+src/ir/builder/mod.rs-345-                    .unwrap_or(IrType::Unit);
+src/ir/builder/mod.rs-346-                // BUG-CG-004 收口：raises 函数即使无返回注解，其 Rust 返回类型也是
+src/ir/builder/mod.rs-347-                // Result<ok, err>（ok 为推断返回值，err 为 raises 异常类型），
+src/ir/builder/mod.rs:348:                // 否则 fn_returns 漏 raises 包裹 → try 体末尾调用该函数时 body 块类型
+src/ir/builder/mod.rs-349-                // 非 Result，use_result_try 误判走 catch_unwind（panic 基）导致 E0308
+src/ir/builder/mod.rs-350-                if let Some(r) = &f.raises {
+src/ir/builder/mod.rs-351-                    ret = IrType::Result {
+src/ir/builder/mod.rs-352-                        ok: Box::new(ret),
+src/ir/builder/mod.rs-353-                        err: Box::new(from_ast_type_with_generics(r, &generics)),
+src/ir/builder/mod.rs-354-                    };
+src/ir/builder/mod.rs-355-                }
+src/ir/builder/mod.rs:356:                self.fn_returns.insert(f.name.clone(), ret);
+src/ir/builder/mod.rs-357-            }
+src/ir/builder/mod.rs-358-            let params: Vec<IrType> = f
+src/ir/builder/mod.rs-359-                .params
+src/ir/builder/mod.rs-360-                .iter()
+src/ir/builder/mod.rs-361-                .map(|p| from_ast_type_with_generics(&p.ty, &generics))
+src/ir/builder/mod.rs-362-                .collect();
+src/ir/builder/mod.rs-363-            self.fn_params.insert(f.name.clone(), params.clone());
+src/ir/builder/mod.rs-364-            // 登记顶层函数类型到 vars：使函数名作为值传递时（如 `fold(..., add)`）
+src/ir/builder/mod.rs-365-            // lookup_var 能返回 Fn 类型，否则回退 Any 导致 codegen 无法生成 `as fn(...)` 强转。
+src/ir/builder/mod.rs-366-            let fn_ty = IrType::Fn {
+--
+src/ir/builder/mod.rs-407-                self.current_generics
+src/ir/builder/mod.rs-408-                    .iter()
+src/ir/builder/mod.rs-409-                    .find(|g| g.as_str() == name)
+src/ir/builder/mod.rs-410-                    .map(|g| IrType::Generic(g.clone()))
+src/ir/builder/mod.rs-411-            })
+src/ir/builder/mod.rs-412-            .or_else(|| self.top_level_consts.get(name).cloned())
+src/ir/builder/mod.rs-413-            .unwrap_or(IrType::Any)
+src/ir/builder/mod.rs-414-    }
+src/ir/builder/mod.rs-415-
+src/ir/builder/mod.rs-416-    pub(crate) fn lookup_fn_return(&self, name: &str) -> IrType {
+src/ir/builder/mod.rs:417:        if let Some(t) = self.fn_returns.get(name) {
+src/ir/builder/mod.rs-418-            return t.clone();
+src/ir/builder/mod.rs-419-        }
+src/ir/builder/mod.rs-420-        // 跨模块回退：本地函数查不到时，从 .lzi 签名补全（lz-infer 生成的
+src/ir/builder/mod.rs-421-        // 跨模块类型签名，main.rs --lzi 加载后经 build_ir_with_lzi 注入）
+src/ir/builder/mod.rs-422-        #[cfg(feature = "infer")]
+src/ir/builder/mod.rs-423-        if let Some(reg) = &self.lzi_signatures {
+src/ir/builder/mod.rs-424-            for file in &reg.files {
+src/ir/builder/mod.rs-425-                for m in file.modules.values() {
+src/ir/builder/mod.rs-426-                    if let Some(f) = m.functions.get(name) {
+src/ir/builder/mod.rs-427-                        if let Some(rt) = &f.return_type {
+--
+src/ir/builder/mod.rs-856-                            ed.methods.push(convert_fn_def(m, &method_ctx));
+src/ir/builder/mod.rs-857-                        }
+src/ir/builder/mod.rs-858-                    }
+src/ir/builder/mod.rs-859-                }
+src/ir/builder/mod.rs-860-            }
+src/ir/builder/mod.rs-861-        }
+src/ir/builder/mod.rs-862-        // BUG-CG-004（轮次12）：注册 struct 内联方法返回类型（含 raises→Result），
+src/ir/builder/mod.rs-863-        // 供方法调用与 ? 错误传播类型推断一致（json.lz 的 self.parse_object()? 等）。
+src/ir/builder/mod.rs-864-        for m in &s.methods {
+src/ir/builder/mod.rs-865-            if m.return_type.is_some() || m.raises.is_some() {
+src/ir/builder/mod.rs:866:                ctx.fn_returns.insert(
+src/ir/builder/mod.rs-867-                    format!("{}.{}", s.name, m.name),
+src/ir/builder/mod.rs-868-                    TypeCtx::fn_return_ir(&m.return_type, &m.raises, &s.generics),
+src/ir/builder/mod.rs-869-                );
+src/ir/builder/mod.rs-870-            }
+src/ir/builder/mod.rs-871-        }
+src/ir/builder/mod.rs-872-        ir_mod.items.push(item);
+src/ir/builder/mod.rs-873-    }
+src/ir/builder/mod.rs-874-
+src/ir/builder/mod.rs-875-    // 6. 转换 traits
+src/ir/builder/mod.rs-876-    for t in &ast_module.traits {
+--
+src/ir/builder/mod.rs-893-                .entry(imp.type_name.clone())
+src/ir/builder/mod.rs-894-                .or_default()
+src/ir/builder/mod.rs-895-                .insert(m.name.clone(), arity);
+src/ir/builder/mod.rs-896-        }
+src/ir/builder/mod.rs-897-        // 登记 impl 方法返回类型（如 box.lz `def get(ref self) -> ref T` 返回 &T）：
+src/ir/builder/mod.rs-898-        // 否则 `b.get()` 方法调用推断为 Any，`assert b.get() == 42` 无法解引用（E0277）。
+src/ir/builder/mod.rs-899-        // 用 `类型名.方法名` 作 key：Rc/Arc 都有 try_unwrap，裸方法名会互相覆盖
+src/ir/builder/mod.rs-900-        // （`rc.try_unwrap()` 误推断为 Arc 的签名 → E0425 cannot find type `T`）
+src/ir/builder/mod.rs-901-        for m in &imp.methods {
+src/ir/builder/mod.rs-902-            if m.return_type.is_some() {
+src/ir/builder/mod.rs:903:                ctx.fn_returns.insert(
+src/ir/builder/mod.rs-904-                    format!("{}.{}", imp.type_name, m.name),
+src/ir/builder/mod.rs-905-                    TypeCtx::fn_return_ir(&m.return_type, &m.raises, &imp.generics),
+src/ir/builder/mod.rs-906-                );
+src/ir/builder/mod.rs-907-            }
+src/ir/builder/mod.rs-908-        }
+src/ir/builder/mod.rs-909-        ir_mod.items.push(convert_impl(imp, &ctx));
+src/ir/builder/mod.rs-910-    }
+src/ir/builder/mod.rs-911-
+src/ir/builder/mod.rs-912-    // 7.5 独立 magic 块: magic __str__: def __str__(self: MyStruct) → impl MyStruct
+src/ir/builder/mod.rs-913-    for mb in &ast_module.magic_blocks {
+src/ir/codegen/expr_gen.rs-5965-                        | "removesuffix"
+src/ir/codegen/expr_gen.rs-5966-                )
+src/ir/codegen/expr_gen.rs-5967-            }
+src/ir/codegen/expr_gen.rs-5968-            ExprKind::Call { callee, .. } => {
+src/ir/codegen/expr_gen.rs-5969-                // 自定义函数调用：检查函数返回类型是否为字符串
+src/ir/codegen/expr_gen.rs-5970-                let fname = match &callee.kind {
+src/ir/codegen/expr_gen.rs-5971-                    ExprKind::Var(n) => Some(n.as_str()),
+src/ir/codegen/expr_gen.rs-5972-                    _ => None,
+src/ir/codegen/expr_gen.rs-5973-                };
+src/ir/codegen/expr_gen.rs-5974-                if let Some(fname) = fname {
+src/ir/codegen/expr_gen.rs:5975:                    self.fn_returns.get(fname).map_or(false, |ret_ty| {
+src/ir/codegen/expr_gen.rs-5976-                        matches!(ret_ty, IrType::Str)
+src/ir/codegen/expr_gen.rs-5977-                            || matches!(ret_ty, IrType::Named { path, args: _ } if path == "String")
+src/ir/codegen/expr_gen.rs-5978-                    })
+src/ir/codegen/expr_gen.rs-5979-                } else {
+src/ir/codegen/expr_gen.rs-5980-                    false
+src/ir/codegen/expr_gen.rs-5981-                }
+src/ir/codegen/expr_gen.rs-5982-            }
+src/ir/codegen/expr_gen.rs-5983-            _ => false,
+src/ir/codegen/expr_gen.rs-5984-        }
+src/ir/codegen/expr_gen.rs-5985-    }
+src/ir/codegen/mod.rs-267-    /// 模块级全局可变变量：name → type（跨函数共享，生成 static mut + unsafe 访问）
+src/ir/codegen/mod.rs-268-    global_vars: std::collections::HashMap<String, IrType>,
+src/ir/codegen/mod.rs-269-    /// 关键字降级变量（Ok/Some/None/Err 用作变量名时重命名为 name_ 避免 E0530）
+src/ir/codegen/mod.rs-270-    downgraded_vars: std::collections::HashSet<String>,
+src/ir/codegen/mod.rs-271-    /// f-string 插值中未绑定的变量名（探测用例引用外部未定义符号，如
+src/ir/codegen/mod.rs-272-    /// lit_probe 的 `f"hello {name}"`）：生成时替换为空字符串，保证 rustc
+src/ir/codegen/mod.rs-273-    /// 编译通过（批测口径只编译不运行）
+src/ir/codegen/mod.rs-274-    unbound_fstring_vars: std::collections::HashSet<String>,
+src/ir/codegen/mod.rs-275-    /// 函数返回类型表：fn_name → return_type（用于 is_str_producing 识别字符串返回函数调用，
+src/ir/codegen/mod.rs-276-    /// 如 `stringify(x)` 返回 String，let 绑定登记到 str_typed_vars 后 f-string 用 {} 而非 {:?}）
+src/ir/codegen/mod.rs:277:    fn_returns: std::collections::HashMap<String, IrType>,
+src/ir/codegen/mod.rs-278-    /// 未定义外部函数名 → 最大实参个数（p16_lzi 等跨模块探测用例：
+src/ir/codegen/mod.rs-279-    /// 调用的 external_add/external_opt 定义在 .lzi 签名中，批测未加载
+src/ir/codegen/mod.rs-280-    /// .lzi 时生成 i64 stub 兜底，保证 rustc 编译通过）
+src/ir/codegen/mod.rs-281-    unknown_extern_fns: std::collections::HashMap<String, usize>,
+src/ir/codegen/mod.rs-282-    /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
+src/ir/codegen/mod.rs-283-    /// struct 字段信息（供 __new__ 补齐默认字段）
+src/ir/codegen/mod.rs-284-    struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
+src/ir/codegen/mod.rs-285-    /// 「被用作 Dict/HashMap 键」的泛型参数名集合（Dict→BTreeMap 要求 K: Ord）。
+src/ir/codegen/mod.rs-286-    ///
+src/ir/codegen/mod.rs-287-    /// Dict 映射为 `BTreeMap<K,V>`（有序，保证 JSON 序列化字段顺序稳定，见
+--
+src/ir/codegen/mod.rs-492-            current_fn_is_async: false,
+src/ir/codegen/mod.rs-493-            current_fn_is_size_hint: false,
+src/ir/codegen/mod.rs-494-            current_fn_ret_is_ref: false,
+src/ir/codegen/mod.rs-495-            duck_field_members: std::collections::HashMap::new(),
+src/ir/codegen/mod.rs-496-            duck_defs: std::collections::HashMap::new(),
+src/ir/codegen/mod.rs-497-            module_uses_ext: false,
+src/ir/codegen/mod.rs-498-            module_uses_dict: false,
+src/ir/codegen/mod.rs-499-            global_vars: std::collections::HashMap::new(),
+src/ir/codegen/mod.rs-500-            downgraded_vars: std::collections::HashSet::new(),
+src/ir/codegen/mod.rs-501-            unbound_fstring_vars: std::collections::HashSet::new(),
+src/ir/codegen/mod.rs:502:            fn_returns: std::collections::HashMap::new(),
+src/ir/codegen/mod.rs-503-            unknown_extern_fns: std::collections::HashMap::new(),
+src/ir/codegen/mod.rs-504-            bridge_registry: None,
+src/ir/codegen/mod.rs-505-            embed_modules: std::collections::HashSet::new(),
+src/ir/codegen/mod.rs-506-            // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
+src/ir/codegen/mod.rs-507-            vec_cap_hint: std::cell::RefCell::new(None),
+src/ir/codegen/mod.rs-508-            owned_locals: std::cell::RefCell::new(std::collections::HashMap::new()),
+src/ir/codegen/mod.rs-509-            buf: String::new(),
+src/ir/codegen/mod.rs-510-        }
+src/ir/codegen/mod.rs-511-    }
+src/ir/codegen/mod.rs-512-
+--
+src/ir/codegen/mod.rs-537-
+src/ir/codegen/mod.rs-538-    /// 将整个 IrModule 生成为 Rust 源代码
+src/ir/codegen/mod.rs-539-    pub fn generate(&mut self, module: &IrModule) -> String {
+src/ir/codegen/mod.rs-540-        self.buf.clear();
+src/ir/codegen/mod.rs-541-        self.indent = 0;
+src/ir/codegen/mod.rs-542-
+src/ir/codegen/mod.rs-543-        // 预扫描：收集 enum variant → enum name 映射 + 函数参数信息 + impl-only 类型名
+src/ir/codegen/mod.rs-544-        // 注意：不能插入 emitted_types（会阻断 gen_enum_def / gen_struct_def 的去重逻辑）
+src/ir/codegen/mod.rs-545-        self.enum_variants.clear();
+src/ir/codegen/mod.rs-546-        self.fn_param_info.clear();
+src/ir/codegen/mod.rs:547:        self.fn_returns.clear();
+src/ir/codegen/mod.rs-548-        self.emitted_types.clear();
+src/ir/codegen/mod.rs-549-        self.impl_types.clear();
+src/ir/codegen/mod.rs-550-        self.mutated_consts.clear();
+src/ir/codegen/mod.rs-551-        self.enum_variant_fields.clear();
+src/ir/codegen/mod.rs-552-        self.overload_sigs.clear();
+src/ir/codegen/mod.rs-553-        self.raises_fn_names.clear();
+src/ir/codegen/mod.rs-554-
+src/ir/codegen/mod.rs-555-        // 预收集所有用户自定义类型名（struct/enum），供函数体/表达式中判断
+src/ir/codegen/mod.rs-556-        self.known_types.clear();
+src/ir/codegen/mod.rs-557-        for item in &module.items {
+--
+src/ir/codegen/mod.rs-592-            if let Item::FnDef(f) = item {
+src/ir/codegen/mod.rs-593-                if f.raises.is_some() {
+src/ir/codegen/mod.rs-594-                    self.raises_fn_names.insert(f.name.clone());
+src/ir/codegen/mod.rs-595-                }
+src/ir/codegen/mod.rs-596-                // 登记顶层 def 名称（IR-003：顶层函数作一等值需 Arc::new(f)）。
+src/ir/codegen/mod.rs-597-                // 前置收集保证任意源码顺序下函数体引用靠后定义的 def 也能识别
+src/ir/codegen/mod.rs-598-                // （combo-pipe-lambda 的 `double if flag else inc`：double/inc 作值需装箱）。
+src/ir/codegen/mod.rs-599-                self.top_level_fns.insert(f.name.clone());
+src/ir/codegen/mod.rs-600-                // 收集函数返回类型（用于 is_str_producing 识别字符串返回函数调用）
+src/ir/codegen/mod.rs-601-                if !matches!(f.ret_ty, IrType::Unit) {
+src/ir/codegen/mod.rs:602:                    self.fn_returns.insert(f.name.clone(), f.ret_ty.clone());
+src/ir/codegen/mod.rs-603-                }
+src/ir/codegen/mod.rs-604-            }
+src/ir/codegen/mod.rs-605-        }
+src/ir/codegen/mod.rs-606-
+src/ir/codegen/mod.rs-607-        // 预扫描 f-string 未绑定插值变量（lit_probe 等探测用例）
+src/ir/codegen/mod.rs-608-        self.unbound_fstring_vars = collect_unbound_fstring_vars(module);
+src/ir/codegen/mod.rs-609-
+src/ir/codegen/mod.rs-610-        // 预扫描未定义外部函数（p16_lzi 等跨模块探测用例）
+src/ir/codegen/mod.rs-611-        self.unknown_extern_fns = collect_unknown_extern_fns(module);
+src/ir/codegen/mod.rs-612-
+src/ir/codegen/str_boundary.rs-76-//! **有意保留**的启发式（附原因，改动前请先读这段）：
+src/ir/codegen/str_boundary.rs-77-//!
+src/ir/codegen/str_boundary.rs-78-//! - `str_typed_vars`：需要在**跨语句状态**上判断（输入还是渲染后的文本，不是 `Expr`）。
+src/ir/codegen/str_boundary.rs-79-//!   并列项 `is_str_expr` 同属此档——它服务 f-string 插值的 `{}`/`{:?}` 分档
+src/ir/codegen/str_boundary.rs-80-//!   （规范 SYNTAX/00-词法基础.md:188：str 插值走 Display 不带引号）。2026-10-02 曾把
+src/ir/codegen/str_boundary.rs-81-//!   插值整块改成一律 Debug 以「对齐」DEMO 文案，代价是打红实跑的
+src/ir/codegen/str_boundary.rs-82-//!   tests/str_boundary.rs c7_fstring，已回退；见台账 memory/bugs.md BUG-22。
+src/ir/codegen/str_boundary.rs-83-//! - `expr_is_clone_of_string`：判断「对 str/String 调用 `.clone()`」的实参，
+src/ir/codegen/str_boundary.rs-84-//!   这类实参 IR 类型常退化为 `Any`（`form_of_expr` 返回 `None`），只能靠
+src/ir/codegen/str_boundary.rs-85-//!   接收者类型 + 方法名兜底。
+src/ir/codegen/str_boundary.rs:86://! - `is_str_producing`：需要 `fn_returns` 表与方法名白名单的上下文推断。
+src/ir/codegen/str_boundary.rs-87-//! - `need_ref` 的接收者归属判定（std `Vec::contains` vs 自定义 `contains`、
+src/ir/codegen/str_boundary.rs-88-//!   Dict `get`、kwargs Any 兜底）：需要方法解析知识，属「调用哪个方法」，
+src/ir/codegen/str_boundary.rs-89-//!   不在形态层职责内。
+src/ir/codegen/str_boundary.rs-90-//! - 文本层剥离（`trim_end_matches(".to_string()")` 等）：输入是已发射文本，
+src/ir/codegen/str_boundary.rs-91-//!   且与发射管线顺序耦合；迁移前必须先拿到 `Expr`。
+src/ir/codegen/str_boundary.rs-92-//! - 泛型/关联类型位的 clone 抑制（`I::Item` 无 `Clone` 约束）与 E0034 强制
+src/ir/codegen/str_boundary.rs-93-//!   限定 UFCS：分别依赖泛型约束与方法解析，形态层不可见。
+src/ir/codegen/str_boundary.rs-94-//! - `IrType::Str` 的**保守借用假设**：IR 里 `Str` 表示 LZ 的 `str`，但其渲染
+src/ir/codegen/str_boundary.rs-95-//!   文本可能是 `&str`/`&String`（`ref` 形参、`&self` 字段、const 等）。因此凡
+src/ir/codegen/str_boundary.rs-96-//!   「不确定渲染形态」的位置，调用方按 [`StrForm::StrRef`] 传入

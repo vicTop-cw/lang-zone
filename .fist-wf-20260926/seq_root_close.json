@@ -1,0 +1,10 @@
+[
+  {"tool": "claim", "args": {"task_id": "T0r8.1", "assignee": "CodeBuddyMain"}},
+  {"tool": "claim", "args": {"task_id": "T0r8", "assignee": "CodeBuddyMain"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.1", "deliverable": "寻虫完成：hunt-20260926 遗留 BUG-1~5 五目录 100% 复现；对抗样例暴露 BUG-6；issue_scan 0 findings", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8", "deliverable": "首轮四模式闭环：寻虫→修复→验证→打磨，Omega+laya+issue_scan+call_log 全程开启，680 测试零回归", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.1", "verdict": "pass", "reviewer": "verifier", "reason": "5 个遗留 BUG 100% 复现 + 新确诊 BUG-6 + issue_scan 0 findings"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8", "verdict": "pass", "reviewer": "verifier", "reason": "首轮四模式闭环，680 测试零回归"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.1", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8", "verifier": "CodeBuddyMain"}}
+]

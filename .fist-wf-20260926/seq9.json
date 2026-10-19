@@ -1,0 +1,14 @@
+[
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.2.1", "content": "修复语料：BUG-4(critical)+BUG-1(high) 必须闭环——函数体 bigint 不坍塌 i128、生成码经 lz_builtins 路由孤立编译通过；hunt_bug1/hunt_bug4 回归转正", "author": "spec_author"}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.2.2", "content": "修复语料：BUG-2/3/5 闭环——const BigInt 包装、needs_lazy 惰性、三层嵌套空列表下推；hunt_bug2/3/5 回归转正", "author": "spec_author"}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.3.1", "content": "验证语料：全量 cargo test 0 failed 且不低于基线 673；269 项 DEMO 闸门全绿", "author": "spec_author"}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.3.2", "content": "验证语料：BUG-1~6 全部有可执行回归锁死（hunt_bug1~6 测试存在且通过）", "author": "spec_author"}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.4.1", "content": "打磨语料：FIND_BUG.md 轮次 16 记录落盘（根因表+转正清单），只增不删不改", "author": "spec_author"}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.4.2", "content": "打磨语料：DEMO 盲区收敛——BigInt/Complex 有可执行样例（hunt-20260926 bug-A~F 六目录）且全部可复现编译", "author": "spec_author"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.2.1", "verdict": "approve", "reviewer": "verifier", "reason": "判据可核验：回归测试名+编译通过口径明确"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.2.2", "verdict": "approve", "reviewer": "verifier", "reason": "同上"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.3.1", "verdict": "approve", "reviewer": "verifier", "reason": "数量口径明确"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.3.2", "verdict": "approve", "reviewer": "verifier", "reason": "回归锁死口径明确"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.4.1", "verdict": "approve", "reviewer": "verifier", "reason": "文档判据明确"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.4.2", "verdict": "approve", "reviewer": "verifier", "reason": "盲区收敛判据明确"}}
+]

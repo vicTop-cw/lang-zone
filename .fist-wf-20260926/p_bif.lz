@@ -1,0 +1,2 @@
+let x: bigint = BigInt::from(5)
+println(x)

@@ -1,0 +1,4 @@
+[
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.1", "verdict": "pass", "reviewer": "verifier", "reason": "5 个遗留 BUG 100% 复现 + 新确诊 BUG-6 + issue_scan 0 findings"}},
+  {"tool": "get", "args": {"task_id": "T0r8.1"}}
+]

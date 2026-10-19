@@ -1,0 +1,3 @@
+def main() =
+    let s = "abc"
+    println(s.nosuch())

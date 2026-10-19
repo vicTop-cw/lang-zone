@@ -1,0 +1,6 @@
+
+thread 'main' (77260) panicked at E:\IDEProjects\AI\lang-zone\DEMO\01_basics\polish_02_scope.rs:40:5:
+assertion `left == right` failed
+  left: 20
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

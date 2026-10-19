@@ -1,0 +1,4 @@
+
+thread 'main' (77648) panicked at E:\IDEProjects\AI\lang-zone\DEMO\04_functions\spread_protocol.rs:62:38:
+404
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

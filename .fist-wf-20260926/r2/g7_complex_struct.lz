@@ -1,0 +1,6 @@
+struct P = re: complex, im: complex
+
+def main() =
+    let p = P { re: Complex64::new(1.0, 0.0), im: Complex64::new(0.0, 1.0) }
+    let mag: complex = p.re * p.re + p.im * p.im
+    println(mag)

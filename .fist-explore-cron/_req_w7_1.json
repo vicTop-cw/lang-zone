@@ -1,0 +1,4 @@
+[
+ {"name":"watchdog_tick","arguments":{"mode":"explore","namespace":"lz-explore","meta_prompt_path":"E:\\IDEProjects\\AI\\FIST-Mbt\\templates\\pipeline_mode_explore.md","timeout_sec":2400,"next_created_by":"watchdog","now":"2026-10-10T18:55:00+08:00"}},
+ {"name":"get","arguments":{"task_id":"T0r9"}}
+]

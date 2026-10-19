@@ -1,0 +1,14 @@
+    Checking lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+warning: field `stderr` is never read
+  --> tests\codegen_corner_fixes.rs:42:5
+   |
+38 | struct Run {
+   |        --- field in this struct
+...
+42 |     stderr: String,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `lang-zone` (test "codegen_corner_fixes") generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 45.88s

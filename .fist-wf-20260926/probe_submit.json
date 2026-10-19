@@ -1,0 +1,4 @@
+[
+  {"tool": "get", "args": {"task_id": "T0r8.2.1"}},
+  {"tool": "submit", "args": {"task_id": "T0r8.2.1"}}
+]

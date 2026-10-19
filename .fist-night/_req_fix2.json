@@ -1,0 +1,6 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r8","assignee":"night-executor","now":"2026-09-27T03:13:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0r8","split_n":4,"by":"night-executor","spec":"{\"laws\":[\"BUG-N1: 隔离副本复现+补丁应用+回归锁死（ty004_params_type_erase / lz_emit_rs_lz_matches_native_codegen 转 PASS）\",\"BUG-N2: 9640 哨兵剥离最小补丁构造+隔离副本验证（sb001_time_method 转 PASS）\",\"BUG-N3: 语义级 E0282 候选方案评估，只挂账不修\",\"收口: 合并补丁产出+golden 快照影响评估+账本更新\"],\"fingerprint\":\"lz-night-20260926-R1-fix\"}","omega_strong_verify":true,"laya_auto":true,"now":"2026-09-27T03:13:00+08:00"}},
+ {"name":"bug_list","arguments":{"project_dir":".","now":"2026-09-27T03:13:00+08:00"}},
+ {"name":"list","arguments":{"now":"2026-09-27T03:13:00+08:00"}}
+]

@@ -1,0 +1,22 @@
+=== nesting-data-types ===
+42
+test
+deep_leaf:99
+deep_empty
+pass
+root:7
+3
+6
+([1, 2, 3], ["a", "b"])
+Err("negative")
+Ok(None)
+Ok(Some(10))
+Counter { count: 15 }
+33.51029333333333
+24.0
+15.70795
+[10, 30, 50]
+negative
+small
+large
+nesting-data-types done

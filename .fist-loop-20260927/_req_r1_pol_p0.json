@@ -1,0 +1,3 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","description":"[lzc-loop:打磨:R1] 质量指标只升不降（cargo test 通过数 / cargo check 告警数 / golden 一致性）+ 复扫收敛盘点 + 验证环节挂账项闭环（仅非 IR 域 BUG-2 可动，其余 ir-upstream 避让）","created_by":"human_steward","namespace":"lzc-loop-20260927","now":"2026-09-29T09:10:00+08:00"}}
+]

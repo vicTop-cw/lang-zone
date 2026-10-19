@@ -1,0 +1,6 @@
+// C06 consumer: the declared dependency version does not exist in the registry.
+// `build` must fail with an explicit version-conflict diagnostic.
+import shared
+
+def main() =
+    print("C06 OK")

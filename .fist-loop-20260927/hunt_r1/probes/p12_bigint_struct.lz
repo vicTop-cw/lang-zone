@@ -1,0 +1,4 @@
+struct Big = val: bigint
+def main() =
+    let b = Big { val: 123456789012345678901234567890 }
+    println(b.val + 1)

@@ -1,0 +1,4 @@
+def f(a: int) -> int =
+    a + 1
+def main() =
+    println(f(1, 2))

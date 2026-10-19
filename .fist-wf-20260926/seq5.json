@@ -1,0 +1,4 @@
+[
+  {"tool": "issue_scan", "args": {"dir": "src", "max_findings": 50}},
+  {"tool": "issue_scan", "args": {"dir": "lz_builtins", "max_findings": 50, "include_tests": true}}
+]

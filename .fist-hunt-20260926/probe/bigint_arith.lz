@@ -1,0 +1,4 @@
+let a: bigint = 99999999999999999999999999999
+let b: int = 42
+let c = a + b
+println(c)

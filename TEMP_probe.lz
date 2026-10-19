@@ -1,0 +1,19 @@
+def accum() -> str:
+    let s: str = "hello"
+    return s
+
+def inferred_str():
+    let s = "world"
+    return s
+
+def inferred_int():
+    let x = 42
+    return x
+
+def main():
+    print(accum())
+    print(inferred_str())
+    print(inferred_int())
+    print("---to_string---")
+    print(42.to_string())
+    print("abc".to_string())

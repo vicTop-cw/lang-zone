@@ -1,0 +1,7 @@
+[
+  {"tool": "get", "args": {"task_id": "T0r8"}},
+  {"tool": "get", "args": {"task_id": "T0r8.1"}},
+  {"tool": "get", "args": {"task_id": "T0r8.2"}},
+  {"tool": "get", "args": {"task_id": "T0r8.4"}},
+  {"tool": "list", "args": {}}
+]

@@ -1,0 +1,46 @@
+warning: field `stderr` is never read
+  --> tests\codegen_corner_fixes.rs:42:5
+   |
+38 | struct Run {
+   |        --- field in this struct
+...
+42 |     stderr: String,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `lang-zone` (test "codegen_corner_fixes") generated 1 warning
+note: did not finalize incremental compilation session directory `\\?\E:\IDEProjects\AI\lang-zone\target\debug\incremental\lexer_parser_core-25w24tb5a4plf\s-hn0l4twpzd-0erc724-working`: 拒绝访问。 (os error 5)
+  |
+  = help: the next build will not be able to reuse work from this compilation
+
+warning: field `transpiled` is never read
+  --> tests\perf_opt_gates.rs:40:5
+   |
+38 | struct Run {
+   |        --- field in this struct
+39 |     ok: bool,
+40 |     transpiled: bool,
+   |     ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `lang-zone` (test "perf_opt_gates") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.56s
+     Running unittests src\lib.rs (target\debug\deps\lang_zone-894916d93cb3dd72.exe)
+     Running unittests src\main.rs (target\debug\deps\lang_zone-55b23eebacfe5eeb.exe)
+     Running tests\bridge_boundary.rs (target\debug\deps\bridge_boundary-8cea0cef175a0b1a.exe)
+     Running tests\bridge_e2e.rs (target\debug\deps\bridge_e2e-2087d0962b328101.exe)
+     Running tests\bridge_embed.rs (target\debug\deps\bridge_embed-80b9c9cefcc11d08.exe)
+     Running tests\bridge_import.rs (target\debug\deps\bridge_import-d81f11e09ceb3a38.exe)
+     Running tests\codegen_corner_fixes.rs (target\debug\deps\codegen_corner_fixes-e0d029e2c13c89d5.exe)
+     Running tests\cy_codegen_gate.rs (target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe)
+     Running tests\cython_backend.rs (target\debug\deps\cython_backend-ae3015987cc48de7.exe)
+     Running tests\demo_codegen_compile.rs (target\debug\deps\demo_codegen_compile-d2f4bd2577ecc517.exe)
+     Running tests\dual_route_golden.rs (target\debug\deps\dual_route_golden-989dd90a453a3185.exe)
+     Running tests\error_bug_libs.rs (target\debug\deps\error_bug_libs-e6474a4c8459d6cb.exe)
+     Running tests\find_bug_bugs.rs (target\debug\deps\find_bug_bugs-ad2f3a2359698717.exe)
+     Running tests\find_bug_libs.rs (target\debug\deps\find_bug_libs-80e1cafdcaf38327.exe)
+     Running tests\fuzz_smoke.rs (target\debug\deps\fuzz_smoke-0e6c0172980f14f1.exe)
+     Running tests\g6_codegen.rs (target\debug\deps\g6_codegen-67ccddffbe2e2f1d.exe)
+error: test failed, to rerun pass `--test g6_codegen`

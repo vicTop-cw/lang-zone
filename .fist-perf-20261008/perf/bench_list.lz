@@ -1,0 +1,11 @@
+def build(n: int) -> List<int> =
+    mut acc: List<int> = []
+    mut i = 0
+    while i < n:
+        acc = acc + [i]
+        i = i + 1
+    acc
+
+def main() =
+    let xs = build(20000)
+    println(xs.len())

@@ -1,0 +1,7 @@
+# C06: dependency version conflict — requests a version that was never published
+name = "c06consumer"
+version = "0.1.0"
+entry = "src/main.lz"
+
+[dependencies]
+shared = "9.9.9"

@@ -1,0 +1,7 @@
+
+thread 'main' (74920) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-defer-guard.rs:129:9:
+"empty_path"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (74920) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-defer-guard.rs:206:9:
+"zero"

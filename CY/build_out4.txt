@@ -1,0 +1,264 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+error: expected `,`
+  --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:84:4
+   |
+83 |         AstExpr::Call {
+   |         ------------- while parsing the fields for this pattern
+84 | std::fs::write(r"C:\Users\victo\AppData\Roaming\Tencent\Marvis\User\oAN1i2SANM4q5TPIlI-lObBKCV9o\workspace\conv_f62e6ba523294be180d0...
+   |    ^^
+
+error: expected `,`
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:666:4
+    |
+665 |         AstExpr::MethodCall {
+    |         ------------------- while parsing the fields for this pattern
+666 | std::fs::write(r"C:\Users\victo\AppData\Roaming\Tencent\Marvis\User\oAN1i2SANM4q5TPIlI-lObBKCV9o\workspace\conv_f62e6ba523294be180d...
+    |    ^^
+
+error: expected one of `,`, `:`, or `}`, found `::`
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:677:4
+    |
+676 |         AstExpr::FieldAccess { receiver, field } => ExprKind::FieldAccess {
+    |                                                     --------------------- while parsing this struct
+677 | std::fs::write(r"C:\Users\victo\AppData\Roaming\Tencent\Marvis\User\oAN1i2SANM4q5TPIlI-lObBKCV9o\workspace\conv_f62e6ba523294be180d...
+    | ---^^ expected one of `,`, `:`, or `}`
+    | |
+    | while parsing this struct field
+
+error: expected identifier, found `"[CE] [CE] field\n"`
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:677:164
+    |
+676 | ...=> ExprKind::FieldAccess {
+    |       --------------------- while parsing this struct
+677 | ...encent\Marvis\User\oAN1i2SANM4q5TPIlI-lObBKCV9o\workspace\conv_f62e6ba523294be180d00eb9a11946f2\temp\stage3.log", "[CE] [CE] field\n").u...
+    |                                                                                                                      ^^^^^^^^^^^^^^^^^^^ expected identifier
+
+error: expected one of `,`, `:`, or `}`, found `)`
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:678:54
+    |
+676 |         AstExpr::FieldAccess { receiver, field } => ExprKind::FieldAccess {
+    |                                                     --------------------- while parsing this struct
+677 | std::fs::write(r"C:\Users\victo\AppData\Roaming\Tencent\Marvis\User\oAN1...
+678 |             base: Box::new(convert_expr(receiver, ctx)),
+    |                                                      ^ expected one of `,`, `:`, or `}`
+
+error[E0308]: `match` arms have incompatible types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:121:42
+    |
+119 |   ...                   let arg_expr: &AstExpr = match arg {
+    |  ________________________________________________-
+120 | | ...                       AstExpr::KwArg { value, .. } => value.as_ref(),
+    | |                                                           -------------- this is found to be of type `&ast::expr::Expr`
+121 | | ...                       other => other,
+    | |                                    ^^^^^ expected `&Expr`, found `Expr`
+122 | | ...                   };
+    | |_______________________- `match` arms have incompatible types
+    |
+help: consider borrowing here
+    |
+121 |                                 other => &other,
+    |                                          +
+
+error[E0614]: type `ast::expr::Expr` cannot be dereferenced
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:125:62
+    |
+125 | ...                   AstExpr::Comptime(inner) => &**inner,
+    |                                                    ^^^^^^^ can't be dereferenced
+
+error[E0308]: `match` arms have incompatible types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:195:54
+    |
+193 |   ...                   Some(a) => match a {
+    |  __________________________________-
+194 | | ...                       AstExpr::KwArg { value, .. } => value.as_ref(),
+    | |                                                           -------------- this is found to be of type `&ast::expr::Expr`
+195 | | ...                       other => other,
+    | |                                    ^^^^^ expected `&Expr`, found `Expr`
+196 | | ...                   },
+    | |_______________________- `match` arms have incompatible types
+    |
+help: consider borrowing here
+    |
+195 |                                             other => &other,
+    |                                                      +
+
+error[E0614]: type `ast::expr::Expr` cannot be dereferenced
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:203:70
+    |
+203 | ...                   AstExpr::Comptime(inner) => &**inner,
+    |                                                    ^^^^^^^ can't be dereferenced
+
+error[E0308]: mismatched types
+    --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:246:74
+     |
+ 246 | ...                   if let Some(rt) = ctx.fn_returns.get(callee) {
+     |                                                        --- ^^^^^^ expected `&_`, found `String`
+     |                                                        |
+     |                                                        arguments to this method are incorrect
+     |
+     = note: expected reference `&_`
+                   found struct `std::string::String`
+note: method defined here
+    --> D:\Migrated\victo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\std\src\collections\hash\map.rs:1030:12
+     |
+1030 |     pub fn get<Q: ?Sized>(&self, k: &Q) -> Option<&V>
+     |            ^^^
+help: consider borrowing here
+     |
+ 246 |                                     if let Some(rt) = ctx.fn_returns.get(&callee) {
+     |                                                                          +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:265:41
+    |
+265 |                 let recv = convert_expr(receiver, ctx);
+    |                            ------------ ^^^^^^^^ expected `&Expr`, found `Box<Expr>`
+    |                            |
+    |                            arguments to this function are incorrect
+    |
+    = note: expected reference `&ast::expr::Expr`
+                  found struct `Box<ast::expr::Expr>`
+note: function defined here
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:6:15
+    |
+  6 | pub(crate) fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
+    |               ^^^^^^^^^^^^ ------------------
+help: consider borrowing here
+    |
+265 |                 let recv = convert_expr(&receiver, ctx);
+    |                                         +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:358:55
+    |
+358 |                         filled_args.push(convert_expr(a, ctx));
+    |                                          ------------ ^ expected `&Expr`, found `Expr`
+    |                                          |
+    |                                          arguments to this function are incorrect
+    |
+note: function defined here
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:6:15
+    |
+  6 | pub(crate) fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
+    |               ^^^^^^^^^^^^ ------------------
+help: consider borrowing here
+    |
+358 |                         filled_args.push(convert_expr(&a, ctx));
+    |                                                       +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:438:39
+    |
+433 |             let actual_func: &AstExpr;
+    |                              -------- expected due to this type
+...
+438 |                         actual_func = receiver;
+    |                                       ^^^^^^^^ expected `&Expr`, found `Box<Expr>`
+    |
+    = note: expected reference `&ast::expr::Expr`
+                  found struct `Box<ast::expr::Expr>`
+help: consider borrowing here
+    |
+438 |                         actual_func = &receiver;
+    |                                       +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:441:39
+    |
+433 |             let actual_func: &AstExpr;
+    |                              -------- expected due to this type
+...
+441 |                         actual_func = receiver;
+    |                                       ^^^^^^^^ expected `&Expr`, found `Box<Expr>`
+    |
+    = note: expected reference `&ast::expr::Expr`
+                  found struct `Box<ast::expr::Expr>`
+help: consider borrowing here
+    |
+441 |                         actual_func = &receiver;
+    |                                       +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:509:69
+    |
+509 | ...                   (name.clone(), convert_expr(value, ctx))
+    |                                      ------------ ^^^^^ expected `&Expr`, found `Box<Expr>`
+    |                                      |
+    |                                      arguments to this function are incorrect
+    |
+    = note: expected reference `&ast::expr::Expr`
+                  found struct `Box<ast::expr::Expr>`
+note: function defined here
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:6:15
+    |
+  6 | pub(crate) fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
+    |               ^^^^^^^^^^^^ ------------------
+help: consider borrowing here
+    |
+509 |                                         (name.clone(), convert_expr(&value, ctx))
+    |                                                                     +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:516:64
+    |
+516 | ...                   (fname_i, convert_expr(a, ctx))
+    |                                 ------------ ^ expected `&Expr`, found `Expr`
+    |                                 |
+    |                                 arguments to this function are incorrect
+    |
+note: function defined here
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:6:15
+    |
+  6 | pub(crate) fn convert_expr(ast_expr: &AstExpr, ctx: &TypeCtx) -> Expr {
+    |               ^^^^^^^^^^^^ ------------------
+help: consider borrowing here
+    |
+516 |                                         (fname_i, convert_expr(&a, ctx))
+    |                                                                +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:570:22
+    |
+570 |                 Some(fname)
+    |                 ---- ^^^^^ expected `&String`, found `String`
+    |                 |
+    |                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `std::string::String` due to the type of the argument passed
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:570:17
+    |
+570 |                 Some(fname)
+    |                 ^^^^^-----^
+    |                      |
+    |                      this argument influences the type of `Some`
+note: tuple variant defined here
+   --> D:\Migrated\victo\.rustup\toolchains\stable-x86_64-pc-windows-msvc\lib/rustlib/src/rust\library\core\src\option.rs:608:5
+    |
+608 |     Some(#[stable(feature = "rust1", since = "1.0.0")] T),
+    |     ^^^^
+help: consider borrowing here
+    |
+570 |                 Some(&fname)
+    |                      +
+
+error[E0308]: mismatched types
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\convert_expr.rs:575:38
+    |
+575 |                 match ctx.lookup_var(fname) {
+    |                           ---------- ^^^^^ expected `&str`, found `String`
+    |                           |
+    |                           arguments to this method are incorrect
+    |
+note: method defined here
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\mod.rs:414:19
+    |
+414 |     pub(crate) fn lookup_var(&self, name: &str) -> IrType {
+    |                   ^^^^^^^^^^        ----------
+help: consider borrowing here
+    |
+575 |                 match ctx.lookup_var(&fname) {
+    |                                      +
+
+Some errors have detailed explanations: E0308, E0614.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `lang-zone` (lib) due to 18 previous errors

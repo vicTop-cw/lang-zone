@@ -1,0 +1,9 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+error: linking with `link.exe` failed: exit code: 1104
+  |
+  = note: "D:\\VisualStudioBuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe" "/NOLOGO" "E:\\IDEProjects\\AI\\lang-zone\\target\\debug\\deps\\rustcJ29sQ5\\symbols.o" "<122 object files omitted>" "<sysroot>\\lib\\rustlib\\x86_64-pc-windows-msvc\\lib/{libtest-*,libgetopts-*,librustc_std_workspace_std-*,libstd-*,libpanic_unwind-*,libcfg_if-*,libwindows_link-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libunwind-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "kernel32.lib" "ntdll.lib" "userenv.lib" "ws2_32.lib" "dbghelp.lib" "/defaultlib:msvcrt" "/NXCOMPAT" "/OUT:E:\\IDEProjects\\AI\\lang-zone\\target\\debug\\deps\\cy_codegen_gate-61c22c5977953f48.exe" "/OPT:REF,NOICF" "/DEBUG" "/PDBALTPATH:%_PDB%" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\intrinsic.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\liballoc.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libcore.natvis" "/NATVIS:<sysroot>\\lib\\rustlib\\etc\\libstd.natvis"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: LINK : fatal error LNK1104: 无法打开文件“E:\IDEProjects\AI\lang-zone\target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe”
+          
+
+error: could not compile `lang-zone` (test "cy_codegen_gate") due to 1 previous error

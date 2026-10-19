@@ -813,3 +813,18 @@ push(Option::None)（None 经 gen_none_ref 发射为 Option::None）→ E0308
 Option(Any)（归一为 Option<i64>），生成器返回类型 Vec<Option<i64>>，
 push(None.clone()) 与 push(Some(1i64)) 均匹配。
 实测 gen_opt.lz RUN-OK Some(None)。
+## BUG-292 [2026-10-19T14:20:00+08:00] [high] FIXED（生成器 if 分支体内 return 未重写为 raise）
+`def gen(): if true: yield 1; return; yield 2` — LZ 语句位置的 if 是
+AstStmt::Expr(AstExpr::If{..})，convert_stmt 降为 Stmt::ExprStmt 包裹
+ExprKind::IfExpr。两处下钻缺口：
+(1) convert_decl.rs ir_block_has_yield：无 Stmt::ExprStmt 分支 →
+    `if true: yield 1; return` 中 return 未重写为 raise → codegen 生成
+    panic!("generator return")（TEMP/probe/sweep6/gen_nested_if_ret.lz）。
+(2) convert_decl.rs rewrite_iterator_returns：同样无 Stmt::ExprStmt 分支
+    → if 分支体内 return 原样保留 Stmt::Return → Stmt::Return codegen 走
+    panic!("generator return") 兜底。
+修法：ir_block_has_yield 增 Stmt::ExprStmt 分支，经新增 ir_expr_has_yield
+递归下钻 ExprKind::IfExpr/BlockExpr；rewrite_iterator_returns 增
+Stmt::ExprStmt 分支，经新增 rewrite_expr_returns 递归重写 if 分支体内
+Stmt::Return → Stmt::Raise。
+实测 gen_nested_if_ret.lz RUN-OK `Some(1)`（yield 1 后 return 终止迭代）。

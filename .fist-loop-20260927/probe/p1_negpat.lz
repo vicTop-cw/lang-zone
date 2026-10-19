@@ -1,0 +1,6 @@
+def f(x: int) -> int =
+    match x:
+        -1 => 0
+        _ => x
+print(f(3))
+

@@ -1,0 +1,7 @@
+[
+  {"tool": "execute", "args": {"task_id": "T0r8.1", "deliverable": "寻虫完成：hunt-20260926 BUG-1~5 五目录 100% 复现；对抗样例暴露 BUG-6；issue_scan 0 findings", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.2", "deliverable": "修复完成：BUG-4/1/2/3/5 入库 + 回归测试", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.3", "deliverable": "验证完成：680 passed / 0 failed", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.4", "deliverable": "打磨完成：FIND_BUG.md 轮次 16 + 六目录样例", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8", "deliverable": "首轮四模式闭环：Omega+laya+issue_scan+call_log 全程开启，680 测试零回归", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}}
+]

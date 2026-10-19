@@ -1,0 +1,32 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r15.1.1","assignee":"human_steward","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r15.1.1","content":"P1 质量指标复测：cargo test 通过数、cargo check 告警数、golden 一致性，与 R1-验证 结果比对。","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r15.1.1","verdict":"approve","note":"指标口径明确","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r15.1.1","by":"human_steward","deliverable":".fist-loop-20260927/_gate_polish_r1.txt + _gate_polish_r1_revert.txt","summary":"指标实测：cargo test 734 passed/1 failed（R1-验证 为 733/2 → 外部改善 1 例）；cargo check --workspace 告警 0、错误 0；golden 五目标全绿、受管 golden 目录 git 洁净","evidence":[".fist-loop-20260927/_gate_polish_r1.txt",".fist-loop-20260927/_gate_polish_r1_revert.txt"],"now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r15.1.1","by":"human_steward","deliverable":"三项质量指标复测结果","summary":"质量指标：test 734/1（未绿）、告警 0、golden 绿","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r15.1.1","by":"verifier","verdict":"reject","summary":"门禁1 仍未全绿（1 failed，外部 IR 域），按红线不得判通过","now":"2026-09-29T09:40:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r15.1.2","assignee":"human_steward","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r15.1.2","content":"P2 闭环唯一非 IR 挂账项 BUG-2：重放 semantic_check 补丁 + 恢复闸门 + 全量门禁复核；新增失败即回滚。","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r15.1.2","verdict":"approve","note":"最小安全改动 + 回滚开关","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r15.1.2","by":"human_steward","deliverable":".fist-loop-20260927/_gate_polish_r1_after.txt","summary":"重放后门禁由 734/1 退化为 730/8（新增 7 项失败）；根因 tests/reject_more.rs:117 unknown_keyword 显式锁定宽松语义 → 属语义边界修订，按红线回滚。回滚后复测回到 734/1 无残留","evidence":[".fist-loop-20260927/_gate_polish_r1_after.txt",".fist-loop-20260927/hunt_r1/bug2_semantic_check.patch.md"],"now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r15.1.2","by":"human_steward","deliverable":"BUG-2 转人工裁定（BUG-13）","summary":"BUG-2 不作为缺陷闭环，升级为语义边界修订请求","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r15.1.2","by":"verifier","verdict":"reject","summary":"未闭环：补丁引发 7 项新增失败并已回滚；转 BUG-13 待人工裁定","now":"2026-09-29T09:40:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r15.2.1","assignee":"human_steward","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r15.2.1","content":"P3 复扫收敛盘点：寻虫 39 探针 -> 7 确诊 -> 6 ir-upstream 避让 + 1 转语义裁定；验证 4 单挂账逐单状态更新。","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r15.2.1","verdict":"approve","note":"逐条给最新状态与归属","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r15.2.1","by":"human_steward","deliverable":"memory/bugs-lzc-loop-20260927.md 盘点段","summary":"盘点完成：BUG-1~6 已修；BUG-2 -> BUG-13 语义裁定；BUG-3~8/9/11/12 ir-upstream 避让；BUG-10 基线口径待裁定","evidence":["memory/bugs-lzc-loop-20260927.md"],"now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r15.2.1","by":"human_steward","deliverable":"复扫收敛盘点表","summary":"盘点清单逐条状态更新完毕","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r15.2.1","by":"verifier","verdict":"pass","summary":"盘点逐条给出状态与归属，缺azon项均已转人工/避让","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r15.2.1","verifier":"verifier","pass":true,"note":"盘点交付物齐备","now":"2026-09-29T09:40:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r15.2.2","assignee":"human_steward","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r15.2.2","content":"P4 账本与轮转结：更新 loop_progress.md done 段，产出 R1 轮转结清单（含避让项与 OPEN 账本快照）。","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r15.2.2","verdict":"approve","note":"只增不删","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r15.2.2","by":"human_steward","deliverable":".fist-loop-20260927/loop_progress.md","summary":"账本 done 段追加 R1-打磨；轮转结清单含 13 单 OPEN 快照 + 8 项 ir-upstream 避让 + 人工裁定项","evidence":[".fist-loop-20260927/loop_progress.md"],"now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r15.2.2","by":"human_steward","deliverable":"账本 + 轮转结清单","summary":"账本更新完成","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r15.2.2","by":"verifier","verdict":"pass","summary":"账本只增不删，转结清单覆盖避让与 OPEN 快照","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r15.2.2","verifier":"verifier","pass":true,"note":"账本交付物齐备","now":"2026-09-29T09:40:00+08:00"}},
+ {"name":"call_log","arguments":{"limit":20,"now":"2026-09-29T09:40:00+08:00"}}
+]

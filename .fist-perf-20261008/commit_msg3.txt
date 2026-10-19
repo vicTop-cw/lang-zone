@@ -1,0 +1,39 @@
+perf(codegen): 列表累加改原地追加 —— 同机严格 A/B 18.3x、峰值内存 -13%
+
+延续「以运行性能与运行时内存为度量」的方向（代码行数不是指标）。
+本轮把上一版的「独占局部变量登记表」从只管字符串泛化为同时管列表，
+消除列表累加模式里每轮一次的全量 clone。
+
+改写（a = a + rhs，a 是by-value 的局部列表绑定）：
+- 单元素列表字面量 -> `a.push(e)`（零分配，优于 extend(vec![e])）
+- 多元素列表字面量 -> `a.extend(vec![..])`
+- 其他表达式       -> `a.extend(<与通用路径完全一致的实参文本>)`
+
+改前：`a = { let mut __cat = a.clone(); __cat.extend(..); __cat }`
+     —— 每轮一次全量 clone，累加模式下拷贝量 O(n^2)。
+改后：`while i < n { a.push(i); i = i + 1; }` —— 零分配、O(n)线性。
+
+实测（同机严格 A/B，两份 .rs 仅差这一行，2 万元素）：
+  230.6ms -> 12.6ms（18.3x）；峰值内存 5192KB -> 4508KB（-13%）。
+差距随规模放大：旧的随 n 平方增长，新的随 n 线性（30 万元素时旧的需数十秒）。
+
+安全性（owned_local.rs 内有完整论证）：
+1. 登记表按函数清空（gen_fn_def 内 owned_local_reset）；
+2. 只登记 is_ref==false 的 str/List 局部绑定，ref / ref mut 绑定排除；
+3. **形参一律不登记** —— 参数是否独占永远不需要跨函数推断，代价是
+   by-value 形参也走通用路径（`a.clone()` + extend），零风险；
+4. `extend(<rhs>)` 的实参文本与改写前完全一致 ⇒ move 语义不变
+   （改写后若再用该变量仍会编译失败，与改前同构）；
+5. `str + int` / 跨类型相加由 IR 类型检查直接拒绝，到不了这里；
+6. 借用检查器是最终保证：能通过原路径编译的场景目标变量必然独占。
+
+闸门：tests/perf_opt_gates.rs 20 -> **25 passed / 0 failed**，新增 5 例：
+单元素字面量走 push、多元素走 extend(vec![..])、变量右操作数走 extend、
+形参保留 clone+extend（证明「不登记形参」这条策略）、str/list 两类登记互不串扰。
+
+回归：cargo test -j 1 --no-fail-fast = **842 passed / 0 failed**（39 个二进制，
+本轮全绿）；demo_codegen_compile --include-ignored = 2/0（空allowlist，348 DEMO 真编译）。
+
+顺带记录一处既有缺陷（本次未修）：List 的迭代方法（如 `xs.sum()`）生成
+`(xs).sum()` 而不是 `(xs).into_iter().sum()` ⇒ E0599。闸门已改用索引求和
+绕开，不在性能改动里夹带类型/方法映射的修复。

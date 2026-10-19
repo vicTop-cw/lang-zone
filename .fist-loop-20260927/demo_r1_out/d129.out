@@ -1,0 +1,13 @@
+triple: 1,2,3
+first: 10
+rest: [20, 30, 40]
+has at least 1 element
+port: 8080
+pass
+five to ten
+small even-ish
+movement command
+medium: 42
+len via ref: 3
+Some([1, 2, 3])
+Some(5)

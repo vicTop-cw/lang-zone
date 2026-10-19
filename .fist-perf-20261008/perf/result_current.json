@@ -1,0 +1,39 @@
+{
+  "label": "current",
+  "rounds": 1,
+  "extra_args": "",
+  "lz": {
+    "lzc_ms": 21.15,
+    "rustc_ms": 347.29,
+    "run_ms": 283.67,
+    "peak_kb": 4448.0,
+    "stdout": [
+      "fib(32) = 2178309",
+      "sieve(300000) = 25997 primes",
+      "sum_to(3000000) = 9000004500000500000"
+    ],
+    "codegen_metrics": {
+      "gen_lines": 70,
+      "anchor_lines": 51,
+      "let_temps": 6,
+      "clone_calls": 0,
+      "to_string_calls": 0,
+      "vec_new": 0,
+      "with_capacity": 1,
+      "rc_arc_box": 0,
+      "diff_changed_lines": 53,
+      "diff_ratio": 1.0392
+    }
+  },
+  "anchor_rust": {
+    "rustc_ms": 334.93,
+    "run_ms": 279.89,
+    "peak_kb": 4432.0,
+    "stdout": [
+      "fib(32) = 2178309",
+      "sieve(300000) = 25997 primes",
+      "sum_to(3000000) = 9000004500000500000"
+    ]
+  },
+  "stdout_match": true
+}

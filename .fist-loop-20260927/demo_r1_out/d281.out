@@ -1,0 +1,18 @@
+=== combo-build-block ===
+100
+0
+zero
+one
+many
+5
+0
+[2, 4, 6, 8]
+(1, 4, 9)
+0
+2
+(2, 3, 6)
+(4, 5, 20)
+(6, 7, 42)
+()
+35
+combo-build-block done

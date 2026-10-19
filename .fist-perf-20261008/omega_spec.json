@@ -1,0 +1,30 @@
+{
+  "laws": [
+    "A-IR-opt-pass：在 src/ir/builder 与 src/ir/codegen 之间新增独立 pass 目录 src/ir/opt/，以 LZIR 为输入输出，实现常量折叠下沉、死代码消除、冗余临时绑定合并、条件分支简化；逐 pass 可开关 --opt=0/1/2；验收：基准生成 .rs 行数与临时变量数下降 >=20%，行为与 --opt=0 一致",
+    "E-codegen-形态对标：codegen 消除防御性clone 与冗余 Rc/Arc 包装，循环标量变量直存原生 i64/bool，列表字面量在长度可推导时生成 Vec::with_capacity 预分配；验收：与手写等价 Rust 的 diff 行数下降 >=50%，基准耗时下降、峰值内存下降",
+    "B-分配消除：IR 层做局部变量生命周期与逃逸分析（未被闭包捕获、未跨函数返回的局部 Vec/Box 不做防御性拷贝），循环内重复分配的临时缓冲提升到循环外；验收：标量热点基准耗时下降 >=10%，逃逸分析保守优先（宁可漏优化不可误判）",
+    "D-rustc调用优化：rustc 段与 lzc 段分离计时，提供对象缓存与 --check 只校验快路径，链接仅在需要最终产物时执行；验收：冷启动 rustc 段耗时下降 >=50%，单测/基准跑批总时长缩短",
+    "C-增量缓存全链路：统一单文件快速路径(main.rs lzc 直编)与工程构建路径(cli.rs create/build/check)的缓存键与产物布局，都走 IncrCompiler 复用 .lzcache 与已生成 .rs，补充跨目录/工程级失效传播；验收：未变更工程二次构建耗时 <= 首次 30%，incr_stats 可观测 hits/misses",
+    "Z-回归闸线（横切）：任何方向落地后 cargo test -j 1 全绿、tests/demo_codegen_compile --include-ignored = 2/0、golden 输出逐字节一致；仓库存在并行 agent 在途改动，测试须在隔离 worktree 或仅提交本任务改动，禁止把他人 WIP 带入"
+  ],
+  "fingerprint": {
+    "goal": "lz 生成代码性能收敛到手写 Rust 水平并压缩冷启动链路",
+    "baseline": "lz 冷启动全流程 50.0ms / 峰值 6.8MB；手写 Rust release 34.0ms / 3.9MB；差距约 +47% / +74%",
+    "targets": {
+      "bench_ms": "<=42（阶段1目标）",
+      "peak_mem_mb": "<=5.5",
+      "opt_level_switchable": "true",
+      "generated_rs_lines_drop": ">=20%",
+      "diff_lines_vs_handwritten_drop": ">=50%",
+      "rustc_segment_drop": ">=50%",
+      "incremental_second_build_ratio": "<=30%"
+    },
+    "gates": [
+      "cargo test -j 1 全绿",
+      "tests/demo_codegen_compile --include-ignored 2 passed / 0 failed",
+      "golden 逐字节一致"
+    ],
+    "spec_source": "Gen_Prompts/lz_性能优化建议书.md",
+    "baseline_source": "BENCH/perf-benchmark-analysis.md + benchmark/run_benchmark.py"
+  }
+}

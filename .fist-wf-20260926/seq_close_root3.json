@@ -1,0 +1,5 @@
+[
+  {"tool": "submit", "args": {"task_id": "T0r8"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8", "verdict": "pass", "reviewer": "verifier", "reason": "首轮四模式闭环：寻虫→修复→验证→打磨，Omega+laya+issue_scan+call_log 全程开启，680 测试零回归"}},
+  {"tool": "verify", "args": {"task_id": "T0r8", "verifier": "CodeBuddyMain"}}
+]

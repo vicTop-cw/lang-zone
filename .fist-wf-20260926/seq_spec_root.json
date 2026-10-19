@@ -1,0 +1,10 @@
+[
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8.1", "content": "寻虫语料：hunt-20260926 遗留 BUG-1~5 五个复现目录 100% 复现；对抗样例 probe_new.lz 暴露 BUG-6（bigint 注解 struct 字段/返回类型位「未知类型」）；issue_scan 对 Rust 源码 0 findings", "author": "spec_author"}},
+  {"tool": "omega_spec_create", "args": {"task_id": "T0r8", "content": "根任务语料：lang-zone codegen 首轮四模式（寻虫→修复→验证→打磨）闭环，Omega 强验证 + laya 降级决策 + issue_scan + call_log 全程开启；680 测试零回归，BUG-1~6 全部转正", "author": "spec_author"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8.1", "verdict": "approve", "reviewer": "verifier", "reason": "寻虫判据可核验"}},
+  {"tool": "omega_spec_review", "args": {"task_id": "T0r8", "verdict": "approve", "reviewer": "verifier", "reason": "根任务判据可核验"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.1", "verdict": "pass", "reviewer": "verifier", "reason": "5 个遗留 BUG 100% 复现 + 新确诊 BUG-6 + issue_scan 0 findings"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8", "verdict": "pass", "reviewer": "verifier", "reason": "首轮四模式闭环：寻虫→修复→验证→打磨，680 测试零回归"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.1", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8", "verifier": "CodeBuddyMain"}}
+]

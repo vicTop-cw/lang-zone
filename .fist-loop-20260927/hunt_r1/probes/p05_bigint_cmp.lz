@@ -1,0 +1,4 @@
+let x: bigint = 12345678901234567890
+let y: bigint = 12345678901234567891
+println(x < y)
+println(x == y)

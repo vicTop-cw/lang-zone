@@ -1,0 +1,4 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r23","assignee":"human_steward","now":"2026-09-29T12:15:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0r23","omega_strong_verify":true,"laya_auto":true,"reinject_context":true,"spec":"[{\"id\":\"C1\",\"title\":\"BUG-16 闭环（BOM）\",\"goal\":\"main.rs 三处源码读取改用 BOM 剥离助手；新增端到端闸门；全量门禁复核\",\"acceptance\":\"BOM 样例编译运行正确；门禁无新增失败\",\"constraints\":[\"非 IR 域\",\"门禁新增失败即回滚\"]},{\"id\":\"C2\",\"title\":\"OPEN 单避让盘点\",\"goal\":\"逐单确认落点：src/ir 者标记避让待人工裁定\",\"acceptance\":\"逐条给出归属\",\"constraints\":[\"不修 IR\"]}]","now":"2026-09-29T12:15:00+08:00"}}
+]

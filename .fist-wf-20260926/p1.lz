@@ -1,0 +1,7 @@
+const xc: bigint = 12345678901234567890
+let xl: bigint = 12345678901234567890
+def main() =
+  let xf: bigint = 12345678901234567890
+  println(xc)
+  println(xl)
+  println(xf)

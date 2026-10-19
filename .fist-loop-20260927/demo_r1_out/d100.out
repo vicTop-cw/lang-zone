@@ -1,0 +1,8 @@
+int:1
+str:a
+any:1
+any:2
+any:3
+int lead, args=[2]
+two str, args=[1]
+overload variadic demo done

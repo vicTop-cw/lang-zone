@@ -1,0 +1,1 @@
+[{"name":"output_validate","arguments":{"artifacts":"[\"patches/BUG-N1N2_path_sentinel.patch\",\"patches/BUG-N3_callsite_annotation.patch\",\"patches/BUG-N1_call_path_sentinel.patch\",\"_verify_full.log\",\"_verify_demo_full.log\"]","now":"2026-09-27T07:17:00+08:00"}}]
