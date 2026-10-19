@@ -101,6 +101,23 @@ pub(crate) fn block_has_yield(block: &Block) -> bool {
                     return true;
                 }
             }
+            // BUG-289：`Stmt::TryCatch` 各分支体是 Block，yield 嵌套其中需下钻
+            // （TEMP/probe/sweep6/gen_try.lz：try 块内 yield 漏检 → 返回类型
+            // Itor<i64> 而非 Vec<i64>，且 __gen_vec 未声明 → E0425）。
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
+                if block_has_yield(body)
+                    || catches.iter().any(|(_, b)| block_has_yield(b))
+                    || else_body.as_ref().map_or(false, block_has_yield)
+                    || finally_body.as_ref().map_or(false, block_has_yield)
+                {
+                    return true;
+                }
+            }
             Stmt::Block { stmts } => {
                 if block_has_yield(&Block {
                     span: Span::unknown(),
@@ -303,6 +320,32 @@ pub(crate) fn first_yield_type(block: &Block) -> Option<IrType> {
             Stmt::Match { arms, .. } => {
                 for arm in arms {
                     if let Some(t) = first_yield_type(&arm.body) {
+                        return Some(t);
+                    }
+                }
+            }
+            // BUG-289：try/catch/finally 各分支体是 Block，yield 需下钻
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
+                if let Some(t) = first_yield_type(body) {
+                    return Some(t);
+                }
+                for (_, b) in catches {
+                    if let Some(t) = first_yield_type(b) {
+                        return Some(t);
+                    }
+                }
+                if let Some(eb) = else_body {
+                    if let Some(t) = first_yield_type(eb) {
+                        return Some(t);
+                    }
+                }
+                if let Some(fb) = finally_body {
+                    if let Some(t) = first_yield_type(fb) {
                         return Some(t);
                     }
                 }

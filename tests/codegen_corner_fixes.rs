@@ -902,4 +902,23 @@ def main() =
     let ok = run_lz("generator_raises_return", src);
     assert!(ok.ok, "生成器 + raises + return 应视为 raise：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(Ok(1))");
+}// BUG-289：生成器内 try/catch/finally 各分支体含 yield 时，返回类型与 __gen_vec
+// 声明漏检（helpers.rs block_has_yield / first_yield_type 无 Stmt::TryCatch 分支）。
+// 旧行为：codegen 生成 `-> Itor<i64>`（类型来自 try 表达式）但 __gen_vec 未声明
+// → E0425（TEMP/probe/sweep6/gen_try.lz）。
+#[test]
+fn generator_try_yield() {
+    let src = r#"
+def gen():
+    try:
+        yield 1
+    catch:
+        yield 2
+def main() =
+    let g = gen()
+    print(g.next())
+"#;
+    let ok = run_lz("generator_try_yield", src);
+    assert!(ok.ok, "生成器内 try/catch yield：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(1)");
 }

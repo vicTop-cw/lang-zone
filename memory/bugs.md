@@ -792,4 +792,16 @@
     转成 Stmt::Raise 时值已被污染 → push(Err(<i64 as ImplicitFrom<String>>::
     __implicit_from__("boom"))) E0277（gen_raises_ret.lz）。修法：
     current_is_iterator = func.is_iterator || ast_body_has_yield(&func.body)。
-实测 gen_raises.lz / gen_raises_ret.lz 均 RUN-OK Some(Ok(1))。
+实测 gen_raises.lz / gen_raises_ret.lz 均 RUN-OK Some(Ok(1))。## BUG-289 [2026-10-19T13:30:00+08:00] [high] FIXED（生成器内 try/catch yield 漏检）
+`def gen(): try: yield 1 catch: yield 2` 三处 yield 检测均未下钻 try 分支体：
+(1) helpers.rs block_has_yield：无 Stmt::TryCatch 分支 → codegen 生成
+    `-> Itor<i64>`（类型来自 try 表达式本身）而非 `-> Vec<i64>`，且
+    __gen_vec 未声明 → E0425（TEMP/probe/sweep6/gen_try.lz）。
+(2) helpers.rs first_yield_type：同样无 Stmt::TryCatch 分支 → 生成器构建块
+    `func *:` 收集器元素类型推断漏检。
+(3) convert_decl.rs ast_expr_has_yield / scan_expr_yield_ty：无
+    AstExpr::TryCatch 分支 → scan_iterator_yield_ty 漏检 yield 元素类型
+    → ret_ty 推断为 Itor<i64> 而非 Vec<i64>。
+修法：三处均补 Stmt::TryCatch / AstExpr::TryCatch 分支，递归下钻
+body/catches/else_body/finally_body。
+实测 gen_try.lz RUN-OK `Some(1)`。

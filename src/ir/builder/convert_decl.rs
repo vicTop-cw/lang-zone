@@ -168,6 +168,18 @@ fn ast_expr_has_yield(expr: &AstExpr) -> bool {
         AstExpr::Match { arms, .. } => arms
             .iter()
             .any(|arm| ast_body_has_yield(&arm.body)),
+        // BUG-289：try/catch/finally 各分支体含 yield 需下钻
+        AstExpr::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
+            ast_body_has_yield(body)
+                || catches.iter().any(|arm| ast_body_has_yield(&arm.body))
+                || else_body.as_ref().map_or(false, |b| ast_body_has_yield(b))
+                || finally_body.as_ref().map_or(false, |b| ast_body_has_yield(b))
+        }
         AstExpr::Closure { body, .. } => ast_expr_has_yield(body),
         AstExpr::BlockExpr(body) => ast_body_has_yield(body),
         _ => false,
@@ -207,6 +219,35 @@ fn scan_expr_yield_ty(expr: &AstExpr, ctx: &mut TypeCtx) -> Option<IrType> {
             None
         }
         AstExpr::BlockExpr(body) => scan_iterator_yield_ty(body, ctx),
+        // BUG-289：try/catch/finally 各分支体含 yield 需下钻（生成器返回类型
+        // 推断），否则 `def gen(): try: yield 1 catch: yield 2` 返回类型漏检
+        // → codegen 生成 `-> Itor<i64>` 且 __gen_vec 未声明 → E0425。
+        AstExpr::TryCatch {
+            body,
+            catches,
+            else_body,
+            finally_body,
+        } => {
+            if let Some(t) = scan_iterator_yield_ty(body, ctx) {
+                return Some(t);
+            }
+            for arm in catches {
+                if let Some(t) = scan_iterator_yield_ty(&arm.body, ctx) {
+                    return Some(t);
+                }
+            }
+            if let Some(eb) = else_body {
+                if let Some(t) = scan_iterator_yield_ty(eb, ctx) {
+                    return Some(t);
+                }
+            }
+            if let Some(fb) = finally_body {
+                if let Some(t) = scan_iterator_yield_ty(fb, ctx) {
+                    return Some(t);
+                }
+            }
+            None
+        }
         _ => None,
     }
 }

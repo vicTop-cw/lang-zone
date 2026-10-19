@@ -360,4 +360,12 @@ ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-288**：生成器 +
     ast_body_has_yield(&func.body)`。
 
 新增回归：generator_raises、generator_raises_return。全门核验：corner 32 ✓、
-demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。
+demo ✓、ir_snapshots ✓、cy_corpus ✓、perf_opt 44 ✓。- **BUG-289**：生成器内 try/catch yield 漏检（3 处）：
+  - `helpers.rs block_has_yield`：无 `Stmt::TryCatch` 分支 → codegen 生成
+    `-> Itor<i64>` 而非 `-> Vec<i64>`，且 `__gen_vec` 未声明 → E0425。
+  - `helpers.rs first_yield_type`：无 `Stmt::TryCatch` 分支 → 生成器构建块
+    收集器元素类型推断漏检。
+  - `convert_decl.rs ast_expr_has_yield / scan_expr_yield_ty`：无
+    `AstExpr::TryCatch` 分支 → `scan_iterator_yield_ty` 漏检。
+  修法：三处均补 `Stmt::TryCatch` / `AstExpr::TryCatch` 分支，递归下钻
+  body/catches/else_body/finally_body。新增回归 generator_try_yield。
