@@ -104,6 +104,10 @@ pub struct CodeGen {
     impl_types: std::collections::HashSet<String>,
     /// enum variant → enum name 映射（用于构造器调用路由）
     enum_variants: HashMap<String, String>,
+    /// type alias 名 → 底层 IR 类型（`type Pair = (int, int)` → "Pair" → Tuple[int, int]）。
+    /// BUG-278：`p: Pair` 的 IR 类型是 Named("Pair")，IndexGet 走元组索引需先解析回
+    /// Tuple 才生成 `p.0`；否则落通用路径 `p[0i64 as usize]` → rustc E0608。
+    type_aliases: std::collections::HashMap<String, IrType>,
     /// 抑制尾表达式隐式 return（用于 match arm / 块表达式内部）
     suppress_tail_return: bool,
     /// defer+尾值捕获：块尾值语句（ExprStmt/TryCatch）已生成到 `__tail_val`，
@@ -432,6 +436,7 @@ impl CodeGen {
             emitted_types: std::collections::HashSet::new(),
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
+            type_aliases: std::collections::HashMap::new(),
             suppress_tail_return: false,
             pending_tail_capture: None,
             force_unit_tail: false,

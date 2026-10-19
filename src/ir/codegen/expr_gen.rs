@@ -480,6 +480,48 @@ impl CodeGen {
         }
     }
 
+    /// 解析 type alias：`Named("Pair")` → 其底层 IR 类型（`(int, int)` → Tuple）。
+    /// BUG-278：`let p: Pair = (1, 2); print(p[0])` 中 p 的 IR 类型是 Named("Pair")，
+    /// 若不做解析，IndexGet 走不到 Tuple 分支而生成 `p[0i64 as usize]` → rustc E0608。
+    /// 递归解析（别名指向别名），带深度保护防环。
+    fn resolve_type_alias(&self, ty: &IrType) -> IrType {
+        self.resolve_type_alias_depth(ty, 0)
+    }
+
+    fn resolve_type_alias_depth(&self, ty: &IrType, depth: u8) -> IrType {
+        if depth > 16 {
+            return ty.clone();
+        }
+        match ty {
+            IrType::Named { path, .. } => {
+                if let Some(inner) = self.type_aliases.get(path.as_str()) {
+                    self.resolve_type_alias_depth(inner, depth + 1)
+                } else {
+                    ty.clone()
+                }
+            }
+            IrType::Option(inner) => IrType::Option(Box::new(self.resolve_type_alias_depth(inner, depth + 1))),
+            IrType::Tuple(items) => IrType::Tuple(
+                items.iter().map(|i| self.resolve_type_alias_depth(i, depth + 1)).collect(),
+            ),
+            IrType::Ref(inner) | IrType::MutRef(inner) => {
+                if matches!(inner.as_ref(), IrType::Named { path, .. }
+                    if self.type_aliases.contains_key(path.as_str()))
+                {
+                    let resolved = self.resolve_type_alias_depth(inner, depth + 1);
+                    if matches!(inner.as_ref(), IrType::MutRef(_)) {
+                        IrType::MutRef(Box::new(resolved))
+                    } else {
+                        IrType::Ref(Box::new(resolved))
+                    }
+                } else {
+                    ty.clone()
+                }
+            }
+            _ => ty.clone(),
+        }
+    }
+
     pub(crate) fn gen_expr(&self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Lit(lit) => self.gen_lit(lit, &expr.ty),
@@ -4900,8 +4942,11 @@ impl CodeGen {
                 } else {
                     let key_s = self.gen_index_key(key, base);
                     // 元组索引 t[0] → Rust 元组字段访问 t.0（Rust 元组不支持 [] 索引，
-                    // E0608 cannot index into tuple）——生成 .0/.1/.2
-                    if let IrType::Tuple(_) = &base.ty {
+                    // E0608 cannot index into tuple）——生成 .0/.1/.2。
+                    // BUG-278：base.ty 可能是 type alias（Named("Pair")），先解析回
+                    // Tuple 再判定，否则落通用路径生成 `p[0i64 as usize]` → E0608。
+                    let base_resolved_ty = self.resolve_type_alias(&base.ty);
+                    if let IrType::Tuple(_) = &base_resolved_ty {
                         let idx = match &key.kind {
                             ExprKind::Lit(LitKind::Int(n)) => n.to_string(),
                             _ => key_s.trim_end_matches("i64").trim().to_string(),

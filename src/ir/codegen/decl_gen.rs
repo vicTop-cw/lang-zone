@@ -2899,6 +2899,9 @@ impl CodeGen {
         } else {
             format!("<{}>", ta.generics.join(", "))
         };
+        // BUG-278：登记别名名 → 底层 IR 类型，供 IndexGet 等按类型分派处解析
+        // `Named("Pair")` 回 Tuple 生成元组字段访问 `p.0`。
+        self.type_aliases.insert(ta.name.clone(), ta.ty.clone());
         self.emit_line(&format!(
             "pub type {}{} = {};",
             ta.name,

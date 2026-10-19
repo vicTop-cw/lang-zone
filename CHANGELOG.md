@@ -309,3 +309,7 @@ AIGC:
 - 双后端：Rust（`lzc`）与 Cython/Python（`lzcyc`）
 *（内容由AI生成，仅供参考）*
 *（内容由AI生成，仅供参考）*
+
+- float×int 混合比较提升（BUG-275）：\1.5 == 1\ 生成 \ == 1i64\（f64 == i64）→ rustc E0308。根因是 f64 提升只挂在 \rith\（Add/Sub/Mul/Div/Mod）分支，比较（Lt/Le/Gt/Ge）与 Eq/Ne 走不到 \({} as f64)\ 提升分支，且整数/浮点字面量不随 \current_expected_ty\ 改自身类型。新增 \
+um_mixed = arith || is_comparison || Eq/Ne\ 让提升分支对比较也生效，\1.5 == 1 → 1.5f64 == (1i64 as f64)\。TEMP/probe/sweep3/f64_cmp_reg.lz 验证 1.5>2 false、3<2.5 false、1==1 true。
+- str/List 重复（\*\）（BUG-276/277）：\"ab" * 2\ 生成 \String * i64\、\[1,2] * 2\ 生成 \Vec * i64\ → rustc E0369。根因是 Mul 未像 Add 那样做集合/字符串特判，str/List 侧落到 f64 提升后被当原生 \*\ 直出。在 Mul 分支前置拦截：str/String × int → \__rep.repeat(n)\、List/Vec × int → 循环 extend 重复，次数取 \max(0)\ 对齐 Python 语义（\"ab" * -1 → ""\、\[1] * 0 → []\）。\"ab"*2 → abab\、\[1,2]*2 → [1,2,1,2]\ 验证通过。

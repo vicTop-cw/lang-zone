@@ -654,3 +654,23 @@ def main() =
         "true true true 3.5 false true false false false false true abab [1, 2, 1, 2]  []"
     );
 }
+
+// BUG-278：type alias 解析。`type Pair = (int, int)` 后 `p: Pair` 的 IR 类型是
+// Named("Pair")，IndexGet 若不解析回 Tuple 会生成 `p[0i64 as usize]` → rustc E0608。
+// 覆盖顶层 alias 与函数内 alias 两种形态。
+#[test]
+fn type_alias_tuple_index_is_tuple_field_access() {
+    let src = r#"
+type Pair = (int, int)
+def main() =
+    let p: Pair = (1, 2)
+    print(p[0])
+    print(p[1])
+    type Local = (int, int)
+    let q: Local = (3, 4)
+    print(q[0] + q[1])
+"#;
+    let ok = run_lz("type_alias_tuple_index", src);
+    assert!(ok.ok, "type alias 元组索引应通过：\n{}", ok.diag);
+    assert_eq!(ok.stdout.replace('\n', " ").trim(), "1 2 7");
+}

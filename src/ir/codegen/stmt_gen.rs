@@ -2482,6 +2482,8 @@ impl CodeGen {
                 }
             }
             Stmt::TypeAlias { name, ty } => {
+                // BUG-278：函数内 type alias 也登记，供 IndexGet 解析 Named → Tuple
+                self.type_aliases.insert(name.clone(), ty.clone());
                 self.emit_line(&format!("// type {} = {};", name, self.rust_type(ty)));
             }
             Stmt::Raise { value } => {

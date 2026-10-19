@@ -766,3 +766,5 @@
 ## BUG-275 [2026-10-19T09:55:00+08:00] [medium] FIXED（codegen expr_gen，float×int 混合比较提升）：1.5 == 1 直出 f64 == i64 → rustc E0308
 ## BUG-276 [2026-10-19T09:55:00+08:00] [medium] OPEN（codegen expr_gen，str 重复语义）："ab" * 2 直出 String * i64 → rustc E0369
 ## BUG-277 [2026-10-19T09:55:00+08:00] [medium] OPEN（codegen expr_gen，list 重复语义）：[1,2] * 2 直出 Vec * i64 → rustc E0369
+
+## BUG-278 [2026-10-19T10:18:00+08:00] [medium] FIXED（codegen type_alias 解析）：	ype Pair = (int, int); let p: Pair = (1,2); print(p[0]) 直出 p[0i64 as usize] → rustc E0608（Named("Pair") 未解析回 Tuple）
