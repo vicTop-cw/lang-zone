@@ -1,4 +1,4 @@
-// Lang-Zone 编译器 — ir/codegen/expr_gen.rs
+﻿// Lang-Zone 编译器 — ir/codegen/expr_gen.rs
 // （由 mod.rs move-only 拆出，逻辑零改动）
 
 use super::scan::cmp_walk_block;
@@ -6063,7 +6063,10 @@ impl CodeGen {
                 // 未使用的闭包参数（Any 类型）无法从上下文推断 → 加 i64 标注
                 // （如 Option.None.and_then(|x| Option.None)，E0282）
                 let mut body_s = self.gen_expr(body);
-                if nested {
+                // BUG-363c：nested 与 box_lambda 同时成立（let add: (int)->(int)->int = |a| |b| a+b）
+                // 会双重 Arc::new（nested 在 6066 包一次、box_lambda 在 6350 包一次）→ E0277。
+                // nested 只在 box_lambda 未覆盖时补 Arc（纯 nested_fn_ret 场景）。
+                if nested && !self.box_lambda {
                     body_s = format!("Arc::new({})", body_s);
                 }
                 let params: Vec<String> = params
@@ -6215,6 +6218,12 @@ impl CodeGen {
                     if self.parent_lambda_non_move {
                         uses_move = true;
                     }
+                    // BUG-363b：box_lambda（值位置闭包，如 def 返回 fn 类型的 Lambda 体）
+                    // 需 Arc<dyn Fn + Send + Sync + 'static>，非 move 闭包借用外层局部变量
+                    // → E0373 closure may outlive（closure_returning_closure.lz）。强制 move。
+                    if self.box_lambda {
+                        uses_move = true;
+                    }
                     // BUG-356：非 move 闭包体引用外层非 Copy 变量（如 `(k, v)` 的 k），
                     // 递归 clone 所有非 Copy 外部变量，否则借用移出 E0507。
                     // BUG-357：被外层非 move 强制成 move 的内层闭包同样需 clone——
@@ -6246,6 +6255,12 @@ impl CodeGen {
                 } else {
                     // 闭包体内赋值外部捕获变量 → 借用捕获（非 move）
                     let mut uses_move = !expr_has_external_assign(body, &params);
+                    // BUG-363b：box_lambda（值位置闭包，如 def 返回 n(int) -> int 的 Lambda
+                    // 体）需 Arc<dyn Fn + Send + Sync + 'static>，非 move 闭包借用外层局部变量
+                    // → E0373 closure may outlive（closure_returning_closure.lz）。强制 move 捕获。
+                    if self.box_lambda {
+                        uses_move = true;
+                    }
                     // 闭包体内引用非 Copy 外部变量（`|j| default`，default: T）：
                     // move 闭包把 default 移入自身，闭包被 map/collect 多次调用即 E0507。
                     // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
@@ -6261,6 +6276,11 @@ impl CodeGen {
                     // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
                     // 借用外层闭包的局部变量而外层已返回 → E0373。内层强制 move。
                     if self.parent_lambda_non_move {
+                        uses_move = true;
+                    }
+                    // BUG-363b：box_lambda 强制 move 必须在 move_kw 计算之前
+                    // （closure_returning_closure.lz |y| x + y 走此 else 分支）
+                    if self.box_lambda {
                         uses_move = true;
                     }
                     let move_kw = if uses_move { "move " } else { "" };
@@ -6289,7 +6309,13 @@ impl CodeGen {
                         c.suppress_tail_return = true;
                         c.parent_lambda_non_move = true;
                         c.nested_fn_ret = self.nested_fn_ret;
-                        if nested {
+                        // BUG-363b：child 必须继承 box_lambda，否则内层闭包重生成时
+                        // 丢失 move 强制（nested_closure_typed.lz |a| |b| a + b 的内层
+                        // 经 body_refs_noncopy_external 分支重建，box_lambda=false → 无 move → E0373）
+                        c.box_lambda = self.box_lambda;
+                        // BUG-363c：child 已继承 box_lambda，内层会在 L6350 自行 Arc::new，
+                        // 此处再包一次即双重 → E0277。nested 包仅留给纯 nested_fn_ret。
+                        if nested && !self.box_lambda {
                             format!("Arc::new({})", c.gen_expr(&cloned))
                         } else {
                             c.gen_expr(&cloned)
@@ -6307,7 +6333,11 @@ impl CodeGen {
                         c.fn_use_count = self.fn_use_count.clone();
                         c.suppress_tail_return = true;
                         c.nested_fn_ret = self.nested_fn_ret;
-                        if nested {
+                        // BUG-363b：同 L6313，child 需继承 box_lambda
+                        c.box_lambda = self.box_lambda;
+                        // BUG-363c：child 已继承 box_lambda，内层会在 L6350 自行 Arc::new，
+                        // 此处再包一次即双重 → E0277。nested 包仅留给纯 nested_fn_ret。
+                        if nested && !self.box_lambda {
                             format!("Arc::new({})", c.gen_expr(&cloned))
                         } else {
                             c.gen_expr(&cloned)
