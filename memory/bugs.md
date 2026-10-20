@@ -1110,3 +1110,8 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - summary: `for k in dict:` 迭代出 (K,V) 元组而非键，`d[k]` 报 `String: Borrow<(String, i64)>`
 - detail: HashMap::into_iter() 产出 (K,V)，但 LZ 语义（对齐 Python）要求 for 直接迭代键。修法：stmt_gen.rs 的 for 循环迭代器选择加 `iter_is_dict` 检测，Dict/HashMap 用 `.keys().cloned()`。
 - evidence: src/ir/codegen/stmt_gen.rs 新增 iter_is_dict + 分支；TEMP/probe/sweep14/dict_iter.lz 从 C-ERR 变 OK（输出 `a 1 | b 2 | "a" 1 | "b" 2`）。
+
+## BUG-347 [2026-10-20T16:42:30+08:00] [low] FIXED：
+- summary: `check` 是保留关键字，不能用作函数名/变量名
+- detail: lexer 把 `check` 恒识别为 `Token::Check`，`def check(...)` / `let check = ...` / `check(1)` 全部报错。修法：三处放行——函数名解析（parser.rs）、绑定位（stmt.rs）、表达式位（expr.rs parse_primary）——把 `Token::Check` 转成字符串 `"check"`。
+- evidence: src/parser/parser.rs（函数名）、src/parser/stmt.rs（绑定位）、src/parser/expr.rs（parse_primary）各加 `Token::Check` 分支；TEMP/probe/sweep12/check_fn.lz 输出 `6`、check_stmt.lz 输出 `checks passed`。

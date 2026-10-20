@@ -1220,6 +1220,8 @@ impl ParserStmtExt for Parser {
 
         let name = match self.advance() {
             Token::Ident(n) => n,
+            // BUG-347：`check` 关键字在绑定位（`let check = ...`）放行
+            Token::Check => "check".to_string(),
             t => return Err(format!("Expected variable name, got {:?}", t)),
         };
 

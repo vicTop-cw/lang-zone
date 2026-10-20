@@ -1080,6 +1080,9 @@ impl Parser {
             Token::Or => "or".to_string(),
             Token::Not => "not".to_string(),
             Token::In => "in".to_string(),
+            // BUG-347：`check` 被 lexer 恒识别为关键字（测试用），但普通函数/变量位
+            // 也应可用（`def check(x)` / `check(1)`）。在此放行作函数名。
+            Token::Check => "check".to_string(),
             t => return Err(format!("Expected function name, got {:?}", t)),
         };
         // 点号分隔函数名: def config.get(...)

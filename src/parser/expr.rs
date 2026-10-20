@@ -1851,6 +1851,9 @@ impl ParserExprExt for Parser {
                 // 作为普通标识符表达式使用
                 Ok(Expr::Ident(name))
             }
+            // BUG-347：`check` 保留字在表达式位（如 `check(1)` / `let x = check(...)`）
+            // 应按普通标识符处理。
+            Token::Check => Ok(Expr::Ident("check".to_string())),
             // BUG-346：`raise` 在表达式位（如 `else raise "bad"`）—— 解析为 Panic 表达式
             Token::Raise => {
                 let msg = self.parse_expr()?;
