@@ -1097,11 +1097,11 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - detail: parse_primary 无 `Token::Raise` 分支 → `if cond then a else raise "bad"` 报 "Unexpected token in expression: Raise"。修法：parse_primary 加 `Token::Raise` 分支，解析后续表达式为 `Expr::Panic(msg)`（与 `raise` 语句一致，builder/codegen 已支持）。
 - evidence: src/parser/expr.rs parse_primary 新增 `Token::Raise` arm；TEMP/probe/sweep12/raise_try.lz、raise_else2.lz 均编译运行通过（输出 `pos | err: Any { .. }`）。
 
-## BUG-347 [2026-10-20T16:42:30+08:00] [low] OPEN：
+## BUG-347 [2026-10-20T16:42:30+08:00] [low] FIXED：
 - summary: `check` 是保留关键字，不能用作函数名（`def check(...)` → "Expected function name, got Check"）
 - detail: Token 枚举含 `Check`（测试框架 `@check` 装饰器相关），lexer 把 `check` 识别为关键字，任何以 `check` 命名的用户函数/变量都无法解析。是否应允许上下文无关的普通标识符位使用 `check`？需与保留字策略对齐。
 
-## BUG-348 [2026-10-20T16:50:00+08:00] [medium] OPEN：
+## BUG-348 [2026-10-20T16:50:00+08:00] [medium] FIXED：
 - summary: `spawn` 非 async 函数返回值的 `await` 报 "i64 is not a future"
 - detail: `let t = spawn work(21)`（work 是普通 def 而非 async def）→ `std::thread::spawn(move || { 42 })` 返回 `JoinHandle<i64>`。但 `await t` 恒生成 `t.await`（要求 Future），而 `JoinHandle` 不是 Future → E0277。修法：codegen 依 receiver 类型选 `.await`（Future）或 `.join()`（JoinHandle）。
 - repro: TEMP/probe/sweep13/spawn2.lz
@@ -1115,3 +1115,11 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - summary: `check` 是保留关键字，不能用作函数名/变量名
 - detail: lexer 把 `check` 恒识别为 `Token::Check`，`def check(...)` / `let check = ...` / `check(1)` 全部报错。修法：三处放行——函数名解析（parser.rs）、绑定位（stmt.rs）、表达式位（expr.rs parse_primary）——把 `Token::Check` 转成字符串 `"check"`。
 - evidence: src/parser/parser.rs（函数名）、src/parser/stmt.rs（绑定位）、src/parser/expr.rs（parse_primary）各加 `Token::Check` 分支；TEMP/probe/sweep12/check_fn.lz 输出 `6`、check_stmt.lz 输出 `checks passed`。
+
+## BUG-350 [2026-10-20T17:15:00+08:00] [medium] FIXED：
+- summary: `spawn` 对非 async 函数返回值报 "i64 is not a future"
+- detail: main 函数统一包装 async，`spawn work(21)` 在 async 上下文走 `__spawn_task(work(21))`，但 work 非 async → 参数是 i64 而非 Future → E0277。修法：
+  1. lz_builtins 新增 `__spawn_sync(f)`：非 async 上下文把 thread::spawn 包装成 Future；
+  2. expr_gen.rs `__go` 在 async 上下文检测参数 IR 类型是否为 `Future`，非 Future 时包 `async { ... }`；
+  3. scan.rs 白名单补 `__spawn_sync`。
+- evidence: lz_builtins/src/runtime/builtins.rs + flat.rs 新增 `__spawn_sync`；src/ir/codegen/expr_gen.rs `__go` 分支按参数类型分流；TEMP/probe/sweep13/spawn2.lz 输出 `42`；CY/TESTS/11_concurrency/spawn_demo.lz 输出 `main done`；CY/TESTS/15_feature_matrix/async_spawn.lz 输出 `data_10 data_20`。

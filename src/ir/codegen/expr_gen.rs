@@ -1850,9 +1850,24 @@ impl CodeGen {
                     //   async 函数中 → __spawn_task(expr) 异步 Future
                     //   普通函数中 → std::thread::spawn(move || { expr }) 并行线程
                     if self.current_fn_is_async {
-                        format!("__spawn_task({})", args_s.join(", "))
+                        // BUG-348：`spawn work(21)` 中 work 若是非 async 函数，其调用结果
+                        // 是 i64 而非 Future。`__spawn_task` 要求 Future 参数 → E0277。
+                        // 用 async {} 包裹让返回值（无论是否 async）都成为 Future。
+                        // 已显式 async 的调用（fetch(10) 返回 Future<String>）不包裹。
+                        let inner = &args[0];
+                        let inner_is_future = matches!(
+                            &inner.ty,
+                            IrType::Named { path, .. } if path == "Future"
+                        );
+                        if inner_is_future {
+                            format!("__spawn_task({})", args_s.join(", "))
+                        } else {
+                            format!("__spawn_task(async {{ {} }})", args_s.join(", "))
+                        }
                     } else {
-                        format!("std::thread::spawn(move || {{ {} }})", args_s.join(", "))
+                        // BUG-348：非 async 上下文 spawn 返回 JoinHandle（非 Future），
+                        // 后续 `await` 会 E0277。改用 __spawn_sync 包装成 Future。
+                        format!("__spawn_sync(move || {{ {} }})", args_s.join(", "))
                     }
                 } else if callee_s == "spawn" && args_s.len() >= 1 {
                     // spawn(expr) → 保持异步 Future 语义

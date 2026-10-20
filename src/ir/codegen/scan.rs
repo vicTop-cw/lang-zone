@@ -1562,6 +1562,8 @@ pub(crate) fn collect_typepack_expr(
 pub(crate) const LZ_BUILTIN_FN_NAMES: &[&str] = &[
     // lz_builtins crate 实际导出（use lz_builtins::* 已引入）
     "__block_on",
+    "__spawn_sync",
+    "__spawn_task",
     "__lz_bytes",
     "__lz_duration_ms",
     "__lz_duration_secs",

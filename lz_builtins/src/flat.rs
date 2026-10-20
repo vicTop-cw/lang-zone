@@ -239,6 +239,17 @@ pub async fn __spawn_task<T>(f: impl std::future::Future<Output = T>) -> T {
     f.await
 }
 
+/// BUG-348：非 async 上下文 spawn 的 Future 包装。
+pub fn __spawn_sync<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> impl std::future::Future<Output = T> {
+    async move {
+        std::thread::spawn(f)
+            .join()
+            .unwrap_or_else(|_| panic!("spawned thread panicked"))
+    }
+}
+
 pub fn __block_on<F: std::future::Future>(mut f: F) -> F::Output {
     use std::pin::Pin;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};

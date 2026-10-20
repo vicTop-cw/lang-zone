@@ -555,6 +555,19 @@ pub async fn __spawn_task<T>(f: impl std::future::Future<Output = T>) -> T {
     f.await
 }
 
+/// BUG-348：非 async 上下文中的 `spawn expr` 生成同步线程，但调用方 `await`
+/// 期望一个 Future。此辅助函数把 `std::thread::spawn(...)` 的 JoinHandle 包装
+/// 成 Future，使 `let t = spawn work(21); await t` 一致可用。
+pub fn __spawn_sync<T: Send + 'static>(
+    f: impl FnOnce() -> T + Send + 'static,
+) -> impl std::future::Future<Output = T> {
+    async move {
+        std::thread::spawn(f)
+            .join()
+            .unwrap_or_else(|_| panic!("spawned thread panicked"))
+    }
+}
+
 pub fn __block_on<F: std::future::Future>(mut f: F) -> F::Output {
     use std::pin::Pin;
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
