@@ -1100,6 +1100,17 @@ pub(crate) fn lookup_builtin_method_ret(
             "extend" => Some(IrType::Unit),
             // sort/reverse → Unit：Python 风格原地修改，返回 void（LZ 无 sorted）
             "sort" | "reverse" => Some(IrType::Unit),
+            // BUG-355: map/filter 未登记 → List<T>.map() 返回 Any → 链式
+            // .map().map() 第二个 receiver 类型是 Any，codegen recv_is_list=false
+            // 走普通方法调用 → E0599。map 返回 List<Any>（元素类型由闭包决定，
+            // IR 层无法知道；Any 使 stmt_gen 的 skip_ty 命中（args 含 Any），
+            // 避免生成错误的具体标注 Vec<i64> → E0308）。
+            // filter 返回 List<T>（元素类型不变）。
+            "map" => Some(IrType::Named {
+                path: "List".into(),
+                args: vec![IrType::Any],
+            }),
+            "filter" => Some(recv_ty.clone()),
             _ => None,
             }
         },
