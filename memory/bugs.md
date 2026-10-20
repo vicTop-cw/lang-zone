@@ -1428,3 +1428,16 @@ async_await.lz + async_chain.lz (await added to chain probe) both now compile.
 
 ### FIXED(2026-10-20T19:00:25Z / BUG-375)
 - evidence: Commit d8acd46: parser/expr.rs Token::Await as method name; decl_gen.rs is_async_main also when main body has await; expr_gen.rs __block_on fallback for sync await. async_await.lz + async_chain.lz compile. Gate 135/133/2.
+## BUG-376 [2026-10-20T19:12:30Z] [medium] FIXED
+- summary: with_block.lz [compile-fail] E0425 cannot find function open in this scope
+- detail: `with (open("file.txt")):` in with_block.lz generated `let mut _with = open("file.txt".to_string());` but `open` wasn't a builtin — E0425 cannot find function open in this scope. The SYNTAX docs say `open()` needs `import std.fs` but no std/fs.lz exists; prelude has no `open`. The with-block codegen desugars correctly (guard drop = RAII), only the function was missing.
+
+Fix (commit 7b4f0e9):
+- lz_builtins/src/runtime/builtins.rs: add `pub fn open(path: impl AsRef<str>) -> FileGuard` and `pub struct FileGuard { path: String, file: Option<std::fs::File> }` with `Drop` closing the file. Signature uses `impl AsRef<str>` to accept both `&str` and `String` (codegen passes `String`).
+
+Gate: TOTAL=135 OK=134 FAIL=1 (only string_concat.lz, deliberate IR design gate str+int remains).
+
+
+
+### FIXED(2026-10-20T19:12:37Z / BUG-376)
+- evidence: Commit 7b4f0e9: lz_builtins/src/runtime/builtins.rs add `pub fn open(impl AsRef<str>) -> FileGuard` + `FileGuard { path, file }` with Drop closing. with_block.lz now compiles. Gate 135/134/1.
