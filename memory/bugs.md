@@ -1296,3 +1296,22 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T16:45:17Z / BUG-365)
 - evidence: 提交 19cf680 `fix(codegen): Vec method filter/map use iter().cloned() instead of into_iter()`。改 src/ir/codegen/expr_gen.rs L4568-4581：裸 Vec 的 `.filter()`/`.map()` 分支把 `({}).into_iter().{}({}).collect::<Vec<_>>()` 改为 `({}).iter().cloned().{}({}).collect::<Vec<_>>()`。`.iter().cloned()` 产生 Cloned<Iter<T>>，filter 闭包仍收 &Item（strip_lambda_type_with_ref 逻辑不变）、map 闭包收 owned Item，语义与 into_iter 等价但不 move 接收者。验证：method_overload.lz（`xs.sort()` 后 `xs.filter()`/`xs.map()`/`xs.fold()` 复用 xs）COMPILE OK；探针门禁 116/94/22 → 116/95/21（+1 OK，无回归）。
+## BUG-366 [2026-10-20T16:55:07Z] [high] FIXED
+- summary: BUG-366: 闭包 body 以 { 开头被当成 dict/set 字面量 → 字典元素间缺逗号 / Expected type got LBrace
+- detail: `|x| { counter = counter + x; counter }` 的 `{...}` body 被闭包 parser 当作字典/集合字面量解析，报「字典/集合字面量元素之间缺少逗号（Semicolon）」。三个形态均坏：
+
+1. `|x| { ... }`（无 `=` 分隔符）→ body 走 parse_expr 命中 Token::LBrace → dict/set 字面量。
+2. `|x| => { ... }`（fat arrow 后直接 `{`）→ 同 1。
+3. `|x| -> { ... }`（`->` 后直接 `{`，无返回类型注解）→ parse_type 报「Expected type, got LBrace」。
+
+修复（`8b20120`）：
+- `->` 后遇 `{` 跳过 parse_type（ret_ty 留 None）。
+- `=>` 后遇 `{` 走 parse_brace_block_expr。
+- 无 `=` 分隔符时 body 遇 `{` 走 parse_brace_block_expr（优先于 Indent/表达式路径）。
+
+修复后 closure_mut.lz / closure_mut2.lz / closure_mut3.lz 全部 COMPILE OK，探针门禁 116/95/21 → 116/98/18（+3 OK，无回归）。
+
+
+
+### FIXED(2026-10-20T16:55:17Z / BUG-366)
+- evidence: 提交 8b20120 `fix(parser): closure body starting with { is block expr, not dict/set`。改 src/parser/expr.rs 闭包解析三处：① `->` 后遇 `{` 跳过 parse_type；② `=>` 后遇 `{` 走 parse_brace_block_expr；③ 无 `=` 分隔符时 body 遇 `{` 走 parse_brace_block_expr。验证：closure_mut.lz / closure_mut2.lz / closure_mut3.lz 三个变体（`|x| {...}`、`|x| => {...}`、`|x| -> {...}`）全部 COMPILE OK；探针门禁 116/95/21 → 116/98/18（+3 OK，无回归）。
