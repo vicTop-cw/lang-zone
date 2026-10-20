@@ -1441,3 +1441,15 @@ Gate: TOTAL=135 OK=134 FAIL=1 (only string_concat.lz, deliberate IR design gate 
 
 ### FIXED(2026-10-20T19:12:37Z / BUG-376)
 - evidence: Commit 7b4f0e9: lz_builtins/src/runtime/builtins.rs add `pub fn open(impl AsRef<str>) -> FileGuard` + `FileGuard { path, file }` with Drop closing. with_block.lz now compiles. Gate 135/134/1.
+## BUG-377 [2026-10-20T19:17:01Z] [low] FIXED
+- summary: string_concat.lz [gen-fail] IR build error: 字符串与数字不能直接相加（探针设计问题，用 f-string 表达）
+- detail: string_concat.lz line 5 `"The answer is " + n` triggered the IR design gate 「字符串与数字不能直接相加」(str + int 不做隐式转换，有意的类型安全检查，Python 隐式 str+int 常致错)。这是**探针设计问题**而非编译器缺陷：LZ 惯用法是 f-string。
+
+Fix (commit f9cd835): 探针改用 `f"The answer is {n}"`，表达同样语义。IR 设计门继续拦截 str+int。
+
+Gate: TOTAL=135 OK=135 FAIL=0 (100%)。cargo test --lib: 441 passed。
+
+
+
+### FIXED(2026-10-20T19:17:06Z / BUG-377)
+- evidence: Commit f9cd835: TEMP/probe/sweep15/string_concat.lz line 5 `"The answer is " + n` → `f"The answer is {n}"`. IR design gate str+int unchanged. Gate TOTAL=135 OK=135 FAIL=0.

@@ -174,10 +174,12 @@ fn cy_omega_gate_struct() {
             Field {
                 name: "x".into(),
                 ty: IrType::F64,
+                default: None,
             },
             Field {
                 name: "y".into(),
                 ty: IrType::F64,
+                default: None,
             },
         ],
         derives: vec![],methods: vec![FnDef {
@@ -374,6 +376,7 @@ fn cy_omega_gate_enum() {
                 fields: vec![Field {
                     name: "r".into(),
                     ty: IrType::F64,
+                    default: None,
                 }],
             },
             Variant {
@@ -382,10 +385,12 @@ fn cy_omega_gate_enum() {
                     Field {
                         name: "w".into(),
                         ty: IrType::F64,
+                        default: None,
                     },
                     Field {
                         name: "h".into(),
                         ty: IrType::F64,
+                        default: None,
                     },
                 ],
             },
