@@ -4706,6 +4706,14 @@ impl CodeGen {
                     // `Iterator::fold(init, closure)`（LZ 的 reduce 带初值参数）。
                     // 裸 Vec 走 into_iter 链；ListExt 等扩展 trait 同名 reduce 由
                     // has_ext_method 分支提前返回，不会进到这里。
+                    // BUG-387：LZ `reduce(closure)` 单参形式（list.lz:151
+                    // `def reduce(ref self, f: fn(T, T) -> T) -> Option<T>`）在裸 Vec
+                    // 上生成 `.reduce(...)` → E0599 Vec is not an iterator。路由到
+                    // lz_builtins::runtime::functional::reduce，返回 Option<T>。
+                    if method == "reduce" && args_s.len() == 1 && recv_is_list {
+                        let lambda = strip_lambda_type(&args_s[0]);
+                        return format!("lz_builtins::runtime::functional::reduce({}, {})", recv, lambda);
+                    }
                     if method == "reduce" && args_s.len() == 2 && recv_is_list {
                         let lambda = strip_lambda_type(&args_s[0]);
                         return format!(

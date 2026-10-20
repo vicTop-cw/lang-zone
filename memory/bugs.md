@@ -1546,3 +1546,21 @@ edge_char_int.lz 现正确输出 Some(42)/None。
 
 ### FIXED(2026-10-20T20:21:23Z / BUG-383, BUG-384, BUG-385)
 - evidence: 三处修复：BUG-383 parser/expr.rs 点号后放行 And/Or 作方法名；BUG-384 parser/expr.rs 闭包参数放行 Underscore；BUG-385 expr_gen.rs int() 检查 str_loop_vars 对 char 生成 as i64。edge_char_int.lz/edge_chains.lz 编译干净，workspace 441 测试全绿，门控 135/135。
+## BUG-386 [2026-10-20T20:22:38Z] [low] OPEN
+- summary: 间接 chars() 赋值丢失 char 类型信息 — for c in 间接迭代变量 → E0599
+- detail: `let chars = s.chars(); for c in chars:` 场景下 `chars` 的 IR 类型是 Iterator<str>，但 Rust 实际是 Chars<'_>（yields char）。str_loop_vars 机制只在 `for c in s.chars()` 直接形式触发（stmt_gen.rs:2079 检查 iter.kind 是 MethodCall(chars)），间接形式漏了 → int(c) 生成 .parse::<i64>() → E0599。
+
+已知限制，非紧急。直接形式 edge_char_int.lz 已修复（BUG-385）。
+
+## BUG-387 [2026-10-20T20:33:18Z] [high] FIXED
+- summary: 单参 .reduce(closure) 生成 .reduce(...) — Vec 无 reduce → E0599
+- detail: expr_gen.rs 单参 `.reduce(closure)` 未被特殊处理 → 生成 `(filtered).reduce(...)` → E0599 no method named `reduce` found for struct `Vec<i64>`。LZ list.lz:151 定义 `def reduce(ref self, f: fn(T, T) -> T) -> Option<T>`（无初值，返回 Option<T>）。
+
+Fix: 新增分支 `method == "reduce" && args_s.len() == 1 && recv_is_list` → 路由到 `lz_builtins::runtime::functional::reduce(recv, closure)`（返回 Option<T>）。
+
+edge_complex.lz `filtered.reduce(|acc,x| acc+x)` 已编译通过。
+
+
+
+### FIXED(2026-10-20T20:35:38Z / BUG-387)
+- evidence: expr_gen.rs 新增单参 .reduce(closure) 分支路由到 lz_builtins::runtime::functional::reduce，返回 Option<T>。edge_complex.lz 编译通过。workspace 441 测试全绿，gate 135/135。
