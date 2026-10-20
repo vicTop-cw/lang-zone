@@ -1,4 +1,4 @@
-﻿// Lang-Zone 编译器 — ir/codegen/expr_gen.rs
+// Lang-Zone 编译器 — ir/codegen/expr_gen.rs
 // （由 mod.rs move-only 拆出，逻辑零改动）
 
 use super::scan::cmp_walk_block;
@@ -6958,7 +6958,13 @@ child.struct_fields_info = self.struct_fields_info.clone();
                         // `list *: yield (1,)` → 每包调用 `list(1)` 生成 `vec![1]`。
                         // 否则 emit 裸 `list(__a0)` 调用 → E0425（build_block3.lz）。
                         let list_ctor = callee_s == "list";
-                        match &elem_ty {
+                        // BUG-363d：`list *: yield (1,)` 的 yield 本身是目标元素（1-元组），
+                        // 直接收集 __bb 即可；list_ctor 时不得解构元组再 vec![__a0] 包一层
+                        // （会得到 Vec<i64> 而非 Vec<(i64,)>，E0308）。
+                        if list_ctor {
+                            "__bb".to_string()
+                        } else {
+                            match &elem_ty {
                             IrType::Tuple(elems) => {
                                 let binds: Vec<String> =
                                     (0..elems.len()).map(|i| format!("__a{}", i)).collect();
@@ -6967,11 +6973,7 @@ child.struct_fields_info = self.struct_fields_info.clone();
                                 } else {
                                     format!("({})", binds.join(", "))
                                 };
-                                let call_s = if list_ctor {
-                                    format!("vec![{}]", binds.join(", "))
-                                } else {
-                                    format!("{}({})", callee_s, binds.join(", "))
-                                };
+                                let call_s = format!("{}({})", callee_s, binds.join(", "));
                                 format!(
                                     "__bb.into_iter().map(move |__p| {{ let {} = __p; {} }}).collect::<Vec<_>>()",
                                     pat,
@@ -6986,6 +6988,7 @@ child.struct_fields_info = self.struct_fields_info.clone();
                                 "__bb.into_iter().map(move |__p| {}(__p)).collect::<Vec<_>>()",
                                 callee_s
                             ),
+                            }
                         }
                     }
                     None => "__bb".to_string(),
