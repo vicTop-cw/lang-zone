@@ -468,6 +468,28 @@ pub fn write_file(path: &str, content: &str) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| format!("write_file: {}", e))
 }
 
+/// `with open("file.txt"):` 的文件守卫：进入 with 块时打开，离开时自动关闭。
+/// `open` 返回一个 Drop guard（with 块末尾自动 drop = RAII 关闭），
+/// 无别名时仅用于展示 with 语句的 RAII 语义。
+pub fn open(path: impl AsRef<str>) -> FileGuard {
+    let path = path.as_ref().to_string();
+    let file = std::fs::File::open(&path).ok();
+    FileGuard { path, file }
+}
+
+/// 文件守卫：Drop 时自动关闭底层句柄（with 块 RAII）。
+pub struct FileGuard {
+    pub path: String,
+    pub file: Option<std::fs::File>,
+}
+
+impl Drop for FileGuard {
+    fn drop(&mut self) {
+        // 关闭 file（Option drop 即 close）
+        self.file = None;
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // [LZ] checker 参数结构体
 // ══════════════════════════════════════════════════════════════

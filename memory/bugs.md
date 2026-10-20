@@ -1413,3 +1413,18 @@ Gate: TOTAL=135 OK=131 FAIL=4.
 
 ### FIXED(2026-10-20T18:48:26Z / BUG-374)
 - evidence: Commit 706899e: ir/node.rs Field.default; ir/builder/convert_decl.rs propagate AST default; ir/codegen/mod.rs struct_field_defaults map; decl_gen.rs register defaults; expr_gen.rs kwarg ctor fills missing fields; parser.rs parse `port: int = 8080`. Probe struct_default.lz now emits `Config { name: "app".to_string(), debug: false, port: 8080i64 }` and compiles; gate 135/131/4.
+## BUG-375 [2026-10-20T19:00:18Z] [high] FIXED
+- summary: async_await.lz [gen-fail] Parse error: Expected field/method, got Await + async_chain.lz [compile-fail] E0728 await only in async fn
+- detail: `let r = fetch(21).await()` in async_await.lz / spawn.lz failed parse with "Expected field/method, got Await" — parser only handled bare postfix `await` (line 1070), not `.await()` method form. Also generated `main` was not wrapped in `__block_on(async {...})` even though its body contained await, so `.await` inside hit E0728.
+
+Fix (commit d8acd46):
+- parser/expr.rs: `Token::Await` accepted as method name after `.` in the postfix-chain method branch → `Expr::MethodCall { method: "await" }`.
+- ir/codegen/decl_gen.rs: `is_async_main` now `f.name == "main" && (f.is_async || block_has_await(&f.body))` so main with `.await()` is emitted as `fn main() { let __async_main = async { ... }; __block_on(__async_main); }`.
+- ir/codegen/expr_gen.rs: `.await()` in a sync context wraps receiver in `__block_on(...)` (defensive E0728 guard).
+
+async_await.lz + async_chain.lz (await added to chain probe) both now compile.
+
+
+
+### FIXED(2026-10-20T19:00:25Z / BUG-375)
+- evidence: Commit d8acd46: parser/expr.rs Token::Await as method name; decl_gen.rs is_async_main also when main body has await; expr_gen.rs __block_on fallback for sync await. async_await.lz + async_chain.lz compile. Gate 135/133/2.
