@@ -1315,3 +1315,15 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T16:55:17Z / BUG-366)
 - evidence: 提交 8b20120 `fix(parser): closure body starting with { is block expr, not dict/set`。改 src/parser/expr.rs 闭包解析三处：① `->` 后遇 `{` 跳过 parse_type；② `=>` 后遇 `{` 走 parse_brace_block_expr；③ 无 `=` 分隔符时 body 遇 `{` 走 parse_brace_block_expr。验证：closure_mut.lz / closure_mut2.lz / closure_mut3.lz 三个变体（`|x| {...}`、`|x| => {...}`、`|x| -> {...}`）全部 COMPILE OK；探针门禁 116/95/21 → 116/98/18（+3 OK，无回归）。
+## BUG-367 [2026-10-20T17:04:52Z] [high] FIXED
+- summary: BUG-367: parse_type 不支持 Fn[...] -> R 方括号函数类型 → Expected param name, got LBrack
+- detail: `def apply_twice(f: Fn[int] -> int, x: int)` 中 `Fn[int] -> int`（方括号参数列表）未被 parse_type 识别：`Fn` 落成 `Type::Named("Fn")` 返回，残留 `[int]` 被调用方（参数解析）报「Expected param name, got LBrack」。higher_order.lz 因此 gen-fail。
+
+修复（`156ac15`）：在 parse_type 的 `Ident(n)` 分支新增 `"Fn"` 特例 —— 遇 `[` 则解析方括号内逗号分隔的参数类型列表，可选 `-> R` 返回类型，产出 `Type::Fn`。无 `[` 时回退 `Named("Fn")`（保持兼容）。
+
+修复后 higher_order.lz COMPILE OK，探针门禁 116/98/18 → 116/99/17。
+
+
+
+### FIXED(2026-10-20T17:05:00Z / BUG-367)
+- evidence: 提交 156ac15 `fix(parser): support Fn[...] -> R higher-order function type syntax`。改 src/parser/parser.rs parse_type 的 `Ident(n)` 分支：新增 `"Fn"` 特例，遇 `Token::LBrack` 则解析方括号内逗号分隔参数类型列表、可选 `-> R` 返回类型，产出 `Type::Fn`；无 `[` 时回退 `Type::Named("Fn")`。验证：higher_order.lz（`f: Fn[int] -> int` + `apply_twice((|v| v + 1), 10)`）COMPILE OK；探针门禁 116/98/18 → 116/99/17（+1 OK，无回归）。
