@@ -1100,3 +1100,8 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 ## BUG-347 [2026-10-20T16:42:30+08:00] [low] OPEN：
 - summary: `check` 是保留关键字，不能用作函数名（`def check(...)` → "Expected function name, got Check"）
 - detail: Token 枚举含 `Check`（测试框架 `@check` 装饰器相关），lexer 把 `check` 识别为关键字，任何以 `check` 命名的用户函数/变量都无法解析。是否应允许上下文无关的普通标识符位使用 `check`？需与保留字策略对齐。
+
+## BUG-348 [2026-10-20T16:50:00+08:00] [medium] OPEN：
+- summary: `spawn` 非 async 函数返回值的 `await` 报 "i64 is not a future"
+- detail: `let t = spawn work(21)`（work 是普通 def 而非 async def）→ `std::thread::spawn(move || { 42 })` 返回 `JoinHandle<i64>`。但 `await t` 恒生成 `t.await`（要求 Future），而 `JoinHandle` 不是 Future → E0277。修法：codegen 依 receiver 类型选 `.await`（Future）或 `.join()`（JoinHandle）。
+- repro: TEMP/probe/sweep13/spawn2.lz
