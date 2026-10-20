@@ -651,16 +651,7 @@ pub(crate) fn ex_check_stmts(
             AstStmt::LetTuple { names, value, .. } => {
                 ex_check_expr(value, work, env, gens, ret, hinted, w);
                 let vt = ex_infer(value, work, env);
-                if let IrType::Tuple(items) = &vt {
-                    for (i, n) in names.iter().enumerate() {
-                        let ty = items.get(i).cloned().unwrap_or(IrType::Any);
-                        env.insert(n.clone(), ty);
-                    }
-                } else {
-                    for n in names {
-                        env.insert(n.clone(), IrType::Any);
-                    }
-                }
+                insert_pattern_names(names, &vt, env);
             }
             AstStmt::Return(Some(e)) => {
                 ex_check_expr(e, work, env, gens, ret, hinted, w);
@@ -1858,3 +1849,29 @@ pub(crate) fn ex_type_has_any_of(t: &IrType, gs: &[String]) -> bool {
         _ => false,
     }
 }
+
+/// BUG-341：递归把 LetTuple 模式中的名字以推断类型插入 env
+fn insert_pattern_names(
+    patterns: &[crate::ast::Pattern],
+    val_ty: &IrType,
+    env: &mut std::collections::HashMap<String, IrType>,
+) {
+    for (i, p) in patterns.iter().enumerate() {
+        let item_ty = match val_ty {
+            IrType::Tuple(items) => items.get(i).cloned().unwrap_or(IrType::Any),
+            _ => IrType::Any,
+        };
+        match p {
+            crate::ast::Pattern::Ident(name)
+            | crate::ast::Pattern::RefMutIdent(name) => {
+                env.insert(name.clone(), item_ty);
+            }
+            crate::ast::Pattern::Tuple(nested) => {
+                insert_pattern_names(nested, &item_ty, env);
+            }
+            crate::ast::Pattern::Wildcard => {}
+            _ => {}
+        }
+    }
+}
+

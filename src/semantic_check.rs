@@ -1074,9 +1074,7 @@ impl Checker {
             }
             Stmt::LetTuple { names, value, .. } => {
                 self.check_expr(value);
-                for n in names {
-                    self.bind(n.clone());
-                }
+                bind_pattern_names(names, &mut |n| self.bind(n.clone()));
             }
             Stmt::EmbedBlock { .. } => {}
         }
@@ -1520,3 +1518,24 @@ fn pattern_key(p: &Pattern) -> Option<String> {
         _ => None,
     }
 }
+
+/// BUG-341：递归收集 LetTuple 模式中的所有绑定名并绑定
+fn bind_pattern_names<F: FnMut(&String)>(patterns: &[crate::ast::Pattern], bind: &mut F) {
+    for p in patterns {
+        match p {
+            crate::ast::Pattern::Ident(name) => bind(name),
+            crate::ast::Pattern::RefMutIdent(name) => bind(name),
+            crate::ast::Pattern::Tuple(nested) => bind_pattern_names(nested, bind),
+            crate::ast::Pattern::List(nested) => bind_pattern_names(nested, bind),
+            crate::ast::Pattern::Variant(_, nested) => bind_pattern_names(nested, bind),
+            crate::ast::Pattern::Dict(entries) => {
+                for (_, v) in entries {
+                    bind_pattern_names(std::slice::from_ref(v), bind);
+                }
+            }
+            crate::ast::Pattern::Rest(Some(name)) => bind(name),
+            _ => {}
+        }
+    }
+}
+

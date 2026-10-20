@@ -1215,9 +1215,7 @@ pub(crate) fn specialize_stmt(
         },
         AstStmt::LetTuple { names, ty, value } => {
             let mut sh = shadow.clone();
-            for n in names {
-                sh.insert(n.clone());
-            }
+            collect_pattern_shadow(names, &mut sh);
             AstStmt::LetTuple {
                 names: names.clone(),
                 ty: ty.clone(),
@@ -1302,3 +1300,25 @@ pub(crate) fn build_specialized_fn(
         default_checker: orig.default_checker.clone(),
     }
 }
+
+/// BUG-341：递归收集 LetTuple 模式中的所有名字进 shadow 集
+fn collect_pattern_shadow(
+    patterns: &[crate::ast::Pattern],
+    out: &mut std::collections::HashSet<String>,
+) {
+    for p in patterns {
+        match p {
+            crate::ast::Pattern::Ident(name) | crate::ast::Pattern::RefMutIdent(name) => {
+                out.insert(name.clone());
+            }
+            crate::ast::Pattern::Tuple(nested) => collect_pattern_shadow(nested, out),
+            crate::ast::Pattern::List(nested) => collect_pattern_shadow(nested, out),
+            crate::ast::Pattern::Variant(_, nested) => collect_pattern_shadow(nested, out),
+            crate::ast::Pattern::Rest(Some(name)) => {
+                out.insert(name.clone());
+            }
+            _ => {}
+        }
+    }
+}
+

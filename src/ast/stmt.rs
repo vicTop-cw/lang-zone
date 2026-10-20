@@ -143,7 +143,8 @@ pub enum Stmt {
 
     // ── 解构绑定 ──
     LetTuple {
-        names: Vec<String>,
+        /// BUG-341：支持嵌套元组解构（如 `let ((a, b), c) = ...`）
+        names: Vec<Pattern>,
         ty: Option<Type>,
         value: Expr,
     },

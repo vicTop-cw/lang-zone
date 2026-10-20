@@ -346,9 +346,7 @@ pub(crate) fn check_stmt_capture(
         }
         AstStmt::LetTuple { names, value, .. } => {
             let hit = check_expr_capture(value, outer, declared, any);
-            for n in names {
-                declared.insert(n.clone());
-            }
+            collect_pattern_names(names, declared);
             hit
         }
         AstStmt::Expr(e) => check_expr_capture(e, outer, declared, any),
@@ -597,3 +595,25 @@ pub(crate) fn collect_checker_captured(
     }
     captured
 }
+
+/// BUG-341：递归收集 LetTuple 模式中的所有绑定名
+fn collect_pattern_names(
+    patterns: &[crate::ast::Pattern],
+    out: &mut std::collections::HashSet<String>,
+) {
+    for p in patterns {
+        match p {
+            crate::ast::Pattern::Ident(name) | crate::ast::Pattern::RefMutIdent(name) => {
+                out.insert(name.clone());
+            }
+            crate::ast::Pattern::Tuple(nested) => collect_pattern_names(nested, out),
+            crate::ast::Pattern::List(nested) => collect_pattern_names(nested, out),
+            crate::ast::Pattern::Variant(_, nested) => collect_pattern_names(nested, out),
+            crate::ast::Pattern::Rest(Some(name)) => {
+                out.insert(name.clone());
+            }
+            _ => {}
+        }
+    }
+}
+

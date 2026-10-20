@@ -10,11 +10,13 @@ use super::*;
 /// 将 AST Stmt 列表转换为 IR Stmt 列表，展开 LetTuple
 pub(crate) fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
     let mut result = Vec::new();
+    let mut destruct_counter = 0usize;
     for s in ast_stmts {
         if let AstStmt::LetTuple { names, ty, value } = s {
             let ir_value = convert_expr(value, ctx);
             let val_ty = ir_value.ty.clone();
-            let tmp_name = format!("__destruct_{}", names.join("_"));
+            let tmp_name = format!("__destruct_{}", destruct_counter);
+            destruct_counter += 1;
             result.push(Stmt::Let {
                 name: tmp_name.clone(),
                 ty: val_ty.clone(),
@@ -23,30 +25,54 @@ pub(crate) fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
                 is_ref: false,
                 mods: IrMods::default(),
             });
-            for (i, name) in names.iter().enumerate() {
-                if name == "_" {
-                    continue;
-                }
-                let field_expr = Expr::new(
-                    ExprKind::FieldAccess {
-                        base: Box::new(Expr::new(
-                            ExprKind::Var(tmp_name.clone()),
-                            val_ty.clone(),
-                            Span::unknown(),
-                        )),
-                        field: format!("{}", i),
-                    },
-                    IrType::Any,
+            expand_lettuple_patterns(
+                names,
+                &tmp_name,
+                &val_ty,
+                ty,
+                &mut result,
+                &mut destruct_counter,
+            );
+        } else {
+            result.push(convert_stmt(s, ctx));
+        }
+    }
+    result
+}
+
+/// BUG-341：递归展开 LetTuple 模式（支持嵌套 `Pattern::Tuple`）
+fn expand_lettuple_patterns(
+    patterns: &[crate::ast::Pattern],
+    base_name: &str,
+    base_ty: &IrType,
+    ann_ty: &Option<crate::types::Type>,
+    out: &mut Vec<Stmt>,
+    counter: &mut usize,
+) {
+    for (i, pattern) in patterns.iter().enumerate() {
+        let field_expr = Expr::new(
+            ExprKind::FieldAccess {
+                base: Box::new(Expr::new(
+                    ExprKind::Var(base_name.to_string()),
+                    base_ty.clone(),
                     Span::unknown(),
-                );
-                // 解构字段类型：从元组类型提取元素（`let (lower, upper) = size_hint()`
-                // 的 (int, Option<int>) → lower: int, upper: Option<int>），否则 Any
-                // 导致 `return (lower, upper)` 推断错误（E0277 ImplicitFrom）
-                let field_ty = match &val_ty {
-                    IrType::Tuple(items) => items.get(i).cloned().unwrap_or(IrType::Any),
-                    _ => ty.as_ref().map(|t| from_ast_type(t)).unwrap_or(IrType::Any),
-                };
-                result.push(Stmt::Let {
+                )),
+                field: format!("{}", i),
+            },
+            IrType::Any,
+            Span::unknown(),
+        );
+        let field_ty = match base_ty {
+            IrType::Tuple(items) => items.get(i).cloned().unwrap_or(IrType::Any),
+            _ => ann_ty
+                .as_ref()
+                .map(|t| from_ast_type(t))
+                .unwrap_or(IrType::Any),
+        };
+        match pattern {
+            crate::ast::Pattern::Wildcard => {}
+            crate::ast::Pattern::Ident(name) => {
+                out.push(Stmt::Let {
                     name: name.clone(),
                     ty: field_ty,
                     value: field_expr,
@@ -55,11 +81,42 @@ pub(crate) fn convert_stmts(ast_stmts: &[AstStmt], ctx: &TypeCtx) -> Vec<Stmt> {
                     mods: IrMods::default(),
                 });
             }
-        } else {
-            result.push(convert_stmt(s, ctx));
+            crate::ast::Pattern::Tuple(nested) => {
+                // 嵌套元组：生成中间临时变量，再递归展开子模式
+                let nested_tmp = format!("__destruct_{}", *counter);
+                *counter += 1;
+                let nested_field_ty = field_ty.clone();
+                out.push(Stmt::Let {
+                    name: nested_tmp.clone(),
+                    ty: field_ty,
+                    value: field_expr,
+                    is_mut: false,
+                    is_ref: false,
+                    mods: IrMods::default(),
+                });
+                expand_lettuple_patterns(
+                    nested,
+                    &nested_tmp,
+                    &nested_field_ty,
+                    ann_ty,
+                    out,
+                    counter,
+                );
+            }
+            _ => {
+                // 其他模式：按 debug 名绑定（parser 目前只产出 Ident/Tuple/Wildcard）
+                let name = format!("{:?}", pattern);
+                out.push(Stmt::Let {
+                    name,
+                    ty: field_ty,
+                    value: field_expr,
+                    is_mut: false,
+                    is_ref: false,
+                    mods: IrMods::default(),
+                });
+            }
         }
     }
-    result
 }
 
 pub(crate) fn convert_stmt(ast_stmt: &AstStmt, ctx: &TypeCtx) -> Stmt {
@@ -2055,10 +2112,10 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
         }
         if let AstStmt::LetTuple { names, ty, .. } = s {
             let ir_ty = ty.as_ref().map(|t| from_ast_type(t)).unwrap_or(IrType::Any);
-            for name in names {
-                if name != "_" {
-                    block_ctx.add_var(name, ir_ty.clone());
-                }
+            let mut shadow_names = Vec::new();
+            collect_pattern_names2(names, &mut shadow_names);
+            for name in &shadow_names {
+                block_ctx.add_var(name, ir_ty.clone());
             }
         }
         // 前向传播：`mut x = None`（Option<Any>）后续 `x = f(...)` 时，
@@ -2364,3 +2421,26 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
 pub(crate) fn convert_block_with_ctx(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
     convert_block(stmts, ctx)
 }
+
+/// BUG-341：递归收集 LetTuple 模式中的所有非通配符名字
+fn collect_pattern_names2(patterns: &[crate::ast::Pattern], out: &mut Vec<String>) {
+    for p in patterns {
+        match p {
+            crate::ast::Pattern::Ident(name) | crate::ast::Pattern::RefMutIdent(name) => {
+                if name != "_" {
+                    out.push(name.clone());
+                }
+            }
+            crate::ast::Pattern::Tuple(nested) => collect_pattern_names2(nested, out),
+            crate::ast::Pattern::List(nested) => collect_pattern_names2(nested, out),
+            crate::ast::Pattern::Variant(_, nested) => collect_pattern_names2(nested, out),
+            crate::ast::Pattern::Rest(Some(name)) => {
+                if name != "_" {
+                    out.push(name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+

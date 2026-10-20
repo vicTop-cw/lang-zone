@@ -11,22 +11,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static FOR_TMP_CTR: AtomicUsize = AtomicUsize::new(0);
 
 /// 收集解构模式中所有绑定名（扁平化），`let` 与 `for` 解构下糖共用
-fn pattern_bind_names(p: &Pattern) -> Vec<String> {
-    let mut out = Vec::new();
-    fn go(p: &Pattern, out: &mut Vec<String>) {
+fn pattern_bind_names(p: &Pattern) -> Vec<Pattern> {
+    fn go(p: &Pattern, out: &mut Vec<Pattern>) {
         match p {
-            Pattern::Ident(n) => out.push(n.clone()),
-            Pattern::Wildcard => out.push("_".to_string()),
-            Pattern::RefMutIdent(n) => out.push(n.clone()),
-            Pattern::Variant(_, ps) | Pattern::Tuple(ps) | Pattern::List(ps) => {
-                for x in ps {
-                    go(x, out);
-                }
-            }
-            Pattern::Rest(_) => out.push("_".to_string()),
+            Pattern::Ident(n) => out.push(Pattern::Ident(n.clone())),
+            Pattern::Wildcard => out.push(Pattern::Wildcard),
+            Pattern::RefMutIdent(n) => out.push(Pattern::RefMutIdent(n.clone())),
+            Pattern::Tuple(ps) => out.push(Pattern::Tuple(ps.clone())),
+            Pattern::List(ps) => out.push(Pattern::List(ps.clone())),
+            Pattern::Variant(v, ps) => out.push(Pattern::Variant(v.clone(), ps.clone())),
+            Pattern::Rest(_) => out.push(Pattern::Wildcard),
             _ => {}
         }
     }
+    let mut out = Vec::new();
     go(p, &mut out);
     out
 }
@@ -79,6 +77,8 @@ pub trait ParserStmtExt {    fn parse_block(&mut self) -> Result<Vec<Stmt>, Stri
     fn parse_stmt(&mut self) -> Result<Stmt, String>;
     fn parse_binding_stmt(&mut self) -> Result<Stmt, String>;
     fn parse_binding_stmt_let(&mut self) -> Result<Stmt, String>;
+    /// BUG-341：解析嵌套元组解构模式（括号已消费），返回 Pattern 列表
+    fn parse_destructure_patterns(&mut self) -> Result<Vec<Pattern>, String>;
     fn parse_build_block_body(&mut self) -> Result<Vec<Stmt>, String>;
     /// 解析 =: 构建块值（let result =: <缩进块>）
     fn parse_build_block_value(&mut self) -> Result<Expr, String>;
@@ -1168,6 +1168,46 @@ impl ParserStmtExt for Parser {
         }
     }
 
+    fn parse_destructure_patterns(
+        &mut self,
+    ) -> Result<Vec<Pattern>, String> {
+        // 调用时已消费 `(`，负责解析到匹配的 `)` 为止
+        use Pattern;
+        let mut pats = Vec::new();
+        loop {
+            match self.peek().clone() {
+                Token::LParen => {
+                    self.advance();
+                    let nested = self.parse_destructure_patterns()?;
+                    pats.push(Pattern::Tuple(nested));
+                }
+                Token::Ident(n) => {
+                    self.advance();
+                    pats.push(Pattern::Ident(n));
+                }
+                Token::Underscore => {
+                    self.advance();
+                    pats.push(Pattern::Wildcard);
+                }
+                Token::RParen => {
+                    self.advance();
+                    break;
+                }
+                Token::Comma => {
+                    self.advance();
+                }
+                _ => {
+                    let t = self.advance();
+                    return Err(format!(
+                        "Expected variable name in destructuring, got {:?}",
+                        t
+                    ));
+                }
+            }
+        }
+        Ok(pats)
+    }
+
     fn parse_binding_stmt(&mut self) -> Result<Stmt, String> {
         let mut is_ref = false;
         let mut is_const = false;
@@ -1325,42 +1365,56 @@ impl ParserStmtExt for Parser {
 
         // 支持解构绑定: let (a, b) = expr
         if self.check(&Token::LParen) {
-            // 解析 tuple 解构模式，收集所有名字
+            // 解析 tuple 解构模式，收集所有 Pattern（支持嵌套元组）
             self.advance(); // consume (
-            let mut names = Vec::new();
+            let mut patterns: Vec<Pattern> = Vec::new();
             loop {
-                match self.advance() {
-                    Token::Ident(n) => names.push(n),
-                    Token::Underscore => names.push("_".to_string()),
-                    Token::RParen => break,
-                    Token::Comma | Token::DotDot | Token::DotDotDot => {
-                        // skip separators and rest patterns
-                        if self.check(&Token::RParen) {
-                            self.advance();
-                            break;
-                        }
-                        continue;
+                match self.peek().clone() {
+                    Token::LParen => {
+                        // 嵌套元组解构：递归解析子模式
+                        self.advance(); // consume (
+                        let nested = self.parse_destructure_patterns()?;
+                        patterns.push(Pattern::Tuple(nested));
                     }
-                    t => {
-                        // skip type annotations in destructure patterns
-                        if self.check(&Token::Colon) {
-                            self.advance(); // :
-                            self.parse_type()?;
-                            if self.check(&Token::RParen) {
-                                self.advance();
-                                break;
+                    _ => {
+                        match self.advance() {
+                            Token::Ident(n) => {
+                                patterns.push(Pattern::Ident(n))
                             }
-                            continue;
+                            Token::Underscore => {
+                                patterns.push(Pattern::Wildcard)
+                            }
+                            Token::RParen => break,
+                            Token::Comma | Token::DotDot | Token::DotDotDot => {
+                                // skip separators and rest patterns
+                                if self.check(&Token::RParen) {
+                                    self.advance();
+                                    break;
+                                }
+                                continue;
+                            }
+                            t => {
+                                // skip type annotations in destructure patterns
+                                if self.check(&Token::Colon) {
+                                    self.advance(); // :
+                                    self.parse_type()?;
+                                    if self.check(&Token::RParen) {
+                                        self.advance();
+                                        break;
+                                    }
+                                    continue;
+                                }
+                                return Err(format!(
+                                    "Expected variable name in destructuring, got {:?}",
+                                    t
+                                ));
+                            }
                         }
-                        return Err(format!(
-                            "Expected variable name in destructuring, got {:?}",
-                            t
-                        ));
                     }
                 }
             }
 
-            if names.is_empty() {
+            if patterns.is_empty() {
                 return Err("Destructuring pattern must contain at least one variable".to_string());
             }
 
@@ -1374,25 +1428,41 @@ impl ParserStmtExt for Parser {
             self.expect(Token::Eq)?;
             let value = self.parse_maybe_build_value()?;
 
-            if names.len() == 1 {
-                // Single name destructuring → regular Let
-                let name = names.into_iter().next().unwrap();
-                if mods.is_const {
-                    return Ok(Stmt::Const { name, ty, value, mods });
-                } else {
-                    return Ok(Stmt::Let {
-                        name,
-                        mutable: mods.mutability != Mutability::Immut,
-                        is_ref: mods.is_ref,
-                        is_owned: mods.owned,
-                        ty,
-                        value,
-                        mods,
-                    });
+            if patterns.len() == 1 {
+                // Single pattern destructuring → regular Let
+                match &patterns[0] {
+                    Pattern::Ident(name) => {
+                        let name = name.clone();
+                        if mods.is_const {
+                            return Ok(Stmt::Const { name, ty, value, mods });
+                        } else {
+                            return Ok(Stmt::Let {
+                                name,
+                                mutable: mods.mutability != Mutability::Immut,
+                                is_ref: mods.is_ref,
+                                is_owned: mods.owned,
+                                ty,
+                                value,
+                                mods,
+                            });
+                        }
+                    }
+                    Pattern::Wildcard => {
+                        // `let (_) = expr` → 忽略结果
+                        return Ok(Stmt::Expr(value));
+                    }
+                    _ => {
+                        // 单元素嵌套模式（如 `let ((a, b)) = ...`）→ 仍走 LetTuple
+                    }
                 }
             }
 
-            return Ok(Stmt::LetTuple { names, ty, value });
+            // BUG-341：LetTuple.names 改为 Vec<Pattern> 支持嵌套元组解构
+            return Ok(Stmt::LetTuple {
+                names: patterns,
+                ty,
+                value,
+            });
         }
 
         let name = match self.advance() {
@@ -1732,3 +1802,4 @@ impl ParserStmtExt for Parser {
         }
     }
 }
+
