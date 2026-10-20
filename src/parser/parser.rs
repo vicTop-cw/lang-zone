@@ -2024,6 +2024,45 @@ impl Parser {
                     }
                     return Ok(generic_ty);
                 }
+                // LZ 方括号泛型语法: Iterator[int], List[str] 等（与 <T> 等价）。
+                // 探针 generator.lz 返回类型 `Iterator[int]` 此前落成 Named("Iterator")
+                // 残留 `[int]` → 调用方报「Expected Eq, got LBrack」。
+                if self.check(&Token::LBrack) {
+                    self.advance(); // consume [
+                    let mut inner = Vec::new();
+                    if !self.check(&Token::RBrack) {
+                        loop {
+                            inner.push(self.parse_type()?);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RBrack)?;
+                    let generic_ty = match &base_ty {
+                        Type::Named(name) if name == "Option" && inner.len() == 1 => {
+                            Type::Option(Box::new(inner.into_iter().next().unwrap()))
+                        }
+                        Type::Named(name) if name == "Result" && inner.len() == 2 => {
+                            let mut iter = inner.into_iter();
+                            Type::Result {
+                                ok: Box::new(iter.next().unwrap()),
+                                err: Box::new(iter.next().unwrap()),
+                            }
+                        }
+                        _ => Type::Generic {
+                            base: Box::new(base_ty),
+                            args: inner,
+                        },
+                    };
+                    if self.check(&Token::Question) {
+                        self.advance();
+                        return Ok(Type::Optional(Box::new(generic_ty)));
+                    }
+                    return Ok(generic_ty);
+                }
                 base_ty
             }
             Token::Ref => {
@@ -2503,12 +2542,38 @@ impl Parser {
         };
         let generics = if self.check(&Token::Lt) {
             self.parse_generic_params()?
+        } else if self.check(&Token::LBrack) {
+            // LZ 方括号泛型语法: trait Container[T] = ...（与 <T> 等价，
+            // 探针 trait_generic.lz 用方括号；此前报 Expected Eq, got LBrack）
+            self.advance(); // consume [
+            let mut params = Vec::new();
+            while !self.check(&Token::RBrack) {
+                let n = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected generic param name, got {:?}", t)),
+                };
+                params.push(n);
+                if self.check(&Token::Colon) {
+                    // 可选 bound: trait Container[T: Clone]
+                    self.advance();
+                    let _ = self.parse_type()?;
+                }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+            }
+            self.expect(Token::RBrack)?;
+            params
         } else {
             Vec::new()
         };
         // 支持 trait Name: Bound1 + Bound2 =  (trait bounds/supertraits)
         // 或 trait Name =  (无 bounds)
+        // 或 trait Name[: Supertrait]: <缩进块>  (冒号直接开体，Rust 风格)：
+        // 探针 trait_generic.lz 用 `trait Container[T]:`，冒号后无 `=`
+        // 直接跟缩进体；此时 expect(Eq) 会失败 → 需放行。
         let mut supertraits = Vec::new();
+        let mut colon_opens_body = false;
         if self.check(&Token::Colon) {
             self.advance(); // consume :
                             // 解析 supertrait 类型直到 =（trait DoubleEndedIterator: Iterator）
@@ -2518,6 +2583,9 @@ impl Parser {
                     || self.check(&Token::Newline)
                     || self.check(&Token::Indent)
                 {
+                    if self.check(&Token::Newline) || self.check(&Token::Indent) {
+                        colon_opens_body = true; // `trait X:` + 缩进体
+                    }
                     break;
                 }
                 let st = self.parse_type()?;
@@ -2529,7 +2597,18 @@ impl Parser {
                 }
             }
         }
-        self.expect(Token::Eq)?;
+        if self.check(&Token::Eq) {
+            self.advance(); // consume =
+        } else if !colon_opens_body {
+            // 既无 `=` 也无 `:`+体 → 报错（原语义：expect(Eq)）
+            // 但若冒号后是 supertrait 列表则 colon_opens_body 不为 true，
+            // 此时必须要有 `=`
+            let t = self.peek().clone();
+            return Err(format!(
+                "Expected Eq after trait declaration, got {:?}",
+                t
+            ));
+        }
         self.skip_newlines();
         self.expect(Token::Indent)?;
 
