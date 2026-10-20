@@ -1692,10 +1692,13 @@ impl ParserExprExt for Parser {
                     }
                 }
                 // 支持可选的返回类型注解: |x| -> int = ...
+                // BUG-366: `|x| -> { ... }` 中 `->` 后直接是 `{`，表示无返回类型注解的块体
                 let mut ret_ty = None;
                 if self.check(&Token::Arrow) {
                     self.advance(); // consume ->
-                    ret_ty = Some(self.parse_type()?);
+                    if !self.check(&Token::LBrace) {
+                        ret_ty = Some(self.parse_type()?);
+                    }
                 }
                 // 支持可选的 = 或 => 分隔符: |x| = body  或  |x| => block
                 let has_fat_arrow = self.check(&Token::FatArrow);
@@ -1705,7 +1708,16 @@ impl ParserExprExt for Parser {
                 self.skip_newlines();
                 if has_fat_arrow {
                     // => 后是块体（支持多语句缩进块）
-                    if self.check(&Token::Indent) {
+                    // BUG-366: `|x| => { ... }` 中 `{` 也是块体（closure_mut2.lz）
+                    if self.check(&Token::LBrace) {
+                        let body = self.parse_brace_block_expr()?;
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
+                    } else if self.check(&Token::Indent) {
                         self.advance(); // skip Indent
                         let stmts = self.parse_block()?;
                         // 消费块体结束的 Dedent（回到闭包外层缩进），
@@ -1731,7 +1743,18 @@ impl ParserExprExt for Parser {
                 } else {
                     // = 后是表达式体；也支持缩进块体（多语句闭包，
                     // 如 `let f = |y: int| -> int =\n    let x = 50\n    x + y + 1`）
-                    if self.check(&Token::Indent) {
+                    // 无 = 分隔符时（`|x| { ... }`，Python 风格块体）：body 从 `{` 开始需解析为块表达式
+                    // （BUG-366: closure_mut.lz `|x| { counter = counter + x; counter }`
+                    // 的 `{ ... }` 被当成 dict/set 字面量 → 字典元素间缺逗号）
+                    if self.check(&Token::LBrace) {
+                        let body = self.parse_brace_block_expr()?;
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
+                    } else if self.check(&Token::Indent) {
                         self.advance(); // skip Indent
                         let stmts = self.parse_block()?;
                         // 消费块体结束的 Dedent（回到闭包外层缩进）
