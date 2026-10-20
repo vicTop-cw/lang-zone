@@ -7,6 +7,40 @@ use super::*;
 // 类型推导：从 AST Expr 推导出 IrType
 // ══════════════════════════════════════════════════════════════
 
+/// 把推导式（comprehension）的循环变量绑定到其 iter 的元素类型，返回扩充后的 ctx。
+/// BUG-361：多 for 推导式 `[(x, y) for x in xs for y in ys]` 的 output 类型在推导时
+/// 循环变量 x/y 尚未绑定 → lookup_var 回退 Any → 生成 Rust 类型标注 i64 →
+/// `let xs: Vec<(i64,i64)>` 而实际是 `Vec<(String,i64)>` E0308。
+fn bind_comp_vars(
+    ctx: &TypeCtx,
+    var: &str,
+    iter: &AstExpr,
+    extra_clauses: &[(String, Box<AstExpr>, Option<Box<AstExpr>>)],
+) -> TypeCtx {
+    fn elem_ty_of(expr: &AstExpr, ctx: &TypeCtx) -> IrType {
+        let it = infer_expr_type(expr, ctx);
+        match &it {
+            // 数组/列表/生成器/迭代器/区间 → 元素类型
+            IrType::Named { path, args } if args.len() == 1 => match path.as_str() {
+                "List" | "Vec" | "Array" | "Itor" | "Iterator" | "Set" => args[0].clone(),
+                _ => it.clone(),
+            },
+            // 区间 `1..3`（IR 类型是 Named("Range") 无 args，元素恒为 int）
+            IrType::Named { path, args } if path == "Range" && args.is_empty() => IrType::Int,
+            // 字符串迭代 → 字符
+            IrType::Str => IrType::Str,
+            // 其他（Option 等）：回退 Any，让下游继续推断
+            _ => it,
+        }
+    }
+    let mut new_ctx = ctx.clone();
+    new_ctx.add_var(var, elem_ty_of(iter, ctx));
+    for (v, i, _c) in extra_clauses {
+        new_ctx.add_var(v, elem_ty_of(i, ctx));
+    }
+    new_ctx
+}
+
 pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
     match ast_expr {
         // comptime 表达式：类型与内部表达式一致（B3 求值内联）
@@ -768,23 +802,51 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::TupleLit(elems) => {
             IrType::Tuple(elems.iter().map(|e| infer_expr_type(e, ctx)).collect())
         }
-        AstExpr::ListComprehension { output, .. } => {
-            let elem_ty = infer_expr_type(output, ctx);
+        AstExpr::ListComprehension {
+            output,
+            var,
+            iter,
+            extra_clauses,
+            ..
+        } => {
+            // BUG-361：多 for 推导式 `[(x, y) for x in xs for y in ys]` 的 output 类型
+            // 在推导时，循环变量 x/y 尚未绑定 → lookup_var 回退 Any → 生成 Rust
+            // 类型标注 i64 → `let xs: Vec<(i64,i64)>` 而实际是 `Vec<(String,i64)>` E0308。
+            // 修法：克隆 ctx，把每个循环变量绑定到其 iter 的元素类型，再推导 output。
+            let bound_ctx = bind_comp_vars(ctx, var, iter, extra_clauses);
+            let elem_ty = infer_expr_type(output, &bound_ctx);
             IrType::Named {
                 path: "List".into(),
                 args: vec![elem_ty],
             }
         }
-        AstExpr::DictComprehension { key, value, .. } => {
-            let k_ty = infer_expr_type(key, ctx);
-            let v_ty = infer_expr_type(value, ctx);
+        AstExpr::DictComprehension {
+            key,
+            value,
+            var,
+            iter,
+            extra_clauses,
+            ..
+        } => {
+            // BUG-361 同族：多 for 字典推导式 `{k: v for k in ks for v in vs}` 的
+            // key/value 类型在推导时循环变量未绑定 → lookup_var 回退 Any → E0308。
+            let bound_ctx = bind_comp_vars(ctx, var, iter, extra_clauses);
+            let k_ty = infer_expr_type(key, &bound_ctx);
+            let v_ty = infer_expr_type(value, &bound_ctx);
             IrType::Named {
                 path: "Dict".into(),
                 args: vec![k_ty, v_ty],
             }
         }
-        AstExpr::SetComprehension { elem, .. } => {
-            let elem_ty = infer_expr_type(elem, ctx);
+        AstExpr::SetComprehension {
+            elem,
+            var,
+            iter,
+            extra_clauses,
+            ..
+        } => {
+            let bound_ctx = bind_comp_vars(ctx, var, iter, extra_clauses);
+            let elem_ty = infer_expr_type(elem, &bound_ctx);
             IrType::Named {
                 path: "Set".into(),
                 args: vec![elem_ty],
