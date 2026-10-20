@@ -1479,3 +1479,20 @@ Fix (commit 0477fc3): src/lexer/lexer.rs —— 在 `.` 行首判断里，检查
 
 ### FIXED(2026-10-20T19:33:01Z / BUG-379)
 - evidence: Commit 0477fc3: src/lexer/lexer.rs `.` 行首判断——上一非空白 token 是 `=` 时正常 handle_indent（duck 体），否则跳过 indent（BUG-373 续行）。duck_demo.lz/duck_soft.lz 均编译成功。
+## BUG-380 [2026-10-20T19:38:13Z] [medium] FIXED
+- summary: extractor_unapply.lz [compile-fail] E0592 duplicate __unapply__ — 合成跳过检查漏查 methods
+- detail: extractor_unapply.lz（DEMO/99_spec）是 KNOWN_RUSTC_FAILURES 豁免名单里的老毛病：E0592 duplicate definitions with name `__unapply__`。
+
+根因：convert_decl.rs 在合成 __unapply__ 前检查「用户是否已显式实现」时，只查 `s.magic_methods`。但 LZ 里 `def __unapply__(self) -> (int, int)` 走普通方法路径（`s.methods`），不在 magic_methods。漏检 → 合成一份重复的 __unapply__。
+
+Fix (commit 9eb54ad): src/ir/builder/convert_decl.rs —— user_has_unapply = magic_methods || methods 任一有 __unapply__。
+
+修复后：
+- extractor_unapply.lz 生成 1 个 def + 1 个调用，rustc 编译干净。
+- demo_codegen_compile 测试从 0 passed / 1 failed → 1 passed / 0 failed。
+- cargo test --workspace 全部通过（此前唯一的失败项已消除）。
+
+
+
+### FIXED(2026-10-20T19:38:20Z / BUG-380)
+- evidence: Commit 9eb54ad: src/ir/builder/convert_decl.rs user_has_unapply 同时查 magic_methods 与 methods。extractor_unapply.lz rustc 编译干净，demo_codegen_compile 1 passed / 0 failed，cargo test --workspace 全通过。
