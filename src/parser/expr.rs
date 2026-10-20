@@ -637,6 +637,11 @@ impl ParserExprExt for Parser {
                         while !self.check(&Token::RParen) {
                             // 跳过参数间的换行和缩进
                             self.skip_newlines();
+                            // BUG-372：`(...)` 内为隐式续行，无 Indent/Dedent，
+                            // skip_newlines 后可能直接落在 `)` 上。
+                            if self.check(&Token::RParen) {
+                                break;
+                            }
                             if self.check(&Token::Indent) {
                                 self.advance();
                             }
@@ -708,6 +713,9 @@ impl ParserExprExt for Parser {
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
                             self.skip_newlines();
+                            if self.check(&Token::RParen) {
+                                break;
+                            }
                             if self.check(&Token::Indent) {
                                 self.advance();
                             }
@@ -821,6 +829,9 @@ impl ParserExprExt for Parser {
                     let mut args = Vec::new();
                     while !self.check(&Token::RParen) {
                         self.skip_newlines();
+                        if self.check(&Token::RParen) {
+                            break;
+                        }
                         if self.check(&Token::Indent) {
                             self.advance();
                         }
@@ -921,6 +932,9 @@ impl ParserExprExt for Parser {
                         let mut args = Vec::new();
                         while !self.check(&Token::RParen) {
                             self.skip_newlines();
+                            if self.check(&Token::RParen) {
+                                break;
+                            }
                             if self.check(&Token::Indent) {
                                 self.advance();
                             }
@@ -1061,6 +1075,13 @@ impl ParserExprExt for Parser {
                 {
                     self.advance();
                     expr = Expr::Await(Box::new(expr));
+                }
+                // 多行方法链（BUG-373）：`xs\n    .map(...)\n    .filter(...)` ——
+                // 换行后紧跟 `.` 时跳过换行继续后缀链，否则结束。
+                Token::Newline if matches!(self.peek_n(1), Token::Dot) => {
+                    eprintln!("DBG chain: skipping newline, pos={}", self.pos);
+                    self.advance(); // consume Newline
+                    self.skip_newlines();
                 }
                 _ => break,
             }
@@ -1546,11 +1567,26 @@ impl ParserExprExt for Parser {
                 }
                 self.expect(Token::Colon)?;
                 self.skip_newlines();
-                self.expect(Token::Indent)?;
+                // BUG-372：`(...)` 内为隐式续行，词法层已不产生 Indent，
+                // 此时 arm 之间仅由 Newline 分隔，终结由 `)`/`]`/`}` 决定。
+                if self.check(&Token::Indent) {
+                    self.advance();
+                }
                 let mut arms = Vec::new();
+                let mut closed_by_delim = false;
                 while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
                     self.skip_newlines();
                     if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        break;
+                    }
+                    // BUG-372：`xs.map(|o| match o:\n case 1: 10\n case _: 0)` ——
+                    // 末臂 body 与调用 `)` 同行，`)` 先于 Dedent 出现；把 `)`/`]`/`}` 视作
+                    // 终结符跳出，否则会把 `)` 当新 arm 的模式去 parse → RParen error。
+                    if self.check(&Token::RParen)
+                        || self.check(&Token::RBrack)
+                        || self.check(&Token::RBrace)
+                    {
+                        closed_by_delim = true;
                         break;
                     }
 
@@ -1604,7 +1640,12 @@ impl ParserExprExt for Parser {
                     }
                     self.skip_newlines();
                 }
-                self.expect(Token::Dedent)?;
+                // BUG-372：`)`/`]`/`}` 提前终结时可能无 Dedent，允许缺失
+                if !closed_by_delim {
+                    self.expect(Token::Dedent)?;
+                } else if self.check(&Token::Dedent) {
+                    self.advance();
+                }
                 Ok(Expr::Match {
                     expr: Box::new(expr),
                     arms,

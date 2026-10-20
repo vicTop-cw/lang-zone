@@ -28,6 +28,10 @@ pub struct Lexer {
     indent: IndentStack,
     line: usize,
     col: usize,
+    /// BUG-372：圆括号内的隐式续行（Python 语义）—— `(...)` 内不产生
+    /// Indent/Dedent，否则 `xs.map(|o| match o:\n case 1: 10\n case _: 0)`
+    /// 会把 `case` 当成新缩进块，`)` 落在 Dedent 之前导致 match 无法配对。
+    paren_depth: usize,
 }
 impl Lexer {
 
@@ -42,6 +46,7 @@ impl Lexer {
             indent: IndentStack::new(),
             line: 1,
             col: 0,
+            paren_depth: 0,
         }
     }
 
@@ -432,8 +437,20 @@ impl Lexer {
                         }
                         _ => {}
                     }
-                    self.handle_indent(col, &mut tokens);
-                    line_start = false;
+                    // BUG-372：圆括号内的隐式续行（Python 语义）—— `(...)` 内不产生
+                    // Indent/Dedent，否则 `xs.map(|o| match o:\n case 1: 10\n case _: 0)`
+                    // 会把 `case` 当成新缩进块，`)` 落在 Dedent 之前导致 match 无法配对。
+                    if self.paren_depth > 0 {
+                        line_start = false;
+                    } else if self.peek() == Some('.') && self.peek_n(1) != Some('.') {
+                        // BUG-373：方法链续行 `.map(...)` —— 行首为 `.` 时不是新块，
+                        // 不产生 Indent/Dedent，作为上一表达式的续行。否则
+                        // `let r = xs\n    .map(...)` 会把 `.map` 误判为缩进块。
+                        line_start = false;
+                    } else {
+                        self.handle_indent(col, &mut tokens);
+                        line_start = false;
+                    }
                 }
                 ' ' | '\t' => {
                     self.advance();
@@ -800,11 +817,13 @@ impl Lexer {
                 }
                 '(' => {
                     self.advance();
+                    self.paren_depth += 1;
                     tokens.push(Token::LParen);
                     line_start = false;
                 }
                 ')' => {
                     self.advance();
+                    self.paren_depth = self.paren_depth.saturating_sub(1);
                     tokens.push(Token::RParen);
                     line_start = false;
                 }
