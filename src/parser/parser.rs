@@ -1856,6 +1856,38 @@ impl Parser {
                             ret: Box::new(ret),
                         });
                     }
+                    "Fn" => {
+                        // 高阶函数类型: Fn[P1, P2, ...] -> R（方括号参数列表）。
+                        // 此前 `Fn[int]` 未被识别，解析 f: Fn[int] -> int 时 `Fn` 落成
+                        // Named 返回，`[int]` 残留 → 调用方 parse_param 报
+                        // 「Expected param name, got LBrack」。
+                        if !self.check(&Token::LBrack) {
+                            return Ok(Type::Named("Fn".to_string()));
+                        }
+                        self.advance(); // consume [
+                        let mut params = Vec::new();
+                        if !self.check(&Token::RBrack) {
+                            loop {
+                                params.push(self.parse_type()?);
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        self.expect(Token::RBrack)?;
+                        let ret = if self.check(&Token::Arrow) {
+                            self.advance();
+                            self.parse_type()?
+                        } else {
+                            Type::Unit
+                        };
+                        return Ok(Type::Fn {
+                            params,
+                            ret: Box::new(ret),
+                        });
+                    }
                     "Simd" => {
                         // Simd[T, N] — SIMD 向量类型
                         self.expect(Token::Lt)?;
