@@ -2288,10 +2288,17 @@ impl Parser {
                     };
                     self.expect(Token::Colon)?;
                     let f_type = self.parse_type()?;
+                    // 字段默认值：`port: int = 8080`（struct_default.lz）
+                    let f_default = if self.check(&Token::Eq) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
                     fields.push(Field {
                         name: f_name,
                         ty: f_type,
-                        default: None,
+                        default: f_default,
                     });
                     if self.check(&Token::Comma) {
                         self.advance();

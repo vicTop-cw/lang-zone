@@ -1951,6 +1951,7 @@ pub(crate) fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                                 .map(|(n, t)| Field {
                                     name: n.clone(),
                                     ty: from_ast_type(t),
+                                    default: None,
                                 })
                                 .collect()
                         }
@@ -1961,12 +1962,14 @@ pub(crate) fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                                 .map(|t| Field {
                                     name: String::new(),
                                     ty: from_ast_type(t),
+                                    default: None,
                                 })
                                 .collect()
                         }
                         other => vec![Field {
                             name: String::new(),
                             ty: from_ast_type(other),
+                            default: None,
                         }],
                     },
                 }
@@ -2044,6 +2047,7 @@ pub(crate) fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
                 Field {
                     name: f.name.clone(),
                     ty: field_ty,
+                    default: f.default.as_ref().map(|d| Box::new(convert_expr(d, ctx))),
                 }
             })
             .collect();

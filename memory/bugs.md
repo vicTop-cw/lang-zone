@@ -1382,3 +1382,15 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T17:35:15Z / BUG-371)
 - evidence: 提交 aafe33f `fix(parser): struct Name(fields): colon-opens-body method block`。src/parser/parser.rs parse_struct_like 重构：① LParen 分支遇 `:` 时把 name/generics/bounds/defaults/fields 暂存到 Parser 新 transient 字段 paren_name/paren_fields/paren_generics/paren_generic_bounds/paren_generic_defaults（新增 5 字段 + new() 初始化），落入下方共享 Indent 体路径；② 分隔符校验与消费按 paren_name.is_none() 跳过；③ Indent 体路径若 paren_name 有值则接管 name/fields/generics（不重开字段列表）。验证：struct_methods.lz（`struct Counter(value: int):` + `def inc(self)`/`def get(self)` + `c.inc()`/`c2.get()`）COMPILE OK；探针门禁 116/104/12 → 116/105/11；cargo test 441+ 通过，唯一失败 `magic_demos_generated_rust_compiles`（extractor_unapply.lz）经 git stash 基线复核为既有回归，与本修复无关。
+## BUG-372 [2026-10-20T18:14:36Z] [high] FIXED
+- summary: 闭包内 match/方法链续行被误判为缩进块，Dedent 悬空导致变量未绑定
+- detail: match 末臂 body 与调用 `)` 同行时（如 `xs.flat_map(|o| match o:\n case Some(v): [v]\n case None: [])`），词法层把 `case` 行当成新缩进块产生 Indent，`)` 落在对应 Dedent 之前。match 消费了 Indent 却配对不到 Dedent，残留的 Dedent 提前终结了外层 `def main` 主体，导致 `print(ys)` 被当作顶层语句、`ys` 未绑定变量。同时方法链续行 `.map(...)` 缩进更深时也会被误判为新 Indent 块。
+
+## BUG-373 [2026-10-20T18:14:46Z] [high] FIXED
+- summary: 方法链续行 `.map(...)` 被词法器误判为新缩进块
+- detail: `let result = xs\n    .map(...)` 中 `.map` 行缩进比上一语句更深，lexer 在 line_start 处理缩进时把 `.` 开头的续行当成新缩进块，产生多余的 Indent。修复：行首首个非空白字符是 `.`（且非 `..`）时跳过 handle_indent，不产生 Indent/Dedent，让 `.map` 作为上一表达式的续行。
+
+
+
+### FIXED(2026-10-20T18:14:57Z / BUG-372, BUG-373)
+- evidence: commit 3cd1e49 (src/lexer/lexer.rs + src/parser/expr.rs): (1) match arm loop now breaks on RParen/RBrack/RBrace and tolerates a missing Indent — `xs.flat_map(|o| match o: case Some(v): [v] case None: [])` parses correctly; (2) lexer suppresses Indent/Dedent when a line's first non-space char is '.' (and not '..') so `.map(...)` is a continuation, not a new block; (3) call-args loops re-check RParen after skip_newlines so multi-line arg lists inside parens still terminate. Verified: t12/t18/t19/map_chain/opt_chain_result all pass; nesting-data-types.lz regression fixed; 441 lib tests pass.

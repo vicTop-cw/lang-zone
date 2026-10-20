@@ -343,6 +343,8 @@ pub struct Param {
 pub struct Field {
     pub name: String,
     pub ty: IrType,
+    /// 字段默认值表达式（`port: int = 8080` 的 `8080`）；构造时缺省字段以此填充。
+    pub default: Option<Box<Expr>>,
 }
 
 // ── 枚举变体 ──

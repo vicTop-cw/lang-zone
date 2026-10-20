@@ -324,6 +324,11 @@ pub struct CodeGen {
     /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
     /// struct 字段信息（供 __new__ 补齐默认字段）
     struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// struct 字段默认值表达式：struct_name → [(field_name, 默认值 IR 表达式)]，
+    /// 用于 `Config(name: "app")` 这种缺省字段构造时按 `port: int = 8080` 填充，
+    /// 否则 E0063 missing field（struct_default.lz）。仅在字段有 AST 默认值时登记。
+    struct_field_defaults:
+        std::collections::HashMap<String, std::collections::HashMap<String, Expr>>,
     /// 「被用作 Dict/HashMap 键」的泛型参数名集合（Dict→BTreeMap 要求 K: Ord）。
     ///
     /// Dict 映射为 `BTreeMap<K,V>`（有序，保证 JSON 序列化字段顺序稳定，见
@@ -527,6 +532,7 @@ impl CodeGen {
             custom_iterator_is_protocol: true,
             borrow_self: false,
             struct_fields_info: std::collections::HashMap::new(),
+            struct_field_defaults: std::collections::HashMap::new(),
         dict_key_generics: std::collections::HashSet::new(),
         current_trait_extends_iter: false,
             fstr_var_types: std::collections::HashMap::new(),

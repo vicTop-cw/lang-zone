@@ -2500,10 +2500,33 @@ impl CodeGen {
                             }
                         }
                     }
+                    // 补齐未提供的字段为默认值：优先 AST 默认值（`port: int = 8080` 的 8080，
+                    // struct_default.lz），其次按字段类型兜底 default_value_for（__new__ 路径）。
+                    let mut filled_names: std::collections::HashSet<String> = Default::default();
+                    if let Some(defaults) = self.struct_field_defaults.get(&base_name) {
+                        for (fname, def_expr) in defaults {
+                            if !provided_names.contains(fname) {
+                                // 期望类型设为字段类型，使数字/None 字面量正确选型
+                                let prev_expected = self.current_expected_ty.borrow().clone();
+                                if let Some((_, fty)) = self
+                                    .struct_fields_info
+                                    .get(&base_name)
+                                    .and_then(|info| info.iter().find(|(n, _)| n == fname))
+                                {
+                                    *self.current_expected_ty.borrow_mut() = Some(fty.clone());
+                                }
+                                let def_s = self.gen_expr(def_expr);
+                                *self.current_expected_ty.borrow_mut() = prev_expected;
+                                all_fields.push(format!("{}: {}", fname, def_s));
+                                filled_names.insert(fname.clone());
+                            }
+                        }
+                    }
                     if self.struct_has_new.contains(&base_name) {
                         if let Some(info) = self.struct_fields_info.get(&base_name) {
                             for (fname, fty) in info {
-                                if !provided_names.contains(fname) {
+                                if !provided_names.contains(fname) && !filled_names.contains(fname)
+                                {
                                     all_fields.push(format!(
                                         "{}: {}",
                                         fname,
@@ -6502,7 +6525,8 @@ impl CodeGen {
                             .get(name.as_str())
                             .cloned()
                             .unwrap_or_default();
-                        let mut fields: Vec<String> = fields
+                        let fields_src = fields;
+                        let mut fields: Vec<String> = fields_src
                             .iter()
                             .map(|(n, v)| {
                                 // 字段值生成期间以字段类型作为期望类型（与实参渲染对称，
@@ -6554,6 +6578,30 @@ impl CodeGen {
                                 }
                             })
                             .collect();
+                        // struct 缺省字段构造（`Config(name: "app")` → 补 `port: 8080, debug: false`）：
+                        // 只对未提供的字段用 AST 默认值表达式填充，否则 E0063 missing field。
+                        // 注意与 __new__ 路径（default_value_for 按类型兜底）区分——这里用的是
+                        // 用户声明的字面默认值（struct_default.lz 的 `port: int = 8080`）。
+                        let provided_names: std::collections::HashSet<&str> =
+                            fields_src.iter().map(|(n, _)| n.as_str()).collect();
+                        if let Some(defaults) = self.struct_field_defaults.get(name.as_str()) {
+                            for (fname, def_expr) in defaults {
+                                if !provided_names.contains(fname.as_str()) {
+                                    // 期望类型设为字段类型，使 None / 数字字面量正确选型
+                                    let field_ty = field_tys
+                                        .iter()
+                                        .find(|(fn_, _)| fn_ == fname)
+                                        .map(|(_, ft)| ft);
+                                    let prev_expected = self.current_expected_ty.borrow().clone();
+                                    if let Some(ft) = field_ty {
+                                        *self.current_expected_ty.borrow_mut() = Some(ft.clone());
+                                    }
+                                    let def_s = self.gen_expr(def_expr);
+                                    *self.current_expected_ty.borrow_mut() = prev_expected;
+                                    fields.push(format!("{}: {}", fname, def_s));
+                                }
+                            }
+                        }
                         if let Some(phantoms) = self.struct_phantom_generics.get(name.as_str()) {
                             for g in phantoms {
                                 // PhantomData 不带显式类型参数：T 在调用点（如 main）未绑定，

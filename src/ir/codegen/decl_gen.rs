@@ -1565,6 +1565,17 @@ impl CodeGen {
                 .map(|f| (f.name.clone(), f.ty.clone()))
                 .collect(),
         );
+        // 记录字段默认值表达式（`port: int = 8080` 的 `8080`），供 StructCtor
+        // 缺省字段构造填充（struct_default.lz 否则 E0063 missing field）
+        let defaults: HashMap<String, Expr> = s
+            .fields
+            .iter()
+            .filter_map(|f| f.default.as_ref().map(|d| (f.name.clone(), (**d).clone())))
+            .collect();
+        if !defaults.is_empty() {
+            self.struct_field_defaults
+                .insert(s.name.clone(), defaults);
+        }
         if s.has_new {
             self.struct_has_new.insert(s.name.clone());
         }
