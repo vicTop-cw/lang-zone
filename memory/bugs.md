@@ -1339,3 +1339,20 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T17:09:44Z / BUG-368)
 - evidence: 提交 64e1601 `fix(parser): let list destructuring let [a, b] = expr`。改 src/parser/stmt.rs parse_binding_stmt_let：在 LParen 解构分支之后新增 `if self.check(&Token::LBrack)` 分支，解析方括号内逗号分隔的嵌套模式（LParen/LBrack/LBrace → parse_pattern；Ident → Pattern::Ident；Underscore → Wildcard），产 `Stmt::LetTuple`。验证：nested_list_tuple.lz（`let [(a, b), (c, d)] = [(1, 2), (3, 4)]` 后 print a/b/c/d）COMPILE OK；探针门禁 116/99/17 → 116/100/16（+1 OK，无回归）。
+## BUG-369 [2026-10-20T17:15:59Z] [high] FIXED
+- summary: BUG-369: trait 方括号泛型 + trait 冒号开体 + parse_type 方括号泛型实参 均不支持
+- detail: 三个 LZ 方括号泛型语法未被支持：
+1. `trait Container[T]:` — trait 泛型参数用方括号（原只认 `<T>`）。
+2. `trait Container[T]:` — 冒号直接开体（无 `=`），原 expect(Eq) 失败。
+3. `Iterator[int]` 返回类型 — parse_type 只认 `<T>` 泛型实参（原落成 Named("Iterator") 残留 `[int]`）。
+
+修复（`b281369`，src/parser/parser.rs）：
+- parse_trait：新增 LBrack 泛型参数分支（逗号分隔，可选 bound）；supertrait 循环后 `=` 可选（冒号已开体时放行）。
+- parse_type：新增 LBrack 泛型实参分支（复用 Option/Result 特化，其余落 Generic）。
+
+修复后 trait_generic.lz / trait_generic2.lz COMPILE OK，探针门禁 116/100/16 → 116/102/14（generator.lz parse-error 消除，仍剩 IR semantic error）。
+
+
+
+### FIXED(2026-10-20T17:16:12Z / BUG-369)
+- evidence: 提交 b281369 `fix(parser): trait/type generic square-bracket syntax + trait colon-opens-body`。src/parser/parser.rs 三处：① parse_trait 新增 LBrack 泛型参数分支（`trait Container[T]`，逗号分隔 + 可选 bound）；② supertrait 循环后 `=` 可选 —— 冒号已开缩进体时放行（`trait Container[T]:` 形态）；③ parse_type 新增 LBrack 泛型实参分支（`Iterator[int]`），Option/Result 特化，其余落 Generic。验证：trait_generic.lz / trait_generic2.lz（`trait Container[T]:` + `trait Container<T>:`）COMPILE OK；generator.lz parse-error 消除（仍剩 IR yield+ret semantic error）；探针门禁 116/100/16 → 116/102/14（+2 OK）。
