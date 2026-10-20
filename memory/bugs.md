@@ -1201,3 +1201,17 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - summary: `xs.flat_map(f)` / `xs.zip(ys)` / `xs.fold(init, f)` 生成裸方法调用，Rust 的 flat_map/zip/fold 只在 Iterator 上 → E0599；Option 的 flat_map 需映射为 and_then
 - detail: LZ 集合方法名与 Rust 方法名不一致——LZ `.flat_map()` 对 Option/Result 语义是 `and_then`（Option 无 flat_map 方法），对 List/Vec 是 `into_iter().flat_map().collect()`；`.zip(ys)` 需 `into_iter().zip(ys.into_iter())`；`.fold(init, f)` 需 `into_iter().fold(init, f)`（注意 LZ 实参序 = init, closure，勿与 reduce 的 closure, init 混用）。
 - evidence: expr_gen.rs `rust_method` match 新增 `"flat_map" if Option/Result 接收者 => "and_then"`；method_param_expected_ty 的闭包方法名单加 flat_map；Option/Result 消费型方法 clone 前缀名单加 flat_map；`fold`/`flat_map`/`zip` 在 recv_is_list 分支新增 into_iter 链（fold 用 `fold(init, lambda)`，flat_map 用 `flat_map(lambda).collect()`，zip 用 `zip(other.into_iter())`）。回归后 option_chain/opt_chain_brace/list_of_lists/zip 全 OK 运行，method_overload 因探针复用 xs 4 次（filter 早已 into_iter 消费）遗留 E0382，探针自身缺陷。
+
+---
+
+## BUG-360 — 普通 struct 解构 let Pair(x, y) = ... 生成 .__unapply__() 但方法不存在 → E0599
+
+- **severity**: high
+- **status**: OPEN
+- **summary**: struct_destruct.lz 用普通 struct struct Pair(a: int, b: int) 做解构 let Pair(x, y) = Pair(1, 2)，parser 层把结构体解构糖化为 .__unapply__() 调用（复用元组解构机制），但 __unapply__ 只为 case struct 合成 → 普通 struct 生成 .__unapply__() → rror[E0599]: no method named __unapply__
+- **detail**: parser/stmt.rs L449-465 对 struct 解构无条件生成 Expr::MethodCall{method:"__unapply__"}；convert_decl.rs convert_struct 只在 s.is_case || @case 装饰器时合成 synth_unapply。修法：convert_decl 对「带字段且非递归且无用户同名方法」的普通 struct 也合成 __unapply__。递归 struct 必须跳过——其递归字段在 codegen 层 Box 包装（Option<Box<Node>>），而 synth_unapply 返回类型用 AST 字段类型（Option<Node>）→ E0308（case struct 同病）。新增 struct_is_recursive() 判断（Ty_refs 递归查 Named 名）。
+
+### FIXED(2026-10-20 / BUG-360)
+- convert_decl.rs convert_struct：扩展 
+eeds_unapply 条件，对非递归带字段普通 struct 合成 __unapply__；新增 struct_is_recursive() helper（递归检查 AST Type 是否引用自身名）。
+- 回归：sweep15 gate 114→115（新增 case_recursive.lz 探针），OK 86→87（struct_destruct 转 OK），FAIL 恒 28，recursive_struct 未回归。

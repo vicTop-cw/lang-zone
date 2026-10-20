@@ -1777,6 +1777,31 @@ pub(crate) fn ast_expr_has_async(expr: &ast::Expr) -> bool {
     }
 }
 
+/// 判断 struct 是否递归（某字段类型直接或嵌套引用自身名）。
+/// 递归 struct 的字段在 codegen 层 Box 包装（`Option<Box<Node>>`），
+/// 而 synth_unapply 的返回类型用 AST 字段类型（`Option<Node>`）→ E0308。
+/// 故递归 struct 不自动合成 __unapply__（case struct 亦受此限，见 recursive_struct.lz）。
+fn struct_is_recursive(s: &ast::StructDef) -> bool {
+    fn ty_refs(ty: &crate::types::Type, name: &str) -> bool {
+        use crate::types::Type as T;
+        match ty {
+            T::Named(n) => n == name,
+            T::Option(inner) | T::Optional(inner) | T::Ref(inner) | T::MutRef(inner) => {
+                ty_refs(inner, name)
+            }
+            T::Result { ok, err } => ty_refs(ok, name) || ty_refs(err, name),
+            T::Generic { base, args } => ty_refs(base, name) || args.iter().any(|a| ty_refs(a, name)),
+            T::Tuple(items) => items.iter().any(|t| ty_refs(t, name)),
+            T::Fn { params, ret } => {
+                params.iter().any(|p| ty_refs(p, name)) || ty_refs(ret, name)
+            }
+            T::Duck { fields } => fields.iter().any(|(_, t)| ty_refs(t, name)),
+            _ => false,
+        }
+    }
+    s.fields.iter().any(|f| ty_refs(&f.ty, &s.name))
+}
+
 /// 为 case struct 合成 `__unapply__`（定长提取，对应 Scala unapply）：
 /// 返回 (self.f1, self.f2, ...)，使 `let PointEx(x, y) = p` / `case PointEx(x, y)`
 /// 能经 `__unapply__` 完成提取。
@@ -1881,8 +1906,21 @@ pub(crate) fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
     // 注入为普通 magic 方法，复用既有 magic 方法 codegen 与类型推断。
     // @case 装饰器与 `case struct` 关键字双用法：装饰器形式
     // `@case struct Point(x: int, y: int)` 等价于 `case struct Point(x: int, y: int)`。
+    // BUG-360：普通（非 case）struct 的解构 `let Pair(x, y) = Pair(1, 2)` 在 parser
+    // 层被糖化为 `.__unapply__()` 调用。若无该方法，生成 `.__unapply__()` → E0599。
+    // 故对所有带字段的非递归 struct 一并合成 `__unapply__`（内部 magic 方法，不与
+    // 用户方法冲突——用户显式实现同名方法时以用户方法为准）。
+    // 跳过递归 struct（如 `struct Node = value: int / next: Option<Node>`）：其递归
+    // 字段在 codegen 层 Box 包装（`Option<Box<Node>>`），而 synth_unapply 的返回类型
+    // 用 AST 字段类型（`Option<Node>`）→ 生成 `self.next.clone()` 返回 `Option<Box<Node>>`
+    // 与声明类型不符 E0308（case struct 同病，见 recursive_struct.lz 回归）。
+    // 无字段 struct（unit struct）无字段可提取，跳过。
     let has_case_decorator = s.decorators.iter().any(|d| d.name == "case");
-    let s = if s.is_case || has_case_decorator {
+    let needs_unapply = (s.is_case || has_case_decorator)
+        || (!s.fields.is_empty()
+            && !struct_is_recursive(s)
+            && !s.magic_methods.iter().any(|m| m.name == "__unapply__"));
+    let s = if needs_unapply {
         let mut owned = s.clone();
         let mut methods = s.magic_methods.clone();
         methods.push(synth_unapply(s));
