@@ -1856,7 +1856,10 @@ impl CodeGen {
                     // i64 int，与方法形式一致。
                     format!("({}).into_iter().enumerate().map(|(i, x)| (i as i64, x)).collect::<Vec<_>>()", args_s[0])
                 } else if callee_s == "zip" && args_s.len() == 2 {
-                    format!("({}).into_iter().zip({}.into_iter())", args_s[0], args_s[1])
+                    // BUG-381：zip 返回 Zip<...> 迭代器，但 LZ 语义要求得到集合
+                    // （调用方可能注解为 Vec<(i64, i64)>）。缺 .collect::<Vec<_>>()
+                    // → E0308 mismatched types (Zip vs Vec)。
+                    format!("({}).into_iter().zip({}.into_iter()).collect::<Vec<_>>()", args_s[0], args_s[1])
                 } else if callee_s == "clone" && args_s.len() == 1 {
                     format!("({}).clone()", args_s[0])
                 } else if callee_s == "__go" && args_s.len() >= 1 {

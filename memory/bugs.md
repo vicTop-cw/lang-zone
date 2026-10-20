@@ -1496,3 +1496,15 @@ Fix (commit 9eb54ad): src/ir/builder/convert_decl.rs —— user_has_unapply = m
 
 ### FIXED(2026-10-20T19:38:20Z / BUG-380)
 - evidence: Commit 9eb54ad: src/ir/builder/convert_decl.rs user_has_unapply 同时查 magic_methods 与 methods。extractor_unapply.lz rustc 编译干净，demo_codegen_compile 1 passed / 0 failed，cargo test --workspace 全通过。
+## BUG-381 [2026-10-20T19:59:04Z] [medium] FIXED
+- summary: zip 自由函数生成 Zip 迭代器而非 Vec — 缺 .collect::<Vec<_>>() → E0308
+- detail: expr_gen.rs:1858 自由函数 zip(a, b) 生成 `(a).into_iter().zip(b.into_iter())` 返回 Rust 的 Zip 迭代器，但 LZ 语义要求集合（调用方注解为 Vec<(i64,i64)>）→ E0308 mismatched types (Zip vs Vec)。
+
+对照方法形式（line 4739）已有 `.collect::<Vec<_>>()`，自由函数形式漏了。
+
+Fix (commit ...): expr_gen.rs 自由函数 zip 补 `.collect::<Vec<_>>()`。修复后 edge_collections.lz 输出 `[(1, 10), (2, 20), (3, 30)]` 正确。
+
+
+
+### FIXED(2026-10-20T19:59:13Z / BUG-381)
+- evidence: Commit: src/ir/codegen/expr_gen.rs 自由函数 zip 补 .collect::<Vec<_>>()。edge_collections.lz rustc 编译干净，输出 [(1, 10), (2, 20), (3, 30)]。
