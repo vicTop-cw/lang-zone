@@ -459,7 +459,12 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     args.get(1).cloned().unwrap_or(IrType::Any)
                 }
                 IrType::Named { path, args } if path == "List" || path == "Vec" => {
-                    args.first().cloned().unwrap_or(IrType::Any)
+                    if is_slice {
+                        // BUG-352: 列表切片 xs[a..b] 返回 List<T>（非元素类型 T）
+                        recv_ty.clone()
+                    } else {
+                        args.first().cloned().unwrap_or(IrType::Any)
+                    }
                 }
                 IrType::Str if is_slice => IrType::Str, // 字符串切片返回 Str
                 IrType::Str => IrType::Str,             // 字符索引返回 Str（LZ 语义）
