@@ -1394,3 +1394,22 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T18:14:57Z / BUG-372, BUG-373)
 - evidence: commit 3cd1e49 (src/lexer/lexer.rs + src/parser/expr.rs): (1) match arm loop now breaks on RParen/RBrack/RBrace and tolerates a missing Indent — `xs.flat_map(|o| match o: case Some(v): [v] case None: [])` parses correctly; (2) lexer suppresses Indent/Dedent when a line's first non-space char is '.' (and not '..') so `.map(...)` is a continuation, not a new block; (3) call-args loops re-check RParen after skip_newlines so multi-line arg lists inside parens still terminate. Verified: t12/t18/t19/map_chain/opt_chain_result all pass; nesting-data-types.lz regression fixed; 441 lib tests pass.
+## BUG-374 [2026-10-20T18:48:19Z] [high] FIXED
+- summary: struct_default.lz [compile-fail] E0063 missing fields debug/port in Config initializer
+- detail: `struct Config = name: str, port: int = 8080, debug: bool = false` then `let c = Config(name: "app")` generated `Config { name: "app".to_string() }` — the AST field defaults (`port: int = 8080`) were dropped at AST→IR (IR `Field` had no default slot) and StructCtor/kwarg codegen never filled missing fields.
+
+Fix (commit 706899e):
+- `ir/node.rs`: `Field` gains `default: Option<Box<Expr>>`.
+- `ir/builder/convert_decl.rs`: propagate AST `Field.default` → IR (enum variant fields = None); the only drop-site was struct fields loop at ~line 2044.
+- `ir/codegen/mod.rs`: add `struct_field_defaults: HashMap<String, HashMap<String, Expr>>`.
+- `ir/codegen/decl_gen.rs` `gen_struct_def`: register fields with AST defaults.
+- `ir/codegen/expr_gen.rs`: kwarg struct ctor path (`Config(name: ...)`) fills missing fields from `struct_field_defaults` (falling back to `default_value_for` for `__new__` path).
+- `parser/parser.rs`: parse `port: int = 8080` field-default syntax after field type.
+
+Generated `let c = Config { name: "app".to_string(), debug: false, port: 8080i64 };` compiles.
+Gate: TOTAL=135 OK=131 FAIL=4.
+
+
+
+### FIXED(2026-10-20T18:48:26Z / BUG-374)
+- evidence: Commit 706899e: ir/node.rs Field.default; ir/builder/convert_decl.rs propagate AST default; ir/codegen/mod.rs struct_field_defaults map; decl_gen.rs register defaults; expr_gen.rs kwarg ctor fills missing fields; parser.rs parse `port: int = 8080`. Probe struct_default.lz now emits `Config { name: "app".to_string(), debug: false, port: 8080i64 }` and compiles; gate 135/131/4.

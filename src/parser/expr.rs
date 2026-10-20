@@ -627,6 +627,8 @@ impl ParserExprExt for Parser {
                         Token::MagicMethod(n) => n,
                         Token::True => "True".to_string(),
                         Token::False => "False".to_string(),
+                        // `.await()`：fut.await()（codegen 转 Rust 后缀 await 关键字）
+                        Token::Await => "await".to_string(),
                         // 元组索引访问 args.0 / args.1（type-pack 异质元组，03d §2.8 方案 B）
                         Token::IntLit(n) => n.to_string(),
                         t => return Err(format!("Expected field/method, got {:?}", t)),

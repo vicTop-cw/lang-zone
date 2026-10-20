@@ -3157,7 +3157,13 @@ impl CodeGen {
 
                 // await: x.await() → x.await (Rust postfix keyword)
                 if method == "await" {
-                    return format!("({}).await", recv);
+                    if self.current_fn_is_async {
+                        return format!("({}).await", recv);
+                    }
+                    // 同步上下文：`let r = fetch(21).await()` → `__block_on(fetch(21))`
+                    // （否则 E0728 `await` is only allowed inside async functions/blocks；
+                    //  builtins 提供 __block_on 用 pollster/手动 poll 同步求值 Future）
+                    return format!("__block_on({})", recv);
                 }
 
                 // clone 方法：&str 类型需要 to_string() 而非 clone()

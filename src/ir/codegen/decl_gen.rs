@@ -962,7 +962,7 @@ impl CodeGen {
             })
         });
         // Rust 不允许 async main，对于 async main 使用 block_on 包装
-        let is_async_main = f.is_async && f.name == "main";
+        let is_async_main = f.name == "main" && (f.is_async || block_has_await(&f.body));
         // LZ 允许 def main() -> int：Rust main 只能返回 ()，需生成内部函数
         // __lz_main() -> i64 + pub fn main() { std::process::exit(__lz_main() as i32); }
         let is_typed_main = f.name == "main" && !is_async_main && f.ret_ty != IrType::Unit;
