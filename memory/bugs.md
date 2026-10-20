@@ -1,4 +1,4 @@
-## BUG-1 [2026-09-26T06:29:50Z] [high] FIXED
+﻿## BUG-1 [2026-09-26T06:29:50Z] [high] FIXED
 - summary: BigInt/Complex 生成码裸发 use num_bigint::BigInt / use num_complex::Complex64，孤立 crate 编译 E0432（num-* 仅为 lz_builtins 传递依赖且零 re-export）
 - detail: codegen/mod.rs:2162-2164 仅按 module_uses_bigint 注入 `use num_bigint::BigInt;`（Complex 同族发 `use num_complex::Complex64;`）。demo 闸门 check_one 以孤立 lib crate 编译产物、仅 --extern lz_builtins，num-* 不在 extern prelude → E0432。lz_builtins 源码 grep 零 bigint/complex re-export，生成 crate 无路由可达。样例 FIND_BUG/hunt-20260926/bug-A-numcrate-import-e0432/{bigint_min,complex_min}.lz。基线 1ccbdc43+5行未提交，cargo test 673 passed。 复现文档: FIND_BUG/hunt-20260926/bug-A-numcrate-import-e0432/复现命令.md
 - reported_by: BugHunter(hunt-20260926)
@@ -1219,14 +1219,13 @@ eeds_unapply 条件，对非递归带字段普通 struct 合成 __unapply__；�
 ### FIXED(2026-10-20T13:20:40Z / BUG-360)
 - evidence: convert_decl.rs convert_struct 扩展 needs_unapply 条件：对「带字段且非递归且无用户同名方法」的普通 struct 也合成 synth_unapply；新增 struct_is_recursive() helper（递归检查 AST Type 是否引用自身名）跳过递归 struct 避免 E0308。回归 sweep15 gate：struct_destruct.lz 转 OK（E0599 消除），recursive_struct.lz 未回归（E0308 未引入），OK 86→87 / FAIL 恒 28 / 总 114→115（新增 case_recursive.lz 探针）。提交 add2a3f。
 
-### BUG-361 多 for 推导式循环变量未绑定 → output 类型回退 Any → 生成 i64 标注 E0308
+## BUG-361 [] [] FIXED
 
-- 状态: FIXED
-- 严重度: high
-- 摘要: `[(x, y) for x in xs for y in ys]` 的 output 类型在推导时循环变量 x/y 尚未绑定 → lookup_var 回退 Any → 生成 `Vec<(i64,i64)>` 而实际是 `Vec<(String,i64)>` E0308
-- 影响: 多 for 的 List/Dict/Set 推导式，iter 为非 int 元素时全部 E0308
-- 真源: src/ir/builder/infer.rs — ListComprehension/DictComprehension/SetComprehension 推导 arm 直接用外层 ctx 推导 output/key/value，未先绑定循环变量
-- 修法: 新增 bind_comp_vars() 克隆 ctx，把每个循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 args[0]；Range 恒为 int；Str 为 Str），再推导 output/key/value
-- 探针: multi_for_str_tuple.lz / multi_for_dict_str.lz / multi_for_set_str.lz / multi_for_range.lz
-- 验证: 4 个探针从 FAIL 转 OK；全量 gate 87 OK/27 FAIL → 90 OK/26 FAIL
-- 关联: BUG-360（同轮次 struct 解构族）
+- **severity**: high
+- **status**: OPEN
+- **summary**: 多 for 推导式 `[(x, y) for x in xs for y in ys]` 的 output 类型在推导时循环变量 x/y 尚未绑定 → lookup_var 回退 Any → 生成 `Vec<(i64,i64)>` 而实际是 `Vec<(String,i64)>` E0308
+- **detail**: 影响多 for 的 List/Dict/Set 推导式，iter 为非 int 元素时全部 E0308。真源 src/ir/builder/infer.rs — ListComprehension/DictComprehension/SetComprehension 推导 arm 直接用外层 ctx 推导 output/key/value，未先绑定循环变量。修法：新增 bind_comp_vars() 克隆 ctx，把每个循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 args[0]；Range 恒为 int；Str 为 Str），再推导 output/key/value。
+- **evidence**: infer.rs L14-41 新增 bind_comp_vars；L805-851 List/Dict/Set 三臂改用它。探针 multi_for_str_tuple.lz / multi_for_dict_str.lz / multi_for_set_str.lz / multi_for_range.lz 从 FAIL 转 OK；全量 gate 87 OK/27 FAIL → 90 OK/26 FAIL。提交 e0aea87。
+
+### FIXED(2026-10-20T14:01:42Z / BUG-361)
+- evidence: src/ir/builder/infer.rs 新增 bind_comp_vars()（L14-41），把每个推导式循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 args[0]；Range 恒为 int；Str 为 Str），并应用于 ListComprehension/DictComprehension/SetComprehension 三个推导 arm。验证：multi_for_str_tuple / multi_for_dict_str / multi_for_set_str / multi_for_range 4 个探针从 FAIL 转 OK（rustc 编译通过），全量 gate 从 87 OK/27 FAIL 升至 90 OK/26 FAIL，commit e0aea87。
