@@ -1284,3 +1284,15 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T16:39:43Z / BUG-364)
 - evidence: 提交 8d39474 `fix(codegen): list GenBuild ctor should not destructure tuple yields`。改 src/ir/codegen/expr_gen.rs GenBuild tail：list_ctor 分支直接返回 `"__bb"`（yield 本身即目标元素），不再解构元组再 vec![__a0] 包装；非 list_ctor 的 Tuple 分支保留原解构逐参传参路径。验证：build_block3.lz（`list *: yield (1,)`）生成 `__bb` 收集路径、COMPILE OK；探针门禁 116/93/23 → 116/94/22（+1 OK，无回归）。
+## BUG-365 [2026-10-20T16:44:57Z] [high] FIXED
+- summary: BUG-365: 裸 Vec 的 .filter()/.map() 用 into_iter() 消费接收者 → E0382 moved value（LZ 值语义允许重复读）
+- detail: `xs.filter(...)` / `xs.map(...)`（裸 Vec）走 `(xs).into_iter()...`，Rust 的 into_iter 消费接收者。但 LZ 值语义允许重复读同一变量（method_overload.lz 里 `xs.sort()` 后依次 `xs.filter(...)`、`xs.map(...)`、`xs.fold(...)` 各自独立使用 xs）→ E0382 use of moved value: `xs`。
+
+修复（`19cf680`）：裸 Vec 的 `.filter()`/`.map()` 改为 `.iter().cloned()`（与 sum/product 的 `.iter().copied()` 同款）。`.iter().cloned()` 产生 Cloned<Iter<T>>，filter 闭包仍收 &Item（strip_lambda_type_with_ref 不变）、map 闭包收 owned Item（与 into_iter 等价），语义兼容且不 move 接收者。
+
+修复后 method_overload.lz COMPILE OK，探针门禁 116/94/22 → 116/95/21。
+
+
+
+### FIXED(2026-10-20T16:45:17Z / BUG-365)
+- evidence: 提交 19cf680 `fix(codegen): Vec method filter/map use iter().cloned() instead of into_iter()`。改 src/ir/codegen/expr_gen.rs L4568-4581：裸 Vec 的 `.filter()`/`.map()` 分支把 `({}).into_iter().{}({}).collect::<Vec<_>>()` 改为 `({}).iter().cloned().{}({}).collect::<Vec<_>>()`。`.iter().cloned()` 产生 Cloned<Iter<T>>，filter 闭包仍收 &Item（strip_lambda_type_with_ref 逻辑不变）、map 闭包收 owned Item，语义与 into_iter 等价但不 move 接收者。验证：method_overload.lz（`xs.sort()` 后 `xs.filter()`/`xs.map()`/`xs.fold()` 复用 xs）COMPILE OK；探针门禁 116/94/22 → 116/95/21（+1 OK，无回归）。
