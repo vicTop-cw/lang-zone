@@ -1854,12 +1854,20 @@ impl CodeGen {
                         // 是 i64 而非 Future。`__spawn_task` 要求 Future 参数 → E0277。
                         // 用 async {} 包裹让返回值（无论是否 async）都成为 Future。
                         // 已显式 async 的调用（fetch(10) 返回 Future<String>）不包裹。
+                        // 通过预扫描的 async_fn_names 集合判断调用的目标函数是否 async。
                         let inner = &args[0];
-                        let inner_is_future = matches!(
-                            &inner.ty,
-                            IrType::Named { path, .. } if path == "Future"
-                        );
-                        if inner_is_future {
+                        let inner_is_async_call = match &inner.kind {
+                            ExprKind::Call { callee, .. } => {
+                                match &callee.kind {
+                                    ExprKind::Var(name) => {
+                                        self.async_fn_names.contains(name)
+                                    }
+                                    _ => false,
+                                }
+                            }
+                            _ => false,
+                        };
+                        if inner_is_async_call {
                             format!("__spawn_task({})", args_s.join(", "))
                         } else {
                             format!("__spawn_task(async {{ {} }})", args_s.join(", "))

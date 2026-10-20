@@ -384,6 +384,9 @@ pub struct CodeGen {
     imported_modules: std::collections::HashSet<String>,
     /// 当前正在生成的函数是否为 async（用于 __go 的异步/同步分派）
     current_fn_is_async: bool,
+    /// BUG-348：预扫描收集的 async 函数名集合，用于 `spawn` 内区分
+    /// 非 async 调用（返回值非 Future）与 async 调用（返回值是 Future）。
+    async_fn_names: std::collections::HashSet<String>,
     /// 当前是否在生成 `impl Iterator` 的 size_hint 方法体：
     /// std Iterator 要求返回 (usize, Option<usize>)，方法体内 `(0, Some(0))`
     /// 元组元素需转 usize（否则 E0308 expected usize, found i64）
@@ -538,6 +541,7 @@ impl CodeGen {
             moddec_atomic_types: std::collections::BTreeSet::new(),
             imported_modules: std::collections::HashSet::new(),
             current_fn_is_async: false,
+            async_fn_names: std::collections::HashSet::new(),
             current_fn_is_size_hint: false,
             current_fn_ret_is_ref: false,
             duck_field_members: std::collections::HashMap::new(),
@@ -600,6 +604,15 @@ impl CodeGen {
         self.enum_variant_fields.clear();
         self.overload_sigs.clear();
         self.raises_fn_names.clear();
+        // BUG-348：预收集 async 函数名，供 spawn 参数类型判断
+        self.async_fn_names.clear();
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if f.is_async {
+                    self.async_fn_names.insert(f.name.clone());
+                }
+            }
+        }
 
         // 预收集所有用户自定义类型名（struct/enum），供函数体/表达式中判断
         self.known_types.clear();
