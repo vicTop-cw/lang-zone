@@ -1179,7 +1179,16 @@ impl Parser {
                 return_type = Some(self.parse_type()?);
             } else if raises.is_none() && self.check(&Token::Raises) {
                 self.advance();
-                raises = Some(self.parse_type()?);
+                // BUG-388：`-> int raises =`（裸 raises，09-错误处理.md §2.2 形式一）在
+                // `raises` 关键字后直接跟 `=`/`:` 时无类型，旧代码无条件
+                // parse_type() 报「Expected type, got Eq」。文档语义：裸 raises
+                // 「不检查抛出的具体类型」，但 codegen 需一个具体错误类型来 emit
+                // Result<ok, E> → 默认 str（与 DEMO 常见 `raises str` 一致）。
+                if self.check(&Token::Eq) || self.check(&Token::Colon) {
+                    raises = Some(Type::Str);
+                } else {
+                    raises = Some(self.parse_type()?);
+                }
             } else {
                 break;
             }
