@@ -35,6 +35,13 @@ pub struct Parser {
     pending_inline_bounds: Vec<(String, Vec<Type>)>,
     /// 最近一次 parse_generic_params 解析到的默认类型 (type_param → default type)
     pending_generic_defaults: Vec<(String, Type)>,
+    /// `struct Counter(value: int):` 冒号开体（BUG-371）：LParen 分支解析完字段后暂存，
+    /// Indent 体路径接管。均为 Option 以便区分「未走 paren 路径」。
+    paren_name: Option<String>,
+    paren_fields: Option<Vec<Field>>,
+    paren_generics: Option<Vec<String>>,
+    paren_generic_bounds: Option<Vec<(String, Vec<Type>)>>,
+    paren_generic_defaults: Option<Vec<(String, Type)>>,
     /// 是否为宏模块（首行 `#!bin macro`）——由调用方在宏展开前用原始
     /// token 流检测并设置（展开会消费 #!bin macro 声明，Parser 自身无法检测）
     pub is_macro: bool,
@@ -48,6 +55,11 @@ impl Parser {
             pending_gt: 0,
             pending_inline_bounds: Vec::new(),
             pending_generic_defaults: Vec::new(),
+            paren_name: None,
+            paren_fields: None,
+            paren_generics: None,
+            paren_generic_bounds: None,
+            paren_generic_defaults: None,
             is_macro: false,
         }
     }
@@ -2155,12 +2167,12 @@ impl Parser {
 
     pub fn parse_struct_like(&mut self, is_enum: bool, is_case: bool) -> Result<StructDef, String> {
         self.advance(); // skip struct/enum
-        let name = match self.advance() {
+        let mut name = match self.advance() {
             Token::Ident(n) => n,
             t => return Err(format!("Expected name, got {:?}", t)),
         };
 
-        let generics = if self.check(&Token::Lt) {
+        let mut generics = if self.check(&Token::Lt) {
             self.parse_generic_params()?
         } else {
             Vec::new()
@@ -2189,26 +2201,52 @@ impl Parser {
                 }
             }
             self.expect(Token::RParen)?;
-            return Ok(StructDef {
-                name,
-                generics,
-                generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
-                generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
-                fields,
-                methods: Vec::new(),
-                magic_methods: Vec::new(),
-                is_enum: false,
-                is_case,
-                decorators: Vec::new(),
-                repr_attr: None,
-            });
+            // case struct Point(x, y) = ...  或  struct Counter(value: int): <体>
+            // 后者（BUG-371: struct_methods.lz）冒号开体，落到底部 Indent 体路径继续解析
+            // 方法；此前直接 return 把 `:` 留给顶层解析 → 「Unexpected token at top level: Colon」
+            if !self.check(&Token::Colon) {
+                return Ok(StructDef {
+                    name,
+                    generics,
+                    generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
+                    generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                    fields,
+                    methods: Vec::new(),
+                    magic_methods: Vec::new(),
+                    is_enum: false,
+                    is_case,
+                    decorators: Vec::new(),
+                    repr_attr: None,
+                });
+            }
+            self.advance(); // consume :
+            self.skip_newlines();
+            // 落入下方 Indent 体路径（fields 已收集，方法体继续解析）
+            self.paren_fields = Some(fields);
+            self.paren_generics = Some(generics.clone());
+            self.paren_generic_bounds =
+                Some(std::mem::take(&mut self.pending_inline_bounds));
+            self.paren_generic_defaults =
+                Some(std::mem::take(&mut self.pending_generic_defaults));
+            self.paren_name = Some(name.clone());
+        } else {
+            self.paren_fields = None;
+            self.paren_name = None;
+            self.paren_generics = None;
+            self.paren_generic_bounds = None;
+            self.paren_generic_defaults = None;
         }
 
         // 支持 = : =: 三种分隔符
         // enum Color: Red, Green, Blue  或  enum Color = Red, Green, Blue
         // struct Box =: body ...  (构建块)
         self.skip_newlines(); // 允许分隔符前换行（如文档注释后的空行）
-        if !self.check(&Token::Eq) && !self.check(&Token::Colon) && !self.check(&Token::BuildAssign)
+        // BUG-371：LParen 分支已消费 `:` 并暂存 paren_*，当前 token 应为 Indent，
+        // 不再走 Eq/Colon 分隔符校验。
+        if self.paren_name.is_none()
+            && !self.check(&Token::Eq)
+            && !self.check(&Token::Colon)
+            && !self.check(&Token::BuildAssign)
         {
             let t = self.advance();
             return Err(format!(
@@ -2216,8 +2254,13 @@ impl Parser {
                 t, self.pos
             ));
         }
-        self.advance(); // consume = : or =:
         self.skip_newlines();
+        // BUG-371：LParen 分支已在 paren_* 里暂存字段并消费了 `:`，此处不再消费分隔符
+        //（否则会把 Indent 吞掉，落入单行分支）。
+        if self.paren_name.is_none() {
+            self.advance(); // consume = : or =:
+            self.skip_newlines();
+        }
 
         // 单行 struct: struct Box<T> = value: T
         // 或 struct Point = x: f64, y: f64
@@ -2282,6 +2325,22 @@ impl Parser {
 
         self.expect(Token::Indent)?;
         let mut fields = Vec::new();
+        // BUG-371：`struct Counter(value: int):` 冒号开体 —— 字段/名/泛型已由
+        // LParen 分支解析并暂存到 paren_*，此处接管而不是重开新字段列表。
+        let from_paren = self.paren_name.take();
+        if let (Some(pn), Some(pf), Some(pg), Some(pb), Some(pd)) = (
+            from_paren,
+            self.paren_fields.take(),
+            self.paren_generics.take(),
+            self.paren_generic_bounds.take(),
+            self.paren_generic_defaults.take(),
+        ) {
+            name = pn;
+            fields = pf;
+            generics = pg;
+            self.pending_inline_bounds = pb;
+            self.pending_generic_defaults = pd;
+        }
         let mut methods = Vec::new();
         let mut magic_methods = Vec::new();
         let mut repr_attr: Option<String> = None;
