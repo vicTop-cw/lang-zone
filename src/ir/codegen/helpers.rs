@@ -1914,6 +1914,197 @@ pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -
             // 更深层嵌套闭包递归
             block_contains_nested_move_lambda(block, lparam_names)
         }
+        // BUG-356: 推导链 body 是 Call（如 comp_mid!(|v| (k, v), ...)），
+        // 内含嵌套闭包引用外层形参 k（非 Copy）。若不递归 Call，外层闭包
+        // 仍用 move 捕获 k，内层 move 闭包再 move 捕获 k → E0507。
+        ExprKind::Call { callee, args, .. } => {
+            body_refs_noncopy_external(callee, lparam_names)
+                || args
+                    .iter()
+                    .any(|a| body_refs_noncopy_external(a, lparam_names))
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            body_refs_noncopy_external(receiver, lparam_names)
+                || args
+                    .iter()
+                    .any(|a| body_refs_noncopy_external(a, lparam_names))
+        }
+        ExprKind::Lambda { params, body, .. } => {
+            let inner_param_names: Vec<String> =
+                params.iter().map(|p| p.name.clone()).collect();
+            // 内层闭包引用的外部变量（相对内层形参）非 Copy → 内层需 move，
+            // 外层若也 move 则双重 move → E0507，需降级外层为借用捕获。
+            body_refs_noncopy_external(body, &inner_param_names)
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            body_refs_noncopy_external(lhs, lparam_names)
+                || body_refs_noncopy_external(rhs, lparam_names)
+        }
+        ExprKind::IfExpr { cond, then, els } => {
+            body_refs_noncopy_external(cond, lparam_names)
+                || body_refs_noncopy_external(then, lparam_names)
+                || body_refs_noncopy_external(els, lparam_names)
+        }
+        ExprKind::ListLit(items) | ExprKind::TupleLit(items) => items
+            .iter()
+            .any(|i| body_refs_noncopy_external(i, lparam_names)),
         _ => false,
+    }
+}
+
+/// 非 move 闭包体内引用外层非 Copy 变量需 `.clone()`，否则借用移出 E0507。
+/// 递归把表达式内的非 Copy 外部变量替换为 `var.clone()`。
+/// （BUG-356：推导链 `|v| (k, v)` 中 k 由外层闭包借用，直接移入 tuple 即 E0507）
+pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr {
+    match &e.kind {
+        ExprKind::Var(name) => {
+            if !lparam_names.contains(name)
+                && !matches!(e.ty, IrType::Int | IrType::F64 | IrType::Bool)
+                && !name.ends_with('!')
+            {
+                let mut new_e = e.clone();
+                new_e.kind = ExprKind::MethodCall {
+                    receiver: Box::new(e.clone()),
+                    method: "clone".to_string(),
+                    args: vec![],
+                };
+                new_e
+            } else {
+                e.clone()
+            }
+        }
+        ExprKind::BlockExpr { block } => {
+            let mut nb = block.clone();
+            nb.stmts = nb
+                .stmts
+                .iter()
+                .map(|s| clone_noncopy_stmt(s, lparam_names))
+                .collect();
+            let mut new_e = e.clone();
+            new_e.kind = ExprKind::BlockExpr { block: nb };
+            new_e
+        }
+        ExprKind::Lambda { params, body, .. } => {
+            let inner_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
+            let mut new_e = e.clone();
+            if let ExprKind::Lambda { body: nb, .. } = &mut new_e.kind {
+                *nb = Box::new(clone_noncopy_external(body, &inner_names));
+            }
+            new_e
+        }
+        ExprKind::Call { callee, args, .. } => {
+            let mut new_e = e.clone();
+            if let ExprKind::Call { callee: nc, args: na, .. } = &mut new_e.kind {
+                *nc = Box::new(clone_noncopy_external(callee, lparam_names));
+                *na = args
+                    .iter()
+                    .map(|a| clone_noncopy_external(a, lparam_names))
+                    .collect();
+            }
+            new_e
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            // BUG-357：若该 MethodCall 本身是 `外部非 Copy 变量.clone()`（本函数上一轮
+            // 已包装），不要再给 receiver 追加一层 clone（避免 `k.clone().clone()`）。
+            let already_cloned = matches!(&receiver.kind, ExprKind::Var(n)
+                if !lparam_names.contains(n)
+                    && !matches!(receiver.ty, IrType::Int | IrType::F64 | IrType::Bool));
+            if already_cloned {
+                return e.clone();
+            }
+            let mut new_e = e.clone();
+            if let ExprKind::MethodCall { receiver: nr, args: na, .. } = &mut new_e.kind {
+                *nr = Box::new(clone_noncopy_external(receiver, lparam_names));
+                *na = args
+                    .iter()
+                    .map(|a| clone_noncopy_external(a, lparam_names))
+                    .collect();
+            }
+            new_e
+        }
+        ExprKind::BinOp { lhs, rhs, .. } => {
+            let mut new_e = e.clone();
+            if let ExprKind::BinOp { lhs: nl, rhs: nr, .. } = &mut new_e.kind {
+                *nl = Box::new(clone_noncopy_external(lhs, lparam_names));
+                *nr = Box::new(clone_noncopy_external(rhs, lparam_names));
+            }
+            new_e
+        }
+        ExprKind::UnOp { operand, .. } => {
+            let mut new_e = e.clone();
+            if let ExprKind::UnOp { operand: no, .. } = &mut new_e.kind {
+                *no = Box::new(clone_noncopy_external(operand, lparam_names));
+            }
+            new_e
+        }
+        ExprKind::IfExpr { cond, then, els } => {
+            let mut new_e = e.clone();
+            if let ExprKind::IfExpr { cond: nc, then: nt, els: ne } = &mut new_e.kind {
+                *nc = Box::new(clone_noncopy_external(cond, lparam_names));
+                *nt = Box::new(clone_noncopy_external(then, lparam_names));
+                *ne = Box::new(clone_noncopy_external(els, lparam_names));
+            }
+            new_e
+        }
+        ExprKind::ListLit(items) | ExprKind::TupleLit(items) => {
+            let is_list = matches!(&e.kind, ExprKind::ListLit(_));
+            let mut new_e = e.clone();
+            let nitems: &mut Vec<Expr> = if is_list {
+                match &mut new_e.kind {
+                    ExprKind::ListLit(n) => n,
+                    _ => unreachable!(),
+                }
+            } else {
+                match &mut new_e.kind {
+                    ExprKind::TupleLit(n) => n,
+                    _ => unreachable!(),
+                }
+            };
+            *nitems = items
+                .iter()
+                .map(|i| clone_noncopy_external(i, lparam_names))
+                .collect();
+            new_e
+        }
+        ExprKind::IndexGet { base, key, .. } => {
+            let mut new_e = e.clone();
+            if let ExprKind::IndexGet { base: nb, key: nk, .. } = &mut new_e.kind {
+                *nb = Box::new(clone_noncopy_external(base, lparam_names));
+                *nk = Box::new(clone_noncopy_external(key, lparam_names));
+            }
+            new_e
+        }
+        ExprKind::FieldAccess { base, .. } => {
+            let mut new_e = e.clone();
+            if let ExprKind::FieldAccess { base: nb, .. } = &mut new_e.kind {
+                *nb = Box::new(clone_noncopy_external(base, lparam_names));
+            }
+            new_e
+        }
+        _ => e.clone(),
+    }
+}
+
+pub(crate) fn clone_noncopy_stmt(s: &Stmt, lparam_names: &[String]) -> Stmt {
+    match s {
+        Stmt::ExprStmt { expr, .. } => Stmt::ExprStmt {
+            expr: clone_noncopy_external(expr, lparam_names),
+        },
+        Stmt::Let {
+            name,
+            value,
+            ty,
+            is_mut,
+            is_ref,
+            mods,
+        } => Stmt::Let {
+            name: name.clone(),
+            value: clone_noncopy_external(value, lparam_names),
+            ty: ty.clone(),
+            is_mut: *is_mut,
+            is_ref: *is_ref,
+            mods: mods.clone(),
+        },
+        _ => s.clone(),
     }
 }

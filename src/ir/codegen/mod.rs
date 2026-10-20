@@ -150,6 +150,10 @@ pub struct CodeGen {
     /// 当前是否在 Lambda 块体（BlockExpr child）内：嵌套 Fn 返回时，
     /// 仅块体尾闭包需 Arc::new 包装，函数体本身的尾表达式（外层闭包）不包装
     in_lambda_block: bool,
+    /// 外层 Lambda 是否为非 move（借用捕获）。内层嵌套 Lambda 若沿用非 move，
+    /// 会借用外层闭包的局部变量而外层闭包已返回 → E0373。内层须改 move 捕获
+    /// 外层变量的引用（&T 是 Copy）并 clone 出 T。
+    parent_lambda_non_move: bool,
     /// 当前是否在生成器（iterator/yield）函数内：体内 return 等价 raise（panic）
     in_generator: bool,
     /// 当前是否在生成器构建块（func *:）闭包内：yield → push 到闭包收集器 __bb
@@ -465,6 +469,7 @@ impl CodeGen {
             top_level_fns: std::collections::HashSet::new(),
             fn_value_carriers: HashMap::new(),
             in_lambda_block: false,
+            parent_lambda_non_move: false,
             in_math_fn: false,
             in_bounded_binop_fn: false,
             in_generator: false,

@@ -1128,3 +1128,60 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - summary: spawn 参数 async/non-async 分流——async_fn_names 预扫描
 - detail: 初版只按 IR 类型 Future 判断，但 async 函数调用的 IR 类型是返回值（String/i64）非 Future。改用预扫描 async_fn_names 集合：codegen.generate() 时收集所有 is_async 函数名，__go 处检查 callee 是否 async 决定是否包 async {}。
 - evidence: src/ir/codegen/mod.rs 新增 async_fn_names 字段 + generate() 预扫描；expr_gen.rs __go 用 ExprKind::Call { callee: ExprKind::Var(name) } 判断；keywords_iterator.lz 输出 `positive | 1 | 2 | 3 | 0 | 1 | 2 | 1 | 3 | "error" | done | keywords demonstrated`；spawn2.lz 输出 `42`。
+### BUG-341 嵌套元组解构 (let ((a,b),c) = ...) FIXED
+- 现象: let ((a, b), c) = ((1, 2), 3) 报「未绑定变量: a/b/c」
+- 根因: LetTuple.names 是 Vec<String>，无法表示嵌套结构
+- 修复: names 改为 Vec<Pattern>，convert_stmts 递归展开生成中间 __destruct_N
+- 证据: TEMP/probe/sweep15/nested_tuple.lz -> 1|2|3；nested_tuple2.lz -> 1|2|3|4|10|20|30|40|50
+- commit: f7c9bc7
+### BUG-345 build block checker 调用 E0608 FIXED
+- 现象: guarded_add[check_positive] ~: (1,2) → E0608 cannot index into Arc<fn>
+- 根因: [checker] 被解析为 IndexGet，codegen 生成 Arc::new(fn)[checker as usize](args)
+- 修复: IndexGet codegen 检测 base=顶层函数 & key=标识符 → 直接返回函数名
+- 证据: CY/TESTS/12_build_blocks/checker_call.lz -> 3
+- commit: f1cc49b
+
+
+### BUG-352 列表切片类型推断 FIXED
+- 现象: let sub = xs[1..3] → E0308 expected i64 found Vec<i64>
+- 根因: List 索引推断返回元素类型 T，切片需返回 List<T>
+- 修复: infer.rs List/Vec + is_slice 时返回 recv_ty
+- 证据: TEMP/probe/sweep15/list_slice.lz -> [2, 3]
+- commit: c7602e6
+
+### BUG-353 case struct 解构 let Pair(x,y) 生成 Rust enum 模式 FIXED
+- 现象: let Pair(x,y) = Pair(1,2) → E0531 cannot find Variant/Ident
+- 根因: Pattern::Variant 在 LetTuple 展开中落入 _ 分支按 debug 名绑定
+- 修复: Variant 按 Tuple 直接递归展开（value 已在 parser 包上 __unapply__）
+- 证据: TEMP/probe/sweep15/case_struct_destruct.lz -> 1 | 2
+### BUG-354 struct 模式字段映射顺序颠倒 FIXED
+- 现象: case Point(x: px, y: py) → Point { y: px, x: py } → px 拿到 y 值
+- 根因: pattern.rs 用 struct_fields (HashMap) keys 迭代，顺序任意
+- 修复: 改用 struct_field_order (Vec<String>) 保持声明顺序
+- 证据: TEMP/probe/sweep15/match_struct_pattern.lz -> 1 | 2 (修前 2 | 1)
+- commit: 48b4e2c
+
+### BUG-355 List.map/filter 类型推断缺失导致链式调用失败 FIXED
+- 现象: List<int>.map(f).map(g) 第二个 map → E0599 no method map on Vec
+- 根因: infer.rs List match 缺 map/filter 分支 → 返回 Any → codegen recv_is_list=false
+- 修复: 添加 map（返回 List<Any> 让 skip_ty 生效，避免错误 Vec<i64> 标注）和 filter（返回 List<T>）
+- 证据: TEMP/probe/sweep15/map_chain3.lz -> ["2", "4", "6", "8", "10"]
+- commit: 73f5305
+
+### BUG-356 嵌套闭包借用移出非 Copy 外部变量 E0507 FIXED
+- 现象: 闭包体内引用外层非 Copy 变量（如 `|v| { (k, v) }` 的 k）→ E0507 cannot move out of
+- 根因: 非 move 闭包体引用外部非 Copy 变量时原样发射，借用移出
+- 修复: 新增 clone_noncopy_external / clone_noncopy_stmt，递归 clone 闭包体内的非 Copy 外部变量
+- 证据: dict_comprehension.lz 修前 E0507，修后 `{"a": 2, "b": 2}`
+
+### BUG-357 非 move 外层闭包内嵌套闭包 E0373 FIXED
+- 现象: `|k| { map(|v| (k, v)) }` → E0373 closure may outlive the current function, it borrows k
+- 根因: 外层闭包非 move（借用捕获），内层沿用非 move 会借用外层闭包的局部变量，
+  而外层闭包已返回（flat_map 的返回值由内层闭包持有）→ 悬垂借用
+- 修复: CodeGen 新增 parent_lambda_non_move 标志；外层非 move 时内层强制 move
+  （捕获 &T，Copy），体内 clone 出 T；并让 clone_noncopy_external 识别已 clone 的
+  MethodCall 不再重复包一层（避免 k.clone().clone()）
+- 证据: dict_comprehension.lz 生成 `flat_map(|k| { ...map(move |v| { (k.clone(), v) }) })`，
+  rustc 0 error，运行 `{"a": 2, "b": 2}`
+- 回归: TEMP/probe/sweep15 全量 114 支 baseline(HEAD=73f5305) 与 本树 均 82 OK/32 FAIL，
+  dict_comprehension.lz 由 FAIL(E0507)->OK，其余逐项一致，零回归

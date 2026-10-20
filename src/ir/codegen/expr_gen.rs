@@ -6111,7 +6111,6 @@ impl CodeGen {
                     // move 语义修复：继承当前函数名与引用计数表（同 BlockExpr 处理）
                     child.cur_fn_name = self.cur_fn_name.clone();
                     child.fn_use_count = self.fn_use_count.clone();
-                    child.gen_block_inner(block_ref);
                     // 闭包体内赋值外部捕获变量（iter.lz for_each `|x| total = total + x`）：
                     // 用借用捕获（非 move），否则 move 复制 total 副本，外部变量不更新
                     let mut uses_move = !block_has_external_assign(block_ref, &params);
@@ -6128,6 +6127,34 @@ impl CodeGen {
                     if uses_move && block_contains_nested_move_lambda(block_ref, &params) {
                         uses_move = false;
                     }
+                    // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
+                    // 借用外层闭包的局部变量（dict_comprehension.lz `|k| { ...map(|v| (k,v)) }`），
+                    // 而外层闭包已返回 → E0373。内层须强制 move（捕获 &T，Copy），
+                    // 体内 clone 出 T。
+                    if self.parent_lambda_non_move {
+                        uses_move = true;
+                    }
+                    // BUG-356：非 move 闭包体引用外层非 Copy 变量（如 `(k, v)` 的 k），
+                    // 递归 clone 所有非 Copy 外部变量，否则借用移出 E0507。
+                    // BUG-357：被外层非 move 强制成 move 的内层闭包同样需 clone——
+                    // move 捕获外层变量的引用（&T，Copy）后，体内须 clone 出 T。
+                    let gen_block: Block = if (!uses_move || self.parent_lambda_non_move)
+                        && block_contains_nested_move_lambda(block_ref, &params)
+                    {
+                        let mut nb = block_ref.clone();
+                        nb.stmts = nb
+                            .stmts
+                            .iter()
+                            .map(|s| clone_noncopy_stmt(s, &params))
+                            .collect();
+                        nb
+                    } else {
+                        block_ref.clone()
+                    };
+                    // 把「外层是否非 move」传给 child：child 生成嵌套 Lambda 时据此
+                    // 决定内层强制 move（BUG-357）。
+                    child.parent_lambda_non_move = !uses_move;
+                    child.gen_block_inner(&gen_block);
                     let move_kw = if uses_move { "move " } else { "" };
                     format!(
                         "{move_kw}|{}|{} {{\n{}        }}",
@@ -6150,11 +6177,51 @@ impl CodeGen {
                     if uses_move && expr_contains_nested_move_lambda(body, &params) {
                         uses_move = false;
                     }
+                    // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
+                    // 借用外层闭包的局部变量而外层已返回 → E0373。内层强制 move。
+                    if self.parent_lambda_non_move {
+                        uses_move = true;
+                    }
                     let move_kw = if uses_move { "move " } else { "" };
                     // 闭包体是裸外部变量（`|j| default`，非 Copy 类型）：
                     // move 闭包首次调用即移出 default，第二次调用 E0507。clone 到闭包体内
                     // `|j| default.clone()`（matrix.lz 列表推导嵌套）。
-                    let body_s = if matches!(&body.kind, ExprKind::Var(name)
+                    // BUG-356：非 move 闭包体引用外层非 Copy 变量（如 `(k, v)` 的 k），
+                    // 递归 clone 所有非 Copy 外部变量，否则借用移出 E0507。
+                    // 只要体内引用非 Copy 外部变量就 clone（含 BUG-357 强制 move 的情况）：
+                    // move 闭包捕获 &T（Copy），体内须 clone 出 T 才能使用。
+                    //
+                    // BUG-357：body_s 在行 5995 已按「当前闭包的父」生成，而本闭包是否为
+                    // move 此刻才定。若本闭包非 move，其体内嵌套 Lambda 须强制 move——
+                    // 用 child CodeGen（parent_lambda_non_move=true）重生成 body_s。
+                    let body_s = if !uses_move {
+                        let cloned = clone_noncopy_external(body, &params);
+                        let mut c = CodeGen::new();
+                        c.known_types = self.known_types.clone();
+                        c.str_typed_vars = self.str_typed_vars.clone();
+                        c.str_match_bindings = self.str_match_bindings.clone();
+                        c.ref_aliases = self.ref_aliases.clone();
+                        c.ref_write_through = self.ref_write_through.clone();
+                        c.type_aliases = self.type_aliases.clone();
+                        c.cur_fn_name = self.cur_fn_name.clone();
+                        c.fn_use_count = self.fn_use_count.clone();
+                        c.suppress_tail_return = true;
+                        c.parent_lambda_non_move = true;
+                        c.gen_expr(&cloned)
+                    } else if body_refs_noncopy_external(body, &params) {
+                        let cloned = clone_noncopy_external(body, &params);
+                        let mut c = CodeGen::new();
+                        c.known_types = self.known_types.clone();
+                        c.str_typed_vars = self.str_typed_vars.clone();
+                        c.str_match_bindings = self.str_match_bindings.clone();
+                        c.ref_aliases = self.ref_aliases.clone();
+                        c.ref_write_through = self.ref_write_through.clone();
+                        c.type_aliases = self.type_aliases.clone();
+                        c.cur_fn_name = self.cur_fn_name.clone();
+                        c.fn_use_count = self.fn_use_count.clone();
+                        c.suppress_tail_return = true;
+                        c.gen_expr(&cloned)
+                    } else if matches!(&body.kind, ExprKind::Var(name)
                         if !matches!(body.ty, IrType::Int | IrType::F64 | IrType::Bool)
                         && !params.iter().any(|p| p.split(':').next().unwrap_or(p) == name))
                     {
