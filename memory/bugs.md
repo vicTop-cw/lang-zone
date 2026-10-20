@@ -1465,3 +1465,17 @@ Fix (commit 5e3aa87): tests/cython_backend.rs 5 处补 `default: None`。
 
 ### FIXED(2026-10-20T19:20:12Z / BUG-378)
 - evidence: Commit 5e3aa87: tests/cython_backend.rs 5 处 Field { name, ty } 补 default: None。cargo test --workspace 编译通过，Gate 135/135/0。
+## BUG-379 [2026-10-20T19:32:53Z] [medium] FIXED
+- summary: duck_demo.lz / duck_soft.lz [parse-fail] Expected Indent, got Dot — BUG-373 `.` 续行规则误伤 duck 成员声明
+- detail: BUG-373 把「行首为 `.` 就跳过 handle_indent」当作续行规则，但 duck 声明 `duck HasName =\n    .name: str` 的 `.name` 是成员字段声明（新缩进块），不是方法链续行——之前被误判为续行导致缺 Indent，报 Parse error: Expected Indent, got Dot。
+
+影响：DEMO/02_types/duck_demo.lz 和 DEMO/02_types/duck_soft.lz 都无法编译。
+
+Fix (commit 0477fc3): src/lexer/lexer.rs —— 在 `.` 行首判断里，检查上一个非 Newline/Indent/Dedent token 是否是 `=`。若是（duck/struct 体以 `=` 结尾），则正常 handle_indent；否则按 BUG-373 跳过 indent（方法链续行）。
+
+验证：duck_demo.lz / duck_soft.lz 均编译成功；Gate 135/135/0；cargo test --workspace 全部通过（唯一剩 extractor_unapply.lz 在 KNOWN_RUSTC_FAILURES 豁免名单内）。
+
+
+
+### FIXED(2026-10-20T19:33:01Z / BUG-379)
+- evidence: Commit 0477fc3: src/lexer/lexer.rs `.` 行首判断——上一非空白 token 是 `=` 时正常 handle_indent（duck 体），否则跳过 indent（BUG-373 续行）。duck_demo.lz/duck_soft.lz 均编译成功。

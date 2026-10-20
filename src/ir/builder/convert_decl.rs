@@ -1916,10 +1916,14 @@ pub(crate) fn convert_struct(s: &ast::StructDef, ctx: &TypeCtx) -> Item {
     // 与声明类型不符 E0308（case struct 同病，见 recursive_struct.lz 回归）。
     // 无字段 struct（unit struct）无字段可提取，跳过。
     let has_case_decorator = s.decorators.iter().any(|d| d.name == "case");
+    // BUG-380：跳过合成须同时检查 magic_methods 与 methods——用户显式定义
+    // `def __unapply__(self) -> (int, int)` 走普通方法（methods），不在 magic_methods；
+    // 只查 magic_methods 会漏检导致合成两份同名方法 → E0592 duplicate definitions。
+    let user_has_unapply =
+        s.magic_methods.iter().any(|m| m.name == "__unapply__")
+            || s.methods.iter().any(|m| m.name == "__unapply__");
     let needs_unapply = (s.is_case || has_case_decorator)
-        || (!s.fields.is_empty()
-            && !struct_is_recursive(s)
-            && !s.magic_methods.iter().any(|m| m.name == "__unapply__"));
+        || (!s.fields.is_empty() && !struct_is_recursive(s) && !user_has_unapply);
     let s = if needs_unapply {
         let mut owned = s.clone();
         let mut methods = s.magic_methods.clone();
