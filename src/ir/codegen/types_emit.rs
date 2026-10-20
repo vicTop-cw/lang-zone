@@ -200,7 +200,11 @@ impl CodeGen {
             IrType::Tuple(items) => {
                 let inner: Vec<String> =
                     items.iter().map(|i| self.duck_sig_type(i, duck)).collect();
-                format!("({})", inner.join(", "))
+                if inner.len() == 1 {
+                    format!("({},)", inner.join(", "))
+                } else {
+                    format!("({})", inner.join(", "))
+                }
             }
             IrType::Ref(inner) => format!("&{}", self.duck_sig_type(inner, duck)),
             IrType::MutRef(inner) => format!("&mut {}", self.duck_sig_type(inner, duck)),
@@ -411,7 +415,12 @@ impl CodeGen {
             }
             IrType::Tuple(elems) => {
                 let elems: Vec<String> = elems.iter().map(|e| self.rust_type(e)).collect();
-                format!("({})", elems.join(", "))
+                if elems.len() == 1 {
+                    // 单元素元组类型 `(T,)`：Rust 必须有尾随逗号
+                    format!("({},)", elems.join(", "))
+                } else {
+                    format!("({})", elems.join(", "))
+                }
             }
             IrType::Fn { params, ret } => {
                 let params: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();

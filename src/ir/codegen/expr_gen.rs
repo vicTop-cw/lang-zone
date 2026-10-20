@@ -638,6 +638,20 @@ impl CodeGen {
                         }
                     }
                 }
+                // 小写 `list(...)`（非空参）是 List 类型别名构造：`list(1, 2)` → `vec![1, 2]`。
+                // 与 L2665 空参分支（`list()` → `Vec::new()`）对称；否则生成裸
+                // `list(...)` 调用 → E0425 cannot find function（build_block3.lz）。
+                if let ExprKind::Var(cn) = &callee.kind {
+                    if cn == "list"
+                        && !args.is_empty()
+                        && !self.fn_param_types.contains_key("list")
+                        && !self.fn_value_carriers.contains_key("list")
+                    {
+                        let elems: Vec<String> =
+                            args.iter().map(|a| self.gen_expr(a)).collect();
+                        return format!("vec![{}]", elems.join(", "));
+                    }
+                }
                 // 构造器调用 Rc(...)/Box(...)/Arc(...) → Rc::new(...)/Box::new(...)/Arc::new(...)
                 // （BUG-CONSTRUCTOR 修复，box.lz / magic_methods.lz）：直接调用语法与 MethodCall
                 // 路径 `Rc.new(x)` → `Rc::new(x)` 对称。否则 Rc 被当作未知外部函数生成
@@ -6910,6 +6924,10 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 let tail = match callee {
                     Some(callee_expr) => {
                         let callee_s = self.gen_expr(callee_expr);
+                        // 小写 `list`（List 类型别名构造）在生成器构建块中充当 callee：
+                        // `list *: yield (1,)` → 每包调用 `list(1)` 生成 `vec![1]`。
+                        // 否则 emit 裸 `list(__a0)` 调用 → E0425（build_block3.lz）。
+                        let list_ctor = callee_s == "list";
                         match &elem_ty {
                             IrType::Tuple(elems) => {
                                 let binds: Vec<String> =
@@ -6919,11 +6937,15 @@ child.struct_fields_info = self.struct_fields_info.clone();
                                 } else {
                                     format!("({})", binds.join(", "))
                                 };
+                                let call_s = if list_ctor {
+                                    format!("vec![{}]", binds.join(", "))
+                                } else {
+                                    format!("{}({})", callee_s, binds.join(", "))
+                                };
                                 format!(
-                                    "__bb.into_iter().map(move |__p| {{ let {} = __p; {}({}) }}).collect::<Vec<_>>()",
+                                    "__bb.into_iter().map(move |__p| {{ let {} = __p; {} }}).collect::<Vec<_>>()",
                                     pat,
-                                    callee_s,
-                                    binds.join(", ")
+                                    call_s
                                 )
                             }
                             IrType::Unit => format!(
@@ -7085,7 +7107,13 @@ child.struct_fields_info = self.struct_fields_info.clone();
                             s
                         })
                         .collect();
-                    format!("({})", elems.join(", "))
+                    if elems.len() == 1 {
+                        // 单元素元组 `(1,)`：Rust 必须带尾随逗号，否则 `(1i64)` 是
+                        // 括号化标量而非 1-元组（build_block3.lz E0308）。
+                        format!("({},)", elems.join(", "))
+                    } else {
+                        format!("({})", elems.join(", "))
+                    }
                 }
             }
             ExprKind::ListLit(elems) => {
