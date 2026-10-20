@@ -1356,3 +1356,15 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T17:16:12Z / BUG-369)
 - evidence: 提交 b281369 `fix(parser): trait/type generic square-bracket syntax + trait colon-opens-body`。src/parser/parser.rs 三处：① parse_trait 新增 LBrack 泛型参数分支（`trait Container[T]`，逗号分隔 + 可选 bound）；② supertrait 循环后 `=` 可选 —— 冒号已开缩进体时放行（`trait Container[T]:` 形态）；③ parse_type 新增 LBrack 泛型实参分支（`Iterator[int]`），Option/Result 特化，其余落 Generic。验证：trait_generic.lz / trait_generic2.lz（`trait Container[T]:` + `trait Container<T>:`）COMPILE OK；generator.lz parse-error 消除（仍剩 IR yield+ret semantic error）；探针门禁 116/100/16 → 116/102/14（+2 OK）。
+## BUG-370 [2026-10-20T17:21:49Z] [high] FIXED
+- summary: BUG-370: yield 守卫不认 Iterator<int> 返回类型 → generator 报「声明了返回类型但在函数体内使用 yield」
+- detail: `def gen() -> Iterator<int>` + yield body 被拒：「函数 gen 声明了返回类型但在函数体内使用 yield（yield 只允许用于无返回类型/iterator 的生成器）」。semantic_check.rs L670 守卫只豁免 `f.is_iterator`（由 `iterator` 关键字设置），不认返回类型为 `Iterator<T>`/`iterator` 的函数。
+
+修复（`c2b3776`）：新增 `ret_is_iterator` 判定 —— 返回类型为 `Named("Iterator"/"iterator")` 或 `Generic` 之 base 为二者时豁免，与 `is_iterator` 关键字路径同效。
+
+修复后 generator.lz / generator2.lz COMPILE OK，探针门禁 116/102/14 → 116/104/12。
+
+
+
+### FIXED(2026-10-20T17:21:57Z / BUG-370)
+- evidence: 提交 c2b3776 `fix(semantic): allow yield in function whose return type is Iterator[...]`。src/semantic_check.rs check_function：新增 `ret_is_iterator` 判定（返回类型为 Named("Iterator")/Named("iterator")，或 Generic 之 base 为二者），并在 yield 守卫 `cur.has_yield && f.return_type.is_some() && !f.is_iterator` 中加入 `&& !ret_is_iterator`。验证：generator.lz / generator2.lz（`def gen() -> Iterator<int>` + 三个 yield + `for v in gen(): print(v)`）COMPILE OK；探针门禁 116/102/14 → 116/104/12（+2 OK，无回归）。
