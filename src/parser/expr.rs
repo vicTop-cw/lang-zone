@@ -629,6 +629,11 @@ impl ParserExprExt for Parser {
                         Token::False => "False".to_string(),
                         // `.await()`：fut.await()（codegen 转 Rust 后缀 await 关键字）
                         Token::Await => "await".to_string(),
+                        // BUG-383：`and`/`or` 是布尔关键字，但 Option::and/or、
+                        // Result::and/or 是文档化方法（option.lz:107,123、
+                        // result.lz:141,157）。点号后语境无歧义，放行作方法名。
+                        Token::And => "and".to_string(),
+                        Token::Or => "or".to_string(),
                         // 元组索引访问 args.0 / args.1（type-pack 异质元组，03d §2.8 方案 B）
                         Token::IntLit(n) => n.to_string(),
                         t => return Err(format!("Expected field/method, got {:?}", t)),
@@ -1712,6 +1717,10 @@ impl ParserExprExt for Parser {
                     while !self.check(&Token::Pipe_) {
                         let n = match self.advance() {
                             Token::Ident(n) => n,
+                            // BUG-384：`|_|` 是文档化语法（06g-魔法综合.md:278
+                            // `f_filter: fn(T) -> bool = |_| True`），下划线占位
+                            // 作匿名参数名。
+                            Token::Underscore => "_".to_string(),
                             t => return Err(format!("Expected param, got {:?}", t)),
                         };
                         params.push(n);

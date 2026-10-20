@@ -1671,7 +1671,13 @@ impl CodeGen {
                                 let is_str = matches!(arg_ty, IrType::Str)
                                     || matches!(arg_ty, IrType::Named { path, .. }
                                         if path == "String" || path == "str");
-                                if is_str {
+                                // BUG-385：`for c in s.chars()` 中 c 的 IR 类型是 Str，
+                                // 但 Rust 实际是 char（str_loop_vars 登记）。`int(c)`
+                                // 对 char 应 `as i64`（字符码点），走 parse::<i64>()
+                                // → E0599 no method named `parse` found for char。
+                                let is_char_loop_var = matches!(&args[0].kind,
+                                    ExprKind::Var(name) if self.str_loop_vars.contains(name.as_str()));
+                                if is_str && !is_char_loop_var {
                                     format!("({}).parse::<i64>().unwrap()", args_s[0])
                                 } else {
                                     format!("({} as i64)", args_s[0])

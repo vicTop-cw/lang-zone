@@ -1520,3 +1520,29 @@ Fix: else 分支根据元素类型 is_copy_ty 判定，非 Copy 时补 .clone()�
 
 ### FIXED(2026-10-20T20:04:20Z / BUG-382)
 - evidence: Commit: src/ir/codegen/expr_gen.rs IndexGet else 分支按 is_copy_ty 判定补 .clone()。edge_ops.lz rustc 编译干净，matrix[0] 输出 [1, 2]。
+## BUG-383 [2026-10-20T20:21:01Z] [high] FIXED
+- summary: 解析器拒绝 .or()/.and() 方法名 — Option::or/and 文档化方法无法调用
+- detail: parser/expr.rs:625 点号后方法名只接受 Ident/MagicMethod/True/False/Await/IntLit，`or`/`and` 被当作布尔关键字拒收。但 option.lz:107,123 定义了 `Option::and()` / `Option::or()`，result.lz:141,157 定义了 `Result::and()` / `Result::or()`。
+
+Fix: 点号后语境无歧义，放行 Token::And → "and"、Token::Or → "or"。
+
+修复后 `none_val.or(Some(99))` 正常解析并编译。
+
+## BUG-384 [2026-10-20T20:21:08Z] [medium] FIXED
+- summary: 解析器拒绝 |_| 下划线匿名闭包参数 — 文档化语法
+- detail: parser/expr.rs:1718 闭包参数只接受 Token::Ident，`|_|` 下划线匿名参数被拒。但 06g-魔法综合.md:278 文档化 `f_filter: fn(T) -> bool = |_| True`。
+
+Fix: Token::Underscore → "_" 作为匿名参数名。
+
+## BUG-385 [2026-10-20T20:21:16Z] [medium] FIXED
+- summary: int(char 循环变量) 生成 .parse::<i64>() — char 无 parse 方法 → E0599
+- detail: expr_gen.rs int() 转换对 Str 类型生成 `.parse::<i64>().unwrap()`。但当变量来自 `for c in s.chars()` 时，IR 类型是 Str 但 Rust 实际是 char（str_loop_vars 已登记），`(c).parse::<i64>()` → E0599 no method named `parse` found for char。
+
+Fix: int 转换前检查 args[0].kind 是否是 str_loop_vars 中的 Var，是则 `as i64`（字符码点）。
+
+edge_char_int.lz 现正确输出 Some(42)/None。
+
+
+
+### FIXED(2026-10-20T20:21:23Z / BUG-383, BUG-384, BUG-385)
+- evidence: 三处修复：BUG-383 parser/expr.rs 点号后放行 And/Or 作方法名；BUG-384 parser/expr.rs 闭包参数放行 Underscore；BUG-385 expr_gen.rs int() 检查 str_loop_vars 对 char 生成 as i64。edge_char_int.lz/edge_chains.lz 编译干净，workspace 441 测试全绿，门控 135/135。
