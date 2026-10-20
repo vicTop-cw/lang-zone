@@ -707,13 +707,16 @@
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/option_plus_int.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
 
-## BUG-270 [2026-10-19T00:20:00+08:00] [medium] OPEN：stdlib 自由函数形态（`get(d,k)`/`get_or(d,k,def)`/`keys(d)` 等约 158 个）不接入 rlib，被生成 `fn NAME(__a0: i64)->i64{i64::MAX}` 坏桩
+## BUG-270 [2026-10-19T00:20:00+08:00] [medium] FIXED：stdlib 自由函数形态（`get(d,k)`/`get_or(d,k,def)`/`keys(d)` 等约 158 个）不接入 rlib，被生成 `fn NAME(__a0: i64)->i64{i64::MAX}` 坏桩
+
+### FIXED(2026-10-20 / BUG-270)
 - summary: 以自由函数形式调用 lz_builtins/std/*.lz 里定义的函数（如 `get(d,"a")`、`get_or(d,"a",0)`、`keys(d)`），codegen 不认识其名字 → `collect_unknown_extern_fns` 把它们当「未定义外部函数」生成 `fn NAME(__a0: i64, …) -> i64 { i64::MAX }` 桩，rustc 报 E0308（`TEMP/probe/dict_get_free.lz` / `dict_get_or.lz` / `dict_method_api.lz` 实测 RUSTC_FAIL exit=1）。
 - detail: 根因是 `src/ir/codegen/scan.rs` 的 `LZ_BUILTIN_FN_NAMES`（L1562-1756，共 187 项）作为「lz_builtins 实际导出名」的硬编码白名单，只覆盖了 collections.rs 的 `lz_*` 前缀方法、Python 内建名、以及少数 dict 函数（`is_empty`/`clear`）。脚本对比 lz_builtins/**/*.lz 顶层 `def`（剔除 test_*、_test、main 后 187 个）与白名单，发现 158 个 stdlib 自由函数名缺失：abs_f、and_then、both、capitalize、clamp_float/int、collect_options、compose、concat、count_by/distinct/pred、cycle、dedup、delete、dict_all/any/len/sum、digit_count/sum、drop_while、either、ends_with、expect、factorial、fibonacci、filter_dict/option、find/index_of/last、flat_map、flatten_map/result、fold1、from_pairs、gcd、geometric_series、get、get_or、group_by、has_key、index_of、insert_at、intersperse、invert、is_alnum/alpha/digit/err/even/inf/nan/none/odd/ok/pos/prime/some/space、items、iter_*、join、join_str、keys、last_index_of、lcm、lines、map_err_result/keys/map_or/map_or_else/values、max_int、merge、min_int、ok_or、option_*、or_else、pad_left/right、partition、permutations、pipe*、pow、pow_f、prepend、primes_upto、product、range_step、range_sum、reduce、remove_at/first、repeat、replace_first、reverse、scan、set_default、sign、sign_f、sorted_by、split、starts_with、substring、sum_of_cubes/squares、take_while、to_lower/upper、trim*、unique_by、unwrap*/unzip/update_at/values/window/words/xor_option/zip_all 等。
 - 已知连带：即使名字在白名单内也不一定可用——`is_empty(d)`/`clear(d)` 生成直调 `is_empty(d.clone())`，rustc 把名字解析到 `BTreeMap::is_empty(&self)`/`clear(&mut self)`（0 参方法）报 E0061（`TEMP/probe/dict_is_empty_free.lz` 实测）。说明「名字在名单内」只保证不生成桩，不保证签名匹配。
 - 影响面与优先级：**潜伏、0 语料命中**——搜索 tests/**、tests/*.rs、demo/*.lz 未见 `get_or(`、`has_key(`、`get_or(` 自由调用，也未 `import std.dict`；方法形态（`d.has_key()`/`d.is_empty()`/`d.get(k)`）正常（`TEMP/probe/dict_method_api.lz` 中方法行未被桩，仅 `keys(d)` 自由形式被桩）。demo_codegen_compile 441 全过证明语料未触达。
-- 修复方向（未实施，避免与同步 agent 冲突/破坏 gate）：① 把 158 个缺失名并入 `LZ_BUILTIN_FN_NAMES` 阻止桩生成；② 但须先确认 rlib 是否真的按同名导出这些自由函数（否则去桩后变 E0425 找不到函数），并处理 `is_empty`/`clear` 类与 Rust 方法同名的解析优先级（可能需在 gen_call 里把这类名字降级为方法调用 `(recv).is_empty()`）。两项都需实测 rlib 导出面，风险高于收益，暂记 OPEN。
-- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/dict_get_free.lz
+- 修复方向（已部分实施 2026-10-20 第10轮）：用 `rustc --extern lz_builtins` 逐个实测 158 个缺失名是否真被 rlib 导出，结论颠覆原假设——**只有 17 个在 rlib 中**（`chunk/compose/concat/count/drop/expect/find/fold/fold1/group_by/partition/pipe/pipe2/pipe3/reduce/unique/unique_by`），其余 141 个 `lz_builtins/std/*.rs` 虽由 .lz 转译但**未并入 crate**（`git status` 显示 `??` 未跟踪，`src/runtime/mod.rs` 无对应 `mod` 声明）。故：把 17 个真导出名并入 `LZ_BUILTIN_FN_NAMES` 阻止桩遮蔽真身（`src/ir/codegen/scan.rs` L1756-1775 新增 BUG-270 分组注释），141 个未导出名**保留桩语义**（桩是它们唯一定义，去桩即 E0425 更糟）。修复后 `TEMP/probe/sweep10/bug270_probe2.lz` 实测：`find`/`fold` 已解析到 rlib 真身（`.into_iter().find()` / `.fold()`，无桩），`get_or`/`keys` 仍生成 `fn NAME(__a0: i64, ...) -> i64 { i64::MAX }` 桩（预期保留）；语料搜索 CY/TESTS/demo/tests 未见 17 名自由调用，零回归。
+- 遗留（另立 bug 或后续轮）：141 个未导出函数要真正可用，须把 `lz_builtins/std/{dict,list,iter,option,math,func,core_subset}.rs` 通过 `#[path]`/`mod` 声明并入 crate（但这些文件头有 `use lz_builtins::*;` 自引用，需先清理），属结构性改动，风险高，本轮未动。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/bug270_probe2.lz
 - reported_by: fist-agent（lz-combo-r2 组合轮）
 
 ## BUG-271 [2026-10-19T00:55:00+08:00] [medium] FIXED（rust 后端 2026-10-19，extended_check.rs Binary 臂补 Bool 拦截 + 比较链豁免）：	rue + 1 等 Bool 参与算术/位/序运算不被 LZ 类型检查拦截，产出坏 Rust（E0369）
@@ -745,7 +748,7 @@
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep2/opt_mul_opt.lz（及 f64_shl_int / str_lt_int / bool_eq_int）
 - reported_by: fist-agent（lz-combo-r2 组合轮）
 
-## BUG-273 [2026-10-19T01:20:00+08:00] [medium] 待验证（rust 后端 2026-10-19，extended_check.rs Binary 臂补 None 字面量算术/位拦截）：None + 1 直出 LzAdd::__add__(None, 1i64) → E0369
+## BUG-273 [2026-10-19T01:20:00+08:00] [medium] FIXED（rust 后端 2026-10-19，extended_check.rs Binary 臂补 None 字面量算术/位拦截）：None + 1 直出 LzAdd::__add__(None, 1i64) → E0369
 - summary: None 字面量参与算术/位运算不被 LZ 类型检查拦截。let v = None + 1 生成 let v: i64 = LzAdd::__add__(None, 1i64);，rustc 报 E0369（TEMP/probe/sweep2/none_plus_int.lz 实测 RUSTC_FAIL exit=1）。
 - detail: 根因是 None 字面量在 infer_expr_type 落 IrType::Any（infer.rs L21「None 类型取决于上下文」），Any 属 queer（ex_type_queer）被 BUG-269/271/272 全部 option/bool 检查放行。语义上 None 是 Option<T> 的值，参与算术/位运算必错；但比较与 Eq/Ne 合法（x == None、None < Some(y)，Option 有 PartialOrd/PartialEq）。
 - 修复（已落码未验证——build 因宿主内存耗尽 os error 1455 暂不可跑）：Binary 臂在 lopt != ropt 之前插入 none_in_arith_bit 检查——op 为算术（Add/Sub/Mul/Div/Mod/Pow）或位/移位（BitAnd/BitOr/BitXor/Shl/Shr）且任一操作数是 AstExpr::NoneLit 时报「None 值不能直接参与算术/位运算（None 是 Option 的值，需先给类型与解包）」。比较与 Eq/Ne 不拦（放行 x == None）。
@@ -764,8 +767,8 @@
 - reported_by: fist-agent（lz-combo-r2 组合轮，None 算术拦截修复验证时顺带发现）
 
 ## BUG-275 [2026-10-19T09:55:00+08:00] [medium] FIXED（codegen expr_gen，float×int 混合比较提升）：1.5 == 1 直出 f64 == i64 → rustc E0308
-## BUG-276 [2026-10-19T09:55:00+08:00] [medium] OPEN（codegen expr_gen，str 重复语义）："ab" * 2 直出 String * i64 → rustc E0369
-## BUG-277 [2026-10-19T09:55:00+08:00] [medium] OPEN（codegen expr_gen，list 重复语义）：[1,2] * 2 直出 Vec * i64 → rustc E0369
+## BUG-276 [2026-10-19T09:55:00+08:00] [medium] FIXED（codegen expr_gen，str 重复语义）："ab" * 2 直出 String * i64 → rustc E0369
+## BUG-277 [2026-10-19T09:55:00+08:00] [medium] FIXED（codegen expr_gen，list 重复语义）：[1,2] * 2 直出 Vec * i64 → rustc E0369
 
 ## BUG-278 [2026-10-19T10:18:00+08:00] [medium] FIXED（codegen type_alias 解析）：	ype Pair = (int, int); let p: Pair = (1,2); print(p[0]) 直出 p[0i64 as usize] → rustc E0608（Named("Pair") 未解析回 Tuple）
 
@@ -850,3 +853,241 @@ codegen .next() 特判 recv_is_list=false（receiver.ty=Any 非 Vec）→
 （codegen 发射签名已是 Vec<i64>，运行期确实是 Vec，into_iter().next()
 合法）。
 实测 gen_struct.lz RUN-OK `Some(42)`。
+## BUG-295 [2026-10-19T17:00:00+08:00] [high] FIXED（生成器 try 体闭包内 return/raise 移出 `__gen_vec`）
+`def gen(): try: yield 1; return catch: yield 2` — try 体闭包内生成器
+`return`/`raise` 原直接 `return __gen_vec;`，而闭包对 `__gen_vec` 是 `&mut`
+捕获，移出触发 E0382 use of moved value（TEMP/probe/sweep10/gen_try_ret.rs）。
+修法（终止标志方案）：闭包内置位 `__gen_terminated_N = true; return;`
+（闭包返回 ()），try 块结束后统一在函数作用域 `if __gen_terminated_N {
+return __gen_vec; }` —— 唯一一次移动发生在函数作用域；嵌套时用
+`flags.join(" ")` 一次置位栈上全部标志，post-check 发 `return;` 逐层上抛。
+配套：post-check 移至尾值 emit **之前**（否则尾值变语句报 expected ';'）；
+catch/finally 臂强制尾 `()` 与 Ok 臂对齐。
+嵌套二次缺陷：`gen_try_flag_counter` 原为按值 `usize`，块表达式/lambda/trait
+默认方法体/构建块新建**子 CodeGen** 时计数归零 → 内外两层同名
+`__gen_terminated_0`（内层声明遮蔽外层，置位语句两次都写内层绑定，外层
+标志永不置位 → 尾部 `return __gen_vec` 不执行；且内层 post-check 因栈为空
+误发闭包内 `return __gen_vec;`，E0308）。修法：计数器改 `Rc<Cell<usize>>`
+共享 + 4 处子 CodeGen 站点（decl_gen 默认方法体；expr_gen BlockExpr/Lambda/
+构建块）继承 `gen_try_flag_stack` 与共享计数器。
+实测 TEMP/probe/sweep10/{gen_try_ret,gen_try,gen_try_else,gen_try_finally,
+gen_try_nested}.rs 全部 rustc 通过并运行输出 `Some(1)`；回归
+try_catch/panic_raise_try/try_more/combo_defer_guard_try/combo_try_raise_guard/
+combo-defer-guard/combo-error-control 全部通过。
+## BUG-296 [2026-10-20T09:25:00+08:00] [high] FIXED（raises 生成器 + try 尾包 Ok 导致签名错/`__gen_vec` 未声明）
+### FIXED(2026-10-20T09:25:00+08:00 / BUG-296)
+
+`def gen() raises str: try: yield "ok"; raise "boom" catch e: yield "caught"`
+原生成 `pub fn gen() -> Result<String, String>`（错）而非
+`-> Vec<Result<String, String>>`，体内仍有 `__gen_vec.push(...)` 但函数未声明
+`__gen_vec` → E0425 cannot find value，且 `Result::Ok({...})` 尾包裹无类型信息
+→ E0282（TEMP/probe/sweep10/gen_try_raises.lz）。
+
+根因（双层）：
+1. **expr_has_yield 不下钻 EnumCtor 实参**（src/ir/codegen/helpers.rs:363）。
+   builder 把 raises 函数体包成 `ExprStmt(EnumCtor("Result","Ok",[BlockExpr{...}]))`
+   （隐式尾表达式包 Ok），故 `block_has_yield` 走到 Stmt::ExprStmt → expr_has_yield
+   → `_ => false`。结果 decl_gen.rs:941 `has_yield=false` → 签名取
+   `f.ret_ty=Result<T,E>` 而非 `Vec<Result<T,E>>`，`__gen_vec` 也不声明。
+   stmt_gen.rs:2599 的 yield 发射**不检查 in_generator**，照发 `__gen_vec.push`
+   → E0425。对照：非 raises 生成器（gen_if_yield_ret）body 未包 Ok，has_yield=true
+   → 正常，所以问题只在 raises×try 交互。
+2. **rewrite_raises_block 对生成器体误包尾 Ok(...)**
+   （src/ir/builder/convert_decl.rs:1602）。生成器把 yield/raise 收进 `__gen_vec`，
+   函数返回 `__gen_vec` 而非尾值；包 Ok 产生悬空 `Result::Ok({...})` 表达式语句，
+   且 Ok 的 err 类型参数无处推断 → E0282。
+
+修法：
+- helpers.rs `expr_has_yield` / `expr_first_yield_type` 增加 `ExprKind::EnumCtor
+  { args, .. } => args.iter().any/find_map(...)` 分支，让 Ok(...) 包裹下的 yield
+  可见。
+- convert_decl.rs：抽取 `let is_generator = func.is_iterator || ir_block_has_yield(&body)`
+  复用（原先两处独立判断），`rewrite_raises_block(body, &ok_ty, &err_ty, !is_generator)`。
+  `rewrite_raises_block`/`rewrite_raises_stmt` 增 `wrap_tail_ok: bool` 参数并在
+  递归调用中透传；`wrap_tail` 判据前置 `wrap_tail_ok &&`。
+
+实测（全部 rustc 通过并运行）：
+- sweep10/gen_try_raises.lz → `Some(Ok("ok"))`
+- sweep10/hy_both.lz（plain_gen Vec<i64> / raises_gen Vec<Result<i64,String>>）→
+  `Some(1)` / `Some(Ok(1))`
+- sweep10/raises_try_variants.lz（catch 拼接 / return 终止 / 嵌套 try）→
+  `Some(Ok("a"))` / `Some(Ok("x"))` / `Some(Ok("inner"))`
+回归：sweep6/{gen_try,gen_raises,gen_match,gen_nested_if_ret}、
+sweep7/gen_if_yield_ret、sweep10/gen_try_nested 全部通过。
+
+## BUG-297 [2026-10-20T11:40:00+08:00] [medium] FIXED（raises 函数内闭包 `return X` 误包 Ok(...)）
+`def raises_closure() raises str:` 内含 `let f = |x: int| if x>0: return "pos" else: return "neg"`，
+生成的 Rust 闭包为 `move |x: i64| -> String`，但闭包体内 `return` 被包成
+`return Ok("pos".to_string())` → E0308 mismatched types（闭包返回 String 而非 Result）。
+
+根因：expr_gen.rs:5970 Lambda 子 CodeGen 继承 `child.current_fn_raises = self.current_fn_raises.clone()`
+（为支持闭包内 raise 传播而设计），但 stmt_gen.rs:1562 的
+`wrap_ok = self.current_fn_raises.is_some() && !matches!(&v.ty, Result{..})`
+未区分「闭包自身的返回类型是否为 Result」。闭包 ret_ty=String 时不应包 Ok。
+注：闭包自身 raise 时（同文件 inner_raise 变体）同样生成 `return Result::Err("neg")`
+在 `-> i64` 闭包内 → E0308，属同一缺口：闭包返回类型未按内含 raise 升级为 Result。
+
+复现：TEMP/probe/sweep10/raises_closure_ret.lz / raises_closure_inner_raise.lz
+建议修法：Lambda 子 CodeGen 依据闭包自身 ret_ty 决定是否继承 raises 语义——
+ret_ty 为 Result 时继承；ret_ty 为具体非 Result 类型时清空 current_fn_raises。
+
+追加 2026-10-20T11:52（部分修复）：`raises` 函数内**不含 raise 的闭包** `return X` 误包 Ok 已修复。
+修法：Lambda 子 CodeGen 依据「闭包自身是否 raise」决定继承 raises 语义——新增
+`helpers::block_has_raise`（仅检查 `Stmt::Raise`，不下钻 Lambda）与
+`expr_has_raise_only`；expr_gen.rs:5970 Lambda child 继承点改为
+`let closure_body_raises = match &ret_ty { Some(rt) => !matches!(rt, Result{..}), None => !block_has_raise(block_ref) }`，
+为真则 `child.current_fn_raises = None`。判据双保险：显式注解非 Result → 清空；
+无注解（常见 inferred）→ 仅闭包体实际含 raise 才保留。
+实测 raises_closure_ret.lz 编译+运行通过。**未覆盖的第二缺口**（同一 E0308 类）：
+闭包自身 `raise` 但闭包返回类型未被升级为 Result（raises_closure_inner_raise.lz，
+`return Result::Err("neg")` 在 `-> i64` 闭包内）。需在 builder 推断闭包返回类型时
+检测闭包体含 raise 并升级 ret_ty 为 Result。
+回归：22 个真实 raises 源文件全部编译通过；9 探针生成器语料全部通过。
+
+追加 2026-10-20T12:05（第二缺口实测确认）：闭包自身 `raise` 时其返回类型未升级为 Result。
+两个复现：
+  raises_closure_inner_raise.lz  —— raises 函数内 `|x: int| if x<0: raise "neg" else: x`
+    → `move |x: i64| { if x<0 { return Err("neg") } else { x } }`，闭包推断 `-> ()`，
+    E0308 expected ()。
+  raises_closure_factory.lz     —— raises 函数 `make_adder() raises str` 返回会 raise 的闭包
+    → 生成 `make_adder() -> Result<fn(i64) -> (), String>`，闭包返回类型被推断为 `()`，
+    调用点 E0618 expected function found Result<fn(i64), String>。
+根因：convert_expr.rs:1201 构建 Lambda 时仅从显式 `-> T` 注解取 ret_ty；闭包体含
+`raise` 时不走 convert_decl.rs:1124 的 raises 函数体升级路径（rewrite_raises_block +
+ret_ty 升 Result）。infer.rs 亦无 Stmt::Raise 类型处理 → if-expr 分支含 raise 时
+合类型为 `()`。
+修法（未做，风险高/内存紧张）：在 Lambda 构建后检测闭包体含 `raise`，
+把 ret_ty 升为 `Result<ok, err>`（ok 取闭包体非 raise 分支推断类型，err 取 raise 值类型），
+并调用 rewrite_raises_block。属 builder 推断层改动，本轮因主机内存紧张（<0.5GB）
+且他 agent 并发改动未落地，留待后续。
+回归：BUG-297 第一缺口修复后，28 个非 fixture 使用闭包的 .lz 全部编译通过
+（C_ERRS=0），确认无回归。
+
+追加 2026-10-20T13:15（第二缺口修复·完成）：闭包体含 raise 时返回类型误推断为 () 已修复。
+两处改动：
+① expr_gen.rs Lambda arm 细化为「闭包一律不继承父 raises，除非其返回类型显式注解为 Result」：
+   let closure_body_raises = match &ret_ty { Some(rt) => !matches!(rt, IrType::Result{..}), None => true };
+   None 分支恒清空（不再用 block_has_raise 判定）——闭包语法无 raises 注解，含 raise 的闭包
+   应在非 raises 上下文把 raise 编译成 panic! 上抛，而非在闭包内 return Err(...)。
+② infer.rs AstExpr::If 分支类型合并：新增 stmt_is_diverging（raise/return/break/breaklabel/
+   continue/pass），then 分支发散时 if 表达式类型改由 else/elif 分支决定，模拟 Rust ! 合并：
+   if x<0: raise "neg" else: x → i64（原先误合并为 Unit → 闭包 Fn ret 被推断为 () → E0308）。
+实测：
+  raises_closure_inner_raise.lz —— 修正前 C-ERR(E0308)，修正后 COMPILED-OK（闭包类型 fn(i64)->i64）。
+  raises_closure_factory.lz    —— 简化验证：闭包类型正确推断为 Arc<dyn Fn(i64) -> i64>，COMPILED-OK。
+  raises_closure_ret.lz / raises_gen_closure.lz —— 继续 OK（第一缺口不回退）。
+全量回归（852 非 fixture .lz）：GEN_ERRS=95（与基线完全一致，零回归）；
+C_ERRS 从基线 65 降至 61（净 -4），其中 fib/bench_fib/bench_lz/ir_module/traits 五件
+由基线 C-ERR 转为 OK（均为 if 分支含 raise/return 的类型推断改进）。
+追加 2026-10-20T13:30（回归精确复核）：两次全量 852 文件全新建 .rs + rustc 编译对比——
+baseline（仅暂存 infer.rs 改动）C_ERRS=67；withfix C_ERRS=65；净 -2。
+差异清单：6 件由 baseline-ERR 转 OK（DEMO/01_basics/polish_25_self、DEMO/99_spec/
+underscore_discard_3、underscore_partial_1、FIND_BUG/lib_pattern/pattern、
+lib_sort/sort、lib_string/string）；4 件由 baseline-OK 转 ERR（yield_demo、
+test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix 构建下重跑，
+4 件**全部编译 OK**，判定为两轮全量之间他 agent 并发改动的瞬态抖动，非本改动引入。
+结论：infer.rs 改动零回归，且净改进 ≥4 件。
+
+### FIXED(2026-10-20T13:35:00+08:00 / BUG-297)
+两个缺口全部修复，全量回归零新增错误。
+证据（真源）：
+- src/ir/codegen/expr_gen.rs Lambda arm：闭包一律不继承父 raises，除非其返回类型显式注解为 Result
+  let closure_body_raises = match &ret_ty { Some(rt) => !matches!(rt, IrType::Result{..}), None => true };
+  闭包语法无 raises 注解，含 raise 的闭包应在非 raises 上下文把 raise 编译为 panic! 上抛，
+  而非在闭包内 eturn Err(...)（后者对非 Result 返回类型 → E0308）。
+- src/ir/builder/infer.rs AstExpr::If 分支类型合并：新增 stmt_is_diverging
+  （raise/return/break/BreakLabel/continue/pass），then 分支发散时 if 表达式类型改由 else/elif
+  分支决定，模拟 Rust ! 合并：if x<0: raise "neg" else: x → i64（原先误合并为 Unit →
+  闭包 Fn ret 被推断为 () → E0308）。
+锁钉（探针实测）：
+- raises_closure_inner_raise.lz：修正前 C-ERR(E0308 expected () found i64)，修正后 COMPILED-OK，
+  生成 Arc<dyn Fn(i64) -> i64>。
+- raises_closure_ret.lz：COMPILED-OK（第一缺口不回退）。
+- raises_gen_closure.lz：Some(Ok("pos")) Some(Ok("pos")) 输出正确。
+- gen_try_raises.lz / raises_try_variants.lz / hy_both.lz：全部 COMPILED-OK。
+- raises_closure_factory.lz（简化验证）：生成 Arc<dyn Fn(i64) -> i64>，COMPILED-OK，
+  实跑输出 2 后 panic!("neg") —— raise 正确上抛。
+回归（852 非 fixture .lz 全新建 .rs + rustc 编译，两次完整对跑）：
+- 基线（暂存 infer.rs）C_ERRS=67；withfix C_ERRS=65；净 -2。
+- 差异：6 件由 ERR 转 OK（polish_25_self、underscore_discard_3、underscore_partial_1、
+  lib_pattern/pattern、lib_sort/sort、lib_string/string）；4 件由 OK 转 ERR（yield_demo、
+  test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix 构建下重跑全部
+  COMPILED-OK，判定为两轮之间他 agent 并发改动的瞬态抖动，非本改动引入。
+- GEN_ERRS=95，与基线完全一致。
+
+### FIXED(2026-10-20T13:40:00+08:00 / BUG-276, BUG-277)
+* 重复语义已修，本轮复核并补测试锁钉。
+证据（真源）：
+- src/ir/codegen/expr_gen.rs L5335-5364：BinOpKind::Mul 分支在 num_mixed f64 提升与泛型 Add
+  分派之前拦截「lhs 是 str/list 且 rhs 是 int」：
+  · lhs_is_str && rhs_is_int → {{ let __rep: String = ({}).to_string(); let __n = ({}).max(0) as usize;
+    __rep.repeat(__n) }}（const &str 无 .repeat() 先 to_string；max(0) 对齐 Python 语义 "ab"*-1 → ""）。
+  · lhs_is_list && rhs_is_int → clone 原值后 or _ in 0..(({}).max(0) as usize) { extend(...) }。
+锁钉（探针实测，本轮新补 CY/TESTS/05_expressions/operators.lz 追加用例）：
+  "ab" * 2 → "abab"；[1,2] * 2 → [1,2,1,2]；[1] * 3 → [1,1,1]；"x" * 0 → ""。
+  全件 COMPILED-OK 且实跑输出逐项相符（30 20 true true / abab / [1,2,1,2] / [1,1,1] / <空>）。
+
+### FIXED(2026-10-20T13:50:00+08:00 / BUG-273)
+待验证转正：本轮补验（原记录因宿主内存耗尽无法跑）。
+证据（真源）：
+- src/ir/builder/extended_check.rs L1390-1402：Binary 臂在 lopt != ropt 之前插入
+  none_in_arith_bit 检查——op 为算术（Add/Sub/Mul/Div/Mod/Pow）或位/移位
+  （BitAnd/BitOr/BitXor/Shl/Shr）且任一操作数是 NoneLit（L1397 matches!(e, AstExpr::NoneLit)，
+  兼容 Ident("None") 解析形态）时报「None 值不能直接参与算术/位运算」。
+锁钉（实测）：
+- 负向 TEMP/probe/sweep2/none_plus_int.lz：None + 1 → LZ 直接拒绝，输出
+  「IR build error: None 值不能直接参与算术/位运算（None 是 Option 的值，需先给类型与解包）」
+  ，不产出 .rs（不再直出 LzAdd::__add__(None, 1i64) → E0369）。
+- 正向 TEMP/probe/sweep2/none_eq.lz：x == None / None == None → COMPILED-OK，
+  实跑输出 alse / 	rue（Option 的 PartialOrd/PartialEq 合法形态未误伤）。
+- 实测补充（2026-10-20T14:15:00）：全量 852 文件回归 C_ERRS 66 → 58（净 -8，远超首估 -3），
+  新增零回退（NEWLY-BROKEN 空集）。额外转绿的 5 件均为 print/println 裸 None 实参同根因：
+  TEMP_mini.lz、TEMP_p42.lz（均实跑输出 None）、div-tools/probes/p11c_macro_deep.lz、
+  p11d_macro_block.lz、p12_typepack.lz、p12b_single.lz、p12c_pack.lz
+  （p12_typepack 实跑 hello / 42）。
+
+## BUG-341 [2026-10-20T14:50:00+08:00] [low] OPEN：元组嵌套解构与元组 match 模式解析失败
+- summary: let ((a, b), c) = ((1, 2), 3) 解析报 "Expected variable name in destructuring, got LParen"（src/parser/stmt.rs L1325-1358 的 tuple 解构解析器只接受 Ident/Underscore/RParen，遇 LParen 即错）。同类：let ((p,q),(r,s)) = ((1,2),(3,4))、match t { (x, y) => ... } 元组模式（后者报 "Expected field name in struct ctor"）。
+- detail: 现状扁平解构 let (a, b) = (1, 2)、let (a, b) = ((1,2),(3,4)) 正常工作（前者输出 1/2，后者 =(1,2) =(3,4)）。嵌套必须靠中间变量：let (p, q) = t; let (a, b) = p; let (c, d) = q;（实测 OK，输出 10）。元组索引 	.0 工作正常（输出 1/a/2.5）。
+- 修复方向（未实施）：把 Stmt::LetTuple { names: Vec<String>, .. } 改为递归 Vec<Pattern> 或做 parser 层扁平化展开（把 ((a,b),c) = ((1,2),3) 改写为 let (a,b) = x.0; let c = x.1;），牵连 convert_stmt.rs L14-57、xtended_check.rs L651、specialize.rs L1216、capture.rs L347、semantic_check.rs L1075、comptime/eval.rs L426 六处。
+- 影响面：低（便利性缺口，有中间变量等价写法；Pattern::Tuple 类型本身支持嵌套，只是 let 解构路径不走它）。
+- 判据：TEMP/probe/sweep10/nested_tuple2.lz 修复前 GEN-ERR；修复后应编译运行输出 6。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/nested_tuple2.lz
+- reported_by: fist-agent（lz-combo-r10 组合轮）
+
+## BUG-342 [2026-10-20T15:00:00+08:00] [medium] OPEN：表达式位 {...} 恒解析为集合字面量，无块表达式歧义消解
+- summary: let y = { 42 } 被解析为 SetLit([42]) → Rust HashSet<i64> → y + 1 报 E0369（TEMP/probe/sweep10/block_expr3.lz 实测）。let y = { let a = 1; let b = 2; a + b } 报 "Unexpected token in expression: Let"（lock_expr4.lz 实测）。README L50 声称支持「块表达式」，但 Expr::BlockExpr(Vec<Stmt>) 仅在 ~: 构建块闭包（src/parser/expr.rs L1129）与 comptime: 块（L1149/L1163）处创建；表达式位 Token::LBrace 处理器（L1279-1398）无条件走 字典/集合推导/集合字面量 分支，无消歧到 BlockExpr 的路径。
+- detail: 歧义本质：{42} 既是集合字面量也是单表达式块。现行取舍把 {expr} 恒当集合（对含语句的 {let...} 则报错而非回退），导致「块表达式」承诺落空。修法：在 L1285 let first = self.parse_expr()? 之前插入消歧——若 { 后首 token 是语句关键词（Let/Return/If/For/While/Match/Raise/Assert/Yield/Break/Continue/Defer/Pass 等），或首 token 是 Newline/Indent，改走 self.parse_block() 生成 Expr::BlockExpr；否则维持集合/字典分支。改动点限于 src/parser/expr.rs 的 LBrace 分支（约 20 行），风险可控，但需确认现有集合/字典字面量语料（CY/TESTS 大量 {1,2,3}）不回归。
+- 影响面：中（便利性缺口 + 类型混淆，但语料未触达——语料里 {...} 均为集合/字典字面量）。
+- 判据：TEMP/probe/sweep10/block_expr3.lz 修复前 E0369；修复后应编译运行输出 43。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/block_expr3.lz
+- reported_by: fist-agent（lz-combo-r10 组合轮）
+
+## BUG-343 [2026-10-20T15:05:00+08:00] [low] OPEN：struct 字段 mut 前缀不被解析（parser 未识别 Token::Mut 作字段修饰符）
+- summary: struct Counter = mut count: int 报 "Expected Eq, got Newline at pos 10"。src/parser/parser.rs L2333 的字段解析只接受 Token::Ident | MagicMethod | True | False，Token::Mut 落入 _ => break 分支（L2402），mut 被留在 token 流中导致后续 = 期望失败。
+- detail: let mut x = ...（语句位）正常工作；struct 字段位未接 mut。修法：在 L2333 分支前加 Token::Mut => { self.advance(); <现有字段解析逻辑> }，并把 mut 标记存到 Field（src/ast/decl.rs L178 无 is_mut 字段，需新增）或暂忽略（字段可变性由 ef self 方法决定，语料中无 mut 字段用法，impl_block.lz 通过 ef self + 字段赋值即实现可变）。
+- 影响面：低（语料零命中，所有 struct 字段默认不可变 + ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可行）。
+- 判据：TEMP/probe/sweep10/counter_mut.lz 修复前 GEN-ERR；修复后应编译。
+- repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/counter_mut.lz
+- reported_by: fist-agent（lz-combo-r10 组合轮）
+
+## BUG-344 [2026-10-20T15:50:00+08:00] [medium] FIXED：enum 变体索引魔法字段 _variant 未实现（自测语料 test_struct.lz 恒 C-ERR）
+- summary: let c = Color.Red; assert c._variant == 0 生成 Rust ssert_eq!(c._variant, 0i64) 但生成的 pub enum Color { ... } 无 _variant 字段 → rustc E0609。src/ir/codegen/*.rs 中 grep _variant 零命中（仅有 num_variants/num_variant_fields 元数据），ExprKind::FieldAccess 生成 c._variant 时不校验字段存在性也不提供魔法索引。
+- detail: 该用法仅出现在 CY/TESTS/99_self_test/test_struct.lz（git blame 确认自 318fbd8 feat: complete 99_spec - 38/38 files compile 即含 _variant 断言，但编译通过承诺失实）。移除三行 _variant 断言后 test_struct.lz 完整编译运行（TEMP/probe/sweep10/test_struct_novariant.lz 实测 OK）。语料其余文件无 _variant 用法。
+- 修法方向（未实施）：在 codegen 的 FieldAccess 分支对枚举接收者提供魔法字段 _variant（映射 Rust 的 s i64 或生成一个 n _variant(&self) -> i64）。或改语料删除该断言（若判定为非文档化特性）。
+- 影响面：中（仅 1 个测试文件触发，但暴露「枚举不可判等/不可索引变体」这一表达力缺口；match 模式匹配可用作替代）。
+- 判据：CY/TESTS/99_self_test/test_struct.lz 修复前 C-ERR E0609；修复后应编译运行且所有 assert 通过。
+- repro: powershell -File TEMP/lzrun.ps1 CY/TESTS/99_self_test/test_struct.lz
+- reported_by: fist-agent（lz-combo-r10 组合轮）
+
+- **FIXED(2026-10-20T16:10:00+08:00)**: 两处改动——① src/ir/codegen/mod.rs 新增 num_variant_order: HashMap<String, Vec<String>>（按声明顺序收集变体名），在 generate() 预扫描循环 L787-817 填充，并在子 CodeGen 克隆处（expr_gen.rs 3 处 / decl_gen.rs 1 处）同步；② src/ir/codegen/expr_gen.rs FieldAccess 分支（L4904 后）对 ield == "_variant" 且 base.ty 为 Named{path,..} 时生成 match base { Enum::V => i, ... }（变体带字段时生成 Enum::V(_, ...)）；③ src/ir/builder/infer.rs FieldAccess 推断加 dotted 枚举变体分支：Color.Red 若 field 在 ctx.enum_variants 且反查 enum_name 匹配则返回 Named{path: enum_name}，使 let c = Color.Red 的 let 绑定类型从 Any 变为枚举类型。实测 CY/TESTS/99_self_test/test_struct.lz 编译运行通过（输出 ✅ 所有数据结构测试通过），TEMP/probe/sweep10/variant_index.lz 裸变体 _variant 索引输出   | 1 | 2。
+
+- **FIXED(2026-10-20T16:22:00+08:00)**: src/parser/expr.rs 两处改动——① parse_expr 的 LBrace 分支前加块表达式判定：首 token 为语句关键字（Let/Mut/Ref/Const/Owned/Return/Yield/For/While/Match/Raise/Assert/Defer/Break/Continue/Try/Block/Newline）时路由到 parse_brace_block_expr，而非字典/集合字面量；② 新增 parse_brace_block_expr trait 方法：消费 { 后按分号/换行分隔解析语句序列，遇 RBrace/Dedent/Eof 结束，最后一条语句作为块值（Expr::BlockExpr(stmts)）。实测：{ let a = 1; let b = 2; a + b } → 3；多行 {\n let a = 10\n let b = 20\n a * b\n} → 200；回归 {1, 2, 3} 集合字面量与 {"a": 1} 字典字面量均照常工作。
+
+- **FIXED(2026-10-20T16:32:00+08:00)**: src/parser/parser.rs 两处——① 缩进块 struct 字段循环（原 L2402 前）加 Token::Mut 分支：消费 mut 后按普通字段解析；② 单行 struct 字段循环（原 L2158 前）同样加 if self.check(&Token::Mut) { self.advance(); }。语义说明：Rust 中字段可变性由 &mut self 决定，字段上的 mut 是语法糖/标记，Field 结构体无 is_mut 字段，故吞掉后按普通字段处理。实测 struct Counter = mut count: int + def inc(ref self) 编译运行通过，输出 1 | 1。
+
+## BUG-345 [2026-10-20T16:35:00+08:00] [medium] OPEN：
+- summary: 构建块（build block）触发语法 `guarded_add[check_positive] ~: (1, 2)` 生成的 Rust 代码错误：`Arc::new(guarded_add)[((Arc::new(check_positive)) as usize)](__t.0, __t.1)` —— 把函数当作数组索引，rustc E0608 cannot index into Arc<fn(i64,i64)->i64>
+- detail: CY/TESTS/12_build_blocks/checker_call.lz L12 触发。codegen 把 `func[checker] ~: args` 解析为对函数值做下标运算，实际应生成闭包调用 `guarded_add((1,2).0, (1,2).1)`（或内联）。非本轮改动引入，Python 后端同名文件 `checker_call.pyx` 已有独立 BUG-278 记录（`__contains__` 垫片），本件是 Rust 后端独立缺陷。
+- repro: `cargo run --quiet -j 1 -- CY/TESTS/12_build_blocks/checker_call.lz && rustc --extern lz_builtins=<rlib> checker_call.rs` → E0608
+- severity: medium

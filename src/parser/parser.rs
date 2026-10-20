@@ -2156,6 +2156,10 @@ impl Parser {
                 && !self.check(&Token::Eof)
             {
                 loop {
+                    // BUG-343：单行 struct 也允许 `mut` 字段前缀
+                    if self.check(&Token::Mut) {
+                        self.advance();
+                    }
                     let f_name = match self.advance() {
                         Token::Ident(n) => n,
                         t => {
@@ -2387,6 +2391,34 @@ impl Parser {
                     } else {
                         Type::Unit // unit variant, no type
                     };
+                    let default = if self.check(&Token::Eq) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    fields.push(Field {
+                        name: f_name,
+                        ty: f_type,
+                        default,
+                    });
+                }
+                // BUG-343：struct 字段声明允许 `mut` 前缀（`mut count: int`）。
+                // Rust 中字段可变性由 `&mut self` 决定，字段上的 `mut` 是语法糖/标记，
+                // 这里吞掉 `mut` 后按普通字段解析（Field 无 is_mut 字段）。
+                Token::Mut => {
+                    self.advance(); // consume `mut`
+                    let f_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "Expected field name after `mut`, got {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    self.expect(Token::Colon)?;
+                    let f_type = self.parse_type()?;
                     let default = if self.check(&Token::Eq) {
                         self.advance();
                         Some(self.parse_expr()?)

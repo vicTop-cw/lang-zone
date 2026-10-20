@@ -1110,7 +1110,8 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     // iterator 体内 return 等价 raise（08-生成器.md：终止迭代并抛出）
     // codegen 将 Stmt::Raise 生成 panic!，因此把带值 return 转成 raise
     // 判断条件：is_iterator 标志 或 body 实际含 yield（更可靠，覆盖标志缺失）
-    let body = if func.is_iterator || ir_block_has_yield(&body) {
+    let is_generator = func.is_iterator || ir_block_has_yield(&body);
+    let body = if is_generator {
         let mut b = body;
         rewrite_iterator_returns(&mut b);
         b
@@ -1132,7 +1133,7 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
             .as_ref()
             .map(from_ast_type)
             .unwrap_or_else(|| ret_ty.clone());
-        rewrite_raises_block(body, &ok_ty, &err_ty)
+        rewrite_raises_block(body, &ok_ty, &err_ty, !is_generator)
     } else {
         body
     };
@@ -1519,7 +1520,12 @@ pub(crate) fn wrap_ok(e: Expr, ok: &IrType, err: &IrType) -> Expr {
     )
 }
 
-pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt {
+pub(crate) fn rewrite_raises_stmt(
+    stmt: Stmt,
+    ok: &IrType,
+    err: &IrType,
+    wrap_tail_ok: bool,
+) -> Stmt {
     match stmt {
         Stmt::Return { value: Some(e) } => Stmt::Return {
             value: Some(wrap_ok(e, ok, err)),
@@ -1534,8 +1540,8 @@ pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt
             else_branch,
         } => Stmt::If {
             cond,
-            then_branch: rewrite_raises_block(then_branch, ok, err),
-            else_branch: else_branch.map(|b| rewrite_raises_block(b, ok, err)),
+            then_branch: rewrite_raises_block(then_branch, ok, err, wrap_tail_ok),
+            else_branch: else_branch.map(|b| rewrite_raises_block(b, ok, err, wrap_tail_ok)),
         },
         Stmt::For {
             var,
@@ -1547,8 +1553,8 @@ pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt
             var,
             iter,
             guard,
-            body: rewrite_raises_block(body, ok, err),
-            else_body: else_body.map(|b| rewrite_raises_block(b, ok, err)),
+            body: rewrite_raises_block(body, ok, err, wrap_tail_ok),
+            else_body: else_body.map(|b| rewrite_raises_block(b, ok, err, wrap_tail_ok)),
         },
         Stmt::While {
             cond,
@@ -1558,8 +1564,8 @@ pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt
         } => Stmt::While {
             cond,
             guard,
-            body: rewrite_raises_block(body, ok, err),
-            else_body: else_body.map(|b| rewrite_raises_block(b, ok, err)),
+            body: rewrite_raises_block(body, ok, err, wrap_tail_ok),
+            else_body: else_body.map(|b| rewrite_raises_block(b, ok, err, wrap_tail_ok)),
         },
         Stmt::WhileLet {
             pattern,
@@ -1570,14 +1576,14 @@ pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt
             pattern,
             expr,
             guard,
-            body: rewrite_raises_block(body, ok, err),
+            body: rewrite_raises_block(body, ok, err, wrap_tail_ok),
         },
         Stmt::Match { scrutinee, arms } => Stmt::Match {
             scrutinee,
             arms: arms
                 .into_iter()
                 .map(|mut a| {
-                    a.body = rewrite_raises_block(a.body, ok, err);
+                    a.body = rewrite_raises_block(a.body, ok, err, wrap_tail_ok);
                     a
                 })
                 .collect(),
@@ -1591,6 +1597,7 @@ pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt
                 },
                 ok,
                 err,
+                wrap_tail_ok,
             )
             .stmts,
         },
@@ -1599,13 +1606,22 @@ pub(crate) fn rewrite_raises_stmt(stmt: Stmt, ok: &IrType, err: &IrType) -> Stmt
     }
 }
 
-pub(crate) fn rewrite_raises_block(mut block: Block, ok: &IrType, err: &IrType) -> Block {
+pub(crate) fn rewrite_raises_block(
+    mut block: Block,
+    ok: &IrType,
+    err: &IrType,
+    wrap_tail_ok: bool,
+) -> Block {
     // 仅当尾语句是裸表达式且其类型尚非 Result 时，包 Ok(...)。
     // 若尾表达式已因 raise→Err / callee 返回 Result 而本身是 Result，则不再重复包裹。
-    let wrap_tail = match block.stmts.last() {
-        Some(Stmt::ExprStmt { expr }) => !matches!(expr.ty, IrType::Result { .. } | IrType::Unit),
-        _ => false,
-    };
+    // wrap_tail_ok=false（生成器体）：生成器把 yield/raise 收进 __gen_vec，函数返回
+    // __gen_vec 而非尾值，包 Ok(...) 会产生悬空 `Result::Ok({...})` 表达式语句且
+    // 无类型信息可推断（E0282）——故生成器跳过尾包裹。
+    let wrap_tail = wrap_tail_ok
+        && match block.stmts.last() {
+            Some(Stmt::ExprStmt { expr }) => !matches!(expr.ty, IrType::Result { .. } | IrType::Unit),
+            _ => false,
+        };
     if wrap_tail {
         if let Some(Stmt::ExprStmt { expr }) = block.stmts.pop() {
             block.stmts.push(Stmt::ExprStmt {
@@ -1616,7 +1632,7 @@ pub(crate) fn rewrite_raises_block(mut block: Block, ok: &IrType, err: &IrType) 
     block.stmts = block
         .stmts
         .into_iter()
-        .map(|s| rewrite_raises_stmt(s, ok, err))
+        .map(|s| rewrite_raises_stmt(s, ok, err, wrap_tail_ok))
         .collect();
     block
 }

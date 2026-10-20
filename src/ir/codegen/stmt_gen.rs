@@ -3,6 +3,7 @@
 
 use super::types_emit::is_bigint_ty;
 use super::types_emit::is_complex_ty;
+use super::helpers::block_has_raise_or_return;
 use super::helpers::collect_pattern_bindings;
 use super::owned_local;
 use super::*;
@@ -1527,7 +1528,24 @@ impl CodeGen {
                     // iterator 体内 return 等价 raise：
                     // - raises 生成器：把 Err 压入收集 Vec 并提前返回（签名 Vec<Result<T,E>>）
                     // - 非 raises 生成器：保持 panic!（catch_unwind 捕获）
-                    if self.current_fn_raises.is_some() {
+                    //
+                    // BUG-295：位于生成器 try 体闭包内时，不能 `return __gen_vec;`
+                    // （被闭包 &mut 捕获 → E0382）。改置位整条终止标志栈并 `return;`
+                    // （闭包返回 ()），由各层 try 块后的标志检查统一 `return __gen_vec;`。
+                    if !self.gen_try_flag_stack.is_empty() {
+                        if self.current_fn_raises.is_some() {
+                            if let Some(v) = value {
+                                self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(v)));
+                            }
+                        }
+                        let flags: Vec<String> = self
+                            .gen_try_flag_stack
+                            .iter()
+                            .map(|f| format!("{} = true;", f))
+                            .collect();
+                        self.emit_line(&flags.join(" "));
+                        self.emit_line("return;");
+                    } else if self.current_fn_raises.is_some() {
                         if let Some(v) = value {
                             self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(v)));
                         }
@@ -2499,7 +2517,24 @@ impl CodeGen {
                     // 是 Unit（无错误可抛）→ 不应 push(Err(()))（Vec<Result<String,
                     // String>> 会 E0308），应视为成功终止（return __gen_vec）
                     // （TEMP/probe/sweep7/gen_if_yield_ret.lz）。
-                    if self.current_fn_raises.is_some()
+                    //
+                    // BUG-295：生成器 try 体闭包内不得 `return __gen_vec;`（&mut 捕获
+                    // → E0382）。改置位终止标志栈 + `return;`（闭包返回 ()），由各层
+                    // try 块后的标志检查统一 `return __gen_vec;`。
+                    if !self.gen_try_flag_stack.is_empty() {
+                        if self.current_fn_raises.is_some()
+                            && !matches!(value.ty, IrType::Unit)
+                        {
+                            self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(value)));
+                        }
+                        let flags: Vec<String> = self
+                            .gen_try_flag_stack
+                            .iter()
+                            .map(|f| format!("{} = true;", f))
+                            .collect();
+                        self.emit_line(&flags.join(" "));
+                        self.emit_line("return;");
+                    } else if self.current_fn_raises.is_some()
                         && !matches!(value.ty, IrType::Unit)
                     {
                         self.emit_line(&format!("__gen_vec.push(Err({}));", self.gen_expr(value)));
@@ -2816,14 +2851,44 @@ impl CodeGen {
 
                 // ── catch_unwind wrapping（panic 基，非 Result 体） ──
                 // suppress_tail_return = true: closure body's last expr is the return value (no explicit return)
+                //
+                // BUG-295：生成器 try 体闭包内的生成器 `return`/`raise` 若直接
+                // `return __gen_vec;`，会把被闭包 `&mut` 捕获的 `__gen_vec` 移出闭包 →
+                // E0382（use of moved value）。改发终止标志：闭包内只置位标志 +
+                // `return;`（闭包返回 ()），try 块结束后在函数作用域统一
+                // `return __gen_vec;`（唯一一次移动）。
+                let gen_try_flag: Option<String> = if self.in_generator
+                    && block_has_raise_or_return(body)
+                {
+                    let idx = self.gen_try_flag_counter.get();
+                    self.gen_try_flag_counter.set(idx + 1);
+                    let name = format!("__gen_terminated_{}", idx);
+                    self.emit_line(&format!("let mut {} = false;", name));
+                    self.gen_try_flag_stack.push(name.clone());
+                    Some(name)
+                } else {
+                    None
+                };
                 self.emit_line("let __panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {");
                 self.indent += 1;
                 let saved = self.suppress_tail_return;
+                let saved_unit = self.force_unit_tail;
                 self.suppress_tail_return = true;
+                // 生成器 try 体闭包改发终止标志时，闭包须返回 ()（与 `return;` 一致）；
+                // 否则 try 体尾值表达式会让闭包返回非 ()，与 `return;` 分支类型冲突 E0308。
+                if gen_try_flag.is_some() {
+                    self.force_unit_tail = true;
+                }
                 self.gen_block_inner(body);
                 self.suppress_tail_return = saved;
+                self.force_unit_tail = saved_unit;
                 self.indent -= 1;
                 self.emit_line("}));");
+                // 闭包已结束：本层标志出栈，catch/finally 体内的生成器 raise/return
+                // 已不在闭包内，走函数作用域 `return __gen_vec;` / 继续上抛外层标志。
+                if gen_try_flag.is_some() {
+                    self.gen_try_flag_stack.pop();
+                }
 
                 if has_catch || has_else {
                     self.emit_line("let __try_val = match __panic_result {");
@@ -2932,7 +2997,17 @@ impl CodeGen {
                                 ));
                                 self.declared.insert(var_name.clone());
                             }
+                            // BUG-295：try 体闭包改发终止标志后闭包返回 `()`，Ok 臂值为 `()`；
+                            // catch 臂须同样产出 `()`（否则 match arms Ok=() / Err=<值>
+                            // 类型不兼容 E0308）。catch 臂内生成器 raise/return 不在闭包
+                            // 内，走外层 `return __gen_vec;`（gen_try_flag_stack 已 pop，
+                            // 路由自动落回函数作用域路径）。
+                            let catch_saved_unit = self.force_unit_tail;
+                            if gen_try_flag.is_some() {
+                                self.force_unit_tail = true;
+                            }
                             self.gen_block_inner(block);
+                            self.force_unit_tail = catch_saved_unit;
                         }
                     }
                     self.suppress_tail_return = _saved;
@@ -2964,8 +3039,30 @@ impl CodeGen {
                     {
                         self.append_to_last_line(";");
                     }
+                    // BUG-295：生成器 try 体闭包内 `return`/`raise` 已改为「置位终止标志 +
+                    // `return;`（闭包返回 ()）」。此处做唯一一次 `__gen_vec` 移动
+                    // （函数作用域，合法）。置于尾值 `__final_val`/`__try_val` 之前，
+                    // 否则尾值后跟语句会要求分号（`__try_val` 无 `;` → E0308/E0107）。
+                    // 嵌套生成器 try 时本层仍在**外层闭包体内**：仅 `return;` 继续
+                    // 上抛（外层标志已被置位，其检查处再 `return __gen_vec;`）——否则
+                    // 会把被外层闭包 &mut 捕获的 `__gen_vec` 移出 → 复现 E0382。
+                    if let Some(flag) = gen_try_flag {
+                        if self.gen_try_flag_stack.is_empty() {
+                            self.emit_line(&format!("if {} {{ return __gen_vec; }}", flag));
+                        } else {
+                            self.emit_line(&format!("if {} {{ return; }}", flag));
+                        }
+                    }
                     self.emit_line("__final_val");
                 } else {
+                    // BUG-295 标志检查同上（置于尾值前，避免 `__try_val` 后紧跟语句）
+                    if let Some(flag) = gen_try_flag {
+                        if self.gen_try_flag_stack.is_empty() {
+                            self.emit_line(&format!("if {} {{ return __gen_vec; }}", flag));
+                        } else {
+                            self.emit_line(&format!("if {} {{ return; }}", flag));
+                        }
+                    }
                     self.emit_line("__try_val");
                 }
             }

@@ -176,6 +176,15 @@ impl CodeGen {
             _ => false,
         }
     }
+    /// print/println 实参是否为「无类型上下文的裸 None」——此类实参被 gen_none_ref
+    /// 发射为 `None` 或 `Option::None`，在 `println!("{:?}", ...)` 处 rustc 报 E0282
+    /// type annotations needed（CY/TESTS/01_basics/literals.lz 实测）。
+    /// 判定：表达式本身是 None 字面量（LitKind::None_）或解析为 Var("None")。
+    /// 注意：`print(x)`（x 为已绑定 Option<T> 变量）不是字面量，不受影响。
+    fn print_arg_is_bare_none(a: &Expr) -> bool {
+        matches!(a.kind, ExprKind::Lit(LitKind::None_))
+            || matches!(&a.kind, ExprKind::Var(n) if n == "None")
+    }
     /// 比较约束传播：预扫描模块内所有 FnDef 体（含 impl/trait 默认方法），
     /// 经调用图不动点计算「参与比较运算」的泛型集合，存入 `self.fn_cmp`。
     /// 调用图传播：若 F 调用 G（G 比较其泛型 → 需 Eq/Ord），且调用实参类型中
@@ -1713,7 +1722,15 @@ impl CodeGen {
                             if matches!(a.kind, ExprKind::Lit(LitKind::Str(_))) {
                                 s.trim_end_matches(".to_string()").to_string()
                             } else {
-                                s.clone()
+                                // None 字面量（或解析为 Var("None")）：`println!("{:?}", None)` /
+                                // `println!("{:?}", Option::None)` 在无上下文处 rustc E0282
+                                // type annotations needed（CY/TESTS/01_basics/literals.lz 实测）。
+                                // 统一注入 `Option::<i64>::None`（i64 为字面量无上下文时的默认元素类型）。
+                                if Self::print_arg_is_bare_none(a) {
+                                    "Option::<i64>::None".to_string()
+                                } else {
+                                    s.clone()
+                                }
                             }
                         })
                         .collect();
@@ -4885,6 +4902,39 @@ impl CodeGen {
                     "."
                 };
                 let mut access_s = format!("{}{}{}", base_s, sep, field);
+                // BUG-344：枚举 `_variant` 魔法字段 —— 变体索引（Color.Red._variant == 0）
+                // 生成 match base { Enum::V1 => 0, Enum::V1(_) => 0, ... }（按声明顺序索引）
+                if field == "_variant" && sep == "." && base_s != "self" {
+                    if let IrType::Named { path, .. } = &base.ty {
+                        if let Some(variants) = self.enum_variant_order.get(path.as_str()) {
+                            if !variants.is_empty() {
+                                let mut arms = String::new();
+                                for (i, v) in variants.iter().enumerate() {
+                                    let fields = self
+                                        .enum_variant_fields
+                                        .get(&(path.clone(), v.clone()));
+                                    match fields {
+                                        Some(ft) if !ft.is_empty() => {
+                                            let pats: Vec<String> =
+                                                ft.iter().map(|_| "_".to_string()).collect();
+                                            arms.push_str(&format!(
+                                                "{}::{}({}) => {}, ",
+                                                path,
+                                                v,
+                                                pats.join(", "),
+                                                i
+                                            ));
+                                        }
+                                        _ => {
+                                            arms.push_str(&format!("{}::{} => {}, ", path, v, i));
+                                        }
+                                    }
+                                }
+                                return format!("match {base_s} {{ {arms}_ => unreachable!() }}");
+                            }
+                        }
+                    }
+                }
                 // Option 字段访问自动解包：`root.val` 当 root 是 `Option<TreeNode<T>>`
                 // 时生成 `root.as_ref().unwrap().val`（否则 E0609 no field val on
                 // Option<...>）。仅小写字段（非枚举变体/关联类型）走此路径；self 已
@@ -5968,12 +6018,32 @@ impl CodeGen {
                     child.known_types = self.known_types.clone();
                     child.struct_fields_info = self.struct_fields_info.clone();
                     child.current_fn_raises = self.current_fn_raises.clone();
+                    // BUG-297：闭包一律不继承父函数 raises 语义，除非其返回类型显式注解为 Result。
+                    // 闭包语法无法声明 `raises`，因此：
+                    //   - `return X` 在闭包内应为普通 return（若继承 raises 会被包成
+                    //     `return Ok(X)` → E0308，如 `|x| -> String`）。
+                    //   - `raise X` 在闭包内应保持 panic!，借 catch_unwind 上抛到外层
+                    //     raises 函数边界（若继承 raises 会生成 `return Err(..)`，但闭包
+                    //     返回类型未升级为 Result → E0308）。
+                    // 判据：
+                    //   (a) ret_ty 显式注解为非 Result → 清空；
+                    //   (b) ret_ty 显式注解为 Result → 保留（闭包确实是 raises 风格）；
+                    //   (c) ret_ty 无注解（常见，inferred）→ 一律清空（`raise` 走 panic
+                    //       路径，`return X` 走普通路径）。
+                    let closure_body_raises = match &ret_ty {
+                        Some(rt) => !matches!(rt, IrType::Result { .. }),
+                        None => true,
+                    };
+                    if closure_body_raises {
+                        child.current_fn_raises = None;
+                    }
                     child.current_ret_ty = self.current_ret_ty.clone();
                     child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
                     child.enum_variant_named_fields = self.enum_variant_named_fields.clone();
                     child.emitted_types = self.emitted_types.clone();
                     child.enum_variants = self.enum_variants.clone();
                     child.enum_variant_fields = self.enum_variant_fields.clone();
+                    child.enum_variant_order = self.enum_variant_order.clone();
                     child.fn_param_info = self.fn_param_info.clone();
                     child.current_variadic_params = self.current_variadic_params.clone();
                     // 继承 struct 方法名集合（闭包体内调用用户 struct 方法时
@@ -5991,6 +6061,9 @@ impl CodeGen {
                     // 同样改写为 `*cfg.get_or_init(..)`（T04/AC4）
                     child.lazy_bindings = self.lazy_bindings.clone();
                     child.in_generator = self.in_generator;
+                    // BUG-295：子 CodeGen 继承生成器 try 终止标志栈与共享计数器
+                    child.gen_try_flag_stack = self.gen_try_flag_stack.clone();
+                    child.gen_try_flag_counter = self.gen_try_flag_counter.clone();
                     // 泛型函数标志需传递给 child（match 臂内 Option.None 的裸 None 推断，
                     // combo-struct-method.lz map<R> 泛型方法）
                     child.in_generic_fn = self.in_generic_fn;
@@ -6521,9 +6594,13 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 child.enum_variant_named_fields = self.enum_variant_named_fields.clone();
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
+                child.enum_variant_order = self.enum_variant_order.clone();
                 child.enum_variant_fields = self.enum_variant_fields.clone();
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = self.in_generator;
+                // BUG-295：子 CodeGen 继承生成器 try 终止标志栈与共享计数器
+                child.gen_try_flag_stack = self.gen_try_flag_stack.clone();
+                child.gen_try_flag_counter = self.gen_try_flag_counter.clone();
                 // 生成器构建块闭包内（func *:）嵌套块表达式（if 分支等）需继承
                 // in_gen_build，否则块内 yield 会误走 __gen_vec 函数级路径（E0425）
                 child.in_gen_build = self.in_gen_build;
@@ -6613,11 +6690,15 @@ child.struct_fields_info = self.struct_fields_info.clone();
                 child.current_fn_ret_ty = self.current_fn_ret_ty.clone();
                 child.enum_variant_named_fields = self.enum_variant_named_fields.clone();
                 child.emitted_types = self.emitted_types.clone();
+                child.enum_variant_order = self.enum_variant_order.clone();
                 child.enum_variants = self.enum_variants.clone();
                 child.enum_variant_fields = self.enum_variant_fields.clone();
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = false;
                 child.in_gen_build = true;
+                // BUG-295：共享计数器（子 CodeGen 内嵌套 try 仍须唯一命名标志）
+                child.gen_try_flag_stack = self.gen_try_flag_stack.clone();
+                child.gen_try_flag_counter = self.gen_try_flag_counter.clone();
                 child.in_generic_fn = self.in_generic_fn;
                 child.in_new_body = self.in_new_body;
                 child.declared = self.declared.clone();

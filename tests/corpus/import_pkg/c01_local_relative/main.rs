@@ -52,9 +52,9 @@ const __name__: &str = "main";
 
 const __file__: &str = "main.lz";
 
-const __package__: &str = "";
+const __package__: &str = "c01_local_relative";
 
-const __path__: &str = "";
+const __path__: &str = "E:\\IDEProjects\\AI\\lang-zone\\tests\\corpus\\import_pkg\\c01_local_relative";
 
 const __doc__: &str = "";
 

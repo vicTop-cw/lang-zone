@@ -1753,6 +1753,27 @@ pub(crate) const LZ_BUILTIN_FN_NAMES: &[&str] = &[
     "delattr",
     "locals",
     "globals",
+    // ── lz_builtins rlib 已按同名导出的顶层自由函数（BUG-270）──
+    // 实测 `rustc --extern lz_builtins` 可解析这 17 名（TEMP/r10_in_rlib.txt 探针）：
+    // 其余 lz_builtins/std/*.rs 虽由 .lz 转译但未并入 crate，未导出 ⇒ 保留 stub 语义
+    //（否则去桩变 E0425）。新增 stdlib 自由函数若并入 crate，须在此表追加同步。
+    "chunk",
+    "compose",
+    "concat",
+    "count",
+    "drop",
+    "expect",
+    "find",
+    "fold",
+    "fold1",
+    "group_by",
+    "partition",
+    "pipe",
+    "pipe2",
+    "pipe3",
+    "reduce",
+    "unique",
+    "unique_by",
 ];
 
 /// 扫描表达式：收集对未定义顶层函数的 Call（callee 为 Var；排除宏名与局部绑定）

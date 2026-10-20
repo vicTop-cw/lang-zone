@@ -1,4 +1,12 @@
 
+// ── LZ rustc link recipe (BUG-10: lz_builtins re-exports num-bigint/num-complex) ──
+// To compile & run this generated file in isolation:
+//   rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O <this_file>.rs
+//   <rlib>     = liblz_builtins.rlib (build it: `cargo build -p lz_builtins`)
+//   <deps_dir> = the directory containing that rlib (e.g. <workspace>/target/debug/deps)
+// Omitting -L gives error[E0463] even if this program never uses BigInt/Complex.
+// ─────────────────────────────────────────────────────────────────────────────────────
+
 #[allow(unused_imports)]
 #[allow(unused_variables)]
 #[allow(dead_code)]
@@ -15,7 +23,7 @@ use lz_builtins::*;
 
 use std::cell::Cell;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MemBudget {
     pub current: Cell<i64>,
     pub max: i64,
@@ -31,15 +39,15 @@ impl MemBudget {
         return self.max.clone() - self.current.get();
     }
 
-    fn used(&self) -> i64 {
+    fn used(&mut self) -> i64 {
         return self.current.get();
     }
 
     fn alloc(&mut self, n: i64) -> Result<(), String> {
         let mut old = self.current.get();
-        let mut new_current: i64 = old + n;
+        let mut new_current: i64 = LzAdd::__add__(old, n);
         return if new_current > self.max.clone() { Err("exceeded memory budget".to_string())} else {
-            self.current.set(new_current);
+            self.current.set(new_current.clone());
             Ok(())
         };
     }
@@ -47,7 +55,7 @@ impl MemBudget {
     fn dealloc(&mut self, n: i64) {
         let mut old = self.current.get();
         let mut new: i64 = old - n;
-        return if new < 0i64 { self.current.set(0i64) } else { self.current.set(new) };
+        return if new < 0i64 { self.current.set(0i64) } else { self.current.set(new.clone()) };
     }
 
     fn tryDealloc(&mut self, n: i64) -> Result<(), String> {
@@ -62,7 +70,7 @@ impl MemBudget {
 
 const __name__: &str = "main";
 
-const __file__: &str = "E:\\IDEProjects\\AI\\lang-zone\\std\\memguard.lz";
+const __file__: &str = "memguard.lz";
 
 const __package__: &str = "std";
 
@@ -73,5 +81,4 @@ const __doc__: &str = "";
 const __is_macro__: bool = false;
 
 pub fn main() {
-    // auto-generated: LZ module has no main entry point
 }

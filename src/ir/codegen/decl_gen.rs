@@ -2185,8 +2185,13 @@ impl CodeGen {
                 child.emitted_types = self.emitted_types.clone();
                 child.enum_variants = self.enum_variants.clone();
                 child.enum_variant_fields = self.enum_variant_fields.clone();
+                child.enum_variant_order = self.enum_variant_order.clone();
                 child.fn_param_info = self.fn_param_info.clone();
                 child.in_generator = self.in_generator;
+                // BUG-295：子 CodeGen 继承生成器 try 终止标志栈与**共享**计数器，
+                // 否则嵌套 try 复用同名标志（内层遮蔽外层 → E0382/永不置位）
+                child.gen_try_flag_stack = self.gen_try_flag_stack.clone();
+                child.gen_try_flag_counter = self.gen_try_flag_counter.clone();
                 child.suppress_tail_return = true;
                 // trait 默认方法的 where 子句若有算术约束（Iterator.sum 的
                 // `where Self.Item: Add<Output=Self.Item>`），其 `+` 须走 Rust 原生

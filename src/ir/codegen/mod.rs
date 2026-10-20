@@ -54,7 +54,9 @@ use super::IrModule;
 // 修饰符装饰器新语义轴（T04）：`@shared` 族 / `@cell` 族 的轴枚举。
 use crate::ast::{InteriorMode, SharedMode};
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 
 /// IR → Rust 代码生成器
@@ -104,6 +106,8 @@ pub struct CodeGen {
     impl_types: std::collections::HashSet<String>,
     /// enum variant → enum name 映射（用于构造器调用路由）
     enum_variants: HashMap<String, String>,
+    /// enum name → 按声明顺序的变体名列表（BUG-344：`_variant` 魔法字段索引）
+    enum_variant_order: HashMap<String, Vec<String>>,
     /// type alias 名 → 底层 IR 类型（`type Pair = (int, int)` → "Pair" → Tuple[int, int]）。
     /// BUG-278：`p: Pair` 的 IR 类型是 Named("Pair")，IndexGet 走元组索引需先解析回
     /// Tuple 才生成 `p.0`；否则落通用路径 `p[0i64 as usize]` → rustc E0608。
@@ -191,6 +195,17 @@ pub struct CodeGen {
     in_ext_trait: bool,
     /// 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
     in_result_try: bool,
+    /// 生成器 try 体闭包内的终止标志栈（BUG-295）：try 体闭包内若直接发
+    /// `return __gen_vec`（生成器 raise/return 的重写产物），会把被 &mut 捕获的
+    /// `__gen_vec` 移出闭包 → E0382（use of moved value）。改发「置位终止标志 +
+    /// `return;`（闭包返回 ()）」，try 块结束后统一 `return __gen_vec`。
+    /// 栈存每层 try 的标志变量名，raise/return 时一次性置位全部标志（嵌套一致）。
+    gen_try_flag_stack: Vec<String>,
+    /// 生成器 try 终止标志的唯一命名计数器。用 Rc<Cell<usize>> 共享：块表达式等
+    /// 会建子 CodeGen（ExprKind::BlockExpr 等），若计数器按值拷贝则嵌套 try 复用
+    /// 同名标志（`__gen_terminated_0` 内层遮蔽外层 → 外层标志永远不被置位），
+    /// 且置位语句两次都写内层绑定（gen_try_nested.lz 实测）。
+    gen_try_flag_counter: Rc<Cell<usize>>,
     /// 正在生成的扩展 trait 名（ListExt/DictExt/SetExt/StrExt）：扩展 trait 方法体
     /// 内 `self.lz_*` 调用需显式 UFCS `<本地 trait>::lz_*(self, ...)`，否则与
     /// lz_builtins::StringExt/ListExt（也 `use lz_builtins::*` 进入作用域，且
@@ -436,6 +451,7 @@ impl CodeGen {
             emitted_types: std::collections::HashSet::new(),
             impl_types: std::collections::HashSet::new(),
             enum_variants: HashMap::new(),
+            enum_variant_order: HashMap::new(),
             type_aliases: std::collections::HashMap::new(),
             suppress_tail_return: false,
             pending_tail_capture: None,
@@ -465,6 +481,9 @@ impl CodeGen {
             in_ext_trait: false,
             // 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
             in_result_try: false,
+            // BUG-295：生成器 try 体闭包内的终止标志栈 & 唯一命名计数器
+            gen_try_flag_stack: Vec::new(),
+            gen_try_flag_counter: Rc::new(Cell::new(0)),
             current_ext_trait: None,
             fn_param_info: HashMap::new(),
             fn_ref_params: HashMap::new(),
@@ -572,6 +591,7 @@ impl CodeGen {
         // 预扫描：收集 enum variant → enum name 映射 + 函数参数信息 + impl-only 类型名
         // 注意：不能插入 emitted_types（会阻断 gen_enum_def / gen_struct_def 的去重逻辑）
         self.enum_variants.clear();
+        self.enum_variant_order.clear();
         self.fn_param_info.clear();
         self.fn_returns.clear();
         self.emitted_types.clear();
@@ -764,7 +784,10 @@ impl CodeGen {
 
         for item in &module.items {
             if let Item::EnumDef(e) = item {
+                // BUG-344：按声明顺序收集变体名（HashMap 不保序，_variant 魔法索引依赖此序）
+                let mut ordered: Vec<String> = Vec::new();
                 for variant in &e.variants {
+                    ordered.push(variant.name.clone());
                     self.enum_variants
                         .insert(variant.name.clone(), e.name.clone());
                     // 收集变体字段类型（用于构造时 Box::new() 包装判断）
@@ -792,6 +815,7 @@ impl CodeGen {
                         if named { named_fields } else { Vec::new() },
                     );
                 }
+                self.enum_variant_order.insert(e.name.clone(), ordered);
             }
             if let Item::StructDef(s) = item {
                 let mset: std::collections::HashSet<String> =

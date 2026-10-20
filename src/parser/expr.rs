@@ -39,6 +39,8 @@ pub trait ParserExprExt {
     /// 判断 `?` 后是否紧跟三元 true 分支（表达式开始）—— 用于区分
     /// 三元 `cond ? a : b` 与错误传播后缀 `expr?`
     fn is_ternary_after(&self) -> bool;
+    /// BUG-342：解析花括号块表达式 `{ let a = 1; a + b }`（首 token 为语句关键字时）
+    fn parse_brace_block_expr(&mut self) -> Result<Expr, String>;
 }
 
 impl ParserExprExt for Parser {
@@ -1277,6 +1279,31 @@ impl ParserExprExt for Parser {
                 Ok(Expr::ListLit(items))
             }
             Token::LBrace => {
+                // BUG-342：块表达式 `{ let a = 1; a + b }` —— 首 token 为语句关键字时
+                // 判定为块而非集合/字典字面量（集合/字典首元素必为表达式 token）
+                if matches!(
+                    self.peek(),
+                    Token::Let
+                        | Token::Mut
+                        | Token::Ref
+                        | Token::Const
+                        | Token::Owned
+                        | Token::Return
+                        | Token::Yield
+                        | Token::For
+                        | Token::While
+                        | Token::Match
+                        | Token::Raise
+                        | Token::Assert
+                        | Token::Defer
+                        | Token::Break
+                        | Token::Continue
+                        | Token::Try
+                        | Token::Block
+                        | Token::Newline
+                ) {
+                    return self.parse_brace_block_expr();
+                }
                 // {} 空字典
                 if self.check(&Token::RBrace) {
                     self.advance();
@@ -2013,6 +2040,37 @@ impl ParserExprExt for Parser {
             }
             _ => Err(format!("Unexpected token in pattern: {:?}", first)),
         }
+    }
+
+    /// BUG-342：解析花括号块表达式 `{ let a = 1; a + b }`。
+    /// 块内为分号分隔的语句序列，块尾表达式（无分号）作为块值。
+    /// 仅在 `parse_expr` 的 LBrace 分支中，首 token 为语句关键字时调用。
+    fn parse_brace_block_expr(&mut self) -> Result<Expr, String> {
+        // 当前 token 为 `{`（调用方已确认）
+        self.advance(); // consume `{`
+        let mut stmts: Vec<crate::ast::Stmt> = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&Token::RBrace)
+                || self.check(&Token::Eof)
+                || self.check(&Token::Dedent)
+            {
+                // Dedent 表示缩进块结束（`{` 后新行缩进触发 Indent/Dedent 对）
+                if self.check(&Token::Dedent) {
+                    self.advance();
+                }
+                break;
+            }
+            // 单条语句：解析普通语句；尾表达式由 parse_stmt 的默认分支（ExprStmt）承担
+            stmts.push(self.parse_stmt()?);
+            // 分号分隔；换行也视为分隔（多行块无需分号）
+            if self.check(&Token::Semicolon) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::BlockExpr(stmts))
     }
 }
 

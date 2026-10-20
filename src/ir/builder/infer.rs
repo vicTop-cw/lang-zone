@@ -412,6 +412,20 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
             IrType::Any
         }
         AstExpr::FieldAccess { receiver, field } => {
+            // BUG-344：`Color.Red` 形式（dotted 枚举变体）应推断为枚举类型而非 Any。
+            // 先前裸变体 `Red` 在 L28 已处理，但 `Color.Red` 走此分支时 receiver=Ident("Color")
+            // 经 lookup_var 得 Any，字段 `Red` 也查不到 → let 绑定类型为 Any，
+            // 后续 `_variant` 魔法字段在 codegen 无类型可循（E0609）。
+            if let AstExpr::Ident(enum_name) = receiver.as_ref() {
+                if let Some(variant_enum) = ctx.enum_variants.get(field) {
+                    if variant_enum == enum_name {
+                        return IrType::Named {
+                            path: enum_name.clone(),
+                            args: vec![],
+                        };
+                    }
+                }
+            }
             let recv_ty = infer_expr_type(receiver, ctx);
             // self 是 &mut self / &self 时，解引用后再查字段类型
             // （skip_ws(mut self) → self 类型为 MutRef(Named("Parser"))，
@@ -518,12 +532,35 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
         AstExpr::Unary { op, operand } => match op {
             _ => infer_expr_type(operand, ctx),
         },
-        AstExpr::If { then_body, .. } => {
-            // 取 then 分支最后表达式类型
-            then_body
-                .last()
-                .map(|s| infer_stmt_type(s, ctx))
-                .unwrap_or(IrType::Unit)
+        AstExpr::If {
+            then_body,
+            elif_clauses,
+            else_body,
+            ..
+        } => {
+            // 取 then 分支最后表达式类型。若 then 以"不产出值"的语句结束
+            // （raise/return/break/continue/pass），等价于 Rust 的 `!` 类型——
+            // 整个 if 表达式类型应由 else 分支决定：
+            // `if x < 0: raise "neg" else: x` → i64（否则误推断为 Unit，
+            // 使闭包 `|x: int| if x<0: raise "neg" else: x` 的返回类型被推断为 ()
+            // → E0308）。
+            let last = then_body.last();
+            if let Some(s) = last {
+                if stmt_is_diverging(s) {
+                    // 优先取最后一条 elif 体（elif_clauses 逆序嵌套，末项最贴近 else），
+                    // 其次 else_body；二者皆缺或皆发散则 Unit。
+                    elif_clauses
+                        .last()
+                        .and_then(|(_, b)| b.last())
+                        .or_else(|| else_body.as_ref().and_then(|b| b.last()))
+                        .map(|s| infer_stmt_type(s, ctx))
+                        .unwrap_or(IrType::Unit)
+                } else {
+                    infer_stmt_type(s, ctx)
+                }
+            } else {
+                IrType::Unit
+            }
         }
         AstExpr::Match { expr, arms } => {
             // type-pack 异质元组（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的 args
@@ -894,6 +931,21 @@ fn infer_closure_body_type(body: &AstExpr, ctx: &TypeCtx) -> IrType {
         }
         _ => infer_expr_type(body, ctx),
     }
+}
+
+/// 语句是否"发散"（不产出值，控制流转移）：raise/return/break/continue/pass。
+/// 用作 if/match 表达式分支类型合并的判据——发散分支等价 Rust `!`，
+/// 不参与类型合并（否则 `if c: raise "e" else: x` 被误合并为 Unit）。
+fn stmt_is_diverging(s: &AstStmt) -> bool {
+    matches!(
+        s,
+        AstStmt::Raise(_)
+            | AstStmt::Return(_)
+            | AstStmt::Break(_)
+            | AstStmt::BreakLabel { .. }
+            | AstStmt::Continue
+            | AstStmt::Pass
+    )
 }
 
 pub(crate) fn infer_stmt_type(stmt: &AstStmt, ctx: &TypeCtx) -> IrType {

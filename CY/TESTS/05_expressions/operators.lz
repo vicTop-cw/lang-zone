@@ -1,7 +1,17 @@
-// 05_expressions - 运算符
+// 05_expressions - 运算符（含 `*` 重复语义：str/list 的 Python 风格重复，BUG-276/277）
 def main() =
     let a: int = 10 + 20
     let b: int = 10 * 2
     let c: bool = a > b
     let d: bool = (a == 30) and (b == 20)
     print(a, b, c, d)
+
+    // `*` 重复（BUG-276 str / BUG-277 list）：`"ab" * 2` → "abab"；`[1,2] * 2` → [1,2,1,2]
+    let s = "ab" * 2
+    print(s)
+    let l = [1, 2] * 2
+    print(l)
+    let l3 = [1] * 3
+    print(l3)
+    let s0 = "x" * 0
+    print(s0)

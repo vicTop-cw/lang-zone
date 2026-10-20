@@ -133,6 +133,172 @@ pub(crate) fn block_has_yield(block: &Block) -> bool {
     false
 }
 
+/// 递归检查块内是否含 `Stmt::Raise` / `Stmt::Return`（含下钻 if/for/while/match/
+/// try/defer/block 等嵌套块）。用途（BUG-295）：try 体闭包内含
+/// `return __gen_vec`（生成器 raise 重写产物）时闭包返回 Vec<i64>，catch 臂须
+/// 同样返回 Vec<i64>（否则 match arms 类型不兼容 E0308）。
+pub(crate) fn block_has_raise_or_return(block: &Block) -> bool {
+    for stmt in &block.stmts {
+        if matches!(stmt, Stmt::Raise { .. } | Stmt::Return { .. }) {
+            return true;
+        }
+        match stmt {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if block_has_raise_or_return(then_branch) {
+                    return true;
+                }
+                if let Some(ref e) = else_branch {
+                    if block_has_raise_or_return(e) {
+                        return true;
+                    }
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
+                if block_has_raise_or_return(body) {
+                    return true;
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                if arms.iter().any(|arm| block_has_raise_or_return(&arm.body)) {
+                    return true;
+                }
+            }
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
+                if block_has_raise_or_return(body)
+                    || catches.iter().any(|(_, b)| block_has_raise_or_return(b))
+                    || else_body.as_ref().map_or(false, block_has_raise_or_return)
+                    || finally_body.as_ref().map_or(false, block_has_raise_or_return)
+                {
+                    return true;
+                }
+            }
+            Stmt::Defer { body } | Stmt::BlockLabel { body, .. } => {
+                if block_has_raise_or_return(body) {
+                    return true;
+                }
+            }
+            Stmt::Block { stmts } => {
+                if block_has_raise_or_return(&Block {
+                    span: Span::unknown(),
+                    stmts: stmts.clone(),
+                    ty: IrType::Unit,
+                }) {
+                    return true;
+                }
+            }
+            Stmt::ExprStmt { expr } => {
+                if expr_has_raise_or_return(expr) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// 递归检查块内是否含 `Stmt::Raise`（不下钻 Lambda/闭包体，仅块结构）。
+/// 用途（BUG-297）：raises 函数内的闭包只有自身含 `raise` 才应继承父函数的
+/// raises 语义（`return Err(..)`）；否则闭包是普通非 raises 闭包，`return X`
+/// 不应被包成 `return Ok(X)`（闭包返回类型非 Result → E0308）。
+pub(crate) fn block_has_raise(block: &Block) -> bool {
+    for stmt in &block.stmts {
+        if matches!(stmt, Stmt::Raise { .. }) {
+            return true;
+        }
+        match stmt {
+            Stmt::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                if block_has_raise(then_branch) {
+                    return true;
+                }
+                if let Some(ref e) = else_branch {
+                    if block_has_raise(e) {
+                        return true;
+                    }
+                }
+            }
+            Stmt::For { body, .. } | Stmt::While { body, .. } | Stmt::WhileLet { body, .. } => {
+                if block_has_raise(body) {
+                    return true;
+                }
+            }
+            Stmt::Match { arms, .. } => {
+                if arms.iter().any(|arm| block_has_raise(&arm.body)) {
+                    return true;
+                }
+            }
+            Stmt::TryCatch {
+                body,
+                catches,
+                else_body,
+                finally_body,
+            } => {
+                if block_has_raise(body)
+                    || catches.iter().any(|(_, b)| block_has_raise(b))
+                    || else_body.as_ref().map_or(false, block_has_raise)
+                    || finally_body.as_ref().map_or(false, block_has_raise)
+                {
+                    return true;
+                }
+            }
+            Stmt::Defer { body } | Stmt::BlockLabel { body, .. } => {
+                if block_has_raise(body) {
+                    return true;
+                }
+            }
+            Stmt::Block { stmts } => {
+                if block_has_raise(&Block {
+                    span: Span::unknown(),
+                    stmts: stmts.clone(),
+                    ty: IrType::Unit,
+                }) {
+                    return true;
+                }
+            }
+            Stmt::ExprStmt { expr } => {
+                if expr_has_raise_only(expr) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// 递归检查表达式内是否含 raise（仅下钻 if 表达式/块表达式；不下钻 Lambda）。
+fn expr_has_raise_only(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::IfExpr { then, els, .. } => expr_has_raise_only(then) || expr_has_raise_only(els),
+        ExprKind::BlockExpr { block } => block_has_raise(block),
+        _ => false,
+    }
+}
+
+/// 递归检查表达式内是否含 raise/return（if 表达式分支体可能内嵌 raise/return）。
+fn expr_has_raise_or_return(expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::IfExpr { then, els, .. } => {
+            expr_has_raise_or_return(then) || expr_has_raise_or_return(els)
+        }
+        ExprKind::BlockExpr { block } => block_has_raise_or_return(block),
+        _ => false,
+    }
+}
+
 /// 检测 Block 中是否包含无值 return（return;）——构建块（=:/~:/*:）内
 /// return; 退出构建块自身，块值应为 ()；此时尾表达式需生成 `expr;`（丢弃值），
 /// 否则闭包返回类型被推断为尾值类型，与 return; 冲突（E0308）
@@ -289,6 +455,13 @@ pub(crate) fn expr_has_yield(expr: &Expr) -> bool {
             expr_has_yield(callee) || args.iter().any(expr_has_yield)
         }
         ExprKind::Lambda { body, .. } => expr_has_yield(body),
+        // raises 生成器：builder 把函数体包成 `Result::Ok(BlockExpr{...})`
+        // （ExprStmt(EnumCtor("Result","Ok",[BlockExpr]))），yield 藏在 Ok(...)
+        // 实参里。此前未下钻 EnumCtor 实参 → expr_has_yield=false → has_yield=false
+        // → 函数被当成普通 raises 函数：签名 `Result<T,E>` 而非 `Vec<Result<T,E>>`，
+        // 且不声明 `__gen_vec`，体内 yield 仍生成 `__gen_vec.push(...)` → E0425
+        // （TEMP/probe/sweep10/gen_try_raises.lz）。
+        ExprKind::EnumCtor { args, .. } => args.iter().any(expr_has_yield),
         _ => false,
     }
 }
@@ -378,6 +551,8 @@ pub(crate) fn expr_first_yield_type(expr: &Expr) -> Option<IrType> {
             expr_first_yield_type(callee).or_else(|| args.iter().find_map(expr_first_yield_type))
         }
         ExprKind::Lambda { body, .. } => expr_first_yield_type(body),
+        // 同 expr_has_yield 的 EnumCtor 下钻：raises 生成器体包在 Ok(BlockExpr) 内
+        ExprKind::EnumCtor { args, .. } => args.iter().find_map(expr_first_yield_type),
         _ => None,
     }
 }
