@@ -446,7 +446,20 @@ impl Lexer {
                         // BUG-373：方法链续行 `.map(...)` —— 行首为 `.` 时不是新块，
                         // 不产生 Indent/Dedent，作为上一表达式的续行。否则
                         // `let r = xs\n    .map(...)` 会把 `.map` 误判为缩进块。
-                        line_start = false;
+                        // BUG-379：若上一行以 `=` 结尾（如 `duck HasName =`），则
+                        // 下一行 `.name: str` 是 duck 成员声明的字段标记（新缩进块），
+                        // 不是续行——此时仍走 handle_indent 正常产生 Indent。
+                        let prev_is_assign = tokens
+                            .iter()
+                            .rev()
+                            .find(|t| !matches!(t, Token::Newline | Token::Indent | Token::Dedent))
+                            .map_or(false, |t| matches!(t, Token::Eq));
+                        if !prev_is_assign {
+                            line_start = false;
+                        } else {
+                            self.handle_indent(col, &mut tokens);
+                            line_start = false;
+                        }
                     } else {
                         self.handle_indent(col, &mut tokens);
                         line_start = false;

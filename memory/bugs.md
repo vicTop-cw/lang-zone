@@ -1453,3 +1453,15 @@ Gate: TOTAL=135 OK=135 FAIL=0 (100%)。cargo test --lib: 441 passed。
 
 ### FIXED(2026-10-20T19:17:06Z / BUG-377)
 - evidence: Commit f9cd835: TEMP/probe/sweep15/string_concat.lz line 5 `"The answer is " + n` → `f"The answer is {n}"`. IR design gate str+int unchanged. Gate TOTAL=135 OK=135 FAIL=0.
+## BUG-378 [2026-10-20T19:20:07Z] [medium] FIXED
+- summary: BUG-374 后 tests/cython_backend.rs 5 处 Field 构造缺 default 字段导致 cargo test --workspace E0063
+- detail: BUG-374 (struct 字段默认值) 给 IR Field 加了必填 `default` 字段，但未同步 `tests/cython_backend.rs` 里的 5 处直接构造 `Field { name, ty }` 的测试桩，导致 `cargo test --workspace` 报 E0063 missing field default（5 处：Line 174/178 的 Point struct x/y，Line 374 的 Circle.r，Line 382/386 的 Rect.w/h）。此前 `cargo test --lib` 不覆盖 integration tests，所以漏检。
+
+Fix (commit 5e3aa87): tests/cython_backend.rs 5 处补 `default: None`。
+
+`cargo test --workspace` 现在全部通过（唯一剩余 extractor_unapply.lz 在 KNOWN_RUSTC_FAILURES 豁免名单内，E0592 duplicate __unapply__）。Gate 仍 135/135/0。
+
+
+
+### FIXED(2026-10-20T19:20:12Z / BUG-378)
+- evidence: Commit 5e3aa87: tests/cython_backend.rs 5 处 Field { name, ty } 补 default: None。cargo test --workspace 编译通过，Gate 135/135/0。
