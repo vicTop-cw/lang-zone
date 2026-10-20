@@ -1185,3 +1185,19 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
   rustc 0 error，运行 `{"a": 2, "b": 2}`
 - 回归: TEMP/probe/sweep15 全量 114 支 baseline(HEAD=73f5305) 与 本树 均 82 OK/32 FAIL，
   dict_comprehension.lz 由 FAIL(E0507)->OK，其余逐项一致，零回归
+
+### BUG-358: 闭包体内的类型构造器被当成非 Copy 外部变量 → `Some::clone()(v*2)`
+- severity: medium
+- status: FIXED
+- task_id: BUG-359-fix
+- summary: option_chain.lz `y.flat_map(|v| Some(v * 2))` 生成 `Some::clone()(v * 2i64)`，E0599 no method clone on Option ctor
+- detail: body_refs_noncopy_external / clone_noncopy_external 把 Call 的 callee `Var("Some")`（ty=Any，非形参，非 Int/F64/Bool）当作外层非 Copy 变量引用，闭包被降级非 move 并对构造器名调用 `.clone()` → 生成 `Some::clone()(v*2)`。
+- evidence: `src/ir/codegen/helpers.rs` 新增 `is_type_ctor_name()`（Some/None/Ok/Err/Option/Result/List/Vec/Set/Dict 等），body_refs_noncopy_external 与 clone_noncopy_external 的 Var 分支都加 `!is_type_ctor_name(name)` 守卫；BUG-357 的 already_cloned 守卫同步加同一守卫。回归后 option_chain.lz 生成 `y.flat_map(move |v| { Some(v * 2i64) })`，rustc 编译过、运行出 `Some(12)`。
+
+### BUG-359: 迭代器适配器方法（flat_map/zip/fold）裸 Vec/Option 接收者缺 into_iter 转换
+- severity: medium
+- status: FIXED
+- task_id: BUG-359-fix
+- summary: `xs.flat_map(f)` / `xs.zip(ys)` / `xs.fold(init, f)` 生成裸方法调用，Rust 的 flat_map/zip/fold 只在 Iterator 上 → E0599；Option 的 flat_map 需映射为 and_then
+- detail: LZ 集合方法名与 Rust 方法名不一致——LZ `.flat_map()` 对 Option/Result 语义是 `and_then`（Option 无 flat_map 方法），对 List/Vec 是 `into_iter().flat_map().collect()`；`.zip(ys)` 需 `into_iter().zip(ys.into_iter())`；`.fold(init, f)` 需 `into_iter().fold(init, f)`（注意 LZ 实参序 = init, closure，勿与 reduce 的 closure, init 混用）。
+- evidence: expr_gen.rs `rust_method` match 新增 `"flat_map" if Option/Result 接收者 => "and_then"`；method_param_expected_ty 的闭包方法名单加 flat_map；Option/Result 消费型方法 clone 前缀名单加 flat_map；`fold`/`flat_map`/`zip` 在 recv_is_list 分支新增 into_iter 链（fold 用 `fold(init, lambda)`，flat_map 用 `flat_map(lambda).collect()`，zip 用 `zip(other.into_iter())`）。回归后 option_chain/opt_chain_brace/list_of_lists/zip 全 OK 运行，method_overload 因探针复用 xs 4 次（filter 早已 into_iter 消费）遗留 E0382，探针自身缺陷。

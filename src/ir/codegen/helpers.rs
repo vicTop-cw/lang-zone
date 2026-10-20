@@ -11,6 +11,19 @@ pub(crate) fn is_kwarg_call(args: &[Expr]) -> bool {
         .any(|a| matches!(&a.kind, ExprKind::StructCtor { name, .. } if name == "_KwArg"))
 }
 
+/// 内建类型/枚举构造器名（`Some(x)`、`None`、`Ok(x)`、`Err(x)` 及集合别名）。
+/// 这些名字以 `Var(name)` 出现在 Call 的 callee 位时，**不是**对外层非 Copy 变量的
+/// 引用，不应触发非 move 降级或 `.clone()`（否则生成 `Some::clone()(v*2)`，E0599）。
+/// （BUG-358：option_chain.lz `|v| Some(v * 2)` 因把 Some 当外部变量，闭包被降级
+/// 非 move 并 clone 了构造器名，生成 `y.flat_map(|v| { Some::clone()(v * 2i64) })`）
+pub(crate) fn is_type_ctor_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Some" | "None" | "Ok" | "Err" | "Option" | "Result" | "List" | "Vec" | "list"
+            | "Set" | "HashSet" | "set" | "Dict" | "HashMap" | "dict"
+    )
+}
+
 /// 判断实参是否为关键字实参节点：`_KwArg`（`name~` 糖）或
 /// `AssignExpr { target: 简单变量 }`（`name=value` 全形，parser 按赋值表达式解析）。
 pub(crate) fn is_kwarg_arg(a: &Expr) -> bool {
@@ -1901,7 +1914,9 @@ pub(crate) fn expr_contains_nested_move_lambda(e: &Expr, params: &[String]) -> b
 pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -> bool {
     match &body.kind {
         ExprKind::Var(name) => {
-            !lparam_names.contains(name)
+            // BUG-358：类型/枚举构造器名（Some/None/Ok/Err/集合别名）不是外部变量引用
+            !is_type_ctor_name(name)
+                && !lparam_names.contains(name)
                 && !matches!(body.ty, IrType::Int | IrType::F64 | IrType::Bool)
         }
         ExprKind::BlockExpr { block } => {
@@ -1958,7 +1973,9 @@ pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -
 pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr {
     match &e.kind {
         ExprKind::Var(name) => {
-            if !lparam_names.contains(name)
+            // BUG-358：类型/枚举构造器名（Some/None/Ok/Err/集合别名）不是变量，不 clone
+            if !is_type_ctor_name(name)
+                && !lparam_names.contains(name)
                 && !matches!(e.ty, IrType::Int | IrType::F64 | IrType::Bool)
                 && !name.ends_with('!')
             {
@@ -2007,7 +2024,8 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
             // BUG-357：若该 MethodCall 本身是 `外部非 Copy 变量.clone()`（本函数上一轮
             // 已包装），不要再给 receiver 追加一层 clone（避免 `k.clone().clone()`）。
             let already_cloned = matches!(&receiver.kind, ExprKind::Var(n)
-                if !lparam_names.contains(n)
+                if !is_type_ctor_name(n)
+                    && !lparam_names.contains(n)
                     && !matches!(receiver.ty, IrType::Int | IrType::F64 | IrType::Bool));
             if already_cloned {
                 return e.clone();

@@ -421,7 +421,7 @@ impl CodeGen {
                     None
                 }
             }
-            "ok" | "err" | "flatten" | "map" | "and_then" | "filter" | "or" | "and" => {
+            "ok" | "err" | "flatten" | "map" | "and_then" | "flat_map" | "filter" | "or" | "and" => {
                 // 这些方法收闭包，不涉及字符串字面量期望类型问题
                 None
             }
@@ -3430,6 +3430,16 @@ impl CodeGen {
                     "pop" => "pop",
                     "sort" => "sort",
                     "reverse" => "reverse",
+                    // BUG-359：LZ `opt.flat_map(|v| Some(..))` 对 Option/Result 语义是
+                    // `and_then`（Rust 的 flat_map 只存在于 Iterator，Option 无该方法 → E0599）。
+                    // 集合（List/Vec）接收者保持 flat_map（走迭代器链）。
+                    "flat_map"
+                        if matches!(&receiver.ty, IrType::Named { path, .. }
+                            if path == "Option" || path == "Result")
+                            || matches!(&receiver.ty, IrType::Option(_) | IrType::Result { .. }) =>
+                    {
+                        "and_then"
+                    }
                     "contains" => {
                         // HashMap/Dict → contains_key; String/Vec → contains
                         let is_dict = matches!(&receiver.ty, IrType::Named { path, .. } if path == "Dict" || path == "HashMap");
@@ -4647,6 +4657,39 @@ impl CodeGen {
                             recv, args_s[1], lambda
                         );
                     }
+                    // BUG-359：Vec 无 `.fold(init, f)`（Rust 的 fold 在 Iterator 上，
+                    // Vec<i64>.fold(...) → E0599）。裸 Vec 走 into_iter().fold(init, f)，
+                    // 返回标量（非 collect）。ListExt 等扩展 trait 同名 fold 由
+                    // has_ext_method 分支提前返回，不会进到这里。
+                    // 注意 LZ `fold(init, closure)` 实参序 = Rust `fold(init, f)`，
+                    // 故 args_s[0]=init、args_s[1]=closure（勿与 reduce 的 `(closure, init)`
+                    // 混用：method_overload.lz 曾生成 fold(closure, init) → E0277）。
+                    if method == "fold" && args_s.len() == 2 && recv_is_list {
+                        let lambda = strip_lambda_type(&args_s[1]);
+                        return format!(
+                            "({}).into_iter().fold({}, {})",
+                            recv, args_s[0], lambda
+                        );
+                    }
+                    // BUG-359：Vec 无 `.flat_map(f)`（Iterator 方法）。裸 Vec 走
+                    // into_iter().flat_map(f).collect()（f 返回 Vec/迭代器，如
+                    // `|row| row`、`|o| match o { Some(v) => [v], None => [] }`）。
+                    if method == "flat_map" && args_s.len() == 1 && recv_is_list {
+                        let lambda = strip_lambda_type(&args_s[0]);
+                        return format!(
+                            "({}).into_iter().flat_map({}).collect::<Vec<_>>()",
+                            recv, lambda
+                        );
+                    }
+                    // BUG-359：Vec 无 `.zip(ys)`（Iterator 方法）。裸 Vec 走
+                    // into_iter().zip(ys.into_iter()).collect::<Vec<_>>()。
+                    // 两个 Vec 都被消费（LZ 值语义下这是可接受的：zip 是配对操作）。
+                    if method == "zip" && args_s.len() == 1 && recv_is_list {
+                        return format!(
+                            "({}).into_iter().zip({}.into_iter()).collect::<Vec<_>>()",
+                            recv, args_s[0]
+                        );
+                    }
                     // BUG-281：Vec 无 `.enumerate()`（E0599）。裸 Vec 走迭代器链
                     // into_iter().enumerate()，产出 Vec<(usize, Item)>。
                     if method == "enumerate" && args_s.is_empty() && recv_is_list {
@@ -4685,6 +4728,7 @@ impl CodeGen {
                         method.as_str(),
                         "map"
                             | "and_then"
+                            | "flat_map"
                             | "unwrap_or"
                             | "unwrap"
                             | "unwrap_or_else"
