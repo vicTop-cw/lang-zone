@@ -667,7 +667,17 @@ impl Checker {
             self.check_return_literal(e);
         }
         let cur = self.fn_ctx.as_ref().unwrap().clone();
-        if cur.has_yield && f.return_type.is_some() && !f.is_iterator {
+        // 返回类型为 Iterator[...] / iterator 的函数也是合法生成器
+        // （探针 generator.lz / generator2.lz 用 `-> Iterator<int>` + yield，
+        // 未写 iterator 关键字但语义等价，不应报错）
+        let ret_is_iterator = matches!(
+            &f.return_type,
+            Some(Type::Named(n)) if n == "Iterator" || n == "iterator"
+        ) || matches!(
+            &f.return_type,
+            Some(Type::Generic { base, .. }) if matches!(&**base, Type::Named(n) if n == "Iterator" || n == "iterator")
+        );
+        if cur.has_yield && f.return_type.is_some() && !f.is_iterator && !ret_is_iterator {
             self.error(format!(
                 "函数 {} 声明了返回类型但在函数体内使用 yield（yield 只允许用于无返回类型/iterator 的生成器）",
                 f.name
