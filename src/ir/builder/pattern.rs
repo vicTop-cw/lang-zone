@@ -30,10 +30,16 @@ pub(crate) fn convert_ast_pattern(pat: &AstPattern, ctx: &TypeCtx) -> Option<Pat
             if ctx.is_struct(name) {
                 // struct 模式: Point(px, py) → Point { x: px, y: py }
                 let field_names: Vec<String> = ctx
-                    .struct_fields
+                    .struct_field_order
                     .get(name)
-                    .map(|fields| fields.keys().cloned().collect())
-                    .unwrap_or_default();
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // 回退：无有序表时按 HashMap keys（顺序不定）
+                        ctx.struct_fields
+                            .get(name)
+                            .map(|fields| fields.keys().cloned().collect())
+                            .unwrap_or_default()
+                    });
                 let fields: Vec<(String, Pattern)> = ir_args
                     .into_iter()
                     .enumerate()
