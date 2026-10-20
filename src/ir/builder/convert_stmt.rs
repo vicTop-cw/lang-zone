@@ -103,8 +103,20 @@ fn expand_lettuple_patterns(
                     counter,
                 );
             }
+            crate::ast::Pattern::Variant(_, nested) => {
+                // case struct 解构: Pair(x, y) — value 已在 parser 层包上
+                // `.__unapply__()`，Variant 模式等价于 Tuple(nested)，直接递归展开。
+                expand_lettuple_patterns(
+                    nested,
+                    base_name,
+                    base_ty,
+                    ann_ty,
+                    out,
+                    counter,
+                );
+            }
             _ => {
-                // 其他模式：按 debug 名绑定（parser 目前只产出 Ident/Tuple/Wildcard）
+                // 其他模式：按 debug 名绑定（parser 目前只产出 Ident/Tuple/Wildcard/Variant）
                 let name = format!("{:?}", pattern);
                 out.push(Stmt::Let {
                     name,
