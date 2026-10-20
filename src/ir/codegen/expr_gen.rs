@@ -5056,6 +5056,16 @@ impl CodeGen {
                 access_s
             }
             ExprKind::IndexGet { base, key } => {
+                // BUG-345: `fn_name[checker_name]` — checker 实例化语法（如
+                // `guarded_add[check_positive] ~: (1, 2)`）。checker 已在函数体内
+                // 应用（`__ps = check_positive(__ps)`），此处跳过索引直接返回函数名。
+                if let ExprKind::Var(base_name) = &base.kind {
+                    if self.top_level_fns.contains(base_name.as_str())
+                        && matches!(&key.kind, ExprKind::Var(_))
+                    {
+                        return base_name.clone();
+                    }
+                }
                 let base_s = self.gen_expr(base);
                 // Box/Rc/Arc dereference: x[0] on Box<i64> → *x
                 if matches!(&base.ty, IrType::Named { path, .. } if path == "Box" || path == "Rc" || path == "Arc")
