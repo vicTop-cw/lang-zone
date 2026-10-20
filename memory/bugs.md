@@ -1508,3 +1508,15 @@ Fix (commit ...): expr_gen.rs 自由函数 zip 补 `.collect::<Vec<_>>()`。修�
 
 ### FIXED(2026-10-20T19:59:13Z / BUG-381)
 - evidence: Commit: src/ir/codegen/expr_gen.rs 自由函数 zip 补 .collect::<Vec<_>>()。edge_collections.lz rustc 编译干净，输出 [(1, 10), (2, 20), (3, 30)]。
+## BUG-382 [2026-10-20T20:04:15Z] [medium] FIXED
+- summary: 非 self 容器索引元素类型非 Copy 时缺 .clone() — Vec<Vec<i64>> 取 [0] → E0507
+- detail: expr_gen.rs IndexGet 的 else 分支（非 self、非泛型函数）：`matrix[0]` 当 matrix 是 Vec<Vec<i64>> 时直接生成 `matrix[0i64 as usize]` → E0507 cannot move out of index。
+
+对照 self_field/self_base 分支（line 5344-5347）与 in_generic_fn 分支（line 5349-5354）都已自动补 .clone()，唯独 else 分支漏了。
+
+Fix: else 分支根据元素类型 is_copy_ty 判定，非 Copy 时补 .clone()。edge_ops.lz `matrix[0]` 现输出 [1, 2] 正确。
+
+
+
+### FIXED(2026-10-20T20:04:20Z / BUG-382)
+- evidence: Commit: src/ir/codegen/expr_gen.rs IndexGet else 分支按 is_copy_ty 判定补 .clone()。edge_ops.lz rustc 编译干净，matrix[0] 输出 [1, 2]。

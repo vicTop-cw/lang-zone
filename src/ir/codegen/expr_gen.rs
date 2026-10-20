@@ -5374,8 +5374,20 @@ impl CodeGen {
                                     format!("{}[{}].to_vec()", base_s, key_s)
                                 }
                             } else {
+                                // BUG-382：非 self / 非泛型函数内容器索引，元素类型若非 Copy
+                                // （如 Vec<Vec<i64>> 取 matrix[0]）直接 `base[i]` 会 move 出
+                                // 容器 → E0507 cannot move out of index。i64/String 之外
+                                // （Vec/Struct/String 等）自动补 .clone() 得 owned 值。
+                                let elem_is_copy = match &base.ty {
+                                    IrType::Named { args, .. } => {
+                                        args.first().map_or(true, |e| self.is_copy_ty(e))
+                                    }
+                                    _ => true,
+                                };
+                                let suffix = if elem_is_copy { "" } else { ".clone()" };
                                 self.gen_seq_neg_index(base, key, &base_s)
-                                    .unwrap_or_else(|| format!("{}[{}]", base_s, key_s))
+                                    .map(|n| format!("{}{}", n, suffix))
+                                    .unwrap_or_else(|| format!("{}[{}]{}", base_s, key_s, suffix))
                             }
                         }
                     }
