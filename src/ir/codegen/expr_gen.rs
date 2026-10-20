@@ -6026,7 +6026,19 @@ impl CodeGen {
             } => {
                 // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Arc::new 包装
                 // （factory_chain: |a| => |b| => x + a + b → move |a| { Arc::new(move |b| {...}) }）
-                let nested = self.nested_fn_ret && matches!(&body.kind, ExprKind::Lambda { .. });
+                // box_lambda（值位置闭包，如 `let add: (int) -> (int) -> int = |a| |b| a + b`）
+                // 同样触发：外层闭包返回值是另一个闭包，必须装箱为 Arc<dyn Fn>。
+                let nested = matches!(&body.kind, ExprKind::Lambda { .. })
+                    && (self.nested_fn_ret
+                        || self.box_lambda
+                        || matches!(&expr.ty, IrType::Fn { ret, .. }
+                            if matches!(ret.as_ref(), IrType::Fn { .. }))
+                        || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Fn { ret, .. })
+                            if matches!(ret.as_ref(), IrType::Fn { .. }))
+                        // 未标注的柯里化闭包（`let add = |a| |b| a + b`）：外层闭包返回
+                        // 内层闭包，Rust 无法从 `|a| move |b| {...}` 推断返回类型（E0282），
+                        // 必须装箱内层为 Arc<dyn Fn> 并给参数加 i64 标注。
+                        || matches!(&expr.ty, IrType::Any));
                 // 闭包返回类型注解（`|x| -> T = ...`）：生成 `-> T` 让 Rust 闭包显式标注，
                 // 否则 `or_else(b, |e: str| -> Result<int,int> = Ok(100))` 无法从 Ok(100)
                 // 推断 Err 泛型（E0283）
@@ -6044,7 +6056,12 @@ impl CodeGen {
                     .iter()
                     .map(|p| {
                         let ps = self.gen_param(p);
-                        if matches!(&p.ty, IrType::Any) && !body_s.contains(&p.name) {
+                        if matches!(&p.ty, IrType::Any)
+                            && (nested
+                                || self.box_lambda
+                                || self.nested_fn_ret
+                                || !body_s.contains(&p.name))
+                        {
                             format!("{}: i64", p.name)
                         } else {
                             ps
@@ -6147,7 +6164,13 @@ impl CodeGen {
                     // Lambda 体内不生成 return，让尾表达式成为闭包返回值
                     child.suppress_tail_return = true;
                     // 嵌套 Fn 返回：内层闭包尾表达式需 Arc::new 包装（E0562）
-                    child.nested_fn_ret = self.nested_fn_ret;
+                    // 值位置闭包本身返回 Fn（如 `let add: (int) -> (int) -> int = |a| |b| a + b`）：
+                    // 闭包体尾表达式是内层 Lambda，需 Arc::new 装箱为 Arc<dyn Fn>（E0308）。
+                    child.nested_fn_ret = self.nested_fn_ret
+                        || matches!(&expr.ty, IrType::Fn { ret, .. }
+                            if matches!(ret.as_ref(), IrType::Fn { .. }))
+                        || matches!(&*self.current_expected_ty.borrow(), Some(IrType::Fn { ret, .. })
+                            if matches!(ret.as_ref(), IrType::Fn { .. }));
                     child.in_lambda_block = true;
                     // 块内含无值 return（return;）→ 尾表达式丢弃值（生成 expr;），
                     // 使闭包返回类型为 ()（var_call_block.lz demo_return_no_value）
@@ -6251,7 +6274,12 @@ impl CodeGen {
                         c.fn_use_count = self.fn_use_count.clone();
                         c.suppress_tail_return = true;
                         c.parent_lambda_non_move = true;
-                        c.gen_expr(&cloned)
+                        c.nested_fn_ret = self.nested_fn_ret;
+                        if nested {
+                            format!("Arc::new({})", c.gen_expr(&cloned))
+                        } else {
+                            c.gen_expr(&cloned)
+                        }
                     } else if body_refs_noncopy_external(body, &params) {
                         let cloned = clone_noncopy_external(body, &params);
                         let mut c = CodeGen::new();
@@ -6264,7 +6292,12 @@ impl CodeGen {
                         c.cur_fn_name = self.cur_fn_name.clone();
                         c.fn_use_count = self.fn_use_count.clone();
                         c.suppress_tail_return = true;
-                        c.gen_expr(&cloned)
+                        c.nested_fn_ret = self.nested_fn_ret;
+                        if nested {
+                            format!("Arc::new({})", c.gen_expr(&cloned))
+                        } else {
+                            c.gen_expr(&cloned)
+                        }
                     } else if matches!(&body.kind, ExprKind::Var(name)
                         if !matches!(body.ty, IrType::Int | IrType::F64 | IrType::Bool)
                         && !params.iter().any(|p| p.split(':').next().unwrap_or(p) == name))
