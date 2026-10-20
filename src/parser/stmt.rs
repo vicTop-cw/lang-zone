@@ -1465,6 +1465,54 @@ impl ParserStmtExt for Parser {
             });
         }
 
+        // 列表解构绑定: let [a, b] = expr 或 let [(a, b), (c, d)] = expr
+        // （BUG-368: nested_list_tuple.lz 报「Expected variable name, got LBrack」——
+        // 原先只有 LParen 走解构分支，LBrack 落到普通 let 绑定名解析）
+        if self.check(&Token::LBrack) {
+            self.advance(); // consume [
+            let mut patterns: Vec<Pattern> = Vec::new();
+            loop {
+                match self.peek().clone() {
+                    Token::RBrack => break,
+                    Token::LParen | Token::LBrack | Token::LBrace => {
+                        patterns.push(self.parse_pattern()?);
+                    }
+                    Token::Underscore => {
+                        self.advance();
+                        patterns.push(Pattern::Wildcard);
+                    }
+                    _ => match self.advance() {
+                        Token::Ident(n) => patterns.push(Pattern::Ident(n)),
+                        Token::Comma => continue,
+                        t => {
+                            return Err(format!(
+                                "Expected variable name in list destructuring, got {:?}",
+                                t
+                            ))
+                        }
+                    },
+                }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+            }
+            self.expect(Token::RBrack)?;
+
+            let ty = if self.check(&Token::Colon) {
+                self.advance();
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            self.expect(Token::Eq)?;
+            let value = self.parse_maybe_build_value()?;
+            return Ok(Stmt::LetTuple {
+                names: patterns,
+                ty,
+                value,
+            });
+        }
+
         let name = match self.advance() {
             Token::Ident(n) => n,
             Token::True => "True".to_string(),
