@@ -1105,3 +1105,8 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - summary: `spawn` 非 async 函数返回值的 `await` 报 "i64 is not a future"
 - detail: `let t = spawn work(21)`（work 是普通 def 而非 async def）→ `std::thread::spawn(move || { 42 })` 返回 `JoinHandle<i64>`。但 `await t` 恒生成 `t.await`（要求 Future），而 `JoinHandle` 不是 Future → E0277。修法：codegen 依 receiver 类型选 `.await`（Future）或 `.join()`（JoinHandle）。
 - repro: TEMP/probe/sweep13/spawn2.lz
+
+## BUG-349 [2026-10-20T16:55:00+08:00] [medium] FIXED：
+- summary: `for k in dict:` 迭代出 (K,V) 元组而非键，`d[k]` 报 `String: Borrow<(String, i64)>`
+- detail: HashMap::into_iter() 产出 (K,V)，但 LZ 语义（对齐 Python）要求 for 直接迭代键。修法：stmt_gen.rs 的 for 循环迭代器选择加 `iter_is_dict` 检测，Dict/HashMap 用 `.keys().cloned()`。
+- evidence: src/ir/codegen/stmt_gen.rs 新增 iter_is_dict + 分支；TEMP/probe/sweep14/dict_iter.lz 从 C-ERR 变 OK（输出 `a 1 | b 2 | "a" 1 | "b" 2`）。

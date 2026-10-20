@@ -1949,6 +1949,13 @@ impl CodeGen {
                 // 歧义（E0034 multiple into_iter found），用 .iter() 明确（item=&T）
                 let iter_is_self_borrow =
                     matches!(&iter.kind, ExprKind::Var(n) if n == "self") && self.borrow_self;
+                // BUG-349：Dict/HashMap 直接 for 迭代默认按键（Python 语义），
+                // 与 variadic kwargs 分支（.iter() 取 (&K,&V) 元组）区分。
+                let iter_is_dict = matches!(&iter.ty, IrType::Named { path, .. }
+                    if path == "Dict" || path == "HashMap")
+                    && !iter_is_ref
+                    && !iter_is_self_borrow
+                    && !iter_is_variadic_slice;
                 let iter_expr = |cg: &Self| -> String {
                     let s = cg.gen_expr(iter);
                     // 字符串 for 迭代：String 不实现 IntoIterator（E0599），
@@ -1975,6 +1982,11 @@ impl CodeGen {
                         format!("({}).iter()", s)
                     } else if iter_is_ref {
                         format!("(*{}).clone().into_iter()", s)
+                    } else if iter_is_dict {
+                        // BUG-349：Dict/HashMap 直接 for 迭代默认按键（Python 语义）。
+                        // HashMap::into_iter() 产出 (K,V) 元组，而 LZ 语义是键迭代
+                        // → 用 .keys().cloned()（K: Clone）取 owned 键。
+                        format!("({}).keys().cloned()", s)
                     } else if iter_is_variadic_slice {
                         // variadic 切片 &[T]：.iter().copied() 给出 T（Copy 类型）；
                         // variadic kwargs &HashMap/Dict：item 为 (&K,&V) 元组，
