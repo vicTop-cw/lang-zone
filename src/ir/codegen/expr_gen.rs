@@ -4570,13 +4570,17 @@ impl CodeGen {
                         // 参数名比较则需 |&x| 模式解引用，否则 `x > 2i64` 比较 &i64 > i64 →
                         // E0308（BUG-279，TEMP/probe/sweep5/closure_filter.lz 实测）。
                         // body 已含 `*x`（如 free function filter）时 strip 不加 &（保留裸参）。
+                        // 裸 Vec：`.iter().cloned()` 而非 `.into_iter()`（后者 move 接收者，LZ 值语义
+                        // 允许重复读该变量——method_overload.lz `xs.filter(...)` 后再
+                        // `xs.map(...)` → E0382 moved value）。cloned 迭代器 filter 闭包
+                        // 参数仍是 &Item，map 闭包参数是 owned Item，与 into_iter 等价。
                         let lambda_arg = if method == "filter" {
                             strip_lambda_type_with_ref(&args_s[0])
                         } else {
                             args_s[0].clone()
                         };
                         return format!(
-                            "({}).into_iter().{}({}).collect::<Vec<_>>()",
+                            "({}).iter().cloned().{}({}).collect::<Vec<_>>()",
                             recv, method, lambda_arg
                         );
                     }
