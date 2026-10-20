@@ -1327,3 +1327,15 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T17:05:00Z / BUG-367)
 - evidence: 提交 156ac15 `fix(parser): support Fn[...] -> R higher-order function type syntax`。改 src/parser/parser.rs parse_type 的 `Ident(n)` 分支：新增 `"Fn"` 特例，遇 `Token::LBrack` 则解析方括号内逗号分隔参数类型列表、可选 `-> R` 返回类型，产出 `Type::Fn`；无 `[` 时回退 `Type::Named("Fn")`。验证：higher_order.lz（`f: Fn[int] -> int` + `apply_twice((|v| v + 1), 10)`）COMPILE OK；探针门禁 116/98/18 → 116/99/17（+1 OK，无回归）。
+## BUG-368 [2026-10-20T17:09:32Z] [high] FIXED
+- summary: BUG-368: let 列表解构 `let [a, b] = expr` 不支持 → Expected variable name, got LBrack
+- detail: `let [(a, b), (c, d)] = [(1, 2), (3, 4)]` 报「Expected variable name, got LBrack」。parse_binding_stmt_let 只对 `(` 起始走解构分支（LParen 解构路径），`[` 起始落到普通绑定名解析（parse_binding_body 只收 Ident）。
+
+修复（`64e1601`）：新增 LBrack 分支 —— 解析方括号内逗号分隔的嵌套模式（tuple/list/brace pattern、Ident、Underscore），产出 `Stmt::LetTuple` 供 IR 端列表解构。
+
+修复后 nested_list_tuple.lz COMPILE OK，探针门禁 116/99/17 → 116/100/16。
+
+
+
+### FIXED(2026-10-20T17:09:44Z / BUG-368)
+- evidence: 提交 64e1601 `fix(parser): let list destructuring let [a, b] = expr`。改 src/parser/stmt.rs parse_binding_stmt_let：在 LParen 解构分支之后新增 `if self.check(&Token::LBrack)` 分支，解析方括号内逗号分隔的嵌套模式（LParen/LBrack/LBrace → parse_pattern；Ident → Pattern::Ident；Underscore → Wildcard），产 `Stmt::LetTuple`。验证：nested_list_tuple.lz（`let [(a, b), (c, d)] = [(1, 2), (3, 4)]` 后 print a/b/c/d）COMPILE OK；探针门禁 116/99/17 → 116/100/16（+1 OK，无回归）。
