@@ -1229,3 +1229,58 @@ eeds_unapply 条件，对非递归带字段普通 struct 合成 __unapply__；�
 
 ### FIXED(2026-10-20T14:01:42Z / BUG-361)
 - evidence: src/ir/builder/infer.rs 新增 bind_comp_vars()（L14-41），把每个推导式循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 args[0]；Range 恒为 int；Str 为 Str），并应用于 ListComprehension/DictComprehension/SetComprehension 三个推导 arm。验证：multi_for_str_tuple / multi_for_dict_str / multi_for_set_str / multi_for_range 4 个探针从 FAIL 转 OK（rustc 编译通过），全量 gate 从 87 OK/27 FAIL 升至 90 OK/26 FAIL，commit e0aea87。
+## BUG-362 [2026-10-20T14:59:09Z] [high] FIXED
+- summary: 柯里化闭包（`|a| |b| a + b`）内层未 Arc::new 装箱且 Any 参数未标注 i64 → E0308/E0282
+- detail: `let add: (int) -> (int) -> int = |a| |b| a + b` 生成 `Arc::new(|a: i64| { move |b| { LzAdd::__add__(a.clone(), b) } })` —— 内层闭包是裸 `move |b| {...}` 而非 `Arc::new(move |b| {...})`，Rust 无法把裸闭包塞进 `Arc<dyn Fn(i64) -> i64>`（E0308）。未标注形态 `let add = |a| |b| a + b` 因外层闭包 `expr.ty=Any`、box_lambda=false 而完全不触发 nested 路径，且 `|a|`/`|b|` 参数缺 i64 标注 → E0282（无法推断 `LzAdd::__add__` 的泛型）。
+
+根因两处：
+1. expr_gen.rs Lambda 臂的 `nested` 标志（原 L6031）仅由 `nested_fn_ret`（def-return Fn(Fn)）或 `box_lambda`（let 的 ty 是 Fn）触发；未标注的柯里化闭包两者皆假。
+2. Lambda 臂里 `body_s` 在 else 分支（L6257+）被重新计算，直接覆盖并丢弃 L6049 的 `Arc::new(...)` 包装。
+
+修法：
+- `nested` 判定追加 `matches!(&expr.ty, IrType::Any)`（未标注柯里化闭包必装箱）。
+- else 分支重建 body_s 时若 `nested` 则再套 `Arc::new(...)`，并把 `nested_fn_ret` 传给子 CodeGen。
+- Any 参数在 `nested || box_lambda || nested_fn_ret || 未被 body 使用` 时补 `: i64` 标注。
+
+TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无类型标注），已按 `|x: int|`/`|y: int|` 修正。
+
+门禁：116/92/24（基线 116/91/25）—— nested_closure_typed / nested_closure / nested_closure_capture 三探针转绿。
+- reported_by: fist-agent（lz-combo-r14 组合轮）
+- task_id: T0r677
+
+
+
+### FIXED(2026-10-20T14:59:25Z / BUG-362)
+- evidence: commit f9e16e7，src/ir/codegen/expr_gen.rs 三处：① `nested` 判定追加 `matches!(&expr.ty, IrType::Any)`；② Lambda 臂 else 分支重建 body_s 时若 `nested` 再套 `Arc::new(...)` 并把 `nested_fn_ret` 传给子 CodeGen；③ Any 参数在 `nested || box_lambda || nested_fn_ret || 未被 body 使用` 时补 `: i64`。门禁 116/92/24（基线 116/91/25）：nested_closure_typed、nested_closure、nested_closure_capture（探针改为 `|x: int|`/`|y: int|`）三探针转绿。
+## BUG-363 [2026-10-20T16:29:41Z] [high] FIXED
+- summary: BUG-363: box_lambda 强制 move 顺序错误 + child 未继承 box_lambda → nested_closure_typed E0373、closure_returning_closure E0373
+- detail: 两处闭包生成缺陷（探针门禁 116/92/24）：
+
+1. **closure_returning_closure.lz**（`def make_adder(x: int) -> fn(int) -> int = |y| x + y`）走 Lambda 分支的 else 路径，`move_kw` 在 `box_lambda` 强制之前计算，导致强制被覆盖 → 生成 `Arc::new(|y| { ... })`（无 move）→ E0373。
+
+2. **nested_closure_typed.lz**（`let add: (int) -> (int) -> int = |a| |b| a + b`）外层走 else 路径、内层经 `body_refs_noncopy_external` 分支的 child CodeGen 重建，child 未继承 `box_lambda` → 内层生成 `Arc::new(|b| ...)`（无 move）→ E0373。
+
+修复（`8d6cfd6`）：
+- `box_lambda` 强制 `uses_move = true` 移到 `move_kw` 计算之前（else 分支）。
+- 两个 child CodeGen 分支都继承 `c.box_lambda = self.box_lambda`。
+- child 里 `if nested` 的 Arc::new 包改为 `if nested && !self.box_lambda`（避免双重 Arc::new → E0277）。
+- 顶层 body_s 的 `if nested` 包同样加 `!self.box_lambda` 条件。
+
+修复后：nested_closure_typed.lz 生成 `Arc::new(move |a: i64| { Arc::new(move |b: i64| { LzAdd::__add__(a.clone(), b.clone()) }) })`，COMPILE OK；closure_returning_closure.lz COMPILE OK。探针门禁 116/92/24 → 116/93/23。
+
+
+
+### FIXED(2026-10-20T16:29:52Z / BUG-363)
+- evidence: 提交 8d6cfd6 `fix(codegen): box_lambda force move before move_kw + child inherits box_lambda + avoid double Arc wrap`。改 src/ir/codegen/expr_gen.rs：① else 分支 box_lambda 强制 uses_move=true 移到 move_kw 之前；② 两个 child CodeGen 分支 c.box_lambda = self.box_lambda；③ 两处 `if nested` 包加 `&& !self.box_lambda` 防双重 Arc。修复后 nested_closure_typed.lz 生成 `Arc::new(move |a: i64| { Arc::new(move |b: i64| { LzAdd::__add__(a.clone(), b.clone()) }) })` COMPILE OK，closure_returning_closure.lz COMPILE OK，探针门禁 116/92/24 → 116/93/23（+1 OK，无回归）。
+## BUG-364 [2026-10-20T16:39:01Z] [high] FIXED
+- summary: BUG-364: list GenBuild ctor 解构元组 yield 再 vec! 包一层 → E0308 expected Vec<(i64,)> found Vec<Vec<i64>>
+- detail: `list *: yield (1,)` 的目标类型是 `Vec<(i64,)>`，但 codegen 在 `list_ctor` 时把元组 yield 解构为 `__a0` 再 `vec![__a0]` 包一层，得到 `Vec<i64>` → E0308 expected `Vec<(i64,)>` found `Vec<Vec<i64>>`。
+
+修复（`8d39474`）：GenBuild tail 中 `list_ctor` 分支直接收集 `__bb`（yield 本身即目标元素，不做解构+vec! 包装）；非 list_ctor 的 Tuple 分支保留原解构路径（调用函数需逐参传参）。
+
+修复后 build_block3.lz COMPILE OK，探针门禁 116/93/23 → 116/94/22。
+
+
+
+### FIXED(2026-10-20T16:39:43Z / BUG-364)
+- evidence: 提交 8d39474 `fix(codegen): list GenBuild ctor should not destructure tuple yields`。改 src/ir/codegen/expr_gen.rs GenBuild tail：list_ctor 分支直接返回 `"__bb"`（yield 本身即目标元素），不再解构元组再 vec![__a0] 包装；非 list_ctor 的 Tuple 分支保留原解构逐参传参路径。验证：build_block3.lz（`list *: yield (1,)`）生成 `__bb` 收集路径、COMPILE OK；探针门禁 116/93/23 → 116/94/22（+1 OK，无回归）。
