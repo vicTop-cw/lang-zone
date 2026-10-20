@@ -1368,3 +1368,17 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 
 ### FIXED(2026-10-20T17:21:57Z / BUG-370)
 - evidence: 提交 c2b3776 `fix(semantic): allow yield in function whose return type is Iterator[...]`。src/semantic_check.rs check_function：新增 `ret_is_iterator` 判定（返回类型为 Named("Iterator")/Named("iterator")，或 Generic 之 base 为二者），并在 yield 守卫 `cur.has_yield && f.return_type.is_some() && !f.is_iterator` 中加入 `&& !ret_is_iterator`。验证：generator.lz / generator2.lz（`def gen() -> Iterator<int>` + 三个 yield + `for v in gen(): print(v)`）COMPILE OK；探针门禁 116/102/14 → 116/104/12（+2 OK，无回归）。
+## BUG-371 [2026-10-20T17:35:04Z] [high] FIXED
+- summary: BUG-371: `struct Counter(value: int):` 圆括号字段 + 冒号开体 不支持 → 顶层 Colon 报错
+- detail: `struct Counter(value: int):` — 圆括号字段 struct 后跟冒号开体。LParen 分支解析完字段后立即 return，把 `:` 留给顶层解析 → 「Unexpected token at top level: Colon」（struct_methods.lz）。
+
+修复（`aafe33f`，src/parser/parser.rs parse_struct_like）：
+- LParen 分支：若紧随 `:`，把 name/generics/bounds/defaults/fields 暂存到新 transient 字段 paren_*，落入下方共享 Indent 体路径（跳过 Eq/Colon 分隔符校验，不重复消费分隔符）。
+- Indent 体路径：若 paren_name 有值则接管（name=paren_name、fields=paren_fields…），继续解析方法。
+
+修复后 struct_methods.lz COMPILE OK，探针门禁 116/104/12 → 116/105/11。cargo test 全部通过（`magic_demos_generated_rust_compiles` 的 extractor_unapply.lz 失败为既有回归，stash 后仍失败，与本修复无关）。
+
+
+
+### FIXED(2026-10-20T17:35:15Z / BUG-371)
+- evidence: 提交 aafe33f `fix(parser): struct Name(fields): colon-opens-body method block`。src/parser/parser.rs parse_struct_like 重构：① LParen 分支遇 `:` 时把 name/generics/bounds/defaults/fields 暂存到 Parser 新 transient 字段 paren_name/paren_fields/paren_generics/paren_generic_bounds/paren_generic_defaults（新增 5 字段 + new() 初始化），落入下方共享 Indent 体路径；② 分隔符校验与消费按 paren_name.is_none() 跳过；③ Indent 体路径若 paren_name 有值则接管 name/fields/generics（不重开字段列表）。验证：struct_methods.lz（`struct Counter(value: int):` + `def inc(self)`/`def get(self)` + `c.inc()`/`c2.get()`）COMPILE OK；探针门禁 116/104/12 → 116/105/11；cargo test 441+ 通过，唯一失败 `magic_demos_generated_rust_compiles`（extractor_unapply.lz）经 git stash 基线复核为既有回归，与本修复无关。
