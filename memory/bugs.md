@@ -1123,3 +1123,8 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
   2. expr_gen.rs `__go` 在 async 上下文检测参数 IR 类型是否为 `Future`，非 Future 时包 `async { ... }`；
   3. scan.rs 白名单补 `__spawn_sync`。
 - evidence: lz_builtins/src/runtime/builtins.rs + flat.rs 新增 `__spawn_sync`；src/ir/codegen/expr_gen.rs `__go` 分支按参数类型分流；TEMP/probe/sweep13/spawn2.lz 输出 `42`；CY/TESTS/11_concurrency/spawn_demo.lz 输出 `main done`；CY/TESTS/15_feature_matrix/async_spawn.lz 输出 `data_10 data_20`。
+
+## BUG-350 [2026-10-20T17:30:00+08:00] [medium] FIXED：
+- summary: spawn 参数 async/non-async 分流——async_fn_names 预扫描
+- detail: 初版只按 IR 类型 Future 判断，但 async 函数调用的 IR 类型是返回值（String/i64）非 Future。改用预扫描 async_fn_names 集合：codegen.generate() 时收集所有 is_async 函数名，__go 处检查 callee 是否 async 决定是否包 async {}。
+- evidence: src/ir/codegen/mod.rs 新增 async_fn_names 字段 + generate() 预扫描；expr_gen.rs __go 用 ExprKind::Call { callee: ExprKind::Var(name) } 判断；keywords_iterator.lz 输出 `positive | 1 | 2 | 3 | 0 | 1 | 2 | 1 | 3 | "error" | done | keywords demonstrated`；spawn2.lz 输出 `42`。
