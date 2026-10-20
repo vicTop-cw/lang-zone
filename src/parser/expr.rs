@@ -1851,6 +1851,11 @@ impl ParserExprExt for Parser {
                 // 作为普通标识符表达式使用
                 Ok(Expr::Ident(name))
             }
+            // BUG-346：`raise` 在表达式位（如 `else raise "bad"`）—— 解析为 Panic 表达式
+            Token::Raise => {
+                let msg = self.parse_expr()?;
+                Ok(Expr::Panic(Box::new(msg)))
+            }
             _ => Err(format!("Unexpected token in expression: {:?}", tok)),
         }
     }

@@ -1055,7 +1055,7 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/nested_tuple2.lz
 - reported_by: fist-agent（lz-combo-r10 组合轮）
 
-## BUG-342 [2026-10-20T15:00:00+08:00] [medium] OPEN：表达式位 {...} 恒解析为集合字面量，无块表达式歧义消解
+## BUG-342 [2026-10-20T15:00:00+08:00] [medium] FIXED：表达式位 {...} 恒解析为集合字面量，无块表达式歧义消解
 - summary: let y = { 42 } 被解析为 SetLit([42]) → Rust HashSet<i64> → y + 1 报 E0369（TEMP/probe/sweep10/block_expr3.lz 实测）。let y = { let a = 1; let b = 2; a + b } 报 "Unexpected token in expression: Let"（lock_expr4.lz 实测）。README L50 声称支持「块表达式」，但 Expr::BlockExpr(Vec<Stmt>) 仅在 ~: 构建块闭包（src/parser/expr.rs L1129）与 comptime: 块（L1149/L1163）处创建；表达式位 Token::LBrace 处理器（L1279-1398）无条件走 字典/集合推导/集合字面量 分支，无消歧到 BlockExpr 的路径。
 - detail: 歧义本质：{42} 既是集合字面量也是单表达式块。现行取舍把 {expr} 恒当集合（对含语句的 {let...} 则报错而非回退），导致「块表达式」承诺落空。修法：在 L1285 let first = self.parse_expr()? 之前插入消歧——若 { 后首 token 是语句关键词（Let/Return/If/For/While/Match/Raise/Assert/Yield/Break/Continue/Defer/Pass 等），或首 token 是 Newline/Indent，改走 self.parse_block() 生成 Expr::BlockExpr；否则维持集合/字典分支。改动点限于 src/parser/expr.rs 的 LBrace 分支（约 20 行），风险可控，但需确认现有集合/字典字面量语料（CY/TESTS 大量 {1,2,3}）不回归。
 - 影响面：中（便利性缺口 + 类型混淆，但语料未触达——语料里 {...} 均为集合/字典字面量）。
@@ -1063,7 +1063,7 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/block_expr3.lz
 - reported_by: fist-agent（lz-combo-r10 组合轮）
 
-## BUG-343 [2026-10-20T15:05:00+08:00] [low] OPEN：struct 字段 mut 前缀不被解析（parser 未识别 Token::Mut 作字段修饰符）
+## BUG-343 [2026-10-20T15:05:00+08:00] [low] FIXED：struct 字段 mut 前缀不被解析（parser 未识别 Token::Mut 作字段修饰符）
 - summary: struct Counter = mut count: int 报 "Expected Eq, got Newline at pos 10"。src/parser/parser.rs L2333 的字段解析只接受 Token::Ident | MagicMethod | True | False，Token::Mut 落入 _ => break 分支（L2402），mut 被留在 token 流中导致后续 = 期望失败。
 - detail: let mut x = ...（语句位）正常工作；struct 字段位未接 mut。修法：在 L2333 分支前加 Token::Mut => { self.advance(); <现有字段解析逻辑> }，并把 mut 标记存到 Field（src/ast/decl.rs L178 无 is_mut 字段，需新增）或暂忽略（字段可变性由 ef self 方法决定，语料中无 mut 字段用法，impl_block.lz 通过 ef self + 字段赋值即实现可变）。
 - 影响面：低（语料零命中，所有 struct 字段默认不可变 + ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可行）。
@@ -1091,3 +1091,12 @@ test_functions、coverage、ir-edge-boundary-values）——逐一在 withfix �
 - detail: CY/TESTS/12_build_blocks/checker_call.lz L12 触发。codegen 把 `func[checker] ~: args` 解析为对函数值做下标运算，实际应生成闭包调用 `guarded_add((1,2).0, (1,2).1)`（或内联）。非本轮改动引入，Python 后端同名文件 `checker_call.pyx` 已有独立 BUG-278 记录（`__contains__` 垫片），本件是 Rust 后端独立缺陷。
 - repro: `cargo run --quiet -j 1 -- CY/TESTS/12_build_blocks/checker_call.lz && rustc --extern lz_builtins=<rlib> checker_call.rs` → E0608
 - severity: medium
+
+## BUG-346 [2026-10-20T16:42:00+08:00] [medium] FIXED：
+- summary: `raise` 在表达式位（如 `else raise "bad"`）不被解析
+- detail: parse_primary 无 `Token::Raise` 分支 → `if cond then a else raise "bad"` 报 "Unexpected token in expression: Raise"。修法：parse_primary 加 `Token::Raise` 分支，解析后续表达式为 `Expr::Panic(msg)`（与 `raise` 语句一致，builder/codegen 已支持）。
+- evidence: src/parser/expr.rs parse_primary 新增 `Token::Raise` arm；TEMP/probe/sweep12/raise_try.lz、raise_else2.lz 均编译运行通过（输出 `pos | err: Any { .. }`）。
+
+## BUG-347 [2026-10-20T16:42:30+08:00] [low] OPEN：
+- summary: `check` 是保留关键字，不能用作函数名（`def check(...)` → "Expected function name, got Check"）
+- detail: Token 枚举含 `Check`（测试框架 `@check` 装饰器相关），lexer 把 `check` 识别为关键字，任何以 `check` 命名的用户函数/变量都无法解析。是否应允许上下文无关的普通标识符位使用 `check`？需与保留字策略对齐。
