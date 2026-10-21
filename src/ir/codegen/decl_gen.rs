@@ -894,10 +894,15 @@ impl CodeGen {
                                 // `impl Fn(b) -> c + 'static` with trait `Send`）。
                                 // 只在这一种函数收紧；map/filter/for_each 等返回非 fn 值
                                 // 的 HOF 形参保持原样，既有的借用捕获语义不受影响。
+                                // BUG-CORE-compose：fn 形参为 `impl Fn(...)` opaque，其**值语义**（LZ 默认按值）在体内
+                                // 被捕获进返回闭包或再次使用时会生成 `f.clone()`，opaque 无 Clone →
+                                // E0599（compose.lz 报 no method named `clone`）。这里统一给
+                                // `impl Fn` 加 `+ Clone`：闭包字面量与 Arc<dyn Fn…> 转发闭包
+                                // 的捕获皆可 Clone，契约收紧不破坏调用点。
                                 let send_bound = if matches!(&f.ret_ty, IrType::Fn { .. }) {
-                                    " + Send + Sync"
+                                    " + Send + Sync + Clone"
                                 } else {
-                                    ""
+                                    " + Clone"
                                 };
                                 format!(
                                     "impl Fn({}) -> {} + 'static{}",
