@@ -1717,14 +1717,21 @@ impl CodeGen {
                             }
                         }
                         "str" => {
-                            // 用户 struct 且有 __str__ → 调用 __str__()；否则用 Display
+                            // 用户 struct 且有 __str__ → 调用 __str__()；否则用 Display。
+                            // 内建集合（Vec/HashMap/HashSet）无 Display，str([1,2,3]) 走
+                            // `format!("{}", vec)` → E0277；改为 `{:?}`（Debug）与 print 一致。
+                            // 仅集合走 Debug，标量（含 F64，需 "42" 而非 "42.0"）照旧 Display。
                             if args.len() == 1 {
                                 if let IrType::Named { path, .. } = &args[0].ty {
                                     if self.is_known_type(path) {
                                         format!("({}).__str__()", args_s[0])
+                                    } else if self.is_collection_type(&args[0].ty) {
+                                        format!("format!(\"{{:?}}\", {})", args_s[0])
                                     } else {
                                         format!("format!(\"{{}}\", {})", args_s[0])
                                     }
+                                } else if self.is_collection_type(&args[0].ty) {
+                                    format!("format!(\"{{:?}}\", {})", args_s[0])
                                 } else {
                                     format!("format!(\"{{}}\", {})", args_s[0])
                                 }
