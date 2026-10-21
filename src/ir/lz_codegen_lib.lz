@@ -485,7 +485,10 @@ def gen_block(b: BlockIR, fn_raises: MaybeIrType) -> String =
             if ss.len() == 0:
                 String::new()
             else:
-                "{\n" + gen_body(ss, false, "".to_string(), fn_raises) + "}"
+                // BUG-406：gen_block 用于 for/if/while/try/defer/match 分支等嵌套块，
+                // 其尾表达式不是函数尾，不得发射 `return`。is_main=true 仅抑制 ExprStmt
+                // 的尾 return，无其他副作用；函数体尾部仍由 gen_item 直接 gen_body。
+                "{\n" + gen_body(ss, true, "".to_string(), fn_raises) + "}"
 
 // ── IrType → Rust 类型 ──
 def rust_type(t: IrType) -> String =
@@ -689,7 +692,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.TupleLit(elems: es, ty: t) => "(".to_string() + expr_cs_list(es, fn_raises) + ")".to_string()
         case Expr.ListLit(items: xs, ty: t) => "[".to_string() + expr_cs_list(xs, fn_raises) + "]".to_string()
-        case Expr.BlockExpr(stmts: ss, ty: t) => "{\n".to_string() + gen_body(ss, false, "".to_string(), fn_raises) + "}"
+        case Expr.BlockExpr(stmts: ss, ty: t) => "{\n".to_string() + gen_body(ss, true, "".to_string(), fn_raises) + "}"
         case Expr.GenExpr(yield_of: y, ty: t) => "gen ".to_string() + gen_expr(y, fn_raises)
         case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + ")".to_string()
         case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64..".to_string() + gen_expr(en, fn_raises)
@@ -876,7 +879,9 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
         case Stmt.Match(scrutinee: s, arms: as_) =>
             "match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
         case Stmt.Block(stmts: ss) =>
-            "{\n".to_string() + gen_body(ss, false, "".to_string(), fn_raises) + "}".to_string()
+            // BUG-406：裸块语句是嵌套上下文，其尾部表达式不是函数尾，不得发射 `return`
+            // （is_main=true 仅在 gen_stmt 的 ExprStmt 处抑制尾 return，无其他副作用）。
+            "{\n".to_string() + gen_body(ss, true, "".to_string(), fn_raises) + "}".to_string()
         case Stmt.Assert(cond: c) =>
             "assert!(".to_string() + gen_expr(c, fn_raises) + ");".to_string()
         case Stmt.Raise(value: v) =>
