@@ -350,6 +350,24 @@ impl CodeGen {
     /// 否则 E0382 use of moved value）。参数个数：Var 实参查 fn_value_carriers 登记表（IR 常把
     /// 偏应用变量标成非 Fn），调用/块实参取自身 `IrType::Fn` 的参数表。
     pub(crate) fn fn_value_fwd(&self, s: &str, a: &Expr) -> Option<String> {
+        // 内置作一等 fn 值传入高阶函数（`apply_len(nums, len)`）：内置 Rust 形参是 &T，
+        // 直接传值 `f(len)` 报 E0631（expected fn(Vec<T>)->i64, found fn(&T)->int）。
+        // 生成转发闭包，对引用形参自动取 &：`move |__lz_fv0| len(&__lz_fv0)`。
+        if let ExprKind::Var(name) = &a.kind {
+            if let Some(refs) = super::scan::builtin_ref_params(name) {
+                let inner: Vec<String> = refs
+                    .iter()
+                    .enumerate()
+                    .map(|(k, is_ref)| {
+                        let v = format!("__lz_fv{}", k);
+                        if *is_ref { format!("&{}", v) } else { v }
+                    })
+                    .collect();
+                let params: Vec<String> = (0..refs.len()).map(|k| format!("__lz_fv{}", k)).collect();
+                let call = format!("{}({})", s, inner.join(", "));
+                return Some(format!("move |{}| {}", params.join(", "), call));
+            }
+        }
         let arity = match &a.kind {
             ExprKind::Var(name) => self.fn_value_carriers.get(name.as_str()).copied(),
             ExprKind::Call { .. } | ExprKind::BlockExpr { .. } => match &a.ty {
@@ -823,7 +841,19 @@ impl CodeGen {
                 // 函数参数调用（iter.lz `predicate(item)`，predicate: fn(ref I.Item) -> bool）：
                 // callee 是 Fn 类型变量且其参数是 ref，实参自动取引用（&item），
                 // 否则 E0308 expected &<I as IntoIterator>::Item, found associated type
-                let callee_fn_refs: Option<Vec<bool>> = match &callee.ty {
+                // 内置作一等 fn 值时（`len.clone()` / `f(len)`），其值类型丢失 `&`
+                // （值类型参数被拍平为 value），故优先从 builtin_ref_params 还原真实引用性
+                // （BUG-395 / BUG-397：len 作值调用报 expected `&_`, found String）。
+                let callee_fn_refs: Option<Vec<bool>> = match &callee.kind {
+                    ExprKind::Var(n) => super::scan::builtin_ref_params(n)
+                        .map(|r| r.to_vec()),
+                    ExprKind::MethodCall { receiver, method, .. } if method == "clone" => match &receiver.kind {
+                        ExprKind::Var(n) => super::scan::builtin_ref_params(n).map(|r| r.to_vec()),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+                .or_else(|| match &callee.ty {
                     // callee 是 fn 类型表达式（Var 或 self.pred.clone() 等字段访问）：
                     // 参数是 ref 时实参自动取引用（&item），否则 E0308 expected
                     // &Item, found Item（iter.lz find / traits.lz Filter 的 predicate(item)）
@@ -834,7 +864,7 @@ impl CodeGen {
                             .collect(),
                     ),
                     _ => None,
-                };
+                });
 
                 // 检测 ~: 元组解包模式：连续的 UnpackBuildCall 参数
                 let has_unpack = args.iter().any(|a| {

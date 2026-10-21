@@ -1778,6 +1778,32 @@ pub(crate) const LZ_BUILTIN_FN_NAMES: &[&str] = &[
     "unique_by",
 ];
 
+/// 内置函数的 Rust 形参是否为引用（&T / &str）。仅在用户把内置当作**一等函数值**使用
+/// （传给高阶函数、或 `len.clone()(x)` 直接调用）时才会命中原始内置签名；直接调用
+/// （`len(x)` / `contains(xs,x)`）已被降级为 `.len()` / `.contains(&x)` 方法调用，无需本表。
+/// 缺失该信息时，`len` 作值的类型丢失 `&` → E0631 / E0308（expected `&_`, found value）。
+/// 取值与 lz_builtins 真实签名逐一对齐；未列出的内置按无引用形参处理。
+pub(crate) fn builtin_ref_params(name: &str) -> Option<&'static [bool]> {
+    match name {
+        // runtime/builtins.rs
+        "len" => Some(&[true]),        // len<T: Len>(obj: &T) -> i64
+        "id" => Some(&[true]),         // id<T>(val: &T) -> usize
+        "hash" => Some(&[true]),       // hash<T: Hash>(val: &T) -> u64
+        "type_of" => Some(&[true]),    // type_of<T>(_val: &T) -> String
+        "isinstance" => Some(&[true]), // isinstance<T:'static>(_val: &T) -> String
+        "lz_int" => Some(&[true]),     // lz_int(s: &str) -> Result<i64, String>
+        "lz_float" => Some(&[true]),   // lz_float(s: &str) -> Result<f64, String>
+        "lz_bool" => Some(&[true]),    // lz_bool(s: &str) -> Result<bool, String>
+        "input" => Some(&[true]),      // input(prompt: &str) -> String
+        "read_file" => Some(&[true]),  // read_file(path: &str) -> Result<String, String>
+        "write_file" => Some(&[true, true]), // write_file(path: &str, content: &str)
+        "__lz_path" => Some(&[true]),
+        "__lz_bytes" => Some(&[true]),
+        "__lz_str_ref" => Some(&[true]),
+        _ => None,
+    }
+}
+
 /// 扫描表达式：收集对未定义顶层函数的 Call（callee 为 Var；排除宏名与局部绑定）
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn scan_expr_extern_calls(
