@@ -274,11 +274,20 @@ impl CodeGen {
                             self.emit_line(&format!("// {}", line));
                         }
                     }
-                } else {
+                } else if crate::embed::is_source_lang(lang) {
+                    // Source 档（rust / rs）：原样内嵌 —— 文档化行为，tests/bridge_embed.rs 钉着
                     self.emit_line(&format!("// #[embed({})]", lang));
                     for line in src.lines() {
                         self.emit_line(line);
                     }
+                } else {
+                    // Cli 档：外语言源码**不再逐行打进 .rs**（那打出来的是编不过的异物文本）。
+                    // 摘出的源码落在 build/embed/<模块>/<产物>/ 里，调用面由 generate()
+                    // 末尾的 argv 垫片提供（子进程代码唯一生成点在 bridge::cli）。
+                    self.emit_line(&format!(
+                        "// #[embed({})] → Cli 档：源码已摘出为独立产物，值只走 argv + 序列化",
+                        lang
+                    ));
                 }
             }
         }
@@ -1598,6 +1607,10 @@ impl CodeGen {
         }
 
         let generics = self.gen_generics(&s.generics);
+        // BUG-TY-005：impl 头自类型不得携带 `= DefaultType`（E0737）也不得携带 bound
+        // （E0229 associated item constraint），只能用裸类型实参 `<T, U>`；仅 struct 定义
+        // 本身用 gen_generics（带默认值+bound）。
+        let generics_plain = self.gen_param_args(&s.generics);
         // __clone__ / __repr__ 自定义语义（06d §十 / §五）：定义了这些魔法方法
         // 的 struct 不得 derive(Clone)/derive(Debug)（手动 impl 会 E0119），
         // 改为生成委托 impl——使 `a.clone()` / `format!("{:?}", a)` 走用户
@@ -1688,7 +1701,7 @@ impl CodeGen {
         if s.has_new || s.has_init {
             self.buf.push('\n');
             let impl_generics = self.struct_impl_generics(s);
-            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
+            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics_plain));
             self.indent += 1;
             // 生成 __new__ 函数签名（如有）
             if s.has_new {
@@ -1702,7 +1715,7 @@ impl CodeGen {
                     .new_ret_ty
                     .as_ref()
                     .map(|t| self.rust_type(t))
-                    .unwrap_or_else(|| format!("{}{}", s.name, generics));
+                    .unwrap_or_else(|| format!("{}{}", s.name, generics_plain));
                 self.emit_line(&format!(
                     "pub fn __new__({}) -> {} {{",
                     params.join(", "),
@@ -1786,7 +1799,7 @@ impl CodeGen {
                 };
                 self.emit_line(&format!(
                     "impl{} ImplicitFrom<{}> for {}{} {{",
-                    impl_generics, src_rust, s.name, generics
+                    impl_generics, src_rust, s.name, generics_plain
                 ));
                 self.indent += 1;
                 let ret_ty = format!("{}{}", s.name, generics);
@@ -1814,7 +1827,7 @@ impl CodeGen {
             self.buf.push('\n');
             // 为泛型参数添加 Clone + Debug 约束（+ 比较约束，见 struct_impl_generics）
             let impl_generics = self.struct_impl_generics(s);
-            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics));
+            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics_plain));
             self.indent += 1;
             // 泛型 struct（struct MyIterator<T>）内联方法按泛型上下文处理：
             // Option.None 生成 Option::None 由返回类型推断（magic_methods.lz __next__ E0308）
@@ -1878,6 +1891,7 @@ impl CodeGen {
         self.emitted_types.insert(e.name.clone());
 
         let generics = self.gen_generics(&e.generics);
+        let generics_plain = self.gen_param_args(&e.generics);
         // @derive(...) 装饰器合并：默认 derive 基础上追加用户请求的 trait
         let mut derives_all: Vec<String> = vec!["Debug".into(), "Clone".into(), "PartialEq".into()];
         for u in &e.derives {
@@ -1969,7 +1983,7 @@ impl CodeGen {
                     .collect();
                 format!("<{}>", params.join(", "))
             };
-            self.emit_line(&format!("impl{} {}{} {{", impl_generics, e.name, generics));
+            self.emit_line(&format!("impl{} {}{} {{", impl_generics, e.name, generics_plain));
             self.indent += 1;
             for m in &e.methods {
                 self.gen_fn_def(m);
@@ -2738,6 +2752,17 @@ impl CodeGen {
 
         // 相对导入（self::、super::）无法在生成的文件中解析，跳过
         if path_str.starts_with("self::") || path_str.starts_with("super::") {
+            return;
+        }
+
+        // 统一抽象：`import <产物名>`（如 `import python_calc`）= 导入一个 Cli 档外语言库产物。
+        // 调用面由 generate() 末尾内联的 __lz_embed 垫片提供，这里记一行来源后返回 ——
+        // 既不静默消失，也不去够一个不存在的 Rust 模块（那会报 E0432）。
+        if self.embed_targets.iter().any(|t| t.artifact == path_str) {
+            self.emit_line(&format!(
+                "// import {} → Cli 档 embed 产物（调用面 {}_<函数名>，见 build/embed/）",
+                path_str, path_str
+            ));
             return;
         }
 
