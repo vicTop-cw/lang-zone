@@ -736,6 +736,14 @@ impl CodeGen {
                 {
                     self.str_typed_vars.insert(safe_name.clone());
                 }
+                // BUG-386：`let cs = s.chars()` 中 cs 的 IR 类型是 Iterator<Str>，但 Rust
+                // 实际是 Chars<'_>（yields char）。把 cs 登记进 str_loop_vars，使后续
+                // `for c in cs:` 认出 char 循环变量（否则 `int(c)` 走 .parse → E0599）。
+                // Chars 迭代器 IR 类型非 Str，故 str_loop_vars 其余用途（to_string/
+                // concat/int 判断）均被 IrType::Str 类型闸门排除，无副作用。
+                if matches!(&value.kind, ExprKind::MethodCall { method, .. } if method == "chars") {
+                    self.str_loop_vars.insert(safe_name.clone());
+                }
                 // 登记「独占局部绑定」（原地追加的前提）。
                 // 只登记 by-value 且非 `Ref(..)`/`MutRef(..)` 类型：这两类在 Rust
                 // 侧是 `&T`/`&mut T`，原地追加会改到别人的值（且 push_str/push
@@ -2103,7 +2111,17 @@ impl CodeGen {
                     // chars() 显式调用：`for c in s.chars()` → Iterator<Str>
                     || (matches!(&iter.ty, IrType::Named { path, args }
                         if path == "Iterator" && args.first().map_or(false, |a| matches!(a, IrType::Str)))
-                        && matches!(&iter.kind, ExprKind::MethodCall { method, .. } if method == "chars"));
+                        && matches!(&iter.kind, ExprKind::MethodCall { method, .. } if method == "chars"))
+                    // BUG-386：间接 chars()（`let cs = s.chars(); for c in cs:`）——
+                    // iter 是 Var，IR 类型仍是 Iterator<Str>，但 Rust 实际 yields char。
+                    // 该 Var 名已在 `Stmt::Let` 处因值为 `chars()` 而登记进 str_loop_vars
+                    // （Chars 迭代器的 IR 类型非 Str，故其余 str_loop_vars 用途均被
+                    // 类型闸门排除，无副作用）。登记后 `int(c)` 走 `as i64`（字符码点）
+                    // 而非 `.parse::<i64>()` → E0599。
+                    || (matches!(&iter.ty, IrType::Named { path, args }
+                        if path == "Iterator" && args.first().map_or(false, |a| matches!(a, IrType::Str)))
+                        && matches!(&iter.kind, ExprKind::Var(vname)
+                            if self.str_loop_vars.contains(vname.as_str())));
                 let was_str_loop_var = self.str_loop_vars.contains(var);
                 if iter_is_str {
                     self.str_loop_vars.insert(var.clone());
