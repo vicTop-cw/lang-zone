@@ -1261,6 +1261,50 @@ def gen_type_alias(name: str, ty: IrType) -> String =
 def gen_test_def(name: str, body: List<Stmt>) -> String =
     "#[test]\nfn ".to_string() + name.to_string() + "() {\n".to_string() + gen_body(body, false, auto_mut_names(body), MaybeIrType.NoTy) + "}".to_string()
 
+// BUG-404（轮28）：--emit=rs-lz 缺 struct 提取魔法方法 __unapply__ / __unapply_seq__。
+// 原生 codegen 对「带字段的非递归 struct」合成这两个方法（builder/convert_decl.rs:1911），
+// 结构体解构糖化为 `.__unapply__()` 调用；LZ 版 codegen 未生成 → E0599
+// （`let Point(a,b) = p` 报 no method named `__unapply__`）。此处补齐，输出与原生逐字符一致：
+//   impl Point {
+//       fn __unapply__(&self) -> (f64, f64) { return (self.x.clone(), self.y.clone()); }
+//       fn __unapply_seq__(&self) -> Vec<f64> { return vec![self.x.clone(), self.y.clone()]; }
+//   }
+// `__unapply_seq__`（变长提取）仅当字段类型同构时生成（对应 convert_decl 的
+// struct_has_unapply_seq 判定）。
+def gen_struct_unapply(name: str, fs: List<(str, IrType)>) -> String =
+    let mut tys: String = "".to_string()
+    let mut accs: String = "".to_string()
+    let mut same: bool = true
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if idx > 0:
+            tys = tys + ", ".to_string()
+            accs = accs + ", ".to_string()
+        tys = tys + rust_type(f.1)
+        accs = accs + "self.".to_string() + f.0.to_string() + ".clone()".to_string()
+        if idx == 1:
+            same = (rust_type(fs[0].clone().1) == rust_type(f.1))
+        if idx > 1:
+            if rust_type(fs[0].clone().1) != rust_type(f.1):
+                same = false
+    // 单字段 tuple 需尾逗号：原生为 `-> (i64,)` / `return (self.z.clone(),);`；
+    // 而 `__unapply_seq__` 的 vec![...] 不追加尾逗号（原生 `vec![self.z.clone()]`）。
+    let mut accs_tup: String = accs.clone()
+    if fs.len() == 1:
+        tys = tys + ","
+        accs_tup = accs_tup + ","
+    let mut out: String = "impl ".to_string() + name.to_string() + " {\n".to_string()
+    out = out + "    fn __unapply__(&self) -> (".to_string() + tys + ") {\n".to_string()
+    out = out + "        return (".to_string() + accs_tup + ");\n".to_string()
+    out = out + "    }\n".to_string()
+    if same:
+        out = out + "\n".to_string()
+        out = out + "    fn __unapply_seq__(&self) -> Vec<".to_string() + rust_type(fs[0].clone().1) + "> {\n".to_string()
+        out = out + "        return vec![".to_string() + accs + "];\n".to_string()
+        out = out + "    }\n".to_string()
+    out = out + "\n}\n".to_string()
+    out
+
 def gen_item(i: Item) -> String =
     match i:
         case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, body: b) =>
@@ -1268,7 +1312,11 @@ def gen_item(i: Item) -> String =
             let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
             "pub fn ".to_string() + n.to_string() + generic_sig(gs) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b), rs) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
-            "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
+            let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
+            if fs.len() > 0:
+                struct_def + "\n\n".to_string() + gen_struct_unapply(n, fs)
+            else:
+                struct_def
         case Item.EnumDef(name: n, generics: gs, variants: vs) =>
             "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs) + "}".to_string()
         case Item.Const(name: n, ty: t, value: v) =>
