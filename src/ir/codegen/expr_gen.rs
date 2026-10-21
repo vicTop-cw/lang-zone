@@ -349,7 +349,11 @@ impl CodeGen {
     /// 套一层持有 Arc clone 的转发闭包：既满足 bound，又不 move 原变量（LZ fn 值是值语义，
     /// 否则 E0382 use of moved value）。参数个数：Var 实参查 fn_value_carriers 登记表（IR 常把
     /// 偏应用变量标成非 Fn），调用/块实参取自身 `IrType::Fn` 的参数表。
-    pub(crate) fn fn_value_fwd(&self, s: &str, a: &Expr) -> Option<String> {
+    pub(crate) fn fn_value_fwd(&self, s: &str, a: &Expr, want_arc: bool) -> Option<String> {
+        // BUG-389：目标形参是一等 fn 值（闭包字面量 Fn 形参，渲染为 Arc<dyn Fn>）时，
+        // 转发闭包须 Arc::new 装箱（`Arc::new(move |x| __lz_fv(x))`），否则裸 move 闭包
+        // 与 Arc<dyn Fn> 形参不符（E0277）。而 def 函数的 impl Fn 形参与 map/filter 等
+        // FnMut 形参仍要裸闭包，故仅 want_arc=true 时装箱（调用方按 callee 是否闭包变量判定）。
         // 内置作一等 fn 值传入高阶函数（`apply_len(nums, len)`）：内置 Rust 形参是 &T，
         // 直接传值 `f(len)` 报 E0631（expected fn(Vec<T>)->i64, found fn(&T)->int）。
         // 生成转发闭包，对引用形参自动取 &：`move |__lz_fv0| len(&__lz_fv0)`。
@@ -365,6 +369,9 @@ impl CodeGen {
                     .collect();
                 let params: Vec<String> = (0..refs.len()).map(|k| format!("__lz_fv{}", k)).collect();
                 let call = format!("{}({})", s, inner.join(", "));
+                if want_arc {
+                    return Some(format!("Arc::new(move |{}| {})", params.join(", "), call));
+                }
                 return Some(format!("move |{}| {}", params.join(", "), call));
             }
         }
@@ -378,12 +385,18 @@ impl CodeGen {
         };
         let arity = arity?;
         let fwd: Vec<String> = (0..arity).map(|k| format!("__lz_fv{}", k)).collect();
-        Some(format!(
-            "{{ let __lz_fv = std::sync::Arc::clone(&{}); move |{}| __lz_fv({}) }}",
-            s,
-            fwd.join(", "),
-            fwd.join(", ")
-        ))
+        let body = format!("move |{}| __lz_fv({})", fwd.join(", "), fwd.join(", "));
+        if want_arc {
+            Some(format!(
+                "{{ let __lz_fv = std::sync::Arc::clone(&{}); Arc::new({}) }}",
+                s, body
+            ))
+        } else {
+            Some(format!(
+                "{{ let __lz_fv = std::sync::Arc::clone(&{}); {} }}",
+                s, body
+            ))
+        }
     }
 
     /// move 语义修复：若实参为「被多次使用的非 Copy 变量」，自动 .clone()，
@@ -978,7 +991,17 @@ impl CodeGen {
                                 self.fn_param_types.get(n).cloned()
                             }
                         }
-                        ExprKind::Var(n) => self.fn_param_types.get(n).cloned(),
+                        ExprKind::Var(n) => self
+                            .fn_param_types
+                            .get(n)
+                            .cloned()
+                            // BUG-389：闭包变量调用（`apply(double, 3)`）不在 fn_param_types
+                            // 表（该表只收 def 具名函数），从 callee 的 IR 类型 Fn 形参表取期望
+                            // 类型，供 fn_value_fwd 判定「一等 fn 值形参 → Arc 装箱」。
+                            .or_else(|| match &callee.ty {
+                                IrType::Fn { params, .. } => Some(params.clone()),
+                                _ => None,
+                            }),
                         _ => None,
                     };
                     let prev_expected = self.current_expected_ty.borrow().clone();
@@ -998,8 +1021,17 @@ impl CodeGen {
                                     }
                                 }
                             }
-                            // fn 值实参（Arc 载体）→ 转发闭包（见 fn_value_fwd）
-                            if let Some(fwd) = self.fn_value_fwd(&s, a) {
+                            // fn 值实参（Arc 载体）→ 转发闭包（见 fn_value_fwd）。
+                            // BUG-389：仅当 callee 是闭包变量（其 Fn 形参渲染为 Arc<dyn Fn>）
+                            // 时装箱 Arc；def 函数（impl Fn 形参）保持裸闭包。
+                            let want_arc = match &callee.kind {
+                                ExprKind::Var(n) => {
+                                    !self.fn_param_types.contains_key(n)
+                                        && matches!(callee.ty, IrType::Fn { .. })
+                                }
+                                _ => false,
+                            };
+                            if let Some(fwd) = self.fn_value_fwd(&s, a, want_arc) {
                                 return fwd;
                             }
                             // fn(...) 类型形参接收 lambda 实参：需转 fn 指针。参数声明
@@ -3118,7 +3150,7 @@ impl CodeGen {
                         *self.current_expected_ty.borrow_mut() = prev_expected;
                         // fn 值实参（Arc 载体）→ 转发闭包：链式 `xs.map(f)`/`filter(f)` 的
                         // 形参要 FnMut，`Arc<dyn Fn … + Send + Sync>` 不满足（见 fn_value_fwd）
-                        if let Some(fwd) = self.fn_value_fwd(&s, a) {
+                        if let Some(fwd) = self.fn_value_fwd(&s, a, false) {
                             return fwd;
                         }
                         self.clone_if_multiuse(s, a)

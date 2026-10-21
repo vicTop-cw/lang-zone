@@ -457,7 +457,9 @@ impl CodeGen {
     pub(crate) fn fn_value_type(&self, ty: &IrType) -> String {
         match ty {
             IrType::Fn { params, ret } => {
-                let p: Vec<String> = params.iter().map(|p| self.rust_type(p)).collect();
+                // BUG-389：形参须同样递归为 Arc<dyn Fn>（否则 `Arc<dyn Fn(fn(i64)->i64, i64)`
+                // 外层注解与闭包字面量 `|f: Arc<dyn Fn(i64)->i64|` 形参不一致 → E0308）。
+                let p: Vec<String> = params.iter().map(|p| self.fn_value_type(p)).collect();
                 format!(
                     "Arc<dyn Fn({}) -> {} + Send + Sync>",
                     p.join(", "),

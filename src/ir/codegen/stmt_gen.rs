@@ -45,7 +45,16 @@ impl CodeGen {
                     format!("{}: &{}", p.name, self.rust_type(&p.ty))
                 }
             } else {
-                format!("{}: {}", p.name, self.rust_type(&p.ty))
+                // BUG-389c：闭包字面量的 Fn 类型形参（`|f: fn(int)->int, x| = f(x)`）须渲染
+                // 成 Arc<dyn Fn>（fn_value_type）而非裸 fn 指针：调用方把一等 fn 值（Arc 载体，
+                // 或捕获型转发闭包）传入时，裸 fn 指针收不下（E0308）。def/impl 的 Fn 形参
+                // 已在 decl_gen 另行处理（impl Fn + 'static），故此处只影响闭包字面量形参。
+                let ty_s = if matches!(&p.ty, IrType::Fn { .. }) {
+                    self.fn_value_type(&p.ty)
+                } else {
+                    self.rust_type(&p.ty)
+                };
+                format!("{}: {}", p.name, ty_s)
             }
         }
     }
