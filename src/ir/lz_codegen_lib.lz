@@ -671,7 +671,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.LitNone(ty: t) => "None".to_string()
         case Expr.Var(name: n, ty: t) => n.to_string()
         case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, fn_raises).to_string()
-        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + method_call_sep(r) + m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b, fn_raises) + ".".to_string() + f.to_string()
         case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "]".to_string()
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "] = ".to_string() + gen_expr(v, fn_raises)
@@ -800,6 +800,22 @@ def gen_dict_ctor(fs: List<(str, Expr)>) -> String =
                 pairs = pairs + ", ".to_string()
             i = i + 2
         "[".to_string() + pairs + "].into_iter().collect()".to_string()
+
+// BUG-405：类型名上的方法调用须用路径分隔符（`Color::Blue` / `Option::None`），
+// 值接收者才用 `.`（`x.clone()`）。原生按 is_known_type_or_enum 判定，LZ 侧无类型
+// 注册表，改用「接收者是 Var 且首字母大写」的等价约定（类型名大写、值变量小写）。
+def method_call_sep(r: Expr) -> String =
+    match r:
+        case Expr.Var(name: n, ty: t2) =>
+            if starts_upper(n):
+                "::".to_string()
+            else:
+                ".".to_string()
+        case _ => ".".to_string()
+
+def starts_upper(s: str) -> bool =
+    let c = s[0..1]
+    (c == "A") || (c == "B") || (c == "C") || (c == "D") || (c == "E") || (c == "F") || (c == "G") || (c == "H") || (c == "I") || (c == "J") || (c == "K") || (c == "L") || (c == "M") || (c == "N") || (c == "O") || (c == "P") || (c == "Q") || (c == "R") || (c == "S") || (c == "T") || (c == "U") || (c == "V") || (c == "W") || (c == "X") || (c == "Y") || (c == "Z")
 
 def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
     match c:
