@@ -6175,7 +6175,19 @@ impl CodeGen {
                 // 推断 Err 泛型（E0283）
                 let ret_ann = ret_ty
                     .as_ref()
-                    .map(|t| format!(" -> {}", self.rust_type(t)))
+                    .map(|t| {
+                        // BUG-389b：闭包返回闭包（`|a: int| -> fn(int)->int = |b| a+b`）时，
+                        // 返回类型注解必须是 `Arc<dyn Fn>`（fn_value_type），否则闭包体
+                        // 返回的 Arc::new(内层闭包) 与注解 `-> fn(i64)->i64` 不符
+                        // → E0308 expected fn pointer found Arc / E0271。仅 Fn 类型走
+                        // fn_value_type，其余（Int/Str/泛型等）照旧 rust_type。
+                        let s = if matches!(t, IrType::Fn { .. }) {
+                            self.fn_value_type(t)
+                        } else {
+                            self.rust_type(t)
+                        };
+                        format!(" -> {}", s)
+                    })
                     .unwrap_or_default();
                 // 未使用的闭包参数（Any 类型）无法从上下文推断 → 加 i64 标注
                 // （如 Option.None.and_then(|x| Option.None)，E0282）
