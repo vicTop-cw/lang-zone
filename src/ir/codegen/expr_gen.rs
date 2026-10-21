@@ -6133,14 +6133,32 @@ impl CodeGen {
                 }
                 let params: Vec<String> = params
                     .iter()
-                    .map(|p| {
+                    .enumerate()
+                    .map(|(i, p)| {
                         let ps = self.gen_param(p);
-                        if matches!(&p.ty, IrType::Any)
+                        // BUG-394：函数返回类型为 Fn 时，闭包字面量形参按返回签名形参类型
+                        // 标注。否则无注解/标量默认（Int）闭包形参被硬编码 i64，而函数签名
+                        // 要求泛型形参（compose：`|x| f(g(x))` 应为 `|x: a|`，误生成 `|x: i64|`
+                        // → E0308 expected `a` found `i64` / E0631）。仅在形参类型是「默认标量」
+                        // （Any/Int）时才覆盖，已显式注解（Str 等）不动。
+                        let ret_fn_ty = match &self.current_ret_ty {
+                            Some(IrType::Fn { params: rps, .. }) if rps.len() == params.len() => {
+                                Some(rps[i].clone())
+                            }
+                            _ => None,
+                        };
+                        let defaulted = matches!(&p.ty, IrType::Any)
                             && (nested
                                 || self.box_lambda
                                 || self.nested_fn_ret
-                                || !body_s.contains(&p.name))
-                        {
+                                || !body_s.contains(&p.name));
+                        if let Some(rt) = ret_fn_ty {
+                            if matches!(&p.ty, IrType::Any | IrType::Int) {
+                                format!("{}: {}", p.name, self.rust_type(&rt))
+                            } else {
+                                ps
+                            }
+                        } else if defaulted {
                             format!("{}: i64", p.name)
                         } else {
                             ps
