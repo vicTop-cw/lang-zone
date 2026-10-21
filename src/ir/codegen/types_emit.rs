@@ -481,6 +481,22 @@ impl CodeGen {
     ///    result/error/traits）；
     /// ③ 无上下文（print(None) 等）→ 注入类型参数（option_none_elem 选型，防 E0282）。
     pub(crate) fn gen_none_ref(&self, expr_ty: &IrType) -> String {
+        // BUG-400：自定义枚举含 None 变体时，裸 `None`（如 `and_then` 的
+        // `case None: None`、`return None`）应解析为 `<枚举>::None`，而非裸 Rust
+        // None（E0308 mismatched types，与期望的 OptionInt 不匹配）。判定：当前期望
+        // 类型或当前函数返回类型恰是「含 None 变体」的自定义枚举。须先于下面
+        // known_types.contains("Option") 判定，否则有自定义 OptionInt 时裸 None 会
+        // 被误路由到 std Option::None。
+        if let Some(en) = self.enum_variants.get("None").cloned() {
+            let ctx_is_en = |t: Option<&IrType>| -> bool {
+                matches!(t, Some(IrType::Named { path, .. }) if path == &en)
+            };
+            if ctx_is_en(self.current_expected_ty.borrow().as_ref())
+                || ctx_is_en(self.current_fn_ret_ty.as_ref())
+            {
+                return format!("{}::None", en);
+            }
+        }
         if self.known_types.contains("Option") {
             return "Option::None".to_string();
         }
