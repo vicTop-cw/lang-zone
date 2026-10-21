@@ -976,7 +976,32 @@ impl CodeGen {
                         },
                     }
                 } else {
-                    self.gen_expr(value)
+                    let g = self.gen_expr(value);
+                    // BUG-398：内置绑定到变量（`f = len`）后，其原始 Rust 形参 `&T` 的引用性
+                    // 随名称传递丢失（`f` 的类型被拍平为 `Fn(Vec<T>)->i64`），导致
+                    // `f(words)` 报 E0308（expected `&_`, found `Vec`）、把 `f` 传高阶函数
+                    // 报 E0631。初值是「引用形参内置名」时，发射转发闭包
+                    // `move |__lz_b0| len(&__lz_b0)`，使 `f` 本身成为类型正确的一等函数，
+                    // 调用与传递两路同时修复（f 未登记为 Arc 载体，故裸闭包即够）。
+                    if let ExprKind::Var(n) = &value.kind {
+                        if let Some(refs) = super::scan::builtin_ref_params(n) {
+                            let inner: Vec<String> = refs
+                                .iter()
+                                .enumerate()
+                                .map(|(k, is_ref)| {
+                                    let v = format!("__lz_b{}", k);
+                                    if *is_ref { format!("&{}", v) } else { v }
+                                })
+                                .collect();
+                            let params: Vec<String> =
+                                (0..refs.len()).map(|k| format!("__lz_b{}", k)).collect();
+                            format!("move |{}| {}({})", params.join(", "), g, inner.join(", "))
+                        } else {
+                            g
+                        }
+                    } else {
+                        g
+                    }
                 };
                 *self.current_expected_ty.borrow_mut() = prev_expected_for_let;
                 self.box_lambda = saved_box_lambda;
