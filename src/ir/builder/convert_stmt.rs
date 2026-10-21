@@ -2082,11 +2082,11 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                 .iter()
                 .map(|p| from_ast_type_with_generics(&p.ty, &g))
                 .collect();
-            let fret = func
-                .return_type
-                .as_ref()
-                .map(|t| from_ast_type_with_generics(t, &g))
-                .unwrap_or(IrType::Any);
+            // BUG-390：本地 FnDef 也要把 raises 升级为 Result<ok, err>，与
+            // collect_functions 的 vars 登记一致；否则本处用裸 return_type 覆盖
+            // 顶层注册，`parse_int(...)?` 的 ? 传播被丢掉（内层 Try 推断为 Int）。
+            // 同时把无返回注解的默认类型从 Any 改成 Unit（与 fn_return_ir 一致）。
+            let fret = TypeCtx::fn_return_ir(&func.return_type, &func.raises, &g);
             let fty = IrType::Fn {
                 params: fparams,
                 ret: Box::new(fret),
