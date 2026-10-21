@@ -5169,23 +5169,34 @@ impl CodeGen {
                         access_s = format!("{}.as_ref().unwrap().{}", base_s, field);
                     }
                 }
-                // 命名字段枚举字段访问: enum E: X(v: i64) 中 `x.v`
-                // → match &x { E::X { v, .. } => v.clone(), _ => unreachable!() }
-                // （Rust 不允许对枚举值直接 .v 访问，需解构；仅小写字段走此路径）
+                // 命名字段枚举字段访问: enum E: X(v: i64), Y(v: i64) 中 `x.v`
+                // → match &x { E::X { v, .. } => v.clone(), E::Y { v, .. } => v.clone(),
+                //   _ => unreachable!() }
+                // （Rust 不允许对枚举值直接 .v 访问，需解构；仅小写字段走此路径。
+                //   BUG-407：原先 .find() 只取该枚举的第一个变体，字段落在后续变体
+                //   （如 Shape 中 Circle/radius 在前、Rect/h 在后，`r.h` 命中 Circle 无
+                //   h 字段）时漏生成解构 → E0609 no field `h` on type `Shape`）
                 if sep == "." && !field.chars().next().map_or(false, |c| c.is_uppercase()) {
                     if let IrType::Named { path, .. } = &base.ty {
-                        if let Some((variant, fields)) = self
+                        let variants_with_field: Vec<(String, Vec<String>)> = self
                             .enum_variant_named_fields
                             .iter()
-                            .find(|((e, _), _)| e == path)
+                            .filter(|((e, _), _)| e == path)
+                            .filter(|((_, _), f)| f.iter().any(|f| f == field))
                             .map(|((_, v), f)| (v.clone(), f.clone()))
-                        {
-                            if fields.iter().any(|f| f == field) {
-                                access_s = format!(
-                                    "match &{} {{ {}::{} {{ {}, .. }} => {}.clone(), _ => unreachable!() }}",
-                                    base_s, path, variant, field, field
-                                );
-                            }
+                            .collect();
+                        if !variants_with_field.is_empty() {
+                            let arms: String = variants_with_field
+                                .iter()
+                                .map(|(v, _)| {
+                                    format!(
+                                        "{}::{} {{ {}, .. }} => {}.clone(), ",
+                                        path, v, field, field
+                                    )
+                                })
+                                .collect();
+                            access_s =
+                                format!("match &{} {{ {}_ => unreachable!() }}", base_s, arms);
                         }
                     }
                 }
