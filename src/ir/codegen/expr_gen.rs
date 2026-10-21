@@ -2917,6 +2917,15 @@ impl CodeGen {
                     _ => false,
                 };
                 if static_type_call {
+                    // BUG-399：builder 对「被复用多次的类型名」包成 MethodCall
+                    // receiver=Var(OptionInt) method=clone（多义变量保护）。此分支把
+                    // `Type.clone()` 当作静态调用渲染成 `OptionInt::clone()`，外层
+                    // FieldAccess 再拼成 `OptionInt::clone().None` → E0061（clone 缺参）
+                    // + E0609（no field None）。类型名不是值，clone 无意义；回退到裸
+                    // 类型路径 recv，让外层按枚举变体/关联路径正常处理。
+                    if method == "clone" && args.is_empty() {
+                        return recv;
+                    }
                     // struct::new 字段类型表（new 形参顺序即字段顺序）：fn 字段实参
                     // 为 lambda 时转 fn 指针（同 Call 分支，lib_iterator MapIter.new）
                     let struct_fields = self.struct_fields_info.get(&recv).cloned();
@@ -4969,6 +4978,22 @@ impl CodeGen {
                         "FIELDBG base_ty={:?} base_kind={:?} field={:?}",
                         base.ty, base.kind, field
                     );
+                }
+                // BUG-399：base 是 builder 对「被复用多次的类型名」注入的多义 clone
+                // （MethodCall receiver=Var(T) method=clone）时，is_known_type /
+                // base_is_unresolved_type 都依赖 base.kind==Var，故提前归一化为类型路径
+                // T.field（大写变体 → T::Field），否则 sep 误选 "." 生成 T.None → E0423。
+                if let ExprKind::MethodCall { receiver, method, args } = &base.kind {
+                    if method == "clone" && args.is_empty() {
+                        if let ExprKind::Var(tn) = &receiver.kind {
+                            let is_enum = self.enum_variants.values().any(|e| e == tn);
+                            if self.is_known_type_or_enum(tn) || is_enum {
+                                if field.chars().next().map_or(false, |c| c.is_uppercase()) {
+                                    return format!("{}::{}", tn, field);
+                                }
+                            }
+                        }
+                    }
                 }
                 // Enum variant: Color.Red → Color::Red (field 大写开头)
                 // Module path: std.io.print → std::io::print
