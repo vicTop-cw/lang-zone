@@ -839,11 +839,32 @@ def print_fmt(as_: List<Expr>) -> String =
             out = out + " {:?}".to_string()
         out + "\", ".to_string()
 
+def gen_kwarg_value(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            if n == "_KwArg":
+                kwarg_value_of(fs, fn_raises)
+            else:
+                gen_expr(e, fn_raises)
+        case _ => gen_expr(e, fn_raises)
+
+// BUG-408：`f(x~=1)` / `Shape.Circle(radius: 5)` 等关键字参数在 IR 中表现为
+// StructCtor(name="_KwArg", fields=[(name, "radius"), (value, 5)])。原生 codegen 用
+// gen_kwarg_value 提取 value 字段、丢弃字段名（位置参数构造）；LZ 侧此前直接渲染成
+// `_KwArg { name: ..., value: ... }` → rustc E0422 cannot find struct `_KwArg`。
+def kwarg_value_of(fs: List<(str, Expr)>, fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if f.0 == "value":
+            out = gen_expr(f.1, fn_raises)
+    out
+
 def expr_cs_list(es: List<Expr>, fn_raises: MaybeIrType) -> String =
     if es.len() == 0:
         "".to_string()
     else:
-        let head = gen_expr(es[0].clone(), fn_raises)
+        let head = gen_kwarg_value(es[0].clone(), fn_raises)
         if es.len() > 1:
             head + ", ".to_string() + expr_cs_list(ec_tail(es), fn_raises)
         else:
