@@ -29,7 +29,8 @@ rayon = { version = "1.10", optional = true }
 # 精确版本锁定，仅在 py-bridge feature 启用时编译
 pyo3 = { version = "0.22.6", optional = true, features = ["extension-module"] }
 # tnr 包已改名 tnr-lang 发布到 crates.io（tnr 名被占）；lib 目标名仍是 tnr
-tnr = { path = "../Tnr", package = "tnr-lang", version = "3.0.0", optional = true }
+# 注：crates.io 上暂无 tnr-lang，先注释；将来发布后解开即可
+# tnr = { version = "3.0.0", package = "tnr-lang", optional = true }
 
 [features]
 # infer：外部 lz-infer / .lzi 跨模块类型签名（可选增强，非主编译管线依赖；
@@ -37,8 +38,8 @@ tnr = { path = "../Tnr", package = "tnr-lang", version = "3.0.0", optional = tru
 default = ["infer"]
 infer = ["serde", "serde_json", "bincode"]
 parallel = ["rayon"]
-# tnr-embed：#[embed(tnr)] 原样块经 tnr lib 转译为 Rust 模块
-tnr-embed = ["dep:tnr"]
+# tnr-embed：#[embed(tnr)] 原样块经 tnr lib 转译为 Rust 模块（依赖暂缺失，先注释）
+# tnr-embed = ["dep:tnr"]
 # py-bridge：Python 桥接绑定（PyO3），启用后 @export(Python) 产物可编译
 # 未启用时 export(Python) 仅生成绑定源码字符串，不编译 pyo3
 py-bridge = ["dep:pyo3"]
