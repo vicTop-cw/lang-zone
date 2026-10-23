@@ -39,6 +39,25 @@ pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
         item_names.push(name);
     }
 
+    // BUG-410：脚本模式（无声明 main）的顶层语句此前根本不进 .lzrs——原生
+    // codegen/mod.rs:1370 在 !has_main 时用 module.top_level_stmts 合成
+    // `pub fn main()`，rs-lz 路径丢了它们 → 产物 E0601 main not found。
+    // 同口径：items 里没有 main FnDef 时（**即使 top_level_stmts 为空**，与原生
+    // 一致，原生 !has_main 无条件合成空 main），追加一条 Item.ScriptMain
+    // （LZ 侧 gen_item 把它渲染成合成 main，is_main=false，尾语句带 return，
+    // 与原生 gen_block_inner 逐字节一致）。
+    let has_main_fn = module
+        .items
+        .iter()
+        .any(|it| matches!(it, Item::FnDef(f) if f.name == "main"));
+    if !has_main_fn {
+        let body = g.stmts_ref(&module.top_level_stmts);
+        let sm = g.fresh();
+        g.lets
+            .push(format!("    let {} = Item.ScriptMain(body: {})", sm, body));
+        item_names.push(sm);
+    }
+
     out.push_str(&g.lets.join("\n"));
     out.push('\n');
     out.push_str(&format!(

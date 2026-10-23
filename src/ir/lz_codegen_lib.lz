@@ -146,6 +146,10 @@ enum Item:
     Impl(trait_: MaybeIrType, for_type: IrType, method_names: List<str>)
     CheckerBlock(name: str, ps_name: MaybeStr)
     Test(name: str, body: List<Stmt>)
+    // BUG-410：脚本模式（无声明 main）顶层语句的合成分支，对应原生
+    // codegen/mod.rs:1370 的 !has_main 合成分支（原生合成走 gen_block_inner，
+    // 尾语句**带** `return ` 前缀，与声明式 main 的抑制行为不同）。
+    ScriptMain(body: List<Stmt>)
 
 // ── IrModule 顶层 ──
 struct IrModule =
@@ -1375,6 +1379,15 @@ def gen_item(i: Item) -> String =
             gen_test_def(n, b)
         case Item.CheckerBlock(name: n, ps_name: p) =>
             "fn ".to_string() + n.to_string() + "(ps: &mut __Params) { unimplemented!() }".to_string()
+        case Item.ScriptMain(body: b) =>
+            // BUG-410：对齐原生 codegen/mod.rs:1370 !has_main 合成分支——
+            // `pub fn main() {\n` + gen_block_inner(top_level_stmts) + `}`。
+            // is_main=false 是关键：原生合成 main 不设 self.is_main，尾语句**带**
+            // `return ` 前缀（声明式 main 才抑制），此处同口径。
+            if b.len() == 0:
+                "pub fn main() {\n}".to_string()
+            else:
+                "pub fn main() {\n".to_string() + gen_body(b, false, auto_mut_names(b), MaybeIrType.NoTy) + "}".to_string()
         case Item.DuckDef(name: n, method_count: mc) =>
             "pub trait ".to_string() + n.to_string() + " { /* ".to_string() + mc.to_string() + " methods */ }".to_string()
         case _ => "// TODO Item ".to_string() + display_item(i)
