@@ -1,0 +1,6 @@
+// [夜巡 R1-寻虫 · 对抗样例 nb06] 窗口日 2026-10-23
+// 期望：str 用 usize 索引应走 chars().nth() 路径（Rust 不允许 str[i]），
+// 输出 h / e 两行；不得生成 `s[0usize]` 这类不能编译的 Rust。
+let s: str = "hello"
+println(s[0])
+println(s[1])
