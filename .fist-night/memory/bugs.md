@@ -146,3 +146,57 @@
 归因: 无本夜补丁对照组同 326/307/19 且同样 E0614 -> 非夜间引入，属 2026-09-26 遗留集批次遗留
 - task_id: T0r10
 
+## BUG-8 [2026-10-23T16:53:51Z] [high] OPEN
+- summary: [夜巡R1-寻虫] DEMO/lz_std/{dict,list,set}.lz 泛型 impl 实现 trait 方法时闭包形参被追加 + Clone 约束 → E0276 impl has stricter requirements than trait
+- detail: 复现：cargo test --test demo_codegen_compile -- --ignored（全量闸门，非门禁）。327 文件 / 319 通过 / 8 失败，其中 dict.lz(9 err)、list.lz(8 err)、set.lz(4 err) 首错均为 E0276。生成码形态：trait 声明 `fn retain(&mut self, predicate: impl Fn(&T) -> bool + 'static);`，impl 处生成为 `fn retain(&mut self, mut predicate: impl Fn(&T) -> bool + 'static + Clone)` —— 实现比 trait 多 `Clone` 约束。最小复现：lzc DEMO/lz_std/list.lz 后 rustc 产物。根因方向：codegen 为『闭包可复制』统一给 `impl Fn(..)` 追加 + Clone，未区分『trait 方法实现』与『独立函数/方法』，前者必须与 trait 签名逐字一致。修复须同步评估 golden 快照是否需再对齐。证据：.fist-night/_work/DEMO_lz_std_list.rustc.log 等。
+- reported_by: night-executor
+- task_id: T0r13
+
+## BUG-9 [2026-10-23T16:53:51Z] [high] OPEN
+- summary: [夜巡R1-寻虫] DEMO/07_data_structures/self_recursive.lz 自递归结构体 Option<Box<T>> 字段在返回元组处未剥 Box → E0308
+- detail: 复现：lzc DEMO/07_data_structures/self_recursive.lz → rustc。产物 32 行 `return (self.value.clone(), self.next.clone());` 报 expected `Option<ListNode<T>>`, found `Option<Box<ListNode<T>>>`；76 行 TreeNode left/right 同族（共 3 处）。根因方向：自递归字段声明为 `Option<Box<Node<T>>>`（打破无限大小），但读取/克隆发射点按『字段声明类型即值类型』处理，缺 `*self.next.clone()` 之类的解箱。证据：.fist-night/_work/DEMO_07_data_structures_self_recursive.rustc.log。
+- reported_by: night-executor
+- task_id: T0r14
+
+## BUG-10 [2026-10-23T16:53:51Z] [medium] OPEN
+- summary: [夜巡R1-寻虫] DEMO/lz_std/traits.lz 泛型字段 Option<J> 调 .clone() 缺 Clone 约束传播 → E0599
+- detail: 复现：lzc DEMO/lz_std/traits.lz → rustc。产物 117 行 `return (self.outer.clone(), self.func.clone(), self.inner.clone());` 报 `J: std::clone::Clone` which is required by `Option<J>: std::clone::Clone` 未满足；148 行 `Option<<I as Iterator>::Item>` 同族（共 2 处）。根因方向：结构体泛型参数 J/I 未把 Clone 约束带进生成的自动访问/元组返回路径（或应在 struct 声明处补 J: Clone）。证据：.fist-night/_work/DEMO_lz_std_traits.rustc.log（单独复现留存）。
+- reported_by: night-executor
+- task_id: T0r15
+
+## BUG-11 [2026-10-23T16:53:51Z] [medium] OPEN
+- summary: [夜巡R1-寻虫] DEMO/boundary-coverage/nesting-closure-lambda.lz 嵌套闭包返回闭包时内层闭包缺 move → E0373 + lifetime
+- detail: 复现：lzc DEMO/boundary-coverage/nesting-closure-lambda.lz → rustc。产物 95-96 行 `return Arc::new(move |a: i64| { Arc::new(|b: i64| { .. a .. }) })`：外层已 move，内层借用外层变量 a，报 `closure may outlive the current function, but it borrows a`(E0373) 与 `lifetime may not live long enough`。根因方向：闭包返回闭包场景未对内层闭包加 move（外层变量按引用捕获即逃逸）。证据：.fist-night/_work/DEMO_boundary-coverage_nesting-closure-lambda.rustc.log。
+- reported_by: night-executor
+- task_id: T0r16
+
+## BUG-12 [2026-10-23T16:53:51Z] [medium] OPEN
+- summary: [夜巡R1-寻虫] DEMO/10_error_handling/panic_raise_try.lz 调用点引用层级不匹配 → E0308 expected String found &String
+- detail: 复现：lzc DEMO/10_error_handling/panic_raise_try.lz → rustc。产物 255 行 `let content: String = (read_file(&path))?;` 报 arguments to this function are incorrect: expected `String`, found `&String`（被调签名生成为 `fn read_file(p: String)`，调用点却发射 `&path`）。根因方向：形参/实参的借用位（borrow bit）在函数声明与调用点两处判定不一致，try/? 包装路径尤甚。证据：.fist-night/_work/DEMO_10_error_handling_panic_raise_try.rustc.log。
+- reported_by: night-executor
+- task_id: T0r17
+
+## BUG-13 [2026-10-23T16:53:51Z] [medium] OPEN
+- summary: [夜巡R1-寻虫] DEMO/lz_std/result.lz or_else 闭包返回类型未传导外层标注 → E0308 Result<i64,_> vs Result<i64,String>
+- detail: 复现：lzc DEMO/lz_std/result.lz → rustc。产物 413 行 `let c: Result<i64, String> = a.or_else(|e: String| -> Result<i64, String> { Ok((e.len() as i64)) });` 报 expected `Result<i64, String>`, found `Result<i64, _>`。根因方向：闭包体 `Ok(..)` 的错误型变体未从标注/被调泛型回推，生成了未定型的 `_`（或 Ok 包装缺类型标注 `Ok::<_, String>`）。证据：.fist-night/_work/DEMO_lz_std_result.rustc.log。
+- reported_by: night-executor
+- task_id: T0r18
+
+## BUG-14 [2026-10-23T16:53:51Z] [medium] OPEN
+- summary: [夜巡R1-寻虫] FIND_BUG/hunt-20261023/nb04 溢出字面量无标注时降为 i128 而非 BigInt，与 int 混算生成 i128 + i64 → E0308/E0277
+- detail: 最小复现 FIND_BUG/hunt-20261023/nb04_bigint_int_mixed_arith.lz：`let x = 100000000000000000000000000000` + `let y: int = 3` + `println(x + y)`。产物 `return println!("{:?}", x + 3i64);` 报 expected `i128`, found `i64` 与 cannot add `i64` to `i128`。对照：显式标注 `let a: bigint = 10; let b: int = 3; println(a + b)`（nb05）正确输出 13 —— 说明『自动溢出提升』落到 i128、『显式 : bigint』落到 BigInt，两条路径不一致，且 i128 与 i64 混算未插入同型转换。期望：要么统一提升到 bigint，要么在混算点插入 `as i128` 同型转换。证据：.fist-night/_work/nb04_bigint_int_mixed_arith.rustc.log。
+- reported_by: night-executor
+- task_id: T0r19
+
+## BUG-15 [2026-10-23T19:36:06Z] [medium] OPEN
+- summary: [夜巡R1-修复] DEMO/lz_std/dict.lz 迭代解构与 BTreeMap 迭代项类型不符 → E0308（3 处）
+- detail: 复现（隔离副本实跑）：lzc DEMO/lz_std/dict.lz → rustc。BUG-8 的 5×E0276 消除后暴露的次生缺陷：产物 214/256 行报 expected this type parameter（impl<K: Clone+Debug+Ord, V: Clone+Debug> DictExt<K,V> for BTreeMap<K,V> 的方法返回类型与泛型参数不匹配）；517 行 `for (k, v) in (d).keys().cloned()` 报 this is an iterator with items of type `String`，无法按 (k,v) 元组解构。根因方向：dict 迭代（keys()/values()/items()）发射未区分『键迭代』与『键值对迭代』，`.keys().cloned()` 被当作键值对迭代解构；方法返回类型未跟随 impl 泛型参数。证据：E:/IDEProjects/AI/_lz_night_scratch/_work/dict.rustc.log。
+- reported_by: night-executor
+- task_id: T0r20
+
+## BUG-16 [2026-10-23T19:36:06Z] [medium] OPEN
+- summary: [夜巡R1-修复] DEMO/lz_std/list.lz 链式调用后原值被移动 → E0382 use of moved value `lst`
+- detail: 复现（隔离副本实跑）：lzc DEMO/lz_std/list.lz → rustc。BUG-8 的 6×E0276 消除后暴露的次生缺陷：产物 518 行 `let mut lst: Vec<i64> = vec![...]`；520 行继续使用 lst 报 use of moved value `lst`（move occurs because `Vec<i64>` does not implement `Copy`）。根因方向：链式方法（sort/reverse/链式 HOF）按值接收 self 后未在使用点插入 `.clone()`，LZ 值语义与 Rust 移动语义在『同一变量链式调用后再次使用』场景未对齐。证据：E:/IDEProjects/AI/_lz_night_scratch/_work/list.rustc.log。
+- reported_by: night-executor
+- task_id: T0r21
+

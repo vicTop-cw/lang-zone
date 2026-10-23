@@ -1,0 +1,44 @@
+diff --git a/src/ir/codegen/decl_gen.rs b/src/ir/codegen/decl_gen.rs
+index fb16eaa..061a17e 100644
+--- a/src/ir/codegen/decl_gen.rs
++++ b/src/ir/codegen/decl_gen.rs
+@@ -2538,12 +2538,33 @@ impl CodeGen {
+                             // 与 impl 端闭包参数渲染保持一致（均带 `+ 'static`），
+                             // 否则 trait 声明 `impl Fn(&T) -> U` 与 impl 端
+                             // `impl Fn(&T) -> U + 'static` 约束不一致 → E0276。
+-                            format!(
+-                                "{}: impl Fn({}) -> {} + 'static",
+-                                p.name,
+-                                ps.join(", "),
+-                                self.rust_type(ret)
+-                            )
++                            //
++                            // BUG-8：impl 端（gen_params）为「闭包可复制」统一给 `impl Fn`
++                            // 追加 `+ Clone`，返回 fn 值时再追加 `+ Send + Sync`。trait 声明
++                            // 必须与 impl 端**逐字一致**（impl 侧不得比 trait 更严，E0276），
++                            // 故此处按 impl 端同一套规则补齐约束；
++                            // `new`（struct 构造）在 impl 端走 fn 指针，声明端同步为 fn 指针。
++                            if m.name == "new" {
++                                format!(
++                                    "{}: fn({}) -> {}",
++                                    p.name,
++                                    ps.join(", "),
++                                    self.rust_type(ret)
++                                )
++                            } else {
++                                let send_bound = if matches!(&m.ret_ty, IrType::Fn { .. }) {
++                                    " + Send + Sync + Clone"
++                                } else {
++                                    " + Clone"
++                                };
++                                format!(
++                                    "{}: impl Fn({}) -> {} + 'static{}",
++                                    p.name,
++                                    ps.join(", "),
++                                    self.rust_type(ret),
++                                    send_bound
++                                )
++                            }
+                         } else {
+                             self.gen_param(p)
+                         }
