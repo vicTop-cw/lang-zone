@@ -846,7 +846,7 @@ def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
     match c:
         case Expr.Var(name: n, ty: t) =>
             if n == "print":
-                "println!(".to_string() + print_fmt(a) + expr_cs_list(a, fn_raises) + ")".to_string()
+                "println!(".to_string() + print_fmt(a) + print_args_list(a, fn_raises) + ")".to_string()
             elif n == "len":
                 "(".to_string() + expr_cs_list(a, fn_raises) + ".len() as i64)".to_string()
             elif n == "set!":
@@ -859,10 +859,59 @@ def print_fmt(as_: List<Expr>) -> String =
     if as_.len() == 0:
         "\"\"".to_string()
     else:
-        let mut out: String = "\"{:?}".to_string()
-        for idx in 1..as_.len():
-            out = out + " {:?}".to_string()
+        // BUG-419：格式串按实参**逐位**选择——字符串（字面量/f-string/str 类型/
+        // cast 到 str）走 Display `{}`，其余走 Debug `{:?}`，对齐原生
+        // expr_gen.rs:1941 的 print_arg_is_display 规则。旧实现恒发 `{:?}`，使同一份
+        // LZ 源码在 --emit=rs-lz 下打印 `"hi"`（带引号转义）、原生打印 `hi`——
+        // 两条 codegen 路线运行结果不一致（D1 字节判据语料恰好只打印 int，未暴露）。
+        let mut out: String = "\"".to_string()
+        for idx in 0..as_.len():
+            if idx > 0:
+                out = out + " ".to_string()
+            out = out + print_placeholder(as_[idx].clone())
         out + "\", ".to_string()
+
+def print_placeholder(e: Expr) -> String =
+    if print_arg_is_display(e):
+        "{}".to_string()
+    else:
+        "{:?}".to_string()
+
+def print_arg_is_display(e: Expr) -> bool =
+    match e:
+        case Expr.LitStr(s: sv, ty: tv) => true
+        case Expr.LitFStr(s: sv, ty: tv) => true
+        case Expr.Cast(inner: i, target: tg, ty: tv) =>
+            if is_string_irtype(tg):
+                true
+            else:
+                is_string_irtype(expr_ty(e))
+        case _ => is_string_irtype(expr_ty(e))
+
+def is_string_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Str => true
+        case IrType.Ref(inner: i) => is_string_irtype(i)
+        case IrType.MutRef(inner: i) => is_string_irtype(i)
+        case IrType.Named(path: p, args: a) => p == "String" || p == "str"
+        case _ => false
+
+// print 实参渲染：字符串字面量去掉多余的 `.to_string()`（Display 已足够，省一次
+// 堆分配），对齐原生 expr_gen.rs:1954 的同款裁剪；其余沿用 gen_kwarg_value。
+def print_args_list(es: List<Expr>, fn_raises: MaybeIrType) -> String =
+    if es.len() == 0:
+        "".to_string()
+    else:
+        let head = print_arg_of(es[0].clone(), fn_raises)
+        if es.len() > 1:
+            head + ", ".to_string() + print_args_list(ec_tail(es), fn_raises)
+        else:
+            head
+
+def print_arg_of(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.LitStr(s: sv, ty: t) => "\"".to_string() + esc_rust(sv) + "\"".to_string()
+        case _ => gen_kwarg_value(e, fn_raises)
 
 def gen_kwarg_value(e: Expr, fn_raises: MaybeIrType) -> String =
     match e:
