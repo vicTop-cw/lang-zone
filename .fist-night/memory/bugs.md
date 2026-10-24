@@ -182,11 +182,12 @@
 - reported_by: night-executor
 - task_id: T0r18
 
-## BUG-14 [2026-10-23T16:53:51Z] [medium] OPEN
+## BUG-14 [2026-10-23T16:53:51Z] [medium] CLOSED
 - summary: [夜巡R1-寻虫] FIND_BUG/hunt-20261023/nb04 溢出字面量无标注时降为 i128 而非 BigInt，与 int 混算生成 i128 + i64 → E0308/E0277
 - detail: 最小复现 FIND_BUG/hunt-20261023/nb04_bigint_int_mixed_arith.lz：`let x = 100000000000000000000000000000` + `let y: int = 3` + `println(x + y)`。产物 `return println!("{:?}", x + 3i64);` 报 expected `i128`, found `i64` 与 cannot add `i64` to `i128`。对照：显式标注 `let a: bigint = 10; let b: int = 3; println(a + b)`（nb05）正确输出 13 —— 说明『自动溢出提升』落到 i128、『显式 : bigint』落到 BigInt，两条路径不一致，且 i128 与 i64 混算未插入同型转换。期望：要么统一提升到 bigint，要么在混算点插入 `as i128` 同型转换。证据：.fist-night/_work/nb04_bigint_int_mixed_arith.rustc.log。
 - reported_by: night-executor
 - task_id: T0r19
+- resolved: 2026-10-24 根因=BinOp 混合算术提升分支只覆盖 f64 侧（int→f64），i128 与 int(i64) 混算无同型转换，直接发射 `i128 + i64`。修复=expr_gen.rs BinOp 分支：lhs/rhs 增加 `is_i128` 判定（含 Cast 目标 Int128 未传播场景），numeric 集合纳入 Int128（f64+i128 混算正确走 f64 分支 `as f64`），并在 f64 分支后新增 i128 提升分支——i128 与 int 混算时把 i64 侧提升为 `as i128`。验证=temp/nb04_repro.lz 探针 rustc 隔离编译通过、运行输出 `100000000000000000000000000003`（与 nb04 期望一致）；FIND_BUG 12/12 PASS、DEMO 全量 327 PASS、全量 cargo test 零失败。
 
 ## BUG-15 [2026-10-23T19:36:06Z] [medium] CLOSED
 - summary: [夜巡R1-修复] DEMO/lz_std/dict.lz 迭代解构与 BTreeMap 迭代项类型不符 → E0308（3 处）

@@ -6029,9 +6029,14 @@ impl CodeGen {
                     || matches!(&lhs.kind, ExprKind::Cast { target, .. } if matches!(target, IrType::F64));
                 let rhs_is_f64 = matches!(rhs_ty, IrType::F64)
                     || matches!(&rhs.kind, ExprKind::Cast { target, .. } if matches!(target, IrType::F64));
+                // 操作数是 `as i128` 转换（Cast 目标为 Int128）时也视为 i128 侧（同 f64 处理）
+                let lhs_is_i128 = matches!(lhs_ty, IrType::Int128)
+                    || matches!(&lhs.kind, ExprKind::Cast { target, .. } if matches!(target, IrType::Int128));
+                let rhs_is_i128 = matches!(rhs_ty, IrType::Int128)
+                    || matches!(&rhs.kind, ExprKind::Cast { target, .. } if matches!(target, IrType::Int128));
                 // rhs 是数值或未知（Any fallback 为 i64）时，f64 侧混合算术需提升
-                let rhs_is_numeric = matches!(rhs_ty, IrType::Int | IrType::F64 | IrType::Any);
-                let lhs_is_numeric = matches!(lhs_ty, IrType::Int | IrType::F64 | IrType::Any);
+                let rhs_is_numeric = matches!(rhs_ty, IrType::Int | IrType::F64 | IrType::Any | IrType::Int128);
+                let lhs_is_numeric = matches!(lhs_ty, IrType::Int | IrType::F64 | IrType::Any | IrType::Int128);
                 // float×int 混合比较也需提升：`1.5 == 1` 生成 f64 == i64 → E0308
                 // （TEMP/probe/sweep3/float_eq_int.lz 实测）。arith 只覆盖 Add/Sub/Mul/Div/Mod，
                 // 比较与 Eq/Ne 走不到下面的 f64 提升分支；故单独开 num_mixed 让比较也参与。
@@ -6102,6 +6107,13 @@ impl CodeGen {
                     format!("{} {} ({} as f64)", lhs_s, op_s, rhs_s)
                 } else if num_mixed && rhs_is_f64 && lhs_is_numeric && !lhs_is_f64 {
                     format!("({} as f64) {} {}", lhs_s, op_s, rhs_s)
+                } else if num_mixed && lhs_is_i128 && rhs_is_numeric && !rhs_is_i128 && !rhs_is_f64 {
+                    // BUG-14：溢出字面量自动提升为 i128，与 int(i64) 混算时把 i64 侧
+                    // 提升为 i128（i128 + i64 → E0308/E0277）。i128 与 f64 混算走
+                    // 上方 f64 分支（f64 优先，as f64 合法）。
+                    format!("{} {} ({} as i128)", lhs_s, op_s, rhs_s)
+                } else if num_mixed && rhs_is_i128 && lhs_is_numeric && !lhs_is_i128 && !lhs_is_f64 {
+                    format!("({} as i128) {} {}", lhs_s, op_s, rhs_s)
                 } else {
                     format!("{} {} {}", lhs_s, op_s, rhs_s)
                 }
