@@ -188,15 +188,17 @@
 - reported_by: night-executor
 - task_id: T0r19
 
-## BUG-15 [2026-10-23T19:36:06Z] [medium] OPEN
+## BUG-15 [2026-10-23T19:36:06Z] [medium] CLOSED
 - summary: [夜巡R1-修复] DEMO/lz_std/dict.lz 迭代解构与 BTreeMap 迭代项类型不符 → E0308（3 处）
 - detail: 复现（隔离副本实跑）：lzc DEMO/lz_std/dict.lz → rustc。BUG-8 的 5×E0276 消除后暴露的次生缺陷：产物 214/256 行报 expected this type parameter（impl<K: Clone+Debug+Ord, V: Clone+Debug> DictExt<K,V> for BTreeMap<K,V> 的方法返回类型与泛型参数不匹配）；517 行 `for (k, v) in (d).keys().cloned()` 报 this is an iterator with items of type `String`，无法按 (k,v) 元组解构。根因方向：dict 迭代（keys()/values()/items()）发射未区分『键迭代』与『键值对迭代』，`.keys().cloned()` 被当作键值对迭代解构；方法返回类型未跟随 impl 泛型参数。证据：E:/IDEProjects/AI/_lz_night_scratch/_work/dict.rustc.log。
+- resolved: 2026-10-24 根因=BUG-349 将 Dict/HashMap 所有 for 迭代一律生成 `.keys().cloned()`（Python 键语义），覆盖了 `for (k, v) in dict` 键值对迭代意图。修复=stmt_gen.rs iter_is_dict 增加 `!var.contains(',')`：单变量 `for k in dict` 仍按键迭代（.keys().cloned()，保留 BUG-349 语义），元组模式 `for (k, v) in dict` 走 .iter()/into_iter() 产出 (K,V)。验证=cargo test --test demo_codegen_compile -- --ignored 全量 327 demo PASS（dict.lz 转绿）。
 - reported_by: night-executor
 - task_id: T0r20
 
-## BUG-16 [2026-10-23T19:36:06Z] [medium] OPEN
+## BUG-16 [2026-10-23T19:36:06Z] [medium] CLOSED
 - summary: [夜巡R1-修复] DEMO/lz_std/list.lz 链式调用后原值被移动 → E0382 use of moved value `lst`
 - detail: 复现（隔离副本实跑）：lzc DEMO/lz_std/list.lz → rustc。BUG-8 的 6×E0276 消除后暴露的次生缺陷：产物 518 行 `let mut lst: Vec<i64> = vec![...]`；520 行继续使用 lst 报 use of moved value `lst`（move occurs because `Vec<i64>` does not implement `Copy`）。根因方向：链式方法（sort/reverse/链式 HOF）按值接收 self 后未在使用点插入 `.clone()`，LZ 值语义与 Rust 移动语义在『同一变量链式调用后再次使用』场景未对齐。证据：E:/IDEProjects/AI/_lz_night_scratch/_work/list.rustc.log。
+- resolved: 2026-10-24 根因=expr_gen.rs 裸 Vec 的 fold/reduce 迭代器化分支（BUG-359 系）对 receiver 直接 `.into_iter()` 消费，未走 clone_if_multiuse 值语义保护。修复=reduce(单参→functional::reduce)/reduce(双参→into_iter().fold)/fold(双参→into_iter().fold) 三处 receiver 改 `clone_if_multiuse(recv, &receiver)`：函数内多使用点克隆（cnt==1 时原样显式消费，不破坏既有语义）。验证=DEMO 全量 327 PASS（list.lz 转绿）+ FIND_BUG 12/12 零回归。
 - reported_by: night-executor
 - task_id: T0r21
 

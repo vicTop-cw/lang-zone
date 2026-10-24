@@ -1993,11 +1993,15 @@ impl CodeGen {
                     matches!(&iter.kind, ExprKind::Var(n) if n == "self") && self.borrow_self;
                 // BUG-349：Dict/HashMap 直接 for 迭代默认按键（Python 语义），
                 // 与 variadic kwargs 分支（.iter() 取 (&K,&V) 元组）区分。
+                // BUG-15（dict.lz 回归）：`for (k, v) in dict` 是**键值对迭代**
+                // （lz_std 字典迭代协议），必须走 .iter()/into_iter() 产出 (K,V)；
+                // 仅单变量模式 `for k in dict` 才是键迭代（.keys().cloned()）。
                 let iter_is_dict = matches!(&iter.ty, IrType::Named { path, .. }
                     if path == "Dict" || path == "HashMap")
                     && !iter_is_ref
                     && !iter_is_self_borrow
-                    && !iter_is_variadic_slice;
+                    && !iter_is_variadic_slice
+                    && !var.contains(',');
                 let iter_expr = |cg: &Self| -> String {
                     let s = cg.gen_expr(iter);
                     // 字符串 for 迭代：String 不实现 IntoIterator（E0599），

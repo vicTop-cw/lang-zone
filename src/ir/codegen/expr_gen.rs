@@ -357,8 +357,16 @@ impl CodeGen {
         // 内置作一等 fn 值传入高阶函数（`apply_len(nums, len)`）：内置 Rust 形参是 &T，
         // 直接传值 `f(len)` 报 E0631（expected fn(Vec<T>)->i64, found fn(&T)->int）。
         // 生成转发闭包，对引用形参自动取 &：`move |__lz_fv0| len(&__lz_fv0)`。
+        // 注意：仅当该名字确为「内建函数作值」时触发（IR 类型 Fn/Any）。同名普通变量
+        // （`let len = xs.len()` 类型 Int、`let id: UserId = 42` 类型 Named）会被
+        // builtin_ref_params 误命中，生成 `move |x| len(&x)` → E0618 expected function
+        // found i64（operators.lz:158 / type_aliases.lz:10 实测）。
         if let ExprKind::Var(name) = &a.kind {
             if let Some(refs) = super::scan::builtin_ref_params(name) {
+                let is_builtin_value = matches!(&a.ty, IrType::Fn { .. } | IrType::Any);
+                if !is_builtin_value {
+                    return None;
+                }
                 let inner: Vec<String> = refs
                     .iter()
                     .enumerate()
@@ -822,6 +830,31 @@ impl CodeGen {
                     } else {
                         self.gen_expr(callee)
                     }
+                } else if let ExprKind::MethodCall {
+                    receiver,
+                    method,
+                    ..
+                } = &callee.kind
+                {
+                    // 内建直接调用偶发以 fn 值形态进入 IR：`print("hi")` 在闭包体内
+                    // 被包成 `print.clone()(...)`（closures_more.lz say_hi 实测 E0061：
+                    // `print.clone()` 是 fn 值载体，带参调用非法）。还原为裸内建名，
+                    // 让下方 print/len/abs 等内建分派分支正常命中。
+                    if method == "clone" {
+                        if let ExprKind::Var(rn) = &receiver.kind {
+                            if super::scan::LZ_BUILTIN_FN_NAMES.contains(&rn.as_str())
+                                && !self.top_level_fns.contains(rn.as_str())
+                            {
+                                rn.clone()
+                            } else {
+                                self.gen_expr(callee)
+                            }
+                        } else {
+                            self.gen_expr(callee)
+                        }
+                    } else {
+                        self.gen_expr(callee)
+                    }
                 } else {
                     self.gen_expr(callee)
                 };
@@ -858,8 +891,18 @@ impl CodeGen {
                 // （值类型参数被拍平为 value），故优先从 builtin_ref_params 还原真实引用性
                 // （BUG-395 / BUG-397：len 作值调用报 expected `&_`, found String）。
                 let callee_fn_refs: Option<Vec<bool>> = match &callee.kind {
-                    ExprKind::Var(n) => super::scan::builtin_ref_params(n)
-                        .map(|r| r.to_vec()),
+                    ExprKind::Var(n) => {
+                        // 用户 def 覆盖 builtin（如 panic_raise_try.lz 自定
+                        // `def read_file(path: str)` 与 scan::builtin_ref_params 的
+                        // read_file(path: &str) 同名冲突）：builtin ref 登记仅对原生
+                        // builtin 生效；用户 def（fn_param_types 有登记）一律跳过，
+                        // 否则调用点被自动注入 `&path` → E0308 expected str, found &str。
+                        if self.fn_param_types.contains_key(n) {
+                            None
+                        } else {
+                            super::scan::builtin_ref_params(n).map(|r| r.to_vec())
+                        }
+                    }
                     ExprKind::MethodCall { receiver, method, .. } if method == "clone" => match &receiver.kind {
                         ExprKind::Var(n) => super::scan::builtin_ref_params(n).map(|r| r.to_vec()),
                         _ => None,
@@ -4790,13 +4833,17 @@ impl CodeGen {
                     // lz_builtins::runtime::functional::reduce，返回 Option<T>。
                     if method == "reduce" && args_s.len() == 1 && recv_is_list {
                         let lambda = strip_lambda_type(&args_s[0]);
-                        return format!("lz_builtins::runtime::functional::reduce({}, {})", recv, lambda);
+                        // BUG-16：list.lz 链式调用后 reuse（E0382 moved）。LZ 值语义
+                        // 下方法调用不消费接收者变量：多使用点克隆保护（cnt==1 时原样）。
+                        let recv_c = self.clone_if_multiuse(recv.clone(), &receiver);
+                        return format!("lz_builtins::runtime::functional::reduce({}, {})", recv_c, lambda);
                     }
                     if method == "reduce" && args_s.len() == 2 && recv_is_list {
                         let lambda = strip_lambda_type(&args_s[0]);
+                        let recv_c = self.clone_if_multiuse(recv.clone(), &receiver);
                         return format!(
                             "({}).into_iter().fold({}, {})",
-                            recv, args_s[1], lambda
+                            recv_c, args_s[1], lambda
                         );
                     }
                     // BUG-359：Vec 无 `.fold(init, f)`（Rust 的 fold 在 Iterator 上，
@@ -4808,9 +4855,12 @@ impl CodeGen {
                     // 混用：method_overload.lz 曾生成 fold(closure, init) → E0277）。
                     if method == "fold" && args_s.len() == 2 && recv_is_list {
                         let lambda = strip_lambda_type(&args_s[1]);
+                        // BUG-16：fold 消费接收者（into_iter）后变量 reuse 报 E0382，
+                        // 多使用点克隆保护（值语义，cnt==1 时原样显式消费）。
+                        let recv_c = self.clone_if_multiuse(recv.clone(), &receiver);
                         return format!(
                             "({}).into_iter().fold({}, {})",
-                            recv, args_s[0], lambda
+                            recv_c, args_s[0], lambda
                         );
                     }
                     // BUG-359：Vec 无 `.flat_map(f)`（Iterator 方法）。裸 Vec 走
@@ -5178,13 +5228,19 @@ impl CodeGen {
                 //   h 字段）时漏生成解构 → E0609 no field `h` on type `Shape`）
                 if sep == "." && !field.chars().next().map_or(false, |c| c.is_uppercase()) {
                     if let IrType::Named { path, .. } = &base.ty {
-                        let variants_with_field: Vec<(String, Vec<String>)> = self
+                        let mut variants_with_field: Vec<(String, Vec<String>)> = self
                             .enum_variant_named_fields
                             .iter()
                             .filter(|((e, _), _)| e == path)
                             .filter(|((_, _), f)| f.iter().any(|f| f == field))
                             .map(|((_, v), f)| (v.clone(), f.clone()))
                             .collect();
+                        // BUG-412：enum_variant_named_fields 是 HashMap，迭代顺序随进程
+                        // 随机种子变化 ⇒ 多臂解的臂序不稳定，同一源码重复编译产物不同
+                        // （实测 6 次里 5 次 E::A 在前、1 次 E::B 在前）。臂之间模式互斥、
+                        // 顺序无语义，按变体名排序固定下来，保证产物可复现并与 LZ 版
+                        // codegen（--emit=rs-lz）逐字节一致。
+                        variants_with_field.sort_by(|a, b| a.0.cmp(&b.0));
                         if !variants_with_field.is_empty() {
                             let arms: String = variants_with_field
                                 .iter()
@@ -6205,6 +6261,13 @@ impl CodeGen {
                 ret_ty,
                 ..
             } => {
+                // 参数链入栈：body 内嵌套闭包判定「外层闭包参数」时，
+                // 需把本闭包参数并入集合（factory_chain 内层 |b| 引用外层 a）。
+                // 出口统一在分支末尾 pop 恢复（见 L6390 处 truncate）。
+                let chain_prev_len = self.enclosing_lambda_params.borrow().len();
+                self.enclosing_lambda_params
+                    .borrow_mut()
+                    .extend(params.iter().map(|p| p.name.clone()));
                 // 嵌套 Fn 返回（fn -> fn -> T）：内层闭包作为外层返回值需 Arc::new 包装
                 // （factory_chain: |a| => |b| => x + a + b → move |a| { Arc::new(move |b| {...}) }）
                 // box_lambda（值位置闭包，如 `let add: (int) -> (int) -> int = |a| |b| a + b`）
@@ -6242,12 +6305,39 @@ impl CodeGen {
                 // 未使用的闭包参数（Any 类型）无法从上下文推断 → 加 i64 标注
                 // （如 Option.None.and_then(|x| Option.None)，E0282）
                 let mut body_s = self.gen_expr(body);
+                // BUG-gate6：自定义 `enum Result<T, E> { Ok(T), Err(E) }` 遮蔽 prelude 时，
+                // 闭包体内裸 `Ok(...)`/`Err(...)` 构造仍解析为 std::result 变体
+                // → E0308（result.lz `a.or_else(|e| -> Result<i64, String> { Ok(..) })`）。
+                // 返回类型注解为 `-> Result<..>`（自定义，std 渲染为 Result<..> 同形，
+                // 但内建 ? 走 std::result 路径不经过闭包体）时，将体内容构造限定为
+                // `Result::Ok(..)` / `Result::Err(..)`。
+                if !ret_ann.trim_start().is_empty() && ret_ann.trim_start().starts_with("-> Result") {
+                        // 保护已限定的变体（gen_expr 的 enum variant 分支已展开为
+                        // `Result::Ok(..)` 时不得二次替换 → `Result::Result::Ok`）
+                        let protected = body_s
+                            .replace("Result::Ok(", "\u{1}ROK\u{1}")
+                            .replace("Result::Err(", "\u{1}RERR\u{1}");
+                        let replaced = protected
+                            .replace("Ok(", "Result::Ok(")
+                            .replace("Err(", "Result::Err(");
+                        body_s = replaced
+                            .replace("\u{1}ROK\u{1}", "Result::Ok(")
+                            .replace("\u{1}RERR\u{1}", "Result::Err(");
+                }
                 // BUG-363c：nested 与 box_lambda 同时成立（let add: (int)->(int)->int = |a| |b| a+b）
                 // 会双重 Arc::new（nested 在 6066 包一次、box_lambda 在 6350 包一次）→ E0277。
                 // nested 只在 box_lambda 未覆盖时补 Arc（纯 nested_fn_ret 场景）。
                 if nested && !self.box_lambda {
                     body_s = format!("Arc::new({})", body_s);
                 }
+                // 纯参数名列表（不含类型标注），供 uses_move / 非 Copy 外部变量
+                // 判定等 helper 使用。BUG：此前把「带类型标注的声明串」（如
+                // `x: &i64`）当作参数名传给 body_refs_noncopy_external /
+                // clone_noncopy_external，导致闭包参数被误判为外部变量而被
+                // 注入 `.clone()`（`|x: ref int| x > 5` 生成 `*x.clone()`
+                // → E0614，lib_iterator 复现）。
+                // 参数名集合改由 self.enclosing_lambda_params 维护（含祖先闭包参数链），
+                // 见 Lambda 分支入栈处 L6251。
                 let params: Vec<String> = params
                     .iter()
                     .enumerate()
@@ -6398,14 +6488,14 @@ impl CodeGen {
                     // 闭包体内引用非 Copy 外部变量（`|j| { default }`，default: T）：
                     // move 闭包首次调用即移出 default，第二次调用 E0507。
                     // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
-                    if uses_move && body_refs_noncopy_external(body, &params) {
+                    if uses_move && body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow()) {
                         uses_move = false;
                     }
                     // 闭包体内含嵌套闭包且嵌套闭包 move 捕获了非 Copy 外部变量
                     // （matrix.lz 列表推导 `|i| { ...map(move |j| { default }) }`）：
                     // 外层若用 move 会把 default 移入自身，内层再 move 捕获即 E0507。
                     // 外层改为借用捕获（default: &T），内层 `default.clone()` 由引用克隆得 T。
-                    if uses_move && block_contains_nested_move_lambda(block_ref, &params) {
+                    if uses_move && block_contains_nested_move_lambda(block_ref, &*self.enclosing_lambda_params.borrow()) {
                         uses_move = false;
                     }
                     // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
@@ -6426,13 +6516,13 @@ impl CodeGen {
                     // BUG-357：被外层非 move 强制成 move 的内层闭包同样需 clone——
                     // move 捕获外层变量的引用（&T，Copy）后，体内须 clone 出 T。
                     let gen_block: Block = if (!uses_move || self.parent_lambda_non_move)
-                        && block_contains_nested_move_lambda(block_ref, &params)
+                        && block_contains_nested_move_lambda(block_ref, &*self.enclosing_lambda_params.borrow())
                     {
                         let mut nb = block_ref.clone();
                         nb.stmts = nb
                             .stmts
                             .iter()
-                            .map(|s| clone_noncopy_stmt(s, &params))
+                            .map(|s| clone_noncopy_stmt(s, &*self.enclosing_lambda_params.borrow()))
                             .collect();
                         nb
                     } else {
@@ -6441,6 +6531,8 @@ impl CodeGen {
                     // 把「外层是否非 move」传给 child：child 生成嵌套 Lambda 时据此
                     // 决定内层强制 move（BUG-357）。
                     child.parent_lambda_non_move = !uses_move;
+                    // 参数链继承：child 生成 block 内嵌套 Lambda 时需知祖先闭包参数
+                    child.enclosing_lambda_params = std::cell::RefCell::new(self.enclosing_lambda_params.borrow().clone());
                     child.gen_block_inner(&gen_block);
                     let move_kw = if uses_move { "move " } else { "" };
                     format!(
@@ -6451,7 +6543,7 @@ impl CodeGen {
                     )
                 } else {
                     // 闭包体内赋值外部捕获变量 → 借用捕获（非 move）
-                    let mut uses_move = !expr_has_external_assign(body, &params);
+                    let mut uses_move = !expr_has_external_assign(body, &*self.enclosing_lambda_params.borrow());
                     // BUG-363b：box_lambda（值位置闭包，如 def 返回 n(int) -> int 的 Lambda
                     // 体）需 Arc<dyn Fn + Send + Sync + 'static>，非 move 闭包借用外层局部变量
                     // → E0373 closure may outlive（closure_returning_closure.lz）。强制 move 捕获。
@@ -6461,13 +6553,13 @@ impl CodeGen {
                     // 闭包体内引用非 Copy 外部变量（`|j| default`，default: T）：
                     // move 闭包把 default 移入自身，闭包被 map/collect 多次调用即 E0507。
                     // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
-                    if uses_move && body_refs_noncopy_external(body, &params) {
+                    if uses_move && body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow()) {
                         uses_move = false;
                     }
                     // 闭包体内含嵌套 move 闭包且捕获了非 Copy 外部变量
                     // （matrix.lz 列表推导 `|i| comp!(|j| { default }, c)`）：
                     // 外层用 move 会把 default 移入自身，内层再 move 捕获即 E0507。
-                    if uses_move && expr_contains_nested_move_lambda(body, &params) {
+                    if uses_move && expr_contains_nested_move_lambda(body, &*self.enclosing_lambda_params.borrow()) {
                         uses_move = false;
                     }
                     // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
@@ -6481,8 +6573,6 @@ impl CodeGen {
                         uses_move = true;
                     }
                     let move_kw = if uses_move { "move " } else { "" };
-                    // 闭包体是裸外部变量（`|j| default`，非 Copy 类型）：
-                    // move 闭包首次调用即移出 default，第二次调用 E0507。clone 到闭包体内
                     // `|j| default.clone()`（matrix.lz 列表推导嵌套）。
                     // BUG-356：非 move 闭包体引用外层非 Copy 变量（如 `(k, v)` 的 k），
                     // 递归 clone 所有非 Copy 外部变量，否则借用移出 E0507。
@@ -6493,7 +6583,7 @@ impl CodeGen {
                     // move 此刻才定。若本闭包非 move，其体内嵌套 Lambda 须强制 move——
                     // 用 child CodeGen（parent_lambda_non_move=true）重生成 body_s。
                     let body_s = if !uses_move {
-                        let cloned = clone_noncopy_external(body, &params);
+                        let cloned = clone_noncopy_external(body, &*self.enclosing_lambda_params.borrow());
                         let mut c = CodeGen::new();
                         c.known_types = self.known_types.clone();
                         c.str_typed_vars = self.str_typed_vars.clone();
@@ -6506,6 +6596,8 @@ impl CodeGen {
                         c.suppress_tail_return = true;
                         c.parent_lambda_non_move = true;
                         c.nested_fn_ret = self.nested_fn_ret;
+                        // 参数链继承：child 重生成嵌套 Lambda 时仍需知道祖先闭包参数
+                        c.enclosing_lambda_params = std::cell::RefCell::new(self.enclosing_lambda_params.borrow().clone());
                         // BUG-363b：child 必须继承 box_lambda，否则内层闭包重生成时
                         // 丢失 move 强制（nested_closure_typed.lz |a| |b| a + b 的内层
                         // 经 body_refs_noncopy_external 分支重建，box_lambda=false → 无 move → E0373）
@@ -6517,8 +6609,8 @@ impl CodeGen {
                         } else {
                             c.gen_expr(&cloned)
                         }
-                    } else if body_refs_noncopy_external(body, &params) {
-                        let cloned = clone_noncopy_external(body, &params);
+                    } else if body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow()) {
+                        let cloned = clone_noncopy_external(body, &*self.enclosing_lambda_params.borrow());
                         let mut c = CodeGen::new();
                         c.known_types = self.known_types.clone();
                         c.str_typed_vars = self.str_typed_vars.clone();
@@ -6530,6 +6622,8 @@ impl CodeGen {
                         c.fn_use_count = self.fn_use_count.clone();
                         c.suppress_tail_return = true;
                         c.nested_fn_ret = self.nested_fn_ret;
+                        // 参数链继承：同 L6589，child 重生成嵌套 Lambda 时需知祖先闭包参数
+                        c.enclosing_lambda_params = std::cell::RefCell::new(self.enclosing_lambda_params.borrow().clone());
                         // BUG-363b：同 L6313，child 需继承 box_lambda
                         c.box_lambda = self.box_lambda;
                         // BUG-363c：child 已继承 box_lambda，内层会在 L6350 自行 Arc::new，
@@ -6557,11 +6651,15 @@ impl CodeGen {
                 // IR-003：值位置（let = Lambda / return Lambda）的闭包需 Arc::new 包装为
                 // Arc<dyn Fn … + Send + Sync>（可 clone）；参数位置（传给 impl FnMut，如 map/filter/for_each）不包装，
                 // 保留借用捕获（for_each |x| total += x 修改外层变量）
-                if self.box_lambda {
+                // 参数链出栈（Lambda 分支唯一出口）：恢复祖先链供兄弟/外层表达式使用
+                // （body_s 里的嵌套 Lambda 已各自入栈自己的参数，此处只还原本层）。
+                let out = if self.box_lambda {
                     format!("Arc::new({})", lam)
                 } else {
                     lam
-                }
+                };
+                self.enclosing_lambda_params.borrow_mut().truncate(chain_prev_len);
+                out
             }
             ExprKind::StructCtor { name, fields } => {
                 // Special handling for built-in types
