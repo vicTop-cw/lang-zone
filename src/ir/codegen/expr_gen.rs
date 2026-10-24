@@ -6527,14 +6527,36 @@ impl CodeGen {
                     // 递归 clone 所有非 Copy 外部变量，否则借用移出 E0507。
                     // BUG-357：被外层非 move 强制成 move 的内层闭包同样需 clone——
                     // move 捕获外层变量的引用（&T，Copy）后，体内须 clone 出 T。
+                    // BUG-413：本闭包被外层强制 move（BUG-357 的「外层非 move ⇒ 内层强制
+                    // move」路径）且体内引用非 Copy 外部变量时，必须在体内 clone 出 T 再使用。
+                    // 复现：dict_comprehension.lz `{k: v for k in [...] for v in [...]}`
+                    // 生成 flat_map(|k| { (…).into_iter().map(move |v| { (k, v) }) })——内层
+                    // 是 map 的 FnMut，按值移出外层循环变量 k（String）即 E0507。
+                    // 旧条件只覆盖「体内含嵌套 move 闭包」的情形，漏了本层直接引用外层
+                    // 循环变量的推导链。
+                    let encl_params = self.enclosing_lambda_params.borrow().clone();
+                    // 本闭包自身形参 = 参数链尾（入栈处以 extend 追加，见 L6279）。
+                    let own_params: Vec<String> =
+                        encl_params[chain_prev_len.min(encl_params.len())..].to_vec();
+                    let has_nested_move = block_contains_nested_move_lambda(block_ref, &encl_params);
+                    // 被外层强制 move 时，clone 判定只排除**自身**形参：祖先形参是外层
+                    // 闭包自有值（不是可复制的借用），内层 move 闭包按值移出即 E0507。
+                    let forced_body_clone = !has_nested_move
+                        && self.parent_lambda_non_move
+                        && body_refs_noncopy_external(body, &own_params);
                     let gen_block: Block = if (!uses_move || self.parent_lambda_non_move)
-                        && block_contains_nested_move_lambda(block_ref, &*self.enclosing_lambda_params.borrow())
+                        && (has_nested_move || forced_body_clone)
                     {
+                        let excl: Vec<String> = if forced_body_clone {
+                            own_params.clone()
+                        } else {
+                            encl_params.clone()
+                        };
                         let mut nb = block_ref.clone();
                         nb.stmts = nb
                             .stmts
                             .iter()
-                            .map(|s| clone_noncopy_stmt(s, &*self.enclosing_lambda_params.borrow()))
+                            .map(|s| clone_noncopy_stmt(s, &excl))
                             .collect();
                         nb
                     } else {
@@ -6594,6 +6616,20 @@ impl CodeGen {
                     // BUG-357：body_s 在行 5995 已按「当前闭包的父」生成，而本闭包是否为
                     // move 此刻才定。若本闭包非 move，其体内嵌套 Lambda 须强制 move——
                     // 用 child CodeGen（parent_lambda_non_move=true）重生成 body_s。
+                    // BUG-413：被外层强制 move（parent_lambda_non_move）的本层闭包，
+                    // clone 判定只排除**自身**形参——祖先闭包形参（如推导链外层循环
+                    // 变量 k）是外层闭包自有值而非可复制的借用，内层 move 闭包按值
+                    // 移出即 E0507（dict_comprehension.lz `{k: v for k … for v …}`
+                    // → `map(move |v| { (k, v) })`）。其余情形保持既有「排除整条
+                    // 参数链」口径，避免重复 clone。
+                    let expr_clone_excl: Vec<String> = {
+                        let encl = self.enclosing_lambda_params.borrow();
+                        if self.parent_lambda_non_move {
+                            encl[chain_prev_len.min(encl.len())..].to_vec()
+                        } else {
+                            encl.clone()
+                        }
+                    };
                     let body_s = if !uses_move {
                         let cloned = clone_noncopy_external(body, &*self.enclosing_lambda_params.borrow());
                         let mut c = CodeGen::new();
@@ -6621,8 +6657,8 @@ impl CodeGen {
                         } else {
                             c.gen_expr(&cloned)
                         }
-                    } else if body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow()) {
-                        let cloned = clone_noncopy_external(body, &*self.enclosing_lambda_params.borrow());
+                    } else if body_refs_noncopy_external(body, &expr_clone_excl) {
+                        let cloned = clone_noncopy_external(body, &expr_clone_excl);
                         let mut c = CodeGen::new();
                         c.known_types = self.known_types.clone();
                         c.str_typed_vars = self.str_typed_vars.clone();
