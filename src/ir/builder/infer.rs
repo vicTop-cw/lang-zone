@@ -272,7 +272,64 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                     "None" => return IrType::Option(Box::new(IrType::Any)),
                     _ => {}
                 }
-                if ctx.is_struct(fname) { return IrType::named(fname);
+                if ctx.is_struct(fname) {
+                    // BUG-17：泛型 struct 构造调用 `Pair2(first: 1, second: "one")`
+                    // 需从字段实参类型推断泛型 args，否则返回 Named(fname, []) 空参，
+                    // 字段访问无法实例化 Generic（打印退化 Debug、方法分派失效）。
+                    if let Some(params) = ctx.struct_generics.get(fname) {
+                        if !params.is_empty() {
+                            let order = ctx
+                                .struct_field_order
+                                .get(fname)
+                                .cloned()
+                                .unwrap_or_default();
+                            let mut field_tys: Vec<(String, IrType)> = Vec::new();
+                            for (i, a) in args.iter().enumerate() {
+                                match a {
+                                    AstExpr::KwArg { name, value } => {
+                                        field_tys.push((
+                                            name.clone(),
+                                            infer_expr_type(value, ctx),
+                                        ));
+                                    }
+                                    other => {
+                                        if let Some(f) = order.get(i) {
+                                            field_tys.push((
+                                                f.clone(),
+                                                infer_expr_type(other, ctx),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            // 字段声明类型 → 泛型参数映射：字段 Generic("A") → 实参类型
+                            let mut subst: std::collections::HashMap<String, IrType> =
+                                std::collections::HashMap::new();
+                            if let Some(fields) = ctx.struct_fields.get(fname) {
+                                for (fn_name, arg_ty) in &field_tys {
+                                    if let Some(decl) = fields.get(fn_name) {
+                                        if let IrType::Generic(gname) = decl {
+                                            subst.insert(gname.clone(), arg_ty.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            let inst_args: Vec<IrType> = params
+                                .iter()
+                                .map(|p| {
+                                    subst
+                                        .get(p)
+                                        .cloned()
+                                        .unwrap_or(IrType::Any)
+                                })
+                                .collect();
+                            return IrType::Named {
+                                path: fname.clone(),
+                                args: inst_args,
+                            };
+                        }
+                    }
+                    return IrType::named(fname);
                 }
                 // 容器空构造：`List()` / `Set()` / `Dict()` 返回对应容器类型，
                 // 否则推断为 Any→i64（`let mut result = List()` 后 `return result`
@@ -302,10 +359,12 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 }
                 // 闭包变量调用：consume() 中 consume 是局部 Fn 变量 →
                 // 返回闭包体 ret 类型（否则 lookup_fn_return 回退 Any→i64，E0308）
-                if let IrType::Fn { ret, .. } = ctx.lookup_var(fname) {
+                let lv = ctx.lookup_var(fname);
+                if let IrType::Fn { ret, .. } = lv {
                     return *ret;
                 }
                 let ret_ty = ctx.lookup_fn_return(fname);
+
                 // 显式 turbofish 类型参数（parse_num.<int>("42")）：
                 // 直接用 type_args 替换返回类型中的泛型（否则 Result<T, String> 中 T 未绑定，E0425）
                 if !type_args.is_empty() && ret_ty.contains_generics() {
@@ -469,7 +528,26 @@ pub(crate) fn infer_expr_type(ast_expr: &AstExpr, ctx: &TypeCtx) -> IrType {
                 other => other.clone(),
             };
             match &base_ty {
-                IrType::Named { path, .. } => ctx.lookup_field(path, field),
+                IrType::Named { path, args } => {
+                    let decl = ctx.lookup_field(path, field);
+                    // BUG-17：泛型 struct 字段访问类型实例化。
+                    // struct Pair2<A,B> 的字段声明类型存的是 Generic("A")/Generic("B")，
+                    // 直接返回会使 `p.second`（Pair2<int,str> 实例）推断为 Generic→
+                    // Any，codegen 打印走 Debug（带引号）、后续方法分派退化。
+                    // 按 struct_generics 形参顺序把 Generic 替换为实例化 args。
+                    if !args.is_empty() {
+                        if let Some(params) = ctx.struct_generics.get(path) {
+                            let mut subst = std::collections::HashMap::new();
+                            for (i, p) in params.iter().enumerate() {
+                                if let Some(a) = args.get(i) {
+                                    subst.insert(p.clone(), a.clone());
+                                }
+                            }
+                            return replace_generic(&decl, &subst);
+                        }
+                    }
+                    decl
+                }
                 // BUG-313：元组字段访问 `t.1` / `inner.1`（LZ 元组索引语义）。
                 // 未处理时回退 Any→i64，`inner.1`（bool 元素）误生成
                 // `<bool as ImplicitFrom<i64>>::__implicit_from__(inner.1)` → E0277
@@ -1430,5 +1508,35 @@ pub(crate) fn safe_nav_field_ty(recv: &Expr, field: &str, ctx: &TypeCtx) -> Opti
             }
         }
         _ => None,
+    }
+}
+
+/// 递归替换类型中的 Generic 变量（struct 字段类型实例化用）。
+fn replace_generic(ty: &IrType, subst: &std::collections::HashMap<String, IrType>) -> IrType {
+    match ty {
+        IrType::Generic(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        IrType::Named { path, args } => IrType::Named {
+            path: path.clone(),
+            args: args.iter().map(|a| replace_generic(a, subst)).collect(),
+        },
+        IrType::Option(inner) => IrType::Option(Box::new(replace_generic(inner, subst))),
+        IrType::Result { ok, err } => IrType::Result {
+            ok: Box::new(replace_generic(ok, subst)),
+            err: Box::new(replace_generic(err, subst)),
+        },
+        IrType::Tuple(elems) => IrType::Tuple(elems.iter().map(|e| replace_generic(e, subst)).collect()),
+        IrType::Fn { params, ret } => IrType::Fn {
+            params: params.iter().map(|p| replace_generic(p, subst)).collect(),
+            ret: Box::new(replace_generic(ret, subst)),
+        },
+        IrType::Ref(inner) => IrType::Ref(Box::new(replace_generic(inner, subst))),
+        IrType::MutRef(inner) => IrType::MutRef(Box::new(replace_generic(inner, subst))),
+        IrType::Duck { fields } => IrType::Duck {
+            fields: fields
+                .iter()
+                .map(|(n, t)| (n.clone(), replace_generic(t, subst)))
+                .collect(),
+        },
+        other => other.clone(),
     }
 }

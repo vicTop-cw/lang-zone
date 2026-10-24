@@ -1972,6 +1972,9 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
             .struct_field_order
             .insert(sn.clone(), order.clone());
     }
+    for (sn, gens) in &ctx.struct_generics {
+        block_ctx.struct_generics.insert(sn.clone(), gens.clone());
+    }
     for (sn, ms) in &ctx.struct_methods {
         block_ctx.struct_methods.insert(sn.clone(), ms.clone());
     }

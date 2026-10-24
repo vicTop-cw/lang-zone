@@ -907,6 +907,9 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
     for (sn, order) in &ctx.struct_field_order {
         fn_ctx.struct_field_order.insert(sn.clone(), order.clone());
     }
+    for (sn, gens) in &ctx.struct_generics {
+        fn_ctx.struct_generics.insert(sn.clone(), gens.clone());
+    }
     for (sn, ms) in &ctx.struct_methods {
         fn_ctx.struct_methods.insert(sn.clone(), ms.clone());
     }
@@ -1786,6 +1789,10 @@ fn struct_is_recursive(s: &ast::StructDef) -> bool {
         use crate::types::Type as T;
         match ty {
             T::Named(n) => n == name,
+            // BUG-SR：`Self` 关键字占位（如 `next: Self?`）同样构成对自身类型的递归
+            // 引用，需跳过 __unapply__ 合成；此前漏判导致递归 struct 也合成
+            // __unapply__，其 Box 字段 clone 类型不匹配（E0308，self_recursive.lz）。
+            T::Self_ => true,
             T::Option(inner) | T::Optional(inner) | T::Ref(inner) | T::MutRef(inner) => {
                 ty_refs(inner, name)
             }

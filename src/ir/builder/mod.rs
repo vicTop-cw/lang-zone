@@ -103,6 +103,8 @@ pub(crate) struct TypeCtx {
     enum_variant_field_types: HashMap<String, Vec<IrType>>,
     /// enum 泛型形参列表：enum_name → [T, E, ...]（match 臂绑定实例化用）
     enum_generics: HashMap<String, Vec<String>>,
+    /// struct 泛型形参列表：struct_name → [T, E, ...]（字段访问类型实例化用）
+    struct_generics: HashMap<String, Vec<String>>,
     /// 本块（convert_block 循环）内首次声明的变量：区分「首次绑定」与「重新赋值」
     /// （闭包体内 `total = total + x` 写外部变量 → 应转 Assign，而非新 let 绑定）
     block_declared: std::collections::HashSet<String>,
@@ -160,6 +162,7 @@ impl TypeCtx {
             enum_variants: HashMap::new(),
             enum_variant_field_types: HashMap::new(),
             enum_generics: HashMap::new(),
+            struct_generics: HashMap::new(),
             block_declared: std::collections::HashSet::new(),
             block_declared_so_far: std::collections::HashSet::new(),
             current_generics: vec![],
@@ -230,12 +233,16 @@ impl TypeCtx {
                 for f in &s.fields {
                     fields.insert(
                         f.name.clone(),
-                        replace_self(&from_ast_type(&f.ty), &self_ty),
+                        replace_self(
+                            &from_ast_type_with_generics(&f.ty, &s.generics),
+                            &self_ty,
+                        ),
                     );
                     field_order.push(f.name.clone());
                 }
                 self.struct_fields.insert(s.name.clone(), fields);
                 self.struct_field_order.insert(s.name.clone(), field_order);
+                self.struct_generics.insert(s.name.clone(), s.generics.clone());
                 // 收集 struct 方法名（含魔术方法）
                 let mut mset: HashSet<String> = HashSet::new();
                 let mut arity_map: HashMap<String, usize> = HashMap::new();
@@ -418,9 +425,8 @@ impl TypeCtx {
                     params,
                     ret: Box::new(ret.clone()),
                 };
-            
             self.vars.insert(f.name.clone(), fn_ty);
-            
+
             // BUG-CG-004 收口：登记 raises 异常类型，供 try 体末尾调用 raises 函数时
             // 将 body 块类型标注为 Result<ok, err>（见 convert_expr 的 TryCatch 分支）。
             if let Some(r) = &f.raises {
