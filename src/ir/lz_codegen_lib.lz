@@ -745,7 +745,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.LitNone(ty: t) => "None".to_string()
         case Expr.Var(name: n, ty: t) => n.to_string()
         case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, fn_raises).to_string()
-        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + method_call_sep(r) + m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_method_call(r, m, a, t, fn_raises)
         case Expr.FieldAccess(base: b, field: f, ty: t) =>
             // BUG-423：基底是**类型名**时须用路径分隔符——`Light.On`（单位变体引用）
             // 在 Rust 应为 `Light::On`，用 `.` 即 E0423 expected value, found enum。
@@ -909,6 +909,81 @@ def method_call_sep(r: Expr) -> String =
             else:
                 ".".to_string()
         case _ => ".".to_string()
+
+// BUG-424：内建方法形态改写（**str 子集**，对齐原生 expr_gen.rs 的改名表/形态适配）——
+//   ① 改名：length→len、to_lower/lower→to_lowercase、to_upper/upper→to_uppercase、
+//      Dict/HashMap 上的 contains→contains_key
+//   ② 模式实参：split/starts_with/ends_with/replace/find/rfind（以及 str 上的 contains）
+//      的 str 字面量必须发**裸字面量**——Rust 的 Pattern 由 &str 实现，`.to_string()`
+//      得到的 String 不实现 ⇒ E0277 the trait bound `String: Pattern` is not satisfied
+//   ③ 返回 String 的方法（trim/trim_start/trim_end/replace）按 LZ str 语义补
+//      `.to_string()`（对齐原生 `s.trim().to_string()`）
+// 未覆盖（另立条目）：集合迭代适配（map/filter/fold/keys/values/join/sorted…）
+// 需要 `.into_iter()/.collect()` 形态改写，属同一张表的另一半。
+def gen_method_call(r: Expr, m: str, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> String =
+    let name = lz_method_rename(m, r)
+    let args_s = if is_pattern_method(m, r):
+        pattern_args_list(a, fn_raises)
+    else:
+        expr_cs_list(a, fn_raises)
+    let call = gen_expr(r, fn_raises) + method_call_sep(r) + name + "(".to_string() + args_s + ")".to_string()
+    if is_str_returning_method(m):
+        call + ".to_string()".to_string()
+    elif m == "split" and is_list_irtype(t):
+        // LZ `s.split(sep)` 返回 List<str>，而 Rust 的 split 返回迭代器 ⇒ 物化
+        //（对齐原生 `…split(",").map(|s| s.to_string()).collect::<Vec<_>>()`）。
+        call + ".map(|s| s.to_string()).collect::<Vec<_>>()".to_string()
+    else:
+        call
+
+def is_list_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: a) => p == "List" || p == "Vec"
+        case _ => false
+
+def lz_method_rename(m: str, r: Expr) -> String =
+    if m == "length":
+        "len".to_string()
+    elif m == "to_lower" or m == "lower":
+        "to_lowercase".to_string()
+    elif m == "to_upper" or m == "upper":
+        "to_uppercase".to_string()
+    elif m == "contains" and is_dict_irtype(expr_ty(r)):
+        "contains_key".to_string()
+    else:
+        m.to_string()
+
+def is_dict_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: a) => p == "Dict" || p == "HashMap"
+        case _ => false
+
+def is_str_returning_method(m: str) -> bool =
+    (m == "trim") || (m == "trim_start") || (m == "trim_end") || (m == "replace")
+
+def is_pattern_method(m: str, r: Expr) -> bool =
+    if (m == "split") || (m == "starts_with") || (m == "ends_with") || (m == "replace") || (m == "find") || (m == "rfind"):
+        true
+    elif m == "contains":
+        is_string_irtype(expr_ty(r))
+    else:
+        false
+
+// 模式位实参：str 字面量发裸 `"…"`（&str 实现 Pattern），其余沿用 gen_kwarg_value
+def pattern_args_list(es: List<Expr>, fn_raises: MaybeIrType) -> String =
+    if es.len() == 0:
+        "".to_string()
+    else:
+        let head = pattern_arg_of(es[0].clone(), fn_raises)
+        if es.len() > 1:
+            head + ", ".to_string() + pattern_args_list(ec_tail(es), fn_raises)
+        else:
+            head
+
+def pattern_arg_of(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.LitStr(s: sv, ty: t) => "\"".to_string() + esc_rust(sv) + "\"".to_string()
+        case _ => gen_kwarg_value(e, fn_raises)
 
 // BUG-423：字段访问的分隔符——基底是类型名（Var 且首字母大写，如 `Light.On`）时
 // 用 `::`（单位变体/关联项引用），否则用 `.`（真实字段访问）。与 method_call_sep 同口径。
