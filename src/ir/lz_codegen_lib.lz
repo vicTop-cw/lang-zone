@@ -1034,6 +1034,15 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         "(".to_string() + recv0 + ").iter().min().cloned()".to_string()
     elif m == "max" and a.len() == 0:
         "(".to_string() + recv0 + ").iter().max().cloned()".to_string()
+    elif m == "map" and a.len() == 1 and is_optres_irtype(expr_ty(r)):
+        // BUG-439：`.map()` 在 Option/Result 接收者上是 Option::map/Result::map（直接
+        // 作用于内层值），rs-lz 此前与集合共用迭代器 map 分支 → 发
+        // `(r).iter().cloned().map(..).collect::<Vec<_>>()`，Option/Result 无 `.iter()`
+        // → rustc E0308 mismatched types。原生 codegen 渲染 `(r).clone().map(move |n| ..)`
+        //（`.clone()` 保留接收者所有权，供后续复用），此处对齐。集合接收者仍走下方
+        // 迭代器 map 分支（Vec 需 `.iter().cloned().map(..).collect()`），与 flat_map
+        // 在 Option/Result 上改名 and_then（BUG-433）互补。
+        "(".to_string() + recv0 + ").clone().map(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
     elif m == "filter" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "map" and a.len() == 1:
