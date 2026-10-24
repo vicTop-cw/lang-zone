@@ -1024,6 +1024,16 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
     // 否则与 i64 比较/赋值处 E0308（`k.len() > 1i64`；与自由函数 len(x) 同口径）。
     if (m == "len") || (m == "length"):
         "(".to_string() + recv0 + ".len() as i64)".to_string()
+    elif m == "sum" and a.len() == 0:
+        // BUG-435：`.sum()` 方法在 Vec/List 上不存在（原生 codegen 渲染
+        // `(a).iter().copied().sum::<i64>()`，rs-lz 此前落进通用方法分支直接发
+        // `a.sum()` → E0599 no method named `sum` found for struct `Vec<i64>`）。
+        // 与自由函数 `sum(x)`（BUG-430）同口径，此处补方法形态以对齐原生逐字符。
+        "(".to_string() + recv0 + ").iter().copied().sum::<i64>()".to_string()
+    elif m == "min" and a.len() == 0:
+        "(".to_string() + recv0 + ").iter().min().cloned()".to_string()
+    elif m == "max" and a.len() == 0:
+        "(".to_string() + recv0 + ").iter().max().cloned()".to_string()
     elif m == "filter" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "map" and a.len() == 1:
