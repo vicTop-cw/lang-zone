@@ -1959,32 +1959,46 @@ def gen_impl_def(trait_: MaybeIrType, for_type: IrType, generics: List<(str, Lis
     let trait_part = match trait_:
         case MaybeIrType.YesTy(t: ty) => rust_type(ty) + " for ".to_string()
         case MaybeIrType.NoTy => "".to_string()
+    // BUG-434：trait impl 的接收者必须与 trait 声明一致。IR 里 TraitDef 方法接收者
+    // 只记为 Self_（无 ref 标志），rs-lz 统一按 `&self` 渲染 trait 声明；而 impl 方法的
+    // `("self", Self_, is_ref, ...)` 若 is_ref=false 则渲染为按值 `self`，两者不一致 →
+    // rustc E0053 method `item` has an incompatible type for trait。原生把 trait impl
+    // 的方法接收者也渲染为 `&self`（一致）。此处对 trait impl（trait_=YesTy）强制接收者
+    // 取引用：&self / &mut self，绝不按值。固有 impl（NoTy）保持 IR 原语义。
+    let force_ref = match trait_:
+        case MaybeIrType.YesTy(t: ty) => true
+        case MaybeIrType.NoTy => false
     let mut body: String = gen_impl_assoc_bindings(assoc_type_bindings)
     for idx in 0..methods.len():
-        body = body + gen_impl_method(methods[idx].clone())
+        body = body + gen_impl_method(methods[idx].clone(), force_ref)
     "impl ".to_string() + generic_sig_b(generics, where_clause) + trait_part + rust_type(for_type) + impl_where_clause(where_clause) + " {\n".to_string() + body + "}".to_string()
 
 // BUG-422：真实方法体（对齐原生 impl 块内的 `fn name(...) -> ret { body }`）。
 // 形参：self 渲染为 `&self` / `&mut self` / `self`（元组序 = name, ty, is_ref,
 // is_mut, is_owned），其余 `name: ty`。返回 () 时省略 `-> ()`。
-def gen_impl_method(m: ImplMethod) -> String =
+def gen_impl_method(m: ImplMethod, force_ref: bool) -> String =
     let ret_s = "".to_string() if r_eq_unit(m.ret) else (" -> ".to_string() + rust_type(m.ret))
-    "    fn ".to_string() + m.name + "(".to_string() + impl_method_params(m.params) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(m.body, false, auto_mut_names(m.body), m.exc) + "    }\n".to_string()
+    "    fn ".to_string() + m.name + "(".to_string() + impl_method_params(m.params, force_ref) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(m.body, false, auto_mut_names(m.body), m.exc) + "    }\n".to_string()
 
-def impl_method_params(ps: List<(str, IrType, bool, bool, bool)>) -> String =
+def impl_method_params(ps: List<(str, IrType, bool, bool, bool)>, force_ref: bool) -> String =
     let mut out: String = "".to_string()
     for idx in 0..ps.len():
         let p = ps[idx].clone()
         if idx > 0:
             out = out + ", ".to_string()
         if p.0 == "self":
-            out = out + self_param_str(p)
+            out = out + self_param_str(p, force_ref)
         else:
             out = out + p.0 + ": ".to_string() + rust_type(p.1)
     out
 
-def self_param_str(p: (str, IrType, bool, bool, bool)) -> String =
-    if p.4:
+def self_param_str(p: (str, IrType, bool, bool, bool), force_ref: bool) -> String =
+    if force_ref:
+        if p.3:
+            "&mut self".to_string()
+        else:
+            "&self".to_string()
+    elif p.4:
         "self".to_string()
     elif p.2:
         if p.3:
