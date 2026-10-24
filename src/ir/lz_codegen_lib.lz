@@ -839,7 +839,18 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
             // 在 Rust 应为 `Light::On`，用 `.` 即 E0423 expected value, found enum。
             // 与 BUG-405（方法调用侧）同口径：Var 且首字母大写视为类型名。
             gen_expr(b, fn_raises) + field_access_sep(b) + f.to_string()
-        case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "]".to_string()
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            // BUG-447：Rust 的 `Vec<T>`/切片下标须 `usize`，LZ 索引表达式是 `int`(i64)。
+            // rs-lz 此前透传 `xs[0i64]` → E0277 cannot be indexed by `i64`；原生渲染
+            // `xs[0i64 as usize]`。Dict 的下标是键（见 BUG-448），不套 usize 转换。
+            if is_dict_irtype(expr_ty(b)):
+                // BUG-448：原生对 Dict 的下标**不用** Rust 下标运算符（BTreeMap 的 Index
+                // 实现与 LZ 键类型口径不同），而是渲染 `(d).get(&"a".to_string()).cloned().unwrap()`：
+                // 键按值持有（`&<dict_insert_key_arg>`），再 .cloned() 取值。rs-lz 此前透传
+                // `d["a".to_string()]` → E0308 mismatched types。
+                "(".to_string() + gen_expr(b, fn_raises) + ").get(&".to_string() + dict_insert_key_arg(k, fn_raises) + ").cloned().unwrap()".to_string()
+            else:
+                gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + " as usize]".to_string()
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "] = ".to_string() + gen_expr(v, fn_raises)
         case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
             // BUG-423：字符串拼接 `a + b` 在 Rust 需 `String + &str`（String + String
@@ -1101,12 +1112,14 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         recv0 + ".values().cloned().collect::<Vec<_>>()".to_string()
     elif m == "get" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ".get(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")).cloned()".to_string()
-    elif m == "contains" and a.len() == 1 and is_list_irtype(expr_ty(r)):
+    elif m == "contains" and a.len() == 1 and (is_list_irtype(expr_ty(r)) or is_set_irtype(expr_ty(r))):
         // BUG-437：List/Vec 的 `.contains(x)` 在 Rust 端签名是 `contains(&self, x: &T)`
         // —— 实参必须按引用传入。rs-lz 此前落到通用方法分支直发 `v.contains(3i64)`
         // → rustc E0308 mismatched types；原生 codegen 渲染 `v.contains(&3i64)`。
         // 注意 Dict（→ contains_key）与 str（→ Pattern 位，is_pattern_method）走各自
         // 既有分支，此处只接管集合（List/Vec）接收者。
+        // BUG-449：`Set`（→ HashSet）接收者同签名 `contains(&self, x: &T)`，同族缺口
+        // （`s.contains(1i64)` → E0308 expected `&i64`, found `i64`）。
         "(".to_string() + recv0 + ").contains(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
     else:
         let recv0 = gen_expr(r, fn_raises)
@@ -1430,6 +1443,13 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> Strin
             // 原生渲染 `std::collections::BTreeMap::new()`。
             elif n == "Dict" and a.len() == 0:
                 "std::collections::BTreeMap::new()".to_string()
+            // BUG-449：空 `Set()` 构造同 BUG-443 的 `Dict()`——builder 生成
+            // `Call(Var("Set"), [])`，rs-lz 走通用分支原发 `Set()`，而 `Set` 只是
+            // lz_builtins 里的类型别名（`Set<T> = HashSet<T>`）⇒ E0423 expected
+            // function, found type alias `Set`。原生渲染
+            // `let mut s: std::collections::HashSet<_> = std::collections::HashSet::new()`。
+            elif n == "Set" and a.len() == 0:
+                "std::collections::HashSet::new()".to_string()
             // BUG-432：命名字段结构体构造 `Point(x: 3, y: 4)`。builder 把它变成
             // `Call(Var("Point"), [_KwArg(x,3), _KwArg(y,4)])`，ty=Named("Point")。
             // rs-lz 此前走通用调用分支、用 kwarg_value_of 剥掉字段名 ⇒ `Point(3i64, 4i64)`
