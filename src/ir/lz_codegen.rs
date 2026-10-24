@@ -962,6 +962,32 @@ impl LzGen {
                 format!("Pattern.Struct(name: \"{}\", fields: {})", name, fields_s)
             }
             Pattern::Enum { enum_name, variant, args } => {
+                // BUG-421：命名字段变体的匹配模式必须是 struct pattern
+                // （`Shape::Circle { radius: r }`）——对 struct variant 写元组 pattern
+                // 报 E0164 expected tuple struct or tuple variant。BUG-411 只修了
+                // **构造**侧（MethodCall → EnumCtor），模式侧当时漏了。
+                if self.rs_codegen_mode {
+                    let names: Option<Vec<String>> = self
+                        .enums
+                        .get(enum_name)
+                        .and_then(|vs| vs.iter().find(|(v, _)| v == variant))
+                        .map(|(_, f)| f.clone());
+                    if let Some(fs) = names {
+                        let all_named = !fs.is_empty() && fs.iter().all(|f| !f.is_empty());
+                        if all_named && fs.len() == args.len() {
+                            let fields_items: Vec<String> = fs
+                                .iter()
+                                .zip(args.iter())
+                                .map(|(n, a)| format!("(\"{}\", {})", n, self.pattern(a)))
+                                .collect();
+                            let fields_s = self.list_ref("(str, Pattern)", fields_items);
+                            return format!(
+                                "Pattern.EnumNamed(enum_name: \"{}\", variant: \"{}\", fields: {})",
+                                enum_name, variant, fields_s
+                            );
+                        }
+                    }
+                }
                 let args_items: Vec<String> = args.iter().map(|a| self.pattern(a)).collect();
                 let args_s = self.list_ref("Pattern", args_items);
                 format!(

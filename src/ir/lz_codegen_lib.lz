@@ -134,6 +134,9 @@ enum Pattern:
     List(elems: List<Pattern>)
     Struct(name: str, fields: List<(str, Pattern)>)
     Enum(enum_name: str, variant: str, args: List<Pattern>)
+    // BUG-421：命名字段变体的匹配模式（Rust struct pattern `E::V { f: p, .. }`）。
+    // 对 struct variant 用元组 pattern 报 E0164；序列化侧按变体定义判定后发本变体。
+    EnumNamed(enum_name: str, variant: str, fields: List<(str, Pattern)>)
     Rest(name: MaybeStr)
     Range(start: int, end: int, inclusive: bool)
 
@@ -415,6 +418,14 @@ def display_pattern(p: Pattern) -> String =
             n + " { ".to_string() + fields_s + " }".to_string()
         case Pattern.Enum(enum_name: en, variant: v, args: a) =>
             en + "::".to_string() + v + arg_pat_list(a)
+        case Pattern.EnumNamed(enum_name: en, variant: v, fields: fs) =>
+            let mut fields_s: String = " { ".to_string()
+            for idx in 0..fs.len():
+                if idx > 0:
+                    fields_s = fields_s + ", ".to_string()
+                let f = fs[idx].clone()
+                fields_s = fields_s + f.0 + ": ".to_string() + display_pattern(f.1)
+            en + "::".to_string() + v + fields_s + " }".to_string()
         case Pattern.Rest(name: rn) =>
             match rn:
                 case MaybeStr.YesStr(value: n2) => "..".to_string() + n2
@@ -459,7 +470,7 @@ def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR), fn_raises: MaybeIrType) ->
     let gd_s = match gd:
         case MaybeExpr.YesExpr(v: vv) => " if ".to_string() + gen_expr(vv, MaybeIrType.NoTy)
         case MaybeExpr.NoExpr => "".to_string()
-    let blk_s = gen_block(blk, fn_raises)
+    let blk_s = gen_value_block(blk, fn_raises)
     "    ".to_string() + pat_s + gd_s + " => ".to_string() + blk_s + ",\n".to_string()
 
 // D2 缺口补齐：Pattern codegen（复用 display_pattern 的输出格式）
@@ -483,6 +494,16 @@ def gen_pattern(p: Pattern) -> String =
                 fields_s = fields_s + f.0 + ": ".to_string() + gen_pattern(f.1)
             fields_s + " }".to_string()
         case Pattern.Enum(enum_name: en, variant: v, args: a) => en + "::".to_string() + v + arg_pat_list(a)
+        // BUG-421：命名字段变体 → struct pattern（`Shape::Circle { radius: r }`），
+        // 对 struct variant 写元组 pattern 即 E0164。
+        case Pattern.EnumNamed(enum_name: en, variant: v, fields: fs) =>
+            let mut fields_s: String = " { ".to_string()
+            for idx in 0..fs.len():
+                if idx > 0:
+                    fields_s = fields_s + ", ".to_string()
+                let f = fs[idx].clone()
+                fields_s = fields_s + f.0 + ": ".to_string() + gen_pattern(f.1)
+            en + "::".to_string() + v + fields_s + " }".to_string()
         case Pattern.Rest(name: rn) =>
             match rn:
                 case MaybeStr.YesStr(value: n2) => "..".to_string() + n2
@@ -501,6 +522,36 @@ def gen_block(b: BlockIR, fn_raises: MaybeIrType) -> String =
                 // 其尾表达式不是函数尾，不得发射 `return`。is_main=true 仅抑制 ExprStmt
                 // 的尾 return，无其他副作用；函数体尾部仍由 gen_item 直接 gen_body。
                 "{\n" + gen_body(ss, true, "".to_string(), fn_raises) + "}"
+
+// BUG-420：**值位置块**——块的值就是尾表达式的值，尾 ExprStmt 不得带分号。
+// gen_block 是语句位置块（尾表达式加分号、丢弃值），用于 for/if/while/try/defer；
+// match 的分支体在「match 本身处于值位置」时必须用本函数，否则分支值被 `;` 丢弃
+// （`def val(e) -> int = match e: case E2.A(x): x + 1` → 生成 `{ x + 1i64; }`
+// → E0308 expected i64, found ()；原生产物为 `{ x + 1i64 }`）。
+def gen_value_body(ss: List<Stmt>, fn_raises: MaybeIrType) -> String =
+    let n = ss.len()
+    let mut out: String = "".to_string()
+    for idx in 0..n:
+        let is_tail = (idx == n - 1)
+        if is_tail:
+            match ss[idx].clone():
+                // 尾表达式：直出表达式、不加分号，块值即其值
+                case Stmt.ExprStmt(expr: e) =>
+                    out = out + "    ".to_string() + gen_expr(e, fn_raises) + "\n".to_string()
+                // 尾语句是 match/if/block 等：is_tail=true 让嵌套 match 走值位置形态
+                case _ =>
+                    out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), true, true, "".to_string(), fn_raises) + "\n".to_string()
+        else:
+            out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), false, true, "".to_string(), fn_raises) + "\n".to_string()
+    out
+
+def gen_value_block(b: BlockIR, fn_raises: MaybeIrType) -> String =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) =>
+            if ss.len() == 0:
+                "{}".to_string()
+            else:
+                "{\n".to_string() + gen_value_body(ss, fn_raises) + "}".to_string()
 
 // ── IrType → Rust 类型 ──
 def rust_type(t: IrType) -> String =
@@ -1039,7 +1090,13 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
         case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) =>
             "for ".to_string() + v + " in ".to_string() + gen_expr(it, fn_raises) + " ".to_string() + gen_block(b, fn_raises)
         case Stmt.Match(scrutinee: s, arms: as_) =>
-            "match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
+            // BUG-420：值位置（函数尾/块尾）的 match 直出，各分支体经 gen_value_block
+            // 产出值；语句位置用 `let _ = match …;` 丢弃值（否则「非 () 类型的表达式
+            // 语句」E0308）。对齐原生：语句 match → `let _ = match …`。
+            if is_tail:
+                "match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
+            else:
+                "let _ = match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "};".to_string()
         case Stmt.Block(stmts: ss) =>
             // BUG-406：裸块语句是嵌套上下文，其尾部表达式不是函数尾，不得发射 `return`
             // （is_main=true 仅在 gen_stmt 的 ExprStmt 处抑制尾 return，无其他副作用）。
