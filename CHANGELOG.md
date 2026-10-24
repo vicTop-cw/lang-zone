@@ -34,6 +34,58 @@ AIGC:
 - `None` 字面量参与算术/位拦截（BUG-273）：`None + 1` 生成 `LzAdd::__add__(None, 1i64)` → E0369，现于 LZ 阶段拦「None 值不能直接参与算术/位运算」。`None` 既可能是 `NoneLit` 也可能是 `Ident("None")`（词法层事实），且 `let None = 300` 可把 `None` 遮蔽为普通变量（`DEMO/boundary-coverage/edge-keyword-identifier.lz` 显式测此场景）——故 `Ident("None")` 仅当类型为 `Any`（prelude None 的推断类型）时按 None 处理，被遮蔽的 `None`（类型 Int）不拦，避免误伤遮蔽演示；`None == None` 因 codegen 不注入类型标注仍 RUSTC_FAIL，记 BUG-274 待修（OPEN）
 - `None == None` / `None != None` 短路（BUG-274）：两侧皆裸 None 时 codegen 输出 `None == None` 无类型标注 → rustc E0282。`expr_gen` Binary 臂的 `x == None → x.is_none()` 守卫只覆盖「恰一侧 None」（`rhs_none != lhs_none`），两侧皆 None 时短路为布尔字面量——`Option<T>::None == Option<T>::None` 恒为 true/false 与内层类型无关，避免 E0282。`x == None` 形态仍走 `is_none()` 不受影响；遮蔽 `let None = 300` 下短路同样成立（`x == x` 恒 true）。回归用例 `scalar_op_type_family_cross_is_clean_lz_type_error` 增补 `None == None` / `None != None` 合法形态，期望输出 `true true true 3.5 false true false`
 
+### 代码生成稳定性与标准库转译修复批次（2026-10-20 ~ 2026-10-22，BUG-341~408）
+-CHANGELOG 此前记录止于 BUG-316；BUG-317~340 已在 `memory/bugs.md` 逐项记录，本段集中补齐其后（341~408）的条目。本批次跨一等函数/闭包语义、枚举/结构体/模式匹配、解析语法、rs-lz 后端四类，集中修复 LZ→Rust 转译产物编译失败与类型推断错误（共 58 个修复提交）：
+
+**一等函数 / 闭包与 fn 值语义**
+- BUG-389：一等 fn 值形参统一渲染为 `Arc<dyn Fn>`，打通 `apply(double,3)`（76689d4）
+- BUG-389b：闭包返回闭包时注解用 `fn_value_type`（`Arc<dyn Fn>`）（92b2de6）
+- BUG-393：impl `Fn(...)` 形参追加 `Clone` 上界，修复 LZ 值语义复用 fn 形参报 E0599（6f56c40）
+- BUG-395/397：内置函数作一等 fn 值时还原引用形参（c7f33cf）
+- BUG-396：泛型函数返回的闭包形参按返回签名标注（`compose |x: a|` 取代 `i64`）（bba8952）
+- BUG-398：内置绑定到变量时用转发闭包保留引用形参（9f80e92）
+- BUG-399：复用类型名的多义 clone 不再渲染成 `T::clone().Field`（9d2e6a9）
+- BUG-400：自定义枚举含 `None` 变体时裸 `None` 解析为 `<枚举>::None`（3b3697d）
+- BUG-392：impl 头自类型改用裸类型实参（去 bound/默认），修复 `struct<T: Clone = List<int>>` 生成非法 impl（a6741ef）
+- BUG-386：间接 `chars()` 迭代变量保留 `char` 类型（f358366）
+- BUG-362：curried closure 内层 `Arc` 包裹 + `Any` 形参注解（f9e16e7）
+
+**枚举 / 结构体 / 模式匹配**
+- BUG-407：命名字段枚举字段访问只匹配首个变体 → E0609 no field（cf29dbe）
+- BUG-353：case struct 解构生成 Rust 枚举模式而非元组展开（39f88d2）
+- BUG-354：struct 模式字段顺序错误（HashMap 迭代无序）（48b4e2c）
+- BUG-352：列表切片 `xs[a..b]` 类型推断返回 `List<T>` 而非 `T`（c7602e6）
+- BUG-344：`_variant` 魔法字段；BUG-342 花括号块表达式；BUG-343 mut struct 字段（4f9d5ec）
+- BUG-374：struct 字段默认值——IR Field 携带 AST 默认值，StructCtor 补全缺失字段（706899e）
+- BUG-341：支持嵌套元组解构 `let ((a,b),c) = ...`（f7c9bc7）
+- BUG-345：支持 checker 实例化调用 `fn[checker] ~: args`（f1cc49b）
+- BUG-347：允许 `check` 关键字作用户标识符（81897eb）
+- BUG-346：`raise` 在表达式位置 → `Expr::Panic`（a28fc19）
+- BUG-348：`spawn` 非 async 函数 await E0277 / 区分 async vs non-async spawn 参数（934ccaa、687301f）
+- BUG-349：dict for-loop 迭代 keys（Python 语义）（8ce7519）
+- BUG-355：List map/filter 类型推断缺失打断链式调用（73f5305）
+- BUG-356/357：嵌套闭包非 Copy 外部 clone + 强制移动内层 lambda（d0f2185）
+- BUG-358/359：闭包体类型构造器 + 裸 Vec/Option 上的迭代器适配（2651350）
+- BUG-360：为普通非递归 struct 合成 `__unapply__`（add2a3f）
+- BUG-381：自由函数 `zip` 补 `.collect::<Vec<_>>()`（615e36b）
+- BUG-382：`IndexGet` else 分支非 Copy 元素自动补 `.clone()`（ea8e89c）
+- BUG-380：跳过 `__unapply__` 合成须同时检查 methods（9eb54ad）
+- BUG-379：`.` 行首续行需区分 duck 成员声明（0477fc3）
+- BUG-375/376：`parse` / `.await()` method + async main 检测（d8acd46）
+- BUG-377：`with open(...)` 补 `lz_builtins::open` 文件守卫（7b4f0e9）
+- BUG-383/384/385：`.or()` / `.and()` / `|_|` / `int(char)` 修复（d7a61f6）
+- BUG-387：single-arg `.reduce(closure)` 路由到 `functional::reduce`（eecbc05）
+- BUG-390：本地 FnDef 登记 raises 升级为 Result；裸 raises 支持 `->` 形式（1fe7361）
+- BUG-388：裸 raises（无类型）解析支持（6629577）
+- BUG-408：rs-lz 关键字参数 `_KwArg` 未解包 → E0422 cannot find struct `_KwArg`（d92f6d3）
+
+**rs-lz / emit 后端**
+- BUG-404：`--emit=rs-lz` 补齐 struct 提取魔法方法 `__unapply__` / `__unapply_seq__`（83b34f7）
+- BUG-405：类型名接收者的方法调用改用路径分隔符 `::`（枚举构造 E0423）（596b685）
+- BUG-406：嵌套块尾部误发射 return → match/if/for 等提前返回（37d9191）
+
+> **已知回归（待并发 codegen agent 收口，不在本批次范围）**：全量 DEMO 编译门禁 `all_demos_generated_rust_compiles` 当前暴露 7 个新增回归——`DEMO/07_data_structures/self_recursive.lz`(E0308)、`DEMO/10_error_handling/panic_raise_try.lz`(E0308)、`DEMO/boundary-coverage/nesting-closure-lambda.lz`(lifetime)、`DEMO/lz_std/dict.lz`(E0308)、`DEMO/lz_std/list.lz`(E0382 moved)、`DEMO/lz_std/result.lz`(E0308)、`DEMO/lz_std/traits.lz`(E0599 Option<J> clone)。这些属 codegen 在途改动引入，需并发 agent 修复，`[tco]` 调试打印已移除以恢复门禁 stderr 纯净。
+
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）
 - 字符串单字符索引在拼接/比较语境直出 String 形态（新增 `gen_str_char_index_tostring` 上下文辅助），修复 lib_json E0308 与 `s[pos] != "\""` 码点十进制化导致的运行期 UnexpectedEnd；find_bug_libs 12/12 全绿

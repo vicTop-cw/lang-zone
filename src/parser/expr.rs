@@ -1086,7 +1086,6 @@ impl ParserExprExt for Parser {
                 // 多行方法链（BUG-373）：`xs\n    .map(...)\n    .filter(...)` ——
                 // 换行后紧跟 `.` 时跳过换行继续后缀链，否则结束。
                 Token::Newline if matches!(self.peek_n(1), Token::Dot) => {
-                    eprintln!("DBG chain: skipping newline, pos={}", self.pos);
                     self.advance(); // consume Newline
                     self.skip_newlines();
                 }

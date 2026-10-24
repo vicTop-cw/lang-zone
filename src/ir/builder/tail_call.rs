@@ -995,30 +995,28 @@ pub(crate) fn rewrite_tco(module: &mut IrModule) {
     if !tco_enabled() {
         return;
     }
-    let mut n = 0;
     for item in module.items.iter_mut() {
         match item {
-            Item::FnDef(f) => n += rewrite_fn(f) as usize,
+            Item::FnDef(f) => {
+                let _ = rewrite_fn(f);
+            }
             Item::StructDef(sd) => {
                 for m in sd.methods.iter_mut() {
-                    n += rewrite_fn(m) as usize;
+                    let _ = rewrite_fn(m);
                 }
             }
             Item::EnumDef(ed) => {
                 for m in ed.methods.iter_mut() {
-                    n += rewrite_fn(m) as usize;
+                    let _ = rewrite_fn(m);
                 }
             }
             Item::Impl(im) => {
                 for m in im.methods.iter_mut() {
-                    n += rewrite_fn(m) as usize;
+                    let _ = rewrite_fn(m);
                 }
             }
             _ => {}
         }
-    }
-    if n > 0 {
-        eprintln!("[tco] 自动改写 {} 个尾递归函数为循环", n);
     }
 }
 
