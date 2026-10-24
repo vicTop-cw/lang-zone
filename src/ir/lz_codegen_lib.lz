@@ -152,15 +152,24 @@ struct ImplMethod =
 
 // ── Item ──
 enum Item:
-    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
+    // BUG-431：FnDef 需携带 where 约束（§五 `def f<T>(x: T) where T: HasArea` →
+    // Rust `fn f<T: HasArea>(...)`），否则生成的泛型函数缺边界，调用处报 E0599
+    // （`no method found for type parameter T`）。与 TraitDef/Impl 同源缺口。
+    // BUG-431：泛型形参携带边界（`where T: Clone` 由 builder 合并到 `GenericParam.bounds`）——
+    // 旧 schema 只带名字，生成的泛型 fn/impl 无边界，调用处报 E0599。
+    FnDef(name: str, generics: List<(str, List<IrType>)>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, where_clause: List<(str, List<IrType>)>, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
-    StructDef(name: str, generics: List<str>, fields: List<(str, IrType)>)
-    EnumDef(name: str, generics: List<str>, variants: List<(str, List<(str, IrType)>)>)
-    TraitDef(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>)
+    StructDef(name: str, generics: List<(str, List<IrType>)>, fields: List<(str, IrType)>)
+    EnumDef(name: str, generics: List<(str, List<IrType>)>, variants: List<(str, List<(str, IrType)>)>)
+    TraitDef(name: str, generics: List<(str, List<IrType>)>, supertraits: List<IrType>, assoc_types: List<str>, methods: List<(str, List<IrType>, IrType)>)
     DuckDef(name: str, method_count: int)
     UseStmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool)
     TypeAlias(name: str, ty: IrType)
-    Impl(trait_: MaybeIrType, for_type: IrType, methods: List<ImplMethod>)
+    // BUG-431：Impl 需携带 impl 级泛型形参、where 约束与关联类型绑定（原生
+    // `impl<T> ... where I::Item: Clone { type Item = ...; }`）。此前只带方法，
+    // 泛型 impl 生成 `impl Box3<T>` 报 E0425 cannot find type `T`，trait impl 缺
+    // `type Item = i64` 报 E0191/E0412。
+    Impl(trait_: MaybeIrType, for_type: IrType, generics: List<(str, List<IrType>)>, where_clause: List<(str, List<IrType>)>, assoc_type_bindings: List<(str, IrType)>, methods: List<ImplMethod>)
     CheckerBlock(name: str, ps_name: MaybeStr)
     Test(name: str, body: List<Stmt>)
     // BUG-410：脚本模式（无声明 main）顶层语句的合成分支，对应原生
@@ -598,11 +607,18 @@ def type_rust_list(ts: List<IrType>) -> String =
         else:
             head
 
-def generic_sig(gs: List<str>) -> String =
+// BUG-431：泛型形参表 → 名字表（struct/enum/自动 unapply 只用名字，对齐原生 `pub struct
+// Box4<T>`；边界仅出现在 fn/impl/trait 上，见 generic_sig_b）。
+def generic_sig(gs: List<(str, List<IrType>)>) -> String =
     if gs.len() == 0:
         "".to_string()
     else:
-        "<".to_string() + str_join(gs) + ">".to_string()
+        let mut out: String = "<".to_string()
+        for idx in 0..gs.len():
+            if idx > 0:
+                out = out + ", ".to_string()
+            out = out + gs[idx].clone().0
+        out + ">".to_string()
 
 def str_join(xs: List<str>) -> String =
     if xs.len() == 0:
@@ -880,15 +896,15 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
 // ── display 辅助函数 ──
 def display_item(i: Item) -> String =
     match i:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: _rs, body: b) => "fn ".to_string() + n
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: _rs, where_clause: wc, body: b) => "fn ".to_string() + n
         case Item.Const(name: n, ty: t, value: v) => "const ".to_string() + n
         case Item.StructDef(name: n, generics: gs, fields: fs) => "struct ".to_string() + n
         case Item.EnumDef(name: n, generics: gs, variants: vs) => "enum ".to_string() + n
-        case Item.TraitDef(name: n, supertraits: sts, methods: ms) => "trait ".to_string() + n
+        case Item.TraitDef(name: n, generics: gs, supertraits: sts, assoc_types: ats, methods: ms) => "trait ".to_string() + n
         case Item.DuckDef(name: n, method_count: mc) => "duck ".to_string() + n
         case Item.UseStmt(path: pth, alias: al, items: its, is_from: fr) => "use ".to_string() + str_join(pth)
         case Item.TypeAlias(name: n, ty: t) => "type ".to_string() + n
-        case Item.Impl(trait_: tr, for_type: ft, methods: mns) => "impl ".to_string() + rust_type(ft)
+        case Item.Impl(trait_: tr, for_type: ft, generics: gs, where_clause: wc, assoc_type_bindings: atb, methods: mns) => "impl ".to_string() + rust_type(ft)
         case Item.CheckerBlock(name: n, ps_name: p) => "checker ".to_string() + n
         case Item.Test(name: n, body: b) => "test ".to_string() + n
         case _ => "item".to_string()
@@ -1746,8 +1762,16 @@ def esc_rust(s: str) -> String =
 
 // ── Item 生成 ──
 
+// BUG-431：trait 关联类型声明（§五 `type Item`）→ Rust `type Item;`。关联类型名必须在
+// trait 内声明，否则 impl 端的 `type Item = i64` 报 E0191（trait 未声明关联类型）。
+def gen_trait_assoc_types(ats: List<str>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..ats.len():
+        out = out + "    type ".to_string() + ats[idx].clone() + ";\n".to_string()
+    out
+
 // D2 缺口补齐：TraitDef 生成
-def gen_trait_def(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>) -> String =
+def gen_trait_def(name: str, generics: List<(str, List<IrType>)>, supertraits: List<IrType>, assoc_types: List<str>, methods: List<(str, List<IrType>, IrType)>) -> String =
     let st_str = if supertraits.len() == 0:
         "".to_string()
     else:
@@ -1758,7 +1782,7 @@ def gen_trait_def(name: str, supertraits: List<IrType>, methods: List<(str, List
                 st_parts = st_parts + " + ".to_string()
             st_parts = st_parts + rust_type(st)
         ": ".to_string() + st_parts
-    "pub trait ".to_string() + name.to_string() + st_str + " {\n".to_string() + gen_trait_methods(methods) + "\n}".to_string()
+    "pub trait ".to_string() + name.to_string() + generic_sig_b(generics, []) + st_str + " {\n".to_string() + gen_trait_assoc_types(assoc_types) + gen_trait_methods(methods, assoc_types) + "\n}".to_string()
 
 // self 标记类型（trait 形参表里可能保留一项 self 类型，渲染签名时须跳过）
 def is_self_irtype(t: IrType) -> bool =
@@ -1768,7 +1792,26 @@ def is_self_irtype(t: IrType) -> bool =
         case IrType.MutRef(inner: i) => is_self_irtype(i)
         case _ => false
 
-def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>) -> String =
+// BUG-431：trait 方法签名里的关联类型名须写成 `Self::Item`。原生此处直接发裸名
+// `-> Item`（trait 内裸名本应可解析，但 Rust 仍报 E0425 cannot find type `Item`），
+// rs-lz 侧修正为 `Self::Item` 以保证生成代码可编译。
+def str_in_list(xs: List<str>, s: str) -> bool =
+    let mut found = false
+    for idx in 0..xs.len():
+        if xs[idx].clone() == s:
+            found = true
+    found
+
+def rust_type_assoc(t: IrType, ats: List<str>) -> String =
+    match t:
+        case IrType.Named(path: p, args: _) =>
+            if str_in_list(ats, p):
+                "Self::".to_string() + p
+            else:
+                rust_type(t)
+        case _ => rust_type(t)
+
+def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>, assoc_types: List<str>) -> String =
     let mut out: String = "".to_string()
     for idx in 0..methods.len():
         let m = methods[idx].clone()
@@ -1783,20 +1826,104 @@ def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>) -> String =
         for pidx in 0..m.1.len():
             let pt = m.1[pidx].clone()
             if not is_self_irtype(pt):
-                params = params + ", _p".to_string() + pn.to_string() + ": ".to_string() + rust_type(pt)
+                params = params + ", _p".to_string() + pn.to_string() + ": ".to_string() + rust_type_assoc(pt, assoc_types)
                 pn = pn + 1
-        out = out + "    fn ".to_string() + m.0.to_string() + "(".to_string() + params + ") -> ".to_string() + rust_type(m.2) + ";\n".to_string()
+        out = out + "    fn ".to_string() + m.0.to_string() + "(".to_string() + params + ") -> ".to_string() + rust_type_assoc(m.2, assoc_types) + ";\n".to_string()
+    out
+
+// BUG-431：where 约束的 type_param 可能是关联类型路径（`I::Item`，含点号），Rust 里
+// 要写成 `I::Item`（本就带 ::），故把 `.` 换成 `::`。LZ String 无 replace，用循环。
+def dot_to_path(s: str) -> String =
+    let mut out: String = "".to_string()
+    let len = s.len()
+    let mut i = 0
+    while i < len:
+        let c = s[i..(i + 1)]
+        if c == ".":
+            out = out + "::"
+        else:
+            out = out + c
+        i = i + 1
+    out
+
+// BUG-431：impl 级 where 约束（原生 `impl<T> ... where I::Item: Clone, K: Eq`）。
+// 须在 `{` 之前生成，否则 non-item in item list。
+def impl_where_clause(wc: List<(str, List<IrType>)>) -> String =
+    if wc.len() == 0:
+        "".to_string()
+    else:
+        let mut parts: String = "".to_string()
+        for idx in 0..wc.len():
+            let w = wc[idx].clone()
+            if idx > 0:
+                parts = parts + ", ".to_string()
+            parts = parts + dot_to_path(w.0) + ": ".to_string() + bounds_join(w.1)
+        " where ".to_string() + parts
+
+def bounds_join(bs: List<IrType>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..bs.len():
+        if idx > 0:
+            out = out + " + ".to_string()
+        out = out + rust_type(bs[idx].clone())
+    out
+
+// BUG-431：某泛型形参在 where 子句中的边界串（`where T: HasArea` → `HasArea`）。
+def wc_bounds_for(tp: str, wc: List<(str, List<IrType>)>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..wc.len():
+        let w = wc[idx].clone()
+        if w.0 == tp:
+            out = bounds_join(w.1)
+    out
+
+// BUG-431：泛型形参签名（内联边界，对齐原生 `impl<T: Clone + Debug> Box4<T>` /
+// `fn area_plus2<T: HasArea>`）。边界取泛型形参自身携带的 bounds，再并入 where 子句
+// 中对该形参的约束；无边界时退化为原 `<T>` 形态，保持既有输出不变。
+def generic_bounds(g: (str, List<IrType>), wc: List<(str, List<IrType>)>) -> String =
+    let nm = g.0.clone()
+    let bnds = g.1.clone()
+    let mut out: String = bounds_join(bnds)
+    let extra = wc_bounds_for(nm, wc)
+    if extra.len() > 0:
+        if out.len() > 0:
+            out = out + " + ".to_string()
+        out = out + extra
+    out
+
+def generic_sig_b(gs: List<(str, List<IrType>)>, wc: List<(str, List<IrType>)>) -> String =
+    if gs.len() == 0:
+        "".to_string()
+    else:
+        let mut out: String = "<".to_string()
+        for idx in 0..gs.len():
+            if idx > 0:
+                out = out + ", ".to_string()
+            let g = gs[idx].clone()
+            let nm = g.0.clone()
+            out = out + nm
+            let bd = generic_bounds(g, wc)
+            if bd.len() > 0:
+                out = out + ": ".to_string() + bd
+        out + ">".to_string()
+
+// BUG-431：impl 关联类型绑定（§五 `type Item = T`）→ Rust `type Item = ...;`。
+def gen_impl_assoc_bindings(atb: List<(str, IrType)>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..atb.len():
+        let b = atb[idx].clone()
+        out = out + "    type ".to_string() + b.0.to_string() + " = ".to_string() + rust_type(b.1) + ";\n".to_string()
     out
 
 // D2 缺口补齐：Impl 生成
-def gen_impl_def(trait_: MaybeIrType, for_type: IrType, methods: List<ImplMethod>) -> String =
+def gen_impl_def(trait_: MaybeIrType, for_type: IrType, generics: List<(str, List<IrType>)>, where_clause: List<(str, List<IrType>)>, assoc_type_bindings: List<(str, IrType)>, methods: List<ImplMethod>) -> String =
     let trait_part = match trait_:
         case MaybeIrType.YesTy(t: ty) => rust_type(ty) + " for ".to_string()
         case MaybeIrType.NoTy => "".to_string()
-    let mut body: String = "".to_string()
+    let mut body: String = gen_impl_assoc_bindings(assoc_type_bindings)
     for idx in 0..methods.len():
         body = body + gen_impl_method(methods[idx].clone())
-    "impl ".to_string() + trait_part + rust_type(for_type) + " {\n".to_string() + body + "}".to_string()
+    "impl ".to_string() + generic_sig_b(generics, where_clause) + trait_part + rust_type(for_type) + impl_where_clause(where_clause) + " {\n".to_string() + body + "}".to_string()
 
 // BUG-422：真实方法体（对齐原生 impl 块内的 `fn name(...) -> ret { body }`）。
 // 形参：self 渲染为 `&self` / `&mut self` / `self`（元组序 = name, ty, is_ref,
@@ -1869,7 +1996,21 @@ def gen_test_def(name: str, body: List<Stmt>) -> String =
 //   }
 // `__unapply_seq__`（变长提取）仅当字段类型同构时生成（对应 convert_decl 的
 // struct_has_unapply_seq 判定）。
-def gen_struct_unapply(name: str, fs: List<(str, IrType)>) -> String =
+// BUG-431：自动生成的 `__unapply__` impl 会对泛型字段调 `.clone()`，须带
+// `Clone` 边界（原生对齐：`impl<T: std::clone::Clone + std::fmt::Debug> Box3<T>`，
+// 边界由 struct 的 derive 推断而来，struct 自身泛型不带边界）。
+def generic_sig_cd(gs: List<(str, List<IrType>)>) -> String =
+    if gs.len() == 0:
+        "".to_string()
+    else:
+        let mut out: String = "<".to_string()
+        for idx in 0..gs.len():
+            if idx > 0:
+                out = out + ", ".to_string()
+            out = out + gs[idx].clone().0 + ": std::clone::Clone + std::fmt::Debug"
+        out + ">".to_string()
+
+def gen_struct_unapply(name: str, generics: List<(str, List<IrType>)>, fs: List<(str, IrType)>) -> String =
     let mut tys: String = "".to_string()
     let mut accs: String = "".to_string()
     let mut same: bool = true
@@ -1891,7 +2032,7 @@ def gen_struct_unapply(name: str, fs: List<(str, IrType)>) -> String =
     if fs.len() == 1:
         tys = tys + ","
         accs_tup = accs_tup + ","
-    let mut out: String = "impl ".to_string() + name.to_string() + " {\n".to_string()
+    let mut out: String = "impl ".to_string() + generic_sig_cd(generics) + name.to_string() + generic_sig(generics) + " {\n".to_string()
     out = out + "    fn __unapply__(&self) -> (".to_string() + tys + ") {\n".to_string()
     out = out + "        return (".to_string() + accs_tup + ");\n".to_string()
     out = out + "    }\n".to_string()
@@ -1905,24 +2046,24 @@ def gen_struct_unapply(name: str, fs: List<(str, IrType)>) -> String =
 
 def gen_item(i: Item) -> String =
     match i:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, body: b) =>
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, where_clause: wc, body: b) =>
             let is_main = (n == "main")
             let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
-            "pub fn ".to_string() + n.to_string() + generic_sig(gs) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b), rs) + "}".to_string()
+            "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b), rs) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
             let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
             if fs.len() > 0:
-                struct_def + "\n\n".to_string() + gen_struct_unapply(n, fs)
+                struct_def + "\n\n".to_string() + gen_struct_unapply(n, gs, fs)
             else:
                 struct_def
         case Item.EnumDef(name: n, generics: gs, variants: vs) =>
             "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs) + "}".to_string()
         case Item.Const(name: n, ty: t, value: v) =>
             gen_const_item(n, t, v)
-        case Item.TraitDef(name: n, supertraits: sts, methods: ms) =>
-            gen_trait_def(n, sts, ms)
-        case Item.Impl(trait_: tr, for_type: ft, method_names: mns) =>
-            gen_impl_def(tr, ft, mns)
+        case Item.TraitDef(name: n, generics: gs, supertraits: sts, assoc_types: ats, methods: ms) =>
+            gen_trait_def(n, gs, sts, ats, ms)
+        case Item.Impl(trait_: tr, for_type: ft, generics: gs, where_clause: wc, assoc_type_bindings: atb, method_names: mns) =>
+            gen_impl_def(tr, ft, gs, wc, atb, mns)
         case Item.UseStmt(path: pth, alias: al, items: its, is_from: fr) =>
             gen_use_stmt(pth, al, its, fr)
         case Item.TypeAlias(name: n, ty: t) =>

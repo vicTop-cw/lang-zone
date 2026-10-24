@@ -257,18 +257,40 @@ impl LzGen {
     fn item(&mut self, item: &Item) -> String {
         match item {
             Item::FnDef(f) => {
-                let gen_items: Vec<String> = f
-                    .generics
-                    .iter()
-                    .map(|g| format!("\"{}\"", escape_lz(&g.name)))
-                    .collect();
-                let generics = self.list_ref("str", gen_items);
+                let generics = if self.rs_codegen_mode {
+                    self.generics_bounds_ref(&f.generics)
+                } else {
+                    self.generics_names_ref(&f.generics)
+                };
                 let params = self.param_pairs(&f.params);
                 let body = self.stmts_ref(&f.body.stmts);
                 let raises_s = match &f.raises {
                     Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
                     None => "MaybeIrType.NoTy".to_string(),
                 };
+                if self.rs_codegen_mode {
+                    // BUG-431：rs-lz 的 FnDef 需携带 where 约束（`where T: HasArea` →
+                    // `fn f<T: HasArea>`），否则生成的泛型函数缺边界报 E0599。
+                    let wc_items: Vec<String> = f
+                        .where_clause
+                        .iter()
+                        .map(|(tp, bounds)| {
+                            let bs: Vec<String> = bounds.iter().map(|b| self.irtype(b)).collect();
+                            format!("(\"{}\", {})", tp, self.list_ref("IrType", bs))
+                        })
+                        .collect();
+                    let wc_s = self.list_ref("(str, List<IrType>)", wc_items);
+                    return format!(
+                        "Item.FnDef(name: \"{}\", generics: {}, params: {}, ret: {}, exc: {}, where_clause: {}, body: {})",
+                        f.name,
+                        generics,
+                        params,
+                        self.irtype(&f.ret_ty),
+                        raises_s,
+                        wc_s,
+                        body
+                    );
+                }
                 format!(
                     "Item.FnDef(name: \"{}\", generics: {}, params: {}, ret: {}, exc: {}, body: {})",
                     f.name,
@@ -292,8 +314,11 @@ impl LzGen {
                     .map(|fl| format!("(\"{}\", {})", fl.name, self.irtype(&fl.ty)))
                     .collect();
                 let fields = self.list_ref("(str, IrType)", items);
-                let generics: Vec<String> = s.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
-                let generics_s = self.list_ref("str", generics);
+                let generics_s = if self.rs_codegen_mode {
+                    self.generics_bounds_ref(&s.generics)
+                } else {
+                    self.generics_names_ref(&s.generics)
+                };
                 format!(
                     "Item.StructDef(name: \"{}\", generics: {}, fields: {})",
                     s.name, generics_s, fields
@@ -330,15 +355,11 @@ impl LzGen {
                 };
                 if self.rs_codegen_mode {
                     let variants = self.list_ref("(str, List<(str, IrType)>)", variants);
-                    let generics: Vec<String> =
-                        e.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
-                    let generics_s = self.list_ref("str", generics);
+                    let generics_s = self.generics_bounds_ref(&e.generics);
                     format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
                 } else {
                     let variants = self.list_ref("(str, List<IrType>)", variants);
-                    let generics: Vec<String> =
-                        e.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
-                    let generics_s = self.list_ref("str", generics);
+                    let generics_s = self.generics_names_ref(&e.generics);
                     format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
                 }
             }
@@ -355,12 +376,26 @@ impl LzGen {
                     })
                     .collect();
                 let methods = self.list_ref("(str, List<IrType>, IrType)", methods_items);
-                format!(
-                    "Item.TraitDef(name: \"{}\", supertraits: {}, methods: {})",
-                    t.name,
-                    supers,
-                    methods
-                )
+                if self.rs_codegen_mode {
+                    // BUG-431：rs-lz 的 TraitDef 需携带泛型形参（含边界）与关联类型声明
+                    // （`type Item` → Rust `type Item;`），否则生成的 trait 里关联类型
+                    // 名成了未绑定类型（E0412），impl 端的 `type Item = i64` 也无处可挂。
+                    let generics_s = self.generics_bounds_ref(&t.generics);
+                    let assoc_items: Vec<String> =
+                        t.assoc_types.iter().map(|n| format!("\"{}\"", n)).collect();
+                    let assoc_s = self.list_ref("str", assoc_items);
+                    format!(
+                        "Item.TraitDef(name: \"{}\", generics: {}, supertraits: {}, assoc_types: {}, methods: {})",
+                        t.name, generics_s, supers, assoc_s, methods
+                    )
+                } else {
+                    format!(
+                        "Item.TraitDef(name: \"{}\", supertraits: {}, methods: {})",
+                        t.name,
+                        supers,
+                        methods
+                    )
+                }
             }
             Item::DuckDef(d) => {
                 format!("Item.DuckDef(name: \"{}\", method_count: {})", d.name, d.methods.len())
@@ -420,10 +455,32 @@ impl LzGen {
                         })
                         .collect();
                     let methods_s = self.list_ref("ImplMethod", methods_items);
+                    // BUG-431：rs-lz 的 Item.Impl 需携带 impl 级泛型形参、where 约束与
+                    // 关联类型绑定（原生 `impl<T> ... where I::Item: Clone { type Item = ...; }`），
+                    // 否则生成的 impl 报 E0425 cannot find type `T` / E0277 / E0191。
+                    let impl_generics_s = self.generics_bounds_ref(&imp.generics);
+                    let wc_items: Vec<String> = imp
+                        .where_clause
+                        .iter()
+                        .map(|(tp, bounds)| {
+                            let bs: Vec<String> = bounds.iter().map(|b| self.irtype(b)).collect();
+                            format!("(\"{}\", {})", tp, self.list_ref("IrType", bs))
+                        })
+                        .collect();
+                    let wc_s = self.list_ref("(str, List<IrType>)", wc_items);
+                    let atb_items: Vec<String> = imp
+                        .assoc_type_bindings
+                        .iter()
+                        .map(|(n, ty)| format!("(\"{}\", {})", n, self.irtype(ty)))
+                        .collect();
+                    let atb_s = self.list_ref("(str, IrType)", atb_items);
                     return format!(
-                        "Item.Impl(trait_: {}, for_type: {}, methods: {})",
+                        "Item.Impl(trait_: {}, for_type: {}, generics: {}, where_clause: {}, assoc_type_bindings: {}, methods: {})",
                         trait_s,
                         self.irtype(&imp.for_type),
+                        impl_generics_s,
+                        wc_s,
+                        atb_s,
                         methods_s
                     );
                 }
@@ -955,6 +1012,30 @@ impl LzGen {
             })
             .collect();
         self.list_ref("(str, IrType, bool, bool, bool)", items)
+    }
+
+    /// BUG-431：泛型形参（含边界）→ `List<(str, List<IrType>)>`。
+    /// 仅 rs-lz 路径用；IR 展示路径仍走 `generics_names_ref`（名字表，schema 兼容 lz_ir_lib）。
+    /// 边界来自 `where T: Clone` 等约束（builder 合并到 `GenericParam.bounds`），
+    /// 缺此信息 rs-lz 生成的泛型函数/impl 无边界，调用处报 E0599。
+    fn generics_bounds_ref(&mut self, gs: &[GenericParam]) -> String {
+        let items: Vec<String> = gs
+            .iter()
+            .map(|g| {
+                let bs: Vec<String> = g.bounds.iter().map(|b| self.irtype(b)).collect();
+                format!("(\"{}\", {})", escape_lz(&g.name), self.list_ref("IrType", bs))
+            })
+            .collect();
+        self.list_ref("(str, List<IrType>)", items)
+    }
+
+    /// 泛型形参名字表（`List<str>`），IR 展示路径 / 不需要边界的场景。
+    fn generics_names_ref(&mut self, gs: &[GenericParam]) -> String {
+        let items: Vec<String> = gs
+            .iter()
+            .map(|g| format!("\"{}\"", escape_lz(&g.name)))
+            .collect();
+        self.list_ref("str", items)
     }
 
     /// Pattern → 构造表达式（列表走 self.list_ref，空列表类型标注避免 Vec<i64> 推断）
