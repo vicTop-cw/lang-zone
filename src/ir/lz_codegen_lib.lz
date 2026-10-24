@@ -832,7 +832,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.LitUnit(ty: t) => "()".to_string()
         case Expr.LitNone(ty: t) => "None".to_string()
         case Expr.Var(name: n, ty: t) => n.to_string()
-        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, fn_raises).to_string()
+        case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, t, fn_raises).to_string()
         case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_method_call(r, m, a, t, fn_raises)
         case Expr.FieldAccess(base: b, field: f, ty: t) =>
             // BUG-423：基底是**类型名**时须用路径分隔符——`Light.On`（单位变体引用）
@@ -1119,8 +1119,29 @@ def lz_method_rename(m: str, r: Expr) -> String =
         "to_uppercase".to_string()
     elif m == "contains" and is_dict_irtype(expr_ty(r)):
         "contains_key".to_string()
+    elif m == "flat_map" and is_optres_irtype(expr_ty(r)):
+        // BUG-433：LZ `opt.flat_map(|v| Some(..))` 对 Option/Result 语义是 `and_then`
+        //（Rust 的 flat_map 只存在于 Iterator，Option/Result 无该方法 ⇒ E0599）。
+        // 集合（List/Vec）接收者保持 flat_map（走迭代器链）。
+        "and_then".to_string()
+    elif m == "add" and is_set_irtype(expr_ty(r)):
+        // BUG-435：对齐原生 expr_gen.rs —— HashSet 无 add，`{1,2}.add(x)` → insert。
+        // 自定义 Set 扩展（lz_std/set.lz）已提供 add 则保留（守卫在 type 判定之外）。
+        "insert".to_string()
     else:
         m.to_string()
+
+def is_optres_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Opt(inner: i) => true
+        case IrType.Res(ok: o, err: e) => true
+        case IrType.Named(path: p, args: a) => p == "Option" || p == "Result"
+        case _ => false
+
+def is_set_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: a) => p == "Set" || p == "HashSet"
+        case _ => false
 
 def is_dict_irtype(t: IrType) -> bool =
     match t:
@@ -1220,15 +1241,17 @@ def gen_comp_macro(n: str, a: List<Expr>, fn_raises: MaybeIrType) -> String =
         else:
             base + ".collect::<".to_string() + comp_collect_ty_of(n) + ">()".to_string()
 
-def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
+def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> String =
     match c:
-        case Expr.Var(name: n, ty: t) =>
+        case Expr.Var(name: n, ty: t2) =>
             if n == "print":
                 "println!(".to_string() + print_fmt(a) + print_args_list(a, fn_raises) + ")".to_string()
             elif n == "len":
                 "(".to_string() + expr_cs_list(a, fn_raises) + ".len() as i64)".to_string()
             elif n == "set!":
-                "[".to_string() + expr_cs_list(a, fn_raises) + "].into_iter().collect()".to_string()
+                // BUG-434：对齐原生 `std::collections::HashSet::from([..])`。
+                // 此前生成 `[..].into_iter().collect()` 无类型标注 ⇒ E0282。
+                "std::collections::HashSet::from([".to_string() + expr_cs_list(a, fn_raises) + "])".to_string()
             elif n == "sorted" and a.len() == 1:
                 "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.sort(); _tmp }".to_string()
             elif n == "reversed" and a.len() == 1:
@@ -1249,11 +1272,27 @@ def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
                 "lz_abs(".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
             elif n == "zip" and a.len() == 2:
                 "(".to_string() + gen_expr(a[0].clone(), fn_raises) + ").into_iter().zip((".to_string() + gen_expr(a[1].clone(), fn_raises) + ").into_iter()).collect::<Vec<_>>()".to_string()
+            // BUG-432：命名字段结构体构造 `Point(x: 3, y: 4)`。builder 把它变成
+            // `Call(Var("Point"), [_KwArg(x,3), _KwArg(y,4)])`，ty=Named("Point")。
+            // rs-lz 此前走通用调用分支、用 kwarg_value_of 剥掉字段名 ⇒ `Point(3i64, 4i64)`
+            // → rustc E0423 expected function/tuple struct, found struct `Point`。
+            // 判据：结果类型路径 == 调用名（排除「返回该 struct 的同名函数」这类伪命中，
+            // Rust 也不允许 fn 与 struct 同名）+ 实参全为 _KwArg。
+            elif is_struct_ctor(n, a, t):
+                n.to_string() + " { ".to_string() + kwarg_pairs_str(a, fn_raises) + " }".to_string()
             elif is_comp_macro(n):
                 gen_comp_macro(n, a, fn_raises)
             else:
                 n.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case _ => gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+
+def is_struct_ctor(n: str, a: List<Expr>, t: IrType) -> bool =
+    starts_upper(n) and all_kwarg_args(a) and irtype_named_path(t, n)
+
+def irtype_named_path(t: IrType, n: str) -> bool =
+    match t:
+        case IrType.Named(path: p, args: ar) => p == n
+        case _ => false
 
 def print_fmt(as_: List<Expr>) -> String =
     if as_.len() == 0:
