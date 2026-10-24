@@ -270,7 +270,19 @@ impl CodeGen {
         // 当返回 Vec<T> 时，IntoIter 不能是 Vec<T>（Vec 不满足 Iterator），
         // 应映射为 std::vec::IntoIter<T> 并在 into_iter 体调用 .into_iter()
         // 包装（p41 探针暴露：`Vec<i64>` is not an iterator）
-        if let Some(im) = methods.iter().find(|m| m.name == "__iter__") {
+        // BUG-418：本类型自身实现 Iterator（定义了 `__next__`）时，std 已有
+        // blanket `impl<I: Iterator> IntoIterator for I`，再发显式 IntoIterator
+        // impl 会 E0119 conflicting implementations（自迭代类型：同一 struct 同时
+        // 定义 `__iter__` 返回自身 + `__next__`，`for v in Countdown(3)` 实测）。
+        // 此时交给 blanket impl：IntoIter = Self、into_iter(self) = self，与
+        // 「__iter__ 返回 self」语义等价。仅当类型自身不是 Iterator（__iter__ 返回
+        // 独立迭代器类型，语料里的常见形态）时才需要显式 impl。
+        let self_is_iterator = methods.iter().any(|m| m.name == "__next__");
+        if let Some(im) = methods
+            .iter()
+            .find(|m| m.name == "__iter__")
+            .filter(|_| !self_is_iterator)
+        {
             if let IrType::Named { .. } = &im.ret_ty {
                 let where_str = self.magic_impl_where_str(im);
                 let (iter_ty, body_expr) = match &im.ret_ty {
