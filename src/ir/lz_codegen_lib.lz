@@ -1043,6 +1043,22 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // 迭代器 map 分支（Vec 需 `.iter().cloned().map(..).collect()`），与 flat_map
         // 在 Option/Result 上改名 and_then（BUG-433）互补。
         "(".to_string() + recv0 + ").clone().map(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+    elif m == "get" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
+        // BUG-440：Dict 的键实参在 Rust 端 `get(&self, key: &Q)` 需要借位。str 字面量
+        // 本身就是 `&str`（Q=str），裸发 `"a"` 即可；其余（String/数值变量等）必须 `&<expr>`。
+        // rs-lz 此前用 pattern_arg_of 对非字面量键直发 `k` → E0308 mismatched types
+        // （expected `&_`, found `String`）。原生 codegen 渲染 `d.get(&k)` / `d.get("a")`。
+        "(".to_string() + recv0 + ".get(".to_string() + dict_key_arg(a[0].clone(), fn_raises) + ")).cloned()".to_string()
+    elif m == "contains" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
+        // BUG-440：同上，`contains_key(&self, key: &Q)` 需借位；改名到 contains_key 见
+        // lz_method_rename。原生渲染 `d.contains_key(&k)` / `d.contains_key("b")`。
+        recv0 + ".contains_key(".to_string() + dict_key_arg(a[0].clone(), fn_raises) + ")".to_string()
+    elif m == "insert" and a.len() == 2 and is_dict_irtype(expr_ty(r)):
+        // BUG-440：`insert(self, k: K, v: V)` 的键须**按值持有**（BTreeMap/HashMap 无
+        // Borrow 借用键的 insert）。LZ 的 Dict 键统一是 str，Rust 端 `BTreeMap<String,V>`
+        // ⇒ 键须 `.to_string()`（字面量与变量同理）。原生渲染
+        // `m.insert("c".to_string(), 3i64)` / `m.insert(k.to_string(), v)`。
+        recv0 + ".insert(".to_string() + dict_insert_key_arg(a[0].clone(), fn_raises) + ", ".to_string() + gen_expr(a[1].clone(), fn_raises) + ")".to_string()
     elif m == "filter" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "map" and a.len() == 1:
@@ -1201,6 +1217,87 @@ def pattern_arg_of(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.LitStr(s: sv, ty: t) => "\"".to_string() + esc_rust(sv) + "\"".to_string()
         case _ => gen_kwarg_value(e, fn_raises)
 
+// BUG-440：Dict 键实参（借位）。Rust 的 `get(&self, key: &Q)` / `contains_key(&self, key: &Q)`
+// 要求 `K: Borrow<Q>` 的借用键。str 字面量本身是 `&str`（Q=str，`String: Borrow<str>`），
+// 裸发 `"a"` 即可；其余（String/数值变量/表达式）必须 `&<expr>`（`String: Borrow<String>`）。
+// 与 List/Vec 的 `.contains`（BUG-437，一实参 `&` 直发）同族，但 dict 键需区分字面量。
+def dict_key_arg(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.LitStr(s: sv, ty: t) => "\"".to_string() + esc_rust(sv) + "\"".to_string()
+        case _ => "&".to_string() + gen_expr(e, fn_raises)
+
+// BUG-440：Dict 键实参（按值持有）。`insert(self, k: K, v: V)` 的键须按值传给
+// `BTreeMap<String,V>`，故 str 键一律补 `.to_string()`（字面量 `"a".to_string()`、
+// 变量 `k.to_string()`）；非 str 键（如 Dict<int, V>）原样发。
+def dict_insert_key_arg(e: Expr, fn_raises: MaybeIrType) -> String =
+    let base = match e:
+        case Expr.LitStr(s: sv, ty: t) => "\"".to_string() + esc_rust(sv) + "\"".to_string()
+        case _ => gen_expr(e, fn_raises)
+    if is_string_irtype(expr_ty(e)):
+        base + ".to_string()".to_string()
+    else:
+        base
+
+// BUG-441：用户函数调用的按值语义。LZ 的集合/字符串/Option/Result/Dict 实参在两次及
+// 多次使用同一变量时，Rust 端第二次传递即 `E0382 use of moved value`（g13_dictkey /
+// g14_listarg 实测：`sumv(xs); lenv(xs)` → 原生 `sumv(xs.clone())`）。原生 codegen 对
+// 每个**非 Copy 类型的左值实参**在调用点补 `.clone()`，rs-lz 此前原样透传。此处补同一
+// 规则；仅对左值表达式（变量/字段访问/下标）克隆——字面量与调用结果本身就是新值，
+// 原生对 `f("a".to_string())` 亦不克隆，故不克隆以对齐逐字符形态。
+// 已知堆类型（需 clone）。Generic/Any/FnType/Duck 一律不动：泛型实参克隆需要 `T: Clone`
+// 约束、闭包/`Box<dyn Fn>` 通常不可 Clone，保守不克隆以避免 E0599/新约束缺失。
+def is_heap_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Str => true
+        case IrType.Opt(inner: i) => true
+        case IrType.Res(ok: o, err: e) => true
+        case IrType.Named(path: p, args: a) => true
+        case IrType.Tuple(elems: es) => not all_copy_irtype(es)
+        case _ => false
+
+def is_copy_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Int => true
+        case IrType.F64 => true
+        case IrType.Bool => true
+        case IrType.Unit => true
+        case IrType.Never => true
+        case IrType.Ref(inner: i) => true
+        case IrType.MutRef(inner: i) => true
+        case IrType.Tuple(elems: es) => all_copy_irtype(es)
+        case _ => false
+
+def all_copy_irtype(ts: List[IrType]) -> bool =
+    if ts.len() == 0:
+        true
+    else:
+        is_copy_irtype(ts[0].clone()) && all_copy_irtype(tail_t(ts))
+
+// 左值表达式（可被复用、会被移动）：变量、字段访问、下标、枚举变体字段访问。
+def is_place_expr(e: Expr) -> bool =
+    match e:
+        case Expr.Var(name: n, ty: t) => true
+        case Expr.FieldAccess(base: b, field: f, ty: t) => true
+        case Expr.IndexGet(base: b, key: k, ty: t) => true
+        case Expr.EnumFieldGet(base: b, enum_name: en, variants: vs, field: f, ty: t) => true
+        case _ => false
+
+def call_arg_src(e: Expr, fn_raises: MaybeIrType) -> String =
+    if is_place_expr(e) && is_heap_irtype(expr_ty(e)):
+        gen_expr(e, fn_raises) + ".clone()".to_string()
+    else:
+        gen_expr(e, fn_raises)
+
+def call_args_list(a: List[Expr], fn_raises: MaybeIrType) -> String =
+    if a.len() == 0:
+        String::new()
+    else:
+        let head = call_arg_src(a[0].clone(), fn_raises)
+        if a.len() > 1:
+            head + ", ".to_string() + call_args_list(ec_tail(a), fn_raises)
+        else:
+            head
+
 // BUG-423：字段访问的分隔符——基底是类型名（Var 且首字母大写，如 `Light.On`）时
 // 用 `::`（单位变体/关联项引用），否则用 `.`（真实字段访问）。与 method_call_sep 同口径。
 def field_access_sep(b: Expr) -> String = method_call_sep(b)
@@ -1309,8 +1406,8 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> Strin
             elif is_comp_macro(n):
                 gen_comp_macro(n, a, fn_raises)
             else:
-                n.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
-        case _ => gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+                n.to_string() + "(".to_string() + call_args_list(a, fn_raises) + ")".to_string()
+        case _ => gen_expr(c, fn_raises) + "(".to_string() + call_args_list(a, fn_raises) + ")".to_string()
 
 def is_struct_ctor(n: str, a: List<Expr>, t: IrType) -> bool =
     starts_upper(n) and all_kwarg_args(a) and irtype_named_path(t, n)
