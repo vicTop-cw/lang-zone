@@ -899,7 +899,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.GenExpr(yield_of: y, ty: t) => "gen ".to_string() + gen_expr(y, fn_raises)
         case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + ")".to_string()
         case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64..".to_string() + gen_expr(en, fn_raises)
-        case Expr.Dict(pairs: ps, ty: t) => "HashMap::new()".to_string()
+        case Expr.Dict(pairs: ps, ty: t) => "std::collections::BTreeMap::new()".to_string()
         case Expr.AssignExpr(target: tg, value: v, ty: t) => gen_expr(tg, fn_raises) + " = ".to_string() + gen_expr(v, fn_raises)
         case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) => gen_expr(s, fn_raises)
         case _ => "unimplemented!".to_string()
@@ -988,10 +988,11 @@ def gen_range_ctor(fs: List<(str, Expr)>) -> String =
     start_s + (if incl: "..=".to_string() else: "..".to_string()) + end_s
 
 // Dict 构造：IR 用 StructCtor(name="Dict", fields=[(_k0, v), (_v0, v), ...]) 表示字典字面量，
-// 原生 codegen 渲染 std::collections::HashMap::from([(k, v), ...])；空字典 HashMap::new()
+// 原生 codegen 渲染 std::collections::BTreeMap::from([(k, v), ...])；空字典 BTreeMap::new()
+// （BUG-452：空字典 `{}` 此前误发 HashMap::new()，而 Dict 别名 = BTreeMap ⇒ E0308）。
 def gen_dict_ctor(fs: List<(str, Expr)>) -> String =
     if fs.len() == 0:
-        "std::collections::HashMap::new()".to_string()
+        "std::collections::BTreeMap::new()".to_string()
     else:
         let mut pairs: String = "".to_string()
         let mut i = 0
@@ -1098,6 +1099,11 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // rs-lz 原发 `d.remove("a".to_string())` → E0308 expected `&_`, found `String`；
         // 原生渲染 `d.remove("a")` / `d.remove(&k)`（remove 返回 `Option<V>`，无需 .cloned()）。
         recv0 + ".remove(".to_string() + dict_key_arg(a[0].clone(), fn_raises) + ")".to_string()
+    elif m == "remove" and a.len() == 1 and is_set_irtype(expr_ty(r)):
+        // BUG-451：`HashSet::remove(&mut self, value: &T)` 实参须借位。rs-lz 落到通用分支
+        // 直发 `s.remove(2i64)` → E0308 expected `&i64`, found `i64`；原生渲染
+        // `s.remove(&2i64)`（与 BUG-449 的 Set.contains 同族）。
+        "(".to_string() + recv0 + ").remove(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
     elif m == "filter" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "map" and a.len() == 1:
@@ -1146,7 +1152,11 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
                     else:
                         expr_cs_list(a, fn_raises)
                     let call = gen_expr(r, fn_raises) + method_call_sep(r) + name + "(".to_string() + args_s + ")".to_string()
-                    if is_str_returning_method(m):
+                    if (m == "find" or m == "rfind") and is_string_irtype(expr_ty(r)):
+                        // BUG-453：LZ `s.find(..)` 语义为「找不到返回 -1」，原生 codegen 在
+                        // `lz_find(..)`（Option<i64>）后接 `.unwrap_or(-1i64)` 物化为 i64。
+                        call + ".unwrap_or(-1i64)".to_string()
+                    elif is_str_returning_method(m):
                         call + ".to_string()".to_string()
                     elif m == "split" and is_list_irtype(t):
                         // LZ `s.split(sep)` 返回 List<str>，而 Rust 的 split 返回迭代器 ⇒ 物化
@@ -1207,6 +1217,14 @@ def lz_method_rename(m: str, r: Expr) -> String =
         //（Rust 的 flat_map 只存在于 Iterator，Option/Result 无该方法 ⇒ E0599）。
         // 集合（List/Vec）接收者保持 flat_map（走迭代器链）。
         "and_then".to_string()
+    elif (m == "find" or m == "rfind") and is_string_irtype(expr_ty(r)):
+        // BUG-453：原生把 str 的 find/rfind 渲染成 `s.lz_find(..)` —— lz_builtins 的扩展
+        // 方法（返回 Option<i64>）。rs-lz 直发 Rust 内建 `str::find`（返回 Option<usize>）
+        // 与原生字节不一致，且后续 `.unwrap_or(-1i64)` 无法编译。
+        if m == "find":
+            "lz_find".to_string()
+        else:
+            "lz_rfind".to_string()
     elif m == "add" and is_set_irtype(expr_ty(r)):
         // BUG-435：对齐原生 expr_gen.rs —— HashSet 无 add，`{1,2}.add(x)` → insert。
         // 自定义 Set 扩展（lz_std/set.lz）已提供 add 则保留（守卫在 type 判定之外）。
