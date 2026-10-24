@@ -1217,6 +1217,22 @@ def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
                 "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.sort(); _tmp }".to_string()
             elif n == "reversed" and a.len() == 1:
                 "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.reverse(); _tmp }".to_string()
+            // BUG-430：标准库自由函数形态。Rust 没有同名自由函数（sum/abs 缺失，min/max 为迭代器
+            // 方法），rs-lz 此前原样透传 ⇒ E0061/E0425。形态对齐原生 expr_gen.rs 的 stdlib 表：
+            //   min/max  → (&xs).iter().min().cloned()
+            //   sum      → xs.iter().copied().sum::<i64>()
+            //   abs      → lz_abs(x)（lz_builtins 内建，原生同）
+            //   zip(a,b) → a.into_iter().zip(b.into_iter()).collect::<Vec<_>>()
+            elif n == "min" and a.len() == 1:
+                "(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ").iter().min().cloned()".to_string()
+            elif n == "max" and a.len() == 1:
+                "(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ").iter().max().cloned()".to_string()
+            elif n == "sum" and a.len() == 1:
+                gen_expr(a[0].clone(), fn_raises) + ".iter().copied().sum::<i64>()".to_string()
+            elif n == "abs" and a.len() == 1:
+                "lz_abs(".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
+            elif n == "zip" and a.len() == 2:
+                "(".to_string() + gen_expr(a[0].clone(), fn_raises) + ").into_iter().zip((".to_string() + gen_expr(a[1].clone(), fn_raises) + ").into_iter()).collect::<Vec<_>>()".to_string()
             elif is_comp_macro(n):
                 gen_comp_macro(n, a, fn_raises)
             else:
