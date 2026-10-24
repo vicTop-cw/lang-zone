@@ -25,6 +25,10 @@ pub const LZ_CODEGEN_LIB: &str = include_str!("lz_codegen_lib.lz");
 /// 自举路线 B：D1 环节 —— LZ 实现 Rust 代码生成
 pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
     let mut g = LzGen::new();
+    // BUG-411：Rust codegen 模式（命名字段变体 + EnumCtor 改写生效）
+    g.rs_codegen_mode = true;
+    // BUG-411：先登记枚举变体字段名，供构造/字段访问解析
+    g.collect_enums(module);
     let mut out = String::new();
     out.push_str("// 由 lzc --emit=rs-lz 生成（自举路线 B：LZ 实现 Rust codegen）\n");
     out.push_str(LZ_CODEGEN_LIB);
@@ -106,15 +110,64 @@ pub fn ir_module_to_lz_source(module: &IrModule) -> String {
     out
 }
 
+/// BUG-411：实参是否为关键字参数节点 `_KwArg { name, value }`
+fn is_kwarg_expr(e: &Expr) -> bool {
+    matches!(&e.kind, ExprKind::StructCtor { name, .. } if name == "_KwArg")
+}
+
 /// 扁平化生成器：产生顶层 let 序列，避免深嵌套构造
 struct LzGen {
     counter: usize,
     lets: Vec<String>,
+    /// BUG-411：枚举名 → [(变体名, 字段名列表)]。字段名为空串表示元组（位置）字段。
+    /// 用于把 `Enum.Variant(...)` 构造（IR 里是 MethodCall receiver=Var(枚举名)）
+    /// 在序列化期解析成 Expr.EnumCtor，并把位置实参补成 _KwArg 以保留字段名。
+    enums: std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
+    /// BUG-411：是否处于 Rust codegen（--emit=rs-lz）模式。命名字段变体与
+    /// EnumCtor 改写只在本模式生效——IR display（--emit=ir-lz）的产物需与
+    /// 原生 `--emit=ir` 文本逐字节一致，那里枚举变体只显示类型、构造显示为
+    /// `method`，不能改写。
+    rs_codegen_mode: bool,
 }
 
 impl LzGen {
     fn new() -> Self {
-        Self { counter: 0, lets: Vec::new() }
+        Self {
+            counter: 0,
+            lets: Vec::new(),
+            enums: std::collections::HashMap::new(),
+            rs_codegen_mode: false,
+        }
+    }
+
+    /// 预扫描模块内 enum 定义，登记 枚举名 → 变体字段名
+    fn collect_enums(&mut self, module: &IrModule) {
+        for item in &module.items {
+            if let Item::EnumDef(e) = item {
+                let vs: Vec<(String, Vec<String>)> = e
+                    .variants
+                    .iter()
+                    .map(|v| {
+                        (v.name.clone(), v.fields.iter().map(|f| f.name.clone()).collect())
+                    })
+                    .collect();
+                self.enums.insert(e.name.clone(), vs);
+            }
+        }
+    }
+
+    /// 接收者是枚举名且方法名命中其变体时，返回该变体的字段名列表
+    fn enum_variant_fields(&self, receiver: &Expr, method: &str) -> Option<Vec<String>> {
+        if let ExprKind::Var(name) = &receiver.kind {
+            if let Some(vs) = self.enums.get(name) {
+                for (v, fields) in vs {
+                    if v == method {
+                        return Some(fields.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn fresh(&mut self) -> String {
@@ -247,19 +300,47 @@ impl LzGen {
                 )
             }
             Item::EnumDef(e) => {
-                let variants: Vec<String> = e
-                    .variants
-                    .iter()
-                    .map(|v| {
-                        let tys: Vec<String> = v.fields.iter().map(|fl| self.irtype(&fl.ty)).collect();
-                        let tys = self.list_ref("IrType", tys);
-                        format!("(\"{}\", {})", v.name, tys)
-                    })
-                    .collect();
-                let variants = self.list_ref("(str, List<IrType>)", variants);
-                let generics: Vec<String> = e.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
-                let generics_s = self.list_ref("str", generics);
-                format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
+                // BUG-411：Rust codegen 模式下变体字段必须带**名字**——LZ 侧
+                // gen_enum_variants 据此区分命名字段变体（`Circle { radius: i64 }`）
+                // 与元组变体（`Blue(i64, String)`），与原生 decl_gen.rs:2009 同口径。
+                // IR display 模式保持旧的「只带类型」形态（对齐原生 --emit=ir 文本）。
+                let variants: Vec<String> = if self.rs_codegen_mode {
+                    e.variants
+                        .iter()
+                        .map(|v| {
+                            let fs: Vec<String> = v
+                                .fields
+                                .iter()
+                                .map(|fl| format!("(\"{}\", {})", fl.name, self.irtype(&fl.ty)))
+                                .collect();
+                            let fs = self.list_ref("(str, IrType)", fs);
+                            format!("(\"{}\", {})", v.name, fs)
+                        })
+                        .collect()
+                } else {
+                    e.variants
+                        .iter()
+                        .map(|v| {
+                            let tys: Vec<String> =
+                                v.fields.iter().map(|fl| self.irtype(&fl.ty)).collect();
+                            let tys = self.list_ref("IrType", tys);
+                            format!("(\"{}\", {})", v.name, tys)
+                        })
+                        .collect()
+                };
+                if self.rs_codegen_mode {
+                    let variants = self.list_ref("(str, List<(str, IrType)>)", variants);
+                    let generics: Vec<String> =
+                        e.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
+                    let generics_s = self.list_ref("str", generics);
+                    format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
+                } else {
+                    let variants = self.list_ref("(str, List<IrType>)", variants);
+                    let generics: Vec<String> =
+                        e.generics.iter().map(|g| format!("\"{}\"", g.name)).collect();
+                    let generics_s = self.list_ref("str", generics);
+                    format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
+                }
             }
             Item::TraitDef(t) => {
                 let supers_items: Vec<String> = t.supertraits.iter().map(|st| self.irtype(st)).collect();
@@ -534,6 +615,42 @@ impl LzGen {
                 )
             }
             ExprKind::MethodCall { receiver, method, args, .. } => {
+                // BUG-411：`Enum.Variant(...)` 构造在 IR 里是 MethodCall(receiver=Var(枚举名))。
+                // 序列化为 Expr.EnumCtor，让 LZ 侧按变体形态（单位/命名字段/元组）渲染。
+                // 命名字段变体的位置实参在此按声明名补 _KwArg 包装（对齐原生
+                // expr_gen.rs:1654 用声明名 zip 实参的命名构造）。
+                if self.rs_codegen_mode {
+                    if let Some(fields) = self.enum_variant_fields(receiver, method) {
+                    let enum_name = match &receiver.kind {
+                        ExprKind::Var(name) => name.clone(),
+                        _ => method.clone(),
+                    };
+                    let all_named = !fields.is_empty() && fields.iter().all(|f| !f.is_empty());
+                    let args_src: Vec<String> = if all_named
+                        && !args.is_empty()
+                        && !args.iter().all(is_kwarg_expr)
+                    {
+                        fields
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(n, a)| {
+                                format!(
+                                    "Expr.StructCtor(name: \"_KwArg\", fields: [(\"name\", Expr.LitStr(s: \"{}\", ty: IrType.Str)), (\"value\", {})], ty: IrType.Any)",
+                                    n,
+                                    self.expr(a)
+                                )
+                            })
+                            .collect()
+                    } else {
+                        args.iter().map(|a| self.expr(a)).collect()
+                    };
+                    let args_ref = self.list_ref("Expr", args_src);
+                    return format!(
+                        "Expr.EnumCtor(enum_name: \"{}\", variant: \"{}\", args: {}, ty: {})",
+                        enum_name, method, args_ref, ty
+                    );
+                    }
+                }
                 let args_s = self.exprs_ref(args);
                 format!(
                     "Expr.MethodCall(receiver: {}, method: \"{}\", args: {}, ty: {})",
@@ -543,12 +660,42 @@ impl LzGen {
                     ty
                 )
             }
-            ExprKind::FieldAccess { base, field } => format!(
-                "Expr.FieldAccess(base: {}, field: \"{}\", ty: {})",
-                self.expr(base),
-                field,
-                ty
-            ),
+            ExprKind::FieldAccess { base, field } => {
+                // BUG-411：命名字段枚举的 `x.f` 需解构成 match（Rust 不允许枚举值
+                // 直接 `.f`，原生 expr_gen.rs:5175 同口径）。base 的静态类型是
+                // 模块内枚举、且该字段落在其某些变体上时改写；struct 字段访问与
+                // 非枚举类型不受影响。
+                if self.rs_codegen_mode {
+                    if let IrType::Named { path, .. } = &base.ty {
+                        let mut arms: Vec<String> = Vec::new();
+                        if let Some(vs) = self.enums.get(path) {
+                            for (v, fields) in vs {
+                                if fields.iter().any(|f| f == field) {
+                                    arms.push(v.clone());
+                                }
+                            }
+                        }
+                        if !arms.is_empty() {
+                            // BUG-412：与原生同口径按变体名排序，保证两侧产物逐字节一致
+                            // （原生侧枚举注册表是 HashMap，不排序则臂序随进程随机）。
+                            arms.sort();
+                            let arms_src: Vec<String> =
+                                arms.iter().map(|v| format!("\"{}\"", v)).collect();
+                            let arms_ref = self.list_ref("str", arms_src);
+                            return format!(
+                                "Expr.EnumFieldGet(base: {}, enum_name: \"{}\", variants: {}, field: \"{}\", ty: {})",
+                                self.expr(base), path, arms_ref, field, ty
+                            );
+                        }
+                    }
+                }
+                format!(
+                    "Expr.FieldAccess(base: {}, field: \"{}\", ty: {})",
+                    self.expr(base),
+                    field,
+                    ty
+                )
+            }
             ExprKind::IndexGet { base, key } => format!(
                 "Expr.IndexGet(base: {}, key: {}, ty: {})",
                 self.expr(base),

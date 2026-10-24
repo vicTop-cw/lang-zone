@@ -45,6 +45,10 @@ enum Expr:
     UnOp(op: str, operand: Expr, ty: IrType)
     StructCtor(name: str, fields: List<(str, Expr)>, ty: IrType)
     EnumCtor(enum_name: str, variant: str, args: List<Expr>, ty: IrType)
+    // BUG-411：命名字段枚举的字段访问解构。Rust 不允许对枚举值直接 `.f`，须解构：
+    //   match &x { E::V { f, .. } => f.clone(), _ => unreachable!() }
+    // variants = 含该字段的**所有**变体名（对齐原生 BUG-407 修复后的多臂口径）。
+    EnumFieldGet(base: Expr, enum_name: str, variants: List<str>, field: str, ty: IrType)
     Cast(inner: Expr, target: IrType, ty: IrType)
     MagicCall(magic: str, args: List<Expr>, ty: IrType)
     IfExpr(cond: Expr, then: Expr, els: Expr, ty: IrType)
@@ -138,7 +142,7 @@ enum Item:
     FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
     StructDef(name: str, generics: List<str>, fields: List<(str, IrType)>)
-    EnumDef(name: str, generics: List<str>, variants: List<(str, List<IrType>)>)
+    EnumDef(name: str, generics: List<str>, variants: List<(str, List<(str, IrType)>)>)
     TraitDef(name: str, supertraits: List<IrType>, methods: List<(str, List<IrType>, IrType)>)
     DuckDef(name: str, method_count: int)
     UseStmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool)
@@ -235,6 +239,10 @@ def display_expr(e: Expr) -> String =
             "[".to_string() + display_type(t) + "] new ".to_string() + n + field_pairs(fs)
         case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
             "[".to_string() + display_type(t) + "] ".to_string() + en + "::".to_string() + v + arg_list(a)
+        // BUG-411：仅 Rust codegen（--emit=rs-lz）会产出该节点；IR display 不产出，
+        // 此处只为 match 穷尽性补一个与字段访问同形的文本。
+        case Expr.EnumFieldGet(base: b, enum_name: en, variants: vs, field: f, ty: t) =>
+            "[".to_string() + display_type(t) + "] field ".to_string() + display_expr(b) + ".".to_string() + f
         case Expr.Cast(inner: i, target: tg, ty: t) =>
             "[".to_string() + display_type(t) + "] cast ".to_string() + display_expr(i) + " as ".to_string() + display_type(tg)
         case Expr.MagicCall(magic: m, args: a, ty: t) =>
@@ -648,6 +656,7 @@ def expr_ty(e: Expr) -> IrType =
         case Expr.UnOp(op: _, operand: _, ty: t) => t
         case Expr.StructCtor(name: _, fields: _, ty: t) => t
         case Expr.EnumCtor(enum_name: _, variant: _, args: _, ty: t) => t
+        case Expr.EnumFieldGet(base: _, enum_name: _, variants: _, field: _, ty: t) => t
         case Expr.Cast(inner: _, target: _, ty: t) => t
         case Expr.MagicCall(magic: _, args: _, ty: t) => t
         case Expr.IfExpr(cond: _, then: _, els: _, ty: t) => t
@@ -688,7 +697,19 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
                 gen_dict_ctor(fs)
             else:
                 n.to_string() + " { ".to_string() + ctor_fields(fs) + " }".to_string()
-        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) => en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
+            // BUG-411：三种变体形态（对齐原生 decl_gen.rs:2005 + expr_gen.rs:1654/1662）
+            //   单位变体（无数据）      → `Enum::Variant`（Rust 单位变体不是函数，带 () 即 E0618）
+            //   命名字段变体（_KwArg）  → `Enum::Variant { f: v, ... }`
+            //   元组变体                → `Enum::Variant(t, t)`
+            if a.len() == 0:
+                en.to_string() + "::".to_string() + v.to_string()
+            elif all_kwarg_args(a):
+                en.to_string() + "::".to_string() + v.to_string() + " { ".to_string() + kwarg_pairs_str(a, fn_raises) + " }".to_string()
+            else:
+                en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        case Expr.EnumFieldGet(base: b, enum_name: en, variants: vs, field: f, ty: t) =>
+            "match &".to_string() + gen_expr(b, fn_raises) + " { ".to_string() + enum_field_arms(en, vs, f) + "_ => unreachable!() }".to_string()
         case Expr.Cast(inner: i, target: tg, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + " as ".to_string() + rust_type(tg).to_string() + ")".to_string()
         case Expr.MagicCall(magic: m, args: a, ty: t) => m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if ".to_string() + gen_expr(c, fn_raises) + " { ".to_string() + gen_expr(th, fn_raises) + " } else { ".to_string() + gen_expr(el, fn_raises) + " }".to_string()
@@ -862,6 +883,57 @@ def kwarg_value_of(fs: List<(str, Expr)>, fn_raises: MaybeIrType) -> String =
         let f = fs[idx].clone()
         if f.0 == "value":
             out = gen_expr(f.1, fn_raises)
+    out
+
+// BUG-411：命名字段变体构造 `Enum::Variant { f: v, ... }` 的两块拼装。
+// 实参为 _KwArg（`name` 字段是字段名字面量，`value` 字段是值表达式）时取字段名；
+// 序列化侧已把位置实参按声明名补成 _KwArg，故此处只需渲染 pairs。
+def all_kwarg_args(a: List<Expr>) -> bool =
+    let mut all_kw: bool = a.len() > 0
+    for idx in 0..a.len():
+        if not is_kwarg_expr(a[idx].clone()):
+            all_kw = false
+    all_kw
+
+def is_kwarg_expr(e: Expr) -> bool =
+    match e:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) => n == "_KwArg"
+        case _ => false
+
+def kwarg_pairs_str(a: List<Expr>, fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..a.len():
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + kwarg_pair_of(a[idx].clone(), fn_raises)
+    out
+
+def kwarg_pair_of(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            kwarg_name_of(fs) + ": ".to_string() + kwarg_value_of(fs, fn_raises)
+        case _ => gen_expr(e, fn_raises)
+
+def kwarg_name_of(fs: List<(str, Expr)>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if f.0 == "name":
+            out = lit_str_of(f.1)
+    out
+
+def lit_str_of(e: Expr) -> String =
+    match e:
+        case Expr.LitStr(s: sv, ty: tv) => sv
+        case _ => "".to_string()
+
+// BUG-411：命名字段枚举字段访问的匹配臂串（对齐原生 expr_gen.rs:5184 的
+// `E::V { f, .. } => f.clone(), `，含该字段的每个变体各一臂）。
+def enum_field_arms(en: str, vs: List<str>, f: str) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..vs.len():
+        let v = vs[idx].clone()
+        out = out + en.to_string() + "::".to_string() + v.to_string() + " { ".to_string() + f.to_string() + ", .. } => ".to_string() + f.to_string() + ".clone(), ".to_string()
     out
 
 def expr_cs_list(es: List<Expr>, fn_raises: MaybeIrType) -> String =
@@ -1564,11 +1636,46 @@ def gen_struct_fields(fs: List<(str, IrType)>) -> String =
         out = out + "    pub ".to_string() + f.0.to_string() + ": ".to_string() + rust_type(f.1) + ",\n".to_string()
     out
 
-def gen_enum_variants(vs: List<(str, List<IrType>)>) -> String =
+// BUG-411：命名字段变体定义（对齐原生 decl_gen.rs:1985 gen_enum_def）——
+//   空字段        → `    Name,`
+//   全命名字段    → `    Name {\n        f: ty,\n    },`
+//   位置（元组）  → `    Name(ty, ty),`
+// 旧实现只序列化字段类型、丢字段名，一律降级为元组变体，与原生产物分叉且
+// 使 `x.f` 字段访问无从生成解构。
+def gen_enum_variants(vs: List<(str, List<(str, IrType)>)>) -> String =
     let mut out: String = "".to_string()
     for idx in 0..vs.len():
         let v = vs[idx].clone()
-        out = out + "    ".to_string() + v.0.to_string() + gen_enum_variant_args(v.1) + ",\n".to_string()
+        out = out + "    ".to_string() + v.0.to_string() + gen_enum_variant_body(v.1) + ",\n".to_string()
+    out
+
+def gen_enum_variant_body(fs: List<(str, IrType)>) -> String =
+    if fs.len() == 0:
+        "".to_string()
+    elif variant_fields_named(fs):
+        let mut body: String = " {\n".to_string()
+        for idx in 0..fs.len():
+            let f = fs[idx].clone()
+            body = body + "        ".to_string() + f.0.to_string() + ": ".to_string() + rust_type(f.1) + ",\n".to_string()
+        body + "    }".to_string()
+    else:
+        "(".to_string() + variant_field_types(fs) + ")".to_string()
+
+def variant_fields_named(fs: List<(str, IrType)>) -> bool =
+    let mut all_named: bool = true
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if f.0 == "":
+            all_named = false
+    all_named
+
+def variant_field_types(fs: List<(str, IrType)>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + rust_type(f.1)
     out
 
 def gen_enum_variant_args(ts: List<IrType>) -> String =
