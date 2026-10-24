@@ -1048,6 +1048,13 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         recv0 + ".values().cloned().collect::<Vec<_>>()".to_string()
     elif m == "get" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ".get(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")).cloned()".to_string()
+    elif m == "contains" and a.len() == 1 and is_list_irtype(expr_ty(r)):
+        // BUG-437：List/Vec 的 `.contains(x)` 在 Rust 端签名是 `contains(&self, x: &T)`
+        // —— 实参必须按引用传入。rs-lz 此前落到通用方法分支直发 `v.contains(3i64)`
+        // → rustc E0308 mismatched types；原生 codegen 渲染 `v.contains(&3i64)`。
+        // 注意 Dict（→ contains_key）与 str（→ Pattern 位，is_pattern_method）走各自
+        // 既有分支，此处只接管集合（List/Vec）接收者。
+        "(".to_string() + recv0 + ").contains(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
     else:
         let recv0 = gen_expr(r, fn_raises)
         if m == "map" and a.len() == 1:
