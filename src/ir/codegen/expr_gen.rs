@@ -3,6 +3,7 @@
 
 use super::scan::cmp_walk_block;
 use super::scan::count_vars_block;
+use super::scan::count_vars_expr;
 use super::scan::CmpInfo;
 use super::types_emit::bigint_from_code;
 use super::types_emit::bigint_lit_code;
@@ -5810,6 +5811,25 @@ impl CodeGen {
                 {
                     let lhs_s = self.gen_expr(lhs);
                     let rhs_s = self.gen_expr(rhs);
+                    // BUG-415：`k + k`（同一变量出现在两侧）经 LzAdd 按值传参时，
+                    // 右侧实参求值前左侧已把 k move 走 → E0382 use of moved value
+                    // （`[k + k for k in ["a","b"]]` 实测）。LZ 值语义每次使用取副本
+                    // ⇒ 左侧补 clone。
+                    let lhs_s = if !lhs_s.contains(".clone()")
+                        && !matches!(lhs.ty, IrType::Int | IrType::F64 | IrType::Bool)
+                    {
+                        if let (ExprKind::Var(a), ExprKind::Var(b)) = (&lhs.kind, &rhs.kind) {
+                            if a == b && a.as_str() != "self" {
+                                format!("{}.clone()", lhs_s)
+                            } else {
+                                lhs_s
+                            }
+                        } else {
+                            lhs_s
+                        }
+                    } else {
+                        lhs_s
+                    };
                     return format!("LzAdd::__add__({}, {})", lhs_s, rhs_s);
                 }
                 // String + 拼接: 右侧需借用 & 以匹配 Rust Add<&str>
@@ -7518,6 +7538,57 @@ child.struct_fields_info = self.struct_fields_info.clone();
                     // 发成 `Vec::<i64>::new()` ⇒ E0308 expected Vec<Vec<i64>>,
                     // found Vec<i64>（静态定义与内联引用两侧同错）。
                     let tuple_expected = self.current_expected_ty.borrow().clone();
+                    // BUG-415：同一非 Copy 变量在元组内出现 ≥2 次时，除**最后一次**出现外
+                    // 都补 `.clone()`。Rust 元组按从左到右求值：先出现的裸引用会把变量
+                    // move 走，后续使用即 E0382（`(k, k.len())`、dict 推导
+                    // `map(|k| (k, k.len()))`、`def pair(k: str) = (k, k.len())` 实测）。
+                    // LZ 是值语义，每次使用各自取副本 ⇒ 补 clone 语义等价。
+                    let mut per_elem: Vec<std::collections::HashMap<String, usize>> = Vec::new();
+                    let mut total: std::collections::HashMap<String, usize> =
+                        std::collections::HashMap::new();
+                    for e in elems.iter() {
+                        let mut m = std::collections::HashMap::new();
+                        count_vars_expr(e, &mut m);
+                        for (k, v) in &m {
+                            *total.entry(k.clone()).or_insert(0) += *v;
+                        }
+                        per_elem.push(m);
+                    }
+                    let mut last_idx: std::collections::HashMap<String, usize> =
+                        std::collections::HashMap::new();
+                    for (i, m) in per_elem.iter().enumerate() {
+                        for k in m.keys() {
+                            last_idx.insert(k.clone(), i);
+                        }
+                    }
+                    // 仅当该变量在某个元素位是**裸引用**（会被 move）时才需要补 clone——
+                    // 只作借用基底的重复（如合成 `__unapply__` 的 `(self.x, self.y)`，
+                    // self 出现两次但都是字段访问基底）不得 clone，否则产物变成
+                    // `(self.clone().x, …)` 并与 rs-lz 路径分叉。
+                    let mut bare_count: std::collections::HashMap<String, usize> =
+                        std::collections::HashMap::new();
+                    for e in elems.iter() {
+                        if let ExprKind::Var(n) = &e.kind {
+                            *bare_count.entry(n.clone()).or_insert(0) += 1;
+                        }
+                    }
+                    // 每个元素需要 clone 的变量名集合（复用 clone_noncopy_external：
+                    // 把该元素内其余变量放进排除集，仅目标变量被 clone；Int/F64/Bool
+                    // 由该 helper 自行跳过，故 Copy 标量不受影响）
+                    let clone_sets: Vec<Vec<String>> = (0..elems.len())
+                        .map(|i| {
+                            per_elem[i]
+                                .keys()
+                                .filter(|k| {
+                                    total.get(*k).copied().unwrap_or(0) >= 2
+                                        && last_idx.get(*k).copied().unwrap_or(0) > i
+                                        && bare_count.get(*k).copied().unwrap_or(0) >= 1
+                                        && k.as_str() != "self"
+                                })
+                                .cloned()
+                                .collect()
+                        })
+                        .collect();
                     let elems: Vec<String> = elems
                         .iter()
                         .enumerate()
@@ -7540,7 +7611,14 @@ child.struct_fields_info = self.struct_fields_info.clone();
                             } else {
                                 None
                             };
-                            let s = self.gen_expr(e);
+                            let s = if clone_sets[i].is_empty() {
+                                self.gen_expr(e)
+                            } else {
+                                let mut excl: Vec<String> = per_elem[i].keys().cloned().collect();
+                                excl.retain(|n| !clone_sets[i].contains(n));
+                                let e2 = clone_noncopy_external(e, &excl);
+                                self.gen_expr(&e2)
+                            };
                             if let Some(prev) = prev_expected {
                                 *self.current_expected_ty.borrow_mut() = prev;
                             }
