@@ -12,6 +12,45 @@ use super::types_emit::BIGINT_RS;
 use super::types_emit::COMPLEX_RS;
 use super::*;
 
+/// BUG-414：推导式 `if` 谓词的闭包参数形态。
+/// Rust 的 `Iterator::filter` 谓词收到的是 `&Item`：元素为 Copy 标量时 `|&x|`
+/// 解构即拷贝，可直接参与比较（既有行为，保持逐字不变）；元素非 Copy
+/// （String/Vec/struct…）时 `|&x|` 会 move 出共享引用 → E0507
+/// （`{k: k.len() for k in ["aa","ccc"] if k.len() > 1}`），必须绑定引用本身
+/// （`|x|`，x: &Item；`x.method()` / `x.field` 经自动解引用仍可用）。
+fn comp_cond_lambda_src(cond: &str, iter_expr: Option<&Expr>, cond_expr: Option<&Expr>) -> String {
+    // 元素类型优先取**被迭代表达式**的元素类型（cond lambda 的形参类型在 IR 里
+    // 常为 Any，不可用）：列表字面量取首元素类型，Vec/List<T> 取 T。取不到则回退
+    // lambda 形参类型。
+    let elem_ty: Option<IrType> = iter_expr
+        .and_then(|e| match &e.kind {
+            ExprKind::ListLit(items) => items.first().map(|i| i.ty.clone()),
+            _ => match &e.ty {
+                IrType::Named { path, args } if path == "Vec" || path == "List" => {
+                    args.first().cloned()
+                }
+                _ => None,
+            },
+        })
+        .or_else(|| {
+            cond_expr.and_then(|e| match &e.kind {
+                ExprKind::Lambda { params, .. } => params.first().map(|p| p.ty.clone()),
+                _ => None,
+            })
+        });
+    // 仅对**确定非 Copy** 的元素类型改用引用绑定（保守：Str/Named/Tuple；其余
+    // 类型——含未定的 Any——保持既有 `|&x|`，避免改变既有产物的语义）。
+    let noncopy_elem = matches!(
+        elem_ty,
+        Some(IrType::Str) | Some(IrType::Named { .. }) | Some(IrType::Tuple(_))
+    );
+    if noncopy_elem {
+        strip_lambda_type(cond)
+    } else {
+        strip_lambda_type_with_ref(cond)
+    }
+}
+
 impl CodeGen {
     /// 字段期望类型是否含未绑定泛型参数（Generic 或单大写字母 Named，如 T/R）：
     /// 含则禁止设为 current_expected_ty —— rust_type 会展开成裸 `T` 导致 E0425
@@ -1434,7 +1473,7 @@ impl CodeGen {
                                     );
                                 }
                             }
-                            let cond = strip_lambda_type_with_ref(cond);
+                            let cond = comp_cond_lambda_src(cond, args.get(1), args.get(2));
                             // filter 谓词仅只读外部变量（如 `x <= pivot`），借用捕获
                             // 而非 move：pivot 可被多个推导式复用，否则 E0382
                             // use of moved value（lib_sort quick_sort）
@@ -1465,7 +1504,7 @@ impl CodeGen {
                         };
                         let lambda = strip_lambda_type(lambda);
                         if let Some(cond) = args_s.get(2) {
-                            let cond = strip_lambda_type_with_ref(cond);
+                            let cond = comp_cond_lambda_src(cond, args.get(1), args.get(2));
                             return format!(
                                 "({}){}.filter({}).map({}).collect::<HashMap<_,_>>()",
                                 iter, iter_method, cond, lambda
@@ -1492,7 +1531,7 @@ impl CodeGen {
                         };
                         let lambda = strip_lambda_type(lambda);
                         if let Some(cond) = args_s.get(2) {
-                            let cond = strip_lambda_type_with_ref(cond);
+                            let cond = comp_cond_lambda_src(cond, args.get(1), args.get(2));
                             return format!(
                                 "({}){}.filter({}).map({}).collect::<HashSet<_>>()",
                                 iter, iter_method, cond, lambda
@@ -1531,7 +1570,7 @@ impl CodeGen {
                                 let op = if suffix == "leaf!" { "map" } else { "flat_map" };
                                 let chain = match args_s.get(2) {
                                     Some(cond) => {
-                                        let cond = strip_lambda_type_with_ref(cond);
+                                        let cond = comp_cond_lambda_src(cond, args.get(1), args.get(2));
                                         format!(
                                             "({}){}.filter({}).{}({})",
                                             iter, iter_method, cond, op, lambda
