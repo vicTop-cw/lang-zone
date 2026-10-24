@@ -6992,9 +6992,23 @@ impl CodeGen {
                             .cloned()
                             .unwrap_or_default();
                         let fields_src = fields;
+                        // BUG-417：位置式 struct 构造 `P(k, k.len())` 同样会在字段值之间
+                        // 复用同一非 Copy 变量 → E0382（`P { a: k, b: (k.len() as i64) }`）。
+                        // 与 Dict/List/Set/Tuple 同口径：同一变量出现 ≥2 次且存在裸引用时，
+                        // 除最后一次外补 clone。
+                        let field_vals: Vec<&Expr> = fields_src.iter().map(|(_, v)| v).collect();
+                        let field_clone_sets = self.repeated_move_clone_sets(&field_vals);
                         let mut fields: Vec<String> = fields_src
                             .iter()
-                            .map(|(n, v)| {
+                            .enumerate()
+                            .map(|(fi, (n, v))| {
+                                let v_cloned: Expr;
+                                let v: &Expr = if field_clone_sets[fi].is_empty() {
+                                    v
+                                } else {
+                                    v_cloned = self.clone_repeated_in_expr(v, &field_clone_sets[fi]);
+                                    &v_cloned
+                                };
                                 // 字段值生成期间以字段类型作为期望类型（与实参渲染对称，
                                 // expr_gen.rs Call 分支同款机制）：字段位 `logging: None`
                                 // 的 None 由此选型 Option<String> 而非错误回退到 expr.ty
