@@ -1043,6 +1043,29 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // 迭代器 map 分支（Vec 需 `.iter().cloned().map(..).collect()`），与 flat_map
         // 在 Option/Result 上改名 and_then（BUG-433）互补。
         "(".to_string() + recv0 + ").clone().map(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+    elif m == "unwrap_or_else" and a.len() == 1 and is_optres_irtype(expr_ty(r)):
+        // BUG-445：`unwrap_or_else` 按值消费 `self`，接收者后续复用须先 `.clone()`。
+        // rs-lz 此前透传 `o.unwrap_or_else(..)`（不 clone）→ E0382/E0308；原生渲染
+        // `(o).clone().unwrap_or_else(move || ..)`（与 `.map` 的 BUG-439 同族）。
+        "(".to_string() + recv0 + ").clone().unwrap_or_else(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+    elif m == "expect" and a.len() == 1 and is_optres_irtype(expr_ty(r)):
+        // BUG-445：`expect(&self, msg: &str)` 消息须 `&str`。rs-lz 原发 `expect("boom".to_string())`
+        // → E0308 expected `&str`, found `String`；原生渲染 `expect("boom")`。字面量本身是
+        // `&str` 裸发，String 变量须 `&msg`。
+        "(".to_string() + recv0 + ").clone().expect(".to_string() + dict_key_arg(a[0].clone(), fn_raises) + ")".to_string()
+    elif m == "unwrap_or" and a.len() == 1 and is_optres_irtype(expr_ty(r)):
+        // BUG-445：`unwrap_or` 按值消费 `self`，接收者后续复用须先 `.clone()`。rs-lz 此前
+        // 透传 `r.unwrap_or(-1)` → E0382 use of moved value；原生 `(r).clone().unwrap_or(-1i64)`。
+        "(".to_string() + recv0 + ").clone().unwrap_or(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+    elif m == "unwrap" and a.len() == 0 and is_optres_irtype(expr_ty(r)):
+        // BUG-445：`unwrap` 按值消费 `self`（`Option::unwrap(self)`）。
+        "(".to_string() + recv0 + ").clone().unwrap()".to_string()
+    elif m == "ok" and a.len() == 0 and is_optres_irtype(expr_ty(r)):
+        // BUG-445：`Result::ok(self)` 按值消费 `self`。
+        "(".to_string() + recv0 + ").clone().ok()".to_string()
+    elif m == "err" and a.len() == 0 and is_optres_irtype(expr_ty(r)):
+        // BUG-445：`Result::err(self)` 按值消费 `self`。
+        "(".to_string() + recv0 + ").clone().err()".to_string()
     elif m == "get" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
         // BUG-440：Dict 的键实参在 Rust 端 `get(&self, key: &Q)` 需要借位。str 字面量
         // 本身就是 `&str`（Q=str），裸发 `"a"` 即可；其余（String/数值变量等）必须 `&<expr>`。
@@ -1059,6 +1082,11 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // ⇒ 键须 `.to_string()`（字面量与变量同理）。原生渲染
         // `m.insert("c".to_string(), 3i64)` / `m.insert(k.to_string(), v)`。
         recv0 + ".insert(".to_string() + dict_insert_key_arg(a[0].clone(), fn_raises) + ", ".to_string() + gen_expr(a[1].clone(), fn_raises) + ")".to_string()
+    elif m == "remove" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
+        // BUG-442：`remove(&self, key: &Q)` 键须借位（与 BUG-440 的 get/contains 同族）。
+        // rs-lz 原发 `d.remove("a".to_string())` → E0308 expected `&_`, found `String`；
+        // 原生渲染 `d.remove("a")` / `d.remove(&k)`（remove 返回 `Option<V>`，无需 .cloned()）。
+        recv0 + ".remove(".to_string() + dict_key_arg(a[0].clone(), fn_raises) + ")".to_string()
     elif m == "filter" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "map" and a.len() == 1:
@@ -1395,6 +1423,13 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> Strin
                 "lz_abs(".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
             elif n == "zip" and a.len() == 2:
                 "(".to_string() + gen_expr(a[0].clone(), fn_raises) + ").into_iter().zip((".to_string() + gen_expr(a[1].clone(), fn_raises) + ").into_iter()).collect::<Vec<_>>()".to_string()
+            // BUG-443：空 `Dict()` 构造（builder 把 `Dict()` 生成 Call(Var("Dict"), [])，
+            // 与字面量 `{..}` 的 StructCtor(name="Dict") 不同路径）。rs-lz 原发 `Dict()`，
+            // 而 `Dict` 只是 lz_builtins 里的类型别名（`Dict<K,V> = BTreeMap<K,V>`），
+            // 不能当函数调用 ⇒ E0423 expected function, found type alias `Dict`。
+            // 原生渲染 `std::collections::BTreeMap::new()`。
+            elif n == "Dict" and a.len() == 0:
+                "std::collections::BTreeMap::new()".to_string()
             // BUG-432：命名字段结构体构造 `Point(x: 3, y: 4)`。builder 把它变成
             // `Call(Var("Point"), [_KwArg(x,3), _KwArg(y,4)])`，ty=Named("Point")。
             // rs-lz 此前走通用调用分支、用 kwarg_value_of 剥掉字段名 ⇒ `Point(3i64, 4i64)`
@@ -2225,7 +2260,8 @@ def gen_item(i: Item) -> String =
         case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, where_clause: wc, body: b) =>
             let is_main = (n == "main")
             let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
-            "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut_names(b), rs) + "}".to_string()
+            let auto_mut = auto_mut_names(b)
+            "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut, rs) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
             let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
             if fs.len() > 0:
@@ -2266,15 +2302,26 @@ def r_eq_unit(t: IrType) -> bool =
         case IrType.Unit => true
         case _ => false
 
-def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>) -> String =
+def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>, auto_mut: String) -> String =
     if ps.len() == 0:
         "".to_string()
     else:
         let p0 = ps[0].clone()
-        fn_param_str(p0) + (", " + fn_param_list(pl_tail(ps)) if ps.len() > 1 else "")
+        fn_param_str(p0, auto_mut) + (", " + fn_param_list(pl_tail(ps), auto_mut) if ps.len() > 1 else "")
 
-def fn_param_str(p: (str, IrType, bool, bool, bool)) -> String =
-    p.0.to_string() + ": ".to_string() + rust_type(p.1)  // D1: 忽略 ref/mut/owned 前缀（原生 codegen 对 fn 参数只输出 name: type）
+def fn_param_str(p: (str, IrType, bool, bool, bool), auto_mut: String) -> String =
+    // BUG-444：函数体内发生 &mut 用法（`d.remove(..)`、集合 push/insert 等）的参数
+    // 在 Rust 端须标 `mut`。原生 codegen 用 auto_mut_locals 同一扫描覆盖局部变量与
+    // 参数，rs-lz 此前恒发 `name: type`（无 mut）⇒ E0596 cannot borrow as mutable。
+    // 仅按精确名字匹配（逗号分隔 token），避免 `x` 误中 `xy`。
+    (("mut " if auto_mut_has(auto_mut, p.0) else "").to_string()) + p.0.to_string() + ": ".to_string() + rust_type(p.1)  // D1: 忽略 ref/mut/owned 前缀（原生 codegen 对 fn 参数只输出 name: type，mut 前缀除外）
+
+def auto_mut_has(list: String, name: str) -> bool =
+    if list.len() == 0:
+        false
+    else:
+        let padded = ",".to_string() + list + ","
+        str_contains(padded, "," + name + ",")
 
 def pl_tail(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool, bool, bool)> =
     let mut out: List<(str, IrType, bool, bool, bool)> = []
