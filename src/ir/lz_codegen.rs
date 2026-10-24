@@ -394,6 +394,39 @@ impl LzGen {
                     Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
                     None => self.opt_none("IrType"),
                 };
+                // BUG-422：Rust codegen 模式下 impl 方法要带**完整定义**（旧实现只带
+                // method_names，LZ 侧只能发 `unimplemented!()` 桩 ⇒ 所有用户 struct/enum
+                // 方法与 trait impl 都是空壳）。IR display 模式保持旧的 names-only 形态
+                // （lz_ir_lib.lz 的 Item.Impl 只有 method_names）。
+                if self.rs_codegen_mode {
+                    let methods_items: Vec<String> = imp
+                        .methods
+                        .iter()
+                        .map(|m| {
+                            let params = self.param_pairs(&m.params);
+                            let body = self.stmts_ref(&m.body.stmts);
+                            let exc = match &m.raises {
+                                Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
+                                None => "MaybeIrType.NoTy".to_string(),
+                            };
+                            format!(
+                                "ImplMethod(name: \"{}\", params: {}, ret: {}, exc: {}, body: {})",
+                                escape_lz(&m.name),
+                                params,
+                                self.irtype(&m.ret_ty),
+                                exc,
+                                body
+                            )
+                        })
+                        .collect();
+                    let methods_s = self.list_ref("ImplMethod", methods_items);
+                    return format!(
+                        "Item.Impl(trait_: {}, for_type: {}, methods: {})",
+                        trait_s,
+                        self.irtype(&imp.for_type),
+                        methods_s
+                    );
+                }
                 let names_items: Vec<String> = imp
                     .methods
                     .iter()

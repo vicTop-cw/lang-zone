@@ -140,6 +140,16 @@ enum Pattern:
     Rest(name: MaybeStr)
     Range(start: int, end: int, inclusive: bool)
 
+// BUG-422：impl 方法需带**完整定义**（名字/形参/返回/raises/函数体）。旧 schema 只带
+// 方法名，LZ 侧只能发 `fn name(&self) { unimplemented!() }` 桩 ⇒ 所有用户 struct/enum
+// 方法与 trait impl 在 --emit=rs-lz 下都是空壳（调用即 E0061 参数个数不符 / 返回值缺失）。
+struct ImplMethod =
+    name: str
+    params: List<(str, IrType, bool, bool, bool)>
+    ret: IrType
+    exc: MaybeIrType
+    body: List<Stmt>
+
 // ── Item ──
 enum Item:
     FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
@@ -150,7 +160,7 @@ enum Item:
     DuckDef(name: str, method_count: int)
     UseStmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool)
     TypeAlias(name: str, ty: IrType)
-    Impl(trait_: MaybeIrType, for_type: IrType, method_names: List<str>)
+    Impl(trait_: MaybeIrType, for_type: IrType, methods: List<ImplMethod>)
     CheckerBlock(name: str, ps_name: MaybeStr)
     Test(name: str, body: List<Stmt>)
     // BUG-410：脚本模式（无声明 main）顶层语句的合成分支，对应原生
@@ -736,10 +746,21 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.Var(name: n, ty: t) => n.to_string()
         case Expr.Call(callee: c, args: a, ty: t) => gen_call(c, a, fn_raises).to_string()
         case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) => gen_expr(r, fn_raises) + method_call_sep(r) + m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
-        case Expr.FieldAccess(base: b, field: f, ty: t) => gen_expr(b, fn_raises) + ".".to_string() + f.to_string()
+        case Expr.FieldAccess(base: b, field: f, ty: t) =>
+            // BUG-423：基底是**类型名**时须用路径分隔符——`Light.On`（单位变体引用）
+            // 在 Rust 应为 `Light::On`，用 `.` 即 E0423 expected value, found enum。
+            // 与 BUG-405（方法调用侧）同口径：Var 且首字母大写视为类型名。
+            gen_expr(b, fn_raises) + field_access_sep(b) + f.to_string()
         case Expr.IndexGet(base: b, key: k, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "]".to_string()
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "] = ".to_string() + gen_expr(v, fn_raises)
-        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) => gen_expr(l, fn_raises) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr(r, fn_raises)
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
+            // BUG-423：字符串拼接 `a + b` 在 Rust 需 `String + &str`（String + String
+            // 无 Add impl → E0308 expected `&str`, found `String`）。两侧均为字符串
+            // 类型时右侧补 `&`，对齐原生 `"hi ".to_string() + &x.clone()` 口径。
+            if o == "+" and is_string_irtype(expr_ty(l)) and is_string_irtype(expr_ty(r)):
+                gen_expr(l, fn_raises) + " + &".to_string() + gen_expr(r, fn_raises)
+            else:
+                gen_expr(l, fn_raises) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr(r, fn_raises)
         case Expr.UnOp(op: o, operand: p, ty: t) => o.to_string() + gen_expr(p, fn_raises)
         case Expr.StructCtor(name: n, fields: fs, ty: t) =>
             if n == "Range":
@@ -788,7 +809,7 @@ def display_item(i: Item) -> String =
         case Item.DuckDef(name: n, method_count: mc) => "duck ".to_string() + n
         case Item.UseStmt(path: pth, alias: al, items: its, is_from: fr) => "use ".to_string() + str_join(pth)
         case Item.TypeAlias(name: n, ty: t) => "type ".to_string() + n
-        case Item.Impl(trait_: tr, for_type: ft, method_names: mns) => "impl ".to_string() + rust_type(ft)
+        case Item.Impl(trait_: tr, for_type: ft, methods: mns) => "impl ".to_string() + rust_type(ft)
         case Item.CheckerBlock(name: n, ps_name: p) => "checker ".to_string() + n
         case Item.Test(name: n, body: b) => "test ".to_string() + n
         case _ => "item".to_string()
@@ -888,6 +909,10 @@ def method_call_sep(r: Expr) -> String =
             else:
                 ".".to_string()
         case _ => ".".to_string()
+
+// BUG-423：字段访问的分隔符——基底是类型名（Var 且首字母大写，如 `Light.On`）时
+// 用 `::`（单位变体/关联项引用），否则用 `.`（真实字段访问）。与 method_call_sep 同口径。
+def field_access_sep(b: Expr) -> String = method_call_sep(b)
 
 def starts_upper(s: str) -> bool =
     let c = s[0..1]
@@ -1427,32 +1452,73 @@ def gen_trait_def(name: str, supertraits: List<IrType>, methods: List<(str, List
         ": ".to_string() + st_parts
     "pub trait ".to_string() + name.to_string() + st_str + " {\n".to_string() + gen_trait_methods(methods) + "\n}".to_string()
 
+// self 标记类型（trait 形参表里可能保留一项 self 类型，渲染签名时须跳过）
+def is_self_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Self_ => true
+        case IrType.Ref(inner: i) => is_self_irtype(i)
+        case IrType.MutRef(inner: i) => is_self_irtype(i)
+        case _ => false
+
 def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>) -> String =
     let mut out: String = "".to_string()
     for idx in 0..methods.len():
         let m = methods[idx].clone()
-        let mut params: String = "".to_string()
+        // BUG-422：trait 方法签名必须带参数名——Rust 的 fn 签名不允许无名形参，
+        // 且 self 要写成 `&self`（旧实现把 self 类型的 `&Self` 原样发射，既是无效
+        // Rust，impl 侧又与其对不上 → E0185）。对齐原生 `fn add(&self, _p1: i64) -> i64;`：
+        // 首个形参恒为 `&self`（LZ trait 方法均为实例方法）；形参表中若含 self 标记
+        // （Ref(Self_)/MutRef(Self_)/Self_，序列化保留了它）需**跳过**，否则 self 被
+        // 计两次 → E0050。其余按位置命名 `_pN`。
+        let mut params: String = "&self".to_string()
+        let mut pn: int = 1
         for pidx in 0..m.1.len():
             let pt = m.1[pidx].clone()
-            if pidx > 0:
-                params = params + ", ".to_string()
-            params = params + rust_type(pt)
+            if not is_self_irtype(pt):
+                params = params + ", _p".to_string() + pn.to_string() + ": ".to_string() + rust_type(pt)
+                pn = pn + 1
         out = out + "    fn ".to_string() + m.0.to_string() + "(".to_string() + params + ") -> ".to_string() + rust_type(m.2) + ";\n".to_string()
     out
 
 // D2 缺口补齐：Impl 生成
-def gen_impl_def(trait_: MaybeIrType, for_type: IrType, method_names: List<str>) -> String =
+def gen_impl_def(trait_: MaybeIrType, for_type: IrType, methods: List<ImplMethod>) -> String =
     let trait_part = match trait_:
         case MaybeIrType.YesTy(t: ty) => rust_type(ty) + " for ".to_string()
         case MaybeIrType.NoTy => "".to_string()
-    "impl ".to_string() + trait_part + rust_type(for_type) + " {\n".to_string() + gen_impl_methods(method_names) + "\n}".to_string()
+    let mut body: String = "".to_string()
+    for idx in 0..methods.len():
+        body = body + gen_impl_method(methods[idx].clone())
+    "impl ".to_string() + trait_part + rust_type(for_type) + " {\n".to_string() + body + "}".to_string()
 
-def gen_impl_methods(method_names: List<str>) -> String =
+// BUG-422：真实方法体（对齐原生 impl 块内的 `fn name(...) -> ret { body }`）。
+// 形参：self 渲染为 `&self` / `&mut self` / `self`（元组序 = name, ty, is_ref,
+// is_mut, is_owned），其余 `name: ty`。返回 () 时省略 `-> ()`。
+def gen_impl_method(m: ImplMethod) -> String =
+    let ret_s = "".to_string() if r_eq_unit(m.ret) else (" -> ".to_string() + rust_type(m.ret))
+    "    fn ".to_string() + m.name + "(".to_string() + impl_method_params(m.params) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(m.body, false, auto_mut_names(m.body), m.exc) + "    }\n".to_string()
+
+def impl_method_params(ps: List<(str, IrType, bool, bool, bool)>) -> String =
     let mut out: String = "".to_string()
-    for idx in 0..method_names.len():
-        let mn = method_names[idx].clone()
-        out = out + "    fn ".to_string() + mn.to_string() + "(&self) {\n        unimplemented!()\n    }\n".to_string()
+    for idx in 0..ps.len():
+        let p = ps[idx].clone()
+        if idx > 0:
+            out = out + ", ".to_string()
+        if p.0 == "self":
+            out = out + self_param_str(p)
+        else:
+            out = out + p.0 + ": ".to_string() + rust_type(p.1)
     out
+
+def self_param_str(p: (str, IrType, bool, bool, bool)) -> String =
+    if p.4:
+        "self".to_string()
+    elif p.2:
+        if p.3:
+            "&mut self".to_string()
+        else:
+            "&self".to_string()
+    else:
+        "self".to_string()
 
 // D2 缺口补齐：UseStmt 生成
 def gen_use_stmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool) -> String =
