@@ -734,6 +734,78 @@ def expr_ty(e: Expr) -> IrType =
         case Expr.ImplicitConvert(source: _, target_ty: _, ty: t) => t
 
 // ── Expr → Rust 表达式（无 [ty] 前缀）──
+// BUG-429：元组按值构造时，同一非 Copy 变量若在**后续**元素里还会被引用，
+// 前面的裸引用会先把它 move 走 ⇒ E0382（`(k, k.len())`，推导值 lambda 实测 c8/c6）。
+// 口径对齐原生 BUG-415：除最后一次出现外补 `.clone()`；显式排除 self；
+// 已知 Copy 标量（Int/F64/Bool）不加 clone。
+def gen_tuple_lit(es: List<Expr>, fn_raises: MaybeIrType) -> String =
+    let mut parts: String = "".to_string()
+    for i in 0..es.len():
+        if i > 0:
+            parts = parts + ", ".to_string()
+        parts = parts + gen_tuple_elem(es[i].clone(), es, i, fn_raises)
+    "(".to_string() + parts + ")".to_string()
+
+def gen_tuple_elem(e: Expr, es: List<Expr>, i: int, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.Var(name: n, ty: t) =>
+            if n != "self" and is_noncopy_irtype(t) and name_used_later(n, es, i + 1):
+                gen_expr(e, fn_raises) + ".clone()".to_string()
+            else:
+                gen_expr(e, fn_raises)
+        case _ => gen_expr(e, fn_raises)
+
+def name_used_later(n: str, es: List<Expr>, start: int) -> bool =
+    let mut found: bool = false
+    for i in start..es.len():
+        if expr_has_var(es[i].clone(), n):
+            found = true
+    found
+
+def is_noncopy_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Int => false
+        case IrType.F64 => false
+        case IrType.Bool => false
+        case _ => true
+
+// 递归查名字（覆盖常用 Expr 变体；未覆盖的保守返回 false，即不补 clone）
+def expr_has_var(e: Expr, n: str) -> bool =
+    match e:
+        case Expr.Var(name: vn, ty: t) => vn == n
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
+            expr_has_var(r, n) || any_expr_has_var(a, n)
+        case Expr.Call(callee: c, args: a, ty: t) => expr_has_var(c, n) || any_expr_has_var(a, n)
+        case Expr.FieldAccess(base: b, field: f, ty: t) => expr_has_var(b, n)
+        case Expr.IndexGet(base: b, key: k, ty: t) => expr_has_var(b, n) || expr_has_var(k, n)
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
+            expr_has_var(b, n) || expr_has_var(k, n) || expr_has_var(v, n)
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) => expr_has_var(l, n) || expr_has_var(r, n)
+        case Expr.UnOp(op: o, operand: p, ty: t) => expr_has_var(p, n)
+        case Expr.TupleLit(elems: es, ty: t) => any_expr_has_var(es, n)
+        case Expr.ListLit(items: xs, ty: t) => any_expr_has_var(xs, n)
+        case Expr.Cast(inner: i, target: tg, ty: t) => expr_has_var(i, n)
+        case Expr.Paren(inner: i, ty: t) => expr_has_var(i, n)
+        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) =>
+            expr_has_var(c, n) || expr_has_var(th, n) || expr_has_var(el, n)
+        case Expr.StructCtor(name: sn, fields: fs, ty: t) => struct_fields_have_var(fs, n)
+        case _ => false
+
+def any_expr_has_var(es: List<Expr>, n: str) -> bool =
+    let mut found: bool = false
+    for i in 0..es.len():
+        if expr_has_var(es[i].clone(), n):
+            found = true
+    found
+
+def struct_fields_have_var(fs: List<(str, Expr)>, n: str) -> bool =
+    let mut found: bool = false
+    for i in 0..fs.len():
+        let f = fs[i].clone()
+        if expr_has_var(f.1, n):
+            found = true
+    found
+
 def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
     match e:
         case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64".to_string()
@@ -787,7 +859,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if ".to_string() + gen_expr(c, fn_raises) + " { ".to_string() + gen_expr(th, fn_raises) + " } else { ".to_string() + gen_expr(el, fn_raises) + " }".to_string()
         case Expr.Lambda(params: ps, body: b, ty: t) => "move |".to_string() + str_join(ps).to_string() + "| ".to_string() + gen_expr(b, fn_raises)
         case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
-        case Expr.TupleLit(elems: es, ty: t) => "(".to_string() + expr_cs_list(es, fn_raises) + ")".to_string()
+        case Expr.TupleLit(elems: es, ty: t) => gen_tuple_lit(es, fn_raises)
         case Expr.ListLit(items: xs, ty: t) =>
             // BUG-426：LZ 列表字面量必须发 `vec![…]`——Rust 数组 `[…]` 的类型是
             // `[T; N]`，与 LZ 的 List<T>（Rust `Vec<T>`）不符 ⇒ E0308 expected Vec<T>,
