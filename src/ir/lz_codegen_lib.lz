@@ -788,7 +788,14 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.Lambda(params: ps, body: b, ty: t) => "move |".to_string() + str_join(ps).to_string() + "| ".to_string() + gen_expr(b, fn_raises)
         case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) => gen_expr(r, fn_raises) + ".".to_string() + gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case Expr.TupleLit(elems: es, ty: t) => "(".to_string() + expr_cs_list(es, fn_raises) + ")".to_string()
-        case Expr.ListLit(items: xs, ty: t) => "[".to_string() + expr_cs_list(xs, fn_raises) + "]".to_string()
+        case Expr.ListLit(items: xs, ty: t) =>
+            // BUG-426：LZ 列表字面量必须发 `vec![…]`——Rust 数组 `[…]` 的类型是
+            // `[T; N]`，与 LZ 的 List<T>（Rust `Vec<T>`）不符 ⇒ E0308 expected Vec<T>,
+            // found [T; N]；空列表发 `Vec::new()`（对齐原生）。
+            if xs.len() == 0:
+                "Vec::new()".to_string()
+            else:
+                "vec![".to_string() + expr_cs_list(xs, fn_raises) + "]".to_string()
         case Expr.BlockExpr(stmts: ss, ty: t) => "{\n".to_string() + gen_body(ss, true, "".to_string(), fn_raises) + "}"
         case Expr.GenExpr(yield_of: y, ty: t) => "gen ".to_string() + gen_expr(y, fn_raises)
         case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + ")".to_string()
@@ -896,7 +903,10 @@ def gen_dict_ctor(fs: List<(str, Expr)>) -> String =
             if i + 2 < fs.len():
                 pairs = pairs + ", ".to_string()
             i = i + 2
-        "[".to_string() + pairs + "].into_iter().collect()".to_string()
+        // BUG-427：字典字面量必须有**具体类型**——`[…].into_iter().collect()` 缺目标
+        // 类型 ⇒ E0282 type annotations needed（后续 `d.keys()` 处报出）。对齐原生
+        // `std::collections::BTreeMap::from([...])`。
+        "std::collections::BTreeMap::from([".to_string() + pairs + "])".to_string()
 
 // BUG-405：类型名上的方法调用须用路径分隔符（`Color::Blue` / `Option::None`），
 // 值接收者才用 `.`（`x.clone()`）。原生按 is_known_type_or_enum 判定，LZ 侧无类型
@@ -920,26 +930,93 @@ def method_call_sep(r: Expr) -> String =
 //      `.to_string()`（对齐原生 `s.trim().to_string()`）
 // 未覆盖（另立条目）：集合迭代适配（map/filter/fold/keys/values/join/sorted…）
 // 需要 `.into_iter()/.collect()` 形态改写，属同一张表的另一半。
-def gen_method_call(r: Expr, m: str, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> String =
-    let name = lz_method_rename(m, r)
-    let args_s = if is_pattern_method(m, r):
-        pattern_args_list(a, fn_raises)
+def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeIrType) -> String =
+    let recv0 = gen_expr(r, fn_raises)
+    if m == "filter" and a.len() == 1:
+        "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
+    elif m == "map" and a.len() == 1:
+        "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
+    elif m == "fold" and a.len() == 2:
+        "(".to_string() + recv0 + ".clone()).into_iter().fold(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+    elif m == "join" and a.len() == 1:
+        "(".to_string() + recv0 + ").iter().map(|x| x.to_string()).collect::<Vec<_>>().join(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")".to_string()
+    elif m == "keys" and a.len() == 0:
+        recv0 + ".keys().cloned().collect::<Vec<_>>()".to_string()
+    elif m == "values" and a.len() == 0:
+        recv0 + ".values().cloned().collect::<Vec<_>>()".to_string()
+    elif m == "get" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
+        "(".to_string() + recv0 + ".get(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")).cloned()".to_string()
     else:
-        expr_cs_list(a, fn_raises)
-    let call = gen_expr(r, fn_raises) + method_call_sep(r) + name + "(".to_string() + args_s + ")".to_string()
-    if is_str_returning_method(m):
-        call + ".to_string()".to_string()
-    elif m == "split" and is_list_irtype(t):
-        // LZ `s.split(sep)` 返回 List<str>，而 Rust 的 split 返回迭代器 ⇒ 物化
-        //（对齐原生 `…split(",").map(|s| s.to_string()).collect::<Vec<_>>()`）。
-        call + ".map(|s| s.to_string()).collect::<Vec<_>>()".to_string()
-    else:
-        call
+        let recv0 = gen_expr(r, fn_raises)
+        if m == "map" and a.len() == 1:
+            "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
+        elif m == "fold" and a.len() == 2:
+            "(".to_string() + recv0 + ".clone()).into_iter().fold(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+        elif m == "join" and a.len() == 1:
+            "(".to_string() + recv0 + ").iter().map(|x| x.to_string()).collect::<Vec<_>>().join(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")".to_string()
+        else:
+            let recv0 = gen_expr(r, fn_raises)
+            if m == "map" and a.len() == 1:
+                "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
+            elif m == "fold" and a.len() == 2:
+                "(".to_string() + recv0 + ".clone()).into_iter().fold(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+            else:
+                let recv0 = gen_expr(r, fn_raises)
+                if m == "map" and a.len() == 1:
+                    "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
+                else:
+                    let name = lz_method_rename(m, r)
+                    let args_s = if is_pattern_method(m, r):
+                        pattern_args_list(a, fn_raises)
+                    else:
+                        expr_cs_list(a, fn_raises)
+                    let call = gen_expr(r, fn_raises) + method_call_sep(r) + name + "(".to_string() + args_s + ")".to_string()
+                    if is_str_returning_method(m):
+                        call + ".to_string()".to_string()
+                    elif m == "split" and is_list_irtype(t):
+                        // LZ `s.split(sep)` 返回 List<str>，而 Rust 的 split 返回迭代器 ⇒ 物化
+                        //（对齐原生 `…split(",").map(|s| s.to_string()).collect::<Vec<_>>()`）。
+                        call + ".map(|s| s.to_string()).collect::<Vec<_>>()".to_string()
+                    else:
+                        call
 
 def is_list_irtype(t: IrType) -> bool =
     match t:
         case IrType.Named(path: p, args: a) => p == "List" || p == "Vec"
         case _ => false
+
+def elem_irtype(r: Expr) -> IrType =
+    match expr_ty(r):
+        case IrType.Named(path: p, args: ar) =>
+            if ar.len() > 0:
+                ar[0].clone()
+            else:
+                IrType.Any
+        case _ => IrType.Any
+
+def is_copy_elem(t: IrType) -> bool =
+    match t:
+        case IrType.Int => true
+        case IrType.F64 => true
+        case IrType.Bool => true
+        case _ => false
+
+def amp_join(ps: List<str>) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..ps.len():
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + "&".to_string() + ps[idx].clone()
+    out
+
+def filter_lambda_src(e: Expr, elem: IrType, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.Lambda(params: ps, body: b, ty: t) =>
+            if is_copy_elem(elem):
+                "move |".to_string() + amp_join(ps) + "| ".to_string() + gen_expr(b, fn_raises)
+            else:
+                gen_expr(e, fn_raises)
+        case _ => gen_expr(e, fn_raises)
 
 def lz_method_rename(m: str, r: Expr) -> String =
     if m == "length":
@@ -1002,6 +1079,10 @@ def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
                 "(".to_string() + expr_cs_list(a, fn_raises) + ".len() as i64)".to_string()
             elif n == "set!":
                 "[".to_string() + expr_cs_list(a, fn_raises) + "].into_iter().collect()".to_string()
+            elif n == "sorted" and a.len() == 1:
+                "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.sort(); _tmp }".to_string()
+            elif n == "reversed" and a.len() == 1:
+                "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.reverse(); _tmp }".to_string()
             else:
                 n.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case _ => gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
