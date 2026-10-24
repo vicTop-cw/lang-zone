@@ -932,7 +932,11 @@ def method_call_sep(r: Expr) -> String =
 // 需要 `.into_iter()/.collect()` 形态改写，属同一张表的另一半。
 def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeIrType) -> String =
     let recv0 = gen_expr(r, fn_raises)
-    if m == "filter" and a.len() == 1:
+    // BUG-428：LZ 的 `.len()` 返回 int（i64），Rust 的 `len()` 是 usize ⇒ 必须补 `as i64`，
+    // 否则与 i64 比较/赋值处 E0308（`k.len() > 1i64`；与自由函数 len(x) 同口径）。
+    if (m == "len") || (m == "length"):
+        "(".to_string() + recv0 + ".len() as i64)".to_string()
+    elif m == "filter" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "map" and a.len() == 1:
         "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
@@ -1070,6 +1074,64 @@ def starts_upper(s: str) -> bool =
     let c = s[0..1]
     (c == "A") || (c == "B") || (c == "C") || (c == "D") || (c == "E") || (c == "F") || (c == "G") || (c == "H") || (c == "I") || (c == "J") || (c == "K") || (c == "L") || (c == "M") || (c == "N") || (c == "O") || (c == "P") || (c == "Q") || (c == "R") || (c == "S") || (c == "T") || (c == "U") || (c == "V") || (c == "W") || (c == "X") || (c == "Y") || (c == "Z")
 
+// BUG-427：推导宏展开。原生 codegen 在 Rust 侧展开 comp!/dict_comp!/set_comp! 及其多 for
+// 链（comp_outer!/comp_mid!/comp_leaf!，dict_/set_ 前缀同族）；LZ 版 codegen 此前不认这些
+// 名字、原样透传 ⇒ rustc `cannot find macro comp`（i7_dict_comp_iter 实测）。
+// 形态对齐原生：单 for 用 map、多 for 链 outer/mid=flat_map、leaf=map，
+// 仅最外层（单 for 或 *_outer!）collect；带条件时先 filter。
+def comp_macro_kind(n: str) -> str =
+    if (n == "comp!") || (n == "comp_outer!") || (n == "comp_mid!") || (n == "comp_leaf!"):
+        "vec".to_string()
+    elif (n == "dict_comp!") || (n == "dict_comp_outer!") || (n == "dict_comp_mid!") || (n == "dict_comp_leaf!"):
+        "dict".to_string()
+    elif (n == "set_comp!") || (n == "set_comp_outer!") || (n == "set_comp_mid!") || (n == "set_comp_leaf!"):
+        "set".to_string()
+    else:
+        "none".to_string()
+
+def is_comp_macro(n: str) -> bool = comp_macro_kind(n) != "none"
+
+def is_comp_chain_node(n: str) -> bool =
+    (n == "comp_outer!") || (n == "comp_mid!") || (n == "comp_leaf!") || (n == "dict_comp_outer!") || (n == "dict_comp_mid!") || (n == "dict_comp_leaf!") || (n == "set_comp_outer!") || (n == "set_comp_mid!") || (n == "set_comp_leaf!")
+
+def comp_collect_ty_of(n: str) -> String =
+    let k = comp_macro_kind(n)
+    if k == "dict":
+        "std::collections::HashMap<_,_>".to_string()
+    elif k == "set":
+        "std::collections::HashSet<_>".to_string()
+    else:
+        "Vec<_>".to_string()
+
+def gen_comp_macro(n: str, a: List<Expr>, fn_raises: MaybeIrType) -> String =
+    if a.len() < 2:
+        "vec![]".to_string()
+    else:
+        let lambda_s = gen_expr(a[0].clone(), fn_raises)
+        let iter_e = a[1].clone()
+        let iter_s = gen_expr(iter_e.clone(), fn_raises)
+        let iter_m = if is_string_irtype(expr_ty(iter_e.clone())):
+            ".chars()".to_string()
+        else:
+            ".into_iter()".to_string()
+        let is_leaf = (n == "comp_leaf!") || (n == "dict_comp_leaf!") || (n == "set_comp_leaf!")
+        let is_single = (n == "comp!") || (n == "dict_comp!") || (n == "set_comp!")
+        let op = if is_leaf || is_single:
+            "map".to_string()
+        else:
+            "flat_map".to_string()
+        let mut base = "(".to_string() + iter_s + ")" + iter_m
+        if a.len() >= 3:
+            base = base + ".filter(".to_string() + filter_lambda_src(a[2].clone(), elem_irtype(iter_e.clone()), fn_raises) + ")".to_string()
+        base = base + ".".to_string() + op + "(".to_string() + lambda_s + ")".to_string()
+        // 仅 mid/leaf 是链内节点（不 collect）；单 for 与 *_outer! 都要 collect
+        //（对齐原生 expr_gen.rs：`if suffix == "outer!" { chain.collect() }`）。
+        let is_mid_or_leaf = (n == "comp_mid!") || (n == "comp_leaf!") || (n == "dict_comp_mid!") || (n == "dict_comp_leaf!") || (n == "set_comp_mid!") || (n == "set_comp_leaf!")
+        if is_mid_or_leaf:
+            base
+        else:
+            base + ".collect::<".to_string() + comp_collect_ty_of(n) + ">()".to_string()
+
 def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
     match c:
         case Expr.Var(name: n, ty: t) =>
@@ -1083,6 +1145,8 @@ def gen_call(c: Expr, a: List<Expr>, fn_raises: MaybeIrType) -> String =
                 "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.sort(); _tmp }".to_string()
             elif n == "reversed" and a.len() == 1:
                 "{ let mut _tmp = ".to_string() + gen_expr(a[0].clone(), fn_raises) + ".clone(); _tmp.reverse(); _tmp }".to_string()
+            elif is_comp_macro(n):
+                gen_comp_macro(n, a, fn_raises)
             else:
                 n.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
         case _ => gen_expr(c, fn_raises) + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
