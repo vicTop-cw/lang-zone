@@ -1817,16 +1817,67 @@ def block_is_pass_only(b: BlockIR) -> bool =
                 false
 
 def gen_let(n: str, t: IrType, v: Expr, m: bool, r: bool, auto_mut: String, fn_raises: MaybeIrType) -> String =
-    let mut_kw = ("mut " if (m || str_contains(auto_mut, n)) else "").to_string()
-    let ref_kw = ("ref " if r else "").to_string()
-    let ty_s = rust_type(t)
-    // 空容器强制类型标注（对齐原生 force_ty：空 ListLit / 空 Dict 构造 且 ty 为 Dict/Set）
-    let empty_c = is_empty_container(v)
-    let force = empty_c && is_dict_or_set_ty(t)
-    if skip_ty_ann(t) && !force:
-        "let ".to_string() + mut_kw + ref_kw + n.to_string() + " = ".to_string() + gen_expr(v, fn_raises) + ";".to_string()
+    if expr_has_var(v, n):
+        // BUG-454：LZ 的 `i = i + 1` 在嵌套块（while/for 体、match 分支）内被解析为
+        // `Stmt.Let(is_mut=true)`，其 value 引用自身名字 —— LZ 语义为重绑定（Python 风格）。
+        // 若照直发射 `let mut i = i + 1;` 会落成 Rust shadow-let，循环体内不累积外层变量
+        // ⇒ 外层 i 恒为初值，`while i < 5 { i = i + 1 }` 无限循环挂死（g33_while RSLZ 超时）。
+        // 原生 codegen 以 `declared.contains(name) && (is_mut || 自引用 || 循环内)` 判定改为
+        // 赋值（stmt_gen.rs:653-737）；rs-lz 无作用域表，用等价判据「value 提到自身名字」
+        // 覆盖：合法程序里 value 能引用 n，则 n 必已在作用域（自引用/循环重绑定两态都命中）。
+        gen_rebind_assign(n, t, v, fn_raises)
     else:
-        "let ".to_string() + mut_kw + ref_kw + n.to_string() + ": ".to_string() + ty_s + " = ".to_string() + gen_expr(v, fn_raises) + ";".to_string()
+        let mut_kw = ("mut " if (m || str_contains(auto_mut, n)) else "").to_string()
+        let ref_kw = ("ref " if r else "").to_string()
+        let ty_s = rust_type(t)
+        // 空容器强制类型标注（对齐原生 force_ty：空 ListLit / 空 Dict 构造 且 ty 为 Dict/Set）
+        let empty_c = is_empty_container(v)
+        let force = empty_c && is_dict_or_set_ty(t)
+        if skip_ty_ann(t) && !force:
+            "let ".to_string() + mut_kw + ref_kw + n.to_string() + " = ".to_string() + gen_expr(v, fn_raises) + ";".to_string()
+        else:
+            "let ".to_string() + mut_kw + ref_kw + n.to_string() + ": ".to_string() + ty_s + " = ".to_string() + gen_expr(v, fn_raises) + ";".to_string()
+
+// BUG-454：重绑定赋值的纯语法收敛 —— `a = a op b`（标量 Int/F64/Bool，lhs 是变量 a 自身）
+// → `a op= b`，对齐原生 stmt_gen.rs:685-714 与手写 Rust 惯用形态。非标量类型（String/
+// BigInt 等无 AddAssign）或不符 lhs 形态则回退 `a = rhs`。
+def gen_rebind_assign(n: str, t: IrType, v: Expr, fn_raises: MaybeIrType) -> String =
+    match v:
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: tt) =>
+            match l:
+                case Expr.Var(name: ln, ty: lt) =>
+                    if (ln == n) && is_scalar_ty(t):
+                        let op_s = binop_compound_symbol(o)
+                        if op_s != "":
+                            n + " " + op_s + "= " + gen_expr(r, fn_raises) + ";"
+                        else:
+                            n + " = " + gen_expr(v, fn_raises) + ";"
+                    else:
+                        n + " = " + gen_expr(v, fn_raises) + ";"
+                case _ => n + " = " + gen_expr(v, fn_raises) + ";"
+        case _ => n + " = " + gen_expr(v, fn_raises) + ";"
+
+// BinOp 运算符 → 复合赋值符（+= -= *= /= %= &= |= ^= <<= >>=）；不支持者返回 ""
+def binop_compound_symbol(op: str) -> String =
+    if op == "+": "+"
+    elif op == "-": "-"
+    elif op == "*": "*"
+    elif op == "/": "/"
+    elif op == "%": "%"
+    elif op == "&": "&"
+    elif op == "|": "|"
+    elif op == "^": "^"
+    elif op == "<<": "<<"
+    elif op == ">>": ">>"
+    else: ""
+
+// 原生 stmt_gen.rs 只对 Int/F64/Bool 做复合回写（String/BigInt 无 AddAssign ⇒ E0308）
+def is_scalar_ty(t: IrType) -> bool =
+    match t:
+        case IrType.Int => true
+        case IrType.F64 => true
+        case IrType.Bool => true
+        case _ => false
 
 def is_empty_container(v: Expr) -> bool =
     match v:
