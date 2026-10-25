@@ -50,6 +50,8 @@ enum Token:
     LBracket
     RBracket
     Newline
+    Indent
+    Dedent
     Eof
 
 // ── 关键字 → Token（查表，返回 (是否为关键字, Token)）──
@@ -211,17 +213,47 @@ def str_to_int(s: str) -> int =
     v
 
 // ── tokenize：简化词法分析（对齐 lexer.rs 核心逻辑）──
+// 缩进处理对齐 src/lexer/indent.rs：行首前导空格列数 vs 缩进栈顶，
+// 增 → Indent 入栈，减 → 逐层 Dedent 出栈；空行/纯空白行不产生缩进 token。
+// 此前 lz_lexer 缺 Indent/Dedent，导致黄金测试 `lz_lexer_matches_native_golden`
+// 断言"匹配原生"而黄金串本身就没有这俩 token（原生对 `def f(x):` 实际发
+// Indent(7)/Dedent(13)）—— 假基准，本修复同时校正测试。
 def tokenize(src: str) -> List<Token> =
     let mut tokens: List<Token> = []
     let mut i = 0
+    let mut at_line_start = true
+    let mut indent_stack: List<int> = [0]
     while i < str_len(src):
         let c = char_at(src, i)
+        // 行首：先吃前导空格，再与缩进栈比较
+        if at_line_start:
+            let mut col = 0
+            let mut j = i
+            while j < str_len(src) && char_at(src, j) == " ":
+                col = col + 1
+                j = j + 1
+            if j >= str_len(src) || char_at(src, j) == "\n":
+                // 空行 / 纯空白行 / 尾随空白：不产生缩进 token，直接交后续处理
+                i = j
+                at_line_start = false
+            else:
+                let top = indent_stack[indent_stack.len() - 1]
+                if col > top:
+                    indent_stack = indent_stack + [col]
+                    tokens = tokens + [Token.Indent]
+                elif col < top:
+                    while indent_stack.len() > 1 && indent_stack[indent_stack.len() - 1] > col:
+                        indent_stack = indent_stack[0..(indent_stack.len() - 1)]
+                        tokens = tokens + [Token.Dedent]
+                i = j
+                at_line_start = false
         // 空白跳过
-        if c == " " || c == "\t":
+        elif c == " " || c == "\t":
             i = i + 1
         elif c == "\n":
             tokens = tokens + [Token.Newline]
             i = i + 1
+            at_line_start = true
         // 字符串字面量 "..." → StrLit
         elif c == "\"":
             let r = scan_string(src, i)
@@ -253,6 +285,10 @@ def tokenize(src: str) -> List<Token> =
             let pr = r.0
             if pr.0:
                 tokens = tokens + [pr.1]
+    // 收尾：弹出所有未闭合缩进（对应原生 Eof 前的 Dedent 序列）
+    while indent_stack.len() > 1:
+        indent_stack = indent_stack[0..(indent_stack.len() - 1)]
+        tokens = tokens + [Token.Dedent]
     tokens = tokens + [Token.Eof]
     tokens
 
@@ -303,6 +339,8 @@ def display_token(t: Token) -> str =
         case Token.LBracket => "LBracket"
         case Token.RBracket => "RBracket"
         case Token.Newline => "Newline"
+        case Token.Indent => "Indent"
+        case Token.Dedent => "Dedent"
         case Token.Eof => "Eof"
 
 // ── main：tokenize 一段示例源码并输出（覆盖字符串/运算符/magic method）──

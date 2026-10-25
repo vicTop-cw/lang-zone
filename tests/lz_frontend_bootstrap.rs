@@ -46,8 +46,8 @@ fn lz_lexer_matches_native_golden() {
         .filter(|l| !l.is_empty() && !l.starts_with("Generated"))
         .collect();
     let expected = vec![
-        "Def", "Ident(f)", "LParen", "Ident(x)", "RParen", "Colon", "Newline",
-        "Return", "Ident(x)", "Plus", "IntLit(1)", "Newline", "Eof",
+        "Def", "Ident(f)", "LParen", "Ident(x)", "RParen", "Colon", "Newline", "Indent",
+        "Return", "Ident(x)", "Plus", "IntLit(1)", "Newline", "Dedent", "Eof",
     ];
     assert_eq!(
         got, expected,
@@ -78,10 +78,10 @@ fn emit_lex_lz_let_and_eq() {
         .map(|l| l.trim().trim_matches('"'))
         .filter(|l| !l.is_empty() && !l.starts_with("Generated"))
         .collect();
-    // 期望前缀子序列（def main() = 后的 let x = 1）
+    // 期望前缀子序列（def main() = 后接缩进块的 let x = 1）
     let needle = vec![
-        "Def", "Ident(main)", "LParen", "RParen", "Eq", "Newline", "Let", "Ident(x)", "Eq",
-        "IntLit(1)",
+        "Def", "Ident(main)", "LParen", "RParen", "Eq", "Newline", "Indent", "Let", "Ident(x)",
+        "Eq", "IntLit(1)",
     ];
     assert!(
         got.windows(needle.len()).any(|w| w == needle.as_slice()),
@@ -105,6 +105,31 @@ fn emit_parse_lz_eq_form_def() {
         "parse-lz 未解析 `=` 式 def 的函数体（BUG-463 回归?）: {}",
         stdout
     );
+}
+
+/// A5：BUG-464 修复回归 —— 此前 lz_lexer 完全不发 Indent/Dedent，导致
+/// ① 无法分词任何多行缩进块；② 黄金测试 `lz_lexer_matches_native_golden`
+/// 是假基准：原生对 `def f(x):` 实际发 Indent/Dedent，黄金串却没有，测试
+/// 却断言"匹配原生"。本测试锁定多级缩进的 Indent/Dedent 序列与原生对齐。
+#[test]
+fn emit_lex_lz_multi_level_indent() {
+    let src = "def a():\n    if b:\n        return c\n    return d\n";
+    let stdout = run_flag("lz_lex_nest", "nest", src, "--emit=lex-lz");
+    let got: Vec<&str> = stdout
+        .lines()
+        .map(|l| l.trim().trim_matches('"'))
+        .filter(|l| !l.is_empty() && !l.starts_with("Generated"))
+        .collect();
+    // 期望：两层缩进（4、8 列）+ 回退到 4 列的一级 Dedent + Eof 前收尾 Dedent = 2 个
+    let indent_count = got.iter().filter(|t| **t == "Indent").count();
+    let dedent_count = got.iter().filter(|t| **t == "Dedent").count();
+    assert_eq!(indent_count, 2, "嵌套缩进应发 2 个 Indent: {:?}", got);
+    assert_eq!(
+        dedent_count, 2,
+        "应发 2 个 Dedent（回退一级+Eof 前收尾）: {:?}",
+        got
+    );
+    assert_eq!(got.last(), Some(&"Eof"), "流应以 Eof 结尾: {:?}", got);
 }
 
 const SAMPLE_BASIC_GOLDEN: &str = "def f(x) {return x + 1}";
