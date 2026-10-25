@@ -707,7 +707,10 @@ def parse_stmt(toks: List<Token>, pos: int, indent: int) -> (str, int) =
             sig = sig + rf.0
             ap = rf.1
             let colon_t = tok_at(toks, ap)
-            let npos = (ap + 1) if colon_t == Token.Colon else ap
+            // 分隔符：冒号式 `def f():` 或等号式 `def f() =` 都要跳过；
+            // 此前只跳 Colon，导致 `def main() =\n    body` 的 `=` 卡住
+            // parse_block（block_tag(`=`)==0 → 空块），函数体被整块吞掉。
+            let npos = (ap + 1) if colon_t == Token.Colon || colon_t == Token.Eq else ap
             let blk = parse_block(toks, npos, indent)
             let body = blk.0
             let blk_end = blk.1

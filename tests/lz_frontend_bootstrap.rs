@@ -92,6 +92,21 @@ fn emit_lex_lz_let_and_eq() {
     assert!(got.contains(&"Let"), "lex-lz 丢了 Let 关键字: {:?}", got);
 }
 
+/// A4：BUG-463 修复回归 —— parse-lz 的 parse_stmt Def 分支此前只跳 `Colon`，
+/// `def main() =` 的 `=` 卡住 parse_block（block_tag(`=`)==0 → 空块），
+/// 函数体整块被吞成 `def main() {}`。本测试锁定 `=` 式定义能解析出函数体。
+#[test]
+fn emit_parse_lz_eq_form_def() {
+    let src = "def main() =\n    let x = 1\n    print(x)\n";
+    let stdout = run_flag("lz_parse_eqdef", "eqdef", src, "--emit=parse-lz");
+    // 函数体不再被吞：须出现 let 绑定与 print 调用
+    assert!(
+        stdout.contains("def main()") && stdout.contains("let x = 1"),
+        "parse-lz 未解析 `=` 式 def 的函数体（BUG-463 回归?）: {}",
+        stdout
+    );
+}
+
 const SAMPLE_BASIC_GOLDEN: &str = "def f(x) {return x + 1}";
 
 /// B1/B2：LZ 版 parser 行为对齐 + 主流程入口
