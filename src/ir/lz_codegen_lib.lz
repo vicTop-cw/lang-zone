@@ -1036,15 +1036,19 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
     // 否则与 i64 比较/赋值处 E0308（`k.len() > 1i64`；与自由函数 len(x) 同口径）。
     if (m == "len") || (m == "length"):
         "(".to_string() + recv0 + ".len() as i64)".to_string()
-    elif m == "sum" and a.len() == 0:
+    elif m == "sum" and a.len() == 0 and is_list_irtype(expr_ty(r)):
         // BUG-435：`.sum()` 方法在 Vec/List 上不存在（原生 codegen 渲染
         // `(a).iter().copied().sum::<i64>()`，rs-lz 此前落进通用方法分支直接发
         // `a.sum()` → E0599 no method named `sum` found for struct `Vec<i64>`）。
         // 与自由函数 `sum(x)`（BUG-430）同口径，此处补方法形态以对齐原生逐字符。
+        // BUG-455：**仅当接收者是 List/Vec** 才走集合归约；自定义 struct 上的同名
+        // `sum` 方法（如 Point::sum）不得被集合 sum 劫持（此前 `p.sum()` 被渲染成
+        // `(p).iter().copied().sum::<i64>()` → E0599 iter 不存在）。原生在
+        // expr_gen.rs:4886-4911 对非 list 接收者回退到 `({recv}).{method}()`。
         "(".to_string() + recv0 + ").iter().copied().sum::<i64>()".to_string()
-    elif m == "min" and a.len() == 0:
+    elif m == "min" and a.len() == 0 and is_list_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ").iter().min().cloned()".to_string()
-    elif m == "max" and a.len() == 0:
+    elif m == "max" and a.len() == 0 and is_list_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ").iter().max().cloned()".to_string()
     elif m == "map" and a.len() == 1 and is_optres_irtype(expr_ty(r)):
         // BUG-439：`.map()` 在 Option/Result 接收者上是 Option::map/Result::map（直接
@@ -1104,17 +1108,20 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // 直发 `s.remove(2i64)` → E0308 expected `&i64`, found `i64`；原生渲染
         // `s.remove(&2i64)`（与 BUG-449 的 Set.contains 同族）。
         "(".to_string() + recv0 + ").remove(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
-    elif m == "filter" and a.len() == 1:
+    elif m == "filter" and a.len() == 1 and is_list_irtype(expr_ty(r)):
+        // BUG-455：集合迭代家族（filter/map/fold/join）只在 List/Vec 接收者上生效，
+        // 自定义 struct 上的同名方法不得被劫持（与 sum/min/max 同族，原生 expr_gen.rs
+        // 对非 list 接收者一律回退到 `({recv}).{method}(...)` 普通方法调用）。
         "(".to_string() + recv0 + ").iter().cloned().filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
-    elif m == "map" and a.len() == 1:
+    elif m == "map" and a.len() == 1 and is_list_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
-    elif m == "fold" and a.len() == 2:
+    elif m == "fold" and a.len() == 2 and is_list_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ".clone()).into_iter().fold(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
-    elif m == "join" and a.len() == 1:
+    elif m == "join" and a.len() == 1 and is_list_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ").iter().map(|x| x.to_string()).collect::<Vec<_>>().join(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")".to_string()
-    elif m == "keys" and a.len() == 0:
+    elif m == "keys" and a.len() == 0 and is_dict_irtype(expr_ty(r)):
         recv0 + ".keys().cloned().collect::<Vec<_>>()".to_string()
-    elif m == "values" and a.len() == 0:
+    elif m == "values" and a.len() == 0 and is_dict_irtype(expr_ty(r)):
         recv0 + ".values().cloned().collect::<Vec<_>>()".to_string()
     elif m == "get" and a.len() == 1 and is_dict_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ".get(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")).cloned()".to_string()
@@ -1128,42 +1135,24 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // （`s.contains(1i64)` → E0308 expected `&i64`, found `i64`）。
         "(".to_string() + recv0 + ").contains(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
     else:
-        let recv0 = gen_expr(r, fn_raises)
-        if m == "map" and a.len() == 1:
-            "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
-        elif m == "fold" and a.len() == 2:
-            "(".to_string() + recv0 + ".clone()).into_iter().fold(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
-        elif m == "join" and a.len() == 1:
-            "(".to_string() + recv0 + ").iter().map(|x| x.to_string()).collect::<Vec<_>>().join(".to_string() + pattern_arg_of(a[0].clone(), fn_raises) + ")".to_string()
+        let name = lz_method_rename(m, r)
+        let args_s = if is_pattern_method(m, r):
+            pattern_args_list(a, fn_raises)
         else:
-            let recv0 = gen_expr(r, fn_raises)
-            if m == "map" and a.len() == 1:
-                "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
-            elif m == "fold" and a.len() == 2:
-                "(".to_string() + recv0 + ".clone()).into_iter().fold(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
-            else:
-                let recv0 = gen_expr(r, fn_raises)
-                if m == "map" and a.len() == 1:
-                    "(".to_string() + recv0 + ").iter().cloned().map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
-                else:
-                    let name = lz_method_rename(m, r)
-                    let args_s = if is_pattern_method(m, r):
-                        pattern_args_list(a, fn_raises)
-                    else:
-                        expr_cs_list(a, fn_raises)
-                    let call = gen_expr(r, fn_raises) + method_call_sep(r) + name + "(".to_string() + args_s + ")".to_string()
-                    if (m == "find" or m == "rfind") and is_string_irtype(expr_ty(r)):
-                        // BUG-453：LZ `s.find(..)` 语义为「找不到返回 -1」，原生 codegen 在
-                        // `lz_find(..)`（Option<i64>）后接 `.unwrap_or(-1i64)` 物化为 i64。
-                        call + ".unwrap_or(-1i64)".to_string()
-                    elif is_str_returning_method(m):
-                        call + ".to_string()".to_string()
-                    elif m == "split" and is_list_irtype(t):
-                        // LZ `s.split(sep)` 返回 List<str>，而 Rust 的 split 返回迭代器 ⇒ 物化
-                        //（对齐原生 `…split(",").map(|s| s.to_string()).collect::<Vec<_>>()`）。
-                        call + ".map(|s| s.to_string()).collect::<Vec<_>>()".to_string()
-                    else:
-                        call
+            expr_cs_list(a, fn_raises)
+        let call = gen_expr(r, fn_raises) + method_call_sep(r) + name + "(".to_string() + args_s + ")".to_string()
+        if (m == "find" or m == "rfind") and is_string_irtype(expr_ty(r)):
+            // BUG-453：LZ `s.find(..)` 语义为「找不到返回 -1」，原生 codegen 在
+            // `lz_find(..)`（Option<i64>）后接 `.unwrap_or(-1i64)` 物化为 i64。
+            call + ".unwrap_or(-1i64)".to_string()
+        elif is_str_returning_method(m):
+            call + ".to_string()".to_string()
+        elif m == "split" and is_list_irtype(t):
+            // LZ `s.split(sep)` 返回 List<str>，而 Rust 的 split 返回迭代器 ⇒ 物化
+            //（对齐原生 `…split(",").map(|s| s.to_string()).collect::<Vec<_>>()`）。
+            call + ".map(|s| s.to_string()).collect::<Vec<_>>()".to_string()
+        else:
+            call
 
 def is_list_irtype(t: IrType) -> bool =
     match t:
