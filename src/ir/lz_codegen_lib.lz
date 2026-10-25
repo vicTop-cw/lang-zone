@@ -1705,8 +1705,14 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
         case Stmt.Assign(target: tg, value: v) =>
             match tg:
                 case Expr.IndexGet(base: b, key: k, ty: t) =>
-                    if base_is_dict(b):
-                        gen_expr(b, MaybeIrType.NoTy) + ".insert(".to_string() + gen_expr(k, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ");".to_string()
+                    // BUG-461：dict 下标赋值的判定用类型判据而非 base_is_dict（后者只认
+                    // Expr.Var，`self.d[k] = v` 的 base 是 FieldAccess → 判定失败，落到非
+                    // dict 分支把 `.get().unwrap()` 当写目标 → E0070）。base 走 gen_recv_place
+                    // 免 `.clone()`：对齐原生顶层 dict 赋值的正确形态 `d.insert(k, v)`
+                    // （原生对 `self.d` 套 clone → 插到临时 dict → 数据丢失运行 panic，
+                    // 见 ledger 原生 bug 条目，rs-lz 不复刻该缺陷）。
+                    if is_dict_irtype(expr_ty(b)):
+                        gen_recv_place(b, MaybeIrType.NoTy) + ".insert(".to_string() + gen_expr(k, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ");".to_string()
                     else:
                         // BUG-460：`self.items[0] = x` 的下标赋值 target 按 place 发射
                         // （gen_recv_place 已对 IndexGet 递归 base），否则 `self.items.clone()[0]=x`
