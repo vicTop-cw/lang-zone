@@ -1040,8 +1040,10 @@ fn compile_main(args: Vec<String>) -> i32 {
         }
     }
 
-    // 默认 codegen 路径: AST → LZIR → Rust（IR 路线；原 AST 直接 codegen 与
-    // 自举路线 B 的 rs-lz/ir-lz/lex-lz/parse-lz 均已移除，仅保留此单一 IR 路线）
+    // 默认 codegen 路径: AST → LZIR → Rust（IR 路线；原 AST→Rust 直接 codegen
+// 的 src/codegen/ 已移除，仅保留此单一 IR 管线。注意：自举路线 B 的
+// rs-lz/ir-lz/lex-lz/parse-lz 并未移除 —— 它们仍在本文件上方 ~899-903 行
+// 经 --emit=*-lz 分发处理，属实验性后备，不参与默认 IR 管线）
     match build_ir_opt(&module, lzi_registry.as_ref()) {
         Ok(ir_module) => {
             if backend_cython {

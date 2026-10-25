@@ -2,9 +2,11 @@
 
 LZ 是一门面向系统编程的静态类型语言：默认可变绑定、结构类型（duck typing）、魔法方法驱动的运算符重载、一等构建块语法、编译期宏与 comptime。本仓库是 LZ 编译器 `lzc`（LZ → Rust）与 `lzcyc`（LZ → Cython/Python）的实现。
 
-> **路线决策（2026-07-31，2026-09-05 落实）**：全力走 **IR 中间表示** 路线。代码生成统一以 LZIR 为中间层（AST → LZIR → 目标语言），**不再使用 AST → Rust 直接 codegen 路线**；旧 `src/codegen/` 等路线 B 代码已于 2026-09-05 彻底移除，编译器仅剩唯一 IR 路线。
+> **路线决策（2026-07-31，2026-09-05 落实）**：全力走 **IR 中间表示** 路线。代码生成统一以 LZIR 为中间层（AST → LZIR → 目标语言），**不再使用 AST → Rust 直接 codegen 路线**；旧 `src/codegen/`（AST→Rust 直接 codegen）已于 2026-09-05 移除，编译器主管线仅剩 IR 路线。注：路线 B 中**自举类** `.lz` 实现（lex-lz/parse-lz/ir-lz/rs-lz）**未随 `src/codegen/` 移除**，仍编译进 `lzc` 并经 `--emit=*-lz` 可达，详见下方"当前状态"。
 
-> **当前状态（2026-09-23 更新）**：路线 B 自举/替代线路（含 `src/codegen/` 的 AST→Rust 直接 codegen、`src/frontend/` 的 lex-lz/parse-lz、`src/ir/lz_codegen*` 等）已**彻底移除**。编译器默认管线**仅有唯一一条 IR 路线**：`AST → LZIR → Rust`（及 Cython 后端）。旧路线源码已备份至仓库外 `E:\IDEProjects\AI\_backup_langzone_routeB_20260905`，不再参与维护。自 2026-09-05 起，magic 运算符重载系统全链路（`__contains__`/`__iadd__`/`__from__`/`__into__`/`__cast__` 等自动生成 trait impl）、装饰器系统（`@derive`/`@lazy`/`@case`/`@memoize`/`@parallel`/`@init`）、`lzcyc` CLI（transpile/compile/run）、raises 全链路 codegen（`fn_raises` 透传）已陆续落地。
+> **当前状态（2026-10-25 校订）**：编译器默认管线**仅有唯一一条 IR 路线**：`AST → LZIR → Rust`（及 Cython 后端）。路线 B 中 `src/codegen/` 的 AST→Rust 直接 codegen 已于 2026-09-05 移除；但自举/替代线路的 **LZ 实现源码仍在仓内并编译进 `lzc`**：`src/frontend/lz_lexer.lz`（`--emit=lex-lz`）、`src/frontend/lz_parser.lz`（`--emit=parse-lz`）、`src/ir/lz_codegen.rs` + `src/ir/lz_codegen_lib.lz`（`--emit=ir-lz`、`--emit=rs-lz`）。这四条属**实验性自举后备，不参与默认 IR 管线**，默认管线仍只有 IR 一条。自 2026-09-05 起，magic 运算符重载系统全链路（`__contains__`/`__iadd__`/`__from__`/`__into__`/`__cast__` 等自动生成 trait impl）、装饰器系统（`@derive`/`@lazy`/`@case`/`@memoize`/`@parallel`/`@init`）、`lzcyc` CLI（transpile/compile/run）、raises 全链路 codegen（`fn_raises` 透传）已陆续落地。
+>
+> **校订说明（2026-10-25）**：本段 2026-09-23 版曾称上述自举线路（`src/frontend/` 的 lex-lz/parse-lz、`src/ir/lz_codegen*` 等）"已彻底移除"，且旧路线源码"已备份至仓库外 `E:\IDEProjects\AI\_backup_langzone_routeB_20260905`"—— 两处均与仓内实际不符：前者源码仍编译在 `lzc` 内，后者该路径在本机不存在。现更正为如实表述。
 
 ---
 
@@ -55,7 +57,7 @@ LZIR 定义于 `src/ir/node.rs`，由 `src/ir/builder.rs` 的 `build_ir()` 从 A
 
 ## 三、路线迁移：AST → Rust 退役计划（✅ 已完成，2026-09-05）
 
-**目标（已达成）**：`main.rs` 默认编译路径已从「AST 直接 codegen」切换为「AST → LZIR → Rust」（`build_ir` → `IrCodeGen`）；`src/codegen/`、`src/frontend/lz_lexer.*`、`src/frontend/lz_parser.*`、`src/ir/lz_codegen*` 等路线 B 代码已删除，旧 `tests/compile_demos.rs` 已弃用移入 `tests/deprecated/`。当前仅 IR 路线参与维护。
+**目标（已达成）**：`main.rs` 默认编译路径已从「AST 直接 codegen」切换为「AST → LZIR → Rust」（`build_ir` → `IrCodeGen`）；`src/codegen/`（AST→Rust 直接 codegen）已删除，旧 `tests/compile_demos.rs` 已弃用移入 `tests/deprecated/`。当前默认管线仅 IR 路线参与维护。**更正（2026-10-25）**：`src/frontend/lz_lexer.lz`、`src/frontend/lz_parser.lz`、`src/ir/lz_codegen.rs` / `lz_codegen_lib.lz` 等自举类 `.lz` 实现**并未随 `src/codegen/` 删除**，仍编译进 `lzc` 并经 `--emit=lex-lz|parse-lz|ir-lz|rs-lz` 可达，属实验性自举后备、不参与默认 IR 管线。
 
 ### 差距清单（已随路线 B 移除而作废）
 
