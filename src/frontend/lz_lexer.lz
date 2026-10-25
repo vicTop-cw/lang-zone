@@ -9,8 +9,15 @@ enum Token:
     Def
     Struct
     If
+    Elif
     Else
     Return
+    Let
+    Match
+    Case
+    While
+    For
+    In
     IntLit(v: int)
     StrLit(s: str)
     Ident(name: str)
@@ -40,25 +47,37 @@ enum Token:
     RParen
     LBrace
     RBrace
+    LBracket
+    RBracket
     Newline
     Eof
 
-// ── 关键字表（简化）──
-def is_keyword(s: str) -> bool =
-    s == "def" || s == "struct" || s == "if" || s == "else" || s == "return"
-
-// ── 关键字 → Token ──
-def keyword_token(s: str) -> Token =
-    if s == "def":
-        Token.Def
-    elif s == "struct":
-        Token.Struct
-    elif s == "if":
-        Token.If
-    elif s == "else":
-        Token.Else
-    else:
-        Token.Return
+// ── 关键字 → Token（查表，返回 (是否为关键字, Token)）──
+// 补齐常用控制/声明关键字：此前仅 def/struct/if/else/return，缺 let/while/for/
+// match/case/in/elif —— 导致 `let x = 1` 被切成 Ident(let)、`for`/`in` 全落标识符。
+// 现与 lz_parser.lz:104-122 同款查表，规避深层 elif 链（p27 栈溢出）。
+// 注：LZ 不支持 `||` 跨行续写，故不用多行布尔表达式。
+def keyword_token(w: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("def", Token.Def),
+        ("struct", Token.Struct),
+        ("if", Token.If),
+        ("elif", Token.Elif),
+        ("else", Token.Else),
+        ("return", Token.Return),
+        ("let", Token.Let),
+        ("match", Token.Match),
+        ("case", Token.Case),
+        ("while", Token.While),
+        ("for", Token.For),
+        ("in", Token.In),
+    ]
+    let mut result: (bool, Token) = (false, Token.Ident(name: w.clone()))
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == w:
+            result = (true, pair.1)
+    result
 
 // ── 单字符运算符/标点 → (bool, Token)（found, token）——不用 Option<Token>：
 //    LZ 对 `None` 赋值硬编码 i64（Option<Token> 场景 E0308，自举 v168 缺陷）；
@@ -80,6 +99,11 @@ def punct_token(c: str) -> (bool, Token) =
         ("}", Token.RBrace),
         ("<", Token.Lt),
         (">", Token.Gt),
+        // 此前缺 `=`：tokenize 未命中即静默丢弃 → `let x = 1` 的等号彻底丢失。
+        // 与 lz_parser.lz:139 对齐。`[`/`]` 同补（下标访问）。
+        ("=", Token.Eq),
+        ("[", Token.LBracket),
+        ("]", Token.RBracket),
     ]
     let mut result: (bool, Token) = (false, Token.Plus)
     for idx in 0..table.len():
@@ -210,10 +234,12 @@ def tokenize(src: str) -> List<Token> =
             let word: str = r.0
             if word.len() > 4 && word[0..2] == "__" && word[(word.len() - 2)..word.len()] == "__":
                 tokens = tokens + [Token.MagicMethod(name: word)]
-            elif is_keyword(word):
-                tokens = tokens + [keyword_token(word)]
             else:
-                tokens = tokens + [Token.Ident(name: word)]
+                let kt = keyword_token(word)
+                if kt.0:
+                    tokens = tokens + [kt.1]
+                else:
+                    tokens = tokens + [Token.Ident(name: word)]
         // 整数：scan_int 返回数字串，查表折叠为 int 生成 IntLit（v170 遗留缺陷已修）
         elif is_digit(c):
             let r = scan_int(src, i)
@@ -236,8 +262,15 @@ def display_token(t: Token) -> str =
         case Token.Def => "Def"
         case Token.Struct => "Struct"
         case Token.If => "If"
+        case Token.Elif => "Elif"
         case Token.Else => "Else"
         case Token.Return => "Return"
+        case Token.Let => "Let"
+        case Token.Match => "Match"
+        case Token.Case => "Case"
+        case Token.While => "While"
+        case Token.For => "For"
+        case Token.In => "In"
         case Token.IntLit(v: n) => "IntLit(" + n.to_string() + ")"
         case Token.StrLit(s: s) => "StrLit(" + s + ")"
         case Token.Ident(name: n) => "Ident(" + n + ")"
@@ -267,6 +300,8 @@ def display_token(t: Token) -> str =
         case Token.RParen => "RParen"
         case Token.LBrace => "LBrace"
         case Token.RBrace => "RBrace"
+        case Token.LBracket => "LBracket"
+        case Token.RBracket => "RBracket"
         case Token.Newline => "Newline"
         case Token.Eof => "Eof"
 

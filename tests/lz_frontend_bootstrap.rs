@@ -65,6 +65,33 @@ fn emit_lex_lz_flag_runs() {
     assert!(stdout.contains("Gt") && stdout.contains("If") && stdout.contains("Else"), "缺关键字/比较符: {}", stdout);
 }
 
+/// A3：BUG-462 修复回归 —— 此前 LZ lexer 的 `punct_token` 表缺 `=`、`is_keyword`
+/// 缺 `let`，导致 `let x = 1` 被切成 `Ident(let)` 且等号被静默丢弃（tokenize
+/// 未命中即跳过）。本测试锁定修复：`let x = 1` 须产生完整
+/// `Let Ident(x) Eq IntLit(1)` 序列。
+#[test]
+fn emit_lex_lz_let_and_eq() {
+    let src = "def main() =\n    let x = 1\n    print(x)\n";
+    let stdout = run_flag("lz_lex_let_eq", "let_eq", src, "--emit=lex-lz");
+    let got: Vec<&str> = stdout
+        .lines()
+        .map(|l| l.trim().trim_matches('"'))
+        .filter(|l| !l.is_empty() && !l.starts_with("Generated"))
+        .collect();
+    // 期望前缀子序列（def main() = 后的 let x = 1）
+    let needle = vec![
+        "Def", "Ident(main)", "LParen", "RParen", "Eq", "Newline", "Let", "Ident(x)", "Eq",
+        "IntLit(1)",
+    ];
+    assert!(
+        got.windows(needle.len()).any(|w| w == needle.as_slice()),
+        "lex-lz 未生成 let/= 关键 token（BUG-462 回归?）: got={:?}",
+        got
+    );
+    assert!(got.contains(&"Eq"), "lex-lz 丢了 Eq token: {:?}", got);
+    assert!(got.contains(&"Let"), "lex-lz 丢了 Let 关键字: {:?}", got);
+}
+
 const SAMPLE_BASIC_GOLDEN: &str = "def f(x) {return x + 1}";
 
 /// B1/B2：LZ 版 parser 行为对齐 + 主流程入口
