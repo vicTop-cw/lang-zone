@@ -859,10 +859,35 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
                 gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + " as usize]".to_string()
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + "] = ".to_string() + gen_expr(v, fn_raises)
         case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
-            // BUG-423：字符串拼接 `a + b` 在 Rust 需 `String + &str`（String + String
-            // 无 Add impl → E0308 expected `&str`, found `String`）。两侧均为字符串
-            // 类型时右侧补 `&`，对齐原生 `"hi ".to_string() + &x.clone()` 口径。
-            if o == "+" and is_string_irtype(expr_ty(l)) and is_string_irtype(expr_ty(r)):
+            // BUG-459：`in`/`not in` 成员测试。Rust 无 `in` 运算符，rs-lz 旧实现透传
+            // `4i64 in s` → rustc `expected '{', found keyword 'in'`。对齐原生
+            // expr_gen.rs:5770-5816 四路 oracle：String → `.contains()`；Dict →
+            // `.contains_key(&elem)`；List/Set/其余 → `.contains(&elem)`；`not in` 前缀 `!`。
+            // String 实参统一 `&*(elem)`（字面量 &str / String 值均解引用到 &str，char 不
+            // 走此分支由类型判据兜住），运行时与原生等价。
+            if o == "in" or o == "not in" or o == "not_in":
+                // BUG-459：`in`/`not in` 成员测试。Rust 无 `in` 运算符，rs-lz 旧实现透传
+                // `4i64 in s` → rustc `expected '{', found keyword 'in'`。对齐原生
+                // expr_gen.rs:5770-5816 四路 oracle：String → `.contains()`；Dict →
+                // `.contains_key(&elem)`；List/Set/其余 → `.contains(&elem)`；`not in` 前缀 `!`。
+                // String 实参统一 `&*(elem)`（字面量 &str / String 值均解引用到 &str，char 不
+                // 走此分支由类型判据兜住），运行时与原生等价。
+                let not_prefix = ("!" if (o == "not in" or o == "not_in") else "").to_string()
+                let cont_s = gen_expr(r, fn_raises)
+                let elem_s = gen_expr(l, fn_raises)
+                if is_string_irtype(expr_ty(r)):
+                    if is_string_irtype(expr_ty(l)):
+                        not_prefix + cont_s + ".contains(&*(".to_string() + elem_s + "))".to_string()
+                    else:
+                        not_prefix + cont_s + ".contains(".to_string() + elem_s + ")".to_string()
+                elif is_dict_irtype(expr_ty(r)):
+                    not_prefix + cont_s + ".contains_key(&".to_string() + elem_s + ")".to_string()
+                else:
+                    not_prefix + cont_s + ".contains(&".to_string() + elem_s + ")".to_string()
+            elif o == "+" and is_string_irtype(expr_ty(l)) and is_string_irtype(expr_ty(r)):
+                // BUG-423：字符串拼接 `a + b` 在 Rust 需 `String + &str`（String + String
+                // 无 Add impl → E0308 expected `&str`, found `String`）。两侧均为字符串
+                // 类型时右侧补 `&`，对齐原生 `"hi ".to_string() + &x.clone()` 口径。
                 gen_expr(l, fn_raises) + " + &".to_string() + gen_expr(r, fn_raises)
             else:
                 gen_expr(l, fn_raises) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr(r, fn_raises)
@@ -906,7 +931,10 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
         case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + ")".to_string()
         case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64..".to_string() + gen_expr(en, fn_raises)
         case Expr.Dict(pairs: ps, ty: t) => "std::collections::BTreeMap::new()".to_string()
-        case Expr.AssignExpr(target: tg, value: v, ty: t) => gen_expr(tg, fn_raises) + " = ".to_string() + gen_expr(v, fn_raises)
+        case Expr.AssignExpr(target: tg, value: v, ty: t) =>
+            // BUG-458：赋值目标按 place 发射（免 `.clone()`），否则 `self.n = self.n + 1`
+            // 被渲染成 `self.n.clone() = self.n.clone() + 1i64` → E0070（赋给临时值）。
+            gen_recv_place(tg, fn_raises) + " = ".to_string() + gen_expr(v, fn_raises)
         case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) => gen_expr(s, fn_raises)
         case _ => "unimplemented!".to_string()
 
@@ -1053,6 +1081,17 @@ def gen_recv_place(r: Expr, fn_raises: MaybeIrType) -> String =
             // 原生 expr_gen.rs 用字符串 `trim_end_matches(".clone()")` 处理任意嵌套，这里
             // 用结构化递归等价对齐；非 FieldAccess 的 base 退回 gen_expr（保持原有语义）。
             gen_recv_place(b, fn_raises) + field_access_sep(b) + f.to_string()
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            // BUG-460：`self.items[0] = x` 的赋值目标须按 place 发射。IndexGet 若透传
+            // gen_expr，其 base 是 `self.<field>` 时会套「字段读取克隆」规则 →
+            // `self.items.clone()[0i64 as usize] = x` 赋到临时值，数据丢失
+            // （g85_self_index_assign 实测 NATIVE 9 / RSLZ 1）。此处 base 递归走
+            // gen_recv_place。Dict 下标是 `.get().unwrap()` 形态（非 place，见 BUG-448），
+            // 且 Dict 赋值走 `.insert()`（Stmt.Assign dict 分支），故仅处理非 dict 下标。
+            if is_dict_irtype(expr_ty(b)):
+                gen_expr(r, fn_raises)
+            else:
+                gen_recv_place(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + " as usize]".to_string()
         case _ => gen_expr(r, fn_raises)
 
 def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeIrType) -> String =
@@ -1669,8 +1708,14 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
                     if base_is_dict(b):
                         gen_expr(b, MaybeIrType.NoTy) + ".insert(".to_string() + gen_expr(k, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ");".to_string()
                     else:
-                        gen_expr(tg, MaybeIrType.NoTy) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
-                case _ => gen_expr(tg, MaybeIrType.NoTy) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
+                        // BUG-460：`self.items[0] = x` 的下标赋值 target 按 place 发射
+                        // （gen_recv_place 已对 IndexGet 递归 base），否则 `self.items.clone()[0]=x`
+                        // 赋到临时值，数据丢失。
+                        gen_recv_place(tg, MaybeIrType.NoTy) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
+                case _ =>
+                            // BUG-458：赋值目标按 place 发射（免 `.clone()`），对齐原生
+                            // `self.n = self.n.clone() + 1i64` 的 LHS 形态；否则 E0070。
+                            gen_recv_place(tg, MaybeIrType.NoTy) + " = ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ";".to_string()
         case Stmt.Return(value: v) =>
             match v:
                 case MaybeExpr.YesExpr(value: inner) => "return ".to_string() + gen_expr(inner, fn_raises) + ";".to_string()
