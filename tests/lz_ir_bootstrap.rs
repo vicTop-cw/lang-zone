@@ -835,6 +835,51 @@ def main() =
 // `pub fn Type.method(...)`（非法 Rust）。原生 gen_item（decl_gen.rs:169-182）检测函数名
 // 含 `.` 即包 `impl Type { fn method }`。断言 rs-lz 产物含 `impl Point {`、rustc 编译运行出 25。
 #[test]
+fn rs_lz_recursive_enum_boxes_fields() {
+    // BUG-475：递归类型（链表/树）字段必须发 `Box<T>`，构造端 `Box::new(..)`，
+    // 否则 rustc E0072 recursive type has infinite size / E0308 Box<T> 赋裸 T。
+    let source = r#"
+enum Tree =
+    Leaf(v: int)
+    Node(l: Tree, r: Tree)
+
+def main() =
+    let t = Tree.Node(l: Tree.Leaf(v: 1), r: Tree.Node(l: Tree.Leaf(v: 2), r: Tree.Leaf(v: 3)))
+    print(0)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_recursive_box");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    // 声明端：递归字段 `l: Tree` → `l: Box<Tree>`
+    assert!(
+        text.contains("l: Box<Tree>"),
+        "递归字段未 Box 化（E0072）:\n{}",
+        text
+    );
+    // 构造端：`Tree.Leaf(...)` 作为递归字段值 → `Box::new(Tree::Leaf {...})`
+    assert!(
+        text.contains("Box::new(Tree::Leaf"),
+        "递归构造未包 Box::new（E0308）:\n{}",
+        text
+    );
+}
+
 fn rs_lz_inherent_method_emits_impl_block() {
     let source = r#"
 struct Point =

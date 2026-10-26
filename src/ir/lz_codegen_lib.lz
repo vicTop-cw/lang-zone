@@ -940,18 +940,20 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType) -> String =
             elif n == "Dict":
                 gen_dict_ctor(fs)
             else:
-                n.to_string() + " { ".to_string() + ctor_fields(fs) + " }".to_string()
+                n.to_string() + " { ".to_string() + ctor_fields_boxed(fs, n, fn_raises) + " }".to_string()
         case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
             // BUG-411：三种变体形态（对齐原生 decl_gen.rs:2005 + expr_gen.rs:1654/1662）
             //   单位变体（无数据）      → `Enum::Variant`（Rust 单位变体不是函数，带 () 即 E0618）
             //   命名字段变体（_KwArg）  → `Enum::Variant { f: v, ... }`
             //   元组变体                → `Enum::Variant(t, t)`
+            // BUG-475：递归字段的值按 expr_ty 判同名即 `Box::new(...)` 包装
+            //（对齐原生构造端 `l: Box::new(Tree::Leaf{..})`）。
             if a.len() == 0:
                 en.to_string() + "::".to_string() + v.to_string()
             elif all_kwarg_args(a):
-                en.to_string() + "::".to_string() + v.to_string() + " { ".to_string() + kwarg_pairs_str(a, fn_raises) + " }".to_string()
+                en.to_string() + "::".to_string() + v.to_string() + " { ".to_string() + kwarg_pairs_str_boxed(a, en, fn_raises) + " }".to_string()
             else:
-                en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list(a, fn_raises) + ")".to_string()
+                en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list_boxed(a, en, fn_raises) + ")".to_string()
         case Expr.EnumFieldGet(base: b, enum_name: en, variants: vs, field: f, ty: t) =>
             "match &".to_string() + gen_expr(b, fn_raises) + " { ".to_string() + enum_field_arms(en, vs, f) + "_ => unreachable!() }".to_string()
         case Expr.Cast(inner: i, target: tg, ty: t) => "(".to_string() + gen_expr(i, fn_raises) + " as ".to_string() + rust_type(tg).to_string() + ")".to_string()
@@ -1738,6 +1740,61 @@ def ctor_fields(fs: List<(str, Expr)>) -> String =
         out = out + (if idx > 0: ", ".to_string() else: "".to_string()) + f.0.to_string() + ": ".to_string() + gen_expr(f.1, MaybeIrType.NoTy)
     out
 
+// BUG-475：构造端的 Box 包装。字段值/参数的类型为被构造类型自身（`expr_ty(v)` 为
+// Named(path=owner) 或 Self_）即视为递归字段，发 `Box::new(<expr>)`，与声明端
+// field_ty_str 的 `Box<T>` 对应；否则原样。避免 `Box<T>` 字段被赋裸 `T` 值（E0308）。
+def ctor_fields_boxed(fs: List<(str, Expr)>, owner: str, fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        out = out + (if idx > 0: ", ".to_string() else: "".to_string()) + f.0.to_string() + ": ".to_string() + maybe_box_expr(f.1, owner, fn_raises)
+    out
+
+def kwarg_pairs_str_boxed(a: List<Expr>, owner: str, fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..a.len():
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + kwarg_pair_of_boxed(a[idx].clone(), owner, fn_raises)
+    out
+
+def kwarg_pair_of_boxed(e: Expr, owner: str, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            kwarg_name_of(fs) + ": ".to_string() + maybe_box_expr(kwarg_value_expr(fs), owner, fn_raises)
+        case _ => maybe_box_expr(e, owner, fn_raises)
+
+def expr_cs_list_boxed(es: List<Expr>, owner: str, fn_raises: MaybeIrType) -> String =
+    if es.len() == 0:
+        "".to_string()
+    else:
+        let head = maybe_box_expr(es[0].clone(), owner, fn_raises)
+        if es.len() > 1:
+            head + ", ".to_string() + expr_cs_list_boxed(ec_tail(es), owner, fn_raises)
+        else:
+            head
+
+// kwarg 值表达式（`_KwArg { name: ..., value: X }` 的 value 字段），供 maybe_box_expr 判型。
+def kwarg_value_expr(fs: List<(str, Expr)>) -> Expr =
+    let mut out: Expr = Expr.LitUnit(ty: IrType.Unit)
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if f.0 == "value":
+            out = f.1.clone()
+    out
+
+def maybe_box_expr(v: Expr, owner: str, fn_raises: MaybeIrType) -> String =
+    if expr_is_recursive_of(v, owner):
+        "Box::new(".to_string() + gen_expr(v, fn_raises) + ")"
+    else:
+        gen_expr(v, fn_raises)
+
+def expr_is_recursive_of(v: Expr, owner: str) -> bool =
+    match expr_ty(v):
+        case IrType.Named(path: p, args: a) => p == owner
+        case IrType.Self_ => true
+        case _ => false
+
 // ── 语句生成 ──
 
 def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises: MaybeIrType) -> String =
@@ -2510,13 +2567,13 @@ def gen_item(i: Item) -> String =
                 let auto_mut = auto_mut_names(b)
                 "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut, rs) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
-            let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
+            let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs, n) + "}".to_string()
             if fs.len() > 0:
                 struct_def + "\n\n".to_string() + gen_struct_unapply(n, gs, fs)
             else:
                 struct_def
         case Item.EnumDef(name: n, generics: gs, variants: vs) =>
-            "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs) + "}".to_string()
+            "#[derive(Debug, Clone, PartialEq)]\npub enum ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_enum_variants(vs, n) + "}".to_string()
         case Item.Const(name: n, ty: t, value: v) =>
             gen_const_item(n, t, v)
         case Item.TraitDef(name: n, generics: gs, supertraits: sts, assoc_types: ats, methods: ms) =>
@@ -2724,11 +2781,47 @@ def callee_is_mut_fn(c: Expr) -> bool =
                 false
         case _ => false
 
-def gen_struct_fields(fs: List<(str, IrType)>) -> String =
+// BUG-475：递归类型字段自动 Box（对齐 helpers.rs:759 field_needs_box + decl_gen.rs:1752-1766）。
+// 递归 struct/enum（链表、树）字段类型为 Self_ 或 Named(自身名) 时必须发 `Box<T>`，
+// 否则 rustc E0072 recursive type has infinite size。
+def field_needs_box(ty: IrType, name: str) -> bool =
+    match ty:
+        case IrType.Self_ => true
+        case IrType.Named(path: p, args: a) => p == name
+        case IrType.Opt(inner: i) =>
+            match i:
+                case IrType.Self_ => true
+                case IrType.Named(path: p, args: a) => p == name
+                case _ => false
+        case _ => false
+
+// 字段类型字符串（递归字段包 Box）。对齐 decl_gen.rs:1752-1766 的三种形态：
+//   Option<Self> → Option<Box<Self>>；裸 Self/Named → Box<T>；Vec/List<Self> → Vec<Box<T>>。
+def field_ty_str(ty: IrType, name: str) -> String =
+    if field_needs_box(ty, name):
+        match ty:
+            case IrType.Opt(inner: i) => "Option<Box<".to_string() + box_inner_ty(i, name) + ">>".to_string()
+            case IrType.Named(path: p, args: a) =>
+                if p == "Option":
+                    "Option<Box<".to_string() + rust_type(ty) + ">>".to_string()
+                elif p == "Vec" or p == "List":
+                    "Vec<Box<".to_string() + rust_type(a[0]) + ">>".to_string()
+                else:
+                    "Box<".to_string() + rust_type(ty) + ">".to_string()
+            case _ => "Box<".to_string() + rust_type(ty) + ">".to_string()
+    else:
+        rust_type(ty)
+
+def box_inner_ty(i: IrType, name: str) -> String =
+    match i:
+        case IrType.Self_ => name
+        case _ => rust_type(i)
+
+def gen_struct_fields(fs: List<(str, IrType)>, sname: str) -> String =
     let mut out: String = "".to_string()
     for idx in 0..fs.len():
         let f = fs[idx].clone()
-        out = out + "    pub ".to_string() + f.0.to_string() + ": ".to_string() + rust_type(f.1) + ",\n".to_string()
+        out = out + "    pub ".to_string() + f.0.to_string() + ": ".to_string() + field_ty_str(f.1, sname) + ",\n".to_string()
     out
 
 // BUG-411：命名字段变体定义（对齐原生 decl_gen.rs:1985 gen_enum_def）——
@@ -2737,24 +2830,24 @@ def gen_struct_fields(fs: List<(str, IrType)>) -> String =
 //   位置（元组）  → `    Name(ty, ty),`
 // 旧实现只序列化字段类型、丢字段名，一律降级为元组变体，与原生产物分叉且
 // 使 `x.f` 字段访问无从生成解构。
-def gen_enum_variants(vs: List<(str, List<(str, IrType)>)>) -> String =
+def gen_enum_variants(vs: List<(str, List<(str, IrType)>)>, ename: str) -> String =
     let mut out: String = "".to_string()
     for idx in 0..vs.len():
         let v = vs[idx].clone()
-        out = out + "    ".to_string() + v.0.to_string() + gen_enum_variant_body(v.1) + ",\n".to_string()
+        out = out + "    ".to_string() + v.0.to_string() + gen_enum_variant_body(v.1, ename) + ",\n".to_string()
     out
 
-def gen_enum_variant_body(fs: List<(str, IrType)>) -> String =
+def gen_enum_variant_body(fs: List<(str, IrType)>, ename: str) -> String =
     if fs.len() == 0:
         "".to_string()
     elif variant_fields_named(fs):
         let mut body: String = " {\n".to_string()
         for idx in 0..fs.len():
             let f = fs[idx].clone()
-            body = body + "        ".to_string() + f.0.to_string() + ": ".to_string() + rust_type(f.1) + ",\n".to_string()
+            body = body + "        ".to_string() + f.0.to_string() + ": ".to_string() + field_ty_str(f.1, ename) + ",\n".to_string()
         body + "    }".to_string()
     else:
-        "(".to_string() + variant_field_types(fs) + ")".to_string()
+        "(".to_string() + variant_field_types(fs, ename) + ")".to_string()
 
 def variant_fields_named(fs: List<(str, IrType)>) -> bool =
     let mut all_named: bool = true
@@ -2764,13 +2857,13 @@ def variant_fields_named(fs: List<(str, IrType)>) -> bool =
             all_named = false
     all_named
 
-def variant_field_types(fs: List<(str, IrType)>) -> String =
+def variant_field_types(fs: List<(str, IrType)>, ename: str) -> String =
     let mut out: String = "".to_string()
     for idx in 0..fs.len():
         let f = fs[idx].clone()
         if idx > 0:
             out = out + ", ".to_string()
-        out = out + rust_type(f.1)
+        out = out + field_ty_str(f.1, ename)
     out
 
 def gen_enum_variant_args(ts: List<IrType>) -> String =

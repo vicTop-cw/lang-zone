@@ -2786,3 +2786,113 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
     发射名 EnumNamed 且字段 List<(str,Pattern)> 与 LZ args:List<Pattern> 双重漂移，语料未触发，留待后续）。
     Item::Test 仍走 Rust {:#?} Debug（display.rs:727），非稳定 Display 契约，记为已知限制。
 ### FIXED(2026-10-26 / BUG-468)
+
+## BUG-469 [high] rs-lz match scrutinee 未对齐原生「纯 Var 一律 .clone()」
+- 类目: rs-lz 保真 / Stmt.Match scrutinee 变换缺失（route B）
+- 发现: 2026-10-26
+- 复现: 对 `_probes/pat_enum.lz`（`def area(s: Shape) = match s:`，enum Shape 有
+    Circle/Rect 变体）分别跑常规 codegen 与 `--emit=rs-lz`，逐字符比对 .rs。
+- 症状: 原生发 `match s.clone() { Shape::Circle { radius: radius } => { return radius; }, ... }`；
+    rs-lz 此前发 `match s { Shape::Circle { radius: radius } => { return radius; }, ... }`。
+    非 Copy 枚举实参经裸 match 移出后，函数体再次使用 `s` 报 rustc E0382（二次移动）。
+    rs-lz 的 scrutinee 变换整段缺失（原生 stmt_gen.rs:2274-2308 有 Str→as_str、
+    self→self.clone、纯 Var→clone、List/Vec/Tuple→as_slice 四支，此前 rs-lz 一律裸发）。
+- oracle: src/ir/codegen/stmt_gen.rs:2304-2308（未改动原生）
+- 修复: src/ir/lz_codegen_lib.lz gen_stmt 的 Stmt.Match case 引入 scrut_s：
+    纯 Var（非 self、非 Str）→ base_s + ".clone()"；self → "self.clone()"；
+    Str → 保持原样（原生走 .as_str()/BUG-284，本库未覆盖，避免把 String 误转 &str，留 TODO）。
+- 回归测试: tests/lz_ir_bootstrap.rs::rs_lz_match_scrutinee_clones_var（断言 rs-lz 产物含
+    `match s.clone()` 且 rustc 可编译）。因 rs-lz 的 match 臂缩进仍与原生动态 indent 不同，
+    该测试不做逐字符比对，只断言 scrutinee 变换这一功能修复点。
+- 验证: cargo test -j 4 -- --test-threads=1 全绿；BUG-469 单测过；rs-lz 产物 rustc 编译并运行输出 5。
+- commit: 7559a78
+- 遗留（非本次）: (a) match 臂缩进 rs-lz 硬编码 4 格 vs 原生动态 indent（格式保真，非功能性）；
+    (b) Str → `.as_str()`（BUG-284）、List/Vec/Tuple → `.as_slice()`、FieldAccess 的
+    ret_is_ref_opt / has_ref_mut 分支均未覆盖，留后续。
+- status: OPEN -> FIXED
+
+## BUG-470 [high] rs-lz match scrutinee 未对齐原生 Str→.as_str() / List/Vec/Tuple→.as_slice()
+- 类目: rs-lz 保真 / Stmt.Match scrutinee 变换（route B），接续 BUG-469
+- 发现: 2026-10-26
+- 复现: `_probes/rslz/str_match.lz`（`def kind(name: str) = match name: case "hello"`）、
+    `_probes/rslz/list_match.lz`（`def first(xs: List<int>) = match xs: case [a, ..rest]`）。
+- 症状: Str scrutinee 原生发 `match name.as_str() {`，rs-lz 发 `match name {`（String 直
+    match &str 字面量模式 rustc E0308）。List/Vec/Tuple scrutinee + 任一臂含列表模式，
+    原生发 `match xs.clone().as_slice() {`，rs-lz 发 `match xs.clone() {`（Vec 直 match
+    数组模式 rustc E0529 expected array or slice）。BUG-469 只补了 ②，本 bug 补 ①③。
+- oracle: src/ir/codegen/stmt_gen.rs:2274-2312（未改动原生）
+- 修复: src/ir/lz_codegen_lib.lz gen_stmt 的 Stmt.Match case 重构为顺序不可颠倒三段变换：
+    ① Str → base_s + ".as_str()"；② 纯 Var → base_s + ".clone()"（self → "self.clone()"）；
+    ③ scrut_is_list(ty) and any_arm_pat_is_list(arms) → 再追加 ".as_slice()"。
+    新增 LZ 侧递归辅助 pattern_is_list / any_pat_is_list / any_field_pat_is_list /
+    scrut_is_list / any_arm_pat_is_list，对齐原生 helpers.rs:59 pattern_is_list。
+    LZ 语法备忘：if-表达式用后缀式 `x if cond else y`（前缀 `if c: x else: y` 会被解析成
+    语句）；布尔返回类型写 `-> bool`（小写），写 `Bool` 报「未知类型」。
+- 回归测试: tests/lz_ir_bootstrap.rs::rs_lz_match_scrutinee_as_str（断言 rs-lz 产物含
+    `match name.as_str() {`、rustc 可编译且运行输出 greet/other）
+- 验证: cargo test -j 4 -- --test-threads=1 全绿（41 套件）；str_match rs-lz 产物
+    COMPILE+RUN 输出 greet/other；list_match scrutinee 已与原生逐字一致。
+- commit: c2713b6
+- status: OPEN -> FIXED
+
+## BUG-471 [high] rs-lz 列表模式发射两处 rustc 硬错（..rest 语法 + slice 元素未解引用）
+- 类目: rs-lz 保真 / Pattern.List 发射（route B）；BUG-470 修复后 list_match 探针暴露
+- 发现: 2026-10-26
+- 复现: `_probes/rslz/list_match.lz` 的 rs-lz 产物过 rustc 报两错。
+- 症状: ① 余项绑定 rs-lz 发 `[a, ..rest]`，工具链 rustc 不识别（应发 `[a, rest @ ..]`，
+    E0425 cannot find value rest in this scope）。② .as_slice() 后元素绑定为 &T，
+    rs-lz 发 `return a` 未解引用（应发 `return *a`，E0308 mismatched types found &i64）。
+- 参考: 原生 gen_pattern 对 List 余项发 `rest @ ..`；对 slice 绑定元素发解引用。
+- 处置: 未修，留后续（本回合聚焦 scrutinee 变换，不 scope-creep）。
+- status: OPEN
+
+## BUG-471(a) [high] rs-lz 具名 Rest 模式发成 `..rest`（E0425）
+
+类目：rs-lz 差分（rslz/simple_rest_pattern.lz）
+发现：rs-lz 产物 `..rest` vs 原生 `rest @ ..`，rustc E0425 cannot find value rest。
+复现：`case [a, rest]: return rest[0]` 的 rs-lz 产物。
+症状：所有 `..name` Rest 绑定在 rs-lz 下编译失败。
+oracle：pattern_gen.rs:187-190 —— `Some(n) => format!("{} @ ..", n)`；`None => ".."`。
+修复：lz_codegen_lib.lz display_pattern + gen_pattern 的 Rest 分支改为
+`n2 + " @ .."`（replace_all 两处同修）。
+回归测试：rs_lz_rest_pattern_emits_at_binding。
+验证：cargo test -j 4 -- --test-threads=1 全绿（41 套件）。
+commit：165b844
+
+## BUG-472 [high] rs-lz auto_mut 未标记字段/下标赋值底座 Var
+
+类目：rs-lz 差分（rslz2/dict_ops.lz）
+发现：`let c = Cache(d: {}); c.d["a"] = 1` 的 rs-lz 产物 `let c` 缺 `mut`，E0596。
+复现：dict_ops.lz 探针。
+症状：任何字段/下标写入的 let 绑定缺 mut。
+oracle：stmt_gen.rs 原生自动 mut 扫描把写入底座记入 auto_mut_locals。
+修复：lz_codegen_lib.lz scan_expr_auto_mut 的 FieldAccess / IndexGet 分支在递归前先
+`acc = add_var_auto_mut(b, acc)`。保守标 mut 在 Rust 中无害。
+回归测试：rs_lz_field_assign_marks_let_mut。
+验证：dict_ops rs-lz COMPILE+RUN 出 1|2；cargo test -j 4 -- --test-threads=1 全绿。
+commit：74798a1
+
+## BUG-473 [high] rs-lz 固有方法发成 `pub fn Type.method` 自由函数
+
+类目：rs-lz 差分（rslz2/struct_method.lz、enum_method.lz）
+发现：rs-lz 产物 `pub fn Point.sq(self: Self) -> i64 {`，函数名带点号非法 Rust。
+症状：所有用户 struct/enum 固有方法在 rs-lz 下编译失败。
+oracle：decl_gen.rs:169-182 —— 名含 `.` 即 `impl <ty> {` + 纯方法名 fn + `}`。
+修复：lz_codegen_lib.lz 新增 split_method_name / find_dot_index；gen_item 的 FnDef 分支
+先判名含 `.`，含则构造 ImplMethod 复用 gen_impl_method（force_ref=false）包 `impl <ty> {`。
+回归测试：rs_lz_inherent_method_emits_impl_block。
+验证：struct_method.rs-lz 出 25；enum_method.rs-lz 出 27|12；cargo test 全绿。
+commit：4897f87
+已知局限：方法自身泛型 impl 块暂未带泛型。
+
+## BUG-475 [high] rs-lz 递归类型字段未 Box 包装（E0072）
+
+类目：rs-lz 差分（rslz4/nested_match.lz）
+发现：`enum Tree = Leaf(v:int) | Node(l: Tree, r: Tree)` 的 rs-lz 产物 `l: Tree`，
+rustc E0072 recursive type has infinite size；原生发 `l: Box<Tree>`。
+症状：所有递归 struct/enum（链表、树）在 rs-lz 下编译失败。
+oracle：decl_gen.rs:1738-1770 + helpers.rs:759 field_needs_box —— Self_/Named==self 字段
+发 `Box<T>`（Option<T> → Option<Box<T>>，Vec/List<T> → Vec<Box<T>>）；构造端 `Box::new(..)`；
+match 解构端 `let x = *x;`。
+修复：未修（需同时改声明/构造/解构三处，范围较大）。
+状态：OPEN
