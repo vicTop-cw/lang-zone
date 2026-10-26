@@ -2966,4 +2966,30 @@ Rust 文本与 native 一致；match 探针（含 guard + 裸 match 作表达式
 4100+ 行的库 diff、掩盖真实差异。已改为先 `cp <probe>.rs <probe>_native.rs`
 快照再跑 rs-lz（BUG-481，同批修复）。
 回归测试：rs_lz_match_blockexpr_two_field_ctor（编译 + 运行断言）
+状态：FIXED（commit 9332bbe）
+
+## BUG-450 [high] native List<str>.contains("a") 实参缺 .to_string()（E0308 expected &String）
+
+现象：`def main() = let v: List<str> = ["a","b"]; print(v.contains("a"))`，
+`lang-zone --emit=rs`（原生 codegen）渲染 `v.contains("a")`，Rust 端
+`Vec<String>::contains(&self, x: &T)` 要求 `&String`，而 `"a"` 是 `&str`
+→ rustc E0308 mismatched types（expected `&String`, found `&str`）。
+rs-lz 侧走借用分支渲染 `(v).contains(&"a".to_string())` 编译通过
+（探针 RSLZ OK `true|`、NATIVE FAIL E0308）。属原生侧 expr_gen.rs 缺口。
+根因：`src/ir/codegen/expr_gen.rs:3952` 的实参改写对 str 字面量一律生成裸
+`"a"`（供 str/String 接收者走 Pattern 位），后续借位改写只补 `&` → `&"a"`
+仍是 `&str`。Vec<String> 接收者（LZ `List<str>` 的 Rust 投影）的元素恒为
+`String`，`contains(&Q)` 的 Q 固定 `T=String`，故 str 字面量须 `.to_string()`
+后借位。
+修复：str 字面量实参分支按 `is_vec_contains` 分流——是则发
+`&"{s}".to_string()`，否则保持裸 `"{s}"`（str/String/Dict/Set 接收者原路径
+不变）。escape_default 保留（`"\\"` 若直拼 format! 生成裸 `"\`，json.lz
+E0308/语法错误）。
+验证：探针 _probes/rslz4/g450_contains.lz 双路编译通过、输出 `true|`；
+原生现发 `v.contains(&"a".to_string())`，与 rs-lz `(v).contains(&"a".to_string())`
+语义一致（仅剩 List<String> vs Vec<String>、`(v)` 括号等 D1 既知形式差）。
+未影响：str 接收者 `.contains`（Pattern 位）、Dict `.contains`（→contains_key）、
+Set<str> `.contains`（HashSet::contains 走 &Q=Borrow<str>，`&"a"` 本可，
+但 rs-lz 亦发 `.to_string()`，本次 is_vec_contains 不覆盖 Set，Set 行为未变）。
+回归测试：rs_lz_list_str_contains_borrows_string（native + rs-lz 双路编译 + 运行断言）
 状态：FIXED（commit 见本轮）

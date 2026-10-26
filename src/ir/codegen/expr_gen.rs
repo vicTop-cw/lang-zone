@@ -824,6 +824,17 @@ impl CodeGen {
                     } = &base.kind
                     {
                         if let ExprKind::Var(module) = &mod_base.kind {
+                            // BUG-N2：`time::Duration` 是 PathAccess，builder.rs:4978 给它
+                            // 加了 "\u{1}PATH\u{1}" 哨兵前缀 → type_name = "\u{1}PATH\u{1}Duration"，
+                            // 白名单精确匹配失效，std 模块链拦截不生效，产物退化为
+                            // `time::Duration::fromMillis(...)`（E0433 cannot find module `time`）。
+                            // 剥离哨兵后按裸类型名匹配与输出（与 BUG-N1 同源修复）。
+                            const PATH_SENTINEL: &str = "\u{1}PATH\u{1}";
+                            let type_name_s: &str = type_name.trim_start_matches(PATH_SENTINEL);
+                            // 同一路径链上，方法段（::fromMillis）同样带哨兵前缀，
+                            // 一并剥离后再做 camelCase→snake_case 映射（否则产物出现
+                            // `std::time::Duration::<0x01>PATH<0x01>fromMillis(...)`）。
+                            let method_s: &str = method.trim_start_matches(PATH_SENTINEL);
                             const STD_MODULES: &[(&str, &[&str])] = &[
                                 ("time", &["Duration", "Instant"]),
                                 ("thread", &["Thread", "JoinHandle"]),
@@ -832,14 +843,14 @@ impl CodeGen {
                                 .iter()
                                 .find(|(lz_name, _)| *lz_name == module.as_str())
                             {
-                                if types.contains(&type_name.as_str()) {
-                                    let rust_method = match method.as_str() {
+                                if types.contains(&type_name_s) {
+                                    let rust_method = match method_s {
                                         "fromMillis" => "from_millis",
                                         "toMillis" => "as_millis",
                                         "fromSecs" | "fromSeconds" => "from_secs",
                                         "fromMicros" => "from_micros",
                                         "fromNanos" => "from_nanos",
-                                        _ => method.as_str(),
+                                        _ => method_s,
                                     };
                                     let args_s: Vec<String> = args
                                         .iter()
@@ -847,7 +858,7 @@ impl CodeGen {
                                             let s = self.gen_expr(a);
                                             // Duration 构造函数参数是 u64：
                                             // `1500i64` → `1500u64`（E0308 修复）
-                                            if type_name == "Duration"
+                                            if type_name_s == "Duration"
                                                 && matches!(a.ty, IrType::Int)
                                             {
                                                 s.trim_end_matches("i64").to_string() + "u64"
@@ -859,7 +870,7 @@ impl CodeGen {
                                     return format!(
                                         "std::{}::{}::{}({})",
                                         rust_mod,
-                                        type_name,
+                                        type_name_s,
                                         rust_method,
                                         args_s.join(", ")
                                     );
@@ -1654,6 +1665,14 @@ impl CodeGen {
                 // 检测 callee 是否为 FieldAccess 形式 Type.Variant → Type::Variant
                 // 仅当 field 是大写开头（枚举变体）时才用 ::；小写开头为方法调用，用 .
                 if let ExprKind::FieldAccess { base, field } = &callee.kind {
+                    // BUG-N1：路径访问（builder.rs:4974 PathAccess）给段名加了
+                    // "\u{1}PATH\u{1}" 哨兵前缀。FieldAccess 表达式发射点（2704+）
+                    // 已在 BUG-8 修复中剥离，但本 Call 发射点未剥离，导致产物出现
+                    // `Type::\u{1}PATH\u{1}new()`（rustc: unknown start of token \u{1}）。
+                    // 此处同步剥离，并强制 sep="::"（路径访问必须是关联路径）。
+                    const PATH_SENTINEL: &str = "\u{1}PATH\u{1}";
+                    let is_path_access = field.starts_with(PATH_SENTINEL);
+                    let field: &str = field.trim_start_matches(PATH_SENTINEL);
                     // 用户导入模块（含别名）的函数调用 m.add(...) → add(...)：
                     // 模块项已平铺生成到同一 Rust 文件，直接调用 field 即可
                     // （避免走方法调用路径把 add 误映射成 insert）
@@ -1667,7 +1686,7 @@ impl CodeGen {
                     let is_std_module = known_modules.contains(&base_s.as_str());
                     let is_var_base = matches!(&base.kind, ExprKind::Var(_));
                     let is_known_type = is_var_base && self.is_known_type_or_enum(&base_s);
-                    let sep = if is_var_base && (is_std_module || is_known_type) {
+                    let sep = if is_path_access || (is_var_base && (is_std_module || is_known_type)) {
                         // 类型名上的调用一律关联路径：Cell::new / Option::None /
                         // Ordering::Less（小写 field 也是关联函数，否则 Cell.new → E0423）
                         "::"
@@ -1678,7 +1697,7 @@ impl CodeGen {
                         // 检查变体字段类型，为递归字段自动包裹 Box::new()
                         let field_types = self
                             .enum_variant_fields
-                            .get(&(base_s.clone(), field.clone()));
+                            .get(&(base_s.clone(), field.to_string()));
                         let wrapped_args: Vec<String> = args_s
                             .iter()
                             .enumerate()
@@ -1748,7 +1767,7 @@ impl CodeGen {
                         // gen_enum_def 对命名字段变体生成 struct variant，tuple 构造会 E0533
                         let named_fields = self
                             .enum_variant_named_fields
-                            .get(&(base_s.clone(), field.clone()))
+                            .get(&(base_s.clone(), field.to_string()))
                             .cloned()
                             .unwrap_or_default();
                         if !named_fields.is_empty() && named_fields.len() == wrapped_args.len() {
@@ -1772,7 +1791,7 @@ impl CodeGen {
                                 .map_or(false, |en| en == &base_s)
                             && self
                                 .enum_variant_fields
-                                .get(&(base_s.clone(), field.clone()))
+                                .get(&(base_s.clone(), field.to_string()))
                                 .map_or(true, |v| v.is_empty());
                         if unit_variant_ctor {
                             return format!("{}::{}", base_s, field);
@@ -3934,7 +3953,18 @@ impl CodeGen {
                                     // 字符串字面量参数直接生成 &str 字面量（避免 .to_string()
                                     // 与 E0308），但必须 escape_default：`"\\"` 若直接
                                     // format!("\"{}\"", s) 会生成 `"\`（json.lz E0308/语法错误）
-                                    *slot = format!("\"{}\"", s.escape_default());
+                                    // BUG-450：List<str> 接收者的 `.contains` 实参须 `&String`
+                                    //（Vec<String>::contains(&self, x: &T)），裸 `&"a"`（&str）
+                                    // 仍 E0308 expected &String。LZ 的 `str` 映射 Rust `String`，
+                                    // 故 Vec 元素恒为 String，str 字面量须 `.to_string()` 后借位。
+                                    // rs-lz 侧渲染 `(v).contains(&"a".to_string())` 已正确，
+                                    // 此处对齐使两后端逐字符一致（D1 门禁）。
+                                    let q = format!("\"{}\"", s.escape_default());
+                                    *slot = if is_vec_contains {
+                                        format!("&{}.to_string()", q)
+                                    } else {
+                                        q
+                                    };
                                 } else if !slot.starts_with('&')
                                     && (is_vec_contains
                                         || is_set_remove
