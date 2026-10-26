@@ -2921,3 +2921,20 @@ str(int)/str(f64)/str(Vec)）rs-lz 产物 main 与 native 逐字节一致，
 codegen 无该表，极少见）；用户 struct 的 `__str__`/`__int__`/`__float__` 缺口魔法
 （原生 is_known_type 表 LZ 无，罕见，留待类型注册表立项一并处理）。
 回归测试：rs_lz_builtin_type_cast_conversions（编译 + 运行断言）
+
+## BUG-478 [medium] rs-lz 内建 stdlib magic 遮蔽同名用户函数
+
+现象：用户定义 `def sum(xs: List<int>) -> int = xs.len()` 后调用 `sum(xs)`，
+rs-lz 发成 `xs.iter().copied().sum::<i64>()`（BUG-430 的 stdlib 魔法）而非
+用户函数调用 `sum(xs)`，返回 6（1+2+3 求和）而非 3（xs.len()）。
+根因：lz_codegen_lib.lz 的 `gen_call` 对 `n=="sum" and a.len()==1` 无条件走
+stdlib 魔法分支；原生 expr_gen.rs:2178 有守卫
+`!self.fn_param_types.contains_key("sum")`——用户声明同名函数时不启用魔法。
+影响面：同族的 `min`/`max`/`abs`/`sorted`/`reversed`/`zip`/`len`/`print`
+魔法均有同一遮蔽隐患（用户以这些名字定义函数即被劫持）。
+修复思路：需在纯函数 codegen 中把「模块内已声明的顶层函数名」作为上下文
+穿透 gen_expr→gen_call（gen_expr 调用点 90 处，与 BUG-475 的类型注册表
+线程化为同一立项）；gen_call 在命中 stdlib 魔法名时先查该表，
+存在同名用户函数则走通用调用分支。
+探针 _probes/rslz4/user_sum.lz：rs-lz 输出 6，native（有守卫）输出 3。
+状态：OPEN（与 BUG-475 残留同源，需统一注册表立项）
