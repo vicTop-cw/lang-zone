@@ -446,8 +446,11 @@ def display_pattern(p: Pattern) -> String =
                 fields_s = fields_s + f.0 + ": ".to_string() + display_pattern(f.1)
             en + "::".to_string() + v + fields_s + " }".to_string()
         case Pattern.Rest(name: rn) =>
+            // BUG-471：对齐原生 pattern_gen.rs:187-190——具名余项发 `rest @ ..`（@ 绑定）
+            // 而非 `..rest`。后者是 Rust 1.83+ 的简写，工具链 rustc 报 E0425
+            // cannot find value rest in this scope。
             match rn:
-                case MaybeStr.YesStr(value: n2) => "..".to_string() + n2
+                case MaybeStr.YesStr(value: n2) => n2 + " @ ..".to_string()
                 case MaybeStr.NoStr => "..".to_string()
         case Pattern.Range(start: st, end: en, inclusive: inc) =>
             st.to_string() + ("..=".to_string() if inc else "..".to_string()) + en.to_string()
@@ -560,8 +563,11 @@ def gen_pattern(p: Pattern) -> String =
                 fields_s = fields_s + f.0 + ": ".to_string() + gen_pattern(f.1)
             en + "::".to_string() + v + fields_s + " }".to_string()
         case Pattern.Rest(name: rn) =>
+            // BUG-471：对齐原生 pattern_gen.rs:187-190——具名余项发 `rest @ ..`（@ 绑定）
+            // 而非 `..rest`。后者是 Rust 1.83+ 的简写，工具链 rustc 报 E0425
+            // cannot find value rest in this scope。
             match rn:
-                case MaybeStr.YesStr(value: n2) => "..".to_string() + n2
+                case MaybeStr.YesStr(value: n2) => n2 + " @ ..".to_string()
                 case MaybeStr.NoStr => "..".to_string()
         case Pattern.Range(start: st, end: en, inclusive: inc) =>
             st.to_string() + "_i64..".to_string() + en.to_string() + "_i64".to_string()
