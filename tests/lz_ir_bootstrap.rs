@@ -570,6 +570,100 @@ def main() =
     let _ = fs::remove_dir_all(&work);
 }
 
+// BUG-469 回归：rs-lz 的 Stmt::Match scrutinee 未对齐原生 stmt_gen.rs:2304 的
+// 「纯 Var 一律 `.clone()`」规则，导致 `match s` 而非 `match s.clone()`——非 Copy
+// 枚举实参匹配后可能 E0382 二次移动。断言 rs-lz 产物含 `.clone()` scrutinee 且能
+// 过 rustc。（注：rs-lz 的 match 臂缩进仍与原生有差异，故不做逐字符比对，仅断言
+// scrutinee 变换这一功能修复点。）
+#[test]
+fn rs_lz_match_scrutinee_clones_var() {
+    let source = r#"
+enum Shape =
+    Circle(radius: int)
+    Rect(w: int, h: int)
+
+def area(s: Shape) -> int =
+    match s:
+        case Shape.Circle(radius): return radius * radius * 3
+        case Shape.Rect(w, h): return w * h
+
+def main() =
+    print(area(Shape.Circle(radius: 3)))
+    print(area(Shape.Rect(w: 3, h: 4)))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_scrut_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("g1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+    let rs_path = work.join("g1_input.rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "常规 codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = fs::read(&rs_path).expect("read native .rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    // BUG-469 核心：原生与 rs-lz 的 scrutinee 都必须带 .clone()（match 纯 Var 实参）
+    let n_str = String::from_utf8_lossy(&native_rs);
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        n_str.contains("match s.clone()"),
+        "参考实现未发 `match s.clone()`（探针失效？）: {}",
+        n_str.lines().find(|l| l.contains("match")).unwrap_or("(无 match)")
+    );
+    assert!(
+        l_str.contains("match s.clone()"),
+        "rs-lz 未对齐原生 scrutinee clone（BUG-469 回归）：\n{}",
+        l_str.lines().find(|l| l.contains("match")).unwrap_or("(无 match)")
+    );
+
+    // 生成产物必须过 rustc（功能正确性兜底）
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("g1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("g1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
 // BUG-466 回归：LZ 侧 IrType/Item 枚举是 Rust 侧（types.rs / node.rs）的子集，
 // 新增变体未镜像会令 --emit=ir-lz 生成的 Rust 编译失败（rustc E0599，如
 // "no variant named Ext/EmbedBlock found for enum"）。此处静态断言确保

@@ -1742,10 +1742,23 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
             // BUG-420：值位置（函数尾/块尾）的 match 直出，各分支体经 gen_value_block
             // 产出值；语句位置用 `let _ = match …;` 丢弃值（否则「非 () 类型的表达式
             // 语句」E0308）。对齐原生：语句 match → `let _ = match …`。
+            // BUG-469：对齐原生 stmt_gen.rs:2274-2308 的 scrutinee 变换——
+            //   纯 Var（非 self、非 Str）→ `.clone()` 防局部移动 E0382；self → `self.clone()`。
+            //   原生对 Str 走 `.as_str()`（BUG-284）、List/Vec/Tuple 走 `.as_slice()`，
+            //   这两支本库尚未覆盖，Str 保持原样以免把 String 错转 &str，留 TODO。
+            let base_s = gen_expr(s, fn_raises)
+            let scrut_s = match expr_ty(s):
+                case IrType.Str => base_s
+                case _ =>
+                    match s:
+                        case Expr.Var(name: n, ty: _):
+                            if n == "self": "self.clone()".to_string()
+                            else: base_s + ".clone()".to_string()
+                        case _: base_s
             if is_tail:
-                "match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
+                "match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
             else:
-                "let _ = match ".to_string() + gen_expr(s, fn_raises) + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "};".to_string()
+                "let _ = match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "};".to_string()
         case Stmt.Block(stmts: ss) =>
             // BUG-406：裸块语句是嵌套上下文，其尾部表达式不是函数尾，不得发射 `return`
             // （is_main=true 仅在 gen_stmt 的 ExprStmt 处抑制尾 return，无其他副作用）。
