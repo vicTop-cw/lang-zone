@@ -1575,12 +1575,46 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> Strin
                 n.to_string() + " { ".to_string() + kwarg_pairs_str(a, fn_raises) + " }".to_string()
             elif is_comp_macro(n):
                 gen_comp_macro(n, a, fn_raises)
+            elif is_cast_call(n, a):
+                gen_cast_call(n, a, fn_raises)
             else:
                 n.to_string() + "(".to_string() + call_args_list(a, fn_raises) + ")".to_string()
         case _ => gen_expr(c, fn_raises) + "(".to_string() + call_args_list(a, fn_raises) + ")".to_string()
 
 def is_struct_ctor(n: str, a: List<Expr>, t: IrType) -> bool =
     starts_upper(n) and all_kwarg_args(a) and irtype_named_path(t, n)
+
+// BUG-477：内建类型转换 `str(x)` / `int(x)` / `f64(x)`。rs-lz 此前走通用分支原发
+// `str(x)`（E0423 expected function, found builtin type `str`）/ `int(x)`（E0425
+// cannot find function）/ `f64(x)`。对齐原生 expr_gen.rs:1876 的规则：
+//   str(x)  → 集合走 `format!("{:?}", x)`（无 Display），标量走 `format!("{}", x)`
+//   int(x)  → 字符串走 `(x).parse::<i64>().unwrap()`，否则 `(x as i64)`
+//   f64(x)  → 字符串走 `(x).parse::<f64>().unwrap()`，否则 `(x as f64)`
+def is_cast_call(n: str, a: List<Expr>) -> bool =
+    (n == "str" or n == "int" or n == "f64" or n == "float") and a.len() >= 1
+
+def gen_cast_call(n: str, a: List<Expr>, fn_raises: MaybeIrType) -> String =
+    if n == "str":
+        if is_collection_irtype(expr_ty(a[0].clone())):
+            "format!(\"{:?}\", ".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
+        else:
+            "format!(\"{}\", ".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
+    elif n == "int":
+        if is_string_irtype(expr_ty(a[0].clone())):
+            "(".to_string() + gen_expr(a[0].clone(), fn_raises) + ").parse::<i64>().unwrap()".to_string()
+        else:
+            "(".to_string() + gen_expr(a[0].clone(), fn_raises) + " as i64)".to_string()
+    else:
+        if is_string_irtype(expr_ty(a[0].clone())):
+            "(".to_string() + gen_expr(a[0].clone(), fn_raises) + ").parse::<f64>().unwrap()".to_string()
+        else:
+            "(".to_string() + gen_expr(a[0].clone(), fn_raises) + " as f64)".to_string()
+
+def is_collection_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: ar) =>
+            p == "Vec" or p == "List" or p == "HashMap" or p == "HashSet" or p == "Dict" or p == "Set"
+        case _ => false
 
 def irtype_named_path(t: IrType, n: str) -> bool =
     match t:

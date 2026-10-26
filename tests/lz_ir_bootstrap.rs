@@ -880,6 +880,112 @@ def main() =
     );
 }
 
+// BUG-477 回归：内建类型转换 `str(x)` / `int(x)` / `f64(x)` 被 rs-lz 原发成函数调用
+// （E0423 expected function, found builtin type `str` / E0425 cannot find function）。
+// 原生 expr_gen.rs:1876 走类型转换分支：str→format!，int→parse/as i64，f64→parse/as f64。
+// 断言 rs-lz 产物含 format!("{}" / as i64 / parse，rustc 编译运行输出 42。
+#[test]
+fn rs_lz_builtin_type_cast_conversions() {
+    let source = r#"
+def main() =
+    let a = "42"
+    let b = int(a)
+    print(b)
+    let c = int(3.9)
+    print(c)
+    let d = "3.14"
+    let e = f64(d)
+    print(e)
+    let g = str(123)
+    print(g)
+    let h = str(2.5)
+    print(h)
+    let i = str([1, 2, 3])
+    print(i)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_cast");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    // int(str) → parse::<i64>().unwrap()（原生 E0605 规避）
+    assert!(
+        text.contains(".parse::<i64>().unwrap()"),
+        "int(str) 未走 parse（E0605）:\n{}",
+        text
+    );
+    // int(f64) → as i64
+    assert!(
+        text.contains(" as i64)"),
+        "int(f64) 未走 as i64:\n{}",
+        text
+    );
+    // f64(str) → parse::<f64>().unwrap()
+    assert!(
+        text.contains(".parse::<f64>().unwrap()"),
+        "f64(str) 未走 parse:\n{}",
+        text
+    );
+    // str(int/f64) 标量 → format!("{}", ..)
+    assert!(
+        text.contains("format!(\"{}\", 123i64)"),
+        "str(int) 未走 Display format!:\n{}",
+        text
+    );
+    // str(Vec) 集合 → format!("{:?}", ..)
+    assert!(
+        text.contains("format!(\"{:?}\", vec!["),
+        "str(Vec) 未走 Debug format!（E0277）:\n{}",
+        text
+    );
+
+    // rustc 编译运行出 42
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &text).expect("write rs-lz .rs");
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "42\n3\n3.14\n123\n2.5\n[1, 2, 3]",
+        "rs-lz 转换运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
 fn rs_lz_inherent_method_emits_impl_block() {
     let source = r#"
 struct Point =

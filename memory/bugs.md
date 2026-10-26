@@ -2900,3 +2900,24 @@ match 解构端 `let x = *x;`。
 E0072 与构造端 E0308 已解。残留：match 解构端缺 `let l = *l;`（递归类型递归 match 仍 E0308）。
 修复需在纯函数 codegen 线程化类型注册表（fn_raises 同型 180 处），单独立项。
 commit：1fdf50c / 回归测试：rs_lz_recursive_enum_boxes_fields
+
+## BUG-477 [high] rs-lz 把内建类型转换 `str(x)`/`int(x)`/`f64(x)` 原发成函数调用
+
+现象：`--emit=rs-lz` 对 `str(self.x)` 生成 `str(self.x.clone())` → rustc E0423
+"expected function, found builtin type `str`"；`int(x)`/`f64(x)` 同样原发成
+同名函数调用 → E0425。native 走类型转换分支（expr_gen.rs:1876-1957）。
+根因：lz_codegen_lib.lz 的 `gen_call` 只有 print/len/set!/sorted/reversed/
+min/max/sum/abs/zip/Dict/Set/结构体构造/comp 宏等特例，兜底 else 直接
+`n + "(" + args + ")"`，未识别 str/int/f64/float 是内建类型名。
+修复：新增 `is_cast_call` + `gen_cast_call` 在 gen_call 兜底前拦截：
+  str(x)  → 集合（Vec/List/HashMap/HashSet/Dict/Set）`format!("{:?}", x)`，
+            标量 `format!("{}", x)`（原生 is_collection_type + Display/Debug）
+  int(x)  → 字符串 `(x).parse::<i64>().unwrap()`，否则 `(x as i64)`
+  f64/float(x) → 字符串 `(x).parse::<f64>().unwrap()`，否则 `(x as f64)`
+探针 _probes/rslz4/cast.lz 七种形态（int(str)/int(f64)/f64(str)/f64(int)/
+str(int)/str(f64)/str(Vec)）rs-lz 产物 main 与 native 逐字节一致，
+运行输出 `42/3/3.14/7.0/123/2.5/[1, 2, 3]` 与预期相符。
+未覆盖：char 循环变量的 `int(c)`（原生 str_loop_vars 登记走 as i64，LZ 纯函数
+codegen 无该表，极少见）；用户 struct 的 `__str__`/`__int__`/`__float__` 缺口魔法
+（原生 is_known_type 表 LZ 无，罕见，留待类型注册表立项一并处理）。
+回归测试：rs_lz_builtin_type_cast_conversions（编译 + 运行断言）
