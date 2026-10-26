@@ -4087,6 +4087,29 @@ impl CodeGen {
                 // BUG-313：`lst.reversed()` E0599 no method named `reversed` on Vec
                 let recv_is_vec_like = matches!(&receiver.ty, IrType::Named { path, .. }
                     if path == "List" || path == "Vec" || path == "list");
+                // BUG-438：`.to_list()` 在迭代器链（`v.iter().cloned()`）上直发
+                // `.to_list()` → E0599 no method named `to_list` on Cloned<I>；应为
+                // `.collect::<Vec<_>>()`。List/Vec 接收者已是 Vec，返回 clone
+                //（非消费，LZ 值语义）。自定义 struct 上的同名 `to_list` 方法（如
+                // LinkedList::to_list）不得被劫持（`ll.to_list()` 是用户方法，直发
+                // `.collect()` → E0599 LinkedList 非 Iterator，FIND_BUG/lib_linked_list
+                // 实测）。
+                if method == "to_list" && args_s.is_empty() && recv_is_vec_like {
+                    return format!("({}).clone()", recv);
+                }
+                if method == "to_list" && args_s.is_empty() {
+                    let rtn = match &receiver.ty {
+                        IrType::Named { path, .. } => path.clone(),
+                        _ => String::new(),
+                    };
+                    let has_custom_to_list = self
+                        .struct_method_names_map
+                        .get(&rtn)
+                        .map_or(false, |s| s.contains("to_list"));
+                    if !has_custom_to_list {
+                        return format!("({}).collect::<Vec<_>>()", recv);
+                    }
+                }
                 let recv_is_set_like = matches!(&receiver.ty, IrType::Named { path, .. }
                     if path == "Set" || path == "HashSet");
                 if recv_is_vec_like {
@@ -4098,6 +4121,12 @@ impl CodeGen {
                         // LZ .unique() → lz_builtins::unique(lst.clone())
                         "unique" => {
                             return format!("unique({}.clone())", recv);
+                        }
+                        // LZ .sorted() → lz_builtins::sorted(lst.clone())。
+                        // BUG-438：Rust std 无 `Vec::sorted`（需 itertools 或 sort 就地），
+                        // 直发 `v.sorted()` → E0599；lz_builtins 提供 sorted(IntoIterator)。
+                        "sorted" => {
+                            return format!("sorted({}.clone())", recv);
                         }
                         // LZ .index_of(value) → ListExt::lz_index(&value)
                         // 返回 Option<i64>（LZ `Option<int>`），不做 unwrap_or 平铺——
@@ -4836,6 +4865,26 @@ impl CodeGen {
                     // 也走普通方法调用（解析到扩展 trait 方法），不命中本特判。
                     let recv_is_list = matches!(&receiver.ty, IrType::Named { path, .. }
                         if path == "List" || path == "Vec" || path == "Array");
+                    // BUG-436：Range（`0..n`，Rust `std::ops::Range<i64>`）本身已是
+                    // Iterator，无需 `.iter().cloned()`，但 `.filter()`/`.map()` 产出
+                    // Filter/Map 迭代器，赋给 LZ 值语义的 List（Vec）返回/变量时 rustc
+                    // E0308 mismatched types（原生此前漏 `.collect::<Vec<_>>()`）。
+                    // Range 的 filter 闭包参数是 &Item → |&x|（strip_lambda_type_with_ref
+                    // 已处理）；map 闭包参数是 owned Item。
+                    let recv_is_range = matches!(&receiver.ty, IrType::Named { path, .. }
+                        if path == "Range" || path == "RangeInclusive");
+                    if (method == "filter" || method == "map") && args_s.len() == 1 && recv_is_range
+                    {
+                        let lambda_arg = if method == "filter" {
+                            strip_lambda_type_with_ref(&args_s[0])
+                        } else {
+                            args_s[0].clone()
+                        };
+                        return format!(
+                            "({}).{}({}).collect::<Vec<_>>()",
+                            recv, method, lambda_arg
+                        );
+                    }
                     if (method == "filter" || method == "map") && args_s.len() == 1 && recv_is_list
                     {
                         // 区分「类型自带扩展方法」（ListExt::filter/map，闭包参数 &T，

@@ -1158,6 +1158,31 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         "(".to_string() + recv0 + ").iter().min().cloned()".to_string()
     elif m == "max" and a.len() == 0 and is_list_irtype(expr_ty(r)):
         "(".to_string() + recv0 + ").iter().max().cloned()".to_string()
+    elif m == "sorted" and a.len() == 0 and is_list_irtype(expr_ty(r)):
+        // BUG-438：Rust std 无 `Vec::sorted` → E0599；lz_builtins 提供自由函数
+        // `sorted(impl IntoIterator<Item=T>) -> Vec<T>`（builtins.rs），原生渲染
+        // `sorted(v.clone())`（clone 保留接收者所有权，LZ 值语义）。rs-lz 此前透传
+        // `v.sorted()` → E0599。
+        "sorted(".to_string() + recv0 + ".clone())".to_string()
+    elif m == "reversed" and a.len() == 0 and is_list_irtype(expr_ty(r)):
+        // BUG-438 同族：`Vec::reversed` 不存在 → E0599；lz_builtins::reversed(IntoIterator)。
+        "reversed(".to_string() + recv0 + ".clone())".to_string()
+    elif m == "to_list" and a.len() == 0 and (is_list_irtype(expr_ty(r)) or is_iterator_irtype(expr_ty(r))):
+        // BUG-438 同族：`.to_list()` 在迭代器链（`v.iter().cloned()`）上直发
+        // `.to_list()` → E0599 no method named `to_list` on Cloned<I>；应为
+        // `.collect::<Vec<_>>()`。List/Vec 接收者已是 Vec，返回 clone（非消费）。
+        // 自定义 struct 上的同名 `to_list`（如 LinkedList::to_list）不满足上方守卫，
+        // 自然落通用方法分支（FIND_BUG/lib_linked_list 实测）。
+        if is_list_irtype(expr_ty(r)):
+            "(".to_string() + recv0 + ").clone()".to_string()
+        else:
+            "(".to_string() + recv0 + ").collect::<Vec<_>>()".to_string()
+    elif m == "iter" and a.len() == 0 and is_list_irtype(expr_ty(r)):
+        // BUG-438 同族：LZ `v.iter()` 值语义产 owned 元素，但 rs-lz 透传 `v.iter()`
+        // 落到 Rust std `slice::Iter`（Item=&T），后续 `.collect::<Vec<_>>()` 得
+        // Vec<&T> → E0308 mismatched types。原生 expr_gen.rs 对集合 `.iter()` 补
+        // `.cloned()`（无自定义 iter 时）转 T。此处对齐：`({recv}).iter().cloned()`。
+        "(".to_string() + recv0 + ").iter().cloned()".to_string()
     elif m == "map" and a.len() == 1 and is_optres_irtype(expr_ty(r)):
         // BUG-439：`.map()` 在 Option/Result 接收者上是 Option::map/Result::map（直接
         // 作用于内层值），rs-lz 此前与集合共用迭代器 map 分支 → 发
@@ -1216,6 +1241,13 @@ def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeI
         // 直发 `s.remove(2i64)` → E0308 expected `&i64`, found `i64`；原生渲染
         // `s.remove(&2i64)`（与 BUG-449 的 Set.contains 同族）。
         "(".to_string() + recv0 + ").remove(&".to_string() + gen_expr(a[0].clone(), fn_raises) + ")".to_string()
+    elif m == "filter" and a.len() == 1 and is_range_irtype(expr_ty(r)):
+        // BUG-436：Range 已是 Iterator，直接 .filter() 后 .collect::<Vec<_>>()；
+        // 不得插 .iter().cloned()（Range 无 .iter() → E0599）。filter 闭包参数是
+        // &Item → filter_lambda_src 已按 elem（Range→Int，Copy）生成 |&x|。
+        "(".to_string() + recv0 + ").filter(".to_string() + filter_lambda_src(a[0].clone(), elem_irtype(r), fn_raises) + ").collect::<Vec<_>>()".to_string()
+    elif m == "map" and a.len() == 1 and is_range_irtype(expr_ty(r)):
+        "(".to_string() + recv0 + ").map(".to_string() + expr_cs_list(a, fn_raises) + ").collect::<Vec<_>>()".to_string()
     elif m == "filter" and a.len() == 1 and is_list_irtype(expr_ty(r)):
         // BUG-455：集合迭代家族（filter/map/fold/join）只在 List/Vec 接收者上生效，
         // 自定义 struct 上的同名方法不得被劫持（与 sum/min/max 同族，原生 expr_gen.rs
@@ -1267,13 +1299,27 @@ def is_list_irtype(t: IrType) -> bool =
         case IrType.Named(path: p, args: a) => p == "List" || p == "Vec"
         case _ => false
 
+// BUG-436：`0..n` 的 IR 类型是 Named("Range")（无 args，元素恒为 int）。Range 本身已是
+// Rust Iterator，`.filter()`/`.map()` 直接可调，无需 `.iter().cloned()`（Range 无 .iter()
+// → E0599）；但结果须 `.collect::<Vec<_>>()`（赋 List 返回/变量时 Filter 迭代器 ≠ Vec，
+// → E0308）。
+def is_range_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: a) => p == "Range" || p == "RangeInclusive"
+        case _ => false
+
 def elem_irtype(r: Expr) -> IrType =
     match expr_ty(r):
         case IrType.Named(path: p, args: ar) =>
             if ar.len() > 0:
                 ar[0].clone()
             else:
-                IrType.Any
+                // BUG-436：Range 无 args，元素恒为 int（infer.rs 同口径）——
+                // filter_lambda_src 依赖 is_copy_elem 决定 `|&x|` 模式。
+                if p == "Range" || p == "RangeInclusive":
+                    IrType.Int
+                else:
+                    IrType.Any
         case _ => IrType.Any
 
 def is_copy_elem(t: IrType) -> bool =
@@ -1344,6 +1390,15 @@ def is_set_irtype(t: IrType) -> bool =
 def is_dict_irtype(t: IrType) -> bool =
     match t:
         case IrType.Named(path: p, args: a) => p == "Dict" || p == "HashMap"
+        case _ => false
+
+def is_iterator_irtype(t: IrType) -> bool =
+    // BUG-438：`.iter()`（infer.rs:1196）返回 IrType::Named { path:"Iterator" }，
+    // Range 亦是 Iterator。识别这两种类型以决定 `.to_list()` 是否发
+    // `.collect::<Vec<_>>()`（自定义 struct 如 LinkedList 有自己的 to_list，不得
+    // 被劫持 —— FIND_BUG/lib_linked_list 实测 `ll.to_list()` 非 Iterator）。
+    match t:
+        case IrType.Named(path: p, args: a) => p == "Iterator" || p == "Range" || p == "RangeInclusive"
         case _ => false
 
 def is_str_returning_method(m: str) -> bool =

@@ -2351,7 +2351,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 回归：cargo test -j 4 -- --test-threads=1 全绿（lib 463/463 + 各集成套件含 rs-lz↔native 字节判据 D1 门禁，42 个 suite 无失败）；135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0。
 
 说明：`v.min() + v.max()` 会被 LZ 前端拒绝（Option 不能直接参与算术），属语言语义，非本 bug；`.min()/.max()` 在 LZ 中返回 Option<int>，与 `.iter().min().cloned()`（Option<i64>）一致。
-## BUG-436 [2026-10-24T13:54:59Z] [medium] OPEN
+## BUG-436 [2026-10-24T13:54:59Z] [medium] FIXED
 - summary: [rule:E0599] rs-lz 对 Range 接收者插 `.iter()`，Range 无该方法；原生同构造又漏 `.collect()`（E0308），需协同对齐
 - detail: rs-lz 的 gen_method_call 对 `filter`/`map`/`join` 等集合迭代方法一律先插 `(<recv>).iter().cloned()`（或 `.into_iter()`），但当接收者是 `Range`（LZ 里 `0..n` 的字面量，Rust 端 `std::ops::Range<i64>`）时，Range 本身已实现 Iterator 却没有 `.iter()` 方法 ⇒ rustc E0599 no method named `iter` found for struct `std::ops::Range<Idx>`。
 
@@ -2380,7 +2380,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 - TEMP/probe/sweep23/g9c_ops.lz：修复前 RSLZ `v.contains(3i64)` → E0308；修复后 `let has3: bool = (v).contains(&3i64);`，两后端均 `XBX|2|`（sops=XBX、lops=2，含 trim/replace/to_upper/contains/push/is_empty/if-表达式）。
 - TEMP/probe/sweep23/g9d_contains.lz（String 列表 contains、复合实参 contains）：两后端产出逐字符一致（`v.contains(&s)`、`v.contains(&a + b)`）。复合实参 `&a + b` 需 `&(a + b)`、是原生侧既有缺口（原生同样发 `&a + b` → E0308），rs-lz 保持与原生逐字符对齐、不擅自加括号，以保 D1 字节一致门禁；故本 bug 仅覆盖简单/变量实参情形。
 回归：cargo test -j 4 -- --test-threads=1 全绿（41 suite / 937 passed / 0 failed，含 rs-lz↔native 字节判据 D1 门禁）；135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0。
-## BUG-438 [2026-10-24T14:22:22Z] [medium] OPEN
+## BUG-438 [2026-10-24T14:22:22Z] [medium] FIXED
 - summary: [rule:E0599] `.sorted()/.reversed()` 及迭代器 `.to_list()` 两后端均直发原生名（无该 Rust 方法），原生侧缺口待补
 - detail: LZ 的 `v.sorted()`（`v: List<int>`）两后端都直发 `v.sorted()` → rustc E0599 no method named `sorted` found for struct `Vec<i64>`（Rust 无 `Vec::sorted`，需 `v.iter().sorted()` / `.into_iter().sorted()`，或改用 `sort()`/`sort_unstable()`）。原生（`src/ir/codegen/*`，本轮为并发代理脏文件）与 rs-lz 都未接管该方法，属原生侧缺口、rs-lz 只是镜像继承（两后端产物逐字符一致，D1 门禁不破）。
 
@@ -3025,3 +3025,40 @@ assoc_types 表，命中则发 `Self::{path}`（decl_gen.rs:2421-2423）。
   残留 D1 形式差：rs-lz 给 tuple 形参加 `mut t`（BUG-475/478 的 defined-fn registry
   缺口，参数是否被改写未判定），两侧均编译通过、运行一致。
 - 回归测试：rs_lz_tuple_field_access_types_correctly
+
+## BUG-436 修复 [2026-10-27T01:50:00+08:00] 状态：FIXED
+现象（复核）：`def evens(n:int)->List<int> = let r=0..n; r.filter(|x| x%2==0)`。
+原生发 `(r).filter(move |&x| { x%2i64==0i64 })`（Range 已是 Iterator，直接可调）但
+漏 `.collect::<Vec<_>>()` → E0308 Filter 迭代器 ≠ Vec。rs-lz 此前发
+`r.filter(move |x| ...)`（本次复核未见 .iter()，说明 E0599 侧已被先前修复消掉）
+同样漏 collect → E0308。
+根因：expr_gen.rs 的 filter/map 特判只识别 List/Vec/Array（recv_is_list），Range
+落入通用分支 `({recv}).filter(...)`；lz_codegen_lib.lz 的 filter/map 特判只
+`is_list_irtype`，Range 落入通用分支。
+修复：expr_gen.rs 增加 `recv_is_range`（Named path == "Range"/"RangeInclusive"），
+filter/map 命中即发 `({recv}).{method}({arg}).collect::<Vec<_>>()`（filter 闭包用
+strip_lambda_type_with_ref 出 `|&x|`，map 闭包 owned）；lz_codegen_lib.lz 增加
+`is_range_irtype` helper 与对应 filter/map 分支（filter 用 filter_lambda_src，
+其依赖的 elem_irtype 对 Range 补返回 IrType.Int，因 Range 无 args，infer.rs 同
+口径元素恒为 int，否则 elem=Any 导致 is_copy_elem=false 出 `|x|` 而闭包参数实为
+&i64 → E0308）。
+验证：探针 _probes/rslz4/g436_range_filter.lz 双路编译运行输出 `[0, 2, 4]` 一致；
+残留 D1 形式差仅 `Vec<i64>` vs `List<i64>`（alias）与单表达式 lambda 花括号。
+回归测试：rs_lz_range_filter_collects
+
+## BUG-438 修复 [2026-10-27T02:20:00+08:00] 状态：FIXED
+现象（复核）：`v.sorted()`/`v.reversed()`（v: List<int>）与 `v.iter().to_list()`。
+原生发 `v.sorted()`（E0599 no method named `sorted` on Vec）、`reversed(v.clone())`
+（已正确）、`(v).iter().cloned().to_list()`（E0599 no method named `to_list` on
+Cloned<I>）。rs-lz 三处全透传同名方法 → E0599。
+根因：expr_gen.rs 的 vec_like match 只处理 reversed/unique（无 sorted），且无
+to_list 分支（落通用方法直发）。rs-lz gen_method_call 无 sorted/reversed/to_list/
+iter 分支（iter 落通用 → std slice::Iter Item=&T，后续 collect 得 Vec<&T> E0308）。
+修复：expr_gen.rs vec_like match 加 `sorted => sorted(v.clone())`（lz_builtins
+free fn sorted(IntoIterator)），并在 vec_like 块前加 to_list 分派（List/Vec 接收者
+`({recv}).clone()`，否则 `({recv}).collect::<Vec<_>>()`）。lz_codegen_lib.lz
+gen_method_call 在 max 后加 sorted/reversed/to_list/iter 四分支，与原生同形态
+（iter 补 `.cloned()`：`({recv}).iter().cloned()`）。
+验证：探针 _probes/rslz4/g438_sorted.lz 双路编译运行输出 `[1, 2, 3] / [2, 1, 3] /
+[3, 1, 2]` 一致；残留 D1 形式差仅 `Vec<i64>` vs `List<i64>`（alias）。
+回归测试：rs_lz_sorted_reversed_to_list_compile_and_run

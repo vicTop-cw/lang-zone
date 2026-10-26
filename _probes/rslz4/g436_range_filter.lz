@@ -1,0 +1,6 @@
+def evens(n: int) -> List<int> =
+    let r = 0..n
+    r.filter(|x| x % 2 == 0)
+
+def main() =
+    print(evens(6))
