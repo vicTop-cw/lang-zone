@@ -664,6 +664,99 @@ def main() =
     let _ = fs::remove_dir_all(&work);
 }
 
+// BUG-470 回归：rs-lz 的 Stmt::Match scrutinee 未对齐原生 stmt_gen.rs:2274 的
+// Str → `.as_str()` 变换。String scrutinee 直接 match &str 字面量模式报 E0308。
+// 断言 rs-lz 产物含 `match name.as_str() {` 且 rustc 可编译运行出正确结果。
+#[test]
+fn rs_lz_match_scrutinee_as_str() {
+    let source = r#"
+def kind(name: str) -> str =
+    match name:
+        case "hello": return "greet"
+        case _: return "other"
+
+def main() =
+    print(kind("hello"))
+    print(kind("zzz"))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_scrut_str");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+    let rs_path = work.join("s1_input.rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "常规 codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = fs::read(&rs_path).expect("read native .rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let n_str = String::from_utf8_lossy(&native_rs);
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        n_str.contains("match name.as_str()"),
+        "参考实现未发 `match name.as_str()`（探针失效？）"
+    );
+    assert!(
+        l_str.contains("match name.as_str()"),
+        "rs-lz 未对齐原生 scrutinee as_str（BUG-470 回归）：\n{}",
+        l_str.lines().find(|l| l.contains("match")).unwrap_or("(无 match)")
+    );
+
+    // rs-lz 产物须过 rustc 且运行输出正确
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "greet\nother",
+        "rs-lz 产物运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
 // BUG-466 回归：LZ 侧 IrType/Item 枚举是 Rust 侧（types.rs / node.rs）的子集，
 // 新增变体未镜像会令 --emit=ir-lz 生成的 Rust 编译失败（rustc E0599，如
 // "no variant named Ext/EmbedBlock found for enum"）。此处静态断言确保

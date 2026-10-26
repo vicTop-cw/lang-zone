@@ -474,6 +474,42 @@ def arg_pat_list(ps: List<Pattern>) -> String =
     else:
         "(".to_string() + pat_list(ps) + ")".to_string()
 
+// BUG-470：对齐原生 helpers.rs:59 pattern_is_list + stmt_gen.rs:2311——任一臂模式
+// （含 Tuple/Struct/Enum/EnumNamed 嵌套）是列表模式且 scrutinee 是 List/Vec/Tuple，
+// 则 scrutinee 追加 `.as_slice()`。原生把 List<int> 编为 Vec<i64>，Rust 数组模式
+// `[a, ..rest]` 只能匹配 slice，否则 E0529 expected array or slice。
+def pattern_is_list(p: Pattern) -> bool =
+    match p:
+        case Pattern.List(elems: _): true
+        case Pattern.Tuple(elems: es): any_pat_is_list(es)
+        case Pattern.Struct(name: _, fields: fs): any_field_pat_is_list(fs)
+        case Pattern.Enum(enum_name: _, variant: _, args: as_): any_pat_is_list(as_)
+        case Pattern.EnumNamed(enum_name: _, variant: _, fields: fs): any_field_pat_is_list(fs)
+        case _: false
+
+def any_pat_is_list(ps: List<Pattern>) -> bool =
+    let mut found = false
+    for p in ps:
+        if pattern_is_list(p): found = true
+    found
+
+def any_field_pat_is_list(fs: List<(str, Pattern)>) -> bool =
+    let mut found = false
+    for f in fs:
+        if pattern_is_list(f.1): found = true
+    found
+
+def scrut_is_list(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: _): p == "List" or p == "Vec" or p == "Tuple"
+        case _: false
+
+def any_arm_pat_is_list(arms: List<(Pattern, MaybeExpr, BlockIR)>) -> bool =
+    let mut found = false
+    for arm in arms:
+        if pattern_is_list(arm.0): found = true
+    found
+
 def gen_match_arms(arms: List<(Pattern, MaybeExpr, BlockIR)>, fn_raises: MaybeIrType) -> String =
     let mut out: String = "".to_string()
     for idx in 0..arms.len():
@@ -1742,19 +1778,20 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
             // BUG-420：值位置（函数尾/块尾）的 match 直出，各分支体经 gen_value_block
             // 产出值；语句位置用 `let _ = match …;` 丢弃值（否则「非 () 类型的表达式
             // 语句」E0308）。对齐原生：语句 match → `let _ = match …`。
-            // BUG-469：对齐原生 stmt_gen.rs:2274-2308 的 scrutinee 变换——
-            //   纯 Var（非 self、非 Str）→ `.clone()` 防局部移动 E0382；self → `self.clone()`。
-            //   原生对 Str 走 `.as_str()`（BUG-284）、List/Vec/Tuple 走 `.as_slice()`，
-            //   这两支本库尚未覆盖，Str 保持原样以免把 String 错转 &str，留 TODO。
+            // BUG-469/470：对齐原生 stmt_gen.rs:2274-2312 的 scrutinee 变换（顺序不可颠倒）——
+            //   ① Str → `.as_str()`（BUG-284，String scrutinee 对 &str 字面量模式 E0308）
+            //   ② 纯 Var（非 self）→ `.clone()` 防局部移动 E0382；self → `self.clone()`
+            //   ③ List/Vec/Tuple scrutinee + 任一臂含列表模式 → 再追加 `.as_slice()`（E0529）
             let base_s = gen_expr(s, fn_raises)
-            let scrut_s = match expr_ty(s):
-                case IrType.Str => base_s
+            let base_sc = match expr_ty(s):
+                case IrType.Str => base_s + ".as_str()".to_string()
                 case _ =>
                     match s:
                         case Expr.Var(name: n, ty: _):
                             if n == "self": "self.clone()".to_string()
                             else: base_s + ".clone()".to_string()
                         case _: base_s
+            let scrut_s = base_sc + ".as_slice()".to_string() if (scrut_is_list(expr_ty(s)) and any_arm_pat_is_list(as_)) else base_sc
             if is_tail:
                 "match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises) + "}".to_string()
             else:
