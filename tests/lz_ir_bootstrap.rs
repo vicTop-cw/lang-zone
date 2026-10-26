@@ -569,3 +569,37 @@ def main() =
 
     let _ = fs::remove_dir_all(&work);
 }
+
+// BUG-466 回归：LZ 侧 IrType/Item 枚举是 Rust 侧（types.rs / node.rs）的子集，
+// 新增变体未镜像会令 --emit=ir-lz 生成的 Rust 编译失败（rustc E0599，如
+// "no variant named Ext/EmbedBlock found for enum"）。此处静态断言确保
+// Ext / EmbedBlock 变体及其 display 分支始终存在，且格式串与原生 display.rs 一致。
+#[test]
+fn lz_ir_lib_mirrors_ext_and_embedblock() {
+    let lib = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ir/lz_ir_lib.lz"),
+    )
+    .expect("read lz_ir_lib.lz");
+
+    // IrType::Ext：types.rs 有 Ext，lz_codegen.rs:961 会发射 `IrType.Ext`
+    assert!(
+        lib.lines().any(|l| l.trim_end() == "    Ext"),
+        "lz_ir_lib.lz 缺 IrType.Ext 变体 (types.rs 有 Ext, lz_codegen.rs 会发射 IrType.Ext)"
+    );
+    assert!(
+        lib.contains("case IrType.Ext => \"Ext\".to_string()"),
+        "IrType.Ext 显示分支缺失或格式漂移 (须对齐 display.rs:23 IrType::Ext 输出 Ext)"
+    );
+
+    // Item::EmbedBlock：node.rs 有 EmbedBlock，lz_codegen.rs:403 会发射 Item.EmbedBlock(lang, src_len)
+    assert!(
+        lib.contains("EmbedBlock(lang: str, src_len: int)"),
+        "lz_ir_lib.lz 缺 Item.EmbedBlock 变体 (node.rs 有 EmbedBlock, lz_codegen.rs:403 会发射)"
+    );
+    assert!(
+        lib.contains(
+            "\"embed(\".to_string() + lg + \") { \" + n.to_string() + \" chars }\""
+        ),
+        "Item.EmbedBlock 显示分支缺失或格式漂移 (须对齐 display.rs:735 embed(lang) 后接 空格+花括号+数字+空格+chars+花括号)"
+    );
+}

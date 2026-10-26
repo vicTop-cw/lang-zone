@@ -14,6 +14,7 @@ enum IrType:
     Never
     Any
     Self_
+    Ext
     Named(path: str, args: List<IrType>)
     Opt(inner: IrType)
     Res(ok: IrType, err: IrType)
@@ -144,6 +145,7 @@ enum Item:
     Impl(trait_: MaybeIrType, for_type: IrType, method_names: List<str>)
     CheckerBlock(name: str, ps_name: MaybeStr)
     Test(name: str, body: List<Stmt>)
+    EmbedBlock(lang: str, src_len: int)
 
 // ── IrModule 顶层 ──
 struct IrModule =
@@ -163,6 +165,7 @@ def display_type(t: IrType) -> String =
         case IrType.Never => "!".to_string()
         case IrType.Any => "?".to_string()
         case IrType.Self_ => "Self".to_string()
+        case IrType.Ext => "Ext".to_string()
         case IrType.Generic(name: g) => g.to_string()
         case IrType.Named(path: p, args: a) =>
             p + ("<" + type_list(a) + ">" if a.len() > 0 else "")
@@ -514,6 +517,8 @@ def display_item(it: Item) -> String =
             "checker block '".to_string() + n + "[ps:".to_string() + opt_debug(p) + "]".to_string()
         case Item.Test(name: n, body: b) =>
             "test ".to_string() + n + " ".to_string() + stmt_block(b)
+        case Item.EmbedBlock(lang: lg, src_len: n) =>
+            "embed(".to_string() + lg + ") { " + n.to_string() + " chars }"
 
 def generic_sig(gs: List<str>) -> String =
     if gs.len() == 0:
