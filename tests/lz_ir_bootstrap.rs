@@ -1396,3 +1396,85 @@ def main() =
 
     let _ = fs::remove_dir_all(&work);
 }
+
+#[test]
+fn rs_lz_trait_assoc_type_return_self_qualified() {
+    // BUG-434：trait 方法返回关联类型时，原生 codegen 发裸名 `-> Item`，
+    // rustc E0425 cannot find type `Item` in this scope；应为 `-> Self::Item`。
+    // rs-lz（rust_type_assoc）已正确。此处验 rs-lz 产物含 `Self::Item`，
+    // 且原生也发 `Self::Item` 并编译通过。
+    let source = r#"
+trait BoxLike =
+    type Item
+    def item(self) -> Item
+
+def main() =
+    print("ok")
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_trait_assoc");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("ta_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 原生 codegen：应发 `Self::Item` 且编译通过
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    assert!(native_rs.exists(), "native .rs 未生成");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("fn item(&self) -> Self::Item;"),
+        "BUG-434：native 未发 `Self::Item`（E0425 cannot find type `Item`）:\n{}",
+        native_src
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let native_exe = work.join("ta_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(
+        rc.status.success(),
+        "BUG-434 回归：native 产物 rustc 失败（trait assoc 类型返回缺 Self::）: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    // rs-lz：应发 `Self::Item`
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("fn item(&self) -> Self::Item;"),
+        "rs-lz 未发 `Self::Item`:\n{}",
+        text
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}

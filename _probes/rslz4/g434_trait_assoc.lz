@@ -1,0 +1,6 @@
+trait BoxLike =
+    type Item
+    def item(self) -> Item
+
+def main() =
+    print("ok")

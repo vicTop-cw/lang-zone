@@ -1548,9 +1548,16 @@ impl CodeGen {
             .generics
             .iter()
             .map(|g| {
-                let mut parts: Vec<String> = vec!["Clone".into(), "std::fmt::Debug".into()];
+                let mut parts: Vec<String> = vec![
+                    self.gen_trait_bound(&IrType::named("Clone")),
+                    "std::fmt::Debug".into(),
+                ];
                 for b in &g.bounds {
-                    parts.push(self.rust_type(b));
+                    // 用户约束是 trait 名（如 `I: Iterator`），必须走 gen_trait_bound
+                    // 映射（Iterator→std::iter::Iterator、Eq→std::cmp::Eq 等）；rust_type
+                    // 会把 trait 名渲染成 `impl Trait`（BUG-389 一等 fn 值口径），
+                    // 出现在泛型约束位置即 E0220/E0782 expected a trait, found type。
+                    parts.push(self.gen_trait_bound(b));
                 }
                 if union_eq.contains(&g.name) || union_ord.contains(&g.name) {
                     parts.push("PartialEq".into());
@@ -1560,10 +1567,89 @@ impl CodeGen {
                     parts.push("PartialOrd".into());
                     parts.push("Ord".into());
                 }
+                // Dict/HashMap → BTreeMap：impl 头同样需要键位泛型 K: Ord
+                // （gen_generics_impl 已在 struct 定义注入；此处保持一致性，
+                // 否则 `self.dict.clone()` 触发 E0277 the trait bound `K: Ord`）。
+                if self.dict_key_generics.contains(&g.name)
+                    && !parts.iter().any(|p| p.contains("Ord"))
+                {
+                    parts.push("Ord".into());
+                }
                 format!("{}: {}", g.name, parts.join(" + "))
             })
             .collect();
-        format!("<{}>", params.join(", "))
+        let mut out = format!("<{}>", params.join(", "));
+        out
+    }
+
+    /// struct 泛型约束的 where 子句（关联类型投影 `X::Item: Clone` 等无法写入
+    /// 泛型参数括号的约束）。调用处须拼在 impl 目标类型之后：
+    /// `impl<...> Type where ...`。返回含前导空格或空串。
+    fn struct_impl_where(&self, s: &StructDef) -> String {
+        if s.generics.is_empty() {
+            return String::new();
+        }
+        let gen_names: HashSet<String> = s.generics.iter().map(|g| g.name.clone()).collect();
+        let mut assoc_wheres: Vec<String> = Vec::new();
+        for f in &s.fields {
+            Self::collect_item_clone_wheres(&f.ty, &gen_names, &mut assoc_wheres);
+        }
+        if assoc_wheres.is_empty() {
+            return String::new();
+        }
+        let mut seen: HashSet<String> = HashSet::new();
+        let uniq: Vec<String> = assoc_wheres
+            .iter()
+            .filter(|w| seen.insert((*w).clone()))
+            .cloned()
+            .collect();
+        format!(" where {}", uniq.join(", "))
+    }
+
+    /// 收集 struct 字段类型中形如 `X.Item`（X 为 struct 泛型）的关联类型投影宿主，
+    /// 为其追加 `X::Item: std::clone::Clone` where 约束（值语义 clone 关联字段需要）。
+    /// 递归覆盖容器变体（Named args / Opt / Res / Tuple / FnType / Ref / MutRef / Duck）。
+    fn collect_item_clone_wheres(
+        ty: &IrType,
+        gen_names: &HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        match ty {
+            IrType::Named { path, args } => {
+                if let Some((owner, member)) = path.split_once('.') {
+                    if member == "Item" && gen_names.contains(owner) && args.is_empty() {
+                        out.push(format!("{}::Item: std::clone::Clone", owner));
+                    }
+                }
+                for a in args.iter() {
+                    Self::collect_item_clone_wheres(a, gen_names, out);
+                }
+            }
+            IrType::Option(inner)
+            | IrType::Ref(inner)
+            | IrType::MutRef(inner) => Self::collect_item_clone_wheres(inner, gen_names, out),
+            IrType::Result { ok, err } => {
+                Self::collect_item_clone_wheres(ok, gen_names, out);
+                Self::collect_item_clone_wheres(err, gen_names, out);
+            }
+            IrType::Tuple(elems) => {
+                for e in elems.iter() {
+                    Self::collect_item_clone_wheres(e, gen_names, out);
+                }
+            }
+            IrType::Fn { params, ret } => {
+                for p in params.iter() {
+                    Self::collect_item_clone_wheres(p, gen_names, out);
+                }
+                Self::collect_item_clone_wheres(ret, gen_names, out);
+            }
+            IrType::Duck { fields } => {
+                for (_, t) in fields.iter() {
+                    Self::collect_item_clone_wheres(t, gen_names, out);
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn gen_struct_def(&mut self, s: &StructDef) {
@@ -1706,7 +1792,11 @@ impl CodeGen {
         if s.has_new || s.has_init {
             self.buf.push('\n');
             let impl_generics = self.struct_impl_generics(s);
-            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics_plain));
+            let impl_where = self.struct_impl_where(s);
+            self.emit_line(&format!(
+                "impl{} {}{}{} {{",
+                impl_generics, s.name, generics_plain, impl_where
+            ));
             self.indent += 1;
             // 生成 __new__ 函数签名（如有）
             if s.has_new {
@@ -1832,7 +1922,11 @@ impl CodeGen {
             self.buf.push('\n');
             // 为泛型参数添加 Clone + Debug 约束（+ 比较约束，见 struct_impl_generics）
             let impl_generics = self.struct_impl_generics(s);
-            self.emit_line(&format!("impl{} {}{} {{", impl_generics, s.name, generics_plain));
+            let impl_where = self.struct_impl_where(s);
+            self.emit_line(&format!(
+                "impl{} {}{}{} {{",
+                impl_generics, s.name, generics_plain, impl_where
+            ));
             self.indent += 1;
             // 泛型 struct（struct MyIterator<T>）内联方法按泛型上下文处理：
             // Option.None 生成 Option::None 由返回类型推断（magic_methods.lz __next__ E0308）
@@ -2014,6 +2108,12 @@ impl CodeGen {
                 }));
         let saved_extends_iter = self.current_trait_extends_iter;
         self.current_trait_extends_iter = extends_iter;
+        // BUG-434：登记本 trait 的关联类型名，供 trait_sig_type 把裸名（如 `Item`）
+        // 改写为 `Self::Item`，否则 rustc E0425 cannot find type `Item` in this scope。
+        let saved_assoc_types = std::mem::replace(
+            &mut self.current_trait_assoc_types,
+            t.assoc_types.clone(),
+        );
         let supertraits = if t.supertraits.is_empty() {
             String::new()
         } else {
@@ -2272,6 +2372,7 @@ impl CodeGen {
         self.indent -= 1;
         self.emit_line("}");
         self.current_trait_extends_iter = saved_extends_iter;
+        self.current_trait_assoc_types = saved_assoc_types;
     }
 
     /// 生成 trait 方法签名中的类型：`Self.Item`（§五 关联类型引用）→ `Self::Item`，
@@ -2314,6 +2415,12 @@ impl CodeGen {
                     }
                 }
                 if args.is_empty() {
+                    // BUG-434：关联类型以裸名出现（如 `-> Item`）须发 `Self::Item`，
+                    // 否则 rustc E0425 cannot find type `Item` in this scope。与上方
+                    // `Self.Item`（点号）路径分支互补：裸名走 assoc_types 登记表。
+                    if self.current_trait_assoc_types.iter().any(|a| a == path) {
+                        return format!("Self::{}", path);
+                    }
                     self.rust_type(ty)
                 } else {
                     let inner: Vec<String> = args
@@ -2523,11 +2630,12 @@ impl CodeGen {
                             self.gen_param(p)
                         } else if let IrType::Fn { params: fp, ret } = &p.ty {
                             let ps: Vec<String> = fp.iter().map(|pt| self.rust_type(pt)).collect();
-                            // 与 impl 端闭包参数渲染保持一致（均带 `+ 'static`），
-                            // 否则 trait 声明 `impl Fn(&T) -> U` 与 impl 端
-                            // `impl Fn(&T) -> U + 'static` 约束不一致 → E0276。
+                            // 与 impl 端闭包参数渲染保持一致（均带 `+ 'static + Clone`），
+                            // 否则 trait 声明 `impl Fn(&T) -> U + 'static` 与 impl 端
+                            // `impl Fn(&T) -> U + 'static + Clone` 约束不一致 → E0276
+                            // （impl has stricter requirements than trait，set.lz map/filter/fold）。
                             format!(
-                                "{}: impl Fn({}) -> {} + 'static",
+                                "{}: impl Fn({}) -> {} + 'static + Clone",
                                 p.name,
                                 ps.join(", "),
                                 self.rust_type(ret)

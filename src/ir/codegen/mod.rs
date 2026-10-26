@@ -154,6 +154,12 @@ pub struct CodeGen {
     /// 会借用外层闭包的局部变量而外层闭包已返回 → E0373。内层须改 move 捕获
     /// 外层变量的引用（&T 是 Copy）并 clone 出 T。
     parent_lambda_non_move: bool,
+    /// 祖先闭包参数链（进入 Lambda 时 push 当前参数，退出时 pop 恢复）。
+    /// 嵌套闭包（factory_chain `|a| => |b| => x + a + b`）生成时，内层闭包的
+    /// body_refs_noncopy_external 判定需把外层闭包参数并入「参数」集合：
+    /// 外层参数 a 已被外层 move 捕获（实际类型 i64，IR 里却是 Any），若仅按
+    /// 内层参数集判定，a 被误判为非 Copy 外部变量 → 降级非 move → E0373。
+    enclosing_lambda_params: std::cell::RefCell<Vec<String>>,
     /// 当前是否在生成器（iterator/yield）函数内：体内 return 等价 raise（panic）
     in_generator: bool,
     /// 当前是否在生成器构建块（func *:）闭包内：yield → push 到闭包收集器 __bb
@@ -346,6 +352,12 @@ pub struct CodeGen {
     /// 供 trait_sig_type 把 `Self.Item` 完全限定为 `<Self as std::iter::Iterator>::Item`
     /// ——协议 Iterator 已不自带 `type Item`，未限定的 `Self::Item` 会 E0220。
     current_trait_extends_iter: bool,
+    /// 当前正在生成的 trait 的关联类型名列表。BUG-434：trait 方法签名里关联类型
+    /// 以裸名（如 `Item`）出现在返回/形参类型时，原生 codegen 此前直发裸名 →
+    /// rustc E0425 cannot find type `Item` in this scope。Rust 内 `Self::Item` 才可解析，
+    /// rs-lz 侧（rust_type_assoc）已修正，此处对齐。trait 生成循环 set/restore，
+    /// 与 current_trait_extends_iter 同构。
+    current_trait_assoc_types: Vec<String>,
     /// f-string 插值静态判定：当前函数可见的变量名 → IR 类型（形参在 gen_fn_def 登记，
     /// let 绑定在 gen_stmt 的 Let 分支登记）。
     /// `f"{r.name}"` 里 r 是 struct 时，需按 `struct_fields_info` 查 `name` 是否 str——
@@ -415,6 +427,12 @@ pub struct CodeGen {
     pub bridge_registry: Option<crate::bridge::core::BridgeRegistry>,
     /// embed 生成的模块名集合（如 `foo_tnr`），供 gen_use_stmt 自动路由。
     embed_modules: std::collections::HashSet<String>,
+    /// Cli 档 embed 产物（`#[embed(mojo|python|c|...)]`）：摘源码 → 建库 → argv + 序列化。
+    /// Source 档（tnr/rust/rs）**不进这里** —— 它们必须保持既有逐字行为。
+    embed_targets: Vec<crate::embed::EmbedTarget>,
+    /// 产物命名用的源文件路径（由 CLI 显式注入）。None ⇒ 沿用 IrModule 的 file_path/name，
+    /// 故既有 `main_tnr` 一类命名不受影响；设过之后 `calc.lz` 才叫得出 `python_calc`。
+    embed_stem: Option<String>,
     /// 方向 E：`[]` 字面量 + 紧随其后的纯 push 循环 → 预分配容量（Rust 表达式文本）。
     /// 由 gen_block_inner 的相邻语句前瞻写入，空列表字面量发射处 `take` 一次。
     /// gen_expr 走 `&self`（内部 RefCell 承担可变状态），故用 RefCell 而非裸字段。
@@ -471,6 +489,7 @@ impl CodeGen {
             force_stmt_semicolon: false,
             nested_fn_ret: false,
             box_lambda: false,
+            enclosing_lambda_params: std::cell::RefCell::new(Vec::new()),
             top_level_fns: std::collections::HashSet::new(),
             fn_value_carriers: HashMap::new(),
             in_lambda_block: false,
@@ -535,6 +554,7 @@ impl CodeGen {
             struct_field_defaults: std::collections::HashMap::new(),
         dict_key_generics: std::collections::HashSet::new(),
         current_trait_extends_iter: false,
+        current_trait_assoc_types: Vec::new(),
             fstr_var_types: std::collections::HashMap::new(),
             fstr_self_type: None,
             struct_phantom_generics: std::collections::HashMap::new(),
@@ -566,6 +586,8 @@ impl CodeGen {
             unknown_extern_fns: std::collections::HashMap::new(),
             bridge_registry: None,
             embed_modules: std::collections::HashSet::new(),
+            embed_targets: Vec::new(),
+            embed_stem: None,
             // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
             vec_cap_hint: std::cell::RefCell::new(None),
             owned_locals: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -585,8 +607,18 @@ impl CodeGen {
     ///
     /// 不改变生成产物本身（registry 仅登记，不影响 emit 输出），
     /// 调用方可对 registry 做台账落盘与审计（G5）。
-    pub fn generate_with_bridge(
-        &mut self,
+    /// Cli 档 embed 产物：供 CLI 侧落盘与建库步骤取用（codegen 自身不做 IO）。
+    pub fn embed_targets(&self) -> &[crate::embed::EmbedTarget] {
+        &self.embed_targets
+    }
+
+    /// CLI 注入源文件路径 ⇒ Cli 档产物按文件主干命名（`calc.lz` → `python_calc`）。
+    /// Source 档（tnr/rust）的既有命名规则一字不动 —— 它们仍用 IrModule 的 file_path/name。
+    pub fn set_embed_stem(&mut self, path: &str) {
+        self.embed_stem = Some(path.to_string());
+    }
+
+    pub fn generate_with_bridge(        &mut self,
         module: &IrModule,
     ) -> (String, crate::bridge::core::BridgeRegistry) {
         let mut reg = crate::bridge::core::BridgeRegistry::new();
@@ -648,6 +680,7 @@ impl CodeGen {
 
         // P1：收集 embed 生成的模块名，供 gen_use_stmt 自动路由
         self.embed_modules.clear();
+        self.embed_targets.clear();
         {
             let mut ec = crate::ir::embed_collector::EmbedCollector::new();
             ec.collect(module);
@@ -657,6 +690,39 @@ impl CodeGen {
                 .unwrap_or(&module.name);
             for name in ec.module_names(source_name) {
                 self.embed_modules.insert(name);
+            }
+            // 统一抽象（src/embed）：Source 档之外的一律按 Cli 档解析 —— 同语言多块
+            // 与 EmbedCollector 同口径（空行拼接），逐语言出一个产物。
+            // 产物主干优先用 CLI 注入的源文件路径；Source 档的 embed_modules 命名**不受影响**。
+            let cli_source_name = self
+                .embed_stem
+                .clone()
+                .unwrap_or_else(|| source_name.to_string());
+            let stem = crate::embed::base_stem(&cli_source_name);
+            let mut by_lang: Vec<(String, String)> = Vec::new();
+            for item in &module.items {
+                if let Item::EmbedBlock { lang, src, .. } = item {
+                    if crate::embed::is_source_lang(lang) {
+                        continue;
+                    }
+                    let entry = match by_lang.iter().position(|(l, _)| l == lang) {
+                        Some(pos) => {
+                            by_lang[pos].1.push_str("\n\n");
+                            &mut by_lang[pos].1
+                        }
+                        None => {
+                            by_lang.push((lang.clone(), String::new()));
+                            &mut by_lang.last_mut().unwrap().1
+                        }
+                    };
+                    entry.push_str(src);
+                }
+            }
+            for (lang, acc) in &by_lang {
+                if let Some(mut t) = crate::embed::resolve(lang, &cli_source_name, acc) {
+                    t.dir_rel = crate::embed::artifact::dir_rel(&stem, &t.artifact);
+                    self.embed_targets.push(t);
+                }
             }
         }
 
@@ -682,6 +748,34 @@ impl CodeGen {
 
         // 预扫描未定义外部函数（p16_lzi 等跨模块探测用例）
         self.unknown_extern_fns = collect_unknown_extern_fns(module);
+        // Cli 档 embed 的调用面由文件末尾的 __lz_embed 垫片提供，LZ 侧看不见它的名字 ⇒
+        // 上面的扫描会把 `python_calc_add` 当成"未知外部函数"再兜底生成一个 `-> i64 { i64::MAX }`
+        // 同名桩（E0255 重定义 + 静默返回垃圾值）。这里把这些名字从兜底表里摘掉，
+        // 并把返回类型登记进 fn_returns，供 print 正确选 Display/Debug。
+        if !self.embed_targets.is_empty() {
+            for t in &self.embed_targets {
+                for m in t.callable_methods() {
+                    let w = format!("{}_{}", t.artifact, m.name);
+                    self.unknown_extern_fns.remove(w.as_str());
+                    let ty = match m.ret.as_deref() {
+                        Some("int") => Some(IrType::Int),
+                        Some("float") => Some(IrType::F64),
+                        Some("bool") => Some(IrType::Bool),
+                        Some("str") => Some(IrType::Str),
+                        _ => None,
+                    };
+                    if let Some(ty) = ty {
+                        self.fn_returns.insert(w, ty);
+                    }
+                }
+                if t.kind == crate::embed::ArtifactKind::Executable {
+                    self.unknown_extern_fns
+                        .remove(format!("{}_run", t.artifact).as_str());
+                    self.fn_returns
+                        .insert(format!("{}_run", t.artifact), IrType::Str);
+                }
+            }
+        }
 
         // 收集所有模块级 const 名称
         let const_names: std::collections::HashSet<String> = module
@@ -1307,6 +1401,17 @@ impl CodeGen {
 
         // duck 结构匹配自动 impl：结构满足 duck 的具体类型 → impl Duck for Type
         self.gen_duck_auto_impls(module);
+
+        // 统一抽象的接合处：Cli 档产物 → 追加 argv 调用垫片（子进程代码的唯一生成点在
+        // bridge::cli::generate_embed_module）。Source 档（tnr/rust/rs）不进这里，
+        // 故它们的既有产物逐字不变。
+        if !self.embed_targets.is_empty() {
+            let text = crate::embed::shim::module_text(&self.embed_targets);
+            self.buf.push_str("pub mod __lz_embed {\n");
+            self.buf.push_str(&text);
+            self.buf.push_str("}\n");
+            self.buf.push_str("use __lz_embed::*;\n");
+        }
 
         std::mem::take(&mut self.buf)
     }

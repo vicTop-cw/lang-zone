@@ -2993,3 +2993,25 @@ Set<str> `.contains`（HashSet::contains 走 &Q=Borrow<str>，`&"a"` 本可，
 但 rs-lz 亦发 `.to_string()`，本次 is_vec_contains 不覆盖 Set，Set 行为未变）。
 回归测试：rs_lz_list_str_contains_borrows_string（native + rs-lz 双路编译 + 运行断言）
 状态：FIXED（commit 见本轮）
+
+## BUG-434 [medium] native trait 方法返回关联类型发裸名 `-> Item` 而非 `-> Self::Item`（E0425）
+
+现象：`trait BoxLike = type Item; def item(self) -> Item`，原生 `--emit=rs` 生成
+`fn item(&self) -> Item;`，关联类型名以裸名出现在返回类型里 → rustc
+E0425 cannot find type `Item` in this scope。rs-lz 侧 rust_type_assoc
+（lz_codegen_lib.lz:2303）已按 assoc_types 登记表把裸名改写为 `Self::Item`。
+注意 rs-lz 的修正仅对 assoc_types 中登记的名字生效——若 trait 未显式声明
+`type Item;` 而仅把 `Item` 用作返回类型，两侧都发裸名（探针初版已证），
+故复现须显式 `type Item;`。
+根因：`src/ir/codegen/decl_gen.rs` 的 trait_sig_type 只处理点号路径
+`Self.Item`（line 2378 起），裸名 `Item` 落 `args.is_empty()` 分支直发
+`rust_type(ty)`。CodeGen 无「当前 trait 的 assoc_types」上下文。
+修复：CodeGen 新增字段 `current_trait_assoc_types: Vec<String>`
+（mod.rs:360，init 空），trait 生成循环里 set/restore（decl_gen.rs:2113-2115、
+2375，与 current_trait_extends_iter 同构）；trait_sig_type 的裸名分支先查
+assoc_types 表，命中则发 `Self::{path}`（decl_gen.rs:2421-2423）。
+验证：探针 _probes/rslz4/g434_trait_assoc.lz 双路编译通过；native 现发
+`fn item(&self) -> Self::Item;`，rssweep 仅剩 1 行空行 D1 形式差。
+回归测试：rs_lz_trait_assoc_type_return_self_qualified（native + rs-lz 双路
+断言 `Self::Item` 并 native 编译运行）
+状态：FIXED（commit 见本轮）
