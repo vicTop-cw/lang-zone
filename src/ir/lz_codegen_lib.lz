@@ -2675,8 +2675,12 @@ def scan_expr_auto_mut(e: Expr, out: String) -> String =
             acc = scan_expr_auto_mut(v, acc)
             acc
         case Expr.FieldAccess(base: b, field: f, ty: t) =>
-            scan_expr_auto_mut(b, out)
+            // BUG-472：base 是字段（`c.d["a"] = 1` 的 FieldAccess 底座）时也要把 Var 底座
+            // 记入 auto_mut，否则 `let c = ...` 缺 `mut`，rustc E0596 cannot borrow as mutable。
+            acc = add_var_auto_mut(b, acc)
+            scan_expr_auto_mut(b, acc)
         case Expr.IndexGet(base: b, key: k, ty: t) =>
+            acc = add_var_auto_mut(b, acc)
             acc = scan_expr_auto_mut(b, acc)
             scan_expr_auto_mut(k, acc)
         case _ => out

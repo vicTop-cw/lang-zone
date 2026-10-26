@@ -757,6 +757,80 @@ def main() =
     let _ = fs::remove_dir_all(&work);
 }
 
+// BUG-472 回归：rs-lz 的 auto_mut 扫描（lz_codegen_lib.lz scan_expr_auto_mut）对
+// FieldAccess / IndexGet 只递归不 add_var_auto_mut，`c.d["a"] = 1` 的底座 Var `c`
+// 未记入 auto_mut → `let c = Cache(...)` 缺 `mut` → rustc E0596 cannot borrow as mutable。
+// 断言 rs-lz 产物含 `let mut c` 且 rustc 编译运行出 1 / 2。
+#[test]
+fn rs_lz_field_assign_marks_let_mut() {
+    let source = r#"
+struct Cache =
+    d: Dict<str, int>
+
+def main() =
+    let c = Cache(d: {})
+    c.d["a"] = 1
+    c.d["b"] = 2
+    print(c.d["a"])
+    print(c.d.len())
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_auto_mut");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        l_str.contains("let mut c"),
+        "rs-lz 未给字段赋值的 let 标 mut（BUG-472 回归）：\n{}",
+        l_str.lines().find(|l| l.contains("let c")).unwrap_or("(无 let c)")
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "1\n2",
+        "rs-lz 产物运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
 // BUG-466 回归：LZ 侧 IrType/Item 枚举是 Rust 侧（types.rs / node.rs）的子集，
 // 新增变体未镜像会令 --emit=ir-lz 生成的 Rust 编译失败（rustc E0599，如
 // "no variant named Ext/EmbedBlock found for enum"）。此处静态断言确保
