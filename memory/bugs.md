@@ -2490,7 +2490,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - BUG-444: gen_item 的 FnDef 分支把 `auto_mut_names(b)` 提为局部变量并传入 `fn_param_list(ps, auto_mut)`；fn_param_str 在名字在 auto_mut 列表中时加 `mut ` 前缀，新增 `auto_mut_has` 用 `"," + list + ","` 精确 token 匹配（防 `x` 误中 `xy`）。g16_dictmisc.lz 由 E0596 转 OK。探针 g18_dict_getonly.lz（仅 .get()/.contains()）双端同为 `mut d`，确认与原生广度一致。
 - BUG-445: gen_method_call 增设 unwrap_or_else/expect/unwrap_or/unwrap/ok/err 六分支，均发 `(recv).clone().method(..)`，expect 消息用 dict_key_arg。g19_opt_else.lz（unwrap_or_else+expect）RSLZ 由 E0308 转 OK `6|`；g20_res_misc.lz（unwrap_or+ok）由 E0382 转 OK `14|`。
 回归：cargo test -j4 -- --test-threads=1 全绿（0 failed）。字节对齐复核 g16/g18/g19/g20：与原生差异仅剩闭包体花括号（move || { .. } vs move || ..）、`__path__` 绝对/相对路径、既有前缀算术写法（`a+b` vs `LzAdd::__add__(a,b)`），三者均可编译且非本次引入。
-## BUG-446 [2026-10-24T16:52:56Z] [high] OPEN
+## BUG-446 [2026-10-24T16:52:56Z] [high] FIXED
 - summary: [native/IR-builder] 元组字段访问 `.0`/`.1` 类型推导错误：IR build error 期望 str 实际 int（g21_tuple.lz）
 - detail: 原生 codegen 路径（非 rs-lz）对元组字段访问 `.0` / `.1` 类型推导错误：IR build 阶段报「函数 tuple1 返回类型不匹配：期望 str，实际 int」。TEMP/probe/sweep24/g21_tuple.lz：`def tuple1(t: (int, str)) -> str = t.0`。两条路线（--emit=rs 与 --emit=rs-lz）均被同一 IR builder 拦截（v5.py 报 NATIVE COMPILE-ERR / RSLZ SELFHOST NO-EMIT），属前端/类型推导 bug，非 rs-lz codegen 独有，需在 IR builder 或类型推导层修复；修好前无法验证 rs-lz 的元组字段访问对齐性。
 - reported_by: lead
@@ -3015,3 +3015,13 @@ assoc_types 表，命中则发 `Self::{path}`（decl_gen.rs:2421-2423）。
 回归测试：rs_lz_trait_assoc_type_return_self_qualified（native + rs-lz 双路
 断言 `Self::Item` 并 native 编译运行）
 状态：FIXED（commit 见本轮）
+
+## BUG-446 复核 [2026-10-27T01:26:00+08:00] 状态：FIXED（验证）
+- 探针 _probes/rslz4/g446_tuple.lz（`def tuple1(t:(int,str))->str = t.1`、`tuple0 = t.0`）
+  native IR build 已通过，无「期望 str 实际 int」错误；生成
+  `pub fn tuple1(t: (i64, String)) -> String { return t.1; }` 编译运行输出 `hi`/`1`。
+  rs-lz 亦发 `return t.1;`/`return t.0;` 编译运行输出一致。IR builder 对 Tuple
+  字段访问按索引取对应成员类型的修复已生效（原 BUG-446 前端/类型推导层缺口已闭合）。
+  残留 D1 形式差：rs-lz 给 tuple 形参加 `mut t`（BUG-475/478 的 defined-fn registry
+  缺口，参数是否被改写未判定），两侧均编译通过、运行一致。
+- 回归测试：rs_lz_tuple_field_access_types_correctly

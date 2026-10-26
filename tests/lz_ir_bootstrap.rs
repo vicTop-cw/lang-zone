@@ -1398,6 +1398,104 @@ def main() =
 }
 
 #[test]
+fn rs_lz_tuple_field_access_types_correctly() {
+    // BUG-446：元组字段访问 `.0`/`.1` 的类型推导错误——IR build 报
+    // 「函数 tuple1 返回类型不匹配：期望 str，实际 int」，两条 emit 路线
+    // （--emit=rs 与 --emit=rs-lz）都被同一 IR builder 拦截，属前端/类型
+    // 推导 bug，非 rs-lz codegen 独有。修复后（IR builder 对 Tuple 字段
+    // 访问按索引取对应成员类型）两侧均应发 `t.1`/`t.0` 并编译运行。
+    let source = r#"
+def tuple1(t: (int, str)) -> str = t.1
+def tuple0(t: (int, str)) -> int = t.0
+
+def main() =
+    print(tuple1((1, "hi")))
+    print(tuple0((1, "hi")))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_tuple");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("tp_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    // 原生：IR build 应通过（不再报「期望 str 实际 int」）并编译运行
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "BUG-446 回归：native IR build 失败（元组字段访问类型推导错）: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("pub fn tuple1(t: (i64, String)) -> String {") && native_src.contains("return t.1;"),
+        "native 元组字段访问发射异常:\n{}",
+        native_src
+    );
+    let native_exe = work.join("tp_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(rc.status.success(), "native 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+
+    // rs-lz：同样通过
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败（IR build 拦截元组字段访问）: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("return t.1;") && text.contains("return t.0;"),
+        "rs-lz 元组字段访问发射异常:\n{}",
+        text
+    );
+    let lz_rs = work.join("tp_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("tp_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(rc2.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc2.stderr));
+    let run = Command::new(&lz_exe).output().expect("run generated exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "hi\n1",
+        "元组字段访问运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
 fn rs_lz_trait_assoc_type_return_self_qualified() {
     // BUG-434：trait 方法返回关联类型时，原生 codegen 发裸名 `-> Item`，
     // rustc E0425 cannot find type `Item` in this scope；应为 `-> Self::Item`。

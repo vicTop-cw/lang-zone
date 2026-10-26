@@ -1,0 +1,6 @@
+def tuple1(t: (int, str)) -> str = t.1
+def tuple0(t: (int, str)) -> int = t.0
+
+def main() =
+    print(tuple1((1, "hi")))
+    print(tuple0((1, "hi")))
