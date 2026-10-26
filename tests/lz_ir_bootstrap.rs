@@ -831,6 +831,83 @@ def main() =
     let _ = fs::remove_dir_all(&work);
 }
 
+// BUG-473 回归：rs-lz 把点号固有方法 `def Type.method()` 发成自由函数
+// `pub fn Type.method(...)`（非法 Rust）。原生 gen_item（decl_gen.rs:169-182）检测函数名
+// 含 `.` 即包 `impl Type { fn method }`。断言 rs-lz 产物含 `impl Point {`、rustc 编译运行出 25。
+#[test]
+fn rs_lz_inherent_method_emits_impl_block() {
+    let source = r#"
+struct Point =
+    x: int
+    y: int
+
+def Point.sq(self) -> int =
+    self.x * self.x + self.y * self.y
+
+def main() =
+    let p = Point(x: 3, y: 4)
+    print(p.sq())
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_inherent_method");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        l_str.contains("impl Point {"),
+        "rs-lz 未把固有方法包成 impl 块（BUG-473 回归）：\n{}",
+        l_str
+            .lines()
+            .find(|l| l.contains("pub fn") && l.contains("Point"))
+            .unwrap_or("(无 pub fn Point.* 行)")
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "25",
+        "rs-lz 产物运行输出与预期不符（3²+4²=25）"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
 // BUG-466 回归：LZ 侧 IrType/Item 枚举是 Rust 侧（types.rs / node.rs）的子集，
 // 新增变体未镜像会令 --emit=ir-lz 生成的 Rust 编译失败（rustc E0599，如
 // "no variant named Ext/EmbedBlock found for enum"）。此处静态断言确保

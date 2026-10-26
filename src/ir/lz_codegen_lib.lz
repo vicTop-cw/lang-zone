@@ -2472,13 +2472,43 @@ def gen_struct_unapply(name: str, generics: List<(str, List<IrType>)>, fs: List<
     out = out + "\n}\n".to_string()
     out
 
+// BUG-473：方法定义语法 `def Type.method(...)`（点号固有方法）在 Rust 中必须是
+// `impl Type { fn method(...) }`，不能发 `pub fn Type.method(...)`（非法 Rust，rustc 直接报
+// 语法错）。原生 gen_item（decl_gen.rs:169-182）检测函数名含 `.` 即切分并包 impl 块。
+// 此处返回 (类型名, 方法名)；名中无 `.` 时返回 (n, "")，由调用方据此判「非方法」。
+def split_method_name(n: str) -> (str, str) =
+    let dot = find_dot_index(n)
+    if dot >= 0:
+        (n[0..dot], n[(dot + 1)..n.len()])
+    else:
+        (n, "")
+
+def find_dot_index(n: str) -> int =
+    let mut i = 0
+    let mut idx = -1
+    let mut found = false
+    while i < n.len():
+        if !found and n[i..(i + 1)] == ".":
+            idx = i
+            found = true
+        i = i + 1
+    idx
+
 def gen_item(i: Item) -> String =
     match i:
         case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, where_clause: wc, body: b) =>
-            let is_main = (n == "main")
-            let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
-            let auto_mut = auto_mut_names(b)
-            "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut, rs) + "}".to_string()
+            let (ty, mn) = split_method_name(n)
+            if mn.len() > 0:
+                // 固有方法：`impl Type { fn method(&self, ...) -> ret { body } }`
+                // force_ref=false（与原生固有 impl 同口径）；gen_impl_method 负责 `fn` 前缀
+                // 与 body 缩进；此处补 `impl <ty> {` 外壳与闭合 `}`。
+                let im = ImplMethod(name: mn, params: ps, ret: r, exc: rs, body: b)
+                "impl ".to_string() + ty + " {\n".to_string() + gen_impl_method(im, false) + "}\n".to_string()
+            else:
+                let is_main = (n == "main")
+                let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
+                let auto_mut = auto_mut_names(b)
+                "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut, rs) + "}".to_string()
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
             let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs) + "}".to_string()
             if fs.len() > 0:
