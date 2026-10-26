@@ -2896,3 +2896,7 @@ oracle：decl_gen.rs:1738-1770 + helpers.rs:759 field_needs_box —— Self_/Nam
 match 解构端 `let x = *x;`。
 修复：未修（需同时改声明/构造/解构三处，范围较大）。
 状态：OPEN
+局部修复：2026-10-26 已修声明端（`l: Box<Tree>`）与构造端（`Box::new(Tree::Leaf..)`），
+E0072 与构造端 E0308 已解。残留：match 解构端缺 `let l = *l;`（递归类型递归 match 仍 E0308）。
+修复需在纯函数 codegen 线程化类型注册表（fn_raises 同型 180 处），单独立项。
+commit：1fdf50c / 回归测试：rs_lz_recursive_enum_boxes_fields
