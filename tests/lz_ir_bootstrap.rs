@@ -644,3 +644,68 @@ fn lz_ir_lib_mirrors_genbuild_and_block_ty() {
         "Item.FnDef 显示分支仍拼接 raises_sig（display.rs 不渲染 raises，须删除）"
     );
 }
+
+#[test]
+fn lz_ir_lib_mirrors_latent_literal_variants() {
+    let lib = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ir/lz_ir_lib.lz"),
+    )
+    .expect("read lz_ir_lib.lz");
+
+    // IrType::{Int128,BigInt,Complex}：display.rs:14-16 分别渲染 int128/BigInt/Complex。
+    // 缺变体时生成的 .rs 报 E0599（探针 _probes/latent_variants.lz 实测 5 处 E0599）。
+    for (variant, want) in [
+        ("    Int128", "case IrType.Int128 => \"int128\".to_string()"),
+        ("    BigInt", "case IrType.BigInt => \"BigInt\".to_string()"),
+        ("    Complex", "case IrType.Complex => \"Complex\".to_string()"),
+    ] {
+        assert!(
+            lib.lines().any(|l| l.trim() == variant.trim()),
+            "lz_ir_lib.lz IrType 缺 {variant} 变体（lz_codegen.rs:999-1001 会发射，缺失触发 E0599）"
+        );
+        assert!(
+            lib.contains(want),
+            "IrType 显示分支缺失/漂移: {want}"
+        );
+    }
+
+    // Expr::LitInt128/LitBigInt/LitComplex：display.rs:243-245 渲染 {n}_i128 / BigInt({s}) /
+    // Complex({re}, {im})，前缀仍为 [e.ty]（display.rs:88）。数值可能超 i64/i128 域，
+    // 故 v 存 str；复数实虚部为 f64 元组。
+    for (variant, want) in [
+        (
+            "LitInt128(v: str, ty: IrType)",
+            "case Expr.LitInt128(v: n, ty: t) => \"[\".to_string() + display_type(t) + \"] \".to_string() + n + \"_i128\"",
+        ),
+        (
+            "LitBigInt(v: str, ty: IrType)",
+            "case Expr.LitBigInt(v: s, ty: t) => \"[\".to_string() + display_type(t) + \"] BigInt(\".to_string() + s + \")\".to_string()",
+        ),
+        (
+            "LitComplex(v: (f64, f64), ty: IrType)",
+            "case Expr.LitComplex(v: reim, ty: t) => \"[\".to_string() + display_type(t) + \"] Complex(\".to_string() + reim.0.to_string() + \", \".to_string() + reim.1.to_string() + \")\".to_string()",
+        ),
+    ] {
+        assert!(
+            lib.lines().any(|l| l.trim() == variant.trim()),
+            "lz_ir_lib.lz Expr 缺 {variant} 变体（lz_codegen.rs:1132-1134 会发射）"
+        );
+        assert!(lib.contains(want), "Expr 字面量显示分支缺失/漂移: {variant}");
+    }
+
+    // Expr::Spread / Expr::EnumFieldGet：display.rs:232 Expr 兜底 `_ => "<expr>"` 覆盖二者，
+    // 故 LZ 显示分支须落 `<expr>`（探针实测 `...lst` → `<expr>`）。
+    for variant in [
+        "Spread(expr: Expr, ty: IrType)",
+        "EnumFieldGet(base: Expr, enum_name: str, variants: List<str>, field: str, ty: IrType)",
+    ] {
+        assert!(
+            lib.lines().any(|l| l.trim() == variant),
+            "lz_ir_lib.lz Expr 缺 {variant} 变体（lz_codegen.rs:697/:776 会发射）"
+        );
+    }
+    assert!(
+        lib.contains("case Expr.Spread(expr: _, ty: t) =>"),
+        "Expr.Spread 显示分支未落 `<expr>` 兜底（display.rs:232）"
+    );
+}

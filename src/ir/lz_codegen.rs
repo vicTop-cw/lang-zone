@@ -1129,9 +1129,21 @@ fn is_simple_expr(kind: &ExprKind) -> bool {
 fn gen_lit(lit: &LitKind, ty: &str) -> String {
     match lit {
         LitKind::Int(n) => format!("Expr.LitInt(v: {}, ty: {})", n, ty),
-        LitKind::Int128(n) => format!("Expr.LitInt128(v: {}, ty: {})", n, ty),
-        LitKind::BigInt(s) => format!("Expr.LitBigInt(v: {}, ty: {})", s, ty),
-        LitKind::Complex(re, im) => format!("Expr.LitComplex(v: ({}, {}), ty: {})", re, im, ty),
+        // int128/BigInt 数值可能超出 LZ 的 `int`(i64) 甚至 i128 域，存十进制字符串
+        LitKind::Int128(n) => format!("Expr.LitInt128(v: \"{}\", ty: {})", n.to_string(), ty),
+        LitKind::BigInt(s) => format!("Expr.LitBigInt(v: \"{}\", ty: {})", s, ty),
+        // 复数实虚部为 f64；照 LitF64 保证小数点，否则 `0` 会被 LZ 当 int 报 E0308
+        LitKind::Complex(re, im) => {
+            let f64s = |n: f64| -> String {
+                let s = format!("{}", n);
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
+            };
+            format!("Expr.LitComplex(v: ({}, {}), ty: {})", f64s(*re), f64s(*im), ty)
+        }
         // LZ 中 `3` 是 int（3_i64），f64 字面量需带小数点（3.0）
         LitKind::F64(n) => {
             let s = format!("{}", n);

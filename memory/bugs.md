@@ -2767,3 +2767,22 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
   commit 192ebe4：lz_ir_lib.lz/lz_codegen.rs/tests/lz_ir_bootstrap.rs 三文件；
   ir-lz 对照 100/101 逐字节一致（test_suite 因 Item::Test 走 {:#?} Debug 例外）；
   新增回归断言锁 GenBuild/block_ty/无 raises_sig 三处。
+
+### BUG-468 [high] ir-lz 对 BigInt/Complex/Int128/Spread 字面量报 E0599（9 个 latent 变体缺漏，实测 5 处）
+  现象: 探针 _probes/latent_variants.lz（BigInt 大整数/3.14i/大 int128/...lst/枚举字段）走 ir-lz 时，
+    生成 .rs 报 5 处 E0599: no variant LitInt128/Int128/LitComplex/Complex/Spread found for Expr/IrType。
+    此前 101 语料未触发（值都落 i64/i128 内），故 latent。
+  根因: LZ IrType/Expr 枚举缺原生变体（display.rs:14-16 渲染 int128/BigInt/Complex，
+    display.rs:243-245 渲染 {n}_i128 / BigInt({s}) / Complex({re},{im})，display.rs:232 Expr 兜底
+    <expr> 覆盖 Spread/EnumFieldGet）。附两处建模错：(1) LitInt128/LitBigInt 数值可超 i64 甚至 i128，
+    LZ int(i64) 字段装不下 -> E0308；(2) LitComplex 发射 `(0, 3.14)` 首元被 LZ 当 int -> E0308。
+  已修: lz_ir_lib.lz（IrType 增 Int128/BigInt/Complex + display；Expr 增 LitInt128(v:str)/LitBigInt(v:str)/
+    LitComplex(v:(f64,f64))/Spread/EnumFieldGet + display 落 <expr>）、
+    lz_codegen.rs gen_lit（LitInt128/BigInt 改存十进制 str；LitComplex 照 LitF64 保证小数点）、
+    tests/lz_ir_bootstrap.rs 增 lz_ir_lib_mirrors_latent_literal_variants 回归断言。
+  cargo test -j 4 -- --test-threads=1 全绿（bootstrap 8/8）。
+  legacy: 9 例中 2 例为假阳性/命名漂移——Item 缺 ScriptMain（原生 0 处出现，route B 内部合成
+    注入 main 入口，不影响字节匹配）；Pattern 缺 EnumNamed（LZ 实为 Pattern.Enum，lz_codegen.rs:1105
+    发射名 EnumNamed 且字段 List<(str,Pattern)> 与 LZ args:List<Pattern> 双重漂移，语料未触发，留待后续）。
+    Item::Test 仍走 Rust {:#?} Debug（display.rs:727），非稳定 Display 契约，记为已知限制。
+### FIXED(2026-10-26 / BUG-468)

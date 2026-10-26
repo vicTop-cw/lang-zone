@@ -8,6 +8,9 @@
 enum IrType:
     Int
     F64
+    Int128
+    BigInt
+    Complex
     Str
     Bool
     Unit
@@ -32,6 +35,11 @@ enum Expr:
     LitStr(s: str, ty: IrType)
     LitFStr(s: str, ty: IrType)
     LitBool(b: bool, ty: IrType)
+    LitInt128(v: str, ty: IrType)
+    LitBigInt(v: str, ty: IrType)
+    LitComplex(v: (f64, f64), ty: IrType)
+    Spread(expr: Expr, ty: IrType)
+    EnumFieldGet(base: Expr, enum_name: str, variants: List<str>, field: str, ty: IrType)
     LitUnit(ty: IrType)
     LitNone(ty: IrType)
     Var(name: str, ty: IrType)
@@ -159,6 +167,9 @@ struct IrModule =
 def display_type(t: IrType) -> String =
     match t:
         case IrType.Int => "int".to_string()
+        case IrType.Int128 => "int128".to_string()
+        case IrType.BigInt => "BigInt".to_string()
+        case IrType.Complex => "Complex".to_string()
         case IrType.F64 => "f64".to_string()
         case IrType.Str => "str".to_string()
         case IrType.Bool => "bool".to_string()
@@ -212,6 +223,11 @@ def display_expr(e: Expr) -> String =
         case Expr.LitStr(s: s, ty: t) => "[".to_string() + display_type(t) + "] \"".to_string() + s + "\"".to_string()
         case Expr.LitFStr(s: s, ty: t) => "[".to_string() + display_type(t) + "] f\"".to_string() + s + "\"".to_string()
         case Expr.LitBool(b: b, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + b.to_string()
+        case Expr.LitInt128(v: n, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + n + "_i128"
+        case Expr.LitBigInt(v: s, ty: t) => "[".to_string() + display_type(t) + "] BigInt(".to_string() + s + ")".to_string()
+        case Expr.LitComplex(v: reim, ty: t) => "[".to_string() + display_type(t) + "] Complex(".to_string() + reim.0.to_string() + ", ".to_string() + reim.1.to_string() + ")".to_string()
+        case Expr.Spread(expr: _, ty: t) => "[".to_string() + display_type(t) + "] <expr>".to_string()
+        case Expr.EnumFieldGet(base: _, enum_name: _, variants: _, field: _, ty: t) => "[".to_string() + display_type(t) + "] <expr>".to_string()
         case Expr.LitUnit(ty: t) => "[".to_string() + display_type(t) + "] ()".to_string()
         case Expr.LitNone(ty: t) => "[".to_string() + display_type(t) + "] None".to_string()
         case Expr.Var(name: n, ty: t) => "[".to_string() + display_type(t) + "] ".to_string() + n
