@@ -603,3 +603,44 @@ fn lz_ir_lib_mirrors_ext_and_embedblock() {
         "Item.EmbedBlock 显示分支缺失或格式漂移 (须对齐 display.rs:735 embed(lang) 后接 空格+花括号+数字+空格+chars+花括号)"
     );
 }
+
+#[test]
+fn lz_ir_lib_mirrors_genbuild_and_block_ty() {
+    let lib = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ir/lz_ir_lib.lz"),
+    )
+    .expect("read lz_ir_lib.lz");
+
+    // Expr::GenBuild：node.rs 有 GenBuild{callee: Option<Box<Expr>>}，lz_codegen.rs:899 会发射
+    // Expr.GenBuild(callee: Some(..)/None, stmts, ty)。callee 用 `Expr?` 触发 lang-zone 的
+    // `Self?` 自动 Box（免写 Box<>；`MaybeExpr` 会让 Expr↔MaybeExpr 互递归触发 E0072）。
+    assert!(
+        lib.lines().any(|l| l.trim() == "GenBuild(callee: Expr?, stmts: List<Stmt>, ty: IrType)"),
+        "lz_ir_lib.lz 缺 Expr.GenBuild 变体，或 callee 未用 `Expr?` 自动 Box（否则生成 .rs 报 E0072 互递归）"
+    );
+    assert!(
+        lib.contains("case Expr.GenBuild(callee: c, stmts: s, ty: t) =>"),
+        "Expr.GenBuild 显示分支缺失或格式漂移 (须对齐 display.rs:232 GenBuild 落 `_ => \"<expr>\"`)"
+    );
+
+    // Expr::BlockExpr 需拆两字段：e.ty（前缀 [e.ty]，display.rs:88）与 block.ty（块内 { [block.ty]，
+    // display.rs:427）。原生 BlockExpr{block} 里这两个类型可不同（如 e.ty=?、block.ty=int），
+    // 单一 ty 复用会静默错值。
+    assert!(
+        lib.lines().any(|l| {
+            l.trim() == "BlockExpr(stmts: List<Stmt>, block_ty: IrType, ty: IrType)"
+        }),
+        "lz_ir_lib.lz 缺 Expr.BlockExpr 的 block_ty 字段（需与 e.ty 拆分，否则 block-with-ty 静默错值）"
+    );
+    assert!(
+        lib.contains("case Expr.BlockExpr(stmts: ss, block_ty: bt, ty: t) =>"),
+        "Expr.BlockExpr 显示分支未解构 block_ty（须与 e.ty 分槽渲染）"
+    );
+
+    // Item::FnDef：display.rs:595-628 不渲染 raises/exc 子句；LZ 侧多出的 `raises_sig(rs)`
+    // 会让输出多出 ` raises T`（例 keywords_iterator.lz）。
+    assert!(
+        lib.contains("+ generic_sig(gs) + param_sig(ps) + \" -> \".to_string() + display_type(r) + \":\\n\""),
+        "Item.FnDef 显示分支仍拼接 raises_sig（display.rs 不渲染 raises，须删除）"
+    );
+}

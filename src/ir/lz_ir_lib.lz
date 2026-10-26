@@ -51,8 +51,9 @@ enum Expr:
     Pipe(receiver: Expr, callee: Expr, args: List<Expr>, ty: IrType)
     TupleLit(elems: List<Expr>, ty: IrType)
     ListLit(items: List<Expr>, ty: IrType)
-    BlockExpr(stmts: List<Stmt>, ty: IrType)
+    BlockExpr(stmts: List<Stmt>, block_ty: IrType, ty: IrType)
     GenExpr(yield_of: Expr, ty: IrType)
+    GenBuild(callee: Expr?, stmts: List<Stmt>, ty: IrType)
     // Rust display.rs 落进 `_ => "<expr>"` 的节点：显示 `<expr>` 逐字符对齐
     Paren(inner: Expr, ty: IrType)
     Range(end: Expr, inclusive: bool, ty: IrType)
@@ -246,10 +247,12 @@ def display_expr(e: Expr) -> String =
             "[".to_string() + display_type(t) + "] (".to_string() + expr_list(es) + ")".to_string()
         case Expr.ListLit(items: xs, ty: t) =>
             "[".to_string() + display_type(t) + "] [".to_string() + expr_list(xs) + "]".to_string()
-        case Expr.BlockExpr(stmts: ss, ty: t) =>
-            "[".to_string() + display_type(t) + "] block ".to_string() + block_with_ty(ss, t)
+        case Expr.BlockExpr(stmts: ss, block_ty: bt, ty: t) =>
+            "[".to_string() + display_type(t) + "] block ".to_string() + block_with_ty(ss, bt)
         case Expr.GenExpr(yield_of: y, ty: t) =>
             "[".to_string() + display_type(t) + "] gen ".to_string() + display_expr(y)
+        case Expr.GenBuild(callee: c, stmts: s, ty: t) =>
+            "[".to_string() + display_type(t) + "] <expr>".to_string()
         case Expr.Paren(inner: i, ty: t) =>
             "[".to_string() + display_type(t) + "] (".to_string() + display_expr(i) + ")".to_string()
         case Expr.Range(end: en, inclusive: inc, ty: t) =>
@@ -492,8 +495,8 @@ def stmt_lines(ss: List<Stmt>) -> String =
 // ── display_item：Item → String ──
 def display_item(it: Item) -> String =
     match it:
-        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, body: b) =>
-            "fn ".to_string() + n + generic_sig(gs) + param_sig(ps) + " -> ".to_string() + display_type(r) + raises_sig(rs) + ":\n".to_string() + stmt_lines(b)
+        case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: _r, body: b) =>
+            "fn ".to_string() + n + generic_sig(gs) + param_sig(ps) + " -> ".to_string() + display_type(r) + ":\n".to_string() + stmt_lines(b)
         case Item.Const(name: n, ty: t, value: v) =>
             "const ".to_string() + n + ": ".to_string() + display_type(t) + " = ".to_string() + display_expr(v)
         case Item.StructDef(name: n, generics: gs, fields: fs) =>

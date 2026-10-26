@@ -894,7 +894,13 @@ impl LzGen {
             ExprKind::Paren(inner) => format!("Expr.Paren(inner: {}, ty: {})", self.expr(inner), ty),
             ExprKind::BlockExpr { block } => {
                 let stmts = self.stmts_ref(&block.stmts);
-                format!("Expr.BlockExpr(stmts: {}, ty: {})", stmts, ty)
+                // block.ty（块结果类型）与 e.ty（表达式类型）在 display.rs 里是两个不同槽位：
+                // 前缀 [e.ty]，块内 { [block.ty]。拆字段保真（对齐 display.rs:88 / display.rs:427）。
+                let bty = self.irtype(&block.ty);
+                format!(
+                    "Expr.BlockExpr(stmts: {}, block_ty: {}, ty: {})",
+                    stmts, bty, ty
+                )
             }
             ExprKind::GenBuild { callee, block } => {
                 let callee_s = match callee {
@@ -1166,7 +1172,7 @@ fn binop_str(op: &super::node::BinOpKind) -> &'static str {
 fn unop_str(op: &super::node::UnOpKind) -> &'static str {
     use super::node::UnOpKind::*;
     match op {
-        Neg => "-", Not => "!", BitNot => "!", Ref => "&", MutRef => "&mut ", Deref => "*",
+        Neg => "-", Not => "!", BitNot => "~", Ref => "&", MutRef => "&mut ", Deref => "*",
     }
 }
 
