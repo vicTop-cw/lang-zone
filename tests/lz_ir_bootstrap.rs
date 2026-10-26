@@ -986,6 +986,97 @@ def main() =
     let _ = fs::remove_dir_all(&work);
 }
 
+// BUG-479：rs-lz 前端自检对含 match 的程序失败（`LZ rs-lz frontend rustc 失败:
+// E0533 expected value, found struct variant Expr::BlockExpr`）。根因：
+// lz_codegen.rs:901 把 IrNode `ExprKind::BlockExpr { block }`（1 个 block 字段）
+// 发射成 LZ 的 `Expr.BlockExpr(stmts:, block_ty:, ty:)` 3 字段构造，而
+// lz_codegen_lib.lz:59 的 `Expr.BlockExpr(stmts: List<Stmt>, ty: IrType)` 是扁平
+// 2 字段元组变体 → LZ→Rust 侧生成 `Expr::BlockExpr(vec![..], IrType, IrType)`
+// 3 参数位置构造，不匹配 Rust IrNode 的 struct variant → E0533，整条 rs-lz 中断。
+// 修后：`--emit=rs-lz` 自检通过、产物编译运行正确。
+#[test]
+fn rs_lz_match_blockexpr_two_field_ctor() {
+    let source = r#"
+def classify(n: int) -> str =
+    match n:
+        case x if x > 3: "big"
+        case 0: "zero"
+        case _: "small"
+
+def main() =
+    print(classify(5))
+    print(classify(0))
+    print(classify(1))
+    let t = match 5:
+        case x if x > 3: "big"
+        case _: "small"
+    print(t)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_blockexpr");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("m_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败（rs-lz 前端自检未过）：{}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    // 不再出现 3 参数位置构造 `Expr::BlockExpr(vec![..], .., ..)`
+    assert!(
+        !text.contains("Expr::BlockExpr(vec!["),
+        "仍发射 3 参数 BlockExpr 构造（E0533）:\n{}",
+        text
+    );
+    // 最终 Rust 里 match 以正规 `match <scrutinee> {` 块出现（原生同构）
+    assert!(
+        text.contains("match 5i64 {"),
+        "inline match 未发射成 Rust match 块:\n{}",
+        text
+    );
+
+    // 产物编译运行：classify 三例 + inline match
+    let out_rs = work.join("m_input_lz.rs");
+    fs::write(&out_rs, &text).expect("write rs-lz .rs");
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = work.join("m_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "big\nzero\nsmall\nbig",
+        "match 产物运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
 fn rs_lz_inherent_method_emits_impl_block() {
     let source = r#"
 struct Point =

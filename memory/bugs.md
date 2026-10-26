@@ -2938,3 +2938,32 @@ stdlib 魔法分支；原生 expr_gen.rs:2178 有守卫
 存在同名用户函数则走通用调用分支。
 探针 _probes/rslz4/user_sum.lz：rs-lz 输出 6，native（有守卫）输出 3。
 状态：OPEN（与 BUG-475 残留同源，需统一注册表立项）
+
+## BUG-479 [high] rs-lz 前端自检对含 match 的程序失败（E0533 Expr::BlockExpr）
+
+现象：`lang-zone <p>.lz --emit=rs-lz` 对任何含 `match` 表达式的程序报
+`LZ rs-lz frontend rustc 失败: error[E0533]: expected value, found struct variant
+Expr::BlockExpr`，整条 rs-lz 路线中断（trait/impl 均为无关因素，最小复现
+`match 5 { _: "x" }` 单语句即触发）。
+根因：`lz_codegen.rs:895` 的 `LzGen::expr` 对 `ExprKind::BlockExpr { block }`
+发射 `Expr.BlockExpr(stmts:, block_ty:, ty:)` **3 字段**构造，而 rs-lz 侧
+`lz_codegen_lib.lz:59` 的 `Expr.BlockExpr(stmts: List<Stmt>, ty: IrType)` 是
+**扁平 2 字段**元组变体。LZ→Rust 侧据该 2 字段定义生成
+`Expr::BlockExpr(vec![..], IrType, IrType)` 3 参数位置构造，而 Rust 侧真实
+IrNode `ExprKind::BlockExpr { block: Block }` 是单字段 struct variant
+（`.rs:1836` 的匹配 `Expr::BlockExpr { stmts, ty }` 也印证此形状）→ E0533。
+另一路 `--emit=ir-lz` 的 `lz_ir_lib.lz:62` 声明的是 `BlockExpr(stmts, block_ty,
+ty)` 3 字段，故此前统一发 3 字段时 ir-lz 字节精确通过、只有 rs-lz 崩——两路
+库对同一变体元数不一致，是本次矛盾的根。
+修复：`lz_codegen.rs` 的 BlockExpr 分支按 `self.rs_codegen_mode` 分流：
+  rs_codegen_mode=true（rs-lz）→ 2 字段 `Expr.BlockExpr(stmts:, ty:)`
+  rs_codegen_mode=false（ir-lz）→ 3 字段原样保留（ir-lz 字节精确不回归）
+rs-lz 2 字段下，gen_expr 只用 stmts（.lz:973），ty 仅供 expr_ty 计算，最终
+Rust 文本与 native 一致；match 探针（含 guard + 裸 match 作表达式）rs-lz
+产物 main 与 native 输出逐字节一致（`big/zero/small/big`）。
+工具链坑：`_probes/rssweep.sh` 原先 `--emit=rs-lz` 会把 `<probe>.rs` 覆盖成
+自托管库 dump（4126 行 LZ 库编译出的 Rust，与用户程序无关），diff 恒为
+4100+ 行的库 diff、掩盖真实差异。已改为先 `cp <probe>.rs <probe>_native.rs`
+快照再跑 rs-lz（BUG-481，同批修复）。
+回归测试：rs_lz_match_blockexpr_two_field_ctor（编译 + 运行断言）
+状态：FIXED（commit 见本轮）

@@ -1,0 +1,6 @@
+def sum(xs: List<int>) -> int =
+    xs.len()
+
+def main() =
+    let xs = [1, 2, 3]
+    print(sum(xs))

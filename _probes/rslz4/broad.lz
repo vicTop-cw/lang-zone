@@ -1,0 +1,31 @@
+// 广泛特性探针：trait impl、泛型、for 循环、match guard、字符串方法、闭包
+trait Show =
+    def show(self) -> str
+
+struct Point =
+    x: int
+    y: int
+
+impl Show for Point =
+    def show(self) -> str =
+        "P(" + str(self.x) + "," + str(self.y) + ")"
+
+def sum_upto(n: int) -> int =
+    if n <= 0:
+        return 0
+    else:
+        return n + sum_upto(n - 1)
+
+def main() =
+    let p = Point(x: 3, y: 4)
+    print(p.show())
+    print(sum_upto(5))
+    let s = "hello world"
+    print(s.len())
+    print(s.upper())
+    let t = match 5:
+        case x if x > 3: "big"
+        case _: "small"
+    print(t)
+    let d = Dict(a: 1, b: 2)
+    print(d.len())

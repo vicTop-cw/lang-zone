@@ -1,0 +1,14 @@
+def classify(n: int) -> str =
+    match n:
+        case x if x > 3: "big"
+        case 0: "zero"
+        case _: "small"
+
+def main() =
+    print(classify(5))
+    print(classify(0))
+    print(classify(1))
+    let t = match 5:
+        case x if x > 3: "big"
+        case _: "small"
+    print(t)

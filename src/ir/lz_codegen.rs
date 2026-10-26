@@ -894,13 +894,25 @@ impl LzGen {
             ExprKind::Paren(inner) => format!("Expr.Paren(inner: {}, ty: {})", self.expr(inner), ty),
             ExprKind::BlockExpr { block } => {
                 let stmts = self.stmts_ref(&block.stmts);
-                // block.ty（块结果类型）与 e.ty（表达式类型）在 display.rs 里是两个不同槽位：
-                // 前缀 [e.ty]，块内 { [block.ty]。拆字段保真（对齐 display.rs:88 / display.rs:427）。
+                // BUG-479：两路 LZ 库对 BlockExpr 的扁平表示**元数不同**：
+                //   lz_ir_lib.lz:62      `BlockExpr(stmts, block_ty, ty)`   ← --emit=ir-lz
+                //   lz_codegen_lib.lz:59 `BlockExpr(stmts, ty)`             ← --emit=rs-lz
+                // 此前统一发 3 字段，rs-lz 侧 LZ→Rust 生成
+                // `Expr::BlockExpr(vec![..], IrType, IrType)` 3 参数位置构造，而 Rust
+                // IrNode `ExprKind::BlockExpr { block }` 是 1 个 block 字段的 struct
+                // variant → E0533 "expected value, found struct variant"，含 match 的
+                // 程序整条 rs-lz 路线中断。按 rs_codegen_mode 分流元数。
                 let bty = self.irtype(&block.ty);
-                format!(
-                    "Expr.BlockExpr(stmts: {}, block_ty: {}, ty: {})",
-                    stmts, bty, ty
-                )
+                if self.rs_codegen_mode {
+                    // rs-lz：2 字段（lib 扁平为 stmts+ty；ty 取表达式类型，供 expr_ty）
+                    format!("Expr.BlockExpr(stmts: {}, ty: {})", stmts, ty)
+                } else {
+                    // ir-lz：3 字段（保留 block_ty 与 e.ty 两个槽位，对齐 display.rs）
+                    format!(
+                        "Expr.BlockExpr(stmts: {}, block_ty: {}, ty: {})",
+                        stmts, bty, ty
+                    )
+                }
             }
             ExprKind::GenBuild { callee, block } => {
                 let callee_s = match callee {
