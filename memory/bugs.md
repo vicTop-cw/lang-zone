@@ -1070,6 +1070,7 @@ eturn Err(...)（后者对非 Result 返回类型 → E0308）。
 - 判据：TEMP/probe/sweep10/block_expr3.lz 修复前 E0369；修复后应编译运行输出 43。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/block_expr3.lz
 - reported_by: fist-agent（lz-combo-r10 组合轮）
+- commit: 82e541b（重映射自 未记）
 
 ## BUG-343 [2026-10-20T15:05:00+08:00] [low] FIXED：struct 字段 mut 前缀不被解析（parser 未识别 Token::Mut 作字段修饰符）
 - summary: struct Counter = mut count: int 报 "Expected Eq, got Newline at pos 10"。src/parser/parser.rs L2333 的字段解析只接受 Token::Ident | MagicMethod | True | False，Token::Mut 落入 _ => break 分支（L2402），mut 被留在 token 流中导致后续 = 期望失败。
@@ -1081,6 +1082,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - 判据：TEMP/probe/sweep10/counter_mut.lz 修复前 GEN-ERR；修复后应编译。
 - repro: powershell -File TEMP/lzrun.ps1 TEMP/probe/sweep10/counter_mut.lz
 - reported_by: fist-agent（lz-combo-r10 组合轮）
+- commit: 82e541b（重映射自 未记）
 
 ## BUG-344 [2026-10-20T15:50:00+08:00] [medium] FIXED：enum 变体索引魔法字段 _variant 未实现（自测语料 test_struct.lz 恒 C-ERR）
 - summary: let c = Color.Red; assert c._variant == 0 生成 Rust ssert_eq!(c._variant, 0i64) 但生成的 pub enum Color { ... } 无 _variant 字段 → rustc E0609。src/ir/codegen/*.rs 中 grep _variant 零命中（仅有 num_variants/num_variant_fields 元数据），ExprKind::FieldAccess 生成 c._variant 时不校验字段存在性也不提供魔法索引。
@@ -1096,6 +1098,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - **FIXED(2026-10-20T16:22:00+08:00)**: src/parser/expr.rs 两处改动——① parse_expr 的 LBrace 分支前加块表达式判定：首 token 为语句关键字（Let/Mut/Ref/Const/Owned/Return/Yield/For/While/Match/Raise/Assert/Defer/Break/Continue/Try/Block/Newline）时路由到 parse_brace_block_expr，而非字典/集合字面量；② 新增 parse_brace_block_expr trait 方法：消费 { 后按分号/换行分隔解析语句序列，遇 RBrace/Dedent/Eof 结束，最后一条语句作为块值（Expr::BlockExpr(stmts)）。实测：{ let a = 1; let b = 2; a + b } → 3；多行 {\n let a = 10\n let b = 20\n a * b\n} → 200；回归 {1, 2, 3} 集合字面量与 {"a": 1} 字典字面量均照常工作。
 
 - **FIXED(2026-10-20T16:32:00+08:00)**: src/parser/parser.rs 两处——① 缩进块 struct 字段循环（原 L2402 前）加 Token::Mut 分支：消费 mut 后按普通字段解析；② 单行 struct 字段循环（原 L2158 前）同样加 if self.check(&Token::Mut) { self.advance(); }。语义说明：Rust 中字段可变性由 &mut self 决定，字段上的 mut 是语法糖/标记，Field 结构体无 is_mut 字段，故吞掉后按普通字段处理。实测 struct Counter = mut count: int + def inc(ref self) 编译运行通过，输出 1 | 1。
+- commit: 82e541b（重映射自 318fbd8）
 
 ## BUG-345 [2026-10-20T16:35:00+08:00] [medium] FIXED
 - summary: 构建块（build block）触发语法 `guarded_add[check_positive] ~: (1, 2)` 生成的 Rust 代码错误：`Arc::new(guarded_add)[((Arc::new(check_positive)) as usize)](__t.0, __t.1)` —— 把函数当作数组索引，rustc E0608 cannot index into Arc<fn(i64,i64)->i64>
@@ -1110,20 +1113,24 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - summary: `raise` 在表达式位（如 `else raise "bad"`）不被解析
 - detail: parse_primary 无 `Token::Raise` 分支 → `if cond then a else raise "bad"` 报 "Unexpected token in expression: Raise"。修法：parse_primary 加 `Token::Raise` 分支，解析后续表达式为 `Expr::Panic(msg)`（与 `raise` 语句一致，builder/codegen 已支持）。
 - evidence: src/parser/expr.rs parse_primary 新增 `Token::Raise` arm；TEMP/probe/sweep12/raise_try.lz、raise_else2.lz 均编译运行通过（输出 `pos | err: Any { .. }`）。
+- commit: 514ef32（重映射自 未记）
 
 ## BUG-347 [2026-10-20T16:42:30+08:00] [low] FIXED：
 - summary: `check` 是保留关键字，不能用作函数名（`def check(...)` → "Expected function name, got Check"）
 - detail: Token 枚举含 `Check`（测试框架 `@check` 装饰器相关），lexer 把 `check` 识别为关键字，任何以 `check` 命名的用户函数/变量都无法解析。是否应允许上下文无关的普通标识符位使用 `check`？需与保留字策略对齐。
+- commit: 65f92fb（重映射自 未记）
 
 ## BUG-348 [2026-10-20T16:50:00+08:00] [medium] FIXED：
 - summary: `spawn` 非 async 函数返回值的 `await` 报 "i64 is not a future"
 - detail: `let t = spawn work(21)`（work 是普通 def 而非 async def）→ `std::thread::spawn(move || { 42 })` 返回 `JoinHandle<i64>`。但 `await t` 恒生成 `t.await`（要求 Future），而 `JoinHandle` 不是 Future → E0277。修法：codegen 依 receiver 类型选 `.await`（Future）或 `.join()`（JoinHandle）。
 - repro: TEMP/probe/sweep13/spawn2.lz
+- commit: 6fb3c72 + dd99337（重映射自 未记）
 
 ## BUG-349 [2026-10-20T16:55:00+08:00] [medium] FIXED：
 - summary: `for k in dict:` 迭代出 (K,V) 元组而非键，`d[k]` 报 `String: Borrow<(String, i64)>`
 - detail: HashMap::into_iter() 产出 (K,V)，但 LZ 语义（对齐 Python）要求 for 直接迭代键。修法：stmt_gen.rs 的 for 循环迭代器选择加 `iter_is_dict` 检测，Dict/HashMap 用 `.keys().cloned()`。
 - evidence: src/ir/codegen/stmt_gen.rs 新增 iter_is_dict + 分支；TEMP/probe/sweep14/dict_iter.lz 从 C-ERR 变 OK（输出 `a 1 | b 2 | "a" 1 | "b" 2`）。
+- commit: e8bed09（重映射自 未记）
 
 ## BUG-347 [2026-10-20T16:42:30+08:00] [low] FIXED：
 - summary: `check` 是保留关键字，不能用作函数名/变量名
@@ -1137,6 +1144,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
   2. expr_gen.rs `__go` 在 async 上下文检测参数 IR 类型是否为 `Future`，非 Future 时包 `async { ... }`；
   3. scan.rs 白名单补 `__spawn_sync`。
 - evidence: lz_builtins/src/runtime/builtins.rs + flat.rs 新增 `__spawn_sync`；src/ir/codegen/expr_gen.rs `__go` 分支按参数类型分流；TEMP/probe/sweep13/spawn2.lz 输出 `42`；CY/TESTS/11_concurrency/spawn_demo.lz 输出 `main done`；CY/TESTS/15_feature_matrix/async_spawn.lz 输出 `data_10 data_20`。
+- commit: 6fb3c72 + dd99337（重映射自 未记）
 
 ## BUG-350 [2026-10-20T17:30:00+08:00] [medium] FIXED：
 - summary: spawn 参数 async/non-async 分流——async_fn_names 预扫描
@@ -1147,13 +1155,13 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - 根因: LetTuple.names 是 Vec<String>，无法表示嵌套结构
 - 修复: names 改为 Vec<Pattern>，convert_stmts 递归展开生成中间 __destruct_N
 - 证据: TEMP/probe/sweep15/nested_tuple.lz -> 1|2|3；nested_tuple2.lz -> 1|2|3|4|10|20|30|40|50
-- commit: f7c9bc7
+- commit: aedbb3f（重映射自 f7c9bc7）
 ### BUG-345 build block checker 调用 E0608 FIXED
 - 现象: guarded_add[check_positive] ~: (1,2) → E0608 cannot index into Arc<fn>
 - 根因: [checker] 被解析为 IndexGet，codegen 生成 Arc::new(fn)[checker as usize](args)
 - 修复: IndexGet codegen 检测 base=顶层函数 & key=标识符 → 直接返回函数名
 - 证据: CY/TESTS/12_build_blocks/checker_call.lz -> 3
-- commit: f1cc49b
+- commit: a230050（重映射自 f1cc49b）
 
 
 ### BUG-352 列表切片类型推断 FIXED
@@ -1161,32 +1169,34 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - 根因: List 索引推断返回元素类型 T，切片需返回 List<T>
 - 修复: infer.rs List/Vec + is_slice 时返回 recv_ty
 - 证据: TEMP/probe/sweep15/list_slice.lz -> [2, 3]
-- commit: c7602e6
+- commit: 77ae29a（重映射自 c7602e6）
 
 ### BUG-353 case struct 解构 let Pair(x,y) 生成 Rust enum 模式 FIXED
 - 现象: let Pair(x,y) = Pair(1,2) → E0531 cannot find Variant/Ident
 - 根因: Pattern::Variant 在 LetTuple 展开中落入 _ 分支按 debug 名绑定
 - 修复: Variant 按 Tuple 直接递归展开（value 已在 parser 包上 __unapply__）
 - 证据: TEMP/probe/sweep15/case_struct_destruct.lz -> 1 | 2
+- commit: ed90286（重映射自 未记）
 ### BUG-354 struct 模式字段映射顺序颠倒 FIXED
 - 现象: case Point(x: px, y: py) → Point { y: px, x: py } → px 拿到 y 值
 - 根因: pattern.rs 用 struct_fields (HashMap) keys 迭代，顺序任意
 - 修复: 改用 struct_field_order (Vec<String>) 保持声明顺序
 - 证据: TEMP/probe/sweep15/match_struct_pattern.lz -> 1 | 2 (修前 2 | 1)
-- commit: 48b4e2c
+- commit: 49bdac9（重映射自 48b4e2c）
 
 ### BUG-355 List.map/filter 类型推断缺失导致链式调用失败 FIXED
 - 现象: List<int>.map(f).map(g) 第二个 map → E0599 no method map on Vec
 - 根因: infer.rs List match 缺 map/filter 分支 → 返回 Any → codegen recv_is_list=false
 - 修复: 添加 map（返回 List<Any> 让 skip_ty 生效，避免错误 Vec<i64> 标注）和 filter（返回 List<T>）
 - 证据: TEMP/probe/sweep15/map_chain3.lz -> ["2", "4", "6", "8", "10"]
-- commit: 73f5305
+- commit: 61a23f2（重映射自 73f5305）
 
 ### BUG-356 嵌套闭包借用移出非 Copy 外部变量 E0507 FIXED
 - 现象: 闭包体内引用外层非 Copy 变量（如 `|v| { (k, v) }` 的 k）→ E0507 cannot move out of
 - 根因: 非 move 闭包体引用外部非 Copy 变量时原样发射，借用移出
 - 修复: 新增 clone_noncopy_external / clone_noncopy_stmt，递归 clone 闭包体内的非 Copy 外部变量
 - 证据: dict_comprehension.lz 修前 E0507，修后 `{"a": 2, "b": 2}`
+- commit: 713f93a（重映射自 未记）
 
 ### BUG-357 非 move 外层闭包内嵌套闭包 E0373 FIXED
 - 现象: `|k| { map(|v| (k, v)) }` → E0373 closure may outlive the current function, it borrows k
@@ -1199,6 +1209,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
   rustc 0 error，运行 `{"a": 2, "b": 2}`
 - 回归: TEMP/probe/sweep15 全量 114 支 baseline(HEAD=73f5305) 与 本树 均 82 OK/32 FAIL，
   dict_comprehension.lz 由 FAIL(E0507)->OK，其余逐项一致，零回归
+- commit: 713f93a（重映射自 73f5305）
 
 ### BUG-358: 闭包体内的类型构造器被当成非 Copy 外部变量 → `Some::clone()(v*2)`
 - severity: medium
@@ -1207,6 +1218,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - summary: option_chain.lz `y.flat_map(|v| Some(v * 2))` 生成 `Some::clone()(v * 2i64)`，E0599 no method clone on Option ctor
 - detail: body_refs_noncopy_external / clone_noncopy_external 把 Call 的 callee `Var("Some")`（ty=Any，非形参，非 Int/F64/Bool）当作外层非 Copy 变量引用，闭包被降级非 move 并对构造器名调用 `.clone()` → 生成 `Some::clone()(v*2)`。
 - evidence: `src/ir/codegen/helpers.rs` 新增 `is_type_ctor_name()`（Some/None/Ok/Err/Option/Result/List/Vec/Set/Dict 等），body_refs_noncopy_external 与 clone_noncopy_external 的 Var 分支都加 `!is_type_ctor_name(name)` 守卫；BUG-357 的 already_cloned 守卫同步加同一守卫。回归后 option_chain.lz 生成 `y.flat_map(move |v| { Some(v * 2i64) })`，rustc 编译过、运行出 `Some(12)`。
+- commit: fa8ee50（重映射自 未记）
 
 ### BUG-359: 迭代器适配器方法（flat_map/zip/fold）裸 Vec/Option 接收者缺 into_iter 转换
 - severity: medium
@@ -1215,6 +1227,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - summary: `xs.flat_map(f)` / `xs.zip(ys)` / `xs.fold(init, f)` 生成裸方法调用，Rust 的 flat_map/zip/fold 只在 Iterator 上 → E0599；Option 的 flat_map 需映射为 and_then
 - detail: LZ 集合方法名与 Rust 方法名不一致——LZ `.flat_map()` 对 Option/Result 语义是 `and_then`（Option 无 flat_map 方法），对 List/Vec 是 `into_iter().flat_map().collect()`；`.zip(ys)` 需 `into_iter().zip(ys.into_iter())`；`.fold(init, f)` 需 `into_iter().fold(init, f)`（注意 LZ 实参序 = init, closure，勿与 reduce 的 closure, init 混用）。
 - evidence: expr_gen.rs `rust_method` match 新增 `"flat_map" if Option/Result 接收者 => "and_then"`；method_param_expected_ty 的闭包方法名单加 flat_map；Option/Result 消费型方法 clone 前缀名单加 flat_map；`fold`/`flat_map`/`zip` 在 recv_is_list 分支新增 into_iter 链（fold 用 `fold(init, lambda)`，flat_map 用 `flat_map(lambda).collect()`，zip 用 `zip(other.into_iter())`）。回归后 option_chain/opt_chain_brace/list_of_lists/zip 全 OK 运行，method_overload 因探针复用 xs 4 次（filter 早已 into_iter 消费）遗留 E0382，探针自身缺陷。
+- commit: fa8ee50（重映射自 未记）
 
 ---
 
@@ -1224,6 +1237,7 @@ ef self 即可；Counter 模式用 let mut c = Counter(count: 0); c.inc() 亦可
 - **status**: OPEN
 - **summary**: struct_destruct.lz 用普通 struct struct Pair(a: int, b: int) 做解构 let Pair(x, y) = Pair(1, 2)，parser 层把结构体解构糖化为 .__unapply__() 调用（复用元组解构机制），但 __unapply__ 只为 case struct 合成 → 普通 struct 生成 .__unapply__() → rror[E0599]: no method named __unapply__
 - **detail**: parser/stmt.rs L449-465 对 struct 解构无条件生成 Expr::MethodCall{method:"__unapply__"}；convert_decl.rs convert_struct 只在 s.is_case || @case 装饰器时合成 synth_unapply。修法：convert_decl 对「带字段且非递归且无用户同名方法」的普通 struct 也合成 __unapply__。递归 struct 必须跳过——其递归字段在 codegen 层 Box 包装（Option<Box<Node>>），而 synth_unapply 返回类型用 AST 字段类型（Option<Node>）→ E0308（case struct 同病）。新增 struct_is_recursive() 判断（Ty_refs 递归查 Named 名）。
+- commit: a1aa413（重映射自 add2a3f）
 
 ### FIXED(2026-10-20 / BUG-360)
 - convert_decl.rs convert_struct：扩展 
@@ -1240,6 +1254,7 @@ eeds_unapply 条件，对非递归带字段普通 struct 合成 __unapply__；�
 - **summary**: 多 for 推导式 `[(x, y) for x in xs for y in ys]` 的 output 类型在推导时循环变量 x/y 尚未绑定 → lookup_var 回退 Any → 生成 `Vec<(i64,i64)>` 而实际是 `Vec<(String,i64)>` E0308
 - **detail**: 影响多 for 的 List/Dict/Set 推导式，iter 为非 int 元素时全部 E0308。真源 src/ir/builder/infer.rs — ListComprehension/DictComprehension/SetComprehension 推导 arm 直接用外层 ctx 推导 output/key/value，未先绑定循环变量。修法：新增 bind_comp_vars() 克隆 ctx，把每个循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 args[0]；Range 恒为 int；Str 为 Str），再推导 output/key/value。
 - **evidence**: infer.rs L14-41 新增 bind_comp_vars；L805-851 List/Dict/Set 三臂改用它。探针 multi_for_str_tuple.lz / multi_for_dict_str.lz / multi_for_set_str.lz / multi_for_range.lz 从 FAIL 转 OK；全量 gate 87 OK/27 FAIL → 90 OK/26 FAIL。提交 e0aea87。
+- commit: ef1abb7（重映射自 e0aea87）
 
 ### FIXED(2026-10-20T14:01:42Z / BUG-361)
 - evidence: src/ir/builder/infer.rs 新增 bind_comp_vars()（L14-41），把每个推导式循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 args[0]；Range 恒为 int；Str 为 Str），并应用于 ListComprehension/DictComprehension/SetComprehension 三个推导 arm。验证：multi_for_str_tuple / multi_for_dict_str / multi_for_set_str / multi_for_range 4 个探针从 FAIL 转 OK（rustc 编译通过），全量 gate 从 87 OK/27 FAIL 升至 90 OK/26 FAIL，commit e0aea87。
@@ -1261,6 +1276,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 门禁：116/92/24（基线 116/91/25）—— nested_closure_typed / nested_closure / nested_closure_capture 三探针转绿。
 - reported_by: fist-agent（lz-combo-r14 组合轮）
 - task_id: T0r677
+- commit: fce50ba（重映射自 f9e16e7）
 
 
 
@@ -1281,6 +1297,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 - 顶层 body_s 的 `if nested` 包同样加 `!self.box_lambda` 条件。
 
 修复后：nested_closure_typed.lz 生成 `Arc::new(move |a: i64| { Arc::new(move |b: i64| { LzAdd::__add__(a.clone(), b.clone()) }) })`，COMPILE OK；closure_returning_closure.lz COMPILE OK。探针门禁 116/92/24 → 116/93/23。
+- commit: 52d4554（重映射自 8d6cfd6）
 
 
 
@@ -1293,6 +1310,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 修复（`8d39474`）：GenBuild tail 中 `list_ctor` 分支直接收集 `__bb`（yield 本身即目标元素，不做解构+vec! 包装）；非 list_ctor 的 Tuple 分支保留原解构路径（调用函数需逐参传参）。
 
 修复后 build_block3.lz COMPILE OK，探针门禁 116/93/23 → 116/94/22。
+- commit: 9c13928（重映射自 8d39474）
 
 
 
@@ -1305,6 +1323,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 修复（`19cf680`）：裸 Vec 的 `.filter()`/`.map()` 改为 `.iter().cloned()`（与 sum/product 的 `.iter().copied()` 同款）。`.iter().cloned()` 产生 Cloned<Iter<T>>，filter 闭包仍收 &Item（strip_lambda_type_with_ref 不变）、map 闭包收 owned Item（与 into_iter 等价），语义兼容且不 move 接收者。
 
 修复后 method_overload.lz COMPILE OK，探针门禁 116/94/22 → 116/95/21。
+- commit: 978c8fb（重映射自 19cf680）
 
 
 
@@ -1324,6 +1343,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 - 无 `=` 分隔符时 body 遇 `{` 走 parse_brace_block_expr（优先于 Indent/表达式路径）。
 
 修复后 closure_mut.lz / closure_mut2.lz / closure_mut3.lz 全部 COMPILE OK，探针门禁 116/95/21 → 116/98/18（+3 OK，无回归）。
+- commit: 85ffa35（重映射自 8b20120）
 
 
 
@@ -1336,6 +1356,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 修复（`156ac15`）：在 parse_type 的 `Ident(n)` 分支新增 `"Fn"` 特例 —— 遇 `[` 则解析方括号内逗号分隔的参数类型列表，可选 `-> R` 返回类型，产出 `Type::Fn`。无 `[` 时回退 `Named("Fn")`（保持兼容）。
 
 修复后 higher_order.lz COMPILE OK，探针门禁 116/98/18 → 116/99/17。
+- commit: 5980264（重映射自 156ac15）
 
 
 
@@ -1348,6 +1369,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 修复（`64e1601`）：新增 LBrack 分支 —— 解析方括号内逗号分隔的嵌套模式（tuple/list/brace pattern、Ident、Underscore），产出 `Stmt::LetTuple` 供 IR 端列表解构。
 
 修复后 nested_list_tuple.lz COMPILE OK，探针门禁 116/99/17 → 116/100/16。
+- commit: 4fcf632（重映射自 64e1601）
 
 
 
@@ -1365,6 +1387,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 - parse_type：新增 LBrack 泛型实参分支（复用 Option/Result 特化，其余落 Generic）。
 
 修复后 trait_generic.lz / trait_generic2.lz COMPILE OK，探针门禁 116/100/16 → 116/102/14（generator.lz parse-error 消除，仍剩 IR semantic error）。
+- commit: 8fa8fdd（重映射自 b281369）
 
 
 
@@ -1377,6 +1400,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 修复（`c2b3776`）：新增 `ret_is_iterator` 判定 —— 返回类型为 `Named("Iterator"/"iterator")` 或 `Generic` 之 base 为二者时豁免，与 `is_iterator` 关键字路径同效。
 
 修复后 generator.lz / generator2.lz COMPILE OK，探针门禁 116/102/14 → 116/104/12。
+- commit: e84bf55（重映射自 c2b3776）
 
 
 
@@ -1391,6 +1415,7 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 - Indent 体路径：若 paren_name 有值则接管（name=paren_name、fields=paren_fields…），继续解析方法。
 
 修复后 struct_methods.lz COMPILE OK，探针门禁 116/104/12 → 116/105/11。cargo test 全部通过（`magic_demos_generated_rust_compiles` 的 extractor_unapply.lz 失败为既有回归，stash 后仍失败，与本修复无关）。
+- commit: 14ff05e（重映射自 aafe33f）
 
 
 
@@ -1399,10 +1424,12 @@ TEMP/probe/sweep15/nested_closure_capture.lz 属探针缺陷（外层 `|x|` 无�
 ## BUG-372 [2026-10-20T18:14:36Z] [high] FIXED
 - summary: 闭包内 match/方法链续行被误判为缩进块，Dedent 悬空导致变量未绑定
 - detail: match 末臂 body 与调用 `)` 同行时（如 `xs.flat_map(|o| match o:\n case Some(v): [v]\n case None: [])`），词法层把 `case` 行当成新缩进块产生 Indent，`)` 落在对应 Dedent 之前。match 消费了 Indent 却配对不到 Dedent，残留的 Dedent 提前终结了外层 `def main` 主体，导致 `print(ys)` 被当作顶层语句、`ys` 未绑定变量。同时方法链续行 `.map(...)` 缩进更深时也会被误判为新 Indent 块。
+- commit: 792009f（重映射自 3cd1e49）
 
 ## BUG-373 [2026-10-20T18:14:46Z] [high] FIXED
 - summary: 方法链续行 `.map(...)` 被词法器误判为新缩进块
 - detail: `let result = xs\n    .map(...)` 中 `.map` 行缩进比上一语句更深，lexer 在 line_start 处理缩进时把 `.` 开头的续行当成新缩进块，产生多余的 Indent。修复：行首首个非空白字符是 `.`（且非 `..`）时跳过 handle_indent，不产生 Indent/Dedent，让 `.map` 作为上一表达式的续行。
+- commit: 792009f（重映射自 3cd1e49）
 
 
 
@@ -1422,6 +1449,7 @@ Fix (commit 706899e):
 
 Generated `let c = Config { name: "app".to_string(), debug: false, port: 8080i64 };` compiles.
 Gate: TOTAL=135 OK=131 FAIL=4.
+- commit: 466c44a（重映射自 706899e）
 
 
 
@@ -1437,6 +1465,7 @@ Fix (commit d8acd46):
 - ir/codegen/expr_gen.rs: `.await()` in a sync context wraps receiver in `__block_on(...)` (defensive E0728 guard).
 
 async_await.lz + async_chain.lz (await added to chain probe) both now compile.
+- commit: b997903（重映射自 d8acd46）
 
 
 
@@ -1450,6 +1479,7 @@ Fix (commit 7b4f0e9):
 - lz_builtins/src/runtime/builtins.rs: add `pub fn open(path: impl AsRef<str>) -> FileGuard` and `pub struct FileGuard { path: String, file: Option<std::fs::File> }` with `Drop` closing the file. Signature uses `impl AsRef<str>` to accept both `&str` and `String` (codegen passes `String`).
 
 Gate: TOTAL=135 OK=134 FAIL=1 (only string_concat.lz, deliberate IR design gate str+int remains).
+- commit: b997903（重映射自 7b4f0e9）
 
 
 
@@ -1462,6 +1492,7 @@ Gate: TOTAL=135 OK=134 FAIL=1 (only string_concat.lz, deliberate IR design gate 
 Fix (commit f9cd835): 探针改用 `f"The answer is {n}"`，表达同样语义。IR 设计门继续拦截 str+int。
 
 Gate: TOTAL=135 OK=135 FAIL=0 (100%)。cargo test --lib: 441 passed。
+- commit: 3f6a8cd（重映射自 f9cd835）
 
 
 
@@ -1474,6 +1505,7 @@ Gate: TOTAL=135 OK=135 FAIL=0 (100%)。cargo test --lib: 441 passed。
 Fix (commit 5e3aa87): tests/cython_backend.rs 5 处补 `default: None`。
 
 `cargo test --workspace` 现在全部通过（唯一剩余 extractor_unapply.lz 在 KNOWN_RUSTC_FAILURES 豁免名单内，E0592 duplicate __unapply__）。Gate 仍 135/135/0。
+- commit: 51a74e9（重映射自 5e3aa87）
 
 
 
@@ -1488,6 +1520,7 @@ Fix (commit 5e3aa87): tests/cython_backend.rs 5 处补 `default: None`。
 Fix (commit 0477fc3): src/lexer/lexer.rs —— 在 `.` 行首判断里，检查上一个非 Newline/Indent/Dedent token 是否是 `=`。若是（duck/struct 体以 `=` 结尾），则正常 handle_indent；否则按 BUG-373 跳过 indent（方法链续行）。
 
 验证：duck_demo.lz / duck_soft.lz 均编译成功；Gate 135/135/0；cargo test --workspace 全部通过（唯一剩 extractor_unapply.lz 在 KNOWN_RUSTC_FAILURES 豁免名单内）。
+- commit: 0646294（重映射自 0477fc3）
 
 
 
@@ -1505,6 +1538,7 @@ Fix (commit 9eb54ad): src/ir/builder/convert_decl.rs —— user_has_unapply = m
 - extractor_unapply.lz 生成 1 个 def + 1 个调用，rustc 编译干净。
 - demo_codegen_compile 测试从 0 passed / 1 failed → 1 passed / 0 failed。
 - cargo test --workspace 全部通过（此前唯一的失败项已消除）。
+- commit: c7933f4（重映射自 9eb54ad）
 
 
 
@@ -1517,6 +1551,7 @@ Fix (commit 9eb54ad): src/ir/builder/convert_decl.rs —— user_has_unapply = m
 对照方法形式（line 4739）已有 `.collect::<Vec<_>>()`，自由函数形式漏了。
 
 Fix (commit ...): expr_gen.rs 自由函数 zip 补 `.collect::<Vec<_>>()`。修复后 edge_collections.lz 输出 `[(1, 10), (2, 20), (3, 30)]` 正确。
+- commit: ad34a27（重映射自 未记）
 
 
 
@@ -1529,6 +1564,7 @@ Fix (commit ...): expr_gen.rs 自由函数 zip 补 `.collect::<Vec<_>>()`。修�
 对照 self_field/self_base 分支（line 5344-5347）与 in_generic_fn 分支（line 5349-5354）都已自动补 .clone()，唯独 else 分支漏了。
 
 Fix: else 分支根据元素类型 is_copy_ty 判定，非 Copy 时补 .clone()。edge_ops.lz `matrix[0]` 现输出 [1, 2] 正确。
+- commit: c405259（重映射自 未记）
 
 
 
@@ -1541,12 +1577,14 @@ Fix: else 分支根据元素类型 is_copy_ty 判定，非 Copy 时补 .clone()�
 Fix: 点号后语境无歧义，放行 Token::And → "and"、Token::Or → "or"。
 
 修复后 `none_val.or(Some(99))` 正常解析并编译。
+- commit: cc9f4d9（重映射自 未记）
 
 ## BUG-384 [2026-10-20T20:21:08Z] [medium] FIXED
 - summary: 解析器拒绝 |_| 下划线匿名闭包参数 — 文档化语法
 - detail: parser/expr.rs:1718 闭包参数只接受 Token::Ident，`|_|` 下划线匿名参数被拒。但 06g-魔法综合.md:278 文档化 `f_filter: fn(T) -> bool = |_| True`。
 
 Fix: Token::Underscore → "_" 作为匿名参数名。
+- commit: cc9f4d9（重映射自 未记）
 
 ## BUG-385 [2026-10-20T20:21:16Z] [medium] FIXED
 - summary: int(char 循环变量) 生成 .parse::<i64>() — char 无 parse 方法 → E0599
@@ -1555,6 +1593,7 @@ Fix: Token::Underscore → "_" 作为匿名参数名。
 Fix: int 转换前检查 args[0].kind 是否是 str_loop_vars 中的 Var，是则 `as i64`（字符码点）。
 
 edge_char_int.lz 现正确输出 Some(42)/None。
+- commit: cc9f4d9（重映射自 未记）
 
 
 
@@ -1565,6 +1604,7 @@ edge_char_int.lz 现正确输出 Some(42)/None。
 - detail: `let chars = s.chars(); for c in chars:` 场景下 `chars` 的 IR 类型是 Iterator<str>，但 Rust 实际是 Chars<'_>（yields char）。str_loop_vars 机制只在 `for c in s.chars()` 直接形式触发（stmt_gen.rs:2079 检查 iter.kind 是 MethodCall(chars)），间接形式漏了 → int(c) 生成 .parse::<i64>() → E0599。
 
 已知限制，非紧急。直接形式 edge_char_int.lz 已修复（BUG-385）。
+- commit: 105515d（重映射自 f358366）
 
 
 ### FIXED(2026-10-21T09:58:37Z / BUG-386)
@@ -1576,6 +1616,7 @@ edge_char_int.lz 现正确输出 Some(42)/None。
 Fix: 新增分支 `method == "reduce" && args_s.len() == 1 && recv_is_list` → 路由到 `lz_builtins::runtime::functional::reduce(recv, closure)`（返回 Option<T>）。
 
 edge_complex.lz `filtered.reduce(|acc,x| acc+x)` 已编译通过。
+- commit: 0b11ed0（重映射自 未记）
 
 
 
@@ -1588,6 +1629,7 @@ edge_complex.lz `filtered.reduce(|acc,x| acc+x)` 已编译通过。
 Fix: 检查下一个 token 为 Eq/Colon 时放 Type::Any 占位，下游只检查 is_some()。
 
 gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64，若 raise 值为 str 需另修（BUG-389 后续）。
+- commit: 7144725（重映射自 未记）
 
 
 
@@ -1600,6 +1642,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 文档 SYNTAX/03e-closure闭包.md §1.5「变量绑定」+ 后续函数调用场景未明示此组合。DEMO/02_types/type_conversion.lz 的 `let add: fn(int,int) -> int = |x,y| x+y` 只被直接调用，未传给 fn(...) 形参，故 DEMO 全绿。
 
 非 gate 失败，probe 设计边界问题，暂列 low。
+- commit: 45b6529 + 778bca9（重映射自 76689d4）
 
 
 ### FIXED(2026-10-21T11:59:49Z / BUG-389)
@@ -1608,11 +1651,13 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-390 本地 FnDef 登记覆盖顶层 raises 函数类型：`parse_int(...)?` 的 ? 传播被丢掉（Try 推断为 Int）
 - detail: collect_functions 把顶层函数登记进 TypeCtx.vars 为 IrType::Fn{ret: Result<ok,err>}（raises 升级正确）。但 convert_block 处理 AstStmt::FnDef 时（convert_stmt.rs ~2085）用 func.return_type 裸算 fret 并 block_ctx.add_var 覆盖同名顶层登记，把 Result<int,str> 覆盖成 fn(str)->int；同时无返回注解默认 IrType::Any（应为 Unit）。后果：内层函数体 `let a = parse_int(s)?` 的 Try 分支 infer_expr_type 看到 inner 类型为裸 Int，不识别 Result → `?` 被丢掉、生成的 Rust 用 .unwrap() 而非 ?，且 trailing 表达式裸返回 i64 而非 Ok(i64) → E0308。复现 TEMP/probe/sweep16/edge_errors.lz（main 内嵌套 def parse_int/pipeline，pipeline 调 parse_int(s)?）。修复：convert_stmt.rs 改用 TypeCtx::fn_return_ir(&func.return_type, &func.raises, &g) 计算 fret，使本地 FnDef 与顶层登记一致。commit 1fe7361。修复后 DEBUG 探针显示 parse_int lv=fn(str)->Result<int,str>（原为 fn(str)->int）、inner_ty=Result{ok:Int,err:Str}（原为 Int）。135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0。
 - reported_by: ds-harness-r19
+- commit: 79494ec（重映射自 1fe7361）
 
 ## BUG-391 [2026-10-21T03:18:35Z] [medium] FIXED
 - summary: BUG-391 裸 raises 后跟 `->` 报「Expected type, got Arrow」：`def f() raises -> int =` 无法解析
 - detail: BUG-388 修复只让 parser.rs 在 raises 后跟 Eq/Colon 时视为裸 raises（默认 err=str），漏掉 Arrow。`def parse_int(s) raises -> int:` 与 `def pick() raises -> int =` 均报 Parse error: Expected type, got Arrow（TEMP/probe14q/z_qmark_result.lz 亦命中，说明该形式从未可解析）。修复：parser.rs 1187 条件加入 Token::Arrow，使裸 raises 默认 str，随后循环继续解析 `-> int` 作为返回类型。commit 1fe7361。修复后 bug390_r2.lz（`def f2() raises str -> int = 1`）与 `def f() raises -> int =` 形式均可解析。
 - reported_by: ds-harness-r19
+- commit: 79494ec（重映射自 1fe7361）
 
 
 
@@ -1622,6 +1667,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-392 impl 头自类型携带泛型默认值/bound：`struct<T: Clone = List<int>>` 生成 `impl<T> Container<T: Clone = Vec<i64>>`（E0737/E0229）
 - detail: struct 定义 `struct Container<T: Clone = List<int>>` 生成 `struct Container<T: Clone = Vec<i64>>`（正确），但 struct 魔法方法 impl 头把同一份 gen_generics(&s.generics) 用在自类型上，生成 `impl<T: Clone + Debug + Clone> Container<T: Clone = Vec<i64>>`：①`= Vec<i64>` 默认类型实参不允许出现在 impl（E0737 expected one of ( + , :: < >, found `=`）；去掉默认后仍携带 bound `Container<T: Clone>`，报 E0229 associated item constraint。根因：gen_generics 同时含 bound 与 default，被「struct 定义」和「impl 自类型/返回类型」共用。修复：types_emit.rs 新增 gen_param_args(&[GenericParam])->`<T,U>`（仅名字，无 bound 无默认），decl_gen.rs 在 struct/enum 的 4 处 impl 头自类型（__new__/__init__ impl、ImplicitFrom、struct 方法 impl、enum 方法 impl）与 __new__ 返回类型改用 gen_param_args；struct/enum 定义仍用 gen_generics（保留默认）。验证：cargo build 0 err；cargo test --test find_bug_bugs ty005_generic_default ok；全量 cargo test --workspace 463 lib pass（+1），仅剩已知 core_compose_ok/core_unique_ok 两个 FAIL；135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0。
 - reported_by: ds-harness-r19
+- commit: 15bfdf5（重映射自 未记）
 
 
 
@@ -1631,6 +1677,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-393 impl Fn(...) opaque 形参缺 Clone：LZ 值语义生成 f.clone() 报 E0599（compose/闭包体内复用 fn 形参）
 - detail: compose.lz `def compose<a,b,c>(f: fn(b)->c, g: fn(a)->b) -> fn(a)->c = |x| f(g(x))` 生成的 Rust 为 `return Arc::new(move |x: i64| { f.clone()(g.clone()(x.clone())) });`，其中 fn 形参被声明为 `impl Fn(b) -> c + 'static + Send + Sync`（opaque），LZ 值语义在闭包体内按值复用生成 `f.clone()`/`g.clone()`，opaque 无 Clone → E0599 no method named `clone`。修复：decl_gen.rs fn(...) 形参生成 `impl Fn(...)` 时统一追加 `+ Clone`（返回 fn 值的函数则 `+ Send + Sync + Clone`）；闭包字面量与 Arc<dyn Fn…> 的 fn_value_fwd 转发闭包捕获皆可 Clone，调用点契约可满足。验证：compose.rs 生成的 fn 形参变 `impl Fn(b) -> c + 'static + Send + Sync + Clone`，E0599 消除；135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0；cargo test --workspace 463 lib pass，无新失败。注：compose 测试仍失败，但剩余错误已变为 E0308/E0631（返回闭包形参被硬编码 i64 而非泛型 a，属另一独立的闭包参数泛型推断缺口，另立条目）。
 - reported_by: ds-harness-r19
+- commit: 88fe39d（重映射自 未记）
 
 
 
@@ -1645,11 +1692,13 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-395 内置函数作一等 fn 值丢失引用形参：`len.clone()(s.to_string())` 以值传参，expected `&T` found `String`
 - detail: unique.lz `unique_by(words, |s: str| len(s))` 生成的 Rust 为 `|s: String| { len.clone()(s.to_string()) }`，报 E0308 expected `&_` found `String`（`pub fn len<T: Len>(obj: &T) -> i64`）。根因：内置 `len` 形参为 `&T`，一旦作为一等 fn 值捕获进闭包（`len.clone()`），codegen 把它的 fn 值类型重建为「值传参」形式 `fn(String) -> i64`，丢失引用性，于是调用点以值传 `s.to_string()` 而非 `&s`。与 BUG-389（闭包/fn 形参）同类：fn 值类型未保留引用形参。修复方向：fn 值载体类型需保留引用形参（`&T`）并在调用点以引用实参调用。FIND_BUG/core/unique.lz。
 - reported_by: ds-harness-r19
+- commit: 73f4274（重映射自 未记）
 
 ## BUG-396 [2026-10-21T05:02:30Z] [medium] FIXED
 - summary: BUG-394 泛型函数返回的闭包字面量形参硬编码 i64（compose `|x: a|` → `|x: i64|`，E0308/E0631）
 - detail: compose.lz `def compose<a,b,c>(f: fn(b)->c, g: fn(a)->b) -> fn(a)->c = |x| f(g(x))`：函数返回闭包字面量，其形参在类型推断阶段被默认成 `int`（LZ 标量默认），codegen 随之硬编码 `|x: i64|`，而函数签名要求 `|x: a|` → E0308 expected type parameter `a` found `i64`、E0631 closure signature `fn(i64)` ≠ expected `fn(a)`。根因：闭包形参类型标注未从「函数返回签名」反推。修复：expr_gen.rs Lambda 分支生成闭包形参时，若 `current_ret_ty` 为 `Fn{params,..}` 且形参数与闭包形参个数一致，则按返回签名形参类型标注该闭包形参（仅当原形参类型为 Any/Int 这类「默认标量」时覆盖，已显式注解如 Str 不动）。验证：compose.rs 生成 `return Arc::new(move |x: a| { f.clone()(g.clone()(x.clone())) });`；cargo test core_compose_ok ok（此前 FAILED）；cargo build 0 error。
 - reported_by: ds-harness-r20
+- commit: 75d5811（重映射自 未记）
 
 
 
@@ -1660,6 +1709,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-397 内置函数作一等 fn 值时丢失引用形参：len 传值报 E0631、len.clone()(x) 报 E0308
 - detail: 根因：LZ 内置函数（len/id/hash/lz_int 等）在直接调用时被降级为方法调用（`len(x)` → `(x).len()`、`contains(xs,x)` → `(xs).contains(&x)`）从而自动获得引用；但当内置被当作**一等 fn 值**使用时（传入高阶函数 `apply_len(nums, len)`，或 `len.clone()(arg)` 直接调用），暴露的是内置的原始 Rust 签名 `len<T: Len>(obj: &T)`，而其值类型在推断/拍平过程中丢失了 `&`。两种表象：① `len.clone()(s)` 报 E0308 expected `&_`, found String；② `apply_len(nums, len)` 报 E0631 type mismatch。修复（codegen 层，避开并发编辑的 infer.rs）：在 scan.rs 新增 `builtin_ref_params(name)` 静态表，按 lz_builtins 真实签名登记引用形参；expr_gen.rs ①callee_fn_refs 优先按内置名还原真实引用性（修 E0308）；②fn_value_fwd 对引用形参内置生成转发闭包 `move |__lz_fv0| len(&__lz_fv0)`（修 E0631）。验证：FIND_BUG/core/unique.rs `core_unique_ok` 由 FAILED 转 PASS；自写探针 h2.lz（apply_len/pick_key 传 len、contains 直调）与 h3.lz（len 于 List<int>/str 各一次）全链路通过；cargo build 0 error；135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0。
 - reported_by: ds-harness-r21
+- commit: 73f4274（重映射自 c7f33cf）
 
 
 
@@ -1669,6 +1719,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-398 内置绑定到变量后引用形参丢失：f = len 使 f(words) 报 E0308、传高阶函数报 E0631
 - detail: 触发（自写探针 h5.lz）：`f = len` 把内置绑定到变量后，`f(words)` 报 E0308 expected `&T`, found Vec（rustc 建议 `f(&words.clone())`），`apply1(words, f)` 传高阶函数报 E0631 type mismatch。根因：内置的原始 Rust 形参 `&T` 在「绑定到变量」这步随名称传递丢失——`f` 的类型被拍平为 `Fn(Vec<T>)->i64`，调用位与传参位都拿不到引用性。修复（codegen 层，commit 后附）：stmt_gen.rs let 绑定初值是「引用形参内置名」时，发射转发闭包 `move |__lz_b0| len(&__lz_b0)`，使 `f` 本身成为类型正确的一等函数，调用与传递两路同时修复（f 未登记为 Arc 载体，裸闭包即够）。验证：h5.lz `r1=2 | r2=2 | h5 done` 全链路通过；h2/h3/h4（直调 len、lz_int/lz_float/lz_bool）回归全绿。
 - reported_by: ds-harness-r22
+- commit: 8e7878b（重映射自 9f80e92）
 
 
 
@@ -1678,6 +1729,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-399 复用类型名被 builder 注入多义 clone，codegen 误渲染 T::clone().Field 报 E0061/E0609/E0277（lib_option、lib_closure 双挂）
 - detail: 触发：`lib_option`（`OptionInt.Some(...) else OptionInt.None` 在闭包内）与 `lib_closure`（`|x: int| -> str = str(x)`）两个 find_bug_libs 用例 RUSTC_FAIL，`cargo test --test find_bug_libs` 长期 10/12。根因：builder 对「在作用域内被复用多次的类型名」注入多义保护 `MethodCall receiver=Var(T) method=clone`；codegen 在 MethodCall 分支的 static_type_call（receiver 是 known_types 里的类型名）/is_type_param 路径把 `T.clone()` 渲染成 `T::clone()`，外层 FieldAccess 再拼成 `OptionInt::clone().None`（E0061 clone 缺参 + E0609 no field None）、`str::clone()(x)`（E0277 str 非 Sized/Clone）。类型名不是值，clone 无意义。修复（commit 后附，仅动 expr_gen.rs 两处）：① static_type_call 分支 method=="clone" 且无参时回退裸类型路径 recv；② FieldAccess 分支 base 是「类型名 + 多义 clone」MethodCall 时归一化为类型路径 T::Field。验证：`cargo test --test find_bug_libs` 由 10/12 FAILED 转为 12/12 ok（lib_option、lib_closure 同修）。
 - reported_by: ds-harness-r23
+- commit: 4dffb30（重映射自 9d2e6a9）
 
 
 
@@ -1687,6 +1739,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 - summary: BUG-400 自定义枚举含 None 变体时裸 None 未解析为 <枚举>::None，生成裸 Rust None 报 E0308
 - detail: 触发：自定义 `enum OptionInt: Some(int) | None` 下，`def and_then(opt: OptionInt, f: fn(int)->OptionInt)->OptionInt = match opt: case Some(v): f(v) case None: None`——`case None: None` 的裸 `None`（body）生成裸 Rust `None` → E0308 mismatched types（期望 OptionInt）。gen_none_ref 只识别 std Option（known_types.contains("Option") / has_option_context 判 path=="Option"），完全不处理「含 None 变体的自定义枚举」。lib_option/option.lz 靠全限定 `OptionInt.None`（第 48 行）绕开，掩盖了该缺口。修复（commit 3b3697d，仅动 types_emit.rs）：gen_none_ref 开头加判定——当前期望类型/当前函数返回类型恰是「含 None 变体」的自定义枚举（enum_variants.get("None")→枚举名 且 path 匹配）时发射 `<枚举>::None`；判定先于 known_types Option 分支，避免自定义 OptionInt 被误路由到 std Option::None。验证：新探针 TEMP/probe/sweep17/h6.lz、h7.lz 由 RUSTC_FAIL 转 OK；find_bug_libs 12/12；lib 463 passed；find_bug_bugs 46 文件独立运行全 OK（套件跑分有并发编译竞态抖动，非本改动回归）。
 - reported_by: ds-harness-r23
+- commit: 6867c33（重映射自 3b3697d）
 
 
 
@@ -1698,10 +1751,12 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 ## BUG-401 [2026-10-21T11:09:58Z] [medium] FIXED
 - summary: str() 作用于内建集合（List/Set/Dict）生成 Display 格式化 -> E0277
 - detail: expr_gen.rs str 内建对 Named Vec/HashSet/HashMap 恒用 `format!("{}", v)`（Display），但内建集合不 impl std::fmt::Display -> E0277；print(x) 用 print_arg_is_display 已对集合走 `{:?}`（Debug）。实测 print([1,2,3]) 输出 [1, 2, 3] 而 str([1,2,3]) 报 E0277，str 与 print 不一致。复现 TEMP/probe/sweep18/coll_str.lz。已修 commit 95d1c0d：仅集合类型走 Debug，标量（含 F64 需 "42" 非 "42.0"）照旧 Display。修复后 OK list=[1, 2, 3] | set={3, 1, 2}。回归 lib 463/463、gate 135/135、find_bug_bugs 46、find_bug_libs 12（含 lib_json）、codegen_corner_fixes 37 全绿。
+- commit: 879597b（重映射自 95d1c0d）
 
 ## BUG-402 [2026-10-21T11:10:33Z] [medium] FIXED
 - summary: str() 作用于内建集合（List/Set/Dict）生成 Display 格式化 -> E0277
 - detail: expr_gen.rs str 内建对 Named Vec/HashSet/HashMap 恒用 `format!("{}", v)`（Display），但内建集合不 impl std::fmt::Display -> E0277；print(x) 用 print_arg_is_display 已对集合走 `{:?}`（Debug）。实测 print([1,2,3]) 输出 [1, 2, 3] 而 str([1,2,3]) 报 E0277，str 与 print 不一致。复现 TEMP/probe/sweep18/coll_str.lz。已修 commit 95d1c0d：仅集合类型走 Debug，标量（含 F64 需 "42" 非 "42.0"）照旧 Display。修复后 OK list=[1, 2, 3] | set={3, 1, 2}。回归 lib 463/463、gate 135/135、find_bug_bugs 46、find_bug_libs 12（含 lib_json）、codegen_corner_fixes 37 全绿。
+- commit: 879597b（重映射自 95d1c0d）
 
 
 
@@ -1710,6 +1765,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 ## BUG-403 [2026-10-21T11:12:32Z] [low] FIXED
 - summary: 闭包返回闭包：Lambda 的返回类型注解用 rust_type -> fn 指针，与闭包体 Arc::new(内层闭包) 不符
 - detail: expr_gen.rs Lambda ret_ann 原用 `self.rust_type(t)`，对 IrType::Fn 渲染成 `-> fn(i64)->i64` 裸函数指针；但闭包体返回 Arc::new(内层闭包) -> E0308 expected fn pointer found Arc / E0271。实测 TEMP/probe/sweep18/nested_ret.lz：`let make_adder = |a: int| -> fn(int)->int = |b| a+b` 修复前 E0308/E0271，修复后 OK add5=12。与 BUG-389 同根（IrType::Fn 在 rust_type 与 fn_value_type 渲染不一致），本处为闭包返回值注解面向。已修 commit 92b2de6：ret_ann 对 Fn 类型改走 fn_value_type -> Arc<dyn Fn(...)+Send+Sync>，其余类型照旧。回归 lib 463/463、gate 135/135、find_bug_bugs 46、find_bug_libs 12、codegen_corner_fixes 37、g6_codegen 17、tail_recursion 16、gen_build_block 5 全绿；fn-value 探测 h7/h8/h2 仍 OK，edge_complex（形参 impl Fn）仍 E0308 待 BUG-389 重构。
+- commit: 778bca9（重映射自 92b2de6）
 
 
 
@@ -1718,6 +1774,7 @@ gate 135/135 仍绿。注：裸 raises 的实际错误类型目前是 Any→i64�
 
 ## BUG-404 [2026-10-21T12:14:28Z] [medium] FIXED
 - summary: lz_codegen_lib 缺 struct 提取魔法方法 __unapply__/__unapply_seq__ 生成，--emit=rs-lz 路径下结构体解构编译失败 E0599
+- commit: 63a1fdf（重映射自 83b34f7）
 
 
 
@@ -1728,6 +1785,7 @@ impl Point { fn __unapply__(&self) -> (f64, f64) { return (self.x.clone(), self.
 验证：① 反例 TEMP/probe/sweep18/d2.lz（struct Point + let Point(a,b)=p）：--emit=rs-lz 由 E0599 no method named __unapply__ 修复为 rustc 编译通过；② 原生 vs rs-lz 逐字节比对 d1（同构2字段）/d3（异构 int+str）/d4（单字段）/d5（空 struct）全部 bodyDiffs=0；③ tests/lz_ir_bootstrap.rs::lz_emit_rs_lz_matches_native_codegen 由 FAILED 修复为 PASS（lz_ir_bootstrap 5/5，该测试 baseline 亦 FAILED 属既有缺口）；④ 回归（--test-threads=1）：gate 135/135、lib 463/463、find_bug_bugs 46、find_bug_libs 12、codegen_corner_fixes 37、g6_codegen 17、tail_recursion 16、gen_build_block 5、error_bug_libs 1、reject_errors 3、dual_route_golden 4、str_boundary 3、bridge_boundary 11、cy_codegen_gate 9、reject_more 8、lexer_parser_core 2、ir_pass_fixes 1、lzc_loop_boundary_gates 4、cython_backend、lz_semantic_cases 7、demo_codegen_compile 16、fuzz_smoke、lzc_loop_nested_def、tail_recursion_matrix 3、lzc_loop_unit_variant 4、ir_snapshots、incremental_golden 全绿。
 ## BUG-405 [2026-10-21T14:04:09Z] [high] FIXED
 - summary: BUG-405 rs-lz 枚举变体构造渲染为 Color.Blue(...)（点号）而非 Color::Blue(...)（路径分隔符），rustc 报 E0423 expected value, found enum Color；附带枚举定义被降级为元组变体 Blue(i64, String)（原生为具名字段变体 Blue { f, g }）。复现 TEMP/probe/sweep18/p_enum.lz。根因 lz_codegen_lib.lz gen_call 非 Var 调用者恒用 .（FieldAccess），且 Item.EnumDef 只携带字段类型丢失字段名。
+- commit: c6e2fe5（重映射自 596b685）
 
 
 ### FIXED(2026-10-21T14:35:54Z / BUG-405)
@@ -1739,6 +1797,7 @@ impl Point { fn __unapply__(&self) -> (f64, f64) { return (self.x.clone(), self.
 ## BUG-406 [2026-10-21T14:04:59Z] [high] FIXED
 - summary: BUG-406 rs-lz Stmt.Match 分支体末尾 ExprStmt 被渲染成 
 eturn println!(...)，使所在函数提前 return、跳过 match 之后语句。复现 TEMP/probe/sweep18/p_match.lz：原生打印 1、2 两行，rs-lz 产物只打印 1（_ 分支的 return 提前返回 main，后续 print(2) 不执行）。根因 gen_match_arm→gen_block→gen_body(is_main=false) 把分支体末语句视为函数尾（is_tail&&!is_main→return）；原生把语句 match 渲染为 let _ = match ... {} 且分支内无 return。
+- commit: 378802f（重映射自 37d9191）
 
 
 
@@ -1749,6 +1808,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 
 ## BUG-407 [2026-10-21T15:02:17Z] [high] FIXED
 - summary: 原生 codegen 的命名字段枚举字段访问 x.v 生成解构 match 时用 .find() 只取该枚举第一个变体；字段落在后续变体（如 Shape 中 Rect.h）时漏生成解构、回落为直接 x.v → rustc E0609 no field h on type Shape。复现 TEMP/probe/sweep18/p_enumfield.lz。
+- commit: 39c5f44（重映射自 cf29dbe）
 
 
 
@@ -1757,6 +1817,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 验证：① TEMP/probe/sweep18/p_enumfield.lz（Shape 含 Circle(radius)/Rect(w,h)，`print(s.radius)` + `print(r.h)`）：修复前原生产物 `println!("{:?}", r.h)` → E0609 编译失败；修复后 `println!("{:?}", match &r { Shape::Rect { h, .. } => h.clone(), _ => unreachable!() })`，rustc 编译通过、运行打印 5、4（s.radius=5、r.h=4）；② 回归（cargo test --test-threads=1）：gate 135/135、lib 463/463、lz_ir_bootstrap 5/5、集成套件全绿（find_bug_bugs 46、find_bug_libs 12、codegen_corner_fixes 37、g6_codegen 17、tail_recursion 16、str_boundary 3、dual_route_golden 4、bridge_boundary 11、cy_codegen_gate 9、demo_codegen_compile 16、lz_frontend_bootstrap 44、lz_semantic_cases 7 等）。
 ## BUG-408 [2026-10-22T03:36:57Z] [high] FIXED
 - summary: --emit=rs-lz 下关键字参数（`Shape.Circle(radius: 5)` / `f(x~=1)`，IR 为 StructCtor(name="_KwArg")）被原样渲染成 `_KwArg {…}` → rustc E0422 cannot find struct _KwArg。lz_codegen_lib.lz expr_cs_list 缺 _KwArg 特判（原生有 helpers.rs gen_kwarg_value）。复现 TEMP/probe/sweep18/p_enumfield.lz。
+- commit: 0d7b576（重映射自 d92f6d3）
 
 
 ### FIXED(2026-10-22T03:37:32Z / BUG-408)
@@ -1785,6 +1846,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 修复方向（两处同改）：lz_codegen.rs 把 top_level_stmts 序列化进 .lzrs（新增字段或合成 Item）；lz_codegen_lib.lz IrModule 加字段 + codegen_module 复刻原生合成分支（注意原生合成分支走 gen_block_inner，尾表达式**带** `return `前缀，与声明式 main 的抑制行为不同——对齐时才字节一致）。风险：IrModule 构造调用点需同步（golden .lzrs 由生成器再生成，无手工旧件；lz_ir_bootstrap 的 d1.lz 无顶层语句，不受影响）。
 
 验证基线（修复前）：p_enumfield.lz --emit=rs-lz → rustc E0601 main not found；原生路径编译运行打印 5、4 正常（BUG-407 修复后）。
+- commit: 4b4ac21（重映射自 e191b77）
 
 
 
@@ -1801,6 +1863,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 复现：TEMP/probe/sweep18/p_enumfield.lz（enum Shape: Circle(radius: int)/Rect(w: int, h: int)；print(s.radius); print(r.h)）——修复前 rs-lz 产物 E0609 编译失败，原生编译运行打印 5、4。
 修复（commit 83280f9）：① 序列化带字段名（rs_codegen 模式），LZ gen_enum_variants 按「全命名→struct variant / 空名→元组 / 无字段→单位变体」生成；② MethodCall 构造改写为既有未用的 Expr.EnumCtor，命名字段变体的位置实参补 _KwArg；LZ 侧 EnumCtor 三形态渲染（无参→Enum::Variant、全 _KwArg→{ f: v }、其余→元组）；③ 新增 Expr.EnumFieldGet 承载解构（含该字段的每个变体一臂 + _ => unreachable!()）；display_expr/expr_ty 补穷尽分支；④ 新增 rs_codegen_mode 开关，保证 --emit=ir-lz 的 display 产物不受影响。
 验证（字节级，python 精确比较 `pub enum … const __name__` 区间）：p_enum_named 248B、p_enum 187B、p_enum_pos 176B、p_enumfield 111B、p_enum_shared 435B 五例 rs-lz 与原生逐字节相同；运行等价（p_enumfield 两侧 5、4；p_enum_shared 两侧 1、3）。回归：lib 463/463、lz_ir_bootstrap 5/5、25 个集成套件全绿。
+- commit: 5a0e136（重映射自 83280f9）
 
 
 ### FIXED(2026-10-24T05:33:15Z / BUG-411)
@@ -1820,6 +1883,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 ② rs-lz 序列化 src/ir/lz_codegen.rs：`arms.sort();`。
 验证：修复后连续 8 次编译臂序稳定（8/8 `E::A` 在前）；p_enum_shared 原生与 rs-lz 产物逐字节一致（435B）。
 落点说明：① 的改动位于 src/ir/codegen/expr_gen.rs，随并发 agent 的提交 104f641 一起入库（共享工作区，非本人提交）；本人在该文件中的同一处改动亦见于该 commit。
+- commit: 8ca7214 + 5a0e136（重映射自 104f641 / 83280f9）
 
 
 ### FIXED(2026-10-24T05:33:24Z / BUG-412)
@@ -1839,6 +1903,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 根因方向：外层循环变量在内层 `move` 闭包中未做 clone 保护；即 `(k.clone(), v)`（原生 expr_gen.rs 既有的 clone_if_multiuse / 闭包捕获保护未覆盖这条嵌套推导链）。
 归因证据：① 门禁脚本 TEMP/probe/sweep15/cy_rust.ps1 走**原生**路径（`cargo run -- <lz>`，不带 --emit=rs-lz），与本人当轮 rs-lz 改动无关；② 失败样例产物内零 enum 构造，排除 BUG-411；③ 本人上一轮收尾时门禁为 135/135（commit e191b77 后实测），此后入库的 104f641「BUG-15 dict for-in 元组模式走键值对迭代; BUG-16 fold/reduce 消费型方法多使用点 clone 保护」正是这一带：其 stmt_gen.rs 改动给 iter_is_dict 追加 `&& !var.contains(',')`（for (k,v) in dict 改走键值对迭代），expr_gen.rs 改动把闭包 move/clone 判定从 `&params` 改为 `self.enclosing_lambda_params.borrow()` 并**删除**了原「move 闭包重复消费需 clone 到闭包体」的注入块（diff @@ -6481,8 +6573,6 段）。当前 src/ir/codegen/expr_gen.rs 与 stmt_gen.rs 均为已提交状态（git status 干净），故不是并发 agent 的在途未提交改动所致。
 修复方向（建议，归该文件 owner）：在生成内层 `move` 闭包时对「来自外层循环变量的非 Copy 捕获」注入 `.clone()`（与 BUG-16 的 clone 保护同机理），或对嵌套推导链的最内层闭包改用非 move 捕获 + 显式 clone。回归锁建议：把这 3 例纳入套件断言（当前只在 TEMP 门禁里跑，cargo test 未覆盖）。
+- commit: 9b974e1（重映射自 104f641 / e191b77 / 96a4e02）
 
 
 
@@ -1860,6 +1925,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 修复（commit 2e794e7）：新增 comp_cond_lambda_src(cond, iter_expr, cond_expr)——元素类型优先取被迭代表达式的元素类型（列表字面量取首元素；Vec/List<T> 取 T；cond lambda 形参类型在 IR 里常为 Any，不可用，仅作回退），仅当确定非 Copy（Str/Named/Tuple）时改用 strip_lambda_type（不注入 `&`，闭包绑定引用本身），其余保持既有 `|&x|` 逐字不变。
 验证：① c7 修复前全 E0507，修复后编译运行正确（dict len=2、list ["aa","ccc"]、set len=2），产物 `filter(|k| { (k.len() …) })`；② c2_cond 产物仍 `filter(|&x| { x > 2i64 })` 逐字不变（无回归）；③ 135-probe 门禁 135/135、lib 463/463、32 集成套件全绿。
 遗留：dict/set 推导**值表达式**复用循环变量仍 E0382（见 BUG-415）。
+- commit: 77cefae（重映射自 2e794e7）
 
 
 ### FIXED(2026-10-24T05:58:41Z / BUG-414)
@@ -1882,6 +1948,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 修复方向（建议）：推导式值 lambda 体内对「在体内出现多次的非 Copy 循环变量」做 clone 保护——
 把除最后一次以外的使用改写为 `k.clone()`（或对元组/字面量元素统一 clone）。
 回归锁建议：dict/set 推导的值表达式与键表达式复用同一循环变量的样例应纳入套件。
+- commit: f65e34c（重映射自 356b11f）
 
 
 
@@ -1901,6 +1968,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 根因：BUG-415 修复只覆盖了元组字面量（ExprKind::TupleLit）与多态加法（LzAdd）；而 dict 字面量的键值对、List()/Set() 构造的元素是**直接拼字符串**生成的（`from([(k, v), …])` / `vec![…]`），不经 TupleLit，故同一「按值多项列表内复用非 Copy 变量」缺口仍在。三个分支（Dict / List|Vec / Set|HashSet）同形。
 修复（commit 72c78ec）：把 BUG-415 的判定抽成可复用方法 repeated_move_clone_sets(items)（同一非 Copy 变量出现 ≥2 次且存在裸引用 → 除最后一次出现外补 clone；显式排除 self）与 clone_repeated_in_expr(e, names)；TupleLit 改用之（行为不变），Dict 分支把键值对展平成 [k0,v0,k1,v1,…] 统一判定（跨条目重复亦覆盖），List|Vec 与 Set|HashSet 分支同样接入。
 验证：d5_dictlit 由 E0382 转为编译通过且输出正确（len=1）；既有 9 个探针（d6_listlit_reuse、d2_callargs、d3_structctor、c6/c7/c8/c9/c10/c11）全部保持通过；135-probe 门禁 135/135；lib 463/463；lz_ir_bootstrap 5/5（含 rs-lz↔native 逐字节一致判据）；31 个集成套件全绿。
+- commit: 7006f9e（重映射自 72c78ec）
 
 
 
@@ -1918,6 +1986,7 @@ eturn println!(...)，使所在函数提前 return、跳过 match 之后语句�
 根因：BUG-415/416 修复覆盖了元组字面量（TupleLit）、多态加法（LzAdd）、Dict 键值对与 List/Set 构造，但**位置式 struct 构造**的字段值渲染是另一条独立代码路径（字段名由位置映射得到，值逐个 gen_expr 拼串），未接入 repeated_move_clone_sets。对照：关键字形式 `P(a: k, b: k.len())` 早就通过（kwarg 路径经 _KwArg 值渲染另有 clone 保护），只有位置式形式炸——这也是它能长期潜伏的原因。
 修复（commit 197a0f5）：按字段声明顺序收集字段值表达式，调用 repeated_move_clone_sets 求出各字段位需 clone 的变量名集合，再对命中的字段值走 clone_repeated_in_expr（enumerate + 延迟初始化局部 Expr 承载克隆副本，不改动期望类型下推与其余渲染逻辑）。
 验证：e4_struct_pos 由 E0382 转为编译通过、输出 b=2；既有探针（d3_structctor kwarg 形式、d5_dictlit、d6_listlit_reuse、d2_callargs、c8/c9/c10/c11）全部保持通过；135-probe 门禁 135/135、lib 463/463、lz_ir_bootstrap 5/5、31 个集成套件全绿。
+- commit: ba37e64（重映射自 197a0f5）
 
 
 
@@ -1941,6 +2010,7 @@ rustc error[E0119]: conflicting implementations of trait `IntoIterator` for type
 根因：magic_gen.rs 只要有 `__iter__`（返回命名类型）就发显式 IntoIterator impl，未考虑「本类型自身已是 Iterator（定义了 `__next__`）」的情形。规范 SYNTAX/06d 的魔术方法表同时列出 `__iter__` 与 `__next__`，自迭代类型（同一 struct 既返回自身又可 next）是合法 LZ；而语料里的常见形态是容器 `__iter__` 返回**独立**迭代器类型（容器本身不是 Iterator ⇒ 无冲突），故缺口长期未暴露——DEMO/07_data_structures/magic_methods.lz 与 DEMO/lz_std/dict.lz 实测均正常。
 修复（commit e0657d3）：计算 self_is_iterator = methods.any(name == "__next__")，`__iter__` 分支加 `.filter(|_| !self_is_iterator)` 跳过显式 impl，交由 std blanket（IntoIter = Self、into_iter(self) = self，与「__iter__ 返回 self」语义等价）。边界：若某类型既有 `__next__` 又让 `__iter__` 返回**不同**类型，Rust 一致性规则下两者不可共存，以 blanket 的自迭代语义为准（已在代码注释记录）。
 验证：i2_iterator 由 E0119 转为编译通过，`for v in Countdown(3)` 输出 3、2、1；magic_methods.lz / dict.lz 无回归；135-probe 门禁 135/135；lib 463/463；31 个集成套件 + lz_ir_bootstrap 5/5 全绿。
+- commit: b2b5986（重映射自 e0657d3）
 
 
 
@@ -1958,6 +2028,7 @@ rustc error[E0119]: conflicting implementations of trait `IntoIterator` for type
 根因：原生 expr_gen.rs:1941 的 print 发射按实参逐位选择占位符（print_arg_is_display：字符串字面量/f-string/cast 到 str/str 类型 → `{}`，其余 → `{:?}`），并对字符串字面量裁掉多余的 `.to_string()`（:1954）；而 lz_codegen_lib.lz 的 print_fmt 恒发 `{:?}`，且实参走通用 expr_cs_list（字面量带 .to_string()）。D1 字节判据的语料恰好只打印 int（两侧同为 `{:?}`），故该分叉长期未被判据捕获。
 修复（commit 3c2b5cc）：print_fmt 逐位生成占位符（`{}`/`{:?}`，空格分隔），新增 print_placeholder / print_arg_is_display / is_string_irtype，判定规则与原生一一对应（LitStr、LitFStr、Cast 到 Str|String、expr_ty 为 Str/Ref(Str)/MutRef(Str)/Named String|str）；新增 print_args_list / print_arg_of，对 print 实参中的字符串字面量去掉 `.to_string()`，其余沿用 gen_kwarg_value（保持 BUG-408 口径）。
 验证：k1_printstr 的 rs-lz 产物修复为 `println!("{}", "done")` / `println!("{}", s)`，运行输出 done、hi，与原生逐行一致（两文件 main 区段内容逐字节相同；全文件首个差异仅为我 PowerShell 捕获产生的 CRLF）；135-probe 门禁 135/135、lib 463/463、lz_ir_bootstrap 5/5、31 个集成套件全绿。
+- commit: ce99ae1（重映射自 3c2b5cc）
 
 
 
@@ -1988,6 +2059,7 @@ ExprStmt 的 `;` 仍然追加（BUG-406 的修复只覆盖「嵌套块不得发�
   「非 () 类型的表达式语句」E0308）。
 验证：f6b 由 E0308 转为编译通过、输出 2、6 与原生一致；p_match（语句位置 match +
 后续语句）仍输出 1、2，无回归；135-probe 门禁 135/135；lib 463/463；lz_ir_bootstrap 5/5；31 套件全绿。
+- commit: 9ccc2e3（重映射自 6eefc1b）
 
 ## BUG-421 [2026-10-24T07:54:26Z] [high] FIXED
 - summary: match s: case Shape.Circle(radius: r) 在 rs-lz 下渲染为 Shape::Circle(r)（元组模式），对 struct variant 报 E0164。BUG-411 只修了构造侧，模式侧序列化仍无字段名。修复 commit 6eefc1b（Pattern 新增 EnumNamed + 序列化按变体定义发该形态；补 display_pattern 穷尽分支）。复现 TEMP/probe/sweep20/f6_match_enum.lz。
@@ -2016,6 +2088,7 @@ ExprStmt 的 `;` 仍然追加（BUG-406 的修复只覆盖「嵌套块不得发�
 定位过程：该失败最初被误判为并发 agent 的调试代码所致，经「stash 自己的两处改动后
 复跑判据（转绿）」隔离，确认归属自身；再过滤 DBG 行读到真实报错文本后定位到 LZ 侧
 match 穷尽性。
+- commit: 9ccc2e3（重映射自 6eefc1b）
 
 
 
@@ -2050,6 +2123,7 @@ B. trait 声明发射 `fn greet(&Self) -> String;`——`&Self` 是无效 Rust�
 （修复前分别 E0061 / E0185+syntax error / E0050）；lz_ir_bootstrap 5/5（两路线字节一致）；
 135-probe 门禁 135/135；lib 463/463；31 套件全绿。
 遗留（另立条目）：impl 的 generics/where 约束/关联类型绑定仍未随 schema 传递。
+- commit: eed7288（重映射自 22abee7）
 
 ## BUG-423 [2026-10-24T08:10:53Z] [medium] FIXED
 - summary: `Light.On.label()` 在 rs-lz 下渲染为 `Light.On.label()`（点号）⇒ E0423 expected value, found enum；`"hi " + self.name` 渲染为 String + String ⇒ E0308 expected &str found String。修复 commit 22abee7：FieldAccess 按基底是否为类型名选 ::/.（复用 BUG-405 判定）；BinOp 的 + 两侧为字符串时右侧补 &。复现 TEMP/probe/sweep20/{g5_enum_methods,f5_trait}.lz。
@@ -2073,6 +2147,7 @@ B. BinOp 的 `+` 在两侧均为字符串类型（str / Ref(Str) / MutRef(Str) /
 验证：g5_enum_methods 由 E0423 转为编译通过、输出 `on`；f5_trait 由 E0308 转为输出 `hi bob`
 （均与原生一致）；lz_ir_bootstrap 5/5（原生与 rs-lz 字节一致判据未破）；135-probe 门禁
 135/135；lib 463/463；31 个集成套件全绿。
+- commit: eed7288（重映射自 22abee7）
 
 
 
@@ -2102,6 +2177,7 @@ filter 谓词按元素 Copy 性择形（Copy → `|&x|` 解构；非 Copy → �
 验证：f2b 输出 [1,2,3]/[2,1,3]/[6,2,4]/[3,2]/6、f3 输出 ["a","b"]/[1,2]/Some(1)/2、
 f12 输出 n0-n1-n2，均与原生逐行一致；135-probe 门禁 135/135、lib 463/463、
 lz_ir_bootstrap 5/5、cargo test --workspace 992 passed / 0 failed。
+- commit: c776bc1（重映射自 76723f5）
 
 ## BUG-425 [2026-10-24T08:52:28Z] [high] FIXED
 - summary: LZ `[3,1,2]` 在 rs-lz 下渲染为 Rust 数组 `[3i64,1i64,2i64]`（类型 [T;N]），与 List<T>=Vec<T> 不符 ⇒ E0308 expected Vec<i64>, found [i64;3]；`[]` 同病。修复 commit 76723f5：非空发 vec![…]、空表发 Vec::new()（对齐原生）。复现 TEMP/probe/sweep20/{f2b_list_methods,f12_string_build}.lz。
@@ -2118,6 +2194,7 @@ f12_string_build.lz（`let mut parts: List<str> = []`）。
 验证：f2b 由 E0308 转为编译通过并输出 [1,2,3]/[2,1,3]/[6,2,4]/[3,2]/6；f12 输出 n0-n1-n2；
 135-probe 门禁 135/135；lib 463/463；lz_ir_bootstrap 5/5；
 cargo test --workspace 992 passed / 0 failed。
+- commit: 2b88428（重映射自 76723f5）
 
 ## BUG-426 [2026-10-24T08:52:29Z] [medium] FIXED
 - summary: LZ `{"a":1,"b":2}` 在 rs-lz 下渲染为 `[…].into_iter().collect()`（无目标类型）⇒ E0282 type annotations needed。修复 commit 76723f5：改发 `std::collections::BTreeMap::from([...])`（对齐原生）。复现 TEMP/probe/sweep20/f3_dict_methods.lz。
@@ -2132,6 +2209,7 @@ cargo test --workspace 992 passed / 0 failed。
 修复（commit 76723f5）：gen_dict_ctor 改发 `std::collections::BTreeMap::from([...])`。
 验证：f3 由 E0282 转为编译通过并输出 ["a","b"] / [1,2] / Some(1) / 2（与原生一致）；
 135-probe 门禁 135/135；lib 463/463；lz_ir_bootstrap 5/5；workspace 992 passed / 0 failed。
+- commit: 2b88428（重映射自 76723f5 / d187c8e）
 
 
 
@@ -2164,6 +2242,7 @@ E0308，改为「仅 mid/leaf 不 collect」。
 验证：i7_dict_comp_iter 2/2、c1_nested3（三层 for 链）[111,121,112,122]、c7_dict_cond_clean
 2/["aa","ccc"]/2、c2_cond [6,8]、c3_set 3 —— 均与原生逐行一致；lz_ir_bootstrap 5/5；
 135-probe 门禁 135/135；lib 463/463；cargo test --workspace 992 passed / 0 failed。
+- commit: ff51c69 + 2b88428（重映射自 cc1aca8）
 
 ## BUG-428 [2026-10-24T09:14:36Z] [medium] FIXED
 - summary: LZ `.len()` 返回 int（i64），rs-lz 原样发 Rust `recv.len()`（usize）⇒ `k.len() > 1i64` 报 E0308 expected usize found i64（推导条件位实测）。自由函数 len(x) 早已补 as i64，方法形式漏了。修复 commit cc1aca8：gen_method_call 增设 len/length → `(recv.len() as i64)`。复现 TEMP/probe/sweep19/c7_dict_cond_clean.lz。
@@ -2178,6 +2257,7 @@ E0308，改为「仅 mid/leaf 不 collect」。
 `(recv.len() as i64)`（length 亦经改名表指向 len）。
 验证：c7_dict_cond_clean 由 E0308 转为编译通过并输出 2/["aa","ccc"]/2（与原生一致）；
 lz_ir_bootstrap 5/5；135-probe 门禁 135/135；lib 463/463；workspace 992 passed / 0 failed。
+- commit: ff51c69（重映射自 cc1aca8）
 
 
 
@@ -2204,6 +2284,7 @@ LzAdd 两侧）。推导值 lambda 的元组体属同一族。
 gen_comp_macro 的 lambda 体（以及更一般的元组字面量渲染）里，对「体内出现 ≥2 次且存在裸
 引用的非 Copy 变量」补 .clone()（边界同样需排除 self 与纯借用基底，见 BUG-412 教训）。
 回归锁建议：c6/c8 两个探针纳入套件。
+- commit: d0d0f51（重映射自 d27b4ce）
 
 
 
@@ -2246,6 +2327,7 @@ sum/abs，min/max 是迭代器方法（`(&xs).iter().min()`，不是 2 参自由
 验证：rs-lz 产物编译并运行 g1_stdlib.lz ⇒ Some(1)|Some(3)|6|4|[1,2,3]|[(1,"a"),(2,"b")]，
 与原生同形；lz_ir_bootstrap 5/5；135-probe 门禁 135/135；lib 463/463；
 cargo test --workspace 992 passed / 0 failed。
+- commit: ec46e33（重映射自 5c43bf6）
 
 
 
@@ -2272,6 +2354,7 @@ max(a,b) 等 2 参用法不受影响。
 3) g2c_where_generic.lz：`impl<T> Box4<T> where T: Clone` 生成 `impl<T> Box4<T>`（`where T: Clone` 被 builder 合并进 GenericParam.bounds，schema 只带名字）⇒ E0599 cannot call clone on T。
 同源：struct 自动生成的 `__unapply__` impl 也缺 `Clone` 边界（原生对齐 `impl<T: std::clone::Clone + std::fmt::Debug> Box3<T>`）。
 - reported_by: lang-zone-agent
+- commit: a6412a1（重映射自 05d1eb5）
 
 
 
@@ -2288,6 +2371,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep23/g3a_ctor.lz、g3b_generic_ctor.lz：rs-lz 修复前产物 `let p = Point(3i64, 4i64);`。
 - reported_by: lead
+- commit: a3e7970（重映射自 efabc7d）
 
 
 
@@ -2306,6 +2390,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep21/g2b_trait_assoc.lz，修复前 rs-lz 产物：`fn item(self) -> i64`。
 - reported_by: lead
+- commit: 5f25546（重映射自 510a4cd）
 
 
 ### FIXED(2026-10-24T13:24:43Z / BUG-433)
@@ -2325,6 +2410,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep21/g2b_trait_assoc.lz，`--emit=rs` 后 rustc 直接报 E0425。
 - reported_by: lead
+- commit: af45005 + 5f25546（重映射自 未记）
 
 
 ## BUG-435 [2026-10-24T13:54:05Z] [medium] FIXED
@@ -2333,6 +2419,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep23/g7_vecstr.lz 的 `let c = a.sum();`，修复前 rs-lz 产物 `a.sum()`。
 - reported_by: lead
+- commit: add69f9（重映射自 73b1fcc）
 
 
 
@@ -2359,6 +2446,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep23/g6_range_filter.lz：NATIVE `error[E0308]: mismatched types`（缺 collect），RSLZ `error[E0599]: no method named `iter` found for struct `Range<Idx>`。
 - reported_by: lead
+- commit: fadfbc2（重映射自 未记）
 
 ## BUG-437 [2026-10-24T14:20:12Z] [medium] FIXED
 - summary: [rule:E0308] rs-lz List/Vec 的 `.contains(x)` 实参未按引用传（直发 `v.contains(3i64)`）(src/ir/lz_codegen_lib.lz gen_method_call)
@@ -2366,6 +2454,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep23/g9c_ops.lz 的 `let has3 = v.contains(3)`，修复前 rs-lz 产物 `v.contains(3i64)`。
 - reported_by: lead
+- commit: c4def88（重映射自 2839b1a）
 
 
 
@@ -2388,6 +2477,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep23/g9_strlist.lz：NATIVE 与 RSLZ 同报 `error[E0599]: no method named `sorted` found for struct `Vec<i64>`。修复需在原生 codegen（集合方法表）补 `sorted/reversed/to_list` 等方法形态，并让 rs-lz 同表同步；rs-lz 单独改会与原生产出分叉、违反 D1 逐字符一致门禁，故本轮仅登记不修。
 - reported_by: lead
+- commit: fadfbc2（重映射自 未记）
 
 ## BUG-439 [2026-10-24T14:37:49Z] [medium] FIXED
 - summary: [rule:E0308] rs-lz Option/Result 接收者的 `.map()` 误走集合迭代器分支（发 `.iter().cloned()..collect()`）(src/ir/lz_codegen_lib.lz gen_method_call)
@@ -2395,6 +2485,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 
 复现探针 TEMP/probe/sweep23/g10_optres.lz 的 `let x = r.map(|n| n * 2)`，修复前 rs-lz 产物 `(r).iter().cloned().map(..).collect::<Vec<_>>()`。
 - reported_by: lead
+- commit: 97295de（重映射自 011887c）
 
 
 
@@ -2425,6 +2516,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 修复（commit a92558e）：新增 is_heap_irtype / is_place_expr / call_arg_src / call_args_list，仅对左值表达式（变量/字段访问/下标/枚举字段）且类型为已知堆类型（Str/Opt/Res/Named/非全 Copy 元组）克隆；字面量与调用结果本身就是新值不克隆（对齐原生 `f("a".to_string())` 不克隆）；泛型/Any/闭包/Duck 不克隆以避免 `T: Clone` 约束缺失与 `Box<dyn Fn>` 不可 Clone。
 
 回归：cargo test -j 4 -- --test-threads=1 全绿 41 suites / 937 passed / 0 failed；g12/g13/g14/g15 双后端 OK 且 rs-lz 产物与原生逐字符对齐。
+- commit: 082c302（重映射自 a92558e）
 
 ## BUG-441 [2026-10-24T15:52:57Z] [high] FIXED
 - summary: [BUG-441] rs-lz Dict 键实参形态错位：get/contains 缺 & 借用、insert 缺 .to_string()（E0308）
@@ -2443,6 +2535,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 修复（commit a92558e）：新增 dict_key_arg（get/contains：字面量裸发 / 其余 `&expr`）与 dict_insert_key_arg（str 键 `.to_string()`），并在 gen_method_call 按接收者 irtype 为 Dict 的三个新分支（get/contains/insert）调用它们。
 
 回归：g12_dict、g13_dictkey 双后端 OK，rs-lz 产物与原生逐字符对齐；cargo test -j 4 -- --test-threads=1 全绿 41 suites / 937 passed / 0 failed。
+- commit: 082c302（重映射自 a92558e）
 
 
 
@@ -2465,21 +2558,25 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - summary: [rule:E0308] rs-lz Dict.remove 键实参未按引用传（发 d.remove(\"a\".to_string())）(src/ir/lz_codegen_lib.lz gen_method_call)
 - detail: Rust 端 `BTreeMap::remove(&self, key: &Q)` 要求键按借用。rs-lz 的 gen_method_call 未接管 Dict 上的 `.remove`，落到通用方法分支直发 `d.remove("a".to_string())`（按值）→ rustc E0308 mismatched types。原生 codegen 渲染 `d.remove("a")`（字面量本身是 &str）/ `d.remove(&k)`，属 rs-lz 独有缺口。与 BUG-440（Dict get/contains 缺 & 借用）同族，仅方法名不同。复现 TEMP/probe/sweep24/g16_dictmisc.lz：rs-lz FAIL E0308，原生 OK `["x", "y"]|[1, 2]|2|-1|done|`。修复：gen_method_call 增设 remove 分支复用 dict_key_arg。
 - reported_by: lead
+- commit: 888cc77（重映射自 未记）
 
 ## BUG-443 [2026-10-24T16:50:34Z] [high] FIXED
 - summary: [rule:E0423] rs-lz 空 Dict() 构造发成 Dict()（类型别名非函数）(src/ir/lz_codegen_lib.lz gen_call)
 - detail: builder 把空 `Dict()` 生成 `Expr.Call(callee=Var("Dict"), args=[])`，与字面量 `{..}` 的 StructCtor(name="Dict") 不同路径。rs-lz 走 gen_call 通用分支发 `Dict()` → rustc E0423 expected function, tuple struct or tuple variant, found type alias `Dict`（`Dict` 是 lz_builtins 里 `Dict<K,V> = BTreeMap<K,V>` 的类型别名，不能当函数调用）。原生 codegen 渲染 `std::collections::BTreeMap::new()`。复现 TEMP/probe/sweep24/g16_dictmisc.lz 的 `let mut d: Dict<str, int> = Dict()`：rs-lz FAIL E0423，原生 OK。修复：gen_call 增设 `n == "Dict" && a.len() == 0` 分支发 BTreeMap::new()。
 - reported_by: lead
+- commit: 888cc77（重映射自 未记）
 
 ## BUG-444 [2026-10-24T16:50:34Z] [high] FIXED
 - summary: [rule:E0596] rs-lz 函数参数恒发 `name: type` 缺 mut，函数体内 &mut 用法（remove/insert/push）报 cannot borrow as mutable (src/ir/lz_codegen_lib.lz fn_param_str)
 - detail: rs-lz 的 fn_param_str 只输出 `name: type`（注释明写「D1: 忽略 ref/mut/owned 前缀」），从不给参数标 mut。函数体内发生 &mut 方法调用（`d.remove(..)`、`d.insert(..)`、集合 push 等）时，Rust 端参数须 `mut` → rustc E0596 cannot borrow `d` as mutable, as it is not declared as mutable。原生 codegen 用 auto_mut_locals 同一扫描覆盖局部变量与参数，对 &mut 用法的参数也标 mut。复现 TEMP/probe/sweep24/g16_dictmisc.lz 的 `pub fn dm(d: Dict<String, i64>)`（体含 d.remove）：rs-lz FAIL E0596，原生 `pub fn dm(mut d: BTreeMap<..>)` OK。修复：把 auto_mut_names(b) 传入 fn_param_list，仅按逗号分隔 token 精确匹配加 `mut` 前缀（避免 `x` 误中 `xy`）。注意原生对「仅 .get()/.contains() 无 &mut」的参数也标 mut（探针 g18 双端一致），故沿用现扫描广度。
 - reported_by: lead
+- commit: 888cc77（重映射自 未记）
 
 ## BUG-445 [2026-10-24T16:50:34Z] [high] FIXED
 - summary: [rule:E0382/E0308] rs-lz Option/Result 按值消费方法（unwrap_or_else/expect/unwrap_or/unwrap/ok/err）缺接收者 .clone()，expect 消息缺 &str (src/ir/lz_codegen_lib.lz gen_method_call)
 - detail: rs-lz 的 gen_method_call 对 Option/Result 上按值消费 self 的方法原样透传：`r.unwrap_or(-1)` 后若复用 r → E0382 use of moved value `r`；`o.expect("boom".to_string())` → E0308 expected `&str`, found `String`（Rust `Option::expect(&self, msg: &str)`）。原生 codegen 统一渲染 `(r).clone().unwrap_or(-1i64)` / `(o).clone().expect("boom")`（`.clone()` 保留接收者所有权供后续复用，与 `.map` 的 BUG-439 同族）。复现：TEMP/probe/sweep24/g19_opt_else.lz（unwrap_or_else+expect）与 g20_res_misc.lz（unwrap_or+ok）rs-lz FAIL，原生 OK。修复：为 unwrap_or_else/expect/unwrap_or/unwrap/ok/err 各增设分支发 `(recv).clone().method(..)`，expect 消息复用 dict_key_arg（字面量裸发 &str，变量发 &expr）。
 - reported_by: lead
+- commit: 888cc77（重映射自 6487cf9）
 
 
 
@@ -2494,21 +2591,25 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - summary: [native/IR-builder] 元组字段访问 `.0`/`.1` 类型推导错误：IR build error 期望 str 实际 int（g21_tuple.lz）
 - detail: 原生 codegen 路径（非 rs-lz）对元组字段访问 `.0` / `.1` 类型推导错误：IR build 阶段报「函数 tuple1 返回类型不匹配：期望 str，实际 int」。TEMP/probe/sweep24/g21_tuple.lz：`def tuple1(t: (int, str)) -> str = t.0`。两条路线（--emit=rs 与 --emit=rs-lz）均被同一 IR builder 拦截（v5.py 报 NATIVE COMPILE-ERR / RSLZ SELFHOST NO-EMIT），属前端/类型推导 bug，非 rs-lz codegen 独有，需在 IR builder 或类型推导层修复；修好前无法验证 rs-lz 的元组字段访问对齐性。
 - reported_by: lead
+- commit: 23e103e（重映射自 未记）
 
 ## BUG-447 [2026-10-24T17:35:13Z] [high] FIXED
 - summary: [rule:E0277] rs-lz 下标 xs[0] 缺 `as usize`（Rust 切片下标须 usize）(src/ir/lz_codegen_lib.lz gen_expr IndexGet)
 - detail: rs-lz 的 gen_expr IndexGet 分支原发 `xs[0i64]`，但 Rust 的 `Vec<T>`/切片下标运算符要求 `usize` → rustc E0277 `[i64] cannot be indexed by i64`。原生 codegen 渲染 `xs[0i64 as usize]`。rs-lz 独有（List 下标）。复现 TEMP/probe/sweep24/g22b_index.lz：NATIVE OK `1|`，RSLZ FAIL E0277。修复：IndexGet 对非 Dict 基座补 ` as usize`；Dict 基座见 BUG-448。
 - reported_by: lead
+- commit: 69edd66（重映射自 未记）
 
 ## BUG-448 [2026-10-24T17:35:13Z] [high] FIXED
 - summary: [rule:E0308] rs-lz Dict 下标 d[\"a\"] 应发 .get(&key).cloned().unwrap() 而非下标运算符 (src/ir/lz_codegen_lib.lz gen_expr IndexGet)
 - detail: rs-lz 对 Dict 的下标原发 `d["a".to_string()]`（BTreeMap 的下标运算符实现与 LZ 键类型口径不匹配）→ rustc E0308 mismatched types。原生 codegen 对 Dict 下标**不用** Rust 下标运算符，而渲染 `(d).get(&"a".to_string()).cloned().unwrap()`：键按值持有（`&<dict_insert_key_arg>`），再 .cloned() 取值。rs-lz 独有。复现 TEMP/probe/sweep24/g22c_dict_index.lz：NATIVE OK `1|`，RSLZ FAIL E0308。修复：IndexGet 对 Dict 基座发 `(recv).get(&<dict_insert_key_arg>).cloned().unwrap()`。顺带确认 `d["x"] = v`（g22e）与 List 下标赋值（g22d）两端已一致。
 - reported_by: lead
+- commit: 69edd66（重映射自 未记）
 
 ## BUG-449 [2026-10-24T17:35:13Z] [high] FIXED
 - summary: [rule:E0423/E0308] rs-lz 空 Set() 构造发 Set()（类型别名）＋ Set.contains 缺 & 借用 (src/ir/lz_codegen_lib.lz gen_call/gen_method_call)
 - detail: 两处缺口：(1) 空 `Set()` 构造——builder 生成 `Call(Var(\"Set\"), [])`，rs-lz 走 gen_call 通用分支原发 `Set()`，而 `Set` 只是 lz_builtins 里的类型别名（`Set<T> = HashSet<T>`）⇒ rustc E0423 expected function, found type alias `Set`；原生渲染 `std::collections::HashSet::new()`。(2) `Set`（→ HashSet）的 `.contains(x)` 与 List 同签名 `contains(&self, x: &T)`，rs-lz 此前无 Set 分支 → `s.contains(1i64)` ⇒ E0308 expected `&i64`, found `i64`；原生渲染 `s.contains(&1i64)`。rs-lz 独有。复现 TEMP/probe/sweep24/g24_set.lz：NATIVE OK `2|2|`，RSLZ FAIL E0423+E0308。修复：gen_call 增设 `n==\"Set\" && a.len()==0` 分支发 HashSet::new()；gen_method_call 的 contains 借位分支扩展到 Set 接收者。
 - reported_by: lead
+- commit: 69edd66（重映射自 fff50ff）
 
 
 ### FIXED(2026-10-24T17:36:53Z / BUG-447, BUG-448, BUG-449)
@@ -2524,22 +2625,26 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - summary: [native/expr_gen] List<str>.contains(\"a\") 发 xs.contains(\"a\") 缺 .to_string()，E0308 expected &String found &str（g22a_contains.lz）
 - detail: 原生 codegen 对 `List<str>.contains(\"a\")` 渲染 `xs.contains(\"a\")`，而 Rust 端 `Vec<String>::contains(&self, x: &String)` ⇒ rustc E0308 mismatched types（expected `&String`, found `&str`）。rs-lz 侧走 contains 借位分支渲染 `xs.contains(&\"a\".to_string())` 编译通过（探针 g22a_contains.lz RSLZ OK `true|`、NATIVE FAIL E0308）。属原生 expr_gen.rs 侧缺陷，需在原生 codegen 对 List<str> 的 contains 实参补 `.to_string()`；修好前无法在 D1 字节对齐上验证（rs-lz 现为超集正确，不擅自回退以对齐原生错误输出）。
 - reported_by: lead
+- commit: f45fe79 + 429f547（重映射自 未记）
 
 
 ## BUG-451 [2026-10-24T22:18:18Z] [high] FIXED
 - summary: [rule:E0308] rs-lz Set.remove(x) 缺 & 借用，HashSet::remove(&mut self, &T) (src/ir/lz_codegen_lib.lz gen_method_call)
 - detail: rs-lz 对 `Set.remove(x)` 落到通用方法分支直发 `s.remove(2i64)`，而 Rust `HashSet::remove(&mut self, value: &T)` 实参须借位 → rustc E0308 mismatched types。原生 codegen 渲染 `s.remove(&2i64)`（g25_set_remove.rs 直接核对 `let r = s.remove(&2i64);`）。rs-lz 独有，与 BUG-449 的 Set.contains 同族。复现 TEMP/probe/sweep24/g25_set_remove.lz：NATIVE OK `2|true|`，RSLZ FAIL E0308。修复：gen_method_call 增设 Set 接收者 remove 分支 `(recv).remove(&arg)`。
 - reported_by: lead
+- commit: 8126d60（重映射自 未记）
 
 ## BUG-452 [2026-10-24T22:18:18Z] [high] FIXED
 - summary: [rule:E0308] rs-lz 空字典字面量 {} 发 HashMap::new()，Dict 别名=BTreeMap (src/ir/lz_codegen_lib.lz gen_dict_ctor/Expr.Dict)
 - detail: rs-lz 的 gen_dict_ctor 空分支发 `std::collections::HashMap::new()`，Expr.Dict 兜底分支发裸 `HashMap::new()`（连 std::collections:: 路径都没有）；而 Dict 的 Rust 别名是 BTreeMap → `let d: Dict<String,i64> = std::collections::HashMap::new()` ⇒ rustc E0308 mismatched types。非空字典字面量已对齐为 `std::collections::BTreeMap::from([...])`（BUG-427），唯独空分支漏改。原生 codegen 渲染 `let mut d: BTreeMap<String,i64> = std::collections::BTreeMap::new();`。复现 TEMP/probe/sweep24/g29_empty_dict_lit.lz：NATIVE OK `0|`，RSLZ FAIL E0308。修复：两处空字典分支统一改 `std::collections::BTreeMap::new()`。
 - reported_by: lead
+- commit: 8126d60（重映射自 未记）
 
 ## BUG-453 [2026-10-24T22:18:18Z] [medium] FIXED
 - summary: rs-lz str.find 直发 Rust str::find(Option<usize>)，原生发 lz_find(..).unwrap_or(-1i64)；输出 Some(6) vs 6 (src/ir/lz_codegen_lib.lz lz_method_rename/gen_method_call)
 - detail: rs-lz 对 str 接收者的 `s.find(..)` 直发 Rust 内建 `str::find`（返回 Option<usize>，print 输出 `Some(6)`），而原生 codegen 用 lz_builtins 扩展 `s.lz_find(..)`（返回 Option<i64>）并接 `.unwrap_or(-1i64)` 物化为 i64（print 输出 `6`）。双端均编译通过但输出/字节不一致。rfind 同族。复现 TEMP/probe/sweep24/g31_str_methods.lz：NATIVE OK `hello there|6|2|`，RSLZ OK 但输出 `hello there|Some(6)|2|`。修复：lz_method_rename 把 str 接收者的 find/rfind 映射到 lz_find/lz_rfind，gen_method_call 该分支后接 `.unwrap_or(-1i64)`。
 - reported_by: lead
+- commit: 8126d60（重映射自 d772401）
 
 
 
@@ -2555,6 +2660,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 复现 TEMP/probe/sweep24/g33_while.lz：NATIVE OK `5`（快），RSLZ 生成 exe 运行 15s 不退出（挂死，g33_rslz.txt 为空）。
 修复（src/ir/lz_codegen_lib.lz gen_let）：新增 `expr_has_var(v, n)` 判据——value 引用自身名字即按重绑定发赋值（合法程序里 value 能提到 n，则 n 必已在作用域；同时覆盖自引用与循环重绑定两态），并新增 gen_rebind_assign / binop_compound_symbol / is_scalar_ty 把标量 `a = a op b` 收敛为 `a op= b`（对齐原生 stmt_gen.rs:685-714）。修复后 g33_while RSLZ 产物为 `i += 1i64;`，与原生 `i += 1i64;` 逐字节一致，运行输出 `5`。
 - reported_by: lead
+- commit: 1006c6b（重映射自 7a4596d）
 
 
 
@@ -2578,6 +2684,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 3. 顺带清掉 else 分支里三层嵌套的**死代码重复**（map/fold/join 已被外层 elif 捕获，永不可达），改为单层 else + 通用方法调用（含 lz_method_rename / pattern_args / find unwrap_or / str-returning to_string / split 物化），避免「外层加了守门、内层死代码又把非集合接收者重新捞回集合路径」的返祖。
 修复后 g35_struct_method RSLZ 产物 `p.sum();`（原生 `(p).sum();`，仅括号差异），rustc 无 error，运行 `7` 与原生一致。
 - reported_by: lead
+- commit: 786eaaa（重映射自 00ecb0f）
 
 
 
@@ -2590,6 +2697,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - detail: rs-lz `self_param_str` 非 owned 分支落到 else 时裸发 `self`（按值接收）。与原生 decl_gen.rs「self 参数修饰」分支不符（原生 is_owned 才发 `self`，其余一律 `&self`/`&mut self`）。按值接收会 move 掉接收者：非 Copy struct 后续再用实例即 borrow-after-move；对 `fn sum(self)->int=self.x+self.y` 这类只读方法，rs-lz 会因按值接收把实例 move 进方法。复现 g35_struct_method.lz（struct Point{ x,y } + `def sum(self)->int=self.x+self.y` + `print(p.sum())`）：rs-lz 旧产物 `fn sum(self)`，原生 `fn sum(&self)`。
 - 复现: _probes/sweep/g35_struct_method.lz（NATIVE 7 / RSLZ 修复前结构分叉）
 - reported_by: lead
+- commit: c989d2e（重映射自 11a1cfc）
 
 ### FIXED(2026-10-25T05:05:00Z / BUG-456)
 - evidence: commit 11a1cfc（仅 src/ir/lz_codegen_lib.lz，36+/4-）。`self_param_str` 的最终 else 分支由 `"self".to_string()` 改为 `"&mut self" if p.3 else "&self"`（p.3 = 原签名自带的 mut 标志），并对齐原生 decl_gen.rs 的「self 参数修饰」判据。
@@ -2604,6 +2712,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 原生基准: src/ir/codegen/expr_gen.rs:5248-5255 —— base 渲染为 self 且 self 类型非 Int/F64/Bool 时字段读取补 `.clone()`；而方法接收者按 place 直发（g46 原生发 `return self.items.push(x);`）。嵌套处理原生用字符串 `recv.trim_end_matches(".clone()")`（expr_gen.rs:3294-3298）。
 - 复现: _probes/sweep/g45_struct_str_method.lz、_probes/sweep/g46_mut_field.lz、_probes/sweep/g47_self_field_len.lz
 - reported_by: lead
+- commit: c989d2e（重映射自 11a1cfc）
 
 ### FIXED(2026-10-25T05:05:00Z / BUG-457)
 - evidence: commit 11a1cfc（与 BUG-456 同一笔，src/ir/lz_codegen_lib.lz）。新增 `def is_self_var(b: Expr) -> bool`（仅当 Expr.Var(name=="self")）；新增 `def gen_recv_place(r, fn_raises) -> String`（FieldAccess 接收者按 place 直发，base 递归走 gen_recv_place 以覆盖嵌套 `self.outer.inner.push(x)`，非 FieldAccess 退回 gen_expr）；gen_expr 的 Expr.FieldAccess 臂补 `+ (".clone()" if is_self_var(b) else "")`；gen_method_call 的 `recv0` 与 default 分支由 `gen_expr(r, fn_raises)` 改用 `gen_recv_place(r, fn_raises)`。
@@ -2616,6 +2725,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 原生基准: src/ir/codegen/expr_gen.rs —— 赋值目标按 place 发射；`self.field` 克隆规则只作用于纯字段读取表达式。
 - 复现: _probes/sweep/g79_self_receiver_mut.lz（修复前 NATIVE OK 2 / RSLZ rustc E0070）
 - reported_by: lead
+- commit: 1185260（重映射自 97f79d6）
 
 ### FIXED(2026-10-25T13:05:00Z / BUG-458)
 - evidence: commit 97f79d6（仅 src/ir/lz_codegen_lib.lz）。`gen_expr` 的 Expr.AssignExpr 臂 target 与 `gen_stmt` 的 Stmt.Assign 默认臂 target 由 `gen_expr(tg, …)` 改为 `gen_recv_place(tg, …)`（FieldAccess base 递归，非 FieldAccess 退回 gen_expr）。Stmt.Assign 的 IndexGet 分支留待 BUG-460 单独处理。
@@ -2632,6 +2742,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
   4. List/Set/其余 → `cont.contains(&elem)`；`not in` 前缀 `!`。
 - 复现: _probes/sweep/g58_set_methods.lz、_probes/sweep/g87_not_in.lz、_probes/sweep/g88_string_in.lz、_probes/sweep/g89_dict_in.lz
 - reported_by: lead
+- commit: 1185260（重映射自 97f79d6）
 
 ### FIXED(2026-10-25T13:20:00Z / BUG-459)
 - evidence: commit 97f79d6（与 BUG-458/460 同一笔）。`gen_expr` 的 Expr.BinOp 臂在字符串 `+` 之前拦截 `o == "in" or o == "not in" or o == "not_in"`，按 expr_ty(rhs) 分派：String rhs → `.contains()`（lhs 亦为字符串类型时统一 `&*(elem)`，字面量 &str / String 值均解引用到 &str，char 由类型判据走原样分支，运行时与原生等价）；Dict rhs → `.contains_key(&elem)`；其余 → `.contains(&elem)`；`not in`/`not_in` 前缀 `!`。
@@ -2644,6 +2755,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 原生基准: src/ir/codegen/expr_gen.rs —— IndexSet 赋值目标按 place 直发，不克隆。
 - 复现: _probes/sweep/g85_self_index_assign.lz（NATIVE 9 / RSLZ 修复前 1，静默分叉）
 - reported_by: lead
+- commit: 1185260（重映射自 97f79d6）
 
 ### FIXED(2026-10-25T13:30:00Z / BUG-460)
 - evidence: commit 97f79d6（与 BUG-458/459 同一笔）。两处：① `gen_recv_place` 新增 Expr.IndexGet 臂 —— base 递归走 gen_recv_place 得 place 形式 `self.items[0i64 as usize]`（Dict 下标是 `.get().unwrap()` 形态非 place 且 Dict 赋值走 `.insert()`，故 dict 下标退回 gen_expr）；② `gen_stmt` 的 Stmt.Assign IndexGet 分支 target 由 `gen_expr(tg, …)` 改为 `gen_recv_place(tg, …)`。
@@ -2655,6 +2767,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 原生基准: src/ir/codegen/expr_gen.rs:5690-5714 —— IndexSet 对 Dict/HashMap 发射 `{base}.insert(&{key}, {value})`。rs-lz 顶层 dict 赋值（g96，base 为 Var）本就正确：`d.insert("b".to_string(), 2i64)` 与原生逐字一致。
 - 复现: _probes/sweep/g92_self_dict_index_assign.lz、_probes/sweep/g96_dict_index_assign_plain.lz
 - reported_by: lead
+- commit: 7da05a1（重映射自 ec322a3）
 
 ### FIXED(2026-10-25T14:05:00Z / BUG-461)
 - evidence: commit ec322a3（仅 src/ir/lz_codegen_lib.lz）。`gen_stmt` 的 Stmt.Assign IndexGet 分支判定由 `base_is_dict(b)` 改为 `is_dict_irtype(expr_ty(b))`（按类型识别 FieldAccess dict base），base 由 `gen_expr(b)` 改为 `gen_recv_place(b)`（免 `.clone()`）。
@@ -2677,6 +2790,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 复现: `_probes/frontend_p0.lz`（`def main() =\n    let x = 1\n    print(x)\n`）。
 - 相关: `docs/脚本冻结清单草案-2026-09-30.md:90` 点名 lex-lz/parse-lz 为独立里程碑环节，但 README:7 又宣称路线 B "已彻底移除"，属文档-代码分歧，见 Q2 取证。
 - reported_by: lead
+- commit: 0c14df2（重映射自 e7ee817）
 
 ### FIXED(2026-10-25T16:13:00Z / BUG-462)
 - evidence: commit e7ee817（仅 src/frontend/lz_lexer.lz + tests/lz_frontend_bootstrap.rs）。① punct_token 表补 `("=", Token.Eq)`、`("[", Token.LBracket)`、`("]", Token.RBracket)`；② is_keyword/keyword_token 改为 lz_parser.lz 同款查表（返回 `(bool, Token)`，规避深层 elif 链 p27 栈溢出与 LZ 不支持跨行 `||` 续写——初版多行布尔表达式触发 "Parse error: Unexpected token in expression: Newline"）；③ Token 枚举 + display_token 补 Elif/Let/Match/Case/While/For/In/LBracket/RBracket；④ tokenize 的 magic-method/关键字分支改为 else 内查表。Indent/Dedent 缩进方案差异（原生 Indent/Dedent 单位 token vs parser Indent(v) 值 token）留待后续单独对齐，本次未改。
@@ -2689,6 +2803,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 原生基准: src/parser —— 等号式 `def f() =` 与冒号式 `def f():` 均支持，等号后接缩进块。
 - 复现: `_probes/frontend_p0.lz`。
 - reported_by: lead
+- commit: af0a62d（重映射自 e66f9fa）
 
 ### FIXED(2026-10-25T16:23:00Z / BUG-463)
 - evidence: commit e66f9fa（仅 src/frontend/lz_parser.lz + tests/lz_frontend_bootstrap.rs）。`Token.Def` 分支分隔符判定由 `colon_t == Token.Colon` 扩为 `colon_t == Token.Colon || colon_t == Token.Eq`，冒号式/等号式两种定义形态都正确跳过到块首。
@@ -2702,6 +2817,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 原生基准: src/lexer/indent.rs + lexer.rs:218-222 的 handle_indent —— 行首前导空格列数 vs 缩进栈顶，增发 Indent 入栈、减逐层 Dedent 出栈，Eof 前补全 Dedent。
 - 复现: `_probes/golden_input.lz`、`_probes/nest.lz`、`_probes/nest2.lz`。
 - reported_by: lead
+- commit: 358f5ac（重映射自 038af95）
 
 ### FIXED(2026-10-25T17:20:00Z / BUG-464)
 - evidence: commit 038af95（仅 src/frontend/lz_lexer.lz + tests/lz_frontend_bootstrap.rs，69+/6-）。Token 枚举加 Indent/Dedent 单元变体；tokenize 引入 at_line_start + indent_stack: List<int>(初始 [0])：行首先吃前导空格得 col，与栈顶比较（col>top 入栈发 Indent；col<top 循环 pop 逐层发 Dedent；空行/纯空白行不发缩进 token）；循环后弹出所有未闭合层级，Eof 前补全 Dedent。display_token 补两分支。
@@ -2716,6 +2832,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 实测（本机，原生为准）: src/codegen/ 确已删（ls: cannot access）；四个 `.lz` 实现全部仍在且经 include_str! 编译进 lzc；四旗标 --emit=lex-lz|parse-lz|ir-lz|rs-lz 均可用（main.rs 共 10 处引用，~899-903 分发）；备份目录 E:\IDEProjects\AI\_backup_langzone_routeB_20260905 本机不存在（ls: cannot access，同目录仅见 _git-full-backup-* 等 git 备份）。
 - 复现: `ls -d src/codegen` / `ls -d "/e/IDEProjects/AI/_backup_langzone_routeB_20260905"`；`grep -c "emit=rs-lz\|emit=ir-lz\|emit=parse-lz\|emit=lex-lz" src/main.rs` → 10。
 - reported_by: lead
+- commit: 01b25e8（重映射自 accdd85 / 45b1e08）
 
 ### FIXED(2026-10-25T21:20:00Z / BUG-465)
 - evidence: commit accdd85（仅 README.md + docs/脚本冻结清单草案-2026-09-30.md + src/main.rs，11+/5-）。裁决原则"文档迁就代码、代码不改"，路线 B 仅 src/codegen/ 移除、自举类 `.lz` 实现保留（实验性自举后备，不参与默认 IR 管线）。
@@ -2730,6 +2847,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - detail: --emit=ir-lz 链路（main.rs:907）：build_ir_opt → src/ir/lz_codegen.rs::ir_module_to_lz_source 把 IR 数据序列化为 LZ 构造调用，display 逻辑完全由 LZ 侧 src/ir/lz_ir_lib.lz 承担，产物应与原生 --emit=ir 逐字节一致。实测 11 个 DEMO 中 embed_tnr_demo.lz、extern_demo.lz 在 rustc 步报 error[E0599]: no variant named EmbedBlock/Ext found for enum Item/IrType，原生 --emit=ir 正常。根因：src/ir/types.rs 的 IrType 与 src/ir/node.rs 的 Item 已增 Ext / EmbedBlock 变体，lz_codegen.rs:961/403 会发射 IrType.Ext / Item.EmbedBlock(...)，但 LZ 侧 lz_ir_lib.lz 对应枚举未镜像这些变体 → 生成 Rust 引用不存在的变体 → E0599。属"LZ IR 库是 Rust IR 模型子集、新变体未镜像"的系统性漂移。
 - 复现: ./target/debug/lang-zone.exe DEMO/extern_demo.lz --emit=ir-lz（E0599 Ext）；./target/debug/lang-zone.exe DEMO/embed_tnr_demo.lz --emit=ir-lz（E0599 EmbedBlock）。
 - reported_by: lead
+- commit: 651d6dc（重映射自 37395e7 / 192ebe4）
 
 ### FIXED(2026-10-26T09:35:00Z / BUG-466)
 - evidence: commit 37395e7（仅 src/ir/lz_ir_lib.lz + tests/lz_ir_bootstrap.rs，5+/34+）。
@@ -2785,6 +2903,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
     注入 main 入口，不影响字节匹配）；Pattern 缺 EnumNamed（LZ 实为 Pattern.Enum，lz_codegen.rs:1105
     发射名 EnumNamed 且字段 List<(str,Pattern)> 与 LZ args:List<Pattern> 双重漂移，语料未触发，留待后续）。
     Item::Test 仍走 Rust {:#?} Debug（display.rs:727），非稳定 Display 契约，记为已知限制。
+commit：92e3cc8（重映射自 未记）
 ### FIXED(2026-10-26 / BUG-468)
 
 ## BUG-469 [high] rs-lz match scrutinee 未对齐原生「纯 Var 一律 .clone()」
@@ -2805,7 +2924,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
     `match s.clone()` 且 rustc 可编译）。因 rs-lz 的 match 臂缩进仍与原生动态 indent 不同，
     该测试不做逐字符比对，只断言 scrutinee 变换这一功能修复点。
 - 验证: cargo test -j 4 -- --test-threads=1 全绿；BUG-469 单测过；rs-lz 产物 rustc 编译并运行输出 5。
-- commit: 7559a78
+- commit: ddeed29（重映射自 7559a78）
 - 遗留（非本次）: (a) match 臂缩进 rs-lz 硬编码 4 格 vs 原生动态 indent（格式保真，非功能性）；
     (b) Str → `.as_str()`（BUG-284）、List/Vec/Tuple → `.as_slice()`、FieldAccess 的
     ret_is_ref_opt / has_ref_mut 分支均未覆盖，留后续。
@@ -2832,7 +2951,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
     `match name.as_str() {`、rustc 可编译且运行输出 greet/other）
 - 验证: cargo test -j 4 -- --test-threads=1 全绿（41 套件）；str_match rs-lz 产物
     COMPILE+RUN 输出 greet/other；list_match scrutinee 已与原生逐字一致。
-- commit: c2713b6
+- commit: 497d66d（重映射自 c2713b6）
 - status: OPEN -> FIXED
 
 ## BUG-471 [high] rs-lz 列表模式发射两处 rustc 硬错（..rest 语法 + slice 元素未解引用）
@@ -2862,6 +2981,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
   新增回归测试 `rs_lz_list_pattern_element_binding_deref`（断言 rs-lz 产物含
   `[a, rest @ ..]` 与 `let a = *a;`，rustc 编译运行输出 `7`）。
 - status: FIXED
+- commit: bfe2d55（重映射自 未记）
 
 ## BUG-471(a) [high] rs-lz 具名 Rest 模式发成 `..rest`（E0425）
 
@@ -2874,7 +2994,7 @@ oracle：pattern_gen.rs:187-190 —— `Some(n) => format!("{} @ ..", n)`；`Non
 `n2 + " @ .."`（replace_all 两处同修）。
 回归测试：rs_lz_rest_pattern_emits_at_binding。
 验证：cargo test -j 4 -- --test-threads=1 全绿（41 套件）。
-commit：165b844
+commit：d53ea29（重映射自 165b844）
 
 ## BUG-472 [high] rs-lz auto_mut 未标记字段/下标赋值底座 Var
 
@@ -2887,7 +3007,7 @@ oracle：stmt_gen.rs 原生自动 mut 扫描把写入底座记入 auto_mut_local
 `acc = add_var_auto_mut(b, acc)`。保守标 mut 在 Rust 中无害。
 回归测试：rs_lz_field_assign_marks_let_mut。
 验证：dict_ops rs-lz COMPILE+RUN 出 1|2；cargo test -j 4 -- --test-threads=1 全绿。
-commit：74798a1
+commit：2688eb7（重映射自 74798a1）
 
 ## BUG-473 [high] rs-lz 固有方法发成 `pub fn Type.method` 自由函数
 
@@ -2899,7 +3019,7 @@ oracle：decl_gen.rs:169-182 —— 名含 `.` 即 `impl <ty> {` + 纯方法名 
 先判名含 `.`，含则构造 ImplMethod 复用 gen_impl_method（force_ref=false）包 `impl <ty> {`。
 回归测试：rs_lz_inherent_method_emits_impl_block。
 验证：struct_method.rs-lz 出 25；enum_method.rs-lz 出 27|12；cargo test 全绿。
-commit：4897f87
+commit：62be5d4（重映射自 4897f87）
 已知局限：方法自身泛型 impl 块暂未带泛型。
 
 ## BUG-475 [high] rs-lz 递归类型字段未 Box 包装（E0072）
@@ -2927,7 +3047,7 @@ match 解构端 `let x = *x;`。
 rustc 编译运行输出 6（原生一致）；cargo test --test lz_ir_bootstrap 24/24 全绿。
 回归测试：rs_lz_recursive_enum_boxes_fields（声明+构造）+ rs_lz_recursive_enum_match_derefs（解构+运行输出 6）
 状态：FIXED
-commit：1fdf50c（声明+构造）/ 6df5a51（解构）
+commit：e8015d6（声明+构造）/ 471e834（解构）（重映射自 1fdf50c / 6df5a51）
 
 ## BUG-477 [high] rs-lz 把内建类型转换 `str(x)`/`int(x)`/`f64(x)` 原发成函数调用
 
@@ -2949,6 +3069,7 @@ str(int)/str(f64)/str(Vec)）rs-lz 产物 main 与 native 逐字节一致，
 codegen 无该表，极少见）；用户 struct 的 `__str__`/`__int__`/`__float__` 缺口魔法
 （原生 is_known_type 表 LZ 无，罕见，留待类型注册表立项一并处理）。
 回归测试：rs_lz_builtin_type_cast_conversions（编译 + 运行断言）
+commit：71bcfae（重映射自 未记）
 
 ## BUG-478 [medium] rs-lz 内建 stdlib magic 遮蔽同名用户函数
 
@@ -2980,6 +3101,7 @@ stdlib `sum([1,2,3])` 无用户 sum 时仍发 `.iter().copied().sum::<i64>()`（
 lz_ir_bootstrap 22 项全绿；新增回归测试 `rs_lz_self_user_fn_shadows_stdlib_magic`
 双路断言输出 3 且 rs-lz 产物不含 `.iter().copied().sum::<i64>()`。
 状态：FIXED（commit 6bb52f5）
+commit：73482a1（重映射自 6bb52f5）
 
 ## BUG-479 [high] rs-lz 前端自检对含 match 的程序失败（E0533 Expr::BlockExpr）
 
@@ -3009,6 +3131,7 @@ Rust 文本与 native 一致；match 探针（含 guard + 裸 match 作表达式
 快照再跑 rs-lz（BUG-481，同批修复）。
 回归测试：rs_lz_match_blockexpr_two_field_ctor（编译 + 运行断言）
 状态：FIXED（commit 9332bbe）
+commit：cf24ea3（重映射自 9332bbe）
 
 ## BUG-450 [high] native List<str>.contains("a") 实参缺 .to_string()（E0308 expected &String）
 
@@ -3210,6 +3333,7 @@ rust_type）与 `IrType.Duck`（`.lz:781`，未改），故改 Any 分支安全�
 （断言 rs-lz 发 `pub fn f(x: i64) -> i64`、不含 `Box<dyn Any>`、rustc 编译且
 运行输出 `42`，并对照 native 同样发 i64）。
 状态：FIXED
+commit：31e0510（重映射自 未记）
 ## BUG-482 [high] rs-lz 的 esc_rust 按字节切片字符串，多字节 UTF-8 字符触发运行时 panic
 
 现象：`--emit=rs-lz` 对任何含非 ASCII 字符的 LZ 源失败。实测 269 文件全量差分扫描
@@ -3253,6 +3377,7 @@ p4b_unicode 5 个原失败探针全部通过自检（生成+编译+运行）。�
 未绑定变量 `NaN` → `未绑定变量: NaN`。esc_rust 修复只清掉 math.lz 的 UTF-8 字面量面，
 NaN 字面量面由 BUG-483 单独收口。同理 p25_long_or.lz 的失败也与 esc_rust 无关，由
 BUG-484 单独收口。此处不删原叙述（追加不改销毁历史），仅更正归因。
+commit：bba18f8（重映射自 未记）
 
 ## BUG-483 [high] rs-lz 的 `.lzrs` 生成端把 `NaN`/`inf` f64 字面量序列化为裸 `NaN.0`，重编译时未绑定变量
 
@@ -3277,6 +3402,7 @@ BUG-484 单独收口。此处不删原叙述（追加不改销毁历史），仅
 0.0f64 / 0.0f64;`。`_probes/div_zero_f64.lz` 探针覆盖 NaN/inf/-inf 常量与除零运行值。
 `lz_ir_bootstrap` 25/25 全绿。
 状态：FIXED
+commit：fb4be42（重映射自 未记）
 
 ## BUG-484 [high] rs-lz 库的 `gen_expr` 对左结合的 or/and 长链递归，53 层即溢出 8MB 主线程栈
 
@@ -3302,6 +3428,7 @@ BUG-484 单独收口。此处不删原叙述（追加不改销毁历史），仅
 bool { ... }` 且 4 个打印断言（`"a"/"Z"/"_"/"1"`）输出正确。回归：math.lz、esc_chars.lz、
 div-tools/probes/p4b_unicode.lz 三个原失败探针均通过。`lz_ir_bootstrap` 25/25 全绿。
 状态：FIXED
+commit：2b56281（重映射自 未记）
 ## BUG-485 [high] `let x: Complex = ..` 类型注解发射裸 `Complex`（未导入），与值侧 `lz_builtins::Complex64` 不一致
 
 现象：`latent_variants.lz` 的 `let comp: Complex = 3.14i` 生成
@@ -3335,6 +3462,7 @@ LitComplex/Complex/Spread found for enum Expr/IrType`——这是该探针有意
 bootstrap IR 缺口（LZ 编译器的 IR 模型尚无这些变体），非 BUG-485 范畴，另立。
 状态：FIXED
 状态：FIXED
+commit：44216e4（重映射自 未记）
 ## BUG-486 [medium] LINK RECIPE 的 `-L dependency` 指向 rlib 所在目录而非 deps/，照抄即 E0463
 
 现象：`lang-zone <f>.lz` 生成的 stderr 链接配方
@@ -3359,6 +3487,7 @@ E0463。`cargo test --lib` 463/463 全绿。
 注意：配方用 Windows 原生反斜杠（`PathBuf::display()`），在 bash 里需转义，
 在 cmd/PowerShell 直接可复制——本 bug 只关路径目录，与斜杠方向无关。
 状态：FIXED
+commit：4520840（重映射自 未记）
 ## BUG-487 [high] 用户 `struct HashMap` 与内建 `HashMap` 撞名，命名构造器被误生成 `BTreeMap::from([...])`
 
 现象：`FIND_BUG/lib_hashmap/hashmap.lz` 定义 `struct HashMap = buckets: ...; values: ...; _size: int; _num_buckets: int`，
@@ -3384,6 +3513,7 @@ _size: 0i64, _num_buckets: 16i64 };`，`cargo test --test find_bug_libs lib_hash
 注意：用户一旦定义 `struct HashMap`，本程序里 `HashMap(k: v)` 关键字字面量将不再生成 dict——这是
 用户遮蔽内建名的预期语义（与 BUG-485 的 `is_user_ty` 守卫同思路）。
 状态：FIXED
+commit：3f8512e（重映射自 未记）
 ## BUG-488 [2026-10-27T13:17:07Z] [medium] OPEN
 - summary: [scope-gate] reserve_scope 对非 Fist-Mbt 项目路径一律 fail-closed：权限表 scope_permissions 写死 Fist-Mbt 源码目录，lang-zone 的 src/embed、Reports 等合法作用域无法预订，导致 explore 并行四道门第 4 门永远不过
 
