@@ -17,6 +17,12 @@ AIGC:
 
 ## [Unreleased]
 
+### rs-lz 后端与原生 codegen 差分对齐（2026-10-27，fist-agent lang-zone 组合轮）
+- `--emit=rs-lz` 的 `rust_type` 对 `IrType.Any` 从 `Box<dyn Any>` 对齐为 `i64`（BUG-480）：无类型注解参数（`def f(x): return x + 1`）此前退化为 `Box<dyn Any>`，对之做 `+ 1i64` 触发 E0369、rs-lz 产物无法编译；原生 `emit.rs:247` 一直发 `i64`。rs-lz 侧其余两处 `Box<dyn Any>` 为 kwargs 桩（`.lz:2906` hardcode）与 `IrType.Duck`（`.lz:781`），均不受影响（`6bb52f5`）
+- 定位方式：`_probes/bigsweep.sh` 64 探针差分扫描唯一真缺陷即此；同批其余 7 例为假阳性（`edge_class/edge_nums/nest/nest2/latent_variants` 为无 main 库探针报 E0601；`sweep/g65_arith_div_zero`/`sweep/g66_arith_overflow` 为刻意测除零/溢出；`x + "a"` 与 `x[0]` 在原生侧同样 E0308/E0608，属双路一致的 ill-typed 程序，非 rs-lz 独有）
+- 回归测试：`tests/lz_ir_bootstrap.rs::rs_lz_unannotated_param_defaults_i64` 断言 rs-lz 发 `pub fn f(x: i64) -> i64`、不含 `Box<dyn Any>`、rustc 编译且运行输出 `42`，并对照 native 同样发 `i64`；`lz_ir_bootstrap` 25 项全绿
+- 差分扫描基建：新增 `_probes/fastsweep.sh`（对 `.lz` 文件集并行跑 `--emit=rs-lz` 自检，退出码即编译运行是否通过；失败者再跑 native 编译以区分「rs-lz 独有缺陷」与「双路一致的 ill-typed 程序」）。踩坑：`--emit=rs-lz` 内置「生成 `.lzrs` → lang-zone → rustc → 运行 exe」递归自检，在 Windows 下工作文件名不可用 `in`（`in.exe` 运行报 `Os code 5 拒绝访问`，疑 Windows 保留/别名冲突），改用唯一哈希目录 + `probe.lz` 即稳定
+
 ### Option 语义族收口（2026-10-18，fist-agent lz-combo-r2 组合轮）
 - `Int/F64.to_string()` 现推断为 `String`（原先因 match 顺序缺陷被 `IrType::Int/F64` 臂先行消费、回退 Any → `print` 走 Debug 加引号），`print(n.to_string())` 从 `"42"` 变 `42`（BUG-264）
 - `List.get/first/last/pop` 与 `List.max/min` 的 IR 类型收口为 `Option<T>`（原先标 `T`，与 codegen 的 `.cloned()` → `Option<T>` 产物矛盾，同 BUG-281/BUG-316 语义漂移）（BUG-265、BUG-266）
