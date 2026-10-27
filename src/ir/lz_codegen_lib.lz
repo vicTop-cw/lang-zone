@@ -2414,21 +2414,25 @@ def args_is_empty_or_generic(a: List<IrType>) -> bool =
 // Rust: let s = f.to_string(); if s.contains('.') || s.contains('e') { s } else { s + ".0" }
 def fmt_f64(n: f64) -> String =
     let s = n.to_string()
-    if has_dot_or_e(s):
+    if s == "NaN":
+        // BUG-483：NaN 文本化为 "NaN"，若走后缀逻辑会产出 `NaN.0f64`——LZ parser 把
+        // `NaN` 当变量名（未绑定变量: NaN），IR build 即失败（math.lz 的
+        // `const NAN = 0.0 / 0.0` 被 comptime 内联为 f64::NAN 字面量时触发）。
+        // 对齐原生 expr_gen.rs:8390-8399：NaN/inf/-inf 直接发 Rust 关联常量。
+        "f64::NAN".to_string()
+    elif s == "inf":
+        "f64::INFINITY".to_string()
+    elif s == "-inf":
+        "(-f64::INFINITY)".to_string()
+    elif has_dot_or_e(s):
         s + "f64".to_string()
     else:
         s + ".0f64".to_string()
 
 def has_dot_or_e(s: str) -> bool =
-    let len = s.len()
-    let mut i = 0
-    let mut found = false
-    while i < len:
-        let c = s[i..(i + 1)]
-        if c == "." || c == "e":
-            found = true
-        i = i + 1
-    found
+    // BUG-482 同族：旧实现 s[i..(i+1)] 按字节切片，多字节字符即越界 panic；
+    // String::contains 按字符边界匹配，字节安全（f64::to_string 恒 ASCII，此处仅防御）。
+    s.contains(".") || s.contains("e")
 
 // ── f-string 模板解析（对齐原生 gen_fstring）──
 // {expr} → {:?} 占位 + 参数列表；{{ → {{；}} → }}；无插值 → 普通字符串
@@ -2499,17 +2503,8 @@ def aj_tail(xs: List<str>) -> List<str> =
 
 // 仅转义双引号（f-string 格式串对齐原生 gen_fstring：只 replace('"', "\\\"")，换行保持原样）
 def esc_quote_only(s: String) -> String =
-    let len = s.len()
-    let mut out: String = "".to_string()
-    let mut i = 0
-    while i < len:
-        let c = s[i..(i + 1)]
-        if c == "\"":
-            out = out + "\\\"".to_string()
-        else:
-            out = out + c
-        i = i + 1
-    out
+    // BUG-482 同族：逐字节切片对多字节字符 panic。replace 按字符边界匹配。
+    s.replace("\"", "\\\"")
 
 // ── Rust 字符串转义（escape_default 常用子集）──
 def esc_rust(s: str) -> String =
@@ -2594,17 +2589,8 @@ def gen_trait_methods(methods: List<(str, List<IrType>, IrType)>, assoc_types: L
 // BUG-431：where 约束的 type_param 可能是关联类型路径（`I::Item`，含点号），Rust 里
 // 要写成 `I::Item`（本就带 ::），故把 `.` 换成 `::`。LZ String 无 replace，用循环。
 def dot_to_path(s: str) -> String =
-    let mut out: String = "".to_string()
-    let len = s.len()
-    let mut i = 0
-    while i < len:
-        let c = s[i..(i + 1)]
-        if c == ".":
-            out = out + "::"
-        else:
-            out = out + c
-        i = i + 1
-    out
+    // BUG-482 同族：replace 按字符边界匹配，多字节字符安全。
+    s.replace(".", "::")
 
 // BUG-431：impl 级 where 约束（原生 `impl<T> ... where I::Item: Clone, K: Eq`）。
 // 须在 `{` 之前生成，否则 non-item in item list。
@@ -2842,15 +2828,9 @@ def split_method_name(n: str) -> (str, str) =
         (n, "")
 
 def find_dot_index(n: str) -> int =
-    let mut i = 0
-    let mut idx = -1
-    let mut found = false
-    while i < n.len():
-        if !found and n[i..(i + 1)] == ".":
-            idx = i
-            found = true
-        i = i + 1
-    idx
+    // BUG-482 同族：n[i..(i+1)] 逐字节切片对多字节字符（如方法名含中文）panic。
+    // LZ s.find(..) 找不到返回 -1，返回字节索引（见 BUG-453）。
+    n.find(".")
 
 def gen_item(i: Item, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
     match i:

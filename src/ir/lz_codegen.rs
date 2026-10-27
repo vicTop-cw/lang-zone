@@ -1158,11 +1158,20 @@ fn gen_lit(lit: &LitKind, ty: &str) -> String {
         }
         // LZ 中 `3` 是 int（3_i64），f64 字面量需带小数点（3.0）
         LitKind::F64(n) => {
+            // BUG-483：NaN/±inf 文本化后为 "NaN"/"inf"/"-inf"，若走 `{}.0` 后缀逻辑会产出
+            // `NaN.0` 等——LZ parser 把 `NaN` 当未绑定变量（IR build 报「未绑定变量: NaN」），
+            // math.lz 的 `const NAN = 0.0 / 0.0` 被 comptime 内联为字面量即触发。
+            // 改发合法的 LZ f64 表达式：除零在 LZ 运行期得 NaN/±inf（div_zero_f64.lz 探针
+            // 验证 native 正常生成 `0.0f64 / 0.0f64`）。fmt_f64 已把该 f64 值再文本化为
+            // Rust 的 f64::NAN/INFINITY，两处对齐原生 expr_gen.rs:8390。
             let s = format!("{}", n);
-            let s = if s.contains('.') || s.contains('e') || s.contains('E') {
-                s
-            } else {
-                format!("{}.0", s)
+            let lower = s.to_ascii_lowercase();
+            let s = match lower.as_str() {
+                "nan" => "0.0/0.0".to_string(),
+                "inf" => "1.0/0.0".to_string(),
+                "-inf" => "-1.0/0.0".to_string(),
+                _ if s.contains('.') || s.contains('e') || s.contains('E') => s,
+                _ => format!("{}.0", s),
             };
             format!("Expr.LitF64(v: {}, ty: {})", s, ty)
         }
