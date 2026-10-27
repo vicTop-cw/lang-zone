@@ -306,8 +306,29 @@ impl CodeGen {
                     }
                     return "std::future::Future<Output = ()>".into();
                 }
-                let mapped = self
-                    .type_map
+                // BUG-485：`let comp: Complex = 3.14i` 的类型注解在 IR 里是
+                // `Named{path:"Complex", args:[]}`（builder 保留用户写法大小写），
+                // type_map 只挂小写 `"complex"` → `.get("Complex")` 未命中 → 裸
+                // `Complex` 未导入（E0425 cannot find type `Complex`）。
+                // 内置标量（bigint/complex 及别名）做大小写不敏感映射，与值侧
+                // 构造器恒用 `lz_builtins::Complex64`/`lz_builtins::BigInt` 对齐。
+                // 用户自定义同名 struct/enum（emitted_types/impl_types）优先，
+                // 不套内置映射（否则 `let x: Complex` 会指向 lz_builtins 而非用户类型）。
+                let is_user_ty = self.emitted_types.contains(path.as_str())
+                    || self.impl_types.contains(path.as_str());
+                let builtin_scalar = if is_user_ty {
+                    None
+                } else {
+                    match path.as_str() {
+                        "bigint" | "BigInt" | "Bigint" | "bignum" | "BigNum" => Some(BIGINT_RS),
+                        "complex" | "Complex" | "Complex64" | "complex64" => Some(COMPLEX_RS),
+                        _ => None,
+                    }
+                };
+                let mapped = if let Some(rs) = builtin_scalar {
+                    rs.to_string()
+                } else {
+                    self.type_map
                     .get(path.as_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| {
@@ -323,7 +344,8 @@ impl CodeGen {
                             // 需写为 `I::Item`（泛型参数上的关联类型用 `::` 而非 `.`）
                             path.replace('.', "::")
                         }
-                    });
+                    })
+                };
                 // 用户自定义类型（struct/enum/impl-only）优先于内置 type_map 映射：
                 // lz_std/iter.lz 自定义 `struct Range`，type_map 却映射到 std::ops::Range，
                 // 导致 `impl Iterator for std::ops::Range<i64>` 与字段访问冲突（E0609）
@@ -881,8 +903,13 @@ impl CodeGen {
                 if !all_bounds.iter().any(|b| b == "Debug") {
                     all_bounds.push("Debug".to_string());
                 }
-                if !all_bounds.iter().any(|b| b == "Clone") {
-                    all_bounds.push("Clone".to_string());
+                // BUG-traits-Clone：追加 Clone 须经 gen_trait_bound 全限定为
+                // std::clone::Clone——traits.lz 自定义 `pub trait Clone` 遮蔽 std
+                // 时，裸 `Clone` bound 指向自定义 trait，`Option<J>: std::clone::Clone`
+                // 不满足 → E0599（FlatMap.inner / Peekable.peeked）。
+                let clone_bound = self.gen_trait_bound(&IrType::named("Clone"));
+                if !all_bounds.iter().any(|b| *b == clone_bound) {
+                    all_bounds.push(clone_bound);
                 }
                 // 比较约束传播：自身或调用链参与比较运算 → 注入 PartialEq/Eq/Ord
                 let needs_ord = cmp_ord.contains(&p.name);

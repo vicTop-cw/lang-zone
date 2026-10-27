@@ -998,3 +998,51 @@ def main() =
     assert!(ok.ok, "struct impl 生成器 .next()：\n{}", ok.diag);
     assert_eq!(ok.stdout.replace('\n', " ").trim(), "Some(42)");
 }
+
+// BUG-485：`let comp: Complex = 3.14i` 的类型注解在 IR 里是 `Named{path:"Complex",
+// args:[]}`（builder 保留用户写法大小写），type_map 只挂小写 `"complex"` →
+// `.get("Complex")` 未命中 → 注解发射裸 `Complex`（未导入，E0425 cannot find type
+// `Complex`），而值侧构造器却发射 `lz_builtins::Complex64::new(..)`，注解/值两侧
+// 类型名不一致。修法：rust_type 的 Named 分支对 bigint/complex 内置标量做大小写
+// 不敏感映射到 `lz_builtins::BigInt`/`lz_builtins::Complex64`。同理 bigint 注解。
+#[test]
+fn complex_bigint_annotation_maps_to_builtin_path() {
+    let src = r#"
+def main() =
+    let big: BigInt = 1234567890123456789012345678901234567890
+    let comp: Complex = 3.14i
+    let c2: complex = 2.5i
+    let b2: bigint = 42
+    print(big)
+    print(comp)
+    print(c2)
+    print(b2)
+"#;
+    let r = run_lz("complex_bigint_annot", src);
+    assert!(
+        r.transpiled && r.ok,
+        "Complex/BigInt 注解应映射到 lz_builtins 路径并编译运行：\n{}",
+        r.diag
+    );
+    let out = r.stdout.replace('\n', " ").trim().to_string();
+    assert!(
+        out.contains("1234567890123456789012345678901234567890"),
+        "BigInt 注解值应正确打印：{}",
+        out
+    );
+    assert!(
+        out.contains("Complex { re: 0.0, im: 3.14 }"),
+        "Complex 注解值应以 Complex64 结构打印：{}",
+        out
+    );
+    assert!(
+        out.contains("Complex { re: 0.0, im: 2.5 }"),
+        "小写 complex 注解值应同样打印：{}",
+        out
+    );
+    assert!(
+        out.ends_with("42"),
+        "小写 bigint 注解值应为 42：{}",
+        out
+    );
+}

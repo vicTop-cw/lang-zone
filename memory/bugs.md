@@ -3302,4 +3302,36 @@ BUG-484 单独收口。此处不删原叙述（追加不改销毁历史），仅
 bool { ... }` 且 4 个打印断言（`"a"/"Z"/"_"/"1"`）输出正确。回归：math.lz、esc_chars.lz、
 div-tools/probes/p4b_unicode.lz 三个原失败探针均通过。`lz_ir_bootstrap` 25/25 全绿。
 状态：FIXED
+## BUG-485 [high] `let x: Complex = ..` 类型注解发射裸 `Complex`（未导入），与值侧 `lz_builtins::Complex64` 不一致
+
+现象：`latent_variants.lz` 的 `let comp: Complex = 3.14i` 生成
+`let comp: Complex = lz_builtins::Complex64::new(0.0, 3.14);`，rustc 报
+`E0425 cannot find type Complex in this scope`（`use lz_builtins::*` 只导出
+`Complex64`，无 `Complex`）。同理 `let big: BigInt = ..`。
+
+根因：类型注解在 IR 里是 `IrType::Named{path:"Complex", args:[]}`（builder
+`src/ir/builder/mod.rs:608` 把 `"complex"/"Complex"/"Complex64"` 值侧统一映射成
+`IrType::Complex`，但注解位保留用户写法大小写，走 Named 分支）。`rust_type` 的
+Named 分支 `src/ir/codegen/types_emit.rs:309` 只 `type_map.get(path)`，而 type_map
+只挂小写 `"complex"`（`mod.rs:465`）→ `.get("Complex")` 未命中 → 走默认
+`path.replace('.', "::")` 返回裸 `Complex`。值侧构造器却恒发 `COMPLEX_RS`
+（`lz_builtins::Complex64`），两侧类型名不一致。`is_complex_ty` 虽对
+`Named("Complex")` 返回 true（强制发标注），但标注内容取自 `rust_type` 的错误结果。
+
+修复：`src/ir/codegen/types_emit.rs` 的 Named 分支在 `type_map.get` 之前，对
+bigint/complex 内置标量做大小写不敏感映射（`"bigint"/"BigInt"/"Bigint"/"bignum"/
+"BigNum"` → `BIGINT_RS`；`"complex"/"Complex"/"Complex64"/"complex64"` →
+`COMPLEX_RS`），与值侧构造器对齐。用户自定义同名 struct/enum 仍由后续
+`emitted_types/impl_types` 分支覆盖（不改动）。
+
+验证：latent_variants.lz 全链路（生成 → rustc → 运行）通过，输出
+`Complex { re: 0.0, im: 3.14 }` / BigInt 大整数正确。新增回归测试
+`complex_bigint_annotation_maps_to_builtin_path`（大/小写 BigInt/Complex 注解
+四组，断言打印值）；`cargo test --lib` 463/463 全绿，
+`codegen_corner_fixes` 38/38 全绿。
+
+注意：latent_variants.lz 在 rs-lz 自检仍报 `E0599 no variant LitBigInt/BigInt/
+LitComplex/Complex/Spread found for enum Expr/IrType`——这是该探针有意探测的
+bootstrap IR 缺口（LZ 编译器的 IR 模型尚无这些变体），非 BUG-485 范畴，另立。
+状态：FIXED
 状态：FIXED
