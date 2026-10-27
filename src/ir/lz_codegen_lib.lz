@@ -645,8 +645,13 @@ def gen_block(b: BlockIR, fn_raises: MaybeIrType, user_fns: List[str], tbm: List
 // match 的分支体在「match 本身处于值位置」时必须用本函数，否则分支值被 `;` 丢弃
 // （`def val(e) -> int = match e: case E2.A(x): x + 1` → 生成 `{ x + 1i64; }`
 // → E0308 expected i64, found ()；原生产物为 `{ x + 1i64 }`）。
-def gen_value_body(ss: List<Stmt>, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+def gen_value_body(ss: List[Stmt], fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
     let n = ss.len()
+    // E0384（D2 连带暴露）：值位置块内同样要按 auto_mut 扫描（原生 auto_mut_locals
+    // 是**函数级**扫描，与块位置无关）。旧实现此处恒传 ""，于是 match 臂内的
+    // `let result = []` 不会标 mut，后续 `result = result + ...`（自引用重绑定按
+    // BUG-454 发赋值）落成对不可变量的二次赋值 ⇒ rustc E0384。
+    let auto_mut = auto_mut_names(ss)
     let mut out: String = "".to_string()
     for idx in 0..n:
         let is_tail = (idx == n - 1)
@@ -657,9 +662,9 @@ def gen_value_body(ss: List<Stmt>, fn_raises: MaybeIrType, user_fns: List[str], 
                     out = out + "    ".to_string() + gen_expr(e, fn_raises, user_fns, tbm, vem) + "\n".to_string()
                 // 尾语句是 match/if/block 等：is_tail=true 让嵌套 match 走值位置形态
                 case _ =>
-                    out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), true, true, "".to_string(), fn_raises, user_fns, tbm, vem) + "\n".to_string()
+                    out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), true, true, auto_mut, fn_raises, user_fns, tbm, vem) + "\n".to_string()
         else:
-            out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), false, true, "".to_string(), fn_raises, user_fns, tbm, vem) + "\n".to_string()
+            out = out + "    ".to_string() + gen_stmt(ss[idx].clone(), false, true, auto_mut, fn_raises, user_fns, tbm, vem) + "\n".to_string()
     out
 
 def gen_value_block(b: BlockIR, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
@@ -688,9 +693,19 @@ def type_box_map(m: IrModule) -> List[(str, List[(str, bool)])] =
             case Item.EnumDef(name: en, generics: _, variants: vs) =>
                 let mut flds: List[(str, bool)] = []
                 for j in 0..vs.len():
-                    let vf = vs[j].clone().1
-                    for k in 0..vf.len():
-                        flds = flds + [(vf[k].clone().0, field_needs_box(vf[k].clone().1, en))]
+                    let var = vs[j].clone()
+                    for k in 0..var.1.len():
+                        // D1：定位（元组）变体的字段名是空串（builder/convert_decl.rs:1980-1984
+                        // 对非命名字段写 `name: String::new()`）。旧实现直接拿该空串当键，同
+                        // 枚举下只要有**任一**盒化字段，`field_is_boxed(tbm, en, "")` 就命中
+                        // ⇒ Node(int, BinaryTree, BinaryTree) 的首个 i64 字段也被当成 Box
+                        // （rustc E0614 type i64 cannot be dereferenced）。
+                        // 定位字段改记合成键（变体名 + 下标），由 pat_field_bindings 在定位
+                        // pattern 侧按同一规则生成查询键；命名变体的字段键仍是字段名，行为不变。
+                        let fname = var.1[k].clone().0
+                        let mut fkey = fname.clone()
+                        if fname == "": fkey = positional_field_key(var.0.clone(), k)
+                        flds = flds + [(fkey, field_needs_box(var.1[k].clone().1, en))]
                 out = out + [(en, flds)]
             case Item.StructDef(name: sn, generics: _, fields: fs) =>
                 let mut flds: List[(str, bool)] = []
@@ -717,6 +732,12 @@ def enum_variant_map(m: IrModule) -> List[(str, List[(str, List[str])])] =
                 out = out + [(en, vs_map)]
             case _ => ()
     out
+
+// D1：定位变体字段的合成键（`#pos#<variant>#<index>`）。`#` 不是合法 LZ 标识符字符，
+// 故与任何命名字段都不可能撞名。type_box_map（写入）与 pat_field_bindings（查询）
+// 必须用同一规则——对齐原生 pattern_gen.rs:281-304 按 (enum, variant, index) 查字段类型。
+def positional_field_key(variant: str, idx: int) -> String =
+    "#pos#".to_string() + variant + "#".to_string() + idx.to_string()
 
 def field_is_boxed(tbm: List[(str, List[(str, bool)])], type_name: str, field: str) -> bool =
     let mut found = false
@@ -762,7 +783,13 @@ def pat_field_bindings(p: Pattern, vem: List[(str, List[(str, List[str])])]) -> 
                 match as_[idx].clone():
                     case Pattern.Ident(name: bn) =>
                         if idx < names.len():
-                            out = out + [(bn, names[idx].clone())]
+                            // D1：定位变体的 names[idx] 是空串（IR 里非命名字段无名字），
+                            // 换成与 type_box_map 一致的「变体名 + 下标」合成键再查盒化；
+                            // 有名字的字段（命名变体被位置式解构）仍用字段名，行为不变。
+                            let fname = names[idx].clone()
+                            let mut fkey = fname.clone()
+                            if fname == "": fkey = positional_field_key(v.clone(), idx)
+                            out = out + [(bn, fkey)]
                     case _ => ()
             out
         case _ => []
@@ -1117,6 +1144,15 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
                     not_prefix + cont_s + ".contains_key(&".to_string() + elem_s + ")".to_string()
                 else:
                     not_prefix + cont_s + ".contains(&".to_string() + elem_s + ")".to_string()
+            elif o == "+" and (expr_is_listy(l) or expr_is_listy(r)):
+                // D2：列表拼接 `a + b`。Rust 的 `Vec<T>` 未实现 `Add`，旧实现把 `+`
+                // 原样透传 ⇒ `error[E0369]: cannot add Vec<i64> to Vec<i64>`
+                //（`inorder(left) + [val] + inorder(right)` 这类树遍历即中招）。
+                // 对齐原生 expr_gen.rs:5955-5972 的主分派（列表字面量或 List/Vec 类型
+                // 任一侧命中即走此路）：
+                //   { let mut __cat = <lhs>.clone(); __cat.extend(<rhs>); __cat }
+                // lhs 无条件 clone 保持「拼接产生新 Vec、两侧操作数不被移动」的值语义。
+                "{ let mut __cat = ".to_string() + gen_expr(l, fn_raises, user_fns, tbm, vem) + ".clone(); __cat.extend(".to_string() + gen_expr(r, fn_raises, user_fns, tbm, vem) + "); __cat }".to_string()
             elif o == "+" and is_string_irtype(expr_ty(l)) and is_string_irtype(expr_ty(r)):
                 // BUG-423：字符串拼接 `a + b` 在 Rust 需 `String + &str`（String + String
                 // 无 Add impl → E0308 expected `&str`, found `String`）。两侧均为字符串
@@ -1186,7 +1222,11 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
             // 这种「match 在表达式位 → 被 builder 包成 BlockExpr」的形态里，match 臂的
             // 递归 Box 字段绑定不做 `let n = *n;` 解引用 ⇒ E0308 expected T, found Box<T>。
             // gen_expr 已全程携带 tbm/vem（R1 穿透改造），此处如实下传。
-            "{\n".to_string() + gen_body(ss, true, "".to_string(), fn_raises, user_fns, tbm, vem) + "}"
+            // E0308（D2 连带暴露）：块表达式是**值位置**块，其尾表达式即块值，故这里必须
+            // 走 gen_value_body（尾表达式不加 `;`）。旧实现用语句位形态 gen_body，尾表达式
+            // 被加分号丢弃 ⇒ `find` 的 `if found_left is Some: found_left else: find(..)`
+            // 嵌在 else 块里时生成 `...;`，rustc 报 expected Option<i64>, found ()。
+            "{\n".to_string() + gen_value_body(ss, fn_raises, user_fns, tbm, vem) + "}"
         case Expr.GenExpr(yield_of: y, ty: t) => "gen ".to_string() + gen_expr(y, fn_raises, user_fns, tbm, vem)
         case Expr.Paren(inner: i, ty: t) => "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ")".to_string()
         case Expr.Range(end: en, inclusive: inc, ty: t) => "0_i64..".to_string() + gen_expr(en, fn_raises, user_fns, tbm, vem)
@@ -1528,6 +1568,14 @@ def is_list_irtype(t: IrType) -> bool =
     match t:
         case IrType.Named(path: p, args: a) => p == "List" || p == "Vec"
         case _ => false
+
+// D2：`+` 的列表拼接判据——对齐原生 expr_gen.rs:5960-5964 的 `add_is_list_concat`：
+// 任一侧是列表字面量，或任一侧类型是 List/Vec（字面量单列一条，因为 `self.data + [x]`
+// 的 lhs 类型可能是 Any/Generic，只有 rhs 的 ListLit 形态能认出来）。
+def expr_is_listy(e: Expr) -> bool =
+    match e:
+        case Expr.ListLit(items: _, ty: _) => true
+        case _ => is_list_irtype(expr_ty(e))
 
 // BUG-436：`0..n` 的 IR 类型是 Named("Range")（无 args，元素恒为 int）。Range 本身已是
 // Rust Iterator，`.filter()`/`.map()` 直接可调，无需 `.iter().cloned()`（Range 无 .iter()
@@ -3065,7 +3113,13 @@ def scan_stmt_auto_mut(s: Stmt, out: String) -> String =
     let mut acc = out.clone()
     match s:
         case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
-            scan_expr_auto_mut(v, out)
+            // E0384（D2 连带暴露）：自引用重绑定（`let result = result + xs`）按 BUG-454
+            // 发成赋值 `result = ...`（LZ 值语义 ↔ Rust 不可变绑定），故该名字必须先
+            // 声明为 mut——对齐原生 auto_mut_locals 把「赋值目标」并入 mut 集的做法
+            // （bug_454 的 `i = i + 1` 在循环体里同样靠这一条拿到 mut）。
+            let mut acc0 = scan_expr_auto_mut(v, out)
+            if expr_has_var(v, n): acc0 = add_var_auto_mut(Expr.Var(name: n.clone(), ty: t.clone()), acc0)
+            acc0
         case Stmt.Assign(target: tg, value: v) =>
             acc = add_var_auto_mut(tg, acc)
             acc = scan_expr_auto_mut(tg, acc)

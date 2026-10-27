@@ -1430,3 +1430,145 @@ def main() =
         "反证失败：修前形态（v: NaN）应被 LZ 编译器拒绝并报「未绑定变量」:\n{bad_err}"
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// fist-mbt T0r6：D1 / D2（HEAD 2aa5088 既有缺陷，均在 src/ir/lz_codegen_lib.lz）
+// ════════════════════════════════════════════════════════════════════════════════
+
+// ── D1（高，E0614）：定位（元组）变体字段被误判为 Box ─────────────────────────
+//
+// 根因：`type_box_map` 把 enum 各变体字段摊平成 `(field_name, is_boxed)`，而**定位
+// 变体**的字段名在 IR 里是空串（builder/convert_decl.rs:1980-1984 对非命名字段写
+// `name: String::new()`）。旧 `field_is_boxed` 按字段名线性查找，空串等于「任意
+// 未命名字段」，同枚举下只要有一个盒化字段（Node 的 left/right：BinaryTree 递归
+// 自引用 ⇒ Box），`field_is_boxed(tbm, "BinaryTree", "")` 就命中 ⇒ Node 的首个
+// `int val` 也被当成 Box，臂首发 `let val = *val;` → rustc E0614
+// `type i64 cannot be dereferenced`。
+// 修法：定位变体字段改用合成键 `#pos#<variant>#<index>`（`#` 非 LZ 标识符字符，
+// 不与命名字段撞名），`type_box_map` 写入侧与 `pat_field_bindings` 查询侧同规则；
+// 命名变体仍按字段名匹配，行为不变（对齐原生 pattern_gen.rs:281-304 的
+// (enum, variant, index) 查表口径）。
+#[test]
+fn d1_positional_enum_variant_box_binding_by_index() {
+    let src = r#"
+enum BinaryTree:
+    Node(int, BinaryTree, BinaryTree)
+    Empty
+
+def inorder(tree: BinaryTree) -> List<int> =
+    match tree:
+        case BinaryTree.Empty:
+            []
+        case BinaryTree.Node(val, left, right):
+            inorder(left) + [val] + inorder(right)
+
+def make_node(val: int, left: BinaryTree, right: BinaryTree) -> BinaryTree =
+    BinaryTree.Node(val, left, right)
+
+def make_empty() -> BinaryTree =
+    BinaryTree.Empty
+
+// 语句位 match（臂后还有语句，故 match 不是尾表达式）：台账指出 D1 在语句位同样存在，
+// 这里一并覆盖 —— 修前臂首的 `let val = *val;` 直接 E0614。
+def describe(tree: BinaryTree) =
+    match tree:
+        case BinaryTree.Empty:
+            print("empty")
+        case BinaryTree.Node(val, left, right):
+            print(val)
+    print("")
+
+def main() =
+    let n4 = make_node(4, make_empty(), make_empty())
+    let n5 = make_node(5, make_empty(), make_empty())
+    let n2 = make_node(2, n4, n5)
+    let tree = make_node(1, n2, make_empty())
+    describe(tree)
+    assert inorder(tree) == [4, 2, 5, 1]
+    print("d1 ok")
+"#;
+    let r = run_rs_lz("d1_pos_variant_box", src);
+    assert!(r.emitted, "rs-lz 生成不应失败:\n{}", r.diag);
+    // 盒化字段（递归自引用）仍要解引用
+    assert!(
+        r.rust.contains("let left = *left;") && r.rust.contains("let right = *right;"),
+        "Box 字段 left/right 必须仍发 `let n = *n;`：\n{}",
+        r.rust
+    );
+    // 非盒化的 i64 字段绝不能再解引用（修前 E0614 的直接来源）
+    assert!(
+        !r.rust.contains("let val = *val;"),
+        "定位变体的 int 字段不得被误判为 Box（rustc E0614 type i64 cannot be dereferenced）：\n{}",
+        r.rust
+    );
+    assert!(
+        r.compile_ok && r.run_ok,
+        "生成的 Rust 应可编译运行（修前 E0614 + E0369）：\n{}",
+        r.diag
+    );
+    assert_eq!(
+        r.stdout.trim(),
+        "1\n\nd1 ok",
+        "语句位 match 应打印根值 1，中序遍历断言应全部通过"
+    );
+}
+
+// ── D2（高，E0369）：List + List 拼接发成 Rust `+` ────────────────────────────
+//
+// 根因：`gen_expr` 的 BinOp 分支只对 `in`/字符串 `+`/`||`/`&&` 做特判，列表 `+`
+// 落进通用分支原样透传 `a + b`。Rust 的 `Vec<T>` 没有 `Add` impl ⇒ rustc
+// `error[E0369]: cannot add Vec<i64> to Vec<i64>`（树遍历 `inorder(l) + [v] + inorder(r)`
+// 即中招）。原生基准：expr_gen.rs:5955-5972 的 `add_is_list_concat` 主分派，产物形态
+// 是 `{ let mut __cat = <lhs>.clone(); __cat.extend(<rhs>); __cat }`（拼接返回新 Vec，
+// 两侧操作数不被移动）。rs-lz 对齐同一形态。
+//
+// 连带项（同一产物不修就仍然编不过，故一并在本用例锁定）：
+//   · `let acc = acc + xs` 是 LZ 重绑定，按 BUG-454 发成赋值；若声明没标 mut 即
+//     E0384（原生 auto_mut_locals 是函数级扫描，match 臂/值位置块内同样算）。
+//     修法：gen_value_body 按自身语句表跑 auto_mut_names，且自引用 Let 的目标名并入
+//     mut 集。
+#[test]
+fn d2_list_concat_emits_extend_form() {
+    let src = r#"
+def concat2(a: List<int>, b: List<int>) -> List<int> =
+    a + b
+
+def main() =
+    let xs = concat2([1, 2], [3, 4])
+    print(xs.len())
+    let acc: List<int> = []
+    let acc = acc + xs
+    let acc = acc + [5]
+    print(acc.len())
+"#;
+    let r = run_rs_lz("d2_list_concat", src);
+    assert!(r.emitted, "rs-lz 生成不应失败:\n{}", r.diag);
+    // 与原生同形态：先 clone 左值再 extend 右值
+    assert!(
+        r.rust.contains("let mut __cat = ") && r.rust.contains("__cat.extend("),
+        "列表拼接必须发原生基准形态 `{{ let mut __cat = <lhs>.clone(); __cat.extend(<rhs>); __cat }}`：\n{}",
+        r.rust
+    );
+    // 反证：不得再有 Vec 之间的裸 `+`（修前 E0369 的直接来源）
+    assert!(
+        !r.rust.contains("vec![1i64, 2i64] + vec![3i64, 4i64]"),
+        "列表字面量之间不得直接发 `+`（E0369 cannot add Vec to Vec）：\n{}",
+        r.rust
+    );
+    // 自引用重绑定需要 mut（E0384 连带项）
+    assert!(
+        r.rust.contains("let mut acc"),
+        "自引用重绑定 `let acc = acc + ..` 的前置声明必须标 mut（rustc E0384）：\n{}",
+        r.rust
+    );
+    assert!(
+        r.compile_ok && r.run_ok,
+        "生成的 Rust 应可编译运行（修前 E0369）：\n{}",
+        r.diag
+    );
+    assert_eq!(
+        r.stdout.trim(),
+        "4\n5",
+        "拼接结果长度应为 4，再拼 [5] 后为 5"
+    );
+}
