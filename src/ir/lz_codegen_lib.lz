@@ -2513,25 +2513,12 @@ def esc_quote_only(s: String) -> String =
 
 // ── Rust 字符串转义（escape_default 常用子集）──
 def esc_rust(s: str) -> String =
-    let len = s.len()
-    let mut out = "".to_string()
-    let mut i = 0
-    while i < len:
-        let c = s[i..(i + 1)]
-        if c == "\\":
-            out = out + "\\\\"
-        elif c == "\"":
-            out = out + "\\\""
-        elif c == "\n":
-            out = out + "\\n"
-        elif c == "\t":
-            out = out + "\\t"
-        elif c == "\r":
-            out = out + "\\r"
-        else:
-            out = out + c
-        i = i + 1
-    out
+    // BUG-482：旧实现按字节切片 `s[i..(i+1)]`，多字节 UTF-8 字符（中文/破折号/emoji）
+    // 会让 end byte index 落在字符中间 → 运行期 panic「not a char boundary」。
+    // 改用 `replace` 链：Rust String::replace 按字符边界匹配，天然字节安全，且
+    // 无需 chars() 迭代（rs-lz 对 `for ch in s.chars()` 生成 Rust char 元素，与
+    // 拼接语境不兼容）。顺序固定：先转义 `\` 再转义其它特殊字符，保证结果一致。
+    s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
 
 // ── Item 生成 ──
 

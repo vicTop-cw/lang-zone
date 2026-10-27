@@ -3210,3 +3210,41 @@ rust_type）与 `IrType.Duck`（`.lz:781`，未改），故改 Any 分支安全�
 （断言 rs-lz 发 `pub fn f(x: i64) -> i64`、不含 `Box<dyn Any>`、rustc 编译且
 运行输出 `42`，并对照 native 同样发 i64）。
 状态：FIXED
+## BUG-482 [high] rs-lz 的 esc_rust 按字节切片字符串，多字节 UTF-8 字符触发运行时 panic
+
+现象：`--emit=rs-lz` 对任何含非 ASCII 字符的 LZ 源失败。实测 269 文件全量差分扫描
+（`_probes/fastsweep.sh`，16 并行）得到 16 例 `RSLZ_FAIL_NATIVE_OK`（rs-lz 失败而
+native 通过），其中 14 例为 `DEMO/lz_std/*`（__init__/box/dict/error/iter/list/math/
+option/ordering/prelude/result/set/string/traits），另 2 例为
+`div-tools/probes/p4b_unicode.lz`（刻意 Unicode 探针）。复现错误：
+`thread 'main' panicked at <file>.rs:3556:26: end byte index 9 is not a char boundary;
+it is inside '—' (bytes 8..11 of string)`。最小探针 `_probes/esc_chars.lz` 用
+`esc_rust("中文")` 即可触发（`end byte index 1 is not a char boundary; it is inside
+'中' (bytes 0..3 of string)`）。
+
+根因：rs-lz 的 `lz_codegen_lib.lz:2515` `def esc_rust` 用
+`let c = s[i..(i + 1)]` 逐**字节**切片；LZ 的 `str` 即 Rust `String`，`s[i..i+1]`
+在 Rust 是字节范围切片，遇多字节字符（中文 3 字节 / 破折号 3 字节 / emoji 4 字节）
+即落进字符中间 → `String` 越界切片 panic。ASCII 全部 1 字节故原样工作，掩盖了缺陷。
+rs-lz 库被 `include_str!` 内嵌（`src/ir/lz_codegen.rs:22`），自检运行时该函数处理
+字符串字面量里的多字节字符即炸。原生侧 `esc_rust` 同样按字节切片
+（`src/ir/lz_codegen_lib.rs:2221`），但原生真正用于发射字符串字面量的是
+`src/ir/codegen/expr_gen.rs:2149` 的 `s.escape_default()`（正确），`esc_rust` 仅在
+rs-lz 库路径被调用，故缺陷只在 rs-lz 面显形。
+
+修复：`lz_codegen_lib.lz:2515` 改为 `replace` 链（无迭代、字节安全）：
+`s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+ .replace("\t", "\\t").replace("\r", "\\r")`。Rust `String::replace` 按字符
+边界匹配，多字节安全；顺序固定「先转义 `\` 再其它」保证与逐字符实现结果一致。
+第一版改用 `for ch in s.chars()` 迭代并 `out + ch`，但 rs-lz 对
+`for ch in s.chars()` 生成 Rust `char` 元素（IR ty 却是 `Iterator<str>`），
+`out + &ch` 报 E0308（`String + &char`）——rs-lz 缺 native
+`src/ir/codegen/mod.rs:91` 的 `str_loop_vars` 机制（chars 循环变量在拼接语境需
+`.to_string().as_str()`，见 expr_gen.rs:6068），故退回 replace 链方案。
+
+验证：`_probes/esc_chars.lz` 探针覆盖 8 例（ASCII/引号/中文/破折号/tab/换行/混合/空串），
+native rustc 0 错误且输出全部正确；`--emit=rs-lz` 对 esc_chars/list/string/__init__/
+p4b_unicode 5 个原失败探针全部通过自检（生成+编译+运行）。重跑 fastsweep 全量 269
+文件，`RSLZ_FAIL_NATIVE_OK` 从 16 降至 2（仅剩 div-tools/probes/p25_long_or.lz 的
+栈溢出独立缺陷）。`lz_ir_bootstrap` 25/25 全绿。
+状态：FIXED
