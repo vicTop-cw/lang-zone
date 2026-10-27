@@ -232,6 +232,36 @@ impl Checker {
             self.mod_dir = Path::new(fp).parent().map(|p| p.to_path_buf());
         }
 
+        // embed 派生模块名：`#[embed(...)]` 块由 codegen 在内存里生成模块/产物，
+        // 磁盘上没有对应的 .lz（Source 档 = `<主干>_<lang>`，如 calc_tnr；
+        // Cli 档 = `<lang>_<主干>` 产物名，如 python_calc）。
+        // 它们必须能 `import`，否则语义检查会在 codegen 之前把整个编译挡死。
+        let source_name: String = m
+            .file_path
+            .clone()
+            .or_else(|| m.name.clone())
+            .unwrap_or_else(|| "main.lz".to_string());
+        let embed_names: HashSet<String> = m
+            .top_stmts
+            .iter()
+            .filter_map(|s| match s {
+                Stmt::EmbedBlock { lang, src, .. } => {
+                    if crate::embed::is_source_lang(lang) {
+                        // 与 EmbedCollector 同口径，但 base_stem 同时认 `\` 与 `/`
+                        // （Windows 绝对路径下只按 `/` 切会把整条路径当成主干）。
+                        Some(format!(
+                            "{}_{}",
+                            crate::embed::base_stem(&source_name),
+                            lang
+                        ))
+                    } else {
+                        crate::embed::resolve(lang, &source_name, src).map(|t| t.artifact)
+                    }
+                }
+                _ => None,
+            })
+            .collect();
+
         // 导入符号（from x import a, b → a/b 视为已知；import x as y → y 已知）
         for imp in &m.imports {
             if imp.is_from {
@@ -286,7 +316,8 @@ impl Checker {
                     }
                     _ => false,
                 };
-                if !found {
+                // embed 派生模块（见上方 embed_names）不是磁盘上的 .lz，按名字放行。
+                if !found && !embed_names.contains(&imp.path.join(".")) {
                     self.error(format!(
                         "import 路径不存在: {}（在当前模块目录下找不到 {}.lz）",
                         imp.path.join("."),

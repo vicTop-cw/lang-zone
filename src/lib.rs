@@ -24,6 +24,12 @@ pub mod parser;
 
 // ── L3 语义与类型层 ──
 pub mod bridge;
+
+// ── 嵌入式语法统一抽象层（src/embed/：adapters / artifact / shim）──
+// 58ecd7b 引入 src/embed/ 但漏了 lib.rs 的 mod 声明，全部 crate::embed::* 调用点
+// 因此 E0433；src/bridge/embed.rs 是另一套桥接实现，与本模块并存。
+pub mod embed;
+
 pub mod magic;
 pub mod semantic_check;
 pub mod types;
