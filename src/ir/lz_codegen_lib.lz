@@ -633,7 +633,13 @@ def gen_block(b: BlockIR, fn_raises: MaybeIrType, user_fns: List[str], tbm: List
     match b:
         case BlockIR.Block(stmts: ss, ty: t) =>
             if ss.len() == 0:
-                String::new()
+                // N5：空块必须发**空块本身** `{\n}`，而不是空串。gen_block 的调用点
+                // 全是语法上必须有块的槽位（if/for/while/try/match 臂）；返回空串会
+                // 直接把块整个吞掉 —— 宏展开出的 `guard x > 3 else: panic(..)`
+                // （then 体为空）生成 `if x > 3i64  else {` ⇒ rustc「this `if`
+                // expression is missing a block after the condition」+ E0423。
+                // 原生对同款输入发 `if x > 3i64 {\n} else { … }`，此处对齐。
+                "{\n}".to_string()
             else:
                 // BUG-406：gen_block 用于 for/if/while/try/defer/match 分支等嵌套块，
                 // 其尾表达式不是函数尾，不得发射 `return`。is_main=true 仅抑制 ExprStmt
@@ -1082,6 +1088,127 @@ def flatten_or_and(e: Expr, target_op: str) -> List[Expr] =
                 done = true
     acc
 
+// ── N2：下标/切片键渲染（对齐原生 stmt_gen.rs:3194 gen_index_key）──────────────
+// `s[a..b]` 的 IR 形态是 StructCtor("Range")（builder/convert_expr.rs:1251 把
+// AstExpr::Range 转成该构造器，**只填已给的端点**：`s[a..]` 只有 start，
+// `s[..b]` 只有 end，`s[..]` 两个都没有）。
+def is_range_key_expr(k: Expr) -> bool =
+    match k:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) => n == "Range"
+        case _ => false
+
+// N2：**切片**键渲染 —— 两端各自 `((<expr>) as usize)`，未给端点保持开放形态。
+// 旧实现（IndexGet 尾部无条件拼 ` as usize`）把 cast 只粘在整个 range 串的末尾，
+// `a..b as usize` 按 Rust 优先级只作用于 b ⇒ 起点仍是 i64，
+// `s[idx..(idx + 1i64) as usize]` 报 E0308（expected i64, found usize）+
+// E0277（`str` cannot be indexed by `Range<i64>`）。17 条 tokenizer 探针同因。
+def gen_range_index_key(fs: List[(str, Expr)], fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    let mut start_s: String = "".to_string()
+    let mut end_s: String = "".to_string()
+    let mut has_start = false
+    let mut has_end = false
+    let mut incl = false
+    for idx in 0..fs.len():
+        let f = fs[idx].clone()
+        if f.0 == "start":
+            start_s = "((".to_string() + gen_expr(f.1, fn_raises, user_fns, tbm, vem) + ") as usize)".to_string()
+            has_start = true
+        elif f.0 == "end":
+            end_s = "((".to_string() + gen_expr(f.1, fn_raises, user_fns, tbm, vem) + ") as usize)".to_string()
+            has_end = true
+        elif f.0 == "inclusive":
+            match f.1:
+                case Expr.LitBool(b: bv, ty: tv) => incl = bv
+                case _ => ()
+    let dots = ("..=" if incl else "..").to_string()
+    if has_start or has_end:
+        start_s + dots + end_s
+    else:
+        // 全开放 `[..]`：取整体切片。原生 gen_index_key 对「两端都缺」回落
+        // `0usize..0usize`（空切片），与 LZ 的「整体」语义不符；此处发开放的
+        // `..`（Rust 的全范围切片），语义正确且同样过 rustc。
+        dots
+
+// N2：**非 range** 的标量下标 —— Rust 的 Vec/str 索引要 usize，故补 `as usize`；
+// 复合表达式整体加括号，避免 `a - 1 as usize` 被解析成 `a - (1 as usize)`
+// （原生 gen_index_key 的 simple 判据同款：简单标识符/字面量省括号）。
+def gen_scalar_index_key(k: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    let ks = gen_expr(k, fn_raises, user_fns, tbm, vem)
+    if str_contains(ks, " ".to_string()) or str_contains(ks, "(".to_string()) or str_contains(ks, ")".to_string()):
+        "((".to_string() + ks + ") as usize)".to_string()
+    else:
+        ks + " as usize".to_string()
+
+// IndexGet/IndexSet 的键统一入口：range 键按切片形态发（两端 usize），
+// 标量键按 usize 形态发。Dict 键不走本函数（键是值不是下标，见 BUG-448）。
+def gen_index_key_expr(k: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    match k:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            if n == "Range":
+                gen_range_index_key(fs, fn_raises, user_fns, tbm, vem)
+            else:
+                gen_scalar_index_key(k, fn_raises, user_fns, tbm, vem)
+        case _ => gen_scalar_index_key(k, fn_raises, user_fns, tbm, vem)
+
+// ── N3/N4：cast 与字符串拼接的类型判据（对齐原生 expr_gen.rs 的同名分支）──
+// N4：`+` 的 str 拼接判据 —— 原生 expr_gen.rs:6046-6050 str_concat：
+// 任一侧为 Str / Named(String|str) 即进字符串拼接（**不要求两侧都是**，
+// 旧实现要求两侧都字符串 ⇒ `String + &str` / `str + int` 全落进裸 `+`）。
+def is_str_concat_ty(t: IrType) -> bool =
+    match t:
+        case IrType.Str => true
+        case IrType.Ref(inner: i) => is_str_concat_ty(i)
+        case IrType.MutRef(inner: i) => is_str_concat_ty(i)
+        case IrType.Named(path: p, args: a) => p == "String" or p == "str"
+        case _ => false
+
+// N4：`&str` 引用（Ref(Str)/MutRef(Str)）作拼接左操作数时须先 to_string()
+def is_ref_str_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Ref(inner: i) => is_string_irtype(i)
+        case IrType.MutRef(inner: i) => is_string_irtype(i)
+        case _ => false
+
+// N3：cast 目标类型判据
+def is_bool_target(t: IrType) -> bool =
+    match t:
+        case IrType.Bool => true
+        case _ => false
+
+def is_numeric_target(t: IrType) -> bool =
+    match t:
+        case IrType.Int => true
+        case IrType.F64 => true
+        case _ => false
+
+def is_str_target(t: IrType) -> bool =
+    match t:
+        case IrType.Str => true
+        case _ => false
+
+def is_named_string_target(t: IrType) -> bool =
+    match t:
+        case IrType.Named(path: p, args: a) => p == "String" or p == "str"
+        case _ => false
+
+// N3：来源可能是字符串（原生把 Any 也当字符串：自举语料里元组/字段类型常丢失，
+// `r.0 as int` 的 expr.ty 是 Any，直接 `as` 会 E0605 —— 走 parse 恒安全）。
+def is_str_or_any_src(t: IrType) -> bool =
+    match t:
+        case IrType.Any => true
+        case _ => is_string_irtype(t)
+
+// N3：`s[a..b] as int` —— 切片表达式 ty 常被推断成 Any，但 base 明确是 String。
+def is_str_index_expr(e: Expr) -> bool =
+    match e:
+        case Expr.IndexGet(base: b, key: k, ty: t) => is_string_irtype(expr_ty(b))
+        case _ => false
+
+def is_index_get_expr(e: Expr) -> bool =
+    match e:
+        case Expr.IndexGet(base: b, key: k, ty: t) => true
+        case _ => false
+
 def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
     match e:
         case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64".to_string()
@@ -1109,6 +1236,9 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
             // BUG-447：Rust 的 `Vec<T>`/切片下标须 `usize`，LZ 索引表达式是 `int`(i64)。
             // rs-lz 此前透传 `xs[0i64]` → E0277 cannot be indexed by `i64`；原生渲染
             // `xs[0i64 as usize]`。Dict 的下标是键（见 BUG-448），不套 usize 转换。
+            // N2：cast 落点收敛到 gen_index_key_expr —— 切片 range 键必须**两端**各自
+            // `as usize`（旧的尾部拼接只对 b 生效，起点留 i64）；切片结果再按基底类型
+            // owned 化（str → `.to_string()`，List/Vec → `.to_vec()`）。
             if is_dict_irtype(expr_ty(b)):
                 // BUG-448：原生对 Dict 的下标**不用** Rust 下标运算符（BTreeMap 的 Index
                 // 实现与 LZ 键类型口径不同），而是渲染 `(d).get(&"a".to_string()).cloned().unwrap()`：
@@ -1116,7 +1246,22 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
                 // `d["a".to_string()]` → E0308 mismatched types。
                 "(".to_string() + gen_expr(b, fn_raises, user_fns, tbm, vem) + ").get(&".to_string() + dict_insert_key_arg(k, fn_raises, user_fns, tbm, vem) + ").cloned().unwrap()".to_string()
             else:
-                gen_expr(b, fn_raises, user_fns, tbm, vem) + "[".to_string() + gen_expr(k, fn_raises, user_fns, tbm, vem) + " as usize]".to_string()
+                // N2：键走统一渲染（range 键两端各自 `as usize`；标量键整体 cast）。
+                let idx_base = gen_expr(b, fn_raises, user_fns, tbm, vem)
+                let idx_key = gen_index_key_expr(k, fn_raises, user_fns, tbm, vem)
+                // 切片结果的 owned 化对齐原生 expr_gen.rs:5739-5768：
+                //   str 基底 → `s[a..b].to_string()`（&str → String）
+                //   List/Vec 基底 → `xs[a..b].to_vec()`（unsized [T] → Vec<T>）
+                if is_range_key_expr(k) and is_string_irtype(expr_ty(b)):
+                    idx_base + "[".to_string() + idx_key + "].to_string()".to_string()
+                elif is_range_key_expr(k) and is_list_irtype(expr_ty(b)):
+                    idx_base + "[".to_string() + idx_key + "].to_vec()".to_string()
+                else:
+                    // 元素非 Copy（String/枚举/结构体…）时 `xs[i]` 会从容器 move 出 ⇒
+                    // E0507 cannot move out of index。原生 expr_gen.rs:5750-5776 按
+                    // `elem_is_copy` 补 `.clone()` 取 owned 值（LZ 是值语义），此处同款。
+                    let elem_clone = (".clone()" if not is_copy_irtype(elem_irtype(b)) else "").to_string()
+                    idx_base + "[".to_string() + idx_key + "]".to_string() + elem_clone
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises, user_fns, tbm, vem) + "[".to_string() + gen_expr(k, fn_raises, user_fns, tbm, vem) + "] = ".to_string() + gen_expr(v, fn_raises, user_fns, tbm, vem)
         case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
             // BUG-459：`in`/`not in` 成员测试。Rust 无 `in` 运算符，rs-lz 旧实现透传
@@ -1153,11 +1298,38 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
                 //   { let mut __cat = <lhs>.clone(); __cat.extend(<rhs>); __cat }
                 // lhs 无条件 clone 保持「拼接产生新 Vec、两侧操作数不被移动」的值语义。
                 "{ let mut __cat = ".to_string() + gen_expr(l, fn_raises, user_fns, tbm, vem) + ".clone(); __cat.extend(".to_string() + gen_expr(r, fn_raises, user_fns, tbm, vem) + "); __cat }".to_string()
-            elif o == "+" and is_string_irtype(expr_ty(l)) and is_string_irtype(expr_ty(r)):
-                // BUG-423：字符串拼接 `a + b` 在 Rust 需 `String + &str`（String + String
-                // 无 Add impl → E0308 expected `&str`, found `String`）。两侧均为字符串
-                // 类型时右侧补 `&`，对齐原生 `"hi ".to_string() + &x.clone()` 口径。
-                gen_expr(l, fn_raises, user_fns, tbm, vem) + " + &".to_string() + gen_expr(r, fn_raises, user_fns, tbm, vem)
+            elif o == "+" and (is_str_concat_ty(expr_ty(l)) or is_str_concat_ty(expr_ty(r))):
+                // N4：字符串拼接 —— 旧实现要求**两侧**都是字符串类型才进此分支，
+                // 且只发 `lhs + &rhs`；于是
+                //   ① 一侧类型丢失（Any）时直接落裸 `+` → `String + String` E0308
+                //      （p18/p42 的 `"return ".to_string() + vs`）；
+                //   ② 临时 String 右操作数发成 `&", ".to_string()`（&String 不是 &str）
+                //      → E0308 expected `&str`, found `String`。
+                // BUG-450 只修了 native 侧。此处对齐原生 expr_gen.rs:6046-6100：
+                //   lhs：字面量/&str 引用 → `.to_string()`；容器取元素 → `.clone()`
+                //   rhs：非字符串 → `format!("{}", r).as_str()`
+                //        字符串     → `&rhs[..]`（String / &str 都适用，取 &str）
+                //   lhs 非字符串 → 整体 `format!("{}{}", l, r)`
+                let lh_s = gen_expr(l, fn_raises, user_fns, tbm, vem)
+                let rh_s = gen_expr(r, fn_raises, user_fns, tbm, vem)
+                let mut lhs_base = lh_s.clone()
+                if is_ref_str_irtype(expr_ty(l)):
+                    // `&str` 引用作 lhs：`&str + &str` 无 Add impl，先 to_string() 成
+                    // String（原生 lhs_is_ref_str 的 Ref(Str) 判据）。rs-lz 的 str
+                    // 值是 owned String，字面量已在 gen_expr 自带 `.to_string()`。
+                    lhs_base = lh_s + ".to_string()"
+                elif is_index_get_expr(l):
+                    // 从容器取元素（`chars[0] + "x"`）：IndexGet 会 move 出 String（E0507），
+                    // 拼接语义要求 owned String 值 → clone（原生同款）。
+                    lhs_base = lh_s + ".clone()"
+                if not is_str_concat_ty(expr_ty(l)):
+                    // int/float/bool + str：Rust 数值未实现 Add<&str> → format! 整体拼
+                    "format!(\"{}{}\", ".to_string() + lhs_base + ", ".to_string() + rh_s + ")".to_string()
+                elif not is_str_concat_ty(expr_ty(r)):
+                    // str + int/float/bool：String 未实现 Add<i64> → 右侧先成 &str
+                    lhs_base + " + format!(\"{}\", ".to_string() + rh_s + ").as_str()".to_string()
+                else:
+                    lhs_base + " + &".to_string() + rh_s + "[..]".to_string()
             elif (o == "||" or o == "&&"):
                 // BUG-484：or/and 长链递归 gen_expr(lhs) 溢出栈。flatten_or_and 迭代收集
                 // 左脊柱，逆序（最右在前）返回；从尾部倒序 gen_expr 各操作数，再正序拼接，
@@ -1202,7 +1374,26 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
                 en.to_string() + "::".to_string() + v.to_string() + "(".to_string() + expr_cs_list_boxed(a, en, fn_raises, user_fns, tbm, vem) + ")".to_string()
         case Expr.EnumFieldGet(base: b, enum_name: en, variants: vs, field: f, ty: t) =>
             "match &".to_string() + gen_expr(b, fn_raises, user_fns, tbm, vem) + " { ".to_string() + enum_field_arms(en, vs, f) + "_ => unreachable!() }".to_string()
-        case Expr.Cast(inner: i, target: tg, ty: t) => "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + " as ".to_string() + rust_type(tg).to_string() + ")".to_string()
+        case Expr.Cast(inner: i, target: tg, ty: t) =>
+            // N3：`as` cast 按来源/目标类型分派 —— 旧实现无条件发 `(<e> as T)`，
+            // 而 Rust 不允许 String/str → 数值（E0605 non-primitive cast
+            // `String` as `i64`）。BUG-477 只修了「int(x)/str(x) 被发成函数调用」
+            // 的形态，覆盖不到 as-cast。分派顺序对齐原生 expr_gen.rs:7329-7405：
+            //   → bool        : `<e> != 0`
+            //   → str         : `format!("{}", <e>)`
+            //   str/Any → 数值 : `(<e>).parse::<T>().unwrap()`（断言语义与原生一致）
+            //   → String      : `(<e>).to_string()`
+            //   其余          : `(<e> as T)`
+            if is_bool_target(tg):
+                gen_expr(i, fn_raises, user_fns, tbm, vem) + " != 0".to_string()
+            elif is_str_target(tg):
+                "format!(\"{}\", ".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ")".to_string()
+            elif is_numeric_target(tg) and (is_str_or_any_src(expr_ty(i)) or is_str_index_expr(i)):
+                "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ").parse::<".to_string() + rust_type(tg) + ">().unwrap()".to_string()
+            elif is_named_string_target(tg):
+                "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ").to_string()".to_string()
+            else:
+                "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + " as ".to_string() + rust_type(tg) + ")".to_string()
         case Expr.MagicCall(magic: m, args: a, ty: t) => m.to_string() + "(".to_string() + expr_cs_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
         case Expr.IfExpr(cond: c, then: th, els: el, ty: t) => "if ".to_string() + gen_expr(c, fn_raises, user_fns, tbm, vem) + " { ".to_string() + gen_expr(th, fn_raises, user_fns, tbm, vem) + " } else { ".to_string() + gen_expr(el, fn_raises, user_fns, tbm, vem) + " }".to_string()
         case Expr.Lambda(params: ps, body: b, ty: t) => "move |".to_string() + str_join(ps).to_string() + "| ".to_string() + gen_expr(b, fn_raises, user_fns, tbm, vem)
@@ -1391,7 +1582,9 @@ def gen_recv_place(r: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: Li
             if is_dict_irtype(expr_ty(b)):
                 gen_expr(r, fn_raises, user_fns, tbm, vem)
             else:
-                gen_recv_place(b, fn_raises, user_fns, tbm, vem) + "[".to_string() + gen_expr(k, fn_raises, user_fns, tbm, vem) + " as usize]".to_string()
+                // N2：下标键同样走统一渲染（`a[i + 1] = x` 的复合键需整体 cast，
+                // 否则 `a[i + 1i64 as usize]` 只作用于字面量 → E0308）。
+                gen_recv_place(b, fn_raises, user_fns, tbm, vem) + "[".to_string() + gen_index_key_expr(k, fn_raises, user_fns, tbm, vem) + "]".to_string()
         case _ => gen_expr(r, fn_raises, user_fns, tbm, vem)
 
 // NATIVE-BUG 对齐（dict 自字段插入被克隆）：嵌套 dict 链的写目标须用 `.get_mut().unwrap()`
@@ -1870,6 +2063,12 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType, user_fns
             if not is_user_fn(user_fns, n):
                 if n == "print":
                     "println!(".to_string() + print_fmt(a) + print_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
+                elif n == "panic" or n == "panic!":
+                    // N5 连带（p11/probe 宏展开体）：`panic(msg)` 在 Rust 是**宏**不是函数，
+                    // 旧实现原样发 `panic(msg)` ⇒ E0423「expected function, found macro
+                    // `panic`」。对齐原生 expr_gen.rs:2022 `panic!("{:?}", <msg>)`。
+                    // 宏展开出的 `let _ = panic!(..)` 形态见 gen_stmt 之外的调用点，同样适用。
+                    "panic!(\"{:?}\", ".to_string() + expr_cs_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
                 elif n == "len":
                     "(".to_string() + expr_cs_list(a, fn_raises, user_fns, tbm, vem) + ".len() as i64)".to_string()
                 elif n == "set!":
@@ -3001,9 +3200,22 @@ def gen_item(i: Item, user_fns: List[str], tbm: List[(str, List[(str, bool)])], 
                 "impl ".to_string() + ty + " {\n".to_string() + gen_impl_method(im, false, empty_atb, user_fns, tbm, vem) + "}\n".to_string()
             else:
                 let is_main = (n == "main")
-                let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
+                // 核实项（红名单 §4 末尾，未计入 40）：`def main() -> int` 的尾表达式是
+                // **函数值**，但旧实现按 is_main 抑制尾 `return`，于是 `...; 0i64;` 落成
+                // 语句 ⇒ E0308（expected i64, found ()）。原生 decl_gen.rs:1060-1075 的
+                // 处理是「typed main 改名 __lz_main 并按普通函数发尾 return」，再补一个
+                // `pub fn main() { std::process::exit(__lz_main() as i32); }`（decl_gen.rs:1516-1523）
+                // ——因为 Rust 的 main 只能返回 ()。此处对齐该形态。
+                let typed_main = is_main && !r_eq_unit(r)
+                let fn_name_s = ("__lz_main" if typed_main else n).to_string()
+                let ret_s = "".to_string() if (is_main && !typed_main) else (" -> ".to_string() + rust_type(r))
                 let auto_mut = auto_mut_names(b)
-                "pub fn ".to_string() + n.to_string() + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(b, is_main, auto_mut, rs, user_fns, tbm, vem) + "}".to_string()
+                let body_s = gen_body(b, is_main && !typed_main, auto_mut, rs, user_fns, tbm, vem)
+                let fndef = "pub fn ".to_string() + fn_name_s + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + body_s + "}".to_string()
+                if typed_main:
+                    fndef + "\npub fn main() {\n    std::process::exit(__lz_main() as i32);\n}".to_string()
+                else:
+                    fndef
         case Item.StructDef(name: n, generics: gs, fields: fs) =>
             let struct_def = "#[derive(Debug, Clone, PartialEq)]\npub struct ".to_string() + n.to_string() + generic_sig(gs) + " {\n".to_string() + gen_struct_fields(fs, n) + "}".to_string()
             if fs.len() > 0:
