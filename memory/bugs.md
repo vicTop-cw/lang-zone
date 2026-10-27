@@ -3517,3 +3517,40 @@ commit：3f8512e（重映射自 未记）
 ## BUG-488 [2026-10-27T13:17:07Z] [medium] OPEN
 - summary: [scope-gate] reserve_scope 对非 Fist-Mbt 项目路径一律 fail-closed：权限表 scope_permissions 写死 Fist-Mbt 源码目录，lang-zone 的 src/embed、Reports 等合法作用域无法预订，导致 explore 并行四道门第 4 门永远不过
 
+## BUG-489 [2026-10-28T06:45:00+08:00] [high] 闭包体重生成漏继承枚举变体表 → `Ok(len(e))` 丢枚举限定（E0308）
+- summary: 闭包体经 child `CodeGen::new()` 重生成时未继承枚举变体表，`Ok(len(e))` 发成裸 `Ok(`，被解析为 `std::result::Result::Ok` 而非程序的枚举变体，rustc E0308（mismatched types）。根因：两处 child 初始化只复制 `known_types`/`type_aliases` 等，漏 `enum_variants` / `enum_variant_named_fields` / `enum_variant_fields` / `enum_variant_order` 四张表——`src/ir/codegen/expr_gen.rs:6869`（`!uses_move` 分支）与 `src/ir/codegen/expr_gen.rs:6908`（move 捕获 + 引用外部非 Copy 变量分支）。实参是 Call 时 `body_refs_noncopy_external` 递归进 callee `Var`（`len`/`inc` 非 Copy、非形参）→ 命中 child 重生成，裸 `Ok(` 覆盖 L6562 的「闭包返回 Result 时替换 `Ok(`/`Err(`」后处理；实参为字面量/变量/二元式时该判定为 false，故只有 Call 实参形态复现。
+- 判据: `cargo test --test native_variant_qual`（4 项全绿：`variant_qualification_statement_position` / `variant_qualification_in_typed_lambda_body` / `variant_qualification_in_lambda_argument` / `custom_enum_variant_qualified`）；修前 `DEMO/lz_std/result.lz` 是 DEMO 门禁唯一红（E0308），修后 327/327。变异测试：禁用任一 child 的继承即回退裸 `Ok(` 或转红，证明两处 site 均为必要。
+- commit: 128c359
+- 回归: tests/native_variant_qual.rs 4/4 + DEMO 门禁 327/327
+状态：FIXED
+## BUG-490 [2026-10-28T06:46:00+08:00] [high] rs-lz 切片 range 只给上界 `as usize`，起点仍 i64（E0308/E0277）
+- summary: rs-lz 生成 `s[a..b]` 这类切片/索引键时只对 range 的上界加 `as usize`，起点仍是 `i64`，两端类型不一致 → rustc E0308（mismatched types）或 E0277（`i64: SliceIndex<[T]>` 不满足）。根因：`src/ir/lz_codegen_lib.lz` 的索引发射对 `Expr.Range`/`RangeFrom`/`RangeTo` 各端点 cast 不统一，且缺一个共用的「索引键」入口。修法：同文件新增 `gen_range_index_key`（:1105）、`gen_scalar_index_key`（:1135）、`gen_index_key_expr`（:1144），每个已给端点各自 `((..) as usize)`、缺端点保持开放（`..` / `..b` / `a..` 三形）；切片结果按基底 owned 化（str → `.to_string()`、List → `.to_vec()`），并给非 Copy 元素索引补 `.clone()`。对齐原生 `src/ir/codegen/stmt_gen.rs:3194` 的口径。
+- 判据: 切片/索引 17 条样本重跑，11 条由 E0308/E0277 转绿；`cargo test --test rs_lz_families` 7/7、`cargo test --test codegen_corner_fixes` 44/44、`--lib` 461/461 无回归。残留：E0382 非 Copy 实参复用一族（7 条，根因在实参克隆表）本轮未修，另开单。
+- commit: e22c897
+- 回归: tests/rs_lz_families.rs 7/7（切片族）+ 17 样本中 11 条转绿
+状态：FIXED
+## BUG-491 [2026-10-28T06:47:00+08:00] [high] rs-lz 把 `int(str)` 发成 `as` cast（E0605）
+- summary: rs-lz 对 `int(str)` / `f64(str)` 一类内建类型转换一律按 `as` cast 发射（`x as i64`），而 `str as i64` 在 Rust 里不是合法 cast → E0605（non-primitive cast）。根因：`src/ir/lz_codegen_lib.lz` 的 `Expr.Cast` 分支不看目标类型，只按「源→`as`→目标」硬发。修法：`Expr.Cast` 按目标类型分派——目标为数值且源为 `str`/`Any` → `.parse::<T>().unwrap()`；目标 `bool` → `.. != 0`；目标 `str` → `format!`；目标 `String` → `.to_string()`。
+- 判据: `int(str)` / `f64(str)` 等 6 条样本 6/6 由 E0605 转绿（编译通过且运行值与 LZ 语义一致）；`cargo test --test rs_lz_families` 7/7、`--lib` 461/461 无回归。
+- commit: e22c897
+- 回归: tests/rs_lz_families.rs 7/7（cast 族）+ 6/6 样本转绿
+状态：FIXED
+## BUG-492 [2026-10-28T06:48:00+08:00] [high] rs-lz 二元 `+` 字符串拼接只转换单侧（E0308）
+- summary: rs-lz 发 `s + x` / `x + s` 时只转换一侧操作数，另一侧仍是 `i64`/其他类型，`String + i64` 之类组合 → E0308（mismatched types）。根因：`src/ir/lz_codegen_lib.lz` 的二元 `+` 分支只用左操作数是否 str 判定是否走拼接，右操作数未统一借位。修法：任一侧为 `str` 即进拼接分支，rhs 统一发 `&rhs[..]` 取 `&str`（`String + &str` 成立），跨类型则退 `format!`。
+- 判据: 字符串拼接 5 条样本中 4 条由 E0308 转绿；余 1 条未绿，与 E0382 非 Copy 实参复用一族相关（本轮未修，另开单）。`cargo test --test codegen_corner_fixes` 44/44 无回归。
+- commit: e22c897
+- 回归: tests/rs_lz_families.rs 7/7 + 5 条样本中 4 条转绿
+状态：FIXED
+## BUG-493 [2026-10-28T06:49:00+08:00] [medium] rs-lz 空 then 块被吞（E0423）+ panic 发成普通函数调用
+- summary: 两处发射缺陷：① 空 `then` 块（`if c then else ..` 形态）被吞成裸条件，生成的 `if c {}` 缺块体/块体为空 → E0423（expected expression, found `.`）一类解析错；② `panic(..)` 被当普通用户函数调用发射，生成的调用签名/路径与运行时不符。根因：`src/ir/lz_codegen_lib.lz` 的 `gen_block` 对空块不落 `{}` 骨架，`panic` 未走内建专用臂。修法：`gen_block` 空块显式发 `{
+}`；`panic(..)` 专发 `panic!("{:?}", ..)`（与 LZ 的 Debug 渲染口径一致）。
+- 判据: 空 then 块与 panic 两条样本 2/2 由红转绿（编译通过、panic 在运行期按预期 abort 并打印 Debug 值）；`cargo test --test rs_lz_families` 7/7、`--test codegen_corner_fixes` 44/44 无回归。
+- commit: e22c897
+- 回归: tests/rs_lz_families.rs 7/7（空块 / panic 族）+ 2/2 样本转绿
+状态：FIXED
+## BUG-494 [2026-10-28T06:50:00+08:00] [high] rs-lz 的 typed main 尾表达式被当语句（E0308）
+- summary: rs-lz 对 `def main() -> int` 这类 typed main 把尾表达式当语句发（`{ ..; 0i64; }`），函数体返回 `()` 与声明返回 `i64` 不符 → E0308；退出码也未真正交给进程。根因：rs-lz 的 decl 发射缺「typed main 的尾值即进程退出码」这一层包装。修法：对齐原生 `src/ir/codegen/decl_gen.rs:1060`（typed main 判定 / `is_typed_main`）与 `src/ir/codegen/decl_gen.rs:1516`（`pub fn main()` 包装）：typed main 改名 `__lz_main`，尾表达式正常作为返回值，另补 `pub fn main() { std::process::exit(__lz_main() as i32); }`。
+- 判据: typed main 样本（`def main() -> int = ..`，尾值非 0）由 E0308 转绿，编译后进程退出码等于尾值（`$?` 实测）；`cargo test --test rs_lz_families` 7/7、`--test codegen_corner_fixes` 44/44、`--lib` 461/461 无回归。
+- commit: e22c897
+- 回归: tests/rs_lz_families.rs 7/7（typed main 族）
+状态：FIXED
