@@ -174,3 +174,37 @@ watchdog_tick_client.py
 watchdog_tick_client_v2.py
 watchdog_tick_run.py
 Modified
+
+# === 2026-10-26: 封堵体积复发的遗漏项 ===
+# 任意层级的 cargo 构建目录（含 CY/target 等，避免构建产物再次入库）
+**/target/
+# 测试探针生成的 IR 中间产物（_probes/*.lzrs 等）
+*.lzrs
+# 大写临时目录（TEMP/ 为历史散落 scratch，不应入库）
+TEMP/
+# 根级散落构建产物
+*.dll
+*.obj
+
+# === 2026-10-27: 封堵 _probes 生成物泄漏，仅放行 17 个已跟踪合法文件 ===
+# _probes 是测试探针输出目录，除下列已跟踪源码外，全部为生成物。
+# 先忽略整个目录，再逐项放行合法文件（gitignore 不影响已跟踪文件，放行仅为语义清晰）。
+/_probes/**
+!/_probes/rslz4/
+!/_probes/rslz4/.gitignore
+!/_probes/rslz4/broad.lz
+!/_probes/rslz4/cast.lz
+!/_probes/rslz4/dict_lit.lz
+!/_probes/rslz4/g434_trait_assoc.lz
+!/_probes/rslz4/g436_range_filter.lz
+!/_probes/rslz4/g438_sorted.lz
+!/_probes/rslz4/g446_tuple.lz
+!/_probes/rslz4/g450_contains.lz
+!/_probes/rslz4/g462_self_dict_index.lz
+!/_probes/rslz4/g463_nested_dict.lz
+!/_probes/rslz4/g464_plain_dict.lz
+!/_probes/rslz4/match_probe.lz
+!/_probes/rslz4/trait_only.lz
+!/_probes/rslz4/trait_show.lz
+!/_probes/rslz4/user_sum.lz
+!/_probes/rssweep.sh
