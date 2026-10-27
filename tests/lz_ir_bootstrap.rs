@@ -2294,3 +2294,90 @@ fn rs_lz_list_pattern_element_binding_deref() {
 
     let _ = fs::remove_dir_all(&work);
 }
+
+#[test]
+fn rs_lz_unannotated_param_defaults_i64() {
+    // BUG-480：`def f(x): return x + 1` 的无类型注解参数在 rs-lz 下被发射成
+    // `x: Box<dyn Any>`（src/ir/lz_codegen_lib.lz 的 rust_type 对 IrType.Any 发射
+    // `Box<dyn Any>`），导致 `x + 1i64` → E0369（cannot add i64 to Box<dyn Any>），
+    // rs-lz 产物无法编译；原生 emit.rs:247 对 IrType.Any 发射 `i64`，双路不一致。
+    // 修复：rs-lz 的 rust_type 对 IrType.Any 对齐发射 `i64`。参数类型与原生一致后
+    // `x + 1i64`（i64 原生加法）通过 rustc 并输出 42。
+    let source = r#"
+def f(x):
+    return x + 1
+
+def main():
+    print(f(41))
+"#;
+
+    let work = std::env::temp_dir().join("lz_any_param");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("ap_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    // 原生：参数发射 i64（对齐基准）
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("pub fn f(x: i64) -> i64"),
+        "BUG-480：native 未发射 `pub fn f(x: i64) -> i64`:\n{}",
+        native_src
+    );
+
+    // rs-lz：必须同样发射 i64，且 rustc 编译运行输出 42
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("pub fn f(x: i64) -> i64"),
+        "BUG-480：rs-lz 未对齐发射 `pub fn f(x: i64) -> i64`（仍退化 Box<dyn Any> → E0369）:\n{}",
+        text
+    );
+    assert!(
+        !text.contains("pub fn f(x: Box<dyn Any>)"),
+        "BUG-480：rs-lz 仍对无注解参数发射 Box<dyn Any>:\n{}",
+        text
+    );
+
+    let lz_rs = work.join("ap_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("ap_lz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(rc.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+    let run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "42");
+
+    let _ = fs::remove_dir_all(&work);
+}

@@ -3180,3 +3180,33 @@ BUG-290 分支要求 `!is_kwarg_call(args)`，关键字形不进；下一分支 
 验证：broad.lz 双路 rustc 编译运行，输出 `P(3,4)/15/11/HELLO WORLD/big/2` 完全一致；
 新增回归测试 `rs_lz_self_dict_kwarg_literal`（tests/lz_ir_bootstrap.rs）双路断言
 `BTreeMap::from([("a".to_string(), 1i64), ("b".to_string(), 2i64)])` 且运行输出 `2`。
+
+## BUG-480 [medium] rs-lz 对无类型注解参数退化为 Box<dyn Any>（E0369 编译失败）
+
+现象：`_probes/golden_input.lz`（`def f(x): return x + 1`）下 `--emit=rs-lz` 生成
+`pub fn f(x: Box<dyn Any>) -> i64`，函数体 `return x + 1i64;` → rustc E0369
+`cannot add i64 to Box<dyn Any>`，rs-lz 产物无法编译；原生同源生成
+`pub fn f(x: i64) -> i64 { return LzAdd::__add__(x, 1i64); }` 编译通过。
+全量 64 探针差分扫描（`_probes/bigsweep.sh`）唯一真缺陷即此；同批其余
+7 例为假阳性（edge_class/edge_nums/nest/nest2/latent_variants 为无 main
+库探针报 E0601；g65_arith_div_zero/g66_arith_overflow 为刻意测除零/溢出的
+编译错误探针；`x + "a"` 与 `x[0]` 在原生侧同样 E0308/E0608，属双路一致的
+ill-typed 程序）。
+
+根因：rs-lz 的 `lz_codegen_lib.lz:767` `rust_type` 对 `IrType.Any` 发射
+`"Box<dyn Any>"`；原生 `src/ir/codegen/emit.rs:247` 对 `IrType.Any` 发射
+`"i64"`（未知/推断失败的参数默认 int）。两路对同型渲染不一致，导致
+rs-lz 把未注解参数当 `Box<dyn Any>` 并对其做 `+`。rs-lz 的 `Box<dyn Any>`
+其余两处引用均为 kwargs 桩（`.lz:2906` `&mut __Params` hardcode，不走
+rust_type）与 `IrType.Duck`（`.lz:781`，未改），故改 Any 分支安全。
+
+修复：`lz_codegen_lib.lz:767` `case IrType.Any => "Box<dyn Any>".to_string()` →
+`"i64".to_string()`，与原生 emit.rs:247 对齐。`x + 1i64`（i64 原生加法）过 rustc。
+
+验证：`golden_input.lz` 与新增 `def f(x): return x + 1` + `def main(): print(f(41))`
+双路 rustc 编译运行，输出 `42` 完全一致；重跑 64 探针 bigsweep 仅剩 7 例
+全为假阳性，`golden_input.lz` 从失败列表消失；`lz_ir_bootstrap` 24 项全绿。
+回归测试：tests/lz_ir_bootstrap.rs::rs_lz_unannotated_param_defaults_i64
+（断言 rs-lz 发 `pub fn f(x: i64) -> i64`、不含 `Box<dyn Any>`、rustc 编译且
+运行输出 `42`，并对照 native 同样发 i64）。
+状态：FIXED
