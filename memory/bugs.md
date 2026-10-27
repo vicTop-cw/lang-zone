@@ -3359,3 +3359,28 @@ E0463。`cargo test --lib` 463/463 全绿。
 注意：配方用 Windows 原生反斜杠（`PathBuf::display()`），在 bash 里需转义，
 在 cmd/PowerShell 直接可复制——本 bug 只关路径目录，与斜杠方向无关。
 状态：FIXED
+## BUG-487 [high] 用户 `struct HashMap` 与内建 `HashMap` 撞名，命名构造器被误生成 `BTreeMap::from([...])`
+
+现象：`FIND_BUG/lib_hashmap/hashmap.lz` 定义 `struct HashMap = buckets: ...; values: ...; _size: int; _num_buckets: int`，
+`new()` 末尾 `HashMap(buckets: buckets, values: values, _size: 0, _num_buckets: 16)` 生成的 `.rs` 变成
+`return std::collections::BTreeMap::from([("buckets".to_string(), buckets), ("values".to_string(), values),
+("_size".to_string(), 0i64), ("_num_buckets".to_string(), 16i64)]);` → rustc E0308（返回类型是用户 struct
+`HashMap`，实为 BTreeMap<String, Vec<Vec<String>>>；桶/值/尺寸三个元素类型还不一致）。`cargo test --test
+find_bug_libs lib_hashmap` FAILED，11/12 通过 1 失败。
+
+根因：`src/ir/codegen/expr_gen.rs` 的 kwargs 调用分支（原 2481-2485 行）对 `Dict | HashMap | dict` 一律
+按「关键字字面量」生成 `BTreeMap::from([...])`，不校验该名字是否已被用户定义为 struct。内建 `HashMap`
+在 `type_map` 与 `known_types` 里恒命中，所以用户 `struct HashMap` 一旦同名，其命名构造器就被抢成 dict。
+
+修复：该 kwargs 分支追加 `&& !self.emitted_types.contains(callee_s.as_str()) &&
+&& !self.impl_types.contains(callee_s.as_str())`——用户已定义同名 struct/enum 时放行到下方
+`is_known_type` 的 struct 构造分支，生成 `HashMap { buckets: ..., values: ..., _size: 0i64, ... }`。
+
+验证：修复后生成的 `new()` 为 `return HashMap { buckets: (buckets).clone(), values: (values).clone(),
+_size: 0i64, _num_buckets: 16i64 };`，`cargo test --test find_bug_libs lib_hashmap` → ok。全量 `cargo test`
+41 个测试套件全绿（含 463 lib + 12 find_bug_libs）。同族风险：`Dict`/`dict` 用户自定义同名 struct 也会
+命中同一守卫修复。
+
+注意：用户一旦定义 `struct HashMap`，本程序里 `HashMap(k: v)` 关键字字面量将不再生成 dict——这是
+用户遮蔽内建名的预期语义（与 BUG-485 的 `is_user_ty` 守卫同思路）。
+状态：FIXED

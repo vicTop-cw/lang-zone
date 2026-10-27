@@ -2482,6 +2482,8 @@ impl CodeGen {
                     && is_kwarg_call(args)
                     && !self.fn_param_types.contains_key(&callee_s)
                     && matches!(callee_s.as_str(), "Dict" | "HashMap" | "dict")
+                    && !self.emitted_types.contains(callee_s.as_str())
+                    && !self.impl_types.contains(callee_s.as_str())
                 {
                     // `Dict(a: 1, b: 2)` 关键字字面量（`{ "a": 1 }` 之外的字形）：
                     // BTreeMap 是类型别名不是 struct，走通用函数调用会生成
