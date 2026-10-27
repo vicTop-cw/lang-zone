@@ -208,3 +208,14 @@ TEMP/
 !/_probes/rslz4/trait_show.lz
 !/_probes/rslz4/user_sum.lz
 !/_probes/rssweep.sh
+
+# --- 运行时产物 / 垃圾（2026-10-27 收尾） ---
+.fist-night/
+.fist-mbt/
+.fist-explore-cron/
+backup/
+build_out*.txt
+build_err*.txt
+CY/TESTS/**/*.txt
+CY/TESTS/**/*.staler*
+CY/TESTS/**/*.exp.staler*
