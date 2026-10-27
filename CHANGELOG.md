@@ -41,7 +41,7 @@ AIGC:
 - `None == None` / `None != None` 短路（BUG-274）：两侧皆裸 None 时 codegen 输出 `None == None` 无类型标注 → rustc E0282。`expr_gen` Binary 臂的 `x == None → x.is_none()` 守卫只覆盖「恰一侧 None」（`rhs_none != lhs_none`），两侧皆 None 时短路为布尔字面量——`Option<T>::None == Option<T>::None` 恒为 true/false 与内层类型无关，避免 E0282。`x == None` 形态仍走 `is_none()` 不受影响；遮蔽 `let None = 300` 下短路同样成立（`x == x` 恒 true）。回归用例 `scalar_op_type_family_cross_is_clean_lz_type_error` 增补 `None == None` / `None != None` 合法形态，期望输出 `true true true 3.5 false true false`
 
 ### 代码生成稳定性与标准库转译修复批次（2026-10-20 ~ 2026-10-22，BUG-341~408）
--CHANGELOG 此前记录止于 BUG-316；BUG-317~340 已在 `memory/bugs.md` 逐项记录，本段集中补齐其后（341~408）的条目。本批次跨一等函数/闭包语义、枚举/结构体/模式匹配、解析语法、rs-lz 后端四类，集中修复 LZ→Rust 转译产物编译失败与类型推断错误（共 58 个修复提交）：
+-CHANGELOG 此前记录止于 BUG-316；BUG-317~340 在 `memory/bugs.md` 与 git 历史中**均不存在**（编号自 316 直接跳至 341，详见本段末「补录」小节说明），本段集中补齐 341~408 的条目。本批次跨一等函数/闭包语义、枚举/结构体/模式匹配、解析语法、rs-lz 后端四类，集中修复 LZ→Rust 转译产物编译失败与类型推断错误（共 58 个修复提交）：
 
 **一等函数 / 闭包与 fn 值语义**
 - BUG-389：一等 fn 值形参统一渲染为 `Arc<dyn Fn>`，打通 `apply(double,3)`（76689d4）
@@ -91,6 +91,34 @@ AIGC:
 - BUG-406：嵌套块尾部误发射 return → match/if/for 等提前返回（37d9191）
 
 > **已知回归（待并发 codegen agent 收口，不在本批次范围）**：全量 DEMO 编译门禁 `all_demos_generated_rust_compiles` 当前暴露 7 个新增回归——`DEMO/07_data_structures/self_recursive.lz`(E0308)、`DEMO/10_error_handling/panic_raise_try.lz`(E0308)、`DEMO/boundary-coverage/nesting-closure-lambda.lz`(lifetime)、`DEMO/lz_std/dict.lz`(E0308)、`DEMO/lz_std/list.lz`(E0382 moved)、`DEMO/lz_std/result.lz`(E0308)、`DEMO/lz_std/traits.lz`(E0599 Option<J> clone)。这些属 codegen 在途改动引入，需并发 agent 修复，`[tco]` 调试打印已移除以恢复门禁 stderr 纯净。
+
+#### 补录：341~408 段此前漏记的条目（2026-10-20 ~ 2026-10-21，依据 git 历史）
+
+> 上列 341~408 段据 `memory/bugs.md` 汇总，其中 18 个编号此前未进 CHANGELOG，本轮按 git 历史逐条补回（18 个编号 / 16 条：BUG-372 与 373 同一提交合并、BUG-401 与 402 重复登记合并）。
+> 说明一：本仓库为迁移后的单根历史（根提交 `b3648ff`，共 636 commit），旧段所记 sha 与本地历史不一致；本补录一律采用**本仓库可查证**的 sha，每条均以 `git show --stat` 核过命中文件与改动量。
+> 说明二：交接文档所称「BUG-317~340」区间在本仓库不存在 —— `memory/bugs.md` 的 3xx 编号自 316 直接跳到 341，`git log` 亦无任何 317~340 的提交；BUG-351 无账本条目、BUG-394 为重复登记（→BUG-396，已在正段记录），三者均不在补录范围。
+
+**解析器 / 词法**
+- BUG-361：多 for 推导式推导 output 类型时循环变量尚未绑定（`lookup_var` 回退 Any → 生成 `Vec<(i64,i64)>` 而实参是 `Vec<(String,i64)>`，E0308）；新增 `bind_comp_vars()` 克隆 ctx、把每个循环变量绑定到其 iter 的元素类型（List/Vec/Array/Itor/Iterator/Set 取 `args[0]`、Range 恒 int、Str 为 Str）后再推导 output/key/value，List/Dict/Set 三臂共用（`ef1abb7`）
+- BUG-366：闭包体以 `{` 开头被当成 dict/set 字面量 —— `|x| {...}` 与 `|x| => {...}` 报「字典/集合字面量元素之间缺少逗号」，`|x| -> {...}` 报 Expected type got LBrace；`->` 后遇 `{` 跳过 `parse_type`（ret_ty 留 None）、`=>` 与无 `=` 分隔时 body 走 `parse_brace_block_expr`（`85ffa35`）
+- BUG-367：`Fn[int] -> int` 方括号函数类型未被 `parse_type` 识别（`Fn` 落 `Type::Named("Fn")` 返回，残留 `[int]` 被参数解析器报 Expected param name got LBrack）；`Ident(n)` 分支补 `"Fn"` 特例：遇 `[` 解析方括号内逗号分隔参数类型表 + 可选 `-> R`，产出 `Type::Fn`，无 `[` 回退 `Named("Fn")` 保持兼容（`5980264`）
+- BUG-368：`let [a, b] = expr` 列表解构不支持（报 Expected variable name got LBrack，原 `parse_binding_stmt_let` 只对 `(` 起始走解构）；补 LBrack 分支解析方括号内嵌套模式（tuple/list/brace、Ident、Underscore），产出 `Stmt::LetTuple` 供 IR 端解构（`4fcf632`）
+- BUG-369：三处方括号泛型语法缺失 —— `trait Container[T]:` 的方括号泛型参数（原只认 `<T>`）、冒号直接开体（原 `expect(Eq)` 失败）、`Iterator[int]` 返回类型的方括号泛型实参（原落 `Named("Iterator")` 残留 `[int]`）；`parse_trait` 补 LBrack 泛型分支 + supertrait 后 `=` 可选，`parse_type` 补 LBrack 泛型实参分支（`8fa8fdd`）
+- BUG-371：`struct Counter(value: int):` 圆括号字段 + 冒号开体 —— LParen 分支解析完字段即 return，把 `:` 留给顶层 → Unexpected token at top level: Colon；改为 LParen 分支遇 `:` 时把 name/generics/bounds/defaults/fields 暂存 `paren_*`，落入共享 Indent 体路径（跳过 Eq/Colon 校验、不重复消费分隔符），Indent 路径见有 `paren_name` 即接管并续解析方法（`14ff05e`）
+- BUG-372/373：闭包内 `match` 末臂 body 与调用 `)` 同行时，词法层 `case` 行产生的 Indent 与 `)` 后的 Dedent 失配，残留 Dedent 提前终结外层 `def main` 主体（`print(ys)` 沦为顶层语句、`ys` 未绑定）；方法链续行 `.map(...)` 缩进更深时亦被误判为新缩进块。修法：match 臂循环遇 RParen/RBrack/RBrace 即断并容忍缺 Indent，lexer 在行首首个非空白字符为 `.`（且非 `..`）时跳过 `handle_indent`，续行不产生 Indent/Dedent，调用参数循环在 `skip_newlines` 后重查 RParen 以保证括号内多行参数仍能终止（`792009f`）
+
+**代码生成**
+- BUG-350：与 BUG-348 同源重复登记 —— `spawn work(21)` 在 async 上下文走 `__spawn_task(...)`，但 work 非 async，参数是 i64 而非 Future → E0277；初版修法为 lz_builtins 新增 `__spawn_sync(f)` 把 `thread::spawn` 包成 Future、`__go` 按参数 IR 类型是否为 `Future` 分流，次轮因 async 函数调用的 IR 类型实为返回类型（String/i64）非 Future，改用 `generate()` 预扫描的 `async_fn_names` 集合判断 callee 是否 async 再决定是否包 `async {}`（`6fb3c72`、`dd99337`）
+- BUG-363：闭包生成两处缺陷 —— 闭包返回闭包走 else 路径时 `move_kw` 在 `box_lambda` 强制之前算出导致强制被覆盖（生成无 move 的 `Arc::new(...)` → E0373），嵌套闭包的内层经 child CodeGen 重建时未继承 `box_lambda`（内层同样丢 move → E0373）；修法为把 `box_lambda` 强制 move 的赋值移到 `move_kw` 计算之前、两个 child 分支继承 `c.box_lambda`、child 与顶层 body 的 `if nested` 包加 `!self.box_lambda` 守卫避免双重 `Arc::new` → E0277（`52d4554`）
+- BUG-364：`list *: yield (1,)` 的目标类型是 `Vec<(i64,)>`，但 `list_ctor` 把元组 yield 解构为 `__a0` 再 `vec![__a0]` 包一层，得 `Vec<i64>` → E0308 expected `Vec<(i64,)>` found `Vec<Vec<i64>>`；GenBuild tail 的 `list_ctor` 分支改为直接收集 `__bb`（yield 本身即目标元素，不解构不包装），非 list_ctor 的 Tuple 分支保留原逐参解构路径（`9c13928`）
+- BUG-365：裸 Vec 的 `.filter()`/`.map()` 走 `(xs).into_iter()` 消费接收者，与 LZ 值语义（允许重复读同一变量：`xs.sort()` 后依次 `filter`/`map`/`fold`）冲突 → E0382 use of moved value；改用 `.iter().cloned()`（与 sum/product 的 `.iter().copied()` 同款），filter 闭包仍收 `&Item`、map 闭包收 owned Item，语义等价且不 move 接收者（`978c8fb`）
+- BUG-370：`def gen() -> Iterator<int>` 配 yield body 被「函数声明了返回类型但在函数体内使用 yield」误拒 —— 守卫只豁免 `f.is_iterator`（由 `iterator` 关键字设置）；新增 `ret_is_iterator` 判定，返回类型为 `Named("Iterator"/"iterator")` 或 `Generic` 之 base 为二者时与关键字路径同效豁免，再并入 yield 守卫条件（`e84bf55`）
+- BUG-391：裸 raises 后跟 `->` 报 Expected type got Arrow（`def f() raises -> int =` 一类形式从未可解析，BUG-388 只放行 Eq/Colon）；`parser.rs` 裸 raises 判定条件加入 `Token::Arrow`，使裸 raises 默认 err 取 str 后继续解析 `-> int` 作返回类型（`79494ec`，与 BUG-390 同一提交）
+- BUG-401/402：`str()` 对内建集合（`Named` Vec/HashSet/HashMap）恒用 `format!("{}")`（Display），而内建集合不 impl Display → E0277；`print(x)` 早已对集合走 `{:?}`（Debug），`print([1,2,3])` 与 `str([1,2,3])` 不一致；`expr_gen.rs` str 内建改为仅集合走 Debug、标量照旧 Display（F64 需 `42` 而非 `42.0`）（`879597b`；两号为同源重复登记）
+- BUG-403：闭包返回闭包时 Lambda 的 ret 注解用 `rust_type` 把 `IrType::Fn` 渲染成裸 `fn(i64)->i64` 指针，与体内 `Arc::new(内层闭包)` 不符 → E0308 expected fn pointer found Arc / E0271；ret_ann 对 Fn 类型改走 `fn_value_type`（`Arc<dyn Fn(...)+Send+Sync>`），其余类型照旧（`778bca9`，与 BUG-389b 同一提交）
+
+**测试 / 基建**
+- BUG-378：BUG-374（struct 字段默认值）给 IR `Field` 加了必填 `default` 字段，但 `tests/cython_backend.rs` 5 处直接构造 `Field { name, ty }` 的测试桩未同步 → `cargo test --workspace` E0063 missing field `default`（此前只跑 `cargo test --lib` 故漏检）；5 处（Point.x/y、Circle.r、Rect.w/h）补 `default: None`，`--workspace` 恢复全绿（`51a74e9`）
 
 ### FIND_BUG 收尾修复（2026-09-24）
 - `type Item` 仅在模块未声明 Iterator trait（落 std::iter::Iterator）时补发，修复 lib_iterator E0437（本地 trait 遮蔽后无 Item 成员）
