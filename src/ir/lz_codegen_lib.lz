@@ -1642,6 +1642,10 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> Strin
             // Rust 也不允许 fn 与 struct 同名）+ 实参全为 _KwArg。
             elif is_struct_ctor(n, a, t):
                 n.to_string() + " { ".to_string() + kwarg_pairs_str(a, fn_raises) + " }".to_string()
+            elif is_dict_kwarg_ctor(n, a):
+                gen_dict_kwarg_ctor(a, fn_raises)
+            elif is_set_kwarg_ctor(n, a):
+                gen_set_kwarg_ctor(a, fn_raises)
             elif is_comp_macro(n):
                 gen_comp_macro(n, a, fn_raises)
             elif is_cast_call(n, a):
@@ -1652,6 +1656,49 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType) -> Strin
 
 def is_struct_ctor(n: str, a: List<Expr>, t: IrType) -> bool =
     starts_upper(n) and all_kwarg_args(a) and irtype_named_path(t, n)
+
+// `Dict(a: 1, b: 2)` 关键字字面量（`{ "a": 1 }` 之外的字形，builder 生成
+// `Call(Var("Dict"), [_KwArg(a,1), _KwArg(b,2)])`）。is_struct_ctor 判据要求结果类型
+// 路径 == 调用名，而此类字面量的结果类型常是 Any（`let d = Dict(a:1)`）→ 判据失败，
+// 落到通用调用分支发 `Dict(_KwArg{..}, _KwArg{..})` → E0422/E0423。BTreeMap 是类型
+// 别名不是 struct，须走 BUG-290 的 `BTreeMap::from([..])` 字面量形态（对齐原生
+// expr_gen.rs 的 Dict kwarg 分支）。同族 Set/HashSet kwarg 同理。
+def is_dict_kwarg_ctor(n: str, a: List<Expr>) -> bool =
+    (n == "Dict" or n == "HashMap" or n == "dict") and all_kwarg_args(a)
+
+def is_set_kwarg_ctor(n: str, a: List<Expr>) -> bool =
+    (n == "Set" or n == "HashSet" or n == "set") and all_kwarg_args(a)
+
+def gen_dict_kwarg_ctor(a: List<Expr>, fn_raises: MaybeIrType) -> String =
+    "std::collections::BTreeMap::from([".to_string() + dict_kwarg_pairs_str(a, fn_raises) + "])".to_string()
+
+def gen_set_kwarg_ctor(a: List[Expr], fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..a.len():
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + dict_kwarg_value_of(a[idx].clone(), fn_raises)
+    "std::collections::HashSet::from([".to_string() + out + "])".to_string()
+
+def dict_kwarg_pairs_str(a: List<Expr>, fn_raises: MaybeIrType) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..a.len():
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + dict_kwarg_pair_of(a[idx].clone(), fn_raises)
+    out
+
+def dict_kwarg_pair_of(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            "(".to_string() + "\"".to_string() + esc_rust(kwarg_name_of(fs)) + "\".to_string(), ".to_string() + kwarg_value_of(fs, fn_raises) + ")".to_string()
+        case _ => gen_expr(e, fn_raises)
+
+def dict_kwarg_value_of(e: Expr, fn_raises: MaybeIrType) -> String =
+    match e:
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            kwarg_value_of(fs, fn_raises)
+        case _ => gen_expr(e, fn_raises)
 
 // BUG-477：内建类型转换 `str(x)` / `int(x)` / `f64(x)`。rs-lz 此前走通用分支原发
 // `str(x)`（E0423 expected function, found builtin type `str`）/ `int(x)`（E0425

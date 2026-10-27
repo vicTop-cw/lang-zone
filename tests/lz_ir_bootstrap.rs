@@ -1943,3 +1943,111 @@ def main():
 
     let _ = fs::remove_dir_all(&work);
 }
+
+// NATIVE-BUG：`Dict(a: 1, b: 2)` 关键字字面量（`{ "a": 1 }` 之外的字形）被当作未定义
+// 函数调用 → 原生发 `fn Dict(__a0: i64, __a1: i64) -> i64 { i64::MAX }` 桩、rs-lz 发
+// `Dict(_KwArg{..}, _KwArg{..})` → 两侧 rustc 均失败（d 变 i64，`d.len()` E0599 /
+// _KwArg E0422、Dict E0423）。修正后两侧统一发
+// `BTreeMap::from([("a".to_string(), 1i64), ...])`。
+#[test]
+fn rs_lz_self_dict_kwarg_literal() {
+    let bin = env!("CARGO_BIN_EXE_lang-zone");
+    let work = std::env::temp_dir().join("lz_self_dict_kwarg_literal");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).expect("mkwork");
+    let lz_path = work.join("dk.lz");
+    fs::write(
+        &lz_path,
+        "def main() =\n    let d = Dict(a: 1, b: 2)\n    print(d.len())\n",
+    )
+    .expect("write lz");
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+
+    // native（.rs 落到 .lz 旁；stdout 只是 "Generated ..." 提示）
+    let out_n = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("native");
+    assert!(
+        out_n.status.success(),
+        "native 失败: {}",
+        String::from_utf8_lossy(&out_n.stderr)
+    );
+    let text_n = fs::read_to_string(work.join("dk.rs")).expect("read native dk.rs");
+    assert!(
+        text_n.contains("BTreeMap::from([(\"a\".to_string(), 1i64), (\"b\".to_string(), 2i64)])"),
+        "native 未发 BTreeMap::from kwarg 字面量:\n{}",
+        text_n
+    );
+    let n_rs = work.join("dk_n.rs");
+    fs::write(&n_rs, &text_n).expect("write native .rs");
+    let n_exe = work.join("dk_n.exe");
+    let rc_n = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&n_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&n_exe)
+        .output()
+        .expect("rustc native");
+    assert!(
+        rc_n.status.success(),
+        "native 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc_n.stderr)
+    );
+    let run_n = Command::new(&n_exe).output().expect("run native exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run_n.stdout).trim(),
+        "2",
+        "native d.len() 应为 2"
+    );
+
+    // rs-lz
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text_lz = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text_lz.contains("BTreeMap::from([(\"a\".to_string(), 1i64), (\"b\".to_string(), 2i64)])"),
+        "rs-lz 未发 BTreeMap::from kwarg 字面量:\n{}",
+        text_lz
+    );
+    let lz_rs = work.join("dk_lz.rs");
+    fs::write(&lz_rs, &text_lz).expect("write rs-lz .rs");
+    let lz_exe = work.join("dk_lz.exe");
+    let rc_lz = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(
+        rc_lz.status.success(),
+        "rs-lz 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc_lz.stderr)
+    );
+    let run_lz = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run_lz.stdout).trim(),
+        "2",
+        "rs-lz d.len() 应为 2"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}

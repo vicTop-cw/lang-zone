@@ -2478,6 +2478,33 @@ impl CodeGen {
                     } else {
                         format!("std::collections::BTreeMap::from([{}])", args_s.join(", "))
                     }
+                } else if !args.is_empty()
+                    && is_kwarg_call(args)
+                    && !self.fn_param_types.contains_key(&callee_s)
+                    && matches!(callee_s.as_str(), "Dict" | "HashMap" | "dict")
+                {
+                    // `Dict(a: 1, b: 2)` 关键字字面量（`{ "a": 1 }` 之外的字形）：
+                    // BTreeMap 是类型别名不是 struct，走通用函数调用会生成
+                    // `fn Dict(__a0: i64, __a1: i64) -> i64 { i64::MAX }` 桩（broad.lz
+                    // 实测：d 变成 i64 → `d.len()` E0599 no method named `len` found
+                    // for type `i64`）。对齐 `{..}` 字面量的
+                    // `BTreeMap::from([("a".to_string(), 1i64), ...])` 形态。
+                    let pairs: Vec<String> = args
+                        .iter()
+                        .filter_map(|a| {
+                            kwarg_name_value(a).map(|(k, v)| {
+                                format!(
+                                    "({}.to_string(), {})",
+                                    format!("\"{}\"", k.escape_default()),
+                                    self.gen_expr(v)
+                                )
+                            })
+                        })
+                        .collect();
+                    format!(
+                        "std::collections::BTreeMap::from([{}])",
+                        pairs.join(", ")
+                    )
                 } else if !args.is_empty() && is_kwarg_call(args) && self.is_known_type(&callee_s) {
                     // Struct constructor with keyword args: Point(x=3, y=4) → Point { x: 3.0, y: 4.0 }
                     let base_name = callee_s.split('<').next().unwrap_or(&callee_s).to_string();

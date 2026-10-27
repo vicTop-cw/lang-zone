@@ -3114,3 +3114,27 @@ base 是 Var，不套克隆规则，故正确。
 输出 `blue` 一致；g96（顶层 dict 赋值）双路一致；残留 diff 仅 BTreeMap/Dict 别名 +
 impl 方法体缩进（10 行）。回归测试 rs_lz_self_dict_index_assign_not_cloned（断言 native
 含 `self.d.insert(k, v)` 且不含 `self.d.clone().insert`，双路 rustc 编译运行输出 `1`）。
+
+## NATIVE-BUG（`Dict(a: 1, b: 2)` 关键字字面量被当成未定义函数调用）[2026-10-27T11:50:00+08:00] 状态：FIXED
+现象（复核探针 _probes/rslz4/broad.lz）：`let d = Dict(a: 1, b: 2)` 原生发
+`fn Dict(__a0: i64, __a1: i64) -> i64 { i64::MAX }` 桩（d 变成 i64，`d.len()` E0599
+no method `len` found for `i64`）；rs-lz 发 `Dict(_KwArg{..}, _KwArg{..})` → E0422
+cannot find struct `_KwArg` / E0423 expected function, found type alias `Dict`。两侧
+rustc 均失败。
+根因：`Dict(a:1, b:2)` 的 IR 是 `Call(Var("Dict"), [_KwArg(a,1), _KwArg(b,2)])`，与
+`{ "a": 1 }` 字面量（`StructCtor(name="Dict")`）不同路径。原生 expr_gen.rs:2438 的
+BUG-290 分支要求 `!is_kwarg_call(args)`，关键字形不进；下一分支 `is_known_type` 对
+类型别名 Dict 恒 false → 落到通用函数调用 → 未定义函数桩。rs-lz `is_struct_ctor`
+要求结果类型路径 == 调用名，而此类字面量结果类型常是 Any → 判据失败 → 通用调用。
+修复（对齐 BUG-290 的 `BTreeMap::from([("a".to_string(),1i64), ...])` 字面量形态）：
+1. expr_gen.rs 2481 前新增 Dict/HashMap/dict 关键字字面量分支：用 kwarg_name_value
+   取 (名, 值)，渲染 `std::collections::BTreeMap::from([(..), (..)])`；key 用
+   `escape_default()` 转义。
+2. lz_codegen_lib.lz 新增 `is_dict_kwarg_ctor`/`gen_dict_kwarg_ctor`/
+   `dict_kwarg_pairs_str`/`dict_kwarg_pair_of`/`dict_kwarg_value_of`，以及
+   `is_set_kwarg_ctor`/`gen_set_kwarg_ctor`（Set/HashSet 同族，值为元素直接入
+   HashSet::from）。注意 pair 须整体包括号，否则 `BTreeMap::from([...])` 实参是
+   扁平数组 → E0308。
+验证：broad.lz 双路 rustc 编译运行，输出 `P(3,4)/15/11/HELLO WORLD/big/2` 完全一致；
+新增回归测试 `rs_lz_self_dict_kwarg_literal`（tests/lz_ir_bootstrap.rs）双路断言
+`BTreeMap::from([("a".to_string(), 1i64), ("b".to_string(), 2i64)])` 且运行输出 `2`。
