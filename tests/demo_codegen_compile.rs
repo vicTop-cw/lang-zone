@@ -1,4 +1,4 @@
-﻿// Lang-Zone 编译器 — tests/demo_codegen_compile.rs
+// Lang-Zone 编译器 — tests/demo_codegen_compile.rs
 //
 // 生成产物编译闸门：对每个 DEMO .lz 先转译为 .rs，再用 rustc **真正编译**。
 //
@@ -78,42 +78,145 @@ fn manifest() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// 在目录中定位 lz_builtins 的 .rlib（逻辑对齐 src/main.rs::probe_rlib）
+// ── 产物目录解析（车道隔离的基础设施，2026-10-28 修复）─────────────
+//
+// 曾经的硬编码：`-L dependency=<manifest>/target/debug/deps`、rlib 顶层
+// `liblz_builtins.rlib`、临时目录 `<manifest>/target/demo_codegen_check`。
+// 后果：用 `CARGO_TARGET_DIR=target/lane-xxx` 跑的车道，门禁会去链接**默认车道**
+// 的产物目录 —— 轻则链到陈旧 rlib，重则产物不存在而假红（红名单报告 §2.2）。
+//
+// 现在一律按**当前运行环境**推导 `<target-dir>/<profile>`，优先级：
+//   a) 环境变量 `CARGO_TARGET_DIR`（相对路径按 crate 根解析）；
+//   b) `std::env::current_exe()` 反推（`<target-dir>/<profile>/deps/<test-bin>` → `<target-dir>/<profile>`）；
+//   c) 兜底 `CARGO_MANIFEST_DIR/target/debug`。
+
+/// 相对路径按 crate 根解析（cargo 在 crate 根执行，相对 `CARGO_TARGET_DIR` 亦以此为基准）
+fn resolve_from_manifest(p: PathBuf) -> PathBuf {
+    if p.is_absolute() {
+        p
+    } else {
+        manifest().join(p)
+    }
+}
+
+/// `<target-dir>/<profile>` —— 由当前测试可执行文件反推：
+/// `.../<target-dir>/<profile>/deps/<test-bin>[.exe]` → `.../<target-dir>/<profile>`
+fn profile_dir_from_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    // cargo test 的 exe 恒在 `<profile>/deps` 下；不在则按 `<profile>` 直落处理
+    let profile_dir = if dir.file_name().map_or(false, |n| n == "deps") {
+        dir.parent()?
+    } else {
+        dir
+    };
+    if profile_dir.is_dir() {
+        Some(profile_dir.to_path_buf())
+    } else {
+        None
+    }
+}
+
+fn profile_name(dir: &Path) -> String {
+    dir.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "debug".to_string())
+}
+
+/// 本次运行真正使用的 `<target-dir>/<profile>` 目录（见上方 a/b/c 解析链）。
+///
+/// 车道示例：`CARGO_TARGET_DIR=target/lane-infra cargo test ...`
+/// → 返回 `target/lane-infra/debug`，于是 `-L dependency=` 与
+/// `--extern lz_builtins=` 都指向**本车道**产物，不再串道。
+fn build_profile_dir() -> PathBuf {
+    if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
+        let raw = PathBuf::from(raw);
+        if !raw.as_os_str().is_empty() {
+            let root = resolve_from_manifest(raw);
+            // 已直接指向 profile 目录（自带 deps/）→ 就用它
+            if root.join("deps").is_dir() {
+                return root;
+            }
+            // profile 名优先跟随当前测试可执行文件（debug / release / 自定义）
+            let profile = profile_dir_from_exe()
+                .map(|d| profile_name(&d))
+                .unwrap_or_else(|| "debug".to_string());
+            return root.join(profile);
+        }
+    }
+    if let Some(dir) = profile_dir_from_exe() {
+        return dir;
+    }
+    manifest().join("target").join("debug")
+}
+
+/// 与 `build_profile_dir()` 配对的 cargo `--target-dir`（即 `<profile>` 的父目录）
+fn build_target_root() -> PathBuf {
+    let dir = build_profile_dir();
+    dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir)
+}
+
+/// 目录内**最新**（mtime 最大）的 `deps/liblz_builtins-*.rlib`。
+/// 同一 target 下可能残留多个 hash 的 rlib，取最新避免链到陈旧产物
+/// （陈旧 rlib 缺失 `Complex64`/`BigInt` 的坑）。
+fn newest_deps_rlib(dir: &Path) -> Option<PathBuf> {
+    let deps = dir.join("deps");
+    let entries = std::fs::read_dir(&deps).ok()?;
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
+            let mtime = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if best.as_ref().map_or(true, |(t, _)| mtime > *t) {
+                best = Some((mtime, e.path()));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// 在某个 `<profile>` 目录里定位 lz_builtins 的 .rlib：
+/// 先 `deps/liblz_builtins-*.rlib` 取最新，再退回顶层 `liblz_builtins.rlib`
+/// （cargo 为 lib target 产的 hardlink，仅作兜底，不再作为首选）。
 fn probe_rlib(dir: &Path) -> Option<PathBuf> {
+    if let Some(p) = newest_deps_rlib(dir) {
+        return Some(p);
+    }
     let direct = dir.join("liblz_builtins.rlib");
     if direct.exists() {
         return Some(direct);
-    }
-    let deps = dir.join("deps");
-    if let Ok(entries) = std::fs::read_dir(&deps) {
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
-                return Some(e.path());
-            }
-        }
     }
     None
 }
 
 fn find_builtins_rlib() -> Option<PathBuf> {
-    for profile in ["debug", "release"] {
-        if let Some(p) = probe_rlib(&manifest().join("target").join(profile)) {
-            return Some(p);
-        }
+    let profile_dir = build_profile_dir();
+    if let Some(p) = probe_rlib(&profile_dir) {
+        return Some(p);
     }
-    // 回退：cargo test 的可执行文件位于 target/<profile>/deps
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if let Some(p) = probe_rlib(dir) {
+    // 回退 1：同一 target 根下的其它 profile（如 release）
+    let root = build_target_root();
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        let mut dirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir() && p.join("deps").is_dir())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            if let Some(p) = probe_rlib(&dir) {
                 return Some(p);
             }
-            if let Some(parent) = dir.parent() {
-                if let Some(p) = probe_rlib(parent) {
-                    return Some(p);
-                }
-            }
         }
+    }
+    // 回退 2：默认 `target/<profile>`（CARGO_TARGET_DIR 未传播到测试进程时）
+    let fallback = manifest().join("target").join(profile_name(&profile_dir));
+    if let Some(p) = probe_rlib(&fallback) {
+        return Some(p);
     }
     None
 }
@@ -121,10 +224,22 @@ fn find_builtins_rlib() -> Option<PathBuf> {
 fn ensure_builtins_rlib() -> Option<PathBuf> {
     // lang-zone 只在生成的字符串里出现 `use lz_builtins::*`，不直接引用其符号，
     // cargo 可能只产出 .rmeta；显式构建该包以确保 .rlib 存在。
-    let _ = Command::new("cargo")
-        .current_dir(manifest())
+    //
+    // **显式传 `--target-dir`**：产物目录由 build_profile_dir() 推导（可能来自
+    // CARGO_TARGET_DIR=target/lane-xxx）。若沿用 cargo 默认目录，构建会落到
+    // target/debug、解析却看向车道目录 → 找不到 rlib → 假红。
+    let profile_dir = build_profile_dir();
+    let profile = profile_name(&profile_dir);
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(manifest())
         .args(["build", "-p", "lz_builtins", "--quiet"])
-        .status();
+        .arg("--target-dir")
+        .arg(build_target_root());
+    if profile != "debug" {
+        // release / 自定义 profile 与测试可执行文件所在 profile 对齐
+        cmd.arg("--profile").arg(&profile);
+    }
+    let _ = cmd.status();
     find_builtins_rlib()
 }
 
@@ -279,19 +394,14 @@ fn check_one(lz: &Path, rlib: Option<&Path>, workdir: &Path) -> Result<(), Failu
     let stem = rel.replace(['/', '.'], "_");
     let out_rlib = workdir.join(format!("{stem}.rlib"));
     let mut cmd = Command::new("rustc");
+    // 链接目录跟随**本次运行**的实际产物目录（车道隔离），不再写死 target/debug/deps
+    let deps_dir = build_profile_dir().join("deps");
     cmd.arg("--edition")
         .arg("2021")
         .arg("--crate-type")
         .arg("lib")
         .arg("-L")
-        .arg(format!(
-            "dependency={}",
-            manifest()
-                .join("target")
-                .join("debug")
-                .join("deps")
-                .display()
-        ))
+        .arg(format!("dependency={}", deps_dir.display()))
         .arg(&rs)
         .arg("-o")
         .arg(&out_rlib);
@@ -324,7 +434,9 @@ fn run_gate(files: &[PathBuf], title: &str) {
     // 串行化：避免与另一个闸门并发操作同一批 DEMO 文件
     let _guard = gate_lock();
 
-    let workdir = manifest().join("target").join("demo_codegen_check");
+    // 临时产物目录落在**本次运行**的 target 根下：默认仍是 target/demo_codegen_check，
+    // 车道下是 target/lane-xxx/demo_codegen_check（跨车道不互相清产物）
+    let workdir = build_target_root().join("demo_codegen_check");
     let _ = std::fs::create_dir_all(&workdir);
     let rlib = ensure_builtins_rlib();
     if rlib.is_none() {
