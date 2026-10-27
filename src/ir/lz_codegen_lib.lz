@@ -1005,6 +1005,28 @@ def struct_fields_have_var(fs: List<(str, Expr)>, n: str) -> bool =
             found = true
     found
 
+// BUG-484：左结合的 or/and 链（如 is_alpha 的 53 层 `a or b or ...`）在 gen_expr 里
+// 逐层递归 gen_expr(lhs)，栈帧大（String 拼接）→ 溢出 8MB 主线程栈（div-tools/
+// probes/p25_long_or.lz）。迭代收集左脊柱的右操作数：Or(Or(Or(a,b),c),d) →
+// 收集 [d, c, b] 后把最左的 a 追加到尾部，返回逆序列表（最右操作数在前）。
+def flatten_or_and(e: Expr, target_op: str) -> List[Expr] =
+    let mut acc: List[Expr] = []
+    let mut cur = e
+    let mut done = false
+    while not done:
+        match cur:
+            case Expr.BinOp(op: o, lhs: l, rhs: r, ty: _) =>
+                if o == target_op:
+                    acc.push(r)
+                    cur = l
+                else:
+                    acc.push(cur)
+                    done = true
+            case _ =>
+                acc.push(cur)
+                done = true
+    acc
+
 def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str]) -> String =
     match e:
         case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64".to_string()
@@ -1072,6 +1094,25 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str]) -> String =
                 // 无 Add impl → E0308 expected `&str`, found `String`）。两侧均为字符串
                 // 类型时右侧补 `&`，对齐原生 `"hi ".to_string() + &x.clone()` 口径。
                 gen_expr(l, fn_raises, user_fns) + " + &".to_string() + gen_expr(r, fn_raises, user_fns)
+            elif (o == "||" or o == "&&"):
+                // BUG-484：or/and 长链递归 gen_expr(lhs) 溢出栈。flatten_or_and 迭代收集
+                // 左脊柱，逆序（最右在前）返回；从尾部倒序 gen_expr 各操作数，再正序拼接，
+                // 每个操作数深度 ≤1，避免深层递归。
+                let chain = flatten_or_and(e, o)
+                let cn = chain.len()
+                let mut parts: List[str] = []
+                let mut pi = cn
+                while pi > 0:
+                    pi = pi - 1
+                    parts.push(gen_expr(chain[pi], fn_raises, user_fns))
+                let mut out_s: String = "".to_string()
+                let mut qi = 0
+                while qi < parts.len():
+                    if qi > 0:
+                        out_s = out_s + " ".to_string() + o.to_string() + " ".to_string()
+                    out_s = out_s + parts[qi].clone()
+                    qi = qi + 1
+                out_s
             else:
                 gen_expr(l, fn_raises, user_fns) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr(r, fn_raises, user_fns)
         case Expr.UnOp(op: o, operand: p, ty: t) => o.to_string() + gen_expr(p, fn_raises, user_fns)

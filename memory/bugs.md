@@ -3247,4 +3247,59 @@ native rustc 0 错误且输出全部正确；`--emit=rs-lz` 对 esc_chars/list/s
 p4b_unicode 5 个原失败探针全部通过自检（生成+编译+运行）。重跑 fastsweep 全量 269
 文件，`RSLZ_FAIL_NATIVE_OK` 从 16 降至 2（仅剩 div-tools/probes/p25_long_or.lz 的
 栈溢出独立缺陷）。`lz_ir_bootstrap` 25/25 全绿。
+补充修正（BUG-483/484 收口时发现）：本条目把 `DEMO/lz_std/math.lz` 归入 esc_rust 14 例，
+但 math.lz 的 rs-lz 失败**另有根因**——其 `const NAN = 0.0/0.0` 经常量折叠进 IR 后是
+`LitKind::F64(NaN)`，`.lzrs` 生成端把它序列化成裸 `NaN.0` 字面量，重编译时被 LZ 解析为
+未绑定变量 `NaN` → `未绑定变量: NaN`。esc_rust 修复只清掉 math.lz 的 UTF-8 字面量面，
+NaN 字面量面由 BUG-483 单独收口。同理 p25_long_or.lz 的失败也与 esc_rust 无关，由
+BUG-484 单独收口。此处不删原叙述（追加不改销毁历史），仅更正归因。
+
+## BUG-483 [high] rs-lz 的 `.lzrs` 生成端把 `NaN`/`inf` f64 字面量序列化为裸 `NaN.0`，重编译时未绑定变量
+
+现象：`--emit=rs-lz` 对 `DEMO/lz_std/math.lz` 报 `未绑定变量: NaN`（IR 构建失败）。
+该文件顶部 `const NAN = 0.0 / 0.0; const INF = 1.0 / 0.0;` 常用量折叠在 IR 层变
+`LitKind::F64(f64::NAN)` / `LitKind::F64(f64::INFINITY)`。native `.lzrs` 生成端
+`src/ir/lz_codegen.rs:1160` 用 `format!("{}", n)` 序列化 f64 → `NaN` / `inf` /
+`-inf`。LZ 词法把 `NaN.0` 识别为 Var 名 `NaN`（不是数字字面量，因为 LZ f64 字面量
+必须带数字，`NaN` 不构成合法数字前缀）→ IR 构建期绑定失败。
+
+根因：LZ 没有 f64 的 `NaN`/`inf` 字面量记号，`format!` 输出与 LZ 语法冲突。
+
+修复：`src/ir/lz_codegen.rs:1160` LitKind::F64 分支改为——按 `format!("{}", n)` 的
+小写结果分发：`nan` → `0.0/0.0`（除零在 LZ 合法，运行期得 NaN）；`inf` →
+`1.0/0.0`；`-inf` → `-1.0/0.0`；其余若不含 `.`/`e`/`E` 则补 `.0` 使成合法 f64
+字面量（`"2"` → `"2.0"`）。同口径的 Pattern::LitF64（`src/ir/lz_codegen.rs:1068`）
+未改——pattern 位接受 `0.0/0.0` 表达式风险高且触发率低，留待有触发样例再处理。
+`.lzrs` 运行端 `lz_codegen_lib.lz:2417-2422` 的 `fmt_f64` 原只处理 `NaN`，本次补齐
+`inf`/`-inf` 三个分支。
+
+验证：`--emit=rs-lz` 对 math.lz 通过自检（生成+编译+运行），生成 `const NAN: f64 =
+0.0f64 / 0.0f64;`。`_probes/div_zero_f64.lz` 探针覆盖 NaN/inf/-inf 常量与除零运行值。
+`lz_ir_bootstrap` 25/25 全绿。
+状态：FIXED
+
+## BUG-484 [high] rs-lz 库的 `gen_expr` 对左结合的 or/and 长链递归，53 层即溢出 8MB 主线程栈
+
+现象：`--emit=rs-lz` 对 `div-tools/probes/p25_long_or.lz` 报
+`thread 'main' has overflowed its stack`。该文件 `is_alpha(c: str) -> bool` 是一串
+`c == "a" or c == "b" or ... or c == "Z"` 的左结合 53 层 or 链。native Rust
+`src/ir/codegen/expr_gen.rs` 处理同深度的 `BinOpKind::Or` 正常（fastsweep native 全过），
+但 rs-lz 的 `lz_codegen_lib.lz:1047-1076` 的 `gen_expr` 对 `Expr.BinOp(op, lhs, rhs)`
+走 `gen_expr(lhs) + op + gen_expr(rhs)` 的递归；LZ→Rust 生成的栈帧比 native Rust 栈帧
+大（多级 String 拼接临时值），53 层左脊柱递归就把 8MB 主线程栈打穿。overflow 发生在
+`--emit=rs-lz` 内嵌自检的第 4 步——codegen exe 运行（main.rs:1023-1032），不是 `.lzrs`
+生成（native `lz_codegen.rs` 无此深度问题）。
+
+修复：`lz_codegen_lib.lz` 新增 `flatten_or_and(e: Expr, target_op: str) -> List[Expr]`
+——迭代沿左脊柱收集右操作数（`Or(Or(Or(a,b),c),d)` → 收集 `d,c,b` 后把最左 `a` 追加
+到尾部），返回逆序列表（最右在前）。`gen_expr` 的 BinOp 分支对 `||`/`&&` 走此路径：
+从尾部倒序 gen_expr 各操作数（每个操作数深度 ≤1），再正序以 ` op ` 拼接。语义等价
+（布尔 or/and 结合律；短路的副作用顺序不变，因为链的 AST 左右嵌套在布尔语境可互换）。
+`chain[pi]` 索引取 `Expr` 需 `.clone()`，`o` 与 `String` 拼接需 `.to_string()`——首版
+漏了这两处，rustc 报 E0507 `cannot move out of index of Vec<String>`，已修。
+
+验证：`--emit=rs-lz` 对 p25_long_or.lz 通过自检，生成 `pub fn is_alpha(c: String) ->
+bool { ... }` 且 4 个打印断言（`"a"/"Z"/"_"/"1"`）输出正确。回归：math.lz、esc_chars.lz、
+div-tools/probes/p4b_unicode.lz 三个原失败探针均通过。`lz_ir_bootstrap` 25/25 全绿。
+状态：FIXED
 状态：FIXED
