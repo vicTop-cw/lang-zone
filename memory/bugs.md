@@ -3384,3 +3384,6 @@ _size: 0i64, _num_buckets: 16i64 };`，`cargo test --test find_bug_libs lib_hash
 注意：用户一旦定义 `struct HashMap`，本程序里 `HashMap(k: v)` 关键字字面量将不再生成 dict——这是
 用户遮蔽内建名的预期语义（与 BUG-485 的 `is_user_ty` 守卫同思路）。
 状态：FIXED
+## BUG-488 [2026-10-27T13:17:07Z] [medium] OPEN
+- summary: [scope-gate] reserve_scope 对非 Fist-Mbt 项目路径一律 fail-closed：权限表 scope_permissions 写死 Fist-Mbt 源码目录，lang-zone 的 src/embed、Reports 等合法作用域无法预订，导致 explore 并行四道门第 4 门永远不过
+
