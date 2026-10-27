@@ -6875,6 +6875,18 @@ impl CodeGen {
                         c.ref_aliases = self.ref_aliases.clone();
                         c.ref_write_through = self.ref_write_through.clone();
                         c.type_aliases = self.type_aliases.clone();
+                        // N1（T0r11）：闭包体经 child CodeGen 重生成时必须继承枚举变体表。
+                        // 实参是函数调用时（`Ok(len(e))` / `Ok(inc(e))`），
+                        // body_refs_noncopy_external 递归到 Call 的 callee Var（`len`/`inc`
+                        // 非 Copy、非形参）→ 判定「引用外部非 Copy 变量」→ 走本分支用
+                        // child 重生成 body；child 若没有 enum_variants，`Ok(` 就退回裸
+                        // 变体名 → 解析到 std::result::Result::Ok → E0308。
+                        // 实参是字面量/变量/二元式时该判定为 false，body 走原 body_s
+                        // （已被闭包返回注解的限定后处理修好），故只在 Call 实参形态复现。
+                        c.enum_variants = self.enum_variants.clone();
+                        c.enum_variant_named_fields = self.enum_variant_named_fields.clone();
+                        c.enum_variant_fields = self.enum_variant_fields.clone();
+                        c.enum_variant_order = self.enum_variant_order.clone();
                         c.cur_fn_name = self.cur_fn_name.clone();
                         c.fn_use_count = self.fn_use_count.clone();
                         c.suppress_tail_return = true;
@@ -6902,6 +6914,13 @@ impl CodeGen {
                         c.ref_aliases = self.ref_aliases.clone();
                         c.ref_write_through = self.ref_write_through.clone();
                         c.type_aliases = self.type_aliases.clone();
+                        // N1（T0r11）：同上，第二处 child 重生成（move 捕获 + 引用外部
+                        // 非 Copy 变量）也必须继承枚举变体表，否则 `Ok(..)` 丢失 `Result::`
+                        // 限定（实参为函数调用时命中此分支）。
+                        c.enum_variants = self.enum_variants.clone();
+                        c.enum_variant_named_fields = self.enum_variant_named_fields.clone();
+                        c.enum_variant_fields = self.enum_variant_fields.clone();
+                        c.enum_variant_order = self.enum_variant_order.clone();
                         c.cur_fn_name = self.cur_fn_name.clone();
                         c.fn_use_count = self.fn_use_count.clone();
                         c.suppress_tail_return = true;
