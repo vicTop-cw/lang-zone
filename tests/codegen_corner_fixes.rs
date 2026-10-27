@@ -1046,3 +1046,387 @@ def main() =
         out
     );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// rs-lz（自举路线 B）回归闸门 —— fist-mbt T0r5：N1 / N2 / R1 / R2
+//
+// 链路说明（决定了断言的写法）：`--emit=rs-lz <abs>.lz` 做的是
+//   input.lz → input.lzrs（LZ 版 codegen 库 + IR 构造 + 打印）
+//            → input.rs（**打印器**的 Rust）→ rustc → exe → 运行
+// 运行的 stdout 才是**目标程序的 Rust 源码**；CLI 并不编译这份 Rust。
+// 所以「生成的 Rust 能否编译运行」必须由本文件自己再 rustc 一次。
+//
+// 已知台账外缺陷（超出 T0r5 四条范围，不改产品码，仅记录）：
+// BUG-475 的 Box 解引用按**字段名**匹配，而定位（非命名）变体字段名是空串，
+// 导致 `let val = *val;` 落到 i64 上（rustc E0614）。R1 样本因此用命名字段变体；
+// 该缺陷在语句位 match 上同样存在，属 HEAD 既有（T0r5 未改 box 判定逻辑）。
+// 注：产物里的 `List<T>`/`Dict<K,V>` 由 `use lz_builtins::*;` 提供
+// （lz_builtins/src/flat.rs:522-523 `pub type List<T> = Vec<T>`），故无需任何 shim。
+// ════════════════════════════════════════════════════════════════════════════════
+
+/// rs-lz 一次完整跑的观测面。
+struct RsLzRun {
+    /// `--emit=rs-lz` 自身是否成功（生成期 panic，如 N2 的字节切片 panic，在这里就红）
+    emitted: bool,
+    /// 生成的目标程序 Rust 源码（stdout）
+    rust: String,
+    /// 生成的目标程序 Rust 源码是否被 rustc 接受
+    compile_ok: bool,
+    /// 生成的目标程序是否跑通
+    run_ok: bool,
+    /// 目标程序 stdout
+    stdout: String,
+    diag: String,
+}
+
+fn rslz_workdir(tag: &str) -> PathBuf {
+    let work = std::env::temp_dir().join(format!("lz_rslz_{tag}"));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create rslz work dir");
+    work
+}
+
+fn lang_zone_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"))
+}
+
+/// 编译并运行一段 Rust 源码（生成产物原样编译，不做任何改写）。
+fn rustc_and_run(tag: &str, rust_src: &str) -> (bool, bool, String, String) {
+    let work = rslz_workdir(&format!("{tag}_rust"));
+    let rs = work.join(format!("{tag}_gen.rs"));
+    std::fs::write(&rs, rust_src).expect("write gen rust");
+    let exe = work.join(format!("{tag}_gen.exe"));
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021", "--crate-name"])
+        .arg(format!("{tag}_gen"))
+        .arg(&rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins_rlib().display()))
+        .arg("-L")
+        .arg(format!(
+            "dependency={}",
+            builtins_rlib().parent().unwrap().join("deps").display()
+        ))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .expect("run rustc on rs-lz output");
+    if !rc.status.success() {
+        return (
+            false,
+            false,
+            String::new(),
+            format!(
+                "rs-lz 生成的 Rust 编译失败:\n{}",
+                String::from_utf8_lossy(&rc.stderr)
+            ),
+        );
+    }
+    let prog = Command::new(&exe).output().expect("run rs-lz output exe");
+    let stdout = clean(&String::from_utf8_lossy(&prog.stdout));
+    (
+        true,
+        prog.status.success(),
+        stdout,
+        String::from_utf8_lossy(&prog.stderr).to_string(),
+    )
+}
+
+/// 跑 `--emit=rs-lz` 并把生成的目标程序 Rust 编译运行起来。
+fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
+    let work = rslz_workdir(tag);
+    let lz = work.join("input.lz");
+    std::fs::write(&lz, src).expect("write lz");
+    let out = Command::new(lang_zone_bin())
+        .arg("--emit=rs-lz")
+        .arg(&lz)
+        .output()
+        .expect("run lzc --emit=rs-lz");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    let rust = String::from_utf8_lossy(&out.stdout).to_string();
+    if !out.status.success() {
+        return RsLzRun {
+            emitted: false,
+            rust,
+            compile_ok: false,
+            run_ok: false,
+            stdout: String::new(),
+            diag: format!("--emit=rs-lz 生成期失败（panic/编译错误）:\n{stderr}"),
+        };
+    }
+    let (compile_ok, run_ok, stdout, diag) = rustc_and_run(tag, &rust);
+    RsLzRun {
+        emitted: true,
+        rust,
+        compile_ok,
+        run_ok,
+        stdout,
+        diag,
+    }
+}
+
+fn build_ir_from(src: &str) -> lang_zone::ir::IrModule {
+    let tokens = lang_zone::lexer::Lexer::new(src).tokenize();
+    let mut parser = lang_zone::parser::Parser::new(tokens);
+    let ast = parser.parse_module().expect("parse ok");
+    lang_zone::ir::builder::build_ir(&ast).expect("build_ir ok")
+}
+
+// ── N1（E0507，高）：非 Copy 元素的列表模式解引用 ─────────────────────────────
+//
+// 根因：`list_elem_bindings` 只按 `Pattern.Ident` 收名字、**不看元素类型**，于是
+// `match xs: case [a, ..]`（xs: List<str>）在臂首发 `let a = *a;` —— a 是 slice
+// 元素 `&String`，`*a` 是从共享引用移出 ⇒ rustc E0507 cannot move out of `*a`。
+// 修法：按 scrutinee 元素类型判 Copy（`list_elem_ty` + `is_copy_irtype`）；Copy 保持
+// `let a = *a;`（List<int> 行为不变），非 Copy 发移动语义 `let a = (*a).clone();`。
+#[test]
+fn n1_noncopy_list_pattern_element_clones() {
+    let src = r#"
+def main() =
+    let xs = ["x", "y"]
+    match xs:
+        case [a, ..]:
+            print(a)
+        case []:
+            print("<empty>")
+    let ys = [1, 2, 3]
+    match ys:
+        case [b, ..]:
+            print(b)
+        case []:
+            print(-1)
+"#;
+    let r = run_rs_lz("n1_list_pattern", src);
+    assert!(r.emitted, "rs-lz 生成不应失败:\n{}", r.diag);
+    assert!(
+        r.rust.contains("let a = (*a).clone();"),
+        "非 Copy（str）列表模式绑定必须走移动语义 clone：\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("let a = *a;"),
+        "非 Copy 元素不得再发 `let a = *a;`（E0507）：\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("let b = *b;"),
+        "Copy（int）元素必须保持 `let b = *b;`（List<int> 行为不变）：\n{}",
+        r.rust
+    );
+    assert!(
+        r.compile_ok && r.run_ok,
+        "生成的 Rust 应可编译运行（修前 E0507）：\n{}",
+        r.diag
+    );
+    let out = r.stdout.replace('\n', " ");
+    assert!(out.contains("\"x\""), "str 列表首元素应打印 x：{out}");
+    assert!(out.contains('1'), "int 列表首元素应打印 1：{out}");
+}
+
+// ── N2（同族残留，高）：f-string / 字符串辅助按字节切多字节串 ─────────────────
+//
+// 根因：`gen_fstring` 用 `s[i..(i+1)]`/`s[(i+1)..j]` 按**字节**取字符与子串，
+// 多字节 UTF-8 下下标落在字符中间 ⇒ 生成期 panic「end byte index N is not a char
+// boundary」，`f"中文{x}"` 一行即崩。同族：starts_upper 的 `s[0..1]`（非 ASCII 首
+// 字符/空串）、str_contains 的滑窗（多字节标识符）、codegen_module 的
+// `out[0..len-2]` 裁尾。修法：一律改按字符（str_chars/chars_slice、String::contains、
+// 分隔符前置不再切尾）。
+#[test]
+fn n2_fstring_and_string_helpers_are_char_safe() {
+    let src = r#"
+struct Box2:
+    v: int
+
+def main() =
+    let mut 累加 = 0
+    累加 = 累加 + 1
+    let mut 总计 = 0
+    总计 = 总计 + 累加
+    let mut 汇总 = 0
+    汇总 = 汇总 + 总计
+    let 盒 = Box2(v: 5)
+    print(盒.v)
+    print(f"中文{汇总}值")
+"#;
+    let r = run_rs_lz("n2_cjk_fstring", src);
+    assert!(
+        r.emitted,
+        "非 ASCII f-string / 中文标识符不应在生成期 panic（修前：not a char boundary）：\n{}",
+        r.diag
+    );
+    assert!(
+        !r.diag.contains("char boundary"),
+        "不应再出现字节切片 panic：\n{}",
+        r.diag
+    );
+    assert!(
+        r.rust.contains("format!(\"中文{:?}值\""),
+        "f-string 应按字符解析成 format! 模板：\n{}",
+        r.rust
+    );
+    assert!(
+        r.compile_ok && r.run_ok,
+        "生成的 Rust 应可编译运行：\n{}",
+        r.diag
+    );
+    let out = r.stdout.replace('\n', " ");
+    assert!(out.contains('5'), "中文字段访问应打印 5：{out}");
+    assert!(out.contains("中文1值"), "中文 f-string 应原样保留：{out}");
+}
+
+// ── R1（BUG-475 收口不全，中）：块表达式内的 match 不带 Box 上下文 ──────────────
+//
+// 根因：`gen_expr` 的 `Expr.BlockExpr` 分支调 `gen_body(ss, true, "", fn_raises,
+// user_fns, [], [])` 传**空** tbm/vem。表达式位的 `match` 被 builder 包成 BlockExpr，
+// 于是 `let r = match t:` 里的递归 enum 解构不做 `let l = *l;` ⇒ 绑定是 `Box<T>`
+// 却当 `T` 用（rustc E0308 expected T, found Box<T>）。
+// 修法：gen_expr（及其全部调用者，40 个函数 / 185 个调用点）携带 tbm/vem，BlockExpr
+// 分支如实下传。
+#[test]
+fn r1_blockexpr_match_carries_box_context() {
+    let src = r#"
+enum BT:
+    Node(v: int, l: BT, r: BT)
+    Empty
+
+def total(t: BT) -> int =
+    let r = match t:
+        case BT.Empty:
+            0
+        case BT.Node(v: vv, l: ll, r: rr):
+            vv + total(ll) + total(rr)
+    r
+
+def main() =
+    let t = BT.Node(v: 1, l: BT.Node(v: 2, l: BT.Empty, r: BT.Empty), r: BT.Empty)
+    print(total(t))
+"#;
+    let r = run_rs_lz("r1_block_match", src);
+    assert!(r.emitted, "rs-lz 生成不应失败:\n{}", r.diag);
+    assert!(
+        r.rust.contains("let ll = *ll;") && r.rust.contains("let rr = *rr;"),
+        "块表达式内 match 的递归 Box 字段必须解引用（修前缺失 ⇒ E0308）：\n{}",
+        r.rust
+    );
+    assert!(
+        r.compile_ok && r.run_ok,
+        "生成的 Rust 应可编译运行（修前 E0308 expected BT, found Box<BT>）：\n{}",
+        r.diag
+    );
+    assert_eq!(r.stdout.trim(), "3", "递归求和应为 1+2=3");
+}
+
+// ── R2（BUG-483 缺口，中）：Pattern::LitF64 发裸 NaN/inf ───────────────────────
+//
+// 根因：`src/ir/lz_codegen.rs:1068` 对 `Pattern::Lit(LitKind::F64(n))` 直接
+// `format!("... v: {})", n)`，NaN/inf 时 .lzrs 里就是 `Pattern.LitF64(v: NaN)`，
+// LZ 编译器把 `NaN` 当未绑定变量 ⇒ 生成的 .lzrs 重编译失败；LZ 侧 gen_pattern 则发
+// `NaN_f64`（非法 Rust）。修法：Rust 侧统一走 lz_f64_expr（0.0/0.0、1.0/0.0、
+// -1.0/0.0，与表达式位同口径），LZ 侧 gen_pattern 走 fmt_f64（f64::NAN/INFINITY，
+// 与原生 expr_gen.rs:8390 对齐）。
+//
+// 说明：`case 2.0:` 这类 f64 模式在 builder 里会退化成 Pattern::LitStr("2")，
+// 源码层面**写不出** NaN 模式，故本用例在 IR 层注入（与台账「可复现性：低」一致）。
+#[test]
+fn r2_pattern_lit_f64_nan_serializes_to_valid_lz() {
+    let src = r#"
+def f(x: f64) -> int =
+    match x:
+        case 2.0:
+            1
+        case _:
+            0
+
+def main() =
+    print(f(2.0))
+"#;
+
+    fn patch(ir: &mut lang_zone::ir::IrModule, v: f64) -> usize {
+        use lang_zone::ir::node::{Item, LitKind, Pattern, Stmt};
+        let mut n = 0;
+        for item in &mut ir.items {
+            if let Item::FnDef(fd) = item {
+                for st in &mut fd.body.stmts {
+                    if let Stmt::Match { arms, .. } = st {
+                        if let Some(a0) = arms.first_mut() {
+                            a0.pattern = Pattern::Lit(LitKind::F64(v));
+                            n += 1;
+                        }
+                    }
+                }
+            }
+        }
+        n
+    }
+
+    // ① NaN：.lzrs 里必须是合法 LZ 表达式，不得是裸 NaN
+    let mut ir = build_ir_from(src);
+    assert!(patch(&mut ir, f64::NAN) > 0, "样本应含 match 臂");
+    let lzrs = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source(&ir);
+    let lit_lines = lzrs
+        .lines()
+        .filter(|l| l.contains("LitF64"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        lzrs.contains("Pattern.LitF64(v: 0.0/0.0)"),
+        "NaN 模式应以合法 LZ f64 表达式序列化（R2）:\n{lit_lines}"
+    );
+    assert!(
+        !lzrs.contains("v: NaN"),
+        "不得再发裸 `NaN` 字面量（LZ 会报「未绑定变量: NaN」）:\n{lit_lines}"
+    );
+    let _ = lit_lines;
+
+    // ② ±inf 同口径
+    let mut ir2 = build_ir_from(src);
+    patch(&mut ir2, f64::INFINITY);
+    let lzrs_inf = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source(&ir2);
+    assert!(
+        lzrs_inf.contains("Pattern.LitF64(v: 1.0/0.0)"),
+        "inf 模式应以 1.0/0.0 序列化"
+    );
+    assert!(!lzrs_inf.contains("v: inf"), "不得再发裸 `inf` 字面量");
+
+    // ③ 生成的 .lzrs 必须能重新过一遍 LZ 编译器（修前：未绑定变量: NaN）
+    let work = rslz_workdir("r2_nan_pattern");
+    let lzrs_path = work.join("nanpat.lzrs");
+    std::fs::write(&lzrs_path, &lzrs).expect("write lzrs");
+    let out = Command::new(lang_zone_bin())
+        .arg(&lzrs_path)
+        .output()
+        .expect("compile generated lzrs");
+    assert!(
+        out.status.success(),
+        ".lzrs 应重新编译通过（修前「未绑定变量: NaN」）:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // ④ 打印器跑起来后，生成的 Rust 模式位应是 f64::NAN（与原生同口径），不是 NaN_f64
+    let printer_rs = work.join("nanpat.rs");
+    let printer_src = std::fs::read_to_string(&printer_rs).expect("read printer .rs");
+    let (compile_ok, run_ok, stdout, diag) = rustc_and_run("r2_printer", &printer_src);
+    assert!(compile_ok && run_ok, "打印器应可编译运行:\n{diag}");
+    assert!(
+        stdout.contains("f64::NAN"),
+        "生成的 Rust 模式位应为 f64::NAN：\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("NaN_f64"),
+        "不得再发 `NaN_f64`（非法 Rust）"
+    );
+
+    // ⑤ 反证：把 .lzrs 改回修前形态（裸 NaN）后 LZ 编译器确实拒绝 —— 证明 ③ 真的在测 R2
+    let broken = lzrs.replace("Pattern.LitF64(v: 0.0/0.0)", "Pattern.LitF64(v: NaN)");
+    let broken_path = work.join("nanpat_broken.lzrs");
+    std::fs::write(&broken_path, broken).expect("write broken lzrs");
+    let bad = Command::new(lang_zone_bin())
+        .arg(&broken_path)
+        .output()
+        .expect("compile broken lzrs");
+    let bad_err = String::from_utf8_lossy(&bad.stderr).to_string();
+    assert!(
+        !bad.status.success() && bad_err.contains("未绑定变量"),
+        "反证失败：修前形态（v: NaN）应被 LZ 编译器拒绝并报「未绑定变量」:\n{bad_err}"
+    );
+}

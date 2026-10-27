@@ -1065,7 +1065,7 @@ impl LzGen {
             Pattern::Lit(LitKind::Int(n)) => format!("Pattern.LitInt(v: {})", n),
             Pattern::Lit(LitKind::Str(s)) => format!("Pattern.LitStr(s: \"{}\")", escape_lz(s)),
             Pattern::Lit(LitKind::Bool(b)) => format!("Pattern.LitBool(b: {})", b),
-            Pattern::Lit(LitKind::F64(n)) => format!("Pattern.LitF64(v: {})", n),
+            Pattern::Lit(LitKind::F64(n)) => format!("Pattern.LitF64(v: {})", lz_f64_expr(*n)),
             Pattern::Lit(_) => "Pattern.Wildcard".to_string(),
             Pattern::Tuple(elems) => {
                 let elems_items: Vec<String> = elems.iter().map(|e| self.pattern(e)).collect();
@@ -1158,28 +1158,37 @@ fn gen_lit(lit: &LitKind, ty: &str) -> String {
         }
         // LZ 中 `3` 是 int（3_i64），f64 字面量需带小数点（3.0）
         LitKind::F64(n) => {
-            // BUG-483：NaN/±inf 文本化后为 "NaN"/"inf"/"-inf"，若走 `{}.0` 后缀逻辑会产出
-            // `NaN.0` 等——LZ parser 把 `NaN` 当未绑定变量（IR build 报「未绑定变量: NaN」），
-            // math.lz 的 `const NAN = 0.0 / 0.0` 被 comptime 内联为字面量即触发。
-            // 改发合法的 LZ f64 表达式：除零在 LZ 运行期得 NaN/±inf（div_zero_f64.lz 探针
-            // 验证 native 正常生成 `0.0f64 / 0.0f64`）。fmt_f64 已把该 f64 值再文本化为
-            // Rust 的 f64::NAN/INFINITY，两处对齐原生 expr_gen.rs:8390。
-            let s = format!("{}", n);
-            let lower = s.to_ascii_lowercase();
-            let s = match lower.as_str() {
-                "nan" => "0.0/0.0".to_string(),
-                "inf" => "1.0/0.0".to_string(),
-                "-inf" => "-1.0/0.0".to_string(),
-                _ if s.contains('.') || s.contains('e') || s.contains('E') => s,
-                _ => format!("{}.0", s),
-            };
-            format!("Expr.LitF64(v: {}, ty: {})", s, ty)
+            format!("Expr.LitF64(v: {}, ty: {})", lz_f64_expr(*n), ty)
         }
         LitKind::Str(s) => format!("Expr.LitStr(s: \"{}\", ty: {})", escape_lz(s), ty),
         LitKind::FStr(s) => format!("Expr.LitFStr(s: \"{}\", ty: {})", escape_lz(s), ty),
         LitKind::Bool(b) => format!("Expr.LitBool(b: {}, ty: {})", b, ty),
         LitKind::Unit => format!("Expr.LitUnit(ty: {})", ty),
         LitKind::None_ => format!("Expr.LitNone(ty: {})", ty),
+    }
+}
+
+/// f64 → 合法 LZ f64 表达式文本（表达式位与模式位共用）。
+///
+/// BUG-483：NaN/±inf 的 `f64::to_string()` 是 "NaN"/"inf"/"-inf"，若走 `{}.0` 后缀
+/// 逻辑会产出 `NaN.0`——LZ parser 把 `NaN` 当未绑定变量（IR build 报「未绑定变量:
+/// NaN」），math.lz 的 `const NAN = 0.0 / 0.0` 被 comptime 内联为字面量即触发。
+/// 改发合法的 LZ f64 表达式：除零在 LZ 运行期得 NaN/±inf（div_zero_f64.lz 探针
+/// 验证 native 正常生成 `0.0f64 / 0.0f64`）。LZ 侧 fmt_f64 再把该 f64 值文本化为
+/// Rust 的 f64::NAN/INFINITY，两处对齐原生 expr_gen.rs:8390。
+///
+/// R2（BUG-483 残留）：`Pattern::LitF64` 此前直接把 f64 用 `{}` 塞进 .lzrs，
+/// NaN/inf 时同样产出裸 `NaN`/`inf` 字面量 ⇒ 生成的 .lzrs 重编译报「未绑定变量」。
+/// 表达式位与模式位统一走本函数，保证两处口径一致。
+fn lz_f64_expr(n: f64) -> String {
+    let s = format!("{}", n);
+    let lower = s.to_ascii_lowercase();
+    match lower.as_str() {
+        "nan" => "0.0/0.0".to_string(),
+        "inf" => "1.0/0.0".to_string(),
+        "-inf" => "-1.0/0.0".to_string(),
+        _ if s.contains('.') || s.contains('e') || s.contains('E') => s,
+        _ => format!("{}.0", s),
     }
 }
 
