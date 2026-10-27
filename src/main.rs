@@ -324,6 +324,55 @@ fn replace_ext(path: &str, from: &str, to: &str) -> String {
     }
 }
 
+/// 把（可能相对的）产物路径按**进程 cwd** 绝对化（N3）。
+///
+/// 自举路线 B 的自检链会把用户入参派生成产物路径再交给外部进程：用户按文档
+/// 写 `lzc --emit=rs-lz foo.lz`（相对路径）时，派生出的产物就是裸文件名
+/// `foo.exe`。Rust std 的 `Command` 对「不含路径分隔符的程序名」只按 `PATH`
+/// 解析，**不查进程 cwd**（Windows 的 `CreateProcess` 本身是会查 cwd 的，故这
+/// 是 std 侧的解析语义），于是产物明明存在，`Command::new("foo.exe")` 仍报
+/// `Error { kind: NotFound }`。统一绝对化后，相对 / 绝对 / 含子目录三种入参
+/// 形态走同一条路径。
+fn absolutize(path: &str) -> std::path::PathBuf {
+    let p = Path::new(path);
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    match std::env::current_dir() {
+        Ok(cwd) => cwd.join(p),
+        // 取不到 cwd 时保留原样：由 run_selfcheck_exe 的 is_file() 给出带路径的
+        // 诊断，而不是 panic。
+        Err(_) => p.to_path_buf(),
+    }
+}
+
+/// 运行自举链路的自检产物；一切可预期失败都返回 `Err`（不再 `expect` panic，
+/// 把「工具链跑不起来」伪装成崩溃）。成功时返回子进程输出，由调用方 print。
+fn run_selfcheck_exe(exe_path: &str) -> Result<std::process::Output, String> {
+    let exe_abs = absolutize(exe_path);
+    if !exe_abs.is_file() {
+        return Err(format!(
+            "自检产物不存在: {}（rustc 报告成功但未产出可执行文件）",
+            exe_abs.display()
+        ));
+    }
+    let out = Command::new(&exe_abs)
+        .output()
+        .map_err(|e| format!("无法启动自检产物 {}: {e}", exe_abs.display()))?;
+    if !out.status.success() {
+        return Err(format!(
+            "自检产物运行失败: {} (exit={}): {}",
+            exe_abs.display(),
+            out.status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string()),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(out)
+}
+
 // ── 自举路线 B：LZ 写的前端（src/frontend/*.lz）接入主流程 ──
 // --emit=lex-lz / --emit=parse-lz：用 LZ 实现的词法/语法前端处理输入文件，
 // 走与 --emit=ir-lz 相同的 lzc→rustc→run 递归管线，输出可与 Rust 版基线 diff。
@@ -375,11 +424,21 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
     eprintln!("Generated {} -> {} (LZ {} frontend)", path, lz_path, mode);
 
     // 与 --emit=ir-lz 相同的递归管线：lang-zone → .rs → rustc → exe → stdout
+    // N3 同族：产物路径先绝对化（相对入参下裸文件名不按 cwd 解析）。
     let self_exe = std::env::current_exe().unwrap_or_default();
-    let build = Command::new(&self_exe)
-        .arg(&lz_path)
-        .output()
-        .expect("run lang-zone on generated LZ frontend");
+    let lz_path_abs = absolutize(&lz_path);
+    let build = match Command::new(&self_exe).arg(&lz_path_abs).output() {
+        Ok(out) => out,
+        Err(e) => {
+            eprintln!(
+                "LZ {} frontend 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
+                mode,
+                self_exe.display(),
+                lz_path_abs.display()
+            );
+            std::process::exit(1);
+        }
+    };
     if !build.status.success() {
         eprintln!(
             "LZ {} frontend 编译失败: {}",
@@ -392,17 +451,25 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
     let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target/debug/liblz_builtins.rlib");
     let exe_path = replace_ext(&lz_path, ".lzfront", ".exe");
-    let rc = Command::new("rustc")
+    let rs_path_abs = absolutize(&rs_path);
+    let exe_path_abs = absolutize(&exe_path);
+    let rc = match Command::new("rustc")
         .args(["--edition", "2021"])
-        .arg(&rs_path)
+        .arg(&rs_path_abs)
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins.display()))
         .arg("-L")
         .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
         .arg("-o")
-        .arg(&exe_path)
+        .arg(&exe_path_abs)
         .output()
-        .expect("run rustc on generated .rs");
+    {
+        Ok(out) => out,
+        Err(e) => {
+            eprintln!("LZ {} frontend 失败: 无法启动 rustc（不在 PATH？）: {e}", mode);
+            std::process::exit(1);
+        }
+    };
     if !rc.status.success() {
         eprintln!(
             "LZ {} frontend rustc 失败: {}",
@@ -411,16 +478,13 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
         );
         std::process::exit(1);
     }
-    let run = Command::new(&exe_path).output().expect("run generated exe");
-    if !run.status.success() {
-        eprintln!(
-            "LZ {} frontend 运行失败: {}",
-            mode,
-            String::from_utf8_lossy(&run.stderr)
-        );
-        std::process::exit(1);
+    match run_selfcheck_exe(&exe_path) {
+        Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
+        Err(msg) => {
+            eprintln!("LZ {} frontend 自检失败: {msg}", mode);
+            std::process::exit(1);
+        }
     }
-    print!("{}", String::from_utf8_lossy(&run.stdout));
 }
 
 // Windows 主线程栈默认仅 1MB（链接器默认），深层递归下降（宏展开、嵌套缩进块
@@ -930,11 +994,20 @@ fn compile_main(args: Vec<String>) -> i32 {
                 });
                 eprintln!("Generated {} -> {} (LZ IR codegen)", path, lz_path);
                 // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
+                // N3 同族：产物路径先绝对化（相对入参下裸文件名不按 cwd 解析）。
                 let self_exe = std::env::current_exe().unwrap_or_default();
-                let build = Command::new(&self_exe)
-                    .arg(&lz_path)
-                    .output()
-                    .expect("run lang-zone on generated LZ");
+                let lz_path_abs = absolutize(&lz_path);
+                let build = match Command::new(&self_exe).arg(&lz_path_abs).output() {
+                    Ok(out) => out,
+                    Err(e) => {
+                        eprintln!(
+                            "LZ IR codegen 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
+                            self_exe.display(),
+                            lz_path_abs.display()
+                        );
+                        std::process::exit(1);
+                    }
+                };
                 if !build.status.success() {
                     eprintln!(
                         "LZ IR codegen 编译失败: {}",
@@ -946,17 +1019,25 @@ fn compile_main(args: Vec<String>) -> i32 {
                 let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("target/debug/liblz_builtins.rlib");
                 let exe_path = replace_ext(&lz_path, ".lzlz", ".exe");
-                let rc = Command::new("rustc")
+                let rs_path_abs = absolutize(&rs_path);
+                let exe_path_abs = absolutize(&exe_path);
+                let rc = match Command::new("rustc")
                     .args(["--edition", "2021"])
-                    .arg(&rs_path)
+                    .arg(&rs_path_abs)
                     .arg("--extern")
                     .arg(format!("lz_builtins={}", builtins.display()))
                     .arg("-L")
                     .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
                     .arg("-o")
-                    .arg(&exe_path)
+                    .arg(&exe_path_abs)
                     .output()
-                    .expect("run rustc on generated .rs");
+                {
+                    Ok(out) => out,
+                    Err(e) => {
+                        eprintln!("LZ IR codegen 失败: 无法启动 rustc（不在 PATH？）: {e}");
+                        std::process::exit(1);
+                    }
+                };
                 if !rc.status.success() {
                     eprintln!(
                         "LZ IR codegen rustc 失败: {}",
@@ -964,14 +1045,13 @@ fn compile_main(args: Vec<String>) -> i32 {
                     );
                     std::process::exit(1);
                 }
-                let run = Command::new(&exe_path)
-                    .output()
-                    .expect("run generated exe");
-                if !run.status.success() {
-                    eprintln!("LZ IR codegen 运行失败: {}", String::from_utf8_lossy(&run.stderr));
-                    std::process::exit(1);
+                match run_selfcheck_exe(&exe_path) {
+                    Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
+                    Err(msg) => {
+                        eprintln!("LZ IR codegen 自检失败: {msg}");
+                        std::process::exit(1);
+                    }
                 }
-                print!("{}", String::from_utf8_lossy(&run.stdout));
                 return 0;
             }
             Err(e) => {
@@ -996,11 +1076,25 @@ fn compile_main(args: Vec<String>) -> i32 {
                 });
                 eprintln!("Generated {} -> {} (LZ Rust codegen)", path, lz_path);
                 // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
+                //
+                // N3：产物路径一律先绝对化，再交给外部进程。相对入参时 exe_path
+                // 只是裸文件名（如 "match_patterns.exe"），`Command::new` 不按
+                // cwd 解析 → 自检 NotFound panic；详见 absolutize 的注释。
+                // 产物落盘位置不变（仍是 <入参目录>/<stem>.{lzrs,rs,exe}），
+                // 只是改用绝对形态寻址。
                 let self_exe = std::env::current_exe().unwrap_or_default();
-                let build = Command::new(&self_exe)
-                    .arg(&lz_path)
-                    .output()
-                    .expect("run lang-zone on generated LZ");
+                let lz_path_abs = absolutize(&lz_path);
+                let build = match Command::new(&self_exe).arg(&lz_path_abs).output() {
+                    Ok(out) => out,
+                    Err(e) => {
+                        eprintln!(
+                            "LZ Rust codegen 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
+                            self_exe.display(),
+                            lz_path_abs.display()
+                        );
+                        std::process::exit(1);
+                    }
+                };
                 if !build.status.success() {
                     eprintln!(
                         "LZ Rust codegen 编译失败: {}",
@@ -1012,17 +1106,27 @@ fn compile_main(args: Vec<String>) -> i32 {
                 let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("target/debug/liblz_builtins.rlib");
                 let exe_path = replace_ext(&lz_path, ".lzrs", ".exe");
-                let rc = Command::new("rustc")
+                let rs_path_abs = absolutize(&rs_path);
+                let exe_path_abs = absolutize(&exe_path);
+                let rc = match Command::new("rustc")
                     .args(["--edition", "2021"])
-                    .arg(&rs_path)
+                    .arg(&rs_path_abs)
                     .arg("--extern")
                     .arg(format!("lz_builtins={}", builtins.display()))
                     .arg("-L")
                     .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
                     .arg("-o")
-                    .arg(&exe_path)
+                    .arg(&exe_path_abs)
                     .output()
-                    .expect("run rustc on generated .rs");
+                {
+                    Ok(out) => out,
+                    Err(e) => {
+                        eprintln!(
+                            "LZ Rust codegen 失败: 无法启动 rustc（不在 PATH？）: {e}"
+                        );
+                        std::process::exit(1);
+                    }
+                };
                 if !rc.status.success() {
                     eprintln!(
                         "LZ Rust codegen rustc 失败: {}",
@@ -1030,17 +1134,13 @@ fn compile_main(args: Vec<String>) -> i32 {
                     );
                     std::process::exit(1);
                 }
-                let run = Command::new(&exe_path)
-                    .output()
-                    .expect("run generated exe");
-                if !run.status.success() {
-                    eprintln!(
-                        "LZ Rust codegen 运行失败: {}",
-                        String::from_utf8_lossy(&run.stderr)
-                    );
-                    std::process::exit(1);
+                match run_selfcheck_exe(&exe_path) {
+                    Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
+                    Err(msg) => {
+                        eprintln!("LZ Rust codegen 自检失败: {msg}");
+                        std::process::exit(1);
+                    }
                 }
-                print!("{}", String::from_utf8_lossy(&run.stdout));
                 return 0;
             }
             Err(e) => {
