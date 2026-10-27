@@ -2927,7 +2927,7 @@ match 解构端 `let x = *x;`。
 rustc 编译运行输出 6（原生一致）；cargo test --test lz_ir_bootstrap 24/24 全绿。
 回归测试：rs_lz_recursive_enum_boxes_fields（声明+构造）+ rs_lz_recursive_enum_match_derefs（解构+运行输出 6）
 状态：FIXED
-commit：1fdf50c（声明+构造）/ 本次（解构）
+commit：1fdf50c（声明+构造）/ 6df5a51（解构）
 
 ## BUG-477 [high] rs-lz 把内建类型转换 `str(x)`/`int(x)`/`f64(x)` 原发成函数调用
 
