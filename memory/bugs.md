@@ -2937,7 +2937,21 @@ stdlib 魔法分支；原生 expr_gen.rs:2178 有守卫
 线程化为同一立项）；gen_call 在命中 stdlib 魔法名时先查该表，
 存在同名用户函数则走通用调用分支。
 探针 _probes/rslz4/user_sum.lz：rs-lz 输出 6，native（有守卫）输出 3。
-状态：OPEN（与 BUG-475 残留同源，需统一注册表立项）
+修复（[2026-10-27T12:15:00+08:00]）：
+1. lz_codegen_lib.lz 新增 `module_user_fn_names(m) -> List[str]`：遍历 m.items，
+   收集顶层 `Item.FnDef` 的非 main 名字。
+2. lz_codegen.rs 生成的 main 改为
+   `let uf = module_user_fn_names(m)` + `codegen_module(m, uf)`。
+3. `user_fns: List[str]` 穿透 54 个 gen_expr/gen_call 传递闭包函数（217 个
+   调用点），gen_call 的 `Expr.Var` 分支前置
+   `if not is_user_fn(user_fns, n):`（新增 is_user_fn 线性扫描 helper），
+   用户同名函数走通用调用分支（不触发 print/len/set!/sorted/reversed/min/
+   max/sum/abs/zip/Dict/Set 任一魔法）。
+验证：user_sum.lz 双路 rustc 编译运行，输出 3 一致（此前 rs-lz=6/native=3）；
+stdlib `sum([1,2,3])` 无用户 sum 时仍发 `.iter().copied().sum::<i64>()`（1 处命中）；
+lz_ir_bootstrap 22 项全绿；新增回归测试 `rs_lz_self_user_fn_shadows_stdlib_magic`
+双路断言输出 3 且 rs-lz 产物不含 `.iter().copied().sum::<i64>()`。
+状态：FIXED
 
 ## BUG-479 [high] rs-lz 前端自检对含 match 的程序失败（E0533 Expr::BlockExpr）
 

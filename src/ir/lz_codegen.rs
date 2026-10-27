@@ -71,7 +71,7 @@ pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
         gen_str_list(&module.prelude),
         module.version
     ));
-    out.push_str("    print_str(codegen_module(m))\n    return 0\n");
+    out.push_str("    let uf = module_user_fn_names(m)\n    print_str(codegen_module(m, uf))\n    return 0\n");
     out
 }
 

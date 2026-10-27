@@ -2051,3 +2051,102 @@ fn rs_lz_self_dict_kwarg_literal() {
 
     let _ = fs::remove_dir_all(&work);
 }
+
+// BUG-478：用户顶层函数 `sum(xs)` 遮蔽标准库 `sum` 魔法。rs-lz 此前无「用户函数注册
+// 表」概念，`print(sum(xs))` 里 `sum` 被误发成 `xs.iter().copied().sum::<i64>()`
+// （1+2+3=6），而原生走用户函数（返回 xs.len()=3）→ 双路输出不一致。修复：main 里
+// `module_user_fn_names(m)` 算一次用户函数名，穿透到 gen_call，魔法分支前置
+// `not is_user_fn(user_fns, n)` 守卫。
+#[test]
+fn rs_lz_self_user_fn_shadows_stdlib_magic() {
+    let bin = env!("CARGO_BIN_EXE_lang-zone");
+    let work = std::env::temp_dir().join("lz_self_user_sum_shadow");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).expect("mkwork");
+    let lz_path = work.join("us.lz");
+    fs::write(
+        &lz_path,
+        "def sum(xs: List<int>) -> int =\n    xs.len()\n\ndef main() =\n    let xs = [1, 2, 3]\n    print(sum(xs))\n",
+    )
+    .expect("write lz");
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+
+    // native（.rs 落到 .lz 旁）
+    let out_n = Command::new(&bin).arg(&lz_path).output().expect("native");
+    assert!(out_n.status.success(), "native 失败: {}", String::from_utf8_lossy(&out_n.stderr));
+    let text_n = fs::read_to_string(work.join("us.rs")).expect("read native us.rs");
+    assert!(
+        text_n.contains("println!(\"{:?}\", sum(xs.clone()))")
+            || text_n.contains("sum(xs"),
+        "native 未调用用户 sum: {}",
+        text_n
+    );
+
+    // rs-lz（stdout 是 Rust 源码）
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("rs-lz");
+    assert!(out_lz.status.success(), "rs-lz 失败: {}", String::from_utf8_lossy(&out_lz.stderr));
+    let text_lz = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        !text_lz.contains(".iter().copied().sum::<i64>()"),
+        "rs-lz 仍把用户 sum 发成 stdlib 魔法:\n{}",
+        text_lz
+    );
+    assert!(
+        text_lz.contains("pub fn sum("),
+        "rs-lz 未输出用户 sum 定义:\n{}",
+        text_lz
+    );
+
+    // 编译运行 rs-lz 产物，断言输出与 native 一致（= 3）
+    let lz_rs = work.join("us_lz.rs");
+    fs::write(&lz_rs, &text_lz).expect("write rs-lz .rs");
+    let lz_exe = work.join("us_lz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(rc.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+    let run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "3",
+        "rs-lz 应调用用户 sum 得 3，而非 stdlib sum 得 6"
+    );
+
+    // native 也编译运行对照
+    let n_rs = work.join("us_n.rs");
+    fs::write(&n_rs, &text_n).expect("write native .rs");
+    let n_exe = work.join("us_n.exe");
+    let rc_n = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&n_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&n_exe)
+        .output()
+        .expect("rustc native");
+    assert!(rc_n.status.success(), "native 产物 rustc 失败: {}", String::from_utf8_lossy(&rc_n.stderr));
+    let run_n = Command::new(&n_exe).output().expect("run native exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run_n.stdout).trim(),
+        "3",
+        "native 应得 3"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
