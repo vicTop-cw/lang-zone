@@ -5766,7 +5766,16 @@ impl CodeGen {
                     )
                 } else if is_dict {
                     // HashMap 不支持 IndexMut，使用 .insert() 代替
-                    format!("{}.insert(&{}, {})", base_s, key_s, self.gen_expr(value))
+                    // NATIVE-BUG（dict 自字段插入被克隆）：base 是 `self.<field>` 时
+                    // gen_expr 会套「self 字段读取克隆」规则生成 `self.d.clone()`，
+                    // insert 落在临时 dict 上 → 原 dict 未变，后续读取 unwrap None panic。
+                    // 与 BUG-457/460 同族：写目标（place）须免克隆。
+                    format!(
+                        "{}.insert(&{}, {})",
+                        base_s.trim_end_matches(".clone()"),
+                        key_s,
+                        self.gen_expr(value)
+                    )
                 } else if is_params_args {
                     format!("{}[{}] = Box::new({})", base_s, key_s, self.gen_expr(value))
                 } else {

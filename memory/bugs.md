@@ -2661,7 +2661,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 - 验证: g92 修复后 RSLZ 产物 `self.d.insert(k, v);`，运行 `1|2`（正确写入）。g96（顶层 dict 赋值）修复前后均 MATCH `1|2|3`；g97_self_dict_read（方法内 `self.d[k]` 读取）MATCH `5|9`（读侧 clone 无害，保持原生形态）。
 - 回归: cargo test -j 4 -- --test-threads=1 全绿 0 failed（exit 0）。
 
-## NATIVE-BUG (dict 自字段插入被克隆) [2026-10-25T14:10:00Z] [high] OPEN
+## NATIVE-BUG (dict 自字段插入被克隆) [2026-10-25T14:10:00Z] [high] FIXED
 - 类目: native codegen 缺陷（rs-lz 不得复刻；oracle 规则：native 错误时 rs-lz 保持正确，不复刻）
 - summary: 原生 codegen 对 `self.d[k] = v`（dict 下标赋值，base 为 self.field）发射 `self.d.clone().insert(k, v)`，插入落在克隆的临时 dict 上 → 原 dict 未变 → 后续读取 `self.d["a"]` 运行 panic `called Option::unwrap() on a None value`
 - detail: 原生 expr_gen.rs:5248-5255 的「self 字段读取克隆」规则被过度套用到 IndexSet 上：base_s = gen_expr(base) 对 `self.<field>` 补 `.clone()`（expr_gen.rs:5691 → 5709 `.insert(&{}, {})`）。clone 得到独立 dict，insert 发生其上，原 self.d 不变，数据静默丢失且无编译错误；随后读取即 unwrap None panic。复现 g92_self_dict_index_assign.lz：原生 emit `self.d.clone().insert(k, v);` → `c.d.get(&"a").unwrap()` panic（`Option::unwrap() on None`，native.rs:53:59）。
@@ -3091,3 +3091,26 @@ str 字面量须 `.to_string()` 后借位。
 缩进差异（4 行，非签名）。回归测试 rs_lz_trait_assoc_type_return_self_qualified 增补
 impl 方法断言（native/rs-lz 各一条 `fn item(&self) -> Self::Item {`）。lz_ir_bootstrap
 19 passed。
+
+## NATIVE-BUG（dict 自字段插入被克隆）修复 [2026-10-27T09:15:00+08:00] 状态：FIXED
+现象（复核探针 _probes/rslz4/g462_self_dict_index.lz）：`self.d[k] = v` 原生发
+`self.d.clone().insert(k, v)` → insert 落在临时 dict 上，原 dict 未变，随后
+`c.d.get(&"a").unwrap()` panic（Option::unwrap() on None）。
+根因：Stmt::Assign 的 dict 分支（stmt_gen.rs:1285-1286）直接 `gen_expr(base)`，
+base 是 `self.<field>` 时套「self 字段读取克隆」规则生成 `self.d.clone()`。与
+BUG-457/460 同族：写目标（place）须免克隆。同族对照：顶层 `d.insert(...)`（g96）
+base 是 Var，不套克隆规则，故正确。
+修复：
+1. stmt_gen.rs Assign dict 分支：`base_s.trim_end_matches(".clone()")`（对齐 rs-lz
+   gen_recv_place 的免克隆语义）；嵌套 dict 链（`settings["theme"]["color"] = c`）
+   的 `base2_s` 同样 trim（get_mut 链需落在真实外层 dict 上）。
+2. expr_gen.rs IndexSet 的 is_dict 分支同步 trim（防御性对齐，覆盖表达式上下文）。
+3. rs-lz 新增 `gen_dict_place`：嵌套 dict 链的写目标用 `({base}).get_mut(&k).unwrap()`
+   拿到外层 dict 的可变引用，避免 `(self.settings.get(&"theme").cloned().unwrap()).insert(...)`
+   插到克隆的内层 dict（g463 实测 rs-lz 原输出 red / native 输出 blue）。Assign 的
+   dict 分支改用 gen_dict_place。注意不能把 `is_dict_irtype(expr_ty(b))` 写成 match
+   guard（LZ→Rust 翻译后 b 是 Box<Expr>，E0308），需写在 case 体内用 if。
+验证：g462（self.d[k]=v）双路 rustc 编译运行输出 `1` 一致；g463（嵌套 dict 链）双路
+输出 `blue` 一致；g96（顶层 dict 赋值）双路一致；残留 diff 仅 BTreeMap/Dict 别名 +
+impl 方法体缩进（10 行）。回归测试 rs_lz_self_dict_index_assign_not_cloned（断言 native
+含 `self.d.insert(k, v)` 且不含 `self.d.clone().insert`，双路 rustc 编译运行输出 `1`）。

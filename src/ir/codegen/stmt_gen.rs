@@ -1277,13 +1277,27 @@ impl CodeGen {
                             if is_dict2 {
                                 let base2_s = self.gen_expr(base2);
                                 let key2_s = self.gen_expr(key2);
-                                let inner = format!("({}).get_mut(&{}).unwrap()", base2_s, key2_s);
+                                // 嵌套链的 base 同样可能走 self 字段克隆 → 写目标须免克隆
+                                let inner = format!(
+                                    "({}).get_mut(&{}).unwrap()",
+                                    base2_s.trim_end_matches(".clone()"),
+                                    key2_s
+                                );
                                 self.emit_line(&format!("{}.insert({}, {});", inner, key_s, val_s));
                                 return;
                             }
                         }
                         let base_s = self.gen_expr(base);
-                        self.emit_line(&format!("{}.insert({}, {});", base_s, key_s, val_s));
+                        // NATIVE-BUG（dict 自字段插入被克隆）：base 是 `self.<field>` 时
+                        // gen_expr 会套「self 字段读取克隆」规则生成 `self.d.clone()`，
+                        // insert 落在临时 dict 上 → 原 dict 未变，后续读取 unwrap None
+                        // panic。与 BUG-457/460 同族：写目标（place）须免克隆。
+                        self.emit_line(&format!(
+                            "{}.insert({}, {});",
+                            base_s.trim_end_matches(".clone()"),
+                            key_s,
+                            val_s
+                        ));
                         return;
                     }
                     // 用户 struct 索引赋值 → .__setitem__(key, value)（key 保持 i64，内部 self.items[i] 再转 usize）

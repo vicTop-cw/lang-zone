@@ -1138,6 +1138,20 @@ def gen_recv_place(r: Expr, fn_raises: MaybeIrType) -> String =
                 gen_recv_place(b, fn_raises) + "[".to_string() + gen_expr(k, fn_raises) + " as usize]".to_string()
         case _ => gen_expr(r, fn_raises)
 
+// NATIVE-BUG 对齐（dict 自字段插入被克隆）：嵌套 dict 链的写目标须用 `.get_mut().unwrap()`
+// 拿到外层 dict 的可变引用，否则 `self.settings["theme"]["color"] = c` 被渲染成
+// `(self.settings.get(&"theme").cloned().unwrap()).insert(...)` —— insert 落在克隆的内层
+// dict 上，原 dict 未变（g463 实测 rs-lz 输出 red / native 输出 blue）。原生
+// stmt_gen.rs 的 Assign dict 分支用 `({base}).get_mut(&k).unwrap()` 处理同款嵌套链。
+def gen_dict_place(r: Expr) -> String =
+    match r:
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            if is_dict_irtype(expr_ty(b)):
+                "(".to_string() + gen_dict_place(b) + ").get_mut(&".to_string() + gen_expr(k, MaybeIrType.NoTy) + ").unwrap()".to_string()
+            else:
+                gen_recv_place(r, MaybeIrType.NoTy)
+        case _ => gen_recv_place(r, MaybeIrType.NoTy)
+
 def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeIrType) -> String =
     let recv0 = gen_recv_place(r, fn_raises)
     // BUG-428：LZ 的 `.len()` 返回 int（i64），Rust 的 `len()` 是 usize ⇒ 必须补 `as i64`，
@@ -1900,7 +1914,7 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
                     // （原生对 `self.d` 套 clone → 插到临时 dict → 数据丢失运行 panic，
                     // 见 ledger 原生 bug 条目，rs-lz 不复刻该缺陷）。
                     if is_dict_irtype(expr_ty(b)):
-                        gen_recv_place(b, MaybeIrType.NoTy) + ".insert(".to_string() + gen_expr(k, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ");".to_string()
+                        gen_dict_place(b) + ".insert(".to_string() + gen_expr(k, MaybeIrType.NoTy) + ", ".to_string() + gen_expr(v, MaybeIrType.NoTy) + ");".to_string()
                     else:
                         // BUG-460：`self.items[0] = x` 的下标赋值 target 按 place 发射
                         // （gen_recv_place 已对 IndexGet 递归 base），否则 `self.items.clone()[0]=x`

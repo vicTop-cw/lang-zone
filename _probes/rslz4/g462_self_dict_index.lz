@@ -1,0 +1,14 @@
+// g92_self_dict_index_assign — Dict 下标赋值 self.d[k] = v（dict place 发射风险）
+struct Cache:
+    d: Dict<str, int>
+
+impl Cache:
+    def put(self, k: str, v: int) -> None =
+        self.d[k] = v
+
+def main():
+    let mut c = Cache { d: {} }
+    c.put("a", 1)
+    c.put("b", 2)
+    print(c.d["a"])
+    print(c.d["b"])

@@ -1819,3 +1819,127 @@ def main() =
 
     let _ = fs::remove_dir_all(&work);
 }
+
+#[test]
+fn rs_lz_self_dict_index_assign_not_cloned() {
+    // NATIVE-BUG（dict 自字段插入被克隆）：原生 codegen 对 `self.d[k] = v` 的 base
+    // （self.field）套「self 字段读取克隆」规则 → `self.d.clone().insert(k, v)`，insert
+    // 落在临时 dict 上，原 dict 未变，后续读取 unwrap None panic。修复：Assign 的 dict
+    // 分支 trim 掉 `.clone()`；嵌套 dict 链用 `.get_mut(&k).unwrap()`。rs-lz 侧由
+    // gen_dict_place 对齐原生正确形态。
+    let source = r#"
+struct Cache:
+    d: Dict<str, int>
+
+impl Cache:
+    def put(self, k: str, v: int) -> None =
+        self.d[k] = v
+
+def main():
+    let mut c = Cache { d: {} }
+    c.put("a", 1)
+    print(c.d["a"])
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_self_dict");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("sd_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("self.d.insert(k, v)"),
+        "BUG：native 未对 self.d[k]=v 发 `self.d.insert(k, v)`（仍带 .clone() → 插到临时 dict）:\n{}",
+        native_src
+    );
+    assert!(
+        !native_src.contains("self.d.clone().insert"),
+        "BUG：native 仍发 `self.d.clone().insert`（插到临时 dict，数据丢失）:\n{}",
+        native_src
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let native_exe = work.join("sd_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(
+        rc.status.success(),
+        "BUG 回归：native 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let native_run = Command::new(&native_exe).output().expect("run native exe");
+    assert!(native_run.status.success(), "native 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&native_run.stdout).trim(),
+        "1",
+        "native self.d[k]=v 写入未生效"
+    );
+
+    // rs-lz：同样应发 `self.d.insert(k, v)` 并编译运行
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("self.d.insert(k, v)"),
+        "rs-lz 未对 self.d[k]=v 发 `self.d.insert(k, v)`:\n{}",
+        text
+    );
+    let lz_rs = work.join("sd_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("sd_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc2.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc2.stderr)
+    );
+    let lz_run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert!(lz_run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&lz_run.stdout).trim(),
+        "1",
+        "rs-lz self.d[k]=v 写入未生效"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
