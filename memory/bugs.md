@@ -2843,8 +2843,25 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
     E0425 cannot find value rest in this scope）。② .as_slice() 后元素绑定为 &T，
     rs-lz 发 `return a` 未解引用（应发 `return *a`，E0308 mismatched types found &i64）。
 - 参考: 原生 gen_pattern 对 List 余项发 `rest @ ..`；对 slice 绑定元素发解引用。
-- 处置: 未修，留后续（本回合聚焦 scrutinee 变换，不 scope-creep）。
-- status: OPEN
+- 处置: ① 余项语法 BUG-470 一并修（`[a, rest @ ..]`）；② 元素绑定解引用本回合修。
+- 修复（[2026-10-27T13:05:00+08:00]）：
+  lz_codegen_lib.lz gen_stmt 的 Stmt.Match 分支先算
+  `let scrut_slice: bool = scrut_is_list(expr_ty(s)) and any_arm_pat_is_list(as_)`，
+  与 `base_sc + ".as_slice()"` 共用同一布尔；穿透到 gen_match_arms/gen_match_arm
+  新增 `scrut_slice: bool` 参数；新增 `list_elem_bindings(p)`（仅收集 List pattern
+  的直接 Ident 元素绑定，不含 Rest/嵌套），gen_match_arm 在其真时给每个元素绑定
+  生成 `let <n> = *<n>;` 前缀，并整体包在臂体块里
+  `{ <derefs> <gen_value_block> }`（否则 `pat => let a = *a; {..}` 非法）。
+  LZ 语言坑：`bindings[idx]` 在 String `+` 里会被翻译成移动（E0507/E0382），
+  必须 `let bn1 = bindings[idx].clone(); let bn2 = bindings[idx].clone();` 两拷贝；
+  `if` 块内声明的变量不外泄，bindings 须声明在函数级
+  `let mut bindings: List[str] = list_elem_bindings(pat) if scrut_slice else []`。
+  验证：list_match.lz rs-lz 产物 rustc 编译通过、运行输出 `7`（first([7,8,9])）；
+  str_match.lz 仍编译通过（BUG-470 未回归）；lz_ir_bootstrap 22 项全绿；
+  batch_sweep 仅剩 g465_global_let/var（顶层 var/let 本不支持，非真 bug）。
+  新增回归测试 `rs_lz_list_pattern_element_binding_deref`（断言 rs-lz 产物含
+  `[a, rest @ ..]` 与 `let a = *a;`，rustc 编译运行输出 `7`）。
+- status: FIXED
 
 ## BUG-471(a) [high] rs-lz 具名 Rest 模式发成 `..rest`（E0425）
 

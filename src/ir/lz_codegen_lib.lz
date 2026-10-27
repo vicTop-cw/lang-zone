@@ -513,14 +513,29 @@ def any_arm_pat_is_list(arms: List<(Pattern, MaybeExpr, BlockIR)>) -> bool =
         if pattern_is_list(arm.0): found = true
     found
 
-def gen_match_arms(arms: List<(Pattern, MaybeExpr, BlockIR)>, fn_raises: MaybeIrType, user_fns: List[str]) -> String =
+def gen_match_arms(arms: List<(Pattern, MaybeExpr, BlockIR)>, fn_raises: MaybeIrType, user_fns: List[str], scrut_slice: bool) -> String =
     let mut out: String = "".to_string()
     for idx in 0..arms.len():
         let arm = arms[idx].clone()
-        out = out + gen_match_arm(arm, fn_raises, user_fns)
+        out = out + gen_match_arm(arm, fn_raises, user_fns, scrut_slice)
     out
 
-def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR), fn_raises: MaybeIrType, user_fns: List[str]) -> String =
+// BUG-471（②）：`match xs.clone().as_slice() { [a, ..] => ... }` 里元素绑定 a 的类型是
+// &T（slice 元素），而 LZ 侧 a 声明为 T；原生靠类型推断在**使用点**插
+// `__implicit_from__(a.clone())`，rs-lz 无推断，需在臂体**开头**插 `let a = *a;`。
+// 仅收集 List pattern 的直接 Ident 元素绑定（不含 Rest/嵌套）。
+def list_elem_bindings(p: Pattern) -> List[str] =
+    match p:
+        case Pattern.List(elems: es) =>
+            let mut out: List[str] = []
+            for idx in 0..es.len():
+                match es[idx]:
+                    case Pattern.Ident(name: n) => out = out + [n]
+                    case _ => ()
+            out
+        case _ => []
+
+def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR), fn_raises: MaybeIrType, user_fns: List[str], scrut_slice: bool) -> String =
     let pat = arm.0
     let gd = arm.1
     let blk = arm.2
@@ -529,7 +544,18 @@ def gen_match_arm(arm: (Pattern, MaybeExpr, BlockIR), fn_raises: MaybeIrType, us
         case MaybeExpr.YesExpr(v: vv) => " if ".to_string() + gen_expr(vv, MaybeIrType.NoTy, user_fns)
         case MaybeExpr.NoExpr => "".to_string()
     let blk_s = gen_value_block(blk, fn_raises, user_fns)
-    "    ".to_string() + pat_s + gd_s + " => ".to_string() + blk_s + ",\n".to_string()
+    // BUG-471：slice scrutinee 时给元素绑定插解引用 let。
+    // bindings 声明在函数级（LZ 块内声明不外泄），derefs 累积到臂体块内。
+    let mut bindings: List[str] = list_elem_bindings(pat) if scrut_slice else []
+    let mut derefs: String = "".to_string()
+    for idx in 0..bindings.len():
+        let bn1 = bindings[idx].clone()
+        let bn2 = bindings[idx].clone()
+        derefs = derefs + "    let " + bn1 + " = *" + bn2 + ";\n"
+    // BUG-471：derefs 必须落在臂体块内（臂体形态 `pat => { prelude body }`），
+    // 否则 `pat => let a = *a; { ... }` 非法（arm 后不能裸 let 语句）。
+    let arm_body_s = ("{\n" + derefs + blk_s + "}\n") if bindings.len() > 0 else blk_s
+    "    ".to_string() + pat_s + gd_s + " => ".to_string() + arm_body_s + ",\n".to_string()
 
 // D2 缺口补齐：Pattern codegen（复用 display_pattern 的输出格式）
 def gen_pattern(p: Pattern) -> String =
@@ -2021,11 +2047,12 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
                             if n == "self": "self.clone()".to_string()
                             else: base_s + ".clone()".to_string()
                         case _: base_s
-            let scrut_s = base_sc + ".as_slice()".to_string() if (scrut_is_list(expr_ty(s)) and any_arm_pat_is_list(as_)) else base_sc
+            let scrut_slice: bool = (scrut_is_list(expr_ty(s)) and any_arm_pat_is_list(as_))
+            let scrut_s = base_sc + ".as_slice()".to_string() if scrut_slice else base_sc
             if is_tail:
-                "match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises, user_fns) + "}".to_string()
+                "match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises, user_fns, scrut_slice) + "}".to_string()
             else:
-                "let _ = match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises, user_fns) + "};".to_string()
+                "let _ = match ".to_string() + scrut_s + " {\n".to_string() + gen_match_arms(as_, fn_raises, user_fns, scrut_slice) + "};".to_string()
         case Stmt.Block(stmts: ss) =>
             // BUG-406：裸块语句是嵌套上下文，其尾部表达式不是函数尾，不得发射 `return`
             // （is_main=true 仅在 gen_stmt 的 ExprStmt 处抑制尾 return，无其他副作用）。

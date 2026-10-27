@@ -2150,3 +2150,61 @@ fn rs_lz_self_user_fn_shadows_stdlib_magic() {
 
     let _ = fs::remove_dir_all(&work);
 }
+
+// BUG-471（②）：`match xs.clone().as_slice() { [a, rest @ ..] => return a, ... }` 里
+// 元素绑定 a 的类型是 &T（slice 元素），rs-lz 此前发 `return a;`（&i64）而返回类型是
+// i64 → E0308。原生靠类型推断在使用点插 `__implicit_from__(a.clone())`，rs-lz 无推断，
+// 改为在臂体开头插 `let a = *a;`。`..rest` 语法（①）已于 BUG-470 修（`rest @ ..`）。
+#[test]
+fn rs_lz_list_pattern_element_binding_deref() {
+    let bin = env!("CARGO_BIN_EXE_lang-zone");
+    let work = std::env::temp_dir().join("lz_list_elem_deref");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).expect("mkwork");
+    let lz_path = work.join("lm.lz");
+    fs::write(
+        &lz_path,
+        "def first(xs: List<int>) -> int =\n    match xs:\n        case [a, ..rest]: return a\n        case _: return -1\n\ndef main() =\n    print(first([7, 8, 9]))\n",
+    )
+    .expect("write lz");
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("rs-lz");
+    assert!(out_lz.status.success(), "rs-lz 失败: {}", String::from_utf8_lossy(&out_lz.stderr));
+    let text_lz = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text_lz.contains("[a, rest @ ..]"),
+        "rs-lz 缺 rest @ .. 语法:\n{}",
+        text_lz
+    );
+    assert!(
+        text_lz.contains("let a = *a;"),
+        "rs-lz 未插元素绑定解引用 let:\n{}",
+        text_lz
+    );
+
+    let lz_rs = work.join("lm_lz.rs");
+    fs::write(&lz_rs, &text_lz).expect("write rs-lz .rs");
+    let lz_exe = work.join("lm_lz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(rc.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+    let run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "7");
+
+    let _ = fs::remove_dir_all(&work);
+}
