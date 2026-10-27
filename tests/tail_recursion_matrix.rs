@@ -167,10 +167,15 @@ fn run_case(c: &Case, idx: usize) -> Report {
         };
     }
     let rs_text = std::fs::read_to_string(&rs).unwrap_or_default();
-    // 双重判据：编译器计数行 > 0，且产物里确有循环改写痕迹
-    // （`__tco_res` 用于有返回值的函数，Unit 函数改写后无结果变量）
+    // 判据：产物里出现循环改写痕迹即可（`__tco_res` 用于有返回值的函数，Unit 函数
+    // 改写后无结果变量、改看 `__tco_a`）。
+    //
+    // 2026-10-28：原先还要求「编译器 [tco] 计数行 > 0」作为双重判据，但 341~408 批次
+    // 为恢复门禁 stderr 纯净已把编译器侧 `[tco]` 调试打印整体移除（`grep -rn '\[tco\]' src/`
+    // 为空），该计数恒为 0，导致本矩阵 22 例「期望 ON」全部误报为 off。判据收敛到产物
+    // 标记；`rewritten` 仅保留在诊断字符串里供人看。
     let marker = rs_text.contains("__tco_res") || rs_text.contains("__tco_a");
-    let got_tco = rewritten > 0 && marker;
+    let got_tco = marker;
 
     let exe = lz.with_extension("exe");
     let rc = Command::new("rustc")
