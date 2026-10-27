@@ -3335,3 +3335,27 @@ LitComplex/Complex/Spread found for enum Expr/IrType`——这是该探针有意
 bootstrap IR 缺口（LZ 编译器的 IR 模型尚无这些变体），非 BUG-485 范畴，另立。
 状态：FIXED
 状态：FIXED
+## BUG-486 [medium] LINK RECIPE 的 `-L dependency` 指向 rlib 所在目录而非 deps/，照抄即 E0463
+
+现象：`lang-zone <f>.lz` 生成的 stderr 链接配方
+`rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<dir> -O <f>.rs`
+里 `<dir>` 取 `r.parent()`。当 rlib 命中 `target/debug/liblz_builtins.rlib`
+（顶层硬链接，`main.rs:264` direct 分支），`parent()` = `target/debug`，
+而其传递依赖（num-bigint/num-complex 等）在 `target/debug/deps/` →
+`-L dependency=target/debug` 找不到依赖 → `E0463 can't find crate for lz_builtins`。
+
+根因：`main.rs` 的 `print_link_recipe` 把「rlib 所在目录」当作「依赖目录」。
+rlib 在 `deps/` 时二者恰好相同（不暴露），顶层硬链接场景暴露。顶层 rlib 是
+Cargo 产物硬链接，其依赖恒定在 `deps/`。
+
+修复：`src/main.rs` 的 `print_link_recipe` 先取 `<exe_dir>/deps` 作为依赖目录
+（`exe_deps_dir`，存在才取），rlib 在 deps 时二者相同无副作用；rlib 在顶层时
+修正为 deps/。`--extern` 的 rlib 路径保持不变（顶层硬链接可正常 extern）。
+
+验证：最小 `def main() = let a=1; print(a)` 生成 recipe 的 `-L dependency` 现为
+`.../target/debug/deps`，按配方 rustc 编译通过并运行输出 `1`。此前配方复现
+E0463。`cargo test --lib` 463/463 全绿。
+
+注意：配方用 Windows 原生反斜杠（`PathBuf::display()`），在 bash 里需转义，
+在 cmd/PowerShell 直接可复制——本 bug 只关路径目录，与斜杠方向无关。
+状态：FIXED

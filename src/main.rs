@@ -260,6 +260,15 @@ fn print_link_recipe(out_path: &std::path::Path) {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+    // BUG-486：`-L dependency` 必须指向 deps/。`target/debug/liblz_builtins.rlib`
+    // 是顶层硬链接，其传递依赖（num-bigint/num-complex 等）位于
+    // `target/debug/deps/`；rlib 在顶层时 `r.parent()` = target/debug →
+    // `-L dependency=target/debug` 找不到依赖 → rustc E0463。此处先取
+    // `<exe_dir>/deps` 备着（rlib 在 deps 时二者相同，无副作用）。
+    let exe_deps_dir: Option<PathBuf> = exe_dir
+        .as_ref()
+        .map(|d| d.join("deps"))
+        .filter(|p| p.is_dir());
     let rlib: Option<PathBuf> = exe_dir.and_then(|d| {
         let direct = d.join("liblz_builtins.rlib");
         if direct.exists() {
@@ -278,8 +287,9 @@ fn print_link_recipe(out_path: &std::path::Path) {
     });
     match rlib {
         Some(r) => {
-            let deps_dir = r
-                .parent()
+            // 统一取 `<exe_dir>/deps`（见上方 BUG-486 注释）。
+            let deps_dir = exe_deps_dir
+                .or_else(|| r.parent().map(|p| p.to_path_buf()))
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             eprintln!(
@@ -1068,8 +1078,19 @@ fn compile_main(args: Vec<String>) -> i32 {
             } else {
                 // ── Rust 后端（默认）──
                 let mut cg = IrCodeGen::new();
+                // Cli 档产物按源文件主干命名（calc.lz → python_calc）；Source 档命名不受影响
+                cg.set_embed_stem(&path.to_string());
                 // I3/I4：注入 BridgeRegistry，extern/@export/embed 符号自动登记
                 let (rust_code, registry) = cg.generate_with_bridge(&ir_module);
+                // 统一抽象（src/embed）：Cli 档产物落盘 + 可选建库。
+                // 默认**只落盘、不起子进程** ⇒ 「编译一跑就 spawn 外部程序」不是既有行为的隐含变化；
+                // 要真建库必须显式 --embed-build。
+                if !cg.embed_targets().is_empty() {
+                    emit_embed_artifacts(
+                        cg.embed_targets(),
+                        args.iter().any(|a| a == "--embed-build"),
+                    );
+                }
                 let out_path = replace_ext(path, ".lz", ".rs");
                 fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", out_path, e);
@@ -1096,6 +1117,80 @@ fn compile_main(args: Vec<String>) -> i32 {
         }
     }
     0
+}
+
+/// Cli 档 embed 产物的交付面：幂等落盘 → 可选建库 → 回执逐条打可 grep 的行。
+/// 硬约束：工具链不在场只能报「跳过」，建库失败必须非零退出 —— 两者都不许伪装成成功。
+fn emit_embed_artifacts(
+    targets: &[lang_zone::embed::EmbedTarget],
+    embed_build: bool,
+) {
+    use lang_zone::embed::artifact::{build_artifact, write_artifacts, BuildStatus};
+    use lang_zone::embed::ArtifactKind;
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut failed = 0usize;
+    let mut skipped = 0usize;
+    for t in targets {
+        let kind = match t.kind {
+            ArtifactKind::Executable => "executable",
+            ArtifactKind::Library => "library",
+        };
+        match write_artifacts(&root, t) {
+            Ok(ops) => {
+                let w = ops.iter().filter(|o| o.action == "written").count();
+                println!(
+                    "embed 产物: {} kind={} files={} (写盘 {} / 未变 {})",
+                    t.dir_rel,
+                    kind,
+                    ops.len(),
+                    w,
+                    ops.len() - w
+                );
+            }
+            Err(e) => {
+                eprintln!("embed 产物写盘失败 {}: {}", t.dir_rel, e);
+                failed += 1;
+            }
+        }
+        if embed_build {
+            let o = build_artifact(&root, t, false);
+            match o.status {
+                BuildStatus::NotNeeded => {
+                    println!("embed 建库: {} 无该步（{}）", o.artifact, o.detail)
+                }
+                BuildStatus::Built => println!("embed 建库: {} 完成 ({})", o.artifact, o.cmd),
+                BuildStatus::Skipped => {
+                    println!("embed 建库: {} 跳过 —— {}", o.artifact, o.detail);
+                    skipped += 1;
+                }
+                BuildStatus::Failed => {
+                    eprintln!(
+                        "embed 建库: {} 失败: {}\n  命令: {}",
+                        o.artifact, o.detail, o.cmd
+                    );
+                    failed += 1;
+                }
+            }
+        }
+        // 取不到的调用面逐条点名：静默少一个函数正是本项目历来在清的那类错
+        for m in t.unsupported_methods() {
+            println!(
+                "embed 未覆盖: {}::{} —— {}",
+                t.artifact,
+                m.name,
+                m.unsupported
+                    .as_deref()
+                    .unwrap_or("签名不在可序列化闭集 int/float/str/bool 内")
+            );
+        }
+    }
+    if failed > 0 {
+        eprintln!("embed: {} 件失败 ⇒ 非零退出（不许报成功）", failed);
+        std::process::exit(1);
+    }
+    if skipped > 0 {
+        eprintln!("embed: {} 件因工具链缺失跳过建库 ⇒ 产物已落盘但未验证", skipped);
+    }
 }
 
 /// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，
