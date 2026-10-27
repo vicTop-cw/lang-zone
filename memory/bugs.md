@@ -2911,12 +2911,23 @@ rustc E0072 recursive type has infinite size；原生发 `l: Box<Tree>`。
 oracle：decl_gen.rs:1738-1770 + helpers.rs:759 field_needs_box —— Self_/Named==self 字段
 发 `Box<T>`（Option<T> → Option<Box<T>>，Vec/List<T> → Vec<Box<T>>）；构造端 `Box::new(..)`；
 match 解构端 `let x = *x;`。
-修复：未修（需同时改声明/构造/解构三处，范围较大）。
-状态：OPEN
-局部修复：2026-10-26 已修声明端（`l: Box<Tree>`）与构造端（`Box::new(Tree::Leaf..)`），
-E0072 与构造端 E0308 已解。残留：match 解构端缺 `let l = *l;`（递归类型递归 match 仍 E0308）。
-修复需在纯函数 codegen 线程化类型注册表（fn_raises 同型 180 处），单独立项。
-commit：1fdf50c / 回归测试：rs_lz_recursive_enum_boxes_fields
+修复：2026-10-27 收口 match 解构端（BUG-475 残留）。
+  1) 新增类型元信息上下文：`type_box_map(m)`（type_name→[(field, is_boxed)]）与
+     `enum_variant_map(m)`（enum→[(variant, [field...])]），在 codegen_module 入口预计算一次；
+     LZ 无可变全局，故像 user_fns 一样把 `tbm`/`vem` 作为尾参穿透到
+     gen_match_arms/gen_match_arm/gen_block/gen_value_block/gen_value_body/gen_stmt/
+     gen_impl_def/gen_impl_method/gen_item/gen_body/gen_while/gen_if/gen_test_def。
+     gen_expr 有意不穿参（93 处调用点）；其内部 BlockExpr 的 gen_body 以空表 `[], []` 兜底
+     （嵌套块表达式内的 match 不做 Box 解引用，记为已知局限）。
+  2) `boxed_bindings_of_pat(p, tbm, vem)`：按 pattern 形态（EnumNamed/Struct/Enum）收集
+     「绑定名→字段名」，再用 tbm 过滤出盒化字段，返回需解引用的绑定名。
+  3) gen_match_arm 把该表与 BUG-471 的 scrut_slice 绑定合并进同一 bindings，
+     统一在臂体块首生成 `let n = *n;`（臂体形态 `pat => { derefs body }`）。
+验证：probe g475_recursive_match.lz --emit=rs-lz 产物 `let l = *l;`/`let r = *r;` 就位，
+rustc 编译运行输出 6（原生一致）；cargo test --test lz_ir_bootstrap 24/24 全绿。
+回归测试：rs_lz_recursive_enum_boxes_fields（声明+构造）+ rs_lz_recursive_enum_match_derefs（解构+运行输出 6）
+状态：FIXED
+commit：1fdf50c（声明+构造）/ 本次（解构）
 
 ## BUG-477 [high] rs-lz 把内建类型转换 `str(x)`/`int(x)`/`f64(x)` 原发成函数调用
 

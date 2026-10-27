@@ -880,6 +880,92 @@ def main() =
     );
 }
 
+// BUG-475（match 解构端）：递归 enum 字段声明发 `Box<T>`、构造发 `Box::new(..)` 之后，
+// rs-lz 在 match 臂解构里仍把 `l`/`r` 当 `Box<Tree>` 绑定，递归调用 `sum_tree(l)` 报
+// E0308（expected Tree, found Box<Tree>）。修复：用类型元信息在臂体块首插 `let n = *n;`
+// 解引用（与 BUG-471 的 slice 元素解引用合并进同一 derefs 块）。断言产物含解引用且运行输出 6。
+#[test]
+fn rs_lz_recursive_enum_match_derefs() {
+    let source = r#"
+enum Tree =
+    Leaf(v: int)
+    Node(l: Tree, r: Tree)
+
+def sum_tree(t: Tree) -> int =
+    match t:
+        case Tree.Leaf(v): return v
+        case Tree.Node(l, r): return sum_tree(l) + sum_tree(r)
+
+def main() =
+    let t = Tree.Node(l: Tree.Leaf(v: 1), r: Tree.Node(l: Tree.Leaf(v: 2), r: Tree.Leaf(v: 3)))
+    print(sum_tree(t))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_recursive_match_deref");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("tree_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "BUG-475 回归：--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+
+    // 声明/构造端已由 rs_lz_recursive_enum_boxes_fields 覆盖；此处专测 match 解构端。
+    // 断言 Node 臂解构出 Box 字段后补了 `let l = *l;` / `let r = *r;`
+    assert!(
+        text.contains("let l = *l;"),
+        "BUG-475：递归 Box 字段解构未插 `let l = *l;`（E0308）:\n{}",
+        text
+    );
+    assert!(
+        text.contains("let r = *r;"),
+        "BUG-475：递归 Box 字段解构未插 `let r = *r;`（E0308）:\n{}",
+        text
+    );
+
+    // 编译运行验证输出 6（1 + (2 + 3)）
+    let lz_rs = work.join("tree_rslz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz output");
+    let exe = work.join("tree_rslz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "BUG-475：rs-lz 产物 rustc 编译失败: {}\n{}",
+        String::from_utf8_lossy(&rc.stderr),
+        text
+    );
+    let run = Command::new(&exe).output().expect("run rs-lz exe");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains('6'),
+        "BUG-475：rs-lz 运行输出应为 6，实际为 {:?}\n{}",
+        stdout,
+        text
+    );
+}
+
 // BUG-477 回归：内建类型转换 `str(x)` / `int(x)` / `f64(x)` 被 rs-lz 原发成函数调用
 // （E0423 expected function, found builtin type `str` / E0425 cannot find function）。
 // 原生 expr_gen.rs:1876 走类型转换分支：str→format!，int→parse/as i64，f64→parse/as f64。
