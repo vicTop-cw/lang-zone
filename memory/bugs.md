@@ -2979,7 +2979,7 @@ stdlib 魔法分支；原生 expr_gen.rs:2178 有守卫
 stdlib `sum([1,2,3])` 无用户 sum 时仍发 `.iter().copied().sum::<i64>()`（1 处命中）；
 lz_ir_bootstrap 22 项全绿；新增回归测试 `rs_lz_self_user_fn_shadows_stdlib_magic`
 双路断言输出 3 且 rs-lz 产物不含 `.iter().copied().sum::<i64>()`。
-状态：FIXED
+状态：FIXED（commit 6bb52f5）
 
 ## BUG-479 [high] rs-lz 前端自检对含 match 的程序失败（E0533 Expr::BlockExpr）
 
