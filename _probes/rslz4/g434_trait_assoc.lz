@@ -1,6 +1,16 @@
-trait BoxLike =
-    type Item
-    def item(self) -> Item
+trait Animal =
+    type Name
+    def item(self) -> Name
+
+struct Dog =
+    name: str
+
+impl Animal for Dog =
+    type Name = str
+
+    def item(self) -> Name =
+        self.name
 
 def main() =
-    print("ok")
+    let d = Dog(name: "Buddy")
+    print(d.item())

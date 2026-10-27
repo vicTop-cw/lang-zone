@@ -1040,7 +1040,7 @@ impl CodeGen {
                         )
                         .and_then(|(i, _)| duck_param_names.get(&i).cloned())
                         .unwrap_or_else(|| self.rust_type(&f.ret_ty)),
-                    _ => self.rust_type(&f.ret_ty),
+                    _ => self.impl_ret_type(&f.ret_ty),
                 };
                 format!(" -> {}", ret_ty_str)
             }
@@ -2466,6 +2466,19 @@ impl CodeGen {
         }
     }
 
+    /// BUG-434 同族：impl 块内方法返回类型若用本 impl 的关联类型裸名（`-> Name`，
+    /// 该名已在 `type Name = String;` 绑定），Rust 中裸名不在此作用域 → E0425
+    /// cannot find type `Name` in this scope。发 `Self::Name`。gen_impl_def 会先
+    /// 把 `i.assoc_type_bindings` 的键登记进 `current_trait_assoc_types`。
+    fn impl_ret_type(&self, ty: &IrType) -> String {
+        if let IrType::Named { path, args } = ty {
+            if args.is_empty() && self.current_trait_assoc_types.iter().any(|a| a == path) {
+                return format!("Self::{}", path);
+            }
+        }
+        self.rust_type(ty)
+    }
+
     pub(crate) fn gen_impl_def(&mut self, i: &ImplDef) {
         // Rust impl 泛型不允许默认类型参数（E0741），剥离默认值仅保留 bounds；
         // 追加 Clone + Debug bound（LZ 值语义自动 .clone()，泛型需可 Clone）
@@ -2743,6 +2756,12 @@ impl CodeGen {
             IrType::Named { path, .. } => Some(path.clone()),
             _ => None,
         };
+        // BUG-434 同族：登记本 impl 的关联类型名（`type Name = String` 的 Name），供
+        // impl_ret_type 把方法返回类型里的裸名改写为 `Self::Name`（否则 E0425）。
+        let saved_impl_assoc_types = std::mem::replace(
+            &mut self.current_trait_assoc_types,
+            i.assoc_type_bindings.iter().map(|(n, _)| n.clone()).collect(),
+        );
         for m in &i.methods {
             // __new__ 体内抑制 kwarg→__new__ 路由（避免 Self(v:...) 无限递归）
             let prev_in_new_body = self.in_new_body;
@@ -2759,6 +2778,7 @@ impl CodeGen {
         self.in_iterator_impl = saved_iterator_impl;
         self.in_ext_trait = saved_ext_trait;
         self.current_ext_trait = saved_ext_trait_name;
+        self.current_trait_assoc_types = saved_impl_assoc_types;
         self.indent -= 1;
         self.emit_line("}");
         // 自动生成 PartialEq：struct 定义 `__eq__` 魔术方法时（box.lz `Box/Rc/Arc`

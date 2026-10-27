@@ -2319,7 +2319,7 @@ LZ 库侧：五个 Item 变体的 generics 改为带边界元组表；新增 gen
 回归：cargo test -j 4 -- --test-threads=1 全绿（lib 463/463 + 各集成套件含 rs-lz↔native 字节判据，41 个 suite 无失败）；135-probe rustc 门禁 TOTAL=135 OK=135 FAIL=0；sweep21/g2a_generic_impl 两后端均 OK `5|"hi"|`（固有 impl 接收者行为未受影响）。
 
 说明：同一探针的原生侧仍报 E0425（trait 声明 `-> Item` 裸名），已另报为 BUG-434（原生 codegen 域，未在本提交修复）。
-## BUG-434 [2026-10-24T13:24:01Z] [medium] OPEN
+## BUG-434 [2026-10-24T13:24:01Z] [medium] FIXED
 - summary: [rule:E0425] 原生 codegen trait 声明关联类型返回用裸名 `-> Item` 而非 `-> Self::Item`
 - detail: trait 声明 `def item(self) -> Item`（关联类型 Item）在原生 `--emit=rs` 中生成 `fn item(&self) -> Item;`，关联类型名以裸名出现在返回类型里，rustc 报 E0425 cannot find type `Item` in this scope。应为 `-> Self::Item`（rs-lz 已正确生成 `fn item(&self) -> Self::Item;`）。注意该 E0425 在原生侧会遮蔽同一探针里的接收者不一致问题（E0053，rs-lz 独有）。
 
@@ -2520,7 +2520,7 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 探针 g24_set.lz 现 NATIVE/RSLZ 均 OK `2|2|`。
 回归：cargo test -j4 -- --test-threads=1 全绿（0 failed）；g16/g18/g19/g20/g22a~g22e/g23/g24 共 11 个探针 RSLZ 全 OK。
 字节对齐复核：g24 与原生差异仅剩 `Set<i64>`/`HashSet<i64>` 形参写法（rs-lz 用别名、原生展开，均可编译）、`__path__` 绝对/相对路径，均为既有形态。
-## BUG-450 [2026-10-24T17:35:13Z] [high] OPEN
+## BUG-450 [2026-10-24T17:35:13Z] [high] FIXED
 - summary: [native/expr_gen] List<str>.contains(\"a\") 发 xs.contains(\"a\") 缺 .to_string()，E0308 expected &String found &str（g22a_contains.lz）
 - detail: 原生 codegen 对 `List<str>.contains(\"a\")` 渲染 `xs.contains(\"a\")`，而 Rust 端 `Vec<String>::contains(&self, x: &String)` ⇒ rustc E0308 mismatched types（expected `&String`, found `&str`）。rs-lz 侧走 contains 借位分支渲染 `xs.contains(&\"a\".to_string())` 编译通过（探针 g22a_contains.lz RSLZ OK `true|`、NATIVE FAIL E0308）。属原生 expr_gen.rs 侧缺陷，需在原生 codegen 对 List<str> 的 contains 实参补 `.to_string()`；修好前无法在 D1 字节对齐上验证（rs-lz 现为超集正确，不擅自回退以对齐原生错误输出）。
 - reported_by: lead
@@ -3062,3 +3062,32 @@ gen_method_call 在 max 后加 sorted/reversed/to_list/iter 四分支，与原�
 验证：探针 _probes/rslz4/g438_sorted.lz 双路编译运行输出 `[1, 2, 3] / [2, 1, 3] /
 [3, 1, 2]` 一致；残留 D1 形式差仅 `Vec<i64>` vs `List<i64>`（alias）。
 回归测试：rs_lz_sorted_reversed_to_list_compile_and_run
+
+## BUG-450 修复 [2026-10-27T02:50:00+08:00] 状态：FIXED
+现象（复核）：native `List<str>.contains("a")` 发 `xs.contains("a")` → E0308
+expected &String, found &str。rs-lz 走借位分支已正确 `xs.contains(&"a".to_string())`。
+根因：Vec<String>::contains(&self, x: &T)，实参需 &String；LZ `str` 映射 Rust `String`，
+str 字面量须 `.to_string()` 后借位。
+修复：expr_gen.rs 的 is_vec_contains 字符串字面量分支（3962-3967）生成
+`&"{escaped}".to_string()`（对齐 rs-lz 与 D1 字节门禁）。
+验证：回归测试 rs_lz_list_str_contains_borrows_string（tests/lz_ir_bootstrap.rs:1294）
+双路产物 rustc 编译通过；lz_ir_bootstrap 19 passed。
+
+## BUG-434 修复 [2026-10-27T03:12:00+08:00] 状态：FIXED
+现象（复核，探针 _probes/rslz4/g434_trait_assoc.lz）：trait 声明内的 `def item(self)
+-> Item`（关联类型）trait_sig_type 已发 `Self::Item`；但 impl 块方法签名 `fn item(&self)
+-> Name {` 两侧都发裸名 `-> Name` → E0425 cannot find type `Name` in this scope（trait
+声明侧曾被 E0425 遮蔽，修复 trait 声明后 impl 侧浮出）。rs-lz 侧此前也被同一问题遮蔽。
+根因：impl 方法返回类型走 rust_type，不知当前 impl 的关联类型绑定名。
+修复：
+1. 原生 decl_gen.rs 加 `impl_ret_type`：`IrType::Named` 且 args 为空且名字落在
+   `current_trait_assoc_types` 内 → 发 `Self::<name>`；gen_impl_def 在遍历方法前
+   `mem::replace` 把 `i.assoc_type_bindings` 的键名（Vec<(String, IrType)> → map 取 .0）
+   登记进去、结束后恢复；gen_fn_def 的 `_ => self.rust_type(&f.ret_ty)` 改用 impl_ret_type。
+2. rs-lz lz_codegen_lib.lz 加 `atb_names`（assoc_type_bindings 键名 List），
+   gen_impl_method 增第 3 参并改用 rust_type_assoc(m.ret, atb_names)；固有方法调用点
+   （gen_item 的 `impl <ty> {`）传空列表。
+验证：探针双路 rustc 编译通过、运行输出 `"Buddy"` 一致；残留 diff 仅 impl 方法体内
+缩进差异（4 行，非签名）。回归测试 rs_lz_trait_assoc_type_return_self_qualified 增补
+impl 方法断言（native/rs-lz 各一条 `fn item(&self) -> Self::Item {`）。lz_ir_bootstrap
+19 passed。

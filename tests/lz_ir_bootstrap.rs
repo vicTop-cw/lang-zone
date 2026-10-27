@@ -1727,6 +1727,15 @@ trait BoxLike =
     type Item
     def item(self) -> Item
 
+struct Box =
+    value: str
+
+impl BoxLike for Box =
+    type Item = str
+
+    def item(self) -> Item =
+        self.value
+
 def main() =
     print("ok")
 "#;
@@ -1754,6 +1763,13 @@ def main() =
     assert!(
         native_src.contains("fn item(&self) -> Self::Item;"),
         "BUG-434：native 未发 `Self::Item`（E0425 cannot find type `Item`）:\n{}",
+        native_src
+    );
+    // BUG-434 同族：impl 块内方法返回本 impl 的关联类型裸名（`-> Item`）同样
+    // 需 `Self::Item`（裸名不在此作用域 → E0425）。trait 声明与 impl 实现都要改写。
+    assert!(
+        native_src.contains("fn item(&self) -> Self::Item {"),
+        "BUG-434 同族：native 的 impl 方法未发 `Self::Item`（E0425）:\n{}",
         native_src
     );
 
@@ -1792,6 +1808,12 @@ def main() =
     assert!(
         text.contains("fn item(&self) -> Self::Item;"),
         "rs-lz 未发 `Self::Item`:\n{}",
+        text
+    );
+    // BUG-434 同族：rs-lz 的 impl 方法返回类型同样需 `Self::Item`
+    assert!(
+        text.contains("fn item(&self) -> Self::Item {"),
+        "rs-lz 的 impl 方法未发 `Self::Item`（E0425）:\n{}",
         text
     );
 

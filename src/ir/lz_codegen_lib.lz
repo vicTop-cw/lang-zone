@@ -2483,15 +2483,20 @@ def gen_impl_def(trait_: MaybeIrType, for_type: IrType, generics: List<(str, Lis
         case MaybeIrType.YesTy(t: ty) => true
         case MaybeIrType.NoTy => false
     let mut body: String = gen_impl_assoc_bindings(assoc_type_bindings)
+    // BUG-434 同族：本 impl 的关联类型名（`type Name = String` 的 Name）登记后传给
+    // gen_impl_method，供其把方法返回类型里的裸名改写为 `Self::Name`（否则 E0425）。
+    let mut atb_names: List[str] = []
+    for idx in 0..assoc_type_bindings.len():
+        atb_names.push(assoc_type_bindings[idx].0)
     for idx in 0..methods.len():
-        body = body + gen_impl_method(methods[idx].clone(), force_ref)
+        body = body + gen_impl_method(methods[idx].clone(), force_ref, atb_names)
     "impl ".to_string() + generic_sig_b(generics, where_clause) + trait_part + rust_type(for_type) + impl_where_clause(where_clause) + " {\n".to_string() + body + "}".to_string()
 
 // BUG-422：真实方法体（对齐原生 impl 块内的 `fn name(...) -> ret { body }`）。
 // 形参：self 渲染为 `&self` / `&mut self` / `self`（元组序 = name, ty, is_ref,
 // is_mut, is_owned），其余 `name: ty`。返回 () 时省略 `-> ()`。
-def gen_impl_method(m: ImplMethod, force_ref: bool) -> String =
-    let ret_s = "".to_string() if r_eq_unit(m.ret) else (" -> ".to_string() + rust_type(m.ret))
+def gen_impl_method(m: ImplMethod, force_ref: bool, atb_names: List[str]) -> String =
+    let ret_s = "".to_string() if r_eq_unit(m.ret) else (" -> ".to_string() + rust_type_assoc(m.ret, atb_names))
     "    fn ".to_string() + m.name + "(".to_string() + impl_method_params(m.params, force_ref) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(m.body, false, auto_mut_names(m.body), m.exc) + "    }\n".to_string()
 
 def impl_method_params(ps: List<(str, IrType, bool, bool, bool)>, force_ref: bool) -> String =
@@ -2649,7 +2654,9 @@ def gen_item(i: Item) -> String =
                 // force_ref=false（与原生固有 impl 同口径）；gen_impl_method 负责 `fn` 前缀
                 // 与 body 缩进；此处补 `impl <ty> {` 外壳与闭合 `}`。
                 let im = ImplMethod(name: mn, params: ps, ret: r, exc: rs, body: b)
-                "impl ".to_string() + ty + " {\n".to_string() + gen_impl_method(im, false) + "}\n".to_string()
+                // 固有方法无关联类型绑定 → atb_names 传空（rust_type_assoc 退化为 rust_type）。
+                let mut empty_atb: List[str] = []
+                "impl ".to_string() + ty + " {\n".to_string() + gen_impl_method(im, false, empty_atb) + "}\n".to_string()
             else:
                 let is_main = (n == "main")
                 let ret_s = "".to_string() if (is_main && r_eq_unit(r)) else (" -> ".to_string() + rust_type(r))
