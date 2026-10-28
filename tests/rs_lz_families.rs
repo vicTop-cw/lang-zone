@@ -677,6 +677,93 @@ def main() =
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// T0r22：`p29_recursive_parser` 的运行期 panic（红名单 r3 §3.4 唯一真行为债）
+//
+// 基线 b78803c 上的复现（产物第 59 行，见 temp/lane-p29/base/oldrslz.err）：
+//
+//     thread 'main' panicked at <产物>.rs:59:5: attempt to multiply with overflow
+//
+// 位置就是 `value *= r.0;`。它不是独立缺陷，而是 T0r20 遮蔽族在**另一症状面**上
+// 的表现：while 体内的 `p = r.1` / `done = true` 是「对已声明变量的重赋」，builder
+// 降成 `Stmt.Let(is_mut=true)`，旧发射器照直发 `let mut p = r.1;`（Rust shadow-let）
+// ⇒ 外层 `p` 冻在 1，循环永远重读 `ts[1] == Star`，`value` 反复 ×3 直到 i64 溢出。
+// 同一根因在 p43/p44 上是死循环（RC=124），在本件上是 debug 溢出检查 panic（RC=101）。
+//
+// 本例取 p29 的**判别形态**：重赋落在「while 体 → if 分支块」第二层（T0r20 的
+// decl 穿透要过 gen_if/gen_expr_ctx 才可达），值来自元组字段 `r.1`（非自引用，
+// BUG-454 的启发式不覆盖），另一支在 else 块里重赋控制变量 `done`。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn p29_nested_block_reassign_keeps_outer_var() {
+    let src = r##"
+enum Tok:
+    Num(v: int)
+    Star
+    Eof
+
+def val(t: Tok) -> int =
+    match t:
+        case Tok.Num(v: n) => n
+        case _ => 0
+
+def atom(ts: List<Tok>, pos: int) -> (int, int) =
+    let t = ts[pos].clone()
+    (val(t), pos + 1)
+
+def term(ts: List<Tok>, pos: int) -> (int, int) =
+    let first = atom(ts, pos)
+    let mut value = first.0
+    let mut p = first.1
+    let mut done = false
+    while not done:
+        let t = ts[p].clone()
+        if t == Tok.Star:
+            let r = atom(ts, p + 1)
+            value = value * r.0
+            p = r.1
+        else:
+            done = true
+    (value, p)
+
+def main() =
+    let ts: List<Tok> = [Tok.Num(v: 2), Tok.Star, Tok.Num(v: 3), Tok.Eof]
+    let r = term(ts, 0)
+    print("mul=" + r.0.to_string())
+"##;
+    let r = run_rs_lz("p29_nested_reassign", src);
+    assert_ok(&r, "p29 嵌套块内重赋不遮蔽");
+    // ① 元组字段重赋必须发成赋值（旧形态 `let mut p = r.1;` ⇒ 外层 p 冻住 ⇒ 溢出 panic）
+    assert!(
+        r.rust.contains("p = r.1;"),
+        "`p = r.1` 未发成赋值（溢出 panic 的根因形态）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("let mut p = r.1"),
+        "仍是 `let mut p = r.1;`（shadow-let ⇒ 外层 p 不推进 ⇒ 乘法溢出）:\n{}",
+        r.rust
+    );
+    // ② else 分支里的控制变量重赋同样不能被遮蔽（否则 `not done` 恒真）
+    assert!(
+        r.rust.contains("done = true;"),
+        "`done = true` 未发成赋值:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("let mut done = true"),
+        "仍是 `let mut done = true;`（shadow-let ⇒ 循环不终止）:\n{}",
+        r.rust
+    );
+    // ③ 运行必须正常退出（旧形态要么 30s 超时，要么 i64 溢出 panic），行为对齐 native
+    assert!(r.run_ok, "生成产物未正常退出（超时/溢出 panic）:\n{}", r.diag);
+    assert!(
+        r.stdout.contains("mul=6"),
+        "`2 * 3` 结果不对（native 同口径应为 mul=6）: {}",
+        r.stdout
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // G5（红名单 r3 剩余 2 条）：字符串**单字符**下标 `s[i]`
 //
 // `str`/`String` 在 Rust 只实现 Range 索引，`s[i]` 直接 E0277（the type `str`
