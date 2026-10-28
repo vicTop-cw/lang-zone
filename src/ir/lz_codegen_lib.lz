@@ -837,7 +837,14 @@ def rust_type(t: IrType) -> String =
         case IrType.Opt(inner: x) => "Option<" + rust_type(x) + ">".to_string()
         case IrType.Res(ok: o, err: e) => "Result<" + rust_type(o) + ", " + rust_type(e) + ">".to_string()
         case IrType.Tuple(elems: es) =>
-            "(" + type_rust_list(es) + ")".to_string()
+            // G6：单元素元组类型 `(T,)` —— Rust 必须有尾随逗号（原生 types_emit.rs:438-444
+            // 同款），否则 `(String)` 只是加括号的 String：`args.0` 直接 E0609/E0277。
+            // typepack 的 `..: Tuple<str, ..>` 在 IR 里就是 1~N 元 Tuple，故此处是
+            // 「元组发射」的第一块基座。
+            if es.len() == 1:
+                "(" + rust_type(es[0].clone()) + ",)".to_string()
+            else:
+                "(" + type_rust_list(es) + ")".to_string()
         case IrType.FnType(params: ps, ret: r) =>
             "fn(" + type_rust_list(ps) + ") -> " + rust_type(r)
         case IrType.Ref(inner: x) => "&".to_string() + rust_type(x)
@@ -1098,8 +1105,36 @@ def flatten_or_and(e: Expr, target_op: str) -> List[Expr] =
 // `s[..b]` 只有 end，`s[..]` 两个都没有）。
 def is_range_key_expr(k: Expr) -> bool =
     match k:
+        // 两种 Range 表示都算切片键：builder 对 `s[a..b]` 既可能造 StructCtor("Range")，
+        // 也可能留下 Expr.Range（起点恒 0 的开放形态）。漏判会让「str 单字符下标」
+        // 分支把切片键当标量发 ⇒ E0605（Range<i64> as usize）。
         case Expr.StructCtor(name: n, fields: fs, ty: t) => n == "Range"
+        case Expr.Range(end: en, inclusive: inc, ty: t) => true
         case _ => false
+
+// ── G6：元组下标 `t[0]` → Rust 字段访问 `t.0` ─────────────────────────────────
+// Rust 的元组不支持 `[]`（E0608 cannot index into `(A, B)`），原生 expr_gen.rs:5554-5596
+// 先 `resolve_type_alias(base.ty)` 再按 Tuple 发 `.N`；此处同口径（rs-lz 的 IR 里
+// typepack/多值与元组同形，均落这一分支）。
+def is_tuple_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Tuple(elems: es) => true
+        case _ => false
+
+// 元组下标的字面量值（非字面量返回 -1，落回通用下标路径）。
+def tuple_index_of(k: Expr) -> int =
+    match k:
+        case Expr.LitInt(v: n, ty: t) => n
+        case _ => -1
+
+def tuple_elem_at(t: IrType, i: int) -> MaybeIrType =
+    match t:
+        case IrType.Tuple(elems: es) =>
+            if i >= 0 and i < es.len():
+                MaybeIrType.YesTy(value: es[i].clone())
+            else:
+                MaybeIrType.NoTy
+        case _ => MaybeIrType.NoTy
 
 // N2：**切片**键渲染 —— 两端各自 `((<expr>) as usize)`，未给端点保持开放形态。
 // 旧实现（IndexGet 尾部无条件拼 ` as usize`）把 cast 只粘在整个 range 串的末尾，
@@ -1208,6 +1243,18 @@ def is_str_index_expr(e: Expr) -> bool =
         case Expr.IndexGet(base: b, key: k, ty: t) => is_string_irtype(expr_ty(b))
         case _ => false
 
+// G5：`int(s[i])` 的码点形态（对齐原生 expr_gen.rs:5676-5683 的 `as i64` 分支）。
+def gen_str_char_code(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    match e:
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            // 切片键（`int(s[a..b])`）语义是「把子串解析成整数」，不是码点：
+            // 落回 parse 形态（`(s[a..b].to_string()).parse::<i64>()`）。
+            if is_range_key_expr(k):
+                "(".to_string() + gen_expr(e, fn_raises, user_fns, tbm, vem) + ").parse::<i64>().unwrap()".to_string()
+            else:
+                "{let __cs: Vec<char> = (".to_string() + gen_expr(b, fn_raises, user_fns, tbm, vem) + ").chars().collect(); let __i = ((".to_string() + gen_expr(k, fn_raises, user_fns, tbm, vem) + ") as usize); __cs[__i] as i64}".to_string()
+        case _ => "(".to_string() + gen_expr(e, fn_raises, user_fns, tbm, vem) + ").parse::<i64>().unwrap()".to_string()
+
 def is_index_get_expr(e: Expr) -> bool =
     match e:
         case Expr.IndexGet(base: b, key: k, ty: t) => true
@@ -1218,7 +1265,7 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
         case Expr.LitInt(v: n, ty: t) => n.to_string() + "i64".to_string()
         case Expr.LitF64(v: n, ty: t) => fmt_f64(n).to_string()
         case Expr.LitStr(s: s, ty: t) => "\"".to_string() + esc_rust(s) + "\".to_string()".to_string()
-        case Expr.LitFStr(s: s, ty: t) => gen_fstring(s).to_string()
+        case Expr.LitFStr(s: s, ty: t) => gen_fstring(s, user_fns).to_string()
         case Expr.LitBool(b: b, ty: t) => b.to_string()
         case Expr.LitUnit(ty: t) => "()".to_string()
         case Expr.LitNone(ty: t) => "None".to_string()
@@ -1252,20 +1299,41 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
             else:
                 // N2：键走统一渲染（range 键两端各自 `as usize`；标量键整体 cast）。
                 let idx_base = gen_expr(b, fn_raises, user_fns, tbm, vem)
-                let idx_key = gen_index_key_expr(k, fn_raises, user_fns, tbm, vem)
-                // 切片结果的 owned 化对齐原生 expr_gen.rs:5739-5768：
-                //   str 基底 → `s[a..b].to_string()`（&str → String）
-                //   List/Vec 基底 → `xs[a..b].to_vec()`（unsized [T] → Vec<T>）
-                if is_range_key_expr(k) and is_string_irtype(expr_ty(b)):
-                    idx_base + "[".to_string() + idx_key + "].to_string()".to_string()
-                elif is_range_key_expr(k) and is_list_irtype(expr_ty(b)):
-                    idx_base + "[".to_string() + idx_key + "].to_vec()".to_string()
+                let bty = expr_ty(b)
+                let ti = tuple_index_of(k)
+                // G6：元组下标 → `.N` 字段访问。原生只在 base 本身是 IndexGet 时补
+                // `.clone()`（`b[0][1]` 的 `b[0]` 是 &T，`.1` 会从借用里 move）；Copy
+                // 元素不补（expr_gen.rs:5580-5588 的 need_clone 判据）。
+                if is_tuple_irtype(bty) and ti >= 0 and not is_range_key_expr(k):
+                    let elem_t = tuple_elem_at(bty, ti)
+                    let mut elem_cl = "".to_string()
+                    match elem_t:
+                        case MaybeIrType.YesTy(value: et) =>
+                            if is_index_get_expr(b) and not is_copy_irtype(et):
+                                elem_cl = ".clone()".to_string()
+                        case MaybeIrType.NoTy => ()
+                    idx_base + ".".to_string() + ti.to_string() + elem_cl
+                // G5：字符串单字符下标 `s[i]`。Rust 的 `str`/`String` 只实现 Range 索引，
+                // `s[i]` 直接 E0277（the type `str` cannot be indexed by `usize`）。
+                // 原生 expr_gen.rs:5665-5682 发「先收集 chars 再按字符下标取」的块，
+                // 字符串语境取 `.to_string()`（i64 码点形态由 Cast 分支单独发）。
+                elif is_string_irtype(bty) and not is_range_key_expr(k):
+                    "{let __cs: Vec<char> = (".to_string() + idx_base + ").chars().collect(); let __i = ((".to_string() + gen_expr(k, fn_raises, user_fns, tbm, vem) + ") as usize); __cs[__i].to_string()}".to_string()
                 else:
-                    // 元素非 Copy（String/枚举/结构体…）时 `xs[i]` 会从容器 move 出 ⇒
-                    // E0507 cannot move out of index。原生 expr_gen.rs:5750-5776 按
-                    // `elem_is_copy` 补 `.clone()` 取 owned 值（LZ 是值语义），此处同款。
-                    let elem_clone = (".clone()" if not is_copy_irtype(elem_irtype(b)) else "").to_string()
-                    idx_base + "[".to_string() + idx_key + "]".to_string() + elem_clone
+                    let idx_key = gen_index_key_expr(k, fn_raises, user_fns, tbm, vem)
+                    // 切片结果的 owned 化对齐原生 expr_gen.rs:5739-5768：
+                    //   str 基底 → `s[a..b].to_string()`（&str → String）
+                    //   List/Vec 基底 → `xs[a..b].to_vec()`（unsized [T] → Vec<T>）
+                    if is_range_key_expr(k) and is_string_irtype(bty):
+                        idx_base + "[".to_string() + idx_key + "].to_string()".to_string()
+                    elif is_range_key_expr(k) and is_list_irtype(bty):
+                        idx_base + "[".to_string() + idx_key + "].to_vec()".to_string()
+                    else:
+                        // 元素非 Copy（String/枚举/结构体…）时 `xs[i]` 会从容器 move 出 ⇒
+                        // E0507 cannot move out of index。原生 expr_gen.rs:5750-5776 按
+                        // `elem_is_copy` 补 `.clone()` 取 owned 值（LZ 是值语义），此处同款。
+                        let elem_clone = (".clone()" if not is_copy_irtype(elem_irtype(b)) else "").to_string()
+                        idx_base + "[".to_string() + idx_key + "]".to_string() + elem_clone
         case Expr.IndexSet(base: b, key: k, value: v, ty: t) => gen_expr(b, fn_raises, user_fns, tbm, vem) + "[".to_string() + gen_expr(k, fn_raises, user_fns, tbm, vem) + "] = ".to_string() + gen_expr(v, fn_raises, user_fns, tbm, vem)
         case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
             // BUG-459：`in`/`not in` 成员测试。Rust 无 `in` 运算符，rs-lz 旧实现透传
@@ -1392,7 +1460,13 @@ def gen_expr(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(st
                 gen_expr(i, fn_raises, user_fns, tbm, vem) + " != 0".to_string()
             elif is_str_target(tg):
                 "format!(\"{}\", ".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ")".to_string()
-            elif is_numeric_target(tg) and (is_str_or_any_src(expr_ty(i)) or is_str_index_expr(i)):
+            elif is_numeric_target(tg) and is_str_index_expr(i):
+                // G5：`int(s[i])` —— 字符串单字符下标的**数值**语境。原生
+                // expr_gen.rs:5665-5682 在「不期望字符串」时发同一 chars 块但取
+                // `as i64`（码点），而不是把 `.to_string()` 结果再 parse（parse 只在
+                // 来源是真正的 str 值时才与原生一致）。
+                gen_str_char_code(i, fn_raises, user_fns, tbm, vem)
+            elif is_numeric_target(tg) and is_str_or_any_src(expr_ty(i)):
                 "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ").parse::<".to_string() + rust_type(tg) + ">().unwrap()".to_string()
             elif is_named_string_target(tg):
                 "(".to_string() + gen_expr(i, fn_raises, user_fns, tbm, vem) + ").to_string()".to_string()
@@ -1608,6 +1682,26 @@ def gen_dict_place(r: Expr, user_fns: List[str], tbm: List[(str, List[(str, bool
         case _ => gen_recv_place(r, MaybeIrType.NoTy, user_fns, tbm, vem)
 
 def gen_method_call(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    // G7：模块命名空间调用 `m.add(2, 3)`（`import moda as m`）。CLI 已把模块项平铺进
+    // 同一文件，原生用 imported_modules（codegen/mod.rs:1335-1342 同时登记 path 与
+    // alias）把 `m.add(..)` 直接渲染成 `add(..)`（expr_gen.rs:3350-3360）。
+    // rs-lz 的 UseStmt schema 把 alias 序列化成 NoStr（lz_codegen.rs:410-413 恒
+    // opt_none），名字对不回来，故用三个**保守**判据替代：
+    //   ① 方法名是模块顶层函数；② 接收者不是顶层函数名；③ 接收者在本模块任何
+    //   作用域里都没有声明（module alias 从不被声明）——`self.helper()` 之类因
+    //   形参表里有 self 而被 ③ 挡住。
+    let mut alias_call: String = "".to_string()
+    match r:
+        case Expr.Var(name: rn, ty: rt) =>
+            if is_user_fn(user_fns, m) and not is_user_fn(user_fns, rn) and not bound_lookup(user_fns, rn):
+                alias_call = m + "(".to_string() + call_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
+        case _ => ()
+    if alias_call.len() > 0:
+        alias_call
+    else:
+        gen_method_call_inner(r, m, a, t, fn_raises, user_fns, tbm, vem)
+
+def gen_method_call_inner(r: Expr, m: str, a: List[Expr], t: IrType, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
     let recv0 = gen_recv_place(r, fn_raises, user_fns, tbm, vem)
     // BUG-428：LZ 的 `.len()` 返回 int（i64），Rust 的 `len()` 是 usize ⇒ 必须补 `as i64`，
     // 否则与 i64 比较/赋值处 E0308（`k.len() > 1i64`；与自由函数 len(x) 同口径）。
@@ -1849,6 +1943,12 @@ def lz_method_rename(m: str, r: Expr) -> String =
         // BUG-435：对齐原生 expr_gen.rs —— HashSet 无 add，`{1,2}.add(x)` → insert。
         // 自定义 Set 扩展（lz_std/set.lz）已提供 add 则保留（守卫在 type 判定之外）。
         "insert".to_string()
+    elif m == "slice" and (is_string_irtype(expr_ty(r)) or is_list_irtype(expr_ty(r))):
+        // G8：LZ `.slice(a, b)` 是语言内建方法，Rust 的 String/Vec 都没有 ⇒ E0599
+        // （no method named `slice` found for struct `String`）。原生 expr_gen.rs:3776-3790
+        // 对内置 str/List 接收者映射到 lz_builtins 的扩展方法 `lz_slice`；用户 struct
+        // 自定义 slice 保留原样（判据即接收者类型）。
+        "lz_slice".to_string()
     else:
         m.to_string()
 
@@ -2081,7 +2181,13 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType, user_fns
             // 原生用 fn_param_types.contains_key 守卫；rs-lz 用 user_fns 列表。
             // print/len 是语言内建关键字不可遮蔽，但 min/max/sum/abs/zip/sorted/
             // reversed/set! 走魔法分支时会吞掉用户同名函数 → 须先判 is_user_fn。
-            if not is_user_fn(user_fns, n):
+            // G6：变参函数（`..: Tuple<...>`）的调用点必须把实参打包成**一个**元组，
+            // 否则 E0061（this function takes 1 argument but N were supplied）。
+            // 对齐原生 expr_gen.rs:2871-2930 的三分支（typepack / 定长前缀 / 其它）。
+            let pk = pack_lookup(user_fns, n)
+            if pack_kind(pk) != "":
+                gen_pack_call(n, a, pk, fn_raises, user_fns, tbm, vem)
+            elif not is_user_fn(user_fns, n):
                 if n == "print":
                     "println!(".to_string() + print_fmt(a) + print_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
                 elif n == "panic" or n == "panic!":
@@ -2156,6 +2262,51 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType, user_fns
 def is_struct_ctor(n: str, a: List<Expr>, t: IrType) -> bool =
     starts_upper(n) and all_kwarg_args(a) and irtype_named_path(t, n)
 
+// G6：变参调用打包（对齐原生 expr_gen.rs:2871-2930）。
+//   定长前缀形态：`f(h0, (a, b, vec![Box::new(c), ...]))`
+//   typepack    ：`f(h0, (a, b, c))`（全部实参进异质元组）
+// vi = 变参形参的位置（其前的普通形参逐个前传）。
+def gen_pack_call(n: str, a: List[Expr], pk: str, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    let vi = pack_idx(pk)
+    let ts = pack_types(pk)
+    let kind = pack_kind(pk)
+    let mut head: String = "".to_string()
+    let mut hi = 0
+    while hi < vi and hi < a.len():
+        if hi > 0:
+            head = head + ", ".to_string()
+        head = head + gen_expr(a[hi].clone(), fn_raises, user_fns, tbm, vem)
+        hi = hi + 1
+    let mut fields: List[str] = []
+    if kind == "T":
+        while hi < a.len():
+            fields.push(gen_expr(a[hi].clone(), fn_raises, user_fns, tbm, vem))
+            hi = hi + 1
+    else:
+        let mut fi = 0
+        while hi < a.len() and fi < ts.len():
+            fields.push(gen_expr(a[hi].clone(), fn_raises, user_fns, tbm, vem))
+            hi = hi + 1
+            fi = fi + 1
+        let mut boxes: String = "".to_string()
+        while hi < a.len():
+            if boxes.len() > 0:
+                boxes = boxes + ", ".to_string()
+            boxes = boxes + "Box::new(".to_string() + gen_expr(a[hi].clone(), fn_raises, user_fns, tbm, vem) + ")".to_string()
+            hi = hi + 1
+        fields.push("vec![".to_string() + boxes + "]".to_string())
+    let mut inner: String = "".to_string()
+    for idx in 0..fields.len():
+        if idx > 0:
+            inner = inner + ", ".to_string()
+        inner = inner + fields[idx].clone()
+    // 单字段元组要尾逗号（Rust 里 `(x)` 只是括号）
+    let tuple_s = ("(".to_string() + inner + ",)".to_string()) if fields.len() == 1 else ("(".to_string() + inner + ")".to_string())
+    if head.len() > 0:
+        n + "(".to_string() + head + ", ".to_string() + tuple_s + ")".to_string()
+    else:
+        n + "(".to_string() + tuple_s + ")".to_string()
+
 // BUG-478：判断 n 是否为模块顶层用户函数名（遮蔽标准库魔法）。List[str] 无 contains，
 // 线性扫描即可（模块函数数远小于魔法分支调用次数）。
 def is_user_fn(user_fns: List[str], n: str) -> bool =
@@ -2224,7 +2375,11 @@ def gen_cast_call(n: str, a: List<Expr>, fn_raises: MaybeIrType, user_fns: List[
         else:
             "format!(\"{}\", ".to_string() + gen_expr(a[0].clone(), fn_raises, user_fns, tbm, vem) + ")".to_string()
     elif n == "int":
-        if is_string_irtype(expr_ty(a[0].clone())):
+        // G5：`int(s[i])` 的字符串单字符下标 → 码点（原生 expr_gen.rs:5676-5683 的
+        // `as i64` 分支）。旧实现一律走 str 源的 parse，对非数字字符运行期 panic。
+        if is_str_index_expr(a[0].clone()):
+            gen_str_char_code(a[0].clone(), fn_raises, user_fns, tbm, vem)
+        elif is_string_irtype(expr_ty(a[0].clone())):
             "(".to_string() + gen_expr(a[0].clone(), fn_raises, user_fns, tbm, vem) + ").parse::<i64>().unwrap()".to_string()
         else:
             "(".to_string() + gen_expr(a[0].clone(), fn_raises, user_fns, tbm, vem) + " as i64)".to_string()
@@ -2554,7 +2709,11 @@ def gen_stmt(s: Stmt, is_tail: bool, is_main: bool, auto_mut: String, fn_raises:
         case Stmt.Raise(value: v) =>
             match fn_raises:
                 case MaybeIrType.YesTy(value: _t) => "return Result::Err(".to_string() + gen_expr(v, fn_raises, user_fns, tbm, vem) + ");".to_string()
-                case MaybeIrType.NoTy => "panic!(".to_string() + gen_expr(v, fn_raises, user_fns, tbm, vem) + ");".to_string()
+                // G8：`raise x` 在无异常签名的函数里就是 `panic!`。Rust 的 panic! 首个
+                // 实参必须是**格式串字面量**，旧实现直发 `panic!("boom".to_string())` ⇒
+                // rustc `expected `,`, found `.``（neg_error_uncaught_panic_ok 实测）。
+                // 原生 expr_gen 的 panic 展开一律 `panic!("{:?}", <v>)`，此处同款。
+                case MaybeIrType.NoTy => "panic!(\"{:?}\", ".to_string() + gen_expr(v, fn_raises, user_fns, tbm, vem) + ");".to_string()
         case Stmt.TypeAlias(name: n, ty: t) =>
             "type ".to_string() + n.to_string() + " = ".to_string() + rust_type(t) + ";".to_string()
         case Stmt.BreakLabel(label: l, value: v) =>
@@ -2835,7 +2994,24 @@ def chars_slice(cs: List<str>, from: int, to: int) -> String =
         i = i + 1
     out
 
-def gen_fstring(s: str) -> String =
+// G8：插值串是否为「单个裸标识符」（无空格/运算符/括号/引号，首字符非数字）。
+// 只用于 f-string 未绑定判定——表达式形态一律不替换。
+def is_bare_ident(s: str) -> bool =
+    let mut ok = true
+    if s.len() == 0:
+        ok = false
+    let bad = " .()[]{}+-*/%<>=!&|,:'\""
+    for idx in 0..bad.len():
+        if str_contains(s, bad[idx..(idx + 1)]):
+            ok = false
+    let cs = str_chars(s)
+    if cs.len() > 0:
+        let c0 = cs[0].clone()
+        if c0 == "0" or c0 == "1" or c0 == "2" or c0 == "3" or c0 == "4" or c0 == "5" or c0 == "6" or c0 == "7" or c0 == "8" or c0 == "9":
+            ok = false
+    ok
+
+def gen_fstring(s: str, user_fns: List[str]) -> String =
     let cs = str_chars(s)
     let mut fmt: String = "".to_string()
     let mut args: List<str> = []
@@ -2859,7 +3035,13 @@ def gen_fstring(s: str) -> String =
                         j = j + 1
                     let expr = chars_slice(cs, i + 1, j)
                     fmt = fmt + "{:?}".to_string()
-                    args.push(expr)
+                    // G8：插值里引用模块内**未绑定**的裸标识符（探针语料 `f"hello {name}"`
+                    // 引外部符号）→ 发空串。原生 collect_unbound_fstring_vars
+                    // （scan.rs:1245）同口径：批测口径只编译不运行，故替换为空串。
+                    if is_bare_ident(expr) and not bound_lookup(user_fns, expr):
+                        args.push("\"\"".to_string())
+                    else:
+                        args.push(expr)
                     i = j + 1
             else:
                 fmt = fmt + "{".to_string()
@@ -3128,15 +3310,53 @@ def self_param_str(p: (str, IrType, bool, bool, bool), force_ref: bool) -> Strin
             "&self".to_string()
 
 // D2 缺口补齐：UseStmt 生成
+// G7：模块 import 的发射口径 —— **只有已知 std 模块才发 `use`**。
+// 用户模块（`import moda` / `import moda as m`）在 CLI 阶段已把模块项平铺进同一
+// IrModule，原生 gen_use_stmt（decl_gen.rs:2809-2960）对这些路径一律 return（不发
+// 任何 `use`）；rs-lz 旧实现无条件发 `use moda;` ⇒ E0432 unresolved import moda
+// （p5_alias 实测）。相对路径（self::/super::）同样跳过。
+def is_known_std_module(p: str) -> bool =
+    let mods: List[str] = ["std", "std::io", "std::collections", "std::sync", "std::rc", "std::time", "std::thread", "std::net", "std::fs", "std::env", "std::process", "std::path", "std::hash", "std::iter", "std::mem", "std::fmt", "std::cmp", "std::str", "std::marker", "std::any", "std::convert", "std::cell", "std::os"]
+    let mut found = false
+    for idx in 0..mods.len():
+        if mods[idx] == p:
+            found = true
+    found
+
+def use_seg_rust(s: str) -> String =
+    if s == "List":
+        "Vec".to_string()
+    elif s == "Dict":
+        "BTreeMap".to_string()
+    elif s == "Set":
+        "HashSet".to_string()
+    elif s == "Nil":
+        "()".to_string()
+    elif s == "int":
+        "i64".to_string()
+    elif s == "str":
+        "String".to_string()
+    elif s == ".":
+        "self".to_string()
+    elif s == "..":
+        "super".to_string()
+    else:
+        s.to_string()
+
 def gen_use_stmt(path: List<str>, alias: MaybeStr, items: List<str>, is_from: bool) -> String =
     let mut path_parts: String = "".to_string()
     for idx in 0..path.len():
-        let ps = path[idx].clone()
+        let ps = use_seg_rust(path[idx].clone())
         if idx > 0:
             path_parts = path_parts + "::".to_string()
-        path_parts = path_parts + ps.to_string()
+        path_parts = path_parts + ps
     let path_str = path_parts
-    if is_from:
+    // 相对导入（self::/super::）与用户模块：不发射（模块项已平铺）
+    if str_starts(path_str, "self::") or str_starts(path_str, "super::"):
+        "".to_string()
+    elif not is_known_std_module(path_str):
+        "".to_string()
+    elif is_from:
         if items.len() == 1 && items[0] == "*":
             "use ".to_string() + path_str + "::*;".to_string()
         else:
@@ -3253,11 +3473,20 @@ def gen_item(i: Item, user_fns: List[str], tbm: List[(str, List[(str, bool)])], 
                 // `pub fn main() { std::process::exit(__lz_main() as i32); }`（decl_gen.rs:1516-1523）
                 // ——因为 Rust 的 main 只能返回 ()。此处对齐该形态。
                 let typed_main = is_main && !r_eq_unit(r)
-                let fn_name_s = ("__lz_main" if typed_main else n).to_string()
-                let ret_s = "".to_string() if (is_main && !typed_main) else (" -> ".to_string() + rust_type(r))
+                let fn_name_s = ("__lz_main" if typed_main else n.clone()).to_string()
+                // G6：变参形参（`..: Tuple<...>`）→ 具体化签名（原生 decl_gen.rs:829-866）
+                let pk = pack_lookup(user_fns, n)
+                // G8：含 yield 的函数在原生侧被改造成「收集到 Vec 再返回」的生成器
+                // （decl_gen.rs 的 __gen_vec 形态）：返回类型 Vec<T>、首行声明收集器、
+                // 末行 `return __gen_vec;`（Stmt.Yield 已按 `__gen_vec.push(..)` 发射）。
+                let is_gen = body_has_yield(b)
+                let ret_s = "".to_string() if (is_main && !typed_main) else (" -> ".to_string() + ("Vec<".to_string() + rust_type(r) + ">" if is_gen else rust_type(r)))
                 let auto_mut = auto_mut_names(b)
                 let body_s = gen_body(b, is_main && !typed_main, auto_mut, rs, user_fns, tbm, vem, "".to_string())
-                let fndef = "pub fn ".to_string() + fn_name_s + generic_sig_b(gs, wc) + "(".to_string() + fn_param_list(ps, auto_mut) + ")".to_string() + ret_s + " {\n".to_string() + body_s + "}".to_string()
+                let pro_s = "    let mut __gen_vec = Vec::new();\n".to_string() if is_gen else "".to_string()
+                let epi_s = "    return __gen_vec;\n".to_string() if is_gen else "".to_string()
+                let fndef = "pub fn ".to_string() + fn_name_s + generic_sig_b(gs_pack_filtered(gs, ps, pk), wc) + "(".to_string() + fn_param_list_pack(ps, auto_mut, pk) + ")".to_string() + ret_s + " {\n".to_string() + pro_s + body_s + epi_s + "}".to_string()
+
                 if typed_main:
                     fndef + "\npub fn main() {\n    std::process::exit(__lz_main() as i32);\n}".to_string()
                 else:
@@ -3308,6 +3537,118 @@ def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>, auto_mut: String) -
     else:
         let p0 = ps[0].clone()
         fn_param_str(p0, auto_mut) + (", " + fn_param_list(pl_tail(ps), auto_mut) if ps.len() > 1 else "")
+
+// G6：带变参编码的形参表（pk 来自 pack_lookup；空串时与 fn_param_list 逐字符一致）
+def fn_param_list_pack(ps: List<(str, IrType, bool, bool, bool)>, auto_mut: String, pk: str) -> String =
+    if ps.len() == 0:
+        "".to_string()
+    else:
+        let p0 = ps[0].clone()
+        fn_param_str_pack(p0, auto_mut, pk) + (", " + fn_param_list_pack(pl_tail(ps), auto_mut, pk) if ps.len() > 1 else "")
+
+def fn_param_str_pack(p: (str, IrType, bool, bool, bool), auto_mut: String, pk: str) -> String =
+    if p.0 == "args" and pack_kind(pk) != "":
+        ("mut " if auto_mut_has(auto_mut, p.0) else "").to_string() + p.0.to_string() + ": ".to_string() + pack_param_type(p.1, pk)
+    else:
+        fn_param_str(p, auto_mut)
+
+// 变参形参的 Rust 类型（对齐原生 decl_gen.rs:829-866）：
+//   定长前缀 `..: Tuple<T1, T2, ..>` → (T1, T2, Vec<Box<dyn Any>>)
+//   typepack `..: Tuple<Ts...>`      → 调用点具体化的 (T1, T2, T3)；无调用点回落 &[Ts]
+// 单字段元组必须带尾逗号（`(i64)` 不是元组）。
+def pack_param_type(t: IrType, pk: str) -> String =
+    let ts = pack_types(pk)
+    let kind = pack_kind(pk)
+    if kind == "T" and ts.len() == 0:
+        let mut g_nm: String = "i64".to_string()
+        match t:
+            case IrType.Tuple(elems: es) =>
+                if es.len() == 1:
+                    g_nm = rust_type(es[0].clone())
+            case _ => ()
+        "&[".to_string() + g_nm + "]".to_string()
+    else:
+        let mut inner: String = "".to_string()
+        for idx in 0..ts.len():
+            if idx > 0:
+                inner = inner + ", ".to_string()
+            inner = inner + ts[idx].clone()
+        if kind == "V":
+            if ts.len() > 0:
+                inner = inner + ", ".to_string()
+            inner = inner + "Vec<Box<dyn Any>>".to_string()
+        if ts.len() == 1:
+            "(".to_string() + inner + ",)".to_string()
+        else:
+            "(".to_string() + inner + ")".to_string()
+
+// typepack 具体化后，pack 泛型形参要从 `<...>` 里剔除（原生 decl_gen.rs:598-603
+// 的 effective_generics：让函数不再是泛型，避免 rustc 对具体元组做 T 推断失败）。
+def gs_pack_filtered(gs: List[(str, List[IrType])], ps: List[(str, IrType, bool, bool, bool)], pk: str) -> List[(str, List[IrType])] =
+    if pack_kind(pk) != "T" or pack_types(pk).len() == 0:
+        gs.clone()
+    else:
+        let mut pack_g: String = "".to_string()
+        for idx in 0..ps.len():
+            let p = ps[idx].clone()
+            if p.0 == "args":
+                match p.1:
+                    case IrType.Tuple(elems: es) =>
+                        if es.len() == 1:
+                            let e0 = es[0].clone()
+                            match e0:
+                                case IrType.Generic(name: g) => pack_g = g.clone()
+                                case _ => ()
+                    case _ => ()
+        let mut out: List[(str, List[IrType])] = []
+        for idx in 0..gs.len():
+            let g = gs[idx].clone()
+            if pack_g.len() == 0 or g.0 != pack_g:
+                out.push(g)
+        out
+
+// ── G8：yield → 生成器（原生把含 yield 的函数改造成 Vec 收集器）──
+def body_has_yield(ss: List[Stmt]) -> bool =
+    let mut found = false
+    for idx in 0..ss.len():
+        if stmt_has_yield(ss[idx].clone()):
+            found = true
+    found
+
+def stmt_has_yield(s: Stmt) -> bool =
+    match s:
+        case Stmt.Yield(value: v) => true
+        case Stmt.YieldFrom(iter: it) => true
+        case Stmt.If(cond: c, then: th, els: el) => block_has_yield(th) or maybe_block_has_yield(el)
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) => block_has_yield(b) or maybe_block_has_yield(eb)
+        case Stmt.While(cond: c, guard_e: g, body: b, else_body: eb) => block_has_yield(b) or maybe_block_has_yield(eb)
+        case Stmt.Block(stmts: ss) => body_has_yield(ss)
+        case Stmt.BlockLabel(label: l, body: b) => block_has_yield(b)
+        case Stmt.Defer(body: b) => block_has_yield(b)
+        case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) => block_has_yield(b)
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let mut found0 = block_has_yield(b) or maybe_block_has_yield(eb) or maybe_block_has_yield(fb)
+            for idx in 0..cs.len():
+                if block_has_yield(cs[idx].clone().1):
+                    found0 = true
+            found0
+        case Stmt.Match(scrutinee: sc, arms: as_) =>
+            let mut found0 = false
+            for idx in 0..as_.len():
+                if block_has_yield(as_[idx].clone().2):
+                    found0 = true
+            found0
+        case _ => false
+
+def block_has_yield(b: BlockIR) -> bool =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) => body_has_yield(ss)
+
+def maybe_block_has_yield(mb: MaybeBlock) -> bool =
+    match mb:
+        case MaybeBlock.YesBlock(value: b) => block_has_yield(b)
+        case MaybeBlock.NoBlock => false
+
 
 def fn_param_str(p: (str, IrType, bool, bool, bool), auto_mut: String) -> String =
     // BUG-444：函数体内发生 &mut 用法（`d.remove(..)`、集合 push/insert 等）的参数
@@ -3631,6 +3972,556 @@ def gen_magic_const(n: str, t: IrType, v: Expr, user_fns: List[str], tbm: List[(
 
 // ── 模块组装 ──
 
+// ══ G6/G7/G8 共用：模块级预扫描 + 编码穿透 ══════════════════════════════════════
+// 原生 Codegen 有三个「先扫全模块、再发射」的表：
+//   typepack_sigs        （codegen/mod.rs:1199-1241 collect_typepack_calls）
+//   unknown_extern_fns   （scan.rs → emit.rs:396-416 的 i64 桩）
+//   unbound_fstring_vars （scan.rs:1245 collect_unbound_fstring_vars）
+// LZ 无可变全局，故在 codegen_module 里一次算好，用**前缀编码**追加进 user_fns
+// 穿透（`@` 不是合法 LZ 标识符字符，绝不会与真函数名撞；is_user_fn 是等值比较，
+// 追加项不影响它）。发射端用下面 *_lookup 取回。
+//   @packV:<fn>#<idx>=<T1>;<T2>  变参前缀形态 → args: (T1, T2, Vec<Box<dyn Any>>)
+//   @packT:<fn>#<idx>=<T1>;<T2>  typepack 具体化 → args: (T1, T2)
+//   @extern:<name>#<arity>       未定义外部函数桩 → fn name(__a0: i64, ...) -> i64
+//   @unbound:<name>              f-string 未绑定插值名 → 发空串
+
+// 字节偏移子串查找（找不到返回 -1）。不用 String::find：rs-lz 只在接收者 IR 类型
+// 明确为 str 时才把它重命名成 lz_find（BUG-453），而这里的接收者多为切片结果
+// （类型 Any）→ 会落成 Rust 原生 `str::find`（返回 Option<usize>）⇒ E0308。
+// 逐字符累加 `c.len()`（LZ 的 str.len() 即字节数）得到与 `s[a..b]` 一致的字节下标。
+def find_sub_byte(s: str, ch: str) -> int =
+    let cs = str_chars(s)
+    let mut at = -1
+    let mut off = 0
+    for idx in 0..cs.len():
+        let c = cs[idx].clone()
+        if at < 0 and c == ch:
+            at = off
+        off = off + c.len()
+    at
+
+def str_starts(s: str, pre: str) -> bool =
+    // 逐字符比较（不用 `s[0..pre.len()]` 字节切片：前缀字节长度可能落在多字节
+    // 字符中间 ⇒ panic「not a char boundary」，同 BUG-482 族）。
+    let cs = str_chars(s)
+    let ps = str_chars(pre)
+    if ps.len() == 0 or cs.len() < ps.len():
+        false
+    else:
+        let mut ok = true
+        for i in 0..ps.len():
+            if cs[i].clone() != ps[i].clone():
+                ok = false
+        ok
+
+def str_after(s: str, pre: str) -> str =
+    let cs = str_chars(s)
+    let ps = str_chars(pre)
+    let mut out: String = "".to_string()
+    for i in 0..cs.len():
+        if i >= ps.len():
+            out = out + cs[i].clone()
+    out
+
+def str_split_semi(s: str) -> List[str] =
+    let mut out: List[str] = []
+    let mut rest = s.clone()
+    let mut going = true
+    while going:
+        let p = find_sub_byte(rest, ";")
+        if p >= 0:
+            let head = rest[0..p]
+            let tail = rest[(p + 1)..rest.len()]
+            out.push(head)
+            rest = tail
+        else:
+            if rest.len() > 0:
+                out.push(rest.clone())
+            going = false
+    out
+
+def count_char(s: str, ch: str) -> int =
+    let mut n = 0
+    for idx in 0..s.len():
+        if s[idx..(idx + 1)] == ch:
+            n = n + 1
+    n
+
+def str_join_semi(ts: List[IrType]) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..ts.len():
+        if idx > 0:
+            out = out + ";".to_string()
+        out = out + rust_type(ts[idx].clone())
+    out
+
+// 用户函数 f 的变参编码（""=不是变参函数）。返回 "V#<idx>=<types>" / "T#<idx>=<types>"。
+def pack_lookup(user_fns: List[str], fn_name: str) -> String =
+    let mut found: String = "".to_string()
+    let vp = "@packV:".to_string() + fn_name + "#".to_string()
+    let tp = "@packT:".to_string() + fn_name + "#".to_string()
+    for idx in 0..user_fns.len():
+        let e = user_fns[idx].clone()
+        if str_starts(e, vp):
+            found = "V#".to_string() + str_after(e, vp)
+        elif str_starts(e, tp):
+            found = "T#".to_string() + str_after(e, tp)
+    found
+
+// "V#2=i64;String" → "V"（无编码时返回 ""）
+def pack_kind(pk: str) -> str =
+    if pk.len() == 0:
+        "".to_string()
+    else:
+        pk[0..1]
+
+// "V#2=i64;String" → 2（-1 = 无编码）。索引以 `|` 个数编码，避免在 LZ 侧做
+// `int(str)` 解析（该转换的分支在 rs-lz 里走 parse，换成分隔符计数更稳）。
+def pack_idx(pk: str) -> int =
+    if pk.len() == 0:
+        -1
+    else:
+        let rest = pk[2..pk.len()]
+        let eq = find_sub_byte(rest, "=")
+        if eq >= 0:
+            count_char(rest[0..eq], "|")
+        else:
+            -1
+
+// "V#2=i64;String" → ["i64", "String"]
+def pack_types(pk: str) -> List[str] =
+    if pk.len() == 0:
+        []
+    else:
+        let rest = pk[2..pk.len()]
+        let eq = find_sub_byte(rest, "=")
+        if eq >= 0:
+            str_split_semi(rest[(eq + 1)..rest.len()])
+        else:
+            []
+
+def is_generic_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Generic(name: g) => true
+        case _ => false
+
+// ── 调用点扫描（对齐原生 codegen/mod.rs:1199-1241 collect_typepack_calls）──
+// 够用即可：只关心 Call(Var(f), args) 的实参类型，其余节点递归穿透。
+def calls_of_module(m: IrModule) -> List[(str, List[IrType])] =
+    let mut acc: List[(str, List[IrType])] = []
+    for idx in 0..m.items.len():
+        let it = m.items[idx].clone()
+        match it:
+            case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, where_clause: wc, body: b) =>
+                acc = calls_in_stmts(b, acc)
+            case Item.Const(name: n, ty: t, value: v) =>
+                acc = calls_in_expr(v, acc)
+            case Item.ScriptMain(body: b) =>
+                acc = calls_in_stmts(b, acc)
+            case Item.Test(name: n, body: b) =>
+                acc = calls_in_stmts(b, acc)
+            case Item.Impl(trait_: tr, for_type: ft, generics: gs, where_clause: wc, assoc_type_bindings: atb, methods: ms) =>
+                for mi in 0..ms.len():
+                    acc = calls_in_stmts(ms[mi].clone().body, acc)
+            case _ => ()
+    acc
+
+def calls_in_block(b: BlockIR, acc: List[(str, List[IrType])]) -> List[(str, List[IrType])] =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) => calls_in_stmts(ss, acc)
+
+def calls_in_maybe_block(mb: MaybeBlock, acc: List[(str, List[IrType])]) -> List[(str, List[IrType])] =
+    match mb:
+        case MaybeBlock.YesBlock(value: b) => calls_in_block(b, acc)
+        case MaybeBlock.NoBlock => acc
+
+def calls_in_maybe_expr(me: MaybeExpr, acc: List[(str, List[IrType])]) -> List[(str, List[IrType])] =
+    match me:
+        case MaybeExpr.YesExpr(value: e) => calls_in_expr(e, acc)
+        case MaybeExpr.NoExpr => acc
+
+def calls_in_stmts(ss: List[Stmt], acc0: List[(str, List[IrType])]) -> List[(str, List[IrType])] =
+    let mut acc = acc0.clone()
+    for idx in 0..ss.len():
+        acc = calls_in_stmt(ss[idx].clone(), acc)
+    acc
+
+def calls_in_stmt(s: Stmt, acc0: List[(str, List[IrType])]) -> List[(str, List[IrType])] =
+    let mut acc = acc0.clone()
+    match s:
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+            calls_in_expr(v, acc)
+        case Stmt.Assign(target: tg, value: v) =>
+            calls_in_expr(v, calls_in_expr(tg, acc))
+        case Stmt.Return(value: v) =>
+            calls_in_maybe_expr(v, acc)
+        case Stmt.ExprStmt(expr: e) =>
+            calls_in_expr(e, acc)
+        case Stmt.If(cond: c, then: th, els: el) =>
+            let a1 = calls_in_expr(c, acc)
+            calls_in_maybe_block(el, calls_in_block(th, a1))
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) =>
+            let a1 = calls_in_expr(it, acc)
+            let a2 = calls_in_maybe_expr(g, a1)
+            calls_in_maybe_block(eb, calls_in_block(b, a2))
+        case Stmt.While(cond: c, guard_e: g, body: b, else_body: eb) =>
+            let a1 = calls_in_expr(c, acc)
+            let a2 = calls_in_maybe_expr(g, a1)
+            calls_in_maybe_block(eb, calls_in_block(b, a2))
+        case Stmt.Block(stmts: ss) =>
+            calls_in_stmts(ss, acc)
+        case Stmt.Match(scrutinee: sc, arms: as_) =>
+            let mut a1 = calls_in_expr(sc, acc)
+            for idx in 0..as_.len():
+                let arm = as_[idx].clone()
+                let a2 = calls_in_maybe_expr(arm.1, a1)
+                a1 = calls_in_block(arm.2, a2)
+            a1
+        case Stmt.Yield(value: v) =>
+            calls_in_expr(v, acc)
+        case Stmt.YieldFrom(iter: it) =>
+            calls_in_expr(it, acc)
+        case Stmt.Raise(value: v) =>
+            calls_in_expr(v, acc)
+        case Stmt.Assert(cond: c) =>
+            calls_in_expr(c, acc)
+        case Stmt.Defer(body: b) =>
+            calls_in_block(b, acc)
+        case Stmt.BlockLabel(label: l, body: b) =>
+            calls_in_block(b, acc)
+        case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) =>
+            let a1 = calls_in_expr(e, acc)
+            let a2 = calls_in_maybe_expr(g, a1)
+            calls_in_block(b, a2)
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let mut a1 = calls_in_block(b, acc)
+            for idx in 0..cs.len():
+                a1 = calls_in_block(cs[idx].clone().1, a1)
+            let a2 = calls_in_maybe_block(eb, a1)
+            calls_in_maybe_block(fb, a2)
+        case _ => acc
+
+def calls_in_expr(e: Expr, acc0: List[(str, List[IrType])]) -> List[(str, List[IrType])] =
+    let mut acc = acc0.clone()
+    match e:
+        case Expr.Call(callee: c, args: a, ty: t) =>
+            match c:
+                case Expr.Var(name: n, ty: t2) =>
+                    let mut ts: List[IrType] = []
+                    for idx in 0..a.len():
+                        ts.push(expr_ty(a[idx].clone()))
+                    acc.push((n, ts))
+                case _ => ()
+            acc = calls_in_expr(c, acc)
+            for idx in 0..a.len():
+                acc = calls_in_expr(a[idx].clone(), acc)
+            acc
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
+            acc = calls_in_expr(r, acc)
+            for idx in 0..a.len():
+                acc = calls_in_expr(a[idx].clone(), acc)
+            acc
+        case Expr.FieldAccess(base: b, field: f, ty: t) =>
+            calls_in_expr(b, acc)
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            calls_in_expr(k, calls_in_expr(b, acc))
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
+            calls_in_expr(v, calls_in_expr(k, calls_in_expr(b, acc)))
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
+            calls_in_expr(r, calls_in_expr(l, acc))
+        case Expr.UnOp(op: o, operand: p, ty: t) =>
+            calls_in_expr(p, acc)
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..fs.len():
+                a1 = calls_in_expr(fs[idx].clone().1, a1)
+            a1
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..a.len():
+                a1 = calls_in_expr(a[idx].clone(), a1)
+            a1
+        case Expr.EnumFieldGet(base: b, enum_name: en, variants: vs, field: f, ty: t) =>
+            calls_in_expr(b, acc)
+        case Expr.Cast(inner: i, target: tg, ty: t) =>
+            calls_in_expr(i, acc)
+        case Expr.MagicCall(magic: m, args: a, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..a.len():
+                a1 = calls_in_expr(a[idx].clone(), a1)
+            a1
+        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) =>
+            calls_in_expr(el, calls_in_expr(th, calls_in_expr(c, acc)))
+        case Expr.Lambda(params: ps, body: b, ty: t) =>
+            calls_in_expr(b, acc)
+        case Expr.Pipe(receiver: r, callee: c, args: a, ty: t) =>
+            let mut a1 = calls_in_expr(c, calls_in_expr(r, acc))
+            for idx in 0..a.len():
+                a1 = calls_in_expr(a[idx].clone(), a1)
+            a1
+        case Expr.TupleLit(elems: es, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..es.len():
+                a1 = calls_in_expr(es[idx].clone(), a1)
+            a1
+        case Expr.ListLit(items: xs, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..xs.len():
+                a1 = calls_in_expr(xs[idx].clone(), a1)
+            a1
+        case Expr.BlockExpr(stmts: ss, ty: t) =>
+            calls_in_stmts(ss, acc)
+        case Expr.GenExpr(yield_of: y, ty: t) =>
+            calls_in_expr(y, acc)
+        case Expr.Paren(inner: i, ty: t) =>
+            calls_in_expr(i, acc)
+        case Expr.Range(end: en, inclusive: inc, ty: t) =>
+            calls_in_expr(en, acc)
+        case Expr.Dict(pairs: ps, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..ps.len():
+                let pr = ps[idx].clone()
+                a1 = calls_in_expr(pr.1, calls_in_expr(pr.0, a1))
+            a1
+        case Expr.AssignExpr(target: tg, value: v, ty: t) =>
+            calls_in_expr(v, calls_in_expr(tg, acc))
+        case Expr.ImplicitConvert(source: s, target_ty: tt, ty: t) =>
+            calls_in_expr(s, acc)
+        case _ => acc
+
+// ── 声明名扫描（对齐原生 scan.rs:1245 collect_unbound_fstring_vars 的 bound 集）──
+def bound_names_of_module(m: IrModule) -> List[str] =
+    let mut acc: List[str] = []
+    for idx in 0..m.items.len():
+        let it = m.items[idx].clone()
+        match it:
+            case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, where_clause: wc, body: b) =>
+                acc = add_name(acc, n)
+                for pi in 0..ps.len():
+                    acc = add_name(acc, ps[pi].clone().0)
+                acc = bound_in_stmts(b, acc)
+            case Item.Const(name: n, ty: t, value: v) =>
+                acc = add_name(acc, n)
+            case Item.StructDef(name: n, generics: gs, fields: fs) =>
+                acc = add_name(acc, n)
+                for fi in 0..fs.len():
+                    acc = add_name(acc, fs[fi].clone().0)
+            case Item.EnumDef(name: n, generics: gs, variants: vs) =>
+                acc = add_name(acc, n)
+            case Item.ScriptMain(body: b) =>
+                acc = bound_in_stmts(b, acc)
+            case Item.Test(name: n, body: b) =>
+                acc = bound_in_stmts(b, acc)
+            case Item.Impl(trait_: tr, for_type: ft, generics: gs, where_clause: wc, assoc_type_bindings: atb, methods: ms) =>
+                for mi in 0..ms.len():
+                    let mm = ms[mi].clone()
+                    for pi in 0..mm.params.len():
+                        acc = add_name(acc, mm.params[pi].clone().0)
+                    acc = bound_in_stmts(mm.body, acc)
+            case _ => ()
+    acc
+
+def add_name(acc: List[str], n: str) -> List[str] =
+    if n.len() == 0:
+        acc.clone()
+    else:
+        acc + [n]
+
+def bound_in_stmts(ss: List[Stmt], acc0: List[str]) -> List[str] =
+    let mut acc = acc0.clone()
+    for idx in 0..ss.len():
+        acc = bound_in_stmt(ss[idx].clone(), acc)
+    acc
+
+def bound_in_block(b: BlockIR, acc: List[str]) -> List[str] =
+    match b:
+        case BlockIR.Block(stmts: ss, ty: t) => bound_in_stmts(ss, acc)
+
+def bound_in_maybe_block(mb: MaybeBlock, acc: List[str]) -> List[str] =
+    match mb:
+        case MaybeBlock.YesBlock(value: b) => bound_in_block(b, acc)
+        case MaybeBlock.NoBlock => acc
+
+def bound_in_stmt(s: Stmt, acc0: List[str]) -> List[str] =
+    let mut acc = acc0.clone()
+    match s:
+        case Stmt.Let(name: n, ty: t, value: v, is_mut: m, is_ref: r) =>
+            bound_in_expr(v, add_name(acc, n))
+        case Stmt.Assign(target: tg, value: v) =>
+            bound_in_expr(v, bound_in_expr(tg, acc))
+        case Stmt.ExprStmt(expr: e) =>
+            bound_in_expr(e, acc)
+        case Stmt.Return(value: v) =>
+            match v:
+                case MaybeExpr.YesExpr(value: e) => bound_in_expr(e, acc)
+                case MaybeExpr.NoExpr => acc
+        case Stmt.If(cond: c, then: th, els: el) =>
+            let a1 = bound_in_expr(c, acc)
+            bound_in_maybe_block(el, bound_in_block(th, a1))
+        case Stmt.For(var: v, iter: it, guard_e: g, body: b, else_body: eb) =>
+            let a1 = bound_in_expr(it, add_name(acc, v))
+            let a2 = match g:
+                case MaybeExpr.YesExpr(value: ge) => bound_in_expr(ge, a1)
+                case MaybeExpr.NoExpr => a1
+            bound_in_maybe_block(eb, bound_in_block(b, a2))
+        case Stmt.While(cond: c, guard_e: g, body: b, else_body: eb) =>
+            let a1 = bound_in_expr(c, acc)
+            bound_in_maybe_block(eb, bound_in_block(b, a1))
+        case Stmt.Block(stmts: ss) =>
+            bound_in_stmts(ss, acc)
+        case Stmt.Match(scrutinee: sc, arms: as_) =>
+            let mut a1 = bound_in_expr(sc, acc)
+            for idx in 0..as_.len():
+                let arm = as_[idx].clone()
+                let a2 = match arm.1:
+                    case MaybeExpr.YesExpr(value: ge) => bound_in_expr(ge, a1)
+                    case MaybeExpr.NoExpr => a1.clone()
+                a1 = bound_in_block(arm.2, a2)
+            a1
+        case Stmt.Raise(value: v) =>
+            bound_in_expr(v, acc)
+        case Stmt.Assert(cond: c) =>
+            bound_in_expr(c, acc)
+        case Stmt.Yield(value: v) =>
+            bound_in_expr(v, acc)
+        case Stmt.YieldFrom(iter: it) =>
+            bound_in_expr(it, acc)
+        case Stmt.Defer(body: b) =>
+            bound_in_block(b, acc)
+        case Stmt.BlockLabel(label: l, body: b) =>
+            bound_in_block(b, acc)
+        case Stmt.WhileLet(pattern: p, expr: e, guard_e: g, body: b) =>
+            let a1 = bound_in_expr(e, acc)
+            bound_in_block(b, a1)
+        case Stmt.TryCatch(body: b, catches: cs, else_body: eb, finally_body: fb) =>
+            let mut a1 = bound_in_block(b, acc)
+            for idx in 0..cs.len():
+                a1 = bound_in_block(cs[idx].clone().1, a1)
+            let a2 = bound_in_maybe_block(eb, a1)
+            bound_in_maybe_block(fb, a2)
+        case _ => acc
+
+def bound_in_expr(e: Expr, acc0: List[str]) -> List[str] =
+    let mut acc = acc0.clone()
+    match e:
+        case Expr.Lambda(params: ps, body: b, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..ps.len():
+                a1 = add_name(a1, ps[idx].clone())
+            bound_in_expr(b, a1)
+        case Expr.Call(callee: c, args: a, ty: t) =>
+            let mut a1 = bound_in_expr(c, acc)
+            for idx in 0..a.len():
+                a1 = bound_in_expr(a[idx].clone(), a1)
+            a1
+        case Expr.MethodCall(receiver: r, method: m, args: a, ty: t) =>
+            let mut a1 = bound_in_expr(r, acc)
+            for idx in 0..a.len():
+                a1 = bound_in_expr(a[idx].clone(), a1)
+            a1
+        case Expr.BinOp(op: o, lhs: l, rhs: r, ty: t) =>
+            bound_in_expr(r, bound_in_expr(l, acc))
+        case Expr.IndexGet(base: b, key: k, ty: t) =>
+            bound_in_expr(k, bound_in_expr(b, acc))
+        case Expr.IndexSet(base: b, key: k, value: v, ty: t) =>
+            bound_in_expr(v, bound_in_expr(k, bound_in_expr(b, acc)))
+        case Expr.FieldAccess(base: b, field: f, ty: t) =>
+            bound_in_expr(b, acc)
+        case Expr.Cast(inner: i, target: tg, ty: t) =>
+            bound_in_expr(i, acc)
+        case Expr.Paren(inner: i, ty: t) =>
+            bound_in_expr(i, acc)
+        case Expr.IfExpr(cond: c, then: th, els: el, ty: t) =>
+            bound_in_expr(el, bound_in_expr(th, bound_in_expr(c, acc)))
+        case Expr.TupleLit(elems: es, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..es.len():
+                a1 = bound_in_expr(es[idx].clone(), a1)
+            a1
+        case Expr.ListLit(items: xs, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..xs.len():
+                a1 = bound_in_expr(xs[idx].clone(), a1)
+            a1
+        case Expr.BlockExpr(stmts: ss, ty: t) =>
+            bound_in_stmts(ss, acc)
+        case Expr.StructCtor(name: n, fields: fs, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..fs.len():
+                a1 = bound_in_expr(fs[idx].clone().1, a1)
+            a1
+        case Expr.EnumCtor(enum_name: en, variant: v, args: a, ty: t) =>
+            let mut a1 = acc.clone()
+            for idx in 0..a.len():
+                a1 = bound_in_expr(a[idx].clone(), a1)
+            a1
+        case _ => acc
+
+def bound_names_has(names: List[str], n: str) -> bool =
+    let mut found = false
+    for idx in 0..names.len():
+        if names[idx] == n:
+            found = true
+    found
+
+// ── 未定义外部函数桩（对齐原生 emit.rs:396-416）──
+// "名字在模块内被调用 + 模块内没有该函数定义 + 不是语言内建" → 发 i64 桩，
+// 保证跨模块（.lzi 签名未加载）探针能编过。内建表取 gen_call 里已实现的魔法名。
+def is_builtin_fn_name(n: str) -> bool =
+    let builtins: List[str] = ["print", "panic", "panic!", "len", "set!", "sorted", "reversed", "min", "max", "sum", "abs", "zip", "Dict", "Set", "HashMap", "HashSet", "range", "int", "str", "float", "bool", "list", "dict", "tuple", "type", "spawn", "await", "read", "input", "open", "Some", "None", "Ok", "Err", "comp!", "dict_comp!", "set_comp!", "comp_mid!", "comp_leaf!", "dict_comp_mid!", "dict_comp_leaf!", "set_comp_mid!", "set_comp_leaf!", "comp_outer!", "dict_comp_outer!", "set_comp_outer!", "assert", "raise", "pass", "format", "repr", "id", "hash", "chr", "ord", "divmod", "round", "any", "all", "enumerate", "map", "filter"]
+    let mut found = false
+    for idx in 0..builtins.len():
+        if builtins[idx] == n:
+            found = true
+    found
+
+// 字符串后缀判定（逐字符，避免字节切片落在多字节字符中间）。
+def str_ends(s: str, suf: str) -> bool =
+    let cs = str_chars(s)
+    let ss = str_chars(suf)
+    if ss.len() == 0 or cs.len() < ss.len():
+        false
+    else:
+        let off = cs.len() - ss.len()
+        let mut ok = true
+        for i in 0..ss.len():
+            if cs[off + i].clone() != ss[i].clone():
+                ok = false
+        ok
+
+// 返回桩行（每行一个），按发现顺序去重。原生 emit.rs:404-408 的三条过滤：
+// 跳过含 `::` 的路径调用、跳过骨架已知的类型/宏（否则 `assert_eq!` 会变成
+// `fn assert_eq!(...)` 非法 Rust；`Point(..)` 会与 struct 撞名）。
+def extern_stub_lines(m: IrModule, user_fns: List[str], decl_names: List[str]) -> String =
+    let calls = calls_of_module(m)
+    let mut names: List[str] = []
+    let mut arities: List[int] = []
+    for idx in 0..calls.len():
+        let c = calls[idx].clone()
+        let n = c.0.clone()
+        let ar = c.1.len()
+        if not is_builtin_fn_name(n) and not is_user_fn(user_fns, n) and not bound_names_has(decl_names, n) and not str_ends(n, "!") and not str_contains(n, "::") and not starts_upper(n):
+            let mut at = -1
+            for k in 0..names.len():
+                if names[k] == n:
+                    at = k
+            if at < 0:
+                names.push(n.clone())
+                arities.push(ar)
+            elif ar > arities[at]:
+                arities[at] = ar
+    // 按发现顺序发射（原生 names.sort() 只影响行序；桩内容与顺序无关，
+    // 此处不做字符串比较排序，避免在 LZ 侧引入 String 的 Ord 依赖）。
+    let mut out: String = "".to_string()
+    for k in 0..names.len():
+        let mut params: String = "".to_string()
+        for pi in 0..arities[k]:
+            if pi > 0:
+                params = params + ", ".to_string()
+            params = params + "__a".to_string() + pi.to_string() + ": i64".to_string()
+        out = out + "#[allow(non_snake_case)] #[allow(dead_code)]\nfn ".to_string() + names[k].clone() + "(".to_string() + params + ") -> i64 { i64::MAX }\n".to_string()
+    out
+
 // BUG-478：收集模块顶层 FnDef 的名字，供 gen_call 判断标准库魔法（sum/min/max/
 // abs/zip/len/print/sorted/reversed/set!）是否被用户同名函数遮蔽。原生用
 // `self.fn_param_types.contains_key(name)` 守卫；rs-lz 无可变全局，故在 main 里
@@ -3651,16 +4542,76 @@ def codegen_module(m: IrModule, user_fns: List[str]) -> String =
     // match 解构端插 `let n = *n;`。LZ 无可变全局，只能像 user_fns 一样穿透。
     let tbm: List[(str, List[(str, bool)])] = type_box_map(m)
     let vem: List[(str, List[(str, List[str])])] = enum_variant_map(m)
-    let mut out: String = module_header()
+    // G6/G7/G8：变参具体化表 / 声明名表一次性算好，编码进同一穿透列表 env。
+    let env: List[str] = user_fns + module_prelude_entries(m, user_fns)
+    // G7：未定义外部函数桩（原生 emit.rs:396-416 在 header 里紧随 `use lz_builtins::*;`）
+    let stubs: String = extern_stub_lines(m, env, bound_names_of_module(m))
+    let mut out: String = module_header() + stubs + (if stubs.len() > 0: "\n".to_string() else: "".to_string())
     for idx in 0..m.items.len():
         // N2（BUG-482 同族）：旧实现每一项后都拼 "\n\n"，最后用 `out[0..(out.len()-2)]`
         // 按**字节**裁尾。产物里含中文/多字节字符串字面量时该字节下标不一定落在
         // 字符边界上（且空模块时 len<2 直接越界）⇒ panic。改为「分隔符前置」：
         // 只在第 2 项起拼 "\n\n"，末尾统一补一个 "\n"，全程不切字节。
         let sep = if idx == 0: "".to_string() else "\n\n".to_string()
-        out = out + sep + gen_item(m.items[idx].clone(), user_fns, tbm, vem)
+        out = out + sep + gen_item(m.items[idx].clone(), env, tbm, vem)
     // print_str 用 println! 会再补一个换行：末尾统一补一个 "\n"
     out + "\n".to_string()
+
+// 变参/声明名的编码表（见文件上方 pack_lookup 段的格式说明）。
+def module_prelude_entries(m: IrModule, user_fns: List[str]) -> List[str] =
+    let calls = calls_of_module(m)
+    let mut out: List[str] = []
+    for idx in 0..m.items.len():
+        let it = m.items[idx].clone()
+        match it:
+            case Item.FnDef(name: n, generics: gs, params: ps, ret: r, exc: rs, where_clause: wc, body: b) =>
+                for pi in 0..ps.len():
+                    let p = ps[pi].clone()
+                    if p.0 == "args":
+                        match p.1:
+                            case IrType.Tuple(elems: es) =>
+                                if es.len() == 1 and is_generic_irtype(es[0]):
+                                    // typepack（`..: Tuple<Ts...>`）：按调用点具体化
+                                    // （原生 decl_gen.rs:838-845 的 typepack_sigs 分支）
+                                    let cts = call_arg_types_of(calls, n)
+                                    if cts.len() > 0:
+                                        out.push("@packT:".to_string() + n.clone() + "#".to_string() + bars(pi) + "=".to_string() + str_join_semi(cts))
+                                else:
+                                    // 定长前缀形态：尾部 `..` 收集为 Vec<Box<dyn Any>>
+                                    out.push("@packV:".to_string() + n.clone() + "#".to_string() + bars(pi) + "=".to_string() + str_join_semi(es))
+                            case _ => ()
+            case _ => ()
+    // 声明名（f-string 未绑定判定用；对齐 scan.rs:1245 的 bound 集）
+    let bound = bound_names_of_module(m)
+    for idx in 0..bound.len():
+        out.push("@bound:".to_string() + bound[idx].clone())
+    out
+
+def bars(n: int) -> String =
+    let mut out: String = "".to_string()
+    for i in 0..n:
+        out = out + "|".to_string()
+    out
+
+// 原生 typepack_sigs.get(f).and_then(|s| s.first())：取**第一个**调用点的实参类型表。
+def call_arg_types_of(calls: List[(str, List[IrType])], fn_name: str) -> List[IrType] =
+    let mut found: List[IrType] = []
+    let mut hit = false
+    for idx in 0..calls.len():
+        let c = calls[idx].clone()
+        if c.0 == fn_name and not hit:
+            found = c.1.clone()
+            hit = true
+    found
+
+def bound_lookup(user_fns: List[str], n: str) -> bool =
+    let key = "@bound:".to_string() + n
+    let mut found = false
+    for idx in 0..user_fns.len():
+        if user_fns[idx] == key:
+            found = true
+    found
+
 
 def module_header() -> String =
     "\n// ── LZ rustc link recipe (BUG-10: lz_builtins re-exports num-bigint/num-complex) ──\n// To compile & run this generated file in isolation:\n//   rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O <this_file>.rs\n//   <rlib>     = liblz_builtins.rlib (build it: `cargo build -p lz_builtins`)\n//   <deps_dir> = the directory containing that rlib (e.g. <workspace>/target/debug/deps)\n// Omitting -L gives error[E0463] even if this program never uses BigInt/Complex.\n// ─────────────────────────────────────────────────────────────────────────────────────\n\n#[allow(unused_imports)]\n#[allow(unused_variables)]\n#[allow(dead_code)]\n#[allow(non_snake_case)]\n\nuse std::collections::{HashMap, HashSet};\nuse std::any::Any;\nuse std::rc::Rc;\nuse std::sync::Arc;\nuse std::fmt::Debug;\nuse std::fmt::Display;\n\nuse lz_builtins::*;\n\n".to_string()

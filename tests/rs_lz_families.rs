@@ -135,9 +135,18 @@ struct RsLzRun {
 }
 
 fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
+    run_rs_lz_files(tag, &[("input.lz", src)])
+}
+
+/// 多文件版本：`files` 里每个 (文件名, 内容) 先落到同一个工作目录，再对 `input.lz`
+/// 走完整链路。用于 `import moda as m` 这类需要**兄弟模块文件**才能解析的样本
+/// （G7）。第一条必须是 input.lz。
+fn run_rs_lz_files(tag: &str, files: &[(&str, &str)]) -> RsLzRun {
     let work = workdir(tag);
+    for (name, body) in files {
+        std::fs::write(work.join(name), body).expect("write lz file");
+    }
     let lz = work.join("input.lz");
-    std::fs::write(&lz, src).expect("write lz source");
 
     let mut emit = Command::new(lang_zone_bin());
     emit.arg("--emit=rs-lz").arg(&lz);
@@ -665,4 +674,249 @@ def main() =
     assert!(r.stdout.contains('6'), "sum_loop(4) 输出不对: {}", r.stdout);
     assert!(r.stdout.contains("11"), "`let x = x + 10` 输出不对: {}", r.stdout);
     assert!(r.stdout.contains('2'), "真·遮蔽 `let y = 2` 输出不对: {}", r.stdout);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// G5（红名单 r3 剩余 2 条）：字符串**单字符**下标 `s[i]`
+//
+// `str`/`String` 在 Rust 只实现 Range 索引，`s[i]` 直接 E0277（the type `str`
+// cannot be indexed by `usize`）。原生 expr_gen.rs:5665-5683 发「先 chars().collect()
+// 再按字符下标取」的块：字符串语境取 `.to_string()`，数值语境取码点 `as i64`。
+// 修法：`gen_expr` 的 IndexGet 在「str 基底 + 非 Range 键」时发同一块；
+// `Expr.Cast` 的数值分支对 str 下标改发码点形态（旧实现会先 to_string 再 parse）。
+// 覆盖样本：`div-tools/probes/p22_str_index.lz`（p12b_single 见 G6）。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn g5_str_single_char_index_uses_char_table() {
+    let src = r##"
+def char_at(s: str, i: int) -> str =
+    s[i]
+
+def code_at(s: str, i: int) -> int =
+    int(s[i])
+
+def main() =
+    print(char_at("abc", 1))
+    print(code_at("abc", 1))
+"##;
+    let r = run_rs_lz("g5_char_index", src);
+    assert_ok(&r, "G5 字符串单字符下标");
+    assert!(
+        r.rust.contains("let __cs: Vec<char> = "),
+        "字符串下标未走 chars 收集块（仍会 E0277 str cannot be indexed by usize）:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("__cs[__i].to_string()"),
+        "字符串语境未取 to_string 形态:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("__cs[__i] as i64"),
+        "数值语境未取码点形态（旧实现是 to_string 后 parse）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("s[i64 as usize]"),
+        "仍是裸 `s[i as usize]`（E0277）:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains('b'), "char_at 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains("98"), "code_at 输出不对: {}", r.stdout);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// G6（2 条）：tuple / typepack 的索引与字段访问
+//
+// 三个叠加缺陷：
+//   ① `t[0]` 发成 `t[0i64 as usize]` ⇒ E0608 cannot index into `(A, B)`
+//      （原生 expr_gen.rs:5554-5596 无条件发 `.0` 字段访问）；
+//   ② 单元素元组类型发成 `(String)` —— Rust 里那只是加括号的 String，
+//      故 `.0` 报 E0609；必须 `(String,)`；
+//   ③ 变参形参 `..: Tuple<...>` 的签名与调用点未打包 ⇒ E0061
+//      （定长前缀形态 → `(T1, T2, Vec<Box<dyn Any>>)`；typepack 形态按调用点
+//       具体化成 `(T1, T2, T3)`）。
+// 覆盖样本：`p12_typepack.lz`、`p12c_pack.lz`、`p12b_single.lz`。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn g6_tuple_index_and_typepack_packing() {
+    let src = r##"
+def log(..: Tuple<str, int, ..>) =
+    print(args[0])
+    print(args[1])
+
+def show<Ts...>(..: Tuple<Ts...>) =
+    print(args.0, args.1)
+
+def main() =
+    log("hello", 42, 3.14, 1)
+    show(1, "a", True)
+"##;
+    let r = run_rs_lz("g6_typepack", src);
+    assert_ok(&r, "G6 元组下标 / typepack 打包");
+    // ① 元组下标 → `.0` / `.1`
+    assert!(
+        r.rust.contains("args.0") && r.rust.contains("args.1"),
+        "元组下标未发成字段访问（E0608）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("args[0i64 as usize]"),
+        "元组下标仍是 `args[0]`（E0608）:\n{}",
+        r.rust
+    );
+    // ② 定长前缀形态的变参签名 + 调用点打包
+    assert!(
+        r.rust.contains("Vec<Box<dyn Any>>"),
+        "定长前缀变参签名未补尾部收集器:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("vec![Box::new("),
+        "调用点未把多余实参 Box 打包:\n{}",
+        r.rust
+    );
+    // ③ typepack 具体化：泛型 Ts 被剔除，签名是具体异质元组
+    assert!(
+        r.rust.contains("pub fn show(mut args: (i64, String, bool))"),
+        "typepack 未按调用点具体化:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains("hello"), "log 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains("42"), "log 第二字段输出不对: {}", r.stdout);
+    assert!(
+        r.stdout.contains('1') && r.stdout.contains('a'),
+        "show 输出不对: {}",
+        r.stdout
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// G7（2 条）：模块 import 未展开 / 外部符号未声明
+//
+//   ① `import moda as m`：CLI 已把模块项平铺进同一 IrModule，原生 imported_modules
+//      （codegen/mod.rs:1335-1342）把 `m.add(..)` 直接渲染成 `add(..)`，且不给用户
+//      模块发 `use`（decl_gen.rs:2809-2960 只对已知 std 路径发）。rs-lz 旧实现
+//      无条件发 `use moda;` ⇒ E0432 unresolved import `moda`。
+//   ② 外部函数（.lzi 签名未加载）：原生 emit.rs:396-416 发 `-> i64 { i64::MAX }` 桩
+//      兜底；rs-lz 旧实现裸调用 ⇒ E0425 cannot find function。
+// 覆盖样本：`p5_alias.lz`、`p16_lzi.lz`。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn g7_module_alias_call_and_extern_stub() {
+    // `import moda as m` 需要兄弟模块文件才能解析（CLI 按输入文件所在目录找）
+    let src = r##"
+import moda as m
+def main() =
+    let r = m.add(2, 3)
+    print(r)
+    let x = external_add(3, 4)
+    print(x)
+"##;
+    let moda = r##"
+def add(a: int, b: int) -> int =
+    a + b
+"##;
+    let r = run_rs_lz_files("g7_alias_extern", &[("input.lz", src), ("moda.lz", moda)]);
+    assert_ok(&r, "G7 模块别名调用 / 外部符号桩");
+    // ① 别名命名空间调用降级为普通调用
+    assert!(
+        r.rust.contains("add(2i64, 3i64)"),
+        "`m.add(2, 3)` 未降级成 `add(2, 3)`:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("m.add("),
+        "别名前缀仍透传（E0425 cannot find value `m`）:\n{}",
+        r.rust
+    );
+    // ② 未定义外部函数发 i64 桩
+    assert!(
+        r.rust.contains("fn external_add(__a0: i64, __a1: i64) -> i64 { i64::MAX }"),
+        "未定义外部函数未发兜底桩（E0425）:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains('5'), "add 输出不对: {}", r.stdout);
+    assert!(
+        r.stdout.contains("9223372036854775807"),
+        "外部桩返回值不对: {}",
+        r.stdout
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// G8（4 条）：杂项单例 —— 插值未绑定名 / `raise` / `.slice()` / `yield` 生成器
+//
+//   ① `f"hello {name}"` 引外部符号：原生 scan.rs:1245 预扫「未绑定插值名」并发空串，
+//      旧实现直发 `name` ⇒ E0425 cannot find value `name`。
+//   ② `raise x`（无异常签名）：Rust 的 panic! 首参必须是格式串字面量，旧实现发
+//      `panic!(x)` ⇒ `expected `,`, found `.``。原生形态 `panic!("{:?}", x)`。
+//   ③ `src.slice(a, b)`：String/Vec 都没有 slice 方法，原生映射 lz_slice（E0599）。
+//   ④ `iterator` + `yield`：原生把函数改造成 Vec 收集器（`__gen_vec` 声明 +
+//      `return __gen_vec;`，返回类型 Vec<T>）；旧实现只发 push，`__gen_vec` 未声明
+//      ⇒ E0425 cannot find value `__gen_vec`。
+// 覆盖样本：`lit_probe.lz`、`neg_error_uncaught_panic_ok.lz`、
+//           `p24_slice_method.lz`、`p8_yield.lz`。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn g8_fstring_unbound_raise_slice_yield() {
+    let src = r##"
+iterator counter(n: int) =
+    let mut i = 0
+    while i < n:
+        yield i
+        i = i + 1
+
+def boom() =
+    raise "boom"
+
+def main() =
+    for x in counter(3):
+        print(x)
+    let src = "def add"
+    let w = src.slice(0, 3)
+    print(w)
+    let fs = f"hello {name}"
+    print(fs)
+"##;
+    let r = run_rs_lz("g8_misc", src);
+    assert_ok(&r, "G8 插值/raise/slice/yield");
+    // ① 未绑定插值名 → 空串
+    assert!(
+        r.rust.contains("format!(\"hello {:?}\", \"\")"),
+        "未绑定 f-string 插值名未替换为空串（E0425）:\n{}",
+        r.rust
+    );
+    // ② raise → panic!("{:?}", ..)
+    assert!(
+        r.rust.contains("panic!(\"{:?}\", "),
+        "raise 未发成 `panic!(\"{{:?}}\", v)`（语法错）:\n{}",
+        r.rust
+    );
+    // ③ slice → lz_slice
+    assert!(
+        r.rust.contains(".lz_slice(0i64, 3i64)"),
+        "`.slice(a, b)` 未映射 lz_slice（E0599）:\n{}",
+        r.rust
+    );
+    // ④ yield 生成器：Vec 返回 + __gen_vec 声明/回收
+    assert!(
+        r.rust.contains("let mut __gen_vec = Vec::new();"),
+        "生成器缺 __gen_vec 声明（E0425）:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("return __gen_vec;"),
+        "生成器缺 `return __gen_vec;`:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("pub fn counter(n: i64) -> Vec<i64>"),
+        "生成器返回类型未改成 Vec<T>:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains('0'), "yield 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains('2'), "yield 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains("def"), "slice 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains("hello"), "f-string 输出不对: {}", r.stdout);
 }
