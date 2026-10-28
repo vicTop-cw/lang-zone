@@ -1965,10 +1965,25 @@ def is_place_expr(e: Expr) -> bool =
         case _ => false
 
 def call_arg_src(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
-    if is_place_expr(e) && is_heap_irtype(expr_ty(e)):
+    if is_place_expr(e) && is_clone_place_ty(expr_ty(e)):
         gen_expr(e, fn_raises, user_fns, tbm, vem) + ".clone()".to_string()
     else:
         gen_expr(e, fn_raises, user_fns, tbm, vem)
+
+// T0r16 E0382：实参 clone 判据补齐「类型未知」一档。
+// 原生 expr_gen.rs 的 Call 实参 clone 判据以**被调函数的形参声明类型**
+// （fn_param_types）为主口径：`!param_is_copy && arg_is_var && !arg_is_copy`。
+// rs-lz 只有实参侧的 `Expr.ty`，没有形参表可用；而 match 臂 / 嵌套块里的
+// 推断会把变量类型退化成 `IrType.Any`（`--emit=ir` 显示为 `[?]`），于是
+// `is_heap_irtype(Any) = false` ⇒ `tok_at(toks, ..)` 裸着 move 走，下一句
+// `parse_block(toks, ..)` 即 E0382（p43/p44/base_parser 一族）。
+// 原生对 Any 实参同样按非 Copy 处理（arg_is_copy 只认 Int/F64/Bool），
+// 故此处把 Any 并入需 clone 的一档——与原生同口径，不多加别的语义。
+// Generic 仍保持不 clone（原生靠泛型约束兜底，rs-lz 无约束推导，保守不动）。
+def is_clone_place_ty(t: IrType) -> bool =
+    match t:
+        case IrType.Any => true
+        case _ => is_heap_irtype(t)
 
 def call_args_list(a: List[Expr], fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
     if a.len() == 0:

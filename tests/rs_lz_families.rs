@@ -430,3 +430,128 @@ def main() -> int =
     );
     assert!(r.stdout.contains("3"), "输出不对: {}", r.stdout);
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// N6（T0r16）：E0382 —— match 臂内复用「上一句已被按值传走」的非 Copy 参数
+//
+// 旧产物（p43/p44/base_parser 一族，红名单剩 7 条的唯一 E-code）：
+//     let t = tok_at(toks, pos);            // toks 在这里被 move
+//     match t { Token.If => {
+//         let nt = tok_at(toks, pos + 1);   // ← E0382 use of moved value
+//         let blk = parse_block(toks, …);   // ← E0382
+// 根因：发射器 `call_arg_src` 只按**实参自身的推断类型**判「非 Copy 才补 clone」
+// （`is_heap_irtype(expr_ty(e))`）；而 match 臂 / 嵌套块里的 IR 类型会退化成
+// `IrType.Any`（`--emit=ir` 显示 `[?]`），`is_heap_irtype(Any) = false` ⇒ 判据
+// 落空，裸实参把变量 move 走。原生 expr_gen.rs 的 Call 实参 clone 口径是
+// `!param_is_copy && arg_is_var && !arg_is_copy`——`arg_is_copy` 只认
+// Int/F64/Bool，Any 同样按非 Copy 处理。
+// 修法：`is_clone_place_ty` 把 `IrType.Any` 并入需 clone 的一档（与原生同口径）。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn e0382_match_arm_reuses_moved_param() {
+    let src = r##"
+enum Token:
+    IntLit(v: int)
+    If
+    Eof
+
+def tok_at(toks: List<Token>, idx: int) -> Token =
+    toks[idx].clone()
+
+def tok_int(t: Token) -> int =
+    let res: int = match t:
+        case Token.IntLit(v: n) => n
+        case _ => -1
+    res
+
+def parse_block(toks: List<Token>, pos: int) -> (List<str>, int) =
+    let t = tok_at(toks, pos)
+    let n = tok_int(t)
+    (["n" + n.to_string()], pos + 1)
+
+def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    let res: (str, int) = match t:
+        case Token.If =>
+            let nt = tok_at(toks, pos + 1)
+            let cond = tok_int(nt)
+            let blk = parse_block(toks, pos + 2)
+            let body = blk.0
+            let body_s = body[0]
+            let rr: (str, int) = ("if " + cond.to_string() + " {" + body_s + "}", blk.1)
+            rr
+        case _ =>
+            let rr: (str, int) = ("?", pos + 1)
+            rr
+    res
+
+def main() =
+    let toks = [Token.If, Token.IntLit(v: 1), Token.IntLit(v: 7), Token.Eof]
+    let r = parse_stmt(toks, 0)
+    print(r.0)
+"##;
+    let r = run_rs_lz("e0382_match_arm", src);
+    assert_ok(&r, "N6 match 臂内复用已 move 的参数");
+    // 臂内两处 `toks` 实参都必须带 clone（第二处是 E0382 的报错点）
+    assert!(
+        r.rust.contains("tok_at(toks.clone(), pos + 1i64)"),
+        "臂内第一处实参未补 .clone()（E0382）:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("parse_block(toks.clone(), pos + 2i64)"),
+        "臂内第二处实参未补 .clone()（E0382）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("tok_at(toks, "),
+        "仍有裸 `toks` 实参（会 move，E0382）:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains("if 1 {n7}"), "输出不对: {}", r.stdout);
+}
+
+/// N6 姊妹面：同一形态作用在**元组字段实参**上（base_parser 的
+/// `keyword_token(r.0)` / `Token.Ident(name: r.0)`）。`p.0` 在臂内同样退化为
+/// `?`，旧产物 `probe(p.0)` 把字段 move 走，下一句 `let tail = p.0` 即 E0382。
+#[test]
+fn e0382_match_arm_reuses_moved_field() {
+    let src = r##"
+enum T:
+    A
+    B
+
+def probe(s: str) -> bool =
+    s == "a"
+
+def scan(p: (str, int)) -> str =
+    let t = T.A
+    let res: str = match t:
+        case T.A =>
+            let ok = probe(p.0)
+            let tail = p.0
+            if ok:
+                tail
+            else:
+                "no"
+        case _ =>
+            "?"
+    res
+
+def main() =
+    print(scan(("a", 1)))
+"##;
+    let r = run_rs_lz("e0382_field", src);
+    assert_ok(&r, "N6 match 臂内复用已 move 的元组字段");
+    assert!(
+        r.rust.contains("probe(p.0.clone())"),
+        "元组字段实参未补 .clone()（E0382）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("probe(p.0)"),
+        "仍有裸 `p.0` 实参（会 move，E0382）:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains('a'), "输出不对: {}", r.stdout);
+}
