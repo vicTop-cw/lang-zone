@@ -20,6 +20,7 @@
 
 pub mod adapters;
 pub mod artifact;
+pub mod dedup;
 pub mod shim;
 
 use std::path::Path;
@@ -130,7 +131,9 @@ impl ForeignFn {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbedTarget {
     pub lang: String,
-    /// 对外可见的产物名 = `<语言>_<源文件主干>`，如 `mojo_input` / `python_input`
+    /// 对外可见的产物名 = `<语言>_<源文件主干>`，如 `mojo_input` / `python_input`；
+    /// 模块在产物根的子目录里时再补 `__<目录slug>_<路径短哈希>`（`src/embed/dedup.rs`），
+    /// 保证同名跨模块产物不互相覆盖。
     pub artifact: String,
     pub tier: EmbedTier,
     pub kind: ArtifactKind,
@@ -211,12 +214,17 @@ pub fn base_stem(source_name: &str) -> String {
 }
 
 /// 解析一个 embed 块：Source 档返回 None（走既有逐字行为），Cli 档返回完整 target
+///
+/// 产物名（`artifact`）由 `dedup::artifact_name` 统一给出：产物根下的模块仍是
+/// `<语言>_<主干>`（`python_calc`，兼容面一字不动），子目录里的模块补
+/// `__<目录slug>_<路径短哈希>` —— 这样 `a/input.lz` 与 `b/input.lz` 的同名产物
+/// 落到 `build/embed/input/python_input__a_*` 与 `...__b_*`，不再互相覆盖目录。
 pub fn resolve(lang: &str, source_name: &str, src: &str) -> Option<EmbedTarget> {
     if is_source_lang(lang) {
         return None;
     }
     let a = adapter(lang);
-    let artifact = format!("{}_{}", a.lang(), base_stem(source_name));
+    let artifact = dedup::artifact_name(a.lang(), source_name);
     let kind = if a.has_main(src) {
         ArtifactKind::Executable
     } else {
