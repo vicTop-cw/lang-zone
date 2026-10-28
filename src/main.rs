@@ -253,56 +253,214 @@ fn merge_imports_into(
 }
 
 /// 将 .lz 扩展名替换为 .rs（只替换最后的扩展名，避免 `a.lz.lz` → `a.rs.rs` 问题）
+// ── lz_builtins rlib 的「按运行环境推导」解析链（T0r25，2026-10-28）─────────
+//
+// 曾经的硬编码：`<manifest>/target/debug/liblz_builtins.rlib`，出现在
+// `--emit=rs-lz` / `--emit=ir-lz` / `--emit=lex-lz|parse-lz` 三处自检链、
+// 以及 `print_link_recipe` 打给用户的 LINK RECIPE。后果：用
+// `CARGO_TARGET_DIR=target/lane-xxx` 跑任何 rs-lz 相关车道/门禁，自检链仍读
+// **默认车道** `target/debug` —— 一旦那个目录没构建或被清，就是假红
+// （T0r21 报告点名；`Reports/redlist-2026-10-28-r3.md` §7 亦记）。
+//
+// 现在与 T0r13 对 `tests/demo_codegen_compile.rs` 的修法保持一致，一律按
+// **当前运行环境**推导 `<target-dir>/<profile>`，优先级：
+//   a) 环境变量 `CARGO_TARGET_DIR`（相对路径按 crate 根解析）；
+//   b) `std::env::current_exe()` 反推
+//      （`<target-dir>/<profile>/deps/<bin>` / `<target-dir>/<profile>/<bin>` → `<target-dir>/<profile>`）；
+//   c) 兜底 `CARGO_MANIFEST_DIR/target/debug`。
+// rlib 选择：`deps/liblz_builtins-*.rlib` 取 mtime 最新；顶层
+// `liblz_builtins.rlib`（cargo 为 lib target 产的硬链接）仅作兜底。
+//
+// 说明：`CARGO_MANIFEST_DIR` 由 cargo 在编译期注入，`env!` 直接用即可
+// （本文件早已在用），不需要 build.rs，也不引入任何新依赖。
+
+/// crate 根（`CARGO_MANIFEST_DIR`，编译期注入）。
+fn crate_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// 相对路径按 crate 根解析（cargo 在 crate 根执行，相对 `CARGO_TARGET_DIR` 亦以此为基准）。
+fn resolve_from_crate_root(p: PathBuf) -> PathBuf {
+    if p.is_absolute() {
+        p
+    } else {
+        crate_root().join(p)
+    }
+}
+
+/// 由当前可执行文件反推 `<target-dir>/<profile>`：
+/// `.../<target-dir>/<profile>/deps/<bin>[.exe]` → `.../<target-dir>/<profile>`；
+/// 直接落在 `<profile>/<bin>` 的普通二进制则取其父目录。
+fn profile_dir_from_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let profile_dir = if dir.file_name().map_or(false, |n| n == "deps") {
+        dir.parent()?
+    } else {
+        dir
+    };
+    if profile_dir.is_dir() {
+        Some(profile_dir.to_path_buf())
+    } else {
+        None
+    }
+}
+
+fn profile_name(dir: &Path) -> String {
+    dir.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "debug".to_string())
+}
+
+/// 本次运行真正使用的 `<target-dir>/<profile>`（见上方 a/b/c 解析链）。
+///
+/// 车道示例：`CARGO_TARGET_DIR=target/lane-rlib cargo build` 后跑
+/// `target/lane-rlib/debug/lzc.exe --emit=rs-lz foo.lz`
+/// → 返回 `target/lane-rlib/debug`，于是 `--extern lz_builtins=` 与
+/// `-L dependency=` 都指向**本车道**产物，不再串道。
+fn lane_profile_dir() -> PathBuf {
+    if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
+        let raw = PathBuf::from(raw);
+        if !raw.as_os_str().is_empty() {
+            let root = resolve_from_crate_root(raw);
+            // 已直接指向 profile 目录（自带 deps/）→ 就用它
+            if root.join("deps").is_dir() {
+                return root;
+            }
+            let profile = profile_dir_from_exe()
+                .map(|d| profile_name(&d))
+                .unwrap_or_else(|| "debug".to_string());
+            return root.join(profile);
+        }
+    }
+    if let Some(dir) = profile_dir_from_exe() {
+        return dir;
+    }
+    crate_root().join("target").join("debug")
+}
+
+/// 与 `lane_profile_dir()` 配对的 cargo `--target-dir`（即 `<profile>` 的父目录）。
+fn lane_target_root() -> PathBuf {
+    let dir = lane_profile_dir();
+    dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir)
+}
+
+/// 目录内**最新**（mtime 最大）的 `deps/liblz_builtins-*.rlib`。
+/// 同一 target 下可能残留多个 hash 的 rlib，取最新避免链到陈旧产物
+/// （陈旧 rlib 缺失 `Complex64`/`BigInt` 的坑）。
+fn newest_deps_rlib(dir: &Path) -> Option<PathBuf> {
+    let deps = dir.join("deps");
+    let entries = std::fs::read_dir(&deps).ok()?;
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
+            let mtime = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if best.as_ref().map_or(true, |(t, _)| mtime > *t) {
+                best = Some((mtime, e.path()));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// 在某个 `<profile>` 目录里定位 lz_builtins 的 .rlib：
+/// 先 `deps/liblz_builtins-*.rlib` 取最新，再退回顶层 `liblz_builtins.rlib`。
+fn probe_rlib(dir: &Path) -> Option<PathBuf> {
+    if let Some(p) = newest_deps_rlib(dir) {
+        return Some(p);
+    }
+    let direct = dir.join("liblz_builtins.rlib");
+    if direct.exists() {
+        return Some(direct);
+    }
+    None
+}
+
+/// 定位本次运行的 lz_builtins .rlib（a/b/c 解析链，见上方注释）。
+fn find_builtins_rlib() -> Option<PathBuf> {
+    let profile_dir = lane_profile_dir();
+    if let Some(p) = probe_rlib(&profile_dir) {
+        return Some(p);
+    }
+    // c) 兜底：默认车道 `CARGO_MANIFEST_DIR/target/debug`（车道没构建时至少给出可用产物）
+    let fallback = crate_root().join("target").join("debug");
+    if fallback != profile_dir {
+        if let Some(p) = probe_rlib(&fallback) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// rlib 对应的 `-L dependency=` 目录：**必须是 deps/**。
+///
+/// BUG-486：顶层 `liblz_builtins.rlib` 是硬链接，其传递依赖
+/// （num-bigint/num-complex 等）只在 `deps/` 里；把 `-L dependency` 指到
+/// profile 目录会 E0463。
+fn deps_dir_for(rlib: &Path) -> PathBuf {
+    let parent = rlib.parent().unwrap_or(Path::new("."));
+    if parent.file_name().map_or(false, |n| n == "deps") {
+        return parent.to_path_buf();
+    }
+    let deps = parent.join("deps");
+    if deps.is_dir() {
+        deps
+    } else {
+        parent.to_path_buf()
+    }
+}
+
+/// （rlib, `-L dependency=` 目录）—— 自检链与 LINK RECIPE 共用的唯一取数口。
+fn builtins_link() -> Option<(PathBuf, PathBuf)> {
+    let rlib = find_builtins_rlib()?;
+    let deps = deps_dir_for(&rlib);
+    Some((rlib, deps))
+}
+
+/// 自检链取 rlib：找不到就**明确报错并行失败**（绝不静默用不存在的路径去喂 rustc，
+/// 那会伪装成 E0463 之类的「编译错误」假红）。
+fn builtins_link_or_exit(what: &str) -> (PathBuf, PathBuf) {
+    match builtins_link() {
+        Some(v) => v,
+        None => {
+            eprintln!(
+                "{what}: 未找到 lz_builtins 的 .rlib（已查找 {}；先 `cargo build -p lz_builtins`{}）",
+                lane_profile_dir().display(),
+                if lane_profile_dir() == crate_root().join("target").join("debug") {
+                    String::new()
+                } else {
+                    format!("，车道 target-dir={}", lane_target_root().display())
+                }
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
 /// BUG-10 产品化（方案 A，2026-10-01）：单文件生成 .rs 后，把**本机解析好的
 /// 完整可复制** rustc 链接命令打到 stderr。只打印不落盘 ⇒ golden 快照零影响。
-/// 解析顺序：lzc exe 同目录 liblz_builtins.rlib → 同目录 deps/ 下的带哈希 rlib。
+/// 解析链见 `lane_profile_dir()` / `find_builtins_rlib()`（T0r25 起按运行环境
+/// 推导，不再硬编码 `target/debug`）。
 fn print_link_recipe(out_path: &std::path::Path) {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-    // BUG-486：`-L dependency` 必须指向 deps/。`target/debug/liblz_builtins.rlib`
-    // 是顶层硬链接，其传递依赖（num-bigint/num-complex 等）位于
-    // `target/debug/deps/`；rlib 在顶层时 `r.parent()` = target/debug →
-    // `-L dependency=target/debug` 找不到依赖 → rustc E0463。此处先取
-    // `<exe_dir>/deps` 备着（rlib 在 deps 时二者相同，无副作用）。
-    let exe_deps_dir: Option<PathBuf> = exe_dir
-        .as_ref()
-        .map(|d| d.join("deps"))
-        .filter(|p| p.is_dir());
-    let rlib: Option<PathBuf> = exe_dir.and_then(|d| {
-        let direct = d.join("liblz_builtins.rlib");
-        if direct.exists() {
-            return Some(direct);
-        }
-        let deps = d.join("deps");
-        std::fs::read_dir(&deps).ok().and_then(|entries| {
-            entries
-                .flatten()
-                .map(|e| e.path())
-                .find(|p| {
-                    let n = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                    n.starts_with("liblz_builtins-") && n.ends_with(".rlib")
-                })
-        })
-    });
-    match rlib {
-        Some(r) => {
-            // 统一取 `<exe_dir>/deps`（见上方 BUG-486 注释）。
-            let deps_dir = exe_deps_dir
-                .or_else(|| r.parent().map(|p| p.to_path_buf()))
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
+    match builtins_link() {
+        Some((r, deps_dir)) => {
             eprintln!(
                 "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins={} -L dependency={} -O {}",
                 r.display(),
-                deps_dir,
+                deps_dir.display(),
                 out_path.display()
             );
         }
         None => {
             eprintln!(
-                "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O {}   (rlib 未在 lzc 同目录找到；先 `cargo build -p lz_builtins`)",
-                out_path.display()
+                "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O {}   (rlib 未在 {} 找到；先 `cargo build -p lz_builtins`)",
+                out_path.display(),
+                lane_profile_dir().display()
             );
         }
     }
@@ -448,8 +606,8 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
         std::process::exit(1);
     }
     let rs_path = replace_ext(&lz_path, ".lzfront", ".rs");
-    let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
+    let (builtins, builtins_deps) = builtins_link_or_exit("LZ frontend 自检");
     let exe_path = replace_ext(&lz_path, ".lzfront", ".exe");
     let rs_path_abs = absolutize(&rs_path);
     let exe_path_abs = absolutize(&exe_path);
@@ -459,7 +617,7 @@ fn run_lz_frontend(path: &str, source: &str, mode: &str) {
         .arg("--extern")
         .arg(format!("lz_builtins={}", builtins.display()))
         .arg("-L")
-        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg(format!("dependency={}", builtins_deps.display()))
         .arg("-o")
         .arg(&exe_path_abs)
         .output()
@@ -1016,8 +1174,8 @@ fn compile_main(args: Vec<String>) -> i32 {
                     std::process::exit(1);
                 }
                 let rs_path = replace_ext(&lz_path, ".lzlz", ".rs");
-                let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("target/debug/liblz_builtins.rlib");
+                // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
+                let (builtins, builtins_deps) = builtins_link_or_exit("LZ IR codegen 自检");
                 let exe_path = replace_ext(&lz_path, ".lzlz", ".exe");
                 let rs_path_abs = absolutize(&rs_path);
                 let exe_path_abs = absolutize(&exe_path);
@@ -1027,7 +1185,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                     .arg("--extern")
                     .arg(format!("lz_builtins={}", builtins.display()))
                     .arg("-L")
-                    .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+                    .arg(format!("dependency={}", builtins_deps.display()))
                     .arg("-o")
                     .arg(&exe_path_abs)
                     .output()
@@ -1103,8 +1261,8 @@ fn compile_main(args: Vec<String>) -> i32 {
                     std::process::exit(1);
                 }
                 let rs_path = replace_ext(&lz_path, ".lzrs", ".rs");
-                let builtins = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("target/debug/liblz_builtins.rlib");
+                // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
+                let (builtins, builtins_deps) = builtins_link_or_exit("LZ Rust codegen 自检");
                 let exe_path = replace_ext(&lz_path, ".lzrs", ".exe");
                 let rs_path_abs = absolutize(&rs_path);
                 let exe_path_abs = absolutize(&exe_path);
@@ -1114,7 +1272,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                     .arg("--extern")
                     .arg(format!("lz_builtins={}", builtins.display()))
                     .arg("-L")
-                    .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+                    .arg(format!("dependency={}", builtins_deps.display()))
                     .arg("-o")
                     .arg(&exe_path_abs)
                     .output()
@@ -1353,47 +1511,9 @@ fn extract_flag_value(args: &[String], flag: &str) -> Option<String> {
     None
 }
 
-/// 在常见构建输出目录中定位 lz_builtins 的 .rlib（生成的 .rs 依赖它）
-fn find_builtins_rlib() -> Option<std::path::PathBuf> {
-    // 开发/测试期：workspace 根 target/debug（与 tests/lz_semantic_cases.rs 一致）
-    let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join("debug");
-    if let Some(p) = probe_rlib(&base) {
-        return Some(p);
-    }
-    // 回退：从当前可执行文件所在目录向上查找（cargo test 的 exe 位于 target/debug/deps）
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if let Some(p) = probe_rlib(dir) {
-                return Some(p);
-            }
-            if let Some(parent) = dir.parent() {
-                if let Some(p) = probe_rlib(parent) {
-                    return Some(p);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn probe_rlib(dir: &std::path::Path) -> Option<std::path::PathBuf> {
-    let direct = dir.join("liblz_builtins.rlib");
-    if direct.exists() {
-        return Some(direct);
-    }
-    let deps = dir.join("deps");
-    if let Ok(entries) = std::fs::read_dir(&deps) {
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
-                return Some(e.path());
-            }
-        }
-    }
-    None
-}
+// T0r25：旧的 `find_builtins_rlib` / `probe_rlib`（硬编码 `<manifest>/target/debug`）
+// 已上移到文件前部，改为按运行环境推导；同一个 `find_builtins_rlib()` 名字保留，
+// 供 `run_test_mode` 等调用方使用。
 
 /// 编译生成的 .rs 文件为测试二进制并运行（IR 路线的 `lz test`）
 /// 找一个可用的宿主 Python：`LZ_PYTHON` 优先，其次 `python`/`python3`（要求 `--version` 真跑得通）。
@@ -1560,10 +1680,22 @@ fn run_test_mode(source_path: &str, out_path: &str) {
     // 确保 lz_builtins 的 rlib 存在：cargo 可能因 lang-zone 自身不直接引用其符号
     // （只生成含 `use lz_builtins::*` 的字符串）而只产出 .rmeta，导致 rustc --test 时
     // 找不到 crate（E0432）。显式构建该包以生成 .rlib。
-    let _ = std::process::Command::new("cargo")
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
+    //
+    // T0r25：**显式传 `--target-dir`**（与 tests/demo_codegen_compile.rs 的 T0r13 修法
+    // 一致）。产物目录由 lane_profile_dir() 推导（可能来自 CARGO_TARGET_DIR=target/lane-xxx）；
+    // 若沿用 cargo 默认目录，构建会落到 target/debug、解析却看向车道目录 → 假红。
+    let profile = profile_name(&lane_profile_dir());
+    let mut cargo = std::process::Command::new("cargo");
+    cargo
+        .current_dir(crate_root())
         .args(["build", "-p", "lz_builtins", "--quiet"])
-        .status();
+        .arg("--target-dir")
+        .arg(lane_target_root());
+    if profile != "debug" {
+        // release / 自定义 profile 与 lzc 自身所在 profile 对齐
+        cargo.arg("--release");
+    }
+    let _ = cargo.status();
 
     let mut cmd = std::process::Command::new("rustc");
     // 生成的 .rs 使用 2021 版语法，且依赖 lz_builtins crate，必须显式链接其 rlib
@@ -1573,11 +1705,10 @@ fn run_test_mode(source_path: &str, out_path: &str) {
         .arg(out_path)
         .arg("-o")
         .arg(&test_bin);
-    if let Some(rlib) = find_builtins_rlib() {
+    if let Some((rlib, deps)) = builtins_link() {
         cmd.arg("--extern")
             .arg(format!("lz_builtins={}", rlib.display()));
-        cmd.arg("-L")
-            .arg(format!("dependency={}", rlib.parent().unwrap().join("deps").display()));
+        cmd.arg("-L").arg(format!("dependency={}", deps.display()));
     } else {
         eprintln!("warning: 未找到 lz_builtins rlib，测试构建可能因链接失败");
     }
