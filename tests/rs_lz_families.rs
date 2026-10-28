@@ -72,6 +72,54 @@ fn clean(s: &str) -> String {
         .join("\n")
 }
 
+/// 以 wall-clock 上限运行子进程，超时即 kill 并按「未成功」返回。
+///
+/// T0r20 的缺陷形态正是「能编过但运行不终止」——若直接用 `.output()`，一旦回归，
+/// 整个 `cargo test` 会被死循环挂死（没有超时就不可能判失败）。所以发射器、rustc、
+/// 产物运行三条路径统一走这里。
+fn output_with_timeout(mut cmd: Command, secs: u64) -> std::process::Output {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn 子进程");
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait().expect("try_wait") {
+            Some(status) => {
+                let mut out = Vec::new();
+                let mut err = Vec::new();
+                if let Some(mut s) = child.stdout.take() {
+                    let _ = s.read_to_end(&mut out);
+                }
+                if let Some(mut s) = child.stderr.take() {
+                    let _ = s.read_to_end(&mut err);
+                }
+                return std::process::Output {
+                    status,
+                    stdout: out,
+                    stderr: err,
+                };
+            }
+            None => {
+                if start.elapsed().as_secs() >= secs {
+                    let _ = child.kill();
+                    let status = child.wait().expect("wait 被 kill 的子进程");
+                    return std::process::Output {
+                        status,
+                        stdout: Vec::new(),
+                        stderr: format!("TIMEOUT: 子进程超过 {secs}s 未退出（疑似死循环）")
+                            .into_bytes(),
+                    };
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
 struct RsLzRun {
     /// 目标程序的 Rust 源码（`--emit=rs-lz` 的 stdout）
     rust: String,
@@ -91,11 +139,9 @@ fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
     let lz = work.join("input.lz");
     std::fs::write(&lz, src).expect("write lz source");
 
-    let out = Command::new(lang_zone_bin())
-        .arg("--emit=rs-lz")
-        .arg(&lz)
-        .output()
-        .expect("run lang-zone --emit=rs-lz");
+    let mut emit = Command::new(lang_zone_bin());
+    emit.arg("--emit=rs-lz").arg(&lz);
+    let out = output_with_timeout(emit, 600);
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     let rust = clean(&String::from_utf8_lossy(&out.stdout));
     if !out.status.success() {
@@ -112,7 +158,8 @@ fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
     let rs = work.join("gen.rs");
     std::fs::write(&rs, &rust).expect("write generated rust");
     let exe = work.join("gen.exe");
-    let rc = Command::new("rustc")
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd
         .args(["--edition", "2021", "--crate-name", "gen_program"])
         .arg(&rs)
         .arg("--extern")
@@ -123,9 +170,8 @@ fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
             builtins_rlib().parent().unwrap().join("deps").display()
         ))
         .arg("-o")
-        .arg(&exe)
-        .output()
-        .expect("run rustc on rs-lz output");
+        .arg(&exe);
+    let rc = output_with_timeout(rustc_cmd, 300);
     if !rc.status.success() {
         return RsLzRun {
             rust: rust.clone(),
@@ -141,7 +187,8 @@ fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
         };
     }
 
-    let prog = Command::new(&exe).output().expect("run generated exe");
+    // T0r20：运行也带上限（30s）——缺陷形态是「编得过但不终止」，不设上限会挂死测试进程
+    let prog = output_with_timeout(Command::new(&exe), 30);
     RsLzRun {
         rust,
         emitted: true,
@@ -554,4 +601,68 @@ def main() =
         r.rust
     );
     assert!(r.stdout.contains('a'), "输出不对: {}", r.stdout);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// N7（T0r20）：循环体内的「重赋」被发成 shadow-let ⇒ 循环变量永不推进（运行不终止）
+//
+// 实测（p43_nested_block.lz / p44_nested_fixed.lz）：native 正常退出并打印，
+// rs-lz 产物能编过但 `timeout 30` 内不退出（exit 124）。
+// 根因不在循环发射，而在 `Stmt.Let` 的两种来源在 IR 里**同形**：
+//   `let mut i = 0`（真声明）与 `i = r.1`（LZ 无 `let` 的重赋）都是 Stmt.Let，
+//   后者只有 is_mut=true 可用，且 value 不含自身名字（BUG-454 的自引用启发不覆盖），
+//   于是照直发 `let mut i = r.1;` —— Rust 的 shadow-let，外层 i 永不推进。
+// 修法：发射器自持作用域表（decl_has / decl_add / decl_after_stmt，见
+// lz_codegen_lib.lz T0r20 段），名字已在词法作用域内 + is_mut=true ⇒ 发 `i = <expr>;`。
+// 本用例同时守住「真·遮蔽不误伤」：显式 `let y = 2` 必须仍是 let（否则 E0384）。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn loop_reassign_emits_assignment_not_shadow() {
+    let src = r##"
+def step(p: int) -> (int, int) =
+    (p, p + 1)
+
+def sum_loop(n: int) -> int =
+    let mut i = 0
+    let mut total = 0
+    while i < n:
+        total = total + i
+        let r = step(i)
+        i = r.1
+    total
+
+def main() =
+    print(sum_loop(4))
+    let x = 1
+    let x = x + 10
+    print(x)
+    let y = 1
+    let y = 2
+    print(y)
+"##;
+    let r = run_rs_lz("n7_loop_reassign", src);
+    assert_ok(&r, "N7 循环内重赋不遮蔽");
+    // ① 重赋必须发成赋值（旧缺陷形态是 `let mut i = r.1;`）
+    assert!(
+        r.rust.contains("i = r.1;"),
+        "循环变量重赋未发成赋值（仍是 shadow-let ⇒ 死循环）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("let mut i = r.1"),
+        "仍是 `let mut i = r.1`（外层 i 永不推进 ⇒ 死循环）:\n{}",
+        r.rust
+    );
+    // ② 真·遮蔽（显式 let 重复声明）必须仍发 let，不得被改成对不可变变量的赋值
+    //    （形态为 `let y: i64 = 2i64;`，故只断言「y 的 let 出现两次」而非字面量文本）
+    assert!(
+        r.rust.matches("let y").count() >= 2,
+        "真·遮蔽被误改成赋值（显式 let 应保持 let）:\n{}",
+        r.rust
+    );
+    // ③ 运行必须在 output_with_timeout 的 30s 上限内正常退出，且输出与 native 同口径
+    assert!(r.run_ok, "生成产物未正常退出（超时/死循环）:\n{}", r.diag);
+    assert!(r.stdout.contains('6'), "sum_loop(4) 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains("11"), "`let x = x + 10` 输出不对: {}", r.stdout);
+    assert!(r.stdout.contains('2'), "真·遮蔽 `let y = 2` 输出不对: {}", r.stdout);
 }
