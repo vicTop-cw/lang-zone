@@ -15,6 +15,12 @@
 //   callee Var（`len`/`inc` 非 Copy 且非形参）→ true → 走 child 重生成 → 裸 `Ok(`。
 //
 // 运行：CARGO_TARGET_DIR=target/lane-native cargo test --test native_variant_qual
+//
+// T0r14（同源的另一半）：用户自定义枚举变体名以 `Var` 出现在**闭包体内** Call 的
+//   callee 位时，clone 路径只认 Some/None/Ok/Err/集合别名（`is_type_ctor_name`），
+//   把 `Bar(inc(n))` 整形为 `Foo::Bar::clone()(inc(n))` → rustc
+//   `error[E0433]: Bar is a variant, not a module`。修法：把变体名表传进 helpers 的
+//   四个自由函数（`is_ctor_name`），变体构造器不再进 clone 路径。回归闸门见 ④。
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -301,11 +307,11 @@ def main() =
 // ③ 自定义枚举正例：`enum Foo: Bar(int)` → `Foo::Bar(..)`
 //    （不依赖 Result 名字，验证限定来自 enum_variants 表本身）
 //
-// 说明：本用例只覆盖**语句位置**形态。`Bar(..)` 出现在闭包体内时另有一个
-// 与 N1 无关的既有缺陷（clone_noncopy_external 只把 Some/None/Ok/Err/集合别名
+// 说明：本用例只覆盖**语句位置**形态。`Bar(..)` 出现在闭包体内时曾另有一个
+// 与 N1 同源的既有缺陷（clone_noncopy_external 只把 Some/None/Ok/Err/集合别名
 // 认作类型构造器，用户自定义变体名 `Bar` 被当成外部变量 → `Foo::Bar::clone()(..)`
-// → E0433），修复它需要给该 helper 传入枚举变体表，超出 N1 的最小改动范围，
-// 故此处不设该形态的闸门（已在 T0r11 报告中记录）。
+// → E0433），已在 T0r14 修复（枚举变体表传入 helpers），
+// 该形态的回归闸门见下方 ④ `custom_enum_variant_in_closure_body`。
 // ────────────────────────────────────────────────────────────────
 #[test]
 fn custom_enum_variant_qualified() {
@@ -355,3 +361,100 @@ def main() =
         uc[0]
     );
 }
+
+// ────────────────────────────────────────────────────────────────
+// ④ N1 修复前的失败形态（T0r14 归零验证）：闭包体内自定义变体构造器
+//
+// 修复前实测（T0r14 复现样本）：
+//   `let mk = |n: int| -> Foo = Bar(inc(n))`
+//   → `Arc::new(move |n: i64| -> Foo { Foo::Bar::clone()(inc.clone()(n)) })`
+//   → rustc `error[E0433]: cannot find module `Bar` in `Foo`` / `Bar` is a variant,
+//     not a module。
+//
+// 根因（与 N1 同源的另一半）：闭包体内的 clone 路径
+//   （helpers.rs `clone_noncopy_external` / `body_refs_noncopy_external`）只把
+//   Some/None/Ok/Err/集合别名认作类型构造器（`is_type_ctor_name`），用户枚举变体名
+//   `Bar` 被当成「外层非 Copy 变量」→ 包一层 `.clone()`。这两个 helper 是自由函数，
+//   拿不到 CodeGen 的 enum_variants 表。
+//
+// 修法：给四个 helper（body_refs_noncopy_external / clone_noncopy_external /
+//   clone_noncopy_stmt / *_contains_nested_move_lambda）加 `variants: &HashMap<..>`
+//   参数，判定改走 `is_ctor_name`（内建列表 ∪ 用户变体表）。变体名从此不进 clone 路径。
+//
+// 本用例覆盖三种闭包体形态：
+//   a. 单表达式体 + 变体实参是函数调用（原始复现形态，走 clone_noncopy_external 的 Call 递归）
+//   b. 块体 + 局部变量（走 clone_noncopy_stmt）
+//   c. 单元变体裸值（`|n| -> Foo = Baz`）
+// 运行时用 `assert unwrap(..) == ..` 校验取值，程序 panic → 非 0 退出 → `a.ok` 为 false。
+// ────────────────────────────────────────────────────────────────
+#[test]
+fn custom_enum_variant_in_closure_body() {
+    let src = r#"
+enum Foo:
+    Bar(int)
+    Baz
+
+def inc(x: int) -> int =
+    return x + 1
+
+def unwrap(f: Foo) -> int =
+    match f:
+        case Foo.Bar(v): return v
+        case Foo.Baz: return 0
+
+def main() =
+    let base: int = 4
+    let mk = |n: int| -> Foo = Bar(inc(n))
+    let mk2 = |n: int| -> Foo =
+        let v: int = inc(n)
+        Bar(v)
+    let mkz = |n: int| -> Foo = Baz
+    let a: Foo = mk(base)
+    let b: Foo = mk2(base)
+    let c: Foo = mkz(1)
+    assert unwrap(a) == 5
+    assert unwrap(b) == 5
+    assert unwrap(c) == 0
+    print(1)
+"#;
+    let a = run_lz("foo_closure", src);
+    assert!(
+        a.ok,
+        "闭包体内的自定义变体构造必须可编译且取值正确（T0r14 原始复现形态）:\n{}",
+        a.diag
+    );
+    let rs = a.rs.expect("rs text");
+    // 核心回归：闭包体内变体构造器不得被 clone 路径整形（`Foo::Bar::clone()` / `<..>::clone()`）
+    assert!(
+        !rs.contains("Bar::clone()"),
+        "变体构造器名不得被 clone（E0433: Bar is a variant, not a module）:\n{}",
+        rs
+    );
+    assert!(
+        !rs.contains("Foo::Baz::clone()"),
+        "单元变体不得发射 `Foo::Baz::clone()`（`::` 路径非法）:\n{}",
+        rs
+    );
+    // 单表达式体（原始复现形态）：该行必须直接以 `Foo::Bar(..)` 构造
+    let mk_line = rs
+        .lines()
+        .find(|l| l.contains("let mut mk:"))
+        .expect("产物中应有 `let mut mk:` 行");
+    assert!(
+        mk_line.contains("Foo::Bar("),
+        "闭包体内 `Bar(inc(n))` 应发射 `Foo::Bar(..)`:\n{}",
+        mk_line
+    );
+    assert!(
+        !mk_line.contains("Foo::Bar::clone"),
+        "闭包体内变体构造器不得进 clone 路径:\n{}",
+        mk_line
+    );
+    // 块体形态：`Bar(v)` 同样限定为 `Foo::Bar(v)`
+    assert!(
+        rs.lines().any(|l| l.trim_start().starts_with("Foo::Bar(v)")),
+        "块体内 `Bar(v)` 应发射 `Foo::Bar(v)`:\n{}",
+        rs
+    );
+}
+

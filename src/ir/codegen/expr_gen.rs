@@ -504,7 +504,7 @@ impl CodeGen {
         count_vars_expr(e, &mut all);
         let mut excl: Vec<String> = all.keys().cloned().collect();
         excl.retain(|n| !names.contains(n));
-        clone_noncopy_external(e, &excl)
+        clone_noncopy_external(e, &excl, &self.enum_variants)
     }
 
     /// move 语义修复：若实参为「被多次使用的非 Copy 变量」，自动 .clone()，
@@ -6736,14 +6736,14 @@ impl CodeGen {
                     // 闭包体内引用非 Copy 外部变量（`|j| { default }`，default: T）：
                     // move 闭包首次调用即移出 default，第二次调用 E0507。
                     // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
-                    if uses_move && body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow()) {
+                    if uses_move && body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow(), &self.enum_variants) {
                         uses_move = false;
                     }
                     // 闭包体内含嵌套闭包且嵌套闭包 move 捕获了非 Copy 外部变量
                     // （matrix.lz 列表推导 `|i| { ...map(move |j| { default }) }`）：
                     // 外层若用 move 会把 default 移入自身，内层再 move 捕获即 E0507。
                     // 外层改为借用捕获（default: &T），内层 `default.clone()` 由引用克隆得 T。
-                    if uses_move && block_contains_nested_move_lambda(block_ref, &*self.enclosing_lambda_params.borrow()) {
+                    if uses_move && block_contains_nested_move_lambda(block_ref, &*self.enclosing_lambda_params.borrow(), &self.enum_variants) {
                         uses_move = false;
                     }
                     // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
@@ -6774,12 +6774,12 @@ impl CodeGen {
                     // 本闭包自身形参 = 参数链尾（入栈处以 extend 追加，见 L6279）。
                     let own_params: Vec<String> =
                         encl_params[chain_prev_len.min(encl_params.len())..].to_vec();
-                    let has_nested_move = block_contains_nested_move_lambda(block_ref, &encl_params);
+                    let has_nested_move = block_contains_nested_move_lambda(block_ref, &encl_params, &self.enum_variants);
                     // 被外层强制 move 时，clone 判定只排除**自身**形参：祖先形参是外层
                     // 闭包自有值（不是可复制的借用），内层 move 闭包按值移出即 E0507。
                     let forced_body_clone = !has_nested_move
                         && self.parent_lambda_non_move
-                        && body_refs_noncopy_external(body, &own_params);
+                        && body_refs_noncopy_external(body, &own_params, &self.enum_variants);
                     let gen_block: Block = if (!uses_move || self.parent_lambda_non_move)
                         && (has_nested_move || forced_body_clone)
                     {
@@ -6792,7 +6792,7 @@ impl CodeGen {
                         nb.stmts = nb
                             .stmts
                             .iter()
-                            .map(|s| clone_noncopy_stmt(s, &excl))
+                            .map(|s| clone_noncopy_stmt(s, &excl, &self.enum_variants))
                             .collect();
                         nb
                     } else {
@@ -6823,13 +6823,13 @@ impl CodeGen {
                     // 闭包体内引用非 Copy 外部变量（`|j| default`，default: T）：
                     // move 闭包把 default 移入自身，闭包被 map/collect 多次调用即 E0507。
                     // 改用借用捕获（非 move），闭包体内 `default.clone()` 由引用克隆得 T。
-                    if uses_move && body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow()) {
+                    if uses_move && body_refs_noncopy_external(body, &*self.enclosing_lambda_params.borrow(), &self.enum_variants) {
                         uses_move = false;
                     }
                     // 闭包体内含嵌套 move 闭包且捕获了非 Copy 外部变量
                     // （matrix.lz 列表推导 `|i| comp!(|j| { default }, c)`）：
                     // 外层用 move 会把 default 移入自身，内层再 move 捕获即 E0507。
-                    if uses_move && expr_contains_nested_move_lambda(body, &*self.enclosing_lambda_params.borrow()) {
+                    if uses_move && expr_contains_nested_move_lambda(body, &*self.enclosing_lambda_params.borrow(), &self.enum_variants) {
                         uses_move = false;
                     }
                     // BUG-357：外层闭包非 move（借用捕获）时，内层若沿用非 move 会
@@ -6867,7 +6867,7 @@ impl CodeGen {
                         }
                     };
                     let body_s = if !uses_move {
-                        let cloned = clone_noncopy_external(body, &*self.enclosing_lambda_params.borrow());
+                        let cloned = clone_noncopy_external(body, &*self.enclosing_lambda_params.borrow(), &self.enum_variants);
                         let mut c = CodeGen::new();
                         c.known_types = self.known_types.clone();
                         c.str_typed_vars = self.str_typed_vars.clone();
@@ -6905,8 +6905,8 @@ impl CodeGen {
                         } else {
                             c.gen_expr(&cloned)
                         }
-                    } else if body_refs_noncopy_external(body, &expr_clone_excl) {
-                        let cloned = clone_noncopy_external(body, &expr_clone_excl);
+                    } else if body_refs_noncopy_external(body, &expr_clone_excl, &self.enum_variants) {
+                        let cloned = clone_noncopy_external(body, &expr_clone_excl, &self.enum_variants);
                         let mut c = CodeGen::new();
                         c.known_types = self.known_types.clone();
                         c.str_typed_vars = self.str_typed_vars.clone();

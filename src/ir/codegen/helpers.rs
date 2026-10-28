@@ -5,6 +5,7 @@
 use super::super::node::*;
 use super::super::types::IrType;
 use super::CodeGen;
+use std::collections::HashMap;
 
 pub(crate) fn is_kwarg_call(args: &[Expr]) -> bool {
     args.iter()
@@ -22,6 +23,15 @@ pub(crate) fn is_type_ctor_name(name: &str) -> bool {
         "Some" | "None" | "Ok" | "Err" | "Option" | "Result" | "List" | "Vec" | "list"
             | "Set" | "HashSet" | "set" | "Dict" | "HashMap" | "dict"
     )
+}
+
+/// 类型/枚举构造器名总判定：内建（`Some`/`Ok`/集合别名，见 `is_type_ctor_name`）
+/// ∪ 用户自定义枚举变体（`enum Foo: Bar(int)` 的 `Bar`）。变体名以 `Var(name)` 出现
+/// 在 Call 的 callee 位时是构造器，**不是**对外层非 Copy 变量的引用；不排除就会被
+/// 闭包体 clone 路径改写成 `Foo::Bar::clone()(..)` → E0433（Bar is a variant, not a module）。
+/// 变体表由调用方（CodeGen）传入：本组 helper 是自由函数，拿不到 CodeGen 的字段。
+pub(crate) fn is_ctor_name(name: &str, variants: &HashMap<String, String>) -> bool {
+    is_type_ctor_name(name) || variants.contains_key(name)
 }
 
 /// 判断实参是否为关键字实参节点：`_KwArg`（`name~` 糖）或
@@ -1729,16 +1739,20 @@ pub(crate) fn replace_ident_boundary(s: &str, from: &str, to: &str) -> String {
 /// （matrix.lz 列表推导 `|i| { ...map(move |j| { default }) }`）。
 /// 若命中，外层闭包应改用借用捕获（非 move），否则外层把变量移入自身，
 /// 内层 move 闭包再次移出即 E0507 cannot move out of captured variable.
-pub(crate) fn block_contains_nested_move_lambda(block: &Block, params: &[String]) -> bool {
+pub(crate) fn block_contains_nested_move_lambda(
+    block: &Block,
+    params: &[String],
+    variants: &HashMap<String, String>,
+) -> bool {
     for stmt in &block.stmts {
         match stmt {
             Stmt::ExprStmt { expr } => {
-                if expr_contains_nested_move_lambda(expr, params) {
+                if expr_contains_nested_move_lambda(expr, params, variants) {
                     return true;
                 }
             }
             Stmt::Let { value, .. } => {
-                if expr_contains_nested_move_lambda(value, params) {
+                if expr_contains_nested_move_lambda(value, params, variants) {
                     return true;
                 }
             }
@@ -1747,21 +1761,21 @@ pub(crate) fn block_contains_nested_move_lambda(block: &Block, params: &[String]
                 else_branch,
                 ..
             } => {
-                if block_contains_nested_move_lambda(then_branch, params)
+                if block_contains_nested_move_lambda(then_branch, params, variants)
                     || else_branch.as_ref().map_or(false, |e| {
-                        block_contains_nested_move_lambda(e, params)
+                        block_contains_nested_move_lambda(e, params, variants)
                     })
                 {
                     return true;
                 }
             }
             Stmt::For { body, .. } | Stmt::While { body, .. } => {
-                if block_contains_nested_move_lambda(body, params) {
+                if block_contains_nested_move_lambda(body, params, variants) {
                     return true;
                 }
             }
             Stmt::Match { arms, .. } => {
-                if arms.iter().any(|a| block_contains_nested_move_lambda(&a.body, params)) {
+                if arms.iter().any(|a| block_contains_nested_move_lambda(&a.body, params, variants)) {
                     return true;
                 }
             }
@@ -1773,55 +1787,59 @@ pub(crate) fn block_contains_nested_move_lambda(block: &Block, params: &[String]
 
 /// 表达式内是否含嵌套 Lambda，且该 Lambda 体内引用了非本 Lambda 形参的
 /// 非 Copy 外部变量（此时嵌套闭包需 move 捕获该变量）
-pub(crate) fn expr_contains_nested_move_lambda(e: &Expr, params: &[String]) -> bool {
+pub(crate) fn expr_contains_nested_move_lambda(
+    e: &Expr,
+    params: &[String],
+    variants: &HashMap<String, String>,
+) -> bool {
     match &e.kind {
         ExprKind::Lambda { params: lparams, body, .. } => {
             // 嵌套闭包体内的变量引用：非本闭包形参、非 Copy 类型 → 需 move 捕获
             let lparam_names: Vec<String> =
                 lparams.iter().map(|p| p.name.clone()).collect();
-            body_refs_noncopy_external(body, &lparam_names)
+            body_refs_noncopy_external(body, &lparam_names, variants)
         }
-        ExprKind::BlockExpr { block } => block_contains_nested_move_lambda(block, params),
+        ExprKind::BlockExpr { block } => block_contains_nested_move_lambda(block, params, variants),
         ExprKind::Call { callee, args, .. } => {
-            expr_contains_nested_move_lambda(callee, params)
+            expr_contains_nested_move_lambda(callee, params, variants)
                 || args
                     .iter()
-                    .any(|a| expr_contains_nested_move_lambda(a, params))
+                    .any(|a| expr_contains_nested_move_lambda(a, params, variants))
         }
         ExprKind::MethodCall { receiver, args, .. } => {
-            expr_contains_nested_move_lambda(receiver, params)
+            expr_contains_nested_move_lambda(receiver, params, variants)
                 || args
                     .iter()
-                    .any(|a| expr_contains_nested_move_lambda(a, params))
+                    .any(|a| expr_contains_nested_move_lambda(a, params, variants))
         }
         ExprKind::BinOp { lhs, rhs, .. } => {
-            expr_contains_nested_move_lambda(lhs, params)
-                || expr_contains_nested_move_lambda(rhs, params)
+            expr_contains_nested_move_lambda(lhs, params, variants)
+                || expr_contains_nested_move_lambda(rhs, params, variants)
         }
-        ExprKind::UnOp { operand, .. } => expr_contains_nested_move_lambda(operand, params),
+        ExprKind::UnOp { operand, .. } => expr_contains_nested_move_lambda(operand, params, variants),
         ExprKind::AssignExpr { target, value, .. } => {
-            expr_contains_nested_move_lambda(target, params)
-                || expr_contains_nested_move_lambda(value, params)
+            expr_contains_nested_move_lambda(target, params, variants)
+                || expr_contains_nested_move_lambda(value, params, variants)
         }
-        ExprKind::FieldAccess { base, .. } => expr_contains_nested_move_lambda(base, params),
+        ExprKind::FieldAccess { base, .. } => expr_contains_nested_move_lambda(base, params, variants),
         ExprKind::IndexGet { base, key, .. } => {
-            expr_contains_nested_move_lambda(base, params)
-                || expr_contains_nested_move_lambda(key, params)
+            expr_contains_nested_move_lambda(base, params, variants)
+                || expr_contains_nested_move_lambda(key, params, variants)
         }
         ExprKind::IfExpr { cond, then, els } => {
-            expr_contains_nested_move_lambda(cond, params)
-                || expr_contains_nested_move_lambda(then, params)
-                || expr_contains_nested_move_lambda(els, params)
+            expr_contains_nested_move_lambda(cond, params, variants)
+                || expr_contains_nested_move_lambda(then, params, variants)
+                || expr_contains_nested_move_lambda(els, params, variants)
         }
         ExprKind::TupleLit(items) => {
             items
                 .iter()
-                .any(|i| expr_contains_nested_move_lambda(i, params))
+                .any(|i| expr_contains_nested_move_lambda(i, params, variants))
         }
         ExprKind::ListLit(items) => {
             items
                 .iter()
-                .any(|i| expr_contains_nested_move_lambda(i, params))
+                .any(|i| expr_contains_nested_move_lambda(i, params, variants))
         }
         _ => false,
     }
@@ -1829,11 +1847,15 @@ pub(crate) fn expr_contains_nested_move_lambda(e: &Expr, params: &[String]) -> b
 
 /// Lambda 体内是否引用非本 Lambda 形参的裸外部变量，且该变量类型非 Copy
 /// （matrix.lz `|j| { default }` 的 default: T）
-pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -> bool {
+pub(crate) fn body_refs_noncopy_external(
+    body: &Expr,
+    lparam_names: &[String],
+    variants: &HashMap<String, String>,
+) -> bool {
     match &body.kind {
         ExprKind::Var(name) => {
             // BUG-358：类型/枚举构造器名（Some/None/Ok/Err/集合别名）不是外部变量引用
-            !is_type_ctor_name(name)
+            !is_ctor_name(name, variants)
                 && !lparam_names.contains(name)
                 && !matches!(body.ty, IrType::Int | IrType::F64 | IrType::Bool)
         }
@@ -1841,46 +1863,46 @@ pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -
             // block 单条语句是裸外部变量
             if block.stmts.len() == 1 {
                 if let Stmt::ExprStmt { expr: e } = &block.stmts[0] {
-                    return body_refs_noncopy_external(e, lparam_names);
+                    return body_refs_noncopy_external(e, lparam_names, variants);
                 }
             }
             // 更深层嵌套闭包递归
-            block_contains_nested_move_lambda(block, lparam_names)
+            block_contains_nested_move_lambda(block, lparam_names, variants)
         }
         // BUG-356: 推导链 body 是 Call（如 comp_mid!(|v| (k, v), ...)），
         // 内含嵌套闭包引用外层形参 k（非 Copy）。若不递归 Call，外层闭包
         // 仍用 move 捕获 k，内层 move 闭包再 move 捕获 k → E0507。
         ExprKind::Call { callee, args, .. } => {
-            body_refs_noncopy_external(callee, lparam_names)
+            body_refs_noncopy_external(callee, lparam_names, variants)
                 || args
                     .iter()
-                    .any(|a| body_refs_noncopy_external(a, lparam_names))
+                    .any(|a| body_refs_noncopy_external(a, lparam_names, variants))
         }
         ExprKind::MethodCall { receiver, args, .. } => {
-            body_refs_noncopy_external(receiver, lparam_names)
+            body_refs_noncopy_external(receiver, lparam_names, variants)
                 || args
                     .iter()
-                    .any(|a| body_refs_noncopy_external(a, lparam_names))
+                    .any(|a| body_refs_noncopy_external(a, lparam_names, variants))
         }
         ExprKind::Lambda { params, body, .. } => {
             let inner_param_names: Vec<String> =
                 params.iter().map(|p| p.name.clone()).collect();
             // 内层闭包引用的外部变量（相对内层形参）非 Copy → 内层需 move，
             // 外层若也 move 则双重 move → E0507，需降级外层为借用捕获。
-            body_refs_noncopy_external(body, &inner_param_names)
+            body_refs_noncopy_external(body, &inner_param_names, variants)
         }
         ExprKind::BinOp { lhs, rhs, .. } => {
-            body_refs_noncopy_external(lhs, lparam_names)
-                || body_refs_noncopy_external(rhs, lparam_names)
+            body_refs_noncopy_external(lhs, lparam_names, variants)
+                || body_refs_noncopy_external(rhs, lparam_names, variants)
         }
         ExprKind::IfExpr { cond, then, els } => {
-            body_refs_noncopy_external(cond, lparam_names)
-                || body_refs_noncopy_external(then, lparam_names)
-                || body_refs_noncopy_external(els, lparam_names)
+            body_refs_noncopy_external(cond, lparam_names, variants)
+                || body_refs_noncopy_external(then, lparam_names, variants)
+                || body_refs_noncopy_external(els, lparam_names, variants)
         }
         ExprKind::ListLit(items) | ExprKind::TupleLit(items) => items
             .iter()
-            .any(|i| body_refs_noncopy_external(i, lparam_names)),
+            .any(|i| body_refs_noncopy_external(i, lparam_names, variants)),
         _ => false,
     }
 }
@@ -1888,11 +1910,15 @@ pub(crate) fn body_refs_noncopy_external(body: &Expr, lparam_names: &[String]) -
 /// 非 move 闭包体内引用外层非 Copy 变量需 `.clone()`，否则借用移出 E0507。
 /// 递归把表达式内的非 Copy 外部变量替换为 `var.clone()`。
 /// （BUG-356：推导链 `|v| (k, v)` 中 k 由外层闭包借用，直接移入 tuple 即 E0507）
-pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr {
+pub(crate) fn clone_noncopy_external(
+    e: &Expr,
+    lparam_names: &[String],
+    variants: &HashMap<String, String>,
+) -> Expr {
     match &e.kind {
         ExprKind::Var(name) => {
             // BUG-358：类型/枚举构造器名（Some/None/Ok/Err/集合别名）不是变量，不 clone
-            if !is_type_ctor_name(name)
+            if !is_ctor_name(name, variants)
                 && !lparam_names.contains(name)
                 && !matches!(e.ty, IrType::Int | IrType::F64 | IrType::Bool)
                 && !name.ends_with('!')
@@ -1913,7 +1939,7 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
             nb.stmts = nb
                 .stmts
                 .iter()
-                .map(|s| clone_noncopy_stmt(s, lparam_names))
+                .map(|s| clone_noncopy_stmt(s, lparam_names, variants))
                 .collect();
             let mut new_e = e.clone();
             new_e.kind = ExprKind::BlockExpr { block: nb };
@@ -1923,17 +1949,17 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
             let inner_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
             let mut new_e = e.clone();
             if let ExprKind::Lambda { body: nb, .. } = &mut new_e.kind {
-                *nb = Box::new(clone_noncopy_external(body, &inner_names));
+                *nb = Box::new(clone_noncopy_external(body, &inner_names, variants));
             }
             new_e
         }
         ExprKind::Call { callee, args, .. } => {
             let mut new_e = e.clone();
             if let ExprKind::Call { callee: nc, args: na, .. } = &mut new_e.kind {
-                *nc = Box::new(clone_noncopy_external(callee, lparam_names));
+                *nc = Box::new(clone_noncopy_external(callee, lparam_names, variants));
                 *na = args
                     .iter()
-                    .map(|a| clone_noncopy_external(a, lparam_names))
+                    .map(|a| clone_noncopy_external(a, lparam_names, variants))
                     .collect();
             }
             new_e
@@ -1942,7 +1968,7 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
             // BUG-357：若该 MethodCall 本身是 `外部非 Copy 变量.clone()`（本函数上一轮
             // 已包装），不要再给 receiver 追加一层 clone（避免 `k.clone().clone()`）。
             let already_cloned = matches!(&receiver.kind, ExprKind::Var(n)
-                if !is_type_ctor_name(n)
+                if !is_ctor_name(n, variants)
                     && !lparam_names.contains(n)
                     && !matches!(receiver.ty, IrType::Int | IrType::F64 | IrType::Bool));
             if already_cloned {
@@ -1950,10 +1976,10 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
             }
             let mut new_e = e.clone();
             if let ExprKind::MethodCall { receiver: nr, args: na, .. } = &mut new_e.kind {
-                *nr = Box::new(clone_noncopy_external(receiver, lparam_names));
+                *nr = Box::new(clone_noncopy_external(receiver, lparam_names, variants));
                 *na = args
                     .iter()
-                    .map(|a| clone_noncopy_external(a, lparam_names))
+                    .map(|a| clone_noncopy_external(a, lparam_names, variants))
                     .collect();
             }
             new_e
@@ -1961,24 +1987,24 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
         ExprKind::BinOp { lhs, rhs, .. } => {
             let mut new_e = e.clone();
             if let ExprKind::BinOp { lhs: nl, rhs: nr, .. } = &mut new_e.kind {
-                *nl = Box::new(clone_noncopy_external(lhs, lparam_names));
-                *nr = Box::new(clone_noncopy_external(rhs, lparam_names));
+                *nl = Box::new(clone_noncopy_external(lhs, lparam_names, variants));
+                *nr = Box::new(clone_noncopy_external(rhs, lparam_names, variants));
             }
             new_e
         }
         ExprKind::UnOp { operand, .. } => {
             let mut new_e = e.clone();
             if let ExprKind::UnOp { operand: no, .. } = &mut new_e.kind {
-                *no = Box::new(clone_noncopy_external(operand, lparam_names));
+                *no = Box::new(clone_noncopy_external(operand, lparam_names, variants));
             }
             new_e
         }
         ExprKind::IfExpr { cond, then, els } => {
             let mut new_e = e.clone();
             if let ExprKind::IfExpr { cond: nc, then: nt, els: ne } = &mut new_e.kind {
-                *nc = Box::new(clone_noncopy_external(cond, lparam_names));
-                *nt = Box::new(clone_noncopy_external(then, lparam_names));
-                *ne = Box::new(clone_noncopy_external(els, lparam_names));
+                *nc = Box::new(clone_noncopy_external(cond, lparam_names, variants));
+                *nt = Box::new(clone_noncopy_external(then, lparam_names, variants));
+                *ne = Box::new(clone_noncopy_external(els, lparam_names, variants));
             }
             new_e
         }
@@ -1998,22 +2024,22 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
             };
             *nitems = items
                 .iter()
-                .map(|i| clone_noncopy_external(i, lparam_names))
+                .map(|i| clone_noncopy_external(i, lparam_names, variants))
                 .collect();
             new_e
         }
         ExprKind::IndexGet { base, key, .. } => {
             let mut new_e = e.clone();
             if let ExprKind::IndexGet { base: nb, key: nk, .. } = &mut new_e.kind {
-                *nb = Box::new(clone_noncopy_external(base, lparam_names));
-                *nk = Box::new(clone_noncopy_external(key, lparam_names));
+                *nb = Box::new(clone_noncopy_external(base, lparam_names, variants));
+                *nk = Box::new(clone_noncopy_external(key, lparam_names, variants));
             }
             new_e
         }
         ExprKind::FieldAccess { base, .. } => {
             let mut new_e = e.clone();
             if let ExprKind::FieldAccess { base: nb, .. } = &mut new_e.kind {
-                *nb = Box::new(clone_noncopy_external(base, lparam_names));
+                *nb = Box::new(clone_noncopy_external(base, lparam_names, variants));
             }
             new_e
         }
@@ -2021,10 +2047,14 @@ pub(crate) fn clone_noncopy_external(e: &Expr, lparam_names: &[String]) -> Expr 
     }
 }
 
-pub(crate) fn clone_noncopy_stmt(s: &Stmt, lparam_names: &[String]) -> Stmt {
+pub(crate) fn clone_noncopy_stmt(
+    s: &Stmt,
+    lparam_names: &[String],
+    variants: &HashMap<String, String>,
+) -> Stmt {
     match s {
         Stmt::ExprStmt { expr, .. } => Stmt::ExprStmt {
-            expr: clone_noncopy_external(expr, lparam_names),
+            expr: clone_noncopy_external(expr, lparam_names, variants),
         },
         Stmt::Let {
             name,
@@ -2035,7 +2065,7 @@ pub(crate) fn clone_noncopy_stmt(s: &Stmt, lparam_names: &[String]) -> Stmt {
             mods,
         } => Stmt::Let {
             name: name.clone(),
-            value: clone_noncopy_external(value, lparam_names),
+            value: clone_noncopy_external(value, lparam_names, variants),
             ty: ty.clone(),
             is_mut: *is_mut,
             is_ref: *is_ref,
