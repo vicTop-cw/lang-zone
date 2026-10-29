@@ -442,6 +442,44 @@ pub(crate) fn tail_is_none_expr(stmt: &AstStmt) -> bool {
     }
 }
 
+/// 花括号函数体（`def f() = { … }`，块体独占一行起）的返回类型推断：
+/// 取块体**最后一条语句**的类型，而不是把整个 `BlockExpr` 当 `IrType::Any`。
+///
+/// 缺口：`AstExpr::BlockExpr(_) => IrType::Any`（infer.rs），于是
+/// `def main() = { print("hi") }`（多行形态）的 ret 被推成 `Any`；codegen 的
+/// typed-main 判据 `f.ret_ty != IrType::Unit`（decl_gen.rs:982）把 `Any` 当成
+/// 「有返回类型」，发 `fn __lz_main() -> i64`，而块体尾值是 `()` ⇒ E0308。
+/// 详见 `Reports/bothfail-2026-10-28.md` §3（8 例判别矩阵：同内容缩进体全绿、
+/// 块末补一行 `0` 也全绿 ⇒ 块体本身受支持，只是判据不自洽）。
+///
+/// 与闭包块体同款（capture.rs `prescan_closure_bindings` 的 `block.last()`）。
+/// 块内的 `let` 绑定按出现顺序登记进**副本**上下文，使尾表达式引用块内局部
+/// 变量时能拿到真实类型（否则 lookup_var 落空 → Any → codegen 渲染 i64）。
+///
+/// 「真·unit 返回」不会被误判成有值：空块（无语句）、末语句为 `let`、
+/// 末语句为 `print(..)`/`pass` 等一律推出 `IrType::Unit`。
+pub(crate) fn infer_block_body_ret_ty(stmts: &[AstStmt], ctx: &TypeCtx) -> IrType {
+    let mut cur = ctx.clone();
+    let n = stmts.len();
+    let mut last_ty = IrType::Unit;
+    for (i, s) in stmts.iter().enumerate() {
+        if let AstStmt::Let {
+            name, ty, value, ..
+        } = s
+        {
+            let vty = ty
+                .as_ref()
+                .map(|t| from_ast_type_with_generics(t, &cur.current_generics))
+                .unwrap_or_else(|| infer_expr_type(value, &cur));
+            cur.add_var(name, vty);
+        }
+        if i + 1 == n {
+            last_ty = infer_stmt_type(s, &cur);
+        }
+    }
+    last_ty
+}
+
 /// 递归扫描生成器函数体，返回第一个 `yield expr` 中 expr 的推断类型。
 /// 同时预登记函数体（含嵌套块）内的 let 绑定，使 `yield i` 能推断出 i 的类型。
 pub(crate) fn scan_iterator_yield_ty(stmts: &[AstStmt], ctx: &mut TypeCtx) -> Option<IrType> {
@@ -1032,6 +1070,24 @@ pub(crate) fn convert_fn_def(func: &ast::Function, ctx: &TypeCtx) -> FnDef {
                 let mut probe = fn_ctx.clone();
                 prescan_body_let_bindings(&func.body, &mut probe);
                 let mut ty = infer_stmt_type(tail, &probe);
+                // 花括号函数体 `def f() = { … }`（块体独占一行起）时，`func.body`
+                // 只有**一条** `Expr(BlockExpr)` ⇒ `infer_stmt_type` 对 BlockExpr 直接
+                // 回 `IrType::Any`（infer.rs 的 `AstExpr::BlockExpr(_) => IrType::Any`）。
+                // 而 codegen 的 typed-main 判据是 `f.ret_ty != IrType::Unit`
+                // （src/ir/codegen/decl_gen.rs:982）——`Any != Unit` 成立 ⇒ 判成
+                // typed main ⇒ 发 `fn __lz_main() -> i64`，而块体尾值是 `()`
+                // ⇒ rustc E0308（Reports/bothfail-2026-10-28.md §3 的 b1/b3/b5/b6；
+                // 判别矩阵 b2/b7：同内容缩进体、或块末补一行 `0` 都全绿）。
+                //
+                // 修法：把块体展开，取块内最后一条语句的类型。与闭包块体的处理
+                // 同款（capture.rs 的 `prescan_closure_bindings`：`BlockExpr(block) =>
+                // block.last().map(infer_stmt_type)`，注释点名的就是同一个 E0308 坑）。
+                // 只在 `ty` 仍是 Any 时接管：非 BlockExpr 的尾语句不受影响（零回归）。
+                if matches!(ty, IrType::Any) {
+                    if let AstStmt::Expr(AstExpr::BlockExpr(block)) = tail {
+                        ty = infer_block_body_ret_ty(block, &probe);
+                    }
+                }
                 // BUG-30：`def f() = None`（无注解返回类型）尾表达式是 None 字面量时，
                 // infer 对 None 按「取决于上下文」返回 Any → codegen 把返回类型落成
                 // i64，而函数体 None 发射成 Option 值（None::<i64>）⇒ E0308 mismatched

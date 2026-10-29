@@ -73,6 +73,11 @@ fn dep_dir(rlib: &PathBuf) -> PathBuf {
 
 struct Artifact {
     ok: bool,
+    /// 产物进程的退出码（转译/rustc 阶段失败时为 None）。
+    /// typed main 的返回值是 `std::process::exit(__lz_main() as i32)`，
+    /// 故「花括号体末为值」形态的返回值直接体现为退出码。
+    code: Option<i32>,
+    stdout: String,
     rs: Option<String>,
     diag: String,
 }
@@ -90,6 +95,8 @@ fn run_lz(tag: &str, src: &str) -> Artifact {
     if !out.status.success() || !rs.exists() {
         return Artifact {
             ok: false,
+            code: None,
+            stdout: String::from_utf8_lossy(&out.stdout).to_string(),
             rs: None,
             diag: format!(
                 "转译失败:\nstdout: {}\nstderr: {}",
@@ -116,6 +123,8 @@ fn run_lz(tag: &str, src: &str) -> Artifact {
     if !rc.status.success() {
         return Artifact {
             ok: false,
+            code: None,
+            stdout: String::new(),
             rs: Some(rs_text),
             diag: format!(
                 "产物 rustc 编译失败:\n{}\n--- 产物 ---\n{}",
@@ -127,6 +136,8 @@ fn run_lz(tag: &str, src: &str) -> Artifact {
     let prog = Command::new(&exe).output().expect("run exe");
     Artifact {
         ok: prog.status.success(),
+        code: prog.status.code(),
+        stdout: String::from_utf8_lossy(&prog.stdout).to_string(),
         rs: Some(rs_text),
         diag: format!(
             "产物运行失败:\nstdout: {}\nstderr: {}",
@@ -460,3 +471,127 @@ def main() =
     );
 }
 
+
+// ────────────────────────────────────────────────────────────────
+// ⑤ 花括号函数体 `def main() = { … }` 的返回类型推断（T0r28 / P3）
+//
+// 缺陷形态（修复前实测，Reports/bothfail-2026-10-28.md §3）：
+//   花括号体只有**一条** `Expr(BlockExpr)` ⇒ infer_stmt_type 对 BlockExpr 回
+//   IrType::Any（infer.rs `AstExpr::BlockExpr(_) => IrType::Any`）⇒ codegen 的
+//   typed-main 判据 `f.ret_ty != IrType::Unit`（decl_gen.rs:982）成立 ⇒
+//   发 `fn __lz_main() -> i64`，而块体尾值是 `()` ⇒ rustc E0308 mismatched types。
+//   判别矩阵：同内容缩进体全绿（b2）、块末补一行 `0` 也全绿（b7）
+//   ⇒ 块体本身是受支持的构造，坏的是「BlockExpr 整体当 Any」这一步。
+//
+// 修法：convert_decl.rs 在 def 体返回类型推断路径上，遇到单条 `Expr(BlockExpr)`
+//   时展开取块内最后一条语句的类型（对齐 capture.rs 闭包块体的 `block.last()`）。
+//
+// 下面三条覆盖三种形态：花括号 unit 尾（须 exit 0）／花括号值尾（须输出该值，
+// 且 typed main 不被误取消）／缩进值尾（不回归）。
+// ────────────────────────────────────────────────────────────────
+
+/// 形态 1：花括号体 + 末语句为 unit（`print(..)`）——曾 E0308，须 exit 0。
+///
+/// 修复前产物：`pub fn __lz_main() -> i64 { return { println!("{}", "hi") }; }`
+/// ⇒ `error[E0308]: mismatched types`（found `()`）。
+/// 修复后产物：无 `__lz_main`，直接 `pub fn main()`，块体作为语句执行。
+#[test]
+fn brace_body_unit_tail_main() {
+    let src = r#"
+def main() = {
+    print("hi")
+}
+"#;
+    let a = run_lz("brace_unit_tail", src);
+    assert!(
+        a.code.is_some(),
+        "花括号体末为 unit 的 main 必须能编译并运行（曾 E0308）:\n{}",
+        a.diag
+    );
+    let rs = a.rs.clone().unwrap_or_default();
+    // 根因判据：不得再判成 typed main（否则签名 -> i64 与体尾 () 冲突）
+    assert!(
+        !rs.contains("__lz_main"),
+        "花括号体末语句为 unit 时不得发 typed main（会 `-> i64` 而体尾是 ()，E0308）:\n{}",
+        rs
+    );
+    assert!(
+        rs.contains("pub fn main()"),
+        "unit 形态应直接发射 `pub fn main()`:\n{}",
+        rs
+    );
+    assert_eq!(a.code, Some(0), "unit 形态须 exit 0:\n{}", a.diag);
+    assert!(
+        a.stdout.contains("hi"),
+        "`print(\"hi\")` 须真的执行（stdout 应有 hi）:\n{}",
+        a.diag
+    );
+}
+
+/// 形态 2：花括号体 + 末语句为值——须输出该值，且 typed main 保留。
+///
+/// 修复前后都走 typed main（Any→i64 与 Int→i64 恰好同形），本用例钉住
+/// 「取块内最后一条语句的类型」不会把值形态误判成 unit（否则返回值被丢弃，
+/// 退出码变 0、`-> i64` 消失）。
+/// 退出码即返回值（typed main 是 `std::process::exit(__lz_main() as i32)`）。
+#[test]
+fn brace_body_value_tail_main() {
+    let src = r#"
+def main() = {
+    let n: int = 42
+    print("v42")
+    n
+}
+"#;
+    let a = run_lz("brace_value_tail", src);
+    assert!(
+        a.code.is_some(),
+        "花括号体末为值的 main 必须能编译并运行:\n{}",
+        a.diag
+    );
+    let rs = a.rs.clone().unwrap_or_default();
+    assert!(
+        rs.contains("__lz_main() -> i64"),
+        "值形态须保留 typed main（`__lz_main() -> i64`），否则块体尾值被丢弃:\n{}",
+        rs
+    );
+    assert_eq!(
+        a.code,
+        Some(42),
+        "块体尾值 42 须成为退出码（typed main 的返回值）:\n{}",
+        a.diag
+    );
+    assert!(
+        a.stdout.contains("v42"),
+        "块体内的 `print(\"v42\")` 须执行:\n{}",
+        a.diag
+    );
+}
+
+/// 形态 3：缩进体 + 末语句为值——对照组，修法不得改变该路径（不回归）。
+#[test]
+fn indent_body_value_tail_main() {
+    let src = r#"
+def main() =
+    let n: int = 5
+    n + 3
+"#;
+    let a = run_lz("indent_value_tail", src);
+    assert!(
+        a.code.is_some(),
+        "缩进体末为值的 main 必须能编译并运行:\n{}",
+        a.diag
+    );
+    let rs = a.rs.clone().unwrap_or_default();
+    assert!(
+        rs.contains("__lz_main() -> i64"),
+        "缩进体值形态须保留 typed main（不回归）:\n{}",
+        rs
+    );
+    assert_eq!(
+        a.code,
+        Some(8),
+        "缩进体尾值 5 + 3 须成为退出码 8:\n{}",
+        a.diag
+    );
+}
