@@ -14,6 +14,8 @@
 //
 // 运行：cargo test -j 1 --test codegen_corner_fixes
 
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -56,10 +58,10 @@ fn clean(s: &str) -> String {
 }
 
 fn run_lz(tag: &str, src: &str) -> Run {
-    let work = std::env::temp_dir().join(format!("lz_cf_{tag}"));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work).expect("create work dir");
-    let lz = work.join("input.lz");
+    // T0r27：临时目录来源改为 tests/common 的进程内唯一目录，不再用固定的
+    // `$TEMP/lz_cf_{tag}`，避免并发车道撞 Windows 文件锁（code: 32）。
+    let work = common::unique_dir(&format!("lz_cf_{tag}"));
+    let lz = work.path().join("input.lz");
     std::fs::write(&lz, src).expect("write lz");
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
     let out = Command::new(&bin).arg(&lz).output().expect("run lzc");
@@ -1079,11 +1081,10 @@ struct RsLzRun {
     diag: String,
 }
 
-fn rslz_workdir(tag: &str) -> PathBuf {
-    let work = std::env::temp_dir().join(format!("lz_rslz_{tag}"));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work).expect("create rslz work dir");
-    work
+fn rslz_workdir(tag: &str) -> common::TempDir {
+    // T0r27：同 run_lz，工作目录改为进程内唯一（pid + 原子计数 + 时间戳），
+    // `Drop` 时递归删除；`LZ_KEEP_TEMP=1` 可保留现场。
+    common::unique_dir(&format!("lz_rslz_{tag}"))
 }
 
 fn lang_zone_bin() -> PathBuf {
@@ -1093,9 +1094,9 @@ fn lang_zone_bin() -> PathBuf {
 /// 编译并运行一段 Rust 源码（生成产物原样编译，不做任何改写）。
 fn rustc_and_run(tag: &str, rust_src: &str) -> (bool, bool, String, String) {
     let work = rslz_workdir(&format!("{tag}_rust"));
-    let rs = work.join(format!("{tag}_gen.rs"));
+    let rs = work.path().join(format!("{tag}_gen.rs"));
     std::fs::write(&rs, rust_src).expect("write gen rust");
-    let exe = work.join(format!("{tag}_gen.exe"));
+    let exe = work.path().join(format!("{tag}_gen.exe"));
     let rc = Command::new("rustc")
         .args(["--edition", "2021", "--crate-name"])
         .arg(format!("{tag}_gen"))
@@ -1135,7 +1136,7 @@ fn rustc_and_run(tag: &str, rust_src: &str) -> (bool, bool, String, String) {
 /// 跑 `--emit=rs-lz` 并把生成的目标程序 Rust 编译运行起来。
 fn run_rs_lz(tag: &str, src: &str) -> RsLzRun {
     let work = rslz_workdir(tag);
-    let lz = work.join("input.lz");
+    let lz = work.path().join("input.lz");
     std::fs::write(&lz, src).expect("write lz");
     let out = Command::new(lang_zone_bin())
         .arg("--emit=rs-lz")
@@ -1390,7 +1391,7 @@ def main() =
 
     // ③ 生成的 .lzrs 必须能重新过一遍 LZ 编译器（修前：未绑定变量: NaN）
     let work = rslz_workdir("r2_nan_pattern");
-    let lzrs_path = work.join("nanpat.lzrs");
+    let lzrs_path = work.path().join("nanpat.lzrs");
     std::fs::write(&lzrs_path, &lzrs).expect("write lzrs");
     let out = Command::new(lang_zone_bin())
         .arg(&lzrs_path)
@@ -1403,7 +1404,7 @@ def main() =
     );
 
     // ④ 打印器跑起来后，生成的 Rust 模式位应是 f64::NAN（与原生同口径），不是 NaN_f64
-    let printer_rs = work.join("nanpat.rs");
+    let printer_rs = work.path().join("nanpat.rs");
     let printer_src = std::fs::read_to_string(&printer_rs).expect("read printer .rs");
     let (compile_ok, run_ok, stdout, diag) = rustc_and_run("r2_printer", &printer_src);
     assert!(compile_ok && run_ok, "打印器应可编译运行:\n{diag}");
@@ -1418,7 +1419,7 @@ def main() =
 
     // ⑤ 反证：把 .lzrs 改回修前形态（裸 NaN）后 LZ 编译器确实拒绝 —— 证明 ③ 真的在测 R2
     let broken = lzrs.replace("Pattern.LitF64(v: 0.0/0.0)", "Pattern.LitF64(v: NaN)");
-    let broken_path = work.join("nanpat_broken.lzrs");
+    let broken_path = work.path().join("nanpat_broken.lzrs");
     std::fs::write(&broken_path, broken).expect("write broken lzrs");
     let bad = Command::new(lang_zone_bin())
         .arg(&broken_path)

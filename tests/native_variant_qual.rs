@@ -22,6 +22,8 @@
 //   `error[E0433]: Bar is a variant, not a module`。修法：把变体名表传进 helpers 的
 //   四个自由函数（`is_ctor_name`），变体构造器不再进 clone 路径。回归闸门见 ④。
 
+mod common;
+
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -76,10 +78,10 @@ struct Artifact {
 }
 
 fn run_lz(tag: &str, src: &str) -> Artifact {
-    let work = std::env::temp_dir().join(format!("lz_nvq_{tag}"));
-    let _ = std::fs::remove_dir_all(&work);
-    std::fs::create_dir_all(&work).expect("create work dir");
-    let lz = work.join("input.lz");
+    // T0r27：临时目录来源改为 tests/common 的进程内唯一目录（pid + 原子计数 + 时间戳），
+    // 不再用固定的 `$TEMP/lz_nvq_{tag}`，避免并发车道撞 Windows 文件锁（code: 32）。
+    let work = common::unique_dir(&format!("lz_nvq_{tag}"));
+    let lz = work.path().join("input.lz");
     std::fs::write(&lz, src).expect("write lz");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
