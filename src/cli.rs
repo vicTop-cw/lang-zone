@@ -544,6 +544,11 @@ pub fn cmd_build(args: &[String]) -> i32 {
                             (Ok(a), Ok(b)) => a >= b,
                             _ => false,
                         };
+                    // T0r31 已知边界（写在这里而不是藏着）：增量命中直接复用上次的
+                    // .rs/exe，**不重跑前端 codegen** ⇒ 也不会重新落盘 embed 产物；
+                    // 若 `build/embed/**` 被手删，本路径不会把它补回来（用
+                    // `--no-incremental` 全量重编一次即可）。不为补一个目录去推翻
+                    // “命中即跳过前端”这条既有语义。
                     if exe_fresh {
                         if rustc_timing_enabled() {
                             eprintln!(
@@ -574,8 +579,25 @@ pub fn cmd_build(args: &[String]) -> i32 {
     };
 
     let mut cg = IrCodeGen::new();
+    // T0r31：与单文件路径同口径的命名主干（`src/main.lz` → `main`）。项目模式的块
+    // 都带 origin（`ProjectCompiler::merge_modules`），本行只兜无 origin 的块。
+    cg.set_embed_stem(&paths.entry.display().to_string());
     // I3/I4：注入 BridgeRegistry，extern/@export/embed 符号自动登记（G5 台账联动）
     let (rust_code, mut registry) = cg.generate_with_bridge(&ir);
+
+    // T0r31：Cli 档 embed 产物落盘 —— 修前 `lz build` 从此不调用 `emit_embed_artifacts`，
+    // 于是 `build/embed/**` 根本不生成，而生成的垫片仍写着 `build/embed/<stem>/<artifact>`
+    // ⇒ 编出来的 exe 一调外部函数就失败（找不到产物目录）。这里直接复用 main.rs 的
+    // 同一条交付面（幂等落盘 → 可选建库 → 回执逐条 → 失败非零），不另写第二套。
+    // 产物根取**项目根**：那正是 `build/<name>.exe` 所在目录，也是垫片相对路径的锚点。
+    if !cg.embed_targets().is_empty() {
+        crate::emit_embed_artifacts(
+            cg.embed_targets(),
+            args.iter().any(|a| a == "--embed-build"),
+            false,
+            Some(paths.root.as_path()),
+        );
+    }
 
     if let Err(e) = fs::create_dir_all(&paths.build_dir) {
         eprintln!("Error: cannot create {}: {}", paths.build_dir.display(), e);

@@ -861,16 +861,32 @@ fn compile_main(args: Vec<String>) -> i32 {
             merged.file_path = Some(path.to_string());
         }
 
+        // T0r31：Cli 档 embed 产物落盘（与单文件路径下方 `cg.embed_targets()` 同口径）。
+        // 修前 `cg` 是 match 臂内的临时值、且**从不调用** `emit_embed_artifacts` ⇒
+        // `--project` 构建完 `build/embed/**` 整棵目录不存在，而产物里的垫片
+        // 仍写着 `__lz_call(..., "build/embed/<stem>/<artifact>", ...)` ⇒ 运行时必失败。
+        // 命名不用在这里另写一套：T0r29 起 `cg.embed_targets()` 已按 (模块, lang) 分好组，
+        // 每个 target 自带 artifact/dir_rel（权威 = `embed::dedup::artifact_name`）。
+        let mut cg = IrCodeGen::new();
+        // 与单文件路径 `cg.set_embed_stem(&path)` 同一把尺：带 origin 的块（项目里每个
+        // 模块各一份）用 origin，本行只兜「无 origin」的块，保证同一文件两条路径同名。
+        cg.set_embed_stem(&path.to_string());
         let rust_code = match build_ir_opt(&merged, lzi_registry.as_ref()) {
-            Ok(ir_module) => {
-                let mut cg = IrCodeGen::new();
-                cg.generate(&ir_module)
-            }
+            Ok(ir_module) => cg.generate(&ir_module),
             Err(e) => {
                 eprintln!("IR build error (project mode): {}", e);
                 std::process::exit(1);
             }
         };
+        // 默认只落盘、不 spawn 外部工具链；要真建库必须显式 `--embed-build`（与单文件同）。
+        if !cg.embed_targets().is_empty() {
+            emit_embed_artifacts(
+                cg.embed_targets(),
+                args.iter().any(|a| a == "--embed-build"),
+                false,
+                None,
+            );
+        }
         let out_path = replace_ext(path, ".lz", ".rs");
         fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
             eprintln!("Error writing {}: {}", out_path, e);
@@ -1322,6 +1338,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                         &embed_targets,
                         args.iter().any(|a| a == "--embed-build"),
                         true,
+                        None,
                     );
                 }
                 return 0;
@@ -1373,6 +1390,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                         cg.embed_targets(),
                         args.iter().any(|a| a == "--embed-build"),
                         false,
+                        None,
                     );
                 }
                 let out_path = replace_ext(path, ".lz", ".rs");
@@ -1409,10 +1427,20 @@ fn compile_main(args: Vec<String>) -> i32 {
 /// `receipts_to_stderr`：`--emit=rs-lz` 的 stdout 是**产物本身**（生成的 Rust 源码，
 /// 见 tests/rs_lz_behdiff.rs），回执必须让开，否则 `embed 产物: ...` 会混进源码里
 /// （T0r24：旁路要落盘 embed 产物，但不能破坏这条既有契约）。
-fn emit_embed_artifacts(
+///
+/// `root_override`：产物根（`build/embed` 的父目录）。`None` = 进程 cwd ——
+/// 单文件路径与 `--project` 路径的历史口径一字不动（`dedup::module_key` 也按 cwd
+/// 量模块身份）。`lz build` 走 `Some(项目根)`：它可能在**别的目录**被调用
+/// （`lz build ../proj`），产物必须跟 `<项目根>/build/<name>.exe` 落在同一棵树下，
+/// 否则垫片里的 `build/embed/...` 与盘上位置不是同一把尺。
+///
+/// 可见性 `pub(crate)`：`src/cli.rs`（同一 bin crate 的子模块）是第三条调用路径
+/// （T0r31：`lz build` 此前从不调用本函数 ⇒ project/build 模式产物目录根本不生成）。
+pub(crate) fn emit_embed_artifacts(
     targets: &[lang_zone::embed::EmbedTarget],
     embed_build: bool,
     receipts_to_stderr: bool,
+    root_override: Option<&Path>,
 ) {
     use lang_zone::embed::artifact::{build_artifact, write_artifacts, BuildStatus};
     use lang_zone::embed::ArtifactKind;
@@ -1426,7 +1454,9 @@ fn emit_embed_artifacts(
             }
         };
     }
-    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = root_override
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let mut failed = 0usize;
     let mut skipped = 0usize;
     for t in targets {
