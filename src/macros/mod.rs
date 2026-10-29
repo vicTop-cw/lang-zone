@@ -4,6 +4,7 @@ pub mod expand;
 pub mod group;
 pub mod import_loader;
 pub mod interp;
+mod parse;
 pub mod pattern;
 
 pub use expand::*;
