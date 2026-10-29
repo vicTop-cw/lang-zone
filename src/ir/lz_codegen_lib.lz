@@ -176,6 +176,16 @@ enum Item:
     // codegen/mod.rs:1370 的 !has_main 合成分支（原生合成走 gen_block_inner，
     // 尾语句**带** `return ` 前缀，与声明式 main 的抑制行为不同）。
     ScriptMain(body: List<Stmt>)
+    // T0r24：`#[embed(...)]` 原样块。旧 schema 只带 (lang, src_len) —— 内嵌源码文本
+    // 根本不进数据面，于是含 embed 的源文件在 rs-lz 上只能死在 E0599（无此变体）。
+    // 现在带源码原文 src，以及**由 Rust 侧算好**的元信息（LZ 侧不重写去重）：
+    //   tier   —— `src_tnr` / `src_raw`（Source 档，逐字进 .rs）/ `cli`（独立产物 + 垫片）
+    //   artifact / dir_rel —— crate::embed::{resolve, artifact::dir_rel} 的结论
+    //                         （命名权威是 dedup::artifact_name，含 FNV-1a 路径短哈希）
+    //   wrappers —— 该产物的调用面名（`<artifact>_<method>` / `<artifact>_run`），
+    //               供 extern_stub_lines 排掉同名外部函数桩（对齐原生
+    //               codegen/mod.rs:755-777 的 unknown_extern_fns.remove，否则 E0428）
+    EmbedBlock(lang: str, src: str, tier: str, artifact: str, dir_rel: str, wrappers: List<str>)
 
 // ── IrModule 顶层 ──
 struct IrModule =
@@ -1523,6 +1533,8 @@ def display_item(i: Item) -> String =
         case Item.Impl(trait_: tr, for_type: ft, generics: gs, where_clause: wc, assoc_type_bindings: atb, methods: mns) => "impl ".to_string() + rust_type(ft)
         case Item.CheckerBlock(name: n, ps_name: p) => "checker ".to_string() + n
         case Item.Test(name: n, body: b) => "test ".to_string() + n
+        case Item.EmbedBlock(lang: lg, src: s, tier: tr, artifact: ar, dir_rel: dr, wrappers: ws) =>
+            "embed(".to_string() + lg + ", ".to_string() + tr + ")".to_string()
         case _ => "item".to_string()
 
 def opt_debug(p: MaybeStr) -> String =
@@ -3524,7 +3536,74 @@ def gen_item(i: Item, user_fns: List[str], tbm: List[(str, List[(str, bool)])], 
                 "pub fn main() {\n".to_string() + gen_body(b, false, auto_mut_names(b), MaybeIrType.NoTy, user_fns, tbm, vem, "".to_string()) + "}".to_string()
         case Item.DuckDef(name: n, method_count: mc) =>
             "pub trait ".to_string() + n.to_string() + " { /* ".to_string() + mc.to_string() + " methods */ }".to_string()
+        case Item.EmbedBlock(lang: lg, src: s, tier: tr, artifact: ar, dir_rel: dr, wrappers: ws) =>
+            // T0r24：`#[embed(...)]` 块的发射面（逐字对齐原生 decl_gen.rs:264-292）
+            gen_embed_block(lg, s, tr)
         case _ => "// TODO Item ".to_string() + display_item(i)
+
+// ── T0r24：embed 块的发射（镜像原生 decl_gen.rs:264-292 的三种形态）──
+//   Source 档 tnr：需 tnr lib 转译；LZ 侧没有该能力 ⇒ 按「feature 未启用」形态发注释
+//                  （与原生未开 tnr-embed 时逐字一致）。
+//   Source 档 rust/rs：原样内嵌（文档化行为，tests/bridge_embed.rs 钉着）。
+//   Cli 档：内嵌源码**不**逐行打进 .rs（那打出来的是编不过的异物文本），只留一行说明；
+//           调用面由 codegen_module 尾部的 `pub mod __lz_embed` 垫片提供，值只走
+//           argv + 序列化（协议实现只有一个生成点：bridge::cli::generate_embed_module，
+//           其文本由 Rust 侧作为字符串穿透进来，LZ 不重写 OK:/ERR: 口径）。
+def gen_embed_block(lang: str, src: str, tier: str) -> String =
+    if tier == "src_tnr":
+        "// #[embed(tnr)] — tnr-embed feature 未启用".to_string() + prefixed_lines(str_lines_of(src), "// ")
+    elif tier == "src_raw":
+        "// #[embed(".to_string() + lang + ")]".to_string() + prefixed_lines(str_lines_of(src), "")
+    else:
+        "// #[embed(".to_string() + lang + ")] → Cli 档：源码已摘出为独立产物，值只走 argv + 序列化".to_string()
+
+// 逐行加前缀（prefix 为空即原样）。等价于原生 emit_line(..) 的逐行发射：
+// 每行前补一个 "\n"，首行不加。空 src 出空串（原生 `src.lines()` 无行可发）。
+def prefixed_lines(ls: List<str>, prefix: str) -> String =
+    let mut out: String = "".to_string()
+    for idx in 0..ls.len():
+        out = out + "\n".to_string() + prefix + ls[idx].clone()
+    out
+
+// Rust `str::lines()` 的同口径拆分：按 '\n' 切，逐行剥掉结尾 '\r'（CRLF 源文件），
+// 末尾换行不产生空行。逐字符实现，避免多字节字符被字节切片切开。
+def str_lines_of(s: str) -> List<str> =
+    let cs = str_chars(s)
+    let mut out: List[str] = []
+    let mut cur: String = "".to_string()
+    for idx in 0..cs.len():
+        let c = cs[idx].clone()
+        if c == "\n":
+            out.push(strip_cr(cur))
+            cur = "".to_string()
+        else:
+            cur = cur + c
+    if cs.len() > 0:
+        if cs[cs.len() - 1].clone() != "\n":
+            out.push(strip_cr(cur))
+    out
+
+def strip_cr(l: str) -> str =
+    let cs = str_chars(l)
+    if cs.len() == 0:
+        "".to_string()
+    elif cs[cs.len() - 1].clone() == "\r":
+        chars_slice(cs, 0, cs.len() - 1)
+    else:
+        l
+
+// 模块里所有 Cli 档产物的调用面名（去重，保持出现顺序）。
+def embed_wrappers(m: IrModule) -> List[str] =
+    let mut out: List[str] = []
+    for idx in 0..m.items.len():
+        match m.items[idx].clone():
+            case Item.EmbedBlock(lang: lg, src: s, tier: tr, artifact: ar, dir_rel: dr, wrappers: ws) =>
+                for wi in 0..ws.len():
+                    let w = ws[wi].clone()
+                    if not str_in_list(out, w):
+                        out.push(w)
+            case _ => ()
+    out
 
 def r_eq_unit(t: IrType) -> bool =
     match t:
@@ -4492,7 +4571,7 @@ def str_ends(s: str, suf: str) -> bool =
 // 返回桩行（每行一个），按发现顺序去重。原生 emit.rs:404-408 的三条过滤：
 // 跳过含 `::` 的路径调用、跳过骨架已知的类型/宏（否则 `assert_eq!` 会变成
 // `fn assert_eq!(...)` 非法 Rust；`Point(..)` 会与 struct 撞名）。
-def extern_stub_lines(m: IrModule, user_fns: List[str], decl_names: List[str]) -> String =
+def extern_stub_lines(m: IrModule, user_fns: List[str], decl_names: List[str], wrappers: List[str]) -> String =
     let calls = calls_of_module(m)
     let mut names: List[str] = []
     let mut arities: List[int] = []
@@ -4500,7 +4579,7 @@ def extern_stub_lines(m: IrModule, user_fns: List[str], decl_names: List[str]) -
         let c = calls[idx].clone()
         let n = c.0.clone()
         let ar = c.1.len()
-        if not is_builtin_fn_name(n) and not is_user_fn(user_fns, n) and not bound_names_has(decl_names, n) and not str_ends(n, "!") and not str_contains(n, "::") and not starts_upper(n):
+        if not is_builtin_fn_name(n) and not is_user_fn(user_fns, n) and not bound_names_has(decl_names, n) and not str_ends(n, "!") and not str_contains(n, "::") and not starts_upper(n) and not str_in_list(wrappers, n):
             let mut at = -1
             for k in 0..names.len():
                 if names[k] == n:
@@ -4537,7 +4616,7 @@ def module_user_fn_names(m: IrModule) -> List[str] =
             case _ => ()
     out
 
-def codegen_module(m: IrModule, user_fns: List[str]) -> String =
+def codegen_module(m: IrModule, user_fns: List[str], embed_shim: str) -> String =
     // BUG-475：预计算类型元信息（Box 字段 + 变体字段序），供 gen_match_arm 在
     // match 解构端插 `let n = *n;`。LZ 无可变全局，只能像 user_fns 一样穿透。
     let tbm: List[(str, List[(str, bool)])] = type_box_map(m)
@@ -4545,7 +4624,10 @@ def codegen_module(m: IrModule, user_fns: List[str]) -> String =
     // G6/G7/G8：变参具体化表 / 声明名表一次性算好，编码进同一穿透列表 env。
     let env: List[str] = user_fns + module_prelude_entries(m, user_fns)
     // G7：未定义外部函数桩（原生 emit.rs:396-416 在 header 里紧随 `use lz_builtins::*;`）
-    let stubs: String = extern_stub_lines(m, env, bound_names_of_module(m))
+    // T0r24：Cli 档 embed 的调用面（`<artifact>_<method>` 等）由垫片提供，必须从桩表里
+    // 排掉，否则同名桩与垫片定义撞车（E0428）——原生同口径见 codegen/mod.rs:755-777。
+    let wrap: List[str] = embed_wrappers(m)
+    let stubs: String = extern_stub_lines(m, env, bound_names_of_module(m), wrap)
     let mut out: String = module_header() + stubs + (if stubs.len() > 0: "\n".to_string() else: "".to_string())
     for idx in 0..m.items.len():
         // N2（BUG-482 同族）：旧实现每一项后都拼 "\n\n"，最后用 `out[0..(out.len()-2)]`
@@ -4554,8 +4636,18 @@ def codegen_module(m: IrModule, user_fns: List[str]) -> String =
         // 只在第 2 项起拼 "\n\n"，末尾统一补一个 "\n"，全程不切字节。
         let sep = if idx == 0: "".to_string() else "\n\n".to_string()
         out = out + sep + gen_item(m.items[idx].clone(), env, tbm, vem)
-    // print_str 用 println! 会再补一个换行：末尾统一补一个 "\n"
-    out + "\n".to_string()
+    // T0r24：Cli 档 embed 的调用面 —— 与原生 codegen/mod.rs:1408-1414 逐字一致：
+    //   pub mod __lz_embed {\n<垫片内容>}\nuse __lz_embed::*;\n
+    // 垫片内容由 Rust 侧唯一生成点算出（`bridge::cli::generate_embed_module`），
+    // 这里只挂模块外壳，**不重写** argv/OK:/ERR: 协议，也不重写产物命名。
+    // 无 Cli 档时 tail 只有结尾那一个 "\n"（print_str 用 println! 会再补一个）。
+    if embed_shim.len() > 0:
+        // 末尾**不**补 "\n"：print_str 走 println!，会补上最后一个换行 —— 这样
+        // 产物与原生 .rs 逐字节一致（原生 generate() 的 buf 以 `use __lz_embed::*;\n` 收尾）。
+        out + "\n\npub mod __lz_embed {\n".to_string() + embed_shim + "}\nuse __lz_embed::*;".to_string()
+    else:
+        // print_str 用 println! 会再补一个换行：末尾统一补一个 "\n"
+        out + "\n".to_string()
 
 // 变参/声明名的编码表（见文件上方 pack_lookup 段的格式说明）。
 def module_prelude_entries(m: IrModule, user_fns: List[str]) -> List[str] =

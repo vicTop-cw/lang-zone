@@ -1226,7 +1226,20 @@ fn compile_main(args: Vec<String>) -> i32 {
     if args.iter().any(|a| a == "--emit=rs-lz") {
         match build_ir_opt(&module, lzi_registry.as_ref()) {
             Ok(ir_module) => {
-                let rs_lz_src = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source(&ir_module);
+                // T0r24：Cli 档 embed 的产物名/目录/垫片在 Rust 侧一次算好，**同一份**
+                // 结论既穿透给 LZ（数据面 + `pub mod __lz_embed`），也用于本函数末尾落盘。
+                // 命名主干取 CLI 入参原样（`calc.lz`）——与原生分支 main.rs:1340 的
+                // `cg.set_embed_stem(&path.to_string())` 是同一把尺（`embed::base_stem`
+                // + `dedup::artifact_name`），故两条路径的产物名不可能漂移。
+                let embed_stem = path.as_str();
+                let embed_targets = lang_zone::ir::lz_codegen::embed_targets_of(
+                    &ir_module,
+                    Some(embed_stem),
+                );
+                let rs_lz_src = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source_with_stem(
+                    &ir_module,
+                    Some(embed_stem),
+                );
                 let lz_path = replace_ext(path, ".lz", ".lzrs");
                 fs::write(&lz_path, &rs_lz_src).unwrap_or_else(|e| {
                     eprintln!("Error writing {}: {}", lz_path, e);
@@ -1299,6 +1312,18 @@ fn compile_main(args: Vec<String>) -> i32 {
                         std::process::exit(1);
                     }
                 }
+                // T0r24：Cli 档产物**只能由 Rust 侧落盘**（LZ 程序不写文件）。
+                // 回执走 stderr：`--emit=rs-lz` 的 stdout 是产物本身（生成的 Rust 源码，
+                // 见 tests/rs_lz_behdiff.rs 的契约），把 `embed 产物: ...` 混进去会污染它。
+                // 落盘是幂等的（artifact::write_artifacts 内容相同则一格都不写），
+                // 且自检链里的递归编译产物是 LZ 程序本身（无 embed 块）⇒ 不会重复落盘。
+                if !embed_targets.is_empty() {
+                    emit_embed_artifacts(
+                        &embed_targets,
+                        args.iter().any(|a| a == "--embed-build"),
+                        true,
+                    );
+                }
                 return 0;
             }
             Err(e) => {
@@ -1347,6 +1372,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                     emit_embed_artifacts(
                         cg.embed_targets(),
                         args.iter().any(|a| a == "--embed-build"),
+                        false,
                     );
                 }
                 let out_path = replace_ext(path, ".lz", ".rs");
@@ -1379,12 +1405,27 @@ fn compile_main(args: Vec<String>) -> i32 {
 
 /// Cli 档 embed 产物的交付面：幂等落盘 → 可选建库 → 回执逐条打可 grep 的行。
 /// 硬约束：工具链不在场只能报「跳过」，建库失败必须非零退出 —— 两者都不许伪装成成功。
+///
+/// `receipts_to_stderr`：`--emit=rs-lz` 的 stdout 是**产物本身**（生成的 Rust 源码，
+/// 见 tests/rs_lz_behdiff.rs），回执必须让开，否则 `embed 产物: ...` 会混进源码里
+/// （T0r24：旁路要落盘 embed 产物，但不能破坏这条既有契约）。
 fn emit_embed_artifacts(
     targets: &[lang_zone::embed::EmbedTarget],
     embed_build: bool,
+    receipts_to_stderr: bool,
 ) {
     use lang_zone::embed::artifact::{build_artifact, write_artifacts, BuildStatus};
     use lang_zone::embed::ArtifactKind;
+    // 回执出口：两条路径共用同一份文案，只是流不同
+    macro_rules! receipt {
+        ($($arg:tt)*) => {
+            if receipts_to_stderr {
+                eprintln!($($arg)*)
+            } else {
+                println!($($arg)*)
+            }
+        };
+    }
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut failed = 0usize;
     let mut skipped = 0usize;
@@ -1396,7 +1437,7 @@ fn emit_embed_artifacts(
         match write_artifacts(&root, t) {
             Ok(ops) => {
                 let w = ops.iter().filter(|o| o.action == "written").count();
-                println!(
+                receipt!(
                     "embed 产物: {} kind={} files={} (写盘 {} / 未变 {})",
                     t.dir_rel,
                     kind,
@@ -1414,11 +1455,11 @@ fn emit_embed_artifacts(
             let o = build_artifact(&root, t, false);
             match o.status {
                 BuildStatus::NotNeeded => {
-                    println!("embed 建库: {} 无该步（{}）", o.artifact, o.detail)
+                    receipt!("embed 建库: {} 无该步（{}）", o.artifact, o.detail)
                 }
-                BuildStatus::Built => println!("embed 建库: {} 完成 ({})", o.artifact, o.cmd),
+                BuildStatus::Built => receipt!("embed 建库: {} 完成 ({})", o.artifact, o.cmd),
                 BuildStatus::Skipped => {
-                    println!("embed 建库: {} 跳过 —— {}", o.artifact, o.detail);
+                    receipt!("embed 建库: {} 跳过 —— {}", o.artifact, o.detail);
                     skipped += 1;
                 }
                 BuildStatus::Failed => {
@@ -1432,7 +1473,7 @@ fn emit_embed_artifacts(
         }
         // 取不到的调用面逐条点名：静默少一个函数正是本项目历来在清的那类错
         for m in t.unsupported_methods() {
-            println!(
+            receipt!(
                 "embed 未覆盖: {}::{} —— {}",
                 t.artifact,
                 m.name,

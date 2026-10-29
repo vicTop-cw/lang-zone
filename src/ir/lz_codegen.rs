@@ -21,14 +21,85 @@ pub const LZ_IR_LIB: &str = include_str!("lz_ir_lib.lz");
 /// 内嵌的 LZ Rust codegen 库（类型定义 + codegen 函数）
 pub const LZ_CODEGEN_LIB: &str = include_str!("lz_codegen_lib.lz");
 
+/// T0r24：把 IrModule 里 Cli 档 embed 块解析成产物描述（产物名 / 目录 / 函数面 / 建库命令）。
+///
+/// 「同一个源文件，两条路径同一个产物名」的接合点：命名权威是
+/// `crate::embed::dedup::artifact_name`（含 FNV-1a 路径短哈希），这里只是把原生
+/// codegen（src/ir/codegen/mod.rs:694-727）的分组口径**原样**复用到自举路线上——
+///   同语言多块：按出现顺序以 `\n\n` 拼接后一次性 resolve（与 EmbedCollector 同口径）
+///   不同语言：各出一个产物
+/// 于是 rs-lz 侧不需要（也不允许）自己重写去重，产物名/目录不可能与原生漂移。
+///
+/// `stem` 是命名主干（`calc.lz` → `calc`），等价于 `IrCodeGen::set_embed_stem`。
+pub fn embed_targets_of(module: &IrModule, stem: Option<&str>) -> Vec<crate::embed::EmbedTarget> {
+    embed_targets_by_lang(module, stem)
+        .into_iter()
+        .map(|(_, t)| t)
+        .collect()
+}
+
+/// 同 [`embed_targets_of`]，但保留**数据面里的原始语言写法**（`py` 与 `python` 都要能
+/// 反查到元信息：`adapter()` 会把 `py` 规范成 `python`，而 IR 里的 lang 是原样字符串）。
+fn embed_targets_by_lang(
+    module: &IrModule,
+    stem: Option<&str>,
+) -> Vec<(String, crate::embed::EmbedTarget)> {
+    let source_name = stem
+        .map(|s| s.to_string())
+        .or_else(|| module.file_path.clone())
+        .unwrap_or_else(|| module.name.clone());
+
+    let mut by_lang: Vec<(String, String)> = Vec::new();
+    for item in &module.items {
+        if let Item::EmbedBlock { lang, src, .. } = item {
+            if crate::embed::is_source_lang(lang) {
+                continue;
+            }
+            let entry = match by_lang.iter().position(|(l, _)| l == lang) {
+                Some(pos) => {
+                    by_lang[pos].1.push_str("\n\n");
+                    &mut by_lang[pos].1
+                }
+                None => {
+                    by_lang.push((lang.clone(), String::new()));
+                    &mut by_lang.last_mut().unwrap().1
+                }
+            };
+            entry.push_str(src);
+        }
+    }
+
+    let stem_base = crate::embed::base_stem(&source_name);
+    let mut out = Vec::new();
+    for (lang, acc) in &by_lang {
+        if let Some(mut t) = crate::embed::resolve(lang, &source_name, acc) {
+            t.dir_rel = crate::embed::artifact::dir_rel(&stem_base, &t.artifact);
+            out.push((lang.clone(), t));
+        }
+    }
+    out
+}
+
 /// 将 IrModule 序列化为完整 LZ 源码（库 + main 构造 + codegen_module 调用）
 /// 自举路线 B：D1 环节 —— LZ 实现 Rust 代码生成
 pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
+    // 模块自身记录的源文件路径即主干来源（main.rs 在 parse 后注入 module.file_path）
+    ir_module_to_rs_lz_source_with_stem(module, module.file_path.as_deref())
+}
+
+/// 与 [`ir_module_to_rs_lz_source`] 相同，但显式指定 embed 产物的命名主干
+/// （`calc.lz` 的 `calc`）。等价于原生 Rust 后端 `IrCodeGen::set_embed_stem`
+/// （src/main.rs:1340）—— 两条路径必须拿到**同一个** source_name，否则
+/// Cli 档产物名/目录会对不上（tests/embed_stem_parity.rs 的判据本体）。
+pub fn ir_module_to_rs_lz_source_with_stem(module: &IrModule, stem: Option<&str>) -> String {
     let mut g = LzGen::new();
     // BUG-411：Rust codegen 模式（命名字段变体 + EnumCtor 改写生效）
     g.rs_codegen_mode = true;
     // BUG-411：先登记枚举变体字段名，供构造/字段访问解析
     g.collect_enums(module);
+    // T0r24：Cli 档 embed 的产物名/目录/垫片文本全部在 Rust 侧算好（唯一命名权威
+    // 是 crate::embed::dedup::artifact_name；LZ 侧不重写 FNV 去重）。
+    g.prepare_embeds(module, stem);
     let mut out = String::new();
     out.push_str("// 由 lzc --emit=rs-lz 生成（自举路线 B：LZ 实现 Rust codegen）\n");
     out.push_str(LZ_CODEGEN_LIB);
@@ -71,7 +142,12 @@ pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
         gen_str_list(&module.prelude),
         module.version
     ));
-    out.push_str("    let uf = module_user_fn_names(m)\n    print_str(codegen_module(m, uf))\n    return 0\n");
+    // T0r24：Cli 档 embed 的垫片模块文本作为**字符串参数**穿透给 LZ
+    // （只穿透一次，故多语言也不会重复 EMBED_SHIM_HEADER → 不会 E0252）。
+    out.push_str(&format!(
+        "    let uf = module_user_fn_names(m)\n    let es = \"{}\"\n    print_str(codegen_module(m, uf, es))\n    return 0\n",
+        escape_lz_multiline(&g.embed_shim)
+    ));
     out
 }
 
@@ -128,6 +204,27 @@ struct LzGen {
     /// 原生 `--emit=ir` 文本逐字节一致，那里枚举变体只显示类型、构造显示为
     /// `method`，不能改写。
     rs_codegen_mode: bool,
+    /// T0r24：语言 → 该语言 embed 块的预计算元信息（档位 + 产物名 + 产物目录）。
+    /// 由 `crate::embed::{resolve, artifact::dir_rel}` 在 Rust 侧算好，LZ 侧只消费。
+    embed_meta: std::collections::HashMap<String, EmbedMeta>,
+    /// T0r24：整段 Cli 档垫片模块文本（`pub mod __lz_embed` 的**内容**）。
+    /// 唯一生成点是 `bridge::cli::generate_embed_module`（经 `embed::shim::module_text`），
+    /// 与原生路径逐字同一份；LZ 侧只负责挂进模块外壳。
+    embed_shim: String,
+}
+
+/// 一个语言的 embed 块在 LZ 数据面里的元信息（T0r24）
+#[derive(Clone)]
+struct EmbedMeta {
+    /// 发射档位：`src_tnr` / `src_raw`（Source 档，逐字进 .rs）/ `cli`（独立产物 + 垫片）
+    tier: &'static str,
+    /// Cli 档产物名（`python_calc`）；Source 档为空串
+    artifact: String,
+    /// Cli 档产物目录（`build/embed/calc/python_calc`）；Source 档为空串
+    dir_rel: String,
+    /// Cli 档对 LZ 可见的调用面（`<artifact>_<method>` / `<artifact>_run`）；
+    /// 用于 LZ 侧把同名外部函数桩排掉（原生 `unknown_extern_fns.remove` 的同口径）
+    wrappers: Vec<String>,
 }
 
 impl LzGen {
@@ -137,7 +234,69 @@ impl LzGen {
             lets: Vec::new(),
             enums: std::collections::HashMap::new(),
             rs_codegen_mode: false,
+            embed_meta: std::collections::HashMap::new(),
+            embed_shim: String::new(),
         }
+    }
+
+    /// T0r24：预计算每个 embed 语言在数据面里的元信息 + 整段垫片文本。
+    ///
+    /// 命名/去重**不在 LZ 侧**做：产物名来自 `crate::embed::dedup::artifact_name`
+    /// （FNV-1a 路径短哈希），目录来自 `crate::embed::artifact::dir_rel`，垫片代码来自
+    /// `crate::embed::shim::module_text`。这里只是把同一批结论搬进数据面。
+    fn prepare_embeds(&mut self, module: &IrModule, stem: Option<&str>) {
+        // Source 档：逐字进 .rs，不产生产物（tnr 需要 tnr lib 转译，LZ 侧没有该能力
+        // ⇒ 按 feature 未启用形态发注释，与原生未开 tnr-embed 时逐字一致）。
+        for item in &module.items {
+            if let Item::EmbedBlock { lang, .. } = item {
+                if crate::embed::is_source_lang(lang) {
+                    let tier: &'static str = if lang == "tnr" { "src_tnr" } else { "src_raw" };
+                    self.embed_meta.entry(lang.clone()).or_insert(EmbedMeta {
+                        tier,
+                        artifact: String::new(),
+                        dir_rel: String::new(),
+                        wrappers: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        // Cli 档：按语言聚合后一次性 resolve（命名口径与原生 codegen 完全同源）。
+        let mut targets: Vec<crate::embed::EmbedTarget> = Vec::new();
+        for (lang, t) in embed_targets_by_lang(module, stem) {
+            // 调用面：可被 LZ 调用的库函数垫片名 +（Executable 档）原样执行面
+            let mut wrappers: Vec<String> = t
+                .callable_methods()
+                .iter()
+                .map(|m| format!("{}_{}", t.artifact, m.name))
+                .collect();
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                wrappers.push(format!("{}_run", t.artifact));
+            }
+            self.embed_meta.insert(
+                lang,
+                EmbedMeta {
+                    tier: "cli",
+                    artifact: t.artifact.clone(),
+                    dir_rel: t.dir_rel.clone(),
+                    wrappers,
+                },
+            );
+            targets.push(t);
+        }
+        if !targets.is_empty() {
+            self.embed_shim = crate::embed::shim::module_text(&targets);
+        }
+    }
+
+    /// Cli 档端点对 LZ 可见的调用面（`<artifact>_<method>` / `<artifact>_run`）。
+    /// 与原生 codegen 的 `unknown_extern_fns.remove(..)` 等价：这些名字由垫片提供，
+    /// LZ 侧不许再发 `-> i64 { i64::MAX }` 桩（会 E0428 重定义）。
+    fn embed_wrapper_names(&self, lang: &str) -> Vec<String> {
+        self.embed_meta
+            .get(lang)
+            .map(|m| m.wrappers.clone())
+            .unwrap_or_default()
     }
 
     /// 预扫描模块内 enum 定义，登记 枚举名 → 变体字段名
@@ -401,7 +560,44 @@ impl LzGen {
                 format!("Item.DuckDef(name: \"{}\", method_count: {})", d.name, d.methods.len())
             }
             Item::EmbedBlock { lang, src, .. } => {
-                format!("Item.EmbedBlock(lang: \"{}\", src_len: {})", lang, src.len())
+                if !self.rs_codegen_mode {
+                    // IR display 路线（--emit=ir-lz）：数据面消费方是 lz_ir_lib.lz 的
+                    // `Item.EmbedBlock(lang, src_len)`，display 也只用这两个字段
+                    // （`embed(<lang>) { <n> chars }`，对齐 src/ir/display.rs:734）。
+                    // 该库不属本次改动范围 ⇒ 这里保持旧形态，别把 rs-lz 的新 schema
+                    // 泄进 IR display 路线（否则 --emit=ir-lz 在含 embed 的文件上
+                    // 会因为枚举没有新变体而 E0599）。
+                    return format!(
+                        "Item.EmbedBlock(lang: \"{}\", src_len: {})",
+                        lang,
+                        src.len()
+                    );
+                }
+                // T0r24：旧实现只发 `(lang, src_len)` —— 内嵌源码根本不进数据面，
+                // rs-lz 侧无从表示 embed 块（rustc E0599: no variant named EmbedBlock）。
+                // 现在带上**源码原文**，并把 Rust 侧算好的档位 / 产物名 / 产物目录 /
+                // 调用面穿透过去（LZ 侧不重写去重，也不猜命名）。
+                let meta = self.embed_meta.get(lang).cloned().unwrap_or(EmbedMeta {
+                    tier: "src_raw",
+                    artifact: String::new(),
+                    dir_rel: String::new(),
+                    wrappers: Vec::new(),
+                });
+                let wrappers_items: Vec<String> = self
+                    .embed_wrapper_names(lang)
+                    .iter()
+                    .map(|w| format!("\"{}\"", escape_lz(w)))
+                    .collect();
+                let wrappers_s = self.list_ref("str", wrappers_items);
+                format!(
+                    "Item.EmbedBlock(lang: \"{}\", src: \"{}\", tier: \"{}\", artifact: \"{}\", dir_rel: \"{}\", wrappers: {})",
+                    escape_lz(lang),
+                    escape_lz_multiline(src),
+                    meta.tier,
+                    escape_lz(&meta.artifact),
+                    escape_lz(&meta.dir_rel),
+                    wrappers_s
+                )
             }
             Item::Use(u) => {
                 let path = u.path.join(".");
@@ -1199,6 +1395,18 @@ fn gen_str_list(xs: &[String]) -> String {
 /// 转义 LZ 字符串字面量中的引号
 fn escape_lz(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// 多行文本进 LZ 字符串字面量：除引号/反斜杠外，把换行/回车/制表压成转义序列。
+/// 理由：LZ 的 `lex_escape` 支持 `\n`/`\r`/`\t`（src/lexer/strings.rs:10-77），而
+/// 原样换行会让缩进词法器把字面量内部当成真实换行 ⇒ 产物缩进语义漂移。
+/// embed 的源码原文与垫片文本都走这里。
+fn escape_lz_multiline(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 fn binop_str(op: &super::node::BinOpKind) -> &'static str {

@@ -5,32 +5,31 @@
 //   ① 原生 Rust 后端（默认路径）：`lzc calc.lz`
 //   ② rs-lz 旁路（自举路线 B）：`lzc calc.lz --emit=rs-lz`
 //
-// 先记结论（本文件的三条判据就是证据，别只看注释）：
+// 先记结论（本文件的判据就是证据，别只看注释）：
 //
 //   原生：产物名 python_calc、目录 build/embed/calc/python_calc、垫片 pub fn python_calc_add
-//         —— 注入点在 src/main.rs:1182 `cg.set_embed_stem(&path.to_string())`；
-//            消费点在 src/ir/codegen/mod.rs:697-727（`cli_source_name` → `base_stem`
+//         —— 注入点在 src/main.rs:1339 `cg.set_embed_stem(&path.to_string())`；
+//            消费点在 src/ir/codegen/mod.rs:694-727（`cli_source_name` → `base_stem`
 //            → `crate::embed::resolve` → `artifact::dir_rel`）；
 //            命名权威在 src/embed/dedup.rs::artifact_name。
-//   旁路：**零产物、零命名**。`--emit=rs-lz` 只把 embed 块序列化成
-//         `Item.EmbedBlock(lang, src_len)`（src/ir/lz_codegen.rs:403-404）——
-//         连内嵌源码文本都不进数据面；而 LZ 发射器的 `Item` 枚举
-//         （src/ir/lz_codegen_lib.lz:154-179）根本没有这个变体，
-//         于是含 embed 的源文件在旁路上是**硬编译失败**（rustc E0599），
-//         不是「按 module.name 命名」这种程度的分歧。
+//   旁路（T0r24 之后）：**同一份结论**。`src/ir/lz_codegen.rs` 在序列化阶段就用
+//         `crate::embed::{resolve, artifact::dir_rel, shim::module_text}` 把产物名、
+//         产物目录、垫片模块文本算好，作为字符串参数穿透进 LZ 数据面
+//         （`Item.EmbedBlock(lang, src, tier, artifact, dir_rel, wrappers)`），
+//         LZ 发射器（src/ir/lz_codegen_lib.lz）只消费、不重写 —— FNV 去重不出现在 LZ 里。
+//         产物落盘由 Rust 侧 `emit_embed_artifacts` 负责（LZ 程序不写文件）。
 //
-// 也就是说 docs/嵌入式统一抽象-实现-2026-10-21.md §6 第 5 条
-// （「`embed_stem` 只在默认 rust 后端注入：旁路仍按 `module.name` 命名产物」）
-// **低估**了缺口：旁路既没有 `embed_stem`，也没有任何命名代码，连 embed 块都表示不出来。
+// T0r24 的栅栏转正记录：本文件原有第三条判据
+// `rs_lz_bypass_still_cannot_represent_embed_blocks`（断言旁路必须死在 E0599、
+// 且 .lzrs 里只有 `src_len` 没有源码文本）已按它自己的注释所写的条件**删除** ——
+// 旁路已能表示 embed 块，那条栅栏钉住的事实不再成立。它留下的证据面由
+// `rs_lz_bypass_represents_embed_blocks_with_source_and_artifact_name` 反向钉死
+// （数据面带源码文本 + 产物名与原生基准一致），本文件的 parity 判据同时转正。
 //
 // 三条判据的分工：
-//   native_path_pins_...            绿 —— 钉住基准面（原生侧的产物名/目录/垫片名）
-//   rs_lz_bypass_still_cannot_...   绿 —— 栅栏：钉住「旁路目前零命名」这一事实，
-//                                         它一变红就说明旁路接上了，届时把下面的
-//                                         parity 判据转正、并删掉本栅栏
-//   same_source_yields_identical_...  ignored —— 接线后必须成立的目标判据；
-//                                         `cargo test --test embed_stem_parity -- --ignored`
-//                                         能直接看到今天的确切失败点
+//   native_path_pins_...             绿 —— 钉住基准面（原生侧的产物名/目录/垫片名）
+//   rs_lz_bypass_represents_...      绿 —— 钉住「旁路已接上」的数据面证据（不是零命名）
+//   same_source_yields_identical_... 绿 —— 目标判据：两条路径产物名/目录逐字一致
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -189,10 +188,18 @@ fn native_path_pins_artifact_name_dir_and_shim() {
     assert!(rs.contains("helper"), "Source 档文本必须仍留在产物里");
 }
 
-// ───────── ② 栅栏：旁路今天既不能命名、也不能落盘任何产物 ─────────
+// ───────── ② 旁路已接上：数据面带源码文本 + 产物名与原生基准一致 ─────────
 
+/// T0r24 转正后的判据（取代旧栅栏 `rs_lz_bypass_still_cannot_represent_embed_blocks`）。
+///
+/// 钉两件事，缺一不可：
+///   1. **数据面**：`.lzrs` 里的 `Item.EmbedBlock` 必须带内嵌源码原文（旧形态只有
+///      `src_len`，源码根本不进数据 —— 那是 rs-lz 表示不了 embed 的根因），且产物名/
+///      目录来自 Rust 侧的 `embed::resolve` / `artifact::dir_rel`（LZ 不重写去重）。
+///   2. **调用面 + 落盘面**：生成的 Rust 里有 `pub mod __lz_embed` 与带主干的垫片
+///      `python_calc_add`，产物目录真的落在 build/embed/calc/python_calc。
 #[test]
-fn rs_lz_bypass_still_cannot_represent_embed_blocks() {
+fn rs_lz_bypass_represents_embed_blocks_with_source_and_artifact_name() {
     ensure_rs_lz_builtins_rlib();
 
     let work = case_dir("rs_lz");
@@ -200,46 +207,67 @@ fn rs_lz_bypass_still_cannot_represent_embed_blocks() {
 
     let ran = run_lz(&work, &["calc.lz", "--emit=rs-lz"]);
     assert!(
-        !ran.ok,
-        "旁路处理含 embed 的源文件居然成功了 ⇒ 说明已接上 embed 支持：\n\
-         请把 same_source_yields_identical_artifact_names_on_both_paths 的 #[ignore] 摘掉、\n\
-         让它承认真实的一致性判据，然后删除本栅栏判据。\nstdout={} stderr={}",
+        ran.ok,
+        "旁路必须能处理含 embed 的源文件（T0r24 前死在 E0599：Item 枚举无 EmbedBlock）:\nstdout={}\nstderr={}",
         ran.stdout, ran.stderr
     );
 
-    // 失败点必须是「LZ 发射器的 Item 枚举不认识 EmbedBlock」，不是缺 rlib / 别的噪声
-    assert!(
-        ran.stderr.contains("EmbedBlock") && ran.stderr.contains("no variant"),
-        "旁路的失败原因不是预期的 E0599（Item 枚举无 EmbedBlock），需要重新定位:\n{}",
-        ran.receipts()
-    );
-
-    // 数据面证据：旁路只带 (lang, src_len)，内嵌源码文本根本没进 IR 数据
+    // ── 数据面：源码原文进数据，不再只有长度 ──
     let lzrs = read(&work.join("calc.lzrs"));
+    let embed_line = grep_lines(&lzrs, "Item.EmbedBlock(");
     assert!(
-        lzrs.contains("Item.EmbedBlock(lang: \"python\", src_len: "),
-        "旁路序列化 embed 块的形式变了（src/ir/lz_codegen.rs:403），需重新核对:\n{}",
-        grep_lines(&lzrs, "EmbedBlock")
+        !embed_line.is_empty(),
+        "旁路 .lzrs 里没有 Item.EmbedBlock 构造点:\n{}",
+        lzrs
     );
     assert!(
-        !lzrs.contains("build/embed"),
-        "旁路的数据面里不该出现产物目录（它今天不落盘任何 embed 产物）"
+        !lzrs.contains("src_len: "),
+        "旁路仍按旧形态序列化（只有 src_len，源码丢了）:\n{embed_line}"
+    );
+    assert!(
+        lzrs.contains("Item.EmbedBlock(lang: \"python\", src: \"") && lzrs.contains("return a + b"),
+        "Cli 档 embed 块的源码原文必须进数据面:\n{embed_line}"
+    );
+    // 产物名/目录是 Rust 侧算好后作为字符串穿透的（LZ 里没有 FNV 实现）
+    assert!(
+        lzrs.contains("artifact: \"python_calc\"")
+            && lzrs.contains("dir_rel: \"build/embed/calc/python_calc\""),
+        "旁路的产物名/目录必须与原生基准（python_calc / build/embed/calc/python_calc）一致:\n{embed_line}"
+    );
+    assert!(
+        !lzrs.contains("0xcbf2_9ce4_8422_2325"),
+        "去重/短哈希不该被搬到 LZ 侧重写（命名权威只有 embed::dedup::artifact_name）"
     );
 
-    // 命名面：既没有 calc 版垫片，也没有 main 版垫片 ⇒ 旁路**零命名**，
-    // 比文档 §6 第 5 条说的「按 module.name 命名」还要靠前一步。
-    for shim in ["pub fn python_calc_add", "pub fn python_main_add"] {
-        assert!(
-            !lzrs.contains(shim),
-            "旁路出现了垫片定义 `{shim}` ⇒ 命名面已被接上，需同步更新本判据与文档 §6"
-        );
-    }
-
-    // 落盘面：原生路径有 build/embed/calc/python_calc，旁路一份都没有
+    // ── 调用面：垫片模块 + 带主干的垫片名 ──
     assert!(
-        !work.join("build/embed").exists(),
-        "旁路不该落盘 embed 产物; 实际存在 {}",
-        work.join("build/embed").display()
+        ran.stdout.contains("pub mod __lz_embed {"),
+        "旁路产物缺 __lz_embed 模块:\n{}",
+        ran.stdout
+    );
+    assert!(
+        ran.stdout.contains("pub fn python_calc_add("),
+        "旁路的垫片名必须带源文件主干 calc（不是 module.name main）:\n{}",
+        grep_lines(&ran.stdout, "_add(")
+    );
+    assert!(
+        !ran.stdout.contains("python_main_add"),
+        "旁路不许退回按 module.name（main）命名"
+    );
+    // 垫片与外部函数桩不能同名共存（原生 unknown_extern_fns.remove 的同口径）
+    assert!(
+        !ran.stdout.contains("fn python_calc_add(__a0"),
+        "旁路既发垫片又发同名 i64 桩 ⇒ E0428 重定义:\n{}",
+        grep_lines(&ran.stdout, "python_calc_add")
+    );
+
+    // ── 落盘面：产物目录由 Rust 侧真落在盘上（LZ 程序不写文件）──
+    let dir = work.join("build/embed/calc/python_calc");
+    assert!(dir.is_dir(), "旁路缺产物目录 {}", dir.display());
+    let manifest = read(&dir.join("MANIFEST.txt"));
+    assert!(
+        manifest.contains("artifact=python_calc") && manifest.contains("dir=build/embed/calc/python_calc"),
+        "旁路 MANIFEST 与原生不一致:\n{manifest}"
     );
 }
 
@@ -252,11 +280,9 @@ fn grep_lines(text: &str, needle: &str) -> String {
         .join("\n")
 }
 
-// ───────── ③ 目标判据：两条路径产物名/目录逐字一致（接线后转正） ─────────
+// ───────── ③ 目标判据：两条路径产物名/目录逐字一致（T0r24 起转正） ─────────
 
 #[test]
-#[ignore = "rs-lz 旁路尚不能表示 embed 块（rustc E0599）⇒ 一致性今天不成立；\
-            接线后摘掉本 ignore，它就是验收判据本身。用 `cargo test --test embed_stem_parity -- --ignored` 可看到确切失败点"]
 fn same_source_yields_identical_artifact_names_on_both_paths() {
     ensure_rs_lz_builtins_rlib();
 
@@ -276,10 +302,19 @@ fn same_source_yields_identical_artifact_names_on_both_paths() {
     let b = run_lz(&bypass, &["calc.lz", "--emit=rs-lz"]);
     assert!(
         b.ok,
-        "旁路必须能处理同一份源文件（今天死在 E0599：Item 枚举无 EmbedBlock）:\nstdout={}\nstderr={}",
+        "旁路必须能处理同一份源文件:\nstdout={}\nstderr={}",
         b.stdout, b.stderr
     );
-    let bypass_dirs = artifact_dirs(&b.stdout);
+    // 回执读 receipts（stdout+stderr）：`--emit=rs-lz` 的 **stdout 是产物本身**
+    // （生成的 Rust 源码，见 tests/rs_lz_behdiff.rs 的契约），所以 embed 落盘回执
+    // 只能走 stderr —— 判据因此按「两股流合起来」摘行，一致性要求本身不变。
+    let bypass_dirs = artifact_dirs(&b.receipts());
+    assert_eq!(
+        bypass_dirs.len(),
+        1,
+        "旁路侧应恰好一个 Cli 产物（回执可能落在 stderr）: {}",
+        b.receipts()
+    );
 
     // 一致性本体：产物目录（含产物名）逐字相同
     assert_eq!(
@@ -292,4 +327,17 @@ fn same_source_yields_identical_artifact_names_on_both_paths() {
     let dir = &native_dirs[0];
     assert!(native.join(dir).is_dir(), "原生侧缺产物目录");
     assert!(bypass.join(dir).is_dir(), "旁路侧缺产物目录");
+
+    // 调用面逐字一致：两边同一份垫片签名 + 同一份产物目录串
+    let native_rs = read(&native.join("calc.rs"));
+    let shim_native = grep_lines(&native_rs, "pub fn python_calc_add(");
+    let shim_bypass = grep_lines(&b.stdout, "pub fn python_calc_add(");
+    assert!(
+        !shim_native.is_empty() && shim_native == shim_bypass,
+        "两条路径的垫片签名必须逐字一致:\n原生={shim_native}\n旁路={shim_bypass}"
+    );
+    assert!(
+        native_rs.contains(dir) && b.stdout.contains(dir),
+        "两条路径的产物目录串必须都出现在调用面里"
+    );
 }
