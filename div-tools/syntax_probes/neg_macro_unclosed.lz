@@ -1,3 +1,21 @@
-@!def unclosed macro
-def main() =
-    print(1)
+#!bin macro
+// neg_macro_unclosed —— 负例：宏定义的 body 到 EOF 仍未闭合
+//
+// 测什么：`#!bin macro` 宏模块里，宏头以 `=` 结尾后文件直接结束——宏 body 从未出现，
+//         「宏」这个构造在 EOF 处仍未闭合（完整形态对比 DEMO/09_macros/macro_demo.lz:17
+//         `macro id(input: Tokens) -> Tokens = input`，body 是 `input`）。
+// 期望什么错误：Macro definition error: unexpected token Eof in macro body at position 0
+//         （编译失败，exit 1）。
+// 为什么原来那条测歪了：原文件写 `@!def unclosed macro`——`@!...` 是装饰器语法，不是宏头；
+//         真正的宏头是首行 `#!bin macro`（见 DEMO/09_macros/macro_demo.lz:1）。实测报
+//         "装饰器名缺失或非法（位置 1:1）"，测到的是「坏装饰器」，宏子系统根本没进去。
+//
+// 实测记录（同为「未闭合」形状里哪些测不到，省得后人换回去）：
+//   · 宏 body 内括号/引号未闭合、且宏未被调用 → 编译器静默接受，exit 0（如 `quote("x"` 少右括号）；
+//   · 宏签名少右括号 → "expected parameter name in macro 'id'"（打到参数解析，不是未闭合）；
+//   · 宏 body 直接以 `(` / `{` 开头 → "unexpected token LParen/LBrace in macro body"（打到 body 文法）；
+//   · 只有展开产物 / 调用块括号不平衡时，才报「括号未闭合（剩余 N 个左括号）」。
+// 本条取定义面：宏 body 在 EOF 处未闭合，报的是 Macro definition error（宏专有诊断），
+// 而不是通用 Parse error。
+
+macro make_const(name: Tokens, value: Tokens) -> Tokens =

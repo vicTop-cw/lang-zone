@@ -1,4 +1,31 @@
-trait T =
-    def go(self) -> int
+// neg_trait_missing_fn —— 负例：trait 的抽象方法在 impl 中未提供
+//
+// 测什么：trait Greeter 声明两个抽象方法 greet / farewell，impl Greeter for Dog 只实现了
+//         greet。trait 声明与 impl 头都合法（单签名无 `=` 体是 trait 的合法形态），
+//         唯一的缺陷是 impl 少一个方法。
+// 期望什么错误：G6 impl 块语义校验（src/semantic_check.rs:416，Bug-10）报
+//         "trait Greeter 要求实现抽象方法 farewell 但 impl Greeter for Dog 未提供"，
+//         编译失败（exit 1）。
+// 为什么原来那条测歪了：原文件是
+//             trait T =
+//                 def go(self) -> int
+//         但 `go` 是保留字（src/lexer/lexer.rs:193 `"go" => Token::Go`），解析器在函数名
+//         位置遇到 Go token 就报 "Parse error: Expected function name, got Go"——实际测的是
+//         「关键字当标识符」。而且 trait 内单签名 `def m(self) -> int` 本身就是合法形态
+//         （见 DEMO/01_basics/traits.lz:6-7），「trait 缺函数名」这个错误在编译器里并不存在，
+//         原探针从来没碰到过 trait 语义校验这条线。
+
+trait Greeter =
+    def greet(self) -> str
+    def farewell(self) -> str
+
+struct Dog =
+    name: str
+
+// 只实现 greet，故意漏掉 farewell
+impl Greeter for Dog =
+    def greet(self) -> str =
+        "hi"
+
 def main() =
     print(1)
