@@ -3595,3 +3595,31 @@ commit：3f8512e（重映射自 未记）
 - commit: 8ca306f
 - 回归: 三条负向探针各自真测目标诊断（假阳性负例清零）
 状态：FIXED
+
+## BUG-501 [2026-10-29T18:40:00+08:00] [high] 语法矩阵反例判据在 PS 5.1 下恒真（`-match 'error'` 命中 NativeCommandError），「诊断可读」半条从未生效
+- summary: 现象：反例判据对**任何产生 stderr 的样本**都判「按预期失败」——连编译成功、stderr 只有 `LZ LINK RECIPE` 的文件也判过，于是「反例不只是失败、还要给出可读诊断」这半条验收从未真正生效，判据等价退化成只看 rc。根因：`div-tools/syntax_matrix.ps1` 旧判据 `(.. 2>&1 | Out-String) -match 'error'` 在 Windows PowerShell 5.1 下把子进程 stderr 每行包成 ErrorRecord（`FullyQualifiedErrorId : NativeCommandError`），子串 `error` 被这层壳命中而恒真；叠加 PS 5.1 经管道按 GBK 解码 UTF-8，中文诊断还会乱码/吞字节。修法（判据 v2）：stdout/stderr **分别重定向到独立临时文件**（不经 PS 管道）→ `Get-Content -Raw -Encoding UTF8` 读回（顺带解决 GBK 解码）→ 正例 `rc==0`；反例 `rc!=0` **且**命中「行首诊断」正则（`^(Parse error|IR build error|Macro definition error|Semantic error|Lexer error|Type error|Codegen error|Link error|Compile error|Error|error[E\d]+)`）→ 再排除噪声黑名单（`NativeCommandError`、`FullyQualifiedErrorId`、`LZ LINK RECIPE`、`Generated` 路径回显、`Bridge registry`、`提示：`、`warning/note/info`）；报告逐行表格记 rc + 诊断原文 + 显式 SKIP；新增 `-SelfTest`（判据自检 + 缺陷对照片段 + 8 条边界用例），自检里同一成功样本 v1 判 True、v2 判 False 即缺陷复现证据。
+- 判据: `powershell -NoProfile -File div-tools\syntax_matrix.ps1 -SelfTest`（不写报告；须打印 v1 对成功样本=True / v2=False 的对照，8 条边界用例全过）；全量矩阵 `powershell -NoProfile -File div-tools\syntax_matrix.ps1`，产物 `tests/syntax-matrix-report.md`，其中「判据（可复核）」段与「反例明细」段即本条的机器判据。
+- commit: 8705619
+- 回归: 判据 v2 下单次重跑反例 8/25 → 24/25（红转绿 16、绿转红 0）、正例 38/38（40 特性中 2 个 SKIP 显式列出）；报告新增「`rc != 0` 但诊断不可读：0」一栏，这栏从无意义变为可读性证据。残余第 25 条为 raise 语义探针假阳性，归 BUG-502（修后 25/25）。
+状态：FIXED
+
+## BUG-502 [2026-10-29T18:41:00+08:00] [medium] 字符串字面量 `raise` 的豁免是有意实现但 SYNTAX/09 未记，探针 `neg_error_uncaught_panic_ok` 因此是假阳性
+- summary: 现象：文档承诺「raise 必须声明 raises」，但 `raise "oops"` 实测 rc=0 不报错；覆盖该承诺的负向探针 `div-tools/syntax_probes/neg_error_uncaught_panic_ok.lz` 写的是字符串 raise，于是探针**恒通过**（rc=0 也被算成 neg 通过），是假阳性负例、挡不住对应回归。根因：`src/ir/semantic_check.rs` 的 `Stmt::Raise` 对 raise 的**字面量形态**（StrLit/FStrLit/RawStrLit）有意豁免 raises 声明（裁决：消息式错误不必每处声明），但这条裁决从未落纸，而 `SYNTAX/09-错误处理.md` §2.2 与 DEMO 注释都写「raise 必须声明」，文档与实现打架。修法：① 文档补 §2.2.1——豁免边界是字面量**形态**而不是 `str` 类型（变量 / 拼接 / 返回值形式的 str 仍需声明 raises），给两个 ✅ 与两个 ❌ 例子并尾注指向源码判据；§2.5 与 §六 里自相矛盾的 `raise "oops"` 反例改成类型化 raise；② 探针改为 `enum AppError` + `raise AppError.Boom(..)`，实测 rc=1 且诊断命中「未在签名中声明 raises」。
+- 判据: 探针复跑须 rc=1 且诊断含 raise 未声明字样：`lz build div-tools/syntax_probes/neg_error_uncaught_panic_ok.lz`；对照三条——字符串 `raise "oops"` rc=0（豁免生效）、变量/拼接形式 str raise rc=1、类型化 raise rc=1。文档口径为 `SYNTAX/09-错误处理.md` §2.2.1（含 ✅/❌ 四例）。
+- commit: 0ddb6ca
+- 回归: `find_bug_bugs` 46/46 + `--lib` 469/469；探针由「字符串 raise（rc=0、恒通过）」改为类型化 raise（rc=1 且命中诊断），假阳性负例清零；矩阵反例随之 24/25 → 25/25。
+状态：FIXED
+
+## BUG-503 [2026-10-29T18:42:00+08:00] [low] `scan.rs` 的 f-string 预扫描段拆分（move-only，sha1 等价）——重构/测试质量类
+- summary: 类别「重构/测试质量」，非缺陷而是可核查的等价性重构，记账以免与「顺手改动」混淆。现象：`src/ir/codegen/scan.rs` 体量居前且含一段与主流程无关的 f-string/lambda 绑定预扫描。做法：把该段 **640 行 / 7 函数**整段移到新文件 `src/ir/codegen/scan/fstring_scan.rs`，原文件 2,692 → 2,060 行；迁入正文与被剪段落 **sha1 相同（24,114 bytes / 640 行）**，即逐字节搬运、无改写；7 函数本就 `pub(crate)`，故零可见性变更，外部仅 1 处调用点经 `pub(crate) use` 转发，`src/ir/codegen/mod.rs` 零改动、lib 告警 9 条零新增。
+- 判据: 等价性可复跑：`git show 6ffcd75 -- src/ir/codegen/scan.rs src/ir/codegen/scan/fstring_scan.rs`（看增删两侧是否同一段正文）；机器判据：取 `git show 6ffcd75:src/ir/codegen/scan/fstring_scan.rs` 去掉文件头若干行后，其正文应作为**连续子串**出现在 `git show 6ffcd75^:src/ir/codegen/scan.rs` 中且两侧 sha1 相同（本轮实测：命中，切片 sha1 一致）。
+- commit: 6ffcd75
+- 回归: `cargo test --lib` 469/469、`cargo test --test codegen_corner_fixes` 44/44、`cargo test --test lz_ir_bootstrap` 25/25；lib 告警 9 条零新增。
+状态：FIXED
+
+## BUG-504 [2026-10-29T18:43:00+08:00] [low] 大文件拆分计划盘点：文件级拆分已全部落地，剩余体积在**单函数**（`gen_expr` 7,328 行）
+- summary: 类别「计划盘点」，不是代码缺陷，是对「还有哪些大文件要拆」这一长期假设的证伪。现象：计划表把「≤4,000 行/文件」当作目标，但按现 HEAD 复核，**文件级拆分已全部落地**——剩下的体积不在文件边界上，而在单个函数体内：`gen_expr` **7,328 行**（`src/ir/codegen/expr_gen.rs` 的 687–8014 行，占该文件 86%）、`gen_stmt` 2,772 行、`convert_expr` 2,403 行，且纯 move-only 在 `gen_expr`/`gen_stmt`/`convert_expr` 三处**已无收益**（再搬只能拆函数，属语义改写而非搬运）。结论/建议：① 指标由「≤4,000 行/文件」改为双指标「**文件 ≤2,500 行 + 单函数 ≤800 行**」，否则计划永远显示「已达成」而最大函数仍在膨胀；② 计划表两处记录已过时需更正（`gen_expr` 记 5,100 → 现 7,328；`gen_stmt` 记 1,850 → 现 2,772）；③ 下一批按风险升序，最高风险项（`expr_gen.rs`/`stmt_gen.rs` 内部按 `ExprKind`/`StmtKind` 提取子函数）必须**单独立项**、不混进 move-only 批次，且新旧发射需对照 `codegen_corner_fixes` 44 条守护区。
+- 判据: 见报告 `Reports/split-plan-2026-10-29.md`（§1 结论、§2 最大 10 文件表、§3.4 等价性证明、§4 下一批风险排序、§5 指标修正）；行数口径可复核：`wc -l src/ir/codegen/expr_gen.rs`（8,548 行）与 `gen_expr` 函数区间 687–8014（7,328 行）。
+- commit: 见报告（无代码提交；Reports/split-plan-2026-10-29.md）
+- 回归: 不适用（纯盘点，不改代码）；盘点结论对既有测试零影响，`--lib` 469/469、corner 44/44、bootstrap 25/25 在同批提交 6ffcd75 上照旧通过。
+状态：FIXED（盘点完成）
