@@ -14,6 +14,8 @@
 #
 # 判据（v2）：
 #   正例：rc == 0。
+#   正例内容断言（P3）：对 5 个代表性特性，rc == 0 且本次生成的 .rs 含预期构造
+#         （正则见 $script:ContentChecks）；不命中记「正例内容不符」。
 #   反例：rc != 0 且 输出里有「行首诊断」（正则见 $script:DiagHeadPattern），
 #         并排除 NativeCommandError / LZ LINK RECIPE / Generated 路径回显 /
 #         Bridge registry / 提示：/ warning / note 这些噪声。
@@ -164,6 +166,27 @@ function Test-NegativeVerdict {
     }
 }
 
+# 正例内容断言的单一入口：判定一份生成物里是否有全部预期构造。
+# 空文件/文件不存在一律判不通过（防「读不到就当通过」）。
+function Test-ContentVerdict {
+    param(
+        [Parameter(Mandatory = $true)][string]$RsPath,
+        [Parameter(Mandatory = $true)][string[]]$Patterns
+    )
+    $text = Read-TextUtf8 -Path $RsPath
+    $hits = @()
+    $misses = @()
+    foreach ($pat in $Patterns) {
+        if ($text -match $pat) { $hits += $pat } else { $misses += $pat }
+    }
+    return [pscustomobject]@{
+        Pass   = (($misses.Count -eq 0) -and ($text.Length -gt 0))
+        Hits   = $hits
+        Misses = $misses
+        Length = $text.Length
+    }
+}
+
 # ============================================================
 # 特性清单（SYNTAX 36 文档 → 特性）
 # ============================================================
@@ -209,6 +232,27 @@ $features = @(
     @{ n = '生成器'; d = '14'; pos = '15_generators\yield_demo.lz' },
     @{ n = '测试框架'; d = '15'; pos = '16_testing\test_suite.lz' }
 )
+
+# ---------- 正例内容断言表（P3，单一真源）----------
+# 每行 = { tag 特性名; pos DEMO 相对路径; pat 生成 .rs 里必须全部命中的正则 }。
+# 断言口径：rc == 0 且 .rs 是本次编译产物 且 全部 pat 命中；任一不满足 = 「正例内容不符」。
+# 只收「生成物里有稳定构造」的特性；不合适的在 $script:RcOnlyNotes 里显式标注「仅 rc 判定」。
+# 新增/调整断言只改这张表（以及必要的 RcOnlyNotes 注释），不要改判定函数。
+$script:ContentChecks = @(
+    @{ tag = 'struct';     pos = '07_data_structures\struct.lz';      pat = @('pub struct\s+Point\b', 'pub struct\s+Pair<T>') },
+    @{ tag = 'enum';       pos = '01_basics\enums.lz';                pat = @('pub enum\s+Color\b', 'pub enum\s+Shape\b') },
+    @{ tag = 'match';      pos = '06_control_flow\match.lz';          pat = @('\bmatch\s+\w+') },
+    @{ tag = 'closure';    pos = '01_basics\functions_advanced.lz';   pat = @('Arc<dyn Fn\(i64\) -> i64', 'Arc::new\(move ') },
+    @{ tag = 'trait/impl'; pos = '07_data_structures\trait_impl.lz';  pat = @('pub trait\s+Drawable\b', 'impl\s+Drawable\s+for\s+Rectangle\b') }
+)
+
+# 显式标注「仅 rc 判定」的特性：这些正例不适合做内容断言，报告中单列原因。
+# 其余没进 $ContentChecks 的特性同样「仅 rc 判定」，报告里按「未配置内容断言」汇总。
+$script:RcOnlyNotes = @{
+    '词法-缩进块'     = '缩进是解析层语法，生成物里没有可断言的独立构造'
+    '词法-字符串/转义' = '字符串字面量被直接内联，生成物形态随内容变化，无稳定构造'
+    '词法-数字字面量'  = '数字字面量被直接内联，生成物形态随数值变化，无稳定构造'
+}
 
 $psVersion = $PSVersionTable.PSVersion.ToString()
 
@@ -326,6 +370,31 @@ if ($SelfTest) {
         Write-Host ('    [{0}] {1}：期望可读={2} 实得={3}' -f $mark, $c.name, $c.want, $got)
     }
 
+    # --- 证据 4：正例内容断言既能判真也能判假（防「恒真」）---
+    $cHitFile = [System.IO.Path]::GetTempFileName()
+    $cMissFile = [System.IO.Path]::GetTempFileName()
+    $cEmptyFile = [System.IO.Path]::GetTempFileName()
+    $cHitOk = $false; $cMissOk = $false; $cEmptyOk = $false
+    try {
+        Set-Content -LiteralPath $cHitFile -Value "pub struct Point {`n    x: i64,`n}" -Encoding UTF8
+        # 应有构造 → 必须通过
+        $cHitOk = (Test-ContentVerdict -RsPath $cHitFile -Patterns @('pub struct\s+Point\b')).Pass
+        # 缺构造 → 必须不通过（样本里只有 Point，没有 Color 枚举）
+        $cMissOk = -not (Test-ContentVerdict -RsPath $cMissFile -Patterns @('^pub enum\s+Color\b')).Pass
+        # 空文件 → 必须不通过
+        $cEmptyOk = -not (Test-ContentVerdict -RsPath $cEmptyFile -Patterns @('pub')).Pass
+    }
+    finally {
+        Remove-Item -LiteralPath $cHitFile, $cMissFile, $cEmptyFile -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host ''
+    Write-Host '[4] 正例内容断言（rc 通过 ≠ 生成物含该特性）'
+    Write-Host ("    样本含 pub struct Point，断言通过        = {0}   ← 必须 True" -f $cHitOk)
+    Write-Host ("    空文件/缺构造样本，断言不通过            = {0}   ← 必须 True（{1}）" -f ($cMissOk -and $cEmptyOk), '防恒真')
+    if (-not $cHitOk) { $fails += '内容断言在应有构造的样本上未命中（判据失效）' }
+    if (-not $cMissOk) { $fails += '内容断言在缺构造的样本上仍判通过（恒真）' }
+    if (-not $cEmptyOk) { $fails += '内容断言在空文件上判通过（恒真）' }
+
     Write-Host ''
     if ($fails.Count -eq 0) {
         Write-Host '===== -SelfTest: 全部通过 =====' -ForegroundColor Green
@@ -370,6 +439,68 @@ foreach ($f in $features) {
     }
 }
 $totalPos = $PASS_POS + $FAIL_POS
+
+# ============================================================
+# 正例内容断言（P3）：rc=0 只证明「编译没失败」，不证明「生成物里还有这个特性」
+# ============================================================
+Write-Host ''
+Write-Host '===== 正例内容断言（生成物构造）====='
+$PASS_CONTENT = 0; $FAIL_CONTENT = 0
+$contentFailList = @()
+$contentRows = New-Object System.Collections.Generic.List[string]
+$contentRows.Add('| 特性 | 正例文件 | rc | 预期构造（正则，全部命中） | 命中 | 结论 |')
+$contentRows.Add('|---|---|---|---|---|---|')
+
+foreach ($chk in $script:ContentChecks) {
+    $p = Join-Path $ROOT ('DEMO\' + $chk.pos)
+    $rs = [System.IO.Path]::ChangeExtension($p, '.rs')
+    $patText = ($chk.pat -join ' ∧ ')
+    if (-not (Test-Path -LiteralPath $p)) {
+        $FAIL_CONTENT++
+        $contentFailList += ('{0} — 无正例文件 DEMO\{1}' -f $chk.tag, $chk.pos)
+        Write-Host ('[FAIL] {0} — 无正例文件 DEMO\{1}' -f $chk.tag, $chk.pos)
+        $contentRows.Add(('| {0} | {1} | - | {2} | 0/{3} | 正例文件不存在 |' -f $chk.tag, $chk.pos, (Escape-Cell $patText), $chk.pat.Count))
+        continue
+    }
+    # 记录编译前 .rs 的 mtime：编译后必须变新，否则说明看的不是本次产物。
+    $stale = $null
+    if (Test-Path -LiteralPath $rs) { $stale = (Get-Item -LiteralPath $rs).LastWriteTimeUtc }
+    $cap = Invoke-LzCapture -Exe $LZ -ArgList @($p, '--std-dir', $STD) -WorkDir $ROOT
+    $fresh = $false
+    if (Test-Path -LiteralPath $rs) {
+        $fresh = $true
+        if ($null -ne $stale) {
+            $fresh = ((Get-Item -LiteralPath $rs).LastWriteTimeUtc -gt $stale)
+        }
+    }
+    $hitCount = 0
+    $reason = ''
+    $verdict = $false
+    if ($cap.Rc -ne 0) {
+        $reason = ('rc={0}（正例编译失败）' -f $cap.Rc)
+    }
+    elseif (-not $fresh) {
+        $reason = '生成 .rs 缺失或不是本次编译产物'
+    }
+    else {
+        $cv = Test-ContentVerdict -RsPath $rs -Patterns $chk.pat
+        $hitCount = $cv.Hits.Count
+        if ($cv.Pass) { $verdict = $true }
+        else { $reason = ('正例内容不符，缺构造：{0}' -f (Format-Short -Text ($cv.Misses -join ' ∧ ') -Max 100)) }
+    }
+    if ($verdict) {
+        $PASS_CONTENT++
+        Write-Host ('[PASS] {0} — 命中 {1}/{2} 个预期构造' -f $chk.tag, $hitCount, $chk.pat.Count)
+        $contentRows.Add(('| {0} | {1} | 0 | {2} | {3}/{4} | PASS |' -f $chk.tag, $chk.pos, (Escape-Cell $patText), $hitCount, $chk.pat.Count))
+    }
+    else {
+        $FAIL_CONTENT++
+        $contentFailList += ('{0}（{1}）— {2}' -f $chk.tag, $chk.pos, $reason)
+        Write-Host ('[FAIL] {0} — {1}' -f $chk.tag, $reason)
+        $contentRows.Add(('| {0} | {1} | {2} | {3} | {4}/{5} | 正例内容不符：{6} |' -f $chk.tag, $chk.pos, $cap.Rc, (Escape-Cell $patText), $hitCount, $chk.pat.Count, (Escape-Cell $reason)))
+    }
+}
+$totalContent = $PASS_CONTENT + $FAIL_CONTENT
 
 # ============================================================
 # 反例（探针应失败）
@@ -430,6 +561,9 @@ $L.Add('- 采集：子进程 stdout、stderr **分别重定向到独立临时文
 $L.Add('  `Get-Content -Raw -Encoding UTF8` 读回，临时文件用完即删。这样子进程 stderr 不会被')
 $L.Add('  PS 5.1 逐行包成 ErrorRecord（`FullyQualifiedErrorId : NativeCommandError`），也不会被 GBK 解码吞字节。')
 $L.Add('- 正例判据：`rc == 0`。')
+$L.Add('- 正例内容断言（P3）：对 5 个代表性特性，除 `rc == 0` 外还要求本次编译生成的 `.rs`')
+$L.Add('  含预期构造（正则表见脚本 `$script:ContentChecks`）；任一不命中记「正例内容不符」，')
+$L.Add('  并计入退出码。未覆盖的特性仍「仅 rc 判定」，清单见「仅 rc 判定清单」。')
 $L.Add('- 反例判据：`rc != 0` **且** 输出含「行首诊断」，并排除噪声：')
 $L.Add('  - 行首诊断（正则）：`^(Parse error|IR build error|Macro definition error|Semantic error|Lexer error|Type error|Codegen error|Link error|Compile error|Error|error[E\d]+)`')
 $L.Add('  - 排除：`NativeCommandError`、`FullyQualifiedErrorId`、`LZ LINK RECIPE`、`Generated` 路径回显、`Bridge registry`、`提示：`、`warning/note/info`。')
@@ -444,6 +578,8 @@ $L.Add(('- 正例通过：{0} / {1}（分母 = 非 SKIP 特性数）' -f $PASS_P
 $L.Add(('- 失败：{0}' -f $FAIL_POS))
 $L.Add(('- SKIP：{0} 条（无正例文件，显式列在第 1 张表末尾与下方清单）' -f $SKIP_POS))
 $L.Add(('- 正例中 rc=0 但 stderr 非空：{0} 条 —— v1 旧判据会把它们全判成「诊断可读」' -f $POS_STDERR))
+$L.Add(('- 内容断言（P3）：{0} / {1} 通过 —— rc=0 且生成 .rs 含预期构造' -f $PASS_CONTENT, $totalContent))
+$L.Add(('- 内容断言失败：{0}{1}' -f $FAIL_CONTENT, $(if ($contentFailList.Count -eq 0) { '' } else { '（' + ($contentFailList -join '; ') + '）' })))
 $L.Add(('- 失败清单：{0}' -f $(if ($posFailList.Count -eq 0) { '无' } else { $posFailList -join '; ' })))
 $L.Add('')
 $L.Add('### 正例明细')
@@ -465,6 +601,35 @@ else {
         }
     }
 }
+$L.Add('')
+$L.Add('### 正例内容断言（P3：rc 通过 ≠ 生成物含该特性）')
+$L.Add('')
+$L.Add('- 断言口径：`rc == 0` **且** `.rs` 是本次编译产物（mtime 变新）**且** 该特性全部预期正则命中；')
+$L.Add('  任一不满足记「正例内容不符」并计入退出码。')
+$L.Add(('- 覆盖：{0} 条（{1}）' -f $totalContent, (($script:ContentChecks | ForEach-Object { $_.tag }) -join ' / ')))
+$L.Add(('- 通过：{0} / {1}' -f $PASS_CONTENT, $totalContent))
+$L.Add(('- 失败：{0}{1}' -f $FAIL_CONTENT, $(if ($contentFailList.Count -eq 0) { '（无）' } else { '（' + ($contentFailList -join '; ') + '）' })))
+$L.Add('')
+foreach ($r in $contentRows) { $L.Add($r) }
+$L.Add('')
+$contentPos = @{}
+foreach ($chk in $script:ContentChecks) { $contentPos[$chk.pos] = $true }
+$rcOnly = @($features | Where-Object { -not $contentPos.ContainsKey($_.pos) })
+$rcOnlyExplicit = @($rcOnly | Where-Object { $script:RcOnlyNotes.ContainsKey($_.n) })
+$rcOnlyPlain = @($rcOnly | Where-Object { -not $script:RcOnlyNotes.ContainsKey($_.n) })
+$L.Add('### 仅 rc 判定清单（正例只判 rc，不保证语义正确）')
+$L.Add('')
+$L.Add('- 显式标注（该特性的正例不适合内容断言）：')
+if ($rcOnlyExplicit.Count -eq 0) {
+    $L.Add('  - 无')
+}
+else {
+    foreach ($f in $rcOnlyExplicit) {
+        $L.Add(('  - {0} — {1}' -f $f.n, $script:RcOnlyNotes[$f.n]))
+    }
+}
+$L.Add(('- 其余未配置内容断言（可继续扩 `$script:ContentChecks`）：{0} 条{1}' -f $rcOnlyPlain.Count, $(if ($rcOnlyPlain.Count -eq 0) { '' } else { ' — ' + (($rcOnlyPlain | ForEach-Object { $_.n }) -join '、') })))
+$L.Add('- 内容断言是生成 `.rs` 的**正则文本匹配**，只证明「构造还在」，不是语义等价性证明。')
 $L.Add('')
 $L.Add('## 反例（探针应失败）')
 $L.Add('')
@@ -490,7 +655,8 @@ if ($knownRaise.Count -gt 0) {
 }
 $L.Add('- 未修的次要缺陷：')
 $L.Add('  - 反例探针与特性清单未建立一一映射，因此“特性级反例覆盖”仍是粗估，不是精确矩阵。')
-$L.Add('  - 正例判定只看 rc，不校验生成物内容（如 .rs 是否含预期构造）；正例“通过”不等于语义正确。')
+$L.Add('  - 正例内容断言只覆盖 5 个代表性特性（struct/enum/match/closure/trait/impl），其余特性仍「仅 rc 判定」；')
+$L.Add('    且断言是生成 `.rs` 的正则文本匹配，不是语义等价性证明。')
 $L.Add('  - 脚本仍按目录约定命名探针（neg_*.lz），命名不规范的新探针不会被收集。')
 
 $reportText = ($L -join "`n")
@@ -498,8 +664,8 @@ Set-Content -LiteralPath $REPORT -Value $reportText -Encoding UTF8
 
 Write-Host ''
 Write-Host '=========================================='
-Write-Host ('正例: {0}/{1}（SKIP {2}）  反例: {3}/{4}' -f $PASS_POS, $totalPos, $SKIP_POS, $PASS_NEG, $totalNeg)
+Write-Host ('正例: {0}/{1}（SKIP {2}）  内容断言: {3}/{4}  反例: {5}/{6}' -f $PASS_POS, $totalPos, $SKIP_POS, $PASS_CONTENT, $totalContent, $PASS_NEG, $totalNeg)
 Write-Host ('报告: {0}' -f ($REPORT.Substring($ROOT.Length).TrimStart('\')))
 Write-Host '=========================================='
 
-if ($FAIL_POS -eq 0 -and $FAIL_NEG -eq 0) { exit 0 } else { exit 1 }
+if ($FAIL_POS -eq 0 -and $FAIL_NEG -eq 0 -and $FAIL_CONTENT -eq 0) { exit 0 } else { exit 1 }

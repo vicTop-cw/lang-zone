@@ -1,7 +1,7 @@
 ﻿# lz 语法特性测试矩阵报告
 
-- 日期：2026-10-29 17:18:35
-- commit：0ddb6ca
+- 日期：2026-10-29 19:46:58
+- commit：f4a7ec3
 - 二进制：target\debug\lang-zone.exe（86655046 字节，2026-10-28 04:48）
 - 测试脚本：div-tools\syntax_matrix.ps1（判据 v2，本报告由脚本生成，勿手改）
 - shell：5.1.19041.1682（powershell.exe；本机无 pwsh）
@@ -12,6 +12,9 @@
   `Get-Content -Raw -Encoding UTF8` 读回，临时文件用完即删。这样子进程 stderr 不会被
   PS 5.1 逐行包成 ErrorRecord（`FullyQualifiedErrorId : NativeCommandError`），也不会被 GBK 解码吞字节。
 - 正例判据：`rc == 0`。
+- 正例内容断言（P3）：对 5 个代表性特性，除 `rc == 0` 外还要求本次编译生成的 `.rs`
+  含预期构造（正则表见脚本 `$script:ContentChecks`）；任一不命中记「正例内容不符」，
+  并计入退出码。未覆盖的特性仍「仅 rc 判定」，清单见「仅 rc 判定清单」。
 - 反例判据：`rc != 0` **且** 输出含「行首诊断」，并排除噪声：
   - 行首诊断（正则）：`^(Parse error|IR build error|Macro definition error|Semantic error|Lexer error|Type error|Codegen error|Link error|Compile error|Error|error[E\d]+)`
   - 排除：`NativeCommandError`、`FullyQualifiedErrorId`、`LZ LINK RECIPE`、`Generated` 路径回显、`Bridge registry`、`提示：`、`warning/note/info`。
@@ -26,6 +29,8 @@
 - 失败：0
 - SKIP：2 条（无正例文件，显式列在第 1 张表末尾与下方清单）
 - 正例中 rc=0 但 stderr 非空：38 条 —— v1 旧判据会把它们全判成「诊断可读」
+- 内容断言（P3）：5 / 5 通过 —— rc=0 且生成 .rs 含预期构造
+- 内容断言失败：0
 - 失败清单：无
 
 ### 正例明细
@@ -80,6 +85,31 @@
 | duck 关系约束 | 07_data_structures\duck_typing.lz | DEMO\07_data_structures\duck_typing.lz 不存在，无正例可编译 |
 | 可变参数 | 04_functions\varargs.lz | DEMO\04_functions\varargs.lz 不存在，无正例可编译 |
 
+### 正例内容断言（P3：rc 通过 ≠ 生成物含该特性）
+
+- 断言口径：`rc == 0` **且** `.rs` 是本次编译产物（mtime 变新）**且** 该特性全部预期正则命中；
+  任一不满足记「正例内容不符」并计入退出码。
+- 覆盖：5 条（struct / enum / match / closure / trait/impl）
+- 通过：5 / 5
+- 失败：0（无）
+
+| 特性 | 正例文件 | rc | 预期构造（正则，全部命中） | 命中 | 结论 |
+|---|---|---|---|---|---|
+| struct | 07_data_structures\struct.lz | 0 | pub struct\s+Point\b ∧ pub struct\s+Pair<T> | 2/2 | PASS |
+| enum | 01_basics\enums.lz | 0 | pub enum\s+Color\b ∧ pub enum\s+Shape\b | 2/2 | PASS |
+| match | 06_control_flow\match.lz | 0 | \bmatch\s+\w+ | 1/1 | PASS |
+| closure | 01_basics\functions_advanced.lz | 0 | Arc<dyn Fn\(i64\) -> i64 ∧ Arc::new\(move  | 2/2 | PASS |
+| trait/impl | 07_data_structures\trait_impl.lz | 0 | pub trait\s+Drawable\b ∧ impl\s+Drawable\s+for\s+Rectangle\b | 2/2 | PASS |
+
+### 仅 rc 判定清单（正例只判 rc，不保证语义正确）
+
+- 显式标注（该特性的正例不适合内容断言）：
+  - 词法-缩进块 — 缩进是解析层语法，生成物里没有可断言的独立构造
+  - 词法-字符串/转义 — 字符串字面量被直接内联，生成物形态随内容变化，无稳定构造
+  - 词法-数字字面量 — 数字字面量被直接内联，生成物形态随数值变化，无稳定构造
+- 其余未配置内容断言（可继续扩 `$script:ContentChecks`）：33 条 — 类型-基础类型、类型-容器、类型-类型标注、duck 关系约束、变量-不可变绑定、变量-可变绑定、变量-引用绑定、变量-海象、函数-基础、函数-泛型、函数-复合、检查站 checker、可变参数、表达式-管道、表达式-三元、表达式-推导式、控制流-if/elif、控制流-循环、控制流-break/continue、控制流-guard、block 命名块、魔法方法、自引用 Self、模块与导入、宏、comptime、错误处理、并发异步、构建块、操作符、指针与引用、生成器、测试框架
+- 内容断言是生成 `.rs` 的**正则文本匹配**，只证明「构造还在」，不是语义等价性证明。
+
 ## 反例（探针应失败）
 
 - 反例探针数：25
@@ -124,5 +154,6 @@
 - 无反例探针的特性：40 - 25 = 15 个（粗估：探针未与特性一一映射，只作覆盖差提示）
 - 未修的次要缺陷：
   - 反例探针与特性清单未建立一一映射，因此“特性级反例覆盖”仍是粗估，不是精确矩阵。
-  - 正例判定只看 rc，不校验生成物内容（如 .rs 是否含预期构造）；正例“通过”不等于语义正确。
+  - 正例内容断言只覆盖 5 个代表性特性（struct/enum/match/closure/trait/impl），其余特性仍「仅 rc 判定」；
+    且断言是生成 `.rs` 的正则文本匹配，不是语义等价性证明。
   - 脚本仍按目录约定命名探针（neg_*.lz），命名不规范的新探针不会被收集。

@@ -1,10 +1,11 @@
 // ============================================================
 // LZ Error Handling — panic / raise / try / catch / finally / ?
 // Spec: SYNTAX/09-错误处理.md
-// Covers: panic (built-in), raise/raises (raise REQUIRES raises
-// declaration), try/catch/finally, try as expression, multiple
-// catch branches, try/catch/else, custom exception enums (enum),
-// ? propagation, error boundary cases.
+// Covers: panic (built-in), raise/raises (string-literal raise is
+// exempt from the raises declaration — SYNTAX/09 §2.2.1; TYPED raise
+// still REQUIRES raises), try/catch/finally, try as expression,
+// multiple catch branches, try/catch/else, custom exception enums
+// (enum), ? propagation, error boundary cases.
 // ============================================================
 
 // =============================================================
@@ -23,17 +24,21 @@ def divide(a: int, b: int) -> int =
 // =============================================================
 // 2. raise / raises 异常
 // =============================================================
-// raise 抛出异常。如果函数体中有 raise，必须在函数签名中
-// 声明 raises 类型（否则编译错误）。
+// raise 抛出异常，分两种形态（SYNTAX/09 §2.2 / §2.2.1）：
+//   • 字符串字面量 raise（raise "msg" / raise f"..."）：消息式错误，
+//     可免 raises 声明 —— 本文件就是这种正例（能编译、rc=0）；
+//   • 类型化 raise（raise ValueError("oops")）：必须声明 raises，
+//     否则编译错误（反例见下方第 9 节）。
 
 def checked_divide(a: int, b: int) -> int raises str =
     if b == 0:
         raise "division by zero"   // raise with string
     a / b
 
-// ❌ 编译错误：函数体有 raise 但未声明 raises
+// ❌ 编译错误：类型化 raise 未声明 raises
+//    （字符串字面量 raise 不在此列，见 §2.2.1）
 // def bad() -> int =
-//     raise "oops"
+//     raise ValueError("oops")   // error: missing raises clause
 
 // ✅ raises 支持多种异常类型联合
 def process_value(x: int) -> int raises str =
@@ -193,9 +198,9 @@ def read_and_parse(path: str) -> int raises FileError =
 // =============================================================
 // 9. 错误语法边界
 // =============================================================
-// ❌ raise 未声明 raises
+// ❌ 类型化 raise 未声明 raises（字面量 raise 免声明，见 §2.2.1）
 // def bad() -> int =
-//     raise "oops"             // error: missing raises clause
+//     raise ValueError("oops") // error: missing raises clause
 
 // ❌ panic 缺少消息
 // panic()                      // error: panic needs argument
