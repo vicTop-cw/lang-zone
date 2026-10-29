@@ -433,6 +433,22 @@ pub struct CodeGen {
     /// 产物命名用的源文件路径（由 CLI 显式注入）。None ⇒ 沿用 IrModule 的 file_path/name，
     /// 故既有 `main_tnr` 一类命名不受影响；设过之后 `calc.lz` 才叫得出 `python_calc`。
     embed_stem: Option<String>,
+    /// T0r32：dedup 产物的**短名主干**（产物全名 → `<语言>_<源文件主干>`）。
+    ///
+    /// 为什么需要：`dedup::artifact_name` 给子目录模块的产物名补了
+    /// `__<目录slug>_<路径短哈希>` 后缀（`python_a__src_4d744cd7`），于是 `__lz_embed`
+    /// 里真正的包装函数叫 `python_a__src_4d744cd7_add`；而 LZ 作者按「模块 + 方法」
+    /// 写的是短名 `python_a_add` —— 短名在 LZ 侧看不见定义 ⇒ 掉进 unknown_extern
+    /// 兜底桩（`-> i64 { i64::MAX }`），桩是 crate 根的真定义，**遮住** `use
+    /// __lz_embed::*` 的 glob 导入 ⇒ 静默返回垃圾值（不是报错）。
+    ///
+    /// 这里只记「这次编译里哪个产物还能被哪个短名指到」，不去动 `src/embed` 的命名
+    /// 权威（全名/目录/MANIFEST 一字不变）：短名是 codegen 在 `__lz_embed` 里补的一条
+    /// `pub use … as …` 别名，外加兜底桩让位。**别名不参与产物命名**。
+    ///
+    /// 只收「短名 ≠ 全名 且 短名是合法 Rust 标识符」的条目 —— 主干含 `-`/中文等
+    /// 字符时不做别名（保持既有行为，不在 codegen 里另造一条命名净化规则）。
+    embed_short_bases: std::collections::HashMap<String, String>,
     /// 方向 E：`[]` 字面量 + 紧随其后的纯 push 循环 → 预分配容量（Rust 表达式文本）。
     /// 由 gen_block_inner 的相邻语句前瞻写入，空列表字面量发射处 `take` 一次。
     /// gen_expr 走 `&self`（内部 RefCell 承担可变状态），故用 RefCell 而非裸字段。
@@ -588,6 +604,7 @@ impl CodeGen {
             embed_modules: std::collections::HashSet::new(),
             embed_targets: Vec::new(),
             embed_stem: None,
+            embed_short_bases: std::collections::HashMap::new(),
             // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
             vec_cap_hint: std::cell::RefCell::new(None),
             owned_locals: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -616,6 +633,105 @@ impl CodeGen {
     /// Source 档（tnr/rust）的既有命名规则一字不动 —— 它们仍用 IrModule 的 file_path/name。
     pub fn set_embed_stem(&mut self, path: &str) {
         self.embed_stem = Some(path.to_string());
+    }
+
+    /// LZ 侧能看见的 embed 导出名 → 该名字的返回类型（None = 无可用类型信息）。
+    ///
+    /// 两类名字：**产物全名**（`<artifact>_<method>`，命名权威在 `embed::dedup`）与
+    /// **短名**（`<语言>_<主干>_<method>`，T0r32 由 `__lz_embed` 里的别名提供）。
+    /// 两处消费：① 从 unknown_extern 兜底表里摘掉（否则桩会遮住垫片/别名）；
+    /// ② 登记 fn_returns，让 print 对 str 返回值选 Display 而不是 Debug。
+    ///
+    /// 短名一律登记（哪怕因歧义/撞名最终没发别名）：不发别名时应当**编译期 E0425**
+    /// 报错，而不是退回一个会静默返回 i64::MAX 的兜底桩。
+    fn embed_export_names(&self) -> Vec<(String, Option<IrType>)> {
+        let mut out: Vec<(String, Option<IrType>)> = Vec::new();
+        for t in &self.embed_targets {
+            let short_base = self.embed_short_bases.get(&t.artifact);
+            for m in t.callable_methods() {
+                let ty = match m.ret.as_deref() {
+                    Some("int") => Some(IrType::Int),
+                    Some("float") => Some(IrType::F64),
+                    Some("bool") => Some(IrType::Bool),
+                    Some("str") => Some(IrType::Str),
+                    _ => None,
+                };
+                out.push((format!("{}_{}", t.artifact, m.name), ty.clone()));
+                if let Some(base) = short_base {
+                    out.push((format!("{}_{}", base, m.name), ty));
+                }
+            }
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                out.push((format!("{}_run", t.artifact), Some(IrType::Str)));
+                if let Some(base) = short_base {
+                    out.push((format!("{}_run", base), Some(IrType::Str)));
+                }
+            }
+        }
+        out
+    }
+
+    /// `pub mod __lz_embed { … }` 末尾追加的**短名别名**行（T0r32）。
+    ///
+    /// 语义：`python_a_add` 是 `python_a__src_4d744cd7_add` 的别名，两者指同一个
+    /// 包装函数（同一份产物、同一条 argv 协议）。**不产生第二个产物、不改产物名**，
+    /// 只是让 LZ 作者的「模块 + 方法」写法能指到 dedup 之后的真包装。
+    ///
+    /// 行为边界（宁可编译期报错，不静默挑一个）：
+    ///   · 短名主干在本次编译里出现多次（两个 `a.lz` 分处不同目录）⇒ 有歧义，不发别名；
+    ///   · 短名与模块内已导出的全名撞车 ⇒ 不发别名（全名优先，别把人家的名字盖掉）；
+    ///   · 短名已被用户顶层定义/类型名占用 ⇒ 不发别名（用户自有名字优先）。
+    fn embed_short_alias_text(&self) -> String {
+        if self.embed_short_bases.is_empty() {
+            return String::new();
+        }
+        // 模块内已存在的导出名：别名不许与它们同名（E0255 the name is defined multiple times）
+        let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut short_uses: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for t in &self.embed_targets {
+            for m in t.callable_methods() {
+                taken.insert(format!("{}_{}", t.artifact, m.name));
+            }
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                taken.insert(format!("{}_run", t.artifact));
+            }
+            if let Some(base) = self.embed_short_bases.get(&t.artifact) {
+                *short_uses.entry(base.as_str()).or_insert(0) += 1;
+            }
+        }
+
+        let mut out = String::new();
+        for t in &self.embed_targets {
+            let Some(base) = self.embed_short_bases.get(&t.artifact) else {
+                continue;
+            };
+            if short_uses.get(base.as_str()).copied().unwrap_or(0) != 1 {
+                continue; // 短名有歧义：不发别名（调用点会 E0425，而不是静默错值）
+            }
+            for m in t.callable_methods() {
+                let full = format!("{}_{}", t.artifact, m.name);
+                let short = format!("{}_{}", base, m.name);
+                if taken.contains(&short)
+                    || self.top_level_fns.contains(&short)
+                    || self.known_types.contains(&short)
+                {
+                    continue; // 用户/全名优先：绝不把已有名字盖掉
+                }
+                out.push_str(&format!("pub use self::{} as {};\n", full, short));
+            }
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                let full = format!("{}_run", t.artifact);
+                let short = format!("{}_run", base);
+                if !taken.contains(&short)
+                    && !self.top_level_fns.contains(&short)
+                    && !self.known_types.contains(&short)
+                {
+                    out.push_str(&format!("pub use self::{} as {};\n", full, short));
+                }
+            }
+        }
+        out
     }
 
     pub fn generate_with_bridge(        &mut self,
@@ -681,6 +797,7 @@ impl CodeGen {
         // P1：收集 embed 生成的模块名，供 gen_use_stmt 自动路由
         self.embed_modules.clear();
         self.embed_targets.clear();
+        self.embed_short_bases.clear();
         {
             let mut ec = crate::ir::embed_collector::EmbedCollector::new();
             ec.collect(module);
@@ -739,6 +856,15 @@ impl CodeGen {
                 if let Some(mut t) = crate::embed::resolve(lang, module_name, acc) {
                     let stem = crate::embed::base_stem(module_name);
                     t.dir_rel = crate::embed::artifact::dir_rel(&stem, &t.artifact);
+                    // T0r32：登记短名主干（= 产物全名去掉 dedup 后缀的那一段）。
+                    // 产物根下的模块 short == artifact（`python_calc`），无需别名也不登记。
+                    let short_base = format!("{}_{}", t.lang, stem);
+                    if short_base != t.artifact
+                        && crate::embed::dedup::artifact_is_identifier_safe(&short_base)
+                    {
+                        self.embed_short_bases
+                            .insert(t.artifact.clone(), short_base);
+                    }
                     self.embed_targets.push(t);
                 }
             }
@@ -770,28 +896,16 @@ impl CodeGen {
         // 上面的扫描会把 `python_calc_add` 当成"未知外部函数"再兜底生成一个 `-> i64 { i64::MAX }`
         // 同名桩（E0255 重定义 + 静默返回垃圾值）。这里把这些名字从兜底表里摘掉，
         // 并把返回类型登记进 fn_returns，供 print 正确选 Display/Debug。
-        if !self.embed_targets.is_empty() {
-            for t in &self.embed_targets {
-                for m in t.callable_methods() {
-                    let w = format!("{}_{}", t.artifact, m.name);
-                    self.unknown_extern_fns.remove(w.as_str());
-                    let ty = match m.ret.as_deref() {
-                        Some("int") => Some(IrType::Int),
-                        Some("float") => Some(IrType::F64),
-                        Some("bool") => Some(IrType::Bool),
-                        Some("str") => Some(IrType::Str),
-                        _ => None,
-                    };
-                    if let Some(ty) = ty {
-                        self.fn_returns.insert(w, ty);
-                    }
-                }
-                if t.kind == crate::embed::ArtifactKind::Executable {
-                    self.unknown_extern_fns
-                        .remove(format!("{}_run", t.artifact).as_str());
-                    self.fn_returns
-                        .insert(format!("{}_run", t.artifact), IrType::Str);
-                }
+        //
+        // T0r32：**短名同样必须摘**。dedup 之后包装函数全名是 `python_a__src_4d744cd7_add`，
+        // 作者写的是短名 `python_a_add` —— 只摘全名等于没修：短名仍留在兜底表里，而桩是
+        // crate 根的本地定义，会**遮住** `use __lz_embed::*` 带来的同名别名（Rust 里本地
+        // 定义优先于 glob 导入）⇒ 又一次静默 i64::MAX。别名由 `embed_short_alias_text`
+        // 在 `__lz_embed` 内发射，两处必须是同一份名单（同一个 helper 供名）。
+        for (name, ty) in self.embed_export_names() {
+            self.unknown_extern_fns.remove(name.as_str());
+            if let Some(ty) = ty {
+                self.fn_returns.insert(name, ty);
             }
         }
 
@@ -1425,8 +1539,13 @@ impl CodeGen {
         // 故它们的既有产物逐字不变。
         if !self.embed_targets.is_empty() {
             let text = crate::embed::shim::module_text(&self.embed_targets);
+            // T0r32：dedup 产物的短名别名（`python_a_add` → `python_a__src_…_add`）。
+            // 与垫片同处一个模块 ⇒ 同一份 `use __lz_embed::*;` 就能把两种写法一起带进来；
+            // 产物名/目录/MANIFEST 一字不动（命名权威仍在 `embed::dedup::artifact_name`）。
+            let aliases = self.embed_short_alias_text();
             self.buf.push_str("pub mod __lz_embed {\n");
             self.buf.push_str(&text);
+            self.buf.push_str(&aliases);
             self.buf.push_str("}\n");
             self.buf.push_str("use __lz_embed::*;\n");
         }
