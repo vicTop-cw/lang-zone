@@ -3554,3 +3554,44 @@ commit：3f8512e（重映射自 未记）
 - commit: e22c897
 - 回归: tests/rs_lz_families.rs 7/7（typed main 族）
 状态：FIXED
+## BUG-495 [2026-10-29T14:00:00+08:00] [high] rs-lz 旁路表示不了 embed（Item 枚举无变体，E0599）
+- summary: rs-lz 旁路对含 `#[embed(..)]` 的源文件生成 E0599（no variant named `EmbedBlock`）：旁路走 `src/ir/lz_codegen_lib.lz` 的 `Item` 枚举，旧 schema 只带 `(lang, src_len)`，内嵌源码文本根本不进数据面，故 embed 块的三种形态一条都发不出来。修法：① `src/ir/lz_codegen_lib.lz:188` 的 `Item` 加变体 `EmbedBlock(lang, src, tier, artifact, dir_rel, wrappers)`，`:1539` / `:3600` 补垫片臂，`gen_embed_block`（`:3552`）逐字对齐原生 `src/ir/codegen/decl_gen.rs:264-292`；② 命名与目录不在 LZ 侧猜——`src/ir/lz_codegen.rs:34` 的 `embed_targets_of`（`:76` 用 `crate::embed::artifact::dir_rel`）在 Rust 侧算好 `artifact` / `dir_rel` 再进数据面（`:208` 注释即此口径），`src/main.rs` 传 stem 进 `set_embed_stem` 并落盘；垫片模块内容由 `src/ir/lz_codegen.rs:210` 供名，外壳 `pub mod __lz_embed` 由 `src/ir/codegen/mod.rs:1546` 包。
+- 判据: `cargo test --test embed_stem_parity`（3/3；此前整文件带 `#[ignore]`，本轮摘掉后真跑，产物名/目录与原生逐字节一致）+ `cargo test --test lz_ir_bootstrap`（25/25）。
+- commit: 842c4c5
+- 回归: tests/embed_stem_parity.rs 3/3（parity 摘 ignore）+ tests/lz_ir_bootstrap.rs 25/25
+状态：FIXED
+
+## BUG-496 [2026-10-29T14:01:00+08:00] [high] `def main() = { ... }` 花括号体末 unit 被误判 typed main（E0308）
+- summary: `def main() = { … }`（花括号块体）的返回类型走语句级路径推断，末单元/尾语句被误判成 typed main，函数体返回 `()` 与声明返回 `i64` 不符 → E0308。根因：`src/ir/builder/convert_decl.rs` 的 decl 推断对块体缺「块尾即返回类型」这一层，与闭包体已修口径不一致（`src/ir/builder/capture.rs:541-547` 的 fat-arrow 闭包体取最后语句类型）。修法：同文件新增 `infer_block_body_ret_ty`（`src/ir/builder/convert_decl.rs:461`），在 `:1088` 对 BlockExpr 体按块尾语句定返回类型，与 capture.rs:541-547 全对齐。
+- 判据: `cargo test --test native_variant_qual`（8/8）。
+- commit: c0bad45
+- 回归: tests/native_variant_qual.rs 8/8
+状态：FIXED
+
+## BUG-497 [2026-10-29T14:02:00+08:00] [medium] project 模式同语言 embed 按语言聚合、不按模块分组（多模块产物互相覆盖）
+- summary: project 模式下 embed 产物只按语言聚合、不按模块分组：多模块同语言时后写覆盖前写，产物目录/文件名撞车，最后一个模块赢。根因：模块身份在 `src/project.rs:347` 的 `merge_modules` 处被抹平——合并后的 IR 只剩一份，codegen 无从知道某个 embed 块来自哪个模块。修法：`src/ir/node.rs:396-398` 给嵌入块节点加 `origin: Option<String>` 承载模块身份，`src/project.rs` 的 `merge_modules` 打 origin，codegen 分组键由 `lang` 改为 `(origin, lang)`；单文件路径 `origin=None`，产物与改前 diff 0 行（零回归）。
+- 判据: `cargo test --test embed_project_grouping`（4/4）；单文件产物改前/改后逐字节对比 0 行差异。
+- commit: 5a30312
+- 回归: tests/embed_project_grouping.rs 4/4
+状态：FIXED
+
+## BUG-498 [2026-10-29T14:03:00+08:00] [high] `--project` 与 `lz build` 从不调 emit_embed_artifacts，产物不落盘（运行时必 panic）
+- summary: `--project` 与 `lz build` 两条路径会生成 embed 调用代码却不落盘产物，运行时按 `__lz_embed_dir` 去取不存在的目录 → 必 panic：编译期全绿、跑起来才炸。根因：`emit_embed_artifacts`（`src/main.rs:1439`）只在个别臂里被调用，project 路径与 `lz build` 都没接；且产物根取决于进程 cwd，不看 cwd 就落错地方。修法：`src/cli.rs:588-594`（`cmd_build`，`lz build` 路径）与 `src/main.rs:865-883`（`compile_main` 的 Cli 档臂）新增调用，`:1337` / `:1389` 两处既有调用补 `root_override`；`emit_embed_artifacts` 改 `pub(crate)` 并加 `root_override: Option<&Path>` 参数（`:1454` 处决定产物根，`None` = 进程 cwd）。
+- 判据: `cargo test --test embed_project_emit`（3/3，断言 `build/embed/**` 真落盘）。
+- commit: 7355a86
+- 回归: tests/embed_project_emit.rs 3/3
+状态：FIXED
+
+## BUG-499 [2026-10-29T14:04:00+08:00] [high] embed 短名调用被 i64::MAX 兜底桩遮蔽（静默错值）
+- summary: embed 的短名（`<语言>_<主干>_<method>`）调用落到 codegen 尾部的 i64::MAX 兜底桩上，返回 `i64::MAX` 而**不报错**（静默错值，比报错更难查）。根因：`use __lz_embed::*` 带来的同名别名被 crate 根的本地定义遮住（`src/ir/codegen/mod.rs:902-904` 注释即此机理），而 `src/ir/codegen/mod.rs:647` 的 `embed_export_names()` 只把全名摘出 `unknown_extern`，短名不在同一份名单里，`__lz_embed` 内也就没有对应别名。修法：`embed_export_names()` 同时给出全名与短名，`:905` 起按同一份名单在 `__lz_embed` 末尾补 `pub use <全名> as <短名>;`（`:674`）；短名有歧义时不发别名（宁缺勿错）。
+- 判据: `cargo test --test embed_stub_shadowing`（4/4）。
+- commit: f3d2080
+- 回归: tests/embed_stub_shadowing.rs 4/4
+状态：FIXED
+
+## BUG-500 [2026-10-29T14:05:00+08:00] [medium] [测试质量] 三条负向探针是假阳性负例（测不到名字声称的东西）
+- summary: 类别「测试质量」。`div-tools/syntax_probes/` 下三条负向探针名不副实：文件确实编译失败，但失败在别的地方，测不到名字声称的诊断，于是探针恒绿而挡不住对应回归——`neg_fn_missing_colon.lz` 冒号其实写了、真正缺的是函数体的 `=`（报 `Expected Eq` 而非 `Expected Colon`）；`neg_macro_unclosed.lz`（宏未闭合）与 `neg_trait_missing_fn.lz`（trait 缺函数体）同族。修法：三条各自改成真测目标诊断——只触发该诊断、其余语法合法的最小样本，文件头固写「测什么 / 期望什么错误 / 为什么原来那条测歪了」三段（`git show 8ca306f`：3 文件 +67/−8）。
+- 判据: 三条探针逐条复跑，实际错误必须等于该文件头「期望什么错误」一行所写（如 `neg_fn_missing_colon.lz` 期望 `Parse error: Expected Colon, got Ident("int") at pos 5`）。
+- commit: 8ca306f
+- 回归: 三条负向探针各自真测目标诊断（假阳性负例清零）
+状态：FIXED
