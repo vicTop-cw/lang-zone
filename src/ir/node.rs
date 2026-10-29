@@ -391,6 +391,11 @@ pub enum Item {
         lang: String,
         src: String,
         form: crate::lexer::EmbedForm,
+        /// 块所属**模块**（源文件路径）。`None` = 单文件路径（产物名取 CLI 注入的
+        /// `embed_stem`，历史行为一字不动）；`Some` = `--project` 模式（T0r29），
+        /// codegen 按 `(origin, lang)` 分组，每个模块各出一份产物。
+        #[cfg_attr(feature = "infer", serde(default))]
+        origin: Option<String>,
     },
 }
 

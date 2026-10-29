@@ -1210,11 +1210,18 @@ fn build_ir_inner(
                     }));
                 }
             }
-            AstStmt::EmbedBlock { lang, src, form } => {
+            AstStmt::EmbedBlock {
+                lang,
+                src,
+                form,
+                origin,
+            } => {
                 ir_mod.items.push(Item::EmbedBlock {
                     lang: lang.clone(),
                     src: src.clone(),
                     form: form.clone(),
+                    // T0r29：模块归属原样转发给 codegen（单文件路径恒 None）
+                    origin: origin.clone(),
                 });
             }
             _ => {}

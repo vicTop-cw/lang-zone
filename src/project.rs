@@ -57,6 +57,23 @@ pub struct CompileUnit {
     pub module: ast::Module,
 }
 
+/// 编译单元 → embed 块的模块归属（源文件路径，T0r29）。
+///
+/// 剥掉 Windows `\\?\`（verbatim）前缀：`fs::canonicalize` 在 Windows 上返回
+/// `\\?\F:\...`，不剥的话 `embed::dedup::module_key` 会把它当成「产物根之外的另一个
+/// 文件」（`//?/F:/...` vs 单文件 argv 的 `F:/...`），于是 `--project` 与单文件路径
+/// 对**同一个文件**给出不同的产物名 —— 而「同 stem 输入得同名」正是本组判据。
+fn unit_origin(path: &Path) -> String {
+    let s = path.display().to_string();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{}", rest)
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        s
+    }
+}
+
 /// 项目级编译器：递归加载和合并多模块
 pub struct ProjectCompiler {
     #[allow(dead_code)]
@@ -84,8 +101,7 @@ impl ProjectCompiler {
     }
 
     /// 编译项目入口文件
-    pub fn compile(&mut self, entry_file: &Path) -> Result<ast::Module, String> {
-        // 相对入口文件：base_dir 已是其父目录，直接拼接会双倍路径
+    pub fn compile(&mut self, entry_file: &Path) -> Result<ast::Module, String> {        // 相对入口文件：base_dir 已是其父目录，直接拼接会双倍路径
         // （base_dir.join(entry_file) → DEMO/08_modules/DEMO/08_modules/x.lz）。
         // 若 entry_file 是相对路径且其父目录恰为 base_dir，直接用原路径。
         let entry_abs = if entry_file.is_absolute() {
@@ -328,8 +344,7 @@ impl ProjectCompiler {
     }
 
     /// 合并所有编译单元为一个 AST Module
-    fn merge_modules(&self) -> Result<ast::Module, String> {
-        if self.units.is_empty() {
+    fn merge_modules(&self) -> Result<ast::Module, String> {        if self.units.is_empty() {
             return Err("No modules to compile".into());
         }
 
@@ -362,7 +377,18 @@ impl ProjectCompiler {
             merged.consts.extend(m.consts.clone());
             merged.type_aliases.extend(m.type_aliases.clone());
             merged.tests.extend(m.tests.clone());
-            merged.top_stmts.extend(m.top_stmts.clone());
+            // 模块维度（T0r29）：合并时把 embed 块**归属于哪个 unit** 记下来。
+            // 之前这里是无差别 `extend(m.top_stmts.clone())` ⇒ codegen 只剩 lang 一维，
+            // `a.lz` 与 `b.lz` 的同语言块被拼成一份 `python_<入口主干>` 产物。
+            // 只给 EmbedBlock 打 origin，其余语句原样搬（顺序不变）。
+            let origin = unit_origin(&unit.path);
+            merged.top_stmts.extend(m.top_stmts.iter().map(|stmt| {
+                let mut stmt = stmt.clone();
+                if let ast::Stmt::EmbedBlock { origin: slot, .. } = &mut stmt {
+                    *slot = Some(origin.clone());
+                }
+                stmt
+            }));
             merged.duck_defs.extend(m.duck_defs.clone());
             merged.magic_blocks.extend(m.magic_blocks.clone());
             // imports 去重

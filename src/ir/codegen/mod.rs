@@ -698,28 +698,46 @@ impl CodeGen {
                 .embed_stem
                 .clone()
                 .unwrap_or_else(|| source_name.to_string());
-            let stem = crate::embed::base_stem(&cli_source_name);
-            let mut by_lang: Vec<(String, String)> = Vec::new();
+            // T0r29：分组键是 **(模块, lang)**，不是只有 lang。
+            //   单文件路径：块 origin 为 None ⇒ 模块维退化成 CLI 注入的 embed_stem，
+            //               分组结果与旧行为逐字相同（`embed_stem_parity` 钉着）。
+            //   `--project`：`ProjectCompiler::merge_modules` 已给每个块打上它所属的
+            //               源文件路径 ⇒ `a.lz` 与 `b.lz` 各出一份独立产物，不再被拼成
+            //               一份入口主干命名的 `python_<入口>`。
+            // 命名规则不在这里另写一套：每个分组仍走 `embed::resolve`
+            //    （产物名权威 = `dedup::artifact_name`），目录仍走 `artifact::dir_rel`。
+            let mut by_module: Vec<(String, String, String)> = Vec::new(); // (模块, lang, 累计源码)
             for item in &module.items {
-                if let Item::EmbedBlock { lang, src, .. } = item {
+                if let Item::EmbedBlock {
+                    lang,
+                    src,
+                    origin,
+                    ..
+                } = item
+                {
                     if crate::embed::is_source_lang(lang) {
                         continue;
                     }
-                    let entry = match by_lang.iter().position(|(l, _)| l == lang) {
+                    let module_name = origin.as_deref().unwrap_or(&cli_source_name);
+                    match by_module
+                        .iter()
+                        .position(|(m, l, _)| m == module_name && l == lang)
+                    {
                         Some(pos) => {
-                            by_lang[pos].1.push_str("\n\n");
-                            &mut by_lang[pos].1
+                            by_module[pos].2.push_str("\n\n");
+                            by_module[pos].2.push_str(src);
                         }
-                        None => {
-                            by_lang.push((lang.clone(), String::new()));
-                            &mut by_lang.last_mut().unwrap().1
-                        }
-                    };
-                    entry.push_str(src);
+                        None => by_module.push((
+                            module_name.to_string(),
+                            lang.clone(),
+                            src.clone(),
+                        )),
+                    }
                 }
             }
-            for (lang, acc) in &by_lang {
-                if let Some(mut t) = crate::embed::resolve(lang, &cli_source_name, acc) {
+            for (module_name, lang, acc) in &by_module {
+                if let Some(mut t) = crate::embed::resolve(lang, module_name, acc) {
+                    let stem = crate::embed::base_stem(module_name);
                     t.dir_rel = crate::embed::artifact::dir_rel(&stem, &t.artifact);
                     self.embed_targets.push(t);
                 }

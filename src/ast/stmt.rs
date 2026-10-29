@@ -153,6 +153,11 @@ pub enum Stmt {
         lang: String,
         src: String,
         form: crate::lexer::EmbedForm,
+        /// 块所属**模块**（源文件路径）。parser 不感知文件路径 ⇒ 单文件路径恒 `None`；
+        /// `--project` 模式在 `ProjectCompiler::merge_modules` 合并各 unit 时按
+        /// `unit.path` 打上（T0r29）—— 没有这一维，`a.lz` 与 `b.lz` 的同语言块
+        /// 到 codegen 就分不出归属，只能被拼成一份 `python_<入口主干>` 产物。
+        origin: Option<String>,
     },
 }
 

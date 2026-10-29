@@ -164,7 +164,14 @@ impl Parser {
             // #[embed(lang)] 原样块：lexer 已捕获为 Token::EmbedBlock
             if let Token::EmbedBlock { lang, src, form } = self.peek().clone() {
                 self.advance();
-                top_stmts.push(Stmt::EmbedBlock { lang, src, form });
+                top_stmts.push(Stmt::EmbedBlock {
+                    lang,
+                    src,
+                    form,
+                    // parser 不感知文件路径：模块归属由 project 模式合并时补
+                    // （见 `ast::Stmt::EmbedBlock::origin` 注释）。
+                    origin: None,
+                });
                 self.skip_newlines();
                 continue;
             }
