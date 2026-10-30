@@ -226,10 +226,31 @@ pub fn runnable(t: &EmbedTarget) -> bool {
 mod tests {
     use super::*;
 
+    /// 进程内/跨进程唯一的临时产物根（T0r44）。
+    ///
+    /// 这里以前是 `%TEMP%/lz_embed_artifact_{tag}` 这种**固定路径**，入口还先 `remove_dir_all`：
+    /// 两条车道同时跑 `cargo test --lib` 时，同一个测试二进制的两个实例会互删目录，
+    /// `build_step_actually_builds_when_tool_present` 就会偶发 `couldn't read stub.rs`（单跑即过）。
+    /// 现在名字里拼上 pid + 进程内原子序号 + 纳秒时间戳，两个实例各自拿到自己的目录。
     fn tmp_root(tag: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("lz_embed_artifact_{}", tag));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir().join(format!(
+            "lz_embed_artifact_{}_{}_{}_{}",
+            tag,
+            std::process::id(),
+            seq,
+            nanos
+        ));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
+        // 失败时这行会随 panic 一起打出来，路径可直接去看（成功时被 libtest 捕获）
+        eprintln!("[lz_embed_artifact] tmp_root={}", p.display());
         p
     }
 
