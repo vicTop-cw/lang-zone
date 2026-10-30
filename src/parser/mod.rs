@@ -6,6 +6,7 @@ mod helpers;
 mod parser;
 mod pattern;
 mod stmt;
+mod underscore;
 
 // Re-export 所有公开类型（保持 crate::parser::* 兼容性）
 pub use crate::ast::*;
