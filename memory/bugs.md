@@ -3623,3 +3623,38 @@ commit：3f8512e（重映射自 未记）
 - commit: 见报告（无代码提交；Reports/split-plan-2026-10-29.md）
 - 回归: 不适用（纯盘点，不改代码）；盘点结论对既有测试零影响，`--lib` 469/469、corner 44/44、bootstrap 25/25 在同批提交 6ffcd75 上照旧通过。
 状态：FIXED（盘点完成）
+
+## BUG-505 [2026-10-30T09:15:00+08:00] [medium] 语法矩阵正例只判 rc、不校验产物内容（能跑过≠语义正确）——测试质量类
+- summary: 类别「测试质量」。现象：`div-tools/syntax_matrix.ps1` 正例判据只有 `rc==0` 一维，产物是否本次生成、`.rs` 里到底写出了什么统统不参与判定——「编译过了」被当成「特性写对了」，读不到产物或写出空文件也算过，语义错位的样本照样绿，等价于把「能跑过」当作「语义正确」。根因/结论：判据缺内容层，正例验收无产物内容证据。修法（commit 7d43b42）：正例升级为 rc + 产物本次新鲜度 + **声明式内容断言**——单一入口 `Test-ContentVerdict` + `$script:ContentChecks` 表，先配 struct/enum/match/closure/trait-impl **5 特性**（各一组必命中正则）；口径：rc==0 且 `.rs` 为本次产物且全部正则命中，不满足记 `FAIL_CONTENT` 并计入退出码；**空文件/缺文件判不通过**（堵死「读不到当通过」）；报告新增「正例内容断言」明细表 + 「仅 rc 判定清单」（3 条显式标注 + 33 条未配置汇总）。注：脚本须保持 UTF-8 带 BOM（PS 5.1 否则按 GBK 读，中文串解析报错）。
+- 判据: `powershell -NoProfile -File div-tools\syntax_matrix.ps1 -SelfTest`（[1]-[4] 全过，[4] 即内容断言的反向证据）；全量 `powershell -NoProfile -File div-tools\syntax_matrix.ps1` 读数：正例 38/38（SKIP 2 显式列出）、**内容断言 5/5**、反例 25/25，脚本 exit 0；报告 `tests/syntax-matrix-report.md` 的「正例内容断言」明细表与「仅 rc 判定清单」两段即本条的机器判据。
+- commit: 7d43b42
+- 回归: 判据加严后既有读数零转红（正例 38/38、反例 25/25 维持），新增内容断言 5/5；改动面 `git show 7d43b42 -- div-tools/syntax_matrix.ps1 tests/syntax-matrix-report.md`（脚本 +172 行、报告 +37 行）。未配置内容断言的 33 条特性在报告里显式汇总，不静默判过。
+状态：FIXED
+
+## BUG-506 [2026-10-30T09:16:00+08:00] [low] DEMO/10_error_handling/panic_raise_try.lz 注释与 raise 字面量豁免实现矛盾（留着永不失败的字符串 raise 反例）
+- summary: 现象：DEMO 注释写「raise REQUIRES raises」，而 `src/ir/semantic_check.rs` 对 raise 的**字面量形态**（StrLit/FStrLit/RawStrLit）有意豁免 raises 声明（SYNTAX/09 §2.2.1 已裁决并落纸，见 BUG-502）——文档、DEMO 注释、实现三者口径不一；且示例里留了一条**永远不会失败**的「反例」`raise "oops"`，读者照抄看不出豁免边界在哪。根因：BUG-502 只改了 SYNTAX/09 文档与该特性的负向探针，DEMO 侧注释与示例未同步收口。修法（commit 7d43b42，与 BUG-505 同批）：① 注释改成**两种形态**并列——字面量形态免声明 raises，变量/拼接/返回值形态仍须声明；② 反例改为类型化 `raise ValueError(oops)`（真触发「未在签名中声明 raises」的诊断），该 DEMO 文件整体仍是正例（实测 rc=0）。
+- 判据: DEMO 门禁跑 `DEMO/10_error_handling/panic_raise_try.lz` 仍 rc=0；`git show 7d43b42 -- DEMO/10_error_handling/panic_raise_try.lz`（+25 行区间）可见注释两段式与类型化 raise；文档口径以 `SYNTAX/09-错误处理.md` §2.2.1（含 ✅/❌ 四例）为准（BUG-502）；负向对照：类型化 raise 未声明 → `lz build` rc=1 且命中诊断，字符串 raise → rc=0（豁免生效）。
+- commit: 7d43b42
+- 回归: 与 BUG-502 同族收口（§2.2.1 + 探针已修，本条补 DEMO 侧注释与示例）；DEMO 全量门禁读数不变，该文件仍计入正例；假「反例」清零。
+状态：FIXED
+
+## BUG-507 [2026-10-30T09:17:00+08:00] [low] macros/expand.rs 混两职责：解析器 1071 行/18 函数搬到 macros/parse.rs（move-only，sha1 等价）——重构类
+- summary: 类别「重构」，非缺陷，按 BUG-503 口径记账以免与「顺手改动」混淆。现象：`src/macros/expand.rs` 一个文件同时承担「宏展开」与「宏定义解析」两职责，2,530 行里被展开逻辑压着 1,071 行解析器，改动面与阅读面一起膨胀。做法（commit 189d9a5）：expand.rs L1131–2201 整段解析器（`extract_macro_defs` / `parse_macro_expr` / `skip_*` / `collect_*` / `tokens_to_string` 等 **18 个函数**）搬到 `src/macros/parse.rs`，原位置留 4 行 `pub use` 转发，外部路径 `crate::macros::expand::*` 不变（`ir/mod.rs`、`interp.rs`、`main.rs`、`incr.rs`、`import_loader.rs` 调用点零改动），`src/macros/mod.rs` 加 1 行 `mod parse;`；expand.rs **2530 → 1466 行**。等价性（**move-only**）：被剪段落 **sha1 `652d9efc…`** 与 parse.rs 正文（归一唯一一处可见性前缀后）**逐字节相同**；`git diff -U0` 只有 3 个 hunk（去 BinaryOp 导入 / 旧横幅改转发横幅 / 删段 + 4 行转发）；numstat 6 insertions / 1070 deletions；尾部 `mod tests` 327 行与 HEAD blob 逐字节相同。唯一必要调整：`tokens_to_string` 需 `pub(super)`（仍被留下的 `MacroExpander` 调用，父模块看不到子模块私有项）。
+- 判据: 等价性可复跑——取 `git show 189d9a5^:src/macros/expand.rs` 的 L1131–2201 段落与 `git show 189d9a5:src/macros/parse.rs` 正文比 sha1（同一 `652d9efc…`）；`git show 189d9a5 -- src/macros/expand.rs src/macros/parse.rs src/macros/mod.rs` 看增删两侧是否同一段正文；行数口径 `wc -l src/macros/expand.rs`（1466）/ `wc -l src/macros/parse.rs`（1080）。
+- commit: 189d9a5
+- 回归: `cargo build` 0 error 且 lib 告警 9→9（清单逐条相同）；`cargo test --lib` 469/469（含 `macros::expand::tests` 10/10）、`cargo test --test find_bug_bugs` 46/46、`cargo test --test lexer_parser_core` 11/11。
+状态：FIXED
+
+## BUG-508 [2026-10-30T09:18:00+08:00] [low] parser/expr.rs 的 parse_pattern 186 行拆到 pattern.rs（move-only，impl Parser 固有方法免动 stmt.rs 5 处调用）——重构类
+- summary: 类别「重构」。现象：`src/parser/expr.rs` 的 `ParserExprExt` 名义是「表达式」，实际挂着唯一一个大方法 `parse_pattern`（**186 行 / 8,717 B**）——通配/区间/rest/点路径/元组/列表/字典/ref-mut 全在它自己的 match 内自递归，表达式文件被模式解析占去一块。另正一处盘点误差：该 trait 实为 **24 个方法**（盘点曾记 48），与 BUG-504「计划表记录过时需更正」同一教训。做法（commit c74af9f）：拆到新文件 `src/parser/pattern.rs`，写成 `impl Parser { pub(crate) fn parse_pattern }` **固有方法**、不新建 trait——固有方法免 trait 导入，故 `stmt.rs` 的 **5 处调用点（在禁改名单内）零改动**，`expr.rs` 自身 2 处调用点同样零改动；`ParserExprExt` 里的声明删除、trait 纯化为纯表达式；`pub(super)` 字段升级 0 个；`src/parser/mod.rs` 加 1 行 `mod pattern;`；expr.rs **2376 → 2188 行**。等价性（**move-only**）：原块 sha1 `629f9544…` → 搬入后 `b80219f7…`，与「仅签名行加 `pub(crate)`」的期望**逐字节相等**（BYTE-EXACT MATCH），unified diff **恰 1 行**（签名行），方法体 0 改动。
+- 判据: 等价性可复跑——对搬出块（`git show c74af9f^:src/parser/expr.rs` 的 parse_pattern）与搬入块（`git show c74af9f:src/parser/pattern.rs`）做「仅改签名行」归一后比 sha1，应同为 `b80219f7…` 且 unified diff 恰 1 行；`git show c74af9f -- src/parser/expr.rs src/parser/pattern.rs src/parser/mod.rs`；行数口径 `wc -l src/parser/expr.rs`（2188）/ `wc -l src/parser/pattern.rs`（201）。
+- commit: c74af9f
+- 回归: `cargo build` 0 error、lib 告警 9→9；`cargo test --lib` 469、`cargo test --test lexer_parser_core` 11、`cargo test --test find_bug_bugs` 46、`cargo test --test lz_semantic_cases` 17；stmt.rs / expr.rs 共 7 处调用点零改动。
+状态：FIXED
+
+## BUG-509 [2026-10-30T09:19:00+08:00] [low] ir/codegen/helpers.rs 2076 行/58 函数按副作用形态三切 pred/scan/emit（三新文件反向重建 HEAD 版 sha1 3e895d71… 逐字节相等）——重构类
+- summary: 类别「重构」。现象：`src/ir/codegen/helpers.rs` 2,076 行 / 58 个函数堆在一个「helpers」杂件筐里，职责边界无从判断。上一轮设想的「谓词/渲染/类型族」三刀**照字面做不出来**：文件里已无 `render_*` / `emit_*` / `rust_type` 这些名字，类型族只剩 10 个函数 / 231 行，独立成模块会是 175 行碎片。结论：改按**副作用形态**归并切三刀（commit ad05098）——`pred`（29 函数 / 804 行，只读判定）/ `scan`（15 / 728，递归遍历写集合）/ `emit`（14 / 535，返回 String + `IrType` 构造），各成 `src/ir/codegen/helpers/` 下新文件。等价性（**move-only**，本批最硬的一条）：用三个新文件**反向重建 HEAD 版 helpers.rs**，重建结果 **sha1 `3e895d71…` 与 HEAD 逐字节相等**；58/58 函数 span 逐字节 sha1 全等，`missing=[]`、`extra=[]`；diff 单 hunk 13 插入 / 2075 删除。接线：helpers.rs 缩到 **14 行**（`mod` + `pub(crate) use`），调用面一行未改（`mod.rs` / `stmt_gen.rs` 的 glob 与全路径都照常解析）；依赖方向 `pred`（叶子）← `scan`、`emit`，无环。
+- 判据: 反向重建判据可复跑——按 HEAD 版顺序拼接三个新文件的正文（去掉各自新增的文件头横幅）后 `sha1sum`，应等于 `git show ad05098^:src/ir/codegen/helpers.rs | sha1sum`（`3e895d71…`）；58/58 函数 span sha1 全等（missing/extra 皆空）；`git show ad05098 --stat`（helpers.rs −2075 / 三新文件 +544/+811/+735）；行数口径 `wc -l src/ir/codegen/helpers.rs`（14）、`pred.rs`（811）、`scan.rs`（735）、`emit.rs`（544）。
+- commit: ad05098
+- 回归: `cargo build` 0 error、lib 告警 9→9（逐条同 kind 同位置）；`cargo test --lib` 469（串行）、`cargo test --test codegen_corner_fixes` 44、`cargo test --test lz_ir_bootstrap` 25。后续判断：**不建议再切**——`pred` 内部是 block↔expr 互递归对，再拆会形成模块级环。
+状态：FIXED
