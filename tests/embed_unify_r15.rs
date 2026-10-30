@@ -607,3 +607,56 @@ fn path_helper_is_not_needed_when_repo_relative() {
     assert!(run.status.success(), "LZ_EMBED_DIR 定位失败: {se}");
     assert_eq!(so.trim(), "5", "垫片必须能从 LZ_EMBED_DIR 根拼出产物目录");
 }
+
+// ─────────────────────── C 档：分发入口真能被调起来（T0r49）───────────────────────
+//
+// 出处：docs/嵌入式统一抽象-实现-2026-10-21.md §六 已知限制第 2 条（「c 的分发入口未经工具链
+// 验证」——落笔时本机没有 gcc）。本机 gcc 在场，一验就露出「建得出 ≠ 调得起来」：
+// c 的 run 命令是**相对**程序名 `./c_calc.exe`，而 Windows 的 CreateProcess 按**父进程** cwd
+// 解析程序名，`current_dir(产物目录)` 只管子进程 cwd ⇒ 修复前从任何非产物目录运行都
+// `os error 2`（实测回执：`无法启动 ./c_calc.exe（系统找不到指定的文件。）`）。
+// 判据分两半：gcc 在场时走真 gcc 那一路；gcc 缺席时用 rustc 造一个守协议的替身 —— 本条测的是
+// 「程序路径怎么解析」，不是「gcc 能不能编」（后者的 Built 分支由 embed/artifact.rs 的单测钉着）。
+#[test]
+fn c_library_artifact_is_invocable_from_an_unrelated_cwd() {
+    let src = "#[embed(c)]\n```\nint add(int a, int b) { return a + b; }\n```\n\ndef main():\n    print(c_calc_add(1, 2))\n";
+    let cc = compile_case("c_lib_invoke", src, &["--embed-build"]);
+    let dir = cc.work.join("build/embed/calc/c_calc");
+    // c adapter 的建库命令固定 `gcc -O2 -o c_calc.exe …`，产物名与平台无关
+    let exe = dir.join("c_calc.exe");
+    assert!(
+        cc.rs_text.contains("c_calc_add("),
+        "c 库产物必须出可调用垫片:\n{}",
+        cc.rs_text
+    );
+    if !exe.is_file() {
+        eprintln!(
+            "[c_lib_invoke] 产物目录里没有 c_calc.exe（gcc 是否在场？编译回执见下），改用 rustc 替身:\n{}",
+            cc.compile_stdout
+        );
+        let stub = dir.join("__lz_stub.rs");
+        std::fs::write(
+            &stub,
+            "fn main() {\n    let a: Vec<String> = std::env::args().collect();\n    let mut sum = 0i64;\n    for kv in a.iter().skip(2) {\n        if let Some((_, v)) = kv.split_once('=') {\n            sum += v.trim().parse::<i64>().unwrap_or(0);\n        }\n    }\n    println!(\"OK:{}\", sum);\n}\n",
+        )
+        .expect("write stub");
+        let rc = Command::new("rustc")
+            .args(["--edition", "2021", "-O", "-o"])
+            .arg(&exe)
+            .arg(&stub)
+            .output()
+            .expect("rustc stub");
+        assert!(
+            rc.status.success(),
+            "替身编译失败: {}",
+            String::from_utf8_lossy(&rc.stderr)
+        );
+    }
+    // 关键一步：母件在**自己的** cwd 里跑，产物在 build/embed/... 子目录 —— 两者不是同一个 cwd
+    let out = run_case(&cc, "c_lib_invoke");
+    assert_eq!(
+        out.trim(),
+        "3",
+        "c 库产物的分发入口必须能从与产物无关的 cwd 调起来（修复前是 os error 2）: {out:?}"
+    );
+}

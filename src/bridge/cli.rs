@@ -283,6 +283,23 @@ fn __lz_embed_dir(rel: &str) -> std::path::PathBuf {
     }
 }
 
+/// 程序路径解析：`./x.exe` 这类**相对**程序名在 Windows 上由 CreateProcess 按**父进程** cwd
+/// 解析 —— `current_dir` 只换子进程的 cwd，管不到程序名本身，于是
+/// 直接 spawn `./c_calc.exe` 再配 `current_dir(产物目录)` 必然 os error 2
+/// （实测 T0r49：`无法启动 ./c_calc.exe（系统找不到指定的文件。）`）。
+/// 故含分隔符的相对程序名先拼成 `<产物目录>/<程序>`；裸名字（python / mojo / scala）
+/// 仍原样交给 PATH 查找，行为与修复前一致。
+fn __lz_resolve_program(dir: &std::path::Path, program: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(program);
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    if program.contains('/') || program.contains('\\') {
+        return dir.join(p);
+    }
+    p.to_path_buf()
+}
+
 /// 分发入口把值里的反斜杠/换行转义成 `\\` / `\n`，这里逐字还原。
 fn __lz_unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -316,7 +333,7 @@ fn __lz_call(
     params: &[(&str, String)],
 ) -> String {
     let dir = __lz_embed_dir(rel);
-    let mut cmd = Command::new(program);
+    let mut cmd = Command::new(__lz_resolve_program(&dir, program));
     cmd.args(prefix);
     cmd.arg(method);
     for (k, v) in params {
@@ -360,7 +377,7 @@ fn __lz_call(
 /// 可执行产物：原样跑一遍，取 stdout（不参与 request/response 协议）。
 fn __lz_exec(artifact: &str, rel: &str, program: &str, prefix: &[&str]) -> String {
     let dir = __lz_embed_dir(rel);
-    let mut cmd = Command::new(program);
+    let mut cmd = Command::new(__lz_resolve_program(&dir, program));
     cmd.args(prefix);
     cmd.current_dir(&dir);
     let out = cmd.output().unwrap_or_else(|e| {
