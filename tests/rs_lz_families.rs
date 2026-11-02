@@ -1007,3 +1007,113 @@ def main() =
     assert!(r.stdout.contains("def"), "slice 输出不对: {}", r.stdout);
     assert!(r.stdout.contains("hello"), "f-string 输出不对: {}", r.stdout);
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// N8（T0r48）：**值位置**块内的重赋 —— T0r20 作用域表残留接全
+//
+// T0r20（181fdd1）把「`is_mut` 的 `Stmt.Let` + 名字已在词法作用域内 ⇒ 发赋值」的
+// 判据穿透到 gen_stmt/gen_body/gen_block/gen_value_body/gen_match_arms，
+// 但它只覆盖**语句位**：`gen_expr` 是上下文无关的（上百个调用点），
+// 只在 gen_value_body 尾表达式 + gen_stmt 的 ExprStmt 上补了 gen_expr_ctx。
+// 于是一旦 if/块出现在**值位置**（`let v = if …`、`return if …`、`x = if …`、
+// while 体里的 `let _s = if …`），分支体内的重赋又按空 decl 生成
+// ⇒ `let mut i = r.1;`（Rust 遮蔽，外层 i 冻在初值）。
+//
+// 判别样本（temp/residue/b_value_if_loop.lz 的最小化形态）：
+//   `let _s = if i < n: let r = step(i); i = r.1; 0 else: 0`
+// 修前产物 `let mut i = r.1;` ⇒ 编译通过但 `while i < n` 永不推进（实测 10s 未退出，
+// exit 124）；修后 `i = r.1;` ⇒ 正常退出并打印 5。
+//
+// 同族另两面一并守住：`return if …` 的 then 块重赋（Return 是值位置却长期走裸
+// gen_expr）、以及「真·遮蔽不误伤」（显式 `let` 必须仍是 let，否则 E0384）。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn value_position_block_reassign_uses_outer_scope() {
+    let src = r##"
+def step(p: int) -> (int, int) =
+    (p, p + 1)
+
+def spin(n: int) -> int =
+    let mut i = 0
+    while i < n:
+        let _s = if i < n:
+            let r = step(i)
+            i = r.1
+            0
+        else:
+            0
+    i
+
+def pick(c: bool) -> int =
+    let mut acc = 0
+    if c:
+        let y = if c:
+            acc = 7
+            1
+        else:
+            2
+        acc = acc + y
+    acc
+
+def via_return(c: bool) -> int =
+    let mut acc = 0
+    if c:
+        return if c:
+            acc = 3
+            acc + 1
+        else:
+            0
+    acc
+
+def shadow_ok() -> int =
+    let y = 1
+    let y = 2
+    y
+
+def main() =
+    print(spin(5))
+    print(pick(true))
+    print(pick(false))
+    print(via_return(true))
+    print(shadow_ok())
+"##;
+    let r = run_rs_lz("n8_value_pos_decl", src);
+    assert_ok(&r, "N8 值位置块内重赋");
+
+    // ① 循环体内的值位置 if 分支：重赋必须发成赋值（旧缺陷形态是 shadow-let）
+    assert!(
+        r.rust.contains("i = r.1;"),
+        "值位置 if 分支里的重赋未发成赋值:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("let mut i = r.1"),
+        "仍是 `let mut i = r.1`（Rust 遮蔽 ⇒ 外层 i 永不推进 ⇒ 死循环）:\n{}",
+        r.rust
+    );
+    // ② `return if …` 的 then 块（Return 值位置）
+    assert!(
+        r.rust.contains("acc = 3i64;"),
+        "`return if` 分支块里的重赋未发成赋值:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("let mut acc = 3i64"),
+        "`return if` 分支块仍遮蔽外层 acc:\n{}",
+        r.rust
+    );
+    // ③ 真·遮蔽不误伤：显式 `let y = 2` 必须仍是 let
+    assert!(
+        r.rust.matches("let y").count() >= 2,
+        "真·遮蔽被误改成赋值（显式 let 应保持 let）:\n{}",
+        r.rust
+    );
+    // ④ 运行必须在 30s 上限内正常退出（缺陷形态是「编得过但不终止」）
+    assert!(r.run_ok, "生成产物未正常退出（超时/死循环）:\n{}", r.diag);
+    let out_has = |v: &str| r.stdout.lines().any(|l| l.trim() == v);
+    assert!(out_has("5"), "spin(5) 不对: {}", r.stdout);
+    assert!(out_has("8"), "pick(true) 不对（acc=7 后 acc+y）: {}", r.stdout);
+    assert!(out_has("0"), "pick(false) 不对: {}", r.stdout);
+    assert!(out_has("4"), "via_return(true) 不对: {}", r.stdout);
+    assert!(out_has("2"), "shadow_ok 不对: {}", r.stdout);
+}
