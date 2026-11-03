@@ -8,9 +8,9 @@ description = "LZ → Cython compiler — transpile LZ to .pyx, compile to .pyd"
 
 [dependencies]
 # 复用主编译器 lib 公开层（lexer/parser/ast/semantic_check/ir/codegen_cython）
-# 注意：主编译器 lib 存在少量无条件 serde_json 引用（infer feature 保护不全），
-# 因此必须保持 default features（含 infer）；serde/serde_json/bincode 会被带入，
-# 待主编译器融入子编译器时一并收敛为真正的零外部依赖
+# M4 依赖收敛已完成：lib 的 serde_json 引用已全部用 #[cfg(feature = "infer")]
+# 门控，--no-default-features 编译通过；lzcyc 改 default-features = false 后
+# cargo tree 零 serde 系外部依赖，回归测试 3/3 全绿。
 lang-zone = { path = "..", default-features = false }
 
 # 集成测试显式声明：Windows 下 tests/ 与参考样例集 TESTS/ 大小写不敏同目录，
