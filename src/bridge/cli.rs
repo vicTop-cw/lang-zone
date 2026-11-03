@@ -364,6 +364,23 @@ fn __lz_unescape(s: &str) -> String {
     out
 }
 
+/// 解析 `[1,2,3]` 形式的 JSON int 数组为 Vec<i64>（手写解析，避免依赖 serde_json）
+fn __lz_parse_list_int(raw: &str, artifact: &str, method: &str) -> Vec<i64> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 List<int> JSON 数组", artifact, method, raw);
+    }
+    let inner = &trimmed[1..trimmed.len()-1];
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    inner.split(',')
+        .map(|s| s.trim().parse::<i64>().unwrap_or_else(|e| {
+            panic!("embed 产物 {} 的 {} 返回值 `{}` 含非 int 元素：{}", artifact, method, raw, e)
+        }))
+        .collect()
+}
+
 /// 协议调用：`<method> key=value ...` 走 argv，响应取 stdout 最后一行。
 /// 起不来 / 非零退出 / ERR: / 无响应 一律 panic 并带上产物名与原因 —— 绝不返回默认值。
 fn __lz_call(
@@ -496,6 +513,7 @@ fn embed_param_ty(lz: &str) -> &'static str {
         // LZ 调点对 str 实参可能给 `&str`（字面量直传）也可能给 `String`
         // （codegen 对未知形参类型的默认是 `.to_string()`），两种都得收。
         "str" => "impl Into<String>",
+        "list<int>" => "Vec<i64>",
         _ => "&str",
     }
 }
@@ -506,6 +524,7 @@ fn embed_ret_ty(ret: &str) -> &'static str {
         "float" => "f64",
         "bool" => "bool",
         "str" => "String",
+        "list<int>" => "Vec<i64>",
         _ => "()",
     }
 }
@@ -514,6 +533,10 @@ fn embed_arg_expr(ident: &str, lz: &str) -> String {
     match lz {
         "bool" => format!("(if {} {{ \"true\" }} else {{ \"false\" }}).to_string()", ident),
         "str" => format!("{}.into()", ident),
+        "list<int>" => format!(
+            "{{ let __arr: Vec<String> = {}.iter().map(|&x| x.to_string()).collect(); \"[\".to_string() + &__arr.join(\",\") + \"]\" }}",
+            ident
+        ),
         _ => format!("{}.to_string()", ident),
     }
 }
@@ -595,6 +618,10 @@ fn embed_wrapper_fn(ep: &EmbedEndpoint, f: &EmbedFnSig) -> String {
             )),
             "bool" => out.push_str(&format!(
                 "    match __r.trim() {{\n        \"true\" | \"True\" | \"1\" => true,\n        \"false\" | \"False\" | \"0\" => false,\n        other => panic!(\"embed 产物 {{}} 的 {{}} 返回值 `{{}}` 不是 bool\", {}, {}, other),\n    }}\n",
+                art, method
+            )),
+            "list<int>" => out.push_str(&format!(
+                "    __lz_parse_list_int(__r, {}, {})\n",
                 art, method
             )),
             _ => out.push_str("    __r\n"),
