@@ -2288,6 +2288,246 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
         set
     }
 
+    // T0r51：值表达式位重赋扫描——collect_reassigned 只下探**语句位**块
+    // （Stmt::If/While/For/Match/TryCatch），不下探 `Stmt::Let` 的**值表达式**。
+    // 「不可变外层 let + 值位置块内重赋」（r2_immut / a_value_if 家族：
+    // `let y = if c: acc = 5; 0`，acc 为外层不可变 let）时外层收不到重赋信号：
+    // 语句位门不触发（块不在语句位）、codegen auto_mut 只在 native 兜底、rs-lz
+    // 无对应扫描 → 双后端产物 rustc E0384（生成 `let acc` + 块内 `acc = 5`）。
+    // 信号口径与 collect_reassigned 一致：Assign / AssignExpr 目标名 + is_mut 影子
+    // 绑定（循环内重绑定外层变量的既有编码形态，见 codegen scan.rs loop_rebind）。
+    // 块内**新的**不可变 let 是遮蔽、不是对外层重赋，不计入（不误伤）。
+    fn collect_reassigned_expr(expr: &Expr, out: &mut std::collections::HashSet<String>) {
+        use crate::ir::node::ExprKind as EK;
+        match &expr.kind {
+            EK::AssignExpr { target, value } => {
+                if let EK::Var(name) = &target.kind {
+                    out.insert(name.clone());
+                }
+                collect_reassigned_expr(target, out);
+                collect_reassigned_expr(value, out);
+            }
+            // 块表达式 / 生成器构建块：语句位信号走 collect_reassigned（含
+            // Assign 目标与 is_mut 影子绑定），其自身的值表达式位再递归下探。
+            EK::BlockExpr { block } => {
+                out.extend(collect_reassigned(&block.stmts));
+                collect_reassigned_values(&block.stmts, out);
+            }
+            EK::GenBuild { callee, block } => {
+                if let Some(c) = callee {
+                    collect_reassigned_expr(c, out);
+                }
+                out.extend(collect_reassigned(&block.stmts));
+                collect_reassigned_values(&block.stmts, out);
+            }
+            EK::IfExpr { cond, then, els } => {
+                collect_reassigned_expr(cond, out);
+                collect_reassigned_expr(then, out);
+                collect_reassigned_expr(els, out);
+            }
+            EK::Lambda { body, .. } => collect_reassigned_expr(body, out),
+            EK::Call { callee, args, .. } => {
+                collect_reassigned_expr(callee, out);
+                for a in args {
+                    collect_reassigned_expr(a, out);
+                }
+            }
+            EK::MethodCall { receiver, args, .. } => {
+                collect_reassigned_expr(receiver, out);
+                for a in args {
+                    collect_reassigned_expr(a, out);
+                }
+            }
+            EK::FieldAccess { base, .. } => collect_reassigned_expr(base, out),
+            EK::IndexGet { base, key } => {
+                collect_reassigned_expr(base, out);
+                collect_reassigned_expr(key, out);
+            }
+            EK::IndexSet { base, key, value } => {
+                collect_reassigned_expr(base, out);
+                collect_reassigned_expr(key, out);
+                collect_reassigned_expr(value, out);
+            }
+            EK::BinOp { lhs, rhs, .. } => {
+                collect_reassigned_expr(lhs, out);
+                collect_reassigned_expr(rhs, out);
+            }
+            EK::UnOp { operand, .. } => collect_reassigned_expr(operand, out),
+            EK::StructCtor { fields, .. } => {
+                for (_, e) in fields {
+                    collect_reassigned_expr(e, out);
+                }
+            }
+            EK::EnumCtor { args, .. } => {
+                for a in args {
+                    collect_reassigned_expr(a, out);
+                }
+            }
+            EK::GenExpr { yield_of } => collect_reassigned_expr(yield_of, out),
+            EK::Cast { expr, .. } => collect_reassigned_expr(expr, out),
+            EK::MagicCall { args, .. } => {
+                for a in args {
+                    collect_reassigned_expr(a, out);
+                }
+            }
+            EK::TupleLit(items) | EK::Tuple(items) | EK::ListLit(items) | EK::List(items) => {
+                for i in items {
+                    collect_reassigned_expr(i, out);
+                }
+            }
+            EK::Spread(inner) => collect_reassigned_expr(inner, out),
+            EK::Dict(entries) => {
+                for (k, v) in entries {
+                    collect_reassigned_expr(k, out);
+                    collect_reassigned_expr(v, out);
+                }
+            }
+            EK::Range { start, end, .. } => {
+                if let Some(s) = start {
+                    collect_reassigned_expr(s, out);
+                }
+                collect_reassigned_expr(end, out);
+            }
+            EK::Pipe {
+                receiver,
+                callee,
+                args,
+            } => {
+                collect_reassigned_expr(receiver, out);
+                collect_reassigned_expr(callee, out);
+                for a in args {
+                    collect_reassigned_expr(a, out);
+                }
+            }
+            EK::Paren(inner) => collect_reassigned_expr(inner, out),
+            EK::ImplicitConvert { source, .. } => collect_reassigned_expr(source, out),
+            EK::Lit(_) | EK::Default | EK::Var(_) => {}
+        }
+    }
+
+    /// 遍历语句表的全部**值表达式**位（与 collect_reassigned 的语句位块下探互补），
+    /// 收集其中出现的重赋名；语句位块（If/While/For/Match/TryCatch…）同样递归下探，
+    /// 使「语句位 if 内含值位块」这类混合形态也能被外层看见。
+    fn collect_reassigned_values(
+        stmts: &[Stmt],
+        out: &mut std::collections::HashSet<String>,
+    ) {
+        for s in stmts {
+            match s {
+                Stmt::Let { value, .. } => collect_reassigned_expr(value, out),
+                Stmt::Assign { value, .. } => collect_reassigned_expr(value, out),
+                Stmt::ExprStmt { expr } => collect_reassigned_expr(expr, out),
+                Stmt::Return { value } => {
+                    if let Some(v) = value {
+                        collect_reassigned_expr(v, out);
+                    }
+                }
+                Stmt::Raise { value } | Stmt::Yield { value } => {
+                    collect_reassigned_expr(value, out);
+                }
+                Stmt::YieldFrom { iter } => collect_reassigned_expr(iter, out),
+                Stmt::Assert { cond, message } => {
+                    collect_reassigned_expr(cond, out);
+                    if let Some(m) = message {
+                        collect_reassigned_expr(m, out);
+                    }
+                }
+                Stmt::BreakLabel { value, .. } => {
+                    if let Some(v) = value {
+                        collect_reassigned_expr(v, out);
+                    }
+                }
+                Stmt::If {
+                    cond,
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    collect_reassigned_expr(cond, out);
+                    collect_reassigned_values(&then_branch.stmts, out);
+                    if let Some(eb) = else_branch {
+                        collect_reassigned_values(&eb.stmts, out);
+                    }
+                }
+                Stmt::While {
+                    cond,
+                    guard,
+                    body,
+                    else_body,
+                } => {
+                    collect_reassigned_expr(cond, out);
+                    if let Some(g) = guard {
+                        collect_reassigned_expr(g, out);
+                    }
+                    collect_reassigned_values(&body.stmts, out);
+                    if let Some(eb) = else_body {
+                        collect_reassigned_values(&eb.stmts, out);
+                    }
+                }
+                Stmt::For {
+                    iter,
+                    guard,
+                    body,
+                    else_body,
+                    ..
+                } => {
+                    collect_reassigned_expr(iter, out);
+                    if let Some(g) = guard {
+                        collect_reassigned_expr(g, out);
+                    }
+                    collect_reassigned_values(&body.stmts, out);
+                    if let Some(eb) = else_body {
+                        collect_reassigned_values(&eb.stmts, out);
+                    }
+                }
+                Stmt::WhileLet {
+                    pattern: _,
+                    expr,
+                    guard,
+                    body,
+                } => {
+                    collect_reassigned_expr(expr, out);
+                    if let Some(g) = guard {
+                        collect_reassigned_expr(g, out);
+                    }
+                    collect_reassigned_values(&body.stmts, out);
+                }
+                Stmt::Match { scrutinee, arms } => {
+                    collect_reassigned_expr(scrutinee, out);
+                    for arm in arms {
+                        if let Some(g) = &arm.guard {
+                            collect_reassigned_expr(g, out);
+                        }
+                        collect_reassigned_values(&arm.body.stmts, out);
+                    }
+                }
+                Stmt::TryCatch {
+                    body,
+                    catches,
+                    else_body,
+                    finally_body,
+                } => {
+                    collect_reassigned_values(&body.stmts, out);
+                    for (_, cb) in catches {
+                        collect_reassigned_values(&cb.stmts, out);
+                    }
+                    if let Some(eb) = else_body {
+                        collect_reassigned_values(&eb.stmts, out);
+                    }
+                    if let Some(fb) = finally_body {
+                        collect_reassigned_values(&fb.stmts, out);
+                    }
+                }
+                Stmt::Block { stmts } => collect_reassigned_values(stmts, out),
+                Stmt::BlockLabel { body, .. } | Stmt::CheckerBlock { body, .. } => {
+                    collect_reassigned_values(&body.stmts, out);
+                }
+                Stmt::Defer { body } => collect_reassigned_values(&body.stmts, out),
+                _ => {}
+            }
+        }
+    }
+
     // 空列表字面量元素类型推断（支持 append/push 上下文推断，贴近 Rust）
     let empty_elems = resolve_empty_list_elems(&ir_stmts);
 
@@ -2300,6 +2540,25 @@ pub(crate) fn convert_block(stmts: &[AstStmt], ctx: &TypeCtx) -> Block {
                     "error[E0384]: cannot assign twice to immutable variable `{}`\n  = help: change `let {}` to `let mut {}` if you intend to reassign it",
                     name, name, name
                 ));
+            }
+        }
+    }
+
+    // T0r51：值表达式位重赋 → 提升本块外层不可变 let 为 mut。
+    // 语句位门（上方）只管「块语句表里看得见的 Assign」；值位置块内的重赋
+    // （`let y = if c: acc = 5; 0`，acc 外层不可变）不进语句位门，此前依赖
+    // codegen auto_mut 在 native 兜底、rs-lz 无兜底 → 双后端产物 rustc E0384。
+    // 这里在 IR 层把外层 `Stmt::Let{is_mut:false}` 就地提升为 mut，native 与
+    // rs-lz 都发 `let mut acc`，且不改语句位报错门（v4 纯语句位重赋仍报 E0384）。
+    let mut value_reassigned = std::collections::HashSet::new();
+    collect_reassigned_values(&ir_stmts, &mut value_reassigned);
+    // 自引用重绑定（`let acc = acc + xs`）在语句位是 Let、不在 reassigned 集内，
+    // 但 codegen 已按 loop_rebind/自引用发 mut——此处若同名同时命中值扫描，
+    // 提升行为与 codegen 一致，无冲突。
+    for s in &mut ir_stmts {
+        if let Stmt::Let { name, is_mut, .. } = s {
+            if !*is_mut && value_reassigned.contains(name.as_str()) {
+                *is_mut = true;
             }
         }
     }
