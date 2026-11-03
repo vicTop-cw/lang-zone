@@ -3658,3 +3658,6 @@ commit：3f8512e（重映射自 未记）
 - commit: ad05098
 - 回归: `cargo build` 0 error、lib 告警 9→9（逐条同 kind 同位置）；`cargo test --lib` 469（串行）、`cargo test --test codegen_corner_fixes` 44、`cargo test --test lz_ir_bootstrap` 25。后续判断：**不建议再切**——`pred` 内部是 block↔expr 互递归对，再拆会形成模块级环。
 状态：FIXED
+## BUG-510 [2026-11-03T06:36:25Z] [medium] OPEN
+- summary: [fist-mbt] heartbeat 无 namespace 路由：task_id 在 ns=lang-zone 存在（get/execute/submit 同参均正常），heartbeat 只查默认库报 task not found —— 工具 schema 里就没有 namespace 参数
+
