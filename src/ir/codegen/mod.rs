@@ -658,6 +658,14 @@ impl CodeGen {
                         path: "Vec".to_string(),
                         args: vec![IrType::Int],
                     }),
+                    Some("list<float>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::F64],
+                    }),
+                    Some("list<str>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Str],
+                    }),
                     _ => None,
                 };
                 out.push((format!("{}_{}", t.artifact, m.name), ty.clone()));

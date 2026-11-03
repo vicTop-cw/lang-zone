@@ -381,6 +381,49 @@ fn __lz_parse_list_int(raw: &str, artifact: &str, method: &str) -> Vec<i64> {
         .collect()
 }
 
+/// 解析 `[1.5,2.0]` 形式的 JSON float 数组为 Vec<f64>
+fn __lz_parse_list_float(raw: &str, artifact: &str, method: &str) -> Vec<f64> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 List<float> JSON 数组", artifact, method, raw);
+    }
+    let inner = &trimmed[1..trimmed.len()-1];
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    inner.split(',')
+        .map(|s| s.trim().parse::<f64>().unwrap_or_else(|e| {
+            panic!("embed 产物 {} 的 {} 返回值 `{}` 含非 float 元素：{}", artifact, method, raw, e)
+        }))
+        .collect()
+}
+
+/// 解析 `["a","b"]` 形式的 JSON str 数组为 Vec<String>
+fn __lz_parse_list_str(raw: &str, artifact: &str, method: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 List<str> JSON 数组", artifact, method, raw);
+    }
+    let inner = &trimmed[1..trimmed.len()-1];
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    // 手写 JSON 字符串数组解析：每个元素是 `"..."` 形式
+    inner.split(',')
+        .map(|s| {
+            let s = s.trim();
+            if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+                // 反转义 \" 和 \\
+                let inner = &s[1..s.len()-1];
+                Ok(inner.replace("\\\"", "\"").replace("\\\\", "\\"))
+            } else {
+                Err(format!("embed 产物 {} 的 {} 返回值 `{}` 含非字符串元素：`{}`", artifact, method, raw, s))
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .unwrap_or_else(|e| panic!("{}", e))
+}
+
 /// 协议调用：`<method> key=value ...` 走 argv，响应取 stdout 最后一行。
 /// 起不来 / 非零退出 / ERR: / 无响应 一律 panic 并带上产物名与原因 —— 绝不返回默认值。
 fn __lz_call(
@@ -514,6 +557,8 @@ fn embed_param_ty(lz: &str) -> &'static str {
         // （codegen 对未知形参类型的默认是 `.to_string()`），两种都得收。
         "str" => "impl Into<String>",
         "list<int>" => "Vec<i64>",
+        "list<float>" => "Vec<f64>",
+        "list<str>" => "Vec<String>",
         _ => "&str",
     }
 }
@@ -525,6 +570,8 @@ fn embed_ret_ty(ret: &str) -> &'static str {
         "bool" => "bool",
         "str" => "String",
         "list<int>" => "Vec<i64>",
+        "list<float>" => "Vec<f64>",
+        "list<str>" => "Vec<String>",
         _ => "()",
     }
 }
@@ -535,6 +582,14 @@ fn embed_arg_expr(ident: &str, lz: &str) -> String {
         "str" => format!("{}.into()", ident),
         "list<int>" => format!(
             "{{ let __arr: Vec<String> = {}.iter().map(|&x| x.to_string()).collect(); \"[\".to_string() + &__arr.join(\",\") + \"]\" }}",
+            ident
+        ),
+        "list<float>" => format!(
+            "{{ let __arr: Vec<String> = {}.iter().map(|x| x.to_string()).collect(); \"[\".to_string() + &__arr.join(\",\") + \"]\" }}",
+            ident
+        ),
+        "list<str>" => format!(
+            "{{ let __arr: Vec<String> = {}.iter().map(|x| format!(\"\\\"{{}}\\\"\", x)).collect(); \"[\".to_string() + &__arr.join(\",\") + \"]\" }}",
             ident
         ),
         _ => format!("{}.to_string()", ident),
@@ -622,6 +677,14 @@ fn embed_wrapper_fn(ep: &EmbedEndpoint, f: &EmbedFnSig) -> String {
             )),
             "list<int>" => out.push_str(&format!(
                 "    __lz_parse_list_int(__r, {}, {})\n",
+                art, method
+            )),
+            "list<float>" => out.push_str(&format!(
+                "    __lz_parse_list_float(__r, {}, {})\n",
+                art, method
+            )),
+            "list<str>" => out.push_str(&format!(
+                "    __lz_parse_list_str(__r, {}, {})\n",
                 art, method
             )),
             _ => out.push_str("    __r\n"),
