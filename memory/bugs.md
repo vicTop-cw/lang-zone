@@ -3665,3 +3665,11 @@ commit：3f8512e（重映射自 未记）
 - fix: 远端 v0.3.11 已修 BUG-452（heartbeat 工具 schema 加 namespace 参数走 engine_for_ns 路由）。本条补 heartbeat 响应加 namespace 字段，调用方可确认心跳路由到哪个命名空间。验证：moon check 0 errors、moon build --target js 通过。
 - commit: 5ba7123d8（fist-mbt）
 
+## BUG-511 [2026-11-04T00:10:00+08:00] [medium] embed §6.4：print(<垫片调用>) 返回 str 走 Debug 带引号，is_str_producing 通道补上
+- summary: embed 跨语言垫片调用返回 str 时，直接 `print(python_shout("ab"))` 生成 `println!("{:?}", …)` 打 `"AB"`（带引号），而非 `println!("{}", …)` 打 `AB`（无引号）。根因：`print_arg_is_display`（`src/ir/codegen/expr_gen.rs`，static 函数）只看表达式自身 `e.ty`，垫片调用的 `e.ty` 在 IR 层不可见（非 LZ 定义的函数），故返回 false 走 `{:?}`。`fn_returns` 已登记垫片函数名与返回类型（`src/ir/codegen/mod.rs:905-910`，由 `embed_export_names()` 供名），`is_str_producing`（`expr_gen.rs:8346`）已能查 `fn_returns` 判定 Call 表达式是否返回 str，但 print 的格式化选择处未接这条通道。修法：print/println 的格式占位符选择处（`expr_gen.rs:1962`）把 `Self::print_arg_is_display(a)` 改为 `Self::print_arg_is_display(a) || self.is_str_producing(a)`。LZ 自定义函数返回 str 的场景两者都覆盖（`e.ty == Str` 时 `print_arg_is_display` 已 true），`||` 不改已有行为，只修复垫片调用这一条之前漏掉的路径。
+- 判据: `cargo test --test embed_unify_r15 print_embed_shim`（2/2：`print_embed_shim_call_returning_str_uses_display_not_debug` 断言直接 print 垫片 str 调用输出 `AB` 无引号 + 生成代码含 `println!("{}", …)`；`print_embed_shim_call_returning_int_unchanged` 负向对照返回 int 的垫片调用输出不变）
+- commit: 6ecb6be
+- 回归: `cargo test --test embed_unify_r15` 23/23、`cargo test --test embed_stub_shadowing` 4/4、`cargo test --test embed_gapfixes` 17/17、`cargo test --lib` 469/469、`cargo test --test codegen_corner_fixes` 44/44、`cargo test --test lz_ir_bootstrap` 25/25、`cargo test --test demo_codegen_compile -- --ignored --nocapture` 全量 DEMO 327/327 全绿零回归。
+- 注意: 文档 `docs/嵌入式统一抽象-实现-2026-10-21.md` §六.4 已过期（原写「未修」），需同步更新为已修复。
+状态：FIXED
+
