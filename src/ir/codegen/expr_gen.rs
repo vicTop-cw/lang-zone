@@ -1958,8 +1958,16 @@ impl CodeGen {
                 }
 
                 if callee_s == "print" || callee_s == "println" {
+                    // §6.4 修复：垫片调用（跨语言 embed 函数）的返回类型在 IR 层
+                    // 不可见（e.ty 非 Str），print_arg_is_display 只看 e.ty 会走
+                    // {:?}（Debug，带引号）。is_str_producing 查 fn_returns（垫片
+                    // 函数名与返回类型已由 embed_export_names 登记，见 mod.rs:905），
+                    // 补上这条通道：Call 表达式的 callee 在 fn_returns 里且返回
+                    // Str/String 时走 Display。LZ 自定义函数返回 str 的场景两者都
+                    // 覆盖（e.ty == Str 时 print_arg_is_display 已 true），|| 不改
+                    // 已有行为，只修复垫片调用这一条之前漏掉的路径。
                     let fmt_placeholders: String =
-                        args.iter().map(|a| if Self::print_arg_is_display(a) { "{}" } else { "{:?}" }).collect::<Vec<_>>().join(" ");
+                        args.iter().map(|a| if Self::print_arg_is_display(a) || self.is_str_producing(a) { "{}" } else { "{:?}" }).collect::<Vec<_>>().join(" ");
                     let fmt = format!("\"{}\"", fmt_placeholders);
                     // 顶层静态（LazyLock<..>）需解引用才能打印值：print(config) → print(*config)
                     // 注意：gen_expr 的 Var 分支已对 lazy_static 生成 `(*name).clone()`，

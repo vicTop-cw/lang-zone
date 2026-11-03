@@ -16,19 +16,110 @@ fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn builtins_rlib_dir_has_artifact(dir: &PathBuf) -> Option<PathBuf> {
+// ── 产物目录解析（车道隔离，照 tests/demo_codegen_compile.rs 的 T0r13 先例）──────
+//
+// 曾经的硬编码：`repo_root()/target/debug`。后果（T0r50 在隔离 worktree 实测）：
+// 用 `CARGO_TARGET_DIR=target/lane-xxx` 跑的车道，rlib 指向**默认车道**目录 ——
+// 轻则链到陈旧产物，重则产物不存在而假红。
+// 现在一律按**当前运行环境**推导 `<target-dir>/<profile>`，优先级：
+//   a) 环境变量 `CARGO_TARGET_DIR`（相对路径按 crate 根解析；自身含 deps/ 直接用，否则补 profile 名）；
+//   b) `std::env::current_exe()` 反推（`<target-dir>/<profile>/deps/<test-bin>` → `<target-dir>/<profile>`）；
+//   c) 兜底 `CARGO_MANIFEST_DIR/target/debug`。
+
+/// 相对路径按 crate 根解析（cargo 在 crate 根执行，相对 `CARGO_TARGET_DIR` 亦以此为基准）
+fn resolve_from_manifest(p: PathBuf) -> PathBuf {
+    if p.is_absolute() {
+        p
+    } else {
+        repo_root().join(p)
+    }
+}
+
+/// `<target-dir>/<profile>` —— 由当前测试可执行文件反推：
+/// `.../<target-dir>/<profile>/deps/<test-bin>[.exe]` → `.../<target-dir>/<profile>`
+fn profile_dir_from_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    // cargo test 的 exe 恒在 `<profile>/deps` 下；不在则按 `<profile>` 直落处理
+    let profile_dir = if dir.file_name().map_or(false, |n| n == "deps") {
+        dir.parent()?
+    } else {
+        dir
+    };
+    if profile_dir.is_dir() {
+        Some(profile_dir.to_path_buf())
+    } else {
+        None
+    }
+}
+
+fn profile_name(dir: &Path) -> String {
+    dir.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "debug".to_string())
+}
+
+/// 本次运行真正使用的 `<target-dir>/<profile>` 目录（见上方 a/b/c 解析链）。
+fn build_profile_dir() -> PathBuf {
+    if let Some(raw) = std::env::var_os("CARGO_TARGET_DIR") {
+        let raw = PathBuf::from(raw);
+        if !raw.as_os_str().is_empty() {
+            let root = resolve_from_manifest(raw);
+            // 已直接指向 profile 目录（自带 deps/）→ 就用它
+            if root.join("deps").is_dir() {
+                return root;
+            }
+            // profile 名优先跟随当前测试可执行文件（debug / release / 自定义）
+            let profile = profile_dir_from_exe()
+                .map(|d| profile_name(&d))
+                .unwrap_or_else(|| "debug".to_string());
+            return root.join(profile);
+        }
+    }
+    if let Some(dir) = profile_dir_from_exe() {
+        return dir;
+    }
+    repo_root().join("target").join("debug")
+}
+
+/// 与 `build_profile_dir()` 配对的 cargo `--target-dir`（即 `<profile>` 的父目录）
+fn build_target_root() -> PathBuf {
+    let dir = build_profile_dir();
+    dir.parent().map(|p| p.to_path_buf()).unwrap_or(dir)
+}
+
+/// 目录内**最新**（mtime 最大）的 `deps/liblz_builtins-*.rlib`。
+/// 同一 target 下可能残留多个 hash 的 rlib，取最新避免链到陈旧产物。
+fn newest_deps_rlib(dir: &Path) -> Option<PathBuf> {
+    let deps = dir.join("deps");
+    let entries = std::fs::read_dir(&deps).ok()?;
+    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
+            let mtime = e
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            if best.as_ref().map_or(true, |(t, _)| mtime > *t) {
+                best = Some((mtime, e.path()));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// 在某个 `<profile>` 目录里定位 lz_builtins 的 .rlib：
+/// 先 `deps/liblz_builtins-*.rlib` 取最新，再退回顶层 `liblz_builtins.rlib`
+/// （cargo 为 lib target 产的 hardlink，仅作兜底，不再作为首选）。
+fn probe_rlib(dir: &Path) -> Option<PathBuf> {
+    if let Some(p) = newest_deps_rlib(dir) {
+        return Some(p);
+    }
     let direct = dir.join("liblz_builtins.rlib");
     if direct.exists() {
         return Some(direct);
-    }
-    let deps = dir.join("deps");
-    if let Ok(entries) = std::fs::read_dir(&deps) {
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
-                return Some(e.path());
-            }
-        }
     }
     None
 }
@@ -36,29 +127,43 @@ fn builtins_rlib_dir_has_artifact(dir: &PathBuf) -> Option<PathBuf> {
 fn builtins_rlib() -> PathBuf {
     // 生成的 .rs 要 `--extern lz_builtins=…` 才链得上。`lz_builtins` 是 workspace 成员而**不是**
     // 根包的依赖 ⇒ `cargo test --test embed_unify_r15` 在一份干净的树上根本不会把它编出来
-    // （冻结快照树实测：target/debug 里 0 件 lz_builtins 产物，11 条用例全死在这一行）。
+    // （冻结快照树实测：profile 目录里 0 件 lz_builtins 产物，11 条用例全死在这一行）。
     // 所以缺件时当场补建一次，让本套判据对任何树都自足，而不是"只在跑过全量 build 的机器上绿"。
-    let dir = repo_root().join("target/debug");
-    if let Some(p) = builtins_rlib_dir_has_artifact(&dir) {
+    //
+    // 取数**与补建**都跟着本次运行的 `<target-dir>/<profile>` 走（见上方解析链）。旧实现把
+    // `repo_root()/target/debug` 写死 ⇒ `CARGO_TARGET_DIR=target/lane-xxx` 时补建产物落到车道目录、
+    // 解析却看向默认目录，当场 12 条假红（T0r50 在隔离 worktree 实测）。
+    let profile_dir = build_profile_dir();
+    if let Some(p) = probe_rlib(&profile_dir) {
         return p;
     }
-    let _ = std::fs::create_dir_all(&dir);
-    let built = std::process::Command::new("cargo")
+    let _ = std::fs::create_dir_all(&profile_dir);
+    // 显式传 `--target-dir`：与 build_profile_dir() 同一口径，补建产物才会落在解析看向的目录。
+    let profile = profile_name(&profile_dir);
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.current_dir(repo_root())
         .args(["build", "-p", "lz_builtins"])
-        .current_dir(repo_root())
-        .output();
+        .arg("--target-dir")
+        .arg(build_target_root());
+    if profile != "debug" {
+        // release / 自定义 profile 与测试可执行文件所在 profile 对齐
+        cmd.arg("--profile").arg(&profile);
+    }
+    let built = cmd.output();
     if let Ok(b) = &built {
         if !b.status.success() {
             panic!(
-                "lz_builtins 补建失败：{}\n若本机无 cargo，请手工产出 target/debug/liblz_builtins.rlib 后复跑",
-                String::from_utf8_lossy(&b.stderr)
+                "lz_builtins 补建失败：{}\n若本机无 cargo，请手工产出 {}/liblz_builtins.rlib 后复跑",
+                String::from_utf8_lossy(&b.stderr),
+                profile_dir.display()
             );
         }
     }
-    builtins_rlib_dir_has_artifact(&dir).unwrap_or_else(|| {
+    probe_rlib(&profile_dir).unwrap_or_else(|| {
         panic!(
-            "已跑 cargo build -p lz_builtins（{:?}）仍在 target/debug 找不到产物 ⇒ 取数路径变了，改本行而非放宽判据",
-            built.as_ref().map(|b| b.status.code()).ok()
+            "已跑 cargo build -p lz_builtins（{:?}）仍在 {} 找不到产物 ⇒ 取数路径变了，改本行而非放宽判据",
+            built.as_ref().map(|b| b.status.code()).ok(),
+            profile_dir.display()
         )
     })
 }
@@ -119,7 +224,8 @@ fn run_case(cc: &Cc, name: &str) -> String {
         .arg("-L")
         .arg(format!(
             "dependency={}",
-            builtins_rlib().parent().unwrap().join("deps").display()
+            // 链接目录跟随本次运行的实际产物目录（车道隔离）；旧写法 rlib 在 deps/ 时会算出 deps/deps
+            build_profile_dir().join("deps").display()
         ))
         .arg("-o")
         .arg(&exe)
@@ -587,7 +693,7 @@ fn path_helper_is_not_needed_when_repo_relative() {
         .arg("-L")
         .arg(format!(
             "dependency={}",
-            builtins_rlib().parent().unwrap().join("deps").display()
+            build_profile_dir().join("deps").display()
         ))
         .arg("-o")
         .arg(&exe)
@@ -658,5 +764,41 @@ fn c_library_artifact_is_invocable_from_an_unrelated_cwd() {
         out.trim(),
         "3",
         "c 库产物的分发入口必须能从与产物无关的 cwd 调起来（修复前是 os error 2）: {out:?}"
+    );
+}
+
+// §6.4 修复判据：垫片调用返回 str 时直接 print 走 Display（{}，无引号），
+// 不再被 print_arg_is_display 只看 e.ty 的判断漏掉而走 {:?}（Debug，带引号）。
+// 对照面：先绑定成 str 再 print 的行为不变（无引号），证明两条路径一致。
+// 负向对照：返回 int 的垫片调用 print 走 Debug 不影响（int 在两种格式下输出相同）。
+#[test]
+fn print_embed_shim_call_returning_str_uses_display_not_debug() {
+    // python 垫片返回 str：直接 print 应无引号（修复前带引号）
+    let src = "#[embed(python)]\n```\ndef shout(s: str) -> str:\n    return s.upper()\n```\n\ndef main():\n    print(python_calc_shout(\"ab\"))\n";
+    let cc = compile_case("print_shim_str", src, &[]);
+    let out = run_case(&cc, "print_shim_str");
+    assert_eq!(
+        out.trim(),
+        "AB",
+        "垫片调用返回 str 直接 print 必须走 Display（无引号），修复前带引号: {out:?}"
+    );
+    // 生成的 .rs 里 print 的格式串必须是 {} 而非 {:?}
+    assert!(
+        cc.rs_text.contains("println!(\"{}\", python_calc_shout(") || cc.rs_text.contains("println!(\"{}\","),
+        "生成代码里 print 垫片调用必须走 {{}} 格式: {}",
+        cc.rs_text
+    );
+}
+
+// 负向对照：返回 int 的垫片调用 print 不受影响（int 在 {} 和 {:?} 下输出相同）
+#[test]
+fn print_embed_shim_call_returning_int_unchanged() {
+    let src = "#[embed(python)]\n```\ndef double(x: int) -> int:\n    return x * 2\n```\n\ndef main():\n    print(python_calc_double(21))\n";
+    let cc = compile_case("print_shim_int", src, &[]);
+    let out = run_case(&cc, "print_shim_int");
+    assert_eq!(
+        out.trim(),
+        "42",
+        "垫片调用返回 int 的 print 输出不变: {out:?}"
     );
 }
