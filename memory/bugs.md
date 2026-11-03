@@ -3514,8 +3514,10 @@ _size: 0i64, _num_buckets: 16i64 };`，`cargo test --test find_bug_libs lib_hash
 用户遮蔽内建名的预期语义（与 BUG-485 的 `is_user_ty` 守卫同思路）。
 状态：FIXED
 commit：3f8512e（重映射自 未记）
-## BUG-488 [2026-10-27T13:17:07Z] [medium] OPEN
+## BUG-488 [2026-10-27T13:17:07Z] [medium] FIXED（2026-11-03 fist-mbt commit f1647e6）
 - summary: [scope-gate] reserve_scope 对非 Fist-Mbt 项目路径一律 fail-closed：权限表 scope_permissions 写死 Fist-Mbt 源码目录，lang-zone 的 src/embed、Reports 等合法作用域无法预订，导致 explore 并行四道门第 4 门永远不过
+- fix: fist-mbt `src/engine/engine_scope_perm.mbt` 的 `scope_permissions` 补 lang-zone 项目目录规则：`src/embed/`、`src/ir/`、`src/bridge/`、`src/parser/`、`src/frontend/`、`tests/`、`Reports/`、`CY/`、`DEMO/`、`FIND_BUG/`、`lz_builtins/`。不用宽泛 `src/` 通配（会覆盖 Fist-Mbt 自身未被具体规则覆盖的 src/ 子路径）。验证：moon check 0 errors、moon test --target js 1545/1545 全绿。
+- commit: f1647e6（fist-mbt）
 
 ## BUG-489 [2026-10-28T06:45:00+08:00] [high] 闭包体重生成漏继承枚举变体表 → `Ok(len(e))` 丢枚举限定（E0308）
 - summary: 闭包体经 child `CodeGen::new()` 重生成时未继承枚举变体表，`Ok(len(e))` 发成裸 `Ok(`，被解析为 `std::result::Result::Ok` 而非程序的枚举变体，rustc E0308（mismatched types）。根因：两处 child 初始化只复制 `known_types`/`type_aliases` 等，漏 `enum_variants` / `enum_variant_named_fields` / `enum_variant_fields` / `enum_variant_order` 四张表——`src/ir/codegen/expr_gen.rs:6869`（`!uses_move` 分支）与 `src/ir/codegen/expr_gen.rs:6908`（move 捕获 + 引用外部非 Copy 变量分支）。实参是 Call 时 `body_refs_noncopy_external` 递归进 callee `Var`（`len`/`inc` 非 Copy、非形参）→ 命中 child 重生成，裸 `Ok(` 覆盖 L6562 的「闭包返回 Result 时替换 `Ok(`/`Err(`」后处理；实参为字面量/变量/二元式时该判定为 false，故只有 Call 实参形态复现。
@@ -3658,6 +3660,8 @@ commit：3f8512e（重映射自 未记）
 - commit: ad05098
 - 回归: `cargo build` 0 error、lib 告警 9→9（逐条同 kind 同位置）；`cargo test --lib` 469（串行）、`cargo test --test codegen_corner_fixes` 44、`cargo test --test lz_ir_bootstrap` 25。后续判断：**不建议再切**——`pred` 内部是 block↔expr 互递归对，再拆会形成模块级环。
 状态：FIXED
-## BUG-510 [2026-11-03T06:36:25Z] [medium] OPEN
+## BUG-510 [2026-11-03T06:36:25Z] [medium] FIXED（2026-11-03 fist-mbt commit f1647e6）
 - summary: [fist-mbt] heartbeat 无 namespace 路由：task_id 在 ns=lang-zone 存在（get/execute/submit 同参均正常），heartbeat 只查默认库报 task not found —— 工具 schema 里就没有 namespace 参数
+- fix: fist-mbt `src/server/server.mbt` 的 `heartbeat` 工具 schema 加 `namespace` 参数（默认 default），走 `engine_for_ns(ns)` 路由到正确的命名空间库，与 `get`/`execute`/`submit` 同口径。回执新增 `namespace` 字段。验证：moon check 0 errors、moon test --target js 1545/1545 全绿。
+- commit: f1647e6（fist-mbt）
 
