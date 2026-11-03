@@ -300,6 +300,48 @@ fn __lz_resolve_program(dir: &std::path::Path, program: &str) -> std::path::Path
     p.to_path_buf()
 }
 
+/// Windows 上「裸名 + PATH 上只有 `.bat`/`.cmd` 包装」的工具链（Coursier 装的 scala/scalac 是典型）
+/// 不能直接 CreateProcess：裸名只补 `.exe`、**不认 PATHEXT**，而编译器侧 `tool_available`
+/// 按文件名扫 PATH 会认 `scalac.bat` ⇒「读数说在场、spawn 说 program not found」
+/// （实测 T0r49 §2.4）。判据与 `src/embed/mod.rs::needs_cmd_route` **同一把尺**：
+///  - 带 `.bat`/`.cmd`/`.exe` 扩展名或含分隔符的形态，CreateProcess 自己解得开 ⇒ 不换；
+///  - 裸名且 PATH 上有同名 `.exe`（python/gcc 这类原生映像）⇒ 不换，行为与修前一字不动；
+///  - 只有「裸名 + 无可执行映像 + 有同名 .bat/.cmd」才换成 `cmd /C <原程序>`。
+///
+/// 返回 `(实际可执行程序, 插在原实参之前的段)`；无需换尺时第二段为空，第一段沿用
+/// `__lz_resolve_program` 的结果（T0r49 的相对程序名按产物目录解析，判据
+/// `c_library_artifact_is_invocable_from_an_unrelated_cwd`）。
+///
+/// 本函数只返回数据、不 spawn ⇒ 每个 runner 仍是**恰好一处** `Command::new`
+/// （`embed_adds_exactly_one_spawn_site_and_it_lives_in_the_shim` 钉着这条不变量）。
+fn __lz_spawn_plan(dir: &std::path::Path, program: &str) -> (std::path::PathBuf, Vec<String>) {
+    if cfg!(windows) {
+        let lower = program.to_ascii_lowercase();
+        if !(lower.ends_with(".bat") || lower.ends_with(".cmd") || lower.ends_with(".exe"))
+            && !program.contains('/')
+            && !program.contains('\\')
+        {
+            let dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).collect())
+                .unwrap_or_default();
+            let has_image = dirs
+                .iter()
+                .any(|d| d.join(format!("{}.exe", program)).is_file());
+            let has_batch = dirs.iter().any(|d| {
+                d.join(format!("{}.bat", program)).is_file()
+                    || d.join(format!("{}.cmd", program)).is_file()
+            });
+            if !has_image && has_batch {
+                return (
+                    std::path::PathBuf::from("cmd"),
+                    vec!["/C".to_string(), program.to_string()],
+                );
+            }
+        }
+    }
+    (__lz_resolve_program(dir, program), Vec::new())
+}
+
 /// 分发入口把值里的反斜杠/换行转义成 `\\` / `\n`，这里逐字还原。
 fn __lz_unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -333,7 +375,9 @@ fn __lz_call(
     params: &[(&str, String)],
 ) -> String {
     let dir = __lz_embed_dir(rel);
-    let mut cmd = Command::new(__lz_resolve_program(&dir, program));
+    let (__prog, __pre) = __lz_spawn_plan(&dir, program);
+    let mut cmd = Command::new(__prog);
+    cmd.args(&__pre);
     cmd.args(prefix);
     cmd.arg(method);
     for (k, v) in params {
@@ -377,7 +421,9 @@ fn __lz_call(
 /// 可执行产物：原样跑一遍，取 stdout（不参与 request/response 协议）。
 fn __lz_exec(artifact: &str, rel: &str, program: &str, prefix: &[&str]) -> String {
     let dir = __lz_embed_dir(rel);
-    let mut cmd = Command::new(__lz_resolve_program(&dir, program));
+    let (__prog, __pre) = __lz_spawn_plan(&dir, program);
+    let mut cmd = Command::new(__prog);
+    cmd.args(&__pre);
     cmd.args(prefix);
     cmd.current_dir(&dir);
     let out = cmd.output().unwrap_or_else(|e| {

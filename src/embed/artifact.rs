@@ -44,9 +44,9 @@ pub fn write_artifacts(repo_root: &Path, t: &EmbedTarget) -> std::io::Result<Vec
             action,
         });
     }
-    // MANIFEST 自身也走幂等写
+    // MANIFEST 自身也走幂等写（run_available 按**产物目录**量，与垫片同一把尺）
     let mpath = dir.join("MANIFEST.txt");
-    let text = manifest_text(t);
+    let text = manifest_text_at(t, Some(&dir));
     let action = match std::fs::read(&mpath) {
         Ok(cur) if cur.as_slice() == text.as_bytes() => "unchanged",
         _ => {
@@ -71,6 +71,13 @@ pub fn artifact_dir(repo_root: &Path, t: &EmbedTarget) -> PathBuf {
 
 /// 确定性 key=value 文本：不含本机绝对路径、不含时间戳 ⇒ 可进 golden 比对
 pub fn manifest_text(t: &EmbedTarget) -> String {
+    manifest_text_at(t, None)
+}
+
+/// 同 `manifest_text`，但额外告知产物目录 —— `run_available` 要按**垫片同一把尺**解析
+/// 相对程序名（`./c_calc.exe` 在产物目录里，不在编译器 cwd 里）。
+/// 传 `None` 时按进程 cwd 解析（旧行为）；落盘路径（`write_artifacts`）传 `Some(产物目录)`。
+pub fn manifest_text_at(t: &EmbedTarget, artifact_dir: Option<&Path>) -> String {
     let mut s = String::new();
     s.push_str(&format!("artifact={}\n", t.artifact));
     s.push_str(&format!("lang={}\n", t.lang));
@@ -100,9 +107,21 @@ pub fn manifest_text(t: &EmbedTarget) -> String {
         }
     ));
     s.push_str(&format!("run={}\n", t.run.display()));
+    // 两行各自可归因（T0r49 §2.1）：旧版只有一行 `toolchain_available=`，量的是 **run 命令**，
+    // 于是 gcc 建库成功之后仍报 `no`（c 的 run 是相对产物名 `./c_calc.exe`，按编译器 cwd 解不开），
+    // 而 scala 的 run 是 `.bat` 包装、扫文件名说「在场」、spawn 说「找不到」——一个读数回答不了两个问题。
+    // `toolchain_available=` 从此只回答**建库工具链在场性**（无建库步 = `n/a`，是「没有这一步」而非失败）；
+    // `run_available=` 回答**运行命令/产物在位性**（相对程序名按产物目录解析，与垫片同一把尺）。
     s.push_str(&format!(
         "toolchain_available={}\n",
-        if t.run.tool_available() { "yes" } else { "no" }
+        match &t.build {
+            Some(b) => if b.tool_available() { "yes" } else { "no" },
+            None => "n/a",
+        }
+    ));
+    s.push_str(&format!(
+        "run_available={}\n",
+        if run_available_at(t, artifact_dir) { "yes" } else { "no" }
     ));
     s.push_str(&format!(
         "dispatch={}\n",
@@ -133,6 +152,30 @@ pub fn manifest_text(t: &EmbedTarget) -> String {
         ));
     }
     s
+}
+
+/// `run_available` 的读数口径：run 命令指向的东西现在在不在位。
+///
+/// 与垫片 `__lz_resolve_program` 同一把尺（`src/bridge/cli.rs`）：
+///  - 含分隔符的**相对**程序名（c 的 `./c_calc.exe`）→ 拼到产物目录下判断，
+///    修前恒 `no`（按编译器 cwd 解不开），修后建库成功即 `yes`；
+///  - 裸名（python / mojo / scala）→ 交给 PATH（`tool_available`）；
+///  - 绝对路径 → 直接看存在性。
+/// 不 spawn，只判存在性 ⇒ 无副作用。
+pub fn run_available_at(t: &EmbedTarget, artifact_dir: Option<&Path>) -> bool {
+    let program = &t.run.program;
+    let p = Path::new(program);
+    if p.is_absolute() {
+        return p.exists();
+    }
+    if program.contains('/') || program.contains('\\') {
+        // 相对且含分隔符：按产物目录解析；没有目录信息时无从判定 ⇒ 如实报 no
+        return match artifact_dir {
+            Some(d) => d.join(p).is_file(),
+            None => false,
+        };
+    }
+    t.run.tool_available()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,11 +225,17 @@ pub fn build_artifact(repo_root: &Path, t: &EmbedTarget, dry: bool) -> BuildOutc
         };
     }
     let dir = artifact_dir(repo_root, t);
-    match std::process::Command::new(&cmd.program)
+    // `.bat`/`.cmd` 形态的工具链（Coursier 的 scalac 是典型）不能直接 CreateProcess ——
+    // 裸名只会补 `.exe`、不认 PATHEXT，而 `tool_available` 扫文件名认 `.bat`，
+    // 于是「读数说在场、spawn 说找不到」（T0r49 §2.4）。两边必须同一把尺：
+    // 这里经 `cmd_route_shape` 换 `cmd /C` 起（cmd 自己按 PATHEXT 解析）。
+    let (program, route_prefix) = super::cmd_route_shape(&cmd.program);
+    let mut spawn = std::process::Command::new(program);
+    spawn
+        .args(&route_prefix)
         .args(&cmd.args)
-        .current_dir(&dir)
-        .output()
-    {
+        .current_dir(&dir);
+    match spawn.output() {
         Ok(o) if o.status.success() => BuildOutcome {
             artifact: t.artifact.clone(),
             status: BuildStatus::Built,

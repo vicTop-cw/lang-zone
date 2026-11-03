@@ -92,6 +92,78 @@ fn strip_type_decor(ty: &str) -> String {
     t
 }
 
+/// 一行文本里是否出现 `return <expr>`（关键字后必须有非空白内容；裸 `return` 不算）
+fn line_has_value_return(s: &str) -> bool {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix("return") {
+        // 排除 `returns` 这类同前缀标识符
+        if rest.is_empty() || rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+            return false;
+        }
+        return !rest.trim().is_empty();
+    }
+    false
+}
+
+/// 顶层定义的**函数体**里是否出现**带值的** `return <expr>`。
+///
+/// 为什么要有这个判据（T0r49 §一「文档没写、实测补上的那一刀」）：返回注解缺失时旧实现既不进
+/// unsupported 也不报错 —— 函数被当成 Unit，垫片发成 `pub fn f(..)`（无返回值），
+/// **调用成功、值被丢掉、没有任何回执**。`def f(): pass` 这类真 Unit 不受影响：
+/// 只认「return 后面还有东西」的行。
+///
+/// 体 = 定义行之后的连续缩进行（允许空行），遇到第一条顶格非空行结束 —— 与「缩进即作用域」
+/// 的摘取口径（`toplevel_lines`）一致；注释行（`#` 起头）不参与判定。
+/// `inline_tail` = 定义行自身冒号之后的部分（覆盖 `def f(n: int): return [n]` 这种单行体，
+/// 探针 p1 报的正是这一形态）。
+fn body_has_value_return(lines: &[&str], def_idx: usize, inline_tail: &str) -> bool {
+    // 定义行冒号之后的部分（`: return [n]` ⇒ 去掉前导 `:` 再判，探针 p1 报的正是这一形态）
+    if line_has_value_return(inline_tail.trim().trim_start_matches(':').trim()) {
+        return true;
+    }
+    let mut i = def_idx + 1;
+    while i < lines.len() {
+        let l = lines[i];
+        if l.trim().is_empty() {
+            i += 1;
+            continue;
+        }
+        if !l.starts_with(' ') && !l.starts_with('\t') {
+            break; // 回到顶格 ⇒ 出了这个函数的体
+        }
+        let t = l.trim();
+        if t.starts_with('#') {
+            i += 1;
+            continue;
+        }
+        if line_has_value_return(t) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// 摘取函数的公共文案：无返回注解却丢弃返回值（判据文本，MANIFEST/回执/测试按此串认）
+pub const DISCARDED_RETURN: &str = "无返回注解且函数体有 return <expr> ⇒ 结果会被静默丢弃";
+
+/// 无返回注解（`ret == None`）但体内有带值的 return ⇒ 置 unsupported
+/// （已有更高优先级的点名原因时不覆盖 —— 保留先报的那条，不做二次归因）。
+fn mark_discarded_return(
+    ret: &Option<String>,
+    lines: &[&str],
+    def_idx: usize,
+    inline_tail: &str,
+    unsupported: &mut Option<String>,
+) {
+    if ret.is_none()
+        && unsupported.is_none()
+        && body_has_value_return(lines, def_idx, inline_tail)
+    {
+        *unsupported = Some(DISCARDED_RETURN.to_string());
+    }
+}
+
 // ──────────────── Python ────────────────
 
 const PY_TY: [(&str, &str); 4] = [
@@ -124,7 +196,13 @@ impl EmbedLang for PythonLang {
 
     fn methods(&self, src: &str) -> Vec<ForeignFn> {
         let mut out = Vec::new();
-        for l in toplevel_lines(src) {
+        // 带下标遍历：判「返回值是否被丢弃」要看**定义行之后**的体，只留顶格行的话体就没了
+        let all: Vec<&str> = src.lines().collect();
+        for (idx, l) in all.iter().enumerate() {
+            let l = *l;
+            if l.is_empty() || l.starts_with(' ') || l.starts_with('\t') {
+                continue;
+            }
             let t = l.trim();
             let rest = if let Some(r) = t.strip_prefix("def ") {
                 r
@@ -176,6 +254,10 @@ impl EmbedLang for PythonLang {
             if rest[open + 1..close].contains("**") {
                 unsupported = Some("**kwargs 形参无法按 key=value 序列化".to_string());
             }
+            // 无返回注解 + 体内带值 return ⇒ 静默丢弃，点名（T0r49 §一）
+            // inline_tail 用 rest 下标（与 close 同尺）：`def f(n: int): return [n]` 的单行体就在这里。
+            // 注：上面 ret 的解析用的是既有的 `t[close + 1..]`（带 `def ` 前缀的偏移，既有行为，不动它）。
+            mark_discarded_return(&ret, &all, idx, &rest[close + 1..], &mut unsupported);
             out.push(ForeignFn {
                 name,
                 params,
@@ -384,7 +466,12 @@ impl EmbedLang for MojoLang {
 /// `fn name(params) -> Type` 形状（Mojo / Scala 共用）
 fn fn_from_toplevel(src: &str, table: &[(&str, &str)], kw: &str) -> Vec<ForeignFn> {
     let mut out = Vec::new();
-    for l in toplevel_lines(src) {
+    let all: Vec<&str> = src.lines().collect();
+    for (idx, l) in all.iter().enumerate() {
+        let l = *l;
+        if l.is_empty() || l.starts_with(' ') || l.starts_with('\t') {
+            continue;
+        }
         let t = l.trim();
         let rest = match t.strip_prefix(kw) {
             Some(r) => r,
@@ -438,6 +525,9 @@ fn fn_from_toplevel(src: &str, table: &[(&str, &str)], kw: &str) -> Vec<ForeignF
                 unsupported = Some(format!("参数 {} 的类型 {} 不在闭集内", p.name, p.lz_type));
             }
         }
+        // 与 python 同一把尺：无返回注解（`->` 之外没有别的返回形态可认）且体里有带值的
+        // return ⇒ 值被静默丢弃，点名（T0r49 §一）。
+        mark_discarded_return(&ret, &all, idx, tail, &mut unsupported);
         out.push(ForeignFn {
             name,
             params,
