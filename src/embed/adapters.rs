@@ -166,7 +166,7 @@ fn mark_discarded_return(
 
 // ──────────────── Python ────────────────
 
-const PY_TY: [(&str, &str); 7] = [
+const PY_TY: [(&str, &str); 8] = [
     ("int", "int"),
     ("float", "float"),
     ("str", "str"),
@@ -174,6 +174,7 @@ const PY_TY: [(&str, &str); 7] = [
     ("List<int>", "list<int>"),
     ("List<float>", "list<float>"),
     ("List<str>", "list<str>"),
+    ("Dict<str,int>", "dict<str,int>"),
 ];
 
 pub struct PythonLang {
@@ -243,7 +244,7 @@ impl EmbedLang for PythonLang {
             let mut unsupported = None;
             if let Some(ref r) = ret {
                 if r.starts_with('?') || value_is_suspicious(r) {
-                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool/list<int>/list<float>/list<str> 内", r));
+                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool/list<int>/list<float>/list<str>/dict<str,int> 内", r));
                 }
             }
             for p in &params {
@@ -291,6 +292,7 @@ impl EmbedLang for PythonLang {
                         "list<int>" => "__lz_json_list_int",
                         "list<float>" => "__lz_json_list_float",
                         "list<str>" => "__lz_json_list_str",
+                        "dict<str,int>" => "__lz_json_dict_str_int",
                         _ => "str",
                     };
                     format!("(\"{}\", {})", p.name, conv)
@@ -308,7 +310,7 @@ impl EmbedLang for PythonLang {
         // 为每个 callable 方法生成独立 arm（if/elif 链），每个 arm 内部有自己的 try/except
         let mut arms = String::new();
         for (i, m) in methods.iter().filter(|m| m.callable()).enumerate() {
-            let ret_is_list = matches!(m.ret.as_deref(), Some("list<int>") | Some("list<float>") | Some("list<str>"));
+            let ret_is_list = matches!(m.ret.as_deref(), Some("list<int>") | Some("list<float>") | Some("list<str>") | Some("dict<str,int>"));
             let branch = if i == 0 { "if" } else { "elif" };
             if ret_is_list {
                 arms.push_str(&format!(
@@ -323,7 +325,7 @@ impl EmbedLang for PythonLang {
             }
         }
         let body = format!(
-            "# -*- coding: utf-8 -*-\n# {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n# 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\nimport importlib\nimport sys\nimport json\n\nARTIFACT = {art_lit}\n\nKNOWN = (\n{names}\n)\n\nCOERCE = {{\n{table}}}\n\n\ndef __lz_bool(s):\n    return s in (\"true\", \"True\", \"1\")\n\n\ndef __lz_json_list_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_str(s):\n    return json.loads(s)\n\n\ndef _out(code, text):\n    one = str(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"%s:%s\\n\" % (code, one))\n    sys.stdout.flush()\n\n\ndef _out_ok_json(text):\n    one = json.dumps(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"OK:%s\\n\" % one)\n    sys.stdout.flush()\n\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        _out(\"ERR\", \"missing method\")\n        return\n    method = argv[0]\n    if method not in KNOWN:\n        _out(\"ERR\", \"no such method: \" + method)\n        return\n    params = {{}}\n    for tok in argv[1:]:\n        k, sep, v = tok.partition(\"=\")\n        if sep:\n            params[k] = v\n    for name, conv in COERCE.get(method, ()): \n        if name in params:\n            params[name] = conv(params[name])\n    mod = importlib.import_module(ARTIFACT)\n    fn = getattr(mod, method, None)\n    if fn is None:\n        _out(\"ERR\", \"not callable: \" + method)\n        return\n{arms}    _out(\"ERR\", \"no such method: \" + method)\n\n\nmain()\n",
+            "# -*- coding: utf-8 -*-\n# {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n# 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\nimport importlib\nimport sys\nimport json\n\nARTIFACT = {art_lit}\n\nKNOWN = (\n{names}\n)\n\nCOERCE = {{\n{table}}}\n\n\ndef __lz_bool(s):\n    return s in (\"true\", \"True\", \"1\")\n\n\ndef __lz_json_list_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_int(s):\n    return json.loads(s)\n\n\ndef _out(code, text):\n    one = str(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"%s:%s\\n\" % (code, one))\n    sys.stdout.flush()\n\n\ndef _out_ok_json(text):\n    one = json.dumps(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"OK:%s\\n\" % one)\n    sys.stdout.flush()\n\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        _out(\"ERR\", \"missing method\")\n        return\n    method = argv[0]\n    if method not in KNOWN:\n        _out(\"ERR\", \"no such method: \" + method)\n        return\n    params = {{}}\n    for tok in argv[1:]:\n        k, sep, v = tok.partition(\"=\")\n        if sep:\n            params[k] = v\n    for name, conv in COERCE.get(method, ()): \n        if name in params:\n            params[name] = conv(params[name])\n    mod = importlib.import_module(ARTIFACT)\n    fn = getattr(mod, method, None)\n    if fn is None:\n        _out(\"ERR\", \"not callable: \" + method)\n        return\n{arms}    _out(\"ERR\", \"no such method: \" + method)\n\n\nmain()\n",
             artifact = artifact,
             art_lit = format!("\"{}\"", artifact),
             names = names.join("\n"),
