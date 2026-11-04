@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod core;
 pub mod embed;
+pub mod project; // M3 T0r55.1.2: cli.rs 子命令下沉到 lib crate
 pub mod r#extern; // Level 1: extern "Rust" 链接桥接
 pub mod ffi;
 pub mod ledger;
