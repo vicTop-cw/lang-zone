@@ -1,14 +1,14 @@
 # 当前阶段目标（Target）
 
-- 本轮聚焦：
-- 验收条件：
+- 本轮聚焦：embed §六.1 可序列化闭集扩展——Dict<str,int> 复合类型序列化支持
+- 验收条件：cargo build 0 error、全量测试零回归、新测试全绿
 
 ---
 
-## 2026-10-17 R26（marvis-probe）：推导式 filter 闭包 `&` 参数模式修复
+## 2026-11-04 T0r56：Dict<str,int> 复合类型序列化
 
-- 焦点：`strip_lambda_type_with_ref`（helpers.rs）passthrough 导致推导式 filter 闭包缺 `&`，`nesting-data-types.lz`/`nesting-closure-lambda.lz` rustc 编译失败（E0308）。
-- 根因：该 helper 只剥类型注解，既不判 body 是否已含 `*param` 解引用，也不补 `&` 模式；旧硬加 `&` 又与 body 已生成的 `*x` 冲突（E0614）。
-- 修复：按 body 决策——body 含 `*param` → 保留裸参数；否则加 `&` 前缀。重建时 after 跳过闭管 `|`（避免 `|&item||` E0214）。
-- 判据：demo_codegen_compile 全量闸门失败数 20（passthrough 对照）→ 13（本修复），净收益 7 项、零新增回归；magic_demos 全绿；lib 441 / cy_codegen_gate 2 / perf_opt_gates 44 / str_boundary 3 / dual_route 4 / incremental_golden 1 / ir_pass_fixes 4 / lzc_* / moddec_* 全绿。剩余 13 项 DEMO 失败在 passthrough 对照下同样存在，属既有 E0308/E0282 基线。
-- 交付：helpers.rs 函数体 + memory/bugs.md BUG-261 台账。
+- 焦点：embed §六.1 可序列化闭集扩展——Dict<str,int> 类型支持（Python 适配器）。
+- 方案：JSON 嵌入编码——LZ 侧序列化为 `{"a":1,"b":2}`，Python 侧 `__lz_json_dict_str_int`/`json.loads` 解码；返回值 `_out_ok_json`/`json.dumps`；Rust 侧 `__lz_parse_dict_str_int` 手写 JSON 对象解析为 `HashMap<String, i64>`，参数序列化 `__lz_dict_to_json`。
+- 判据：lib 469 + embed_unify_r15 23 + embed_gapfixes 17 + embed_stub_shadowing 4 + embed_stem_parity 3 + embed_list_serialization 8 + embed_dict_serialization 8 + codegen_corner_fixes 44 + lz_ir_bootstrap 25 = 543 passed / 0 failed，零回归。
+- 交付：adapters.rs + cli.rs + codegen/mod.rs + tests/embed_dict_serialization.rs（8 条）+ 文档 §六.1 同步 + VERSION_PATCH 195→196。
+- 下一轮：推广到其他 Dict K/V 组合（Dict<str,float>/Dict<str,str>/Dict<int,int>）+ Tuple 复合类型 + 其他语言适配器。
