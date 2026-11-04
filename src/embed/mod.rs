@@ -21,6 +21,7 @@
 pub mod adapters;
 pub mod artifact;
 pub mod dedup;
+pub mod emit;
 pub mod shim;
 
 use std::path::Path;

@@ -880,7 +880,7 @@ fn compile_main(args: Vec<String>) -> i32 {
         };
         // 默认只落盘、不 spawn 外部工具链；要真建库必须显式 `--embed-build`（与单文件同）。
         if !cg.embed_targets().is_empty() {
-            emit_embed_artifacts(
+            lang_zone::embed::emit::emit_embed_artifacts(
                 cg.embed_targets(),
                 args.iter().any(|a| a == "--embed-build"),
                 false,
@@ -1334,7 +1334,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                 // 落盘是幂等的（artifact::write_artifacts 内容相同则一格都不写），
                 // 且自检链里的递归编译产物是 LZ 程序本身（无 embed 块）⇒ 不会重复落盘。
                 if !embed_targets.is_empty() {
-                    emit_embed_artifacts(
+                    lang_zone::embed::emit::emit_embed_artifacts(
                         &embed_targets,
                         args.iter().any(|a| a == "--embed-build"),
                         true,
@@ -1386,7 +1386,7 @@ fn compile_main(args: Vec<String>) -> i32 {
                 // 默认**只落盘、不起子进程** ⇒ 「编译一跑就 spawn 外部程序」不是既有行为的隐含变化；
                 // 要真建库必须显式 --embed-build。
                 if !cg.embed_targets().is_empty() {
-                    emit_embed_artifacts(
+                    lang_zone::embed::emit::emit_embed_artifacts(
                         cg.embed_targets(),
                         args.iter().any(|a| a == "--embed-build"),
                         false,
@@ -1421,106 +1421,8 @@ fn compile_main(args: Vec<String>) -> i32 {
     0
 }
 
-/// Cli 档 embed 产物的交付面：幂等落盘 → 可选建库 → 回执逐条打可 grep 的行。
-/// 硬约束：工具链不在场只能报「跳过」，建库失败必须非零退出 —— 两者都不许伪装成成功。
-///
-/// `receipts_to_stderr`：`--emit=rs-lz` 的 stdout 是**产物本身**（生成的 Rust 源码，
-/// 见 tests/rs_lz_behdiff.rs），回执必须让开，否则 `embed 产物: ...` 会混进源码里
-/// （T0r24：旁路要落盘 embed 产物，但不能破坏这条既有契约）。
-///
-/// `root_override`：产物根（`build/embed` 的父目录）。`None` = 进程 cwd ——
-/// 单文件路径与 `--project` 路径的历史口径一字不动（`dedup::module_key` 也按 cwd
-/// 量模块身份）。`lz build` 走 `Some(项目根)`：它可能在**别的目录**被调用
-/// （`lz build ../proj`），产物必须跟 `<项目根>/build/<name>.exe` 落在同一棵树下，
-/// 否则垫片里的 `build/embed/...` 与盘上位置不是同一把尺。
-///
-/// 可见性 `pub(crate)`：`src/cli.rs`（同一 bin crate 的子模块）是第三条调用路径
-/// （T0r31：`lz build` 此前从不调用本函数 ⇒ project/build 模式产物目录根本不生成）。
-pub(crate) fn emit_embed_artifacts(
-    targets: &[lang_zone::embed::EmbedTarget],
-    embed_build: bool,
-    receipts_to_stderr: bool,
-    root_override: Option<&Path>,
-) {
-    use lang_zone::embed::artifact::{build_artifact, write_artifacts, BuildStatus};
-    use lang_zone::embed::ArtifactKind;
-    // 回执出口：两条路径共用同一份文案，只是流不同
-    macro_rules! receipt {
-        ($($arg:tt)*) => {
-            if receipts_to_stderr {
-                eprintln!($($arg)*)
-            } else {
-                println!($($arg)*)
-            }
-        };
-    }
-    let root = root_override
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let mut failed = 0usize;
-    let mut skipped = 0usize;
-    for t in targets {
-        let kind = match t.kind {
-            ArtifactKind::Executable => "executable",
-            ArtifactKind::Library => "library",
-        };
-        match write_artifacts(&root, t) {
-            Ok(ops) => {
-                let w = ops.iter().filter(|o| o.action == "written").count();
-                receipt!(
-                    "embed 产物: {} kind={} files={} (写盘 {} / 未变 {})",
-                    t.dir_rel,
-                    kind,
-                    ops.len(),
-                    w,
-                    ops.len() - w
-                );
-            }
-            Err(e) => {
-                eprintln!("embed 产物写盘失败 {}: {}", t.dir_rel, e);
-                failed += 1;
-            }
-        }
-        if embed_build {
-            let o = build_artifact(&root, t, false);
-            match o.status {
-                BuildStatus::NotNeeded => {
-                    receipt!("embed 建库: {} 无该步（{}）", o.artifact, o.detail)
-                }
-                BuildStatus::Built => receipt!("embed 建库: {} 完成 ({})", o.artifact, o.cmd),
-                BuildStatus::Skipped => {
-                    receipt!("embed 建库: {} 跳过 —— {}", o.artifact, o.detail);
-                    skipped += 1;
-                }
-                BuildStatus::Failed => {
-                    eprintln!(
-                        "embed 建库: {} 失败: {}\n  命令: {}",
-                        o.artifact, o.detail, o.cmd
-                    );
-                    failed += 1;
-                }
-            }
-        }
-        // 取不到的调用面逐条点名：静默少一个函数正是本项目历来在清的那类错
-        for m in t.unsupported_methods() {
-            receipt!(
-                "embed 未覆盖: {}::{} —— {}",
-                t.artifact,
-                m.name,
-                m.unsupported
-                    .as_deref()
-                    .unwrap_or("签名不在可序列化闭集 int/float/str/bool 内")
-            );
-        }
-    }
-    if failed > 0 {
-        eprintln!("embed: {} 件失败 ⇒ 非零退出（不许报成功）", failed);
-        std::process::exit(1);
-    }
-    if skipped > 0 {
-        eprintln!("embed: {} 件因工具链缺失跳过建库 ⇒ 产物已落盘但未验证", skipped);
-    }
-}
+/// Cli 档 embed 产物的交付面已下沉到 lib crate：`lang_zone::embed::emit::emit_embed_artifacts`（T0r55.1.1）。
+/// 调用点改用 `lang_zone::embed::emit::emit_embed_artifacts`，与 CY/（lzcyc）共用同一条交付面。
 
 /// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，
 /// 否则默认入口（本地函数查不到返回类型时回退查询外部模块签名）

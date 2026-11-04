@@ -591,7 +591,7 @@ pub fn cmd_build(args: &[String]) -> i32 {
     // 同一条交付面（幂等落盘 → 可选建库 → 回执逐条 → 失败非零），不另写第二套。
     // 产物根取**项目根**：那正是 `build/<name>.exe` 所在目录，也是垫片相对路径的锚点。
     if !cg.embed_targets().is_empty() {
-        crate::emit_embed_artifacts(
+        lang_zone::embed::emit::emit_embed_artifacts(
             cg.embed_targets(),
             args.iter().any(|a| a == "--embed-build"),
             false,
