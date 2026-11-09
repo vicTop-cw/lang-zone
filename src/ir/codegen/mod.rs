@@ -678,6 +678,10 @@ impl CodeGen {
                         path: "std::collections::HashMap".to_string(),
                         args: vec![IrType::Str, IrType::Str],
                     }),
+                    Some("dict<int,int>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Int, IrType::Int],
+                    }),
                     _ => None,
                 };
                 out.push((format!("{}_{}", t.artifact, m.name), ty.clone()));
