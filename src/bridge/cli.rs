@@ -351,6 +351,24 @@ fn __lz_dict_to_json(map: &std::collections::HashMap<String, i64>) -> String {
     format!("{{{}}}", pairs.join(","))
 }
 
+/// 把 HashMap<String, f64> 序列化为 JSON 对象字符串 `{"key":value,...}`
+fn __lz_dict_to_json_float(map: &std::collections::HashMap<String, f64>) -> String {
+    let mut pairs: Vec<String> = Vec::with_capacity(map.len());
+    for (k, v) in map.iter() {
+        pairs.push(format!("\"{}\":{}", k, v));
+    }
+    format!("{{{}}}", pairs.join(","))
+}
+
+/// 把 HashMap<String, String> 序列化为 JSON 对象字符串 `{"key":"value",...}`
+fn __lz_dict_to_json_str(map: &std::collections::HashMap<String, String>) -> String {
+    let mut pairs: Vec<String> = Vec::with_capacity(map.len());
+    for (k, v) in map.iter() {
+        pairs.push(format!("\"{}\":\"{}\"", k, v));
+    }
+    format!("{{{}}}", pairs.join(","))
+}
+
 /// 分发入口把值里的反斜杠/换行转义成 `\\` / `\n`，这里逐字还原。
 fn __lz_unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -505,6 +523,142 @@ fn __lz_parse_dict_str_int(raw: &str, artifact: &str, method: &str) -> std::coll
     map
 }
 
+/// 解析 `{"a":1.5,"b":2.0}` 形式的 JSON 对象为 HashMap<String, f64>（手写解析，避免依赖 serde_json）
+fn __lz_parse_dict_str_float(raw: &str, artifact: &str, method: &str) -> std::collections::HashMap<String, f64> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 Dict<str,float> JSON 对象", artifact, method, raw);
+    }
+    let inner = &trimmed[1..trimmed.len()-1];
+    let mut map = std::collections::HashMap::new();
+    if inner.trim().is_empty() {
+        return map;
+    }
+    let mut pairs: Vec<&str> = Vec::new();
+    let mut depth = 0;
+    let mut in_str = false;
+    let mut escape = false;
+    let mut start = 0;
+    for (i, c) in inner.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if c == '\\' {
+            escape = true;
+            continue;
+        }
+        if c == '"' {
+            in_str = !in_str;
+            continue;
+        }
+        if in_str {
+            continue;
+        }
+        if c == ':' || c == '{' || c == '[' {
+            depth += 1;
+        } else if c == '}' || c == ']' {
+            depth -= 1;
+        }
+        if c == ',' && depth == 0 {
+            pairs.push(&inner[start..i]);
+            start = i + 1;
+        }
+    }
+    pairs.push(&inner[start..]);
+    for pair in pairs {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let colon = pair.find(':').unwrap_or_else(|| panic!(
+            "embed 产物 {} 的 {} 返回值 `{}` 的键值对 `{}` 缺少冒号",
+            artifact, method, raw, pair
+        ));
+        let key_raw = pair[..colon].trim();
+        let val_raw = pair[colon+1..].trim();
+        let key = if key_raw.starts_with('"') && key_raw.ends_with('"') && key_raw.len() >= 2 {
+            &key_raw[1..key_raw.len()-1]
+        } else {
+            panic!("embed 产物 {} 的 {} 返回值 `{}` 的键 `{}` 不是字符串", artifact, method, raw, key_raw)
+        };
+        let val: f64 = val_raw.parse::<f64>().unwrap_or_else(|e| {
+            panic!("embed 产物 {} 的 {} 返回值 `{}` 的值 `{}` 不是 float：{}", artifact, method, raw, val_raw, e)
+        });
+        map.insert(key.to_string(), val);
+    }
+    map
+}
+
+/// 解析 `{"a":"x","b":"y"}` 形式的 JSON 对象为 HashMap<String, String>（手写解析，避免依赖 serde_json）
+fn __lz_parse_dict_str_str(raw: &str, artifact: &str, method: &str) -> std::collections::HashMap<String, String> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 Dict<str,str> JSON 对象", artifact, method, raw);
+    }
+    let inner = &trimmed[1..trimmed.len()-1];
+    let mut map = std::collections::HashMap::new();
+    if inner.trim().is_empty() {
+        return map;
+    }
+    let mut pairs: Vec<&str> = Vec::new();
+    let mut depth = 0;
+    let mut in_str = false;
+    let mut escape = false;
+    let mut start = 0;
+    for (i, c) in inner.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if c == '\\' {
+            escape = true;
+            continue;
+        }
+        if c == '"' {
+            in_str = !in_str;
+            continue;
+        }
+        if in_str {
+            continue;
+        }
+        if c == ':' || c == '{' || c == '[' {
+            depth += 1;
+        } else if c == '}' || c == ']' {
+            depth -= 1;
+        }
+        if c == ',' && depth == 0 {
+            pairs.push(&inner[start..i]);
+            start = i + 1;
+        }
+    }
+    pairs.push(&inner[start..]);
+    for pair in pairs {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let colon = pair.find(':').unwrap_or_else(|| panic!(
+            "embed 产物 {} 的 {} 返回值 `{}` 的键值对 `{}` 缺少冒号",
+            artifact, method, raw, pair
+        ));
+        let key_raw = pair[..colon].trim();
+        let val_raw = pair[colon+1..].trim();
+        let key = if key_raw.starts_with('"') && key_raw.ends_with('"') && key_raw.len() >= 2 {
+            &key_raw[1..key_raw.len()-1]
+        } else {
+            panic!("embed 产物 {} 的 {} 返回值 `{}` 的键 `{}` 不是字符串", artifact, method, raw, key_raw)
+        };
+        let val = if val_raw.starts_with('"') && val_raw.ends_with('"') && val_raw.len() >= 2 {
+            &val_raw[1..val_raw.len()-1]
+        } else {
+            panic!("embed 产物 {} 的 {} 返回值 `{}` 的值 `{}` 不是字符串", artifact, method, raw, val_raw)
+        };
+        map.insert(key.to_string(), val.replace("\\\"", "\"").replace("\\\\", "\\"));
+    }
+    map
+}
+
 /// 协议调用：`<method> key=value ...` 走 argv，响应取 stdout 最后一行。
 /// 起不来 / 非零退出 / ERR: / 无响应 一律 panic 并带上产物名与原因 —— 绝不返回默认值。
 fn __lz_call(
@@ -641,6 +795,8 @@ fn embed_param_ty(lz: &str) -> &'static str {
         "list<float>" => "Vec<f64>",
         "list<str>" => "Vec<String>",
         "dict<str,int>" => "std::collections::HashMap<String, i64>",
+        "dict<str,float>" => "std::collections::HashMap<String, f64>",
+        "dict<str,str>" => "std::collections::HashMap<String, String>",
         _ => "&str",
     }
 }
@@ -655,6 +811,8 @@ fn embed_ret_ty(ret: &str) -> &'static str {
         "list<float>" => "Vec<f64>",
         "list<str>" => "Vec<String>",
         "dict<str,int>" => "std::collections::HashMap<String, i64>",
+        "dict<str,float>" => "std::collections::HashMap<String, f64>",
+        "dict<str,str>" => "std::collections::HashMap<String, String>",
         _ => "()",
     }
 }
@@ -677,6 +835,14 @@ fn embed_arg_expr(ident: &str, lz: &str) -> String {
         ),
         "dict<str,int>" => format!(
             "{{ __lz_dict_to_json({}) }}",
+            ident
+        ),
+        "dict<str,float>" => format!(
+            "{{ __lz_dict_to_json_float({}) }}",
+            ident
+        ),
+        "dict<str,str>" => format!(
+            "{{ __lz_dict_to_json_str({}) }}",
             ident
         ),
         _ => format!("{}.to_string()", ident),
@@ -776,6 +942,14 @@ fn embed_wrapper_fn(ep: &EmbedEndpoint, f: &EmbedFnSig) -> String {
             )),
             "dict<str,int>" => out.push_str(&format!(
                 "    __lz_parse_dict_str_int(__r, {}, {})\n",
+                art, method
+            )),
+            "dict<str,float>" => out.push_str(&format!(
+                "    __lz_parse_dict_str_float(__r, {}, {})\n",
+                art, method
+            )),
+            "dict<str,str>" => out.push_str(&format!(
+                "    __lz_parse_dict_str_str(__r, {}, {})\n",
                 art, method
             )),
             _ => out.push_str("    __r\n"),

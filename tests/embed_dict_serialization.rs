@@ -240,3 +240,240 @@ fn embed_param_ret_ty_covers_dict_str_int() {
     let (_, body) = lang.dispatch_file("python_test", &refs).expect("dispatch_file");
     assert!(body.contains("__lz_json_dict_str_int"));
 }
+
+// ── T0r57：dict<str,float> / dict<str,str> Rust 侧序列化补全 ──
+
+/// 单元测试：Python dispatch_file 生成的代码包含 dict<str,float> JSON 解码/编码逻辑
+#[test]
+fn python_dispatch_includes_json_for_dict_str_float() {
+    use lang_zone::embed::adapters::adapter;
+
+    let lang = adapter("python");
+    let src = "def calc_ratios(data: Dict<str,float>) -> Dict<str,float>:\n    return {k: v / 2.0 for k, v in data.items()}\n";
+    let methods = lang.methods(src);
+
+    assert_eq!(methods.len(), 1);
+    let m = &methods[0];
+    assert_eq!(m.name, "calc_ratios");
+    assert!(m.callable(), "Dict<str,float> 签名应可序列化");
+    assert_eq!(m.ret.as_deref(), Some("dict<str,float>"), "返回类型应为 dict<str,float>");
+    assert_eq!(m.params.len(), 1, "应有 1 个参数");
+    assert_eq!(m.params[0].lz_type, "dict<str,float>", "参数类型应为 dict<str,float>");
+
+    let refs: Vec<&_> = methods.iter().collect();
+    let (path, body) = lang.dispatch_file("python_test", &refs).expect("dispatch_file");
+    assert!(path.contains("__lz_dispatch_python_test.py"));
+
+    // 验证 JSON 解码函数存在
+    assert!(body.contains("__lz_json_dict_str_float"), "应包含 JSON 解码函数");
+    assert!(body.contains("json.loads"), "应使用 json.loads 解码");
+
+    // 验证 JSON 编码函数存在
+    assert!(body.contains("_out_ok_json"), "应包含 JSON 编码输出函数");
+    assert!(body.contains("json.dumps"), "应使用 json.dumps 编码");
+
+    // 验证 dict<str,float> 返回值使用 _out_ok_json
+    let arm = body.split("if method == \"calc_ratios\":").nth(1).unwrap_or("");
+    assert!(arm.contains("_out_ok_json"), "calc_ratios 返回值应使用 JSON 编码");
+    assert!(!arm.contains("_out(\"OK\""), "calc_ratios 不应使用普通 _out");
+}
+
+/// 单元测试：Python dispatch_file 生成的代码包含 dict<str,str> JSON 解码/编码逻辑
+#[test]
+fn python_dispatch_includes_json_for_dict_str_str() {
+    use lang_zone::embed::adapters::adapter;
+
+    let lang = adapter("python");
+    let src = "def upper_keys(data: Dict<str,str>) -> Dict<str,str>:\n    return {k.upper(): v for k, v in data.items()}\n";
+    let methods = lang.methods(src);
+
+    assert_eq!(methods.len(), 1);
+    let m = &methods[0];
+    assert_eq!(m.name, "upper_keys");
+    assert!(m.callable(), "Dict<str,str> 签名应可序列化");
+    assert_eq!(m.ret.as_deref(), Some("dict<str,str>"), "返回类型应为 dict<str,str>");
+    assert_eq!(m.params.len(), 1, "应有 1 个参数");
+    assert_eq!(m.params[0].lz_type, "dict<str,str>", "参数类型应为 dict<str,str>");
+
+    let refs: Vec<&_> = methods.iter().collect();
+    let (path, body) = lang.dispatch_file("python_test", &refs).expect("dispatch_file");
+    assert!(path.contains("__lz_dispatch_python_test.py"));
+
+    assert!(body.contains("__lz_json_dict_str_str"), "应包含 JSON 解码函数");
+    assert!(body.contains("json.loads"), "应使用 json.loads 解码");
+    assert!(body.contains("_out_ok_json"), "应包含 JSON 编码输出函数");
+    assert!(body.contains("json.dumps"), "应使用 json.dumps 编码");
+
+    let arm = body.split("if method == \"upper_keys\":").nth(1).unwrap_or("");
+    assert!(arm.contains("_out_ok_json"), "upper_keys 返回值应使用 JSON 编码");
+    assert!(!arm.contains("_out(\"OK\""), "upper_keys 不应使用普通 _out");
+}
+
+/// 单元测试：dict<str,float> 参数走 JSON 解码，返回标量用普通 _out
+#[test]
+fn python_dispatch_dict_str_float_param_scalar_ret() {
+    use lang_zone::embed::adapters::adapter;
+
+    let lang = adapter("python");
+    let src = "def total_area(data: Dict<str,float>) -> float:\n    return sum(data.values())\n";
+    let methods = lang.methods(src);
+
+    assert_eq!(methods.len(), 1);
+    let m = &methods[0];
+    assert!(m.callable(), "Dict<str,float> 参数 + float 返回值应可序列化");
+    assert_eq!(m.params[0].lz_type, "dict<str,float>");
+    assert_eq!(m.ret.as_deref(), Some("float"));
+
+    let refs: Vec<&_> = methods.iter().collect();
+    let (_, body) = lang.dispatch_file("python_test", &refs).expect("dispatch_file");
+
+    assert!(body.contains("__lz_json_dict_str_float"), "COERCE 表应包含 Dict 解码函数");
+    let arm = body.split("if method == \"total_area\":").nth(1).unwrap_or("");
+    assert!(arm.contains("_out(\"OK\""), "total_area 返回值应使用普通 _out");
+    assert!(!arm.contains("_out_ok_json"), "total_area 返回值不应使用 JSON 编码");
+}
+
+/// 单元测试：dict<str,str> 参数走 JSON 解码，返回标量用普通 _out
+#[test]
+fn python_dispatch_dict_str_str_param_scalar_ret() {
+    use lang_zone::embed::adapters::adapter;
+
+    let lang = adapter("python");
+    let src = "def count_entries(data: Dict<str,str>) -> int:\n    return len(data)\n";
+    let methods = lang.methods(src);
+
+    assert_eq!(methods.len(), 1);
+    let m = &methods[0];
+    assert!(m.callable(), "Dict<str,str> 参数 + int 返回值应可序列化");
+    assert_eq!(m.params[0].lz_type, "dict<str,str>");
+    assert_eq!(m.ret.as_deref(), Some("int"));
+
+    let refs: Vec<&_> = methods.iter().collect();
+    let (_, body) = lang.dispatch_file("python_test", &refs).expect("dispatch_file");
+
+    assert!(body.contains("__lz_json_dict_str_str"), "COERCE 表应包含 Dict 解码函数");
+    let arm = body.split("if method == \"count_entries\":").nth(1).unwrap_or("");
+    assert!(arm.contains("_out(\"OK\""), "count_entries 返回值应使用普通 _out");
+    assert!(!arm.contains("_out_ok_json"), "count_entries 返回值不应使用 JSON 编码");
+}
+
+/// 单元测试：三种 Dict K/V 组合共存时各用各的解码函数
+#[test]
+fn python_dispatch_three_dict_variants_coexist() {
+    use lang_zone::embed::adapters::adapter;
+
+    let lang = adapter("python");
+    let src = "def f_int(d: Dict<str,int>) -> Dict<str,int>:\n    return d\n\n\ndef f_float(d: Dict<str,float>) -> Dict<str,float>:\n    return d\n\n\ndef f_str(d: Dict<str,str>) -> Dict<str,str>:\n    return d\n";
+    let methods = lang.methods(src);
+
+    assert_eq!(methods.len(), 3);
+    for m in &methods {
+        assert!(m.callable(), "{} 签名应可序列化", m.name);
+    }
+
+    let refs: Vec<&_> = methods.iter().collect();
+    let (_, body) = lang.dispatch_file("python_test", &refs).expect("dispatch_file");
+
+    // 三种解码函数都应存在
+    assert!(body.contains("__lz_json_dict_str_int"), "应包含 int dict 解码函数");
+    assert!(body.contains("__lz_json_dict_str_float"), "应包含 float dict 解码函数");
+    assert!(body.contains("__lz_json_dict_str_str"), "应包含 str dict 解码函数");
+
+    // 3 个方法的 arm 都用 JSON 编码输出返回值
+    let arm_bodies: Vec<&str> = body
+        .lines()
+        .filter(|l| l.trim().starts_with("_out_ok_json") && !l.trim().starts_with("def _out_ok_json"))
+        .collect();
+    assert_eq!(arm_bodies.len(), 3, "应有 3 个 arm 使用 _out_ok_json 输出，实际 {}", arm_bodies.len());
+}
+
+/// 单元测试：Rust 侧 embed_wrapper_fn 对 dict<str,float> 返回值调用 __lz_parse_dict_str_float
+/// 通过 generate_embed_module 间接验证（不依赖实际 spawn）
+#[test]
+fn rust_embed_wrapper_parses_dict_str_float_ret() {
+    use lang_zone::bridge::cli::{EmbedEndpoint, EmbedFnSig, generate_embed_module};
+
+    let ep = EmbedEndpoint {
+        artifact: "py_calc".to_string(),
+        dir_rel: "target/embed_test".to_string(),
+        program: "python".to_string(),
+        prefix: vec![],
+        kind: "library",
+        fns: vec![EmbedFnSig {
+            wrapper: "calc_ratios".to_string(),
+            method: "calc_ratios".to_string(),
+            params: vec![("data".to_string(), "dict<str,float>".to_string())],
+            ret: "dict<str,float>".to_string(),
+        }],
+    };
+    let code = generate_embed_module(&[ep]);
+
+    // 参数序列化：应调用 __lz_dict_to_json_float
+    assert!(code.contains("__lz_dict_to_json_float"), "参数序列化应调用 __lz_dict_to_json_float");
+    // 参数类型：HashMap<String, f64>
+    assert!(code.contains("HashMap<String, f64>"), "参数类型应为 HashMap<String, f64>");
+    // 返回值反序列化：应调用 __lz_parse_dict_str_float
+    assert!(code.contains("__lz_parse_dict_str_float"), "返回值反序列化应调用 __lz_parse_dict_str_float");
+    // 返回值类型：HashMap<String, f64>
+    assert!(code.contains("-> std::collections::HashMap<String, f64>"), "返回值类型应为 HashMap<String, f64>");
+}
+
+/// 单元测试：Rust 侧 embed_wrapper_fn 对 dict<str,str> 返回值调用 __lz_parse_dict_str_str
+#[test]
+fn rust_embed_wrapper_parses_dict_str_str_ret() {
+    use lang_zone::bridge::cli::{EmbedEndpoint, EmbedFnSig, generate_embed_module};
+
+    let ep = EmbedEndpoint {
+        artifact: "py_labels".to_string(),
+        dir_rel: "target/embed_test".to_string(),
+        program: "python".to_string(),
+        prefix: vec![],
+        kind: "library",
+        fns: vec![EmbedFnSig {
+            wrapper: "upper_keys".to_string(),
+            method: "upper_keys".to_string(),
+            params: vec![("data".to_string(), "dict<str,str>".to_string())],
+            ret: "dict<str,str>".to_string(),
+        }],
+    };
+    let code = generate_embed_module(&[ep]);
+
+    // 参数序列化：应调用 __lz_dict_to_json_str
+    assert!(code.contains("__lz_dict_to_json_str"), "参数序列化应调用 __lz_dict_to_json_str");
+    // 参数类型：HashMap<String, String>
+    assert!(code.contains("HashMap<String, String>"), "参数类型应为 HashMap<String, String>");
+    // 返回值反序列化：应调用 __lz_parse_dict_str_str
+    assert!(code.contains("__lz_parse_dict_str_str"), "返回值反序列化应调用 __lz_parse_dict_str_str");
+    // 返回值类型：HashMap<String, String>
+    assert!(code.contains("-> std::collections::HashMap<String, String>"), "返回值类型应为 HashMap<String, String>");
+}
+
+/// 单元测试：Rust 侧 embed_wrapper_fn 对 dict<str,float> 参数 + dict<str,int> 返回值（跨组合）
+#[test]
+fn rust_embed_wrapper_cross_dict_variants() {
+    use lang_zone::bridge::cli::{EmbedEndpoint, EmbedFnSig, generate_embed_module};
+
+    let ep = EmbedEndpoint {
+        artifact: "py_conv".to_string(),
+        dir_rel: "target/embed_test".to_string(),
+        program: "python".to_string(),
+        prefix: vec![],
+        kind: "library",
+        fns: vec![EmbedFnSig {
+            wrapper: "convert_to_int_map".to_string(),
+            method: "convert_to_int_map".to_string(),
+            params: vec![("data".to_string(), "dict<str,float>".to_string())],
+            ret: "dict<str,int>".to_string(),
+        }],
+    };
+    let code = generate_embed_module(&[ep]);
+
+    // 参数序列化用 float 版
+    assert!(code.contains("__lz_dict_to_json_float"), "float 参数序列化应调用 __lz_dict_to_json_float");
+    // 参数类型用 float 版
+    assert!(code.contains("HashMap<String, f64>"), "float 参数类型应为 HashMap<String, f64>");
+    // 返回值反序列化用 int 版
+    assert!(code.contains("__lz_parse_dict_str_int"), "int 返回值反序列化应调用 __lz_parse_dict_str_int");
+    // 返回值类型用 int 版
+    assert!(code.contains("-> std::collections::HashMap<String, i64>"), "int 返回值类型应为 HashMap<String, i64>");
+}
