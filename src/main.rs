@@ -816,73 +816,8 @@ fn compile_main(args: Vec<String>) -> i32 {
     if args.iter().any(|a| a == "--emit=ir-lz") {
         match build_ir_opt(&module, lzi_registry.as_ref()) {
             Ok(ir_module) => {
-                let lz_source =
-                    lang_zone::ir::lz_codegen::ir_module_to_lz_source(&ir_module);
-                let lz_path = replace_ext(path, ".lz", ".lzlz");
-                fs::write(&lz_path, &lz_source).unwrap_or_else(|e| {
-                    eprintln!("Error writing {}: {}", lz_path, e);
-                    std::process::exit(1);
-                });
-                eprintln!("Generated {} -> {} (LZ IR codegen)", path, lz_path);
-                // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
-                // N3 同族：产物路径先绝对化（相对入参下裸文件名不按 cwd 解析）。
-                let self_exe = std::env::current_exe().unwrap_or_default();
-                let lz_path_abs = absolutize(&lz_path);
-                let build = match Command::new(&self_exe).arg(&lz_path_abs).output() {
-                    Ok(out) => out,
-                    Err(e) => {
-                        eprintln!(
-                            "LZ IR codegen 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
-                            self_exe.display(),
-                            lz_path_abs.display()
-                        );
-                        std::process::exit(1);
-                    }
-                };
-                if !build.status.success() {
-                    eprintln!(
-                        "LZ IR codegen 编译失败: {}",
-                        String::from_utf8_lossy(&build.stderr)
-                    );
-                    std::process::exit(1);
-                }
-                let rs_path = replace_ext(&lz_path, ".lzlz", ".rs");
-                // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
-                let (builtins, builtins_deps) = builtins_link_or_exit("LZ IR codegen 自检");
-                let exe_path = replace_ext(&lz_path, ".lzlz", ".exe");
-                let rs_path_abs = absolutize(&rs_path);
-                let exe_path_abs = absolutize(&exe_path);
-                let rc = match Command::new("rustc")
-                    .args(["--edition", "2021"])
-                    .arg(&rs_path_abs)
-                    .arg("--extern")
-                    .arg(format!("lz_builtins={}", builtins.display()))
-                    .arg("-L")
-                    .arg(format!("dependency={}", builtins_deps.display()))
-                    .arg("-o")
-                    .arg(&exe_path_abs)
-                    .output()
-                {
-                    Ok(out) => out,
-                    Err(e) => {
-                        eprintln!("LZ IR codegen 失败: 无法启动 rustc（不在 PATH？）: {e}");
-                        std::process::exit(1);
-                    }
-                };
-                if !rc.status.success() {
-                    eprintln!(
-                        "LZ IR codegen rustc 失败: {}",
-                        String::from_utf8_lossy(&rc.stderr)
-                    );
-                    std::process::exit(1);
-                }
-                match run_selfcheck_exe(&exe_path) {
-                    Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
-                    Err(msg) => {
-                        eprintln!("LZ IR codegen 自检失败: {msg}");
-                        std::process::exit(1);
-                    }
-                }
+                // M5 T0r56.1.2：编排已下沉 lib crate，main.rs 只留 IR 构建 + 分派
+                lang_zone::frontend::bootstrap_emit::run_lz_ir_selfcheck(&ir_module, path);
                 return 0;
             }
             Err(e) => {
@@ -899,105 +834,13 @@ fn compile_main(args: Vec<String>) -> i32 {
     if args.iter().any(|a| a == "--emit=rs-lz") {
         match build_ir_opt(&module, lzi_registry.as_ref()) {
             Ok(ir_module) => {
-                // T0r24：Cli 档 embed 的产物名/目录/垫片在 Rust 侧一次算好，**同一份**
-                // 结论既穿透给 LZ（数据面 + `pub mod __lz_embed`），也用于本函数末尾落盘。
-                // 命名主干取 CLI 入参原样（`calc.lz`）——与原生分支 main.rs:1340 的
-                // `cg.set_embed_stem(&path.to_string())` 是同一把尺（`embed::base_stem`
-                // + `dedup::artifact_name`），故两条路径的产物名不可能漂移。
-                let embed_stem = path.as_str();
-                let embed_targets = lang_zone::ir::lz_codegen::embed_targets_of(
+                // M5 T0r56.1.2：编排已下沉 lib crate（含 T0r24 embed 产物 Rust 侧落盘），
+                // main.rs 只留 IR 构建 + 分派
+                lang_zone::frontend::bootstrap_emit::run_lz_rs_selfcheck(
                     &ir_module,
-                    Some(embed_stem),
+                    path,
+                    args.iter().any(|a| a == "--embed-build"),
                 );
-                let rs_lz_src = lang_zone::ir::lz_codegen::ir_module_to_rs_lz_source_with_stem(
-                    &ir_module,
-                    Some(embed_stem),
-                );
-                let lz_path = replace_ext(path, ".lz", ".lzrs");
-                fs::write(&lz_path, &rs_lz_src).unwrap_or_else(|e| {
-                    eprintln!("Error writing {}: {}", lz_path, e);
-                    std::process::exit(1);
-                });
-                eprintln!("Generated {} -> {} (LZ Rust codegen)", path, lz_path);
-                // 递归编译运行：lang-zone <lz_path> → .rs → rustc → exe → stdout
-                //
-                // N3：产物路径一律先绝对化，再交给外部进程。相对入参时 exe_path
-                // 只是裸文件名（如 "match_patterns.exe"），`Command::new` 不按
-                // cwd 解析 → 自检 NotFound panic；详见 absolutize 的注释。
-                // 产物落盘位置不变（仍是 <入参目录>/<stem>.{lzrs,rs,exe}），
-                // 只是改用绝对形态寻址。
-                let self_exe = std::env::current_exe().unwrap_or_default();
-                let lz_path_abs = absolutize(&lz_path);
-                let build = match Command::new(&self_exe).arg(&lz_path_abs).output() {
-                    Ok(out) => out,
-                    Err(e) => {
-                        eprintln!(
-                            "LZ Rust codegen 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
-                            self_exe.display(),
-                            lz_path_abs.display()
-                        );
-                        std::process::exit(1);
-                    }
-                };
-                if !build.status.success() {
-                    eprintln!(
-                        "LZ Rust codegen 编译失败: {}",
-                        String::from_utf8_lossy(&build.stderr)
-                    );
-                    std::process::exit(1);
-                }
-                let rs_path = replace_ext(&lz_path, ".lzrs", ".rs");
-                // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
-                let (builtins, builtins_deps) = builtins_link_or_exit("LZ Rust codegen 自检");
-                let exe_path = replace_ext(&lz_path, ".lzrs", ".exe");
-                let rs_path_abs = absolutize(&rs_path);
-                let exe_path_abs = absolutize(&exe_path);
-                let rc = match Command::new("rustc")
-                    .args(["--edition", "2021"])
-                    .arg(&rs_path_abs)
-                    .arg("--extern")
-                    .arg(format!("lz_builtins={}", builtins.display()))
-                    .arg("-L")
-                    .arg(format!("dependency={}", builtins_deps.display()))
-                    .arg("-o")
-                    .arg(&exe_path_abs)
-                    .output()
-                {
-                    Ok(out) => out,
-                    Err(e) => {
-                        eprintln!(
-                            "LZ Rust codegen 失败: 无法启动 rustc（不在 PATH？）: {e}"
-                        );
-                        std::process::exit(1);
-                    }
-                };
-                if !rc.status.success() {
-                    eprintln!(
-                        "LZ Rust codegen rustc 失败: {}",
-                        String::from_utf8_lossy(&rc.stderr)
-                    );
-                    std::process::exit(1);
-                }
-                match run_selfcheck_exe(&exe_path) {
-                    Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
-                    Err(msg) => {
-                        eprintln!("LZ Rust codegen 自检失败: {msg}");
-                        std::process::exit(1);
-                    }
-                }
-                // T0r24：Cli 档产物**只能由 Rust 侧落盘**（LZ 程序不写文件）。
-                // 回执走 stderr：`--emit=rs-lz` 的 stdout 是产物本身（生成的 Rust 源码，
-                // 见 tests/rs_lz_behdiff.rs 的契约），把 `embed 产物: ...` 混进去会污染它。
-                // 落盘是幂等的（artifact::write_artifacts 内容相同则一格都不写），
-                // 且自检链里的递归编译产物是 LZ 程序本身（无 embed 块）⇒ 不会重复落盘。
-                if !embed_targets.is_empty() {
-                    lang_zone::embed::emit::emit_embed_artifacts(
-                        &embed_targets,
-                        args.iter().any(|a| a == "--embed-build"),
-                        true,
-                        None,
-                    );
-                }
                 return 0;
             }
             Err(e) => {

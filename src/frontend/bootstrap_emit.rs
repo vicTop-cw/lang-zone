@@ -282,16 +282,27 @@ pub fn run_lz_frontend(path: &str, source: &str, mode: &str) {
     });
     eprintln!("Generated {} -> {} (LZ {} frontend)", path, lz_path, mode);
 
-    // 与 --emit=ir-lz 相同的递归管线：lang-zone → .rs → rustc → exe → stdout
+    // 与 --emit=ir-lz 相同的递归管线（共享实现，见 run_recursive_selfcheck）
+    let label = format!("LZ {} frontend", mode);
+    run_recursive_selfcheck(&lz_path, ".lzfront", &label, "LZ frontend");
+}
+
+/// 递归自检管线公共体（T0r56.1.2 抽取）：源文件已写盘 →
+/// 当前编译器自编译 → rustc 链接 lz_builtins → 运行 → stdout 透传。
+///
+/// `src_ext`：派生产物扩展名（".lzfront"/".lzlz"/".lzrs"）；
+/// `label`：错误信息前缀（如 "LZ IR codegen"）；
+/// `link_label`：rlib 缺失报错前缀（lex/parse 共用 "LZ frontend"，与
+/// 原 builtins_link_or_exit 的 what 参数逐字一致）。
+fn run_recursive_selfcheck(lz_path: &str, src_ext: &str, label: &str, link_label: &str) {
     // N3 同族：产物路径先绝对化（相对入参下裸文件名不按 cwd 解析）。
     let self_exe = std::env::current_exe().unwrap_or_default();
-    let lz_path_abs = absolutize(&lz_path);
+    let lz_path_abs = absolutize(lz_path);
     let build = match Command::new(&self_exe).arg(&lz_path_abs).output() {
         Ok(out) => out,
         Err(e) => {
             eprintln!(
-                "LZ {} frontend 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
-                mode,
+                "{label} 自检失败: 无法启动子编译器 {} 处理 {}: {e}",
                 self_exe.display(),
                 lz_path_abs.display()
             );
@@ -299,20 +310,16 @@ pub fn run_lz_frontend(path: &str, source: &str, mode: &str) {
         }
     };
     if !build.status.success() {
-        eprintln!(
-            "LZ {} frontend 编译失败: {}",
-            mode,
-            String::from_utf8_lossy(&build.stderr)
-        );
+        eprintln!("{label} 编译失败: {}", String::from_utf8_lossy(&build.stderr));
         std::process::exit(1);
     }
-    let rs_path = replace_ext(&lz_path, ".lzfront", ".rs");
+    let rs_path = replace_ext(lz_path, src_ext, ".rs");
     // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
     let (builtins, builtins_deps) = match builtins_link() {
         Some(v) => v,
         None => {
             eprintln!(
-                "LZ frontend 自检: 未找到 lz_builtins 的 .rlib（已查找 {}；先 `cargo build -p lz_builtins`{}）",
+                "{link_label} 自检: 未找到 lz_builtins 的 .rlib（已查找 {}；先 `cargo build -p lz_builtins`{}）",
                 lane_profile_dir().display(),
                 if lane_profile_dir() == crate_root().join("target").join("debug") {
                     String::new()
@@ -323,7 +330,7 @@ pub fn run_lz_frontend(path: &str, source: &str, mode: &str) {
             std::process::exit(1);
         }
     };
-    let exe_path = replace_ext(&lz_path, ".lzfront", ".exe");
+    let exe_path = replace_ext(lz_path, src_ext, ".exe");
     let rs_path_abs = absolutize(&rs_path);
     let exe_path_abs = absolutize(&exe_path);
     let rc = match Command::new("rustc")
@@ -339,23 +346,61 @@ pub fn run_lz_frontend(path: &str, source: &str, mode: &str) {
     {
         Ok(out) => out,
         Err(e) => {
-            eprintln!("LZ {} frontend 失败: 无法启动 rustc（不在 PATH？）: {e}", mode);
+            eprintln!("{label} 失败: 无法启动 rustc（不在 PATH？）: {e}");
             std::process::exit(1);
         }
     };
     if !rc.status.success() {
-        eprintln!(
-            "LZ {} frontend rustc 失败: {}",
-            mode,
-            String::from_utf8_lossy(&rc.stderr)
-        );
+        eprintln!("{label} rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
         std::process::exit(1);
     }
     match run_selfcheck_exe(&exe_path) {
         Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
         Err(msg) => {
-            eprintln!("LZ {} frontend 自检失败: {msg}", mode);
+            eprintln!("{label} 自检失败: {msg}");
             std::process::exit(1);
         }
+    }
+}
+
+/// --emit=ir-lz 自举管线（M5 T0r56.1.2 下沉）：IR 已构建，生成 LZ 构造代码
+/// （lz_ir_lib.lz 库 + main 构造），递归编译运行输出 IR 文本（与 --emit=ir 逐字符一致）。
+/// 即「用 LZ 实现 IR display」：display 逻辑完全由 LZ 侧承担。
+pub fn run_lz_ir_selfcheck(ir_module: &crate::ir::IrModule, path: &str) {
+    let lz_source = crate::ir::lz_codegen::ir_module_to_lz_source(ir_module);
+    let lz_path = replace_ext(path, ".lz", ".lzlz");
+    std::fs::write(&lz_path, &lz_source).unwrap_or_else(|e| {
+        eprintln!("Error writing {}: {}", lz_path, e);
+        std::process::exit(1);
+    });
+    eprintln!("Generated {} -> {} (LZ IR codegen)", path, lz_path);
+    run_recursive_selfcheck(&lz_path, ".lzlz", "LZ IR codegen", "LZ IR codegen");
+}
+
+/// --emit=rs-lz 自举管线（M5 T0r56.1.2 下沉）：IR 已构建，生成 LZ 版 Rust codegen
+/// 源码（lz_codegen_lib.lz 库 + main 构造），递归编译运行输出 Rust 源码
+/// （与常规 codegen 逐字符一致）。embed 产物由 Rust 侧末尾落盘（T0r24 契约：
+/// LZ 程序不写文件；stdout 是产物本身，回执走 stderr）。
+pub fn run_lz_rs_selfcheck(ir_module: &crate::ir::IrModule, path: &str, embed_build: bool) {
+    // T0r24：Cli 档 embed 的产物名/目录/垫片在 Rust 侧一次算好，**同一份**
+    // 结论既穿透给 LZ（数据面 + `pub mod __lz_embed`），也用于末尾落盘。
+    // 命名主干取 CLI 入参原样（`calc.lz`）——与原生分支 `cg.set_embed_stem(path)`
+    // 是同一把尺（`embed::base_stem` + `dedup::artifact_name`），产物名不可能漂移。
+    let embed_stem = path;
+    let embed_targets = crate::ir::lz_codegen::embed_targets_of(ir_module, Some(embed_stem));
+    let rs_lz_src =
+        crate::ir::lz_codegen::ir_module_to_rs_lz_source_with_stem(ir_module, Some(embed_stem));
+    let lz_path = replace_ext(path, ".lz", ".lzrs");
+    std::fs::write(&lz_path, &rs_lz_src).unwrap_or_else(|e| {
+        eprintln!("Error writing {}: {}", lz_path, e);
+        std::process::exit(1);
+    });
+    eprintln!("Generated {} -> {} (LZ Rust codegen)", path, lz_path);
+    run_recursive_selfcheck(&lz_path, ".lzrs", "LZ Rust codegen", "LZ Rust codegen");
+    // T0r24：Cli 档产物**只能由 Rust 侧落盘**（LZ 程序不写文件）。
+    // 落盘是幂等的（artifact::write_artifacts 内容相同则一格都不写），
+    // 且自检链里的递归编译产物是 LZ 程序本身（无 embed 块）⇒ 不会重复落盘。
+    if !embed_targets.is_empty() {
+        crate::embed::emit::emit_embed_artifacts(&embed_targets, embed_build, true, None);
     }
 }
