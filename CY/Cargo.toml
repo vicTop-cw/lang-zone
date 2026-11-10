@@ -18,3 +18,9 @@ lang-zone = { path = "..", default-features = false }
 [[test]]
 name = "cli"
 path = "testsrc/cli.rs"
+
+# M3 入口融合（T0r55.3.1）：lzcyc 升级为 bin crate，
+# 吸收 lzc 的 create/build/peek/check/push 子命令
+[[bin]]
+name = "lzcyc"
+path = "src/main.rs"

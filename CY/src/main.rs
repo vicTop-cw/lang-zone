@@ -22,10 +22,44 @@ fn main() {
         print_help();
         std::process::exit(0);
     }
+    // M3 入口融合（T0r55.3.2）：吸收 lzc 的子命令
+    // cmd_* 函数期望完整 args（args[0]=二进制名, args[1]=子命令），
+    // 本处 args[0] 已是子命令，需前置 "lzcyc" 构造完整向量
     match args[0].as_str() {
         "transpile" => cmd_transpile(&args[1..]),
         "compile" => cmd_compile(&args[1..]),
         "run" => cmd_run(&args[1..]),
+        // —— M3 吸收的 lzc 子命令 ——
+        "create" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_create(&full));
+        }
+        "build" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_build(&full));
+        }
+        "check" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_check(&full));
+        }
+        "peek" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_peek(&full));
+        }
+        "push" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_push(&full));
+        }
+        "emit-bridge-report" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_emit_bridge_report(&full));
+        }
         "--version" | "-V" => println!("lzcyc {VERSION}"),
         "--help" | "-h" => print_help(),
         other => {
@@ -43,8 +77,17 @@ fn print_help() {
          \x20 lzcyc transpile <file.lz> [-o <dir>]   转译为 .pyx\n\
          \x20 lzcyc compile  <file.lz> [-o <dir>]    转译 + cythonize（→ .c/.pyd）\n\
          \x20 lzcyc run      <file.lz> [func]        编译并运行（默认入口 main）\n\
-         \x20 lzcyc --version                        版本号\n\
-         \x20 lzcyc --help                           本帮助\n\
+         \n\
+         M3 吸收的 lzc 子命令:\n\
+         \x20 lzcyc create <path>    脚手架新项目（lz.toml + src/main.lz）\n\
+         \x20 lzcyc build  [dir]     构建项目（.lz → .rs → exe，增量）\n\
+         \x20 lzcyc check  [dir]     类型检查（不生成代码）\n\
+         \x20 lzcyc peek   <file>    查看 tokens/AST/IR\n\
+         \x20 lzcyc push   [--dry-run] 发布到本地 registry\n\
+         \x20 lzcyc emit-bridge-report <tsv>  审计 bridge 台账\n\
+         \n\
+         \x20 lzcyc --version        版本号\n\
+         \x20 lzcyc --help           本帮助\n\
          \n\
          说明:\n\
          \x20 前端（lexer/parser/semantic_check/IR）与 lzc 共享同一实现，\n\
