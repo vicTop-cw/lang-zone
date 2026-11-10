@@ -10,6 +10,9 @@ pub mod project;
 pub mod simd;
 pub mod util;
 
+// ── M5 自举组件接入层（T0r56.1.1）：lz_lexer.lz / lz_parser.lz 源与自举 emit 管线 ──
+pub mod frontend;
+
 // ─── FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D） ───
 pub mod hotreload;
 // LSP 依赖 serde_json（仅 infer feature 提供），故同 gate
