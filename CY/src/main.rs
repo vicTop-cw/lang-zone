@@ -89,6 +89,10 @@ fn print_help() {
          \x20 lzcyc --version        版本号\n\
          \x20 lzcyc --help           本帮助\n\
          \n\
+         选项:\n\
+         \x20 --backend=rust   transpile/compile/run 改走 Rust codegen（产物 .rs/.exe）\n\
+         \x20                  默认 Cython（产物 .pyx/.pyd）；吸收的子命令恒走 Rust 管线\n\
+         \n\
          说明:\n\
          \x20 前端（lexer/parser/semantic_check/IR）与 lzc 共享同一实现，\n\
          \x20 后端输出 Cython (.pyx)，可编译为 Python C 扩展 (.pyd)。"
@@ -104,6 +108,13 @@ fn macro_check_mode() -> lang_zone::macros::expand::CheckMode {
         Some(s) if s == "strict" => lang_zone::macros::expand::CheckMode::Strict,
         _ => lang_zone::macros::expand::CheckMode::Light,
     }
+}
+
+/// --backend 选择（M3 T0r55.4.1）：cython（默认）| rust（可选）
+/// rust 后端：transpile/compile/run 改走主编译器的 Rust codegen（与 lzc 单文件模式一致），
+/// 产物为 .rs；吸收的 create/build/check/peek/push 子命令恒走 lib crate Rust 管线。
+fn backend_is_rust() -> bool {
+    std::env::args().any(|a| a == "--backend=rust")
 }
 
 /// 宏/模板展开（对齐主编译器管线 08 §3.6）：
@@ -253,6 +264,28 @@ fn transpile_source(path: &Path) -> Result<String, String> {
             let ir =
                 lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
 
+            // 后端分发（M3 T0r55.4.1）：--backend=rust 走主编译器 Rust codegen（产物 .rs，
+            // 与 lzc 单文件模式同一条交付面）；默认 Cython（产物 .pyx）
+            if backend_is_rust() {
+                let mut cg = lang_zone::ir::codegen::CodeGen::new();
+                cg.set_embed_stem(&path.display().to_string());
+                let (rs_code, mut registry) = cg.generate_with_bridge(&ir);
+                // embed 产物落盘（与主编译器同口径：默认只落盘，--embed-build 才建库）
+                if !cg.embed_targets().is_empty() {
+                    lang_zone::embed::emit::emit_embed_artifacts(
+                        cg.embed_targets(),
+                        std::env::args().any(|a| a == "--embed-build"),
+                        false,
+                        None,
+                    );
+                }
+                if registry.symbol_count() > 0 {
+                    let _ = registry.set_ledger_path(&PathBuf::from("build/bridge-ledger.tsv"));
+                    let _ = registry.ledger_mut().flush();
+                }
+                return Ok(rs_code);
+            }
+
             // Cython 后端（generate 出原始形态 + 本地 postprocess_pyx 兜底管线）
             // 注意：不用 lib 的 generate_full——其内置 postprocess_pyx 为远端精简线副本，
             // 与本地 M1 下沉叠加会双处理（(__cv)(__cv) 双调用/_LZNONE 垫片污染 is None）
@@ -283,15 +316,17 @@ fn extract_out_dir(args: &[String]) -> (Vec<String>, Option<String>) {
     (rest, out_dir)
 }
 
-/// 计算输出 .pyx 路径：默认输入同目录同名；指定 -o 则落到该目录
+/// 计算输出路径：默认输入同目录同名；指定 -o 则落到该目录。
+/// 扩展名随后端（M3 T0r55.4.1）：--backend=rust → .rs，默认 Cython → .pyx
 fn pyx_output_path(input: &Path, out_dir: Option<&str>) -> PathBuf {
     let stem = input
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "output".to_string());
+    let ext = if backend_is_rust() { "rs" } else { "pyx" };
     match out_dir {
-        Some(dir) => PathBuf::from(dir).join(format!("{stem}.pyx")),
-        None => input.with_file_name(format!("{stem}.pyx")),
+        Some(dir) => PathBuf::from(dir).join(format!("{stem}.{ext}")),
+        None => input.with_file_name(format!("{stem}.{ext}")),
     }
 }
 
@@ -620,9 +655,10 @@ fn strip_cython_syntax(code: &str) -> String {
 // ─────────────────────────── 子命令 ───────────────────────────
 
 fn cmd_transpile(args: &[String]) {
-    let (rest, out_dir) = extract_out_dir(args);
+    let (mut rest, out_dir) = extract_out_dir(args);
+    rest.retain(|a| !a.starts_with("--backend"));
     let Some(input) = rest.first() else {
-        eprintln!("用法: lzcyc transpile <file.lz> [-o <dir>]");
+        eprintln!("用法: lzcyc transpile <file.lz> [-o <dir>] [--backend=rust]");
         std::process::exit(1);
     };
     let input = Path::new(input);
@@ -649,9 +685,10 @@ fn cmd_transpile(args: &[String]) {
 }
 
 fn cmd_compile(args: &[String]) {
-    let (rest, out_dir) = extract_out_dir(args);
+    let (mut rest, out_dir) = extract_out_dir(args);
+    rest.retain(|a| !a.starts_with("--backend"));
     let Some(input) = rest.first() else {
-        eprintln!("用法: lzcyc compile <file.lz> [-o <dir>]");
+        eprintln!("用法: lzcyc compile <file.lz> [-o <dir>] [--backend=rust]");
         std::process::exit(1);
     };
     let input = Path::new(input);
@@ -676,7 +713,42 @@ fn cmd_compile(args: &[String]) {
     }
     println!("transpile: {} → {}", input.display(), out_path.display());
 
-    // 2) cythonize（调 CY/scripts/cython_build.py；.c → .pyd 需要本机 C 编译器）
+    // 2) 后端编译（M3 T0r55.4.1）：--backend=rust 走 rustc（与 lzc 同尺），
+    //    默认 Cython 走 cythonize（调 CY/scripts/cython_build.py；.c → .pyd 需要本机 C 编译器）
+    if backend_is_rust() {
+        let exe_out = out_path.with_file_name(format!(
+            "{}.exe",
+            out_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output")
+        ));
+        let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib");
+        let status = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&out_path)
+            .arg("--extern")
+            .arg(format!("lz_builtins={}", builtins.display()))
+            .arg("-L")
+            .arg(format!(
+                "dependency={}",
+                builtins.parent().unwrap().join("deps").display()
+            ))
+            .arg("-o")
+            .arg(&exe_out)
+            .status();
+        match status {
+            Ok(s) if s.success() => println!("compile: {} → {} OK", out_path.display(), exe_out.display()),
+            Ok(s) => {
+                eprintln!("rustc 编译失败（退出码 {:?}）", s.code());
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("无法启动 rustc: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Cython：cythonize（调 CY/scripts/cython_build.py；.c → .pyd 需要本机 C 编译器）
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/cython_build.py");
     let status = Command::new("python")
         .arg(&script)
@@ -704,13 +776,56 @@ fn cmd_compile(args: &[String]) {
 }
 
 fn cmd_run(args: &[String]) {
-    let (rest, out_dir) = extract_out_dir(args);
+    let (mut rest, out_dir) = extract_out_dir(args);
+    rest.retain(|a| !a.starts_with("--backend"));
     let Some(input) = rest.first() else {
-        eprintln!("用法: lzcyc run <file.lz> [func]");
+        eprintln!("用法: lzcyc run <file.lz> [func] [--backend=rust]");
         std::process::exit(1);
     };
     let func = rest.get(1).cloned().unwrap_or_else(|| "main".to_string());
     let input = Path::new(input);
+
+    // M3 T0r55.4.1：--backend=rust 早分支——transpile 产 .rs → rustc → 直接跑 exe
+    // （与 lzc 单文件编译运行同尺，绕过整条 Cython pyximport 管线）
+    if backend_is_rust() {
+        let rs_out = match transpile_source(input) {
+            Ok(code) => code,
+            Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        };
+        let run_dir = out_dir.as_deref().map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output/rsrun"));
+        let _ = fs::create_dir_all(&run_dir);
+        let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let rs_path = run_dir.join(format!("{stem}.rs"));
+        let exe_path = run_dir.join(format!("{stem}.exe"));
+        if let Err(e) = fs::write(&rs_path, &rs_out) {
+            eprintln!("Error writing {}: {}", rs_path.display(), e);
+            std::process::exit(1);
+        }
+        let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib");
+        let status = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&rs_path)
+            .arg("--extern")
+            .arg(format!("lz_builtins={}", builtins.display()))
+            .arg("-L")
+            .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+            .arg("-o")
+            .arg(&exe_path)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => { eprintln!("rustc 编译失败（退出码 {:?}）", s.code()); std::process::exit(1); }
+            Err(e) => { eprintln!("无法启动 rustc: {e}"); std::process::exit(1); }
+        }
+        // 入口固定调 main（LZ 运行期约定；func 参数仅 Cython 侧支持）
+        let run = Command::new(&exe_path).status();
+        match run {
+            Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+            Err(e) => { eprintln!("无法运行 {}: {e}", exe_path.display()); std::process::exit(1); }
+        }
+    }
+
     let stem = input
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
