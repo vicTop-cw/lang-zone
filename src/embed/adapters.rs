@@ -166,7 +166,7 @@ fn mark_discarded_return(
 
 // ──────────────── Python ────────────────
 
-const PY_TY: [(&str, &str); 17] = [
+const PY_TY: [(&str, &str); 28] = [
     ("int", "int"),
     ("float", "float"),
     ("str", "str"),
@@ -184,6 +184,17 @@ const PY_TY: [(&str, &str); 17] = [
     ("Tuple<int,int,int>", "tuple<int,int,int>"),
     ("Tuple<float,float>", "tuple<float,float>"),
     ("Tuple<bool,bool>", "tuple<bool,bool>"),
+    ("Tuple<int,float>", "tuple<int,float>"),
+    ("Tuple<int,bool>", "tuple<int,bool>"),
+    ("Tuple<float,int>", "tuple<float,int>"),
+    ("Tuple<float,str>", "tuple<float,str>"),
+    ("Tuple<float,bool>", "tuple<float,bool>"),
+    ("Tuple<str,int>", "tuple<str,int>"),
+    ("Tuple<str,float>", "tuple<str,float>"),
+    ("Tuple<str,bool>", "tuple<str,bool>"),
+    ("Tuple<bool,int>", "tuple<bool,int>"),
+    ("Tuple<bool,float>", "tuple<bool,float>"),
+    ("Tuple<bool,str>", "tuple<bool,str>"),
 ];
 
 pub struct PythonLang {
@@ -253,7 +264,7 @@ impl EmbedLang for PythonLang {
             let mut unsupported = None;
             if let Some(ref r) = ret {
                 if r.starts_with('?') || value_is_suspicious(r) {
-                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool/list<int>/list<float>/list<str>/dict<str,int>/dict<str,float>/dict<str,str>/dict<int,int> 内", r));
+                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool/list<int>/list<float>/list<str>/dict<str,int>/dict<str,float>/dict<str,str>/dict<int,int>/tuple<int,int>/tuple<int,float>/tuple<int,str>/tuple<int,bool>/tuple<float,int>/tuple<float,float>/tuple<float,str>/tuple<float,bool>/tuple<str,int>/tuple<str,float>/tuple<str,str>/tuple<str,bool>/tuple<bool,int>/tuple<bool,float>/tuple<bool,str>/tuple<bool,bool>/tuple<int,int,int> 内", r));
                 }
             }
             for p in &params {
@@ -282,7 +293,7 @@ impl EmbedLang for PythonLang {
     }
 
     fn extract(&self, artifact: &str, src: &str) -> Vec<(String, String)> {
-        vec![(format!("{}.py", artifact), src.to_string())]
+        vec![(format!("{}.py", artifact), py_annotate(src))]
     }
 
     fn dispatch_file(&self, artifact: &str, methods: &[&ForeignFn]) -> Option<(String, String)> {
@@ -311,6 +322,17 @@ impl EmbedLang for PythonLang {
                     "tuple<int,int,int>" => "__lz_json_tuple_int_int_int",
                     "tuple<float,float>" => "__lz_json_tuple_float_float",
                     "tuple<bool,bool>" => "__lz_json_tuple_bool_bool",
+                    "tuple<int,float>" => "__lz_json_tuple_int_float",
+                    "tuple<int,bool>" => "__lz_json_tuple_int_bool",
+                    "tuple<float,int>" => "__lz_json_tuple_float_int",
+                    "tuple<float,str>" => "__lz_json_tuple_float_str",
+                    "tuple<float,bool>" => "__lz_json_tuple_float_bool",
+                    "tuple<str,int>" => "__lz_json_tuple_str_int",
+                    "tuple<str,float>" => "__lz_json_tuple_str_float",
+                    "tuple<str,bool>" => "__lz_json_tuple_str_bool",
+                    "tuple<bool,int>" => "__lz_json_tuple_bool_int",
+                    "tuple<bool,float>" => "__lz_json_tuple_bool_float",
+                    "tuple<bool,str>" => "__lz_json_tuple_bool_str",
                     _ => "str",
                 };
                     format!("(\"{}\", {})", p.name, conv)
@@ -328,7 +350,7 @@ impl EmbedLang for PythonLang {
         // 为每个 callable 方法生成独立 arm（if/elif 链），每个 arm 内部有自己的 try/except
         let mut arms = String::new();
         for (i, m) in methods.iter().filter(|m| m.callable()).enumerate() {
-            let ret_is_list = matches!(m.ret.as_deref(), Some("list<int>") | Some("list<float>") | Some("list<str>") | Some("dict<str,int>") | Some("dict<str,float>") | Some("dict<str,str>") | Some("dict<int,int>") | Some("tuple<int,int>") | Some("tuple<int,str>") | Some("tuple<str,str>") | Some("tuple<int,int,int>") | Some("tuple<float,float>") | Some("tuple<bool,bool>"));
+            let ret_is_list = matches!(m.ret.as_deref(), Some("list<int>") | Some("list<float>") | Some("list<str>") | Some("dict<str,int>") | Some("dict<str,float>") | Some("dict<str,str>") | Some("dict<int,int>") | Some("tuple<int,int>") | Some("tuple<int,str>") | Some("tuple<str,str>") | Some("tuple<int,int,int>") | Some("tuple<float,float>") | Some("tuple<bool,bool>") | Some("tuple<int,float>") | Some("tuple<int,bool>") | Some("tuple<float,int>") | Some("tuple<float,str>") | Some("tuple<float,bool>") | Some("tuple<str,int>") | Some("tuple<str,float>") | Some("tuple<str,bool>") | Some("tuple<bool,int>") | Some("tuple<bool,float>") | Some("tuple<bool,str>"));
             let branch = if i == 0 { "if" } else { "elif" };
             if ret_is_list {
                 arms.push_str(&format!(
@@ -343,7 +365,7 @@ impl EmbedLang for PythonLang {
             }
         }
         let body = format!(
-            "# -*- coding: utf-8 -*-\n# {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n# 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\nimport importlib\nimport sys\nimport json\n\nARTIFACT = {art_lit}\n\nKNOWN = (\n{names}\n)\n\nCOERCE = {{\n{table}}}\n\n\ndef __lz_bool(s):\n    return s in (\"true\", \"True\", \"1\")\n\n\ndef __lz_json_list_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_int_int(s):\n    d = json.loads(s)\n    return {{int(k): v for k, v in d.items()}}\n\n\ndef __lz_json_tuple_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_bool(s):\n    return tuple(json.loads(s))\n\n\ndef _out(code, text):\n    one = str(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"%s:%s\\n\" % (code, one))\n    sys.stdout.flush()\n\n\ndef _out_ok_json(text):\n    one = json.dumps(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"OK:%s\\n\" % one)\n    sys.stdout.flush()\n\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        _out(\"ERR\", \"missing method\")\n        return\n    method = argv[0]\n    if method not in KNOWN:\n        _out(\"ERR\", \"no such method: \" + method)\n        return\n    params = {{}}\n    for tok in argv[1:]:\n        k, sep, v = tok.partition(\"=\")\n        if sep:\n            params[k] = v\n    for name, conv in COERCE.get(method, ()): \n        if name in params:\n            params[name] = conv(params[name])\n    mod = importlib.import_module(ARTIFACT)\n    fn = getattr(mod, method, None)\n    if fn is None:\n        _out(\"ERR\", \"not callable: \" + method)\n        return\n{arms}    _out(\"ERR\", \"no such method: \" + method)\n\n\nmain()\n",
+            "# -*- coding: utf-8 -*-\n# {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n# 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\nimport importlib\nimport sys\nimport json\n\nARTIFACT = {art_lit}\n\nKNOWN = (\n{names}\n)\n\n\ndef __lz_bool(s):\n    return s in (\"true\", \"True\", \"1\")\n\n\ndef __lz_json_list_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_int_int(s):\n    d = json.loads(s)\n    return {{int(k): v for k, v in d.items()}}\n\n\ndef __lz_json_tuple_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_str(s):\n    return tuple(json.loads(s))\n\n\ndef _out(code, text):\n    one = str(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"%s:%s\\n\" % (code, one))\n    sys.stdout.flush()\n\n\ndef _out_ok_json(text):\n    one = json.dumps(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"OK:%s\\n\" % one)\n    sys.stdout.flush()\n\n\nCOERCE = {{\n{table}}}\n\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        _out(\"ERR\", \"missing method\")\n        return\n    method = argv[0]\n    if method not in KNOWN:\n        _out(\"ERR\", \"no such method: \" + method)\n        return\n    params = {{}}\n    for tok in argv[1:]:\n        k, sep, v = tok.partition(\"=\")\n        if sep:\n            params[k] = v\n    for name, conv in COERCE.get(method, ()): \n        if name in params:\n            params[name] = conv(params[name])\n    mod = importlib.import_module(ARTIFACT)\n    fn = getattr(mod, method, None)\n    if fn is None:\n        _out(\"ERR\", \"not callable: \" + method)\n        return\n{arms}    _out(\"ERR\", \"no such method: \" + method)\n\n\nmain()\n",
             artifact = artifact,
             art_lit = format!("\"{}\"", artifact),
             names = names.join("\n"),
@@ -401,6 +423,127 @@ fn parse_annotated_params(raw: &str, table: &[(&str, &str)]) -> Vec<ForeignParam
         });
     }
     out
+}
+
+/// 把 LZ 源码里的类型注解转换为 Python 3.9+ 兼容语法。
+///
+/// LZ 用尖括号泛型（`Tuple<int,bool>`、`Dict<str,int>`、`List<int>`）+ 大写基类型名；
+/// Python 3.9+ 用方括号泛型（`tuple[int, bool]`、`dict[str, int]`、`list[int]`）+ 小写基类型名。
+///
+/// 不做转换的话，`def pick(p: Tuple<int,bool>) -> int:` 写入 .py 后 Python 解释器会
+/// 报 `SyntaxError: invalid syntax`（T0r59 端到端 roundtrip 首次暴露此问题）。
+///
+/// 实现策略：
+/// 1. 用临时哨兵保护 `->` 箭头（避免 `>` 被误替换为 `]`）；
+/// 2. 逐字符扫描，跳过字符串字面量与整行注释；
+/// 3. 对非字符串/非注释区域做 `Tuple`→`tuple`、`Dict`→`dict`、`List`→`list`、`<`→`[`、`>`→`]` 替换；
+/// 4. 恢复 `->` 箭头。
+fn py_annotate(src: &str) -> String {
+    // 第一步：用哨兵保护 `->`（U+E000 私有区字符，源码中不会出现）
+    const ARROW_SENTINEL: char = '\u{E000}';
+    let chars: Vec<char> = src.chars().collect();
+    let n = chars.len();
+    // 先把 `->` 替换为哨兵+`-`
+    let mut protected: Vec<char> = Vec::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        if chars[i] == '-' && i + 1 < n && chars[i + 1] == '>' {
+            protected.push('-');
+            protected.push(ARROW_SENTINEL);
+            i += 2;
+        } else {
+            protected.push(chars[i]);
+            i += 1;
+        }
+    }
+    // 第二步：逐字符扫描，跳过字符串与注释，做泛型替换
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    let m = protected.len();
+    let mut in_str: Option<char> = None;
+    while i < m {
+        let c = protected[i];
+        // 字符串字面量内：原样保留
+        if let Some(q) = in_str {
+            out.push(c);
+            if c == q && (i == 0 || protected[i - 1] != '\\') {
+                in_str = None;
+            }
+            i += 1;
+            continue;
+        }
+        // 引号开头 → 进入字符串
+        if c == '"' || c == '\'' {
+            in_str = Some(c);
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        // 行首注释（# 前只有空白或行首）→ 保留到行尾
+        if c == '#' {
+            // 检查 # 前的非空白字符
+            let mut k = i;
+            while k > 0 && protected[k - 1].is_whitespace() {
+                k -= 1;
+            }
+            if k == 0 || !protected[k - 1].is_alphanumeric() && protected[k - 1] != '_' && protected[k - 1] != ')' && protected[k - 1] != ']' {
+                while i < m && protected[i] != '\n' {
+                    out.push(protected[i]);
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        // 泛型替换
+        match c {
+            'T' if matches_prefix(&protected, i, "Tuple") => {
+                out.push_str("tuple");
+                i += 5;
+            }
+            'D' if matches_prefix(&protected, i, "Dict") => {
+                out.push_str("dict");
+                i += 4;
+            }
+            'L' if matches_prefix(&protected, i, "List") => {
+                out.push_str("list");
+                i += 4;
+            }
+            '<' => {
+                out.push('[');
+                i += 1;
+            }
+            '>' => {
+                out.push(']');
+                i += 1;
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    // 第三步：恢复 `->` 箭头
+    out.chars().flat_map(|c| {
+        if c == ARROW_SENTINEL {
+            vec!['>']
+        } else {
+            vec![c]
+        }
+    }).collect()
+}
+
+/// 检查 char 切片从位置 i 开始是否匹配给定前缀字符串
+fn matches_prefix(chars: &[char], i: usize, prefix: &str) -> bool {
+    let plen = prefix.chars().count();
+    if i + plen > chars.len() {
+        return false;
+    }
+    for (k, pc) in prefix.chars().enumerate() {
+        if chars[i + k] != pc {
+            return false;
+        }
+    }
+    true
 }
 
 // ──────────────── Mojo ────────────────

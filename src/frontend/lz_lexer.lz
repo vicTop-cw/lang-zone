@@ -173,16 +173,19 @@ def scan_int(src: str, start: int) -> (str, int) =
 // 扫描运算符/标点：返回 ((bool, Token), 结束位置)；双字符优先
 def scan_punct(src: str, i: int) -> ((bool, Token), int) =
     let c = char_at(src, i)
-    let r = punct_token(c)
-    if r.0:
-        (r, i + 1)
-    elif i + 1 < str_len(src):
+    // 双字符优先（BUG-511）：> < = & | : * - 等首字符都在单字符表内，
+    // 若先查单表，>= 会在 Gt 命中即返回、下一轮把 = 切成 Eq——
+    // 双字符表形同虚设。先查双表，未命中再回落单表（`!` 不在单表，
+    // `!=` 走本分支原本就正常）。
+    if i + 1 < str_len(src):
         let two = two_char_token(c, char_at(src, i + 1))
         if two.0:
             ((true, two.1), i + 2)
         else:
+            let r = punct_token(c)
             (r, i + 1)
     else:
+        let r = punct_token(c)
         (r, i + 1)
 
 // 扫描字符串字面量：返回 (内容, 结束位置)；"..." 到匹配引号
@@ -278,6 +281,22 @@ def tokenize(src: str) -> List<Token> =
             i = r.1
             let num: str = r.0
             tokens = tokens + [Token.IntLit(v: str_to_int(num))]
+        // 行注释 // 到行尾（对齐 Rust skip_line_comment）：注释体不产 token，
+        // 行尾 \n 交常规分支仍发 Newline（与原生行结构一致）
+        elif c == "/" && i + 1 < str_len(src) && char_at(src, i + 1) == "/":
+            i = i + 2
+            while i < str_len(src) && char_at(src, i) != "\n":
+                i = i + 1
+        // 块注释 /* */（对齐 Rust skip_block_comment）：整块跳过含内部换行
+        elif c == "/" && i + 1 < str_len(src) && char_at(src, i + 1) == "*":
+            i = i + 2
+            let mut closed = false
+            while i < str_len(src) && !closed:
+                if char_at(src, i) == "*" && i + 1 < str_len(src) && char_at(src, i + 1) == "/":
+                    i = i + 2
+                    closed = true
+                else:
+                    i = i + 1
         // 运算符/标点（双字符优先，含 == != <= >= && || :: -> => **）
         else:
             let r = scan_punct(src, i)

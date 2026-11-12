@@ -260,6 +260,13 @@ fn escape_lz_wrapper(s: &str) -> String {
 /// 组装 wrapper LZ 源码并递归编译运行（lexer 输出 token 流；parser 输出语句描述）。
 /// 递归管线：当前编译器 → .rs → rustc → exe → stdout（M5 下沉后 lzcyc 可直接复用）。
 pub fn run_lz_frontend(path: &str, source: &str, mode: &str) {
+    print!("{}", run_lz_frontend_capture(path, source, mode));
+}
+
+/// LZ 前端自检（捕获变体，M5 Lane B/C）：返回 LZ 前端 stdout（token 流 / 解析描述）
+/// 而不直接打印。供 lzcyc `--frontend=lz` 一致性门禁捕获对比；run_lz_frontend 为其
+/// 打印包装（主编译器 --emit=lex-lz/parse-lz 行为一字不变）。
+pub fn run_lz_frontend_capture(path: &str, source: &str, mode: &str) -> String {
     let (lib_only, body) = match mode {
         "lex" => (
             lz_frontend_lib_only(LZ_LEXER_LIB),
@@ -284,17 +291,21 @@ pub fn run_lz_frontend(path: &str, source: &str, mode: &str) {
 
     // 与 --emit=ir-lz 相同的递归管线（共享实现，见 run_recursive_selfcheck）
     let label = format!("LZ {} frontend", mode);
-    run_recursive_selfcheck(&lz_path, ".lzfront", &label, "LZ frontend");
+    run_recursive_selfcheck(&lz_path, ".lzfront", &label, "LZ frontend")
 }
-
 /// 递归自检管线公共体（T0r56.1.2 抽取）：源文件已写盘 →
-/// 当前编译器自编译 → rustc 链接 lz_builtins → 运行 → stdout 透传。
+/// 当前编译器自编译 → rustc 链接 lz_builtins → 运行 → 返回 stdout（不打印）。
+/// 打印由调用方自行决定：透传方直接 `print!`（ir-lz/rs-lz），捕获方直接返回
+/// （lex-lz/parse-lz 的 `run_lz_frontend_capture`，M5 Lane B/C 一致性门禁对比用）。
 ///
 /// `src_ext`：派生产物扩展名（".lzfront"/".lzlz"/".lzrs"）；
 /// `label`：错误信息前缀（如 "LZ IR codegen"）；
 /// `link_label`：rlib 缺失报错前缀（lex/parse 共用 "LZ frontend"，与
 /// 原 builtins_link_or_exit 的 what 参数逐字一致）。
-fn run_recursive_selfcheck(lz_path: &str, src_ext: &str, label: &str, link_label: &str) {
+fn run_recursive_selfcheck(lz_path: &str, src_ext: &str, label: &str, link_label: &str) -> String {
+    // M5：优先隔离车道 target/lane-bootstrap（免受共享 target/debug 被异版本
+    // 工具链交叉重建污染；rust-toolchain.toml 钉版后此为纵深防御）。
+    set_bootstrap_lane_env();
     // N3 同族：产物路径先绝对化（相对入参下裸文件名不按 cwd 解析）。
     let self_exe = std::env::current_exe().unwrap_or_default();
     let lz_path_abs = absolutize(lz_path);
@@ -355,7 +366,7 @@ fn run_recursive_selfcheck(lz_path: &str, src_ext: &str, label: &str, link_label
         std::process::exit(1);
     }
     match run_selfcheck_exe(&exe_path) {
-        Ok(run) => print!("{}", String::from_utf8_lossy(&run.stdout)),
+        Ok(run) => String::from_utf8_lossy(&run.stdout).into_owned(),
         Err(msg) => {
             eprintln!("{label} 自检失败: {msg}");
             std::process::exit(1);
@@ -374,7 +385,7 @@ pub fn run_lz_ir_selfcheck(ir_module: &crate::ir::IrModule, path: &str) {
         std::process::exit(1);
     });
     eprintln!("Generated {} -> {} (LZ IR codegen)", path, lz_path);
-    run_recursive_selfcheck(&lz_path, ".lzlz", "LZ IR codegen", "LZ IR codegen");
+    print!("{}", run_recursive_selfcheck(&lz_path, ".lzlz", "LZ IR codegen", "LZ IR codegen"));
 }
 
 /// --emit=rs-lz 自举管线（M5 T0r56.1.2 下沉）：IR 已构建，生成 LZ 版 Rust codegen
@@ -396,11 +407,133 @@ pub fn run_lz_rs_selfcheck(ir_module: &crate::ir::IrModule, path: &str, embed_bu
         std::process::exit(1);
     });
     eprintln!("Generated {} -> {} (LZ Rust codegen)", path, lz_path);
-    run_recursive_selfcheck(&lz_path, ".lzrs", "LZ Rust codegen", "LZ Rust codegen");
+    print!("{}", run_recursive_selfcheck(&lz_path, ".lzrs", "LZ Rust codegen", "LZ Rust codegen"));
     // T0r24：Cli 档产物**只能由 Rust 侧落盘**（LZ 程序不写文件）。
     // 落盘是幂等的（artifact::write_artifacts 内容相同则一格都不写），
     // 且自检链里的递归编译产物是 LZ 程序本身（无 embed 块）⇒ 不会重复落盘。
     if !embed_targets.is_empty() {
         crate::embed::emit::emit_embed_artifacts(&embed_targets, embed_build, true, None);
     }
+}
+
+// ─────────────────── 双轨一致性（M5 Lane B/C 共用） ───────────────────
+
+/// 自举链 rlib 车道选择：未显式设置 CARGO_TARGET_DIR 且隔离车道
+/// `target/lane-bootstrap/debug/deps` 已建时，为**本进程及其子进程**指向隔离车道。
+/// 共享 target/debug 会被不同入口（人工 gnu shell / cron 默认工具链）交叉重建，
+/// mtime 最新的 rlib 可能与当前 rustc 版本错配（E0514 反复复发的根因）；
+/// 隔离车道只由钉版工具链构建，永不串道。已显式设置车道时尊重现值。
+pub fn set_bootstrap_lane_env() {
+    if std::env::var_os("CARGO_TARGET_DIR").is_some() {
+        return;
+    }
+    let lane = crate_root().join("target").join("lane-bootstrap");
+    if lane.join("debug").join("deps").is_dir() {
+        std::env::set_var("CARGO_TARGET_DIR", "target/lane-bootstrap");
+    }
+}
+
+/// 还原 Rust Debug 转义（\" \\ \n \r \t \0 \u{XXXX}）为原始字符。
+/// 双轨归一化用：Rust 侧 Token Debug 的字符串 payload 是 Debug 转义形态。
+fn debug_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('0') => out.push('\0'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('\'') => out.push('\''),
+            Some('u') => {
+                // \u{XXXX} → 字符；畸形序列原样保留（门禁失败时可见原文）
+                let mut hex = String::new();
+                if chars.peek() == Some(&'{') {
+                    chars.next();
+                    for hc in chars.by_ref() {
+                        if hc == '}' {
+                            break;
+                        }
+                        hex.push(hc);
+                    }
+                }
+                match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    Some(ch) => out.push(ch),
+                    None => {
+                        out.push_str("\\u{");
+                        out.push_str(&hex);
+                        out.push('}');
+                    }
+                }
+            }
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// 双轨 token 流归一化（M5 Lane B/C 门禁共用单真源）。
+///
+/// 两侧原始形态：
+/// - Rust（`--tokens` / `format!("{:?}")`）：`=== Tokens ===` 头 + 行首序号
+///   `  12 Ge` + 带值变体 Debug 转义 `Ident("f")` / `StrLit("ok")`
+/// - LZ（display_token + print）：无头无序号、payload 裸形态 `Ident(f)`，
+///   print 可能给整行裹引号（golden 测试的 trim_matches('"') 即此历史）
+///
+/// 归一后两侧应为同一向量：变体名 + 还原后的裸 payload。
+/// `rust_side=true` 走 Rust 形态解析；false 走 LZ 形态。
+pub fn normalize_token_stream(raw: &str, rust_side: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in raw.lines() {
+        let mut l = line.trim();
+        if l.is_empty() {
+            continue;
+        }
+        if l.starts_with("=== Tokens ===") {
+            continue;
+        }
+        if rust_side {
+            // 剥行首序号："12 Ge"（trim 后首段全数字才剥，payload 含空格不受扰）
+            if let Some(pos) = l.find(' ') {
+                if l[..pos].chars().all(|c| c.is_ascii_digit()) {
+                    l = l[pos..].trim();
+                }
+            }
+        }
+        // LZ print 的整体引号（两侧防御性剥离，Rust 侧无引号时无害）
+        let l = l.trim_matches('"');
+        if l.is_empty() {
+            continue;
+        }
+        // Var("payload") → Var(还原 payload)；无括号行原样
+        let norm = match (l.find('('), l.rfind(')')) {
+            (Some(open), Some(close)) if close > open => {
+                let variant = &l[..open];
+                let payload = &l[open + 1..close];
+                let payload = if rust_side
+                    && payload.len() >= 2
+                    && payload.starts_with('"')
+                    && payload.ends_with('"')
+                {
+                    debug_unescape(&payload[1..payload.len() - 1])
+                } else {
+                    payload.to_string()
+                };
+                format!("{}({})", variant, payload)
+            }
+            _ => l.to_string(),
+        };
+        out.push(norm);
+    }
+    out
 }

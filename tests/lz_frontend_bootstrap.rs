@@ -56,13 +56,17 @@ fn lz_lexer_matches_native_golden() {
 }
 
 /// A2：--emit=lex-lz 独立入口（字符串/magic method/比较运算符覆盖）
+/// BUG-511 修正后断言：`>=` 产出单 token `Ge`（此前 scan_punct 单字符表
+/// 先命中 Gt 即返回，`=` 被切成独立 Eq——本测试旧断言 contains("Gt")
+/// 恰把该错误行为固化，随双轨门禁发现一并修正）。
 #[test]
 fn emit_lex_lz_flag_runs() {
     let src = "def g(a, b):\n    if a >= b:\n        return \"ok\"\n    else:\n        return a + 1\n";
     let stdout = run_flag("lz_lex_flag", "rich", src, "--emit=lex-lz");
     assert!(stdout.contains("StrLit(ok)"), "缺 StrLit: {}", stdout);
     assert!(stdout.contains("IntLit(1)"), "缺 IntLit: {}", stdout);
-    assert!(stdout.contains("Gt") && stdout.contains("If") && stdout.contains("Else"), "缺关键字/比较符: {}", stdout);
+    assert!(stdout.contains("Ge"), "缺比较符 Ge（>= 应为单 token，BUG-511 回归?）: {}", stdout);
+    assert!(stdout.contains("If") && stdout.contains("Else"), "缺关键字: {}", stdout);
 }
 
 /// A3：BUG-462 修复回归 —— 此前 LZ lexer 的 `punct_token` 表缺 `=`、`is_keyword`

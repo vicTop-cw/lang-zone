@@ -738,6 +738,357 @@ fn __lz_parse_dict_int_int(raw: &str, artifact: &str, method: &str) -> std::coll
     map
 }
 
+/// 顶层逗号切分 JSON 数组内部（引号感知：字符串元素内的逗号/括号不参与切分）
+fn __lz_split_json_array(raw: &str, artifact: &str, method: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 JSON 数组", artifact, method, raw);
+    }
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut in_str = false;
+    let mut escape = false;
+    let mut depth: i32 = 0;
+    for c in inner.chars() {
+        if escape {
+            cur.push(c);
+            escape = false;
+            continue;
+        }
+        match c {
+            '\\' if in_str => { cur.push(c); escape = true; }
+            '"' => { in_str = !in_str; cur.push(c); }
+            '[' | '{' if !in_str => { depth += 1; cur.push(c); }
+            ']' | '}' if !in_str => { depth -= 1; cur.push(c); }
+            ',' if !in_str && depth == 0 => {
+                parts.push(cur.trim().to_string());
+                cur = String::new();
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    parts
+}
+
+/// JSON 数组字符串元素解析（要求带引号，反转义 \" 与 \\）
+fn __lz_json_elem_str(elem: &str, raw: &str, artifact: &str, method: &str, idx: usize) -> String {
+    let t = elem.trim();
+    if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
+        let inner = &t[1..t.len() - 1];
+        inner.replace("\\\"", "\"").replace("\\\\", "\\")
+    } else {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 第 {} 位不是字符串元素：`{}`", artifact, method, raw, idx, elem)
+    }
+}
+
+/// JSON 数组 bool 元素解析（true/false 字面量）
+fn __lz_json_elem_bool(elem: &str, raw: &str, artifact: &str, method: &str, idx: usize) -> bool {
+    match elem.trim() {
+        "true" => true,
+        "false" => false,
+        other => panic!("embed 产物 {} 的 {} 返回值 `{}` 第 {} 位不是 bool：`{}`", artifact, method, raw, idx, other),
+    }
+}
+
+/// LZ 字符串 → JSON 字符串字面量（含引号与最小转义，参数方向用）
+fn __lz_json_str_lit(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// (i64, i64) → JSON 数组字符串 [1,2]
+fn __lz_tuple_int_int_to_json(t: &(i64, i64)) -> String {
+    format!("[{},{}]", t.0, t.1)
+}
+
+/// (i64, f64) → JSON 数组字符串 [1,2.5]
+fn __lz_tuple_int_float_to_json(t: &(i64, f64)) -> String {
+    format!("[{},{}]", t.0, t.1)
+}
+
+/// (i64, String) → JSON 数组字符串 [1,"a"]
+fn __lz_tuple_int_str_to_json(t: &(i64, String)) -> String {
+    format!("[{},{}]", t.0, __lz_json_str_lit(&t.1))
+}
+
+/// (i64, bool) → JSON 数组字符串 [1,true]
+fn __lz_tuple_int_bool_to_json(t: &(i64, bool)) -> String {
+    format!("[{},{}]", t.0, if t.1 { "true" } else { "false" })
+}
+
+/// (f64, i64) → JSON 数组字符串 [1.5,2]
+fn __lz_tuple_float_int_to_json(t: &(f64, i64)) -> String {
+    format!("[{},{}]", t.0, t.1)
+}
+
+/// (f64, f64) → JSON 数组字符串 [1.5,2.5]
+fn __lz_tuple_float_float_to_json(t: &(f64, f64)) -> String {
+    format!("[{},{}]", t.0, t.1)
+}
+
+/// (f64, String) → JSON 数组字符串 [1.5,"a"]
+fn __lz_tuple_float_str_to_json(t: &(f64, String)) -> String {
+    format!("[{},{}]", t.0, __lz_json_str_lit(&t.1))
+}
+
+/// (f64, bool) → JSON 数组字符串 [1.5,true]
+fn __lz_tuple_float_bool_to_json(t: &(f64, bool)) -> String {
+    format!("[{},{}]", t.0, if t.1 { "true" } else { "false" })
+}
+
+/// (String, i64) → JSON 数组字符串 ["a",2]
+fn __lz_tuple_str_int_to_json(t: &(String, i64)) -> String {
+    format!("[{},{}]", __lz_json_str_lit(&t.0), t.1)
+}
+
+/// (String, f64) → JSON 数组字符串 ["a",2.5]
+fn __lz_tuple_str_float_to_json(t: &(String, f64)) -> String {
+    format!("[{},{}]", __lz_json_str_lit(&t.0), t.1)
+}
+
+/// (String, String) → JSON 数组字符串 ["a","b"]
+fn __lz_tuple_str_str_to_json(t: &(String, String)) -> String {
+    format!("[{},{}]", __lz_json_str_lit(&t.0), __lz_json_str_lit(&t.1))
+}
+
+/// (String, bool) → JSON 数组字符串 ["a",true]
+fn __lz_tuple_str_bool_to_json(t: &(String, bool)) -> String {
+    format!("[{},{}]", __lz_json_str_lit(&t.0), if t.1 { "true" } else { "false" })
+}
+
+/// (bool, i64) → JSON 数组字符串 [true,2]
+fn __lz_tuple_bool_int_to_json(t: &(bool, i64)) -> String {
+    format!("[{},{}]", if t.0 { "true" } else { "false" }, t.1)
+}
+
+/// (bool, f64) → JSON 数组字符串 [true,2.5]
+fn __lz_tuple_bool_float_to_json(t: &(bool, f64)) -> String {
+    format!("[{},{}]", if t.0 { "true" } else { "false" }, t.1)
+}
+
+/// (bool, String) → JSON 数组字符串 [true,"a"]
+fn __lz_tuple_bool_str_to_json(t: &(bool, String)) -> String {
+    format!("[{},{}]", if t.0 { "true" } else { "false" }, __lz_json_str_lit(&t.1))
+}
+
+/// (bool, bool) → JSON 数组字符串 [true,false]
+fn __lz_tuple_bool_bool_to_json(t: &(bool, bool)) -> String {
+    format!("[{},{}]", if t.0 { "true" } else { "false" }, if t.1 { "true" } else { "false" })
+}
+
+/// (i64, i64, i64) → JSON 数组字符串 [1,2,3]
+fn __lz_tuple_int_int_int_to_json(t: &(i64, i64, i64)) -> String {
+    format!("[{},{},{}]", t.0, t.1, t.2)
+}
+
+/// 解析 `[1,2]` 形式的 JSON 数组为 (i64, i64)
+fn __lz_parse_tuple_int_int(raw: &str, artifact: &str, method: &str) -> (i64, i64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<int,int> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 int：{}", artifact, method, raw, e)),
+        parts[1].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 int：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `[1,2.5]` 形式的 JSON 数组为 (i64, f64)
+fn __lz_parse_tuple_int_float(raw: &str, artifact: &str, method: &str) -> (i64, f64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<int,float> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 int：{}", artifact, method, raw, e)),
+        parts[1].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 float：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `[1,"a"]` 形式的 JSON 数组为 (i64, String)
+fn __lz_parse_tuple_int_str(raw: &str, artifact: &str, method: &str) -> (i64, String) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<int,str> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 int：{}", artifact, method, raw, e)),
+        __lz_json_elem_str(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `[1,true]` 形式的 JSON 数组为 (i64, bool)
+fn __lz_parse_tuple_int_bool(raw: &str, artifact: &str, method: &str) -> (i64, bool) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<int,bool> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 int：{}", artifact, method, raw, e)),
+        __lz_json_elem_bool(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `[1.5,2]` 形式的 JSON 数组为 (f64, i64)
+fn __lz_parse_tuple_float_int(raw: &str, artifact: &str, method: &str) -> (f64, i64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<float,int> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 float：{}", artifact, method, raw, e)),
+        parts[1].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 int：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `[1.5,2.5]` 形式的 JSON 数组为 (f64, f64)
+fn __lz_parse_tuple_float_float(raw: &str, artifact: &str, method: &str) -> (f64, f64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<float,float> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 float：{}", artifact, method, raw, e)),
+        parts[1].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 float：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `[1.5,"a"]` 形式的 JSON 数组为 (f64, String)
+fn __lz_parse_tuple_float_str(raw: &str, artifact: &str, method: &str) -> (f64, String) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<float,str> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 float：{}", artifact, method, raw, e)),
+        __lz_json_elem_str(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `[1.5,true]` 形式的 JSON 数组为 (f64, bool)
+fn __lz_parse_tuple_float_bool(raw: &str, artifact: &str, method: &str) -> (f64, bool) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<float,bool> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 float：{}", artifact, method, raw, e)),
+        __lz_json_elem_bool(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `["a",2]` 形式的 JSON 数组为 (String, i64)
+fn __lz_parse_tuple_str_int(raw: &str, artifact: &str, method: &str) -> (String, i64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<str,int> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_str(&parts[0], raw, artifact, method, 0),
+        parts[1].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 int：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `["a",2.5]` 形式的 JSON 数组为 (String, f64)
+fn __lz_parse_tuple_str_float(raw: &str, artifact: &str, method: &str) -> (String, f64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<str,float> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_str(&parts[0], raw, artifact, method, 0),
+        parts[1].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 float：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `["a","b"]` 形式的 JSON 数组为 (String, String)
+fn __lz_parse_tuple_str_str(raw: &str, artifact: &str, method: &str) -> (String, String) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<str,str> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_str(&parts[0], raw, artifact, method, 0),
+        __lz_json_elem_str(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `["a",true]` 形式的 JSON 数组为 (String, bool)
+fn __lz_parse_tuple_str_bool(raw: &str, artifact: &str, method: &str) -> (String, bool) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<str,bool> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_str(&parts[0], raw, artifact, method, 0),
+        __lz_json_elem_bool(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `[true,2]` 形式的 JSON 数组为 (bool, i64)
+fn __lz_parse_tuple_bool_int(raw: &str, artifact: &str, method: &str) -> (bool, i64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<bool,int> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_bool(&parts[0], raw, artifact, method, 0),
+        parts[1].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 int：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `[true,2.5]` 形式的 JSON 数组为 (bool, f64)
+fn __lz_parse_tuple_bool_float(raw: &str, artifact: &str, method: &str) -> (bool, f64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<bool,float> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_bool(&parts[0], raw, artifact, method, 0),
+        parts[1].trim().parse::<f64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 float：{}", artifact, method, raw, e)),
+    )
+}
+
+/// 解析 `[true,"a"]` 形式的 JSON 数组为 (bool, String)
+fn __lz_parse_tuple_bool_str(raw: &str, artifact: &str, method: &str) -> (bool, String) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<bool,str> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_bool(&parts[0], raw, artifact, method, 0),
+        __lz_json_elem_str(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `[true,false]` 形式的 JSON 数组为 (bool, bool)
+fn __lz_parse_tuple_bool_bool(raw: &str, artifact: &str, method: &str) -> (bool, bool) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 2 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 2 元 Tuple<bool,bool> JSON 数组", artifact, method, raw);
+    }
+    (
+        __lz_json_elem_bool(&parts[0], raw, artifact, method, 0),
+        __lz_json_elem_bool(&parts[1], raw, artifact, method, 1),
+    )
+}
+
+/// 解析 `[1,2,3]` 形式的 JSON 数组为 (i64, i64, i64)
+fn __lz_parse_tuple_int_int_int(raw: &str, artifact: &str, method: &str) -> (i64, i64, i64) {
+    let parts = __lz_split_json_array(raw, artifact, method);
+    if parts.len() != 3 {
+        panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 3 元 Tuple<int,int,int> JSON 数组", artifact, method, raw);
+    }
+    (
+        parts[0].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 0 位不是 int：{}", artifact, method, raw, e)),
+        parts[1].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 1 位不是 int：{}", artifact, method, raw, e)),
+        parts[2].trim().parse::<i64>().unwrap_or_else(|e| panic!("embed 产物 {} 的 {} 返回值 `{}` 第 2 位不是 int：{}", artifact, method, raw, e)),
+    )
+}
+
 /// 协议调用：`<method> key=value ...` 走 argv，响应取 stdout 最后一行。
 /// 起不来 / 非零退出 / ERR: / 无响应 一律 panic 并带上产物名与原因 —— 绝不返回默认值。
 fn __lz_call(
@@ -877,6 +1228,23 @@ fn embed_param_ty(lz: &str) -> &'static str {
         "dict<str,float>" => "std::collections::HashMap<String, f64>",
         "dict<str,str>" => "std::collections::HashMap<String, String>",
         "dict<int,int>" => "std::collections::HashMap<i64, i64>",
+        "tuple<int,int>" => "(i64, i64)",
+        "tuple<int,float>" => "(i64, f64)",
+        "tuple<int,str>" => "(i64, String)",
+        "tuple<int,bool>" => "(i64, bool)",
+        "tuple<float,int>" => "(f64, i64)",
+        "tuple<float,float>" => "(f64, f64)",
+        "tuple<float,str>" => "(f64, String)",
+        "tuple<float,bool>" => "(f64, bool)",
+        "tuple<str,int>" => "(String, i64)",
+        "tuple<str,float>" => "(String, f64)",
+        "tuple<str,str>" => "(String, String)",
+        "tuple<str,bool>" => "(String, bool)",
+        "tuple<bool,int>" => "(bool, i64)",
+        "tuple<bool,float>" => "(bool, f64)",
+        "tuple<bool,str>" => "(bool, String)",
+        "tuple<bool,bool>" => "(bool, bool)",
+        "tuple<int,int,int>" => "(i64, i64, i64)",
         _ => "&str",
     }
 }
@@ -894,6 +1262,23 @@ fn embed_ret_ty(ret: &str) -> &'static str {
         "dict<str,float>" => "std::collections::HashMap<String, f64>",
         "dict<str,str>" => "std::collections::HashMap<String, String>",
         "dict<int,int>" => "std::collections::HashMap<i64, i64>",
+        "tuple<int,int>" => "(i64, i64)",
+        "tuple<int,float>" => "(i64, f64)",
+        "tuple<int,str>" => "(i64, String)",
+        "tuple<int,bool>" => "(i64, bool)",
+        "tuple<float,int>" => "(f64, i64)",
+        "tuple<float,float>" => "(f64, f64)",
+        "tuple<float,str>" => "(f64, String)",
+        "tuple<float,bool>" => "(f64, bool)",
+        "tuple<str,int>" => "(String, i64)",
+        "tuple<str,float>" => "(String, f64)",
+        "tuple<str,str>" => "(String, String)",
+        "tuple<str,bool>" => "(String, bool)",
+        "tuple<bool,int>" => "(bool, i64)",
+        "tuple<bool,float>" => "(bool, f64)",
+        "tuple<bool,str>" => "(bool, String)",
+        "tuple<bool,bool>" => "(bool, bool)",
+        "tuple<int,int,int>" => "(i64, i64, i64)",
         _ => "()",
     }
 }
@@ -928,6 +1313,74 @@ fn embed_arg_expr(ident: &str, lz: &str) -> String {
         ),
         "dict<int,int>" => format!(
             "{{ __lz_dict_int_int_to_json({}) }}",
+            ident
+        ),
+        "tuple<int,int>" => format!(
+            "{{ __lz_tuple_int_int_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<int,float>" => format!(
+            "{{ __lz_tuple_int_float_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<int,str>" => format!(
+            "{{ __lz_tuple_int_str_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<int,bool>" => format!(
+            "{{ __lz_tuple_int_bool_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<float,int>" => format!(
+            "{{ __lz_tuple_float_int_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<float,float>" => format!(
+            "{{ __lz_tuple_float_float_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<float,str>" => format!(
+            "{{ __lz_tuple_float_str_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<float,bool>" => format!(
+            "{{ __lz_tuple_float_bool_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<str,int>" => format!(
+            "{{ __lz_tuple_str_int_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<str,float>" => format!(
+            "{{ __lz_tuple_str_float_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<str,str>" => format!(
+            "{{ __lz_tuple_str_str_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<str,bool>" => format!(
+            "{{ __lz_tuple_str_bool_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<bool,int>" => format!(
+            "{{ __lz_tuple_bool_int_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<bool,float>" => format!(
+            "{{ __lz_tuple_bool_float_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<bool,str>" => format!(
+            "{{ __lz_tuple_bool_str_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<bool,bool>" => format!(
+            "{{ __lz_tuple_bool_bool_to_json(&{}) }}",
+            ident
+        ),
+        "tuple<int,int,int>" => format!(
+            "{{ __lz_tuple_int_int_int_to_json(&{}) }}",
             ident
         ),
         _ => format!("{}.to_string()", ident),
@@ -1014,31 +1467,99 @@ fn embed_wrapper_fn(ep: &EmbedEndpoint, f: &EmbedFnSig) -> String {
                 art, method
             )),
             "list<int>" => out.push_str(&format!(
-                "    __lz_parse_list_int(__r, {}, {})\n",
+                "    __lz_parse_list_int(&__r, {}, {})\n",
                 art, method
             )),
             "list<float>" => out.push_str(&format!(
-                "    __lz_parse_list_float(__r, {}, {})\n",
+                "    __lz_parse_list_float(&__r, {}, {})\n",
                 art, method
             )),
             "list<str>" => out.push_str(&format!(
-                "    __lz_parse_list_str(__r, {}, {})\n",
+                "    __lz_parse_list_str(&__r, {}, {})\n",
                 art, method
             )),
             "dict<str,int>" => out.push_str(&format!(
-                "    __lz_parse_dict_str_int(__r, {}, {})\n",
+                "    __lz_parse_dict_str_int(&__r, {}, {})\n",
                 art, method
             )),
             "dict<str,float>" => out.push_str(&format!(
-                "    __lz_parse_dict_str_float(__r, {}, {})\n",
+                "    __lz_parse_dict_str_float(&__r, {}, {})\n",
                 art, method
             )),
             "dict<str,str>" => out.push_str(&format!(
-                "    __lz_parse_dict_str_str(__r, {}, {})\n",
+                "    __lz_parse_dict_str_str(&__r, {}, {})\n",
                 art, method
             )),
             "dict<int,int>" => out.push_str(&format!(
-                "    __lz_parse_dict_int_int(__r, {}, {})\n",
+                "    __lz_parse_dict_int_int(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<int,int>" => out.push_str(&format!(
+                "    __lz_parse_tuple_int_int(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<int,float>" => out.push_str(&format!(
+                "    __lz_parse_tuple_int_float(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<int,str>" => out.push_str(&format!(
+                "    __lz_parse_tuple_int_str(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<int,bool>" => out.push_str(&format!(
+                "    __lz_parse_tuple_int_bool(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<float,int>" => out.push_str(&format!(
+                "    __lz_parse_tuple_float_int(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<float,float>" => out.push_str(&format!(
+                "    __lz_parse_tuple_float_float(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<float,str>" => out.push_str(&format!(
+                "    __lz_parse_tuple_float_str(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<float,bool>" => out.push_str(&format!(
+                "    __lz_parse_tuple_float_bool(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<str,int>" => out.push_str(&format!(
+                "    __lz_parse_tuple_str_int(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<str,float>" => out.push_str(&format!(
+                "    __lz_parse_tuple_str_float(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<str,str>" => out.push_str(&format!(
+                "    __lz_parse_tuple_str_str(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<str,bool>" => out.push_str(&format!(
+                "    __lz_parse_tuple_str_bool(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<bool,int>" => out.push_str(&format!(
+                "    __lz_parse_tuple_bool_int(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<bool,float>" => out.push_str(&format!(
+                "    __lz_parse_tuple_bool_float(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<bool,str>" => out.push_str(&format!(
+                "    __lz_parse_tuple_bool_str(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<bool,bool>" => out.push_str(&format!(
+                "    __lz_parse_tuple_bool_bool(&__r, {}, {})\n",
+                art, method
+            )),
+            "tuple<int,int,int>" => out.push_str(&format!(
+                "    __lz_parse_tuple_int_int_int(&__r, {}, {})\n",
                 art, method
             )),
             _ => out.push_str("    __r\n"),
