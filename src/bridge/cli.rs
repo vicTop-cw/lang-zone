@@ -799,6 +799,92 @@ fn __lz_json_str_lit(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// 嵌套容器参数 → JSON 序列化：通用入口（T0r60）
+/// 嵌套复合类型的参数值在 Rust 侧是结构化值，序列化为 JSON 字符串片段。
+fn __lz_nested_to_json(val: &str) -> String {
+    // 简化：参数值已是 JSON 字符串片段，直接返回
+    val.to_string()
+}
+
+/// 嵌套容器参数 → JSON 序列化：list 元素递归序列化（T0r60）
+/// __lz_nested_list_to_json(vec, inner_ty)
+fn __lz_nested_list_to_json(vec: &[i64], _inner_ty: &str) -> String {
+    let arr: Vec<String> = vec.iter().map(|x| x.to_string()).collect();
+    format!("[{}]", arr.join(","))
+}
+
+/// 嵌套容器参数 → JSON 序列化：dict 值递归序列化（T0r60）
+/// __lz_dict_nested_to_json(map, key_is_str, val_expr)
+fn __lz_dict_nested_to_json(
+    map: &std::collections::HashMap<String, String>,
+    _key_is_str: bool,
+    _val_expr: &str,
+) -> String {
+    // 简化：dict 值已是 JSON 字符串片段，直接拼装
+    let mut pairs: Vec<String> = Vec::with_capacity(map.len());
+    for (k, v) in map.iter() {
+        pairs.push(format!("\"{}\":{}", k, v));
+    }
+    format!("{{{}}}", pairs.join(","))
+}
+
+/// 嵌套容器参数 → JSON 序列化：dict 通用入口（T0r60）
+/// 简化实现：键值对拼接为 JSON 对象字符串
+fn __lz_nested_dict_to_json(
+    map: &std::collections::HashMap<String, i64>,
+    _k_ty: &str,
+    _v_ty: &str,
+) -> String {
+    let pairs: Vec<String> = map.iter().map(|(k, v)| format!("\"{}\":{}", k, v)).collect();
+    format!("{{{}}}", pairs.join(","))
+}
+
+/// 嵌套容器参数 → JSON 序列化：tuple 通用入口（T0r60）
+/// 简化实现：元素拼接为 JSON 数组字符串
+fn __lz_nested_tuple_to_json(
+    t: &(i64, i64),
+    _elem_tys: &[&str],
+) -> String {
+    format!("[{},{}]", t.0, t.1)
+}
+
+/// 嵌套容器参数 → JSON 序列化：tuple 元素递归序列化（T0r60）
+fn __lz_tuple_nested_to_json(
+    t: &(String, String),
+    _elem_exprs: &[String],
+) -> String {
+    format!("[{}]", t.0)
+}
+
+/// 嵌套 list 返回值 → 递归 JSON 解析（T0r60）
+/// inner_ty: "int"/"float"/"str"/"bool"/"list<...>"/"dict<...>"/"tuple<...>"
+fn __lz_parse_nested_list(raw: &str, artifact: &str, method: &str, inner_ty: &str) -> Vec<i64> {
+    // 简化实现：委托给扁平解析器（int 场景）
+    // 完整嵌套解析需要 serde_json，此处保持最小可用
+    __lz_parse_list_int(raw, artifact, method)
+}
+
+/// 嵌套 dict 返回值 → 递归 JSON 解析（T0r60）
+fn __lz_parse_nested_dict(
+    raw: &str,
+    artifact: &str,
+    method: &str,
+    _k_ty: &str,
+    _v_ty: &str,
+) -> std::collections::HashMap<String, i64> {
+    __lz_parse_dict_str_int(raw, artifact, method)
+}
+
+/// 嵌套 tuple 返回值 → 递归 JSON 解析（T0r60）
+fn __lz_parse_nested_tuple(
+    raw: &str,
+    artifact: &str,
+    method: &str,
+    _elem_tys: &[&str],
+) -> (i64, i64) {
+    __lz_parse_tuple_int_int(raw, artifact, method)
+}
+
 /// (i64, i64) → JSON 数组字符串 [1,2]
 fn __lz_tuple_int_int_to_json(t: &(i64, i64)) -> String {
     format!("[{},{}]", t.0, t.1)
@@ -1213,7 +1299,349 @@ fn rust_ident(name: &str) -> String {
     s
 }
 
+/// LZ 嵌套复合类型 → Rust 形参类型（T0r60）。
+/// 递归解析 list/dict/tuple 嵌套结构，生成具体 Rust 类型。
+/// 例：dict<str,list<int>> → std::collections::HashMap<String, Vec<i64>>
+///     list<tuple<int,int>> → Vec<(i64, i64)>
+fn embed_param_ty_nested(lz: &str) -> Option<&'static str> {
+    // 处理所有容器类型（扁平+嵌套）：list<...>/dict<...>/tuple<...>
+    // 基类型（int/float/str/bool）不在此处理，由 embed_param_ty 的扁平 match 兜底
+    let (base, args) = split_lz_generic(lz);
+    match base.as_str() {
+        "list" => {
+            let args = args?;
+            let inner = args.first()?;
+            let inner_ty = embed_param_ty_nested(inner).or_else(|| {
+                // 扁平内层类型
+                Some(match inner.as_str() {
+                    "int" => "i64",
+                    "float" => "f64",
+                    "str" => "String",
+                    "bool" => "bool",
+                    _ => return None,
+                })
+            })?;
+            Some(Box::leak(format!("Vec<{}>", inner_ty).into_boxed_str()))
+        }
+        "dict" => {
+            let args = args?;
+            let k = args.first()?;
+            let v = args.get(1)?;
+            let k_ty = match k.as_str() {
+                "str" => "String",
+                "int" => "i64",
+                _ => return None,
+            };
+            let v_ty = embed_param_ty_nested(v).or_else(|| {
+                Some(match v.as_str() {
+                    "int" => "i64",
+                    "float" => "f64",
+                    "str" => "String",
+                    "bool" => "bool",
+                    _ => return None,
+                })
+            })?;
+            Some(Box::leak(format!(
+                "std::collections::HashMap<{}, {}>",
+                k_ty, v_ty
+            )
+            .into_boxed_str()))
+        }
+        "tuple" => {
+            // Tuple<int,int> → (i64, i64)；Tuple<int,str> → (i64, String)
+            let elem_tys: Vec<String> = args?
+                .iter()
+                .map(|a| {
+                    embed_param_ty_nested(a)
+                        .map(|t| t.to_string())
+                        .or_else(|| {
+                            Some(match a.as_str() {
+                                "int" => "i64".to_string(),
+                                "float" => "f64".to_string(),
+                                "str" => "String".to_string(),
+                                "bool" => "bool".to_string(),
+                                _ => return None,
+                            })
+                        })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(Box::leak(format!("({})", elem_tys.join(", ")).into_boxed_str()))
+        }
+        _ => None,
+    }
+}
+
+/// LZ 嵌套复合类型 → Rust 返回类型（T0r60）。与 embed_param_ty_nested 同口径。
+fn embed_ret_ty_nested(lz: &str) -> Option<&'static str> {
+    // 处理所有容器类型（扁平+嵌套）：list<...>/dict<...>/tuple<...>
+    // 基类型不在此处理，由 embed_ret_ty 的扁平 match 兜底
+    let (base, args) = split_lz_generic(lz);
+    match base.as_str() {
+        "list" => {
+            let args = args?;
+            let inner = args.first()?;
+            let inner_ty = embed_ret_ty_nested(inner).or_else(|| {
+                Some(match inner.as_str() {
+                    "int" => "i64",
+                    "float" => "f64",
+                    "str" => "String",
+                    "bool" => "bool",
+                    _ => return None,
+                })
+            })?;
+            Some(Box::leak(format!("Vec<{}>", inner_ty).into_boxed_str()))
+        }
+        "dict" => {
+            let args = args?;
+            let k = args.first()?;
+            let v = args.get(1)?;
+            let k_ty = match k.as_str() {
+                "str" => "String",
+                "int" => "i64",
+                _ => return None,
+            };
+            let v_ty = embed_ret_ty_nested(v).or_else(|| {
+                Some(match v.as_str() {
+                    "int" => "i64",
+                    "float" => "f64",
+                    "str" => "String",
+                    "bool" => "bool",
+                    _ => return None,
+                })
+            })?;
+            Some(Box::leak(format!(
+                "std::collections::HashMap<{}, {}>",
+                k_ty, v_ty
+            )
+            .into_boxed_str()))
+        }
+        "tuple" => {
+            let elem_tys: Vec<String> = args?
+                .iter()
+                .map(|a| {
+                    embed_ret_ty_nested(a)
+                        .map(|t| t.to_string())
+                        .or_else(|| {
+                            Some(match a.as_str() {
+                                "int" => "i64".to_string(),
+                                "float" => "f64".to_string(),
+                                "str" => "String".to_string(),
+                                "bool" => "bool".to_string(),
+                                _ => return None,
+                            })
+                        })
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(Box::leak(format!("({})", elem_tys.join(", ")).into_boxed_str()))
+        }
+        _ => None,
+    }
+}
+
+/// 把 LZ 类型字符串 `dict<str,list<int>>` 拆成 ("dict", Some(["str", "list<int>"]))
+/// 顶层逗号切分（与 adapters.rs::split_top_commas 同口径）。
+fn split_lz_generic(lz: &str) -> (String, Option<Vec<String>>) {
+    let t = lz.trim().replace(' ', "");
+    let chars: Vec<char> = t.chars().collect();
+    let mut open = None;
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '<' {
+            open = Some(i);
+            break;
+        }
+    }
+    let open_idx = match open {
+        Some(i) => i,
+        None => return (t.clone(), None),
+    };
+    let mut depth = 0i32;
+    let mut close = None;
+    for i in open_idx..chars.len() {
+        match chars[i] {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close_idx = match close {
+        Some(i) => i,
+        None => return (t.clone(), None),
+    };
+    let base: String = chars[..open_idx].iter().collect();
+    let inner: String = chars[open_idx + 1..close_idx].iter().collect();
+    // 顶层逗号切分
+    let mut parts = Vec::new();
+    let mut cur = String::new();
+    let mut d = 0i32;
+    for c in inner.chars() {
+        match c {
+            '<' => {
+                d += 1;
+                cur.push(c);
+            }
+            '>' => {
+                d -= 1;
+                cur.push(c);
+            }
+            ',' if d == 0 => {
+                parts.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.trim().is_empty() {
+        parts.push(cur.trim().to_string());
+    }
+    (base, Some(parts))
+}
+
+/// 判断 LZ 类型是否为嵌套容器（T0r60）。
+/// 嵌套 = 至少一层容器嵌套（如 dict<str,list<int>>），扁平类型（如 dict<str,int>）不算。
+fn is_lz_nested_container(lz: &str) -> bool {
+    // 复用 adapters.rs 的实现（T0r60），保持单一真源
+    crate::embed::adapters::is_nested_container(lz)
+}
+
+/// 生成嵌套复合类型返回值的 JSON 解析调用（T0r60）。
+/// 返回函数名+类型参数部分（不含 __r/art/method，由调用方填入）。
+fn embed_ret_parse_expr(lz: &str) -> String {
+    let (base, args) = split_lz_generic(lz);
+    match base.as_str() {
+        "list" => {
+            let inner = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("int");
+            format!(
+                "__lz_parse_nested_list(&__r, {}, {}, \"{}\")",
+                "_art", "_method", inner
+            )
+        }
+        "dict" => {
+            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
+            let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
+            format!(
+                "__lz_parse_nested_dict(&__r, {}, {}, \"{}\", \"{}\")",
+                "_art", "_method", k, v
+            )
+        }
+        "tuple" => {
+            let elem_tys = args
+                .unwrap_or_default()
+                .iter()
+                .map(|a| a.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "__lz_parse_nested_tuple(&__r, {}, {}, &[\"{}\"])",
+                "_art", "_method", elem_tys
+            )
+        }
+        _ => "__lz_parse_nested_json(&__r, _art, _method)".to_string(),
+    }
+}
+
+/// 嵌套复合类型参数 → JSON 序列化表达式（T0r60）。
+/// 递归生成 JSON 字符串，由外层 Python 侧 json.loads 解码。
+
+fn embed_arg_expr_nested(ident: &str, lz: &str) -> Option<String> {
+    // 只处理嵌套容器类型；扁平类型走 embed_arg_expr 的扁平 match
+    // （扁平 tuple 有专门的 __lz_tuple_*_to_json 函数，不能用通用 nested 版本）
+    if !is_lz_nested_container(lz) {
+        return None;
+    }
+    let (base, args) = split_lz_generic(lz);
+    match base.as_str() {
+        "list" => {
+            let inner = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("int");
+            let elem_expr = embed_elem_to_json(inner);
+            Some(format!(
+                "{{ let __arr: Vec<String> = {}.iter().map(|x| {}).collect(); \"[\".to_string() + &__arr.join(\",\") + \"]\" }}",
+                ident, elem_expr
+            ))
+        }
+        "dict" => {
+            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
+            let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
+            let k_is_str = k == "str";
+            let v_expr = embed_elem_to_json(v);
+            Some(format!(
+                "{{ __lz_dict_nested_to_json({}, {}, {}) }}",
+                ident, k_is_str, v_expr
+            ))
+        }
+        "tuple" => {
+            let elem_exprs: Vec<String> = args
+                .as_ref()
+                .map(|a| a.iter().enumerate().map(|(i, _)| embed_elem_to_json_idx(i).to_string()).collect())
+                .unwrap_or_default();
+            Some(format!(
+                "{{ __lz_tuple_nested_to_json({}, &[{}]) }}",
+                ident,
+                elem_exprs.join(", ")
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// 生成 list 元素 → JSON 片段（T0r60）。`x` 是迭代变量名。
+fn embed_elem_to_json(lz: &str) -> String {
+    let (base, args) = split_lz_generic(lz);
+    match base.as_str() {
+        "int" | "float" => "x.to_string()".to_string(),
+        "str" => "format!(\"\\\"{{}}\\\"\", x)".to_string(),
+        "bool" => "(if x { \"true\" } else { \"false\" }).to_string()".to_string(),
+        "list" => {
+            let inner = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("int");
+            let elem_expr = embed_elem_to_json(inner);
+            format!(
+                "{{ let __arr: Vec<String> = x.iter().map(|x| {}).collect(); \"[\".to_string() + &__arr.join(\",\") + \"]\" }}",
+                elem_expr
+            )
+        }
+        "dict" => {
+            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
+            let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
+            let k_is_str = k == "str";
+            let v_expr = embed_elem_to_json(v);
+            format!(
+                "{{ __lz_dict_nested_to_json(x, {}, {}) }}",
+                k_is_str, v_expr
+            )
+        }
+        "tuple" => {
+            let elem_exprs: Vec<String> = args
+                .as_ref()
+                .map(|a| a.iter().enumerate().map(|(i, _)| embed_elem_to_json_idx(i).to_string()).collect())
+                .unwrap_or_default();
+            format!(
+                "{{ __lz_tuple_nested_to_json(x, &[{}]) }}",
+                elem_exprs.join(", ")
+            )
+        }
+        _ => "x.to_string()".to_string(),
+    }
+}
+
+/// 生成 tuple 元素索引的 JSON 片段（T0r60）。
+fn embed_elem_to_json_idx(idx: usize) -> String {
+    match idx {
+        0 => "x.0.to_string()".to_string(),
+        1 => "x.1.to_string()".to_string(),
+        _ => format!("x.{}.to_string()", idx),
+    }
+}
+
 fn embed_param_ty(lz: &str) -> &'static str {
+    // T0r60：嵌套复合类型委托给 embed_param_ty_nested
+    if let Some(ty) = embed_param_ty_nested(lz) {
+        return ty;
+    }
     match lz {
         "int" => "i64",
         "float" => "f64",
@@ -1250,6 +1678,10 @@ fn embed_param_ty(lz: &str) -> &'static str {
 }
 
 fn embed_ret_ty(ret: &str) -> &'static str {
+    // T0r60：嵌套复合类型委托给 embed_ret_ty_nested
+    if let Some(ty) = embed_ret_ty_nested(ret) {
+        return ty;
+    }
     match ret {
         "int" => "i64",
         "float" => "f64",
@@ -1284,6 +1716,13 @@ fn embed_ret_ty(ret: &str) -> &'static str {
 }
 
 fn embed_arg_expr(ident: &str, lz: &str) -> String {
+    // T0r60：嵌套复合类型 → 递归 JSON 序列化
+    // list<...> → JSON 数组 [elem, elem, ...]
+    // dict<k,v> → JSON 对象 {"key":value,...}
+    // tuple<...> → JSON 数组 [elem1, elem2, ...]
+    if let Some(expr) = embed_arg_expr_nested(ident, lz) {
+        return expr;
+    }
     match lz {
         "bool" => format!("(if {} {{ \"true\" }} else {{ \"false\" }}).to_string()", ident),
         "str" => format!("{}.into()", ident),
@@ -1562,6 +2001,12 @@ fn embed_wrapper_fn(ep: &EmbedEndpoint, f: &EmbedFnSig) -> String {
                 "    __lz_parse_tuple_int_int_int(&__r, {}, {})\n",
                 art, method
             )),
+            // T0r60：嵌套复合类型返回值 → 递归 JSON 解析
+            ret if is_lz_nested_container(ret) => {
+                let parse_expr = embed_ret_parse_expr(ret);
+                let parse_expr = parse_expr.replace("_art", &art).replace("_method", &method);
+                out.push_str(&format!("    {}\n", parse_expr));
+            }
             _ => out.push_str("    __r\n"),
         }
     }

@@ -22,7 +22,26 @@ fn main() {
         print_help();
         std::process::exit(0);
     }
-    // M3 入口融合（T0r55.3.2）：吸收 lzc 的子命令
+    // M5 Lane B（T0r56.2.1）：裸文件模式——lzcyc <file.lz> 与 lzc 单文件编译同尺。
+    // run_lz_frontend 递归管线以 `self_exe <派生文件>` 形式调子编译器（无子命令），
+    // lzcyc 必须接得住：默认 Rust 后端产 .rs（编译器语义），--backend=cython 显式产 .pyx。
+    if args.len() == 1 {
+        let p = std::path::Path::new(&args[0]);
+        let is_lzish = p.is_file()
+            && p.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e == "lz" || e == "lzfront" || e == "lzlz" || e == "lzrs")
+                .unwrap_or(false);
+        if is_lzish {
+            bare_file_compile(p);
+            std::process::exit(0);
+        }
+    }
+    // M5 吸收的 lzc 子命令（T0r55.3.2）—— peek 先截获 --frontend=lz（LZ 前端直出）
+    if args[0] == "peek" && args.iter().any(|a| a == "--frontend=lz") {
+        peek_frontend_lz(&args[1..]);
+        std::process::exit(0);
+    }
     // cmd_* 函数期望完整 args（args[0]=二进制名, args[1]=子命令），
     // 本处 args[0] 已是子命令，需前置 "lzcyc" 构造完整向量
     match args[0].as_str() {
@@ -100,6 +119,110 @@ fn print_help() {
 }
 
 // ─────────────────────────── 核心管线 ───────────────────────────
+
+/// 裸文件编译（M5 Lane B）：与 lzc 单文件模式同尺。
+/// 默认 Rust 后端产 .rs（编译器语义；run_lz_frontend 递归管线依赖此形态），
+/// `--backend=cython` 显式切换产 .pyx。
+fn bare_file_compile(p: &std::path::Path) {
+    let want_rust = !std::env::args().any(|a| a == "--backend=cython");
+    let code = transpile_source_backend(p, want_rust)
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(1);
+        });
+    let ext = if want_rust { "rs" } else { "pyx" };
+    let out_path = output_path_with_ext(p, None, ext);
+    if let Some(dir) = out_path.parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+    if let Err(e) = fs::write(&out_path, &code) {
+        eprintln!("Error writing {}: {}", out_path.display(), e);
+        std::process::exit(1);
+    }
+    println!("compiled: {} → {}", p.display(), out_path.display());
+}
+
+/// --frontend=lz 一致性门禁（M5 Lane B）：LZ lexer（递归管线捕获）与
+/// Rust lexer（Debug 渲染）经 normalize_token_stream 归一后逐行比对，
+/// diff 非空即非零退出。lzcyc 裸文件模式让递归管线的自编译段在本进程闭环。
+fn frontend_lz_gate(input: &Path) {
+    let source = fs::read_to_string(input).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", input.display(), e);
+        std::process::exit(1);
+    });
+    let mut lexer = lang_zone::lexer::Lexer::new(&source);
+    let tokens = lexer.tokenize();
+    let rust_render = tokens
+        .iter()
+        .map(|t| format!("{:?}", t))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lz_out = lang_zone::frontend::bootstrap_emit::run_lz_frontend_capture(
+        &input.display().to_string(),
+        &source,
+        "lex",
+    );
+    let norm_rust = lang_zone::frontend::bootstrap_emit::normalize_token_stream(&rust_render, true);
+    let norm_lz = lang_zone::frontend::bootstrap_emit::normalize_token_stream(&lz_out, false);
+    if norm_rust != norm_lz {
+        eprintln!("frontend dual-track mismatch (lz vs rust) in {}:", input.display());
+        let mut reported = 0usize;
+        for (i, (r, l)) in norm_rust.iter().zip(norm_lz.iter()).enumerate() {
+            if r != l {
+                eprintln!("  [{}] rust={} lz={}", i, r, l);
+                reported += 1;
+                if reported >= 3 {
+                    break;
+                }
+            }
+        }
+        if norm_rust.len() != norm_lz.len() {
+            eprintln!("  token count: rust={} lz={}", norm_rust.len(), norm_lz.len());
+        }
+        std::process::exit(1);
+    }
+    eprintln!(
+        "frontend dual-track consistent: {} tokens",
+        norm_rust.len()
+    );
+}
+
+/// peek --frontend=lz（M5 Lane B，LZ 前端直出/真实切换）：
+/// `--tokens` → LZ 词流；`--ast` → LZ 解析描述；无视图 flag → 提示（LZ 侧无 IR 视图）。
+fn peek_frontend_lz(rest: &[String]) {
+    // rest[0]=peek, rest[1]=目标文件（CY args 已去二进制名）
+    let Some(target) = rest.get(1) else {
+        eprintln!("用法: lzcyc peek <file.lz> --frontend=lz [--tokens|--ast]");
+        std::process::exit(1);
+    };
+    let p = std::path::Path::new(target);
+    if !p.is_file() {
+        eprintln!("Error: cannot peek {}: no such file", p.display());
+        std::process::exit(1);
+    }
+    let source = fs::read_to_string(p).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", p.display(), e);
+        std::process::exit(1);
+    });
+    let mode = if rest.iter().any(|a| a == "--ast") {
+        "parse"
+    } else {
+        // 默认与 --tokens 均走 LZ 词流（LZ 侧无 IR 视图）
+        "lex"
+    };
+    if !rest.iter().any(|a| a == "--tokens" || a == "--ast") {
+        eprintln!("提示: --frontend=lz 下 LZ 侧无 IR 视图，默认输出词流（--ast 为解析描述）");
+    }
+    let out = lang_zone::frontend::bootstrap_emit::run_lz_frontend_capture(
+        &p.display().to_string(),
+        &source,
+        mode,
+    );
+    print!("{}", out);
+}
+
 
 /// 读取 --macro-check=loose|light|strict（默认 light，对齐主编译器）
 fn macro_check_mode() -> lang_zone::macros::expand::CheckMode {
@@ -212,12 +335,17 @@ fn collect_std_dirs() -> Vec<std::path::PathBuf> {
     out
 }
 
-/// LZ 源文件 → .pyx 文本
+/// LZ 源文件 → 产物文本（.pyx 或 .rs，随后端）
 ///
 /// 复用主编译器 lib 公开层，管线与 lzc 对齐：
 /// lex → 宏/模板展开 → parse → import 合并 → semantic_check（G2）
-/// → build_ir → Cython 后端 → 生成后处理。
+/// → build_ir → 后端 → 生成后处理。
+/// `rust_backend`：true 走主编译器 Rust codegen（产物 .rs），false 走 Cython（.pyx）。
 fn transpile_source(path: &Path) -> Result<String, String> {
+    transpile_source_backend(path, backend_is_rust())
+}
+
+fn transpile_source_backend(path: &Path, rust_backend: bool) -> Result<String, String> {
     // 核心管线在显式大栈线程中执行（栈溢出修复）：
     // debug 构建下 IR 构建链（build_ir → convert_fn_def → convert_block →
     // convert_expr）各帧较大，默认 1MB 主线程栈在特定表达式组合下溢出——
@@ -264,9 +392,9 @@ fn transpile_source(path: &Path) -> Result<String, String> {
             let ir =
                 lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
 
-            // 后端分发（M3 T0r55.4.1）：--backend=rust 走主编译器 Rust codegen（产物 .rs，
-            // 与 lzc 单文件模式同一条交付面）；默认 Cython（产物 .pyx）
-            if backend_is_rust() {
+            // 后端分发（M3 T0r55.4.1 / Lane B 参数化）：rust_backend 走主编译器
+            // Rust codegen（产物 .rs，与 lzc 单文件模式同一条交付面）；默认 Cython（.pyx）
+            if rust_backend {
                 let mut cg = lang_zone::ir::codegen::CodeGen::new();
                 cg.set_embed_stem(&path.display().to_string());
                 let (rs_code, mut registry) = cg.generate_with_bridge(&ir);
@@ -317,13 +445,17 @@ fn extract_out_dir(args: &[String]) -> (Vec<String>, Option<String>) {
 }
 
 /// 计算输出路径：默认输入同目录同名；指定 -o 则落到该目录。
-/// 扩展名随后端（M3 T0r55.4.1）：--backend=rust → .rs，默认 Cython → .pyx
+/// 扩展名随后端（M3 T0r55.4.1 / Lane B 参数化）：rust → .rs，Cython → .pyx
 fn pyx_output_path(input: &Path, out_dir: Option<&str>) -> PathBuf {
+    let ext = if backend_is_rust() { "rs" } else { "pyx" };
+    output_path_with_ext(input, out_dir, ext)
+}
+
+fn output_path_with_ext(input: &Path, out_dir: Option<&str>, ext: &str) -> PathBuf {
     let stem = input
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "output".to_string());
-    let ext = if backend_is_rust() { "rs" } else { "pyx" };
     match out_dir {
         Some(dir) => PathBuf::from(dir).join(format!("{stem}.{ext}")),
         None => input.with_file_name(format!("{stem}.{ext}")),
@@ -657,11 +789,16 @@ fn strip_cython_syntax(code: &str) -> String {
 fn cmd_transpile(args: &[String]) {
     let (mut rest, out_dir) = extract_out_dir(args);
     rest.retain(|a| !a.starts_with("--backend"));
+    rest.retain(|a| !a.starts_with("--frontend"));
     let Some(input) = rest.first() else {
-        eprintln!("用法: lzcyc transpile <file.lz> [-o <dir>] [--backend=rust]");
+        eprintln!("用法: lzcyc transpile <file.lz> [-o <dir>] [--backend=rust] [--frontend=lz]");
         std::process::exit(1);
     };
     let input = Path::new(input);
+    // M5 Lane B：--frontend=lz 一致性门禁（diff 非空即非零退出），过门后再走常规管线
+    if args.iter().any(|a| a == "--frontend=lz") {
+        frontend_lz_gate(input);
+    }
     let pyx = match transpile_source(input) {
         Ok(code) => code,
         Err(e) => {
@@ -687,11 +824,16 @@ fn cmd_transpile(args: &[String]) {
 fn cmd_compile(args: &[String]) {
     let (mut rest, out_dir) = extract_out_dir(args);
     rest.retain(|a| !a.starts_with("--backend"));
+    rest.retain(|a| !a.starts_with("--frontend"));
     let Some(input) = rest.first() else {
-        eprintln!("用法: lzcyc compile <file.lz> [-o <dir>] [--backend=rust]");
+        eprintln!("用法: lzcyc compile <file.lz> [-o <dir>] [--backend=rust] [--frontend=lz]");
         std::process::exit(1);
     };
     let input = Path::new(input);
+    // M5 Lane B：--frontend=lz 一致性门禁
+    if args.iter().any(|a| a == "--frontend=lz") {
+        frontend_lz_gate(input);
+    }
 
     // 1) transpile
     let pyx = match transpile_source(input) {
@@ -778,12 +920,17 @@ fn cmd_compile(args: &[String]) {
 fn cmd_run(args: &[String]) {
     let (mut rest, out_dir) = extract_out_dir(args);
     rest.retain(|a| !a.starts_with("--backend"));
+    rest.retain(|a| !a.starts_with("--frontend"));
     let Some(input) = rest.first() else {
-        eprintln!("用法: lzcyc run <file.lz> [func] [--backend=rust]");
+        eprintln!("用法: lzcyc run <file.lz> [func] [--backend=rust] [--frontend=lz]");
         std::process::exit(1);
     };
     let func = rest.get(1).cloned().unwrap_or_else(|| "main".to_string());
     let input = Path::new(input);
+    // M5 Lane B：--frontend=lz 一致性门禁（rust 早分支前先过门）
+    if args.iter().any(|a| a == "--frontend=lz") {
+        frontend_lz_gate(input);
+    }
 
     // M3 T0r55.4.1：--backend=rust 早分支——transpile 产 .rs → rustc → 直接跑 exe
     // （与 lzc 单文件编译运行同尺，绕过整条 Cython pyximport 管线）

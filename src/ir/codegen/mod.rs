@@ -699,6 +699,30 @@ impl CodeGen {
                     Some("tuple<bool,str>") => Some(IrType::Tuple(vec![IrType::Bool, IrType::Str])),
                     Some("tuple<bool,bool>") => Some(IrType::Tuple(vec![IrType::Bool, IrType::Bool])),
                     Some("tuple<int,int,int>") => Some(IrType::Tuple(vec![IrType::Int, IrType::Int, IrType::Int])),
+                    // T0r60：嵌套复合类型 → 递归映射
+                    Some("list<list<int>>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Named { path: "Vec".to_string(), args: vec![IrType::Int] }],
+                    }),
+                    Some("list<dict<str,int>>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Named {
+                            path: "std::collections::HashMap".to_string(),
+                            args: vec![IrType::Str, IrType::Int],
+                        }],
+                    }),
+                    Some("dict<str,list<int>>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::Named { path: "Vec".to_string(), args: vec![IrType::Int] }],
+                    }),
+                    Some("dict<str,tuple<int,int>>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::Tuple(vec![IrType::Int, IrType::Int])],
+                    }),
+                    Some("list<tuple<int,int>>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Tuple(vec![IrType::Int, IrType::Int])],
+                    }),
                     _ => None,
                 };
                 out.push((format!("{}_{}", t.artifact, m.name), ty.clone()));

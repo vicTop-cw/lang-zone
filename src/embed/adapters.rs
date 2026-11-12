@@ -75,12 +75,13 @@ fn value_is_suspicious(t: &str) -> bool {
 /// 返回 None 表示全部合法；Some(reason) 表示某个子类型不在闭集。
 fn check_nested_type(lz: &str) -> Option<String> {
     let normalized = normalize_nested_type(lz);
-    let (base, args) = split_generic(normalized.chars().collect::<Vec<_>>().as_slice());
+    let chars: Vec<char> = normalized.chars().collect();
+    let (base, args) = split_generic(&chars);
     match args {
         Some(parts) => {
             // 容器类型：递归检查每个参数
             for p in parts {
-                if let Some(reason) = check_nested_type(p) {
+                if let Some(reason) = check_nested_type(&p) {
                     return Some(format!("子类型 {} {}", p, reason));
                 }
             }
@@ -97,6 +98,35 @@ fn check_nested_type(lz: &str) -> Option<String> {
     }
 }
 
+/// 判断类型是否为嵌套容器（含至少一层嵌套，T0r60）。
+/// 例：dict<str,list<int>> 是嵌套容器；dict<str,int> 不是（扁平）。
+pub(crate) fn is_nested_container(lz: &str) -> bool {
+    let normalized = normalize_nested_type(lz);
+    let chars: Vec<char> = normalized.chars().collect();
+    let (_base, args) = split_generic(&chars);
+    match args {
+        Some(parts) => {
+            // 至少一个参数是容器（list/dict/tuple）或本身是嵌套容器
+            parts.iter().any(|p| {
+                let norm_p = normalize_nested_type(p);
+                let p_chars: Vec<char> = norm_p.chars().collect();
+                let (sub_base, sub_args) = split_generic(&p_chars);
+                sub_args.is_some() || matches!(sub_base.as_str(), "list" | "dict" | "tuple")
+            })
+        }
+        None => false,
+    }
+}
+
+/// 判断类型是否为容器（扁平或嵌套），返回值需走 JSON 编码输出。
+/// 基类型 int/float/str/bool 非容器；list/dict/tuple 及嵌套形态都是容器。
+pub(crate) fn is_container_type(lz: &str) -> bool {
+    let normalized = normalize_nested_type(lz);
+    let chars: Vec<char> = normalized.chars().collect();
+    let (base, _args) = split_generic(&chars);
+    matches!(base.as_str(), "list" | "dict" | "tuple")
+}
+
 fn map_ty(table: &[(&str, &str)], ty: &str) -> Option<String> {
     // 先尝试直接查表（扁平类型）
     if let Some(v) = table.iter().find(|(k, _)| *k == ty) {
@@ -104,15 +134,15 @@ fn map_ty(table: &[(&str, &str)], ty: &str) -> Option<String> {
     }
     // 再尝试递归规范化嵌套类型（T0r60）：
     // Dict<str,List<int>> → dict<str,list<int>>
-    // 递归后整体不在表中，但递归语义可由 JSON 编解码器处理
+    // 只有合法的嵌套容器才返回 Some；非法类型（如 DenseTensor）返回 None
     let normalized = normalize_nested_type(ty);
     if normalized != ty {
-        // 规范化后的小写形态匹配表项（如 dict<str,int>）
-        if let Some(v) = table.iter().find(|(k, _)| *k == &normalized) {
-            return Some(v.1.to_string());
+        // 递归检查子类型是否都在闭集中
+        if check_nested_type(ty).is_none() {
+            return Some(normalized);
         }
-        // 递归嵌套类型：返回规范化形态，由调用方按嵌套语义处理
-        return Some(normalized);
+        // 子类型不合法 → 不通过（返回 None 让调用方标记 unsupported）
+        return None;
     }
     None
 }
@@ -143,7 +173,7 @@ fn normalize_nested_type(ty: &str) -> String {
 
 /// 把 `Dict<str,List<int>>` 拆成 ("Dict", Some(["str", "List<int>"]))
 /// 顶层逗号切分（与 split_top_commas 同口径：只切 depth==0 的逗号）
-fn split_generic(chars: &[char]) -> (String, Option<Vec<&str>>) {
+fn split_generic(chars: &[char]) -> (String, Option<Vec<String>>) {
     // 找第一个 '<'
     let mut open = None;
     for (i, &c) in chars.iter().enumerate() {
@@ -370,7 +400,7 @@ impl EmbedLang for PythonLang {
             let mut unsupported = None;
             if let Some(ref r) = ret {
                 if r.starts_with('?') || value_is_suspicious(r) {
-                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool 及嵌套容器 list<>/dict<,>/tuple<,> 内（如 dict<str,list<int>>, list<tuple<int,int>>）", r));
+                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool 及嵌套容器 list<>/dict<,>/tuple<,> 内（如 dict<str,list<int>>, tuple<int,float>）", r));
                 }
             }
             for p in &params {
@@ -477,7 +507,7 @@ impl EmbedLang for PythonLang {
             }
         }
         let body = format!(
-            "# -*- coding: utf-8 -*-\n# {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n# 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\nimport importlib\nimport sys\nimport json\n\nARTIFACT = {art_lit}\n\nKNOWN = (\n{names}\n)\n\n\ndef __lz_bool(s):\n    return s in (\"true\", \"True\", \"1\")\n\n\ndef __lz_json_list_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_int_int(s):\n    d = json.loads(s)\n    return {{int(k): v for k, v in d.items()}}\n\n\ndef __lz_json_tuple_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_str(s):\n    return tuple(json.loads(s))\n\n\ndef _out(code, text):\n    one = str(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"%s:%s\\n\" % (code, one))\n    sys.stdout.flush()\n\n\ndef _out_ok_json(text):\n    one = json.dumps(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"OK:%s\\n\" % one)\n    sys.stdout.flush()\n\n\nCOERCE = {{\n{table}}}\n\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        _out(\"ERR\", \"missing method\")\n        return\n    method = argv[0]\n    if method not in KNOWN:\n        _out(\"ERR\", \"no such method: \" + method)\n        return\n    params = {{}}\n    for tok in argv[1:]:\n        k, sep, v = tok.partition(\"=\")\n        if sep:\n            params[k] = v\n    for name, conv in COERCE.get(method, ()): \n        if name in params:\n            params[name] = conv(params[name])\n    mod = importlib.import_module(ARTIFACT)\n    fn = getattr(mod, method, None)\n    if fn is None:\n        _out(\"ERR\", \"not callable: \" + method)\n        return\n{arms}    _out(\"ERR\", \"no such method: \" + method)\n\n\nmain()\n",
+            "# -*- coding: utf-8 -*-\n# {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n# 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\nimport importlib\nimport sys\nimport json\n\nARTIFACT = {art_lit}\n\nKNOWN = (\n{names}\n)\n\n\ndef __lz_bool(s):\n    return s in (\"true\", \"True\", \"1\")\n\n\ndef __lz_json_list_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_list_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_int(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_float(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_str_str(s):\n    return json.loads(s)\n\n\ndef __lz_json_dict_int_int(s):\n    d = json.loads(s)\n    return {{int(k): v for k, v in d.items()}}\n\n\ndef __lz_json_tuple_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_int_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_int_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_float_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_str_bool(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_int(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_float(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_tuple_bool_str(s):\n    return tuple(json.loads(s))\n\n\ndef __lz_json_nested(s):\n    return json.loads(s)\n\n\ndef _out(code, text):\n    one = str(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"%s:%s\\n\" % (code, one))\n    sys.stdout.flush()\n\n\ndef _out_ok_json(text):\n    one = json.dumps(text).replace(chr(92), chr(92) + chr(92)).replace(chr(10), chr(92) + \"n\")\n    sys.stdout.write(\"OK:%s\\n\" % one)\n    sys.stdout.flush()\n\n\nCOERCE = {{\n{table}}}\n\n\ndef main():\n    argv = sys.argv[1:]\n    if not argv:\n        _out(\"ERR\", \"missing method\")\n        return\n    method = argv[0]\n    if method not in KNOWN:\n        _out(\"ERR\", \"no such method: \" + method)\n        return\n    params = {{}}\n    for tok in argv[1:]:\n        k, sep, v = tok.partition(\"=\")\n        if sep:\n            params[k] = v\n    for name, conv in COERCE.get(method, ()): \n        if name in params:\n            params[name] = conv(params[name])\n    mod = importlib.import_module(ARTIFACT)\n    fn = getattr(mod, method, None)\n    if fn is None:\n        _out(\"ERR\", \"not callable: \" + method)\n        return\n{arms}    _out(\"ERR\", \"no such method: \" + method)\n\n\nmain()\n",
             artifact = artifact,
             art_lit = format!("\"{}\"", artifact),
             names = names.join("\n"),
