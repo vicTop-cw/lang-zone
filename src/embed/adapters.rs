@@ -70,11 +70,117 @@ fn value_is_suspicious(t: &str) -> bool {
     t.contains('\0')
 }
 
+/// 递归检查嵌套类型的所有子类型是否都在闭集内（T0r60）。
+/// 基类型闭集：int/float/str/bool + 嵌套容器（list/dict/tuple）的子类型递归检查。
+/// 返回 None 表示全部合法；Some(reason) 表示某个子类型不在闭集。
+fn check_nested_type(lz: &str) -> Option<String> {
+    let normalized = normalize_nested_type(lz);
+    let (base, args) = split_generic(normalized.chars().collect::<Vec<_>>().as_slice());
+    match args {
+        Some(parts) => {
+            // 容器类型：递归检查每个参数
+            for p in parts {
+                if let Some(reason) = check_nested_type(p) {
+                    return Some(format!("子类型 {} {}", p, reason));
+                }
+            }
+            None
+        }
+        None => {
+            // 基类型：必须在 {int, float, str, bool} 内
+            if !matches!(base.as_str(), "int" | "float" | "str" | "bool") {
+                Some("不在闭集内".to_string())
+            } else {
+                None
+            }
+        }
+    }
+}
+
 fn map_ty(table: &[(&str, &str)], ty: &str) -> Option<String> {
-    table
-        .iter()
-        .find(|(k, _)| *k == ty)
-        .map(|(_, v)| v.to_string())
+    // 先尝试直接查表（扁平类型）
+    if let Some(v) = table.iter().find(|(k, _)| *k == ty) {
+        return Some(v.1.to_string());
+    }
+    // 再尝试递归规范化嵌套类型（T0r60）：
+    // Dict<str,List<int>> → dict<str,list<int>>
+    // 递归后整体不在表中，但递归语义可由 JSON 编解码器处理
+    let normalized = normalize_nested_type(ty);
+    if normalized != ty {
+        // 规范化后的小写形态匹配表项（如 dict<str,int>）
+        if let Some(v) = table.iter().find(|(k, _)| *k == &normalized) {
+            return Some(v.1.to_string());
+        }
+        // 递归嵌套类型：返回规范化形态，由调用方按嵌套语义处理
+        return Some(normalized);
+    }
+    None
+}
+
+/// 递归规范化嵌套类型注解（T0r60）：
+/// - 基类型大写 → 小写（Dict→dict, List→list, Tuple→tuple）
+/// - 尖括号泛型参数递归规范化（Dict<str,List<int>> → dict<str,list<int>>）
+/// - 空格去除（与 strip_type_decor 一致）
+///
+/// 设计：递归下降解析。识别 `基类型<参数1,参数2,...>` 形态，
+/// 基类型做大写→小写映射，参数按顶层逗号切分后递归规范化。
+fn normalize_nested_type(ty: &str) -> String {
+    let t = ty.trim().replace(' ', "");
+    let chars: Vec<char> = t.chars().collect();
+    let (base, args) = split_generic(&chars);
+    let base_lower = base.to_lowercase();
+    match args {
+        Some(arg_parts) => {
+            let norm_args: Vec<String> = arg_parts
+                .iter()
+                .map(|a| normalize_nested_type(a))
+                .collect();
+            format!("{}<{}>", base_lower, norm_args.join(","))
+        }
+        None => base_lower,
+    }
+}
+
+/// 把 `Dict<str,List<int>>` 拆成 ("Dict", Some(["str", "List<int>"]))
+/// 顶层逗号切分（与 split_top_commas 同口径：只切 depth==0 的逗号）
+fn split_generic(chars: &[char]) -> (String, Option<Vec<&str>>) {
+    // 找第一个 '<'
+    let mut open = None;
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '<' {
+            open = Some(i);
+            break;
+        }
+    }
+    let open_idx = match open {
+        Some(i) => i,
+        None => return (chars.iter().collect(), None),
+    };
+    // 找匹配的 '>'（depth 计数）
+    let mut depth = 0i32;
+    let mut close = None;
+    for i in open_idx..chars.len() {
+        match chars[i] {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close_idx = match close {
+        Some(i) => i,
+        None => return (chars.iter().collect(), None),
+    };
+    let base: String = chars[..open_idx].iter().collect();
+    let inner: String = chars[open_idx + 1..close_idx].iter().collect();
+    // 顶层逗号切分
+    let parts = split_top_commas(&inner);
+    (base, Some(parts))
 }
 
 /// 去掉 Mojo/C 的类型标注修饰词，取出裸类型名
@@ -264,7 +370,7 @@ impl EmbedLang for PythonLang {
             let mut unsupported = None;
             if let Some(ref r) = ret {
                 if r.starts_with('?') || value_is_suspicious(r) {
-                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool/list<int>/list<float>/list<str>/dict<str,int>/dict<str,float>/dict<str,str>/dict<int,int>/tuple<int,int>/tuple<int,float>/tuple<int,str>/tuple<int,bool>/tuple<float,int>/tuple<float,float>/tuple<float,str>/tuple<float,bool>/tuple<str,int>/tuple<str,float>/tuple<str,str>/tuple<str,bool>/tuple<bool,int>/tuple<bool,float>/tuple<bool,str>/tuple<bool,bool>/tuple<int,int,int> 内", r));
+                    unsupported = Some(format!("返回类型 {} 不在闭集 int/float/str/bool 及嵌套容器 list<>/dict<,>/tuple<,> 内（如 dict<str,list<int>>, list<tuple<int,int>>）", r));
                 }
             }
             for p in &params {
@@ -333,6 +439,9 @@ impl EmbedLang for PythonLang {
                     "tuple<bool,int>" => "__lz_json_tuple_bool_int",
                     "tuple<bool,float>" => "__lz_json_tuple_bool_float",
                     "tuple<bool,str>" => "__lz_json_tuple_bool_str",
+                    // T0r60：嵌套复合类型（dict<str,list<int>> 等）走通用 JSON 解码
+                    // json.loads 天然支持任意嵌套结构，无需穷举每种组合
+                    _ if is_nested_container(&p.lz_type) => "__lz_json_nested",
                     _ => "str",
                 };
                     format!("(\"{}\", {})", p.name, conv)
@@ -350,9 +459,12 @@ impl EmbedLang for PythonLang {
         // 为每个 callable 方法生成独立 arm（if/elif 链），每个 arm 内部有自己的 try/except
         let mut arms = String::new();
         for (i, m) in methods.iter().filter(|m| m.callable()).enumerate() {
-            let ret_is_list = matches!(m.ret.as_deref(), Some("list<int>") | Some("list<float>") | Some("list<str>") | Some("dict<str,int>") | Some("dict<str,float>") | Some("dict<str,str>") | Some("dict<int,int>") | Some("tuple<int,int>") | Some("tuple<int,str>") | Some("tuple<str,str>") | Some("tuple<int,int,int>") | Some("tuple<float,float>") | Some("tuple<bool,bool>") | Some("tuple<int,float>") | Some("tuple<int,bool>") | Some("tuple<float,int>") | Some("tuple<float,str>") | Some("tuple<float,bool>") | Some("tuple<str,int>") | Some("tuple<str,float>") | Some("tuple<str,bool>") | Some("tuple<bool,int>") | Some("tuple<bool,float>") | Some("tuple<bool,str>"));
+            let ret_is_container = match m.ret.as_deref() {
+                Some(r) => is_container_type(r),
+                None => false,
+            };
             let branch = if i == 0 { "if" } else { "elif" };
-            if ret_is_list {
+            if ret_is_container {
                 arms.push_str(&format!(
                     "    {} method == \"{}\":\n        try:\n            r = fn(**params)\n            _out_ok_json(\"\" if r is None else r)\n        except Exception as e:\n            _out(\"ERR\", type(e).__name__ + \": \" + str(e))\n        return\n",
                     branch, m.name
