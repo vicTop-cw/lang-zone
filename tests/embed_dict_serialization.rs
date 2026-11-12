@@ -410,12 +410,12 @@ fn rust_embed_wrapper_parses_dict_str_float_ret() {
 
     // 参数序列化：应调用 __lz_dict_to_json_float
     assert!(code.contains("__lz_dict_to_json_float"), "参数序列化应调用 __lz_dict_to_json_float");
-    // 参数类型：HashMap<String, f64>
-    assert!(code.contains("HashMap<String, f64>"), "参数类型应为 HashMap<String, f64>");
+    // 参数类型：BTreeMap<String, f64>
+    assert!(code.contains("BTreeMap<String, f64>"), "参数类型应为 BTreeMap<String, f64>");
     // 返回值反序列化：应调用 __lz_parse_dict_str_float
     assert!(code.contains("__lz_parse_dict_str_float"), "返回值反序列化应调用 __lz_parse_dict_str_float");
-    // 返回值类型：HashMap<String, f64>
-    assert!(code.contains("-> std::collections::HashMap<String, f64>"), "返回值类型应为 HashMap<String, f64>");
+    // 返回值类型：BTreeMap<String, f64>
+    assert!(code.contains("-> std::collections::BTreeMap<String, f64>"), "返回值类型应为 BTreeMap<String, f64>");
 }
 
 /// 单元测试：Rust 侧 embed_wrapper_fn 对 dict<str,str> 返回值调用 __lz_parse_dict_str_str
@@ -440,12 +440,12 @@ fn rust_embed_wrapper_parses_dict_str_str_ret() {
 
     // 参数序列化：应调用 __lz_dict_to_json_str
     assert!(code.contains("__lz_dict_to_json_str"), "参数序列化应调用 __lz_dict_to_json_str");
-    // 参数类型：HashMap<String, String>
-    assert!(code.contains("HashMap<String, String>"), "参数类型应为 HashMap<String, String>");
+    // 参数类型：BTreeMap<String, String>
+    assert!(code.contains("BTreeMap<String, String>"), "参数类型应为 BTreeMap<String, String>");
     // 返回值反序列化：应调用 __lz_parse_dict_str_str
     assert!(code.contains("__lz_parse_dict_str_str"), "返回值反序列化应调用 __lz_parse_dict_str_str");
-    // 返回值类型：HashMap<String, String>
-    assert!(code.contains("-> std::collections::HashMap<String, String>"), "返回值类型应为 HashMap<String, String>");
+    // 返回值类型：BTreeMap<String, String>
+    assert!(code.contains("-> std::collections::BTreeMap<String, String>"), "返回值类型应为 BTreeMap<String, String>");
 }
 
 /// 单元测试：Rust 侧 embed_wrapper_fn 对 dict<str,float> 参数 + dict<str,int> 返回值（跨组合）
@@ -471,9 +471,56 @@ fn rust_embed_wrapper_cross_dict_variants() {
     // 参数序列化用 float 版
     assert!(code.contains("__lz_dict_to_json_float"), "float 参数序列化应调用 __lz_dict_to_json_float");
     // 参数类型用 float 版
-    assert!(code.contains("HashMap<String, f64>"), "float 参数类型应为 HashMap<String, f64>");
+    assert!(code.contains("BTreeMap<String, f64>"), "float 参数类型应为 BTreeMap<String, f64>");
     // 返回值反序列化用 int 版
     assert!(code.contains("__lz_parse_dict_str_int"), "int 返回值反序列化应调用 __lz_parse_dict_str_int");
     // 返回值类型用 int 版
-    assert!(code.contains("-> std::collections::HashMap<String, i64>"), "int 返回值类型应为 HashMap<String, i64>");
+    assert!(code.contains("-> std::collections::BTreeMap<String, i64>"), "int 返回值类型应为 BTreeMap<String, i64>");
+}
+
+/// 端到端回归：Dict<str,float> 参数 + Dict<str,float> 返回值的 LZ 程序能编译通过。
+/// 修复前：LZ codegen 把 dict 字面量生成为 BTreeMap，而 embed 形参声明为 HashMap，
+/// 类型不匹配导致 rustc 编译失败（E0308）。修复后 embed 侧统一为 BTreeMap，类型对齐可编译。
+#[test]
+fn python_embed_dict_str_float_roundtrip_compiles() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("roundtrip_float");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc_float.lz");
+    let src = r#"
+#[embed(python)]
+# python_lib.py
+def scale_values(data: Dict<str,float>) -> Dict<str,float>:
+    return {k: v * 3.0 for k, v in data.items()}
+
+def main():
+    result = scale_values({"a": 1.5, "b": 2.5})
+    print(result)
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    assert!(
+        out.status.success(),
+        "Dict<str,float> roundtrip 编译失败（BTreeMap/HashMap 类型应对齐）: stdout={}\nstderr={}",
+        stdout, stderr
+    );
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "Dict<str,float> 签名不应被标记为未覆盖: {}",
+        stdout
+    );
 }

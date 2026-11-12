@@ -147,8 +147,54 @@ def is_ident_char(c: str) -> bool =
 
 // ── 字符工具：字符串单字符索引 s[i] 返回字节码 i64（有意设计，见
 //    polish_28_strings 断言），取字符需用切片 s[idx..idx+1] ──
+// 多字节安全（M5 双轨门禁 BUG-512）：s[idx..idx+1] 在 idx 非字符边界时
+// panic（"byte index ... is not a char boundary"）。本机 DEMO 语料含中文
+// 注释，跳过循环按字节推进会踩中。修正：续字节（0x80-0xBF）前进到下一个
+// 首字节，按首字节判宽切片；越界返回空串。
 def char_at(s: str, idx: int) -> str =
-    s[idx..(idx + 1)]
+    let n = str_len(s)
+    let mut i = idx
+    let mut result: str = ""
+    if i >= n:
+        result = ""
+    elif i < 0:
+        result = s[0..1]
+    else:
+        let b = s[i]
+        if b >= 128 and b < 192:
+            i = i + 1
+        if i >= n:
+            result = ""
+        elif s[i] < 128:
+            result = s[i..(i + 1)]
+        elif s[i] < 224:
+            result = s[i..(i + 2)]
+        elif s[i] < 240:
+            result = s[i..(i + 3)]
+        else:
+            result = s[i..(i + 4)]
+    result
+
+// UTF-8 首字节判宽（idx 须为字符边界；ASCII=1/双字节=2/三字节=3/四字节=4）
+def char_width(s: str, idx: int) -> int =
+    let b = s[idx]
+    if b < 128:
+        1
+    elif b < 224:
+        2
+    elif b < 240:
+        3
+    else:
+        4
+
+// idx 是否字符边界（0/len 恒为边界；首字节 <0x80 或 >=0xC0，续字节排除）
+def char_boundary(s: str, idx: int) -> bool =
+    let n = str_len(s)
+    let mut result: bool = true
+    if idx > 0 and idx < n:
+        let b = s[idx]
+        result = b < 128 or b >= 192
+    result
 
 def str_len(s: str) -> int =
     s.len()
@@ -156,18 +202,20 @@ def str_len(s: str) -> int =
 // ── 扫描函数（拆分 tokenize：单函数嵌套过深触发 lang-zone 编译栈溢出，
 //    自举试点 v167 缺陷 3；每个扫描函数只处理一类 token）──
 
-// 扫描标识符/关键字：返回 (word, 结束位置)
+// 扫描标识符/关键字：返回 (word, 结束位置)。
+// 按字符宽推进（BUG-512）：src[start..i] 切片要求 i 在字符边界，
+// 多字节字符推进宽度固定按字节会踩中。
 def scan_ident(src: str, start: int) -> (str, int) =
     let mut i = start
-    while i < str_len(src) && is_ident_char(char_at(src, i)):
-        i = i + 1
+    while i < str_len(src) and is_ident_char(char_at(src, i)):
+        i = i + char_width(src, i)
     (src[start..i], i)
 
 // 扫描整数：返回 (数字字符串, 结束位置)
 def scan_int(src: str, start: int) -> (str, int) =
     let mut i = start
-    while i < str_len(src) && is_digit(char_at(src, i)):
-        i = i + 1
+    while i < str_len(src) and is_digit(char_at(src, i)):
+        i = i + char_width(src, i)
     (src[start..i], i)
 
 // 扫描运算符/标点：返回 ((bool, Token), 结束位置)；双字符优先
@@ -177,7 +225,9 @@ def scan_punct(src: str, i: int) -> ((bool, Token), int) =
     // 若先查单表，>= 会在 Gt 命中即返回、下一轮把 = 切成 Eq——
     // 双字符表形同虚设。先查双表，未命中再回落单表（`!` 不在单表，
     // `!=` 走本分支原本就正常）。
-    if i + 1 < str_len(src):
+    // BUG-512 追加：双字符探测须 i+1 在字符边界（tolerant char_at 会跳过
+    // 续字节，否则 "轮/" 之类会让 `/` 假匹配双字符表）。
+    if i + 1 < str_len(src) and char_boundary(src, i + 1):
         let two = two_char_token(c, char_at(src, i + 1))
         if two.0:
             ((true, two.1), i + 2)
@@ -189,10 +239,14 @@ def scan_punct(src: str, i: int) -> ((bool, Token), int) =
         (r, i + 1)
 
 // 扫描字符串字面量：返回 (内容, 结束位置)；"..." 到匹配引号
+// 按字符宽推进（BUG-512）：多字节内容（中文串）推进宽度固定按字节会
+// 让收尾 i 落在字符中间 → src[(start+1)..i] 切片 panic。
 def scan_string(src: str, start: int) -> (str, int) =
     let mut i = start + 1
-    while i < str_len(src) && char_at(src, i) != "\"":
-        i = i + 1
+    while i < str_len(src):
+        if char_at(src, i) == "\"":
+            break
+        i = i + char_width(src, i)
     (src[(start + 1)..i], i + 1)
 
 // 数字字符查表转值（避免 str→int 直 cast 的 E0605）

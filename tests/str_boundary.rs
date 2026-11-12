@@ -243,7 +243,7 @@ def main() =
     print(12345)
 "#,
         ),
-        // B2 Dict<str, int> 键（HashMap<String, i64> 的 get/insert）
+        // B2 Dict<str, int> 键（BTreeMap<String, i64> 的 get/insert）
         (
             "b2_dict_str_key",
             r#"

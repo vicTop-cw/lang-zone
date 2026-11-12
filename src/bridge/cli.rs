@@ -342,8 +342,8 @@ fn __lz_spawn_plan(dir: &std::path::Path, program: &str) -> (std::path::PathBuf,
     (__lz_resolve_program(dir, program), Vec::new())
 }
 
-/// 把 HashMap<String, i64> 序列化为 JSON 对象字符串 `{"key":value,...}`（手写，避免依赖 serde_json）
-fn __lz_dict_to_json(map: &std::collections::HashMap<String, i64>) -> String {
+/// 把 BTreeMap<String, i64> 序列化为 JSON 对象字符串 `{"key":value,...}`（手写，避免依赖 serde_json）
+fn __lz_dict_to_json(map: &std::collections::BTreeMap<String, i64>) -> String {
     let mut pairs: Vec<String> = Vec::with_capacity(map.len());
     for (k, v) in map.iter() {
         pairs.push(format!("\"{}\":{}", k, v));
@@ -351,8 +351,8 @@ fn __lz_dict_to_json(map: &std::collections::HashMap<String, i64>) -> String {
     format!("{{{}}}", pairs.join(","))
 }
 
-/// 把 HashMap<String, f64> 序列化为 JSON 对象字符串 `{"key":value,...}`
-fn __lz_dict_to_json_float(map: &std::collections::HashMap<String, f64>) -> String {
+/// 把 BTreeMap<String, f64> 序列化为 JSON 对象字符串 `{"key":value,...}`
+fn __lz_dict_to_json_float(map: &std::collections::BTreeMap<String, f64>) -> String {
     let mut pairs: Vec<String> = Vec::with_capacity(map.len());
     for (k, v) in map.iter() {
         pairs.push(format!("\"{}\":{}", k, v));
@@ -360,8 +360,8 @@ fn __lz_dict_to_json_float(map: &std::collections::HashMap<String, f64>) -> Stri
     format!("{{{}}}", pairs.join(","))
 }
 
-/// 把 HashMap<String, String> 序列化为 JSON 对象字符串 `{"key":"value",...}`
-fn __lz_dict_to_json_str(map: &std::collections::HashMap<String, String>) -> String {
+/// 把 BTreeMap<String, String> 序列化为 JSON 对象字符串 `{"key":"value",...}`
+fn __lz_dict_to_json_str(map: &std::collections::BTreeMap<String, String>) -> String {
     let mut pairs: Vec<String> = Vec::with_capacity(map.len());
     for (k, v) in map.iter() {
         pairs.push(format!("\"{}\":\"{}\"", k, v));
@@ -370,7 +370,7 @@ fn __lz_dict_to_json_str(map: &std::collections::HashMap<String, String>) -> Str
 }
 
 /// Dict<int,int> → JSON 对象字符串 `{"1":100,"2":200}`（键和值都是整数）
-fn __lz_dict_int_int_to_json(map: &std::collections::HashMap<i64, i64>) -> String {
+fn __lz_dict_int_int_to_json(map: &std::collections::BTreeMap<i64, i64>) -> String {
     let mut pairs: Vec<String> = Vec::with_capacity(map.len());
     for (k, v) in map.iter() {
         pairs.push(format!("\"{}\":{}", k, v));
@@ -460,14 +460,14 @@ fn __lz_parse_list_str(raw: &str, artifact: &str, method: &str) -> Vec<String> {
         .unwrap_or_else(|e| panic!("{}", e))
 }
 
-/// 解析 `{"a":1,"b":2}` 形式的 JSON 对象为 HashMap<String, i64>（手写解析，避免依赖 serde_json）
-fn __lz_parse_dict_str_int(raw: &str, artifact: &str, method: &str) -> std::collections::HashMap<String, i64> {
+/// 解析 `{"a":1,"b":2}` 形式的 JSON 对象为 BTreeMap<String, i64>（手写解析，避免依赖 serde_json）
+fn __lz_parse_dict_str_int(raw: &str, artifact: &str, method: &str) -> std::collections::BTreeMap<String, i64> {
     let trimmed = raw.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 Dict<str,int> JSON 对象", artifact, method, raw);
     }
     let inner = &trimmed[1..trimmed.len()-1];
-    let mut map = std::collections::HashMap::new();
+    let mut map = std::collections::BTreeMap::new();
     if inner.trim().is_empty() {
         return map;
     }
@@ -532,14 +532,14 @@ fn __lz_parse_dict_str_int(raw: &str, artifact: &str, method: &str) -> std::coll
     map
 }
 
-/// 解析 `{"a":1.5,"b":2.0}` 形式的 JSON 对象为 HashMap<String, f64>（手写解析，避免依赖 serde_json）
-fn __lz_parse_dict_str_float(raw: &str, artifact: &str, method: &str) -> std::collections::HashMap<String, f64> {
+/// 解析 `{"a":1.5,"b":2.0}` 形式的 JSON 对象为 BTreeMap<String, f64>（手写解析，避免依赖 serde_json）
+fn __lz_parse_dict_str_float(raw: &str, artifact: &str, method: &str) -> std::collections::BTreeMap<String, f64> {
     let trimmed = raw.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 Dict<str,float> JSON 对象", artifact, method, raw);
     }
     let inner = &trimmed[1..trimmed.len()-1];
-    let mut map = std::collections::HashMap::new();
+    let mut map = std::collections::BTreeMap::new();
     if inner.trim().is_empty() {
         return map;
     }
@@ -599,14 +599,14 @@ fn __lz_parse_dict_str_float(raw: &str, artifact: &str, method: &str) -> std::co
     map
 }
 
-/// 解析 `{"a":"x","b":"y"}` 形式的 JSON 对象为 HashMap<String, String>（手写解析，避免依赖 serde_json）
-fn __lz_parse_dict_str_str(raw: &str, artifact: &str, method: &str) -> std::collections::HashMap<String, String> {
+/// 解析 `{"a":"x","b":"y"}` 形式的 JSON 对象为 BTreeMap<String, String>（手写解析，避免依赖 serde_json）
+fn __lz_parse_dict_str_str(raw: &str, artifact: &str, method: &str) -> std::collections::BTreeMap<String, String> {
     let trimmed = raw.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 Dict<str,str> JSON 对象", artifact, method, raw);
     }
     let inner = &trimmed[1..trimmed.len()-1];
-    let mut map = std::collections::HashMap::new();
+    let mut map = std::collections::BTreeMap::new();
     if inner.trim().is_empty() {
         return map;
     }
@@ -668,14 +668,14 @@ fn __lz_parse_dict_str_str(raw: &str, artifact: &str, method: &str) -> std::coll
     map
 }
 
-/// 解析 `{"1":100,"2":200}` 形式的 JSON 对象为 HashMap<i64, i64>（手写解析，键和值都是整数）
-fn __lz_parse_dict_int_int(raw: &str, artifact: &str, method: &str) -> std::collections::HashMap<i64, i64> {
+/// 解析 `{"1":100,"2":200}` 形式的 JSON 对象为 BTreeMap<i64, i64>（手写解析，键和值都是整数）
+fn __lz_parse_dict_int_int(raw: &str, artifact: &str, method: &str) -> std::collections::BTreeMap<i64, i64> {
     let trimmed = raw.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         panic!("embed 产物 {} 的 {} 返回值 `{}` 不是 Dict<int,int> JSON 对象", artifact, method, raw);
     }
     let inner = &trimmed[1..trimmed.len()-1];
-    let mut map = std::collections::HashMap::new();
+    let mut map = std::collections::BTreeMap::new();
     if inner.trim().is_empty() {
         return map;
     }
@@ -816,7 +816,7 @@ fn __lz_nested_list_to_json(vec: &[i64], _inner_ty: &str) -> String {
 /// 嵌套容器参数 → JSON 序列化：dict 值递归序列化（T0r60）
 /// __lz_dict_nested_to_json(map, key_is_str, val_expr)
 fn __lz_dict_nested_to_json(
-    map: &std::collections::HashMap<String, String>,
+    map: &std::collections::BTreeMap<String, String>,
     _key_is_str: bool,
     _val_expr: &str,
 ) -> String {
@@ -831,7 +831,7 @@ fn __lz_dict_nested_to_json(
 /// 嵌套容器参数 → JSON 序列化：dict 通用入口（T0r60）
 /// 简化实现：键值对拼接为 JSON 对象字符串
 fn __lz_nested_dict_to_json(
-    map: &std::collections::HashMap<String, i64>,
+    map: &std::collections::BTreeMap<String, i64>,
     _k_ty: &str,
     _v_ty: &str,
 ) -> String {
@@ -871,10 +871,10 @@ fn __lz_parse_dict_nested(
     raw: &str,
     _k_ty: &str,
     _v_ty: &str,
-) -> std::collections::HashMap<String, String> {
-    // 简化实现：解析 JSON 对象为 HashMap<String, String>
+) -> std::collections::BTreeMap<String, String> {
+    // 简化实现：解析 JSON 对象为 BTreeMap<String, String>
     // 完整嵌套解析需要 serde_json；此处保持最小可用，值作为 JSON 字符串片段保留
-    let mut map = std::collections::HashMap::new();
+    let mut map = std::collections::BTreeMap::new();
     let trimmed = raw.trim().trim_start_matches('{').trim_end_matches('}');
     for pair in trimmed.split(',') {
         if pair.is_empty() {
@@ -1316,7 +1316,7 @@ fn rust_ident(name: &str) -> String {
 
 /// LZ 嵌套复合类型 → Rust 形参类型（T0r60）。
 /// 递归解析 list/dict/tuple 嵌套结构，生成具体 Rust 类型。
-/// 例：dict<str,list<int>> → std::collections::HashMap<String, Vec<i64>>
+/// 例：dict<str,list<int>> → std::collections::BTreeMap<String, Vec<i64>>
 ///     list<tuple<int,int>> → Vec<(i64, i64)>
 fn embed_param_ty_nested(lz: &str) -> Option<&'static str> {
     // 处理所有容器类型（扁平+嵌套）：list<...>/dict<...>/tuple<...>
@@ -1357,7 +1357,7 @@ fn embed_param_ty_nested(lz: &str) -> Option<&'static str> {
                 })
             })?;
             Some(Box::leak(format!(
-                "std::collections::HashMap<{}, {}>",
+                "std::collections::BTreeMap<{}, {}>",
                 k_ty, v_ty
             )
             .into_boxed_str()))
@@ -1415,10 +1415,10 @@ fn embed_ret_ty_nested(lz: &str) -> Option<&'static str> {
                 "int" => "i64",
                 _ => return None,
             };
-            // 嵌套 dict 返回值：值以 JSON 字符串片段形式返回（HashMap<String, String>）
+            // 嵌套 dict 返回值：值以 JSON 字符串片段形式返回（BTreeMap<String, String>）
             // 避免泛型返回类型问题，调用方可自行转换
             Some(Box::leak(format!(
-                "std::collections::HashMap<{}, String>",
+                "std::collections::BTreeMap<{}, String>",
                 k_ty
             )
             .into_boxed_str()))
@@ -1697,10 +1697,10 @@ fn embed_param_ty(lz: &str) -> &'static str {
         "list<int>" => "Vec<i64>",
         "list<float>" => "Vec<f64>",
         "list<str>" => "Vec<String>",
-        "dict<str,int>" => "std::collections::HashMap<String, i64>",
-        "dict<str,float>" => "std::collections::HashMap<String, f64>",
-        "dict<str,str>" => "std::collections::HashMap<String, String>",
-        "dict<int,int>" => "std::collections::HashMap<i64, i64>",
+        "dict<str,int>" => "std::collections::BTreeMap<String, i64>",
+        "dict<str,float>" => "std::collections::BTreeMap<String, f64>",
+        "dict<str,str>" => "std::collections::BTreeMap<String, String>",
+        "dict<int,int>" => "std::collections::BTreeMap<i64, i64>",
         "tuple<int,int>" => "(i64, i64)",
         "tuple<int,float>" => "(i64, f64)",
         "tuple<int,str>" => "(i64, String)",
@@ -1735,10 +1735,10 @@ fn embed_ret_ty(ret: &str) -> &'static str {
         "list<int>" => "Vec<i64>",
         "list<float>" => "Vec<f64>",
         "list<str>" => "Vec<String>",
-        "dict<str,int>" => "std::collections::HashMap<String, i64>",
-        "dict<str,float>" => "std::collections::HashMap<String, f64>",
-        "dict<str,str>" => "std::collections::HashMap<String, String>",
-        "dict<int,int>" => "std::collections::HashMap<i64, i64>",
+        "dict<str,int>" => "std::collections::BTreeMap<String, i64>",
+        "dict<str,float>" => "std::collections::BTreeMap<String, f64>",
+        "dict<str,str>" => "std::collections::BTreeMap<String, String>",
+        "dict<int,int>" => "std::collections::BTreeMap<i64, i64>",
         "tuple<int,int>" => "(i64, i64)",
         "tuple<int,float>" => "(i64, f64)",
         "tuple<int,str>" => "(i64, String)",
