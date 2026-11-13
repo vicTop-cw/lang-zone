@@ -163,6 +163,86 @@ pub fn builtins_link() -> Option<(PathBuf, PathBuf)> {
     Some((rlib, deps))
 }
 
+/// rlib 兼容性实探（M5 BUG-513 根修）：target/lane-bootstrap 与共享
+/// target/debug 都可能被异版本工具链（cron 流水线）交叉重建，mtime 最新的
+/// rlib 不一定与当前 rustc 兼容（E0514 反复复发的根源）。本函数对每个候选
+/// rlib 用**与管线同款 rustc** 做一次最小 metadata 探针（空源文件 +
+/// --emit=metadata），取第一个兼容的；全不兼容返回 None（调用方报明确
+/// 错误）。结果进程内缓存（OnceLock），每进程只探一次。
+pub fn verify_builtins_link() -> Option<(PathBuf, PathBuf)> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<(PathBuf, PathBuf)>> = OnceLock::new();
+    if let Some(v) = CACHE.get() {
+        return v.clone();
+    }
+    let verified = probe_builtins_link();
+    let _ = CACHE.set(verified.clone());
+    verified
+}
+
+fn probe_builtins_link() -> Option<(PathBuf, PathBuf)> {
+    // 候选 = 隔离车道 + 当前车道 profile 目录下的**全部** liblz_builtins-*.rlib
+    // （M5 BUG-513 修正：此前只取 mtime 最新的一个——共享 target/debug 里
+    // 常同时存在异版本工具链的 rlib，mtime 最新的恰是不可用的）。
+    // 逐一用同款 rustc 做 metadata 探针，取第一个兼容的。
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let lane = crate_root().join("target").join("lane-bootstrap").join("debug");
+    collect_rlibs(&lane, &mut candidates);
+    collect_rlibs(&lane_profile_dir(), &mut candidates);
+    let fallback = crate_root().join("target").join("debug");
+    if fallback != lane_profile_dir() {
+        collect_rlibs(&fallback, &mut candidates);
+    }
+    candidates.dedup();
+    if candidates.is_empty() {
+        return None;
+    }
+    let tmp_dir = std::env::temp_dir().join("fist-lz-rlib-probe");
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    // 探针源必须**引用** lz_builtins（use 强制 rustc 解析并校验 crate 版本）——
+    // 空 main 不触达 extern crate，不兼容 rlib 也会假通过（实测踩过）。
+    let probe_src = tmp_dir.join("probe.rs");
+    std::fs::write(&probe_src, "use lz_builtins::*;\nfn main() {}\n").ok()?;
+    for rlib in &candidates {
+        let out = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .args(["--emit=metadata"])
+            .arg(&probe_src)
+            .arg("--extern")
+            .arg(format!("lz_builtins={}", rlib.display()))
+            .arg("-L")
+            .arg(format!("dependency={}", deps_dir_for(rlib).display()))
+            .arg("-o")
+            .arg(tmp_dir.join("probe.rmeta"))
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let deps = deps_dir_for(rlib);
+                return Some((rlib.clone(), deps));
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
+/// 收集目录下所有 liblz_builtins-*.rlib（含 deps/ 子目录）
+fn collect_rlibs(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_rlibs(&p, out);
+        } else if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            if name.starts_with("liblz_builtins-") && name.ends_with(".rlib") {
+                out.push(p);
+            }
+        }
+    }
+}
+
 // ─────────────────────────── 自检链助手 ───────────────────────────
 
 pub fn replace_ext(path: &str, from: &str, to: &str) -> String {
@@ -325,18 +405,16 @@ fn run_recursive_selfcheck(lz_path: &str, src_ext: &str, label: &str, link_label
         std::process::exit(1);
     }
     let rs_path = replace_ext(lz_path, src_ext, ".rs");
-    // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）
-    let (builtins, builtins_deps) = match builtins_link() {
+    // T0r25：rlib 与 -L dependency 按当前车道推导（不再硬编码 target/debug）。
+    // BUG-513：用兼容性实探（verify_builtins_link）替代裸 mtime 选择——
+    // 车道 rlib 可能被异版本工具链交叉重建，mtime 最新的不兼容（E0514 根源）。
+    let (builtins, builtins_deps) = match verify_builtins_link() {
         Some(v) => v,
         None => {
             eprintln!(
-                "{link_label} 自检: 未找到 lz_builtins 的 .rlib（已查找 {}；先 `cargo build -p lz_builtins`{}）",
-                lane_profile_dir().display(),
-                if lane_profile_dir() == crate_root().join("target").join("debug") {
-                    String::new()
-                } else {
-                    format!("，车道 target-dir={}", lane_target_root().display())
-                }
+                "{link_label} 自检: 未找到与当前 rustc 兼容的 lz_builtins .rlib。\n\
+                 已探测: 车道 target/lane-bootstrap/debug、当前车道 profile 目录。\n\
+                 修复：`CARGO_TARGET_DIR=target/lane-bootstrap cargo build -p lz_builtins`（钉版工具链）"
             );
             std::process::exit(1);
         }
@@ -482,6 +560,31 @@ fn debug_unescape(s: &str) -> String {
     out
 }
 
+/// 从 `EmbedBlock { lang: "X", src: "Y", form: Z }` 形态提取字段值。
+/// 提取 `key: "value"` 或 `key: value` 的 value 部分。
+fn extract_field(line: &str, key: &str) -> String {
+    let pat = format!("{}:", key);
+    let Some(pos) = line.find(&pat) else {
+        return String::new();
+    };
+    let rest = &line[pos + pat.len()..];
+    let rest = rest.trim_start();
+    if rest.starts_with('"') {
+        // 引号包裹：取到匹配的收尾引号
+        let inner = &rest[1..];
+        // 找最后一个 '"'（form 字段无引号时也安全）
+        if let Some(end) = inner.rfind('"') {
+            inner[..end].to_string()
+        } else {
+            inner.to_string()
+        }
+    } else {
+        // 无引号：取到 ',' 或行尾
+        let end = rest.find(',').unwrap_or(rest.len());
+        rest[..end].trim().to_string()
+    }
+}
+
 /// 双轨 token 流归一化（M5 Lane B/C 门禁共用单真源）。
 ///
 /// 两侧原始形态：
@@ -513,6 +616,17 @@ pub fn normalize_token_stream(raw: &str, rust_side: bool) -> Vec<String> {
         // LZ print 的整体引号（两侧防御性剥离，Rust 侧无引号时无害）
         let l = l.trim_matches('"');
         if l.is_empty() {
+            continue;
+        }
+        // EmbedBlock { lang: "X", src: "...", form: Y } → EmbedBlock(X, src, Y)
+        // 两侧格式不同：Rust Debug 转义 src，LZ display 裸 src。
+        // 统一提取 lang/src/form，Rust 侧 unescape src。
+        if l.starts_with("EmbedBlock") {
+            let lang = extract_field(l, "lang");
+            let src = extract_field(l, "src");
+            let src = debug_unescape(&src);
+            let form = extract_field(l, "form");
+            out.push(format!("EmbedBlock({},{},{})", lang, src, form));
             continue;
         }
         // Var("payload") → Var(还原 payload)；无括号行原样

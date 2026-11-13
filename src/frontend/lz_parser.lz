@@ -55,8 +55,14 @@ enum Token:
     Eof
 
 // ── 字符工具 ──
+// M5（BUG-512）：字符索引语义——LZ 的 s[i] 是 char-safe 字符索引（codegen
+// chars().collect()），此前 s[idx..idx+1] 字节切片在多字节内容上 panic
+// （DEMO 语料含中文注释）。位置统一为字符位置，循环边界用 char_count。
 def char_at(s: str, idx: int) -> str =
-    s[idx..(idx + 1)]
+    s[idx]
+
+def char_count(s: str) -> int =
+    (s.chars().count()) as i64
 
 def str_len(s: str) -> int =
     s.len()
@@ -74,7 +80,7 @@ def is_alpha(c: str) -> bool =
 // 仅 tokenize 复杂函数上下文差异登记待修）
 def scan_int(src: str, start: int) -> (int, int) =
     let mut i = start
-    while i < str_len(src) && is_digit(char_at(src, i)):
+    while i < char_count(src) && is_digit(char_at(src, i)):
         i = i + 1
     let v = src[start..i] as int
     let res: (int, int) = (v, i)
@@ -82,23 +88,25 @@ def scan_int(src: str, start: int) -> (int, int) =
 
 def scan_indent(src: str, start: int) -> (int, int) =
     let mut j = start
-    while j < str_len(src) && (char_at(src, j) == " " or char_at(src, j) == "	"):
+    while j < char_count(src) && (char_at(src, j) == " " or char_at(src, j) == "	"):
         j = j + 1
     (j - start, j)
 
 def scan_ident(src: str, start: int) -> (str, int) =
     let mut i = start
-    while i < str_len(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
+    while i < char_count(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
         i = i + 1
     (src[start..i], i)
 
 // 扫描字符串字面量（v188）："..." 到匹配引号；返回 (内容, 结束位置)
+// M5（BUG-512）：字符索引 + 拼接取内容，多字节字符串安全
 def scan_string(src: str, start: int) -> (str, int) =
     let mut i = start + 1
-    while i < str_len(src) && char_at(src, i) != "\"":
+    let mut content: str = ""
+    while i < char_count(src) and char_at(src, i) != "\"":
+        content = content + char_at(src, i)
         i = i + 1
-    let res: (str, int) = (src[(start + 1)..i], i + 1)
-    res
+    (content, i + 1)
 
 // ── 关键字 → Token（查表，规避深层 elif 链）──
 def keyword_token(w: str) -> (bool, Token) =
@@ -173,8 +181,21 @@ def tokenize(src: str) -> List<Token> =
     let mut tokens: List<Token> = []
     let mut i = 0
     let mut line_start = true
-    while i < str_len(src):
+    while i < char_count(src):
         let c = char_at(src, i)
+        // 注释跳过（M5：对齐 lexer 注释处理，DEMO 语料含中文注释——
+        // 不跳的话 // 会被切成 Slash token、注释文本被切成 Ident，
+        // 解析必然失败）
+        if c == "/" and i + 1 < char_count(src) and (char_at(src, i + 1) == "/" or char_at(src, i + 1) == "*"):
+            i = i + 2
+            let mut closed = false
+            while i < char_count(src) and !closed:
+                if char_at(src, i) == "*" and i + 1 < char_count(src) and char_at(src, i + 1) == "/":
+                    i = i + 2
+                    closed = true
+                else:
+                    i = i + 1
+            continue
         if c == "\n":
             tokens = tokens + [Token.Newline]
             i = i + 1

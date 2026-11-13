@@ -1415,11 +1415,21 @@ fn embed_ret_ty_nested(lz: &str) -> Option<&'static str> {
                 "int" => "i64",
                 _ => return None,
             };
-            // 嵌套 dict 返回值：值以 JSON 字符串片段形式返回（BTreeMap<String, String>）
-            // 避免泛型返回类型问题，调用方可自行转换
+            // T0r61：嵌套 dict 返回值按值类型递归表达真实嵌套结构，
+            // 不再降级为 String 片段。dict<str,list<int>> → BTreeMap<String, Vec<i64>>
+            // 值类型递归走 embed_ret_ty_nested，嵌套容器（list/dict/tuple）与扁平基类型均覆盖。
+            let v_ty = embed_ret_ty_nested(v).or_else(|| {
+                Some(match v.as_str() {
+                    "int" => "i64",
+                    "float" => "f64",
+                    "str" => "String",
+                    "bool" => "bool",
+                    _ => return None,
+                })
+            })?;
             Some(Box::leak(format!(
-                "std::collections::BTreeMap<{}, String>",
-                k_ty
+                "std::collections::BTreeMap<{}, {}>",
+                k_ty, v_ty
             )
             .into_boxed_str()))
         }
@@ -1536,13 +1546,16 @@ fn embed_ret_parse_expr(lz: &str) -> String {
             )
         }
         "dict" => {
-            let _k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
-            let _v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
-            // dict 嵌套返回值：直接在代码中解析 JSON，避免泛型返回类型问题
-            // 生成内联解析代码：遍历 JSON 对象的键值对，递归解析 value
+            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
+            let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
+            // T0r61：嵌套 dict 返回值按值类型递归解析 JSON，还原嵌套结构，
+            // 不再降级为 String 片段。dict<str,list<int>> 的 value 递归解析为 Vec<i64>。
+            // 生成内联递归解析代码：遍历 JSON 对象的键值对，对每个 value 按 v 类型递归解析。
+            let v_parse = embed_ret_parse_elem(v);
             format!(
-                "{{ let __raw = __r; let mut __map = std::collections::HashMap::<String, String>::new(); for __pair in __raw.trim_matches(|c| c=='{{'||c=='}}').split(',') {{ if __pair.is_empty() {{ continue; }} let __parts: Vec<&str> = __pair.splitn(2, ':').collect(); if __parts.len() == 2 {{ let __k = __parts[0].trim().trim_matches('\"'); let __v = __parts[1].trim(); __map.insert(__k.to_string(), __v.to_string()); }} }} __map }}"
-            )
+                "{{ let __raw = __r; let mut __map = std::collections::BTreeMap::<String, _>::new(); for __pair in __raw.trim_matches(|c| c=='{{'||c=='}}').split(',') {{ if __pair.is_empty() {{ continue; }} let __parts: Vec<&str> = __pair.splitn(2, ':').collect(); if __parts.len() == 2 {{ let __k = __parts[0].trim().trim_matches('\"'); let __v_str = __parts[1].trim(); __map.insert(__k.to_string(), __lz_parse_nested_value(__v_str, \"{}\")); }} }} __map }}",
+                v
+            ).replace(&format!("__lz_parse_nested_value(__v_str, \"{}\"", v), &v_parse)
         }
         "tuple" => {
             let elem_tys = args
@@ -1557,6 +1570,49 @@ fn embed_ret_parse_expr(lz: &str) -> String {
             )
         }
         _ => "__lz_parse_nested_json(&__r)".to_string(),
+    }
+}
+
+/// T0r61：按 LZ 类型生成单值 JSON 片段的递归解析表达式。
+/// `__v_str` 是待解析的 JSON 片段字符串（如 `"[1,2,3]"`、`"{\"k\":1}"`、`"42"`）。
+/// 标量直接 parse，容器递归解析还原嵌套结构，返回带类型标注的 Rust 表达式。
+fn embed_ret_parse_elem(lz: &str) -> String {
+    let (base, args) = split_lz_generic(lz);
+    match base.as_str() {
+        "int" => "__v_str.parse::<i64>().unwrap_or(0)".to_string(),
+        "float" => "__v_str.parse::<f64>().unwrap_or(0.0)".to_string(),
+        "str" => {
+            // 字符串值：JSON 中是带引号的，去掉首尾引号
+            "__v_str.trim_matches('\"').to_string()".to_string()
+        }
+        "bool" => "(__v_str == \"true\" || __v_str == \"1\")".to_string(),
+        "list" => {
+            let inner = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("int");
+            let elem_parse = embed_ret_parse_elem(inner);
+            format!(
+                "{{ let __arr: Vec<_> = __v_str.trim_matches(|c| c=='['||c==']').split(',').filter(|s| !s.trim().is_empty()).map(|s| {}).collect(); __arr }}",
+                elem_parse
+            )
+        }
+        "dict" => {
+            // 嵌套 dict 值：内联递归解析 JSON 对象，避免依赖外部运行时函数
+            // 生成局部闭包，对每个键值对递归解析 value
+            let inner_v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
+            let inner_parse = embed_ret_parse_elem(inner_v);
+            // 闭包主体为普通字符串常量（避开 format! 的 {} 转义），在插入位用占位符替换
+            let closure_body = "{ let __parse_val = |__s: &str| -> _ { let __trimmed = __s.trim().trim_start_matches('{').trim_end_matches('}'); let mut __m = std::collections::BTreeMap::<String, _>::new(); for __pair in __trimmed.split(',') { if __pair.is_empty() { continue; } let __parts: Vec<&str> = __pair.splitn(2, ':').collect(); if __parts.len() == 2 { let __k = __parts[0].trim().trim_matches('\"'); let __vs = __parts[1].trim(); __m.insert(__k.to_string(), __INNER__); } } __m } }; __parse_val(__v_str) }";
+            closure_body.replace("__INNER__", &inner_parse)
+        }
+        "tuple" => {
+            let elem_tys = args
+                .unwrap_or_default()
+                .iter()
+                .map(|a| a.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("__lz_parse_nested_tuple(__v_str, &[\"{}\"])", elem_tys)
+        }
+        _ => "__v_str.to_string()".to_string(),
     }
 }
 
