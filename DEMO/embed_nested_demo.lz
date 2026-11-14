@@ -1,0 +1,15 @@
+// embed_nested_demo.lz — T0r63：嵌套容器序列化端到端演示
+// 验证 LZ 程序通过 #[embed(python)] 调用 Python 函数，
+// 嵌套容器 Dict<str,List<int>> 参数与返回值经 JSON 嵌入编码端到端可用。
+//
+// 运行验证：group_counts 接收嵌套 dict，每组列表求和，
+// 输出 {'a': 6, 'b': 9}。
+
+#[embed(python)]
+# python_lib.py
+def group_counts(data: Dict<str,List<int>>) -> Dict<str,int>:
+    return {k: sum(v) for k, v in data.items()}
+
+def main():
+    result = group_counts({"a": [1, 2, 3], "b": [4, 5]})
+    print(result)

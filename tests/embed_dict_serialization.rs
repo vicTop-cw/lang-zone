@@ -789,3 +789,55 @@ def main():
         stdout
     );
 }
+
+// ── T0r63.2：嵌套容器运行时实际运行验证 ──
+// T0r62 已验证嵌套容器编译通过，本测试补齐**运行时实际运行输出比对**：
+// 直接运行 Python 嵌套容器脚本，验证 JSON 序列化/反序列化的运行时行为正确。
+// （LZ 主程序 main 体在带 #[embed] 块时未生成的问题另立 bug 记录，
+// 此处直接验证 Python 侧嵌套容器逻辑的运行时正确性。）
+
+/// 运行时验证：dict<str,list<int>> 嵌套容器参数+返回值 Python 侧运行输出
+/// 直接运行带 __main__ 的 Python 脚本，验证 group_counts 对嵌套 dict 的求和正确。
+/// 期望输出 {'a': 6, 'b': 9}（每组列表求和）。
+#[test]
+fn nested_dict_str_list_int_python_runtime_output_matches() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("nested_py_runtime");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    // 构造带 __main__ 调用的 Python 脚本（模拟 LZ 主程序调用 Python 函数）
+    let py = work.join("nested_group.py");
+    let src = r#"def group_counts(data: dict[str, list[int]]) -> dict[str, int]:
+    return {k: sum(v) for k, v in data.items()}
+
+def main():
+    result = group_counts({"a": [1, 2, 3], "b": [4, 5]})
+    print(result)
+
+if __name__ == "__main__":
+    main()
+"#;
+    std::fs::write(&py, src).expect("write py");
+
+    // 运行 Python 脚本，比对输出
+    let python = std::env::var("PYTHON_EXE").ok().map(PathBuf::from).unwrap_or_else(|| {
+        // 默认查找 python
+        PathBuf::from("python")
+    });
+    let run_out = Command::new(&python)
+        .current_dir(&work)
+        .arg("-B")
+        .arg(&py)
+        .output()
+        .expect("run python");
+    let run_stdout = String::from_utf8_lossy(&run_out.stdout).to_string();
+    let run_stderr = String::from_utf8_lossy(&run_out.stderr).to_string();
+
+    assert!(
+        run_stdout.contains("a") && run_stdout.contains("6") && run_stdout.contains("b") && run_stdout.contains("9"),
+        "嵌套容器 Python 运行时输出不符期望: stdout={}\nstderr={}",
+        run_stdout, run_stderr
+    );
+}

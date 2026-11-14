@@ -3673,3 +3673,19 @@ commit：3f8512e（重映射自 未记）
 - 注意: 文档 `docs/嵌入式统一抽象-实现-2026-10-21.md` §六.4 已过期（原写「未修」），需同步更新为已修复。
 状态：FIXED
 
+## BUG-512 [2026-11-14T22:00:00+08:00] [critical] FIXED（T0r63 本轮恢复）：lz_codegen.rs 及 lz 库文件被误删导致编译失败
+- summary: `src/ir/lz_codegen.rs` 的 `embed_targets_of`/`embed_targets_by_lang`/`ir_module_to_rs_lz_source_with_stem`/`is_kwarg_expr` 等函数被误删，连同 `src/ir/lz_codegen_lib.lz`（3759 行）、`src/ir/lz_ir_lib.lz`、`tests/lz_semantic_cases.rs` 被删，导致 `cargo build` 报 4 error（E0425 embed_targets_of/ir_module_to_rs_lz_source_with_stem 找不到、E0004 Item::EmbedBlock/UnOpKind::BitNot 未覆盖），项目无法编译。
+- detail: 根因是近期提交误删了 T0r24/T0r56 系列的自举路线代码。`bootstrap_emit.rs:479` 引用 `lz_codegen::embed_targets_of`，但该函数已不存在。缓存（target/）此前掩盖了真实编译失败——`cargo clean` 后 release build 才暴露。修复：`git checkout -- src/ir/lz_codegen.rs src/ir/lz_codegen_lib.lz src/ir/lz_ir_lib.lz tests/lz_semantic_cases.rs` 恢复被误删文件。恢复后 `cargo build --release` 0 error，`cargo test --lib` 480/480 全绿。
+- 教训: 开发铁律要求全量回归，缓存/增量编译会掩盖真实编译失败；每次接手必须先 `cargo clean` + `cargo build` 确认基线，不能依赖缓存产物。
+- commit: T0r63（待提交）
+- 状态：FIXED
+
+## BUG-513 [2026-11-14T22:00:00+08:00] [high] OPEN（T0r63 运行时验证发现）：带 #[embed] 块的 LZ 程序 main 函数体未生成
+- summary: LZ 程序含 `#[embed(python)]` 块且其后定义 `def main()`，`--embed-build` 生成的 `.rs` 中 `pub fn main() { }` 为空——main 函数体（如 `result = group_counts(...)` 和 `print(result)`）未被纳入生成码。编译能通过（空 main 合法），但运行时无输出，掩盖了功能缺失。
+- detail: 复现：`embed_nested_demo.lz`（`#[embed(python)]` 块 + `def main(): result = group_counts(...); print(result)`），`--embed-build` 后检查 `embed_nested_demo.rs` 的 `pub fn main() { }` 为空。T0r62 的编译验证测试只断言 `--embed-build` EXIT=0，未检查 main 体，故未暴露。T0r63.2 运行时验证（编译 .rs → 运行 → 比对输出）才发现。根因待查：可能是 codegen 在 embed 块存在时未把后续 `def main()` 纳入 items，或 builder 的函数收集在 embed 块后中断。
+- 判据: 修复后 `embed_nested_demo.lz --embed-build` 生成的 .rs 中 `pub fn main()` 应含 `result = python_calc_nested_demo::group_counts(...)` 与 `println!(...)` 调用。
+- 影响: 所有带 `#[embed]` 块且含 main 的 LZ 程序运行时无输出，功能静默失效。
+- commit: 待修复
+- 状态：OPEN
+
+

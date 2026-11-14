@@ -21,6 +21,7 @@ pub fn adapter(lang: &str) -> Box<dyn EmbedLang + 'static> {
     match lang {
         "mojo" => Box::new(MojoLang),
         "python" | "py" => Box::new(PythonLang { canon: "python" }),
+        "js" | "javascript" => Box::new(JsLang),
         "c" => Box::new(CLane),
         "scala" => Box::new(ScalaLang),
         other => Box::new(GenericLang {
@@ -914,6 +915,165 @@ impl EmbedLang for ScalaLang {
     }
 }
 
+// ──────────────── JS (JavaScript / Node) ────────────────
+
+/// JS 类型映射表：LZ 源注解 → JS 语义类型。
+/// 容器类型与 Python 同构（List/Dict/Tuple），但 JS 侧用 JSON.parse/stringify 编解码，
+/// 基类型 int/float 统一映射到 number（JS 无 int/float 之分）。
+const JS_TY: [(&str, &str); 28] = [
+    ("int", "number"),
+    ("float", "number"),
+    ("str", "string"),
+    ("bool", "boolean"),
+    ("List<int>", "list<int>"),
+    ("List<float>", "list<float>"),
+    ("List<str>", "list<str>"),
+    ("Dict<str,int>", "dict<str,int>"),
+    ("Dict<str,float>", "dict<str,float>"),
+    ("Dict<str,str>", "dict<str,str>"),
+    ("Dict<int,int>", "dict<int,int>"),
+    ("Tuple<int,int>", "tuple<int,int>"),
+    ("Tuple<int,str>", "tuple<int,str>"),
+    ("Tuple<str,str>", "tuple<str,str>"),
+    ("Tuple<int,int,int>", "tuple<int,int,int>"),
+    ("Tuple<float,float>", "tuple<float,float>"),
+    ("Tuple<bool,bool>", "tuple<bool,bool>"),
+    ("Tuple<int,float>", "tuple<int,float>"),
+    ("Tuple<int,bool>", "tuple<int,bool>"),
+    ("Tuple<float,int>", "tuple<float,int>"),
+    ("Tuple<float,str>", "tuple<float,str>"),
+    ("Tuple<float,bool>", "tuple<float,bool>"),
+    ("Tuple<str,int>", "tuple<str,int>"),
+    ("Tuple<str,float>", "tuple<str,float>"),
+    ("Tuple<str,bool>", "tuple<str,bool>"),
+    ("Tuple<bool,int>", "tuple<bool,int>"),
+    ("Tuple<bool,float>", "tuple<bool,float>"),
+    ("Tuple<bool,str>", "tuple<bool,str>"),
+];
+
+/// JavaScript 适配器（Node.js 运行）。
+///
+/// 语言特征：
+/// - 顶层 `function name(p: T) { ... }` 定义（与 Python `def` 同构，用 `fn_from_toplevel` 摘取）
+/// - `has_main`：`function main(` 或 `if (require.main === module)`
+/// - 容器参数用 `JSON.parse` 解码，容器返回值用 `JSON.stringify` 编码
+/// - 解释型：`build_cmd` 返回 None，`run_cmd` 用 `node <entry>`
+pub struct JsLang;
+
+impl EmbedLang for JsLang {
+    fn lang(&self) -> &str {
+        "js"
+    }
+    fn src_ext(&self) -> &str {
+        "js"
+    }
+    fn has_main(&self, src: &str) -> bool {
+        src.lines().any(|l| {
+            let t = l.trim();
+            t.starts_with("function main(")
+                || t.starts_with("async function main(")
+                || t.contains("require.main === module")
+                || t.contains("require.main == module")
+        })
+    }
+    fn methods(&self, src: &str) -> Vec<ForeignFn> {
+        // JS 顶层函数定义 `function name(...)` —— 复用 fn_from_toplevel（与 Scala 同口径，
+        // kw="function "）。JS 无 `->` 返回注解语法，返回类型靠 JSDoc/显式标注不可静态判，
+        // 故 ret 一律 None（生成的垫片按 Unit 处理，与 Python 无注解路径一致）。
+        fn_from_toplevel(src, &JS_TY, "function ")
+    }
+    fn extract(&self, artifact: &str, src: &str) -> Vec<(String, String)> {
+        vec![(format!("{}.js", artifact), src.to_string())]
+    }
+    fn dispatch_file(&self, artifact: &str, methods: &[&ForeignFn]) -> Option<(String, String)> {
+        // 生成 Node.js CLI 分发入口：argv[2..] 为 key=value，
+        // 容器参数用 JSON.parse 解码，容器返回值用 JSON.stringify 编码。
+        let mut table = String::new();
+        for m in methods.iter().filter(|m| m.callable()) {
+            let items: Vec<String> = m
+                .params
+                .iter()
+                .map(|p| {
+                    let conv = match p.lz_type.as_str() {
+                        "int" | "float" => "__lz_num",
+                        "bool" => "__lz_bool",
+                        "str" => "__lz_str",
+                        "list<int>" | "list<float>" | "list<str>" => "__lz_json_list",
+                        "dict<str,int>"
+                        | "dict<str,float>"
+                        | "dict<str,str>"
+                        | "dict<int,int>" => "__lz_json_dict",
+                        "tuple<int,int>"
+                        | "tuple<int,str>"
+                        | "tuple<str,str>"
+                        | "tuple<int,int,int>"
+                        | "tuple<float,float>"
+                        | "tuple<bool,bool>"
+                        | "tuple<int,float>"
+                        | "tuple<int,bool>"
+                        | "tuple<float,int>"
+                        | "tuple<float,str>"
+                        | "tuple<float,bool>"
+                        | "tuple<str,int>"
+                        | "tuple<str,float>"
+                        | "tuple<str,bool>"
+                        | "tuple<bool,int>"
+                        | "tuple<bool,float>"
+                        | "tuple<bool,str>" => "__lz_json_tuple",
+                        // 嵌套复合类型（dict<str,list<int>> 等）走通用 JSON 解码
+                        _ if is_nested_container(&p.lz_type) => "__lz_json_nested",
+                        _ => "__lz_str",
+                    };
+                    format!("(\"{}\", {})", p.name, conv)
+                })
+                .collect();
+            table.push_str(&format!("    \"{}\": [{}],\n", m.name, items.join(", ")));
+        }
+        let names: Vec<String> = methods
+            .iter()
+            .filter(|m| m.callable())
+            .map(|m| format!("        \"{}\",", m.name))
+            .collect();
+        let mut arms = String::new();
+        for (i, m) in methods.iter().filter(|m| m.callable()).enumerate() {
+            let branch = if i == 0 { "if" } else { "else if" };
+            // JS 侧函数体直接用解构后的参数调用；容器返回值用 JSON.stringify
+            arms.push_str(&format!(
+                "    {} method === \"{}\" {{\n        try {{\n            const r = fn({args});\n            __lz_out(__lz_ok(r));\n        }} catch (e) {{\n            __lz_out(__lz_err(e));\n        }}\n        return;\n    }}\n",
+                branch,
+                m.name,
+                args = m
+                    .params
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        let body = format!(
+            "// {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n// 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\n'use strict';\nconst ARTIFACT = {art_lit};\n\nconst KNOWN = [\n{names}\n];\n\nfunction __lz_argv_get(key) {{\n    for (let i = 2; i < process.argv.length; i++) {{\n        if (process.argv[i].startsWith(key + \"=\")) {{\n            return process.argv[i].slice(key.length + 1);\n        }}\n    }}\n    return \"\";\n}}\n\nfunction __lz_num(s) {{\n    return Number(s);\n}}\n\nfunction __lz_str(s) {{\n    return s;\n}}\n\nfunction __lz_bool(s) {{\n    return s === \"true\" || s === \"1\" || s === \"True\";\n}}\n\nfunction __lz_json_list(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_dict(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_tuple(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_nested(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_ok(v) {{\n    if (v === undefined || v === null) return \"\";\n    // 容器返回值走 JSON 编码；标量直接 String()\n    if (Array.isArray(v) || (typeof v === \"object\" && v !== null)) return JSON.stringify(v);\n    return String(v);\n}}\n\nfunction __lz_err(e) {{\n    return \"ERR:\" + (e && e.message ? e.message : String(e));\n}}\n\nfunction __lz_out(s) {{\n    console.log(s);\n}}\n\nconst method = process.argv[2];\nif (!method) {{\n    __lz_out(\"ERR:missing method\");\n    process.exit(2);\n}}\n\nconst fn = require(\"./\" + ARTIFACT);\n\nconst PARAMS = {{\n{table}\n}};\n\nif (method === \"help\") {{\n    __lz_out(\"OK:\" + KNOWN.map((n) => n.slice(1, -1)).join(\",\"));\n    process.exit(0);\n}}\n\n{arms}\n__lz_out(\"ERR:no such method: \" + method);\nprocess.exit(3);\n",
+            artifact = artifact,
+            art_lit = format!("\"{}\"", artifact),
+            names = names.join("\n"),
+            table = table,
+            arms = arms,
+        );
+        Some((format!("__lz_dispatch_{}.js", artifact), body))
+    }
+    fn build_cmd(&self, _kind: ArtifactKind, _entry: &str) -> Option<CommandSpec> {
+        None // 解释型：Node.js 无需建库步骤
+    }
+    fn run_cmd(&self, kind: ArtifactKind, entry: &str) -> CommandSpec {
+        match kind {
+            ArtifactKind::Executable => CommandSpec::new("node", &[entry]),
+            ArtifactKind::Library => CommandSpec::new(
+                "node",
+                &[&format!("__lz_dispatch_{}.js", entry.trim_end_matches(".js"))],
+            ),
+        }
+    }
+}
+
 // ──────────────── C ────────────────
 
 const C_TY: [(&str, &str); 8] = [
@@ -1194,5 +1354,103 @@ mod tests {
         assert_eq!(ms[0].ret.as_deref(), Some("int"));
         let p = a.methods("void go(int n) { }\n");
         assert_eq!(p[0].ret, None);
+    }
+
+    #[test]
+    fn js_toplevel_function_signatures_parse() {
+        let a = adapter("js");
+        // JS 顶层 function 定义
+        let ms = a.methods(
+            "function add(a: int, b: int) { return a + b; }\nfunction greet(name: str) { return name; }\n",
+        );
+        assert_eq!(ms.len(), 2);
+        assert_eq!(ms[0].name, "add");
+        assert_eq!(ms[0].params.len(), 2);
+        // JS 无 int/float 之分，int 统一映射为 number
+        assert_eq!(ms[0].params[0].lz_type, "number");
+        assert_eq!(ms[0].params[1].lz_type, "number");
+        assert!(ms[0].callable());
+        assert_eq!(ms[1].name, "greet");
+        // JS str 映射为 string
+        assert_eq!(ms[1].params[0].lz_type, "string");
+        assert!(ms[1].callable());
+    }
+
+    #[test]
+    fn js_indented_functions_are_not_toplevel() {
+        let a = adapter("js");
+        let ms = a.methods("function outer() {\n    function inner(x: int) { return x; }\n}\n");
+        // inner 缩进 ⇒ 不摘取；outer 无参数但可调用
+        assert_eq!(ms.len(), 1);
+        assert_eq!(ms[0].name, "outer");
+    }
+
+    #[test]
+    fn js_has_main_detection() {
+        let a = adapter("js");
+        assert!(a.has_main("function main() { console.log(1); }\n"));
+        assert!(a.has_main("if (require.main === module) { run(); }\n"));
+        assert!(!a.has_main("function add(a: int, b: int) { return a + b; }\n"));
+    }
+
+    #[test]
+    fn js_dispatch_file_generates_node_entry() {
+        let a = adapter("js");
+        let ms = a.methods(
+            "function double_all(nums: List<int>) { return nums.map(n => n * 2); }\n",
+        );
+        assert_eq!(ms.len(), 1);
+        assert!(ms[0].callable());
+        let refs: Vec<&ForeignFn> = ms.iter().collect();
+        let (path, body) = a.dispatch_file("js_calc", &refs).unwrap();
+        assert_eq!(path, "__lz_dispatch_js_calc.js");
+        // Node 分发入口特征
+        assert!(body.contains("'use strict'"));
+        assert!(body.contains("ARTIFACT = \"js_calc\""));
+        assert!(body.contains("require(\"./\" + ARTIFACT)"));
+        assert!(body.contains("JSON.parse"));
+        assert!(body.contains("JSON.stringify"));
+        assert!(body.contains("\"double_all\""));
+        assert!(body.contains("__lz_json_list"));
+    }
+
+    #[test]
+    fn js_scalar_params_use_num_bool_str() {
+        let a = adapter("js");
+        let ms = a.methods("function f(a: int, b: float, c: bool, d: str) { return a; }\n");
+        let refs: Vec<&ForeignFn> = ms.iter().collect();
+        let (_, body) = a.dispatch_file("js_scalar", &refs).unwrap();
+        assert!(body.contains("__lz_num"));
+        assert!(body.contains("__lz_bool"));
+        assert!(body.contains("__lz_str"));
+    }
+
+    #[test]
+    fn js_unsupported_type_recorded_not_guessed() {
+        let a = adapter("js");
+        // DenseTensor 不在闭集内
+        let ms = a.methods("function bad(x: DenseTensor) { return x; }\n");
+        assert_eq!(ms.len(), 1);
+        assert!(!ms[0].callable());
+        assert!(ms[0].unsupported.as_ref().unwrap().contains("DenseTensor"));
+    }
+
+    #[test]
+    fn js_run_cmd_uses_node() {
+        let a = adapter("js");
+        let ex = a.run_cmd(ArtifactKind::Executable, "calc.js");
+        assert_eq!(ex.program, "node");
+        assert_eq!(ex.args, vec!["calc.js"]);
+        let lib = a.run_cmd(ArtifactKind::Library, "calc.js");
+        assert_eq!(lib.program, "node");
+        assert_eq!(lib.args, vec!["__lz_dispatch_calc.js"]);
+    }
+
+    #[test]
+    fn js_javascript_alias_maps_to_js() {
+        // "javascript" 别名应等价于 "js"
+        let a = adapter("javascript");
+        assert_eq!(a.lang(), "js");
+        assert_eq!(a.src_ext(), "js");
     }
 }
