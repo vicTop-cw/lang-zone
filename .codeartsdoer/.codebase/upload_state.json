@@ -1,10 +1,13 @@
 {
   "globalPaused": false,
-  "isSingle": false,
+  "isSingle": true,
   "isInitial": false,
-  "codebaseId": "1260811751717425152",
-  "codebaseBranchId": "1260836154249400320",
-  "taskId": "1260836154320703488",
-  "branch": "feature/m1-variant-sink",
-  "isBaselineInitial": false
+  "codebaseId": "1281463345911779328",
+  "codebaseBranchId": "1281463346037608448",
+  "taskId": "1281463346113105920",
+  "branch": "master",
+  "isBaselineInitial": false,
+  "finishedCount": 0,
+  "taskStatus": "",
+  "taskProgress": ""
 }

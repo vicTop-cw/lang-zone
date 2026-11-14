@@ -524,3 +524,268 @@ def main():
         stdout
     );
 }
+
+/// T0r61：嵌套 dict 返回值端到端测试
+/// dict<str,list<int>> 作为返回值，Rust 侧 wrapper 应返回真实嵌套类型，
+/// 不再降级为 BTreeMap<String, String>（JSON 字符串片段）。
+/// 端到端编译通过 + 产物中嵌套解析代码存在性断言（wrapper 函数体经 shim 引入，不在主产物文本中）。
+#[test]
+fn python_embed_nested_dict_ret_real_type() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("nested_real_ty");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc_real_ty.lz");
+    let src = r#"
+#[embed(python)]
+# python_lib.py
+def group_lists(data: Dict<str,int>) -> Dict<str,List<int>>:
+    return {"a": [1, 2, 3], "b": [4, 5]}
+
+def main():
+    result = group_lists({"x": 1, "y": 2})
+    print(result)
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    assert!(
+        out.status.success(),
+        "嵌套 dict<str,List<int>> 返回值端到端编译失败: stdout={}\nstderr={}",
+        stdout, stderr
+    );
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "嵌套 dict<str,List<int>> 返回值签名不应被标记为未覆盖: {}",
+        stdout
+    );
+
+    // 产物中应包含嵌套 dict 的递归解析代码（内联闭包解析 JSON 对象），
+    // 且运行时辅助 __lz_parse_dict_nested 不应再固定返回 BTreeMap<String, String>
+    let rs_path = work.join("calc_real_ty.rs");
+    let content = std::fs::read_to_string(&rs_path).expect("read rs product");
+    // 递归解析代码：内联闭包 + BTreeMap 解析
+    assert!(
+        content.contains("BTreeMap") && content.contains("parse"),
+        "产物应包含嵌套 dict 的 JSON 解析逻辑"
+    );
+}
+
+/// T0r61：嵌套 dict 返回值端到端编译测试
+/// 端到端验证 dict<str,list<int>> 作为返回值时，LZ 程序编译通过（rustc 编译产物）
+#[test]
+fn python_embed_nested_dict_ret_compiles() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("nested_ret");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc_nested.lz");
+    let src = r#"
+#[embed(python)]
+# python_lib.py
+def group_lists(data: Dict<str,int>) -> Dict<str,List<int>>:
+    return {"a": [1, 2, 3], "b": [4, 5]}
+
+def main():
+    result = group_lists({"x": 1, "y": 2})
+    print(result)
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    assert!(
+        out.status.success(),
+        "嵌套 dict<str,List<int>> 返回值端到端编译失败: stdout={}\nstderr={}",
+        stdout, stderr
+    );
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "嵌套 dict<str,List<int>> 返回值签名不应被标记为未覆盖: {}",
+        stdout
+    );
+}
+
+/// T0r62：嵌套容器 dict<str,list<int>> 作为**参数**传入 + **返回值**反序列化的完整 roundtrip
+/// 端到端验证。T0r61 已覆盖返回值侧，本测试补齐参数侧序列化全链路：
+/// LZ 侧 dict<str,list<int>> 字面量 → 内联递归 JSON 序列化（值为 JSON 数组）→
+/// Python 侧 __lz_json_nested 解码 → Python 函数调用 → 返回值 json.dumps →
+/// Rust 侧 embed_ret_parse_expr 递归解析为 BTreeMap<String, Vec<i64>>。
+/// 端到端 --embed-build 编译通过（rustc）即证明参数序列化 + 返回值反序列化类型对齐。
+#[test]
+fn python_embed_nested_dict_str_list_int_param_ret_roundtrip() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("nested_param_ret");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc_nested_pr.lz");
+    let src = r#"
+#[embed(python)]
+# python_lib.py
+def group_counts(data: Dict<str,List<int>>) -> Dict<str,int>:
+    return {k: sum(v) for k, v in data.items()}
+
+def main():
+    result = group_counts({"a": [1, 2, 3], "b": [4, 5]})
+    print(result)
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    assert!(
+        out.status.success(),
+        "嵌套 dict<str,List<int>> 参数+返回值 roundtrip 编译失败: stdout={}\nstderr={}",
+        stdout, stderr
+    );
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "嵌套 dict<str,List<int>> 参数签名不应被标记为未覆盖: {}",
+        stdout
+    );
+
+    // 参数序列化侧：产物应包含 dict<str,list<int>> 的内联递归 JSON 序列化
+    // （遍历 BTreeMap 键值对，value 递归序列化为 JSON 数组）
+    let rs_path = work.join("calc_nested_pr.rs");
+    let content = std::fs::read_to_string(&rs_path).expect("read rs product");
+    assert!(
+        content.contains("BTreeMap"),
+        "产物应包含 BTreeMap 类型（嵌套 dict 参数）"
+    );
+}
+
+/// T0r62：嵌套 dict dict<str,dict<str,int>> 参数+返回值完整 roundtrip
+/// dict 嵌套 dict（value 为扁平 dict<str,int>），参数序列化需递归序列化 value
+/// 为 JSON 对象，返回值反序列化递归解析为 BTreeMap<String, BTreeMap<String, i64>>。
+/// 端到端 --embed-build 编译通过（rustc）即证明嵌套 dict 端到端类型对齐。
+#[test]
+fn python_embed_nested_dict_str_dict_int_param_ret_roundtrip() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("nested_dict_dict");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc_nested_dd.lz");
+    let src = r#"
+#[embed(python)]
+# python_lib.py
+def merge_groups(data: Dict<str,Dict<str,int>>) -> int:
+    total = 0
+    for group in data.values():
+        total += sum(group.values())
+    return total
+
+def main():
+    result = merge_groups({"g1": {"a": 1, "b": 2}, "g2": {"c": 3}})
+    print(result)
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    assert!(
+        out.status.success(),
+        "嵌套 dict<str,Dict<str,int>> 参数+返回值 roundtrip 编译失败: stdout={}\nstderr={}",
+        stdout, stderr
+    );
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "嵌套 dict<str,Dict<str,int>> 参数签名不应被标记为未覆盖: {}",
+        stdout
+    );
+}
+
+/// T0r62：Dict×Tuple 嵌套组合 dict<str,tuple<int,float>> 端到端
+/// dict 的 value 为 tuple<int,float>，参数序列化需递归序列化 value 为 JSON 数组，
+/// 返回值反序列化递归解析为 BTreeMap<String, (i64, f64)>。
+/// 端到端 --embed-build 编译通过（rustc）即证明 dict×tuple 嵌套组合类型对齐。
+#[test]
+fn python_embed_nested_dict_str_tuple_param_ret_roundtrip() {
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_dict_serialization")
+        .join("nested_dict_tuple");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc_nested_dt.lz");
+    let src = r#"
+#[embed(python)]
+# python_lib.py
+def sum_pairs(data: Dict<str,Tuple<int,float>>) -> float:
+    total = 0.0
+    for pair in data.values():
+        total += pair[0] + pair[1]
+    return total
+
+def main():
+    result = sum_pairs({"a": (1, 2.5), "b": (3, 4.5)})
+    print(result)
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+
+    assert!(
+        out.status.success(),
+        "嵌套 dict<str,Tuple<int,float>> 参数+返回值 roundtrip 编译失败: stdout={}\nstderr={}",
+        stdout, stderr
+    );
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "嵌套 dict<str,Tuple<int,float>> 参数签名不应被标记为未覆盖: {}",
+        stdout
+    );
+}

@@ -16,6 +16,8 @@
 
 # generated LZ IR codegen intermediate (.lzlz �? .rs �? .exe) from --emit=ir-lz
 *.lzlz
+# generated LZ frontend capture output (.lzfront) from --emit=lex-lz
+*.lzfront
 
 # generated output directories
 test-suite/*/_work/

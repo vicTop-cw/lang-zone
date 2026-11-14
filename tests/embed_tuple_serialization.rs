@@ -364,3 +364,24 @@ fn e2e_tuple_int_bool_param_roundtrip_runs() {
     let lines: Vec<&str> = out.trim().lines().collect();
     assert_eq!(lines, vec!["3", "-3"], "bool 元素应正确传为 Python True/False");
 }
+
+/// T0r62：Dict×Tuple 嵌套组合端到端——tuple<dict<str,int>,list<int>>
+/// 参数方向：LZ 侧 tuple 元素含容器（dict + list），参数序列化需递归处理
+/// （dict 元素内联 JSON 对象，list 元素内联 JSON 数组），Python 侧 __lz_json_tuple_nested 解码。
+/// 端到端 --embed-build 编译通过（rustc）即证明嵌套组合序列化类型对齐。
+#[test]
+fn e2e_tuple_dict_list_nested_param_compiles() {
+    let src = "#[embed(python)]\n```\ndef summarize(d: Tuple<Dict<str,int>,List<int>>) -> int:\n    return sum(d[0].values()) + sum(d[1])\n```\n\ndef main():\n    print(python_calc_summarize(({\"a\": 1, \"b\": 2}, [3, 4])))\n";
+    let cc = compile_case("e2e_dict_list", src, &["--embed-build"]);
+    assert!(
+        cc.rs_text.contains("BTreeMap"),
+        "tuple 内嵌 dict 元素应使用 BTreeMap 类型:\n{}",
+        cc.rs_text
+    );
+    // 嵌套 tuple 参数序列化：元素含容器，应生成内联 JSON 序列化
+    assert!(
+        cc.rs_text.contains("nested") || cc.rs_text.contains("to_json"),
+        "嵌套 tuple 参数应包含递归 JSON 序列化逻辑:\n{}",
+        cc.rs_text
+    );
+}
