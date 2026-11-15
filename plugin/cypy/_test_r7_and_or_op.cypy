@@ -1,0 +1,24 @@
+# Test: && 和 || 运算符 (Cypy 实际支持的 and/or 语法)
+def test_and_op() -> int:
+    if True && False:
+        return 1
+    return 0
+
+def test_or_op() -> int:
+    if True || False:
+        return 1
+    return 0
+
+def test_and_expr() -> bool:
+    return True && False
+
+def test_or_expr() -> bool:
+    return True || False
+
+def test_not_op() -> int:
+    if !True:
+        return 1
+    return 0
+
+def main() -> int:
+    return 0

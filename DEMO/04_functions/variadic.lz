@@ -1,0 +1,14 @@
+// ============================
+// LZ Functions — Variadic Parameters
+// ============================
+
+def sum_all(values: List<int>) -> int =
+    total = 0
+    for v in values:
+        total += v
+    total
+
+def main() =
+    let r1 = sum_all(1, 2, 3, 4, 5)
+    let r2 = sum_all()
+    print(r1, r2)

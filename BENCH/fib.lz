@@ -1,0 +1,12 @@
+// 性能测试 — 递归斐波那契（计算密集，测试编译器代码生成质量）
+// lzc 编译: lzc fib.lz → fib.rs → rustc -O fib.rs -o fib.exe
+
+def fib(n: int) -> int =
+    if n <= 1:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+def main() =
+    let n = 35
+    print(fib(n))

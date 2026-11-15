@@ -1,0 +1,8 @@
+// Ownership runtime test — ^ move + use-after-move detection
+// Tests that _MovedCheck is generated for moved variables
+def main() =
+    x = 42
+    y = x^           // move ownership from x to y
+    // x 被移动后使用 — _MovedCheck 应在此处生成
+    print(x)         // should trigger runtime _MovedCheck
+    print(y)         // y still valid

@@ -1,0 +1,5 @@
+[
+ {"name":"verify","arguments":{"task_id":"T0r2.1.1","verifier":"verifier","pass":true,"note":"H1 硬门：6 单逐条实测证据齐备","now":"2026-09-28T10:52:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r2.1.2","verifier":"verifier","pass":true,"note":"H2 硬门：最小复现齐备 + 观察区单列","now":"2026-09-28T10:52:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r2.2.1","verifier":"verifier","pass":true,"note":"H3 硬门：可达性判定齐全","now":"2026-09-28T10:52:00+08:00"}}
+]

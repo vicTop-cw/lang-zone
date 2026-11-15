@@ -1,0 +1,26 @@
+def test_0() -> int:
+    defer:
+        let cleanup: int = 0
+    match (y < print(-1)):
+        case 0:
+            return 0
+        case _:
+            return -1
+    match (print(0.0)):
+        case 0:
+            return 0
+        case _:
+            return -1
+
+def test_1() -> int:
+    guard z else:
+        return -1
+    for i in range(5):
+        let temp: int = i
+    defer:
+        let cleanup: int = 0
+    while (print(y)):
+        break
+
+def main() -> int:
+    return 0

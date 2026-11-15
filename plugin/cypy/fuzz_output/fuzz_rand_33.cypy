@@ -1,0 +1,19 @@
+def test_0() -> int:
+    guard (42) else:
+        return -1
+    False
+    for i in range(2):
+        let temp: int = i
+
+def test_1() -> int:
+    x = z
+    defer:
+        let cleanup: int = 0
+
+def test_2() -> int:
+    return print(print(print(print(True))))
+    guard "a" else:
+        return -1
+
+def main() -> int:
+    return 0

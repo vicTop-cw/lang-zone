@@ -1,0 +1,10 @@
+// 用例：go/spawn 捕获 fn 值时，载体必须可跨线程
+// 出处：2026-09-30 T0r3 把 fn 值载体从 Box<dyn Fn> 换成 Rc<dyn Fn>（修 E0599 clone）后引入的外溢——
+//       Rc<dyn Fn> 既非 Send 也非 Sync，落进 std::thread::spawn 的捕获闭包即 E0277。
+// 卡点阶段：RUSTC_FAIL
+def use_it(v: int) = print("got {}", v)
+
+def main() =
+    let f = |x: int| x * 2
+    go print(f(1))
+    print("rc-send-marker ok")

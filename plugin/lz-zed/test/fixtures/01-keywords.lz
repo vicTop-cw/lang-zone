@@ -1,0 +1,141 @@
+// lz-zed test fixture: 01-keywords — 全部 61 个关键字
+// Authority: SYNTAX/00-词法基础.md §1 + 附录B §1
+
+# 声明关键字 (14)
+def greet(name: str) -> str = f"hi {name}"
+
+struct Point =
+    x: int
+    y: int
+
+enum Color =
+    Red
+    Green
+
+trait Drawable =
+    def draw(self) -> ()
+
+impl Drawable for Point =
+    def draw(self) -> () = pass
+
+type Alias = int
+const MAX: int = 100
+mut x = 1
+ref r = x
+let y = 2
+owned z = y^
+
+magic __str__:
+
+duck Shape =
+    require(area)
+
+iterator gen() -> int =
+    yield 1
+
+# 控制流关键字 (16)
+def classify(n: int) -> str =
+    if n > 0:
+        "positive"
+    elif n < 0:
+        "negative"
+    else:
+        "zero"
+
+def pick(x: int) -> str =
+    match x:
+        case 1 => "one"
+        case _ => "other"
+
+def guarded(x: int) -> int =
+    guard x > 0 else 0
+    x
+
+def loop_ops(xs: List<int>) -> int =
+    total = 0
+    for i in xs:
+        if i < 0:
+            continue
+        total += i
+    while total > 100:
+        total -= 1
+    loop:
+        if total == 0:
+            break
+        total -= 1
+    block outer:
+        pass
+    with open("f") as f:
+        pass
+    defer f.close()
+    pass
+    total
+
+def early(x: int) -> int =
+    return 42
+
+# 异常关键字 (5)
+raise IOError("boom")
+
+def risky() -> int raises IOError =
+    try:
+        1
+    catch IOError:
+        -1
+    finally:
+        pass
+
+# 异步与并发 (4)
+async def fetch() -> int =
+    await get()
+
+spawn worker()
+go heavy()
+
+# 生成器 (1)
+def emit(xs: List<int>) -> int =
+    yield from xs
+
+# 泛型与约束 (2)
+def id2[T](x: T) -> T where T: Clone =
+    x
+
+trait Builder =
+    def build(self) -> Self
+
+# 宏与编译期 (3)
+macro id(x: Tokens) -> Tokens = x
+
+comptime:
+
+template tpl(x: Tokens) -> Tokens = x
+
+# 测试框架 (6)
+test "addition": assert 1 + 1 == 2
+
+suite MathTests:
+    setup:
+        db = connect()
+    teardown:
+        db.close()
+    test "mul":
+        assert 2 * 3 == 6
+    check True
+
+# 运算符关键字 (5)
+def logic(a: bool, b: bool, xs: List<int>) -> bool =
+    a and b or not a
+    a in xs
+    a is None
+
+# 导入关键字 (3)
+import std.io as IO
+from std.collections import List
+
+# 布尔字面量关键字 (2)
+let t = True
+let f = False
+
+# 抽象方法标记 (1)
+trait Abstract =
+    def draw(self) -> () = ...

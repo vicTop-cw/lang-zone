@@ -1,0 +1,13 @@
+// find_bug/parser/bug-decorator-on-var.lz
+// BUG-PR-005: decorator 应用到非函数（变量）应拒绝（负向用例）
+// @decorator 只能用于 def 声明；用于顶层变量赋值应被 lzc 拒绝
+
+@cache
+x = 42
+
+def test() =
+  print("x:", x)
+
+def main() =
+  test()
+  print("decorator-on-var.lz done")

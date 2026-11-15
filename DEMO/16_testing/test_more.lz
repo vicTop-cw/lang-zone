@@ -1,0 +1,20 @@
+// LZ 测试框架 — test / assert 扩展
+// 覆盖：多个 test 块、断言运算与函数调用
+
+def add(a: int, b: int) -> int = a + b
+def concat(a: str, b: str) -> str = a + b
+
+test "addition":
+    assert 1 + 1 == 2
+
+test "subtraction":
+    assert 5 - 3 == 2
+
+test "string concat":
+    assert concat("a", "b") == "ab"
+
+test "function call":
+    assert add(2, 3) == 5
+
+test "boolean":
+    assert True and (1 < 2)

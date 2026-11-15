@@ -1,0 +1,9 @@
+// 04_functions - 基本函数
+def double(x: int) -> int = x * 2
+
+def greet(name: str) -> str =
+    f"Hello, {name}"
+
+def main() =
+    print(double(5))
+    print(greet("LZ"))

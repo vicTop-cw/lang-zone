@@ -1,0 +1,5 @@
+# just a comment
+# another one
+
+def main() -> int:
+    return 0

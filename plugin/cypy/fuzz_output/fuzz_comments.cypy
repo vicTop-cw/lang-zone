@@ -1,0 +1,5 @@
+# top comment
+def main() -> int:
+    # inner comment
+    let x: int = 1 # inline
+    return x

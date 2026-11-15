@@ -1,0 +1,1895 @@
+// Lang-Zone 编译器 — ir/codegen.rs
+// LZIR → Rust 源代码生成器
+//
+// 职责：
+// 1. 将 IrModule 转换为合法的 Rust 源代码字符串
+// 2. 类型映射：IrType → Rust 类型（如 Option→Option, List→Vec）
+// 3. 生成完整的、可编译的 .rs 文件
+
+mod helpers;
+
+pub mod moddec_emit;
+
+// 大文件拆分（move-only，2026-10-06）：原单文件按职责切分为子模块，逻辑零改动
+mod cap_hint;
+mod decl_gen;
+mod emit;
+mod expr_gen;
+mod hide_ty;
+mod magic_gen;
+mod marks;
+mod owned_local;
+mod pattern_gen;
+mod scan;
+mod stmt_gen;
+pub mod str_boundary;
+mod types_emit;
+
+// 隐藏类型标注/release/module-meta/return-keyword 开关需由二进制（main.rs / cli.rs）调用，重导出到 crate 根
+pub use hide_ty::{hide_type_annotations_str, hide_module_meta, hide_return_keyword, release_mode, set_hide_type_annotations, set_hide_module_meta, set_hide_return_keyword, set_release_mode};
+
+// 注：子模块内部符号不再在 mod.rs 统一 re-export —— 方法经 impl 自动可见，
+// 自由函数由使用方 `use super::<mod>::<name>;` 显式引入。
+use scan::{
+    block_uses_dict, collect_typepack_calls, collect_unbound_fstring_vars,
+    collect_unknown_extern_fns, expr_uses_dict,
+};
+use types_emit::{is_dict_ty, BIGINT_RS, COMPLEX_RS};
+
+use helpers::*;
+
+// builder.rs 直接依赖 collect_var_refs（AST→IR 的全局变量收集），重导出保持路径稳定
+pub(crate) use helpers::collect_var_refs;
+
+// 方向 E 的产物形态开关（CLI `--stmt-marks` 入口）
+pub use marks::set_stmt_marks;
+
+
+use super::node::*;
+
+use super::types::IrType;
+
+use super::IrModule;
+
+// 修饰符装饰器新语义轴（T04）：`@shared` 族 / `@cell` 族 的轴枚举。
+use crate::ast::{InteriorMode, SharedMode};
+
+use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
+
+/// IR → Rust 代码生成器
+pub struct CodeGen {
+    /// 缩进级别（空格数）
+    indent: usize,
+    /// 类型映射表：LZ 类型名 → Rust 类型名
+    type_map: HashMap<&'static str, &'static str>,
+    /// 当前函数返回类型
+    current_ret_ty: Option<IrType>,
+    /// 当前函数 raises 异常类型（BUG-CG-004 轮次12）：Some(E) 时函数返回
+    /// `Result<ret_ty, E>`，try/catch 结果基分支据此决定是否按 Result 匹配。
+    current_fn_raises: Option<IrType>,
+
+    /// 当前函数签名返回类型（与 current_ret_ty 不同：后者在 if/match 等块内
+    /// 可能被推断覆盖为 None，此字段保存函数级返回类型用于 ref 判断回退）
+    current_fn_ret_ty: Option<IrType>,
+    /// 当前表达式期望类型（函数调用实参位置由 fn_param_types 注入，
+    /// 用于 Option::None 等需类型参数的表达式跟随实参类型，E0308 修复）
+    /// 用 RefCell：gen_expr 仅 &self，实参生成时需临时改写
+    current_expected_ty: std::cell::RefCell<Option<IrType>>,
+    /// 当前函数是否返回引用（`-> &Self` 等）：builder 对 ref 返回推断可能为 None，
+    /// Stmt::Return 中 `return self` 判断是否 clone 时使用
+    current_fn_ret_is_ref: bool,
+    is_main: bool,
+    declared: std::collections::HashSet<String>,
+    /// 已知为字符串类型的局部变量名（let 绑定 ty=Str / 字符串字面量 / 参数 ty=Str）：
+    /// f-string 插值用 `{}` 而非 `{:?}`（`{:?}` 会给字符串加引号，如 `f"[{joined}]"`）
+    str_typed_vars: std::collections::HashSet<String>,
+    /// 字符串 for 循环变量名集合（`for c in s` 生成 Rust `char`，IR ty 为 Str）：
+    /// 拼接语境需 `c.to_string()`（BUG-268）
+    str_loop_vars: std::collections::HashSet<String>,
+    /// BUG-284：Str 类型 match scrutinee 经 `.as_str()` 转为 &str，通配绑定为 &str；
+    /// 返回 String 语境需 `.to_string()`
+    str_match_bindings: std::collections::HashSet<String>,
+    /// ref 绑定变量名集合（ref r = x / let ref r = x）：后续赋值 r = v 需生成 `*r = v`
+    ref_bindings: std::collections::HashSet<String>,
+    /// ref 别名字符串替换（ref f = h.n，value 是可赋值 place）：f → 目标位置表达式
+    /// （h.n）。读 f 替换为读 h.n、写 f 替换为 `h.n = v`，避免 &mut 引用的 E0596/E0502
+    /// 借用冲突（BUG-20）。基底可变性由 scan_auto_mut_block 预扫登记 auto_mut_locals。
+    ref_aliases: std::collections::HashMap<String, Expr>,
+    /// ref 别名写穿名集合（ref f = h.n; f = 9）：由 scan_ref_write_through 预扫，
+    /// 仅写穿 ref 走别名替换；只读 ref（moddec @ref）保持 &mut 形态（BUG-20）。
+    ref_write_through: std::collections::HashSet<String>,
+    emitted_types: std::collections::HashSet<String>,
+    /// 仅 impl 块（非 struct/enum）的类型名，用于 FieldAccess 生成 :: 语法
+    impl_types: std::collections::HashSet<String>,
+    /// enum variant → enum name 映射（用于构造器调用路由）
+    enum_variants: HashMap<String, String>,
+    /// enum name → 按声明顺序的变体名列表（BUG-344：`_variant` 魔法字段索引）
+    enum_variant_order: HashMap<String, Vec<String>>,
+    /// type alias 名 → 底层 IR 类型（`type Pair = (int, int)` → "Pair" → Tuple[int, int]）。
+    /// BUG-278：`p: Pair` 的 IR 类型是 Named("Pair")，IndexGet 走元组索引需先解析回
+    /// Tuple 才生成 `p.0`；否则落通用路径 `p[0i64 as usize]` → rustc E0608。
+    type_aliases: std::collections::HashMap<String, IrType>,
+    /// 抑制尾表达式隐式 return（用于 match arm / 块表达式内部）
+    suppress_tail_return: bool,
+    /// defer+尾值捕获：块尾值语句（ExprStmt/TryCatch）已生成到 `__tail_val`，
+    /// 块结束后（flush defer cleanup 之后）统一 `return __tail_val`（否则尾值
+    /// 被 force_stmt_semicolon 丢弃、cleanup 落尾 → 函数返回 ()，E0308 家族）
+    pending_tail_capture: Option<String>,
+    /// 块内存在无值 return（return;）时强制尾表达式生成 `expr;`（丢弃值），
+    /// 使闭包/块返回类型为 ()（否则 return; 与尾值类型冲突 E0308）
+    force_unit_tail: bool,
+    /// 循环体（for/while）内所有表达式语句强制加分号：循环体不是值上下文，
+    /// 尾表达式裸生成会导致 E0308（如 go print(...) → std::thread::spawn(...) 缺 `;`）
+    force_stmt_semicolon: bool,
+    /// 函数返回类型为嵌套 Fn（fn -> fn -> T）时：内层闭包返回需 Arc::new 包装，
+    /// 且返回类型用 Arc<dyn Fn … + Send + Sync>（Rust 不允许 impl Fn -> impl Fn 嵌套，E0562）
+    nested_fn_ret: bool,
+    /// IR-003：Lambda 作为一等值（let = Lambda / return Lambda 的值位置）时
+    /// 需 Arc::new 包装为 `Arc<dyn Fn … + Send + Sync>`（Arc 而非 Box：LZ fn 值是值语义，产物会 .clone()，
+    /// Box<dyn Fn> 不实现 Clone）。仅在值位置置 true，避免借用捕获闭包被误装箱
+    /// （for_each |x| total += x 必须保持 impl FnMut 借用捕获，见 gen_param）
+    box_lambda: bool,
+    /// 顶层 def 名称集合：用作值（Var）时需 Arc::new(f)；局部 fn-let 由 let 值位置已
+    /// 装箱，不重复装箱（避免 Rc 双层嵌套）
+    top_level_fns: std::collections::HashSet<String>,
+    /// 值位置 fn 变量的名字 → 参数个数（Rust 侧载体为 `Arc<dyn Fn … + Send + Sync> …>`）：由 `let x = <闭包>`
+    /// 装箱或 `let x = 返回 fn 的调用` 建立。std 未给 `Arc<dyn Fn … + Send + Sync>` 实现 `Fn`，故把这类值传给
+    /// `impl Fn(…) + 'static` / 迭代器 `FnMut` 时需用转发闭包（见 fn_value_fwd）。
+    /// 记个数而非类型：IR 有时把 fn 值变量标成非 Fn（偏应用 `add(_, 1)`），名字是唯一可靠线索
+    fn_value_carriers: HashMap<String, usize>,
+    /// @math 函数标志：体内整数字面量经 T::from(i32) 转换（使 `x * 2` 中 2 推断为 T）。
+    /// 普通泛型函数不应转换（否则 `total = 0` 生成 T::from(0i32) 与 i64 冲突，E0308）
+    in_math_fn: bool,
+    /// 当前函数 where 子句对操作数类型有显式算术约束（Add/Mul/Sub/Div/Rem）。
+    /// 此时 `+`/`*` 走 Rust 原生运算符（约束已在签名里），不经 LzAdd 分派
+    /// （iter.lz `sum`：where I.Item: Add<Output=I.Item>，走 LzAdd 报 E0277）。
+    in_bounded_binop_fn: bool,
+    /// 当前是否在 Lambda 块体（BlockExpr child）内：嵌套 Fn 返回时，
+    /// 仅块体尾闭包需 Arc::new 包装，函数体本身的尾表达式（外层闭包）不包装
+    in_lambda_block: bool,
+    /// 外层 Lambda 是否为非 move（借用捕获）。内层嵌套 Lambda 若沿用非 move，
+    /// 会借用外层闭包的局部变量而外层闭包已返回 → E0373。内层须改 move 捕获
+    /// 外层变量的引用（&T 是 Copy）并 clone 出 T。
+    parent_lambda_non_move: bool,
+    /// 祖先闭包参数链（进入 Lambda 时 push 当前参数，退出时 pop 恢复）。
+    /// 嵌套闭包（factory_chain `|a| => |b| => x + a + b`）生成时，内层闭包的
+    /// body_refs_noncopy_external 判定需把外层闭包参数并入「参数」集合：
+    /// 外层参数 a 已被外层 move 捕获（实际类型 i64，IR 里却是 Any），若仅按
+    /// 内层参数集判定，a 被误判为非 Copy 外部变量 → 降级非 move → E0373。
+    enclosing_lambda_params: std::cell::RefCell<Vec<String>>,
+    /// 当前是否在生成器（iterator/yield）函数内：体内 return 等价 raise（panic）
+    in_generator: bool,
+    /// 当前是否在生成器构建块（func *:）闭包内：yield → push 到闭包收集器 __bb
+    in_gen_build: bool,
+    /// 当前是否在泛型函数内（@math 等）：整数字面量不附加 i64 后缀，
+    /// 否则 `x * 2i64`（T 泛型）报 E0308（expected T, found i64）
+    in_generic_fn: bool,
+    /// 当前是否在泛型 impl 块内：impl<T> 的方法自身无 generics 字段，
+    /// 但体内 Option.None 等需按泛型上下文处理（magic_methods.lz __next__ E0308）
+    in_impl_generic: bool,
+    /// 当前 impl / struct 块的泛型参数名。
+    /// builder 会把外层泛型合并进方法的 generics，若方法再声明一次会导致
+    /// `impl<T> X<T> { fn m<T>(..) }` → E0403（T 重复声明）。
+    /// gen_fn_def 生成方法签名时据此剔除同名泛型（方法自身泛型如 <U> 保留）。
+    current_impl_generics: Vec<String>,
+    /// 循环 else 标志栈：Some(flag) = 当前循环带 else 子句（while/else, for/else，
+    /// 规范 05-控制流.md §13.2/13.3），break 时置 false 跳过 else 体
+    loop_else_stack: Vec<Option<String>>,
+    /// 循环 else 标志唯一命名计数器
+    loop_else_counter: usize,
+    /// 块级 defer 体收集（BUG-IR-002 方案 A：内联脱糖，块退出前逆序 emit，规避闭包捕获 E0499）
+    deferred: Vec<Block>,
+    /// plain block（block NAME: → (|| { ... })() 闭包）嵌套深度：
+    /// 闭包内顶层（非循环内）break 应生成 return 退出闭包而非裸 break（E0267）
+    plain_block_depth: usize,
+    /// 当前循环嵌套深度（for/while/while let/loop）：
+    /// plain block 内循环中的 break 仍跳出循环，块顶层的 break 退出闭包
+    loop_depth: usize,
+    /// type-pack 切片模式绑定变量名集合（03d §2.8 方案 B）：`..: Tuple<Ts...>` 的
+    /// args 编译为 &[Ts]，`[a]` / `[a, ..]` 模式中 a 绑定 &Ts（引用），臂体内
+    /// 引用 a 需生成 a.clone()（否则 E0308 expected Ts, found &Ts）
+    slice_clone_bindings: std::collections::HashSet<String>,
+    /// 当前是否在 `impl Iterator for X` 内（LZ 迭代协议，规范 06d-内置魔法trait和
+    /// 全局函数.md §五）：LZ 用 `__next__`/`__size_hint__` 魔术方法实现迭代协议，
+    /// 生成 std::iter::Iterator impl 时需映射为 `next`/`size_hint`（否则 E0407）
+    in_iterator_impl: bool,
+    /// 当前是否在 if/else 分支内：分支内方法调用返回 String 时需 `let _ = expr` 丢弃
+    /// 值以统一分支类型为 `()`（否则 E0308 if and else have incompatible types）
+    in_if_else_branch: bool,
+    /// 正在生成外部类型扩展 trait（ListExt/DictExt/SetExt/StrExt）时置 true：
+    /// 方法名需与调用点映射一致（slice → lz_slice，对齐 lz_builtins 的
+    /// ListExt/StringExt），否则 trait 声明是 slice 而调用是 lz_slice → E0599
+    in_ext_trait: bool,
+    /// 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
+    in_result_try: bool,
+    /// 生成器 try 体闭包内的终止标志栈（BUG-295）：try 体闭包内若直接发
+    /// `return __gen_vec`（生成器 raise/return 的重写产物），会把被 &mut 捕获的
+    /// `__gen_vec` 移出闭包 → E0382（use of moved value）。改发「置位终止标志 +
+    /// `return;`（闭包返回 ()）」，try 块结束后统一 `return __gen_vec`。
+    /// 栈存每层 try 的标志变量名，raise/return 时一次性置位全部标志（嵌套一致）。
+    gen_try_flag_stack: Vec<String>,
+    /// 生成器 try 终止标志的唯一命名计数器。用 Rc<Cell<usize>> 共享：块表达式等
+    /// 会建子 CodeGen（ExprKind::BlockExpr 等），若计数器按值拷贝则嵌套 try 复用
+    /// 同名标志（`__gen_terminated_0` 内层遮蔽外层 → 外层标志永远不被置位），
+    /// 且置位语句两次都写内层绑定（gen_try_nested.lz 实测）。
+    gen_try_flag_counter: Rc<Cell<usize>>,
+    /// 正在生成的扩展 trait 名（ListExt/DictExt/SetExt/StrExt）：扩展 trait 方法体
+    /// 内 `self.lz_*` 调用需显式 UFCS `<本地 trait>::lz_*(self, ...)`，否则与
+    /// lz_builtins::StringExt/ListExt（也 `use lz_builtins::*` 进入作用域，且
+    /// StringExt 同时 impl 于 str/String）同名方法产生 E0034 多重适用项歧义
+    current_ext_trait: Option<String>,
+    /// 函数名 → (总参数数, 默认参数数)（用于调用时自动填充 None）
+    fn_param_info: HashMap<String, (usize, usize)>,
+    /// 函数 ref/mut ref 参数标记：函数名 → 每参数 (is_ref, is_mut)（调用点自动传引用）
+    fn_ref_params: HashMap<String, Vec<(bool, bool)>>,
+    /// 当前函数内需自动 mut 的局部 let 变量名（预扫描收集）：
+    /// LZ 源码 `let v = vec; v.push(1)` 未写 mut，但可变方法调用/赋值需 mut 绑定
+    auto_mut_locals: std::collections::HashSet<String>,
+    /// 被修改的模块级 const 名称（需生成 static mut 而非 const）
+    mutated_consts: std::collections::HashSet<String>,
+    /// enum variant → field types 映射: (enum_name, variant_name) → Vec<IrType>
+    enum_variant_fields: HashMap<(String, String), Vec<IrType>>,
+    /// enum variant → 命名字段名列表（空 = 元组/位置字段）
+    enum_variant_named_fields: HashMap<(String, String), Vec<String>>,
+    /// 函数名 → variadic 参数起始索引（该索引及之后的参数收集为 &[T]）
+    fn_variadic: HashMap<String, usize>,
+    /// 函数名 → kwargs 注入参数起始索引（kwargs 收集为 &HashMap<String, V>）
+    fn_kwargs: HashMap<String, usize>,
+    /// 函数名 → 参数类型列表（用于隐式 variadic + 调用方类型检查）
+    fn_param_types: HashMap<String, Vec<IrType>>,
+    /// 函数名 → 参数名列表（用于命名实参 k=v 按声明顺序重排，BUG-24）
+    fn_param_names: HashMap<String, Vec<String>>,
+    /// 比较约束传播：函数名 → (eq 泛型集合, ord 泛型集合)。
+    /// 由 gen_module 预扫描所有 FnDef 体（含调用图不动点）得到，
+    /// 用于为参与比较运算（==/!= → PartialEq+Eq；<,>,<=,>= → PartialEq+Eq+Ord）
+    /// 的泛型注入 Rust trait bound，修复泛型比较算法的 E0277/E0369。
+    fn_cmp: HashMap<String, (HashSet<String>, HashSet<String>)>,
+    /// 各函数变量引用次数（函数名 → 变量名 → 次数），用于 move 语义修复：
+    /// 被多次使用的非 Copy 变量在调用实参处自动 .clone()，避免 E0382 二次移动，
+    /// 如 `for x in xs: push(seen, x); push(result, x)`。由 gen_module 预计算
+    /// （含闭包/循环体等嵌套函数），按函数名查表，避免 gen_fn_def 嵌套覆盖。
+    fn_use_count: HashMap<String, HashMap<String, usize>>,
+    /// 当前正在生成的函数名（嵌套 gen_fn_def 时经保存/恢复）。
+    cur_fn_name: String,
+    /// type-pack 变参函数（`..: Tuple<Ts...>`，03d §2.8 方案 B）：
+    /// 函数名 → pack 泛型参数名（如 "Ts"）。args 参数类型为
+    /// IrType::Tuple([Generic("Ts")])，由调用点具体化为 Rust 异质元组。
+    typepack_param: HashMap<String, String>,
+    /// type-pack 函数调用点收集：函数名 → 各调用点实参类型列表
+    /// （用于生成具体化签名 `args: (T1, T2, T3)`，修复异质元组被降级为
+    /// &[Ts] 同构切片的 E0308 根因）
+    typepack_sigs: HashMap<String, Vec<Vec<IrType>>>,
+    /// 顶层 `def m(self: StructName, ...)` 归属表（BUG-CG-002/TY-002 修复）：
+    /// 函数名 → (struct 名, self 是否 mut)。命中的函数发射为 `impl StructName`
+    /// 方法而非自由函数（E0568：Rust 的 self 参数只许出现在 impl/trait 关联项），
+    /// 调用点同步改写为 `recv.m(...)` 方法语法。仅当 self 注解类型是本模块
+    /// struct 时归属（外部类型的扩展方法仍走自由函数路径）。
+    self_fns: HashMap<String, (String, bool)>,
+    /// checker 块名称集合（fn NAME(ps: &mut __Params)），用于 default_checker 链
+    /// 调用时区分 checker 块与普通值函数（fn NAME(ps: __Params) -> __Params）
+    checker_blocks: std::collections::HashSet<String>,
+    /// raises 函数名集合：checker 注入调用点需解包其 `Result` 返回值
+    /// （raises checker 是值函数 `fn NAME(ps: __Params) -> __Params raises E`，
+    /// Rust 侧返回 `Result<__Params, E>`，直接 `__ps = NAME(__ps)` 会 E0308）
+    raises_fn_names: std::collections::HashSet<String>,
+    /// checker 块捕获的外层局部变量：checker 名 → [(变量名, 类型)]
+    /// （block 闭包语义，规范 05b-block命名块.md §三）：生成
+    /// fn NAME(ps: &mut __Params, out: &mut Vec<i64>, ...)，调用点传 &mut out
+    checker_captures: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// 当前正在生成的 checker fn 捕获参数名集合（递归调用时捕获变量已是
+    /// fn 参数 &mut 引用，直接传名而非 &mut 名）
+    current_checker_captures: std::collections::HashSet<String>,
+    /// match 臂 `ref mut` 模式绑定名集合（case Some(ref mut c)：臂体内
+    /// c = c + 1 需生成 *c = *c + 1 解引用赋值，E0384 修复）
+    ref_mut_bindings: std::collections::HashSet<String>,
+    /// 重载函数签名集合：函数名 → 多个参数类型签名（同名函数 >1 个时启用 mangling）
+    overload_sigs: HashMap<String, Vec<Vec<IrType>>>,
+    /// 重载签名是否带 `..` 变参：函数名 → 每个签名是否 variadic（03d §2.7 兜底）
+    overload_variadic: HashMap<String, Vec<bool>>,
+    /// 重载签名的显式参数类型（排除注入的 args/kwargs）：函数名 → 每签名显式参数
+    overload_explicit: HashMap<String, Vec<Vec<IrType>>>,
+    /// 当前正在生成的函数的 variadic 参数名集合
+    current_variadic_params: std::collections::HashSet<String>,
+    /// 模块级 const/static 名称（用于参数重命名避免 E0530 冲突）
+    top_level_static_names: std::collections::HashSet<String>,
+    /// 当前函数的参数重命名映射（原名 → 新名），用于 E0530 冲突解决
+    param_renames: HashMap<String, String>,
+    /// @parallel 装饰的当前函数：函数内 `xs.map(f)` 方法调用生成并行版本
+    cur_fn_is_parallel: bool,
+    /// @init 装饰的模块初始化函数名（main 开头按声明顺序自动注入调用）
+    init_fns: Vec<String>,
+    /// 所有用户自定义类型名（struct/enum），预收集用于判断表达式是否为自定义类型
+    known_types: std::collections::HashSet<String>,
+    /// 所有用户自定义 trait 名（TraitDef），用于 trait 对象引用生成 `dyn Trait`
+    /// （error.lz `Option<ref Error>` → Option<&dyn Error>，E0782 expected a type, found a trait）
+    trait_names: std::collections::HashSet<String>,
+    /// 模块自定义 `trait Iterator` 是否为 LZ 迭代协议（含 __next__/next 魔术方法）：
+    /// 是 → impl 映射 std::iter::Iterator（iter.lz/traits.lz）；否（trait_assoc.lz 的
+    /// get/peek 自定义 trait）→ 使用本地 trait 名（E0407 method get is not a member）
+    custom_iterator_is_protocol: bool,
+    /// 当前方法是否以共享引用（&self）接收，用于对 self.字段 值表达式自动 .clone()
+    borrow_self: bool,
+    /// 模块级全局可变变量：name → type（跨函数共享，生成 static mut + unsafe 访问）
+    global_vars: std::collections::HashMap<String, IrType>,
+    /// 关键字降级变量（Ok/Some/None/Err 用作变量名时重命名为 name_ 避免 E0530）
+    downgraded_vars: std::collections::HashSet<String>,
+    /// f-string 插值中未绑定的变量名（探测用例引用外部未定义符号，如
+    /// lit_probe 的 `f"hello {name}"`）：生成时替换为空字符串，保证 rustc
+    /// 编译通过（批测口径只编译不运行）
+    unbound_fstring_vars: std::collections::HashSet<String>,
+    /// 函数返回类型表：fn_name → return_type（用于 is_str_producing 识别字符串返回函数调用，
+    /// 如 `stringify(x)` 返回 String，let 绑定登记到 str_typed_vars 后 f-string 用 {} 而非 {:?}）
+    fn_returns: std::collections::HashMap<String, IrType>,
+    /// 未定义外部函数名 → 最大实参个数（p16_lzi 等跨模块探测用例：
+    /// 调用的 external_add/external_opt 定义在 .lzi 签名中，批测未加载
+    /// .lzi 时生成 i64 stub 兜底，保证 rustc 编译通过）
+    unknown_extern_fns: std::collections::HashMap<String, usize>,
+    /// struct 字段信息：struct_name → [(field_name, field_type)]，用于 __new__ 补齐默认字段
+    /// struct 字段信息（供 __new__ 补齐默认字段）
+    struct_fields_info: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// struct 字段默认值表达式：struct_name → [(field_name, 默认值 IR 表达式)]，
+    /// 用于 `Config(name: "app")` 这种缺省字段构造时按 `port: int = 8080` 填充，
+    /// 否则 E0063 missing field（struct_default.lz）。仅在字段有 AST 默认值时登记。
+    struct_field_defaults:
+        std::collections::HashMap<String, std::collections::HashMap<String, Expr>>,
+    /// 「被用作 Dict/HashMap 键」的泛型参数名集合（Dict→BTreeMap 要求 K: Ord）。
+    ///
+    /// Dict 映射为 `BTreeMap<K,V>`（有序，保证 JSON 序列化字段顺序稳定，见
+    /// types_emit.rs），故任何出现在 Dict/HashMap **第一个类型实参**位的泛型
+    /// 参数都必须 `Ord`。原先只在 `impl Dict/HashMap` 块注入（decl_gen.rs 的
+    /// BUG-dict-Ord 补丁），漏掉三类用法：① 方法级泛型（`dict.map<K2,V2>` 返回
+    /// `Dict<K2,V2>`）② 自身字段含 Dict 的 struct 的 `impl Iterator` 块
+    /// （`DictIter<K,V>` 的 `dict: Dict<K,V>` 字段 → `self.dict[key]` 需 K: Ord）
+    /// ③ 以 Dict 当集合用的泛型函数（`list.unique<T>` 的 `seen: Dict<T,_>`）。
+    ///
+    /// 这里预扫描全模块（含 struct 字段与 impl 泛型实参）收集该集合，
+    /// 由 `gen_generics` / `gen_fn_generics` 统一注入 `Ord`，避免逐点打补丁。
+    dict_key_generics: std::collections::HashSet<String>,
+    /// 当前正在生成的 trait「是或继承了」协议 Iterator（gen_trait_def 设置）。
+    /// 供 trait_sig_type 把 `Self.Item` 完全限定为 `<Self as std::iter::Iterator>::Item`
+    /// ——协议 Iterator 已不自带 `type Item`，未限定的 `Self::Item` 会 E0220。
+    current_trait_extends_iter: bool,
+    /// 当前正在生成的 trait 的关联类型名列表。BUG-434：trait 方法签名里关联类型
+    /// 以裸名（如 `Item`）出现在返回/形参类型时，原生 codegen 此前直发裸名 →
+    /// rustc E0425 cannot find type `Item` in this scope。Rust 内 `Self::Item` 才可解析，
+    /// rs-lz 侧（rust_type_assoc）已修正，此处对齐。trait 生成循环 set/restore，
+    /// 与 current_trait_extends_iter 同构。
+    current_trait_assoc_types: Vec<String>,
+    /// f-string 插值静态判定：当前函数可见的变量名 → IR 类型（形参在 gen_fn_def 登记，
+    /// let 绑定在 gen_stmt 的 Let 分支登记）。
+    /// `f"{r.name}"` 里 r 是 struct 时，需按 `struct_fields_info` 查 `name` 是否 str——
+    /// 否则 str 字段被判成非字符串走 `{:?}` 带引号，既违反
+    /// SYNTAX/00-词法基础.md:188（str 插值 = Display 无引号），也与 cy 后端的
+    /// 运行时判定（`_lz_fs` 按值类型去引号）分叉。台账 BUG-23。
+    fstr_var_types: std::collections::HashMap<String, IrType>,
+    /// 当前方法所属 struct 名（`self.field` 的同款判定）
+    fstr_self_type: Option<String>,
+    /// struct 名 → 自动追加的 PhantomData 泛型参数列表
+    /// （box.lz `struct Box<T> { _ptr: int }` 中 T 未使用，E0392 修复；
+    /// 构造点需自动补 `_lz_phantom_T: PhantomData` 字段，否则 E0063）
+    struct_phantom_generics: std::collections::HashMap<String, Vec<String>>,
+    /// struct 方法名集合：struct_name → 方法名集合（用于 r? 自定义传播类型判定 __is_ok__ 等）
+    struct_method_names_map: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// 结构 __init__ 参数表（仅 self 时可自动注入调用点）
+    struct_init_params_map: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// struct 是否定义了 __new__：struct_name → 是否
+    struct_has_new: std::collections::HashSet<String>,
+    /// struct __new__ 参数表：struct_name → [(param_name, param_type)]，用于 kwarg 构造路由到 __new__
+    struct_new_params_map: std::collections::HashMap<String, Vec<(String, IrType)>>,
+    /// 当前是否正在生成 __new__ 体（抑制 kwarg→__new__ 路由，避免无限递归）
+    in_new_body: bool,
+    /// case struct 集合（自动配 __unapply__ / __unapply_seq__ 提取魔法方法）
+    case_structs: std::collections::HashSet<String>,
+    /// 支持定长提取（__unapply__）的 struct 集合（case struct 或显式实现）
+    struct_has_unapply: std::collections::HashSet<String>,
+    /// 支持变长提取（__unapply_seq__）的 struct 集合（仅字段同构的 case struct）
+    struct_has_unapply_seq: std::collections::HashSet<String>,
+    /// 使用 LazyLock 的顶层静态集合名（需解引用访问）
+    lazy_static_names: std::collections::HashSet<String>,
+    /// 延迟惰性绑定（`@lazy` / `@lazy_mut`）：源码变量名 → (发射用安全名, 首次访问
+    /// 求值表达式)。绑定处**不求值**，本作用域内对该变量的引用改写为
+    /// `*安全名.get_or_init(|| 表达式)`，仅求值一次（AC4）。
+    lazy_bindings: std::collections::HashMap<String, (String, String)>,
+    /// 修饰符装饰器目标类型所需的 std 导入项：模块路径 → 项名集合
+    /// （如 `std::sync` → {`Mutex`, `RwLock`}）。仅在使用相应轴时登记，
+    /// 未使用时不产生任何导入，保证无装饰器模块产物逐字节不变（T04）。
+    moddec_std_imports:
+        std::collections::BTreeMap<&'static str, std::collections::BTreeSet<&'static str>>,
+    /// `@atomic` 用到的具体原子类型名集合（如 `AtomicI64`），供 prelude 精确导入。
+    moddec_atomic_types: std::collections::BTreeSet<String>,
+    /// 已导入的用户模块名（import services → "services"）：模块命名空间访问
+    /// （services.service_name）降级为直接引用（模块项已平铺生成到同一 Rust 文件）
+    imported_modules: std::collections::HashSet<String>,
+    /// 当前正在生成的函数是否为 async（用于 __go 的异步/同步分派）
+    current_fn_is_async: bool,
+    /// BUG-348：预扫描收集的 async 函数名集合，用于 `spawn` 内区分
+    /// 非 async 调用（返回值非 Future）与 async 调用（返回值是 Future）。
+    async_fn_names: std::collections::HashSet<String>,
+    /// 当前是否在生成 `impl Iterator` 的 size_hint 方法体：
+    /// std Iterator 要求返回 (usize, Option<usize>)，方法体内 `(0, Some(0))`
+    /// 元组元素需转 usize（否则 E0308 expected usize, found i64）
+    current_fn_is_size_hint: bool,
+    /// duck 约束字段成员：泛型参数名 → 该泛型 duck 约束声明的字段名集合
+    /// （用于泛型函数体内 `a.field` → trait accessor `a.__field_field()`）
+    duck_field_members: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// duck 定义索引（name → DuckDef），供 gen_fn_def 填充 duck_field_members 使用
+    duck_defs: std::collections::HashMap<String, DuckDef>,
+    /// 本模块是否使用 Ext 类型或 #[extern] 装饰器（仅此时生成 ExtHandle）
+    module_uses_ext: bool,
+    /// 本模块是否使用 Dict/HashMap 类型（仅此时注入 use std::collections::BTreeMap;）
+    module_uses_dict: bool,
+    /// I3：L2 中继——extern 自动登记目标 registry。注入后 codegen 处理
+    /// #[extern(lang)] 函数时自动 register_symbol 并联动台账（REGISTER）。
+    /// None = 不登记（默认，保持既有生成行为不变）。
+    pub bridge_registry: Option<crate::bridge::core::BridgeRegistry>,
+    /// embed 生成的模块名集合（如 `foo_tnr`），供 gen_use_stmt 自动路由。
+    embed_modules: std::collections::HashSet<String>,
+    /// Cli 档 embed 产物（`#[embed(mojo|python|c|...)]`）：摘源码 → 建库 → argv + 序列化。
+    /// Source 档（tnr/rust/rs）**不进这里** —— 它们必须保持既有逐字行为。
+    embed_targets: Vec<crate::embed::EmbedTarget>,
+    /// 产物命名用的源文件路径（由 CLI 显式注入）。None ⇒ 沿用 IrModule 的 file_path/name，
+    /// 故既有 `main_tnr` 一类命名不受影响；设过之后 `calc.lz` 才叫得出 `python_calc`。
+    embed_stem: Option<String>,
+    /// T0r32：dedup 产物的**短名主干**（产物全名 → `<语言>_<源文件主干>`）。
+    ///
+    /// 为什么需要：`dedup::artifact_name` 给子目录模块的产物名补了
+    /// `__<目录slug>_<路径短哈希>` 后缀（`python_a__src_4d744cd7`），于是 `__lz_embed`
+    /// 里真正的包装函数叫 `python_a__src_4d744cd7_add`；而 LZ 作者按「模块 + 方法」
+    /// 写的是短名 `python_a_add` —— 短名在 LZ 侧看不见定义 ⇒ 掉进 unknown_extern
+    /// 兜底桩（`-> i64 { i64::MAX }`），桩是 crate 根的真定义，**遮住** `use
+    /// __lz_embed::*` 的 glob 导入 ⇒ 静默返回垃圾值（不是报错）。
+    ///
+    /// 这里只记「这次编译里哪个产物还能被哪个短名指到」，不去动 `src/embed` 的命名
+    /// 权威（全名/目录/MANIFEST 一字不变）：短名是 codegen 在 `__lz_embed` 里补的一条
+    /// `pub use … as …` 别名，外加兜底桩让位。**别名不参与产物命名**。
+    ///
+    /// 只收「短名 ≠ 全名 且 短名是合法 Rust 标识符」的条目 —— 主干含 `-`/中文等
+    /// 字符时不做别名（保持既有行为，不在 codegen 里另造一条命名净化规则）。
+    embed_short_bases: std::collections::HashMap<String, String>,
+    /// 方向 E：`[]` 字面量 + 紧随其后的纯 push 循环 → 预分配容量（Rust 表达式文本）。
+    /// 由 gen_block_inner 的相邻语句前瞻写入，空列表字面量发射处 `take` 一次。
+    /// gen_expr 走 `&self`（内部 RefCell 承担可变状态），故用 RefCell 而非裸字段。
+    vec_cap_hint: std::cell::RefCell<Option<String>>,
+    /// 运行时优化：`s = s + rhs` → `s.push_str(&rhs)`。
+    /// 登记**当前函数内**by-value 的 str 局部绑定（`is_ref == false`），
+    /// 由 `gen_fn_def` 入口清空；只有登记在册的变量才允许原地追加，
+    /// 从而保证不会把 `&str` / `&String` 形参误当独占 String 改写。
+    /// 详见 owned_str.rs 的安全性论证。
+    owned_locals: owned_local::OwnedLocals,
+    buf: String,
+}
+impl CodeGen {
+
+
+    pub fn new() -> Self {
+        let mut type_map = HashMap::new();
+        type_map.insert("List", "Vec");
+        type_map.insert("Dict", "BTreeMap");
+        type_map.insert("Set", "HashSet");
+        type_map.insert("String", "String");
+        type_map.insert("Nil", "()");
+        type_map.insert("Unit", "()");
+        type_map.insert("Range", "std::ops::Range<i64>");
+        type_map.insert("RangeInclusive", "std::ops::RangeInclusive<i64>");
+        // 基础类型保持原样
+        type_map.insert("int", "i64");
+        type_map.insert("int128", "i128");
+        type_map.insert("bigint", BIGINT_RS);
+        type_map.insert("complex", COMPLEX_RS);
+        CodeGen {
+            current_expected_ty: std::cell::RefCell::new(None),
+            indent: 0,
+            type_map,
+            current_ret_ty: None,
+            current_fn_raises: None,
+            current_fn_ret_ty: None,
+            is_main: false,
+            declared: std::collections::HashSet::new(),
+            str_typed_vars: std::collections::HashSet::new(),
+            str_loop_vars: std::collections::HashSet::new(),
+            str_match_bindings: std::collections::HashSet::new(),
+            ref_bindings: std::collections::HashSet::new(),
+            ref_aliases: std::collections::HashMap::new(),
+            ref_write_through: std::collections::HashSet::new(),
+            emitted_types: std::collections::HashSet::new(),
+            impl_types: std::collections::HashSet::new(),
+            enum_variants: HashMap::new(),
+            enum_variant_order: HashMap::new(),
+            type_aliases: std::collections::HashMap::new(),
+            suppress_tail_return: false,
+            pending_tail_capture: None,
+            force_unit_tail: false,
+            force_stmt_semicolon: false,
+            nested_fn_ret: false,
+            box_lambda: false,
+            enclosing_lambda_params: std::cell::RefCell::new(Vec::new()),
+            top_level_fns: std::collections::HashSet::new(),
+            fn_value_carriers: HashMap::new(),
+            in_lambda_block: false,
+            parent_lambda_non_move: false,
+            in_math_fn: false,
+            in_bounded_binop_fn: false,
+            in_generator: false,
+            in_gen_build: false,
+            in_generic_fn: false,
+            in_impl_generic: false,
+            current_impl_generics: Vec::new(),
+            loop_else_stack: Vec::new(),
+            loop_else_counter: 0,
+            deferred: Vec::new(),
+            plain_block_depth: 0,
+            loop_depth: 0,
+            slice_clone_bindings: std::collections::HashSet::new(),
+            in_iterator_impl: false,
+            in_if_else_branch: false,
+
+            in_ext_trait: false,
+            // 当前是否在 Result 基 try 块闭包体内：raises 函数调用需 `?` 解包
+            in_result_try: false,
+            // BUG-295：生成器 try 体闭包内的终止标志栈 & 唯一命名计数器
+            gen_try_flag_stack: Vec::new(),
+            gen_try_flag_counter: Rc::new(Cell::new(0)),
+            current_ext_trait: None,
+            fn_param_info: HashMap::new(),
+            fn_ref_params: HashMap::new(),
+            auto_mut_locals: std::collections::HashSet::new(),
+            mutated_consts: std::collections::HashSet::new(),
+            enum_variant_fields: HashMap::new(),
+            enum_variant_named_fields: HashMap::new(),
+            current_variadic_params: std::collections::HashSet::new(),
+            fn_variadic: HashMap::new(),
+            fn_kwargs: HashMap::new(),
+            fn_param_types: HashMap::new(),
+            fn_param_names: HashMap::new(),
+            fn_cmp: HashMap::new(),
+            fn_use_count: HashMap::new(),
+            cur_fn_name: String::new(),
+            typepack_param: HashMap::new(),
+            typepack_sigs: HashMap::new(),
+            self_fns: HashMap::new(),
+            checker_blocks: std::collections::HashSet::new(),
+            raises_fn_names: std::collections::HashSet::new(),
+            checker_captures: std::collections::HashMap::new(),
+            current_checker_captures: std::collections::HashSet::new(),
+            ref_mut_bindings: std::collections::HashSet::new(),
+            overload_sigs: HashMap::new(),
+            overload_variadic: HashMap::new(),
+            overload_explicit: HashMap::new(),
+            top_level_static_names: std::collections::HashSet::new(),
+            param_renames: HashMap::new(),
+            cur_fn_is_parallel: false,
+            init_fns: Vec::new(),
+            known_types: std::collections::HashSet::new(),
+            trait_names: std::collections::HashSet::new(),
+            custom_iterator_is_protocol: true,
+            borrow_self: false,
+            struct_fields_info: std::collections::HashMap::new(),
+            struct_field_defaults: std::collections::HashMap::new(),
+        dict_key_generics: std::collections::HashSet::new(),
+        current_trait_extends_iter: false,
+        current_trait_assoc_types: Vec::new(),
+            fstr_var_types: std::collections::HashMap::new(),
+            fstr_self_type: None,
+            struct_phantom_generics: std::collections::HashMap::new(),
+            struct_method_names_map: std::collections::HashMap::new(),
+            struct_init_params_map: std::collections::HashMap::new(),
+            struct_has_new: std::collections::HashSet::new(),
+            struct_new_params_map: std::collections::HashMap::new(),
+            in_new_body: false,
+            case_structs: std::collections::HashSet::new(),
+            struct_has_unapply: std::collections::HashSet::new(),
+            struct_has_unapply_seq: std::collections::HashSet::new(),
+            lazy_static_names: std::collections::HashSet::new(),
+            lazy_bindings: std::collections::HashMap::new(),
+            moddec_std_imports: std::collections::BTreeMap::new(),
+            moddec_atomic_types: std::collections::BTreeSet::new(),
+            imported_modules: std::collections::HashSet::new(),
+            current_fn_is_async: false,
+            async_fn_names: std::collections::HashSet::new(),
+            current_fn_is_size_hint: false,
+            current_fn_ret_is_ref: false,
+            duck_field_members: std::collections::HashMap::new(),
+            duck_defs: std::collections::HashMap::new(),
+            module_uses_ext: false,
+            module_uses_dict: false,
+            global_vars: std::collections::HashMap::new(),
+            downgraded_vars: std::collections::HashSet::new(),
+            unbound_fstring_vars: std::collections::HashSet::new(),
+            fn_returns: std::collections::HashMap::new(),
+            unknown_extern_fns: std::collections::HashMap::new(),
+            bridge_registry: None,
+            embed_modules: std::collections::HashSet::new(),
+            embed_targets: Vec::new(),
+            embed_stem: None,
+            embed_short_bases: std::collections::HashMap::new(),
+            // 方向 E：`[]` + 纯 push 循环 → Vec::with_capacity 预分配提示（Rust 文本）
+            vec_cap_hint: std::cell::RefCell::new(None),
+            owned_locals: std::cell::RefCell::new(std::collections::HashMap::new()),
+            buf: String::new(),
+        }
+    }
+
+    // ── 入口 ──
+
+    /// 注入 BridgeRegistry：使 #[extern(lang)] 在 codegen 时自动登记（I3）
+    pub fn set_bridge_registry(&mut self, registry: crate::bridge::core::BridgeRegistry) {
+        self.bridge_registry = Some(registry);
+    }
+
+    /// I3/I4：生成 Rust 代码的同时注入 BridgeRegistry，自动登记
+    /// #[extern]/#[embed]/@export 符号并联动台账。返回 (rust_code, registry)。
+    ///
+    /// 不改变生成产物本身（registry 仅登记，不影响 emit 输出），
+    /// 调用方可对 registry 做台账落盘与审计（G5）。
+    /// Cli 档 embed 产物：供 CLI 侧落盘与建库步骤取用（codegen 自身不做 IO）。
+    pub fn embed_targets(&self) -> &[crate::embed::EmbedTarget] {
+        &self.embed_targets
+    }
+
+    /// CLI 注入源文件路径 ⇒ Cli 档产物按文件主干命名（`calc.lz` → `python_calc`）。
+    /// Source 档（tnr/rust）的既有命名规则一字不动 —— 它们仍用 IrModule 的 file_path/name。
+    pub fn set_embed_stem(&mut self, path: &str) {
+        self.embed_stem = Some(path.to_string());
+    }
+
+    /// LZ 侧能看见的 embed 导出名 → 该名字的返回类型（None = 无可用类型信息）。
+    ///
+    /// 两类名字：**产物全名**（`<artifact>_<method>`，命名权威在 `embed::dedup`）与
+    /// **短名**（`<语言>_<主干>_<method>`，T0r32 由 `__lz_embed` 里的别名提供）。
+    /// 两处消费：① 从 unknown_extern 兜底表里摘掉（否则桩会遮住垫片/别名）；
+    /// ② 登记 fn_returns，让 print 对 str 返回值选 Display 而不是 Debug。
+    ///
+    /// 短名一律登记（哪怕因歧义/撞名最终没发别名）：不发别名时应当**编译期 E0425**
+    /// 报错，而不是退回一个会静默返回 i64::MAX 的兜底桩。
+    fn embed_export_names(&self) -> Vec<(String, Option<IrType>)> {
+        let mut out: Vec<(String, Option<IrType>)> = Vec::new();
+        for t in &self.embed_targets {
+            let short_base = self.embed_short_bases.get(&t.artifact);
+            for m in t.callable_methods() {
+                let ty = match m.ret.as_deref() {
+                    Some("int") => Some(IrType::Int),
+                    Some("float") => Some(IrType::F64),
+                    Some("bool") => Some(IrType::Bool),
+                    Some("str") => Some(IrType::Str),
+                    Some("list<int>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Int],
+                    }),
+                    Some("list<float>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::F64],
+                    }),
+                    Some("list<str>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Str],
+                    }),
+                    Some("dict<str,int>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::Int],
+                    }),
+                    Some("dict<str,float>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::F64],
+                    }),
+                    Some("dict<str,str>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::Str],
+                    }),
+                    Some("dict<int,int>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Int, IrType::Int],
+                    }),
+                    Some("tuple<int,int>") => Some(IrType::Tuple(vec![IrType::Int, IrType::Int])),
+                    Some("tuple<int,float>") => Some(IrType::Tuple(vec![IrType::Int, IrType::F64])),
+                    Some("tuple<int,str>") => Some(IrType::Tuple(vec![IrType::Int, IrType::Str])),
+                    Some("tuple<int,bool>") => Some(IrType::Tuple(vec![IrType::Int, IrType::Bool])),
+                    Some("tuple<float,int>") => Some(IrType::Tuple(vec![IrType::F64, IrType::Int])),
+                    Some("tuple<float,float>") => Some(IrType::Tuple(vec![IrType::F64, IrType::F64])),
+                    Some("tuple<float,str>") => Some(IrType::Tuple(vec![IrType::F64, IrType::Str])),
+                    Some("tuple<float,bool>") => Some(IrType::Tuple(vec![IrType::F64, IrType::Bool])),
+                    Some("tuple<str,int>") => Some(IrType::Tuple(vec![IrType::Str, IrType::Int])),
+                    Some("tuple<str,float>") => Some(IrType::Tuple(vec![IrType::Str, IrType::F64])),
+                    Some("tuple<str,str>") => Some(IrType::Tuple(vec![IrType::Str, IrType::Str])),
+                    Some("tuple<str,bool>") => Some(IrType::Tuple(vec![IrType::Str, IrType::Bool])),
+                    Some("tuple<bool,int>") => Some(IrType::Tuple(vec![IrType::Bool, IrType::Int])),
+                    Some("tuple<bool,float>") => Some(IrType::Tuple(vec![IrType::Bool, IrType::F64])),
+                    Some("tuple<bool,str>") => Some(IrType::Tuple(vec![IrType::Bool, IrType::Str])),
+                    Some("tuple<bool,bool>") => Some(IrType::Tuple(vec![IrType::Bool, IrType::Bool])),
+                    Some("tuple<int,int,int>") => Some(IrType::Tuple(vec![IrType::Int, IrType::Int, IrType::Int])),
+                    // T0r60：嵌套复合类型 → 递归映射
+                    Some("list<list<int>>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Named { path: "Vec".to_string(), args: vec![IrType::Int] }],
+                    }),
+                    Some("list<dict<str,int>>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Named {
+                            path: "std::collections::HashMap".to_string(),
+                            args: vec![IrType::Str, IrType::Int],
+                        }],
+                    }),
+                    Some("dict<str,list<int>>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::Named { path: "Vec".to_string(), args: vec![IrType::Int] }],
+                    }),
+                    Some("dict<str,tuple<int,int>>") => Some(IrType::Named {
+                        path: "std::collections::HashMap".to_string(),
+                        args: vec![IrType::Str, IrType::Tuple(vec![IrType::Int, IrType::Int])],
+                    }),
+                    Some("list<tuple<int,int>>") => Some(IrType::Named {
+                        path: "Vec".to_string(),
+                        args: vec![IrType::Tuple(vec![IrType::Int, IrType::Int])],
+                    }),
+                    _ => None,
+                };
+                out.push((format!("{}_{}", t.artifact, m.name), ty.clone()));
+                if let Some(base) = short_base {
+                    out.push((format!("{}_{}", base, m.name), ty));
+                }
+            }
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                out.push((format!("{}_run", t.artifact), Some(IrType::Str)));
+                if let Some(base) = short_base {
+                    out.push((format!("{}_run", base), Some(IrType::Str)));
+                }
+            }
+        }
+        out
+    }
+
+    /// `pub mod __lz_embed { … }` 末尾追加的**短名别名**行（T0r32）。
+    ///
+    /// 语义：`python_a_add` 是 `python_a__src_4d744cd7_add` 的别名，两者指同一个
+    /// 包装函数（同一份产物、同一条 argv 协议）。**不产生第二个产物、不改产物名**，
+    /// 只是让 LZ 作者的「模块 + 方法」写法能指到 dedup 之后的真包装。
+    ///
+    /// 行为边界（宁可编译期报错，不静默挑一个）：
+    ///   · 短名主干在本次编译里出现多次（两个 `a.lz` 分处不同目录）⇒ 有歧义，不发别名；
+    ///   · 短名与模块内已导出的全名撞车 ⇒ 不发别名（全名优先，别把人家的名字盖掉）；
+    ///   · 短名已被用户顶层定义/类型名占用 ⇒ 不发别名（用户自有名字优先）。
+    fn embed_short_alias_text(&self) -> String {
+        if self.embed_short_bases.is_empty() {
+            return String::new();
+        }
+        // 模块内已存在的导出名：别名不许与它们同名（E0255 the name is defined multiple times）
+        let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut short_uses: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for t in &self.embed_targets {
+            for m in t.callable_methods() {
+                taken.insert(format!("{}_{}", t.artifact, m.name));
+            }
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                taken.insert(format!("{}_run", t.artifact));
+            }
+            if let Some(base) = self.embed_short_bases.get(&t.artifact) {
+                *short_uses.entry(base.as_str()).or_insert(0) += 1;
+            }
+        }
+
+        let mut out = String::new();
+        for t in &self.embed_targets {
+            let Some(base) = self.embed_short_bases.get(&t.artifact) else {
+                continue;
+            };
+            if short_uses.get(base.as_str()).copied().unwrap_or(0) != 1 {
+                continue; // 短名有歧义：不发别名（调用点会 E0425，而不是静默错值）
+            }
+            for m in t.callable_methods() {
+                let full = format!("{}_{}", t.artifact, m.name);
+                let short = format!("{}_{}", base, m.name);
+                if taken.contains(&short)
+                    || self.top_level_fns.contains(&short)
+                    || self.known_types.contains(&short)
+                {
+                    continue; // 用户/全名优先：绝不把已有名字盖掉
+                }
+                out.push_str(&format!("pub use self::{} as {};\n", full, short));
+            }
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                let full = format!("{}_run", t.artifact);
+                let short = format!("{}_run", base);
+                if !taken.contains(&short)
+                    && !self.top_level_fns.contains(&short)
+                    && !self.known_types.contains(&short)
+                {
+                    out.push_str(&format!("pub use self::{} as {};\n", full, short));
+                }
+            }
+        }
+        out
+    }
+
+    pub fn generate_with_bridge(        &mut self,
+        module: &IrModule,
+    ) -> (String, crate::bridge::core::BridgeRegistry) {
+        let mut reg = crate::bridge::core::BridgeRegistry::new();
+        // P3：注册默认桥接——TnrBridge 处理 tnr::/tnr_lib:: 路由
+        reg.register(Box::new(crate::bridge::tnr::TnrBridge::new()));
+        self.bridge_registry = Some(reg);
+        let code = self.generate(module);
+        let reg = self.bridge_registry.take().unwrap();
+        (code, reg)
+    }
+
+    /// 将整个 IrModule 生成为 Rust 源代码
+    pub fn generate(&mut self, module: &IrModule) -> String {
+        self.buf.clear();
+        self.indent = 0;
+
+        // 预扫描：收集 enum variant → enum name 映射 + 函数参数信息 + impl-only 类型名
+        // 注意：不能插入 emitted_types（会阻断 gen_enum_def / gen_struct_def 的去重逻辑）
+        self.enum_variants.clear();
+        self.enum_variant_order.clear();
+        self.fn_param_info.clear();
+        self.fn_returns.clear();
+        self.emitted_types.clear();
+        self.impl_types.clear();
+        self.mutated_consts.clear();
+        self.enum_variant_fields.clear();
+        self.overload_sigs.clear();
+        self.raises_fn_names.clear();
+        // BUG-348：预收集 async 函数名，供 spawn 参数类型判断
+        self.async_fn_names.clear();
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if f.is_async {
+                    self.async_fn_names.insert(f.name.clone());
+                }
+            }
+        }
+
+        // 预收集所有用户自定义类型名（struct/enum），供函数体/表达式中判断
+        self.known_types.clear();
+        for item in &module.items {
+            match item {
+                Item::StructDef(s) => {
+                    self.known_types.insert(s.name.clone());
+                }
+                Item::EnumDef(e) => {
+                    self.known_types.insert(e.name.clone());
+                }
+                _ => {}
+            }
+        }
+
+        // 预扫描：收集被用作 Dict/HashMap 键的泛型参数（Dict→BTreeMap 要求 K: Ord），
+        // 由 gen_generics / gen_fn_generics 统一注入 Ord 约束（详见 dict_key_generics 字段注释）
+        self.dict_key_generics = crate::ir::codegen::scan::collect_dict_key_generics(module);
+
+        // 预扫描修饰符装饰器目标类型所需的 std 导入项（T04；仅实际使用时登记）
+        self.collect_moddec_imports(module);
+
+        // P1：收集 embed 生成的模块名，供 gen_use_stmt 自动路由
+        self.embed_modules.clear();
+        self.embed_targets.clear();
+        self.embed_short_bases.clear();
+        {
+            let mut ec = crate::ir::embed_collector::EmbedCollector::new();
+            ec.collect(module);
+            let source_name = module
+                .file_path
+                .as_deref()
+                .unwrap_or(&module.name);
+            for name in ec.module_names(source_name) {
+                self.embed_modules.insert(name);
+            }
+            // 统一抽象（src/embed）：Source 档之外的一律按 Cli 档解析 —— 同语言多块
+            // 与 EmbedCollector 同口径（空行拼接），逐语言出一个产物。
+            // 产物主干优先用 CLI 注入的源文件路径；Source 档的 embed_modules 命名**不受影响**。
+            let cli_source_name = self
+                .embed_stem
+                .clone()
+                .unwrap_or_else(|| source_name.to_string());
+            // T0r29：分组键是 **(模块, lang)**，不是只有 lang。
+            //   单文件路径：块 origin 为 None ⇒ 模块维退化成 CLI 注入的 embed_stem，
+            //               分组结果与旧行为逐字相同（`embed_stem_parity` 钉着）。
+            //   `--project`：`ProjectCompiler::merge_modules` 已给每个块打上它所属的
+            //               源文件路径 ⇒ `a.lz` 与 `b.lz` 各出一份独立产物，不再被拼成
+            //               一份入口主干命名的 `python_<入口>`。
+            // 命名规则不在这里另写一套：每个分组仍走 `embed::resolve`
+            //    （产物名权威 = `dedup::artifact_name`），目录仍走 `artifact::dir_rel`。
+            let mut by_module: Vec<(String, String, String)> = Vec::new(); // (模块, lang, 累计源码)
+            for item in &module.items {
+                if let Item::EmbedBlock {
+                    lang,
+                    src,
+                    origin,
+                    ..
+                } = item
+                {
+                    if crate::embed::is_source_lang(lang) {
+                        continue;
+                    }
+                    let module_name = origin.as_deref().unwrap_or(&cli_source_name);
+                    match by_module
+                        .iter()
+                        .position(|(m, l, _)| m == module_name && l == lang)
+                    {
+                        Some(pos) => {
+                            by_module[pos].2.push_str("\n\n");
+                            by_module[pos].2.push_str(src);
+                        }
+                        None => by_module.push((
+                            module_name.to_string(),
+                            lang.clone(),
+                            src.clone(),
+                        )),
+                    }
+                }
+            }
+            for (module_name, lang, acc) in &by_module {
+                if let Some(mut t) = crate::embed::resolve(lang, module_name, acc) {
+                    let stem = crate::embed::base_stem(module_name);
+                    t.dir_rel = crate::embed::artifact::dir_rel(&stem, &t.artifact);
+                    // T0r32：登记短名主干（= 产物全名去掉 dedup 后缀的那一段）。
+                    // 产物根下的模块 short == artifact（`python_calc`），无需别名也不登记。
+                    let short_base = format!("{}_{}", t.lang, stem);
+                    if short_base != t.artifact
+                        && crate::embed::dedup::artifact_is_identifier_safe(&short_base)
+                    {
+                        self.embed_short_bases
+                            .insert(t.artifact.clone(), short_base);
+                    }
+                    self.embed_targets.push(t);
+                }
+            }
+        }
+
+        // 预扫描 raises 函数名（checker 调用点解包其 Result 返回值）
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if f.raises.is_some() {
+                    self.raises_fn_names.insert(f.name.clone());
+                }
+                // 登记顶层 def 名称（IR-003：顶层函数作一等值需 Arc::new(f)）。
+                // 前置收集保证任意源码顺序下函数体引用靠后定义的 def 也能识别
+                // （combo-pipe-lambda 的 `double if flag else inc`：double/inc 作值需装箱）。
+                self.top_level_fns.insert(f.name.clone());
+                // 收集函数返回类型（用于 is_str_producing 识别字符串返回函数调用）
+                if !matches!(f.ret_ty, IrType::Unit) {
+                    self.fn_returns.insert(f.name.clone(), f.ret_ty.clone());
+                }
+            }
+        }
+
+        // 预扫描 f-string 未绑定插值变量（lit_probe 等探测用例）
+        self.unbound_fstring_vars = collect_unbound_fstring_vars(module);
+
+        // 预扫描未定义外部函数（p16_lzi 等跨模块探测用例）
+        self.unknown_extern_fns = collect_unknown_extern_fns(module);
+        // Cli 档 embed 的调用面由文件末尾的 __lz_embed 垫片提供，LZ 侧看不见它的名字 ⇒
+        // 上面的扫描会把 `python_calc_add` 当成"未知外部函数"再兜底生成一个 `-> i64 { i64::MAX }`
+        // 同名桩（E0255 重定义 + 静默返回垃圾值）。这里把这些名字从兜底表里摘掉，
+        // 并把返回类型登记进 fn_returns，供 print 正确选 Display/Debug。
+        //
+        // T0r32：**短名同样必须摘**。dedup 之后包装函数全名是 `python_a__src_4d744cd7_add`，
+        // 作者写的是短名 `python_a_add` —— 只摘全名等于没修：短名仍留在兜底表里，而桩是
+        // crate 根的本地定义，会**遮住** `use __lz_embed::*` 带来的同名别名（Rust 里本地
+        // 定义优先于 glob 导入）⇒ 又一次静默 i64::MAX。别名由 `embed_short_alias_text`
+        // 在 `__lz_embed` 内发射，两处必须是同一份名单（同一个 helper 供名）。
+        for (name, ty) in self.embed_export_names() {
+            self.unknown_extern_fns.remove(name.as_str());
+            if let Some(ty) = ty {
+                self.fn_returns.insert(name, ty);
+            }
+        }
+
+        // 收集所有模块级 const 名称
+        let const_names: std::collections::HashSet<String> = module
+            .items
+            .iter()
+            .filter_map(|item| {
+                if let Item::Const(c) = item {
+                    Some(c.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // 预登记 LazyLock 静态集合名（集合/Option<集合>/Tuple/Str 非字面量 const）。
+        // 必须在函数体生成前登记：否则 main 内 config.and_then(...) 时
+        // lazy_static_names 尚无 config → 生成 config 而非 (*config).clone()（E0507）
+        // 与 gen_const_def 的 needs_lazy 条件对齐：Str 非纯字面量值生成
+        // .to_string() → LazyLock<String>，引用处同样需 (*name).clone() 解引用
+        // （顶层构建块 x =: 返回 String 的场景，E0369）
+        self.lazy_static_names.clear();
+        for item in &module.items {
+            if let Item::Const(c) = item {
+                let ty_is_collection = match &c.ty {
+                    IrType::Named { path, .. } => {
+                        ["Vec", "List", "HashMap", "HashSet", "Dict", "Set"]
+                            .contains(&path.as_str())
+                    }
+                    IrType::Option(inner) => matches!(
+                        inner.as_ref(),
+                        IrType::Named { path, .. }
+                            if ["Vec", "List", "HashMap", "HashSet", "Dict", "Set"]
+                                .contains(&path.as_str())
+                    ),
+                    IrType::Tuple(_) => true,
+                    IrType::Str => !matches!(&c.value.kind, ExprKind::Lit(LitKind::Str(_))),
+                    _ => false,
+                };
+                // `@lazy_static` / `@once` 顶层静态：同样经 LazyLock/OnceLock 解引用访问
+                if ty_is_collection || c.mods.lazy {
+                    self.lazy_static_names.insert(c.name.clone());
+                }
+            }
+        }
+
+        // 收集所有模块级顶层名称（const + 函数名）以避免 E0530 参数冲突
+        self.top_level_static_names.clear();
+        for item in &module.items {
+            match item {
+                Item::Const(c) => {
+                    self.top_level_static_names.insert(c.name.clone());
+                }
+                Item::FnDef(f) => {
+                    self.top_level_static_names.insert(f.name.clone());
+                }
+                Item::StructDef(s) => {
+                    self.top_level_static_names.insert(s.name.clone());
+                }
+                Item::EnumDef(e) => {
+                    self.top_level_static_names.insert(e.name.clone());
+                }
+                Item::TraitDef(t) => {
+                    self.top_level_static_names.insert(t.name.clone());
+                    self.trait_names.insert(t.name.clone());
+                    if t.name == "Iterator" {
+                        self.custom_iterator_is_protocol = t
+                            .methods
+                            .iter()
+                            .any(|m| m.name == "__next__" || m.name == "next");
+                    }
+                }
+                Item::Impl(i) => {
+                    // 外部类型扩展 trait（impl str → StrExt 等）：预登记到 trait_names，
+                    // 供 StrExt 强制调用判断（string.lz `self.slice_from(pos).find(...)`
+                    // 需 `<str as StrExt>::find`；prelude_demo 无 StrExt 则走普通方法）
+                    if let IrType::Named { path, .. } = &i.for_type {
+                        let ext = match path.as_str() {
+                            "Dict" | "HashMap" => Some("DictExt".to_string()),
+                            "Set" | "HashSet" => Some("SetExt".to_string()),
+                            "List" | "Vec" => Some("ListExt".to_string()),
+                            "str" | "String" => Some("StrExt".to_string()),
+                            _ => None,
+                        };
+                        if let Some(ext_name) = ext {
+                            self.trait_names.insert(ext_name);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 分析跨函数全局可变变量（如 count，在 next() 中使用但 main() 中声明）
+        self.analyze_global_vars(module, &const_names);
+        // 索引 duck 定义（用于泛型函数体内 duck 字段访问 → trait accessor 转换）
+        self.duck_defs.clear();
+        let mut duck_defs_idx: HashMap<&str, &DuckDef> = HashMap::new();
+        for item in &module.items {
+            if let Item::DuckDef(d) = item {
+                duck_defs_idx.insert(d.name.as_str(), d);
+                self.duck_defs.insert(d.name.clone(), d.clone());
+            }
+        }
+        // 生成 static mut 全局变量声明
+        if !self.global_vars.is_empty() {
+            let gv: Vec<(String, String, String)> = self
+                .global_vars
+                .iter()
+                .map(|(n, t)| (n.clone(), self.rust_type(t), self.const_default_value(t)))
+                .collect();
+            for (name, rust_ty, init) in &gv {
+                self.emit_line(&format!("static mut {}: {} = {};", name, rust_ty, init));
+            }
+            self.buf.push('\n');
+        }
+
+        // 提前生成所有类型别名（必须在使用前声明）
+        for item in &module.items {
+            if let Item::TypeAlias(ta) = item {
+                self.gen_type_alias_def(ta);
+            }
+        }
+        self.buf.push('\n');
+
+        for item in &module.items {
+            if let Item::EnumDef(e) = item {
+                // BUG-344：按声明顺序收集变体名（HashMap 不保序，_variant 魔法索引依赖此序）
+                let mut ordered: Vec<String> = Vec::new();
+                for variant in &e.variants {
+                    ordered.push(variant.name.clone());
+                    self.enum_variants
+                        .insert(variant.name.clone(), e.name.clone());
+                    // 收集变体字段类型（用于构造时 Box::new() 包装判断）
+                    let field_types: Vec<IrType> =
+                        variant.fields.iter().map(|f| f.ty.clone()).collect();
+                    self.enum_variant_fields
+                        .insert((e.name.clone(), variant.name.clone()), field_types.clone());
+                    // 变体字段类型（dotted + 裸名双键，与 builder.rs:156-158 一致）：
+                    // MethodCall 构造器分支按 "Enum.Variant" 查表设置参数期望类型，
+                    // 不填充则查表恒 None，String 索引期望类型推断失效（lib_json E0308）
+                    self.enum_variant_fields
+                        .insert((e.name.clone(), variant.name.clone()), field_types.clone());
+
+                    // 命名字段列表（全命名 = 结构体变体）
+                    let named_fields: Vec<String> = variant
+                        .fields
+                        .iter()
+                        .filter(|f| !f.name.is_empty())
+                        .map(|f| f.name.clone())
+                        .collect();
+                    let named =
+                        !variant.fields.is_empty() && named_fields.len() == variant.fields.len();
+                    self.enum_variant_named_fields.insert(
+                        (e.name.clone(), variant.name.clone()),
+                        if named { named_fields } else { Vec::new() },
+                    );
+                }
+                self.enum_variant_order.insert(e.name.clone(), ordered);
+            }
+            if let Item::StructDef(s) = item {
+                let mset: std::collections::HashSet<String> =
+                    s.methods.iter().map(|m| m.name.clone()).collect();
+                let mut mset = mset;
+                // __init__ 也被特殊处理，需加入 map 以便构造后调用点检测
+                if s.has_init {
+                    mset.insert("__init__".to_string());
+                }
+                self.struct_method_names_map.insert(s.name.clone(), mset);
+                // 记录 __init__ 参数表，用于判断是否可自动注入（仅 self 参数时）
+                if s.has_init {
+                    self.struct_init_params_map
+                        .insert(s.name.clone(), s.init_params.clone());
+                }
+                // 记录 __new__ 参数表，用于 kwarg 构造路由到 __new__
+                if s.has_new {
+                    self.struct_new_params_map
+                        .insert(s.name.clone(), s.new_params.clone());
+                }
+                // struct 内定义方法的 ref/mut ref 参数标记登记 fn_ref_params
+                // （vector.lz `__add__(ref self, ref other)` 的 other 调用点需自动 &，
+                //   否则 (b).clone() 传 owned 报 E0308 expected &VectorInt）
+                // str 参数不登记为 ref：参数类型映射已改为 String（按值），
+                // 调用点由 9556-9648 行的值语义逻辑自动 .clone()，避免 &String vs String E0308
+                for m in &s.methods {
+                    let has_ref_or_str = m.params.iter().any(|p| p.is_ref);
+                    if has_ref_or_str {
+                        self.fn_ref_params.insert(
+                            m.name.clone(),
+                            m.params.iter()
+                                .map(|p| {
+                                    let is_ref = p.is_ref;
+                                    (is_ref, p.is_mut)
+                                })
+                                .collect(),
+                        );
+                    }
+                }
+            }
+            // impl 块方法也并入 struct 方法名集合（如 HttpResult 的 __is_ok__/__unwrap__
+            // 定义在 `impl HttpResult<T>` 中，r? 自定义传播类型判定需要）
+            if let Item::Impl(i) = item {
+                if let IrType::Named { path, .. } = &i.for_type {
+                    let entry = self
+                        .struct_method_names_map
+                        .entry(path.clone())
+                        .or_default();
+                    for m in &i.methods {
+                        entry.insert(m.name.clone());
+                        // 若 __init__ 在 impl 块中，也记录其参数表以便注入点判定
+                        if m.name == "__init__" {
+                            let params: Vec<(String, IrType)> = m
+                                .params
+                                .iter()
+                                .map(|p| (p.name.clone(), p.ty.clone()))
+                                .collect();
+                            self.struct_init_params_map.insert(path.clone(), params);
+                        }
+                        // 若 __new__ 或 new 在 impl 块中，记录其参数表以便 kwarg 构造路由
+                        if m.name == "__new__" || m.name == "new" {
+                            let params: Vec<(String, IrType)> = m
+                                .params
+                                .iter()
+                                .filter(|p| p.name != "self" && p.name != "self_")
+                                .map(|p| (p.name.clone(), p.ty.clone()))
+                                .collect();
+                            
+                            self.struct_new_params_map.insert(path.clone(), params);
+                        }
+                        // 收集 impl 方法的 ref/mut ref 参数标记（DictExt::get 的
+                        // key: ref K 调用点自动 &，否则 d.get("a") 报 E0308
+                        // expected &K, found String）
+                        // str 参数不登记为 ref：参数类型映射已改为 String（按值），
+                        // 调用点由值语义逻辑自动 .clone()，避免 &String vs String E0308
+                        let has_ref_or_str = m.params.iter().any(|p| p.is_ref);
+                        if has_ref_or_str {
+                            self.fn_ref_params.insert(
+                                m.name.clone(),
+                                m.params.iter()
+                                    .map(|p| {
+                                        let is_ref = p.is_ref;
+                                        (is_ref, p.is_mut)
+                                    })
+                                    .collect(),
+                            );
+                        }
+                    }
+                }
+            }
+            if let Item::FnDef(f) = item {
+                let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
+                if default_count > 0 {
+                    self.fn_param_info
+                        .insert(f.name.clone(), (f.params.len(), default_count));
+                }
+                // 收集 ref/mut ref 参数标记（函数名 → 每参数 (is_ref, is_mut)）
+                // str 参数不登记为 ref：参数类型映射已改为 String（按值），
+                // 调用点由值语义逻辑自动 .clone()，避免 &String vs String E0308
+                if f.params.iter().any(|p| p.is_ref) {
+                    self.fn_ref_params.insert(
+                        f.name.clone(),
+                        f.params.iter()
+                            .map(|p| {
+                                let is_ref = p.is_ref;
+                                (is_ref, p.is_mut)
+                            })
+                            .collect(),
+                    );
+                }
+                // 收集所有参数类型（用于隐式 variadic 检测）
+                self.fn_param_types.insert(
+                    f.name.clone(),
+                    f.params.iter().map(|p| p.ty.clone()).collect(),
+                );
+                // 收集所有参数名（用于命名实参 k=v 按声明顺序重排，BUG-24）
+                self.fn_param_names.insert(
+                    f.name.clone(),
+                    f.params.iter().map(|p| p.name.clone()).collect(),
+                );
+                // 登记 type-pack 变参（..: Tuple<Ts...>）：args 参数类型为
+                // Tuple([Generic("Ts")])（builder 标记）→ 记录 pack 泛型名，
+                // 供调用点具体化为异质元组（03d §2.8 方案 B）
+                if let Some((_, p)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name == "args")
+                {
+                    if let IrType::Tuple(items) = &p.ty {
+                        if items.len() == 1 {
+                            if let IrType::Generic(g) = &items[0] {
+                                self.typepack_param.insert(f.name.clone(), g.clone());
+                            }
+                        }
+                    }
+                }
+                // 收集重载签名：同名非方法函数出现多次 → 记录各签名（用于函数重载 mangling）
+                if !f.params.iter().any(|p| p.name == "self") {
+                    let sig: Vec<IrType> = f.params.iter().map(|p| p.ty.clone()).collect();
+                    self.overload_sigs
+                        .entry(f.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(sig);
+                    // 03d §2.7：`..` 变长签名作为兜底候选，记录 variadic 标记与显式参数
+                    let is_var = f.params.iter().any(|p| p.variadic);
+                    self.overload_variadic
+                        .entry(f.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(is_var);
+                    let explicit: Vec<IrType> = f
+                        .params
+                        .iter()
+                        .filter(|p| !p.variadic)
+                        .map(|p| p.ty.clone())
+                        .collect();
+                    self.overload_explicit
+                        .entry(f.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(explicit);
+                }
+                // @init：模块初始化函数登记（main 开头按声明顺序注入调用）
+                if f
+                    .intrinsics
+                    .iter()
+                    .any(|i| matches!(i.kind, IntrinsicKind::Init))
+                {
+                    self.init_fns.push(f.name.clone());
+                }
+                // 收集 variadic 参数信息（函数名 → variadic 参数起始索引）
+                // 注意：kwargs 注入参数单独记录在 fn_kwargs，不参与位置变参打包
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name != "kwargs")
+                {
+                    self.fn_variadic.insert(f.name.clone(), idx);
+                }
+                // 收集 kwargs 注入参数（函数名 → kwargs 参数起始索引）
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name == "kwargs")
+                {
+                    self.fn_kwargs.insert(f.name.clone(), idx);
+                }
+                // 方法定义语法 fn Type.method() → Type 是 impl-only 类型名
+                if let Some((ty_name, _)) = f.name.split_once('.') {
+                    self.impl_types.insert(ty_name.to_string());
+                }
+                // 扫描函数体中的 const 修改
+                if !const_names.is_empty() {
+                    scan_const_mutations(&f.body, &const_names, &mut self.mutated_consts);
+                }
+                // 检测函数参数名与模块级 static 的冲突（E0530）
+                // 冲突解决在 gen_fn_def 中通过 param_renames 处理
+            }
+            if let Item::CheckerBlock { name, .. } = item {
+                self.fn_param_types.insert(
+                    name.clone(),
+                    vec![IrType::Named {
+                        path: "__Params".into(),
+                        args: vec![],
+                    }],
+                );
+                // 登记 checker 块名称：default_checker 链调用时区分
+                // checker 块（fn NAME(ps: &mut __Params) → NAME(ps);）
+                // 与普通值函数（fn NAME(ps: __Params) -> __Params → *ps = NAME(ps.clone());）
+                self.checker_blocks.insert(name.clone());
+            }
+            if let Item::CheckerBlock { name, captured, .. } = item {
+                // 登记 checker 块捕获的外层局部变量（block 闭包语义，规范 05b-block命名块.md §三）
+                if !captured.is_empty() {
+                    self.checker_captures.insert(name.clone(), captured.clone());
+                }
+            }
+        }
+
+        // 补登记：为 mangled 重载名登记 variadic/kwargs/param_types，
+        // 使调用点按 mangled 名（如 show__Any）能查到打包信息（03d §2.7）
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                if f.params.iter().any(|p| p.name == "self") {
+                    continue;
+                }
+                let sig: Vec<IrType> = f.params.iter().map(|p| p.ty.clone()).collect();
+                let mangled = self.mangled_fn_name(f.name.clone(), &sig);
+                if mangled == f.name {
+                    continue;
+                }
+                // variadic args 起始索引（排除 kwargs）
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name != "kwargs")
+                {
+                    self.fn_variadic.insert(mangled.clone(), idx);
+                }
+                // kwargs 起始索引
+                if let Some((idx, _)) = f
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, p)| p.variadic && p.name == "kwargs")
+                {
+                    self.fn_kwargs.insert(mangled.clone(), idx);
+                }
+                // 参数类型（含注入参数，供隐式 variadic 检测）
+                self.fn_param_types.insert(mangled.clone(), sig);
+                // 默认参数信息
+                let default_count = f.params.iter().filter(|p| p.default.is_some()).count();
+                if default_count > 0 {
+                    self.fn_param_info
+                        .insert(mangled, (f.params.len(), default_count));
+                }
+            }
+        }
+
+        // 收集 type-pack 函数调用点实参类型（具体化签名数据源）。
+        // 需在全部 typepack_param 登记完成后扫描，故作为独立 pass。
+        if !self.typepack_param.is_empty() {
+            for item in &module.items {
+                match item {
+                    Item::FnDef(f) => collect_typepack_calls(
+                        &f.body,
+                        &self.typepack_param,
+                        &mut self.typepack_sigs,
+                    ),
+                    Item::CheckerBlock { body, .. } => {
+                        collect_typepack_calls(body, &self.typepack_param, &mut self.typepack_sigs)
+                    }
+                    Item::StructDef(s) => {
+                        for m in &s.methods {
+                            collect_typepack_calls(
+                                &m.body,
+                                &self.typepack_param,
+                                &mut self.typepack_sigs,
+                            );
+                        }
+                    }
+                    Item::EnumDef(e) => {
+                        for m in &e.methods {
+                            collect_typepack_calls(
+                                &m.body,
+                                &self.typepack_param,
+                                &mut self.typepack_sigs,
+                            );
+                        }
+                    }
+                    Item::Impl(im) => {
+                        for m in &im.methods {
+                            collect_typepack_calls(
+                                &m.body,
+                                &self.typepack_param,
+                                &mut self.typepack_sigs,
+                            );
+                        }
+                    }
+                    Item::Test(t) => collect_typepack_calls(
+                        &t.body,
+                        &self.typepack_param,
+                        &mut self.typepack_sigs,
+                    ),
+                    _ => {}
+                }
+            }
+        }
+
+        // 顶层 self-def 归属判定（BUG-CG-002/TY-002，E0568 修复）：
+        // 顶层 `def m(self: StructName, ...)` 的 self 注解类型是本模块
+        // struct → 登记归属表（发射为 impl 方法 + 调用点方法语法）。
+        // 独立 pass 的原因：struct 定义与 def 的源码顺序任意（struct 可在
+        // def 之后），须在 struct_method_names_map 全量收集完成后判定。
+        // 不含 self 或注解非本模块 struct（如基础类型/外部类型）→ 不归属。
+        for item in &module.items {
+            if let Item::FnDef(f) = item {
+                let Some(self_p) = f.params.first() else {
+                    continue;
+                };
+                if self_p.name != "self" {
+                    continue;
+                }
+                if let IrType::Named { path, .. } = &self_p.ty {
+                    // 剥离泛型参数（部分场景注解带 <>）后按基础名归属
+                    let base = path.split('<').next().unwrap_or(path);
+                    if self.struct_method_names_map.contains_key(base) {
+                        // 方法名并入 struct 方法集合（user_plain 判定、
+                        // magic 映射守卫等已有逻辑自动生效）
+                        self.struct_method_names_map
+                            .get_mut(base)
+                            .unwrap()
+                            .insert(f.name.clone());
+                        self.self_fns
+                            .insert(f.name.clone(), (base.to_string(), self_p.is_mut));
+                        // 若该顶层方法是 __init__，同步记录参数表以便注入点判定
+                        if f.name == "__init__" {
+                            let params: Vec<(String, IrType)> = f
+                                .params
+                                .iter()
+                                .map(|p| (p.name.clone(), p.ty.clone()))
+                                .collect();
+                            self.struct_init_params_map.insert(base.to_string(), params);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 标准 prelude
+        self.module_uses_ext = module.items.iter().any(|item| match item {
+            Item::FnDef(f) => {
+                matches!(f.ret_ty, IrType::Ext)
+                    || f.intrinsics
+                        .iter()
+                        .any(|i| matches!(i.kind, IntrinsicKind::Extern(_)))
+            }
+            _ => false,
+        });
+        self.module_uses_dict = module.items.iter().any(|item| match item {
+            Item::FnDef(f) => {
+                is_dict_ty(&f.ret_ty)
+                    || f.params.iter().any(|p| is_dict_ty(&p.ty))
+                    || block_uses_dict(&f.body)
+            }
+            Item::Const(c) => is_dict_ty(&c.ty) || expr_uses_dict(&c.value),
+            Item::StructDef(s) => s.fields.iter().any(|f| is_dict_ty(&f.ty)),
+            _ => false,
+        });
+        // 比较约束传播：预扫描全部 FnDef 体，计算各函数「参与比较运算」的泛型集合
+        // （含调用图不动点），供 gen_fn_generics 注入 PartialEq/Eq/Ord（修复泛型比较算法）
+        self.compute_cmp_constraints(module);
+        // 变量引用计数：预计算各函数体内变量引用次数，供 move 语义修复（克隆多次
+        // 使用的非 Copy 变量，避免 E0382 二次移动）
+        self.compute_use_counts(module);
+
+        self.emit_prelude();
+
+        // 每个顶层 item — 先发射 checker 块供后续函数引用
+        let mut has_main = false;
+        // 追踪已生成的 use 语句（去重 prelude imports）
+        let mut emitted_uses: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // prelude 已自动导入的模块/类型
+        let prelude_imports: std::collections::HashSet<&str> =
+            ["std::collections::HashMap", "std::collections::HashSet"]
+                .iter()
+                .cloned()
+                .collect();
+
+        // 第一遍：仅发射 CheckerBlock（必须先于引用它的函数）
+        for item in &module.items {
+            if matches!(item, Item::CheckerBlock { .. }) {
+                self.gen_item(item);
+                self.buf.push('\n');
+            }
+            // 收集用户导入模块名（import services → "services"）供命名空间降级
+            if let Item::Use(u) = item {
+                if let Some(first) = u.path.first() {
+                    self.imported_modules.insert(first.clone());
+                }
+                // import moda as m → 别名 m 同样登记为模块命名空间前缀
+                if let Some(alias) = &u.alias {
+                    self.imported_modules.insert(alias.clone());
+                }
+            }
+        }
+
+        // 第二遍：发射所有其他 item
+        for item in &module.items {
+            if matches!(item, Item::CheckerBlock { .. }) {
+                continue;
+            }
+            if let Item::FnDef(f) = item {
+                if f.name == "main" {
+                    has_main = true;
+                }
+                // 已归属 struct 的顶层 self-def 不作自由函数发射（E0568），
+                // 改由下方 gen_self_fn_impls 挂 impl 块
+                if self.self_fns.contains_key(&f.name) {
+                    continue;
+                }
+            }
+            // 跳过已在 prelude 中导入的重复 use 语句
+            if let Item::Use(u) = item {
+                let key = u.path.join("::");
+                if prelude_imports.contains(key.as_str()) {
+                    continue;
+                }
+                if u.is_from && u.items.len() == 1 {
+                    let full = format!("{}::{}", key, u.items[0]);
+                    if prelude_imports.contains(full.as_str()) {
+                        continue;
+                    }
+                }
+                if emitted_uses.contains(&key) && u.items.is_empty() {
+                    continue; // 完全重复的 use path;
+                }
+                emitted_uses.insert(key);
+            }
+            self.gen_item(item);
+            self.buf.push('\n');
+        }
+
+        // 如果没有 main 函数，自动生成 main 并顺序执行顶层语句（BUG-PR-001：
+        // 顶层表达式语句如 print(...) 需被执行，而非被静默丢弃）
+        if !has_main {
+            self.buf.push_str("pub fn main() {\n");
+            self.indent += 1;
+            let blk = Block {
+                stmts: module.top_level_stmts.clone(),
+                ty: IrType::Unit,
+                span: Span::unknown(),
+            };
+            self.gen_block_inner(&blk);
+            self.indent -= 1;
+            self.buf.push_str("}\n");
+        }
+
+        // 顶层 self-def → impl 块（BUG-CG-002/TY-002，E0568 修复）：
+        // 按 struct 分组发射 `impl StructName { fn m(...) }`，
+        // 复用 gen_fn_def 的方法生成路径（is_method 分支渲染 &self 等）
+        self.gen_self_fn_impls(module);
+
+        // duck 结构匹配自动 impl：结构满足 duck 的具体类型 → impl Duck for Type
+        self.gen_duck_auto_impls(module);
+
+        // 统一抽象的接合处：Cli 档产物 → 追加 argv 调用垫片（子进程代码的唯一生成点在
+        // bridge::cli::generate_embed_module）。Source 档（tnr/rust/rs）不进这里，
+        // 故它们的既有产物逐字不变。
+        if !self.embed_targets.is_empty() {
+            let text = crate::embed::shim::module_text(&self.embed_targets);
+            // T0r32：dedup 产物的短名别名（`python_a_add` → `python_a__src_…_add`）。
+            // 与垫片同处一个模块 ⇒ 同一份 `use __lz_embed::*;` 就能把两种写法一起带进来；
+            // 产物名/目录/MANIFEST 一字不动（命名权威仍在 `embed::dedup::artifact_name`）。
+            let aliases = self.embed_short_alias_text();
+            self.buf.push_str("pub mod __lz_embed {\n");
+            self.buf.push_str(&text);
+            self.buf.push_str(&aliases);
+            self.buf.push_str("}\n");
+            self.buf.push_str("use __lz_embed::*;\n");
+        }
+
+        std::mem::take(&mut self.buf)
+    }
+
+    /// 隐式转换桥：let x: TargetTy = src_val 中，若 TargetTy 实现了 __implicit_from__(SrcTy)，
+    /// 生成 `<TargetTy as ImplicitFrom<SrcTy>>::__implicit_from__(value)` 桥接表达式。
+    pub(crate) fn build_implicit_bridge(
+        &self,
+        target_ty: &IrType,
+        value: &crate::ir::node::Expr,
+        value_s: &str,
+    ) -> Option<String> {
+        // 提取目标路径
+        let target_path = match target_ty {
+            IrType::Named { path, .. } => path.as_str(),
+            _ => return None,
+        };
+        // 目标类型必须是已知的 struct/enum
+        if !self.is_known_type(target_path) {
+            return None;
+        }
+        // 源值类型
+        let src_ty = &value.ty;
+        // 若源类型与目标类型已匹配 → 无需桥接
+        if let IrType::Named { path: src_path, .. } = src_ty {
+            if src_path == target_path {
+                return None;
+            }
+        }
+        // 若源类型是 Any/Unit → 无法判断，保守跳过
+        if matches!(src_ty, IrType::Any | IrType::Unit) {
+            return None;
+        }
+        // 若源类型不是已知具体类型（含泛型参数），保守跳过——避免在泛型上下文（如 fn<K,V> 内）误触发
+        if !self.is_known_type(match src_ty {
+            IrType::Named { path, .. } => path.as_str(),
+            _ => "",
+        }) && !matches!(
+            src_ty,
+            IrType::Int | IrType::F64 | IrType::Bool | IrType::Str | IrType::Unit | IrType::Any
+        ) {
+            return None;
+        }
+        // 源/目标类型必须完全具体（不含泛型类型参数），否则跳过——避免
+        // 在泛型函数体内对 Option<(K,V)> 等误生成桥接（E0277）
+        if !self.is_fully_concrete(src_ty) || !self.is_fully_concrete(target_ty) {
+            return None;
+        }
+        // 检查目标类型是否实现了 __implicit_from__ 方法
+        let has_implicit_from = self
+            .struct_method_names_map
+            .get(target_path)
+            .map(|ms| ms.contains("__implicit_from__"))
+            .unwrap_or(false);
+        if has_implicit_from {
+            let src_rust_ty = self.rust_type(src_ty);
+            let target_rust_ty = self.rust_type(&IrType::Named {
+                path: target_path.to_string(),
+                args: vec![],
+            });
+            return Some(format!(
+                "<{} as lz_builtins::runtime::ImplicitFrom<{}>>::__implicit_from__({})",
+                target_rust_ty, src_rust_ty, value_s
+            ));
+        }
+        // 回退：检查源类型是否实现了 __implicit_to__ 方法（目标端转换）
+        if let IrType::Named { path: src_path, .. } = src_ty {
+            if self.is_known_type(src_path) {
+                let has_implicit_to = self
+                    .struct_method_names_map
+                    .get(src_path)
+                    .map(|ms| ms.contains("__implicit_to__"))
+                    .unwrap_or(false);
+                if has_implicit_to {
+                    let target_rust_ty = self.rust_type(&IrType::Named {
+                        path: target_path.to_string(),
+                        args: vec![],
+                    });
+                    return Some(format!(
+                        "<{} as lz_builtins::runtime::ImplicitInto<{}>>::__implicit_into__(&{})",
+                        self.rust_type(src_ty),
+                        target_rust_ty,
+                        value_s
+                    ));
+                }
+            }
+        }
+        None
+    }}
+impl Default for CodeGen {
+
+
+    fn default() -> Self {
+        Self::new()
+    }}
+
+
+/// 判断表达式是否为 _KwArg（关键字参数）
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extern_auto_registers_to_bridge_registry() {
+        // I3：注入 registry 时，#[extern(lang)] 函数在 codegen 中自动
+        // register_symbol + 台账 REGISTER（不改变生成产物本身）。
+        let mut module = IrModule::new("test".into());
+        module.items.push(Item::FnDef(FnDef {
+            name: "open_device".into(),
+            generics: vec![],
+            params: vec![Param {
+                name: "dev".into(),
+                ty: IrType::Int,
+                is_mut: false,
+                is_ref: false,
+                is_owned: false,
+                default: None,
+                variadic: false,
+                comptime: false,
+                mods: IrMods::default(),
+            }],
+            ret_ty: IrType::Unit,
+            raises: None,
+            body: Block {
+                stmts: vec![],
+                ty: IrType::Unit,
+                span: Span::unknown(),
+            },
+            intrinsics: vec![Intrinsic {
+                kind: IntrinsicKind::Extern(vec!["Rust".into()]),
+                span: Span::unknown(),
+            }],
+            is_async: false,
+            is_iterator: false,
+            is_test: false,
+            checker_param: None,
+            default_checker: None,
+            where_clause: vec![],
+            span: Span::unknown(),
+        
+            tco: None,
+        }));
+        let reg = crate::bridge::core::BridgeRegistry::new();
+        let mut cg = CodeGen::new();
+        cg.set_bridge_registry(reg);
+        let _rust = cg.generate(&module);
+        let reg = cg.bridge_registry.unwrap();
+        assert_eq!(reg.symbol_count(), 1, "extern 符号应自动登记");
+        let sym = reg.lookup_symbol("open_device").expect("符号应可查询");
+        assert_eq!(sym.lang, "Rust");
+        assert!(
+            sym.signature.contains("dev: i64"),
+            "签名应含参数类型: {}",
+            sym.signature
+        );
+        let recs = reg.ledger().records();
+        assert!(
+            recs.iter()
+                .any(|r| r.event == "REGISTER" && r.detail.contains("open_device")),
+            "台账应含 REGISTER 记录"
+        );
+    }
+
+    #[test]
+    fn test_empty_module() {
+        let module = IrModule::new("test".into());
+        let mut cg = CodeGen::new();
+        let rust = cg.generate(&module);
+        assert!(rust.contains("use std::collections"));
+    }
+
+    #[test]
+    fn test_simple_fn() {
+        let mut module = IrModule::new("test".into());
+        module.items.push(Item::FnDef(FnDef {
+            name: "hello".into(),
+            generics: vec![],
+            params: vec![],
+            ret_ty: IrType::Unit,
+            raises: None,
+            body: Block {
+                stmts: vec![],
+                ty: IrType::Unit,
+                span: Span::unknown(),
+            },
+            intrinsics: vec![],
+            is_async: false,
+            is_iterator: false,
+            is_test: false,
+            checker_param: None,
+            default_checker: None,
+            where_clause: vec![],
+            span: Span::unknown(),
+        
+            tco: None,
+        }));
+        let mut cg = CodeGen::new();
+        let rust = cg.generate(&module);
+        assert!(rust.contains("pub fn hello()"));
+    }
+
+    #[test]
+    fn test_fn_with_params() {
+        let mut module = IrModule::new("test".into());
+        module.items.push(Item::FnDef(FnDef {
+            name: "add".into(),
+            generics: vec![],
+            params: vec![
+                Param {
+                    name: "a".into(),
+                    ty: IrType::Int,
+                    is_mut: false,
+                    is_ref: false,
+                    is_owned: false,
+                    default: None,
+                    variadic: false,
+                    comptime: false,
+                    mods: IrMods::default(),
+                },
+                Param {
+                    name: "b".into(),
+                    ty: IrType::Int,
+                    is_mut: false,
+                    is_ref: false,
+                    is_owned: false,
+                    default: None,
+                    variadic: false,
+                    comptime: false,
+                    mods: IrMods::default(),
+                },
+            ],
+            ret_ty: IrType::Int,
+            raises: None,
+            body: Block {
+                stmts: vec![Stmt::ExprStmt {
+                    expr: Expr::new(
+                        ExprKind::BinOp {
+                            op: BinOpKind::Add,
+                            lhs: Box::new(Expr::new(
+                                ExprKind::Var("a".into()),
+                                IrType::Int,
+                                Span::unknown(),
+                            )),
+                            rhs: Box::new(Expr::new(
+                                ExprKind::Var("b".into()),
+                                IrType::Int,
+                                Span::unknown(),
+                            )),
+                        },
+                        IrType::Int,
+                        Span::unknown(),
+                    ),
+                }],
+                ty: IrType::Int,
+                span: Span::unknown(),
+            },
+            intrinsics: vec![],
+            is_async: false,
+            is_iterator: false,
+            is_test: false,
+            checker_param: None,
+            default_checker: None,
+            where_clause: vec![],
+            span: Span::unknown(),
+        
+            tco: None,
+        }));
+        let mut cg = CodeGen::new();
+        let rust = cg.generate(&module);
+        assert!(rust.contains("pub fn add(a: i64, b: i64) -> i64"));
+        assert!(rust.contains("a + b"));
+    }
+}

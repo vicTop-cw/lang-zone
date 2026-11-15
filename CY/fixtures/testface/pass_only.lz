@@ -1,0 +1,9 @@
+// BUG-18 判据语料：全部 test 通过（没有 main，--test 之外不该有输出）
+suite "lz_testface_pass":
+
+    test "pass_a":
+        assert 1 + 1 == 2
+
+    test "pass_b":
+        let xs = [1, 2, 3]
+        assert xs[1] == 2

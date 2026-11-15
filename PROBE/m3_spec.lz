@@ -1,0 +1,22 @@
+// M3 单态化验证探针
+// 目标：证明 comptime 形参在调用点编译期可知时，编译器生成一个特化副本，
+// 并将 comptime 值"焊死"进函数体（mangled 命名 + 常量替换，调用点去掉该实参）。
+
+const N = 7
+
+// comptime 形参 n 用于算术：特化后应把 n 直接替换成字面量
+def add_n(comptime n: int, x: int) -> int =
+    x + n
+
+// comptime 形参 limit 用于控制流条件：特化后应把 limit 烘焙进 if 条件
+def classify(comptime limit: int, x: int) -> str =
+    if x > limit:
+        "big"
+    else:
+        "small"
+
+def main() =
+    print(add_n(N, 3))      // 期望 10（N=7 被烘焙）
+    print(add_n(2, 100))    // 期望 102（字面量 2 被烘焙）
+    print(classify(5, 10))  // 期望 big（limit=5 被烘焙）
+    print(classify(5, 2))   // 期望 small（与上一行共用同一特化版本）

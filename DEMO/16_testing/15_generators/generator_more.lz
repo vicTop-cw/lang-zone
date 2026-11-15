@@ -1,0 +1,24 @@
+// LZ 生成器 — yield 扩展
+// 覆盖：在循环中 yield、局部状态累积
+
+iterator fib(n: int) -> int =
+    a = 0
+    b = 1
+    for i in 0..n:
+        yield a
+        tmp = a
+        a = b
+        b = tmp + b
+
+iterator squares(n: int) -> int =
+    for i in 1..n:
+        yield i * i
+
+def main() =
+    for v in fib(7):
+        print(v)
+
+    mut acc = 0
+    for s in squares(5):
+        acc += s
+    print(acc)

@@ -1,0 +1,50 @@
+# lz std::mem — P1 内存操作
+# 源码级映射：lz 符号 → Rust std::mem 路径
+# 注意：transmute / transmute_copy 为 unsafe 操作
+
+[module]
+tier = 1
+rust_prefix = "std::mem"
+
+# ── 自由函数 ──
+
+[functions]
+swap            = { rust = "std::mem::swap",            shim = "" }
+replace         = { rust = "std::mem::replace",         shim = "" }
+take            = { rust = "std::mem::take",            shim = "" }
+size_of         = { rust = "std::mem::size_of",         shim = "" }
+size_of_val     = { rust = "std::mem::size_of_val",     shim = "" }
+align_of        = { rust = "std::mem::align_of",        shim = "" }
+align_of_val    = { rust = "std::mem::align_of_val",    shim = "" }
+forget          = { rust = "std::mem::forget",          shim = "" }
+drop            = { rust = "std::mem::drop",            shim = "" }
+transmute       = { rust = "std::mem::transmute",       shim = "unsafe" }
+transmute_copy  = { rust = "std::mem::transmute_copy",  shim = "unsafe" }
+zeroed          = { rust = "std::mem::zeroed",          shim = "" }
+needs_drop      = { rust = "std::mem::needs_drop",      shim = "" }
+discriminant    = { rust = "std::mem::discriminant",    shim = "" }
+
+# ── 类型映射 ──
+
+[types]
+MaybeUninit  = "std::mem::MaybeUninit"
+ManuallyDrop = "std::mem::ManuallyDrop"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# MaybeUninit 方法
+uninit     = "uninit"
+zeroedInit = "zeroed"
+assumeInit = "assume_init"
+write      = "write"
+asPtr      = "as_ptr"
+asMutPtr   = "as_mut_ptr"
+# ManuallyDrop 方法
+intoInnerMem    = "into_inner"
+cloneMem        = "clone"
+
+# ── 类型别名注入 ──
+
+[aliases]

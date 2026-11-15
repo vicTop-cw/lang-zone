@@ -1,0 +1,16 @@
+// 泛型默认参数测试（03b §四）
+// 函数泛型默认参数：Rust 函数泛型不支持默认值，但 LZ 层贯通（IR 保留），调用点推断
+def make_pair<T = int>(x: T, y: T) -> (T, T) =
+    (x, y)
+
+// struct 泛型默认参数：Rust 支持 `<T = i64>`
+struct Wrapper<T = int> =
+    value: T
+
+def main() =
+    let p = make_pair(1, 2)
+    print(p)
+    let w = Wrapper(value: 42)
+    print(w.value)
+    let wf = Wrapper<f64>(value: 3.5)
+    print(wf.value)

@@ -1,0 +1,21 @@
+// ============================================================
+// 轮11: enum 进阶 — 带字段变体组合/嵌套枚举 match
+// 每项用 assert 确保正确
+// ============================================================
+
+enum Shape =
+    Point
+    Circle(radius: int)
+    Rect(w: int, h: int)
+    Triangle(base: int, height: int)
+
+enum Result2 =
+    Success(value: int)
+    Failure(msg: str)
+
+def main() =
+    // ── 带字段变体构造与字段访问 ──
+    let s1 = Shape.Point
+    let s2 = Shape.Circle(radius: 5)
+    let s3 = Shape.Rect(w: 3, h: 4)
+    let s4 = Shape.Tr

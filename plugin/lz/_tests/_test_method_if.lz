@@ -1,0 +1,42 @@
+struct Parser =
+    input: str
+    pos: int
+
+    def new(input: str)-> Parser =
+        Parser(input, 0)
+
+    def skip_whitespace(mut self: Parser) =
+        self.pos += 0
+
+    def get_pos(self: Parser)-> int =
+        self.pos
+
+    def is_eof(self: Parser)-> bool =
+        self.pos >= self.input.len()
+
+// Test 1: if with user-defined method returning bool
+def test1(mut parser: Parser)-> (Parser, int) =
+    parser.skip_whitespace()
+    if parser.is_eof():
+        (parser, 0)
+    else:
+        (parser, 1)
+
+// Test 2: if with user-defined method returning int
+def test2(mut parser: Parser)-> (Parser, int) =
+    parser.skip_whitespace()
+    if parser.get_pos() > 0:
+        (parser, 0)
+    else:
+        (parser, 1)
+
+// Test 3: if with built-in method
+def test3(mut parser: Parser)-> (Parser, int) =
+    parser.skip_whitespace()
+    if parser.input.len() > 0:
+        (parser, 0)
+    else:
+        (parser, 1)
+
+def main() =
+    print("ok")

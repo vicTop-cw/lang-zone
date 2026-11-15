@@ -1,0 +1,16 @@
+enum JsonValue =
+    Null
+    Bool(bool)
+    Number(f64)
+    String(str)
+    Array(List<JsonValue>)
+    Object(Dict<str, JsonValue>)
+
+def test1()-> JsonValue? =
+    Some(JsonValue.Bool(True))
+
+def test2()-> JsonValue? =
+    Some(JsonValue.Bool(False))
+
+def main() =
+    print("ok")

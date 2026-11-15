@@ -1,0 +1,4 @@
+# Bug-R3-3: malloc 参数应为 sizeof() 而非数值
+def test_malloc() -> int:
+    let ptr: int* = malloc(4)
+    return 0

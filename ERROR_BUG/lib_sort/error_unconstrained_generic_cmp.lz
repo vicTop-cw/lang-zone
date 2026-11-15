@@ -1,0 +1,24 @@
+// ============================================================
+// error_unconstrained_generic_cmp.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_sort | 期望检查点：泛型 T 无 Ordered 约束却使用 > 比较，应报约束错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0369
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+def bad_sort<T>(list: List<T>) -> List<T> =
+    let n = list.len()
+    mut result = list.clone()
+    for i in 0..n:
+        for j in 0..(n - i - 1):
+            if result[j] > result[j + 1]:
+                let tmp = result[j]
+                result[j] = result[j + 1]
+                result[j + 1] = tmp
+    result
+
+def main() =
+    let data = [3, 1, 4, 1, 5, 9, 2, 6]
+    let r = bad_sort(data)
+    print(r)

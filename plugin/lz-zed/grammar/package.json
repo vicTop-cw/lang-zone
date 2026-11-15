@@ -1,0 +1,15 @@
+{
+  "name": "tree-sitter-lz",
+  "version": "0.1.0",
+  "description": "Lang-Zone (lz) tree-sitter grammar — source of the Zed extension grammar",
+  "main": "grammar.js",
+  "license": "MIT",
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.0"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "build:wasm": "tree-sitter build --wasm",
+    "test": "node ../test/run-tests.js"
+  }
+}

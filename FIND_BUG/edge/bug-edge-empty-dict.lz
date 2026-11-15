@@ -1,0 +1,12 @@
+// find_bug/edge/bug-edge-empty-dict.lz
+// BUG-EC-003: 空集合字面量 {} 是 Dict 还是 Set？
+
+def test_empty_dict() =
+  d: Dict<str, int> = {}
+  print("empty Dict:", d)
+  assert len(d) == 0
+  // d2 = {}  // 可能推断为 Dict<?, ?>
+  print("empty-dict.lz done")
+
+def main() =
+  test_empty_dict()

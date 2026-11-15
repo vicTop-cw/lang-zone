@@ -1,0 +1,4 @@
+[
+  {"tool": "issue_scan", "args": {"project_dir": ".", "target": "src/ir/codegen/mod.rs"}},
+  {"tool": "issue_scan", "args": {"project_dir": ".", "target": "src/ir/builder.rs"}}
+]

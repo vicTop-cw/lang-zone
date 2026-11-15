@@ -1,0 +1,59 @@
+// _test_nested_control.lz — 阶段 10: 嵌套控制流
+
+// ── 10.1 嵌套循环 ──
+
+def test_nested_loop() =
+    i = 0
+    while i < 3:
+        j = 0
+        while j < 2:
+            print("Inner: ")
+            print(j)
+            j = j + 1
+        print("Outer: ")
+        print(i)
+        i = i + 1
+
+// ── 10.2 break 在嵌套循环中 ──
+
+def test_break_in_nested() =
+    i = 0
+    while i < 5:
+        if i == 3:
+            break
+        print("Pre-break: ")
+        print(i)
+        i = i + 1
+
+// ── 10.3 continue 在嵌套循环中 ──
+
+def test_continue_in_nested() =
+    i = 0
+    while i < 5:
+        i = i + 1
+        if i == 2:
+            continue
+        print("After continue: ")
+        print(i)
+
+// ── 10.4 嵌套 if-elif-else ──
+
+def test_nested_if() =
+    x = 10
+    y = 20
+    if x > 0:
+        if y > 10:
+            print("Nested if true")
+        else:
+            print("Nested if false")
+    else:
+        print("Outer false")
+
+// ── 主入口 ──
+def main() =
+    print("=== Nested Control Test ===")
+    test_nested_loop()
+    test_break_in_nested()
+    test_continue_in_nested()
+    test_nested_if()
+    print("=== Nested Control Test Complete ===")

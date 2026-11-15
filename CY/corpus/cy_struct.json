@@ -1,0 +1,29 @@
+{
+  "op": "cy_struct",
+  "version": "1.0",
+  "definition": {
+    "signature": "gen_struct(s: StructDef) -> String",
+    "note": "StructDef → cdef class：cdef public 字段 + __init__ + cpdef/cdef 方法。对齐 PyO3 #[pyclass] + #[pymethods]。"
+  },
+  "preconditions": [
+    "s.name 必须是合法标识符",
+    "s.fields 每个元素含 name 和 ty",
+    "s.methods 每个元素是合法 FnDef"
+  ],
+  "laws": ["L1", "L3"],
+  "tests": [
+    {
+      "input": {"s": {"name": "Point", "fields": [{"name":"x","ty":"F64"},{"name":"y","ty":"F64"}], "methods": []}},
+      "expected": "cdef class Point:\n    cdef public double x\n    cdef public double y\n    def __init__(self, double x, double y):\n        self.x = x\n        self.y = y"
+    },
+    {
+      "input": {"s": {"name": "Circle", "fields": [{"name":"r","ty":"F64"}], "methods": [{"name":"area","params":[{"name":"ty","ty":"Self_"}],"ret_ty":"F64","body":"return self.r * self.r * 3.14"}]}},
+      "expected": "cdef class Circle:\n    cdef public double r\n    def __init__(self, double r):\n        self.r = r\n    cpdef double area(self):\n        return self.r * self.r * 3.14"
+    },
+    {
+      "input": {"s": {"name": "Empty", "fields": [], "methods": []}},
+      "expected": "cdef class Empty:\n    pass"
+    }
+  ],
+  "fingerprint": "fnv1a64:cy_struct_v1"
+}

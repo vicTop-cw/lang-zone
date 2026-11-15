@@ -1,0 +1,1 @@
+[{"name": "output_validate", "arguments": {"artifacts": [{"path": "patches/BUG-N1N2_path_sentinel.patch"}, {"path": "patches/BUG-N3_callsite_annotation.patch"}, {"path": "patches/BUG-N1_call_path_sentinel.patch"}, {"path": "_verify_full.log"}, {"path": "_verify_demo_full.log"}, {"path": "_verify_demo_nopatch.log"}], "now": "2026-09-27T07:20:00+08:00"}}]

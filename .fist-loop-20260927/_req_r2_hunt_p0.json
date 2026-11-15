@@ -1,0 +1,3 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","description":"[lzc-loop:寻虫:R2] 五路寻虫第二轮：R2 开局探针复跑比对（回归候选）+ 前端 lexer/parser 边界对抗样例（BOM/CRLF/TAB 缩进/转义/数字字面量/超长标识符/关键字占位/深嵌套）+ 非 IR 侧模式化读码（unwrap/panic/越界切片）；确诊项入账，IR 落点标 [ir-upstream]","created_by":"human_steward","namespace":"lzc-loop-20260927","now":"2026-09-29T11:25:00+08:00"}}
+]

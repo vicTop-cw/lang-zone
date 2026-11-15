@@ -1,0 +1,5 @@
+[
+ {"name":"get","arguments":{"task_id":"T0r6"}},
+ {"name":"get","arguments":{"task_id":"T0r7"}},
+ {"name":"task_triage","arguments":{"namespace":"lz-explore","want":5}}
+]

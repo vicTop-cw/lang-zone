@@ -1,0 +1,86 @@
+// ============================================================
+// 轮7: 闭包进阶 — 闭包数组/捕获/返回闭包链
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── 闭包基本调用 ──
+    let add = |a: int, b: int| a + b
+    assert add(1, 2) == 3
+
+    // ── 闭包捕获外部变量（值捕获） ──
+    let base = 10
+    let add_base = |x: int| x + base
+    assert add_base(5) == 15
+
+    // ── 闭包作为参数（map/filter 风格） ──
+    def apply_twice(f: fn(int) -> int, x: int) -> int =
+        f(f(x))
+    let dbl = |x: int| x * 2
+    assert apply_twice(dbl, 5) == 20
+
+    // ── 闭包数组 ──
+    let ops: List<fn(int) -> int> = [
+        |x: int| x + 1,
+        |x: int| x * 2,
+        |x: int| x * x,
+    ]
+    assert ops[0](3) == 4
+    assert ops[1](3) == 6
+    assert ops[2](3) == 9
+
+    // ── 闭包返回闭包（柯里化） ──
+    def curried_add(a: int) -> fn(int) -> int =
+        |b: int| a + b
+    let add5 = curried_add(5)
+    let add100 = curried_add(100)
+    assert add5(3) == 8
+    assert add100(3) == 103
+
+    // ── 闭包链式组合 ──
+    def compose(f: fn(int) -> int, g: fn(int) -> int) -> fn(int) -> int =
+        |x: int| f(g(x))
+    let inc = |x: int| x + 1
+    let square = |x: int| x * x
+    mut inc_then_square = compose(square, inc)
+    assert inc_then_square(3) == 16    // (3+1)^2
+    mut square_then_inc = compose(inc, square)
+    assert square_then_inc(3) == 10    // 3^2+1
+
+    // ── 闭包内使用循环/条件（LZ 闭包仅单行表达式，循环逻辑用函数） ──
+    def sum_to_fn(n: int) -> int =
+        mut total = 0
+        for i in 0..n:
+            total = total + i
+        return total
+    assert sum_to_fn(5) == 10
+
+    // ── 闭包捕获多个变量 ──
+    let a = 2
+    let b = 3
+    let c = 4
+    let combo = |x: int| a * x * x + b * x + c
+    assert combo(1) == 9      // 2+3+4
+    assert combo(2) == 18     // 8+6+4
+
+    // ── 闭包作为返回值直接调用 ──
+    assert (|x: int| x + 100)(1) == 101
+
+    // ── 闭包排序场景（比较函数） ──
+    def sort_desc(xs: List<int>) -> List<int> =
+        mut result = xs
+        mut i = 0
+        while i < len(result):
+            mut j = i + 1
+            while j < len(result):
+                if result[j] > result[i]:
+                    let tmp = result[i]
+                    result[i] = result[j]
+                    result[j] = tmp
+                j = j + 1
+            i = i + 1
+        return result
+    let sorted = sort_desc([3, 1, 2])
+    assert sorted == [3, 2, 1]
+
+    print("P7 closures OK")

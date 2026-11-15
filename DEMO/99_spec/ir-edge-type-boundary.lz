@@ -1,0 +1,29 @@
+// ============================
+// IR边界测试: 类型转换边界值
+// ============================
+
+def max_int() -> int = 9223372036854775807
+
+def min_int() -> int = -9223372036854775808
+
+def test_int_convert(x: int) -> str =
+    str(x)
+
+def test_float_convert(x: f64) -> str =
+    str(x)
+
+def test_str_to_int(s: str) -> int =
+    int(s)
+
+def test_str_to_float(s: str) -> f64 =
+    float(s)
+
+def main() =
+    let a = max_int()
+    let b = min_int()
+    let sa = test_int_convert(a)
+    let sb = test_int_convert(b)
+    let sf = test_float_convert(3.14159)
+    let si = test_str_to_int("42")
+    let sfi = test_str_to_float("2.718")
+    print(sa, sb, sf, si, sfi)

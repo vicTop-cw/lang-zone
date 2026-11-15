@@ -1,0 +1,53 @@
+// Fuzz 11: Enum 高级特性测试
+
+// ── 11.1 多关联值枚举 ──
+enum Shape =
+    Circle(f64)          // 半径
+    Rect(f64, f64)       // 宽, 高
+    Tri(f64, f64)        // 底, 高
+
+def test_multi_variant() =
+    s = Rect(3.0, 4.0)
+    match s:
+        case Circle(r):
+            print("circle: ")
+            print(r)
+        case Rect(w, h):
+            print("rect: ")
+            print(w)
+            print(h)
+        case Tri(b, h):
+            print("tri: ")
+            print(b)
+            print(h)
+
+// ── 11.2 枚举直接构造 ──
+enum ExprKind =
+    IntVal(i64)
+    AddVal(i64, i64)
+    MulVal(i64, i64)
+
+def eval_expr(e: ExprKind) =
+    match e:
+        case IntVal(v):
+            print("int: ")
+            print(v)
+        case AddVal(left, right):
+            print("add: ")
+            print(left + right)
+        case MulVal(left, right):
+            print("mul: ")
+            print(left * right)
+
+def test_nested_enum() =
+    e = AddVal(1, 2)
+    eval_expr(e)
+    e2 = MulVal(3, 4)
+    eval_expr(e2)
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Enum Adv ===")
+    test_multi_variant()
+    test_nested_enum()
+    print("=== Fuzz Enum Adv Complete ===")

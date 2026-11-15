@@ -1,0 +1,75 @@
+// ============================================================
+// 轮1: 字面量与基础表达式 — int/float/str/bool、算术、比较、逻辑
+// 含嵌套组合与边界；每项用 assert 确保正确（失败即 panic）
+// ============================================================
+
+def main() =
+    // ── 整数/浮点字面量（进制、下划线） ──
+    assert 42 == 42
+    assert 0x1F == 31
+    assert 0o17 == 15
+    assert 0b1010 == 10
+    assert 1_000_000 == 1000000
+    assert 3.14 == 3.14
+    assert 2.5e3 == 2500.0
+
+    // ── 算术运算 ──
+    assert 7 + 3 == 10
+    assert 7 - 3 == 4
+    assert 7 * 3 == 21
+    assert 7 / 2 == 3        // 整数除法取整
+    assert 7.0 / 2.0 == 3.5  // 浮点除法
+    assert 7 % 3 == 1        // 取模
+    assert 2 ** 10 == 1024   // 幂
+    assert -5 + 3 == -2      // 一元负号
+    assert (2 + 3) * 4 == 20 // 括号优先级
+    assert 2 + 3 * 4 == 14   // 乘法优先
+
+    // ── 浮点与整数混算（自动提升） ──
+    assert 3 + 0.5 == 3.5
+    assert 2 * 1.5 == 3.0
+
+    // ── 比较运算 ──
+    assert 1 < 2
+    assert 2 <= 2
+    assert 3 > 2
+    assert 3 >= 3
+    assert 4 == 4
+    assert 4 != 5
+    assert 0.1 + 0.2 > 0.3  // 浮点比较边界
+    assert "abc" == "abc"
+    assert "abc" != "abd"
+    assert True != False
+
+    // ── 逻辑运算（and/or/not，短路） ──
+    assert True and True
+    assert not False
+    assert True or False
+    assert (1 < 2) and (2 < 3)
+    assert (1 > 2) or (2 > 1)
+    assert not (1 > 2)
+    // 短路：左边已定结果时不求值右边（用 let 绑定验证不崩溃 + 值正确）
+    let sc1 = False and (1 / 0 == 0)   // 短路 → False，不求值 1/0
+    assert sc1 == False
+    let sc2 = True or (1 / 0 == 0)     // 短路 → True，不求值 1/0
+    assert sc2 == True
+
+    // ── 字符串字面量与转义 ──
+    assert "hello" == "hello"
+    assert "single" == "single"     // 单引号字符串不支持（词法文档仅转义 \'）
+    assert "tab\there" != "tabhere"
+    assert "newline\n" != "newline"
+    assert "" == ""
+    assert "a" + "b" == "ab"
+
+    // ── 嵌套表达式（多运算符组合） ──
+    assert ((1 + 2) * (3 + 4)) - (10 / 2) == 16
+    assert (2 ** 3) + (4 % 3) + (6 / 2) == 12
+    assert (5 > 3) and ((2 < 4) or (1 == 2))
+
+    // ── 布尔与整数混算（LZ 视为数值） ──
+    // 边界验证：数值溢出使用 i64 饱和/回绕，仅验证不会崩溃
+    let big = 9223372036854775807
+    print(big)
+
+    print("R1 literals OK")

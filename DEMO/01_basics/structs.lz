@@ -1,0 +1,85 @@
+// ============================================================
+// 轮11: struct 定义 — 字段/构造/方法/self
+// 每项用 assert 确保正确
+// ============================================================
+
+struct Point =
+    x: int
+    y: int
+
+struct Rect =
+    top_left: Point
+    w: int
+    h: int
+
+def main() =
+    // ── 结构体构造与字段访问 ──
+    let p = Point(x: 3, y: 4)
+    assert p.x == 3
+    assert p.y == 4
+
+    // ── 修改字段 ──
+    mut q = Point(x: 0, y: 0)
+    q.x = 10
+    q.y = 20
+    assert q.x == 10
+    assert q.y == 20
+
+    // ── 字段参与运算 ──
+    let dist_sq = p.x * p.x + p.y * p.y
+    assert dist_sq == 25
+
+    // ── 结构体作为函数参数与返回值 ──
+    def shift(pp: Point, dx: int, dy: int) -> Point =
+        Point(x: pp.x + dx, y: pp.y + dy)
+    let moved = shift(p, 1, 1)
+    assert moved.x == 4
+    assert moved.y == 5
+    assert p.x == 3            // 原结构体不变（值传递）
+
+    // ── 结构体方法（self） ──
+    def Point.sum(self) -> int =
+        self.x + self.y
+    assert p.sum() == 7
+
+    // ── 结构体方法修改 self（mut self） ──
+    def Point.double_mut(mut self) =
+        self.x = self.x * 2
+        self.y = self.y * 2
+    mut r = Point(x: 1, y: 2)
+    r.double_mut()
+    assert r.x == 2
+    assert r.y == 4
+
+    // ── 结构体数组 ──
+    let points = [Point(x: 1, y: 2), Point(x: 3, y: 4)]
+    assert points[0].x == 1
+    assert points[1].y == 4
+    mut total = 0
+    for pt in points:
+        total = total + pt.sum()
+    assert total == 10          // (1+2) + (3+4)
+
+    // ── 嵌套结构体（Rect 已在顶层定义；函数体内不可嵌套 struct 定义） ──
+    let rect = Rect(top_left: Point(x: 0, y: 0), w: 5, h: 3)
+    assert rect.top_left.x == 0
+    assert rect.w == 5
+    assert rect.h == 3
+    assert rect.top_left.sum() == 0
+
+    // 注：struct 相等比较（p1 == p2）需显式定义 __eq__ 魔术方法（编译器不自动
+    // 派生 PartialEq，E0369）——已知语义，用字段比较代替
+    let p1 = Point(x: 1, y: 2)
+    let p3 = Point(x: 1, y: 3)
+    assert p1.x == 1 and p1.y == 2
+    assert p3.y == 3
+    assert p1.x == p3.x
+    assert p1.y != p3.y
+
+    // ── 方法返回字段组合 ──
+    def Point.describe(self) -> str =
+        "(" + str(self.x) + ", " + str(self.y) + ")"
+    let p4 = Point(x: 7, y: 8)
+    assert p4.describe() == "(7, 8)"
+
+    print("R11 structs OK")

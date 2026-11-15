@@ -1,0 +1,13 @@
+# Test: while continue 隔离测试
+def test_while_continue() -> int:
+    let i: int = 0
+    let total: int = 0
+    while i < 5:
+        i = i + 1
+        if i == 3:
+            continue
+        total = total + 1
+    return total
+
+def main() -> int:
+    return 0

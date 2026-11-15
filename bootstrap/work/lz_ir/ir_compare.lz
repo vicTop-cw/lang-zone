@@ -1,0 +1,9 @@
+// 对照输入：与 ir_module.lz main 中构造的 IR 等价
+def add(x: int, y: int) -> int =
+    x + y
+
+const LIMIT: int = 100
+
+def main() =
+    let xs: List<int> = [1, 2]
+    print(xs[0])

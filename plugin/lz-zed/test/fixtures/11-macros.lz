@@ -1,0 +1,51 @@
+// lz-zed test fixture: 11-macros — 宏与编译期
+// Authority: SYNTAX/08-宏与编译期.md + 08b-comptime编译期.md
+
+#!bin macro
+
+# 属性宏：export / derive / bin
+#!export(Rust)
+#![derive(Clone)]
+
+# 装饰器形式
+@export(Rust)
+def decorated() = pass
+
+# macro 定义：固定签名 Tokens -> Tokens
+macro id(input: Tokens) -> Tokens = input
+
+macro greet(name: Tokens) -> Tokens =
+    quote("fn hello() { println!(\"Hello, \" + " + name + " + \"!\"); }")
+
+macro merge(a: Tokens, b: Tokens) -> Tokens =
+    merge_tokens(a, b)
+
+# quote() 语法糖：反引号块（f``` 插值 / r``` 原始）
+macro debug_log(msg: Tokens) -> Tokens =
+    f```
+    if DEBUG:
+        print($(msg))
+    ```
+
+macro raw_out(input: Tokens) -> Tokens =
+    r```
+    // $(x) 不会插值，原样保留
+    ```
+
+# template：自由类型参数，返回仍为 Tokens
+template const_i64(name: str, value: int) -> Tokens =
+    quote("const " + name + ": i64 = " + value + ";")
+
+# 宏调用：name!(...)
+println!("hello")
+vec![1, 2, 3]
+
+# comptime：块形式与表达式形式
+const TABLE: int = comptime compute_table()
+
+comptime:
+    let n = 40 + 2
+    assert n == 42
+
+# 宏模块中也可定义普通 def
+def helper() -> int = 1

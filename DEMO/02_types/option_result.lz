@@ -1,0 +1,27 @@
+// ============================
+// LZ Type System — Option & Result
+// ============================
+
+def main() =
+    let x: Option<int> = Some(42)
+    let y: Option<int> = None
+
+    let desc = match x:
+        case Some(v) => f"value: {v}"
+        case None => "empty"
+
+    let a: int? = Some(10)
+    let b: int? = None
+
+    def safe_div(a: int, b: int) -> Result<int, str> =
+        if b == 0:
+            Err("division by zero")
+        else:
+            Ok(a / b)
+
+    let r1 = safe_div(10, 2)
+    match r1:
+        case Ok(v) => print(f"result: {v}")
+        case Err(e) => print(f"error: {e}")
+
+    print(desc)

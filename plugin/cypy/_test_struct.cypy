@@ -1,0 +1,23 @@
+struct Point:
+    x: float
+    y: float
+
+struct Rectangle:
+    width: float
+    height: float
+
+    def area(self) -> float:
+        return self.width * self.height
+
+    def perimeter(self) -> float:
+        return 2.0 * (self.width + self.height)
+
+def main() -> int:
+    p = Point {x: 10.0, y: 20.0}
+    print(f"Point: ({p.x}, {p.y})")
+
+    rect = Rectangle {width: 5.0, height: 3.0}
+    print(f"Rectangle area: {rect.area()}")
+    print(f"Rectangle perimeter: {rect.perimeter()}")
+
+    return 0

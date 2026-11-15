@@ -1,0 +1,67 @@
+// ============================================================
+// ? 可传播协议 — 自定义可传播类型
+// LZ Spec 09-错误处理.md §4.3 + 06d-内置魔法trait和全局函数.md
+//
+// 三件套魔法方法（实现即可参与 `?` 传播）：
+//   __is_ok__(self) -> bool    成功/错误判定
+//   __unwrap__(self) -> T      成功值解包
+//   __err__(self) -> E         错误值提取
+// ============================================================
+
+// --- 自定义可传播类型：HttpResult<T> ---
+// 表示 HTTP 请求结果：成功携带值，失败携带状态码
+struct HttpResult<T> =
+    ok: bool
+    value: T
+    error_code: int
+
+impl HttpResult<T> =
+    def __is_ok__(self) -> bool =
+        self.ok
+
+    def __unwrap__(self) -> T =
+        guard self.ok else:
+            panic(f"unwrap on error {self.error_code}")
+        self.value
+
+    def __err__(self) -> int =
+        self.error_code
+
+// --- 使用 ? 传播的工厂函数 ---
+// fetch_ok: 返回成功 HttpResult
+def fetch_ok() -> HttpResult<int> =
+    HttpResult(ok: True, value: 200, error_code: 0)
+
+// fetch_err: 返回失败 HttpResult（模拟 404）
+def fetch_err() -> HttpResult<int> =
+    HttpResult(ok: False, value: 0, error_code: 404)
+
+// process: 用 ? 解包 HttpResult —— 成功取 value，失败向上传播（raise 或 return）
+def process(r: HttpResult<int>) -> int raises int =
+    let code = r?            // __is_ok__ 判定；失败 → __err__ 提取并传播
+    code * 2
+
+def main() =
+    // 成功路径：? 解包
+    let ok_result = fetch_ok()
+    let doubled = process(ok_result)      // r? 成功 → value(200) * 2 = 400
+    print(doubled)
+
+    // 失败路径：process 内 r? 判定失败 → raise error_code(404)
+    // 由调用方 try/catch 捕获
+    let bad_result = fetch_err()
+    try:
+        let x = process(bad_result)
+        print(x)
+    catch e:                      // catch int 类型（__err__ 提取的 404）
+        print(f"caught http error: {e}")
+
+// --- 内置类型 ? 传播对照 ---
+// Result/Option 由编译器内建判定（Ok/Some=成功，Err/None=错误）
+def use_builtin(r: Result<int, str>) -> int raises str =
+    let v = r?              // Ok → v；Err(e) → raise e（与 raises str 兼容）
+    v + 1
+
+def use_option(o: Option<int>) -> int raises ValueError =
+    let v = o?              // Some(v) → v；None → raise ValueError("None")
+    v - 1

@@ -1,0 +1,3 @@
+[
+ {"name":"task_plan_deep","arguments":{"task_id":"T0","split_n":2,"by":"human_steward","omega_strong_verify":true,"laya_auto":true,"reinject_context":true,"spec":["L1 不得修改 src/ir/**（IR 上游只读）；IR 层缺陷一律 report_bug([ir-upstream]) 入账并避让","L2 lzcyz/Cython 域（src/ir/codegen_cython.rs、src/codegen/、CY/、BENCH 的 lzcyz 基准）零触碰","L3 FIST-Mbt 仓库只读，只允许以其已构建 JS 产物作为 MCP server 运行","L4 生成码铁律：.lz 产物必须过 rustc 且运行正确才计完成；新特性必须配 DEMO","L5 门禁：全量 cargo test 绿、DEMO 回归（排除 99_errors/，lz_std 暂不处理）、golden 不漂移、测试数只增不减","L6 git 纪律：遗留集零触碰，逐文件 git add，禁 -A，工具态文件不进库","L7 无最小复现不入账，误报不刷账本","L8 不可逆操作（push/删分支/删文件/清任务库）只挂账待人工"],"now":"2026-09-27T12:40:00+08:00"}}
+]

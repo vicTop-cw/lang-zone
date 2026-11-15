@@ -1,0 +1,4 @@
+def main() =
+    let v: List<str> = ["a", "b"]
+    print(v.contains("a"))
+    print(v.contains("z"))

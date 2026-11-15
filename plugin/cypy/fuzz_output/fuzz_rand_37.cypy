@@ -1,0 +1,22 @@
+def test_0() -> int:
+    while total:
+        break
+    return (-(-print((0))))
+
+def test_1() -> int:
+    while ((-((1 < True) < print(100)))):
+        break
+    let x: bool = True
+    if -1:
+        return 1
+    else:
+        return 0
+    while -3.14:
+        break
+    if (-total):
+        return 1
+    else:
+        return 0
+
+def main() -> int:
+    return 0

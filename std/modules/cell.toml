@@ -1,0 +1,48 @@
+# lz std::cell — P1 内部可变性类型
+# 源码级映射：lz 符号 → Rust std::cell 路径
+
+[module]
+tier = 1
+rust_prefix = "std::cell"
+
+# ── 类型映射 ──
+
+[types]
+Cell       = "std::cell::Cell"
+RefCell    = "std::cell::RefCell"
+Ref        = "std::cell::Ref"
+RefMut     = "std::cell::RefMut"
+UnsafeCell = "std::cell::UnsafeCell"
+OnceCell   = "std::cell::OnceCell"
+BorrowError      = "std::cell::BorrowError"
+BorrowMutError   = "std::cell::BorrowMutError"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Cell 方法
+new         = "new"
+get         = "get"
+set         = "set"
+replace     = "replace"
+getMut      = "get_mut"
+intoInner   = "into_inner"
+asPtr       = "as_ptr"
+takeCell    = "take"
+swapCell    = "swap"
+# RefCell 方法
+borrow      = "borrow"
+borrowMut   = "borrow_mut"
+tryBorrow   = "try_borrow"
+tryBorrowMut = "try_borrow_mut"
+replaceWith = "replace_with"
+# OnceCell 方法
+getCell    = "get"
+setCell    = "set"
+getOrInitCell = "get_or_init"
+isInitialized = "is_initialized"
+
+# ── 类型别名注入 ──
+
+[aliases]

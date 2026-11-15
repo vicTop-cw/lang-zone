@@ -1,0 +1,7 @@
+import std.io
+
+@export(Rust)
+def helper(x: int) -> int = x * 2
+
+@export(Rust)
+def format_name(first: str, last: str) -> str = first + " " + last

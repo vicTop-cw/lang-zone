@@ -1,0 +1,4 @@
+
+thread 'main' (77212) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-async-await.rs:32:9:
+"invalid_id"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

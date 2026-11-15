@@ -1,0 +1,25 @@
+// 命名实参：`k=v` 全形（SYNTAX/02-变量与绑定.md:226 的 `name~` 糖写全形、
+// SYNTAX/01b-duck关系约束.md:481 的 build(name="x", version=1)）与 `k~` 糖。
+//
+// **双后端差分用例（BUG-24 修复后封 .exp）**：Rust 后端 codegen 把关键字实参
+// 按被调函数声明参数顺序重排为位置实参——全形 `name=value`（parser 解析为
+// AssignExpr{target: 变量}）与糖形 `name~`（IR `_KwArg`）统一收口，默认值形参
+// 经 current_expected_ty 注入 Some 包裹；Cython 后端走 Python 原生关键字实参。
+// 两后端 stdout 一致，.exp 为跨后端 oracle。
+def greet(name: str = "world") -> str =
+    f"hi {name}"
+
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    name = "LZ"
+    print(add(b=2, a=1))
+    print(add(1, b=2))
+    print(greet(name~))
+    print(greet(name="LZ"))
+    print(greet())
+    assert add(b=2, a=1) == 3
+    assert add(1, b=2) == 3
+    assert greet(name~) == "hi LZ"
+    assert greet(name="LZ") == "hi LZ"
+    assert greet() == "hi world"

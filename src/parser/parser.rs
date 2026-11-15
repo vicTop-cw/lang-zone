@@ -1,0 +1,3293 @@
+// Lang-Zong 编译器 — parser/parser.rs
+// Parser 核心 + 顶层解析方法
+
+use super::expr::ParserExprExt;
+use super::stmt::ParserStmtExt;
+use crate::ast::*;
+use crate::lexer::Token;
+use crate::moddec::{errmsg, DecoratorRegistry};
+use crate::types::Type;
+
+/// 装饰器名映射（D1）：`Ident` 与「修饰关键字 token」统一映射为名字串。
+/// `mut/ref/owned/const/comptime` 已是关键字 token，`@mut` 等须据此读取（否则报
+/// "Expected decorator name"）。`let` 保留用于诊断（非正式成员）。
+fn decorator_name_of(tok: &Token) -> Option<String> {
+    match tok {
+        Token::Ident(n) => Some(n.clone()),
+        Token::Mut => Some("mut".to_string()),
+        Token::Ref => Some("ref".to_string()),
+        Token::Owned => Some("owned".to_string()),
+        Token::Const => Some("const".to_string()),
+        Token::Comptime => Some("comptime".to_string()),
+        Token::Let => Some("let".to_string()),
+        Token::Case => Some("case".to_string()),
+        _ => None,
+    }
+}
+
+// ──────────────── Parser ────────────────
+
+pub struct Parser {
+    pub(super) tokens: Vec<Token>,
+    pub(super) pos: usize,
+    pub(super) pending_gt: usize, // 处理嵌套泛型 >> 分裂为两个 >
+    /// 最近一次 parse_generic_params 解析到的内联约束 (type_param → bounds)
+    pending_inline_bounds: Vec<(String, Vec<Type>)>,
+    /// 最近一次 parse_generic_params 解析到的默认类型 (type_param → default type)
+    pending_generic_defaults: Vec<(String, Type)>,
+    /// `struct Counter(value: int):` 冒号开体（BUG-371）：LParen 分支解析完字段后暂存，
+    /// Indent 体路径接管。均为 Option 以便区分「未走 paren 路径」。
+    paren_name: Option<String>,
+    paren_fields: Option<Vec<Field>>,
+    paren_generics: Option<Vec<String>>,
+    paren_generic_bounds: Option<Vec<(String, Vec<Type>)>>,
+    paren_generic_defaults: Option<Vec<(String, Type)>>,
+    /// 是否为宏模块（首行 `#!bin macro`）——由调用方在宏展开前用原始
+    /// token 流检测并设置（展开会消费 #!bin macro 声明，Parser 自身无法检测）
+    pub is_macro: bool,
+}
+
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            pending_gt: 0,
+            pending_inline_bounds: Vec::new(),
+            pending_generic_defaults: Vec::new(),
+            paren_name: None,
+            paren_fields: None,
+            paren_generics: None,
+            paren_generic_bounds: None,
+            paren_generic_defaults: None,
+            is_macro: false,
+        }
+    }
+
+    pub(super) fn peek(&self) -> &Token {
+        if self.pending_gt > 0 {
+            return &Token::Gt;
+        }
+        self.tokens.get(self.pos).unwrap_or(&Token::Eof)
+    }
+
+    pub(super) fn peek_n(&self, n: usize) -> &Token {
+        if n == 0 {
+            return self.peek();
+        }
+        // 如果 pending_gt 存在，偏移一位
+        if self.pending_gt > 0 {
+            return self.tokens.get(self.pos + n - 1).unwrap_or(&Token::Eof);
+        }
+        self.tokens.get(self.pos + n).unwrap_or(&Token::Eof)
+    }
+
+    pub(super) fn advance(&mut self) -> Token {
+        if self.pending_gt > 0 {
+            self.pending_gt -= 1;
+            return Token::Gt;
+        }
+        let t = self.peek().clone();
+        self.pos += 1;
+        t
+    }
+
+    pub(super) fn skip_newlines(&mut self) {
+        while matches!(self.peek(), Token::Newline) {
+            self.advance();
+        }
+    }
+
+    pub(super) fn check(&self, expected: &Token) -> bool {
+        std::mem::discriminant(self.peek()) == std::mem::discriminant(expected)
+    }
+
+    pub(super) fn expect(&mut self, expected: Token) -> Result<Token, String> {
+        let t = self.advance();
+        if std::mem::discriminant(&t) == std::mem::discriminant(&expected) {
+            Ok(t)
+        } else {
+            Err(format!(
+                "Expected {:?}, got {:?} at pos {}",
+                expected, t, self.pos
+            ))
+        }
+    }
+
+    // ─── 顶层 ───
+
+    pub fn parse_module(&mut self) -> Result<Module, String> {
+        // 宏模块检测：首行 `#!bin macro` 声明（lexer 对整行产生单个 Token::Macro，
+        // 后跟 Newline/Eof）。宏/template 仅能定义在宏模块，__is_macro__ 据此填充
+        let mut is_macro_module = false;
+        let mut ti = 0;
+        while ti < self.tokens.len() && matches!(&self.tokens[ti], Token::Newline | Token::Indent) {
+            ti += 1;
+        }
+        if ti < self.tokens.len() && self.tokens[ti] == Token::Macro {
+            let next = self.tokens.get(ti + 1);
+            if next.map_or(true, |t| matches!(t, Token::Newline | Token::Eof)) {
+                is_macro_module = true;
+            }
+        }
+
+        let mut imports = Vec::new();
+        let mut functions = Vec::new();
+        let mut structs = Vec::new();
+        let mut traits = Vec::new();
+        let mut impls = Vec::new();
+        let mut consts = Vec::new();
+        let mut type_aliases = Vec::new();
+        let mut tests = Vec::new();
+        let mut top_level_builds = Vec::new();
+        let mut top_stmts: Vec<Stmt> = Vec::new();
+        let mut duck_defs = Vec::new();
+        let mut module_name = None;
+        let mut magic_blocks: Vec<MagicDef> = Vec::new();
+
+        // 词法错误（构建块符号留白违规等）在解析阶段拒绝
+        for t in &self.tokens {
+            if let Token::LexError(m) = t {
+                return Err(m.clone());
+            }
+        }
+
+        self.skip_newlines();
+
+        while self.peek() != &Token::Eof {
+            // 跳过意外的 Dedent（嵌套块结束标记）
+            if self.check(&Token::Dedent) {
+                self.advance();
+                self.skip_newlines();
+                continue;
+            }
+            // #[embed(lang)] 原样块：lexer 已捕获为 Token::EmbedBlock
+            if let Token::EmbedBlock { lang, src, form } = self.peek().clone() {
+                self.advance();
+                top_stmts.push(Stmt::EmbedBlock {
+                    lang,
+                    src,
+                    form,
+                    // parser 不感知文件路径：模块归属由 project 模式合并时补
+                    // （见 `ast::Stmt::EmbedBlock::origin` 注释）。
+                    origin: None,
+                });
+                self.skip_newlines();
+                continue;
+            }
+            let mut decorators = Vec::new();
+            let mut modifier_mods: Option<Modifiers> = None;
+            // 解析装饰器（先不跳过换行，以便判定「同行 / 独占行」）
+            while self.check(&Token::At) {
+                let name = match decorator_name_of(self.peek_n(1)) {
+                    Some(n) => n,
+                    None => {
+                        let (l, c) = self.cur_loc();
+                        return Err(errmsg::at_loc("装饰器名缺失或非法", l, c));
+                    }
+                };
+                let d = self.parse_decorator()?;
+                // #[attr] 写法：属性头后的 ] 可省略（#[extern(rust)] → @extern(rust)]）
+                if self.check(&Token::RBrack) {
+                    self.advance();
+                }
+                let eol = self.check(&Token::Newline);
+                if DecoratorRegistry::is_modifier(&name) {
+                    // AC6：修饰符装饰器须与目标同行
+                    if eol {
+                        let (l, c) = self.cur_loc();
+                        return Err(errmsg::at_loc(&errmsg::must_inline(&name), l, c));
+                    }
+                    // AC8：每目标至多一个修饰符装饰器
+                    if modifier_mods.is_some() {
+                        let (l, c) = self.cur_loc();
+                        return Err(errmsg::at_loc(&errmsg::at_most_one(), l, c));
+                    }
+                    modifier_mods = Some(
+                        Modifiers::from_decorator_name(&name, true).map_err(|e| e.to_message())?,
+                    );
+                } else if DecoratorRegistry::is_normal(&name) {
+                    // AC7：普通装饰器须独占一行
+                    if !eol {
+                        let (l, c) = self.cur_loc();
+                        return Err(errmsg::at_loc(&errmsg::must_own_line(&name), l, c));
+                    }
+                    decorators.push(d);
+                } else {
+                    // AC5：未知装饰器（内置封闭集之外）
+                    let (l, c) = self.cur_loc();
+                    return Err(errmsg::at_loc(&errmsg::unknown(&name), l, c));
+                }
+                self.skip_newlines();
+            }
+
+            // 修饰符装饰器（模块顶层）→ 绑定/常量（携带轴集合；顶层绑定即常量）
+            if let Some(mods) = modifier_mods {
+                let stmt = self.parse_binding_body(mods)?;
+                match stmt {
+                    Stmt::Const {
+                        name,
+                        ty,
+                        value,
+                        mods,
+                    } => consts.push(ConstDef {
+                        name,
+                        ty,
+                        value,
+                        mutable: false,
+                        mods,
+                    }),
+                    Stmt::Let {
+                        name,
+                        ty,
+                        value,
+                        mutable,
+                        mods,
+                        ..
+                    } => consts.push(ConstDef {
+                        name,
+                        ty,
+                        value,
+                        mutable,
+                        mods,
+                    }),
+                    other => top_stmts.push(other),
+                }
+                continue;
+            }
+
+            // BUG-PR-005 修复：普通装饰器只能修饰声明（def/struct/enum/async/iterator/
+            // comptime def），修饰变量/语句/其他项会被静默丢弃（SILENT_PASS），此处显式拒绝。
+            if !decorators.is_empty() {
+                let decorator_eligible = matches!(
+                    self.peek(),
+                    Token::Def | Token::Iterator | Token::Async | Token::Struct | Token::Enum
+                ) || (self.check(&Token::Comptime)
+                    && self.peek_n(1) == &Token::Def);
+                if !decorator_eligible {
+                    return Err(format!(
+                        "装饰器只能用于 def/struct/enum/async/iterator 等声明，不能用于 {:?}",
+                        self.peek()
+                    ));
+                }
+            }
+
+            match self.peek() {
+                Token::Def => {
+                    let mut f = self.parse_function(false)?;
+                    f.decorators = decorators;
+                    functions.push(f);
+                }
+                Token::Iterator => {
+                    let mut f = self.parse_function(false)?;
+                    f.is_iterator = true;
+                    f.decorators = decorators;
+                    functions.push(f);
+                }
+                Token::Async => {
+                    self.advance();
+                    let mut f = self.parse_function(false)?;
+                    f.is_async = true;
+                    f.decorators = decorators;
+                    functions.push(f);
+                }
+                Token::Struct => {
+                    let mut s = self.parse_struct_like(false, false)?;
+                    s.decorators = decorators;
+                    structs.push(s);
+                }
+                Token::Enum => {
+                    let mut s = self.parse_struct_like(true, false)?;
+                    s.decorators = decorators;
+                    structs.push(s);
+                }
+                Token::Case => {
+                    self.advance(); // skip `case`
+                                    // 不在此消费 struct/enum，交给 parse_struct_like 内部消费，
+                                    // 否则会重复消费导致把名字读成 `(`。
+                    let is_enum = matches!(self.peek(), Token::Enum);
+                    let mut s = self.parse_struct_like(is_enum, true)?;
+                    s.decorators = decorators;
+                    structs.push(s);
+                }
+                Token::Trait => {
+                    let t = self.parse_trait()?;
+                    traits.push(t);
+                }
+                Token::Impl => {
+                    let i = self.parse_impl()?;
+                    impls.push(i);
+                }
+                Token::Import => {
+                    imports.push(self.parse_import()?);
+                }
+                Token::From => {
+                    imports.push(self.parse_from_import()?);
+                }
+                Token::Const => {
+                    let c = self.parse_const()?;
+                    consts.push(c);
+                }
+                Token::Test | Token::Suite | Token::Assert => {
+                    let stmt = self.parse_stmt()?;
+                    tests.push(stmt);
+                }
+                Token::Let => {
+                    // 顶层 let x = 1 → 不可变全局常量
+                    self.advance();
+                    let stmt = self.parse_binding_stmt_let()?;
+                    if let Stmt::Let {
+                        name,
+                        ty,
+                        value,
+                        mutable,
+                        mods,
+                        ..
+                    } = stmt
+                    {
+                        consts.push(ConstDef {
+                            name,
+                            ty,
+                            value,
+                            mutable,
+                            mods,
+                        });
+                    }
+                }
+                Token::Mut | Token::Ref | Token::Owned => {
+                    // 顶层变量绑定: mut y: int = 0, ref r = &x
+                    let stmt = self.parse_binding_stmt()?;
+                    if let Stmt::Let {
+                        name,
+                        ty,
+                        value,
+                        mutable,
+                        mods,
+                        ..
+                    } = stmt
+                    {
+                        consts.push(ConstDef {
+                            name,
+                            ty,
+                            value,
+                            mutable,
+                            mods,
+                        });
+                    }
+                }
+                Token::Newline => {
+                    self.advance();
+                }
+                Token::Block => {
+                    // 模块级 block 定义 / 触发调用
+                    // 作为顶层构建块语句处理
+                    let stmt = self.parse_stmt()?;
+                    top_stmts.push(stmt);
+                }
+                Token::MagicMethod(ref magic_name) => {
+                    // 模块级魔法属性: __name__ = "value", __all__ = [...]
+                    let name = magic_name.clone();
+                    self.advance(); // 消费 MagicMethod
+                    if self.check(&Token::Eq) {
+                        self.advance(); // =
+                        let value = self.parse_expr()?;
+                        // 存储已知魔法属性到 Module
+                        match name.as_str() {
+                            "__name__" => {
+                                if let Expr::StrLit(s) = &value {
+                                    module_name = Some(s.clone());
+                                }
+                            }
+                            _ => {} // __all__, __bridge__ 等暂存 consts
+                        }
+                        consts.push(ConstDef {
+                            name,
+                            ty: None,
+                            value,
+                            mutable: false,
+                            mods: Modifiers::empty(),
+                        });
+                    } else if self.check(&Token::Colon) {
+                        // magic __str__: 块 — 跳过整个块
+                        self.advance(); // :
+                        self.skip_newlines();
+                        if self.check(&Token::Indent) {
+                            self.advance();
+                            let mut depth = 1;
+                            while depth > 0 && !self.check(&Token::Eof) {
+                                match self.advance() {
+                                    Token::Indent => depth += 1,
+                                    Token::Dedent => depth -= 1,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                Token::Comptime => {
+                    // 顶层循环用 match peek() 未消费 token：先 advance 消费 comptime
+                    self.advance();
+                    // comptime def f(...) — 编译期函数（仅编译期存在，不生成运行时代码）
+                    // 支持 `comptime def` 和 `comptime <换行> def` 两种写法
+                    if self.check(&Token::Def) {
+                        let mut f = self.parse_function(false)?;
+                        f.is_comptime = true;
+                        f.decorators = decorators;
+                        functions.push(f);
+                        continue;
+                    }
+                    // 检查 `comptime <换行> def`（跳过换行后看是否为 def）
+                    let save_pos = self.pos;
+                    self.skip_newlines();
+                    if self.check(&Token::Def) {
+                        let mut f = self.parse_function(false)?;
+                        f.is_comptime = true;
+                        f.decorators = decorators;
+                        functions.push(f);
+                        continue;
+                    }
+                    self.pos = save_pos; // 回退：不是 def，恢复位置
+                    // comptime: <缩进块> 或 comptime <换行> <缩进块> — 编译期求值块
+                    let is_colon = self.check(&Token::Colon);
+                    if is_colon {
+                        self.advance();
+                    }
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let block = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        // 将 comptime 块体内容存入 consts（标记 comptime 语义）
+                        for stmt in &block {
+                            if let Stmt::Let {
+                                name,
+                                ty,
+                                value,
+                                mutable,
+                                mods,
+                                ..
+                            } = stmt
+                            {
+                                consts.push(ConstDef {
+                                    name: name.clone(),
+                                    ty: ty.clone(),
+                                    value: value.clone(),
+                                    mutable: *mutable,
+                                    mods: mods.clone(),
+                                });
+                            }
+                        }
+                    } else if self.check(&Token::Const) {
+                        // comptime const X = ... — 编译期常量（求值后内联到使用处）
+                        let c = self.parse_const()?;
+                        consts.push(c);
+                    } else if !self.check(&Token::Newline) && !self.check(&Token::Eof) {
+                        // 单行: comptime x = expr
+                        let stmt = self.parse_stmt()?;
+                        if let Stmt::Let {
+                            name,
+                            ty,
+                            value,
+                            mutable,
+                            mods,
+                            ..
+                        } = &stmt
+                        {
+                            consts.push(ConstDef {
+                                name: name.clone(),
+                                ty: ty.clone(),
+                                value: value.clone(),
+                                mutable: *mutable,
+                                mods: mods.clone(),
+                            });
+                        }
+                    }
+                }
+                Token::Duck => {
+                    // 解析 duck 声明: duck Name = def method(...) -> Ret ...
+                    let d = self.parse_duck_def()?;
+                    duck_defs.push(d);
+                }
+                Token::Macro | Token::Template => {
+                    // 宏定义兜底解析：正常流程下宏/template 定义已由 main.rs 的
+                    // token 层展开管线（MacroExpander/TemplateExpander 交替展开，
+                    // 08 §3.6）在解析前移除并展开，IR 后端直接消费展开后的 token
+                    // 流；此处仅作兜底（宏定义未被前置过滤时），解析为普通函数定义
+                    // （参数/返回按 Tokens 类型保存，body 为 quote(...) 表达式）
+                    self.advance(); // consume macro/template
+                    let name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected macro name, got {:?}", t)),
+                    };
+                    // 参数
+                    self.expect(Token::LParen)?;
+                    let (params, _variadic) = self.parse_params()?;
+                    self.expect(Token::RParen)?;
+                    // 可选返回类型: -> Tokens
+                    let return_type = if self.check(&Token::Arrow) {
+                        self.advance();
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    self.expect(Token::Eq)?;
+                    self.skip_newlines();
+                    // 跳过可能的外层 Indent（缩进块体）
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                    }
+                    let body = self.parse_expr()?;
+                    if self.check(&Token::Dedent) {
+                        self.advance();
+                    }
+                    functions.push(Function {
+                        name,
+                        generics: vec![],
+                        generic_defaults: vec![],
+                        params,
+                        return_type,
+                        raises: None,
+                        where_clause: vec![],
+                        body: vec![Stmt::Return(Some(body))],
+                        is_async: false,
+                        is_abstract: false,
+                        is_iterator: false,
+                        is_magic: false,
+                        is_comptime: false,
+                        decorators: vec![],
+                        variadic: crate::ast::VariadicMode::None,
+                        checker_param: None,
+                        default_checker: None,
+                    });
+                }
+                _ => {
+                    // 尝试解析为顶层赋值（全局变量）
+                    if let Token::Ident(_) = self.peek() {
+                        // magic __xxx__ 块: magic __str__: def __str__(self: T) -> ...
+                        if self.peek().to_string() == "magic"
+                            && matches!(self.peek_n(1), Token::MagicMethod(_))
+                        {
+                            self.advance(); // magic
+                            let magic_name = match self.advance() {
+                                Token::MagicMethod(n) => n,
+                                t => {
+                                    return Err(format!("Expected magic method name, got {:?}", t))
+                                }
+                            };
+                            self.expect(Token::Colon)?;
+                            self.skip_newlines();
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                                while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                                    if self.check(&Token::Def) {
+                                        let f = self.parse_function(false)?;
+                                        magic_blocks.push(MagicDef {
+                                            method_name: magic_name.clone(),
+                                            function: f,
+                                            block_name: None,
+                                            block_generics: vec![],
+                                        });
+                                    } else {
+                                        self.advance();
+                                    }
+                                }
+                                if self.check(&Token::Dedent) {
+                                    self.advance();
+                                }
+                            }
+                        } else if self.peek().to_string() == "magic"
+                            // 方法定义式：`magic <Name><泛型?> =`。
+                            // peek_n(2) 必须是 Eq（无泛型）或 Lt（带泛型），
+                            // 否则（如把 magic 当普通变量/函数名 `magic = 5`）
+                            // 回落到下方 parse_stmt 路径，保持软关键字兼容性
+                            && matches!(
+                                self.peek_n(2),
+                                Token::Eq | Token::Lt
+                            )
+                        {
+                            // 方法定义式（06f §七.1）:
+                            //   magic <Name><泛型?> =
+                            //       def __方法名__(self, ...) -> Ret = ... | = <expr>
+                            self.advance(); // magic
+                            let block_name = match self.advance() {
+                                Token::Ident(n) => n,
+                                t => return Err(format!("Expected magic block name, got {:?}", t)),
+                            };
+                            // 可选块级泛型参数表: magic map<T, R> =
+                            let block_generics = if self.check(&Token::Lt) {
+                                self.parse_generic_params()?
+                            } else {
+                                vec![]
+                            };
+                            self.expect(Token::Eq)?;
+                            self.skip_newlines();
+                            if self.check(&Token::Indent) {
+                                self.advance(); // 进入缩进块
+                                let mut f = self.parse_function(false)?;
+                                // 块级泛型：def 自身无泛型时写入 function.generics，
+                                // 使 builder 可直接用 function.generics 作 trait 泛型
+                                if f.generics.is_empty() && !block_generics.is_empty() {
+                                    f.generics = block_generics.clone();
+                                }
+                                // parse_function(false) 已完整处理体：
+                                //   `= ...`     → 抽象（body 空、is_abstract=true）
+                                //   `= <expr>`  → 单行默认实现（body=[Stmt::Expr(expr)]）
+                                //   缩进多行块  → 完整实现（body=块语句）
+                                //   无体        → 抽象（is_abstract=true）
+                                // 单行默认实现下糖为单表达式返回（仿顶层 const def 的
+                                // Stmt::Return 写法），便于 builder 统一消费
+                                if !f.is_abstract && f.body.len() == 1 {
+                                    if let Stmt::Expr(e) = f.body[0].clone() {
+                                        f.body[0] = Stmt::Return(Some(e));
+                                    }
+                                }
+                                magic_blocks.push(MagicDef {
+                                    method_name: f.name.clone(),
+                                    function: f,
+                                    block_name: Some(block_name),
+                                    block_generics,
+                                });
+                                // 配平：体后剩余的 Newline/Dedent（Dedent 平衡 magic 块缩进）
+                                self.skip_newlines();
+                                if self.check(&Token::Dedent) {
+                                    self.advance();
+                                }
+                            }
+                        } else if self.peek().to_string() == "type" {
+                            // type alias: type UserId = int
+                            self.advance(); // type
+                            let name = match self.advance() {
+                                Token::Ident(n) => n,
+                                t => return Err(format!("Expected type alias name, got {:?}", t)),
+                            };
+                            // 可选泛型参数: type Name<T> = ...
+                            let generics = if self.check(&Token::Lt) {
+                                self.advance();
+                                let mut gens = Vec::new();
+                                loop {
+                                    match self.advance() {
+                                        Token::Ident(g) => gens.push(g),
+                                        Token::Gt | Token::Shr => break,
+                                        Token::Comma => {}
+                                        Token::Eof => {
+                                            return Err("Unterminated generic params".into())
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                gens
+                            } else {
+                                vec![]
+                            };
+                            self.expect(Token::Eq)?;
+                            let ty = self.parse_type()?;
+                            type_aliases.push(TypeAliasDef { name, generics, ty });
+                        } else if self.peek_n(1) == &Token::Colon {
+                            let name = self.advance().to_string();
+                            self.advance(); // 消费 :
+                            let ty = self.parse_type()?;
+                            self.expect(Token::Eq)?;
+                            let value = self.parse_expr()?;
+                            consts.push(ConstDef {
+                                name,
+                                ty: Some(ty),
+                                value,
+                                mutable: false,
+                                mods: Modifiers::empty(),
+                            });
+                        } else {
+                            let stmt = self.parse_stmt()?;
+                            // 将 Let / Assign 转为 const（简化处理）
+                            match stmt {
+                                Stmt::Let {
+                                    name,
+                                    ty,
+                                    value,
+                                    mutable,
+                                    mods,
+                                    ..
+                                } => {
+                                    consts.push(ConstDef {
+                                        name,
+                                        ty,
+                                        value,
+                                        mutable,
+                                        mods,
+                                    });
+                                }
+                                Stmt::Assign { target, op, value } => {
+                                    // 赋值语句如 y += 10 在顶层暂时跳过
+                                    // 实际应放在 main 函数中
+                                    let name = match target {
+                                        Expr::Ident(n) => n,
+                                        _ => "_".to_string(),
+                                    };
+                                    if op == AssignOp::Eq {
+                                        consts.push(ConstDef {
+                                            name,
+                                            ty: None,
+                                            value,
+                                            mutable: false,
+                                            mods: Modifiers::empty(),
+                                        });
+                                    }
+                                    // 复合赋值在顶层忽略（应放在函数中）
+                                }
+                                Stmt::Expr(Expr::BuildBlock { kind: _, lhs, body }) => {
+                                    // 顶层构建块：Var 类型的 =: 构建块，保存用于 codegen
+                                    let name = match &*lhs {
+                                        Expr::Ident(n) => n.clone(),
+                                        _ => format!("__build_{}", top_level_builds.len()),
+                                    };
+                                    top_level_builds.push((name, body));
+                                }
+                                _ => {
+                                    // 其他顶层语句（如顶层表达式 print(...)）：收集到
+                                    // top_stmts，由 codegen 在无 def main 时注入自动生成的
+                                    // main 顺序执行（BUG-PR-001）
+                                    top_stmts.push(stmt);
+                                }
+                            }
+                        }
+                    } else {
+                        return Err(format!("Unexpected token at top level: {:?}", self.peek()));
+                    }
+                }
+            }
+            self.skip_newlines();
+        }
+
+        Ok(Module {
+            name: module_name,
+            // 源文件路径由 main.rs 在解析后注入（parser 不感知文件路径）
+            file_path: None,
+            // 源文件文本同样由 main.rs 在解析后注入（comptime getsource 数据源）
+            source_text: None,
+            imports,
+            functions,
+            structs,
+            traits,
+            impls,
+            consts,
+            type_aliases,
+            tests,
+            top_level_builds,
+            top_stmts,
+            duck_defs,
+            magic_blocks,
+            // main.rs 用原始 token 流（展开前）检测设置；自检作兜底
+            is_macro: self.is_macro || is_macro_module,
+        })
+    }
+
+    fn parse_decorator(&mut self) -> Result<Decorator, String> {
+        self.expect(Token::At)?;
+        let name = match decorator_name_of(self.peek()) {
+            Some(n) => {
+                self.advance(); // 消费名字 token（Ident 或修饰关键字）
+                n
+            }
+            None => {
+                let t = self.advance();
+                return Err(format!("Expected decorator name, got {:?}", t));
+            }
+        };
+        let args = if self.check(&Token::LParen) {
+            self.advance();
+            let mut args = Vec::new();
+            while !self.check(&Token::RParen) {
+                args.push(self.parse_expr()?);
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+            }
+            self.expect(Token::RParen)?;
+            args
+        } else {
+            Vec::new()
+        };
+        Ok(Decorator { name, args })
+    }
+
+    /// 当前位置的近似「行:列」（词法 token 不含位置；按 `Newline` token 计数估算）。
+    /// 仅用于装饰器诊断信息，满足「错误信息须含位置（行:列）」的格式约定。
+    pub(super) fn cur_loc(&self) -> (usize, usize) {
+        let mut line = 1usize;
+        let mut col = 1usize;
+        for t in self.tokens.iter().take(self.pos) {
+            if matches!(t, Token::Newline) {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+        (line, col)
+    }
+
+    /// 解析语句位 / 形参位的「修饰符装饰器」序列（可连写）。
+    ///
+    /// 规则（架构 §1.2）：
+    /// - 仅接受修饰符装饰器（28 个之一）；普通装饰器 / 未知 → 报错。
+    /// - 须与目标**同行**（其后紧跟 `Newline` → `E-MODDEC-INLINE`，AC6）。
+    /// - 每目标**至多一个**（`E-MODDEC-AT-MOST-ONE`，AC8）。
+    /// - 融合型在此展开为成分轴（委托 `Modifiers::from_decorator_name`）。
+    ///
+    /// 返回合并后的轴集合（无装饰器时为空）。
+    pub(super) fn parse_modifier_decorators(&mut self) -> Result<Modifiers, String> {
+        let mut slot: Option<Modifiers> = None;
+        while self.check(&Token::At) {
+            let name = match decorator_name_of(self.peek_n(1)) {
+                Some(n) => n,
+                None => {
+                    let (l, c) = self.cur_loc();
+                    return Err(errmsg::at_loc("装饰器名缺失或非法", l, c));
+                }
+            };
+            if !DecoratorRegistry::is_modifier(&name) {
+                let (l, c) = self.cur_loc();
+                let msg = if DecoratorRegistry::is_known(&name) {
+                    format!("普通装饰器 '@{name}' 不能用于此处（仅用于声明）")
+                } else {
+                    errmsg::unknown(&name)
+                };
+                return Err(errmsg::at_loc(&msg, l, c));
+            }
+            self.advance(); // @
+            self.advance(); // 名字 token
+            if self.check(&Token::LParen) {
+                let (l, c) = self.cur_loc();
+                return Err(errmsg::at_loc(
+                    &format!("修饰符装饰器 '@{name}' 不接受参数"),
+                    l,
+                    c,
+                ));
+            }
+            // 同行校验（AC6）
+            if self.check(&Token::Newline) {
+                let (l, c) = self.cur_loc();
+                return Err(errmsg::at_loc(&errmsg::must_inline(&name), l, c));
+            }
+            let m = Modifiers::from_decorator_name(&name, true).map_err(|e| e.to_message())?;
+            // 每目标至多一个（AC8）
+            if slot.is_some() {
+                let (l, c) = self.cur_loc();
+                return Err(errmsg::at_loc(&errmsg::at_most_one(), l, c));
+            }
+            slot = Some(m);
+        }
+        Ok(slot.unwrap_or_else(Modifiers::empty))
+    }
+
+    /// 给定已解析的修饰轴，解析绑定体 `name [: ty] = value`
+    /// （模块顶层 / 语句位「`@` 前置」路径复用）。`is_const` 轴 → `Stmt::Const`。
+    pub(super) fn parse_binding_body(&mut self, mods: Modifiers) -> Result<Stmt, String> {
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            Token::True => "True".to_string(),
+            Token::False => "False".to_string(),
+            t => return Err(format!("Expected variable name, got {:?}", t)),
+        };
+        let ty = if self.check(&Token::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        self.expect(Token::Eq)?;
+        let value = self.parse_maybe_build_value()?;
+        if mods.is_const {
+            Ok(Stmt::Const { name, ty, value, mods })
+        } else {
+            // 装饰器路径：默认不可变，仅显式 `@mut`/`@ref`(Mut) 等为可变
+            // （与关键字 `owned`/`let` 等价；AC1/AC3 逐字节一致）
+            Ok(Stmt::Let {
+                name,
+                mutable: mods.mutability == Mutability::Mut,
+                is_ref: mods.is_ref,
+                is_owned: mods.owned,
+                ty,
+                value,
+                mods,
+            })
+        }
+    }
+
+    fn parse_import(&mut self) -> Result<ImportStmt, String> {
+        self.expect(Token::Import)?;
+        // import macro X（宏命名空间导入，IR 后端同普通 import 处理）
+        if self.check(&Token::Macro) {
+            self.advance();
+        }
+        let mut path = Vec::new();
+        loop {
+            match self.advance() {
+                Token::Ident(n) => path.push(n),
+                // glob 导入: import X::* / import X.* —— * 结束路径
+                Token::Star => break,
+                t => return Err(format!("Expected module name, got {:?}", t)),
+            }
+            // 路径分隔符接受 ::（Rust 风格）或 .（LZ 风格）
+            if self.check(&Token::PathSep) || self.check(&Token::Dot) {
+                // :: 后跟 { 表示花括号形式，跳出循环单独处理
+                let next_is_brace = self.peek_n(1) == &Token::LBrace;
+                if next_is_brace {
+                    break;
+                }
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        // glob 导入: import X::* 或 import X.* → items = ["*"]
+        let items = if (self.check(&Token::PathSep) || self.check(&Token::Dot))
+            && self.peek_n(1) == &Token::Star
+        {
+            self.advance(); // :: 或 .
+            self.advance(); // *
+            vec!["*".to_string()]
+        } else if (self.check(&Token::PathSep) || self.check(&Token::Dot))
+            && self.peek_n(1) == &Token::LBrace
+        {
+            self.advance(); // :: 或 .
+            self.advance(); // {
+            let mut items = Vec::new();
+            loop {
+                match self.advance() {
+                    Token::Ident(n) => items.push(n),
+                    t => return Err(format!("Expected import item, got {:?}", t)),
+                }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RBrace)?;
+            items
+        } else {
+            Vec::new()
+        };
+        let alias = if self.check(&Token::As) {
+            self.advance();
+            match self.advance() {
+                Token::Ident(n) => Some(n),
+                t => return Err(format!("Expected alias, got {:?}", t)),
+            }
+        } else {
+            None
+        };
+        Ok(ImportStmt {
+            path,
+            alias,
+            items,
+            is_from: false,
+        })
+    }
+
+    fn parse_from_import(&mut self) -> Result<ImportStmt, String> {
+        self.expect(Token::From)?;
+        // from macro X import Y（宏命名空间导入，IR 后端同普通 import 处理）
+        if self.check(&Token::Macro) {
+            self.advance();
+        }
+        let mut path = Vec::new();
+        // 支持相对导入: from .utils, from ..common
+        while self.check(&Token::Dot) || self.check(&Token::DotDot) {
+            let seg = match self.advance() {
+                Token::Dot => "self".to_string(),
+                Token::DotDot => "super".to_string(),
+                t => t.to_string(),
+            };
+            path.push(seg);
+        }
+        loop {
+            match self.peek() {
+                Token::Ident(_) => path.push(self.advance().to_string()),
+                Token::PathSep | Token::Dot => {
+                    self.advance();
+                }
+                _ => break,
+            }
+            // 在 ident 之后检查是否是 :: 或 .（统一为路径分隔符）
+            if !self.check(&Token::PathSep)
+                && !self.check(&Token::Dot)
+                && !matches!(self.peek(), Token::Ident(_))
+            {
+                break;
+            }
+        }
+        self.expect(Token::Import)?;
+        let mut items = Vec::new();
+        loop {
+            match self.advance() {
+                Token::Ident(n) => items.push(n),
+                Token::Star => items.push("*".to_string()),
+                t => return Err(format!("Expected import item, got {:?}", t)),
+            }
+            if self.check(&Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(ImportStmt {
+            path,
+            alias: None,
+            items,
+            is_from: true,
+        })
+    }
+
+    fn parse_const(&mut self) -> Result<ConstDef, String> {
+        self.expect(Token::Const)?;
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected const name, got {:?}", t)),
+        };
+        let ty = if self.check(&Token::Colon) {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        self.expect(Token::Eq)?;
+        let value = self.parse_expr()?;
+        Ok(ConstDef {
+            name,
+            ty,
+            value,
+            mutable: false,
+            mods: Modifiers::from_keywords(false, false, false, true, false),
+        })
+    }
+
+    // ─── 函数 ───
+
+    pub(super) fn parse_function(&mut self, no_body: bool) -> Result<Function, String> {
+        // 跳过装饰器 (@unsafe 等)
+        let mut decorators = Vec::new();
+        while self.check(&Token::At) {
+            self.advance(); // consume @
+            let name = match decorator_name_of(self.peek()) {
+                Some(n) => {
+                    self.advance();
+                    n
+                }
+                None => {
+                    let t = self.advance();
+                    return Err(format!("Expected decorator name after @, got {:?}", t));
+                }
+            };
+            decorators.push(Decorator {
+                name,
+                args: Vec::new(),
+            });
+            self.skip_newlines();
+        }
+        // 接受 def / iterator / magic 关键字
+        let is_magic = match self.advance() {
+            Token::Def => false,
+            Token::Iterator => false,
+            Token::Ident(ref s) if s == "magic" => true,
+            t => return Err(format!("Expected def, iterator or magic, got {:?}", t)),
+        };
+        let mut name = match self.advance() {
+            Token::Ident(n) => n,
+            Token::MagicMethod(n) => n,
+            Token::And => "and".to_string(),
+            Token::Or => "or".to_string(),
+            Token::Not => "not".to_string(),
+            Token::In => "in".to_string(),
+            // BUG-347：`check` 被 lexer 恒识别为关键字（测试用），但普通函数/变量位
+            // 也应可用（`def check(x)` / `check(1)`）。在此放行作函数名。
+            Token::Check => "check".to_string(),
+            t => return Err(format!("Expected function name, got {:?}", t)),
+        };
+        // 点号分隔函数名: def config.get(...)
+        while self.check(&Token::Dot) {
+            self.advance();
+            name.push('.');
+            match self.advance() {
+                Token::Ident(seg) => name.push_str(&seg),
+                t => {
+                    return Err(format!(
+                        "Expected identifier after . in function name, got {:?}",
+                        t
+                    ))
+                }
+            }
+        }
+
+        // checker 注解:
+        //   [ps: __Params]  → 定义检查站参数（新的 def/block 自带 ps 参数）
+        //   [checker_name]  → 引用已有检查站（无类型注解）
+        //   [None]          → 显式无检查站
+        let (checker_param, default_checker) = if self.check(&Token::LBrack) {
+            self.advance(); // [
+            let first = match self.advance() {
+                Token::Ident(n) => n,
+                t => {
+                    return Err(format!(
+                        "Expected checker name or ps:Type after [, got {:?}",
+                        t
+                    ))
+                }
+            };
+            if first == "None" {
+                self.expect(Token::RBrack)?;
+                (None, None)
+            } else if self.check(&Token::Colon) {
+                // [ps: __Params] → 定义检查站参数
+                self.advance(); // :
+                self.parse_type()?; // skip __Params type
+                self.expect(Token::RBrack)?;
+                (Some(first), None)
+            } else {
+                // [checker_name] → 引用已有检查站
+                self.expect(Token::RBrack)?;
+                (None, Some(first))
+            }
+        } else {
+            (None, None)
+        };
+
+        // 泛型参数
+        let generics = if self.check(&Token::Lt) {
+            self.parse_generic_params()?
+        } else {
+            Vec::new()
+        };
+
+        // 参数
+        self.expect(Token::LParen)?;
+        let (params, variadic) = self.parse_params()?;
+        self.expect(Token::RParen)?;
+
+        // 返回类型: 使用 `-> type`（与参数类型注解 `:` 区分）
+        // 返回类型与 raises 异常标注：顺序无关（支持 `-> str raises E` 与 `raises E -> str`）
+        self.skip_newlines();
+
+        // 处理下一行缩进：where 子句可能在缩进块内（该 Indent 需在函数体前以 Dedent 配平）
+        let mut consumed_indent_for_body = if self.check(&Token::Indent) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        let mut return_type: Option<Type> = None;
+        let mut raises: Option<Type> = None;
+        // 返回类型与 raises 各最多解析一次，任意顺序
+        let mut sig_guard = 0;
+        loop {
+            if return_type.is_none() && self.check(&Token::Arrow) {
+                self.advance();
+                return_type = Some(self.parse_type()?);
+            } else if raises.is_none() && self.check(&Token::Raises) {
+                self.advance();
+                // BUG-388/391：`raises` 关键字后直接跟 `=`/`:`/`->` 时为裸 raises
+                // （09-错误处理.md §2.2 形式一），旧代码只认 Eq/Colon，漏掉
+                // Arrow 导致 `def f() raises -> int =` 报「Expected type, got Arrow」。
+                // 文档语义：裸 raises「不检查抛出的具体类型」，但 codegen 需一个具体
+                // 错误类型来 emit Result<ok, E> → 默认 str（与 DEMO 常见 `raises str` 一致）。
+                if self.check(&Token::Eq)
+                    || self.check(&Token::Colon)
+                    || self.check(&Token::Arrow)
+                {
+                    raises = Some(Type::Str);
+                } else {
+                    raises = Some(self.parse_type()?);
+                }
+            } else {
+                break;
+            }
+            self.skip_newlines();
+            sig_guard += 1;
+            if sig_guard >= 4 {
+                break;
+            }
+        }
+
+        // where 子句（允许换行和缩进）
+        // def name<T>() -> R where T: Bound
+        //     where T: Bound2 =
+        self.skip_newlines();
+        if self.check(&Token::Indent) {
+            // where 子句自身独占一行缩进（与函数体同列），该 Indent 实为
+            // 函数体块的起始 Indent。将其记为已消费，使函数体按缩进块解析
+            // 并在末尾 expect(Dedent) 配平，避免残留的 Dedent 泄漏到外层
+            //（如 impl 块）提前终止，把后续魔法方法误提升为顶层函数。
+            self.advance(); // skip Indent before where
+            consumed_indent_for_body = true;
+        }
+        let mut where_clause = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&Token::Indent) {
+                // 同上：`where` 在首行、但 `=` 独占缩进行时，此 Indent 为体块起始
+                self.advance(); // skip Indent before where/=
+                consumed_indent_for_body = true;
+            }
+            if self.check(&Token::Where) {
+                where_clause.extend(self.parse_where_clause()?);
+            } else {
+                break;
+            }
+        }
+        // 合并内联约束 (T: Ordered → where_clause)
+        for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
+            where_clause.push(WhereBound {
+                type_param: tp,
+                bounds: bds,
+            });
+        }
+
+        // 函数体
+        let (body, is_abstract) = if no_body {
+            (Vec::new(), false)
+        } else {
+            self.skip_newlines(); // 允许 = 在下一行
+                                  // 支持 `:` 作为 block body 分隔符（def main(): <Indent>）
+            let has_colon_body = self.check(&Token::Colon);
+            if has_colon_body {
+                self.advance(); // consume :
+            } else if self.check(&Token::Dedent) {
+                // 直接遇到 Dedent（trait 抽象方法 `def reset(mut self)` 后无 body）：
+                // 返回抽象方法且不消费 Dedent（否则 trait 块结束符丢失，
+                // 后续 trait/struct 被误当表达式，E0554）
+                return Ok(Function {
+                    name,
+                    generics,
+                    generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                    params,
+                    return_type,
+                    raises,
+                    where_clause,
+                    body: Vec::new(),
+                    is_async: false,
+                    is_abstract: true,
+                    is_iterator: false,
+                    is_magic,
+                    is_comptime: false,
+                    decorators: Vec::new(),
+                    variadic,
+                    checker_param: None,
+                    default_checker: None,
+                });
+            } else if !self.check(&Token::Eq) && !self.check(&Token::Dedent) {
+                // 没有 = body → 抽象方法声明（仅签名）
+                // 但如果下一个是 Dedent 或 Struct 等顶层 token，也视为无 body
+                if matches!(
+                    self.peek(),
+                    Token::Dedent
+                        | Token::Struct
+                        | Token::Enum
+                        | Token::Trait
+                        | Token::Impl
+                        | Token::Def
+                        | Token::Iterator
+                ) {
+                    return Ok(Function {
+                        name,
+                        generics,
+                        generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                        params,
+                        return_type,
+                        raises,
+                        where_clause,
+                        body: Vec::new(),
+                        is_async: false,
+                        is_abstract: true,
+                        is_iterator: false,
+                        is_magic,
+                        is_comptime: false,
+                        decorators: Vec::new(),
+                        variadic,
+                        checker_param: None,
+                        default_checker: None,
+                    });
+                }
+                self.expect(Token::Eq)?;
+            } else {
+                self.advance(); // consume =
+            }
+            self.skip_newlines();
+            if self.check(&Token::DotDot) || self.check(&Token::DotDotDot) {
+                if self.check(&Token::DotDotDot) {
+                    self.advance(); // DotDotDot (3 dots)
+                } else {
+                    self.advance(); // DotDot (2 dots)
+                    if self.check(&Token::Dot) {
+                        self.advance(); // 3rd dot
+                    }
+                }
+                (Vec::new(), true)
+            } else if self.check(&Token::Indent) && !consumed_indent_for_body {
+                self.advance();
+                let b = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                (b, false)
+            } else if consumed_indent_for_body {
+                // where 子句已经消费了外层 Indent，body 在同一个缩进块内
+                let b = self.parse_block()?;
+                (b, false)
+            } else {
+                let s = self.parse_stmt()?;
+                (vec![s], false)
+            }
+        };
+
+        // 消费与 consumed_indent_for_body 匹配的外层 Dedent
+        if consumed_indent_for_body {
+            self.expect(Token::Dedent)?;
+        }
+
+        Ok(Function {
+            name,
+            generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+            params,
+            return_type,
+            raises,
+            where_clause,
+            body,
+            is_async: false,
+            is_abstract,
+            is_iterator: false,
+            is_magic,
+            is_comptime: false,
+            decorators: Vec::new(),
+            variadic,
+            checker_param,
+            default_checker,
+        })
+    }
+
+    fn parse_generic_params(&mut self) -> Result<Vec<String>, String> {
+        self.expect(Token::Lt)?;
+        let mut params = Vec::new();
+        // 内联约束: T: Ordered → 合并进 where_clause
+        // 注意：不能 clear pending_inline_bounds——parse_impl 会调用本函数两次
+        // （impl<A: Iterator> 声明泛型 + Zip<A,B> 类型实参），第二次调用若 clear
+        // 会丢掉第一次收集的 `A: Iterator` 约束（E0220 associated type not found）
+        let mut inline_bounds: Vec<(String, Vec<Type>)> = Vec::new();
+        loop {
+            let name = match self.advance() {
+                Token::Ident(n) => n,
+                t => return Err(format!("Expected generic param, got {:?}", t)),
+            };
+            // type-pack 变长泛型参数（03d-可变参数.md §2.8 方案 B）：`Ts...`
+            // 解析为普通泛型参数 Ts（变长展开能力待 codegen 实现，先保证解析通过）
+            if self.check(&Token::DotDotDot) {
+                self.advance(); // consume ...
+            } else if self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot {
+                self.advance(); // consume ..
+                self.advance(); // consume .
+            }
+            // 内联 trait 约束: T: Ordered + Clone
+            let mut bounds: Vec<Type> = Vec::new();
+            if self.check(&Token::Colon) {
+                self.advance();
+                loop {
+                    let b = self.parse_type()?;
+                    bounds.push(b);
+                    if self.check(&Token::Plus) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if !bounds.is_empty() {
+                inline_bounds.push((name.clone(), bounds));
+            }
+            // 默认类型: T = int（§四）→ 解析并存入 pending_generic_defaults
+            // 注意：需在 push(name) 之前 clone，避免 name 被移动后借用
+            if self.check(&Token::Eq) {
+                self.advance(); // =
+                let default_ty = self.parse_type()?;
+                self.pending_generic_defaults
+                    .push((name.clone(), default_ty));
+            }
+            params.push(name);
+            if self.check(&Token::Comma) {
+                self.advance();
+                continue;
+            }
+            // 闭合 >：Gt 或 Shr（嵌套泛型 >>）
+            if self.check(&Token::Gt) {
+                self.advance();
+                break;
+            }
+            if self.check(&Token::Shr) {
+                self.advance();
+                self.pending_gt += 1;
+                break;
+            }
+            break;
+        }
+        if !inline_bounds.is_empty() {
+            // 用 extend 而非赋值：parse_impl 会调用本函数两次（impl<A: Iterator>
+            // 声明泛型 + Zip<A,B> 类型实参），第二次 inline_bounds 为空时
+            // 不能覆盖第一次收集的 `A: Iterator` 约束（E0220）
+            self.pending_inline_bounds.extend(inline_bounds);
+        }
+        Ok(params)
+    }
+
+    /// 解析函数参数列表，返回 (params, variadic_mode)
+    /// `..` 是变参注入标记（最多 2 次）：单 `..` 无注解 → 注入 args（元素 Any）；
+    /// `..: Tuple<T>` → args-only；`..: Dict<K,V>` → kwargs-only；双 `..` → args + kwargs。
+    /// `/` `*` 是安全分隔符（仅分割、不注入），与 `..` 互斥（见 03d-可变参数.md §三）。
+    fn parse_params(&mut self) -> Result<(Vec<Param>, VariadicMode), String> {
+        let mut params = Vec::new();
+        let mut dotdot_positions: Vec<usize> = Vec::new();
+        let mut dotdot_annots: Vec<Option<Type>> = Vec::new();
+        let mut has_slash_star = false;
+
+        while !self.check(&Token::RParen) {
+            // 检查 `..` 变参注入标记
+            if self.check(&Token::DotDot) {
+                if dotdot_positions.len() >= 2 {
+                    return Err("`..` 最多出现 2 次".to_string());
+                }
+                self.advance(); // 消费 ..
+                dotdot_positions.push(params.len());
+                // 可选类型注解: ..: Tuple<T> / ..: Dict<K,V>
+                let annot = if self.check(&Token::Colon) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                dotdot_annots.push(annot);
+                // `..` 后可选逗号继续
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+                continue;
+            }
+            // `/` `*` 安全分隔符（仅分割，不注入）
+            if self.check(&Token::Slash) || self.check(&Token::Star) {
+                self.advance();
+                has_slash_star = true;
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+                continue;
+            }
+
+            // 参数默认不可变；mut 修饰按需添加
+            let mut is_mut = false;
+            let mut is_owned = false;
+            let mut is_ref = false;
+            let mut is_comptime = false;
+            let mut dec_mods = Modifiers::empty();
+
+            // 参数修饰符（名前修饰：mut / ref / owned / comptime / `@` 修饰符装饰器）
+            loop {
+                match self.peek() {
+                    Token::Mut => {
+                        self.advance();
+                        is_mut = true;
+                    }
+                    Token::Ref => {
+                        self.advance();
+                        is_ref = true;
+                    }
+                    Token::Owned => {
+                        self.advance();
+                        is_owned = true;
+                    }
+                    Token::Comptime => {
+                        self.advance();
+                        is_comptime = true;
+                    }
+                    Token::At => {
+                        // 形参位修饰符装饰器（`def f(@mut n: int)`，AC12）
+                        let d = self.parse_modifier_decorators()?;
+                        dec_mods = dec_mods.merge(d).map_err(|e| e.to_message())?;
+                    }
+                    _ => break,
+                }
+            }
+
+            let name = match self.advance() {
+                Token::Ident(n) => n,
+                Token::Self_ => "self".to_string(),
+                Token::From => "from".to_string(),
+                // guard 是检查站软关键字（stmt.rs `guard cond:`），作参数名时
+                // 豁免为普通标识符（否则 `def f(guard: File)` 报 Parse error）
+                Token::Guard => "guard".to_string(),
+                Token::Underscore => "_".to_string(),
+                t => return Err(format!("Expected param name, got {:?}", t)),
+            };
+
+            // 参数可以无类型注解（默认为泛型推断）
+            let ty = if self.check(&Token::Comma)
+                || self.check(&Token::RParen)
+                || self.check(&Token::DotDot)
+                || self.check(&Token::Slash)
+                || self.check(&Token::Star)
+            {
+                if name == "self" {
+                    Type::Self_
+                } else {
+                    Type::Any
+                }
+            } else {
+                self.expect(Token::Colon)?;
+
+                // 类型前缀修饰符（名后修饰：name: owed str）
+                if self.check(&Token::Owned) {
+                    self.advance();
+                    is_owned = true;
+                }
+                // ref 在类型前缀位置 → 同样支持
+                if self.check(&Token::Ref) {
+                    self.advance();
+                    is_ref = true;
+                }
+
+                self.parse_type()?
+            };
+
+            // 默认值
+            let default = if self.check(&Token::Eq) {
+                self.advance();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+
+            // 关键字产物（参数默认 Implicit，非 Immut —— 避免被 merge 误判为 `let`）
+            let mut kw = Modifiers::empty();
+            if is_mut {
+                kw.mutability = Mutability::Mut;
+            }
+            kw.is_ref = is_ref;
+            kw.owned = is_owned;
+            kw.comptime = is_comptime;
+            let mods = kw.merge(dec_mods).map_err(|e| e.to_message())?;
+            params.push(Param {
+                name,
+                ty,
+                default,
+                is_mut: is_mut || mods.mutability == Mutability::Mut,
+                is_owned: is_owned || mods.owned,
+                is_ref: is_ref || mods.is_ref,
+                comptime: is_comptime || mods.comptime,
+                mods,
+            });
+            if self.check(&Token::Comma) {
+                self.advance();
+            }
+        }
+
+        // `/` `*` 与 `..` 互斥：同一签名不允许混用（文档 §3.3）
+        if has_slash_star && !dotdot_positions.is_empty() {
+            return Err("`/` `*` 与 `..` 不能混用在同一签名".to_string());
+        }
+
+        let variadic = match dotdot_positions.len() {
+            0 => VariadicMode::None,
+            1 => {
+                let at = dotdot_positions[0];
+                let annot = dotdot_annots[0].clone();
+                match annot {
+                    // ..: Dict<K,V> → kwargs-only（值类型 V）
+                    Some(Type::Generic { base, args })
+                        if matches!(*base, Type::Named(ref b) if b == "Dict") =>
+                    {
+                        let value_ty = args.last().cloned();
+                        VariadicMode::KwargsOnly { dotdot_at: at, value_ty }
+                    }
+                    // ..: Tuple<T> → args-only（元素类型 T）
+                    Some(Type::Tuple(ts)) => VariadicMode::ArgsOnly {
+                        dotdot_at: at,
+                        elem_ty: ts.first().cloned(),
+                        elem_tys: ts.clone(),
+                    },
+                    Some(Type::Generic { base, args })
+                        if matches!(*base, Type::Named(ref b) if b == "Tuple") =>
+                    {
+                        VariadicMode::ArgsOnly {
+                            dotdot_at: at,
+                            elem_ty: args.first().cloned(),
+                            elem_tys: args.clone(),
+                        }
+                    }
+                    // .. 无注解 → args-only（元素 Any）
+                    _ => VariadicMode::ArgsOnly { dotdot_at: at, elem_ty: None, elem_tys: vec![] },
+                }
+            }
+            2 => VariadicMode::Both {
+                first_at: dotdot_positions[0],
+                args_elem_ty: dotdot_annots[0]
+                    .clone()
+                    .and_then(|t| match t {
+                        Type::Tuple(ts) => ts.first().cloned(),
+                        Type::Generic { base, args }
+                            if matches!(*base, Type::Named(ref b) if b == "Tuple") =>
+                        {
+                            args.first().cloned()
+                        }
+                        _ => None,
+                    }),
+                second_at: dotdot_positions[1],
+                kwargs_value_ty: dotdot_annots[1]
+                    .clone()
+                    .and_then(|t| match t {
+                        Type::Generic { base, args }
+                            if matches!(*base, Type::Named(ref b) if b == "Dict") =>
+                        {
+                            args.last().cloned()
+                        }
+                        _ => None,
+                    }),
+            },
+            _ => unreachable!(),
+        };
+
+        Ok((params, variadic))
+    }
+
+    /// 解析单个函数参数（名称、类型注解、默认值、修饰符），
+    /// 供 duck 方法签名等需要独立解析单个参数的场景复用。
+    fn parse_single_param(&mut self, allow_default: bool) -> Result<Param, String> {
+        // 参数默认不可变；mut 修饰按需添加
+        let mut is_mut = false;
+        let mut is_owned = false;
+        let mut is_ref = false;
+        let mut is_comptime = false;
+        let mut dec_mods = Modifiers::empty();
+
+        // 参数修饰符（名前修饰：mut / ref / owned / comptime / `@` 修饰符装饰器）
+        loop {
+            match self.peek() {
+                Token::Mut => {
+                    self.advance();
+                    is_mut = true;
+                }
+                Token::Ref => {
+                    self.advance();
+                    is_ref = true;
+                }
+                Token::Owned => {
+                    self.advance();
+                    is_owned = true;
+                }
+                Token::Comptime => {
+                    self.advance();
+                    is_comptime = true;
+                }
+                Token::At => {
+                    let d = self.parse_modifier_decorators()?;
+                    dec_mods = dec_mods.merge(d).map_err(|e| e.to_message())?;
+                }
+                _ => break,
+            }
+        }
+
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            Token::Self_ => "self".to_string(),
+            Token::From => "from".to_string(),
+            // guard 软关键字作参数名豁免（与上方 parse_params 同步）
+            Token::Guard => "guard".to_string(),
+            Token::Underscore => "_".to_string(),
+            t => return Err(format!("Expected param name, got {:?}", t)),
+        };
+
+        // 参数可以无类型注解（默认为泛型推断）
+        let ty = if self.check(&Token::Comma)
+            || self.check(&Token::RParen)
+            || self.check(&Token::DotDot)
+        {
+            if name == "self" {
+                Type::Self_
+            } else {
+                Type::Any
+            }
+        } else {
+            self.expect(Token::Colon)?;
+
+            // 类型前缀修饰符（名后修饰：name: owed str）
+            if self.check(&Token::Owned) {
+                self.advance();
+                is_owned = true;
+            }
+            // ref 在类型前缀位置 → 同样支持
+            if self.check(&Token::Ref) {
+                self.advance();
+                is_ref = true;
+            }
+
+            self.parse_type()?
+        };
+
+        // 默认值
+        let default = if allow_default && self.check(&Token::Eq) {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        // 关键字产物（参数默认 Implicit，非 Immut —— 避免被 merge 误判为 `let`）
+        let mut kw = Modifiers::empty();
+        if is_mut {
+            kw.mutability = Mutability::Mut;
+        }
+        kw.is_ref = is_ref;
+        kw.owned = is_owned;
+        kw.comptime = is_comptime;
+        let mods = kw.merge(dec_mods).map_err(|e| e.to_message())?;
+        Ok(Param {
+            name,
+            ty,
+            default,
+            is_mut: is_mut || mods.mutability == Mutability::Mut,
+            is_owned: is_owned || mods.owned,
+            is_ref: is_ref || mods.is_ref,
+            comptime: is_comptime || mods.comptime,
+            mods,
+        })
+    }
+
+    fn parse_where_clause(&mut self) -> Result<Vec<WhereBound>, String> {
+        self.expect(Token::Where)?;
+        let mut bounds = Vec::new();
+        loop {
+            // where 子句约束参数支持关联类型路径：`I.Item: Add<...>`（06c-trait定义.md §五）
+            // 或 trait 内 `Self.Item: ...`（Self 是 Token::Self_ 特殊 token）。
+            // 读类型参数后若跟 `.` + Ident（关联类型），拼接为 "I.Item" / "Self.Item" 形式
+            let mut type_param = match self.advance() {
+                Token::Ident(n) => n,
+                Token::Self_ => "Self".to_string(),
+                t => return Err(format!("Expected type param in where, got {:?}", t)),
+            };
+            while self.check(&Token::Dot) {
+                self.advance(); // .
+                let seg = match self.advance() {
+                    Token::Ident(s) => s,
+                    t => return Err(format!("Expected assoc type in where, got {:?}", t)),
+                };
+                type_param = format!("{}.{}", type_param, seg);
+            }
+            self.expect(Token::Colon)?;
+
+            let mut trait_bounds = Vec::new();
+            loop {
+                let b = self.parse_type()?;
+                trait_bounds.push(b);
+                if self.check(&Token::Plus) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            bounds.push(WhereBound {
+                type_param,
+                bounds: trait_bounds,
+            });
+
+            // 多个约束用逗号分隔（或换行后继续）
+            if self.check(&Token::Comma) {
+                self.advance();
+                self.skip_newlines();
+            } else {
+                break;
+            }
+        }
+        Ok(bounds)
+    }
+
+    // ─── 测试名称解析 ───
+
+    /// 解析 test/suite 的名称：支持引号形式 `"name"` 或自由文本形式 `name words`
+    pub(super) fn parse_test_name(&mut self) -> Result<String, String> {
+        if matches!(self.peek(), Token::StrLit(_)) {
+            // 引号形式: test "add works":
+            if let Token::StrLit(name) = self.advance() {
+                return Ok(name);
+            }
+            return Err("Expected string literal".into());
+        }
+        // 自由文本形式: test add works:
+        // 收集 test 之后、本行最后一个 : 之前的所有 token 作为名称
+        let mut parts = Vec::new();
+        loop {
+            if self.check(&Token::Colon) {
+                break;
+            }
+            // 任意非冒号 token 拼接为名称（包括关键字、数字等）
+            parts.push(self.advance().to_string());
+        }
+        if parts.is_empty() {
+            return Err("Expected test name".into());
+        }
+        Ok(parts.join(" "))
+    }
+
+    // ─── 类型解析 ───
+
+    pub(super) fn parse_type(&mut self) -> Result<Type, String> {
+        let mut base = match self.advance() {
+            Token::Duck => {
+                // duck { name: Type, name: Type, ... }
+                self.expect(Token::LBrace)?;
+                let mut fields = Vec::new();
+                while !self.check(&Token::RBrace) {
+                    let name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected field name in duck type, got {:?}", t)),
+                    };
+                    self.expect(Token::Colon)?;
+                    let field_ty = self.parse_type()?;
+                    fields.push((name, field_ty));
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(Token::RBrace)?;
+                return Ok(Type::Duck { fields });
+            }
+            Token::Ident(n) => {
+                let base_ty = match n.as_str() {
+                    "int" | "i64" | "i32" | "i16" | "i8" | "u64" | "u32" | "u16"
+                    | "u8" | "usize" | "isize" | "long" | "int64" => Type::Int,
+                    "f64" => Type::F64,
+                    "float" => Type::Float,
+                    "str" => Type::Str,
+                    "bool" => Type::Bool,
+                    "None" => Type::None_,
+                    "Never" => Type::Never,
+                    "Any" => Type::Any,
+                    "fn" => {
+                        // 函数类型: fn(int, str) -> bool
+                        self.expect(Token::LParen)?;
+                        let mut params = Vec::new();
+                        while !self.check(&Token::RParen) {
+                            params.push(self.parse_type()?);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                        let ret = if self.check(&Token::Arrow) {
+                            self.advance();
+                            self.parse_type()?
+                        } else {
+                            Type::Unit
+                        };
+                        return Ok(Type::Fn {
+                            params,
+                            ret: Box::new(ret),
+                        });
+                    }
+                    "Fn" => {
+                        // 高阶函数类型: Fn[P1, P2, ...] -> R（方括号参数列表）。
+                        // 此前 `Fn[int]` 未被识别，解析 f: Fn[int] -> int 时 `Fn` 落成
+                        // Named 返回，`[int]` 残留 → 调用方 parse_param 报
+                        // 「Expected param name, got LBrack」。
+                        if !self.check(&Token::LBrack) {
+                            return Ok(Type::Named("Fn".to_string()));
+                        }
+                        self.advance(); // consume [
+                        let mut params = Vec::new();
+                        if !self.check(&Token::RBrack) {
+                            loop {
+                                params.push(self.parse_type()?);
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        self.expect(Token::RBrack)?;
+                        let ret = if self.check(&Token::Arrow) {
+                            self.advance();
+                            self.parse_type()?
+                        } else {
+                            Type::Unit
+                        };
+                        return Ok(Type::Fn {
+                            params,
+                            ret: Box::new(ret),
+                        });
+                    }
+                    "Simd" => {
+                        // Simd[T, N] — SIMD 向量类型
+                        self.expect(Token::Lt)?;
+                        let elem = self.parse_type()?;
+                        self.expect(Token::Comma)?;
+                        let width = match self.advance() {
+                            Token::IntLit(n) => {
+                                if n < 1 || n > 64 {
+                                    return Err(format!(
+                                        "Simd width must be between 1 and 64, got {}",
+                                        n
+                                    ));
+                                }
+                                n as usize
+                            }
+                            t => {
+                                return Err(format!("Expected integer width for Simd, got {:?}", t))
+                            }
+                        };
+                        self.expect(Token::Gt)?;
+                        return Ok(Type::Simd {
+                            elem: Box::new(elem),
+                            width,
+                        });
+                    }
+                    _ => Type::Named(n),
+                };
+                // 泛型参数 List<int>, Dict<K,V>, Option<T>, Result<T,E>
+                // 也支持 Tuple<T1, T2, ..> 中的 `..` 通配（03d §2.3：约束位置参数各自类型）
+                if self.check(&Token::Lt) {
+                    self.advance(); // consume <
+                    let mut inner = Vec::new();
+                    // 空泛型实参 `Container<>`（使用声明的默认类型，TY-005）：直接闭合
+                    if self.check(&Token::Gt) {
+                        self.advance();
+                        let base = base_ty;
+                        return Ok(Type::Generic {
+                            base: Box::new(base),
+                            args: Vec::new(),
+                        });
+                    }
+                    loop {
+                        if self.check(&Token::DotDot) {
+                            // `..` 通配：位置参数数量不限，push 占位 Any 后继续
+                            self.advance();
+                            inner.push(Type::Any);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Gt) {
+                                self.advance();
+                                break;
+                            }
+                            continue;
+                        }
+                        inner.push(self.parse_type()?);
+                        // 命名泛型参数（关联类型绑定）：`Add<Output = I.Item>`
+                        // （06c-trait定义.md §五：trait 泛型用关联类型绑定）——
+                        // `Output = Type` 形式：把整个绑定作为 Named("Output = I.Item")
+                        // 保留（codegen 渲染为 `Add<Output = I::Item>`），
+                        // 而不是仅记录 Output 导致 E0425 cannot find type `Output`
+                        if self.check(&Token::Eq) {
+                            let name = inner.pop().unwrap_or(Type::Any);
+                            self.advance(); // consume =
+                            let value = self.parse_type()?; // 关联类型值
+                            inner.push(Type::Named(format!(
+                                "{} = {}",
+                                name.to_string(),
+                                value.to_string()
+                            )));
+                        }
+                        // type-pack 元素 `Ts...`（03d §2.8 方案 B）：消费尾部 `...`
+                        // （parse_type 解析 Ident(Ts) 后残留 `...`）
+                        // 注意：词法器把 `...` 拆为 DotDot + Dot 两个 token（lexer.rs
+                        // 仅识别 `..`），因此 DotDotDot 分支实际不可达；真正生效的是
+                        // else-if 的 DotDot + Dot 分支。两者都要做标记：
+                        // 将最后一个实参改为 Named("Ts...")（带省略号后缀），
+                        // 供 `..: Tuple<Ts...>` 变参注入在 builder 阶段识别为 type pack
+                        // （此前 `...` 被静默消费，Tuple<Ts...> 与 Tuple<T> 无法区分，
+                        // 导致异质元组被降级为 &[Ts] 同构切片 → E0308）
+                        if self.check(&Token::DotDotDot) {
+                            self.advance(); // consume ...
+                            if let Some(last) = inner.last_mut() {
+                                *last = Type::Named(format!("{}...", last.to_string()));
+                            }
+                        } else if self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot {
+                            self.advance(); // consume ..
+                            self.advance(); // consume .
+                            if let Some(last) = inner.last_mut() {
+                                *last = Type::Named(format!("{}...", last.to_string()));
+                            }
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                        // 闭合 >：可能是 Gt 或 Shr（嵌套泛型 >>）
+                        if self.check(&Token::Gt) {
+                            self.advance();
+                            break;
+                        }
+                        if self.check(&Token::Shr) {
+                            // >> 分裂：消耗一个 >，留一个 pending
+                            self.advance();
+                            self.pending_gt += 1;
+                            break;
+                        }
+                        if self.check(&Token::Ge) {
+                            // >= 情况（不应出现在类型中，但防御性处理）
+                            self.advance();
+                            break;
+                        }
+                    }
+                    // 识别特殊容器类型
+                    let generic_ty = match &base_ty {
+                        Type::Named(name) if name == "Option" && inner.len() == 1 => {
+                            Type::Option(Box::new(inner.into_iter().next().unwrap()))
+                        }
+                        Type::Named(name) if name == "Result" && inner.len() == 2 => {
+                            let mut iter = inner.into_iter();
+                            Type::Result {
+                                ok: Box::new(iter.next().unwrap()),
+                                err: Box::new(iter.next().unwrap()),
+                            }
+                        }
+                        _ => Type::Generic {
+                            base: Box::new(base_ty),
+                            args: inner,
+                        },
+                    };
+                    // 泛型类型后也支持 ? 后缀: List<T>? → Optional<List<T>>
+                    if self.check(&Token::Question) {
+                        self.advance();
+                        return Ok(Type::Optional(Box::new(generic_ty)));
+                    }
+                    return Ok(generic_ty);
+                }
+                // LZ 方括号泛型语法: Iterator[int], List[str] 等（与 <T> 等价）。
+                // 探针 generator.lz 返回类型 `Iterator[int]` 此前落成 Named("Iterator")
+                // 残留 `[int]` → 调用方报「Expected Eq, got LBrack」。
+                if self.check(&Token::LBrack) {
+                    self.advance(); // consume [
+                    let mut inner = Vec::new();
+                    if !self.check(&Token::RBrack) {
+                        loop {
+                            inner.push(self.parse_type()?);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RBrack)?;
+                    let generic_ty = match &base_ty {
+                        Type::Named(name) if name == "Option" && inner.len() == 1 => {
+                            Type::Option(Box::new(inner.into_iter().next().unwrap()))
+                        }
+                        Type::Named(name) if name == "Result" && inner.len() == 2 => {
+                            let mut iter = inner.into_iter();
+                            Type::Result {
+                                ok: Box::new(iter.next().unwrap()),
+                                err: Box::new(iter.next().unwrap()),
+                            }
+                        }
+                        _ => Type::Generic {
+                            base: Box::new(base_ty),
+                            args: inner,
+                        },
+                    };
+                    if self.check(&Token::Question) {
+                        self.advance();
+                        return Ok(Type::Optional(Box::new(generic_ty)));
+                    }
+                    return Ok(generic_ty);
+                }
+                base_ty
+            }
+            Token::Ref => {
+                let inner = self.parse_type()?;
+                Type::Ref(Box::new(inner))
+            }
+            Token::Mut => {
+                let inner = self.parse_type()?;
+                Type::MutRef(Box::new(inner))
+            }
+            Token::Self_ => Type::Self_,
+            Token::LParen => {
+                // 函数类型 (T) -> U 或元组类型 (T, U)
+                let mut inner = Vec::new();
+                while !self.check(&Token::RParen) {
+                    inner.push(self.parse_type()?);
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(Token::RParen)?;
+                if self.check(&Token::Arrow) {
+                    self.advance();
+                    let ret = self.parse_type()?;
+                    Type::Fn {
+                        params: inner,
+                        ret: Box::new(ret),
+                    }
+                } else {
+                    Type::Tuple(inner)
+                }
+            }
+            Token::Amp => {
+                let inner = self.parse_type()?;
+                Type::Ref(Box::new(inner))
+            }
+            t => return Err(format!("Expected type, got {:?}", t)),
+        };
+
+        // 支持路径类型: Self.Item 或 std.collections.List<T>
+        while self.check(&Token::Dot) {
+            self.advance(); // consume .
+            let next = match self.advance() {
+                Token::Ident(n) => n,
+                t => {
+                    return Err(format!(
+                        "Expected identifier after . in type path, got {:?}",
+                        t
+                    ))
+                }
+            };
+            // 构建路径类型: Self.Item → Named("Self.Item")
+            let path = match &base {
+                Type::Named(n) => format!("{}.{}", n, next),
+                Type::Self_ => format!("Self.{}", next),
+                _ => format!("{}.{}", "<>", next), // 回退
+            };
+            base = Type::Named(path);
+            // 检查泛型参数: Self.Item<T>
+            if self.check(&Token::Lt) {
+                self.advance();
+                let mut inner = Vec::new();
+                loop {
+                    inner.push(self.parse_type()?);
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                    if self.check(&Token::Gt) {
+                        self.advance();
+                        break;
+                    }
+                }
+                base = Type::Generic {
+                    base: Box::new(base),
+                    args: inner,
+                };
+            }
+        }
+
+        // int? 语法糖：int? → Option<int>, str? → Option<str>
+        if self.check(&Token::Question) {
+            self.advance();
+            return Ok(Type::Optional(Box::new(base)));
+        }
+
+        Ok(base)
+    }
+
+    // ─── struct / enum ───
+
+    pub fn parse_struct_like(&mut self, is_enum: bool, is_case: bool) -> Result<StructDef, String> {
+        self.advance(); // skip struct/enum
+        let mut name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected name, got {:?}", t)),
+        };
+
+        let mut generics = if self.check(&Token::Lt) {
+            self.parse_generic_params()?
+        } else {
+            Vec::new()
+        };
+
+        // case struct Point(x: int, y: int) —— 圆括号字段形式（无 = / : 分隔符）
+        if self.check(&Token::LParen) {
+            self.advance(); // consume (
+            let mut fields = Vec::new();
+            while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                let fname = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected field name, got {:?}", t)),
+                };
+                self.expect(Token::Colon)?;
+                let fty = self.parse_type()?;
+                fields.push(Field {
+                    name: fname,
+                    ty: fty,
+                    default: None,
+                });
+                if self.check(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RParen)?;
+            // case struct Point(x, y) = ...  或  struct Counter(value: int): <体>
+            // 后者（BUG-371: struct_methods.lz）冒号开体，落到底部 Indent 体路径继续解析
+            // 方法；此前直接 return 把 `:` 留给顶层解析 → 「Unexpected token at top level: Colon」
+            if !self.check(&Token::Colon) {
+                return Ok(StructDef {
+                    name,
+                    generics,
+                    generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
+                    generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                    fields,
+                    methods: Vec::new(),
+                    magic_methods: Vec::new(),
+                    is_enum: false,
+                    is_case,
+                    decorators: Vec::new(),
+                    repr_attr: None,
+                });
+            }
+            self.advance(); // consume :
+            self.skip_newlines();
+            // 落入下方 Indent 体路径（fields 已收集，方法体继续解析）
+            self.paren_fields = Some(fields);
+            self.paren_generics = Some(generics.clone());
+            self.paren_generic_bounds =
+                Some(std::mem::take(&mut self.pending_inline_bounds));
+            self.paren_generic_defaults =
+                Some(std::mem::take(&mut self.pending_generic_defaults));
+            self.paren_name = Some(name.clone());
+        } else {
+            self.paren_fields = None;
+            self.paren_name = None;
+            self.paren_generics = None;
+            self.paren_generic_bounds = None;
+            self.paren_generic_defaults = None;
+        }
+
+        // 支持 = : =: 三种分隔符
+        // enum Color: Red, Green, Blue  或  enum Color = Red, Green, Blue
+        // struct Box =: body ...  (构建块)
+        self.skip_newlines(); // 允许分隔符前换行（如文档注释后的空行）
+        // BUG-371：LParen 分支已消费 `:` 并暂存 paren_*，当前 token 应为 Indent，
+        // 不再走 Eq/Colon 分隔符校验。
+        if self.paren_name.is_none()
+            && !self.check(&Token::Eq)
+            && !self.check(&Token::Colon)
+            && !self.check(&Token::BuildAssign)
+        {
+            let t = self.advance();
+            return Err(format!(
+                "Expected Eq, Colon or BuildAssign, got {:?} at pos {}",
+                t, self.pos
+            ));
+        }
+        self.skip_newlines();
+        // BUG-371：LParen 分支已在 paren_* 里暂存字段并消费了 `:`，此处不再消费分隔符
+        //（否则会把 Indent 吞掉，落入单行分支）。
+        if self.paren_name.is_none() {
+            self.advance(); // consume = : or =:
+            self.skip_newlines();
+        }
+
+        // 单行 struct: struct Box<T> = value: T
+        // 或 struct Point = x: f64, y: f64
+        if !self.check(&Token::Indent) {
+            let mut fields = Vec::new();
+            let methods = Vec::new();
+            // 解析单行字段（支持逗号分隔多个字段）
+            if !self.check(&Token::Newline)
+                && !self.check(&Token::Dedent)
+                && !self.check(&Token::Eof)
+            {
+                loop {
+                    // BUG-343：单行 struct 也允许 `mut` 字段前缀
+                    if self.check(&Token::Mut) {
+                        self.advance();
+                    }
+                    let f_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "struct 字段需换行缩进书写，或单行用逗号分隔。当前: {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    self.expect(Token::Colon)?;
+                    let f_type = self.parse_type()?;
+                    // 字段默认值：`port: int = 8080`（struct_default.lz）
+                    let f_default = if self.check(&Token::Eq) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    fields.push(Field {
+                        name: f_name,
+                        ty: f_type,
+                        default: f_default,
+                    });
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                        // 跳过逗号后的空格/换行（检查是否还有下一个字段）
+                        self.skip_newlines();
+                        if self.check(&Token::Newline)
+                            || self.check(&Token::Dedent)
+                            || self.check(&Token::Eof)
+                        {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+            return Ok(StructDef {
+                name,
+                generics,
+                generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
+                generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+                fields,
+                methods,
+                magic_methods: Vec::new(),
+                is_enum,
+                is_case,
+                decorators: Vec::new(),
+                repr_attr: None,
+            });
+        }
+
+        self.expect(Token::Indent)?;
+        let mut fields = Vec::new();
+        // BUG-371：`struct Counter(value: int):` 冒号开体 —— 字段/名/泛型已由
+        // LParen 分支解析并暂存到 paren_*，此处接管而不是重开新字段列表。
+        let from_paren = self.paren_name.take();
+        if let (Some(pn), Some(pf), Some(pg), Some(pb), Some(pd)) = (
+            from_paren,
+            self.paren_fields.take(),
+            self.paren_generics.take(),
+            self.paren_generic_bounds.take(),
+            self.paren_generic_defaults.take(),
+        ) {
+            name = pn;
+            fields = pf;
+            generics = pg;
+            self.pending_inline_bounds = pb;
+            self.pending_generic_defaults = pd;
+        }
+        let mut methods = Vec::new();
+        let mut magic_methods = Vec::new();
+        let mut repr_attr: Option<String> = None;
+
+        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            self.skip_newlines();
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
+
+            // __slots__ = "C" | "packed" | "align(N)" | "transparent"  → #[repr(...)]
+            if matches!(self.peek(), Token::MagicMethod(_)) {
+                let id = self.peek().to_string();
+                if id == "__slots__" {
+                    self.advance(); // consume __slots__
+                    self.expect(Token::Eq)?;
+                    let val = match self.advance() {
+                        Token::StrLit(s) => s,
+                        Token::Ident(s) => s, // 允许未加引号: __slots__ = C
+                        t => {
+                            return Err(format!(
+                                "Expected string literal for __slots__, got {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    // 验证 repr 值
+                    let valid = val == "C"
+                        || val == "packed"
+                        || val == "transparent"
+                        || val.starts_with("align(");
+                    if !valid {
+                        return Err(format!("Invalid __slots__ value '{}': expected 'C', 'packed', 'align(N)', or 'transparent'", val));
+                    }
+                    repr_attr = Some(val);
+                    self.skip_newlines();
+                    continue;
+                }
+            }
+
+            // magic __new__(...) / magic __xxx__(...) → 解析为 Function
+            if let Token::Ident(ref name) = self.peek() {
+                if name == "magic" && matches!(self.peek_n(1), Token::MagicMethod(_)) {
+                    self.advance(); // magic
+                    let magic_name = match self.advance() {
+                        Token::MagicMethod(n) => n,
+                        t => return Err(format!("Expected magic method name, got {:?}", t)),
+                    };
+                    // 解析参数列表
+                    let (params, variadic) = if self.check(&Token::LParen) {
+                        self.advance();
+                        let result = self.parse_params()?;
+                        self.expect(Token::RParen)?;
+                        result
+                    } else {
+                        (Vec::new(), VariadicMode::None)
+                    };
+                    // 解析返回类型
+                    let return_type = if self.check(&Token::Arrow) {
+                        self.advance();
+                        Some(self.parse_type()?)
+                    } else {
+                        None
+                    };
+                    // 解析函数体: : indent body dedent 或 = expr
+                    let body = if self.check(&Token::Colon) {
+                        self.advance();
+                        self.skip_newlines();
+                        self.expect(Token::Indent)?;
+                        let body = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        body
+                    } else if self.check(&Token::Eq) {
+                        self.advance();
+                        self.skip_newlines();
+                        if self.check(&Token::Indent) {
+                            self.advance();
+                            let body = self.parse_block()?;
+                            self.expect(Token::Dedent)?;
+                            body
+                        } else {
+                            let expr = self.parse_expr()?;
+                            vec![Stmt::Return(Some(expr))]
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    magic_methods.push(Function {
+                        name: magic_name.clone(),
+                        generics: Vec::new(),
+                        generic_defaults: Vec::new(),
+                        params,
+                        return_type,
+                        raises: None,
+                        where_clause: Vec::new(),
+                        body,
+                        is_async: false,
+                        is_abstract: false,
+                        is_iterator: false,
+                        is_magic: false,
+                        is_comptime: false,
+                        decorators: Vec::new(),
+                        variadic,
+                        checker_param: None,
+                        default_checker: None,
+                    });
+                    self.skip_newlines();
+                    continue;
+                }
+            }
+
+            match self.peek() {
+                Token::Def => {
+                    methods.push(self.parse_function(false)?);
+                }
+                Token::Iterator => {
+                    let mut f = self.parse_function(false)?;
+                    f.is_iterator = true;
+                    methods.push(f);
+                }
+                Token::Async => {
+                    self.advance();
+                    let mut f = self.parse_function(false)?;
+                    f.is_async = true;
+                    methods.push(f);
+                }
+                Token::Ident(_) | Token::MagicMethod(_) | Token::True | Token::False => {
+                    let f_name = self.advance().to_string();
+                    // 处理 enum 变体: Some(T), Ok(T), Err(E), Circle(x: f64, y: f64)
+                    let f_type = if self.check(&Token::LParen) {
+                        self.advance();
+                        // 判断是否为关键字参数风格（命名字段）: Circle(x: f64, y: f64)
+                        let has_named_fields = matches!(self.peek(), Token::Ident(_))
+                            && self.peek_n(1) == &Token::Colon;
+                        if has_named_fields {
+                            // 命名字段变体: Circle(x: f64, y: f64) → Record[(name, ty)]
+                            // （保留字段名，供 IR/codegen 生成 Rust 结构体变体与命名字段访问）
+                            let mut named_fields = Vec::new();
+                            while !self.check(&Token::RParen) {
+                                let fname = match self.advance() {
+                                    Token::Ident(n) => n,
+                                    t => return Err(format!("Expected field name, got {:?}", t)),
+                                };
+                                self.expect(Token::Colon)?;
+                                let fty = self.parse_type()?;
+                                named_fields.push((fname, fty));
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                }
+                            }
+                            self.expect(Token::RParen)?;
+                            // 复用 Duck 结构化字段类型编码命名字段变体字段（types::Type 无 Record）
+                            Type::Duck {
+                                fields: named_fields,
+                            }
+                        } else {
+                            let mut types = Vec::new();
+                            while !self.check(&Token::RParen) {
+                                types.push(self.parse_type()?);
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                }
+                            }
+                            self.expect(Token::RParen)?;
+                            if types.len() == 1 {
+                                types.into_iter().next().unwrap()
+                            } else {
+                                Type::Tuple(types) // 多字段变体: Color(f64, f64, f64)
+                            }
+                        }
+                    } else if self.check(&Token::Colon) {
+                        self.advance();
+                        self.parse_type()?
+                    } else if matches!(self.peek(), Token::Ident(_)) {
+                        // G2: 字段/变体缺冒号（`struct P { x int }`）→ 报错而非容错
+                        let t = self.peek().clone();
+                        return Err(format!(
+                            "字段/变体 `{:?}` 缺少冒号 `:`（期望形如 `{:?}: Type`）",
+                            t, t
+                        ));
+                    } else {
+                        Type::Unit // unit variant, no type
+                    };
+                    let default = if self.check(&Token::Eq) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    fields.push(Field {
+                        name: f_name,
+                        ty: f_type,
+                        default,
+                    });
+                }
+                // BUG-343：struct 字段声明允许 `mut` 前缀（`mut count: int`）。
+                // Rust 中字段可变性由 `&mut self` 决定，字段上的 `mut` 是语法糖/标记，
+                // 这里吞掉 `mut` 后按普通字段解析（Field 无 is_mut 字段）。
+                Token::Mut => {
+                    self.advance(); // consume `mut`
+                    let f_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => {
+                            return Err(format!(
+                                "Expected field name after `mut`, got {:?}",
+                                t
+                            ))
+                        }
+                    };
+                    self.expect(Token::Colon)?;
+                    let f_type = self.parse_type()?;
+                    let default = if self.check(&Token::Eq) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    fields.push(Field {
+                        name: f_name,
+                        ty: f_type,
+                        default,
+                    });
+                }
+                _ => {
+                    break;
+                }
+            }
+            self.skip_newlines();
+        }
+
+        // 消费所有嵌套块的 Dedent（struct/impl/trait 嵌套时可能有多层）
+        while self.check(&Token::Dedent) {
+            self.advance();
+            self.skip_newlines();
+        }
+        Ok(StructDef {
+            name,
+            generics,
+            generic_bounds: std::mem::take(&mut self.pending_inline_bounds),
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+            fields,
+            methods,
+            magic_methods,
+            is_enum,
+            is_case,
+            decorators: Vec::new(),
+            repr_attr,
+        })
+    }
+
+    // ─── trait ───
+
+    fn parse_trait(&mut self) -> Result<TraitDef, String> {
+        self.advance(); // skip trait
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected trait name, got {:?}", t)),
+        };
+        let generics = if self.check(&Token::Lt) {
+            self.parse_generic_params()?
+        } else if self.check(&Token::LBrack) {
+            // LZ 方括号泛型语法: trait Container[T] = ...（与 <T> 等价，
+            // 探针 trait_generic.lz 用方括号；此前报 Expected Eq, got LBrack）
+            self.advance(); // consume [
+            let mut params = Vec::new();
+            while !self.check(&Token::RBrack) {
+                let n = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected generic param name, got {:?}", t)),
+                };
+                params.push(n);
+                if self.check(&Token::Colon) {
+                    // 可选 bound: trait Container[T: Clone]
+                    self.advance();
+                    let _ = self.parse_type()?;
+                }
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+            }
+            self.expect(Token::RBrack)?;
+            params
+        } else {
+            Vec::new()
+        };
+        // 支持 trait Name: Bound1 + Bound2 =  (trait bounds/supertraits)
+        // 或 trait Name =  (无 bounds)
+        // 或 trait Name[: Supertrait]: <缩进块>  (冒号直接开体，Rust 风格)：
+        // 探针 trait_generic.lz 用 `trait Container[T]:`，冒号后无 `=`
+        // 直接跟缩进体；此时 expect(Eq) 会失败 → 需放行。
+        let mut supertraits = Vec::new();
+        let mut colon_opens_body = false;
+        if self.check(&Token::Colon) {
+            self.advance(); // consume :
+                            // 解析 supertrait 类型直到 =（trait DoubleEndedIterator: Iterator）
+            loop {
+                if self.check(&Token::Eq)
+                    || self.check(&Token::Eof)
+                    || self.check(&Token::Newline)
+                    || self.check(&Token::Indent)
+                {
+                    if self.check(&Token::Newline) || self.check(&Token::Indent) {
+                        colon_opens_body = true; // `trait X:` + 缩进体
+                    }
+                    break;
+                }
+                let st = self.parse_type()?;
+                supertraits.push(st);
+                if self.check(&Token::Plus) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+        if self.check(&Token::Eq) {
+            self.advance(); // consume =
+        } else if !colon_opens_body {
+            // 既无 `=` 也无 `:`+体 → 报错（原语义：expect(Eq)）
+            // 但若冒号后是 supertrait 列表则 colon_opens_body 不为 true，
+            // 此时必须要有 `=`
+            let t = self.peek().clone();
+            return Err(format!(
+                "Expected Eq after trait declaration, got {:?}",
+                t
+            ));
+        }
+        self.skip_newlines();
+        self.expect(Token::Indent)?;
+
+        let mut methods = Vec::new();
+        let mut fields = Vec::new();
+        // trait 内声明的关联类型（§五 `type Item`）收集
+        let mut assoc_types = Vec::new();
+
+        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            self.skip_newlines();
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
+
+            match self.peek() {
+                Token::Def | Token::Iterator => {
+                    // trait 方法：既可能是抽象声明（`def measure(self) -> int` 无 body，
+                    // parse_function 内部检测 Dedent 等返回 is_abstract），也可能是
+                    // 默认实现（`def describe(self) -> str = f"..."` 带 body）。
+                    // 用 no_body=false 让两种形态都正确解析。
+                    let f = self.parse_function(false)?;
+                    methods.push(f);
+                }
+                Token::Ident(ref kw) if kw == "type" => {
+                    // trait 关联类型声明（§五）: `type Item` 或带 bound 的
+                    // `type Iter: Iterator<Item = Self.Item>`
+                    self.advance(); // type
+                    let assoc_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected assoc type name in trait, got {:?}", t)),
+                    };
+                    assoc_types.push(assoc_name);
+                    // 可选 bound：`type Iter: Iterator<...>` — 消费 bound 类型
+                    // （bound 的完整 Rust 输出暂由关联类型使用处承担）
+                    if self.check(&Token::Colon) {
+                        self.advance(); // :
+                        let _ = self.parse_type()?;
+                    }
+                }
+                Token::Ident(_) => {
+                    let f_name = self.advance().to_string();
+                    if self.check(&Token::Colon) {
+                        self.advance();
+                        let f_type = self.parse_type()?;
+                        fields.push(Field {
+                            name: f_name,
+                            ty: f_type,
+                            default: None,
+                        });
+                    }
+                }
+                _ => {
+                    break;
+                }
+            }
+            self.skip_newlines();
+        }
+        while self.check(&Token::Dedent) {
+            self.advance();
+            self.skip_newlines();
+        }
+        Ok(TraitDef {
+            name,
+            generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+            supertraits,
+            methods,
+            fields,
+            assoc_types,
+        })
+    }
+
+    // ─── impl ───
+
+    fn parse_impl(&mut self) -> Result<ImplDef, String> {
+        self.advance(); // skip impl
+
+        let mut generics = if self.check(&Token::Lt) {
+            self.parse_generic_params()?
+        } else {
+            Vec::new()
+        };
+        // 立即转存头部内联约束（`impl<A: Iterator> ...`）：后续解析 impl 方法体
+        // 时 parse_function 会 take 清空 pending_inline_bounds，导致 `A: Iterator`
+        // 约束丢失（E0220 associated type not found）
+        let head_inline_bounds = std::mem::take(&mut self.pending_inline_bounds);
+
+        let first_name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected type/trait name, got {:?}", t)),
+        };
+
+        let (trait_name, type_name) = if self.check(&Token::For) {
+            self.advance();
+            let tn = match self.advance() {
+                Token::Ident(n) => n,
+                t => return Err(format!("Expected type name, got {:?}", t)),
+            };
+            (Some(first_name), tn)
+        } else {
+            (None, first_name)
+        };
+
+        // 支持 impl 类型上的泛型参数: impl<T> Box<T> =
+        // 也支持 `impl Box<T>` 形式（类型名后的泛型参数一并归入 generics）。
+        // 注意：`impl<T> Iterator for Once<T>` 中 Once<T> 的 T 是 impl 泛型 T 的
+        // 使用，不能重复收集（否则生成 impl<T, T> for Once<T, T>，E0403/E0107）；
+        // 仅当类型参数名不在已有 generics 中时才收集（如 `impl Box<T>` 无 impl 泛型）
+        if self.check(&Token::Lt) {
+            let mut impl_gen = self.parse_generic_params()?;
+            for g in impl_gen.drain(..) {
+                if !generics.iter().any(|x| x == &g) {
+                    generics.push(g);
+                }
+            }
+        }
+
+        // 支持 = 和 : 两种分隔符；也支持 where 子句位于分隔符之前
+        // （换行/缩进形式，与 parse_function 一致）：
+        //   impl<I: Iterator, J: Iterator, B> Iterator for FlatMap<I, J, B>
+        //       where J: Iterator<Item = B>
+        //       =
+        let mut pre_where = Vec::new();
+        let mut consumed_indent_for_where = false;
+        loop {
+            self.skip_newlines();
+            if self.check(&Token::Indent) {
+                self.advance(); // skip Indent before where
+                consumed_indent_for_where = true;
+            }
+            if self.check(&Token::Where) {
+                pre_where.extend(self.parse_where_clause()?);
+            } else {
+                break;
+            }
+        }
+        if !self.check(&Token::Eq) && !self.check(&Token::Colon) {
+            let t = self.advance();
+            return Err(format!(
+                "Expected Eq or Colon, got {:?} at pos {}",
+                t, self.pos
+            ));
+        }
+        self.advance(); // consume = or :
+        self.skip_newlines();
+        if !consumed_indent_for_where {
+            self.expect(Token::Indent)?;
+        }
+
+        let mut methods = Vec::new();
+        let mut assoc_type_bindings = Vec::new();
+        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            self.skip_newlines();
+            if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                break;
+            }
+            // impl 块中的关联类型绑定: type Item = int（§五）
+            if let Token::Ident(ref s) = self.peek() {
+                if s == "type" {
+                    self.advance(); // consume 'type'
+                    let bind_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected assoc type name in impl, got {:?}", t)),
+                    };
+                    self.expect(Token::Eq)?;
+                    let bind_ty = self.parse_type()?;
+                    assoc_type_bindings.push((bind_name, bind_ty));
+                    continue;
+                }
+            }
+            methods.push(self.parse_function(false)?);
+            self.skip_newlines();
+        }
+        while self.check(&Token::Dedent) {
+            self.advance();
+            self.skip_newlines();
+        }
+
+        let mut where_clause = if self.check(&Token::Where) {
+            self.parse_where_clause()?
+        } else {
+            Vec::new()
+        };
+        // 合并分隔符之前的 where 子句（impl ... where ... = 换行形式）
+        where_clause.splice(0..0, pre_where);
+        // 合并 impl 头部内联约束（`impl<A: Iterator>` 的 A: Iterator，已提前转存
+        // 避免被 parse_function 清空）与后续内联约束
+        for (tp, bds) in head_inline_bounds {
+            where_clause.push(WhereBound {
+                type_param: tp,
+                bounds: bds,
+            });
+        }
+        for (tp, bds) in std::mem::take(&mut self.pending_inline_bounds) {
+            where_clause.push(WhereBound {
+                type_param: tp,
+                bounds: bds,
+            });
+        }
+
+        Ok(ImplDef {
+            trait_name,
+            type_name,
+            generics,
+            generic_defaults: std::mem::take(&mut self.pending_generic_defaults),
+            where_clause,
+            methods,
+            assoc_type_bindings,
+        })
+    }
+
+    /// 解析 duck 声明: duck Name<T> = def method(self) -> Ret .field: Type ...
+    fn parse_duck_def(&mut self) -> Result<DuckDef, String> {
+        self.advance(); // duck keyword
+        let name = match self.advance() {
+            Token::Ident(n) => n,
+            t => return Err(format!("Expected duck name, got {:?}", t)),
+        };
+        // 可选的泛型参数: duck Mapper<T, R> = ...
+        let generics = if self.check(&Token::Lt) {
+            self.parse_generic_params()?
+        } else {
+            Vec::new()
+        };
+        // 可选的嵌套约束: duck D<T> where T: Iterable = ...（§2.4）
+        let where_clause = if self.check(&Token::Where) {
+            self.parse_where_clause()?
+        } else {
+            Vec::new()
+        };
+        self.expect(Token::Eq)?;
+        self.skip_newlines();
+        self.expect(Token::Indent)?;
+
+        let mut methods = Vec::new();
+        let mut fields = Vec::new();
+        let mut assoc_types = Vec::new();
+        let mut satisfies = Vec::new();
+        let mut sealed = false;
+        let mut match_rules = Vec::new();
+        let mut param_reqs = Vec::new();
+
+        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+            // default 修饰（§11.4③）：`default def fallback(self) -> ()`
+            // 必须在软关键字行判断之前消费，否则 default 会走普通标识符分支
+            let mut is_default = false;
+            if let Token::Ident(kw) = self.peek() {
+                if kw == "default" && self.peek_n(1) == &Token::Def {
+                    self.advance();
+                    is_default = true;
+                }
+            }
+            // ── 软关键字行（§11）：satisfies / sealed / match / require / optional ──
+            if let Token::Ident(kw) = self.peek() {
+                match kw.as_str() {
+                    "satisfies" => {
+                        self.advance();
+                        match self.advance() {
+                            Token::Ident(n) => satisfies.push(n),
+                            t => {
+                                return Err(format!(
+                                    "Expected duck name after satisfies, got {:?}",
+                                    t
+                                ))
+                            }
+                        }
+                        self.skip_newlines();
+                        continue;
+                    }
+                    "sealed" => {
+                        self.advance();
+                        sealed = true;
+                        self.skip_newlines();
+                        continue;
+                    }
+                    "match" => {
+                        self.advance();
+                        // match /pattern/ at_least(N) / at_most(N) / exact(N)
+                        //（模式用字符串字面量承载，如 match "get_\w+" at_least(1)）
+                        let pattern = match self.advance() {
+                            Token::StrLit(s) => s,
+                            Token::RawStrLit(s) => s,
+                            t => {
+                                return Err(format!(
+                                    "Expected regex pattern in duck match, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        let count_kw = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected count constraint in duck match, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.expect(Token::LParen)?;
+                        let n = match self.advance() {
+                            Token::IntLit(n) => n as usize,
+                            t => {
+                                return Err(format!(
+                                    "Expected int in match constraint, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.expect(Token::RParen)?;
+                        let range = match count_kw.as_str() {
+                            "at_least" => (n, usize::MAX),
+                            "at_most" => (0, n),
+                            "exact" => (n, n),
+                            other => {
+                                return Err(format!(
+                                    "Expected at_least/at_most/exact, got {}",
+                                    other
+                                ))
+                            }
+                        };
+                        match_rules.push(DuckMatchRule { pattern, range });
+                        self.skip_newlines();
+                        continue;
+                    }
+                    "require" | "optional" => {
+                        let is_required = kw == "require";
+                        self.advance();
+                        self.expect(Token::LParen)?;
+                        let mut names = Vec::new();
+                        while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                            self.skip_newlines();
+                            match self.advance() {
+                                Token::Ident(n) => names.push(n),
+                                Token::Self_ => names.push("self".to_string()),
+                                t => {
+                                    return Err(format!(
+                                        "Expected param name in duck require/optional, got {:?}",
+                                        t
+                                    ))
+                                }
+                            }
+                            // 可选类型标注 name: type
+                            if self.check(&Token::Colon) {
+                                self.advance();
+                                self.parse_type()?;
+                            }
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                        }
+                        self.expect(Token::RParen)?;
+                        param_reqs.push(DuckParamReq { is_required, names });
+                        self.skip_newlines();
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            if self.check(&Token::Def) {
+                self.advance(); // def
+                                // 多泛型关系 duck 的类型前缀: def T.map(self) -> R
+                let mut owner = None;
+                if let Token::Ident(n) = self.peek() {
+                    if self.peek_n(1) == &Token::Dot {
+                        owner = Some(n.clone());
+                        self.advance(); // 前缀类型名
+                        self.advance(); // .
+                    }
+                }
+                // 方法名：普通标识符 或 正则模式 "get_\w+"（§8.4）
+                let mut name_pattern = None;
+                let method_name = match self.advance() {
+                    Token::Ident(n) => n,
+                    Token::MagicMethod(n) => n,
+                    Token::StrLit(p) => {
+                        name_pattern = Some(p);
+                        "__regex__".to_string()
+                    }
+                    t => return Err(format!("Expected method name in duck, got {:?}", t)),
+                };
+                // 解析参数（可含参数数量约束: exact(N)/min(N)/max(N)/range(L,R)）
+                self.expect(Token::LParen)?;
+                let mut param_range = None;
+                let mut params = Vec::new();
+                while !self.check(&Token::RParen) && !self.check(&Token::Eof) {
+                    self.skip_newlines();
+                    // 检测参数数量约束关键字: exact / min / max / range
+                    if let Token::Ident(ref kw) = self.peek() {
+                        if matches!(kw.as_str(), "exact" | "min" | "max" | "range")
+                            && self.peek_n(1) == &Token::LParen
+                        {
+                            let kw = kw.clone();
+                            self.advance(); // 关键字
+                            self.advance(); // (
+                            let first = match self.advance() {
+                                Token::IntLit(n) => n as usize,
+                                t => {
+                                    return Err(format!(
+                                        "Expected int in {} constraint, got {:?}",
+                                        kw, t
+                                    ))
+                                }
+                            };
+                            let (lo, hi) = match kw.as_str() {
+                                "exact" => (first, first),
+                                "min" => (first, usize::MAX),
+                                "max" => (0, first),
+                                "range" => {
+                                    self.expect(Token::Comma)?;
+                                    let hi = match self.advance() {
+                                        Token::IntLit(n) => n as usize,
+                                        t => {
+                                            return Err(format!(
+                                                "Expected int for range max, got {:?}",
+                                                t
+                                            ))
+                                        }
+                                    };
+                                    (first, hi)
+                                }
+                                _ => unreachable!(),
+                            };
+                            self.expect(Token::RParen)?;
+                            param_range = Some((lo, hi));
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                            continue;
+                        }
+                    }
+                    // 解析普通参数
+                    let p = self.parse_single_param(false)?;
+                    params.push(p);
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                }
+                self.expect(Token::RParen)?;
+                // 返回类型
+                let ret = if self.check(&Token::Arrow) {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                methods.push(DuckMethod {
+                    owner,
+                    name: method_name,
+                    name_pattern,
+                    params,
+                    return_type: ret,
+                    param_range,
+                    is_default,
+                });
+            } else if self.check(&Token::Dot) {
+                // .field_name: Type（无前缀）
+                self.advance(); // .
+                let field_name = match self.advance() {
+                    Token::Ident(n) => n,
+                    t => return Err(format!("Expected field name after . in duck, got {:?}", t)),
+                };
+                self.expect(Token::Colon)?;
+                let field_ty = self.parse_type()?;
+                fields.push(DuckField {
+                    owner: None,
+                    name: field_name,
+                    ty: field_ty,
+                    rel: None,
+                });
+            } else if let Token::Ident(ref kw) = self.peek() {
+                if kw == "type" {
+                    // 关联类型约束: `type I.Item`（§2.3）或 `type Item`（当前类型）
+                    self.advance(); // type
+                    let owner = if self.peek_n(1) == &Token::Dot {
+                        match self.advance() {
+                            Token::Ident(n) => Some(n),
+                            t => {
+                                return Err(format!(
+                                    "Expected type prefix in duck assoc type, got {:?}",
+                                    t
+                                ))
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    if owner.is_some() {
+                        self.advance(); // .
+                    }
+                    let assoc_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected assoc type name in duck, got {:?}", t)),
+                    };
+                    assoc_types.push(DuckAssocType {
+                        owner,
+                        name: assoc_name,
+                    });
+                } else if self.peek_n(1) == &Token::Dot {
+                    // 多泛型关系 duck 的字段前缀: A.x: f64 / A.x == B.y / A.x: B.y（§2.2）
+                    let owner = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected type prefix in duck, got {:?}", t)),
+                    };
+                    self.advance(); // .
+                    let field_name = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected field name in duck, got {:?}", t)),
+                    };
+                    // A.x == B.y：类型等同关系
+                    if self.check(&Token::EqEq) {
+                        self.advance();
+                        let rel_owner = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected type prefix after == in duck field, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.advance(); // .
+                        let rel_name = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected field name after == in duck field, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        fields.push(DuckField {
+                            owner: Some(owner),
+                            name: field_name,
+                            ty: Type::Any,
+                            rel: Some((rel_owner, rel_name)),
+                        });
+                        continue;
+                    }
+                    self.expect(Token::Colon)?;
+                    // A.x: B.y：简写形式（类型等同），区别于 A.x: f64（显式类型）
+                    if let Token::Ident(_rel_owner) = self.peek() {
+                        if self.peek_n(1) == &Token::Dot {
+                            let rel_owner = match self.advance() {
+                                Token::Ident(n) => n,
+                                _ => unreachable!(),
+                            };
+                            self.advance(); // .
+                            let rel_name = match self.advance() {
+                                Token::Ident(n) => n,
+                                t => {
+                                    return Err(format!(
+                                        "Expected field name after : in duck field, got {:?}",
+                                        t
+                                    ))
+                                }
+                            };
+                            fields.push(DuckField {
+                                owner: Some(owner),
+                                name: field_name,
+                                ty: Type::Any,
+                                rel: Some((rel_owner, rel_name)),
+                            });
+                            continue;
+                        }
+                    }
+                    let field_ty = self.parse_type()?;
+                    fields.push(DuckField {
+                        owner: Some(owner),
+                        name: field_name,
+                        ty: field_ty,
+                        rel: None,
+                    });
+                } else {
+                    self.advance(); // skip unexpected
+                }
+            } else {
+                // skip unexpected tokens
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(Token::Dedent)?;
+
+        Ok(DuckDef {
+            name,
+            generics,
+            where_clause,
+            assoc_types,
+            satisfies,
+            sealed,
+            match_rules,
+            param_reqs,
+            methods,
+            fields,
+        })
+    }
+}

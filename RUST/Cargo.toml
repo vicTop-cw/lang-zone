@@ -1,0 +1,18 @@
+[workspace]
+exclude = ["generated"]
+
+[package]
+name = "lzrsc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 零外部依赖：本阶段只处理 import/export/bridge 的核心映射。
+
+[[bin]]
+name = "lzrsc"
+path = "src/main.rs"
+
+[lib]
+name = "lzrsc"
+path = "src/lib.rs"

@@ -1,0 +1,6 @@
+class Data:
+    name: str = ""
+    age: int = 0
+
+def main() -> int:
+    return 0

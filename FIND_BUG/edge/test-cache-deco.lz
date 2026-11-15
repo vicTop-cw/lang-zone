@@ -1,0 +1,15 @@
+// @cache 装饰器端到端测试
+def fib(n: int) -> int:
+  if n <= 1:
+    return n
+  return fib(n - 1) + fib(n - 2)
+
+@cache
+def fib_cached(n: int) -> int:
+  if n <= 1:
+    return n
+  return fib_cached(n - 1) + fib_cached(n - 2)
+
+def main() = 
+  print("fib(10)=", fib(10))
+  print("fib_cached(10)=", fib_cached(10))

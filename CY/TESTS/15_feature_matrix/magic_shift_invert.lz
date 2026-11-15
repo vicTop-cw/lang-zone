@@ -1,0 +1,45 @@
+// 15_feature_matrix - magic_shift_invert：移位与取反的魔法名（SYNTAX/12 §3.1/§3.2）
+//
+// 两条本轮修掉的 cy 分叉（探针 `TEMP/magic_probes_r11.py` 的 m_bits）：
+// ① `<<`/`>>` 在共享 IR 的魔法分派表（`src/ir/builder/ops_map.rs::magic_method_for_binop`）里**缺席**，
+//    Rust 侧靠生成的 `impl Shl/Shr` 兜住，而 Python 的运算符协议名是 `__lshift__`/`__rshift__`，
+//    与 LZ 的 `__shl__`/`__shr__` 不同名 ⇒ 裸 `a << b` 在 cy 面运行期 TypeError。
+// ② `~x` 在 `map_unop` 里被降级成 `UnOpKind::Not`（注释原话「位非降级为逻辑非」），
+//    旧 cy 发射一律发 `not ` ⇒ `~6` 出 `False`、`~obj` 塌成 bool（`.v` 取不到）。
+//    现在按操作数静态类型还原：bool ⇒ `not`，其余 ⇒ `~`（整数得位非、用户类走 `__invert__`）。
+//
+// 每一步都用**新的绑定**：二元魔法按值消费 self/rhs（§3.1 明写），复用同一个变量会让
+// Rust 面先撞 E0382，那条所有权错会把「cy 侧没派发」这件事遮掉。
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分。
+struct Bits =
+    v: int
+
+impl Bits =
+    def __shl__(self, o: Bits) -> Bits =
+        Bits(v: self.v << o.v)
+    def __shr__(self, o: Bits) -> Bits =
+        Bits(v: self.v >> o.v)
+    def __invert__(self) -> Bits =
+        Bits(v: ~self.v)
+    def __bitxor__(self, o: Bits) -> Bits =
+        Bits(v: self.v ^ o.v)
+
+def main() =
+    let p1 = Bits(v: 6)
+    let q1 = Bits(v: 3)
+    print((p1 << q1).v)
+
+    let p2 = Bits(v: 6)
+    let q2 = Bits(v: 3)
+    print((p2 >> q2).v)
+
+    let p3 = Bits(v: 6)
+    print((~p3).v)
+
+    let p4 = Bits(v: 6)
+    let q4 = Bits(v: 3)
+    print((p4 ^ q4).v)
+
+    // 逻辑非仍走 `not`（bool 操作数），别被上面那条「`~` 还原」带偏
+    let flag = true
+    print(not flag)

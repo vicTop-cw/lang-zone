@@ -1,0 +1,20 @@
+// ============================================================
+// error_use_result_without_unwrap.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_result | 期望检查点：Result<int,str> 直接参与算术运算，应报类型错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0369
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+enum Result<T, E>:
+    Ok(T)
+    Err(E)
+
+def risky() -> Result<int, str> =
+    Ok(1)
+
+def main() =
+    let r = risky()
+    let v = r + 1
+    print(v)

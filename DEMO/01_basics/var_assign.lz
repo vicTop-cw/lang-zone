@@ -1,0 +1,92 @@
+// ============================================================
+// 轮2: 变量与赋值 — let/mut、复合赋值、解构、字符串操作
+// 含嵌套与边界；每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── let 不可变绑定 ──
+    let a = 10
+    assert a == 10
+    let b: int = 20
+    assert b == 20
+    let c = "str"
+    assert c == "str"
+    let d = True
+    assert d == True
+    let e = 3.5
+    assert e == 3.5
+
+    // ── mut 可变绑定与重新赋值 ──
+    mut x = 1
+    x = 2
+    assert x == 2
+    x = x + 10
+    assert x == 12
+    mut s = "hello"
+    s = "world"
+    assert s == "world"
+
+    // ── 复合赋值（+= -= *= /= %=） ──
+    mut n = 10
+    n += 5
+    assert n == 15
+    n -= 3
+    assert n == 12
+    n *= 2
+    assert n == 24
+    n /= 4
+    assert n == 6
+    n %= 4
+    assert n == 2
+    mut f = 1.5
+    f += 2.0
+    assert f == 3.5
+    mut st = "foo"
+    st += "bar"
+    assert st == "foobar"
+
+    // ── 字符串拼接与操作 ──
+    let first = "LZ"
+    let last = "lang"
+    let full = first + "-" + last
+    assert full == "LZ-lang"
+    assert len(full) == 7
+    assert "abc"[0] == 97      // 字符串索引返回字符码
+    assert "abc"[2] == 99
+    assert "abc" + "def" == "abcdef"
+
+    // ── 变量参与表达式/嵌套 ──
+    let p = 3
+    let q = 4
+    let r = p * p + q * q
+    assert r == 25
+    mut acc = 0
+    acc = acc + p
+    acc = acc + q
+    assert acc == 7
+
+    // ── 类型注解与值推断 ──
+    let annotated: float = 2.5
+    assert annotated == 2.5
+    let inferred = 100
+    assert inferred == 100
+
+    // ── 边界：作用域内遮蔽（内层同名变量） ──
+    let shadow = 1
+    if True:
+        let shadow = 2
+        assert shadow == 2
+    assert shadow == 1
+
+    // ── 字符串方法链（大小写/包含/替换） ──
+    let msg = "Hello World"
+    assert msg.contains("World")
+    assert not msg.contains("xyz")
+    let low = "MiXeD".to_lower()
+    assert low == "mixed"
+    let up = "MiXeD".to_upper()
+    assert up == "MIXED"
+    let rep = "a-b-c".replace("-", "+")
+    assert rep == "a+b+c"
+
+    print("R2 variables OK")

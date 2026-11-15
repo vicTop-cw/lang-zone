@@ -1,0 +1,7 @@
+args=[1, 2, 3]
+""=30
+""=3
+total=6
+args=[1, 2]
+kwargs={"name": 9}
+variadic demo done

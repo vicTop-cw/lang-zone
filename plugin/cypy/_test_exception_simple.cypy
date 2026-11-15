@@ -1,0 +1,7 @@
+# Test: custom exception definition - simple
+exception MyError:
+    pass
+
+def main() -> int:
+    raise MyError()
+    return 0

@@ -1,0 +1,8 @@
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+def main() =
+    let s = "123"
+    let n = s[0..3] as int
+    print(n.to_string())

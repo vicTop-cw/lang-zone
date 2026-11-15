@@ -1,0 +1,11 @@
+id = "cypy-lang"
+name = "Cypy Language Support"
+version = "0.1.0"
+schema_version = 1
+authors = ["lang-zone"]
+description = "Cypy programming language support for Zed"
+repository = "https://github.com/lang-zone/cypy-zed"
+
+[grammars.cypy]
+repository = "file:///e:/IDEProjects/AI/lang-zone/josn_parse/cypy-zed/tree-sitter-cypy"
+rev = "685ff870c7df47ef2c4473afb568044ff4abc0f0"

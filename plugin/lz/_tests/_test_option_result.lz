@@ -1,0 +1,73 @@
+// Phase 13: Option/Result 测试
+
+// ── 13.1 Option Some 基本操作 ──
+def test_option_some() =
+    opt = Some(42)
+    match opt:
+        case Some(v):
+            print("Some value: ")
+            print(v)
+        case _:
+            print("Unexpected")
+
+// ── 13.2 Option 条件分支返回 ──
+def test_option_conditional() =
+    flag = true
+    result = if flag:
+        Some(100)
+    else:
+        Some(0)
+
+    match result:
+        case Some(v):
+            print("Conditional Some: ")
+            print(v)
+        case _:
+            print("Conditional None")
+
+// ── 13.3 Option 链式操作 ──
+def test_option_chain() =
+    a = Some(10)
+    b = Some(20)
+    match a:
+        case Some(x):
+            match b:
+                case Some(y):
+                    print("Sum: ")
+                    print(x + y)
+                case _:
+                    print("b is None")
+        case _:
+            print("a is None")
+
+// ── 13.4 Result 条件分支 ──
+def test_result_conditional_ok() =
+    flag = true
+    result = if flag:
+        Ok(100)
+    else:
+        Err("failed")
+
+    match result:
+        case Ok(v):
+            print("Result Ok: ")
+            print(v)
+        case Err(e):
+            print("Error: ")
+            print(e)
+
+// ── 13.5 is_some / is_none 检查 ──
+def test_option_check() =
+    a = Some(10)
+    if a.is_some():
+        print("a is some")
+
+// ── 入口 ──
+def main() =
+    print("=== Option/Result Test ===")
+    test_option_some()
+    test_option_conditional()
+    test_option_chain()
+    test_result_conditional_ok()
+    test_option_check()
+    print("=== Option/Result Test Complete ===")

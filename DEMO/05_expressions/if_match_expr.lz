@@ -1,0 +1,36 @@
+// ============================
+// LZ Expressions — if / match as Expressions
+// ============================
+
+def main() =
+    let n = 5
+
+    mut sign = ""
+    if n > 0:
+        sign = "positive"
+    elif n < 0:
+        sign = "negative"
+    else:
+        sign = "zero"
+
+    mut grade = ""
+    if n >= 90:
+        grade = "A"
+    elif n >= 80:
+        grade = "B"
+    else:
+        grade = "F"
+
+    let color = 1
+    let desc = match color:
+        case 0 => "none"
+        case 1 => "one"
+        case _ => "many"
+
+    let detailed = match color:
+        case 0:
+            "zero"
+        case _:
+            "other"
+
+    print(sign, grade, desc, detailed)

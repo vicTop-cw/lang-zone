@@ -1,0 +1,177 @@
+// ================================================================
+// LZ Expressions — Operators (ALL: arithmetic, comparison, logical,
+// bitwise, compound assignment, identity, membership, ranges,
+// safe nav, coalescing, error propagation, ownership, f-strings,
+// calls, method access, turbofish, indexing, whitespace rules)
+// ================================================================
+
+struct Point =
+    x: int
+    y: int
+
+let point = Point(x: 10, y: 20)
+
+// config?.get() — config 为 Option 容器，?. 安全导航后调用 get
+let config: Option<Dict<str, int>> = Some({"timeout": 30})
+// safe_field 等用到 config 的语句依赖上面的类型标注
+
+let items = ["a", "b", "c"]
+
+def main() =
+    // ---- 2.1 / 2.2 / 2.3  Literals ----
+    let int_lit   = 42
+    let hex_lit   = 0xFF
+    let oct_lit   = 0o77
+    let bin_lit   = 0b1010
+    let float_lit = 3.14
+    let sci_lit   = 1e10
+    let str_lit   = "hello"
+    let raw_lit   = r"\d+"
+    let multi_lit = """line1
+line2"""
+    let t_bool    = True
+    let f_bool    = False
+    let none_val  = None
+
+    // ---- 3  Collection literals ----
+    let list_lit  = [1, 2, 3]
+    let tup_lit   = (1, "hi", True)
+    let dict_lit  = {"a": 1, "b": 2}
+    let set_lit   = {1, 2, 3}
+
+    // ---- 4  Arithmetic  ----
+    let add   = 10 + 20        // 30
+    let sub   = 20 - 10        // 10
+    let mul   = 5 * 6          // 30
+    let div   = 30 / 5         // 6
+    let rem   = 17 % 5         // 2
+    let pow   = 2 ** 10        // 1024
+    let neg   = -30            // unary adjacent
+    let pos   = +30            // unary +
+
+    // ---- 4  Comparison  ----
+    let eq  = 1 == 1           // True
+    let ne  = 1 != 2           // True
+    let lt  = 1 < 2            // True
+    let gt  = 2 > 1            // True
+    let le  = 1 <= 1           // True
+    let ge  = 2 >= 1           // True
+    let chain = 1 < 5 < 10    // chained comparison
+
+    // `is` — 编译期关键字, 仅用于 duck 约束
+    //   duck 内: `x is None` (单例同一性, 编译期判定)
+    //   运行时不可用, 参见 SYNTAX/01b-duck关系约束.md
+
+    // ---- 5  Logical — keyword form  ----
+    let land = True and False   // short-circuit
+    let lor  = True or False
+    let lnot = not True
+
+    // ---- 5  Logical — symbol form  ----
+    let sand = True && False    // same as and
+    let sor  = True || False    // same as or
+    let snot = !True            // same as not
+
+    // ---- 6  Bitwise (including ~)  ----
+    let band = 5 & 3        // 1
+    let bor  = 5 | 3        // 7
+    let bxor = 5 ^ 3        // 6
+    let binv = ~5           // bitwise NOT via __invert__
+    let shl  = 1 << 3       // 8
+    let shr  = 8 >> 2       // 2
+
+    // ----  in  (membership)  ----
+    let in_str = "llo" in "hello"       // substring
+    let in_lst = 3 in [1, 2, 3]
+    let in_dict = "a" in {"a": 1}
+    let in_set  = 2 in {1, 2, 3}
+
+    // ---- 14  Range expressions  ----
+    let range_half = 0..10       // half-open
+    let range_clsd = 0..=9       // closed
+
+    // ---- 11  Safe navigation ?.  ----
+    let safe_field = config?.get("key")
+    let safe_chain = config?.nested           // 键不存在 → None（Option<int>）
+
+    // ---- 12  Null coalescing ??  ----
+    let coalesce = config?.get("timeout") ?? 30
+
+    // ---- 13  Error propagation ?  ----
+    let parsed_val = parse_int("42")?
+
+    // ---- 15  Ownership move ^  ----
+    let source = 42
+    let target = source^
+
+    // ---- f-string  ----
+    let name = "world"
+    let msg  = f"Hello, {name}!"
+    let calc = f"2 + 2 = {2 + 2}"
+
+    // ---- 8.1  Function calls  ----
+    let fc1 = double(5)
+    let fc2 = add_three(1, 2, 3)
+
+    // ---- 8.2  Method calls  ----
+    let xs    = [3, 1, 2]
+    let len   = xs.len()
+    let first = xs.first()
+    let upper = "hello".to_upper()
+
+    // ---- 8.3  Field access  ----
+    let pt_x = point.x
+    let pt_y = point.y
+
+    // ---- 8.4  Path access (module)  ----
+    // let mod_path = std.io.print   // 模块路径函数引用暂不支持（待模块系统接入）
+
+    // ---- 8.5  Turbofish .<T>  ----
+    let parsed = parse_num("42")
+    let collected = collect_items.<str>(items)
+
+    // ---- 9  Indexing  ----
+    let idx0 = xs[0]         // 3
+    let idx1 = xs[1]         // 1
+    let dkey = dict_lit["a"] // 1
+
+    // ---- 7  Compound assignment (all 11)  ----
+    mx = 10
+    mx += 5
+    mx -= 3
+    mx *= 2
+    mx /= 4
+    mx %= 5
+    mx **= 2
+    mx &= 3
+    mx |= 2
+    mx ^= 1
+    mx <<= 1
+    mx >>= 1
+
+    print(add, sub, mul, div, rem, pow, neg, pos)
+    print(eq, ne, lt, gt, le, ge, chain)
+    print(land, lor, lnot, sand, sor, snot)
+    print(band, bor, bxor, binv, shl, shr)
+    print(in_str, in_lst, in_dict, in_set)
+    print(range_half, range_clsd)
+    print(safe_field, safe_chain, coalesce, parsed_val)
+    print(msg, calc)
+    print(fc1, fc2, len, first, upper, pt_x, pt_y)
+    print(parsed, collected)
+    print(idx0, idx1, dkey, mx)
+
+
+def double(x: int) -> int = x * 2
+
+def add_three(a: int, b: int, c: int) -> int = a + b + c
+
+def parse_int(s: str) -> Result<int, str> =
+    try:
+        Ok(int(s))
+    catch e:
+        Err(f"cannot parse: {s}")
+
+def parse_num(s: str) -> Result<int, str> = parse_int(s)
+
+def collect_items<T>(items: List<T>) -> List<T> = items

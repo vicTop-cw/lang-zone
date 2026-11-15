@@ -1,0 +1,19 @@
+// p36_list_concat_cast.lz：复现「List 拼接 + 枚举构造实参 cast」场景
+// parser.lz 的 `tokens = tokens + [Token.IntLit(v: num as int)]`
+// （p35 是 List 字面量走 parse，此 probe 验证 List 拼接是否走 as i64）
+enum Token:
+    IntLit(v: int)
+
+def get_pair() -> (str, int) =
+    let res: (str, int) = ("42", 1)
+    res
+
+def main() =
+    let r = get_pair()
+    let num: str = r.0
+    // List 拼接（tokens + [构造+cast]）场景
+    let mut toks: List<Token> = []
+    toks = toks + [Token.IntLit(v: num as int)]
+    let t = toks[0].clone()
+    match t:
+        case Token.IntLit(v: n) => print("val=" + n.to_string())

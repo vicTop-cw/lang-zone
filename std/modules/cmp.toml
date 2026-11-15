@@ -1,0 +1,43 @@
+# lz std::cmp — P1 比较运算特征
+# 源码级映射：lz 符号 → Rust std::cmp 路径
+
+[module]
+tier = 1
+rust_prefix = "std::cmp"
+
+# ── 类型映射 ──
+
+[types]
+Ordering    = "std::cmp::Ordering"
+Reverse     = "std::cmp::Reverse"
+Eq          = "std::cmp::Eq"
+Ord         = "std::cmp::Ord"
+PartialEq   = "std::cmp::PartialEq"
+PartialOrd  = "std::cmp::PartialOrd"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Ordering 方法
+isEq         = "is_eq"
+isNe         = "is_ne"
+isLt         = "is_lt"
+isGt         = "is_gt"
+isLe         = "is_le"
+isGe         = "is_ge"
+then         = "then"
+thenWith     = "then_with"
+reverse      = "reverse"
+# Ord / PartialOrd 方法 (camelCase → snake_case)
+partialCmp   = "partial_cmp"
+lt           = "lt"
+le           = "le"
+gt           = "gt"
+ge           = "ge"
+# Reverse 方法
+asInner      = "as_inner"
+
+# ── 类型别名注入 ──
+
+[aliases]

@@ -1,0 +1,3 @@
+[
+  {"tool": "report_bug", "args": {"project_dir": ".", "summary": "BUG-6 [new·round1] bigint 类型注解支持位不一致：let 注解位接受、struct 字段/def 返回类型位报「未知类型: bigint」", "detail": "对抗样例（.fist-wf-20260926/probe_new.lz）：`let x: bigint = ...`（对齐 bug-D 样例）在 typer 接受，但 `struct Big = val: bigint` 与 `def make_big() -> bigint` 均报 Semantic error: 未知类型: bigint。typer 的 bigint 识别仅覆盖 let 注解路径，未覆盖命名类型解析路径（struct 字段/返回类型）。与 BUG-1~5 同属 BigInt 成簇缺陷（词法 4cebe6a9 放行后类型系统各路径口径不一）。复现：lang-zone.exe .fist-wf-20260926/probe_new.lz → IR build error。基线：hunt-20260926 五项全部 100% 复现后追加探针发现。", "severity": "medium", "reported_by": "BugHunter(wf-20260926-round1)", "publish_task": false}}
+]

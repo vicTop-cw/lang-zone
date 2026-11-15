@@ -1,0 +1,30 @@
+// ============================================================
+// 04_functions / generics.lz
+// 覆盖: 03b-函数泛型.md — <T>、trait 约束、where 子句、
+//       泛型默认参数类型、错误语法边界
+// ============================================================
+
+// ── 1. 基本泛型 ────────────────────────────────────────
+def identity<T>(x: T) -> T = x
+
+def first<T>(a: T, b: T) -> T = a
+
+// ── 2. 带约束的泛型（trait 约束）────────────────────────
+def larger<T: PartialOrder>(a: T, b: T) -> T =
+    if a > b:
+        a
+    else:
+        b
+
+// ── 3. where 子句 ─────────────────────────────────────
+def clone_all<T>(items: List<T>) -> List<T> where T: Clone =
+    result: List<T> = []
+    for item in items:
+        push(result, item)
+    result
+
+// ── 4. 泛型默认参数类型 ────────────────────────────────
+def make_pair<T = int>(x: T, y: T) -> (T, T) =
+    (x, y)
+
+// ── 5. 混合泛型 + trait 约束 + 默认类型 ─────────

@@ -1,0 +1,4 @@
+// 最小复现：LZ 字符串字面量是否支持 \n 转义
+def main() =
+    let s = "line1\nline2"
+    print(s)

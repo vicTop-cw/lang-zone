@@ -1,0 +1,3 @@
+// C05 library: exported function consumed by c05consumer
+def cube(a: int) -> int =
+    return a * a * a

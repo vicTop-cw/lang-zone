@@ -1,0 +1,470 @@
+// JSON 解析器 — 完整实现
+
+// ============================================================
+// 1. 数据类型定义
+// ============================================================
+
+enum JsonValue =
+    Null
+    Bool(bool)
+    Number(f64)
+    String(str)
+    Array(List<JsonValue>)
+    Object(Dict<str, JsonValue>)
+
+struct Parser =
+    input: str
+    pos: int
+
+    def new(input: str)-> Parser =
+        Parser(input, 0)
+
+    def skip_whitespace(mut self: Parser) =
+        while self.pos < self.input.len():
+            ch = self.input[self.pos]
+            if ch == " " or ch == "\n" or ch == "\r" or ch == "\t":
+                self.pos += 1
+            else:
+                break
+
+// ============================================================
+// 辅助函数：将 JsonValue 包装为 Option
+// 绕过 LZ 编译器 bug：在元组返回中不能直接 Some(JsonValue.Variant(data))
+// ============================================================
+
+def some_val(v: JsonValue)-> JsonValue? =
+    Some(v)
+
+// ============================================================
+// 2. 解析函数
+// ============================================================
+
+// 解析 null — 逐字符检查 "null"
+def parse_null(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "n"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "u"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "l"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "l"):
+        return (parser, None)
+    parser.pos += 1
+    return (parser, some_val(JsonValue.Null))
+
+// 解析 true — 逐字符检查 "true"
+def parse_true(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "t"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "r"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "u"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "e"):
+        return (parser, None)
+    parser.pos += 1
+    return (parser, some_val(JsonValue.Bool(True)))
+
+// 解析 false — 逐字符检查 "false"
+def parse_false(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "f"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "a"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "l"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "s"):
+        return (parser, None)
+    parser.pos += 1
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "e"):
+        return (parser, None)
+    parser.pos += 1
+    return (parser, some_val(JsonValue.Bool(False)))
+
+// 解析 bool — 分发到 true/false
+def parse_bool(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    saved: int = parser.pos
+    (parser, val) = parse_true(parser)
+    match val:
+        case Some(_):
+            return (parser, val)
+        case None:
+            parser.pos = saved
+            parse_false(parser)
+
+// 解析数字
+def parse_number(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    start: int = parser.pos
+    ch = parser.input[parser.pos]
+    // 负号
+    if ch == "-":
+        parser.pos += 1
+    if parser.pos >= parser.input.len():
+        parser.pos = start
+        return (parser, None)
+    ch = parser.input[parser.pos]
+    // 整数部分
+    if not (ch >= "0" and ch <= "9"):
+        parser.pos = start
+        return (parser, None)
+    while parser.pos < parser.input.len():
+        ch = parser.input[parser.pos]
+        if ch >= "0" and ch <= "9":
+            parser.pos += 1
+        else:
+            break
+    // 小数部分
+    if parser.pos < parser.input.len():
+        if parser.input[parser.pos] == ".":
+            parser.pos += 1
+            if parser.pos >= parser.input.len():
+                parser.pos = start
+                return (parser, None)
+            if not (parser.input[parser.pos] >= "0" and parser.input[parser.pos] <= "9"):
+                parser.pos = start
+                return (parser, None)
+            while parser.pos < parser.input.len():
+                ch = parser.input[parser.pos]
+                if ch >= "0" and ch <= "9":
+                    parser.pos += 1
+                else:
+                    break
+    // 科学计数法
+    if parser.pos < parser.input.len():
+        ch = parser.input[parser.pos]
+        if ch == "e" or ch == "E":
+            parser.pos += 1
+            if parser.pos >= parser.input.len():
+                parser.pos = start
+                return (parser, None)
+            ch = parser.input[parser.pos]
+            if ch == "+" or ch == "-":
+                parser.pos += 1
+            if parser.pos >= parser.input.len():
+                parser.pos = start
+                return (parser, None)
+            if not (parser.input[parser.pos] >= "0" and parser.input[parser.pos] <= "9"):
+                parser.pos = start
+                return (parser, None)
+            while parser.pos < parser.input.len():
+                ch = parser.input[parser.pos]
+                if ch >= "0" and ch <= "9":
+                    parser.pos += 1
+                else:
+                    break
+    return (parser, some_val(JsonValue.Number(0.0)))
+
+// 解析字符串
+def parse_string(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "\""):
+        return (parser, None)
+    parser.pos += 1
+    result = ""
+    while parser.pos < parser.input.len():
+        ch = parser.input[parser.pos]
+        if ch == "\"":
+            parser.pos += 1
+            return (parser, some_val(JsonValue.String(result)))
+        if ch == "\\":
+            parser.pos += 1
+            if parser.pos >= parser.input.len():
+                return (parser, None)
+            esc = parser.input[parser.pos]
+            if esc == "\"":
+                result += "\""
+            elif esc == "\\":
+                result += "\\"
+            elif esc == "/":
+                result += "/"
+            elif esc == "n":
+                result += "\n"
+            elif esc == "r":
+                result += "\r"
+            elif esc == "t":
+                result += "\t"
+            else:
+                result += esc
+            parser.pos += 1
+        else:
+            result += ch
+            parser.pos += 1
+    return (parser, None)
+
+// 解析数组
+def parse_array(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "["):
+        return (parser, None)
+    parser.pos += 1
+    parser.skip_whitespace()
+    arr = []
+    // 空数组
+    if parser.pos < parser.input.len():
+        if parser.input[parser.pos] == "]":
+            parser.pos += 1
+            return (parser, some_val(JsonValue.Array(arr)))
+    // 解析元素
+    while parser.pos < parser.input.len():
+        (parser, val) = parse_value(parser)
+        match val:
+            case Some(v):
+                arr.append(v)
+            case None:
+                return (parser, None)
+        parser.skip_whitespace()
+        if parser.pos >= parser.input.len():
+            return (parser, None)
+        ch = parser.input[parser.pos]
+        if ch == ",":
+            parser.pos += 1
+            parser.skip_whitespace()
+        elif ch == "]":
+            parser.pos += 1
+            return (parser, some_val(JsonValue.Array(arr)))
+        else:
+            return (parser, None)
+    return (parser, None)
+
+// 解析对象
+def parse_object(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    if not (parser.input[parser.pos] == "{"):
+        return (parser, None)
+    parser.pos += 1
+    parser.skip_whitespace()
+    obj = Dict()
+    // 空对象
+    if parser.pos < parser.input.len():
+        if parser.input[parser.pos] == "}":
+            parser.pos += 1
+            return (parser, some_val(JsonValue.Object(obj)))
+    // 解析 key-value 对
+    while parser.pos < parser.input.len():
+        // 解析 key
+        (parser, key_val) = parse_string(parser)
+        match key_val:
+            case Some(kv):
+                match kv:
+                    case String(key):
+                        parser.skip_whitespace()
+                        if parser.pos >= parser.input.len():
+                            return (parser, None)
+                        if not (parser.input[parser.pos] == ":"):
+                            return (parser, None)
+                        parser.pos += 1
+                        // 解析 value
+                        (parser, val) = parse_value(parser)
+                        match val:
+                            case Some(v):
+                                obj.insert(key, v)
+                            case None:
+                                return (parser, None)
+                    case _:
+                        return (parser, None)
+            case None:
+                return (parser, None)
+        parser.skip_whitespace()
+        if parser.pos >= parser.input.len():
+            return (parser, None)
+        ch = parser.input[parser.pos]
+        if ch == ",":
+            parser.pos += 1
+            parser.skip_whitespace()
+        elif ch == "}":
+            parser.pos += 1
+            return (parser, some_val(JsonValue.Object(obj)))
+        else:
+            return (parser, None)
+    return (parser, None)
+
+// 解析值 — 根据首字符分发
+def parse_value(mut parser: Parser)-> (Parser, JsonValue?) =
+    parser.skip_whitespace()
+    if parser.pos >= parser.input.len():
+        return (parser, None)
+    ch = parser.input[parser.pos]
+    if ch == "n":
+        parse_null(parser)
+    elif ch == "t":
+        parse_true(parser)
+    elif ch == "f":
+        parse_false(parser)
+    elif ch == "\"":
+        parse_string(parser)
+    elif ch == "[":
+        parse_array(parser)
+    elif ch == "{":
+        parse_object(parser)
+    elif ch == "-" or (ch >= "0" and ch <= "9"):
+        parse_number(parser)
+    else:
+        (parser, None)
+
+// ============================================================
+// 3. 顶层函数
+// ============================================================
+
+// 入口：解析 JSON 字符串
+def parse(input: str)-> JsonValue? =
+    parser = Parser.new(input)
+    (parser, val) = parse_value(parser)
+    match val:
+        case Some(v):
+            parser.skip_whitespace()
+            if parser.pos >= parser.input.len():
+                val
+            else:
+                None
+        case None:
+            None
+
+// 调试打印
+def print_value(v: JsonValue) =
+    match v:
+        case Null:
+            print("null")
+        case Bool(b):
+            if b:
+                print("true")
+            else:
+                print("false")
+        case Number(n):
+            print("number")
+        case String(s):
+            print("string")
+        case Array(arr):
+            print("array")
+        case Object(obj):
+            print("object")
+
+// 测试入口
+def main() =
+    // 测试 null
+    r1 = parse("null")
+    match r1:
+        case Some(v1):
+            print("test null: ")
+            print_value(v1)
+        case None:
+            print("test null: FAIL")
+
+    // 测试 bool
+    r2 = parse("true")
+    match r2:
+        case Some(v2):
+            print("test true: ")
+            print_value(v2)
+        case None:
+            print("test true: FAIL")
+
+    r3 = parse("false")
+    match r3:
+        case Some(v3):
+            print("test false: ")
+            print_value(v3)
+        case None:
+            print("test false: FAIL")
+
+    // 测试数字
+    r4 = parse("42")
+    match r4:
+        case Some(v4):
+            print("test number: ")
+            print_value(v4)
+        case None:
+            print("test number: FAIL")
+
+    r5 = parse("-3.14")
+    match r5:
+        case Some(v5):
+            print("test float: ")
+            print_value(v5)
+        case None:
+            print("test float: FAIL")
+
+    // 测试字符串
+    r6 = parse("\"hello world\"")
+    match r6:
+        case Some(v6):
+            print("test string: ")
+            print_value(v6)
+        case None:
+            print("test string: FAIL")
+
+    // 测试数组
+    r7 = parse("[1, 2, 3]")
+    match r7:
+        case Some(v7):
+            print("test array: ")
+            print_value(v7)
+        case None:
+            print("test array: FAIL")
+
+    // 测试对象
+    r8 = parse("{\"name\": \"Alice\", \"age\": 30}")
+    match r8:
+        case Some(v8):
+            print("test object: ")
+            print_value(v8)
+        case None:
+            print("test object: FAIL")
+
+    // 测试嵌套
+    r9 = parse("{\"users\": [{\"id\": 1, \"name\": \"Bob\"}]}")
+    match r9:
+        case Some(v9):
+            print("test nested: ")
+            print_value(v9)
+        case None:
+            print("test nested: FAIL")
+
+    print("json parser done")

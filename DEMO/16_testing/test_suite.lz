@@ -1,0 +1,9 @@
+// ============================
+// LZ Testing Framework
+// ============================
+
+test "add":
+    assert 1 + 1 == 2
+
+test "sub":
+    assert 5 - 3 == 2

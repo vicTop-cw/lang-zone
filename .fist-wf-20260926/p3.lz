@@ -1,0 +1,4 @@
+struct Big = val: bigint
+def main() =
+  let b = Big { val: 42 }
+  println(b.val)

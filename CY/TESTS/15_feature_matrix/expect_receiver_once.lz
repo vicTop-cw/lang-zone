@@ -1,0 +1,16 @@
+// 15_feature_matrix - expect_receiver_once：`.expect(msg)` 不许把接收者拼两遍
+// （SYNTAX/06b Option + 11 §构建块）
+//
+// 旧发射是 `({r} if {r} is not None else __lz_expect_fail({m}))`——同一个接收者表达式**拼两次**。
+// r 是变量时无害，r 带副作用时就是跑两遍。实测（`TEMP/uncond-x13-before-r13.log` 的 x_expect_twice）：
+//   修前 cy stdout 'mk\nmk\n5\n'，修后 'mk\n5\n'，而两遍的**退出码都是 0**。
+// ⇒ 现在发射 `__lz_expect(mk(), "m")`：接收者只求值一次。
+//
+// BUG-42 修复：字符串实参 `.expect("m")` 现在生成裸 `&str`（`expect("m")`），不再
+// 无条件加 `.to_string()` 导致 rust 面 E0308（expected `&str`, found `String`）。
+def mk() -> Option<int> =
+    print("mk")
+    Some(5)
+
+def main() =
+    print(mk().expect("m"))

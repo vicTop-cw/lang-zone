@@ -1,0 +1,42 @@
+#!bin macro
+// ============================================================
+// template 生成代码 — 编译期函数批量生成代码片段
+// 覆盖: SYNTAX/08-宏与编译期.md §四 template 模板
+//
+// template 与 macro 的区别：参数签名自由（str/int/Tokens 均可），
+// 返回类型必须为 Tokens。适合「批量生成」重复代码（常量表、
+// 转换器、getter 等），展开时按实参替换生成目标代码。
+// ============================================================
+
+// --- 模板 1：批量生成常量（gen_const!(NAME, value) → const NAME = value）---
+// 顶层调用后展开为 const 定义，main 中可直接引用
+template gen_const(name: Tokens, value: Tokens) -> Tokens =
+    quote("const " + name + " = " + value)
+
+// --- 模板 2：单位转换器（to_celsius!(expr) → (expr - 32) * 5 / 9）---
+// 参数是表达式 Tokens，展开为换算表达式，运行时零成本
+template to_celsius(f: Tokens) -> Tokens =
+    quote("(" + f + " - 32) * 5 / 9")
+
+// --- 模板 3：批量生成 getter 函数（make_getter!(name) → def name(...)）---
+// name 传完整函数名（如 get_double），避免 `"get_" + name` 拼接产生的
+// 两个 Ident token（quote 字符串片段与参数 token 不会合并成单一标识符）
+template make_getter(name: Tokens) -> Tokens =
+    quote("def " + name + "(x: int) -> int: return x * 2")
+
+// 顶层展开：生成两个常量 + 一个 getter 函数
+gen_const!(LIMIT, 100)
+gen_const!(BASE, 7)
+make_getter!(get_double)
+
+def main() =
+    // 模板生成的常量直接可用
+    print(LIMIT)      // 100
+    print(BASE)       // 7
+
+    // 模板生成的转换器（编译期展开为换算表达式）
+    let c = to_celsius!(212)      // (212 - 32) * 5 / 9 = 100
+    print(c)
+
+    // 模板生成的 getter 函数
+    print(get_double(21))         // 42

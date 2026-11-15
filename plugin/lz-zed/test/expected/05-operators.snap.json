@@ -1,0 +1,2929 @@
+{
+  "file": "05-operators.lz",
+  "tokens": 617,
+  "scopes": {
+    "comment.line.double-slash.lz": 2,
+    "text": 286,
+    "meta.preprocessor.attribute.lz": 11,
+    "variable.lz": 114,
+    "keyword.lz": 37,
+    "keyword.operator.lz": 94,
+    "constant.numeric.integer.lz": 36,
+    "punctuation.section.lz": 14,
+    "support.function.lz": 1,
+    "punctuation.accessor.lz": 1,
+    "string.quoted.double.lz": 16,
+    "punctuation.separator.lz": 4,
+    "support.type.lz": 1
+  },
+  "lines": [
+    [
+      {
+        "t": "// lz-zed test fixture: 05-operators — 运算符全集",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// Authority: SYNTAX/12-操作符.md §一（完整列表）+ 00-词法基础.md §5.1",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "算术",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "5",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "-",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "c",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "4",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "*",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "d",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "9",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "e",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "%",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "f",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "**",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "8",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "一元",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "g",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "-",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "h",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "i",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "~",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "bits",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "j",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "*",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "ptr",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "k",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "&",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "val",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "l",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "!",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "flag",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "比较",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "m1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "==",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "m2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "!=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "m3",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "<",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "m4",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ">",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "m5",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "<=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "m6",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ">=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "逻辑",
+        "s": "variable.lz"
+      },
+      {
+        "t": "（",
+        "s": "text"
+      },
+      {
+        "t": "符号形式",
+        "s": "variable.lz"
+      },
+      {
+        "t": "）",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "n1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "&&",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "n2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "||",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "位运算",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "o1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "&",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "o2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "|",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "o3",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "^",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "o4",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "<<",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "o5",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ">>",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "复合赋值",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "-=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "*=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "%=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "**=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "&=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "|=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "^=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "<<=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ">>=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "赋值",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "海象",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "区间",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "管道",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "42",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "w1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "n",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ":=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "len",
+        "s": "support.function.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "xs",
+        "s": "variable.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "r1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "..",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "r2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "..=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "p1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "data",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "|>",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "process",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "空安全",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "q1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "fallible",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "?",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "q2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "obj",
+        "s": "variable.lz"
+      },
+      {
+        "t": "?.",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "field",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "q3",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "config",
+        "s": "variable.lz"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": "get",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "k",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "??",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "f",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "a",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "u",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "l",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "所有权",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "命名参数糖",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "后缀",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "moved",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": "^",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "name",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": "~",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": ",",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": "~",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "标点",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "t1",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "int",
+        "s": "support.type.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "5",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "t2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ",",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "h",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "t3",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "f",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ",",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "t5",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "|",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": "|",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "x",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "仅用于返回类型标注",
+        "s": "variable.lz"
+      },
+      {
+        "t": "（",
+        "s": "text"
+      },
+      {
+        "t": "见",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "08",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "-",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "functions",
+        "s": "variable.lz"
+      },
+      {
+        "t": "）",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      }
+    ]
+  ]
+}

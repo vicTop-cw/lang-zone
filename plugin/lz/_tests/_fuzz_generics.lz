@@ -1,0 +1,43 @@
+// Fuzz 7: 简化泛型测试
+
+// ── 7.1 Option<i64> 测试 ──
+def test_option_i64() =
+    opt = Some(100)
+    match opt:
+        case Some(v):
+            print("Some: ")
+            print(v)
+        case _:
+            print("None")
+
+// ── 7.2 Option<String> 测试 ──
+def test_option_string() =
+    opt = Some("world")
+    match opt:
+        case Some(s):
+            print("String: ")
+            print(s)
+        case _:
+            print("None")
+
+// ── 7.3 嵌套 Option ──
+def test_nested_option() =
+    opt = Some(Some(42))
+    match opt:
+        case Some(inner):
+            match inner:
+                case Some(v):
+                    print("nested: ")
+                    print(v)
+                case _:
+                    print("empty")
+        case _:
+            print("none")
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Generics ===")
+    test_option_i64()
+    test_option_string()
+    test_nested_option()
+    print("=== Fuzz Generics Complete ===")

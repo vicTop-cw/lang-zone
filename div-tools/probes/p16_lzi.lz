@@ -1,0 +1,7 @@
+// 跨模块推断 probe：external_add/external_opt 定义在 ext_sig.lzi 中，
+// 主文件不定义它们——编译时应从 .lzi 签名补全返回类型（int / Option<int>）
+def main() =
+    let x = external_add(3, 4)
+    print(x)
+    let o = external_opt()
+    print(o)

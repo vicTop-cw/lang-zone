@@ -1,0 +1,1 @@
+Arc<{closure@E:/IDEProjects/AI/lang-zone/DEMO/boundary-coverage/nesting-closure-lambda.rs:83:72: 83:95}>

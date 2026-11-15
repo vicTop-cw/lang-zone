@@ -1,0 +1,29 @@
+// 04_functions - 闭包（逐条对应 SYNTAX/03e-closure闭包.md 的可观测形态）
+//
+// 为什么补这件：本轮普查 `grep -E '\|[^|]*\|'` 全语料，闭包只有**一处**在用
+// （`05_expressions/comprehension_pipe.lz:6` 的 `let double = |x| x * 2`）⇒ 03e §二/§三/§四 的
+// 多行块体、`fn(...)` 形参、无参闭包 `| |`、逻辑或 `||` 分界在验收面上是空白。
+// 期望值不抄 cy 产物：件内注释只标规范写明的那几个数（10/42/6/12/25），落盘 `.exp` 仍由
+// **Rust 面实跑**封（两后端逐字一致才封）。
+// 本件**不测** §三 的「变量绑定必须注解参数」那条：那是检查站义务（两后端共用 IR），
+// 而且现存那处 `let double = |x| x * 2` 恰恰是没注解的写法——要判它先另开一件，别混在这里。
+
+def apply(f: fn(int) -> int, x: int) -> int =
+    f(x)
+
+def main() =
+    let double = |x: int| -> int = x * 2
+    print(double(5))
+    let noop = | | -> int = 42
+    print(noop())
+    print(apply(|x| x + 1, 5))
+    print(apply(|x| => x + 1, 5))
+    let process = |f: fn(int) -> int, x: int| => f(x) * 2
+    print(process(|x| x + 1, 5))
+    let sq = |a: int, b: int| =>
+        c = a + b
+        c * c
+    print(sq(2, 3))
+    print(True || False)
+    let hi = | | print("hi")
+    hi()

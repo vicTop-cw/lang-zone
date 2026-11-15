@@ -1,0 +1,16 @@
+trait Animal =
+    type Name
+    def item(self) -> Name
+
+struct Dog =
+    name: str
+
+impl Animal for Dog =
+    type Name = str
+
+    def item(self) -> Name =
+        self.name
+
+def main() =
+    let d = Dog(name: "Buddy")
+    print(d.item())

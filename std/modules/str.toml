@@ -1,0 +1,38 @@
+# lz std::str — P0 字符串操作
+# 源码级映射：lz 符号 → Rust std::str 路径
+# 注：lz str → String 由 map_type 内置处理，此处仅补充方法别名
+
+[module]
+tier = 1
+rust_prefix = "std::str"
+
+# ── 类型映射 ──
+# 仅列 map_type 未覆盖的类型
+
+[types]
+# str → String 已在 map_type 内置映射，不重复
+
+# ── 方法别名 ──
+# 这些方法挂在 String/&str 上的方法别名
+
+[methods]
+length  = "len"           # lz .length() → Rust .len()
+isEmpty = "is_empty"      # lz .isEmpty() → Rust .is_empty()
+contains = "contains"     # lz .contains(s) → Rust .contains(s)
+startsWith = "starts_with" # lz .startsWith(s) → Rust .starts_with(s)
+endsWith   = "ends_with"   # lz .endsWith(s) → Rust .ends_with(s)
+trim      = "trim"         # 身份映射
+trimStart = "trim_start"   # lz .trimStart() → Rust .trim_start()
+trimEnd   = "trim_end"     # lz .trimEnd() → Rust .trim_end()
+split     = "split"        # 身份映射
+replace   = "replace"      # 身份映射
+toUpperCase = "to_uppercase" # lz .toUpperCase() → Rust .to_uppercase()
+toLowerCase = "to_lowercase" # lz .toLowerCase() → Rust .to_lowercase()
+stripPrefix = "strip_prefix" # lz .stripPrefix(s) → Rust .strip_prefix(s)
+stripSuffix = "strip_suffix" # lz .stripSuffix(s) → Rust .strip_suffix(s)
+indexOf   = "find"         # lz .indexOf(s) → Rust .find(s)
+slice     = ""             # 不映射 — Rust 用 [start..end] 切片语法
+
+# ── 类型别名注入 ──
+
+[aliases]

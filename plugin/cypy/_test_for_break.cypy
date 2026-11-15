@@ -1,0 +1,11 @@
+# Test: for loop, break, string iteration with as cast
+def main() -> int:
+    let s: str = "hello world"
+    let count: int = 0
+    for ch in s:
+        let c: str = ch as str
+        if c == " ":
+            break
+        count = count + 1
+    print(f"count={count}")
+    return 0

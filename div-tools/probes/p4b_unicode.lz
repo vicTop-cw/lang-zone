@@ -1,0 +1,5 @@
+def main() =
+    let emoji = "\u{1F600}"
+    print(emoji)
+    let nul = "x\u{0}y"
+    print(nul)

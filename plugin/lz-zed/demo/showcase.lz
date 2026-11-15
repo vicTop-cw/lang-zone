@@ -1,0 +1,122 @@
+// lz-zed showcase — Lang-Zone (lz) 语法高亮综合示例
+// 本文件用于在 Zed 中目视验证高亮效果（打开此文件即可）
+// 语法基准: SYNTAX 规范 v3.3
+
+#!bin macro
+#![derive(Clone)]
+
+import std.io
+from std.collections import List, Dict
+import std.collections.HashMap as Map
+
+const MAX_RETRIES: int = 3
+type UserId = int
+
+# --- struct 与魔法方法 ------------------------------------------------------
+
+struct User =
+    id: UserId
+    name: str
+    scores: List<int>
+    def __init__(self, id: UserId, name: str) =
+        self.id = id
+        self.name = name
+        self.scores = []
+    def __str__(self) -> str =
+        f"User({self.id}, {self.name})"
+    def best(self) -> Option<int> =
+        if len(self.scores) == 0:
+            None
+        else:
+            Some(max(self.scores))
+
+# --- enum / trait / impl ----------------------------------------------------
+
+enum Status =
+    Active
+    Suspended
+
+trait Reportable =
+    def report(self) -> str = ...
+    def label(self) -> str = "item"
+
+impl Reportable for User =
+    def report(self) -> str =
+        f"{self.name}: {self.best() ?? -1}"
+
+# --- 函数与闭包 -------------------------------------------------------------
+
+def rank(u: User) -> int =
+    let best = u.best() ?? 0
+    best
+
+async def fetch_scores(u: User) -> List<int> =
+    let raw = await api.scores(u.id)?
+    raw |> map(|x| x * 2) |> collect()
+
+def summarize(users: List<User>) -> Dict<str, int> =
+    out = {}
+    for u in users if u.best() != None:
+        out[u.name] = u.best()^
+    out
+
+# --- 控制流 -----------------------------------------------------------------
+
+def describe(status: Status) -> str =
+    match status:
+        case Active => "on"
+        case Suspended => "off"
+        case _ => "unknown"
+
+def safe_best(u: User) -> int =
+    guard let Some(v) = u.best() else:
+        return 0
+    v
+
+# --- 测试 -------------------------------------------------------------------
+
+suite UserTests:
+    setup:
+        alice = User(id: 1, name: "Alice")
+    teardown:
+        cleanup()
+    test "best score":
+        alice.scores.append(95)
+        assert alice.best() == Some(95)
+    test "empty best":
+        check alice.best() == None
+
+# --- 宏 / 构建块 / 鸭子类型 --------------------------------------------------
+
+macro double_expr(e: Tokens) -> Tokens =
+    quote("(" + e + " + " + e + ")")
+
+duck Named =
+    require(name)
+    def label(self) -> str = ...
+
+greeting =:
+    let n = "world"
+    f"hello {n}"
+
+first = xs ^:
+    0
+
+# --- 数字 / 字符串 / 注释 ----------------------------------------------------
+
+let hex_val = 0xDEAD_BEEF
+let oct_val = 0o755
+let bin_val = 0b1101
+let big = 1_000_000_000
+let ratio = 3.14159
+let sci = 6.02e23
+let raw_re = r"^\d+$"
+let multi = """multi
+line"""
+let msg = f"user={u.name} score={rank(u)}"
+
+# 注释与运算符
+total = (a + b) * c / d % e ** f
+flag = not ready or (enabled and !blocked)
+moved = data^
+named_call(limit~, offset~)

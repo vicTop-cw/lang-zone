@@ -1,0 +1,42 @@
+// ============================================================
+// 测试: def NAME[ps: __Params] — 定义检查站参数
+// 即函数自身作为检查站，接受 &mut __Params
+// ============================================================
+
+// ── 检查站函数：直接接受 __Params 并返回 ──
+def validate_args(ps: __Params) -> __Params =
+    // 校验并修改参数
+    if ps.args.len() > 0:
+        let v = ps.args[0] as int
+        if v < 0:
+            ps.args[0] = 0          // 负值归零
+    ps                               // 返回处理后的参数
+
+// ── 带检查站的函数（引用已有检查站）──
+def safe_div[validate_args](a: int, b: int) -> int =
+    a / b                            // 参数已通过 validate_args 处理
+
+// ── 带检查站的函数，调用处覆盖 ──
+def safe_add[validate_args](a: int, b: int) -> int =
+    a + b
+
+// ── [None] 显式无检查站 ──
+def raw_add[None](a: int, b: int) -> int =
+    a + b                            // 保证不经过任何检查站
+
+def main() =
+    test "def with checker reference":
+        let r = safe_div(10, 2)      // 10 通过 validate_args → 不变 → 10/2=5
+        assert r == 5
+
+    test "def with checker, negative arg fixed":
+        // safe_add(-5, 3) → validate_args 将 -5 归零 → 0+3=3
+        let r2 = safe_add(-5, 3)
+        assert r2 == 3
+
+    test "def [None] explicit no checker":
+        // raw_add 有 [None]，不经过任何检查站
+        let r3 = raw_add(-5, 3)
+        assert r3 == -2              // 直算 -5+3=-2
+
+    print("def[checker_param] tests done")

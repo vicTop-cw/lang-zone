@@ -1,0 +1,10 @@
+[
+  {"tool": "execute", "args": {"task_id": "T0r8.1.1", "deliverable": "复现报告：hunt-20260926 BUG-1~5 全部 100% 复现（E0432/E0308/E0015/E0308+E0277/E0308），证据 .fist-wf-20260926/repro.ps1 输出；复现产物 .rs/.rlib 在 .fist-wf-20260926/tmp", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "execute", "args": {"task_id": "T0r8.1.2", "deliverable": "新寻虫：issue_scan(src/lz_builtins) 0 findings（.mbt 规则集对 Rust 项目空扫留痕）；对抗样例确诊 BUG-6（bigint 注解支持位不一致：let 位接受、struct 字段/返回类型位拒绝）已 report_bug 入账", "executor": "CodeBuddyMain", "model": "GLM-5.3-Flash"}},
+  {"tool": "run_check", "args": {"task_id": "T0r8.1.1", "cmd": "powershell", "args": ["-ExecutionPolicy","Bypass","-File",".fist-wf-20260926\\repro.ps1"], "workdir": ".", "timeout_ms": 120000}},
+  {"tool": "run_check", "args": {"task_id": "T0r8.1.2", "cmd": "powershell", "args": ["-Command","Test-Path .fist-wf-20260926/probe_new.lz"], "workdir": ".", "timeout_ms": 30000}},
+  {"tool": "submit", "args": {"task_id": "T0r8.1.1", "now": "2026-09-26T16:20:00Z"}},
+  {"tool": "submit", "args": {"task_id": "T0r8.1.2", "now": "2026-09-26T16:20:05Z"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.1.1", "verifier": "CodeBuddyMain", "now": "2026-09-26T16:20:30Z"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.1.2", "verifier": "CodeBuddyMain", "now": "2026-09-26T16:20:35Z"}}
+]

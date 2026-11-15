@@ -1,0 +1,52 @@
+fix(compiler): 修复三处既有缺陷（List 归约/ 返回类型推断 / 只读 ref 形参赋值）
+
+前三轮把它们记录为「已知缺陷，本轮修复」。三个都是**编译期硬失败或错误代码**，
+不是风格问题。
+
+── 缺陷A：`xs.sum()` / `xs.product()` ⇒ E0599 ────────────────
+根因：方法调用里有一条 `if method == "sum" { return ({recv}).sum() }` 的短路分支，
+它不区分「真迭代器」和「List」。而 Rust 的 Vec/HashSet **既不是Iterator，也没有
+sum/product 方法**（这正是它与 LZ 迭代协议的关键差别）⇒ E0599
+「Vec<i64> is not an iterator」。
+修复：List/Set 接收者改走 `({recv}).iter().copied().sum::<T>()`，其中 T 取**元素
+类型**而非硬编码 i64（否则 `List<float>.sum()` 会得到 `.sum::<i64>()` ⇒ E0308，
+这是自由函数路径遗留的同类硬编码，不在本次范围）。
+用 `.iter()` 而非 `.into_iter()`：后者 move 接收者，而 LZ 值语义允许重复读该变量。
+渲染与自由函数 `sum(collection)` 完全一致 —— 同一操作两种写法现在产出相同 Rust。
+
+── 缺陷C：无返回注解时 str 尾表达式被推成 i64 ⇒ E0308 ──────────
+根因：`ret_ty` 在**体转换之前**算好，而 `let` 绑定的类型登记发生在体转换过程中
+⇒ 尾表达式若引用本函数体顶层的 let 变量，`lookup_var` 落空 → 回退 Any →
+codegen 渲染成 i64 ⇒ `def accum() = ... s`（尾表达式是 str）直接编译不过。
+修复：在推断ret_ty 时用**一次性探测副本**（`fn_ctx.clone()`）预登记顶层 let 绑定。
+踩过的坑：直接登记进 fn_ctx 会让 convert_block 的预扫描（`!vars.contains(name)` 才
+登记 block_declared）把这些变量误判为「已声明」而跳过真实声明 ⇒ Rust 侧变量未定义
+E0425（实测）。用副本即彻底避免该副作用。只扫顶层不下钻嵌套块，避���与块内遮蔽打架。
+
+── 缺陷B：给只读 `ref` 形参赋值 ⇒ E0308/E0384（诊断指向生成代码）────
+根因：`ref x: T` 在 Rust 侧是 `&T`（只读借用），赋值本身在 LZ 语义下就非法，
+但编译器放行后生成了 `s = format!(..)` / `s = s + 1`。
+修复：在赋值点（Let 重绑定路径 + Assign 路径）检测「目标是只读 ref 形参」并发射
+`compile_error!` 精确诊断。登记复用既有的 owned_local 登记表（新增
+`LocalKind::ReadonlyBorrow` + `owned_local_mark_readonly`，在 gen_fn_def 的形参循环
+里登记，随每函数 reset 清空），不引入新字段。
+**刻意不改发射为 `&mut T`**：`ref self` 是 std 协议 trait 方法的常规写法
+（`__eq__(ref self, ..)` → `&self`），改成 &mut 会与 trait 签名不匹配 ⇒ E0053/E0195，
+波及所有扩展 trait。只读用法（`ref s: str` 只读取）完全不受影响，仍渲染 `&str`。
+
+三处都补了「该修的修、不该受影响的不受影响」的回归闸门（共 8 例，含反向用例：
+显式注解与 int 尾表达式不变、只读 ref 形参只读取仍照常工作且绝不渲染成 &mut、
+sum 之后接收者仍可读）。
+
+闸门：tests/perf_opt_gates.rs 25 -> **32 passed / 0 failed**。
+回归：cargo test -j 1 --no-fail-fast = **849 passed / 0 failed**（39 个二进制全绿）；
+demo_codegen_compile --include-ignored = 2/0（空allowlist，348 DEMO 真编译）；
+cargo build 0 error / 0 warning。
+
+顺带记录一个仍存在的**分层缺口**（未修，非回归）：调用点仍把「推断出来的返回类型」
+视为 Any（`fn_returns` 只登记显式注解的函数），所以 `def accum() = ... s` 的调用
+`println(accum())` 走 Debug（输出带引号），而显式 `-> str` 的走 Display。缺陷 C 修
+的是函数自身签名（此前根本编译不过），调用点的返回类型推断是另一层工作。
+
+提交卫生：5 个混合/干净文件按 hunk 精确分离，残差校验 RESIDUAL_MARKERS=0，
+他人未提交 WIP 完整保留未暂存。

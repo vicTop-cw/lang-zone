@@ -1,0 +1,221 @@
+# ============================================================
+# JSON Type Constants
+# Workaround: Cypy's enum compiles at the parser level but fails
+# at the scope analyzer (scope_analyzer.py lacks _visit_EnumDef).
+# So we use integer constants instead of enum.
+# ============================================================
+
+# JSON type tag constants (used as int values)
+let TYPE_NULL: int = 0
+let TYPE_BOOL: int = 1
+let TYPE_NUMBER: int = 2
+let TYPE_STRING: int = 3
+let TYPE_ARRAY: int = 4
+let TYPE_OBJECT: int = 5
+
+
+# ============================================================
+# Approach A: struct-based JSON value representation
+# Uses a struct with a type_tag field to represent JSON values.
+# Note: bool is not fully supported as return type, use int instead.
+# ============================================================
+
+struct JsonValue:
+    type_tag: int
+
+    def is_null(self) -> int:
+        if self.type_tag == 0:
+            return 1
+        return 0
+
+    def is_bool(self) -> int:
+        if self.type_tag == 1:
+            return 1
+        return 0
+
+    def is_number(self) -> int:
+        if self.type_tag == 2:
+            return 1
+        return 0
+
+    def is_string(self) -> int:
+        if self.type_tag == 3:
+            return 1
+        return 0
+
+    def is_array(self) -> int:
+        if self.type_tag == 4:
+            return 1
+        return 0
+
+    def is_object(self) -> int:
+        if self.type_tag == 5:
+            return 1
+        return 0
+
+    def type_name(self) -> str:
+        if self.type_tag == 0:
+            return "null"
+        if self.type_tag == 1:
+            return "bool"
+        if self.type_tag == 2:
+            return "number"
+        if self.type_tag == 3:
+            return "string"
+        if self.type_tag == 4:
+            return "array"
+        if self.type_tag == 5:
+            return "object"
+        return "unknown"
+
+
+# ============================================================
+# JSON Value factory functions using Approach A (struct)
+# ============================================================
+
+def make_null() -> JsonValue:
+    return JsonValue {type_tag: 0}
+
+def make_bool() -> JsonValue:
+    return JsonValue {type_tag: 1}
+
+def make_number() -> JsonValue:
+    return JsonValue {type_tag: 2}
+
+def make_string() -> JsonValue:
+    return JsonValue {type_tag: 3}
+
+def make_array() -> JsonValue:
+    return JsonValue {type_tag: 4}
+
+def make_object() -> JsonValue:
+    return JsonValue {type_tag: 5}
+
+
+# ============================================================
+# Parser struct with methods
+# ============================================================
+
+struct Parser:
+    input: str
+    pos: int
+
+    def peek(self) -> str:
+        if self.pos < len(self.input):
+            return self.input[self.pos]
+        return ""
+
+    def advance(self) -> str:
+        if self.pos < len(self.input):
+            let ch: str = self.input[self.pos]
+            self.pos = self.pos + 1
+            return ch
+        return ""
+
+    def skip_whitespace(self):
+        if self.pos < len(self.input):
+            let ch: str = self.input[self.pos]
+            if ch == " ":
+                self.pos = self.pos + 1
+                self.skip_whitespace()
+            elif ch == "\t":
+                self.pos = self.pos + 1
+                self.skip_whitespace()
+            elif ch == "\n":
+                self.pos = self.pos + 1
+                self.skip_whitespace()
+            elif ch == "\r":
+                self.pos = self.pos + 1
+                self.skip_whitespace()
+
+    def at_end(self) -> int:
+        if self.pos >= len(self.input):
+            return 1
+        return 0
+
+
+# ============================================================
+# Approach B: Plain Python types for JSON values
+# Since Cypy is a Python superset, Python types work directly.
+# ============================================================
+
+def demo_python_approach() -> int:
+    # Represent JSON values using plain Python types
+    let json_null = None
+    let json_num = 42
+    let json_str = "hello world"
+    let json_bool = 1
+    let json_arr = [1, 2, 3, "hello", None]
+
+    print("=== Approach B: Plain Python types ===")
+    print(f"JSON null: {json_null}")
+    print(f"JSON number: {json_num}")
+    print(f"JSON string: {json_str}")
+    print(f"JSON bool: {json_bool}")
+    print(f"JSON array: {json_arr}")
+    return 0
+
+
+# ============================================================
+# main() function: tests both approaches
+# ============================================================
+
+def main() -> int:
+    print("=== JSON Types Demo ===")
+    print()
+
+    # --- Approach A: struct-based JsonValue ---
+    print("--- Approach A: struct-based JsonValue ---")
+    let v0 = make_null()
+    let v1 = make_bool()
+    let v2 = make_number()
+    let v3 = make_string()
+    let v4 = make_array()
+    let v5 = make_object()
+
+    print(f"JsonValue 0: type_tag={v0.type_tag}, type_name={v0.type_name()}")
+    print(f"JsonValue 1: type_tag={v1.type_tag}, type_name={v1.type_name()}")
+    print(f"JsonValue 2: type_tag={v2.type_tag}, type_name={v2.type_name()}")
+    print(f"JsonValue 3: type_tag={v3.type_tag}, type_name={v3.type_name()}")
+    print(f"JsonValue 4: type_tag={v4.type_tag}, type_name={v4.type_name()}")
+    print(f"JsonValue 5: type_tag={v5.type_tag}, type_name={v5.type_name()}")
+    print()
+
+    # --- Approach B: plain Python types ---
+    demo_python_approach()
+    print()
+
+    # --- Parser test ---
+    print("--- Parser test ---")
+    let parser = Parser {input: "  \t\n  hello  world", pos: 0}
+
+    # Test skip_whitespace
+    parser.skip_whitespace()
+    print(f"After skip_whitespace: pos={parser.pos}")
+
+    # Test peek
+    let pch = parser.peek()
+    print(f"peek() -> '{pch}', pos={parser.pos}")
+
+    # Test advance
+    let ch1 = parser.advance()
+    print(f"advance() -> '{ch1}', pos={parser.pos}")
+
+    let ch2 = parser.advance()
+    print(f"advance() -> '{ch2}', pos={parser.pos}")
+
+    let ch3 = parser.advance()
+    print(f"advance() -> '{ch3}', pos={parser.pos}")
+
+    let ch4 = parser.advance()
+    print(f"advance() -> '{ch4}', pos={parser.pos}")
+
+    let ch5 = parser.advance()
+    print(f"advance() -> '{ch5}', pos={parser.pos}")
+
+    let end_status = parser.at_end()
+    print(f"at_end() -> {end_status}")
+    print()
+
+    print("=== Done ===")
+    return 0

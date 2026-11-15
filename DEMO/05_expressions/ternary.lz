@@ -1,0 +1,14 @@
+// LZ 表达式 — 三元表达式 a if cond else b
+// 解析器已实现（desugar 为 Expr::If）
+
+def main() =
+    let a = 10
+    let b = 20
+    let max = a if a > b else b
+    print(max)
+
+    let status = "ok" if max > 0 else "neg"
+    print(status)
+
+    let grade = "pass" if a >= 60 else "fail"
+    print(grade)

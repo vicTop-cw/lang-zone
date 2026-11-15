@@ -1,0 +1,8 @@
+# Bug-R3-2: free 未定义为内置函数
+def test_free() -> int:
+    let p: int* = malloc(sizeof(int))
+    free(p)
+    return 0
+
+def main() -> int:
+    return 0

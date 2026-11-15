@@ -1,0 +1,113 @@
+// lz_builtins/std/core_subset.lz — lz_builtins 核心自举子集（自举路线 B · E 环节）
+// 只用 LZ 原语（运算符/索引/len/循环/push/三元）实现，不调用 Rust 等价物。
+// 此文件是 bootstrap/work/lz_builtins/core_subset.lz 的 LZ 源码版本。
+// 生成: lzc lz_builtins/std/core_subset.lz --std-dir std
+//       → core_subset.rs → 提取 pub fn 段并入 lz_builtins/src/runtime/lz_bootstrap_builtins.rs
+
+// ── 列表/布尔 ──────────────────────────────────────────────────
+
+// lz_all — 所有元素是否都为 true
+def lz_all(xs: List<bool>) -> bool =
+  ok = true
+  for x in xs:
+    if not x:
+      ok = false
+  ok
+
+// lz_any — 是否有任意元素为 true
+def lz_any(xs: List<bool>) -> bool =
+  found = false
+  for x in xs:
+    if x:
+      found = true
+  found
+
+// lz_count_if — 统计满足谓词的元素个数
+def lz_count_if(xs: List<int>, pred: fn(int) -> bool) -> int =
+  c = 0
+  for x in xs:
+    if pred(x):
+      c = c + 1
+  c
+
+// ── 列表/数值 ──────────────────────────────────────────────────
+
+// lz_sum_ints — 整数列表求和
+def lz_sum_ints(xs: List<int>) -> int =
+  s = 0
+  for x in xs:
+    s = s + x
+  s
+
+// ── 字符串 ─────────────────────────────────────────────────────
+
+// lz_join_words — 用分隔符合并字符串列表
+def lz_join_words(xs: List<str>, sep: str) -> str =
+  out: str = ""
+  first = true
+  for w in xs:
+    if not first:
+      out = out + sep
+    out = out + w
+    first = false
+  out
+
+// lz_ends_with — 是否以 suffix 结尾
+def lz_ends_with(s: str, suffix: str) -> bool =
+  n = len(s)
+  m = len(suffix)
+  ok = n >= m
+  i = 0
+  while ok and i < m:
+    if s[n - m + i] != suffix[i]:
+      ok = false
+    i = i + 1
+  ok
+
+// ── 数值 ───────────────────────────────────────────────────────
+
+// lz_abs — 绝对值
+def lz_abs(x: int) -> int =
+  -x if x < 0 else x
+
+// lz_clamp — 限制在 [lo, hi]
+def lz_clamp(x: int, lo: int, hi: int) -> int =
+  if x < lo:
+    return lo
+  if x > hi:
+    return hi
+  x
+
+// ── 行为自检 ───────────────────────────────────────────────────
+
+def is_pos(x: int) -> bool =
+  x > 0
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def main() =
+  // 列表/布尔
+  print(lz_all([true, true, true]))      // true
+  print(lz_all([true, false]))            // false
+  print(lz_any([false, false]))           // false
+  print(lz_any([false, true]))            // true
+  print(lz_count_if([-1, 2, 3, -4], is_pos))  // 2
+
+  // 列表/数值
+  print(lz_sum_ints([1, 2, 3, 4]))         // 10
+  print(lz_sum_ints([]))                  // 0
+
+  // 字符串
+  print(lz_join_words(["a", "b", "c"], "-"))  // a-b-c
+  print(lz_join_words([], "-"))            // ""
+  print(lz_ends_with("hello", "lo"))       // true
+  print(lz_ends_with("hello", "x"))       // false
+
+  // 数值
+  print(lz_abs(-7))                       // 7
+  print(lz_abs(7))                        // 7
+  print(lz_clamp(100, 0, 10))             // 10
+  print(lz_clamp(-5, 0, 10))              // 0
+  print(lz_clamp(5, 0, 10))               // 5
+
+  print("core_subset.lz: self-test passed!")

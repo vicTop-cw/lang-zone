@@ -1,0 +1,12 @@
+def first<T = int>(x: T) -> T = x
+
+struct Box2<T = int> =
+    val: T
+
+def main() =
+    let a = first(42)
+    print(a)
+    let b = first("hi")
+    print(b)
+    let c = Box2(val: 7)
+    print(c.val)

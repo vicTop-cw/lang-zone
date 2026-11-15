@@ -1,0 +1,6 @@
+def add(a: int, b: int) -> int =
+    a + b
+
+def main() =
+    let x = add(1, 2)
+    print(x)

@@ -1,0 +1,4 @@
+comptime: 42 + 10
+
+def test_comptime() -> int:
+    return 42

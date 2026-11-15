@@ -1,0 +1,9 @@
+iterator counter(n: int) =
+    let mut i = 0
+    while i < n:
+        yield i
+        i = i + 1
+
+def main() =
+    for x in counter(3):
+        print(x)

@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json.schemastore.org/tmLanguage.json",
+  "name": "lz",
+  "scopeName": "source.lz",
+  "fileTypes": [
+    "lz"
+  ],
+  "uuid": "6f1b9c2e-4d7a-4e5b-9c1d-lz00-000000000001",
+  "comment": "Lang-Zone (lz) TextMate grammar. Authority: E:\\IDEProjects\\AI\\lang-zone\\SYNTAX (spec v3.3). Serves as (1) the executable spec for test/run-tests.js and (2) a zero-compile syntax definition for editors supporting TextMate grammars.",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#duck"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#magic"
+    },
+    {
+      "include": "#attributes"
+    },
+    {
+      "include": "#decorators"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.lz",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.lz",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": []
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.f.lz",
+          "begin": "f\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.f.lz",
+          "begin": "f\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            },
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.raw.lz",
+          "begin": "r\"\"\"",
+          "end": "\"\"\"",
+          "patterns": []
+        },
+        {
+          "name": "string.quoted.double.raw.lz",
+          "begin": "r\"",
+          "end": "\"",
+          "patterns": []
+        },
+        {
+          "name": "string.quoted.double.lz",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.lz",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "include": "#escape"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.triple.backtick.lz",
+          "begin": "f```",
+          "end": "```",
+          "patterns": [
+            {
+              "include": "#interpolation"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.triple.backtick.lz",
+          "begin": "r```",
+          "end": "```",
+          "patterns": []
+        },
+        {
+          "name": "string.quoted.triple.backtick.lz",
+          "begin": "```",
+          "end": "```",
+          "patterns": []
+        }
+      ]
+    },
+    "escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.lz",
+          "match": "\\\\u\\{[0-9a-fA-F]{1,6}\\}|\\\\[nrt\\\\\"'0{}]|\\\\."
+        }
+      ]
+    },
+    "interpolation": {
+      "patterns": [
+        {
+          "name": "meta.interpolation.lz",
+          "begin": "\\{",
+          "end": "\\}",
+          "patterns": [
+            {
+              "include": "#keywords"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#builtins"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#identifiers"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.lz",
+          "match": "\\b[0-9][0-9_]*\\.[0-9]+([eE][+-]?[0-9]+)?\\b|\\b[0-9][0-9_]*[eE][+-]?[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.lz",
+          "match": "\\b0[xX][0-9a-fA-F_]+\\b|\\b0[oO][0-7_]+\\b|\\b0[bB][01_]+\\b|\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "duck": {
+      "patterns": [
+        {
+          "name": "meta.duck.lz",
+          "begin": "(?m)(^\\s*)(duck)(\\s+[A-Za-z_][A-Za-z0-9_]*\\s*(?:=|:))",
+          "beginCaptures": {
+            "2": {
+              "name": "keyword.lz"
+            },
+            "3": {
+              "name": "entity.name.type.lz"
+            }
+          },
+          "end": "(?=^\\S)",
+          "patterns": [
+            {
+              "name": "keyword.control.duck.lz",
+              "match": "\\b(require|optional|exact|min|max|range|at_least|at_most|satisfies|sealed|default|StackType|RefType|Any)\\b"
+            },
+            {
+              "name": "string.regexp.lz",
+              "match": "/[^/\\s]+/"
+            },
+            {
+              "include": "#keywords"
+            },
+            {
+              "include": "#builtins"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#identifiers"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.lz",
+          "match": "\\b(if|elif|else|match|case|guard|for|while|loop|block|pass|break|continue|return|with|defer|async|await|spawn|go|yield)\\b"
+        },
+        {
+          "name": "keyword.exception.lz",
+          "match": "\\b(raise|raises|try|catch|finally)\\b"
+        },
+        {
+          "name": "keyword.import.lz",
+          "match": "\\b(import|from|as)\\b"
+        },
+        {
+          "name": "keyword.operator.lz",
+          "match": "\\b(and|or|not|is|in)\\b"
+        },
+        {
+          "name": "keyword.lz",
+          "match": "\\b(def|struct|enum|trait|impl|type|const|mut|ref|let|owned|magic|duck|iterator|where|Self|macro|comptime|template|test|suite|setup|teardown|assert|check)\\b"
+        },
+        {
+          "name": "constant.language.boolean.lz",
+          "match": "\\b(True|False)\\b"
+        },
+        {
+          "name": "keyword.operator.ellipsis.lz",
+          "match": "\\.\\.\\."
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.type.lz",
+          "match": "\\b(int|f64|bool|str|List|Dict|Set|Option|Result|Tuple|Box|Rc|Arc|Cell|RefCell|IOError|Tokens|Never|Unit|Nil|Number)\\b"
+        },
+        {
+          "name": "constant.language.lz",
+          "match": "\\b(None|Some|Ok|Err)\\b"
+        },
+        {
+          "name": "support.function.lz",
+          "match": "\\b(print|panic|len|contains|iter|enumerate|zip|map|filter|collect|sort|reverse|clone|drop|format|hash|callable|quote|merge_tokens|sum|prod)\\b"
+        }
+      ]
+    },
+    "magic": {
+      "patterns": [
+        {
+          "name": "entity.name.function.magic.lz",
+          "match": "__[_\\p{L}\\p{N}]+__"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.preprocessor.attribute.lz",
+          "match": "#!\\[[^\\]]*\\]|#!\\S+|#\\[[^\\]]*\\]|#"
+        }
+      ]
+    },
+    "decorators": {
+      "patterns": [
+        {
+          "name": "meta.annotation.lz",
+          "match": "@[_\\p{L}][_\\p{L}\\p{N}]*"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.lz",
+          "match": "\\*\\*=|<<=|>>=|\\.\\.=|\\.\\.\\.|->|=>|\\|>|:=|=:|\\^:|~:|\\*:|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|\\*\\*|==|!=|<=|>=|&&|\\|\\||<<|>>|\\.\\.|\\+|-|\\*|/|%|&|\\||\\^|~|!|<|>|=|\\?\\?|\\?\\.|\\?|@"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.lz",
+          "match": "[:,]"
+        },
+        {
+          "name": "punctuation.accessor.lz",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.section.lz",
+          "match": "[(){}\\[\\]]"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.lz",
+          "match": "[_\\p{L}][_\\p{L}\\p{N}]*"
+        }
+      ]
+    }
+  }
+}

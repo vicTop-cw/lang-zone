@@ -1,0 +1,43 @@
+// lz-zed test fixture: 17-duck — 鸭子类型约束（软关键字）
+// Authority: SYNTAX/01b-duck关系约束.md §十一 + 附录B §1.13
+
+# duck 定义：约束行 / 签名内嵌 / match 行 / 伪类型
+duck Sortable =
+    require(key)
+    optional(reverse)
+    def sort(self, key: Callable, reverse: bool) -> List<Any> = ...
+    match /^get_/ at_least(1)
+    satisfies Base
+
+duck HasArea =
+    def area(self) -> f64 = ...
+    sealed
+    default
+
+duck Positional =
+    def point(self, x: Any, y: Any) -> Any = ...
+    exact(2)
+    range(1, 3)
+    min(1)
+    max(3)
+    at_most(2)
+
+# duck 体外：软关键字恢复为普通标识符（附录B §1.13）
+let require = 1
+def optional(x: int) -> int = x
+struct X = value: StackType
+
+# 伪类型
+duck StackOnly =
+    def push(self, value: StackType) -> () = ...
+    def get(self) -> RefType = ...
+
+# 多类型关系
+duck Pair =
+    left: Any
+    right: Any
+
+# duck 作为类型注解
+def process(t: Sortable) -> () = pass
+
+let obj: HasArea = Circle(1.0)

@@ -1,0 +1,7 @@
+enum Color = Red | Green
+def h(c: Color) -> int =
+    match c:
+        Color.Red => 1
+        _ => 0
+print(h(Color.Red))
+

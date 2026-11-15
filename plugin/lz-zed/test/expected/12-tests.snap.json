@@ -1,0 +1,2182 @@
+{
+  "file": "12-tests.lz",
+  "tokens": 473,
+  "scopes": {
+    "comment.line.double-slash.lz": 2,
+    "text": 225,
+    "meta.preprocessor.attribute.lz": 5,
+    "variable.lz": 28,
+    "keyword.lz": 27,
+    "string.quoted.double.lz": 90,
+    "punctuation.separator.lz": 14,
+    "constant.numeric.integer.lz": 16,
+    "keyword.operator.lz": 20,
+    "constant.language.boolean.lz": 3,
+    "keyword.control.lz": 1,
+    "string.quoted.double.f.lz": 19,
+    "meta.interpolation.lz": 4,
+    "punctuation.section.lz": 14,
+    "punctuation.accessor.lz": 4,
+    "support.type.lz": 1
+  },
+  "lines": [
+    [
+      {
+        "t": "// lz-zed test fixture: 12-tests — 测试框架",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// Authority: SYNTAX/15-测试框架.md",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "静态名称",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "a",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "o",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "n",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "==",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "动态名称",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "name",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "g",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "n",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "r",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "a",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "_",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "name",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "True",
+        "s": "constant.language.boolean.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "for",
+        "s": "keyword.control.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "i",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "in",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "..",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "5",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "f\"",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "y",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "n",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "a",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "m",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "c",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "_",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "{",
+        "s": "meta.interpolation.lz"
+      },
+      {
+        "t": "i",
+        "s": "variable.lz"
+      },
+      {
+        "t": "}",
+        "s": "meta.interpolation.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "i",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ">",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "suite",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "setup",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "teardown",
+        "s": "keyword.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "suite",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "MathTests",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "a",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "==",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "m",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "u",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "l",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "*",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "==",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "6",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "suite",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "DatabaseTests",
+        "s": "variable.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "setup",
+        "s": "keyword.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "db",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "connect",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "m",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "m",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "o",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "r",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "y",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "db",
+        "s": "variable.lz"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": "migrate",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "prefix",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "d",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "b",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "teardown",
+        "s": "keyword.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "db",
+        "s": "variable.lz"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": "close",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "f\"",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "{",
+        "s": "meta.interpolation.lz"
+      },
+      {
+        "t": "prefix",
+        "s": "variable.lz"
+      },
+      {
+        "t": "}",
+        "s": "meta.interpolation.lz"
+      },
+      {
+        "t": "_",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "n",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "r",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.f.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "db",
+        "s": "variable.lz"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": "insert",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "u",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "r",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ",",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "name",
+        "s": "variable.lz"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "A",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "l",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "c",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "db",
+        "s": "variable.lz"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": "count",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "u",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "r",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "==",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "软断言",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "check",
+        "s": "keyword.lz"
+      },
+      {
+        "t": "（",
+        "s": "text"
+      },
+      {
+        "t": "不中止",
+        "s": "variable.lz"
+      },
+      {
+        "t": "）",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "def",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "flaky",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "->",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "bool",
+        "s": "support.type.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "True",
+        "s": "constant.language.boolean.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "o",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "f",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "t",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "check",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "flaky",
+        "s": "variable.lz"
+      },
+      {
+        "t": "(",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": ")",
+        "s": "punctuation.section.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "check",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "True",
+        "s": "constant.language.boolean.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "单行",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "形式",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "test",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "s",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "n",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "g",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "l",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "-",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "l",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "i",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "n",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "e",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": "\"",
+        "s": "string.quoted.double.lz"
+      },
+      {
+        "t": ":",
+        "s": "punctuation.separator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "assert",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "==",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "4",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      }
+    ]
+  ]
+}

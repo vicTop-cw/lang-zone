@@ -1,0 +1,60 @@
+# lz std::path — P1 路径类型
+# 源码级映射：lz 符号 → Rust std::path 路径
+
+[module]
+tier = 1
+rust_prefix = "std::path"
+
+# ── 类型映射 ──
+
+[types]
+Path      = "std::path::Path"
+PathBuf   = "std::path::PathBuf"
+Component = "std::path::Component"
+PrefixComponent = "std::path::PrefixComponent"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Path 实例方法 / PathBuf 共享方法
+parent          = "parent"
+ancestors       = "ancestors"
+fileStem        = "file_stem"
+filePrefix      = "file_prefix"
+fileName        = "file_name"
+extension       = "extension"
+isAbsolute      = "is_absolute"
+isRelative      = "is_relative"
+hasRoot         = "has_root"
+components      = "components"
+iter            = "iter"
+display         = "display"
+toStr           = "to_str"
+toStringLossy   = "to_string_lossy"
+stripPrefix     = "strip_prefix"
+startsWith      = "starts_with"
+endsWith        = "ends_with"
+metadata        = "metadata"
+symlinkMetadata = "symlink_metadata"
+readDir         = "read_dir"
+exists          = "exists"
+isDir           = "is_dir"
+isFile          = "is_file"
+isSymlink       = "is_symlink"
+canonicalize    = "canonicalize"
+# PathBuf 方法
+new       = "new"
+push      = "push"
+pop       = "pop"
+asPath    = "as_path"
+setFileName    = "set_file_name"
+setExtension   = "set_extension"
+intoOsString   = "into_os_string"
+join      = "join"
+withExtension  = "with_extension"
+withFileName   = "with_file_name"
+
+# ── 类型别名注入 ──
+
+[aliases]

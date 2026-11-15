@@ -1,0 +1,36 @@
+# lz std::io — P0 I/O 操作
+# 源码级映射：lz 符号 → Rust std::io 路径
+
+[module]
+tier = 1
+rust_prefix = "std::io"
+
+# ── 类型映射 ──
+
+[types]
+IOError   = "std::io::Error"
+BufReader = "std::io::BufReader"
+BufWriter = "std::io::BufWriter"
+Stdin     = "std::io::Stdin"
+Stdout    = "std::io::Stdout"
+
+# ── 自由函数 ──
+
+[functions]
+stdin  = { rust = "std::io::stdin",  shim = "" }
+stdout = { rust = "std::io::stdout", shim = "" }
+read_line = { rust = "std::io::stdin().read_line", shim = "" }
+
+# ── 方法别名 ──
+
+[methods]
+readToString = "read_to_string"   # lz .readToString() → Rust .read_to_string()
+readLine     = "read_line"        # lz .readLine() → Rust .read_line()
+writeAll     = "write_all"        # lz .writeAll() → Rust .write_all()
+flush        = "flush"            # 身份映射
+
+# ── 类型别名注入 ──
+# 导入 io 时自动追加
+
+[aliases]
+IOError = "std::io::Error"       # pub type IOError = std::io::Error;

@@ -1,0 +1,13 @@
+// find_bug/codegen/bug-codegen-export.lz
+// BUG-CG-003: #!export 生成 pub fn
+// #!export 标记：导出为公共 API
+
+#!export
+def exported_func(x: int) -> int =
+  x * 2
+
+def main() =
+  r = exported_func(21)
+  print("exported_func(21):", r)
+  assert r == 42
+  print("bug-codegen-export.lz done")

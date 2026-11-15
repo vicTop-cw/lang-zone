@@ -1,0 +1,10 @@
+def main() =
+    print("plain")
+    let n = 42
+    print(f"fstring {n}")
+    print(n)
+    print(true)
+    print([1, 2, 3])
+    let s = "str"
+    print(s)
+    println("done")

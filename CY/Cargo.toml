@@ -1,0 +1,26 @@
+[package]
+name = "lzcyc"
+version = "0.1.0"
+edition = "2021"
+description = "LZ → Cython compiler — transpile LZ to .pyx, compile to .pyd"
+
+[workspace]
+
+[dependencies]
+# 复用主编译器 lib 公开层（lexer/parser/ast/semantic_check/ir/codegen_cython）
+# M4 依赖收敛已完成：lib 的 serde_json 引用已全部用 #[cfg(feature = "infer")]
+# 门控，--no-default-features 编译通过；lzcyc 改 default-features = false 后
+# cargo tree 零 serde 系外部依赖，回归测试 3/3 全绿。
+lang-zone = { path = "..", default-features = false }
+
+# 集成测试显式声明：Windows 下 tests/ 与参考样例集 TESTS/ 大小写不敏同目录，
+# 测试源码放 testsrc/ 避免混入参考集
+[[test]]
+name = "cli"
+path = "testsrc/cli.rs"
+
+# M3 入口融合（T0r55.3.1）：lzcyc 升级为 bin crate，
+# 吸收 lzc 的 create/build/peek/check/push 子命令
+[[bin]]
+name = "lzcyc"
+path = "src/main.rs"

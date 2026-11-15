@@ -1,0 +1,50 @@
+// ============================================================
+// G6 D2 codegen 补缺 - match 模式匹配
+// 覆盖: match 值表达式、函数内 match 分发、元组模式、
+//       范围模式（1..=3）、守卫（guard）、嵌套 match
+// 运行: lzc DEMO/g6/g6_match.lz → rustc → 输出见文件尾部注释
+// ============================================================
+
+def describe(x: int) -> str =
+    match x:
+        case 0 => "zero"
+        case 1 => "one"
+        case _ => "many"
+
+def main() =
+    // match 值表达式
+    print(describe(0))
+    print(describe(1))
+    print(describe(7))
+
+    // match 作为表达式赋值
+    let v = match 3:
+        case 1 => 10
+        case 2 => 20
+        case _ => 30
+    print(v)
+
+    // 元组模式 + 通配
+    let t = (1, 2)
+    let r = match t:
+        case (0, _) => "zero first"
+        case (1, 2) => "one-two"
+        case _ => "other"
+    print(r)
+
+    // 范围模式 + 守卫
+    let n = 5
+    let q = match n:
+        case x if x > 7 => "big"
+        case 1..=3 => "small"
+        case 4..=7 => "medium"
+        case _ => "large"
+    print(q)
+
+    // 期望输出:
+    // "zero"
+    // "one"
+    // "many"
+    // 30
+    // "one-two"
+    // "medium"

@@ -1,0 +1,17 @@
+def test_0() -> int:
+    print(0.0)
+    x = result
+    total
+
+def test_1() -> int:
+    return 1.5
+    defer:
+        let cleanup: int = 0
+    match (result):
+        case 0:
+            return 0
+        case _:
+            return -1
+
+def main() -> int:
+    return 0

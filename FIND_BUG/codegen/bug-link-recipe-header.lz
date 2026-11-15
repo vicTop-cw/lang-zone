@@ -1,0 +1,4 @@
+// 用例：BUG-10 链接配方锁——生成 .rs 的文件头必须带静态配方块，
+// CLI stderr 必须打印本机解析好的完整 rustc 链接命令（含 -L dependency）。
+def main() =
+    print("recipe-lock ok")

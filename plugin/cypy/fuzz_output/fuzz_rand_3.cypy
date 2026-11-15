@@ -1,0 +1,14 @@
+def test_0() -> int:
+    (-print(0))
+    match (((0.0 == 1.5) > print(y))):
+        case 0:
+            return 0
+        case _:
+            return -1
+    defer:
+        let cleanup: int = 0
+    return ((-((0) != -3.14)))
+    print((z < -3.14))
+
+def main() -> int:
+    return 0

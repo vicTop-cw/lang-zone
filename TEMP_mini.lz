@@ -1,0 +1,4 @@
+def main() =
+    print(None)
+    let x = None
+    print(x)

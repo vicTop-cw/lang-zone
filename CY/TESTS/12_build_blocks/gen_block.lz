@@ -1,0 +1,8 @@
+// Build block tests — *: generator build block
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    xs = add *:
+        yield (1, 2)
+        yield (3, 4)
+    print(xs)

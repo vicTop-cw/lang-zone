@@ -1,0 +1,8 @@
+# Bug-R4-6: del 关键字未定义
+def test_del() -> int:
+    let x: int = 1
+    del x
+    return 0
+
+def main() -> int:
+    return 0

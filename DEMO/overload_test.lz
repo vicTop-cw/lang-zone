@@ -1,0 +1,9 @@
+@overload
+def add(a: int, b: int) -> int = a + b
+
+@overload
+def add(a: str, b: str) -> str = a + b
+
+def main() =
+    print(add(1, 2))
+    print(add("hello"," world"))

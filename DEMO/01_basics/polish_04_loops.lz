@@ -1,0 +1,94 @@
+// ============================================================
+// 轮4: 循环边界 — while let/for else/guard/嵌套变量遮蔽
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── for 遍历嵌套列表 ──
+    mut sum = 0
+    for row in [[1, 2], [3, 4]]:
+        for cell in row:
+            sum = sum + cell
+    assert sum == 10
+
+    // ── while 条件含副作用表达式 ──
+    mut n = 10
+    mut count = 0
+    while n > 0 and count < 5:
+        n = n - 1
+        count = count + 1
+    assert count == 5
+    assert n == 5
+
+    // ── for/else：循环正常结束执行 else ──
+    mut else_ran = False
+    for i in 0..3:
+        pass
+    else:
+        else_ran = True
+    assert else_ran == True
+
+    // ── for 带 guard 过滤（跳过满足条件的） ──
+    mut acc = 0
+    for i in 0..10 if i % 3 == 0:
+        acc = acc + i
+    assert acc == 18            // 0+3+6+9
+
+    // ── 嵌套循环变量遮蔽（内层同名） ──
+    mut outer_total = 0
+    for v in [1, 2]:
+        let v = v * 100          // 内层遮蔽
+        outer_total = outer_total + v
+    assert outer_total == 300
+
+    // ── break 提前退出嵌套循环（内层 break 只退内层） ──
+    mut found_pair: List<int> = []
+    for i in 1..4:
+        for j in 1..4:
+            if i == j:
+                break            // 只退出内层
+            found_pair.push(i * 10 + j)
+    assert found_pair == [21, 31, 32]
+
+    // ── continue 跳过（外层不受影响） ──
+    mut cont_sum = 0
+    for i in 1..5:
+        if i == 2:
+            continue
+        cont_sum = cont_sum + i
+    assert cont_sum == 8         // 1+3+4
+
+    // ── while let（模式绑定循环条件） ──
+    mut nums: List<int> = [1, 2, 3, 4]
+    mut popped_sum = 0
+    while let Some(top) = nums.pop():
+        popped_sum = popped_sum + top
+    assert popped_sum == 10
+    assert len(nums) == 0
+
+    // ── for 遍历 tuple 列表（解构） ──
+    mut pair_sum = 0
+    for (a, b) in [(1, 2), (3, 4)]:
+        pair_sum = pair_sum + a * b
+    assert pair_sum == 14        // 1*2 + 3*4
+
+    // ── 循环中使用函数调用作为迭代器 ──
+    def make_range(n: int) -> List<int> =
+        mut out: List<int> = []
+        for i in 0..n:
+            out.push(i)
+        return out
+    mut total = 0
+    for x in make_range(5):
+        total = total + x
+    assert total == 10
+
+    // ── 无限循环用 break 退出（步数保护） ──
+    mut steps = 0
+    while True:
+        steps = steps + 1
+        if steps >= 4:
+            break
+    assert steps == 4
+
+    print("P4 loops OK")

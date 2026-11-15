@@ -1,0 +1,4 @@
+let xs = [1, 2, 3]
+let ys = [x + 1 for x in xs]
+print(ys)
+

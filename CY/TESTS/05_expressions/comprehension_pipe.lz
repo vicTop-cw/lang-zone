@@ -1,0 +1,8 @@
+// 列表推导式和管道测试
+def main() =
+    let squares = [x * x for x in 0..10 if x % 2 == 0]
+    print(squares)
+
+    let double = |x| x * 2
+    let result = 5 |> double
+    print(result)

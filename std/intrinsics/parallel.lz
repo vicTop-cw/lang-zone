@@ -1,0 +1,29 @@
+// ============================================================
+// @parallel — 自动并行化
+//
+// 语法：
+//   @parallel
+//   def process(items: List<T>) -> List<U> =
+//       items | map(f) | filter(pred)
+//
+//   @parallel
+//   def compute() =                       // 应用于函数体
+//       parallel for x in items:          // @parallel 展开并行迭代
+//           heavy_compute(x)
+//
+// 编译产出 Rust：
+//   @parallel 标记的函数或 for 循环在 codegen 阶段：
+//   1. 导入 rayon crate
+//   2. 将 .iter() / .into_iter() 替换为 .par_iter()
+//   3. map/filter 等适配器自动并行
+//   4. for 循环体分配到线程池
+//
+// 适用场景：
+//   • 纯 CPU 密集型计算
+//   • 无状态转换（map/filter 等）
+//   • 大数据集处理
+//
+// 不适用：
+//   • IO 密集型（异步更适合）
+//   • 共享可变状态
+// ============================================================

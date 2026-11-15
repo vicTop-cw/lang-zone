@@ -1,0 +1,10 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 47.64s
+     Running tests\cy_codegen_gate.rs (target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe)
+
+running 2 tests
+test cy_l1_corpus_and_allowlist_invariants ... ok
+test cy_l1_transpile_all_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 3.84s
+

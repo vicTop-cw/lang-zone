@@ -1,0 +1,8 @@
+// ============================
+// LZ Compile-time (comptime)
+// ============================
+
+const TABLE_SIZE: int = 256
+
+def main() =
+    print(TABLE_SIZE)

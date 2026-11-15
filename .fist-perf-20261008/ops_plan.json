@@ -1,0 +1,15 @@
+[
+ {"tool":"task_plan_deep","args":{
+   "task_id":"T0r9",
+   "split_n":6,
+   "by":"codebuddy-agent",
+   "omega_strong_verify":false,
+   "spec":"@!.fist-perf-20261008/omega_spec.json",
+   "decide_split_n":6,
+   "decide_difficulty":4,
+   "decide_reason":"建议书五方向 A/B/C/D/E + 横切回归闸线，各自可独立验收，拆6片",
+   "decide_by":"codebuddy-agent",
+   "reinject_context":true}},
+ {"tool":"status_summary","args":{"namespace":"perf-opt"}},
+ {"tool":"list","args":{"namespace":"perf-opt"}}
+]

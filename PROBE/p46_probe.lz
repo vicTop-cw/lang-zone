@@ -1,0 +1,16 @@
+struct PipelineConfig =
+    count: int
+    name: str
+
+impl PipelineConfig =
+    def __buildparams__(ref self) -> (int, str) =
+        return (self.count, self.name)
+
+def task(count: int, name: str) =
+    print(count)
+    print(name)
+
+def main() =
+    cfg = PipelineConfig(count: 5, name: "lz")
+    task ~: cfg
+    print("done")

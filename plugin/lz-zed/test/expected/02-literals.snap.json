@@ -1,0 +1,1237 @@
+{
+  "file": "02-literals.lz",
+  "tokens": 250,
+  "scopes": {
+    "comment.line.double-slash.lz": 2,
+    "text": 126,
+    "meta.preprocessor.attribute.lz": 7,
+    "variable.lz": 33,
+    "keyword.lz": 20,
+    "keyword.operator.lz": 30,
+    "constant.numeric.integer.lz": 23,
+    "punctuation.accessor.lz": 2,
+    "constant.numeric.float.lz": 4,
+    "constant.language.boolean.lz": 2,
+    "support.function.lz": 1
+  },
+  "lines": [
+    [
+      {
+        "t": "// lz-zed test fixture: 02-literals — 数字与布尔字面量",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "// Authority: SYNTAX/00-词法基础.md §2 + §2.2",
+        "s": "comment.line.double-slash.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "十进制整数",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "a",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "42",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "b",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "c",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1_000_000",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "十六进制",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "八进制",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "二进制",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "h",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0xFF",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "o",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0o77",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "bin",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0b1010",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "浮点",
+        "s": "variable.lz"
+      },
+      {
+        "t": "：",
+        "s": "text"
+      },
+      {
+        "t": "小数与科学计数",
+        "s": "variable.lz"
+      },
+      {
+        "t": "（",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "与",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": ".",
+        "s": "punctuation.accessor.lz"
+      },
+      {
+        "t": "5",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "非法",
+        "s": "variable.lz"
+      },
+      {
+        "t": "，",
+        "s": "text"
+      },
+      {
+        "t": "不出现",
+        "s": "variable.lz"
+      },
+      {
+        "t": "）",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "pi",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3.14",
+        "s": "constant.numeric.float.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "e",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1e10",
+        "s": "constant.numeric.float.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "neg",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1.5e-3",
+        "s": "constant.numeric.float.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "big",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2.5E+6",
+        "s": "constant.numeric.float.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "整数边界",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "neg_int",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "-",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "9223372036854775808",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "max_int",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "9223372036854775807",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "区间字面量",
+        "s": "variable.lz"
+      },
+      {
+        "t": "（",
+        "s": "text"
+      },
+      {
+        "t": "含数值",
+        "s": "variable.lz"
+      },
+      {
+        "t": "）",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "r1",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "..",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "r2",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "0",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "..=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": "9",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "布尔",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "yes",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "True",
+        "s": "constant.language.boolean.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "no",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "False",
+        "s": "constant.language.boolean.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "#",
+        "s": "meta.preprocessor.attribute.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "数值参与表达式",
+        "s": "variable.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "sum",
+        "s": "support.function.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "1",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "+",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "*",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "frac",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "/",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "4",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "mod",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "%",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "3",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      },
+      {
+        "t": "let",
+        "s": "keyword.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "pow",
+        "s": "variable.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "=",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "2",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "**",
+        "s": "keyword.operator.lz"
+      },
+      {
+        "t": " ",
+        "s": "text"
+      },
+      {
+        "t": "10",
+        "s": "constant.numeric.integer.lz"
+      },
+      {
+        "t": "",
+        "s": "text"
+      }
+    ],
+    [
+      {
+        "t": "",
+        "s": "text"
+      }
+    ]
+  ]
+}

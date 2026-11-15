@@ -1,0 +1,248 @@
+
+enum Token:
+    Def
+    Struct
+    If
+    Else
+    Return
+    IntLit(v: int)
+    StrLit(s: str)
+    Ident(name: str)
+    MagicMethod(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    Percent
+    StarStar
+    Eq
+    EqEq
+    NotEq
+    Lt
+    Gt
+    Le
+    Ge
+    AmpAmp
+    PipePipe
+    Colon
+    ColonColon
+    Comma
+    Dot
+    Arrow
+    FatArrow
+    LParen
+    RParen
+    LBrace
+    RBrace
+    Newline
+    Eof
+
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "struct" || s == "if" || s == "else" || s == "return"
+
+def keyword_token(s: str) -> Token =
+    if s == "def":
+        Token.Def
+    elif s == "struct":
+        Token.Struct
+    elif s == "if":
+        Token.If
+    elif s == "else":
+        Token.Else
+    else:
+        Token.Return
+
+def punct_token(c: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("+", Token.Plus),
+        ("-", Token.Minus),
+        ("*", Token.Star),
+        ("/", Token.Slash),
+        ("%", Token.Percent),
+        (":", Token.Colon),
+        (",", Token.Comma),
+        (".", Token.Dot),
+        ("(", Token.LParen),
+        (")", Token.RParen),
+        ("{", Token.LBrace),
+        ("}", Token.RBrace),
+        ("<", Token.Lt),
+        (">", Token.Gt),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = (true, pair.1)
+    result
+
+def two_char_token(c1: str, c2: str) -> (bool, Token) =
+    let key: str = c1 + c2
+    let table: List<(str, Token)> = [
+        ("==", Token.EqEq),
+        ("!=", Token.NotEq),
+        ("<=", Token.Le),
+        (">=", Token.Ge),
+        ("&&", Token.AmpAmp),
+        ("||", Token.PipePipe),
+        ("::", Token.ColonColon),
+        ("->", Token.Arrow),
+        ("=>", Token.FatArrow),
+        ("**", Token.StarStar),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == key:
+            result = (true, pair.1)
+    result
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def is_ident_char(c: str) -> bool =
+    is_alpha(c) || is_digit(c)
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_ident_char(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+def scan_int(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+def scan_punct(src: str, i: int) -> ((bool, Token), int) =
+    let c = char_at(src, i)
+    let r = punct_token(c)
+    if r.0:
+        (r, i + 1)
+    elif i + 1 < str_len(src):
+        let two = two_char_token(c, char_at(src, i + 1))
+        if two.0:
+            ((true, two.1), i + 2)
+        else:
+            (r, i + 1)
+    else:
+        (r, i + 1)
+
+def scan_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 1
+    while i < str_len(src) && char_at(src, i) != "\"":
+        i = i + 1
+    (src[(start + 1)..i], i + 1)
+
+def digit_val(c: str) -> int =
+    let table: List<(str, int)> = [
+        ("0", 0), ("1", 1), ("2", 2), ("3", 3), ("4", 4),
+        ("5", 5), ("6", 6), ("7", 7), ("8", 8), ("9", 9)
+    ]
+    let mut result = 0
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = pair.1
+    result
+
+def str_to_int(s: str) -> int =
+    let mut v = 0
+    for idx in 0..s.len():
+        v = v * 10 + digit_val(char_at(s, idx))
+    v
+
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if c == " " || c == "\t":
+            i = i + 1
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+        elif c == "\"":
+            let r = scan_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.StrLit(s: r.0)]
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let word: str = r.0
+            if word.len() > 4 && word[0..2] == "__" && word[(word.len() - 2)..word.len()] == "__":
+                tokens = tokens + [Token.MagicMethod(name: word)]
+            elif is_keyword(word):
+                tokens = tokens + [keyword_token(word)]
+            else:
+                tokens = tokens + [Token.Ident(name: word)]
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            let num: str = r.0
+            tokens = tokens + [Token.IntLit(v: str_to_int(num))]
+        else:
+            let r = scan_punct(src, i)
+            i = r.1
+            let pr = r.0
+            if pr.0:
+                tokens = tokens + [pr.1]
+    tokens = tokens + [Token.Eof]
+    tokens
+
+def display_token(t: Token) -> str =
+    match t:
+        case Token.Def => "Def"
+        case Token.Struct => "Struct"
+        case Token.If => "If"
+        case Token.Else => "Else"
+        case Token.Return => "Return"
+        case Token.IntLit(v: n) => "IntLit(" + n.to_string() + ")"
+        case Token.StrLit(s: s) => "StrLit(" + s + ")"
+        case Token.Ident(name: n) => "Ident(" + n + ")"
+        case Token.MagicMethod(name: n) => "MagicMethod(" + n + ")"
+        case Token.Plus => "Plus"
+        case Token.Minus => "Minus"
+        case Token.Star => "Star"
+        case Token.Slash => "Slash"
+        case Token.Percent => "Percent"
+        case Token.StarStar => "StarStar"
+        case Token.Eq => "Eq"
+        case Token.EqEq => "EqEq"
+        case Token.NotEq => "NotEq"
+        case Token.Lt => "Lt"
+        case Token.Gt => "Gt"
+        case Token.Le => "Le"
+        case Token.Ge => "Ge"
+        case Token.AmpAmp => "AmpAmp"
+        case Token.PipePipe => "PipePipe"
+        case Token.Colon => "Colon"
+        case Token.ColonColon => "ColonColon"
+        case Token.Comma => "Comma"
+        case Token.Dot => "Dot"
+        case Token.Arrow => "Arrow"
+        case Token.FatArrow => "FatArrow"
+        case Token.LParen => "LParen"
+        case Token.RParen => "RParen"
+        case Token.LBrace => "LBrace"
+        case Token.RBrace => "RBrace"
+        case Token.Newline => "Newline"
+        case Token.Eof => "Eof"
+
+
+def main() =
+    let src = read_file(__file__).unwrap()
+    let toks = tokenize(src)
+    for idx in 0..toks.len():
+        print(display_token(toks[idx]))

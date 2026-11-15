@@ -1,0 +1,44 @@
+// _test_trait_adv.lz — 阶段 3.1: Trait 系统完整性测试
+
+trait Show =
+    def show(self: Self) -> str = ...
+
+trait Double =
+    def double(self: Self) -> Self = ...
+
+// trait 默认方法
+trait Greet =
+    def greet(self: Self) -> str =
+        "Hello from trait!"
+
+// 实现 trait
+struct Person =
+    name: str
+
+impl Greet for Person =
+    def greet(self: Person) -> str =
+        "Hi, I'm " + self.name
+
+impl Show for Person =
+    def show(self: Person) -> str =
+        self.name
+
+// 测试
+def test_trait_default() =
+    p = Person("Alice")
+    msg = p.greet()
+    print("Greet: ")
+    print(msg)
+
+def test_trait_show() =
+    p = Person("Bob")
+    msg = p.show()
+    print("Show: ")
+    print(msg)
+
+// 主入口
+def main() =
+    print("=== Trait Advanced Test ===")
+    test_trait_default()
+    test_trait_show()
+    print("=== Trait Advanced Test Complete ===")

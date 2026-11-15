@@ -1,0 +1,18 @@
+// ============================
+// LZ Control Flow — for / while / loop
+// ============================
+
+def main() =
+    for i in 0..5:
+        print(i)
+
+    i = 0
+    while i < 3:
+        print(i)
+        i += 1
+
+    count = 0
+    loop:
+        if count >= 3:
+            break
+        count += 1

@@ -1,0 +1,127 @@
+// lib_pattern — 模式匹配测试
+// 测试：嵌套模式、枚举解构、守卫、字符串匹配、通配
+
+enum Shape:
+    Circle(f64)
+    Rectangle(f64, f64)
+    Triangle(f64, f64, f64)
+    Point
+
+enum Color:
+    Red
+    Green
+    Blue
+    RGB(int, int, int)
+
+def shape_name(s: Shape) -> str =
+    match s:
+        case Shape.Circle(_):
+            "circle"
+        case Shape.Rectangle(_, _):
+            "rectangle"
+        case Shape.Triangle(_, _, _):
+            "triangle"
+        case Shape.Point:
+            "point"
+
+def is_round(s: Shape) -> bool =
+    match s:
+        case Shape.Circle(_):
+            True
+        case Shape.Point:
+            True
+        case _:
+            False
+
+def area(s: Shape) -> f64 =
+    match s:
+        case Shape.Circle(r):
+            3.14159 * r * r
+        case Shape.Rectangle(w, h):
+            w * h
+        case Shape.Triangle(a, b, c):
+            let s2 = (a + b + c) / 2
+            (s2 * (s2 - a) * (s2 - b) * (s2 - c))
+        case Shape.Point:
+            0.0
+
+def color_hex(c: Color) -> str =
+    match c:
+        case Color.Red:
+            "#FF0000"
+        case Color.Green:
+            "#00FF00"
+        case Color.Blue:
+            "#0000FF"
+        case Color.RGB(r, g, b):
+            f"#{r}{g}{b}"
+
+def classify(n: int) -> str =
+    match n:
+        case 0:
+            "zero"
+        case 1:
+            "one"
+        case 2:
+            "two"
+        case 3:
+            "three"
+        case 4:
+            "four"
+        case 5:
+            "five"
+        case _ if n < 0:
+            "negative"
+        case _ if n > 100:
+            "large"
+        case _:
+            "medium"
+
+def describe_pair(p: (int, int)) -> str =
+    match p:
+        case (0, 0):
+            "origin"
+        case (0, _):
+            "on y-axis"
+        case (_, 0):
+            "on x-axis"
+        case (x, y) if x == y:
+            f"diagonal at {x}"
+        case (x, y):
+            f"({x}, {y})"
+
+def main() =
+    // shape matching
+    assert shape_name(Shape.Circle(5.0)) == "circle"
+    assert shape_name(Shape.Rectangle(3.0, 4.0)) == "rectangle"
+    assert shape_name(Shape.Point) == "point"
+
+    // guards
+    assert is_round(Shape.Circle(1.0)) == True
+    assert is_round(Shape.Point) == True
+    assert is_round(Shape.Rectangle(1.0, 2.0)) == False
+
+    // destructuring
+    assert area(Shape.Circle(1.0)) == 3.14159
+    assert area(Shape.Rectangle(3.0, 4.0)) == 12.0
+    assert area(Shape.Point) == 0.0
+
+    // enum with data
+    assert color_hex(Color.Red) == "#FF0000"
+    assert color_hex(Color.RGB(255, 128, 0)) == "#2551280"
+
+    // guard patterns
+    assert classify(0) == "zero"
+    assert classify(3) == "three"
+    assert classify(-5) == "negative"
+    assert classify(200) == "large"
+    assert classify(50) == "medium"
+
+    // tuple destructuring
+    assert describe_pair((0, 0)) == "origin"
+    assert describe_pair((0, 5)) == "on y-axis"
+    assert describe_pair((3, 0)) == "on x-axis"
+    assert describe_pair((5, 5)) == "diagonal at 5"
+    assert describe_pair((2, 3)) == "(2, 3)"
+
+    print("lib_pattern OK")

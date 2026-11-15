@@ -1,0 +1,52 @@
+// ============================================================
+// 测试: owned 变量绑定 — 强制显式消费 + 毒化
+// 对应 SYNTAX/02-变量与绑定.md §六 6.1
+// ============================================================
+
+// ── owned 形参接收者 ──
+def consume_str(owned s: str) -> int =
+    s.len()                 // 内部拿到所有权，返回后 s 被消费
+
+// ── owned 形参内部消费：传给另一个 owned 形参 ──
+def pass_through(owned s: str) -> int =
+    consume_str(s^)         // 显式转移给下一个 owned 形参
+
+// ── 普通函数（仿射，不强制消费） ──
+def just_read(s: str) -> int =
+    s.len()
+
+def main() =
+    // ── 1. owned 变量：显式 ^ 消费 ──
+    owned a = "hello"
+    let len_a = a^          // 消费：所有权转移给 len_a 绑定的表达式
+    print(len_a)            // 5
+
+    // a 已毒化，此处不可再使用 a
+    // print(a)             // ❌ 编译错误：a 已毒化
+
+    // ── 2. owned 变量：传给 owned 形参消费 ──
+    owned b = "world"
+    let len_b = consume_str(b)   // 传 owned 形参 → b 被消费
+    print(len_b)                 // 5
+
+    // b 已毒化
+    // print(b)             // ❌ 编译错误
+
+    // ── 3. owned 变量：内部传链消费 ──
+    owned c = "chain"
+    let len_c = pass_through(c)  // c → pass_through → consume_str
+    print(len_c)                 // 5
+
+    // ── 4. mut owned 变量：可修改 + 强制消费 ──
+    mut owned d = 1
+    d += 1                       // 可变：可修改内容
+    print(d)                     // 2
+    let dd = d^                  // 消费
+    print(dd)                    // 2
+
+    // ── 5. 普通变量（仿射）不受影响 ──
+    e = "normal"
+    print(just_read(e))          // 6
+    print(just_read(e))          // ✅ 仿射可多次使用
+
+    print("owned binding tests done")

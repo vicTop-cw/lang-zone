@@ -1,0 +1,4 @@
+import std.collections.HashMap as Map
+
+@export(Rust)
+def config(key: str) -> str = key

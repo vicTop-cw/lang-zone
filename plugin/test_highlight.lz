@@ -1,0 +1,77 @@
+// Test LZ syntax highlighting
+
+def main():
+    let x = 42
+    let y = 3.14
+    let name = "hello"
+    let flag = True
+
+    if x > 0:
+        print("positive")
+    elif x < 0:
+        print("negative")
+    else:
+        print("zero")
+
+    for i in range(10):
+        if i % 2 == 0:
+            continue
+        print(i)
+
+    match x:
+        case 0:
+            print("zero")
+        case 1:
+            print("one")
+        case _:
+            print("other")
+
+    while x > 0:
+        x -= 1
+        if x == 5:
+            break
+
+    try:
+        risky_call()
+    catch e as Exception:
+        print("error")
+    finally:
+        cleanup()
+
+struct Point:
+    x: Int
+    y: Int
+
+    def __init__(self, x: Int, y: Int):
+        self.x = x
+        self.y = y
+
+enum Color:
+    Red
+    Green
+    Blue
+
+trait Drawable:
+    def draw(self):
+        pass
+
+impl Drawable for Point:
+    def draw(self):
+        print("drawing point")
+
+@deprecated
+def old_func():
+    pass
+
+macro my_macro():
+    pass
+
+template my_template[T]():
+    pass
+
+test "simple test":
+    assert True
+
+suite MathTests:
+    test "addition":
+        assert 1 + 1 == 2

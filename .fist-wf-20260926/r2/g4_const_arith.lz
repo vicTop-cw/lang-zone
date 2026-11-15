@@ -1,0 +1,4 @@
+const K: bigint = BigInt::from(10) * BigInt::from(20) + BigInt::from(5)
+
+def main() =
+    println(K)

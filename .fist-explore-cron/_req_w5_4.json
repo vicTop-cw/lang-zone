@@ -1,0 +1,8 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r9","assignee":"lang-zone-explore-cron","now":"2026-10-10T09:09:00+08:00"}},
+ {"name":"heartbeat","arguments":{"task_id":"T0r9","signal":"running","now":"2026-10-10T09:09:00+08:00"}},
+ {"name":"reserve_release","arguments":{"scope":"src/ir/codegen/mod.rs","agent":"lang-zone-explore-cron"}},
+ {"name":"reserve_release","arguments":{"scope":"tests/demo_codegen_compile.rs","agent":"lang-zone-explore-cron"}},
+ {"name":"reserve_release","arguments":{"scope":"DEMO/01_basics/","agent":"lang-zone-explore-cron"}},
+ {"name":"output_validate","arguments":{"project_dir":".","artifacts":[{"path":"prompts/20261009.13.45.00.md","contains":"chosen_mode"},{"path":"memory/bugs.md","min_chars":1}],"evidence":"c=3（LADDER 档 中 限定 3；文档词+0；子树0+0；提及 E0599 缺陷+1；polish 档不扩边界）| chosen_mode=polish | parallel_requested=0 | blocked_by=none（单模式不进入并行四道门）| dispatched=T0r9（ns=lz-explore）| reserved=3/3（src/ir/codegen/mod.rs、tests/demo_codegen_compile.rs、DEMO/01_basics/）| 与 T0r6 作用域字面不相交，T0r7/T0r8 为模板噪音任务 | gate: workspace 742p/0f、DEMO unexpected=0、golden 绿","require_evidence":true,"now":"2026-10-10T09:09:00+08:00"}}
+]

@@ -1,0 +1,9 @@
+const LIMIT: int = comptime 100
+
+def main() =
+    comptime:
+        let src = inspect.getsource()
+        print("filename:", inspect.getsourcefile())
+        print("lines count:", inspect.getsourcelines().lines.len())
+        print("first line:", inspect.getsourcelines().lines[0])
+    print("runtime ok", LIMIT)

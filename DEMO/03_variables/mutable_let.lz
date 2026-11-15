@@ -1,0 +1,38 @@
+// ============================
+// LZ Variables — Default Mutable & let Immutable
+// ============================
+
+def main() =
+    // --- Default mutable binding ---
+    x = 42
+    x = 100
+    print(x)
+
+    // With type annotation (still mutable)
+    y: int = 10
+    y = 20
+
+    // mut keyword is no-op (already mutable by default)
+    mut z = 50
+    z = 60
+
+    // --- let immutable binding ---
+    let a = 42
+    let name: str = "world"
+    let pi: f64 = 3.14159
+
+    // --- Destructuring bindings ---
+    let (first, second) = (1, 2)
+    let (head, ..,) = (1, 2, 3, 4)
+
+    // --- Option shorthand int? ---
+    let opt: int? = Some(42)            // int? 等价于 Option<int>
+    match opt:
+        case Some(v) => print("matched:", v)
+        case None => print("none")
+
+    // --- guard let for Option ---
+    guard let Some(w) = opt else:
+        print("no value")
+
+    print(x, y, z, a, first, second, head)

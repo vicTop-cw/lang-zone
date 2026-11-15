@@ -1,0 +1,5 @@
+// 修饰符装饰器语料 — shared @ var（期望：编译通过 + 产物断言）
+// 规范：SYNTAX/02-变量与绑定.md §八
+def main() =
+    @shared s = 42
+    print(s)

@@ -1,0 +1,8 @@
+# rs-lz 差分探针的生成物（.rs/.exe/.pdb/.lzrs/_lz.*/_native.rs）不入库
+*.rs
+*.exe
+*.pdb
+*.lzrs
+*.lzlz
+*_lz.*
+*_native.rs

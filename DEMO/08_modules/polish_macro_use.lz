@@ -1,0 +1,33 @@
+// ============================================================
+// polish_macro_use — 非宏模块：import macro 导入宏模块 API 并使用
+// 验证常用模式：宏模块定义宏 API → 非宏模块导入使用
+// 规范: SYNTAX/08-宏与编译期.md §4.3 + 07-模块与导入.md
+// 运行: lang-zone <file> --project（跨模块）
+// ============================================================
+
+// --- 导入宏模块（宏命名空间与普通项分离） ---
+import macro polish_macro_lib                    // 导入整个宏模块
+from macro polish_macro_lib import make_const, say_hi   // 导入特定宏/模板
+
+// 顶层宏调用：生成顶层常量（宏调用独占一行）
+@make_const!(LIMIT2, 50)
+
+def main() =
+    // 导入的宏：独占一行调用（guard/else 断言展开）
+    @check_eq!(1 + 1, 2)
+    @check_eq!(LIMIT2, 50)
+
+    // 导入的 template：name! 内联调用
+    say_hi!("LZ")
+
+    // 宏生成的常量可直接引用
+    print(LIMIT2)          // 50
+
+    // 导入的宏作用于缩进块（朋友函数场景）
+    @note_block!
+    def helper2(x: int) -> int =
+        x + 100
+
+    print(helper2(1))      // 101
+
+    print("macro API use OK")

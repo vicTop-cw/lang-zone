@@ -1,0 +1,7 @@
+// 泛型函数测试
+def identity<T>(x: T) -> T = x
+
+def main() =
+    let a = identity(42)
+    let b = identity("hello")
+    print(a, b)

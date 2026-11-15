@@ -1,0 +1,4 @@
+[
+  {"tool": "claim", "args": {"task_id": "T0r8", "assignee": "CodeBuddyMain", "now": "2026-09-26T16:01:00Z"}},
+  {"tool": "task_plan_deep", "args": {"task_id": "T0r8", "split_n": 4, "by": "CodeBuddyMain", "omega_strong_verify": true, "laya_auto": true, "now": "2026-09-26T16:01:30Z", "spec": "{\"laws\":[\"寻虫：issue_scan+对抗样例核实 hunt-20260926 遗留 BUG-1~5 并新寻虫\",\"修复：按 critical>high>medium 顺序修复 BUG-4/1/2/3/5 并补回归测试\",\"验证：cargo 回归闸门 -j1 + omega_verify 强验证 + 证据梯 L4\",\"打磨：DEMO 盲区补 bigint/complex 用例 + 文档报告落盘 + call_log 审计\"]}"}}
+]

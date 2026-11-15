@@ -1,0 +1,16 @@
+// find_bug/typer/bug-params-type-erase.lz
+// BUG-TY-004: __Params 运行时反射的类型擦除
+// Box<dyn Any> downcast 失败会 panic
+// __Params 在 lz_builtins/src/runtime/builtins.rs 定义
+
+def test_params_mixed() =
+  p = __Params::new()
+  p.set(0, 42)
+  p.set(1, "hello")
+  // 正确类型推断
+  val0 = p.get(0)
+  print("param[0]:", val0)
+
+def main() =
+  test_params_mixed()
+  print("params-type-erase.lz done")

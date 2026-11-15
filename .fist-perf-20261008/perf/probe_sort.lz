@@ -1,0 +1,7 @@
+def build() -> List<int> =
+    [3, 1, 2]
+
+def main() =
+    mut xs = [5, 4, 6]
+    let a = sorted(build())
+    print(a)

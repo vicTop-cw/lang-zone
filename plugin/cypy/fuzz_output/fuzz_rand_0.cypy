@@ -1,0 +1,31 @@
+def test_0() -> int:
+    x = x
+    let x: double = 1.5
+
+def test_1() -> int:
+    if (-print(0.0)):
+        return 1
+    else:
+        return 0
+    guard ((-((False <= False)))) else:
+        return -1
+    if (print(1.5)):
+        return 1
+    else:
+        return 0
+
+def test_2() -> int:
+    guard print((-total)) else:
+        return -1
+    while 1.5:
+        break
+    print(print(((-42))))
+    return ((-(print(-1))))
+    match (print((-(--1)))):
+        case 0:
+            return 0
+        case _:
+            return -1
+
+def main() -> int:
+    return 0

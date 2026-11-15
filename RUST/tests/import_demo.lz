@@ -1,0 +1,18 @@
+import std.io
+import std.fs
+import std.collections.HashMap as Map
+import lz.io
+from lz.io import print
+from std.bridge.rust.serde_json import from_str
+from .utils import helper
+from .common import config
+
+@export(Rust)
+def add(a: int, b: int) -> int = a + b
+
+@export(Rust)
+def greet(name: str) -> str = "hello " + name
+
+def main() =
+    let data = fs.read_to_string("input.txt")
+    print(data)

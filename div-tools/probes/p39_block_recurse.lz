@@ -1,0 +1,46 @@
+// p39_block_recurse.lz：验证 parse_stmt ↔ parse_block 互相递归是否触发编译栈溢出
+enum Token:
+    IntLit(v: int)
+    Indent(v: int)
+    Newline
+    Eof
+
+def tok_at(toks: List<Token>, idx: int) -> Token =
+    toks[idx].clone()
+
+// parse_expr 简化：只吃 IntLit
+def parse_expr(toks: List<Token>, pos: int) -> (int, int) =
+    let t = tok_at(toks, pos)
+    let res: (int, int) = match t:
+        case Token.IntLit(v: n) => (n, pos + 1)
+        case _ => (0, pos + 1)
+    res
+
+// parse_block → parse_stmt → parse_block（互相递归）
+def parse_block(toks: List<Token>, pos: int) -> (int, int) =
+    let t = tok_at(toks, pos)
+    let res: (int, int) = if t == Token.Eof:
+        (0, pos)
+    elif t == Token.Newline:
+        let r = parse_block(toks, pos + 1)
+        (r.0, r.1)
+    else:
+        let indent_v = match t:
+            case Token.Indent(v: n) => n
+            case _ => -1
+        if indent_v >= 0:
+            let r = parse_stmt(toks, pos + 1)
+            let r2 = parse_block(toks, r.1)
+            (r.0 + r2.0, r2.1)
+        else:
+            (0, pos + 1)
+    res
+
+def parse_stmt(toks: List<Token>, pos: int) -> (int, int) =
+    let r = parse_expr(toks, pos)
+    (r.0, r.1)
+
+def main() =
+    let toks: List<Token> = [Token.Indent(v: 4), Token.IntLit(v: 1), Token.Newline, Token.Eof]
+    let r = parse_block(toks, 0)
+    print("sum=" + r.0.to_string())

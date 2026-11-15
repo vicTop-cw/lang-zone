@@ -1,0 +1,10 @@
+// spawn 测试
+def worker(name: str) -> str =
+    f"Hello from {name}"
+
+async def async_main() =
+    print("async hello")
+
+def main() =
+    let t = spawn worker("task1")
+    print("main done")

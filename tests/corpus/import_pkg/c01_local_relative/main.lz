@@ -1,0 +1,10 @@
+// C01 consumer: import same-dir module mylib
+import mylib
+
+from mylib import add2
+
+def main() =
+    assert add2(3, 4) == 7
+    let p = Point { x: 10, y: 20 }
+    assert p.total() == 30
+    print("C01 OK")

@@ -1,0 +1,5 @@
+// Build block tests — =: variable build block
+def main() =
+    x =:
+        1 + 2
+    print(x)

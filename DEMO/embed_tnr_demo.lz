@@ -1,0 +1,36 @@
+// embed_tnr_demo.lz — #[embed(tnr)] / @tnr! 用法演示
+//
+// 本 demo 展示 LZ 嵌入 Tnr 的三种形式：
+//   A. #[embed(tnr)] + 缩进块（原样静态嵌入）
+//   B. @tnr! + r```（反引号原始块）
+//   C. @tnr! + f```（动态生成式，#tnr-embed feature 下插值）
+
+// 形式 A：缩进式原样静态嵌入
+// 签名用 tnr 的 fn（非 LZ 的 def），整块一体作为 tnr 原样源码
+#[embed(tnr)]
+fn add(a, b)
+    a + b
+
+#[embed(tnr)]
+fn matmul_relu(A, B)
+    let C = A × B
+    let D = relu(C)
+    D
+
+// 形式 B：反引号原始块（花括号式 tnr）
+@tnr!
+r```
+fn fast_mul(a, b) { a * b }
+```
+
+// 形式 C：动态生成式（f`` 支持 $(var) 插值）
+let bias = "0.1"
+@tnr!
+f```
+fn dense(A, W)
+    let C = A × W + $(bias)
+    relu(C)
+```
+
+def main():
+    print("embed_tnr_demo: see generated .rs for tnr transpiled output")

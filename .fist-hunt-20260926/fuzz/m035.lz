@@ -1,0 +1,17 @@
+// ⚠️ 规范符合性示例 —— `..` 可变参数注入
+// 详见 SYNTAX/03d-可变参数.md。
+//
+// LZ 可变参数语法（详见 SYNTAX/03d-可变参数.md）
+// `..` 用于变参注入：带注解限定一侧，无注解则仅注入 args（Tuple<Any,..>）
+
+// === 安全收集：无 ..，类型安全 ===
+def sum_all(values: List<int>) -> int =
+    s = 0
+    for v in values:
+        s += v
+    s
+
+sum_all(1, 2, 3, 4)        // 10 — 自动收集为 List<int>
+
+def main() =
+    sum_all(1, 2

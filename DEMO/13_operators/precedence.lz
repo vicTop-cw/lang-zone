@@ -1,0 +1,87 @@
+// ============================
+// LZ Operator Precedence & Whitespace
+// ============================
+
+// Reference: 12-操作符.md §1.18 (Whitespace) & §2 (Precedence)
+
+def main() =
+    // --- Whitespace rules ---
+    // Binary operators: MUST have whitespace before and after
+    let a = 3
+    let b = 4
+    mut x = 5
+    mut y = 2
+    let n = 7
+    let sum = a + b
+    let product = x * y
+    let compare = n >= 0
+    let logical = True and False
+
+    // Unary operators: MUST be adjacent to operand
+    let neg = -x
+    let invert = ~a
+    let not_val = not x
+
+    // Postfix operators: MUST be adjacent to value
+    def fallible() -> Option<int> = Some(n)
+    let propagated = fallible()?
+    def obj() -> Option<int> = Some(n)
+    let safe = obj()?
+    let source = 42
+    let moved = source^
+
+    // Parentheses: MUST be adjacent to function name
+    def f(v: int) -> int = v * 2
+    let xs = [1, 2, 3]
+    let r1 = f(x)
+    let r2 = xs[1]
+
+    // Compound assignment: no space inside symbol
+    x += 1
+    y *= 2
+
+    // Build blocks: must have whitespace before/after + newline
+    val =:
+        42
+
+    // --- Precedence table (0 low → 17 high, 权威源：12-操作符.md §二) ---
+    // 0:  = += -= *= /= %= **= &= |= ^= <<= >>=  (assignment, right)
+    // 1:  :=  (walrus, right)；同级：三元 a if c else b、范围 .. ..=
+    // 2:  or ||   (logical or, left)
+    // 3:  and &&  (logical and, left)
+    // 4:  not !   (logical not, right)
+    // 5:  == != < > <= >=  (comparison)
+    // 6:  is in as  (identity / membership / cast)
+    // 7:  |>      (pipe, left)
+    // 8:  ??      (null-coalesce, left)
+    // 9:  |       (bitwise or, left)
+    // 10: ^       (bitwise xor, left)
+    // 11: &       (bitwise and, left)
+    // 12: << >>   (shift, left)
+    // 13: + -     (additive, left)
+    // 14: * / %   (multiplicative, left)
+    // 15: **      (power, right)
+    // 16: + - ~ * & (unary)  (unary, right)
+    // 17: ? ?. ^(postfix) [] () .  (member/index/call, left)
+
+    // --- Precedence examples ---
+    let r = 2 + 3 * 4          // = 14 (* before +)
+    let p = (2 + 3) * 4        // = 20 (explicit grouping)
+
+    // Comparison chaining: a < b < c → a < b and b < c
+    let chain = 1 < 5 < 10
+
+    // Power is right-associative
+    let pow = 2 ** 3 ** 2      // = 2**(3**2) = 512
+
+    // Pipe has very low precedence (shown via function composition)
+    let data = 4
+    let piped = process(transform(data))
+
+    // Assignment is lowest
+    x = 1 + 2 * 3              // = 7
+
+    print(r, p, chain, pow)
+
+def transform(v: int) -> int = v * 2
+def process(v: int) -> int = v + 1

@@ -1,0 +1,10 @@
+struct Person =
+    name: str
+    age: int
+
+def main() =
+    p: Option<Person> = None
+    n = p?.name ?? "default"
+    print(n)
+    a = p?.age ?? 0
+    print(a)

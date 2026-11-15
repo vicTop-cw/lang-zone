@@ -1,0 +1,19 @@
+// LZ 并发 — async / await / spawn 扩展
+// 覆盖：多个并发任务、await 聚合、spawn 返回 future
+
+async def fetch(id: int) -> str =
+    f"result_{id}"
+
+async def fetch_all() -> List<str> =
+    let a = spawn fetch(1)
+    let b = spawn fetch(2)
+    let c = spawn fetch(3)
+    [await a, await b, await c]
+
+def main() =
+    let results = spawn fetch_all()
+    print(await results)
+
+    // 直接 spawn 单个任务
+    let single = spawn fetch(99)
+    print(await single)

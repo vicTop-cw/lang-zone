@@ -1,0 +1,32 @@
+// 综合覆盖率测试 — 覆盖全部 IR ExprKind + Stmt 变体
+
+struct Point =
+    x: int
+    y: int
+
+def add(a: int, b: int) -> int = a + b
+
+def compute(a: int) -> int =
+    let b = a + 1
+    let c = a * b
+    if a > 0:
+        a
+    else:
+        -a
+
+def loops() =
+    for i in 0..5:
+        print(i)
+
+def arithmetic(a: int, b: int) -> int =
+    a + b - a * b / 2
+
+def use_point(x: int, y: int) -> int =
+    let p = Point(x: x, y: y)
+    p.x + p.y
+
+def main() =
+    let r = compute(10)
+    print(r)
+    print(arithmetic(3, 4))
+    print(use_point(5, 6))

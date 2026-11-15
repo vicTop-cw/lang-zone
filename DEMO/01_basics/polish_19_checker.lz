@@ -1,0 +1,29 @@
+// ============================================================
+// 轮19: 检查站 — checker 函数（__Params）与 def f[chk] 引用
+// 语法参考 DEMO/04_functions/checker.lz 与 03c 规范
+// 每项用 assert 确保正确
+// ============================================================
+
+// checker 函数：接收 __Params 返回 __Params，检查参数后放行
+def check_positive(ps: __Params) -> __Params raises str =
+    if ps.kwargs.contains("x"):
+        let val = ps.kwargs["x"]
+        if val <= 0:
+            raise "must be positive"
+    ps
+
+// 引用检查站：def f[check_name](...) 调用时自动检查
+def test_val[check_positive](x: int) -> int = x
+
+def main() =
+    // ── 带检查站的函数（参数满足检查约束） ──
+    let r1 = test_val[check_positive](5)
+    assert r1 == 5
+    let r2 = test_val[check_positive](100)
+    assert r2 == 100
+
+    // ── 普通函数不受影响 ──
+    def plain(x: int) -> int = x * 2
+    assert plain(3) == 6
+
+    print("P19 checker OK")

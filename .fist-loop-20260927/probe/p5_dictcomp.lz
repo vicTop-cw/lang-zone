@@ -1,0 +1,5 @@
+def f() -> Dict<str,int> =
+    let xs = [1, 2]
+    {"k": x for x in xs}
+print(f())
+

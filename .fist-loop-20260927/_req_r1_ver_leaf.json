@@ -1,0 +1,34 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0r10.1.1","assignee":"human_steward","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r10.1.1","content":"G1 门禁1：cargo test --workspace --no-fail-fast -j 2 实跑，统计 passed/failed 并对齐基线 748；失败项摘录原始报错并入账。","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r10.1.1","verdict":"approve","note":"门禁硬口径","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r10.1.1","by":"human_steward","deliverable":".fist-loop-20260927/_gate_ver_r1.txt","summary":"全量实跑：35 目标 733 passed / 2 failed（str_boundary 两用例：E0277 String: Pattern + E0308），退出码 101","evidence":[".fist-loop-20260927/_gate_ver_r1.txt"],"now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r10.1.1","by":"human_steward","deliverable":"门禁1 实跑结果","summary":"门禁1 红：733/2","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r10.1.1","by":"verifier","verdict":"reject","summary":"门禁不绿：2 failed；已入账 BUG-9（ir-upstream）","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r10.1.1","verifier":"verifier","pass":false,"note":"门禁1 红，按红线不 verify 通过；缺陷已入账","now":"2026-09-28T06:40:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r10.1.2","assignee":"human_steward","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r10.1.2","content":"G2 门禁2：DEMO/**/*.lz 逐个 codegen -> rustc -> 运行（排除 99_errors 与 lz_std），统计失败清单。","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r10.1.2","verdict":"approve","note":"含 per-case 超时防挂死","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r10.1.2","by":"human_steward","deliverable":".fist-loop-20260927/_demo_regression_r1_v3.txt","summary":"312 例：ok=285 / lzFail=1 / rustcFail=25 / runFail=0 / timeout=1；05:48 现场重建编译器复核 polish_07_closures、iterator_demo、nesting-closure-lambda 仍复现失败","evidence":[".fist-loop-20260927/_demo_regression_r1_v3.txt"],"now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r10.1.2","by":"human_steward","deliverable":"门禁2 实跑结果","summary":"门禁2 红：27 例非 OK","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r10.1.2","by":"verifier","verdict":"reject","summary":"门禁不绿：25 rustc + 1 IR build + 1 挂起；已入账 BUG-11/BUG-12（ir-upstream）","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r10.1.2","verifier":"verifier","pass":false,"note":"门禁2 红，缺陷已入账","now":"2026-09-28T06:40:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r10.2.1","assignee":"human_steward","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r10.2.1","content":"G3 门禁3 golden 对账 + 门禁4 测试数：golden 相关测试目标结果、受管 golden 目录 git 洁净性、测试数基线->终值。","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r10.2.1","verdict":"approve","note":"两项分开结论","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r10.2.1","by":"human_steward","deliverable":"memory/reviews/20260928.06.40.00.md 第一节","summary":"门禁3 绿（golden 五目标全绿、受管 golden 无漂移）；门禁4 破：748 -> 735，入账 BUG-10","evidence":["memory/reviews/20260928.06.40.00.md"],"now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r10.2.1","by":"human_steward","deliverable":"门禁3/4 结论","summary":"golden 绿 / 测试数破","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r10.2.1","by":"verifier","verdict":"reject","summary":"门禁4 不达标（只增不减破），已入账 BUG-10","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r10.2.1","verifier":"verifier","pass":false,"note":"门禁4 红","now":"2026-09-28T06:40:00+08:00"}},
+
+ {"name":"claim","arguments":{"task_id":"T0r10.2.2","assignee":"human_steward","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_create","arguments":{"task_id":"T0r10.2.2","content":"G4：omega_status 盘点欠账补链 + 按 PROJECT-SPEC/04 落进度报告（只增不删）。","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_spec_review","arguments":{"task_id":"T0r10.2.2","verdict":"approve","note":"报告落 memory/reviews/","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0r10.2.2","by":"human_steward","deliverable":"memory/reviews/20260928.06.40.00.md","summary":"进度报告已落盘（四门禁结果 + 4 单入账 + 判定 + 转结）；账本同步","evidence":["memory/reviews/20260928.06.40.00.md",".fist-loop-20260927/loop_progress.md"],"now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0r10.2.2","by":"human_steward","deliverable":"memory/reviews/20260928.06.40.00.md","summary":"R1-验证 进度报告落盘","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0r10.2.2","by":"verifier","verdict":"pass","summary":"报告存在且口径符合只增不删、含四门禁与欠账","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0r10.2.2","verifier":"verifier","pass":true,"note":"交付物硬门满足","now":"2026-09-28T06:40:00+08:00"}},
+ {"name":"omega_status","arguments":{"task_id":"T0r10","now":"2026-09-28T06:40:00+08:00"}}
+]

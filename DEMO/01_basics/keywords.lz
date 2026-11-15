@@ -1,0 +1,83 @@
+// =============================================================
+// LZ 词法基础 — 全部关键字展示 (00-词法基础.md §一)
+// 关键字在 def main() 内演示。iterator 是顶层定义关键字，定义在 main() 外。
+// =============================================================
+
+// 生成器关键字 iterator
+iterator counter(n: int) -> int =
+    for i in 0..n:
+        yield i
+
+def main() =
+    // 声明关键字
+    def add(a: int, b: int) -> int = a + b
+    let name: str = "Alice"
+    x = 42
+    x = 100
+    pass
+
+    // 控制流关键字
+    if x > 0:
+        print("positive")
+    elif x < 0:
+        print("negative")
+    else:
+        print("zero")
+
+    match x:
+        case 0 => "none"
+        case 1 => "one"
+        case _ => "many"
+
+    guard x != 0 else:
+        print("guarded")
+
+    for v in [1, 2, 3]:
+        print(v)
+
+    i = 0
+    while i < 3:
+        print(i)
+        i += 1
+
+    loop:
+        if i >= 5:
+            break
+        i += 1
+
+    for v in [1, 2, 3]:
+        if v == 2:
+            continue
+        print(v)
+
+    // 异常关键字
+    def faulty() raises str =
+        raise "error"
+
+    try:
+        faulty()
+    catch e:
+        print(e)
+    finally:
+        print("done")
+
+    // 异步关键字
+    async def fetch() -> str = "data"
+    let f = spawn fetch()
+    let r = await f
+
+    // 运算符关键字
+    let r1 = True and False
+    let r2 = True or False
+    let r3 = not True
+    // `is` 是编译期关键字, 用于 duck 约束中做单例同一性判断 (如 `is None`)
+    // 运行时不可用, 参见 SYNTAX/01b-duck关系约束.md
+
+    // 字面量关键字
+    let flag: bool = True
+    let missing: Option<int> = None
+    let present: Option<int> = Some(42)
+    let ok: Result<int, str> = Ok(1)
+    let err: Result<int, str> = Err("fail")
+
+    print("keywords demonstrated")

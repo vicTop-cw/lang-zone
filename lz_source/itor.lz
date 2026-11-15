@@ -1,0 +1,398 @@
+// ============================================================
+// lz_source/itor.lz — Controllable Iterator (泛型 + impl)
+// 自举用标准库模块，对齐 vools.data.itor
+// ============================================================
+
+import std.sync.Mutex
+import std.sync.Condvar
+import std.collections.vec.Vec
+
+// ============================================================
+// ItorState — 生命周期状态机
+// ============================================================
+enum ItorState =
+    PENDING
+    ITERRING
+    PAUSED
+    STOPPED
+
+// ============================================================
+// Node<T> — 单链表节点（泛型）
+// 用于历史记录、跳转队列、重放回放
+// ============================================================
+struct Node<T> =
+    val: T
+    _next: Option<Node<T>>
+    _is_replay: bool
+    // 懒加载：_next 为 None 时，从 _iterator 生成下一个
+    _iterator: Option<Iterator<T>>
+    _fallback: Option<Node<T>>
+
+    // ── 构造函数 ──
+    def new(val: T)-> Node<T> =
+        Node(val: val, _next: None, _is_replay: false,
+             _iterator: None, _fallback: None)
+
+    def next(self)-> Option<Node<T>> =
+        if self._next.is_some():
+            return self._next
+        // 懒加载
+        match self._iterator:
+            case Some(iter):
+                match iter.next():
+                    case Some(v):
+                        self._next = Some(Node(v, _iterator: self._iterator,
+                                               _fallback: self._fallback))
+                    case None:
+                        self._next = self._fallback
+                        self._iterator = None
+                        self._fallback = None
+            case None:
+                pass
+        self._next
+
+    // ── 类方法：从可迭代对象创建 Node 链表 ──
+    def from_iter(iterable: Iterable<T>)-> Option<Node<T>> =
+        iterator = iterable.iter()
+        match iterator.next():
+            case Some(first):
+                head = Node(first, _iterator: Some(iterator))
+                Some(head)
+            case None:
+                None
+
+    // ── 转换为迭代器 ──
+    def to_iter(self)-> NodeIter<T> =
+        NodeIter(_current: Some(self))
+
+    // ── 转换为 Itor ──
+    def to_itor(self)-> Itor<T> =
+        Itor.from_iterable(NodeIterable(head: self))
+
+// ============================================================
+// NodeIter<T> — Node 链遍历迭代器
+// ============================================================
+struct NodeIter<T> =
+    _current: Option<Node<T>>
+
+impl Iterator<T> for NodeIter<T> =
+    def next(mut self)-> Option<T> =
+        match self._current:
+            case Some(node):
+                val = node.val
+                self._current = node.next
+                Some(val)
+            case None:
+                None
+
+// ============================================================
+// NodeIterable — 将 Node 包装为 Iterable
+// ============================================================
+struct NodeIterable<T> =
+    head: Node<T>
+
+impl Iterable<T> for NodeIterable<T> =
+    def iter(self)-> NodeIter<T> =
+        self.head.to_iter()
+
+// ============================================================
+// Iterable<T> trait — 可迭代抽象
+// ============================================================
+trait Iterable<T> =
+    def iter(self)-> Iterator<T>
+
+// ============================================================
+// Iterator<T> trait — 迭代器抽象
+// ============================================================
+trait Iterator<T> =
+    def next(mut self)-> Option<T>
+
+// ============================================================
+// Itor<T> — 可控迭代器（泛型，线程安全）
+//
+// Yield 优先级: 紧急跳转 > 历史重放 > 待处理源 > 源迭代器
+// ============================================================
+struct Itor<T> =
+    _iterable: Iterable<T>
+    _iterator: Option<Iterator<T>>
+    _state: ItorState
+    _lock: Mutex<()>
+    _pause_enabled: bool
+    _pause_event: Condvar
+
+    // 哨兵节点，next 指向下一个待产出的跳转 Node
+    _dummy: Node<T>
+    // 历史链表
+    _history_head: Option<Node<T>>
+    _history_tail: Option<Node<T>>
+    // 条件跳转队列
+    _conditional_jumps: Vec<(Node<T>, fn(&Itor<T>)-> bool)>
+    // 重放模式
+    _replay_mode: bool
+    _replay_node: Option<Node<T>>
+    // 待处理源值（取数期间被插队时暂存）
+    _pending_source: Option<Node<T>>
+    // 历史策略
+    _history_strategy: Option<fn(&mut Itor<T>)>
+    _stop_requested: bool
+
+    // ═══════════════════════════════════════════
+    // 构造函数
+    // ═══════════════════════════════════════════
+    def from_iterable(source: Iterable<T>)-> Itor<T> =
+        Itor(
+            _iterable: source,
+            _iterator: None,
+            _state: PENDING,
+            _lock: Mutex(()),
+            _pause_enabled: false,
+            _pause_event: Condvar(),
+            _dummy: Node.new(source.iter().next().unwrap_or(
+                // sentinel with any T — never accessed
+                )),
+            _history_head: None,
+            _history_tail: None,
+            _conditional_jumps: Vec(),
+            _replay_mode: false,
+            _replay_node: None,
+            _pending_source: None,
+            _history_strategy: None,
+            _stop_requested: false,
+        )
+
+    // ═══════════════════════════════════════════
+    // 公共 API — 全部返回 self 支持链式调用
+    // ═══════════════════════════════════════════
+
+    // ── state() — 读取当前状态 ──
+    def state(self)-> ItorState =
+        self._lock.lock(); let s = self._state; self._lock.unlock(); s
+
+    // ── send(jump, jump_when) — 插队 ──
+    // jump_when = None → 紧急插队（下一个 next() 立即产出）
+    // jump_when = Some(fn) → 条件插队（每次 next() 检查条件）
+    def send(mut self, jump: T, jump_when: Option<fn(&Itor<T>)-> bool>)-> Itor<T> =
+        node = Node.new(jump)
+        self._lock.lock()
+        if jump_when.is_none():
+            // 紧急插队 → 插入 dummy 之后
+            node._next = self._dummy._next
+            self._dummy._next = Some(node)
+        else:
+            // 条件插队 → 加入队列
+            self._conditional_jumps.push((node, jump_when.val))
+        self._lock.unlock()
+        self
+
+    // ── set_pause() — 暂停 ──
+    def set_pause(mut self)-> Itor<T> =
+        self._lock.lock()
+        self._pause_enabled = true
+        self._pause_event.reset()
+        self._lock.unlock()
+        self
+
+    // ── resume() — 恢复 ──
+    def resume(mut self)-> Itor<T> =
+        self._lock.lock()
+        self._pause_enabled = false
+        self._pause_event.notify_all()
+        self._lock.unlock()
+        self
+
+    // ── restart() — 基于历史重新开始 ──
+    def restart(mut self)-> Itor<T> =
+        self._lock.lock()
+        self._state = PENDING
+        self._pause_enabled = false
+        self._pause_event.notify_all()
+        self._stop_requested = false
+        self._replay_mode = true
+        self._replay_node = self._history_head
+        self._dummy._next = None
+        self._conditional_jumps.clear()
+        self._lock.unlock()
+        self
+
+    // ── history_strategy() — 设置历史策略 ──
+    def history_strategy(mut self, strategy: Option<fn(&mut Itor<T>)>)-> Itor<T> =
+        self._lock.lock()
+        self._history_strategy = strategy
+        self._lock.unlock()
+        self
+
+    // ── set_history_max() — 类方法，保留最近 N 条 ──
+    def set_history_max(mut itor: Itor<T>, max_len: int) =
+        if max_len == -1:
+            itor.history_strategy(None)
+            return
+        // 策略闭包：每次产出后裁剪历史
+        clip = fn(mut it: &mut Itor<T>):
+            mut count = 0
+            mut cur = it._history_head
+            while cur.is_some():
+                count += 1
+                cur = cur.val.next
+            while count > max_len and it._history_head.is_some():
+                it._history_head = it._history_head.val.next
+                count -= 1
+            if it._history_head.is_none():
+                it._history_tail = None
+        itor.history_strategy(Some(clip))
+
+    // ── stop() — 终止 ──
+    def stop(mut self)-> Itor<T> =
+        self._lock.lock()
+        self._state = STOPPED
+        self._stop_requested = true
+        self._pause_event.notify_all()
+        self._lock.unlock()
+        self
+
+    // ── copy() — 浅拷贝（独立状态） ──
+    def copy(self)-> Itor<T> =
+        new = Itor.from_iterable(self._iterable)
+        new._history_strategy = self._history_strategy
+        new
+
+    // ── call() — __call__ 语义，返回独立副本 ──
+    def call(self)-> Itor<T> =
+        self.copy()
+
+    // ═══════════════════════════════════════════
+    // Iterator trait impl
+    // ═══════════════════════════════════════════
+    def iter(mut self)-> Itor<T> = self
+    def next(mut self)-> Option<T> = self._next_value()
+
+    // ═══════════════════════════════════════════
+    // do() — 副作用遍历
+    // ═══════════════════════════════════════════
+    def do(mut self, f: fn(T), pre_f: Option<fn(T)-> T>, sub_f: Option<fn(T)>)-> Itor<T> =
+        mut it = self.copy()
+        for v in it:
+            if pre_f.is_some():
+                v = pre_f.val(v)
+            f(v)
+            if sub_f.is_some():
+                sub_f.val(v)
+        self
+
+    // ═══════════════════════════════════════════
+    // 内部方法
+    // ═══════════════════════════════════════════
+
+    def _next_value(mut self)-> Option<T> =
+        // 初始化
+        self._lock.lock()
+        if self._iterator.is_none():
+            self._iterator = Some(self._iterable.iter())
+        if self._state == PENDING:
+            self._state = ITERRING
+        self._lock.unlock()
+
+        loop:
+            // 等待暂停恢复
+            self._lock.lock()
+            while self._pause_enabled and !self._stop_requested:
+                self._pause_event.wait(self._lock)
+            if self._stop_requested or self._state == STOPPED:
+                self._lock.unlock()
+                return None
+            self._lock.unlock()
+
+            // 处理条件跳转
+            self._eval_conditional_jumps()
+
+            // 获取下一个节点
+            self._lock.lock()
+            // 1. 紧急跳转
+            if self._dummy._next.is_some():
+                node = self._dummy._next.val
+                self._dummy._next = node._next
+                node._next = None
+                self._lock.unlock()
+                return self._yield_node(node)
+            // 2. 历史重放
+            if self._replay_mode:
+                self._lock.unlock()
+                return self._replay_next(self._lock)
+            // 3. 待处理源
+            if self._pending_source.is_some():
+                node = self._pending_source.val
+                self._pending_source = None
+                self._lock.unlock()
+                return self._yield_node(node)
+            self._lock.unlock()
+
+            // 4. 源迭代器（锁外调用避免死锁）
+            match self._iterator.val.next():
+                case Some(v):
+                    // 加锁检查是否有新跳转
+                    self._lock.lock()
+                    // 优先处理紧急跳转
+                    if self._dummy._next.is_some():
+                        self._pending_source = Some(Node.new(v))
+                        node = self._dummy._next.val
+                        self._dummy._next = node._next
+                        node._next = None
+                        self._lock.unlock()
+                        return self._yield_node(node)
+                    // 重放模式=保存待处理
+                    if self._replay_mode:
+                        self._pending_source = Some(Node.new(v))
+                        self._lock.unlock()
+                        return self._replay_next(self._lock)
+                    self._lock.unlock()
+                    return self._yield_node(Node.new(v))
+                case None:
+                    self._lock.lock()
+                    self._state = STOPPED
+                    self._lock.unlock()
+                    return None
+
+    def _yield_node(mut self, node: Node<T>)-> Option<T> =
+        self._lock.lock()
+        val = node.val
+        if !node._is_replay:
+            self._append_history(node)
+        if self._history_strategy.is_some():
+            self._history_strategy.val(self)
+        self._lock.unlock()
+        Some(val)
+
+    def _replay_next(mut self, lock: Mutex<()>)-> Option<T> =
+        lock.lock()
+        if self._replay_node.is_some():
+            val = self._replay_node.val.val
+            self._replay_node = self._replay_node.val._next
+            lock.unlock()
+            node = Node.new(val, _is_replay: true)
+            Some(val)
+        else:
+            self._replay_mode = false
+            lock.unlock()
+            self._next_value()  // 继续取源
+
+    def _eval_conditional_jumps(mut self):
+        self._lock.lock()
+        mut i = 0
+        while i < self._conditional_jumps.len():
+            (node, condition) = self._conditional_jumps[i]
+            if condition(self):
+                // 满足条件 → 插入 dummy 之后
+                node._next = self._dummy._next
+                self._dummy._next = Some(node)
+                self._conditional_jumps.remove(i)
+            else:
+                i += 1
+        self._lock.unlock()
+
+    def _append_history(mut self, node: Node<T>):
+        node._next = None
+        if self._history_tail.is_none():
+            self._history_head = Some(node)
+            self._history_tail = Some(node)
+        else:
+            self._history_tail.val._next = Some(node)
+            self._history_tail = Some(node)

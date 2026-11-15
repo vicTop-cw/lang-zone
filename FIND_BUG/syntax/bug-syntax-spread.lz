@@ -1,0 +1,21 @@
+// find_bug/syntax/bug-syntax-spread.lz
+// BUG-SG-005: ... 展开运算符
+// 词法器有 ... (DotDotDot) token
+
+def test_spread() =
+  a = [1, 2, 3]
+  // ... 展开 a
+  b = [0, ...a, 4]
+  print("spread [0,...a,4]:", b)
+  assert b == [0, 1, 2, 3, 4]
+
+def test_spread_nested() =
+  x = [1, 2]
+  y = [3, 4]
+  z = [...x, ...y]
+  print("spread nested:", z)
+  assert z == [1, 2, 3, 4]
+
+def main() =
+  test_spread()
+  test_spread_nested()

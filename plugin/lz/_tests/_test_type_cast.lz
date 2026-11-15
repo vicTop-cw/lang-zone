@@ -1,0 +1,52 @@
+// _test_type_cast.lz   阶段 14: 类型转换与字面量
+
+// ── 14.1 int 字面量边界 ──
+def test_int_literals() =
+    a = 0
+    b = -1
+    c = 2147483647
+    print("Zero: ")
+    print(a)
+    print("Negative: ")
+    print(b)
+    print("Large: ")
+    print(c)
+
+// ── 14.2 bool 字面量 ──
+def test_bool_literals() =
+    t = true
+    f = false
+    print("True: ")
+    print(t)
+    print("False: ")
+    print(f)
+
+// ── 14.3 类型转换 ──
+def test_type_conversion() =
+    a = 42
+    s = a.to_string()
+    print("int->str: ")
+    print(s)
+
+// ── 14.4 运算中的类型提升 ──
+def test_arithmetic_mixed() =
+    a = 10
+    b = 3
+    div = a / b
+    print("Int division: ")
+    print(div)
+    mul = a * b
+    print("Multiplication: ")
+    print(mul)
+    neg = -a
+    print("Negation: ")
+    print(neg)
+
+// ── 入口 ──
+def main() =
+    print("=== Type Cast Test ===")
+    test_int_literals()
+    test_bool_literals()
+    test_type_conversion()
+    test_arithmetic_mixed()
+    print("=== Type Cast Test Complete ===")

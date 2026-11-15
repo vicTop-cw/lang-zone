@@ -1,0 +1,16 @@
+// neg_fn_missing_colon —— 负例：函数参数的类型标注缺冒号 `:`
+//
+// 测什么：`def f(x int) = ...`，参数名 `x` 与类型 `int` 之间少写冒号。
+// 期望什么错误：Parse error: Expected Colon, got Ident("int") at pos 5（编译失败，exit 1）。
+// 为什么原来那条测歪了：原文件是
+//             def f(x: int)
+//                 x + 1
+//         冒号是写了的，真正缺的是函数体的 `=`，所以报
+//         "Parse error: Expected Eq, got Ident("x") at pos 10"——名字说「缺冒号」，
+//         实际测的是「缺 `=`」。
+// 选型说明（任务允许二选一：改形态 / 改名）：这里选「改形态」——保留文件名所声称的
+//         「缺冒号」，把缺的位置落到参数标注上。同族 neg_struct_missing_colon.lz 覆盖的是
+//         `struct` 字段缺冒号（字段面），本条覆盖函数参数（参数面），两者不重复。
+
+def f(x int) =
+    x + 1

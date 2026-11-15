@@ -1,0 +1,6 @@
+counter: n=42
+run: x=7
+pass_thru: x=-3
+compute(5) = 20
+compute2(5) = 16
+block checker forms tests done

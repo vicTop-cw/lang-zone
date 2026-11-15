@@ -1,0 +1,23 @@
+// ============================================================
+// error_match_branch_type_mismatch.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_option | 期望检查点：match 分支返回类型不一致（int vs str），应报类型错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0308
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+enum Option<T>:
+    Some(T)
+    None
+
+def get_value(opt: Option<int>) -> str =
+    match opt:
+        case Some(v):
+            v
+        case None:
+            "none"
+
+def main() =
+    let a: Option<int> = Some(42)
+    print(get_value(a))

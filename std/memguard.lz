@@ -1,0 +1,49 @@
+// Lang-Zone 编译期内存预算守卫
+// 使用方式：
+//   import std::memguard
+//   budget = MemBudget::new(1024 * 1024)   // 1 MB 预算
+//   budget.alloc(512)                       // 申请 512 字节
+//   budget.dealloc(256)                     // 释放 256 字节
+//   budget.remaining()                      // 查询剩余
+
+import std::cell::Cell
+
+struct MemBudget =
+    current: Cell<int>
+    max: int
+
+impl MemBudget =
+    def new(max: int)-> MemBudget =
+        current = Cell::new(0)
+        MemBudget(current: current, max: max)
+
+    def remaining(self)-> int =
+        self.max - self.current.get()
+
+    def used(self)-> int =
+        self.current.get()
+
+    def alloc(mut self, n: int)-> Result<(), str> =
+        old = self.current.get()
+        new_current = old + n
+        if new_current > self.max:
+            Err("exceeded memory budget")
+        else:
+            self.current.set(new_current)
+            Ok(())
+
+    def dealloc(mut self, n: int) =
+        old = self.current.get()
+        new = old - n
+        if new < 0:
+            self.current.set(0)
+        else:
+            self.current.set(new)
+
+    def tryDealloc(mut self, n: int)-> Result<(), str> =
+        old = self.current.get()
+        if n > old:
+            Err("cannot dealloc more than allocated")
+        else:
+            self.current.set(old - n)
+            Ok(())

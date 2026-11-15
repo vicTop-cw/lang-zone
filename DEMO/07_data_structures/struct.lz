@@ -1,0 +1,37 @@
+// ============================
+// LZ Data Structures — struct
+// Cover: 06a-struct (basic features)
+// ============================
+
+// --- Basic struct at module level ---
+struct Point =
+    x: f64
+    y: f64
+
+// --- Struct with methods ---
+struct Rectangle =
+    width: f64
+    height: f64
+
+    def area(self) -> f64 =
+        self.width * self.height
+
+    def scale(mut self, factor: f64) =
+        self.width *= factor
+        self.height *= factor
+
+// --- Generic struct ---
+struct Pair<T> =
+    first: T
+    second: T
+
+// --- Struct construction and usage ---
+def main() =
+    let p = Point(x: 3.0, y: 4.0)
+    print(p.x, p.y)
+
+    let r = Rectangle(width: 10.0, height: 5.0)
+    print(r.area())
+
+    let pair = Pair(first: 1, second: 2)
+    print(pair.first)

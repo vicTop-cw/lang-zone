@@ -1,0 +1,37 @@
+
+// ── LZ rustc link recipe (BUG-10: lz_builtins re-exports num-bigint/num-complex) ──
+// To compile & run this generated file in isolation:
+//   rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O <this_file>.rs
+//   <rlib>     = liblz_builtins.rlib (build it: `cargo build -p lz_builtins`)
+//   <deps_dir> = the directory containing that rlib (e.g. <workspace>/target/debug/deps)
+// Omitting -L gives error[E0463] even if this program never uses BigInt/Complex.
+// ─────────────────────────────────────────────────────────────────────────────────────
+
+#[allow(unused_imports)]
+#[allow(unused_variables)]
+#[allow(dead_code)]
+#[allow(non_snake_case)]
+
+use std::collections::{HashMap, HashSet};
+use std::any::Any;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::fmt::Debug;
+use std::fmt::Display;
+
+use lz_builtins::*;
+
+const __name__: &str = "main";
+
+const __file__: &str = "init.lz";
+
+const __package__: &str = "intrinsics";
+
+const __path__: &str = "E:\\IDEProjects\\AI\\lang-zone\\std\\intrinsics";
+
+const __doc__: &str = "";
+
+const __is_macro__: bool = false;
+
+pub fn main() {
+}

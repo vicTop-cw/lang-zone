@@ -1,0 +1,18 @@
+# Bug-R6-25: try/except/raise/assert 代码生成 (简化版)
+def test_try() -> int:
+    try:
+        let x: int = 1
+    except:
+        let x: int = 0
+    return 0
+
+def test_raise() -> int:
+    raise
+    return 0
+
+def test_assert() -> int:
+    assert 1 == 1
+    return 0
+
+def main() -> int:
+    return 0

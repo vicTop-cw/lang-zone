@@ -1,0 +1,17 @@
+// find_bug/parser/bug-typealias-magic.lz
+// BUG-PR-004: 类型别名引用魔法方法
+// __add__ 是方法而非类型，类型别名 = 魔法方法 应报错
+
+// 错误（预期报错）:
+// type MyAdder = __add__
+
+// 正确用法：类型别名 = 具体类型
+type IntPair = (int, int)
+
+def test_pair() =
+  p: IntPair = (1, 2)
+  print("pair:", p)
+
+def main() =
+  test_pair()
+  print("typealias-magic.lz done")

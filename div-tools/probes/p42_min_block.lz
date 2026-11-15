@@ -1,0 +1,157 @@
+// p42_min_block.lz：最小缩进块组合——验证 parse_block 逻辑可用
+// tokenize(缩进) + parse_stmt(return) + parse_block(收集缩进体)
+enum Token:
+    IntLit(v: int)
+    Ident(name: str)
+    Return
+    Indent(v: int)
+    Newline
+    Eof
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def scan_indent(src: str, start: int) -> (int, int) =
+    let mut j = start
+    while j < str_len(src) && char_at(src, j) == " ":
+        j = j + 1
+    (j - start, j)
+
+def scan_int(src: str, start: int) -> (int, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    let v = src[start..i] as int
+    let res: (int, int) = (v, i)
+    res
+
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
+        i = i + 1
+    (src[start..i], i)
+
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    let mut line_start = true
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if line_start && c == " ":
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+            line_start = true
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            tokens = tokens + [Token.IntLit(v: r.0)]
+            line_start = false
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let w = r.0
+            if w == "return":
+                tokens = tokens + [Token.Return]
+            else:
+                tokens = tokens + [Token.Ident(name: w)]
+            line_start = false
+        else:
+            i = i + 1
+    tokens = tokens + [Token.Eof]
+    tokens
+
+def tok_at(toks: List<Token>, idx: int) -> Token =
+    toks[idx].clone()
+
+// parse_stmt：return expr | 表达式
+def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    let res: (str, int) = match t:
+        case Token.Return =>
+            let nt = tok_at(toks, pos + 1)
+            let vs = tok_name(nt)
+            let rr: (str, int) = ("return " + vs, pos + 2)
+            rr
+        case Token.IntLit(v: n) =>
+            let rr: (str, int) = ("int " + n.to_string(), pos + 1)
+            rr
+        case Token.Newline =>
+            let rr: (str, int) = ("", pos + 1)
+            rr
+        case _ =>
+            let rr: (str, int) = ("?", pos + 1)
+            rr
+    res
+
+def tok_name(t: Token) -> str =
+    let res: str = match t:
+        case Token.IntLit(v: n) => n.to_string()
+        case Token.Ident(name: n) => n
+        case _ => "?"
+    res
+
+// parse_block：收集缩进 > indent 的语句
+// 注：`elif t == Token.Indent(v: n)` 的枚举比较+字段绑定在 if 条件里
+// 无法绑定（E0425，自举暴露缺陷）——改用 match 绑定
+def parse_block(toks: List<Token>, pos: int, indent: int) -> (List<str>, int) =
+    let mut out: List<str> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        let tag = block_tag(t)
+        if tag == 0:
+            done = true
+        elif tag == 1:
+            p = p + 1
+        elif tag == 2:
+            let n = block_indent(t)
+            if n > indent:
+                let r = parse_stmt(toks, p + 1)
+                let s = r.0
+                if s.len() > 0:
+                    out = out + [s]
+                p = r.1
+            else:
+                done = true
+        else:
+            done = true
+    (out, p)
+
+// block_tag: 0=Eof/其它, 1=Newline, 2=Indent
+def block_tag(t: Token) -> int =
+    let res: int = match t:
+        case Token.Eof => 0
+        case Token.Newline => 1
+        case Token.Indent(v: n) => 2
+        case _ => 0
+    res
+
+// 提取 Indent 值（非 Indent 返回 -1）
+def block_indent(t: Token) -> int =
+    let res: int = match t:
+        case Token.Indent(v: n) => n
+        case _ => -1
+    res
+
+def main() =
+    let src = "  return 7\n  return 8"
+    let toks = tokenize(src)
+    let r = parse_block(toks, 0, 0)
+    let stmts = r.0
+    for idx in 0..stmts.len():
+        print(stmts[idx])

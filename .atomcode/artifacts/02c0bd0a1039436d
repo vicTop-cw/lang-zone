@@ -1,0 +1,477 @@
+TEMP/add_corpus_r12.py-1-# -*- coding: utf-8 -*-
+TEMP/add_corpus_r12.py-2-"""T0r12 的三份新语料（CRLF，落盘前 compile 级检查 + 落盘后回读逐字对表）。
+TEMP/add_corpus_r12.py-3-
+TEMP/add_corpus_r12.py-4-写成脚本而不是手打，是为了三条可复核的纪律：
+TEMP/add_corpus_r12.py-5-  ① 行尾与既有语料一致（`CY/TESTS/**/*.lz` 是 CRLF，混进 LF 文件会让 git diff 显示整篇重写）；
+TEMP/add_corpus_r12.py:6:  ② 每份正文里的**期望值主张**只写在注释里，真正的期望值由 Rust 面实跑封盘（`seal_missing_exp.py`），
+TEMP/add_corpus_r12.py-7-     本件不写 `.exp`——空 stdout 与两侧不等的都不封，那是那把尺子的职责；
+TEMP/add_corpus_r12.py-8-  ③ 第三份**故意不配 `.exp`**（rust 面 E0282，取不到 oracle），它必须同批登记进
+TEMP/add_corpus_r12.py-9-     `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`，否则 L3 的双向对表会判红。
+TEMP/add_corpus_r12.py-10-"""
+TEMP/add_corpus_r12.py-11-import io
+--
+TEMP/add_corpus_r12.py-28-//   （`TEMP/dynrecv-before-r12.log` 的 d_duck_len，同一件 rust 面 `'3\\n8\\n'`）；
+TEMP/add_corpus_r12.py-29-//   `.is_empty()` 同一条路：`TypeError: object of type '_lzcyg_d_duck_empty.Bucket' has no len()`。
+TEMP/add_corpus_r12.py-30-// 现在的产物是 `return _lz_len(x, "len")` / `return _lz_isempty(x)`：**按运行时实际类型**分派，
+TEMP/add_corpus_r12.py-31-// 名单 `_LZ_TYPES` 与静态判据同源（`known_types ∪ cdef_classes`），非本模块用户类走 Python 内建。
+TEMP/add_corpus_r12.py-32-//
+TEMP/add_corpus_r12.py:33:// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分（`python -u TEMP/seal_missing_exp.py`）。
+TEMP/add_corpus_r12.py-34-duck HasLen =
+TEMP/add_corpus_r12.py-35-    def len(self) -> int
+TEMP/add_corpus_r12.py-36-
+TEMP/add_corpus_r12.py-37-duck HasEmpty =
+TEMP/add_corpus_r12.py-38-    def is_empty(self) -> bool
+TEMP/add_corpus_r13.py-1-# -*- coding: utf-8 -*-
+TEMP/add_corpus_r13.py-2-"""T0r13 的三份新语料（CRLF，落盘前占位符/行尾检查 + 落盘后回读逐字对表，带 --verify）。
+TEMP/add_corpus_r13.py-3-
+TEMP/add_corpus_r13.py-4-纪律沿用 r12 的**方法**（正文全部重写——跨轮复用正文＝把上一轮的事实当成新的）：
+TEMP/add_corpus_r13.py-5-  ① `CY/TESTS/**/*.lz` 是 CRLF，混进 LF 会让 diff 显示整篇重写；
+TEMP/add_corpus_r13.py:6:  ② 有 oracle 的那份**不写 .exp**——期望值由 `TEMP/seal_missing_exp.py` 从 Rust 面实跑封盘
+TEMP/add_corpus_r13.py-7-     （两后端逐字一致才封、已有 .exp 不覆盖、空 stdout 不封）；
+TEMP/add_corpus_r13.py-8-  ③ 另外两份**故意没有 .exp**：一份撞对面在册的 `Option.expect` E0308，一份撞无注解闭包形参
+TEMP/add_corpus_r13.py-9-     的 E0282 ⇒ 必须同批登记进 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`，
+TEMP/add_corpus_r13.py-10-     否则 L3 的双向对表判红（缺口清单变长＝这轮没回归的证据之一）。
+TEMP/add_corpus_r13.py-11-"""
+--
+TEMP/add_corpus_r13.py-32-// 现在闸门与上一轮的 clone/unwrap 同一条纪律：看「本类**有没有**定义这个名字」——
+TEMP/add_corpus_r13.py-33-// 有 ⇒ 落回通用尾巴发 `a.is_none()`；没有（含真 Option）⇒ 保持原来的表达式形态。
+TEMP/add_corpus_r13.py-34-// 动态接收者（duck 泛型形参／无注解闭包形参）静态判不出 ⇒ 发 `_lz_isnone(x, "is_none")`
+TEMP/add_corpus_r13.py-35-// 之类的运行时助手，按 `_LZ_TYPES` 名单**加上**属性存在才走方法那一支。
+TEMP/add_corpus_r13.py-36-//
+TEMP/add_corpus_r13.py:37:// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分（`python -u TEMP/seal_missing_exp.py`）。
+TEMP/add_corpus_r13.py-38-struct Cfg =
+TEMP/add_corpus_r13.py-39-    n: int
+TEMP/add_corpus_r13.py-40-    def expect(ref self, msg: str) -> int =
+TEMP/add_corpus_r13.py-41-        self.n * 2
+TEMP/add_corpus_r13.py-42-    def is_none(ref self) -> bool =
+TEMP/append_registry_row_r10.py-183-           u"不回话继续推下一条 cy 缺口）；未改 `SYNTAX/`（D13）与 `src/ir/codegen/mod.rs`。 | "
+TEMP/append_registry_row_r10.py-184-           u"`src/ir/codegen_cython.rs`（`lambda_block_needs_def`／`lambda_written_names`／`hoist_lambdas` 的 "
+TEMP/append_registry_row_r10.py-185-           u"`global`／`nonlocal` 守卫）；`tests/cython_backend.rs`（2 条机制锁）；`tests/cy_codegen_gate.rs`"
+TEMP/append_registry_row_r10.py-186-           u"（`NO_ORACLE_EXPLAINED` 扩到 %d 条）；语料 `CY/TESTS/04_functions/closure_{basic,modlevel,write_capture}.lz`；"
+TEMP/append_registry_row_r10.py-187-           u"报告 `memory/reviews/%s`；证据 `TEMP/closure_prefix_loss.py`＋`TEMP/%s`、"
+TEMP/append_registry_row_r10.py:188:           u"`TEMP/closure_probes_r10.py`＋`TEMP/%s`、`TEMP/seal_missing_exp.py`＋`TEMP/%s`、"
+TEMP/append_registry_row_r10.py-189-           u"`TEMP/ledger_cards_r10.py`、门禁 `TEMP/%s`＋`TEMP/%s`、复跑 `TEMP/%s`＋`TEMP/%s` |" % (
+TEMP/append_registry_row_r10.py-190-               esc(old_rej), cur_rc, esc(unit_res), n_bytes,
+TEMP/append_registry_row_r10.py-191-               esc(writecap), esc(rust_e0594), esc(refused[0].strip()),
+TEMP/append_registry_row_r10.py-192-               rc_build, rc_cy, rc_ws, rc_ws2, rc_demo, esc(l2), esc(l3), n_reg, n_no,
+TEMP/append_registry_row_r10.py-193-               cons[0], rc_word_l1, rc_word_unit, n_heads,
+TEMP/append_registry_row_r11.py-177-           u"`src/ir/codegen_cython.rs`（`class_method_names` 这张**不被消费的**登记表＋三处闸门＋prelude 的 "
+TEMP/append_registry_row_r11.py-178-           u"`_lz_iter`/`_lz_or`）；`tests/cython_backend.rs`（4 条机制锁）；语料 "
+TEMP/append_registry_row_r11.py-179-           u"`CY/TESTS/15_feature_matrix/magic_{cmp_arith,contains_call,iter_proto,shift_invert}.lz`；"
+TEMP/append_registry_row_r11.py-180-           u"台账 `memory/bugs.md` BUG-34／BUG-35／BUG-36（行首卡头 %d 张）；报告 `memory/reviews/%s`；"
+TEMP/append_registry_row_r11.py-181-           u"证据 `TEMP/magic_probes_r11.py`＋`TEMP/%s`（修前）＋`TEMP/%s`（修后）、"
+TEMP/append_registry_row_r11.py:182:           u"`TEMP/seal_missing_exp.py`＋`TEMP/%s`、`TEMP/ledger_cards_r11.py`（含「卡里逐字引用的 stdout 必须等于某份 "
+TEMP/append_registry_row_r11.py-183-           u".exp」那一格——本轮就往卡里手打过一位错的数字）、`TEMP/report_r11.py`、门禁 `TEMP/%s` |" % (
+TEMP/append_registry_row_r11.py-184-               esc(u"／".join(u"%s %d" % (k, v) for k, v in sorted(bad_t.items(), key=lambda kv: -kv[1]))), bad_n,
+TEMP/append_registry_row_r11.py-185-               esc(bad_iter),
+TEMP/append_registry_row_r11.py-186-               esc(u"／".join(u"%s %d" % (k, v) for k, v in sorted(good_t.items(), key=lambda kv: -kv[1]))), good_n,
+TEMP/append_registry_row_r11.py-187-               bytes_sum,
+TEMP/append_registry_row_r12.py-223-           u"`CY/TESTS/15_feature_matrix/dyn_recv_{duck,user_methods,closure}.lz`；"
+TEMP/append_registry_row_r12.py-224-           u"`tests/cy_codegen_gate.rs`（`NO_ORACLE_EXPLAINED` +1 条）；台账 `memory/bugs.md` "
+TEMP/append_registry_row_r12.py-225-           u"BUG-37／BUG-38／BUG-39（行首卡头 %d 张）；报告 `%s`；"
+TEMP/append_registry_row_r12.py-226-           u"证据 `TEMP/dynrecv_probes_r12.py`＋`%s`（修前）＋`%s`（修后）、"
+TEMP/append_registry_row_r12.py-227-           u"`TEMP/add_corpus_r12.py`、`TEMP/ledger_cards_r12.py`（含读数门的 `--selftest` 红对照）、"
+TEMP/append_registry_row_r12.py:228:           u"`TEMP/seal_missing_exp.py`＋`%s`、`TEMP/report_r12.py`、"
+TEMP/append_registry_row_r12.py-229-           u"门禁 `%s`＋`%s`＋L2/L3 `%s`、单元 `%s` |" % (
+TEMP/append_registry_row_r12.py-230-               bad_n,
+TEMP/append_registry_row_r12.py-231-               esc(fmt_t(bad_t, bad_n)), esc(fmt_t(good_t, good_n)), BOUND,
+TEMP/append_registry_row_r12.py-232-               esc(q_duck), esc(q_clone_r),
+TEMP/append_registry_row_r12.py-233-               len(HELPS), u"`" + u"`/`".join(HELPS) + u"`",
+TEMP/append_registry_row_r14.py-210-            u"⑧ **那 1 件真分叉没被封成 golden**：`TEMP/withdefer_diag_r14.py` 先把三方逐行分类，"
+TEMP/append_registry_row_r14.py-211-            u"证实它和那 %(NSTALE)d 件陈旧是两回事（老 `.exp` vs 拆前 rust，按**行**分档："
+TEMP/append_registry_row_r14.py-212-            u"陈旧 %(DGSTALE)d 行／真分叉 %(DGREAL)d 行，"
+TEMP/append_registry_row_r14.py-213-            u"复原式 老 golden %(DGOLD)d 行 == 新语料 %(DGCHILD)d 行 + 母件今日 %(DGPAR)d 行）；"
+TEMP/append_registry_row_r14.py-214-            u"再把那一句 `with … as res: print(f\"using {res.name}\")` 拆进独立语料 "
+TEMP/append_registry_row_r14.py:215:            u"`CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz`，母件按今日 rust 重封"
+TEMP/append_registry_row_r14.py-216-            u"（%(WDROW)d 行／%(WDCHAR)d 字符，老那份留盘 `CY/TESTS/15_feature_matrix/with_defer.exp.presplitr14`）；"
+TEMP/append_registry_row_r14.py-217-            u"新语料**不封** `.exp` 而是登记进 `NO_ORACLE_EXPLAINED` 的第 %(NNOORC)d 条——oracle 在场，"
+TEMP/append_registry_row_r14.py-218-            u"但它是缺陷的产物，封它等于把缺陷钉成验收标准（登记表的语义因此扩成两种合法形状：取不到 oracle、"
+TEMP/append_registry_row_r14.py-219-            u"oracle＝缺陷产物；都不许当 `KNOWN_*` 豁免用）。拆分件的承重证明 %(CTLGOOD)d 格全过、坏格 %(CTLBAD)d"
+TEMP/append_registry_row_r14.py-220-            u"（fixture 用 **HEAD 里那份真语料**，否则测不到「拆的那条路」）；缺陷入账 **BUG-44**"
+TEMP/append_registry_row_r8.py-27-    "TEMP/gates-cy-%s.log" % GATE_STEM,
+TEMP/append_registry_row_r8.py-28-    "TEMP/gates-rc-%s.txt" % GATE_STEM,
+TEMP/append_registry_row_r8.py-29-    "TEMP/gates-cy-1649.log",
+TEMP/append_registry_row_r8.py-30-    "TEMP/ut-cy-1721.log",
+TEMP/append_registry_row_r8.py-31-    "TEMP/seal-missing-1741.log",
+TEMP/append_registry_row_r8.py:32:    "TEMP/seal_missing_exp.py",
+TEMP/append_registry_row_r8.py-33-    "TEMP/probe8/xdiff-11-before-0914.log",
+TEMP/append_registry_row_r8.py-34-    "TEMP/probe8/xdiff-11-after-0919.log",
+TEMP/append_registry_row_r8.py-35-    "TEMP/probe8/gojar/p_go_panic.pyx",
+TEMP/append_registry_row_r8.py-36-    "TEMP/evidence-r8/set-order-3runs.txt",
+TEMP/append_registry_row_r8.py-37-    "CY/TESTS/11_concurrency/go_failure_isolated.lz",
+--
+TEMP/append_registry_row_r8.py-91-        u"② **BUG-12 销账**：`go`/`spawn` 的 IR 是 `__go(体)`，而 Python 实参**先求值** ⇒ 垫片结构上不可能延后（这才是降级根因）；"
+TEMP/append_registry_row_r8.py-92-        u"现在同步函数发 `__spawn(lambda: 体)`（threading.Thread + 失败只写 stderr，对齐 rust 面 `std::thread::spawn` 的可观测形态），"
+TEMP/append_registry_row_r8.py-93-        u"`async def` 保持 `__go(...)`（那里拿到的是协程对象）。判据两侧：行为侧新语料 `go_failure_isolated.lz`"
+TEMP/append_registry_row_r8.py-94-        u"（`.exp` 由 Rust 面实跑封盘，`TEMP/probe8/xdiff-11-after-0919.log` 差分 2/2 一致）+ 机制侧 L1 文本闸"
+TEMP/append_registry_row_r8.py-95-        u"（同步 `def` 里出现 `__go(` 即红，随 workspace 日常跑）+ 单元锁两向都咬。遗留三条写在卡里。"
+TEMP/append_registry_row_r8.py:96:        u"③ **覆盖补强**：`TEMP/seal_missing_exp.py` 把「跑得过但没 `.exp`」的语料补成行为判据，"
+TEMP/append_registry_row_r8.py-97-        u"三条硬规则=两后端 stdout 逐字一致／**已存在 `.exp` 一律不覆盖**／空 stdout 不封；"
+TEMP/append_registry_row_r8.py-98-        u"结果 81 件里 75 件有 golden（本轮 +27），不封的 6 件里 3 件空输出、3 件是 rust 面编不过（BUG-29/BUG-30 + BUG-24）。"
+TEMP/append_registry_row_r8.py-99-        u"其中 `containers.lz` 改写一次：rust 面 `print(Set)` 每进程随机（同一 exe 三跑三样，"
+TEMP/append_registry_row_r8.py-100-        u"`TEMP/evidence-r8/set-order-3runs.txt`），SYNTAX/02 从未承诺 Set 顺序 ⇒ 改成与顺序无关的断言（BUG-31）。"
+TEMP/append_registry_row_r8.py-101-        u"**三份豁免清单本轮零新增，仍是空。**"
+TEMP/chainE_r14.sh-1-#!/bin/sh
+TEMP/chainE_r14.sh-2-# T0r14 E 档：门禁注释定稿后，把「跑在快照树上」的四个档位全部重跑一遍，
+TEMP/chainE_r14.sh:3:# 让报告引用的每份 log 都出自**最终那份文件面**（含新语料 with_as_binding_fstr、重封后的 with_defer.exp、
+TEMP/chainE_r14.sh-4-# 登记表新增条目与其文档注释）。输出沿用同名 log 文件：报告尺子会重新反解，数字若漂移就会 REFUSE 而不是静默过关。
+TEMP/chainE_r14.sh-5-set +e
+TEMP/chainE_r14.sh-6-cd /e/IDEProjects/AI/lang-zone
+TEMP/chainE_r14.sh-7-cp -f tests/cy_codegen_gate.rs TEMP/snap-r14-99/tests/cy_codegen_gate.rs
+TEMP/chainE_r14.sh-8-cp -f tests/cython_backend.rs TEMP/snap-r14-99/tests/cython_backend.rs
+TEMP/ledger_bug44_r14.py-21-REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+TEMP/ledger_bug44_r14.py-22-DOC = os.path.join(REPO, "memory", "bugs.md")
+TEMP/ledger_bug44_r14.py-23-EV = os.path.join(REPO, "TEMP", "wdseal-r14-apply.log")
+TEMP/ledger_bug44_r14.py-24-NUM = u"BUG-44"
+TEMP/ledger_bug44_r14.py-25-HEAD = re.compile(r"^## BUG-\d+ ", re.M)
+TEMP/ledger_bug44_r14.py:26:ANCHOR = u"with_as_binding_fstr"
+TEMP/ledger_bug44_r14.py-27-
+TEMP/ledger_bug44_r14.py-28-
+TEMP/ledger_bug44_r14.py-29-def evidence():
+TEMP/ledger_bug44_r14.py-30-    t = io.open(EV, encoding="utf-8", errors="replace").read()
+TEMP/ledger_bug44_r14.py-31-    m = re.search(r"^   rust: (.*)$", t, re.M)
+--
+TEMP/ledger_bug44_r14.py-69-        u"类型落地，不是 cy 的分档。同洞的另一朝向：`.to_string()` 的 IR 返回类型也不是 `str` ⇒ "
+TEMP/ledger_bug44_r14.py-70-        u"`print(n.to_string())` **两侧都**出带引号的 Debug（凭据 `TEMP/corp-z1-r14.log` 的 "
+TEMP/ledger_bug44_r14.py-71-        u"`z_tstr_ty.lz` 那格）——那条两侧同错、这条只错 rust 一侧。" % (
+TEMP/ledger_bug44_r14.py-72-            rust, cy, n_diff, n_tot, pairs),
+TEMP/ledger_bug44_r14.py-73-        u"- 本轮处置（不动共享层代码、不放宽任何门禁）：把这一句从语料 `with_defer.lz` 拆成独立语料 "
+TEMP/ledger_bug44_r14.py:74:        u"`CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz`（写盘件 `TEMP/split_withdefer_r14.py`，"
+TEMP/ledger_bug44_r14.py-75-        u"它的红对照 `TEMP/split_ctl_r14.py`），母件余下 8 行按**当日** rust 面重封"
+TEMP/ledger_bug44_r14.py-76-        u"（`TEMP/wd_reseal_r14.py --apply`，老那份改名留盘 `with_defer.exp.presplitr14`）。拆的判据是硬的："
+TEMP/ledger_bug44_r14.py-77-        u"老 golden 摘掉的 3 行必须与新语料 rust 输出的 3 行「摘引号后逐字相等」，余下行必须「只差引号」，"
+TEMP/ledger_bug44_r14.py-78-        u"且母件 cy 实测 == 当日 rust 逐字（三格红对照：少摘一行、多摘一行、oracle 改一个字符，全被拦下）。"
+TEMP/ledger_bug44_r14.py-79-        u"新语料**不封** `.exp`，登记在 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`（该表双向可红）。"
+TEMP/ledger_bug44_r14.py-80-        u"照 cy 封它违反「期望值来自另一后端」的封盘纪律（那句话就写在母件第 2 行注释里）；"
+TEMP/ledger_bug44_r14.py-81-        u"照 rust 封它等于把本卡描述的缺陷钉成 cy 的验收标准。",
+TEMP/ledger_bug44_r14.py-82-        u"- 转正前置: 共享层把 `with ... as` 的绑定类型落成被管理值的类型之后，`f\"using {res.name}\"` "
+TEMP/ledger_bug44_r14.py:83:        u"两侧应逐字一致（都是 `using database`）；届时 `python -u TEMP/seal_missing_exp.py` 会补封 "
+TEMP/ledger_bug44_r14.py:84:        u"`with_as_binding_fstr.exp`（该工具只在两后端逐字一致时封、不覆盖已有 `.exp`、空 stdout 不封），"
+TEMP/ledger_bug44_r14.py-85-        u"而 `NO_ORACLE_EXPLAINED` 那条随即被门禁的「登记了但 `.exp` 在场 ⇒ 红」反向门逼着同轮移出。"
+TEMP/ledger_bug44_r14.py-86-        u"顺手一起看 `print(n.to_string())` 那一族（`.to_string()` 的 IR 返回类型应为 `str`）。",
+TEMP/ledger_bug44_r14.py-87-        u"- repro: `python -u TEMP/wd_reseal_r14.py`（DRY，含三格红对照，出两侧原文逐字）；"
+TEMP/ledger_bug44_r14.py-88-        u"`python -u TEMP/withdefer_diag_r14.py`（拆前母件的三方逐行分类：陈旧引号 10 行 / 真分叉 1 行）；"
+TEMP/ledger_bug44_r14.py-89-        u"`cargo test --test cy_codegen_gate`（L1，含登记表与语料的双向对表）",
+TEMP/ledger_cards_r10.py-80-            u"补封后不移出会把门禁判红）；行为期望值暂由 `cy_closure_write_capture_decls` 的机制断言承担。",
+TEMP/ledger_cards_r10.py-81-            u"  第三组 `p_writecap_assign.lz`（把写捕获写成单表达式体 `|v: int| = total = total + v`）也是"
+TEMP/ledger_cards_r10.py-82-            u"`rust=RUSTC_FAIL(E0308) / cy=OK`，但**该写法在 03e 里没有逐字形例**，"
+TEMP/ledger_cards_r10.py-83-            u"所以本卡只以 B 组（规范里有字形例的那条）为凭，C 组当旁证不主张。",
+TEMP/ledger_cards_r10.py-84-            u"- 转正前置: rust 面按 §五 选 `FnMut`（或对写捕获降级为 `RefCell`/显式 `mut` 语义并回写规范条文）后，"
+TEMP/ledger_cards_r10.py:85:            u"用 `python -u TEMP/seal_missing_exp.py` 补封 `closure_write_capture.exp`"
+TEMP/ledger_cards_r10.py-86-            u"（该工具不覆盖已存在的 `.exp`），并同轮把该条从 `NO_ORACLE_EXPLAINED` 移出。",
+TEMP/ledger_cards_r10.py-87-            u"- repro: `python -u TEMP/closure_probes_r10.py`（看 B 组两行）；"
+TEMP/ledger_cards_r10.py-88-            u"`python -u TEMP/xdiff_ds07.py CY/TESTS/04_functions`",
+TEMP/ledger_cards_r10.py-89-        ],
+TEMP/ledger_cards_r10.py-90-        "by": u"qoder-explore-worker(cy 后端轮 T0r10)",
+TEMP/ledger_cards_r12.py-145-            u"已登记在 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`（该表与盘面双向对表，"
+TEMP/ledger_cards_r12.py-146-            u"补封后不移出会把门禁判红）；行为期望暂由 BUG-37 那四支单元锁的**发射形态**断言承担。",
+TEMP/ledger_cards_r12.py-147-            u"  与既往那条流程债同源（上一轮记的「`cy` 的接受面比 rust 宽（无 borrowck）」）："
+TEMP/ledger_cards_r12.py-148-            u"这一族缺陷都要靠**前端类型检查**才判得动，不在本车道。",
+TEMP/ledger_cards_r12.py-149-            u"- 转正前置: rust 面给无注解闭包形参定标（按调用点推断并单态化，或按规范回写「必须注解」并改 §一）后，"
+TEMP/ledger_cards_r12.py:150:            u"用 `python -u TEMP/seal_missing_exp.py` 补封 `dyn_recv_closure.exp`（该工具不覆盖已存在的 `.exp`），"
+TEMP/ledger_cards_r12.py-151-            u"并同轮把该条从 `NO_ORACLE_EXPLAINED` 移出。",
+TEMP/ledger_cards_r12.py-152-            u"- repro: `python -u TEMP/dynrecv_probes_r12.py`（看 d_len_obj／d_len_list／d_push_list 三支的 rust 行）；"
+TEMP/ledger_cards_r12.py:153:            u"`python -u TEMP/seal_missing_exp.py`（回执里 `15_feature_matrix/dyn_recv_closure.lz` 那行）",
+TEMP/ledger_cards_r12.py-154-        ],
+TEMP/ledger_cards_r12.py-155-        "by": u"qoder-explore-worker(cy 后端轮 T0r12)",
+TEMP/ledger_cards_r12.py-156-    },
+TEMP/ledger_cards_r12.py-157-    {
+TEMP/ledger_cards_r12.py-158-        "sev": "medium",
+--
+TEMP/ledger_cards_r12.py-257-    # 封盘件：显示形态从盘上的 .exp 算出来，不手打
+TEMP/ledger_cards_r12.py-258-    exp_forms = {}
+TEMP/ledger_cards_r12.py-259-    for key, rel in sorted(EXP_CLAIMS.items()):
+TEMP/ledger_cards_r12.py-260-        p = os.path.join(REPO, rel.replace("/", os.sep))
+TEMP/ledger_cards_r12.py-261-        if not os.path.exists(p):
+TEMP/ledger_cards_r12.py:262:            raise SystemExit("REFUSE: 封盘件 %s 不在盘上 ⇒ 先跑 TEMP/seal_missing_exp.py" % rel)
+TEMP/ledger_cards_r12.py-263-        content = read(p)
+TEMP/ledger_cards_r12.py-264-        if not content:
+TEMP/ledger_cards_r12.py-265-            raise SystemExit("REFUSE: 封盘件 %s 是空的 ⇒ 空 golden 不承重" % rel)
+TEMP/ledger_cards_r12.py-266-        exp_forms["%%E_%s%%" % key] = qfmt(content.replace("\n", "\\n"))
+TEMP/ledger_cards_r12.py-267-    exp_quoted = set(exp_forms.values())
+TEMP/ledger_cards_r13.py-159-            u"`NO_ORACLE_EXPLAINED`（该表与盘面双向对表）。补封之前，`.expect` 的行为凭据只有"
+TEMP/ledger_cards_r13.py-160-            u"cy 侧的发射形态锁与「副作用一次」那条自证——**这不是等价证据**，跨后端对照缺着。",
+TEMP/ledger_cards_r13.py-161-            u"  为什么归到 rust 侧：改名/实参加工发生在 `src/ir/codegen/mod.rs` 一侧（本车道不改）；"
+TEMP/ledger_cards_r13.py-162-            u"且规范没有禁止 `&str` 形参上直接传字面量。",
+TEMP/ledger_cards_r13.py-163-            u"- 转正前置: rust 侧不再对 `expect` 的字符串实参无条件 `.to_string()` 后，"
+TEMP/ledger_cards_r13.py:164:            u"用 `python -u TEMP/seal_missing_exp.py` 补封 `expect_receiver_once.exp`"
+TEMP/ledger_cards_r13.py-165-            u"（该工具不覆盖已存在的 `.exp`、空 stdout 不封），并同轮把该条从 `NO_ORACLE_EXPLAINED` 移出。",
+TEMP/ledger_cards_r13.py-166-            u"- repro: `python -u TEMP/rust_expect_evidence_r13.py`；"
+TEMP/ledger_cards_r13.py-167-            u"`python -u TEMP/uncond_arms_probes_r13.py`（看 x_expect_option / x_expect_none 两行）",
+TEMP/ledger_cards_r13.py-168-        ],
+TEMP/ledger_cards_r13.py-169-        "by": u"qoder-explore-worker(cy 后端轮 T0r13)",
+TEMP/ledger_cards_r8b.py-149-- detail: 逐字取自本轮封盘回执（TEMP/seal-missing-1741.log）：
+TEMP/ledger_cards_r8b.py-150-  `%s`
+TEMP/ledger_cards_r8b.py-151-  口径：cy 语料的 `.exp` 只许取**另一后端**的实跑产物（BUG-21 同一条纪律），拿 cy 自己的 stdout 反灌＝把当期缺陷封成契约，所以 rust 编不过就等于这件没有覆盖。
+TEMP/ledger_cards_r8b.py-152-  性质是「**挡路**」不是「cy 坏了」：cy 侧对字面量的处理已跑通，缺的是 rust 侧的类型推断。
+TEMP/ledger_cards_r8b.py-153-  复跑：`python -u TEMP/xdiff_ds07.py CY/TESTS/01_basics`（不带 LZ_SEAL_EXP=1，只看差分）。
+TEMP/ledger_cards_r8b.py:154:  转正前置：rust 面让该件产物可编译后，用 `python -u TEMP/seal_missing_exp.py` 补封（该工具**不会覆盖已存在的 .exp**）。
+TEMP/ledger_cards_r8b.py-155-- reported_by: qoder-explore-worker(cy 后端轮 T0r8)
+TEMP/ledger_cards_r8b.py-156-
+TEMP/ledger_cards_r8b.py-157-## BUG-%d [%s] [medium] 入账未修（rust 后端；自举语料在单文件取数面上编不过）
+TEMP/ledger_cards_r8b.py-158-- summary: `CY/TESTS/99_bootstrap/lz_std.lz` 在本轮差分器的取数面（`lzc` 单文件转译 → `rustc --extern lz_builtins` → run）下 rustc 失败（`error[E0308]: mismatched types`），cy 面 OK ⇒ 该件同样封不了盘
+TEMP/ledger_cards_r8b.py-159-- detail: 逐字取自 TEMP/seal-missing-1741.log：
+TEMP/overlay_corpus_r14.py-1-# -*- coding: utf-8 -*-
+TEMP/overlay_corpus_r14.py-2-"""把脏树 `CY/TESTS/**.lz` 的语料面逐字节重贴进快照树，并自证「重贴后两侧等」。
+TEMP/overlay_corpus_r14.py-3-
+TEMP/overlay_corpus_r14.py:4:`TEMP/overlay_exp_r14.py` 只管 `.exp`；本轮拆出新语料 `with_as_binding_fstr.lz` 并改了母件
+TEMP/overlay_corpus_r14.py-5-`with_defer.lz` ⇒ 快照树若少一件或多一件，L2/L3 数的就不是同一张语料面（那两档的件数是报告里的主张）。
+TEMP/overlay_corpus_r14.py-6-判据：重贴后逐字节再读一遍；不等 ⇒ RC=1。开始前把差异列出来（列空也要打印，
+TEMP/overlay_corpus_r14.py-7-「一条都没取到」与「本来就一致」是两件事，混起来就是把恒真当通过）。
+TEMP/overlay_corpus_r14.py-8-"""
+TEMP/overlay_corpus_r14.py-9-import io
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-77-     `.pop(i)` 改写的原意，见 `DEMO/01_basics/lists.lz`）。
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-78-
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-79-## 四、判据三层
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-80-
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-81-- **行为侧（有 oracle，期望值只取 Rust 面产物）**：`CY/TESTS/15_feature_matrix/dyn_recv_duck.lz`（封 `'3\n8\nfalse\ntrue\ntrue\n`）、
+TEMP/r12-report-first-write-placeholder-leak-mirror.md:82:  `dyn_recv_user_methods.lz`（封 `'8\n107\n2\n3\n`）。封盘走 `TEMP/seal_missing_exp.py`：两后端逐字一致才封、
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-83-  已存在的 `.exp` 一律不覆盖、空 stdout 不封。本轮**复打**这两份，回执字节数与盘上件逐一对表
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-84-  （`dyn_recv_duck.exp` 20 字节、`dyn_recv_user_methods.exp` 10 字节）。
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-85-- **行为侧（无 oracle）**：`dyn_recv_closure.lz` **故意没有 `.exp`** —— 同一份源码 rust 面恒
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-86-  `error[E0282]: type annotations needed`（BUG-38 在册），已登记 `NO_ORACLE_EXPLAINED`（该表与盘面双向对表）。
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-87-- **机制侧（发射形态）**：四支新锁 `cy_dynamic_receiver_dispatches_at_runtime`、`cy_static_receivers_keep_their_existing_forms`、`cy_clone_unwrap_only_passthrough_when_no_such_method`、`cy_dynamic_for_site_wraps_and_the_helper_self_guards`，单元档 48 支全绿。
+--
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-160-**会被回收**（`TEMP/` 是 gitignored 的工作区，清掉就没了 ⇒ 附再生命令）：
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-161-上述四份 log 全部由前面那些件重跑生成，逐条对应：
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-162-修前探针 = 产品码回退后 `python -u TEMP/dynrecv_probes_r12.py`（本轮的修前那份是在改动产品码**之前**跑的，
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-163-重现已不可能，只能靠同一支取数件在新码上重跑得到修后读数）；
+TEMP/r12-report-first-write-placeholder-leak-mirror.md-164-其余 = `cargo test -j 1 --test cython_backend`、
+TEMP/r12-report-first-write-placeholder-leak-mirror.md:165:`cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`、`python -u TEMP/seal_missing_exp.py`。
+TEMP/r12-report-first-write-placeholder-leak.md-77-     `.pop(i)` 改写的原意，见 `DEMO/01_basics/lists.lz`）。
+TEMP/r12-report-first-write-placeholder-leak.md-78-
+TEMP/r12-report-first-write-placeholder-leak.md-79-## 四、判据三层
+TEMP/r12-report-first-write-placeholder-leak.md-80-
+TEMP/r12-report-first-write-placeholder-leak.md-81-- **行为侧（有 oracle，期望值只取 Rust 面产物）**：`CY/TESTS/15_feature_matrix/dyn_recv_duck.lz`（封 `'3\n8\nfalse\ntrue\ntrue\n`）、
+TEMP/r12-report-first-write-placeholder-leak.md:82:  `dyn_recv_user_methods.lz`（封 `'8\n107\n2\n3\n`）。封盘走 `TEMP/seal_missing_exp.py`：两后端逐字一致才封、
+TEMP/r12-report-first-write-placeholder-leak.md-83-  已存在的 `.exp` 一律不覆盖、空 stdout 不封。本轮**复打**这两份，回执字节数与盘上件逐一对表
+TEMP/r12-report-first-write-placeholder-leak.md-84-  （`dyn_recv_duck.exp` 20 字节、`dyn_recv_user_methods.exp` 10 字节）。
+TEMP/r12-report-first-write-placeholder-leak.md-85-- **行为侧（无 oracle）**：`dyn_recv_closure.lz` **故意没有 `.exp`** —— 同一份源码 rust 面恒
+TEMP/r12-report-first-write-placeholder-leak.md-86-  `error[E0282]: type annotations needed`（BUG-38 在册），已登记 `NO_ORACLE_EXPLAINED`（该表与盘面双向对表）。
+TEMP/r12-report-first-write-placeholder-leak.md-87-- **机制侧（发射形态）**：四支新锁 `cy_dynamic_receiver_dispatches_at_runtime`、`cy_static_receivers_keep_their_existing_forms`、`cy_clone_unwrap_only_passthrough_when_no_such_method`、`cy_dynamic_for_site_wraps_and_the_helper_self_guards`，单元档 48 支全绿。
+--
+TEMP/r12-report-first-write-placeholder-leak.md-160-**会被回收**（`TEMP/` 是 gitignored 的工作区，清掉就没了 ⇒ 附再生命令）：
+TEMP/r12-report-first-write-placeholder-leak.md-161-上述四份 log 全部由前面那些件重跑生成，逐条对应：
+TEMP/r12-report-first-write-placeholder-leak.md-162-修前探针 = 产品码回退后 `python -u TEMP/dynrecv_probes_r12.py`（本轮的修前那份是在改动产品码**之前**跑的，
+TEMP/r12-report-first-write-placeholder-leak.md-163-重现已不可能，只能靠同一支取数件在新码上重跑得到修后读数）；
+TEMP/r12-report-first-write-placeholder-leak.md-164-其余 = `cargo test -j 1 --test cython_backend`、
+TEMP/r12-report-first-write-placeholder-leak.md:165:`cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`、`python -u TEMP/seal_missing_exp.py`。
+TEMP/registry-before-r14.md-77-| D12 | 半自动口径已生效：日常轮次不打 tag、不发布；**重要版本发布**才转人工。本会话未打 tag、未 push | 本轮 HEAD 仍 `ddf6e6be` |
+TEMP/registry-before-r14.md-78-| D13/14/15 | 维持冻结。本轮实测：`SYNTAX/` 洁净；`docs/str-boundary-contract-2026-09-27.md` 未改；未新增语法结构，未开替代路线（IR 路线唯一性：`src/semantic_check.rs` 报错文案已写明「Route B 已退役」） | `git status --porcelain SYNTAX/ docs/str-boundary-contract-2026-09-27.md` 为空 |
+TEMP/registry-before-r14.md-79-| D6（BUG-5/9 收口 + 新缺陷，2026-10-01 追记） | **剩余 bug 清偿腿**。① **BUG-5 后半段修完**：`src/ir/builder.rs:2777` 的 `comptime_value_to_lit` 加声明类型入参（沿 `ctx.top_level_consts` 递归带元素类型；`Tuple` 臂一并修；`Map/Type/Inspect` 本就不内联⇒不适用；另两个调用点 :4349/:7640 无注解类型可依据⇒显式 `None` 保持改前行为），`rv_list3` 的引用位从 `vec![(), vec![()]]` 变与定义位逐字相同；锁 `d6_list3_nested_empty_pushdown_inlined` 由 `#[ignore]` 转正并改名。② **BUG-9 修完，且卡片归因被实测推翻**：`git show HEAD:src/ir/codegen/mod.rs` 里 `Rc<dyn Fn`=0／`Box<dyn Fn`=22，把同一份生成码四态实测（`TEMP/bug5/carrier/{box_head,arc_plain,arc_send}.rs`，闸门同款 rustc 参数）⇒ Box 时代就 E0277、裸 Arc 也 E0277，**只有 `Arc<dyn Fn … + Send + Sync>` 可编译**；载体落 `fn_value_type:2578`＋柯里链 :3686＋6 处装箱（:3742/:3748/:8178/:9542/:13664/:13745）＋转发闭包 `Arc::clone`（:6986），并只在「本函数返回 fn 值」时给 `impl Fn` 形参加 `+ Send + Sync`（:3479）；`rc_fn_values/rc_fn_value_fwd` 改名 `fn_value_carriers/fn_value_fwd`（15 处，实测无外部引用）。③ **新缺陷（暂记 BUG-11，未入账）**：BUG-5 的引用位修好后定义位立刻暴露 `TupleLit` 槽位从不下推期望类型（`(Vec::<i64>::new(), …)` 对 `Vec<Vec<i64>>` 槽位 ⇒ E0308）；修在 `ExprKind::TupleLit` 非 s…
+TEMP/registry-before-r14.md-80-| D4（cy 后端轮，2026-10-02 追记） | **把 D4 自己点名的阻塞点做掉了，裁决仍归你**。D4/D5 那两行的阻塞点是「cython 融进主干后本地没有任何验收面」⇒ 本轮把它变成**可红判据**：`tests/cy_codegen_gate.rs` 三层 L1 transpile 全语料 / L2 `python -m cython` 语法层 / L3 编译成扩展模块真跑并与 `.exp` 逐字比，**两份在册清单都是空 `&[]`**（`KNOWN_CYTHONIZE_FAILURES`、`KNOWN_RUNTIME_FAILURES`），终值 `语料 64 件 \| cythonize 通过 64 \| 失败 0` 与 `语料 64 件 \| 执行通过 64 \| 运行异常 0 \| 输出不符 0`。入口碰撞面按本轮盘面实测更正行号（旧行号随本轮 main.rs 改动已漂）：主干 CLI 是 `src/main.rs:441` 认 `--backend=cython`，`lzcyc` 是 `CY/src/main.rs:26` 的 `transpile` 子命令，且 `CY/src/main.rs:207` 自带一份 `postprocess_pyx` **副本**（注释自述「不用 lib 的 generate_full」）⇒ 两个入口的产物今天仍然分叉，本轮**没有**做逐字节等值差分（这是 D4 整合要先回答的问题之一，不在本轮授权面内）。门禁因此明确只吃主干 lib 的产物，这条口径写在 `CY/scripts/cy_gate_run.py` 文件头。**仍未做（属 L2′，等你拍板）**：把 cython 出口从 CLI 移进 `lzcyc` 这件事本身——它改的是下游入口契约，不在授权面内。本轮同时修掉 rust 后端一处跨后端分叉（台账 BUG-11，`memory/bugs.md:87`）并补一条护栏对照回归锁 | `cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`（日志 `TEMP/reviews/gates-final-005555.log`）；L2 判据三格对照 `TEMP/reviews/l2-hermetic-ctrl-011124.l…
+TEMP/registry-before-r14.md-81-| D4（cy 后端轮 T0r7，2026-10-02 追记） | **口径回退 + 两处自造回归修到能红 + BUG-13 判据先行**。**本行作废上一行（D4 cy 后端轮 2026-10-02 追记）里那句裁决**：「SYNTAX 对插值引号无条文、f-string 统一到 Debug」——那句的证据来自一次 grep 错了目录（`docs/SYNTAX/` 不存在，规范在仓库根 `SYNTAX/`），零命中被当成了「无条文」。规范实有明文：`SYNTAX/00-词法基础.md:188` 写 `f"x={x}"` 对应 `format!("x={}", x)`（Display，str 不带引号），而**会被执行**的判据 `tests/str_boundary.rs`（用例标签 c7_fstring）断言 `name=LZ, age=30`。据此把 Rust 侧 `gen_fstring` 逐字节回退到基线形态，cy 侧改用运行时判定 `_lz_fs`；台账 BUG-15 改判 **REVERTED** 并附红绿两份日志，另立新卡 BUG-22..26。证据优先级固化为：规范条文 ＞ 会执行且有绿红成对日志的判据 ＞ 没人执行的注释与断言文案。**同轮自纠两处自己写的回归**：BUG-26（切片作值的 owned 化不分基底类型 ⇒ 文本基底吃 `to_vec()` ⇒ rustc E0599，workspace 两 target 红）已用 `base_is_str_like()` 按类型分叉修掉；BUG-25（本轮 own 的方法改写表把 `ps.kwargs.contains(k)` 写成 `k in ps.kwargs`，而后端自己发的垫片类`_LzKwargsMap` 没有 `__contains__` ⇒ Python 退化成迭代协议 ⇒ `KeyError: 0`）已补四个协议方法，并把两份逐字垫片副本收成一份 `const PARAMS_SHIM`（两处插入点共用）。**BUG-13 按卡内前置做完**（判据先行再动发射点）：L1 现在逐件扫生成的 `.pyx`，把返回位写 `-> Py_ssize_t`／`-> double`／`-> bint`／`-> float` 这类「Cython 3.2.2 只给 warning」的假注解判红；软判据…
+TEMP/registry-before-r14.md:82:| D4（cy 后端轮 T0r8，2026-10-06 追记） | **回归修到能红 + BUG-12 销账 + 行为判据从 48 件补到 75 件**。① **BUG-27（本轮自造回归，门禁自己抓的）**：builder 把 `with` 脱糖成 `let __with_val_* = { 体语句; 尾值 }` 之后，cy 的 9 个 BlockExpr 提升点全部 `gen_block`（连尾语句发）+ `block_tail_expr`（再发一次）⇒ 尾语句跑两遍，`with_defer.lz` 的 print 重复（红证 `TEMP/gates-cy-1649.log`）；新增 `gen_block_prefix()` 后 9 点统一走它，单元锁 `cy_block_expr_tail_runs_once` 数 marker 各恰好 1 次。② **BUG-12 销账**：`go`/`spawn` 的 IR 是 `__go(体)`，而 Python 实参**先求值** ⇒ 垫片结构上不可能延后（这才是降级根因）；现在同步函数发 `__spawn(lambda: 体)`（threading.Thread + 失败只写 stderr，对齐 rust 面 `std::thread::spawn` 的可观测形态），`async def` 保持 `__go(...)`（那里拿到的是协程对象）。判据两侧：行为侧新语料 `go_failure_isolated.lz`（`.exp` 由 Rust 面实跑封盘，`TEMP/probe8/xdiff-11-after-0919.log` 差分 2/2 一致）+ 机制侧 L1 文本闸（同步 `def` 里出现 `__go(` 即红，随 workspace 日常跑）+ 单元锁两向都咬。遗留三条写在卡里。③ **覆盖补强**：`TEMP/seal_missing_exp.py` 把「跑得过但没 `.exp`」的语料补成行为判据，三条硬规则=两后端 stdout 逐字一致／**已存在 `.exp` 一律不覆盖**／空 stdout 不封；结果 81 件里 75 件有 golden（本轮 +27），不封的 6 件里 3 件空输出、3 件是 rust 面编不过（BUG-29/BUG-30 + BUG-24）。其中 `containers…
+TEMP/registry-before-r14.md-83-| D4（cy 后端轮 T0r9，2026-10-06 追记） | **两条判据补的是「门禁自己看不见的那一面」，本轮没有新缺陷被抓出来**。① **L2 的 stderr 整条通道原先被丢掉**：这层只看退出码，而 BUG-13 那类「写上去的东西不承重」rc=0、stdout 也对，唯一信号是 `warning:` 行。本轮先把**全量语料**逐件过一遍告警普查（`TEMP/cy_warn_census.py`，取数命令与门禁逐字同构，且**语料整树镜像**——第一版按件建隔离目录，`99_bootstrap/import_runtime.lz` 因找不到兄弟模块而 TRANSPILE_FAIL，那是取数面的缺陷不是产品的），读数：合计 81 件 \| clean 81 \| 有告警 0 \| rc!=0 0 \| 转译失败 0 \|\| 分组行 0（逐行累加 0）\| 类别 0；再加 in-test 正向对照（`warning:` 类 = BUG-13 原样形状 + 定位错误类），对照没被看见就当场 panic ⇒ 「没有告警」不可能靠取数面失明成立：SELFCHK OK: 对照 2/2 命中、两条累加路径一致、四态覆盖满 81 件。**检测面边界已写进判据注释**（形状不是猜的，是 `TEMP/cy_warn_shape_probe.py` 实测，回执 cy-warn-shapes-182731.log）：同一条命令下 `cdef int spam(int x)` 连 `-Wextra` 都不打 performance hint，所以本判据只覆盖 `warning:` 与带定位错误，「0」不等于「产物没有优化空间」。基线 0 行、**不开告警豁免清单**（告警说的是「没生效」，开清单等于把它登记成常态）。② **L3 的「执行通过 81」是过度主张**：里面混着「逐字比对过」与「只证明跑完没抛」两类，本轮把它拆成两栏并加 `NO_ORACLE_EXPLAINED` 登记表（6 条，逐条带原因）＋双向对表（无 `.exp` 又没登记 ⇒ 红；登记了但 `.exp` 已在 ⇒ 红；两栏之和 != 语料件数 ⇒ 红）。这些件的成因实测自 `TEMP/why_unsealed_r9.py`（回执 `TEMP/why-unsealed-r9.log`）：`01_bas…
+TEMP/registry-before-r14.md:84:| D4（cy 后端轮 T0r10，2026-10-06 追记） | **本轮抓出一个真缺陷并修掉（BUG-32）；闭包（SYNTAX/03e）从零覆盖补成 3 件语料**。① **缺陷形状**：块体闭包 `\|a, b\| => { 语句; 尾值 }` 进 cy 的 Lambda 发射臂时，旧实现只认尾值那一支，**前缀语句整条被丢掉**——程序照跑、退出码 0、只是少了绑定，属最坏的一类（单后端测试全绿）。唯一机器信号是 Cython 侧拒绝原文（OLD_SHAPE_REJECT: old_shape.pyx:1:19: undeclared name not builtin: c）；现在块体闭包一律提升为嵌套 `def`（`lambda_block_needs_def`），当前产物 cython rc=0 且「有提升 def／不降级」两条读数各 1 条在场。**写捕获**按 §五 成立：按作用域发 `nonlocal`（函数内绑定）／`global`（模块级），单表达式闭包仍走 `lambda`（没为对称多留一条分支）。② **判据两侧**：机制侧 2 条单元锁全绿（`cy_closure_block_body_is_hoisted`／`cy_closure_write_capture_decls`，单元档 test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s）＋行为侧语料 3 件；golden **只取 rust 面实跑产物**并先做跨后端 stdout 差分：`closure_basic`／`closure_modlevel` 合计封 29 字节；`closure_write_capture` **故意没有 `.exp`**——rust 面在这条合法写法上编不出东西（探针 \| p_writecap.lz            rust=RUSTC_FAIL     cy=OK             逐字一致=False \| error[E0594]: cannot assign to `total`, as it is a captured variable in a `Fn` closure \| error[E0…
+TEMP/registry-before-r14.md:85:| D4（cy 后端轮 T0r11，2026-10-08 追记） | **魔法方法面做了一次跨后端实跑差分，抓出四处 cy 分叉并修掉，另把共享 IR 的一条信息丢失入账**。① **取数面**：`TEMP/magic_probes_r11.py` 九支探针（比较族／算术族／一元族／写索引／成员判定两面／可调用对象／迭代协议／位运算／`unwrap_or`），两后端各跑一遍比 stdout —— 修前 一致 4／分叉 3／两侧都红 1（共 8 支）。此前 cy 语料只钉住五个名字（`__add__/__eq__/__getitem__/__len__/__str__`）。② **修掉的四处（台账 BUG-34／BUG-35）**：`x.contains(y)`（Python 协议面是 `y in x`，LZ 的调用糖不是它）／`a << b`、`a >> b`（共享 IR 的 `magic_method_for_binop` 里移位缺席，而 Python 要 `__lshift__`）／`~x`（`map_unop` 把位非降级成逻辑非，旧发射一律发 `not ` ⇒ 对象塌成 bool）／`__next__` 的 `Option.None` 结束态（Python 要 `StopIteration`，旧发射发 `return None` ⇒ for 把 `None` 当成一个元素，修前逐字 TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'）＋ `.unwrap_or`（cy 方法表里整条缺席，落到裸值上就是 AttributeError）。三处按「**用户类且确实实现了那个魔法名**」的闸门改写，迭代那条只套在 **for 的取数面**（`_lz_iter`），用户的 `__next__` 一字不动。③ **过程里最值钱的一条**：`__next__` 的第一版是把用户方法改名 `__lz_next__` 再包一层，`for` 当场修好，但同一支探针的 `m_next` 从「返回 None」变成「把 StopIteration 抛进用户程序」——**修复自己引入新分叉，是差分面当场抓住的**；换成败于取数面的适配器后九支全部逐字一致（一致 9，共 9 支）。④ **入账未修**：BU…
+TEMP/registry-before-r14.md:86:| D4（cy 后端轮 T0r12，2026-10-08 追记） | **把上一轮自己写下的那条边界量成了数：动态接收者上的方法改写表两侧都瞎，补运行时分派后修掉这一族 cy 分叉，另把 rust 侧的两条镜像问题入账**。① **取数面**：`TEMP/dynrecv_probes_r12.py` 21 支探针（无注解闭包形参／duck 约束泛型形参／无条件臂 clone·unwrap·try_into／动态 for 面／动态移位／成员判定／字符串方法族），两后端各跑一遍比 stdout，**并回吐 cy 产物里相关的 pyx 行**（哪条臂生效只能看发射形态）——修前 两侧都红 11／分叉 9／一致 1（共 21 支）；修后 分叉 15／一致 5／两侧都红 1（共 21 支）。上一轮报告 §八 那句「接收者静态类型是 `Any`／泛型参数时这三条改写不生效」本轮兑现。② **修掉的分叉（台账 BUG-37）**：接收者是 `IrType::Any`（`capture.rs:528`）或 `IrType::Generic(_)`（`convert_decl.rs:665`）时 cy 侧形参就是 `object` ⇒ `!ty_is_user_class` 的改写臂**恒真**（用户类自带的 `len`/`push`/`contains`/`is_empty`/`trim`/`remove`/`starts_with`/`to_lower`/`unwrap_or` 被强改成 Python 名，修前逐字 TypeError: object of type '_lzcyg_d_duck_len.Bucket' has no len()），正向直派臂**恒假**（`__shl__` 不派发、迭代适配器不套）。三支**无条件**臂更狠：`clone`/`unwrap` 透传把一次调用整条吃掉，**两侧都不报错只是数字不一样**（d_clone_static.lz  rust=OK           cy=OK           分叉，rust=OK 那一支的 cy 旧产物就是少一步）。③ **修法**：prelude 加 `_LZ_TYPES` 名单（与静态判据同源 `known_types ∪ cdef_classes`，排序保证产物逐字稳定）＋8 支运行时分派助手（…
+TEMP/registry-before-r14.md-87-| D4（cy 后端轮 T0r13，2026-10-08 追记） | **把上一轮自己写下的那句「没取数所以不动」兑现了：方法表里余下三条**无条件**臂（`expect`／`is_none`／`is_some`）连接收者是谁都不看，补闸门后 5／14 支探针转一致；另抓到一条**同轮自发**的缺陷：`.expect()` 的发射把接收者拼两遍。**未 commit、未打 tag、未 push**。① **取数面**：`TEMP/uncond_arms_probes_r13.py` 14 支探针（静态用户类／duck 泛型形参／无注解闭包形参／真 Option 成对锁／`remove` 按位置 vs 按值三面），两后端各跑一遍比 stdout，**并回吐 cy 产物的 pyx 行**——修前 分叉 11／一致 2／两侧都红 1（共 14 支）；修后 一致 7／分叉 6／两侧都红 1（共 14 支）（两份修后之间只改了抽取器，分类逐字相同 ⇒ 「改动不许动判定」钉成硬门）。上一轮报告 §七 点名的 `d_duck_iter` 那支提醒了取数纪律：duck 约束只看 struct 体内的方法，探针第一版把方法写在 `impl` 块里 ⇒ 那几支恒 `TRANSPILE_FAIL`（`src/ir/duck_check.rs:489`；轮16 已写在 `duck_types.lz` 头注释）。**「两侧都红」不等于产品有缺口，先证明取数面自己写得对。**② **修掉的两条（台账 BUG-40／BUG-41）**：`is_none`/`is_some`/`expect` 三条臂的立论是「cy 的 Option 就是裸值／None」——那是**值表示**而不是**接收者类型**，于是用户类自带的同名方法被整条换成一次 identity 比较：`x_expect_static` 修前 rust `'42\n'` / cy ``'Cfg { n: 21 }\n'``（**不报错，打印的是对象**）、`x_isnone_static` rust `'true\n'` / cy `'false\n'`、`x_issome_static` rust `'false\n'` / cy `'true\n'`。修法抄上一轮那条纪律：闸门从无条件换成「**本类有没有定义这个名字**」（`use…
+TEMP/report_r10.py-280-
+TEMP/report_r10.py-281-def evidence_list():
+TEMP/report_r10.py-282-    items = [
+TEMP/report_r10.py-283-        ("TEMP/closure_probes_r10.py", "闭包三组探针（模块级 / 写捕获 / 单表达式写捕获）"),
+TEMP/report_r10.py-284-        ("TEMP/closure_prefix_loss.py", "旧发射形态的拒绝原文 + 当前产物不降级"),
+TEMP/report_r10.py:285:        ("TEMP/seal_missing_exp.py", "非覆盖式 golden 封盘器"),
+TEMP/report_r10.py-286-        ("TEMP/cy_warn_census.py", "L2 stderr 告警普查（T0r9 的取数件，本轮复跑前未动）"),
+TEMP/report_r10.py-287-    ]
+TEMP/report_r10.py-288-    logs = [newest("closure-probes-*.log"), newest("prefix-loss-*.log"),
+TEMP/report_r10.py-289-            newest("seal-closure-*.log"), newest("ut-closure-*.log"),
+TEMP/report_r10.py-290-            newest("gates-r10-*.log", exclude="ws2"), newest("gates-r10-ws2-*.log"),
+TEMP/report_r11.py-352-
+TEMP/report_r11.py-353-
+TEMP/report_r11.py-354-def evidence_list(gate_log, ut_log, seal_log, bad_log, mid_log, good_log):
+TEMP/report_r11.py-355-    items = [
+TEMP/report_r11.py-356-        ("TEMP/magic_probes_r11.py", "9 支跨后端探针（比较/算术/一元/写索引/成员/调用/迭代/位运算/unwrap_or）"),
+TEMP/report_r11.py:357:        ("TEMP/seal_missing_exp.py", "非覆盖式 golden 封盘器（两后端逐字一致才封、已有 .exp 不动、空 stdout 不封）"),
+TEMP/report_r11.py-358-        ("TEMP/ledger_cards_r11.py", "三张卡的追加器（卡号反解 + 引用串逐条对盘 + stdout 串必须等于某份 .exp）"),
+TEMP/report_r11.py-359-        ("TEMP/append_registry_row_r10.py", "上一轮的登记表台账行（本轮沿其纪律，不复用正文）"),
+TEMP/report_r11.py-360-    ]
+TEMP/report_r11.py-361-    logs = [bad_log, mid_log, good_log, seal_log, ut_log, gate_log]
+TEMP/report_r11.py-362-    out = []
+TEMP/report_r12.py-470-     `.pop(i)` 改写的原意，见 `DEMO/01_basics/lists.lz`）。
+TEMP/report_r12.py-471-
+TEMP/report_r12.py-472-## 四、判据三层
+TEMP/report_r12.py-473-
+TEMP/report_r12.py-474-- **行为侧（有 oracle，期望值只取 Rust 面产物）**：`CY/TESTS/15_feature_matrix/dyn_recv_duck.lz`（封 %E_DUCK%）、
+TEMP/report_r12.py:475:  `dyn_recv_user_methods.lz`（封 %E_USERM%）。封盘走 `TEMP/seal_missing_exp.py`：两后端逐字一致才封、
+TEMP/report_r12.py-476-  已存在的 `.exp` 一律不覆盖、空 stdout 不封。本轮**复打**这两份，回执字节数与盘上件逐一对表
+TEMP/report_r12.py-477-  （`dyn_recv_duck.exp` %BDUCK% 字节、`dyn_recv_user_methods.exp` %BUSERM% 字节）。
+TEMP/report_r12.py-478-- **行为侧（无 oracle）**：`dyn_recv_closure.lz` **故意没有 `.exp`** —— 同一份源码 rust 面恒
+TEMP/report_r12.py-479-  `error[E0282]: type annotations needed`（BUG-38 在册），已登记 `NO_ORACLE_EXPLAINED`（该表与盘面双向对表）。
+TEMP/report_r12.py-480-- **机制侧（发射形态）**：%NLOCK% 支新锁 @LOCKLIST@，单元档 %UTPASS% 支全绿。
+--
+TEMP/report_r12.py-569-**会被回收**（`TEMP/` 是 gitignored 的工作区，清掉就没了 ⇒ 附再生命令）：
+TEMP/report_r12.py-570-上述 log 全部由前面那些件重跑生成，逐条对应：
+TEMP/report_r12.py-571-修前探针 = 产品码回退后 `python -u TEMP/dynrecv_probes_r12.py`（本轮的修前那份是在改动产品码**之前**跑的，
+TEMP/report_r12.py-572-重现已不可能，只能靠同一支取数件在新码上重跑得到修后读数）；
+TEMP/report_r12.py-573-其余 = `cargo test -j 1 --test cython_backend`、
+TEMP/report_r12.py:574:`cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`、`python -u TEMP/seal_missing_exp.py`。
+TEMP/report_r12.py-575-"""
+TEMP/report_r12.py-576-
+TEMP/report_r12.py-577-    reps = {
+TEMP/report_r12.py-578-        u"@TITLE@": title,
+TEMP/report_r12.py-579-        u"@STAMP@": stamp,
+TEMP/report_r13.py-462-
+TEMP/report_r13.py-463-## 四、判据三层
+TEMP/report_r13.py-464-
+TEMP/report_r13.py-465-- **行为侧（有 oracle）**：`CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz`
+TEMP/report_r13.py-466-  （静态用户类三支 + duck 泛型形参一支，封 %E_ARMS%，%EARMSB% 字节）。封盘走
+TEMP/report_r13.py:467:  `TEMP/seal_missing_exp.py`：两后端逐字一致才封、已有 `.exp` 不覆盖、空 stdout 不封。
+TEMP/report_r13.py-468-- **行为侧（无 oracle，两份）**：`expect_receiver_once.lz`（rust 面 E0308，BUG-42）与
+TEMP/report_r13.py-469-  `uncond_arms_closure.lz`（无注解闭包形参 E0282，BUG-38 在册）⇒ 都登记进 `NO_ORACLE_EXPLAINED`，
+TEMP/report_r13.py-470-  该表与盘面「无 `.exp`」双向对表（%NO% 条 ↔ %NO% 件）。
+TEMP/report_r13.py-471-- **机制侧（发射形态）**：%NLOCK% 支新锁 @LOCKLIST@，单元档 %UTPASS% 支全绿。
+TEMP/report_r13.py-472-  其中 `cy_option_face_still_compares_to_none` 是**成对反向锁**：真 Option 上的
+--
+TEMP/report_r13.py-548-
+TEMP/report_r13.py-549-**会被回收**（`TEMP/` 是 gitignored 工作区 ⇒ 附再生命令）：修前那份探针件是在改动产品码**之前**跑的，
+TEMP/report_r13.py-550-重现已不可能（同一支取数件在新码上只能得到修后读数）；其余 =
+TEMP/report_r13.py-551-`python -u TEMP/uncond_arms_probes_r13.py`、`python -u TEMP/rust_expect_evidence_r13.py`、
+TEMP/report_r13.py-552-`cargo test -j 1 --test cython_backend`、
+TEMP/report_r13.py:553:`cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`、`python -u TEMP/seal_missing_exp.py`。
+TEMP/report_r13.py-554-"""
+TEMP/report_r13.py-555-
+TEMP/report_r13.py-556-    reps = {
+TEMP/report_r13.py-557-        u"@TITLE@": title,
+TEMP/report_r13.py-558-        u"@STAMP@": stamp,
+TEMP/report_r14.py-581-    %(q_summ)s
+TEMP/report_r14.py-582-
+TEMP/report_r14.py-583-  其中 %(ncompared)d（逐字比对）+ %(nl3no)d（无 oracle，登记表逐条点名 %(reglen)d 条）== %(ncorpus)d
+TEMP/report_r14.py-584-  由报告自己复核；首跑的红见 `%(l23alog)s`，重封 %(n_resealed)d 件后的那次复跑仍剩 %(l23bf)d 件
+TEMP/report_r14.py-585-  见 `%(l23clog)s`，拆语料之后的终版见上
+TEMP/report_r14.py:586:* 封盘 `TEMP/seal_missing_exp.py`：处理 %(nproc)d 件（输入 %(ninput)d 件）| 新封 %(nnew)d | 未封 %(nun)d，
+TEMP/report_r14.py-587-  新封的即本轮两份语料 %(seelist)s；回执 `%(seal)s`
+TEMP/report_r14.py-588-
+TEMP/report_r14.py-589-## ⑤ 交给对面车道（入账未修；本车道不动 `src/ir/codegen/`、`src/ir/builder/`）
+TEMP/report_r14.py-590-
+TEMP/report_r14.py-591-1. `?` 在 IR 里降成 `MethodCall{try_into}`，rust 面把所有 `try_into` 当传播 ⇒ 用户类自带的
+--
+TEMP/report_r14.py-671-于是三条路都试过，只有一条不撒谎：
+TEMP/report_r14.py-672-1. **照 rust 重封整件** ⇒ 把那 %(dreal)d 行缺陷钉成 cy 的验收标准（且形状门本来就会拦它：老侧引号**不多**于新侧）；
+TEMP/report_r14.py-673-2. **照 cy 重封** ⇒ 违反「期望值来自另一后端」的封盘纪律（那句话写在母件第 2 行注释里）；
+TEMP/report_r14.py-674-3. **往 `KNOWN_DIFF_NOT_COMPARABLE` 加一条** ⇒ 破那份清单「必须为空＝全语料都该能比」的主张。
+TEMP/report_r14.py-675-
+TEMP/report_r14.py:676:走的是第四条：**把那一句话拆成独立语料** `CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz`
+TEMP/report_r14.py-677-（写盘件 `TEMP/split_withdefer_r14.py`；承重证明 `TEMP/split_ctl_r14.py` 拿 **HEAD 里那份真语料**当
+TEMP/report_r14.py-678-fixture——上一版对照是在**已拆**的盘面上做变异，那三格根本不 REFUSE，看着像门坏了其实是 fixture 错。
+TEMP/report_r14.py-679-现在 %(nctl)d 格全过、坏格 %(nctlbad)d：正向「生成 == 盘面」与幂等各 1 格，变异 3 格（改词／删说明／
+TEMP/report_r14.py-680-重复贴块）各红在预期原因上，去向 2 格，说明行 %(nsplitnote)d 格在场），
+TEMP/report_r14.py-681-母件余下 %(dpar)d 行按当日 rust 面重封（`TEMP/wd_reseal_r14.py`：摘行自证 + 形状门「只差引号」+
+TEMP/report_r14.py-682-母件 cy==rust 逐字，红对照「少摘一行／多摘一行／oracle 改一个字符」%(nwdctl)d 格全被拦下：
+TEMP/report_r14.py-683-
+TEMP/report_r14.py-684-%(q_wd_ctl)s
+TEMP/report_r14.py-685-
+TEMP/report_r14.py-686-老那份改名留盘 `with_defer.exp.presplitr14`）。新语料不封 `.exp`，登记 `NO_ORACLE_EXPLAINED` 并写明
+TEMP/report_r14.py:687:「oracle 在场但是缺陷产物」+ 转正前置（对面修好后 `seal_missing_exp.py` 补封 ⇒ 反向门逼着同轮移出该条）。
+TEMP/report_r14.py-688-覆盖面因此只让掉**这一句**，其余行为仍被逐字钉住；新语料仍被 L3 执行（崩溃类回归照样能抓）。
+TEMP/report_r14.py-689-**复跑须知（本轮自己踩到并当场修掉的量具坑）**：那件重封工具的「老 golden」原先**固定读盘面 `.exp`**，
+TEMP/report_r14.py-690-而 `--apply` 的落盘动作会把盘面换成新那份 ⇒ 之后再复跑就永远红在 `%(dold)d − %(dpar)d ≠ %(dchild)d` 这道它自己造出的行算术上
+TEMP/report_r14.py-691-（写入毁掉了判据的前提＝恒假门，与「断言里含本轮会被改掉的量」同族）。现在它按状态取备份件，
+TEMP/report_r14.py-692-并把「取的是哪一份」打进 log（`%(wdv2)s`，逐字两行）：
+--
+TEMP/report_r14.py-716-  里没有这支）⇒ 结为流程债。
+TEMP/report_r14.py-717-* `?` 的**早返回**在 cy 面仍未实现（只取值不传播）：要语句级注入，走 `gen_block_prefix()`，单开一腿。
+TEMP/report_r14.py-718-* 取数面自己的缺陷：`TEMP/xdiff_ds07.py` 的 `rust_out()` 只拷单个 `.lz`，所以任何**带 import 的
+TEMP/report_r14.py-719-  语料**在那把尺上恒 TRANSPILE_FAIL ⇒ `99_bootstrap/*` 历年被算成 NO_ORACLE 是假的。本轮用
+TEMP/report_r14.py-720-  `TEMP/tworeseal_r14.py` 的就地取数绕开，没改那把共用尺（改了会让历史回执不可比）。
+TEMP/report_r14.py:721:* **`with_as_binding_fstr.lz` 在 cy 面没有逐字 golden**（只有登记表说明 + L3 执行 + BUG-44 的卡）。
+TEMP/report_r14.py-722-  这不是能由本车道补的：补它要共享层先把绑定类型落地。转正前置已写进卡里，且门禁的反向表
+TEMP/report_r14.py-723-  （登记了但 `.exp` 在场 ⇒ 红）保证补封之后同轮必须把那条从表里移出，不会变成永久豁免。
+TEMP/report_r14.py-724-* 登记表本轮多了**第二种形状**（oracle 在场但是在册缺陷的产物），门禁 `NO_ORACLE_EXPLAINED` 的
+TEMP/report_r14.py-725-  注释已把两种形状与「不许当 `KNOWN_*` 用」写进文档（`tests/cy_codegen_gate.rs`）。仍缺的是一道
+TEMP/report_r14.py-726-  **机器可检**的 reason 形状门——现在只有散文约束（每格要么指到卡号，要么指到「空 golden 不承重」
+TEMP/report_r8.py-45-    "TEMP/ledger-r8-cards.log",
+TEMP/report_r8.py-46-    "TEMP/ledger-r8-bug12.log",
+TEMP/report_r8.py-47-    "TEMP/ledger_cards_r8.py",
+TEMP/report_r8.py-48-    "TEMP/ledger_cards_r8b.py",
+TEMP/report_r8.py-49-    "TEMP/ledger_bug12_fixed.py",
+TEMP/report_r8.py:50:    "TEMP/seal_missing_exp.py",
+TEMP/report_r8.py-51-]
+TEMP/report_r8.py-52-
+TEMP/report_r8.py-53-
+TEMP/report_r8.py-54-def read(p):
+TEMP/report_r8.py-55-    if not os.path.exists(p):
+--
+TEMP/report_r8.py-235-| 无 `.exp` | %d | 同上 |
+TEMP/report_r8.py-236-| 本轮新封 | %d（补漏跑）+ 2（BUG-12 的 `go_failure_isolated` / `spawn_demo`）= %d | `TEMP/seal-missing-1741.log` |
+TEMP/report_r8.py-237-| 补封前覆盖 | %d（= %d 现有 − %d 本轮新增，含 10-06 早些时候那 2 件） | 由上两行算出并断言 |
+TEMP/report_r8.py-238-| 不封的原因分栏 | 空 stdout 3 件（故意不封）；rust 面编不过 3 件（BUG-29/24/30） | 同一回执 |
+TEMP/report_r8.py-239-
+TEMP/report_r8.py:240:封盘只走 `TEMP/seal_missing_exp.py`，三条硬规则：**两后端 stdout 逐字一致**、**已存在 `.exp` 一律不覆盖**、
+TEMP/report_r8.py-241-空 stdout 不封。第二条本轮救了一次：rust 面当下有 BUG-28 的 f-string Debug 分叉，覆盖 = 把已回退的
+TEMP/report_r8.py-242-「统一 Debug」裁决重新封成契约。
+TEMP/report_r8.py-243-
+TEMP/report_r8.py-244-`02_types/containers.lz` 改写过一次：rust 面 `print(Set)` 每进程随机（同一 exe 三跑三样，
+TEMP/report_r8.py-245-`TEMP/evidence-r8/set-order-3runs.txt`），而 SYNTAX/02 从未承诺 Set 顺序 ⇒ 改成只打与顺序无关的事实，
+TEMP/report_r9.py-211-%d 件的成因（逐字，来自 `TEMP/why-unsealed-r9.log`，该件由 `TEMP/why_unsealed_r9.py` 现跑）：
+TEMP/report_r9.py-212-%s
+TEMP/report_r9.py-213-
+TEMP/report_r9.py-214-其中 %d 件是 **rust 面取不到 oracle**（已分别在册 BUG-29 / BUG-24 / BUG-30，本车道不改 `src/ir/codegen/mod.rs`），
+TEMP/report_r9.py-215-%d 件是两侧 stdout 恒为空——空 golden 不承重，封了反而把「有文件」当成「有覆盖」。
+TEMP/report_r9.py:216:登记表的转正前置与卡片里写的一致：rust 面能编之后用 `python -u TEMP/seal_missing_exp.py` 补封
+TEMP/report_r9.py-217-（该工具不会覆盖已存在的 `.exp`），补封后必须同轮把该条从表里移出。
+TEMP/report_r9.py-218-
+TEMP/report_r9.py-219-## 四、门禁读数（逐字，全部取自同一次跑）
+TEMP/report_r9.py-220-
+TEMP/report_r9.py-221-| 档 | 读数 |
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-8-//   （`TEMP/dynrecv-before-r12.log` 的 d_duck_len，同一件 rust 面 `'3\n8\n'`）；
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-9-//   `.is_empty()` 同一条路：`TypeError: object of type '_lzcyg_d_duck_empty.Bucket' has no len()`。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-10-// 现在的产物是 `return _lz_len(x, "len")` / `return _lz_isempty(x)`：**按运行时实际类型**分派，
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-11-// 名单 `_LZ_TYPES` 与静态判据同源（`known_types ∪ cdef_classes`），非本模块用户类走 Python 内建。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-12-//
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz:13:// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分（`python -u TEMP/seal_missing_exp.py`）。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-14-duck HasLen =
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-15-    def len(self) -> int
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-16-
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-17-duck HasEmpty =
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/dyn_recv_duck.lz-18-    def is_empty(self) -> bool
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-11-// 现在闸门与上一轮的 clone/unwrap 同一条纪律：看「本类**有没有**定义这个名字」——
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-12-// 有 ⇒ 落回通用尾巴发 `a.is_none()`；没有（含真 Option）⇒ 保持原来的表达式形态。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-13-// 动态接收者（duck 泛型形参／无注解闭包形参）静态判不出 ⇒ 发 `_lz_isnone(x, "is_none")`
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-14-// 之类的运行时助手，按 `_LZ_TYPES` 名单**加上**属性存在才走方法那一支。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-15-//
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz:16:// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分（`python -u TEMP/seal_missing_exp.py`）。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-17-struct Cfg =
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-18-    n: int
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-19-    def expect(ref self, msg: str) -> int =
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-20-        self.n * 2
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/uncond_arms_user_methods.lz-21-    def is_none(ref self) -> bool =
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-2-// 本件**没有** `.exp`，已登记 tests/cy_codegen_gate.rs 的 NO_ORACLE_EXPLAINED，理由：
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-3-//   Rust 面拿 `with MyResource(...) as res` 的绑定时取不到 `str` ⇒ `f"using {res.name}"` 发 `{:?}`，
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-4-//   cy 面按 Python 运行时类型发 Display ⇒ 两者逐字不等。规范 SYNTAX/00-词法基础.md:188 站 cy 这边；
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-5-//   同构造的 `self.name` 插值两侧一致（见 with_defer.lz）⇒ 缺的是「`with as` 绑定的类型落地」
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-6-//   （BUG-44 在册，交对面车道修共享层；本车道不改 `src/ir/builder/`，也不照 cy 封这份缺陷期望值）。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz:7:// 判据：L3 执行本件并计入「无 oracle 仅跑通」；对面修好后 TEMP/seal_missing_exp.py 会在两侧一致时补封，
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-8-//       届时门禁的「登记了但 `.exp` 在场 ⇒ 红」反向门逼着同轮把这条从表里移出。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-9-
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-10-struct MyResource =
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-11-    name: str
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_as_binding_fstr.lz-12-
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-1-// 出处：DEMO/06_control_flow/with_defer.lz（逐字拷贝，仅加本注释头）
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-2-// 期望值 with_defer.exp 由 **Rust 后端**实跑生成（TEMP/xdiff_ds07.py + LZ_SEAL_EXP=1，2026-10-02），不是抄 cy 自己的产物。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-3-// 2026-10-09（T0r14）：本件的 with_defer.exp 由 TEMP/reseal_stale_exp_r14.py --apply 按**当日** Rust 面重封
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-4-// （原 golden 封在 rust 面对裸字符串也发 `{:?}` 的年代，10 行只差引号形态）。同批把**唯一一条真分叉**
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-5-// （`with ... as res` 绑定后的 `f"using {res.name}"`：rust 出 Debug、cy 按 SYNTAX/00-词法基础.md:188 出 Display）
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz:6:// 拆到 with_as_binding_fstr.lz —— 那条语句的期望值是缺陷产物，封它等于把缺陷钉成验收标准（BUG-44 在册，交对面）。
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-7-// ============================================================
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-8-// with (context manager) / defer (LIFO) / pass (no-op)
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-9-// LZ Spec §9, §10, §11
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-10-// ============================================================
+TEMP/snap-r14-99/CY/TESTS/15_feature_matrix/with_defer.lz-11-
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md-77-| D12 | 半自动口径已生效：日常轮次不打 tag、不发布；**重要版本发布**才转人工。本会话未打 tag、未 push | 本轮 HEAD 仍 `ddf6e6be` |
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md-78-| D13/14/15 | 维持冻结。本轮实测：`SYNTAX/` 洁净；`docs/str-boundary-contract-2026-09-27.md` 未改；未新增语法结构，未开替代路线（IR 路线唯一性：`src/semantic_check.rs` 报错文案已写明「Route B 已退役」） | `git status --porcelain SYNTAX/ docs/str-boundary-contract-2026-09-27.md` 为空 |
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md-79-| D6（BUG-5/9 收口 + 新缺陷，2026-10-01 追记） | **剩余 bug 清偿腿**。① **BUG-5 后半段修完**：`src/ir/builder.rs:2777` 的 `comptime_value_to_lit` 加声明类型入参（沿 `ctx.top_level_consts` 递归带元素类型；`Tuple` 臂一并修；`Map/Type/Inspect` 本就不内联⇒不适用；另两个调用点 :4349/:7640 无注解类型可依据⇒显式 `None` 保持改前行为），`rv_list3` 的引用位从 `vec![(), vec![()]]` 变与定义位逐字相同；锁 `d6_list3_nested_empty_pushdown_inlined` 由 `#[ignore]` 转正并改名。② **BUG-9 修完，且卡片归因被实测推翻**：`git show HEAD:src/ir/codegen/mod.rs` 里 `Rc<dyn Fn`=0／`Box<dyn Fn`=22，把同一份生成码四态实测（`TEMP/bug5/carrier/{box_head,arc_plain,arc_send}.rs`，闸门同款 rustc 参数）⇒ Box 时代就 E0277、裸 Arc 也 E0277，**只有 `Arc<dyn Fn … + Send + Sync>` 可编译**；载体落 `fn_value_type:2578`＋柯里链 :3686＋6 处装箱（:3742/:3748/:8178/:9542/:13664/:13745）＋转发闭包 `Arc::clone`（:6986），并只在「本函数返回 fn 值」时给 `impl Fn` 形参加 `+ Send + Sync`（:3479）；`rc_fn_values/rc_fn_value_fwd` 改名 `fn_value_carriers/fn_value_fwd`（15 处，实测无外部引用）。③ **新缺陷（暂记 BUG-11，未入账）**：BUG-5 的引用位修好后定义位立刻暴露 `TupleLit` 槽位从不下推期望类型（`(Vec::<i64>::new(), …)` 对 `Vec<Vec<i64>>` 槽位 ⇒ E0308）；修在 `ExprKind::TupleLit` 非 s…
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md-80-| D4（cy 后端轮，2026-10-02 追记） | **把 D4 自己点名的阻塞点做掉了，裁决仍归你**。D4/D5 那两行的阻塞点是「cython 融进主干后本地没有任何验收面」⇒ 本轮把它变成**可红判据**：`tests/cy_codegen_gate.rs` 三层 L1 transpile 全语料 / L2 `python -m cython` 语法层 / L3 编译成扩展模块真跑并与 `.exp` 逐字比，**两份在册清单都是空 `&[]`**（`KNOWN_CYTHONIZE_FAILURES`、`KNOWN_RUNTIME_FAILURES`），终值 `语料 64 件 \| cythonize 通过 64 \| 失败 0` 与 `语料 64 件 \| 执行通过 64 \| 运行异常 0 \| 输出不符 0`。入口碰撞面按本轮盘面实测更正行号（旧行号随本轮 main.rs 改动已漂）：主干 CLI 是 `src/main.rs:441` 认 `--backend=cython`，`lzcyc` 是 `CY/src/main.rs:26` 的 `transpile` 子命令，且 `CY/src/main.rs:207` 自带一份 `postprocess_pyx` **副本**（注释自述「不用 lib 的 generate_full」）⇒ 两个入口的产物今天仍然分叉，本轮**没有**做逐字节等值差分（这是 D4 整合要先回答的问题之一，不在本轮授权面内）。门禁因此明确只吃主干 lib 的产物，这条口径写在 `CY/scripts/cy_gate_run.py` 文件头。**仍未做（属 L2′，等你拍板）**：把 cython 出口从 CLI 移进 `lzcyc` 这件事本身——它改的是下游入口契约，不在授权面内。本轮同时修掉 rust 后端一处跨后端分叉（台账 BUG-11，`memory/bugs.md:87`）并补一条护栏对照回归锁 | `cargo test -j 1 --test cy_codegen_gate -- --ignored --nocapture`（日志 `TEMP/reviews/gates-final-005555.log`）；L2 判据三格对照 `TEMP/reviews/l2-hermetic-ctrl-011124.l…
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md-81-| D4（cy 后端轮 T0r7，2026-10-02 追记） | **口径回退 + 两处自造回归修到能红 + BUG-13 判据先行**。**本行作废上一行（D4 cy 后端轮 2026-10-02 追记）里那句裁决**：「SYNTAX 对插值引号无条文、f-string 统一到 Debug」——那句的证据来自一次 grep 错了目录（`docs/SYNTAX/` 不存在，规范在仓库根 `SYNTAX/`），零命中被当成了「无条文」。规范实有明文：`SYNTAX/00-词法基础.md:188` 写 `f"x={x}"` 对应 `format!("x={}", x)`（Display，str 不带引号），而**会被执行**的判据 `tests/str_boundary.rs`（用例标签 c7_fstring）断言 `name=LZ, age=30`。据此把 Rust 侧 `gen_fstring` 逐字节回退到基线形态，cy 侧改用运行时判定 `_lz_fs`；台账 BUG-15 改判 **REVERTED** 并附红绿两份日志，另立新卡 BUG-22..26。证据优先级固化为：规范条文 ＞ 会执行且有绿红成对日志的判据 ＞ 没人执行的注释与断言文案。**同轮自纠两处自己写的回归**：BUG-26（切片作值的 owned 化不分基底类型 ⇒ 文本基底吃 `to_vec()` ⇒ rustc E0599，workspace 两 target 红）已用 `base_is_str_like()` 按类型分叉修掉；BUG-25（本轮 own 的方法改写表把 `ps.kwargs.contains(k)` 写成 `k in ps.kwargs`，而后端自己发的垫片类`_LzKwargsMap` 没有 `__contains__` ⇒ Python 退化成迭代协议 ⇒ `KeyError: 0`）已补四个协议方法，并把两份逐字垫片副本收成一份 `const PARAMS_SHIM`（两处插入点共用）。**BUG-13 按卡内前置做完**（判据先行再动发射点）：L1 现在逐件扫生成的 `.pyx`，把返回位写 `-> Py_ssize_t`／`-> double`／`-> bint`／`-> float` 这类「Cython 3.2.2 只给 warning」的假注解判红；软判据…
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md:82:| D4（cy 后端轮 T0r8，2026-10-06 追记） | **回归修到能红 + BUG-12 销账 + 行为判据从 48 件补到 75 件**。① **BUG-27（本轮自造回归，门禁自己抓的）**：builder 把 `with` 脱糖成 `let __with_val_* = { 体语句; 尾值 }` 之后，cy 的 9 个 BlockExpr 提升点全部 `gen_block`（连尾语句发）+ `block_tail_expr`（再发一次）⇒ 尾语句跑两遍，`with_defer.lz` 的 print 重复（红证 `TEMP/gates-cy-1649.log`）；新增 `gen_block_prefix()` 后 9 点统一走它，单元锁 `cy_block_expr_tail_runs_once` 数 marker 各恰好 1 次。② **BUG-12 销账**：`go`/`spawn` 的 IR 是 `__go(体)`，而 Python 实参**先求值** ⇒ 垫片结构上不可能延后（这才是降级根因）；现在同步函数发 `__spawn(lambda: 体)`（threading.Thread + 失败只写 stderr，对齐 rust 面 `std::thread::spawn` 的可观测形态），`async def` 保持 `__go(...)`（那里拿到的是协程对象）。判据两侧：行为侧新语料 `go_failure_isolated.lz`（`.exp` 由 Rust 面实跑封盘，`TEMP/probe8/xdiff-11-after-0919.log` 差分 2/2 一致）+ 机制侧 L1 文本闸（同步 `def` 里出现 `__go(` 即红，随 workspace 日常跑）+ 单元锁两向都咬。遗留三条写在卡里。③ **覆盖补强**：`TEMP/seal_missing_exp.py` 把「跑得过但没 `.exp`」的语料补成行为判据，三条硬规则=两后端 stdout 逐字一致／**已存在 `.exp` 一律不覆盖**／空 stdout 不封；结果 81 件里 75 件有 golden（本轮 +27），不封的 6 件里 3 件空输出、3 件是 rust 面编不过（BUG-29/BUG-30 + BUG-24）。其中 `containers…
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md-83-| D4（cy 后端轮 T0r9，2026-10-06 追记） | **两条判据补的是「门禁自己看不见的那一面」，本轮没有新缺陷被抓出来**。① **L2 的 stderr 整条通道原先被丢掉**：这层只看退出码，而 BUG-13 那类「写上去的东西不承重」rc=0、stdout 也对，唯一信号是 `warning:` 行。本轮先把**全量语料**逐件过一遍告警普查（`TEMP/cy_warn_census.py`，取数命令与门禁逐字同构，且**语料整树镜像**——第一版按件建隔离目录，`99_bootstrap/import_runtime.lz` 因找不到兄弟模块而 TRANSPILE_FAIL，那是取数面的缺陷不是产品的），读数：合计 81 件 \| clean 81 \| 有告警 0 \| rc!=0 0 \| 转译失败 0 \|\| 分组行 0（逐行累加 0）\| 类别 0；再加 in-test 正向对照（`warning:` 类 = BUG-13 原样形状 + 定位错误类），对照没被看见就当场 panic ⇒ 「没有告警」不可能靠取数面失明成立：SELFCHK OK: 对照 2/2 命中、两条累加路径一致、四态覆盖满 81 件。**检测面边界已写进判据注释**（形状不是猜的，是 `TEMP/cy_warn_shape_probe.py` 实测，回执 cy-warn-shapes-182731.log）：同一条命令下 `cdef int spam(int x)` 连 `-Wextra` 都不打 performance hint，所以本判据只覆盖 `warning:` 与带定位错误，「0」不等于「产物没有优化空间」。基线 0 行、**不开告警豁免清单**（告警说的是「没生效」，开清单等于把它登记成常态）。② **L3 的「执行通过 81」是过度主张**：里面混着「逐字比对过」与「只证明跑完没抛」两类，本轮把它拆成两栏并加 `NO_ORACLE_EXPLAINED` 登记表（6 条，逐条带原因）＋双向对表（无 `.exp` 又没登记 ⇒ 红；登记了但 `.exp` 已在 ⇒ 红；两栏之和 != 语料件数 ⇒ 红）。这些件的成因实测自 `TEMP/why_unsealed_r9.py`（回执 `TEMP/why-unsealed-r9.log`）：`01_bas…
+TEMP/snap-r14-99/docs/决策登记表-2026-09-29.md:84:| D4（cy 后端轮 T0r10，2026-10-06 追记） | **本轮抓出一个真缺陷并修掉（BUG-32）；闭包（SYNTAX/03e）从零覆盖补成 3 件语料**。① **缺陷形状**：块体闭包 `\|a, b\| => { 语句; 尾值 }` 进 cy 的 Lambda 发射臂时，旧实现只认尾值那一支，**前缀语句整条被丢掉**——程序照跑、退出码 0、只是少了绑定，属最坏的一类（单后端测试全绿）。唯一机器信号是 Cython 侧拒绝原文（OLD_SHAPE_REJECT: old_shape.pyx:1:19: undeclared name not builtin: c）；现在块体闭包一律提升为嵌套 `def`（`lambda_block_needs_def`），当前产物 cython rc=0 且「有提升 def／不降级」两条读数各 1 条在场。**写捕获**按 §五 成立：按作用域发 `nonlocal`（函数内绑定）／`global`（模块级），单表达式闭包仍走 `lambda`（没为对称多留一条分支）。② **判据两侧**：机制侧 2 条单元锁全绿（`cy_closure_block_body_is_hoisted`／`cy_closure_write_capture_decls`，单元档 test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s）＋行为侧语料 3 件；golden **只取 rust 面实跑产物**并先做跨后端 stdout 差分：`closure_basic`／`closure_modlevel` 合计封 29 字节；`closure_write_capture` **故意没有 `.exp`**——rust 面在这条合法写法上编不出东西（探针 \| p_writecap.lz            rust=RUSTC_FAIL     cy=OK             逐字一致=False \| error[E0594]: cannot assign to `total`, as it is a captured variable in a `Fn` closure \| error[E0…
+TEMP/snap-r14-99/tests/cy_codegen_gate.rs-142-        "无注解闭包形参在 rust 面恒 E0282（BUG-38 在册）⇒ 取不到 oracle；\
+TEMP/snap-r14-99/tests/cy_codegen_gate.rs-143-         is_none/is_some/expect 三条臂在 `Any` 接收者上的运行时分派由 \
+TEMP/snap-r14-99/tests/cy_codegen_gate.rs-144-         cy_dynamic_arms_dispatch_by_name_list 钉住（T0r13，BUG-40 在册）",
+TEMP/snap-r14-99/tests/cy_codegen_gate.rs-145-    ),
+TEMP/snap-r14-99/tests/cy_codegen_gate.rs-146-    (
+TEMP/snap-r14-99/tests/cy_codegen_gate.rs:147:        "15_feature_matrix/with_as_binding_fstr.lz",
+
+[Results capped at 50 matches]

@@ -1,0 +1,6 @@
+def double(x: bigint): bigint =
+    x * BigInt::from(2)
+
+def main() =
+    let r = double(BigInt::from(123456789012345678901234567890))
+    println(r)

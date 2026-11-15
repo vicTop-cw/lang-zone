@@ -1,0 +1,20 @@
+// find_bug/lexer/bug-multiline-indent.lz
+// BUG-LX-004: 多行字符串公共缩进边界
+// """...""" 清除每行公共最小缩进（空格/制表符）
+// 行首缩进 < 公共缩进时报错
+
+def test_multiline() =
+  s = """
+    line one
+    line two
+    """
+  print("multiline:", s)
+  // 边界：行首无缩进
+  s2 = """no indent
+    still part of string
+  """
+  print("s2:", s2)
+
+def main() =
+  test_multiline()
+  print("bug-multiline-indent.lz done")

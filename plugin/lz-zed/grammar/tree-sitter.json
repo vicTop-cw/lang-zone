@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tree-sitter/tree-sitter/main/cli/npm/tree-sitter.json",
+  "grammars": [
+    {
+      "name": "lz",
+      "camelcase": "Lz",
+      "scope": "source.lz",
+      "path": ".",
+      "file-types": ["lz"],
+      "highlights": ["../languages/lz/highlights.scm"],
+      "indents": ["../languages/lz/indents.scm"],
+      "outline": ["../languages/lz/outline.scm"]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Lang-Zone (lz) language grammar"
+  }
+}

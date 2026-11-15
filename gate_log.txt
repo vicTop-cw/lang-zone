@@ -1,0 +1,67 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running tests\cy_codegen_gate.rs (target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe)
+
+running 4 tests
+test cy_l2_cythonize_all_corpus ... ignored, 需要 python + Cython 工具链且逐件 cythonize 较慢；显式 --ignored 作为命名门禁跑
+test cy_l3_run_all_corpus ... ignored, 需要 python + Cython + 可用 C 编译器（本机 MSVC），逐件 pyximport 编译很慢
+test cy_l1_corpus_and_allowlist_invariants ... ok
+test cy_l1_transpile_all_corpus ... ok
+
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 5.76s
+
+     Running tests\demo_codegen_compile.rs (target\debug\deps\demo_codegen_compile-d2f4bd2577ecc517.exe)
+
+running 2 tests
+test all_demos_generated_rust_compiles ... ignored, 全量 DEMO 较慢；按需运行：cargo test --test demo_codegen_compile -- --ignored --nocapture
+test magic_demos_generated_rust_compiles ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.59s
+
+     Running tests\perf_opt_gates.rs (target\debug\deps\perf_opt_gates-827e6bde6a3e6796.exe)
+
+running 42 tests
+test d1_invalid_opt_level_exits_with_error ... ok
+test e2_string_append_int_rhs_is_rejected_by_typecheck ... ok
+test d1_stats_flag_reports_lzc_segment ... ok
+test a1_overflow_expression_is_never_folded ... ok
+test e2_ref_param_is_never_rewritten_in_place ... ok
+test e1_print_uses_display_for_strings_and_keeps_debug_otherwise ... ok
+test a1_const_fold_literals_but_never_overflows ... ok
+test e2_capacity_hint_not_applied_when_loop_body_has_extra_work ... ok
+test e2_string_append_literal_becomes_push_str ... ok
+test e2_string_append_var_becomes_borrowed_push_str ... ok
+test e2_owned_str_registry_is_per_function ... ok
+test e2_empty_list_before_push_loop_gets_capacity ... ok
+test a1_opt0_keeps_pass_inert_marker ... ok
+test e2_string_append_fstring_keeps_format_borrowed ... ok
+test a3_dce_drops_unused_pure_binding_but_keeps_captured ... ok
+test b1_reversed_of_fresh_temp_moves_instead_of_cloning ... ok
+test a2_branch_simplify_keeps_break_loops ... ok
+test b1_sort_of_fresh_temp_moves_instead_of_cloning ... ok
+test e3_list_append_multi_literal_becomes_extend ... ok
+test e3_list_append_var_becomes_extend ... ok
+test e3_list_append_single_literal_becomes_push ... ok
+test e3_list_param_is_not_rewritten ... ok
+test fix_b_assigning_to_readonly_ref_param_gives_precise_diagnostic ... ok
+test e3_str_and_list_registries_do_not_cross_talk ... ok
+test fix_a_list_sum_does_not_move_receiver ... ok
+test fix_a_list_sum_iterates_instead_of_passthrough ... ok
+test a1_opt0_keeps_pass_inert_and_opt1_folds ... ok
+test fix_a_list_sum_uses_element_type_not_hardcoded_i64 ... ok
+test fix_b_readonly_ref_param_is_still_usable_for_reading ... ok
+test fix_c_explicit_and_int_tails_unchanged ... ok
+test fix_c_str_tail_without_return_annotation_infers_string ... ok
+test fix_e_dict_accumulate_uses_insert_not_add ... ok
+test fix_e_dict_multi_entry_literal_extends ... ok
+test fix_e_dict_and_set_variable_rhs_extends ... ok
+test fix_e_list_forms_still_intact_after_container_extension ... ok
+test fix_e_set_accumulate_uses_insert_not_add ... ok
+test fix_e_set_multi_element_literal_extends ... ok
+test fix_f_dict_index_assign_auto_mut ... ok
+test fix_f_lowercase_container_ctors ... ok
+test fix_f_user_dict_fn_not_shadowed ... ok
+test e3_stmt_marks_off_by_default_and_restorable ... ok
+test a1_opt_levels_agree_on_behaviour ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.13s
+

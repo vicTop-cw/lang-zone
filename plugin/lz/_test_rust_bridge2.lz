@@ -1,0 +1,16 @@
+// _test_rust_bridge2.lz — 测试 Rust 桥接函数调用链
+// 测试通过 import std.bridge.rust.* 调用 Rust 函数
+
+// 导入 Rust 标准库模块
+import std.bridge.rust.std.fs
+import std.bridge.rust.std.io
+
+// 测试：通过桥接调用 Rust 标准库函数
+def main() =
+    // 尝试使用 std.fs.read_to_string 读取文件
+    content = std.fs.read_to_string("Cargo.toml")
+    print("File content length: ")
+    print(content.len())
+    
+    // 尝试使用 std.io.stdout
+    print("Bridge function call test passed")

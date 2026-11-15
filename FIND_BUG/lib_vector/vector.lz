@@ -1,0 +1,108 @@
+// lib_vector — 动态数组（简化版）
+// 修复：避免泛型关联函数 new()，改用具体类型
+
+struct VectorInt =
+    data: List<int>
+    _len: int
+    _cap: int
+
+    def len(self) -> int =
+        self._len
+
+    def push(mut self, val: int) =
+        if self._len >= self._cap:
+            self._cap = self._cap * 2
+        self.data = self.data + [val]
+        self._len = self._len + 1
+
+    def pop(mut self) -> int =
+        if self._len == 0:
+            panic("pop from empty vector")
+        let val = self.data[self._len - 1]
+        self._len = self._len - 1
+        val
+
+    def get(self, i: int) -> int =
+        if i < 0 or i >= self._len:
+            panic("index out of bounds")
+        self.data[i]
+
+    def set(mut self, i: int, val: int) =
+        if i < 0 or i >= self._len:
+            panic("index out of bounds")
+        self.data[i] = val
+
+    def __str__(ref self) -> str =
+        let parts: List<str> = []
+        mut idx = 0
+        while idx < self._len:
+            let p = str(self.data[idx])
+            let parts = parts + [p]
+            idx = idx + 1
+        let joined = ", ".join(parts)
+        f"[{joined}]"
+
+    def __eq__(ref self, other: VectorInt) -> bool =
+        if self._len != other._len:
+            False
+        else:
+            mut eq = True
+            mut idx = 0
+            while idx < self._len:
+                if self.data[idx] != other.data[idx]:
+                    eq = False
+                idx = idx + 1
+            eq
+
+    def __add__(ref self, ref other: VectorInt) -> VectorInt =
+        let result = _new_vector()
+        mut idx = 0
+        while idx < self._len:
+            result.push(self.data[idx])
+            idx = idx + 1
+        mut j = 0
+        while j < other._len:
+            result.push(other.data[j])
+            j = j + 1
+        result
+
+def _new_vector() -> VectorInt =
+    VectorInt(data: [], _len: 0, _cap: 4)
+
+def main() =
+    let v = _new_vector()
+    assert v.len() == 0
+
+    v.push(1)
+    v.push(2)
+    v.push(3)
+    assert v.len() == 3
+    assert v.get(0) == 1
+    assert v.get(1) == 2
+    assert v.get(2) == 3
+
+    v.set(1, 20)
+    assert v.get(1) == 20
+
+    let popped = v.pop()
+    assert popped == 3
+    assert v.len() == 2
+
+    let a = _new_vector()
+    a.push(1)
+    a.push(20)
+
+    let b = _new_vector()
+    b.push(1)
+    b.push(20)
+
+    assert a == b
+
+    let c = a + b
+    assert c.len() == 4
+    assert c.get(0) == 1
+    assert c.get(3) == 20
+
+    assert str(a) == "[1, 20]"
+
+    print("lib_vector OK")

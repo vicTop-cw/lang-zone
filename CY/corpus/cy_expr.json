@@ -1,0 +1,31 @@
+{
+  "op": "cy_expr",
+  "version": "1.0",
+  "definition": {
+    "signature": "gen_expr(expr: Expr) -> String",
+    "note": "全部 ExprKind 变体 → Cython 表达式：Lit/Var/Call/MethodCall/FieldAccess/IndexGet/BinOp/UnOp/IfExpr/Lambda/StructCtor/EnumCtor/Cast/MagicCall/Tuple/List/Dict/Range/Pipe 等。"
+  },
+  "preconditions": ["expr 必须是合法 Expr 变体，携带 ty"],
+  "laws": ["L1", "L4"],
+  "tests": [
+    {"input": {"expr": {"Lit": "42"}}, "expected": "42"},
+    {"input": {"expr": {"Lit": "3.14"}}, "expected": "3.14"},
+    {"input": {"expr": {"Lit": "\"hello\""}}, "expected": "\"hello\""},
+    {"input": {"expr": {"Lit": "true"}}, "expected": "True"},
+    {"input": {"expr": {"Lit": "false"}}, "expected": "False"},
+    {"input": {"expr": {"Lit": "none"}}, "expected": "None"},
+    {"input": {"expr": {"Var": "x"}}, "expected": "x"},
+    {"input": {"expr": {"Call": {"callee":"f","args":["a","b"]}}}, "expected": "f(a, b)"},
+    {"input": {"expr": {"MethodCall": {"receiver":"obj","method":"m","args":["a"]}}}, "expected": "obj.m(a)"},
+    {"input": {"expr": {"FieldAccess": {"base":"p","field":"x"}}}, "expected": "p.x"},
+    {"input": {"expr": {"IndexGet": {"base":"lst","key":"i"}}}, "expected": "lst[i]"},
+    {"input": {"expr": {"BinOp": {"op":"Add","lhs":"a","rhs":"b"}}}, "expected": "a + b"},
+    {"input": {"expr": {"BinOp": {"op":"Eq","lhs":"a","rhs":"b"}}}, "expected": "a == b"},
+    {"input": {"expr": {"UnOp": {"op":"Neg","operand":"x"}}}, "expected": "-x"},
+    {"input": {"expr": {"UnOp": {"op":"Not","operand":"x"}}}, "expected": "not x"},
+    {"input": {"expr": {"IfExpr": {"cond":"c","then":"a","els":"b"}}}, "expected": "(a if c else b)"},
+    {"input": {"expr": {"Lambda": {"params":["x"],"body":"x + 1"}}}, "expected": "lambda x: x + 1"},
+    {"input": {"expr": {"StructCtor": {"name":"Point","fields":[["x",1],["y",2]]}}}, "expected": "Point(x = 1, y = 2)"}
+  ],
+  "fingerprint": "fnv1a64:cy_expr_v1"
+}

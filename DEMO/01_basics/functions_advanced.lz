@@ -1,0 +1,66 @@
+// ============================================================
+// 轮7: 函数进阶 — 可变参数、闭包、泛型函数
+// 每项用 assert 确保正确
+// ============================================================
+
+def sum_all(..: int) -> int =
+    mut total = 0
+    for x in args:
+        total = total + x
+    return total
+
+def first_of(..: int) -> int =
+    args[0]
+
+def generic_id<T>(x: T) -> T =
+    x
+
+def main() =
+    // ── 可变参数（..） ──
+    assert sum_all() == 0
+    assert sum_all(1) == 1
+    assert sum_all(1, 2, 3) == 6
+    assert sum_all(1, 2, 3, 4, 5) == 15
+    assert first_of(7, 8, 9) == 7
+
+    // ── 泛型函数（id 函数：int/str/float 均适用） ──
+    assert generic_id(42) == 42
+    assert generic_id("str") == "str"
+    assert generic_id(3.5) == 3.5
+
+    // ── 闭包（匿名函数） ──
+    let double = |x: int| x * 2
+    assert double(5) == 10
+
+    let add_fn = |a: int, b: int| a + b
+    assert add_fn(3, 4) == 7
+
+    // ── 闭包捕获外部变量 ──
+    let base = 100
+    let add_base = |x: int| x + base
+    assert add_base(5) == 105
+
+    // ── 闭包作为参数传递（map 风格） ──
+    mut doubled_list: List<int> = []   // 空列表需显式类型注解（规范 01）
+    for v in [1, 2, 3]:
+        doubled_list.push(double(v))
+    assert doubled_list == [2, 4, 6]
+
+    // ── 闭包返回闭包（函数工厂） ──
+    def make_adder(n: int) -> fn(int) -> int =
+        |x: int| x + n
+    let add10 = make_adder(10)
+    assert add10(5) == 15
+    let add100 = make_adder(100)
+    assert add100(5) == 105
+
+    // ── 闭包捕获（LZ 闭包为 move 值捕获：外部更新不影响闭包内捕获值） ──
+    let fixed = 7
+    let read_capture = |x: int| x + fixed
+    assert read_capture(1) == 8
+    assert read_capture(2) == 9
+
+    // ── 闭包作为返回值直接调用 ──
+    assert (|x: int| x * 10)(4) == 40
+
+    print("R7 advanced OK")

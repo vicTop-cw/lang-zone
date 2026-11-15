@@ -1,0 +1,37 @@
+# lz std::collections — P0 集合类型
+# 源码级映射：lz 符号 → Rust std::collections 路径
+
+[module]
+tier = 1
+rust_prefix = "std::collections"
+
+# ── 类型映射 ──
+
+[types]
+HashMap = "std::collections::HashMap"
+HashSet = "std::collections::HashSet"
+BTreeMap = "std::collections::BTreeMap"
+BTreeSet = "std::collections::BTreeSet"
+LinkedList = "std::collections::LinkedList"
+VecDeque = "std::collections::VecDeque"
+BinaryHeap = "std::collections::BinaryHeap"
+
+# ── 方法别名 ──
+# lz 方法名 → Rust 方法名（仅列不一致的）
+
+[methods]
+append = "push"           # lz .append(x) → Rust .push(x)
+remove = "remove"         # 身份映射（HashMap）
+delete = "remove"         # lz .delete(key) → Rust .remove(key)
+contains = "contains"     # lz .contains(key) → Rust .contains(key)（Vec/Set/str通用）
+containsKey = "contains_key" # lz .containsKey(key) → Rust .contains_key(key)（HashMap专用）
+length = "len"            # lz .length() → Rust .len()
+size = "len"              # lz .size() → Rust .len()
+isEmpty = "is_empty"      # lz .isEmpty() → Rust .is_empty()
+keys = "keys"             # 身份映射
+values = "values"         # 身份映射
+entries = "iter"          # lz .entries() → Rust .iter()（返回 &(K,V)）
+
+# ── 类型别名注入 ──
+
+[aliases]

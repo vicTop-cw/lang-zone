@@ -1,0 +1,16 @@
+15
+inner done
+after outer
+count_up got: 10
+count_up got: 20
+validated: -2
+validated: -1
+validated: 0
+validated: 1
+5
+work ps: Any { .. }
+processed: Any { .. }
+norm: Any { .. }
+run: Any { .. }
+apply_f: Any { .. }
+[3, 2, 1]

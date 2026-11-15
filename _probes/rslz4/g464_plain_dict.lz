@@ -1,0 +1,8 @@
+// g96_dict_index_assign_plain — 顶层 Dict 下标赋值 d[k] = v（原生干净 oracle）
+def main():
+    let mut d: Dict<str, int> = {"a": 1}
+    d["b"] = 2
+    d["c"] = 3
+    print(d["a"])
+    print(d["b"])
+    print(d["c"])

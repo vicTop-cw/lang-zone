@@ -1,0 +1,5 @@
+// 反例：修饰符装饰器须与目标同行 → E-MODDEC-INLINE (AC6)
+def main() =
+    @mut
+    x = 42
+    print(x)

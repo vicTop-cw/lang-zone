@@ -1,0 +1,4 @@
+[
+ {"tool":"status_summary","args":{"namespace":"perf-opt"}},
+ {"tool":"dag_ready","args":{"task_ids":["T0r9.1.1","T0r9.1.2","T0r9.2.1","T0r9.2.2","T0r9.3.1","T0r9.3.2","T0r9.4.1","T0r9.4.2","T0r9.5.1","T0r9.5.2","T0r9.6.1","T0r9.6.2"]}}
+]

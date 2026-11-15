@@ -1,0 +1,92 @@
+// Fuzz 2: 深层嵌套测试
+
+// ── 2.1 深层 if-elif-else 嵌套 ──
+def test_deep_if() =
+    x = 1
+    if x > 0:
+        if x > 0:
+            if x > 0:
+                if x > 0:
+                    if x > 0:
+                        print("deep if ok")
+                    else:
+                        print("no")
+                else:
+                    print("no")
+            else:
+                print("no")
+        else:
+            print("no")
+    else:
+        print("no")
+
+// ── 2.2 深层 while 嵌套 ──
+def test_deep_while() =
+    i = 0
+    while i < 2:
+        j = 0
+        while j < 2:
+            k = 0
+            while k < 2:
+                print("deep while: ")
+                print(i * 100 + j * 10 + k)
+                k = k + 1
+            j = j + 1
+        i = i + 1
+
+// ── 2.3 深层 match 嵌套 ──
+def test_nested_match() =
+    a = Some(1)
+    b = Some(2)
+    match a:
+        case Some(x):
+            match b:
+                case Some(y):
+                    match Some(x + y):
+                        case Some(z):
+                            print("nested match: ")
+                            print(z)
+                        case _:
+                            print("no")
+                case _:
+                    print("no")
+        case _:
+            print("no")
+
+// ── 2.4 if-elif-else 多分支 ──
+def test_multi_elif() =
+    x = 3
+    if x == 1:
+        print("1")
+    elif x == 2:
+        print("2")
+    elif x == 3:
+        print("3")
+    elif x == 4:
+        print("4")
+    elif x == 5:
+        print("5")
+    else:
+        print("other")
+
+// ── 2.5 条件嵌套 + 循环 ──
+def test_if_while_nest() =
+    i = 0
+    while i < 3:
+        if i == 0:
+            print("first")
+        elif i == 1:
+            print("second")
+        else:
+            print("third")
+        i = i + 1
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Nesting ===")
+    test_deep_if()
+    test_deep_while()
+    test_nested_match()
+    test_multi_elif()
+    test_if_while_nest()
+    print("=== Fuzz Nesting Complete ===")

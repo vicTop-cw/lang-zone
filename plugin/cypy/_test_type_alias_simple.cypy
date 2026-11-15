@@ -1,0 +1,12 @@
+# Test: type alias expansion - simple
+type MyInt = int
+type MyFloat = float
+
+def add(a: MyInt, b: MyFloat) -> float:
+    return a + b
+
+def main() -> int:
+    x: MyInt = 10
+    y: MyFloat = 20.5
+    result = add(x, y)
+    return int(result)

@@ -1,0 +1,7 @@
+import std.io
+import std.collections.HashMap as Map
+from std.bridge.rust.serde_json import from_str
+from .utils import helper
+
+@export(Rust)
+def add(a: int, b: int) -> int = a + b

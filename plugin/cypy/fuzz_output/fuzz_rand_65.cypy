@@ -1,0 +1,9 @@
+def test_0() -> int:
+    for i in range(3):
+        let temp: int = i
+    let x: bool = True
+    while 42:
+        break
+
+def main() -> int:
+    return 0

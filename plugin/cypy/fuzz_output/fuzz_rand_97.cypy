@@ -1,0 +1,26 @@
+def test_0() -> int:
+    defer:
+        let cleanup: int = 0
+    guard (print(print(result)) != False) else:
+        return -1
+    x = (-((print(1) > (100 + 100)) * (False)))
+    x = (-(((--1)) != (-(1 != False))))
+    while total:
+        break
+
+def test_1() -> int:
+    defer:
+        let cleanup: int = 0
+    let x: float = 1.5
+
+def test_2() -> int:
+    guard print(z) else:
+        return -1
+    return (print((-0.0)) == print(x))
+    guard print(-3.14) else:
+        return -1
+    guard 1.5 else:
+        return -1
+
+def main() -> int:
+    return 0

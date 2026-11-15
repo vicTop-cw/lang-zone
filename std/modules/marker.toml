@@ -1,0 +1,25 @@
+# lz std::marker — P1 标记特征与类型
+# 源码级映射：lz 符号 → Rust std::marker 路径
+
+[module]
+tier = 1
+rust_prefix = "std::marker"
+
+# ── 类型映射 ──
+
+[types]
+PhantomData    = "std::marker::PhantomData"
+PhantomPinned  = "std::marker::PhantomPinned"
+Copy           = "std::marker::Copy"
+Send           = "std::marker::Send"
+Sync           = "std::marker::Sync"
+Sized          = "std::marker::Sized"
+Unpin          = "std::marker::Unpin"
+UnwindSafe     = "std::panic::UnwindSafe"
+RefUnwindSafe  = "std::panic::RefUnwindSafe"
+StructuralPartialEq = "std::marker::StructuralPartialEq"
+StructuralEq   = "std::marker::StructuralEq"
+
+# ── 类型别名注入 ──
+
+[aliases]

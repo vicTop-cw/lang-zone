@@ -1,0 +1,19 @@
+// 04_functions - 闭包**写捕获**（SYNTAX/03e-closure闭包.md §五「可写捕获 → FnMut」）
+//
+// 本件**故意没有 `.exp`**：`.exp` 只许取 Rust 面实跑产物，而 rust 面在这条合法写法上编不出东西——
+//   error[E0594]: cannot assign to `total`, as it is a captured variable in a `Fn` closure
+//   error[E0502]: cannot borrow `total` as immutable because it is also borrowed as mutable
+// 取数件 `TEMP/closure_probes_r10.py` B 组（`p_writecap.lz` 与本件同源）。
+// cy 面已按 §五 实现（产物里 `nonlocal total`，实跑 stdout `'7\n'`）⇒ 这是**另一侧的规范违背**，
+// 已入账 BUG-33；在册理由同时登记在 `tests/cy_codegen_gate.rs` 的 `NO_ORACLE_EXPLAINED`。
+// 所以本件在 L3 里只证明「跑完没抛」，行为期望值由 `tests/cython_backend.rs::cy_closure_write_capture_decls`
+// 的机制断言承担，等 rust 面补齐后补封 golden 并把该条从登记表移出。
+
+def main() =
+    let total: int = 0
+    let add = |v: int| =>
+        total = total + v
+        total
+    add(3)
+    add(4)
+    print(total)

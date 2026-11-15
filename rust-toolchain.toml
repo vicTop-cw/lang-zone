@@ -1,0 +1,12 @@
+# 工具链钉版（M5 T0r56，2026-11-11）
+#
+# 根因：本仓库自举链（--emit=lex-lz/parse-lz/ir-lz/rs-lz 与 CY 一致性门禁）
+# 以裸 rustc 链接 target 里的 liblz_builtins.rlib。此前无钉版时，不同入口
+# （人工 shell 用 gnu 1.98.1、cron 流水线用默认 1.99.1）会交叉重建 rlib，
+# mtime 最新的 rlib 与当前 rustc 版本错配 ⇒ 反复 E0514。
+#
+# 钉住 gnu 1.98.1 后，所有经 rustup 代理的 cargo/rustc 调用（含 cron）
+# 统一产同一版本 rlib，E0514 类污染根除；直接调工具链二进制的入口本就
+# 指向同版本，不受此文件影响。
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"

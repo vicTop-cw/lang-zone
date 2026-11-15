@@ -1,0 +1,159 @@
+// embed-tnr-test-corpus.lz — 计划一测试语料：LZ 嵌入 Tnr（`#[embed(tnr)]` + `@tnr!` 语言宏）
+//
+// ⚠️ 待实现：本语料验证 `融入计划-embed-tnr-2026-10-02.md` 的语法设计。
+//    当前 LZ 编译器尚未实现 `#[embed(tnr)]` 原样块捕获与 `@tnr!` 语言宏，
+//    本文件暂时无法编译通过。实现完成后作为 `tests/bridge_embed.rs` 的对照基准。
+//
+// 语法规则（摘自计划一）：
+//   1. #[embed(lang)] + 缩进块 = 原样静态嵌入（禁止插值），签名随被嵌入语言
+//   2. @lang! + 缩进块 = 原样静态（等价 #[embed(lang)]）
+//   3. @lang! + r```···``` = 原样静态（花括号式语言）
+//   4. @lang! + f```···``` = 动态生成式（支持 $(var) 插值）
+//   5. 同 LZ 文件同语言多个 embed 块 → 同名 .tnr 文件 → Rust 模块
+//   6. Tensor = tnr::tensor::Tensor（struct 对 struct，零 marshal）
+//
+// 相关：docs/融入计划-embed-tnr-2026-10-02.md
+
+// ══════════════════════════════════════════════════════════════════════
+// 一、#[embed(tnr)] 缩进式原样静态嵌入
+// ══════════════════════════════════════════════════════════════════════
+
+// 用例 1.1：单函数，tnr 缩进块，签名用 tnr 的 fn（免类型注解）
+#[embed(tnr)]
+fn tnr_add(a, b)
+    a + b                      // tnr 尾表达式即返回值
+
+// 用例 1.2：tnr 矩阵乘 + relu，体现 tnr 算子（× / relu）
+#[embed(tnr)]
+fn tnr_matmul_relu(A, B)
+    let C = A × B              // tnr 矩阵乘（× 是 U+00D7）
+    let D = relu(C)            // tnr 内置算子
+    D
+
+// 用例 1.3：tnr 归约 + 符号公式
+#[embed(tnr)]
+fn tnr_sum_and_grad(x)
+    let s = ∑ x                // tnr 求和归约（∑ 是 U+2211）
+    s
+
+// 用例 1.4：tnr spawn/sync 并发
+#[embed(tnr)]
+fn tnr_parallel(A, B, C)
+    let h = spawn { A × B }    // tnr 建图块
+    let ab = sync h            // tnr 行动算子
+    ab + C
+
+// ══════════════════════════════════════════════════════════════════════
+// 二、同名文件聚合（本文件所有 #[embed(tnr)] 块 → embed-tnr-test-corpus.tnr）
+// ══════════════════════════════════════════════════════════════════════
+
+// 用例 2.1：多个 #[embed(tnr)] 块在同一 .lz 文件
+//   → 合并到同名 embed-tnr-test-corpus.tnr
+//   → tnr 编译为 embed-tnr-test-corpus_tnr.rs 模块
+//   → LZ codegen 生成：#[path = "embed-tnr-test-corpus_tnr.rs"] mod embed_tnr_test_corpus_tnr;
+//                      use embed_tnr_test_corpus_tnr::*;
+//   上方 tnr_add / tnr_matmul_relu / tnr_sum_and_grad / tnr_parallel 均在此模块
+
+// ══════════════════════════════════════════════════════════════════════
+// 三、@tnr! 语言宏
+// ══════════════════════════════════════════════════════════════════════
+
+// 用例 3.1：@tnr! + 缩进块 = 原样静态（等价 #[embed(tnr)]）
+@tnr!
+fn tnr_softmax(x)
+    let e_x = exp(x)
+    e_x / ∑ e_x
+
+// 用例 3.2：@tnr! + r``` 原样静态（tnr 花括号式）
+@tnr!
+r```
+fn tnr_dot(a, b) { ∑(a * b) }
+```
+
+// 用例 3.3：@tnr! + f``` 动态生成式（支持 $(var) 插值）
+let bias_term = "let b = 0.1"
+let act_fn = "relu"
+@tnr!
+f```
+fn tnr_dense(A, W)
+    $(bias_term)
+    let C = A × W + b
+    $(act_fn)(C)
+```
+
+// ══════════════════════════════════════════════════════════════════════
+// 四、其它语言 embed（语法对照，非本计划核心）
+// ══════════════════════════════════════════════════════════════════════
+
+// 用例 4.1：#[embed(py)] Python 缩进式
+#[embed(py)]
+class PyDemo:
+    def add(self, a, b):
+        return a + b
+
+// 用例 4.2：#[embed(scala)] Scala 缩进式
+#[embed(scala)]
+object ScalaDemo:
+    def add(a: Int, b: Int): Int = a + b
+
+// 用例 4.3：@rust! + r``` Rust 花括号式
+@rust!
+r```
+fn rust_fast_add(a: i64, b: i64) -> i64 { a + b }
+```
+
+// ══════════════════════════════════════════════════════════════════════
+// 五、兼容：现有 #[embed(rust)] 字符串形式（保留，后续迁移 @rust!）
+// ══════════════════════════════════════════════════════════════════════
+
+// 用例 5.1：旧字符串形式（extract_embed_code 兼容分支，不删除）
+#[embed(rust)]
+def legacy_embed() -> int:
+    return "println!(\"legacy embed ok\"); 42"
+
+// ══════════════════════════════════════════════════════════════════════
+// 六、Tensor 零 marshal + LZ 调用 embed 函数
+// ══════════════════════════════════════════════════════════════════════
+
+// 用例 6.1：LZ 侧调用 tnr embed 函数，Tensor 零 marshal
+//   tnr_add 的签名在 LZ 侧桥接为 fn tnr_add(a: Tensor, b: Tensor) -> Tensor
+//   Tensor = tnr::tensor::Tensor，直接传引用
+def main():
+    // 假设 A, B 是 tnr::tensor::Tensor（经 tnr 构造或从数据加载）
+    // let A = ...
+    // let B = ...
+    // let s = tnr_add(A, B)           // 调 tnr embed 函数，零 marshal
+    // let r = tnr_matmul_relu(A, B)   // 调 tnr 矩阵乘+relu
+    // print(s)
+    // print(r)
+    print("embed-tnr corpus: 待实现")
+
+// ══════════════════════════════════════════════════════════════════════
+// 七、禁止形式（编译应报错，实现后加入 reject_errors）
+// ══════════════════════════════════════════════════════════════════════
+
+// 禁止 7.1：#[embed(tnr)] 缩进块内插值 → 编译错误
+// let extra = "let D = C × W"
+// #[embed(tnr)]
+// fn bad_interp(A, B)
+//     let C = A × B
+//     $(extra)              // ❌ 禁止：缩进式原样不得插值
+//     relu(D)
+
+// 禁止 7.2：用户宏用保留语言宏名 → 编译错误
+// macro rust(input: Tokens) -> Tokens = input   // ❌ rust 是保留语言宏名
+
+// ══════════════════════════════════════════════════════════════════════
+// 八、预期产物（实现后验证）
+// ══════════════════════════════════════════════════════════════════════
+
+// 编译本文件 → 生成：
+//   embed-tnr-test-corpus.tnr（含 tnr_add/tnr_matmul_relu/tnr_sum_and_grad/
+//                              tnr_parallel/tnr_softmax/tnr_dot/tnr_dense）
+//   → tnr 编译 → embed-tnr-test-corpus_tnr.rs
+//   → LZ codegen 生成：
+//     #[path = "embed-tnr-test-corpus_tnr.rs"] mod embed_tnr_test_corpus_tnr;
+//     use embed_tnr_test_corpus_tnr::*;
+//     use tnr::tensor::Tensor;
+//
+// 运行 main() → 调 tnr_add(A, B) 等 → 输出张量结果

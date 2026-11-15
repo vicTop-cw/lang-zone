@@ -1,0 +1,26 @@
+// LZ 词法基础 — 字面量扩展覆盖
+// 覆盖：嵌套集合、布尔逻辑、Option/Result 构造、区间、元组
+
+def main() =
+    // 嵌套集合
+    let matrix: List<List<int>> = [[1, 2], [3, 4]]
+    let nested_dict: Dict<str, Dict<str, int>> = {"a": {"x": 1}, "b": {"y": 2}}
+
+    // 布尔与逻辑运算
+    let ok = True and False or True
+    let not_ok = not ok
+
+    // Option / Result 构造
+    let maybe: Option<int> = Some(7)
+    let res: Result<int, str> = Err("boom")
+
+    // 区间（半开与闭区间）
+    let half_open: Range = 0..10
+    let closed: Range = 0..=9
+
+    // 元组构造与打印
+    let pt: (f64, f64) = (1.0, 2.0)
+
+    print(matrix, nested_dict)
+    print(ok, not_ok, maybe, res)
+    print(half_open, closed, pt)

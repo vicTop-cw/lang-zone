@@ -1,0 +1,8 @@
+# Bug-R4-5: not 关键字在 if 条件中不支持
+def test_not() -> int:
+    if not 1 == 2:
+        return 1
+    return 0
+
+def main() -> int:
+    return 0

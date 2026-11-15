@@ -1,0 +1,6 @@
+// C04 entry: import a sibling module inside the same package
+import helper
+
+def main() =
+    assert helper_add(2, 3) == 5
+    print("C04 OK")

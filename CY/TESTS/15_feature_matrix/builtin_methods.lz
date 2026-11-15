@@ -1,0 +1,23 @@
+// 内建接收者上的方法族：`len/length/is_empty/contains/starts_with/ends_with/trim/
+// to_lower/to_upper/remove`。这一族此前 cy **零覆盖**（关键词普查：`.len()` 在语料里
+// 只出现在一行注释里），每条都有实测崩溃或静默错值在前（缺陷卡 BUG-14）。
+// 口径出处：SYNTAX/99-内置预导入库.md:128（`len(x)` → `__len__`）与 :152
+// （「`.length()` 是 List/str 的实例方法」）；`remove` 按**位置/键**移除
+// （DEMO/01_basics/lists.lz 的「移除位置 1」注释）。
+// 期望值由 Rust 后端实跑生成（TEMP/xdiff_ds07.py + LZ_SEAL_EXP=1，2026-10-02）。
+def main() =
+    let s: str = "  Hello World  "
+    print(s.length(), len(s), s.is_empty())
+    let t = s.trim()
+    print(t, t.to_lower().length(), t.starts_with("Hel"), t.ends_with("rld"), t.contains("lo W"))
+    print(t.to_upper())
+    let xs: List<int> = [1, 2, 3]
+    print(xs.length(), xs.len(), len(xs), xs.is_empty(), xs.contains(2), xs.contains(9))
+    mut ys: List<int> = [1, 2, 3]
+    ys.remove(0)
+    print(ys)
+    let d: Dict<str, int> = {"a": 1, "b": 2}
+    print(d.length(), d.contains("a"), d.contains("z"))
+    mut dd: Dict<str, int> = {"a": 1, "b": 2}
+    dd.remove("a")
+    print(dd)

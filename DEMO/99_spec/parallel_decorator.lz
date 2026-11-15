@@ -1,0 +1,7 @@
+// @parallel 装饰器 — 已实现（生成 #[cfg(feature="rayon")] + rayon::prelude）
+// 出处：SYNTAX/03-函数.md — 复合综合装饰器
+@parallel
+def process(batch: List<int>) -> int = sum(batch)
+
+def main() =
+    print(process([1, 2, 3]))

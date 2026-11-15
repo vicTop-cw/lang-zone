@@ -1,0 +1,87 @@
+// lz-zed test fixture: 09-structs-enums-traits — 类型定义
+// Authority: SYNTAX/06 系列
+
+# struct：字段注解、泛型、魔法方法、__slots__
+struct Point =
+    x: f64
+    y: f64
+
+struct Person =
+    name: str
+    age: int
+    def __init__(self, name: str, age: int) = pass
+    def greet(self) -> str = f"hi {self.name}"
+
+struct Box2[T] =
+    value: T
+
+struct MyStruct =
+    __slots__ = "C"
+    x: int
+
+struct Marker =
+
+# 构造（命名参数形式）
+let p = Point(x: 1.0, y: 2.0)
+let q = Person(name: "Ada", age: 36)
+
+# enum：变体、泛型、模式匹配
+enum Color2 =
+    Red
+    Green
+    Blue
+
+enum Maybe2[T] =
+    Nothing
+    Just(T)
+
+enum Shape2 =
+    Circle(f64)
+    Rect(f64, f64)
+
+# trait：抽象方法 = ...、默认实现、泛型
+trait Drawable2 =
+    def draw(self) -> () = ...
+    def label(self) -> str = "shape"
+
+trait Container2[T] =
+    def get(self, index: int) -> T = ...
+
+# impl：为类型实现 trait
+impl Drawable2 for Point =
+    def draw(self) -> () = pass
+
+# 关联类型 / Self 引用
+trait Builder2 =
+    type Output
+    def build(self) -> Self
+
+struct Node =
+    value: int
+    next: Option<Box<Node>>
+
+# 类型别名
+type IntList = List<int>
+type SharedInt = Rc<int>
+type ArcInt = Arc<int>
+type CellInt = Cell<int>
+type RefInt = RefCell<int>
+type IdSet = Set<int>
+
+# 编译期常量
+const PI: f64 = 3.14159
+
+# magic 声明块（模块级）
+magic __name__:
+
+# 内建类型在注解中的使用
+let a: int = 1
+let b: f64 = 2.5
+let c: bool = True
+let d: str = "s"
+let e: List<int> = []
+let f2: Dict<str, int> = {}
+let g2: Option<str> = None
+let h2: Result<int, IOError> = Ok(1)
+let i2: (int, str) = (1, "x")
+let u: Unit = ()

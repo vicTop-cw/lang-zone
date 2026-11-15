@@ -1,0 +1,14 @@
+// lz_std — LZ 运行时库最小 fixture（lzcyc 自举测试 import_runtime.lz 用）
+// 简化实现：保证 import 与调用可运行；Option/Result/Box 语义为惯用降级
+def Some(v) = v
+
+def None_() = None
+
+def Ok(v) = v
+
+def Err(e) = e
+
+def Box(v) = v
+
+def main() =
+    print("lz_std ok")

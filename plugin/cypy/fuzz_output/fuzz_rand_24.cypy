@@ -1,0 +1,8 @@
+def test_0() -> int:
+    defer:
+        let cleanup: int = 0
+    while (-(((100 - 0)))):
+        break
+
+def main() -> int:
+    return 0

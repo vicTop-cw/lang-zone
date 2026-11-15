@@ -1,0 +1,10 @@
+struct Point =
+    x: f64
+    y: f64
+    def __init__(self, x: f64, y: f64) = self.x = x
+    def clone(self) -> Self = Self(x: self.x, y: self.y)
+
+def main() =
+    let p = Point(x: 1.0, y: 2.0)
+    let q = p.clone()
+    println(q.x)

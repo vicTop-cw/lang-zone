@@ -1,0 +1,9 @@
+// 15_feature_matrix - export_annotation：`@export(...)` 注解位的函数导出形态。
+// 期望值取自 Rust 后端实跑（2026-10-02 跨后端差分：两侧同为 '3'）。
+// cy 侧该注解不改变产物语义（注解是目标语言相关的），本件钉的就是"不因注解而变"。
+// 源出 DEMO/export_demo.lz（原样）。
+@export(Rust)
+def add(a: int, b: int) -> int = a + b
+
+def main() =
+    print(add(1, 2))

@@ -1,0 +1,44 @@
+// lz-zed test fixture: 12-tests — 测试框架
+// Authority: SYNTAX/15-测试框架.md
+
+# 静态名称
+test "addition":
+    assert 1 + 1 == 2
+
+# 动态名称
+name = "generated_test"
+test name:
+    assert True
+
+for i in 1..5:
+    test f"dynamic_{i}":
+        assert i > 0
+
+# suite + setup / teardown
+suite MathTests:
+    test "add":
+        assert 1 + 1 == 2
+    test "mul":
+        assert 2 * 3 == 6
+
+suite DatabaseTests:
+    setup:
+        db = connect(":memory:")
+        db.migrate()
+        prefix = "db"
+
+    teardown:
+        db.close()
+
+    test f"{prefix}_insert":
+        db.insert("users", name="Alice")
+        assert db.count("users") == 1
+
+# 软断言 check（不中止）
+def flaky() -> bool = True
+test "soft":
+    check flaky()
+    check True
+
+# 单行 test 形式
+test "single-line": assert 2 + 2 == 4

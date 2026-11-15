@@ -1,0 +1,16 @@
+// p23_lexer_probe.lz：隔离 lexer.lz 编译栈溢出触发点
+// 测试 A：字符串切片 s[idx..idx+1]
+// 测试 B：while 循环 + List 累积
+def main() =
+    let src = "def add(a, b):"
+    // A：切片
+    let c0 = src[0..1]
+    print("c0=" + c0)
+    // B：while 循环累积字符
+    let mut i = 0
+    let mut chars: List<str> = []
+    while i < src.len():
+        chars = chars + [src[i..(i + 1)]]
+        i = i + 1
+    print("count=" + chars.len().to_string())
+    print(chars[0] + chars[1] + chars[2])

@@ -1,0 +1,72 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 3：用 LZ 实现 LZ 词法分析核心（对齐 src/lexer/token.rs）
+// 覆盖：Token 枚举（带值变体）+ tokenize 简化版（标识符/整数/字符串/
+//       运算符/标点）——验证「LZ 写编译器前端」可行性，暴露 codegen 缺陷
+// ═══════════════════════════════════════════════════════════════
+
+// ── Token（对齐 token.rs 核心子集）──
+enum Token:
+    Def
+    Struct
+    If
+    Else
+    Return
+    IntLit(v: int)
+    StrLit(s: str)
+    Ident(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    Eq
+    EqEq
+    Colon
+    Comma
+    Dot
+    LParen
+    RParen
+    LBrace
+    RBrace
+    Newline
+    Eof
+
+// ── 关键字表（简化）──
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "struct" || s == "if" || s == "else" || s == "return"
+
+// ── 关键字 → Token ──
+def keyword_token(s: str) -> Token =
+    if s == "def":
+        Token.Def
+    elif s == "struct":
+        Token.Struct
+    elif s == "if":
+        Token.If
+    elif s == "else":
+        Token.Else
+    else:
+        Token.Return
+
+// ── 单字符运算符/标点 → Option<Token>（LZ 用 Option 表示可无）──
+def punct_token(c: str) -> Option<Token> =
+    if c == "+":
+        Option.Some(value: Token.Plus)
+    elif c == "-":
+        Option.Some(value: Token.Minus)
+    elif c == "*":
+        Option.Some(value: Token.Star)
+    elif c == "/":
+        Option.Some(value: Token.Slash)
+    elif c == ":":
+        Option.Some(value: Token.Colon)
+    elif c == ",":
+        Option.Some(value: Token.Comma)
+    elif c == ".":
+        Option.Some(value: Token.Dot)
+    elif c == "(":
+        Option.Some(value: Token.LParen)
+    elif c == ")":
+        Option.Some(value: Token.RParen)
+    elif c == "{":
+        Option.Some(value: Token.LBrace)
+    elif c == "}":

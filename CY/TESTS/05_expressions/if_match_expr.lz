@@ -1,0 +1,13 @@
+// 05_expressions - if 表达式
+def sign(n: int) -> str =
+    if n > 0:
+        "positive"
+    elif n < 0:
+        "negative"
+    else:
+        "zero"
+
+def main() =
+    print(sign(5))
+    print(sign(-3))
+    print(sign(0))

@@ -1,0 +1,10 @@
+enum JsonValue =
+    Null
+    Bool(bool)
+
+struct Parser =
+    pos: int
+    input: str
+
+def parse_bool(mut parser: Parser)-> (Parser, JsonValue?) =
+    return (parser, Some(JsonValue.Bool(True)))

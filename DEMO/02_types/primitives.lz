@@ -1,0 +1,57 @@
+// ============================
+// LZ Type — Primitives
+// ============================
+
+// --- Scalar types ---
+def main() =
+    let a: int = 42
+    let b: f64 = 3.14
+    let c: str = "hello"
+    let d: bool = True
+
+    // --- Unit type ---
+    let u: Unit = ()
+
+    // --- Never type (diverging) ---
+    def abort(msg: str) -> Never =
+        panic(msg)
+
+    // --- Type annotations ---
+    let annotated: int = 100
+    let named: str = "world"
+
+    // --- Type inference ---
+    let inf_a = 42
+    let inf_b = "hello"
+    let inf_c = [1, 2, 3]
+    let inf_d = (1, "hi")
+    let inf_e = {"key": 42}
+    let inf_f = {1, 2, 3}
+
+    // --- Nil（单元类型别名）与空列表 ---
+    let n: Nil = ()           // 单元类型：无值占位
+    let empty: List<int> = []            // 空列表：类型由上下文推断为 List<T>
+
+    // --- Tuple ---
+    let t: (int, str, bool) = (42, "hi", True)
+    let (x, y, z) = t
+    let (first, ..) = t
+
+    // --- Reference ---
+    // ref 绑定需要源变量可变（规范 02 §5.1：默认可变绑定），let 不可变绑定
+    // 取 &mut 会 E0596
+    val = 42
+    ref r = val
+    let ref s = val
+
+    // --- Function type ---
+    let add: fn(int, int) -> int = |x, y| x + y
+
+    // --- Pointer types ---
+    let boxed: Box<int> = Box.new(99)
+    let bv = boxed[0]
+
+    print(a)
+    print(b)
+    print(c)
+    print(d)

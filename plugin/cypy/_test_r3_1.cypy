@@ -1,0 +1,4 @@
+# Bug-R3-1: 指针类型仅允许在构建块内使用
+def test_pointer() -> int:
+    let ptr: int* = None
+    return 0

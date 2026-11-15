@@ -1,0 +1,23 @@
+=== edge-values-boundary ===
+0 1 -1
+9223372036854775807 -9223372036854775808
+0.0 1.0 1e-10
+[] {} {1}
+ 0
+None Some(0) Some(None)
+9223372036854775807 0 255
+1e-308 9.9e307
+ x 你好世界
+tab:	here \n\t\0
+line1
+line2
+line3  x=3
+true false false
+true true
+false true false
+4611686018427387904 0
+1 1
+-9223372036854775807 0 -3
+42 1
+false true true
+edge-values-boundary done

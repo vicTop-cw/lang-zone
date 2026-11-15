@@ -1,0 +1,14 @@
+def test_0() -> int:
+    guard z else:
+        return -1
+    for i in range(4):
+        let temp: int = i
+    if print((-print(True))):
+        return 1
+    else:
+        return 0
+    ((-((100 > True))) <= (-x))
+    let x: str = "hello"
+
+def main() -> int:
+    return 0

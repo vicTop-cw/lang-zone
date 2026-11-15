@@ -1,0 +1,16 @@
+// ============================================================
+// error_field_not_found.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_linked_list | 期望检查点：访问 Point 不存在的字段 z，应报字段未定义错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0609
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+struct Point:
+    x: int
+    y: int
+
+def main() =
+    let p = Point(1, 2)
+    print(p.z)

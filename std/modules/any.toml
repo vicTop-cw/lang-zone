@@ -1,0 +1,33 @@
+# lz std::any — P1 动态类型反射
+# 源码级映射：lz 符号 → Rust std::any 路径
+
+[module]
+tier = 1
+rust_prefix = "std::any"
+
+# ── 自由函数 ──
+
+[functions]
+type_name = { rust = "std::any::type_name", shim = "" }
+
+# ── 类型映射 ──
+
+[types]
+Any    = "std::any::Any"
+TypeId = "std::any::TypeId"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Any 方法
+is      = "is"
+downcastRef    = "downcast_ref"
+downcastMut    = "downcast_mut"
+typeId  = "type_id"
+# TypeId 方法
+of      = "of"
+
+# ── 类型别名注入 ──
+
+[aliases]

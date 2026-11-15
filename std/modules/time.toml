@@ -1,0 +1,53 @@
+# lz std::time — P1 时间与计时类型
+# 源码级映射：lz 符号 → Rust std::time 路径
+
+[module]
+tier = 1
+rust_prefix = "std::time"
+
+# ── 自由函数 ──
+
+[functions]
+now = { rust = "std::time::Instant::now", shim = "" }
+
+# ── 类型映射 ──
+
+[types]
+Duration    = "std::time::Duration"
+Instant     = "std::time::Instant"
+SystemTime  = "std::time::SystemTime"
+
+# ── 方法别名 ──
+# lz 方法名（camelCase）→ Rust 方法名（snake_case）
+
+[methods]
+# Duration 构造器（关联函数）
+fromMillis     = "from_millis"
+fromSecs       = "from_secs"
+fromMicros     = "from_micros"
+fromNanos      = "from_nanos"
+# Duration 实例方法
+asMillis       = "as_millis"
+asSecs         = "as_secs"
+asMicros       = "as_micros"
+asNanos        = "as_nanos"
+subsecMillis   = "subsec_millis"
+subsecMicros   = "subsec_micros"
+subsecNanos    = "subsec_nanos"
+checkedAdd     = "checked_add"
+checkedSub     = "checked_sub"
+checkedMul     = "checked_mul"
+checkedDiv     = "checked_div"
+saturatingAdd  = "saturating_add"
+saturatingSub  = "saturating_sub"
+saturatingMul  = "saturating_mul"
+isZero         = "is_zero"
+# Instant / SystemTime 实例方法
+elapsed               = "elapsed"
+durationSince         = "duration_since"
+checkedDurationSince  = "checked_duration_since"
+saturatingDurationSince = "saturating_duration_since"
+
+# ── 类型别名注入 ──
+
+[aliases]

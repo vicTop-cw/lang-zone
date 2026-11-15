@@ -1,0 +1,30 @@
+import lz.io
+
+struct Point =
+    x: float
+    y: float
+
+enum Shape:
+    Circle(radius: float)
+    Rectangle(width: float, height: float)
+    Triangle(base: float, height: float)
+
+@export(Rust)
+def describe_shape(s: Shape) -> str =
+    match s with
+        case Shape.Circle(r) -> "circle"
+        case Shape.Rectangle(w, h) -> "rectangle"
+        case Shape.Triangle(b, h) -> "triangle"
+
+@export(Rust)
+def grade(score: int) -> str =
+    match score with
+        case 90..100 when score <= 100 -> "A"
+        case 80..90 -> "B"
+        case 70..80 -> "C"
+        case 60..70 -> "D"
+        case _ -> "F"
+
+def main() =
+    let c = Shape.Circle(5.0) in
+    print(describe_shape(c), grade(85), grade(95))

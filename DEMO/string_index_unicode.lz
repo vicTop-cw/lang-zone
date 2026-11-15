@@ -1,0 +1,12 @@
+// string_index_unicode.lz — G3 字符串索引 char 边界回归测试
+// 修复前：非 ASCII 字符串 s[i] 生成 as_bytes()[i]，中文/emoji 切片 panic
+// 修复后：按 char 边界安全索引
+
+def main() -> int:
+    let s = "你好世界"
+    let c = s[1]  // 第二个字符（好），char 安全
+    let e = "ab🚀cd"
+    let rocket = e[2]  // 🚀（emoji 多字节），char 安全
+    print(c)
+    print(rocket)
+    return 0

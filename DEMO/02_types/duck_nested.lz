@@ -1,0 +1,27 @@
+// ============================================================
+// 测试: duck 嵌套约束 where T: Iterable 递归验证（§2.4）
+// ============================================================
+
+// ── 嵌套 duck：被约束的 duck ──
+duck Iterable =
+    def __iter__(self) -> ()
+
+// ── 外层 duck：T 必须同时满足 Iterable ──
+duck DoubleMap<T, R> where T: Iterable =
+    def T.map(self) -> R
+
+// ── 满足双层约束的类型 ──
+struct MyList =
+    items: List<int>
+    def __iter__(self) -> () = pass
+    def map(self) -> str = "mapped"
+
+// ── 使用嵌套约束 duck 的泛型函数 ──
+def process<T, R>(x: T) -> R where T: DoubleMap<T, R> =
+    x.map()
+
+def main() =
+    let lst = MyList(items: [1, 2, 3])
+    let r = process(lst)
+    print(r)
+    print("nested duck demo done")

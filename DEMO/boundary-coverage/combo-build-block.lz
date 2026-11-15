@@ -1,0 +1,97 @@
+// ============================================================
+// boundary-coverage: 构建块 + 其他特性组合测试
+// 覆盖: =: 变量绑定 + 控制流、~: 调用块 + 异常、
+//      ^: 索引块 + match、*: 生成器块 + 闭包
+// ============================================================
+
+// --- 1. =: 构建块 + if/else ---
+def build_if_else(flag: bool) -> int =
+    let result =:
+        if flag:
+            100
+        else:
+            0
+
+// --- 2. =: 构建块 + match ---
+def build_match(x: int) -> str =
+    let description =:
+        match x:
+            case 0:
+                "zero"
+            case 1:
+                "one"
+            case _:
+                "many"
+
+// --- 3. =: 构建块 + try ---
+def build_try(a: int, b: int) -> int =
+    let result =:
+        try:
+            a / b
+        catch e:
+            0
+
+// --- 4. =: 构建块 + for 生成 ---
+def build_from_for(items: List<int>) -> List<int> =
+    let doubled =:
+        [x * 2 for x in items]
+
+// --- 5. ~: 调用构建块 + 元组参数 ---
+def process_data(a: int, b: int, c: int) -> (int, int, int) =
+    (a * 1, b * 2, c * 3)
+
+def build_call() =
+    let result = process_data ~:
+        (1, 2, 3)
+    print(result)
+
+// --- 6. ^: 索引构建块 + 条件 ---
+def build_index_conditional(xs: List<int>, flag: bool) -> int =
+    let idx =:
+        if flag:
+            0
+        else:
+            xs.len() - 1
+
+// --- 7. *: 生成器构建块 + 条件 yield ---
+def multiply_pair(a: int, b: int) -> (int, int, int) =
+    (a, b, a * b)
+
+pairs = multiply_pair *:
+    yield (2, 3)
+    yield (4, 5)
+    yield (6, 7)
+
+// --- 8. =: 构建块 + 闭包 ---
+def build_closure_value() =
+    let compute =:
+        let add = |x: int, y: int| -> int = x + y
+        let mul = |x: int, y: int| -> int = x * y
+        add(10, mul(2, 3))
+
+// --- 9. 多层 =: 构建块嵌套 ---
+def nested_build_blocks(a: int) -> int =
+    let base =:
+        let inner =:
+            a * 10
+        inner + 5
+
+// --- main ---
+def main() =
+    print("=== combo-build-block ===")
+    print(build_if_else(True))
+    print(build_if_else(False))
+    print(build_match(0))
+    print(build_match(1))
+    print(build_match(5))
+    print(build_try(10, 2))
+    print(build_try(10, 0))
+    print(build_from_for([1, 2, 3, 4]))
+    build_call()
+    print(build_index_conditional([100, 200, 300], True))
+    print(build_index_conditional([100, 200, 300], False))
+    for p in pairs:
+        print(p)
+    print(build_closure_value())
+    print(nested_build_blocks(3))
+    print("combo-build-block done")

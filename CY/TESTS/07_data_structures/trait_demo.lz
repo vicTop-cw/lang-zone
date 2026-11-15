@@ -1,0 +1,7 @@
+// trait 测试
+trait Drawable =
+    def draw(self) -> () = ...
+    def name(self) -> str = "shape"
+
+def main() =
+    print("trait test")

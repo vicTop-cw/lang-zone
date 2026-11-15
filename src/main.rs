@@ -1,0 +1,1206 @@
+// Lang-Zong 编译器 — CLI 入口
+// 用法: lzc hello.lz [--tokens] [--ast] [--emit=ir] [--std-dir <path>] [--allow-rustc-private]  → hello.rs
+// 子命令: lang-zone create|build|check|peek|push → src/cli.rs
+
+mod cli;
+
+use lang_zone::cache::CacheEntry;
+use lang_zone::incr::IncrCompiler;
+use lang_zone::ir::builder::build_ir;
+use lang_zone::ir::codegen::CodeGen as IrCodeGen;
+use lang_zone::lexer::Lexer;
+use lang_zone::macros::expand::{
+    contains_pending_call, extract_macro_defs, extract_template_defs, has_bin_macro_declaration,
+    MacroExpander, TemplateExpander,
+};
+use lang_zone::parser::Parser;
+use lang_zone::project::ProjectCompiler;
+// M5 T0r56.1.1：车道 rlib 解析 + 自检链助手 + LZ 前端自检已下沉到 lib crate，
+// main.rs 经 use 导入同名函数，全部调用点零改动。
+use lang_zone::frontend::bootstrap_emit::{
+    absolutize, builtins_link, crate_root, lane_profile_dir, lane_target_root, profile_name,
+    replace_ext, run_lz_frontend, run_selfcheck_exe,
+};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// 读取 .lz 源码并剥离 UTF-8 BOM（EF BB BF）。
+///
+/// Windows 记事本等编辑器默认「UTF-8 带 BOM」保存；未剥离时 BOM 会作为首字符进入
+/// 词法层，报 `Parse error: Unexpected token at top level: Unknown(U+FEFF)`，
+/// 且错误信息不含 BOM 字样、排查成本高（BUG-16）。与 `util::source::SourceCache::read`
+/// 同一口径（后者另做行尾归一化，此处保持原始行尾以免影响既有产物对比）。
+fn read_source_lossy(path: &Path) -> std::io::Result<String> {
+    let raw = fs::read(path)?;
+    Ok(String::from_utf8_lossy(lang_zone::util::platform::strip_bom(&raw)).into_owned())
+}
+
+/// 跨模块符号内联：单文件模式下将用户 import 模块的顶层项合并进主 AST，
+/// 使被导入符号进入 IR/codegen（修复 E0425 use/extern 作用域系列失败）。
+/// 只注入定义项（fn/const/struct/enum/impl/alias/duck/magic + 顶层 let 转 const），
+/// checker 块注入为空 stub（避免 body 引用 __Params 触发语义错误），
+/// 顶层表达式语句（print 等）不注入（仅影响运行期初始化输出，批测不运行）。
+fn merge_imported_modules(module: &mut lang_zone::ast::Module, entry: &Path) -> Vec<String> {
+    let dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut loaded: Vec<PathBuf> = Vec::new();
+    let mut merged: Vec<String> = Vec::new();
+    merge_imports_into(module, &dir, &mut loaded, &mut merged);
+    merged
+}
+
+/// 阶段 3（G3）：把 import 路径解析为 registry 中的包内文件。
+///
+/// `import mylib` → 从 `dir` 逐级向上找 `local-registry/`，取 `<pkg>` 最新的
+/// 已发布版本，返回包内的入口 `.lz`（`import pkg.sub` 则定位 `sub.lz`）。
+/// 返回 None 表示「不是 registry 包」，调用方继续走既有本地查找/跳过逻辑。
+fn resolve_registry_import(dir: &Path, path: &[String]) -> Option<PathBuf> {
+    let first = path.first()?;
+    let root = lang_zone::util::registry::find_registry_root(dir)?;
+    let versions = lang_zone::util::registry::list_versions(&root, first);
+    let rest = &path[1..];
+    for v in &versions {
+        let base = root.join(first).join(v);
+        if rest.is_empty() {
+            // 包入口约定：lib.lz > mod.lz > src/main.lz
+            for cand in ["lib.lz", "mod.lz", "src/main.lz"] {
+                let p = base.join(cand);
+                if p.is_file() {
+                    return Some(p);
+                }
+            }
+        } else {
+            let rel = rest.join("/");
+            let p = base.join(&rel).with_extension("lz");
+            if p.is_file() {
+                return Some(p);
+            }
+            let p = base.join(&rel).join("mod.lz");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+fn merge_imports_into(
+    module: &mut lang_zone::ast::Module,
+    dir: &Path,
+    loaded: &mut Vec<PathBuf>,
+    merged: &mut Vec<String>,
+) {
+    let imports = module.imports.clone();
+    for imp in &imports {
+        if imp.path.is_empty() {
+            continue;
+        }
+        let first = imp.path[0].as_str();
+        // 跳过 std / crate 依赖 / macro 专有导入（宏定义合并由主流程完成）
+        if first == "std"
+            || first == "macro"
+            || [
+                "serde",
+                "tokio",
+                "regex",
+                "chrono",
+                "rand",
+                "itertools",
+                "serde_json",
+                "once_cell",
+            ]
+            .contains(&first)
+        {
+            continue;
+        }
+        let rel = imp.path.join("/");
+        let candidates = [
+            dir.join(&rel).with_extension("lz"),
+            dir.join(&rel).join("mod.lz"),
+        ];
+        // 阶段 3（G3）：本地目录未命中时，查registry（`push` 发布的三方包）。
+        // 追加在既有候选之后 ⇒ 纯增量，本地优先的行为完全不变。
+        let mut all: Vec<PathBuf> = candidates.to_vec();
+        if !candidates.iter().any(|c| c.exists()) {
+            if let Some(found) = resolve_registry_import(dir, &imp.path) {
+                all.push(found);
+            }
+        }
+        let Some(mp) = all.into_iter().find(|c| c.exists()) else {
+            continue;
+        };
+        if loaded.contains(&mp) {
+            continue;
+        }
+        loaded.push(mp.clone());
+        let Ok(src) = read_source_lossy(&mp) else {
+            continue;
+        };
+        let mut lexer = Lexer::new(&src);
+        let tokens = lexer.tokenize();
+        let Ok((registry, ranges)) = extract_macro_defs(&tokens) else {
+            continue;
+        };
+        let Ok((treg, tranges)) = extract_template_defs(&tokens) else {
+            continue;
+        };
+        let mut ranges = ranges;
+        ranges.extend(tranges);
+        let expander = MacroExpander::new(registry);
+        let expand_input: Vec<_> = tokens
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                !ranges
+                    .chunks(2)
+                    .any(|ch| ch.len() == 2 && *i >= ch[0] && *i < ch[1])
+            })
+            .map(|(_, t)| t.clone())
+            .collect();
+        let Ok(mut expanded) = expander.expand(&expand_input) else {
+            continue;
+        };
+        let tpl = TemplateExpander::new(treg);
+        for _ in 0..16 {
+            let before = expanded.clone();
+            let Ok(after_tpl) = tpl.expand(&expanded) else {
+                break;
+            };
+            let Ok(after_mac) = expander.expand(&after_tpl) else {
+                break;
+            };
+            expanded = after_mac;
+            if expanded == before {
+                break;
+            }
+        }
+        let mut parser = Parser::new(expanded);
+        let Ok(mut sub) = parser.parse_module() else {
+            continue;
+        };
+        // 递归处理子模块的 import
+        let sub_dir = mp.parent().unwrap_or(dir).to_path_buf();
+        merge_imports_into(&mut sub, &sub_dir, loaded, merged);
+        // 记下「已被平铺合并」的模块名：Cython 后端据此不发射 `import X` 行、
+        // 并把 `X.sym` 剥成裸名 `sym`（Rust 后端发的从来就是裸名）。
+        if !merged.iter().any(|m| m == first) {
+            merged.push(first.to_string());
+        }
+        // ── 平铺合并的同名重复定义过滤 ──
+        // 这里把被导入模块的项**平铺**进主模块的同一个命名空间，于是
+        // 「同名同签名」= 重复定义：Rust 后端发出两个 `pub fn main__()`
+        // ⇒ E0428 the name `main__` is defined multiple times；Cython 后端发出两个
+        // `def main__0()` 加上指向从未发射的 `main__1` 的分发器
+        // ⇒ cython: undeclared name not builtin: main__1（CY/TESTS/99_bootstrap 实测）。
+        // 被导入模块的定义让位给已在场的定义（本地/先导入者胜）——一个模块的 `main`
+        // 是它自己的入口，不是导出给 importing 方的 API。
+        // 不同签名的同名 def **不**过滤：那是合法重载。
+        {
+            let dup_def = |f: &lang_zone::ast::Function| {
+                module.functions.iter().any(|g| {
+                    g.name == f.name
+                        && g.params.len() == f.params.len()
+                        && g.params
+                            .iter()
+                            .zip(f.params.iter())
+                            .all(|(a, b)| a.ty == b.ty)
+                })
+            };
+            sub.functions.retain(|f| !dup_def(f));
+        }
+        // 注入定义项
+        module.functions.extend(sub.functions);
+        module.structs.extend(sub.structs);
+        module.traits.extend(sub.traits);
+        module.impls.extend(sub.impls);
+        module.type_aliases.extend(sub.type_aliases);
+        module.duck_defs.extend(sub.duck_defs);
+        module.magic_blocks.extend(sub.magic_blocks);
+        module.consts.extend(sub.consts);
+        // 顶层 let → Const（builder 对 consts 生成 IR Const）
+        for s in &sub.top_stmts {
+            if let lang_zone::ast::Stmt::Let {
+                name,
+                mutable,
+                ty,
+                value,
+                mods,
+                ..
+            } = s
+            {
+                module.consts.push(lang_zone::ast::ConstDef {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    value: value.clone(),
+                    mutable: *mutable,
+                    mods: mods.clone(),
+                });
+            }
+        }
+        // checker 块 → 空 stub（供调用点编译通过；body 语义不展开）
+        for s in &sub.top_stmts {
+            if let lang_zone::ast::Stmt::CheckerBlock {
+                label,
+                ps_name,
+                default_checker,
+                ..
+            } = s
+            {
+                module.top_stmts.push(lang_zone::ast::Stmt::CheckerBlock {
+                    label: label.clone(),
+                    ps_name: ps_name.clone(),
+                    default_checker: default_checker.clone(),
+                    body: vec![],
+                });
+            }
+        }
+    }
+}
+
+/// 自检链取 rlib：找不到就**明确报错并行失败**（绝不静默用不存在的路径去喂 rustc，
+/// 那会伪装成 E0463 之类的「编译错误」假红）。
+fn builtins_link_or_exit(what: &str) -> (PathBuf, PathBuf) {
+    match builtins_link() {
+        Some(v) => v,
+        None => {
+            eprintln!(
+                "{what}: 未找到 lz_builtins 的 .rlib（已查找 {}；先 `cargo build -p lz_builtins`{}）",
+                lane_profile_dir().display(),
+                if lane_profile_dir() == crate_root().join("target").join("debug") {
+                    String::new()
+                } else {
+                    format!("，车道 target-dir={}", lane_target_root().display())
+                }
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+/// BUG-10 产品化（方案 A，2026-10-01）：单文件生成 .rs 后，把**本机解析好的
+/// 完整可复制** rustc 链接命令打到 stderr。只打印不落盘 ⇒ golden 快照零影响。
+/// 解析链见 `lane_profile_dir()` / `find_builtins_rlib()`（T0r25 起按运行环境
+/// 推导，不再硬编码 `target/debug`）。
+fn print_link_recipe(out_path: &std::path::Path) {
+    match builtins_link() {
+        Some((r, deps_dir)) => {
+            eprintln!(
+                "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins={} -L dependency={} -O {}",
+                r.display(),
+                deps_dir.display(),
+                out_path.display()
+            );
+        }
+        None => {
+            eprintln!(
+                "LZ LINK RECIPE (BUG-10): rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<deps_dir> -O {}   (rlib 未在 {} 找到；先 `cargo build -p lz_builtins`)",
+                out_path.display(),
+                lane_profile_dir().display()
+            );
+        }
+    }
+}
+
+// Windows 主线程栈默认仅 1MB（链接器默认），深层递归下降（宏展开、嵌套缩进块
+// 解析、深层嵌套表达式 codegen）会栈溢出（p43 复现：thread 'main' has
+// overflowed its stack）。将整个编译流水线移入 512MB 大栈线程，解除该限制。
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    // 方向 D：冷启动分段计时。lzc 段= 前端+IR+codegen（本进程），rustc 段由
+    // 调用方（cli::rustc_compile / run_test_mode）各自打印，两段可分别归因。
+    let stats = args.iter().any(|a| a == "--stats");
+    let started = std::time::Instant::now();
+    let code = std::thread::Builder::new()
+        .name("lang-zone-compile".to_string())
+        .stack_size(512 * 1024 * 1024)
+        .spawn(move || compile_main(args))
+        .expect("failed to spawn compile thread")
+        .join()
+        .unwrap_or(1);
+    if stats {
+        eprintln!(
+            "[stats] lzc total: {:.1} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    std::process::exit(code);
+}
+
+/// 实际编译流水线（在 main 的大栈线程中执行）；返回进程退出码
+fn compile_main(args: Vec<String>) -> i32 {
+    // ── 子命令分派：args[1] 是 create/build/check/peek/push 或
+    // -h/--help/--version 时走子命令路径；否则保持原单文件编译路径不变 ──
+    if args.len() >= 2 {
+        match args[1].as_str() {
+            "-h" | "--help" => {
+                cli::print_help();
+                return 0;
+            }
+            "--version" => {
+                println!(
+                    "Lang-Zone compiler (lz) {}",
+                    lang_zone::util::version::version()
+                );
+                return 0;
+            }
+            "create" => return cli::cmd_create(&args),
+            "build" => return cli::cmd_build(&args),
+            "check" => return cli::cmd_check(&args),
+            "peek" => return cli::cmd_peek(&args),
+            "push" => return cli::cmd_push(&args),
+            // 方案.md G5：调用台账审计入口（只读，不依赖编译）
+            "emit-bridge-report" => return cli::cmd_emit_bridge_report(&args),
+            // FIST T4.5 / 升级计划第4章：热重载（方向C）与 LSP（方向D）
+            "watch" => return lang_zone::hotreload::cmd_watch(&args),
+            #[cfg(feature = "infer")]
+            "lsp" => return lang_zone::lsp::run_lsp(),
+            _ => { /* 单文件编译路径（行为保持原样） */ }
+        }
+    }
+
+    if args.len() < 2 {
+        eprintln!("Usage: lang-zone <file.lz> [--tokens] [--ast] [--emit=ir] [--test] [--project] [--std-dir <path>] [--allow-rustc-private]");
+        std::process::exit(1);
+    }
+
+    let should_use_project = args.iter().any(|a| a == "--project");
+
+    // --macro-check=loose|light|strict：宏/template 逐层检查模式
+    // （08 §3.6 规则 4）——loose=只最后完整检查；light（默认）=逐层轻量结构
+    // 校验 + 最终 Parser 兜底；strict=每层完整 Parser（中间层产物须独立合法）
+    let macro_check_mode = match args.iter().find_map(|a| a.strip_prefix("--macro-check=")) {
+        Some("loose") => lang_zone::macros::expand::CheckMode::Loose,
+        Some("strict") => lang_zone::macros::expand::CheckMode::Strict,
+        Some("light") | _ => lang_zone::macros::expand::CheckMode::Light,
+    };
+
+    // CLI 标志解析（提前，供 project 和单文件两种模式共用）
+    let std_dir = extract_flag_value(&args, "--std-dir").map(PathBuf::from);
+    let run_tests = args.iter().any(|a| a == "--test");
+    let use_cache = args.iter().any(|a| a == "--cached");
+    // --backend=cython：选择 Cython 后端（默认 Rust）
+    let backend_cython = args.iter().any(|a| a == "--backend=cython");
+    // --no-tco：关闭尾递归自动改写（环境变量 LZ_TCO=0 等价）。
+    // 只影响**自动**优化；@tailrec / #[tail_call] 标注的静态校验始终生效。
+    if args.iter().any(|a| a == "--no-tco") {
+        lang_zone::ir::builder::set_tco_enabled(false);
+    }
+    // --hide-type-annotations：隐藏局部 let 绑定的安全类型标注（等价 LZ_HIDE_TYPE_ANNOTATIONS=1）
+    if args.iter().any(|a| a == "--hide-type-annotations") {
+        lang_zone::ir::codegen::set_hide_type_annotations(true);
+    }
+    // --hide-module-meta：隐藏模块元数据常量（__name__、__file__、__package__、__path__、__doc__、__is_macro__）
+    if args.iter().any(|a| a == "--hide-module-meta") {
+        lang_zone::ir::codegen::set_hide_module_meta(true);
+    }
+    // --hide-return-keyword：隐藏显式 return 关键字（尾表达式裸写，对齐手写 Rust 惯用形态）
+    if args.iter().any(|a| a == "--hide-return-keyword") {
+        lang_zone::ir::codegen::set_hide_return_keyword(true);
+    }
+    // --release：rustc 调用注入 -C opt-level=3（等价 LZ_RELEASE=1）
+    if args.iter().any(|a| a == "--release") {
+        lang_zone::ir::codegen::set_release_mode(true);
+    }
+    // --stmt-marks：恢复逐语句 `// STMT:*` 定位注释（方向 E：默认关闭，
+    // 因为注释使生成 .rs 行数近乎翻倍、抬升 rustc 段开销且无运行时价值）。
+    // 等价环境变量：LZ_STMT_MARKS=1。
+    if args.iter().any(|a| a == "--stmt-marks") {
+        lang_zone::ir::codegen::set_stmt_marks(true);
+    }
+    // --opt=N | --opt N：IR 优化 pass 层级（方向 A，0=关闭/1=常量折叠+分支简化/
+    // 2=+死绑定消除）。默认 0 —— 保证与优化前逐字节一致，便于用既有 golden 回归。
+    // 两种写法都收（`--emit=ir` 家族用 `=`，`--std-dir` 家族用空格）。
+    let opt_arg = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--opt=").map(|v| v.to_string()))
+        .or_else(|| {
+            args.iter()
+                .position(|a| a == "--opt")
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        });
+    if let Some(v) = opt_arg {
+        match v.trim().parse::<u8>() {
+            Ok(level) => lang_zone::ir::opt::set_opt_level(level),
+            Err(_) => {
+                eprintln!("error: --opt 需要 0/1/2 整数，收到 {:?}", v);
+                std::process::exit(2);
+            }
+        }
+    }
+    // `--test` 的执行面：Rust 面直调 `rustc --test`（run_test_mode），cy 面发射
+    // `_lz_run_tests()` 运行器再用 pyximport 跑它（run_cy_test_mode）。
+    // 历史形状（2026-10-02 之前）：cy 面把 `--test` 当作不存在——实测只打一行
+    // 「Generated ... sp.pyx」并以 rc=0 退出 ⇒ 调用方读到的是「测试跑过了」而实际一个 test
+    // 都没执行（台账 BUG-18）。缺能力可以接受，**装作有能力**不行，所以当时先改成带原因拒绝，
+    // 本轮按「判据先行」补上执行面（判据：CY/scripts/cy_test_gate.py）。
+    if backend_cython && run_tests {
+        // 执行面需要宿主 Python；取不到数的那一侧必须拒绝出数（非零），不能报绿。
+        if cy_python_program().is_none() {
+            eprintln!(
+                "error: --test 在 cython 后端需要 Python 宿主来编译并执行 .pyx（缺陷卡：memory/bugs.md BUG-18）。\n\
+                 出路：把 python/python3 放进 PATH，或设 LZ_PYTHON=<解释器路径>；\n\
+                 跑测试也可直接用默认 Rust 后端（去掉 --backend=cython）。"
+            );
+            std::process::exit(1);
+        }
+    }
+
+    // --lzi <file>：加载 lz-infer 生成的跨模块类型签名（.lzi），注入 IR builder，
+    // 本地函数查不到返回类型时回退查询外部模块签名（可选增强，infer 特性门控）
+    #[cfg(feature = "infer")]
+    let lzi_registry = extract_flag_value(&args, "--lzi").map(|p| {
+        let reg = lang_zone::infer::LziRegistry::load_single(Path::new(&p)).unwrap_or_else(|e| {
+            eprintln!("lzi load error ({}): {}", p, e);
+            std::process::exit(1);
+        });
+        std::rc::Rc::new(reg)
+    });
+    // 非 infer 构建：无 .lzi 支持，占位（build_ir_opt 非 infer 版本忽略该参数）
+    #[cfg(not(feature = "infer"))]
+    let lzi_registry: Option<()> = None;
+
+    // entry 路径取第一个非 `-` 开头的参数（兼容 `--incr <file>` 与 `<file> --incr` 两种顺序）
+    let path = args
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .unwrap_or(&args[1]);
+
+    // --incr：增量编译（FIST T4.3 / 升级计划方向B）
+    // 模块级缓存 + 依赖图 + 传播失效；未变更模块直接复用缓存产物。
+    if args.iter().any(|a| a == "--incr") {
+        let base_dir = std::path::Path::new(path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
+        let cache_dir = args
+            .iter()
+            .find_map(|a| a.strip_prefix("--incr-cache="))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(IncrCompiler::default_cache_dir()));
+        let mut ic = IncrCompiler::new(base_dir, cache_dir);
+        let outcome = ic.compile(std::path::Path::new(path)).unwrap_or_else(|e| {
+            eprintln!("Incremental compile error: {}", e);
+            std::process::exit(1);
+        });
+        let out_path = replace_ext(path, ".lz", ".rs");
+        fs::write(&out_path, &outcome.code).unwrap_or_else(|e| {
+            eprintln!("Error writing {}: {}", out_path, e);
+            std::process::exit(1);
+        });
+        print_link_recipe(std::path::Path::new(&out_path));
+        println!(
+            "Incremental: {} -> {} ({} modules: {} cached, {} rebuilt, {} ms)",
+            path,
+            out_path,
+            outcome.stats.total,
+            outcome.stats.hits,
+            outcome.stats.misses,
+            outcome.stats.elapsed_ms
+        );
+        return 0;
+    }
+
+    // --project: 递归加载 import 的所有 .lz 依赖，合并编译
+    if should_use_project {
+        let base_dir = std::path::Path::new(path)
+            .parent()
+            .unwrap_or(std::path::Path::new("."));
+        let mut pc = ProjectCompiler::new(base_dir.to_path_buf(), std_dir.clone());
+        let mut merged = pc.compile(std::path::Path::new(path)).unwrap_or_else(|e| {
+            eprintln!("Project compile error: {}", e);
+            std::process::exit(1);
+        });
+        // 项目模式合并模块也需带 file_path：语义检查 import 同目录解析依赖它
+        if merged.file_path.is_none() {
+            merged.file_path = Some(path.to_string());
+        }
+
+        // T0r31：Cli 档 embed 产物落盘（与单文件路径下方 `cg.embed_targets()` 同口径）。
+        // 修前 `cg` 是 match 臂内的临时值、且**从不调用** `emit_embed_artifacts` ⇒
+        // `--project` 构建完 `build/embed/**` 整棵目录不存在，而产物里的垫片
+        // 仍写着 `__lz_call(..., "build/embed/<stem>/<artifact>", ...)` ⇒ 运行时必失败。
+        // 命名不用在这里另写一套：T0r29 起 `cg.embed_targets()` 已按 (模块, lang) 分好组，
+        // 每个 target 自带 artifact/dir_rel（权威 = `embed::dedup::artifact_name`）。
+        let mut cg = IrCodeGen::new();
+        // 与单文件路径 `cg.set_embed_stem(&path)` 同一把尺：带 origin 的块（项目里每个
+        // 模块各一份）用 origin，本行只兜「无 origin」的块，保证同一文件两条路径同名。
+        cg.set_embed_stem(&path.to_string());
+        let rust_code = match build_ir_opt(&merged, lzi_registry.as_ref()) {
+            Ok(ir_module) => cg.generate(&ir_module),
+            Err(e) => {
+                eprintln!("IR build error (project mode): {}", e);
+                std::process::exit(1);
+            }
+        };
+        // 默认只落盘、不 spawn 外部工具链；要真建库必须显式 `--embed-build`（与单文件同）。
+        if !cg.embed_targets().is_empty() {
+            lang_zone::embed::emit::emit_embed_artifacts(
+                cg.embed_targets(),
+                args.iter().any(|a| a == "--embed-build"),
+                false,
+                None,
+            );
+        }
+        let out_path = replace_ext(path, ".lz", ".rs");
+        fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
+            eprintln!("Error writing {}: {}", out_path, e);
+            std::process::exit(1);
+        });
+        print_link_recipe(std::path::Path::new(&out_path));
+        println!(
+            "Generated {} -> {} (project mode, {}, {} modules)",
+            path,
+            out_path,
+            "IR codegen",
+            pc.unit_count()
+        );
+        return 0;
+    }
+
+    // --cached: 跳过未修改文件
+    if use_cache {
+        let src_path = std::path::Path::new(path);
+        let cache_dir = PathBuf::from(".lzcache");
+        if let Ok(Some(entry)) = CacheEntry::load(&cache_dir, src_path) {
+            if entry.is_fresh(src_path, &cache_dir) {
+                println!("Cached (unchanged): {}", path);
+                return 0;
+            }
+        }
+        // 不新鲜则继续编译；编译成功后在末尾保存缓存
+    }
+
+    let source = read_source_lossy(Path::new(path)).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", path, e);
+        std::process::exit(1);
+    });
+
+    // Tokenize
+    let mut lexer = Lexer::new(&source);
+    let tokens = lexer.tokenize();
+
+    if args.iter().any(|a| a == "--tokens") {
+        println!("=== Tokens ===");
+        for (i, t) in tokens.iter().enumerate() {
+            println!("{:4} {:?}", i, t);
+        }
+        return 0;
+    }
+
+    // ── 宏展开（Phase 2: Lexer 之后、Parser 之前） ──
+    // 第一遍：提取宏定义并构建注册中心（ranges 记录宏定义占用 token，用于从流中移除）
+    let mut macro_ranges_from_extract: Vec<usize>;
+    let template_ranges_from_extract: Vec<usize>;
+    let mut registry = match extract_macro_defs(&tokens) {
+        Ok((r, ranges)) => {
+            macro_ranges_from_extract = ranges;
+            r
+        }
+        Err(e) => {
+            eprintln!("Macro definition error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    // 提取 template 定义（返回 Tokens 的编译期函数，调用 `name!`）
+    let mut template_registry = match extract_template_defs(&tokens) {
+        Ok((r, ranges)) => {
+            template_ranges_from_extract = ranges;
+            r
+        }
+        Err(e) => {
+            eprintln!("Template definition error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // 跨模块宏导入：`import macro X` / `from macro X import Y` → 读取 X.lz 并合并其宏定义
+    let dir = std::path::Path::new(path)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut i = 0usize;
+    while i < tokens.len() {
+        let is_import = tokens[i] == lang_zone::lexer::Token::Import
+            || tokens[i] == lang_zone::lexer::Token::From;
+        if is_import {
+            // import macro X / from macro X import Y
+            let mut j = i + 1;
+            let mut is_macro_import = false;
+            let mut mod_name: Option<String> = None;
+            while j < tokens.len() {
+                match &tokens[j] {
+                    lang_zone::lexer::Token::Macro => {
+                        is_macro_import = true;
+                        j += 1;
+                    }
+                    lang_zone::lexer::Token::Ident(n) if mod_name.is_none() => {
+                        mod_name = Some(n.clone());
+                        j += 1;
+                    }
+                    lang_zone::lexer::Token::Newline | lang_zone::lexer::Token::Dedent => break,
+                    _ => {
+                        if tokens[j] == lang_zone::lexer::Token::Import {
+                            j += 1;
+                        } else if tokens[j] == lang_zone::lexer::Token::As {
+                            j += 2;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if tokens[j] == lang_zone::lexer::Token::Newline {
+                    break;
+                }
+            }
+            if is_macro_import {
+                if let Some(mname) = mod_name {
+                    let macro_path = dir.join(format!("{}.lz", mname));
+                    if let Ok(src) = read_source_lossy(&macro_path) {
+                        let mut mlexer = lang_zone::lexer::Lexer::new(&src);
+                        let mtokens = mlexer.tokenize();
+                        if let Ok((mreg, _mranges)) = extract_macro_defs(&mtokens) {
+                            registry.merge(mreg);
+                        }
+                        if let Ok((treg, _tranges)) = extract_template_defs(&mtokens) {
+                            template_registry.merge(treg);
+                        }
+                    }
+                }
+            }
+            // 跳到本行末尾
+            while i < tokens.len() && tokens[i] != lang_zone::lexer::Token::Newline {
+                i += 1;
+            }
+        }
+        i += 1;
+    }
+    // 从 Token 流中移除宏定义（展开后不再需要；模板定义同样由 expander 处理）
+    // 合并宏定义 + 模板定义占用范围
+    macro_ranges_from_extract.extend(template_ranges_from_extract);
+    let macro_ranges = macro_ranges_from_extract;
+
+    // 从 Token 流中移除宏定义（展开后不再需要）
+    let mut expander = MacroExpander::new(registry);
+    expander.set_check_mode(macro_check_mode);
+    let expand_input: Vec<_> = tokens
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| {
+            // 过滤掉宏定义占用的 token
+            let mut skip = false;
+            for chunk in macro_ranges.chunks(2) {
+                if chunk.len() == 2 && *i >= chunk[0] && *i < chunk[1] {
+                    skip = true;
+                    break;
+                }
+            }
+            !skip
+        })
+        .map(|(_, t)| t.clone())
+        .collect();
+
+    // 第二遍：展开所有 @name! 宏调用
+    // 混合嵌套交替展开循环（08 §3.6）：宏→模板→宏→…直到稳定。
+    // 宏产物可含 name!（模板调用）、模板产物可含 @name!（宏调用），
+    // 单次宏展开 + 单次模板展开无法覆盖双向混合嵌套，需交替直到无变化。
+    let mut template_expander = TemplateExpander::new(template_registry);
+    template_expander.set_check_mode(macro_check_mode);
+    let mut expanded_tokens = expander.expand(&expand_input).unwrap_or_else(|e| {
+        eprintln!("Macro expansion error: {}", e);
+        std::process::exit(1);
+    });
+    let max_passes = 16;
+    let mut stable = false;
+    for _pass in 0..max_passes {
+        let before = expanded_tokens.clone();
+        // 模板展开（name!，内部递归处理模板→模板嵌套）
+        let after_tpl = match template_expander.expand(&expanded_tokens) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Template expansion error: {}", e);
+                std::process::exit(1);
+            }
+        };
+        // 宏展开（@name!，内部递归处理宏→宏嵌套，也展开模板产物中的 @name!）
+        let after_mac = match expander.expand(&after_tpl) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Macro expansion error: {}", e);
+                std::process::exit(1);
+            }
+        };
+        expanded_tokens = after_mac;
+        // 稳定条件：该轮无任何新展开 **且无未展开的嵌套调用残留**——
+        // 宏↔模板无限交替时 token 流往返可能相同（如 `// m\nloop_tpl!(x)`
+        // ↔ `// t\n@gen_tpl!(x)` 回到同形），仅比较相等会误判稳定并残留调用
+        if expanded_tokens == before && !contains_pending_call(&expanded_tokens) {
+            stable = true;
+            break;
+        }
+    }
+    if !stable {
+        eprintln!(
+            "Macro/template 交替展开未稳定（可能循环嵌套，超过 {} 轮）",
+            max_passes
+        );
+        std::process::exit(1);
+    }
+
+    if args.iter().any(|a| a == "--dump-macros") {
+        println!("=== Expanded Tokens ===");
+        for (i, t) in expanded_tokens.iter().enumerate() {
+            println!("{:4} {:?}", i, t);
+        }
+        return 0;
+    }
+
+    // Parse（使用展开后的 Token 流）
+    let mut parser = Parser::new(expanded_tokens);
+    // 宏模块检测：展开已消费 #!bin macro 声明，用原始 token 流（展开前）检测
+    // （lexer 对 `#!bin macro` 整行产生单个 Token::Macro + Newline）
+    parser.is_macro = has_bin_macro_declaration(&tokens);
+    let mut module = match parser.parse_module() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            std::process::exit(1);
+        }
+    };
+    // 模块级魔法属性 __file__/__package__/__path__ 的数据源（06e §一）：
+    // parser 不感知文件路径，编译入口（main.rs）在此注入 .lz 源文件路径
+    module.file_path = Some(path.to_string());
+    // comptime inspect.getsource/getsourcelines 的源码数据源（08b §6）：
+    // 注入源文件文本，供 ComptimeContext.with_source 使用
+    module.source_text = Some(source.clone());
+    // ── 跨模块符号内联（E0425 修复）──
+    // 单文件模式存在用户模块 import 时，加载被导入模块顶层项合并进主 AST，
+    // 使被导入符号进入 IR/codegen，修复 E0425 use/extern 作用域系列失败。
+    // 返回值是「被合并掉的模块名」清单，Cython 后端拿它剥限定前缀/省掉 import 行。
+    let merged_modules = merge_imported_modules(&mut module, Path::new(path));
+
+    if args.iter().any(|a| a == "--ast") {
+        println!("{:#?}", module);
+        return 0;
+    }
+
+    // --emit=ir: 输出 LZIR 中间表示文本（不生成 .rs）
+    if args.iter().any(|a| a == "--emit=ir") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                println!("{ir_module}");
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("IR emission error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // --emit=lex-lz / --emit=parse-lz: 自举路线 B —— 用 LZ 写的前端处理输入文件
+    if args.iter().any(|a| a == "--emit=lex-lz") {
+        run_lz_frontend(path, &source, "lex");
+        return 0;
+    }
+    if args.iter().any(|a| a == "--emit=parse-lz") {
+        run_lz_frontend(path, &source, "parse");
+        return 0;
+    }
+
+    // --emit=ir-lz: 自举路线 B —— 生成 LZ 构造代码（lz_ir_lib.lz 库 + main 构造），
+    // 经 lang-zone → rustc → 运行 输出 IR 文本（与 --emit=ir 逐字符一致）。
+    // 即「用 LZ 实现 IR display」：Rust 编译器只序列化 IR 数据为 LZ 调用，
+    // display 逻辑完全由 LZ 侧承担（bootstrap/work/lz_ir 试点落地）。
+    if args.iter().any(|a| a == "--emit=ir-lz") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                // M5 T0r56.1.2：编排已下沉 lib crate，main.rs 只留 IR 构建 + 分派
+                lang_zone::frontend::bootstrap_emit::run_lz_ir_selfcheck(&ir_module, path);
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("IR emission error (ir-lz): {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // --emit=rs-lz: 自举路线 B —— 生成 LZ 版 Rust codegen 源码（lz_codegen_lib.lz 库 + main 构造），
+    // 经 lang-zone → rustc → 运行 输出 Rust 源码（与常规 codegen 逐字符一致）。
+    // 即「用 LZ 实现 Rust 代码生成」：Rust 编译器只序列化 IR 数据为 LZ 调用，
+    // codegen 逻辑完全由 LZ 侧承担。
+    if args.iter().any(|a| a == "--emit=rs-lz") {
+        match build_ir_opt(&module, lzi_registry.as_ref()) {
+            Ok(ir_module) => {
+                // M5 T0r56.1.2：编排已下沉 lib crate（含 T0r24 embed 产物 Rust 侧落盘），
+                // main.rs 只留 IR 构建 + 分派
+                lang_zone::frontend::bootstrap_emit::run_lz_rs_selfcheck(
+                    &ir_module,
+                    path,
+                    args.iter().any(|a| a == "--embed-build"),
+                );
+                return 0;
+            }
+            Err(e) => {
+                eprintln!("RS-LZ emission error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // 默认 codegen 路径: AST → LZIR → Rust（IR 路线；原 AST→Rust 直接 codegen
+// 的 src/codegen/ 已移除，仅保留此单一 IR 管线。注意：自举路线 B 的
+// rs-lz/ir-lz/lex-lz/parse-lz 并未移除 —— 它们仍在本文件上方 ~899-903 行
+// 经 --emit=*-lz 分发处理，属实验性后备，不参与默认 IR 管线）
+    match build_ir_opt(&module, lzi_registry.as_ref()) {
+        Ok(ir_module) => {
+            if backend_cython {
+                // ── Cython 后端：IR → .pyx（与 lzcyc 共享 codegen_cython）──
+                let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
+                // 平铺合并掉的模块在 Python 侧不存在：不发射 `import X`，`X.sym` → `sym`
+                cg.set_merged_modules(merged_modules);
+                cg.set_test_runner(run_tests);
+                let pyx_code = cg.generate(&ir_module).to_string();
+                let out_path = replace_ext(path, ".lz", ".pyx");
+                fs::write(&out_path, &pyx_code).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", out_path, e);
+                    std::process::exit(1);
+                });
+                println!(
+                    "Generated {} -> {} (Cython backend, shared codegen with lzcyc)",
+                    path, out_path
+                );
+                if run_tests {
+                    run_cy_test_mode(&out_path);
+                }
+            } else {
+                // ── Rust 后端（默认）──
+                let mut cg = IrCodeGen::new();
+                // Cli 档产物按源文件主干命名（calc.lz → python_calc）；Source 档命名不受影响
+                cg.set_embed_stem(&path.to_string());
+                // I3/I4：注入 BridgeRegistry，extern/@export/embed 符号自动登记
+                let (rust_code, registry) = cg.generate_with_bridge(&ir_module);
+                // 统一抽象（src/embed）：Cli 档产物落盘 + 可选建库。
+                // 默认**只落盘、不起子进程** ⇒ 「编译一跑就 spawn 外部程序」不是既有行为的隐含变化；
+                // 要真建库必须显式 --embed-build。
+                if !cg.embed_targets().is_empty() {
+                    lang_zone::embed::emit::emit_embed_artifacts(
+                        cg.embed_targets(),
+                        args.iter().any(|a| a == "--embed-build"),
+                        false,
+                        None,
+                    );
+                }
+                let out_path = replace_ext(path, ".lz", ".rs");
+                fs::write(&out_path, &rust_code).unwrap_or_else(|e| {
+                    eprintln!("Error writing {}: {}", out_path, e);
+                    std::process::exit(1);
+                });
+                print_link_recipe(std::path::Path::new(&out_path));
+                println!("Generated {} -> {} (IR codegen)", path, out_path);
+                if registry.symbol_count() > 0 {
+                    println!(
+                        "Bridge registry: {} symbol(s) registered (extern/export/embed)",
+                        registry.symbol_count()
+                    );
+                }
+
+                // --test: 编译并运行测试（IR 路径）
+                if run_tests {
+                    run_test_mode(path, &out_path);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("IR build error: {e}");
+            std::process::exit(1);
+        }
+    }
+    0
+}
+
+/// Cli 档 embed 产物的交付面已下沉到 lib crate：`lang_zone::embed::emit::emit_embed_artifacts`（T0r55.1.1）。
+/// 调用点改用 `lang_zone::embed::emit::emit_embed_artifacts`，与 CY/（lzcyc）共用同一条交付面。
+
+/// 带可选 .lzi 跨模块签名的 build_ir 分发：有 registry 走 build_ir_with_lzi，
+/// 否则默认入口（本地函数查不到返回类型时回退查询外部模块签名）
+/// 统一入口：先做 G2 语义检查（semantic_check），再进入 IR 构建。
+#[cfg(feature = "infer")]
+fn build_ir_opt(
+    module: &lang_zone::ast::Module,
+    lzi: Option<&std::rc::Rc<lang_zone::infer::LziRegistry>>,
+) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
+    let errs = lang_zone::semantic_check::check_module(module);
+    if !errs.is_empty() {
+        return Err(lang_zone::ir::builder::IrBuildError::Generic(
+            errs.join("\n"),
+        ));
+    }
+    match lzi {
+        Some(reg) => lang_zone::ir::builder::build_ir_with_lzi(module, reg.clone()),
+        None => build_ir(module),
+    }
+    .map(|m| {
+        report_tco_warnings();
+        m
+    })
+}
+
+/// 打印尾递归优化的非致命提示（如 `#[tail_call]` 弃用别名）
+fn report_tco_warnings() {
+    for w in lang_zone::ir::builder::take_tco_warnings() {
+        eprintln!("{}", w);
+    }
+}
+
+/// 非 infer 构建：无 .lzi 支持，直接走默认 build_ir（忽略 lzi 占位参数）
+/// 统一入口：先做 G2 语义检查（semantic_check），再进入 IR 构建。
+#[cfg(not(feature = "infer"))]
+fn build_ir_opt(
+    module: &lang_zone::ast::Module,
+    _lzi: Option<&()>,
+) -> Result<lang_zone::ir::IrModule, lang_zone::ir::builder::IrBuildError> {
+    let errs = lang_zone::semantic_check::check_module(module);
+    if !errs.is_empty() {
+        return Err(lang_zone::ir::builder::IrBuildError::Generic(
+            errs.join("\n"),
+        ));
+    }
+    build_ir(module).map(|m| {
+        report_tco_warnings();
+        m
+    })
+}
+
+/// 从 CLI 参数中提取标志值（如 --std-dir <path>）
+fn extract_flag_value(args: &[String], flag: &str) -> Option<String> {
+    for i in 0..args.len() {
+        if args[i] == flag && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
+        }
+    }
+    None
+}
+
+// T0r25：旧的 `find_builtins_rlib` / `probe_rlib`（硬编码 `<manifest>/target/debug`）
+// 已上移到文件前部，改为按运行环境推导；同一个 `find_builtins_rlib()` 名字保留，
+// 供 `run_test_mode` 等调用方使用。
+
+/// 编译生成的 .rs 文件为测试二进制并运行（IR 路线的 `lz test`）
+/// 找一个可用的宿主 Python：`LZ_PYTHON` 优先，其次 `python`/`python3`（要求 `--version` 真跑得通）。
+/// 取不到就返回 None —— 调用方必须拒绝出数（非零），不能把「没跑」报成「跑过」。
+fn cy_python_program() -> Option<String> {
+    if let Ok(p) = std::env::var("LZ_PYTHON") {
+        if !p.trim().is_empty() {
+            if python_usable(&p) {
+                return Some(p);
+            }
+            return None;
+        }
+    }
+    ["python", "python3"]
+        .iter()
+        .find(|p| python_usable(p))
+        .map(|p| p.to_string())
+}
+
+fn python_usable(prog: &str) -> bool {
+    std::process::Command::new(prog)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// pyximport 宿主：把 .pyx 复制成一个谁也不可能预占的别名再编译导入。
+/// 别名与身份校验不是洁癖——`sys.meta_path` 里 pyx 的 finder 排在最后，同名的
+/// site-packages/stdlib 包会先命中（cy L3 实测过 `enum`/`struct`/`test_suite` 被抢，
+/// 那一轮的 ok 里含假绿）。
+///
+/// 两条本轮实测到的坑，都写进代码里免得下一轮再踩：
+///  ① 身份**不许读 `mod.__file__`**：LZ 产物自己在模块级发 `__file__ = "<源文件>.lz"`
+///     （const 机制），读它会把真产物判成冒名（假红）。用导入机器形写入的 `spec.origin`。
+///  ② 归属比较不许用字符串前缀：`.../target/cy-testface/x.lz` 以 `.../target/cy-test`
+///     开头却是隔壁目录（假绿）。用 `os.path.commonpath` 按分量比。
+const CY_TEST_HOST: &str = r#"import os, subprocess, sys
+
+def inside(child, parent):
+    a, b = os.path.realpath(child), os.path.realpath(parent)
+    try:
+        return os.path.commonpath([a, b]) == b
+    except ValueError:
+        return False
+
+pyx_path, alias, work = sys.argv[1], sys.argv[2], sys.argv[3]
+
+if os.environ.get("LZCYT_STAGE") != "run":
+    # 第一遍把 pyximport/setuptools 的编译噪声关进子进程（它会往 stdout 打 MSVC 链接器
+    # 日志，冷缓存那一遍尤其明显），第二遍缓存命中 ⇒ stdout 只剩测试行，跨后端才可比。
+    env = dict(os.environ)
+    env["LZCYT_STAGE"] = "run"
+    subprocess.call([sys.executable, os.path.abspath(__file__), pyx_path, alias, work],
+                    env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="strict")
+except Exception:
+    pass
+
+try:
+    import pyximport
+    pyximport.install(language_level=3, build_dir=work)
+    if work not in sys.path:
+        sys.path.insert(0, work)
+    mod = __import__(alias)
+except Exception as exc:
+    sys.stderr.write("error: .pyx 编译或导入失败：%s\n" % exc)
+    sys.exit(5)
+
+origin = getattr(getattr(mod, "__spec__", None), "origin", None)
+if not origin:
+    origin = getattr(getattr(mod, "__loader__", None), "path", None)
+if not origin or not inside(origin, work):
+    sys.stderr.write("error: 加载到的模块不是本次产物：%r\n" % (origin,))
+    sys.exit(4)
+
+run = getattr(mod, "_lz_run_tests", None)
+if run is None:
+    sys.stderr.write("error: 产物里没有 _lz_run_tests 运行器（发射失败）\n")
+    sys.exit(3)
+sys.exit(1 if run() else 0)
+"#;
+
+/// cy 面的 `--test`：用 pyximport 编译并执行刚写出的 .pyx，逐条状态由发射的运行器打印。
+/// 尾巴的 ✅/❌ 与退出码对齐 Rust 面的 run_test_mode，两面同一份 .lz 才有可比性。
+fn run_cy_test_mode(pyx_path: &str) {
+    let py = match cy_python_program() {
+        Some(p) => p,
+        None => {
+            eprintln!("Test compilation failed: 找不到可用的 python");
+            std::process::exit(1);
+        }
+    };
+    let stem = Path::new(pyx_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mod".to_string());
+    let alias = format!("_lzcyt_{}", stem);
+    let work = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("cy-test");
+    if let Err(e) = std::fs::create_dir_all(&work) {
+        eprintln!("Test compilation failed: 建不出 {}：{e}", work.display());
+        std::process::exit(1);
+    }
+    // 每次起手摘掉旧产物：宁可慢一遍编译，也不让上一轮的 .pyd 冒充本轮的代码
+    for ext in [".pyx", ".c", ".pyd", ".so"].iter() {
+        let mut f = work.join(&alias);
+        f.set_extension(format!("{}", ext.trim_start_matches('.')));
+        let _ = std::fs::remove_file(&f);
+    }
+    let aliased = work.join(format!("{}.pyx", alias));
+    if let Err(e) = std::fs::copy(pyx_path, &aliased) {
+        eprintln!("Test compilation failed: 复制不出 {}：{e}", aliased.display());
+        std::process::exit(1);
+    }
+    let host = work.join("lz_cy_test_host.py");
+    if let Err(e) = fs::write(&host, CY_TEST_HOST) {
+        eprintln!("Test compilation failed: 写不出宿主：{e}");
+        std::process::exit(1);
+    }
+    let status = std::process::Command::new(&py)
+        .arg(&host)
+        .arg(&aliased)
+        .arg(&alias)
+        .arg(&work)
+        .status();
+    match status {
+        Ok(s) if s.success() => println!("✅ All tests passed"),
+        Ok(s) if s.code() == Some(1) => {
+            eprintln!("❌ Some tests failed");
+            std::process::exit(1);
+        }
+        Ok(s) if s.code() == Some(5) => {
+            eprintln!("Test compilation failed（.pyx 编译或导入失败，宿主退出码 5）");
+            std::process::exit(1);
+        }
+        Ok(s) => {
+            eprintln!(
+                "❌ 测试执行面未能给出判定（宿主退出码 {:?}：3=产物里没有运行器，\
+                 4=加载到的模块不是本次产物，5=编译或导入失败）",
+                s.code()
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Test compilation failed: 起不了 {}：{e}", py);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_test_mode(source_path: &str, out_path: &str) {
+    let out_name = replace_ext(source_path, ".lz", "");
+    #[cfg(target_os = "windows")]
+    let test_bin = format!("{}_test.exe", out_name);
+    #[cfg(not(target_os = "windows"))]
+    let test_bin = format!("{}_test", out_name);
+
+    // 确保 lz_builtins 的 rlib 存在：cargo 可能因 lang-zone 自身不直接引用其符号
+    // （只生成含 `use lz_builtins::*` 的字符串）而只产出 .rmeta，导致 rustc --test 时
+    // 找不到 crate（E0432）。显式构建该包以生成 .rlib。
+    //
+    // T0r25：**显式传 `--target-dir`**（与 tests/demo_codegen_compile.rs 的 T0r13 修法
+    // 一致）。产物目录由 lane_profile_dir() 推导（可能来自 CARGO_TARGET_DIR=target/lane-xxx）；
+    // 若沿用 cargo 默认目录，构建会落到 target/debug、解析却看向车道目录 → 假红。
+    let profile = profile_name(&lane_profile_dir());
+    let mut cargo = std::process::Command::new("cargo");
+    cargo
+        .current_dir(crate_root())
+        .args(["build", "-p", "lz_builtins", "--quiet"])
+        .arg("--target-dir")
+        .arg(lane_target_root());
+    if profile != "debug" {
+        // release / 自定义 profile 与 lzc 自身所在 profile 对齐
+        cargo.arg("--release");
+    }
+    let _ = cargo.status();
+
+    let mut cmd = std::process::Command::new("rustc");
+    // 生成的 .rs 使用 2021 版语法，且依赖 lz_builtins crate，必须显式链接其 rlib
+    cmd.arg("--edition")
+        .arg("2021")
+        .arg("--test")
+        .arg(out_path)
+        .arg("-o")
+        .arg(&test_bin);
+    if let Some((rlib, deps)) = builtins_link() {
+        cmd.arg("--extern")
+            .arg(format!("lz_builtins={}", rlib.display()));
+        cmd.arg("-L").arg(format!("dependency={}", deps.display()));
+    } else {
+        eprintln!("warning: 未找到 lz_builtins rlib，测试构建可能因链接失败");
+    }
+
+    match cmd.status() {
+        Ok(s) if s.success() => match std::process::Command::new(&test_bin).status() {
+            Ok(s) if s.success() => {
+                println!("✅ All tests passed");
+                let _ = std::fs::remove_file(&test_bin);
+            }
+            _ => {
+                eprintln!("❌ Some tests failed");
+                let _ = std::fs::remove_file(&test_bin);
+                std::process::exit(1);
+            }
+        },
+        _ => {
+            eprintln!("Test compilation failed");
+            std::process::exit(1);
+        }
+    }
+}

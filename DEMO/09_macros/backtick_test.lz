@@ -1,0 +1,10 @@
+#!bin macro
+// f``` 三反引号块 + $(expr) 插值测试（08 §3.2）
+// $(x) 是反引号块内裸 token（非字符串内），展开时替换为参数 token
+macro block_print(x: Tokens) -> Tokens =
+    f```
+    print($(x))
+    ```
+
+def main() =
+    @block_print!(42)

@@ -1,0 +1,12 @@
+// bootstrap test3: struct + 字段访问
+struct Point =
+  x: int
+  y: int
+
+def origin() -> Point =
+  Point(x: 0, y: 0)
+
+def main() =
+  p = Point(x: 3, y: 4)
+  print(p.x)
+  print(p.y)

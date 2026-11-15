@@ -1,0 +1,26 @@
+def test_0() -> int:
+    match 42:
+        case 0:
+            return 0
+        case _:
+            return -1
+    let x: float = -3.14
+    while (-(-z)):
+        break
+
+def test_1() -> int:
+    match y:
+        case 0:
+            return 0
+        case _:
+            return -1
+    print((-((-1))))
+    return (print((print(False))) / 1)
+
+def test_2() -> int:
+    100
+    y
+    x = (((-print(True)) * result))
+
+def main() -> int:
+    return 0

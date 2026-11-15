@@ -1,0 +1,5 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0","assignee":"night-executor","now":"2026-09-27T00:25:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0","split_n":3,"by":"night-executor","spec":"{\"laws\":[\"标记盘点:src 全量 TODO/FIXME/HACK/unwrap/panic 统计\",\"测试暴露:cargo test 门禁实跑取失败清单\",\"读码狩猎+golden差分:codegen 哨兵与生成产物逐字节比对\",\"确诊入账:最小复现+根因+补丁入 bugs.md\"],\"fingerprint\":\"lz-night-20260926-R1-hunt\"}","omega_strong_verify":true,"laya_auto":true,"now":"2026-09-27T00:25:00+08:00"}},
+ {"name":"list","arguments":{"now":"2026-09-27T00:25:00+08:00"}}
+]

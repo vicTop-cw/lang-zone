@@ -1,0 +1,8 @@
+[
+ {"name":"reserve_check","arguments":{"scope":"src/ir/codegen/mod.rs"}},
+ {"name":"reserve_check","arguments":{"scope":"tests/demo_codegen_compile.rs"}},
+ {"name":"reserve_check","arguments":{"scope":"DEMO/01_basics/"}},
+ {"name":"reserve_scope","arguments":{"scope":"src/ir/codegen/mod.rs","agent":"lang-zone-explore-cron","ttl_until":"2026-10-10T09:50:00+08:00"}},
+ {"name":"reserve_scope","arguments":{"scope":"tests/demo_codegen_compile.rs","agent":"lang-zone-explore-cron","ttl_until":"2026-10-10T09:50:00+08:00"}},
+ {"name":"reserve_scope","arguments":{"scope":"DEMO/01_basics/","agent":"lang-zone-explore-cron","ttl_until":"2026-10-10T09:50:00+08:00"}}
+]

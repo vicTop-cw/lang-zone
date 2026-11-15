@@ -1,0 +1,10 @@
+struct Q =
+    v: int
+
+magic __str__:
+    def __str__(self: Q) -> str =
+        f"Q({self.v})"
+
+def main() =
+    q = Q(v: 1)
+    print(str(q))

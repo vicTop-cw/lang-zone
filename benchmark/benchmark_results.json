@@ -1,0 +1,29 @@
+{
+  "Lang-Zong (lz)": {
+    "compile_lzc_s": 0.107,
+    "exec_s": 0.6689,
+    "binary_kb": 126.5,
+    "loc": 8
+  },
+  "Rust": {
+    "compile_s": 0.251,
+    "exec_s": 0.7174,
+    "binary_kb": 141.5,
+    "loc": 13
+  },
+  "Scala": {
+    "compile_s": 2.19,
+    "exec_s": 0.6994,
+    "loc": 12
+  },
+  "Go": {
+    "compile_s": 1.06,
+    "exec_s": 0.6009,
+    "binary_kb": 2416.5,
+    "loc": 12
+  },
+  "Python": {
+    "exec_s": 1.0065,
+    "loc": 9
+  }
+}

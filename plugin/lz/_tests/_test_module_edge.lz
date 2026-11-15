@@ -1,0 +1,25 @@
+// _test_module_edge.lz — 阶段 2 边界测试
+// 测试: 私有访问、别名导入、结构体构造、循环导入
+
+import _test_module_a
+
+// ── 测试 1: 尝试访问私有函数 ──
+def test_private_access() =
+    // 尝试调用 _internal（私有函数，应报错或无法访问）
+    result = _test_module_a._internal()
+    print("Private access: ")
+    print(result)
+
+// ── 测试 2: 模块路径的结构体构造 ──
+def test_struct_construct() =
+    p = _test_module_a.Point(5, 15)
+    print("Struct Point: ")
+    print(p.x)
+    print(p.y)
+
+// 主入口
+def main() =
+    print("=== Module Edge Test ===")
+    test_private_access()
+    test_struct_construct()
+    print("=== Module Edge Test Complete ===")

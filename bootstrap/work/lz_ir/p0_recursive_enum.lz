@@ -1,0 +1,17 @@
+// 自举试点可行性验证：LZ 递归 enum（IR 的 IrType 是自引用类型）
+// 变体字段用括号定义（enum Shape: Circle(x: int, ...)）
+enum IrType:
+    Int
+    Named(path: str, args: List<IrType>)
+    Option(inner: IrType)
+
+def main() =
+    // 构造递归类型：Option<Named("Vec", [Int])>
+    let t = IrType.Option(inner: IrType.Named(path: "Vec", args: [IrType.Int]))
+    match t:
+        case IrType.Option(inner: n) =>
+            match n:
+                case IrType.Named(path: p, args: a) =>
+                    print("recursive enum OK: Option<" + p + "<" + ("Int" if a.len() > 0 else "?") + ">>")
+                case _ => print("not named")
+        case _ => print("not option")

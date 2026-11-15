@@ -1,0 +1,62 @@
+// ============================================================
+// 轮21: 错误处理进阶 — guard 组合/raise/嵌套检查
+// 每项用 assert 确保正确
+// ============================================================
+
+def safe_div(a: int, b: int) -> int =
+    guard b != 0 else:
+        raise "division by zero"
+    a / b
+
+def clamp(v: int, lo: int, hi: int) -> int =
+    guard v >= lo else:
+        return lo
+    guard v <= hi else:
+        return hi
+    v
+
+def is_valid(x: int) -> bool =
+    guard x >= 0 else:
+        return False
+    guard x < 100 else:
+        return False
+    True
+
+def main() =
+    // ── guard 多条件组合（连续 guard） ──
+    assert clamp(5, 0, 10) == 5
+    assert clamp(-3, 0, 10) == 0
+    assert clamp(99, 0, 10) == 10
+    assert clamp(0, 0, 10) == 0
+    assert clamp(10, 0, 10) == 10
+
+    // ── guard 返回布尔判定 ──
+    assert is_valid(0) == True
+    assert is_valid(50) == True
+    assert is_valid(-1) == False
+    assert is_valid(100) == False
+    assert is_valid(99) == True
+
+    // ── 除法保护（guard 通过路径） ──
+    assert safe_div(10, 2) == 5
+    assert safe_div(-8, 4) == -2
+
+    // ── assert/check 组合 ──
+    assert clamp(7, 0, 10) == 7
+    check clamp(8, 0, 10) == 8
+
+    // ── 嵌套 guard（函数内多层校验） ──
+    def grade2(score: int) -> str =
+        guard score >= 0 else:
+            return "invalid"
+        guard score <= 100 else:
+            return "invalid"
+        if score >= 60:
+            return "pass"
+        return "fail"
+    assert grade2(75) == "pass"
+    assert grade2(40) == "fail"
+    assert grade2(-5) == "invalid"
+    assert grade2(150) == "invalid"
+
+    print("P21 errors OK")

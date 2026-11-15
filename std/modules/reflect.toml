@@ -1,0 +1,43 @@
+# lz std::reflect — 运行时反射库
+# 源码级映射：lz 符号 → std/reflect.rs 运行时反射库
+# 基于 Rust 重写的 C reflect 库替代品
+
+[module]
+tier = 1
+rust_prefix = "std::reflect"
+
+# ── 自由函数 ──
+
+[functions]
+init       = { rust = "__lz_reflect_init", shim = "" }
+register   = { rust = "__lz_reflect_register", shim = "" }
+findType   = { rust = "__lz_reflect_find_type", shim = "" }
+fieldCount = { rust = "__lz_reflect_field_count", shim = "" }
+field      = { rust = "__lz_reflect_field", shim = "" }
+findField  = { rust = "__lz_reflect_find_field", shim = "" }
+
+# ── 类型映射 ──
+
+[types]
+TypeInfo  = "__lz_TypeInfo"
+FieldInfo = "__lz_FieldInfo"
+TypeKind  = "__lz_TypeKind"
+
+# ── 字段内省方法 ──
+
+[methods]
+# TypeInfo 方法
+name       = "name"
+size       = "size"
+fields     = "fields"
+typeName   = "name"
+
+# FieldInfo 方法
+fieldName  = "name"
+offset     = "offset"
+kind       = "kind"
+
+# ── 类型安全字段读写 ──
+# codegen 侧生成对应函数调用
+
+[aliases]

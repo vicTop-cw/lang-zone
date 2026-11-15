@@ -1,0 +1,174 @@
+// p43_nested_block.lz：验证「parse_stmt If 分支递归调 parse_block」嵌套递归逻辑
+// 最小嵌套：if 1: 体含 return 2（两层级联）——证明嵌套块递归可工作
+enum Token:
+    IntLit(v: int)
+    Ident(name: str)
+    If
+    Return
+    Indent(v: int)
+    Newline
+    Eof
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def scan_indent(src: str, start: int) -> (int, int) =
+    let mut j = start
+    while j < str_len(src) && char_at(src, j) == " ":
+        j = j + 1
+    (j - start, j)
+
+def scan_int(src: str, start: int) -> (int, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    let v = src[start..i] as int
+    let res: (int, int) = (v, i)
+    res
+
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && (is_alpha(char_at(src, i)) or is_digit(char_at(src, i))):
+        i = i + 1
+    (src[start..i], i)
+
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    let mut line_start = true
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if line_start && c == " ":
+            let r = scan_indent(src, i)
+            tokens = tokens + [Token.Indent(v: r.0)]
+            i = r.1
+            line_start = false
+        elif line_start:
+            tokens = tokens + [Token.Indent(v: 0)]
+            line_start = false
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+            line_start = true
+        elif is_digit(c):
+            let r = scan_int(src, i)
+            i = r.1
+            tokens = tokens + [Token.IntLit(v: r.0)]
+            line_start = false
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let w = r.0
+            if w == "if":
+                tokens = tokens + [Token.If]
+            elif w == "return":
+                tokens = tokens + [Token.Return]
+            else:
+                tokens = tokens + [Token.Ident(name: w)]
+            line_start = false
+        else:
+            i = i + 1
+    tokens = tokens + [Token.Eof]
+    tokens
+
+def tok_at(toks: List<Token>, idx: int) -> Token =
+    toks[idx].clone()
+
+def tok_int(t: Token) -> int =
+    let res: int = match t:
+        case Token.IntLit(v: n) => n
+        case _ => -1
+    res
+
+def tok_name(t: Token) -> str =
+    let res: str = match t:
+        case Token.Ident(name: n) => n
+        case _ => "?"
+    res
+
+// block_tag: 0=其它, 1=Newline, 2=Indent
+def block_tag(t: Token) -> int =
+    let res: int = match t:
+        case Token.Newline => 1
+        case Token.Indent(v: n) => 2
+        case _ => 0
+    res
+
+def block_indent(t: Token) -> int =
+    let res: int = match t:
+        case Token.Indent(v: n) => n
+        case _ => -1
+    res
+
+// parse_block：收集缩进 > indent 的语句；语句内 If 递归调 parse_block（嵌套）
+def parse_block(toks: List<Token>, pos: int, indent: int) -> (List<str>, int) =
+    let mut out: List<str> = []
+    let mut p = pos
+    let mut done = false
+    while not done:
+        let t = tok_at(toks, p)
+        let tag = block_tag(t)
+        if tag == 0:
+            done = true
+        elif tag == 1:
+            p = p + 1
+        elif tag == 2:
+            let n = block_indent(t)
+            if n > indent:
+                let r = parse_stmt(toks, p + 1)
+                let s = r.0
+                if s.len() > 0:
+                    out = out + [s]
+                p = r.1
+            else:
+                done = true
+        else:
+            done = true
+    (out, p)
+
+// parse_stmt：if expr { 体 } | return expr | 表达式
+def parse_stmt(toks: List<Token>, pos: int) -> (str, int) =
+    let t = tok_at(toks, pos)
+    let res: (str, int) = match t:
+        case Token.If =>
+            let nt = tok_at(toks, pos + 1)
+            let cond = tok_int(nt)
+            let blk = parse_block(toks, pos + 2, 0)
+            let body = blk.0
+            let blk_end = blk.1
+            let body_s = list_summary(body)
+            let rr: (str, int) = ("if " + cond.to_string() + " {" + body_s + "}", blk_end)
+            rr
+        case Token.Return =>
+            let nt = tok_at(toks, pos + 1)
+            let v = tok_int(nt)
+            let rr: (str, int) = ("return " + v.to_string(), pos + 2)
+            rr
+        case _ =>
+            let rr: (str, int) = ("?", pos + 1)
+            rr
+    res
+
+def list_summary(xs: List<str>) -> str =
+    let mut out = ""
+    for idx in 0..xs.len():
+        if idx > 0:
+            out = out + ", "
+        out = out + xs[idx]
+    out
+
+def main() =
+    // 嵌套：if 1: 体含 return 2（if 的 Indent(4) 内再套 return）
+    let src = "if 1:\n    return 2"
+    let toks = tokenize(src)
+    let r = parse_stmt(toks, 0)
+    print(r.0)

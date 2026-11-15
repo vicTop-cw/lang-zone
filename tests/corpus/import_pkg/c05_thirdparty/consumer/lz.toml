@@ -1,0 +1,7 @@
+# C05: third-party package import via local registry
+name = "c05consumer"
+version = "0.1.0"
+entry = "src/main.lz"
+
+[dependencies]
+mathlib = "0.1.0"

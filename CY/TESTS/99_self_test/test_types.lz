@@ -1,0 +1,41 @@
+// LZ 自测 — 基本类型和字面量
+def main() =
+    // 整数
+    assert 42 == 42
+    assert 0xFF == 255
+    assert 0b1010 == 10
+    assert 0o77 == 63
+
+    // 浮点
+    assert 3.14 == 3.14
+    assert 1e10 == 10000000000.0
+
+    // 布尔
+    assert True
+    assert not False
+
+    // 字符串
+    assert "hello" == "hello"
+    let empty = ""
+    assert empty == ""
+
+    // 列表
+    assert [1, 2, 3] == [1, 2, 3]
+
+    // 元组
+    let t = (1, "hi")
+    assert t[0] == 1
+
+    // 字典
+    let d = {"a": 1}
+    assert d["a"] == 1
+
+    // 集合
+    let s = {1, 2}
+    assert 1 in s
+
+    // None
+    let n = None
+    assert n is None
+
+    print("✅ 所有类型和字面量测试通过")

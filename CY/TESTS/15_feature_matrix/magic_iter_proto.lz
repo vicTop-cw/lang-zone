@@ -1,0 +1,48 @@
+// 15_feature_matrix - magic_iter_proto：迭代子协议（SYNTAX/12 §3.1 `__iter__`/`__next__` ＋ SYNTAX/14）
+//
+// 覆盖的是**取数面**，不是「能不能编译」：LZ 的 `__next__` 用 `Option.None` 表示「取完了」，
+// 而 Python 的 for 协议要求抛 `StopIteration`。旧发射把 `Option.None` 直接发成 `return None`，
+// for 循环于是把 `None` 当成**一个元素**（`total = total + None` ⇒ TypeError），
+// 修前该形状在 cy 面一件语料都没有（探针 `TEMP/magic_probes_r11.py`，回执 `TEMP/magic-probes-*.log`）。
+// 现在 for 的取数面对「实现了迭代魔法的用户类」套 `_lz_iter`，而用户的 `__next__` 原样保留 ⇒
+// `next(it)` 与 `it.__next__()` 仍返回 Option 形态（第三、四行打印就是这条）。
+//
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分。
+struct Steps =
+    n: int
+
+impl Steps =
+    def __iter__(self) -> StepsIter =
+        StepsIter(i: 0, n: self.n)
+
+struct StepsIter =
+    i: int
+    n: int
+
+impl StepsIter =
+    def __next__(mut self) -> Option<int> =
+        if self.i < self.n:
+            let r = self.i
+            self.i = self.i + 1
+            Option.Some(value: r)
+        else:
+            Option.None
+
+def main() =
+    // ── for 取数面：None 必须是「结束」而不是一个元素 ──
+    mut total = 0
+    for x in Steps(n: 4):
+        total = total + x
+    print(total)
+
+    // ── 空迭代器：一次都不进循环体 ──
+    mut hits = 0
+    for y in Steps(n: 0):
+        hits = hits + 1
+    print(hits)
+
+    // ── 显式取下一步：Some 出值、None 出默认（`.unwrap_or` 在 cy 侧是分档不是方法）──
+    let g = Steps(n: 2).__iter__()
+    print(g.__next__().unwrap_or(-1))
+    print(g.__next__().unwrap_or(-1))
+    print(g.__next__().unwrap_or(-1))

@@ -1,0 +1,35 @@
+// 错误 1 最小复现：递归函数 + enum 参数 + ts[0] 实参
+enum IrType:
+    Int
+    Named(path: str, args: List<IrType>)
+    Option(inner: IrType)
+
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + display_list(a) + ">" if a.len() > 0 else "")
+        case IrType.Option(inner: i) => "Option<" + display_type(i) + ">"
+
+def display_list(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        let head = display_type(ts[0])
+        if ts.len() > 1:
+            head + ", " + display_list(tail(ts))
+        else:
+            head
+
+def tail(ts: List<IrType>) -> List<IrType> =
+    let mut out: List<IrType> = []
+    for i in 1..ts.len():
+        out = out + [ts[i]]
+    out
+
+def main() =
+    let v = IrType.Named(path: "Vec", args: [IrType.Int])
+    print(display_type(v))
+    let v2 = IrType.Named(path: "Vec", args: [IrType.Int])
+    let ov = IrType.Option(inner: v2)
+    print(display_type(ov))

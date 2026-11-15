@@ -1,0 +1,341 @@
+// lz_builtins/std/math.lz — 数学工具库
+// 全部用 LZ 原语实现，不调用 Rust math。
+
+// ── 整数数学 ──────────────────────────────────────────────────
+
+// abs — 绝对值
+def abs(x: int) -> int =
+  if x < 0 then -x else x
+
+// sign — 符号函数（-1/0/1）
+def sign(x: int) -> int =
+  if x < 0 then -1 else (if x > 0 then 1 else 0)
+
+// max_int — 二元最大
+def max_int(a: int, b: int) -> int =
+  if a > b then a else b
+
+// min_int — 二元最小
+def min_int(a: int, b: int) -> int =
+  if a < b then a else b
+
+// clamp_int — 限制在 [lo, hi] 范围
+def clamp_int(x: int, lo: int, hi: int) -> int =
+  if x < lo then lo else (if x > hi then hi else x)
+
+// pow — 整数幂
+def pow(base: int, exp: int) -> int =
+  if exp < 0:
+    return 0
+  if exp == 0:
+    return 1
+  result = 1
+  i = 0
+  while i < exp:
+    result = result * base
+    i = i + 1
+  result
+
+// divmod — 商和余数
+def divmod(n: int, d: int) -> (int, int) =
+  if d == 0:
+    return (0, 0)
+  q = n / d
+  r = n % d
+  (q, r)
+
+// is_even — 是否偶数
+def is_even(x: int) -> bool =
+  x % 2 == 0
+
+// is_odd — 是否奇数
+def is_odd(x: int) -> bool =
+  x % 2 != 0
+
+// gcd — 最大公约数（欧几里得算法）
+def gcd(a: int, b: int) -> int =
+  a2 = abs(a)
+  b2 = abs(b)
+  while b2 != 0:
+    (q, r) = divmod(a2, b2)
+    a2 = b2
+    b2 = r
+  a2
+
+// lcm — 最小公倍数
+def lcm(a: int, b: int) -> int =
+  if a == 0 or b == 0:
+    return 0
+  abs(a * b) / gcd(a, b)
+
+// factorial — 阶乘
+def factorial(n: int) -> int =
+  if n < 0:
+    return 0
+  if n <= 1:
+    return 1
+  result = 1
+  i = 2
+  while i <= n:
+    result = result * i
+    i = i + 1
+  result
+
+// fibonacci(n) — 第 n 个斐波那契数
+def fibonacci(n: int) -> int =
+  if n <= 0:
+    return 0
+  if n == 1:
+    return 1
+  a = 0
+  b = 1
+  i = 2
+  while i <= n:
+    c = a + b
+    a = b
+    b = c
+    i = i + 1
+  b
+
+// is_prime — 是否质数
+def is_prime(n: int) -> bool =
+  if n < 2:
+    return false
+  if n == 2:
+    return true
+  if is_even(n):
+    return false
+  i = 3
+  while i * i <= n:
+    if n % i == 0:
+      return false
+    i = i + 2
+  true
+
+// primes_upto(n) — 1..n 范围内的质数
+def primes_upto(n: int) -> List<int> =
+  result: List<int> = []
+  i = 2
+  while i <= n:
+    if is_prime(i):
+      push(result, i)
+    i = i + 1
+  result
+
+// digit_sum — 各位数之和
+def digit_sum(n: int) -> int =
+  if n < 0:
+    return digit_sum(-n)
+  if n == 0:
+    return 0
+  digit_sum(n / 10) + (n % 10)
+
+// digit_count — 位数
+def digit_count(n: int) -> int =
+  if n == 0:
+    return 1
+  if n < 0:
+    return digit_count(-n) + 1
+  count = 0
+  temp = n
+  while temp > 0:
+    count = count + 1
+    temp = temp / 10
+  count
+
+// range_sum — 1+2+...+n = n*(n+1)/2
+def range_sum(n: int) -> int =
+  n * (n + 1) / 2
+
+// ── 浮点数学 ──────────────────────────────────────────────────
+
+// abs_f — 浮点绝对值
+def abs_f(x: float) -> float =
+  if x < 0.0 then -x else x
+
+// sign_f — 浮点符号
+def sign_f(x: float) -> float =
+  if x < 0.0 then -1.0 else (if x > 0.0 then 1.0 else 0.0)
+
+// pow_f — 浮点幂
+def pow_f(base: float, exp: float) -> float =
+  // 简化为 exp 为整数的情况
+  pow(base as int, exp as int) as float
+
+// floor — 向下取整
+def floor(x: float) -> int =
+  if x >= 0.0:
+    return x as int
+  if x as int == x:
+    return x as int
+  (x - 1.0) as int
+
+// ceil — 向上取整
+def ceil(x: float) -> int =
+  if x <= 0.0:
+    return x as int
+  if x as int == x:
+    return x as int
+  (x + 1.0) as int
+
+// round — 四舍五入
+def round(x: float) -> int =
+  if x >= 0.0:
+    return (x + 0.5) as int
+  (x - 0.5) as int
+
+// clamp_float — 浮点数限制范围
+def clamp_float(x: float, lo: float, hi: float) -> float =
+  if x < lo then lo else (if x > hi then hi else x)
+
+// is_nan — 是否为 NaN
+def is_nan(x: float) -> bool =
+  // NaN != NaN
+  x != x
+
+// is_inf — 是否为无穷
+def is_inf(x: float) -> bool =
+  x > 1e308 or x < -1e308
+
+// ── 数列 ──────────────────────────────────────────────────────
+
+// arithmetic_series(a, d, n) — 等差数列前 n 项和
+// 首项 a，公差 d，第 n 项 = a + (n-1)*d
+def arithmetic_series(a: int, d: int, n: int) -> int =
+  if n <= 0:
+    return 0
+  n * a + d * (n - 1) * n / 2
+
+// geometric_series(a, r, n) — 等比数列前 n 项和
+// 首项 a，公比 r
+def geometric_series(a: int, r: int, n: int) -> int =
+  if n <= 0:
+    return 0
+  if r == 1:
+    return a * n
+  a * (pow(r, n) - 1) / (r - 1)
+
+// sum_of_squares(n) — 1²+2²+...+n² = n(n+1)(2n+1)/6
+def sum_of_squares(n: int) -> int =
+  n * (n + 1) * (2 * n + 1) / 6
+
+// sum_of_cubes(n) — 1³+2³+...+n³ = (n(n+1)/2)²
+def sum_of_cubes(n: int) -> int =
+  m = n * (n + 1) / 2
+  m * m
+
+// ── 组合数学 ──────────────────────────────────────────────────
+
+// binomial(n, k) — C(n,k) = n!/(k!(n-k)!)
+def binomial(n: int, k: int) -> int =
+  if k < 0 or k > n:
+    return 0
+  if k == 0 or k == n:
+    return 1
+  // 取较小的 k
+  k2 = if k < n - k then k else (n - k)
+  result = 1
+  i = 0
+  while i < k2:
+    result = result * (n - i) / (i + 1)
+    i = i + 1
+  result
+
+// permutations(n, k) — P(n,k) = n!/(n-k)!
+def permutations(n: int, k: int) -> int =
+  if k < 0 or k > n:
+    return 0
+  result = 1
+  i = 0
+  while i < k:
+    result = result * (n - i)
+    i = i + 1
+  result
+
+// ── 测试入口 ────────────────────────────────────────────────────
+
+def test_abs() =
+  print("[abs]:", abs(-5), abs(0), abs(5))
+  assert abs(-5) == 5
+  assert abs(0) == 0
+  assert abs(5) == 5
+
+def test_gcd_lcm() =
+  print("[gcd 12,8]:", gcd(12, 8))
+  print("[lcm 12,8]:", lcm(12, 8))
+  assert gcd(12, 8) == 4
+  assert lcm(12, 8) == 24
+
+def test_factorial() =
+  print("[factorial 5]:", factorial(5))
+  assert factorial(5) == 120
+  assert factorial(0) == 1
+  assert factorial(1) == 1
+
+def test_fibonacci() =
+  print("[fibonacci 10]:", fibonacci(10))
+  assert fibonacci(0) == 0
+  assert fibonacci(1) == 1
+  assert fibonacci(6) == 8
+  assert fibonacci(10) == 55
+
+def test_is_prime() =
+  print("[is_prime]:", is_prime(7), is_prime(8), is_prime(2), is_prime(1))
+  assert is_prime(7) == true
+  assert is_prime(8) == false
+  assert is_prime(2) == true
+  assert is_prime(1) == false
+
+def test_primes_upto() =
+  r = primes_upto(20)
+  print("[primes_upto 20]:", r)
+  assert r == [2, 3, 5, 7, 11, 13, 17, 19]
+
+def test_digit() =
+  print("[digit_sum 123]:", digit_sum(123))
+  print("[digit_count 12345]:", digit_count(12345))
+  assert digit_sum(123) == 6
+  assert digit_count(12345) == 5
+
+def test_binomial() =
+  print("[binomial 5,2]:", binomial(5, 2))
+  assert binomial(5, 2) == 10
+  assert binomial(10, 0) == 1
+  assert binomial(10, 10) == 1
+
+def test_sum_squares_cubes() =
+  print("[sum_of_squares 3]:", sum_of_squares(3))  // 1+4+9=14
+  print("[sum_of_cubes 3]:", sum_of_cubes(3))     // 1+8+27=36
+  assert sum_of_squares(3) == 14
+  assert sum_of_cubes(3) == 36
+
+def test_range_sum() =
+  print("[range_sum 100]:", range_sum(100))  // 1+...+100=5050
+  assert range_sum(100) == 5050
+
+def test_clamp() =
+  print("[clamp_int 100,0,10]:", clamp_int(100, 0, 10))
+  assert clamp_int(100, 0, 10) == 10
+  assert clamp_int(-5, 0, 10) == 0
+  assert clamp_int(5, 0, 10) == 5
+
+def test_divmod() =
+  (q, r) = divmod(17, 5)
+  print("[divmod 17,5]:", q, r)
+  assert q == 3
+  assert r == 2
+
+def main() =
+  test_abs()
+  test_gcd_lcm()
+  test_factorial()
+  test_fibonacci()
+  test_is_prime()
+  test_primes_upto()
+  test_digit()
+  test_binomial()
+  test_sum_squares_cubes()
+  test_range_sum()
+  test_clamp()
+  test_divmod()
+  print("math.lz: all tests passed!")

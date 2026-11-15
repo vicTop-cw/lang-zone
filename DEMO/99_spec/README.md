@@ -1,0 +1,84 @@
+# DEMO/99_spec — 规范目标案例目录
+
+本目录存放按语法规范文档撰写的特性示例。
+
+## 状态：✅ 已纳入编译测试 (2026-07-31)
+
+**38/38 文件**（32 主 + 6 combo）已纳入正向测试覆盖。
+- 关键示例（含 `extractor_unapply_let_for.lz`）接入 `tests/lz_semantic_cases.rs` 可运行回归（编译→rustc→运行→断言 stdout）
+- 原 `tests/compile_demos.rs`（AST→RUST 直翻路径）已弃用停用，本目录文件作为规范目标示例存档，每个 `.lz` 配 `codegen` 产物 `.rs`
+注：部分示例依赖特定编译器功能（如列表变量推导迭代器），解析通过即标记 ✅。
+
+## 文件清单
+
+| 文件 | 对应特性 | 状态 |
+|------|---------|:----:|
+| `dict_comprehension.lz` | 字典推导 | ✅ |
+| `set_comprehension.lz` | 集合推导 | ✅ |
+| `comprehension_over_list.lz` | 推导支持列表变量迭代器 | ✅ |
+| `top_level_build.lz` | 顶层构建块 `x =: body` | ✅ |
+| `extractor_unapply.lz` | `__unapply__` 提取器 | ✅ |
+| `go_stmt.lz` | `go` 并发语句 | ✅ |
+| `setup_teardown.lz` | `setup`/`teardown` 生命周期 | ✅ |
+| `constraint_multi.lz` | `T: A + B` 多约束求解 | ✅ |
+| `pipe_spec.lz` | 管道 `|>` | ✅ |
+| `parallel_decorator.lz` | `@parallel` 装饰器 | ✅ |
+| `gen_block_star.lz` | 生成器构建块 `*:` | ✅ |
+| `match_guard.lz` | match 守卫 | ✅ |
+| `loop_else.lz` | 循环 else 分支 | ✅ |
+| `null_safe.lz` | 安全导航 `?.` | ✅ |
+| `macro_real.lz` | 普通模块 macro 定义 | ✅ |
+| `comptime_template.lz` | comptime: 编译期块 | ✅ |
+| `underscore_partial_1.lz` | 下划线偏应用（单洞） | ✅ |
+| `underscore_partial_2.lz` | 下划线偏应用（多洞） | ✅ |
+| `underscore_discard_3.lz` | 下划线丢弃 `_ = expr` | ✅ |
+| `tilde_named_arg_1.lz` | `~` 命名参数糖 | ✅ |
+| `tilde_named_arg_2.lz` | `~` 命名参数糖（重排） | ✅ |
+| `tilde_named_arg_3.lz` | `~` 命名参数糖（混合） | ✅ |
+| `guard_for_1.lz` | `for ... if` 守卫 | ✅ |
+| `guard_for_2.lz` | `for ... if` 守卫 + else | ✅ |
+| `guard_for_3.lz` | `while ... if` 守卫 | ✅ |
+| `while_walrus_guard_1.lz` | `while` + `:=` + `if` 守卫 | ✅ |
+| `index_build.lz` | 索引构建块 `^:` | ✅ |
+| `index_build_block.lz` | 索引构建块（简化） | ✅ |
+| `iterator_demo.lz` | `iterator` 生成器函数 | ✅ |
+| `duck_test.lz` | duck 类型测试 | ✅ |
+| `keyword_downgrade.lz` | 关键字降级 | ✅ |
+| `extractor_unapply_let_for.lz` | case struct 提取：`let`/`for` 解构（自动 `__unapply__`） | ✅ |
+
+### combo-syntax/ 子目录
+
+| 文件 | 组合特性 | 状态 |
+|------|---------|:----:|
+| `combo_for_guard_walrus.lz` | `for` 守卫 + `:=` 海象 | ✅ |
+| `combo_while_guard_walrus.lz` | `while` 守卫 + `:=` + 标量累积 | ✅ |
+| `combo_for_guard_struct.lz` | `for` 守卫 + struct 构造 | ✅ |
+| `combo_while_guard_else.lz` | `while` 守卫 + `else` | ✅ |
+| `combo_for_guard_match.lz` | `for` 守卫 + `match` | ✅ |
+| `combo_while_guard_try.lz` | `while` 守卫 + `try/catch` + `:=` | ✅ |
+
+### moddec/ 子目录 — 修饰符装饰器语料（2026-09-14 新增）
+
+规范真值：[`SYNTAX/02-变量与绑定.md`](../../SYNTAX/02-变量与绑定.md) §八（11 基础 + 17 融合）。
+**语料先行（测试先于实现）**：本批语料用于钉住实现缺口，首轮预期为「红」。
+
+| 文件 | 对应特性 | 状态 |
+|------|---------|:----:|
+| `moddec_basic_<axis>_{var,param}_pos.lz` | 11 基础装饰器 × {变量, 形参} | 🔴 待实现 |
+| `moddec_fusion_<axis>_{var,param}_pos.lz` | 17 融合装饰器 × {变量, 形参} | 🔴 待实现 |
+| `golden/*.rs` | 等价关键字形式的冻结产物（AC1/2/3/11/12） | 🔴 待实现 |
+
+**命名规范**：`moddec_<basic|fusion>_<axis>_<var|param>_{pos|neg}.lz`
+
+- `basic`：`mut` `immut` `ref` `owned` `const` `static` `shared` `cell` `lazy` `comptime` `source`
+- `fusion`：`borrow` `borrow_mut` `rcell` `take` `take_ro` `rc` `arc` `weak` `mutex` `rwlock` `atomic` `lazy_static` `once` `lazy_mut` `static_mut` `compile_time` `meta`
+- 反例位于 [`DEMO/99_errors/moddec/`](../99_errors/moddec/)（unknown / position_inline / position_ownline / multi / let_conflict / owend / axis_conflict）
+- 测试驱动：[`tests/moddec_corpus.rs`](../../tests/moddec_corpus.rs)（L1 编译 / L6 反例）、
+  [`tests/moddec_product_assert.rs`](../../tests/moddec_product_assert.rs)（L2–L5 产物断言）
+- 运行：`cargo test --test moddec_corpus --test moddec_product_assert`
+
+## 实现摘要
+
+- 本目录多数特性在 2026-07-31 审计中确认已实现（lexer/parser/codegen 全链路）
+- `duck_demo.lz` 位于 `DEMO/99_errors/`（非本目录），本 README 过去误列，已更正
+- 部分示例使用简化写法（如区间推导而非列表变量推导），以适配当前编译器边界

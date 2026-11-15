@@ -1,0 +1,140 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 3：用 LZ 实现 LZ 词法分析核心（对齐 src/lexer/token.rs）
+// 覆盖：Token 枚举（带值变体）+ tokenize 简化版（标识符/整数/字符串/
+//       运算符/标点）——验证「LZ 写编译器前端」可行性，暴露 codegen 缺陷
+// ═══════════════════════════════════════════════════════════════
+
+// ── Token（对齐 token.rs 核心子集）──
+enum Token:
+    Def
+    Struct
+    If
+    Else
+    Return
+    IntLit(v: int)
+    StrLit(s: str)
+    Ident(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    Eq
+    EqEq
+    Colon
+    Comma
+    Dot
+    LParen
+    RParen
+    LBrace
+    RBrace
+    Newline
+    Eof
+
+// ── 关键字表（简化）──
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "struct" || s == "if" || s == "else" || s == "return"
+
+// ── 关键字 → Token ──
+def keyword_token(s: str) -> Token =
+    if s == "def":
+        Token.Def
+    elif s == "struct":
+        Token.Struct
+    elif s == "if":
+        Token.If
+    elif s == "else":
+        Token.Else
+    else:
+        Token.Return
+
+// ── 单字符运算符/标点 → Option<Token>（LZ 用 Option 表示可无）──
+def punct_token(c: str) -> Option<Token> =
+    if c == "+":
+        Option.Some(value: Token.Plus)
+    elif c == "-":
+        Option.Some(value: Token.Minus)
+    elif c == "*":
+        Option.Some(value: Token.Star)
+    elif c == "/":
+        Option.Some(value: Token.Slash)
+    elif c == ":":
+        Option.Some(value: Token.Colon)
+    elif c == ",":
+        Option.Some(value: Token.Comma)
+    elif c == ".":
+        Option.Some(value: Token.Dot)
+    elif c == "(":
+        Option.Some(value: Token.LParen)
+    elif c == ")":
+        Option.Some(value: Token.RParen)
+    elif c == "{":
+        Option.Some(value: Token.LBrace)
+    elif c == "}":
+        Option.Some(value: Token.RBrace)
+    else:
+        Option.None
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def is_ident_char(c: str) -> bool =
+    is_alpha(c) || is_digit(c)
+
+// ── 字符工具：字符串单字符索引 s[i] 返回字节码 i64（有意设计，见
+//    polish_28_strings 断言），取字符需用切片 s[idx..idx+1] ──
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+// ── 扫描函数（拆分 tokenize：单函数嵌套过深触发 lang-zone 编译栈溢出，
+//    自举试点 v167 缺陷 3；每个扫描函数只处理一类 token）──
+
+// 扫描标识符/关键字：返回 (word, 结束位置)
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_ident_char(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+// 扫描整数：返回 (数字字符串, 结束位置)
+def scan_int(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_digit(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+// 扫描运算符/标点：返回 (Option<Token>, 结束位置)；== 合并为 EqEq
+def scan_punct(src: str, i: int) -> (Option<Token>, int) =
+    let c = char_at(src, i)
+    match punct_token(c):
+        case Option.Some(value: t) =>
+            if t == Token.Eq && i + 1 < str_len(src) && char_at(src, i + 1) == "=":
+                (Option.Some(value: Token.EqEq), i + 2)
+            else:
+                (Option.Some(value: t), i + 1)
+        case Option.None =>
+            (Option.None, i + 1)
+
+// ── tokenize：简化词法分析（对齐 lexer.rs 核心逻辑）──
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    while i < str_len(src):
+        let c = char_at(src, i)
+        // 空白跳过
+        if c == " " || c == "\t":
+            i = i + 1
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+        // 标识符/关键字
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            if is_keyword(r.0):
+                tokens = tokens + [keyword_token(r.0)]

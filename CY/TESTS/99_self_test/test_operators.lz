@@ -1,0 +1,35 @@
+// LZ 自测 — 算术和比较运算
+def main() =
+    // 算术
+    assert 1 + 2 == 3
+    assert 5 - 3 == 2
+    assert 4 * 5 == 20
+    assert 10 / 2 == 5
+    assert 10 % 3 == 1
+    assert 2 ** 3 == 8
+
+    // 比较
+    assert 1 < 2
+    assert 2 > 1
+    assert 2 <= 2
+    assert 2 >= 2
+    assert not (1 == 2)
+
+    // 逻辑运算
+    assert True and True
+    assert False or True
+    assert not False
+    assert (True && True)
+    assert (False || True)
+    assert !False
+
+    // 复合赋值
+    x = 10
+    x += 5
+    assert x == 15
+    x -= 3
+    assert x == 12
+    x *= 2
+    assert x == 24
+
+    print("✅ 所有运算测试通过")

@@ -1,0 +1,2 @@
+magic inc =
+    def __inc__(self, n: int) -> int = n + 1

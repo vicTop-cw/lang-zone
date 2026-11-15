@@ -1,0 +1,16 @@
+=== edge-keyword-identifier ===
+1000
+side_effect
+15
+3
+not_zero
+MagicBox { value: 30 }
+false
+true
+10
+1
+() None Some(42)
+Ok(10) Err("failed")
+42 secret 10 20
+1 2 3 4
+edge-keyword-identifier done

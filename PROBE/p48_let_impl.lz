@@ -1,0 +1,21 @@
+struct Celsius =
+    value: f64
+
+impl Celsius =
+    def __implicit_from__(v: f64) -> Celsius =
+        return Celsius(value: v)
+
+struct Fahrenheit =
+    value: f64
+
+impl Fahrenheit =
+    def __implicit_from__(v: f64) -> Fahrenheit =
+        return Fahrenheit(value: v)
+
+def main() =
+    c = Celsius(value: 100.0)
+    f: Fahrenheit = c.value
+    print(f.value)
+    x: f64 = 36.8
+    c2: Celsius = x
+    print(c2.value)

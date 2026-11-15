@@ -1,0 +1,22 @@
+=== combo-struct-method ===
+user_1:Alice
+invalid_user
+invalid_user
+true
+false
+42
+0
+84
+enter:1
+10
+exit:1
+B
+D
+true
+false
+Book(LZ Guide, 200p)
+Ok(30)
+Err("div_by_zero")
+Ok(30)
+Ok(32)
+combo-struct-method done

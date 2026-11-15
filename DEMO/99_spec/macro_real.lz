@@ -1,0 +1,9 @@
+#!bin macro
+// macro 定义：仅在 #!bin macro 模块中可用
+// 出处：SYNTAX/08-宏与编译期.md — macro 定义
+// 预期语法：
+macro json(field: Tokens, val: Tokens) -> Tokens =
+    f`"{field}": {val}`
+
+def main() =
+    print("ok")

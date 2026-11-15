@@ -1,0 +1,14 @@
+[
+ {"tool":"claim","args":{"task_id":"T0r9.1.1","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.1.2","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.2.1","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.2.2","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.3.1","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.3.2","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.4.1","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.4.2","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.5.1","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.5.2","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.6.1","assignee":"codebuddy-agent"}},
+ {"tool":"claim","args":{"task_id":"T0r9.6.2","assignee":"codebuddy-agent"}}
+]

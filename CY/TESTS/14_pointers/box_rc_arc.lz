@@ -1,0 +1,5 @@
+// 14_pointers - box/rc/arc 指针
+def main() =
+    let x: Box<int> = Box.new(42)
+    let y: Rc<str> = Rc.new("hello")
+    print(x[0], y[0])

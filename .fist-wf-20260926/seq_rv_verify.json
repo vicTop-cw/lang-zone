@@ -1,0 +1,14 @@
+[
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.2.1", "verdict": "pass", "reviewer": "verifier", "reason": "hunt_bug1×2+bug4 全绿，孤立编译 E0432/E0308/E0277 消除"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.2.2", "verdict": "pass", "reviewer": "verifier", "reason": "hunt_bug2/3/5/6 全绿，E0015/E0308 消除"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.3.1", "verdict": "pass", "reviewer": "verifier", "reason": "680 passed / 0 failed，高于基线 673 且零回归"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.3.2", "verdict": "pass", "reviewer": "verifier", "reason": "6 用例 7 测试全部锁死"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.4.1", "verdict": "pass", "reviewer": "verifier", "reason": "轮次 16 记录已落盘"}},
+  {"tool": "omega_result_verify", "args": {"task_id": "T0r8.4.2", "verdict": "pass", "reviewer": "verifier", "reason": "六目录样例全链路可复现"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.2.1", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.2.2", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.3.1", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.3.2", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.4.1", "verifier": "CodeBuddyMain"}},
+  {"tool": "verify", "args": {"task_id": "T0r8.4.2", "verifier": "CodeBuddyMain"}}
+]

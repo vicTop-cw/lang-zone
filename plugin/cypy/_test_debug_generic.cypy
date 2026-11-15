@@ -1,0 +1,3 @@
+# Test: debug generic parameter registration
+def test_func[T](x: T) -> T:
+    return x

@@ -1,0 +1,15 @@
+// find_bug/stdbridge/bug-stdbridge-startswith.lz
+// BUG-SB-003: camelCase startsWith 映射到 starts_with
+
+#!export
+def test_starts_with() =
+  s = "hello world"
+  result = s.startsWith("hello")
+  result2 = s.startsWith("world")
+  print("startsWith hello:", result)   // true
+  print("startsWith world:", result2)  // false
+  assert result == true
+  assert result2 == false
+
+def main() =
+  test_starts_with()

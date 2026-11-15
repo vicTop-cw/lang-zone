@@ -1,0 +1,26 @@
+// ============================
+// LZ Functions — Composite (Decorators, Closures)
+// ============================
+
+@export(Rust)
+def add(a: int, b: int) -> int = a + b
+
+@memoize
+def fib(n: int) -> int =
+    if n <= 1:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+@math
+def sq(x, y) = x * x + y * y
+
+def main() =
+    let f = fib(10)
+    print(f)
+
+    let r = sq(3.0, 4.0)
+    print(r)
+
+    let double = |x: int| -> int = x * 2
+    print(double(5))

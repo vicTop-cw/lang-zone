@@ -1,0 +1,22 @@
+def test_0() -> int:
+    (-(-((False) <= print(1))))
+    defer:
+        let cleanup: int = 0
+    for i in range(1):
+        let temp: int = i
+    if y:
+        return 1
+    else:
+        return 0
+
+def test_1() -> int:
+    match (-""):
+        case 0:
+            return 0
+        case _:
+            return -1
+    for i in range(5):
+        let temp: int = i
+
+def main() -> int:
+    return 0

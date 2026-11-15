@@ -1,0 +1,18 @@
+// ✅ case struct 提取解构：let 绑定 与 for 循环变量均支持 __unapply__ 提取
+// 出处：SYNTAX/06a-struct.md §6.6 / SYNTAX/02-变量与绑定.md §3.3 / SYNTAX/05-控制流.md §3.1
+// case struct 自动配 __unapply__（编译器生成，无需显式 magic __unapply__）
+case struct PointEx(x: int, y: int)
+
+def main() =
+    let p = PointEx(1, 2)
+    // let 提取解构：let PointEx(a, b) = p  →  let (a, b) = p.__unapply__()
+    let PointEx(a, b) = p
+    print("let:", a, b)                 // 1 2
+    // for 循环变量提取解构
+    let pts = [PointEx(1, 2), PointEx(3, 4), PointEx(5, 6)]
+    for PointEx(x, y) in pts:
+        print("for:", x, y)             // 1 2 / 3 4 / 5 6
+    // for + 守卫：guard 在解构之后求值，可引用解构出的变量
+    let pts2 = [PointEx(1, 2), PointEx(3, 4), PointEx(5, 6)]
+    for PointEx(x, y) in pts2 if x > 1:
+        print("for-guard:", x + y)      // 7 / 11

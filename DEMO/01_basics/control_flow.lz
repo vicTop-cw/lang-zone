@@ -1,0 +1,130 @@
+// ============================================================
+// 轮3: 控制流 — if/elif/else（语句形式、表达式形式、嵌套、边界）
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── if/else 基本语句 ──
+    mut r = 0
+    if True:
+        r = 1
+    assert r == 1
+
+    r = 0
+    if False:
+        r = 1
+    else:
+        r = 2
+    assert r == 2
+
+    // ── if/elif/else 链（命中首个真分支） ──
+    mut tag = ""
+    let x = 7
+    if x < 0:
+        tag = "neg"
+    elif x == 0:
+        tag = "zero"
+    elif x < 10:
+        tag = "small"
+    else:
+        tag = "big"
+    assert tag == "small"
+
+    tag = ""
+    let y = -3
+    if y < 0:
+        tag = "neg"
+    elif y == 0:
+        tag = "zero"
+    else:
+        tag = "pos"
+    assert tag == "neg"
+
+    tag = ""
+    let z = 100
+    if z < 0:
+        tag = "neg"
+    elif z == 0:
+        tag = "zero"
+    elif z < 10:
+        tag = "small"
+    else:
+        tag = "big"
+    assert tag == "big"
+
+    // ── if 表达式（值绑定，块尾表达式为分支值） ──
+    let a = 5
+    let sign = if a > 0: "positive" else "non-positive"
+    assert sign == "positive"
+    let b = -5
+    let sign2 = if b > 0: "positive" else "non-positive"
+    assert sign2 == "non-positive"
+
+    let max_val = if 10 > 20: 10 else 20
+    assert max_val == 20
+    let min_val = if 10 < 20: 10 else 20
+    assert min_val == 10
+
+    // ── 嵌套 if（多层缩进） ──
+    mut depth = 0
+    let n = 15
+    if n > 0:
+        if n > 10:
+            depth = 2
+        else:
+            depth = 1
+    else:
+        depth = -1
+    assert depth == 2
+
+    depth = 0
+    let m = 5
+    if m > 0:
+        if m > 10:
+            depth = 2
+        else:
+            depth = 1
+    else:
+        depth = -1
+    assert depth == 1
+
+    // ── 多分支嵌套 + 表达式组合 ──
+    mut score = ""
+    let marks = 75
+    if marks >= 90:
+        score = "A"
+    elif marks >= 75:
+        score = "B"
+    elif marks >= 60:
+        score = "C"
+    else:
+        score = "F"
+    assert score == "B"
+
+    // ── 条件用复杂表达式 ──
+    let is_leap = True
+    if (marks > 50) and is_leap:
+        score = "B+"
+    assert score == "B+"
+
+    // ── if 语句块内赋值后外部可见 ──
+    mut visible = "init"
+    let cond = 3 < 4
+    if cond:
+        visible = "changed"
+        mut inner = 99
+        assert inner == 99
+    assert visible == "changed"
+
+    // ── 嵌套 if 表达式（表达式内再含 if） ──
+    let p = 3
+    let nested_expr = if p > 0: (if p > 2: "big-positive" else "small-positive") else "negative"
+    assert nested_expr == "big-positive"
+
+    // ── 边界：if 无 else（条件为假时跳过） ──
+    mut skipped = 0
+    if 1 > 2:
+        skipped = 1
+    assert skipped == 0
+
+    print("R3 control OK")

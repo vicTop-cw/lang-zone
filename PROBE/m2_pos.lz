@@ -1,0 +1,8 @@
+// M2 正例：comptime 形参的实参编译期已知（const / 字面量表达式）
+def repeat(comptime n: int, s: str) -> str = s
+
+const N = 8
+
+def main() =
+    print(repeat(N, "const-ok"))
+    print(repeat(3 + 2, "literal-ok"))

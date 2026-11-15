@@ -1,0 +1,16 @@
+def test_0() -> int:
+    guard z else:
+        return -1
+    match (print(((0 - 0) != print(False)))):
+        case 0:
+            return 0
+        case _:
+            return -1
+    guard ("a" >= (1.5)) else:
+        return -1
+    for i in range(4):
+        let temp: int = i
+    (print(x))
+
+def main() -> int:
+    return 0

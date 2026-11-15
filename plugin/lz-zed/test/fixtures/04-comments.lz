@@ -1,0 +1,24 @@
+// lz-zed test fixture: 04-comments — 注释
+// Authority: SYNTAX/00-词法基础.md §三
+
+// 单行注释
+let x = 42
+
+// 正确的单行注释
+let y = 10 // 行尾注释
+
+/*
+  多行注释
+  可以跨行
+  内含关键字 def if 也不应被高亮为关键字
+  内含字符串 "hello" 与数字 42 也不应被高亮
+*/
+let z = 20
+
+/* 单行块注释 */
+let w = 30
+
+// # 是属性宏标记而不是注释（00 §1.13），注释内出现的 # 属于注释文本
+#!bin macro
+#!export(Rust)
+#![derive(Clone)]

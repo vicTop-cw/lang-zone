@@ -1,0 +1,21 @@
+// ============================
+// LZ Control Flow — if / elif / else
+// ============================
+
+def main() =
+    score = 85
+    if score >= 90:
+        print("A")
+    elif score >= 80:
+        print("B")
+    else:
+        print("C")
+
+    mut grade = ""
+    if score >= 90:
+        grade = "A"
+    elif score >= 80:
+        grade = "B"
+    else:
+        grade = "C"
+    print(grade)

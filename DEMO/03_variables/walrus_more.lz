@@ -1,0 +1,20 @@
+// LZ 变量 — 海象运算符更多用法
+// 覆盖：while/if 条件中的 := 赋值表达式
+
+count = 0
+
+def tick() -> int =
+    count += 1
+    count
+
+def main() =
+    // 在 while 条件中赋值并复用
+    while (v := tick()) < 4:
+        print(v)
+
+    // 在 if 条件中赋值
+    let prepared = 5
+    if (w := prepared * 2) > 0:
+        print(w)
+
+    print("done")

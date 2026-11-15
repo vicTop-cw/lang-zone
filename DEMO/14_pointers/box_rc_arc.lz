@@ -1,0 +1,14 @@
+// ============================
+// LZ Pointers & References
+// ============================
+
+def main() =
+    let x: Box<int> = Box.new(42)
+    let val = x[0]
+    print(val)
+
+    let rc: Rc<int> = Rc.new(42)
+    let c = rc.clone()
+
+    let arc: Arc<int> = Arc.new(7)
+    let s = arc.clone()

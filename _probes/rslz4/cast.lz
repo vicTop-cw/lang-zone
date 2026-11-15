@@ -1,0 +1,17 @@
+def main() =
+    let a = "42"
+    let b = int(a)
+    print(b)
+    let c = int(3.9)
+    print(c)
+    let d = "3.14"
+    let e = f64(d)
+    print(e)
+    let f = f64(7)
+    print(f)
+    let g = str(123)
+    print(g)
+    let h = str(2.5)
+    print(h)
+    let i = str([1, 2, 3])
+    print(i)

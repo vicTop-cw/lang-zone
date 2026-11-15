@@ -1,0 +1,720 @@
+"""
+Cypy Lexer — 用 Cypy 语言实现的 Cypy 词法分析器
+用于分析 .cypy 源码，输出 Token 流
+
+注意：Cypy 的 enum 在 scope_analyzer 层面不支持，
+      故使用整数常量代替。ord() 也不可用，用字符比较代替。
+"""
+
+# ── Token 类型常量 ──
+# 关键字
+let TK_KW_DEF: int = 1
+let TK_KW_STRUCT: int = 2
+let TK_KW_ENUM: int = 3
+let TK_KW_MATCH: int = 4
+let TK_KW_CASE: int = 5
+let TK_KW_IF: int = 6
+let TK_KW_ELIF: int = 7
+let TK_KW_ELSE: int = 8
+let TK_KW_FOR: int = 9
+let TK_KW_WHILE: int = 10
+let TK_KW_RETURN: int = 11
+let TK_KW_IMPORT: int = 12
+let TK_KW_FROM: int = 13
+let TK_KW_AS: int = 14
+let TK_KW_TRAIT: int = 15
+let TK_KW_IMPL: int = 16
+let TK_KW_GUARD: int = 17
+let TK_KW_DEFER: int = 18
+let TK_KW_LET: int = 19
+let TK_KW_VAL: int = 20
+let TK_KW_MACRO: int = 21
+let TK_KW_COMPTIME: int = 22
+let TK_KW_IMPLICIT: int = 23
+let TK_KW_UNION: int = 24
+let TK_KW_TEST: int = 25
+let TK_KW_PASS: int = 26
+let TK_KW_BREAK: int = 27
+let TK_KW_CONTINUE: int = 28
+let TK_KW_AND: int = 29
+let TK_KW_OR: int = 30
+let TK_KW_NOT: int = 31
+let TK_KW_IN: int = 32
+let TK_KW_IS: int = 33
+let TK_KW_CPDEF: int = 34
+let TK_KW_CDEF: int = 35
+let TK_KW_YIELD: int = 36
+let TK_KW_RAISE: int = 37
+let TK_KW_TRY: int = 38
+let TK_KW_EXCEPT: int = 39
+let TK_KW_FINALLY: int = 40
+let TK_KW_ASSERT: int = 41
+let TK_KW_CLASS: int = 42
+
+# 字面量
+let TK_LIT_INT: int = 50
+let TK_LIT_FLOAT: int = 51
+let TK_LIT_STR: int = 52
+let TK_LIT_BOOL_TRUE: int = 53
+let TK_LIT_BOOL_FALSE: int = 54
+let TK_LIT_NONE: int = 55
+
+# 标识符
+let TK_IDENT: int = 60
+
+# 操作符
+let TK_OP_PLUS: int = 70
+let TK_OP_MINUS: int = 71
+let TK_OP_STAR: int = 72
+let TK_OP_SLASH: int = 73
+let TK_OP_DOUBLE_SLASH: int = 74
+let TK_OP_PERCENT: int = 75
+let TK_OP_DOUBLE_STAR: int = 76
+let TK_OP_EQ: int = 77
+let TK_OP_EQ_EQ: int = 78
+let TK_OP_NOT_EQ: int = 79
+let TK_OP_LT: int = 80
+let TK_OP_GT: int = 81
+let TK_OP_LT_EQ: int = 82
+let TK_OP_GT_EQ: int = 83
+let TK_OP_PLUS_EQ: int = 84
+let TK_OP_MINUS_EQ: int = 85
+let TK_OP_STAR_EQ: int = 86
+let TK_OP_SLASH_EQ: int = 87
+let TK_OP_ARROW: int = 88
+let TK_OP_FAT_ARROW: int = 89
+let TK_OP_PIPE: int = 90
+let TK_OP_BUILD_EQ: int = 91
+let TK_OP_BUILD_TILDE: int = 92
+let TK_OP_BUILD_STAR: int = 93
+let TK_OP_AT: int = 94
+let TK_OP_DOT: int = 95
+let TK_OP_DOT_DOT: int = 96
+
+# 分隔符
+let TK_LPAREN: int = 100
+let TK_RPAREN: int = 101
+let TK_LBRACKET: int = 102
+let TK_RBRACKET: int = 103
+let TK_LBRACE: int = 104
+let TK_RBRACE: int = 105
+let TK_COLON: int = 106
+let TK_SEMICOLON: int = 107
+let TK_COMMA: int = 108
+let TK_NEWLINE: int = 109
+let TK_INDENT: int = 110
+let TK_DEDENT: int = 111
+
+# 其他
+let TK_EOF: int = 200
+let TK_COMMENT: int = 201
+let TK_UNKNOWN: int = 202
+
+# ── 辅助函数 ──
+def token_kind_name(kind: int) -> str:
+    if kind == TK_KW_DEF:
+        return "KW_DEF"
+    if kind == TK_KW_STRUCT:
+        return "KW_STRUCT"
+    if kind == TK_KW_FOR:
+        return "KW_FOR"
+    if kind == TK_KW_IF:
+        return "KW_IF"
+    if kind == TK_KW_ELIF:
+        return "KW_ELIF"
+    if kind == TK_KW_ELSE:
+        return "KW_ELSE"
+    if kind == TK_KW_RETURN:
+        return "KW_RETURN"
+    if kind == TK_KW_IMPORT:
+        return "KW_IMPORT"
+    if kind == TK_KW_FROM:
+        return "KW_FROM"
+    if kind == TK_KW_AS:
+        return "KW_AS"
+    if kind == TK_KW_TRAIT:
+        return "KW_TRAIT"
+    if kind == TK_KW_IMPL:
+        return "KW_IMPL"
+    if kind == TK_KW_GUARD:
+        return "KW_GUARD"
+    if kind == TK_KW_DEFER:
+        return "KW_DEFER"
+    if kind == TK_KW_LET:
+        return "KW_LET"
+    if kind == TK_KW_VAL:
+        return "KW_VAL"
+    if kind == TK_KW_MACRO:
+        return "KW_MACRO"
+    if kind == TK_KW_COMPTIME:
+        return "KW_COMPTIME"
+    if kind == TK_KW_IMPLICIT:
+        return "KW_IMPLICIT"
+    if kind == TK_KW_PASS:
+        return "KW_PASS"
+    if kind == TK_KW_BREAK:
+        return "KW_BREAK"
+    if kind == TK_KW_CONTINUE:
+        return "KW_CONTINUE"
+    if kind == TK_KW_AND:
+        return "KW_AND"
+    if kind == TK_KW_OR:
+        return "KW_OR"
+    if kind == TK_KW_NOT:
+        return "KW_NOT"
+    if kind == TK_KW_IN:
+        return "KW_IN"
+    if kind == TK_KW_IS:
+        return "KW_IS"
+    if kind == TK_KW_CLASS:
+        return "KW_CLASS"
+    if kind == TK_KW_YIELD:
+        return "KW_YIELD"
+    if kind == TK_LIT_BOOL_TRUE:
+        return "KW_TRUE"
+    if kind == TK_LIT_BOOL_FALSE:
+        return "KW_FALSE"
+    if kind == TK_LIT_NONE:
+        return "KW_NONE"
+    if kind == TK_IDENT:
+        return "IDENT"
+    if kind == TK_LIT_INT:
+        return "LIT_INT"
+    if kind == TK_LIT_FLOAT:
+        return "LIT_FLOAT"
+    if kind == TK_LIT_STR:
+        return "LIT_STR"
+    if kind == TK_EOF:
+        return "EOF"
+    if kind == TK_NEWLINE:
+        return "NEWLINE"
+    if kind == TK_COMMENT:
+        return "COMMENT"
+    if kind == TK_LPAREN:
+        return "LPAREN"
+    if kind == TK_RPAREN:
+        return "RPAREN"
+    if kind == TK_LBRACKET:
+        return "LBRACKET"
+    if kind == TK_RBRACKET:
+        return "RBRACKET"
+    if kind == TK_LBRACE:
+        return "LBRACE"
+    if kind == TK_RBRACE:
+        return "RBRACE"
+    if kind == TK_COLON:
+        return "COLON"
+    if kind == TK_COMMA:
+        return "COMMA"
+    if kind == TK_OP_ARROW:
+        return "OP_ARROW"
+    if kind == TK_OP_EQ:
+        return "OP_EQ"
+    if kind == TK_OP_EQ_EQ:
+        return "OP_EQ_EQ"
+    if kind == TK_OP_PLUS:
+        return "OP_PLUS"
+    if kind == TK_OP_MINUS:
+        return "OP_MINUS"
+    if kind == TK_OP_STAR:
+        return "OP_STAR"
+    if kind == TK_OP_SLASH:
+        return "OP_SLASH"
+    if kind == TK_OP_PIPE:
+        return "OP_PIPE"
+    if kind == TK_OP_FAT_ARROW:
+        return "OP_FAT_ARROW"
+    if kind == TK_OP_BUILD_EQ:
+        return "OP_BUILD_EQ"
+    if kind == TK_OP_BUILD_TILDE:
+        return "OP_BUILD_TILDE"
+    if kind == TK_OP_BUILD_STAR:
+        return "OP_BUILD_STAR"
+    if kind == TK_OP_DOT:
+        return "OP_DOT"
+    if kind == TK_OP_AT:
+        return "OP_AT"
+    if kind == TK_OP_DOUBLE_STAR:
+        return "OP_DOUBLE_STAR"
+    if kind == TK_OP_PERCENT:
+        return "OP_PERCENT"
+    if kind == TK_OP_LT:
+        return "OP_LT"
+    if kind == TK_OP_GT:
+        return "OP_GT"
+    if kind == TK_OP_LT_EQ:
+        return "OP_LT_EQ"
+    if kind == TK_OP_GT_EQ:
+        return "OP_GT_EQ"
+    if kind == TK_OP_NOT_EQ:
+        return "OP_NOT_EQ"
+    if kind == TK_UNKNOWN:
+        return "UNKNOWN"
+    return "?"
+
+def is_alpha(ch: str) -> int:
+    if ch >= "a":
+        if ch <= "z":
+            return 1
+    if ch >= "A":
+        if ch <= "Z":
+            return 1
+    if ch == "_":
+        return 1
+    return 0
+
+def is_digit(ch: str) -> int:
+    if ch >= "0":
+        if ch <= "9":
+            return 1
+    return 0
+
+def is_alnum(ch: str) -> int:
+    if is_alpha(ch) == 1:
+        return 1
+    if is_digit(ch) == 1:
+        return 1
+    return 0
+
+# ── 关键字查找 ──
+def lookup_keyword(lexeme: str) -> int:
+    if lexeme == "def":
+        return TK_KW_DEF
+    if lexeme == "struct":
+        return TK_KW_STRUCT
+    if lexeme == "enum":
+        return TK_KW_ENUM
+    if lexeme == "match":
+        return TK_KW_MATCH
+    if lexeme == "case":
+        return TK_KW_CASE
+    if lexeme == "if":
+        return TK_KW_IF
+    if lexeme == "elif":
+        return TK_KW_ELIF
+    if lexeme == "else":
+        return TK_KW_ELSE
+    if lexeme == "for":
+        return TK_KW_FOR
+    if lexeme == "while":
+        return TK_KW_WHILE
+    if lexeme == "return":
+        return TK_KW_RETURN
+    if lexeme == "import":
+        return TK_KW_IMPORT
+    if lexeme == "from":
+        return TK_KW_FROM
+    if lexeme == "as":
+        return TK_KW_AS
+    if lexeme == "trait":
+        return TK_KW_TRAIT
+    if lexeme == "impl":
+        return TK_KW_IMPL
+    if lexeme == "guard":
+        return TK_KW_GUARD
+    if lexeme == "defer":
+        return TK_KW_DEFER
+    if lexeme == "let":
+        return TK_KW_LET
+    if lexeme == "val":
+        return TK_KW_VAL
+    if lexeme == "macro":
+        return TK_KW_MACRO
+    if lexeme == "comptime":
+        return TK_KW_COMPTIME
+    if lexeme == "implicit":
+        return TK_KW_IMPLICIT
+    if lexeme == "union":
+        return TK_KW_UNION
+    if lexeme == "test":
+        return TK_KW_TEST
+    if lexeme == "pass":
+        return TK_KW_PASS
+    if lexeme == "break":
+        return TK_KW_BREAK
+    if lexeme == "continue":
+        return TK_KW_CONTINUE
+    if lexeme == "and":
+        return TK_KW_AND
+    if lexeme == "or":
+        return TK_KW_OR
+    if lexeme == "not":
+        return TK_KW_NOT
+    if lexeme == "in":
+        return TK_KW_IN
+    if lexeme == "is":
+        return TK_KW_IS
+    if lexeme == "cpdef":
+        return TK_KW_CPDEF
+    if lexeme == "cdef":
+        return TK_KW_CDEF
+    if lexeme == "yield":
+        return TK_KW_YIELD
+    if lexeme == "raise":
+        return TK_KW_RAISE
+    if lexeme == "try":
+        return TK_KW_TRY
+    if lexeme == "except":
+        return TK_KW_EXCEPT
+    if lexeme == "finally":
+        return TK_KW_FINALLY
+    if lexeme == "assert":
+        return TK_KW_ASSERT
+    if lexeme == "class":
+        return TK_KW_CLASS
+    if lexeme == "True":
+        return TK_LIT_BOOL_TRUE
+    if lexeme == "False":
+        return TK_LIT_BOOL_FALSE
+    if lexeme == "None":
+        return TK_LIT_NONE
+    return TK_IDENT
+
+# ── Tokenize 主函数 ──
+def tokenize(source: str) -> str:
+    """将 Cypy 源码 tokenize 为 Token 流，返回格式化字符串"""
+    let end: int = len(source)
+    let pos: int = 0
+    let line: int = 1
+    let col: int = 1
+    let result: str = ""
+
+    for unused in source:
+        if pos >= end:
+            break
+
+        # 跳过空白
+        for ws_loop in source:
+            if pos >= end:
+                break
+            let ws_ch: str = source[pos] as str
+            if ws_ch == " ":
+                pos = pos + 1
+                col = col + 1
+            elif ws_ch == "\t":
+                pos = pos + 1
+                col = col + 1
+            elif ws_ch == "\r":
+                pos = pos + 1
+            else:
+                break
+
+        if pos >= end:
+            break
+
+        let ch: str = source[pos] as str
+
+        # 换行
+        if ch == "\n":
+            pos = pos + 1
+            line = line + 1
+            col = 1
+            result = result + "NEWLINE\n"
+            continue
+
+        # 注释
+        if ch == "#":
+            pos = pos + 1
+            col = col + 1
+            for comment_loop in source:
+                if pos >= end:
+                    break
+                let cch: str = source[pos] as str
+                if cch == "\n":
+                    break
+                pos = pos + 1
+                col = col + 1
+            result = result + "COMMENT\n"
+            continue
+
+        # 字符串
+        if ch == "\"":
+            pos = pos + 1
+            col = col + 1
+            for str_loop in source:
+                if pos >= end:
+                    break
+                let sch: str = source[pos] as str
+                if sch == "\"":
+                    pos = pos + 1
+                    col = col + 1
+                    break
+                if sch == "\\":
+                    pos = pos + 1
+                    col = col + 1
+                    if pos < end:
+                        pos = pos + 1
+                        col = col + 1
+                else:
+                    pos = pos + 1
+                    col = col + 1
+            result = result + "LIT_STR\n"
+            continue
+
+        # 数字
+        if is_digit(ch) == 1:
+            for num_loop in source:
+                if pos >= end:
+                    break
+                let nch: str = source[pos] as str
+                if is_digit(nch) == 1:
+                    pos = pos + 1
+                    col = col + 1
+                elif nch == ".":
+                    pos = pos + 1
+                    col = col + 1
+                else:
+                    break
+            result = result + "LIT_INT\n"
+            continue
+
+        # 标识符或关键字
+        if is_alpha(ch) == 1:
+            let ident: str = ""
+            for ident_loop in source:
+                if pos >= end:
+                    break
+                let ich: str = source[pos] as str
+                if is_alnum(ich) == 1:
+                    ident = ident + ich
+                    pos = pos + 1
+                    col = col + 1
+                else:
+                    break
+            let kw: int = lookup_keyword(ident)
+            if kw == TK_IDENT:
+                result = result + "IDENT:" + ident + "\n"
+            else:
+                result = result + token_kind_name(kw) + "\n"
+            continue
+
+        # 分隔符
+        if ch == "(":
+            pos = pos + 1
+            col = col + 1
+            result = result + "LPAREN\n"
+            continue
+        if ch == ")":
+            pos = pos + 1
+            col = col + 1
+            result = result + "RPAREN\n"
+            continue
+        if ch == "[":
+            pos = pos + 1
+            col = col + 1
+            result = result + "LBRACKET\n"
+            continue
+        if ch == "]":
+            pos = pos + 1
+            col = col + 1
+            result = result + "RBRACKET\n"
+            continue
+        if ch == "{":
+            pos = pos + 1
+            col = col + 1
+            result = result + "LBRACE\n"
+            continue
+        if ch == "}":
+            pos = pos + 1
+            col = col + 1
+            result = result + "RBRACE\n"
+            continue
+        if ch == ":":
+            pos = pos + 1
+            col = col + 1
+            result = result + "COLON\n"
+            continue
+        if ch == ",":
+            pos = pos + 1
+            col = col + 1
+            result = result + "COMMA\n"
+            continue
+        if ch == ";":
+            pos = pos + 1
+            col = col + 1
+            result = result + "SEMICOLON\n"
+            continue
+
+        # 操作符
+        if ch == "=":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_EQ_EQ\n"
+                    continue
+                if source[pos] == ">":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_FAT_ARROW\n"
+                    continue
+                if source[pos] == ":":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_BUILD_EQ\n"
+                    continue
+            result = result + "OP_EQ\n"
+            continue
+        if ch == "+":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_PLUS_EQ\n"
+                    continue
+            result = result + "OP_PLUS\n"
+            continue
+        if ch == "-":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_MINUS_EQ\n"
+                    continue
+                if source[pos] == ">":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_ARROW\n"
+                    continue
+            result = result + "OP_MINUS\n"
+            continue
+        if ch == "*":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_STAR_EQ\n"
+                    continue
+                if source[pos] == "*":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_DOUBLE_STAR\n"
+                    continue
+                if source[pos] == ":":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_BUILD_STAR\n"
+                    continue
+            result = result + "OP_STAR\n"
+            continue
+        if ch == "/":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_SLASH_EQ\n"
+                    continue
+                if source[pos] == "/":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_DOUBLE_SLASH\n"
+                    continue
+            result = result + "OP_SLASH\n"
+            continue
+        if ch == "<":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_LT_EQ\n"
+                    continue
+            result = result + "OP_LT\n"
+            continue
+        if ch == ">":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_GT_EQ\n"
+                    continue
+            result = result + "OP_GT\n"
+            continue
+        if ch == "!":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == "=":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_NOT_EQ\n"
+                    continue
+            result = result + "UNKNOWN\n"
+            continue
+        if ch == "|":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == ">":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_PIPE\n"
+                    continue
+            result = result + "UNKNOWN\n"
+            continue
+        if ch == "~":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == ":":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_BUILD_TILDE\n"
+                    continue
+            result = result + "UNKNOWN\n"
+            continue
+        if ch == ".":
+            pos = pos + 1
+            col = col + 1
+            if pos < end:
+                if source[pos] == ".":
+                    pos = pos + 1
+                    col = col + 1
+                    result = result + "OP_DOT_DOT\n"
+                    continue
+            result = result + "OP_DOT\n"
+            continue
+        if ch == "@":
+            pos = pos + 1
+            col = col + 1
+            result = result + "OP_AT\n"
+            continue
+        if ch == "%":
+            pos = pos + 1
+            col = col + 1
+            result = result + "OP_PERCENT\n"
+            continue
+
+        # 未知字符
+        pos = pos + 1
+        col = col + 1
+        result = result + "UNKNOWN\n"
+
+    result = result + "EOF\n"
+    return result
+
+# ── 测试 ──
+def main() -> int:
+    print("=== Cypy Lexer Test ===")
+    print("")
+    let test_code: str = "def hello() -> int:\n    return 42\n"
+    print("Input:")
+    print(test_code)
+    print("Tokens:")
+    let tokens_str: str = tokenize(test_code)
+    print(tokens_str)
+    print("=== Done ===")
+    return 0

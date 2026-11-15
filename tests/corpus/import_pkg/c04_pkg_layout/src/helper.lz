@@ -1,0 +1,3 @@
+// C04: sibling module inside the same package
+def helper_add(a: int, b: int) -> int =
+    return a + b

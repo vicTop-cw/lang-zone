@@ -1,0 +1,81 @@
+// Fuzz 14: 控制流组合测试
+
+// ── 14.1 guard let 解包 ──
+def test_guard_return() =
+    x = Some(42)
+    guard let Some(val) = x else:
+        print("none")
+    print("value: ")
+    print(val)
+
+// ── 14.2 guard + None (workaround Bug-36) ──
+def test_guard_none() =
+    x = Some(0)
+    guard let Some(val) = x else:
+        print("guard caught None")
+    if val == 0:
+        print("got zero from Some")
+
+// ── 14.3 defer + 多个退出点 (workaround: 用 print 替代 return) ──
+def test_defer_multi_exit() =
+    defer print("cleanup")
+    x = 1
+    if x < 0:
+        print("negative")
+    elif x == 0:
+        print("zero")
+    else:
+        print("positive")
+
+// ── 14.4 defer + match ──
+def test_defer_with_match() =
+    defer print("match cleanup")
+    x = Some(99)
+    match x:
+        case Some(v):
+            print("found: ")
+            print(v)
+        case _:
+            print("none")
+
+// ── 14.5 guard + defer 组合 ──
+def test_guard_defer_combo() =
+    defer print("outer defer")
+    guard true else:
+        print("guard fail")
+    defer print("inner defer")
+    print("body")
+
+// ── 14.6 match 与 if 组合 ──
+def test_match_if_combo() =
+    x = 15
+    match x:
+        case 5:
+            print("five")
+        case 15:
+            print("fifteen")
+        case _:
+            print("other")
+
+    if x == 15:
+        print("matched medium")
+
+// ── 14.7 while + 条件计数 ──
+def test_while_count() =
+    i = 0
+    while i < 3:
+        print("while: ")
+        print(i)
+        i = i + 1
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Control Combo ===")
+    test_guard_return()
+    test_guard_none()
+    test_defer_multi_exit()
+    test_defer_with_match()
+    test_guard_defer_combo()
+    test_match_if_combo()
+    test_while_count()
+    print("=== Fuzz Control Combo Complete ===")

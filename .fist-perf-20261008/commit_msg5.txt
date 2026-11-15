@@ -1,0 +1,56 @@
+fix(codegen): Dict/Set 的 `+` 合并此前生成**根本无法编译**的代码（E0369）
+
+继续按运行时口径排查同类形态时发现的第四个既有缺陷 —— 而且它比前三类更严重：
+不是「慢」或「诊断不清」，而是**生成的 Rust 必然编译失败**。
+
+── 根因 ────────────────────────────────────────────────
+Rust 的 std **没有**为 BTreeMap / Vec / HashSet 实现 `Add`。已实证：
+三者在独立最小程序里全部 E0369「cannot add X to X」。
+而通用路径对 dict/set 的 `+` 直接透传运算符：
+
+```rust
+d = d + std::collections::BTreeMap::from([(i, i)]);   // E0369
+s = s + std::collections::HashSet::from([i]);// E0369
+```
+
+即 LZ 里 `d = d + {...}` / `s = s + {...}` 的累加写法**从来没编译过**。
+（list 之前幸免：它走的是专用模板 `__cat = a.clone(); __cat.extend(..)`。）
+
+── 修复 ────────────────────────────────────────────────
+把「独占局部变量登记表」从 str/List 扩到四类容器（LocalKind::{Str,List,Dict,Set}），
+`x = x + rhs` 统一降级为原地操作：
+
+| 形态 | 改写后 |
+|---|---|
+| 单条目 dict 字面量 | `d.insert(k, v)` |
+| 多条目 dict 字面量 | `d.extend([(k, v), ..])` |
+| 单元素 set 字面量 | `s.insert(e)` |
+| 多元素 set 字面量 | `s.extend([..])` |
+| 变量右操作数 | `d.extend(rhs)` |
+| 单元素 list 字面量 | `xs.push(e)`（不变） |
+| 多元素 list 字面量 | `xs.extend([..])` —— 由 `vec![..]` 改为数组字面量，再省一次分配 |
+
+Dict 字面量在 IR 里是 `StructCtor{name:"Dict", fields:[("_k0",k),("_v0",v),..]}`，
+Set 字面量被脱糖成 `set!(..)` 调用，两者分别解析。
+
+── 关于收益，如实记录 ──────────────────────────────────
+**不是性能问题，是「能不能编译」的问题。** 我无法对旧形态做A/B（旧产物根本编不过），
+只能与「道德等价基线」（每轮建一张临时表再 extend，即不建临时表的正确写法）比：
+8000 元素 21.3 vs 22.8ms、50000 元素 28.1 vs 29.0ms —— **噪声内无差异**，
+因为 BTreeMap 插入是 O(log n) 而临时表只有 1 个条目。
+本次收益 = 从「编译失败」变成「可编译可运行」，附带零分配语义正确；
+不宣称任何提速。
+
+闸门：tests/perf_opt_gates.rs 32 -> **38 passed / 0 failed**，新增 6 例覆盖
+dict 单/多条目、set 单/多元素、dict/set 变量右操作数，以及一条**回归用例**
+钉住 list 三形态不受本次扩展影响（push / extend([..]) / extend(rhs)）。
+回归：cargo test -j 1 --no-fail-fast = **855 passed / 0 failed**（39 个二进制全绿）；
+demo_codegen_compile --include-ignored = 2/0（空allowlist，348 DEMO 真编译）。
+
+顺带记录一个**未修**的既有缺口：空容器只能靠大写类型名构造
+（`Dict()` / `List()` / `Set()` 已有映射），小写 `dict()` / `list()` / `set()`
+未接线（生成 `fn set() -> i64 { i64::MAX }` 桩⇒ rustc E0425）。
+lz_std 用的都是大写形式，故不是阻塞问题，但错误信息对用户不友好。
+
+提交卫生：stmt_gen.rs 按 hunk 精确分离（7/19），残差校验 RESIDUAL_MARKERS=0，
+他人未提交 WIP 完整保留未暂存。

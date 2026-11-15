@@ -1,0 +1,8 @@
+// for 守卫：`for x in xs if cond:`
+// 出处：SYNTAX/05-控制流.md §3.5 — for 守卫
+// 预期语法：
+def has(x: int) -> bool = True
+
+def main() =
+    for i in [1, 2, 3, 4] if has(i):
+        print(i)

@@ -1,0 +1,6 @@
+# Bug-R3-8: nogil 块语法不支持
+nogil:
+    let x: int = 1 + 1
+
+def main() -> int:
+    return 0

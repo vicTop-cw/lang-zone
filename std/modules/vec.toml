@@ -1,0 +1,36 @@
+# lz std::vec — P0 Vec 类型（核心容器）
+# 源码级映射：lz 符号 → Rust std::vec 路径
+# 注：Vec 在 lz 中经 map_type 的 List<T>→Vec<T> 映射已自动覆盖
+# 此清单补充方法别名与自由函数
+
+[module]
+tier = 1
+rust_prefix = "std::vec"
+
+# ── 类型映射 ──
+
+[types]
+Vec = "Vec"
+
+# ── 方法别名 ──
+
+[methods]
+append  = "push"         # lz .append(x) → Rust .push(x)
+pop     = "pop"          # 身份映射
+length  = "len"          # lz .length() → Rust .len()
+size    = "len"          # lz .size() → Rust .len()
+isEmpty = "is_empty"     # lz .isEmpty() → Rust .is_empty()
+clear   = "clear"        # 身份映射
+first   = "first"        # 身份映射
+last    = "last"         # 身份映射
+at      = ""             # 身份映射 — Rust 用 [] 索引，无需方法映射
+contains = "contains"    # lz .contains(x) → Rust .contains(&x)
+extend  = "extend"       # 身份映射
+sort    = "sort"         # 身份映射
+reverse = "reverse"      # 身份映射
+map     = "map"           # lz 管道 |> 生成 .iter().map() 链式调用
+filter  = "filter"        # lz 管道 |> 生成 .iter().filter() 链式调用
+
+# ── 类型别名注入 ──
+
+[aliases]

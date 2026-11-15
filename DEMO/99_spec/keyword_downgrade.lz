@@ -1,0 +1,5 @@
+def main() =
+    let Ok = 1
+    let Some = 2
+    let None = 3
+    print(Ok + Some + None)

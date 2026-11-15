@@ -1,0 +1,24 @@
+// ============================
+// IR边界测试: guard组合场景
+// ============================
+
+def classify(x: int) -> str =
+    match x:
+        case n if n < 0 => "negative"
+        case 0 => "zero"
+        case n if n < 10 => "single_digit"
+        case n if n < 100 => "double_digit"
+        case n => "large"
+
+def for_with_guard(items: List<int>) =
+    for item in items if item > 0:
+        print(item)
+
+def main() =
+    let a = classify(-5)
+    let b = classify(0)
+    let c = classify(5)
+    let d = classify(50)
+    let e = classify(500)
+    print(a, b, c, d, e)
+    for_with_guard([-1, 0, 1, 2, -3, 3])

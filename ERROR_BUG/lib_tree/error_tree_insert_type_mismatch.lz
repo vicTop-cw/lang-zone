@@ -1,0 +1,26 @@
+// ============================================================
+// error_tree_insert_type_mismatch.lz — 负向测试用例（ERROR_BUG）
+// 所属：lib_tree | 期望检查点：insert 期望 int 却传入 str，应报类型错误
+// 级别：L2
+//   L1 = 完全漏放行（lang-zone 放行且生成的 Rust 也通过，最严重）
+//   L2 = 前端漏检（lang-zone 放行，生成的 Rust 被 rustc 拒绝）
+// 实际：lang-zone 放行（EXIT 0）| rustc 拒绝 E0308
+// 验证：lang-zone <本文件> 当前返回 0；修复后应返回非 0 并报错
+// ============================================================
+enum Tree:
+    Node(int, Tree, Tree)
+    Empty
+
+def insert(t: Tree, v: int) -> Tree =
+    match t:
+        case Empty:
+            Node(v, Empty, Empty)
+        case Node(val, left, right):
+            if v < val:
+                Node(val, insert(left, v), right)
+            else:
+                Node(val, left, insert(right, v))
+
+def main() =
+    let t = insert(Empty, "not an int")
+    print(t)

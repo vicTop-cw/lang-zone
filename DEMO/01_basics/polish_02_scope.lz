@@ -1,0 +1,74 @@
+// ============================================================
+// 轮2: 变量作用域与遮蔽 — 嵌套块/全局 const/跨函数
+// 每项用 assert 确保正确
+// ============================================================
+
+const GLOBAL_C = 100
+
+def main() =
+    // ── 全局 const 读取 ──
+    assert GLOBAL_C == 100
+
+    // ── 局部变量与全局不冲突 ──
+    let GLOBAL_C = 1            // 遮蔽全局 const
+    assert GLOBAL_C == 1
+    assert GLOBAL_C + 0 == 1
+
+    // ── 嵌套块作用域（if 块内遮蔽） ──
+    let outer = "outer"
+    if True:
+        let outer = "inner"     // 块内遮蔽
+        assert outer == "inner"
+    assert outer == "outer"     // 块外恢复
+
+    // ── 循环内遮蔽 ──
+    let counter = 0
+    for i in 0..3:
+        let counter = i * 10    // 循环内局部遮蔽
+        assert counter == i * 10
+    assert counter == 0         // 循环外恢复
+
+    // ── 跨函数变量隔离 ──
+    def set_val() =
+        let val = 999
+        assert val == 999
+    set_val()
+    // val 不泄漏到 main
+
+    // ── 全局变量（顶层 Assign 转 const）跨函数可见 ──
+    let shared = 50
+    def read_shared() -> int =
+        shared
+    assert read_shared() == 50
+
+    // ── 函数参数遮蔽外部变量 ──
+    let n = 5
+    def triple(n: int) -> int =
+        n * 3
+    assert triple(10) == 30     // 参数 n=10 遮蔽外部 n=5
+    assert n == 5               // 外部 n 不变
+
+    // ── 同名变量连续定义（重新绑定） ──
+    let v = 1
+    let v = v + 1
+    assert v == 2
+    let v = v * 10
+    assert v == 20
+
+    // ── 深层嵌套作用域 ──
+    let level = "top"
+    if True:
+        let level = "mid"
+        if True:
+            let level = "deep"
+            assert level == "deep"
+        assert level == "mid"
+    assert level == "top"
+
+    // ── 循环变量作用域（循环后不可用，但可重新绑定） ──
+    for idx in 0..2:
+        assert idx < 2
+    let idx = 99                // 循环后重新绑定
+    assert idx == 99
+
+    print("P2 scope OK")

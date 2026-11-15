@@ -1,0 +1,2383 @@
+// Lang-Zone 自举回归测试：LZ 写的 IR display 能否经自家工具链编译运行
+//
+// 验证链路：内嵌 LZ 源码（递归 enum IrType + display_type）→ lang-zone 编译
+// → rustc 编译 → 运行 → 断言输出与 Rust 版 display.rs 格式一致。
+// 这是自举路线 B（LZ 翻译编译器核心）的固化回归：bootstrap/work/lz_ir
+// 试点若回归，此测试即失败。
+
+use std::path::PathBuf;
+use std::process::Command;
+use std::fs;
+
+// 精简 LZ 源：递归 enum IrType + display_type（对齐 src/ir/display.rs）
+// 覆盖递归 enum 自引用（Box<Vec<IrType>>）、[ty] 前缀、fn/option 容器
+const LZ_SOURCE: &str = r#"
+enum IrType:
+    Int
+    Str
+    Named(path: str, args: List<IrType>)
+    Opt(inner: IrType)
+
+def display_type(t: IrType) -> str =
+    match t:
+        case IrType.Int => "int"
+        case IrType.Str => "str"
+        case IrType.Named(path: p, args: a) =>
+            p + ("<" + type_list(a) + ">" if a.len() > 0 else "")
+        case IrType.Opt(inner: x) => "Option<" + display_type(x) + ">"
+
+def type_list(ts: List<IrType>) -> str =
+    if ts.len() == 0:
+        ""
+    else:
+        let head = display_type(ts[0])
+        if ts.len() > 1:
+            head + ", " + type_list(tail_t(ts))
+        else:
+            head
+
+def tail_t(ts: List<IrType>) -> List<IrType> =
+    let mut out: List<IrType> = []
+    for idx in 1..ts.len():
+        out = out + [ts[idx]]
+    out
+
+def main() =
+    // Vec<int>
+    let v1 = IrType.Named(path: "Vec", args: [IrType.Int])
+    print(display_type(v1))
+    // Option<Vec<int>>（递归嵌套）
+    let v2 = IrType.Named(path: "Vec", args: [IrType.Int])
+    let ov = IrType.Opt(inner: v2)
+    print(display_type(ov))
+"#;
+
+#[test]
+fn lz_written_ir_display_compiles_and_runs() {
+    let work = std::env::temp_dir().join("lz_ir_regression");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("ir_types.lz");
+    let rs_path = work.join("ir_types.rs");
+    let exe_path = work.join("ir_types.exe");
+    fs::write(&lz_path, LZ_SOURCE).expect("write lz source");
+
+    // 1. lang-zone 编译 .lz → .rs
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "lang-zone failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(rs_path.exists(), "generated .rs missing");
+
+    // 2. rustc 编译 .rs（链接 lz_builtins）
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let rustc_out = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs_path)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rustc_out.status.success(),
+        "rustc failed: {}",
+        String::from_utf8_lossy(&rustc_out.stderr)
+    );
+
+    // 3. 运行并断言输出（与 Rust 版 display.rs 格式一致）
+    let run_out = Command::new(&exe_path).output().expect("run exe");
+    assert!(run_out.status.success(), "generated exe failed");
+    let stdout = String::from_utf8_lossy(&run_out.stdout);
+    let first: Vec<&str> = stdout.lines().collect();
+    assert!(
+        first.len() >= 2,
+        "expected >=2 lines, got: {}",
+        stdout
+    );
+    // Vec<int>（Named 无泛型括号展开）
+    assert!(
+        stdout.contains("Vec<int>"),
+        "expected Vec<int>, got: {}",
+        stdout
+    );
+    // Option<Vec<int>>（递归嵌套容器）
+    assert!(
+        stdout.contains("Option<Vec<int>>"),
+        "expected Option<Vec<int>>, got: {}",
+        stdout
+    );
+
+    // 清理
+    let _ = fs::remove_dir_all(&work);
+}
+
+/// 自举回归门禁（词法试点）：LZ 写的 Lexer（Token 枚举 + tokenize 简化版）
+/// 经 lang-zone → rustc → 运行 端到端输出正确 token 序列。
+/// 试点源：bootstrap/work/lz_lexer/lexer.lz（bootstrap/ 被 gitignore 忽略，
+/// 故测试内嵌等价精简源——覆盖字符串字面量/多字符运算符/magic method）。
+const LZ_LEXER_SOURCE: &str = r#"
+enum Token:
+    Def
+    If
+    Return
+    StrLit(s: str)
+    Ident(name: str)
+    MagicMethod(name: str)
+    Plus
+    EqEq
+    AmpAmp
+    Dot
+    LParen
+    RParen
+    Newline
+    Eof
+
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "if" || s == "return"
+
+def keyword_token(s: str) -> Token =
+    if s == "def":
+        Token.Def
+    elif s == "if":
+        Token.If
+    else:
+        Token.Return
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def is_alpha(c: str) -> bool =
+    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+def is_ident_char(c: str) -> bool =
+    is_alpha(c) or is_digit(c)
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def str_len(s: str) -> int =
+    s.len()
+
+def scan_ident(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < str_len(src) && is_ident_char(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+def punct_token(c: str) -> (bool, Token) =
+    let table: List<(str, Token)> = [
+        ("+", Token.Plus),
+        (".", Token.Dot),
+        ("(", Token.LParen),
+        (")", Token.RParen),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == c:
+            result = (true, pair.1)
+    result
+
+def two_char_token(c1: str, c2: str) -> (bool, Token) =
+    let key: str = c1 + c2
+    let table: List<(str, Token)> = [
+        ("==", Token.EqEq),
+        ("&&", Token.AmpAmp),
+    ]
+    let mut result: (bool, Token) = (false, Token.Plus)
+    for idx in 0..table.len():
+        let pair = table[idx].clone()
+        if pair.0 == key:
+            result = (true, pair.1)
+    result
+
+def scan_punct(src: str, i: int) -> ((bool, Token), int) =
+    let c = char_at(src, i)
+    let r = punct_token(c)
+    if r.0:
+        (r, i + 1)
+    elif i + 1 < str_len(src):
+        let two = two_char_token(c, char_at(src, i + 1))
+        if two.0:
+            ((true, two.1), i + 2)
+        else:
+            (r, i + 1)
+    else:
+        (r, i + 1)
+
+def scan_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 1
+    while i < str_len(src) && char_at(src, i) != "\"":
+        i = i + 1
+    (src[(start + 1)..i], i + 1)
+
+def tokenize(src: str) -> List<Token> =
+    let mut tokens: List<Token> = []
+    let mut i = 0
+    while i < str_len(src):
+        let c = char_at(src, i)
+        if c == " " || c == "\t":
+            i = i + 1
+        elif c == "\n":
+            tokens = tokens + [Token.Newline]
+            i = i + 1
+        elif c == "\"":
+            let r = scan_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.StrLit(s: r.0)]
+        elif is_alpha(c):
+            let r = scan_ident(src, i)
+            i = r.1
+            let word: str = r.0
+            if word.len() > 4 && word[0..2] == "__" && word[(word.len() - 2)..word.len()] == "__":
+                tokens = tokens + [Token.MagicMethod(name: word)]
+            elif is_keyword(word):
+                tokens = tokens + [keyword_token(word)]
+            else:
+                tokens = tokens + [Token.Ident(name: word)]
+        else:
+            let r = scan_punct(src, i)
+            i = r.1
+            let pr = r.0
+            if pr.0:
+                tokens = tokens + [pr.1]
+    tokens = tokens + [Token.Eof]
+    tokens
+
+def main() =
+    let src = "def f:\n    x.__len__()\n    \"hi\" + y\n    a == b && c"
+    let toks = tokenize(src)
+    for idx in 0..toks.len():
+        let t = toks[idx].clone()
+        match t:
+            case Token.Def => print("Def")
+            case Token.If => print("If")
+            case Token.Return => print("Return")
+            case Token.StrLit(s: s) => print("StrLit(" + s + ")")
+            case Token.Ident(name: n) => print("Ident(" + n + ")")
+            case Token.MagicMethod(name: n) => print("MagicMethod(" + n + ")")
+            case Token.Plus => print("Plus")
+            case Token.EqEq => print("EqEq")
+            case Token.AmpAmp => print("AmpAmp")
+            case Token.Dot => print("Dot")
+            case Token.LParen => print("LParen")
+            case Token.RParen => print("RParen")
+            case Token.Newline => print("Newline")
+            case Token.Eof => print("Eof")
+"#;
+
+#[test]
+fn lz_written_lexer_compiles_and_runs() {
+    let work = std::env::temp_dir().join("lz_lexer_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("lexer.lz");
+    let rs_path = work.join("lexer.rs");
+    let exe_path = work.join("lexer.exe");
+    fs::write(&lz_path, LZ_LEXER_SOURCE).expect("write lz source");
+
+    // 1. lang-zone 编译 .lz → .rs
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin).arg(&lz_path).output().expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "lang-zone failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(rs_path.exists(), "generated .rs missing");
+
+    // 2. rustc 编译
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let rustc_out = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs_path)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc");
+    assert!(
+        rustc_out.status.success(),
+        "rustc failed: {}",
+        String::from_utf8_lossy(&rustc_out.stderr)
+    );
+
+    // 3. 运行并断言 token 序列（字符串字面量/magic method/双字符运算符）
+    let run_out = Command::new(&exe_path).output().expect("run exe");
+    assert!(run_out.status.success(), "generated exe failed");
+    let stdout = String::from_utf8_lossy(&run_out.stdout);
+    assert!(stdout.contains("Def"), "缺 Def: {}", stdout);
+    assert!(stdout.contains("MagicMethod(__len__)"), "缺 magic method: {}", stdout);
+    assert!(stdout.contains("StrLit(hi)"), "缺字符串字面量: {}", stdout);
+    assert!(stdout.contains("EqEq") && stdout.contains("AmpAmp"), "缺双字符运算符: {}", stdout);
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+/// 自举回归门禁（增强）：lzc --emit=ir-lz 端到端。
+#[test]
+fn lz_emit_ir_lz_roundtrip() {
+    let work = std::env::temp_dir().join("lz_ir_lz_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    // 复制一个基础 DEMO 到临时目录（避免 --emit=ir-lz 在 DEMO 目录落盘）
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("DEMO/04_functions/basic.lz");
+    let lz_path = work.join("basic.lz");
+    fs::copy(&src, &lz_path).expect("copy demo");
+    let out_path = work.join("basic.lzlz");
+    let rs_path = work.join("basic.rs");
+    let exe_path = work.join("basic.exe");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=ir-lz")
+        .output()
+        .expect("run lang-zone --emit=ir-lz");
+    assert!(
+        out.status.success(),
+        "--emit=ir-lz 失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out_path.exists(), "生成 .lzlz 缺失");
+    assert!(rs_path.exists(), "中间 .rs 缺失");
+    assert!(exe_path.exists(), "最终 exe 缺失");
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // IR 文本输出（Debug 字符串：带引号与 \n 转义；断言关键子串）
+    assert!(
+        stdout.contains("LZIR v1"),
+        "输出应含 LZIR v1 头，got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("fn add") && stdout.contains("binop"),
+        "输出应含 fn add / binop，got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("items"),
+        "输出应含 items 计数，got: {}",
+        stdout
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+/// 自举 C3 门禁（50% 里程碑）：--emit=ir vs --emit=ir-lz 双路输出逐字符一致。
+///
+/// Rust 版 display.rs（--emit=ir）与 LZ 版 lz_ir_lib.lz（--emit=ir-lz，经
+/// 递归管线 lzc→rustc→run）对同一输入产出完全相同 IR 文本。若 lz_ir_lib.lz
+/// 或 lz_codegen.rs 回归（ty 前缀 / 缩进式 body / 泛型签名等丢失），本测试失败。
+#[test]
+fn lz_emit_ir_lz_matches_ir_byte_exact() {
+    // 覆盖：函数定义（含泛型）、const、let/赋值、binop/unop、call/index/field、
+    // if/else、for/while、match、return、struct 定义、enum 定义、列表/字典字面量
+    let source = r#"
+def add(x: int, y: int) -> int =
+    x + y
+
+const LIMIT: int = 100
+
+struct Pair<T> =
+    first: T
+    second: T
+
+enum Shape:
+    Circle(r: f64)
+    Rect(w: f64, h: f64)
+
+def classify(x: int) -> str =
+    match x:
+        case 0 => "zero"
+        case _ => "many"
+
+def sum_to(n: int) -> int =
+    let mut total = 0
+    for i in 0..n:
+        total = total + i
+    while total > 100:
+        total = total - 1
+    total
+
+def area(s: Shape) -> f64 =
+    match s:
+        case Shape.Circle(r: r) => 3.14 * r * r
+        case Shape.Rect(w: w, h: h) => w * h
+
+def main() =
+    let xs: List<int> = [1, 2]
+    let d = {"a": 1}
+    print(xs[0])
+    print(add(LIMIT, 1))
+    print(classify(0))
+    print(sum_to(5))
+    let c = Shape.Circle(r: 3.0)
+    print(area(c))
+"#;
+
+    let work = std::env::temp_dir().join("lz_ir_diff_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("diff_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 路 1：Rust 版 display（--emit=ir）
+    let out_ir = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=ir")
+        .output()
+        .expect("run lang-zone --emit=ir");
+    assert!(
+        out_ir.status.success(),
+        "--emit=ir 失败: {}",
+        String::from_utf8_lossy(&out_ir.stderr)
+    );
+
+    // 路 2：LZ 版 display（--emit=ir-lz，递归管线）
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=ir-lz")
+        .output()
+        .expect("run lang-zone --emit=ir-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=ir-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    // 逐字符一致断言（C3 判据）
+    assert_eq!(
+        out_ir.stdout, out_lz.stdout,
+        "--emit=ir 与 --emit=ir-lz 输出不一致（LZ 版 display 回归？）\nir: {}\nlz: {}",
+        String::from_utf8_lossy(&out_ir.stdout),
+        String::from_utf8_lossy(&out_lz.stdout)
+    );
+    assert!(!out_ir.stdout.is_empty(), "IR 输出不应为空");
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+/// 自举 D1 门禁（100% 里程碑）：--emit=rs-lz 双路 .rs 产物逐字符一致。
+///
+/// Rust 版 codegen（常规路径生成 .rs）与 LZ 版 codegen（--emit=rs-lz，经递归
+/// 管线 lzc→rustc→run 输出 Rust 源码）对同一输入产出完全相同的 .rs。若
+/// lz_codegen_lib.lz 或 lz_codegen.rs 的 rs-lz 生成回归，本测试失败。
+#[test]
+fn lz_emit_rs_lz_matches_native_codegen() {
+    let source = r#"
+def add(x: int, y: int) -> int =
+    x + y
+
+const LIMIT: int = 100
+
+struct Point =
+    x: f64
+    y: f64
+
+enum Color:
+    Red
+    Blue
+
+def main() =
+    let a = 1 + 2
+    let b = 3.5 * 2.0
+    let s = "hi"
+    let neg = -a
+    let c = add(a, 4)
+    print(c)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_diff_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("d1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+    let rs_path = work.join("d1_input.rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 路 1：常规路径生成 .rs（Rust 版 codegen）
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "常规 codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = fs::read(&rs_path).expect("read native .rs");
+
+    // 路 2：--emit=rs-lz（LZ 版 codegen，递归管线）
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    // 逐字符一致断言（D1 判据）
+    assert_eq!(
+        native_rs, out_lz.stdout,
+        "常规 codegen 与 --emit=rs-lz 产物不一致（LZ 版 codegen 回归？）\nnative: {}\nlz: {}",
+        String::from_utf8_lossy(&native_rs),
+        String::from_utf8_lossy(&out_lz.stdout)
+    );
+    assert!(!out_lz.stdout.is_empty(), ".rs 输出不应为空");
+
+    // 生成的 Rust 必须能过 rustc（运行行为一致由 D2 全量比对覆盖）
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = work.join("d1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rs_path)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on generated .rs");
+    assert!(
+        rc.status.success(),
+        "LZ 版 codegen 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "生成产物运行失败");
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-469 回归：rs-lz 的 Stmt::Match scrutinee 未对齐原生 stmt_gen.rs:2304 的
+// 「纯 Var 一律 `.clone()`」规则，导致 `match s` 而非 `match s.clone()`——非 Copy
+// 枚举实参匹配后可能 E0382 二次移动。断言 rs-lz 产物含 `.clone()` scrutinee 且能
+// 过 rustc。（注：rs-lz 的 match 臂缩进仍与原生有差异，故不做逐字符比对，仅断言
+// scrutinee 变换这一功能修复点。）
+#[test]
+fn rs_lz_match_scrutinee_clones_var() {
+    let source = r#"
+enum Shape =
+    Circle(radius: int)
+    Rect(w: int, h: int)
+
+def area(s: Shape) -> int =
+    match s:
+        case Shape.Circle(radius): return radius * radius * 3
+        case Shape.Rect(w, h): return w * h
+
+def main() =
+    print(area(Shape.Circle(radius: 3)))
+    print(area(Shape.Rect(w: 3, h: 4)))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_scrut_gate");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("g1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+    let rs_path = work.join("g1_input.rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "常规 codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = fs::read(&rs_path).expect("read native .rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    // BUG-469 核心：原生与 rs-lz 的 scrutinee 都必须带 .clone()（match 纯 Var 实参）
+    let n_str = String::from_utf8_lossy(&native_rs);
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        n_str.contains("match s.clone()"),
+        "参考实现未发 `match s.clone()`（探针失效？）: {}",
+        n_str.lines().find(|l| l.contains("match")).unwrap_or("(无 match)")
+    );
+    assert!(
+        l_str.contains("match s.clone()"),
+        "rs-lz 未对齐原生 scrutinee clone（BUG-469 回归）：\n{}",
+        l_str.lines().find(|l| l.contains("match")).unwrap_or("(无 match)")
+    );
+
+    // 生成产物必须过 rustc（功能正确性兜底）
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("g1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("g1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-470 回归：rs-lz 的 Stmt::Match scrutinee 未对齐原生 stmt_gen.rs:2274 的
+// Str → `.as_str()` 变换。String scrutinee 直接 match &str 字面量模式报 E0308。
+// 断言 rs-lz 产物含 `match name.as_str() {` 且 rustc 可编译运行出正确结果。
+#[test]
+fn rs_lz_match_scrutinee_as_str() {
+    let source = r#"
+def kind(name: str) -> str =
+    match name:
+        case "hello": return "greet"
+        case _: return "other"
+
+def main() =
+    print(kind("hello"))
+    print(kind("zzz"))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_scrut_str");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+    let rs_path = work.join("s1_input.rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "常规 codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = fs::read(&rs_path).expect("read native .rs");
+    let _ = fs::remove_file(&rs_path);
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let n_str = String::from_utf8_lossy(&native_rs);
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        n_str.contains("match name.as_str()"),
+        "参考实现未发 `match name.as_str()`（探针失效？）"
+    );
+    assert!(
+        l_str.contains("match name.as_str()"),
+        "rs-lz 未对齐原生 scrutinee as_str（BUG-470 回归）：\n{}",
+        l_str.lines().find(|l| l.contains("match")).unwrap_or("(无 match)")
+    );
+
+    // rs-lz 产物须过 rustc 且运行输出正确
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "greet\nother",
+        "rs-lz 产物运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-472 回归：rs-lz 的 auto_mut 扫描（lz_codegen_lib.lz scan_expr_auto_mut）对
+// FieldAccess / IndexGet 只递归不 add_var_auto_mut，`c.d["a"] = 1` 的底座 Var `c`
+// 未记入 auto_mut → `let c = Cache(...)` 缺 `mut` → rustc E0596 cannot borrow as mutable。
+// 断言 rs-lz 产物含 `let mut c` 且 rustc 编译运行出 1 / 2。
+#[test]
+fn rs_lz_field_assign_marks_let_mut() {
+    let source = r#"
+struct Cache =
+    d: Dict<str, int>
+
+def main() =
+    let c = Cache(d: {})
+    c.d["a"] = 1
+    c.d["b"] = 2
+    print(c.d["a"])
+    print(c.d.len())
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_auto_mut");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        l_str.contains("let mut c"),
+        "rs-lz 未给字段赋值的 let 标 mut（BUG-472 回归）：\n{}",
+        l_str.lines().find(|l| l.contains("let c")).unwrap_or("(无 let c)")
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "1\n2",
+        "rs-lz 产物运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-473 回归：rs-lz 把点号固有方法 `def Type.method()` 发成自由函数
+// `pub fn Type.method(...)`（非法 Rust）。原生 gen_item（decl_gen.rs:169-182）检测函数名
+// 含 `.` 即包 `impl Type { fn method }`。断言 rs-lz 产物含 `impl Point {`、rustc 编译运行出 25。
+#[test]
+fn rs_lz_recursive_enum_boxes_fields() {
+    // BUG-475：递归类型（链表/树）字段必须发 `Box<T>`，构造端 `Box::new(..)`，
+    // 否则 rustc E0072 recursive type has infinite size / E0308 Box<T> 赋裸 T。
+    let source = r#"
+enum Tree =
+    Leaf(v: int)
+    Node(l: Tree, r: Tree)
+
+def main() =
+    let t = Tree.Node(l: Tree.Leaf(v: 1), r: Tree.Node(l: Tree.Leaf(v: 2), r: Tree.Leaf(v: 3)))
+    print(0)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_recursive_box");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    // 声明端：递归字段 `l: Tree` → `l: Box<Tree>`
+    assert!(
+        text.contains("l: Box<Tree>"),
+        "递归字段未 Box 化（E0072）:\n{}",
+        text
+    );
+    // 构造端：`Tree.Leaf(...)` 作为递归字段值 → `Box::new(Tree::Leaf {...})`
+    assert!(
+        text.contains("Box::new(Tree::Leaf"),
+        "递归构造未包 Box::new（E0308）:\n{}",
+        text
+    );
+}
+
+// BUG-475（match 解构端）：递归 enum 字段声明发 `Box<T>`、构造发 `Box::new(..)` 之后，
+// rs-lz 在 match 臂解构里仍把 `l`/`r` 当 `Box<Tree>` 绑定，递归调用 `sum_tree(l)` 报
+// E0308（expected Tree, found Box<Tree>）。修复：用类型元信息在臂体块首插 `let n = *n;`
+// 解引用（与 BUG-471 的 slice 元素解引用合并进同一 derefs 块）。断言产物含解引用且运行输出 6。
+#[test]
+fn rs_lz_recursive_enum_match_derefs() {
+    let source = r#"
+enum Tree =
+    Leaf(v: int)
+    Node(l: Tree, r: Tree)
+
+def sum_tree(t: Tree) -> int =
+    match t:
+        case Tree.Leaf(v): return v
+        case Tree.Node(l, r): return sum_tree(l) + sum_tree(r)
+
+def main() =
+    let t = Tree.Node(l: Tree.Leaf(v: 1), r: Tree.Node(l: Tree.Leaf(v: 2), r: Tree.Leaf(v: 3)))
+    print(sum_tree(t))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_recursive_match_deref");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("tree_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "BUG-475 回归：--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+
+    // 声明/构造端已由 rs_lz_recursive_enum_boxes_fields 覆盖；此处专测 match 解构端。
+    // 断言 Node 臂解构出 Box 字段后补了 `let l = *l;` / `let r = *r;`
+    assert!(
+        text.contains("let l = *l;"),
+        "BUG-475：递归 Box 字段解构未插 `let l = *l;`（E0308）:\n{}",
+        text
+    );
+    assert!(
+        text.contains("let r = *r;"),
+        "BUG-475：递归 Box 字段解构未插 `let r = *r;`（E0308）:\n{}",
+        text
+    );
+
+    // 编译运行验证输出 6（1 + (2 + 3)）
+    let lz_rs = work.join("tree_rslz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz output");
+    let exe = work.join("tree_rslz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "BUG-475：rs-lz 产物 rustc 编译失败: {}\n{}",
+        String::from_utf8_lossy(&rc.stderr),
+        text
+    );
+    let run = Command::new(&exe).output().expect("run rs-lz exe");
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains('6'),
+        "BUG-475：rs-lz 运行输出应为 6，实际为 {:?}\n{}",
+        stdout,
+        text
+    );
+}
+
+// BUG-477 回归：内建类型转换 `str(x)` / `int(x)` / `f64(x)` 被 rs-lz 原发成函数调用
+// （E0423 expected function, found builtin type `str` / E0425 cannot find function）。
+// 原生 expr_gen.rs:1876 走类型转换分支：str→format!，int→parse/as i64，f64→parse/as f64。
+// 断言 rs-lz 产物含 format!("{}" / as i64 / parse，rustc 编译运行输出 42。
+#[test]
+fn rs_lz_builtin_type_cast_conversions() {
+    let source = r#"
+def main() =
+    let a = "42"
+    let b = int(a)
+    print(b)
+    let c = int(3.9)
+    print(c)
+    let d = "3.14"
+    let e = f64(d)
+    print(e)
+    let g = str(123)
+    print(g)
+    let h = str(2.5)
+    print(h)
+    let i = str([1, 2, 3])
+    print(i)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_cast");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    // int(str) → parse::<i64>().unwrap()（原生 E0605 规避）
+    assert!(
+        text.contains(".parse::<i64>().unwrap()"),
+        "int(str) 未走 parse（E0605）:\n{}",
+        text
+    );
+    // int(f64) → as i64
+    assert!(
+        text.contains(" as i64)"),
+        "int(f64) 未走 as i64:\n{}",
+        text
+    );
+    // f64(str) → parse::<f64>().unwrap()
+    assert!(
+        text.contains(".parse::<f64>().unwrap()"),
+        "f64(str) 未走 parse:\n{}",
+        text
+    );
+    // str(int/f64) 标量 → format!("{}", ..)
+    assert!(
+        text.contains("format!(\"{}\", 123i64)"),
+        "str(int) 未走 Display format!:\n{}",
+        text
+    );
+    // str(Vec) 集合 → format!("{:?}", ..)
+    assert!(
+        text.contains("format!(\"{:?}\", vec!["),
+        "str(Vec) 未走 Debug format!（E0277）:\n{}",
+        text
+    );
+
+    // rustc 编译运行出 42
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &text).expect("write rs-lz .rs");
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "42\n3\n3.14\n123\n2.5\n[1, 2, 3]",
+        "rs-lz 转换运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-479：rs-lz 前端自检对含 match 的程序失败（`LZ rs-lz frontend rustc 失败:
+// E0533 expected value, found struct variant Expr::BlockExpr`）。根因：
+// lz_codegen.rs:901 把 IrNode `ExprKind::BlockExpr { block }`（1 个 block 字段）
+// 发射成 LZ 的 `Expr.BlockExpr(stmts:, block_ty:, ty:)` 3 字段构造，而
+// lz_codegen_lib.lz:59 的 `Expr.BlockExpr(stmts: List<Stmt>, ty: IrType)` 是扁平
+// 2 字段元组变体 → LZ→Rust 侧生成 `Expr::BlockExpr(vec![..], IrType, IrType)`
+// 3 参数位置构造，不匹配 Rust IrNode 的 struct variant → E0533，整条 rs-lz 中断。
+// 修后：`--emit=rs-lz` 自检通过、产物编译运行正确。
+#[test]
+fn rs_lz_match_blockexpr_two_field_ctor() {
+    let source = r#"
+def classify(n: int) -> str =
+    match n:
+        case x if x > 3: "big"
+        case 0: "zero"
+        case _: "small"
+
+def main() =
+    print(classify(5))
+    print(classify(0))
+    print(classify(1))
+    let t = match 5:
+        case x if x > 3: "big"
+        case _: "small"
+    print(t)
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_blockexpr");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("m_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败（rs-lz 前端自检未过）：{}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    // 不再出现 3 参数位置构造 `Expr::BlockExpr(vec![..], .., ..)`
+    assert!(
+        !text.contains("Expr::BlockExpr(vec!["),
+        "仍发射 3 参数 BlockExpr 构造（E0533）:\n{}",
+        text
+    );
+    // 最终 Rust 里 match 以正规 `match <scrutinee> {` 块出现（原生同构）
+    assert!(
+        text.contains("match 5i64 {"),
+        "inline match 未发射成 Rust match 块:\n{}",
+        text
+    );
+
+    // 产物编译运行：classify 三例 + inline match
+    let out_rs = work.join("m_input_lz.rs");
+    fs::write(&out_rs, &text).expect("write rs-lz .rs");
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let exe_path = work.join("m_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "big\nzero\nsmall\nbig",
+        "match 产物运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+fn rs_lz_inherent_method_emits_impl_block() {
+    let source = r#"
+struct Point =
+    x: int
+    y: int
+
+def Point.sq(self) -> int =
+    self.x * self.x + self.y * self.y
+
+def main() =
+    let p = Point(x: 3, y: 4)
+    print(p.sq())
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_inherent_method");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("s1_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+
+    let l_str = String::from_utf8_lossy(&out_lz.stdout);
+    assert!(
+        l_str.contains("impl Point {"),
+        "rs-lz 未把固有方法包成 impl 块（BUG-473 回归）：\n{}",
+        l_str
+            .lines()
+            .find(|l| l.contains("pub fn") && l.contains("Point"))
+            .unwrap_or("(无 pub fn Point.* 行)")
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let out_rs = work.join("s1_input_lz.rs");
+    fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
+    let exe_path = work.join("s1_input.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&out_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&exe_path)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let run = Command::new(&exe_path).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "25",
+        "rs-lz 产物运行输出与预期不符（3²+4²=25）"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-466 回归：LZ 侧 IrType/Item 枚举是 Rust 侧（types.rs / node.rs）的子集，
+// 新增变体未镜像会令 --emit=ir-lz 生成的 Rust 编译失败（rustc E0599，如
+// "no variant named Ext/EmbedBlock found for enum"）。此处静态断言确保
+// Ext / EmbedBlock 变体及其 display 分支始终存在，且格式串与原生 display.rs 一致。
+#[test]
+fn lz_ir_lib_mirrors_ext_and_embedblock() {
+    let lib = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ir/lz_ir_lib.lz"),
+    )
+    .expect("read lz_ir_lib.lz");
+
+    // IrType::Ext：types.rs 有 Ext，lz_codegen.rs:961 会发射 `IrType.Ext`
+    assert!(
+        lib.lines().any(|l| l.trim_end() == "    Ext"),
+        "lz_ir_lib.lz 缺 IrType.Ext 变体 (types.rs 有 Ext, lz_codegen.rs 会发射 IrType.Ext)"
+    );
+    assert!(
+        lib.contains("case IrType.Ext => \"Ext\".to_string()"),
+        "IrType.Ext 显示分支缺失或格式漂移 (须对齐 display.rs:23 IrType::Ext 输出 Ext)"
+    );
+
+    // Item::EmbedBlock：node.rs 有 EmbedBlock，lz_codegen.rs:403 会发射 Item.EmbedBlock(lang, src_len)
+    assert!(
+        lib.contains("EmbedBlock(lang: str, src_len: int)"),
+        "lz_ir_lib.lz 缺 Item.EmbedBlock 变体 (node.rs 有 EmbedBlock, lz_codegen.rs:403 会发射)"
+    );
+    assert!(
+        lib.contains(
+            "\"embed(\".to_string() + lg + \") { \" + n.to_string() + \" chars }\""
+        ),
+        "Item.EmbedBlock 显示分支缺失或格式漂移 (须对齐 display.rs:735 embed(lang) 后接 空格+花括号+数字+空格+chars+花括号)"
+    );
+}
+
+#[test]
+fn lz_ir_lib_mirrors_genbuild_and_block_ty() {
+    let lib = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ir/lz_ir_lib.lz"),
+    )
+    .expect("read lz_ir_lib.lz");
+
+    // Expr::GenBuild：node.rs 有 GenBuild{callee: Option<Box<Expr>>}，lz_codegen.rs:899 会发射
+    // Expr.GenBuild(callee: Some(..)/None, stmts, ty)。callee 用 `Expr?` 触发 lang-zone 的
+    // `Self?` 自动 Box（免写 Box<>；`MaybeExpr` 会让 Expr↔MaybeExpr 互递归触发 E0072）。
+    assert!(
+        lib.lines().any(|l| l.trim() == "GenBuild(callee: Expr?, stmts: List<Stmt>, ty: IrType)"),
+        "lz_ir_lib.lz 缺 Expr.GenBuild 变体，或 callee 未用 `Expr?` 自动 Box（否则生成 .rs 报 E0072 互递归）"
+    );
+    assert!(
+        lib.contains("case Expr.GenBuild(callee: c, stmts: s, ty: t) =>"),
+        "Expr.GenBuild 显示分支缺失或格式漂移 (须对齐 display.rs:232 GenBuild 落 `_ => \"<expr>\"`)"
+    );
+
+    // Expr::BlockExpr 需拆两字段：e.ty（前缀 [e.ty]，display.rs:88）与 block.ty（块内 { [block.ty]，
+    // display.rs:427）。原生 BlockExpr{block} 里这两个类型可不同（如 e.ty=?、block.ty=int），
+    // 单一 ty 复用会静默错值。
+    assert!(
+        lib.lines().any(|l| {
+            l.trim() == "BlockExpr(stmts: List<Stmt>, block_ty: IrType, ty: IrType)"
+        }),
+        "lz_ir_lib.lz 缺 Expr.BlockExpr 的 block_ty 字段（需与 e.ty 拆分，否则 block-with-ty 静默错值）"
+    );
+    assert!(
+        lib.contains("case Expr.BlockExpr(stmts: ss, block_ty: bt, ty: t) =>"),
+        "Expr.BlockExpr 显示分支未解构 block_ty（须与 e.ty 分槽渲染）"
+    );
+
+    // Item::FnDef：display.rs:595-628 不渲染 raises/exc 子句；LZ 侧多出的 `raises_sig(rs)`
+    // 会让输出多出 ` raises T`（例 keywords_iterator.lz）。
+    assert!(
+        lib.contains("+ generic_sig(gs) + param_sig(ps) + \" -> \".to_string() + display_type(r) + \":\\n\""),
+        "Item.FnDef 显示分支仍拼接 raises_sig（display.rs 不渲染 raises，须删除）"
+    );
+}
+
+#[test]
+fn lz_ir_lib_mirrors_latent_literal_variants() {
+    let lib = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/ir/lz_ir_lib.lz"),
+    )
+    .expect("read lz_ir_lib.lz");
+
+    // IrType::{Int128,BigInt,Complex}：display.rs:14-16 分别渲染 int128/BigInt/Complex。
+    // 缺变体时生成的 .rs 报 E0599（探针 _probes/latent_variants.lz 实测 5 处 E0599）。
+    for (variant, want) in [
+        ("    Int128", "case IrType.Int128 => \"int128\".to_string()"),
+        ("    BigInt", "case IrType.BigInt => \"BigInt\".to_string()"),
+        ("    Complex", "case IrType.Complex => \"Complex\".to_string()"),
+    ] {
+        assert!(
+            lib.lines().any(|l| l.trim() == variant.trim()),
+            "lz_ir_lib.lz IrType 缺 {variant} 变体（lz_codegen.rs:999-1001 会发射，缺失触发 E0599）"
+        );
+        assert!(
+            lib.contains(want),
+            "IrType 显示分支缺失/漂移: {want}"
+        );
+    }
+
+    // Expr::LitInt128/LitBigInt/LitComplex：display.rs:243-245 渲染 {n}_i128 / BigInt({s}) /
+    // Complex({re}, {im})，前缀仍为 [e.ty]（display.rs:88）。数值可能超 i64/i128 域，
+    // 故 v 存 str；复数实虚部为 f64 元组。
+    for (variant, want) in [
+        (
+            "LitInt128(v: str, ty: IrType)",
+            "case Expr.LitInt128(v: n, ty: t) => \"[\".to_string() + display_type(t) + \"] \".to_string() + n + \"_i128\"",
+        ),
+        (
+            "LitBigInt(v: str, ty: IrType)",
+            "case Expr.LitBigInt(v: s, ty: t) => \"[\".to_string() + display_type(t) + \"] BigInt(\".to_string() + s + \")\".to_string()",
+        ),
+        (
+            "LitComplex(v: (f64, f64), ty: IrType)",
+            "case Expr.LitComplex(v: reim, ty: t) => \"[\".to_string() + display_type(t) + \"] Complex(\".to_string() + reim.0.to_string() + \", \".to_string() + reim.1.to_string() + \")\".to_string()",
+        ),
+    ] {
+        assert!(
+            lib.lines().any(|l| l.trim() == variant.trim()),
+            "lz_ir_lib.lz Expr 缺 {variant} 变体（lz_codegen.rs:1132-1134 会发射）"
+        );
+        assert!(lib.contains(want), "Expr 字面量显示分支缺失/漂移: {variant}");
+    }
+
+    // Expr::Spread / Expr::EnumFieldGet：display.rs:232 Expr 兜底 `_ => "<expr>"` 覆盖二者，
+    // 故 LZ 显示分支须落 `<expr>`（探针实测 `...lst` → `<expr>`）。
+    for variant in [
+        "Spread(expr: Expr, ty: IrType)",
+        "EnumFieldGet(base: Expr, enum_name: str, variants: List<str>, field: str, ty: IrType)",
+    ] {
+        assert!(
+            lib.lines().any(|l| l.trim() == variant),
+            "lz_ir_lib.lz Expr 缺 {variant} 变体（lz_codegen.rs:697/:776 会发射）"
+        );
+    }
+    assert!(
+        lib.contains("case Expr.Spread(expr: _, ty: t) =>"),
+        "Expr.Spread 显示分支未落 `<expr>` 兜底（display.rs:232）"
+    );
+}
+
+#[test]
+fn rs_lz_list_str_contains_borrows_string() {
+    // BUG-450：List<str>.contains("a") 的实参须 `&String`（Vec<String>::contains(&self,
+    // x: &T)），裸 `&"a"`（&str）仍 E0308。rs-lz 侧已发 `(v).contains(&"a".to_string())`，
+    // 原生 codegen（expr_gen.rs str 字面量实参分支）此前发 `v.contains("a")`。此处验
+    // rs-lz 产物含 `&"a".to_string()`，且原生与 rs-lz 都编译运行通过、输出一致。
+    let source = r#"
+def main() =
+    let v: List<str> = ["a", "b"]
+    print(v.contains("a"))
+    print(v.contains("z"))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_contains");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("c_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 原生 codegen：应发射 `.to_string()` 并编译通过
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    // native 把 .rs 写到 <lz 源>.rs（stdout 仅 "Generated" 横幅）
+    let native_rs = lz_path.with_extension("rs");
+    assert!(native_rs.exists(), "native .rs 未生成");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains(r#"contains(&"a".to_string())"#),
+        "BUG-450：native 未对 List<str>.contains 发射 `&\"a\".to_string()`:\n{}",
+        native_src
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let native_exe = work.join("c_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(
+        rc.status.success(),
+        "BUG-450 回归：native 产物 rustc 失败（List<str>.contains 实参缺 .to_string()）: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    // rs-lz：应发射 `&"a".to_string()` 并编译运行
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains(r#"contains(&"a".to_string())"#),
+        "rs-lz 未对 List<str>.contains 发射 `&\"a\".to_string()`（E0308 expected &String）:\n{}",
+        text
+    );
+    let lz_rs = work.join("c_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("c_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc2.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc2.stderr)
+    );
+    let run = Command::new(&lz_exe).output().expect("run generated exe");
+    assert!(run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "true\nfalse",
+        "List<str>.contains 运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
+fn rs_lz_sorted_reversed_to_list_compile_and_run() {
+    // BUG-438：`.sorted()/.reversed()` 在 List 接收者上直发同名方法 → E0599（Rust std
+    // 无 `Vec::sorted/reversed`）；迭代器链上的 `.to_list()` 直发 → E0599。修复后原生
+    // 与 rs-lz 均发 lz_builtins 自由函数 `sorted(v.clone())`/`reversed(v.clone())`，
+    // `.to_list()` 发 `.collect::<Vec<_>>()`（List 接收者为 `.clone()`），双路编译运行一致。
+    let source = r#"
+def f1(v: List<int>) -> List<int> = v.sorted()
+def f2(v: List<int>) -> List<int> = v.reversed()
+def f3(v: List<int>) -> List<int> = v.iter().to_list()
+
+def main() =
+    print(f1([3, 1, 2]))
+    print(f2([3, 1, 2]))
+    print(f3([3, 1, 2]))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_sorted");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("srt_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "BUG-438 回归：native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    for needle in [
+        "sorted(v.clone())",
+        "reversed(v.clone())",
+        ".collect::<Vec<_>>()",
+    ] {
+        assert!(
+            native_src.contains(needle),
+            "BUG-438：native 缺 {}（直发同名方法 → E0599）:\n{}",
+            needle,
+            native_src
+        );
+    }
+    let native_exe = work.join("srt_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(
+        rc.status.success(),
+        "BUG-438 回归：native 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    for needle in [
+        "sorted(v.clone())",
+        "reversed(v.clone())",
+        ".collect::<Vec<_>>()",
+    ] {
+        assert!(
+            text.contains(needle),
+            "BUG-438：rs-lz 缺 {}（透传同名方法 → E0599）",
+            needle
+        );
+    }
+    let lz_rs = work.join("srt_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("srt_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc2.status.success(),
+        "rs-lz 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc2.stderr)
+    );
+    let run = Command::new(&lz_exe).output().expect("run generated exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "[1, 2, 3]\n[2, 1, 3]\n[3, 1, 2]",
+        "sorted/reversed/to_list 运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
+fn rs_lz_range_filter_collects() {
+    // BUG-436：`0..n` 的接收者上 `.filter()`，原生此前漏 `.collect::<Vec<_>>()`（E0308，
+    // Filter 迭代器 ≠ Vec），rs-lz 此前插 `.iter().cloned()`（Range 无 .iter() → E0599）。
+    // 修复后两侧均发 `(r).filter(move |&x| ...).collect::<Vec<_>>()` 并编译运行一致。
+    let source = r#"
+def evens(n: int) -> List<int> =
+    let r = 0..n
+    r.filter(|x| x % 2 == 0)
+
+def main() =
+    print(evens(6))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_range_filter");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("rf_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    // 原生：须含 .collect::<Vec<_>>() 并编译运行
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "BUG-436 回归：native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains(".collect::<Vec<_>>()"),
+        "BUG-436：native 漏 .collect::<Vec<_>>()（Range.filter 返回 Filter 迭代器 → E0308）:\n{}",
+        native_src
+    );
+    assert!(
+        !native_src.contains("r).iter()"),
+        "BUG-436：native 对 Range 误插 .iter()（Range 无该方法 → E0599）"
+    );
+    let native_exe = work.join("rf_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(rc.status.success(), "BUG-436 回归：native 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+
+    // rs-lz：同样须 collect 且不得插 .iter()
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains(".collect::<Vec<_>>()"),
+        "BUG-436：rs-lz 漏 .collect::<Vec<_>>()"
+    );
+    assert!(
+        !text.contains("r).iter()"),
+        "BUG-436：rs-lz 对 Range 误插 .iter()（Range 无该方法 → E0599）"
+    );
+    let lz_rs = work.join("rf_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("rf_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(rc2.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc2.stderr));
+    let run = Command::new(&lz_exe).output().expect("run generated exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "[0, 2, 4]",
+        "Range.filter 运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
+fn rs_lz_tuple_field_access_types_correctly() {
+    // BUG-446：元组字段访问 `.0`/`.1` 的类型推导错误——IR build 报
+    // 「函数 tuple1 返回类型不匹配：期望 str，实际 int」，两条 emit 路线
+    // （--emit=rs 与 --emit=rs-lz）都被同一 IR builder 拦截，属前端/类型
+    // 推导 bug，非 rs-lz codegen 独有。修复后（IR builder 对 Tuple 字段
+    // 访问按索引取对应成员类型）两侧均应发 `t.1`/`t.0` 并编译运行。
+    let source = r#"
+def tuple1(t: (int, str)) -> str = t.1
+def tuple0(t: (int, str)) -> int = t.0
+
+def main() =
+    print(tuple1((1, "hi")))
+    print(tuple0((1, "hi")))
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_tuple");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("tp_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    // 原生：IR build 应通过（不再报「期望 str 实际 int」）并编译运行
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "BUG-446 回归：native IR build 失败（元组字段访问类型推导错）: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("pub fn tuple1(t: (i64, String)) -> String {") && native_src.contains("return t.1;"),
+        "native 元组字段访问发射异常:\n{}",
+        native_src
+    );
+    let native_exe = work.join("tp_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(rc.status.success(), "native 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+
+    // rs-lz：同样通过
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败（IR build 拦截元组字段访问）: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("return t.1;") && text.contains("return t.0;"),
+        "rs-lz 元组字段访问发射异常:\n{}",
+        text
+    );
+    let lz_rs = work.join("tp_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("tp_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(rc2.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc2.stderr));
+    let run = Command::new(&lz_exe).output().expect("run generated exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "hi\n1",
+        "元组字段访问运行输出与预期不符"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
+fn rs_lz_trait_assoc_type_return_self_qualified() {
+    // BUG-434：trait 方法返回关联类型时，原生 codegen 发裸名 `-> Item`，
+    // rustc E0425 cannot find type `Item` in this scope；应为 `-> Self::Item`。
+    // rs-lz（rust_type_assoc）已正确。此处验 rs-lz 产物含 `Self::Item`，
+    // 且原生也发 `Self::Item` 并编译通过。
+    let source = r#"
+trait BoxLike =
+    type Item
+    def item(self) -> Item
+
+struct Box =
+    value: str
+
+impl BoxLike for Box =
+    type Item = str
+
+    def item(self) -> Item =
+        self.value
+
+def main() =
+    print("ok")
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_trait_assoc");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("ta_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    // 原生 codegen：应发 `Self::Item` 且编译通过
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    assert!(native_rs.exists(), "native .rs 未生成");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("fn item(&self) -> Self::Item;"),
+        "BUG-434：native 未发 `Self::Item`（E0425 cannot find type `Item`）:\n{}",
+        native_src
+    );
+    // BUG-434 同族：impl 块内方法返回本 impl 的关联类型裸名（`-> Item`）同样
+    // 需 `Self::Item`（裸名不在此作用域 → E0425）。trait 声明与 impl 实现都要改写。
+    assert!(
+        native_src.contains("fn item(&self) -> Self::Item {"),
+        "BUG-434 同族：native 的 impl 方法未发 `Self::Item`（E0425）:\n{}",
+        native_src
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let native_exe = work.join("ta_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(
+        rc.status.success(),
+        "BUG-434 回归：native 产物 rustc 失败（trait assoc 类型返回缺 Self::）: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+
+    // rs-lz：应发 `Self::Item`
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("fn item(&self) -> Self::Item;"),
+        "rs-lz 未发 `Self::Item`:\n{}",
+        text
+    );
+    // BUG-434 同族：rs-lz 的 impl 方法返回类型同样需 `Self::Item`
+    assert!(
+        text.contains("fn item(&self) -> Self::Item {"),
+        "rs-lz 的 impl 方法未发 `Self::Item`（E0425）:\n{}",
+        text
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
+fn rs_lz_self_dict_index_assign_not_cloned() {
+    // NATIVE-BUG（dict 自字段插入被克隆）：原生 codegen 对 `self.d[k] = v` 的 base
+    // （self.field）套「self 字段读取克隆」规则 → `self.d.clone().insert(k, v)`，insert
+    // 落在临时 dict 上，原 dict 未变，后续读取 unwrap None panic。修复：Assign 的 dict
+    // 分支 trim 掉 `.clone()`；嵌套 dict 链用 `.get_mut(&k).unwrap()`。rs-lz 侧由
+    // gen_dict_place 对齐原生正确形态。
+    let source = r#"
+struct Cache:
+    d: Dict<str, int>
+
+impl Cache:
+    def put(self, k: str, v: int) -> None =
+        self.d[k] = v
+
+def main():
+    let mut c = Cache { d: {} }
+    c.put("a", 1)
+    print(c.d["a"])
+"#;
+
+    let work = std::env::temp_dir().join("lz_rs_self_dict");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("sd_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("self.d.insert(k, v)"),
+        "BUG：native 未对 self.d[k]=v 发 `self.d.insert(k, v)`（仍带 .clone() → 插到临时 dict）:\n{}",
+        native_src
+    );
+    assert!(
+        !native_src.contains("self.d.clone().insert"),
+        "BUG：native 仍发 `self.d.clone().insert`（插到临时 dict，数据丢失）:\n{}",
+        native_src
+    );
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+    let native_exe = work.join("sd_native.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&native_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&native_exe)
+        .output()
+        .expect("run rustc on native .rs");
+    assert!(
+        rc.status.success(),
+        "BUG 回归：native 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc.stderr)
+    );
+    let native_run = Command::new(&native_exe).output().expect("run native exe");
+    assert!(native_run.status.success(), "native 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&native_run.stdout).trim(),
+        "1",
+        "native self.d[k]=v 写入未生效"
+    );
+
+    // rs-lz：同样应发 `self.d.insert(k, v)` 并编译运行
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("self.d.insert(k, v)"),
+        "rs-lz 未对 self.d[k]=v 发 `self.d.insert(k, v)`:\n{}",
+        text
+    );
+    let lz_rs = work.join("sd_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("sd_lz.exe");
+    let rc2 = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("run rustc on rs-lz .rs");
+    assert!(
+        rc2.status.success(),
+        "rs-lz 产物 rustc 编译失败: {}",
+        String::from_utf8_lossy(&rc2.stderr)
+    );
+    let lz_run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert!(lz_run.status.success(), "rs-lz 产物运行失败");
+    assert_eq!(
+        String::from_utf8_lossy(&lz_run.stdout).trim(),
+        "1",
+        "rs-lz self.d[k]=v 写入未生效"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// NATIVE-BUG：`Dict(a: 1, b: 2)` 关键字字面量（`{ "a": 1 }` 之外的字形）被当作未定义
+// 函数调用 → 原生发 `fn Dict(__a0: i64, __a1: i64) -> i64 { i64::MAX }` 桩、rs-lz 发
+// `Dict(_KwArg{..}, _KwArg{..})` → 两侧 rustc 均失败（d 变 i64，`d.len()` E0599 /
+// _KwArg E0422、Dict E0423）。修正后两侧统一发
+// `BTreeMap::from([("a".to_string(), 1i64), ...])`。
+#[test]
+fn rs_lz_self_dict_kwarg_literal() {
+    let bin = env!("CARGO_BIN_EXE_lang-zone");
+    let work = std::env::temp_dir().join("lz_self_dict_kwarg_literal");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).expect("mkwork");
+    let lz_path = work.join("dk.lz");
+    fs::write(
+        &lz_path,
+        "def main() =\n    let d = Dict(a: 1, b: 2)\n    print(d.len())\n",
+    )
+    .expect("write lz");
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+
+    // native（.rs 落到 .lz 旁；stdout 只是 "Generated ..." 提示）
+    let out_n = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("native");
+    assert!(
+        out_n.status.success(),
+        "native 失败: {}",
+        String::from_utf8_lossy(&out_n.stderr)
+    );
+    let text_n = fs::read_to_string(work.join("dk.rs")).expect("read native dk.rs");
+    assert!(
+        text_n.contains("BTreeMap::from([(\"a\".to_string(), 1i64), (\"b\".to_string(), 2i64)])"),
+        "native 未发 BTreeMap::from kwarg 字面量:\n{}",
+        text_n
+    );
+    let n_rs = work.join("dk_n.rs");
+    fs::write(&n_rs, &text_n).expect("write native .rs");
+    let n_exe = work.join("dk_n.exe");
+    let rc_n = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&n_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&n_exe)
+        .output()
+        .expect("rustc native");
+    assert!(
+        rc_n.status.success(),
+        "native 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc_n.stderr)
+    );
+    let run_n = Command::new(&n_exe).output().expect("run native exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run_n.stdout).trim(),
+        "2",
+        "native d.len() 应为 2"
+    );
+
+    // rs-lz
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text_lz = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text_lz.contains("BTreeMap::from([(\"a\".to_string(), 1i64), (\"b\".to_string(), 2i64)])"),
+        "rs-lz 未发 BTreeMap::from kwarg 字面量:\n{}",
+        text_lz
+    );
+    let lz_rs = work.join("dk_lz.rs");
+    fs::write(&lz_rs, &text_lz).expect("write rs-lz .rs");
+    let lz_exe = work.join("dk_lz.exe");
+    let rc_lz = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(
+        rc_lz.status.success(),
+        "rs-lz 产物 rustc 失败: {}",
+        String::from_utf8_lossy(&rc_lz.stderr)
+    );
+    let run_lz = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run_lz.stdout).trim(),
+        "2",
+        "rs-lz d.len() 应为 2"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-478：用户顶层函数 `sum(xs)` 遮蔽标准库 `sum` 魔法。rs-lz 此前无「用户函数注册
+// 表」概念，`print(sum(xs))` 里 `sum` 被误发成 `xs.iter().copied().sum::<i64>()`
+// （1+2+3=6），而原生走用户函数（返回 xs.len()=3）→ 双路输出不一致。修复：main 里
+// `module_user_fn_names(m)` 算一次用户函数名，穿透到 gen_call，魔法分支前置
+// `not is_user_fn(user_fns, n)` 守卫。
+#[test]
+fn rs_lz_self_user_fn_shadows_stdlib_magic() {
+    let bin = env!("CARGO_BIN_EXE_lang-zone");
+    let work = std::env::temp_dir().join("lz_self_user_sum_shadow");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).expect("mkwork");
+    let lz_path = work.join("us.lz");
+    fs::write(
+        &lz_path,
+        "def sum(xs: List<int>) -> int =\n    xs.len()\n\ndef main() =\n    let xs = [1, 2, 3]\n    print(sum(xs))\n",
+    )
+    .expect("write lz");
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+
+    // native（.rs 落到 .lz 旁）
+    let out_n = Command::new(&bin).arg(&lz_path).output().expect("native");
+    assert!(out_n.status.success(), "native 失败: {}", String::from_utf8_lossy(&out_n.stderr));
+    let text_n = fs::read_to_string(work.join("us.rs")).expect("read native us.rs");
+    assert!(
+        text_n.contains("println!(\"{:?}\", sum(xs.clone()))")
+            || text_n.contains("sum(xs"),
+        "native 未调用用户 sum: {}",
+        text_n
+    );
+
+    // rs-lz（stdout 是 Rust 源码）
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("rs-lz");
+    assert!(out_lz.status.success(), "rs-lz 失败: {}", String::from_utf8_lossy(&out_lz.stderr));
+    let text_lz = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        !text_lz.contains(".iter().copied().sum::<i64>()"),
+        "rs-lz 仍把用户 sum 发成 stdlib 魔法:\n{}",
+        text_lz
+    );
+    assert!(
+        text_lz.contains("pub fn sum("),
+        "rs-lz 未输出用户 sum 定义:\n{}",
+        text_lz
+    );
+
+    // 编译运行 rs-lz 产物，断言输出与 native 一致（= 3）
+    let lz_rs = work.join("us_lz.rs");
+    fs::write(&lz_rs, &text_lz).expect("write rs-lz .rs");
+    let lz_exe = work.join("us_lz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(rc.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+    let run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "3",
+        "rs-lz 应调用用户 sum 得 3，而非 stdlib sum 得 6"
+    );
+
+    // native 也编译运行对照
+    let n_rs = work.join("us_n.rs");
+    fs::write(&n_rs, &text_n).expect("write native .rs");
+    let n_exe = work.join("us_n.exe");
+    let rc_n = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&n_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&n_exe)
+        .output()
+        .expect("rustc native");
+    assert!(rc_n.status.success(), "native 产物 rustc 失败: {}", String::from_utf8_lossy(&rc_n.stderr));
+    let run_n = Command::new(&n_exe).output().expect("run native exe");
+    assert_eq!(
+        String::from_utf8_lossy(&run_n.stdout).trim(),
+        "3",
+        "native 应得 3"
+    );
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+// BUG-471（②）：`match xs.clone().as_slice() { [a, rest @ ..] => return a, ... }` 里
+// 元素绑定 a 的类型是 &T（slice 元素），rs-lz 此前发 `return a;`（&i64）而返回类型是
+// i64 → E0308。原生靠类型推断在使用点插 `__implicit_from__(a.clone())`，rs-lz 无推断，
+// 改为在臂体开头插 `let a = *a;`。`..rest` 语法（①）已于 BUG-470 修（`rest @ ..`）。
+#[test]
+fn rs_lz_list_pattern_element_binding_deref() {
+    let bin = env!("CARGO_BIN_EXE_lang-zone");
+    let work = std::env::temp_dir().join("lz_list_elem_deref");
+    let _ = fs::remove_dir_all(&work);
+    fs::create_dir_all(&work).expect("mkwork");
+    let lz_path = work.join("lm.lz");
+    fs::write(
+        &lz_path,
+        "def first(xs: List<int>) -> int =\n    match xs:\n        case [a, ..rest]: return a\n        case _: return -1\n\ndef main() =\n    print(first([7, 8, 9]))\n",
+    )
+    .expect("write lz");
+
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("rs-lz");
+    assert!(out_lz.status.success(), "rs-lz 失败: {}", String::from_utf8_lossy(&out_lz.stderr));
+    let text_lz = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text_lz.contains("[a, rest @ ..]"),
+        "rs-lz 缺 rest @ .. 语法:\n{}",
+        text_lz
+    );
+    assert!(
+        text_lz.contains("let a = *a;"),
+        "rs-lz 未插元素绑定解引用 let:\n{}",
+        text_lz
+    );
+
+    let lz_rs = work.join("lm_lz.rs");
+    fs::write(&lz_rs, &text_lz).expect("write rs-lz .rs");
+    let lz_exe = work.join("lm_lz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(rc.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+    let run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "7");
+
+    let _ = fs::remove_dir_all(&work);
+}
+
+#[test]
+fn rs_lz_unannotated_param_defaults_i64() {
+    // BUG-480：`def f(x): return x + 1` 的无类型注解参数在 rs-lz 下被发射成
+    // `x: Box<dyn Any>`（src/ir/lz_codegen_lib.lz 的 rust_type 对 IrType.Any 发射
+    // `Box<dyn Any>`），导致 `x + 1i64` → E0369（cannot add i64 to Box<dyn Any>），
+    // rs-lz 产物无法编译；原生 emit.rs:247 对 IrType.Any 发射 `i64`，双路不一致。
+    // 修复：rs-lz 的 rust_type 对 IrType.Any 对齐发射 `i64`。参数类型与原生一致后
+    // `x + 1i64`（i64 原生加法）通过 rustc 并输出 42。
+    let source = r#"
+def f(x):
+    return x + 1
+
+def main():
+    print(f(41))
+"#;
+
+    let work = std::env::temp_dir().join("lz_any_param");
+    fs::create_dir_all(&work).expect("create work dir");
+    let lz_path = work.join("ap_input.lz");
+    fs::write(&lz_path, source).expect("write lz source");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/debug/liblz_builtins.rlib");
+
+    // 原生：参数发射 i64（对齐基准）
+    let out_native = Command::new(&bin)
+        .arg(&lz_path)
+        .output()
+        .expect("run lang-zone (native codegen)");
+    assert!(
+        out_native.status.success(),
+        "native codegen 失败: {}",
+        String::from_utf8_lossy(&out_native.stderr)
+    );
+    let native_rs = lz_path.with_extension("rs");
+    let native_src = fs::read_to_string(&native_rs).expect("read native .rs");
+    assert!(
+        native_src.contains("pub fn f(x: i64) -> i64"),
+        "BUG-480：native 未发射 `pub fn f(x: i64) -> i64`:\n{}",
+        native_src
+    );
+
+    // rs-lz：必须同样发射 i64，且 rustc 编译运行输出 42
+    let out_lz = Command::new(&bin)
+        .arg(&lz_path)
+        .arg("--emit=rs-lz")
+        .output()
+        .expect("run lang-zone --emit=rs-lz");
+    assert!(
+        out_lz.status.success(),
+        "--emit=rs-lz 失败: {}",
+        String::from_utf8_lossy(&out_lz.stderr)
+    );
+    let text = String::from_utf8_lossy(&out_lz.stdout).to_string();
+    assert!(
+        text.contains("pub fn f(x: i64) -> i64"),
+        "BUG-480：rs-lz 未对齐发射 `pub fn f(x: i64) -> i64`（仍退化 Box<dyn Any> → E0369）:\n{}",
+        text
+    );
+    assert!(
+        !text.contains("pub fn f(x: Box<dyn Any>)"),
+        "BUG-480：rs-lz 仍对无注解参数发射 Box<dyn Any>:\n{}",
+        text
+    );
+
+    let lz_rs = work.join("ap_lz.rs");
+    fs::write(&lz_rs, &text).expect("write rs-lz .rs");
+    let lz_exe = work.join("ap_lz.exe");
+    let rc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&lz_rs)
+        .arg("--extern")
+        .arg(format!("lz_builtins={}", builtins.display()))
+        .arg("-L")
+        .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+        .arg("-o")
+        .arg(&lz_exe)
+        .output()
+        .expect("rustc rs-lz");
+    assert!(rc.status.success(), "rs-lz 产物 rustc 失败: {}", String::from_utf8_lossy(&rc.stderr));
+    let run = Command::new(&lz_exe).output().expect("run rs-lz exe");
+    assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "42");
+
+    let _ = fs::remove_dir_all(&work);
+}

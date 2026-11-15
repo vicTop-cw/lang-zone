@@ -1,0 +1,52 @@
+#!bin macro
+// ============================================================
+// nested_macros — 多层宏/template 嵌套与混合嵌套展开检查
+// 规范: SYNTAX/08-宏与编译期.md §3.6 规则 4（多层嵌套多次硬检查）
+//
+// 场景覆盖：
+// 1. 多层宏嵌套：@run_double! 产物含 @print_double!（宏→宏）
+// 2. template 嵌套：gen_wrap! 产物含 gen_print!（模板→模板）
+// 3. 混合 A：宏产物含 name!（宏→模板）
+// 4. 混合 B：模板产物含 @name!（模板→宏）
+//
+// 展开阶段交替循环（宏→模板→宏→…）直到稳定，每层做结构检查
+// ============================================================
+
+// ── 层 2 宏：生成 print 表达式（纯 Token 转换，自包含） ──
+macro print_double(x: Tokens) -> Tokens =
+    quote("print(" + x + " * 2)")
+
+// ── 层 1 宏：产物含层 2 宏调用 @print_double!（宏→宏 嵌套） ──
+macro run_double(x: Tokens) -> Tokens =
+    quote("// layer1-macro\n" + "@print_double!(" + x + ")")
+
+// ── 模板 1：自由参数，生成 print 语句（可内联） ──
+template gen_print(v: Tokens) -> Tokens =
+    quote("print(" + v + ")")
+
+// ── 模板 2：产物含模板 1 调用 gen_print!（模板→模板 嵌套） ──
+template gen_wrap(v: Tokens) -> Tokens =
+    quote("// layer2-template\n" + "gen_print!(" + v + ")")
+
+// ── 混合 A：宏产物含模板调用（宏→模板） ──
+macro run_print(x: Tokens) -> Tokens =
+    quote("// macro-to-template\n" + "gen_print!(" + x + ")")
+
+// ── 混合 B：模板产物含宏调用（模板→宏） ──
+template gen_double_msg(x: Tokens) -> Tokens =
+    quote("// template-to-macro\n" + "@print_double!(" + x + ")")
+
+def main() =
+    // 1. 多层宏嵌套：@run_double!(21) → @print_double!(21) → print(21 * 2) = 42
+    @run_double!(21)
+
+    // 2. template 嵌套：gen_wrap!(7) → gen_print!(7) → print(7)
+    gen_wrap!(7)
+
+    // 3. 混合 A（宏→模板）：@run_print!(30) → gen_print!(30) → print(30)
+    @run_print!(30)
+
+    // 4. 混合 B（模板→宏）：gen_double_msg!(5) → @print_double!(5) → print(5 * 2) = 10
+    gen_double_msg!(5)
+
+    print("nested macros OK")

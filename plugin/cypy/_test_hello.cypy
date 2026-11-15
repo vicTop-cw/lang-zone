@@ -1,0 +1,3 @@
+def main() -> int:
+    print("hello from josn_parse/cypy")
+    return 0

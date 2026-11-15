@@ -1,0 +1,4 @@
+// 反例：每目标至多一个修饰符装饰器 → E-MODDEC-AT-MOST-ONE (AC8)
+def main() =
+    @shared @mut y = 0
+    print(y)

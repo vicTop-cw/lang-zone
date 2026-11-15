@@ -1,0 +1,10 @@
+def fill_dict(n: int) -> Dict<int, int> =
+    mut d: Dict<int, int> = Dict()
+    mut i = 0
+    while i < n:
+        d = d + {i: i}
+        i = i + 1
+    d
+
+def main() =
+    println(fill_dict(8000).len())

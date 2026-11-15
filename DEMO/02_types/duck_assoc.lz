@@ -1,0 +1,22 @@
+// ============================================================
+// 测试: duck 关联类型 type I.Item（§2.3）
+// ============================================================
+
+// ── 关联类型 duck：I 有关联类型 Item ──
+duck HasItem<I> =
+    type I.Item
+    def I.get(self) -> I.Item
+
+// ── 满足约束的泛型类型：Box2<T>.get 返回 T → Item = T ──
+struct Box2<T> =
+    value: T
+    def get(self) -> T = self.value
+
+// ── 使用关联类型 duck 的泛型函数 ──
+def fetch<T>(b: T) where T: HasItem<T> =
+    print(f"got: {b.get()}")
+
+def main() =
+    let b = Box2(value: 42)
+    fetch(b)
+    print("assoc type duck demo done")

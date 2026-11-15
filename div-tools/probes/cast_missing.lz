@@ -1,0 +1,8 @@
+// __cast__/__try_cast__ 双缺：文档 01 §6 承诺编译期报错
+struct Point =
+    x: int
+
+def main() =
+    let p = Point(x: 1)
+    let v: int = p as int
+    print(v)

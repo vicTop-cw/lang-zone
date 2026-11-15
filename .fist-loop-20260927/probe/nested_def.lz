@@ -1,0 +1,5 @@
+def outer() -> int =
+    def inner(x: int) -> int = x + 1
+    inner(41)
+print(outer())
+

@@ -1,0 +1,12 @@
+// impl block 测试
+struct Point =
+    x: f64
+    y: f64
+
+impl Point =
+    def new(x: f64, y: f64) -> Point =
+        Point(x: x, y: y)
+
+def main() =
+    let p = Point.new(3.0, 4.0)
+    print(p.x, p.y)

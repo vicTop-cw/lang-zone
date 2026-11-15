@@ -1,0 +1,33 @@
+{
+  "op": "cy_function",
+  "version": "1.0",
+  "definition": {
+    "signature": "gen_function(f: FnDef) -> String",
+    "note": "FnDef → cpdef/cdef/def 函数。非空 body 用 cdef，空 body 用 cpdef。返回类型 void 表示 Unit。"
+  },
+  "preconditions": [
+    "f.name 必须是合法标识符",
+    "f.params 每个元素含 name 和 ty",
+    "f.ret_ty 是合法 IrType"
+  ],
+  "laws": ["L1", "L2"],
+  "tests": [
+    {
+      "input": {"f": {"name": "double", "params": [{"name":"x","ty":"Int"}], "ret_ty": "Int", "body": "return x * 2"}},
+      "expected": "cdef Py_ssize_t double(Py_ssize_t x):\n    return x * 2"
+    },
+    {
+      "input": {"f": {"name": "greet", "params": [{"name":"name","ty":"Str"}], "ret_ty": "Str", "body": "return f\"Hello, {name}\""}},
+      "expected": "cdef str greet(str name):\n    return f\"Hello, {name}\""
+    },
+    {
+      "input": {"f": {"name": "main", "params": [], "ret_ty": "Unit", "body": "print(1)"}},
+      "expected": "cdef void main():\n    print(1)"
+    },
+    {
+      "input": {"f": {"name": "abstract_func", "params": [{"name":"x","ty":"Int"}], "ret_ty": "Int", "body": ""}},
+      "expected": "cpdef Py_ssize_t abstract_func(Py_ssize_t x):"
+    }
+  ],
+  "fingerprint": "fnv1a64:cy_function_v1"
+}

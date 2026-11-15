@@ -1,0 +1,14 @@
+[
+ {"name":"submit","arguments":{"task_id":"T0.1","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0.1","verifier":"human_steward","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0.2","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0.2","verifier":"human_steward","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0.3","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0.3","verifier":"human_steward","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0.4","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0.4","verifier":"human_steward","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0","verifier":"human_steward","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"archive","arguments":{"task_id":"T0","by":"human_steward","now":"2026-09-27T00:55:00+08:00"}},
+ {"name":"call_log","arguments":{"limit":5,"now":"2026-09-27T00:55:00+08:00"}}
+]

@@ -1,0 +1,47 @@
+def main() -> int:
+    if True:
+        if True:
+            if True:
+                if True:
+                    if True:
+                        if True:
+                            if True:
+                                if True:
+                                    if True:
+                                        if True:
+                                            if True:
+                                                if True:
+                                                    if True:
+                                                        if True:
+                                                            if True:
+                                                                return 0
+                                                            else:
+                                                                return 0
+                                                        else:
+                                                            return 0
+                                                    else:
+                                                        return 0
+                                                else:
+                                                    return 0
+                                            else:
+                                                return 0
+                                        else:
+                                            return 0
+                                    else:
+                                        return 0
+                                else:
+                                    return 0
+                            else:
+                                return 0
+                        else:
+                            return 0
+                    else:
+                        return 0
+                else:
+                    return 0
+            else:
+                return 0
+        else:
+            return 0
+    else:
+        return 0

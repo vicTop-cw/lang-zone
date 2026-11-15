@@ -1,0 +1,7 @@
+// 02_types - 基本类型
+def main() =
+    let a: int = 42
+    let b: f64 = 3.14
+    let c: str = "hello"
+    let d: bool = True
+    print(a, b, c, d)

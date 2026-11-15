@@ -1,0 +1,12 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0.1.1","assignee":"human_steward","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0.1.1","by":"human_steward","deliverable":"tests/lzc_loop_nested_def.rs::nested_def_is_hoisted_and_callable / nested_def_two_levels","summary":"内嵌 def 提升端到端闸门：新增 tests/lzc_loop_nested_def.rs 两用例（单层/两层嵌套 def），走 lang-zone codegen → rustc → 运行 → 断言 stdout 42/8；探针实跑取证于 .fist-loop-20260927/probe/","evidence":["tests/lzc_loop_nested_def.rs"],"now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0.1.1","by":"human_steward","deliverable":"tests/lzc_loop_nested_def.rs::nested_def_is_hoisted_and_callable / nested_def_two_levels","summary":"内嵌 def 提升闸门（2 用例）","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0.1.1","by":"verifier","pass":true,"summary":"交付物存在且为端到端闸门（lz→rs→rustc→run→assert）；探针实跑 42/8 与断言一致","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0.1.1","by":"verifier","pass":true,"note":"R1-推进 交付物硬门：文件存在 + 用例可复现","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"claim","arguments":{"task_id":"T0.1.2","assignee":"human_steward","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"execute","arguments":{"task_id":"T0.1.2","by":"human_steward","deliverable":"tests/lzc_loop_nested_def.rs::list_comprehension_over_list_variable / list_comprehension_top_level","summary":"推导式 over 列表变量端到端闸门：函数体内与顶层两用例，断言 stdout [2, 4, 6] / [2, 3, 4]","evidence":["tests/lzc_loop_nested_def.rs"],"now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"submit","arguments":{"task_id":"T0.1.2","by":"human_steward","deliverable":"tests/lzc_loop_nested_def.rs::list_comprehension_over_list_variable / list_comprehension_top_level","summary":"推导式 over 列表变量闸门（2 用例）","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"omega_result_verify","arguments":{"task_id":"T0.1.2","by":"verifier","pass":true,"summary":"交付物存在；探针实跑 [2, 4, 6] / [2, 3, 4] 与断言一致","now":"2026-09-27T12:45:00+08:00"}},
+ {"name":"verify","arguments":{"task_id":"T0.1.2","by":"verifier","pass":true,"note":"R1-推进 交付物硬门：文件存在 + 用例可复现","now":"2026-09-27T12:45:00+08:00"}}
+]

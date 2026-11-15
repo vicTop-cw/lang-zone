@@ -1,0 +1,1970 @@
+// Lang-Zong 编译器 — parser/expr.rs
+// 表达式解析（优先级递降）；Pattern 解析已拆至 parser/pattern.rs（move-only）
+
+use super::helpers::validate_fstring;
+use super::parser::Parser;
+use super::stmt::ParserStmtExt;
+use super::underscore::{build_block_uses_underscore, rename_underscore_params};
+use crate::ast::*;
+use crate::lexer::Token;
+use crate::types::Type;
+
+/// Parser 的表达式解析扩展 trait
+pub trait ParserExprExt {
+    fn parse_expr(&mut self) -> Result<Expr, String>;
+    fn parse_or(&mut self) -> Result<Expr, String>;
+    fn parse_and(&mut self) -> Result<Expr, String>;
+    fn parse_not(&mut self) -> Result<Expr, String>;
+    fn parse_comparison(&mut self) -> Result<Expr, String>;
+    fn parse_in_is(&mut self) -> Result<Expr, String>;
+    fn parse_pipe(&mut self) -> Result<Expr, String>;
+    fn parse_null_coalesce(&mut self) -> Result<Expr, String>;
+    fn parse_bit_or(&mut self) -> Result<Expr, String>;
+    fn parse_bit_xor(&mut self) -> Result<Expr, String>;
+    fn parse_bit_and(&mut self) -> Result<Expr, String>;
+    fn parse_shift(&mut self) -> Result<Expr, String>;
+    fn parse_additive(&mut self) -> Result<Expr, String>;
+    fn parse_multiplicative(&mut self) -> Result<Expr, String>;
+    fn parse_power(&mut self) -> Result<Expr, String>;
+    fn parse_unary(&mut self) -> Result<Expr, String>;
+    fn parse_postfix(&mut self) -> Result<Expr, String>;
+    /// 从已有表达式继续解析 postfix（跨行方法链用）
+    fn parse_postfix_chain(&mut self, expr: Expr) -> Result<Expr, String>;
+    fn parse_primary(&mut self) -> Result<Expr, String>;
+    /// 解析列表字面量元素（BUG-SG-005）：支持展开运算符 `...a` / `.. .a`
+    fn parse_list_element(&mut self) -> Result<Expr, String>;
+    /// 解析 comprehension 的 iter 表达式：支持 range(..) 和 walrus(:=)，
+    /// 但不消费 if（避免与 comprehension guard 冲突）
+    fn parse_comprehension_iter(&mut self) -> Result<Expr, String>;
+    /// 判断 `?` 后是否紧跟三元 true 分支（表达式开始）—— 用于区分
+    /// 三元 `cond ? a : b` 与错误传播后缀 `expr?`
+    fn is_ternary_after(&self) -> bool;
+    /// BUG-342：解析花括号块表达式 `{ let a = 1; a + b }`（首 token 为语句关键字时）
+    fn parse_brace_block_expr(&mut self) -> Result<Expr, String>;
+}
+
+impl ParserExprExt for Parser {
+    // ─── 表达式解析（优先级递降） ───
+
+    fn parse_expr(&mut self) -> Result<Expr, String> {
+        let left = self.parse_or()?;
+        // Ternary: a if cond else b (only if left is NOT an if/while/for expression)
+        if !matches!(&left, Expr::If { .. } | Expr::Match { .. }) && self.check(&Token::If) {
+            self.advance();
+            let cond = self.parse_expr()?;
+            self.skip_newlines();
+            self.expect(Token::Else)?;
+            let else_val = self.parse_expr()?;
+            return Ok(Expr::If {
+                cond: Box::new(cond),
+                then_body: vec![Stmt::Expr(left)],
+                elif_clauses: Vec::new(),
+                else_body: Some(vec![Stmt::Expr(else_val)]),
+            });
+        }
+        // Ternary (C 风格): cond ? a : b
+        // `?` 作为三元中缀（其后跟表达式再跟 :）；若为行尾 Try 已由 postfix 消费
+        if self.check(&Token::Question) {
+            self.advance();
+            let then_val = self.parse_expr()?;
+            self.expect(Token::Colon)?;
+            let else_val = self.parse_expr()?;
+            return Ok(Expr::If {
+                cond: Box::new(left),
+                then_body: vec![Stmt::Expr(then_val)],
+                elif_clauses: Vec::new(),
+                else_body: Some(vec![Stmt::Expr(else_val)]),
+            });
+        }
+        // Walrus: x := expr  (右结合，最低优先级)
+        if self.check(&Token::ColonEq) {
+            self.advance();
+            let value = self.parse_expr()?;
+            return Ok(Expr::Walrus {
+                target: Box::new(left),
+                value: Box::new(value),
+            });
+        }
+        // 赋值表达式: x = expr（闭包体 `|x: int| = total = total + x`、复合赋值 += 等）。
+        // 注意 `==` 是比较（EqEq），此处是单 `=` 赋值
+        if matches!(
+            &left,
+            Expr::Ident(_) | Expr::FieldAccess { .. } | Expr::Index { .. }
+        ) && self.check(&Token::Eq)
+        {
+            self.advance();
+            let value = self.parse_expr()?;
+            return Ok(Expr::Assign {
+                target: Box::new(left),
+                op: AssignOp::Eq,
+                value: Box::new(value),
+            });
+        }
+        // Range: a..b or a..=b
+        if self.check(&Token::DotDot) || self.check(&Token::DotDotEq) {
+            let inclusive = self.check(&Token::DotDotEq);
+            self.advance();
+            let end = if self.check(&Token::Colon)
+                || self.check(&Token::Newline)
+                || self.check(&Token::Dedent)
+                || self.check(&Token::Eof)
+                || self.check(&Token::RParen)
+                || self.check(&Token::RBrack)
+            {
+                None
+            } else {
+                Some(Box::new(self.parse_or()?))
+            };
+            return Ok(Expr::Range {
+                start: Some(Box::new(left)),
+                end,
+                inclusive,
+            });
+        }
+        Ok(left)
+    }
+
+    /// 解析 comprehension 的 iter 表达式：支持 range/walrus 但不消费 if
+    fn parse_comprehension_iter(&mut self) -> Result<Expr, String> {
+        let left = self.parse_or()?;
+        // Walrus (不消费 if 三元)
+        if self.check(&Token::ColonEq) {
+            self.advance();
+            let value = self.parse_expr()?;
+            return Ok(Expr::Walrus {
+                target: Box::new(left),
+                value: Box::new(value),
+            });
+        }
+        // Range
+        if self.check(&Token::DotDot) || self.check(&Token::DotDotEq) {
+            let inclusive = self.check(&Token::DotDotEq);
+            self.advance();
+            let end = if self.check(&Token::Colon)
+                || self.check(&Token::Newline)
+                || self.check(&Token::Dedent)
+                || self.check(&Token::Eof)
+                || self.check(&Token::RParen)
+                || self.check(&Token::RBrack)
+                || self.check(&Token::RBrace)
+                || self.check(&Token::If)
+            {
+                None
+            } else {
+                Some(Box::new(self.parse_or()?))
+            };
+            return Ok(Expr::Range {
+                start: Some(Box::new(left)),
+                end,
+                inclusive,
+            });
+        }
+        Ok(left)
+    }
+
+    fn is_ternary_after(&self) -> bool {
+        // `?` 后紧跟一个表达式开始（三元 true 分支）→ 是三元中缀
+        // 注意：当前位置是 `?`，需检查其后的 token
+        match self.peek_n(1) {
+            Token::IntLit(_)
+            | Token::FloatLit(_)
+            | Token::StrLit(_)
+            | Token::FStrLit(_)
+            | Token::RawStrLit(_)
+            | Token::TripleStrLit(_)
+            | Token::True
+            | Token::False
+            | Token::Ident(_)
+            | Token::MagicMethod(_)
+            | Token::Underscore
+            | Token::Self_
+            | Token::LParen
+            | Token::LBrack
+            | Token::LBrace
+            | Token::If
+            | Token::Not
+            | Token::Minus
+            | Token::Plus
+            | Token::Pipe
+            | Token::BackPipe
+            | Token::Try
+            | Token::Async => true,
+            _ => false,
+        }
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_and()?;
+        while self.check(&Token::Or) || self.check(&Token::PipePipe) {
+            self.advance();
+            let right = self.parse_and()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::Or,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_not()?;
+        while self.check(&Token::And) || self.check(&Token::AmpAmp) {
+            self.advance();
+            let right = self.parse_not()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::And,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_not(&mut self) -> Result<Expr, String> {
+        if self.check(&Token::Not) {
+            self.advance();
+            let operand = self.parse_not()?;
+            return Ok(Expr::Unary {
+                op: UnaryOp::Not,
+                operand: Box::new(operand),
+            });
+        }
+        self.parse_comparison()
+    }
+
+    fn parse_comparison(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_in_is()?;
+        loop {
+            let op = match self.peek() {
+                Token::EqEq => BinOp::Eq,
+                Token::NotEq => BinOp::Ne,
+                Token::Lt => BinOp::Lt,
+                Token::Gt => BinOp::Gt,
+                Token::Le => BinOp::Le,
+                Token::Ge => BinOp::Ge,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_in_is()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_in_is(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_pipe()?;
+        loop {
+            match self.peek() {
+                Token::In => {
+                    self.advance();
+                    let right = self.parse_pipe()?;
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: BinOp::In,
+                        right: Box::new(right),
+                    };
+                }
+                Token::Not => {
+                    self.advance();
+                    // not in 运算符
+                    self.expect(Token::In)?;
+                    let right = self.parse_pipe()?;
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: BinOp::NotIn,
+                        right: Box::new(right),
+                    };
+                }
+                Token::Is => {
+                    self.advance();
+                    let right = self.parse_pipe()?;
+                    left = Expr::Binary {
+                        left: Box::new(left),
+                        op: BinOp::Is,
+                        right: Box::new(right),
+                    };
+                }
+                Token::As => {
+                    self.advance();
+                    // 解析 as 右侧的类型
+                    let ty = self.parse_type()?;
+                    let ty_name = ty.to_string();
+                    left = Expr::Call {
+                        type_args: vec![],
+                        func: Box::new(Expr::Ident("__as__".to_string())),
+                        args: vec![left, Expr::Ident(ty_name)],
+                    };
+                }
+                _ => break,
+            }
+        }
+        Ok(left)
+    }
+
+    fn parse_pipe(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_null_coalesce()?;
+        while self.check(&Token::Pipe) {
+            self.advance();
+            // 右侧 callable 表达式：函数名 / 调用 f(args) / 构造 Point(2.0) /
+            // 方法 obj.method / 闭包 |x| expr / 括号包裹表达式 (expr) / 变量（__call__ 实例）
+            if self.check(&Token::LParen) {
+                // 括号包裹的表达式: x |> (|y| expr)
+                self.advance(); // consume (
+                let expr = self.parse_expr()?;
+                // 跳过可能的外层 Dedent（Lambda body 中的 match 块消费了 case Dedent）
+                self.skip_newlines();
+                while self.check(&Token::Dedent) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+                self.expect(Token::RParen)?;
+                left = Expr::Pipe {
+                    receiver: Box::new(left),
+                    callee: Box::new(expr),
+                    args: Vec::new(),
+                };
+                continue;
+            }
+            // 其余情况：解析 postfix 表达式（覆盖 Ident / f(args) / obj.method / 闭包 / 变量）
+            let rhs = self.parse_postfix()?;
+            // 拆分 Call → (callee, args)：`f(1,2)` → callee=f, args=[1,2]，
+            // 由 IR 端把 receiver 预填充为首参（f(recv, 1, 2)）
+            let (callee, args) = match rhs {
+                Expr::Call {
+                    type_args: _,
+                    func,
+                    args,
+                } => (*func, args),
+                other => (other, Vec::new()),
+            };
+            left = Expr::Pipe {
+                receiver: Box::new(left),
+                callee: Box::new(callee),
+                args,
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_null_coalesce(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_bit_or()?;
+        while self.check(&Token::QuestionQuestion) {
+            self.advance();
+            let right = self.parse_bit_or()?;
+            left = Expr::NullCoalesce {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_bit_or(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_bit_xor()?;
+        while self.check(&Token::Pipe_) {
+            self.advance();
+            let right = self.parse_bit_xor()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::BitOr,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_bit_xor(&mut self) -> Result<Expr, String> {
+        // ^ 既作中缀 XOR，也作后缀 move（y^）；此处只处理中缀，后缀在 parse_postfix 消歧
+        // CaretInfix（前置留白的 `a ^`）强制走中缀：缺右操作数时 parse_bit_and 报错（悬空 ^）。
+        let mut left = self.parse_bit_and()?;
+        while self.check(&Token::CaretOp) || self.check(&Token::CaretInfix) {
+            self.advance();
+            let right = self.parse_bit_and()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::BitXor,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_bit_and(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_shift()?;
+        while self.check(&Token::Amp) {
+            self.advance();
+            let right = self.parse_shift()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::BitAnd,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_additive()?;
+        loop {
+            let op = match self.peek() {
+                Token::Shl => BinOp::Shl,
+                Token::Shr => BinOp::Shr,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_additive()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_additive(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_multiplicative()?;
+        loop {
+            let op = match self.peek() {
+                Token::Plus => BinOp::Add,
+                Token::Minus => BinOp::Sub,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_multiplicative()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_multiplicative(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_power()?;
+        loop {
+            let op = match self.peek() {
+                Token::Star => BinOp::Mul,
+                Token::Slash => BinOp::Div,
+                Token::Percent => BinOp::Mod,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_power()?;
+            left = Expr::Binary {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_power(&mut self) -> Result<Expr, String> {
+        let left = self.parse_unary()?;
+        if self.check(&Token::StarStar) {
+            self.advance();
+            let right = self.parse_power()?; // 右结合
+            return Ok(Expr::Binary {
+                left: Box::new(left),
+                op: BinOp::Pow,
+                right: Box::new(right),
+            });
+        }
+        Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, String> {
+        match self.peek() {
+            Token::Minus => {
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Neg,
+                    operand: Box::new(operand),
+                })
+            }
+            Token::Plus => {
+                self.advance();
+                // 一元 `+` 保留为 Pos 节点（06d §三）：内建数值恒等由 codegen
+                // 处理；用户 struct 分派 `a.__pos__()`
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Pos,
+                    operand: Box::new(operand),
+                })
+            }
+            Token::Exclamation => {
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::BitNot,
+                    operand: Box::new(operand),
+                })
+            }
+            Token::Not => {
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    operand: Box::new(operand),
+                })
+            }
+            Token::Star => {
+                // 一元 * 解引用（*(&(*boxed)) 前缀叠写，12-操作符.md §1.18）
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Deref,
+                    operand: Box::new(operand),
+                })
+            }
+            Token::Amp => {
+                // 一元 & 取引用（*(&(*boxed)) 前缀叠写；位与是二元，此处仅表达式前缀）
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expr::Unary {
+                    op: UnaryOp::Ref,
+                    operand: Box::new(operand),
+                })
+            }
+            _ => self.parse_postfix(),
+        }
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expr, String> {
+        let expr = self.parse_primary()?;
+        self.parse_postfix_chain(expr)
+    }
+
+    /// 从已有表达式继续解析 postfix（跨行方法链用）
+    fn parse_postfix_chain(&mut self, mut expr: Expr) -> Result<Expr, String> {
+        loop {
+            match self.peek() {
+                Token::Dot => {
+                    self.advance();
+                    // turbofish: parse.<int>("42")
+                    if self.check(&Token::Lt) {
+                        self.advance(); // <
+                        let mut depth = 1;
+                        // 收集类型参数名（int/str/f64/List<int> 等）
+                        let mut type_args: Vec<String> = Vec::new();
+                        let mut cur = String::new();
+                        while depth > 0 && !self.check(&Token::Eof) {
+                            match self.peek() {
+                                Token::Lt => {
+                                    depth += 1;
+                                    cur.push('<');
+                                    self.advance();
+                                }
+                                Token::Gt | Token::Shr => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        if !cur.is_empty() {
+                                            type_args.push(cur.trim().to_string());
+                                        }
+                                        self.advance();
+                                        break;
+                                    }
+                                    cur.push('>');
+                                    self.advance();
+                                }
+                                Token::Comma => {
+                                    if !cur.is_empty() {
+                                        type_args.push(cur.trim().to_string());
+                                        cur.clear();
+                                    }
+                                    self.advance();
+                                }
+                                Token::Ident(n) => {
+                                    cur.push_str(&n);
+                                    self.advance();
+                                }
+                                Token::LBrack => {
+                                    cur.push_str("[");
+                                    self.advance();
+                                }
+                                Token::RBrack => {
+                                    cur.push_str("]");
+                                    self.advance();
+                                }
+                                Token::Underscore => {
+                                    cur.push('_');
+                                    self.advance();
+                                }
+                                _ => {
+                                    self.advance();
+                                }
+                            }
+                        }
+                        // Parse LParen args after >
+                        if self.check(&Token::LParen) {
+                            self.advance();
+                            let mut args = Vec::new();
+                            while !self.check(&Token::RParen) {
+                                args.push(self.parse_expr()?);
+                                if self.check(&Token::Comma) {
+                                    self.advance();
+                                }
+                            }
+                            self.expect(Token::RParen)?;
+                            expr = Expr::Call {
+                                type_args,
+                                func: Box::new(expr),
+                                args,
+                            };
+                        }
+                        continue;
+                    }
+                    let name = match self.advance() {
+                        Token::Ident(n) => n,
+                        Token::MagicMethod(n) => n,
+                        Token::True => "True".to_string(),
+                        Token::False => "False".to_string(),
+                        // `.await()`：fut.await()（codegen 转 Rust 后缀 await 关键字）
+                        Token::Await => "await".to_string(),
+                        // BUG-383：`and`/`or` 是布尔关键字，但 Option::and/or、
+                        // Result::and/or 是文档化方法（option.lz:107,123、
+                        // result.lz:141,157）。点号后语境无歧义，放行作方法名。
+                        Token::And => "and".to_string(),
+                        Token::Or => "or".to_string(),
+                        // 元组索引访问 args.0 / args.1（type-pack 异质元组，03d §2.8 方案 B）
+                        Token::IntLit(n) => n.to_string(),
+                        t => return Err(format!("Expected field/method, got {:?}", t)),
+                    };
+                    if self.check(&Token::LParen) {
+                        self.advance();
+                        let mut args = Vec::new();
+                        while !self.check(&Token::RParen) {
+                            // 跳过参数间的换行和缩进
+                            self.skip_newlines();
+                            // BUG-372：`(...)` 内为隐式续行，无 Indent/Dedent，
+                            // skip_newlines 后可能直接落在 `)` 上。
+                            if self.check(&Token::RParen) {
+                                break;
+                            }
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Dedent) {
+                                break;
+                            }
+                            // 关键字参数: name: value / name~ 语法糖 / name=value
+                            let arg = if let Token::Ident(_) = self.peek() {
+                                if self.peek_n(1) == &Token::Tilde {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // 消费 ~
+                                    Expr::KwArg {
+                                        name: name.clone(),
+                                        value: Box::new(Expr::Ident(name)),
+                                    }
+                                } else if self.peek_n(1) == &Token::Colon {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // 消费 :
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else if self.peek_n(1) == &Token::Eq {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // 消费 =
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else {
+                                    self.parse_expr()?
+                                }
+                            } else {
+                                self.parse_expr()?
+                            };
+                            args.push(arg);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                        }
+                        // Dedent 表示参数列表的缩进块结束，跳过它
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
+                        self.expect(Token::RParen)?;
+
+                        expr = Expr::MethodCall {
+                            receiver: Box::new(expr),
+                            method: name,
+                            args,
+                        };
+                    } else {
+                        expr = Expr::FieldAccess {
+                            receiver: Box::new(expr),
+                            field: name,
+                        };
+                    }
+                }
+                Token::PathSep => {
+                    self.advance();
+                    let seg = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected path segment, got {:?}", t)),
+                    };
+                    if self.check(&Token::LParen) {
+                        self.advance();
+                        let mut args = Vec::new();
+                        while !self.check(&Token::RParen) {
+                            self.skip_newlines();
+                            if self.check(&Token::RParen) {
+                                break;
+                            }
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Dedent) {
+                                break;
+                            }
+                            args.push(self.parse_expr()?);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                        }
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
+                        self.expect(Token::RParen)?;
+                        expr = Expr::Call {
+                            type_args: vec![],
+                            func: Box::new(Expr::PathAccess {
+                                receiver: Box::new(expr),
+                                segment: seg,
+                            }),
+                            args,
+                        };
+                    } else {
+                        expr = Expr::PathAccess {
+                            receiver: Box::new(expr),
+                            segment: seg,
+                        };
+                    }
+                }
+                Token::Lt => {
+                    // 泛型调用: func<Type>(args)
+                    // 仅在当前表达式是 Ident（函数名）且后面跟着 > 和 ( 时处理
+                    if !matches!(&expr, Expr::Ident(_)) {
+                        break;
+                    }
+                    // peek ahead: 检查是否是泛型调用模式
+                    // 模式: Ident < Type (,...)? > (
+                    let mut is_generic_call = false;
+                    let mut idx = 1usize;
+                    loop {
+                        match self.peek_n(idx) {
+                            Token::Gt | Token::Shr => {
+                                // 检查 > 后面是否是 (
+                                let after_gt = if matches!(self.peek_n(idx), Token::Shr) {
+                                    idx + 1
+                                } else {
+                                    idx + 1
+                                };
+                                if matches!(self.peek_n(after_gt), Token::LParen) {
+                                    is_generic_call = true;
+                                }
+                                break;
+                            }
+                            Token::Comma => {
+                                idx += 1;
+                            }
+                            Token::Ident(_)
+                            | Token::IntLit(_)
+                            | Token::StrLit(_)
+                            | Token::True
+                            | Token::False => {
+                                idx += 1;
+                            }
+                            Token::LBrack => {
+                                // 跳过 [Type] 如 List[int]
+                                idx += 1;
+                                let mut depth = 1;
+                                while depth > 0 {
+                                    match self.peek_n(idx) {
+                                        Token::RBrack => {
+                                            depth -= 1;
+                                            idx += 1;
+                                        }
+                                        Token::Eof => break,
+                                        _ => {
+                                            idx += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+                    if !is_generic_call {
+                        break;
+                    }
+                    // 确认是泛型调用，现在解析类型参数
+                    let _ = self.advance(); // 消费 <
+                    let mut type_args: Vec<Type> = Vec::new();
+                    loop {
+                        match self.peek() {
+                            Token::Gt | Token::Shr | Token::Eof => break,
+                            _ => {}
+                        }
+                        type_args.push(self.parse_type()?);
+                        if self.check(&Token::Comma) {
+                            let _ = self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    // 处理 >> 作为两个 > 的情况
+                    if self.check(&Token::Shr) {
+                        let _ = self.advance(); // 消费 >>（作为单个 >）
+                    } else {
+                        let _ = self.expect(Token::Gt)?;
+                    }
+                    // 解析参数（含关键字实参 name: value / name~，与普通调用一致）
+                    let _ = self.expect(Token::LParen)?;
+                    let mut args = Vec::new();
+                    while !self.check(&Token::RParen) {
+                        self.skip_newlines();
+                        if self.check(&Token::RParen) {
+                            break;
+                        }
+                        if self.check(&Token::Indent) {
+                            self.advance();
+                        }
+                        if self.check(&Token::Dedent) {
+                            break;
+                        }
+                        let arg = if let Token::Ident(_) = self.peek() {
+                            if self.peek_n(1) == &Token::Tilde {
+                                let name = self.advance().to_string();
+                                self.advance(); // ~
+                                Expr::KwArg {
+                                    name: name.clone(),
+                                    value: Box::new(Expr::Ident(name)),
+                                }
+                            } else if self.peek_n(1) == &Token::Colon {
+                                let name = self.advance().to_string();
+                                self.advance(); // :
+                                let v = self.parse_expr()?;
+                                Expr::KwArg {
+                                    name,
+                                    value: Box::new(v),
+                                }
+                            } else if self.peek_n(1) == &Token::Eq {
+                                let name = self.advance().to_string();
+                                self.advance(); // =
+                                let v = self.parse_expr()?;
+                                Expr::KwArg {
+                                    name,
+                                    value: Box::new(v),
+                                }
+                            } else {
+                                self.parse_expr()?
+                            }
+                        } else {
+                            self.parse_expr()?
+                        };
+                        args.push(arg);
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                    }
+                    if self.check(&Token::Dedent) {
+                        self.advance();
+                    }
+                    let _ = self.expect(Token::RParen)?;
+                    let type_arg_names: Vec<String> =
+                        type_args.iter().map(|t| t.to_string()).collect();
+                    expr = Expr::Call {
+                        type_args: type_arg_names,
+                        func: Box::new(expr),
+                        args,
+                    };
+                }
+                Token::LParen => {
+                    self.advance();
+                    self.skip_newlines();
+                    // 多行 struct 构造: Name(\n    field: value\n    ...)
+                    let args = if self.check(&Token::Indent) {
+                        self.advance();
+                        let mut args = Vec::new();
+                        while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                            // 关键字参数: name: value 或 name~ 语法糖
+                            let arg = if let Token::Ident(_) = self.peek() {
+                                if self.peek_n(1) == &Token::Tilde {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // ~
+                                    Expr::KwArg {
+                                        name: name.clone(),
+                                        value: Box::new(Expr::Ident(name)),
+                                    }
+                                } else if self.peek_n(1) == &Token::Colon {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // :
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else {
+                                    self.parse_expr()?
+                                }
+                            } else {
+                                self.parse_expr()?
+                            };
+                            args.push(arg);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                            self.skip_newlines();
+                        }
+                        self.expect(Token::Dedent)?;
+                        // 消费闭合的 RParen（Dedent 后紧跟 )）
+                        if self.check(&Token::RParen) {
+                            self.advance();
+                        }
+                        args
+                    } else {
+                        let mut args = Vec::new();
+                        while !self.check(&Token::RParen) {
+                            self.skip_newlines();
+                            if self.check(&Token::RParen) {
+                                break;
+                            }
+                            if self.check(&Token::Indent) {
+                                self.advance();
+                            }
+                            if self.check(&Token::Dedent) {
+                                break;
+                            }
+                            // 关键字参数: name: value / name~ 语法糖 / name=value
+                            let arg = if let Token::Ident(_) = self.peek() {
+                                if self.peek_n(1) == &Token::Tilde {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // ~
+                                    Expr::KwArg {
+                                        name: name.clone(),
+                                        value: Box::new(Expr::Ident(name)),
+                                    }
+                                } else if self.peek_n(1) == &Token::Colon {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // :
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else if self.peek_n(1) == &Token::Eq {
+                                    let name = self.advance().to_string();
+                                    self.advance(); // =
+                                    let v = self.parse_expr()?;
+                                    Expr::KwArg {
+                                        name,
+                                        value: Box::new(v),
+                                    }
+                                } else {
+                                    self.parse_expr()?
+                                }
+                            } else {
+                                self.parse_expr()?
+                            };
+                            args.push(arg);
+                            if self.check(&Token::Comma) {
+                                self.advance();
+                            }
+                        }
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
+                        self.expect(Token::RParen)?;
+                        args
+                    };
+                    expr = Expr::Call {
+                        type_args: vec![],
+                        func: Box::new(expr),
+                        args,
+                    };
+                }
+                Token::LBrace => {
+                    // Struct ctor: Point{x: 10, y: 20} 或 Point{x~, y~}
+                    self.advance();
+                    let mut args = Vec::new();
+                    while !self.check(&Token::RBrace) {
+                        let name = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected field name in struct ctor, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        if self.check(&Token::Tilde) {
+                            self.advance(); // ~
+                            args.push(Expr::KwArg {
+                                name: name.clone(),
+                                value: Box::new(Expr::Ident(name)),
+                            });
+                        } else {
+                            self.expect(Token::Colon)?;
+                            let v = self.parse_expr()?;
+                            args.push(Expr::KwArg {
+                                name,
+                                value: Box::new(v),
+                            });
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                    }
+                    self.expect(Token::RBrace)?;
+                    expr = Expr::Call {
+                        type_args: vec![],
+                        func: Box::new(expr),
+                        args,
+                    };
+                }
+                Token::LBrack => {
+                    self.advance();
+                    let index = self.parse_expr()?;
+                    self.expect(Token::RBrack)?;
+                    expr = Expr::Index {
+                        receiver: Box::new(expr),
+                        index: Box::new(index),
+                    };
+                }
+                Token::Question => {
+                    // 区分三元 `cond ? a : b` 与错误传播 `expr?`：
+                    // 若 `?` 后紧跟一个表达式开始（三元 true 分支），则交由
+                    // parse_expr 处理三元；否则为 Try 错误传播后缀。
+                    if self.is_ternary_after() {
+                        break;
+                    }
+                    self.advance();
+                    expr = Expr::Try(Box::new(expr));
+                }
+                Token::SafeNav => {
+                    self.advance();
+                    let field = match self.advance() {
+                        Token::Ident(n) => n,
+                        t => return Err(format!("Expected field name, got {:?}", t)),
+                    };
+                    expr = Expr::SafeNav {
+                        receiver: Box::new(expr),
+                        field,
+                    };
+                }
+                // ^ 后缀 move（y^）：紧邻标识符的 CaretOp（无前置留白）
+                Token::CaretOp => {
+                    self.advance();
+                    expr = Expr::Move(Box::new(expr));
+                }
+                // await 后缀：仅紧邻表达式（同一行，无换行/缩进分隔）时应用。
+                // 检查**前一个** token 是否为 Newline/Indent/Dedent——若跨行，
+                // 说明是下一行的前缀 await（如 `match bad:` 后跟 `await spawn ...`），
+                // 不应作为当前表达式的后缀（否则误生成 ({match...}).await，E0277）
+                Token::Await
+                    if !matches!(
+                        self.tokens.get(self.pos.wrapping_sub(1)),
+                        Some(Token::Newline) | Some(Token::Indent) | Some(Token::Dedent)
+                    ) =>
+                {
+                    self.advance();
+                    expr = Expr::Await(Box::new(expr));
+                }
+                // 多行方法链（BUG-373）：`xs\n    .map(...)\n    .filter(...)` ——
+                // 换行后紧跟 `.` 时跳过换行继续后缀链，否则结束。
+                Token::Newline if matches!(self.peek_n(1), Token::Dot) => {
+                    self.advance(); // consume Newline
+                    self.skip_newlines();
+                }
+                _ => break,
+            }
+        }
+        Ok(expr)
+    }
+
+    /// 解析列表字面量元素，支持展开运算符 `...a` / `.. .a`（BUG-SG-005）。
+    /// 普通元素走 `parse_expr`；展开元素返回 `Expr::Spread(Box::new(inner))`。
+    fn parse_list_element(&mut self) -> Result<Expr, String> {
+        // 仅当为三连点（DotDotDot，或 DotDot 紧跟 Dot）时视为展开，避免与 `..` 区间混淆
+        if self.check(&Token::DotDotDot)
+            || (self.check(&Token::DotDot) && self.peek_n(1) == &Token::Dot)
+        {
+            if self.check(&Token::DotDotDot) {
+                self.advance(); // 消费 DotDotDot
+            } else {
+                self.advance(); // 消费 DotDot
+                self.advance(); // 消费第三个 Dot
+            }
+            let inner = self.parse_expr()?;
+            return Ok(Expr::Spread(Box::new(inner)));
+        }
+        self.parse_expr()
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr, String> {
+        let tok = self.advance();
+        match tok {
+            // 跳过缩进 token（用于 Lambda body 跨行时外层的缩进）
+            Token::Indent => self.parse_primary(),
+            Token::IntLit(n) => Ok(Expr::IntLit(n)),
+            Token::Int128Lit(n) => Ok(Expr::Int128Lit(n)),
+            Token::BigIntLit(s) => Ok(Expr::BigIntLit(s.clone())),
+            Token::ComplexLit(re, im) => Ok(Expr::ComplexLit(re, im)),
+            Token::FloatLit(f) => Ok(Expr::FloatLit(f)),
+            Token::StrLit(s) => Ok(Expr::StrLit(s)),
+            Token::FStrLit(s) => {
+                validate_fstring(&s)?;
+                Ok(Expr::FStrLit(s))
+            }
+            Token::RawStrLit(s) => Ok(Expr::RawStrLit(s)),
+            Token::True => Ok(Expr::BoolLit(true)),
+            Token::False => Ok(Expr::BoolLit(false)),
+            Token::From => Ok(Expr::Ident("from".to_string())),
+            Token::Ident(name) => Ok(Expr::Ident(name)),
+            Token::Underscore => Ok(Expr::Ident("_".to_string())),
+            // Self 在表达式位置保持大写，用于结构体构造 Self(host: host, ...)
+            // builder 端根据 self_ty 上下文区分为 StructCtor 或类型引用
+            Token::Self_ => Ok(Expr::Ident("Self".to_string())),
+            Token::BuildCall | Token::BuildGen | Token::BuildIndex => {
+                // 构建块作为表达式（如 f(~: _ % 2 == 0) 的实参，BUG-IR-001）
+                let kind = match tok {
+                    Token::BuildCall => BuildKind::Call,
+                    Token::BuildGen => BuildKind::Gen,
+                    _ => BuildKind::Index,
+                };
+                let body = self.parse_build_block_body()?;
+                // ~: 块体含 `_` 参数标识符 → 参数位闭包（f(~: _ % 2 == 0)），
+                // 脱糖为 Closure（`_` 重命名为闭包参数 __lz_cb_0），builder 转 Lambda
+                if kind == BuildKind::Call && build_block_uses_underscore(&body) {
+                    let mut body = body;
+                    rename_underscore_params(&mut body, "__lz_cb_0");
+                    return Ok(Expr::Closure {
+                        params: vec!["__lz_cb_0".to_string()],
+                        param_tys: vec![None],
+                        ret_ty: None,
+                        body: Box::new(Expr::BlockExpr(body)),
+                    });
+                }
+                self.validate_build_block(kind, &body)?;
+                Ok(Expr::BuildBlock {
+                    kind,
+                    lhs: Box::new(Expr::TupleLit(Vec::new())),
+                    body,
+                })
+            }
+            Token::Comptime => {
+                // comptime <expr> — 编译期表达式（求值后内联结果）
+                // comptime: 块 — 编译期块（规范 08b §2.1），块尾表达式值为结果
+                if self.check(&Token::Colon) {
+                    self.advance();
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let block = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        Ok(Expr::Comptime(Box::new(Expr::BlockExpr(block))))
+                    } else {
+                        // 单行块：comptime: expr
+                        let inner = self.parse_expr()?;
+                        Ok(Expr::Comptime(Box::new(inner)))
+                    }
+                } else {
+                    // comptime <换行> <缩进块> — 等价于 comptime: 块（省略冒号）
+                    let save_pos = self.pos;
+                    self.skip_newlines();
+                    if self.check(&Token::Indent) {
+                        self.advance();
+                        let block = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        Ok(Expr::Comptime(Box::new(Expr::BlockExpr(block))))
+                    } else {
+                        // 回退：comptime <expr> — 编译期表达式
+                        self.pos = save_pos;
+                        let inner = self.parse_expr()?;
+                        Ok(Expr::Comptime(Box::new(inner)))
+                    }
+                }
+            }
+            Token::LParen => {
+                // 空括号 () → 单元
+                if self.check(&Token::RParen) {
+                    self.advance();
+                    return Ok(Expr::TupleLit(Vec::new()));
+                }
+                let first = self.parse_expr()?;
+                // 单元素括号 (e) vs 元组 (e,)
+                if self.check(&Token::Comma) {
+                    let mut items = vec![first];
+                    self.advance();
+                    while !self.check(&Token::RParen) {
+                        items.push(self.parse_expr()?);
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::TupleLit(items))
+                } else {
+                    self.expect(Token::RParen)?;
+                    Ok(Expr::Paren(Box::new(first))) // 保留括号分组信息
+                }
+            }
+            Token::LBrack => {
+                // [] 空列表
+                if self.check(&Token::RBrack) {
+                    self.advance();
+                    return Ok(Expr::ListLit(Vec::new()));
+                }
+                // 跨行列表字面量（如闭包数组 `[\n |x| x + 1, ...\n]`）：
+                // `[` 后先跳过换行/缩进，否则 parse_expr 遇 Newline 报错
+                while self.check(&Token::Newline)
+                    || self.check(&Token::Indent)
+                    || self.check(&Token::Dedent)
+                {
+                    self.advance();
+                }
+                if self.check(&Token::RBrack) {
+                    self.advance();
+                    return Ok(Expr::ListLit(Vec::new()));
+                }
+                let first = self.parse_list_element()?;
+                // 推导式: [output for var in iter if cond]
+                // 支持多个 for 子句: [x * y for x in 0..N for y in 0..N if cond]
+                if self.check(&Token::For) {
+                    let mut clauses = Vec::new();
+                    loop {
+                        self.advance(); // for
+                        let var = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => return Err(format!("Expected var, got {:?}", t)),
+                        };
+                        self.expect(Token::In)?;
+                        let iter = self.parse_comprehension_iter()?;
+                        let cond = if self.check(&Token::If) {
+                            self.advance();
+                            Some(Box::new(self.parse_expr()?))
+                        } else {
+                            None
+                        };
+                        clauses.push((var, Box::new(iter), cond));
+                        if !self.check(&Token::For) {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RBrack)?;
+                    return Ok(Expr::ListComprehension {
+                        output: Box::new(first),
+                        var: clauses[0].0.clone(),
+                        iter: clauses[0].1.clone(),
+                        cond: clauses[0].2.clone(),
+                        extra_clauses: clauses[1..].to_vec(),
+                    });
+                }
+                // 列表字面量
+                let mut items = vec![first];
+                if self.check(&Token::Comma) {
+                    self.advance();
+                }
+                while !self.check(&Token::RBrack) {
+                    // 跨行列表字面量（如闭包数组 `[\n |x| x + 1,\n |x| x * 2\n]`）：
+                    // 跳过元素间的 Newline/Indent/Dedent，否则 parse_expr 遇 Newline 报错
+                    while self.check(&Token::Newline)
+                        || self.check(&Token::Indent)
+                        || self.check(&Token::Dedent)
+                    {
+                        self.advance();
+                    }
+                    if self.check(&Token::RBrack) {
+                        break;
+                    }
+                    items.push(self.parse_list_element()?);
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                    // 跳过逗号后的换行/缩进
+                    while self.check(&Token::Newline)
+                        || self.check(&Token::Indent)
+                        || self.check(&Token::Dedent)
+                    {
+                        self.advance();
+                    }
+                }
+                self.expect(Token::RBrack)?;
+                Ok(Expr::ListLit(items))
+            }
+            Token::LBrace => {
+                // BUG-342：块表达式 `{ let a = 1; a + b }` —— 首 token 为语句关键字时
+                // 判定为块而非集合/字典字面量（集合/字典首元素必为表达式 token）
+                if matches!(
+                    self.peek(),
+                    Token::Let
+                        | Token::Mut
+                        | Token::Ref
+                        | Token::Const
+                        | Token::Owned
+                        | Token::Return
+                        | Token::Yield
+                        | Token::For
+                        | Token::While
+                        | Token::Match
+                        | Token::Raise
+                        | Token::Assert
+                        | Token::Defer
+                        | Token::Break
+                        | Token::Continue
+                        | Token::Try
+                        | Token::Block
+                        | Token::Newline
+                ) {
+                    return self.parse_brace_block_expr();
+                }
+                // {} 空字典
+                if self.check(&Token::RBrace) {
+                    self.advance();
+                    return Ok(Expr::DictLit(Vec::new()));
+                }
+                let first = self.parse_expr()?;
+                // 字典推导: {k: v for x in iter}
+                if self.check(&Token::Colon) {
+                    self.advance();
+                    let val = self.parse_expr()?;
+                    if self.check(&Token::For) {
+                        // Dict comprehension: {k: v for var in iter if cond}
+                        // 支持多个 for 子句: {k: v for x in a for y in b if cond}
+                        let mut clauses = Vec::new();
+                        loop {
+                            self.advance(); // for
+                            let var = match self.advance() {
+                                Token::Ident(n) => n,
+                                t => {
+                                    return Err(format!(
+                                        "Expected var in dict comprehension, got {:?}",
+                                        t
+                                    ))
+                                }
+                            };
+                            self.expect(Token::In)?;
+                            let iter = self.parse_comprehension_iter()?;
+                            let cond = if self.check(&Token::If) {
+                                self.advance();
+                                Some(Box::new(self.parse_expr()?))
+                            } else {
+                                None
+                            };
+                            clauses.push((var, Box::new(iter), cond));
+                            if !self.check(&Token::For) {
+                                break;
+                            }
+                        }
+                        self.expect(Token::RBrace)?;
+                        return Ok(Expr::DictComprehension {
+                            key: Box::new(first),
+                            value: Box::new(val),
+                            var: clauses[0].0.clone(),
+                            iter: clauses[0].1.clone(),
+                            cond: clauses[0].2.clone(),
+                            extra_clauses: clauses[1..].to_vec(),
+                        });
+                    }
+                    // 常规字典字面量 {k: v, k2: v2}
+                    let mut entries = vec![(first, val)];
+                    if self.check(&Token::Comma) {
+                        self.advance();
+                    }
+                    while !self.check(&Token::RBrace) {
+                        let k = self.parse_expr()?;
+                        self.expect(Token::Colon)?;
+                        let v = self.parse_expr()?;
+                        entries.push((k, v));
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                    }
+                    self.expect(Token::RBrace)?;
+                    Ok(Expr::DictLit(entries))
+                } else if self.check(&Token::For) {
+                    // Set comprehension: {x for var in iter if cond}
+                    // 支持多个 for 子句: {x for a in xs for b in ys if cond}
+                    let mut clauses = Vec::new();
+                    loop {
+                        self.advance(); // for
+                        let var = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!(
+                                    "Expected var in set comprehension, got {:?}",
+                                    t
+                                ))
+                            }
+                        };
+                        self.expect(Token::In)?;
+                        let iter = self.parse_comprehension_iter()?;
+                        let cond = if self.check(&Token::If) {
+                            self.advance();
+                            Some(Box::new(self.parse_expr()?))
+                        } else {
+                            None
+                        };
+                        clauses.push((var, Box::new(iter), cond));
+                        if !self.check(&Token::For) {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RBrace)?;
+                    Ok(Expr::SetComprehension {
+                        elem: Box::new(first),
+                        var: clauses[0].0.clone(),
+                        iter: clauses[0].1.clone(),
+                        cond: clauses[0].2.clone(),
+                        extra_clauses: clauses[1..].to_vec(),
+                    })
+                } else {
+                    // 集合字面量 {a, b, c}
+                    let mut items = vec![first];
+                    while !self.check(&Token::RBrace) {
+                        // G2: 元素间必须用逗号分隔（如 `{"a" 1}` 本意字典缺冒号）→ 报错而非吞为集合
+                        if !self.check(&Token::Comma) && !self.check(&Token::Newline) {
+                            let t = self.peek().clone();
+                            return Err(format!(
+                                "字典/集合字面量元素之间缺少逗号（{t:?}）；字典请使用 `key: value` 形式"
+                            ));
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                        items.push(self.parse_expr()?);
+                    }
+                    self.expect(Token::RBrace)?;
+                    Ok(Expr::SetLit(items))
+                }
+            }
+            Token::If => {
+                let cond = self.parse_expr()?;
+                self.skip_newlines();
+                // Python 式前缀三元：if cond then a else b
+                // （与冒号块形式 `if cond: ...` 并存，desugar 为 Expr::If）
+                if matches!(self.peek(), Token::Ident(n) if n.as_str() == "then") {
+                    self.advance();
+                    let then_val = self.parse_expr()?;
+                    self.skip_newlines();
+                    self.expect(Token::Else)?;
+                    let else_val = self.parse_expr()?;
+                    return Ok(Expr::If {
+                        cond: Box::new(cond),
+                        then_body: vec![Stmt::Expr(then_val)],
+                        elif_clauses: Vec::new(),
+                        else_body: Some(vec![Stmt::Expr(else_val)]),
+                    });
+                }
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                // 内联 if 表达式（`let x = if cond: then else`，math.lz 行 125）：
+                // 冒号后直接跟表达式而非缩进块 → then_body 为单个表达式语句
+                if !self.check(&Token::Indent) {
+                    let then_expr = self.parse_expr()?;
+                    let mut elif_clauses = Vec::new();
+                    let mut else_body = None;
+                    // 支持 then_expr 后换行再接 else / elif（bench.lz 单行 if-else）：
+                    //   if cond: then
+                    //   else: else_expr
+                    //   elif cond2: then2
+                    if self.check(&Token::Newline) {
+                        self.skip_newlines();
+                    }
+                    // elif 链
+                    while self.check(&Token::Elif) {
+                        self.advance();
+                        let eif_cond = self.parse_expr()?;
+                        self.expect(Token::Colon)?;
+                        self.skip_newlines();
+                        let eif_then = self.parse_expr()?;
+                        elif_clauses.push((eif_cond, vec![Stmt::Expr(eif_then)]));
+                        if self.check(&Token::Newline) {
+                            self.skip_newlines();
+                        }
+                    }
+                    // else if 链 / else 分支（同行或换行后）
+                    if self.check(&Token::Else) {
+                        self.advance();
+                        if self.check(&Token::If) {
+                            self.advance();
+                            let eif_cond = self.parse_expr()?;
+                            self.expect(Token::Colon)?;
+                            self.skip_newlines();
+                            let eif_then = self.parse_expr()?;
+                            elif_clauses.push((eif_cond, vec![Stmt::Expr(eif_then)]));
+                        } else {
+                            // 支持 `else: expr` 与 `else expr` 两种写法
+                            if self.check(&Token::Colon) {
+                                self.advance();
+                                self.skip_newlines();
+                            }
+                            let else_expr = self.parse_expr()?;
+                            else_body = Some(vec![Stmt::Expr(else_expr)]);
+                        }
+                    }
+                    return Ok(Expr::If {
+                        cond: Box::new(cond),
+                        then_body: vec![Stmt::Expr(then_expr)],
+                        elif_clauses,
+                        else_body,
+                    });
+                }
+                self.expect(Token::Indent)?;
+                let then_body = self.parse_block()?;
+                self.expect(Token::Dedent)?;
+                // elif / else
+                let mut elif_clauses = Vec::new();
+                let mut else_body = None;
+                while self.check(&Token::Elif) {
+                    self.advance();
+                    let elif_cond = self.parse_expr()?;
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let elif_body = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    elif_clauses.push((elif_cond, elif_body));
+                }
+                if self.check(&Token::Else) {
+                    self.advance();
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    if self.check(&Token::If) {
+                        // else if 嵌套 → 转为 elif
+                        self.advance();
+                        let else_if_cond = self.parse_expr()?;
+                        self.expect(Token::Colon)?;
+                        self.skip_newlines();
+                        self.expect(Token::Indent)?;
+                        let else_if_body = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        elif_clauses.push((else_if_cond, else_if_body));
+                    } else {
+                        self.expect(Token::Indent)?;
+                        else_body = Some(self.parse_block()?);
+                        self.expect(Token::Dedent)?;
+                    }
+                }
+                Ok(Expr::If {
+                    cond: Box::new(cond),
+                    then_body,
+                    elif_clauses,
+                    else_body,
+                })
+            }
+            Token::Match => {
+                let expr = self.parse_expr()?;
+                if !self.check(&Token::Colon) {
+
+                }
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                // BUG-372：`(...)` 内为隐式续行，词法层已不产生 Indent，
+                // 此时 arm 之间仅由 Newline 分隔，终结由 `)`/`]`/`}` 决定。
+                if self.check(&Token::Indent) {
+                    self.advance();
+                }
+                let mut arms = Vec::new();
+                let mut closed_by_delim = false;
+                while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                    self.skip_newlines();
+                    if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        break;
+                    }
+                    // BUG-372：`xs.map(|o| match o:\n case 1: 10\n case _: 0)` ——
+                    // 末臂 body 与调用 `)` 同行，`)` 先于 Dedent 出现；把 `)`/`]`/`}` 视作
+                    // 终结符跳出，否则会把 `)` 当新 arm 的模式去 parse → RParen error。
+                    if self.check(&Token::RParen)
+                        || self.check(&Token::RBrack)
+                        || self.check(&Token::RBrace)
+                    {
+                        closed_by_delim = true;
+                        break;
+                    }
+
+                    // 可选 case 关键字
+                    if self.check(&Token::Case) {
+                        self.advance();
+                    }
+
+                    // 模式支持 | 分隔多模式
+                    let mut patterns = Vec::new();
+                    loop {
+                        // 尝试解析模式；如果失败则可能是缺少 Delim 导致，跳出
+                        match self.parse_pattern() {
+                            Ok(p) => patterns.push(p),
+                            Err(e) => return Err(format!("{} (in match arm pattern)", e)),
+                        }
+                        if self.check(&Token::Pipe_) || self.check(&Token::PipePipe) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    let guard = if self.check(&Token::If) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    // 接受 : 或 => 作为 arm 分隔符（所有模式共享同一个 body）
+                    if self.check(&Token::FatArrow) {
+                        self.advance();
+                    } else {
+                        self.expect(Token::Colon)?;
+                    }
+                    self.skip_newlines();
+                    let body = if self.check(&Token::Indent) {
+                        self.advance();
+                        let b = self.parse_block()?;
+                        self.expect(Token::Dedent)?;
+                        b
+                    } else {
+                        vec![self.parse_stmt()?]
+                    };
+                    // 对于多模式，每个模式复制一份 arm（简化处理）
+                    for pat in &patterns {
+                        arms.push(MatchArm {
+                            pattern: pat.clone(),
+                            guard: guard.clone(),
+                            body: body.clone(),
+                        });
+                    }
+                    self.skip_newlines();
+                }
+                // BUG-372：`)`/`]`/`}` 提前终结时可能无 Dedent，允许缺失
+                if !closed_by_delim {
+                    self.expect(Token::Dedent)?;
+                } else if self.check(&Token::Dedent) {
+                    self.advance();
+                }
+                Ok(Expr::Match {
+                    expr: Box::new(expr),
+                    arms,
+                })
+            }
+            Token::PipePipe => {
+                // 空参数闭包: || expr
+                // 跳过换行，支持跨行表达式
+                self.skip_newlines();
+                // 支持可选的返回类型注解: || -> int = body
+                if self.check(&Token::Arrow) {
+                    self.advance(); // consume ->
+                    self.parse_type()?; // skip return type annotation
+                }
+                // 支持可选的 = 分隔符: || -> int = body
+                if self.check(&Token::Eq) {
+                    self.advance(); // consume =
+                }
+                self.skip_newlines();
+                if self.check(&Token::Indent) {
+                    self.advance(); // skip Indent
+                }
+                let body = self.parse_expr()?;
+                Ok(Expr::Closure {
+                    params: Vec::new(),
+                    param_tys: Vec::new(),
+                    ret_ty: None,
+                    body: Box::new(body),
+                })
+            }
+            Token::Pipe_ => {
+                // 闭包: |x, y| x + y  或  |x: int, y: int| -> int = x + y
+                let mut params = Vec::new();
+                let mut param_tys: Vec<Option<Type>> = Vec::new();
+                if self.check(&Token::LParen) {
+                    // 圆括号参数形式: |(x: int, y) body （类 Python/Rust fn 风格）
+                    self.advance(); // consume (
+                    while !self.check(&Token::RParen) {
+                        let n = match self.advance() {
+                            Token::Ident(n) => n,
+                            t => {
+                                return Err(format!("Expected param name in closure, got {:?}", t))
+                            }
+                        };
+                        params.push(n);
+                        // 支持可选的类型注解: |(x: int)|
+                        if self.check(&Token::Colon) {
+                            self.advance(); // consume :
+                            param_tys.push(Some(self.parse_type()?));
+                        } else {
+                            param_tys.push(None);
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    // 圆括号形式无尾随 |，直接进入 body
+                } else {
+                    // 参数用逗号分隔；无闭包 | 时（如 `|s: str len(s)`，类 OCaml/Kotlin
+                    // 风格），参数列表在遇到非逗号、非 | 的 token 后即结束，后续为 body。
+                    while !self.check(&Token::Pipe_) {
+                        let n = match self.advance() {
+                            Token::Ident(n) => n,
+                            // BUG-384：`|_|` 是文档化语法（06g-魔法综合.md:278
+                            // `f_filter: fn(T) -> bool = |_| True`），下划线占位
+                            // 作匿名参数名。
+                            Token::Underscore => "_".to_string(),
+                            t => return Err(format!("Expected param, got {:?}", t)),
+                        };
+                        params.push(n);
+                        // 支持可选的类型注解: |x: int|
+                        if self.check(&Token::Colon) {
+                            self.advance(); // consume :
+                            param_tys.push(Some(self.parse_type()?));
+                        } else {
+                            param_tys.push(None);
+                        }
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        } else {
+                            // 无逗号：若下一个是 | 则 while 条件退出并由下方消费；
+                            // 否则视为「无闭包 | 闭包」，参数结束，后续为 body
+                            break;
+                        }
+                    }
+                    if self.check(&Token::Pipe_) {
+                        self.advance(); // consume closing |
+                    }
+                }
+                // 支持可选的返回类型注解: |x| -> int = ...
+                // BUG-366: `|x| -> { ... }` 中 `->` 后直接是 `{`，表示无返回类型注解的块体
+                let mut ret_ty = None;
+                if self.check(&Token::Arrow) {
+                    self.advance(); // consume ->
+                    if !self.check(&Token::LBrace) {
+                        ret_ty = Some(self.parse_type()?);
+                    }
+                }
+                // 支持可选的 = 或 => 分隔符: |x| = body  或  |x| => block
+                let has_fat_arrow = self.check(&Token::FatArrow);
+                if self.check(&Token::Eq) || has_fat_arrow {
+                    self.advance(); // consume = or =>
+                }
+                self.skip_newlines();
+                if has_fat_arrow {
+                    // => 后是块体（支持多语句缩进块）
+                    // BUG-366: `|x| => { ... }` 中 `{` 也是块体（closure_mut2.lz）
+                    if self.check(&Token::LBrace) {
+                        let body = self.parse_brace_block_expr()?;
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
+                    } else if self.check(&Token::Indent) {
+                        self.advance(); // skip Indent
+                        let stmts = self.parse_block()?;
+                        // 消费块体结束的 Dedent（回到闭包外层缩进），
+                        // 否则外层 block 会误判提前结束（后续语句丢失）
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(Expr::BlockExpr(stmts)),
+                        })
+                    } else {
+                        let body = self.parse_expr()?;
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
+                    }
+                } else {
+                    // = 后是表达式体；也支持缩进块体（多语句闭包，
+                    // 如 `let f = |y: int| -> int =\n    let x = 50\n    x + y + 1`）
+                    // 无 = 分隔符时（`|x| { ... }`，Python 风格块体）：body 从 `{` 开始需解析为块表达式
+                    // （BUG-366: closure_mut.lz `|x| { counter = counter + x; counter }`
+                    // 的 `{ ... }` 被当成 dict/set 字面量 → 字典元素间缺逗号）
+                    if self.check(&Token::LBrace) {
+                        let body = self.parse_brace_block_expr()?;
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
+                    } else if self.check(&Token::Indent) {
+                        self.advance(); // skip Indent
+                        let stmts = self.parse_block()?;
+                        // 消费块体结束的 Dedent（回到闭包外层缩进）
+                        if self.check(&Token::Dedent) {
+                            self.advance();
+                        }
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(Expr::BlockExpr(stmts)),
+                        })
+                    } else {
+                        let body = self.parse_expr()?;
+                        Ok(Expr::Closure {
+                            params,
+                            param_tys,
+                            ret_ty,
+                            body: Box::new(body),
+                        })
+                    }
+                }
+            }
+            Token::Try => {
+                self.expect(Token::Colon)?;
+                self.skip_newlines();
+                self.expect(Token::Indent)?;
+                let mut body = Vec::new();
+                while !self.check(&Token::Dedent) && !self.check(&Token::Eof) {
+                    self.skip_newlines();
+                    if self.check(&Token::Dedent) || self.check(&Token::Eof) {
+                        break;
+                    }
+                    // 允许直接 catch 在新的 try-catch 中
+                    if self.check(&Token::Catch)
+                        || self.check(&Token::Else)
+                        || self.check(&Token::Finally)
+                    {
+                        break;
+                    }
+                    body.push(self.parse_stmt()?);
+                }
+                self.expect(Token::Dedent)?;
+
+                let mut catches = Vec::new();
+                while self.check(&Token::Catch) {
+                    self.advance();
+                    let pattern = if self.check(&Token::Pipe_)
+                        || matches!(self.peek(), Token::Ident(_))
+                        || matches!(self.peek(), Token::Self_)
+                        || self.check(&Token::Underscore)
+                        || matches!(self.peek(), Token::IntLit(_))
+                    {
+                        self.parse_pattern()?
+                    } else {
+                        Pattern::Wildcard
+                    };
+                    let guard = if self.check(&Token::If) {
+                        self.advance();
+                        Some(self.parse_expr()?)
+                    } else {
+                        None
+                    };
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let catch_body = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    catches.push(MatchArm {
+                        pattern,
+                        guard,
+                        body: catch_body,
+                    });
+                }
+
+                let else_body = if self.check(&Token::Else) {
+                    self.advance();
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let b = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    Some(b)
+                } else {
+                    None
+                };
+
+                let finally_body = if self.check(&Token::Finally) {
+                    self.advance();
+                    self.expect(Token::Colon)?;
+                    self.skip_newlines();
+                    self.expect(Token::Indent)?;
+                    let b = self.parse_block()?;
+                    self.expect(Token::Dedent)?;
+                    Some(b)
+                } else {
+                    None
+                };
+
+                Ok(Expr::TryCatch {
+                    body,
+                    catches,
+                    else_body,
+                    finally_body,
+                })
+            }
+            Token::Spawn | Token::Go => {
+                let expr = self.parse_expr()?;
+                Ok(Expr::Spawn(Box::new(expr)))
+            }
+            Token::Await => {
+                let inner = self.parse_expr()?;
+                Ok(Expr::Await(Box::new(inner)))
+            }
+            Token::MagicMethod(name) => {
+                // __name__, __doc__, __is_macro__ 等魔法标识符
+                // 作为普通标识符表达式使用
+                Ok(Expr::Ident(name))
+            }
+            // BUG-347：`check` 保留字在表达式位（如 `check(1)` / `let x = check(...)`）
+            // 应按普通标识符处理。
+            Token::Check => Ok(Expr::Ident("check".to_string())),
+            // BUG-346：`raise` 在表达式位（如 `else raise "bad"`）—— 解析为 Panic 表达式
+            Token::Raise => {
+                let msg = self.parse_expr()?;
+                Ok(Expr::Panic(Box::new(msg)))
+            }
+            _ => Err(format!("Unexpected token in expression: {:?}", tok)),
+        }
+    }
+
+
+    /// 块内为分号分隔的语句序列，块尾表达式（无分号）作为块值。
+    /// 仅在 `parse_expr` 的 LBrace 分支中，首 token 为语句关键字时调用。
+    fn parse_brace_block_expr(&mut self) -> Result<Expr, String> {
+        // 当前 token 为 `{`（调用方已确认）
+        self.advance(); // consume `{`
+        let mut stmts: Vec<crate::ast::Stmt> = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&Token::RBrace)
+                || self.check(&Token::Eof)
+                || self.check(&Token::Dedent)
+            {
+                // Dedent 表示缩进块结束（`{` 后新行缩进触发 Indent/Dedent 对）
+                if self.check(&Token::Dedent) {
+                    self.advance();
+                }
+                break;
+            }
+            // 单条语句：解析普通语句；尾表达式由 parse_stmt 的默认分支（ExprStmt）承担
+            stmts.push(self.parse_stmt()?);
+            // 分号分隔；换行也视为分隔（多行块无需分号）
+            if self.check(&Token::Semicolon) {
+                self.advance();
+            }
+            self.skip_newlines();
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::BlockExpr(stmts))
+    }
+}

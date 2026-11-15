@@ -1,0 +1,12 @@
+struct P =
+    x: int
+    def __implicit_copy__(ref self) -> P =
+        P(x: self.x)
+
+def main() =
+    a = P(x: 1)
+    b = a
+    print(a.x, b.x)
+    c = P(x: 2)
+    d = c^
+    print(d.x)

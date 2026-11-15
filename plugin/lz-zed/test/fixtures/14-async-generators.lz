@@ -1,0 +1,50 @@
+// lz-zed test fixture: 14-async-generators — 并发与生成器
+// Authority: SYNTAX/10-并发与异步.md + 14-生成器.md
+
+# async def / await
+async def fetch(url: str) -> str =
+    let body = await http.get(url)
+    body
+
+async def fetch_all(urls: List<str>) -> List<str> =
+    out = []
+    for u in urls:
+        out.append(await fetch(u))
+    out
+
+# spawn / go
+def start() =
+    spawn worker(1)
+    spawn worker(2)
+    go heavy_task()
+
+# iterator 生成器函数
+iterator countdown(n: int) -> int =
+    while n > 0:
+        yield n
+        n -= 1
+
+iterator evens(xs: List<int>) -> int =
+    for x in xs:
+        guard x % 2 == 0 else yield -1
+        yield x
+
+# yield from
+iterator flatten(outer: List<List<int>>) -> int =
+    for inner in outer:
+        yield from inner
+
+# 生成器构建块 *:
+def make_gen() -> Iterator<int> =
+    let g = counter *:
+        n = 0
+        while True:
+            yield n
+            n += 1
+    g
+
+# guard else yield（生成器内）
+iterator guarded(xs: List<int>) -> int =
+    for x in xs:
+        guard x > 0 else yield 0
+        yield x

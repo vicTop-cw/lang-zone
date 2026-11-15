@@ -1,0 +1,8 @@
+# Test: custom exception with fields
+exception ValueError:
+    message: str
+    code: int
+
+def main() -> int:
+    raise ValueError("Invalid value", 400)
+    return 0

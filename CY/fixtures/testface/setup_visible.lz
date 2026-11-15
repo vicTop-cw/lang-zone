@@ -1,0 +1,11 @@
+// BUG-18 判据语料：setup 的变量必须在每个 test 里可见（builder 把 setup 内联进 test）
+suite "lz_testface_setup":
+
+    setup:
+        base = 40
+
+    test "sees_setup":
+        assert base + 2 == 42
+
+    test "sees_setup_again":
+        assert base == 40

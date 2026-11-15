@@ -1,0 +1,8 @@
+// BUG-IR-003 复现：嵌套 def 捕获外层参数，需作为一等值返回并可调用
+def outer(x: int) -> fn(int) -> int:
+    def inner(y: int) -> int = x + y
+    return inner
+
+def main():
+    let add5 = outer(5)
+    print(f"outer(5)(10): {add5(10)}")

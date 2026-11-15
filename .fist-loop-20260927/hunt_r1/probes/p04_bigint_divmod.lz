@@ -1,0 +1,5 @@
+let x: bigint = 12345678901234567890
+let y: bigint = x / 7
+let z: bigint = x % 7
+println(y)
+println(z)

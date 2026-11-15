@@ -1,0 +1,29 @@
+// ============================================================
+// @memoize — 编译期记忆化缓存（真正的"永久 cache"）
+//
+// 语法：
+//   @memoize
+//   def expensive_fn(param1: Type1, param2: Type2) -> ReturnType =
+//       body
+//
+// 编译产出 Rust：
+//   生成 OnceLock<HashMap<(Type1, Type2), ReturnType>> 缓存层。
+//   首次调用求值并缓存，后续调用命中缓存。
+//
+//   @memoize 的编译期特化：
+//   如果 memoize 函数的参数在编译期已知（comptime 上下文），
+//   编译器在编译期求值并将结果硬编码为字面量——这才是真正的"永久 cache"。
+//
+// 示例：
+//   @memoize
+//   def fibonacci(n: int) -> int =
+//       if n <= 1: n
+//       else: fibonacci(n - 1) + fibonacci(n - 2)
+//
+//   def main() =
+//       print(fibonacci(40))   // 首次求值
+//       print(fibonacci(40))   // 命中缓存
+//
+//   // 编译期缓存：
+//   comptime let fib40 = fibonacci(40)  // 编译期求值，结果硬编码
+// ============================================================

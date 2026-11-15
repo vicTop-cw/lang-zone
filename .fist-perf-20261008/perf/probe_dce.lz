@@ -1,0 +1,8 @@
+def work(n: int) -> int =
+    let unused_const = 2 * 3
+    let captured = n + 1
+    let f = |x: int| => x + captured
+    f(10)
+
+def main() =
+    print(work(5))

@@ -1,0 +1,31 @@
+# lz std::thread — P0 多线程
+# 源码级映射：lz 符号 → Rust std::thread 路径
+
+[module]
+tier = 1
+rust_prefix = "std::thread"
+
+# ── 自由函数 ──
+
+[functions]
+spawn = { rust = "std::thread::spawn", shim = "" }
+sleep = { rust = "std::thread::sleep", shim = "" }
+current = { rust = "std::thread::current", shim = "" }
+yield_now = { rust = "std::thread::yield_now", shim = "" }
+
+# ── 类型映射 ──
+
+[types]
+Thread = "std::thread::Thread"
+JoinHandle = "std::thread::JoinHandle"
+
+# ── 方法别名 ──
+
+[methods]
+join = "join"
+id   = "id"
+name = "name"
+
+# ── 类型别名注入 ──
+
+[aliases]

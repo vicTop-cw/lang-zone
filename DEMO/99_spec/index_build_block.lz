@@ -1,0 +1,7 @@
+// 索引构建块 ^: — 对容器做 __getitem__ 访问
+def main() =
+    let xs = [10, 20, 30, 40]
+    // ^: 索引构建块
+    let val = xs ^:
+        2
+    print(val)

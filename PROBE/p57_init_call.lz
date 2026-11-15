@@ -1,0 +1,13 @@
+struct Counter =
+    value: int
+    label: str
+
+impl Counter =
+    def __init__(self) =
+        self.value = 100
+        self.label = "initialized"
+
+def main() =
+    mut c = Counter(value: 0, label: "")
+    print(c.value)
+    print(c.label)

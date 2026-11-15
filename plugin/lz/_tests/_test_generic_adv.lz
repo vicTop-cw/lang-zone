@@ -1,0 +1,49 @@
+def identity<T>(x: T) -> T =
+    x
+
+def max_int(a: int, b: int) -> int =
+    if a > b:
+        a
+    else:
+        b
+
+def test_option_map() =
+    val = Some(42)
+    doubled = val.map(|x| x * 2)
+    print("Option map: ")
+    print(doubled)
+
+def test_none_inference() =
+    val = None
+    print("None: ")
+    print(val)
+
+def test_empty_list() =
+    list = List()
+    print("Empty list: ")
+    print(list)
+
+def test_max() =
+    result = max_int(3, 7)
+    print("Max: ")
+    print(result)
+
+def test_identity() =
+    val = identity("hello")
+    print("Identity: ")
+    print(val)
+
+def pair<T, U>(a: T, b: U) =
+    print("Pair: ")
+    print(a)
+    print(b)
+
+def main() =
+    print("=== Generic Advanced Test ===")
+    test_option_map()
+    test_none_inference()
+    test_empty_list()
+    test_max()
+    test_identity()
+    pair(1, "hello")
+    print("=== Generic Advanced Test Complete ===")

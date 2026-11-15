@@ -1,0 +1,15 @@
+// 循环 else：`while cond: ... else:` / `for x in xs: ... else:`（循环正常结束执行 else）
+// 出处：SYNTAX/05-控制流.md — 循环 else
+// 预期语法：
+def main() =
+    mut i = 0
+    while i < 3:
+        i += 1
+    else:
+        print("completed without break")
+
+    mut total = 0
+    for k in 1..4:
+        total += k
+    else:
+        print(f"total={total}")

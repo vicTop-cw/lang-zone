@@ -1,0 +1,4 @@
+
+thread 'main' (78636) panicked at E:\IDEProjects\AI\lang-zone\DEMO\boundary-coverage\combo-build-block.rs:51:5:
+attempt to divide by zero
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

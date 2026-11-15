@@ -1,0 +1,20 @@
+=== nesting-expressions ===
+48
+true
+4
+17
+abcd_pos
+ab_pos
+all_nonpos
+18
+12
+[0, 0, 0, 0, 1, 0]
+0
+1
+10
+112
+-1
+true
+false
+user: Alice, age: 25, city: NYC, sum: 35, check: true
+nesting-expressions done

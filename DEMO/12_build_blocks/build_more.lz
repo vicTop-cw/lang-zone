@@ -1,0 +1,28 @@
+// LZ 构建块 — =: 与 ~: 扩展
+// 覆盖：=: 返回结构化值、~: 元组拆包传参
+
+struct Point =
+    x: int
+    y: int
+
+def make_point(x: int, y: int) -> Point = Point(x: x, y: y)
+
+def main() =
+    // =: 构建结构化值（块尾表达式作为返回值）
+    p =:
+        px = 3
+        py = 4
+        make_point(px, py)
+    print(p.x, p.y)
+
+    // ~: 调用构建块，末尾元组拆包传给 callee
+    q = make_point ~:
+        (7, 8)
+    print(q.x, q.y)
+
+    // ~: 计算型构建块
+    r = make_point ~:
+        a = 1
+        b = 2
+        (a + 10, b + 20)
+    print(r.x, r.y)

@@ -1,0 +1,31 @@
+// Phase 15: 闭包/管道/f-string 测试
+
+// ── 15.1 管道操作符 ──
+def test_pipe() =
+    square = |x| x * x
+    double = |x| x * 2
+    result = 3 |> square |> double
+    print("Pipe result: ")
+    print(result)
+
+// ── 15.2 f-string ──
+def test_fstring() =
+    name = "World"
+    value = 42
+    msg = f"Hello, {name}! Value is {value}"
+    print(msg)
+
+// ── 15.3 闭包赋值后管道 ──
+def test_closure_pipe() =
+    add_one = |x| x + 1
+    result = 5 |> add_one |> add_one
+    print("Closure pipe: ")
+    print(result)
+
+// ── 入口 ──
+def main() =
+    print("=== Closure/Expr Test ===")
+    test_pipe()
+    test_fstring()
+    test_closure_pipe()
+    print("=== Closure/Expr Test Complete ===")

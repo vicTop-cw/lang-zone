@@ -1,0 +1,8 @@
+# Bug-R5-7: defer expr 单行语法不支持
+def test_defer_expr() -> int:
+    let result: int = 0
+    defer result = result + 1
+    return result
+
+def main() -> int:
+    return 0

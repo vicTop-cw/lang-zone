@@ -1,0 +1,44 @@
+perf(codegen): 字符串累加改原地追加 —— 运行 2.06×、峰值内存 −45%
+
+度量口径按用户要求切到**运行性能与运行时内存**（代码行数不再作为指标）。
+
+发现：通用字符串加法路径发的是 `s.to_string() + &"ab".to_string()[..]`
+—— 每次迭代 3 次堆分配，且把已累积的字符串完整拷贝两遍。对
+`while i < n { s = s + "ab" }` 这种最常见的累加模式意味着时间O(n²)、
+分配抖动 O(n)。实测（2 万轮）LZ 362.9ms / 7892KB vs 手写 push_str
+145.9ms / 4824KB —— 慢 2.49×、内存多 63%。
+
+改写：`s = s + rhs` → `s.push_str(&rhs)`（新增 src/ir/codegen/owned_str.rs）。
+字符串字面量右操作数同时剥掉多余的 `.to_string()`，直接以 `&'static str`
+传入 ⇒ 整个累加循环**零分配**。
+
+保守边界（详见 owned_str.rs 文档注释）：
+- 只对**已声明的局部变量**生效，且该变量必须在函数入口清空过的登记表里
+  （`gen_fn_def` 里`self.owned_str_reset()`，紧邻 str_typed_vars.clear()）；
+- 只登记 by-value 的 str 绑定（`is_ref == false`），`ref s: str` /
+  `ref mut s: str` 形参一律不登记 —— 它们是借用视图，原地追加会改到
+  调用方的值；
+- 形参一律不登记（保守：by-value 形参也走通用路径，牺牲优化换零风险）；
+- RHS 必须是 str形态（字面量 / f-string / str 变量 / 字符串方法链），
+  `str + int` 等由 IR 类型检查直接拒绝，根本到不了这里；
+- 借用检查器是最终保证：任何能通过原路径编译的场景 `s` 必然是可独占的
+  String，所以最坏情况是编译期报错，不会静默改变语义。
+
+实测（同机严格 A/B，两份 .rs 仅差这一行）：40.5ms → 19.7ms（2.06×）；
+端到端基准 362.9ms/7892KB → 142.9ms/4308KB（−45% 峰值内存）。
+相对手写 push_str 已从"慢 2.49×"变为"持平（噪声内）"。
+
+闸门：tests/perf_opt_gates.rs 14 → **20 passed / 0 failed**，新增 6 例钉住
+「该改写的改、不该改的绝不改」：字面量→push_str("x") 且无 to_string()+add、
+变量右操作数→push_str(&x) 且 x 之后仍可读、f-string→push_str(&format!)、
+str+int 被类型检查拒绝、ref 形参绝不被原地改写、登记表按函数隔离。
+
+回归：cargo test -j 1 --no-fail-fast = **691 passed / 2 failed**（39 个二进制）；
+2 项均为并行 agent 在途 WIP 的既有失败（cython_backend::
+cy_block_expr_tail_runs_once，codegen_cython.rs +367 行未提交），非本次引入。
+
+顺带记录两处**既有缺陷**（本次未修，已在闸门注释与文档中标注）：
+①`def f(ref s: str) = s = s + "x"` 通用路径生成 `format!(..)` 赋给 &str 形参
+   ⇒ E0308，即 by-ref str 形参的字符串拼接本来就编译不过；
+② 无显式返回类型的 `def accum() = ... s`（尾表达式为 str）被推断成 i64。
+两者都需独立立项，不在性能改动里夹带。

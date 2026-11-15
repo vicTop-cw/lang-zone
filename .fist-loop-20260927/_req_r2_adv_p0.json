@@ -1,0 +1,3 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","description":"[lzc-loop:推进:R2] 清偿 BUG-6（非 IR 域）：src/ast/mod.rs builtin_type_names 补入 bigint/complex，统一类型注解位口径；配前端接受/未知类型仍拒 双向闸门；剩余端到端阻塞（BUG-4 形参强转、BUG-14 裸 num_* import）入账避让","created_by":"human_steward","namespace":"lzc-loop-20260927","now":"2026-09-29T11:05:00+08:00"}}
+]

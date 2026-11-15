@@ -1,0 +1,25 @@
+// LZ 自测 — 综合测试 (test/assert/check)
+suite "lz_self_test":
+
+    test "arithmetic basics":
+        assert 1 + 1 == 2
+        assert 5 * 3 == 15
+        check 10 / 2 == 5
+
+    test "string operations":
+        let s = "hello"
+        assert s == "hello"
+        let fs = f"value: {42}"
+        assert fs == "value: 42"
+
+    test "list operations":
+        let xs = [1, 2, 3]
+        assert xs == [1, 2, 3]
+        assert xs[0] == 1
+
+    test "function basics":
+        def add(a: int, b: int) -> int = a + b
+        assert add(1, 2) == 3
+
+def main() =
+    print("✅ 所有综合测试通过")

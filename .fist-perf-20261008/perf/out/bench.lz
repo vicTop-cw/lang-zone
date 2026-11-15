@@ -1,0 +1,43 @@
+// lz 性能基准工作负载（标量热点 + 容器分配 + 嵌套循环）
+// 与 bench_rs.rs 逐算法等价，用于「生成代码 vs 手写 Rust」对照与 diff 归因。
+def fib(n: int) -> int =
+    if n <= 1:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+def sieve(n: int) -> int =
+    mut count = 0
+    mut is_prime: List<bool> = []
+    for i in range(n + 1):
+        is_prime.push(true)
+    is_prime[0] = false
+    is_prime[1] = false
+    mut p = 2
+    while p * p <= n:
+        if is_prime[p]:
+            mut multiple = p * p
+            while multiple <= n:
+                is_prime[multiple] = false
+                multiple = multiple + p
+        p = p + 1
+    for i in range(n + 1):
+        if is_prime[i]:
+            count = count + 1
+    count
+
+def sum_to(n: int) -> int =
+    mut acc = 0
+    mut i = 1
+    while i <= n:
+        acc = acc + i * i
+        i = i + 1
+    acc
+
+def main() =
+    let f = fib(32)
+    print(f"fib(32) = {f}")
+    let c = sieve(300000)
+    print(f"sieve(300000) = {c} primes")
+    let s = sum_to(3000000)
+    print(f"sum_to(3000000) = {s}")

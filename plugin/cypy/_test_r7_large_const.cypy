@@ -1,0 +1,5 @@
+def test() -> int:
+    let big: int = 2147483647
+    return big
+def main() -> int:
+    return 0

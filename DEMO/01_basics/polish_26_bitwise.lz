@@ -1,0 +1,52 @@
+// ============================================================
+// 轮26: 位运算与复合操作 — &|^<<>>、复合赋值
+// 每项用 assert 确保正确
+// ============================================================
+
+def main() =
+    // ── 位与/或/异或 ──
+    assert (5 & 3) == 1        // 101 & 011 = 001
+    assert (5 | 3) == 7        // 101 | 011 = 111
+    assert (5 ^ 3) == 6        // 101 ^ 011 = 110
+
+    // ── 移位 ──
+    assert (1 << 4) == 16
+    assert (16 >> 2) == 4
+    assert (1 << 10) == 1024
+
+    // ── 位运算组合 ──
+    assert ((0xF0 | 0x0F)) == 0xFF
+    assert ((0xFF & 0x0F)) == 0x0F
+    assert ((1 << 8) | (1 << 2)) == 260
+
+    // ── 复合赋值（+= -= *=） ──
+    mut a = 10
+    a += 5
+    assert a == 15
+    a -= 3
+    assert a == 12
+    a *= 2
+    assert a == 24
+    a /= 4
+    assert a == 6
+    a %= 4
+    assert a == 2
+
+    // ── 复合赋值与位运算 ──
+    mut b = 1
+    b <<= 4
+    assert b == 16
+    b >>= 2
+    assert b == 4
+
+    // ── 逻辑运算组合 ──
+    assert (True and True) and (False or True)
+    assert not (True and False)
+    assert (5 > 3) and (2 < 4)
+
+    // ── 数值运算边界 ──
+    assert 7 / 2 == 3
+    assert 7.0 / 2 == 3.5
+    assert -7 % 3 == -1 or 7 % 3 == 1
+
+    print("P26 bitwise OK")

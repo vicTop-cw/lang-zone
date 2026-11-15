@@ -1,0 +1,15 @@
+Some(10)
+None
+Some(6)
+None
+5
+0
+Some(51)
+9
+Ok(30)
+Err("boom")
+Ok(5)
+Err("boom")
+10
+-1
+42

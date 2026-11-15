@@ -1,0 +1,60 @@
+// Fuzz 12: for-in 循环边界测试
+
+// ── 12.1 for-in range ──
+def test_for_range() =
+    sum = 0
+    for i in 0..5:
+        print("i: ")
+        print(i)
+        sum = sum + i
+    print("sum: ")
+    print(sum)
+
+// ── 12.2 for-in list ──
+def test_for_list() =
+    arr = [10, 20, 30, 40]
+    for x in arr:
+        print("x: ")
+        print(x)
+
+// ── 12.3 for-in 嵌套循环 ──
+def test_nested_for() =
+    for i in 0..3:
+        for j in 0..2:
+            print("nested: ")
+            print(i * 10 + j)
+
+// ── 12.4 for-in 空 range ──
+def test_empty_range() =
+    count = 0
+    for i in 0..0:
+        count = count + 1
+    print("empty count: ")
+    print(count)
+
+// ── 12.5 for-in with if 条件 ──
+def test_for_with_if() =
+    for i in 0..5:
+        if i == 2:
+            print("two")
+        elif i == 3:
+            print("three")
+        else:
+            print("other")
+
+// ── 12.6 for-in 单元素 range ──
+def test_single_range() =
+    for i in 5..6:
+        print("single: ")
+        print(i)
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz For Loop ===")
+    test_for_range()
+    test_for_list()
+    test_nested_for()
+    test_empty_range()
+    test_for_with_if()
+    test_single_range()
+    print("=== Fuzz For Loop Complete ===")

@@ -1,0 +1,10 @@
+// 15_feature_matrix - debug_repr_variant：带数据（位置字段）变体的打印形态。
+// 期望值同 debug_repr：取自 Rust 后端运行产物，非 cy 自抄。
+enum Shape:
+    Circle(f64, f64, f64)
+    Rect(f64, f64)
+
+def main() =
+    let c = Shape.Circle(0.0, 0.0, 5.0)
+    let r = Shape.Rect(10.0, 20.0)
+    print(c, r)

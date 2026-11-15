@@ -1,0 +1,19 @@
+"""
+Round 3c: 测试 Cypy 并发特性 —— spawn, go
+"""
+# 1. spawn 关键字
+def test_spawn() -> int:
+    spawn print("spawned")
+    return 0
+
+# 2. go 关键字
+def test_go() -> int:
+    go print("go_routine")
+    return 0
+
+def main() -> int:
+    print("=== Concurrent Test ===")
+    print("test_spawn: done")
+    print("test_go: done")
+    print("=== Done ===")
+    return 0

@@ -1,0 +1,14 @@
+// combo-syntax（绿色回归测试）：struct 方法 + 偏应用 _
+// struct 方法内部使用偏应用生成闭包，避免显式 lambda
+def add(a: int, b: int) -> int = a + b
+
+struct Counter =
+    value: int
+
+    def bump(self) -> int =
+        let inc = add(_, 1)
+        inc(self.value)
+
+def main() =
+    let c = Counter(value: 10)
+    print(c.bump())          // 11

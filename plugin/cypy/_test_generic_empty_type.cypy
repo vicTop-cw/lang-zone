@@ -1,0 +1,5 @@
+# Test: type alias with empty generic params should fail
+type Maybe[] = None
+
+def main() -> int:
+    return 0

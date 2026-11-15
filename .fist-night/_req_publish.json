@@ -1,0 +1,4 @@
+[
+ {"name":"publish","arguments":{"project_dir":".","description":"[night:2026-09-26-night:R1-寻虫] lang-zone 夜间循环 R1 寻虫：五路发现通道产出确诊缺陷并入账（不改语义）","created_by":"human_steward","now":"2026-09-27T00:20:00+08:00"}},
+ {"name":"get","arguments":{"task_id":"T0","now":"2026-09-27T00:20:00+08:00"}}
+]

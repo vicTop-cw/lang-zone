@@ -1,0 +1,40 @@
+# Test: 类型系统边界
+struct Vec3:
+    x: int = 0
+    y: int = 0
+    z: int = 0
+
+def test_struct_default() -> int:
+    let v: Vec3 = Vec3{}
+    return v.x
+
+def test_struct_field_access() -> int:
+    let v: Vec3 = Vec3{x: 1, y: 2, z: 3}
+    return v.x + v.y + v.z
+
+def test_struct_return() -> Vec3:
+    return Vec3{x: 1, y: 2, z: 3}
+
+def test_struct_param(v: Vec3) -> int:
+    return v.x
+
+def test_list_type() -> list[int]:
+    return [1, 2, 3]
+
+def test_list_param(lst: list[int]) -> int:
+    return lst[0]
+
+def test_tuple_type() -> tuple[int, int]:
+    return (1, 2)
+
+def test_option_type() -> int:
+    return 0
+
+def test_result_type() -> int:
+    return 0
+
+def test_dict_type() -> int:
+    return 0
+
+def main() -> int:
+    return 0

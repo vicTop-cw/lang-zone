@@ -1,0 +1,28 @@
+// ============================================================
+// 测试: duck 字段关系约束 A.id == B.id / A.name: B.name（§2.2）
+// ============================================================
+
+// ── 字段级关系 duck ──
+duck LinkedFields<A, B> =
+    A.id == B.id                   // A.id 的类型必须等于 B.id 的类型
+    A.name: B.name                 // A.name 类型必须等于 B.name 类型（简写）
+
+// ── 满足关系的类型对：id 均为 int，name 均为 str ──
+struct User =
+    id: int
+    name: str
+
+struct Account =
+    id: int
+    name: str
+
+// ── 使用关系 duck 的泛型函数（A、B 各需声明约束才能访问各自字段） ──
+def link<A, B>(a: A, b: B) -> bool where A: LinkedFields<A, B>, B: LinkedFields<B, A> =
+    a.id == b.id && a.name == b.name
+
+def main() =
+    let u = User(id: 7, name: "alice")
+    let acc = Account(id: 7, name: "alice")
+    let ok = link(u, acc)
+    print(f"linked: {ok}")
+    print("field relation duck demo done")

@@ -1,0 +1,11 @@
+// _test_rust_bridge.lz — 测试 Rust 桥接模块
+// 测试 import std.bridge.rust.* 语法
+
+// 测试 1: 导入 Rust 标准库路径
+import std.bridge.rust.std.io
+
+// 测试 2: 导入 serde_json（如果可用）
+import std.bridge.rust.serde_json
+
+def main() =
+    print("Rust bridge test loaded")

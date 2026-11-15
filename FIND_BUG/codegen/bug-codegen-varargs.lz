@@ -1,0 +1,15 @@
+// find_bug/codegen/bug-codegen-varargs.lz
+// BUG-CG-001: ..: 变参展开为 Vec
+// 变参参数展开到 Rust codegen
+
+def sum_all(..: int) -> int =
+  s = 0
+  for x in args:
+    s = s + x
+  s
+
+def main() =
+  r = sum_all(1, 2, 3, 4, 5)
+  print("sum_all(1..5):", r)
+  assert r == 15
+  print("bug-codegen-varargs.lz done")

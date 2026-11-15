@@ -1,0 +1,19 @@
+def test_0() -> int:
+    defer:
+        let cleanup: int = 0
+    match y:
+        case 0:
+            return 0
+        case _:
+            return -1
+    x = (z != x)
+    x = result
+
+def test_1() -> int:
+    for i in range(4):
+        let temp: int = i
+    while print(print(((1 * -1)))):
+        break
+
+def main() -> int:
+    return 0

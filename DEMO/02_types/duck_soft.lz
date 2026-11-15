@@ -1,0 +1,56 @@
+// ============================================================
+// 测试: duck 软关键字族 — satisfies / sealed / default / match / require/optional
+// ============================================================
+
+// ── 基础 duck ──
+duck Named =
+    .name: str
+
+// ── satisfies：要求目标类型同时满足 Named ──
+duck Greeter =
+    satisfies Named
+    def greet(self) -> str
+
+// ── sealed：闭合约束，不得有额外成员 ──
+duck ExactPoint =
+    sealed
+    .x: int
+    .y: int
+
+// ── default：可选成员 ──
+duck Renderable =
+    def render(self) -> str
+    default def fallback(self) -> str
+
+// ── match 数量约束 + 正则方法名 ──
+duck MultiGetter =
+    match "get_\\w+" at_least(1)
+
+// ── 满足约束的类型 ──
+struct Person =
+    name: str
+    def greet(self) -> str = "hi"
+
+struct Point =
+    x: int
+    y: int
+
+struct Text =
+    def render(self) -> str = "rendered"
+    def get_size(self) -> int = 10
+
+// ── 使用 duck 约束的泛型函数 ──
+def show_greeting<T>(p: T) -> str where T: Greeter =
+    p.greet()
+
+def render_any<T>(t: T) -> str where T: Renderable =
+    t.render()
+
+def main() =
+    let p = Person(name: "bob")
+    print(show_greeting(p))
+    let pt = Point(x: 1, y: 2)
+    print(f"point: {pt.x},{pt.y}")
+    let tx = Text()
+    print(render_any(tx))
+    print("duck soft keywords demo done")

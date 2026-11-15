@@ -1,0 +1,3 @@
+// C02: submodule under a subdirectory
+def twice(a: int) -> int =
+    return a * 2

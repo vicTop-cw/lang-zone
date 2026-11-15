@@ -1,0 +1,6 @@
+[
+  {"tool": "bug_list", "args": {}},
+  {"tool": "laya_decide", "args": {"context": "lang-zone 编译器修复任务：修复 codegen 层 BigInt/Complex 生成码缺陷与 ListLit 期望类型下推缺陷，涉及多站点发射点收敛与递归下推，中高难度 Rust 代码修复"}},
+  {"tool": "project_standards", "args": {}},
+  {"tool": "status_summary", "args": {}}
+]

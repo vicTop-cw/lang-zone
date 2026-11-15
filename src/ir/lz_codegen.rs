@@ -1,0 +1,1439 @@
+// Lang-Zone 编译器 — ir/lz_codegen.rs
+// 自举路线 B：IrModule → LZ 构造代码（生成 .lz 源码，编译运行后输出 IR 文本）
+//
+// 用法：lzc file.lz --emit=ir-lz
+//   → 生成 tmp.lzlz = LZ_IR_LIB（LZ 版 IR 类型 + display 函数）+ main 构造代码
+//   → lang-zone 编译运行 tmp.lzlz → 输出与 --emit=ir 一致的 IR 文本
+//
+// 这是「用 LZ 实现 IR display」的落地：Rust 编译器只负责把 IR 数据
+// 序列化为 LZ 构造调用，display 逻辑完全由 LZ 侧（lz_ir_lib.lz）承担。
+//
+// 扁平化策略：每个复杂 Expr/Stmt 拆成顶层 `let __tN = <构造>` 中间变量，
+// 避免深层嵌套的 enum 构造调用导致 LZ 编译器（lang-zone）解析栈溢出。
+
+use super::IrModule;
+use super::node::*;
+use super::types::IrType;
+
+/// 内嵌的 LZ IR 库（类型定义 + display 函数）
+pub const LZ_IR_LIB: &str = include_str!("lz_ir_lib.lz");
+
+/// 内嵌的 LZ Rust codegen 库（类型定义 + codegen 函数）
+pub const LZ_CODEGEN_LIB: &str = include_str!("lz_codegen_lib.lz");
+
+/// T0r24：把 IrModule 里 Cli 档 embed 块解析成产物描述（产物名 / 目录 / 函数面 / 建库命令）。
+///
+/// 「同一个源文件，两条路径同一个产物名」的接合点：命名权威是
+/// `crate::embed::dedup::artifact_name`（含 FNV-1a 路径短哈希），这里只是把原生
+/// codegen（src/ir/codegen/mod.rs:694-727）的分组口径**原样**复用到自举路线上——
+///   同语言多块：按出现顺序以 `\n\n` 拼接后一次性 resolve（与 EmbedCollector 同口径）
+///   不同语言：各出一个产物
+/// 于是 rs-lz 侧不需要（也不允许）自己重写去重，产物名/目录不可能与原生漂移。
+///
+/// `stem` 是命名主干（`calc.lz` → `calc`），等价于 `IrCodeGen::set_embed_stem`。
+pub fn embed_targets_of(module: &IrModule, stem: Option<&str>) -> Vec<crate::embed::EmbedTarget> {
+    embed_targets_by_lang(module, stem)
+        .into_iter()
+        .map(|(_, t)| t)
+        .collect()
+}
+
+/// 同 [`embed_targets_of`]，但保留**数据面里的原始语言写法**（`py` 与 `python` 都要能
+/// 反查到元信息：`adapter()` 会把 `py` 规范成 `python`，而 IR 里的 lang 是原样字符串）。
+fn embed_targets_by_lang(
+    module: &IrModule,
+    stem: Option<&str>,
+) -> Vec<(String, crate::embed::EmbedTarget)> {
+    let source_name = stem
+        .map(|s| s.to_string())
+        .or_else(|| module.file_path.clone())
+        .unwrap_or_else(|| module.name.clone());
+
+    let mut by_lang: Vec<(String, String)> = Vec::new();
+    for item in &module.items {
+        if let Item::EmbedBlock { lang, src, .. } = item {
+            if crate::embed::is_source_lang(lang) {
+                continue;
+            }
+            let entry = match by_lang.iter().position(|(l, _)| l == lang) {
+                Some(pos) => {
+                    by_lang[pos].1.push_str("\n\n");
+                    &mut by_lang[pos].1
+                }
+                None => {
+                    by_lang.push((lang.clone(), String::new()));
+                    &mut by_lang.last_mut().unwrap().1
+                }
+            };
+            entry.push_str(src);
+        }
+    }
+
+    let stem_base = crate::embed::base_stem(&source_name);
+    let mut out = Vec::new();
+    for (lang, acc) in &by_lang {
+        if let Some(mut t) = crate::embed::resolve(lang, &source_name, acc) {
+            t.dir_rel = crate::embed::artifact::dir_rel(&stem_base, &t.artifact);
+            out.push((lang.clone(), t));
+        }
+    }
+    out
+}
+
+/// 将 IrModule 序列化为完整 LZ 源码（库 + main 构造 + codegen_module 调用）
+/// 自举路线 B：D1 环节 —— LZ 实现 Rust 代码生成
+pub fn ir_module_to_rs_lz_source(module: &IrModule) -> String {
+    // 模块自身记录的源文件路径即主干来源（main.rs 在 parse 后注入 module.file_path）
+    ir_module_to_rs_lz_source_with_stem(module, module.file_path.as_deref())
+}
+
+/// 与 [`ir_module_to_rs_lz_source`] 相同，但显式指定 embed 产物的命名主干
+/// （`calc.lz` 的 `calc`）。等价于原生 Rust 后端 `IrCodeGen::set_embed_stem`
+/// （src/main.rs:1340）—— 两条路径必须拿到**同一个** source_name，否则
+/// Cli 档产物名/目录会对不上（tests/embed_stem_parity.rs 的判据本体）。
+pub fn ir_module_to_rs_lz_source_with_stem(module: &IrModule, stem: Option<&str>) -> String {
+    let mut g = LzGen::new();
+    // BUG-411：Rust codegen 模式（命名字段变体 + EnumCtor 改写生效）
+    g.rs_codegen_mode = true;
+    // BUG-411：先登记枚举变体字段名，供构造/字段访问解析
+    g.collect_enums(module);
+    // T0r24：Cli 档 embed 的产物名/目录/垫片文本全部在 Rust 侧算好（唯一命名权威
+    // 是 crate::embed::dedup::artifact_name；LZ 侧不重写 FNV 去重）。
+    g.prepare_embeds(module, stem);
+    let mut out = String::new();
+    out.push_str("// 由 lzc --emit=rs-lz 生成（自举路线 B：LZ 实现 Rust codegen）\n");
+    out.push_str(LZ_CODEGEN_LIB);
+    out.push_str("\n\n// ── main：构造当前模块的 IR 并输出 Rust 代码 ──\n");
+    out.push_str("def main() =\n");
+
+    let mut item_names: Vec<String> = Vec::new();
+    for item in &module.items {
+        let name = g.fresh();
+        let item_src = g.item(item);
+        g.lets.push(format!("    let {} = {}", name, item_src));
+        item_names.push(name);
+    }
+
+    // BUG-410：脚本模式（无声明 main）的顶层语句此前根本不进 .lzrs——原生
+    // codegen/mod.rs:1370 在 !has_main 时用 module.top_level_stmts 合成
+    // `pub fn main()`，rs-lz 路径丢了它们 → 产物 E0601 main not found。
+    // 同口径：items 里没有 main FnDef 时（**即使 top_level_stmts 为空**，与原生
+    // 一致，原生 !has_main 无条件合成空 main），追加一条 Item.ScriptMain
+    // （LZ 侧 gen_item 把它渲染成合成 main，is_main=false，尾语句带 return，
+    // 与原生 gen_block_inner 逐字节一致）。
+    let has_main_fn = module
+        .items
+        .iter()
+        .any(|it| matches!(it, Item::FnDef(f) if f.name == "main"));
+    if !has_main_fn {
+        let body = g.stmts_ref(&module.top_level_stmts);
+        let sm = g.fresh();
+        g.lets
+            .push(format!("    let {} = Item.ScriptMain(body: {})", sm, body));
+        item_names.push(sm);
+    }
+
+    out.push_str(&g.lets.join("\n"));
+    out.push('\n');
+    out.push_str(&format!(
+        "    let m = IrModule(name: \"{}\", items: [{}], prelude: [{}], version: {})\n",
+        module.name,
+        item_names.join(", "),
+        gen_str_list(&module.prelude),
+        module.version
+    ));
+    // T0r24：Cli 档 embed 的垫片模块文本作为**字符串参数**穿透给 LZ
+    // （只穿透一次，故多语言也不会重复 EMBED_SHIM_HEADER → 不会 E0252）。
+    out.push_str(&format!(
+        "    let uf = module_user_fn_names(m)\n    let es = \"{}\"\n    print_str(codegen_module(m, uf, es))\n    return 0\n",
+        escape_lz_multiline(&g.embed_shim)
+    ));
+    out
+}
+
+/// 将 IrModule 序列化为完整 LZ 源码（库 + main 构造 + display_module 调用）
+pub fn ir_module_to_lz_source(module: &IrModule) -> String {
+    let mut g = LzGen::new();
+    let mut out = String::new();
+    out.push_str("// 由 lzc --emit=ir-lz 生成（自举路线 B：LZ 实现 IR display）\n");
+    out.push_str(LZ_IR_LIB);
+    out.push_str("\n\n// ── main：构造当前模块的 IR 并输出 ──\n");
+    out.push_str("def main() =\n");
+
+    // 每个 item 拆成顶层 let（中间变量扁平化）
+    let mut item_names: Vec<String> = Vec::new();
+    for item in &module.items {
+        let name = g.fresh();
+        let item_src = g.item(item);
+        g.lets.push(format!("    let {} = {}", name, item_src));
+        item_names.push(name);
+    }
+
+    // 组装 IrModule 并输出
+    out.push_str(&g.lets.join("\n"));
+    out.push('\n');
+    out.push_str(&format!(
+        "    let m = IrModule(name: \"{}\", items: [{}], prelude: [{}], version: {})\n",
+        module.name,
+        item_names.join(", "),
+        gen_str_list(&module.prelude),
+        module.version
+    ));
+    // print_str（Display 输出，println!("{}")）与 --emit=ir 的 println!("{ir_module}") 一致；
+    // print 会被 codegen 特判为 Debug 格式（println!("{:?}")），str 加引号转义 → 不可用
+    // 尾部加 return 0：print_str 返回 ()，而 LZ main 尾表达式会被当作返回值（i64）→ E0308
+    out.push_str("    print_str(display_module(m))\n    return 0\n");
+    out
+}
+
+/// BUG-411：实参是否为关键字参数节点 `_KwArg { name, value }`
+fn is_kwarg_expr(e: &Expr) -> bool {
+    matches!(&e.kind, ExprKind::StructCtor { name, .. } if name == "_KwArg")
+}
+
+/// 扁平化生成器：产生顶层 let 序列，避免深嵌套构造
+struct LzGen {
+    counter: usize,
+    lets: Vec<String>,
+    /// BUG-411：枚举名 → [(变体名, 字段名列表)]。字段名为空串表示元组（位置）字段。
+    /// 用于把 `Enum.Variant(...)` 构造（IR 里是 MethodCall receiver=Var(枚举名)）
+    /// 在序列化期解析成 Expr.EnumCtor，并把位置实参补成 _KwArg 以保留字段名。
+    enums: std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
+    /// BUG-411：是否处于 Rust codegen（--emit=rs-lz）模式。命名字段变体与
+    /// EnumCtor 改写只在本模式生效——IR display（--emit=ir-lz）的产物需与
+    /// 原生 `--emit=ir` 文本逐字节一致，那里枚举变体只显示类型、构造显示为
+    /// `method`，不能改写。
+    rs_codegen_mode: bool,
+    /// T0r24：语言 → 该语言 embed 块的预计算元信息（档位 + 产物名 + 产物目录）。
+    /// 由 `crate::embed::{resolve, artifact::dir_rel}` 在 Rust 侧算好，LZ 侧只消费。
+    embed_meta: std::collections::HashMap<String, EmbedMeta>,
+    /// T0r24：整段 Cli 档垫片模块文本（`pub mod __lz_embed` 的**内容**）。
+    /// 唯一生成点是 `bridge::cli::generate_embed_module`（经 `embed::shim::module_text`），
+    /// 与原生路径逐字同一份；LZ 侧只负责挂进模块外壳。
+    embed_shim: String,
+}
+
+/// 一个语言的 embed 块在 LZ 数据面里的元信息（T0r24）
+#[derive(Clone)]
+struct EmbedMeta {
+    /// 发射档位：`src_tnr` / `src_raw`（Source 档，逐字进 .rs）/ `cli`（独立产物 + 垫片）
+    tier: &'static str,
+    /// Cli 档产物名（`python_calc`）；Source 档为空串
+    artifact: String,
+    /// Cli 档产物目录（`build/embed/calc/python_calc`）；Source 档为空串
+    dir_rel: String,
+    /// Cli 档对 LZ 可见的调用面（`<artifact>_<method>` / `<artifact>_run`）；
+    /// 用于 LZ 侧把同名外部函数桩排掉（原生 `unknown_extern_fns.remove` 的同口径）
+    wrappers: Vec<String>,
+}
+
+impl LzGen {
+    fn new() -> Self {
+        Self {
+            counter: 0,
+            lets: Vec::new(),
+            enums: std::collections::HashMap::new(),
+            rs_codegen_mode: false,
+            embed_meta: std::collections::HashMap::new(),
+            embed_shim: String::new(),
+        }
+    }
+
+    /// T0r24：预计算每个 embed 语言在数据面里的元信息 + 整段垫片文本。
+    ///
+    /// 命名/去重**不在 LZ 侧**做：产物名来自 `crate::embed::dedup::artifact_name`
+    /// （FNV-1a 路径短哈希），目录来自 `crate::embed::artifact::dir_rel`，垫片代码来自
+    /// `crate::embed::shim::module_text`。这里只是把同一批结论搬进数据面。
+    fn prepare_embeds(&mut self, module: &IrModule, stem: Option<&str>) {
+        // Source 档：逐字进 .rs，不产生产物（tnr 需要 tnr lib 转译，LZ 侧没有该能力
+        // ⇒ 按 feature 未启用形态发注释，与原生未开 tnr-embed 时逐字一致）。
+        for item in &module.items {
+            if let Item::EmbedBlock { lang, .. } = item {
+                if crate::embed::is_source_lang(lang) {
+                    let tier: &'static str = if lang == "tnr" { "src_tnr" } else { "src_raw" };
+                    self.embed_meta.entry(lang.clone()).or_insert(EmbedMeta {
+                        tier,
+                        artifact: String::new(),
+                        dir_rel: String::new(),
+                        wrappers: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        // Cli 档：按语言聚合后一次性 resolve（命名口径与原生 codegen 完全同源）。
+        let mut targets: Vec<crate::embed::EmbedTarget> = Vec::new();
+        for (lang, t) in embed_targets_by_lang(module, stem) {
+            // 调用面：可被 LZ 调用的库函数垫片名 +（Executable 档）原样执行面
+            let mut wrappers: Vec<String> = t
+                .callable_methods()
+                .iter()
+                .map(|m| format!("{}_{}", t.artifact, m.name))
+                .collect();
+            if t.kind == crate::embed::ArtifactKind::Executable {
+                wrappers.push(format!("{}_run", t.artifact));
+            }
+            self.embed_meta.insert(
+                lang,
+                EmbedMeta {
+                    tier: "cli",
+                    artifact: t.artifact.clone(),
+                    dir_rel: t.dir_rel.clone(),
+                    wrappers,
+                },
+            );
+            targets.push(t);
+        }
+        if !targets.is_empty() {
+            self.embed_shim = crate::embed::shim::module_text(&targets);
+        }
+    }
+
+    /// Cli 档端点对 LZ 可见的调用面（`<artifact>_<method>` / `<artifact>_run`）。
+    /// 与原生 codegen 的 `unknown_extern_fns.remove(..)` 等价：这些名字由垫片提供，
+    /// LZ 侧不许再发 `-> i64 { i64::MAX }` 桩（会 E0428 重定义）。
+    fn embed_wrapper_names(&self, lang: &str) -> Vec<String> {
+        self.embed_meta
+            .get(lang)
+            .map(|m| m.wrappers.clone())
+            .unwrap_or_default()
+    }
+
+    /// 预扫描模块内 enum 定义，登记 枚举名 → 变体字段名
+    fn collect_enums(&mut self, module: &IrModule) {
+        for item in &module.items {
+            if let Item::EnumDef(e) = item {
+                let vs: Vec<(String, Vec<String>)> = e
+                    .variants
+                    .iter()
+                    .map(|v| {
+                        (v.name.clone(), v.fields.iter().map(|f| f.name.clone()).collect())
+                    })
+                    .collect();
+                self.enums.insert(e.name.clone(), vs);
+            }
+        }
+    }
+
+    /// 接收者是枚举名且方法名命中其变体时，返回该变体的字段名列表
+    fn enum_variant_fields(&self, receiver: &Expr, method: &str) -> Option<Vec<String>> {
+        if let ExprKind::Var(name) = &receiver.kind {
+            if let Some(vs) = self.enums.get(name) {
+                for (v, fields) in vs {
+                    if v == method {
+                        return Some(fields.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn fresh(&mut self) -> String {
+        self.counter += 1;
+        format!("__t{}", self.counter)
+    }
+
+    /// 生成列表引用：空列表 → 带类型标注的中间变量（LZ 空列表 `[]` 无法推断
+    /// 元素类型，E0308 found Vec<i64>），非空 → 内联字面量
+    /// 注意：items 需先收集完毕（闭包不得捕获 self），避免借用冲突。
+    fn list_ref(&mut self, elem_ty: &str, items: Vec<String>) -> String {
+        if items.is_empty() {
+            let name = self.fresh();
+            self.lets.push(format!("    let {}: List<{}> = []", name, elem_ty));
+            name
+        } else {
+            format!("[{}]", items.join(", "))
+        }
+    }
+
+    /// 收集并生成语句列表引用（先收集避免闭包借用 self）
+    /// 每条 Stmt 绑定为中间变量，列表只含引用——避免长列表内联成超长行
+    /// 导致 lang-zone 解析/生成栈溢出（自举试点 primitives.lz 3071 字符行触发）
+    fn stmts_ref(&mut self, stmts: &[Stmt]) -> String {
+        if stmts.is_empty() {
+            let name = self.fresh();
+            self.lets.push(format!("    let {}: List<Stmt> = []", name));
+            return name;
+        }
+        let names: Vec<String> = stmts
+            .iter()
+            .map(|s| {
+                let src = self.stmt(s);
+                self.let_bind(src)
+            })
+            .collect();
+        format!("[{}]", names.join(", "))
+    }
+
+    /// 生成 BlockIR 构造：块语句列表 + 块类型（对齐 Rust Block Display 的 [ty] 标注）
+    fn block_ref(&mut self, b: &Block) -> String {
+        let ss = self.stmts_ref(&b.stmts);
+        let ty = self.irtype(&b.ty);
+        format!("BlockIR.Block(stmts: {}, ty: {})", ss, ty)
+    }
+
+    /// 裸 Option.None 无法推断元素类型（LZ 硬编码 Option::<i64>::None）；
+    /// 改用 lz_ir_lib.lz 的自有 Maybe* 单位变体枚举构造。
+    fn opt_none(&mut self, inner_ty: &str) -> String {
+        match inner_ty {
+            "Expr" => "MaybeExpr.NoExpr".to_string(),
+            "BlockIR" => "MaybeBlock.NoBlock".to_string(),
+            "str" => "MaybeStr.NoStr".to_string(),
+            "IrType" => "MaybeIrType.NoTy".to_string(),
+            "Pattern" => "MaybePattern.NoPat".to_string(),
+            other => {
+                let name = self.fresh();
+                self.lets.push(format!("    let {}: Option<{}> = Option.None", name, other));
+                name
+            }
+        }
+    }
+
+    /// MaybeStr 构造（str 需转义）
+    fn opt_str(&mut self, s: &Option<String>) -> String {
+        match s {
+            Some(v) => format!("MaybeStr.YesStr(value: \"{}\")", escape_lz(v)),
+            None => self.opt_none("str"),
+        }
+    }
+
+    /// 收集并生成表达式列表引用
+    fn exprs_ref(&mut self, exprs: &[Expr]) -> String {
+        let items: Vec<String> = exprs.iter().map(|e| self.expr(e)).collect();
+        self.list_ref("Expr", items)
+    }
+
+    /// 生成一条顶层 let（构造表达式 + 变量名）
+    fn let_bind(&mut self, expr: String) -> String {
+        let name = self.fresh();
+        self.lets.push(format!("    let {} = {}", name, expr));
+        name
+    }
+
+    // ── Item → 构造表达式（子节点走 self.expr/stmt，扁平化）──
+
+    fn item(&mut self, item: &Item) -> String {
+        match item {
+            Item::FnDef(f) => {
+                let generics = if self.rs_codegen_mode {
+                    self.generics_bounds_ref(&f.generics)
+                } else {
+                    self.generics_names_ref(&f.generics)
+                };
+                let params = self.param_pairs(&f.params);
+                let body = self.stmts_ref(&f.body.stmts);
+                let raises_s = match &f.raises {
+                    Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
+                    None => "MaybeIrType.NoTy".to_string(),
+                };
+                if self.rs_codegen_mode {
+                    // BUG-431：rs-lz 的 FnDef 需携带 where 约束（`where T: HasArea` →
+                    // `fn f<T: HasArea>`），否则生成的泛型函数缺边界报 E0599。
+                    let wc_items: Vec<String> = f
+                        .where_clause
+                        .iter()
+                        .map(|(tp, bounds)| {
+                            let bs: Vec<String> = bounds.iter().map(|b| self.irtype(b)).collect();
+                            format!("(\"{}\", {})", tp, self.list_ref("IrType", bs))
+                        })
+                        .collect();
+                    let wc_s = self.list_ref("(str, List<IrType>)", wc_items);
+                    return format!(
+                        "Item.FnDef(name: \"{}\", generics: {}, params: {}, ret: {}, exc: {}, where_clause: {}, body: {})",
+                        f.name,
+                        generics,
+                        params,
+                        self.irtype(&f.ret_ty),
+                        raises_s,
+                        wc_s,
+                        body
+                    );
+                }
+                format!(
+                    "Item.FnDef(name: \"{}\", generics: {}, params: {}, ret: {}, exc: {}, body: {})",
+                    f.name,
+                    generics,
+                    params,
+                    self.irtype(&f.ret_ty),
+                    raises_s,
+                    body
+                )
+            }
+            Item::Const(c) => format!(
+                "Item.Const(name: \"{}\", ty: {}, value: {})",
+                c.name,
+                self.irtype(&c.ty),
+                self.expr(&c.value)
+            ),
+            Item::StructDef(s) => {
+                let items: Vec<String> = s
+                    .fields
+                    .iter()
+                    .map(|fl| format!("(\"{}\", {})", fl.name, self.irtype(&fl.ty)))
+                    .collect();
+                let fields = self.list_ref("(str, IrType)", items);
+                let generics_s = if self.rs_codegen_mode {
+                    self.generics_bounds_ref(&s.generics)
+                } else {
+                    self.generics_names_ref(&s.generics)
+                };
+                format!(
+                    "Item.StructDef(name: \"{}\", generics: {}, fields: {})",
+                    s.name, generics_s, fields
+                )
+            }
+            Item::EnumDef(e) => {
+                // BUG-411：Rust codegen 模式下变体字段必须带**名字**——LZ 侧
+                // gen_enum_variants 据此区分命名字段变体（`Circle { radius: i64 }`）
+                // 与元组变体（`Blue(i64, String)`），与原生 decl_gen.rs:2009 同口径。
+                // IR display 模式保持旧的「只带类型」形态（对齐原生 --emit=ir 文本）。
+                let variants: Vec<String> = if self.rs_codegen_mode {
+                    e.variants
+                        .iter()
+                        .map(|v| {
+                            let fs: Vec<String> = v
+                                .fields
+                                .iter()
+                                .map(|fl| format!("(\"{}\", {})", fl.name, self.irtype(&fl.ty)))
+                                .collect();
+                            let fs = self.list_ref("(str, IrType)", fs);
+                            format!("(\"{}\", {})", v.name, fs)
+                        })
+                        .collect()
+                } else {
+                    e.variants
+                        .iter()
+                        .map(|v| {
+                            let tys: Vec<String> =
+                                v.fields.iter().map(|fl| self.irtype(&fl.ty)).collect();
+                            let tys = self.list_ref("IrType", tys);
+                            format!("(\"{}\", {})", v.name, tys)
+                        })
+                        .collect()
+                };
+                if self.rs_codegen_mode {
+                    let variants = self.list_ref("(str, List<(str, IrType)>)", variants);
+                    let generics_s = self.generics_bounds_ref(&e.generics);
+                    format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
+                } else {
+                    let variants = self.list_ref("(str, List<IrType>)", variants);
+                    let generics_s = self.generics_names_ref(&e.generics);
+                    format!("Item.EnumDef(name: \"{}\", generics: {}, variants: {})", e.name, generics_s, variants)
+                }
+            }
+            Item::TraitDef(t) => {
+                let supers_items: Vec<String> = t.supertraits.iter().map(|st| self.irtype(st)).collect();
+                let supers = self.list_ref("IrType", supers_items);
+                let methods_items: Vec<String> = t
+                    .methods
+                    .iter()
+                    .map(|m| {
+                        let params: Vec<String> = m.params.iter().map(|p| self.irtype(p)).collect();
+                        let params = self.list_ref("IrType", params);
+                        format!("(\"{}\", {}, {})", m.name, params, self.irtype(&m.ret))
+                    })
+                    .collect();
+                let methods = self.list_ref("(str, List<IrType>, IrType)", methods_items);
+                if self.rs_codegen_mode {
+                    // BUG-431：rs-lz 的 TraitDef 需携带泛型形参（含边界）与关联类型声明
+                    // （`type Item` → Rust `type Item;`），否则生成的 trait 里关联类型
+                    // 名成了未绑定类型（E0412），impl 端的 `type Item = i64` 也无处可挂。
+                    let generics_s = self.generics_bounds_ref(&t.generics);
+                    let assoc_items: Vec<String> =
+                        t.assoc_types.iter().map(|n| format!("\"{}\"", n)).collect();
+                    let assoc_s = self.list_ref("str", assoc_items);
+                    format!(
+                        "Item.TraitDef(name: \"{}\", generics: {}, supertraits: {}, assoc_types: {}, methods: {})",
+                        t.name, generics_s, supers, assoc_s, methods
+                    )
+                } else {
+                    format!(
+                        "Item.TraitDef(name: \"{}\", supertraits: {}, methods: {})",
+                        t.name,
+                        supers,
+                        methods
+                    )
+                }
+            }
+            Item::DuckDef(d) => {
+                format!("Item.DuckDef(name: \"{}\", method_count: {})", d.name, d.methods.len())
+            }
+            Item::EmbedBlock { lang, src, .. } => {
+                if !self.rs_codegen_mode {
+                    // IR display 路线（--emit=ir-lz）：数据面消费方是 lz_ir_lib.lz 的
+                    // `Item.EmbedBlock(lang, src_len)`，display 也只用这两个字段
+                    // （`embed(<lang>) { <n> chars }`，对齐 src/ir/display.rs:734）。
+                    // 该库不属本次改动范围 ⇒ 这里保持旧形态，别把 rs-lz 的新 schema
+                    // 泄进 IR display 路线（否则 --emit=ir-lz 在含 embed 的文件上
+                    // 会因为枚举没有新变体而 E0599）。
+                    return format!(
+                        "Item.EmbedBlock(lang: \"{}\", src_len: {})",
+                        lang,
+                        src.len()
+                    );
+                }
+                // T0r24：旧实现只发 `(lang, src_len)` —— 内嵌源码根本不进数据面，
+                // rs-lz 侧无从表示 embed 块（rustc E0599: no variant named EmbedBlock）。
+                // 现在带上**源码原文**，并把 Rust 侧算好的档位 / 产物名 / 产物目录 /
+                // 调用面穿透过去（LZ 侧不重写去重，也不猜命名）。
+                let meta = self.embed_meta.get(lang).cloned().unwrap_or(EmbedMeta {
+                    tier: "src_raw",
+                    artifact: String::new(),
+                    dir_rel: String::new(),
+                    wrappers: Vec::new(),
+                });
+                let wrappers_items: Vec<String> = self
+                    .embed_wrapper_names(lang)
+                    .iter()
+                    .map(|w| format!("\"{}\"", escape_lz(w)))
+                    .collect();
+                let wrappers_s = self.list_ref("str", wrappers_items);
+                format!(
+                    "Item.EmbedBlock(lang: \"{}\", src: \"{}\", tier: \"{}\", artifact: \"{}\", dir_rel: \"{}\", wrappers: {})",
+                    escape_lz(lang),
+                    escape_lz_multiline(src),
+                    meta.tier,
+                    escape_lz(&meta.artifact),
+                    escape_lz(&meta.dir_rel),
+                    wrappers_s
+                )
+            }
+            Item::Use(u) => {
+                let path = u.path.join(".");
+                let items = u.items.join(", ");
+                if u.is_from {
+                    format!("Item.UseStmt(path: [\"{}\"], alias: {}, items: [\"{}\"], is_from: true)", path, self.opt_none("str"), items)
+                } else {
+                    format!("Item.UseStmt(path: [\"{}\"], alias: {}, items: [], is_from: false)", path, self.opt_none("str"))
+                }
+            }
+            Item::Test(t) => {
+                let body = self.stmts_ref(&t.body.stmts);
+                format!("Item.Test(name: \"{}\", body: {})", t.name, body)
+            }
+            Item::CheckerBlock { name, ps_name, .. } => format!(
+                "Item.CheckerBlock(name: \"{}\", ps_name: {})",
+                name,
+                self.opt_str(ps_name)
+            ),
+            Item::TypeAlias(ta) => {
+                format!("Item.TypeAlias(name: \"{}\", ty: {})", ta.name, self.irtype(&ta.ty))
+            }
+            Item::Impl(imp) => {
+                let trait_s = match &imp.trait_ {
+                    Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
+                    None => self.opt_none("IrType"),
+                };
+                // BUG-422：Rust codegen 模式下 impl 方法要带**完整定义**（旧实现只带
+                // method_names，LZ 侧只能发 `unimplemented!()` 桩 ⇒ 所有用户 struct/enum
+                // 方法与 trait impl 都是空壳）。IR display 模式保持旧的 names-only 形态
+                // （lz_ir_lib.lz 的 Item.Impl 只有 method_names）。
+                if self.rs_codegen_mode {
+                    let methods_items: Vec<String> = imp
+                        .methods
+                        .iter()
+                        .map(|m| {
+                            let params = self.param_pairs(&m.params);
+                            let body = self.stmts_ref(&m.body.stmts);
+                            let exc = match &m.raises {
+                                Some(t) => format!("MaybeIrType.YesTy(value: {})", self.irtype(t)),
+                                None => "MaybeIrType.NoTy".to_string(),
+                            };
+                            format!(
+                                "ImplMethod(name: \"{}\", params: {}, ret: {}, exc: {}, body: {})",
+                                escape_lz(&m.name),
+                                params,
+                                self.irtype(&m.ret_ty),
+                                exc,
+                                body
+                            )
+                        })
+                        .collect();
+                    let methods_s = self.list_ref("ImplMethod", methods_items);
+                    // BUG-431：rs-lz 的 Item.Impl 需携带 impl 级泛型形参、where 约束与
+                    // 关联类型绑定（原生 `impl<T> ... where I::Item: Clone { type Item = ...; }`），
+                    // 否则生成的 impl 报 E0425 cannot find type `T` / E0277 / E0191。
+                    let impl_generics_s = self.generics_bounds_ref(&imp.generics);
+                    let wc_items: Vec<String> = imp
+                        .where_clause
+                        .iter()
+                        .map(|(tp, bounds)| {
+                            let bs: Vec<String> = bounds.iter().map(|b| self.irtype(b)).collect();
+                            format!("(\"{}\", {})", tp, self.list_ref("IrType", bs))
+                        })
+                        .collect();
+                    let wc_s = self.list_ref("(str, List<IrType>)", wc_items);
+                    let atb_items: Vec<String> = imp
+                        .assoc_type_bindings
+                        .iter()
+                        .map(|(n, ty)| format!("(\"{}\", {})", n, self.irtype(ty)))
+                        .collect();
+                    let atb_s = self.list_ref("(str, IrType)", atb_items);
+                    return format!(
+                        "Item.Impl(trait_: {}, for_type: {}, generics: {}, where_clause: {}, assoc_type_bindings: {}, methods: {})",
+                        trait_s,
+                        self.irtype(&imp.for_type),
+                        impl_generics_s,
+                        wc_s,
+                        atb_s,
+                        methods_s
+                    );
+                }
+                let names_items: Vec<String> = imp
+                    .methods
+                    .iter()
+                    .map(|m| format!("\"{}\"", escape_lz(&m.name)))
+                    .collect();
+                let names_s = self.list_ref("str", names_items);
+                format!(
+                    "Item.Impl(trait_: {}, for_type: {}, method_names: {})",
+                    trait_s,
+                    self.irtype(&imp.for_type),
+                    names_s
+                )
+            }
+        }
+    }
+
+    // ── Stmt → 构造表达式（子节点走 self.expr，扁平化）──
+
+    fn stmt(&mut self, s: &Stmt) -> String {
+        match s {
+            Stmt::Let { name, ty, value, is_mut, is_ref, .. } => format!(
+                "Stmt.Let(name: \"{}\", ty: {}, value: {}, is_mut: {}, is_ref: {})",
+                name,
+                self.irtype(ty),
+                self.expr(value),
+                if *is_mut { "true" } else { "false" },
+                if *is_ref { "true" } else { "false" }
+            ),
+            Stmt::Assign { target, value } => format!(
+                "Stmt.Assign(target: {}, value: {})",
+                self.expr(target),
+                self.expr(value)
+            ),
+            Stmt::Return { value } => match value {
+                Some(v) => format!("Stmt.Return(value: MaybeExpr.YesExpr(value: {}))", self.expr(v)),
+                None => format!("Stmt.Return(value: {})", self.opt_none("Expr")),
+            },
+            Stmt::ExprStmt { expr } => format!("Stmt.ExprStmt(expr: {})", self.expr(expr)),
+            Stmt::If { cond, then_branch, else_branch } => {
+                let then_s = self.block_ref(then_branch);
+                let els_s = match else_branch {
+                    Some(b) => {
+                        let es = self.block_ref(b);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                format!(
+                    "Stmt.If(cond: {}, then: {}, els: {})",
+                    self.expr(cond),
+                    then_s,
+                    els_s
+                )
+            }
+            Stmt::For { var, iter, guard, body, else_body, .. } => {
+                let body_s = self.block_ref(body);
+                let guard_s = match guard {
+                    Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                    None => self.opt_none("Expr"),
+                };
+                let else_s = match else_body {
+                    Some(eb) => {
+                        let es = self.block_ref(eb);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                format!(
+                    "Stmt.For(var: \"{}\", iter: {}, guard_e: {}, body: {}, else_body: {})",
+                    var,
+                    self.expr(iter),
+                    guard_s,
+                    body_s,
+                    else_s
+                )
+            }
+            Stmt::While { cond, guard, body, else_body, .. } => {
+                let body_s = self.block_ref(body);
+                let guard_s = match guard {
+                    Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                    None => self.opt_none("Expr"),
+                };
+                let else_s = match else_body {
+                    Some(eb) => {
+                        let es = self.block_ref(eb);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                format!(
+                    "Stmt.While(cond: {}, guard_e: {}, body: {}, else_body: {})",
+                    self.expr(cond),
+                    guard_s,
+                    body_s,
+                    else_s
+                )
+            }
+            Stmt::Block { stmts } => {
+                let ss = self.stmts_ref(stmts);
+                format!("Stmt.Block(stmts: {})", ss)
+            }
+            Stmt::Match { scrutinee, arms } => {
+                let arms_items: Vec<String> = arms
+                    .iter()
+                    .map(|a| {
+                        let body = self.block_ref(&a.body);
+                        let guard = match &a.guard {
+                            Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                            None => self.opt_none("Expr"),
+                        };
+                        format!("({}, {}, {})", self.pattern(&a.pattern), guard, body)
+                    })
+                    .collect();
+                let arms_s = self.list_ref("(Pattern, MaybeExpr, BlockIR)", arms_items);
+                format!(
+                    "Stmt.Match(scrutinee: {}, arms: {})",
+                    self.expr(scrutinee),
+                    arms_s
+                )
+            }
+            Stmt::Yield { value } => format!("Stmt.Yield(value: {})", self.expr(value)),
+            Stmt::YieldFrom { iter } => format!("Stmt.YieldFrom(iter: {})", self.expr(iter)),
+            Stmt::Break => "Stmt.Break".to_string(),
+            Stmt::BreakLabel { label, value } => {
+                let v = match value {
+                    Some(v) => format!("MaybeExpr.YesExpr(value: {})", self.expr(v)),
+                    None => self.opt_none("Expr"),
+                };
+                format!("Stmt.BreakLabel(label: \"{}\", value: {})", label, v)
+            }
+            Stmt::Continue => "Stmt.Continue".to_string(),
+            Stmt::BlockLabel { label, body } => {
+                let ss = self.block_ref(body);
+                format!("Stmt.BlockLabel(label: \"{}\", body: {})", label, ss)
+            }
+            Stmt::CheckerBlock { label, ps_name, .. } => format!(
+                "Stmt.CheckerBlock(label: \"{}\", ps_name: {})",
+                label,
+                self.opt_str(ps_name)
+            ),
+            Stmt::Defer { body } => {
+                let ss = self.block_ref(body);
+                format!("Stmt.Defer(body: {})", ss)
+            }
+            Stmt::Raise { value } => format!("Stmt.Raise(value: {})", self.expr(value)),
+            Stmt::Assert { cond, .. } => format!("Stmt.Assert(cond: {})", self.expr(cond)),
+            Stmt::Pass => "Stmt.Pass".to_string(),
+            Stmt::TypeAlias { name, ty } => {
+                format!("Stmt.TypeAlias(name: \"{}\", ty: {})", name, self.irtype(ty))
+            }
+            Stmt::TryCatch { body, catches, else_body, finally_body } => {
+                let ss = self.block_ref(body);
+                let catches_items: Vec<String> = catches
+                    .iter()
+                    .map(|(pat, block)| {
+                        let b = self.block_ref(block);
+                        let p = match pat {
+                            Some(p) => format!("MaybePattern.YesPat(value: {})", self.pattern(p)),
+                            None => self.opt_none("Pattern"),
+                        };
+                        format!("({}, {})", p, b)
+                    })
+                    .collect();
+                let catches_s = self.list_ref("(MaybePattern, BlockIR)", catches_items);
+                let else_s = match else_body {
+                    Some(eb) => {
+                        let es = self.block_ref(eb);
+                        format!("MaybeBlock.YesBlock(value: {})", es)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                let finally_s = match finally_body {
+                    Some(fb) => {
+                        let fs = self.block_ref(fb);
+                        format!("MaybeBlock.YesBlock(value: {})", fs)
+                    }
+                    None => self.opt_none("BlockIR"),
+                };
+                format!(
+                    "Stmt.TryCatch(body: {}, catches: {}, else_body: {}, finally_body: {})",
+                    ss,
+                    catches_s,
+                    else_s,
+                    finally_s
+                )
+            }
+            Stmt::WhileLet { pattern, expr, guard, body, .. } => {
+                let guard_s = match guard {
+                    Some(g) => format!("MaybeExpr.YesExpr(value: {})", self.expr(g)),
+                    None => self.opt_none("Expr"),
+                };
+                format!(
+                    "Stmt.WhileLet(pattern: {}, expr: {}, guard_e: {}, body: {})",
+                    self.pattern(pattern),
+                    self.expr(expr),
+                    guard_s,
+                    self.block_ref(body)
+                )
+            }
+        }
+    }
+
+    // ── Expr → 构造表达式（复杂节点拆中间变量，扁平化）──
+
+    fn expr(&mut self, e: &Expr) -> String {
+        let ty = self.irtype(&e.ty);
+        let src = match &e.kind {
+            ExprKind::Lit(lit) => gen_lit(lit, &ty),
+            ExprKind::Default => format!("Expr.Var(name: \"__default__\", ty: {})", ty),
+            ExprKind::Var(name) => format!("Expr.Var(name: \"{}\", ty: {})", name, ty),
+            ExprKind::Spread(inner) => format!("Expr.Spread(expr: {}, ty: {})", self.expr(inner), ty),
+            ExprKind::Call { callee, args, .. } => {
+                let args_s = self.exprs_ref(args);
+                format!(
+                    "Expr.Call(callee: {}, args: {}, ty: {})",
+                    self.expr(callee),
+                    args_s,
+                    ty
+                )
+            }
+            ExprKind::MethodCall { receiver, method, args, .. } => {
+                // BUG-411：`Enum.Variant(...)` 构造在 IR 里是 MethodCall(receiver=Var(枚举名))。
+                // 序列化为 Expr.EnumCtor，让 LZ 侧按变体形态（单位/命名字段/元组）渲染。
+                // 命名字段变体的位置实参在此按声明名补 _KwArg 包装（对齐原生
+                // expr_gen.rs:1654 用声明名 zip 实参的命名构造）。
+                if self.rs_codegen_mode {
+                    if let Some(fields) = self.enum_variant_fields(receiver, method) {
+                    let enum_name = match &receiver.kind {
+                        ExprKind::Var(name) => name.clone(),
+                        _ => method.clone(),
+                    };
+                    let all_named = !fields.is_empty() && fields.iter().all(|f| !f.is_empty());
+                    let args_src: Vec<String> = if all_named
+                        && !args.is_empty()
+                        && !args.iter().all(is_kwarg_expr)
+                    {
+                        fields
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(n, a)| {
+                                format!(
+                                    "Expr.StructCtor(name: \"_KwArg\", fields: [(\"name\", Expr.LitStr(s: \"{}\", ty: IrType.Str)), (\"value\", {})], ty: IrType.Any)",
+                                    n,
+                                    self.expr(a)
+                                )
+                            })
+                            .collect()
+                    } else {
+                        args.iter().map(|a| self.expr(a)).collect()
+                    };
+                    let args_ref = self.list_ref("Expr", args_src);
+                    return format!(
+                        "Expr.EnumCtor(enum_name: \"{}\", variant: \"{}\", args: {}, ty: {})",
+                        enum_name, method, args_ref, ty
+                    );
+                    }
+                }
+                let args_s = self.exprs_ref(args);
+                format!(
+                    "Expr.MethodCall(receiver: {}, method: \"{}\", args: {}, ty: {})",
+                    self.expr(receiver),
+                    method,
+                    args_s,
+                    ty
+                )
+            }
+            ExprKind::FieldAccess { base, field } => {
+                // BUG-411：命名字段枚举的 `x.f` 需解构成 match（Rust 不允许枚举值
+                // 直接 `.f`，原生 expr_gen.rs:5175 同口径）。base 的静态类型是
+                // 模块内枚举、且该字段落在其某些变体上时改写；struct 字段访问与
+                // 非枚举类型不受影响。
+                if self.rs_codegen_mode {
+                    if let IrType::Named { path, .. } = &base.ty {
+                        let mut arms: Vec<String> = Vec::new();
+                        if let Some(vs) = self.enums.get(path) {
+                            for (v, fields) in vs {
+                                if fields.iter().any(|f| f == field) {
+                                    arms.push(v.clone());
+                                }
+                            }
+                        }
+                        if !arms.is_empty() {
+                            // BUG-412：与原生同口径按变体名排序，保证两侧产物逐字节一致
+                            // （原生侧枚举注册表是 HashMap，不排序则臂序随进程随机）。
+                            arms.sort();
+                            let arms_src: Vec<String> =
+                                arms.iter().map(|v| format!("\"{}\"", v)).collect();
+                            let arms_ref = self.list_ref("str", arms_src);
+                            return format!(
+                                "Expr.EnumFieldGet(base: {}, enum_name: \"{}\", variants: {}, field: \"{}\", ty: {})",
+                                self.expr(base), path, arms_ref, field, ty
+                            );
+                        }
+                    }
+                }
+                format!(
+                    "Expr.FieldAccess(base: {}, field: \"{}\", ty: {})",
+                    self.expr(base),
+                    field,
+                    ty
+                )
+            }
+            ExprKind::IndexGet { base, key } => format!(
+                "Expr.IndexGet(base: {}, key: {}, ty: {})",
+                self.expr(base),
+                self.expr(key),
+                ty
+            ),
+            ExprKind::IndexSet { base, key, value } => format!(
+                "Expr.IndexSet(base: {}, key: {}, value: {}, ty: {})",
+                self.expr(base),
+                self.expr(key),
+                self.expr(value),
+                ty
+            ),
+            ExprKind::BinOp { op, lhs, rhs } => format!(
+                "Expr.BinOp(op: \"{}\", lhs: {}, rhs: {}, ty: {})",
+                binop_str(op),
+                self.expr(lhs),
+                self.expr(rhs),
+                ty
+            ),
+            ExprKind::UnOp { op, operand } => format!(
+                "Expr.UnOp(op: \"{}\", operand: {}, ty: {})",
+                unop_str(op),
+                self.expr(operand),
+                ty
+            ),
+            ExprKind::StructCtor { name, fields } => {
+                let fields_items: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("(\"{}\", {})", k, self.expr(v)))
+                    .collect();
+                let fields_s = self.list_ref("(str, Expr)", fields_items);
+                format!("Expr.StructCtor(name: \"{}\", fields: {}, ty: {})", name, fields_s, ty)
+            }
+            ExprKind::EnumCtor { enum_name, variant, args } => {
+                let args_s = self.exprs_ref(args);
+                format!(
+                    "Expr.EnumCtor(enum_name: \"{}\", variant: \"{}\", args: {}, ty: {})",
+                    enum_name,
+                    variant,
+                    args_s,
+                    ty
+                )
+            }
+            ExprKind::Cast { expr, target } => format!(
+                "Expr.Cast(inner: {}, target: {}, ty: {})",
+                self.expr(expr),
+                self.irtype(target),
+                ty
+            ),
+            ExprKind::MagicCall { kind, args } => {
+                let args_s = self.exprs_ref(args);
+                format!(
+                    "Expr.MagicCall(magic: \"{}\", args: {}, ty: {})",
+                    magic_str(kind),
+                    args_s,
+                    ty
+                )
+            }
+            ExprKind::IfExpr { cond, then, els } => format!(
+                "Expr.IfExpr(cond: {}, then: {}, els: {}, ty: {})",
+                self.expr(cond),
+                self.expr(then),
+                self.expr(els),
+                ty
+            ),
+            ExprKind::Pipe { receiver, callee, args } => {
+                let args_s = self.exprs_ref(args);
+                format!(
+                    "Expr.Pipe(receiver: {}, callee: {}, args: {}, ty: {})",
+                    self.expr(receiver),
+                    self.expr(callee),
+                    args_s,
+                    ty
+                )
+            }
+            ExprKind::TupleLit(elems) | ExprKind::Tuple(elems) => {
+                let elems_s = self.exprs_ref(elems);
+                format!("Expr.TupleLit(elems: {}, ty: {})", elems_s, ty)
+            }
+            ExprKind::ListLit(elems) | ExprKind::List(elems) => {
+                let elems_s = self.exprs_ref(elems);
+                format!("Expr.ListLit(items: {}, ty: {})", elems_s, ty)
+            }
+            ExprKind::Dict(pairs) => {
+                let elems_items: Vec<String> = pairs
+                    .iter()
+                    .map(|(k, v)| {
+                        format!("({}, {})", self.expr(k), self.expr(v))
+                    })
+                    .collect();
+                let elems_s = self.list_ref("(Expr, Expr)", elems_items);
+                format!("Expr.Dict(pairs: {}, ty: {})", elems_s, ty)
+            }
+            ExprKind::Range { start, end, inclusive } => {
+                // 注意：LZ 版 Range 不携带 start（display.rs 对 Range 落 `_ => "<expr>"`，
+                // start 不参与显示；同时避免 Expr ↔ MaybeExpr 直接互递归 E0072）
+                let _ = start;
+                format!(
+                    "Expr.Range(end: {}, inclusive: {}, ty: {})",
+                    self.expr(end),
+                    inclusive,
+                    ty
+                )
+            }
+            ExprKind::Paren(inner) => format!("Expr.Paren(inner: {}, ty: {})", self.expr(inner), ty),
+            ExprKind::BlockExpr { block } => {
+                let stmts = self.stmts_ref(&block.stmts);
+                // BUG-479：两路 LZ 库对 BlockExpr 的扁平表示**元数不同**：
+                //   lz_ir_lib.lz:62      `BlockExpr(stmts, block_ty, ty)`   ← --emit=ir-lz
+                //   lz_codegen_lib.lz:59 `BlockExpr(stmts, ty)`             ← --emit=rs-lz
+                // 此前统一发 3 字段，rs-lz 侧 LZ→Rust 生成
+                // `Expr::BlockExpr(vec![..], IrType, IrType)` 3 参数位置构造，而 Rust
+                // IrNode `ExprKind::BlockExpr { block }` 是 1 个 block 字段的 struct
+                // variant → E0533 "expected value, found struct variant"，含 match 的
+                // 程序整条 rs-lz 路线中断。按 rs_codegen_mode 分流元数。
+                let bty = self.irtype(&block.ty);
+                if self.rs_codegen_mode {
+                    // rs-lz：2 字段（lib 扁平为 stmts+ty；ty 取表达式类型，供 expr_ty）
+                    format!("Expr.BlockExpr(stmts: {}, ty: {})", stmts, ty)
+                } else {
+                    // ir-lz：3 字段（保留 block_ty 与 e.ty 两个槽位，对齐 display.rs）
+                    format!(
+                        "Expr.BlockExpr(stmts: {}, block_ty: {}, ty: {})",
+                        stmts, bty, ty
+                    )
+                }
+            }
+            ExprKind::GenBuild { callee, block } => {
+                let callee_s = match callee {
+                    Some(c) => format!("Some({})", self.expr(c)),
+                    None => "None".to_string(),
+                };
+                let stmts = self.stmts_ref(&block.stmts);
+                format!(
+                    "Expr.GenBuild(callee: {}, stmts: {}, ty: {})",
+                    callee_s, stmts, ty
+                )
+            }
+            ExprKind::GenExpr { yield_of } => {
+                format!(
+                    "Expr.GenExpr(yield_of: {}, ty: {})",
+                    self.expr(yield_of),
+                    ty
+                )
+            }
+            ExprKind::AssignExpr { target, value } => format!(
+                "Expr.AssignExpr(target: {}, value: {}, ty: {})",
+                self.expr(target),
+                self.expr(value),
+                ty
+            ),
+            ExprKind::ImplicitConvert { source, target_ty } => format!(
+                "Expr.ImplicitConvert(source: {}, target_ty: {}, ty: {})",
+                self.expr(source),
+                self.irtype(target_ty),
+                ty
+            ),
+            ExprKind::Lambda { params, body, .. } => {
+                let param_items: Vec<String> = params
+                    .iter()
+                    .map(|p| format!("\"{}\"", escape_lz(&p.name)))
+                    .collect();
+                let params_s = self.list_ref("str", param_items);
+                format!(
+                    "Expr.Lambda(params: {}, body: {}, ty: {})",
+                    params_s,
+                    self.expr(body),
+                    ty
+                )
+            }
+        };
+        // 简单节点（字面量/变量）直接内联；含子节点的复杂构造拆中间变量
+        if is_simple_expr(&e.kind) {
+            src
+        } else {
+            self.let_bind(src)
+        }
+    }
+
+    fn irtype(&mut self, t: &IrType) -> String {
+        match t {
+            IrType::Int => "IrType.Int".to_string(),
+            IrType::F64 => "IrType.F64".to_string(),
+            IrType::Str => "IrType.Str".to_string(),
+            IrType::Bool => "IrType.Bool".to_string(),
+            IrType::Unit => "IrType.Unit".to_string(),
+            IrType::Never => "IrType.Never".to_string(),
+            IrType::Any => "IrType.Any".to_string(),
+            IrType::Self_ => "IrType.Self_".to_string(),
+            IrType::Ext => "IrType.Ext".to_string(),
+            IrType::Named { path, args } => {
+                let args_items: Vec<String> = args.iter().map(|a| self.irtype(a)).collect();
+                let args_s = self.list_ref("IrType", args_items);
+                format!("IrType.Named(path: \"{}\", args: {})", escape_lz(path), args_s)
+            }
+            IrType::Option(inner) => format!("IrType.Opt(inner: {})", self.irtype(inner)),
+            IrType::Result { ok, err } => format!(
+                "IrType.Res(ok: {}, err: {})",
+                self.irtype(ok),
+                self.irtype(err)
+            ),
+            IrType::Tuple(elems) => {
+                let elems_items: Vec<String> = elems.iter().map(|e| self.irtype(e)).collect();
+                let elems_s = self.list_ref("IrType", elems_items);
+                format!("IrType.Tuple(elems: {})", elems_s)
+            }
+            IrType::Fn { params, ret } => {
+                let params_items: Vec<String> = params.iter().map(|p| self.irtype(p)).collect();
+                let params_s = self.list_ref("IrType", params_items);
+                format!("IrType.FnType(params: {}, ret: {})", params_s, self.irtype(ret))
+            }
+            IrType::Ref(inner) => format!("IrType.Ref(inner: {})", self.irtype(inner)),
+            IrType::MutRef(inner) => format!("IrType.MutRef(inner: {})", self.irtype(inner)),
+            IrType::Duck { fields } => {
+                let fields_items: Vec<String> = fields
+                    .iter()
+                    .map(|(n, ty)| format!("(\"{}\", {})", escape_lz(n), self.irtype(ty)))
+                    .collect();
+                let fields_s = self.list_ref("(str, IrType)", fields_items);
+                format!("IrType.Duck(fields: {})", fields_s)
+            }
+            IrType::Int128 => "IrType.Int128".to_string(),
+            IrType::BigInt => "IrType.BigInt".to_string(),
+            IrType::Complex => "IrType.Complex".to_string(),
+            IrType::Generic(name) => format!("IrType.Generic(name: \"{}\")", escape_lz(name)),
+        }
+    }
+
+    fn param_pairs(&mut self, params: &[Param]) -> String {
+        let items: Vec<String> = params
+            .iter()
+            .map(|p| {
+                format!(
+                    "(\"{}\", {}, {}, {}, {})",
+                    p.name,
+                    self.irtype(&p.ty),
+                    if p.is_ref { "true" } else { "false" },
+                    if p.is_mut { "true" } else { "false" },
+                    if p.is_owned { "true" } else { "false" }
+                )
+            })
+            .collect();
+        self.list_ref("(str, IrType, bool, bool, bool)", items)
+    }
+
+    /// BUG-431：泛型形参（含边界）→ `List<(str, List<IrType>)>`。
+    /// 仅 rs-lz 路径用；IR 展示路径仍走 `generics_names_ref`（名字表，schema 兼容 lz_ir_lib）。
+    /// 边界来自 `where T: Clone` 等约束（builder 合并到 `GenericParam.bounds`），
+    /// 缺此信息 rs-lz 生成的泛型函数/impl 无边界，调用处报 E0599。
+    fn generics_bounds_ref(&mut self, gs: &[GenericParam]) -> String {
+        let items: Vec<String> = gs
+            .iter()
+            .map(|g| {
+                let bs: Vec<String> = g.bounds.iter().map(|b| self.irtype(b)).collect();
+                format!("(\"{}\", {})", escape_lz(&g.name), self.list_ref("IrType", bs))
+            })
+            .collect();
+        self.list_ref("(str, List<IrType>)", items)
+    }
+
+    /// 泛型形参名字表（`List<str>`），IR 展示路径 / 不需要边界的场景。
+    fn generics_names_ref(&mut self, gs: &[GenericParam]) -> String {
+        let items: Vec<String> = gs
+            .iter()
+            .map(|g| format!("\"{}\"", escape_lz(&g.name)))
+            .collect();
+        self.list_ref("str", items)
+    }
+
+    /// Pattern → 构造表达式（列表走 self.list_ref，空列表类型标注避免 Vec<i64> 推断）
+    fn pattern(&mut self, p: &Pattern) -> String {
+        match p {
+            Pattern::Wildcard => "Pattern.Wildcard".to_string(),
+            Pattern::Ident(name) => format!("Pattern.Ident(name: \"{}\")", name),
+            Pattern::RefMutIdent(name) => format!("Pattern.RefMutIdent(name: \"{}\")", name),
+            Pattern::Lit(LitKind::Int(n)) => format!("Pattern.LitInt(v: {})", n),
+            Pattern::Lit(LitKind::Str(s)) => format!("Pattern.LitStr(s: \"{}\")", escape_lz(s)),
+            Pattern::Lit(LitKind::Bool(b)) => format!("Pattern.LitBool(b: {})", b),
+            Pattern::Lit(LitKind::F64(n)) => format!("Pattern.LitF64(v: {})", lz_f64_expr(*n)),
+            Pattern::Lit(_) => "Pattern.Wildcard".to_string(),
+            Pattern::Tuple(elems) => {
+                let elems_items: Vec<String> = elems.iter().map(|e| self.pattern(e)).collect();
+                let elems_s = self.list_ref("Pattern", elems_items);
+                format!("Pattern.Tuple(elems: {})", elems_s)
+            }
+            Pattern::List(elems) => {
+                let elems_items: Vec<String> = elems.iter().map(|e| self.pattern(e)).collect();
+                let elems_s = self.list_ref("Pattern", elems_items);
+                format!("Pattern.List(elems: {})", elems_s)
+            }
+            Pattern::Dict(_) => "Pattern.Wildcard".to_string(),
+            Pattern::Rest(name) => match name {
+                Some(n) => format!("Pattern.Rest(name: MaybeStr.YesStr(value: \"{}\"))", escape_lz(n)),
+                None => format!("Pattern.Rest(name: {})", self.opt_none("str")),
+            },
+            Pattern::Range { start, end, inclusive } => {
+                format!("Pattern.Range(start: {}, end: {}, inclusive: {})", start, end, inclusive)
+            }
+            Pattern::Struct { name, fields } => {
+                let fields_items: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| format!("(\"{}\", {})", k, self.pattern(v)))
+                    .collect();
+                let fields_s = self.list_ref("(str, Pattern)", fields_items);
+                format!("Pattern.Struct(name: \"{}\", fields: {})", name, fields_s)
+            }
+            Pattern::Enum { enum_name, variant, args } => {
+                // BUG-421：命名字段变体的匹配模式必须是 struct pattern
+                // （`Shape::Circle { radius: r }`）——对 struct variant 写元组 pattern
+                // 报 E0164 expected tuple struct or tuple variant。BUG-411 只修了
+                // **构造**侧（MethodCall → EnumCtor），模式侧当时漏了。
+                if self.rs_codegen_mode {
+                    let names: Option<Vec<String>> = self
+                        .enums
+                        .get(enum_name)
+                        .and_then(|vs| vs.iter().find(|(v, _)| v == variant))
+                        .map(|(_, f)| f.clone());
+                    if let Some(fs) = names {
+                        let all_named = !fs.is_empty() && fs.iter().all(|f| !f.is_empty());
+                        if all_named && fs.len() == args.len() {
+                            let fields_items: Vec<String> = fs
+                                .iter()
+                                .zip(args.iter())
+                                .map(|(n, a)| format!("(\"{}\", {})", n, self.pattern(a)))
+                                .collect();
+                            let fields_s = self.list_ref("(str, Pattern)", fields_items);
+                            return format!(
+                                "Pattern.EnumNamed(enum_name: \"{}\", variant: \"{}\", fields: {})",
+                                enum_name, variant, fields_s
+                            );
+                        }
+                    }
+                }
+                let args_items: Vec<String> = args.iter().map(|a| self.pattern(a)).collect();
+                let args_s = self.list_ref("Pattern", args_items);
+                format!(
+                    "Pattern.Enum(enum_name: \"{}\", variant: \"{}\", args: {})",
+                    enum_name,
+                    variant,
+                    args_s
+                )
+            }
+        }
+    }
+}
+
+/// 简单表达式（字面量/变量）可内联，避免不必要的中间变量
+fn is_simple_expr(kind: &ExprKind) -> bool {
+    matches!(kind, ExprKind::Lit(_) | ExprKind::Var(_))
+}
+
+fn gen_lit(lit: &LitKind, ty: &str) -> String {
+    match lit {
+        LitKind::Int(n) => format!("Expr.LitInt(v: {}, ty: {})", n, ty),
+        // int128/BigInt 数值可能超出 LZ 的 `int`(i64) 甚至 i128 域，存十进制字符串
+        LitKind::Int128(n) => format!("Expr.LitInt128(v: \"{}\", ty: {})", n.to_string(), ty),
+        LitKind::BigInt(s) => format!("Expr.LitBigInt(v: \"{}\", ty: {})", s, ty),
+        // 复数实虚部为 f64；照 LitF64 保证小数点，否则 `0` 会被 LZ 当 int 报 E0308
+        LitKind::Complex(re, im) => {
+            let f64s = |n: f64| -> String {
+                let s = format!("{}", n);
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
+            };
+            format!("Expr.LitComplex(v: ({}, {}), ty: {})", f64s(*re), f64s(*im), ty)
+        }
+        // LZ 中 `3` 是 int（3_i64），f64 字面量需带小数点（3.0）
+        LitKind::F64(n) => {
+            format!("Expr.LitF64(v: {}, ty: {})", lz_f64_expr(*n), ty)
+        }
+        LitKind::Str(s) => format!("Expr.LitStr(s: \"{}\", ty: {})", escape_lz(s), ty),
+        LitKind::FStr(s) => format!("Expr.LitFStr(s: \"{}\", ty: {})", escape_lz(s), ty),
+        LitKind::Bool(b) => format!("Expr.LitBool(b: {}, ty: {})", b, ty),
+        LitKind::Unit => format!("Expr.LitUnit(ty: {})", ty),
+        LitKind::None_ => format!("Expr.LitNone(ty: {})", ty),
+    }
+}
+
+/// f64 → 合法 LZ f64 表达式文本（表达式位与模式位共用）。
+///
+/// BUG-483：NaN/±inf 的 `f64::to_string()` 是 "NaN"/"inf"/"-inf"，若走 `{}.0` 后缀
+/// 逻辑会产出 `NaN.0`——LZ parser 把 `NaN` 当未绑定变量（IR build 报「未绑定变量:
+/// NaN」），math.lz 的 `const NAN = 0.0 / 0.0` 被 comptime 内联为字面量即触发。
+/// 改发合法的 LZ f64 表达式：除零在 LZ 运行期得 NaN/±inf（div_zero_f64.lz 探针
+/// 验证 native 正常生成 `0.0f64 / 0.0f64`）。LZ 侧 fmt_f64 再把该 f64 值文本化为
+/// Rust 的 f64::NAN/INFINITY，两处对齐原生 expr_gen.rs:8390。
+///
+/// R2（BUG-483 残留）：`Pattern::LitF64` 此前直接把 f64 用 `{}` 塞进 .lzrs，
+/// NaN/inf 时同样产出裸 `NaN`/`inf` 字面量 ⇒ 生成的 .lzrs 重编译报「未绑定变量」。
+/// 表达式位与模式位统一走本函数，保证两处口径一致。
+fn lz_f64_expr(n: f64) -> String {
+    let s = format!("{}", n);
+    let lower = s.to_ascii_lowercase();
+    match lower.as_str() {
+        "nan" => "0.0/0.0".to_string(),
+        "inf" => "1.0/0.0".to_string(),
+        "-inf" => "-1.0/0.0".to_string(),
+        _ if s.contains('.') || s.contains('e') || s.contains('E') => s,
+        _ => format!("{}.0", s),
+    }
+}
+
+fn gen_str_list(xs: &[String]) -> String {
+    xs.iter().map(|s| format!("\"{}\"", escape_lz(s))).collect::<Vec<_>>().join(", ")
+}
+
+/// 转义 LZ 字符串字面量中的引号
+fn escape_lz(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// 多行文本进 LZ 字符串字面量：除引号/反斜杠外，把换行/回车/制表压成转义序列。
+/// 理由：LZ 的 `lex_escape` 支持 `\n`/`\r`/`\t`（src/lexer/strings.rs:10-77），而
+/// 原样换行会让缩进词法器把字面量内部当成真实换行 ⇒ 产物缩进语义漂移。
+/// embed 的源码原文与垫片文本都走这里。
+fn escape_lz_multiline(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+fn binop_str(op: &super::node::BinOpKind) -> &'static str {
+    use super::node::BinOpKind::*;
+    match op {
+        Add => "+", Sub => "-", Mul => "*", Div => "/", Mod => "%", Pow => "**",
+        Eq => "==", Neq => "!=", Lt => "<", Gt => ">", Le => "<=", Ge => ">=",
+        And => "&&", Or => "||", BitAnd => "&", BitOr => "|", Xor => "^",
+        Shl => "<<", Shr => ">>", In => "in", NotIn => "not in",
+    }
+}
+
+fn unop_str(op: &super::node::UnOpKind) -> &'static str {
+    use super::node::UnOpKind::*;
+    match op {
+        Neg => "-", Not => "!", BitNot => "~", Ref => "&", MutRef => "&mut ", Deref => "*",
+    }
+}
+
+fn magic_str(kind: &super::node::MagicKind) -> &'static str {
+    use super::node::MagicKind::*;
+    match kind {
+        GetItem => "__getitem__", SetItem => "__setitem__", Call => "__call__",
+        Iter => "__iter__", Next => "__next__", Display => "__str__", Eq => "__eq__",
+        Cmp => "__cmp__", Drop => "__drop__", Rev => "__rev__", Len => "__len__",
+        Add => "__add__", Sub => "__sub__", Mul => "__mul__", Neg => "__neg__",
+        Not_ => "__not__", IntoIter => "__into_iter__", SizeHint => "__size_hint__",
+        IterStrategy => "__iter_strategy__", UnpackBuildCall => "unpack_build_call",
+    }
+}

@@ -1,0 +1,26 @@
+// find_bug/syntax/bug-syntax-safe-nav.lz
+// BUG-SG-003: ?. 安全导航运算符链式调用
+// 词法器有 ?. (SafeNav) token
+
+struct DbConfig =
+  host: str?
+
+struct Config =
+  db: DbConfig?
+  logging: str?
+
+def test_safe_nav() =
+  cfg: Config? = Config { db: DbConfig { host: "localhost" }, logging: None }
+  // 链式安全导航：cfg?.db?.host ?? "unknown"
+  // ?. 在某级为 None 时短路，返回 None
+  host = cfg?.db?.host ?? "unknown"
+  print("safe nav host:", host)
+  assert host == "localhost"
+
+  // logging 为 None，?. 返回 None，?? 提供默认值
+  log = cfg?.logging ?? "default"
+  print("safe nav logging:", log)
+  assert log == "default"
+
+def main() =
+  test_safe_nav()

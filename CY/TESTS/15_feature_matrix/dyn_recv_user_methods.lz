@@ -1,0 +1,32 @@
+// 15_feature_matrix - dyn_recv_user_methods：用户类自带的 clone / unwrap（SYNTAX/12 §3.1 同名方法）
+//
+// 这两支在 cy 的方法表里原本是**无条件**臂（`"clone" => return r`、`"unwrap" => return r`），
+// 理由是 with 脱糖在共享 IR 里就对用户类发 `alias.clone()`，而 cy 没有 Clone trait。
+// 但无条件等于「不管用户类有没有这个名字，都把一次调用吃掉」，实测是**静默少一步**而不是报错：
+//   d_clone_static   rust `'8\n'`  / 旧 cy `'7\n'`        —— Bag2(v:7).clone() 本该 +1
+//   d_unwrap_static  rust `'101\n'` / 旧 cy `'Opt2 { v: 1 }'` —— 打印的是对象而不是返回值
+// （两份修前读数在 `TEMP/dynrecv-before-r12.log`）。
+// 闸门因此从「是不是用户类」换成「本类**有没有**定义这个名字」：没有 → 继续透传（with 那条路不变），
+// 有 → 落回通用尾巴发 `a.clone()`。动态接收者（泛型／无注解闭包形参）判不出 ⇒ 发 `_lz_self(x, "clone")`
+// 由运行时属性决定。
+//
+// 每个名字用**新的绑定**：二元／按值消费 self（SYNTAX/12 §3.1），复用同一个变量会让 Rust 面先撞 E0382。
+// 期望值取自 Rust 后端实跑产物，封盘前做过跨后端逐字差分。
+struct Step =
+    v: int
+    def clone(self) -> Step =
+        Step(v: self.v + 1)
+    def unwrap(self) -> int =
+        self.v + 100
+
+def main() =
+    let a1 = Step(v: 7)
+    print(a1.clone().v)
+
+    let a2 = Step(v: 7)
+    print(a2.unwrap())
+
+    let a3 = Step(v: 1)
+    let b3 = a3.clone()
+    print(b3.v)
+    print(a3.clone().clone().v)

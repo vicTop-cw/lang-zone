@@ -1,0 +1,7 @@
+// 泛型 struct 测试
+struct Box<T> =
+    value: T
+
+def main() =
+    let b = Box(value: 42)
+    print(b.value)

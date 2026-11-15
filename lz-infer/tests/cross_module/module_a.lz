@@ -1,0 +1,10 @@
+from module_b import PointB
+
+struct PointA {
+    x: int
+    y: int
+    b: PointB
+}
+
+def make_point_a(x: int, y: int, b: PointB) -> PointA =
+    PointA { x: x, y: y, b: b }

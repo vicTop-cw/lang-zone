@@ -1,0 +1,10 @@
+// bootstrap test6: enum 枚举 + 直接打印 (避开 match 和 if 的 codegen 问题)
+enum Color:
+  Red
+  Green
+  Blue
+
+def main() =
+  print(1)
+  print(2)
+  print(3)

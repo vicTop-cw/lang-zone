@@ -1,0 +1,5 @@
+// 反例：普通装饰器须独占一行 → E-MODDEC-OWNLINE (AC7)
+@export(Rust) def f() = 1
+
+def main() =
+    print(f())

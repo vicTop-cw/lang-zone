@@ -1,0 +1,1 @@
+[{"name":"publish","arguments":{"project_dir":".","description":"[night:2026-09-26-night:R1-验证] lang-zone 夜间循环 R1 验证：门禁实跑(cargo test 全绿)+golden 快照对账+DEMO 关键样例编译实跑+omega 欠账盘点补链+output_validate 硬门","priority":"高","now":"2026-09-27T06:12:00+08:00"}}]

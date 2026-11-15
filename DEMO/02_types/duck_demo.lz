@@ -1,0 +1,36 @@
+// ============================================================
+// 测试: duck 类型约束 — 基本方法 + 字段约束
+// ============================================================
+
+// ── 方法约束 duck ──
+duck Quackable =
+    def quack(self) -> ()
+    def walk(self) -> ()
+
+// ── 字段 + 方法约束 duck ──
+duck HasName =
+    .name: str
+    def greet(self) -> str
+
+// ── 带返回值的 duck ──
+duck HasArea =
+    def area(self) -> f64
+
+// ── 使用 duck 的结构体 ──
+struct Circle =
+    radius: f64
+    def area(self) -> f64 = 3.14159 * self.radius * self.radius
+
+struct Rectangle =
+    width: f64
+    height: f64
+    def area(self) -> f64 = self.width * self.height
+
+// ── duck 作为 where 约束 ──
+def print_area<T>(shape: T) where T: HasArea =
+    print(f"area: {shape.area()}")
+
+def main() =
+    let c = Circle(radius: 2.0)
+    print_area(c)
+    print("duck demo done")

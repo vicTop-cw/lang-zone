@@ -1,0 +1,16 @@
+// p34_field_enum_cast.lz：精确定位「FieldAccess 来源 + 枚举构造实参」cast 差异
+// v171 parser.lz 实际失败点：let num: str = r.0 后 Token.IntLit(v: num as int)
+enum Token:
+    IntLit(v: int)
+
+def get_pair() -> (str, int) =
+    let res: (str, int) = ("42", 1)
+    res
+
+def main() =
+    let r = get_pair()
+    let num: str = r.0
+    // FieldAccess 来源的变量 cast 作为枚举构造实参
+    let t = Token.IntLit(v: num as int)
+    match t:
+        case Token.IntLit(v: n) => print("val=" + n.to_string())

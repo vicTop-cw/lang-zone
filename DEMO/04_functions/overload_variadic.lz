@@ -1,0 +1,33 @@
+// ============================================================
+// 测试: @overload 变长分派 — 固定签名优先 + `..` 兜底（03d §2.7）
+// ============================================================
+
+@overload
+def show(x: int) =
+    print(f"int:{x}")
+
+@overload
+def show(x: str) =
+    print(f"str:{x}")
+
+@overload
+def show(..) =
+    for v in args:
+        print(f"any:{v}")
+
+// 显式参数不同 + 变长兜底
+@overload
+def g(a: int, ..) =
+    print(f"int lead, args={args}")
+
+@overload
+def g(a: str, b: str, ..) =
+    print(f"two str, args={args}")
+
+def main() =
+    show(1)
+    show("a")
+    show(1, 2, 3)
+    g(1, 2)
+    g("x", "y", 1)
+    print("overload variadic demo done")

@@ -1,0 +1,12 @@
+# Test: type alias expansion
+type Int = int
+type IntPair = Pair[int]
+
+struct Pair[T]:
+    first: T
+    second: T
+
+def main() -> int:
+    x: Int = 1
+    p: IntPair = Pair {first: 2, second: 3}
+    return x + p.first

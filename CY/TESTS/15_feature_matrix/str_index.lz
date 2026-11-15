@@ -1,0 +1,16 @@
+// 索引与切片形态：str 索引给**码点整数**（`"abc"[0] == 97`，见 DEMO/01_basics/strings.lz:18
+// 的断言）；序列切片 `xs[a..b]` 按 Python 语义（SYNTAX/01-类型系统.md:436、442）。
+// 负索引 `xs[-1]` 取末位（Python 风，:441）：Rust 后端把负整数字面量下标归一化为
+// `len + k`（BUG-19 修复，见 memory/bugs.md），双后端一致，故可封 .exp。
+// 期望值由 Rust 后端实跑生成（2026-10-14 重封，补回负索引行）。
+def main() =
+    let s: str = "abc"
+    print(s[0], s[2])
+    let xs: List<int> = [0, 1, 2, 3, 4, 5]
+    print(xs[1..3])
+    print(xs[2..5])
+    print(xs[0..2])
+    print(xs[-1])
+    print(xs[-2])
+    let grid: List<List<int>> = [[1, 2], [3, 4]]
+    print(grid[0][1], grid[1][0])

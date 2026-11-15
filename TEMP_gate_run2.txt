@@ -1,0 +1,32 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+note: did not finalize incremental compilation session directory `\\?\E:\IDEProjects\AI\lang-zone\target\debug\incremental\lang_zone-1uktsrt6uhvwi\s-hn89qbel11-0dbb4ma-working`: 拒绝访问。 (os error 5)
+  |
+  = help: the next build will not be able to reuse work from this compilation
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 21.01s
+     Running tests\cy_codegen_gate.rs (target\debug\deps\cy_codegen_gate-61c22c5977953f48.exe)
+
+running 2 tests
+test cy_l2_cythonize_all_corpus has been running for over 60 seconds
+test cy_l3_run_all_corpus has been running for over 60 seconds
+test cy_l2_cythonize_all_corpus ... FAILED
+test cy_l3_run_all_corpus ... ok
+
+failures:
+
+---- cy_l2_cythonize_all_corpus stdout ----
+[cy L2-ctl] 告警取数面对照命中 1 行: Unknown type declaration 'nosuchtype' in annotation, ignoring
+[cy L2] 语料 97 件 | cythonize 通过 96 | 失败 1（在册 0）| Cython 告警行 0
+   ❌新增 01_basics/literals.lz :: \\?\E:\IDEProjects\AI\lang-zone\target\cy-gate\01_basics\literals.pyx
+
+thread 'cy_l2_cythonize_all_corpus' (18188) panicked at tests\cy_codegen_gate.rs:522:5:
+1 件出现非基线内的 cythonize 失败（新增回归）: ["01_basics/literals.lz: \\\\?\\E:\\IDEProjects\\AI\\lang-zone\\target\\cy-gate\\01_basics\\literals.pyx"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    cy_l2_cythonize_all_corpus
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 351.42s
+
+error: test failed, to rerun pass `--test cy_codegen_gate`

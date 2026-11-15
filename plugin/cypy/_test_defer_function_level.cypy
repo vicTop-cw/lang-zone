@@ -1,0 +1,8 @@
+# Test: defer inside function should work
+def test_defer() -> int:
+    defer:
+        print("cleanup")
+    return 0
+
+def main() -> int:
+    return 0

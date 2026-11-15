@@ -1,0 +1,26 @@
+// ============================================================
+// @derive(Clone, Debug, Serialize, Deserialize, ...)
+//
+// 编译器内置的可派生 trait 装饰器。
+// 对 struct/enum 自动生成对应的 Rust trait impl。
+//
+// 语法：
+//   @derive(Clone, Debug, Serialize)
+//   struct User =
+//       name: str
+//       age: int
+//
+// 去重规则：重复 trait 以最后一个为准（后覆盖前）
+// 不支持抽象方法 trait（编译期报错）
+//
+// 内置派生 trait 列表（12 个）：
+//   Clone, Copy, Debug, Default,
+//   PartialEq, Eq, PartialOrd, Ord, Hash,
+//   Serialize, Deserialize, JsonSchema
+//
+// == Rust 输出示例 ==
+//   #[derive(Clone, Debug)]
+//   struct User { name: String, age: i64 }
+//   impl serde::Serialize for User { ... }
+//   impl<'de> serde::Deserialize<'de> for User { ... }
+// ============================================================

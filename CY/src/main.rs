@@ -1,0 +1,1105 @@
+// lzcyc — LZ → Cython 子编译器
+//
+// 架构约束（长期项目决策）：
+// - lzc 是主编译器（默认 Rust 后端），本子编译器不修改 src/ 下任何文件；
+//   主编译器未来会融入子编译器，届时以本 crate 为主干。
+// - lzcyc 复用主编译器 lib 公开层（L1 lexer → L2 parser/ast → L3 semantic_check
+//   → L3.5 ir/builder → Cython 后端 codegen_cython），全部走 `lang_zone::` 库路径。
+//
+// 管线：
+//   input.lz → lex → parse → semantic_check → build_ir → CythonCodeGen → output.pyx
+//           → (可选) cythonize → .c → C 编译 → .pyd
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() {
+        print_help();
+        std::process::exit(0);
+    }
+    // M5 Lane B（T0r56.2.1）：裸文件模式——lzcyc <file.lz> 与 lzc 单文件编译同尺。
+    // run_lz_frontend 递归管线以 `self_exe <派生文件>` 形式调子编译器（无子命令），
+    // lzcyc 必须接得住：默认 Rust 后端产 .rs（编译器语义），--backend=cython 显式产 .pyx。
+    if args.len() == 1 {
+        let p = std::path::Path::new(&args[0]);
+        let is_lzish = p.is_file()
+            && p.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e == "lz" || e == "lzfront" || e == "lzlz" || e == "lzrs")
+                .unwrap_or(false);
+        if is_lzish {
+            bare_file_compile(p);
+            std::process::exit(0);
+        }
+    }
+    // M5 吸收的 lzc 子命令（T0r55.3.2）—— peek 先截获 --frontend=lz（LZ 前端直出）
+    if args[0] == "peek" && args.iter().any(|a| a == "--frontend=lz") {
+        peek_frontend_lz(&args[1..]);
+        std::process::exit(0);
+    }
+    // cmd_* 函数期望完整 args（args[0]=二进制名, args[1]=子命令），
+    // 本处 args[0] 已是子命令，需前置 "lzcyc" 构造完整向量
+    match args[0].as_str() {
+        "transpile" => cmd_transpile(&args[1..]),
+        "compile" => cmd_compile(&args[1..]),
+        "run" => cmd_run(&args[1..]),
+        // —— M3 吸收的 lzc 子命令 ——
+        "create" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_create(&full));
+        }
+        "build" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_build(&full));
+        }
+        "check" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_check(&full));
+        }
+        "peek" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_peek(&full));
+        }
+        "push" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_push(&full));
+        }
+        "emit-bridge-report" => {
+            let mut full = vec!["lzcyc".to_string()];
+            full.extend_from_slice(&args);
+            std::process::exit(lang_zone::bridge::project::cmd_emit_bridge_report(&full));
+        }
+        "--version" | "-V" => println!("lzcyc {VERSION}"),
+        "--help" | "-h" => print_help(),
+        other => {
+            eprintln!("未知命令: {other}（查看帮助: lzcyc --help）");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_help() {
+    println!(
+        "lzcyc {VERSION} — LZ → Cython 编译器（lzc 的子编译器）\n\
+         \n\
+         用法:\n\
+         \x20 lzcyc transpile <file.lz> [-o <dir>]   转译为 .pyx\n\
+         \x20 lzcyc compile  <file.lz> [-o <dir>]    转译 + cythonize（→ .c/.pyd）\n\
+         \x20 lzcyc run      <file.lz> [func]        编译并运行（默认入口 main）\n\
+         \n\
+         M3 吸收的 lzc 子命令:\n\
+         \x20 lzcyc create <path>    脚手架新项目（lz.toml + src/main.lz）\n\
+         \x20 lzcyc build  [dir]     构建项目（.lz → .rs → exe，增量）\n\
+         \x20 lzcyc check  [dir]     类型检查（不生成代码）\n\
+         \x20 lzcyc peek   <file>    查看 tokens/AST/IR\n\
+         \x20 lzcyc push   [--dry-run] 发布到本地 registry\n\
+         \x20 lzcyc emit-bridge-report <tsv>  审计 bridge 台账\n\
+         \n\
+         \x20 lzcyc --version        版本号\n\
+         \x20 lzcyc --help           本帮助\n\
+         \n\
+         选项:\n\
+         \x20 --backend=rust   transpile/compile/run 改走 Rust codegen（产物 .rs/.exe）\n\
+         \x20                  默认 Cython（产物 .pyx/.pyd）；吸收的子命令恒走 Rust 管线\n\
+         \n\
+         说明:\n\
+         \x20 前端（lexer/parser/semantic_check/IR）与 lzc 共享同一实现，\n\
+         \x20 后端输出 Cython (.pyx)，可编译为 Python C 扩展 (.pyd)。"
+    );
+}
+
+// ─────────────────────────── 核心管线 ───────────────────────────
+
+/// 裸文件编译（M5 Lane B）：与 lzc 单文件模式同尺。
+/// 默认 Rust 后端产 .rs（编译器语义；run_lz_frontend 递归管线依赖此形态），
+/// `--backend=cython` 显式切换产 .pyx。
+fn bare_file_compile(p: &std::path::Path) {
+    let want_rust = !std::env::args().any(|a| a == "--backend=cython");
+    let code = transpile_source_backend(p, want_rust)
+        .unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(1);
+        });
+    let ext = if want_rust { "rs" } else { "pyx" };
+    let out_path = output_path_with_ext(p, None, ext);
+    if let Some(dir) = out_path.parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+    if let Err(e) = fs::write(&out_path, &code) {
+        eprintln!("Error writing {}: {}", out_path.display(), e);
+        std::process::exit(1);
+    }
+    println!("compiled: {} → {}", p.display(), out_path.display());
+}
+
+/// --frontend=lz 一致性门禁（M5 Lane B）：LZ lexer（递归管线捕获）与
+/// Rust lexer（Debug 渲染）经 normalize_token_stream 归一后逐行比对，
+/// diff 非空即非零退出。lzcyc 裸文件模式让递归管线的自编译段在本进程闭环。
+fn frontend_lz_gate(input: &Path) {
+    let source = fs::read_to_string(input).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", input.display(), e);
+        std::process::exit(1);
+    });
+    let mut lexer = lang_zone::lexer::Lexer::new(&source);
+    let tokens = lexer.tokenize();
+    let rust_render = tokens
+        .iter()
+        .map(|t| format!("{:?}", t))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lz_out = lang_zone::frontend::bootstrap_emit::run_lz_frontend_capture(
+        &input.display().to_string(),
+        &source,
+        "lex",
+    );
+    let norm_rust = lang_zone::frontend::bootstrap_emit::normalize_token_stream(&rust_render, true);
+    let norm_lz = lang_zone::frontend::bootstrap_emit::normalize_token_stream(&lz_out, false);
+    if norm_rust != norm_lz {
+        eprintln!("frontend dual-track mismatch (lz vs rust) in {}:", input.display());
+        let mut reported = 0usize;
+        for (i, (r, l)) in norm_rust.iter().zip(norm_lz.iter()).enumerate() {
+            if r != l {
+                eprintln!("  [{}] rust={} lz={}", i, r, l);
+                reported += 1;
+                if reported >= 3 {
+                    break;
+                }
+            }
+        }
+        if norm_rust.len() != norm_lz.len() {
+            eprintln!("  token count: rust={} lz={}", norm_rust.len(), norm_lz.len());
+        }
+        std::process::exit(1);
+    }
+    eprintln!(
+        "frontend dual-track consistent: {} tokens",
+        norm_rust.len()
+    );
+}
+
+/// peek --frontend=lz（M5 Lane B，LZ 前端直出/真实切换）：
+/// `--tokens` → LZ 词流；`--ast` → LZ 解析描述；无视图 flag → 提示（LZ 侧无 IR 视图）。
+fn peek_frontend_lz(rest: &[String]) {
+    // rest[0]=peek, rest[1]=目标文件（CY args 已去二进制名）
+    let Some(target) = rest.get(1) else {
+        eprintln!("用法: lzcyc peek <file.lz> --frontend=lz [--tokens|--ast]");
+        std::process::exit(1);
+    };
+    let p = std::path::Path::new(target);
+    if !p.is_file() {
+        eprintln!("Error: cannot peek {}: no such file", p.display());
+        std::process::exit(1);
+    }
+    let source = fs::read_to_string(p).unwrap_or_else(|e| {
+        eprintln!("Error reading {}: {}", p.display(), e);
+        std::process::exit(1);
+    });
+    let mode = if rest.iter().any(|a| a == "--ast") {
+        "parse"
+    } else {
+        // 默认与 --tokens 均走 LZ 词流（LZ 侧无 IR 视图）
+        "lex"
+    };
+    if !rest.iter().any(|a| a == "--tokens" || a == "--ast") {
+        eprintln!("提示: --frontend=lz 下 LZ 侧无 IR 视图，默认输出词流（--ast 为解析描述）");
+    }
+    let out = lang_zone::frontend::bootstrap_emit::run_lz_frontend_capture(
+        &p.display().to_string(),
+        &source,
+        mode,
+    );
+    print!("{}", out);
+}
+
+
+/// 读取 --macro-check=loose|light|strict（默认 light，对齐主编译器）
+fn macro_check_mode() -> lang_zone::macros::expand::CheckMode {
+    match std::env::args().find_map(|a| a.strip_prefix("--macro-check=").map(String::from)) {
+        Some(s) if s == "loose" => lang_zone::macros::expand::CheckMode::Loose,
+        Some(s) if s == "strict" => lang_zone::macros::expand::CheckMode::Strict,
+        _ => lang_zone::macros::expand::CheckMode::Light,
+    }
+}
+
+/// --backend 选择（M3 T0r55.4.1）：cython（默认）| rust（可选）
+/// rust 后端：transpile/compile/run 改走主编译器的 Rust codegen（与 lzc 单文件模式一致），
+/// 产物为 .rs；吸收的 create/build/check/peek/push 子命令恒走 lib crate Rust 管线。
+fn backend_is_rust() -> bool {
+    std::env::args().any(|a| a == "--backend=rust")
+}
+
+/// 宏/模板展开（对齐主编译器管线 08 §3.6）：
+/// 提取宏/模板定义 → 跨模块宏导入（macro import）→ 过滤定义占用 token
+/// → 首遍宏展开 → 宏↔模板交替展开至稳定（上限 16 轮）。
+/// 全部复用 lib 公开层 `lang_zone::macros::*`，编排逻辑为本 crate 自有。
+fn expand_macro_pipeline(
+    path: &Path,
+    tokens: &[lang_zone::lexer::Token],
+) -> Result<Vec<lang_zone::lexer::Token>, String> {
+    use lang_zone::lexer::Token;
+    use lang_zone::macros::{
+        contains_pending_call, extract_macro_defs, extract_template_defs, load_macro_imports,
+        MacroExpander, TemplateExpander,
+    };
+    use lang_zone::util::import::ImportResolver;
+
+    let mode = macro_check_mode();
+
+    // 1) 提取本文件宏/模板定义
+    let (mut registry, mut ranges) =
+        extract_macro_defs(tokens).map_err(|e| format!("Macro definition error: {e}"))?;
+    let (mut template_registry, tpl_ranges) =
+        extract_template_defs(tokens).map_err(|e| format!("Template definition error: {e}"))?;
+    ranges.extend(tpl_ranges);
+
+    // 2) 跨模块宏导入（macro import X → 递归加载并合并宏/模板定义）
+    let base_dir = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+    let mut resolver = ImportResolver::new();
+    let (imp_macros, imp_templates, imp_ranges) =
+        load_macro_imports(tokens, &base_dir, &mut resolver)
+            .map_err(|e| format!("Macro import error: {e}"))?;
+    registry.merge(imp_macros);
+    template_registry.merge(imp_templates);
+    ranges.extend(imp_ranges);
+
+    // 3) 过滤宏/模板定义占用的 token
+    let expander_input: Vec<Token> = tokens
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| {
+            !ranges
+                .chunks(2)
+                .any(|c| c.len() == 2 && *i >= c[0] && *i < c[1])
+        })
+        .map(|(_, t)| t.clone())
+        .collect();
+
+    // 4) 首遍宏展开 + 宏↔模板交替至稳定
+    let mut expander = MacroExpander::new(registry);
+    expander.set_check_mode(mode);
+    let mut template_expander = TemplateExpander::new(template_registry);
+    template_expander.set_check_mode(mode);
+
+    let mut expanded = expander
+        .expand(&expander_input)
+        .map_err(|e| format!("Macro expansion error: {e}"))?;
+    let max_passes = 16;
+    let mut stable = false;
+    for _pass in 0..max_passes {
+        let before = expanded.clone();
+        let after_tpl = template_expander
+            .expand(&expanded)
+            .map_err(|e| format!("Template expansion error: {e}"))?;
+        let after_mac = expander
+            .expand(&after_tpl)
+            .map_err(|e| format!("Macro expansion error: {e}"))?;
+        expanded = after_mac;
+        if expanded == before && !contains_pending_call(&expanded) {
+            stable = true;
+            break;
+        }
+    }
+    if !stable {
+        return Err(
+            "宏/template 交替展开未稳定（可能循环嵌套，超过 16 轮）".to_string(),
+        );
+    }
+    Ok(expanded)
+}
+
+/// 读取 --std-dir <path>（可多次出现，累积）
+fn collect_std_dirs() -> Vec<std::path::PathBuf> {
+    let args: Vec<String> = std::env::args().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--std-dir" && i + 1 < args.len() {
+            out.push(std::path::PathBuf::from(&args[i + 1]));
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// LZ 源文件 → 产物文本（.pyx 或 .rs，随后端）
+///
+/// 复用主编译器 lib 公开层，管线与 lzc 对齐：
+/// lex → 宏/模板展开 → parse → import 合并 → semantic_check（G2）
+/// → build_ir → 后端 → 生成后处理。
+/// `rust_backend`：true 走主编译器 Rust codegen（产物 .rs），false 走 Cython（.pyx）。
+fn transpile_source(path: &Path) -> Result<String, String> {
+    transpile_source_backend(path, backend_is_rust())
+}
+
+fn transpile_source_backend(path: &Path, rust_backend: bool) -> Result<String, String> {
+    // 核心管线在显式大栈线程中执行（栈溢出修复）：
+    // debug 构建下 IR 构建链（build_ir → convert_fn_def → convert_block →
+    // convert_expr）各帧较大，默认 1MB 主线程栈在特定表达式组合下溢出——
+    // 如 print 参数为 FieldAccess(Binary(<<))、用户自定义 to_string 方法。
+    // 主编译器 lzc 链路较浅不触发；lzcyc 额外包一层 Cython 管线后触发
+    // （0xC0000409 栈溢出）。64MB 栈对 debug/release 均足够且仅按需提交。
+    const PIPELINE_STACK: usize = 64 * 1024 * 1024;
+    let path = path.to_path_buf();
+    std::thread::Builder::new()
+        .stack_size(PIPELINE_STACK)
+        .spawn(move || {
+            let path: &Path = &path;
+            let source = fs::read_to_string(path)
+                .map_err(|e| format!("Error reading {}: {}", path.display(), e))?;
+
+            // L1 词法
+            let tokens = lang_zone::lexer::Lexer::new(&source).tokenize();
+
+            // 宏/模板展开（lexer 之后、parser 之前，对齐主编译器位置）
+            let expanded_tokens = expand_macro_pipeline(path, &tokens)?;
+
+            // L2 语法
+            let mut parser = lang_zone::parser::Parser::new(expanded_tokens);
+            // 宏模块检测：用原始 token 流（展开前）检测 #!bin macro 声明
+            parser.is_macro = lang_zone::macros::has_bin_macro_declaration(&tokens);
+            let mut module = parser
+                .parse_module()
+                .map_err(|e| format!("Parse error: {e}"))?;
+            // 模块级魔法属性与 comptime 源码数据源（对齐主编译器编译入口行为）
+            module.file_path = Some(path.to_string_lossy().to_string());
+            module.source_text = Some(source);
+
+            // import 合并（lzcyc 侧增强：源目录 + --std-dir 候选）
+            let std_dirs = collect_std_dirs();
+            let merged_modules = merge_imports(&mut module, path, &std_dirs)?;
+
+            // L3 语义检查（G2，与主编译器 build_ir_opt 前置检查一致）
+            let errs = lang_zone::semantic_check::check_module(&module);
+            if !errs.is_empty() {
+                return Err(format!("Semantic error:\n{}", errs.join("\n")));
+            }
+
+            // L3.5 IR 构建
+            let ir =
+                lang_zone::ir::builder::build_ir(&module).map_err(|e| format!("IR build error: {e}"))?;
+
+            // 后端分发（M3 T0r55.4.1 / Lane B 参数化）：rust_backend 走主编译器
+            // Rust codegen（产物 .rs，与 lzc 单文件模式同一条交付面）；默认 Cython（.pyx）
+            if rust_backend {
+                let mut cg = lang_zone::ir::codegen::CodeGen::new();
+                cg.set_embed_stem(&path.display().to_string());
+                let (rs_code, mut registry) = cg.generate_with_bridge(&ir);
+                // embed 产物落盘（与主编译器同口径：默认只落盘，--embed-build 才建库）
+                if !cg.embed_targets().is_empty() {
+                    lang_zone::embed::emit::emit_embed_artifacts(
+                        cg.embed_targets(),
+                        std::env::args().any(|a| a == "--embed-build"),
+                        false,
+                        None,
+                    );
+                }
+                if registry.symbol_count() > 0 {
+                    let _ = registry.set_ledger_path(&PathBuf::from("build/bridge-ledger.tsv"));
+                    let _ = registry.ledger_mut().flush();
+                }
+                return Ok(rs_code);
+            }
+
+            // Cython 后端（generate 出原始形态 + 本地 postprocess_pyx 兜底管线）
+            // 注意：不用 lib 的 generate_full——其内置 postprocess_pyx 为远端精简线副本，
+            // 与本地 M1 下沉叠加会双处理（(__cv)(__cv) 双调用/_LZNONE 垫片污染 is None）
+            let mut cg = lang_zone::ir::codegen_cython::CythonCodeGen::new();
+            let raw = cg.generate(&ir).to_string();
+            let enum_variants = collect_enum_variants(&module);
+            Ok(postprocess_pyx(&raw, &enum_variants, &merged_modules))
+        })
+        .map_err(|e| format!("无法创建编译线程: {e}"))?
+        .join()
+        .map_err(|_| "编译管线线程异常终止".to_string())?
+}
+
+/// 解析 `-o/--output <dir>` 选项，返回 (剩余位置参数, 输出目录)
+fn extract_out_dir(args: &[String]) -> (Vec<String>, Option<String>) {
+    let mut rest = Vec::new();
+    let mut out_dir = None;
+    let mut i = 0;
+    while i < args.len() {
+        if (args[i] == "-o" || args[i] == "--output") && i + 1 < args.len() {
+            out_dir = Some(args[i + 1].clone());
+            i += 2;
+        } else {
+            rest.push(args[i].clone());
+            i += 1;
+        }
+    }
+    (rest, out_dir)
+}
+
+/// 计算输出路径：默认输入同目录同名；指定 -o 则落到该目录。
+/// 扩展名随后端（M3 T0r55.4.1 / Lane B 参数化）：rust → .rs，Cython → .pyx
+fn pyx_output_path(input: &Path, out_dir: Option<&str>) -> PathBuf {
+    let ext = if backend_is_rust() { "rs" } else { "pyx" };
+    output_path_with_ext(input, out_dir, ext)
+}
+
+fn output_path_with_ext(input: &Path, out_dir: Option<&str>, ext: &str) -> PathBuf {
+    let stem = input
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "output".to_string());
+    match out_dir {
+        Some(dir) => PathBuf::from(dir).join(format!("{stem}.{ext}")),
+        None => input.with_file_name(format!("{stem}.{ext}")),
+    }
+}
+
+// ─────────────────────────── 后处理与 import 合并 ───────────────────────────
+
+/// 从 AST 收集 enum 变体映射（变体类名 → 声明序号）。
+/// LZ 无数据枚举在 AST 中为 `StructDef { is_enum: true, fields: [变体...] }`。
+fn collect_enum_variants(module: &lang_zone::ast::Module) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    for s in &module.structs {
+        if s.is_enum {
+            for (i, f) in s.fields.iter().enumerate() {
+                out.push((f.name.clone(), i));
+            }
+        }
+    }
+    out
+}
+
+/// 生成后处理：修复主编译器 Cython 后端的运行期语义缺口（挂账项，融入前由 lzcyc 兜底）。
+/// 各项均以生成代码的稳定形态为锚点，匹配不上则原样保留：
+/// 1. enum 无数据变体注入 `_variant = <序号>`（match 解构依赖）
+/// 2. Box/Rc/Arc 补 `__getitem__`/`__setitem__`（`x[0]` 取/存内部值）
+/// 3. Option 垫片：`None_()` 返回带方法的 `_LZNONE` 单例；行级 `x = None` → `x = _LZNONE`
+///    （LZ `is None` 生成 `.is_none()` 调用，裸 None 无方法）
+/// 4. 构建块下标：`(lambda : (...)))()(N)` → `...))()[N]`（lib 把下标生成了调用）
+/// 5. 列表推导 filter 谓词补调用：`for __cv in ... if (lambda ...)` → `...(__cv)`
+/// 6. 已合并 import 的限定前缀剥离：`lz_std.X` → `X`，并删除对应 `import X` 行
+/// 7. checker 派发：`fn[checker](...)` 调用改写为包装器；注入 `__Params` 垫片
+///    （规范接口：ps.kwargs.contains(k) / ps.kwargs[k]，kwargs 为形参名到实参映射）
+fn postprocess_pyx(
+    code: &str,
+    enum_variants: &[(String, usize)],
+    merged_modules: &[String],
+) -> String {
+    let mut lines: Vec<String> = code.lines().map(String::from).collect();
+
+    // 1) _variant 注入：`class Red(Color):` 的下一行 `pass` → `_variant = N`
+    for i in 0..lines.len() {
+        let t = lines[i].trim_start().to_string();
+        if let Some(rest) = t.strip_prefix("class ") {
+            if let Some(paren) = rest.find('(') {
+                let cname = rest[..paren].trim();
+                if let Some((_, idx)) = enum_variants.iter().find(|(n, _)| n == cname) {
+                    if i + 1 < lines.len() && lines[i + 1].trim() == "pass" {
+                        let indent = lines[i + 1].len() - lines[i + 1].trim_start().len();
+                        lines[i + 1] =
+                            format!("{}{}", " ".repeat(indent), format!("_variant = {idx}"));
+                    }
+                }
+            }
+        }
+    }
+    let mut code = lines.join("\n");
+
+    // 2) Box/Rc/Arc 下标增强（prelude 固定形态为锚点）
+    for cls in ["Box", "Rc", "Arc"] {
+        let anchor = format!(
+            "class {cls}:\n    def __init__(self, v=None): self._v = v\n    @staticmethod\n    def new(v=None): return {cls}(v)\n    def __getattr__(self, n): return getattr(self._v, n)"
+        );
+        let enhanced = format!(
+            "{anchor}\n    def __getitem__(self, i): return self._v\n    def __setitem__(self, i, v): self._v = v"
+        );
+        if code.contains(&anchor) {
+            code = code.replace(&anchor, &enhanced);
+        }
+    }
+
+    // 3) Option/None 方法族：已下沉 lib（is_none→is None、is_some→is not None、
+    //    unwrap/expect 透传 + __lz_expect_fail），垫片方案退位删除（M1.3）
+
+    // 4) 构建块下标修复：`))()(N)` → `))()[N]`（逐个消耗，防死循环）
+    loop {
+        let Some(p) = code.find("))()(") else { break };
+        let after = &code[p + 5..];
+        let Some(close) = after.find(')') else { break };
+        let idx = &after[..close];
+        if idx.is_empty() || !idx.chars().all(|c| c.is_ascii_digit()) {
+            break;
+        }
+        code = format!("{}))()[{}]{}", &code[..p], idx, &after[close + 1..]);
+    }
+
+    // 5) 列表推导 filter 谓词补调用：已下沉 lib（filter 为 lambda 时直出 `(__cv)` 调用），
+    //    postprocess 分支退位删除（M1.5——叠加生成会导致 `(__cv)(__cv)` 双调用）
+
+    // 6) 已合并 import：删除 `import X` 行 + 剥离 `X.` 限定前缀
+    for m in merged_modules {
+        code = code.replace(&format!("{m}."), "");
+        let mut out = Vec::with_capacity(code.lines().count());
+        let import_stmt = format!("import {m}");
+        for l in code.lines() {
+            if l.trim() == import_stmt {
+                continue;
+            }
+            out.push(l.to_string());
+        }
+        code = out.join("\n");
+    }
+
+    // 7) checker 派发：已下沉 lib（Call 生成识别 `fn[checker]` 形态 → 包装器调用，
+    //    __Params 垫片与包装器由 generate 收尾统一追加），postprocess 分支退位删除（M1.6）
+
+    code
+}
+
+/// 简版 import 合并（对齐主编译器 merge_imports_into 语义）：
+/// 对每个 `import X` 在源目录与 std 目录中查找 `X.lz` / `X/mod.lz`，
+/// 找到则 parse 并将顶层项合并进主模块；import 语句保留（semantic_check
+/// 需要模块名绑定，文件在同目录/std 目录可寻即放行）。
+/// 返回已成功合并的模块名列表（供生成后处理剥离限定前缀）。
+fn merge_imports(
+    module: &mut lang_zone::ast::Module,
+    entry: &Path,
+    std_dirs: &[PathBuf],
+) -> Result<Vec<String>, String> {
+    let dir = entry.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let mut loaded: Vec<PathBuf> = Vec::new();
+    let mut merged = Vec::new();
+    merge_imports_into(module, &dir, std_dirs, &mut loaded, &mut merged)?;
+    Ok(merged)
+}
+
+fn merge_imports_into(
+    module: &mut lang_zone::ast::Module,
+    dir: &Path,
+    std_dirs: &[PathBuf],
+    loaded: &mut Vec<PathBuf>,
+    merged: &mut Vec<String>,
+) -> Result<(), String> {
+    const SKIP: &[&str] = &[
+        "std", "macro", "serde", "tokio", "regex", "chrono", "rand", "itertools", "serde_json",
+        "once_cell",
+    ];
+    let imports = module.imports.clone();
+    for imp in &imports {
+        if imp.path.is_empty() {
+            continue;
+        }
+        let first = imp.path[0].as_str();
+        if SKIP.contains(&first) {
+            continue;
+        }
+        let rel = imp.path.join("/");
+        let mut candidates = vec![dir.join(&rel).with_extension("lz"), dir.join(&rel).join("mod.lz")];
+        for sd in std_dirs {
+            candidates.push(sd.join(&rel).with_extension("lz"));
+            candidates.push(sd.join(&rel).join("mod.lz"));
+        }
+        let Some(mp) = candidates.into_iter().find(|c| c.exists()) else {
+            continue;
+        };
+        if loaded.contains(&mp) {
+            continue;
+        }
+        loaded.push(mp.clone());
+        let Ok(src) = std::fs::read_to_string(&mp) else {
+            continue;
+        };
+        let tokens = lang_zone::lexer::Lexer::new(&src).tokenize();
+        let mut parser = lang_zone::parser::Parser::new(tokens);
+        let Ok(mut sub) = parser.parse_module() else {
+            continue;
+        };
+        // 递归处理子模块的 import
+        let sub_dir = mp.parent().unwrap_or(dir).to_path_buf();
+        merge_imports_into(&mut sub, &sub_dir, std_dirs, loaded, merged)?;
+        // ── 平铺合并的同名重复定义过滤（对齐主编译器 src/main.rs）──
+        // 被导入模块的定义让位给已在场的定义（本地/先导入者胜）——一个模块的
+        // `main` 是它自己的入口，不是导出给 importing 方的 API。不同签名的
+        // 同名 def **不**过滤：那是合法重载。
+        {
+            let dup_def = |f: &lang_zone::ast::Function| {
+                module.functions.iter().any(|g| {
+                    g.name == f.name
+                        && g.params.len() == f.params.len()
+                        && g.params
+                            .iter()
+                            .zip(f.params.iter())
+                            .all(|(a, b)| a.ty == b.ty)
+                })
+            };
+            sub.functions.retain(|f| !dup_def(f));
+        }
+        // 注入定义项（对齐主编译器合并字段）
+        module.functions.extend(sub.functions);
+        module.structs.extend(sub.structs);
+        module.traits.extend(sub.traits);
+        module.impls.extend(sub.impls);
+        module.type_aliases.extend(sub.type_aliases);
+        module.duck_defs.extend(sub.duck_defs);
+        module.magic_blocks.extend(sub.magic_blocks);
+        module.consts.extend(sub.consts);
+        // 顶层 let → Const
+        for s in &sub.top_stmts {
+            if let lang_zone::ast::Stmt::Let {
+                name,
+                mutable,
+                ty,
+                value,
+                mods,
+                ..
+            } = s
+            {
+                module.consts.push(lang_zone::ast::ConstDef {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    value: value.clone(),
+                    mutable: *mutable,
+                    mods: mods.clone(),
+                });
+            }
+        }
+        // 记录已合并模块名（后处理剥限定前缀用）
+        if !merged.iter().any(|m| m == &first) {
+            merged.push(first.to_string());
+        }
+    }
+    Ok(())
+}
+
+/// 剥离函数参数列表中的 C 风格类型标注：`double x, str y = "a"` → `x, y = "a"`。
+/// Python 风格标注 `x: int` 与 `*args/**kwargs` 原样保留。
+/// 额外处理：显式收集参数与变参重名（`args, *args` → `*args`，调用点散传语义一致）。
+fn strip_param_types(params: &str) -> String {
+    let stripped: Vec<String> = params
+        .split(',')
+        .map(|seg| {
+            let seg_t = seg.trim();
+            if seg_t.is_empty() || seg_t.starts_with('*') {
+                return seg_t.to_string();
+            }
+            let (head, tail) = match seg_t.find('=') {
+                Some(eq) => (&seg_t[..eq], &seg_t[eq..]),
+                None => (seg_t, ""),
+            };
+            let head_t = head.trim();
+            if head_t.contains(':') {
+                // Python 类型标注，合法，保留
+                format!("{head_t}{tail}")
+            } else {
+                match head_t.split_whitespace().last() {
+                    Some(last) if head_t.contains(' ') => format!("{last}{tail}"),
+                    _ => format!("{head_t}{tail}"),
+                }
+            }
+        })
+        .collect();
+    // 重名消解：存在 `*args` 时删除同名显式参数（变参降级语义等价）
+    let star_name = stripped.iter().find_map(|p| {
+        p.trim().strip_prefix('*').map(|n| n.trim().to_string())
+    });
+    let out: Vec<String> = match star_name {
+        Some(star) => stripped
+            .into_iter()
+            .filter(|p| {
+                let t = p.trim();
+                t.starts_with('*') || t.split('=').next().unwrap_or(t).trim() != star
+            })
+            .collect(),
+        None => stripped,
+    };
+    out.join(", ")
+}
+
+/// 剥离 Cython 特有语法，使产物可作为纯 Python 运行（项目验证约定）。
+/// 规则（行级保守剥离）：
+/// - `cdef class X` → `class X`
+/// - 函数行（def/cpdef/cdef）：剥 C 风格参数类型、`-> <ret>` 返回标注、cpdef/cdef 前缀
+/// - 字段声明 `cdef ...`（无括号）→ 注释（__init__ 动态属性赋值仍生效）
+/// - `cimport ...` / `from cpython ...` / `@cython.*` 装饰器 → 注释
+fn strip_cython_syntax(code: &str) -> String {
+    code.lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let indent: String = line.chars().take(line.len() - trimmed.len()).collect();
+            let is_fn_line = trimmed.starts_with("def ")
+                || trimmed.starts_with("cpdef ")
+                || trimmed.starts_with("cdef ")
+                || trimmed.starts_with("async def ");
+            if trimmed.starts_with("cdef class ") {
+                format!("{indent}{}", trimmed.replacen("cdef ", "", 1))
+            } else if is_fn_line && trimmed.contains('(') {
+                // 函数定义行：统一剥前缀/返回标注/参数 C 类型
+                let is_async = trimmed.starts_with("async def ");
+                let body = trimmed
+                    .trim_start_matches("async def ")
+                    .trim_start_matches("cpdef ")
+                    .trim_start_matches("cdef ");
+                let name_part = match (body.find('('), body.rfind(')')) {
+                    (Some(paren), Some(close)) if close > paren => {
+                        let fname = body[..paren]
+                            .split_whitespace()
+                            .last()
+                            .unwrap_or("");
+                        let params = strip_param_types(&body[paren + 1..close]);
+                        // 剥 `-> <ret>` 返回标注，但保留冒号后的单行函数体（如 `...`）
+                        let suffix = &body[close + 1..];
+                        let suffix = match suffix.find(" -> ") {
+                            Some(arrow) => match suffix[arrow..].find(':') {
+                                Some(colon) => format!(":{}", &suffix[arrow + colon + 1..]),
+                                None => suffix[..arrow].to_string() + ":",
+                            },
+                            None => suffix.to_string(),
+                        };
+                        format!("{}def {fname}({params}){suffix}", if is_async { "async " } else { "" })
+                    }
+                    _ => format!("# [pyrun] {trimmed}"),
+                };
+                format!("{indent}{name_part}")
+            } else if trimmed.starts_with("cdef ")
+                || trimmed.starts_with("ctypedef ")
+                || trimmed.starts_with("cimport ")
+                || trimmed.starts_with("from cpython ")
+                || trimmed.starts_with("@cython.")
+            {
+                format!("{indent}# [pyrun] {trimmed}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// ─────────────────────────── 子命令 ───────────────────────────
+
+fn cmd_transpile(args: &[String]) {
+    let (mut rest, out_dir) = extract_out_dir(args);
+    rest.retain(|a| !a.starts_with("--backend"));
+    rest.retain(|a| !a.starts_with("--frontend"));
+    let Some(input) = rest.first() else {
+        eprintln!("用法: lzcyc transpile <file.lz> [-o <dir>] [--backend=rust] [--frontend=lz]");
+        std::process::exit(1);
+    };
+    let input = Path::new(input);
+    // M5 Lane B：--frontend=lz 一致性门禁（diff 非空即非零退出），过门后再走常规管线
+    if args.iter().any(|a| a == "--frontend=lz") {
+        frontend_lz_gate(input);
+    }
+    let pyx = match transpile_source(input) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let out_path = pyx_output_path(input, out_dir.as_deref());
+    if let Some(dir) = out_path.parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+    match fs::write(&out_path, &pyx) {
+        Ok(_) => println!("transpile: {} → {}", input.display(), out_path.display()),
+        Err(e) => {
+            eprintln!("Error writing {}: {}", out_path.display(), e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_compile(args: &[String]) {
+    let (mut rest, out_dir) = extract_out_dir(args);
+    rest.retain(|a| !a.starts_with("--backend"));
+    rest.retain(|a| !a.starts_with("--frontend"));
+    let Some(input) = rest.first() else {
+        eprintln!("用法: lzcyc compile <file.lz> [-o <dir>] [--backend=rust] [--frontend=lz]");
+        std::process::exit(1);
+    };
+    let input = Path::new(input);
+    // M5 Lane B：--frontend=lz 一致性门禁
+    if args.iter().any(|a| a == "--frontend=lz") {
+        frontend_lz_gate(input);
+    }
+
+    // 1) transpile
+    let pyx = match transpile_source(input) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let out_path = pyx_output_path(input, out_dir.as_deref());
+    if let Some(dir) = out_path.parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+    if let Err(e) = fs::write(&out_path, &pyx) {
+        eprintln!("Error writing {}: {}", out_path.display(), e);
+        std::process::exit(1);
+    }
+    println!("transpile: {} → {}", input.display(), out_path.display());
+
+    // 2) 后端编译（M3 T0r55.4.1）：--backend=rust 走 rustc（与 lzc 同尺），
+    //    默认 Cython 走 cythonize（调 CY/scripts/cython_build.py；.c → .pyd 需要本机 C 编译器）
+    if backend_is_rust() {
+        let exe_out = out_path.with_file_name(format!(
+            "{}.exe",
+            out_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output")
+        ));
+        let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib");
+        let status = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&out_path)
+            .arg("--extern")
+            .arg(format!("lz_builtins={}", builtins.display()))
+            .arg("-L")
+            .arg(format!(
+                "dependency={}",
+                builtins.parent().unwrap().join("deps").display()
+            ))
+            .arg("-o")
+            .arg(&exe_out)
+            .status();
+        match status {
+            Ok(s) if s.success() => println!("compile: {} → {} OK", out_path.display(), exe_out.display()),
+            Ok(s) => {
+                eprintln!("rustc 编译失败（退出码 {:?}）", s.code());
+                std::process::exit(1);
+            }
+            Err(e) => {
+                eprintln!("无法启动 rustc: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Cython：cythonize（调 CY/scripts/cython_build.py；.c → .pyd 需要本机 C 编译器）
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/cython_build.py");
+    let status = Command::new("python")
+        .arg(&script)
+        .arg(&out_path)
+        .arg(out_path.parent().unwrap_or(Path::new(".")))
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            println!("compile: {} cythonize OK", out_path.display());
+            println!("提示: 生成 .pyd 需要本机 C 编译器（GCC/MSVC）；");
+            println!("  也可用 pyximport 直接导入 .pyx 运行。");
+        }
+        Ok(s) => {
+            eprintln!("cythonize 失败（退出码 {:?}）", s.code());
+            eprintln!("请确认 python 环境已安装 cython: pip install cython");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("无法启动 python: {e}");
+            eprintln!("compile 命令需要 python + cython 环境（pip install cython）；");
+            eprintln!("仅转译可使用: lzcyc transpile <file.lz>");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_run(args: &[String]) {
+    let (mut rest, out_dir) = extract_out_dir(args);
+    rest.retain(|a| !a.starts_with("--backend"));
+    rest.retain(|a| !a.starts_with("--frontend"));
+    let Some(input) = rest.first() else {
+        eprintln!("用法: lzcyc run <file.lz> [func] [--backend=rust] [--frontend=lz]");
+        std::process::exit(1);
+    };
+    let func = rest.get(1).cloned().unwrap_or_else(|| "main".to_string());
+    let input = Path::new(input);
+    // M5 Lane B：--frontend=lz 一致性门禁（rust 早分支前先过门）
+    if args.iter().any(|a| a == "--frontend=lz") {
+        frontend_lz_gate(input);
+    }
+
+    // M3 T0r55.4.1：--backend=rust 早分支——transpile 产 .rs → rustc → 直接跑 exe
+    // （与 lzc 单文件编译运行同尺，绕过整条 Cython pyximport 管线）
+    if backend_is_rust() {
+        let rs_out = match transpile_source(input) {
+            Ok(code) => code,
+            Err(e) => { eprintln!("{e}"); std::process::exit(1); }
+        };
+        let run_dir = out_dir.as_deref().map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output/rsrun"));
+        let _ = fs::create_dir_all(&run_dir);
+        let stem = input.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let rs_path = run_dir.join(format!("{stem}.rs"));
+        let exe_path = run_dir.join(format!("{stem}.exe"));
+        if let Err(e) = fs::write(&rs_path, &rs_out) {
+            eprintln!("Error writing {}: {}", rs_path.display(), e);
+            std::process::exit(1);
+        }
+        let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib");
+        let status = Command::new("rustc")
+            .args(["--edition", "2021"])
+            .arg(&rs_path)
+            .arg("--extern")
+            .arg(format!("lz_builtins={}", builtins.display()))
+            .arg("-L")
+            .arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display()))
+            .arg("-o")
+            .arg(&exe_path)
+            .status();
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => { eprintln!("rustc 编译失败（退出码 {:?}）", s.code()); std::process::exit(1); }
+            Err(e) => { eprintln!("无法启动 rustc: {e}"); std::process::exit(1); }
+        }
+        // 入口固定调 main（LZ 运行期约定；func 参数仅 Cython 侧支持）
+        let run = Command::new(&exe_path).status();
+        match run {
+            Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+            Err(e) => { eprintln!("无法运行 {}: {e}", exe_path.display()); std::process::exit(1); }
+        }
+    }
+
+    let stem = input
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "output".to_string());
+
+    // run 的 .pyx 产物固定落 output/pyrun（避免污染 TESTS 参考目录）；
+    // 显式 -o 时尊重用户指定
+    let pyx_path = match out_dir.as_deref() {
+        Some(dir) => pyx_output_path(input, Some(dir)),
+        None => {
+            let pyrun_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output/pyrun");
+            let stem = input
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "output".to_string());
+            pyrun_dir.join(format!("{stem}.pyx"))
+        }
+    };
+    let module_dir = pyx_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // 1) transpile（run 前置：确保 .pyx 为最新）
+    let pyx = match transpile_source(input) {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    if let Some(dir) = pyx_path.parent() {
+        if !dir.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(dir);
+        }
+    }
+    if let Err(e) = fs::write(&pyx_path, &pyx) {
+        eprintln!("Error writing {}: {}", pyx_path.display(), e);
+        std::process::exit(1);
+    }
+
+    // 2) 探测 cython 可用性，选择运行路径
+    let has_cython = Command::new("python")
+        .args(["-c", "import cython"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let (code, note): (String, &str) = if has_cython {
+        // Cython 可用：pyximport 即时编译导入（本机有 C 编译器时生成 .pyd 缓存）。
+        // 修复 1：把 PyxImportMetaFinder 提到 meta_path 首位，避免 `enum`/`struct` 等
+        //   stdlib 同名模块被前置 finder 抢先导入（实测 `module 'enum' has no attribute 'main'`）。
+        // 修复 2：编译失败（环境升级后 distutils 不再识别 `--cython-c-in-temp`，
+        //   或 Cython 语法错误）时回退到剥离语法的 .py 降级加载，保证验证约定可跑。
+        let pyrun_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output/pyrun");
+        let _ = fs::create_dir_all(&pyrun_dir);
+        let py_path = pyrun_dir.join(format!("{stem}.py"));
+        if let Err(e) = fs::write(&py_path, strip_cython_syntax(&pyx)) {
+            eprintln!("Error writing {}: {}", py_path.display(), e);
+            std::process::exit(1);
+        }
+        (
+            format!(
+                concat!(
+                    "import sys, types\n",
+                    "try:\n",
+                    "    import cython\n",
+                    "except ImportError:\n",
+                    "    sys.modules['cython'] = types.ModuleType('cython')\n",
+                    "sys.path.insert(0, r'{module_dir_disp}')\n",
+                    "import pyximport; pyximport.install()\n",
+                    "import pyximport.pyximport as _pp\n",
+                    "for _i, _f in enumerate(sys.meta_path):\n",
+                    "    if isinstance(_f, _pp.PyxImportMetaFinder):\n",
+                    "        sys.meta_path.pop(_i); sys.meta_path.insert(0, _f); break\n",
+                    "sys.modules.pop('{stem}', None)\n",
+                    "try:\n",
+                    "    import {stem}\n",
+                    "except Exception:\n",
+                    "    sys.meta_path[:] = [_f for _f in sys.meta_path if not isinstance(_f, _pp.PyxImportMetaFinder)]\n",
+                    "    sys.path.insert(0, r'{pyrun_dir_disp}')\n",
+                    "    import {stem}\n",
+                    "getattr({stem}, '{func}')()",
+                ),
+                module_dir_disp = module_dir.display(),
+                pyrun_dir_disp = pyrun_dir.display(),
+                stem = stem,
+                func = func,
+            ),
+            "pyximport",
+        )
+    } else {
+        // 纯 Python 降级运行（验证约定）：剥离 Cython 特有语法后作为 .py 模块运行。
+        // struct/enum 产物含 cdef class/cpdef，经 strip_cython_syntax 保守剥离；
+        // 对 `import cython` 行注入空模块 stub 以脱离 cython 包依赖。
+        let pyrun_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("output/pyrun");
+        let _ = fs::create_dir_all(&pyrun_dir);
+        let py_path = pyrun_dir.join(format!("{stem}.py"));
+        let py_code = strip_cython_syntax(&pyx);
+        if let Err(e) = fs::write(&py_path, &py_code) {
+            eprintln!("Error writing {}: {}", py_path.display(), e);
+            std::process::exit(1);
+        }
+        (
+            format!(
+                "import sys, types\n\
+                 try:\n    import cython\n\
+                 except ImportError:\n    sys.modules['cython'] = types.ModuleType('cython')\n\
+                 sys.path.insert(0, r'{}')\n\
+                 import {stem}\n\
+                 getattr({stem}, '{func}')()",
+                pyrun_dir.display()
+            ),
+            "py 降级",
+        )
+    };
+
+    match Command::new("python").arg("-c").arg(&code).status() {
+        Ok(s) if s.success() => println!("run: {stem}.{func}() OK（{note}）"),
+        Ok(s) => {
+            eprintln!("run 失败（退出码 {:?}）", s.code());
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("无法启动 python: {e}");
+            eprintln!("run 命令需要 python 环境（建议同时安装 cython: pip install cython）");
+            std::process::exit(1);
+        }
+    }
+}

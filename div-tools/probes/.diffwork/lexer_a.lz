@@ -1,0 +1,40 @@
+// ═══════════════════════════════════════════════════════════════
+// 自举试点 3：用 LZ 实现 LZ 词法分析核心（对齐 src/lexer/token.rs）
+// 覆盖：Token 枚举（带值变体）+ tokenize 简化版（标识符/整数/字符串/
+//       运算符/标点）——验证「LZ 写编译器前端」可行性，暴露 codegen 缺陷
+// ═══════════════════════════════════════════════════════════════
+
+// ── Token（对齐 token.rs 核心子集）──
+enum Token:
+    Def
+    Struct
+    If
+    Else
+    Return
+    IntLit(v: int)
+    StrLit(s: str)
+    Ident(name: str)
+    Plus
+    Minus
+    Star
+    Slash
+    Eq
+    EqEq
+    Colon
+    Comma
+    Dot
+    LParen
+    RParen
+    LBrace
+    RBrace
+    Newline
+    Eof
+
+// ── 关键字表（简化）──
+def is_keyword(s: str) -> bool =
+    s == "def" || s == "struct" || s == "if" || s == "else" || s == "return"
+
+// ── 关键字 → Token ──
+def keyword_token(s: str) -> Token =
+    if s == "def":
+        Token.Def

@@ -1,0 +1,223 @@
+/target
+*.exe
+*.pdb
+
+# generated .rs output from lzc �? keep only source in src/
+*.rs
+!src/**/*.rs
+!tests/**/*.rs
+# workspace 成员�? Rust 源码必须入库（否则干净检出无法构建）
+!lz_builtins/**/*.rs
+!lz-infer/**/*.rs
+# std 目录�? Rust 桥接源（shims.rs，被 src/codegen 引用）同样必须入�?
+!std/**/*.rs
+# moddec golden 快照（测试冻结产物，必须入库）
+!DEMO/99_spec/moddec/golden/*.rs
+
+# generated LZ IR codegen intermediate (.lzlz �? .rs �? .exe) from --emit=ir-lz
+*.lzlz
+# generated LZ frontend capture output (.lzfront) from --emit=lex-lz
+*.lzfront
+
+# generated output directories
+test-suite/*/_work/
+test-suite/*/__pycache__/
+*.pyc
+
+# build artifacts
+*.o
+*.so
+*.dylib
+
+# workspace-specific
+.workbuddy/
+workbuddy/
+# 自举目录：只入库规范文档、脚本与 .lz 试点源（构建产物 .rs/.exe/log/backup 不入库）
+bootstrap/*
+!bootstrap/01-自举总纲.md
+!bootstrap/02-自举前置条件清单.md
+!bootstrap/03-自举执行计划.md
+!bootstrap/04-当前项目自举具体方案.md
+!bootstrap/05-自举里程碑台�?.md
+!bootstrap/06-自举交接续推文档.md
+!bootstrap/README.md
+!bootstrap/build.sh
+!bootstrap/build.ps1
+!bootstrap/rollback.sh
+!bootstrap/rollback.ps1
+!bootstrap/work/
+bootstrap/work/*
+!bootstrap/work/fail_drill.sh
+!bootstrap/work/*.lz
+!bootstrap/work/lz_ir/
+bootstrap/work/lz_ir/*
+!bootstrap/work/lz_ir/*.lz
+!bootstrap/work/lz_ir/*.ps1
+!bootstrap/work/lz_ir/README.md
+!bootstrap/work/lz_codegen/
+bootstrap/work/lz_codegen/*
+!bootstrap/work/lz_codegen/*.ps1
+!bootstrap/stage/
+bootstrap/stage/*
+!bootstrap/stage/*.ps1
+!bootstrap/stage/*.lz
+!bootstrap/stage/*.md
+!bootstrap/work/lz_lexer/
+bootstrap/work/lz_lexer/*
+!bootstrap/work/lz_lexer/*.lz
+!bootstrap/work/lz_parser/
+bootstrap/work/lz_parser/*
+!bootstrap/work/lz_parser/*.lz
+
+err.log
+demo_err.log
+demo_rc.log
+rc.log
+.trae/
+_bak/
+_mz/
+
+# build artifacts / compile cache (previously committed by mistake)
+*.rmeta
+*.rlib
+_ir_out/
+
+# temp test & analysis scripts/logs
+_*.py
+_*.txt
+temp_test_*.lz
+.test_meta/
+
+# generated test reports
+issue/test-report-*.md
+
+# local test/log artifacts (2026-08-19)
+*.log
+test_out*.txt
+test_list.txt
+build_pid.txt
+cargo_ir_out.txt
+temp/
+reports/
+omega/
+
+
+# FIND_BUG / ��ȱ�м����
+.diffwork/
+*.lzcache
+div-tools/syntax_matrix_out.txt
+*.lzi
+
+# FIND_BUG ����/�����м���2026-09-03��
+FIND_BUG/dbg_dump.txt
+FIND_BUG/test_results.txt
+FIND_BUG/*/debug/
+
+# ��Ŀ¼ɢ��Ĺ�����־��2026-09-03��
+build_err.txt
+build_out.txt
+iter_err.txt
+plugin/lz-zed/**/*.wasm
+plugin/lz-zed/**/*.dll
+plugin/lz-zed/**/*.obj
+plugin/lz-zed/**/*.lib
+plugin/lz-zed/**/*.exp
+
+# ���ع��߲���
+.freebuff/
+_work_0903/
+.probe_0903/
+*.lz.tmp
+
+# Build artifacts
+CY/output/
+CY/build_impl/
+CY/*.pyd
+CY/*.so
+FIND_BUG/**/*.rs
+FIND_BUG/**/*.exe
+FIND_BUG/**/*.pyx
+FIND_BUG/**/*.pyd
+BENCH/*.pyx
+BENCH/*.pyd
+BENCH/*.so
+BENCH/*.c
+BENCH/*.cp313-win_amd64.pyd
+plugin/output/*.pyx
+*.pyxbld
+
+# AI tooling artifacts
+.arts/
+.codegraph/
+.resultverify/
+Gen_Prompts/
+.watchdog_last_tick
+.watchdog_last_round
+nul
+lz_wc.txt
+lz_probe*.txt
+cron-auto-lang.db
+fist-mbt.db
+err.txt
+lz_check.txt
+lz_probe*.txt
+lz_prod_out.txt
+lz_test_out.txt
+lz_wc.txt
+
+# Temporary scripts
+.tmp_brace_check.py
+watchdog_check_state.py
+watchdog_client.py
+watchdog_client_debug.py
+watchdog_publish.py
+watchdog_tick.py
+watchdog_tick_client.py
+watchdog_tick_client_v2.py
+watchdog_tick_run.py
+Modified
+
+# === 2026-10-26: 封堵体积复发的遗漏项 ===
+# 任意层级的 cargo 构建目录（含 CY/target 等，避免构建产物再次入库）
+**/target/
+# 测试探针生成的 IR 中间产物（_probes/*.lzrs 等）
+*.lzrs
+# 大写临时目录（TEMP/ 为历史散落 scratch，不应入库）
+TEMP/
+# 根级散落构建产物
+*.dll
+*.obj
+
+# === 2026-10-27: 封堵 _probes 生成物泄漏，仅放行 17 个已跟踪合法文件 ===
+# _probes 是测试探针输出目录，除下列已跟踪源码外，全部为生成物。
+# 先忽略整个目录，再逐项放行合法文件（gitignore 不影响已跟踪文件，放行仅为语义清晰）。
+/_probes/**
+!/_probes/rslz4/
+!/_probes/rslz4/.gitignore
+!/_probes/rslz4/broad.lz
+!/_probes/rslz4/cast.lz
+!/_probes/rslz4/dict_lit.lz
+!/_probes/rslz4/g434_trait_assoc.lz
+!/_probes/rslz4/g436_range_filter.lz
+!/_probes/rslz4/g438_sorted.lz
+!/_probes/rslz4/g446_tuple.lz
+!/_probes/rslz4/g450_contains.lz
+!/_probes/rslz4/g462_self_dict_index.lz
+!/_probes/rslz4/g463_nested_dict.lz
+!/_probes/rslz4/g464_plain_dict.lz
+!/_probes/rslz4/match_probe.lz
+!/_probes/rslz4/trait_only.lz
+!/_probes/rslz4/trait_show.lz
+!/_probes/rslz4/user_sum.lz
+!/_probes/rssweep.sh
+
+# --- 运行时产物 / 垃圾（2026-10-27 收尾） ---
+.fist-night/
+.fist-mbt/
+.fist-explore-cron/
+backup/
+build_out*.txt
+build_err*.txt
+CY/TESTS/**/*.txt
+CY/TESTS/**/*.staler*
+CY/TESTS/**/*.exp.staler*

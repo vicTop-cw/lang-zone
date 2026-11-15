@@ -1,0 +1,104 @@
+// lz-zed test fixture: 07-control-flow — 控制流结构
+// Authority: SYNTAX/05-控制流.md
+
+# if / elif / else 与三元
+def sign(n: int) -> str =
+    if n > 0:
+        "positive"
+    elif n < 0:
+        "negative"
+    else:
+        "zero"
+
+let status = "pass" if score >= 60 else "fail"
+
+# if 作为表达式
+let grade = if n > 0:
+        "A"
+    else:
+        "F"
+
+# match / case（冒号形式 + 胖箭头形式 + 模式）
+def describe(v: int) -> str =
+    match v:
+        case 0:
+            "zero"
+        case 1 => "one"
+        case x if x > 10 => "big"
+        case _ => "other"
+
+def nested(result: Result<int, str>) -> str =
+    match result:
+        case Ok(Some(v)):
+            f"got {v}"
+        case Err(e):
+            f"error: {e}"
+
+# for / while / loop / else 子句
+def find_index(arr: List<int>, target: int) -> int =
+    for (i, val) in enumerate(arr):
+        if val == target:
+            return i
+    else:
+        return -1
+
+def countdown(n: int) -> int =
+    i = n
+    while i > 0:
+        i -= 1
+    loop:
+        if i >= n:
+            break
+        i += 1
+    i
+
+# for 守卫与声明式 for
+def filtered(xs: List<int>) -> List<int> =
+    out = []
+    for x in xs if x > 0:
+        out.append(x)
+    out
+
+let total = sum x in arr: x * x
+let fact = prod i in 1..n: i
+
+# block 命名作用域与标签跳出
+def search(grid: List<List<int>>) -> int =
+    found = -1
+    block outer:
+        for i in grid:
+            for j in i:
+                if j == 42:
+                    found = j
+                    break outer
+    found
+
+# guard / guard let / while let
+def safe_div(a: int, b: int) -> int =
+    guard b != 0 else 0
+    a / b
+
+def greet(name: Option<str>) -> str =
+    guard let Some(n) = name else:
+        "no name"
+    f"hello {n}"
+
+def consume(it: Iterator<int>) -> int =
+    total = 0
+    while let Some(item) = it.next():
+        total += item
+    total
+
+# break / continue 带值与带标签
+def loop_value(xs: List<int>) -> int =
+    let r = for i in xs:
+        if i > 5:
+            break with i
+    r
+
+# defer / with
+def process_file(path: str) -> str =
+    with open(path) as f:
+        content = f.read()
+    defer cleanup()
+    content

@@ -1,0 +1,14 @@
+// find_bug/syntax/bug-syntax-build-return.lz
+// BUG-SG-004: =: 构建块赋值表达式返回值
+
+def test_build_return() =
+  // =: 块最终表达式的值作为整体值
+  result =:
+    x = 10
+    y = 20
+    x + y
+  print("result =: block:", result)
+  assert result == 30
+
+def main() =
+  test_build_return()

@@ -1,0 +1,5 @@
+# Test: val variable valid usage
+def main() -> int:
+    val x: int = 1
+    let y: int = x + 1
+    return x + y

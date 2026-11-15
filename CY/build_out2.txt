@@ -1,0 +1,15 @@
+   Compiling lang-zone v0.1.0 (E:\IDEProjects\AI\lang-zone)
+error: expected one of `:` or `|`, found `.`
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\mod.rs:760:183
+    |
+760 | ...80d00eb9a11946f2\temp\stage2.log", "[BI] enter\n").unwrap();
+    |                                                      ^ expected one of `:` or `|`
+
+error[E0425]: cannot find function `init_ctx` in this scope
+   --> E:\IDEProjects\AI\lang-zone\src\ir\builder\mod.rs:768:5
+    |
+768 |     init_ctx(&mut ctx);
+    |     ^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `lang-zone` (lib) due to 2 previous errors

@@ -1,0 +1,13 @@
+// enum 带数据变体测试（元组变体语法）
+enum Shape:
+    Circle(f64, f64, f64)
+    Rect(f64, f64)
+    Point
+
+def main() =
+    let c = Shape.Circle(0.0, 0.0, 5.0)
+    let r = Shape.Rect(10.0, 20.0)
+    let p = Shape.Point()
+    print(c)
+    print(r)
+    print(p)

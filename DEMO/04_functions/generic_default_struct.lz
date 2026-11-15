@@ -1,0 +1,6 @@
+struct Wrapper<T = int> =
+    value: T
+
+def main() =
+    let w = Wrapper(value: 42)
+    print(w.value)

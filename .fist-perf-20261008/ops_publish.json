@@ -1,0 +1,9 @@
+[
+ {"tool":"publish","args":{
+   "project_dir":"E:\\IDEProjects\\AI\\lang-zone",
+   "namespace":"perf-opt",
+   "created_by":"human_steward",
+   "description":"按 Gen_Prompts/lz_性能优化建议书.md 实施 lz 编译器性能优化：方向A(IR opt pass层: 常量折叠/死代码消除/冗余绑定合并, --opt=0/1/2)、方向B(分配消除与借用优化: 逃逸分析/循环缓冲提升)、方向C(增量编译与缓存全链路落地, 单文件与工程路径统一走 IncrCompiler)、方向D(rustc 调用优化: --emit=obj 缓存/--check 快路径/分段计时)、方向E(codegen 产物形态对标手写 Rust: 消除防御性 clone 与冗余包装, Vec::with_capacity 预分配)。验收闸门：cargo test -j 1 全绿 + demo_codegen_compile 2/0 + golden 输出一致 + 基准耗时/内存下降。"}},
+ {"tool":"status_summary","args":{"namespace":"perf-opt"}},
+ {"tool":"list","args":{"namespace":"perf-opt"}}
+]

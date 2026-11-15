@@ -1,0 +1,7 @@
+def main() =
+    let s = "中文字符串 hello"
+    println(s.len())
+    println(s)
+    let c = "中"
+    println(c.len())
+    println(c)

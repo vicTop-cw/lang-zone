@@ -1,0 +1,923 @@
+
+running 426 tests
+test bridge::core::tests::test_bridge_capabilities_flags ... ok
+test bridge::cli::tests::test_cli_bridge_capabilities ... ok
+test bridge::cli::tests::test_cli_bridge_generate_empty ... ok
+test bridge::cli::tests::test_cli_bridge_empty ... ok
+test ast::modifier::tests::empty_is_empty ... ok
+test ast::modifier::tests::basic_decorator_equivalence ... ok
+test ast::modifier::tests::merge_let_conflict ... ok
+test ast::modifier::tests::fusion_expands_to_axes ... ok
+test ast::modifier::tests::unknown_decorator_is_err ... ok
+test ast::modifier::tests::merge_idempotent_same_axis ... ok
+test ast::modifier::tests::merge_axis_conflict ... ok
+test ast::modifier::tests::merge_orthogonal_is_ok ... ok
+test bridge::core::tests::test_bridge_error_display ... ok
+test bridge::core::tests::test_best_for_prefers_compile_time ... ok
+test bridge::cli::tests::test_cli_bridge_line_protocol_format ... ok
+test bridge::cli::tests::test_cli_bridge_call ... ok
+test bridge::cli::tests::test_cli_bridge_generate_with_endpoints ... ok
+test bridge::cli::tests::test_cli_bridge_register ... ok
+test bridge::core::tests::test_bridge_level_ordering ... ok
+test bridge::core::tests::test_bridge_meta_default ... ok
+test bridge::core::tests::test_call_arg_count_mismatch_returns_e_type ... ok
+test bridge::core::tests::test_call_lang_not_supported_returns_e_lang ... ok
+test bridge::core::tests::test_bridge_health_method ... ok
+test bridge::core::tests::test_call_resolve_result_simple ... ok
+test bridge::core::tests::test_call_success_records_ledger ... ok
+test bridge::core::tests::test_batch_import ... ok
+test bridge::core::tests::test_call_symbol_not_found_returns_e_sym ... ok
+test bridge::core::tests::test_error_domain ... ok
+test bridge::core::tests::test_error_retryable ... ok
+test bridge::core::tests::test_export_kind_values ... ok
+test bridge::core::tests::test_find_by_capability ... ok
+test bridge::core::tests::test_health_status_healthy ... ok
+test bridge::core::tests::test_health_status_unknown ... ok
+test bridge::core::tests::test_message_envelope ... ok
+test bridge::core::tests::test_message_response_matches_request ... ok
+test bridge::core::tests::test_method_resolve_result_identity ... ok
+test bridge::core::tests::test_method_resolve_result_mapped ... ok
+test bridge::core::tests::test_ping_message ... ok
+test bridge::core::tests::test_register_symbol_and_lookup ... ok
+test bridge::core::tests::test_register_symbol_dup_returns_e_dup ... ok
+test bridge::core::tests::test_registry_deregister ... ok
+test bridge::core::tests::test_registry_deregister_nonexistent ... ok
+test bridge::core::tests::test_registry_empty ... ok
+test bridge::core::tests::test_list_exports_functions ... ok
+test bridge::core::tests::test_registry_register_and_find ... ok
+test bridge::core::tests::test_registry_names ... ok
+test bridge::core::tests::test_list_exports_types ... ok
+test bridge::core::tests::test_registry_register_with_deps_missing ... ok
+test bridge::core::tests::test_registry_register_with_deps_success ... ok
+test bridge::core::tests::test_registry_resolve_import_fallback ... ok
+test bridge::core::tests::test_registry_stats ... ok
+test bridge::core::tests::test_signature_param_count ... ok
+test bridge::embed::tests::test_capabilities_no_import ... ok
+test bridge::embed::tests::test_embed_bridge_new ... ok
+test bridge::embed::tests::test_embed_bridge_server_client ... ok
+test bridge::embed::tests::test_embed_bridge_shm_path ... ok
+test bridge::embed::tests::test_embed_bridge_with_size ... ok
+test bridge::embed::tests::test_embed_constants ... ok
+test bridge::embed::tests::test_empty_bridge ... ok
+test bridge::embed::tests::test_export_count ... ok
+test bridge::embed::tests::test_generate_export_wrappers ... ok
+test bridge::core::tests::test_resolve_method_full ... ok
+test bridge::core::tests::test_resolve_call_full_with_source_bridge ... ok
+test bridge::embed::tests::test_generate_host_module ... ok
+test bridge::embed::tests::test_generate_host_module_contains_all_funcs ... ok
+test bridge::embed::tests::test_generate_lz_shims ... ok
+test bridge::embed::tests::test_header_is_valid ... ok
+test bridge::embed::tests::test_host_func_count ... ok
+test bridge::core::tests::test_total_exports_count ... ok
+test bridge::embed::tests::test_list_exports_functions ... ok
+test bridge::embed::tests::test_list_exports_modules ... ok
+test bridge::embed::tests::test_meta_description ... ok
+test bridge::embed::tests::test_request_response_default ... ok
+test bridge::embed::tests::test_resolve_call ... ok
+test bridge::embed::tests::test_resolve_call_full ... ok
+test bridge::embed::tests::test_resolve_call_unknown ... ok
+test bridge::embed::tests::test_resolve_import_embed_host ... ok
+test bridge::embed::tests::test_resolve_import_non_embed_ignored ... ok
+test bridge::embed::tests::test_resolve_import_short_path ... ok
+test bridge::embed::tests::test_resolve_import_unknown_func ... ok
+test bridge::ledger::tests::test_ledger_append_memory ... ok
+test bridge::ledger::tests::test_ledger_record_tsv_roundtrip ... ok
+test bridge::ffi::tests::test_ffi_bridge_capabilities ... ok
+test bridge::ffi::tests::test_ffi_bridge_call ... ok
+test bridge::r#extern::tests::test_capabilities_no_import ... ok
+test bridge::r#extern::tests::test_empty_bridge ... ok
+test bridge::r#extern::tests::test_export_count ... ok
+test bridge::ffi::tests::test_ffi_bridge_load ... ok
+test bridge::r#extern::tests::test_extern_bridge_new ... ok
+test bridge::core::tests::test_ledger_path_and_report ... ok
+test bridge::r#extern::tests::test_gen_import ... ok
+test bridge::ffi::tests::test_ffi_bridge_extern_block ... ok
+test bridge::r#extern::tests::test_generate_cargo_hints ... ok
+test bridge::ffi::tests::test_ffi_bridge_link_attrs ... ok
+test bridge::r#extern::tests::test_generate_extern_blocks ... ok
+test bridge::ffi::tests::test_ffi_bridge_safe_wrappers ... ok
+test bridge::r#extern::tests::test_generate_extern_blocks_void_return ... ok
+test bridge::r#extern::tests::test_generate_safe_wrappers ... ok
+test bridge::r#extern::tests::test_inline_function ... ok
+test bridge::r#extern::tests::test_link_attr_for_non_std_crate ... ok
+test bridge::r#extern::tests::test_list_exports_functions ... ok
+test bridge::r#extern::tests::test_list_exports_modules ... ok
+test bridge::r#extern::tests::test_multiple_blocks_independent ... ok
+test bridge::python::tests::test_pyo3_bridge_gen_call ... ok
+test bridge::r#extern::tests::test_register_fn ... ok
+test bridge::r#extern::tests::test_resolve_call_direct_symbol ... ok
+test bridge::python::tests::test_pyo3_bridge_load ... ok
+test bridge::r#extern::tests::test_resolve_call_extern_prefix ... ok
+test bridge::r#extern::tests::test_resolve_call_full ... ok
+test bridge::r#extern::tests::test_resolve_call_unknown ... ok
+test bridge::r#extern::tests::test_resolve_import_extern_rayon ... ok
+test bridge::r#extern::tests::test_resolve_import_extern_serde ... ok
+test bridge::r#extern::tests::test_resolve_import_nested_path ... ok
+test bridge::r#extern::tests::test_resolve_import_non_extern_ignored ... ok
+test bridge::r#extern::tests::test_resolve_import_short_path_ignored ... ok
+test bridge::r#extern::tests::test_safe_wrapper_void ... ok
+test bridge::r#extern::tests::test_used_crates ... ok
+test bridge::python::tests::test_pyo3_list_exports ... ok
+test bridge::rust::tests::test_crate_not_registered ... ok
+test bridge::rust::tests::test_ignore_non_bridge ... ok
+test bridge::rust::tests::test_ignore_short_path ... ok
+test bridge::python::tests::test_pyo3_module_generation ... ok
+test bridge::python::tests::test_pyo3_forward_shims_generation ... ok
+test bridge::rust::tests::test_import_rust_crate ... ok
+test bridge::rust::tests::test_import_rust_nested ... ok
+test bridge::rust::tests::test_resolve_call ... ok
+test bridge::rust::tests::test_resolve_type ... ok
+test bridge::rust::tests::test_route_patterns ... ok
+test bridge::python::tests::test_pyo3_forward_import_and_call ... ok
+test bridge::ledger::tests::test_ledger_disk_append_and_report ... ok
+test bridge::std::tests::test_load_fallback_consistent ... ok
+test bridge::std::tests::test_load_fallback_empty ... ok
+test bridge::std::tests::test_resolve_call_fallback_none ... ok
+test bridge::source::tests::test_source_bridge_call ... ok
+test bridge::source::tests::test_source_bridge_import ... ok
+test bridge::source::tests::test_source_bridge_create ... ok
+test bridge::std::tests::test_resolve_import_fallback_non_std ... ok
+test bridge::source::tests::test_source_bridge_method ... ok
+test bridge::source::tests::test_source_bridge_resolve_import_full ... ok
+test bridge::source::tests::test_source_bridge_shims ... ok
+test bridge::source::tests::test_source_bridge_tier2_off_by_default ... ok
+test bridge::source::tests::test_source_bridge_type ... ok
+test bridge::std::tests::test_all_24_modules_load ... ok
+test bridge::std::tests::test_contains_method_unified ... ok
+test bridge::std::tests::test_load_bridge_has_modules ... ok
+test bridge::std::tests::test_load_bridge_has_type_aliases ... ok
+test bridge::std::tests::test_load_bridge_success ... ok
+test bridge::std::tests::test_map_filter_unified ... ok
+test bridge::std::tests::test_no_weak_type_conflict ... ok
+test bridge::std::tests::test_resolve_call_in_core ... ok
+test bridge::std::tests::test_resolve_call_nonexistent ... ok
+test bridge::std::tests::test_resolve_call_print_function ... ok
+test bridge::std::tests::test_resolve_call_unknown ... ok
+test bridge::std::tests::test_resolve_import_deeply_nested ... ok
+test bridge::std::tests::test_resolve_method_fallback_always_identity ... ok
+test bridge::std::tests::test_resolve_import_empty_path ... ok
+test bridge::std::tests::test_resolve_import_io_with_aliases ... ok
+test bridge::std::tests::test_resolve_import_non_std_identity ... ok
+test bridge::std::tests::test_resolve_import_non_std_slashes ... ok
+test bridge::std::tests::test_resolve_import_single_element_std ... ok
+test bridge::std::tests::test_resolve_import_std_collections ... ok
+test bridge::std::tests::test_resolve_import_std_fs ... ok
+test bridge::std::tests::test_resolve_import_std_io ... ok
+test bridge::std::tests::test_rewrite_type_fallback_none ... ok
+test bridge::std::tests::test_resolve_import_tier2_allowed_with_flag ... ok
+test bridge::std::tests::test_resolve_import_tier2_denied_by_default ... ok
+test bridge::std::tests::test_resolve_import_with_alias_path ... ok
+test bridge::std::tests::test_resolve_import_unknown_std_module_identity ... ok
+test bridge::std::tests::test_load_bridge_twice_idempotent ... ok
+test bridge::std::tests::test_resolve_import_with_items ... ok
+test bridge::std::tests::test_resolve_method_all_str_aliases ... ok
+test bridge::std::tests::test_resolve_import_with_kebab_case_module ... ok
+test bridge::std::tests::test_shims_required_fallback_empty ... ok
+test bridge::std::tests::test_resolve_method_all_vec_aliases ... ok
+test bridge::std::tests::test_resolve_method_case_sensitive ... ok
+test bridge::std::tests::test_resolve_method_empty_string ... ok
+test bridge::std::tests::test_resolve_method_global_fallback ... ok
+test cache::tests::entry_parse_no_deps ... ok
+test cache::tests::entry_parse_roundtrip ... ok
+test bridge::std::tests::test_resolve_method_is_empty_alias ... ok
+test bridge::std::tests::test_resolve_method_len_alias ... ok
+test hotreload::tests::replace_ext_works ... ok
+test incr::tests::incr_cache_key_stable ... ok
+test ir::codegen::moddec_emit::tests::atomic_type_bool_and_aliases ... ok
+test ir::codegen::moddec_emit::tests::atomic_type_integer_mapping ... ok
+test bridge::std::tests::test_resolve_method_push_alias ... ok
+test ir::codegen::moddec_emit::tests::atomic_type_non_scalar_is_placeholder ... ok
+test bridge::std::tests::test_resolve_method_starts_with_alias ... ok
+test ir::codegen::moddec_emit::tests::composite_arc_atomic_i64_matches_l4 ... ok
+test ir::codegen::moddec_emit::tests::composite_arc_mutex ... ok
+test bridge::std::tests::test_resolve_method_time_duration ... ok
+test ir::codegen::moddec_emit::tests::composite_arc_rwlock ... ok
+test ir::codegen::moddec_emit::tests::composite_rc_refcell ... ok
+test ir::codegen::moddec_emit::tests::static_decl_with_init ... ok
+test ir::codegen::moddec_emit::tests::static_decl_without_init_is_lazylock ... ok
+test ir::codegen::moddec_emit::tests::wrap_interior_atomic_delegates_to_scalar_mapping ... ok
+test bridge::std::tests::test_resolve_method_unknown_identity ... ok
+test ir::codegen::moddec_emit::tests::wrap_interior_cell ... ok
+test hotreload::tests::collect_deps_finds_imports ... ok
+test ir::codegen::moddec_emit::tests::wrap_interior_mutex ... ok
+test ir::codegen::moddec_emit::tests::wrap_interior_none_is_identity ... ok
+test ir::codegen::moddec_emit::tests::wrap_interior_refcell ... ok
+test bridge::std::tests::test_rewrite_type_case_sensitive ... ok
+test ir::codegen::moddec_emit::tests::wrap_interior_rwlock ... ok
+test bridge::std::tests::test_rewrite_type_io_error ... ok
+test ir::codegen::moddec_emit::tests::wrap_lazy_basic_default_is_oncecell ... ok
+test ir::codegen::moddec_emit::tests::wrap_lazy_local_is_oncecell ... ok
+test bridge::std::tests::test_rewrite_type_never ... ok
+test ir::codegen::moddec_emit::tests::wrap_lazy_once_is_oncelock ... ok
+test bridge::std::tests::test_rewrite_type_not_in_any_module ... ok
+test ir::codegen::moddec_emit::tests::wrap_lazy_static_is_oncelock ... ok
+test ir::codegen::moddec_emit::tests::wrap_lazy_unknown_origin_is_oncecell ... ok
+test bridge::std::tests::test_rewrite_type_str_not_overwritten ... ok
+test bridge::std::tests::test_shims_required_core_has_shims ... ok
+test bridge::std::tests::test_shims_required_all_modules ... ok
+test ir::codegen::moddec_emit::tests::wrap_shared_arc ... ok
+test ir::codegen::moddec_emit::tests::wrap_shared_none_is_identity ... ok
+test bridge::std::tests::test_shims_required_fs_has_shims ... ok
+test ir::codegen::moddec_emit::tests::wrap_shared_rc ... ok
+test bridge::std::tests::test_tier2_allowed_denied_by_flag ... ok
+test ir::codegen::moddec_emit::tests::wrap_shared_weak ... ok
+test bridge::std::tests::test_tier2_allowed_all_states ... ok
+test bridge::std::tests::test_rewrite_type_unknown ... ok
+test bridge::std::tests::test_tier2_version_mismatch ... ok
+test bridge::std::tests::test_tier2_allowed_with_flag_no_version ... ok
+test ir::codegen::str_boundary::tests::coerce_preserves_complex_expressions ... ok
+test ir::codegen::str_boundary::tests::contract_matrix_is_frozen ... ok
+test ir::codegen::str_boundary::tests::form_of_expr_prefers_literal_form ... ok
+test ir::codegen::str_boundary::tests::form_of_ir_classifies_all_string_shapes ... ok
+test ir::codegen::str_boundary::tests::is_str_ir_covers_both_spellings ... ok
+test ir::codegen::str_boundary::tests::owned_copy_is_form_only ... ok
+test ir::codegen::tests::test_empty_module ... ok
+test ir::codegen::tests::test_simple_fn ... ok
+test ir::codegen::tests::test_extern_auto_registers_to_bridge_registry ... ok
+test ir::codegen::tests::test_fn_with_params ... ok
+test ir::types::tests::test_from_ast_generic ... ok
+test ir::types::tests::test_from_ast_option ... ok
+test ir::types::tests::test_from_ast_optional_sugar ... ok
+test ir::types::tests::test_from_ast_primitives ... ok
+test ir::types::tests::test_from_ast_result ... ok
+test lexer::indent::tests::test_drain_at_eof ... ok
+test ir::tests::ir_struct_def ... ok
+test ir::tests::ir_let_binding ... ok
+test ir::tests::ir_if_else ... ok
+test ir::tests::ir_simple_function ... ok
+test lexer::indent::tests::test_initial_state ... ok
+test lexer::indent::tests::test_invalid_dedent ... ok
+test lexer::indent::tests::test_multi_level ... ok
+test lexer::indent::tests::test_single_dedent ... ok
+test lexer::indent::tests::test_single_indent ... ok
+test hotreload::tests::deps_fingerprint_stable_and_sensitive ... ok
+test lsp::tests::analyze_bad_source_has_diagnostic ... ok
+test lsp::tests::line_of_byte_counts_newlines ... ok
+test lsp::tests::analyze_clean_source_no_diagnostics ... ok
+test lsp::tests::token_index_to_line_rough ... ok
+test lsp::tests::symbols_include_struct_trait_enum ... ok
+test lsp::tests::token_index_to_line_second_line ... ok
+test lsp::tests::word_at_works ... ok
+test macros::expand::tests::test_collect_bracket_group_nested ... ok
+test macros::expand::tests::test_collect_bracket_group_simple ... ok
+test macros::expand::tests::test_compile_time_numeric_ops ... ok
+test macros::expand::tests::test_decorator_preserved ... ok
+test macros::expand::tests::test_empty_registry ... ok
+test macros::expand::tests::test_expand_identity_macro ... ok
+test macros::expand::tests::test_extract_macro_defs_basic ... ok
+test macros::expand::tests::test_nested_macro_expansion ... ok
+test macros::expand::tests::test_plus_string_concat_vs_arithmetic ... ok
+test macros::expand::tests::test_register_and_get ... ok
+test macros::group::tests::test_classify_decl ... ok
+test macros::group::tests::test_classify_expr ... ok
+test macros::group::tests::test_classify_pattern ... ok
+test macros::group::tests::test_classify_skip_whitespace ... ok
+test macros::group::tests::test_classify_stmt ... ok
+test macros::group::tests::test_classify_type ... ok
+test macros::group::tests::test_token_tree_find_group ... ok
+test macros::group::tests::test_token_tree_flatten ... ok
+test macros::group::tests::test_token_tree_nested_groups ... ok
+test macros::group::tests::test_token_tree_parse_paren_group ... ok
+test macros::group::tests::test_token_tree_parse_simple ... ok
+test macros::group::tests::test_tokens_concat ... ok
+test macros::group::tests::test_tokens_empty ... ok
+test macros::group::tests::test_tokens_first_rest ... ok
+test macros::interp::tests::test_builtin_filter_tokens_idents ... ok
+test macros::interp::tests::test_builtin_first_rest ... ok
+test macros::interp::tests::test_builtin_is_empty ... ok
+test macros::interp::tests::test_builtin_merge_tokens ... ok
+test macros::interp::tests::test_builtin_quote ... ok
+test macros::interp::tests::test_builtin_remove_tokens ... ok
+test macros::interp::tests::test_builtin_replace_tokens ... ok
+test macros::interp::tests::test_builtin_token_count ... ok
+test macros::interp::tests::test_builtin_token_stream ... ok
+test macros::interp::tests::test_builtin_token_stream_nested ... ok
+test macros::interp::tests::test_empty_macro_body ... ok
+test macros::interp::tests::test_f_backtick_interpolation ... ok
+test macros::interp::tests::test_identity_macro ... ok
+test macros::interp::tests::test_let_binding ... ok
+test macros::interp::tests::test_r_backtick_raw ... ok
+test macros::pattern::tests::test_apply_remove ... ok
+test macros::pattern::tests::test_apply_replace_simple ... ok
+test macros::pattern::tests::test_apply_replace_with_capture ... ok
+test macros::pattern::tests::test_match_capture ... ok
+test macros::pattern::tests::test_match_exact ... ok
+test macros::pattern::tests::test_match_exact_fail ... ok
+test macros::pattern::tests::test_match_seq ... ok
+test macros::pattern::tests::test_match_type_ident ... ok
+test macros::pattern::tests::test_match_wildcard ... ok
+test macros::pattern::tests::test_parse_capture ... ok
+test macros::pattern::tests::test_parse_type_ident ... ok
+test macros::pattern::tests::test_parse_wildcard ... ok
+test moddec::tests::basic_lookup_axes ... ok
+test moddec::tests::builtin_registry_counts ... ok
+test moddec::tests::class_predicates ... ok
+test moddec::tests::errmsg_helpers_embed_placeholders ... ok
+test moddec::tests::fusion_lookup_axes ... ok
+test moddec::tests::owend_is_not_known ... ok
+test simd::dtype::tests::test_bit_widths ... ok
+test simd::dtype::tests::test_classification ... ok
+test simd::dtype::tests::test_simd_width_elements ... ok
+test simd::layout::tests::test_align_math ... ok
+test project::tests::test_project_compile_single_file ... ok
+test simd::layout::tests::test_aligned_alloc ... ok
+test simd::layout::tests::test_layout_computation ... ok
+test simd::ops::tests::test_all_any ... ok
+test simd::ops::tests::test_argsort ... ok
+test simd::ops::tests::test_cartesian ... ok
+test simd::ops::tests::test_cast_to_i64 ... ok
+test simd::ops::tests::test_clip ... ok
+test simd::ops::tests::test_count_by_value ... ok
+test project::tests::test_cross_module_import ... ok
+test simd::ops::tests::test_cummax ... ok
+test simd::ops::tests::test_cummin ... ok
+test simd::ops::tests::test_cumprod ... ok
+test simd::ops::tests::test_cumsum ... ok
+test simd::ops::tests::test_fill_null ... ok
+test simd::ops::tests::test_filter ... ok
+test simd::bench::bench_sort ... ok
+test simd::ops::tests::test_filter_map ... ok
+test simd::ops::tests::test_flat_map ... ok
+test simd::ops::tests::test_fold ... ok
+test simd::ops::tests::test_foreach ... ok
+test simd::ops::tests::test_head ... ok
+test simd::ops::tests::test_histogram ... ok
+test simd::ops::tests::test_intersection ... ok
+test simd::ops::tests::test_mean ... ok
+test simd::ops::tests::test_median ... ok
+test simd::ops::tests::test_partition ... ok
+test simd::ops::tests::test_product ... ok
+test simd::ops::tests::test_quantile ... ok
+test simd::ops::tests::test_sample ... ok
+test simd::ops::tests::test_shift ... ok
+test simd::ops::tests::test_slice ... ok
+test simd::ops::tests::test_sort_by_key ... ok
+test simd::ops::tests::test_sorted ... ok
+test simd::ops::tests::test_std_dev ... ok
+test simd::ops::tests::test_subtract ... ok
+test simd::ops::tests::test_tail ... ok
+test simd::ops::tests::test_take_every ... ok
+test simd::ops::tests::test_take_indices ... ok
+test simd::ops::tests::test_top_bottom ... ok
+test simd::ops::tests::test_union ... ok
+test simd::ops::tests::test_unique ... ok
+test simd::ops::tests::test_variance ... ok
+test simd::ops::tests::test_zip_with ... ok
+test simd::stack::tests::test_select ... ok
+test simd::bench::bench_reduce_sum ... ok
+test simd::stack::tests::test_stack_add ... ok
+test simd::stack::tests::test_stack_reduce ... ok
+test simd::stack::tests::test_stack_shuffle ... ok
+test simd::stack::tests::test_stack_splat ... ok
+test util::chars::tests::test_build_ws ... ok
+test util::chars::tests::test_ident_continue ... ok
+test util::chars::tests::test_ident_start ... ok
+test util::import::tests::test_detect_cycle ... ok
+test util::import::tests::test_no_cycle ... ok
+test util::import::tests::test_resolve_path ... ok
+test util::mini_toml::tests::test_bool_false ... ok
+test util::mini_toml::tests::test_bool_true ... ok
+test util::mini_toml::tests::test_bridge_top_format ... ok
+test util::mini_toml::tests::test_comment_in_section ... ok
+test util::mini_toml::tests::test_comment_only ... ok
+test util::mini_toml::tests::test_comment_preserves_inline_table ... ok
+test util::mini_toml::tests::test_empty_doc ... ok
+test util::mini_toml::tests::test_empty_key_error ... ok
+test util::mini_toml::tests::test_float ... ok
+test util::mini_toml::tests::test_inline_comment ... ok
+test util::mini_toml::tests::test_inline_table_empty_shim ... ok
+test util::mini_toml::tests::test_inline_table_multi ... ok
+test util::mini_toml::tests::test_inline_table_nested_path ... ok
+test util::mini_toml::tests::test_inline_table_single ... ok
+test util::mini_toml::tests::test_integer ... ok
+test util::mini_toml::tests::test_key_with_underscores ... ok
+test util::mini_toml::tests::test_module_manifest_format ... ok
+test util::mini_toml::tests::test_multiple_keys_in_root ... ok
+test util::mini_toml::tests::test_multiple_sections ... ok
+test util::mini_toml::tests::test_nightly_version_string ... ok
+test util::mini_toml::tests::test_root_and_section ... ok
+test util::mini_toml::tests::test_section ... ok
+test util::mini_toml::tests::test_section_with_inline_tables ... ok
+test util::mini_toml::tests::test_simple_string ... ok
+test util::mini_toml::tests::test_special_chars_in_value ... ok
+test util::mini_toml::tests::test_trailing_whitespace ... ok
+test util::mini_toml::tests::test_unparsable_value_returns_err ... ok
+test util::mini_toml::tests::test_value_with_colons ... ok
+test util::mini_toml::tests::test_value_with_punctuation ... ok
+test util::mini_toml::tests::test_value_with_spaces_inside_quotes ... ok
+test util::parallel::tests::test_thread_pool ... ok
+test util::platform::tests::test_host_os_detected ... ok
+test util::platform::tests::test_line_endings ... ok
+test util::platform::tests::test_normalize_path ... ok
+test util::parallel::tests::test_temp_dir_lifecycle ... ok
+test util::platform::tests::test_strip_bom ... ok
+test util::source::tests::test_crlf_normalized ... ok
+test util::source::tests::test_from_string ... ok
+test simd::bench::bench_fold ... ok
+test util::source::tests::test_output_path ... ok
+test util::source::tests::test_snippet ... ok
+test util::version::tests::test_edition_support ... ok
+test util::version::tests::test_version_not_empty ... ok
+test util::parallel::tests::test_temp_dir_parallel_isolation ... ok
+test simd::bench::bench_map ... ok
+test simd::bench::bench_clip ... ok
+test simd::bench::bench_element_wise_add ... ok
+test simd::bench::bench_cumsum ... ok
+test simd::bench::bench_mean_std ... ok
+test simd::bench::bench_filter ... ok
+test simd::bench::bench_summary ... ok
+
+test result: ok. 426 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+
+running 3 tests
+test cli::tests::locate_finds_parent ... ok
+test cli::tests::manifest_missing_fields_default ... ok
+test cli::tests::manifest_roundtrip ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 6 tests
+test comptime_m3_emits_specialized_fns_with_baked_values ... ok
+test export_auto_registers_symbols ... ok
+test extern_auto_registers_symbols ... ok
+test embed_without_code_is_rejected ... ok
+test embed_rust_inserts_raw_code_and_runs ... ok
+test comptime_m3_specialization_bakes_constants_and_runs ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.08s
+
+
+running 34 tests
+test cy_module_magic ... ok
+test cy_empty_module ... ok
+test cy_omega_gate_expr_assign ... ok
+test cy_omega_gate_const ... ok
+test cy_omega_gate_duck_def ... ok
+test cy_omega_gate_expr_paren ... ok
+test cy_omega_gate_enum_cstyle ... ok
+test cy_omega_gate_expr_cast ... ok
+test cy_omega_gate_expr_magic_call ... ok
+test cy_omega_gate_expr_collections ... ok
+test cy_omega_gate_function ... ok
+test cy_omega_gate_expr_range ... ok
+test cy_omega_gate_function_variadic ... ok
+test cy_omega_gate_impl ... ok
+test cy_omega_gate_import ... ok
+test cy_omega_gate_overload ... ok
+test cy_omega_gate_pattern_list ... ok
+test cy_omega_gate_function_generic ... ok
+test cy_omega_gate_pattern_ident ... ok
+test cy_omega_gate_enum ... ok
+test cy_omega_gate_pattern_lit ... ok
+test cy_omega_gate_pattern_range ... ok
+test cy_omega_gate_pattern_tuple ... ok
+test cy_omega_gate_pattern_wildcard ... ok
+test cy_omega_gate_stmt_defer ... ok
+test cy_omega_gate_stmt_pass ... ok
+test cy_omega_gate_stmt_try_catch ... ok
+test cy_omega_gate_stmt_while_let ... ok
+test cy_omega_gate_stmt_yield_from ... ok
+test cy_omega_gate_struct ... ok
+test cy_omega_gate_test ... ok
+test cy_omega_gate_trait ... ok
+test cy_omega_gate_type_alias ... ok
+test cy_omega_gate_type_map ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 2 tests
+test all_demos_generated_rust_compiles ... ignored, 全量 DEMO 较慢；按需运行：cargo test --test demo_codegen_compile -- --ignored --nocapture
+test magic_demos_generated_rust_compiles ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.00s
+
+
+running 4 tests
+test dual_route_golden_func ... ok
+test dual_route_golden_callable ... ok
+test dual_route_golden_simple ... ok
+test dual_route_golden_top_build ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.47s
+
+
+running 1 test
+test error_bug_all_rejected ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.25s
+
+
+running 47 tests
+test cg001_varargs_full_ok ... ok
+test cg002_call_magic ... ok
+test ec003_empty_dict_ok ... ok
+test core_unique_ok ... ok
+test ec006_type_name ... ok
+test core_fold_ok ... ok
+test cg003_export_ok ... ok
+test ec002_int_overflow ... ok
+test core_compose_ok ... ok
+test cg004_raises_result ... ok
+test hunt_bug1_bigint_lzbuildins_route ... ok
+test ec007_underscore_ok ... ok
+test hunt_bug1_complex_lzbuildins_route ... ok
+test hunt_bug2_bigint_const_wrap ... ok
+test hunt_bug4_bigint_fnbody ... ok
+test hunt_bug3_bigint_const_lazy ... ok
+test lx001_empty_unicode_escape_rejected_negative ... ok
+test hunt_bug6_bigint_annotation_positions ... ok
+test ir001_build_block_expr ... ok
+test ec004_float_precision_ok ... ok
+test hunt_bug5_list3_nested_pushdown ... ok
+test lx003_tilde_colon_rejected_negative ... ok
+test pr003_varargs_mixed_rejected_negative ... ok
+test pr004_typealias_magic_rejected_negative ... ok
+test pr005_decorator_on_var_negative ... ok
+test ir003_nested_function ... ok
+test ir002_defer_guard ... ok
+test ir005_comptime_block_ok ... ok
+test lx001_unicode_escape_ok ... ok
+test lx002_nested_comment ... ok
+test lx004_multiline_indent_ok ... ok
+test lx005_inline_build_assign ... ok
+test pr001_top_level_build ... ok
+test pr002_raises_with_return ... ok
+test pr004_typealias_magic_ok ... ok
+test sb001_time_method ... ok
+test sb002_vec_contains ... ok
+test sb003_starts_with ... ok
+test sb004_kebab_ok ... ok
+test sg003_safe_nav ... ok
+test sg002_null_coalesce ... ok
+test sg004_build_block_return_ok ... ok
+test sg005_spread ... ok
+test ty001_duck_generic ... ok
+test ty002_self_underscore ... ok
+test ty005_generic_default ... ok
+test ty004_params_type_erase ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.68s
+
+
+running 12 tests
+test lib_closure ... ok
+test lib_iterator ... ok
+test lib_option ... ok
+test lib_linked_list ... ok
+test lib_tree ... ok
+test lib_hashmap ... ok
+test lib_pattern ... ok
+test lib_vector ... ok
+test lib_result ... ok
+test lib_string ... ok
+test lib_sort ... ok
+test lib_json ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.86s
+
+
+running 1 test
+test fuzz_pipeline_never_panics ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 17 tests
+test g6_generator_reject_top_level_yield ... ok
+test g6_impl_reject_abstract_missing ... ok
+test g6_match_reject_unbound_guard ... ok
+test g6_impl_reject_extra_method ... ok
+test g6_match_reject_dup_pattern ... ok
+test g6_impl_reject_unknown_trait ... ok
+test g6_listcomp_reject_unbound_guard ... ok
+test g6_impl_reject_unknown_target ... ok
+test g6_impl_generic ... ok
+test g6_generator_yield ... ok
+test g6_generator_yield_from ... ok
+test g6_listcomp_simple_and_guard ... ok
+test g6_listcomp_function_call ... ok
+test g6_match_literal_and_wildcard ... ok
+test g6_listcomp_nested ... ok
+test g6_match_tuple_range_guard ... ok
+test g6_impl_inherent_and_trait ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s
+
+
+running 5 tests
+test gen_build_callee_type_annotation ... ok
+test gen_build_callee_single_pack ... ok
+test gen_build_callee_multi_pack ... ok
+test gen_build_conditional_yield ... ok
+test gen_build_combo_listcomp ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.87s
+
+
+running 1 test
+test incremental_golden_cache_hit_and_propagation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+
+running 4 tests
+test string_to_int_uses_parse ... ok
+test option_none_in_else_branch_matches_fn_ret ... ok
+test slice_method_maps_to_lz_slice ... ok
+test str_index_in_str_return_fn_yields_string ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.67s
+
+
+running 5 tests
+test ir_serialize_minimal_module ... ok
+test ir_module_boundaries_contract ... ok
+test source_hash_is_content_based ... ok
+test ir_bincode_roundtrip ... ok
+test ir_json_roundtrip ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 8 tests
+test ir_simple_function ... ok
+test ir_empty_module ... ok
+test ir_let_bindings ... ok
+test ir_generator_yield ... ok
+test ir_literals ... ok
+test ir_if_else ... ok
+test ir_struct_definition ... ok
+test ir_demo_snapshots ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.12s
+
+
+running 11 tests
+test lex_comments_and_operators ... ok
+test lex_numbers_and_strings ... ok
+test lex_rejects_unterminated_string ... ok
+test parse_struct_fields ... ok
+test parse_enum_like ... ok
+test parse_def_signature ... ok
+test parse_import_path ... ok
+test lex_promotes_int_overflow_to_wider_types ... ok
+test parse_rejects_malformed ... ok
+test parse_try_catch ... ok
+test parse_top_level_statements_and_control_flow ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 4 tests
+test lz_lexer_matches_native_golden ... ok
+test emit_lex_lz_flag_runs ... ok
+test lz_parser_matches_golden ... ok
+test emit_parse_lz_flag_runs ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.23s
+
+
+running 5 tests
+test lz_written_ir_display_compiles_and_runs ... ok
+test lz_written_lexer_compiles_and_runs ... ok
+test lz_emit_ir_lz_matches_ir_byte_exact ... ok
+test lz_emit_ir_lz_roundtrip ... ok
+test lz_emit_rs_lz_matches_native_codegen ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.86s
+
+
+running 17 tests
+test sem_arith_precedence ... ok
+test sem_bool_compare ... ok
+test sem_build_block ... ok
+test sem_for_loop_sum ... ok
+test sem_closure ... ok
+test sem_generator_yield ... ok
+test sem_for_case_struct_unapply ... ok
+test sem_multi_line_fn ... ok
+test sem_raise_try ... ok
+test sem_lambda_raise ... ok
+test sem_struct_method ... ok
+test sem_recursion_fib ... ok
+test sem_while_loop ... ok
+test sem_list_ops ... ok
+test sem_string_concat ... ok
+test sem_raises_unit_tail ... ok
+test sem_string_length_index ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.43s
+
+
+running 2 tests
+test lz_test_suite_setup_teardown ... ok
+test lz_test_basic_test_block ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+
+
+running 62 tests
+test cython_backend::cy_module_magic ... ok
+test cython_backend::cy_empty_module ... ok
+test cython_backend::cy_omega_gate_const ... ok
+test cython_backend::cy_omega_gate_duck_def ... ok
+test cython_backend::cy_omega_gate_expr_assign ... ok
+test cython_backend::cy_omega_gate_expr_cast ... ok
+test cython_backend::cy_omega_gate_enum ... ok
+test cython_backend::cy_omega_gate_enum_cstyle ... ok
+test cython_backend::cy_omega_gate_expr_collections ... ok
+test cython_backend::cy_omega_gate_expr_magic_call ... ok
+test cython_backend::cy_omega_gate_function ... ok
+test cython_backend::cy_omega_gate_expr_range ... ok
+test cython_backend::cy_omega_gate_function_variadic ... ok
+test cython_backend::cy_omega_gate_function_generic ... ok
+test cython_backend::cy_omega_gate_import ... ok
+test cython_backend::cy_omega_gate_impl ... ok
+test cython_backend::cy_omega_gate_expr_paren ... ok
+test cython_backend::cy_omega_gate_overload ... ok
+test cython_backend::cy_omega_gate_pattern_ident ... ok
+test cython_backend::cy_omega_gate_pattern_list ... ok
+test cython_backend::cy_omega_gate_pattern_lit ... ok
+test cython_backend::cy_omega_gate_pattern_range ... ok
+test cython_backend::cy_omega_gate_pattern_tuple ... ok
+test cython_backend::cy_omega_gate_pattern_wildcard ... ok
+test cython_backend::cy_omega_gate_stmt_defer ... ok
+test cython_backend::cy_omega_gate_stmt_pass ... ok
+test cython_backend::cy_omega_gate_stmt_try_catch ... ok
+test cython_backend::cy_omega_gate_stmt_while_let ... ok
+test cython_backend::cy_omega_gate_stmt_yield_from ... ok
+test cython_backend::cy_omega_gate_struct ... ok
+test cython_backend::cy_omega_gate_test ... ok
+test cython_backend::cy_omega_gate_trait ... ok
+test cython_backend::cy_omega_gate_type_alias ... ok
+test cython_backend::cy_omega_gate_type_map ... ok
+test fuzz_smoke::fuzz_pipeline_never_panics ... ok
+test ir_snapshots::ir_empty_module ... ok
+test ir_snapshots::ir_generator_yield ... ok
+test ir_snapshots::ir_if_else ... ok
+test ir_snapshots::ir_let_bindings ... ok
+test ir_snapshots::ir_literals ... ok
+test ir_snapshots::ir_simple_function ... ok
+test ir_snapshots::ir_struct_definition ... ok
+test reject_errors::error_boundaries_are_rejected ... ok
+test lz_semantic_cases::sem_arith_precedence ... ok
+test lz_semantic_cases::sem_bool_compare ... ok
+test lz_semantic_cases::sem_build_block ... ok
+test lz_semantic_cases::sem_closure ... ok
+test lz_semantic_cases::sem_for_loop_sum ... ok
+test lz_semantic_cases::sem_generator_yield ... ok
+test lz_semantic_cases::sem_for_case_struct_unapply ... ok
+test lz_semantic_cases::sem_multi_line_fn ... ok
+test lz_semantic_cases::sem_raises_unit_tail ... ok
+test lz_semantic_cases::sem_lambda_raise ... ok
+test lz_semantic_cases::sem_list_ops ... ok
+test lz_semantic_cases::sem_raise_try ... ok
+test lz_semantic_cases::sem_string_concat ... ok
+test lz_semantic_cases::sem_recursion_fib ... ok
+test lz_semantic_cases::sem_while_loop ... ok
+test lz_semantic_cases::sem_struct_method ... ok
+test lz_semantic_cases::sem_string_length_index ... ok
+test reject_more::inline_error_boundaries_are_rejected ... ok
+test ir_snapshots::ir_demo_snapshots ... ok
+
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.96s
+
+
+running 2 tests
+test moddec_negative_corpus_rejected_with_expected_message ... ok
+test moddec_positive_corpus_compiles ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.28s
+
+
+running 5 tests
+test moddec_mut_triple_is_equivalent ... ok
+test moddec_generated_target_types ... ok
+test moddec_lazy_deferred_in_nested_block ... ok
+test moddec_lazy_evaluates_once ... ok
+test moddec_decorator_equals_keyword_and_golden ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+
+running 1 test
+test error_boundaries_are_rejected ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+test inline_error_boundaries_are_rejected ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+
+running 3 tests
+test str_boundary_args_and_returns ... ok
+test str_boundary_bindings_and_containers ... ok
+test str_boundary_ops_and_formatting ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.59s
+
+
+running 12 tests
+test eval::tests::eval_literals ... ok
+test eval::tests::eval_binary_int ... ok
+test infer::tests::derive_name_from_path ... ok
+test infer::tests::type_to_lz_basic ... ok
+test type_parser::tests::parse_fn ... ok
+test type_parser::tests::parse_generic ... ok
+test lzi::tests::lzi_roundtrip ... ok
+test type_parser::tests::parse_option ... ok
+test type_parser::tests::parse_primitives ... ok
+test type_parser::tests::parse_result ... ok
+test type_parser::tests::parse_tuple ... ok
+test type_parser::tests::parse_ref ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 20 tests
+test infer_hkt_map_list_call ... ignored, HKT 泛型 `F[_]` 为主 crate 未实现的语法（parse_type 不支持），lz-infer 从未编译通过，无既有行为可保；待主 crate 支持 HKT 后启用
+test infer_hkt_map_option_call ... ignored, HKT 泛型 `F[_]` 为主 crate 未实现的语法（parse_type 不支持），lz-infer 从未编译通过，无既有行为可保；待主 crate 支持 HKT 后启用
+test infer_hkt_map_signature ... ignored, HKT 泛型 `F[_]` 为主 crate 未实现的语法（parse_type 不支持），lz-infer 从未编译通过，无既有行为可保；待主 crate 支持 HKT 后启用
+test infer_intersection_type ... ignored, 交叉类型 `Clone & Debug` 为主 crate 未实现的语法（Type 无 Intersection 变体），lz-infer 从未编译通过，无既有行为可保；待主 crate 支持交叉类型后启用
+test infer_simple_local_inference ... ignored, 依赖未注解参数的局部类型推断（旧 Typer 能力，从未编译通过）；当前实现以源码显式注解为准，未注解参数标记为 ?，待 lz-infer 接入可用推断器后启用
+test infer_type_test_narrowing ... ignored, 依赖 is 类型收窄推断（旧 Typer 能力，从未编译通过）；当前实现以源码显式注解为准，未注解参数标记为 ?，待 lz-infer 接入可用推断器后启用
+test infer_union_type ... ignored, 联合返回类型 `int | str` 为主 crate 未实现的语法（parse_type 不支持 `|`），lz-infer 从未编译通过，无既有行为可保；待主 crate 支持联合类型后启用
+test infer_union_type_match ... ignored, 联合返回类型为主 crate 未实现的语法（parse_type 不支持 `|`），lz-infer 从未编译通过，无既有行为可保；待主 crate 支持联合类型后启用
+test lzi_roundtrip ... ok
+test type_parser_rejects_union_intersection ... ok
+test type_parser_primitives ... ok
+test infer_explicit_function_signature ... ok
+test infer_as_expression ... ok
+test infer_where_clause ... ok
+test infer_struct_fields ... ok
+test infer_const_value ... ok
+test infer_cross_module_with_type_alias ... ok
+test infer_cross_module_no_cross_flag_fallback ... ok
+test infer_cross_module_struct_fields ... ok
+test infer_cross_module_mutual_structs ... ok
+
+test result: ok. 12 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 31 tests
+test comptime::tests::test_fields_of_empty ... ok
+test runtime::error::tests::test_assert_eq_vals ... ok
+test runtime::error::tests::test_error_new ... ok
+test runtime::error::tests::test_option_ext ... ok
+test runtime::functional::tests::test_compose ... ok
+test runtime::functional::tests::test_fold1_empty ... ok
+test comptime::tests::test_type_id ... ok
+test runtime::error::tests::test_error_display ... ok
+test comptime::tests::test_type_name ... ok
+test runtime::error::tests::test_kind_name ... ok
+test comptime::tests::test_is_same_type ... ok
+test runtime::error::tests::test_result_ext ... ok
+test comptime::tests::test_size_of ... ok
+test runtime::functional::tests::test_fold1 ... ok
+test runtime::error::tests::test_convenience_constructors ... ok
+test runtime::functional::tests::test_pipe ... ok
+test runtime::functional::tests::test_partition ... ok
+test runtime::error::tests::test_error_clone ... ok
+test runtime::functional::tests::test_chunk ... ok
+test runtime::functional::tests::test_reduce ... ok
+test runtime::functional::tests::test_fold ... ok
+test runtime::functional::tests::test_sum ... ok
+test runtime::functional::tests::test_unique ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_abs ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_all ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_any ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_clamp ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_count_if ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_ends_with ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_join_words ... ok
+test runtime::lz_bootstrap_builtins::tests::test_lz_sum_ints ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+
+running 1 test
+test src\macros\group.rs - macros::group::TokenTree (line 20) ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,25 @@
+// p37_scanint_cast.lz：验证 scan_int 自定义函数（返回 (str,int)）场景的 cast
+// parser.lz tokenize 等价结构：scan_int → r.0 → let num: str → List 拼接 cast
+enum Token:
+    IntLit(v: int)
+
+def is_digit(c: str) -> bool =
+    c >= "0" and c <= "9"
+
+def char_at(s: str, idx: int) -> str =
+    s[idx..(idx + 1)]
+
+def scan_int(src: str, start: int) -> (str, int) =
+    let mut i = start
+    while i < src.len() && is_digit(char_at(src, i)):
+        i = i + 1
+    (src[start..i], i)
+
+def main() =
+    let r = scan_int("42abc", 0)
+    let num: str = r.0
+    let mut toks: List<Token> = []
+    toks = toks + [Token.IntLit(v: num as int)]
+    let t = toks[0].clone()
+    match t:
+        case Token.IntLit(v: n) => print("val=" + n.to_string())

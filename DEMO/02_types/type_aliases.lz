@@ -1,0 +1,10 @@
+// ============================
+// LZ Type System — Type Aliases
+// ============================
+
+type UserId = int
+type NameList = List<str>
+
+def main() =
+    let id: UserId = 42
+    print(id)

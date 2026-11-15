@@ -1,0 +1,22 @@
+// 自测 — 字符串和运算符
+def main() =
+    // f-string
+    let name = "LZ"
+    let greeting = f"Hello, {name}"
+    assert greeting == "Hello, LZ"
+
+    // in 操作符
+    let xs = [1, 2, 3]
+    assert 1 in xs
+    assert not (5 in xs)
+
+    // is 操作符
+    let n = None
+    assert n is None
+
+    // 列表方法
+    let ys = [1, 2, 3]
+    assert ys[0] == 1
+    assert ys[2] == 3
+
+    print("✅ 字符串和运算符测试通过")

@@ -1,0 +1,2 @@
+def f() -> int =
+    yield 1

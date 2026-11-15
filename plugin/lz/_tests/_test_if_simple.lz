@@ -1,0 +1,21 @@
+// Test: if/else with non-tuple return types
+def test_if1(x: int)-> int =
+    if x > 0:
+        1
+    else:
+        0
+
+def test_if2(x: int)-> str =
+    if x > 0:
+        "positive"
+    else:
+        "negative"
+
+def test_if3(x: int)-> bool =
+    if x > 0:
+        True
+    else:
+        False
+
+def main() =
+    print("ok")

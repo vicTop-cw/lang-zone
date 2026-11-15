@@ -1,0 +1,4 @@
+def main() =
+    let a = 10
+    let b = 0
+    println(a / b)

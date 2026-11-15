@@ -1,0 +1,52 @@
+// lz-zed test fixture: 13-errors — 错误处理
+// Authority: SYNTAX/09-错误处理.md
+
+# raise / raises
+raise ValueError("bad value")
+
+def parse_int(s: str) -> int raises ValueError =
+    raise ValueError("not a number")
+    0
+
+# try / catch / finally / else
+def load(path: str) -> str =
+    try:
+        let data = read_file(path)
+        data
+    catch IOError:
+        "file not found"
+    finally:
+        close_all()
+
+def guarded() -> int =
+    try:
+        1
+    catch IOError:
+        -1
+    catch ValueError:
+        -2
+    else:
+        0
+
+# ? 错误传播
+def read_config(path: str) -> str =
+    let raw = read_file(path)?
+    raw
+
+def chain() -> int =
+    let v = fallible()?
+    v + 1
+
+# 多异常标注
+def risky2() -> int raises (IOError, ValueError) =
+    1
+
+# panic 是内建函数（非关键字）
+def abort(msg: str) -> Never =
+    panic(msg)
+
+# Nil 为单元类型 () 的别名
+def finish() -> Nil = pass
+
+# Unit 内建类型
+let done: Unit = ()

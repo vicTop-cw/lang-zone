@@ -1,0 +1,1002 @@
+// Lang-Zong 编译器 — lexer/lexer.rs
+// 词法分析器: 源码 → Token 流
+//
+// 大文件拆分（move-only，2026-10-06）：数字字面量 → lexer/numbers.rs，
+// 字符串/f-string → lexer/strings.rs，主循环保留在本文件，逻辑零改动。
+#[path = "numbers.rs"]
+mod numbers;
+#[path = "strings.rs"]
+mod strings;
+
+use super::indent::IndentStack;
+
+use super::token::{Token, EmbedForm};
+
+use crate::util::chars::is_build_ws;
+
+
+/// 构建块符号（`=:` `~:` `*: ` `^:`）之前的合法边界：
+/// 空白字符，或括号/方括号/花括号/逗号（即处于调用实参、下标、元组等位置）。
+/// 用于允许 `f(~: ...)` 这类「符号紧贴 `(`」的合法写法（BUG-IR-001）。
+fn is_build_before(c: Option<char>) -> bool {
+    is_build_ws(c) || matches!(c, Some('(' | ')' | '[' | ']' | '{' | '}' | ','))
+}
+
+pub struct Lexer {
+    chars: Vec<char>,
+    pos: usize,
+    indent: IndentStack,
+    line: usize,
+    col: usize,
+    /// BUG-372：圆括号内的隐式续行（Python 语义）—— `(...)` 内不产生
+    /// Indent/Dedent，否则 `xs.map(|o| match o:\n case 1: 10\n case _: 0)`
+    /// 会把 `case` 当成新缩进块，`)` 落在 Dedent 之前导致 match 无法配对。
+    paren_depth: usize,
+}
+impl Lexer {
+
+
+    pub fn new(source: &str) -> Self {
+        // UTF-8 BOM（EF BB BF）剥离：read_to_string 后 BOM 表现为首字符 U+FEFF。
+        // 词法层统一剥离，project/build/check 与单文件入口全部受益；无 BOM 输入零变化。
+        let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
+        Self {
+            chars: source.chars().collect(),
+            pos: 0,
+            indent: IndentStack::new(),
+            line: 1,
+            col: 0,
+            paren_depth: 0,
+        }
+    }
+
+    pub(crate) fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    pub(crate) fn peek_n(&self, n: usize) -> Option<char> {
+        self.chars.get(self.pos + n).copied()
+    }
+
+    /// 返回当前位置的前一个字符（pos==0 时返回 None，视作输入边界）
+    pub(crate) fn prev_char(&self) -> Option<char> {
+        if self.pos == 0 {
+            None
+        } else {
+            self.chars.get(self.pos - 1).copied()
+        }
+    }
+
+    pub(crate) fn advance(&mut self) -> Option<char> {
+        let c = self.chars.get(self.pos).copied()?;
+        self.pos += 1;
+        if c == '\n' {
+            self.line += 1;
+            self.col = 0;
+        } else {
+            self.col += 1;
+        }
+        Some(c)
+    }
+
+    pub(crate) fn skip_inline_whitespace(&mut self) -> usize {
+        let mut spaces = 0;
+        while let Some(c) = self.peek() {
+            if c == ' ' {
+                spaces += 1;
+                self.advance();
+            } else if c == '\t' {
+                spaces += 4;
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        spaces
+    }
+
+    pub(crate) fn skip_line_comment(&mut self) {
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            self.advance();
+        }
+    }
+
+    pub(crate) fn skip_block_comment(&mut self) {
+        // /* ... */ 多行注释（Java/Rust 体系）；# 预留给宏语法，不再作注释
+        // 支持嵌套 /* /* */ */ ：用深度计数，遇到 /* 深度+1，遇到 */ 深度-1，
+        // 深度归零才真正结束（调用方已消费起始的 /*，故初始深度为 1）。
+        let mut depth: usize = 1;
+        while depth > 0 {
+            match self.peek() {
+                None => break,
+                // 嵌套起始 /* → 深度+1
+                Some('/') if self.peek_n(1) == Some('*') => {
+                    self.advance();
+                    self.advance();
+                    depth += 1;
+                }
+                // 注释结束 */ → 深度-1
+                Some('*') if self.peek_n(1) == Some('/') => {
+                    self.advance();
+                    self.advance();
+                    depth -= 1;
+                }
+                Some(_) => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    pub(crate) fn read_ident_or_keyword(&mut self, first: char) -> Token {
+        let mut s = String::from(first);
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                s.push(self.advance().unwrap());
+            } else {
+                break;
+            }
+        }
+
+        // 单独的 `_` 是通配符 token（pattern 中 → Wildcard，表达式中 → Ident("_")）
+        if s == "_" {
+            return Token::Underscore;
+        }
+
+        // 魔法方法 __xxx__
+        if s.starts_with("__") && s.ends_with("__") && s.len() > 4 {
+            return Token::MagicMethod(s);
+        }
+
+        match s.as_str() {
+            "def" => Token::Def,
+            "iterator" => Token::Iterator,
+            "mut" => Token::Mut,
+            "ref" => Token::Ref,
+            "const" => Token::Const,
+            "let" => Token::Let,
+            "owned" => Token::Owned,
+            "return" => Token::Return,
+            "yield" => Token::Yield,
+            "if" => Token::If,
+            "elif" => Token::Elif,
+            "else" => Token::Else,
+            "match" => Token::Match,
+            "case" => Token::Case,
+            "guard" => Token::Guard,
+            "for" => Token::For,
+            "in" => Token::In,
+            "while" => Token::While,
+            "loop" => Token::Loop,
+            "break" => Token::Break,
+            "continue" => Token::Continue,
+            "struct" => Token::Struct,
+            "enum" => Token::Enum,
+            "trait" => Token::Trait,
+            "impl" => Token::Impl,
+            "where" => Token::Where,
+            "Self" => Token::Self_,
+            "try" => Token::Try,
+            "catch" => Token::Catch,
+            "finally" => Token::Finally,
+            "with" => Token::With,
+            "defer" => Token::Defer,
+            "as" => Token::As,
+            "import" => Token::Import,
+            "from" => Token::From,
+            "async" => Token::Async,
+            "await" => Token::Await,
+            "spawn" => Token::Spawn,
+            "go" => Token::Go,
+            "select" => Token::Select,
+            "macro" => Token::Macro,
+            "template" => Token::Template,
+            "comptime" => Token::Comptime,
+            "raise" => Token::Raise,
+            "raises" => Token::Raises,
+            "test" => Token::Test,
+            "assert" => Token::Assert,
+            "check" => Token::Check,
+            "suite" => Token::Suite,
+            "setup" => Token::Setup,
+            "teardown" => Token::Teardown,
+            "and" => Token::And,
+            "or" => Token::Or,
+            "not" => Token::Not,
+            "is" => Token::Is,
+            "duck" => Token::Duck,
+            "block" => Token::Block,
+            "True" | "true" => Token::True,
+            "False" | "false" => Token::False,
+            _ => Token::Ident(s),
+        }
+    }
+
+    pub(crate) fn handle_indent(&mut self, col: usize, tokens: &mut Vec<Token>) {
+        if let Some(mut virtual_tokens) = self.indent.handle(col) {
+            tokens.append(&mut virtual_tokens);
+        }
+    }
+
+    pub(crate) fn try_match_embed_attr(&self) -> Option<(String, usize)> {
+        let mut p = self.pos;
+        if self.chars.get(p) != Some(&'[') {
+            return None;
+        }
+        p += 1;
+        for ec in "embed".chars() {
+            if self.chars.get(p) != Some(&ec) {
+                return None;
+            }
+            p += 1;
+        }
+        if self.chars.get(p) != Some(&'(') {
+            return None;
+        }
+        p += 1;
+        let mut lang = String::new();
+        while let Some(&c) = self.chars.get(p) {
+            if c.is_alphanumeric() || c == '_' {
+                lang.push(c);
+                p += 1;
+            } else {
+                break;
+            }
+        }
+        if lang.is_empty() {
+            return None;
+        }
+        if self.chars.get(p) != Some(&')') {
+            return None;
+        }
+        p += 1;
+        if self.chars.get(p) != Some(&']') {
+            return None;
+        }
+        p += 1;
+        Some((lang, p))
+    }
+
+    pub(crate) fn read_embed_backtick_block(&mut self) -> (String, EmbedForm) {
+        let form = match self.peek() {
+            Some('r') if self.peek_n(1) == Some('`') => {
+                self.advance();
+                EmbedForm::Raw
+            }
+            Some('f') if self.peek_n(1) == Some('`') => {
+                self.advance();
+                EmbedForm::Interp
+            }
+            Some('`') => EmbedForm::Raw,
+            _ => return (String::new(), EmbedForm::Raw),
+        };
+        if self.peek() != Some('`') {
+            return (String::new(), form);
+        }
+        let triple = self.peek_n(1) == Some('`') && self.peek_n(2) == Some('`');
+        if triple {
+            self.advance();
+            self.advance();
+            self.advance();
+        } else {
+            self.advance();
+        }
+        let mut src = String::new();
+        if triple {
+            loop {
+                match self.peek() {
+                    None => break,
+                    Some('`') if self.peek_n(1) == Some('`') && self.peek_n(2) == Some('`') => {
+                        self.advance();
+                        self.advance();
+                        self.advance();
+                        break;
+                    }
+                    Some(c) => {
+                        src.push(c);
+                        self.advance();
+                    }
+                }
+            }
+        } else {
+            while let Some(c) = self.peek() {
+                if c == '`' {
+                    self.advance();
+                    break;
+                }
+                src.push(self.advance().unwrap());
+            }
+        }
+        (src, form)
+    }
+
+    pub(crate) fn read_embed_indent_block(&mut self) -> String {
+        while let Some(c) = self.peek() {
+            if c == '\n' || c == '\r' {
+                self.advance();
+            } else if c == ' ' || c == '\t' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let block_indent = self.col;
+        let mut src = String::new();
+        let mut first_line = true;
+        loop {
+            if self.peek().is_none() {
+                break;
+            }
+            let line_start_pos = self.pos;
+            let mut line_content = String::new();
+            while let Some(c) = self.peek() {
+                if c == '\n' {
+                    break;
+                }
+                line_content.push(self.advance().unwrap());
+            }
+            let trimmed = line_content.trim();
+            if trimmed.is_empty() {
+                if self.peek() == Some('\n') {
+                    self.advance();
+                }
+                if !first_line {
+                    src.push('\n');
+                }
+                continue;
+            }
+            let leading_ws: usize = line_content
+                .chars()
+                .take_while(|&c| c == ' ' || c == '\t')
+                .count();
+            if leading_ws < block_indent {
+                self.pos = line_start_pos;
+                let consumed: String = self.chars[..line_start_pos]
+                    .iter()
+                    .filter(|&&c| c == '\n')
+                    .map(|_| '\n')
+                    .collect();
+                let newlines = consumed.matches('\n').count();
+                self.line = self.line.saturating_sub(newlines);
+                self.col = 0;
+                for &c in &self.chars[line_start_pos..] {
+                    if c == '\n' {
+                        break;
+                    }
+                    if c == ' ' || c == '\t' {
+                        self.col += 1;
+                    } else {
+                        self.col += 1;
+                    }
+                }
+                self.col = leading_ws;
+                break;
+            }
+            let dedented = if line_content.len() >= block_indent {
+                &line_content[block_indent..]
+            } else {
+                &line_content[..]
+            };
+            if !first_line {
+                src.push('\n');
+            }
+            src.push_str(dedented);
+            first_line = false;
+            if self.peek() == Some('\n') {
+                self.advance();
+            }
+        }
+        src
+    }
+
+    pub fn tokenize(&mut self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        let mut line_start = true;
+
+        loop {
+            let c = match self.peek() {
+                Some(c) => c,
+                None => break,
+            };
+
+            // 行首非空白字符：处理 col 0 的 Dedent
+            if line_start && c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+                self.handle_indent(0, &mut tokens);
+                line_start = false;
+            }
+
+            match c {
+                '\n' => {
+                    self.advance();
+                    // 连续空行不产生 Newline
+                    if !tokens.is_empty() && tokens.last() != Some(&Token::Newline) {
+                        tokens.push(Token::Newline);
+                    }
+                    line_start = true;
+                }
+                ' ' | '\t' if line_start => {
+                    let col = self.skip_inline_whitespace();
+                    // 空行或注释行不处理缩进
+                    match self.peek() {
+                        None => break,
+                        Some('\n') => continue,
+                        Some('/') if self.peek_n(1) == Some('/') => {
+                            self.advance();
+                            self.advance();
+                            self.skip_line_comment();
+                            continue;
+                        }
+                        Some('/') if self.peek_n(1) == Some('*') => {
+                            self.advance();
+                            self.advance();
+                            self.skip_block_comment();
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    // BUG-372：圆括号内的隐式续行（Python 语义）—— `(...)` 内不产生
+                    // Indent/Dedent，否则 `xs.map(|o| match o:\n case 1: 10\n case _: 0)`
+                    // 会把 `case` 当成新缩进块，`)` 落在 Dedent 之前导致 match 无法配对。
+                    if self.paren_depth > 0 {
+                        line_start = false;
+                    } else if self.peek() == Some('.') && self.peek_n(1) != Some('.') {
+                        // BUG-373：方法链续行 `.map(...)` —— 行首为 `.` 时不是新块，
+                        // 不产生 Indent/Dedent，作为上一表达式的续行。否则
+                        // `let r = xs\n    .map(...)` 会把 `.map` 误判为缩进块。
+                        // BUG-379：若上一行以 `=` 结尾（如 `duck HasName =`），则
+                        // 下一行 `.name: str` 是 duck 成员声明的字段标记（新缩进块），
+                        // 不是续行——此时仍走 handle_indent 正常产生 Indent。
+                        let prev_is_assign = tokens
+                            .iter()
+                            .rev()
+                            .find(|t| !matches!(t, Token::Newline | Token::Indent | Token::Dedent))
+                            .map_or(false, |t| matches!(t, Token::Eq));
+                        if !prev_is_assign {
+                            line_start = false;
+                        } else {
+                            self.handle_indent(col, &mut tokens);
+                            line_start = false;
+                        }
+                    } else {
+                        self.handle_indent(col, &mut tokens);
+                        line_start = false;
+                    }
+                }
+                ' ' | '\t' => {
+                    self.advance();
+                }
+                '\r' => {
+                    self.advance();
+                }
+                // # 不再作为注释：预留给 Rust 风格宏语法，交由下方 _ 兜底跳过
+                '0'..='9' => {
+                    let first = self.advance().unwrap();
+                    tokens.push(self.read_number(first));
+                    line_start = false;
+                }
+                '"' if self.peek_n(1) == Some('"') && self.peek_n(2) == Some('"') => {
+                    tokens.push(self.read_triple_string());
+                    line_start = false;
+                }
+                '"' => {
+                    tokens.push(self.read_string());
+                    line_start = false;
+                }
+                'f' if self.peek_n(1) == Some('"') => {
+                    tokens.push(self.read_fstring());
+                    line_start = false;
+                }
+                'r' if self.peek_n(1) == Some('"') => {
+                    tokens.push(self.read_raw_string());
+                    line_start = false;
+                }
+                '`' => {
+                    self.advance();
+                    tokens.push(Token::Backtick);
+                    line_start = false;
+                }
+                c if c.is_alphabetic() || c == '_' => {
+                    let first = self.advance().unwrap();
+                    tokens.push(self.read_ident_or_keyword(first));
+                    line_start = false;
+                }
+                // 构建块符号 =: 变量构建块（前后必须留白，其后必须换行缩进）
+                '=' if self.peek_n(1) == Some(':') => {
+                    if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::BuildAssign);
+                    } else {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::LexError(
+                            "构建块符号 '=:' 前后必须留白（符号前需空格，符号后需换行缩进）".into(),
+                        ));
+                    }
+                    line_start = false;
+                }
+                // 赋值/比较
+                '=' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::EqEq);
+                    line_start = false;
+                }
+                '=' if self.peek_n(1) == Some('>') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::FatArrow);
+                    line_start = false;
+                }
+                '=' => {
+                    self.advance();
+                    tokens.push(Token::Eq);
+                    line_start = false;
+                }
+                '!' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::NotEq);
+                    line_start = false;
+                }
+                '!' => {
+                    self.advance();
+                    tokens.push(Token::Exclamation);
+                    line_start = false;
+                }
+
+                // 比较/约束
+                '<' => {
+                    self.advance();
+                    if self.peek() == Some('|') {
+                        self.advance();
+                        tokens.push(Token::BackPipe);
+                    } else if self.peek() == Some('<') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::ShlEq);
+                        } else {
+                            tokens.push(Token::Shl);
+                        }
+                    } else if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::Le);
+                    } else {
+                        tokens.push(Token::Lt);
+                    }
+                    line_start = false;
+                }
+                '>' => {
+                    self.advance();
+                    if self.peek() == Some('>') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::ShrEq);
+                        } else {
+                            tokens.push(Token::Shr);
+                        }
+                    } else if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token::Ge);
+                    } else {
+                        tokens.push(Token::Gt);
+                    }
+                    line_start = false;
+                }
+
+                // 构建块符号 *: 生成器调用构建块（前后必须留白，其后必须换行缩进）
+                '*' if self.peek_n(1) == Some(':') => {
+                    if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::BuildGen);
+                    } else {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::LexError(
+                            "构建块符号 '*:' 前后必须留白（符号前需空格，符号后需换行缩进）".into(),
+                        ));
+                    }
+                    line_start = false;
+                }
+                // 算术
+                '+' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::PlusEq);
+                    line_start = false;
+                }
+                '+' => {
+                    self.advance();
+                    tokens.push(Token::Plus);
+                    line_start = false;
+                }
+                '-' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::MinusEq);
+                    line_start = false;
+                }
+                '-' if self.peek_n(1) == Some('>') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::Arrow);
+                    line_start = false;
+                }
+                '-' => {
+                    self.advance();
+                    tokens.push(Token::Minus);
+                    line_start = false;
+                }
+                '*' if self.peek_n(1) == Some('*') => {
+                    if self.peek_n(2) == Some('=') {
+                        self.advance();
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::PowEq);
+                    } else {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::StarStar);
+                    }
+                    line_start = false;
+                }
+                '*' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::StarEq);
+                    line_start = false;
+                }
+                '*' => {
+                    self.advance();
+                    tokens.push(Token::Star);
+                    line_start = false;
+                }
+                '/' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::SlashEq);
+                    line_start = false;
+                }
+                '/' if self.peek_n(1) == Some('/') => {
+                    // 行注释（Java/Rust 体系），可出现在行尾
+                    self.advance();
+                    self.advance();
+                    self.skip_line_comment();
+                }
+                '/' if self.peek_n(1) == Some('*') => {
+                    // 块注释（Java/Rust 体系）
+                    self.advance();
+                    self.advance();
+                    self.skip_block_comment();
+                }
+                '/' => {
+                    self.advance();
+                    tokens.push(Token::Slash);
+                    line_start = false;
+                }
+                '%' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::PercentEq);
+                    line_start = false;
+                }
+                '%' => {
+                    self.advance();
+                    tokens.push(Token::Percent);
+                    line_start = false;
+                }
+                // 构建块符号 ~: 调用构建块（前后必须留白，其后必须换行缩进）
+                '~' if self.peek_n(1) == Some(':') => {
+                    if is_build_before(self.prev_char()) && is_build_ws(self.peek_n(2)) {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::BuildCall);
+                    } else {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::LexError(
+                            "构建块符号 '~:' 前后必须留白（符号前需空格，符号后需换行缩进）".into(),
+                        ));
+                    }
+                    line_start = false;
+                }
+                '~' => {
+                    // 后缀命名参数糖: x~ → 仅在紧贴标识符后时产生 Tilde
+                    // 前缀 ~x (位非) → 产生 Token::Exclamation (等价于 !x)
+                    // 先检查前置字符（advance 之前），再 advance
+                    let prev_before_tilde = self.prev_char();
+                    self.advance();
+                    if prev_before_tilde
+                        .map_or(false, |c| c.is_alphanumeric() || c == '_' || c == ')')
+                    {
+                        tokens.push(Token::Tilde);
+                    } else {
+                        tokens.push(Token::Exclamation);
+                    }
+                    line_start = false;
+                }
+                '^' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::XorEq);
+                    line_start = false;
+                }
+                '^' => {
+                    // `^:` → BuildIndex（索引构建块）
+                    if self.peek_n(1) == Some(':') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::BuildIndex);
+                    } else {
+                        let spaced = is_build_ws(self.prev_char());
+                        self.advance();
+                        tokens.push(if spaced {
+                            Token::CaretInfix
+                        } else {
+                            Token::CaretOp
+                        });
+                    }
+                    line_start = false;
+                }
+
+                // 位/逻辑
+                '&' if self.peek_n(1) == Some('&') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::AmpAmp);
+                    line_start = false;
+                }
+                '&' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::AndEq);
+                    line_start = false;
+                }
+                '&' => {
+                    self.advance();
+                    tokens.push(Token::Amp);
+                    line_start = false;
+                }
+                '|' if self.peek_n(1) == Some('|') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::PipePipe);
+                    line_start = false;
+                }
+                '|' if self.peek_n(1) == Some('>') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::Pipe);
+                    line_start = false;
+                }
+                '|' if self.peek_n(1) == Some('=') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::OrEq);
+                    line_start = false;
+                }
+                '|' => {
+                    self.advance();
+                    tokens.push(Token::Pipe_);
+                    line_start = false;
+                }
+
+                // 标点
+                ':' => {
+                    if self.peek_n(1) == Some(':') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::PathSep);
+                    } else if self.peek_n(1) == Some('=') {
+                        self.advance();
+                        self.advance();
+                        tokens.push(Token::ColonEq);
+                    } else {
+                        self.advance();
+                        tokens.push(Token::Colon);
+                    }
+                    line_start = false;
+                }
+                ',' => {
+                    self.advance();
+                    tokens.push(Token::Comma);
+                    line_start = false;
+                }
+                ';' => {
+                    self.advance();
+                    tokens.push(Token::Semicolon);
+                    line_start = false;
+                }
+                '.' => {
+                    self.advance();
+                    if self.peek() == Some('.') {
+                        self.advance();
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            tokens.push(Token::DotDotEq);
+                        } else {
+                            tokens.push(Token::DotDot);
+                        }
+                    } else {
+                        tokens.push(Token::Dot);
+                    }
+                    line_start = false;
+                }
+                '(' => {
+                    self.advance();
+                    self.paren_depth += 1;
+                    tokens.push(Token::LParen);
+                    line_start = false;
+                }
+                ')' => {
+                    self.advance();
+                    self.paren_depth = self.paren_depth.saturating_sub(1);
+                    tokens.push(Token::RParen);
+                    line_start = false;
+                }
+                '[' => {
+                    self.advance();
+                    tokens.push(Token::LBrack);
+                    line_start = false;
+                }
+                ']' => {
+                    self.advance();
+                    tokens.push(Token::RBrack);
+                    line_start = false;
+                }
+                '{' => {
+                    self.advance();
+                    tokens.push(Token::LBrace);
+                    line_start = false;
+                }
+                '}' => {
+                    self.advance();
+                    tokens.push(Token::RBrace);
+                    line_start = false;
+                }
+                '@' => {
+                    self.advance();
+                    tokens.push(Token::At);
+                    line_start = false;
+                }
+                '$' => {
+                    self.advance();
+                    tokens.push(Token::Dollar);
+                    line_start = false;
+                }
+
+                // 特殊
+                '?' if self.peek_n(1) == Some('?') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::QuestionQuestion);
+                    line_start = false;
+                }
+                '?' if self.peek_n(1) == Some('.') => {
+                    self.advance();
+                    self.advance();
+                    tokens.push(Token::SafeNav);
+                    line_start = false;
+                }
+                '?' => {
+                    self.advance();
+                    tokens.push(Token::Question);
+                    line_start = false;
+                }
+                '_' if self
+                    .peek_n(1)
+                    .map_or(true, |c| !c.is_alphanumeric() && c != '_') =>
+                {
+                    self.advance();
+                    tokens.push(Token::Underscore);
+                    line_start = false;
+                }
+
+                // #! shebang / #!bin macro 宏模块声明
+                '#' if self.peek_n(1) == Some('!') => {
+                    self.advance();
+                    self.advance();
+                    // 收集 #! 后到行尾的内容
+                    let start = self.pos;
+                    while self.pos < self.chars.len() && self.chars[self.pos] != '\n' {
+                        self.pos += 1;
+                    }
+                    let rest: String = self.chars[start..self.pos].iter().collect();
+                    let trimmed = rest.trim();
+                    // #!bin macro → 宏模块声明（规范 08 §二）
+                    if trimmed.starts_with("bin macro") {
+                        tokens.push(Token::Macro);
+                    } else if trimmed.starts_with("export") {
+                        // #!export(Rust) → @export(Rust)（属性宏，复用 @export 装饰器路径）
+                        // lexer 把 #!export(X) 转成 @export(X) 的 token 序列，
+                        // parser 的 parse_decorator 与 builder 的 Export 内建处理
+                        tokens.push(Token::At);
+                        let sub_src = format!("export{}", &trimmed[6..]);
+                        let mut sub = crate::lexer::Lexer::new(&sub_src);
+                        tokens.extend(sub.tokenize().into_iter().filter(|t| {
+                            !matches!(
+                                t,
+                                Token::Eof | Token::Newline | Token::Indent | Token::Dedent
+                            )
+                        }));
+                    } else if trimmed == "no_std" {
+                        // #!no_std → @no_std 属性宏（IR 层 ModuleDirective.no_std 处理）
+                        tokens.push(Token::At);
+                        tokens.push(Token::Ident("no_std".to_string()));
+                    }
+                    // 其他 #! 视为 shebang 跳过
+                    line_start = false;
+                }
+                '#' => {
+                    self.advance();
+                    if let Some((lang, end_pos)) = self.try_match_embed_attr() {
+                        let mut p = end_pos;
+                        while let Some(&c) = self.chars.get(p) {
+                            if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+                                p += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        let is_old_string_form = matches!(lang.as_str(), "rust" | "py")
+                            && self.chars.get(p) == Some(&'d')
+                            && self.chars.get(p + 1) == Some(&'e')
+                            && self.chars.get(p + 2) == Some(&'f')
+                            && matches!(self.chars.get(p + 3), Some(' ') | Some('\t'));
+                        if is_old_string_form {
+                            if self.chars.get(self.pos) == Some(&'[') {
+                                self.advance();
+                            }
+                            tokens.push(Token::At);
+                            line_start = false;
+                            continue;
+                        }
+                        self.pos = end_pos;
+                        if self.chars.get(p) == Some(&'`') {
+                            self.pos = p;
+                            let (src, form) = self.read_embed_backtick_block();
+                            tokens.push(Token::EmbedBlock { lang, src, form });
+                        } else {
+                            let src = self.read_embed_indent_block();
+                            tokens.push(Token::EmbedBlock {
+                                lang,
+                                src,
+                                form: EmbedForm::Indent,
+                            });
+                        }
+                        line_start = false;
+                        continue;
+                    }
+                    // #[attr] 属性宏写法：'#' 后跟 '[' 时跳过 '['，等价于 @attr
+                    if self.chars.get(self.pos) == Some(&'[') {
+                        self.advance();
+                    }
+                    tokens.push(Token::At);
+                    line_start = false;
+                }
+
+                _ => {
+                    // 未知字符：产生 Token::Unknown（携带原始字符），
+                    // 供宏/模板展开器与前端检查层识别未知输入（而非静默跳过）
+                    let ch = self.chars[self.pos].to_string();
+                    self.advance();
+                    tokens.push(Token::Unknown(ch));
+                }
+            }
+        }
+
+        // EOF 结尾排空所有剩余缩进
+        tokens.append(&mut self.indent.drain());
+        // 清理尾部 Newline
+        while tokens.last() == Some(&Token::Newline) {
+            tokens.pop();
+        }
+        tokens.push(Token::Eof);
+        tokens
+    }}

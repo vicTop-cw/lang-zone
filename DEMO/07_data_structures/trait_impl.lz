@@ -1,0 +1,18 @@
+// ============================
+// LZ Data Structures — trait & impl
+// ============================
+
+trait Drawable =
+    def draw(self) -> () = ...
+    def bounds(self) -> (f64, f64, f64, f64) = ...
+
+impl Drawable for Rectangle =
+    def draw(self) -> () = print("drawing")
+    def bounds(self) -> (f64, f64, f64, f64) = (0.0, 0.0, 10.0, 5.0)
+
+struct Rectangle =
+    width: f64
+    height: f64
+
+def main() =
+    print("trait/impl demo")

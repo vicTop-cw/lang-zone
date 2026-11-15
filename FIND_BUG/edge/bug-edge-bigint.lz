@@ -1,0 +1,4 @@
+// BigInt 端到端测试 — 任意精度整数
+let big: bigint = 12345678901234567890
+let huge: bigint = big * 100
+println(huge)

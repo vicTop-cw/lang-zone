@@ -1,0 +1,14 @@
+// C01 baseline: local same-dir relative import
+// Target: lock the minimal already-working surface -- same-dir import + fn/struct cross-file visibility.
+// Criterion: transpile -> rustc -> run, all asserts green, exit 0.
+// Status (measured 2026-10-16): PASS -- serves as the foundation for later regression.
+
+def add2(a: int, b: int) -> int =
+    return a + b
+
+struct Point =
+    x: int
+    y: int
+
+    def total(self) -> int =
+        return self.x + self.y

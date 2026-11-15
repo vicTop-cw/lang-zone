@@ -1,0 +1,75 @@
+// Fuzz 3: 类型系统边界测试
+
+// ── 3.1 变量重赋值（不同类型） ──
+def test_reassign() =
+    x = 1
+    x = 2
+    print("reassign: ")
+    print(x)
+
+// ── 3.2 变量遮蔽 ──
+def test_shadow() =
+    x = 1
+    if true:
+        x = 2
+        print("inner: ")
+        print(x)
+    print("outer: ")
+    print(x)
+
+// ── 3.3 类型推断链 ──
+def test_type_infer_chain() =
+    a = 1
+    b = a + 2
+    c = b * 3
+    print("chain: ")
+    print(c)
+
+// ── 3.4 混合类型运算 ──
+def test_mixed_types() =
+    a = 10
+    b = 3
+    print("sum: ")
+    print(a + b)
+    print("diff: ")
+    print(a - b)
+    print("prod: ")
+    print(a * b)
+    print("quot: ")
+    print(a / b)
+
+// ── 3.5 bool 与 int 互操作 ──
+def test_bool_int() =
+    a = true
+    b = false
+    print("true: ")
+    print(a)
+    print("false: ")
+    print(b)
+    print("true == true: ")
+    print(a == true)
+    print("false == false: ")
+    print(b == false)
+
+// ── 3.6 比较运算符链 ──
+def test_compare_chain() =
+    x = 5
+    print("x < 10: ")
+    print(x < 10)
+    print("x > 0: ")
+    print(x > 0)
+    print("x >= 5: ")
+    print(x >= 5)
+    print("x <= 5: ")
+    print(x <= 5)
+
+// ── 入口 ──
+def main() =
+    print("=== Fuzz Types ===")
+    test_reassign()
+    test_shadow()
+    test_type_infer_chain()
+    test_mixed_types()
+    test_bool_int()
+    test_compare_chain()
+    print("=== Fuzz Types Complete ===")

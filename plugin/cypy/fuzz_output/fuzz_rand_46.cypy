@@ -1,0 +1,30 @@
+def test_0() -> int:
+    x = print(print((-(-True))))
+    x = print(total)
+    defer:
+        let cleanup: int = 0
+    for i in range(1):
+        let temp: int = i
+    defer:
+        let cleanup: int = 0
+
+def test_1() -> int:
+    x = ((-print((0))) != False)
+    for i in range(1):
+        let temp: int = i
+    return (print(total))
+    if print(0.0):
+        return 1
+    else:
+        return 0
+
+def test_2() -> int:
+    defer:
+        let cleanup: int = 0
+    guard (((print(100) <= (1)))) else:
+        return -1
+    for i in range(5):
+        let temp: int = i
+
+def main() -> int:
+    return 0

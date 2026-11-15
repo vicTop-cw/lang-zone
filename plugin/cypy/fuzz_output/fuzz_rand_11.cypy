@@ -1,0 +1,33 @@
+def test_0() -> int:
+    guard print((z)) else:
+        return -1
+    let x: float = -3.14
+    let x: float = -3.14
+    let x: bool = True
+    while (-(-(total * x))):
+        break
+
+def test_1() -> int:
+    match print(("hello" < x)):
+        case 0:
+            return 0
+        case _:
+            return -1
+    let x: bool = False
+    match print((print((-1)))):
+        case 0:
+            return 0
+        case _:
+            return -1
+
+def test_2() -> int:
+    defer:
+        let cleanup: int = 0
+    return print(0)
+    while ((-z)):
+        break
+    x = (((print(1))))
+    total
+
+def main() -> int:
+    return 0

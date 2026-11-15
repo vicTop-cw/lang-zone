@@ -1,0 +1,4 @@
+# C06: library published as v0.1.0
+name = "shared"
+version = "0.1.0"
+entry = "src/main.lz"

@@ -1,0 +1,29 @@
+# lz Tier-2：rustc 编译器内部 API
+# 仅当 --allow-rustc-private 开启且 nightly 版本匹配时激活
+# ⚠ 无稳定保证，升级工具链需人工维护此表
+
+[meta]
+tier = 2
+description = "rustc 编译器内部 API 桥接（实验/自举专用）"
+nightly_required = "nightly-2026-07-01"
+feature_flag = "rustc_private"
+
+# ── rustc crate 映射 ──
+# lz import 名称 → Rust extern crate 名称 + 入口路径
+
+[crates]
+rustc_middle  = { extern = "rustc_middle",  path = "rustc_middle"  }
+rustc_hir     = { extern = "rustc_hir",     path = "rustc_hir"     }
+rustc_span    = { extern = "rustc_span",    path = "rustc_span"    }
+rustc_ast     = { extern = "rustc_ast",     path = "rustc_ast"     }
+rustc_interface = { extern = "rustc_interface", path = "rustc_interface" }
+rustc_driver    = { extern = "rustc_driver",    path = "rustc_driver"    }
+rustc_session   = { extern = "rustc_session",   path = "rustc_session"   }
+rustc_target    = { extern = "rustc_target",     path = "rustc_target"    }
+
+# ── 版本校验 ──
+# 编译期检查当前 nightly 与 nightly_required 一致
+# 版本漂移 → 硬报错，避免内部 API 破坏性变更静默失败
+
+[version_check]
+strict = true  # 不匹配即报错，不降级

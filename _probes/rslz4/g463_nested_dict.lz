@@ -1,0 +1,13 @@
+// g463_nested_dict_assign — 嵌套 dict 链赋值 self.settings["theme"]["color"] = v
+struct Config:
+    settings: Dict<str, Dict<str, str>>
+
+impl Config:
+    def set_theme(self, c: str) -> None =
+        self.settings["theme"]["color"] = c
+
+def main():
+    let mut cfg = Config { settings: {} }
+    cfg.settings["theme"] = { "color": "red" }
+    cfg.set_theme("blue")
+    print(cfg.settings["theme"]["color"])

@@ -1,0 +1,65 @@
+// ============================================================
+// 测试: block 三种 [] 形态 — 定义 ps / 引用 checker / [None]
+// 对应 SYNTAX/05b-block命名块.md §5.1 表格
+// ============================================================
+
+def main() =
+    // ── 形态 1：block [ps: __Params] — 定义检查站参数 ──
+    block counter[ps: __Params]:
+        let n = ps.args[0] as int
+        print(f"counter: n={n}")
+
+    // 触发形态 1 的块
+    block counter ^:
+        (42,)                        // counter: n=42
+
+    // ── 形态 2：block [chk] — 引用已有检查站 ──
+    block normalize[ps: __Params]:
+        let v = ps.args[0] as int
+        ps.args[0] = v.abs()         // 归正
+
+    // run 块引用 normalize 作默认检查站
+    block run[normalize]:
+        let x = ps.args[0] as int
+        print(f"run: x={x}")         // x 已归正
+
+    // 触发：normalize 先跑（abs），再进 run
+    block run ^:
+        (-7,)
+    // 输出: run: x=7
+
+    // ── 形态 3：block [None] — 显式无检查站 ──
+    block pass_thru[None]:
+        let x = ps.args[0] as int
+        print(f"pass_thru: x={x}")   // 原样
+
+    block pass_thru ^:
+        (-3,)
+    // 输出: pass_thru: x=-3
+
+    // ── 组合：block 作函数的检查站 ──
+    block double[ps: __Params]:
+        let v = ps.args[0] as int
+        ps.args[0] = v * 2
+
+    block add_one[ps: __Params]:
+        let v = ps.args[0] as int
+        ps.args[0] = v + 1
+
+    // 函数引用 block 作检查站（默认 double）
+    def compute[double](x: int) -> int =
+        x + 10                       // 参数已被 double 处理
+
+    let r = compute(5)               // 5*2 + 10 = 20
+    print(f"compute(5) = {r}")
+    assert r == 20
+
+    // 函数引用另一个 block 作检查站
+    def compute2[add_one](x: int) -> int =
+        x + 10
+
+    let r2 = compute2(5)             // 5+1 + 10 = 16
+    print(f"compute2(5) = {r2}")
+    assert r2 == 16
+
+    print("block checker forms tests done")

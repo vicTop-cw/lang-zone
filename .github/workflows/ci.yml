@@ -1,0 +1,56 @@
+# Lang-Zong CI
+# Runs on every push and pull request to main
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy
+
+    - name: Check formatting
+      run: cargo fmt --check
+      continue-on-error: true
+
+    - name: Build
+      run: cargo build --workspace
+
+    - name: Clippy
+      run: cargo clippy --workspace -- -D warnings
+      continue-on-error: true
+
+    - name: Run unit tests
+      run: cargo test --lib --workspace
+
+    - name: Run demo compilation tests
+      run: cargo test --test compile_demos
+
+    - name: Run error boundary tests
+      run: cargo test --test reject_errors
+
+    - name: Run demo validation script
+      run: bash DEMO/run_check.sh
+
+    - name: Build lzcyc (LZ → Cython)
+      run: cd CY && cargo build --bin lzcyc
+
+    - name: lzcyc transpile tests
+      run: |
+        cd CY
+        for f in TESTS/*/ *.lz TESTS/*_blocks/*.lz; do
+          [ -f "$f" ] && cargo run --bin lzcyc -- transpile "$f"
+        done

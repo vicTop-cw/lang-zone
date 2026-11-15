@@ -1,0 +1,50 @@
+// lz-zed test fixture: 15-build-blocks — 构建块
+// Authority: SYNTAX/11-构建块.md + 14-生成器.md
+
+# 变量构建块 =:
+x =:
+    y = 1
+    y + 2
+
+result =:
+    a = 10
+    b = 20
+    a + b
+
+score =:
+    if grade == "A":
+        90
+    elif grade == "B":
+        80
+    else:
+        60
+
+# 嵌套构建块
+outer =:
+    inner =:
+        5 * 5
+    inner + 10
+
+# 索引构建块 ^:
+lst = [1, 2, 3]
+value = lst ^:
+    key
+
+# 调用构建块 ~:
+f =: 
+    g = |x| x * 2
+    g
+doubled = f ~:
+    21
+
+# 生成器构建块 *:
+nums = counter *:
+    yield 1
+    yield 2
+    yield 3
+
+# 构建块组合：=: 内含 ^:
+combined =:
+    tmp = cache ^:
+        compute_key()
+    tmp + 1

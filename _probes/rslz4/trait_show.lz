@@ -1,0 +1,14 @@
+trait Show =
+    def show(self) -> str
+
+struct Point =
+    x: int
+    y: int
+
+impl Show for Point =
+    def show(self) -> str =
+        "P(" + str(self.x) + "," + str(self.y) + ")"
+
+def main() =
+    let p = Point(x: 3, y: 4)
+    print(p.show())

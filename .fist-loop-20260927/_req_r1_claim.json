@@ -1,0 +1,4 @@
+[
+ {"name":"claim","arguments":{"task_id":"T0","assignee":"human_steward","now":"2026-09-27T12:35:00+08:00"}},
+ {"name":"task_plan_deep","arguments":{"task_id":"T0","by":"human_steward","omega_strong_verify":true,"laya_auto":true,"reinject_context":true,"split_n":2,"inject":"code-review","spec":"[lzc-loop 推进 R1 laws] L1 非 IR 域：不得修改 src/ir/**（上游只读），IR 层缺陷一律 report_bug([ir-upstream]) 入账避让；L2 lzcyz/Cython 域（src/ir/codegen_cython.rs、src/codegen/、CY/、BENCH 的 lzcyz 基准）零触碰；L3 FIST-Mbt 仓库只读，只运行其构建产物为 MCP server；L4 生成码铁律：.lz 改动后产物必须过 rustc 且运行正确才计完成，新特性必须配 DEMO；L5 测试门禁：全量 cargo test 绿、DEMO 全量回归（排除 99_errors/，lz_std 暂不处理）、golden 不漂移、测试数只增不减；L6 git 纪律：遗留集零触碰，逐文件 git add，禁 -A，工具态文件不进库；L7 无最小复现不入账，误报不刷账本；L8 不可逆操作（push/删分支/删文件/清任务库）只挂账待人工。","now":"2026-09-27T12:35:00+08:00"}}
+]
