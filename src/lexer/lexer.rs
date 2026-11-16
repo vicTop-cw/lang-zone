@@ -340,13 +340,63 @@ impl Lexer {
             }
             let trimmed = line_content.trim();
             if trimmed.is_empty() {
-                if self.peek() == Some('\n') {
-                    self.advance();
+                // BUG-513：缩进式嵌入块以「空行 + 下一非空行缩进 ≤ 块缩进」为界。
+                // 否则 col-0 块（block_indent==0）永不为真（leading_ws < 0 永不成立），
+                // 会把其后所有 LZ 代码一并吞进嵌入块（如 def main() 被吞 → 生成空 main）。
+                // 向前跳过连续空行，看下一个非空行的缩进：若 ≤ 块缩进，则块在此空行处结束，
+                // 且不消费该空行（留给外层流，避免吃掉分隔空行）。
+                let mut peek = self.pos;
+                // 消费当前位置可能的 \n
+                if self.chars.get(peek) == Some(&'\n') {
+                    peek += 1;
                 }
-                if !first_line {
-                    src.push('\n');
+                // 跳过后续连续空行/纯空白行
+                let mut next_indent: Option<usize> = None;
+                loop {
+                    // 收集一行
+                    let line_start = peek;
+                    while let Some(&c) = self.chars.get(peek) {
+                        if c == '\n' {
+                            break;
+                        }
+                        peek += 1;
+                    }
+                    let line: String = self.chars[line_start..peek].iter().collect();
+                    if line.trim().is_empty() {
+                        // 空行，继续下探
+                        if self.chars.get(peek) == Some(&'\n') {
+                            peek += 1;
+                            continue;
+                        }
+                        // 到文件尾仍全空
+                        next_indent = None;
+                        break;
+                    }
+                    let lead: usize = line
+                        .chars()
+                        .take_while(|&c| c == ' ' || c == '\t')
+                        .count();
+                    next_indent = Some(lead);
+                    break;
                 }
-                continue;
+                match next_indent {
+                    Some(lead) if lead <= block_indent => {
+                        // 块结束：不消费该空行，回退到行首（当前位置即空行起点）
+                        self.pos = line_start_pos;
+                        self.col = 0;
+                        break;
+                    }
+                    _ => {
+                        // 块内空行：消费并保留
+                        if self.peek() == Some('\n') {
+                            self.advance();
+                        }
+                        if !first_line {
+                            src.push('\n');
+                        }
+                        continue;
+                    }
+                }
             }
             let leading_ws: usize = line_content
                 .chars()

@@ -80,6 +80,9 @@ enum Token:
     RawStrLit(s: str)
     TripleStrLit(s: str)
     EmbedBlock(lang: str, src: str, form: EmbedForm)
+    Int128Lit(v: str)
+    BigIntLit(v: str)
+    LexError(v: str)
     Ident(name: str)
     MagicMethod(name: str)
     Underscore
@@ -109,7 +112,8 @@ enum Token:
     PowEq
     Amp
     Pipe_
-    Caret
+    CaretInfix
+    CaretOp
     Shl
     Shr
     AmpAmp
@@ -150,6 +154,10 @@ enum Token:
     Indent
     Dedent
     Eof
+    // BUG-514：未知字符（对齐 Rust Token::Unknown(String)）。
+    // 空白/运算符以外的非字母数字字符（如 tnr 的 `×`）——Rust 侧产 Unknown，lz 侧旧实现
+    // 静默丢弃 → 双轨一致门禁在含 `×` 的样本上 rust 多一个 token 而不一致。
+    Unknown(str)
 
 // ── 关键字 → Token（查表，返回 (是否为关键字, Token)）──
 // M5 双轨门禁：关键字集合与 Rust read_ident_or_keyword 逐字镜像（含 True/true、
@@ -250,7 +258,6 @@ def punct_token(c: str) -> (bool, Token) =
         ("]", Token.RBrack),
         ("&", Token.Amp),
         ("|", Token.Pipe_),
-        ("^", Token.Caret),
         (";", Token.Semicolon),
         ("!", Token.Exclamation),
         ("?", Token.Question),
@@ -258,6 +265,8 @@ def punct_token(c: str) -> (bool, Token) =
         ("$", Token.Dollar),
         ("`", Token.Backtick),
     ]
+    // 注意：^ 不在单字符表——tokenize 主循环按上下文拦截（前导留白
+    // → CaretInfix，紧贴 → CaretOp，^: → BuildIndex，对齐 lexer.rs:730-746）
     let mut result: (bool, Token) = (false, Token.Plus)
     for idx in 0..table.len():
         let pair = table[idx].clone()
@@ -329,8 +338,10 @@ def three_char_token(c1: str, c2: str, c3: str) -> (bool, Token) =
 def is_digit(c: str) -> bool =
     c >= "0" and c <= "9"
 
+// 对齐 Rust char::is_alphabetic：a-zA-Z 下划线之外，Unicode 字母（café 的 é、
+// 中文变量名）也算标识符字符。单字符 str 走 chars().all 闭包判定。
 def is_alpha(c: str) -> bool =
-    (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+    c == "_" or ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z")) or c.chars().all(|ch| ch.is_alphabetic())
 
 def is_ident_char(c: str) -> bool =
     is_alpha(c) || is_digit(c)
@@ -398,27 +409,186 @@ def scan_int(src: str, start: int) -> (str, int) =
         i = i + 1
     (num, i)
 
-// 扫描浮点字面量（M5：对齐 Rust FloatLit）：digits '.' digits，
-// 返回 (原始字面量文本, 结束位置, 是否含小数点)
-// result 变量模式：规避 LZ codegen 对函数内 if-表达式的 lowering 缺陷
-def scan_float(src: str, start: int) -> (str, int, bool) =
+// ── scan_number：数字字面量统一扫描（对齐 lexer/numbers.rs read_number）──
+// 0x/0o/0b 进制前缀（含数字间下划线分隔）→ IntLit；
+// 十进制（下划线分隔）+ 小数 + 科学计数法 e/E±digits → FloatLit（parse_f64）；
+// i64 溢出：9223372036854775808 一元负号上下文 → IntLit(i64::MIN)，
+// 否则 Int128Lit；更大 → BigIntLit；数字后跟字母 → LexError。
+// 返回 (Token, 结束位置)。
+def scan_number(src: str, start: int) -> (Token, int) =
+    let n = char_count(src)
     let mut i = start
-    let mut content: str = ""
-    while i < char_count(src) and is_digit(char_at(src, i)):
-        content = content + char_at(src, i)
-        i = i + 1
-    let mut is_float: bool = false
-    let mut result: (str, int, bool) = ("", i, false)
-    if i < char_count(src) and char_at(src, i) == ".":
-        if i + 1 < char_count(src) and is_digit(char_at(src, i + 1)):
-            content = content + "."
+    let c0 = char_at(src, i)
+    // ── 进制前缀 ──
+    if c0 == "0" and i + 1 < n:
+        let p = char_at(src, i + 1)
+        if p == "x" or p == "X":
+            i = i + 2
+            let mut hex: str = ""
+            while i < n:
+                let ch = char_at(src, i)
+                if is_hex_digit(ch):
+                    hex = hex + ch
+                    i = i + 1
+                elif ch == "_":
+                    i = i + 1
+                else:
+                    break
+            let v = hex_fold(hex)
+            (Token.IntLit(v: v), i)
+        elif p == "o" or p == "O":
+            i = i + 2
+            let mut oct: str = ""
+            while i < n:
+                let ch = char_at(src, i)
+                if ch >= "0" and ch <= "7":
+                    oct = oct + ch
+                    i = i + 1
+                elif ch == "_":
+                    i = i + 1
+                else:
+                    break
+            let v = radix_fold(oct, 8)
+            (Token.IntLit(v: v), i)
+        elif p == "b" or p == "B":
+            i = i + 2
+            let mut bin: str = ""
+            while i < n:
+                let ch = char_at(src, i)
+                if ch == "0" or ch == "1":
+                    bin = bin + ch
+                    i = i + 1
+                elif ch == "_":
+                    i = i + 1
+                else:
+                    break
+            let v = radix_fold(bin, 2)
+            (Token.IntLit(v: v), i)
+        else:
+            scan_dec_number(src, start)
+    else:
+        scan_dec_number(src, start)
+
+// 十进制/浮点扫描（scan_number 的无前缀分支）：
+// digits + 下划线 + 小数（'.' 后须 digit）+ 科学计数法 e/E[+-]digits
+def scan_dec_number(src: str, start: int) -> (Token, int) =
+    let n = char_count(src)
+    let mut i = start
+    let mut num: str = ""
+    let mut is_float = false
+    while i < n:
+        let ch = char_at(src, i)
+        if is_digit(ch):
+            num = num + ch
             i = i + 1
-            while i < char_count(src) and is_digit(char_at(src, i)):
-                content = content + char_at(src, i)
-                i = i + 1
+        elif ch == "_":
+            i = i + 1
+        elif ch == "." and is_float == false and i + 1 < n and is_digit(char_at(src, i + 1)):
             is_float = true
-    result = (content, i, is_float)
-    result
+            num = num + ch
+            i = i + 1
+        elif ch == "e" or ch == "E":
+            // 科学计数法（对齐 numbers.rs 86-100：无论此前是否 float 都消费
+            // e/E + 可选符号——2.5e3 的 e 在 is_float=true 时也必须消费）
+            is_float = true
+            num = num + ch
+            i = i + 1
+            if i < n:
+                let s = char_at(src, i)
+                if s == "+" or s == "-":
+                    num = num + s
+                    i = i + 1
+        else:
+            break
+    // G2：数字后紧跟字母/下划线 → LexError（对齐 numbers.rs G2）
+    if i < n:
+        let after = char_at(src, i)
+        if is_alpha(after) or is_digit(after):
+            (Token.LexError(v: "非法数字字面量: " + num + "（后跟 `" + after + "`）"), i)
+        else:
+            finish_number(src, start, num, is_float, i)
+    else:
+        finish_number(src, start, num, is_float, i)
+
+// 数字 token 收尾：float → FloatLit（parse_f64）；int → i64 边界语义
+def finish_number(src: str, start: int, num: str, is_float: bool, i: int) -> (Token, int) =
+    if is_float:
+        (Token.FloatLit(v: num), i)
+    else:
+        // i64 溢出判定：num 长度 > 19 或解析越界。语料边界 = 9223372036854775808。
+        if str_len(num) > 19:
+            // 一元负号上下文（-9223372036854775808 → i64::MIN）
+            if num == "9223372036854775808" and is_unary_minus_ctx(src, start):
+                (Token.IntLit(v: -9223372036854775807 - 1), i)
+            elif num == "9223372036854775808":
+                (Token.Int128Lit(v: num), i)
+            else:
+                (Token.BigIntLit(v: num), i)
+        elif str_len(num) == 19:
+            // 19 位可能恰在 i64 边界。等长数字串的字符串比较等价数值比较：
+            // num > "9223372036854775807" 即超 i64::MAX（含 9223372036854775808）
+            if num > "9223372036854775807":
+                if num == "9223372036854775808" and is_unary_minus_ctx(src, start):
+                    (Token.IntLit(v: -9223372036854775807 - 1), i)
+                else:
+                    (Token.Int128Lit(v: num), i)
+            else:
+                let v = str_to_int(num)
+                (Token.IntLit(v: v), i)
+        else:
+            let v = str_to_int(num)
+            (Token.IntLit(v: v), i)
+
+// 一元负号上下文判定（对齐 numbers.rs is_unary_minus）：
+// start 前一字符是 '-' 且再往前是边界（输入起点/空白/括号/运算符）
+def is_unary_minus_ctx(src: str, start: int) -> bool =
+    if start < 1:
+        false
+    else:
+        let before_minus = char_at(src, start - 1)
+        if before_minus != "-":
+            false
+        elif start < 2:
+            true
+        else:
+            let p = char_at(src, start - 2)
+            if p == " " or p == "\t" or p == "\n" or p == "\r" or p == "(" or p == "[" or p == "{" or p == "=" or p == ":" or p == "," or p == "+" or p == "-" or p == "*" or p == "/" or p == "<" or p == ">" or p == "|" or p == "&":
+                true
+            else:
+                false
+
+// 十六进制字符判定与取值
+def is_hex_digit(c: str) -> bool =
+    (c >= "0" and c <= "9") or (c >= "a" and c <= "f") or (c >= "A" and c <= "F")
+
+def hex_val(c: str) -> int =
+    let table: List<(str, int)> = [
+        ("a", 10), ("b", 11), ("c", 12), ("d", 13), ("e", 14), ("f", 15),
+        ("A", 10), ("B", 11), ("C", 12), ("D", 13), ("E", 14), ("F", 15)
+    ]
+    if is_digit(c):
+        digit_val(c)
+    else:
+        let mut result = 0
+        for idx in 0..table.len():
+            let pair = table[idx].clone()
+            if pair.0 == c:
+                result = pair.1
+        result
+
+// 十六进制折叠（≤15 位安全；语料边界 0x7FFFFFFFFFFFFFFF = i64::MAX 不溢出）
+def hex_fold(s: str) -> int =
+    let mut v = 0
+    for idx in 0..char_count(s):
+        v = v * 16 + hex_val(char_at(s, idx))
+    v
+
+// 通用 radix 折叠（八进制/二进制；基数 ≤ 8，19 位内 i64 安全）
+def radix_fold(s: str, base: int) -> int =
+    let mut v = 0
+    for idx in 0..char_count(s):
+        v = v * base + digit_val(char_at(s, idx))
+    v
 
 // 扫描运算符/标点：返回 ((bool, Token), 结束位置)；三字符 → 双字符 → 单字符
 // 字符索引下 i+1/i+2 恒为合法字符位置，无需字符边界守卫（BUG-512 的
@@ -476,7 +646,7 @@ def scan_string(src: str, start: int) -> (str, int) =
     (content, i + 1)
 
 // 处理一个转义序列（i 指向 '\'）：返回 (还原后的字符, 结束位置)
-// 对齐 Rust lex_escape：\n \t \r \\ \" \' \0；未知转义原样保留两字符
+// 对齐 Rust lex_escape：\n \t \r \\ \" \' \0 \u{hex}；未知转义原样保留两字符
 def scan_escape(src: str, i: int) -> (str, int) =
     let j = i + 1
     let c = char_at(src, j)
@@ -494,6 +664,20 @@ def scan_escape(src: str, i: int) -> (str, int) =
         return ("'", j + 1)
     elif c == "0":
         return ("\0", j + 1)
+    elif c == "u":
+        // \u{hex} → 码点字符（对齐 lex_escape；chr_unchecked 来自 lz_builtins）
+        let n = char_count(src)
+        let mut k = j + 1
+        let mut hex: str = ""
+        if k < n and char_at(src, k) == "{":
+            k = k + 1
+            while k < n and char_at(src, k) != "}":
+                hex = hex + char_at(src, k)
+                k = k + 1
+            if k < n:
+                k = k + 1
+        let cp = hex_fold(hex)
+        return (chr_unchecked(cp).to_string(), k)
     else:
         // 未知转义：原样保留反斜杠 + 字符（对齐 Rust 的 LexError，
         // 但门禁语料均为合法转义，未知形态不出现在 DEMO 语料）
@@ -535,6 +719,85 @@ def scan_triple_string(src: str, start: int) -> (str, int) =
         content = content + char_at(src, i)
         i = i + 1
     (content, i + 3)
+
+// 扫描 f-三引号字符串（f"""..."""，对齐 Rust read_fstring triple 分支：
+// 无 dedent，原始收集含 \r\n 到匹配三引号）。start 指向 f。
+def scan_f_triple_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 4
+    let mut content: str = ""
+    while i + 2 < char_count(src):
+        if char_at(src, i) == "\"" and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+            break
+        content = content + char_at(src, i)
+        i = i + 1
+    (content, i + 3)
+
+// 扫描 r-三引号原始串（r"""..."""，对齐 Rust read_raw_string triple 分支：
+// 原始收集含 \r\n 到匹配三引号，无 dedent）。start 指向 r。
+def scan_r_triple_string(src: str, start: int) -> (str, int) =
+    let mut i = start + 4
+    let mut content: str = ""
+    while i + 2 < char_count(src):
+        if char_at(src, i) == "\"" and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+            break
+        content = content + char_at(src, i)
+        i = i + 1
+    (content, i + 3)
+
+// 三引号内容公共缩进去除（对齐 Rust read_triple_string strings.rs:123-150）：
+// 按 \n 分行（剥行尾 \r，对齐 Rust lines()）；首行原样，空行原样；
+// 其余行剥 min_indent（取第 2 行起非空行的最小前导空格数）；join "\n"。
+def dedent_triple(s: str) -> str =
+    let lines = split_nl(s)
+    let mut out: str = ""
+    if lines.len() <= 1:
+        return join_nl(lines)
+    let mut min_indent = 2147483647
+    for idx in 1..lines.len():
+        let l = lines[idx]
+        if trim_spaces(l) != "":
+            let ind = count_leading_spaces_str(l)
+            if ind < min_indent:
+                min_indent = ind
+    if min_indent == 2147483647:
+        min_indent = 0
+    for idx in 0..lines.len():
+        if idx > 0:
+            out = out + "\n"
+        let l = lines[idx]
+        if idx == 0 or trim_spaces(l) == "":
+            out = out + l
+        elif char_count(l) >= min_indent:
+            out = out + slice_str(l, min_indent, char_count(l))
+        else:
+            out = out + l
+    out
+
+// 按换行分割（剥 \r，对齐 Rust str::lines()：末尾换行不产生空段）
+def split_nl(s: str) -> List<str> =
+    let mut lines: List<str> = []
+    let mut cur: str = ""
+    for idx in 0..char_count(s):
+        let c = char_at(s, idx)
+        if c == "\n":
+            if char_count(cur) > 0 and char_at(cur, char_count(cur) - 1) == "\r":
+                cur = slice_str(cur, 0, char_count(cur) - 1)
+            lines = lines + [cur]
+            cur = ""
+        else:
+            cur = cur + c
+    if cur != "":
+        lines = lines + [cur]
+    lines
+
+// 换行连接
+def join_nl(lines: List<str>) -> str =
+    let mut out: str = ""
+    for idx in 0..lines.len():
+        if idx > 0:
+            out = out + "\n"
+        out = out + lines[idx]
+    out
 
 // 数字字符查表转值（避免 str→int 直 cast 的 E0605）
 def digit_val(c: str) -> int =
@@ -652,7 +915,33 @@ def read_embed_indent_block(src: str, i: int) -> (str, int) =
             j = j + 1
         let trimmed = trim_spaces(line_content)
         if trimmed == "":
-            // 空行
+            // BUG-513：缩进式嵌入块以「空行 + 下一非空行缩进 ≤ 块缩进」为界。
+            // 否则 col-0 块（block_indent==0）永不为真（leading_ws < 0 永不成立），
+            // 会把其后所有 LZ 代码一并吞进嵌入块（如 def main() 被吞 → 生成空 main）。
+            // 向前跳过连续空行，看下一个非空行的缩进：若 ≤ 块缩进，则块在此空行处结束，
+            // 且不消费该空行（留给外层流，避免吃掉分隔空行）。
+            let mut peek = j
+            if peek < char_count(src) and char_at(src, peek) == "\n":
+                peek = peek + 1
+            let mut next_indent = -1
+            while peek < char_count(src):
+                let ls = peek
+                while peek < char_count(src) and char_at(src, peek) != "\n":
+                    peek = peek + 1
+                let line: str = slice_str(src, ls, peek)
+                if trim_spaces(line) == "":
+                    if peek < char_count(src) and char_at(src, peek) == "\n":
+                        peek = peek + 1
+                        continue
+                    next_indent = -1
+                    break
+                next_indent = count_leading_spaces_str(line)
+                break
+            if next_indent >= 0 and next_indent <= block_indent:
+                // 块结束：不消费该空行，回退到行首
+                j = line_start
+                break
+            // 块内空行：消费并保留
             if j < char_count(src) and char_at(src, j) == "\n":
                 j = j + 1
             if not first_line:
@@ -748,6 +1037,29 @@ def escape_for_debug(s: str) -> str =
         i = i + 1
     result
 
+// 字符包含判定
+def str_contains(s: str, c: str) -> bool =
+    let mut i = 0
+    let mut found = false
+    while i < char_count(s):
+        if char_at(s, i) == c:
+            found = true
+            i = char_count(s)
+        else:
+            i = i + 1
+    found
+
+// f64 的 Rust Debug 形态（对齐 format!("{:?}", f)）：Display 与 Debug 对
+// f64 的唯一差异是整值补 .0（1 → "1.0"）；科学计数/NaN/inf 两形态一致。
+// v 是原始数字文本（如 "1.5e10"），parse_f64 后复刻 Debug 形态。
+def float_debug_str(v: str) -> str =
+    let f = v.parse_f64()
+    let s = f.to_string()
+    if str_contains(s, ".") or str_contains(s, "e") or str_contains(s, "E") or str_contains(s, "N") or str_contains(s, "i"):
+        s
+    else:
+        s + ".0"
+
 // 跳过空白后返回首个非空白字符位置（对齐 Rust is_old_string_form 的 p 定位）
 def skip_ws_and_get(src: str, i: int) -> int =
     let mut j = i
@@ -782,6 +1094,9 @@ def tokenize(src: str) -> List<Token> =
     let mut i = 0
     let mut at_line_start = true
     let mut indent_stack: List<int> = [0]
+    // BUG-372 对齐：圆括号未闭合期间，行首缩进不产生 Indent/Dedent
+    // （自举双轨门禁 quarter2 实测：多行调用实参续行两侧行为须一致）
+    let mut paren_depth = 0
     let n = char_count(src)
     while i < n:
         let c = char_at(src, i)
@@ -811,16 +1126,22 @@ def tokenize(src: str) -> List<Token> =
                 i = j
                 at_line_start = false
             else:
-                let top = indent_stack[indent_stack.len() - 1]
-                if col > top:
-                    indent_stack = indent_stack + [col]
-                    tokens = tokens + [Token.Indent]
-                elif col < top:
-                    while indent_stack.len() > 1 and indent_stack[indent_stack.len() - 1] > col:
-                        indent_stack = indent_stack[0..(indent_stack.len() - 1)]
-                        tokens = tokens + [Token.Dedent]
-                i = j
-                at_line_start = false
+                // 括号内续行（BUG-372）：col>0 且 paren_depth>0 → 缩进处理整体
+                // 跳过（不产 Indent/Dedent、不动缩进栈，对齐 Rust 行首空白分支）
+                if paren_depth > 0 and col > 0:
+                    i = j
+                    at_line_start = false
+                else:
+                    let top = indent_stack[indent_stack.len() - 1]
+                    if col > top:
+                        indent_stack = indent_stack + [col]
+                        tokens = tokens + [Token.Indent]
+                    elif col < top:
+                        while indent_stack.len() > 1 and indent_stack[indent_stack.len() - 1] > col:
+                            indent_stack = indent_stack[0..(indent_stack.len() - 1)]
+                            tokens = tokens + [Token.Dedent]
+                    i = j
+                    at_line_start = false
         // 空白跳过（含 \r：CRLF 行尾的 \r 静默跳过，对齐 Rust '\r' => advance）
         elif c == " " or c == "\t" or c == "\r":
             i = i + 1
@@ -834,13 +1155,27 @@ def tokenize(src: str) -> List<Token> =
         // 字符串字面量（M5：对齐 Rust 词法——三引号 """、f-string f"、
         // 原始 r" 优先于普通 "，且 f/r 前缀必须在 is_alpha 分支之前拦截）
         elif c == "\"" and i + 2 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+            // 三引号 → **StrLit**（对齐 Rust read_triple_string：变体是 StrLit
+            // 而非 TripleStrLit，且做公共缩进去除 + 剥 \r，strings.rs:105-151）
             let r = scan_triple_string(src, i)
             i = r.1
-            tokens = tokens + [Token.TripleStrLit(s: r.0)]
+            tokens = tokens + [Token.StrLit(s: dedent_triple(r.0))]
+        elif c == "f" and i + 2 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+            // f"""...""" 三引号插值串（对齐 Rust read_fstring triple 分支：
+            // 无 dedent，原样收集到匹配三引号）
+            let r = scan_f_triple_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.FStrLit(s: r.0)]
         elif c == "f" and i + 1 < n and char_at(src, i + 1) == "\"":
             let r = scan_fstring(src, i)
             i = r.1
             tokens = tokens + [Token.FStrLit(s: r.0)]
+        elif c == "r" and i + 2 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+            // r"""...""" 三引号原始串（对齐 Rust read_raw_string triple 分支：
+            // 无 dedent、原样含 \r\n 收集到匹配三引号）
+            let r = scan_r_triple_string(src, i)
+            i = r.1
+            tokens = tokens + [Token.RawStrLit(s: r.0)]
         elif c == "r" and i + 1 < n and char_at(src, i + 1) == "\"":
             let r = scan_raw_string(src, i)
             i = r.1
@@ -857,7 +1192,9 @@ def tokenize(src: str) -> List<Token> =
             if word == "_":
                 // 单独的 `_` 是通配符 token（对齐 Rust read_ident_or_keyword）
                 tokens = tokens + [Token.Underscore]
-            elif word.len() > 4 and word[0..2] == "__" and word[(word.len() - 2)..word.len()] == "__":
+            elif char_count(word) > 4 and char_at(word, 0) == "_" and char_at(word, 1) == "_" and char_at(word, char_count(word) - 1) == "_" and char_at(word, char_count(word) - 2) == "_":
+                // __xxx__ magic method（char-safe 前后缀判定：字节切片 word[0..2]
+                // 在多字节标识符（中文）处会 panic——identifiers.lz 真实案例）
                 tokens = tokens + [Token.MagicMethod(name: word)]
             else:
                 let kt = keyword_token(word)
@@ -865,15 +1202,29 @@ def tokenize(src: str) -> List<Token> =
                     tokens = tokens + [kt.1]
                 else:
                     tokens = tokens + [Token.Ident(name: word)]
-        // 整数/浮点字面量：scan_float 统一扫描，按是否含小数点分流
-        // （M5：对齐 Rust——95.5 等多位数浮点此前被切成 IntLit+Dot+IntLit）
+        // 数字字面量：scan_number 统一扫描（进制前缀/下划线/科学计数法/
+        // i64 边界语义，对齐 Rust read_number）
         elif is_digit(c):
-            let r = scan_float(src, i)
+            let r = scan_number(src, i)
             i = r.1
-            if r.2:
-                tokens = tokens + [Token.FloatLit(v: r.0)]
+            tokens = tokens + [r.0]
+        // ^ 上下文（对齐 lexer.rs:724-746，优先级 ^X > ^: > 上下文）：
+        // ^= → XorEq；^: → BuildIndex；前导留白 → CaretInfix（强制中缀 XOR）；
+        // 紧贴 → CaretOp
+        elif c == "^":
+            if i + 1 < n and char_at(src, i + 1) == "=":
+                i = i + 2
+                tokens = tokens + [Token.XorEq]
+            elif i + 1 < n and char_at(src, i + 1) == ":":
+                i = i + 2
+                tokens = tokens + [Token.BuildIndex]
             else:
-                tokens = tokens + [Token.IntLit(v: str_to_int(r.0))]
+                let prev = prev_char_at(src, i)
+                if is_build_ws_char(prev):
+                    tokens = tokens + [Token.CaretInfix]
+                else:
+                    tokens = tokens + [Token.CaretOp]
+                i = i + 1
         // 构建块符号 =: 变量构建块（对齐 Rust：is_build_before(prev) && is_build_ws(after)
         // 才合法，否则 LexError；子集语料均为合法用法，走 BuildAssign）
         elif c == "=" and i + 1 < n and char_at(src, i + 1) == ":":
@@ -973,14 +1324,19 @@ def tokenize(src: str) -> List<Token> =
             i = i + 2
             while i < n and char_at(src, i) != "\n":
                 i = i + 1
-        // 块注释 /* */（对齐 Rust skip_block_comment）：整块跳过含内部换行
+        // 块注释 /* */（对齐 Rust skip_block_comment）：**嵌套**深度计数——
+        // 注释文本里的字面 /* 使深度+1（comments.lz 第 16 行真实案例），
+        // 须配对数量的 */ 才结束，深度未归零时吞到文件尾
         elif c == "/" and i + 1 < n and char_at(src, i + 1) == "*":
             i = i + 2
-            let mut closed = false
-            while i < n and !closed:
-                if char_at(src, i) == "*" and i + 1 < n and char_at(src, i + 1) == "/":
+            let mut depth = 1
+            while i < n and depth > 0:
+                if char_at(src, i) == "/" and i + 1 < n and char_at(src, i + 1) == "*":
+                    depth = depth + 1
                     i = i + 2
-                    closed = true
+                elif char_at(src, i) == "*" and i + 1 < n and char_at(src, i + 1) == "/":
+                    depth = depth - 1
+                    i = i + 2
                 else:
                     i = i + 1
         // 运算符/标点（双字符优先，含 == != <= >= && || :: -> => **）
@@ -989,7 +1345,19 @@ def tokenize(src: str) -> List<Token> =
             i = r.1
             let pr = r.0
             if pr.0:
-                tokens = tokens + [pr.1]
+                // 括号深度跟踪（BUG-372）：先比较再 push（== 借用语义），
+                // push 会移动 pr.1，之后再访问即 E0382
+                let tok = pr.1
+                if tok == Token.LParen:
+                    paren_depth = paren_depth + 1
+                elif tok == Token.RParen:
+                    if paren_depth > 0:
+                        paren_depth = paren_depth - 1
+                tokens = tokens + [tok]
+            else:
+                // BUG-514：未知字符（对齐 Rust `_ =>` 发射 Token::Unknown）。
+                // scan_punct 未识别时 r.1 = i+1（前进 1 字符），携带原字符成 Unknown。
+                tokens = tokens + [Token.Unknown(char_at(src, i - 1))]
     // 收尾：弹出所有未闭合缩进（对应原生 Eof 前的 Dedent 序列）
     while indent_stack.len() > 1:
         indent_stack = indent_stack[0..(indent_stack.len() - 1)]
@@ -1063,19 +1431,22 @@ def display_token(t: Token) -> str =
         case Token.TrueLit => "True"
         case Token.FalseLit => "False"
         case Token.IntLit(v: n) => "IntLit(" + n.to_string() + ")"
-        case Token.FloatLit(v: n) => "FloatLit(" + n + ")"
-        case Token.StrLit(s: s) => "StrLit(" + s + ")"
-        case Token.FStrLit(s: s) => "FStrLit(" + s + ")"
-        case Token.RawStrLit(s: s) => "RawStrLit(" + s + ")"
-        case Token.TripleStrLit(s: s) => "TripleStrLit(" + s + ")"
+        case Token.FloatLit(v: n) => "FloatLit(" + float_debug_str(n) + ")"
+        case Token.StrLit(s: s) => "StrLit(" + escape_for_debug(s) + ")"
+        case Token.FStrLit(s: s) => "FStrLit(" + escape_for_debug(s) + ")"
+        case Token.RawStrLit(s: s) => "RawStrLit(" + escape_for_debug(s) + ")"
+        case Token.TripleStrLit(s: s) => "TripleStrLit(" + escape_for_debug(s) + ")"
         case Token.EmbedBlock(lang: l, src: s, form: f) =>
             let form_str = match f:
                 case EmbedForm.Indent => "Indent"
                 case EmbedForm.Raw => "Raw"
                 case EmbedForm.Interp => "Interp"
             "EmbedBlock { lang: \"" + l + "\", src: \"" + escape_for_debug(s) + "\", form: " + form_str + " }"
-        case Token.Ident(name: n) => "Ident(" + n + ")"
-        case Token.MagicMethod(name: n) => "MagicMethod(" + n + ")"
+        case Token.Int128Lit(v: n) => "Int128Lit(" + n + ")"
+        case Token.BigIntLit(v: n) => "BigIntLit(\"" + escape_for_debug(n) + "\")"
+        case Token.LexError(v: e) => "LexError(\"" + escape_for_debug(e) + "\")"
+        case Token.Ident(name: n) => "Ident(" + escape_for_debug(n) + ")"
+        case Token.MagicMethod(name: n) => "MagicMethod(" + escape_for_debug(n) + ")"
         case Token.Underscore => "Underscore"
         case Token.Plus => "Plus"
         case Token.Minus => "Minus"
@@ -1103,7 +1474,8 @@ def display_token(t: Token) -> str =
         case Token.PowEq => "PowEq"
         case Token.Amp => "Amp"
         case Token.Pipe_ => "Pipe_"
-        case Token.Caret => "Caret"
+        case Token.CaretInfix => "CaretInfix"
+        case Token.CaretOp => "CaretOp"
         case Token.Shl => "Shl"
         case Token.Shr => "Shr"
         case Token.AmpAmp => "AmpAmp"
@@ -1144,6 +1516,7 @@ def display_token(t: Token) -> str =
         case Token.Indent => "Indent"
         case Token.Dedent => "Dedent"
         case Token.Eof => "Eof"
+        case Token.Unknown(s: s) => "Unknown(" + s + ")"
 
 // ── main：tokenize 一段示例源码并输出（覆盖字符串/运算符/magic method）──
 def main() =

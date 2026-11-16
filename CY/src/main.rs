@@ -39,7 +39,8 @@ fn main() {
     }
     // M5 吸收的 lzc 子命令（T0r55.3.2）—— peek 先截获 --frontend=lz（LZ 前端直出）
     if args[0] == "peek" && args.iter().any(|a| a == "--frontend=lz") {
-        peek_frontend_lz(&args[1..]);
+        // peek_frontend_lz 约定 rest[0]="peek"、rest[1]=目标文件，传完整 args
+        peek_frontend_lz(&args);
         std::process::exit(0);
     }
     // cmd_* 函数期望完整 args（args[0]=二进制名, args[1]=子命令），

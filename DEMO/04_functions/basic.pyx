@@ -4,6 +4,7 @@
 
 import cython
 import sys
+import threading as _lz_threading
 
 class _Moved:
     def __getattr__(self, name): raise RuntimeError('access to moved value')
@@ -28,6 +29,10 @@ class Box:
     @staticmethod
     def new(v=None): return Box(v)
     def __getattr__(self, n): return getattr(self._v, n)
+    def __getitem__(self, i): return self._v
+    def __setitem__(self, i, v): self._v = v
+    def __getitem__(self, i): return self._v
+    def __setitem__(self, i, v): self._v = v
     def __repr__(self): return 'Box(' + repr(self._v) + ')'
 
 class Rc:
@@ -35,6 +40,10 @@ class Rc:
     @staticmethod
     def new(v=None): return Rc(v)
     def __getattr__(self, n): return getattr(self._v, n)
+    def __getitem__(self, i): return self._v
+    def __setitem__(self, i, v): self._v = v
+    def __getitem__(self, i): return self._v
+    def __setitem__(self, i, v): self._v = v
     def __repr__(self): return 'Rc(' + repr(self._v) + ')'
 
 class Arc:
@@ -42,6 +51,10 @@ class Arc:
     @staticmethod
     def new(v=None): return Arc(v)
     def __getattr__(self, n): return getattr(self._v, n)
+    def __getitem__(self, i): return self._v
+    def __setitem__(self, i, v): self._v = v
+    def __getitem__(self, i): return self._v
+    def __setitem__(self, i, v): self._v = v
     def __repr__(self): return 'Arc(' + repr(self._v) + ')'
 
 class Option:
@@ -55,7 +68,18 @@ class Result:
     @staticmethod
     def Err(e): return LZError(e)
 
-def __go(v): return v  # go 并发降级为同步求值
+def __go(v): return v  # async 上下文：v 是协程对象，await 时才执行
+def __spawn(__fn):
+    def __run():
+        try:
+            __fn()
+        except BaseException as __e:
+            print('task failed: %s: %s' % (type(__e).__name__, __e), file=sys.stderr)
+    __t = _lz_threading.Thread(target=__run)
+    __t.start()
+    return __t
+def __lz_expect_fail(m): raise LZError(m)
+def __lz_expect(v, m): return v if v is not None else __lz_expect_fail(m)
 def push(seq, item):
     seq.append(item)
     return item
@@ -76,83 +100,181 @@ def fold(seq, init, f):
     for x in seq:
         acc = f(acc, x)
     return acc
+def _lz_dbg(v):
+    if v is True: return "true"
+    if v is False: return "false"
+    if v is None: return "None"
+    if isinstance(v, str):
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
+    if isinstance(v, (list, tuple)):
+        o, c = ("[", "]") if isinstance(v, list) else ("(", ")")
+        s = ", ".join(_lz_dbg(x) for x in v)
+        if not isinstance(v, list) and len(v) == 1: s += ","
+        return o + s + c
+    if isinstance(v, dict):
+        return "{" + ", ".join(_lz_dbg(k) + ": " + _lz_dbg(x) for k, x in v.items()) + "}"
+    if isinstance(v, BaseException):
+        return _lz_dbg(str(v))
+    if isinstance(v, float):
+        s = repr(v)
+        if "e" not in s: return s
+        m, e = s.split("e")
+        return m + "e" + str(int(e))
+    return repr(v)
+
+def _lz_disp_f(x):
+    s = repr(x)
+    m, e = (s.split("e") + ["0"])[:2] if "e" in s else (s, "0")
+    neg = m.startswith("-")
+    if neg: m = m[1:]
+    ip, _, fp = m.partition(".")
+    dig = ip + fp
+    pt = len(ip) + int(e)
+    if pt <= 0: out = "0." + "0" * (-pt) + dig
+    elif pt >= len(dig): out = dig + "0" * (pt - len(dig))
+    else: out = dig[:pt] + "." + dig[pt:]
+    if "." in out: out = out.rstrip("0").rstrip(".")
+    return "-" + out if neg else out
+def _lz_disp(v):
+    if v is True: return "true"
+    if v is False: return "false"
+    if isinstance(v, str): return v
+    if isinstance(v, float): return _lz_disp_f(v)
+    if isinstance(v, int): return str(v)
+    return _lz_dbg(v)
+def _lz_tostr(o):
+    f = getattr(o, "to_string", None)
+    return f() if f is not None else _lz_disp(o)
+
+def _lz_idx_str(s, i):
+    return ord(s[i]) if 0 <= i < len(s) else 0
+
+def _lz_fs(v):
+    return v if isinstance(v, str) else _lz_dbg(v)
+
+def _lz_or(v, d):
+    return d if (v is None or v.__class__.__name__ == "_LzNoneCls") else v
+
+def _lz_iter(o):
+    if type(o).__name__ not in _LZ_TYPES:
+        for v in o: yield v
+        return
+    it = o.__iter__() if hasattr(o, "__iter__") else o
+    while True:
+        v = it.__next__()
+        if v is None or v.__class__.__name__ == "_LzNoneCls": return
+        yield v
+
+_LZ_TYPES = ()
+def _lz_dyn(o):
+    return type(o).__name__ in _LZ_TYPES
+def _lz_meth(o, lz_name, py_name, args):
+    return getattr(o, lz_name if _lz_dyn(o) else py_name)(*args)
+def _lz_len(o, lz_name):
+    return getattr(o, lz_name)() if _lz_dyn(o) else len(o)
+def _lz_isempty(o):
+    return o.is_empty() if _lz_dyn(o) else (len(o) == 0)
+def _lz_contains(o, v):
+    f = getattr(o, "contains", None)
+    return f(v) if f is not None else (v in o)
+def _lz_orv(o, d):
+    f = getattr(o, "unwrap_or", None)
+    return f(d) if f is not None else _lz_or(o, d)
+def _lz_self(o, lz_name):
+    f = getattr(o, lz_name, None)
+    return f() if f is not None else o
+def _lz_shift(a, b, lz_name, is_shr):
+    f = getattr(a, lz_name, None)
+    if f is not None: return f(b)
+    return (a >> b) if is_shr else (a << b)
+def _lz_isnone(o, lz_name):
+    f = getattr(o, lz_name, None)
+    return f() if _lz_dyn(o) and f is not None else (o is None)
+def _lz_issome(o, lz_name):
+    f = getattr(o, lz_name, None)
+    return f() if _lz_dyn(o) and f is not None else (o is not None)
+def _lz_exp(o, m, lz_name):
+    f = getattr(o, lz_name, None)
+    return f(m) if _lz_dyn(o) and f is not None else __lz_expect(o, m)
 
 __name__ = "main"
 __file__ = "main.lz"
 __all__ = ["add", "double", "greet", "max", "multiply", "sq", "read_data", "modify", "greet_default", "is_positive", "inferred_double", "main", "log", "abort", "early_exit", "divide", "__name__", "__file__", "__package__", "__path__", "__doc__", "__is_macro__"]
 
-def add(Py_ssize_t a, Py_ssize_t b) -> Py_ssize_t:
+def add(Py_ssize_t a, Py_ssize_t b):  # ret: Py_ssize_t
     return a + b
 
-def double(Py_ssize_t x) -> Py_ssize_t:
+def double(Py_ssize_t x):  # ret: Py_ssize_t
     return x * 2
 
-def greet(str name) -> str:
-    return f"Hello, {name}"
+def greet(str name):  # ret: str
+    return f"Hello, {_lz_fs(name)}"
 
-def max(Py_ssize_t a, Py_ssize_t b) -> Py_ssize_t:
+def max(Py_ssize_t a, Py_ssize_t b):  # ret: Py_ssize_t
     return (a if a > b else b)
 
-def multiply(Py_ssize_t a, Py_ssize_t b) -> Py_ssize_t:
+def multiply(Py_ssize_t a, Py_ssize_t b):  # ret: Py_ssize_t
     return a * b
 
-def sq(object x, object y) -> object:
+def sq(object x, object y):  # ret: object
     # generic<T>
     # @export(Math)
     return x * x + y * y
 
-def read_data(list data) -> Py_ssize_t:
-    return data.len()
+def read_data(list data):  # ret: Py_ssize_t
+    return len(data)
 
 def modify(list data):
-    data.push(42)
+    data.append(42)
 
-def greet_default(str name = "world") -> str:
-    return f"Hello, {name}"
+def greet_default(str name = "world"):  # ret: str
+    return f"Hello, {_lz_fs(name)}"
 
-def is_positive(Py_ssize_t x) -> bint:
+def is_positive(Py_ssize_t x):  # ret: bint
     return x > 0
 
-def inferred_double(Py_ssize_t x) -> Py_ssize_t:
+def inferred_double(Py_ssize_t x):  # ret: Py_ssize_t
     return x * 2
 
 def main():
     print("=== basic.lz ===")
-    print(add(3, 5))
-    print(double(7))
+    print(_lz_dbg(add(3, 5)))
+    print(_lz_dbg(double(7)))
     print(greet("LZ"))
-    print(max(10, 20))
-    print(multiply(4, 6))
-    print(sq(3, 4))
-    print(sq(3.0, 4.0))
-    print(read_data([1, 2, 3]))
+    print(_lz_dbg(max(10, 20)))
+    print(_lz_dbg(multiply(4, 6)))
+    print(_lz_dbg(sq(3, 4)))
+    print(_lz_dbg(sq(3.0, 4.0)))
+    print(_lz_dbg(read_data([1, 2, 3])))
     print(greet_default())
     print(greet_default("LZ"))
-    print(is_positive(-1))
-    print(inferred_double(5))
-    print(divide(10, 2))
-    print(early_exit(-5))
-    print(early_exit(3))
+    print(_lz_dbg(is_positive(-1)))
+    print(_lz_dbg(inferred_double(5)))
+    print(_lz_dbg(divide(10, 2)))
+    print(_lz_dbg(early_exit(-5)))
+    print(_lz_dbg(early_exit(3)))
 
-def log(str msg) -> tuple:
+def log(str msg):  # ret: tuple
     return print(msg)
 
 def abort(str msg):
-    raise LZError(LZError(msg)) if not isinstance((LZError(msg)), BaseException) else (LZError(msg))
+    __raise_0 = LZError(msg)
+    raise __raise_0 if isinstance(__raise_0, BaseException) else LZError(__raise_0)
 
-def early_exit(Py_ssize_t x) -> Py_ssize_t:
+def early_exit(Py_ssize_t x):  # ret: Py_ssize_t
     if x < 0:
         return 0
     return x + 1
 
 def divide(Py_ssize_t a, Py_ssize_t b) -> object:
     if b == 0:
-        raise LZError("division by zero") if not isinstance(("division by zero"), BaseException) else ("division by zero")
+        __raise_1 = "division by zero"
+        raise __raise_1 if isinstance(__raise_1, BaseException) else LZError(__raise_1)
     return a // b
 
 __name__ = "main"  # const: str
-__file__ = "F:\\AI\\lang-zone\\DEMO\\04_functions\\basic.lz"  # const: str
+__file__ = "basic.lz"  # const: str
 __package__ = "04_functions"  # const: str
-__path__ = "F:\\AI\\lang-zone\\DEMO\\04_functions"  # const: str
+__path__ = "F:/AI/lang-zone/DEMO/04_functions"  # const: str
 __doc__ = ""  # const: str
 __is_macro__ = False  # const: bint
