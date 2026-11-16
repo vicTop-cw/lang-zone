@@ -494,7 +494,10 @@ fn __lz_parse_dict_str_int(raw: &str, artifact: &str, method: &str) -> std::coll
         if in_str {
             continue;
         }
-        if c == ':' || c == '{' || c == '[' {
+        // BUG-513 第二面：`:` 不是嵌套开启符，只 `{`/`[` 才加深度。
+        // 旧实现把 `:` 计入 depth，导致顶层分隔逗号在 depth==1 处被漏判，
+        // `{"a": 6, "b": 9}` 被切成一整对（键 `"a"`、值 `6, "b": 9`）→ 解析 panic。
+        if c == '{' || c == '[' {
             depth += 1;
         } else if c == '}' || c == ']' {
             depth -= 1;
@@ -564,7 +567,10 @@ fn __lz_parse_dict_str_float(raw: &str, artifact: &str, method: &str) -> std::co
         if in_str {
             continue;
         }
-        if c == ':' || c == '{' || c == '[' {
+        // BUG-513 第二面：`:` 不是嵌套开启符，只 `{`/`[` 才加深度。
+        // 旧实现把 `:` 计入 depth，导致顶层分隔逗号在 depth==1 处被漏判，
+        // `{"a": 6, "b": 9}` 被切成一整对（键 `"a"`、值 `6, "b": 9`）→ 解析 panic。
+        if c == '{' || c == '[' {
             depth += 1;
         } else if c == '}' || c == ']' {
             depth -= 1;
@@ -631,7 +637,10 @@ fn __lz_parse_dict_str_str(raw: &str, artifact: &str, method: &str) -> std::coll
         if in_str {
             continue;
         }
-        if c == ':' || c == '{' || c == '[' {
+        // BUG-513 第二面：`:` 不是嵌套开启符，只 `{`/`[` 才加深度。
+        // 旧实现把 `:` 计入 depth，导致顶层分隔逗号在 depth==1 处被漏判，
+        // `{"a": 6, "b": 9}` 被切成一整对（键 `"a"`、值 `6, "b": 9`）→ 解析 panic。
+        if c == '{' || c == '[' {
             depth += 1;
         } else if c == '}' || c == ']' {
             depth -= 1;
@@ -700,7 +709,10 @@ fn __lz_parse_dict_int_int(raw: &str, artifact: &str, method: &str) -> std::coll
         if in_str {
             continue;
         }
-        if c == ':' || c == '{' || c == '[' {
+        // BUG-513 第二面：`:` 不是嵌套开启符，只 `{`/`[` 才加深度。
+        // 旧实现把 `:` 计入 depth，导致顶层分隔逗号在 depth==1 处被漏判，
+        // `{"a": 6, "b": 9}` 被切成一整对（键 `"a"`、值 `6, "b": 9`）→ 解析 panic。
+        if c == '{' || c == '[' {
             depth += 1;
         } else if c == '}' || c == ']' {
             depth -= 1;

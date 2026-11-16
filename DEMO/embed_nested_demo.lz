@@ -4,6 +4,11 @@
 //
 // 运行验证：group_counts 接收嵌套 dict，每组列表求和，
 // 输出 {'a': 6, 'b': 9}。
+//
+// 注意（docs/嵌入式统一抽象-实现 §6.7）：可调用名带的是「编译输入文件的主干」，
+// 本文件为 embed_nested_demo.lz ⇒ 产物主干 = embed_nested_demo，
+// 故 LZ 侧调用名为 python_embed_nested_demo_group_counts
+// （写错名字会落进未知外部函数兜底桩 i64::MAX，编译过、值恒错）。
 
 #[embed(python)]
 # python_lib.py
@@ -11,5 +16,5 @@ def group_counts(data: Dict<str,List<int>>) -> Dict<str,int>:
     return {k: sum(v) for k, v in data.items()}
 
 def main():
-    result = group_counts({"a": [1, 2, 3], "b": [4, 5]})
+    result = python_embed_nested_demo_group_counts({"a": [1, 2, 3], "b": [4, 5]})
     print(result)

@@ -3685,7 +3685,20 @@ commit：3f8512e（重映射自 未记）
 - detail: 复现：`embed_nested_demo.lz`（`#[embed(python)]` 块 + `def main(): result = group_counts(...); print(result)`），`--embed-build` 后检查 `embed_nested_demo.rs` 的 `pub fn main() { }` 为空。T0r62 的编译验证测试只断言 `--embed-build` EXIT=0，未检查 main 体，故未暴露。T0r63.2 运行时验证（编译 .rs → 运行 → 比对输出）才发现。根因待查：可能是 codegen 在 embed 块存在时未把后续 `def main()` 纳入 items，或 builder 的函数收集在 embed 块后中断。
 - 判据: 修复后 `embed_nested_demo.lz --embed-build` 生成的 .rs 中 `pub fn main()` 应含 `result = python_calc_nested_demo::group_counts(...)` 与 `println!(...)` 调用。
 - 影响: 所有带 `#[embed]` 块且含 main 的 LZ 程序运行时无输出，功能静默失效。
-- commit: 待修复
-- 状态：OPEN
+- commit: T0r64 本轮（三面修复，见下追记）
+- 状态：FIXED
 
+## BUG-513 修复追记 [2026-11-16T22:00:00+08:00] 状态：FIXED（三面收口）
+- 本轮（T0r64 定时探索）接手时发现：工作区存在 BUG-513 的三面未提交修复，代码已落地但台账未更新。逐面复核并端到端验证后收口：
+  - 第一面（main 体被吞）：src/lexer/lexer.rs 缩进式嵌入块边界判定——col-0 块（block_indent==0）用「空行 + 下一非空行缩进 <= 块缩进」为界，修复 leading_ws < 0 永不成立导致后续 def main() 被吞进嵌入块 / 生成空 main。实证：DEMO/embed_nested_demo.lz 生成 .rs 的 pub fn main() 现含 result = python_embed_nested_demo_group_counts(...) + println!；编译运行输出 {"a": 6, "b": 9}。
+  - 第二面（嵌套 dict JSON 解析 冒号 深度误判）：src/bridge/cli.rs 四处 __lz_parse_dict_* 把 冒号 计入 depth，顶层分隔逗号在 depth==1 被漏判，{"a": 6, "b": 9} 被切成一整对 → 解析 panic。修为只 花括号/方括号 加深度。实证：嵌套 demo 端到端返回值解析正确。
+  - 第三面（@name! + 反引号块参数）：src/macros/expand.rs 新增 try_collect_backtick_arg / backtick_arg_as_input，在 @name! 后探测 反引号块 三反引号块整块作宏输入并折叠成单个 RawStrLit/FStrLit，消除顶层裸露 Backtick 报错。实证：DEMO/embed_tnr_demo.lz（三种嵌入形式 A/B/C）编译 EXIT=0，生成 .rs 经 rustc 编译运行输出 embed_tnr_demo: see generated .rs for tnr transpiled output。
+- 判据复核：embed_js_serialization 7/0、embed_dict_serialization 23/0、embed_tuple_serialization 7/0、embed_unify_r15 23/0、embed_dedup 4/0、embed_gapfixes 17/0、embed_stem_parity 3/0、embed_stub_shadowing 4/0、embed_project_emit 3/0、embed_project_grouping 4/0、lib 480/0、lz_ir_bootstrap 25/0、lz_frontend_bootstrap 7/0、frontend_dual_track 1/0、lexer_parser_core 4/0、dual_route_golden 11/0 全绿。
+- 状态：FIXED
+
+## BUG-514 [2026-11-16T22:00:00+08:00] [medium] 双轨词法一致性：lz 侧 Token 缺 Int128Lit/BigIntLit/LexError/CaretOp/CaretInfix/Unknown 六态
+- summary: Rust 侧 lexer 产 Token::Int128Lit/BigIntLit/LexError/CaretOp/CaretInfix/Unknown(String) 等 token，lz 侧 src/frontend/lz_lexer.lz 旧实现缺失对应变体（Caret 未区分中缀/前缀，未知字符如 tnr 的 乘号 被静默丢弃）→ 双轨一致门禁在含 乘号 等样本上 rust 侧多一个 token 而不一致。
+- 修复: src/frontend/lz_lexer.lz 补齐 Int128Lit/BigIntLit/LexError/Unknown 变体、把 Caret 拆为 CaretInfix/CaretOp，与 Rust Token 逐字镜像。
+- 判据: frontend_dual_track_stratified_subset 1/0（含含 乘号 样本）。
+- 状态：FIXED（随 BUG-513 同轮提交）
 

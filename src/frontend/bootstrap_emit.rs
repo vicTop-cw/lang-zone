@@ -629,21 +629,21 @@ pub fn normalize_token_stream(raw: &str, rust_side: bool) -> Vec<String> {
             out.push(format!("EmbedBlock({},{},{})", lang, src, form));
             continue;
         }
-        // Var("payload") → Var(还原 payload)；无括号行原样
+        // Var(payload) → Var(还原 payload)；无括号行原样。
+        // M5 全量门禁：两侧 payload 统一为 Debug 转义形态（LZ display_token
+        // 对 String payload 亦做 escape_for_debug），此处统一剥引号 + 还原：
+        // - Rust Debug：StrLit("line1\nline2") —— 引号包裹 + 转义
+        // - LZ display：StrLit(line1\nline2) —— 无引号包裹 + 转义（引号会
+        //   破坏 `Ident(f)` 这类裸形态的可读性，故 LZ 侧不包引号）
+        // 统一 unescape 后两侧 payload 一致。
         let norm = match (l.find('('), l.rfind(')')) {
             (Some(open), Some(close)) if close > open => {
                 let variant = &l[..open];
-                let payload = &l[open + 1..close];
-                let payload = if rust_side
-                    && payload.len() >= 2
-                    && payload.starts_with('"')
-                    && payload.ends_with('"')
-                {
-                    debug_unescape(&payload[1..payload.len() - 1])
-                } else {
-                    payload.to_string()
-                };
-                format!("{}({})", variant, payload)
+                let mut payload = &l[open + 1..close];
+                if payload.len() >= 2 && payload.starts_with('"') && payload.ends_with('"') {
+                    payload = &payload[1..payload.len() - 1];
+                }
+                format!("{}({})", variant, debug_unescape(payload))
             }
             _ => l.to_string(),
         };

@@ -881,6 +881,24 @@ impl MacroExpander {
                             i = after_name; // ! 后，保留后续 token
                             continue;
                         }
+                        // BUG-513（第三面）：@name! + 反引号块参数（r``` / f``` / ```）。
+                        // 反引号块作为宏输入时不被 collect_decl_tokens 正确处理（它按声明
+                        // 边界收集，反引号块是三 Backtick token 序列、无缩进结构），会在顶层
+                        // 漏出裸露 Backtick → "Unexpected token at top level: Backtick"
+                        // （DEMO/embed_tnr_demo.lz）。这里在 @name! 后探测反引号块（可带 r/f
+                        // 前缀），整块作为 input，折叠成单个 RawStrLit/FStrLit。
+                        if let Some((block_src, block_form, block_end)) =
+                            self.try_collect_backtick_arg(tokens, after_name)
+                        {
+                            let decl_tokens =
+                                self.backtick_arg_as_input(block_src, block_form);
+                            let mut expanded =
+                                self.expand_macro(&name, &decl_tokens, None, depth)?;
+                            rebalance_expanded_indents(&mut expanded);
+                            result.extend(expanded);
+                            i = block_end;
+                            continue;
+                        }
                         let decl_tokens = self.collect_decl_tokens(tokens, after_name);
                         let decl_end = after_name + decl_tokens.len();
                         if !decl_tokens.is_empty() {
@@ -1125,6 +1143,66 @@ impl MacroExpander {
             i += 1;
         }
         result
+    }
+
+    /// BUG-513（第三面）：探测 `@name!` 之后的反引号块参数。
+    /// 识别三种前缀：`r` `` ` `` / `f` `` ` `` / 裸 `` ` ``，收集三反引号块。
+    /// 返回 `(块内正文, form, 结束位置)`；非反引号块返回 None。
+    fn try_collect_backtick_arg(
+        &self,
+        tokens: &[Token],
+        start: usize,
+    ) -> Option<(String, crate::lexer::EmbedForm, usize)> {
+        use crate::lexer::EmbedForm;
+        let mut j = start;
+        // 容忍前置 Newline
+        while j < tokens.len() && tokens[j] == Token::Newline {
+            j += 1;
+        }
+        // 前缀：r / f 后紧跟 Backtick；或直接 Backtick
+        let (form, k) = match tokens.get(j) {
+            Some(Token::Ident(s)) if s == "r" && tokens.get(j + 1) == Some(&Token::Backtick) => {
+                (EmbedForm::Raw, j + 1)
+            }
+            Some(Token::Ident(s)) if s == "f" && tokens.get(j + 1) == Some(&Token::Backtick) => {
+                (EmbedForm::Interp, j + 1)
+            }
+            Some(Token::Backtick) => (EmbedForm::Raw, j),
+            _ => return None,
+        };
+        // k 现在指向第一个 Backtick；要求至少三连
+        if k + 2 >= tokens.len()
+            || tokens[k] != Token::Backtick
+            || tokens[k + 1] != Token::Backtick
+            || tokens[k + 2] != Token::Backtick
+        {
+            return None;
+        }
+        let body_start = k + 3;
+        let mut e = body_start;
+        while e + 2 < tokens.len() {
+            if tokens[e] == Token::Backtick
+                && tokens[e + 1] == Token::Backtick
+                && tokens[e + 2] == Token::Backtick
+            {
+                let body: String = tokens[body_start..e]
+                    .iter()
+                    .map(|t| crate::macros::parse::tokens_to_string(std::slice::from_ref(t)))
+                    .collect::<Vec<_>>()
+                    .join("");
+                return Some((body, form, e + 3));
+            }
+            e += 1;
+        }
+        None
+    }
+
+    /// 把反引号块正文包成单个 RawStrLit/FStrLit token，作为宏展开输入。
+    fn backtick_arg_as_input(&self, src: String, form: crate::lexer::EmbedForm) -> Vec<Token> {
+        match form {
+            crate::lexer::EmbedForm::Interp => vec![Token::FStrLit(src)],
+            _ => vec![Token::RawStrLit(src)],
+        }
     }
 }
 
