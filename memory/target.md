@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-11-16 T0r64（定时任务探索轮）：BUG-513 三面收口 + JS 适配器产物「真跑」修复
+- 起点：接手时工作区有 BUG-513 三面未提交修复（lexer 嵌入块边界 / cli dict 解析 / macros 反引号块）+ BUG-514 双轨词法对齐，代码已落地但台账未更新。
+- **BUG-513 三面复核收口（FIXED）**：① `src/lexer/lexer.rs` 缩进式嵌入块边界（col-0 块用「空行 + 下一非空行缩进 ≤ 块缩进」为界，修复 main 体被吞）；② `src/bridge/cli.rs` 四处 `__lz_parse_dict_*` 的 `:` 深度误判（`{"a":6,"b":9}` 被切成一整对）；③ `src/macros/expand.rs` `@name!` + 反引号块参数探测。实证：`DEMO/embed_nested_demo.lz` 运行输出 `{"a": 6, "b": 9}`；`DEMO/embed_tnr_demo.lz` 编译运行输出正常。台账追记 + BUG-514 登记。
+- **BUG-515~519（JS 适配器产物不可运行，全 FIXED）**：T0r63 的 JS 测试只断言 `body.contains(...)`，产物实际是**非法 JS**。本轮用 `node --check` + `node <dispatch>` 真跑暴露并修复五处：
+  - BUG-515 dispatch arms 发成 Rust 形态 `if method === "x" {`（缺条件括号）→ 修为 `if (method === "x") {`；
+  - BUG-516 PARAMS 表发成 Rust 元组 `[("a", __lz_str)]` → 修为 JS 二维数组 `[["a", __lz_str]]`；
+  - BUG-517 artifact 保留 `# <filename>` LZ 注释（JS 无 `#` 语法）→ 新增 `js_comment_fix` 转 `//`；
+  - BUG-518 顶层函数未 `module.exports`（CommonJS 取到 undefined）→ `extract` 追加 `module.exports = { ... }`；
+  - BUG-519 dispatch 标量类型按 LZ 词汇 `int` 匹配（JS_TY 已映射为 `number`）恒不命中 → 退化 `__lz_str`，`add(3,4)` 得 `"34"`；修为按 JS 映射词汇匹配。另修 `fn_from_toplevel` 的 `rfind(')')`（函数体同行含 `)` 时吞函数体）为配对括号深度计数。
+  - 另修 `help` 的 `KNOWN.map(n => n.slice(1,-1))`（值本无引号 → `OK:d`）。
+- 验证：`node --check` 两文件均 0；端到端 `add a=3 b=4`→7、`sum_all nums=[1,2,3,4]`→10、`make_list`→`[1,2,3]`、`help`→`OK:add,sum_all,make_list`。测试强化 `tests/embed_js_serialization.rs` 新增 `js_embedded_artifacts_are_valid_and_run_correctly`（node --check + 运行判据），8/8 绿。
+- 回归：lib 480/0、embed 全套 11 套件全绿、lz_ir_bootstrap 25/0、lz_frontend_bootstrap 7/0、frontend_dual_track 1/0（并发跑时一次 flake，单跑 492s 通过）、lexer_parser_core 4/0、dual_route_golden 11/0。
+- 提交：acd352d（BUG-513/514，管线提交）、d58562c（JS 适配器修复）已推 GitCode；台账追记 fd24688。
+- 下一步：① JS 适配器容器嵌套（dict/tuple 嵌套）运行验证；② 其他适配器（mojo/c/scala）嵌套容器序列化；③ `double_all(nums: list)` 这类非法 LZ 类型的用户提示友好化。
+
+---
+
 ## 2026-11-14 T0r63（定时任务探索轮）：JS 适配器实现 + 嵌套容器运行时验证 + 编译回归修复
 - 起点：T0r62（commit dc3f3f2）已完成嵌套容器完整 roundtrip + Dict×Tuple 嵌套组合端到端验证，下一步为① JS 适配器、② 嵌套容器运行时实际运行验证、③ 嵌套容器 DEMO 用例。
 - **Bug 修复（BUG-512，critical）**：基线编译验证发现 `cargo clean` 后 release build 报 4 error——`src/ir/lz_codegen.rs` 的 `embed_targets_of`/`ir_module_to_rs_lz_source_with_stem` 等函数被误删，连同 `lz_codegen_lib.lz`（3759 行）/`lz_ir_lib.lz`/`tests/lz_semantic_cases.rs` 被删。`git checkout` 恢复后编译通过。教训：缓存掩盖真实编译失败，接手必须先 clean+build 确认基线。
