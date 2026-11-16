@@ -581,6 +581,129 @@ fn parse_annotated_params(raw: &str, table: &[(&str, &str)]) -> Vec<ForeignParam
 /// 2. 逐字符扫描，跳过字符串字面量与整行注释；
 /// 3. 对非字符串/非注释区域做 `Tuple`→`tuple`、`Dict`→`dict`、`List`→`list`、`<`→`[`、`>`→`]` 替换；
 /// 4. 恢复 `->` 箭头。
+/// JS 侧剥除函数形参的 LZ 类型注解。
+///
+/// LZ embed 块里 JS 函数照 LZ 习惯写 `function add(a: int, b: int)`，但 JS 无类型
+/// 注解语法，`a: int` 会让产物 `node --check` 报 `Unexpected token ':'`。
+/// 这里只处理 `function <name>(<params>)` 的形参列表：把每个形参的 `: <type>`
+/// 去掉（含 `List<...>`/`Dict<...>`/`Tuple<...>` 这类含尖括号、逗号的复合类型），
+/// 保留形参名。字符串与注释内的内容不动。
+fn js_strip_type_annotations(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for (i, line) in src.lines().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&strip_fn_params_types(line));
+    }
+    out
+}
+
+/// 对单行：若含 `function <name>(`，重写其形参列表剥除 `: type`；否则原样返回。
+fn strip_fn_params_types(line: &str) -> String {
+    let Some(fpos) = line.find("function ") else {
+        return line.to_string();
+    };
+    // `function` 之后找首个 `(`
+    let after = &line[fpos + "function ".len()..];
+    let Some(open_rel) = after.find('(') else {
+        return line.to_string();
+    };
+    let open = fpos + "function ".len() + open_rel;
+    // 从 open 找配对 )
+    let mut depth = 0i32;
+    let mut close: Option<usize> = None;
+    let mut in_str: Option<char> = None;
+    for (ci, c) in line.char_indices().skip_while(|(ci, _)| *ci < open) {
+        if let Some(q) = in_str {
+            if c == q {
+                in_str = None;
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' | '`' => in_str = Some(c),
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(ci);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return line.to_string();
+    };
+    let params_raw = &line[open + 1..close];
+    let repaired: Vec<String> = split_top_commas(params_raw)
+        .into_iter()
+        .map(|p| {
+            let p = p.trim();
+            if p.is_empty() {
+                return String::new();
+            }
+            // 剥除行首 `...`（rest 参数保留）
+            let (prefix, core) = if let Some(rest) = p.strip_prefix("...") {
+                ("...", rest)
+            } else {
+                ("", p)
+            };
+            // 找顶层 `:`（不在尖括号/方括号内）
+            let mut angle = 0i32;
+            let mut colon: Option<usize> = None;
+            for (ci, c) in core.char_indices() {
+                match c {
+                    '<' | '[' | '(' => angle += 1,
+                    '>' | ']' | ')' => angle -= 1,
+                    ':' if angle == 0 => {
+                        colon = Some(ci);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            match colon {
+                Some(ci) => format!("{}{}", prefix, core[..ci].trim_end()),
+                None => p.to_string(),
+            }
+        })
+        .collect();
+    format!(
+        "{}({}){}",
+        &line[..open],
+        repaired.join(", "),
+        &line[close + 1..]
+    )
+}
+
+/// JS 侧「行首 `#` 注释」→ `//` 改写。
+///
+/// LZ embed 块首行惯例写 `# <目标文件名>`（Python 语境下 `#` 即注释），但 JS 无
+/// `#` 行注释语法，原样落盘会让产物 `node --check` 直接 `SyntaxError`。
+/// 这里只改写「行首（可含前导空白）以 `#` 开头」的行，`#` 前有内容的行（如
+/// 属性访问 `obj.#x` 之类）不动，避免误伤。保持每行缩进与缩进结构不变。
+fn js_comment_fix(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    for (i, line) in src.lines().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let indent_len = line.len() - line.trim_start().len();
+        let (indent, rest) = line.split_at(indent_len);
+        if let Some(after) = rest.strip_prefix('#') {
+            out.push_str(indent);
+            out.push_str("//");
+            out.push_str(after);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
 fn py_annotate(src: &str) -> String {
     // 第一步：用哨兵保护 `->`（U+E000 私有区字符，源码中不会出现）
     const ARROW_SENTINEL: char = '\u{E000}';
@@ -819,9 +942,44 @@ fn fn_from_toplevel(src: &str, table: &[(&str, &str)], kw: &str) -> Vec<ForeignF
             Some(i) => i,
             None => continue,
         };
-        let close = match rest.rfind(')') {
-            Some(i) if i > open => i,
-            _ => continue,
+        // 取与首个 `(` 配对的 `)`（深度计数，跳过字符串），而非 `rfind(')')`。
+        // 旧实现用 rfind：JS 函数体与签名同处一行且体内含 `)`（如
+        // `function double_all(nums: List<int>) { return nums.map(n => n * 2); }`）
+        // 时会把体内 `)` 当成签名闭合 ⇒ 形参切片吞掉函数体，
+        // 类型解析成 `?list) { return nums.map(n`（T0r64 端到端暴露）。
+        let close = {
+            let bytes = rest.as_bytes();
+            let mut depth = 0i32;
+            let mut in_str: Option<u8> = None;
+            let mut found: Option<usize> = None;
+            let mut i = open;
+            while i < bytes.len() {
+                let b = bytes[i];
+                if let Some(q) = in_str {
+                    if b == q && (i == 0 || bytes[i - 1] != b'\\') {
+                        in_str = None;
+                    }
+                    i += 1;
+                    continue;
+                }
+                match b {
+                    b'"' | b'\'' | b'`' => in_str = Some(b),
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            found = Some(i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            match found {
+                Some(i) => i,
+                None => continue,
+            }
         };
         let params = parse_annotated_params(&rest[open + 1..close], table);
         let tail = &rest[close + 1..];
@@ -983,18 +1141,59 @@ impl EmbedLang for JsLang {
         fn_from_toplevel(src, &JS_TY, "function ")
     }
     fn extract(&self, artifact: &str, src: &str) -> Vec<(String, String)> {
-        vec![(format!("{}.js", artifact), src.to_string())]
+        // JS 无 `#` 行注释（那是 Python 语法）——embed 块首行的 `# <filename>`
+        // 目标名提示在 Python 侧无害（`#` 即注释），在 JS 侧是硬语法错。
+        // 故此处把「行首 `#` 注释」统一改写为 `//`，保持 JS 语法有效。
+        let cleaned = js_comment_fix(src);
+        let cleaned = js_strip_type_annotations(&cleaned);
+        // CommonJS：顶层 `function name()` 不自动挂到 module.exports，
+        // 分发入口 `require(ARTIFACT)[method]` 会取到 undefined ⇒ 追加显式导出。
+        // 仅导出顶层函数名（`function name(` 门面），与 dispatch 的 KNOWN 表同源。
+        let mut exported: Vec<String> = Vec::new();
+        for line in cleaned.lines() {
+            let t = line.trim_start();
+            if let Some(rest) = t.strip_prefix("function ") {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '$')
+                    .collect();
+                if !name.is_empty() && name != "main" {
+                    exported.push(name);
+                }
+            }
+        }
+        exported.sort();
+        exported.dedup();
+        let mut body = cleaned;
+        if !body.ends_with('\n') {
+            body.push('\n');
+        }
+        if !exported.is_empty() {
+            body.push_str(&format!("\nmodule.exports = {{ {} }};\n", exported.join(", ")));
+        }
+        vec![(format!("{}.js", artifact), body)]
     }
     fn dispatch_file(&self, artifact: &str, methods: &[&ForeignFn]) -> Option<(String, String)> {
         // 生成 Node.js CLI 分发入口：argv[2..] 为 key=value，
         // 容器参数用 JSON.parse 解码，容器返回值用 JSON.stringify 编码。
+        //
+        // 两处语法必须是 **JavaScript**（此前误发成 Rust 形态，node --check 直接红）：
+        //   - PARAMS 表：JS 用二维数组 `[["a", __lz_str], ...]`（旧实现发成 Rust 元组 `[("a", __lz_str)]`）
+        //   - arms：`if (method === "x") {`（旧实现缺条件括号，发成 `if method === "x" {`）
         let mut table = String::new();
         for m in methods.iter().filter(|m| m.callable()) {
             let items: Vec<String> = m
                 .params
                 .iter()
                 .map(|p| {
+                    // 注意：JS_TY 把标量映射为 JS 词汇（int→number、str→string、bool→boolean），
+                    // 容器保持 `list<...>`/`dict<...>`/`tuple<...>` 形态。故此处按 **JS 映射后**
+                    // 的 `p.lz_type` 匹配（先前误按 LZ 词汇 `int`/`str` 匹配，恒不命中 → 全部退化为
+                    // `__lz_str`，`add(3,4)` 返回字符串拼接 `"34"` 而非 `7`）。
                     let conv = match p.lz_type.as_str() {
+                        "number" => "__lz_num",
+                        "string" => "__lz_str",
+                        "boolean" => "__lz_bool",
                         "int" | "float" => "__lz_num",
                         "bool" => "__lz_bool",
                         "str" => "__lz_str",
@@ -1024,7 +1223,8 @@ impl EmbedLang for JsLang {
                         _ if is_nested_container(&p.lz_type) => "__lz_json_nested",
                         _ => "__lz_str",
                     };
-                    format!("(\"{}\", {})", p.name, conv)
+                    // JS 数组对：`["a", __lz_str]`
+                    format!("[\"{}\", {}]", p.name, conv)
                 })
                 .collect();
             table.push_str(&format!("    \"{}\": [{}],\n", m.name, items.join(", ")));
@@ -1037,21 +1237,35 @@ impl EmbedLang for JsLang {
         let mut arms = String::new();
         for (i, m) in methods.iter().filter(|m| m.callable()).enumerate() {
             let branch = if i == 0 { "if" } else { "else if" };
-            // JS 侧函数体直接用解构后的参数调用；容器返回值用 JSON.stringify
+            // 参数按 PARAMS 表逐个用 __lz_argv_get + 转换器转回声明类型，
+            // 标量 Number/原样，容器 JSON.parse —— 与 Python 侧同口径。
+            let args = m
+                .params
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let unpack = m
+                .params
+                .iter()
+                .enumerate()
+                .map(|(idx, p)| {
+                    format!(
+                        "            const {} = PARAMS[\"{}\"][{}][1](__lz_argv_get(\"{}\"));\n",
+                        p.name, m.name, idx, p.name
+                    )
+                })
+                .collect::<String>();
             arms.push_str(&format!(
-                "    {} method === \"{}\" {{\n        try {{\n            const r = fn({args});\n            __lz_out(__lz_ok(r));\n        }} catch (e) {{\n            __lz_out(__lz_err(e));\n        }}\n        return;\n    }}\n",
-                branch,
-                m.name,
-                args = m
-                    .params
-                    .iter()
-                    .map(|p| p.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "    {branch} (method === \"{name}\") {{\n        try {{\n{unpack}            const r = fn({args});\n            __lz_out(__lz_ok(r));\n        }} catch (e) {{\n            __lz_out(__lz_err(e));\n        }}\n        return;\n    }}\n",
+                branch = branch,
+                name = m.name,
+                unpack = unpack,
+                args = args,
             ));
         }
         let body = format!(
-            "// {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n// 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\n'use strict';\nconst ARTIFACT = {art_lit};\n\nconst KNOWN = [\n{names}\n];\n\nfunction __lz_argv_get(key) {{\n    for (let i = 2; i < process.argv.length; i++) {{\n        if (process.argv[i].startsWith(key + \"=\")) {{\n            return process.argv[i].slice(key.length + 1);\n        }}\n    }}\n    return \"\";\n}}\n\nfunction __lz_num(s) {{\n    return Number(s);\n}}\n\nfunction __lz_str(s) {{\n    return s;\n}}\n\nfunction __lz_bool(s) {{\n    return s === \"true\" || s === \"1\" || s === \"True\";\n}}\n\nfunction __lz_json_list(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_dict(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_tuple(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_nested(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_ok(v) {{\n    if (v === undefined || v === null) return \"\";\n    // 容器返回值走 JSON 编码；标量直接 String()\n    if (Array.isArray(v) || (typeof v === \"object\" && v !== null)) return JSON.stringify(v);\n    return String(v);\n}}\n\nfunction __lz_err(e) {{\n    return \"ERR:\" + (e && e.message ? e.message : String(e));\n}}\n\nfunction __lz_out(s) {{\n    console.log(s);\n}}\n\nconst method = process.argv[2];\nif (!method) {{\n    __lz_out(\"ERR:missing method\");\n    process.exit(2);\n}}\n\nconst fn = require(\"./\" + ARTIFACT);\n\nconst PARAMS = {{\n{table}\n}};\n\nif (method === \"help\") {{\n    __lz_out(\"OK:\" + KNOWN.map((n) => n.slice(1, -1)).join(\",\"));\n    process.exit(0);\n}}\n\n{arms}\n__lz_out(\"ERR:no such method: \" + method);\nprocess.exit(3);\n",
+            "// {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改\n// 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`\n'use strict';\nconst ARTIFACT = {art_lit};\n\nconst KNOWN = [\n{names}\n];\n\nfunction __lz_argv_get(key) {{\n    for (let i = 2; i < process.argv.length; i++) {{\n        if (process.argv[i].startsWith(key + \"=\")) {{\n            return process.argv[i].slice(key.length + 1);\n        }}\n    }}\n    return \"\";\n}}\n\nfunction __lz_num(s) {{\n    return Number(s);\n}}\n\nfunction __lz_str(s) {{\n    return s;\n}}\n\nfunction __lz_bool(s) {{\n    return s === \"true\" || s === \"1\" || s === \"True\";\n}}\n\nfunction __lz_json_list(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_dict(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_tuple(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_json_nested(s) {{\n    return JSON.parse(s);\n}}\n\nfunction __lz_ok(v) {{\n    if (v === undefined || v === null) return \"\";\n    // 容器返回值走 JSON 编码；标量直接 String()\n    if (Array.isArray(v) || (typeof v === \"object\" && v !== null)) return JSON.stringify(v);\n    return String(v);\n}}\n\nfunction __lz_err(e) {{\n    return \"ERR:\" + (e && e.message ? e.message : String(e));\n}}\n\nfunction __lz_out(s) {{\n    console.log(s);\n}}\n\nconst method = process.argv[2];\nif (!method) {{\n    __lz_out(\"ERR:missing method\");\n    process.exit(2);\n}}\n\nconst M = require(\"./\" + ARTIFACT);\nconst fn = M[method];\n\nconst PARAMS = {{\n{table}\n}};\n\nif (method === \"help\") {{\n    __lz_out(\"OK:\" + KNOWN.join(\",\"));\n    process.exit(0);\n}}\n\nif (typeof fn !== \"function\") {{\n    __lz_out(\"ERR:no such method: \" + method);\n    process.exit(3);\n}}\n\n{arms}\n__lz_out(\"ERR:no such method: \" + method);\nprocess.exit(3);\n",
             artifact = artifact,
             art_lit = format!("\"{}\"", artifact),
             names = names.join("\n"),
