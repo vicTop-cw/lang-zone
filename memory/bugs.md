@@ -3702,3 +3702,12 @@ commit：3f8512e（重映射自 未记）
 - 判据: frontend_dual_track_stratified_subset 1/0（含含 乘号 样本）。
 - 状态：FIXED（随 BUG-513 同轮提交）
 
+## BUG-467 [2026-11-17T09:02:47Z] [high] OPEN
+- summary: LZ 词法器双轨残余 5 处：CRLF 空白行缩进/行首块注释重入/f64 Debug 科学计数
+- detail: 全量 328 样本双轨扫描残余 5 处（3 类根因）：
+1) CRLF 空白行（4 空格+CRLF）：Rust peek 为 \r 落 _ 分支仍走 handle_indent(col) → Dedent 后再发 Newline；LZ 把 \r 视作空行 → 少 Dedent/Newline（ir-edge-boundary-values:364 rust=Newline lz=Mut；ir-edge-enum-self-methods:56 rust=Newline lz=Def）
+2) 行首【缩进】块注释跨行、*/ 后同行有内容（`    /* 跨行\n       块注释 */ let z = 3`）：Rust 保持 line_start=true，剩余按新行首重入缩进（col=1 → Dedent）；LZ 直接 line_start=false → 少 Dedent，致 `    let w = 4` 少 Indent（edge-keyword-identifier:437 rust=Indent lz=Let）
+3) f64 Debug：Rust Debug 对 1e-10 → `1e-10`（阈值外科学计数），LZ 用 Display → `0.0000000001`（edge-values-boundary:96、lz_std/math:563）
+证据：temp/fullgate.js checked=328 failed=5；temp/diffone.js 单样本复核
+- reported_by: human_steward
+- task_id: T0r57

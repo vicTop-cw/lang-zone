@@ -947,6 +947,7 @@ pub(crate) const LZ_BUILTIN_FN_NAMES: &[&str] = &[
     "compile_warn",
     "contains",
     "currentframe",
+    "debug_f64",
     "divmod",
     "field",
     "field_count",

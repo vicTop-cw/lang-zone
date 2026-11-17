@@ -1049,16 +1049,10 @@ def str_contains(s: str, c: str) -> bool =
             i = i + 1
     found
 
-// f64 的 Rust Debug 形态（对齐 format!("{:?}", f)）：Display 与 Debug 对
-// f64 的唯一差异是整值补 .0（1 → "1.0"）；科学计数/NaN/inf 两形态一致。
-// v 是原始数字文本（如 "1.5e10"），parse_f64 后复刻 Debug 形态。
+// f64 的 Rust Debug 形态（对齐 format!("{:?}", f)）：经 lz_builtins::debug_f64
+// 复刻（Display 与 Debug 在指数阈值外形态不同：1e-10 vs 0.0000000001）
 def float_debug_str(v: str) -> str =
-    let f = v.parse_f64()
-    let s = f.to_string()
-    if str_contains(s, ".") or str_contains(s, "e") or str_contains(s, "E") or str_contains(s, "N") or str_contains(s, "i"):
-        s
-    else:
-        s + ".0"
+    debug_f64(v.parse_f64())
 
 // 跳过空白后返回首个非空白字符位置（对齐 Rust is_old_string_form 的 p 定位）
 def skip_ws_and_get(src: str, i: int) -> int =
@@ -1097,6 +1091,8 @@ def tokenize(src: str) -> List<Token> =
     // BUG-372 对齐：圆括号未闭合期间，行首缩进不产生 Indent/Dedent
     // （自举双轨门禁 quarter2 实测：多行调用实参续行两侧行为须一致）
     let mut paren_depth = 0
+    // BUG-467 根因 2：缩进行首块注释消费完后，剩余内容按新行首重入缩进处理
+    let mut reenter_after_block_comment = false
     let n = char_count(src)
     while i < n:
         let c = char_at(src, i)
@@ -1107,24 +1103,42 @@ def tokenize(src: str) -> List<Token> =
             while j < n and char_at(src, j) == " ":
                 col = col + 1
                 j = j + 1
-            if j >= n or char_at(src, j) == "\n" or char_at(src, j) == "\r":
-                // 空行 / 纯空白行 / 尾随空白：不产生缩进 token，交 \n 分支按
-                // 折叠规则处理（与原生一致：空行也发 Newline，连续折叠）。
-                // 含 \r：CRLF 空白行以 \r 开头，须视同行尾，否则 \r 会被
-                // 当成内容触发缩进处理（Dedent 错位 + 多余 Newline）
+            // 空行判定对齐 Rust：仅 None / '\n' 是空行（'\r' 不豁免——
+            // `    \r\n` 这类含空格的 CRLF 行 Rust 仍走 handle_indent(col)，
+            // 发 Dedent 后再发 Newline；见 BUG-467 根因 1）
+            if j >= n or char_at(src, j) == "\n":
                 i = j
                 at_line_start = false
-            elif char_at(src, j) == "/" and j + 1 < n and (char_at(src, j + 1) == "/" or char_at(src, j + 1) == "*"):
-                // 注释行：顶格注释行先弹缩进（对齐 Rust 顶格分支先 handle_indent(0)
-                // 再跳注释——弹 Dedent 改变上一 token，注释行尾 Newline 才不被
-                // 折叠）；缩进注释行不做缩进处理（对齐 Rust 行首空白分支：
-                // 遇注释先跳再 continue，不触发 Indent/Dedent）
+            elif char_at(src, j) == "\r" and col == 0:
+                // 顶格纯 CRLF 行（`\r\n`）：Rust 行首非空白判定排除 '\r'，
+                // 落 '\r' => advance 分支 → 不处理缩进
+                i = j
+                at_line_start = false
+            elif char_at(src, j) == "/" and j + 1 < n and char_at(src, j + 1) == "/":
+                // 行注释：顶格先弹缩进（Rust 行首非空白分支 handle_indent(0)），
+                // 缩进行不处理缩进（Rust 行首空白分支遇 // 先跳再 continue）
                 if col == 0:
                     while indent_stack.len() > 1 and indent_stack[indent_stack.len() - 1] > 0:
                         indent_stack = indent_stack[0..(indent_stack.len() - 1)]
                         tokens = tokens + [Token.Dedent]
                 i = j
                 at_line_start = false
+            elif char_at(src, j) == "/" and j + 1 < n and char_at(src, j + 1) == "*":
+                // 块注释：顶格时 Rust 先 handle_indent(0) 再跳注释（line_start
+                // 转 false）；缩进时 Rust 跳过注释后 **line_start 保持 true**，
+                // `*/` 之后同行剩余内容按新行首重入缩进处理（BUG-467 根因 2）
+                if col == 0:
+                    while indent_stack.len() > 1 and indent_stack[indent_stack.len() - 1] > 0:
+                        indent_stack = indent_stack[0..(indent_stack.len() - 1)]
+                        tokens = tokens + [Token.Dedent]
+                    i = j
+                    at_line_start = false
+                else:
+                    // 先置 false 交主循环消费注释体，消费完由标志恢复 true →
+                    // 剩余内容按新行首重入缩进处理
+                    i = j
+                    at_line_start = false
+                    reenter_after_block_comment = true
             else:
                 // 括号内续行（BUG-372）：col>0 且 paren_depth>0 → 缩进处理整体
                 // 跳过（不产 Indent/Dedent、不动缩进栈，对齐 Rust 行首空白分支）
@@ -1137,9 +1151,15 @@ def tokenize(src: str) -> List<Token> =
                         indent_stack = indent_stack + [col]
                         tokens = tokens + [Token.Indent]
                     elif col < top:
+                        // 弹出到 <= col；但落到非法层级时 Rust handle() 返回 None
+                        // → **栈已变、Dedent 一枚不发**（edge-keyword-identifier
+                        // 实测：col=1 落在 [0,4] 之间 → 静默丢 Dedent）
+                        let mut popped: List<Token> = []
                         while indent_stack.len() > 1 and indent_stack[indent_stack.len() - 1] > col:
                             indent_stack = indent_stack[0..(indent_stack.len() - 1)]
-                            tokens = tokens + [Token.Dedent]
+                            popped = popped + [Token.Dedent]
+                        if indent_stack[indent_stack.len() - 1] == col:
+                            tokens = tokens + popped
                     i = j
                     at_line_start = false
         // 空白跳过（含 \r：CRLF 行尾的 \r 静默跳过，对齐 Rust '\r' => advance）
@@ -1160,7 +1180,7 @@ def tokenize(src: str) -> List<Token> =
             let r = scan_triple_string(src, i)
             i = r.1
             tokens = tokens + [Token.StrLit(s: dedent_triple(r.0))]
-        elif c == "f" and i + 2 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+        elif c == "f" and i + 3 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"" and char_at(src, i + 3) == "\"":
             // f"""...""" 三引号插值串（对齐 Rust read_fstring triple 分支：
             // 无 dedent，原样收集到匹配三引号）
             let r = scan_f_triple_string(src, i)
@@ -1170,7 +1190,7 @@ def tokenize(src: str) -> List<Token> =
             let r = scan_fstring(src, i)
             i = r.1
             tokens = tokens + [Token.FStrLit(s: r.0)]
-        elif c == "r" and i + 2 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"":
+        elif c == "r" and i + 3 < n and char_at(src, i + 1) == "\"" and char_at(src, i + 2) == "\"" and char_at(src, i + 3) == "\"":
             // r"""...""" 三引号原始串（对齐 Rust read_raw_string triple 分支：
             // 无 dedent、原样含 \r\n 收集到匹配三引号）
             let r = scan_r_triple_string(src, i)
@@ -1339,6 +1359,10 @@ def tokenize(src: str) -> List<Token> =
                     i = i + 2
                 else:
                     i = i + 1
+            // 缩进行首块注释消费完：剩余内容按新行首重入（Rust line_start 保持 true）
+            if reenter_after_block_comment:
+                at_line_start = true
+                reenter_after_block_comment = false
         // 运算符/标点（双字符优先，含 == != <= >= && || :: -> => **）
         else:
             let r = scan_punct(src, i)

@@ -429,6 +429,13 @@ pub fn chr_unchecked(code: i64) -> char {
     std::char::from_u32(code as u32).unwrap_or('\u{FFFD}')
 }
 
+/// f64 的 Rust Debug 形态（`format!("{:?}", x)`）。自举词法器双轨门禁需要
+/// 与 `Token::FloatLit(f64)` 的 Debug 渲染逐字符一致（Display 与 Debug 在
+/// 指数阈值外形态不同，如 1e-10 → `1e-10` vs `0.0000000001`）。
+pub fn debug_f64(x: f64) -> String {
+    format!("{:?}", x)
+}
+
 // ══════════════════════════════════════════════════════════════
 // [RT] id / hash
 // ══════════════════════════════════════════════════════════════
