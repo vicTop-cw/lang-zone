@@ -292,3 +292,216 @@ def main():
     assert_eq!(run(&["help"]), "OK:add,sum_all,make_list", "help 列表错误");
 }
 
+// ──────────────── T0r65：JS 适配器**嵌套容器**运行时回归 ────────────────
+//
+// 背景：T0r64 只锁定了标量 + 扁平 `list<int>` 的运行判据；JS dispatch 里
+// `_ if is_nested_container(&p.lz_type) => "__lz_json_nested"` 这条分支（adapters.rs）
+// 一直没有端到端护栏。本组用**真实编译 + node 运行**锁住嵌套容器的 roundtrip：
+//   dict<str,list<int>> / list<list<int>> / dict<str,dict<str,int>>。
+// 判据口径：`node __lz_dispatch_*.js <method> key=<json>` 的 stdout 必须等于期望值，
+// 而不是断言生成的源码字符串里含某个子串（那正是 T0r63→T0r64 暴露的「字符串命中≠可运行」教训）。
+
+/// 端到端：LZ 程序含 `#[embed(js)]`，承载三类嵌套容器函数；编译后对每个方法
+/// 用 node 跑分发入口，比对运行输出。参数以 **Command::arg 逐字传入**（不经 shell，
+/// 避免 PowerShell 吃掉 JSON 里的双引号 —— 本机实测 shell 会 strip `"`）。
+#[test]
+fn js_nested_containers_run_correctly_end_to_end() {
+    if !node_available() {
+        eprintln!("跳过：本机无 node");
+        return;
+    }
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_js_serialization")
+        .join("nested");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc.lz");
+    // 三类嵌套形态：
+    //   group_counts(Dict<str,List<int>>) —— dict<str,list<int>>
+    //   sum_nested(List<List<int>>)       —— list<list<int>>
+    //   flat_keys(Dict<str,Dict<str,int>>) —— dict<str,dict<str,int>>（深层嵌套）
+    // 逐个用 JS 侧 reduce / 遍历求和，返回值均为标量 int（便于断言）。
+    let src = r#"
+#[embed(js)]
+# js_lib.js
+function group_counts(groups: Dict<str,List<int>>) { let t = 0; for (const k in groups) { t += groups[k].reduce((a,b)=>a+b,0); } return t; }
+function sum_nested(matrix: List<List<int>>) { let t = 0; for (const row of matrix) { for (const v of row) t += v; } return t; }
+function flat_keys(m: Dict<str,Dict<str,int>>) { let t = 0; for (const k in m) { for (const k2 in m[k]) t += m[k][k2]; } return t; }
+
+def main():
+    print("nested runtime demo")
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "lang-zone 编译失败: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // 三类嵌套容器签名都不得被回执点名「不在闭集内」
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("embed 未覆盖"),
+        "嵌套容器签名不应被标记为未覆盖: {stdout}"
+    );
+
+    let art_dir = work.join("build/embed/calc/js_calc");
+    let artifact = art_dir.join("js_calc.js");
+    let dispatch = art_dir.join("__lz_dispatch_js_calc.js");
+    assert!(dispatch.is_file(), "缺 dispatch: {}", dispatch.display());
+
+    // 生成物必须过 node --check（语法有效）
+    node_check(&artifact).unwrap_or_else(|e| panic!("{e}"));
+    node_check(&dispatch).unwrap_or_else(|e| panic!("{e}"));
+
+    // dispatch 的 PARAMS 表必须把三类嵌套类型都挂到 __lz_json_nested
+    let dispatch_src = std::fs::read_to_string(&dispatch).unwrap();
+    assert!(
+        dispatch_src.contains("\"group_counts\": [[\"groups\", __lz_json_nested]]"),
+        "group_counts 未走 __lz_json_nested:\n{dispatch_src}"
+    );
+    assert!(
+        dispatch_src.contains("\"sum_nested\": [[\"matrix\", __lz_json_nested]]"),
+        "sum_nested 未走 __lz_json_nested:\n{dispatch_src}"
+    );
+    assert!(
+        dispatch_src.contains("\"flat_keys\": [[\"m\", __lz_json_nested]]"),
+        "flat_keys 未走 __lz_json_nested:\n{dispatch_src}"
+    );
+
+    // 运行判据：Command::arg 逐字传参（不经 shell），JSON 里的 `"` 得以保留。
+    let run = |args: &[&str]| -> String {
+        let o = Command::new("node")
+            .current_dir(&art_dir)
+            .arg("__lz_dispatch_js_calc.js")
+            .args(args)
+            .output()
+            .expect("run dispatch");
+        assert!(
+            o.status.success(),
+            "dispatch 非零退出：{:?} stderr={}",
+            o.status,
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+
+    // dict<str,list<int>>：{"a":[1,2,3],"b":[4,5]} → 6+9 = 15
+    assert_eq!(
+        run(&["group_counts", r#"groups={"a":[1,2,3],"b":[4,5]}"#]),
+        "15",
+        "dict<str,list<int>> 嵌套容器参数 roundtrip 失败"
+    );
+    // list<list<int>>：[[1,2],[3,4]] → 10
+    assert_eq!(
+        run(&["sum_nested", "matrix=[[1,2],[3,4]]"]),
+        "10",
+        "list<list<int>> 嵌套容器参数 roundtrip 失败"
+    );
+    // dict<str,dict<str,int>>：{"a":{"x":1,"y":2},"b":{"z":3}} → 6
+    assert_eq!(
+        run(&["flat_keys", r#"m={"a":{"x":1,"y":2},"b":{"z":3}}"#]),
+        "6",
+        "dict<str,dict<str,int>> 深层嵌套参数 roundtrip 失败"
+    );
+}
+
+/// 端到端：JS 嵌套容器的**边界与方向**覆盖 —— 空容器、内层空容器、
+/// 嵌套容器**返回值**（JSON.stringify 侧）、list<dict<str,int>> 参数形态。
+/// 与上一组同一编译口径（真编译 + node 运行），逐条比对 stdout。
+#[test]
+fn js_nested_containers_edge_and_return_forms() {
+    if !node_available() {
+        eprintln!("跳过：本机无 node");
+        return;
+    }
+    let work = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/embed_js_serialization")
+        .join("nested_edge");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).expect("create work dir");
+
+    let lz = work.join("calc.lz");
+    // 三类边界/方向：
+    //   group_counts(Dict<str,List<int>>) —— 空 dict / 内层空 list
+    //   make_nested()                     —— 嵌套容器**返回值**
+    //   list_of_dicts(List<Dict<str,int>>)—— list<dict<..>> 参数形态
+    let src = r#"
+#[embed(js)]
+# js_lib.js
+function group_counts(groups: Dict<str,List<int>>) { let t = 0; for (const k in groups) { t += groups[k].reduce((a,b)=>a+b,0); } return t; }
+function make_nested() { return {"a":[1,2],"b":[3]}; }
+function list_of_dicts(xs: List<Dict<str,int>>) { let t = 0; for (const d of xs) { for (const k in d) t += d[k]; } return t; }
+
+def main():
+    print("nested edge demo")
+"#;
+    std::fs::write(&lz, src).expect("write lz");
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
+    let out = Command::new(&bin)
+        .current_dir(&work)
+        .arg(&lz)
+        .arg("--embed-build")
+        .output()
+        .expect("run lang-zone");
+    assert!(
+        out.status.success(),
+        "lang-zone 编译失败: stdout={}\nstderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let art_dir = work.join("build/embed/calc/js_calc");
+    let dispatch = art_dir.join("__lz_dispatch_js_calc.js");
+    assert!(dispatch.is_file(), "缺 dispatch: {}", dispatch.display());
+    node_check(&dispatch).unwrap_or_else(|e| panic!("{e}"));
+
+    let run = |args: &[&str]| -> String {
+        let o = Command::new("node")
+            .current_dir(&art_dir)
+            .arg("__lz_dispatch_js_calc.js")
+            .args(args)
+            .output()
+            .expect("run dispatch");
+        assert!(
+            o.status.success(),
+            "dispatch 非零退出：{:?} stderr={}",
+            o.status,
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+
+    // 边界①：空 dict（内层无元素）→ 0
+    assert_eq!(run(&["group_counts", "groups={}"]), "0", "空 dict 嵌套参数失败");
+    // 边界②：内层空 list 与空 list 混合 → 0+1+5 = 6
+    assert_eq!(
+        run(&["group_counts", r#"groups={"a":[],"b":[1],"c":[2,3]}"#]),
+        "6",
+        "内层空 list 混合参数失败"
+    );
+    // 方向③：嵌套容器**返回值**走 JSON.stringify（对象序为插入序）
+    assert_eq!(
+        run(&["make_nested"]),
+        r#"{"a":[1,2],"b":[3]}"#,
+        "嵌套容器返回值未走 JSON.stringify"
+    );
+    // 形态④：list<dict<str,int>> 参数 → 1+2+3 = 6
+    assert_eq!(
+        run(&["list_of_dicts", r#"xs=[{"a":1},{"b":2},{"c":3}]"#]),
+        "6",
+        "list<dict<str,int>> 参数 roundtrip 失败"
+    );
+}
+

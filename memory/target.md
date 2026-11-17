@@ -1,7 +1,20 @@
 ﻿# 当前阶段目标（Target）
 
-- 本轮聚焦：embed §六.1 可序列化闭集扩展——Dict<str,float>/Dict<str,str> + Tuple 复合类型序列化支持
+- 本轮聚焦：JS 适配器**嵌套容器**跨语言序列化护栏（dict<str,list<int>> / list<list<int>> / dict<str,dict<str,int>> / list<dict<str,int>>）
 - 验收条件：cargo build 0 error、全量测试零回归、新测试全绿
+
+---
+
+## 2026-11-17 T0r65（定时任务探索轮）：JS 适配器嵌套容器护栏锁定 + 陈旧车道 rlib 排障
+- 起点：接手 HEAD=c2a6f94（T0r64），工作树有并发 agent 在途未提交 WIP（BUG-467 lz_lexer.lz/BUG-512 相关 builtins.rs/scan.rs，17:02–17:14 落笔，非本轮）。
+- **T0r65 三方向并发落地**（任务树 T0r13，全部真编译 + node 运行验证，非字符串断言）：
+  - 方向① T0r13.1：`tests/embed_js_serialization.rs` 新增 `js_nested_containers_run_correctly_end_to_end`——编译含 `#[embed(js)]` 的 LZ 程序（group_counts:Dict<str,List<int>>、sum_nested:List<List<int>>、flat_keys:Dict<str,Dict<str,int>>），`node --check` 两产物 + `Command::arg` 逐字传参（不经 shell，规避 PowerShell strip 双引号）跑分发入口：15 / 10 / 6 全部正确。
+  - 方向② T0r13.2：新增 `js_nested_containers_edge_and_return_forms`——空 dict `{}`→0、内层空 list 混合→6、嵌套容器**返回值** `{"a":[1,2],"b":[3]}`（JSON.stringify）、`list<dict<str,int>>` 参数→6。
+  - 方向③ T0r13.3：`src/embed/adapters.rs` 单测新增 3 条——`is_container_type` / `is_nested_container` 谓词真值表 + dispatch PARAMS 表三类嵌套参数挂 `__lz_json_nested`（不退化为 `__lz_str`）。
+- **排障：陈旧车道 rlib（非本轮回归）**：全量回归时 `lz_frontend_bootstrap`(7→4 failed) / `frontend_dual_track`(1 failed) 双红，报 `error[E0425]: cannot find function debug_f64`。经 `git stash` 到纯 HEAD 复核**同样红** ⇒ 非本轮引入。根因：并发 WIP 给 `lz_builtins` 加了 `debug_f64` 并进了 `LZ_BUILTIN_FN_NAMES`，但 `target/lane-bootstrap/debug/liblz_builtins.rlib` 是加之前的旧产物（lex-lz 走该隔离车道）。`CARGO_TARGET_DIR=target/lane-bootstrap cargo build -p lz_builtins` 重建后两套件回绿（7/7、1/1）。教训对齐 loomy-learned-stale-lane-test-triage。
+- 回归读数：lib 483/0、embed 全套 119/0（js_serialization 10：+2）、lz_ir_bootstrap 25/0、lz_frontend_bootstrap 7/0（车道重建后）、frontend_dual_track 1/0、lexer_parser_core 11/0、dual_route_golden 4/0；`cargo build --bin lang-zone` 0 error。
+- 边界：并发 agent 的 4 个 WIP 文件（lz_lexer.lz/builtins.rs/scan.rs/bugs.md）**本轮未提交**（非我改动面），已在 `memory/bugs.md` 记为 BUG-467（其台账状态由原 agent 维护）。
+- 下一步：① 其他语言适配器（mojo/c/scala）嵌套容器序列化（本机无 mojo/scala 工具链，c 可验）；② BUG-467 并发 WIP 的提交与收口；③ 嵌套容器跨适配器统一 varargs/返回侧护栏。
 
 ---
 

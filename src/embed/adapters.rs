@@ -1667,4 +1667,82 @@ mod tests {
         assert_eq!(a.lang(), "js");
         assert_eq!(a.src_ext(), "js");
     }
+
+    // ──────── T0r65：嵌套容器判据 is_nested_container / is_container_type ────────
+    //
+    // 这条谓词决定 dispatch 的 PARAMS 表把参数挂到 `__lz_json_nested` 还是标量转换器，
+    // 是「嵌套容器能不能跑起来」的分水岭；此前只有端到端字符串断言，无单元判据。
+
+    #[test]
+    fn is_container_type_matches_flat_and_nested_but_not_scalars() {
+        // 扁平容器：是容器
+        assert!(is_container_type("list<int>"));
+        assert!(is_container_type("dict<str,int>"));
+        assert!(is_container_type("tuple<int,float>"));
+        // 嵌套容器：也是容器
+        assert!(is_container_type("dict<str,list<int>>"));
+        assert!(is_container_type("list<list<int>>"));
+        // 标量：不是容器
+        assert!(!is_container_type("int"));
+        assert!(!is_container_type("str"));
+        assert!(!is_container_type("bool"));
+        assert!(!is_container_type("float"));
+        // 大写形态（LZ 源码常见）也归一
+        assert!(is_container_type("List<int>"));
+        assert!(is_container_type("Dict<str,int>"));
+    }
+
+    #[test]
+    fn is_nested_container_only_true_for_nested_not_flat() {
+        // 嵌套（子类型本身是容器）→ true
+        assert!(is_nested_container("dict<str,list<int>>"));
+        assert!(is_nested_container("list<list<int>>"));
+        assert!(is_nested_container("dict<str,dict<str,int>>"));
+        assert!(is_nested_container("list<dict<str,int>>"));
+        assert!(is_nested_container("tuple<dict<str,int>,list<int>>"));
+        // 扁平（子类型全是标量）→ false（这些走专用 __lz_json_list/dict/tuple）
+        assert!(!is_nested_container("list<int>"));
+        assert!(!is_nested_container("dict<str,int>"));
+        assert!(!is_nested_container("tuple<int,float>"));
+        // 标量 → false
+        assert!(!is_nested_container("int"));
+        assert!(!is_nested_container("str"));
+        // 大写归一后同样成立
+        assert!(is_nested_container("Dict<str,List<int>>"));
+        assert!(!is_nested_container("Dict<str,int>"));
+    }
+
+    #[test]
+    fn js_dispatch_maps_nested_container_params_to_json_nested() {
+        // 三类嵌套形态都必须进 __lz_json_nested（而非退化成 __lz_str）
+        let a = adapter("js");
+        let ms = a.methods(
+            "function a(g: Dict<str,List<int>>) { return g; }\n\
+             function b(m: List<List<int>>) { return m; }\n\
+             function c(d: Dict<str,Dict<str,int>>) { return d; }\n",
+        );
+        assert_eq!(ms.len(), 3);
+        for m in &ms {
+            assert!(m.callable(), "嵌套容器签名应可序列化: {:?}", m.name);
+        }
+        let refs: Vec<&ForeignFn> = ms.iter().collect();
+        let (_, body) = a.dispatch_file("js_nested_disp", &refs).unwrap();
+        assert!(
+            body.contains("\"a\": [[\"g\", __lz_json_nested]]"),
+            "Dict<str,List<int>> 参数未挂 __lz_json_nested:\n{body}"
+        );
+        assert!(
+            body.contains("\"b\": [[\"m\", __lz_json_nested]]"),
+            "List<List<int>> 参数未挂 __lz_json_nested:\n{body}"
+        );
+        assert!(
+            body.contains("\"c\": [[\"d\", __lz_json_nested]]"),
+            "Dict<str,Dict<str,int>> 参数未挂 __lz_json_nested:\n{body}"
+        );
+        // 不得退化成标量转换器
+        assert!(
+            !body.contains("\"a\": [[\"g\", __lz_str]]"),
+            "嵌套容器被误当标量 str:\n{body}"
+        );
+    }
 }
