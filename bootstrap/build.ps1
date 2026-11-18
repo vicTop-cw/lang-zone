@@ -51,8 +51,25 @@ if (-not $BuiltinsRlib) {
     else { $BuiltinsRlib = Join-Path $ProjectDir "target\debug\liblz_builtins.rlib" }
 }
 if (-not $StdDir) { $StdDir = Join-Path $ProjectDir "std" }
+# 车道 rlib 与当前工具链同源（防 cron 异版本重建 → E0514；~3s）
+$laneDir = Join-Path $ProjectDir "target\lane-bootstrap"
+if (Test-Path $laneDir) {
+    $saved = $env:CARGO_TARGET_DIR
+    $env:CARGO_TARGET_DIR = "target/lane-bootstrap"
+    Push-Location $ProjectDir
+    try { cargo build -p lz_builtins 2>&1 | Out-Null } finally { Pop-Location; $env:CARGO_TARGET_DIR = $saved }
+}
 # lzcyc 走 compile 子命令 + Rust 后端（cython 后端本机不可用，见 M5 风险缓解预案）
 $IsLzcyc = ([System.IO.Path]::GetFileNameWithoutExtension($Lzc) -ieq "lzcyc")
+# 钉版工具链自给（读 rust-toolchain.toml；防 cron/异版本 rustc 造成 E0514）
+$tcFile = Join-Path $ProjectDir "rust-toolchain.toml"
+if (Test-Path $tcFile) {
+    $m = Select-String -Path $tcFile -Pattern 'channel\s*=\s*"([^"]+)"'
+    if ($m) {
+        $tcBin = Join-Path (Join-Path $env:USERPROFILE ".rustup\toolchains") ($m.Matches[0].Groups[1].Value + "\bin")
+        if (Test-Path $tcBin) { $env:PATH = "$tcBin;" + $env:PATH }
+    }
+}
 
 function Log-Step([string]$msg) { Write-Host "`n>>> $msg" -ForegroundColor Yellow }
 function Log-Pass([string]$msg) { Write-Host "[PASS] $msg" -ForegroundColor Green }
