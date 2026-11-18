@@ -3665,7 +3665,7 @@ commit：3f8512e（重映射自 未记）
 - fix: 远端 v0.3.11 已修 BUG-452（heartbeat 工具 schema 加 namespace 参数走 engine_for_ns 路由）。本条补 heartbeat 响应加 namespace 字段，调用方可确认心跳路由到哪个命名空间。验证：moon check 0 errors、moon build --target js 通过。
 - commit: 5ba7123d8（fist-mbt）
 
-## BUG-511 [2026-11-04T00:10:00+08:00] [medium] embed §6.4：print(<垫片调用>) 返回 str 走 Debug 带引号，is_str_producing 通道补上
+## BUG-511 [2026-11-04T00:10:00+08:00] [medium] FIXED
 - summary: embed 跨语言垫片调用返回 str 时，直接 `print(python_shout("ab"))` 生成 `println!("{:?}", …)` 打 `"AB"`（带引号），而非 `println!("{}", …)` 打 `AB`（无引号）。根因：`print_arg_is_display`（`src/ir/codegen/expr_gen.rs`，static 函数）只看表达式自身 `e.ty`，垫片调用的 `e.ty` 在 IR 层不可见（非 LZ 定义的函数），故返回 false 走 `{:?}`。`fn_returns` 已登记垫片函数名与返回类型（`src/ir/codegen/mod.rs:905-910`，由 `embed_export_names()` 供名），`is_str_producing`（`expr_gen.rs:8346`）已能查 `fn_returns` 判定 Call 表达式是否返回 str，但 print 的格式化选择处未接这条通道。修法：print/println 的格式占位符选择处（`expr_gen.rs:1962`）把 `Self::print_arg_is_display(a)` 改为 `Self::print_arg_is_display(a) || self.is_str_producing(a)`。LZ 自定义函数返回 str 的场景两者都覆盖（`e.ty == Str` 时 `print_arg_is_display` 已 true），`||` 不改已有行为，只修复垫片调用这一条之前漏掉的路径。
 - 判据: `cargo test --test embed_unify_r15 print_embed_shim`（2/2：`print_embed_shim_call_returning_str_uses_display_not_debug` 断言直接 print 垫片 str 调用输出 `AB` 无引号 + 生成代码含 `println!("{}", …)`；`print_embed_shim_call_returning_int_unchanged` 负向对照返回 int 的垫片调用输出不变）
 - commit: 6ecb6be
@@ -3673,14 +3673,14 @@ commit：3f8512e（重映射自 未记）
 - 注意: 文档 `docs/嵌入式统一抽象-实现-2026-10-21.md` §六.4 已过期（原写「未修」），需同步更新为已修复。
 状态：FIXED
 
-## BUG-512 [2026-11-14T22:00:00+08:00] [critical] FIXED（T0r63 本轮恢复）：lz_codegen.rs 及 lz 库文件被误删导致编译失败
+## BUG-512 [2026-11-14T22:00:00+08:00] [critical] FIXED
 - summary: `src/ir/lz_codegen.rs` 的 `embed_targets_of`/`embed_targets_by_lang`/`ir_module_to_rs_lz_source_with_stem`/`is_kwarg_expr` 等函数被误删，连同 `src/ir/lz_codegen_lib.lz`（3759 行）、`src/ir/lz_ir_lib.lz`、`tests/lz_semantic_cases.rs` 被删，导致 `cargo build` 报 4 error（E0425 embed_targets_of/ir_module_to_rs_lz_source_with_stem 找不到、E0004 Item::EmbedBlock/UnOpKind::BitNot 未覆盖），项目无法编译。
 - detail: 根因是近期提交误删了 T0r24/T0r56 系列的自举路线代码。`bootstrap_emit.rs:479` 引用 `lz_codegen::embed_targets_of`，但该函数已不存在。缓存（target/）此前掩盖了真实编译失败——`cargo clean` 后 release build 才暴露。修复：`git checkout -- src/ir/lz_codegen.rs src/ir/lz_codegen_lib.lz src/ir/lz_ir_lib.lz tests/lz_semantic_cases.rs` 恢复被误删文件。恢复后 `cargo build --release` 0 error，`cargo test --lib` 480/480 全绿。
 - 教训: 开发铁律要求全量回归，缓存/增量编译会掩盖真实编译失败；每次接手必须先 `cargo clean` + `cargo build` 确认基线，不能依赖缓存产物。
 - commit: T0r63（待提交）
 - 状态：FIXED
 
-## BUG-513 [2026-11-14T22:00:00+08:00] [high] OPEN（T0r63 运行时验证发现）：带 #[embed] 块的 LZ 程序 main 函数体未生成
+## BUG-513 [2026-11-14T22:00:00+08:00] [high] FIXED
 - summary: LZ 程序含 `#[embed(python)]` 块且其后定义 `def main()`，`--embed-build` 生成的 `.rs` 中 `pub fn main() { }` 为空——main 函数体（如 `result = group_counts(...)` 和 `print(result)`）未被纳入生成码。编译能通过（空 main 合法），但运行时无输出，掩盖了功能缺失。
 - detail: 复现：`embed_nested_demo.lz`（`#[embed(python)]` 块 + `def main(): result = group_counts(...); print(result)`），`--embed-build` 后检查 `embed_nested_demo.rs` 的 `pub fn main() { }` 为空。T0r62 的编译验证测试只断言 `--embed-build` EXIT=0，未检查 main 体，故未暴露。T0r63.2 运行时验证（编译 .rs → 运行 → 比对输出）才发现。根因待查：可能是 codegen 在 embed 块存在时未把后续 `def main()` 纳入 items，或 builder 的函数收集在 embed 块后中断。
 - 判据: 修复后 `embed_nested_demo.lz --embed-build` 生成的 .rs 中 `pub fn main()` 应含 `result = python_calc_nested_demo::group_counts(...)` 与 `println!(...)` 调用。
@@ -3688,7 +3688,7 @@ commit：3f8512e（重映射自 未记）
 - commit: T0r64 本轮（三面修复，见下追记）
 - 状态：FIXED
 
-## BUG-513 修复追记 [2026-11-16T22:00:00+08:00] 状态：FIXED（三面收口）
+- 修复追记 [2026-11-16T22:00:00+08:00] 状态：FIXED（三面收口）
 - 本轮（T0r64 定时探索）接手时发现：工作区存在 BUG-513 的三面未提交修复，代码已落地但台账未更新。逐面复核并端到端验证后收口：
   - 第一面（main 体被吞）：src/lexer/lexer.rs 缩进式嵌入块边界判定——col-0 块（block_indent==0）用「空行 + 下一非空行缩进 <= 块缩进」为界，修复 leading_ws < 0 永不成立导致后续 def main() 被吞进嵌入块 / 生成空 main。实证：DEMO/embed_nested_demo.lz 生成 .rs 的 pub fn main() 现含 result = python_embed_nested_demo_group_counts(...) + println!；编译运行输出 {"a": 6, "b": 9}。
   - 第二面（嵌套 dict JSON 解析 冒号 深度误判）：src/bridge/cli.rs 四处 __lz_parse_dict_* 把 冒号 计入 depth，顶层分隔逗号在 depth==1 被漏判，{"a": 6, "b": 9} 被切成一整对 → 解析 panic。修为只 花括号/方括号 加深度。实证：嵌套 demo 端到端返回值解析正确。
@@ -3696,13 +3696,16 @@ commit：3f8512e（重映射自 未记）
 - 判据复核：embed_js_serialization 7/0、embed_dict_serialization 23/0、embed_tuple_serialization 7/0、embed_unify_r15 23/0、embed_dedup 4/0、embed_gapfixes 17/0、embed_stem_parity 3/0、embed_stub_shadowing 4/0、embed_project_emit 3/0、embed_project_grouping 4/0、lib 480/0、lz_ir_bootstrap 25/0、lz_frontend_bootstrap 7/0、frontend_dual_track 1/0、lexer_parser_core 4/0、dual_route_golden 11/0 全绿。
 - 状态：FIXED
 
-## BUG-514 [2026-11-16T22:00:00+08:00] [medium] 双轨词法一致性：lz 侧 Token 缺 Int128Lit/BigIntLit/LexError/CaretOp/CaretInfix/Unknown 六态
+## BUG-514 [2026-11-16T22:00:00+08:00] [medium] FIXED
 - summary: Rust 侧 lexer 产 Token::Int128Lit/BigIntLit/LexError/CaretOp/CaretInfix/Unknown(String) 等 token，lz 侧 src/frontend/lz_lexer.lz 旧实现缺失对应变体（Caret 未区分中缀/前缀，未知字符如 tnr 的 乘号 被静默丢弃）→ 双轨一致门禁在含 乘号 等样本上 rust 侧多一个 token 而不一致。
 - 修复: src/frontend/lz_lexer.lz 补齐 Int128Lit/BigIntLit/LexError/Unknown 变体、把 Caret 拆为 CaretInfix/CaretOp，与 Rust Token 逐字镜像。
 - 判据: frontend_dual_track_stratified_subset 1/0（含含 乘号 样本）。
 - 状态：FIXED（随 BUG-513 同轮提交）
 
-## BUG-467 [2026-11-17T09:02:47Z] [high] OPEN
+
+### FIXED(2026-11-18T10:06:55Z / BUG-514)
+- evidence: 回归锁：tests/frontend_dual_track.rs（全量 328 样本双轨零分歧 + 分层子集门禁 passed）；真源 src/frontend/lz_lexer.lz 六态（Int128Lit/BigIntLit/LexError/CaretOp/CaretInfix/Unknown）
+## BUG-467 [2026-11-17T09:02:47Z] [high] FIXED
 - summary: LZ 词法器双轨残余 5 处：CRLF 空白行缩进/行首块注释重入/f64 Debug 科学计数
 - detail: 全量 328 样本双轨扫描残余 5 处（3 类根因）：
 1) CRLF 空白行（4 空格+CRLF）：Rust peek 为 \r 落 _ 分支仍走 handle_indent(col) → Dedent 后再发 Newline；LZ 把 \r 视作空行 → 少 Dedent/Newline（ir-edge-boundary-values:364 rust=Newline lz=Mut；ir-edge-enum-self-methods:56 rust=Newline lz=Def）
@@ -3711,3 +3714,14 @@ commit：3f8512e（重映射自 未记）
 证据：temp/fullgate.js checked=328 failed=5；temp/diffone.js 单样本复核
 - reported_by: human_steward
 - task_id: T0r57
+
+
+### FIXED(2026-11-17T18:30:00Z / BUG-467)
+- evidence: 真源：`src/frontend/lz_lexer.lz`（tokenize 空白/缩进分支三处）——①CRLF 空行判定对齐 Rust：仅 None/'\n' 为空行、顶格纯 CRLF 行（col==0 且 peek 为 '\r'）落 advance 不处理缩进、含空格 CRLF 行仍走 handle_indent(col) 发 Dedent 再 Newline；②行首缩进块注释跨行重入：新增 `reenter_after_block_comment` 标志，缩进块注释消费完后恢复 `at_line_start=true` 按新行首重入缩进处理；③非法缩进层级（col 落在栈相邻两层之间）Dedent 一枚不发（对齐 Rust handle() 返回 None）。f64 Debug：`lz_builtins/src/runtime/builtins.rs` 新增 `debug_f64(x: f64) -> String = format!("{:?}", x)` 复刻 Rust Debug 科学计数形态，`float_debug_str` 改为调用它，`src/ir/codegen/scan.rs` 的 LZ_BUILTIN_FN_NAMES 登记 `debug_f64`。
+- 回归锁：`tests/frontend_dual_track.rs::frontend_dual_track_bug467_regression` 对四个曾失败样本（99_spec/ir-edge-boundary-values、99_spec/ir-edge-enum-self-methods、boundary-coverage/edge-keyword-identifier、boundary-coverage/edge-values-boundary）跑 Rust `--tokens` vs LZ `--emit=lex-lz` 归一化逐行比对，常规 `cargo test` 即跑（非 #[ignore]）。
+- 全量证据：temp/fullgate.js 分三块（0-110 / 110-220 / 220-328）跑全 328 样本，checked=328 **failed=0**（此前 failed=5）。
+- 回归：`cargo test --lib` 483/0；frontend_dual_track 1/0（+新锁 1/0）；lz_frontend_bootstrap 7/0；lexer_parser_core 11/0；dual_route_golden 4/0；lz_ir_bootstrap 25/0；lz_semantic_cases 17/0；`cargo build --bin lang-zone` 0 error（仅 3 条既有 unused 警告，非本轮引入）。
+
+
+### FIXED(2026-11-18T10:06:55Z / BUG-467)
+- evidence: 回归锁：tests/frontend_dual_track.rs 分层子集门禁 + temp/fullgate.js 全量 328 四块扫描零失败；真源 src/frontend/lz_lexer.lz 行首状态机（空行判定/块注释重入/无效层级丢 Dedent）
