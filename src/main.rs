@@ -1170,7 +1170,7 @@ fn run_test_mode(source_path: &str, out_path: &str) {
     }
     let _ = cargo.status();
 
-    let mut cmd = std::process::Command::new("rustc");
+    let mut cmd = lang_zone::frontend::bootstrap_emit::rustc_command();
     // 生成的 .rs 使用 2021 版语法，且依赖 lz_builtins crate，必须显式链接其 rlib
     cmd.arg("--edition")
         .arg("2021")

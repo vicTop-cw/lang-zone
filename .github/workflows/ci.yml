@@ -48,6 +48,10 @@ jobs:
     - name: Build lzcyc (LZ → Cython)
       run: cd CY && cargo build --bin lzcyc
 
+    - name: Dual-track consistency gate (LZ lexer vs Rust lexer, subset)
+      # M5 T0r56.3：分层子集门禁（每类目录代表样本），全量 328 由里程碑任务跑
+      run: cargo test --test frontend_dual_track stratified_subset
+
     - name: lzcyc transpile tests
       run: |
         cd CY

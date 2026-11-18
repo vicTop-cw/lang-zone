@@ -204,7 +204,7 @@ fn probe_builtins_link() -> Option<(PathBuf, PathBuf)> {
     let probe_src = tmp_dir.join("probe.rs");
     std::fs::write(&probe_src, "use lz_builtins::*;\nfn main() {}\n").ok()?;
     for rlib in &candidates {
-        let out = Command::new("rustc")
+        let out = crate::frontend::bootstrap_emit::rustc_command()
             .args(["--edition", "2021"])
             .args(["--emit=metadata"])
             .arg(&probe_src)
@@ -422,7 +422,7 @@ fn run_recursive_selfcheck(lz_path: &str, src_ext: &str, label: &str, link_label
     let exe_path = replace_ext(lz_path, src_ext, ".exe");
     let rs_path_abs = absolutize(&rs_path);
     let exe_path_abs = absolutize(&exe_path);
-    let rc = match Command::new("rustc")
+    let rc = match crate::frontend::bootstrap_emit::rustc_command()
         .args(["--edition", "2021"])
         .arg(&rs_path_abs)
         .arg("--extern")
@@ -511,6 +511,13 @@ pub fn set_bootstrap_lane_env() {
     }
 }
 
+/// 自举/自检链统一 rustc 入口：LZ_RUSTC 环境可覆盖（与 build.ps1/build.sh 同口径，
+/// 保证 rustc 与 BuiltinsRlib 同版本，规避 E0514 跨版本错配）。
+pub fn rustc_command() -> std::process::Command {
+    std::process::Command::new(
+        std::env::var("LZ_RUSTC").unwrap_or_else(|_| "rustc".to_string()),
+    )
+}
 /// 还原 Rust Debug 转义（\" \\ \n \r \t \0 \u{XXXX}）为原始字符。
 /// 双轨归一化用：Rust 侧 Token Debug 的字符串 payload 是 Debug 转义形态。
 fn debug_unescape(s: &str) -> String {

@@ -6,9 +6,17 @@
 #
 # 用法:
 #   ./build.sh all           # 编译所有测试（bootstrap/work/*.lz）
-#   ./build.sh closed        # 自举闭环：两轮构建 + 一致性校验（降级口径）
+#   ./build.sh closed        # 自举闭环：两代构建 + 一致性校验（降级口径）
+#   ./build.sh closed --generations 3   # 三代自举收敛（M5 Lane D 验收口径）
+#   ./build.sh closed --compiler lzcyc  # 闭环入口换成 lzcyc（--backend=rust）
 #   ./build.sh path/to/file  # 编译单个 .lz 文件
 #   ./build.sh clean         # 清理构建产物
+#
+# 入口/工具链参数（与 build.ps1 同口径）：
+#   --compiler <lang-zone|lzcyc|任意路径>   --lzc <显式路径>（优先）
+#   --rlib <lz_builtins.rlib>               --std <标准库目录>
+#   --rustc <rustc 命令>（须与 rlib 同版本，否则 E0514）
+#   --generations <N>    closed 模式构建代数（默认 2）
 #
 # 退出码（closed 模式）：
 #   0 闭环全通过；1 lzc 失败；2 rustc 失败；3 运行失败；4 一致性校验失败；5 环境缺失
@@ -27,9 +35,46 @@ MANIFEST_DIR="$WORK_DIR/manifest"
 LOG_DIR="$WORK_DIR/log"
 RUNOUT_DIR="$WORK_DIR/runout"
 BACKUP_GOOD="$WORK_DIR/backup/good"
-LZC="$PROJECT_DIR/target/debug/lang-zone.exe"
-STD_DIR="$PROJECT_DIR/std"
-BUILTINS_RLIB="$PROJECT_DIR/target/debug/liblz_builtins.rlib"
+
+# ── 入口/工具链参数解析（M5 Lane D：与 build.ps1 同口径）──
+GENERATIONS="${GENERATIONS:-2}"
+RUSTC="${RUSTC:-rustc}"
+COMPILER=""
+LZC_ARG=""
+RLIB_ARG=""
+STD_ARG=""
+POS_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --compiler)    COMPILER="$2"; shift 2 ;;
+        --lzc)         LZC_ARG="$2"; shift 2 ;;
+        --rlib)        RLIB_ARG="$2"; shift 2 ;;
+        --std)         STD_ARG="$2"; shift 2 ;;
+        --rustc)       RUSTC="$2"; shift 2 ;;
+        --generations) GENERATIONS="$2"; shift 2 ;;
+        *)             POS_ARGS+=("$1"); shift ;;
+    esac
+done
+if [ ${#POS_ARGS[@]} -gt 0 ]; then set -- "${POS_ARGS[@]}"; else set -- "all"; fi
+
+if [ -n "$LZC_ARG" ]; then
+    LZC="$LZC_ARG"
+elif [[ "$COMPILER" == *lzcyc* ]]; then
+    LZC="$PROJECT_DIR/CY/target/debug/lzcyc.exe"
+else
+    LZC="$PROJECT_DIR/target/debug/lang-zone.exe"
+fi
+STD_DIR="${STD_ARG:-$PROJECT_DIR/std}"
+if [ -n "$RLIB_ARG" ]; then
+    BUILTINS_RLIB="$RLIB_ARG"
+elif [ -f "$PROJECT_DIR/target/lane-bootstrap/debug/liblz_builtins.rlib" ]; then
+    # 车道 rlib 优先（钉版工具链构建，规避 E0514 跨版本错配）
+    BUILTINS_RLIB="$PROJECT_DIR/target/lane-bootstrap/debug/liblz_builtins.rlib"
+else
+    BUILTINS_RLIB="$PROJECT_DIR/target/debug/liblz_builtins.rlib"
+fi
+IS_LZCYC=0
+if [[ "$(basename "$LZC")" == *lzcyc* ]]; then IS_LZCYC=1; fi
 
 # 颜色定义
 GREEN='\033[0;32m'
@@ -45,6 +90,13 @@ log_step()  { echo -e "\n${YELLOW}>>> $*${NC}"; }
 # 将 Git Bash /e/... 路径转为 Windows E:\... 格式（lang-zone.exe 需要 Windows 路径）
 to_win_path() {
     local p="$1"
+    # WSL 路径：/mnt/f/AI/x → F:\AI\x
+    if [[ "$p" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then
+        local wdrive="${BASH_REMATCH[1]}"
+        local wrest="${BASH_REMATCH[2]}"
+        echo "${wdrive^^}:\\${wrest//\//\\}"
+        return
+    fi
     if [[ "$p" == /* && "${p:1:1}" != "/" ]]; then
         local drive="${p:1:1}"
         local rest="${p:2}"
@@ -54,12 +106,29 @@ to_win_path() {
     fi
 }
 
+# 让本进程与子进程里的裸 rustc 与 --rustc 同源（防 lzcyc/库内嵌调用
+# 走异版本 rustc → E0514；WSL 下 /mnt/<d>/ 与 Windows <D>:\ 互转）
+if [ "$RUSTC" != "rustc" ]; then
+    rustc_dir=""
+    if [[ "$RUSTC" == /* ]]; then
+        rustc_dir="$(dirname "$RUSTC")"
+    elif [[ "$RUSTC" == [A-Za-z]:* ]]; then
+        rustc_dir="$(dirname "$(to_win_path "$RUSTC")")"
+    fi
+    if [ -n "$rustc_dir" ] && [ -d "$rustc_dir" ]; then
+        export PATH="$rustc_dir:$PATH"
+    fi
+fi
 # ============================================================
 # 编译单个 .lz → .rs → .exe → 运行
 # 返回：0 成功；1 lzc 失败；2 rustc 失败；3 运行失败
 # ============================================================
 compile_and_run() {
     local lz_file="$1"
+    # 相对路径转绝对（Windows 侧编译器/exe 需要绝对路径）
+    if [[ "$lz_file" != /* && "$lz_file" != [A-Za-z]:* ]]; then
+        lz_file="$PWD/$lz_file"
+    fi
     local base="$(basename "$lz_file" .lz)"
     local dir="$(dirname "$lz_file")"
     local rs_file="$dir/$base.rs"
@@ -67,21 +136,33 @@ compile_and_run() {
     local win_lz="$(to_win_path "$lz_file")"
     local win_std="$(to_win_path "$STD_DIR")"
     local win_rlib="$(to_win_path "$BUILTINS_RLIB")"
+    local win_rs="$(to_win_path "$rs_file")"
+    local win_exe="$(to_win_path "$exe_file")"
+    local win_deps="$(to_win_path "$(dirname "$BUILTINS_RLIB")/deps")"
 
     log_step "编译: $base"
 
     # Step 1: LZ → Rust
     log_info "  [LZC] LZ → Rust..."
-    if ! "$LZC" "$win_lz" --std-dir "$win_std" 2>&1; then
-        log_fail "  [LZC] LZ 编译失败: $lz_file"
-        return 1
+    if [ "$IS_LZCYC" -eq 1 ]; then
+        # lzcyc 入口：compile 子命令 + Rust 后端；透传 rustc/rlib 选择（Lane D 参数化）
+        if ! LZ_RUSTC="$(to_win_path "$RUSTC")" LZ_BUILTINS_RLIB="$win_rlib" \
+             "$LZC" compile "$win_lz" --backend=rust --std-dir "$win_std" 2>&1 < /dev/null; then
+            log_fail "  [LZC] LZ 编译失败: $lz_file"
+            return 1
+        fi
+    else
+        if ! "$LZC" "$win_lz" --std-dir "$win_std" 2>&1 < /dev/null; then
+            log_fail "  [LZC] LZ 编译失败: $lz_file"
+            return 1
+        fi
     fi
     log_pass "  [LZC] LZ → $rs_file"
 
     # Step 2: Rust → Binary（链接 lz_builtins，codegen 恒生成 use lz_builtins::*）
     log_info "  [RUSTC] Rust → Binary..."
     local rustc_output
-    rustc_output=$(rustc --edition 2021 "$rs_file" --extern "lz_builtins=$win_rlib" -L "dependency=$(dirname "$win_rlib")/deps" -o "$exe_file" 2>&1) || {
+    rustc_output=$("$RUSTC" --edition 2021 "$win_rs" --extern "lz_builtins=$win_rlib" -L "dependency=$win_deps" -o "$win_exe" 2>&1 < /dev/null) || {
         log_fail "  [RUSTC] rustc 编译失败: $lz_file"
         echo "$rustc_output" | grep -E "error\[" | head -5
         return 2
@@ -91,7 +172,7 @@ compile_and_run() {
     # Step 3: 运行验证
     log_info "  [RUN] 运行..."
     local run_output
-    if run_output=$("$exe_file" 2>&1); then
+    if run_output=$("$exe_file" 2>&1 < /dev/null); then
         log_pass "  [RUN] 运行成功: [$run_output]"
         echo ""
     else
@@ -169,7 +250,7 @@ record_runout() {
     cd "$WORK_DIR"
     while IFS= read -r -d '' f; do
         local base="$(basename "$f" .exe)"
-        "$f" > "$out/$base.out" 2>&1
+        "$PWD/${f#./}" > "$out/$base.out" 2>&1 < /dev/null
     done < <(find . -type f -name "*.exe" -not -path "./backup/*" -not -path "./manifest/*" -not -path "./log/*" -not -path "./runout/*" -print0)
 }
 
@@ -212,50 +293,49 @@ build_closed() {
         echo "时间: $ts"
         echo "编译器: $LZC"
         echo ""
-        # 第 1 轮
-        log_step "第 1 轮构建"
-        if ! build_all; then
-            log_fail "第 1 轮构建失败（见上方阶段日志定位）"
-            return 1
-        fi
-        make_manifest "$MANIFEST_DIR/run1.sha256"
-        log_info "第 1 轮 manifest: $MANIFEST_DIR/run1.sha256 ($(wc -l < "$MANIFEST_DIR/run1.sha256") 项)"
-        record_runout "$RUNOUT_DIR/run1"
+        # ── N 代构建：每代清产物 → 全量 → manifest + runout ──
+        if [ "$GENERATIONS" -lt 1 ]; then GENERATIONS=1; fi
+        g=1
+        while [ "$g" -le "$GENERATIONS" ]; do
+            if [ "$g" -gt 1 ]; then
+                log_info "[GEN $g] 清理上一代产物 (.rs/.exe) ..."
+                find "$WORK_DIR" -name "*.rs" -not -path "*/backup/*" -not -path "*/runout/*" -delete
+                find "$WORK_DIR" -name "*.exe" -not -path "*/backup/*" -not -path "*/runout/*" -delete
+            fi
+            log_step "第 $g 代构建"
+            if ! build_all; then
+                log_fail "第 $g 代构建失败（见上方阶段日志定位）"
+                return 1
+            fi
+            make_manifest "$MANIFEST_DIR/gen$g.sha256"
+            log_info "第 $g 代 manifest: $MANIFEST_DIR/gen$g.sha256 ($(wc -l < "$MANIFEST_DIR/gen$g.sha256") 项)"
+            record_runout "$RUNOUT_DIR/gen$g"
+            g=$((g + 1))
+        done
 
-        # 清理产物（仅 .rs/.exe，不动 .lz 源与 backup/）
-        log_info "[VERIFY] 清理产物后执行第 2 轮..."
-        find "$WORK_DIR" -name "*.rs" -not -path "*/backup/*" -not -path "*/runout/*" -delete
-        find "$WORK_DIR" -name "*.exe" -not -path "*/backup/*" -not -path "*/runout/*" -delete
+        # ── 收敛校验：全部 manifest 与 gen1 一致 + 运行输出一致 ──
+        log_info "[VERIFY] $GENERATIONS 代 .rs manifest 一致性校验..."
+        g=2
+        while [ "$g" -le "$GENERATIONS" ]; do
+            if ! diff -q "$MANIFEST_DIR/gen1.sha256" "$MANIFEST_DIR/gen$g.sha256" > /dev/null; then
+                log_fail "第 1 代与第 $g 代 .rs manifest 不一致（非确定性构建 / 未收敛）"
+                diff "$MANIFEST_DIR/gen1.sha256" "$MANIFEST_DIR/gen$g.sha256" | head -20
+                return 4
+            fi
+            log_pass "[VERIFY] gen1 与 gen$g .rs manifest 完全一致"
+            log_info "[VERIFY] gen1 与 gen$g .exe 运行输出一致性校验..."
+            if ! diff_runout "$RUNOUT_DIR/gen1" "$RUNOUT_DIR/gen$g"; then
+                log_fail "gen1 与 gen$g .exe 运行输出不一致"
+                return 4
+            fi
+            log_pass "[VERIFY] gen1 与 gen$g 运行输出完全一致"
+            g=$((g + 1))
+        done
 
-        # 第 2 轮
-        log_step "第 2 轮构建"
-        if ! build_all; then
-            log_fail "第 2 轮构建失败"
-            return 1
-        fi
-        make_manifest "$MANIFEST_DIR/run2.sha256"
-        log_info "第 2 轮 manifest: $MANIFEST_DIR/run2.sha256 ($(wc -l < "$MANIFEST_DIR/run2.sha256") 项)"
-        record_runout "$RUNOUT_DIR/run2"
-
-        # 一致性校验（降级口径：.rs 哈希一致 + .exe 运行输出一致）
-        log_info "[VERIFY] 两轮 .rs manifest 一致性校验..."
-        if ! diff -q "$MANIFEST_DIR/run1.sha256" "$MANIFEST_DIR/run2.sha256" > /dev/null; then
-            log_fail "两轮 .rs manifest 不一致（非确定性构建，详见 diff run1 run2）"
-            diff "$MANIFEST_DIR/run1.sha256" "$MANIFEST_DIR/run2.sha256" | head -20
-            return 4
-        fi
-        log_pass "[VERIFY] 两轮 .rs manifest 完全一致"
-        log_info "[VERIFY] 两轮 .exe 运行输出一致性校验..."
-        if ! diff_runout "$RUNOUT_DIR/run1" "$RUNOUT_DIR/run2"; then
-            log_fail "两轮 .exe 运行输出不一致"
-            return 4
-        fi
-        log_pass "[VERIFY] 两轮 .exe 运行输出完全一致"
-
-        # PROMOTE：更新回滚基线
+        # PROMOTE：更新回滚基线（末代 manifest）
         log_info "[PROMOTE] 更新回滚基线 backup/good ..."
         rm -f "$BACKUP_GOOD"/*.rs "$BACKUP_GOOD"/*.exe
-        cp "$MANIFEST_DIR/run2.sha256" "$BACKUP_GOOD/manifest.sha256"
+        cp "$MANIFEST_DIR/gen$GENERATIONS.sha256" "$BACKUP_GOOD/manifest.sha256"
         while IFS= read -r -d '' f; do
             local rel="${f#./}"
             mkdir -p "$BACKUP_GOOD/$(dirname "$rel")"
@@ -264,7 +344,7 @@ build_closed() {
         log_pass "[PROMOTE] 回滚基线已更新"
         echo ""
         echo "=========================================="
-        echo -e "${GREEN}[OK] 自举闭环全部通过（两轮一致 + 运行全绿）${NC}"
+        echo -e "${GREEN}[OK] 自举闭环全部通过（$GENERATIONS 代 .rs 一致 + 运行全绿）${NC}"
         echo "日志: $log_file"
         echo "=========================================="
     } 2>&1 | tee -a "$log_file"
