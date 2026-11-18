@@ -16,6 +16,26 @@ use std::process::Command;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// M5 Lane D：内置库 rlib 解析——环境覆盖 > 车道（target/lane-bootstrap）> target/debug。
+/// 车道 rlib 由钉版工具链构建，配合同版本 rustc 可规避 E0514 跨版本错配。
+fn builtins_rlib_path() -> PathBuf {
+    if let Some(p) = std::env::var_os("LZ_BUILTINS_RLIB") {
+        return PathBuf::from(p);
+    }
+    let lane = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../target/lane-bootstrap/debug/liblz_builtins.rlib");
+    if lane.is_file() {
+        lane
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib")
+    }
+}
+
+/// M5 Lane D：rustc 解析（环境 LZ_RUSTC 可覆盖；须与 rlib 同版本）
+fn rustc_bin() -> String {
+    std::env::var("LZ_RUSTC").unwrap_or_else(|_| "rustc".to_string())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
@@ -863,8 +883,8 @@ fn cmd_compile(args: &[String]) {
             "{}.exe",
             out_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output")
         ));
-        let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib");
-        let status = Command::new("rustc")
+        let builtins = builtins_rlib_path();
+        let status = Command::new(rustc_bin())
             .args(["--edition", "2021"])
             .arg(&out_path)
             .arg("--extern")
@@ -950,8 +970,8 @@ fn cmd_run(args: &[String]) {
             eprintln!("Error writing {}: {}", rs_path.display(), e);
             std::process::exit(1);
         }
-        let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/liblz_builtins.rlib");
-        let status = Command::new("rustc")
+        let builtins = builtins_rlib_path();
+        let status = Command::new(rustc_bin())
             .args(["--edition", "2021"])
             .arg(&rs_path)
             .arg("--extern")
