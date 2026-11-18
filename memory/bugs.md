@@ -3725,3 +3725,7 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-18T10:06:55Z / BUG-467)
 - evidence: 回归锁：tests/frontend_dual_track.rs 分层子集门禁 + temp/fullgate.js 全量 328 四块扫描零失败；真源 src/frontend/lz_lexer.lz 行首状态机（空行判定/块注释重入/无效层级丢 Dedent）
+## BUG-515 [2026-11-18T10:30:23Z] [low] OPEN
+- summary: WSL 下 lzcyc 入口闭环仍 E0514：内部某条 rustc 调用不认 LZ_RUSTC/PATH 同源
+- detail: 复现：WSL bash 执行 `bash bootstrap/build.sh closed --generations 3 --compiler lzcyc --rustc /mnt/c/.../stable-x86_64-pc-windows-gnu/bin/rustc.exe`，12 源全部 [LZC] LZ 编译失败，日志 E0514：rlib=lane(1.98.1) vs current=1.99.1。已排除：CY rustc_bin/builtins_rlib_path 均读 LZ_RUSTC/LZ_BUILTINS_RLIB（trace 证实 env 正确）；lib 6 处 Command::new("rustc") 已改 rustc_command()（读 LZ_RUSTC）；PATH 已前置 gnu 目录。仍失败 → 说明 lzcyc 走 --backend=rust 的某条内部编译链仍以裸 rustc 解析到 Windows PATH 的 1.99.1（疑似经生成的临时脚本或子系统 interop 环境传递丢失）。影响：仅 WSL 驱动场景；原生 Windows（build.ps1 -Compiler lzcyc -Generations 3）三代收敛已全绿（bootstrap/work/log/20261118-175536.log）。建议：在 lzcyc 内部为所有 rustc 派生调用统一注入 LZ_RUSTC（含生成的临时脚本模板），或在 build.sh 头注明『lzcyc 入口仅支持原生 Windows 环境』。
+- reported_by: human_steward
