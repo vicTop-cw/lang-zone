@@ -3613,7 +3613,7 @@ commit：3f8512e（重映射自 未记）
 - commit: e22c897
 - 回归: tests/rs_lz_families.rs 7/7（切片族）+ 17 样本中 11 条转绿
 状态：FIXED
-## BUG-491 [2026-10-28T06:47:00+08:00] [high] OPEN
+## BUG-491 [2026-10-28T06:47:00+08:00] [high] FIXED
 - note: rs-lz 把 `int(str)` 发成 `as` cast（E0605）
 - summary: rs-lz 对 `int(str)` / `f64(str)` 一类内建类型转换一律按 `as` cast 发射（`x as i64`），而 `str as i64` 在 Rust 里不是合法 cast → E0605（non-primitive cast）。根因：`src/ir/lz_codegen_lib.lz` 的 `Expr.Cast` 分支不看目标类型，只按「源→`as`→目标」硬发。修法：`Expr.Cast` 按目标类型分派——目标为数值且源为 `str`/`Any` → `.parse::<T>().unwrap()`；目标 `bool` → `.. != 0`；目标 `str` → `format!`；目标 `String` → `.to_string()`。
 - 判据: `int(str)` / `f64(str)` 等 6 条样本 6/6 由 E0605 转绿（编译通过且运行值与 LZ 语义一致）；`cargo test --test rs_lz_families` 7/7、`--lib` 461/461 无回归。
@@ -3630,7 +3630,7 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-19T12:47:49Z / BUG-490, BUG-492)
 - evidence: 回归锁：tests/rs_lz_families.rs 16/16（切片族：range 两端 cast 断言）+ tests/codegen_corner_fixes.rs 44/44，两把锁已纳入 scripts/dual_track_gate.ps1 常规门禁（判据 check:T0r60:r1 passed：SelfTest + 两套件 + 双轨子集 GATE PASS）。真源：src/ir/lz_codegen_lib.lz（commit e22c897：切片 range 两端 as usize / 二元 + 字符串拼接借位转换）。附带治理：两套件 harness 参数化（LZ_RUSTC/LZ_BUILTINS_RLIB + 车道 rlib 优先），消除 cron 车道 rlib 版本漂移造成的 E0514 假红（原 0/16 与 2/44 全红实为环境）。
-## BUG-493 [2026-10-28T06:49:00+08:00] [medium] OPEN
+## BUG-493 [2026-10-28T06:49:00+08:00] [medium] FIXED
 - note: rs-lz 空 then 块被吞（E0423）+ panic 发成普通函数调用
 - summary: 两处发射缺陷：① 空 `then` 块（`if c then else ..` 形态）被吞成裸条件，生成的 `if c {}` 缺块体/块体为空 → E0423（expected expression, found `.`）一类解析错；② `panic(..)` 被当普通用户函数调用发射，生成的调用签名/路径与运行时不符。根因：`src/ir/lz_codegen_lib.lz` 的 `gen_block` 对空块不落 `{}` 骨架，`panic` 未走内建专用臂。修法：`gen_block` 空块显式发 `{
 }`；`panic(..)` 专发 `panic!("{:?}", ..)`（与 LZ 的 Debug 渲染口径一致）。
@@ -3638,13 +3638,16 @@ commit：3f8512e（重映射自 未记）
 - commit: e22c897
 - 回归: tests/rs_lz_families.rs 7/7（空块 / panic 族）+ 2/2 样本转绿
 状态：FIXED
-## BUG-494 [2026-10-28T06:50:00+08:00] [high] OPEN
+## BUG-494 [2026-10-28T06:50:00+08:00] [high] FIXED
 - note: rs-lz 的 typed main 尾表达式被当语句（E0308）
 - summary: rs-lz 对 `def main() -> int` 这类 typed main 把尾表达式当语句发（`{ ..; 0i64; }`），函数体返回 `()` 与声明返回 `i64` 不符 → E0308；退出码也未真正交给进程。根因：rs-lz 的 decl 发射缺「typed main 的尾值即进程退出码」这一层包装。修法：对齐原生 `src/ir/codegen/decl_gen.rs:1060`（typed main 判定 / `is_typed_main`）与 `src/ir/codegen/decl_gen.rs:1516`（`pub fn main()` 包装）：typed main 改名 `__lz_main`，尾表达式正常作为返回值，另补 `pub fn main() { std::process::exit(__lz_main() as i32); }`。
 - 判据: typed main 样本（`def main() -> int = ..`，尾值非 0）由 E0308 转绿，编译后进程退出码等于尾值（`$?` 实测）；`cargo test --test rs_lz_families` 7/7、`--test codegen_corner_fixes` 44/44、`--lib` 461/461 无回归。
 - commit: e22c897
 - 回归: tests/rs_lz_families.rs 7/7（typed main 族）
 状态：FIXED
+
+### FIXED(2026-11-19T12:48:30Z / BUG-491, BUG-493, BUG-494)
+- evidence: 回归锁：tests/rs_lz_families.rs（16/16，同判据 check:T0r60:r1 passed）内逐条点名——n3_str_to_number_uses_parse（`int(str)` 走 parse 而非 as cast，BUG-491）、n5_empty_then_block_and_panic_macro（空 then 块不吞 + panic 宏形态，BUG-493）、typed_main_keeps_tail_value（typed main 保留尾值、`__lz_main() -> i64` 形态，BUG-494）；同批由 e22c897 落地并已纳入 scripts/dual_track_gate.ps1 常规门禁。真源：src/ir/lz_codegen_lib.lz。
 ## BUG-495 [2026-10-29T14:00:00+08:00] [high] OPEN
 - note: rs-lz 旁路表示不了 embed（Item 枚举无变体，E0599）
 - summary: rs-lz 旁路对含 `#[embed(..)]` 的源文件生成 E0599（no variant named `EmbedBlock`）：旁路走 `src/ir/lz_codegen_lib.lz` 的 `Item` 枚举，旧 schema 只带 `(lang, src_len)`，内嵌源码文本根本不进数据面，故 embed 块的三种形态一条都发不出来。修法：① `src/ir/lz_codegen_lib.lz:188` 的 `Item` 加变体 `EmbedBlock(lang, src, tier, artifact, dir_rel, wrappers)`，`:1539` / `:3600` 补垫片臂，`gen_embed_block`（`:3552`）逐字对齐原生 `src/ir/codegen/decl_gen.rs:264-292`；② 命名与目录不在 LZ 侧猜——`src/ir/lz_codegen.rs:34` 的 `embed_targets_of`（`:76` 用 `crate::embed::artifact::dir_rel`）在 Rust 侧算好 `artifact` / `dir_rel` 再进数据面（`:208` 注释即此口径），`src/main.rs` 传 stem 进 `set_embed_stem` 并落盘；垫片模块内容由 `src/ir/lz_codegen.rs:210` 供名，外壳 `pub mod __lz_embed` 由 `src/ir/codegen/mod.rs:1546` 包。
