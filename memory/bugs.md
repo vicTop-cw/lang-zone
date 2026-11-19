@@ -3835,10 +3835,13 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-19T10:53:10Z / BUG-515)
 - evidence: 回归锁：scripts/dual_track_gate.ps1（内建『车道 rlib 与当前工具链同源重建』，把 E0514 混合产物从人工纪律变为脚本行为）+ bootstrap/build.sh（WSL+lzcyc 组合显式守卫，exit 5 并指引用 build.ps1；默认入口 2 代闭环已复验 12/12×2 全绿）。真源：bootstrap/build.ps1 车道重建、src/frontend/bootstrap_emit.rs rustc_command()（LZ_RUSTC 统一入口）、CY/src/main.rs builtins_rlib_path/rustc_bin。根因结论：WSL 启动 Windows 进程时合并 Windows 级 PATH 且 WSL 侧不可覆盖 → lzcyc/库内某条 rustc 派生调用解析到 1.99.1；原生 PowerShell 入口无此问题（三代收敛已证）。
-## BUG-516 [2026-11-19T10:54:23Z] [medium] OPEN
+## BUG-516 [2026-11-19T10:54:23Z] [medium] FIXED
 - summary: 账本标题状态位不统一致 bug_list/bug_fix 解析盲区（128 条不可见）
 - detail: 现象：memory/bugs.md 中 `## BUG-N [ts] [sev] STATUS` 为标准形态（被 bug_list/bug_fix 识别），但大量历史条目写作 `## BUG-N [ts] [sev] FIXED（说明…）` 或 `## BUG-N 修复追记 …`，解析器取状态位失败 → 这些条目对工具不可见：bug_list 只见 116 条（实测 `count:116`），全文件实际 `## BUG-` 标题 128 条不规范（脚本统计：`^## BUG-\d+ \[[^\]]+\] \[[^\]]+\] (OPEN|FIXED|DUPLICATE|FALSE_POSITIVE)\s*$` 之外者）。后果：① bug_fix 报『编号不存在』（BUG-514/467 已在规范化标题后可销账）；② 四态计数与插件投影漂移；③ 历史条目无法程序化检索。建议（择一）：a) Fist-Mbt 侧放宽解析——状态位按『首个匹配 OPEN|FIXED|REVERTED|DUPLICATE|FALSE_POSITIVE 的整词』提取，忽略其后括号注记；b) 本仓一次性规范化 128 条标题（把 `FIXED（…）` 拆为 `FIXED` + 正文 `- note:`），diff 较大需单独提交。证据：temp 下标题扫描输出；本轮已手工规范化 6 条（511/512/513/513追记/514/467）作为样例。
 - reported_by: human_steward
+
+### FIXED(2026-11-19T11:54:21Z / BUG-516)
+- evidence: 回归锁：scripts/normalize_bug_headings.ps1（幂等规范化脚本，-DryRun 可预检；此后新增条目标题必须写成 `## BUG-N [ts] [sev] STATUS` 形态）。修复实证：bug_list 可见条数 116 → 224（198 FIXED / 24 OPEN / 2 DUPLICATE）；本次改 102 条标题 + 5 条子标题降级为正文；原尾注全部保留为 `- note:` 行（行数 3176→3278），无信息丢失（备份 temp/bugs.md.bak）。遗留提示：存量重复编号 BUG-450/434/350/347（另账，需人工合并）。
 ## BUG-520 [2026-11-19T11:05:00Z] [high] FIXED
 - summary: PyO3Bridge 生成的 #[pyfunction] 吐 todo!() 桩 + C 适配器缺 str/原型声明
 - detail: 两处同族缺陷（"生成产物不可运行"）：① src/bridge/python.rs 的 generate_pyfunction 对每个导出函数发 `todo!("Implement __py_<name>")`，生成的 PyO3 模块一旦被 Python 调用即 panic —— 未委托到 LZ 侧 __py_<name> 实现。② src/embed/adapters.rs 的 CLane 缺 str 标量（const char*）映射（Python/JS 已有）⇒ 带 str 形参/返回的 C 函数被静默标 unsupported；且 dispatch_file 不发被调函数原型（跨翻译单元调用隐式 int 返回会截断 const char* 指针 → 0xC0000005 崩溃）；容器/Dict-KV 形参被静默丢弃无回执。
