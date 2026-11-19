@@ -9,6 +9,21 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::fs;
 
+/// 与链侧同源的 rlib 解析（LZ_BUILTINS_RLIB > 车道 > target/debug）。
+/// 注意：只换主 rlib 不够——其传递依赖（num-bigint 等）必须与主 rlib 同目录
+/// deps 才可加载，否则 rustc 报 E0463「can't find crate」。
+fn lz_builtins_rlib() -> PathBuf {
+    if let Some(p) = std::env::var_os("LZ_BUILTINS_RLIB") {
+        return PathBuf::from(p);
+    }
+    let lane = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/lane-bootstrap/debug/liblz_builtins.rlib");
+    if lane.is_file() {
+        return lane;
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib")
+}
+
 // 精简 LZ 源：递归 enum IrType + display_type（对齐 src/ir/display.rs）
 // 覆盖递归 enum 自引用（Box<Vec<IrType>>）、[ty] 前缀、fn/option 容器
 const LZ_SOURCE: &str = r#"
@@ -75,8 +90,7 @@ fn lz_written_ir_display_compiles_and_runs() {
     assert!(rs_path.exists(), "generated .rs missing");
 
     // 2. rustc 编译 .rs（链接 lz_builtins）
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let rustc_out = Command::new("rustc")
         .args(["--edition", "2021"])
         .arg(&rs_path)
@@ -296,8 +310,7 @@ fn lz_written_lexer_compiles_and_runs() {
     assert!(rs_path.exists(), "generated .rs missing");
 
     // 2. rustc 编译
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let rustc_out = Command::new("rustc")
         .args(["--edition", "2021"])
         .arg(&rs_path)
@@ -545,8 +558,7 @@ def main() =
     assert!(!out_lz.stdout.is_empty(), ".rs 输出不应为空");
 
     // 生成的 Rust 必须能过 rustc（运行行为一致由 D2 全量比对覆盖）
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let exe_path = work.join("d1_input.exe");
     let rc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -639,8 +651,7 @@ def main() =
     );
 
     // 生成产物必须过 rustc（功能正确性兜底）
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let out_rs = work.join("g1_input_lz.rs");
     fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
     let exe_path = work.join("g1_input.exe");
@@ -725,8 +736,7 @@ def main() =
     );
 
     // rs-lz 产物须过 rustc 且运行输出正确
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let out_rs = work.join("s1_input_lz.rs");
     fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
     let exe_path = work.join("s1_input.exe");
@@ -799,8 +809,7 @@ def main() =
         l_str.lines().find(|l| l.contains("let c")).unwrap_or("(无 let c)")
     );
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let out_rs = work.join("s1_input_lz.rs");
     fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
     let exe_path = work.join("s1_input.exe");
@@ -907,8 +916,7 @@ def main() =
     fs::write(&lz_path, source).expect("write lz source");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     let out_lz = Command::new(&bin)
         .arg(&lz_path)
@@ -1042,8 +1050,7 @@ def main() =
     // rustc 编译运行出 42
     let out_rs = work.join("s1_input_lz.rs");
     fs::write(&out_rs, &text).expect("write rs-lz .rs");
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let exe_path = work.join("s1_input.exe");
     let rc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -1133,8 +1140,7 @@ def main() =
     // 产物编译运行：classify 三例 + inline match
     let out_rs = work.join("m_input_lz.rs");
     fs::write(&out_rs, &text).expect("write rs-lz .rs");
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let exe_path = work.join("m_input.exe");
     let rc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -1204,8 +1210,7 @@ def main() =
             .unwrap_or("(无 pub fn Point.* 行)")
     );
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let out_rs = work.join("s1_input_lz.rs");
     fs::write(&out_rs, &out_lz.stdout).expect("write rs-lz .rs");
     let exe_path = work.join("s1_input.exe");
@@ -1416,8 +1421,7 @@ def main() =
         native_src
     );
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let native_exe = work.join("c_native.exe");
     let rc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -1506,8 +1510,7 @@ def main() =
     fs::write(&lz_path, source).expect("write lz source");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     let out_native = Command::new(&bin)
         .arg(&lz_path)
@@ -1621,8 +1624,7 @@ def main() =
     fs::write(&lz_path, source).expect("write lz source");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     // 原生：须含 .collect::<Vec<_>>() 并编译运行
     let out_native = Command::new(&bin)
@@ -1726,8 +1728,7 @@ def main() =
     fs::write(&lz_path, source).expect("write lz source");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     // 原生：IR build 应通过（不再报「期望 str 实际 int」）并编译运行
     let out_native = Command::new(&bin)
@@ -1859,8 +1860,7 @@ def main() =
         native_src
     );
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let native_exe = work.join("ta_native.exe");
     let rc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -1956,8 +1956,7 @@ def main():
         native_src
     );
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
     let native_exe = work.join("sd_native.exe");
     let rc = Command::new("rustc")
         .args(["--edition", "2021"])
@@ -2048,7 +2047,7 @@ fn rs_lz_self_dict_kwarg_literal() {
     )
     .expect("write lz");
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     // native（.rs 落到 .lz 旁；stdout 只是 "Generated ..." 提示）
     let out_n = Command::new(&bin)
@@ -2156,7 +2155,7 @@ fn rs_lz_self_user_fn_shadows_stdlib_magic() {
     )
     .expect("write lz");
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     // native（.rs 落到 .lz 旁）
     let out_n = Command::new(&bin).arg(&lz_path).output().expect("native");
@@ -2254,7 +2253,7 @@ fn rs_lz_list_pattern_element_binding_deref() {
     )
     .expect("write lz");
 
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     let out_lz = Command::new(&bin)
         .arg(&lz_path)
@@ -2317,8 +2316,7 @@ def main():
     fs::write(&lz_path, source).expect("write lz source");
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_lang-zone"));
-    let builtins = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/liblz_builtins.rlib");
+    let builtins = lz_builtins_rlib();
 
     // 原生：参数发射 i64（对齐基准）
     let out_native = Command::new(&bin)

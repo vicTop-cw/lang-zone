@@ -37,6 +37,22 @@ fn profile_dir() -> PathBuf {
 }
 
 fn builtins_rlib() -> PathBuf {
+    // 环境可覆盖 > 车道（钉版工具链）> 本地 profile 目录（防 E0514 混合产物）
+    if let Ok(p) = std::env::var("LZ_BUILTINS_RLIB") {
+        let p = PathBuf::from(p);
+        if p.exists() {
+            return p;
+        }
+    }
+    if let Some(root) = profile_dir().parent().and_then(|d| d.parent()) {
+        let lane = root
+            .join("lane-bootstrap")
+            .join("debug")
+            .join("liblz_builtins.rlib");
+        if lane.exists() {
+            return lane;
+        }
+    }
     let dir = profile_dir();
     let direct = dir.join("liblz_builtins.rlib");
     if direct.exists() {
@@ -109,7 +125,7 @@ fn run_lz(tag: &str, src: &str) -> Artifact {
 
     let rlib = builtins_rlib();
     let exe = lz.with_extension("exe");
-    let rc = Command::new("rustc")
+    let rc = Command::new(std::env::var("LZ_RUSTC").unwrap_or_else(|_| "rustc".to_string()))
         .args(["--edition", "2021"])
         .arg(&rs)
         .arg("--extern")

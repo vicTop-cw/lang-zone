@@ -21,10 +21,18 @@ if (Test-Path $tcFile) {
         $tcBin = Join-Path (Join-Path $env:USERPROFILE ".rustup\toolchains") ($m.Matches[0].Groups[1].Value + "\bin")
         if (Test-Path $tcBin) { $env:PATH = "$tcBin;" + $env:PATH }
     }
-}# 车道 rlib 与当前工具链同源（cron 可能用异版本重建过；就地重建 ~3s）
+}
+# 车道 rlib 与当前工具链同源（cron 可能用异版本重建过；就地重建 ~3s）
 $env:CARGO_TARGET_DIR = Join-Path $Root "target\lane-bootstrap"
 cargo build -p lz_builtins 2>&1 | Out-Null
 $env:CARGO_TARGET_DIR = Join-Path $Root "target\gate-test"
+# 链侧统一 rlib 解析：把车道 rlib + 钉版 rustc 通过环境交给所有子进程
+# （src/bridge/project.rs / hotreload.rs 已改用 builtins_rlib_path()：env > 车道 > 默认；
+#  只拷主 rlib 不够——传递依赖 num-bigint 等须同目录 deps，否则 rustc 报 E0463）
+$gateLaneRlib = Join-Path $Root "target\lane-bootstrap\debug\liblz_builtins.rlib"
+if (Test-Path $gateLaneRlib) { $env:LZ_BUILTINS_RLIB = $gateLaneRlib }
+$gateTcBin = ($env:PATH -split ';' | Where-Object { $_ -match 'stable-x86_64-pc-windows-gnu\\bin$' } | Select-Object -First 1)
+if ($gateTcBin) { $env:LZ_RUSTC = Join-Path $gateTcBin "rustc.exe" }
 Push-Location $Root
 try {
     # rs-lz 回归锁（BUG-490/492 等族）：harness 用 LZ_RUSTC/LZ_BUILTINS_RLIB，
@@ -40,6 +48,13 @@ try {
             if ($LASTEXITCODE -ne 0) { Write-Host "[GATE] rs_lz_families FAIL" -ForegroundColor Red; exit 1 }
             cargo test --test codegen_corner_fixes 2>&1 | Select-Object -Last 2
             if ($LASTEXITCODE -ne 0) { Write-Host "[GATE] codegen_corner_fixes FAIL" -ForegroundColor Red; exit 1 }
+
+            # BUG-489/495/496/498/499 具名回归锁（同源 env 已在上文设置）
+            foreach ($suite in @("native_variant_qual","embed_stub_shadowing","embed_project_emit","embed_stem_parity","lz_ir_bootstrap")) {
+                Write-Host "[GATE] $suite ..." -ForegroundColor Yellow
+                cargo test --test $suite 2>&1 | Select-Object -Last 2
+                if ($LASTEXITCODE -ne 0) { Write-Host "[GATE] $suite FAIL" -ForegroundColor Red; exit 1 }
+            }
         }
     }
     # 判据自检先行（BUG-501 回归锁）：语法矩阵反例/正例判据的边界用例必须全过

@@ -203,7 +203,7 @@ fn source_hashes(entry: &Path) -> Vec<(String, String)> {
 
 fn rustc_compile(rs: &Path, exe: &Path) -> Result<(), String> {
     let started = std::time::Instant::now();
-    let builtins = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let builtins = crate::frontend::bootstrap_emit::builtins_rlib_path();
     let mut cmd = crate::frontend::bootstrap_emit::rustc_command();
     cmd.args(["--edition", "2021"]).arg(rs).arg("--extern").arg(format!("lz_builtins={}", builtins.display())).arg("-L").arg(format!("dependency={}", builtins.parent().unwrap().join("deps").display())).arg("-o").arg(exe);
     if rustc_incremental_enabled() {
@@ -350,7 +350,7 @@ pub fn cmd_check(args: &[String]) -> i32 {
 
 fn rustc_metadata_check(rs: &Path) -> Result<(), String> {
     let started = std::time::Instant::now();
-    let builtins = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let builtins = crate::frontend::bootstrap_emit::builtins_rlib_path();
     let out = crate::frontend::bootstrap_emit::rustc_command().args(["--edition", "2021", "--emit=metadata", "--crate-type", "lib"]).arg(rs).arg("--extern").arg(format!("lz_builtins={}", builtins.display())).output().map_err(|e| format!("Failed to run rustc: {}", e))?;
     if rustc_timing_enabled() { eprintln!("[check] rustc --emit=metadata: {:.0} ms", started.elapsed().as_secs_f64() * 1000.0); }
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).to_string()) }

@@ -160,7 +160,7 @@ pub fn compile_to_rs(entry: &Path, cache_dir: &Path) -> Result<ReloadResult, Str
 
 /// rustc 编译 .rs → exe（复用 main.rs 的 --incr 管线 rustc 调用方式）
 pub fn rustc_compile(rs: &Path, exe: &Path, incremental_dir: Option<&Path>) -> Result<(), String> {
-    let builtins = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib");
+    let builtins = crate::frontend::bootstrap_emit::builtins_rlib_path();
     let mut cmd = crate::frontend::bootstrap_emit::rustc_command();
     cmd.args(["--edition", "2021"])
         .arg(rs)

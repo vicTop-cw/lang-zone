@@ -511,6 +511,21 @@ pub fn set_bootstrap_lane_env() {
     }
 }
 
+/// rs-lz / embed 链统一 lz_builtins rlib 位置（与环境同源的传递依赖一并可用）：
+/// LZ_BUILTINS_RLIB 可覆盖 > 车道 target/lane-bootstrap（钉版工具链）> target/debug。
+/// 只换主 rlib 不够——其传递依赖（num-bigint/num-complex 等）必须同目录 deps 才可加载，
+/// 否则 rustc 报 E0463「can't find crate」。
+pub fn builtins_rlib_path() -> std::path::PathBuf {
+    if let Some(p) = std::env::var_os("LZ_BUILTINS_RLIB") {
+        return std::path::PathBuf::from(p);
+    }
+    let lane = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target/lane-bootstrap/debug/liblz_builtins.rlib");
+    if lane.is_file() {
+        return lane;
+    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/debug/liblz_builtins.rlib")
+}
 /// 自举/自检链统一 rustc 入口：LZ_RUSTC 环境可覆盖（与 build.ps1/build.sh 同口径，
 /// 保证 rustc 与 BuiltinsRlib 同版本，规避 E0514 跨版本错配）。
 pub fn rustc_command() -> std::process::Command {
