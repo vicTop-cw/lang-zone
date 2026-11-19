@@ -76,6 +76,16 @@ fi
 IS_LZCYC=0
 if [[ "$(basename "$LZC")" == *lzcyc* ]]; then IS_LZCYC=1; fi
 
+# WSL 守卫（BUG-515）：WSL 启动 Windows 进程时会合并 **Windows 级 PATH** 且在
+# WSL 侧不可覆盖 → lzcyc/库内某条 rustc 派生调用会解析到异版本（E0514）。
+# 该组合是环境性缺陷：请改用原生 PowerShell 入口 build.ps1 -Compiler lzcyc。
+if [ "$IS_LZCYC" -eq 1 ] && [[ "$(uname -r 2>/dev/null)" == *microsoft* ]] && [ "${FIST_ALLOW_WSL_LZCYC:-0}" != "1" ]; then
+    echo "[FAIL] lzcyc 入口不支持在 WSL 下驱动（Windows 级 PATH 不可覆盖 → E0514）。" >&2
+    echo "       请用：powershell -File bootstrap/build.ps1 -Mode Closed -Generations 3 -Compiler lzcyc" >&2
+    echo "       （如确需强制尝试：FIST_ALLOW_WSL_LZCYC=1 重跑）" >&2
+    exit 5
+fi
+
 # 颜色定义
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -109,6 +119,11 @@ to_win_path() {
 # 让本进程与子进程里的裸 rustc 与 --rustc 同源（防 lzcyc/库内嵌调用
 # 走异版本 rustc → E0514；WSL 下 /mnt/<d>/ 与 Windows <D>:\ 互转）
 if [ "$RUSTC" != "rustc" ]; then
+    # rustc shim：兜住 lzcyc/库内走 PATH 的裸 rustc 调用（BGU-515 根因：逃逸调用解析到异版本）
+    SHIM_DIR="$PROJECT_DIR/temp/rustc-shim"
+    mkdir -p "$SHIM_DIR"
+    printf "@echo off\r\n\"%s\" %%*\r\n" "$(to_win_path "$RUSTC")" > "$SHIM_DIR/rustc.cmd"
+    export PATH="$SHIM_DIR:$PATH"
     rustc_dir=""
     if [[ "$RUSTC" == /* ]]; then
         rustc_dir="$(dirname "$RUSTC")"
@@ -118,6 +133,19 @@ if [ "$RUSTC" != "rustc" ]; then
     if [ -n "$rustc_dir" ] && [ -d "$rustc_dir" ]; then
         export PATH="$rustc_dir:$PATH"
     fi
+fi
+# 车道 rlib 与当前工具链同源（cron 可能用异版本重建过 → E0514；就地重建 ~3s）
+if [ -n "${PROJECT_DIR:-}" ] && [[ "$(uname -r)" != *microsoft* ]]; then
+    # 必须用与 --rustc 同目录的 cargo：WSL 下裸 cargo 是 Linux 版，
+    # 会把车道 rlib 编成 Linux rustc 产物 → 对 Windows rustc 造成 E0514
+    # WSL 下跳过（Linux cargo 无 rustc / 路径转换不可靠）：车道 rlib 由 build.ps1 侧同源重建
+    CARGO_BIN="cargo"
+    rustc_dir_bin="$(dirname "$RUSTC")"
+    for cand in "$rustc_dir_bin/cargo" "$rustc_dir_bin/cargo.exe"; do
+        if [ "$RUSTC" != "rustc" ] && [ -x "$cand" ]; then CARGO_BIN="$cand"; break; fi
+    done
+    # RUSTC 显式绑定，防 cargo 经 Windows PATH 抓到异版本 rustc
+    ( cd "$PROJECT_DIR" && RUSTC="$(to_win_path "$RUSTC")" CARGO_TARGET_DIR=target/lane-bootstrap "$CARGO_BIN" build -p lz_builtins >/dev/null 2>&1 ) || true
 fi
 # ============================================================
 # 编译单个 .lz → .rs → .exe → 运行
