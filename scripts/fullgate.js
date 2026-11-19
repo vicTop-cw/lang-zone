@@ -91,6 +91,17 @@ function collect(dir, out) {
   }
 }
 
+function runOnce(args) {
+  // 瞬时启动失败（并发抢占/杀进程）重试一次，避免把环境抖动当分歧
+  let last;
+  for (let k = 0; k < 2; k++) {
+    try {
+      return execFileSync(bin, args, { encoding: 'utf8', timeout: 120000, maxBuffer: 50 * 1024 * 1024 });
+    } catch (e) { last = e; }
+  }
+  throw last;
+}
+
 const samples = [];
 collect(path.join(path.resolve(__dirname, '..'), 'DEMO'), samples);
 samples.sort();
@@ -101,8 +112,8 @@ for (let i = from; i < Math.min(to, total); i++) {
   const s = samples[i];
   let rustOut, lzOut;
   try {
-    rustOut = execFileSync(bin, [s, '--tokens'], { encoding: 'utf8', timeout: 120000, maxBuffer: 50 * 1024 * 1024 });
-    lzOut = execFileSync(bin, [s, '--emit=lex-lz', '--std-dir', 'std'], { encoding: 'utf8', timeout: 120000, maxBuffer: 50 * 1024 * 1024 });
+    rustOut = runOnce([s, '--tokens']);
+    lzOut = runOnce([s, '--emit=lex-lz', '--std-dir', 'std']);
   } catch (e) {
     failed.push(s + ': spawn fail ' + (e.status !== undefined ? 'exit=' + e.status : e.message));
     continue;
