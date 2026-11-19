@@ -27,6 +27,10 @@ cargo build -p lz_builtins 2>&1 | Out-Null
 $env:CARGO_TARGET_DIR = Join-Path $Root "target\gate-test"
 Push-Location $Root
 try {
+    # 判据自检先行（BUG-501 回归锁）：语法矩阵反例/正例判据的边界用例必须全过
+    Write-Host "[GATE] 语法矩阵判据 SelfTest ..." -ForegroundColor Yellow
+    & (Join-Path $Root "div-tools\syntax_matrix.ps1") -SelfTest | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "[GATE] SelfTest FAIL exit=$LASTEXITCODE" -ForegroundColor Red; exit 1 }
     if (-not $Full) {
         Write-Host "[GATE] 快线：分层子集门禁 ..." -ForegroundColor Yellow
         cargo test --test frontend_dual_track stratified_subset 2>&1 | Select-Object -Last 6

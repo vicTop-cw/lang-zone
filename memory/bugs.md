@@ -3690,7 +3690,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: 三条负向探针各自真测目标诊断（假阳性负例清零）
 状态：FIXED
 
-## BUG-501 [2026-10-29T18:40:00+08:00] [high] OPEN
+## BUG-501 [2026-10-29T18:40:00+08:00] [high] FIXED
 - note: 语法矩阵反例判据在 PS 5.1 下恒真（`-match 'error'` 命中 NativeCommandError），「诊断可读」半条从未生效
 - summary: 现象：反例判据对**任何产生 stderr 的样本**都判「按预期失败」——连编译成功、stderr 只有 `LZ LINK RECIPE` 的文件也判过，于是「反例不只是失败、还要给出可读诊断」这半条验收从未真正生效，判据等价退化成只看 rc。根因：`div-tools/syntax_matrix.ps1` 旧判据 `(.. 2>&1 | Out-String) -match 'error'` 在 Windows PowerShell 5.1 下把子进程 stderr 每行包成 ErrorRecord（`FullyQualifiedErrorId : NativeCommandError`），子串 `error` 被这层壳命中而恒真；叠加 PS 5.1 经管道按 GBK 解码 UTF-8，中文诊断还会乱码/吞字节。修法（判据 v2）：stdout/stderr **分别重定向到独立临时文件**（不经 PS 管道）→ `Get-Content -Raw -Encoding UTF8` 读回（顺带解决 GBK 解码）→ 正例 `rc==0`；反例 `rc!=0` **且**命中「行首诊断」正则（`^(Parse error|IR build error|Macro definition error|Semantic error|Lexer error|Type error|Codegen error|Link error|Compile error|Error|error[E\d]+)`）→ 再排除噪声黑名单（`NativeCommandError`、`FullyQualifiedErrorId`、`LZ LINK RECIPE`、`Generated` 路径回显、`Bridge registry`、`提示：`、`warning/note/info`）；报告逐行表格记 rc + 诊断原文 + 显式 SKIP；新增 `-SelfTest`（判据自检 + 缺陷对照片段 + 8 条边界用例），自检里同一成功样本 v1 判 True、v2 判 False 即缺陷复现证据。
 - 判据: `powershell -NoProfile -File div-tools\syntax_matrix.ps1 -SelfTest`（不写报告；须打印 v1 对成功样本=True / v2=False 的对照，8 条边界用例全过）；全量矩阵 `powershell -NoProfile -File div-tools\syntax_matrix.ps1`，产物 `tests/syntax-matrix-report.md`，其中「判据（可复核）」段与「反例明细」段即本条的机器判据。
@@ -3698,6 +3698,9 @@ commit：3f8512e（重映射自 未记）
 - 回归: 判据 v2 下单次重跑反例 8/25 → 24/25（红转绿 16、绿转红 0）、正例 38/38（40 特性中 2 个 SKIP 显式列出）；报告新增「`rc != 0` 但诊断不可读：0」一栏，这栏从无意义变为可读性证据。残余第 25 条为 raise 语义探针假阳性，归 BUG-502（修后 25/25）。
 状态：FIXED
 
+
+### FIXED(2026-11-19T12:21:16Z / BUG-501)
+- evidence: 回归锁：div-tools/syntax_matrix.ps1 -SelfTest（判据边界 8 用例 + UTF-8 严格解码 4 项 + 内容断言防恒真 2 项；含 v1 恒真 / v2 必须 False 的对照）已纳入 scripts/dual_track_gate.ps1 前置步骤，判据回退即门禁 red。实证：check:T0r59:r1 passed（SelfTest PASS + 门禁 PASS）；全量矩阵 正例 38/38（SKIP 2）·内容断言 5/5·反例 25/25（旧回归线 24/25 的 raise 探针假阳性已被并行轮次修复），报告 tests/syntax-matrix-report.md 重新生成（c940e89）。真源：div-tools/syntax_matrix.ps1 判据 v2（stderr 落文件再读 + DiagHeadPattern/DiagDenyPattern 噪声排除）
 ## BUG-502 [2026-10-29T18:41:00+08:00] [medium] OPEN
 - note: 字符串字面量 `raise` 的豁免是有意实现但 SYNTAX/09 未记，探针 `neg_error_uncaught_panic_ok` 因此是假阳性
 - summary: 现象：文档承诺「raise 必须声明 raises」，但 `raise "oops"` 实测 rc=0 不报错；覆盖该承诺的负向探针 `div-tools/syntax_probes/neg_error_uncaught_panic_ok.lz` 写的是字符串 raise，于是探针**恒通过**（rc=0 也被算成 neg 通过），是假阳性负例、挡不住对应回归。根因：`src/ir/semantic_check.rs` 的 `Stmt::Raise` 对 raise 的**字面量形态**（StrLit/FStrLit/RawStrLit）有意豁免 raises 声明（裁决：消息式错误不必每处声明），但这条裁决从未落纸，而 `SYNTAX/09-错误处理.md` §2.2 与 DEMO 注释都写「raise 必须声明」，文档与实现打架。修法：① 文档补 §2.2.1——豁免边界是字面量**形态**而不是 `str` 类型（变量 / 拼接 / 返回值形式的 str 仍需声明 raises），给两个 ✅ 与两个 ❌ 例子并尾注指向源码判据；§2.5 与 §六 里自相矛盾的 `raise "oops"` 反例改成类型化 raise；② 探针改为 `enum AppError` + `raise AppError.Boom(..)`，实测 rc=1 且诊断命中「未在签名中声明 raises」。
