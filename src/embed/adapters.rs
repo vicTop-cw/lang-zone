@@ -1290,7 +1290,7 @@ impl EmbedLang for JsLang {
 
 // ──────────────── C ────────────────
 
-const C_TY: [(&str, &str); 8] = [
+const C_TY: [(&str, &str); 9] = [
     ("int", "int"),
     ("long", "int"),
     ("size_t", "int"),
@@ -1299,6 +1299,10 @@ const C_TY: [(&str, &str); 8] = [
     ("float", "float"),
     ("bool", "bool"),
     ("_Bool", "bool"),
+    // C 字符串 `char`（`const char *s` 经 strip_type_decor 后为 `char`）→ LZ `str`。
+    // Python/JS 均把字符串作为可序列化标量；C 侧此前缺此映射 ⇒ 带 str 形参/返回的
+    // C 函数被静默标 unsupported。现补齐，与 Python/JS 标量闭集对齐。
+    ("char", "str"),
 ];
 
 pub struct CLane;
@@ -1336,6 +1340,9 @@ impl EmbedLang for CLane {
                 Some(i) => head[i + 1..].trim().to_string(),
                 None => continue,
             };
+            // C 指针返回：`const char *greet(` 的 head 尾段是 `*greet` ⇒ 去掉前导 `*`
+            // 取出纯标识符（否则名字含 `*` 被过滤，整个 str 返回函数被丢弃）。
+            let name = name.trim_start_matches('*').to_string();
             if name.is_empty() || name == "main" || !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
                 continue;
             }
@@ -1359,11 +1366,16 @@ impl EmbedLang for CLane {
                 let pcore = one.split('=').next().unwrap_or("").trim();
                 let pname = match pcore.rfind(|c: char| c.is_alphanumeric() || c == '_') {
                     Some(i) => {
+                        // 从最后一个标识符字符向左走，纳入整个标识符
+                        // （`const char *name` → `name`；此前条件反了 ⇒ 只取到末字符）
                         let mut j = i;
-                        while j > 0 && (pcore.as_bytes()[j - 1] as char).is_alphanumeric() == false
-                            && (pcore.as_bytes()[j - 1] as char) != '_'
-                        {
-                            j -= 1;
+                        while j > 0 {
+                            let prev = pcore.as_bytes()[j - 1] as char;
+                            if prev.is_alphanumeric() || prev == '_' {
+                                j -= 1;
+                            } else {
+                                break;
+                            }
                         }
                         pcore[j..].to_string()
                     }
@@ -1407,6 +1419,40 @@ impl EmbedLang for CLane {
     }
     fn dispatch_file(&self, artifact: &str, methods: &[&ForeignFn]) -> Option<(String, String)> {
         let mut disp = String::new();
+        // 被调函数的前置声明：C 里跨翻译单元调用**必须有原型**，否则隐式 int 返回
+        // 会把 `const char *` 返回值截断成 int ⇒ 解引用悬空指针崩（实测 exit=0xC0000005）。
+        // 声明按 LZ 类型反推 C 形态（int→long, float→double, bool→int, str→const char*）。
+        let mut protos = String::new();
+        for m in methods.iter().filter(|m| m.callable()) {
+            let cret = match m.ret.as_deref() {
+                Some("int") => "long",
+                Some("float") => "double",
+                Some("bool") => "int",
+                Some("str") => "const char *",
+                None => "void",
+                _ => continue, // 非法返回类型不声明（该臂也不会被发出）
+            };
+            let cparams: Vec<String> = m
+                .params
+                .iter()
+                .map(|p| match p.lz_type.as_str() {
+                    "int" => format!("long {}", p.name),
+                    "float" => format!("double {}", p.name),
+                    "bool" => format!("int {}", p.name),
+                    "str" => format!("const char *{}", p.name),
+                    _ => String::new(),
+                })
+                .collect();
+            // 含无法映射为 C 的形参 ⇒ 与护栏臂同口径，不声明（该臂不真正调用）
+            if cparams.iter().any(|s| s.is_empty()) {
+                continue;
+            }
+            protos.push_str(&format!(
+                "extern {}({});\n",
+                format!("{} {}", cret, m.name).as_str(),
+                if cparams.is_empty() { "void".to_string() } else { cparams.join(", ") }
+            ));
+        }
         for m in methods.iter().filter(|m| m.callable()) {
             let mut pre = String::new();
             let mut cargs = Vec::new();
@@ -1416,18 +1462,36 @@ impl EmbedLang for CLane {
                     "int" => ("long", "atol"),
                     "float" => ("double", "atof"),
                     "bool" => ("int", "(int)__lz_is_true"),
+                    // str 与 Python/JS 标量闭集对齐：argv 原样字符串，C 侧 `const char *`
+                    "str" => ("const char *", "__lz_argv_get"),
                     _ => {
                         ok_shape = false;
                         break;
                     }
                 };
-                pre.push_str(&format!(
-                    "        {} {} = {}(__lz_argv_get(argv, argc, \"{}\"));\n",
-                    ctype, p.name, conv, p.name
-                ));
+                // __lz_argv_get 是 (argv, argc, key) 三参签名，其余转换器是单参
+                if conv == "__lz_argv_get" {
+                    pre.push_str(&format!(
+                        "        {} {} = {}(argv, argc, \"{}\");\n",
+                        ctype, p.name, conv, p.name
+                    ));
+                } else {
+                    pre.push_str(&format!(
+                        "        {} {} = {}(__lz_argv_get(argv, argc, \"{}\"));\n",
+                        ctype, p.name, conv, p.name
+                    ));
+                }
                 cargs.push(p.name.clone());
             }
             if !ok_shape || m.params.iter().any(|p| p.name.is_empty()) {
+                // 容器/Dict-KV 等 C 无法原生表达的类型：不静默丢弃，发一条显式护栏臂，
+                // 回执 `ERR:unsupported param type`（与 Python/JS 的诚实回执口径对齐）。
+                if m.params.iter().any(|p| !p.name.is_empty()) {
+                    disp.push_str(&format!(
+                        "    if (strcmp(argv[1], \"{}\") == 0) {{\n        printf(\"ERR:unsupported param type in {}\\n\");\n        return 4;\n    }}\n",
+                        m.name, m.name
+                    ));
+                }
                 continue;
             }
             let call = format!("{}({})", m.name, cargs.join(", "));
@@ -1435,6 +1499,13 @@ impl EmbedLang for CLane {
                 Some("int") => format!("printf(\"OK:%ld\\n\", (long)({}));", call),
                 Some("float") => format!("printf(\"OK:%g\\n\", (double)({}));", call),
                 Some("bool") => format!("printf(\"OK:%s\\n\", ({} ? \"true\" : \"false\"));", call),
+                Some("str") => {
+                    // str 返回：逐字节转义 `\` 与换行，保证单行 `OK:<值>` 协议（与 Python _out 同口径）
+                    format!(
+                        "{{ const char *__r = ({}); printf(\"OK:\"); __lz_emit_str(__r); printf(\"\\n\"); }}",
+                        call
+                    )
+                }
                 None => format!("{}; printf(\"OK:\\n\");", call),
                 _ => "printf(\"ERR:unsupported return\\n\");".to_string(),
             };
@@ -1444,8 +1515,9 @@ impl EmbedLang for CLane {
             ));
         }
         let src = format!(
-            "/* {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改 */\n/* 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>` */\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nstatic const char *__lz_argv_get(char **argv, int argc, const char *key) {{\n    size_t n = strlen(key);\n    for (int i = 2; i < argc; i++) {{\n        if (strncmp(argv[i], key, n) == 0 && argv[i][n] == '=') {{\n            return argv[i] + n + 1;\n        }}\n    }}\n    return \"\";\n}}\n\nstatic int __lz_is_true(const char *s) {{\n    return strcmp(s, \"1\") == 0 || strcmp(s, \"true\") == 0 || strcmp(s, \"True\") == 0;\n}}\n\nint main(int argc, char **argv) {{\n    if (argc < 2) {{\n        printf(\"ERR:missing method\\n\");\n        return 2;\n    }}\n{disp}    printf(\"ERR:no such method: %s\\n\", argv[1]);\n    return 3;\n}}\n",
+            "/* {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改 */\n/* 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>` */\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nstatic const char *__lz_argv_get(char **argv, int argc, const char *key) {{\n    size_t n = strlen(key);\n    for (int i = 2; i < argc; i++) {{\n        if (strncmp(argv[i], key, n) == 0 && argv[i][n] == '=') {{\n            return argv[i] + n + 1;\n        }}\n    }}\n    return \"\";\n}}\n\nstatic int __lz_is_true(const char *s) {{\n    return strcmp(s, \"1\") == 0 || strcmp(s, \"true\") == 0 || strcmp(s, \"True\") == 0;\n}}\n\n/* str 返回：转义 `\\` 与换行，保证单行 `OK:<值>` 协议（与 Python _out 同口径） */\nstatic void __lz_emit_str(const char *s) {{\n    if (s == NULL) {{ return; }}\n    for (const char *p = s; *p; p++) {{\n        if (*p == '\\\\') {{ printf(\"\\\\\\\\\"); }}\n        else if (*p == '\\n') {{ printf(\"\\\\n\"); }}\n        else {{ putchar(*p); }}\n    }}\n}}\n\n/* 被调函数前置声明（跨翻译单元必须有原型，否则隐式 int 截断指针返回） */\n{protos}\nint main(int argc, char **argv) {{\n    if (argc < 2) {{\n        printf(\"ERR:missing method\\n\");\n        return 2;\n    }}\n{disp}    printf(\"ERR:no such method: %s\\n\", argv[1]);\n    return 3;\n}}\n",
             artifact = artifact,
+            protos = protos,
             disp = disp,
         );
         Some((format!("__lz_dispatch_{}.c", artifact), src))
@@ -1568,6 +1640,51 @@ mod tests {
         assert_eq!(ms[0].ret.as_deref(), Some("int"));
         let p = a.methods("void go(int n) { }\n");
         assert_eq!(p[0].ret, None);
+    }
+
+    /// 方向②：C 的 str 标量（const char *）应与 Python/JS 对齐，不再被静默标 unsupported。
+    #[test]
+    fn c_str_signature_is_callable_and_dispatches() {
+        let a = adapter("c");
+        let ms = a.methods("const char *greet(const char *name) { return name; }\n");
+        assert_eq!(ms.len(), 1);
+        assert_eq!(ms[0].params[0].lz_type, "str");
+        assert_eq!(ms[0].ret.as_deref(), Some("str"));
+        assert!(ms[0].callable(), "str 形参/返回应可序列化：{:?}", ms[0]);
+
+        let refs: Vec<&ForeignFn> = ms.iter().collect();
+        let (path, body) = a.dispatch_file("c_str", &refs).unwrap();
+        assert_eq!(path, "__lz_dispatch_c_str.c");
+        // str 参数：const char * 原样取 argv；不再退化为 atol
+        assert!(body.contains("const char * name = __lz_argv_get(argv, argc, \"name\");"));
+        // str 返回：OK: 前缀 + 转义发射
+        assert!(body.contains("__lz_emit_str(__r)"), "应发射转义函数：\n{}", body);
+        assert!(body.contains("static void __lz_emit_str"), "应有 __lz_emit_str 定义");
+    }
+
+    /// 方向②：C 无法原生表达的容器/Dict-KV 形参，不静默丢弃，发显式护栏臂。
+    #[test]
+    fn c_unsupported_param_emits_explicit_guard_arm() {
+        let a = adapter("c");
+        // 人为构造一个带容器形参的签名（C 源无法直接声明，但闭集判定走同一路径）
+        let ms = vec![ForeignFn {
+            name: "sum_all".to_string(),
+            params: vec![ForeignParam {
+                name: "nums".to_string(),
+                lz_type: "list<int>".to_string(),
+            }],
+            ret: Some("int".to_string()),
+            unsupported: None,
+        }];
+        let refs: Vec<&ForeignFn> = ms.iter().collect();
+        let (_, body) = a.dispatch_file("c_guard", &refs).unwrap();
+        // 不静默丢弃：发一条显式 ERR 臂
+        assert!(
+            body.contains("unsupported param type in sum_all"),
+            "容器形参应发显式护栏臂：\n{}",
+            body
+        );
+        assert!(body.contains("strcmp(argv[1], \"sum_all\")"));
     }
 
     #[test]

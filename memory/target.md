@@ -5,6 +5,19 @@
 
 ---
 
+## 2026-11-19 T0r66（定时任务探索轮）：PyO3 委托落地 + C 适配器 str/容器护栏对齐
+- 起点：HEAD=aee53cc（BUG-515 入账）；fist-mbt lang-zone ns 健康（133 任务，16 待领取）；工作树有并发 agent 在途 WIP（BUG-467 回归锁 tests/frontend_dual_track.rs 未提交）。
+- **先收口在途**：BUG-467 回归锁 `frontend_dual_track_bug467_regression` 真跑通过（1/1，19.7s），确认该未提交改动有效。
+- **T0r14 双方向并发落地**（任务树 T0r14，探索模式；两方向文件作用域不相交：python.rs vs adapters.rs，已 file_bind 绑定）：
+  - 方向① `T0r14.1.1`：`src/bridge/python.rs` 的 `generate_pyfunction` 由 `todo!("Implement __py_<name>")` 桩改为**真实委托** `__py_<name>(args)`；`generate_module` 顶部注入 `extern "Rust"` 委托声明（新 `generate_delegate_decls`）使生成模块自洽。单元测试 `test_pyo3_pyfunction_delegates_not_todo`（bridge::python 7/7）+ 集成测试 `tests/bridge_python_delegation.rs`（**真跑 rustc 编译委托核 + 运行**，输出 `hi bob 7`）。
+  - 方向② `T0r14.2.1`：`src/embed/adapters.rs` CLane —— ①`C_TY` 补 `char→str`（const char* 形参/返回与 Python/JS 标量闭集对齐）；②`methods()` 修正指针返回函数名提取（`trim_start_matches('*')`，此前 `*greet` 因含 `*` 被滤掉）与形参名提取（左行纳入整标识符——旧实现条件反了只取末字符）；③`dispatch_file` 为每个可调用函数发 `extern` 原型声明（跨翻译单元必须，否则隐式 int 截断 `const char*` 返回 → exit=0xC0000005 崩），并新增 str 形参（const char* argv 原样）与 str 返回（`OK:` + `__lz_emit_str` 转义）；④容器/Dict-KV 等无法原生表达的形参不再静默丢弃，发显式护栏臂 `ERR:unsupported param type`。单元测试 2 条（adapters 19/19）+ 集成测试 `tests/embed_c_serialization.rs` 2 条（**真跑 gcc 13.2.0 编译 + 运行**：str 返回 `OK:hi`、容器形参显式护栏）。
+- **排障：并发车道竞争（非本轮回归）**：首轮全量 `lz_ir_bootstrap` 14 红，**单跑复跑 25/25 全绿**；根因是兄弟定时任务（cargo PID 6716 + lang-zone PIDs 3748/20600，19:13–19:14）在同一 `lang-zone.exe` 上并发 build/run，造成文件锁与陈旧 bin 竞争。教训对齐 loomy-learned-stale-lane-test-triage。隔离车道 `CARGO_TARGET_DIR=target/lane-loomy-1600` 规避 exe 锁。
+- 回归读数：`cargo build --bin lang-zone` 0 error（隔离车道）；**全量非慢档 60 套件全绿零回归**（lib 486/0，含本轮 +3 单元测试；embed 全套 +dm；lz_ir_bootstrap 25/0、lz_frontend_bootstrap 7/0、frontend_dual_track 3/0 含 BUG-467 锁）。
+- 台账：BUG-520 [high] FIXED（PyO3 todo!() 桩 + C 适配器 str/原型/容器护栏）。
+- 下一步：① 其他语言适配器（mojo/c/scala）容器序列化（本机有 gcc，c 可继续深化；mojo/scala 无工具链）；② BUG-515（WSL 下 lzcyc 入口 E0514）收口；③ Python bridge `__py_` 委托的 LZ codegen 侧符号生成打通（当前仅桥接侧委托就位）。
+
+---
+
 ## 2026-11-17 T0r65（定时任务探索轮）：JS 适配器嵌套容器护栏锁定 + 陈旧车道 rlib 排障
 - 起点：接手 HEAD=c2a6f94（T0r64），工作树有并发 agent 在途未提交 WIP（BUG-467 lz_lexer.lz/BUG-512 相关 builtins.rs/scan.rs，17:02–17:14 落笔，非本轮）。
 - **T0r65 三方向并发落地**（任务树 T0r13，全部真编译 + node 运行验证，非字符串断言）：

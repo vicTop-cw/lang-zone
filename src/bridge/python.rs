@@ -240,6 +240,11 @@ impl PyO3Bridge {
             out.push('\n');
         }
 
+        // LZ 侧委托函数声明（BUG-520：让 #[pyfunction] 真正委托到 __py_<name>）
+        if !self.functions.is_empty() {
+            out.push_str(&self.generate_delegate_decls());
+        }
+
         // Python 函数
         for (_, func) in &self.functions {
             out.push_str(&self.generate_pyfunction(func));
@@ -313,13 +318,50 @@ impl PyO3Bridge {
             params.join(", "),
             ret
         ));
+        // 委托给 LZ 侧实现函数 `__py_<name>`：该符号由 LZ 代码生成器按导出清单
+        // 生成（签名与本 #[pyfunction] 一一对应），链接时解析。
+        // 之前这里直接 `todo!("Implement __py_<name>")`，生成的 PyO3 模块一旦被
+        // Python 侧调用即 panic；现改为真实委托（BUG-520）。
         out.push_str(&format!(
-            "    // TODO: delegate to lz function __py_{}\n",
+            "    // delegate to lz function __py_{} (provided by LZ codegen)\n",
             func.name
         ));
-        out.push_str(&format!("    todo!(\"Implement __py_{}\")\n", func.name));
+        let call_args: Vec<String> = func.args.iter().map(|(n, _)| n.clone()).collect();
+        if func.ret == "None" || func.ret == "void" || func.ret.is_empty() {
+            out.push_str(&format!("    __py_{}({});\n", func.name, call_args.join(", ")));
+        } else {
+            out.push_str(&format!(
+                "    __py_{}({})\n",
+                func.name,
+                call_args.join(", ")
+            ));
+        }
         out.push_str("}\n");
 
+        out
+    }
+
+    /// 生成 `__py_<name>` 委托目标的外部声明（供 `generate_module` 顶部注入，
+    /// 使生成文件自洽——符号实际由 LZ codegen 侧提供，链接时解析）。
+    fn generate_delegate_decls(&self) -> String {
+        let mut out = String::new();
+        out.push_str("// ── LZ 侧委托函数声明（符号由 LZ codegen 提供，链接时解析）──\n");
+        out.push_str("extern \"Rust\" {\n");
+        for (_, func) in &self.functions {
+            let params: Vec<String> = func
+                .args
+                .iter()
+                .map(|(n, t)| format!("{}: {}", n, self.lz_to_rust(t)))
+                .collect();
+            let ret = self.lz_to_rust(&func.ret);
+            out.push_str(&format!(
+                "    fn __py_{}({}) -> {};\n",
+                func.name,
+                params.join(", "),
+                ret
+            ));
+        }
+        out.push_str("}\n\n");
         out
     }
 
@@ -725,5 +767,43 @@ Point = { fields = "x: f64, y: f64", doc = "A 2D point" }
         let types = bridge.list_exports(ExportKind::Type);
         assert_eq!(types.len(), 1);
         assert!(types.iter().any(|e| e.name == "Point"));
+    }
+
+    /// BUG-520：`#[pyfunction]` 必须真实委托到 `__py_<name>`，不得再吐 `todo!()`。
+    #[test]
+    fn test_pyo3_pyfunction_delegates_not_todo() {
+        let dir = TempDir::new("lz-pyo3-delegate").unwrap();
+        let path = create_test_manifest(&dir);
+        let bridge = PyO3Bridge::load(&path).unwrap();
+
+        let code = bridge.generate_module();
+        // 委托调用存在
+        assert!(
+            code.contains("__py_greet(name)"),
+            "greet 应委托到 __py_greet(name)：\n{}",
+            code
+        );
+        assert!(
+            code.contains("__py_add(a, b)"),
+            "add 应委托到 __py_add(a, b)：\n{}",
+            code
+        );
+        // 不再出现 todo!() 桩
+        assert!(
+            !code.contains("todo!("),
+            "生成的模块不应再包含 todo!() 桩：\n{}",
+            code
+        );
+        // 委托目标的外部声明（让生成文件自洽）
+        assert!(
+            code.contains("extern \"Rust\""),
+            "应发射 __py_ 委托函数的外部声明"
+        );
+        assert!(
+            code.contains("fn __py_greet(name: String) -> String;"),
+            "应声明 __py_greet 的委托签名：\n{}",
+            code
+        );
+        assert!(code.contains("fn __py_add(a: i64, b: i64) -> i64;"));
     }
 }

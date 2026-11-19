@@ -191,3 +191,31 @@ fn frontend_dual_track_full_corpus() {
         failed.join("\n")
     );
 }
+
+/// BUG-467 回归锁：三处根因（CRLF 空白行缩进 / 行首缩进块注释重入 / f64 Debug 科学计数）
+/// 在四个曾失败样本上必须双轨一致。这四个样本不在分层子集内（子集按目录取字典序第一个），
+/// 故单列一条锁测试，常规 `cargo test` 即跑，防止根因回归。
+#[test]
+fn frontend_dual_track_bug467_regression() {
+    lang_zone::frontend::bootstrap_emit::set_bootstrap_lane_env();
+    let bin = bin_path();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("DEMO");
+    // 曾由 BUG-467 命中：CRLF 空白行(ir-edge-boundary-values / ir-edge-enum-self-methods)、
+    // 行首缩进块注释重入(edge-keyword-identifier)、f64 Debug 科学计数(edge-values-boundary)
+    let cases = [
+        "99_spec/ir-edge-boundary-values.lz",
+        "99_spec/ir-edge-enum-self-methods.lz",
+        "boundary-coverage/edge-keyword-identifier.lz",
+        "boundary-coverage/edge-values-boundary.lz",
+    ];
+    let mut checked = 0;
+    for rel in cases {
+        let s = root.join(rel);
+        if !s.exists() {
+            continue;
+        }
+        assert_dual_track(&bin, &s);
+        checked += 1;
+    }
+    assert!(checked >= 1, "BUG-467 回归样本不应全部缺失");
+}
