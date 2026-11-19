@@ -3599,7 +3599,7 @@ commit：3f8512e（重映射自 未记）
 - fix: fist-mbt v0.3.11（远端 main）的 `scope_permissions` 补 lang-zone 项目目录规则：`src/embed/`、`src/ir/`、`src/bridge/`、`src/parser/`、`src/frontend/`、`tests/`、`Reports/`、`CY/`、`DEMO/`、`FIND_BUG/`、`lz_builtins/`。不用宽泛 `src/` 通配。验证：moon check 0 errors、moon build --target js 通过。注：moon test --target js 在干净远端 main 上同样失败（server.whitebox_test test driver 环境问题，非本次改动引入）。
 - commit: 5ba7123d8（fist-mbt）
 
-## BUG-489 [2026-10-28T06:45:00+08:00] [high] OPEN
+## BUG-489 [2026-10-28T06:45:00+08:00] [high] FIXED
 - note: 闭包体重生成漏继承枚举变体表 → `Ok(len(e))` 丢枚举限定（E0308）
 - summary: 闭包体经 child `CodeGen::new()` 重生成时未继承枚举变体表，`Ok(len(e))` 发成裸 `Ok(`，被解析为 `std::result::Result::Ok` 而非程序的枚举变体，rustc E0308（mismatched types）。根因：两处 child 初始化只复制 `known_types`/`type_aliases` 等，漏 `enum_variants` / `enum_variant_named_fields` / `enum_variant_fields` / `enum_variant_order` 四张表——`src/ir/codegen/expr_gen.rs:6869`（`!uses_move` 分支）与 `src/ir/codegen/expr_gen.rs:6908`（move 捕获 + 引用外部非 Copy 变量分支）。实参是 Call 时 `body_refs_noncopy_external` 递归进 callee `Var`（`len`/`inc` 非 Copy、非形参）→ 命中 child 重生成，裸 `Ok(` 覆盖 L6562 的「闭包返回 Result 时替换 `Ok(`/`Err(`」后处理；实参为字面量/变量/二元式时该判定为 false，故只有 Call 实参形态复现。
 - 判据: `cargo test --test native_variant_qual`（4 项全绿：`variant_qualification_statement_position` / `variant_qualification_in_typed_lambda_body` / `variant_qualification_in_lambda_argument` / `custom_enum_variant_qualified`）；修前 `DEMO/lz_std/result.lz` 是 DEMO 门禁唯一红（E0308），修后 327/327。变异测试：禁用任一 child 的继承即回退裸 `Ok(` 或转红，证明两处 site 均为必要。
@@ -3648,7 +3648,7 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-19T12:48:30Z / BUG-491, BUG-493, BUG-494)
 - evidence: 回归锁：tests/rs_lz_families.rs（16/16，同判据 check:T0r60:r1 passed）内逐条点名——n3_str_to_number_uses_parse（`int(str)` 走 parse 而非 as cast，BUG-491）、n5_empty_then_block_and_panic_macro（空 then 块不吞 + panic 宏形态，BUG-493）、typed_main_keeps_tail_value（typed main 保留尾值、`__lz_main() -> i64` 形态，BUG-494）；同批由 e22c897 落地并已纳入 scripts/dual_track_gate.ps1 常规门禁。真源：src/ir/lz_codegen_lib.lz。
-## BUG-495 [2026-10-29T14:00:00+08:00] [high] OPEN
+## BUG-495 [2026-10-29T14:00:00+08:00] [high] FIXED
 - note: rs-lz 旁路表示不了 embed（Item 枚举无变体，E0599）
 - summary: rs-lz 旁路对含 `#[embed(..)]` 的源文件生成 E0599（no variant named `EmbedBlock`）：旁路走 `src/ir/lz_codegen_lib.lz` 的 `Item` 枚举，旧 schema 只带 `(lang, src_len)`，内嵌源码文本根本不进数据面，故 embed 块的三种形态一条都发不出来。修法：① `src/ir/lz_codegen_lib.lz:188` 的 `Item` 加变体 `EmbedBlock(lang, src, tier, artifact, dir_rel, wrappers)`，`:1539` / `:3600` 补垫片臂，`gen_embed_block`（`:3552`）逐字对齐原生 `src/ir/codegen/decl_gen.rs:264-292`；② 命名与目录不在 LZ 侧猜——`src/ir/lz_codegen.rs:34` 的 `embed_targets_of`（`:76` 用 `crate::embed::artifact::dir_rel`）在 Rust 侧算好 `artifact` / `dir_rel` 再进数据面（`:208` 注释即此口径），`src/main.rs` 传 stem 进 `set_embed_stem` 并落盘；垫片模块内容由 `src/ir/lz_codegen.rs:210` 供名，外壳 `pub mod __lz_embed` 由 `src/ir/codegen/mod.rs:1546` 包。
 - 判据: `cargo test --test embed_stem_parity`（3/3；此前整文件带 `#[ignore]`，本轮摘掉后真跑，产物名/目录与原生逐字节一致）+ `cargo test --test lz_ir_bootstrap`（25/25）。
@@ -3656,7 +3656,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: tests/embed_stem_parity.rs 3/3（parity 摘 ignore）+ tests/lz_ir_bootstrap.rs 25/25
 状态：FIXED
 
-## BUG-496 [2026-10-29T14:01:00+08:00] [high] OPEN
+## BUG-496 [2026-10-29T14:01:00+08:00] [high] FIXED
 - note: `def main() = { ... }` 花括号体末 unit 被误判 typed main（E0308）
 - summary: `def main() = { … }`（花括号块体）的返回类型走语句级路径推断，末单元/尾语句被误判成 typed main，函数体返回 `()` 与声明返回 `i64` 不符 → E0308。根因：`src/ir/builder/convert_decl.rs` 的 decl 推断对块体缺「块尾即返回类型」这一层，与闭包体已修口径不一致（`src/ir/builder/capture.rs:541-547` 的 fat-arrow 闭包体取最后语句类型）。修法：同文件新增 `infer_block_body_ret_ty`（`src/ir/builder/convert_decl.rs:461`），在 `:1088` 对 BlockExpr 体按块尾语句定返回类型，与 capture.rs:541-547 全对齐。
 - 判据: `cargo test --test native_variant_qual`（8/8）。
@@ -3664,6 +3664,9 @@ commit：3f8512e（重映射自 未记）
 - 回归: tests/native_variant_qual.rs 8/8
 状态：FIXED
 
+
+### FIXED(2026-11-19T14:41:59Z / BUG-489, BUG-496)
+- evidence: 回归锁：tests/native_variant_qual.rs 8/8（variant_qualification_statement_position / ..._in_typed_lambda_body / ..._in_lambda_argument / custom_enum_variant_in_closure_body / custom_enum_variant_qualified / brace_body_unit_tail_main / brace_body_value_tail_main / indent_body_value_tail_main），已纳入 scripts/dual_track_gate.ps1（判据 check:T0r61:r1 passed）；真源 src/ir/codegen（变体名表传进 helpers::is_ctor_name，变体构造器不再进 clone 路径），提交 128c359/c0bad45。附带：harness 改为同源 rlib 解析（env>车道>默认）消除 E0514 假红。
 ## BUG-497 [2026-10-29T14:02:00+08:00] [medium] OPEN
 - note: project 模式同语言 embed 按语言聚合、不按模块分组（多模块产物互相覆盖）
 - summary: project 模式下 embed 产物只按语言聚合、不按模块分组：多模块同语言时后写覆盖前写，产物目录/文件名撞车，最后一个模块赢。根因：模块身份在 `src/project.rs:347` 的 `merge_modules` 处被抹平——合并后的 IR 只剩一份，codegen 无从知道某个 embed 块来自哪个模块。修法：`src/ir/node.rs:396-398` 给嵌入块节点加 `origin: Option<String>` 承载模块身份，`src/project.rs` 的 `merge_modules` 打 origin，codegen 分组键由 `lang` 改为 `(origin, lang)`；单文件路径 `origin=None`，产物与改前 diff 0 行（零回归）。
@@ -3672,7 +3675,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: tests/embed_project_grouping.rs 4/4
 状态：FIXED
 
-## BUG-498 [2026-10-29T14:03:00+08:00] [high] OPEN
+## BUG-498 [2026-10-29T14:03:00+08:00] [high] FIXED
 - note: `--project` 与 `lz build` 从不调 emit_embed_artifacts，产物不落盘（运行时必 panic）
 - summary: `--project` 与 `lz build` 两条路径会生成 embed 调用代码却不落盘产物，运行时按 `__lz_embed_dir` 去取不存在的目录 → 必 panic：编译期全绿、跑起来才炸。根因：`emit_embed_artifacts`（`src/main.rs:1439`）只在个别臂里被调用，project 路径与 `lz build` 都没接；且产物根取决于进程 cwd，不看 cwd 就落错地方。修法：`src/cli.rs:588-594`（`cmd_build`，`lz build` 路径）与 `src/main.rs:865-883`（`compile_main` 的 Cli 档臂）新增调用，`:1337` / `:1389` 两处既有调用补 `root_override`；`emit_embed_artifacts` 改 `pub(crate)` 并加 `root_override: Option<&Path>` 参数（`:1454` 处决定产物根，`None` = 进程 cwd）。
 - 判据: `cargo test --test embed_project_emit`（3/3，断言 `build/embed/**` 真落盘）。
@@ -3680,7 +3683,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: tests/embed_project_emit.rs 3/3
 状态：FIXED
 
-## BUG-499 [2026-10-29T14:04:00+08:00] [high] OPEN
+## BUG-499 [2026-10-29T14:04:00+08:00] [high] FIXED
 - note: embed 短名调用被 i64::MAX 兜底桩遮蔽（静默错值）
 - summary: embed 的短名（`<语言>_<主干>_<method>`）调用落到 codegen 尾部的 i64::MAX 兜底桩上，返回 `i64::MAX` 而**不报错**（静默错值，比报错更难查）。根因：`use __lz_embed::*` 带来的同名别名被 crate 根的本地定义遮住（`src/ir/codegen/mod.rs:902-904` 注释即此机理），而 `src/ir/codegen/mod.rs:647` 的 `embed_export_names()` 只把全名摘出 `unknown_extern`，短名不在同一份名单里，`__lz_embed` 内也就没有对应别名。修法：`embed_export_names()` 同时给出全名与短名，`:905` 起按同一份名单在 `__lz_embed` 末尾补 `pub use <全名> as <短名>;`（`:674`）；短名有歧义时不发别名（宁缺勿错）。
 - 判据: `cargo test --test embed_stub_shadowing`（4/4）。
@@ -3688,6 +3691,9 @@ commit：3f8512e（重映射自 未记）
 - 回归: tests/embed_stub_shadowing.rs 4/4
 状态：FIXED
 
+
+### FIXED(2026-11-19T14:41:59Z / BUG-495, BUG-498, BUG-499)
+- evidence: 回归锁（均纳入 scripts/dual_track_gate.ps1，check:T0r61:r1 passed）：BUG-495 → tests/embed_stem_parity.rs 3/3（parity 摘 ignore 真跑，产物名/目录与原生逐字节一致）+ tests/lz_ir_bootstrap.rs 25/25；BUG-498 → tests/embed_project_emit.rs 3/3（断言 build/embed/** 真落盘）；BUG-499 → tests/embed_stub_shadowing.rs 4/4（短名/全名调用真 wrapper 而非 i64::MAX 兜底桩）。真源：src/bridge/project.rs / hotreload.rs 统一 builtins_rlib_path()（env>车道>target/debug），并修 harness 取数；提交 842c4c5/7355a86/f3d2080 + af6d8bd。
 ## BUG-500 [2026-10-29T14:05:00+08:00] [medium] OPEN
 - note: [测试质量] 三条负向探针是假阳性负例（测不到名字声称的东西）
 - summary: 类别「测试质量」。`div-tools/syntax_probes/` 下三条负向探针名不副实：文件确实编译失败，但失败在别的地方，测不到名字声称的诊断，于是探针恒绿而挡不住对应回归——`neg_fn_missing_colon.lz` 冒号其实写了、真正缺的是函数体的 `=`（报 `Expected Eq` 而非 `Expected Colon`）；`neg_macro_unclosed.lz`（宏未闭合）与 `neg_trait_missing_fn.lz`（trait 缺函数体）同族。修法：三条各自改成真测目标诊断——只触发该诊断、其余语法合法的最小样本，文件头固写「测什么 / 期望什么错误 / 为什么原来那条测歪了」三段（`git show 8ca306f`：3 文件 +67/−8）。
