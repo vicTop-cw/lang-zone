@@ -1380,7 +1380,9 @@ pub(crate) fn lookup_builtin_method_ret(
         // ── 字符串化：所有原语类型调用 .to_string() 应返回 String，
         //    使 print_arg_is_display 识别为字符串走 `{}`（Display）而非 `{:?}`（Debug）。
         //    BUG-44：此前 Int/F64/Bool 等臂缺失，导致 print(n.to_string()) 走 Debug 加引号。
-        IrType::Int | IrType::Int128 | IrType::BigInt | IrType::F64 | IrType::Bool => {
+        //    注：Int/F64 已由上方各自专属臂（L1166/L1177）先行登记 to_string；本臂只兜住
+        //    尚未单列臂的 Int128/BigInt/Bool（旧的 Int/F64 分支恒不可达，2026-11-19 去除）。
+        IrType::Int128 | IrType::BigInt | IrType::Bool => {
             if method == "to_string" {
                 return Some(IrType::Named { path: "String".into(), args: vec![] });
             }

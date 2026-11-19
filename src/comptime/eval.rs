@@ -415,7 +415,7 @@ impl ComptimeEvaluator {
                     ComptimeValue::Tuple(xs) => xs,
                     _ => return Err("comptime for 仅支持遍历 list/tuple".into()),
                 };
-                for (it_idx, it) in items.iter().enumerate() {
+                for it in items.iter() {
                     // 元组解构 `for (kind, name) in members:`：parser 把 var 存为
                     // "(kind, name)" 字符串（08b §7.3 示例），解析名字后逐一绑定
                     let trimmed = var.trim();

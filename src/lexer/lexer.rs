@@ -351,7 +351,7 @@ impl Lexer {
                     peek += 1;
                 }
                 // 跳过后续连续空行/纯空白行
-                let mut next_indent: Option<usize> = None;
+                let next_indent: Option<usize>;
                 loop {
                     // 收集一行
                     let line_start = peek;

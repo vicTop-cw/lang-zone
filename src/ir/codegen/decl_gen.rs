@@ -1578,7 +1578,7 @@ impl CodeGen {
                 format!("{}: {}", g.name, parts.join(" + "))
             })
             .collect();
-        let mut out = format!("<{}>", params.join(", "));
+        let out = format!("<{}>", params.join(", "));
         out
     }
 

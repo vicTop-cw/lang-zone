@@ -18,13 +18,12 @@ use lang_zone::project::ProjectCompiler;
 // M5 T0r56.1.1：车道 rlib 解析 + 自检链助手 + LZ 前端自检已下沉到 lib crate，
 // main.rs 经 use 导入同名函数，全部调用点零改动。
 use lang_zone::frontend::bootstrap_emit::{
-    absolutize, builtins_link, crate_root, lane_profile_dir, lane_target_root, profile_name,
-    replace_ext, run_lz_frontend, run_selfcheck_exe,
+    builtins_link, crate_root, lane_profile_dir, lane_target_root, profile_name, replace_ext,
+    run_lz_frontend,
 };
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// 读取 .lz 源码并剥离 UTF-8 BOM（EF BB BF）。
 ///
@@ -254,26 +253,6 @@ fn merge_imports_into(
                     body: vec![],
                 });
             }
-        }
-    }
-}
-
-/// 自检链取 rlib：找不到就**明确报错并行失败**（绝不静默用不存在的路径去喂 rustc，
-/// 那会伪装成 E0463 之类的「编译错误」假红）。
-fn builtins_link_or_exit(what: &str) -> (PathBuf, PathBuf) {
-    match builtins_link() {
-        Some(v) => v,
-        None => {
-            eprintln!(
-                "{what}: 未找到 lz_builtins 的 .rlib（已查找 {}；先 `cargo build -p lz_builtins`{}）",
-                lane_profile_dir().display(),
-                if lane_profile_dir() == crate_root().join("target").join("debug") {
-                    String::new()
-                } else {
-                    format!("，车道 target-dir={}", lane_target_root().display())
-                }
-            );
-            std::process::exit(1);
         }
     }
 }

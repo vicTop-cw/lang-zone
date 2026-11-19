@@ -10,7 +10,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::cache::CacheEntry;
 use crate::ir::builder::build_ir;

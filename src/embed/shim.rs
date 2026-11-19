@@ -15,27 +15,6 @@ use crate::bridge::cli::{EmbedEndpoint, EmbedFnSig};
 
 use super::{ArtifactKind, EmbedTarget};
 
-/// lz 基础类型 → Rust 形参类型（垫片签名里用）
-fn rust_param_ty(lz: &str) -> &'static str {
-    match lz {
-        "int" => "i64",
-        "float" => "f64",
-        "bool" => "bool",
-        _ => "&str",
-    }
-}
-
-/// lz 基础类型 → Rust 返回类型
-fn rust_ret_ty(lz: Option<&str>) -> &'static str {
-    match lz {
-        Some("int") => "i64",
-        Some("float") => "f64",
-        Some("bool") => "bool",
-        Some("str") => "String",
-        _ => "String",
-    }
-}
-
 /// 把一个 Cli 档产物描述成一个 CLI 端点（可调用面 = callable 的那些函数）
 pub fn endpoint(t: &EmbedTarget) -> EmbedEndpoint {
     let fns: Vec<EmbedFnSig> = t

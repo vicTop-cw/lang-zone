@@ -816,13 +816,6 @@ impl CodeGen {
         self.gen_generics_impl(g, true)
     }
 
-    /// 泛型参数：不带 `= DefaultType` 默认值。Rust 只允许 struct/enum/type/const 定义携带
-    /// 默认类型参数，`impl<T> Struct<T = Default>` 是语法错误（E0737 expected one of ... found `=`）。
-    /// 凡「引用结构体类型」的位置（impl 头、返回类型、字段类型、trait 头）必须用本函数。
-    pub(crate) fn gen_generics_no_default(&self, g: &[GenericParam]) -> String {
-        self.gen_generics_impl(g, false)
-    }
-
     /// 仅类型实参名（`<T, U>`），无 bound 无默认值：impl 头的自类型必须用裸类型实参
     /// （`impl<T: Clone> Container<T: Clone>` 是 E0229 associated item constraint）。
     pub(crate) fn gen_param_args(&self, g: &[GenericParam]) -> String {

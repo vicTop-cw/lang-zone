@@ -1558,7 +1558,6 @@ fn embed_ret_parse_expr(lz: &str) -> String {
             )
         }
         "dict" => {
-            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
             let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
             // T0r61：嵌套 dict 返回值按值类型递归解析 JSON，还原嵌套结构，
             // 不再降级为 String 片段。dict<str,list<int>> 的 value 递归解析为 Vec<i64>。
@@ -1628,27 +1627,6 @@ fn embed_ret_parse_elem(lz: &str) -> String {
     }
 }
 
-/// 判断 LZ 类型是否为扁平容器（无嵌套）。
-fn is_lz_flat_container(lz: &str) -> bool {
-    let (base, args) = split_lz_generic(lz);
-    match base.as_str() {
-        "list" => {
-            let inner = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("");
-            !is_lz_container(inner)
-        }
-        "dict" => {
-            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("");
-            let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("");
-            !is_lz_container(k) && !is_lz_container(v)
-        }
-        "tuple" => {
-            let elems = args.as_ref().map(|a| a.as_slice()).unwrap_or(&[]);
-            elems.iter().all(|e| !is_lz_container(e))
-        }
-        _ => false,
-    }
-}
-
 /// 判断 LZ 类型是否为容器（扁平或嵌套）。
 fn is_lz_container(lz: &str) -> bool {
     let (base, _) = split_lz_generic(lz);
@@ -1675,7 +1653,6 @@ fn embed_arg_expr_nested(ident: &str, lz: &str) -> Option<String> {
             ))
         }
         "dict" => {
-            let k = args.as_ref().and_then(|a| a.first()).map(|s| s.as_str()).unwrap_or("str");
             let v = args.as_ref().and_then(|a| a.get(1)).map(|s| s.as_str()).unwrap_or("int");
             let v_expr = embed_elem_to_json(v);
             // 直接生成 JSON 序列化代码：遍历 dict 的键值对，递归序列化 value

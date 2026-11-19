@@ -4147,8 +4147,6 @@ impl CodeGen {
                         return format!("({}).collect::<Vec<_>>()", recv);
                     }
                 }
-                let recv_is_set_like = matches!(&receiver.ty, IrType::Named { path, .. }
-                    if path == "Set" || path == "HashSet");
                 if recv_is_vec_like {
                     match method.as_str() {
                         // LZ .reversed() → lz_builtins::reversed(lst.clone())
@@ -4610,13 +4608,6 @@ impl CodeGen {
                     && matches!(method.as_str(), "values" | "keys" | "items")
                     && !user_plain.contains(method.as_str())
                 {
-                    let recv_ref = if recv == "self" || recv.starts_with('&') {
-                        recv.clone()
-                    } else if recv.starts_with('(') {
-                        format!("&{}", recv)
-                    } else {
-                        format!("&({})", recv)
-                    };
                     // keys/values → List<K>/List<V>（.cloned().collect::<Vec<_>>()）；
                     // items → List<(K, V)>：BTreeMap::iter() 已取 &self，
                     // 不要再包 &（`&(d).iter()` 变 &&BTreeMap → E0308）

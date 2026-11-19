@@ -1,7 +1,23 @@
 ﻿# 当前阶段目标（Target）
 
-- 本轮聚焦：JS 适配器**嵌套容器**跨语言序列化护栏（dict<str,list<int>> / list<list<int>> / dict<str,dict<str,int>> / list<dict<str,int>>）
-- 验收条件：cargo build 0 error、全量测试零回归、新测试全绿
+- 本轮聚焦：**编译 warning 清零打磨**（全仓 17 条 rustc warning → 0）
+- 验收条件：cargo build 0 warning 0 error、全量测试零回归、端到端产物编译+运行等价
+
+---
+
+## 2026-11-19 迭代-18:00（定时任务探索轮）：编译 warning 清零打磨（17→0）
+- 起点：HEAD=bd6ee6e（T0r14/T0r66 已收口 BUG-520/515，全绿基线）。接手做**前提检查**：源文件最新改动距启动 1327 分钟（≥5），继续。
+- **本轮判定：无未实现缺口，转为打磨池**（既有 bug/失败测试/warning/文档漂移）。核对确认：T0r57 Dict-KV、T0r61 嵌套容器、BUG-520 PyO3 委托、C 适配器 str/容器护栏均已落地（HEAD 含 a46c363/d0f212d）；账本仅 BUG-515（low，WSL-only）OPEN 且已在 d0f212d 收口。⇒ 打磨目标锁定 = **17 条 rustc warning**。
+- **T0r15 warning 清零**（10 文件，+8/-88，纯删死码/去未用）：
+  - unused imports：`src/main.rs`（absolutize/run_selfcheck_exe/std::process::Command）、`src/bridge/project.rs`（std::process::Command）。
+  - dead_code：`src/main.rs::builtins_link_or_exit`（职责由 print_link_recipe 承担）、`src/bridge/cli.rs::is_lz_flat_container`、`src/embed/shim.rs::rust_param_ty/rust_ret_ty`、`src/ir/codegen/types_emit.rs::gen_generics_no_default`（impl 头改用 gen_param_args 后无人调用）。
+  - unused var：`src/bridge/cli.rs` 两个 vestigial `k`、`src/comptime/eval.rs::it_idx`（去 enumerate）、`src/ir/codegen/expr_gen.rs::recv_is_set_like` + 冗余 `recv_ref`。
+  - unreachable pattern：`src/ir/builder/infer.rs` L1383 臂 `Int|Int128|BigInt|F64|Bool` → `Int128|BigInt|Bool`（Int/F64 已由 L1166/L1177 专属臂先行登记 to_string，原分支恒不可达）。
+  - never-read / unneeded mut：`src/lexer/lexer.rs::next_indent` 初值恒未被读 → 去 `= None`；`src/ir/codegen/decl_gen.rs::out` → 去 mut。
+- **门禁/验证**：①判据脚本 `scripts/iter18_warning_gate.ps1`（run_check → warnings=0 errors=0，passed）；②全量 `cargo test --no-fail-fast -j 1` 60 套件全绿，passed 1139 / failed 0，exit 0（零回归）；③端到端 `DEMO/01_basics/combined.lz` → .rs → rustc 编译 → 运行输出 `R18 combined OK` exit 0（验证铁律：产物编译+运行等价）。
+- **任务卫生**：lang-zone ns 清出 16 条陈旧僵尸任务（T0r7.x/T0r8/T0r11.x，特性均已由 T0r57/T0r61 落地），逐条 pause→force 归档；ns 由「16 待领取」归零（126 已完成 + 20 已归档）。
+- 账簿：本轮非新缺陷，未新增 bug 条目；T0r15 一条（已完成）。
+- 下一步：① 文档漂移治理（`docs/py-bridge-struct.md` §2.2 仍写「函数体占位 todo!()」，与 BUG-520 实际实现矛盾——需更新为「真实委托 __py_<name>」）；② 其他语言适配器（mojo/scala，本机无工具链）容器序列化；③ CHANGELOG 回填。
 
 ---
 
