@@ -20,6 +20,15 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn builtins_rlib() -> PathBuf {
+    // 环境可覆盖 > 车道（钉版工具链）> target/debug（防 E0514 混合产物）
+    if let Ok(p) = std::env::var("LZ_BUILTINS_RLIB") {
+        return PathBuf::from(p);
+    }
+    let lane = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/lane-bootstrap/debug/liblz_builtins.rlib");
+    if lane.exists() {
+        return lane;
+    }
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug");
     let direct = dir.join("liblz_builtins.rlib");
     if direct.exists() {
@@ -77,7 +86,7 @@ fn run_lz(tag: &str, src: &str) -> Run {
         };
     }
     let exe = lz.with_extension("exe");
-    let rc = Command::new("rustc")
+    let rc = Command::new(std::env::var("LZ_RUSTC").unwrap_or_else(|_| "rustc".to_string()))
         .args(["--edition", "2021"])
         .arg(&rs)
         .arg("--extern")
@@ -1097,7 +1106,7 @@ fn rustc_and_run(tag: &str, rust_src: &str) -> (bool, bool, String, String) {
     let rs = work.path().join(format!("{tag}_gen.rs"));
     std::fs::write(&rs, rust_src).expect("write gen rust");
     let exe = work.path().join(format!("{tag}_gen.exe"));
-    let rc = Command::new("rustc")
+    let rc = Command::new(std::env::var("LZ_RUSTC").unwrap_or_else(|_| "rustc".to_string()))
         .args(["--edition", "2021", "--crate-name"])
         .arg(format!("{tag}_gen"))
         .arg(&rs)

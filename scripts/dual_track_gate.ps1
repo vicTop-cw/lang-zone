@@ -27,6 +27,21 @@ cargo build -p lz_builtins 2>&1 | Out-Null
 $env:CARGO_TARGET_DIR = Join-Path $Root "target\gate-test"
 Push-Location $Root
 try {
+    # rs-lz 回归锁（BUG-490/492 等族）：harness 用 LZ_RUSTC/LZ_BUILTINS_RLIB，
+    # 这里绑定到刚重建的车道 rlib，保证与当前工具链同源（防 E0514 混合产物误红）
+    $laneRlib = Join-Path $Root "target\lane-bootstrap\debug\liblz_builtins.rlib"
+    if ((Test-Path $laneRlib) -and $env:PATH) {
+        $tcBin = ($env:PATH -split ';' | Where-Object { $_ -match 'stable-x86_64-pc-windows-gnu\\bin$' } | Select-Object -First 1)
+        if ($tcBin) {
+            $env:LZ_RUSTC = Join-Path $tcBin "rustc.exe"
+            $env:LZ_BUILTINS_RLIB = $laneRlib
+            Write-Host "[GATE] rs-lz 回归锁（rs_lz_families / codegen_corner_fixes）..." -ForegroundColor Yellow
+            cargo test --test rs_lz_families 2>&1 | Select-Object -Last 2
+            if ($LASTEXITCODE -ne 0) { Write-Host "[GATE] rs_lz_families FAIL" -ForegroundColor Red; exit 1 }
+            cargo test --test codegen_corner_fixes 2>&1 | Select-Object -Last 2
+            if ($LASTEXITCODE -ne 0) { Write-Host "[GATE] codegen_corner_fixes FAIL" -ForegroundColor Red; exit 1 }
+        }
+    }
     # 判据自检先行（BUG-501 回归锁）：语法矩阵反例/正例判据的边界用例必须全过
     Write-Host "[GATE] 语法矩阵判据 SelfTest ..." -ForegroundColor Yellow
     & (Join-Path $Root "div-tools\syntax_matrix.ps1") -SelfTest | Out-Null

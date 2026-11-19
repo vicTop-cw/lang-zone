@@ -3606,7 +3606,7 @@ commit：3f8512e（重映射自 未记）
 - commit: 128c359
 - 回归: tests/native_variant_qual.rs 4/4 + DEMO 门禁 327/327
 状态：FIXED
-## BUG-490 [2026-10-28T06:46:00+08:00] [high] OPEN
+## BUG-490 [2026-10-28T06:46:00+08:00] [high] FIXED
 - note: rs-lz 切片 range 只给上界 `as usize`，起点仍 i64（E0308/E0277）
 - summary: rs-lz 生成 `s[a..b]` 这类切片/索引键时只对 range 的上界加 `as usize`，起点仍是 `i64`，两端类型不一致 → rustc E0308（mismatched types）或 E0277（`i64: SliceIndex<[T]>` 不满足）。根因：`src/ir/lz_codegen_lib.lz` 的索引发射对 `Expr.Range`/`RangeFrom`/`RangeTo` 各端点 cast 不统一，且缺一个共用的「索引键」入口。修法：同文件新增 `gen_range_index_key`（:1105）、`gen_scalar_index_key`（:1135）、`gen_index_key_expr`（:1144），每个已给端点各自 `((..) as usize)`、缺端点保持开放（`..` / `..b` / `a..` 三形）；切片结果按基底 owned 化（str → `.to_string()`、List → `.to_vec()`），并给非 Copy 元素索引补 `.clone()`。对齐原生 `src/ir/codegen/stmt_gen.rs:3194` 的口径。
 - 判据: 切片/索引 17 条样本重跑，11 条由 E0308/E0277 转绿；`cargo test --test rs_lz_families` 7/7、`cargo test --test codegen_corner_fixes` 44/44、`--lib` 461/461 无回归。残留：E0382 非 Copy 实参复用一族（7 条，根因在实参克隆表）本轮未修，另开单。
@@ -3620,13 +3620,16 @@ commit：3f8512e（重映射自 未记）
 - commit: e22c897
 - 回归: tests/rs_lz_families.rs 7/7（cast 族）+ 6/6 样本转绿
 状态：FIXED
-## BUG-492 [2026-10-28T06:48:00+08:00] [high] OPEN
+## BUG-492 [2026-10-28T06:48:00+08:00] [high] FIXED
 - note: rs-lz 二元 `+` 字符串拼接只转换单侧（E0308）
 - summary: rs-lz 发 `s + x` / `x + s` 时只转换一侧操作数，另一侧仍是 `i64`/其他类型，`String + i64` 之类组合 → E0308（mismatched types）。根因：`src/ir/lz_codegen_lib.lz` 的二元 `+` 分支只用左操作数是否 str 判定是否走拼接，右操作数未统一借位。修法：任一侧为 `str` 即进拼接分支，rhs 统一发 `&rhs[..]` 取 `&str`（`String + &str` 成立），跨类型则退 `format!`。
 - 判据: 字符串拼接 5 条样本中 4 条由 E0308 转绿；余 1 条未绿，与 E0382 非 Copy 实参复用一族相关（本轮未修，另开单）。`cargo test --test codegen_corner_fixes` 44/44 无回归。
 - commit: e22c897
 - 回归: tests/rs_lz_families.rs 7/7 + 5 条样本中 4 条转绿
 状态：FIXED
+
+### FIXED(2026-11-19T12:47:49Z / BUG-490, BUG-492)
+- evidence: 回归锁：tests/rs_lz_families.rs 16/16（切片族：range 两端 cast 断言）+ tests/codegen_corner_fixes.rs 44/44，两把锁已纳入 scripts/dual_track_gate.ps1 常规门禁（判据 check:T0r60:r1 passed：SelfTest + 两套件 + 双轨子集 GATE PASS）。真源：src/ir/lz_codegen_lib.lz（commit e22c897：切片 range 两端 as usize / 二元 + 字符串拼接借位转换）。附带治理：两套件 harness 参数化（LZ_RUSTC/LZ_BUILTINS_RLIB + 车道 rlib 优先），消除 cron 车道 rlib 版本漂移造成的 E0514 假红（原 0/16 与 2/44 全红实为环境）。
 ## BUG-493 [2026-10-28T06:49:00+08:00] [medium] OPEN
 - note: rs-lz 空 then 块被吞（E0423）+ panic 发成普通函数调用
 - summary: 两处发射缺陷：① 空 `then` 块（`if c then else ..` 形态）被吞成裸条件，生成的 `if c {}` 缺块体/块体为空 → E0423（expected expression, found `.`）一类解析错；② `panic(..)` 被当普通用户函数调用发射，生成的调用签名/路径与运行时不符。根因：`src/ir/lz_codegen_lib.lz` 的 `gen_block` 对空块不落 `{}` 骨架，`panic` 未走内建专用臂。修法：`gen_block` 空块显式发 `{

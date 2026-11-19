@@ -26,10 +26,24 @@ fn lang_zone_bin() -> PathBuf {
 /// 生成产物需要 `--extern lz_builtins=<rlib>`（`List<T>`/`Dict<K,V>` 别名在其中）。
 /// 从当前测试二进制的 target 目录出发找，避免与别的车道的 target 目录混淆。
 fn builtins_rlib() -> PathBuf {
+    // 环境可覆盖 > 车道（target/lane-bootstrap，钉版工具链）> 测试二进制同目录
+    // （cron/并行轮次可能用异版本重建 rlib，造成 E0514；见 BUG-490/492 复验记录）
+    if let Ok(p) = std::env::var("LZ_BUILTINS_RLIB") {
+        return PathBuf::from(p);
+    }
     let dir = lang_zone_bin()
         .parent()
         .expect("bin dir")
         .to_path_buf();
+    if let Some(root) = dir.parent().and_then(|d| d.parent()) {
+        let lane = root
+            .join("lane-bootstrap")
+            .join("debug")
+            .join("liblz_builtins.rlib");
+        if lane.exists() {
+            return lane;
+        }
+    }
     let direct = dir.join("liblz_builtins.rlib");
     if direct.exists() {
         return direct;
@@ -167,7 +181,8 @@ fn run_rs_lz_files(tag: &str, files: &[(&str, &str)]) -> RsLzRun {
     let rs = work.join("gen.rs");
     std::fs::write(&rs, &rust).expect("write generated rust");
     let exe = work.join("gen.exe");
-    let mut rustc_cmd = Command::new("rustc");
+    // rustc 与 rlib 必须同版本（E0514）：LZ_RUSTC 可覆盖
+    let mut rustc_cmd = Command::new(std::env::var("LZ_RUSTC").unwrap_or_else(|_| "rustc".to_string()));
     rustc_cmd
         .args(["--edition", "2021", "--crate-name", "gen_program"])
         .arg(&rs)
