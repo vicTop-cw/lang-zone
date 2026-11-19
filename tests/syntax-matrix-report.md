@@ -1,8 +1,8 @@
 ﻿# lz 语法特性测试矩阵报告
 
-- 日期：2026-10-29 19:46:58
-- commit：f4a7ec3
-- 二进制：target\debug\lang-zone.exe（86655046 字节，2026-10-28 04:48）
+- 日期：2026-11-19 20:11:49
+- commit：e2bed3d
+- 二进制：target\debug\lang-zone.exe（87609814 字节，2026-11-18 20:06）
 - 测试脚本：div-tools\syntax_matrix.ps1（判据 v2，本报告由脚本生成，勿手改）
 - shell：5.1.19041.1682（powershell.exe；本机无 pwsh）
 
