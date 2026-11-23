@@ -1,4 +1,4 @@
-# 迭代-18:00 判据脚本：编译 warning 清零门禁
+﻿# 迭代-18:00 判据脚本：编译 warning 清零门禁
 # 判据：cargo build --bin lang-zone 产出 0 warning（旧口径 17）。
 # 用法：powershell -NoProfile -File scripts/iter18_warning_gate.ps1
 $ErrorActionPreference = "Continue"

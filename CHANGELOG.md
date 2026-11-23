@@ -17,6 +17,10 @@ AIGC:
 
 ## [Unreleased]
 
+### 测试基建：Loomy 定制 cargo shim 扁平布局适配 + 账本治理（2026-11-23，fist-agent lang-zone 定时轮 iter-14:00）
+- **shim 布局适配（测试基建）**：本机 cargo 为 Loomy 环境 shim（`~\\.cargo\\bin\\cargo.exe` 为 0 字节占位），`--out-dir` 走 `<target>/<profile>/build/<crate>/<hash>/out/` 并以多个 `-L dependency=build/<dep>/<hash>/out` 传依赖，**从不生成 `deps/` 子目录**。项目内 30 个集成测试与 `src/bridge/project.rs` 按标准 cargo 布局以 `-L dependency=<rlib 父目录>/deps` 链接，恒报 `E0463 can't find crate`。修复：① `tests/demo_codegen_compile.rs` / `tests/embed_tuple_serialization.rs` / `tests/embed_unify_r15.rs` 的 `profile_dir_from_exe()` 增强识别 `.../<profile>/build/<crate>/<hash>/out` 形态（逐级上溯到 `<profile>`）；② 新增 `scripts/prepare_lane_deps.ps1`（把扁平布局的 rlib 递归收集到合成 `deps/`，可选 `-Build`），并集成进 `scripts/dual_track_gate.ps1`。修复后全量测试 60 套件全绿 **1139 passed / 0 failed**。
+- **账本标题规范化**：`scripts/normalize_bug_headings.ps1` 增强处理「缺 timestamp 的单括号形态」`## BUG-N [sev] <desc>`：timestamp 取正文 `发现:`/日期或占位，状态位取正文 `status:`/`状态：`（支持 `OPEN -> FIXED` 箭头取右端）或「修复+回归测试+commit」启发式。本次规范化 18 条历史遗留条目（BUG-469/470/471/472/473/475/477/478/479/480/450/434/482/483/484/485/486/487），原描述转 `- note:`；`scripts/bug_ledger_consistency.ps1` 门禁 PASS（243 条，标题 vs 正文 0 不一致），脚本幂等（二次 DryRun=0）。
+
 ### rs-lz 后端与原生 codegen 差分对齐（2026-10-27，fist-agent lang-zone 组合轮）
 - `--emit=rs-lz` 的 `rust_type` 对 `IrType.Any` 从 `Box<dyn Any>` 对齐为 `i64`（BUG-480）：无类型注解参数（`def f(x): return x + 1`）此前退化为 `Box<dyn Any>`，对之做 `+ 1i64` 触发 E0369、rs-lz 产物无法编译；原生 `emit.rs:247` 一直发 `i64`。rs-lz 侧其余两处 `Box<dyn Any>` 为 kwargs 桩（`.lz:2906` hardcode）与 `IrType.Duck`（`.lz:781`），均不受影响（`6bb52f5`）
 - 定位方式：`_probes/bigsweep.sh` 64 探针差分扫描唯一真缺陷即此；同批其余 7 例为假阳性（`edge_class/edge_nums/nest/nest2/latent_variants` 为无 main 库探针报 E0601；`sweep/g65_arith_div_zero`/`sweep/g66_arith_overflow` 为刻意测除零/溢出；`x + "a"` 与 `x[0]` 在原生侧同样 E0308/E0608，属双路一致的 ill-typed 程序，非 rs-lz 独有）

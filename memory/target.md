@@ -1,7 +1,24 @@
 ﻿# 当前阶段目标（Target）
 
-- 本轮聚焦：**编译 warning 清零打磨**（全仓 17 条 rustc warning → 0）
-- 验收条件：cargo build 0 warning 0 error、全量测试零回归、端到端产物编译+运行等价
+- 本轮聚焦：**测试基建环境适配 + 账本治理（Loomy cargo shim 扁平布局）**
+- 验收条件：cargo build 0 warning 0 error、全量测试零回归（1139 passed/0 failed）、端到端产物编译+运行等价、账本一致性门禁 PASS
+
+---
+
+## 2026-11-23 迭代-14:00（定时任务探索轮）：shim 布局适配 + 账本治理（T0r16）
+- 起点：HEAD=bd74b6c（上轮 iter-18:00 warning 清零后全绿基线）。前提检查：源文件最新改动距启动 33.6 分钟（≥5），继续。
+- **本轮判定：无未实现缺口，转打磨池**；但接手即遇**环境级阻塞** —— `cargo clean`（21.8GiB）后全量测试大面积红：30 个集成测试报 `E0463 can't find crate for lz_builtins`/`num_bigint`。
+- **根因（双重）**：
+  1. **陈旧 rlib 混合产物（E0514）**：`target/debug/deps` 里的 `libnum_bigint`/`liblz_builtins` 是旧工具链（异版本）编译的，与当前 rustc 1.100.0 不兼容；`cargo clean` 全清 + `cargo build -p lz_builtins` 同源重建后消除。
+  2. **shim 扁平布局无 deps/ 子目录**：本机 cargo 为 Loomy 环境 shim（`~\.cargo\bin\cargo.exe` 0 字节占位），`--out-dir=<target>/<profile>/build/<crate>/<hash>/out`、以多个 `-L dependency=build/<dep>/<hash>/out` 传依赖，**从不产 deps/**。项目测试与 `src/bridge/project.rs` 按标准布局用 `<rlib父目录>/deps`，恒失败。
+- **修复**：
+  - 3 个测试（`demo_codegen_compile` / `embed_tuple_serialization` / `embed_unify_r15`）的 `profile_dir_from_exe()` 增强识别 `.../<profile>/build/<crate>/<hash>/out` → 逐级上溯到 `<profile>`。
+  - 新增 `scripts/prepare_lane_deps.ps1`：把扁平布局 rlib 递归收集到合成 `deps/`（`-Build` 可预构建）。集成进 `scripts/dual_track_gate.ps1`。
+  - 5 个 scripts 统一转 UTF-8 BOM（防跨环境编码漂移）。
+- **账本治理**：`scripts/normalize_bug_headings.ps1` 增强处理「缺 timestamp 单括号形态」`## BUG-N [sev] <desc>`（状态位取正文 `status:`/`状态：`，支持 `OPEN -> FIXED` 箭头取右端，或「修复+回归测试+commit」启发式）；规范化 18 条历史遗留（BUG-469/470/471/472/473/475/477/478/479/480/450/434/482/483/484/485/486/487），补 `### FIXED` 小记。`scripts/bug_ledger_consistency.ps1` PASS（243 条，0 不一致）。
+- **门禁/验证**：①`cargo build --bin lang-zone` 0 warning 0 error（隔离车道）；②全量 `cargo test --no-fail-fast -j 1` 60 套件全绿 **1139 passed / 0 failed**；③端到端 `temp/_e2e_iter1400/probe.lz`（fib 递归）→ .rs → rustc 编译 → 运行输出 `55` exit 0（验证铁律）。
+- 账簿：本轮为环境适配 + 账本治理，非新缺陷；无新 bug 条目，补 [### FIXED] 小记（18 条账本可见性）。
+- 下一步：① rs-lz 保真边界扫描（`_probes/rslz*`，新用例）；② 其他语言适配器深化（C str/容器已有，mojo/scala 无工具链）；③ 把 `prepare_lane_deps` 加入常规 CI/门禁前置（当前 dual_track_gate 已接）。
 
 ---
 

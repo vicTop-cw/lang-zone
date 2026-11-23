@@ -26,6 +26,10 @@ if (Test-Path $tcFile) {
 $env:CARGO_TARGET_DIR = Join-Path $Root "target\lane-bootstrap"
 cargo build -p lz_builtins 2>&1 | Out-Null
 $env:CARGO_TARGET_DIR = Join-Path $Root "target\gate-test"
+# Loomy 定制 cargo shim 适配（迭代-14:00）：shim 产出扁平布局、无 deps/ 子目录，
+# 补合成 deps/ 使 `-L dependency=<profile>/deps` 可解析主 rlib 与传递依赖
+# （否则 E0463 can't find crate）。幂等，缺失则跳。
+& (Join-Path $Root "scripts\prepare_lane_deps.ps1") | Out-Null
 # 链侧统一 rlib 解析：把车道 rlib + 钉版 rustc 通过环境交给所有子进程
 # （src/bridge/project.rs / hotreload.rs 已改用 builtins_rlib_path()：env > 车道 > 默认；
 #  只拷主 rlib 不够——传递依赖 num-bigint 等须同目录 deps，否则 rustc 报 E0463）

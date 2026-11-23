@@ -2985,7 +2985,8 @@ BUG-441（账本=BUG-441 号即 Dict 键实参形态）：
 commit：92e3cc8（重映射自 未记）
 ### FIXED(2026-10-26 / BUG-468)
 
-## BUG-469 [high] rs-lz match scrutinee 未对齐原生「纯 Var 一律 .clone()」
+## BUG-469 [2026-10-26T00:00:00Z] [high] FIXED
+- note: rs-lz match scrutinee 未对齐原生「纯 Var 一律 .clone()」
 - 类目: rs-lz 保真 / Stmt.Match scrutinee 变换缺失（route B）
 - 发现: 2026-10-26
 - 复现: 对 `_probes/pat_enum.lz`（`def area(s: Shape) = match s:`，enum Shape 有
@@ -3009,7 +3010,8 @@ commit：92e3cc8（重映射自 未记）
     ret_is_ref_opt / has_ref_mut 分支均未覆盖，留后续。
 - status: OPEN -> FIXED
 
-## BUG-470 [high] rs-lz match scrutinee 未对齐原生 Str→.as_str() / List/Vec/Tuple→.as_slice()
+## BUG-470 [2026-10-26T00:00:00Z] [high] FIXED
+- note: rs-lz match scrutinee 未对齐原生 Str→.as_str() / List/Vec/Tuple→.as_slice()
 - 类目: rs-lz 保真 / Stmt.Match scrutinee 变换（route B），接续 BUG-469
 - 发现: 2026-10-26
 - 复现: `_probes/rslz/str_match.lz`（`def kind(name: str) = match name: case "hello"`）、
@@ -3033,7 +3035,8 @@ commit：92e3cc8（重映射自 未记）
 - commit: 497d66d（重映射自 c2713b6）
 - status: OPEN -> FIXED
 
-## BUG-471 [high] rs-lz 列表模式发射两处 rustc 硬错（..rest 语法 + slice 元素未解引用）
+## BUG-471 [2026-10-26T00:00:00Z] [high] FIXED
+- note: rs-lz 列表模式发射两处 rustc 硬错（..rest 语法 + slice 元素未解引用）
 - 类目: rs-lz 保真 / Pattern.List 发射（route B）；BUG-470 修复后 list_match 探针暴露
 - 发现: 2026-10-26
 - 复现: `_probes/rslz/list_match.lz` 的 rs-lz 产物过 rustc 报两错。
@@ -3075,7 +3078,8 @@ oracle：pattern_gen.rs:187-190 —— `Some(n) => format!("{} @ ..", n)`；`Non
 验证：cargo test -j 4 -- --test-threads=1 全绿（41 套件）。
 commit：d53ea29（重映射自 165b844）
 
-## BUG-472 [high] rs-lz auto_mut 未标记字段/下标赋值底座 Var
+## BUG-472 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz auto_mut 未标记字段/下标赋值底座 Var
 
 类目：rs-lz 差分（rslz2/dict_ops.lz）
 发现：`let c = Cache(d: {}); c.d["a"] = 1` 的 rs-lz 产物 `let c` 缺 `mut`，E0596。
@@ -3088,7 +3092,8 @@ oracle：stmt_gen.rs 原生自动 mut 扫描把写入底座记入 auto_mut_local
 验证：dict_ops rs-lz COMPILE+RUN 出 1|2；cargo test -j 4 -- --test-threads=1 全绿。
 commit：2688eb7（重映射自 74798a1）
 
-## BUG-473 [high] rs-lz 固有方法发成 `pub fn Type.method` 自由函数
+## BUG-473 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz 固有方法发成 `pub fn Type.method` 自由函数
 
 类目：rs-lz 差分（rslz2/struct_method.lz、enum_method.lz）
 发现：rs-lz 产物 `pub fn Point.sq(self: Self) -> i64 {`，函数名带点号非法 Rust。
@@ -3101,7 +3106,8 @@ oracle：decl_gen.rs:169-182 —— 名含 `.` 即 `impl <ty> {` + 纯方法名 
 commit：62be5d4（重映射自 4897f87）
 已知局限：方法自身泛型 impl 块暂未带泛型。
 
-## BUG-475 [high] rs-lz 递归类型字段未 Box 包装（E0072）
+## BUG-475 [2026-10-27T00:00:00Z] [high] FIXED
+- note: rs-lz 递归类型字段未 Box 包装（E0072）
 
 类目：rs-lz 差分（rslz4/nested_match.lz）
 发现：`enum Tree = Leaf(v:int) | Node(l: Tree, r: Tree)` 的 rs-lz 产物 `l: Tree`，
@@ -3128,7 +3134,8 @@ rustc 编译运行输出 6（原生一致）；cargo test --test lz_ir_bootstrap
 状态：FIXED
 commit：e8015d6（声明+构造）/ 471e834（解构）（重映射自 1fdf50c / 6df5a51）
 
-## BUG-477 [high] rs-lz 把内建类型转换 `str(x)`/`int(x)`/`f64(x)` 原发成函数调用
+## BUG-477 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz 把内建类型转换 `str(x)`/`int(x)`/`f64(x)` 原发成函数调用
 
 现象：`--emit=rs-lz` 对 `str(self.x)` 生成 `str(self.x.clone())` → rustc E0423
 "expected function, found builtin type `str`"；`int(x)`/`f64(x)` 同样原发成
@@ -3150,7 +3157,8 @@ codegen 无该表，极少见）；用户 struct 的 `__str__`/`__int__`/`__floa
 回归测试：rs_lz_builtin_type_cast_conversions（编译 + 运行断言）
 commit：71bcfae（重映射自 未记）
 
-## BUG-478 [medium] rs-lz 内建 stdlib magic 遮蔽同名用户函数
+## BUG-478 [2026-10-27T12:15:00+08:00] [medium] FIXED
+- note: rs-lz 内建 stdlib magic 遮蔽同名用户函数
 
 现象：用户定义 `def sum(xs: List<int>) -> int = xs.len()` 后调用 `sum(xs)`，
 rs-lz 发成 `xs.iter().copied().sum::<i64>()`（BUG-430 的 stdlib 魔法）而非
@@ -3182,7 +3190,8 @@ lz_ir_bootstrap 22 项全绿；新增回归测试 `rs_lz_self_user_fn_shadows_st
 状态：FIXED（commit 6bb52f5）
 commit：73482a1（重映射自 6bb52f5）
 
-## BUG-479 [high] rs-lz 前端自检对含 match 的程序失败（E0533 Expr::BlockExpr）
+## BUG-479 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz 前端自检对含 match 的程序失败（E0533 Expr::BlockExpr）
 
 现象：`lang-zone <p>.lz --emit=rs-lz` 对任何含 `match` 表达式的程序报
 `LZ rs-lz frontend rustc 失败: error[E0533]: expected value, found struct variant
@@ -3212,7 +3221,8 @@ Rust 文本与 native 一致；match 探针（含 guard + 裸 match 作表达式
 状态：FIXED（commit 9332bbe）
 commit：cf24ea3（重映射自 9332bbe）
 
-## BUG-450 [high] native List<str>.contains("a") 实参缺 .to_string()（E0308 expected &String）
+## BUG-450 [1970-01-01T00:00:00Z] [high] FIXED
+- note: native List<str>.contains("a") 实参缺 .to_string()（E0308 expected &String）
 
 现象：`def main() = let v: List<str> = ["a","b"]; print(v.contains("a"))`，
 `lang-zone --emit=rs`（原生 codegen）渲染 `v.contains("a")`，Rust 端
@@ -3238,7 +3248,8 @@ Set<str> `.contains`（HashSet::contains 走 &Q=Borrow<str>，`&"a"` 本可，
 回归测试：rs_lz_list_str_contains_borrows_string（native + rs-lz 双路编译 + 运行断言）
 状态：FIXED（commit 见本轮）
 
-## BUG-434 [medium] native trait 方法返回关联类型发裸名 `-> Item` 而非 `-> Self::Item`（E0425）
+## BUG-434 [2026-10-27T01:26:00+08:00] [medium] FIXED
+- note: native trait 方法返回关联类型发裸名 `-> Item` 而非 `-> Self::Item`（E0425）
 
 现象：`trait BoxLike = type Item; def item(self) -> Item`，原生 `--emit=rs` 生成
 `fn item(&self) -> Item;`，关联类型名以裸名出现在返回类型里 → rustc
@@ -3383,7 +3394,8 @@ BUG-290 分支要求 `!is_kwarg_call(args)`，关键字形不进；下一分支 
 新增回归测试 `rs_lz_self_dict_kwarg_literal`（tests/lz_ir_bootstrap.rs）双路断言
 `BTreeMap::from([("a".to_string(), 1i64), ("b".to_string(), 2i64)])` 且运行输出 `2`。
 
-## BUG-480 [medium] rs-lz 对无类型注解参数退化为 Box<dyn Any>（E0369 编译失败）
+## BUG-480 [1970-01-01T00:00:00Z] [medium] FIXED
+- note: rs-lz 对无类型注解参数退化为 Box<dyn Any>（E0369 编译失败）
 
 现象：`_probes/golden_input.lz`（`def f(x): return x + 1`）下 `--emit=rs-lz` 生成
 `pub fn f(x: Box<dyn Any>) -> i64`，函数体 `return x + 1i64;` → rustc E0369
@@ -3413,7 +3425,8 @@ rust_type）与 `IrType.Duck`（`.lz:781`，未改），故改 Any 分支安全�
 运行输出 `42`，并对照 native 同样发 i64）。
 状态：FIXED
 commit：31e0510（重映射自 未记）
-## BUG-482 [high] rs-lz 的 esc_rust 按字节切片字符串，多字节 UTF-8 字符触发运行时 panic
+## BUG-482 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz 的 esc_rust 按字节切片字符串，多字节 UTF-8 字符触发运行时 panic
 
 现象：`--emit=rs-lz` 对任何含非 ASCII 字符的 LZ 源失败。实测 269 文件全量差分扫描
 （`_probes/fastsweep.sh`，16 并行）得到 16 例 `RSLZ_FAIL_NATIVE_OK`（rs-lz 失败而
@@ -3458,7 +3471,8 @@ NaN 字面量面由 BUG-483 单独收口。同理 p25_long_or.lz 的失败也与
 BUG-484 单独收口。此处不删原叙述（追加不改销毁历史），仅更正归因。
 commit：bba18f8（重映射自 未记）
 
-## BUG-483 [high] rs-lz 的 `.lzrs` 生成端把 `NaN`/`inf` f64 字面量序列化为裸 `NaN.0`，重编译时未绑定变量
+## BUG-483 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz 的 `.lzrs` 生成端把 `NaN`/`inf` f64 字面量序列化为裸 `NaN.0`，重编译时未绑定变量
 
 现象：`--emit=rs-lz` 对 `DEMO/lz_std/math.lz` 报 `未绑定变量: NaN`（IR 构建失败）。
 该文件顶部 `const NAN = 0.0 / 0.0; const INF = 1.0 / 0.0;` 常用量折叠在 IR 层变
@@ -3483,7 +3497,8 @@ commit：bba18f8（重映射自 未记）
 状态：FIXED
 commit：fb4be42（重映射自 未记）
 
-## BUG-484 [high] rs-lz 库的 `gen_expr` 对左结合的 or/and 长链递归，53 层即溢出 8MB 主线程栈
+## BUG-484 [1970-01-01T00:00:00Z] [high] FIXED
+- note: rs-lz 库的 `gen_expr` 对左结合的 or/and 长链递归，53 层即溢出 8MB 主线程栈
 
 现象：`--emit=rs-lz` 对 `div-tools/probes/p25_long_or.lz` 报
 `thread 'main' has overflowed its stack`。该文件 `is_alpha(c: str) -> bool` 是一串
@@ -3508,7 +3523,8 @@ bool { ... }` 且 4 个打印断言（`"a"/"Z"/"_"/"1"`）输出正确。回归�
 div-tools/probes/p4b_unicode.lz 三个原失败探针均通过。`lz_ir_bootstrap` 25/25 全绿。
 状态：FIXED
 commit：2b56281（重映射自 未记）
-## BUG-485 [high] `let x: Complex = ..` 类型注解发射裸 `Complex`（未导入），与值侧 `lz_builtins::Complex64` 不一致
+## BUG-485 [1970-01-01T00:00:00Z] [high] FIXED
+- note: `let x: Complex = ..` 类型注解发射裸 `Complex`（未导入），与值侧 `lz_builtins::Complex64` 不一致
 
 现象：`latent_variants.lz` 的 `let comp: Complex = 3.14i` 生成
 `let comp: Complex = lz_builtins::Complex64::new(0.0, 3.14);`，rustc 报
@@ -3542,7 +3558,8 @@ bootstrap IR 缺口（LZ 编译器的 IR 模型尚无这些变体），非 BUG-4
 状态：FIXED
 状态：FIXED
 commit：44216e4（重映射自 未记）
-## BUG-486 [medium] LINK RECIPE 的 `-L dependency` 指向 rlib 所在目录而非 deps/，照抄即 E0463
+## BUG-486 [1970-01-01T00:00:00Z] [medium] FIXED
+- note: LINK RECIPE 的 `-L dependency` 指向 rlib 所在目录而非 deps/，照抄即 E0463
 
 现象：`lang-zone <f>.lz` 生成的 stderr 链接配方
 `rustc --edition 2021 --extern lz_builtins=<rlib> -L dependency=<dir> -O <f>.rs`
@@ -3567,7 +3584,8 @@ E0463。`cargo test --lib` 463/463 全绿。
 在 cmd/PowerShell 直接可复制——本 bug 只关路径目录，与斜杠方向无关。
 状态：FIXED
 commit：4520840（重映射自 未记）
-## BUG-487 [high] 用户 `struct HashMap` 与内建 `HashMap` 撞名，命名构造器被误生成 `BTreeMap::from([...])`
+## BUG-487 [1970-01-01T00:00:00Z] [high] FIXED
+- note: 用户 `struct HashMap` 与内建 `HashMap` 撞名，命名构造器被误生成 `BTreeMap::from([...])`
 
 现象：`FIND_BUG/lib_hashmap/hashmap.lz` 定义 `struct HashMap = buckets: ...; values: ...; _size: int; _num_buckets: int`，
 `new()` 末尾 `HashMap(buckets: buckets, values: values, _size: 0, _num_buckets: 16)` 生成的 `.rs` 变成
@@ -3667,7 +3685,7 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-19T14:41:59Z / BUG-489, BUG-496)
 - evidence: 回归锁：tests/native_variant_qual.rs 8/8（variant_qualification_statement_position / ..._in_typed_lambda_body / ..._in_lambda_argument / custom_enum_variant_in_closure_body / custom_enum_variant_qualified / brace_body_unit_tail_main / brace_body_value_tail_main / indent_body_value_tail_main），已纳入 scripts/dual_track_gate.ps1（判据 check:T0r61:r1 passed）；真源 src/ir/codegen（变体名表传进 helpers::is_ctor_name，变体构造器不再进 clone 路径），提交 128c359/c0bad45。附带：harness 改为同源 rlib 解析（env>车道>默认）消除 E0514 假红。
-## BUG-497 [2026-10-29T14:02:00+08:00] [medium] OPEN
+## BUG-497 [2026-10-29T14:02:00+08:00] [medium] FIXED
 - note: project 模式同语言 embed 按语言聚合、不按模块分组（多模块产物互相覆盖）
 - summary: project 模式下 embed 产物只按语言聚合、不按模块分组：多模块同语言时后写覆盖前写，产物目录/文件名撞车，最后一个模块赢。根因：模块身份在 `src/project.rs:347` 的 `merge_modules` 处被抹平——合并后的 IR 只剩一份，codegen 无从知道某个 embed 块来自哪个模块。修法：`src/ir/node.rs:396-398` 给嵌入块节点加 `origin: Option<String>` 承载模块身份，`src/project.rs` 的 `merge_modules` 打 origin，codegen 分组键由 `lang` 改为 `(origin, lang)`；单文件路径 `origin=None`，产物与改前 diff 0 行（零回归）。
 - 判据: `cargo test --test embed_project_grouping`（4/4）；单文件产物改前/改后逐字节对比 0 行差异。
@@ -3694,7 +3712,7 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-19T14:41:59Z / BUG-495, BUG-498, BUG-499)
 - evidence: 回归锁（均纳入 scripts/dual_track_gate.ps1，check:T0r61:r1 passed）：BUG-495 → tests/embed_stem_parity.rs 3/3（parity 摘 ignore 真跑，产物名/目录与原生逐字节一致）+ tests/lz_ir_bootstrap.rs 25/25；BUG-498 → tests/embed_project_emit.rs 3/3（断言 build/embed/** 真落盘）；BUG-499 → tests/embed_stub_shadowing.rs 4/4（短名/全名调用真 wrapper 而非 i64::MAX 兜底桩）。真源：src/bridge/project.rs / hotreload.rs 统一 builtins_rlib_path()（env>车道>target/debug），并修 harness 取数；提交 842c4c5/7355a86/f3d2080 + af6d8bd。
-## BUG-500 [2026-10-29T14:05:00+08:00] [medium] OPEN
+## BUG-500 [2026-10-29T14:05:00+08:00] [medium] FIXED
 - note: [测试质量] 三条负向探针是假阳性负例（测不到名字声称的东西）
 - summary: 类别「测试质量」。`div-tools/syntax_probes/` 下三条负向探针名不副实：文件确实编译失败，但失败在别的地方，测不到名字声称的诊断，于是探针恒绿而挡不住对应回归——`neg_fn_missing_colon.lz` 冒号其实写了、真正缺的是函数体的 `=`（报 `Expected Eq` 而非 `Expected Colon`）；`neg_macro_unclosed.lz`（宏未闭合）与 `neg_trait_missing_fn.lz`（trait 缺函数体）同族。修法：三条各自改成真测目标诊断——只触发该诊断、其余语法合法的最小样本，文件头固写「测什么 / 期望什么错误 / 为什么原来那条测歪了」三段（`git show 8ca306f`：3 文件 +67/−8）。
 - 判据: 三条探针逐条复跑，实际错误必须等于该文件头「期望什么错误」一行所写（如 `neg_fn_missing_colon.lz` 期望 `Parse error: Expected Colon, got Ident("int") at pos 5`）。
@@ -3713,7 +3731,7 @@ commit：3f8512e（重映射自 未记）
 
 ### FIXED(2026-11-19T12:21:16Z / BUG-501)
 - evidence: 回归锁：div-tools/syntax_matrix.ps1 -SelfTest（判据边界 8 用例 + UTF-8 严格解码 4 项 + 内容断言防恒真 2 项；含 v1 恒真 / v2 必须 False 的对照）已纳入 scripts/dual_track_gate.ps1 前置步骤，判据回退即门禁 red。实证：check:T0r59:r1 passed（SelfTest PASS + 门禁 PASS）；全量矩阵 正例 38/38（SKIP 2）·内容断言 5/5·反例 25/25（旧回归线 24/25 的 raise 探针假阳性已被并行轮次修复），报告 tests/syntax-matrix-report.md 重新生成（c940e89）。真源：div-tools/syntax_matrix.ps1 判据 v2（stderr 落文件再读 + DiagHeadPattern/DiagDenyPattern 噪声排除）
-## BUG-502 [2026-10-29T18:41:00+08:00] [medium] OPEN
+## BUG-502 [2026-10-29T18:41:00+08:00] [medium] FIXED
 - note: 字符串字面量 `raise` 的豁免是有意实现但 SYNTAX/09 未记，探针 `neg_error_uncaught_panic_ok` 因此是假阳性
 - summary: 现象：文档承诺「raise 必须声明 raises」，但 `raise "oops"` 实测 rc=0 不报错；覆盖该承诺的负向探针 `div-tools/syntax_probes/neg_error_uncaught_panic_ok.lz` 写的是字符串 raise，于是探针**恒通过**（rc=0 也被算成 neg 通过），是假阳性负例、挡不住对应回归。根因：`src/ir/semantic_check.rs` 的 `Stmt::Raise` 对 raise 的**字面量形态**（StrLit/FStrLit/RawStrLit）有意豁免 raises 声明（裁决：消息式错误不必每处声明），但这条裁决从未落纸，而 `SYNTAX/09-错误处理.md` §2.2 与 DEMO 注释都写「raise 必须声明」，文档与实现打架。修法：① 文档补 §2.2.1——豁免边界是字面量**形态**而不是 `str` 类型（变量 / 拼接 / 返回值形式的 str 仍需声明 raises），给两个 ✅ 与两个 ❌ 例子并尾注指向源码判据；§2.5 与 §六 里自相矛盾的 `raise "oops"` 反例改成类型化 raise；② 探针改为 `enum AppError` + `raise AppError.Boom(..)`，实测 rc=1 且诊断命中「未在签名中声明 raises」。
 - 判据: 探针复跑须 rc=1 且诊断含 raise 未声明字样：`lz build div-tools/syntax_probes/neg_error_uncaught_panic_ok.lz`；对照三条——字符串 `raise "oops"` rc=0（豁免生效）、变量/拼接形式 str raise rc=1、类型化 raise rc=1。文档口径为 `SYNTAX/09-错误处理.md` §2.2.1（含 ✅/❌ 四例）。
@@ -3721,7 +3739,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: `find_bug_bugs` 46/46 + `--lib` 469/469；探针由「字符串 raise（rc=0、恒通过）」改为类型化 raise（rc=1 且命中诊断），假阳性负例清零；矩阵反例随之 24/25 → 25/25。
 状态：FIXED
 
-## BUG-503 [2026-10-29T18:42:00+08:00] [low] OPEN
+## BUG-503 [2026-10-29T18:42:00+08:00] [low] FIXED
 - note: `scan.rs` 的 f-string 预扫描段拆分（move-only，sha1 等价）——重构/测试质量类
 - summary: 类别「重构/测试质量」，非缺陷而是可核查的等价性重构，记账以免与「顺手改动」混淆。现象：`src/ir/codegen/scan.rs` 体量居前且含一段与主流程无关的 f-string/lambda 绑定预扫描。做法：把该段 **640 行 / 7 函数**整段移到新文件 `src/ir/codegen/scan/fstring_scan.rs`，原文件 2,692 → 2,060 行；迁入正文与被剪段落 **sha1 相同（24,114 bytes / 640 行）**，即逐字节搬运、无改写；7 函数本就 `pub(crate)`，故零可见性变更，外部仅 1 处调用点经 `pub(crate) use` 转发，`src/ir/codegen/mod.rs` 零改动、lib 告警 9 条零新增。
 - 判据: 等价性可复跑：`git show 6ffcd75 -- src/ir/codegen/scan.rs src/ir/codegen/scan/fstring_scan.rs`（看增删两侧是否同一段正文）；机器判据：取 `git show 6ffcd75:src/ir/codegen/scan/fstring_scan.rs` 去掉文件头若干行后，其正文应作为**连续子串**出现在 `git show 6ffcd75^:src/ir/codegen/scan.rs` 中且两侧 sha1 相同（本轮实测：命中，切片 sha1 一致）。
@@ -3729,7 +3747,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: `cargo test --lib` 469/469、`cargo test --test codegen_corner_fixes` 44/44、`cargo test --test lz_ir_bootstrap` 25/25；lib 告警 9 条零新增。
 状态：FIXED
 
-## BUG-504 [2026-10-29T18:43:00+08:00] [low] OPEN
+## BUG-504 [2026-10-29T18:43:00+08:00] [low] FIXED
 - note: 大文件拆分计划盘点：文件级拆分已全部落地，剩余体积在**单函数**（`gen_expr` 7,328 行）
 - summary: 类别「计划盘点」，不是代码缺陷，是对「还有哪些大文件要拆」这一长期假设的证伪。现象：计划表把「≤4,000 行/文件」当作目标，但按现 HEAD 复核，**文件级拆分已全部落地**——剩下的体积不在文件边界上，而在单个函数体内：`gen_expr` **7,328 行**（`src/ir/codegen/expr_gen.rs` 的 687–8014 行，占该文件 86%）、`gen_stmt` 2,772 行、`convert_expr` 2,403 行，且纯 move-only 在 `gen_expr`/`gen_stmt`/`convert_expr` 三处**已无收益**（再搬只能拆函数，属语义改写而非搬运）。结论/建议：① 指标由「≤4,000 行/文件」改为双指标「**文件 ≤2,500 行 + 单函数 ≤800 行**」，否则计划永远显示「已达成」而最大函数仍在膨胀；② 计划表两处记录已过时需更正（`gen_expr` 记 5,100 → 现 7,328；`gen_stmt` 记 1,850 → 现 2,772）；③ 下一批按风险升序，最高风险项（`expr_gen.rs`/`stmt_gen.rs` 内部按 `ExprKind`/`StmtKind` 提取子函数）必须**单独立项**、不混进 move-only 批次，且新旧发射需对照 `codegen_corner_fixes` 44 条守护区。
 - 判据: 见报告 `Reports/split-plan-2026-10-29.md`（§1 结论、§2 最大 10 文件表、§3.4 等价性证明、§4 下一批风险排序、§5 指标修正）；行数口径可复核：`wc -l src/ir/codegen/expr_gen.rs`（8,548 行）与 `gen_expr` 函数区间 687–8014（7,328 行）。
@@ -3737,7 +3755,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: 不适用（纯盘点，不改代码）；盘点结论对既有测试零影响，`--lib` 469/469、corner 44/44、bootstrap 25/25 在同批提交 6ffcd75 上照旧通过。
 状态：FIXED（盘点完成）
 
-## BUG-505 [2026-10-30T09:15:00+08:00] [medium] OPEN
+## BUG-505 [2026-10-30T09:15:00+08:00] [medium] FIXED
 - note: 语法矩阵正例只判 rc、不校验产物内容（能跑过≠语义正确）——测试质量类
 - summary: 类别「测试质量」。现象：`div-tools/syntax_matrix.ps1` 正例判据只有 `rc==0` 一维，产物是否本次生成、`.rs` 里到底写出了什么统统不参与判定——「编译过了」被当成「特性写对了」，读不到产物或写出空文件也算过，语义错位的样本照样绿，等价于把「能跑过」当作「语义正确」。根因/结论：判据缺内容层，正例验收无产物内容证据。修法（commit 7d43b42）：正例升级为 rc + 产物本次新鲜度 + **声明式内容断言**——单一入口 `Test-ContentVerdict` + `$script:ContentChecks` 表，先配 struct/enum/match/closure/trait-impl **5 特性**（各一组必命中正则）；口径：rc==0 且 `.rs` 为本次产物且全部正则命中，不满足记 `FAIL_CONTENT` 并计入退出码；**空文件/缺文件判不通过**（堵死「读不到当通过」）；报告新增「正例内容断言」明细表 + 「仅 rc 判定清单」（3 条显式标注 + 33 条未配置汇总）。注：脚本须保持 UTF-8 带 BOM（PS 5.1 否则按 GBK 读，中文串解析报错）。
 - 判据: `powershell -NoProfile -File div-tools\syntax_matrix.ps1 -SelfTest`（[1]-[4] 全过，[4] 即内容断言的反向证据）；全量 `powershell -NoProfile -File div-tools\syntax_matrix.ps1` 读数：正例 38/38（SKIP 2 显式列出）、**内容断言 5/5**、反例 25/25，脚本 exit 0；报告 `tests/syntax-matrix-report.md` 的「正例内容断言」明细表与「仅 rc 判定清单」两段即本条的机器判据。
@@ -3745,7 +3763,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: 判据加严后既有读数零转红（正例 38/38、反例 25/25 维持），新增内容断言 5/5；改动面 `git show 7d43b42 -- div-tools/syntax_matrix.ps1 tests/syntax-matrix-report.md`（脚本 +172 行、报告 +37 行）。未配置内容断言的 33 条特性在报告里显式汇总，不静默判过。
 状态：FIXED
 
-## BUG-506 [2026-10-30T09:16:00+08:00] [low] OPEN
+## BUG-506 [2026-10-30T09:16:00+08:00] [low] FIXED
 - note: DEMO/10_error_handling/panic_raise_try.lz 注释与 raise 字面量豁免实现矛盾（留着永不失败的字符串 raise 反例）
 - summary: 现象：DEMO 注释写「raise REQUIRES raises」，而 `src/ir/semantic_check.rs` 对 raise 的**字面量形态**（StrLit/FStrLit/RawStrLit）有意豁免 raises 声明（SYNTAX/09 §2.2.1 已裁决并落纸，见 BUG-502）——文档、DEMO 注释、实现三者口径不一；且示例里留了一条**永远不会失败**的「反例」`raise "oops"`，读者照抄看不出豁免边界在哪。根因：BUG-502 只改了 SYNTAX/09 文档与该特性的负向探针，DEMO 侧注释与示例未同步收口。修法（commit 7d43b42，与 BUG-505 同批）：① 注释改成**两种形态**并列——字面量形态免声明 raises，变量/拼接/返回值形态仍须声明；② 反例改为类型化 `raise ValueError(oops)`（真触发「未在签名中声明 raises」的诊断），该 DEMO 文件整体仍是正例（实测 rc=0）。
 - 判据: DEMO 门禁跑 `DEMO/10_error_handling/panic_raise_try.lz` 仍 rc=0；`git show 7d43b42 -- DEMO/10_error_handling/panic_raise_try.lz`（+25 行区间）可见注释两段式与类型化 raise；文档口径以 `SYNTAX/09-错误处理.md` §2.2.1（含 ✅/❌ 四例）为准（BUG-502）；负向对照：类型化 raise 未声明 → `lz build` rc=1 且命中诊断，字符串 raise → rc=0（豁免生效）。
@@ -3753,7 +3771,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: 与 BUG-502 同族收口（§2.2.1 + 探针已修，本条补 DEMO 侧注释与示例）；DEMO 全量门禁读数不变，该文件仍计入正例；假「反例」清零。
 状态：FIXED
 
-## BUG-507 [2026-10-30T09:17:00+08:00] [low] OPEN
+## BUG-507 [2026-10-30T09:17:00+08:00] [low] FIXED
 - note: macros/expand.rs 混两职责：解析器 1071 行/18 函数搬到 macros/parse.rs（move-only，sha1 等价）——重构类
 - summary: 类别「重构」，非缺陷，按 BUG-503 口径记账以免与「顺手改动」混淆。现象：`src/macros/expand.rs` 一个文件同时承担「宏展开」与「宏定义解析」两职责，2,530 行里被展开逻辑压着 1,071 行解析器，改动面与阅读面一起膨胀。做法（commit 189d9a5）：expand.rs L1131–2201 整段解析器（`extract_macro_defs` / `parse_macro_expr` / `skip_*` / `collect_*` / `tokens_to_string` 等 **18 个函数**）搬到 `src/macros/parse.rs`，原位置留 4 行 `pub use` 转发，外部路径 `crate::macros::expand::*` 不变（`ir/mod.rs`、`interp.rs`、`main.rs`、`incr.rs`、`import_loader.rs` 调用点零改动），`src/macros/mod.rs` 加 1 行 `mod parse;`；expand.rs **2530 → 1466 行**。等价性（**move-only**）：被剪段落 **sha1 `652d9efc…`** 与 parse.rs 正文（归一唯一一处可见性前缀后）**逐字节相同**；`git diff -U0` 只有 3 个 hunk（去 BinaryOp 导入 / 旧横幅改转发横幅 / 删段 + 4 行转发）；numstat 6 insertions / 1070 deletions；尾部 `mod tests` 327 行与 HEAD blob 逐字节相同。唯一必要调整：`tokens_to_string` 需 `pub(super)`（仍被留下的 `MacroExpander` 调用，父模块看不到子模块私有项）。
 - 判据: 等价性可复跑——取 `git show 189d9a5^:src/macros/expand.rs` 的 L1131–2201 段落与 `git show 189d9a5:src/macros/parse.rs` 正文比 sha1（同一 `652d9efc…`）；`git show 189d9a5 -- src/macros/expand.rs src/macros/parse.rs src/macros/mod.rs` 看增删两侧是否同一段正文；行数口径 `wc -l src/macros/expand.rs`（1466）/ `wc -l src/macros/parse.rs`（1080）。
@@ -3761,7 +3779,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: `cargo build` 0 error 且 lib 告警 9→9（清单逐条相同）；`cargo test --lib` 469/469（含 `macros::expand::tests` 10/10）、`cargo test --test find_bug_bugs` 46/46、`cargo test --test lexer_parser_core` 11/11。
 状态：FIXED
 
-## BUG-508 [2026-10-30T09:18:00+08:00] [low] OPEN
+## BUG-508 [2026-10-30T09:18:00+08:00] [low] FIXED
 - note: parser/expr.rs 的 parse_pattern 186 行拆到 pattern.rs（move-only，impl Parser 固有方法免动 stmt.rs 5 处调用）——重构类
 - summary: 类别「重构」。现象：`src/parser/expr.rs` 的 `ParserExprExt` 名义是「表达式」，实际挂着唯一一个大方法 `parse_pattern`（**186 行 / 8,717 B**）——通配/区间/rest/点路径/元组/列表/字典/ref-mut 全在它自己的 match 内自递归，表达式文件被模式解析占去一块。另正一处盘点误差：该 trait 实为 **24 个方法**（盘点曾记 48），与 BUG-504「计划表记录过时需更正」同一教训。做法（commit c74af9f）：拆到新文件 `src/parser/pattern.rs`，写成 `impl Parser { pub(crate) fn parse_pattern }` **固有方法**、不新建 trait——固有方法免 trait 导入，故 `stmt.rs` 的 **5 处调用点（在禁改名单内）零改动**，`expr.rs` 自身 2 处调用点同样零改动；`ParserExprExt` 里的声明删除、trait 纯化为纯表达式；`pub(super)` 字段升级 0 个；`src/parser/mod.rs` 加 1 行 `mod pattern;`；expr.rs **2376 → 2188 行**。等价性（**move-only**）：原块 sha1 `629f9544…` → 搬入后 `b80219f7…`，与「仅签名行加 `pub(crate)`」的期望**逐字节相等**（BYTE-EXACT MATCH），unified diff **恰 1 行**（签名行），方法体 0 改动。
 - 判据: 等价性可复跑——对搬出块（`git show c74af9f^:src/parser/expr.rs` 的 parse_pattern）与搬入块（`git show c74af9f:src/parser/pattern.rs`）做「仅改签名行」归一后比 sha1，应同为 `b80219f7…` 且 unified diff 恰 1 行；`git show c74af9f -- src/parser/expr.rs src/parser/pattern.rs src/parser/mod.rs`；行数口径 `wc -l src/parser/expr.rs`（2188）/ `wc -l src/parser/pattern.rs`（201）。
@@ -3769,7 +3787,7 @@ commit：3f8512e（重映射自 未记）
 - 回归: `cargo build` 0 error、lib 告警 9→9；`cargo test --lib` 469、`cargo test --test lexer_parser_core` 11、`cargo test --test find_bug_bugs` 46、`cargo test --test lz_semantic_cases` 17；stmt.rs / expr.rs 共 7 处调用点零改动。
 状态：FIXED
 
-## BUG-509 [2026-10-30T09:19:00+08:00] [low] OPEN
+## BUG-509 [2026-10-30T09:19:00+08:00] [low] FIXED
 - note: ir/codegen/helpers.rs 2076 行/58 函数按副作用形态三切 pred/scan/emit（三新文件反向重建 HEAD 版 sha1 3e895d71… 逐字节相等）——重构类
 - summary: 类别「重构」。现象：`src/ir/codegen/helpers.rs` 2,076 行 / 58 个函数堆在一个「helpers」杂件筐里，职责边界无从判断。上一轮设想的「谓词/渲染/类型族」三刀**照字面做不出来**：文件里已无 `render_*` / `emit_*` / `rust_type` 这些名字，类型族只剩 10 个函数 / 231 行，独立成模块会是 175 行碎片。结论：改按**副作用形态**归并切三刀（commit ad05098）——`pred`（29 函数 / 804 行，只读判定）/ `scan`（15 / 728，递归遍历写集合）/ `emit`（14 / 535，返回 String + `IrType` 构造），各成 `src/ir/codegen/helpers/` 下新文件。等价性（**move-only**，本批最硬的一条）：用三个新文件**反向重建 HEAD 版 helpers.rs**，重建结果 **sha1 `3e895d71…` 与 HEAD 逐字节相等**；58/58 函数 span 逐字节 sha1 全等，`missing=[]`、`extra=[]`；diff 单 hunk 13 插入 / 2075 删除。接线：helpers.rs 缩到 **14 行**（`mod` + `pub(crate) use`），调用面一行未改（`mod.rs` / `stmt_gen.rs` 的 glob 与全路径都照常解析）；依赖方向 `pred`（叶子）← `scan`、`emit`，无环。
 - 判据: 反向重建判据可复跑——按 HEAD 版顺序拼接三个新文件的正文（去掉各自新增的文件头横幅）后 `sha1sum`，应等于 `git show ad05098^:src/ir/codegen/helpers.rs | sha1sum`（`3e895d71…`）；58/58 函数 span sha1 全等（missing/extra 皆空）；`git show ad05098 --stat`（helpers.rs −2075 / 三新文件 +544/+811/+735）；行数口径 `wc -l src/ir/codegen/helpers.rs`（14）、`pred.rs`（811）、`scan.rs`（735）、`emit.rs`（544）。
@@ -3863,3 +3881,7 @@ commit：3f8512e（重映射自 未记）
 - fix: ① generate_pyfunction 改为真实委托 __py_<name>(args)，generate_module 顶部注入 extern "Rust" 委托声明（generate_delegate_decls）。② C_TY 补 char→str；methods() 修正指针返回函数名（trim_start_matches('*')）与形参名（左行纳入整标识符）提取；dispatch_file 发 extern 原型 + str 形参（const char* argv 原样）/str 返回（OK: + __lz_emit_str 转义）；容器形参发显式护栏臂 ERR:unsupported param type。
 - evidence: 单元测试 bridge::python 7/7（含 test_pyo3_pyfunction_delegates_not_todo）、embed::adapters 19/19（含 c_str_signature_is_callable_and_dispatches、c_unsupported_param_emits_explicit_guard_arm）；集成测试 tests/bridge_python_delegation.rs（真跑 rustc 编译委托核 + 运行输出 "hi bob 7"）、tests/embed_c_serialization.rs（真跑 gcc 13.2.0 编译 + 运行：str 返回 OK:hi、容器形参显式护栏）。全量非慢档 60 套件全绿零回归（lib 486/0）。
 - reported_by: loomy-cmd
+
+
+### FIXED(2026-11-23T14:20:00Z / BUG-469, BUG-470, BUG-471, BUG-472, BUG-473, BUG-475, BUG-477, BUG-478, BUG-479, BUG-480, BUG-450, BUG-434, BUG-482, BUG-483, BUG-484, BUG-485, BUG-486, BUG-487)
+- evidence: 账本标题规范化收口（迭代-14:00，scripts/normalize_bug_headings.ps1 增强版）：18 条历史遗留「缺 timestamp/状态位」标题（形态 `## BUG-N [sev] <desc>`）统一为 `## BUG-N [ts] [sev] FIXED`，原描述转 `- note:`。状态位取自各条正文（`- status: OPEN -> FIXED` 箭头右端 / `状态：FIXED` / 「修复+回归测试+commit」启发式）。此为**账本治理（纯文案）**，不需代码回归锁——各 bug 的代码修复此前已由各自 commit 落地（469=ddeed29 / 470=497d66d / 471=bfe2d55 / 472=2688eb7 / 473=62be5d4 / 475=e8015d6,471e834 / 477=71bcfae / 478=6bb52f5 / 479=9332bbe / 483=fb4be42 / 484=2b56281 / 486=4520840 / 487=3f8512e）。治理一致性由 scripts/bug_ledger_consistency.ps1（标题状态位 vs 正文状态，PASS 0 不一致，243 条）+ scripts/normalize_bug_headings.ps1 -DryRun（幂等，二次 DryRun=0 条）双门禁钉住。工具可见性：符合账本解析正则的条目 225 → 243。

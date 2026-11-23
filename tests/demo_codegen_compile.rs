@@ -104,14 +104,26 @@ fn resolve_from_manifest(p: PathBuf) -> PathBuf {
 fn profile_dir_from_exe() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    // cargo test 的 exe 恒在 `<profile>/deps` 下；不在则按 `<profile>` 直落处理
-    let profile_dir = if dir.file_name().map_or(false, |n| n == "deps") {
-        dir.parent()?
-    } else {
-        dir
-    };
-    if profile_dir.is_dir() {
-        Some(profile_dir.to_path_buf())
+    // 标准 cargo 布局：exe 在 `<profile>/deps` 下
+    if dir.file_name().map_or(false, |n| n == "deps") {
+        let profile_dir = dir.parent()?;
+        if profile_dir.is_dir() {
+            return Some(profile_dir.to_path_buf());
+        }
+    }
+    // shim 布局（Loomy 定制 cargo）：exe 在
+    // `<target>/<profile>/build/<crate>/<hash>/out/` 下，无 deps 子目录。
+    // 逐级上溯，返回第一个「名字是 build 的目录的父目录」即 `<profile>` 目录。
+    let mut cur = dir;
+    while let Some(parent) = cur.parent() {
+        if cur.file_name().map_or(false, |n| n == "build") && parent.is_dir() {
+            return Some(parent.to_path_buf());
+        }
+        cur = parent;
+    }
+    // 其它布局：按 `<profile>` 直落处理
+    if dir.is_dir() {
+        Some(dir.to_path_buf())
     } else {
         None
     }
