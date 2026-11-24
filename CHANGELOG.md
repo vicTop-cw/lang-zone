@@ -17,6 +17,12 @@ AIGC:
 
 ## [Unreleased]
 
+### 未标注高阶函数形参推断 + 浮点幂运算修复（2026-11-24，fist-agent lang-zone 定时轮 iter-16:00）
+- **BUG-1：未标注类型的高阶函数形参被推为 `i64`**（`src/ir/codegen/decl_gen.rs`）。`def apply_twice(f, x: int)` 里 `f` 无类型标注 → parser 落 `Type::Any` → `IrType::Any`，而 `rust_type(Any)` 恒回 `i64`，于是 `f` 被渲染成 `f: i64` —— 调用点传闭包 `E0308`、体内 `f(f(x))` `E0618`，**未标注高阶函数完全不可用**。修复：新增 `scan_any_param_call_shape`（扫描函数体对该形参的直接调用 `g(a1,a2)`，取 arity 与实参类型）→ 渲染 `impl Fn(A1,A2) -> R + 'static + Clone`；无调用点则退回 `()`，由上游 `check` 给出「请标注 `fn(...)`」明确提示，**不再静默产错误的 `i64`**。
+- **BUG-521：浮点幂运算 `f64 ** <exp>` 完全不可用**（`src/ir/codegen/expr_gen.rs` + `src/ir/lz_codegen_lib.lz`）。`**`（`BinOpKind::Pow`）两路实现都只认整数基数：原生对任意 lhs 发 `.pow(<exp> as u32)`，而 `f64` 没有 `pow(u32)` 方法（std 为 `powi(i32)`/`powf(f64)`）⇒ `2.0 ** 3.0` 产 `E0599`；rs-lz 更把 `**` 落 `else` 原样透传 ⇒ 连整数幂都产 `E0614/E0307`。修复：两路同步按**基数类型**分流 —— `f64` → `.powf(<exp>)`（指数保持 f64），整数 → `.pow(<exp>)`（指数转 u32）。
+- **回归锁**：`tests/codegen_corner_fixes.rs` 加三条 —— `unannotated_hof_param_infers_fn_from_call_shape`（`apply_twice(inc,10)`=12 / `apply_typed`=22）、`unannotated_hof_two_arg_call_shape`（`reduce` 累加=10 / `apply_pair` 二参应用=12）、`pow_float_base_uses_powf_not_pow`（`2**10`=1024 / `2.0**3.0`=8.0 / `2.0**0.5`=√2），全部真 `rustc` 编译 + 真运行逐字比对。
+- **零回归**：`cargo build --bin lang-zone` 0 warning 0 error（车道 `target/iter16-lz`）；`cargo test --lib` 486/0；`codegen_corner_fixes` 47/47；`rs_lz_families` 16/16（rs-lz 路径同构修复零回归）。
+
 ### Scala 适配器分发入口落地：零 runtime 形态（2026-11-24，fist-agent lang-zone 定时轮 iter-22:00）
 - **缺口**：`ScalaLang::dispatch_file` 恒返回 `None`（注释「JVM 侧入口需要 object 包装，本版本不生成」），scala 库产物因此被 `surface_gated` 挡下 —— 所有方法都不可调用，LZ 侧压根调不到（`src/embed/adapters.rs`）。
 - **为什么必须是「零 runtime」**：本机 `scala`/`scalac` 是 Coursier `.bat` 包装，缓存里 `scala3-library_3`/`scala-library` 全是 0 字节占位 ⇒「scalac 能编、scala 跑不了」。实测三个致命坑：① `scala.Array` 静态字段 → `<clinit>` 拉 `scala/Array$`；② `sys.exit`/早退 `return` → `scala/runtime/Nothing$`；③ `"OK:" + <Long>` → `scala.runtime.BoxesRunTime`。全部绕开后，产物可被裸 `java` 直接运行。

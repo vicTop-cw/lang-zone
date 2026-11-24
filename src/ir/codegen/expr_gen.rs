@@ -5852,12 +5852,20 @@ impl CodeGen {
                         return format!("({}).to_string() {} ({}).to_string()", lhs_s, o, rhs_s);
                     }
                 }
-                // Pow: ** → .pow() 方法调用 (a ** b → a.pow(b))
+                // Pow: ** → .pow()/.powf() 方法调用 (a ** b → a.pow(b))
                 if matches!(op, BinOpKind::Pow) {
-                    // a ** b → a.pow(b)。gen_lit 已为整数字面量附加 i64 后缀
-                    //（如 2i64），直接使用 lhs_s，避免重复追加产生 2i64_i64。
-                    // Rust 的 .pow() 指数参数为 u32：整数字面量用 {n}u32，否则 as u32。
+                    // 按**基数类型**分流（原生旧实现只认整数，f64 基数发成
+                    // `f64.pow(u32)` → error[E0599]: no method named `pow` found
+                    // for type `f64`，即 float 幂运算完全不可用）：
+                    //   f64 基数 → `.powf(<rhs>)`，指数保持 f64（std f64::powf(f64)）；
+                    //   整数基数 → `.pow(<rhs>)`，指数为 u32（std i64::pow(u32)）。
+                    // gen_lit 已为整数字面量附加 i64 后缀（如 2i64），直接使用 lhs_s，
+                    // 避免重复追加产生 2i64_i64。
                     let lhs_s = self.gen_expr(lhs);
+                    if matches!(&lhs.ty, IrType::F64) {
+                        let rhs_s = self.gen_expr(rhs);
+                        return format!("{}.powf({})", lhs_s, rhs_s);
+                    }
                     let rhs_s = match &rhs.kind {
                         ExprKind::Lit(LitKind::Int(n)) => format!("{}u32", n),
                         _ => format!("{} as u32", self.gen_expr(rhs)),

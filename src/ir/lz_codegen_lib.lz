@@ -1451,6 +1451,19 @@ def gen_expr_d(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(
                     out_s = out_s + parts[qi].clone()
                     qi = qi + 1
                 out_s
+            elif o == "**":
+                // 幂运算（iter-16:00）：rs-lz 旧实现把 `**` 落 else 原样透传
+                // → `2i64 ** 10i64` 产 E0614/E0307（Rust 无 `**` 运算符）。
+                // 对齐原生 expr_gen.rs 的 Pow 分流：f64 基数 → `.powf(<exp>)`
+                //（指数保持 f64，std f64::powf(f64)）；整数基数 → `.pow(<exp>)`
+                //（指数转 u32，std i64::pow(u32)）。原生旧实现只认整数，f64 基数
+                // 发成 `.pow(u32)` 会 E0599，此处一并修正为 `.powf`。
+                let pow_l = gen_expr_d(l, fn_raises, user_fns, tbm, vem, decl.clone())
+                let pow_r = gen_expr_d(r, fn_raises, user_fns, tbm, vem, decl.clone())
+                if expr_ty(l) == IrType.F64:
+                    pow_l + ".powf(".to_string() + pow_r + ")".to_string()
+                else:
+                    pow_l + ".pow(".to_string() + pow_r + " as u32)".to_string()
             else:
                 gen_expr_d(l, fn_raises, user_fns, tbm, vem, decl.clone()) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr_d(r, fn_raises, user_fns, tbm, vem, decl.clone())
         case Expr.UnOp(op: o, operand: p, ty: t) => o.to_string() + gen_expr_d(p, fn_raises, user_fns, tbm, vem, decl.clone())

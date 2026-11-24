@@ -1636,3 +1636,24 @@ def main():
     assert!(r.ok, "二参未标注高阶函数形参应推断为二参 impl Fn 并编译运行：\n{}", r.diag);
     assert_eq!(r.stdout.trim(), "10\n12");
 }
+
+// 幂运算回归锁（iter-16:00）：`**`（BinOpKind::Pow）旧实现**只认整数基数**，
+// 把 `f64` 基数也发成 `f64.pow(<exp> as u32)` → `error[E0599]: no method named
+// `pow` found for type `f64``，即**浮点幂运算完全不可用**（幂运算只有整数能用）。
+// 修复：按基数类型分流 —— f64 → `.powf(<exp>)`（指数保持 f64），整数 → `.pow(<exp>)`。
+#[test]
+fn pow_float_base_uses_powf_not_pow() {
+    let src = r#"
+def main():
+    let a: int = 2
+    print(a ** 10)
+    let b: float = 2.0
+    print(b ** 3.0)
+    print(b ** 0.5)
+"#;
+    let r = run_lz("pow_float", src);
+    assert!(r.transpiled, "幂运算应能转译：\n{}", r.diag);
+    assert!(r.ok, "浮点幂运算应编译运行（f64 走 .powf 而非 .pow(u32)）：\n{}", r.diag);
+    // 2**10=1024；2.0**3.0=8.0；2.0**0.5=√2≈1.4142135623730951
+    assert_eq!(r.stdout.trim(), "1024\n8.0\n1.4142135623730951");
+}
