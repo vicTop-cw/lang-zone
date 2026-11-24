@@ -1,7 +1,22 @@
 ﻿# 当前阶段目标（Target）
 
-- 本轮聚焦：**Scala 适配器分发入口落地（零 runtime 形态）+ 账本陈旧条目收口**
-- 验收条件：cargo build 0 warning 0 error、embed/bridge 全量套件零回归、Scala 分发**真编译+真运行**、账本一致性门禁 PASS
+- 本轮聚焦：**rs-lz 自举路径三条真实缺口（T0r19）** —— 已落地缺口① 浮点/整数幂运算（BUG-521）
+- 验收条件：cargo build 0 warning 0 error、lib/相关套件零回归、端到端真编译+真运行、账本 BUG-521 记录
+
+---
+
+## 2026-11-24 迭代-16:00（定时任务探索轮）：收口 BUG-1 + 修浮点幂运算（T0r18 + T0r19.1）
+
+- 起点：HEAD=7ee1eea（iter-22:00 全绿基线）。前提检查：源文件最新改动距启动 42.02 分钟（≥5），CONTINUE_PROCEED；`git pull` 已最新。
+- **第一步：收口僵尸树 T0r18（04:00 探索轮的 BUG-1 修复）**。工作树 `src/ir/codegen/decl_gen.rs`（+227 行）正是 T0r18 的未提交成果（iter-22:00 曾把它当兄弟 agent 的坏 WIP stash 隔离）。实测**能编译**（0 warning 0 error），但其回归锁期望值写错：`reduce(mul,[1,2,3,4])` 期望 24，实际语义 0（累加器从 0 起，`0*x` 恒 0）——代码对、锁错。修锁（改无初值歧义的 `apply_pair` 场景）后 46/46 绿 → 提交 **ddce839**，T0r18 整棵树收口（根/…1 完成、…2/…3 归档 + 5 个孤儿归档）。
+- **第二步：验收 T0r17**（iter-22:00 Scala 零 runtime 分发入口）：embed_scala_serialization 8/8 复跑通过；根/…1 完成、…2/…3 归档。
+- **第三步：发起本轮新迭代 T0r19**（rs-lz 自举路径三条缺口，plan_deep 拆 3×2），亲自落地**缺口① 幂运算**：
+  - 发掘出比 rs-lz 更严重的**原生 bug**：`f64 ** exp` 两路都只认整数基数。原生 `expr_gen.rs` Pow 分支对任意 lhs 发 `.pow(<exp> as u32)`，而 `f64` 无 `pow(u32)` 方法（std 为 `powi(i32)`/`powf(f64)`）→ **E0599，浮点幂整条不可用**（整数幂正常，掩盖缺陷）；rs-lz `lz_codegen_lib.lz` 更把 `**` 落 `else` 原样透传 → 连整数幂都 E0614/E0307。
+  - 修复：两路同步按基数类型分流 —— f64 → `.powf(<exp>)`（指数保持 f64），整数 → `.pow(<exp>)`（指数转 u32）。提交 **8fe64e3**，台账 **BUG-521**。
+  - 回归锁：`tests/codegen_corner_fixes.rs::pow_float_base_uses_powf_not_pow`（`2**10`=1024 / `2.0**3.0`=8.0 / `2.0**0.5`=√2，真 rustc 编译 + 真运行）。
+- **零回归读数**（车道 `target/iter16-lz`）：`cargo build --bin lang-zone` 0 warning 0 error；lib 486/0；codegen_corner_fixes 47/47；rs_lz_families 16/16；embed_scala_serialization 8/8。push 至 GitCode 成功（本地=远程=8fe64e3）。
+- **在册遗留（T0r19，留给并发轮次）**：缺口② 混合数值算术无提升；缺口③ 默认参数签名字面展开；外加 `demo_codegen_compile::magic_demos_generated_rust_compiles` 单条历史失败（未定位）。
+- 下一步：① 缺口②（混合数值提升：`3i64 + 0.5f64` → E0277，按类型提升到公共数值类型）；② 缺口③（默认参数 E0061）；③ 定位 magic_demos 历史失败。
 
 ---
 

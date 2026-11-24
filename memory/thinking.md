@@ -81,3 +81,13 @@
 - 契约反转：三条旧测试断言「scala 无分发入口」，现在必须反转。做法是「有入口⇒有调用面」+ 用 Executable 档/泛型函数把 NO_DISPATCH_SURFACE 门本身钉死，而不是简单删测试。
 - 血泪：兄弟 agent 在 decl_gen.rs 反复写不编译的 WIP，把共享树测试连带给拉红。三次 git stash 隔离后跑干净树全绿。**绝不动别人的未提交改动**。
 - 教训沉淀：并发定时轮次里，「我的改动 + 别人的坏 WIP」会伪装成「我的回归」。判据是先 stash 别人的、跑自己干净的树，绿了才算数。
+## 2026-11-24 16:00 迭代-16:00 探索轮：收口 BUG-1 + 修浮点幂运算（BUG-521）
+- 前提检查：源文件最新改动 15:18:57，距启动 42.02 分钟（≥5），CONTINUE_PROCEED；git pull 已最新。但工作树有大量未提交改动。
+- **关键判断（本轮最重要的一步）**：工作树的 src/ir/codegen/decl_gen.rs（+227 行）正是 lang-zone ns 在册任务树 T0r18（04:00 探索轮）的 BUG-1 修复，其 created_at=04:11、updated_at 从未推进 —— 是**僵尸树的未提交成果**，而非「别人的坏 WIP」（iter-22:00 曾把它当坏 WIP stash 隔离）。实测它**能编译**（0 warning 0 error），只是回归锁的期望值写错了：`reduce(mul,[1,2,3,4])` 期望 24，实际语义是 0（累加器从 0 起，0*x 恒 0）——**代码对、锁错**。修锁（改用无初值歧义的 `apply_pair` 场景）后 46/46 绿 → 提交 ddce839 收口 T0r18 整棵树。
+- 教训修正：**「别人的未提交改动」要先实测再归类**。iter-22:00 判它「自身不编译」是正确的（当时那份是中间态），但 16:00 这一份已是完成态。同一条 WIP 在不同时刻状态不同，必须每次重新实测，不能沿用过时结论。
+- 收口动作：T0r18 整棵树（根/…1 完成、…2/…3 归档）＋ 5 个孤儿子任务（T0r18.1.2/.2.1/.2.2/.3.1/.3.2）清理归档（父节点归档后子任务成了孤儿，pause→force archive）；T0r17（iter-22:00 Scala）验收（.1 完成、.2/.3 归档、根完成，embed_scala_serialization 8/8 复跑通过）。
+- **本轮新缺口落地**：按 iter-22:00「下一步」与 thinking 留档，发布 T0r19（rs-lz 自举路径三条缺口）并 plan_deep 拆 3×2。亲自落地缺口① 幂运算，**发掘出比 rs-lz 更严重的原生 bug**：`f64 ** exp` 两路都只认整数基数 —— 原生 expr_gen.rs 发 `.pow(exp as u32)` → `f64` 无 `pow(u32)` 方法 → E0599，**浮点幂整条不可用**（整数幂正常，把缺陷掩盖了）；rs-lz 更把 `**` 落 else 原样透传 → 连整数幂都 E0614。两路同构修复（f64→.powf，整数→.pow），回归锁 pow_float_base_uses_powf_not_pow（1024/8.0/√2）。提交 8fe64e3，台账 BUG-521。
+- 验证铁律遵循：全程真 rustc 编译 + 真运行逐字比对（非自述）；零回归读数 build 0 warning 0 error / lib 486/0 / codegen_corner_fixes 47/47 / rs_lz_families 16/16 / embed_scala_serialization 8/8。
+- 推送：git push 报 "Everything up-to-date" 是 ref 缓存滞后（fetch 后 origin/master 已前进），`git push origin HEAD:master` 实推 ddce839→8fe64e3 成功，fetch 复核本地=远程。
+- 遗留（T0r19 在册，留给并发轮次）：缺口② 混合数值算术无提升（`3i64 + 0.5f64` → E0277）、缺口③ 默认参数签名字面展开（E0061）；另有 iter-22:00 留档的 `demo_codegen_compile::magic_demos_generated_rust_compiles` 单条历史失败（未定位）。
+- 前提检查判据仍待升级（本机已第 5 次复现脚本盲区）：只看 *.rs/.py/.pyx/.md/.toml/.lz 的 mtime；并发 agent 编译时不回写源文件。建议判据改为「源文件 mtime ＜5min **或** 任意 target/lane-*|target/iter* 产物 mtime ＜5min **或** 存活 cargo/rustc 子进程」。
