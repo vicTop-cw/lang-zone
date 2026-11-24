@@ -1,7 +1,25 @@
 ﻿# 当前阶段目标（Target）
 
-- 本轮聚焦：**测试基建环境适配 + 账本治理（Loomy cargo shim 扁平布局）**
-- 验收条件：cargo build 0 warning 0 error、全量测试零回归（1139 passed/0 failed）、端到端产物编译+运行等价、账本一致性门禁 PASS
+- 本轮聚焦：**Scala 适配器分发入口落地（零 runtime 形态）+ 账本陈旧条目收口**
+- 验收条件：cargo build 0 warning 0 error、embed/bridge 全量套件零回归、Scala 分发**真编译+真运行**、账本一致性门禁 PASS
+
+---
+
+## 2026-11-24 迭代-22:00（定时任务探索轮）：Scala 零 runtime 分发入口（T0r17）
+
+- 起点：HEAD=7ee1eea（上轮 iter-14:00 全绿基线）。前提检查：源文件最新改动距启动 1022 分钟（≥5），CONTINUE_PROCEED。`git pull` 已最新；基线 `cargo build` 0 error、`cargo test --lib` 486/486。
+- **本轮缺口判定**：`ScalaLang::dispatch_file` 恒 `None`（注释「JVM 入口要 object 包装，本版本不生成」）⇒ scala 库产物 `surface_gated`，**调用面为零**。这正是 iter-04:00 thinking 里点名的「下轮可直接接手的具体缺口」，也是 T0r66 起 `mojo/scala` 长期挂账的那一条。
+- **探针期（先证伪再动手）**：本机 `scala`/`scalac` 是 Coursier `.bat` 包装，缓存里 `scala3-library_3`/`scala-library` **全是 0 字节占位** ⇒ 「scalac 能编、scala 跑不了」。实测三处致命坑（每个都让裸 `java` 崩）：① `private var ARGS: Array[String] = Array.empty[String]` 在 `<clinit>` 拉 `scala/Array$`；② `sys.exit`/早退 `return` 拉 `scala/runtime/Nothing$`；③ `"OK:" + <Long>` 字符串拼接拉 `scala.runtime.BoxesRunTime`。绕开即成立：参数走 main 入参线性扫、退出码用局部 `var code` 末尾统一 `System.exit`、数值显式 `java.lang.*.toString`、输出 `new java.io.PrintStream(System.out, true, "UTF-8")`。
+- **T0r17 落地（`src/embed/adapters.rs`）**：
+  - `extract`：`java` 在场且源无自定 `package` 时，整体包入 `package lz_embed_<artifact>` 并把顶格 `def` 收进 `object Lib`（缩进 2 空格）；作者自带 package 则不动（幂等，不双包）。
+  - `dispatch_file`：生成同包 `object __lz_<artifact>`，`argvGet(args,key)`/`__lz_bool`/`__lz_escape` 自声明（不撞 stdlib），help 臂 + 逐方法臂 + 未知方法 `code=3`；`java` 不在场则**仍返回 None**（保留 gate，不出假垫片）。
+  - `build_cmd` = `scalac -d classes <dispatch> <lib>`；`run_cmd` = `java -cp classes <pkg>.__lz_<artifact>`。
+  - **共用摘取器改造**：`fn_from_toplevel` 抽出 `fn_from_toplevel_ex(.., ret_sep)`，scala 用 `ret_sep=":"`。原实现只认 `->`，导致 `def add(a: Long): Long = ...` 的返回类型恒 None ⇒ 入口打印裸 `OK:`（本轮实测暴露）。`ret_sep=":"` 时返回值以 `=` 截断，避免把 `Long = a + b` 整段当类型。Mojo/JS 走原 `->` 路径，零回归。
+- **回归锁**：① 新增 `tests/embed_scala_serialization.rs` **8/8**（含真 `scalac` 编译 + 真 `java` 运行，见 docs §2 判据）；② `tests/embed_gapfixes.rs` 三条**旧契约反转**：原 `scala_without_dispatch_surface_gets_no_callable_shim`/`scala_embed_emits_no_wrapper_and_names_the_gap`/`author_still_calling_a_gated_method...` 前提是「scala 无分发入口」，T0r17 后反转——改为「有分发入口⇒有可调用面」+「NO_DISPATCH_SURFACE 门仍由 Executable 档与泛型函数两条钉住」。18/18 全绿（`scala_a_add` 命名口径：resolve("scala","a.lz") → artifact `scala_a`）。
+- **零回归读数**（隔离车道 `target/iter22-scala`，先跑 `scripts/prepare_lane_deps.ps1 -Profile target/iter22-scala/debug`）：lib 486/0；embed 全套 15 套件全绿（unify_r15 23、dict 23、tuple 7、js 10、c 2、dedup 4、list 8、stub 4、stem_parity 3、project_emit 3、project_grouping 4、dict_ext 10、dict_kv 3、gapfixes 18、scala 8）；bridge_embed 8、bridge_python_delegation 1。`cargo build --bin lang-zone` 0 warning 0 error（顺手删掉探针期留下的死函数 `scala_native_ty`）。
+- **台账**：BUG-2（陈旧 OPEN，`bootstrap_emit.rs` 签名不匹配 E0308）复核后 `bug_fix` 改判 FIXED——HEAD 下两函数签名早已一致，`cargo build`+`lib` 全绿即证。另修 BUG-520 正文缺 `状态：FIXED` 行导致一致性门禁扫到下方子标题（`scripts/bug_ledger_consistency.ps1` PASS，243 条 0 不一致）。
+- **并发干扰（重要）**：全程有兄弟 agent 在 `src/ir/codegen/decl_gen.rs` 反复落笔（13:11、14:06 两次），其 WIP **自身不编译**（`E0599 ExprKind::Set`、`E0308 &Expr`），把共享工作树的测试连带给拉红。处理：把它们的改动 `git stash`（`other-agent-decl_gen-wip{,2,3}`）后在我的干净树上跑完全部回归，**绝不回滚也不提交别人的 WIP**。教训对齐 `loomy-learned-stale-lane-test-triage`：先隔离变量证明代码未坏，再判环境红。
+- 下一步：① `c` 适配器容器序列化（gcc 在场可继续深化）；② `mojo` 适配器（本机无工具链，需先解决工具链或以「生成文本 + 静态审」口径钉住）；③ `embed_gapfixes::magic_demos_generated_rust_compiles` 单条历史失败（iter-04:00 记为未定位，本轮未涉足）。
 
 ---
 

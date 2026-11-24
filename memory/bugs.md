@@ -3881,6 +3881,7 @@ commit：3f8512e（重映射自 未记）
 - fix: ① generate_pyfunction 改为真实委托 __py_<name>(args)，generate_module 顶部注入 extern "Rust" 委托声明（generate_delegate_decls）。② C_TY 补 char→str；methods() 修正指针返回函数名（trim_start_matches('*')）与形参名（左行纳入整标识符）提取；dispatch_file 发 extern 原型 + str 形参（const char* argv 原样）/str 返回（OK: + __lz_emit_str 转义）；容器形参发显式护栏臂 ERR:unsupported param type。
 - evidence: 单元测试 bridge::python 7/7（含 test_pyo3_pyfunction_delegates_not_todo）、embed::adapters 19/19（含 c_str_signature_is_callable_and_dispatches、c_unsupported_param_emits_explicit_guard_arm）；集成测试 tests/bridge_python_delegation.rs（真跑 rustc 编译委托核 + 运行输出 "hi bob 7"）、tests/embed_c_serialization.rs（真跑 gcc 13.2.0 编译 + 运行：str 返回 OK:hi、容器形参显式护栏）。全量非慢档 60 套件全绿零回归（lib 486/0）。
 - reported_by: loomy-cmd
+状态：FIXED
 
 
 ### FIXED(2026-11-23T14:20:00Z / BUG-469, BUG-470, BUG-471, BUG-472, BUG-473, BUG-475, BUG-477, BUG-478, BUG-479, BUG-480, BUG-450, BUG-434, BUG-482, BUG-483, BUG-484, BUG-485, BUG-486, BUG-487)

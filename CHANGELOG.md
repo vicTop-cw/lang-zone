@@ -17,6 +17,15 @@ AIGC:
 
 ## [Unreleased]
 
+### Scala 适配器分发入口落地：零 runtime 形态（2026-11-24，fist-agent lang-zone 定时轮 iter-22:00）
+- **缺口**：`ScalaLang::dispatch_file` 恒返回 `None`（注释「JVM 侧入口需要 object 包装，本版本不生成」），scala 库产物因此被 `surface_gated` 挡下 —— 所有方法都不可调用，LZ 侧压根调不到（`src/embed/adapters.rs`）。
+- **为什么必须是「零 runtime」**：本机 `scala`/`scalac` 是 Coursier `.bat` 包装，缓存里 `scala3-library_3`/`scala-library` 全是 0 字节占位 ⇒「scalac 能编、scala 跑不了」。实测三个致命坑：① `scala.Array` 静态字段 → `<clinit>` 拉 `scala/Array$`；② `sys.exit`/早退 `return` → `scala/runtime/Nothing$`；③ `"OK:" + <Long>` → `scala.runtime.BoxesRunTime`。全部绕开后，产物可被裸 `java` 直接运行。
+- **实现**：`extract` 在 `java` 在场且源无自定 `package` 时，整体包入 `package lz_embed_<artifact>` 并把顶格 `def` 收进 `object Lib`（幂等，作者自带 package 则不动）；`dispatch_file` 生成同包 `object __lz_<artifact>`（只碰 `java.lang`/`java.io`，自声明 `argvGet`/`__lz_bool`/`__lz_escape`）；`build_cmd` = `scalac -d classes <dispatch> <lib>`；`run_cmd` = `java -cp classes <pkg>.__lz_<artifact>`。`java` 不在场时仍返回 `None`（保留 gate，不出假垫片）。
+- **附带修复**：共用摘取器 `fn_from_toplevel` 抽出 `fn_from_toplevel_ex(.., ret_sep)`，scala 用 `ret_sep=":"` —— 原实现只认 `->`，`def add(a: Long): Long = ...` 的返回类型恒为 `None`，分发入口会打印裸 `OK:`（本轮实测暴露）。Mojo/JS 走原 `->` 路径，零回归。
+- **回归锁**：新增 `tests/embed_scala_serialization.rs` **8/8**，含 `scala_dispatch_compiles_and_runs_under_bare_java`（真 `scalac` 编译 + 真 `java` 运行：`add a=3 b=4`→`OK:7`、`greet name=bob`→`OK:hi bob`、`ratio x=2.5`→`OK:2.5`、`is_ok flag=true`→`OK:true`、`help`、未知方法非 0 退出）。`tests/embed_gapfixes.rs` 三条旧契约（断言「scala 无分发入口」）反转为「有入口⇒有调用面」，并另加 `no_dispatch_surface_still_gates_callable_face` 把 gate 本身钉死（18/18）。
+- **零回归**：lib 486/0；embed 15 套件 + bridge 2 套件全绿；`cargo build --bin lang-zone` 0 warning 0 error。
+- **台账**：BUG-2（陈旧 OPEN，`bootstrap_emit.rs` 签名不匹配 E0308）复核后改判 FIXED（签名早已一致，build+lib 全绿即证）；修 BUG-520 正文缺 `状态：FIXED` 行致一致性门禁误扫下方子标题，`scripts/bug_ledger_consistency.ps1` PASS（243 条 0 不一致）。
+
 ### 测试基建：Loomy 定制 cargo shim 扁平布局适配 + 账本治理（2026-11-23，fist-agent lang-zone 定时轮 iter-14:00）
 - **shim 布局适配（测试基建）**：本机 cargo 为 Loomy 环境 shim（`~\\.cargo\\bin\\cargo.exe` 为 0 字节占位），`--out-dir` 走 `<target>/<profile>/build/<crate>/<hash>/out/` 并以多个 `-L dependency=build/<dep>/<hash>/out` 传依赖，**从不生成 `deps/` 子目录**。项目内 30 个集成测试与 `src/bridge/project.rs` 按标准 cargo 布局以 `-L dependency=<rlib 父目录>/deps` 链接，恒报 `E0463 can't find crate`。修复：① `tests/demo_codegen_compile.rs` / `tests/embed_tuple_serialization.rs` / `tests/embed_unify_r15.rs` 的 `profile_dir_from_exe()` 增强识别 `.../<profile>/build/<crate>/<hash>/out` 形态（逐级上溯到 `<profile>`）；② 新增 `scripts/prepare_lane_deps.ps1`（把扁平布局的 rlib 递归收集到合成 `deps/`，可选 `-Build`），并集成进 `scripts/dual_track_gate.ps1`。修复后全量测试 60 套件全绿 **1139 passed / 0 failed**。
 - **账本标题规范化**：`scripts/normalize_bug_headings.ps1` 增强处理「缺 timestamp 的单括号形态」`## BUG-N [sev] <desc>`：timestamp 取正文 `发现:`/日期或占位，状态位取正文 `status:`/`状态：`（支持 `OPEN -> FIXED` 箭头取右端）或「修复+回归测试+commit」启发式。本次规范化 18 条历史遗留条目（BUG-469/470/471/472/473/475/477/478/479/480/450/434/482/483/484/485/486/487），原描述转 `- note:`；`scripts/bug_ledger_consistency.ps1` 门禁 PASS（243 条，标题 vs 正文 0 不一致），脚本幂等（二次 DryRun=0）。

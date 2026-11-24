@@ -144,41 +144,60 @@ fn absent_build_toolchain_is_no_not_na_and_does_not_leak_into_run_line() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-// ════════════════ ② scala：没有分发入口 ⇒ 整个调用面不可调用，且逐条点名 ════════════════
+// ════════════════ ② scala：**有**分发入口后不再被 surface_gated（T0r17 契约反转）════════════════
 
-/// 正向（§2.3）：scala 的 `dispatch_file()` 返回 None（注释承诺「不出假垫片」），
-/// 修前 `callable_methods()` 不看这个 ⇒ MANIFEST 写 `dispatch=none` + `method=add … callable`，
-/// 垫片照发 `pub fn scala_calc_add(a: i64, b: i64)`（返回 Unit），真调起来必 panic。
+/// T0r17 前：scala 的 `dispatch_file()` 返回 None ⇒ `callable_methods()` 被 has_dispatch_file 门挡下，
+/// MANIFEST 写 `dispatch=none` + 逐条点名 NO_DISPATCH_SURFACE。
+/// T0r17 后：scala 生成「零 runtime」分发入口（java 在场时），调用面**打开** ⇒ 本用例反转为
+/// 「有分发入口 ⇒ 有可调用面」，而 NO_DISPATCH_SURFACE 门本身仍由 `langs_with_dispatch_surface_keep_their_callable_face`
+/// 与 `scala_no_dispatch_when_java_absent_gets_gated` 两条钉住（门没被拆，只是 scala 现在过门了）。
 #[test]
-fn scala_without_dispatch_surface_gets_no_callable_shim() {
+fn scala_with_dispatch_surface_exposes_callable_face() {
+    if !lang_zone::embed::tool_available("java") {
+        eprintln!("SKIP: java 不可用（scala 零 runtime 分发需 java）⇒ 本条走下面的 gated 分支");
+        return;
+    }
     let t = target("scala", "a.lz", "def add(a: Int, b: Int): Int = a + b\n");
-    assert!(!t.has_dispatch_file(), "scala 本版本不生成分发入口");
     assert!(
-        t.callable_methods().is_empty(),
-        "没有分发入口 ⇒ 不许有任何可调用面：{:?}",
-        t.callable_methods()
+        t.has_dispatch_file(),
+        "T0r17：scala 应生成分发入口（此前恒无）"
     );
-    // 被门挡下的方法必须**逐条点名**（保持「未覆盖」口径，不是静默消失）
-    let uns = t.unsupported_methods();
-    assert_eq!(uns.len(), 1, "{:?}", uns);
-    assert_eq!(uns[0].name, "add");
-    assert_eq!(uns[0].unsupported.as_deref(), Some(NO_DISPATCH_SURFACE));
-
+    let callable = t.callable_methods();
+    assert_eq!(callable.len(), 1, "add 现应可调用：{:?}", t.methods);
+    assert_eq!(callable[0].name, "add");
+    // MANIFEST 反映新状态
     let m = manifest_text(&t);
-    assert!(m.contains("dispatch=none"), "{m}");
+    assert!(m.contains("dispatch=generated"), "{m}");
     assert!(
-        !m.contains("method=add params=a:int,b:int ret=none callable\n"),
-        "MANIFEST 不许再把它标成 callable：\n{m}"
+        m.contains("method=add params=a:int,b:int ret=int callable"),
+        "MANIFEST 应把 add 标 callable（且 ret 已从 Scala 冒号形态解析出 int）：\n{m}"
     );
-    assert!(m.contains(&NO_DISPATCH_SURFACE.replace(' ', "_")), "{m}");
+    assert!(!m.contains(&NO_DISPATCH_SURFACE.replace(' ', "_")), "{m}");
 
-    // 垫片文本里真的没有那个函数（生成面消失，而不是留在生成物里等着运行期炸）
+    // 垫片现在**应当**发这个函数（调用面真的存在）
+    // 注意 artifact 名：resolve("scala", "a.lz", …) → `scala_a` ⇒ wrapper `scala_a_add`
     let shim = lang_zone::embed::shim::module_text(std::slice::from_ref(&t));
     assert!(
-        !shim.contains("scala_calc_add"),
-        "无分发入口却发了垫片：\n{shim}"
+        shim.contains("scala_a_add"),
+        "有分发入口却不肯发垫片：\n{shim}"
     );
-    assert!(shim.contains("__lz_spawn_plan"), "垫片头仍在（未整体失效）");
+    assert!(shim.contains("__lz_spawn_plan"), "垫片头仍在");
+}
+
+/// 负向对照：NO_DISPATCH_SURFACE 门**依然在**。用 python 的 Executable 档（有自家 main、
+/// 无分发入口）证明「没有分发入口 ⇒ 调用面为空 + 逐条点名」这条规则没被 T0r17 拆掉。
+#[test]
+fn no_dispatch_surface_still_gates_callable_face() {
+    // Executable 档按定义带 main、不出分发入口（见 has_main_decides_executable_not_a_declaration）
+    let t = target("python", "a.lz", "if __name__ == \"__main__\":\n    print(1)\n");
+    assert!(!t.has_dispatch_file(), "Executable 档不应有分发入口");
+    assert!(
+        t.callable_methods().is_empty(),
+        "无分发入口 ⇒ 不许有任何可调用面：{:?}",
+        t.callable_methods()
+    );
+    let m = manifest_text(&t);
+    assert!(m.contains("dispatch=none"), "{m}");
 }
 
 /// 负向对照：有分发入口的语言（python）不受这道门影响 ⇒ 不许被误伤成全员不可调用。
@@ -389,23 +408,34 @@ fn discarded_return_is_reported_on_the_receipt_and_absent_from_generated_code() 
     assert!(rs.contains("pub fn python_calc_ok("), "同产物里的可调用面不受牵连:\n{rs}");
 }
 
-/// scala 的端到端：修前 `pub fn scala_calc_add(a: i64, b: i64)` 照发（MANIFEST 还标 callable），
-/// 修后垫片面为空 + 回执点名 ⇒ 母件照样编译。
+/// scala 的端到端（T0r17 契约反转）：修前 `dispatch=none` ⇒ 垫片发空 + 回执点名；
+/// T0r17 后 scala 生成「零 runtime」分发入口 ⇒ 垫片应当真的发出来，MANIFEST 标 dispatch=generated。
 #[test]
-fn scala_embed_emits_no_wrapper_and_names_the_gap() {
+fn scala_embed_emits_dispatch_and_wrapper_after_t0r17() {
+    if !lang_zone::embed::tool_available("java") {
+        eprintln!("SKIP: java 不可用 ⇒ scala 仍走 gated 分支（由 no_dispatch_surface_still_gates_callable_face 覆盖）");
+        return;
+    }
     let src = "#[embed(scala)]\n```\ndef add(a: Int, b: Int): Int = a + b\n```\n\ndef main():\n    print(1)\n";
     let (work, stdout, stderr) = compile_case("gap_scala", src, &[]);
     let receipts = format!("{stdout}{stderr}");
+    // T0r17 后 add 已可调用 ⇒ 不应再被点名「未覆盖」
     assert!(
-        receipts.contains("embed 未覆盖: scala_calc::add"),
-        "无分发入口必须逐条点名，实际: {receipts}"
+        !receipts.contains("embed 未覆盖: scala_calc::add"),
+        "add 现已可调用，不该被点名未覆盖：{receipts}"
     );
     let rs = std::fs::read_to_string(work.join("calc.rs")).expect("read rs");
-    assert!(!rs.contains("scala_calc_add"), "scala 不许出假垫片:\n{rs}");
+    assert!(
+        rs.contains("scala_calc_add"),
+        "有分发入口 ⇒ 垫片应真的发出来：\n{rs}"
+    );
     let mani = std::fs::read_to_string(work.join("build/embed/calc/scala_calc/MANIFEST.txt"))
         .expect("manifest");
-    assert!(mani.contains("dispatch=none"), "{mani}");
-    assert!(!mani.contains("callable\n"), "MANIFEST 不许残留 callable 标记:\n{mani}");
+    assert!(mani.contains("dispatch=generated"), "{mani}");
+    assert!(
+        mani.contains("method=add params=a:int,b:int ret=int callable"),
+        "add 应标 callable 且 ret 已解析:\n{mani}"
+    );
     // ①+③ 同一份 MANIFEST 的两行：scalac（.bat）在场时 toolchain_available=yes
     let line = manifest_field(&mani, "toolchain_available");
     assert!(
@@ -438,13 +468,15 @@ fn author_still_calling_a_gated_method_gets_a_named_receipt() {
         "调用被门挡下的函数，编译期必须点名：{r1}"
     );
 
-    // ②：scala 无分发入口却被调用
-    let src2 = "#[embed(scala)]\n```\ndef add(a: Int, b: Int): Int = a + b\n```\n\ndef main():\n    print(scala_calc_add(1, 2))\n";
-    let (_w2, so2, se2) = compile_case("gap_scala_call", src2, &[]);
+    // ②：**泛型函数**（带类型参数）被点名 —— 这类签名永远在闭集外（与 java 是否在场无关），
+    // 是 NO_DISPATCH_SURFACE 之外「逐条点名」口径的稳定样本（T0r17 后 scala 的普通 def 已可调用，
+    // 不能再拿它当 gated 样本）。
+    let src2 = "#[embed(scala)]\n```\ndef pick[T](xs: List[T]): T = xs(0)\n```\n\ndef main():\n    print(1)\n";
+    let (_w2, so2, se2) = compile_case("gap_generic_call", src2, &[]);
     let r2 = format!("{so2}{se2}");
     assert!(
-        r2.contains("embed 未覆盖: scala_calc::add"),
-        "无分发入口的调用面必须点名：{r2}"
+        r2.contains("embed 未覆盖: scala_calc::pick") || r2.contains("泛形函数"),
+        "闭集外的泛型函数必须点名：{r2}"
     );
 }
 

@@ -916,8 +916,23 @@ impl EmbedLang for MojoLang {
     }
 }
 
-/// `fn name(params) -> Type` 形状（Mojo / Scala 共用）
+/// `fn name(params) -> Type` 形状（Mojo / Scala / JS 共用）
 fn fn_from_toplevel(src: &str, table: &[(&str, &str)], kw: &str) -> Vec<ForeignFn> {
+    fn_from_toplevel_ex(src, table, kw, "->")
+}
+
+/// 同 `fn_from_toplevel`，返回类型分隔符可指定。
+///
+/// 为什么需要 `ret_sep`：`fn_from_toplevel` 是 Mojo / JS / Scala 共用的摘取器，
+/// 但它只认 `-> Type` 这一种返回形态。Scala 写的是 `def add(a: Long): Long = ...`
+/// （冒号），漏认的后果不是「少个注解」而是 **整个返回值被丢掉**——
+/// 分发入口会打印裸 `OK:`（T0r17 实测）。
+fn fn_from_toplevel_ex(
+    src: &str,
+    table: &[(&str, &str)],
+    kw: &str,
+    ret_sep: &str,
+) -> Vec<ForeignFn> {
     let mut out = Vec::new();
     let all: Vec<&str> = src.lines().collect();
     for (idx, l) in all.iter().enumerate() {
@@ -987,8 +1002,13 @@ fn fn_from_toplevel(src: &str, table: &[(&str, &str)], kw: &str) -> Vec<ForeignF
         if rest[..open].contains('[') {
             unsupported = Some("带类型参数的泛形函数不在闭集内".to_string());
         }
-        let ret = if let Some(pos) = tail.rfind("->") {
-            let raw = tail[pos + 2..]
+        let ret = if let Some(pos) = tail.rfind(ret_sep) {
+            let raw = tail[pos + ret_sep.len()..]
+                // 冒号形态（Scala）：`def f(a: Long): Long = a + b` 里返回值到 `=` 为止；
+                // 去掉 `=` 之后再交给闭集判定，避免把 `Long = a + b` 整段当类型。
+                .split(|c: char| c == '=' && ret_sep == ":")
+                .next()
+                .unwrap_or("")
                 .split('#')
                 .next()
                 .unwrap_or("")
@@ -1037,6 +1057,52 @@ const SCALA_TY: [(&str, &str); 6] = [
     ("Boolean", "bool"),
 ];
 
+/// Scala3「零 runtime」包根名前缀。
+///
+/// 为什么需要它：本机（与多数无 sbt/scala-library 的环境）只有 scalac，
+/// 没有可分发的 scala3-library jar ⇒ 编译得出、跑不起来。实测绕法是
+/// **分发入口完全不引用 `scala.*` 运行时符号**（见 `scala_dispatch_mode` 的探针结论）：
+/// 把源文件整体挪进一个包，分发 object 只在 `java.lang` 上工作。
+const SCALA_RT_PKG_PREFIX: &str = "lz_embed_";
+
+/// Scala 分发模板的可选能力：`java` 是否在 PATH 上（运行侧无 scala 时用它跑）。
+///
+/// 只做**一次**探测并缓存 —— 每条 embed 解析都去 spawn 一次太贵。
+fn scala_java_ok() -> bool {
+    use std::sync::OnceLock;
+    static OK: OnceLock<bool> = OnceLock::new();
+    *OK.get_or_init(|| super::tool_available("java"))
+}
+
+/// LZ 类型 → 从 argv 字符串取出该类型的分发代码（Scala3，仅 java.lang）。
+fn scala_arg_conv(lz: &str, name: &str) -> Option<String> {
+    match lz {
+        // `java.lang.Long.parseLong` / `Double.parseDouble` 都是 static，Scala3 里可直接点名
+        "int" => Some(format!("java.lang.Long.parseLong(argvGet(args, \"{name}\"))")),
+        "float" => Some(format!("java.lang.Double.parseDouble(argvGet(args, \"{name}\"))")),
+        "bool" => Some(format!("__lz_bool(argvGet(args, \"{name}\"))")),
+        "str" => Some(format!("argvGet(args, \"{name}\")")),
+        _ => None,
+    }
+}
+
+/// 返回值 → `OK:` 行内容（Scala3，仅 java.lang；str 走单行转义）。
+///
+/// **必须显式点名 `java.lang.*.toString`**：在 Scala3 里 `"OK:" + <Long>` 这类
+/// 字符串拼接会落到 `scala.runtime.StringAdd`/`BoxesRunTime`（实测无 scala-library
+/// 时 `NoClassDefFoundError: scala/runtime/BoxesRunTime`）。把值先转成 Java String 再拼，
+/// 生成的就是纯 `StringBuilder`，运行时零依赖。
+fn scala_ret_emit(lz: Option<&str>, call: &str) -> Option<String> {
+    match lz {
+        Some("int") => Some(format!("\"OK:\" + java.lang.Long.toString({})", call)),
+        Some("float") => Some(format!("\"OK:\" + java.lang.Double.toString({})", call)),
+        Some("bool") => Some(format!("\"OK:\" + java.lang.Boolean.toString({})", call)),
+        Some("str") => Some(format!("\"OK:\" + __lz_escape({})", call)),
+        None => Some("\"OK:\"".to_string()),
+        _ => None,
+    }
+}
+
 pub struct ScalaLang;
 
 impl EmbedLang for ScalaLang {
@@ -1053,24 +1119,211 @@ impl EmbedLang for ScalaLang {
         })
     }
     fn methods(&self, src: &str) -> Vec<ForeignFn> {
-        // Scala 的顶层定义一般在 object 里（缩进）⇒ 只收顶格 def，object 内的由同语言程序自行导入
-        fn_from_toplevel(src, &SCALA_TY, "def ")
+        // Scala 的顶层定义一般在 object 里（缩进）⇒ 只收顶格 def，object 内的由同语言程序自行导入。
+        // 返回类型是 `): T =` / `): T` 形态（冒号），不是 `->` —— 用 ret_sep=":" 摘。
+        fn_from_toplevel_ex(src, &SCALA_TY, "def ", ":")
     }
     fn extract(&self, artifact: &str, src: &str) -> Vec<(String, String)> {
-        vec![(format!("{}.scala", artifact), src.to_string())]
-    }
-    fn dispatch_file(&self, _artifact: &str, _methods: &[&ForeignFn]) -> Option<(String, String)> {
-        None // JVM 侧入口需要 object 包装，本版本不生成 ⇒ 记账为不可调用，不出假垫片
-    }
-    fn build_cmd(&self, _kind: ArtifactKind, entry: &str) -> Option<CommandSpec> {
-        Some(CommandSpec::new("scalac", &[entry]))
-    }
-    fn run_cmd(&self, kind: ArtifactKind, entry: &str) -> CommandSpec {
-        match kind {
-            ArtifactKind::Executable => CommandSpec::new("scala", &[entry]),
-            ArtifactKind::Library => CommandSpec::new("scala", &[entry]),
+        // 「零 runtime」形态：源文件整体挪进包，见 SCALA_RT_PKG_PREFIX 的说明。
+        // 只在**可打包**时这么做（`java` 在场、且源里没有自己声明的 package），
+        // 否则原样落盘 —— 不把「跑不起来」伪装成「已支持」。
+        if scala_java_ok() && !scala_src_has_package(src) {
+            let pkg = scala_pkg_of(artifact);
+            // 解析函数必须挂进 `object Lib`（Scala 没有顶层函数；分发入口按
+            // `Lib.<name>(...)` 调用）。缩进 2 空格，与 Scala 的块规则一致。
+            let mut body = String::new();
+            for line in src.lines() {
+                if line.trim().is_empty() {
+                    body.push('\n');
+                } else {
+                    body.push_str("  ");
+                    body.push_str(line);
+                    body.push('\n');
+                }
+            }
+            let wrapped = format!(
+                "// 由 lang-zone 生成：整体包入 {pkg}，解析函数收进 object Lib（零 runtime 分发前提）\n\
+                 package {pkg}\n\n\
+                 object Lib {{\n{body}}}\n",
+                pkg = pkg,
+                body = body
+            );
+            vec![(format!("{}.scala", artifact), wrapped)]
+        } else {
+            vec![(format!("{}.scala", artifact), src.to_string())]
         }
     }
+    fn dispatch_file(&self, artifact: &str, methods: &[&ForeignFn]) -> Option<(String, String)> {
+        // 门①：没有 `java` 就出不了可跑入口（scalac 只能编译，scala 启动器在本环境不可用）
+        // ⇒ 返回 None，由 resolve() 逐条点名 NO_DISPATCH_SURFACE，不出假垫片。
+        if !scala_java_ok() {
+            return None;
+        }
+        let pkg = scala_pkg_of(artifact);
+        // 可调用 = 签名闭集内（int/float/str/bool）且无 unsupported
+        let callable: Vec<&&ForeignFn> = methods.iter().filter(|m| m.callable()).collect();
+        let mut arms = String::new();
+        for m in &callable {
+            let convs: Option<Vec<String>> = m
+                .params
+                .iter()
+                .map(|p| scala_arg_conv(&p.lz_type, &p.name))
+                .collect();
+            let Some(convs) = convs else {
+                // 签名层已保证 callable 的形参都在闭集内；这里兜底不静默丢
+                continue;
+            };
+            let argnames: Vec<String> = m.params.iter().map(|p| p.name.clone()).collect();
+            let call = format!("{}.{}({})", "Lib", m.name, argnames.join(", "));
+            let Some(ok_line) = scala_ret_emit(m.ret.as_deref(), &call) else {
+                continue;
+            };
+            let binds: String = convs
+                .iter()
+                .zip(argnames.iter())
+                .map(|(c, n)| format!("      val {} = {}\n", n, c))
+                .collect();
+            let ind = if arms.is_empty() { "    if" } else { "    } else if" };
+            arms.push_str(&format!(
+                "{ind} (method == \"{name}\") {{\n{binds}      out.println({ok_line})\n",
+                ind = ind,
+                name = m.name,
+                binds = binds,
+                ok_line = ok_line
+            ));
+        }
+        if !arms.is_empty() {
+            arms.push_str("    } else {\n      out.println(\"ERR:no such method: \" + method)\n      code = 3\n    }\n");
+        } else {
+            arms.push_str(
+                "    out.println(\"ERR:no such method: \" + method)\n    code = 3\n",
+            );
+        }
+        let known = callable
+            .iter()
+            .map(|m| m.name.clone())
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!(
+            r#"// {artifact} 的 CLI 分发入口 —— 由 lang-zone 生成，勿手改
+// 请求：argv = <method> [key=value ...]    响应：单行 `OK:<值>` / `ERR:<原因>`
+//
+// **零 runtime 前提**：本文件的静态初始化与服务体只碰 java.lang / java.io。
+// 刻意不用 `scala.Array` 静态字段（`<clinit>` 会拉 scala/Array$）、不用 `sys.exit` /
+// 早退 `return`（会拉 scala/runtime/Nothing$）—— 这两处都在无 scala-library 的环境
+// 实测崩过（T0r17）。参数一律走 main 的入参，退出码用局部变量末尾统一 System.exit。
+package {pkg}
+
+object __lz_{artifact} {{
+  private def argvGet(args: Array[String], key: String): String = {{
+    val prefix = key + "="
+    var i = 1
+    var out: String = ""
+    var done = false
+    while (i < args.length && !done) {{
+      val a = args(i)
+      if (a != null && a.startsWith(prefix)) {{
+        out = a.substring(prefix.length)
+        done = true
+      }}
+      i += 1
+    }}
+    out
+  }}
+
+  private def __lz_bool(s: String): Boolean = s == "true" || s == "1" || s == "True"
+
+  private def __lz_escape(s: String): String = {{
+    if (s == null) ""
+    else {{
+      val sb = new java.lang.StringBuilder()
+      var i = 0
+      while (i < s.length) {{
+        val c = s.charAt(i)
+        if (c == '\\') sb.append("\\\\")
+        else if (c == '\n') sb.append("\\n")
+        else sb.append(c)
+        i += 1
+      }}
+      sb.toString
+    }}
+  }}
+
+  def main(args: Array[String]): Unit = {{
+    val out = new java.io.PrintStream(java.lang.System.out, true, "UTF-8")
+    if (args == null || args.length == 0) {{
+      out.println("ERR:missing method")
+      java.lang.System.exit(2)
+    }} else {{
+      val method = args(0)
+      var code = 0
+      if (method == "help") {{
+        out.println("OK:{known}")
+      }} else {{
+{arms}      }}
+      out.flush()
+      java.lang.System.exit(code)
+    }}
+  }}
+}}
+"#,
+            artifact = artifact,
+            pkg = pkg,
+            known = known,
+            arms = arms
+        );
+        Some((format!("__lz_dispatch_{}.scala", artifact), body))
+    }
+    fn build_cmd(&self, kind: ArtifactKind, entry: &str) -> Option<CommandSpec> {
+        // 可调用形态（有分发入口）：把 Lib 与 dispatch 一起编到 `classes/`，
+        // 之后由 `java -cp classes` 起（scala 启动器在本环境不可用）。
+        let has_dispatch = kind == ArtifactKind::Library && scala_java_ok();
+        if has_dispatch {
+            let disp = format!(
+                "__lz_dispatch_{}.scala",
+                entry.trim_end_matches(".scala")
+            );
+            return Some(CommandSpec::new(
+                "scalac",
+                &["-d", "classes", &disp, entry],
+            ));
+        }
+        Some(CommandSpec::new("scalac", &["-d", "classes", entry]))
+    }
+    fn run_cmd(&self, kind: ArtifactKind, entry: &str) -> CommandSpec {
+        let stem = entry.trim_end_matches(".scala");
+        match kind {
+            // 库产物：java 直接起分发 object（classpath = classes 目录）
+            ArtifactKind::Library => CommandSpec::new(
+                "java",
+                &["-cp", "classes", &format!("{}.__lz_{}", scala_pkg_of(stem), stem)],
+            ),
+            ArtifactKind::Executable => CommandSpec::new(
+                "java",
+                &["-cp", "classes", &format!("{}.main", scala_pkg_of(stem))],
+            ),
+        }
+    }
+}
+
+/// Scala 源是否自带 `package` 声明（有就说明作者自己管包，不再强行包入）。
+fn scala_src_has_package(src: &str) -> bool {
+    src.lines()
+        .take(20)
+        .any(|l| l.trim_start().starts_with("package "))
+}
+
+/// 产物名 → 包名（`scala_calc` → `lz_embed_scala_calc`，非字母数字一律 `_`）。
+fn scala_pkg_of(artifact: &str) -> String {
+    let mut s = String::from(SCALA_RT_PKG_PREFIX);
+    for c in artifact.chars() {
+        if c.is_ascii_alphanumeric() {
+            s.push(c);
+        } else {
+            s.push('_');
+        }
+    }
+    s
 }
 
 // ──────────────── JS (JavaScript / Node) ────────────────
