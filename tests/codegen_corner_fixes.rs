@@ -1582,3 +1582,57 @@ def main() =
         "拼接结果长度应为 4，再拼 [5] 后为 5"
     );
 }
+
+
+// BUG-1 回归锁（iter-04:00）：**未标注类型的高阶函数形参**曾按 `rust_type(Any)` 渲染成
+// `i64`，`def apply(f, x)` 生成 `f: i64` —— 调用点传闭包 E0308、体内 `f(f(x))` E0618，
+// 未标注高阶函数完全不可用。修复：按函数体内 `f(...)` 的调用形态推断出
+// `impl Fn(实参类型..) -> 返回类型`。
+#[test]
+fn unannotated_hof_param_infers_fn_from_call_shape() {
+    let src = r#"
+def apply_twice(f, x: int) -> int:
+    return f(f(x))
+
+def apply_typed(f: fn(int) -> int, x: int) -> int:
+    return f(f(x))
+
+def main():
+    let inc = |x: int| x + 1
+    print(apply_twice(inc, 10))
+    print(apply_typed(inc, 20))
+"#;
+    let r = run_lz("unannotated_hof", src);
+    assert!(r.transpiled, "未标注高阶函数应能转译：\n{}", r.diag);
+    assert!(r.ok, "未标注高阶函数形参应推断为 impl Fn 并编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "12\n22");
+}
+
+// BUG-1 回归锁（iter-04:00）：未标注形参的**实参类型**也须参与推断——
+// `def reduce(f, xs: List<int>)` 里 `f(acc, x)` 两个实参（acc:int / x:int）
+// 决定 arity=2 与参数类型，闭包 `|a: int, b: int| a + b` 应能传入。
+// 注意：`mul` 不适用本场景——`reduce` 累加器从 0 起，`0 * x` 恒 0，与推断无关，
+// 故第二个断言改用无初值歧义的二参直接应用 `apply_pair` 来锁定 arity=2 推断本身。
+#[test]
+fn unannotated_hof_two_arg_call_shape() {
+    let src = r#"
+def reduce(f, xs: List<int>) -> int:
+    let mut acc: int = 0
+    for x in xs:
+        acc = f(acc, x)
+    return acc
+
+def apply_pair(f, x: int, y: int) -> int:
+    return f(x, y)
+
+def main():
+    let add = |a: int, b: int| a + b
+    print(reduce(add, [1, 2, 3, 4]))
+    let mul = |a: int, b: int| a * b
+    print(apply_pair(mul, 3, 4))
+"#;
+    let r = run_lz("unannotated_hof2", src);
+    assert!(r.transpiled, "二参未标注高阶函数应能转译：\n{}", r.diag);
+    assert!(r.ok, "二参未标注高阶函数形参应推断为二参 impl Fn 并编译运行：\n{}", r.diag);
+    assert_eq!(r.stdout.trim(), "10\n12");
+}

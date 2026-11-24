@@ -163,6 +163,198 @@ pub(crate) fn block_assigns_param(body: &Block, pname: &str) -> bool {
     false
 }
 
+/// 未标注类型的形参（`IrType::Any`）的**调用形态**（BUG-1，iter-04:00）。
+///
+/// 背景：`def f(g, x)` 里 `g` 没有类型标注，parser 落 `Type::Any`；直接按
+/// `rust_type(Any)` 会渲染成 `i64`（E0618/E0308，未标注高阶函数彻底不可用）。
+/// Rust 形参又不允许省略类型标注，泛型参数也表达不了「可调用」（`F: Fn(P)->R`
+/// 要求 P/R 已知、未使用还会 E0207）。因此退一步：能静态看出调用形态时据此渲染
+/// `impl Fn(..)`——扫描函数体收集 `g(...)` 的实参个数与实参类型，得到 arity + 参数类型。
+/// 找不到调用点时返回 `None`，调用方退回占位，由上游 `check` 给出「请标注 fn(...)」。
+#[derive(Debug, Clone)]
+pub(crate) struct AnyParamCallShape {
+    /// 该形参被调用时的实参个数（闭包 arity）
+    pub arity: usize,
+    /// 实参类型（长度 = arity；无法确定的元素为 `IrType::Any`）
+    pub args: Vec<IrType>,
+}
+
+/// 合并两处观测的调用形态：取较具体的实参类型；arity 不一致视作判不了（返回 `None`）。
+fn merge_call_shape(
+    a: Option<AnyParamCallShape>,
+    b: Option<AnyParamCallShape>,
+) -> Option<AnyParamCallShape> {
+    match (a, b) {
+        (None, x) | (x, None) => x,
+        (Some(a), Some(b)) => {
+            if a.arity != b.arity {
+                return None;
+            }
+            let args = a
+                .args
+                .iter()
+                .zip(b.args.iter())
+                .map(|(x, y)| {
+                    if matches!(x, IrType::Any) {
+                        y.clone()
+                    } else {
+                        x.clone()
+                    }
+                })
+                .collect();
+            Some(AnyParamCallShape {
+                arity: a.arity,
+                args,
+            })
+        }
+    }
+}
+
+/// 推断函数体中 `pname`（未标注形参）被直接调用（`pname(args)`）时的形态。
+pub(crate) fn scan_any_param_call_shape(body: &Block, pname: &str) -> Option<AnyParamCallShape> {
+    let mut found: Option<AnyParamCallShape> = None;
+    let mut stmts: Vec<&[Stmt]> = vec![&body.stmts];
+    let mut exprs: Vec<&Expr> = Vec::new();
+    loop {
+        if let Some(ss) = stmts.pop() {
+            for st in ss {
+                match st {
+                    Stmt::Let { value, .. } => exprs.push(value),
+                    Stmt::Assign { target, value } => {
+                        exprs.push(target);
+                        exprs.push(value);
+                    }
+                    Stmt::Return { value: Some(v) } => exprs.push(v),
+                    Stmt::ExprStmt { expr } => exprs.push(expr),
+                    Stmt::Raise { value } => exprs.push(value),
+                    Stmt::If {
+                        cond,
+                        then_branch,
+                        else_branch,
+                    } => {
+                        exprs.push(cond);
+                        stmts.push(&then_branch.stmts);
+                        if let Some(b) = else_branch {
+                            stmts.push(&b.stmts);
+                        }
+                    }
+                    Stmt::Block { stmts: inner } => stmts.push(inner),
+                    Stmt::For {
+                        iter,
+                        body,
+                        else_body,
+                        ..
+                    } => {
+                        exprs.push(iter);
+                        stmts.push(&body.stmts);
+                        if let Some(b) = else_body {
+                            stmts.push(&b.stmts);
+                        }
+                    }
+                    Stmt::While {
+                        cond,
+                        body,
+                        else_body,
+                        ..
+                    } => {
+                        exprs.push(cond);
+                        stmts.push(&body.stmts);
+                        if let Some(b) = else_body {
+                            stmts.push(&b.stmts);
+                        }
+                    }
+                    Stmt::WhileLet { expr, body, .. } => {
+                        exprs.push(expr);
+                        stmts.push(&body.stmts);
+                    }
+                    Stmt::BlockLabel { body, .. } => stmts.push(&body.stmts),
+                    Stmt::Defer { body } => stmts.push(&body.stmts),
+                    Stmt::CheckerBlock { body, .. } => stmts.push(&body.stmts),
+                    Stmt::Match {
+                        scrutinee, arms, ..
+                    } => {
+                        exprs.push(scrutinee);
+                        for a in arms {
+                            stmts.push(&a.body.stmts);
+                        }
+                    }
+                    Stmt::TryCatch {
+                        body,
+                        catches,
+                        else_body,
+                        finally_body,
+                    } => {
+                        stmts.push(&body.stmts);
+                        for (_, b) in catches {
+                            stmts.push(&b.stmts);
+                        }
+                        if let Some(b) = else_body {
+                            stmts.push(&b.stmts);
+                        }
+                        if let Some(b) = finally_body {
+                            stmts.push(&b.stmts);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+        let Some(e) = exprs.pop() else { break };
+        match &e.kind {
+            ExprKind::Call { callee, args, .. } => {
+                if matches!(&callee.kind, ExprKind::Var(n) if n == pname) {
+                    let shape = AnyParamCallShape {
+                        arity: args.len(),
+                        args: args.iter().map(|a| a.ty.clone()).collect(),
+                    };
+                    found = merge_call_shape(found, Some(shape));
+                }
+                exprs.push(callee);
+                exprs.extend(args.iter());
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                exprs.push(receiver);
+                exprs.extend(args.iter());
+            }
+            ExprKind::FieldAccess { base, .. } => exprs.push(base),
+            ExprKind::IndexGet { base, key } => {
+                exprs.push(base);
+                exprs.push(key);
+            }
+            ExprKind::IndexSet { base, key, value } => {
+                exprs.push(base);
+                exprs.push(key);
+                exprs.push(value);
+            }
+            ExprKind::BinOp { lhs, rhs, .. } => {
+                exprs.push(lhs);
+                exprs.push(rhs);
+            }
+            ExprKind::AssignExpr { target, value } => {
+                exprs.push(target);
+                exprs.push(value);
+            }
+            ExprKind::Tuple(items) | ExprKind::List(items) => {
+                exprs.extend(items.iter());
+            }
+            ExprKind::Dict(pairs) => {
+                for (k, v) in pairs {
+                    exprs.push(k);
+                    exprs.push(v);
+                }
+            }
+            ExprKind::Lambda { body, .. } => exprs.push(body),
+            ExprKind::BlockExpr { block } => stmts.push(&block.stmts),
+            // 形如 `return f(f(x))` 的返回位置会被 builder 包一层隐式转换
+            // （`ImplicitConvert { source, target_ty }`），要穿透 source 才能看到里层调用。
+            ExprKind::ImplicitConvert { source, .. } => exprs.push(source),
+            _ => {}
+        }
+    }
+    found
+}
+
 impl CodeGen {
     pub(crate) fn gen_item(&mut self, item: &Item) {
         match item {
@@ -911,6 +1103,41 @@ impl CodeGen {
                                     send_bound
                                 )
                             }
+                    } else if matches!(&p.ty, IrType::Any) {
+                        // BUG-1（iter-04:00）：形参**未标注类型**时 parser 落 `Type::Any`
+                        // → `IrType::Any`，而 `rust_type(Any)` 恒回 `i64`。若照搬，`def f(g, x)`
+                        // 会被渲染成 `g: i64` —— 调用点 `g(...)`（E0618）与传进来的闭包实参
+                        // （E0308）双双编译失败，未标注高阶函数彻底不可用。
+                        //
+                        // 本分支产出**类型片段**（外层拼 `name: <片段>`），故不能像
+                        // `stmt_gen::gen_param` 那样"省略注解"（Rust 形参不许省略类型，实测
+                        // E0573）；泛型参数也表达不了"可调用"（`F: Fn(P)->R` 要求 P/R 已知，
+                        // 且未使用的泛型参数触发 E0207）。
+                        //
+                        // 改走**调用形态推断**：扫描函数体里对该形参的直接调用 `g(a1, a2)`，
+                        // 取 arity 与实参类型，渲染成 `impl Fn(A1, A2) -> R`（R 取本函数返回
+                        // 类型）。实测 `def apply_twice(f, x: int) -> int: return f(f(x))`
+                        // → `impl Fn(i64) -> i64 + 'static + Clone`，`apply_twice(inc, 10)` = 12。
+                        //   - 有可判定的调用点 → 收闭包字面量 / Arc 载体均可，体内 `f(x)` 正常调用；
+                        //   - 推断不出 → 退回占位 `()`，由上游 `check` 给出"请标注 fn(...) 类型"
+                        //     的明确提示，而不是静默产出错误的 `i64`。
+                        match scan_any_param_call_shape(&f.body, &p.name) {
+                            Some(shape) if shape.arity > 0 => {
+                                let ps: Vec<String> =
+                                    shape.args.iter().map(|t| self.rust_type(t)).collect();
+                                let ret_ty = if f.ret_ty == IrType::Unit {
+                                    "()".to_string()
+                                } else {
+                                    self.rust_type(&f.ret_ty)
+                                };
+                                format!(
+                                    "impl Fn({}) -> {} + 'static + Clone",
+                                    ps.join(", "),
+                                    ret_ty
+                                )
+                            }
+                            _ => "()".to_string(),
+                        }
                     } else {
                         let ty_str = self.rust_type(&p.ty).to_string();
                         let ty_str = if let IrType::Named { path, args } = &p.ty {
