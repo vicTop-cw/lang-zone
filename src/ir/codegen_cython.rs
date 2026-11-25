@@ -246,12 +246,27 @@ impl CythonCodeGen {
             self.writeln(&format!("    def __repr__(self): return '{}(' + repr(self._v) + ')'", name));
             self.writeln("");
         }
-        // 运行时：Option/Result 命名空间（Option.None/Some、Result.Ok/Err 伴随访问）
+        // 运行时：Option 命名空间 + Option-None 单例（`_LZNONE` / `_LzNoneCls`）。
+        // 直出形态（下沉自 postprocess 3a）：`Option.None` 改为调用得 `_LZNONE` 的静态方法，
+        // `_LzNoneCls` 提供 is_none/is_some/unwrap/expect/__eq__/__bool__ 语义。
         self.writeln("class Option:");
         self.writeln("    @staticmethod");
         self.writeln("    def Some(v): return v");
-        self.writeln("    None_ = None");
+        self.writeln("    @staticmethod");
+        self.writeln("    def None_(): return _LZNONE");
         self.writeln("");
+        self.writeln("class _LzNoneCls:");
+        self.writeln("    def is_none(self): return True");
+        self.writeln("    def is_some(self): return False");
+        self.writeln("    def unwrap(self): raise LZError('unwrap None')");
+        self.writeln("    def expect(self, m): raise LZError(m)");
+        self.writeln("    def __repr__(self): return 'None'");
+        self.writeln("    def __eq__(self, o): return o is None or isinstance(o, _LzNoneCls)");
+        self.writeln("    def __bool__(self): return False");
+        self.writeln("");
+        self.writeln("_LZNONE = _LzNoneCls()");
+        self.writeln("");
+        // 运行时：Result 命名空间（Result.Ok/Err 伴随访问）
         self.writeln("class Result:");
         self.writeln("    @staticmethod");
         self.writeln("    def Ok(v): return v");
@@ -4768,12 +4783,9 @@ pub fn postprocess_pyx(
         }
     }
 
-    // 3a) Option 垫片：None_ 裸 None → 单例方法对象
-    let opt_anchor = "class Option:\n    @staticmethod\n    def Some(v): return v\n    None_ = None";
-    let opt_shim = "class Option:\n    @staticmethod\n    def Some(v): return v\n    @staticmethod\n    def None_(): return _LZNONE\n\nclass _LzNoneCls:\n    def is_none(self): return True\n    def is_some(self): return False\n    def unwrap(self): raise LZError('unwrap None')\n    def expect(self, m): raise LZError(m)\n    def __repr__(self): return 'None'\n    def __eq__(self, o): return o is None or isinstance(o, _LzNoneCls)\n    def __bool__(self): return False\n\n_LZNONE = _LzNoneCls()";
-    if code.contains(opt_anchor) {
-        code = code.replace(opt_anchor, opt_shim);
-    }
+    // 3a) Option 垫片：已下沉至 codegen 直出（gen prelude 发 `Option.None_()` +
+    //     `_LzNoneCls` + `_LZNONE`），本处分支退位删除，防叠加生成
+    //     （原锚点 `class Option: … None_ = None` 不再出现）。
 
     // 3b) 行级裸 None 字面量赋值 → _LZNONE
     {
@@ -4804,17 +4816,9 @@ pub fn postprocess_pyx(
         code = out.join("\n");
     }
 
-    // 4) 构建块下标修复：`))()(N)` → `))()[N]`
-    loop {
-        let Some(p) = code.find("))()(") else { break };
-        let after = &code[p + 5..];
-        let Some(close) = after.find(')') else { break };
-        let idx = &after[..close];
-        if idx.is_empty() || !idx.chars().all(|c| c.is_ascii_digit()) {
-            break;
-        }
-        code = format!("{}))()[{}]{}", &code[..p], idx, &after[close + 1..]);
-    }
+    // 4) 构建块下标：已由 codegen 直出。`MagicKind::UnpackBuildCall` 直接发
+    //    `((lambda …)())[N]` 下标形态（见 gen_expr），旧 `))()(N)`→`))()[N]`
+    //    的文本改写分支退位删除（当前 gen 在 CY/TESTS 与 DEMO 全量均不再产生 `))()(`）。
 
     // 5) 列表推导 filter 谓词补调用
     {
