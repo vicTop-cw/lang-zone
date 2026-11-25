@@ -1132,3 +1132,110 @@ def main() =
     assert!(out_has("4"), "via_return(true) 不对: {}", r.stdout);
     assert!(out_has("2"), "shadow_ok 不对: {}", r.stdout);
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 缺口②（iter-22:00）：混合数值算术/比较的类型提升
+//
+// rs-lz 旧实现把 `3 + 0.5`（一侧 int 一侧 f64）落 gen_expr 的 else 原样透传 ⇒
+// `3i64 + 0.5f64` 产 E0277（no impl Add<f64> for i64）。修法对齐原生 oracle
+// expr_gen.rs:6349-6352：一侧 f64、另一侧数值非 f64 时把数值侧 `as f64`。
+// 覆盖算术（+ - * / %）与比较（< <= > >= == !=，对齐原生 num_mixed 口径）。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn m_num_mixed_promotes_to_f64() {
+    let src = r##"
+def main() =
+    let a = 3 + 0.5
+    let b = 2 * 1.5
+    let c = 1.0 - 4
+    let d = 7.5 / 2
+    let e = 5.0 % 3
+    assert a == 3.5
+    assert b == 3.0
+    assert c == -3.0
+    assert d == 3.75
+    assert e == 2.0
+    assert 3 < 3.5
+    assert 2.0 > 1
+    assert 1.0 == 1.0
+    assert 1.5 != 1
+    print("N9 mixed-ok")
+"##;
+    let r = run_rs_lz("n9_num_mixed", src);
+    assert_ok(&r, "N9 混合数值提升");
+    // int 侧必须被 `as f64` 提升（旧缺陷形态是裸 `3i64 + 0.5f64`）
+    assert!(
+        r.rust.contains("(3i64 as f64) + 0.5f64"),
+        "int 侧未提升为 f64（旧缺陷形态 `3i64 + 0.5f64`）:\n{}",
+        r.rust
+    );
+    assert!(
+        !r.rust.contains("3i64 + 0.5f64"),
+        "仍是裸 `3i64 + 0.5f64` ⇒ E0277:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("(2i64 as f64) * 1.5f64"),
+        "乘法侧未提升:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains("N9 mixed-ok"), "运行输出不对: {}", r.stdout);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 缺口③（iter-22:00）：默认参数签名 Option<T> + 函数体影子 + 调用点补参
+//
+// rs-lz 旧实现直接按默认值类型发签名（`b: i64`）且调用点不补参 ⇒ `default_params(1)`
+// 报 E0061。修法对齐原生 decl_gen.rs:1053-1054 / 1529-1543 + expr_gen.rs:1486-1510：
+//   签名 b → Option<i64>；函数体首 `let b = b.unwrap_or_else(|| 10i64);`；
+//   调用点 `default_params(1, 2)` → `default_params(1i64, Some(2i64))`、
+//   `default_params(1)` → `default_params(1i64, None)`。
+// ════════════════════════════════════════════════════════════════════════════
+#[test]
+fn m_default_param_option_shim_and_call_padding() {
+    let src = r##"
+def defp(a: int, b: int = 10) -> int =
+    a + b
+
+def defs(g: str, name: str = "World") -> str =
+    g + ", " + name
+
+def main() =
+    assert defp(1, 2) == 3
+    assert defp(1) == 11
+    assert defs("Hi") == "Hi, World"
+    assert defs("Hi", "LZ") == "Hi, LZ"
+    print("N10 defaults-ok")
+"##;
+    let r = run_rs_lz("n10_defaults", src);
+    assert_ok(&r, "N10 默认参数");
+    // 签名发成 Option<T>
+    assert!(
+        r.rust.contains("pub fn defp(a: i64, b: Option<i64>) -> i64"),
+        "默认形参签名未发 Option<i64>:\n{}",
+        r.rust
+    );
+    // 函数体首影子
+    assert!(
+        r.rust.contains("let b = b.unwrap_or_else(|| 10i64);"),
+        "默认形参函数体影子缺失:\n{}",
+        r.rust
+    );
+    // 调用点补参：显式传入包 Some、未提供补 None
+    assert!(
+        r.rust.contains("defp(1i64, Some(2i64))"),
+        "显式传入的默认实参未包 Some:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("defp(1i64, None)"),
+        "未提供的默认实参未补 None:\n{}",
+        r.rust
+    );
+    assert!(
+        r.rust.contains("defs(\"Hi\".to_string(), None)"),
+        "str 默认参数调用点未补 None:\n{}",
+        r.rust
+    );
+    assert!(r.stdout.contains("N10 defaults-ok"), "运行输出不对: {}", r.stdout);
+}

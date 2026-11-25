@@ -1215,17 +1215,25 @@ impl LzGen {
         let items: Vec<String> = params
             .iter()
             .map(|p| {
+                // 第 7 位 default 表达式：无默认时填 `Expr.LitUnit(ty: IrType.Unit)` 占位
+                //（LZ 侧仅当第 6 位 has_default=true 时才渲染它，占位永不进产物）。
+                let def_s = match &p.default {
+                    Some(d) => self.expr(d),
+                    None => "Expr.LitUnit(ty: IrType.Unit)".to_string(),
+                };
                 format!(
-                    "(\"{}\", {}, {}, {}, {})",
+                    "(\"{}\", {}, {}, {}, {}, {}, {})",
                     p.name,
                     self.irtype(&p.ty),
                     if p.is_ref { "true" } else { "false" },
                     if p.is_mut { "true" } else { "false" },
-                    if p.is_owned { "true" } else { "false" }
+                    if p.is_owned { "true" } else { "false" },
+                    if p.default.is_some() { "true" } else { "false" },
+                    def_s
                 )
             })
             .collect();
-        self.list_ref("(str, IrType, bool, bool, bool)", items)
+        self.list_ref("(str, IrType, bool, bool, bool, bool, Expr)", items)
     }
 
     /// BUG-431：泛型形参（含边界）→ `List<(str, List<IrType>)>`。

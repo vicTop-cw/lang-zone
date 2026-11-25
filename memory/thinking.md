@@ -91,3 +91,29 @@
 - 推送：git push 报 "Everything up-to-date" 是 ref 缓存滞后（fetch 后 origin/master 已前进），`git push origin HEAD:master` 实推 ddce839→8fe64e3 成功，fetch 复核本地=远程。
 - 遗留（T0r19 在册，留给并发轮次）：缺口② 混合数值算术无提升（`3i64 + 0.5f64` → E0277）、缺口③ 默认参数签名字面展开（E0061）；另有 iter-22:00 留档的 `demo_codegen_compile::magic_demos_generated_rust_compiles` 单条历史失败（未定位）。
 - 前提检查判据仍待升级（本机已第 5 次复现脚本盲区）：只看 *.rs/.py/.pyx/.md/.toml/.lz 的 mtime；并发 agent 编译时不回写源文件。建议判据改为「源文件 mtime ＜5min **或** 任意 target/lane-*|target/iter* 产物 mtime ＜5min **或** 存活 cargo/rustc 子进程」。
+
+## 2026-11-25T04:02:31Z
+
+## 2026-11-25 12:00 迭代-12:00 定时轮：**跳过（并发活跃，证据链完整 — 第6次复现脚本盲区）**
+- 前提检查（字面口径）：最新源文件 11:48:31，距启动 12.03 分钟 → 表面 CONTINUE_PROCEED；git pull 已最新（Already up to date）。
+- 但按前提检查**本意**终止，实证（我会话零构建、零项目源文件写入）：
+  1. **存活的并发构建进程树**：父链 `66612 → 79748(powershell, 12:00:35) → 31728(rustup) → 54364(cargo test --test lz_ir_bootstrap)`；另有 `54364 → 111080(lz_ir_bootstrap-*.exe 测试进程, 12:00:40)` 作为十余个 lang-zone.exe 的父进程。全部启动于 12:00:35~12:01:18，与本次任务启动（12:00:33）几乎重合。
+  2. **实时活跃的 rs-lz 回归扫描**：进程 111080 以 `target/iter22-lz/debug/lang-zone.exe <tmp>.lz --emit=rs-lz` 批量驱动 rs-lz 源码扫描，临时目录 `lz_rs_scrut_str/lz_rs_scrut_gate/lz_rs_recursive_box/lz_rs_range_filter/lz_self_dict_kwarg_literal/lz_self_user_sum_shadow/lz_any_param/lz_rs_tuple/lz_rs_trait_assoc` 在 12:01→12:02:21 之间**连续产出新内容**（两次 5-6 秒采样各见新写入），进程 111080 CPU 由 0.390625→0.453125 稳步累积。
+  3. **归属判定**：这正是 rs-lz 自举路径缺口的在途验证工作，与在册任务树 T0r19/T0r20（待领取 9 + 已领取 1 + 拆分中 7）同源 —— 另一 agent 会话（很可能是同一"lang-zone迭代"定时任务的并发实例，或上轮 agent 收尾中）正在做缺口②混合数值提升/③默认参数展开的验证与 z_* 门禁静态判定。
+- ⚠ **脚本盲区第 6 次复现**（thinking.md 已记 4 次、memory 内多次）：前提检查只看 `*.rs/.py/.pyx/.md/.toml/.lz` 的 mtime；并发 agent 编译/验证时不回写源文件，只写 `target/` 与 `%TEMP%/lz_*` 目录 ⇒ 脚本恒 CONTINUE。**判据应升级为**：「源文件 mtime ＜5min **或** 任意 `target/lane-*|target/iter*` 产物 mtime ＜5min **或** `%TEMP%/lz_*` 目录 mtime ＜5min **或** 存活 cargo/rustc/lang-zone 子进程」。
+- 本次动作：**零**项目源文件修改、零发布/认领/归档、零提交。工作树中 `src/ir/codegen_cython.rs`、`src/ir/lz_codegen.rs`、`src/ir/lz_codegen_lib.lz`、`src/ir/lz_ir_lib.lz`、`tests/rs_lz_families.rs`、`memory/bugs.md` 的未提交改动属并发会话（rs-lz 缺口工作）在做内容，**任何轮次不得擅自回滚或提交**。
+- 沿袭留档（仍待收口，rs-lz 自举路径独有、原生正常）：① `**` 幂运算缺 Pow 分支（已由 iter-16:00 连带修复浮点幂 BUG-521）；② 混合数值算术无提升（`3i64 + 0.5f64` → E0277）；③ 默认参数签名字面展开（E0061）。位置 src/ir/lz_codegen_lib.lz gen_expr 的 case Expr.BinOp（约 1368-1455 行），样本 DEMO/01_basics/{functions,expr_literals}.lz。
+## 2026-11-25 22:00 迭代-22:00 探索轮：T0r20 收口 rs-lz 缺口②③（并发窗口内完成）
+- 前提检查（修正脚本后）：项目源文件（排除 temp/）最新改动 975 分钟（≥5）→ CONTINUE_PROCEED；temp/cy_s4 下有 1.29 分钟前的 .pyx 写入（属并发构建探针目录，非源码），按本意先复核。git pull：本地=origin/master=92a7f29（领先 origin/main 3 个提交）；工作树有 1 个未提交改动 src/ir/codegen_cython.rs（**Option 垫片下沉**，见下）。
+- **先收口在途 Option 垫片**：src/ir/codegen_cython.rs 的未提交改动把 postprocess 3a 的 Option 垫片**下沉至 codegen 直出**（`Option.None_()` + `_LzNoneCls` + `_LZNONE`），并删除 postprocess 里已退位的分支防叠加生成。实测编译 0 warning 0 error → 提交 5f08826（收口，非本轮新建工作）。
+- **本轮缺口判定与落地（T0r20）**：接手 iter-16:00 留档的 rs-lz 三条缺口，核实后 ②③ 仍在（① 浮点幂已由 BUG-521 修）：
+  - **缺口② 混合数值算术提升**：rs-lz `3i64 + 0.5f64` 落 gen_expr 的 else 原样 → E0277。修法：新增 `is_arith_or_cmp_op`/`is_f64_irtype`/`is_numeric_or_any_irtype`/`expr_is_f64_side` 判据，在 BinOp 的 else 前插 f64 提升分支（对齐原生 expr_gen.rs:6349-6352）。输出 `(3i64 as f64) + 0.5f64`，与原生**逐字一致**。
+  - **缺口③ 默认参数**：这是本轮**最大的一处下沉改造**。rs-lz 的参数元组 schema 从 5 元组 `(str,IrType,bool,bool,bool)` 扩为 **7 元组** `(str,IrType,bool,bool,bool,bool,Expr)`（末两位=has_default + default 表达式），需**同步改 lz_codegen.rs 的 param_pairs + lz_codegen_lib.lz + lz_ir_lib.lz**（17 处类型标注）。LZ 侧：`fn_param_str` 对 has_default 形参发 `Option<T>`；新增 `default_shadow_lines` 在函数体首补 `let b = b.unwrap_or_else(|| 10i64);`；新增 `@dfc:<fn>#<total>#<defcount>` 编码表（走 module_prelude_entries 的 env 穿透）+ `dfc_lookup`/`gen_default_call` 在调用点补 `Some(x)`/`None`。输出与原生 decl_gen.rs:1053/1529 + expr_gen.rs:1486-1510 **逐字一致**（`default_params(1i64, Some(2i64))` / `default_params(1i64, None)`）。
+- **血泪教训（本轮最贵的一课）**：用 PowerShell `Set-Content -Encoding UTF8` 批量改 .lz 时**引入了 BOM** —— 而 lz_*.lz 被 `include_str!` 嵌入，BOM 让生成器解析报 `Unexpected token: Unknown("\u{feff}")`，表现为「rs-lz 产物恒空」。用 `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))` 修回无 BOM。（同理：实测产物写文件也要无 BOM，否则 rustc 报 `stream did not contain valid UTF-8`。）
+- **另一处自找的坑**：把调用点补参分支插进了 `elif not is_user_fn(...)` 的魔法分支链里，而带默认参数的**用户函数**走的是外层 `else`（用户同名函数）—— 分支放错层，debug 多花数轮。教训：改 if/elif 链前先看清**外层条件**（`is_user_fn` 的正/反两路是不同 else 分支）。
+- **验证铁律**：全程真 `.lz → .rs → rustc → 运行`——expr_literals（`R1 literals OK` exit 0）+ functions（`R6 functions OK` exit 0）+ literals/types/structs/dicts/control_flow 抽查全过。
+- **回归读数**（车道 target/iter22-lz）：build 0 warning 0 error；lib 486/0；**rs_lz_families 18/18**（新增 2 锁 m_num_mixed / m_default_param）；codegen_corner_fixes 47/47；rs_lz_behdiff 16/16；rs_lz_relpath 3/3；lz_frontend_bootstrap 7/7；frontend_dual_track 2/0；dual_route_golden 4/4；g6_codegen 17/17；embed 全套（gapfixes 18/scala 8/dict 23/tuple 7/unify 23/js 10/c 2/list 8/dedup 4）全绿。
+- **零回归坐实（关键）**：lz_ir_bootstrap 24 passed / 1 failed，失败项 `rs_lz_unannotated_param_defaults_i64`（BUG-480 锁）**在纯 HEAD 上同样红**（stash 复核：`pub fn f(x: ())` 在 native 断言）⇒ 既有回归，非本轮。DEMO 抽查 7 个失败项经 stash 基线对照 **BASE_FAIL=7**⇒ 全为 rs-lz 既有缺口族，非本轮引入。
+- **新入账 5 条 bug**（全为既有缺口，供后续轮次）：BUG-522（assert_eq! 混合数值不提升，两侧同形态）、BUG-523（native 无注解形参推断为 `()`，iter-16 ddce839 引入）、BUG-524（rs-lz 返回闭包类型 `fn` vs `Arc<dyn Fn>`）、BUG-525（rs-lz 运算符重载 `&Money` vs `Money`）、BUG-526（DEMO/01_basics rs-lz 端到端未覆盖基线，系统性缺口汇总）。
+- **在册遗留（T0r20 后续）**：rs-lz 路径的基础容器（lists/索引 cast）、字符码点（G5）、返回闭包、运算符重载、DEMO 全量 rs-lz 门禁 —— 均已在 BUG-522~526 记账，建议后续轮次逐族收敛并把 DEMO/01_basics 纳入 rs-lz 回归门禁。
+- ⚠ 前提检查脚本盲区仍旧（源文件 mtime 判据漏并发构建）；本轮因 temp/cy_s4 探针目录写入而一度接近「按本意跳过」，实地核验（无 cargo/rustc 存活、源码未动）后判定 CONTINUE（并发窗口已结束）。

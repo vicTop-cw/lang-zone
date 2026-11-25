@@ -3893,3 +3893,28 @@ commit：3f8512e（重映射自 未记）
 - evidence: 回归锁 tests/codegen_corner_fixes.rs::pow_float_base_uses_powf_not_pow（int `a**10`=1024 / f64 `2.0**3.0`=8.0 / `2.0**0.5`=1.4142135623730951，真 rustc 编译 + 真运行逐字比对）。rs-lz 路径同构修复由 tests/rs_lz_families 16/16 零回归钉住。cargo build --bin lang-zone 0 warning 0 error（车道 target/iter16-lz）。
 - reported_by: loomy-commander
 状态：FIXED
+
+## BUG-522 [2026-11-25T11:48:07Z] [medium] OPEN
+- summary: assert_eq! 混合数值不提升：`assert 1.0 == 1` 生成 `assert_eq!(1.0f64, 1i64)` → E0277/E0308（原生与 rs-lz 两侧同形态；BinOp 的数值提升逻辑不覆盖 `Call(Var("assert_eq!"))` 路径）
+- detail: 发现于 iter-22:00（T0r20 方向①混合数值提升落地时）。原生 oracle expr_gen.rs:6349-6352 的 f64/i128 提升只在 `ExprKind::BinOp` 分支生效；但 `assert a == b` 被 builder 编成 `ExprKind::Call(callee=Var("assert_eq!"), args=[a, b])`（非 BinOp），其两实参各自独立渲染（expr_gen.rs:1098-1146 的 assert_eq! expected_ty 注入只处理 None 字面量，不处理混合数值）⇒ `assert 1.0 == 1` 生成 `assert_eq!(1.0f64, 1i64)`，rustc 报 E0277（no impl PartialEq<i64> for f64）/E0308。实测：`temp/iter2200/nc.lz`（`assert 1.0 == 1` + `assert 1 != 1.5`）经 `--emit=rust` 得 `assert_eq!(1.0f64, 1i64);` 与 `assert!((1i64 as f64) != 1.5f64);`——后者（`!=` 走 BinOp）已被正确提升，证实仅 `==`（assert_eq!）这一路漏。rs-lz 侧同形态（gen_call 的 assert_eq! 走通用调用分支，两实参不提升）。集成回归锁 tests/rs_lz_families.rs::m_num_mixed_promotes_to_f64 已把该形态从样本里剔除（改用原生可编译的 `1.0 == 1.0` / `1.5 != 1`），以守「rs-lz 与原生逐字一致」——**未单侧修 rs-lz**（避免制造新的两侧分叉；正解应两侧同修）。
+- reported_by: 统帅-CEO(iter-22:00 探索轮 T0r20)
+
+## BUG-523 [2026-11-25T11:55:00Z] [medium] OPEN
+- summary: native 无类型注解形参推断为 `()` 而非 `i64`：`def f(x): return x + 1` 生成 `pub fn f(x: ())`，与 BUG-480 的既定期望 `pub fn f(x: i64)` 冲突（iter-16:00 ddce839 引入）
+- detail: 测试 tests/lz_ir_bootstrap.rs::rs_lz_unannotated_param_defaults_i64（BUG-480 回归锁）在 HEAD=5f08826 上**已红**（iter-22:00 纯净 stash 复核坐实：失败信息 `BUG-480：native 未发射 pub fn f(x: i64) -> i64:` / 实际 `pub fn f(x: ()) -> i64`，断言在 native 分支 tests/lz_ir_bootstrap.rs:2333）。根因疑为 iter-16:00 的 BUG-1 修复（commit ddce839「未标注类型高阶函数形参按调用形态推断为 impl Fn」）对**普通函数**的无注解形参 `def f(x)`（非高阶）也做了推断，落成 `()` 而非原生 emit.rs:247 的 `i64`。native 路径 src/ir/codegen/ 未在本轮改动（git diff 为空），故为本轮起点的既有回归。rs-lz 侧同形态（本测试同时断言 rs-lz 产物），需两侧一致修复。修法方向：推断仅在形参确为「按调用形态推断为闭包」时生效，普通未注解形参回落 i64（对齐 emit.rs:247）。
+- reported_by: 统帅-CEO(iter-22:00 探索轮 T0r20)
+
+## BUG-524 [2026-11-25T12:00:00Z] [medium] OPEN
+- summary: rs-lz 返回闭包类型发射与原生不一致：`def make_adder(n: int) -> fn(int) -> int` 在 rs-lz 发 `-> fn(i64) -> i64`（fn 指针），而原生发 `-> Arc<dyn Fn(i64) -> i64 + Send + Sync>` ⇒ rs-lz 产物 `return move |x| x + n;` 报 E0308（expected fn pointer, found closure）
+- detail: 发现于 iter-22:00（T0r20 DEMO rs-lz 端到端抽查）。DEMO/01_basics/polish_06_functions.lz 的 `make_adder` 在 rs-lz 产物 `pub fn make_adder(n: i64) -> fn(i64) -> i64 {`（temp/iter2200/e2e/polish_06_functions.rs:112），真 rustc 报 E0308 expected `fn(i64) -> i64` found closure（:113 `return move |x| x + n;`）；原生同源产物 `DEMO/01_basics/polish_06_functions.rs:112` 为 `-> Arc<dyn Fn(i64) -> i64 + Send + Sync>`（返回闭包需装箱，Rust 闭包非 fn 指针）。**基线坐实**：iter-22:00 纯净 stash 复核（无本轮改动）下 rs-lz 同样发 `-> fn(i64) -> i64` ⇒ 既有缺口，非本轮引入。修法方向：rs-lz 对「返回类型为 IrType.FnType」的形参/返回发射 `Arc<dyn Fn(...) -> ... + Send + Sync>`（对齐原生 decl_gen.rs 的 nested_fn_ret / Arc 装箱口径）。
+- reported_by: 统帅-CEO(iter-22:00 探索轮 T0r20)
+
+## BUG-525 [2026-11-25T12:00:00Z] [medium] OPEN
+- summary: rs-lz 运算符重载引用的值/借用差异：`expected Money, found &Money`（`expected Vec2, found &Vec2`）—— DEMO/01_basics/polish_14_operators.lz rs-lz 产物 E0308
+- detail: 发现于 iter-22:00（T0r20 DEMO rs-lz 端到端抽查）。polish_14_operators.lz 的运算符重载（Money/Vec2 的 `__add__` 等）在 rs-lz 产物里形参按借用（`&Money`）传而操作点按值期望（`Money`）⇒ E0308 mismatched types（expected `Money`, found `&Money` / expected `Vec2`, found `&Vec2`）。原生同源产物可编译（原生对运算符重载接收者做值/借用统一）。rs-lz 侧 gen_expr 的 BinOp/MagicCall 对用户自定义运算符类型的引用处理未对齐原生。**基线坐实**：本轮未碰运算符重载路径（src/ir/codegen/ 零改动），属既有缺口。留待后续轮次收口。
+- reported_by: 统帅-CEO(iter-22:00 探索轮 T0r20)
+
+## BUG-526 [2026-11-25T12:05:00Z] [medium] OPEN
+- summary: DEMO/01_basics rs-lz 端到端未覆盖基线：≥7 个 DEMO 经 `--emit=rs-lz` → rustc 编不过（既有缺口族，本轮 iter-22:00 stash 复核坐实全部 BASE_FAIL）
+- detail: iter-22:00（T0r20）对 DEMO/01_basics 做 rs-lz 全链路抽查（`--emit=rs-lz` → rustc → run），失败集 = {combined, polish_29_combined, polish_30_edge, polish_14_operators, polish_06_functions, lists, var_assign}（BASE_OK=0/BASE_FAIL=7，**无本轮改动**的纯基线复核）。各失败归因（族）：① lists → `expected usize, found i64`（索引 cast，N2 族）；② var_assign → `String == i64`（G5 `s[i]` 码点语境取了 `.to_string()` 而非 `as i64`）；③ combined → `String is not an iterator`；④ polish_14_operators → `expected Money/Vec2, found &Money/&Vec2`（运算符重载引用，见 BUG-525）；⑤ polish_06_functions → 返回闭包 `-> fn(i64) -> i64`（见 BUG-524）；⑥ polish_29/polish_30 同族组合。结论：rs-lz 与原生在**若干基础容器/字符/运算符形态**上尚未逐字对齐，DEMO 全量未纳入 rs-lz 门禁（当前 rs-lz 门禁靠 tests/rs_lz_families.rs 16 族 + lz_ir_bootstrap）。**这是 rs-lz 自举路径系统性缺口**（非本轮引入），需后续轮次逐族收敛，并把 DEMO/01_basics 全量纳入 rs-lz 回归门禁。
+- reported_by: 统帅-CEO(iter-22:00 探索轮 T0r20)

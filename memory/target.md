@@ -1,7 +1,21 @@
 ﻿# 当前阶段目标（Target）
 
-- 本轮聚焦：**rs-lz 自举路径三条真实缺口（T0r19）** —— 已落地缺口① 浮点/整数幂运算（BUG-521）
-- 验收条件：cargo build 0 warning 0 error、lib/相关套件零回归、端到端真编译+真运行、账本 BUG-521 记录
+- 本轮聚焦：**rs-lz 自举路径三条真实缺口（T0r19/T0r20）** —— 已落地① 浮点/整数幂（BUG-521）、② 混合数值提升、③ 默认参数（T0r20, iter-22:00）
+- 验收条件：cargo build 0 warning 0 error、lib/相关套件零回归、端到端真编译+真运行、账本 BUG-521/BUG-522~526 记录
+
+---
+
+## 2026-11-25 迭代-22:00（定时任务探索轮）：T0r20 收口 rs-lz 缺口②③
+
+- 起点：HEAD=92a7f29（iter-16:00 全绿基线）。前提检查：项目源文件最新改动距启动 975 分钟（≥5），CONTINUE_PROCEED；git pull 本地=origin/master。工作树有 1 个在途改动 `src/ir/codegen_cython.rs`（Option 垫片下沉）。
+- **先收口在途**：`codegen_cython.rs` 的 Option 垫片下沉（postprocess 3a 分支退位、codegen 直出 `Option.None_()` + `_LzNoneCls` + `_LZNONE`）实测编译通过 → 提交 **5f08826**。
+- **T0r20 落地 rs-lz 两条缺口**（发任务树 T0r20 + plan_deep 拆 3×2）：
+  - **缺口② 混合数值算术提升**：新增判据 `is_arith_or_cmp_op`/`expr_is_f64_side` 等，BinOp 的 else 前插 f64 提升分支（对齐原生 expr_gen.rs:6349-6352）→ `(3i64 as f64) + 0.5f64`，与原生逐字一致。
+  - **缺口③ 默认参数**（最大改造）：参数元组 schema 5→**7 元组** `(str,IrType,bool,bool,bool,bool,Expr)`，同步改 `lz_codegen.rs::param_pairs` + `lz_codegen_lib.lz` + `lz_ir_lib.lz`；LZ 侧发 `Option<T>` 签名 + `default_shadow_lines` 函数体影子 + `@dfc` 编码表 + `gen_default_call` 调用点补 `Some()/None`。输出与原生逐字一致。
+- **验证**（真 `.lz→.rs→rustc→运行`）：expr_literals（`R1 literals OK`）/ functions（`R6 functions OK`）等抽查全过；回归锁 rs_lz_families **18/18**（+2 锁）；lib 486/0；codegen_corner_fixes 47/47；rs_lz_behdiff 16/16；embed 全套绿。
+- **零回归坐实**：lz_ir_bootstrap 24/1 失败项 `rs_lz_unannotated_param_defaults_i64` 与 DEMO 7 个失败项，经 stash 基线对照**同样红**（BASE_FAIL=7）⇒ 全为既有缺口，非本轮。
+- **新入账 5 条既有缺口**：BUG-522（assert_eq! 混合数值）/BUG-523（native 无注解形参 `()`）/BUG-524（rs-lz 返回闭包 `fn` vs `Arc<dyn Fn>`）/BUG-525（rs-lz 运算符重载引用）/BUG-526（DEMO rs-lz 未覆盖基线），供后续轮次逐族收敛。
+- 下一步：① 收口 BUG-522~526（rs-lz 与原生逐字对齐）；② 把 DEMO/01_basics 全量纳入 rs-lz 回归门禁；③ 前提检查脚本判据升级（源文件 mtime + target/iter* 产物 + %TEMP%/lz_* + 存活进程）。
 
 ---
 

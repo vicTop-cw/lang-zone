@@ -145,7 +145,7 @@ enum Pattern:
 // 方法与 trait impl 在 --emit=rs-lz 下都是空壳（调用即 E0061 参数个数不符 / 返回值缺失）。
 struct ImplMethod =
     name: str
-    params: List<(str, IrType, bool, bool, bool)>
+    params: List<(str, IrType, bool, bool, bool, bool, Expr)>
     ret: IrType
     exc: MaybeIrType
     body: List<Stmt>
@@ -157,7 +157,7 @@ enum Item:
     // （`no method found for type parameter T`）。与 TraitDef/Impl 同源缺口。
     // BUG-431：泛型形参携带边界（`where T: Clone` 由 builder 合并到 `GenericParam.bounds`）——
     // 旧 schema 只带名字，生成的泛型 fn/impl 无边界，调用处报 E0599。
-    FnDef(name: str, generics: List<(str, List<IrType>)>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, where_clause: List<(str, List<IrType>)>, body: List<Stmt>)
+    FnDef(name: str, generics: List<(str, List<IrType>)>, params: List<(str, IrType, bool, bool, bool, bool, Expr)>, ret: IrType, exc: MaybeIrType, where_clause: List<(str, List<IrType>)>, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
     StructDef(name: str, generics: List<(str, List<IrType>)>, fields: List<(str, IrType)>)
     EnumDef(name: str, generics: List<(str, List<IrType>)>, variants: List<(str, List<(str, IrType)>)>)
@@ -1236,6 +1236,45 @@ def is_str_target(t: IrType) -> bool =
         case IrType.Str => true
         case _ => false
 
+// ── 缺口②（iter-22:00）：混合数值算术的类型提升判据 ──
+// 对齐原生 oracle expr_gen.rs:6266-6362：一侧 f64、另一侧数值（int/f64/Any）
+// 时把数值侧 `as f64`。操作数是 `as f64` 转换（Cast 目标 F64）时也视为 f64 侧
+//（IR 类型未传播时的兜底，与原生 lhs_is_f64 的 Cast 兜底同口径）。
+// 注：本库的 IrType（17 变体）不含 Int128/BigInt/Complex（那是 lz_ir_lib 的
+// 22 变体版），故 i128 提升档在此不可达，略去（rs-lz 面无需）。
+def is_f64_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.F64 => true
+        case _ => false
+
+// 数值侧判据：int/f64/Any（Any 按 i64 落 Rust，参与提升时需 as）
+def is_numeric_or_any_irtype(t: IrType) -> bool =
+    match t:
+        case IrType.Int => true
+        case IrType.F64 => true
+        case IrType.Any => true
+        case _ => false
+
+// 缺口②：参与数值提升的运算符集合 —— 算术（+ - * / %）与比较（< <= > >= == !=）。
+// 对齐原生 oracle 的 `num_mixed = arith || op.is_comparison() || Eq || Neq`
+//（expr_gen.rs:6258-6288）。LZ 的运算符字形用源码原文（parser 落 op 字符串）。
+def is_arith_or_cmp_op(o: String) -> bool =
+    if o == "+" or o == "-" or o == "*" or o == "/" or o == "%":
+        true
+    elif o == "<" or o == "<=" or o == ">" or o == ">=" or o == "==" or o == "!=":
+        true
+    else:
+        false
+
+// 表达式视为 f64 侧：类型 F64，或本身是 `as f64` 的 Cast（IR 类型常未传播）
+def expr_is_f64_side(e: Expr) -> bool =
+    if is_f64_irtype(expr_ty(e)):
+        true
+    else:
+        match e:
+            case Expr.Cast(inner: i, target: tg, ty: t) => is_f64_irtype(tg)
+            case _ => false
+
 def is_named_string_target(t: IrType) -> bool =
     match t:
         case IrType.Named(path: p, args: a) => p == "String" or p == "str"
@@ -1464,6 +1503,22 @@ def gen_expr_d(e: Expr, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(
                     pow_l + ".powf(".to_string() + pow_r + ")".to_string()
                 else:
                     pow_l + ".pow(".to_string() + pow_r + " as u32)".to_string()
+            elif is_arith_or_cmp_op(o) and (expr_is_f64_side(l) or expr_is_f64_side(r)):
+                // 缺口②（iter-22:00）：混合数值算术/比较的类型提升。
+                // rs-lz 旧实现把 `3i64 + 0.5f64` 落 else 原样透传 → E0277
+                //（no impl Add<f64> for i64）。对齐原生 expr_gen.rs:6349-6352：
+                //   一侧 f64、另一侧数值非 f64 → `f64侧 <op> (数值侧 as f64)`
+                //「数值」用 is_numeric_or_any_irtype（Any 按 i64 落 Rust）；「一侧是
+                // f64」用 expr_is_f64_side（含 `as f64` Cast 兜底）。两侧都判定为非
+                // f64 时此分支不可达（前置条件已保证至少一侧）。
+                let mix_l = gen_expr_d(l, fn_raises, user_fns, tbm, vem, decl.clone())
+                let mix_r = gen_expr_d(r, fn_raises, user_fns, tbm, vem, decl.clone())
+                if expr_is_f64_side(l) and is_numeric_or_any_irtype(expr_ty(r)) and not expr_is_f64_side(r):
+                    mix_l + " ".to_string() + o.to_string() + " (".to_string() + mix_r + " as f64)".to_string()
+                elif expr_is_f64_side(r) and is_numeric_or_any_irtype(expr_ty(l)) and not expr_is_f64_side(l):
+                    "(".to_string() + mix_l + " as f64) ".to_string() + o.to_string() + " ".to_string() + mix_r
+                else:
+                    mix_l + " ".to_string() + o.to_string() + " ".to_string() + mix_r
             else:
                 gen_expr_d(l, fn_raises, user_fns, tbm, vem, decl.clone()) + " ".to_string() + o.to_string() + " ".to_string() + gen_expr_d(r, fn_raises, user_fns, tbm, vem, decl.clone())
         case Expr.UnOp(op: o, operand: p, ty: t) => o.to_string() + gen_expr_d(p, fn_raises, user_fns, tbm, vem, decl.clone())
@@ -2147,7 +2202,7 @@ def is_clone_place_ty(t: IrType) -> bool =
         case IrType.Any => true
         case _ => is_heap_irtype(t)
 
-def call_args_list(a: List[Expr], fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+def call_args_list(a: List<Expr>, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
     if a.len() == 0:
         String::new()
     else:
@@ -2156,6 +2211,34 @@ def call_args_list(a: List[Expr], fn_raises: MaybeIrType, user_fns: List[str], t
             head + ", ".to_string() + call_args_list(ec_tail(a), fn_raises, user_fns, tbm, vem)
         else:
             head
+
+// 缺口③（iter-22:00）：带默认参数的用户函数调用点补参。
+// 形参表 `(a: T, b: Option<T>)` 有 total 个形参、其中 defc 个带默认（位于尾部）。
+// 规则（对齐原生 expr_gen.rs:1486-1510）：
+//   · 实参数 < total：必需段 [0, required) 原样，已有默认段实参包 `Some(x)`，
+//     缺的默认段补 `None`（required = total - defc）
+//   · 实参数 >= total：原样（防御，正常不出现）
+// 仅渲染实参表达式，外层加 `<fn>(...)`。
+def gen_default_call(n: str, a: List[Expr], total: int, defc: int, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])]) -> String =
+    let required = total - defc
+    let mut parts: List[str] = []
+    for idx in 0..a.len():
+        let s = call_arg_src(a[idx].clone(), fn_raises, user_fns, tbm, vem)
+        if idx < required:
+            parts.push(s)
+        else:
+            parts.push("Some(".to_string() + s + ")".to_string())
+    while parts.len() < total:
+        parts.push("None".to_string())
+    n.to_string() + "(".to_string() + str_join_commas(parts) + ")".to_string()
+
+def str_join_commas(parts: List[str]) -> String =
+    let mut out: String = String::new()
+    for idx in 0..parts.len():
+        if idx > 0:
+            out = out + ", ".to_string()
+        out = out + parts[idx].clone()
+    out
 
 // BUG-423：字段访问的分隔符——基底是类型名（Var 且首字母大写，如 `Light.On`）时
 // 用 `::`（单位变体/关联项引用），否则用 `.`（真实字段访问）。与 method_call_sep 同口径。
@@ -2312,7 +2395,13 @@ def gen_call(c: Expr, a: List<Expr>, t: IrType, fn_raises: MaybeIrType, user_fns
                     n.to_string() + "(".to_string() + call_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
             else:
                 // 用户同名函数：走通用调用分支（不发魔法形态）
-                n.to_string() + "(".to_string() + call_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
+                // 缺口③（iter-22:00）：带默认参数的用户函数调用点补参 —— 形参发成
+                // `(a: T, b: Option<T>)`，此处按 (total, defcount) 把显式传入的后段包
+                // `Some(x)`、未提供的补 `None`（对齐原生 expr_gen.rs:1486-1510）。
+                if dfc_lookup_total(user_fns, n) >= 0:
+                    gen_default_call(n, a, dfc_lookup_total(user_fns, n), dfc_lookup_defc(user_fns, n), fn_raises, user_fns, tbm, vem)
+                else:
+                    n.to_string() + "(".to_string() + call_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
         case _ => gen_expr(c, fn_raises, user_fns, tbm, vem) + "(".to_string() + call_args_list(a, fn_raises, user_fns, tbm, vem) + ")".to_string()
 
 def is_struct_ctor(n: str, a: List<Expr>, t: IrType) -> bool =
@@ -3342,7 +3431,7 @@ def gen_impl_method(m: ImplMethod, force_ref: bool, atb_names: List[str], user_f
     let ret_s = "".to_string() if r_eq_unit(m.ret) else (" -> ".to_string() + rust_type_assoc(m.ret, atb_names))
     "    fn ".to_string() + m.name + "(".to_string() + impl_method_params(m.params, force_ref) + ")".to_string() + ret_s + " {\n".to_string() + gen_body(m.body, false, auto_mut_names(m.body), m.exc, user_fns, tbm, vem, "".to_string()) + "    }\n".to_string()
 
-def impl_method_params(ps: List<(str, IrType, bool, bool, bool)>, force_ref: bool) -> String =
+def impl_method_params(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>, force_ref: bool) -> String =
     let mut out: String = "".to_string()
     for idx in 0..ps.len():
         let p = ps[idx].clone()
@@ -3354,7 +3443,7 @@ def impl_method_params(ps: List<(str, IrType, bool, bool, bool)>, force_ref: boo
             out = out + p.0 + ": ".to_string() + rust_type(p.1)
     out
 
-def self_param_str(p: (str, IrType, bool, bool, bool), force_ref: bool) -> String =
+def self_param_str(p: (str, IrType, bool, bool, bool, bool, Expr), force_ref: bool) -> String =
     if force_ref:
         if p.3:
             "&mut self".to_string()
@@ -3551,7 +3640,10 @@ def gen_item(i: Item, user_fns: List[str], tbm: List[(str, List[(str, bool)])], 
                 let ret_s = "".to_string() if (is_main && !typed_main) else (" -> ".to_string() + ("Vec<".to_string() + rust_type(r) + ">" if is_gen else rust_type(r)))
                 let auto_mut = auto_mut_names(b)
                 let body_s = gen_body(b, is_main && !typed_main, auto_mut, rs, user_fns, tbm, vem, "".to_string())
-                let pro_s = "    let mut __gen_vec = Vec::new();\n".to_string() if is_gen else "".to_string()
+                // 缺口③（iter-22:00）：默认参数影子（在 gen 收集器之前，形参生命周期的
+                // 常规位置——对齐原生「checker 段之后、body 之前」的顺序）。
+                let def_s = default_shadow_lines(ps, rs, user_fns, tbm, vem, auto_mut)
+                let pro_s = def_s + ("    let mut __gen_vec = Vec::new();\n".to_string() if is_gen else "".to_string())
                 let epi_s = "    return __gen_vec;\n".to_string() if is_gen else "".to_string()
                 let fndef = "pub fn ".to_string() + fn_name_s + generic_sig_b(gs_pack_filtered(gs, ps, pk), wc) + "(".to_string() + fn_param_list_pack(ps, auto_mut, pk) + ")".to_string() + ret_s + " {\n".to_string() + pro_s + body_s + epi_s + "}".to_string()
 
@@ -3666,7 +3758,7 @@ def r_eq_unit(t: IrType) -> bool =
         case IrType.Unit => true
         case _ => false
 
-def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>, auto_mut: String) -> String =
+def fn_param_list(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>, auto_mut: String) -> String =
     if ps.len() == 0:
         "".to_string()
     else:
@@ -3674,18 +3766,33 @@ def fn_param_list(ps: List<(str, IrType, bool, bool, bool)>, auto_mut: String) -
         fn_param_str(p0, auto_mut) + (", " + fn_param_list(pl_tail(ps), auto_mut) if ps.len() > 1 else "")
 
 // G6：带变参编码的形参表（pk 来自 pack_lookup；空串时与 fn_param_list 逐字符一致）
-def fn_param_list_pack(ps: List<(str, IrType, bool, bool, bool)>, auto_mut: String, pk: str) -> String =
+def fn_param_list_pack(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>, auto_mut: String, pk: str) -> String =
     if ps.len() == 0:
         "".to_string()
     else:
         let p0 = ps[0].clone()
         fn_param_str_pack(p0, auto_mut, pk) + (", " + fn_param_list_pack(pl_tail(ps), auto_mut, pk) if ps.len() > 1 else "")
 
-def fn_param_str_pack(p: (str, IrType, bool, bool, bool), auto_mut: String, pk: str) -> String =
+def fn_param_str_pack(p: (str, IrType, bool, bool, bool, bool, Expr), auto_mut: String, pk: str) -> String =
     if p.0 == "args" and pack_kind(pk) != "":
         ("mut " if auto_mut_has(auto_mut, p.0) else "").to_string() + p.0.to_string() + ": ".to_string() + pack_param_type(p.1, pk)
     else:
         fn_param_str(p, auto_mut)
+
+// 缺口③（iter-22:00）：默认参数形参在函数体首部补「影子」绑定。
+// 形参发成 `x: Option<T>`（见 fn_param_str），此处对每个 has_default（p.5）的形参
+// 生成 `    let x = x.unwrap_or_else(|| <default>);`（对齐原生 decl_gen.rs:1529-1543）。
+// default 表达式由 Rust 侧 param_pairs 第 7 位携带（Expr），此处走 gen_expr 渲染。
+// 影子用**不可变**绑定（LZ 值语义；TCO 重赋场景极少，此处保守用不可变，若将来遭遇
+// E0384 再按 auto_mut 补 mut）。每行补 4 空格缩进，与 gen_body 的语句缩进一致。
+def default_shadow_lines(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>, fn_raises: MaybeIrType, user_fns: List[str], tbm: List[(str, List[(str, bool)])], vem: List[(str, List[(str, List[str])])], auto_mut: String) -> String =
+    let mut out: String = String::new()
+    for idx in 0..ps.len():
+        let p = ps[idx].clone()
+        if p.5:
+            let kw = ("mut " if auto_mut_has(auto_mut, p.0) else "").to_string()
+            out = out + "    let ".to_string() + kw + p.0.to_string() + " = ".to_string() + p.0.to_string() + ".unwrap_or_else(|| ".to_string() + gen_expr(p.6.clone(), fn_raises, user_fns, tbm, vem) + ");\n".to_string()
+    out
 
 // 变参形参的 Rust 类型（对齐原生 decl_gen.rs:829-866）：
 //   定长前缀 `..: Tuple<T1, T2, ..>` → (T1, T2, Vec<Box<dyn Any>>)
@@ -3719,7 +3826,7 @@ def pack_param_type(t: IrType, pk: str) -> String =
 
 // typepack 具体化后，pack 泛型形参要从 `<...>` 里剔除（原生 decl_gen.rs:598-603
 // 的 effective_generics：让函数不再是泛型，避免 rustc 对具体元组做 T 推断失败）。
-def gs_pack_filtered(gs: List[(str, List[IrType])], ps: List[(str, IrType, bool, bool, bool)], pk: str) -> List[(str, List[IrType])] =
+def gs_pack_filtered(gs: List[(str, List[IrType])], ps: List[(str, IrType, bool, bool, bool, bool, Expr)], pk: str) -> List[(str, List[IrType])] =
     if pack_kind(pk) != "T" or pack_types(pk).len() == 0:
         gs.clone()
     else:
@@ -3785,12 +3892,18 @@ def maybe_block_has_yield(mb: MaybeBlock) -> bool =
         case MaybeBlock.NoBlock => false
 
 
-def fn_param_str(p: (str, IrType, bool, bool, bool), auto_mut: String) -> String =
+def fn_param_str(p: (str, IrType, bool, bool, bool, bool, Expr), auto_mut: String) -> String =
     // BUG-444：函数体内发生 &mut 用法（`d.remove(..)`、集合 push/insert 等）的参数
     // 在 Rust 端须标 `mut`。原生 codegen 用 auto_mut_locals 同一扫描覆盖局部变量与
     // 参数，rs-lz 此前恒发 `name: type`（无 mut）⇒ E0596 cannot borrow as mutable。
     // 仅按精确名字匹配（逗号分隔 token），避免 `x` 误中 `xy`。
-    (("mut " if auto_mut_has(auto_mut, p.0) else "").to_string()) + p.0.to_string() + ": ".to_string() + rust_type(p.1)  // D1: 忽略 ref/mut/owned 前缀（原生 codegen 对 fn 参数只输出 name: type，mut 前缀除外）
+    // 缺口③（iter-22:00）：带默认值的形参（p.5=has_default）在 Rust 端发 `Option<T>`
+    //（对齐原生 decl_gen.rs:1053-1054），调用点补 `Some(x)`/`None`，函数体首部补
+    // `let x = x.unwrap_or_else(|| <default>);` 影子。此处仅改签名形态。
+    if p.5:
+        (("mut " if auto_mut_has(auto_mut, p.0) else "").to_string()) + p.0.to_string() + ": Option<".to_string() + rust_type(p.1) + ">".to_string()
+    else:
+        (("mut " if auto_mut_has(auto_mut, p.0) else "").to_string()) + p.0.to_string() + ": ".to_string() + rust_type(p.1)  // D1: 忽略 ref/mut/owned 前缀（原生 codegen 对 fn 参数只输出 name: type，mut 前缀除外）
 
 def auto_mut_has(list: String, name: str) -> bool =
     if list.len() == 0:
@@ -3799,8 +3912,8 @@ def auto_mut_has(list: String, name: str) -> bool =
         let padded = ",".to_string() + list + ","
         str_contains(padded, "," + name + ",")
 
-def pl_tail(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool, bool, bool)> =
-    let mut out: List<(str, IrType, bool, bool, bool)> = []
+def pl_tail(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>) -> List<(str, IrType, bool, bool, bool, bool, Expr)> =
+    let mut out: List<(str, IrType, bool, bool, bool, bool, Expr)> = []
     for idx in 1..ps.len():
         out.push(ps[idx].clone())
     out
@@ -4728,6 +4841,17 @@ def module_prelude_entries(m: IrModule, user_fns: List[str]) -> List[str] =
                                     // 定长前缀形态：尾部 `..` 收集为 Vec<Box<dyn Any>>
                                     out.push("@packV:".to_string() + n.clone() + "#".to_string() + bars(pi) + "=".to_string() + str_join_semi(es))
                             case _ => ()
+                // 缺口③（iter-22:00）：默认参数计数表。格式 `@dfc:<fn>#<total>#<defcount>`。
+                // 仅当有默认参数（defcount>0）且**非变参**时登记，供 gen_call 在调用点补
+                // `Some()/None`（对齐原生 expr_gen.rs:1486-1510 的 fn_param_info）。
+                // 变参函数（形参名含 `args` 且类型为 Tuple）跳过——其调用点走 gen_pack_call。
+                let dfc_n = ps.len()
+                let mut dfc_d = 0
+                for pi in 0..ps.len():
+                    if ps[pi].clone().5:
+                        dfc_d = dfc_d + 1
+                if dfc_d > 0 and not ps_has_variadic(ps):
+                    out.push("@dfc:".to_string() + n.clone() + "#".to_string() + dfc_n.to_string() + "#".to_string() + dfc_d.to_string())
             case _ => ()
     // 声明名（f-string 未绑定判定用；对齐 scan.rs:1245 的 bound 集）
     let bound = bound_names_of_module(m)
@@ -4740,6 +4864,73 @@ def bars(n: int) -> String =
     for i in 0..n:
         out = out + "|".to_string()
     out
+
+// 缺口③：形参表是否含变参（`..name: Tuple<...>`，形参名 "args"）。
+// 变参函数的调用点走 gen_pack_call，不参与默认参数补参。
+def ps_has_variadic(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>) -> bool =
+    let mut found = false
+    for idx in 0..ps.len():
+        if ps[idx].clone().0 == "args":
+            found = true
+    found
+
+// 缺口③：默认参数计数表查询。env 形如 `@dfc:<fn>#<total>#<defcount>`。
+// 返回 (total, defcount)；无登记返回 (-1, 0)（用 -1 表「非默认参数函数」）。
+// 全程走 str_chars 逐字符（不用字节切片，规避 str 切片被 owned 化成 to_vec 的 N2 规则）。
+// 拆出两个标量查询（total/defc）供条件表达式直接用，避免 LZ 对元组字段访问 `.0`
+// 在 `and` 链里的兼容问题。
+def dfc_lookup_total(env: List[str], fn_name: str) -> int =
+    dfc_lookup(env, fn_name).0
+
+def dfc_lookup_defc(env: List[str], fn_name: str) -> int =
+    dfc_lookup(env, fn_name).1
+
+def dfc_lookup(env: List[str], fn_name: str) -> (int, int) =
+    let key = "@dfc:".to_string() + fn_name + "#".to_string()
+    let mut total: int = -1
+    let mut defc: int = 0
+    for idx in 0..env.len():
+        let e = env[idx].clone()
+        if str_starts(e, key):
+            let rest = str_after(e, key)
+            let cs = str_chars(rest)
+            let mut acc0: int = 0
+            let mut acc1: int = 0
+            let mut seen_hash = false
+            for ci in 0..cs.len():
+                let ch = cs[ci].clone()
+                if ch == "#":
+                    seen_hash = true
+                elif not seen_hash:
+                    acc0 = acc0 * 10 + digit_of(ch)
+                else:
+                    acc1 = acc1 * 10 + digit_of(ch)
+            total = acc0
+            defc = acc1
+    (total, defc)
+
+// 单字符 → 数字（'0'..'9' → 0..9；其它 → 0，容错）。
+def digit_of(ch: str) -> int =
+    if ch == "1":
+        1
+    elif ch == "2":
+        2
+    elif ch == "3":
+        3
+    elif ch == "4":
+        4
+    elif ch == "5":
+        5
+    elif ch == "6":
+        6
+    elif ch == "7":
+        7
+    elif ch == "8":
+        8
+    elif ch == "9":
+        9
+    else:
+        0
 
 // 原生 typepack_sigs.get(f).and_then(|s| s.first())：取**第一个**调用点的实参类型表。
 def call_arg_types_of(calls: List[(str, List[IrType])], fn_name: str) -> List[IrType] =

@@ -143,7 +143,7 @@ enum Pattern:
 
 // ── Item ──
 enum Item:
-    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
+    FnDef(name: str, generics: List<str>, params: List<(str, IrType, bool, bool, bool, bool, Expr)>, ret: IrType, exc: MaybeIrType, body: List<Stmt>)
     Const(name: str, ty: IrType, value: Expr)
     StructDef(name: str, generics: List<str>, fields: List<(str, IrType)>)
     EnumDef(name: str, generics: List<str>, variants: List<(str, List<IrType>)>)
@@ -581,25 +581,25 @@ def method_lines(ms: List<(str, List<IrType>, IrType)>) -> String =
         out = out + "  fn ".to_string() + m.0 + "(".to_string() + type_list(m.1) + ") -> ".to_string() + display_type(m.2) + "\n".to_string()
     out
 
-def param_sig(ps: List<(str, IrType, bool, bool, bool)>) -> String =
+def param_sig(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>) -> String =
     if ps.len() == 0:
         "()".to_string()
     else:
         "(".to_string() + param_list(ps) + ")".to_string()
 
-def param_list(ps: List<(str, IrType, bool, bool, bool)>) -> String =
+def param_list(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>) -> String =
     if ps.len() == 0:
         "".to_string()
     else:
         let p0 = ps[0].clone()
         param_str(p0) + (", ".to_string() + param_list(tail_p(ps)) if ps.len() > 1 else "".to_string())
 
-def param_str(p: (str, IrType, bool, bool, bool)) -> String =
+def param_str(p: (str, IrType, bool, bool, bool, bool, Expr)) -> String =
     // 对齐 display.rs Item::FnDef：mut → owned → ref 前缀顺序
     ("mut ".to_string() if p.3 else "".to_string()) + ("owned ".to_string() if p.4 else "".to_string()) + ("ref ".to_string() if p.2 else "".to_string()) + p.0 + ": ".to_string() + display_type(p.1)
 
-def tail_p(ps: List<(str, IrType, bool, bool, bool)>) -> List<(str, IrType, bool, bool, bool)> =
-    let mut out: List<(str, IrType, bool, bool, bool)> = []
+def tail_p(ps: List<(str, IrType, bool, bool, bool, bool, Expr)>) -> List<(str, IrType, bool, bool, bool, bool, Expr)> =
+    let mut out: List<(str, IrType, bool, bool, bool, bool, Expr)> = []
     for idx in 1..ps.len():
         out.push(ps[idx].clone())
     out
